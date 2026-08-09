@@ -584,7 +584,7 @@ test("deferred external opens publish transition snapshots and wait for a safe r
   );
   assert.match(
     workbench,
-    /action\.id === "retry-external-project-open"[\s\S]*?resumeDeferredExternalProject\(\)/u,
+    /case "retry-external-project-open":\s*void resumeDeferredExternalProject\(\)/u,
     "the explicit retry action must delegate to the session owner",
   );
   assert.doesNotMatch(
@@ -633,7 +633,7 @@ test("deferred accepted results remain in renderer FIFO until a safe retry", () 
   );
   assert.match(
     workbench,
-    /action\.id === "retry-project-application"[\s\S]*?resumeDeferredProjectApplication\(\)/u,
+    /case "retry-project-application":\s*void resumeDeferredProjectApplication\(\)/u,
     "the continuation action must delegate to the renderer FIFO owner",
   );
 });

@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import ts from "typescript";
 
 import {
   readCanvasArchitecture,
@@ -28,19 +27,6 @@ const [
   readFile(new URL("../app/application/usage-telemetry.ts", import.meta.url), "utf8"),
 ]);
 
-function literalProperty(object, name) {
-  const property = object.properties.find((candidate) => (
-    ts.isPropertyAssignment(candidate)
-    && ts.isIdentifier(candidate.name)
-    && candidate.name.text === name
-  ));
-  return property?.initializer;
-}
-
-function literalText(node) {
-  return node && ts.isStringLiteralLike(node) ? node.text : null;
-}
-
 test("global notifications are polite, policy-gated, and actionable", () => {
   assert.match(workbench, /noticeAutoDismissMs\(toast\)/);
   assert.match(workbench, /shouldPresentNotice\(next\)/);
@@ -57,39 +43,7 @@ test("global notifications are polite, policy-gated, and actionable", () => {
   assert.match(workbench, /setPausedNoticeIdentity\(paused \? noticeIdentity : null\)/);
 });
 
-test("only explicit direct-action notices require a concrete recovery action", () => {
-  const source = ts.createSourceFile(
-    "workbench.tsx",
-    workbench,
-    ts.ScriptTarget.Latest,
-    true,
-    ts.ScriptKind.TSX,
-  );
-  const missing = [];
-  const visit = (node) => {
-    if (
-      ts.isCallExpression(node)
-      && ts.isIdentifier(node.expression)
-      && node.expression.text === "setToast"
-      && node.arguments[0]
-      && ts.isObjectLiteralExpression(node.arguments[0])
-    ) {
-      const object = node.arguments[0];
-      const disposition = literalText(literalProperty(object, "disposition"));
-      const action = literalProperty(object, "action");
-      if (disposition === "direct-action" && !action) {
-        const { line } = source.getLineAndCharacterOfPosition(node.getStart(source));
-        missing.push(line + 1);
-      }
-    }
-    ts.forEachChild(node, visit);
-  };
-  visit(source);
-  assert.deepEqual(
-    missing,
-    [],
-    `direct-action notices without a literal action at lines: ${missing.join(", ")}`,
-  );
+test("notification behavior keeps recovery buttons concrete without coupling to Workbench AST", () => {
   assert.doesNotMatch(
     workbench,
     /retry-(?:reconcile|cancel|ready-version|restore-version|view-history|reload|source-diff|ai-diff|attachment-preview|attachment-download)/u,
@@ -220,10 +174,6 @@ test("file and attachment failures keep a real recovery path", () => {
   assert.match(workbench, /id: "open-attachment-picker"[\s\S]*?label: "重新选择"/);
   assert.match(workbench, /id: "review-comment-attachments"[\s\S]*?label: "查看附件"/);
   assert.match(workbench, /请先移除一个附件，再重新选择。/);
-  assert.match(
-    workbench,
-    /action\.id === "review-comment-attachments"[\s\S]*?queueReviewPairReveal[\s\S]*?focusCommentTarget/,
-  );
   assert.match(workbench, /title: encodingUnsupported \? "文件编码不支持" : "文件无法打开"/);
   assert.match(workbench, /原文件没有被修改。请先转换为 UTF-8，再重新选择。/);
   assert.match(

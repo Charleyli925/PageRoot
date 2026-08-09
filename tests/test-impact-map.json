@@ -436,6 +436,7 @@
       "id": "workbench-lifecycle",
       "patterns": [
         "^app/workbench(?:\\.tsx|/.*\\.(?:ts|tsx))$",
+        "^tests/notification-contract\\.typecheck\\.ts$",
         "^app/lib/(?:audit-events|direct-edit-events)\\.js$",
         "^app/lib/comment-rail-layout\\.js$",
         "^tests/(?:audit-events|comment-rail-layout|direct-edit-events)\\.test\\.mjs$",

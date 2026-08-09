@@ -299,15 +299,45 @@ export type ToastAction =
   | { id: "retry-submit"; label: string }
   | { id: "resume-draft"; label: string }
   | { id: "resume-comment-edit"; label: string; commentId: string };
-export type Toast = {
+
+type ToastBase = {
   title: string;
   message: string;
   tone: ToastTone;
   sticky?: boolean;
   dedupeKey?: string;
-  disposition?: ToastDisposition;
+};
+
+/**
+ * The disposition/action matrix is intentionally a type-level contract.
+ *
+ * A direct user decision must always name its recovery action; silent and
+ * deferred outcomes must not accidentally grow a button that replays work.
+ * The remaining visible outcomes may optionally offer a bounded action.
+ */
+type ToastDispositionActionMatrix = {
+  "silent-recover": { action?: never };
+  "defer-and-resume": { action?: never };
+  "direct-action": { action: ToastAction };
+  "user-choice": { action: ToastAction };
+  "background-result": { action?: ToastAction };
+  "inform-in-place": { action?: ToastAction };
+};
+
+type ToastForDisposition<TDisposition extends ToastDisposition> = ToastBase & {
+  disposition: TDisposition;
+} & ToastDispositionActionMatrix[TDisposition];
+
+type InformInPlaceToast = ToastBase & {
+  /** Omitted disposition retains the historical in-place informational default. */
+  disposition?: "inform-in-place";
   action?: ToastAction;
-} | null;
+};
+
+export type Toast = (
+  | InformInPlaceToast
+  | { [TDisposition in ToastDisposition]: ToastForDisposition<TDisposition> }[ToastDisposition]
+) | null;
 export type StartupIssue = {
   title: string;
   message: string;
