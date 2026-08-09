@@ -123,14 +123,20 @@ async function launchPageRoot({
     },
   });
   const page = await electronApp.firstWindow();
-  const nativeWindow = await electronApp.evaluate(({ BrowserWindow }) => {
-    const window = BrowserWindow.getAllWindows()[0];
+  const mainRendererUrl = page.url();
+  const nativeWindow = await electronApp.evaluate(({ BrowserWindow }, rendererUrl) => {
+    const window = BrowserWindow.getAllWindows().find((candidate) => (
+      candidate.webContents.getURL() === rendererUrl
+    ));
+    if (!window) {
+      throw new Error("PageRoot main BrowserWindow is unavailable during launch.");
+    }
     window?.webContents.setBackgroundThrottling(false);
     return {
       focused: window?.isFocused() || false,
       visible: window?.isVisible() || false,
     };
-  });
+  }, mainRendererUrl);
   const foreground = (
     injectedEnv.PAGEROOT_E2E_FOREGROUND
     ?? process.env.PAGEROOT_E2E_FOREGROUND
@@ -200,12 +206,51 @@ async function stopPageRoot(electronApp, isolatedUserData) {
   removeAiLoopUserData(isolatedUserData);
 }
 
-async function closePageRootGracefully(electronApp) {
+async function closePageRootGracefully(electronApp, page) {
+  const mainRendererUrl = page?.url();
+  if (!mainRendererUrl) {
+    throw new Error("PageRoot main renderer URL is unavailable for graceful close.");
+  }
   const closed = electronApp.waitForEvent("close", { timeout: 20_000 });
-  await electronApp.evaluate(({ BrowserWindow }) => {
-    BrowserWindow.getAllWindows()[0]?.close();
-  });
+  const requested = await electronApp.evaluate(({ BrowserWindow }, rendererUrl) => {
+    // Runtime snapshots own hidden offscreen BrowserWindows. The E2E close
+    // must target the known app renderer instead of assuming array order.
+    const mainWindow = BrowserWindow.getAllWindows().find((candidate) => (
+      candidate.webContents.getURL() === rendererUrl
+    ));
+    if (!mainWindow) return false;
+    mainWindow.close();
+    return true;
+  }, mainRendererUrl);
+  if (!requested) {
+    throw new Error("PageRoot main BrowserWindow was unavailable for graceful close.");
+  }
   await closed;
+}
+
+async function sendToMainRenderer(electronApp, page, channel, payload) {
+  const mainRendererUrl = page?.url();
+  if (!mainRendererUrl) {
+    throw new Error("PageRoot main renderer URL is unavailable for renderer IPC.");
+  }
+  const delivered = await electronApp.evaluate(
+    ({ BrowserWindow }, { rendererUrl, messageChannel, messagePayload }) => {
+      const mainWindow = BrowserWindow.getAllWindows().find((candidate) => (
+        candidate.webContents.getURL() === rendererUrl
+      ));
+      if (!mainWindow) return false;
+      mainWindow.webContents.send(messageChannel, messagePayload);
+      return true;
+    },
+    {
+      rendererUrl: mainRendererUrl,
+      messageChannel: channel,
+      messagePayload: payload,
+    },
+  );
+  if (!delivered) {
+    throw new Error("PageRoot main BrowserWindow was unavailable for renderer IPC.");
+  }
 }
 
 function createSourceFixture(
@@ -2862,7 +2907,7 @@ test("two AI versions activate in order and survive relaunch without identity dr
     expect(sourceRecords.filter((record) => record.role === "current"))
       .toHaveLength(1);
 
-    await closePageRootGracefully(launched.electronApp);
+    await closePageRootGracefully(launched.electronApp, launched.page);
     activeAppClosed = true;
     const relaunched = await launchPageRoot({
       isolatedUserData: launched.isolatedUserData,
@@ -3285,7 +3330,7 @@ test("ending a copied run still warns after restart and blocks late finalization
       launched.electronApp,
       fixture.sourcePath,
     );
-    await closePageRootGracefully(launched.electronApp);
+    await closePageRootGracefully(launched.electronApp, launched.page);
     launched = await launchPageRoot({
       activeSourcePath: fixture.sourcePath,
       isolatedUserData: launched.isolatedUserData,
@@ -3554,7 +3599,7 @@ test("a persisted legacy global comment stays exact after restart and sends dire
       { timeout: 20_000 },
     ).toBe(true);
 
-    await closePageRootGracefully(firstLaunch.electronApp);
+    await closePageRootGracefully(firstLaunch.electronApp, firstLaunch.page);
     expect(workspaceContainsDraftComment(firstLaunch.workspace, commentText)).toBe(true);
     expect(rewriteWorkspaceDraftComment(
       firstLaunch.workspace,
@@ -3606,7 +3651,7 @@ test("multiple orphaned comments relink in sequence and resume the original send
       () => workspaceContainsDraftComment(firstLaunch.workspace, secondComment),
       { timeout: 20_000 },
     ).toBe(true);
-    await closePageRootGracefully(firstLaunch.electronApp);
+    await closePageRootGracefully(firstLaunch.electronApp, firstLaunch.page);
 
     const externallyChanged = readFileSync(fixture.sourcePath, "utf8")
       .replace(
@@ -3739,19 +3784,19 @@ test("automatic update actions sit on the HTML icon and the icon opens About", a
       badgeExpected: false,
     });
 
-    await launched.electronApp.evaluate(({ BrowserWindow }) => {
-      BrowserWindow.getAllWindows()[0]?.webContents.send(
-        "html-updates:status",
-        {
-          status: "available",
-          currentVersion: "0.8.6",
-          latestVersion: "9.9.9",
-          minimumMacOS: "12.0",
-          architecture: "arm64",
-          publishedAt: "2026-07-23T00:00:00.000Z",
-        },
-      );
-    });
+    await sendToMainRenderer(
+      launched.electronApp,
+      launched.page,
+      "html-updates:status",
+      {
+        status: "available",
+        currentVersion: "0.8.6",
+        latestVersion: "9.9.9",
+        minimumMacOS: "12.0",
+        architecture: "arm64",
+        publishedAt: "2026-07-23T00:00:00.000Z",
+      },
+    );
     await expect(launched.page.getByRole("button", {
       name: "发现 PageRoot 9.9.9，下载更新",
     })).toBeVisible();
@@ -3767,19 +3812,19 @@ test("automatic update actions sit on the HTML icon and the icon opens About", a
       requestAnimationFrame(() => requestAnimationFrame(resolve));
     }));
 
-    await launched.electronApp.evaluate(({ BrowserWindow }) => {
-      BrowserWindow.getAllWindows()[0]?.webContents.send(
-        "html-updates:status",
-        {
-          status: "downloaded",
-          currentVersion: "0.8.6",
-          latestVersion: "9.9.9",
-          minimumMacOS: "12.0",
-          architecture: "arm64",
-          publishedAt: "2026-07-23T00:00:00.000Z",
-        },
-      );
-    });
+    await sendToMainRenderer(
+      launched.electronApp,
+      launched.page,
+      "html-updates:status",
+      {
+        status: "downloaded",
+        currentVersion: "0.8.6",
+        latestVersion: "9.9.9",
+        minimumMacOS: "12.0",
+        architecture: "arm64",
+        publishedAt: "2026-07-23T00:00:00.000Z",
+      },
+    );
     await expect(launched.page.getByRole("button", {
       name: "PageRoot 9.9.9 已下载，重启更新",
     })).toBeVisible();
@@ -3850,7 +3895,7 @@ test("rapid project switching and immediate close preserve the last native edit"
     await firstLaunch.page.keyboard.insertText(closeText);
     await expect(frame.locator(caseSelector("list-item"))).toHaveText(closeText);
 
-    await closePageRootGracefully(firstLaunch.electronApp);
+    await closePageRootGracefully(firstLaunch.electronApp, firstLaunch.page);
     firstClosed = true;
     reopened = await launchPageRoot({
       isolatedUserData: firstLaunch.isolatedUserData,

@@ -72,14 +72,20 @@ async function launchPageRoot(options = {}) {
     },
   });
   const page = await electronApp.firstWindow();
-  const nativeWindow = await electronApp.evaluate(({ BrowserWindow }) => {
-    const window = BrowserWindow.getAllWindows()[0];
+  const mainRendererUrl = page.url();
+  const nativeWindow = await electronApp.evaluate(({ BrowserWindow }, rendererUrl) => {
+    const window = BrowserWindow.getAllWindows().find((candidate) => (
+      candidate.webContents.getURL() === rendererUrl
+    ));
+    if (!window) {
+      throw new Error("PageRoot main BrowserWindow is unavailable during launch.");
+    }
     window?.webContents.setBackgroundThrottling(false);
     return {
       focused: window?.isFocused() || false,
       visible: window?.isVisible() || false,
     };
-  });
+  }, mainRendererUrl);
   const foreground = process.env.PAGEROOT_E2E_FOREGROUND === "1";
   expect(nativeWindow.visible).toBe(foreground);
   if (!foreground) expect(nativeWindow.focused).toBe(false);
@@ -299,9 +305,10 @@ async function expectCheckpointPersisted(page, afterRevision) {
   return Number(await indicator.getAttribute("data-persisted-revision"));
 }
 
-async function clickEditHistoryMenu(electronApp, direction) {
+async function clickEditHistoryMenu(electronApp, page, direction) {
+  const mainRendererUrl = page.url();
   await electronApp.evaluate(
-    ({ BrowserWindow, Menu }, requestedDirection) => {
+    ({ BrowserWindow, Menu }, { requestedDirection, rendererUrl }) => {
       const menu = Menu.getApplicationMenu();
       const expectedLabel = requestedDirection === "undo" ? "Undo" : "Redo";
       const editMenu = menu?.items.find((item) => (
@@ -315,9 +322,15 @@ async function clickEditHistoryMenu(electronApp, direction) {
       if (!item?.click) {
         throw new Error(`Edit > ${expectedLabel} is not installed.`);
       }
-      item.click(item, BrowserWindow.getAllWindows()[0], {});
+      const mainWindow = BrowserWindow.getAllWindows().find((candidate) => (
+        candidate.webContents.getURL() === rendererUrl
+      ));
+      if (!mainWindow) {
+        throw new Error("PageRoot main BrowserWindow is unavailable for Edit history.");
+      }
+      item.click(item, mainWindow, {});
     },
-    direction,
+    { requestedDirection: direction, rendererUrl: mainRendererUrl },
   );
 }
 
@@ -1200,15 +1213,22 @@ test("workspace failure keeps the current page visible with export and relaunch 
     });
     electronApp = launched.electronApp;
     await loadedDiskFrame(launched.page, sourcePath, "list-item");
-    await launched.electronApp.evaluate(({ BrowserWindow }) => {
-      BrowserWindow.getAllWindows()[0]?.webContents.send(
+    const mainRendererUrl = launched.page.url();
+    await launched.electronApp.evaluate(({ BrowserWindow }, rendererUrl) => {
+      const mainWindow = BrowserWindow.getAllWindows().find((candidate) => (
+        candidate.webContents.getURL() === rendererUrl
+      ));
+      if (!mainWindow) {
+        throw new Error("PageRoot main BrowserWindow is unavailable for workspace recovery.");
+      }
+      mainWindow.webContents.send(
         "html-app:workspace-unavailable",
         {
           title: "本地项目资料暂时不可用",
           message: "当前页面内容仍保留。可先导出当前编辑，再重新打开源页。",
         },
       );
-    });
+    }, mainRendererUrl);
 
     const recovery = launched.page.getByRole("alert")
       .filter({ hasText: "本地项目资料暂时不可用" });
@@ -1398,7 +1418,7 @@ test("Electron persists text, style, structure, and reorder undo while focused f
     await reopened.page.keyboard.press("End");
     await reopened.page.keyboard.insertText("新增");
     await expect(commentInput).toHaveValue("原文新增");
-    await clickEditHistoryMenu(reopenedApp, "undo");
+    await clickEditHistoryMenu(reopenedApp, reopened.page, "undo");
     await expect(commentInput).toHaveValue("原文");
     expect(
       readFileSync(sourcePath).equals(expected),
@@ -1406,7 +1426,7 @@ test("Electron persists text, style, structure, and reorder undo while focused f
     ).toBe(true);
 
     await reopenedFrame.locator(caseSelector("source-fidelity")).click();
-    await clickEditHistoryMenu(reopenedApp, "undo");
+    await clickEditHistoryMenu(reopenedApp, reopened.page, "undo");
     const undoRevision = await expectCheckpointPersisted(
       reopened.page,
       firstPersistedRevision,
@@ -1442,7 +1462,7 @@ test("Electron persists text, style, structure, and reorder undo while focused f
     const styledBytes = readFileSync(sourcePath);
     expect(styledBytes.equals(expected)).toBe(false);
     expect(styledBytes.toString("utf8")).toContain("font-weight: 700");
-    await clickEditHistoryMenu(reopenedApp, "undo");
+    await clickEditHistoryMenu(reopenedApp, reopened.page, "undo");
     latestRevision = await expectCheckpointPersisted(
       reopened.page,
       latestRevision,
@@ -1451,7 +1471,7 @@ test("Electron persists text, style, structure, and reorder undo while focused f
       readFileSync(sourcePath).equals(expected),
       "style undo must restore the exact bytes before the toolbar command",
     ).toBe(true);
-    await clickEditHistoryMenu(reopenedApp, "redo");
+    await clickEditHistoryMenu(reopenedApp, reopened.page, "redo");
     latestRevision = await expectCheckpointPersisted(
       reopened.page,
       latestRevision,
@@ -1477,7 +1497,7 @@ test("Electron persists text, style, structure, and reorder undo while focused f
     const structuredBytes = readFileSync(sourcePath);
     expect(structuredBytes.equals(styledBytes)).toBe(false);
     expect(structuredBytes.toString("utf8")).toContain("<br>");
-    await clickEditHistoryMenu(reopenedApp, "undo");
+    await clickEditHistoryMenu(reopenedApp, reopened.page, "undo");
     latestRevision = await expectCheckpointPersisted(
       reopened.page,
       latestRevision,
@@ -1486,7 +1506,7 @@ test("Electron persists text, style, structure, and reorder undo while focused f
       readFileSync(sourcePath).equals(styledBytes),
       "editable-island structure undo must remove only the inserted break",
     ).toBe(true);
-    await clickEditHistoryMenu(reopenedApp, "redo");
+    await clickEditHistoryMenu(reopenedApp, reopened.page, "redo");
     latestRevision = await expectCheckpointPersisted(
       reopened.page,
       latestRevision,
@@ -1510,7 +1530,7 @@ test("Electron persists text, style, structure, and reorder undo while focused f
     expect(reorderedBytes.equals(structuredBytes)).toBe(false);
     expect(reorderedText.indexOf('title="entity spellings"'))
       .toBeLessThan(reorderedText.indexOf('data-native-case="source-fidelity"'));
-    await clickEditHistoryMenu(reopenedApp, "undo");
+    await clickEditHistoryMenu(reopenedApp, reopened.page, "undo");
     latestRevision = await expectCheckpointPersisted(
       reopened.page,
       latestRevision,
@@ -1519,7 +1539,7 @@ test("Electron persists text, style, structure, and reorder undo while focused f
       readFileSync(sourcePath).equals(structuredBytes),
       "move undo must restore the exact sibling order and bytes",
     ).toBe(true);
-    await clickEditHistoryMenu(reopenedApp, "redo");
+    await clickEditHistoryMenu(reopenedApp, reopened.page, "redo");
     await expectCheckpointPersisted(reopened.page, latestRevision);
     expect(readFileSync(sourcePath).equals(reorderedBytes)).toBe(true);
 
@@ -1539,7 +1559,7 @@ test("Electron persists text, style, structure, and reorder undo while focused f
     await reopened.page.keyboard.press("End");
     await reopened.page.keyboard.insertText("\n临时新增规则");
     await expect(projectRules).toHaveValue(`${originalRules}\n临时新增规则`);
-    await clickEditHistoryMenu(reopenedApp, "undo");
+    await clickEditHistoryMenu(reopenedApp, reopened.page, "undo");
     await expect(projectRules).toHaveValue(originalRules);
     expect(
       readFileSync(sourcePath).equals(reorderedBytes),
@@ -1680,7 +1700,7 @@ test("Electron restores the active text selection and keeps comment anchors stab
       requestAnimationFrame(sample);
     });
 
-    await clickEditHistoryMenu(electronApp, "undo");
+    await clickEditHistoryMenu(electronApp, launched.page, "undo");
     await expectCheckpointPersisted(launched.page, persistedRevision);
     await expect.poll(() => readFileSync(sourcePath).equals(original)).toBe(true);
     frame = await currentEditorFrame(launched.page);

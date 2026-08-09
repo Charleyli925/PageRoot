@@ -65,6 +65,26 @@ async function stopPackagedAppForCleanup(electronApp) {
   }
 }
 
+async function closePackagedGracefully(electronApp, page) {
+  const mainRendererUrl = page?.url();
+  if (!mainRendererUrl) {
+    throw new Error("PageRoot main renderer URL is unavailable for graceful close.");
+  }
+  const closed = electronApp.waitForEvent("close", { timeout: 30_000 });
+  const requested = await electronApp.evaluate(({ BrowserWindow }, rendererUrl) => {
+    const mainWindow = BrowserWindow.getAllWindows().find((candidate) => (
+      candidate.webContents.getURL() === rendererUrl
+    ));
+    if (!mainWindow) return false;
+    mainWindow.close();
+    return true;
+  }, mainRendererUrl);
+  if (!requested) {
+    throw new Error("PageRoot main BrowserWindow was unavailable for graceful close.");
+  }
+  await closed;
+}
+
 test("packaged app preserves identity and opens external HTML across startup states", async () => {
   test.setTimeout(60_000);
   const isolatedUserData = mkdtempSync(
@@ -152,11 +172,7 @@ test("packaged app preserves identity and opens external HTML across startup sta
       { timeout: 30_000 },
     ).toBe("ready");
 
-    const closed = electronApp.waitForEvent("close", { timeout: 30_000 });
-    await electronApp.evaluate(({ BrowserWindow }) => {
-      BrowserWindow.getAllWindows()[0]?.close();
-    });
-    await closed;
+    await closePackagedGracefully(electronApp, page);
     electronApp = null;
   } finally {
     if (electronApp) await stopPackagedAppForCleanup(electronApp);
