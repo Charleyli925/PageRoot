@@ -3,8 +3,7 @@ const PROJECT_OPENING = new Set(["desktop-dialog", "browser-file"]);
 const ATTACHMENT_PERSISTENCE = new Set(["bridge", "memory", "none"]);
 const CLOSE_COORDINATION = new Set(["electron-handshake", "browser-beforeunload"]);
 const INTERACTIVE_PREVIEW = new Set(["independent-url", "srcdoc"]);
-const EDIT_VISUAL_PROJECTION = new Set(["offscreen-capture", "none"]);
-const REVIEW_RUNTIME_VISUAL_CAPTURE = new Set(["owner-isolated", "none"]);
+const RUNTIME_SNAPSHOT_CAPTURE = new Set(["owner-isolated", "none"]);
 
 function isRecord(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -17,8 +16,7 @@ function isCapabilityManifest(value) {
     && ATTACHMENT_PERSISTENCE.has(value.attachmentPersistence)
     && CLOSE_COORDINATION.has(value.closeCoordination)
     && INTERACTIVE_PREVIEW.has(value.interactivePreview)
-    && EDIT_VISUAL_PROJECTION.has(value.editVisualProjection)
-    && REVIEW_RUNTIME_VISUAL_CAPTURE.has(value.reviewRuntimeVisualCapture);
+    && RUNTIME_SNAPSHOT_CAPTURE.has(value.runtimeSnapshotCapture);
 }
 
 function freezeManifest(value) {
@@ -28,8 +26,7 @@ function freezeManifest(value) {
     attachmentPersistence: value.attachmentPersistence,
     closeCoordination: value.closeCoordination,
     interactivePreview: value.interactivePreview,
-    editVisualProjection: value.editVisualProjection,
-    reviewRuntimeVisualCapture: value.reviewRuntimeVisualCapture,
+    runtimeSnapshotCapture: value.runtimeSnapshotCapture,
   });
 }
 
@@ -39,8 +36,7 @@ export const BROWSER_RUNTIME_CAPABILITIES = freezeManifest({
   attachmentPersistence: "none",
   closeCoordination: "browser-beforeunload",
   interactivePreview: "srcdoc",
-  editVisualProjection: "none",
-  reviewRuntimeVisualCapture: "none",
+  runtimeSnapshotCapture: "none",
 });
 
 export const DESKTOP_RUNTIME_CAPABILITIES = freezeManifest({
@@ -49,8 +45,7 @@ export const DESKTOP_RUNTIME_CAPABILITIES = freezeManifest({
   attachmentPersistence: "bridge",
   closeCoordination: "electron-handshake",
   interactivePreview: "independent-url",
-  editVisualProjection: "offscreen-capture",
-  reviewRuntimeVisualCapture: "owner-isolated",
+  runtimeSnapshotCapture: "owner-isolated",
 });
 
 export function resolveRuntimeCapabilities({

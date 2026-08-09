@@ -10,6 +10,8 @@ test("source host resolver admits only direct paint roots and stable empty hosts
   const beforeHtml = `<!doctype html><html><body><main>
     <canvas id="sales-canvas"></canvas>
     <svg viewBox="0 0 10 10"><path d="M0 0L10 10"></path></svg>
+    <svg id="empty-runtime-svg"></svg>
+    <div id="id-chart"></div>
     <div data-chart="revenue"></div>
     <div class="traffic-unique"></div>
     <div class="duplicate-chart"></div><div class="duplicate-chart"></div>
@@ -22,12 +24,23 @@ test("source host resolver admits only direct paint roots and stable empty hosts
   assert.equal(RUNTIME_SNAPSHOT_HOST_LIMIT, 32);
   assert.deepEqual(
     resolved.hosts.map(({ before }) => before.kind),
-    ["canvas", "svg", "host", "host"],
+    ["canvas", "svg", "svg", "host", "host", "host"],
   );
   assert.deepEqual(
     resolved.hosts.map(({ before }) => before.binding.tagName),
-    ["canvas", "svg", "div", "div"],
+    ["canvas", "svg", "svg", "div", "div", "div"],
   );
+  const emptySvg = resolved.hosts.find(({ before }) => (
+    before.binding.identityAttributes.some(([name]) => name === "id")
+    && before.binding.tagName === "svg"
+  ));
+  assert.ok(emptySvg, "a source-empty SVG keeps its source-backed identity");
+  const idHost = resolved.hosts.find(({ before }) => (
+    before.binding.identityAttributes.some(([name, value]) => (
+      name === "id" && value === "id-chart"
+    ))
+  ));
+  assert.ok(idHost, "a source-empty stable ID host is eligible");
   const dataHost = resolved.hosts.find(({ before }) => (
     before.binding.identityAttributes.some(([name]) => name === "data-chart")
   ));

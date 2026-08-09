@@ -1,6 +1,6 @@
 # ADR 0016: Review Runtime Snapshot owner
 
-- Status: Accepted
+- Status: Superseded by `0017-shared-runtime-snapshot-owner.md`
 - Date: 2026-08-09
 
 ## Context

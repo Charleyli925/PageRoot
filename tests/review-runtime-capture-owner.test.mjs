@@ -3,8 +3,8 @@ import { createHash } from "node:crypto";
 import test from "node:test";
 
 import {
-  createReviewRuntimeCaptureController,
-  validateReviewRuntimeCaptureRequest,
+  createRuntimeSnapshotCaptureController,
+  validateRuntimeSnapshotCaptureRequest,
 } from "../desktop/runtime-visual-capture-owner.mjs";
 
 const PNG = Buffer.from(
@@ -120,7 +120,7 @@ function fakeOwner({
     }
   }
 
-  const controller = createReviewRuntimeCaptureController({
+  const controller = createRuntimeSnapshotCaptureController({
     BrowserWindowClass: FakeBrowserWindow,
     createSession: async (payload) => {
       state.createRequests.push(payload);
@@ -164,22 +164,29 @@ function fakeOwner({
 }
 
 test("runtime snapshot owner rejects non-authoritative or unsupported capture inputs", () => {
-  const accepted = validateReviewRuntimeCaptureRequest(request());
+  const accepted = validateRuntimeSnapshotCaptureRequest(request());
   assert.equal(accepted.sourceSha256, SOURCE_SHA256);
   assert.equal(accepted.candidates[0].kind, "canvas");
   assert.equal(Object.isFrozen(accepted), true);
+  assert.equal(
+    validateRuntimeSnapshotCaptureRequest(request({
+      captureSessionId: "runtime-edit-session-0001",
+      side: "edit",
+    })).side,
+    "edit",
+  );
   assert.throws(
-    () => validateReviewRuntimeCaptureRequest(request({ sourcePath: "/private/report.html" })),
+    () => validateRuntimeSnapshotCaptureRequest(request({ sourcePath: "/private/report.html" })),
     /invalid/u,
   );
   assert.throws(
-    () => validateReviewRuntimeCaptureRequest(request({
+    () => validateRuntimeSnapshotCaptureRequest(request({
       candidates: [{ ...request().candidates[0], kind: "computed-selector" }],
     })),
     /identity/u,
   );
   assert.throws(
-    () => validateReviewRuntimeCaptureRequest(request({
+    () => validateRuntimeSnapshotCaptureRequest(request({
       candidates: [{ ...request().candidates[0], path: [-1] }],
     })),
     /identity/u,

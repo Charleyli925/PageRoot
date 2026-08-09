@@ -50,17 +50,15 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
   media, but not for renderer or authored scripts: `pageroot-preview:` is absent
   from `script-src`, the edit document remains sandboxed without script
   capability, and every source transition revokes the previous session.
-- Desktop edit visual capture is a separate narrow IPC capability. The main
-  process revalidates the known source path and a bounded payload, owns one
-  hidden sandboxed BrowserWindow with Node disabled, denies navigation,
-  popups and webviews, and destroys the window plus preview session after each
-  capture or superseding request. Every page-realm evaluation and bitmap
-  operation is bounded by the shared owner deadline; authored clocks cannot keep
-  the window alive. It returns only bounded PNG bytes plus
-  validated PNG dimensions/content SHA/byte length/DPR/sizing/crop metadata,
-  explicit content/border-box geometry and deferred source-node identities tied
-  to the renderer-provided exact source Hash; it never returns
-  runtime HTML, SVG, script state or filesystem data.
+- Desktop runtime snapshot capture is one narrow IPC capability shared by Edit
+  and Review. The main process revalidates exact source HTML/SHA and a bounded
+  source-host binding, owns one hidden sandboxed BrowserWindow with Node
+  disabled, denies navigation, popups and webviews, and destroys the window plus
+  preview session after each capture or superseding request. Every page-realm
+  evaluation and bitmap operation is bounded by the shared owner deadline;
+  authored clocks cannot keep the window alive. It returns only bounded PNG
+  bytes plus validated dimensions/content SHA/byte length, never runtime HTML,
+  SVG, script state, TargetRefs or filesystem data.
 - Strict schemas, frozen inputs and identity/Hash/path checks before accepting
   AI output; complete-document and non-empty-body checks remain protocol
   boundaries. Authored scripts, handlers, executable URLs and refresh directives
@@ -135,11 +133,12 @@ When the user returns to editing,
 PageRoot accepts only an allowlisted source-backed presentation diff. It rejects
 unknown or duplicated source nodes, stale Hashes, truncated captures, arbitrary
 one-sided runtime classes, text/HTML, inline style, form state and runtime
-children. Independently, Edit may display a PNG capture only inside a unique
-source-empty host with the exact current source Hash. Source Hash is the first
-cache invalidator, and no bitmap, deferred fallback or TargetRef may rebind
-across source Hashes. The bitmap has pointer
-events disabled, so selection and comments resolve the original source host.
+children. Independently, Edit may display a PNG only on a direct Canvas/SVG
+root or a unique source-empty stable host. The session may rebind a verified
+bitmap only after the current `SourceIndex` resolves the same stable host; its
+coarse runtime-input key, not arbitrary document text, decides reuse. The
+bitmap has pointer events disabled, so selection and comments resolve the
+original source host.
 Projection nodes are keyed/reconciled as disposable presentation and cannot be
 serialized by the source engine. Save, review comparison and Request creation
 continue from authoritative source bytes (the Bridge copies those exact bytes
@@ -162,9 +161,10 @@ request, candidate binding, screenshot result, or runtime `MessagePort`.
 For every capture, Electron main creates a fresh non-persistent partition and
 hidden sandboxed window that can load only its expected `pageroot-preview:` URL.
 Permissions, navigation, popups, downloads, webviews and all non-preview
-network requests are denied. The ephemeral preview has no source path, Bridge,
-preload, Node or filesystem capability. Inline/browser review remains
-static-only.
+network requests are denied. The authored page receives no source path, Bridge,
+preload, Node or filesystem capability; when an active desktop document needs
+relative assets, main supplies only its declared, contained source-relative
+allowlist to the ephemeral preview. Inline/browser review remains static-only.
 
 Entering review does not change `project.json.sourcePath`, the current Canvas,
 the immutable Version or the activation transaction, and runtime interaction

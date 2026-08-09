@@ -6,7 +6,7 @@ import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex } from "@noble/hashes/utils.js";
 
 import {
-  acceptReviewRuntimeVisualSnapshots,
+  acceptRuntimeVisualSnapshots,
   changedReviewRuntimeVisualCandidateKeys,
   mergeReviewRuntimeVisualChanges,
 } from "../app/lib/review-runtime-visual.js";
@@ -49,28 +49,28 @@ function unavailable(key) {
 
 test("runtime snapshots accept only bounded declared PNG results", () => {
   const allowed = new Set(["runtime-host-1"]);
-  const accepted = acceptReviewRuntimeVisualSnapshots([
+  const accepted = acceptRuntimeVisualSnapshots([
     snapshot("runtime-host-1"),
   ], allowed);
   assert.equal(accepted?.length, 1);
   assert.equal(accepted?.[0].pngSha256, hash(PNG));
   assert.notEqual(accepted?.[0].pngBytes, PNG, "accepted bytes must be copied");
-  assert.equal(acceptReviewRuntimeVisualSnapshots([
+  assert.equal(acceptRuntimeVisualSnapshots([
     snapshot("runtime-host-2"),
   ], allowed), null);
-  assert.equal(acceptReviewRuntimeVisualSnapshots([
+  assert.equal(acceptRuntimeVisualSnapshots([
     { ...snapshot("runtime-host-1"), extra: true },
   ], allowed), null);
-  assert.equal(acceptReviewRuntimeVisualSnapshots([
+  assert.equal(acceptRuntimeVisualSnapshots([
     { ...snapshot("runtime-host-1"), pngSha256: hash(CHANGED_PNG) },
   ], allowed), null);
-  assert.equal(acceptReviewRuntimeVisualSnapshots([
+  assert.equal(acceptRuntimeVisualSnapshots([
     { ...snapshot("runtime-host-1"), width: 2 },
   ], allowed), null);
-  assert.equal(acceptReviewRuntimeVisualSnapshots([
+  assert.equal(acceptRuntimeVisualSnapshots([
     unavailable("runtime-host-1"),
   ], allowed)?.[0].state, "unavailable");
-  assert.equal(acceptReviewRuntimeVisualSnapshots(
+  assert.equal(acceptRuntimeVisualSnapshots(
     [],
     new Set(Array.from({ length: 33 }, (_, index) => `runtime-host-${index + 1}`)),
   ), null);

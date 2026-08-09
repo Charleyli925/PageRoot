@@ -397,12 +397,12 @@ test("runtime chart review is captured by the owner and never trusted from the a
   assert.match(reviewDocument, /runtimeVisualSourceHtml/);
   assert.match(reviewDocument, /resolveRuntimeSnapshotHosts/);
   assert.match(reviewDocument, /sourceHostTargetRefs/);
-  assert.match(review, /window\.htmlAIReviewRuntimeVisuals/);
+  assert.match(review, /window\.htmlAIRuntimeSnapshots/);
   assert.match(review, /requestOwnerRuntimeVisualCapture/);
   assert.match(review, /documents\.runtimeVisualSourceHtml\[side\]/);
   assert.match(review, /documents\.runtimeVisualCaptureCandidates\[side\]/);
   assert.match(review, /acceptedRuntimeVisualEnvelope/);
-  assert.match(review, /acceptReviewRuntimeVisualSnapshots/);
+  assert.match(review, /acceptRuntimeVisualSnapshots/);
   assert.match(review, /changedReviewRuntimeVisualCandidateKeys/);
   assert.match(review, /Promise\.all\(/);
   assert.match(review, /runtimeVisualStaticReadyRef/);

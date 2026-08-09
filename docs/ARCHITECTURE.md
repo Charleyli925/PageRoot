@@ -56,46 +56,24 @@ Comments + frozen input
 - Preview-to-edit carries only a bounded `PageViewContext`: source-backed
   active/inactive class transitions and `hidden`, `open`, `aria-selected` or
   `aria-expanded` state. It never carries runtime DOM, pixels or table markup.
-- Desktop Edit has one separate, disposable runtime-visual projection. A
-  renderer session reuses the Canvas `SourceIndex`, limits source-empty hosts
-  to authored executable causality (scripts or inline handlers), and keys capture
-  work first by the complete source Hash, then by executable source,
-  script/handler-referenced data containers, stable host TargetRef, a 64px
-  viewport bucket and presentation context. Structural, generic, or computed
-  DOM reads conservatively widen exact source-empty candidates and fold the
-  complete source Hash into the dependency. No projection or deferred bitmap
-  may rebind across a source Hash change. A bounded LRU keeps
-  recent viewport/context results under both entry and byte budgets, and Preview/Edit suspension retains the last
-  committed result while canceling pending work. A real dependency change asks
-  one hidden sandboxed `pageroot-preview:` window to run the authored page and
-  accepts bounded PNG captures only after exact source/host validation. Empty
-  source-authored `canvas` and `svg` roots are candidates as well as ordinary
-  containers. `HtmlCanvasEditor` mounts each PNG through a responsive content
-  layer (or one bitmap row for an empty `tbody`); direct Canvas/SVG roots use a
-  reversible content-box background adapter that temporarily applies the captured
-  content-box dimensions. The host therefore remains the selectable/commentable
-  TargetRef. The runtime DOM is never merged or synchronized, and neither the
-  bitmap nor its temporary attributes enter SourcePatch, save, version, review
-  diff or AI Request input.
-  Capture protocol V2 transfers bounded PNG bytes rather than Base64, validates
-  PNG signature/IHDR dimensions, content SHA, byte length, DPR, sizing mode and
-  crop geometry, waits for a short mutation-quiet point, keeps positive
-  axis-aligned scale/translate and zoom in the final painted geometry, and
-  neutralizes other disposable transform/effect presentation during
-  measurement. It captures the content box for ordinary hosts and the border
-  box for `tbody`, and rejects a
-  viewport/overflow-clipped rectangle rather than stretching a partial bitmap.
-  Every page-realm evaluation and bitmap operation is bounded by the shared
-  1500ms owner deadline; timeout destroys the hidden window/session.
-  Hidden or temporarily uncapturable hosts are deferred so their previous
-  committed bitmap can remain; a valid non-deferred empty result is an
-  authoritative clear. The Canvas reconciles by stable host key, keeps
-  identical image nodes, and decodes a changed Blob URL off-DOM before replacing
-  the old node. Content layers follow host resize/flow changes with `contain`
-  sizing and an owned `ResizeObserver`, so a cache hit cannot reuse stale fixed
-  pixel geometry. A source-zero host receives the validated captured intrinsic
-  size instead of resolving a percentage against its own zero box; a projection
-  refresh never starts by blanking the document.
+- Edit and Review share one disposable runtime-snapshot path. The
+  `SourceHostResolver` admits only direct source Canvas/SVG roots and stable,
+  source-empty hosts; it never uses script causality, computed selectors,
+  arbitrary HTML or `tbody`. `EditRuntimeSnapshotSession` owns one small
+  current-document cache keyed by document, supported runtime inputs and a
+  64px viewport bucket. Normal text edits and Preview/Edit or tab/mode changes
+  re-resolve the current `SourceIndex` and keep the verified image; a changed
+  supported runtime input keeps the compatible prior image only while one
+  background capture replaces it. It never reads a source path or presentation
+  context and never models a JavaScript dependency graph.
+  `RuntimeSnapshotOwner` is the one hidden, sandboxed Electron capture owner
+  for Edit (`edit`) and Review (`before`/`after`). It accepts bounded PNG bytes
+  only after exact source/binding validation in an isolated world. The Canvas
+  stages a replacement Blob before switching a direct Canvas/SVG background or
+  a stable empty-host image, so refresh does not blank a verified visual. The
+  original source host remains selectable and commentable. Runtime DOM, PNGs
+  and temporary attributes never enter SourcePatch, save, Version, Review
+  source analysis or AI Request input.
 - Comment selection remains source-node exact inside foreign content. Authored
   SVG children retain their own instrumented SourceIndex identity; runtime-only
   children fail closed and are never promoted to an ancestor `svg`.
@@ -239,7 +217,7 @@ they do not import application services.
 | Close, switch, submit and history obligations | `app/application/drain-coordinator.js` |
 | Late query rejection and monotonic draft reads | `app/application/project-query-fence.js` |
 | Crash-only browser recovery | `app/application/recovery-store.js` |
-| Renderer, project-picker, attachment, interactive-preview and edit-visual capabilities | `app/application/runtime-capabilities.js` |
+| Renderer, project-picker, attachment, interactive-preview and runtime-snapshot capabilities | `app/application/runtime-capabilities.js` |
 | Same-directory source rename, operation journal and active/recent path rebase | `desktop/source-rename.mjs` |
 | Known-source Finder reveal | narrow project IPC in `desktop/main.mjs` |
 | Validated default-browser HTML launch | `desktop/open-in-default-browser.mjs`, behind `desktop/project-ipc-security.mjs` sender authority |
@@ -247,9 +225,9 @@ they do not import application services.
 | Preview sanitization and verified frame injection | `app/components/html-preview-sandbox.js` |
 | Volatile desktop preview sessions and contained local-asset serving | `desktop/preview-protocol.mjs` |
 | Source-backed preview/edit display-state filtering, rebinding and safe action resolution | `app/lib/page-view-context.js` |
-| Source-bound edit visual request/late-result ownership and payload validation | `app/application/runtime-visual-projection-session.js`, `app/domain/runtime-visual-projection.js` |
-| Shared runtime-visual limits, source/session envelope and page budgets | `app/domain/runtime-visual-contract.js` |
-| Sandboxed offscreen page execution and bounded bitmap capture | `desktop/edit-visual-capture.mjs` |
+| Shared source-host discovery, Edit snapshot/cache ownership and generic capture request shape | `app/domain/runtime-snapshot-hosts.js`, `app/application/edit-runtime-snapshot-session.js`, `app/components/desktop-runtime-snapshot-api.ts` |
+| Shared runtime-snapshot limits, source/session envelope and PNG validation | `app/domain/runtime-visual-contract.js`, `app/lib/runtime-visual-snapshots.js` |
+| Sandboxed offscreen page execution and bounded bitmap capture for Edit and Review | `desktop/runtime-visual-capture-owner.mjs` |
 | Read-only bitmap mounting inside original source hosts | `app/components/html-canvas-runtime-visual.ts` |
 | Run lifecycle decoding and transition policy | `app/domain/run-lifecycle.js` |
 | Workbench pure record/comment/project/version/browser helpers | `app/workbench/*-model.ts`, `app/workbench/browser-io.ts` |
@@ -258,7 +236,7 @@ they do not import application services.
 | Formal AI review state transitions | `app/workbench/review-state.ts` |
 | Bounded pure sibling alignment for semantic review units | `app/lib/review-semantic-alignment.js` |
 | Typed, per-element review projection fact normalization and filtering | `app/lib/review-projection-facts.js` |
-| Bounded review-runtime snapshot validation, comparison, deduplication and comparison deadline | `app/lib/review-runtime-visual.js` |
+| Review-specific runtime-snapshot comparison and marker merge | `app/lib/review-runtime-visual.js` |
 | Review runtime-capture migration interface and capture identity | `app/workbench/review-runtime-capture-adapter.ts` |
 | Formal AI review analysis, paired runtime mapping, global mask and overlay projection | `app/workbench/review-document.ts` |
 | Formal AI review composition and isolated-frame coordination | `app/workbench/AiReviewWorkspace.tsx` |

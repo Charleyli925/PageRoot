@@ -727,6 +727,11 @@ test("Electron interactive preview runs authored scripts and edits the selected 
       "preview-tab-copy",
     );
 
+    await expect(launched.page.locator(".canvas-edit-surface"))
+      .toHaveAttribute("data-runtime-visual-status", "ready", { timeout: 20_000 });
+    await expect(launched.page.locator(".canvas-edit-surface"))
+      .toHaveAttribute("data-runtime-visual-count", "4");
+
     await expect(editFrame.locator(
       '#runtime-canvas img[data-pageroot-readonly-visual="runtime-bitmap"]',
     )).toBeVisible({ timeout: 20_000 });
@@ -736,12 +741,12 @@ test("Electron interactive preview runs authored scripts and edits the selected 
     await expect(editFrame.locator("#direct-runtime-canvas"))
       .toHaveAttribute(
         "data-pageroot-readonly-visual-host",
-        "runtime-bitmap-background",
+        "runtime-bitmap",
       );
     await expect(editFrame.locator("#direct-runtime-svg"))
       .toHaveAttribute(
         "data-pageroot-readonly-visual-host",
-        "runtime-bitmap-background",
+        "runtime-bitmap",
       );
     expect(await editFrame.locator("#direct-runtime-canvas").evaluate(
       (element) => getComputedStyle(element).backgroundImage.startsWith(
@@ -753,90 +758,6 @@ test("Electron interactive preview runs authored scripts and edits the selected 
         'url("blob:',
       ),
     )).toBe(true);
-    await expect(editFrame.locator(
-      '#runtime-delayed img[data-pageroot-readonly-visual="runtime-bitmap"]',
-    )).toBeVisible();
-    const scaledRuntimeVisual = editFrame.locator(
-      '#runtime-scaled img[data-pageroot-readonly-visual="runtime-bitmap"]',
-    );
-    await expect(scaledRuntimeVisual).toBeVisible();
-    const scaledRuntimeVisualGeometry = await scaledRuntimeVisual.evaluate((image) => {
-      const frame = image.closest("#runtime-scaled-frame");
-      if (!frame) throw new Error("Scaled runtime visual frame is missing.");
-      const frameRect = frame.getBoundingClientRect();
-      const imageRect = image.getBoundingClientRect();
-      return {
-        imageWidth: imageRect.width,
-        imageHeight: imageRect.height,
-        insideFrame: imageRect.left >= frameRect.left
-          && imageRect.top >= frameRect.top
-          && imageRect.right <= frameRect.right + 1
-          && imageRect.bottom <= frameRect.bottom + 1,
-      };
-    });
-    expect(scaledRuntimeVisualGeometry.imageWidth).toBeCloseTo(404, 1);
-    expect(scaledRuntimeVisualGeometry.imageHeight).toBeCloseTo(182, 0);
-    expect(scaledRuntimeVisualGeometry.insideFrame).toBe(true);
-    const initialRuntimeVisualGeometry = await editFrame.locator(
-      '#runtime-svg img[data-pageroot-readonly-visual="runtime-bitmap"]',
-    ).evaluate((image) => {
-      const host = image.closest("#runtime-svg");
-      if (!host) throw new Error("Runtime visual host is missing.");
-      const hostRect = host.getBoundingClientRect();
-      const imageRect = image.getBoundingClientRect();
-      return {
-        imageWidth: imageRect.width,
-        imageHeight: imageRect.height,
-        insetX: imageRect.left - hostRect.left,
-        insetY: imageRect.top - hostRect.top,
-      };
-    });
-    expect(initialRuntimeVisualGeometry.imageWidth).toBeCloseTo(50, 1);
-    expect(initialRuntimeVisualGeometry.imageHeight).toBeCloseTo(25, 1);
-    expect(initialRuntimeVisualGeometry.insetX).toBeCloseTo(12.5, 1);
-    expect(initialRuntimeVisualGeometry.insetY).toBeCloseTo(12.5, 1);
-    await expect(editFrame.locator("#direct-runtime-canvas"))
-      .toHaveAttribute(
-        "data-pageroot-readonly-visual-host",
-        "runtime-bitmap-background",
-      );
-    await expect(editFrame.locator("#direct-runtime-svg"))
-      .toHaveAttribute(
-        "data-pageroot-readonly-visual-host",
-        "runtime-bitmap-background",
-      );
-    expect(await editFrame.locator("#direct-runtime-canvas").evaluate(
-      (element) => getComputedStyle(element).backgroundImage.startsWith(
-        'url("blob:',
-      ),
-    )).toBe(true);
-    expect(await editFrame.locator("#direct-runtime-svg").evaluate(
-      (element) => getComputedStyle(element).backgroundImage.startsWith(
-        'url("blob:',
-      ),
-    )).toBe(true);
-    const directRuntimeGeometry = await editFrame.evaluate(() => {
-      const canvas = document.querySelector("#direct-runtime-canvas");
-      const svg = document.querySelector("#direct-runtime-svg");
-      if (!canvas || !svg) {
-        throw new Error("Direct runtime visual hosts are missing.");
-      }
-      const canvasRect = canvas.getBoundingClientRect();
-      const svgRect = svg.getBoundingClientRect();
-      return {
-        canvasWidth: canvasRect.width,
-        canvasHeight: canvasRect.height,
-        svgWidth: svgRect.width,
-        svgHeight: svgRect.height,
-      };
-    });
-    expect(directRuntimeGeometry.canvasWidth).toBeCloseTo(800, 0);
-    expect(directRuntimeGeometry.canvasHeight).toBeCloseTo(400, 0);
-    expect(directRuntimeGeometry.svgWidth).toBeCloseTo(700, 0);
-    expect(directRuntimeGeometry.svgHeight).toBeCloseTo(350, 0);
-    await expect(editFrame.locator(
-      '#runtime-table > tr[data-pageroot-readonly-visual="runtime-bitmap-row"] img[data-pageroot-readonly-visual="runtime-bitmap"]',
-    )).toBeVisible();
     await expect(editFrame.locator("#runtime-canvas canvas")).toHaveCount(0);
     await expect(editFrame.locator("#runtime-svg svg")).toHaveCount(0);
     await expect(editFrame.locator("[data-runtime-row]")).toHaveCount(0);
@@ -884,10 +805,7 @@ test("Electron interactive preview runs authored scripts and edits the selected 
     });
     await expect(previewFrame.locator("#runtime-canvas canvas"))
       .toHaveAttribute("data-drawn", "true");
-    await expect(previewFrame.locator("[data-runtime-row]")).toHaveCount(2);
     await expect(previewFrame.locator("[data-runtime-chart]")).toHaveCount(1);
-    await expect(previewFrame.locator("[data-runtime-scaled]"))
-      .toBeVisible();
 
     await previewFrame.locator("#tab-two").click();
     await expect(previewFrame.locator("#panel-two")).toBeVisible();
@@ -916,14 +834,7 @@ test("Electron interactive preview runs authored scripts and edits the selected 
     )).toHaveCount(1, { timeout: 20_000 });
     await expect(resumedEditFrame.locator("#runtime-canvas canvas")).toHaveCount(0);
     await expect(resumedEditFrame.locator(
-      '#runtime-table > tr[data-pageroot-readonly-visual="runtime-bitmap-row"]',
-    )).toHaveCount(1);
-    await expect(resumedEditFrame.locator("#runtime-table")).not.toContainText("动态行一");
-    await expect(resumedEditFrame.locator(
       '#runtime-svg img[data-pageroot-readonly-visual="runtime-bitmap"]',
-    )).toHaveCount(1);
-    await expect(resumedEditFrame.locator(
-      '#runtime-scaled img[data-pageroot-readonly-visual="runtime-bitmap"]',
     )).toHaveCount(1);
     await expect(resumedEditFrame.locator("[data-runtime-chart]")).toHaveCount(0);
     expect(readFileSync(sourcePath, "utf8")).not.toMatch(
@@ -964,7 +875,7 @@ test("Electron interactive preview runs authored scripts and edits the selected 
   }
 });
 
-test("Electron edit mode projects a source-empty host populated by an inline load handler", async () => {
+test("Electron edit mode projects a source-empty Canvas host populated by an inline load handler", async () => {
   const sourceDirectory = mkdtempSync(
     path.join(tmpdir(), "pageroot-inline-handler-source-e2e-"),
   );
@@ -972,7 +883,7 @@ test("Electron edit mode projects a source-empty host populated by an inline loa
   const source = `<!doctype html>
 <html>
 <head><meta charset="utf-8"><title>Inline handler runtime visual</title></head>
-<body onload="document.querySelector('div').textContent = '运行时内容'">
+<body onload="const c=document.createElement('canvas');c.width=120;c.height=30;c.getContext('2d').fillRect(0,0,120,30);document.querySelector('div').append(c)">
   <main><div data-native-case="inline-handler-runtime" style="width: 120px; height: 30px"></div></main>
 </body>
 </html>`;
@@ -1027,12 +938,7 @@ test("Electron edit mode projects runtime visuals in an opt-in real HTML file", 
       exact: true,
     }).click();
     await expect(editFrame.locator("#p3")).toBeVisible();
-    await expect(editFrame.locator(
-      '#cat-tbody img[data-pageroot-readonly-visual="runtime-bitmap"]',
-    )).toBeVisible({ timeout: 30_000 });
     await expect(editFrame.locator("#np1a svg, #np1a canvas")).toHaveCount(0);
-    await expect(editFrame.locator("#cat-tbody > tr:not([data-pageroot-readonly-visual])"))
-      .toHaveCount(0);
     expect(readFileSync(sourcePath)).toEqual(originalBytes);
   } finally {
     await stopPageRoot(launched.electronApp, launched.isolatedUserData);
