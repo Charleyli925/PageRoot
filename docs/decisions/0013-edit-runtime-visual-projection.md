@@ -1,9 +1,13 @@
 # ADR 0013: Edit runtime visuals are disposable source-host bitmap projections
 
-- Status: Accepted
+- Status: Superseded by `0017-shared-runtime-snapshot-owner.md`
 - Date: 2026-08-04
 
 ## Context
+
+> Historical decision. The Edit-only controller, full-source cache identity,
+> `tbody` support and projection protocol described below were removed by the
+> shared owner convergence. The current contract is ADR 0017.
 
 The edit iframe deliberately disables authored scripts so source mapping,
 Selection, IME and SourcePatch remain authoritative. Many existing reports,

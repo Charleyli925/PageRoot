@@ -1,12 +1,6 @@
-export type ReviewRuntimeVisualSnapshot = Readonly<{
-  key: string;
-  state: "captured" | "unavailable";
-  pngSha256: string;
-  width: number;
-  height: number;
-  byteLength: number;
-  pngBytes: Uint8Array;
-}>;
+import type { RuntimeVisualSnapshot } from "./runtime-visual-snapshots.js";
+
+export type ReviewRuntimeVisualSnapshot = RuntimeVisualSnapshot;
 
 export type ReviewRuntimeVisualCandidate = Readonly<{
   key: string;
@@ -23,7 +17,7 @@ export type ReviewRuntimeVisualCandidate = Readonly<{
 
 export const REVIEW_RUNTIME_VISUAL_CANDIDATE_LIMIT: 32;
 
-export function acceptReviewRuntimeVisualSnapshots(
+export function acceptRuntimeVisualSnapshots(
   value: unknown,
   allowedCandidateKeys: ReadonlySet<string>,
 ): readonly ReviewRuntimeVisualSnapshot[] | null;

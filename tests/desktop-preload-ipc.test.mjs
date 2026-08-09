@@ -53,8 +53,7 @@ async function loadPreloadApis(invoke) {
     lifecycle: exposed.get("htmlAIAppLifecycle"),
     usage: exposed.get("htmlAIUsage"),
     preview: exposed.get("htmlAIPreview"),
-    editVisuals: exposed.get("htmlAIEditVisuals"),
-    reviewRuntimeVisuals: exposed.get("htmlAIReviewRuntimeVisuals"),
+    runtimeSnapshots: exposed.get("htmlAIRuntimeSnapshots"),
     edit: exposed.get("htmlAIEdit"),
     sent,
     emit(channel, payload) {
@@ -83,14 +82,13 @@ test("preload declares one immutable desktop runtime capability manifest", async
   assert.equal(runtime.capabilities.attachmentPersistence, "bridge");
   assert.equal(runtime.capabilities.closeCoordination, "electron-handshake");
   assert.equal(runtime.capabilities.interactivePreview, "independent-url");
-  assert.equal(runtime.capabilities.editVisualProjection, "offscreen-capture");
-  assert.equal(runtime.capabilities.reviewRuntimeVisualCapture, "owner-isolated");
+  assert.equal(runtime.capabilities.runtimeSnapshotCapture, "owner-isolated");
   assert.equal(Object.isFrozen(runtime.capabilities), true);
 });
 
-test("preload exposes one narrow owner-controlled review runtime capture method", async () => {
+test("preload exposes one narrow owner-controlled Runtime Snapshot capture method", async () => {
   const calls = [];
-  const { reviewRuntimeVisuals } = await loadPreloadApis(async (...args) => {
+  const { runtimeSnapshots } = await loadPreloadApis(async (...args) => {
     calls.push(args);
     return success({ outcome: "failed", reason: "capture-failed" });
   });
@@ -105,35 +103,11 @@ test("preload exposes one narrow owner-controlled review runtime capture method"
   };
 
   assert.deepEqual(
-    await reviewRuntimeVisuals.capture(payload),
+    await runtimeSnapshots.capture(payload),
     { outcome: "failed", reason: "capture-failed" },
   );
-  assert.deepEqual(calls, [["html-review-runtime-visuals:capture", payload]]);
-  assert.deepEqual(Object.keys(reviewRuntimeVisuals), ["capture"]);
-});
-
-test("preload exposes one narrow edit visual capture method", async () => {
-  const calls = [];
-  const { editVisuals } = await loadPreloadApis(async (...args) => {
-    calls.push(args);
-    return success({
-      protocol: "pageroot-runtime-visual-projection",
-      version: 2,
-      sourceSha256: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      visuals: [],
-    });
-  });
-  const payload = {
-    html: "<!doctype html><div></div>",
-    sourcePath: "/Users/demo/report.html",
-  };
-
-  await editVisuals.captureProjection(payload);
-  assert.deepEqual(calls, [[
-    "html-edit-visuals:capture-projection",
-    payload,
-  ]]);
-  assert.deepEqual(Object.keys(editVisuals), ["captureProjection"]);
+  assert.deepEqual(calls, [["html-runtime-snapshots:capture", payload]]);
+  assert.deepEqual(Object.keys(runtimeSnapshots), ["capture"]);
 });
 
 test("preload exposes only preview session creation and revocation", async () => {

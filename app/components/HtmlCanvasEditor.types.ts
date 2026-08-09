@@ -1,5 +1,5 @@
 import type { PageViewContext } from "../lib/page-view-context.js";
-import type { RuntimeVisualProjection } from "../domain/runtime-visual-projection.js";
+import type { RuntimeVisualProjection } from "../domain/runtime-snapshot-hosts.js";
 import type {
   NativeEditCheckpointTrigger,
   NativeEditSelection,

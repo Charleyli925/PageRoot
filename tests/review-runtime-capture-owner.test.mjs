@@ -3,8 +3,8 @@ import { createHash } from "node:crypto";
 import test from "node:test";
 
 import {
-  createReviewRuntimeCaptureController,
-  validateReviewRuntimeCaptureRequest,
+  createRuntimeSnapshotCaptureController,
+  validateRuntimeSnapshotCaptureRequest,
 } from "../desktop/runtime-visual-capture-owner.mjs";
 
 const PNG = Buffer.from(
@@ -77,9 +77,13 @@ function fakeOwner({
 
     constructor(options) {
       this.options = options;
+      this.paintHandlers = [];
       this.webContents = {
         setWindowOpenHandler: (handler) => {
           this.windowOpenHandler = handler;
+        },
+        once: (event, handler) => {
+          if (event === "paint") this.paintHandlers.push(handler);
         },
         on: (event, handler) => {
           this.handlers ??= new Map();
@@ -99,6 +103,11 @@ function fakeOwner({
     async loadURL(url) {
       this.url = url;
       await loadURL(url);
+      const paintHandlers = this.paintHandlers.splice(0);
+      if (paintHandlers.length) {
+        state.captureEvents.push({ type: "paint" });
+        paintHandlers.forEach((handler) => handler());
+      }
     }
 
     async capturePage(rect, options) {
@@ -120,7 +129,7 @@ function fakeOwner({
     }
   }
 
-  const controller = createReviewRuntimeCaptureController({
+  const controller = createRuntimeSnapshotCaptureController({
     BrowserWindowClass: FakeBrowserWindow,
     createSession: async (payload) => {
       state.createRequests.push(payload);
@@ -164,22 +173,29 @@ function fakeOwner({
 }
 
 test("runtime snapshot owner rejects non-authoritative or unsupported capture inputs", () => {
-  const accepted = validateReviewRuntimeCaptureRequest(request());
+  const accepted = validateRuntimeSnapshotCaptureRequest(request());
   assert.equal(accepted.sourceSha256, SOURCE_SHA256);
   assert.equal(accepted.candidates[0].kind, "canvas");
   assert.equal(Object.isFrozen(accepted), true);
+  assert.equal(
+    validateRuntimeSnapshotCaptureRequest(request({
+      captureSessionId: "runtime-edit-session-0001",
+      side: "edit",
+    })).side,
+    "edit",
+  );
   assert.throws(
-    () => validateReviewRuntimeCaptureRequest(request({ sourcePath: "/private/report.html" })),
+    () => validateRuntimeSnapshotCaptureRequest(request({ sourcePath: "/private/report.html" })),
     /invalid/u,
   );
   assert.throws(
-    () => validateReviewRuntimeCaptureRequest(request({
+    () => validateRuntimeSnapshotCaptureRequest(request({
       candidates: [{ ...request().candidates[0], kind: "computed-selector" }],
     })),
     /identity/u,
   );
   assert.throws(
-    () => validateReviewRuntimeCaptureRequest(request({
+    () => validateRuntimeSnapshotCaptureRequest(request({
       candidates: [{ ...request().candidates[0], path: [-1] }],
     })),
     /identity/u,
@@ -197,6 +213,8 @@ test("runtime snapshot owner captures once through an isolated one-use Electron 
   assert.equal(snapshot.pngSha256, `sha256:${createHash("sha256").update(PNG).digest("hex")}`);
   assert.equal(snapshot.width, 1);
   assert.equal(snapshot.height, 1);
+  assert.equal(snapshot.layoutWidth, 1);
+  assert.equal(snapshot.layoutHeight, 1);
   assert.equal(snapshot.byteLength, PNG.byteLength);
   assert.deepEqual([...snapshot.pngBytes], [...PNG]);
   assert.deepEqual(state.createRequests, [{ html: HTML, bootstrapJavaScript: "" }]);
@@ -253,6 +271,8 @@ test("runtime snapshot owner keeps valid hosts when another frozen binding is re
     pngSha256: "",
     width: 0,
     height: 0,
+    layoutWidth: 0,
+    layoutHeight: 0,
     byteLength: 0,
     pngBytes: new Uint8Array(),
   });
@@ -270,8 +290,8 @@ test("runtime snapshot owner captures each host before measuring the next viewpo
     },
   ];
   const rects = [
-    ownerRectsFor("runtime-host-1", { x: 11, y: 12, width: 1, height: 1 }),
-    ownerRectsFor("runtime-host-2", { x: 21, y: 22, width: 1, height: 1 }),
+    ownerRectsFor("runtime-host-1", { x: 11, y: 12, width: 41, height: 21 }),
+    ownerRectsFor("runtime-host-2", { x: 21, y: 22, width: 51, height: 31 }),
   ];
   const { controller, state } = fakeOwner({
     rects: ({ index }) => rects[index],
@@ -284,14 +304,22 @@ test("runtime snapshot owner captures each host before measuring the next viewpo
 
   assert.equal(captured.outcome, "captured");
   assert.deepEqual(state.captureEvents.map((event) => event.type), [
+    "paint",
     "measure",
     "capture",
     "measure",
     "capture",
   ]);
   assert.deepEqual(state.capturePage.map(({ rect }) => rect), [
-    { x: 11, y: 12, width: 1, height: 1 },
-    { x: 21, y: 22, width: 1, height: 1 },
+    { x: 11, y: 12, width: 41, height: 21 },
+    { x: 21, y: 22, width: 51, height: 31 },
+  ]);
+  assert.deepEqual(captured.envelope.runtimeVisualSnapshots.map((snapshot) => ({
+    layoutWidth: snapshot.layoutWidth,
+    layoutHeight: snapshot.layoutHeight,
+  })), [
+    { layoutWidth: 41, layoutHeight: 21 },
+    { layoutWidth: 51, layoutHeight: 31 },
   ]);
   assert.match(state.isolatedSources[0].scripts[0].code, /runtime-host-1/u);
   assert.match(state.isolatedSources[1].scripts[0].code, /runtime-host-2/u);
@@ -321,6 +349,8 @@ test("runtime snapshot owner silently marks invalid PNG output unavailable", asy
     pngSha256: "",
     width: 0,
     height: 0,
+    layoutWidth: 0,
+    layoutHeight: 0,
     byteLength: 0,
     pngBytes: new Uint8Array(),
   });

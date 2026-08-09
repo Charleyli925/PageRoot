@@ -24,7 +24,7 @@ the surrounding source-authored analysis hard to review.
 
 The independent preview/session decision below remains active. The two-case
 Canvas/table visual handoff is retained here as historical context and is
-superseded by `0013-edit-runtime-visual-projection.md`.
+superseded by `0017-shared-runtime-snapshot-owner.md`.
 
 - Electron registers one standard, secure `pageroot-preview:` scheme before the
   app is ready. The scheme does not bypass CSP.

@@ -115,9 +115,9 @@ import {
   type ProjectApplicationSnapshot,
 } from "./application/project-application-session.js";
 import {
-  RuntimeVisualProjectionSession,
-  type RuntimeVisualProjectionSnapshot,
-} from "./application/runtime-visual-projection-session.js";
+  EditRuntimeSnapshotSession,
+  type EditRuntimeSnapshot,
+} from "./application/edit-runtime-snapshot-session.js";
 import {
   ReviewAnalysisCancelledError,
   ReviewAnalysisSession,
@@ -387,7 +387,7 @@ const INITIAL_DOCUMENT_SNAPSHOT: DocumentSessionSnapshot = {
   persistError: "",
 };
 const INITIAL_RUNTIME_VISUAL_PROJECTION_SNAPSHOT:
-RuntimeVisualProjectionSnapshot = Object.freeze({
+EditRuntimeSnapshot = Object.freeze({
   status: "idle",
   documentKey: null,
   sourceSha256: null,
@@ -603,11 +603,11 @@ export default function Workbench() {
   const runtimeCapabilitiesRef =
     useRef<RuntimeCapabilities>(BROWSER_RUNTIME_CAPABILITIES);
   const runtimeVisualProjectionSessionRef = useRef(
-    new RuntimeVisualProjectionSession({
+    new EditRuntimeSnapshotSession({
       capture: async (payload) => {
-        const api = globalThis.window?.htmlAIEditVisuals;
-        if (!api) throw new Error("Edit visual capture is unavailable.");
-        return api.captureProjection(payload);
+        const api = globalThis.window?.htmlAIRuntimeSnapshots;
+        if (!api) throw new Error("Runtime snapshot capture is unavailable.");
+        return api.capture(payload);
       },
     }),
   );
@@ -807,7 +807,7 @@ export default function Workbench() {
   const [pageViewContext, setPageViewContext] =
     useState<PageViewContext | null>(null);
   const [runtimeVisualProjectionSnapshot, setRuntimeVisualProjectionSnapshot] =
-    useState<RuntimeVisualProjectionSnapshot>(
+    useState<EditRuntimeSnapshot>(
       INITIAL_RUNTIME_VISUAL_PROJECTION_SNAPSHOT,
     );
   const [interactivePreviewTransport, setInteractivePreviewTransport] =
@@ -1397,8 +1397,8 @@ export default function Workbench() {
     }
     const available = (
       runtimeCapabilitiesReady
-      && runtimeCapabilitiesRef.current.editVisualProjection
-        === "offscreen-capture"
+      && runtimeCapabilitiesRef.current.runtimeSnapshotCapture
+        === "owner-isolated"
       && !browserPreviewOnly
       && viewMode === "current"
       && Boolean(sourcePath)
@@ -1422,14 +1422,11 @@ export default function Workbench() {
     }
     runtimeVisualProjectionSessionRef.current.request({
       html,
-      sourcePath,
       documentKey: pageViewDocumentKey,
       viewportWidth: currentViewport.width,
-      pageViewContext: activePageViewContext,
       sourceIndex: currentViewport.sourceIndex,
     });
   }, [
-    activePageViewContext,
     browserPreviewOnly,
     canvasMode,
     commentLayoutAuthority.textEditing,

@@ -20,7 +20,7 @@ export const RUNTIME_VISUAL_CONTRACT = Object.freeze({
 
 export const RUNTIME_VISUAL_SOURCE_SHA256_PATTERN = /^sha256:[a-f0-9]{64}$/u;
 export const RUNTIME_VISUAL_SESSION_ID_PATTERN =
-  /^review-[a-z0-9][a-z0-9._:-]{7,127}$/u;
+  /^(?:review|runtime)-[a-z0-9][a-z0-9._:-]{7,127}$/u;
 
 export function isRuntimeVisualSourceSha256(value) {
   return typeof value === "string"

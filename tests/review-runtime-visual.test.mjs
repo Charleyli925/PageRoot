@@ -6,7 +6,7 @@ import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex } from "@noble/hashes/utils.js";
 
 import {
-  acceptReviewRuntimeVisualSnapshots,
+  acceptRuntimeVisualSnapshots,
   changedReviewRuntimeVisualCandidateKeys,
   mergeReviewRuntimeVisualChanges,
 } from "../app/lib/review-runtime-visual.js";
@@ -29,6 +29,8 @@ function snapshot(key, pngBytes = PNG, overrides = {}) {
     pngSha256: hash(pngBytes),
     width: 1,
     height: 1,
+    layoutWidth: 1,
+    layoutHeight: 1,
     byteLength: pngBytes.byteLength,
     pngBytes: new Uint8Array(pngBytes),
     ...overrides,
@@ -42,6 +44,8 @@ function unavailable(key) {
     pngSha256: "",
     width: 0,
     height: 0,
+    layoutWidth: 0,
+    layoutHeight: 0,
     byteLength: 0,
     pngBytes: new Uint8Array(),
   };
@@ -49,28 +53,31 @@ function unavailable(key) {
 
 test("runtime snapshots accept only bounded declared PNG results", () => {
   const allowed = new Set(["runtime-host-1"]);
-  const accepted = acceptReviewRuntimeVisualSnapshots([
+  const accepted = acceptRuntimeVisualSnapshots([
     snapshot("runtime-host-1"),
   ], allowed);
   assert.equal(accepted?.length, 1);
   assert.equal(accepted?.[0].pngSha256, hash(PNG));
   assert.notEqual(accepted?.[0].pngBytes, PNG, "accepted bytes must be copied");
-  assert.equal(acceptReviewRuntimeVisualSnapshots([
+  assert.equal(acceptRuntimeVisualSnapshots([
     snapshot("runtime-host-2"),
   ], allowed), null);
-  assert.equal(acceptReviewRuntimeVisualSnapshots([
+  assert.equal(acceptRuntimeVisualSnapshots([
     { ...snapshot("runtime-host-1"), extra: true },
   ], allowed), null);
-  assert.equal(acceptReviewRuntimeVisualSnapshots([
+  assert.equal(acceptRuntimeVisualSnapshots([
     { ...snapshot("runtime-host-1"), pngSha256: hash(CHANGED_PNG) },
   ], allowed), null);
-  assert.equal(acceptReviewRuntimeVisualSnapshots([
+  assert.equal(acceptRuntimeVisualSnapshots([
     { ...snapshot("runtime-host-1"), width: 2 },
   ], allowed), null);
-  assert.equal(acceptReviewRuntimeVisualSnapshots([
+  assert.equal(acceptRuntimeVisualSnapshots([
+    { ...snapshot("runtime-host-1"), layoutWidth: 0 },
+  ], allowed), null);
+  assert.equal(acceptRuntimeVisualSnapshots([
     unavailable("runtime-host-1"),
   ], allowed)?.[0].state, "unavailable");
-  assert.equal(acceptReviewRuntimeVisualSnapshots(
+  assert.equal(acceptRuntimeVisualSnapshots(
     [],
     new Set(Array.from({ length: 33 }, (_, index) => `runtime-host-${index + 1}`)),
   ), null);
@@ -87,6 +94,11 @@ test("runtime comparison uses one before/after PNG pair and fails closed", () =>
     candidates,
     before: [snapshot("runtime-host-1")],
     after: [snapshot("runtime-host-1", CHANGED_PNG)],
+  }), ["runtime-host-1"]);
+  assert.deepEqual(changedReviewRuntimeVisualCandidateKeys({
+    candidates,
+    before: [snapshot("runtime-host-1")],
+    after: [snapshot("runtime-host-1", PNG, { layoutWidth: 2 })],
   }), ["runtime-host-1"]);
   assert.deepEqual(changedReviewRuntimeVisualCandidateKeys({
     candidates,

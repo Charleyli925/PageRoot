@@ -8,8 +8,8 @@ import {
   isRuntimeVisualSourceSha256,
 } from "../app/domain/runtime-visual-contract.js";
 
-const REVIEW_CAPTURE_WORLD_ID = 91_117;
-const REVIEW_CAPTURE_PARTITION_PREFIX = "pageroot-review-runtime-";
+const RUNTIME_SNAPSHOT_CAPTURE_WORLD_ID = 91_117;
+const RUNTIME_SNAPSHOT_CAPTURE_PARTITION_PREFIX = "pageroot-runtime-snapshot-";
 const MAX_VIEWPORT_WIDTH = 4_096;
 const MAX_VIEWPORT_HEIGHT = 2_400;
 const MIN_VIEWPORT_WIDTH = 320;
@@ -259,15 +259,15 @@ function frozenSourceBindingKeys(request) {
  * Validates the only renderer-to-owner request. It deliberately excludes a
  * project path, TargetRef, comment IDs, binary data, and arbitrary scripts.
  */
-export function validateReviewRuntimeCaptureRequest(value) {
+export function validateRuntimeSnapshotCaptureRequest(value) {
   if (
     !isRecord(value)
     || Object.keys(value).some((key) => !CAPTURE_REQUEST_KEYS.has(key))
   ) {
-    throw new TypeError("Review runtime capture request is invalid.");
+    throw new TypeError("Runtime snapshot capture request is invalid.");
   }
   if (value.contractVersion !== RUNTIME_VISUAL_CONTRACT_VERSION) {
-    throw new TypeError("Review runtime capture contract version is invalid.");
+    throw new TypeError("Runtime snapshot capture contract version is invalid.");
   }
   const captureSessionId = String(value.captureSessionId || "");
   const sourceSha = String(value.sourceSha256 || "").toLowerCase();
@@ -279,32 +279,32 @@ export function validateReviewRuntimeCaptureRequest(value) {
     || Buffer.byteLength(html, "utf8") > RUNTIME_VISUAL_CONTRACT.pageBudget.htmlBytes
     || sourceSha256(html) !== sourceSha
   ) {
-    throw new TypeError("Review runtime capture source identity is invalid.");
+    throw new TypeError("Runtime snapshot capture source identity is invalid.");
   }
-  if (value.side !== "before" && value.side !== "after") {
-    throw new TypeError("Review runtime capture side is invalid.");
+  if (value.side !== "before" && value.side !== "after" && value.side !== "edit") {
+    throw new TypeError("Runtime snapshot capture side is invalid.");
   }
   if (
     !isRecord(value.viewport)
     || Object.keys(value.viewport).some((key) => key !== "width" && key !== "height")
   ) {
-    throw new TypeError("Review runtime capture viewport is invalid.");
+    throw new TypeError("Runtime snapshot capture viewport is invalid.");
   }
   const width = boundedInteger(value.viewport.width, MIN_VIEWPORT_WIDTH, MAX_VIEWPORT_WIDTH);
   const height = boundedInteger(value.viewport.height, MIN_VIEWPORT_HEIGHT, MAX_VIEWPORT_HEIGHT);
   if (width === null || height === null) {
-    throw new TypeError("Review runtime capture viewport is invalid.");
+    throw new TypeError("Runtime snapshot capture viewport is invalid.");
   }
   if (
     !Array.isArray(value.candidates)
     || value.candidates.length > RUNTIME_VISUAL_CONTRACT.pageBudget.visualLimit
   ) {
-    throw new TypeError("Review runtime capture candidates are invalid.");
+    throw new TypeError("Runtime snapshot capture candidates are invalid.");
   }
   const keys = new Set();
   const candidates = value.candidates.map((candidate) => normalizeCandidate(candidate, keys));
   if (candidates.some((candidate) => candidate === null)) {
-    throw new TypeError("Review runtime capture candidate identity is invalid.");
+    throw new TypeError("Runtime snapshot capture candidate identity is invalid.");
   }
   return Object.freeze({
     contractVersion: RUNTIME_VISUAL_CONTRACT_VERSION,
@@ -447,6 +447,8 @@ function unavailableSnapshot(key) {
     pngSha256: "",
     width: 0,
     height: 0,
+    layoutWidth: 0,
+    layoutHeight: 0,
     byteLength: 0,
     pngBytes: new Uint8Array(),
   });
@@ -509,11 +511,18 @@ function ownerExecutor(webContents, source) {
     throw new Error("Runtime snapshot capture requires isolated-world evaluation.");
   }
   return webContents.executeJavaScriptInIsolatedWorld(
-    REVIEW_CAPTURE_WORLD_ID,
+    RUNTIME_SNAPSHOT_CAPTURE_WORLD_ID,
     [{ code: source, url: "pageroot-runtime-snapshot-owner.js" }],
     true,
     true,
   );
+}
+
+function waitForFirstOffscreenPaint(webContents) {
+  if (typeof webContents?.once !== "function") return Promise.resolve();
+  return new Promise((resolve) => {
+    webContents.once("paint", () => resolve());
+  });
 }
 
 async function settleOwnerCleanup(cleanup) {
@@ -534,7 +543,7 @@ async function settleOwnerCleanup(cleanup) {
  * capability, comment data, or owner protocol; it can only affect a bounded
  * PNG presentation result that the trusted renderer may discard.
  */
-export function createReviewRuntimeCaptureController({
+export function createRuntimeSnapshotCaptureController({
   BrowserWindowClass,
   createSession,
   revokeSession,
@@ -544,16 +553,16 @@ export function createReviewRuntimeCaptureController({
   randomToken = () => randomBytes(12).toString("hex"),
 } = {}) {
   if (typeof BrowserWindowClass !== "function") {
-    throw new TypeError("Review runtime capture requires BrowserWindow.");
+    throw new TypeError("Runtime snapshot capture requires BrowserWindow.");
   }
   if (typeof createSession !== "function" || typeof revokeSession !== "function") {
-    throw new TypeError("Review runtime capture requires preview session ownership.");
+    throw new TypeError("Runtime snapshot capture requires preview session ownership.");
   }
   if (typeof createIsolatedSession !== "function") {
-    throw new TypeError("Review runtime capture requires an isolated session.");
+    throw new TypeError("Runtime snapshot capture requires an isolated session.");
   }
   if (typeof releaseIsolatedSession !== "function") {
-    throw new TypeError("Review runtime capture requires isolated session cleanup.");
+    throw new TypeError("Runtime snapshot capture requires isolated session cleanup.");
   }
   const deadlineMs = Math.max(1, Math.min(
     RUNTIME_VISUAL_CONTRACT.ownerDeadlineMs,
@@ -564,7 +573,7 @@ export function createReviewRuntimeCaptureController({
   const capture = async (rawRequest) => {
     let request;
     try {
-      request = validateReviewRuntimeCaptureRequest(rawRequest);
+      request = validateRuntimeSnapshotCaptureRequest(rawRequest);
     } catch {
       return result("failed", "invalid-request");
     }
@@ -630,7 +639,7 @@ export function createReviewRuntimeCaptureController({
       if (!previewSession?.sessionId || !previewSession?.url) {
         return result("failed", "invalid-preview-session");
       }
-      const partition = `${REVIEW_CAPTURE_PARTITION_PREFIX}${randomToken()}`;
+      const partition = `${RUNTIME_SNAPSHOT_CAPTURE_PARTITION_PREFIX}${randomToken()}`;
       isolatedSession = await withOwnerDeadline(createIsolatedSession(partition));
       if (!isolatedSession || typeof isolatedSession !== "object") {
         return result("failed", "invalid-isolated-session");
@@ -662,7 +671,9 @@ export function createReviewRuntimeCaptureController({
       captureWindow.webContents.on?.("will-navigate", (event, url) => {
         if (url !== previewSession.url) event.preventDefault();
       });
+      const firstPaint = waitForFirstOffscreenPaint(captureWindow.webContents);
       await withOwnerDeadline(captureWindow.loadURL(previewSession.url));
+      await withOwnerDeadline(firstPaint);
       if (cancellationReason || captureWindow.isDestroyed()) throw new CaptureCancelledError();
 
       let capturedPixels = 0;
@@ -711,7 +722,13 @@ export function createReviewRuntimeCaptureController({
           }
           capturedPixels += png.width * png.height;
           capturedBytes += png.byteLength;
-          snapshots.push(Object.freeze({ key: candidate.key, state: "captured", ...png }));
+          snapshots.push(Object.freeze({
+            key: candidate.key,
+            state: "captured",
+            ...png,
+            layoutWidth: ownerSnapshot.rect.width,
+            layoutHeight: ownerSnapshot.rect.height,
+          }));
         } catch (error) {
           if (error instanceof CaptureTimedOutError || error instanceof CaptureCancelledError) {
             throw error;

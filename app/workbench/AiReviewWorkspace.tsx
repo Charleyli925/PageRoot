@@ -38,10 +38,10 @@ import {
   type ReviewSide,
 } from "./review-document";
 import type {
-  ReviewRuntimeCaptureResult,
-} from "../components/desktop-review-runtime-visual-api";
+  RuntimeSnapshotCaptureResult,
+} from "../components/desktop-runtime-snapshot-api";
 import {
-  acceptReviewRuntimeVisualSnapshots,
+  acceptRuntimeVisualSnapshots,
   changedReviewRuntimeVisualCandidateKeys,
   mergeReviewRuntimeVisualChanges,
 } from "../lib/review-runtime-visual.js";
@@ -740,7 +740,7 @@ export default function AiReviewWorkspace({
       || runtimeVisualResolutionRef.current?.documents === documents
     ) return;
     const candidateKeys = new Set(documents.runtimeVisualCandidates.map(({ key }) => key));
-    const captureApi = window.htmlAIReviewRuntimeVisuals;
+    const captureApi = window.htmlAIRuntimeSnapshots;
     if (!captureApi) {
       resolveRuntimeVisuals([]);
       return;
@@ -758,7 +758,7 @@ export default function AiReviewWorkspace({
       };
       if (!candidates.length) return [];
       try {
-        const capture: ReviewRuntimeCaptureResult = await captureApi.capture({
+        const capture: RuntimeSnapshotCaptureResult = await captureApi.capture({
           contractVersion: documents.runtimeVisualCaptureIdentity.contractVersion,
           captureSessionId: expected.sessionId,
           sourceSha256: expected.sourceSha256,
@@ -770,7 +770,7 @@ export default function AiReviewWorkspace({
         if (capture?.outcome !== "captured") return [];
         const envelope = acceptedRuntimeVisualEnvelope(capture.envelope, expected);
         return envelope
-          ? acceptReviewRuntimeVisualSnapshots(
+          ? acceptRuntimeVisualSnapshots(
               capture.envelope.runtimeVisualSnapshots,
               candidateKeys,
             ) || []
@@ -779,10 +779,13 @@ export default function AiReviewWorkspace({
         return [];
       }
     };
-    void Promise.all([
-      captureSide("before"),
-      captureSide("after"),
-    ]).then(([before, after]) => {
+    // Keep the one before/after pair bounded, but do not make two hidden
+    // offscreen Electron renderers compete for their short owner deadline.
+    void (async () => {
+      const before = await captureSide("before");
+      const after = await captureSide("after");
+      return { before, after };
+    })().then(({ before, after }) => {
       if (
         runtimeVisualOwnerDocumentsRef.current !== documents
         || runtimeVisualResolutionRef.current?.documents === documents

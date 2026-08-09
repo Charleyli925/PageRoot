@@ -96,11 +96,23 @@ async function bridgeJson(page, pathname, {
   return payload;
 }
 
-async function closePackagedGracefully(electronApp) {
+async function closePackagedGracefully(electronApp, page) {
+  const mainRendererUrl = page?.url();
+  if (!mainRendererUrl) {
+    throw new Error("PageRoot main renderer URL is unavailable for graceful close.");
+  }
   const closed = electronApp.waitForEvent("close", { timeout: 35_000 });
-  await electronApp.evaluate(({ BrowserWindow }) => {
-    BrowserWindow.getAllWindows()[0]?.close();
-  });
+  const requested = await electronApp.evaluate(({ BrowserWindow }, rendererUrl) => {
+    const mainWindow = BrowserWindow.getAllWindows().find((candidate) => (
+      candidate.webContents.getURL() === rendererUrl
+    ));
+    if (!mainWindow) return false;
+    mainWindow.close();
+    return true;
+  }, mainRendererUrl);
+  if (!requested) {
+    throw new Error("PageRoot main BrowserWindow was unavailable for graceful close.");
+  }
   await closed;
 }
 
@@ -220,7 +232,7 @@ test("packaged PageRoot preserves outside-island bytes and reconciles draft revi
       deletedCommentIds: ["comment_packaged_external_deleted"],
     });
 
-    await closePackagedGracefully(electronApp);
+    await closePackagedGracefully(electronApp, page);
     electronApp = null;
 
     launched = await launchPackaged(isolatedUserData);
@@ -236,7 +248,7 @@ test("packaged PageRoot preserves outside-island bytes and reconciles draft revi
       .toHaveAttribute("data-project-state", "ready", { timeout: 30_000 });
     const reopenedBeforeClose = await bridgeJson(page, "/workspace", { sourcePath });
     expect(reopenedBeforeClose.runtimeState.draft.draftRevision).toBe(expectedRevision);
-    await closePackagedGracefully(electronApp);
+    await closePackagedGracefully(electronApp, page);
     electronApp = null;
 
     launched = await launchPackaged(isolatedUserData);

@@ -1,6 +1,161 @@
 import { expect, test } from "@playwright/test";
+import { build } from "esbuild";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { generatedReviewBootstrap } from "../../helpers/generated-review-bootstrap.mjs";
+import {
+  SOURCE_NODE_ATTRIBUTE,
+  buildSourceIndex,
+  sourceSha256,
+} from "../../../app/lib/source-index.js";
+
+const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
+const productRoot = path.resolve(currentDirectory, "../../..");
+const RUNTIME_HOST_SOURCE = `<!doctype html>
+<html><head><meta charset="utf-8"></head><body>
+  <div id="runtime-host"></div>
+</body></html>`;
+const RUNTIME_DIRECT_SOURCE = `<!doctype html>
+<html><head><meta charset="utf-8"></head><body>
+  <canvas id="runtime-direct" width="30" height="15" style="background-image:linear-gradient(red, blue);background-size:contain;width:30px;height:15px"></canvas>
+</body></html>`;
+const RUNTIME_TRANSFORMED_DIRECT_SOURCE = `<!doctype html>
+<html><head><meta charset="utf-8"></head><body style="margin:0">
+  <main style="transform:scale(2);transform-origin:top left">
+    <canvas id="runtime-transformed-direct" width="100" height="50" style="display:block;width:100px;height:50px;transform:scale(1.5, 2);transform-origin:top left"></canvas>
+  </main>
+</body></html>`;
+const RUNTIME_ZOOMED_DIRECT_SOURCE = `<!doctype html>
+<html><head><meta charset="utf-8"></head><body style="margin:0">
+  <main style="zoom:2">
+    <canvas id="runtime-zoomed-direct" width="120" height="60" style="display:block;width:120px;height:60px"></canvas>
+  </main>
+</body></html>`;
+const RUNTIME_PNG_BYTES = Object.freeze([
+  137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82,
+  0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0, 31, 21, 196, 137,
+  0, 0, 0, 13, 73, 68, 65, 84, 8, 215, 99, 248, 207, 192, 240,
+  31, 0, 5, 0, 1, 255, 137, 153, 61, 29, 0, 0, 0, 0, 73, 69,
+  78, 68, 174, 66, 96, 130,
+]);
+let runtimeProjectionBundlePromise;
+
+async function runtimeProjectionBundle() {
+  runtimeProjectionBundlePromise ??= build({
+    entryPoints: [path.join(
+      productRoot,
+      "app/components/html-canvas-runtime-visual.ts",
+    )],
+    bundle: true,
+    format: "iife",
+    globalName: "PageRootRuntimeVisualTest",
+    logLevel: "silent",
+    platform: "browser",
+    target: "es2022",
+    write: false,
+  }).then((result) => result.outputFiles[0]?.text || "");
+  const bundle = await runtimeProjectionBundlePromise;
+  if (!bundle) throw new Error("Runtime visual projection test bundle is empty.");
+  return bundle;
+}
+
+function runtimeSourceNodeId(source, id, tagName) {
+  const sourceIndex = buildSourceIndex(source);
+  const host = sourceIndex.elements.find((element) => (
+    element.tagName === tagName
+    && element.stableAttributes.id === id
+  ));
+  if (!host) throw new Error("Runtime visual test host was not indexed.");
+  return host.nodeId;
+}
+
+function runtimeHostProjection(sourceNodeId, pngSha256) {
+  return {
+    sourceSha256: sourceSha256(RUNTIME_HOST_SOURCE),
+    visuals: [{
+      captureKey: "runtime-host",
+      height: 1,
+      kind: "host",
+      pngBytes: [...RUNTIME_PNG_BYTES],
+      pngSha256,
+      sourceNodeId,
+      tagName: "div",
+      width: 1,
+      layoutWidth: 1,
+      layoutHeight: 1,
+    }],
+  };
+}
+
+function runtimeDirectProjection(source, sourceNodeId, pngSha256, {
+  layoutWidth = 640,
+  layoutHeight = 320,
+} = {}) {
+  return {
+    sourceSha256: sourceSha256(source),
+    visuals: [{
+      captureKey: "runtime-direct",
+      height: 1,
+      kind: "canvas",
+      pngBytes: [...RUNTIME_PNG_BYTES],
+      pngSha256,
+      sourceNodeId,
+      tagName: "canvas",
+      width: 1,
+      layoutWidth,
+      layoutHeight,
+    }],
+  };
+}
+
+async function installDeferredRuntimeProjectionHarness(page, {
+  source = RUNTIME_HOST_SOURCE,
+  id = "runtime-host",
+  tagName = "div",
+} = {}) {
+  const sourceNodeId = runtimeSourceNodeId(source, id, tagName);
+  await page.setContent(source);
+  await page.addScriptTag({ content: await runtimeProjectionBundle() });
+  await page.evaluate(({ sourceNodeAttribute, sourceNodeId: nodeId, id: targetId }) => {
+    const host = document.getElementById(targetId);
+    if (!host) throw new Error("Runtime visual test host is missing.");
+    host.setAttribute(sourceNodeAttribute, nodeId);
+
+    const originalSrc = Object.getOwnPropertyDescriptor(
+      HTMLImageElement.prototype,
+      "src",
+    );
+    if (!originalSrc) throw new Error("Image src descriptor is unavailable.");
+    const sourceByImage = new WeakMap();
+    Object.defineProperty(HTMLImageElement.prototype, "src", {
+      configurable: true,
+      enumerable: originalSrc.enumerable,
+      get() {
+        return sourceByImage.get(this) || "";
+      },
+      set(value) {
+        sourceByImage.set(this, String(value));
+      },
+    });
+
+    const deferred = [];
+    HTMLImageElement.prototype.decode = function deferredDecode() {
+      return new Promise((resolve, reject) => {
+        deferred.push({ image: this, reject, resolve });
+      });
+    };
+    window.__PAGEROOT_RUNTIME_VISUAL_TEST__ = {
+      deferredCount: () => deferred.length,
+      resolve(index) {
+        const pending = deferred[index];
+        if (!pending) throw new Error(`Missing deferred image ${index}.`);
+        pending.resolve();
+      },
+    };
+  }, { sourceNodeAttribute: SOURCE_NODE_ATTRIBUTE, sourceNodeId, id });
+  return { sourceNodeId };
+}
 
 const COMMENT_SOURCE_BOX_SIGNATURE = JSON.stringify([
   ["class", "comment-host"],
@@ -319,4 +474,351 @@ test("mixed-shape path-only comment decoys fail closed", async ({ page }) => {
   expect(result.layouts.some((message) => (
     message.commentLayouts?.some((layout) => layout.key.startsWith("parsed-comment-"))
   ))).toBe(false);
+});
+
+test("runtime host projection keeps a newer pending bitmap when an old decode settles", async ({ page }) => {
+  const { sourceNodeId } = await installDeferredRuntimeProjectionHarness(page);
+  const first = runtimeHostProjection(sourceNodeId, "sha256:runtime-first");
+  const second = runtimeHostProjection(sourceNodeId, "sha256:runtime-second");
+  await page.evaluate(({ first: initial, source }) => {
+    window.PageRootRuntimeVisualTest.applyRuntimeVisualProjectionToDocument(
+      document,
+      source,
+      initial,
+    );
+  }, { first, source: RUNTIME_HOST_SOURCE });
+  await expect.poll(() => page.evaluate(() => (
+    window.__PAGEROOT_RUNTIME_VISUAL_TEST__.deferredCount()
+  ))).toBe(1);
+
+  await page.evaluate(({ next, source }) => {
+    window.PageRootRuntimeVisualTest.applyRuntimeVisualProjectionToDocument(
+      document,
+      source,
+      next,
+    );
+  }, { next: second, source: RUNTIME_HOST_SOURCE });
+  await expect.poll(() => page.evaluate(() => (
+    window.__PAGEROOT_RUNTIME_VISUAL_TEST__.deferredCount()
+  ))).toBe(2);
+
+  await page.evaluate(async () => {
+    window.__PAGEROOT_RUNTIME_VISUAL_TEST__.resolve(0);
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+  await page.evaluate(async () => {
+    window.__PAGEROOT_RUNTIME_VISUAL_TEST__.resolve(1);
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+
+  await expect(page.locator(
+    '#runtime-host img[data-pageroot-readonly-visual="runtime-bitmap"]',
+  )).toHaveAttribute("data-pageroot-readonly-visual-sha", "sha256:runtime-second");
+});
+
+test("runtime host projection cancels a pending bitmap before it can mount after cleanup", async ({ page }) => {
+  const { sourceNodeId } = await installDeferredRuntimeProjectionHarness(page);
+  const projection = runtimeHostProjection(sourceNodeId, "sha256:runtime-pending");
+  await page.evaluate(({ projection: next, source }) => {
+    window.PageRootRuntimeVisualTest.applyRuntimeVisualProjectionToDocument(
+      document,
+      source,
+      next,
+    );
+  }, { projection, source: RUNTIME_HOST_SOURCE });
+  await expect(page.locator("#runtime-host")).toHaveAttribute(
+    "data-pageroot-readonly-visual-host",
+    "runtime-bitmap",
+  );
+  await page.evaluate(() => {
+    window.PageRootRuntimeVisualTest.restoreRuntimeVisualProjection(document);
+    window.__PAGEROOT_RUNTIME_VISUAL_TEST__.resolve(0);
+  });
+  await expect.poll(() => page.locator(
+    '#runtime-host img[data-pageroot-readonly-visual="runtime-bitmap"]',
+  ).count()).toBe(0);
+  await expect(page.locator("#runtime-host")).not.toHaveAttribute(
+    "data-pageroot-readonly-visual-host",
+  );
+});
+
+test("direct runtime projection cancels a pending replacement when an undo reselects its mounted bitmap", async ({ page }) => {
+  const { sourceNodeId } = await installDeferredRuntimeProjectionHarness(page, {
+    source: RUNTIME_DIRECT_SOURCE,
+    id: "runtime-direct",
+    tagName: "canvas",
+  });
+  const first = runtimeDirectProjection(
+    RUNTIME_DIRECT_SOURCE,
+    sourceNodeId,
+    "sha256:runtime-direct-first",
+  );
+  const second = runtimeDirectProjection(
+    RUNTIME_DIRECT_SOURCE,
+    sourceNodeId,
+    "sha256:runtime-direct-second",
+  );
+  await page.evaluate(({ projection, source }) => {
+    window.PageRootRuntimeVisualTest.applyRuntimeVisualProjectionToDocument(
+      document,
+      source,
+      projection,
+    );
+  }, { projection: first, source: RUNTIME_DIRECT_SOURCE });
+  await expect.poll(() => page.evaluate(() => (
+    window.__PAGEROOT_RUNTIME_VISUAL_TEST__.deferredCount()
+  ))).toBe(1);
+  await page.evaluate(async () => {
+    window.__PAGEROOT_RUNTIME_VISUAL_TEST__.resolve(0);
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+  await expect(page.locator("#runtime-direct")).toHaveAttribute(
+    "data-pageroot-readonly-visual-sha",
+    "sha256:runtime-direct-first",
+  );
+
+  await page.evaluate(({ projection, source }) => {
+    window.PageRootRuntimeVisualTest.applyRuntimeVisualProjectionToDocument(
+      document,
+      source,
+      projection,
+    );
+  }, { projection: second, source: RUNTIME_DIRECT_SOURCE });
+  await expect.poll(() => page.evaluate(() => (
+    window.__PAGEROOT_RUNTIME_VISUAL_TEST__.deferredCount()
+  ))).toBe(2);
+  await page.evaluate(({ projection, source }) => {
+    window.PageRootRuntimeVisualTest.applyRuntimeVisualProjectionToDocument(
+      document,
+      source,
+      projection,
+    );
+  }, { projection: first, source: RUNTIME_DIRECT_SOURCE });
+  await page.evaluate(async () => {
+    window.__PAGEROOT_RUNTIME_VISUAL_TEST__.resolve(1);
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+  await expect(page.locator("#runtime-direct")).toHaveAttribute(
+    "data-pageroot-readonly-visual-sha",
+    "sha256:runtime-direct-first",
+  );
+});
+
+test("direct runtime projection restores a current source style after a retained bitmap is rebased", async ({ page }) => {
+  const { sourceNodeId } = await installDeferredRuntimeProjectionHarness(page, {
+    source: RUNTIME_DIRECT_SOURCE,
+    id: "runtime-direct",
+    tagName: "canvas",
+  });
+  const initial = runtimeDirectProjection(
+    RUNTIME_DIRECT_SOURCE,
+    sourceNodeId,
+    "sha256:runtime-direct-rebase",
+  );
+  await page.evaluate(({ projection, source }) => {
+    window.PageRootRuntimeVisualTest.applyRuntimeVisualProjectionToDocument(
+      document,
+      source,
+      projection,
+    );
+  }, { projection: initial, source: RUNTIME_DIRECT_SOURCE });
+  await page.evaluate(async () => {
+    window.__PAGEROOT_RUNTIME_VISUAL_TEST__.resolve(0);
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+
+  const updatedSource = RUNTIME_DIRECT_SOURCE.replace(
+    "background-image:linear-gradient(red, blue);background-size:contain;width:30px;height:15px",
+    "background-image:linear-gradient(green, black);background-size:cover;width:77px;height:33px",
+  );
+  const updatedSourceNodeId = runtimeSourceNodeId(
+    updatedSource,
+    "runtime-direct",
+    "canvas",
+  );
+  const retained = runtimeDirectProjection(
+    updatedSource,
+    updatedSourceNodeId,
+    "sha256:runtime-direct-rebase",
+  );
+  await page.evaluate(({ sourceNodeAttribute, nodeId }) => {
+    const host = document.getElementById("runtime-direct");
+    if (!host) throw new Error("Direct runtime host is missing.");
+    host.setAttribute(
+      "style",
+      "background-image:linear-gradient(green, black);background-size:cover;width:77px;height:33px",
+    );
+    host.setAttribute(sourceNodeAttribute, nodeId);
+  }, { sourceNodeAttribute: SOURCE_NODE_ATTRIBUTE, nodeId: updatedSourceNodeId });
+  await page.evaluate(({ projection, source }) => {
+    window.PageRootRuntimeVisualTest.applyRuntimeVisualProjectionToDocument(
+      document,
+      source,
+      projection,
+    );
+  }, { projection: retained, source: updatedSource });
+  await expect(page.locator("#runtime-direct")).toHaveCSS("width", "640px");
+  await expect(page.locator("#runtime-direct")).toHaveCSS("height", "320px");
+
+  await page.evaluate(({ source }) => {
+    window.PageRootRuntimeVisualTest.applyRuntimeVisualProjectionToDocument(
+      document,
+      source,
+      null,
+    );
+  }, { source: updatedSource });
+  await expect(page.locator("#runtime-direct")).toHaveCSS("width", "77px");
+  await expect(page.locator("#runtime-direct")).toHaveCSS("height", "33px");
+  await expect(page.locator("#runtime-direct")).toHaveCSS("background-size", "cover");
+});
+
+test("direct runtime projection never restores an old style over a source patch cleared before reapply", async ({ page }) => {
+  const { sourceNodeId } = await installDeferredRuntimeProjectionHarness(page, {
+    source: RUNTIME_DIRECT_SOURCE,
+    id: "runtime-direct",
+    tagName: "canvas",
+  });
+  const projection = runtimeDirectProjection(
+    RUNTIME_DIRECT_SOURCE,
+    sourceNodeId,
+    "sha256:runtime-direct-clear-source-style",
+  );
+  await page.evaluate(({ projection: next, source }) => {
+    window.PageRootRuntimeVisualTest.applyRuntimeVisualProjectionToDocument(
+      document,
+      source,
+      next,
+    );
+  }, { projection, source: RUNTIME_DIRECT_SOURCE });
+  await expect.poll(() => page.evaluate(() => (
+    window.__PAGEROOT_RUNTIME_VISUAL_TEST__.deferredCount()
+  ))).toBe(1);
+  await page.evaluate(async () => {
+    window.__PAGEROOT_RUNTIME_VISUAL_TEST__.resolve(0);
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+  await page.evaluate(() => {
+    const host = document.getElementById("runtime-direct");
+    if (!host) throw new Error("Direct runtime host is missing.");
+    host.setAttribute(
+      "style",
+      "background-image:linear-gradient(purple, white);background-size:cover;width:89px;height:55px",
+    );
+    window.PageRootRuntimeVisualTest.restoreRuntimeVisualProjection(document);
+  });
+  await expect(page.locator("#runtime-direct")).toHaveCSS("width", "89px");
+  await expect(page.locator("#runtime-direct")).toHaveCSS("height", "55px");
+  await expect(page.locator("#runtime-direct")).toHaveCSS("background-size", "cover");
+});
+
+test("direct runtime projection uses owner CSS-pixel geometry instead of PNG dimensions", async ({ page }) => {
+  const { sourceNodeId } = await installDeferredRuntimeProjectionHarness(page, {
+    source: RUNTIME_DIRECT_SOURCE,
+    id: "runtime-direct",
+    tagName: "canvas",
+  });
+  const projection = runtimeDirectProjection(
+    RUNTIME_DIRECT_SOURCE,
+    sourceNodeId,
+    "sha256:runtime-direct-geometry",
+    { layoutWidth: 800, layoutHeight: 400 },
+  );
+  await page.evaluate(({ projection, source }) => {
+    window.PageRootRuntimeVisualTest.applyRuntimeVisualProjectionToDocument(
+      document,
+      source,
+      projection,
+    );
+  }, { projection, source: RUNTIME_DIRECT_SOURCE });
+  await page.evaluate(async () => {
+    window.__PAGEROOT_RUNTIME_VISUAL_TEST__.resolve(0);
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+  await expect(page.locator("#runtime-direct")).toHaveCSS("width", "800px");
+  await expect(page.locator("#runtime-direct")).toHaveCSS("height", "400px");
+});
+
+test("direct runtime projection removes retained axis-aligned transforms from owner geometry", async ({ page }) => {
+  const { sourceNodeId } = await installDeferredRuntimeProjectionHarness(page, {
+    source: RUNTIME_TRANSFORMED_DIRECT_SOURCE,
+    id: "runtime-transformed-direct",
+    tagName: "canvas",
+  });
+  const target = page.locator("#runtime-transformed-direct");
+  const before = await target.boundingBox();
+  if (!before) throw new Error("Transformed runtime host is not visible.");
+  const projection = runtimeDirectProjection(
+    RUNTIME_TRANSFORMED_DIRECT_SOURCE,
+    sourceNodeId,
+    "sha256:runtime-direct-transform",
+    {
+      layoutWidth: Math.ceil(before.width),
+      layoutHeight: Math.ceil(before.height),
+    },
+  );
+  await page.evaluate(({ next, source }) => {
+    window.PageRootRuntimeVisualTest.applyRuntimeVisualProjectionToDocument(
+      document,
+      source,
+      next,
+    );
+  }, { next: projection, source: RUNTIME_TRANSFORMED_DIRECT_SOURCE });
+  await page.evaluate(async () => {
+    window.__PAGEROOT_RUNTIME_VISUAL_TEST__.resolve(0);
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+
+  await expect(target).toHaveCSS("width", "100px");
+  await expect(target).toHaveCSS("height", "50px");
+  const after = await target.boundingBox();
+  if (!after) throw new Error("Transformed runtime host disappeared.");
+  expect(after.width).toBeCloseTo(before.width, 3);
+  expect(after.height).toBeCloseTo(before.height, 3);
+});
+
+test("direct runtime projection removes retained zoom from owner geometry", async ({ page }) => {
+  const { sourceNodeId } = await installDeferredRuntimeProjectionHarness(page, {
+    source: RUNTIME_ZOOMED_DIRECT_SOURCE,
+    id: "runtime-zoomed-direct",
+    tagName: "canvas",
+  });
+  const target = page.locator("#runtime-zoomed-direct");
+  const before = await target.boundingBox();
+  if (!before) throw new Error("Zoomed runtime host is not visible.");
+  const projection = runtimeDirectProjection(
+    RUNTIME_ZOOMED_DIRECT_SOURCE,
+    sourceNodeId,
+    "sha256:runtime-direct-zoom",
+    {
+      layoutWidth: Math.ceil(before.width),
+      layoutHeight: Math.ceil(before.height),
+    },
+  );
+  await page.evaluate(({ next, source }) => {
+    window.PageRootRuntimeVisualTest.applyRuntimeVisualProjectionToDocument(
+      document,
+      source,
+      next,
+    );
+  }, { next: projection, source: RUNTIME_ZOOMED_DIRECT_SOURCE });
+  await page.evaluate(async () => {
+    window.__PAGEROOT_RUNTIME_VISUAL_TEST__.resolve(0);
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+
+  await expect(target).toHaveCSS("width", "120px");
+  await expect(target).toHaveCSS("height", "60px");
+  const after = await target.boundingBox();
+  if (!after) throw new Error("Zoomed runtime host disappeared.");
+  expect(after.width).toBeCloseTo(before.width, 3);
+  expect(after.height).toBeCloseTo(before.height, 3);
 });

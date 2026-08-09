@@ -51,11 +51,8 @@ const previewChannels = Object.freeze({
   createSession: "html-preview:create-session",
   revokeSession: "html-preview:revoke-session",
 });
-const editVisualChannels = Object.freeze({
-  captureProjection: "html-edit-visuals:capture-projection",
-});
-const reviewRuntimeVisualChannels = Object.freeze({
-  capture: "html-review-runtime-visuals:capture",
+const runtimeSnapshotChannels = Object.freeze({
+  capture: "html-runtime-snapshots:capture",
 });
 const editChannels = Object.freeze({
   historyRequested: "html-edit:history-requested",
@@ -178,8 +175,7 @@ const runtimeCapabilities = Object.freeze({
   attachmentPersistence: "bridge",
   closeCoordination: "electron-handshake",
   interactivePreview: "independent-url",
-  editVisualProjection: "offscreen-capture",
-  reviewRuntimeVisualCapture: "owner-isolated",
+  runtimeSnapshotCapture: "owner-isolated",
 });
 const runtimeConfig = Object.freeze({
   bridgePort,
@@ -196,16 +192,9 @@ const previewApi = Object.freeze({
   ),
 });
 
-const editVisualApi = Object.freeze({
-  captureProjection: (payload) => invokeProject(
-    editVisualChannels.captureProjection,
-    payload,
-  ),
-});
-
-const reviewRuntimeVisualApi = Object.freeze({
+const runtimeSnapshotApi = Object.freeze({
   capture: (payload) => invokeProject(
-    reviewRuntimeVisualChannels.capture,
+    runtimeSnapshotChannels.capture,
     payload,
   ),
 });
@@ -425,11 +414,7 @@ contextBridge.exposeInMainWorld("htmlAIProjects", projectsApi);
 contextBridge.exposeInMainWorld("htmlAIIntegrations", integrationsApi);
 contextBridge.exposeInMainWorld("htmlAIUpdates", updatesApi);
 contextBridge.exposeInMainWorld("htmlAIPreview", previewApi);
-contextBridge.exposeInMainWorld("htmlAIEditVisuals", editVisualApi);
-contextBridge.exposeInMainWorld(
-  "htmlAIReviewRuntimeVisuals",
-  reviewRuntimeVisualApi,
-);
+contextBridge.exposeInMainWorld("htmlAIRuntimeSnapshots", runtimeSnapshotApi);
 contextBridge.exposeInMainWorld("htmlAIRuntime", runtimeConfig);
 contextBridge.exposeInMainWorld("htmlAIAppLifecycle", appLifecycleApi);
 contextBridge.exposeInMainWorld("htmlAIUsage", usageApi);

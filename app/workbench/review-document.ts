@@ -1,7 +1,10 @@
 import type { HtmlCanvasSelection } from "../components/HtmlCanvasEditor.types";
+import {
+  runtimeSnapshotCaptureCandidate,
+} from "../domain/runtime-snapshot-hosts.js";
 import type {
-  ReviewRuntimeCaptureCandidate,
-} from "../components/desktop-review-runtime-visual-api";
+  RuntimeSnapshotCaptureCandidate,
+} from "../domain/runtime-snapshot-hosts.js";
 import {
   RUNTIME_VISUAL_CONTRACT,
   RUNTIME_VISUAL_CONTRACT_VERSION,
@@ -90,7 +93,7 @@ export type ReviewDocuments = {
   changes: ReviewChange[];
   outline: ReviewOutlineItem[];
   runtimeVisualCandidates: ReviewRuntimeVisualCandidate[];
-  runtimeVisualCaptureCandidates: Record<ReviewSide, ReviewRuntimeCaptureCandidate[]>;
+  runtimeVisualCaptureCandidates: Record<ReviewSide, RuntimeSnapshotCaptureCandidate[]>;
   runtimeVisualSourceHtml: Record<ReviewSide, string>;
   runtimeVisualCaptureIdentity: ReviewRuntimeVisualCaptureIdentity;
   commentGroups: ReviewCommentGroup[];
@@ -1308,7 +1311,7 @@ type ReviewCommentBootstrapBinding = ReviewBootstrapElementBinding & {
 
 type ReviewRuntimeVisualAnnotations = {
   candidates: ReviewRuntimeVisualCandidate[];
-  captureCandidates: Record<ReviewSide, ReviewRuntimeCaptureCandidate[]>;
+  captureCandidates: Record<ReviewSide, RuntimeSnapshotCaptureCandidate[]>;
 };
 
 function reviewBootstrapElementBinding(
@@ -1388,23 +1391,6 @@ function runtimeOutlineId(element: Element): string | null {
     ?.getAttribute("data-pageroot-outline-id") || null;
 }
 
-function runtimeSnapshotCaptureCandidate(key: string, host: {
-  binding: {
-    path: readonly number[];
-    tagName: string;
-    kind: "canvas" | "svg" | "host";
-    identityAttributes: readonly (readonly [string, string])[];
-  };
-}): ReviewRuntimeCaptureCandidate {
-  return {
-    key,
-    path: [...host.binding.path],
-    tagName: host.binding.tagName,
-    kind: host.binding.kind,
-    identityAttributes: host.binding.identityAttributes.map(([name, value]) => [name, value]),
-  };
-}
-
 function annotateRuntimeVisualCandidates({
   beforeHtml,
   afterHtml,
@@ -1422,7 +1408,7 @@ function annotateRuntimeVisualCandidates({
   afterSourceElements: ReadonlyMap<string, Element>;
   outline: readonly ReviewOutlineItem[];
 }): ReviewRuntimeVisualAnnotations {
-  const captureCandidates: Record<ReviewSide, ReviewRuntimeCaptureCandidate[]> = {
+  const captureCandidates: Record<ReviewSide, RuntimeSnapshotCaptureCandidate[]> = {
     before: [],
     after: [],
   };
@@ -1446,8 +1432,11 @@ function annotateRuntimeVisualCandidates({
     if (!outlineItem) return;
     const key = `runtime-host-${candidates.length + 1}`;
     const changeId = outlineItem.changeId || `runtime-change-${outlineItem.id}`;
-    captureCandidates.before.push(runtimeSnapshotCaptureCandidate(key, before));
-    captureCandidates.after.push(runtimeSnapshotCaptureCandidate(key, after));
+    const beforeCaptureCandidate = runtimeSnapshotCaptureCandidate(key, before);
+    const afterCaptureCandidate = runtimeSnapshotCaptureCandidate(key, after);
+    if (!beforeCaptureCandidate || !afterCaptureCandidate) return;
+    captureCandidates.before.push(beforeCaptureCandidate);
+    captureCandidates.after.push(afterCaptureCandidate);
     candidates.push({
       key,
       outlineId: outlineItem.id,
