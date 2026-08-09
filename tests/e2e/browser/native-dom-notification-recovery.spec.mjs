@@ -31,11 +31,15 @@ test.describe("notification recovery paths", () => {
     await expect(notice).toContainText(
       "原文件没有被修改。请先转换为 UTF-8，再重新选择。",
     );
+    await expect(notice).toHaveAttribute("role", "status");
+    await expect(notice).toHaveAttribute("aria-live", "polite");
     await expect(page.getByText("notification-recovery", { exact: true }).first())
       .toBeVisible();
 
     const chooserPromise = page.waitForEvent("filechooser");
-    await notice.getByRole("button", { name: "重新选择" }).click();
+    const retry = notice.getByRole("button", { name: "重新选择" });
+    await retry.focus();
+    await page.keyboard.press("Enter");
     const chooser = await chooserPromise;
     await chooser.setFiles({
       name: "recovered-utf8.html",

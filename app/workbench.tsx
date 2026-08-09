@@ -4843,7 +4843,7 @@ export default function Workbench() {
         : commentSessionRef.current.editSession?.draftAttachments.length ?? 0;
       const needsRemoval = attachmentPlan.overLimit.length > 0
         && currentAttachmentCount >= MAX_COMMENT_ATTACHMENTS;
-      setToast({
+      const notice = {
         title: addedAttachmentCount > 0 ? "部分附件没有加入" : "附件没有加入",
         message: `${issueNotes.join("；")}。${
           addedAttachmentCount > 0
@@ -4858,12 +4858,20 @@ export default function Workbench() {
         }`,
         tone: targetStillOpen && failedNames.length > 0 ? "error" : "warning",
         sticky: targetStillOpen,
-        disposition: targetStillOpen ? "direct-action" : "background-result",
         dedupeKey: `attachment-batch-${target.commentId}`,
-        ...(targetStillOpen ? {
+      } as const;
+      if (targetStillOpen) {
+        setToast({
+          ...notice,
+          disposition: "direct-action",
           action: attachmentRecoveryAction(needsRemoval),
-        } : {}),
-      });
+        });
+      } else {
+        setToast({
+          ...notice,
+          disposition: "background-result",
+        });
+      }
     }
   }, [
     deleteAttachmentFile,
@@ -10378,65 +10386,77 @@ export default function Workbench() {
     setCanvasMode("edit");
     setDrawer("handoff");
   };
-  const handleToastAction = () => {
-    const action = toast?.action;
-    if (!action) return;
+  const handleToastAction = (action: ToastAction) => {
     setToast(null);
-    if (action.id === "retry-export") {
-      void exportCurrentHtml();
-    } else if (action.id === "open-handoff") {
-      setDrawer("handoff");
-    } else if (action.id === "open-project") {
-      void openProject(action.sourcePath);
-    } else if (action.id === "retry-project-open") {
-      void openProject(action.sourcePath);
-    } else if (action.id === "retry-external-project-open") {
-      void resumeDeferredExternalProject();
-    } else if (action.id === "retry-project-application") {
-      void resumeDeferredProjectApplication();
-    } else if (action.id === "open-attachment-picker") {
-      openAttachmentPicker(action.target, action.accept || "all");
-    } else if (action.id === "review-comment-attachments") {
-      if (action.target.kind === "composer") {
-        const target = commentSessionRef.current.composerTarget;
-        if (
-          commentSessionRef.current.composerCommentId === action.target.commentId
-          && target
-        ) {
-          setComposerOpen(true);
-          queueReviewPairReveal(target, "__composer");
-          requestComposerFocus();
+    switch (action.id) {
+      case "retry-export":
+        void exportCurrentHtml();
+        return;
+      case "open-handoff":
+        setDrawer("handoff");
+        return;
+      case "open-project":
+      case "retry-project-open":
+        void openProject(action.sourcePath);
+        return;
+      case "retry-external-project-open":
+        void resumeDeferredExternalProject();
+        return;
+      case "retry-project-application":
+        void resumeDeferredProjectApplication();
+        return;
+      case "open-attachment-picker":
+        openAttachmentPicker(action.target, action.accept || "all");
+        return;
+      case "review-comment-attachments":
+        if (action.target.kind === "composer") {
+          const target = commentSessionRef.current.composerTarget;
+          if (
+            commentSessionRef.current.composerCommentId === action.target.commentId
+            && target
+          ) {
+            setComposerOpen(true);
+            queueReviewPairReveal(target, "__composer");
+            requestComposerFocus();
+          }
+        } else {
+          const comment = commentSessionRef.current.comments.find(
+            (item) => item.commentId === action.target.commentId,
+          );
+          if (comment) focusCommentTarget(comment.target, comment.commentId);
         }
-      } else {
-        const comment = commentSessionRef.current.comments.find(
-          (item) => item.commentId === action.target.commentId,
-        );
-        if (comment) focusCommentTarget(comment.target, comment.commentId);
-      }
-    } else if (action.id === "relink-target") {
-      resumeSubmissionAfterRelinkRef.current = action.resumeSubmission === true;
-      beginTargetRelink(action.commentId);
-      setCanvasMode("edit");
-      setDrawer(null);
-    } else if (action.id === "relaunch-app") {
-      void relaunchApp();
-    } else if (action.id === "retry-draft-persist") {
-      void flushDraftPersistence();
-    } else if (action.id === "review-project-rules") {
-      setDrawer("files");
-      if (fileView?.path !== "PROJECT.md") void viewFile("PROJECT.md");
-    } else if (action.id === "resume-draft") {
-      setCanvasMode("edit");
-      setDrawer(null);
-      resumeCurrentComposer();
-    } else if (action.id === "resume-comment-edit") {
-      setCanvasMode("edit");
-      setDrawer(null);
-      window.requestAnimationFrame(() => {
-        resumeCommentEdit(action.commentId);
-      });
-    } else if (action.id === "retry-submit") {
-      void generateRequest();
+        return;
+      case "relink-target":
+        resumeSubmissionAfterRelinkRef.current = action.resumeSubmission === true;
+        beginTargetRelink(action.commentId);
+        setCanvasMode("edit");
+        setDrawer(null);
+        return;
+      case "relaunch-app":
+        void relaunchApp();
+        return;
+      case "retry-draft-persist":
+        void flushDraftPersistence();
+        return;
+      case "review-project-rules":
+        setDrawer("files");
+        if (fileView?.path !== "PROJECT.md") void viewFile("PROJECT.md");
+        return;
+      case "resume-draft":
+        setCanvasMode("edit");
+        setDrawer(null);
+        resumeCurrentComposer();
+        return;
+      case "resume-comment-edit":
+        setCanvasMode("edit");
+        setDrawer(null);
+        window.requestAnimationFrame(() => {
+          resumeCommentEdit(action.commentId);
+        });
+        return;
+      case "retry-submit":
+        void generateRequest();
+        return;
     }
   };
 
@@ -12399,7 +12419,10 @@ export default function Workbench() {
           message={toast.message}
           tone={toast.tone}
           actionLabel={toast.action?.label}
-          onAction={toast.action ? handleToastAction : undefined}
+          onAction={toast.action ? (() => {
+            const action = toast.action;
+            if (action) handleToastAction(action);
+          }) : undefined}
           onDismiss={() => setToast(null)}
           usageCode={noticeUsageCode(toast.dedupeKey)}
           usageDisposition={toast.disposition || "inform-in-place"}
