@@ -13,6 +13,7 @@ const PNG = Buffer.from(
 );
 const HTML = "<!doctype html><html><body><main><canvas id=chart></canvas></main></body></html>";
 const SOURCE_SHA256 = `sha256:${createHash("sha256").update(HTML, "utf8").digest("hex")}`;
+const MULTI_HOST_HTML = "<!doctype html><html><body><main><canvas id=chart></canvas><canvas id=chart-two></canvas></main></body></html>";
 
 function request(overrides = {}) {
   return {
@@ -44,6 +45,13 @@ function ownerRects() {
   };
 }
 
+function ownerRectsFor(key, rect) {
+  return {
+    status: "captured",
+    snapshots: [{ key, state: "captured", rect }],
+  };
+}
+
 function fakeOwner({
   rects = ownerRects(),
   loadURL = async () => {},
@@ -61,6 +69,7 @@ function fakeOwner({
     permissionChecks: [],
     downloadHandlers: [],
     beforeRequest: [],
+    captureEvents: [],
   };
   let sessionIndex = 0;
   class FakeBrowserWindow {
@@ -78,7 +87,10 @@ function fakeOwner({
         },
         executeJavaScriptInIsolatedWorld: async (worldId, scripts, userGesture) => {
           state.isolatedSources.push({ worldId, scripts, userGesture });
-          return rects;
+          state.captureEvents.push({ type: "measure", scripts });
+          return typeof rects === "function"
+            ? rects({ worldId, scripts, userGesture, index: state.isolatedSources.length - 1 })
+            : rects;
         },
       };
       state.windows.push(this);
@@ -92,6 +104,7 @@ function fakeOwner({
     async capturePage(rect, options) {
       state.capturePage ??= [];
       state.capturePage.push({ rect, options });
+      state.captureEvents.push({ type: "capture", rect });
       return {
         isEmpty: () => false,
         toPNG: () => png,
@@ -244,6 +257,44 @@ test("runtime snapshot owner keeps valid hosts when another frozen binding is re
     pngBytes: new Uint8Array(),
   });
   assert.equal(state.capturePage.length, 1);
+});
+
+test("runtime snapshot owner captures each host before measuring the next viewport", async () => {
+  const candidates = [
+    request().candidates[0],
+    {
+      ...request().candidates[0],
+      key: "runtime-host-2",
+      path: [1, 0, 1],
+      identityAttributes: [["id", "chart-two"]],
+    },
+  ];
+  const rects = [
+    ownerRectsFor("runtime-host-1", { x: 11, y: 12, width: 1, height: 1 }),
+    ownerRectsFor("runtime-host-2", { x: 21, y: 22, width: 1, height: 1 }),
+  ];
+  const { controller, state } = fakeOwner({
+    rects: ({ index }) => rects[index],
+  });
+  const captured = await controller.capture(request({
+    html: MULTI_HOST_HTML,
+    sourceSha256: `sha256:${createHash("sha256").update(MULTI_HOST_HTML, "utf8").digest("hex")}`,
+    candidates,
+  }));
+
+  assert.equal(captured.outcome, "captured");
+  assert.deepEqual(state.captureEvents.map((event) => event.type), [
+    "measure",
+    "capture",
+    "measure",
+    "capture",
+  ]);
+  assert.deepEqual(state.capturePage.map(({ rect }) => rect), [
+    { x: 11, y: 12, width: 1, height: 1 },
+    { x: 21, y: 22, width: 1, height: 1 },
+  ]);
+  assert.match(state.isolatedSources[0].scripts[0].code, /runtime-host-1/u);
+  assert.match(state.isolatedSources[1].scripts[0].code, /runtime-host-2/u);
 });
 
 test("runtime snapshot owner keeps before and after captures isolated without cancelling either side", async () => {

@@ -317,11 +317,11 @@ export function validateReviewRuntimeCaptureRequest(value) {
   });
 }
 
-function isolatedSnapshotRectScript(candidates) {
+function isolatedSnapshotRectScript(candidate) {
   return String.raw`(() => {
   "use strict";
   const __pagerootRuntimeSnapshotRects = true;
-  const candidates = ${safeScriptValue(candidates)};
+  const candidate = ${safeScriptValue(candidate)};
   const queryElements = Function.prototype.call.bind(Element.prototype.querySelectorAll);
   const getAttribute = Function.prototype.call.bind(Element.prototype.getAttribute);
   const getRect = Function.prototype.call.bind(Element.prototype.getBoundingClientRect);
@@ -363,29 +363,28 @@ function isolatedSnapshotRectScript(candidates) {
       height: Math.max(1, Math.ceil(rect.height)),
     };
   };
-  const result = [];
-  for (const candidate of candidates) {
-    const host = childAtPath(candidate.path);
-    if (!bindingMatches(host, candidate)) {
-      result.push({ key: candidate.key, state: "unavailable", rect: null });
-      continue;
-    }
-    try { scrollIntoView(host, { block: "center", inline: "nearest" }); } catch {
-      result.push({ key: candidate.key, state: "unavailable", rect: null });
-      continue;
-    }
-    const hostRect = usableRect(host);
-    const paintTargets = candidate.kind === "host"
-      ? Array.from(queryElements(host, "canvas,svg"))
-      : [host];
-    const hasVisiblePaint = paintTargets.some((target) => usableRect(target) !== null);
-    result.push(
+  const unavailable = () => ({
+    status: "captured",
+    snapshots: [{ key: candidate.key, state: "unavailable", rect: null }],
+  });
+  const host = childAtPath(candidate.path);
+  if (!bindingMatches(host, candidate)) return unavailable();
+  try { scrollIntoView(host, { block: "center", inline: "nearest" }); } catch {
+    return unavailable();
+  }
+  const hostRect = usableRect(host);
+  const paintTargets = candidate.kind === "host"
+    ? Array.from(queryElements(host, "canvas,svg"))
+    : [host];
+  const hasVisiblePaint = paintTargets.some((target) => usableRect(target) !== null);
+  return {
+    status: "captured",
+    snapshots: [
       hostRect && hasVisiblePaint
         ? { key: candidate.key, state: "captured", rect: hostRect }
         : { key: candidate.key, state: "unavailable", rect: null },
-    );
-  }
-  return { status: "captured", snapshots: result };
+    ],
+  };
 })()`;
 }
 
@@ -666,40 +665,35 @@ export function createReviewRuntimeCaptureController({
       await withOwnerDeadline(captureWindow.loadURL(previewSession.url));
       if (cancellationReason || captureWindow.isDestroyed()) throw new CaptureCancelledError();
 
-      const ownerRequest = Object.freeze({
-        ...request,
-        candidates: Object.freeze(captureCandidates),
-      });
-      const ownerRects = normalizedOwnerRects(await withOwnerDeadline(ownerExecutor(
-        captureWindow.webContents,
-        isolatedSnapshotRectScript(captureCandidates),
-      )), ownerRequest);
-      if (!ownerRects) return result("failed", "invalid-owner-snapshot");
-
       let capturedPixels = 0;
       let capturedBytes = 0;
       const snapshots = [];
-      const ownerSnapshotsByKey = new Map(
-        ownerRects.snapshots.map((snapshot) => [snapshot.key, snapshot]),
-      );
       for (const candidate of request.candidates) {
         if (!frozenBindingKeys.has(candidate.key)) {
-          snapshots.push(unavailableSnapshot(candidate.key));
-          continue;
-        }
-        const ownerSnapshot = ownerSnapshotsByKey.get(candidate.key);
-        if (!ownerSnapshot || ownerSnapshot.state !== "captured" || !ownerSnapshot.rect) {
           snapshots.push(unavailableSnapshot(candidate.key));
           continue;
         }
         try {
           const remainingPixels = RUNTIME_VISUAL_CONTRACT.pageBudget.canvasPixels - capturedPixels;
           const remainingBytes = RUNTIME_VISUAL_CONTRACT.pageBudget.visualBytes - capturedBytes;
-          if (
-            remainingPixels < 1
-            || remainingBytes < 1
-            || ownerSnapshot.rect.width * ownerSnapshot.rect.height > remainingPixels
-          ) {
+          if (remainingPixels < 1 || remainingBytes < 1) {
+            snapshots.push(unavailableSnapshot(candidate.key));
+            continue;
+          }
+          const ownerRequest = Object.freeze({
+            ...request,
+            candidates: Object.freeze([candidate]),
+          });
+          const ownerRects = normalizedOwnerRects(await withOwnerDeadline(ownerExecutor(
+            captureWindow.webContents,
+            isolatedSnapshotRectScript(candidate),
+          )), ownerRequest);
+          const ownerSnapshot = ownerRects?.snapshots[0];
+          if (!ownerSnapshot || ownerSnapshot.state !== "captured" || !ownerSnapshot.rect) {
+            snapshots.push(unavailableSnapshot(candidate.key));
+            continue;
+          }
+          if (ownerSnapshot.rect.width * ownerSnapshot.rect.height > remainingPixels) {
             snapshots.push(unavailableSnapshot(candidate.key));
             continue;
           }
