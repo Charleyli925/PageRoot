@@ -352,6 +352,33 @@ test("empty ID substring selectors do not consume the candidate cap", () => {
   );
 });
 
+test("empty class substring selectors do not consume the candidate cap", () => {
+  const unrelatedHosts = Array.from(
+    { length: RUNTIME_VISUAL_CONTRACT.candidateLimit },
+    (_, index) => `<div class="early-${index}"></div>`,
+  ).join("");
+  const source = `<!doctype html><main>${unrelatedHosts}
+    <div id="late-chart"></div>
+    <script>
+      document.querySelector('[class$=""]').textContent = "ignored";
+      document.getElementById("late-chart").textContent = "ready";
+      document.createElement("span");
+    </script>
+  </main>`;
+  const sourceIndex = buildSourceIndex(source);
+  const prepared = prepareRuntimeVisualCapture({
+    html: source,
+    sourcePath: "/tmp/empty-class-substring-runtime-host.html",
+    viewportWidth: 900,
+  });
+  assert.equal(prepared?.candidates.length, RUNTIME_VISUAL_CONTRACT.candidateLimit);
+  const firstCandidate = prepared?.candidates[0];
+  assert.equal(
+    firstCandidate && sourceIndex.byNodeId.get(firstCandidate.sourceNodeId)?.stableAttributes.id,
+    "late-chart",
+  );
+});
+
 test("stable short ID lookups retain the exact host", () => {
   const source = `<!doctype html><main>
     <div class="go"></div>

@@ -259,6 +259,10 @@ function runtimeAttributeSelectorMatches(source, value, kind) {
     const expected = runtimeSelectorLiteralValue(classSelector.groups.value)
       ?? classSelector.groups.value;
     const actual = String(value);
+    if (
+      expected.length === 0
+      && ["~=", "^=", "$=", "*="].includes(classSelector.groups.operator)
+    ) return false;
     switch (classSelector.groups.operator) {
       case "=":
         return kind === "class-value" && expected === actual;

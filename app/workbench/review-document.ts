@@ -1350,6 +1350,7 @@ type ChangedReviewScript = {
 type RuntimeVisualScriptTokenKind =
   | "id"
   | "class"
+  | "class-value"
   | "data-attribute"
   | "data-value"
   | "semantic-value";
@@ -1645,12 +1646,18 @@ function runtimeVisualScriptTokens(
       }
     });
     if (semanticTokens.length) return semanticTokens;
-    return classTokens(element)
+    const classValue = (element.getAttribute("class") || "").trim();
+    return [
+      ...(classValue.length >= 3
+        ? [{ value: classValue, kind: "class-value" as const, attributeName: "class" }]
+        : []),
+      ...classTokens(element)
       .filter((token) => (
         !GENERIC_RUNTIME_VISUAL_CLASSES.has(token.toLowerCase())
       ))
       .filter((value) => value.length >= 3)
-      .map((value) => ({ value, kind: "class" }));
+      .map((value) => ({ value, kind: "class" as const })),
+    ];
   };
   const unique = new Map<string, RuntimeVisualScriptToken>();
   [...elementTokens(before), ...elementTokens(after)].forEach((token) => {
@@ -1741,6 +1748,37 @@ function runtimeVisualScriptDataSelectorMatches(
   return false;
 }
 
+function runtimeVisualScriptClassSelectorMatches(
+  source: string,
+  token: RuntimeVisualScriptToken,
+): boolean {
+  const classSelector = new RegExp(
+    "\\[\\s*class(?:\\s*(?<operator>[~|^$*]?=)\\s*(?<operand>[^\\]]*))?\\s*\\]",
+    "u",
+  );
+  for (const queryMatch of source.matchAll(/\bquerySelector(?:All)?\s*\(\s*([^)]*)\)/gu)) {
+    const selector = runtimeVisualScriptSelectorLiteral(queryMatch[1]);
+    if (selector === null) continue;
+    const match = selector.match(classSelector);
+    if (!match) continue;
+    const operator = match.groups?.operator || "";
+    if (!operator) return token.kind === "class-value";
+    const rawOperand = match.groups?.operand?.trim() || "";
+    const operand = runtimeVisualScriptSelectorLiteral(rawOperand) ?? rawOperand;
+    if (operator === "~=" && token.kind === "class") {
+      if (runtimeVisualScriptAttributeOperatorMatches(token.value, operator, operand)) {
+        return true;
+      }
+      continue;
+    }
+    if (token.kind === "class-value"
+      && runtimeVisualScriptAttributeOperatorMatches(token.value, operator, operand)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function runtimeVisualScriptReferencesToken(
   source: string,
   token: RuntimeVisualScriptToken,
@@ -1757,7 +1795,10 @@ function runtimeVisualScriptReferencesToken(
     ).test(source) || new RegExp(
       `\\[\\s*class\\s*(?:[~|^$*]?=)\\s*${runtimeVisualScriptStringLiteral(value)}`,
       "u",
-    ).test(source);
+    ).test(source) || runtimeVisualScriptClassSelectorMatches(source, token);
+  }
+  if (token.kind === "class-value") {
+    return runtimeVisualScriptClassSelectorMatches(source, token);
   }
   if (token.kind === "data-attribute") {
     return runtimeVisualScriptDataSelectorMatches(source, token)

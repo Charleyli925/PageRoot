@@ -640,6 +640,8 @@ test("hostile review fixtures are enforced by the adapter and page contract", ()
   assert.match(reviewDocument, /runtimeVisualScriptReferencesToken/);
   assert.match(reviewDocument, /runtimeVisualScriptDataSelectorMatches/);
   assert.match(reviewDocument, /runtimeVisualScriptAttributeOperatorMatches/);
+  assert.match(reviewDocument, /runtimeVisualScriptClassSelectorMatches/);
+  assert.match(reviewDocument, /kind: "class-value"/);
   assert.doesNotMatch(reviewDocument, /content\.includes\(token\)/u);
   assert.match(reviewDocument, /(?:color\|lab\|lch\|oklab\|oklch\|hsl\|hwb)/u);
   assert.match(reviewDocument, /runtimeVisualNumberIsFinite/);
