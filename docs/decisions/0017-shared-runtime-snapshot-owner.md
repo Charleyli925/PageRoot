@@ -39,7 +39,9 @@ needlessly recapture or clear an otherwise valid visual.
 - Direct Edit projections own only their temporary overrides. If a source patch
   replaces a mounted Canvas/SVG inline style, clearing or replacing the bitmap
   leaves the newer source style intact while the direct host keeps the captured
-  CSS-pixel geometry.
+  CSS-pixel geometry. Retained positive axis-aligned transforms and zoom are
+  normalized before that underlying host size is assigned, so Edit does not
+  apply a captured painted scale twice.
 
 ## Consequences
 

@@ -269,6 +269,71 @@ function rebaseBackgroundStyles(host: HTMLElement, state: BackgroundStyleState) 
   });
 }
 
+/**
+ * The owner measures final painted rectangles. Edit keeps authored positive
+ * axis-aligned transforms and zoom in place, so a direct host must divide
+ * those factors back out before writing its underlying CSS dimensions.
+ */
+function preservedPaintedScale(host: HTMLElement): { x: number; y: number } {
+  let scaleX = 1;
+  let scaleY = 1;
+  for (let node: HTMLElement | null = host; node; node = node.parentElement) {
+    const style = node.ownerDocument.defaultView?.getComputedStyle(node);
+    if (!style) continue;
+    const match = /^matrix\(([^)]+)\)$/u.exec(style.transform);
+    if (match) {
+      const values = match[1].split(",").map((value) => Number.parseFloat(value));
+      if (
+        values.length === 6
+        && values.every(Number.isFinite)
+        && values[0] > 0
+        && values[3] > 0
+        && Math.abs(values[1]) < 0.000001
+        && Math.abs(values[2]) < 0.000001
+      ) {
+        scaleX *= values[0];
+        scaleY *= values[3];
+      }
+    }
+    const zoom = Number.parseFloat(style.zoom);
+    if (Number.isFinite(zoom) && zoom > 0) {
+      scaleX *= zoom;
+      scaleY *= zoom;
+    }
+  }
+  return {
+    x: Math.max(0.000001, scaleX),
+    y: Math.max(0.000001, scaleY),
+  };
+}
+
+function styleLength(style: CSSStyleDeclaration, property: string): number {
+  const value = Number.parseFloat(style.getPropertyValue(property));
+  return Number.isFinite(value) ? value : 0;
+}
+
+function directBackgroundDimension(
+  host: HTMLElement,
+  visual: RuntimeVisualProjection["visuals"][number],
+  dimension: "width" | "height",
+): number {
+  const style = host.ownerDocument.defaultView?.getComputedStyle(host);
+  const scale = preservedPaintedScale(host);
+  const paintedLength = dimension === "width"
+    ? visual.layoutWidth / scale.x
+    : visual.layoutHeight / scale.y;
+  if (!style || style.boxSizing === "border-box") return Math.max(1, paintedLength);
+  const suffix = dimension === "width" ? "left" : "top";
+  const oppositeSuffix = dimension === "width" ? "right" : "bottom";
+  const boxExtras = [
+    `padding-${suffix}`,
+    `padding-${oppositeSuffix}`,
+    `border-${suffix}-width`,
+    `border-${oppositeSuffix}-width`,
+  ].reduce((total, property) => total + styleLength(style, property), 0);
+  return Math.max(1, paintedLength - boxExtras);
+}
+
 function applyDirectBackgroundStyles(
   host: HTMLElement,
   visual: RuntimeVisualProjection["visuals"][number],
@@ -285,8 +350,16 @@ function applyDirectBackgroundStyles(
     Object.freeze({ property: "background-position", value: "center", priority: "important" }),
     Object.freeze({ property: "background-repeat", value: "no-repeat", priority: "important" }),
     Object.freeze({ property: "background-size", value: "100% 100%", priority: "important" }),
-    Object.freeze({ property: "width", value: `${visual.layoutWidth}px`, priority: "important" }),
-    Object.freeze({ property: "height", value: `${visual.layoutHeight}px`, priority: "important" }),
+    Object.freeze({
+      property: "width",
+      value: `${directBackgroundDimension(host, visual, "width")}px`,
+      priority: "important",
+    }),
+    Object.freeze({
+      property: "height",
+      value: `${directBackgroundDimension(host, visual, "height")}px`,
+      priority: "important",
+    }),
   ] satisfies InlineStyleValue[];
   projection.forEach(({ property, value }) => setImportantStyle(host, property, value));
   state.projection = projection;

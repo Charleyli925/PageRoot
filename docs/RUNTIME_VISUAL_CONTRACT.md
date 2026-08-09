@@ -73,7 +73,9 @@ Review, or AI input.
 or a stable empty host image as pointer-transparent presentation. Direct roots
 use the owner-measured CSS-pixel rectangle rather than DPR-dependent PNG
 dimensions, so an authored script that changes Canvas/SVG size keeps its runtime
-geometry in the script-disabled Edit frame. Projection overrides track only
+geometry in the script-disabled Edit frame. Positive axis-aligned transforms and
+zoom retained by the Edit DOM are divided out before assigning that underlying
+host size, avoiding a second painted scale. Projection overrides track only
 their own inline values: an in-place SourcePatch that changes a host style stays
 the current baseline when a bitmap is replaced or cleared. New Blob URLs stage
 off-DOM before replacement and retired URLs are revoked. The original source

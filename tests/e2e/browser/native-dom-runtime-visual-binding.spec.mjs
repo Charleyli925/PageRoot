@@ -20,6 +20,18 @@ const RUNTIME_DIRECT_SOURCE = `<!doctype html>
 <html><head><meta charset="utf-8"></head><body>
   <canvas id="runtime-direct" width="30" height="15" style="background-image:linear-gradient(red, blue);background-size:contain;width:30px;height:15px"></canvas>
 </body></html>`;
+const RUNTIME_TRANSFORMED_DIRECT_SOURCE = `<!doctype html>
+<html><head><meta charset="utf-8"></head><body style="margin:0">
+  <main style="transform:scale(2);transform-origin:top left">
+    <canvas id="runtime-transformed-direct" width="100" height="50" style="display:block;width:100px;height:50px;transform:scale(1.5, 2);transform-origin:top left"></canvas>
+  </main>
+</body></html>`;
+const RUNTIME_ZOOMED_DIRECT_SOURCE = `<!doctype html>
+<html><head><meta charset="utf-8"></head><body style="margin:0">
+  <main style="zoom:2">
+    <canvas id="runtime-zoomed-direct" width="120" height="60" style="display:block;width:120px;height:60px"></canvas>
+  </main>
+</body></html>`;
 const RUNTIME_PNG_BYTES = Object.freeze([
   137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82,
   0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0, 31, 21, 196, 137,
@@ -731,4 +743,82 @@ test("direct runtime projection uses owner CSS-pixel geometry instead of PNG dim
   });
   await expect(page.locator("#runtime-direct")).toHaveCSS("width", "800px");
   await expect(page.locator("#runtime-direct")).toHaveCSS("height", "400px");
+});
+
+test("direct runtime projection removes retained axis-aligned transforms from owner geometry", async ({ page }) => {
+  const { sourceNodeId } = await installDeferredRuntimeProjectionHarness(page, {
+    source: RUNTIME_TRANSFORMED_DIRECT_SOURCE,
+    id: "runtime-transformed-direct",
+    tagName: "canvas",
+  });
+  const target = page.locator("#runtime-transformed-direct");
+  const before = await target.boundingBox();
+  if (!before) throw new Error("Transformed runtime host is not visible.");
+  const projection = runtimeDirectProjection(
+    RUNTIME_TRANSFORMED_DIRECT_SOURCE,
+    sourceNodeId,
+    "sha256:runtime-direct-transform",
+    {
+      layoutWidth: Math.ceil(before.width),
+      layoutHeight: Math.ceil(before.height),
+    },
+  );
+  await page.evaluate(({ next, source }) => {
+    window.PageRootRuntimeVisualTest.applyRuntimeVisualProjectionToDocument(
+      document,
+      source,
+      next,
+    );
+  }, { next: projection, source: RUNTIME_TRANSFORMED_DIRECT_SOURCE });
+  await page.evaluate(async () => {
+    window.__PAGEROOT_RUNTIME_VISUAL_TEST__.resolve(0);
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+
+  await expect(target).toHaveCSS("width", "100px");
+  await expect(target).toHaveCSS("height", "50px");
+  const after = await target.boundingBox();
+  if (!after) throw new Error("Transformed runtime host disappeared.");
+  expect(after.width).toBeCloseTo(before.width, 3);
+  expect(after.height).toBeCloseTo(before.height, 3);
+});
+
+test("direct runtime projection removes retained zoom from owner geometry", async ({ page }) => {
+  const { sourceNodeId } = await installDeferredRuntimeProjectionHarness(page, {
+    source: RUNTIME_ZOOMED_DIRECT_SOURCE,
+    id: "runtime-zoomed-direct",
+    tagName: "canvas",
+  });
+  const target = page.locator("#runtime-zoomed-direct");
+  const before = await target.boundingBox();
+  if (!before) throw new Error("Zoomed runtime host is not visible.");
+  const projection = runtimeDirectProjection(
+    RUNTIME_ZOOMED_DIRECT_SOURCE,
+    sourceNodeId,
+    "sha256:runtime-direct-zoom",
+    {
+      layoutWidth: Math.ceil(before.width),
+      layoutHeight: Math.ceil(before.height),
+    },
+  );
+  await page.evaluate(({ next, source }) => {
+    window.PageRootRuntimeVisualTest.applyRuntimeVisualProjectionToDocument(
+      document,
+      source,
+      next,
+    );
+  }, { next: projection, source: RUNTIME_ZOOMED_DIRECT_SOURCE });
+  await page.evaluate(async () => {
+    window.__PAGEROOT_RUNTIME_VISUAL_TEST__.resolve(0);
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+
+  await expect(target).toHaveCSS("width", "120px");
+  await expect(target).toHaveCSS("height", "60px");
+  const after = await target.boundingBox();
+  if (!after) throw new Error("Zoomed runtime host disappeared.");
+  expect(after.width).toBeCloseTo(before.width, 3);
+  expect(after.height).toBeCloseTo(before.height, 3);
 });
