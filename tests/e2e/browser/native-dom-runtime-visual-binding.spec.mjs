@@ -1,6 +1,118 @@
 import { expect, test } from "@playwright/test";
+import { build } from "esbuild";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { generatedReviewBootstrap } from "../../helpers/generated-review-bootstrap.mjs";
+import {
+  SOURCE_NODE_ATTRIBUTE,
+  buildSourceIndex,
+  sourceSha256,
+} from "../../../app/lib/source-index.js";
+
+const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
+const productRoot = path.resolve(currentDirectory, "../../..");
+const RUNTIME_HOST_SOURCE = `<!doctype html>
+<html><head><meta charset="utf-8"></head><body>
+  <div id="runtime-host"></div>
+</body></html>`;
+const RUNTIME_PNG_BYTES = Object.freeze([
+  137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82,
+  0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0, 31, 21, 196, 137,
+  0, 0, 0, 13, 73, 68, 65, 84, 8, 215, 99, 248, 207, 192, 240,
+  31, 0, 5, 0, 1, 255, 137, 153, 61, 29, 0, 0, 0, 0, 73, 69,
+  78, 68, 174, 66, 96, 130,
+]);
+let runtimeProjectionBundlePromise;
+
+async function runtimeProjectionBundle() {
+  runtimeProjectionBundlePromise ??= build({
+    entryPoints: [path.join(
+      productRoot,
+      "app/components/html-canvas-runtime-visual.ts",
+    )],
+    bundle: true,
+    format: "iife",
+    globalName: "PageRootRuntimeVisualTest",
+    logLevel: "silent",
+    platform: "browser",
+    target: "es2022",
+    write: false,
+  }).then((result) => result.outputFiles[0]?.text || "");
+  const bundle = await runtimeProjectionBundlePromise;
+  if (!bundle) throw new Error("Runtime visual projection test bundle is empty.");
+  return bundle;
+}
+
+function runtimeHostSourceNodeId() {
+  const sourceIndex = buildSourceIndex(RUNTIME_HOST_SOURCE);
+  const host = sourceIndex.elements.find((element) => (
+    element.tagName === "div"
+    && element.stableAttributes.id === "runtime-host"
+  ));
+  if (!host) throw new Error("Runtime visual test host was not indexed.");
+  return host.nodeId;
+}
+
+function runtimeHostProjection(sourceNodeId, pngSha256) {
+  return {
+    sourceSha256: sourceSha256(RUNTIME_HOST_SOURCE),
+    visuals: [{
+      captureKey: "runtime-host",
+      height: 1,
+      kind: "host",
+      pngBytes: [...RUNTIME_PNG_BYTES],
+      pngSha256,
+      sourceNodeId,
+      tagName: "div",
+      width: 1,
+    }],
+  };
+}
+
+async function installDeferredRuntimeProjectionHarness(page) {
+  const sourceNodeId = runtimeHostSourceNodeId();
+  await page.setContent(RUNTIME_HOST_SOURCE);
+  await page.addScriptTag({ content: await runtimeProjectionBundle() });
+  await page.evaluate(({ sourceNodeAttribute, sourceNodeId: nodeId }) => {
+    const host = document.querySelector("#runtime-host");
+    if (!host) throw new Error("Runtime visual test host is missing.");
+    host.setAttribute(sourceNodeAttribute, nodeId);
+
+    const originalSrc = Object.getOwnPropertyDescriptor(
+      HTMLImageElement.prototype,
+      "src",
+    );
+    if (!originalSrc) throw new Error("Image src descriptor is unavailable.");
+    const sourceByImage = new WeakMap();
+    Object.defineProperty(HTMLImageElement.prototype, "src", {
+      configurable: true,
+      enumerable: originalSrc.enumerable,
+      get() {
+        return sourceByImage.get(this) || "";
+      },
+      set(value) {
+        sourceByImage.set(this, String(value));
+      },
+    });
+
+    const deferred = [];
+    HTMLImageElement.prototype.decode = function deferredDecode() {
+      return new Promise((resolve, reject) => {
+        deferred.push({ image: this, reject, resolve });
+      });
+    };
+    window.__PAGEROOT_RUNTIME_VISUAL_TEST__ = {
+      deferredCount: () => deferred.length,
+      resolve(index) {
+        const pending = deferred[index];
+        if (!pending) throw new Error(`Missing deferred image ${index}.`);
+        pending.resolve();
+      },
+    };
+  }, { sourceNodeAttribute: SOURCE_NODE_ATTRIBUTE, sourceNodeId });
+  return { sourceNodeId };
+}
 
 const COMMENT_SOURCE_BOX_SIGNATURE = JSON.stringify([
   ["class", "comment-host"],
@@ -319,4 +431,72 @@ test("mixed-shape path-only comment decoys fail closed", async ({ page }) => {
   expect(result.layouts.some((message) => (
     message.commentLayouts?.some((layout) => layout.key.startsWith("parsed-comment-"))
   ))).toBe(false);
+});
+
+test("runtime host projection keeps a newer pending bitmap when an old decode settles", async ({ page }) => {
+  const { sourceNodeId } = await installDeferredRuntimeProjectionHarness(page);
+  const first = runtimeHostProjection(sourceNodeId, "sha256:runtime-first");
+  const second = runtimeHostProjection(sourceNodeId, "sha256:runtime-second");
+  await page.evaluate(({ first: initial, source }) => {
+    window.PageRootRuntimeVisualTest.applyRuntimeVisualProjectionToDocument(
+      document,
+      source,
+      initial,
+    );
+  }, { first, source: RUNTIME_HOST_SOURCE });
+  await expect.poll(() => page.evaluate(() => (
+    window.__PAGEROOT_RUNTIME_VISUAL_TEST__.deferredCount()
+  ))).toBe(1);
+
+  await page.evaluate(({ next, source }) => {
+    window.PageRootRuntimeVisualTest.applyRuntimeVisualProjectionToDocument(
+      document,
+      source,
+      next,
+    );
+  }, { next: second, source: RUNTIME_HOST_SOURCE });
+  await expect.poll(() => page.evaluate(() => (
+    window.__PAGEROOT_RUNTIME_VISUAL_TEST__.deferredCount()
+  ))).toBe(2);
+
+  await page.evaluate(async () => {
+    window.__PAGEROOT_RUNTIME_VISUAL_TEST__.resolve(0);
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+  await page.evaluate(async () => {
+    window.__PAGEROOT_RUNTIME_VISUAL_TEST__.resolve(1);
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+
+  await expect(page.locator(
+    '#runtime-host img[data-pageroot-readonly-visual="runtime-bitmap"]',
+  )).toHaveAttribute("data-pageroot-readonly-visual-sha", "sha256:runtime-second");
+});
+
+test("runtime host projection cancels a pending bitmap before it can mount after cleanup", async ({ page }) => {
+  const { sourceNodeId } = await installDeferredRuntimeProjectionHarness(page);
+  const projection = runtimeHostProjection(sourceNodeId, "sha256:runtime-pending");
+  await page.evaluate(({ projection: next, source }) => {
+    window.PageRootRuntimeVisualTest.applyRuntimeVisualProjectionToDocument(
+      document,
+      source,
+      next,
+    );
+  }, { projection, source: RUNTIME_HOST_SOURCE });
+  await expect(page.locator("#runtime-host")).toHaveAttribute(
+    "data-pageroot-readonly-visual-host",
+    "runtime-bitmap",
+  );
+  await page.evaluate(() => {
+    window.PageRootRuntimeVisualTest.restoreRuntimeVisualProjection(document);
+    window.__PAGEROOT_RUNTIME_VISUAL_TEST__.resolve(0);
+  });
+  await expect.poll(() => page.locator(
+    '#runtime-host img[data-pageroot-readonly-visual="runtime-bitmap"]',
+  ).count()).toBe(0);
+  await expect(page.locator("#runtime-host")).not.toHaveAttribute(
+    "data-pageroot-readonly-visual-host",
+  );
 });

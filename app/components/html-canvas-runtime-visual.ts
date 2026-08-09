@@ -182,13 +182,21 @@ function stageHostImage(
   if (previousPending) releaseImageObjectUrl(previousPending);
   previousPending?.remove();
   pendingImageByHost.set(host, pending);
+  // Register the host before decoding. A projection clear only walks marked
+  // hosts, so this lets it cancel an off-DOM image before that image can
+  // settle and mount after the projection has been retired.
+  host.setAttribute(RUNTIME_VISUAL_HOST_ATTRIBUTE, "runtime-bitmap");
   let settled = false;
   const finish = () => {
     if (settled) return;
     settled = true;
     if (pendingImageByHost.get(host) !== pending || !host.isConnected) {
       releaseImageObjectUrl(pending);
-      pendingImageByHost.delete(host);
+      // A later refresh may have already staged its own image. Do not erase
+      // that newer pending entry when this stale decode finally settles.
+      if (pendingImageByHost.get(host) === pending) {
+        pendingImageByHost.delete(host);
+      }
       return;
     }
     runtimeImages(host).forEach(removeImage);
