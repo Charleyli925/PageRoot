@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -12,8 +13,11 @@ import {
 import {
   RUNTIME_VISUAL_FIXTURE_SOURCE_SHA,
   RUNTIME_VISUAL_HOSTILE_PAGES,
-  RUNTIME_VISUAL_SETTLEMENT_SOURCE_SHA,
 } from "./fixtures/runtime-visual-hostile-pages.mjs";
+import {
+  RUNTIME_VISUAL_SETTLEMENT_IMPLEMENTATION_FILES,
+  RUNTIME_VISUAL_SETTLEMENT_IMPLEMENTATION_FINGERPRINT,
+} from "./fixtures/runtime-visual-settlement-manifest.mjs";
 
 const runtimeVisualContractDocument = await readFile(
   new URL("../docs/RUNTIME_VISUAL_CONTRACT.md", import.meta.url),
@@ -21,11 +25,15 @@ const runtimeVisualContractDocument = await readFile(
 );
 const productRoot = fileURLToPath(new URL("../", import.meta.url));
 
-function gitOutput(arguments_) {
-  return execFileSync("git", arguments_, {
-    cwd: productRoot,
-    encoding: "utf8",
-  });
+async function settlementImplementationFingerprint() {
+  const hash = createHash("sha256");
+  for (const relativePath of RUNTIME_VISUAL_SETTLEMENT_IMPLEMENTATION_FILES) {
+    hash.update(relativePath);
+    hash.update("\0");
+    hash.update(await readFile(resolve(productRoot, relativePath)));
+    hash.update("\0");
+  }
+  return `sha256:${hash.digest("hex")}`;
 }
 
 test("runtime visual producers and consumers share one immutable contract", () => {
@@ -65,29 +73,15 @@ test("runtime visual envelopes bind contract, session, and full source SHA", () 
   }, expected), null);
 });
 
-test("the settlement matrix points to a reachable implementation snapshot", () => {
-  assert.match(RUNTIME_VISUAL_SETTLEMENT_SOURCE_SHA, /^[0-9a-f]{40}$/u);
-  assert.doesNotThrow(() => {
-    execFileSync("git", [
-      "merge-base",
-      "--is-ancestor",
-      RUNTIME_VISUAL_SETTLEMENT_SOURCE_SHA,
-      "HEAD",
-    ], {
-      cwd: productRoot,
-      stdio: "ignore",
-    });
-  });
-  const fixtureAtSettlement = gitOutput([
-    "show",
-    `${RUNTIME_VISUAL_SETTLEMENT_SOURCE_SHA}:tests/fixtures/runtime-visual-hostile-pages.mjs`,
-  ]);
-  const browserOracleAtSettlement = gitOutput([
-    "show",
-    `${RUNTIME_VISUAL_SETTLEMENT_SOURCE_SHA}:tests/e2e/browser/native-dom-runtime-visual-binding.spec.mjs`,
-  ]);
-  assert.match(fixtureAtSettlement, /querySelector\('\[class~="chart-host"\]'\)\.className/u);
-  assert.match(browserOracleAtSettlement, /runtimeVisualHostilePage\("pr115-class-write-causality"\)/u);
+test("the settlement matrix locks an immutable implementation snapshot", async () => {
+  assert.match(
+    RUNTIME_VISUAL_SETTLEMENT_IMPLEMENTATION_FINGERPRINT,
+    /^sha256:[0-9a-f]{64}$/u,
+  );
+  assert.equal(
+    await settlementImplementationFingerprint(),
+    RUNTIME_VISUAL_SETTLEMENT_IMPLEMENTATION_FINGERPRINT,
+  );
 });
 
 test("the hostile-page settlement matrix closes all thirteen tracked threads", () => {
@@ -106,7 +100,11 @@ test("the hostile-page settlement matrix closes all thirteen tracked threads", (
   assert.ok(classWriteFixture?.changedHtml);
   assert.match(classWriteFixture.changedHtml, /querySelector\('\[class~="chart-host"\]'\)/u);
   assert.doesNotMatch(classWriteFixture.changedHtml, /querySelector\("div"\)/u);
-  assert.ok(runtimeVisualContractDocument.includes(RUNTIME_VISUAL_SETTLEMENT_SOURCE_SHA));
+  assert.ok(
+    runtimeVisualContractDocument.includes(
+      RUNTIME_VISUAL_SETTLEMENT_IMPLEMENTATION_FINGERPRINT,
+    ),
+  );
   for (const fixture of RUNTIME_VISUAL_HOSTILE_PAGES) {
     assert.match(fixture.id, /^pr(?:100|105|107|115)-/u);
     assert.match(fixture.html, /<!doctype html>/iu);

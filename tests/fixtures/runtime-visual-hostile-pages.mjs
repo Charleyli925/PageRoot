@@ -4,9 +4,6 @@ const OVER_LIMIT_ATTRIBUTES = Array.from(
   (_, index) => `data-key-${index}="${index}"`,
 ).join(" ");
 
-export const RUNTIME_VISUAL_SETTLEMENT_SOURCE_SHA =
-  "795ed18380a67a56e267cad43cd188877ea1c8f8";
-
 export const RUNTIME_VISUAL_HOSTILE_PAGES = Object.freeze([
   Object.freeze({
     id: "pr100-canvas-native-intrinsics",
