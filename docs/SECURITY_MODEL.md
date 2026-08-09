@@ -50,8 +50,8 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
   media, but not for renderer or authored scripts: `pageroot-preview:` is absent
   from `script-src`, the edit document remains sandboxed without script
   capability, and every source transition revokes the previous session.
-- Desktop runtime snapshot capture is one narrow IPC capability shared by Edit
-  and Review. The main process revalidates exact source HTML/SHA and a bounded
+- Desktop Review runtime snapshot capture is one narrow IPC capability. The
+  main process revalidates exact source HTML/SHA and a bounded
   source-host binding, owns one hidden sandboxed BrowserWindow with Node
   disabled, denies navigation, popups and webviews, and destroys the window plus
   preview session after each capture or superseding request. Every page-realm
@@ -129,21 +129,13 @@ only to the trusted application main frame. A direct preview frame that tries
 to self-navigate is fenced by the main process; before its first load completes,
 its volatile session becomes a one-way scriptless fallback retaining only the
 owned external bootstrap, while later attempts leave the loaded page intact.
-When the user returns to editing,
-PageRoot accepts only an allowlisted source-backed presentation diff. It rejects
-unknown or duplicated source nodes, stale Hashes, truncated captures, arbitrary
-one-sided runtime classes, text/HTML, inline style, form state and runtime
-children. Independently, Edit may display a PNG only on a direct Canvas/SVG
-root or a unique source-empty stable host. The session may rebind a verified
-bitmap only after the current `SourceIndex` resolves the same stable host; its
-coarse runtime-input key, not arbitrary document text, decides reuse. The
-bitmap has pointer events disabled, so selection and comments resolve the
-original source host.
-Projection nodes are keyed/reconciled as disposable presentation and cannot be
-serialized by the source engine. Save, review comparison and Request creation
-continue from authoritative source bytes (the Bridge copies those exact bytes
-to `input/base/index.html`); PageRoot-generated projection attributes and PNGs
-are never appended to AI input. The normal script-disabled editing iframe and
+When the user returns to editing, PageRoot accepts only an allowlisted
+source-backed presentation diff. It rejects unknown or duplicated source nodes,
+stale Hashes, arbitrary one-sided runtime classes, text/HTML, inline style,
+form state and runtime children. Edit never displays a captured PNG or creates
+runtime projection attributes: it is a normal script-disabled source surface.
+Save, review comparison and Request creation continue from authoritative source
+bytes (the Bridge copies those exact bytes to `input/base/index.html`), and the
 SourcePatch checks remain unchanged.
 
 The AI review workspace is an isolated interactive review preview with no

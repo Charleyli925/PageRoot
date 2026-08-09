@@ -56,23 +56,16 @@ Comments + frozen input
 - Preview-to-edit carries only a bounded `PageViewContext`: source-backed
   active/inactive class transitions and `hidden`, `open`, `aria-selected` or
   `aria-expanded` state. It never carries runtime DOM, pixels or table markup.
-- Edit and Review share one disposable runtime-snapshot path. The
+- Edit is script-disabled and renders only source-static content. It has no
+  runtime snapshot session, cache, IPC request, bitmap projection or Blob URL;
+  authored inline SVG remains source-backed while runtime-only Canvas/SVG stays
+  in Preview.
+- Review alone has a disposable runtime-snapshot supplement. Its
   `SourceHostResolver` admits only direct source Canvas/SVG roots and stable,
   source-empty hosts; it never uses script causality, computed selectors,
-  arbitrary HTML or `tbody`. `EditRuntimeSnapshotSession` owns one small
-  current-document cache keyed by document, supported runtime inputs and a
-  64px viewport bucket. Normal text edits and Preview/Edit or tab/mode changes
-  re-resolve the current `SourceIndex` and keep the verified image; a changed
-  supported runtime input keeps the compatible prior image only while one
-  background capture replaces it. It never reads a source path or presentation
-  context and never models a JavaScript dependency graph.
-  `RuntimeSnapshotOwner` is the one hidden, sandboxed Electron capture owner
-  for Edit (`edit`) and Review (`before`/`after`). It accepts bounded PNG bytes
-  only after exact source/binding validation in an isolated world. The Canvas
-  stages a replacement Blob before switching a direct Canvas/SVG background or
-  a stable empty-host image, so refresh does not blank a verified visual. The
-  original source host remains selectable and commentable. Runtime DOM, PNGs
-  and temporary attributes never enter SourcePatch, save, Version, Review
+  arbitrary HTML or `tbody`. `RuntimeSnapshotOwner` accepts bounded `before`/
+  `after` PNG evidence only after exact source/binding validation in an isolated
+  world. Runtime DOM and PNGs never enter SourcePatch, save, Version, Review
   source analysis or AI Request input.
 - Comment selection remains source-node exact inside foreign content. Authored
   SVG children retain their own instrumented SourceIndex identity; runtime-only
@@ -217,7 +210,7 @@ they do not import application services.
 | Close, switch, submit and history obligations | `app/application/drain-coordinator.js` |
 | Late query rejection and monotonic draft reads | `app/application/project-query-fence.js` |
 | Crash-only browser recovery | `app/application/recovery-store.js` |
-| Renderer, project-picker, attachment, interactive-preview and runtime-snapshot capabilities | `app/application/runtime-capabilities.js` |
+| Renderer, project-picker, attachment, interactive-preview and close capabilities | `app/application/runtime-capabilities.js` |
 | Same-directory source rename, operation journal and active/recent path rebase | `desktop/source-rename.mjs` |
 | Known-source Finder reveal | narrow project IPC in `desktop/main.mjs` |
 | Validated default-browser HTML launch | `desktop/open-in-default-browser.mjs`, behind `desktop/project-ipc-security.mjs` sender authority |
@@ -225,10 +218,9 @@ they do not import application services.
 | Preview sanitization and verified frame injection | `app/components/html-preview-sandbox.js` |
 | Volatile desktop preview sessions and contained local-asset serving | `desktop/preview-protocol.mjs` |
 | Source-backed preview/edit display-state filtering, rebinding and safe action resolution | `app/lib/page-view-context.js` |
-| Shared source-host discovery, Edit snapshot/cache ownership and generic capture request shape | `app/domain/runtime-snapshot-hosts.js`, `app/application/edit-runtime-snapshot-session.js`, `app/components/desktop-runtime-snapshot-api.ts` |
-| Shared runtime-snapshot limits, source/session envelope and PNG validation | `app/domain/runtime-visual-contract.js`, `app/lib/runtime-visual-snapshots.js` |
-| Sandboxed offscreen page execution and bounded bitmap capture for Edit and Review | `desktop/runtime-visual-capture-owner.mjs` |
-| Read-only bitmap mounting inside original source hosts | `app/components/html-canvas-runtime-visual.ts` |
+| Review source-host discovery and Review-only capture request shape | `app/domain/runtime-snapshot-hosts.js`, `app/components/desktop-runtime-snapshot-api.ts` |
+| Review runtime-snapshot limits, source/session envelope and PNG validation | `app/domain/runtime-visual-contract.js`, `app/lib/runtime-visual-snapshots.js` |
+| Sandboxed offscreen page execution and bounded bitmap capture for Review | `desktop/runtime-visual-capture-owner.mjs` |
 | Run lifecycle decoding and transition policy | `app/domain/run-lifecycle.js` |
 | Workbench pure record/comment/project/version/browser helpers | `app/workbench/*-model.ts`, `app/workbench/browser-io.ts` |
 | History, attachment and preview presentation | `app/workbench/presentation.tsx` |

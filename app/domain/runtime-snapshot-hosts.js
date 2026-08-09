@@ -1,5 +1,5 @@
 import { RUNTIME_VISUAL_CONTRACT } from "./runtime-visual-contract.js";
-import { buildSourceIndex, sourceSha256 } from "../lib/source-index.js";
+import { buildSourceIndex } from "../lib/source-index.js";
 import {
   createTargetRef,
   resolveTargetRef,
@@ -28,13 +28,6 @@ const EXCLUDED_STABLE_ATTRIBUTES = new Set([
   "name",
   "aria-label",
 ]);
-const RUNTIME_INPUT_TAGS = new Set([
-  "base",
-  "link",
-  "script",
-  "style",
-]);
-
 function sourceIndexFor(html, supplied) {
   return supplied?.source === html
     && Array.isArray(supplied.elements)
@@ -213,17 +206,6 @@ function pairedAfterHost(beforeHost, afterIndex) {
   return compatibleHost(beforeHost, afterHost) ? afterHost : null;
 }
 
-function rawSourceForElement(index, element) {
-  const startOffset = element?.range?.startOffset;
-  const endOffset = element?.range?.endOffset;
-  return Number.isInteger(startOffset)
-    && Number.isInteger(endOffset)
-    && startOffset >= 0
-    && endOffset >= startOffset
-    ? index.source.slice(startOffset, endOffset)
-    : "";
-}
-
 function normalizedHostBinding(host) {
   const binding = host?.binding;
   if (!binding) return null;
@@ -233,16 +215,6 @@ function normalizedHostBinding(host) {
     kind: binding.kind,
     identityAttributes: binding.identityAttributes.map(([name, value]) => [name, value]),
   };
-}
-
-/**
- * A stable local key for a source-backed host binding. It deliberately has no
- * source-node ID or byte offsets, so ordinary text edits can safely reuse a
- * recent bitmap only after the current SourceIndex resolves the same host.
- */
-export function runtimeSnapshotBindingKey(host) {
-  const binding = normalizedHostBinding(host);
-  return binding ? sourceSha256(JSON.stringify(binding)) : null;
 }
 
 /**
@@ -306,67 +278,5 @@ export function resolveRuntimeSnapshotHosts({
     beforeIndex,
     afterIndex,
     hosts: Object.freeze(hosts),
-  });
-}
-
-/**
- * Describes the one edit-side snapshot input. The coarse hash intentionally
- * covers supported host markup plus authored executable/style resources, not
- * every text node or a speculative JavaScript dependency graph. This lets a
- * normal text edit keep a still-valid recent bitmap while chart input changes
- * schedule a quiet background replacement.
- */
-export function describeRuntimeSnapshotInputs({
-  html,
-  sourceIndex: suppliedSourceIndex = null,
-  maximum = RUNTIME_SNAPSHOT_HOST_LIMIT,
-} = {}) {
-  if (typeof html !== "string" || !html) return null;
-  const index = sourceIndexFor(html, suppliedSourceIndex);
-  const resolved = resolveRuntimeSnapshotHosts({
-    beforeHtml: html,
-    afterHtml: html,
-    beforeIndex: index,
-    afterIndex: index,
-    maximum,
-  });
-  if (!resolved) return null;
-
-  const candidates = [];
-  resolved.hosts.forEach(({ after }) => {
-    const bindingKey = runtimeSnapshotBindingKey(after);
-    if (!bindingKey) return;
-    const captureKey = `runtime-host-${candidates.length + 1}`;
-    const captureCandidate = runtimeSnapshotCaptureCandidate(captureKey, after);
-    if (!captureCandidate) return;
-    candidates.push(Object.freeze({
-      captureKey,
-      bindingKey,
-      sourceNodeId: after.sourceNodeId,
-      tagName: after.binding.tagName,
-      kind: after.kind,
-      hostTargetRef: after.hostTargetRef,
-      captureCandidate,
-    }));
-  });
-
-  const runtimeInputs = index.elements
-    .filter((element) => RUNTIME_INPUT_TAGS.has(element.tagName))
-    .map((element) => Object.freeze({
-      tagName: element.tagName,
-      source: rawSourceForElement(index, element),
-    }));
-  const hostInputs = candidates.map((candidate) => {
-    const element = index.byNodeId.get(candidate.sourceNodeId);
-    return Object.freeze({
-      bindingKey: candidate.bindingKey,
-      source: rawSourceForElement(index, element),
-    });
-  });
-  return Object.freeze({
-    sourceSha256: index.sourceSha256,
-    runtimeInputSha256: sourceSha256(JSON.stringify({ runtimeInputs, hostInputs })),
-    sourceIndex: index,
-    candidates: Object.freeze(candidates),
   });
 }

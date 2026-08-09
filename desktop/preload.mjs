@@ -51,8 +51,8 @@ const previewChannels = Object.freeze({
   createSession: "html-preview:create-session",
   revokeSession: "html-preview:revoke-session",
 });
-const runtimeSnapshotChannels = Object.freeze({
-  capture: "html-runtime-snapshots:capture",
+const reviewRuntimeSnapshotChannels = Object.freeze({
+  capture: "html-review-runtime-snapshots:capture",
 });
 const editChannels = Object.freeze({
   historyRequested: "html-edit:history-requested",
@@ -175,7 +175,6 @@ const runtimeCapabilities = Object.freeze({
   attachmentPersistence: "bridge",
   closeCoordination: "electron-handshake",
   interactivePreview: "independent-url",
-  runtimeSnapshotCapture: "owner-isolated",
 });
 const runtimeConfig = Object.freeze({
   bridgePort,
@@ -192,9 +191,9 @@ const previewApi = Object.freeze({
   ),
 });
 
-const runtimeSnapshotApi = Object.freeze({
+const reviewRuntimeSnapshotApi = Object.freeze({
   capture: (payload) => invokeProject(
-    runtimeSnapshotChannels.capture,
+    reviewRuntimeSnapshotChannels.capture,
     payload,
   ),
 });
@@ -414,7 +413,7 @@ contextBridge.exposeInMainWorld("htmlAIProjects", projectsApi);
 contextBridge.exposeInMainWorld("htmlAIIntegrations", integrationsApi);
 contextBridge.exposeInMainWorld("htmlAIUpdates", updatesApi);
 contextBridge.exposeInMainWorld("htmlAIPreview", previewApi);
-contextBridge.exposeInMainWorld("htmlAIRuntimeSnapshots", runtimeSnapshotApi);
+contextBridge.exposeInMainWorld("htmlAIReviewRuntimeSnapshots", reviewRuntimeSnapshotApi);
 contextBridge.exposeInMainWorld("htmlAIRuntime", runtimeConfig);
 contextBridge.exposeInMainWorld("htmlAIAppLifecycle", appLifecycleApi);
 contextBridge.exposeInMainWorld("htmlAIUsage", usageApi);

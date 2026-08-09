@@ -163,11 +163,3 @@ export function acceptRuntimeVisualSnapshots(value, allowedCandidateKeys) {
   }
   return Object.freeze(accepted);
 }
-
-export function runtimeVisualSnapshotsByteSize(snapshots) {
-  return Array.isArray(snapshots)
-    ? snapshots.reduce((total, snapshot) => (
-      total + Math.max(0, Number(snapshot?.byteLength) || 0)
-    ), 0)
-    : 0;
-}

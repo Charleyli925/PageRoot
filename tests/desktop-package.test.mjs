@@ -509,10 +509,10 @@ test("desktop package carries the v3 patch engine, candidate assessment and acti
   );
   assert.match(
     preload,
-    /exposeInMainWorld\(["']htmlAIRuntimeSnapshots["'],\s*runtimeSnapshotApi\)/,
+    /exposeInMainWorld\(["']htmlAIReviewRuntimeSnapshots["'],\s*reviewRuntimeSnapshotApi\)/,
   );
   assert.match(mainProcess, /createRuntimeSnapshotCaptureController/);
-  assert.match(mainProcess, /html-runtime-snapshots:capture/);
+  assert.match(mainProcess, /html-review-runtime-snapshots:capture/);
   assert.match(preload, /exposeInMainWorld\(["']htmlAIRuntime["'],\s*runtimeConfig\)/);
   assert.match(preload, /exposeInMainWorld\(["']htmlAIAppLifecycle["'],\s*appLifecycleApi\)/);
   assert.match(preload, /onPrepareClose/);

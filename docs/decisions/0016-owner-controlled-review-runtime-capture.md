@@ -48,10 +48,9 @@ state machine without changing its source authority.
 
 Review becomes usable as soon as static frames are ready. Runtime data can
 decorate the existing review presentation but cannot change source HTML,
-TargetRefs, comment targets, acceptance, persistence or AI input. The simpler
-snapshot shape is intentionally retained as the foundation for the later Edit
-and Review convergence milestone; it does not itself replace the existing Edit
-capture implementation.
+TargetRefs, comment targets, acceptance, persistence or AI input. Stage 08
+later removed Edit capture instead of converging it; ADR 0017 is the current
+Review-only contract.
 
 Tests cover source-host resolution, owner request rejection and containment,
 one-pass PNG validation, silent static fallback, package inclusion and the

@@ -23,14 +23,13 @@
 | Bridge transport, timeouts, error details and unknown outcomes | Typed Bridge client | no durable state | application sessions |
 | Bridge startup operation, live utility process and ready-only port | Main-process Bridge startup lifecycle | no durable state; one in-memory single-flight operation per app process | window bootstrap, graceful shutdown and workspace-unavailable recovery |
 | Undelivered Bridge-unavailable recovery issue and renderer-listener readiness | Main-process recovery mailbox | in-memory for the current app process | preload handshake, native fallback and Workbench banner |
-| Renderer edit, project-picker, attachment-persistence, close-coordination, interactive-preview and runtime-snapshot capabilities | Runtime capability resolver | immutable preload manifest; fail-closed browser default | Workbench composition root |
+| Renderer edit, project-picker, attachment-persistence, close-coordination and interactive-preview capabilities | Runtime capability resolver | immutable preload manifest; fail-closed browser default | Workbench composition root |
 | Volatile interactive-preview document, bootstrap, allowed source-relative asset root, completed-frame identity set and one-way pre-load scriptless navigation-fallback flag | Main-process preview protocol controller plus the owning window's navigation fence | none; bounded in-memory session/window state only; the fallback cannot be reversed inside a session | isolated preview iframe and the script-disabled edit iframe's resource base |
-| Current preview/edit display context, bounded read-only visuals, safe reveal transition and per-surface render acknowledgement | Workbench page-view context state | none; source-bound in-memory projection tagged by `DocumentSession` Canvas generation and rendered source Hash | `HtmlCanvasEditor`, `HtmlInteractionPreview`, save-status projection and toolbar |
-| Shared runtime-snapshot limits, page budget, owner deadline, envelope and PNG parser | `runtime-visual-contract.js` and `runtime-visual-snapshots.js`; consumers may validate but not redeclare either | none; frozen process-local contract only | Edit session, Review pair, shared owner and hostile-page gates |
-| Current Edit coarse runtime-input identity, generation, accepted bitmap projection and bounded recent-result cache | Renderer `EditRuntimeSnapshotSession`; the one main-process owner solely owns its active hidden window/session | none; current-source-rebound in-memory PNGs only | `HtmlCanvasEditor`; original source host remains comment target |
+| Current preview/edit display context, safe reveal transition and per-surface render acknowledgement | Workbench page-view context state | none; source-bound in-memory projection tagged by `DocumentSession` Canvas generation and rendered source Hash | `HtmlCanvasEditor`, `HtmlInteractionPreview`, save-status projection and toolbar |
+| Review runtime-snapshot limits, page budget, owner deadline, envelope and PNG parser | `runtime-visual-contract.js` and `runtime-visual-snapshots.js`; consumers may validate but not redeclare either | none; frozen process-local contract only | Review pair, shared owner and hostile-page gates |
 | AI review page view, change filter, context visibility, navigation target, canonical page-presentation path, scroll mode and zoom mode | `AiReviewWorkspace` review reducer | none; disposable state bound to the frozen before/after pair | review toolbar, content map and isolated review frames |
 | AI review semantic sibling pair graph, typed change facts (including multiple independent facts on one prepared element), disposable fact/semantic/geometry owner IDs, prepared immutable review documents and canonical frame/mask geometry | Cancellable `ReviewAnalysisSession` plus `review-document` analyzer, ready-review session and isolated-frame projection runtime | none; byte-bounded multi-entry cache keyed only by exact operation/source/comment identity; fact identities are analysis-only and never persisted | review outline, semantic frames and context mask |
-| Runtime snapshot request, temporary owner window/session, deadline/cancellation and bounded PNG snapshots | Electron main `RuntimeSnapshotOwner`; `EditRuntimeSnapshotSession` and `AiReviewWorkspace` are separate consumers | none; exact-source, side/session-fenced in-memory decisions; bindings/TargetRefs remain in trusted renderer memory, raw DOM never leaves the owner and PNGs remain disposable presentation bytes | Edit Canvas projection; effective Review changes/outline and static review-frame presentation |
+| Review runtime snapshot request, temporary owner window/session, deadline/cancellation and bounded PNG snapshots | Electron main `RuntimeSnapshotOwner`; `AiReviewWorkspace` is the sole consumer | none; exact-source, side/session-fenced in-memory decisions; bindings/TargetRefs remain in trusted renderer memory, raw DOM never leaves the owner and PNGs remain disposable presentation bytes | effective Review changes/outline and static review-frame presentation |
 | AI review Tab/disclosure/control presentation state and transition epoch | Parent `AiReviewWorkspace` presentation coordinator; either frame may propose an intent | none; disposable parent state plus frame projection only | both review frames, content map and overlay/mask projection |
 | Frozen review comment set and read-only before-page marker projection | Ready-review session owns comment text; `review-document` resolves opaque targets during analysis, strips temporary review attributes, and carries source-node bindings only in the parser-blocking first private bootstrap response; trusted `AiReviewWorkspace` delivers targets only through a challenged private port, then joins anonymous viewport geometry and renders it | none beyond the immutable Request/Draft evidence already frozen for the run | trusted review host above the before frame only; authored frames never receive comment text, comment keys, a comment marker, or a source-node/locator map in HTML or later bootstrap source |
 | Current source-backed comment resolution, visibility, coordinates, marker eligibility and natural document height | `HtmlCanvasEditor` presentation measurement | none; disposable snapshot tagged by rendered source Hash, applied page-view generation and exact target-ID set | Workbench comment rail and Canvas height |
@@ -118,18 +117,11 @@ Rules:
   `projectId` and `documentId`.
 - Runtime features are declared independently. The presence of a project-picker
   API never implies source-edit or attachment-persistence authority.
-- Interactive-preview sessions, page-view context and runtime snapshots are
-  disposable. They do not participate in save, switch, submit or close drains,
-  and cannot become a second copy of the source HTML. Bitmap projections never
-  enter source patch, review source analysis, Version, persistence or AI input.
-  `EditRuntimeSnapshotSession` owns its cache independently of `PageViewContext`:
-  its coarse key is document, supported source-host/runtime-resource inputs and
-  viewport bucket. A normal text edit may re-resolve and reuse a verified image
-  at the current `SourceIndex`; a changed input may retain that compatible image
-  only until one background owner capture succeeds. Late, unavailable and failed
-  results clear only disposable presentation. Direct Canvas/SVG backgrounds and
-  stable empty-host images are replaced only after decode, and Blob URLs are
-  revoked on replacement or frame disposal.
+- Interactive-preview sessions, page-view context and Review runtime snapshots
+  are disposable. They do not participate in save, switch, submit or close
+  drains, and cannot become a second copy of the source HTML. Edit owns no
+  runtime bitmap/cache/projection state; it remains a script-disabled static
+  source surface.
 - AI review state fields are orthogonal. Page, filter, visibility, navigation,
   page presentation, scroll and zoom actions may update only their own reducer field. Review
   navigation can reveal a hidden panel in both frames but cannot become a
@@ -158,13 +150,13 @@ Rules:
   documents so the projection can group one frozen review result, but they have
   no database, source, Version, comment locator, Bridge or IPC authority and
   are discarded with that review session or its bounded cache entry.
-- The shared runtime-snapshot path starts only from source-backed candidates:
+- The Review runtime-snapshot path starts only from source-backed candidates:
   direct Canvas/SVG roots or source-empty stable hosts paired by
   `SourceHostResolver`. It never derives candidates from scripts, comment
   metadata, selectors, arbitrary HTML/`tbody` or runtime DOM.
-  `EditRuntimeSnapshotSession` issues an `edit` request; `AiReviewWorkspace`
-  presents static Review first and issues one `before`/`after` pair. Authored
-  frames have no runtime request or result capability.
+  `AiReviewWorkspace` presents static Review first and issues one
+  `before`/`after` pair. Authored frames have no runtime request or result
+  capability, and Edit never requests a runtime snapshot.
   `RuntimeSnapshotOwner` alone creates the temporary non-persistent partition,
   preview session and hidden sandboxed window. It revalidates the raw source
   binding, confirms the same runtime host and visible Canvas/SVG paint in an

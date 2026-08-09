@@ -53,6 +53,7 @@ async function loadPreloadApis(invoke) {
     lifecycle: exposed.get("htmlAIAppLifecycle"),
     usage: exposed.get("htmlAIUsage"),
     preview: exposed.get("htmlAIPreview"),
+    reviewRuntimeSnapshots: exposed.get("htmlAIReviewRuntimeSnapshots"),
     runtimeSnapshots: exposed.get("htmlAIRuntimeSnapshots"),
     edit: exposed.get("htmlAIEdit"),
     sent,
@@ -82,13 +83,12 @@ test("preload declares one immutable desktop runtime capability manifest", async
   assert.equal(runtime.capabilities.attachmentPersistence, "bridge");
   assert.equal(runtime.capabilities.closeCoordination, "electron-handshake");
   assert.equal(runtime.capabilities.interactivePreview, "independent-url");
-  assert.equal(runtime.capabilities.runtimeSnapshotCapture, "owner-isolated");
   assert.equal(Object.isFrozen(runtime.capabilities), true);
 });
 
-test("preload exposes one narrow owner-controlled Runtime Snapshot capture method", async () => {
+test("preload exposes one narrow Review-only Runtime Snapshot capture method", async () => {
   const calls = [];
-  const { runtimeSnapshots } = await loadPreloadApis(async (...args) => {
+  const { reviewRuntimeSnapshots, runtimeSnapshots } = await loadPreloadApis(async (...args) => {
     calls.push(args);
     return success({ outcome: "failed", reason: "capture-failed" });
   });
@@ -103,11 +103,12 @@ test("preload exposes one narrow owner-controlled Runtime Snapshot capture metho
   };
 
   assert.deepEqual(
-    await runtimeSnapshots.capture(payload),
+    await reviewRuntimeSnapshots.capture(payload),
     { outcome: "failed", reason: "capture-failed" },
   );
-  assert.deepEqual(calls, [["html-runtime-snapshots:capture", payload]]);
-  assert.deepEqual(Object.keys(runtimeSnapshots), ["capture"]);
+  assert.deepEqual(calls, [["html-review-runtime-snapshots:capture", payload]]);
+  assert.deepEqual(Object.keys(reviewRuntimeSnapshots), ["capture"]);
+  assert.equal(runtimeSnapshots, undefined);
 });
 
 test("preload exposes only preview session creation and revocation", async () => {

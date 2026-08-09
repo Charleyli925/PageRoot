@@ -314,13 +314,13 @@
     {
       "id": "state-architecture",
       "patterns": [
-        "^app/application/(?:bridge-client|comment-session|document-session|draft-session|drain-coordinator|edit-runtime-snapshot-session|external-file-open-session|local-action-outcomes|project-application-session|project-query-fence|project-rules-session|project-session|recovery-store|review-analysis-session|run-session|runtime-capabilities|source-history-session|version-session)\\.(?:js|d\\.ts)$",
+        "^app/application/(?:bridge-client|comment-session|document-session|draft-session|drain-coordinator|external-file-open-session|local-action-outcomes|project-application-session|project-query-fence|project-rules-session|project-session|recovery-store|review-analysis-session|run-session|runtime-capabilities|source-history-session|version-session)\\.(?:js|d\\.ts)$",
         "^desktop/project-open-queue\\.mjs$",
         "^app/domain/(?:draft-aggregate|run-lifecycle|runtime-snapshot-hosts|runtime-visual-contract|source-history)\\.(?:js|d\\.ts)$",
         "^app/workbench/(?:version-model|version-compatibility-decoder)\\.(?:js|ts)$",
         "^shared/(?:direct-edit-compatibility|draft-aggregate|source-history)\\.mjs$",
         "^scripts/(?:check-architecture|draft-aggregate|draft-command-decoder|draft-service|project-context-service|source-history-service)\\.mjs$",
-        "^tests/(?:architecture-boundaries|bridge-client|comment-session|compatibility-decoders|document-session|draft-aggregate|draft-service|draft-session|drain-coordinator|edit-runtime-snapshot-session|external-file-open-session|local-action-outcomes|project-application-session|project-open-queue|project-query-fence|project-rules-session|project-session|recovery-store|review-analysis-session|run-lifecycle|run-session|runtime-capabilities|source-history|source-history-session|version-session)\\.test\\.mjs$",
+        "^tests/(?:architecture-boundaries|bridge-client|comment-session|compatibility-decoders|document-session|draft-aggregate|draft-service|draft-session|drain-coordinator|external-file-open-session|local-action-outcomes|project-application-session|project-open-queue|project-query-fence|project-rules-session|project-session|recovery-store|review-analysis-session|run-lifecycle|run-session|runtime-capabilities|source-history|source-history-session|version-session)\\.test\\.mjs$",
         "^(?:CONTRIBUTING|docs/(?:ARCHITECTURE|ARCHITECTURE_CONTRACT|COMPATIBILITY|STATE_OWNERSHIP|ENGINEERING_STANDARDS|SECURITY_MODEL|RUNTIME_VISUAL_CONTRACT))\\.md$",
         "^docs/decisions/(?:0003-session-ownership-and-mutation-outcomes|0004-v2-editable-islands|0007-independent-interactive-preview|0008-safe-presentation-actions-in-edit-mode|0009-persistent-source-patch-history|0011-workbench-session-decomposition|0012-id-first-project-context|0013-edit-runtime-visual-projection|0015-safe-host-fallback-and-direct-text-nodes|0016-owner-controlled-review-runtime-capture|0017-shared-runtime-snapshot-owner)\\.md$"
       ],
@@ -348,7 +348,6 @@
         "tests/run-lifecycle.test.mjs",
         "tests/run-session.test.mjs",
         "tests/runtime-capabilities.test.mjs",
-        "tests/edit-runtime-snapshot-session.test.mjs",
         "tests/source-history.test.mjs",
         "tests/source-history-session.test.mjs",
         "tests/version-session.test.mjs"
@@ -377,7 +376,7 @@
     {
       "id": "v2-island-controller",
       "patterns": [
-        "^app/components/(?:HtmlCanvasEditor(?:\\.types)?|HtmlInteractionPreview|desktop-(?:runtime-snapshot|preview)-api|html-canvas-(?:dom|interaction|internal-types|page-view|preview-sync|runtime-visual|selection|style-inspector)|IslandEditingController|native-edit-types|native-edit-runtime-preflight|html-preview-sandbox)\\.(?:tsx|ts|js|d\\.ts)$"
+        "^app/components/(?:HtmlCanvasEditor(?:\\.types)?|HtmlInteractionPreview|desktop-(?:runtime-snapshot|preview)-api|html-canvas-(?:dom|interaction|internal-types|page-view|preview-sync|selection|style-inspector)|IslandEditingController|native-edit-types|native-edit-runtime-preflight|html-preview-sandbox)\\.(?:tsx|ts|js|d\\.ts)$"
       ],
       "suites": ["typecheck", "browser-smoke", "electron-smoke"],
       "nodeTests": [
@@ -495,32 +494,10 @@
       ]
     },
     {
-      "id": "edit-runtime-snapshot",
-      "patterns": [
-        "^app/application/edit-runtime-snapshot-session\\.(?:js|d\\.ts)$",
-        "^app/domain/(?:runtime-snapshot-hosts|runtime-visual-contract)\\.(?:js|d\\.ts)$",
-        "^app/components/(?:desktop-runtime-snapshot-api|html-canvas-runtime-visual)\\.(?:ts|d\\.ts)$",
-        "^app/lib/runtime-visual-snapshots\\.(?:js|d\\.ts)$",
-        "^desktop/runtime-visual-capture-owner\\.mjs$",
-        "^tests/(?:edit-runtime-snapshot-session|review-runtime-capture-owner|runtime-snapshot-hosts|runtime-visual-contract)\\.test\\.mjs$",
-        "^tests/fixtures/runtime-visual-hostile-pages\\.mjs$",
-        "^docs/(?:RUNTIME_VISUAL_CONTRACT|decisions/(?:0013-edit-runtime-visual-projection|0017-shared-runtime-snapshot-owner))\\.md$"
-      ],
-      "suites": ["typecheck", "electron-smoke"],
-      "nodeTests": [
-        "tests/edit-runtime-snapshot-session.test.mjs",
-        "tests/runtime-visual-contract.test.mjs",
-        "tests/runtime-snapshot-hosts.test.mjs",
-        "tests/review-runtime-capture-owner.test.mjs",
-        "tests/desktop-preload-ipc.test.mjs",
-        "tests/workbench-source-fence-contract.test.mjs"
-      ]
-    },
-    {
       "id": "desktop-runtime",
       "patterns": [
         "^desktop/.*\\.(?:mjs|tsx|ts|html)$",
-        "^tests/(?:bridge-startup|edit-runtime-snapshot-session|electron-window-policy|open-in-default-browser|preview-protocol|review-runtime-capture-owner)\\.test\\.mjs$"
+        "^tests/(?:bridge-startup|electron-window-policy|open-in-default-browser|preview-protocol|review-runtime-capture-owner)\\.test\\.mjs$"
       ],
       "suites": ["electron-smoke"],
       "nodeTests": [
@@ -532,7 +509,6 @@
         "tests/bridge-startup.test.mjs",
         "tests/bridge-shutdown.test.mjs",
         "tests/export-copy.test.mjs",
-        "tests/edit-runtime-snapshot-session.test.mjs",
         "tests/external-file-open.test.mjs",
         "tests/project-open-queue.test.mjs",
         "tests/electron-window-policy.test.mjs",

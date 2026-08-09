@@ -46,7 +46,7 @@ test("source-boundary freeze is fail closed and verifies the exact source snapsh
   );
 });
 
-test("edit visual projection never becomes review, persistence, or AI input", () => {
+test("source-bound request never has an Edit runtime projection", () => {
   const submission = section(
     workbench,
     "const generateRequest = useCallback",
@@ -65,8 +65,8 @@ test("edit visual projection never becomes review, persistence, or AI input", ()
     "AI Request must remain bound to the exact frozen and persisted source",
   );
   assert.doesNotMatch(
-    submission,
-    /runtimeVisualProjection|data-pageroot-readonly-visual|data-pageroot-readonly-visual-host/u,
+    workbench,
+    /EditRuntimeSnapshotSession|runtimeVisualProjection|runtimeVisualViewport|htmlAIRuntimeSnapshots|data-pageroot-readonly-visual/u,
   );
   assert.doesNotMatch(
     submission.slice(submission.indexOf("bridgeClient.createRequest({")),

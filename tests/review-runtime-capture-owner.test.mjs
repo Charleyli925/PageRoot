@@ -177,12 +177,9 @@ test("runtime snapshot owner rejects non-authoritative or unsupported capture in
   assert.equal(accepted.sourceSha256, SOURCE_SHA256);
   assert.equal(accepted.candidates[0].kind, "canvas");
   assert.equal(Object.isFrozen(accepted), true);
-  assert.equal(
-    validateRuntimeSnapshotCaptureRequest(request({
-      captureSessionId: "runtime-edit-session-0001",
-      side: "edit",
-    })).side,
-    "edit",
+  assert.throws(
+    () => validateRuntimeSnapshotCaptureRequest(request({ side: "edit" })),
+    /side is invalid/u,
   );
   assert.throws(
     () => validateRuntimeSnapshotCaptureRequest(request({ sourcePath: "/private/report.html" })),

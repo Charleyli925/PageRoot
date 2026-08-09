@@ -1,11 +1,9 @@
 import type { PageViewContext } from "../lib/page-view-context.js";
-import type { RuntimeVisualProjection } from "../domain/runtime-snapshot-hosts.js";
 import type {
   NativeEditCheckpointTrigger,
   NativeEditSelection,
 } from "./native-edit-types";
 import type { NoticeUsageCapture } from "./NoticeBar";
-import type { SourceIndexValue } from "./html-canvas-internal-types";
 
 export type HtmlCanvasSelectionLevel = "module" | "part" | "insertion";
 export type HtmlCanvasTargetResolution =
@@ -256,14 +254,6 @@ export type HtmlCanvasEditorProps = {
   trackedTargets?: readonly HtmlCanvasSelection[];
   /** Disposable source-backed presentation state for the current document. */
   pageViewContext?: PageViewContext | null;
-  /** Read-only runtime bitmap projection; never enters source or edit history. */
-  runtimeVisualProjection?: RuntimeVisualProjection | null;
-  /** Reports the inert edit frame viewport used to request a matching projection. */
-  onRuntimeVisualViewport?: (viewport: {
-    width: number;
-    height: number;
-    sourceIndex?: SourceIndexValue;
-  }) => void;
   /** Stable host-owned identity for disposable presentation state. */
   pageViewDocumentKey?: string;
   /** Accepts source-backed presentation state without treating it as an HTML edit. */

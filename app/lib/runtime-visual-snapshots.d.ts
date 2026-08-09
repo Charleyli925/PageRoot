@@ -17,7 +17,3 @@ export function acceptRuntimeVisualSnapshots(
   value: unknown,
   allowedCandidateKeys: ReadonlySet<string>,
 ): readonly RuntimeVisualSnapshot[] | null;
-
-export function runtimeVisualSnapshotsByteSize(
-  snapshots: readonly RuntimeVisualSnapshot[] | unknown,
-): number;
