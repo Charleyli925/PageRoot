@@ -7,6 +7,7 @@ import {
   Menu,
   net,
   protocol,
+  session as electronSession,
   shell,
   utilityProcess,
   webFrameMain,
@@ -105,6 +106,9 @@ import {
   createEditVisualCaptureController,
   createEditVisualCaptureOperation,
 } from "./edit-visual-capture.mjs";
+import {
+  createReviewRuntimeCaptureController,
+} from "./runtime-visual-capture-owner.mjs";
 
 // electron-updater is CommonJS; the default import is the supported ESM bridge.
 const { autoUpdater } = electronUpdater;
@@ -210,6 +214,9 @@ const PREVIEW_CHANNELS = Object.freeze({
 const EDIT_VISUAL_CHANNELS = Object.freeze({
   captureProjection: "html-edit-visuals:capture-projection",
 });
+const REVIEW_RUNTIME_VISUAL_CHANNELS = Object.freeze({
+  capture: "html-review-runtime-visuals:capture",
+});
 const EDIT_CHANNELS = Object.freeze({
   historyRequested: "html-edit:history-requested",
   nativeHistory: "html-edit:native-history",
@@ -236,6 +243,7 @@ let workspaceFailurePrompt = null;
 let managedWelcomeRegistration = null;
 let previewProtocolController = null;
 let editVisualCaptureController = null;
+let reviewRuntimeCaptureController = null;
 const workspaceRecoveryMailbox = createWorkspaceRecoveryMailbox();
 const externalFileOpenMailbox = createExternalFileOpenMailbox();
 const externalFileOpenExitHandoff = createExternalFileOpenExitHandoff({
@@ -270,6 +278,36 @@ function ensureEditVisualCaptureController() {
     });
   }
   return editVisualCaptureController;
+}
+
+function ensureReviewRuntimeCaptureController() {
+  if (!reviewRuntimeCaptureController) {
+    reviewRuntimeCaptureController = createReviewRuntimeCaptureController({
+      BrowserWindowClass: BrowserWindow,
+      createSession: (payload) => (
+        ensurePreviewProtocolController().createSession(payload)
+      ),
+      revokeSession: (sessionId) => (
+        Promise.resolve(
+          ensurePreviewProtocolController().revokeSession(sessionId),
+        )
+      ),
+      createIsolatedSession: (partition) => {
+        const isolatedSession = electronSession.fromPartition(partition);
+        ensurePreviewProtocolController().installFor(isolatedSession.protocol);
+        return isolatedSession;
+      },
+      async releaseIsolatedSession(isolatedSession) {
+        await Promise.all([
+          Promise.resolve(isolatedSession.clearStorageData?.()).catch(() => undefined),
+          Promise.resolve(
+            isolatedSession.protocol?.unhandle?.("pageroot-preview"),
+          ).catch(() => undefined),
+        ]);
+      },
+    });
+  }
+  return reviewRuntimeCaptureController;
 }
 
 function telemetryFingerprint(value) {
@@ -989,6 +1027,10 @@ const captureEditVisualProjection = createEditVisualCaptureOperation({
     return inspectHtmlFile(sourcePath);
   },
 });
+
+const captureReviewRuntimeVisual = (payload) => (
+  ensureReviewRuntimeCaptureController().capture(payload)
+);
 
 async function resolveKnownRenameSource(sourcePathInput) {
   const sourcePath = assertReadPayload(sourcePathInput);
@@ -1722,6 +1764,13 @@ function registerProjectIpc() {
       "edit_visual_capture_projection",
     ),
   );
+  ipcMain.handle(
+    REVIEW_RUNTIME_VISUAL_CHANNELS.capture,
+    trustedProject(
+      captureReviewRuntimeVisual,
+      "review_runtime_visual_capture",
+    ),
+  );
   ipcMain.handle(APP_CHANNELS.closeResult, trusted(reportCloseResult));
   ipcMain.handle(
     APP_CHANNELS.workspaceRecoveryReady,
@@ -1899,6 +1948,7 @@ function unregisterIpc() {
     ...Object.values(INTEGRATION_CHANNELS),
     ...Object.values(UPDATE_CHANNELS),
     ...Object.values(EDIT_VISUAL_CHANNELS),
+    ...Object.values(REVIEW_RUNTIME_VISUAL_CHANNELS),
     APP_CHANNELS.closeResult,
     APP_CHANNELS.workspaceRecoveryReady,
     APP_CHANNELS.externalOpenReady,
@@ -2416,6 +2466,8 @@ async function createWindow() {
     applicationUpdate?.stopAutomaticChecks();
     editVisualCaptureController?.dispose();
     editVisualCaptureController = null;
+    reviewRuntimeCaptureController?.dispose();
+    reviewRuntimeCaptureController = null;
     previewProtocolController?.dispose();
     rendererHasLoaded = false;
     workspaceRecoveryMailbox.beginRendererLoad();

@@ -7,7 +7,7 @@ export const REVIEW_RUNTIME_VISUAL_CANDIDATE_LIMIT =
 
 const MAX_RUNTIME_VISUAL_ATOMS = RUNTIME_VISUAL_CONTRACT.pageBudget.hostAtoms;
 const MAX_RUNTIME_CANVAS_PIXELS = RUNTIME_VISUAL_CONTRACT.pageBudget.canvasPixels;
-const SIGNATURE_PATTERN = /^[a-f0-9]{32}:[1-9]\d{0,7}$/u;
+const SIGNATURE_PATTERN = /^(?:[a-f0-9]{32}|[a-f0-9]{64}):[1-9]\d{0,7}$/u;
 const SNAPSHOT_KEYS = new Set([
   "key",
   "state",
@@ -327,10 +327,19 @@ export function mergeReviewRuntimeVisualChanges(documents, changedCandidateKeys)
       helper: helperForTypes(types),
     });
   });
-  const markers = changedCandidates.map((candidate) => Object.freeze({
-    key: candidate.key,
-    changeId: candidate.changeId,
-  }));
+  // The authored review page receives only opaque section-level fallback
+  // markers. Several runtime hosts can belong to one static outline, so send
+  // one marker per outline instead of exposing host identities or causing the
+  // page-side all-or-nothing marker validator to reject duplicates.
+  const seenMarkerOutlineIds = new Set();
+  const markers = changedCandidates.flatMap((candidate) => {
+    if (seenMarkerOutlineIds.has(candidate.outlineId)) return [];
+    seenMarkerOutlineIds.add(candidate.outlineId);
+    return [Object.freeze({
+      changeId: candidate.changeId,
+      outlineId: candidate.outlineId,
+    })];
+  });
   return Object.freeze({
     changes: Object.freeze(mergedChanges),
     outline: Object.freeze(mergedOutline),
@@ -396,13 +405,17 @@ export class ReviewRuntimeVisualCoordinator {
       this.resolved
       || this.disposed
       || (side !== "before" && side !== "after")
-      || (this.phase !== "initial" && this.phase !== "confirmation")
+      || (
+        this.phase !== "initial"
+        && this.phase !== "awaiting-confirmation"
+        && this.phase !== "confirmation"
+      )
     ) return false;
+    this.start();
     const snapshots = this.phase === "confirmation"
       ? this.confirmationSnapshots
       : this.snapshots;
     if (snapshots[side] !== null) return false;
-    this.start();
     snapshots[side] = acceptReviewRuntimeVisualSnapshots(
       rawSnapshots,
       this.allowedCandidateKeys,

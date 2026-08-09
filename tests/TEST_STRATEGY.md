@@ -140,17 +140,21 @@ PR 批量是建议而非固定限制：用 CI Health 的 Ready 次数、candidat
   读取 bootstrap 地址时均不得得到 key、路径、source-node 或基线，更不能借此
   制造运行态 marker；路径失效时只允许唯一私有指纹回退，歧义、替换或断连必须
   使整批运行态补充回退静态审阅；
-  Node 必须先对生成后的 bootstrap 做语法编译，
-  Electron 再覆盖 API shadow、未知 key 与宿主 claim 被窃取场景。同一 section 内由未修改
-  脚本独立生成随机值或时间戳的空宿主不得仅因旁边脚本变化进入候选；同一正式用例还要证明评论只落在 A 所属图表组的标题或说明（而非图表宿主）时，评论 key 自身不会把共同容器制造成静态结构变化，A 与最近双图表祖先组内的同级 B 即使由未修改绑定脚本读取独立变化的配色脚本，也都会进入前后指纹比对并产生 marker，而该组外未评论的随机宿主继续被排除。作者脚本若显式探测评论 scope 属性，前后页都不得看到该属性；即使它读取当前页面和随后 bootstrap 源码，也不得发现冻结定位描述或据此让仅候选脚本产生运行态 marker。即使它插入或重排同标签兄弟，before bootstrap 仍必须通过首个私有响应中的冻结源路径/指纹定位评论标题；路径失效后只有唯一私有指纹可保留 marker，同组的 scope 探针虽进入候选也不得产生 runtime marker。定位描述不得使用 `nth-*` 等位置路径，无法证明稳定绑定或私有端口不可用时必须省略评论标记。Node 另证明超过 128 个候选时直接评论目标、评论祖先内宿主、最近组相邻图表、普通宿主依次保留，且不会改写输入顺序；两侧慢资源分别延迟 50ms/750ms 时，快照缓存必须在各自注册后提交，500ms 决策预算必须等到两侧 iframe 均
-  `load` 后才启动；任一 frame 资源持续不完成时，1.5 秒注册上限必须让工具栏恢复可用并保留静态 marker，之后资源完成和迟到运行态证据都不得追加框；候选脚本在首次 `load` 前尝试导航到能伪造 challenge 回复的替换页时，主进程必须拦截导航，同一会话必须一次性重载为只保留受管 bootstrap 的无作者脚本副本，保留静态 marker、不接受替换页快照，且不卡住审阅；内联/浏览器运输不得启用运行态候选。极快
-  `srcDoc` 先注册、后建立协调器时，owner 必须主动排空已注册 frame。
-  Node 由纯协调器 oracle
-  验证消息上限、完整双侧提交、静态 `changeId` 复用、500ms 全量回退
-  和迟到拒绝。
+  Node 必须验证静态候选筛选、128 个候选的稳定截断和输入顺序，并证明未修改脚本独立生成的随机空宿主不会因相邻脚本变化进入候选。运行态结论一律由主进程 owner 产生：窄请求不得接受路径、脚本或二进制；原始 source SHA 与静态绑定必须先于窗口创建验证，运行后只接受唯一的路径/标签/身份匹配。Node oracle 验证两侧并行、每候选两次事实和一次 PNG、像素/字节预算、1500ms owner-pair deadline、取消/迟到拒绝，以及失败候选不影响其他静态或合格候选。
   Browser 另外证明点击页面 padding 与 App 空白会一起结束编辑、选区和
   工具栏。测试自动生成受控 AI 输出并执行正式 finalizer，不等待外部模型
   或真人接力。
+- Review owner capture（现行路径，覆盖上文关于作者页 runtime `MessageChannel`、
+  frame 注册和 bootstrap 采样的旧描述）：Node 必须验证窄请求拒绝路径/脚本/二进制和
+  错误 SHA、独立非持久 partition、无 preload/Node/Bridge、权限/导航/popup/download/
+  webview/非 preview 请求拒绝、只能使用 isolated world、原始 source binding 与运行时
+  路径/fingerprint 唯一重验、两次事实、每候选一次 PNG SHA-256 像素摘要和聚合预算、
+  超时/取消/迟到结果销毁窗口并撤销 preview
+  session。Electron 回归必须证明静态审阅先呈现且 owner 迟到或失败不改变静态数量、
+  文本、TargetRef 或 UI；作者页读取 HTML/bootstrap、监听窗口消息或伪造 port 都不能
+  得到 candidate key、路径、fingerprint、截图或 runtime 结果。确认 run 必须使用两组
+  新 owner session，任何一侧不稳定只省略该局部 marker。新 runtime owner 文件必须在
+  package allowlist、packaged artifact gate 和启动 smoke 中出现。
 - 运行态视觉合同只有一个生产声明：Node 必须直接验证候选上限 128、身份属性
   上限 24、页面/单宿主预算、1500ms owner deadline、完整 source SHA 与
   `contractVersion + sessionId + side source SHA` 封包；Edit 与 Review 的生产者、
@@ -166,13 +170,12 @@ PR 批量是建议而非固定限制：用 CI Health 的 Ready 次数、candidat
   evidence，透明文字仍无 marker；不允许以新增临时 DOM 属性或截图人工判读替代这些机器
   oracle。
 - 评论标记必须覆盖无 `id`、`data-*`、`name`、`aria-label` 的 class-only 普通目标：即使作者插入或重排同标签兄弟，before bootstrap 也必须仅凭首个私有响应中的冻结源 `sourceNodeId` 路径/指纹绑定解析器创建的原元素并保留 marker。测试还必须证明 HTML、后续 bootstrap 读取和作者可枚举 DOM 均不含该绑定、评论正文、评论 key 或定位映射；恶意作者脚本读取当前页面或 bootstrap 地址后仍不得产生伪造 marker。恶意的作者 capture listener 即使尝试读取 challenge、以同一 challenge 伪造评论端口，也既看不到评论 channel 请求，也收不到 `comment-targets`。
-- 评论范围放宽而没有直接变化脚本因果证据的运行态候选，Node 必须证明首轮
-  before/after 差异会请求且只请求一次新 frame run：两侧各自与首轮完全一致时
-  才保留 marker，任一侧指纹不同、确认 run 无法注册或确认 deadline 超时都只
-  回退该 scope-only 候选，同时保留首轮已经具备直接脚本因果的 marker。正式
-  Electron 闭环必须让同一评论图表组内一个未修改脚本以 `Date.now()` 和
-  `Math.random()` 一次性渲染，另有无关脚本变化；它可进入候选但在两次 frame
-  run 后绝不能得到 marker，而确定的 A+B 配色变化仍保留 marker。
+- 每个局部运行态候选都必须在首轮 before/after 差异后请求且只请求一次新的
+  owner-session pair：两侧各自与首轮完全一致时才保留该 marker，任一侧 source
+  SHA、viewport、facts 或像素摘要不同，确认 run 无法注册或确认 deadline 超时都只
+  回退该候选，不影响其他已确认候选。正式 Electron 闭环必须让同一评论图表组内
+  一个未修改脚本以 `Date.now()` 和 `Math.random()` 一次性渲染，另有确定的 A+B
+  配色变化；前者在两次 owner-session run 后绝不能得到 marker，后者仍保留 marker。
 - 审阅滚动回归必须直接证明页面概览会递增手势代次、取消待执行跟随帧并保留语义映射；评论布局契约还必须接受超出 100,000px 的有限长文档坐标，同时继续拒绝非有限值和超过安全上限的坐标。
 - 文案 footprint 算法由 Node 直接用字符范围 oracle 验证：覆盖有意义标点前后的独立替换、纯插入、纯删除、稳定句首词、短中文块的字符级辅助配对、超长无标点文本中的多处远距离精确修改、短间隔归组、稳定句拆分和密集成对改写提升，以及“品均基本持平”替换为“单品效率整体稳定，增幅仅+0.10%”时不能用偶然相同的“品”抵消增删。纯插入/纯删除必须严格镜像，并分别断言 operation、两侧 evidence ranges、无证据侧的不可见 anchor 与空 footprint groups；整句单侧变化只能得到 sentence scope，存在稳定外句或缺少任一侧 evidence 时不得提升为 block。仅换行变化使用 layout operation，且两侧均无红绿文字 evidence。语义对齐另以独立 Node oracle 覆盖头/中/尾新增、重复编号与表格类目、多解不猜、显式 ID 移动、普通插入不误判移动、稳定前后边界中的长插入、前后镜像，以及超过 60,000 DP 单元后的有限前瞻回退；结果必须保持父级边界和单调顺序。Electron 正式闭环必须按最终 geometry 验证：编号行修改前零 marker/框/孔/标签、修改后只有第四行；纯删除修改后零框零孔，但内容地图导航落到 collapsed Range 上下文而不是 section 顶；同一元素上的 box-style 与 layout 必须作为两个独立投影事实，分别产生自己的 canonical frame 和 mask hole，且互不覆盖；直接同父级的图片、SVG、Canvas 和输入控件必须作为原子语义单元保留，新增/删除生成自身结构事实，唯一稳定身份的样式变化进入视觉配对而稳定文字邻居零误报；新增表格行在全部模式只有一个 `tr` 框、结构模式只有父行框、文案模式只显示 cell 内 Range 行框，旧重复行零误报。窄 cell 跨行、四行文字、嵌套 inline/列表、authored marker/`div`/`svg` 样式、适应与 100% 缩放、单双页和主窗口 resize 后都必须重新测量；文字框数量与 Range 行盒一致、同组一个标签且无 shaped，overlay 与 mask hole 的数量、坐标和 path 逐项相同。
 - 应用更新：Node 用伪 updater 证明 stable-only、点击后单次下载、差分开启、普通退出不安装、仅 downloaded 状态可安装和错误降级；Preload/Workbench 合同证明状态快照、下载/安装意图、无 Canvas 完成横幅与重启确认保持窄边界。

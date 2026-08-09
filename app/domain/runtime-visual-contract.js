@@ -5,7 +5,7 @@ export const RUNTIME_VISUAL_CONTRACT = Object.freeze({
   candidateLimit: 128,
   identityAttributeLimit: 24,
   ownerDeadlineMs: 1_500,
-  comparisonDeadlineMs: 500,
+  comparisonDeadlineMs: 1_500,
   pageBudget: Object.freeze({
     htmlBytes: 25 * 1024 * 1024,
     visualLimit: 32,

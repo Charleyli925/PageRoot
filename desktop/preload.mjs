@@ -54,6 +54,9 @@ const previewChannels = Object.freeze({
 const editVisualChannels = Object.freeze({
   captureProjection: "html-edit-visuals:capture-projection",
 });
+const reviewRuntimeVisualChannels = Object.freeze({
+  capture: "html-review-runtime-visuals:capture",
+});
 const editChannels = Object.freeze({
   historyRequested: "html-edit:history-requested",
   nativeHistory: "html-edit:native-history",
@@ -176,6 +179,7 @@ const runtimeCapabilities = Object.freeze({
   closeCoordination: "electron-handshake",
   interactivePreview: "independent-url",
   editVisualProjection: "offscreen-capture",
+  reviewRuntimeVisualCapture: "owner-isolated",
 });
 const runtimeConfig = Object.freeze({
   bridgePort,
@@ -195,6 +199,13 @@ const previewApi = Object.freeze({
 const editVisualApi = Object.freeze({
   captureProjection: (payload) => invokeProject(
     editVisualChannels.captureProjection,
+    payload,
+  ),
+});
+
+const reviewRuntimeVisualApi = Object.freeze({
+  capture: (payload) => invokeProject(
+    reviewRuntimeVisualChannels.capture,
     payload,
   ),
 });
@@ -415,6 +426,10 @@ contextBridge.exposeInMainWorld("htmlAIIntegrations", integrationsApi);
 contextBridge.exposeInMainWorld("htmlAIUpdates", updatesApi);
 contextBridge.exposeInMainWorld("htmlAIPreview", previewApi);
 contextBridge.exposeInMainWorld("htmlAIEditVisuals", editVisualApi);
+contextBridge.exposeInMainWorld(
+  "htmlAIReviewRuntimeVisuals",
+  reviewRuntimeVisualApi,
+);
 contextBridge.exposeInMainWorld("htmlAIRuntime", runtimeConfig);
 contextBridge.exposeInMainWorld("htmlAIAppLifecycle", appLifecycleApi);
 contextBridge.exposeInMainWorld("htmlAIUsage", usageApi);

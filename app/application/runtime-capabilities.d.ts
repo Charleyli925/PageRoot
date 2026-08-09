@@ -5,6 +5,7 @@ export type RuntimeCapabilities = Readonly<{
   closeCoordination: "electron-handshake" | "browser-beforeunload";
   interactivePreview: "independent-url" | "srcdoc";
   editVisualProjection: "offscreen-capture" | "none";
+  reviewRuntimeVisualCapture: "owner-isolated" | "none";
 }>;
 
 export const BROWSER_RUNTIME_CAPABILITIES: RuntimeCapabilities;

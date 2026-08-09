@@ -1527,7 +1527,7 @@ test("a verified AI result stays pending through desktop review until the user a
       .toBeGreaterThanOrEqual(1);
     expect(delayedReviewResourceRequestsBySide.get("after") || 0)
       .toBeGreaterThanOrEqual(1);
-    const runtimeChangedHosts = [
+    const runtimeCandidateHosts = [
       "#review-runtime-html-chart",
       "#review-runtime-text-chart",
       "#review-runtime-svg-chart",
@@ -1542,22 +1542,25 @@ test("a verified AI result stays pending through desktop review until the user a
       "#review-runtime-comment-chart",
       "#review-runtime-comment-adjacent-chart",
     ];
-    for (const selector of runtimeChangedHosts) {
-      await expect(beforeReviewFrame.locator(selector)).toHaveAttribute(
-        "data-pageroot-review-runtime-marker",
-        "true",
-      );
-      await expect(afterReviewFrame.locator(selector)).toHaveAttribute(
-        "data-pageroot-review-runtime-marker",
-        "true",
-      );
-      await expect(afterReviewFrame.locator(selector)).toHaveAttribute(
-        "data-pageroot-review-marker-types",
-        "style",
-      );
-    }
+    const runtimeVisualSection = 'section[data-review-runtime-visuals]';
+    await expect(beforeReviewFrame.locator(runtimeVisualSection)).toHaveAttribute(
+      "data-pageroot-review-runtime-marker",
+      "true",
+    );
+    await expect(afterReviewFrame.locator(runtimeVisualSection)).toHaveAttribute(
+      "data-pageroot-review-runtime-marker",
+      "true",
+    );
+    await expect(afterReviewFrame.locator(runtimeVisualSection)).toHaveAttribute(
+      "data-pageroot-review-marker-types",
+      "style",
+    );
+    const runtimeSectionChangeId = await afterReviewFrame.locator(
+      runtimeVisualSection,
+    ).getAttribute("data-pageroot-review-marker");
+    expect(runtimeSectionChangeId).toMatch(/^runtime-change-outline-\d+$/u);
     const runtimeCandidateMetadataHosts = [
-      ...runtimeChangedHosts,
+      ...runtimeCandidateHosts,
       "#review-runtime-attribute-limit",
       "#review-runtime-flow-chart",
       "#review-runtime-unstable-chart",
@@ -1577,22 +1580,19 @@ test("a verified AI result stays pending through desktop review until the user a
           .not.toHaveAttribute("data-pageroot-review-runtime-host");
         await expect(frame.locator(selector))
           .not.toHaveAttribute("data-pageroot-review-runtime-source-box");
+        await expect(frame.locator(selector))
+          .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
       }
     }
-    const runtimeChangedIds = await Promise.all(runtimeChangedHosts.map((selector) => (
-      afterReviewFrame.locator(selector).getAttribute("data-pageroot-review-marker")
-    )));
-    expect(new Set(runtimeChangedIds).size).toBe(1);
-    expect(runtimeChangedIds[0]).toMatch(/^runtime-change-outline-\d+$/u);
     await expect(launched.page.getByTestId("review-outline-item").filter({
       has: launched.page.getByText("运行态图表回归", { exact: true }),
     })).toHaveAttribute("aria-label", "运行态图表回归：视觉调整");
-    const runtimeHtmlOwner = await afterReviewFrame.locator(
-      "#review-runtime-html-chart",
+    const runtimeSectionOwner = await afterReviewFrame.locator(
+      runtimeVisualSection,
     ).getAttribute("data-pageroot-review-style-owner");
-    expect(runtimeHtmlOwner).toMatch(/^runtime-runtime-host-\d+$/u);
+    expect(runtimeSectionOwner).toMatch(/^runtime-outline-\d+$/u);
     await expect(afterReviewFrame.locator(
-      `[data-pageroot-review-overlay-owner="${runtimeHtmlOwner}"]`,
+      `[data-pageroot-review-overlay-owner="${runtimeSectionOwner}"]`,
     )).toBeVisible();
     await expect(afterReviewFrame.locator("#review-runtime-flow-chart"))
       .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
@@ -1641,7 +1641,7 @@ test("a verified AI result stays pending through desktop review until the user a
       .toHaveAttribute("data-pageroot-review-marker-types", /style/u);
     expect(await afterReviewFrame.locator(
       "#review-runtime-static-covered",
-    ).getAttribute("data-pageroot-review-marker")).not.toBe(runtimeChangedIds[0]);
+    ).getAttribute("data-pageroot-review-marker")).not.toBe(runtimeSectionChangeId);
     await afterReviewFrame.locator("html").evaluate(() => {
       document.documentElement.dataset.reviewPostLoadNavigationAttempted = "true";
       location.replace(
@@ -3652,8 +3652,10 @@ test("fetched review bytes cannot expose a runtime host binding", async () => {
         "data-review-runtime-duplicate-claim",
         "false",
       );
-      await expect(frame.locator("#review-runtime-duplicate-claim-chart"))
+      await expect(frame.locator("section[data-review-runtime-duplicate-claim]"))
         .toHaveAttribute("data-pageroot-review-runtime-marker", "true");
+      await expect(frame.locator("#review-runtime-duplicate-claim-chart"))
+        .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
       await expect(frame.locator("#review-runtime-duplicate-claim-forgery"))
         .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
       await expect(frame.locator(

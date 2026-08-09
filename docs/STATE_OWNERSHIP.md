@@ -26,11 +26,11 @@
 | Renderer edit, project-picker, attachment-persistence, close-coordination, interactive-preview and edit-visual capabilities | Runtime capability resolver | immutable preload manifest; fail-closed browser default | Workbench composition root |
 | Volatile interactive-preview document, bootstrap, allowed source-relative asset root, completed-frame identity set and one-way pre-load scriptless navigation-fallback flag | Main-process preview protocol controller plus the owning window's navigation fence | none; bounded in-memory session/window state only; the fallback cannot be reversed inside a session | isolated preview iframe and the script-disabled edit iframe's resource base |
 | Current preview/edit display context, bounded read-only visuals, safe reveal transition and per-surface render acknowledgement | Workbench page-view context state | none; source-bound in-memory projection tagged by `DocumentSession` Canvas generation and rendered source Hash | `HtmlCanvasEditor`, `HtmlInteractionPreview`, save-status projection and toolbar |
-| Shared runtime-visual limits, page budget, owner deadline and source/session envelope | `runtime-visual-contract.js`; consumers may validate but not redeclare it | none; frozen process-local contract only | Edit capture, Review capture adapter, both consumers and hostile-page gates |
+| Shared runtime-visual limits, page budget, owner deadline and source/session envelope | `runtime-visual-contract.js`; consumers may validate but not redeclare it | none; frozen process-local contract only | Edit capture, Review owner capture, both consumers and hostile-page gates |
 | Current edit runtime-visual full-source identity, generation, accepted bitmap projection and byte-bounded recent-result cache | Renderer `RuntimeVisualProjectionSession`; main-process capture controller solely owns its active hidden window/session | none; exact-source-validated in-memory binary PNGs only | `HtmlCanvasEditor` responsive keyed presentation reconciler; original source host remains comment target |
 | AI review page view, change filter, context visibility, navigation target, canonical page-presentation path, scroll mode and zoom mode | `AiReviewWorkspace` review reducer | none; disposable state bound to the frozen before/after pair | review toolbar, content map and isolated review frames |
 | AI review semantic sibling pair graph, typed change facts (including multiple independent facts on one prepared element), disposable fact/semantic/geometry owner IDs, prepared immutable review documents and canonical frame/mask geometry | Cancellable `ReviewAnalysisSession` plus `review-document` analyzer, ready-review session and isolated-frame projection runtime | none; byte-bounded multi-entry cache keyed only by exact operation/source/comment identity; fact identities are analysis-only and never persisted | review outline, semantic frames and context mask |
-| Initial AI review runtime-chart snapshot batch, side-specific source/session identity, one-shot private candidate element/key/source-box bindings, one conditional same-document confirmation batch for scope-only candidates, frame-registration/comparison deadlines and accepted supplemental host markers | Parent `AiReviewWorkspace` through `ReviewRuntimeVisualCoordinator`; `ReviewRuntimeVisualCaptureAdapter` owns the replaceable capture seam behind the main-process managed-preview navigation fence; the first parser bootstrap response owns the transient binding map | none; one bounded in-memory decision bound to the frozen document pair, contract version, exact side Hashes and declared host keys; bindings never enter HTML, a later bootstrap read is unbound, and only a first-pair difference without direct script causality reloads once; fresh sessions serve confirmation bindings; session/load failure, binding drift, navigation fallback and inline/browser review are static-only | effective review changes/outline and both isolated frame projections |
+| AI review runtime capture request, temporary owner window/session, deadline/cancellation, derived per-side facts and one required confirmation run | Electron main `ReviewRuntimeCaptureController`; `AiReviewWorkspace` and `ReviewRuntimeVisualCoordinator` only schedule and consume its bounded result | none; one exact-source, side/session-fenced in-memory decision; candidate path/fingerprint records exist only in trusted renderer memory and the owner isolated-world closure; raw DOM and PNG bytes are discarded before the renderer result | effective review changes/outline and static review-frame presentation |
 | AI review Tab/disclosure/control presentation state and transition epoch | Parent `AiReviewWorkspace` presentation coordinator; either frame may propose an intent | none; disposable parent state plus frame projection only | both review frames, content map and overlay/mask projection |
 | Frozen review comment set and read-only before-page marker projection | Ready-review session owns comment text; `review-document` resolves opaque targets during analysis, strips scope attributes, and carries source-node bindings only in the parser-blocking first private bootstrap response; trusted `AiReviewWorkspace` delivers targets only through a challenged private port, then joins anonymous viewport geometry and renders it | none beyond the immutable Request/Draft evidence already frozen for the run | trusted review host above the before frame only; authored frames never receive comment text, comment keys, a comment scope marker, or a source-node/locator map in HTML or later bootstrap source |
 | Current source-backed comment resolution, visibility, coordinates, marker eligibility and natural document height | `HtmlCanvasEditor` presentation measurement | none; disposable snapshot tagged by rendered source Hash, applied page-view generation and exact target-ID set | Workbench comment rail and Canvas height |
@@ -161,56 +161,29 @@ Rules:
   declares an ordinary host only when the changed authored script directly
   references that host's distinctive source identity. A source-empty host
   directly targeted by, or nested beneath, a frozen non-global review comment
-  may instead use the opaque comment target as explicit local scope. Every
-  frozen non-global target inside the current review section also starts a
-  nearest-group search: its first ancestor containing at least two pairable
-  hosts owns lower-priority scope for sibling charts, even if the target is a
-  caption or heading beside them. Direct, contained and nearest-group hosts are
-  selected in that order before ordinary hosts under the same 128-candidate
-  limit. Global
-  comments do not widen runtime scope, the group cannot cross its section, and
-  ordinary group-external section co-location is not enough.
-  Candidate keys and original source-box baselines are held only in the first
-  parser bootstrap response's session-private element map. No temporary
-  identity, fixed runtime-host/source-box attribute, key or path is serialized.
-  A fingerprintless comment binding remains valid only at its exact frozen
-  path; a same-tag observation at a shifted path is ambiguous and is omitted.
-  A stale path may resolve only to one matching private fingerprint; a missing,
-  ambiguous, replaced or disconnected binding invalidates the full supplemental
-  batch. Confirmation creates fresh sessions so its frame pair receives new
-  one-shot bindings.
-  The bootstrap binds its evidence-reading DOM/style/Canvas and numeric
-  conversion/rounding primitives before
-  authored scripts run, owns the frozen analyzer-declared host-key set and
-  records the parser-created element that first claims every key. Undeclared
-  claims are ignored; missing, duplicate, transferred, replaced or drifting
-  declared identities invalidate the whole supplemental batch. Each host retains
-  independent failure isolation while one aggregate capture budget spans the
-  complete two-sample batch; a local fault, instability or exhaustion is a
-  validated unavailable fact with no authority over valid sibling hosts.
-  Producer and consumer share the 128-candidate, 24-identity-attribute and page
-  budgets. Review evidence must match contract version, session and side-specific
-  source Hash before it can enter the coordinator.
-  It accepts only a complete declared before/after pair before its initial deadline,
-  includes the host's own painted box, fully transparent disappearance state
-  and directly mutated size but prunes every descendant subtree whose ancestor
-  chain reaches zero opacity, including SVG wrapper groups; hidden descendants, unpainted geometry and
-  indirect layout size are not facts. It ignores
-  absolute document position and unstable or late samples, merges with an
-  existing owning change instead of duplicating it, and freezes after the
-  initial projection commit. Pre-load evidence remains bootstrap-owned until
-  frame registration, and owner installation drains frames already registered
-  for that exact document pair. Once a managed session pair exists, the parent
-  allows 1.5s for both exact frames to register and otherwise commits the static
-  result; session failure does the same. The coordinator arms its separate
-  500ms comparison deadline only when both exact frame documents are loaded.
-  Runtime evidence is accepted only through the
-  challenged capability port created by the trusted bootstrap before authored
-  scripts run; ordinary frame messages cannot complete a side. A pre-load
-  navigation attempt irreversibly switches that volatile preview session to a
-  scriptless copy with the owned bootstrap, then completes without runtime
-  additions. Failure has no
-  visible recovery owner because the authoritative static review remains valid.
+  may instead use the opaque comment target as explicit local scope. Direct,
+  contained and nearest-group hosts are selected in that order under the shared
+  128-candidate limit; global comments never widen capture scope.
+  `AiReviewWorkspace` starts the static review immediately, then requests each
+  side from the Electron owner with the frozen raw HTML, full SHA, viewport and
+  candidate binding. The authored review page has no runtime request or result
+  capability.
+  For one request the owner alone creates a fresh non-persistent partition,
+  preview session and hidden sandboxed window. It verifies each
+  path/tag/source-box/fingerprint against raw source before scripts run, then
+  its isolated-world program revalidates path/tag/identity after scripts run;
+  an ambiguous or changed binding fails closed. It takes two fact passes and
+  one bounded screenshot per accepted rectangle, validates PNG
+  size/header/aggregate budget and keeps only the SHA-256 digest and bounded
+  facts. Raw DOM, nodes and PNG bytes never pass the owner boundary.
+  Main owns the 1.5-second deadline, cancellation and cleanup, so a page cannot
+  extend its lifetime. Any failure resolves to static-only review. Every local
+  candidate requires a second entirely fresh owner-session pair; source SHA,
+  frozen viewport, facts and pixel digest must agree, and instability drops
+  only that local marker. The coordinator accepts only a complete,
+  contract/session/source-SHA-fenced before/after envelope, then
+  merges public `changeId`/`outlineId` markers into the existing static
+  presentation. It owns no source, Draft, Version, comment or persistence fact.
 - `CommentSession` is a renderer working copy, not durable Draft authority.
   Runtime state is likewise not a second copy of draft contents: it carries
   lifecycle state and a revisioned pointer to the draft repository.

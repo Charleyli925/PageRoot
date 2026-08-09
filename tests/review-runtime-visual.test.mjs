@@ -212,7 +212,7 @@ test("snapshot validation enforces the combined per-host atom budget", () => {
   ], keys), null);
 });
 
-test("runtime visual merge reuses a static change and creates at most one change per untouched outline", () => {
+test("runtime visual merge reuses a static change and emits one opaque marker per outline", () => {
   const documents = {
     changes: [{
       id: "change-1",
@@ -271,9 +271,8 @@ test("runtime visual merge reuses a static change and creates at most one change
   assert.equal(merged.changes[1].id, "runtime-change-outline-2");
   assert.equal(merged.outline[1].changeId, "runtime-change-outline-2");
   assert.deepEqual(merged.markers, [
-    { key: "runtime-host-1", changeId: "change-1" },
-    { key: "runtime-host-2", changeId: "runtime-change-outline-2" },
-    { key: "runtime-host-3", changeId: "runtime-change-outline-2" },
+    { changeId: "change-1", outlineId: "outline-1" },
+    { changeId: "runtime-change-outline-2", outlineId: "outline-2" },
   ]);
 });
 
@@ -300,7 +299,7 @@ test("runtime visual coordination commits once, falls back atomically, and ignor
   assert.deepEqual(timerDelays, []);
   assert.equal(coordinator.start(), true);
   assert.equal(coordinator.start(), false);
-  assert.deepEqual(timerDelays, [500]);
+  assert.deepEqual(timerDelays, [1500]);
   assert.equal(coordinator.accept("before", [snapshot("runtime-host-1")]), true);
   assert.deepEqual(resolutions, []);
   assert.equal(coordinator.accept("after", [
@@ -345,29 +344,30 @@ test("runtime visual coordination commits once, falls back atomically, and ignor
   assert.deepEqual(incompleteResolutions, [[]]);
 });
 
-test("comment-scoped runtime evidence must match a fresh document run", () => {
+test("owner runtime evidence must match a fresh independent document run", () => {
   const candidates = [
     {
-      key: "comment-scoped-host",
+      key: "owner-host-1",
       outlineId: "outline-1",
       changeId: "runtime-change-outline-1",
       label: "图表区",
       requiresDeterministicConfirmation: true,
     },
     {
-      key: "causal-host",
+      key: "owner-host-2",
       outlineId: "outline-1",
       changeId: "runtime-change-outline-1",
       label: "图表区",
+      requiresDeterministicConfirmation: true,
     },
   ];
   const initialBefore = [
-    snapshot("comment-scoped-host"),
-    snapshot("causal-host"),
+    snapshot("owner-host-1"),
+    snapshot("owner-host-2"),
   ];
   const initialAfter = [
-    snapshot("comment-scoped-host", { paintSignature: signature("d") }),
-    snapshot("causal-host", { paintSignature: signature("e") }),
+    snapshot("owner-host-1", { paintSignature: signature("d") }),
+    snapshot("owner-host-2", { paintSignature: signature("e") }),
   ];
   const unstableResolutions = [];
   let unstableRequests = 0;
@@ -383,13 +383,12 @@ test("comment-scoped runtime evidence must match a fresh document run", () => {
   unstableCoordinator.accept("after", initialAfter);
   assert.equal(unstableRequests, 1);
   assert.deepEqual(unstableResolutions, []);
-  assert.equal(unstableCoordinator.start(), true);
-  unstableCoordinator.accept("before", [
-    snapshot("comment-scoped-host", { paintSignature: signature("f") }),
-    snapshot("causal-host"),
-  ]);
-  unstableCoordinator.accept("after", initialAfter);
-  assert.deepEqual(unstableResolutions, [["causal-host"]]);
+  assert.equal(unstableCoordinator.accept("before", [
+    snapshot("owner-host-1", { paintSignature: signature("f") }),
+    snapshot("owner-host-2"),
+  ]), true, "the first confirmation result must start its own confirmation round");
+  assert.equal(unstableCoordinator.accept("after", initialAfter), true);
+  assert.deepEqual(unstableResolutions, [["owner-host-2"]]);
 
   const stableResolutions = [];
   const stableCoordinator = new ReviewRuntimeVisualCoordinator({
@@ -399,10 +398,9 @@ test("comment-scoped runtime evidence must match a fresh document run", () => {
   });
   stableCoordinator.accept("before", initialBefore);
   stableCoordinator.accept("after", initialAfter);
-  assert.equal(stableCoordinator.start(), true);
-  stableCoordinator.accept("before", initialBefore);
-  stableCoordinator.accept("after", initialAfter);
-  assert.deepEqual(stableResolutions, [["comment-scoped-host", "causal-host"]]);
+  assert.equal(stableCoordinator.accept("before", initialBefore), true);
+  assert.equal(stableCoordinator.accept("after", initialAfter), true);
+  assert.deepEqual(stableResolutions, [["owner-host-1", "owner-host-2"]]);
 
   const unavailableConfirmationResolutions = [];
   const unavailableConfirmationCoordinator = new ReviewRuntimeVisualCoordinator({
@@ -413,7 +411,7 @@ test("comment-scoped runtime evidence must match a fresh document run", () => {
   unavailableConfirmationCoordinator.accept("before", initialBefore);
   unavailableConfirmationCoordinator.accept("after", initialAfter);
   assert.equal(unavailableConfirmationCoordinator.failConfirmation(), true);
-  assert.deepEqual(unavailableConfirmationResolutions, [["causal-host"]]);
+  assert.deepEqual(unavailableConfirmationResolutions, [[]]);
 
   const confirmationTimers = [];
   const timeoutResolutions = [];
@@ -429,7 +427,9 @@ test("comment-scoped runtime evidence must match a fresh document run", () => {
   });
   timeoutCoordinator.accept("before", initialBefore);
   timeoutCoordinator.accept("after", initialAfter);
-  assert.equal(timeoutCoordinator.start(), true);
+  assert.equal(timeoutCoordinator.phase, "awaiting-confirmation");
+  assert.equal(timeoutCoordinator.accept("before", initialBefore), true);
+  assert.equal(timeoutCoordinator.phase, "confirmation");
   confirmationTimers.at(-1)();
-  assert.deepEqual(timeoutResolutions, [["causal-host"]]);
+  assert.deepEqual(timeoutResolutions, [[]]);
 });

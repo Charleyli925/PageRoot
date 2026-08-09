@@ -18,13 +18,13 @@ export type ReviewRuntimeVisualCandidate = Readonly<{
   outlineId: string;
   changeId: string;
   label: string;
-  /** Requires a fresh same-document run when comment scope, not script causality, admitted it. */
+  /** Owner-produced local markers require a fresh independent capture session. */
   requiresDeterministicConfirmation?: boolean;
   panelKey?: string;
   panelPath?: readonly string[];
 }>;
 
-export const REVIEW_RUNTIME_VISUAL_DEADLINE_MS: 500;
+export const REVIEW_RUNTIME_VISUAL_DEADLINE_MS: 1500;
 export const REVIEW_RUNTIME_VISUAL_CANDIDATE_LIMIT: 128;
 
 export function selectPrioritizedReviewRuntimeVisualCandidates<
@@ -60,7 +60,7 @@ export function mergeReviewRuntimeVisualChanges<
 }, changedCandidateKeys: readonly string[]): Readonly<{
   changes: readonly TChange[];
   outline: readonly TOutline[];
-  markers: readonly Readonly<{ key: string; changeId: string }>[];
+  markers: readonly Readonly<{ changeId: string; outlineId: string }>[];
 }>;
 
 export class ReviewRuntimeVisualCoordinator {

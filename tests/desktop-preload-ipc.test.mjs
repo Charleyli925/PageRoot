@@ -54,6 +54,7 @@ async function loadPreloadApis(invoke) {
     usage: exposed.get("htmlAIUsage"),
     preview: exposed.get("htmlAIPreview"),
     editVisuals: exposed.get("htmlAIEditVisuals"),
+    reviewRuntimeVisuals: exposed.get("htmlAIReviewRuntimeVisuals"),
     edit: exposed.get("htmlAIEdit"),
     sent,
     emit(channel, payload) {
@@ -83,7 +84,32 @@ test("preload declares one immutable desktop runtime capability manifest", async
   assert.equal(runtime.capabilities.closeCoordination, "electron-handshake");
   assert.equal(runtime.capabilities.interactivePreview, "independent-url");
   assert.equal(runtime.capabilities.editVisualProjection, "offscreen-capture");
+  assert.equal(runtime.capabilities.reviewRuntimeVisualCapture, "owner-isolated");
   assert.equal(Object.isFrozen(runtime.capabilities), true);
+});
+
+test("preload exposes one narrow owner-controlled review runtime capture method", async () => {
+  const calls = [];
+  const { reviewRuntimeVisuals } = await loadPreloadApis(async (...args) => {
+    calls.push(args);
+    return success({ outcome: "unmapped", reason: "frozen-binding-mismatch" });
+  });
+  const payload = {
+    contractVersion: 1,
+    captureSessionId: "review-owner-session-0001",
+    sourceSha256: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    side: "before",
+    html: "<!doctype html><main></main>",
+    candidates: [],
+    viewport: { width: 960, height: 640 },
+  };
+
+  assert.deepEqual(
+    await reviewRuntimeVisuals.capture(payload),
+    { outcome: "unmapped", reason: "frozen-binding-mismatch" },
+  );
+  assert.deepEqual(calls, [["html-review-runtime-visuals:capture", payload]]);
+  assert.deepEqual(Object.keys(reviewRuntimeVisuals), ["capture"]);
 });
 
 test("preload exposes one narrow edit visual capture method", async () => {

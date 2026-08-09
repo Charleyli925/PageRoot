@@ -124,6 +124,7 @@ export async function ensureSourceEditingTestRuntime(page) {
           closeCoordination: "browser-beforeunload",
           interactivePreview: "srcdoc",
           editVisualProjection: "none",
+          reviewRuntimeVisualCapture: "none",
         },
       },
     });

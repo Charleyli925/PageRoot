@@ -18,6 +18,37 @@ import {
   registerPreviewProtocolScheme,
 } from "../desktop/preview-protocol.mjs";
 
+test("preview protocol installs one handler for each isolated Electron session", () => {
+  let defaultHandlers = 0;
+  let isolatedHandlers = 0;
+  let isolatedHandler = null;
+  const controller = createPreviewProtocolController({
+    protocolApi: {
+      handle(scheme, handler) {
+        assert.equal(scheme, PREVIEW_PROTOCOL_SCHEME);
+        assert.equal(typeof handler, "function");
+        defaultHandlers += 1;
+      },
+    },
+    netFetch: async () => new Response("unreachable"),
+  });
+  const isolatedProtocol = {
+    handle(scheme, handler) {
+      assert.equal(scheme, PREVIEW_PROTOCOL_SCHEME);
+      isolatedHandlers += 1;
+      isolatedHandler = handler;
+    },
+  };
+
+  controller.install();
+  controller.installFor(isolatedProtocol);
+  controller.installFor(isolatedProtocol);
+
+  assert.equal(defaultHandlers, 1);
+  assert.equal(isolatedHandlers, 1);
+  assert.equal(typeof isolatedHandler, "function");
+});
+
 test("preview session operation authorizes the source path before creation", async () => {
   const calls = [];
   const operation = createPreviewSessionOperation({
