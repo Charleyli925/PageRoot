@@ -72,6 +72,7 @@ async function launchPageRoot(options = {}) {
     },
   });
   const page = await electronApp.firstWindow();
+  await page.waitForLoadState("domcontentloaded");
   const mainRendererUrl = page.url();
   const nativeWindow = await electronApp.evaluate(({ BrowserWindow }, rendererUrl) => {
     const window = BrowserWindow.getAllWindows().find((candidate) => (
@@ -89,7 +90,6 @@ async function launchPageRoot(options = {}) {
   const foreground = process.env.PAGEROOT_E2E_FOREGROUND === "1";
   expect(nativeWindow.visible).toBe(foreground);
   if (!foreground) expect(nativeWindow.focused).toBe(false);
-  await page.waitForLoadState("domcontentloaded");
   await page.waitForFunction(() => document.visibilityState === "visible");
   await page.evaluate(() => new Promise((resolve) => {
     requestAnimationFrame(() => requestAnimationFrame(resolve));
