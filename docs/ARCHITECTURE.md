@@ -205,7 +205,7 @@ they do not import application services.
 | Current source bytes, Hash, revisions, persistence projection, source-write single flight and Canvas authority generation | `app/application/document-session.js` |
 | Renderer draft revision, pending operations and reconciliation | `app/application/draft-session.js` |
 | Renderer comment working copy, composer and saved-comment edit projection | `app/application/comment-session.js` |
-| Active/background runs, Qoder status, background outcomes and operation locks | `app/application/run-session.js` |
+| Active/background runs, Qoder status, background outcomes, submission lifecycle locks and operation locks | `app/application/run-session.js` |
 | Immutable Version projection and history-view transition | `app/application/version-session.js` |
 | `PROJECT.md` editor, composition fence, autosave and reconciliation | `app/application/project-rules-session.js` |
 | Renderer source-history context, pending Patch operations and action intent | `app/application/source-history-session.js` |

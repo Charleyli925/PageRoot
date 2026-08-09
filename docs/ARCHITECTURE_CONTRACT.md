@@ -67,7 +67,8 @@ The renderer's main workspace facts are partitioned as follows:
 - `ProjectRulesSession`: `PROJECT.md` working copy, composition fence,
   autosave and reconciliation;
 - `RunSession`: current/background run projections, Qoder status, background
-  outcomes and operation locks;
+  outcomes, the one preparing/frozen/uncertain submission lock, and operation
+  locks;
 - `VersionSession`: immutable Version projection and history-view transition;
 - `SourceHistorySession`: pending exact Patch operations and history action.
 - `ExternalFileOpenSession`: opaque external-open delivery IDs, one active

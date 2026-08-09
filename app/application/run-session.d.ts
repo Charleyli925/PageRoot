@@ -2,6 +2,14 @@ import type { ActiveRun } from "../domain/run-lifecycle.js";
 
 export type RunOperationKind = "activate" | "cancel" | "resolve" | "poll";
 
+export type RunSubmissionPhase = "preparing" | "frozen" | "uncertain";
+
+export type RunSubmission = {
+  token: number;
+  sourcePath: string;
+  phase: RunSubmissionPhase;
+};
+
 export type RunHandoffState = {
   sourcePath: string;
   requestId: string;
@@ -20,6 +28,10 @@ export type RunSessionSnapshot = {
   activeRun: ActiveRun | null;
   activeHandoff: RunHandoffState | null;
   activeHandoffMayBeRunning: boolean;
+  activeSubmission: RunSubmission | null;
+  submissionPending: boolean;
+  activeLocked: boolean;
+  operationKeys: ReadonlyArray<readonly [RunOperationKind, string]>;
   recentOutcome: ActiveRun | null;
   backgroundResults: ReadonlyArray<readonly [string, RunBackgroundResult]>;
 };
@@ -28,6 +40,13 @@ export class RunSession {
   constructor(options?: { sourcePath?: string | null });
   setObserver(observer: ((snapshot: RunSessionSnapshot) => void) | null): void;
   activate(sourcePath: string | null): RunSessionSnapshot;
+  beginSubmission(value: {
+    sourcePath: string;
+  }): RunSubmission | null;
+  freezeSubmission(submission: RunSubmission): boolean;
+  markSubmissionUncertain(submission: RunSubmission): boolean;
+  releaseSubmission(submission: RunSubmission): boolean;
+  clearActiveSubmission(): boolean;
   setActiveRun(run: ActiveRun | null): ActiveRun | null;
   trackRun(
     run: ActiveRun,
@@ -73,6 +92,9 @@ export class RunSession {
   readonly activeRun: ActiveRun | null;
   readonly activeHandoff: RunHandoffState | null;
   readonly activeHandoffMayBeRunning: boolean;
+  readonly activeSubmission: RunSubmission | null;
+  readonly submissionPending: boolean;
+  readonly activeLocked: boolean;
   readonly runs: ReadonlyArray<ActiveRun>;
   readonly snapshot: RunSessionSnapshot;
 }

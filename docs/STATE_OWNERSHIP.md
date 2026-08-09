@@ -15,7 +15,7 @@
 | Renderer comment/edit-event working copy, deletion tombstones, composer fields and saved-comment edit session | Renderer `CommentSession` | none; disposable projection until Draft acknowledgement | Workbench views, Draft session and Request preparation |
 | Acknowledged comments, edit events, tombstones and operation identities | Draft aggregate and Bridge draft service | `draft/annotations.json`; runtime stores only its pointer and revision | Draft session and Request freeze |
 | Staged comment attachments and references | Draft aggregate attachment repository | managed draft attachment directory plus draft references | composer and Request freeze |
-| Active/background AI run projections, Qoder handoff status and recovered handoff-risk disposition, background results and renderer operation locks | Renderer `RunSession` | none beyond authoritative runtime and immutable Request/Attempt records | Workbench process panel and project list |
+| Active/background AI run projections, Qoder handoff status and recovered handoff-risk disposition, background results, submission preparation/freeze/unknown-outcome lock and renderer operation locks | Renderer `RunSession` | none beyond authoritative runtime and immutable Request/Attempt records | Workbench process panel, drain coordinator and project list |
 | AI Request/Attempt lifecycle transition | Bridge run lifecycle | runtime state and immutable Request/Attempt records | Run session and finalizer |
 | Immutable Version list, based-on/exact/restored identities and history-view transition | Renderer `VersionSession` | immutable Version records and current runtime pointers | Workbench history and Canvas projection |
 | `PROJECT.md` content, editor generation, composition fence, autosave eligibility and save status | Renderer `ProjectRulesSession` | managed `PROJECT.md` | project panel, drain coordinator and Request freeze |
@@ -83,6 +83,12 @@ Rules:
 - `workbench.tsx` is a composition root, not an additional state owner. It
   subscribes to session snapshots, derives read-only presentation values and
   dispatches user intent back to the owning session.
+- `RunSession` owns the one in-memory submission lifecycle. `preparing` blocks
+  duplicate intent and drain without freezing the current canvas; `frozen`
+  blocks edits until the Request is known; `uncertain` preserves a current
+  read-only fence while reconciliation determines whether a durable run exists.
+  Workbench must derive its active lock and submission presentation from that
+  snapshot rather than maintain a second boolean or ref.
 - Workbench presentation modules receive snapshots and callbacks only. They
   may not import application sessions, Bridge services or persistence
   adapters.

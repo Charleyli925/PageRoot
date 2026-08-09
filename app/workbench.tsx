@@ -133,6 +133,7 @@ import {
 } from "./application/project-session.js";
 import {
   RunSession,
+  type RunOperationKind,
   type RunSessionSnapshot,
 } from "./application/run-session.js";
 import { createBrowserRecoveryStore } from "./application/recovery-store.js";
@@ -219,7 +220,6 @@ import {
 import {
   activeRunOperationKey,
   fileExtension,
-  fileNameFromSourcePath,
   fileStem,
   folderFromSourcePath,
   formatProjectTimestamp,
@@ -258,7 +258,6 @@ import type {
   DesktopProjectsApi,
   Drawer,
   HtmlProject,
-  OpenedAiVersionNotice,
   OtherTabCommentEntry,
   PendingDraft,
   PendingWrite,
@@ -351,6 +350,10 @@ const INITIAL_RUN_SNAPSHOT: RunSessionSnapshot = {
   activeRun: null,
   activeHandoff: null,
   activeHandoffMayBeRunning: false,
+  activeSubmission: null,
+  submissionPending: false,
+  activeLocked: false,
+  operationKeys: [],
   recentOutcome: null,
   backgroundResults: [],
 };
@@ -482,10 +485,6 @@ const WELCOME_PROJECT = {
   sourcePath: null as string | null,
 };
 
-function isLockedLifecycle(state: LifecycleState | undefined): boolean {
-  return isLockedLifecycleState(state);
-}
-
 function noticeReducer(current: Toast, next: Toast): Toast {
   if (!shouldPresentNotice(next)) return current;
   return shouldReplaceNotice(current, next) ? next : current;
@@ -571,8 +570,6 @@ export default function Workbench() {
   const commentsPanelRef = useRef<HTMLElement>(null);
   const commentsHeaderRef = useRef<HTMLElement>(null);
   const reviewStageRef = useRef<HTMLDivElement>(null);
-  const projectMenuRef = useRef<HTMLDivElement>(null);
-  const projectSwitcherRef = useRef<HTMLButtonElement>(null);
   const commentCounter = useRef(1);
   const changeCounter = useRef(1);
   const attachmentCounter = useRef(1);
@@ -633,12 +630,10 @@ export default function Workbench() {
     errorMessage: productErrorMessage,
   }));
   const recoveryIdentityRef = useRef<RecoveryIdentity | null>(null);
-  const projectLockedRef = useRef(false);
   const projectHydratingRef = useRef(false);
   const projectLoadErrorRef = useRef<string | null>(null);
   const viewTransitioningRef = useRef(false);
   const navigationOperationRef = useRef(0);
-  const submissionPendingRef = useRef(false);
   const historyActionPromiseRef = useRef<Promise<boolean> | null>(null);
   const autosaveTimerRef = useRef<number | null>(null);
   const auditPendingRef = useRef<DirectEditEvent[]>([]);
@@ -653,19 +648,12 @@ export default function Workbench() {
   const runSessionRef = useRef(new RunSession({
     sourcePath: WELCOME_PROJECT.sourcePath,
   }));
-  const submissionIntentRef = useRef<{
-    token: number;
-    epoch: number;
-    sourcePath: string;
-  } | null>(null);
-  const submissionIntentCounterRef = useRef(0);
   const toastRef = useRef<Toast>(null);
   const previousPersistStateRef = useRef(new Map<string, PersistState>());
   const previousRunStateRef = useRef(
     new Map<string, LifecycleState | "none">(),
   );
   const interruptionPresenceRef = useRef(new Map<string, boolean>());
-  const pendingReconcileBusyRef = useRef(false);
   const relinkingTargetRef = useRef<string | null>(null);
   const relinkSelectionArmedRef = useRef(false);
   const resumeSubmissionAfterRelinkRef = useRef(false);
@@ -735,7 +723,6 @@ export default function Workbench() {
   const [fileRenameBusy, setFileRenameBusy] = useState(false);
   const [fileRenameDraft, setFileRenameDraft] = useState("");
   const [fileRenameError, setFileRenameError] = useState("");
-  const [, setProjectMenuOpen] = useState(false);
   const [recentProjects, setRecentProjects] = useState<RecentProject[]>([]);
   const [recentProjectsError, setRecentProjectsError] = useState("");
   const [selection, setSelection] = useState<HtmlCanvasSelection | null>(null);
@@ -846,9 +833,23 @@ export default function Workbench() {
   const handlePreviewReady = useCallback((sha256: string | null) => {
     acknowledgeCanvasRender("preview", canvasGeneration, sha256);
   }, [acknowledgeCanvasRender, canvasGeneration]);
-  const [, setBridgeConnected] = useState<boolean | null>(null);
   const activeRun = runSnapshot.activeRun;
   const recentRunOutcome = runSnapshot.recentOutcome;
+  const projectLocked = runSnapshot.activeLocked;
+  const submissionPending = runSnapshot.submissionPending;
+  const generating = runSnapshot.activeSubmission?.phase === "preparing";
+  const activeRunOperation = activeRun ? activeRunOperationKey(activeRun) : "";
+  const isActiveRunOperationBusy = (kind: RunOperationKind) => (
+    runSnapshot.operationKeys.some(([operation, key]) => (
+      operation === kind && key === activeRunOperation
+    ))
+  );
+  const cancelling = isActiveRunOperationBusy("cancel");
+  const resolvingConflict = isActiveRunOperationBusy("resolve");
+  const pendingReconcileBusy = Boolean(
+    activeRun?.requestId === "pending"
+    && isActiveRunOperationBusy("poll"),
+  );
   const setActiveRun = useCallback((
     next: SetStateAction<ActiveRun | null>,
   ) => {
@@ -857,23 +858,18 @@ export default function Workbench() {
       typeof next === "function" ? next(session.activeRun) : next,
     );
   }, []);
-  const [projectLocked, setProjectLocked] = useState(false);
   const [projectHydrating, setProjectHydrating] = useState(false);
   const [projectLoadError, setProjectLoadError] = useState<string | null>(null);
   const [startupIssue, setStartupIssue] = useState<StartupIssue | null>(null);
   const [workspaceIssue, setWorkspaceIssue] = useState<WorkspaceIssue | null>(null);
   const [viewTransitioning, setViewTransitioning] = useState(false);
   const [draftPersistError, setDraftPersistError] = useState("");
-  const [generating, setGenerating] = useState(false);
-  const [cancelling, setCancelling] = useState(false);
   const [cancelRunConfirmationKey, setCancelRunConfirmationKey] =
     useState<string | null>(null);
   const [reviewPreparing, setReviewPreparing] = useState(false);
   const [readyReviewSession, setReadyReviewSession] =
     useState<ReadyReviewSession | null>(null);
   const [openingReadyVersion, setOpeningReadyVersion] = useState(false);
-  const [resolvingConflict, setResolvingConflict] = useState(false);
-  const [pendingReconcileBusy, setPendingReconcileBusy] = useState(false);
   const [relinkingTarget, setRelinkingTarget] = useState<string | null>(null);
   const [runtimeCapabilitiesReady, setRuntimeCapabilitiesReady] = useState(false);
   const [browserPreviewOnly, setBrowserPreviewOnly] = useState(false);
@@ -889,8 +885,6 @@ export default function Workbench() {
   const [repositoryOpenFailed, setRepositoryOpenFailed] = useState(false);
   const [userNoticeOpenFailed, setUserNoticeOpenFailed] = useState(false);
   const promptedUpdateVersionRef = useRef<string | null>(null);
-  const [, setOpenedAiVersionNotice] =
-    useState<OpenedAiVersionNotice | null>(null);
   const [toast, setToast] = useReducer(noticeReducer, null);
   const [pausedNoticeIdentity, setPausedNoticeIdentity] =
     useState<string | null>(null);
@@ -1169,7 +1163,6 @@ export default function Workbench() {
     const lifecycle = window.htmlAIAppLifecycle;
     if (!lifecycle?.onWorkspaceUnavailable) return undefined;
     return lifecycle.onWorkspaceUnavailable((issue) => {
-      setBridgeConnected(false);
       setWorkspaceIssue({
         title: issue.title || "本地项目资料暂时不可用",
         message: issue.message
@@ -1273,7 +1266,7 @@ export default function Workbench() {
     () => versions.find((version) => version.id === viewingVersionId) || null,
     [versions, viewingVersionId],
   );
-  const runInProgress = projectLocked || isLockedLifecycle(activeRun?.status);
+  const runInProgress = projectLocked;
   const currentQoderHandoffStatus = (
     activeRun?.sourcePath
     && activeRun.requestId
@@ -1665,9 +1658,6 @@ export default function Workbench() {
   useEffect(() => {
     attachmentUploadCountRef.current = attachmentUploadCount;
   }, [attachmentUploadCount]);
-  useEffect(() => {
-    projectLockedRef.current = projectLocked;
-  }, [projectLocked]);
   useEffect(() => {
     const capabilities = resolveRuntimeCapabilities({
       runtimeConfig: window.htmlAIRuntime,
@@ -2636,7 +2626,6 @@ export default function Workbench() {
                 currentExactVersionId: payload.currentExactVersionId,
               });
             }
-            setBridgeConnected(true);
             auditPendingRef.current = removeAcknowledgedAuditEvents(
               auditPendingRef.current,
               write.events,
@@ -2724,7 +2713,6 @@ export default function Workbench() {
                 error: visibleError,
               });
             }
-            setBridgeConnected(error.message.includes("fetch") ? false : true);
           }
           return false;
         } finally {
@@ -2870,7 +2858,7 @@ export default function Workbench() {
           label: "需要处理",
           updatedAt: Date.now(),
         });
-      } else if (isLockedLifecycle(outgoingRun.status)) {
+      } else if (isLockedLifecycleState(outgoingRun.status)) {
         markBackgroundProjectResult(outgoingSourcePath, {
           state: "processing",
           label: "正在处理",
@@ -2878,13 +2866,6 @@ export default function Workbench() {
         });
       }
     }
-    const backgroundRun = project.sourcePath
-      ? runSessionRef.current.runForSource(project.sourcePath)
-      : null;
-    const backgroundRunKey = backgroundRun
-      ? activeRunOperationKey(backgroundRun)
-      : "";
-    const opensLockedProject = isLockedLifecycle(backgroundRun?.status);
     projectSessionRef.current.openLocator(project.sourcePath || null);
     runSessionRef.current.activate(project.sourcePath || null);
     clearAutosaveTimer();
@@ -2895,20 +2876,17 @@ export default function Workbench() {
     auditPendingRef.current = [];
     recoveryIdentityRef.current = null;
     projectRegistrationPromiseRef.current = null;
-    projectLockedRef.current = opensLockedProject;
     projectHydratingRef.current = Boolean(project.sourcePath);
     markProjectHydrationStage("apply-authority");
     projectLoadErrorRef.current = null;
     viewTransitioningRef.current = false;
     navigationOperationRef.current += 1;
-    submissionPendingRef.current = false;
     draftSessionRef.current.deactivate();
     sourceHistorySessionRef.current.deactivate();
     projectRulesSessionRef.current.close();
     draftPersistenceAuthorityRef.current = null;
     draftRecoveryOperationIdRef.current = null;
     setProjectName(project.name);
-    setOpenedAiVersionNotice(null);
     setProjectRecordsPath(null);
     setLastModifiedAt(project.lastModifiedAt || null);
     setSelection(null);
@@ -2962,27 +2940,20 @@ export default function Workbench() {
         : "edit",
     );
     invalidateCanvasRenderAcks();
-    setProjectLocked(opensLockedProject);
     setProjectHydrating(Boolean(project.sourcePath));
     setProjectLoadError(null);
     setViewTransitioning(false);
     setDraftPersistError("");
-    setProjectMenuOpen(false);
     setProjectRecordsPreparing(false);
     setProjectRecordsError("");
-    pendingReconcileBusyRef.current = false;
-    setPendingReconcileBusy(false);
-    setGenerating(
-      sameLocalSourcePath(submissionIntentRef.current?.sourcePath, project.sourcePath),
-    );
-    setCancelling(
-      runSessionRef.current.isOperationBusy("cancel", backgroundRunKey),
-    );
     setOpeningReadyVersion(
-      runSessionRef.current.isOperationBusy("activate", backgroundRunKey),
-    );
-    setResolvingConflict(
-      runSessionRef.current.isOperationBusy("resolve", backgroundRunKey),
+      Boolean(
+        runSessionRef.current.activeRun
+        && runSessionRef.current.isOperationBusy(
+          "activate",
+          activeRunOperationKey(runSessionRef.current.activeRun),
+        ),
+      ),
     );
     setDrawer(null);
     setFileView(null);
@@ -2997,7 +2968,7 @@ export default function Workbench() {
       }
     }
     try {
-      if (!opensLockedProject) editorRef.current?.unlockNow?.();
+      if (!runSessionRef.current.activeLocked) editorRef.current?.unlockNow?.();
     } catch {
       // The outgoing lazy editor may be between ref cleanup and DOM teardown.
     }
@@ -3487,7 +3458,6 @@ export default function Workbench() {
     }
     let activeSource = sourceOverride === undefined ? projectSessionRef.current.sourcePath : sourceOverride;
     if (!activeSource) {
-      setBridgeConnected(null);
       return;
     }
     let epoch = epochOverride ?? projectSessionRef.current.epoch;
@@ -3849,10 +3819,8 @@ export default function Workbench() {
       } else if (!recoveredRun) {
         runSessionRef.current.forgetOutcome(activeSource);
       }
-      if (recoveredRun && isLockedLifecycle(recoveredRun.status)) {
+      if (recoveredRun && isLockedLifecycleState(recoveredRun.status)) {
         runSessionRef.current.trackRun(recoveredRun, { recovered: true });
-        setProjectLocked(true);
-        projectLockedRef.current = true;
         if (projectHydratingRef.current) {
           setHandoffPreviewOpen(false);
           setCanvasMode("edit");
@@ -3872,8 +3840,6 @@ export default function Workbench() {
           );
           if (!keepVisibleTerminal) runSessionRef.current.clearActiveRun();
         }
-        setProjectLocked(false);
-        projectLockedRef.current = false;
         if (!sourceBoundaryFrozen && !projectHydratingRef.current) {
           editorRef.current?.unlockNow?.();
         }
@@ -3974,9 +3940,12 @@ export default function Workbench() {
       projectLoadErrorRef.current = null;
       setProjectHydrating(false);
       setProjectLoadError(null);
-      setBridgeConnected(true);
       markProjectHydrationStage("ready");
-      if (sourceBoundaryFrozen && !recoveredAutosaveConflict && !projectLockedRef.current) {
+      if (
+        sourceBoundaryFrozen
+        && !recoveredAutosaveConflict
+        && !runSessionRef.current.activeLocked
+      ) {
         window.requestAnimationFrame(() => editorRef.current?.unlockNow?.());
       }
     } catch (cause) {
@@ -3990,7 +3959,6 @@ export default function Workbench() {
         setProjectHydrating(false);
         setProjectLoadError(message);
         invalidateCanvasRenderAcks();
-        setBridgeConnected(false);
         markProjectHydrationStage("failed");
       }
     } finally {
@@ -4063,7 +4031,7 @@ export default function Workbench() {
       if (recoveredOutcome) {
         runSessionRef.current.rememberOutcome(recoveredOutcome);
       }
-      if (recoveredRun && isLockedLifecycle(recoveredRun.status)) {
+      if (recoveredRun && isLockedLifecycleState(recoveredRun.status)) {
         runSessionRef.current.trackRun(recoveredRun, {
           activate: "never",
           recovered: true,
@@ -4079,7 +4047,6 @@ export default function Workbench() {
     const timer = window.setTimeout(() => {
       if (cancelled) return;
       if (!api) {
-        setBridgeConnected(null);
         return;
       }
       void Promise.allSettled([api.getActiveProject(), api.listRecentProjects()])
@@ -4130,27 +4097,6 @@ export default function Workbench() {
   }, [applyProject, hydrateRecentProjectRuns, refreshRecents, refreshWorkspace]);
 
   useEffect(() => {
-    const onPointerDown = (event: PointerEvent) => {
-      const target = event.target;
-      if (!(target instanceof Node)) return;
-      if (
-        projectMenuRef.current?.contains(target)
-        || projectSwitcherRef.current?.contains(target)
-      ) return;
-      setProjectMenuOpen(false);
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setProjectMenuOpen(false);
-    };
-    document.addEventListener("pointerdown", onPointerDown, true);
-    document.addEventListener("keydown", onKeyDown, true);
-    return () => {
-      document.removeEventListener("pointerdown", onPointerDown, true);
-      document.removeEventListener("keydown", onKeyDown, true);
-    };
-  }, []);
-
-  useEffect(() => {
     if (!toast) return;
     if (noticeTimerPaused) return;
     const dismissAfter = noticeAutoDismissMs(toast);
@@ -4193,7 +4139,6 @@ export default function Workbench() {
         event.error,
         "本轮评论自动恢复后仍无法记录，请稍后重试。",
       ));
-      setBridgeConnected(false);
       return;
     }
     if (event.type !== "acknowledged") return;
@@ -4213,7 +4158,6 @@ export default function Workbench() {
       });
     }
     setDraftPersistError("");
-    setBridgeConnected(true);
     if (!sessionState.pending) {
       commentSessionRef.current.clearDeletedCommentIds();
       persistDraftRecovery({
@@ -4283,12 +4227,12 @@ export default function Workbench() {
       label: "等待本轮提交准备结束",
       inspect: (boundary) => (
         boundary !== "submit"
-        && (submissionIntentRef.current || submissionPendingRef.current)
+        && runSessionRef.current.submissionPending
           ? { state: "pending", reason: "内部 AI 的冻结 Request 尚未安全建立。" }
           : { state: "resolved" }
       ),
       drain: () => waitUntilResolved(
-        () => !submissionIntentRef.current && !submissionPendingRef.current,
+        () => !runSessionRef.current.submissionPending,
       ),
     });
     coordinator.replace("attachments", {
@@ -4303,7 +4247,7 @@ export default function Workbench() {
     coordinator.replace("project-rules", {
       label: "等待项目规则保存",
       inspect: () => projectRulesSessionRef.current.inspect({
-        locked: projectLockedRef.current,
+        locked: runSessionRef.current.activeLocked,
       }),
       drain: () => saveProjectRulesRef.current(),
     });
@@ -4311,7 +4255,7 @@ export default function Workbench() {
       label: "等待当前 HTML 写回",
       inspect: (boundary) => {
         if (
-          projectLockedRef.current
+          runSessionRef.current.activeLocked
           && boundary !== "submit"
         ) return { state: "resolved" };
         if (!projectSessionRef.current.sourcePath && documentSessionRef.current.editRevision > 0) {
@@ -4361,7 +4305,7 @@ export default function Workbench() {
           || commentEditSessionHasChanges(commentSessionRef.current.editSession)
         );
         if (
-          (projectLockedRef.current && boundary !== "submit")
+          (runSessionRef.current.activeLocked && boundary !== "submit")
           || projectLoadErrorRef.current
         ) return { state: "resolved" };
         if (!captureProjectContext()) {
@@ -4403,7 +4347,7 @@ export default function Workbench() {
         );
         let context = captureProjectContext();
         if (
-          (projectLockedRef.current && boundary !== "submit")
+          (runSessionRef.current.activeLocked && boundary !== "submit")
           || projectLoadErrorRef.current
         ) return true;
         if (!context && !hasLocalDraftMaterial) return true;
@@ -4983,7 +4927,7 @@ export default function Workbench() {
     if (!snapshot) return;
     draftRecoveryOperationIdRef.current = null;
     persistDraftRecovery(snapshot);
-    if (projectLockedRef.current || projectLocked) return;
+    if (runSessionRef.current.activeLocked) return;
     void flushDraftPersistence(snapshot);
   }, [
     changeEvents,
@@ -5082,7 +5026,7 @@ export default function Workbench() {
             if (canCloseDuringHydration({
               projectHydrating: true,
               viewTransitioning: viewTransitioningRef.current,
-              submissionPending: submissionPendingRef.current,
+              submissionPending: runSessionRef.current.submissionPending,
               persistState: documentSessionRef.current.persistState,
               pendingWrite: Boolean(documentSessionRef.current.pendingWrite),
               flushInProgress: Boolean(documentSessionRef.current.flushPromise),
@@ -5117,7 +5061,7 @@ export default function Workbench() {
             return inAppBlock("当前撤销或重做没有安全完成，已取消关闭。");
           }
 
-          if (viewMode !== "history" && !projectLockedRef.current) {
+          if (viewMode !== "history" && !runSessionRef.current.activeLocked) {
             const frozen = editorRef.current?.freezeNow();
             if (!frozen) {
               return inAppBlock("编辑画布尚未就绪，已取消关闭以避免丢失文字草稿。");
@@ -5229,7 +5173,11 @@ export default function Workbench() {
           if (closeLifecycle.preparingRequestId === detail.requestId) {
             closeLifecycle.preparingRequestId = null;
           }
-          if (!ready && imposedEditorFreeze && !projectLockedRef.current) {
+          if (
+            !ready
+            && imposedEditorFreeze
+            && !runSessionRef.current.activeLocked
+          ) {
             if (closeLifecycle.frozenRequestId === detail.requestId) {
               closeLifecycle.frozenRequestId = null;
             }
@@ -5267,11 +5215,11 @@ export default function Workbench() {
         approvedRequestId: closeLifecycle.frozenRequestId,
         abortedRequestId: detail.requestId,
         imposedEditorFreeze: true,
-        projectLocked: projectLockedRef.current,
+        projectLocked: runSessionRef.current.activeLocked,
         projectHydrating: projectHydratingRef.current,
         projectLoadError: Boolean(projectLoadErrorRef.current),
         viewTransitioning: viewTransitioningRef.current,
-        submissionPending: submissionPendingRef.current,
+        submissionPending: runSessionRef.current.submissionPending,
         persistState: documentSessionRef.current.persistState,
         pendingWrite: Boolean(documentSessionRef.current.pendingWrite),
         flushInProgress: Boolean(documentSessionRef.current.flushPromise),
@@ -5427,7 +5375,7 @@ export default function Workbench() {
       sourceHistorySessionRef.current.deactivate();
       return true;
     }
-    if (projectLockedRef.current) {
+    if (runSessionRef.current.activeLocked) {
       const drained = await drainCoordinatorRef.current.drain("switch", {
         deadlineAt: Date.now() + 15_000,
       });
@@ -5596,7 +5544,6 @@ export default function Workbench() {
   const openProject = useCallback(async (recentPath?: string) => {
     if (!await prepareProjectSwitch(false, { retrySourcePath: recentPath })) return;
     pendingProjectOpenRef.current = null;
-    setProjectMenuOpen(false);
     const openRequest = projectOpenRequestRef.current + 1;
     projectOpenRequestRef.current = openRequest;
     const orderedByMainProcess = (
@@ -5692,7 +5639,6 @@ export default function Workbench() {
     }
 
     pendingProjectOpenRef.current = null;
-    setProjectMenuOpen(false);
     const openRequest = projectOpenRequestRef.current + 1;
     projectOpenRequestRef.current = openRequest;
     const acceptExternalOpen = window.htmlAIProjects?.acceptExternalOpen;
@@ -5795,12 +5741,11 @@ export default function Workbench() {
       && !externalDeferredRequestId
     ) return;
     const projectRulesUnsaved = projectRulesSessionRef.current
-      .inspect({ locked: projectLockedRef.current }).state !== "resolved";
+      .inspect({ locked: runSessionRef.current.activeLocked }).state !== "resolved";
     const draftState = draftSessionRef.current.inspect();
     const switchBlocked = Boolean(
       generating
-      || submissionIntentRef.current
-      || submissionPendingRef.current
+      || submissionPending
       || attachmentUploadCount > 0
       || projectHydrating
       || viewTransitioning
@@ -5902,6 +5847,7 @@ export default function Workbench() {
     projectHydrating,
     resumeDeferredProjectApplication,
     resumeDeferredExternalProject,
+    submissionPending,
     viewTransitioning,
   ]);
   useEffect(() => {
@@ -5928,7 +5874,6 @@ export default function Workbench() {
     await runLocalUserAction({
       kind: "show-source-in-folder",
       invoke: () => showInFolder(activeSourcePath),
-      onSuccess: () => setProjectMenuOpen(false),
       onFailure: (cause: unknown) => setToast({
         title: "无法在 Finder 中显示",
         message: productErrorMessage(
@@ -6206,8 +6151,6 @@ export default function Workbench() {
       ]);
       setProjectName(result.stem || requestedStem);
       setLastModifiedAt(result.lastModifiedAt || null);
-      setOpenedAiVersionNotice(null);
-
       await Promise.all([
         refreshRecents(),
         refreshWorkspace(
@@ -6331,7 +6274,7 @@ export default function Workbench() {
     if (
       runtimeCapabilitiesRef.current.sourceEditing !== "enabled"
       ||
-      projectLockedRef.current
+      runSessionRef.current.activeLocked
       || projectHydratingRef.current
       || projectLoadErrorRef.current
       || viewTransitioningRef.current
@@ -6339,7 +6282,6 @@ export default function Workbench() {
       || String(documentSessionRef.current.persistState) === "conflict"
       || viewMode === "history"
     ) return false;
-    setOpenedAiVersionNotice(null);
     try {
       enqueueAutosave(nextHtml, mutation, sourceTransaction);
     } catch (cause) {
@@ -6731,7 +6673,7 @@ export default function Workbench() {
     if (
       runtimeCapabilitiesRef.current.sourceEditing !== "enabled"
       || !projectSessionRef.current.sourcePath
-      || projectLockedRef.current
+      || runSessionRef.current.activeLocked
       || projectHydratingRef.current
       || projectLoadErrorRef.current
       || viewTransitioningRef.current
@@ -6995,7 +6937,6 @@ export default function Workbench() {
         state: "idle",
         error: "",
       });
-      setBridgeConnected(true);
       return true;
     };
 
@@ -7357,7 +7298,7 @@ export default function Workbench() {
     if (relinkingTargetRef.current && finishTargetRelink(target)) return;
     if (attachmentUploadCountRef.current > 0) return;
     if (
-      projectLockedRef.current
+      runSessionRef.current.activeLocked
       || projectHydratingRef.current
       || projectLoadErrorRef.current
       || viewTransitioningRef.current
@@ -7441,7 +7382,6 @@ export default function Workbench() {
     }
     setCanvasMode("edit");
     setDrawer(null);
-    setProjectMenuOpen(false);
     const globalTarget: HtmlCanvasSelection = {
       id: "target_global_page",
       label: "整个页面",
@@ -7517,7 +7457,7 @@ export default function Workbench() {
 
   const addComment = useCallback(async () => {
     if (
-      projectLockedRef.current
+      runSessionRef.current.activeLocked
       || projectHydratingRef.current
       || projectLoadErrorRef.current
       || viewTransitioningRef.current
@@ -7563,7 +7503,7 @@ export default function Workbench() {
     const currentTarget = commentSessionRef.current.composerTarget;
     if (
       commentEpoch !== projectSessionRef.current.epoch
-      || projectLockedRef.current
+      || runSessionRef.current.activeLocked
       || projectHydratingRef.current
       || projectLoadErrorRef.current
       || viewTransitioningRef.current
@@ -7604,7 +7544,6 @@ export default function Workbench() {
       composerAttachments: [],
       composerTarget: null,
     });
-    setOpenedAiVersionNotice(null);
     setComposerOpen(false);
     setPendingDeleteCommentId(null);
     if (toastRef.current?.dedupeKey === "unfinished-comment-draft") {
@@ -8235,8 +8174,9 @@ export default function Workbench() {
   }, []);
 
   const generateRequest = useCallback(async (fromDeferred = false) => {
-    if (submissionIntentRef.current) return;
-    if (!projectSessionRef.current.sourcePath) {
+    if (runSessionRef.current.submissionPending) return;
+    const submissionSourcePath = projectSessionRef.current.sourcePath;
+    if (!submissionSourcePath) {
       if (typeof window !== "undefined" && !window.htmlAIProjects) return;
       void openProject();
       return;
@@ -8254,7 +8194,7 @@ export default function Workbench() {
     if (documentSessionRef.current.persistState === "failed" || documentSessionRef.current.persistState === "conflict") {
       return;
     }
-    if (projectLockedRef.current) {
+    if (runSessionRef.current.activeLocked) {
       setDrawer("handoff");
       return;
     }
@@ -8315,29 +8255,21 @@ export default function Workbench() {
       return;
     }
 
-    const submissionIntent = {
-      token: ++submissionIntentCounterRef.current,
-      epoch: projectSessionRef.current.epoch,
-      sourcePath: projectSessionRef.current.sourcePath,
-    };
-    submissionIntentRef.current = submissionIntent;
-    setGenerating(true);
-    const releaseSubmissionIntent = () => {
-      if (submissionIntentRef.current?.token === submissionIntent.token) {
-        submissionIntentRef.current = null;
-      }
-      if (sameLocalSourcePath(projectSessionRef.current.sourcePath, submissionIntent.sourcePath)) {
-        setGenerating(false);
-      }
+    const submissionEpoch = projectSessionRef.current.epoch;
+    const submission = runSessionRef.current.beginSubmission({
+      sourcePath: submissionSourcePath,
+    });
+    if (!submission) return;
+    const releaseSubmission = () => {
+      runSessionRef.current.releaseSubmission(submission);
     };
 
     try {
       const registered = await ensureProjectRegistered();
       if (!registered) throw new Error("当前项目已经切换，请重试。");
       if (
-        submissionIntentRef.current?.token !== submissionIntent.token
-        || projectSessionRef.current.epoch !== submissionIntent.epoch
-        || !sameLocalSourcePath(projectSessionRef.current.sourcePath, submissionIntent.sourcePath)
+        projectSessionRef.current.epoch !== submissionEpoch
+        || !sameLocalSourcePath(projectSessionRef.current.sourcePath, submission.sourcePath)
       ) {
         throw new Error("当前项目已经切换，请重试。");
       }
@@ -8354,13 +8286,13 @@ export default function Workbench() {
         dedupeKey: "project-registration",
         action: { id: "retry-submit", label: "重新建立并发送" },
       });
-      releaseSubmissionIntent();
+      releaseSubmission();
       return;
     }
     activeComments = normalizeCurrentGlobalComments();
     if (activeComments.length === 0) {
       requestComposerFocus();
-      releaseSubmissionIntent();
+      releaseSubmission();
       return;
     }
     const unsafeRegisteredTargets = activeComments.filter(
@@ -8368,7 +8300,7 @@ export default function Workbench() {
     );
     if (unsafeRegisteredTargets.length > 0) {
       setToast(unsafeCommentTargetsNotice(unsafeRegisteredTargets));
-      releaseSubmissionIntent();
+      releaseSubmission();
       return;
     }
 
@@ -8384,22 +8316,24 @@ export default function Workbench() {
       editorRef.current?.showCommitBlocked(
         frozen?.reason || "画布还没有形成可验证的 HTML 快照，本轮不会发送。",
       );
-      releaseSubmissionIntent();
+      releaseSubmission();
       return;
     }
-    projectLockedRef.current = true;
-    submissionPendingRef.current = true;
-    setProjectLocked(true);
+    if (!runSessionRef.current.freezeSubmission(submission)) {
+      editorRef.current?.unlockNow?.();
+      releaseSubmission();
+      return;
+    }
     const capturedHtml = frozen.html;
     if (capturedHtml !== documentSessionRef.current.html) {
       enqueueAutosave(capturedHtml, frozen.pendingMutation || undefined);
     }
     const freezeCutoffRevision = documentSessionRef.current.editRevision;
     const submissionContext = {
-      epoch: projectSessionRef.current.epoch,
+      epoch: submissionEpoch,
       projectId: projectSessionRef.current.projectId,
       documentId: projectSessionRef.current.documentId,
-      sourcePath: projectSessionRef.current.sourcePath,
+      sourcePath: submission.sourcePath,
       projectName,
       comments: activeComments.map((comment) => ({ ...comment })),
       changeEvents: commentSessionRef.current.changeEvents.map((event) => ({ ...event })),
@@ -8437,6 +8371,7 @@ export default function Workbench() {
     let requestDispatched = false;
     let durableRun: ActiveRun | null = null;
     let confirmedNoRun = false;
+    let submissionUncertain = false;
     try {
       const drained = await drainCoordinatorRef.current.drain("submit", {
         deadlineAt: Date.now() + 60_000,
@@ -8523,10 +8458,8 @@ export default function Workbench() {
       );
       if (!run) throw new Error("任务已创建，但缺少可验证的 Request 身份。");
       durableRun = run;
-      submissionPendingRef.current = false;
       runSessionRef.current.trackRun(run);
       if (isCurrentProjectContext(submissionContext)) {
-        setBridgeConnected(true);
         setDrawer("handoff");
       }
     } catch (cause) {
@@ -8545,8 +8478,6 @@ export default function Workbench() {
             runSessionRef.current.trackRun(durableRun);
           } else if (isCurrentProjectContext(submissionContext)) {
             confirmedNoRun = true;
-            projectLockedRef.current = false;
-            setProjectLocked(false);
             runSessionRef.current.clearActiveRun();
             editorRef.current?.unlockNow?.();
           }
@@ -8555,8 +8486,6 @@ export default function Workbench() {
           // reconciliation succeeds; unlocking here could split client/server state.
         }
       } else if (isCurrentProjectContext(submissionContext)) {
-        projectLockedRef.current = false;
-        setProjectLocked(false);
         editorRef.current?.unlockNow?.();
         runSessionRef.current.clearActiveRun();
       }
@@ -8572,6 +8501,8 @@ export default function Workbench() {
           error: "本轮任务状态暂时无法确认。当前项目保持只读，避免重复建立任务。",
         } as ActiveRun;
         setActiveRun(unknownRun);
+        submissionUncertain = runSessionRef.current
+          .markSubmissionUncertain(submission);
       }
       if (!durableRun && requestDispatched && !confirmedNoRun) {
         setDrawer("handoff");
@@ -8588,8 +8519,7 @@ export default function Workbench() {
         setDrawer("handoff");
       }
     } finally {
-      submissionPendingRef.current = false;
-      releaseSubmissionIntent();
+      if (!submissionUncertain) releaseSubmission();
     }
     if (durableRun?.handoffMessage) {
       await sendToQoderWork(durableRun.handoffMessage, durableRun);
@@ -8851,17 +8781,9 @@ export default function Workbench() {
     }
     setActiveRun(completedRun);
     setDrawer(null);
-    setProjectLocked(false);
-    projectLockedRef.current = false;
     viewTransitioningRef.current = false;
     setViewTransitioning(false);
     window.requestAnimationFrame(() => editorRef.current?.unlockNow?.());
-    setOpenedAiVersionNotice({
-      sourcePath: committedSourcePath,
-      fileName: fileNameFromSourcePath(committedSourcePath),
-      versionLabel: candidateLabel,
-      generatedAt: versionGeneratedAt,
-    });
     if (protocolViolation) {
       const warning = "内部 AI 的临时输出在最终化后又被修改；已提交版本本身未受影响。";
       const warningRun: ActiveRun = {
@@ -9229,8 +9151,6 @@ export default function Workbench() {
       });
       if (isCurrentProject) {
         clearBackgroundProjectResult(run.sourcePath);
-        setProjectLocked(true);
-        projectLockedRef.current = true;
         setDrawer("handoff");
         if (toastRef.current?.dedupeKey === "ai-submit") setToast(null);
       } else if (previousBackgroundState !== "ready-to-open") {
@@ -9264,8 +9184,6 @@ export default function Workbench() {
       runSessionRef.current.rememberOutcome(noChangeRun);
       if (isCurrentProject) {
         clearBackgroundProjectResult(run.sourcePath);
-        projectLockedRef.current = false;
-        setProjectLocked(false);
         editorRef.current?.unlockNow?.();
         setActiveRun(noChangeRun);
         setDrawer("handoff");
@@ -9282,8 +9200,6 @@ export default function Workbench() {
       deleteTrackedRun();
       if (isCurrentProject) {
         clearBackgroundProjectResult(run.sourcePath);
-        projectLockedRef.current = false;
-        setProjectLocked(false);
         editorRef.current?.unlockNow?.();
         runSessionRef.current.clearActiveRun();
         setDrawer(null);
@@ -9304,8 +9220,6 @@ export default function Workbench() {
       };
       runSessionRef.current.rememberOutcome(errorRun);
       if (isCurrentProject) {
-        projectLockedRef.current = false;
-        setProjectLocked(false);
         editorRef.current?.unlockNow?.();
         setActiveRun(errorRun);
         setDrawer("handoff");
@@ -9329,8 +9243,6 @@ export default function Workbench() {
     });
     if (isCurrentProject) {
       clearBackgroundProjectResult(run.sourcePath);
-      setProjectLocked(isLockedLifecycle(nextRun.status));
-      projectLockedRef.current = isLockedLifecycle(nextRun.status);
       if (nextRun.status === "awaiting-conflict-resolution"
         || nextRun.status === "recovering-transaction") {
         setDrawer("handoff");
@@ -9392,16 +9304,15 @@ export default function Workbench() {
   const reconcilePendingRun = useCallback(async (): Promise<void> => {
     const pendingRun = runSessionRef.current.activeRun;
     if (
-      pendingReconcileBusyRef.current
-      || submissionPendingRef.current
-      || !projectLockedRef.current
+      runSessionRef.current.submissionPending
+      || !runSessionRef.current.activeLocked
       || pendingRun?.requestId !== "pending"
       || !projectSessionRef.current.sourcePath
     ) return;
     const context = captureProjectContext();
     if (!context) return;
-    pendingReconcileBusyRef.current = true;
-    setPendingReconcileBusy(true);
+    const operationKey = activeRunOperationKey(pendingRun);
+    if (!runSessionRef.current.beginOperation("poll", operationKey)) return;
     try {
       const payload = await bridgeClient.workspace(context.sourcePath);
       if (!isCurrentProjectContext(context)) return;
@@ -9422,9 +9333,7 @@ export default function Workbench() {
           activate: "always",
           recovered: true,
         });
-        setProjectLocked(isLockedLifecycle(recoveredRun.status));
-        projectLockedRef.current = isLockedLifecycle(recoveredRun.status);
-        setBridgeConnected(true);
+        runSessionRef.current.clearActiveSubmission();
         setDrawer("handoff");
         return;
       }
@@ -9432,36 +9341,37 @@ export default function Workbench() {
       if (recoveredOutcome) {
         runSessionRef.current.rememberOutcome(recoveredOutcome);
         runSessionRef.current.setActiveRun(recoveredOutcome);
-        projectLockedRef.current = false;
-        setProjectLocked(false);
+        runSessionRef.current.clearActiveSubmission();
         editorRef.current?.unlockNow?.();
         setDrawer("handoff");
         return;
       }
-      projectLockedRef.current = false;
-      setProjectLocked(false);
+      runSessionRef.current.clearActiveSubmission();
       editorRef.current?.unlockNow?.();
       runSessionRef.current.clearActiveRun();
       setDrawer(null);
     } catch {
       if (!isCurrentProjectContext(context)) return;
     } finally {
-      pendingReconcileBusyRef.current = false;
-      if (isCurrentProjectContext(context)) setPendingReconcileBusy(false);
+      runSessionRef.current.endOperation("poll", operationKey);
     }
   }, [captureProjectContext, isCurrentProjectContext]);
 
   useEffect(() => {
     if (
       generating
-      || submissionPendingRef.current
+      || submissionPending
       || !projectLocked
       || activeRun?.requestId !== "pending"
       || !sourcePath
     ) return;
-    void reconcilePendingRun();
+    const initialReconcile = window.setTimeout(
+      () => void reconcilePendingRun(),
+      0,
+    );
     const timer = window.setInterval(() => void reconcilePendingRun(), 4_000);
     return () => {
+      window.clearTimeout(initialReconcile);
       window.clearInterval(timer);
     };
   }, [
@@ -9470,6 +9380,7 @@ export default function Workbench() {
     projectLocked,
     reconcilePendingRun,
     sourcePath,
+    submissionPending,
   ]);
 
   const cancelActiveRun = useCallback(async ({
@@ -9494,8 +9405,6 @@ export default function Workbench() {
       });
     };
     if (run.sourcePath === "preview://welcome") {
-      projectLockedRef.current = false;
-      setProjectLocked(false);
       editorRef.current?.unlockNow?.();
       runSessionRef.current.clearActiveRun();
       runSessionRef.current.clearActiveHandoff();
@@ -9516,7 +9425,6 @@ export default function Workbench() {
     )
       ? captureProjectContext()
       : null;
-    setCancelling(true);
     try {
       await bridgeClient.cancelActiveRun({
         projectId: run.projectId,
@@ -9532,8 +9440,6 @@ export default function Workbench() {
         runSessionRef.current.removeRun(run);
       }
       if (context && isCurrentProjectContext(context)) {
-        projectLockedRef.current = false;
-        setProjectLocked(false);
         editorRef.current?.unlockNow?.();
         runSessionRef.current.clearActiveRun();
         setHandoffPreviewOpen(false);
@@ -9568,9 +9474,6 @@ export default function Workbench() {
       return false;
     } finally {
       runSessionRef.current.endOperation("cancel", operationKey);
-      if (context && isCurrentProjectContext(context)) {
-        setCancelling(false);
-      }
     }
   }, [
     activeRun,
@@ -9606,7 +9509,6 @@ export default function Workbench() {
     )
       ? captureProjectContext()
       : null;
-    setResolvingConflict(true);
     try {
       const payload = await bridgeClient.resolveConflict({
         projectId: run.projectId,
@@ -9622,8 +9524,6 @@ export default function Workbench() {
           runSessionRef.current.removeRun(run);
         }
         if (context && isCurrentProjectContext(context)) {
-          projectLockedRef.current = false;
-          setProjectLocked(false);
           editorRef.current?.unlockNow?.();
           runSessionRef.current.clearActiveRun();
           await reloadCurrentSource(true);
@@ -9666,9 +9566,6 @@ export default function Workbench() {
       }
     } finally {
       runSessionRef.current.endOperation("resolve", operationKey);
-      if (context && isCurrentProjectContext(context)) {
-        setResolvingConflict(false);
-      }
     }
   }, [
     activeRun,
@@ -10371,8 +10268,6 @@ export default function Workbench() {
     setHandoffPreviewOpen(false);
     setCanvasMode("edit");
     setDrawer(null);
-    setProjectLocked(false);
-    projectLockedRef.current = false;
     editorRef.current?.unlockNow?.();
   };
   const reopenRecentRunOutcome = () => {
@@ -10726,7 +10621,6 @@ export default function Workbench() {
               disabled={browserPreviewOnly || runInProgress || viewMode === "history"}
               title={browserPreviewOnly ? "浏览器预览为只读模式" : undefined}
               onClick={() => {
-                setProjectMenuOpen(false);
                 if (canvasMode !== "preview") {
                   setCanvasMode("edit");
                   return;
@@ -10790,7 +10684,6 @@ export default function Workbench() {
                   editorRef.current?.applyPageViewContext(null);
                   setSelection(null);
                   updateFocusedComment(null);
-                  setProjectMenuOpen(false);
                   setCanvasMode("preview");
                 };
                 if (deferEditorCommand("project-switch", enterPreview)) return;
@@ -11032,7 +10925,6 @@ export default function Workbench() {
                   height={`${canvasDocumentHeight}px`}
                   onChange={handleCanvasChange}
                   onInteraction={() => {
-                    setProjectMenuOpen(false);
                     if (relinkingTargetRef.current) {
                       relinkSelectionArmedRef.current = true;
                     }
@@ -11091,7 +10983,6 @@ export default function Workbench() {
               sourcePath={sourcePath || undefined}
               height="100%"
               transport={interactivePreviewTransport}
-              onInteraction={() => setProjectMenuOpen(false)}
               onReady={handlePreviewReady}
             />
           ) : null}

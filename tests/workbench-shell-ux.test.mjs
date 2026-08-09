@@ -141,17 +141,13 @@ test("the right-side project panel keeps file actions concise and safe", () => {
   assert.doesNotMatch(workbench, />新建 HTML</);
   assert.doesNotMatch(workbench, /api\.newHtml/);
   assert.doesNotMatch(workbench, /className="project-switcher"|className="project-menu"/);
-  assert.match(
-    workbench,
-    /kind: "show-source-in-folder"[\s\S]*?invoke: \(\) => showInFolder\(activeSourcePath\)[\s\S]*?onSuccess: \(\) => setProjectMenuOpen\(false\)/,
-  );
+  assert.match(workbench, /kind: "show-source-in-folder"[\s\S]*?invoke: \(\) => showInFolder\(activeSourcePath\)/);
   assert.match(workbench, /formatProjectTimestamp\(project\.lastOpenedAt\)/);
   assert.doesNotMatch(workbench, /formatRecentProjectTimestamp/);
   assert.match(styles, /\.side-drawer\s*\{[\s\S]*?width:\s*min\(410px, calc\(100vw - 24px\)\)/);
   assert.match(styles, /\.project-tabs\s*\{[\s\S]*?grid-template-columns:\s*1fr 1fr/);
   assert.match(styles, /\.current-project-card\s*\{[\s\S]*?grid-template-columns:\s*42px minmax\(0, 1fr\) auto/);
-  assert.match(workbench, /onInteraction=\{\(\) => setProjectMenuOpen\(false\)\}/);
-  assert.match(workbench, /document\.addEventListener\("pointerdown", onPointerDown, true\)/);
+  assert.doesNotMatch(workbench, /projectMenuRef|projectSwitcherRef|setProjectMenuOpen/);
 
   for (const source of [mainProcess, preload]) {
     assert.match(source, /html-projects:show-in-folder/);
@@ -764,7 +760,7 @@ test("QoderWork handoff exposes a truthful process board with review-first ready
   assert.doesNotMatch(processingHeader, /cancelActiveRun|取消发送/);
   assert.match(
     workbench,
-    /generating[\s\S]*?\|\| submissionPendingRef\.current[\s\S]*?\|\| !projectLocked[\s\S]*?activeRun\?\.requestId !== "pending"/,
+    /generating[\s\S]*?\|\| submissionPending[\s\S]*?\|\| !projectLocked[\s\S]*?activeRun\?\.requestId !== "pending"/,
   );
 });
 
@@ -829,7 +825,7 @@ test("ending a copied AI run warns clearly and restores editing with a stop remi
 
 test("processing keeps its decision surface dismissible and project navigation available", () => {
   const recoveredRunStart = workbench.indexOf(
-    "if (recoveredRun && isLockedLifecycle(recoveredRun.status))",
+    "if (recoveredRun && isLockedLifecycleState(recoveredRun.status))",
   );
   const recoveredRunEnd = workbench.indexOf("} else {", recoveredRunStart);
   const recoveredRun = workbench.slice(recoveredRunStart, recoveredRunEnd);
@@ -935,13 +931,20 @@ test("AI submission and run operations remain isolated by project and run identi
     generateStart,
   );
   const generate = workbench.slice(generateStart, generateEnd);
-  const intentClaim = generate.indexOf("submissionIntentRef.current = submissionIntent");
+  const intentClaim = generate.indexOf(
+    "const submission = runSessionRef.current.beginSubmission",
+  );
   const registration = generate.indexOf("await ensureProjectRegistered()");
   assert.ok(intentClaim >= 0 && registration > intentClaim);
-  assert.match(generate, /if \(submissionIntentRef\.current\) return/);
+  assert.match(generate, /if \(runSessionRef\.current\.submissionPending\) return/);
   assert.match(
     generate,
-    /submissionIntentRef\.current\?\.token !== submissionIntent\.token[\s\S]*?projectSessionRef\.current\.epoch !== submissionIntent\.epoch[\s\S]*?!sameLocalSourcePath\(projectSessionRef\.current\.sourcePath, submissionIntent\.sourcePath\)/,
+    /projectSessionRef\.current\.epoch !== submissionEpoch[\s\S]*?!sameLocalSourcePath\(projectSessionRef\.current\.sourcePath, submission\.sourcePath\)[\s\S]*?runSessionRef\.current\.freezeSubmission\(submission\)/,
+  );
+  assert.match(generate, /runSessionRef\.current\.freezeSubmission\(submission\)/);
+  assert.match(
+    generate,
+    /runSessionRef\.current\s*\.markSubmissionUncertain\(submission\)/,
   );
   assert.match(
     workbench,
@@ -1066,10 +1069,7 @@ test("AI completion adopts the generated semantic file before editing resumes", 
     workbench,
     /await refreshWorkspace\(committedSourcePath, adoptedContext\.epoch\)/,
   );
-  assert.match(
-    workbench,
-    /setOpenedAiVersionNotice\(\{[\s\S]*?fileName: fileNameFromSourcePath\(committedSourcePath\)[\s\S]*?versionLabel: candidateLabel/,
-  );
+  assert.doesNotMatch(workbench, /OpenedAiVersionNotice|setOpenedAiVersionNotice/);
   assert.match(
     workbench,
     /activeRun\.status === "ready-to-open"[\s\S]*?审阅对比[\s\S]*?直接打开/u,
