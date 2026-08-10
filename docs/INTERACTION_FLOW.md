@@ -267,7 +267,7 @@ SourcePatch、不写磁盘、不运行作者脚本，也不引入右键菜单、
 本地文本编辑会直接修改源文件并保存
 ```
 
-这里的源文件是项目当前指向的 HTML。首次打开时是用户选择的原始文件；第一次 AI 成功后是 `working/V1.1.html`，下一次是 `working/V1.2.html`。
+这里的源文件是项目当前指向的 HTML。首次打开时是用户选择的原始文件；第一次 AI 成功后是 `working/<原用户文件名>-V1.1.html`，下一次是 `working/<原用户文件名>-V1.2.html`。
 
 每次编辑的交互顺序：
 
@@ -572,7 +572,7 @@ commit pending native edit checkpoint
 
 1. 读取 Prompt、v3 Request、input manifest、项目规则和冻结输入。
 2. 只修改明确目标及聊天补充指向的位置。
-3. 将完整 HTML 写入唯一 `output/index.html`。
+3. 将完整 HTML 写入 Prompt 冻结的唯一 `output/<原用户文件名>-V1.x.html`。PageRoot 已在 Prompt 中给出原用户文件名、文件版本号、精确文件名和绝对路径；AI 不得从 `input/base/index.html` 推导名称，也不得自行改名、递增版本号或写入 `output/index.html`。
 4. 完成全部写入后执行 Prompt 给出的完整 finalizer 命令。
 
 产品可以用文件可读性检查辅助显示进度，但不得把“暂时没有变化”解释为完成。

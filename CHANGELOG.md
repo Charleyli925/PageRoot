@@ -4,6 +4,10 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
+- AI Attempt 输出现在保留用户原始文件名并附加系统分配的 `V1.x` 后缀，例如
+  `市场概览-V1.9.html`。Prompt 明确给出每轮唯一的绝对输出路径，AI 不再把
+  冻结输入的 `index.html` 误当成输出文件名；已冻结的旧 Attempt 仍可按原
+  `output/index.html` 合同完成。
 - Add a credential-free Release Dry Run for Pull Requests that change packaging,
   release metadata, Electron or packaged Bridge paths. Two independent macOS
   jobs now assemble and checkpoint an explicitly unsigned non-release App, then restore it in

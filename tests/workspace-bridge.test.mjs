@@ -423,6 +423,8 @@ async function runFinalizer(workspace, run, overrides = {}) {
 }
 
 function manualCompletionFor(run, baseHtml, outputHtml) {
+  const outputPrefix =
+    `requests/${run.requestId}/attempts/${run.attemptId}/`;
   return {
     schemaVersion: "1.0.0",
     finalizerVersion: "1.0.0",
@@ -438,7 +440,9 @@ function manualCompletionFor(run, baseHtml, outputHtml) {
     candidateVersionLabel: run.candidateVersionLabel,
     baseSnapshotSha256: run.activeRun.baseSnapshotSha256,
     inputManifestSha256: run.activeRun.inputManifestSha256,
-    outputRelativePath: "output/index.html",
+    outputRelativePath: run.activeRun.outputRelativePath.slice(
+      outputPrefix.length,
+    ),
     outputSha256: hash(outputHtml),
     baseComparisonSha256: comparisonSha256(baseHtml),
     outputComparisonSha256: comparisonSha256(outputHtml),
@@ -1208,8 +1212,27 @@ test("AI readOrder excludes the full audit archive and compacts long module quot
     inputManifest.readOrder.includes("input/annotations/records.json"),
     false,
   );
+  assert.equal(
+    changeRequest.finalization.outputRelativePath,
+    "output/compact-ai-input-V1.1.html",
+  );
+  assert.equal(
+    submitted.body.outputPath,
+    join(
+      submitted.body.attemptPath,
+      "output",
+      "compact-ai-input-V1.1.html",
+    ),
+  );
   assert.doesNotMatch(prompt, /input\/annotations\/records\.json/);
   assert.match(prompt, /^# PageRoot 本轮修改 · compact-ai-input$/m);
+  assert.match(prompt, /原用户文件名：`compact-ai-input`/);
+  assert.match(prompt, /本轮文件版本号：`V1\.1`/);
+  assert.match(prompt, /固定输出文件名：`compact-ai-input-V1\.1\.html`/);
+  assert.match(
+    prompt,
+    /input\/base\/index\.html 只是冻结输入的固定存储名，不代表用户文件名/,
+  );
   assert.match(prompt, /不要读取未列入 readOrder 的审计归档/);
   assert.match(
     prompt,
@@ -2685,7 +2708,9 @@ test("comment attachments persist in the project and freeze with comment-target 
   assert.match(prompt, /严格按 input-manifest\.json 的 readOrder/);
   assert.match(prompt, /不要扫描其他任务、版本或项目/);
   assert.match(prompt, /只修改用户明确指定的区域/);
-  assert.match(prompt, /只把一个完整 HTML 写入当前 Attempt 的 output\/index\.html/);
+  assert.match(prompt, /只把一个完整 HTML 写入下方“唯一 HTML 输出”的精确路径/);
+  assert.match(prompt, /固定输出文件名：`comment-attachments-V1\.1\.html`/);
+  assert.match(prompt, /output\/comment-attachments-V1\.1\.html/);
   assert.match(prompt, /不得直接编辑 USER_SUPPLEMENT\.json、PROJECT\.md、冻结输入或其他协议文件/);
   assert.match(prompt, new RegExp(requestAttachment.localPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.doesNotMatch(prompt, /dataBase64|project-local-comment-image/);
@@ -2860,7 +2885,7 @@ test("read-only file inspector exposes only runtime, audit, and request artifact
     "PROJECT_FILE_NOT_INSPECTABLE",
   );
   const unsupportedAttemptOutput = await inspect(
-    `requests/${run.requestId}/attempts/${run.attemptId}/output/index.html`,
+    run.activeRun.outputRelativePath,
   );
   assert.equal(unsupportedAttemptOutput.response.status, 403);
   assert.equal(
@@ -2898,6 +2923,10 @@ test("mandatory finalizer controls completion, identity, no-change, and cancella
   assert.equal(run.previousVersionId, "ver_0001");
   assert.equal(run.basedOnVersionId, "ver_0001");
   assert.equal(run.activeRun.status, "processing");
+  assert.equal(
+    run.activeRun.outputRelativePath,
+    `requests/${run.requestId}/attempts/${run.attemptId}/output/finalizer-V1.1.html`,
+  );
   assert.match(await readFile(run.promptPath, "utf8"), /finalize-attempt\.mjs/);
   await writeFile(
     run.outputPath,
@@ -2937,6 +2966,7 @@ test("mandatory finalizer controls completion, identity, no-change, and cancella
   const completionEvidence = JSON.parse(
     await readFile(run.completionPath, "utf8"),
   );
+  assert.equal(completionEvidence.outputRelativePath, "output/finalizer-V1.1.html");
   await delay(20);
   const ready = await requestJson(
     bridge.baseUrl,
@@ -3033,6 +3063,7 @@ test("mandatory finalizer controls completion, identity, no-change, and cancella
     transaction.candidateContentSha256,
     created.body.contentSha256,
   );
+  assert.equal(transaction.outputRelativePath, run.activeRun.outputRelativePath);
   const exactV2 = await requestJson(
     bridge.baseUrl,
     `/version-file?sourcePath=${encodeURIComponent(sourcePath)}&versionId=ver_0002`,
@@ -3056,6 +3087,27 @@ test("mandatory finalizer controls completion, identity, no-change, and cancella
     mutationDetected.body.protocolViolation.code,
     "OUTPUT_MUTATED_AFTER_FINALIZATION",
   );
+  const originalCompletionText = await readFile(run.completionPath, "utf8");
+  const pathTamperedCompletion = JSON.parse(originalCompletionText);
+  pathTamperedCompletion.outputRelativePath = "../../outside.html";
+  await writeFile(
+    run.completionPath,
+    `${JSON.stringify(pathTamperedCompletion, null, 2)}\n`,
+    "utf8",
+  );
+  const pathTamperingDetected = await requestJson(
+    bridge.baseUrl,
+    `/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
+  );
+  assert.equal(
+    pathTamperingDetected.body.protocolViolation.code,
+    "OUTPUT_PATH_IDENTITY_MISMATCH",
+  );
+  assert.equal(
+    pathTamperingDetected.body.protocolViolation.expectedOutputRelativePath,
+    completionEvidence.outputRelativePath,
+  );
+  await writeFile(run.completionPath, originalCompletionText, "utf8");
   assert.equal(
     await readFile(created.body.currentPath, "utf8"),
     committedSource,

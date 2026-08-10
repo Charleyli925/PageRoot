@@ -40,8 +40,8 @@ v3 是干净切换后的唯一运行时协议。v1/v2 记录在切换前整体�
         ├── runtime-state.json
         ├── edit-audit.jsonl
         ├── working/
-        │   ├── V1.1.html
-        │   └── V1.2.html
+        │   ├── <原用户文件名>-V1.1.html
+        │   └── <原用户文件名>-V1.2.html
         ├── draft/
         │   ├── annotations.json
         │   └── attachments/<commentId>/<attachmentId>-<fileName>
@@ -77,7 +77,7 @@ v3 是干净切换后的唯一运行时协议。v1/v2 记录在切换前整体�
                         ├── candidate-assessment.json
                         ├── validation-review.json (legacy only)
                         ├── annotations.json
-                        ├── output/index.html
+                        ├── output/<原用户文件名>-V1.x.html
                         ├── completion.json
                         └── outcome.json
 ```
@@ -91,7 +91,7 @@ v3 是干净切换后的唯一运行时协议。v1/v2 记录在切换前整体�
   `storageDirectoryName=projectId`；v1/v2、记录不完整或身份不一致的旧目录不迁移。
 - `PROJECT.md` 是整个项目长期使用的 AI 修改规则，不只属于某一次 Request；项目空闲时允许用户修改并由工作台自动保存，处理期间只读。Request 会把当时已持久化规则冻结到 `input/PROJECT.md`。
 - `runtime-state.json` 与 `edit-audit.jsonl` 是系统运行和本地直接编辑的审计文件，只建议查看，不提供普通用户编辑入口。
-- `working/V1.x.html` 是有效 AI 结果通过校验后创建的完整 HTML。它先进入“可审阅/打开”状态；审阅只读不会切换项目当前源，只有用户点击“直接打开”或在审阅页确认“打开 AI 修改后”才成为项目当前源。旧工作文件永不原地改写。
+- `working/<原用户文件名>-V1.x.html` 是有效 AI 结果通过校验后创建的完整 HTML。它先进入“可审阅/打开”状态；审阅只读不会切换项目当前源，只有用户点击“直接打开”或在审阅页确认“打开 AI 修改后”才成为项目当前源。旧工作文件永不原地改写。
 - input manifest、冻结 annotation 等可移植索引只使用项目或 Request 内相对路径。
 - `PROMPT.md` 可以包含本机绝对 Attempt 路径和可直接执行的 finalizer 命令。
 - `change-request.json` 的附件项可以额外包含由系统生成的 Request 内本机绝对 `localPath`，供当前电脑上的内部 AI / QoderWork 直接读取；同一项必须保留可移植的 `requestRelativePath`。
@@ -132,7 +132,22 @@ v3 是干净切换后的唯一运行时协议。v1/v2 记录在切换前整体�
 - 内部 AI 不得自行改名、递增或另建版本身份。
 - 候选只有成功提交后才被占用。
 
-协议字段继续使用既有 `candidateVersionLabel=V1/V2/V3`，以兼容严格 v3 Schema；UI 按同一 ordinal 显示“版本 1、版本 2、版本 3”。既有 `working/*-V1.x.html` 文件名继续兼容，不作为用户版本名。内部 AI 必须原样保留协议标签，不能把显示标签写回旧字段。
+协议字段继续使用既有 `candidateVersionLabel=V1/V2/V3`，以兼容严格 v3 Schema；UI 按同一 ordinal 显示“版本 1、版本 2、版本 3”。内部 AI 必须原样保留协议标签，不能把显示标签写回旧字段。
+
+### 3.3 AI 输出文件命名
+
+PageRoot 在冻结 Request 时一次性计算唯一输出名，内部 AI 只接收并写入
+Prompt 指定的精确路径，不能自行计算、递增或改名：
+
+```text
+<原用户文件名主干>-V1.<candidateVersionOrdinal - 1>.html
+```
+
+- 原用户文件名主干来自冻结时的项目 `displayName`；移除 `.html/.htm` 与已有的 `-V1.x` 后缀，并按本地安全文件名规则规范化。
+- 初始基线 `ver_0001` 对应 `V1.0`；候选 `ver_0002` 对应 `V1.1`，候选 `ver_0010` 对应 `V1.9`。
+- `input/base/index.html` 只是冻结输入的机器存储名，绝不能据此把输出命名为 `index.html`。
+- 同一文件名同时用于 Attempt 的 `output/` 和成功后的 `working/`；它不是严格 Schema 中的 `candidateVersionLabel`。
+- 已冻结的旧 Request 仍可声明 `output/index.html`，以免升级后中断进行中的 Attempt；新 Request 一律使用上述版本化名称。
 
 ## 4. 提交前冻结
 
@@ -265,9 +280,9 @@ offset 统一按 JavaScript UTF-16 code unit 计算。Request 只能把 `exact` 
 
 ### 5.4 `finalization`
 
-固定：
+冻结：
 
-- `outputRelativePath=output/index.html`
+- `outputRelativePath=output/<原用户文件名>-V1.x.html`，其精确值由 PageRoot 按 3.3 写入；仅已冻结的旧 Request 保留 `output/index.html`
 - `completionRelativePath=completion.json`
 - `completionSchema=completion.v1.schema.json`
 - 受支持 finalizer 版本
@@ -347,7 +362,7 @@ Prompt 必须是当前 Attempt 的精简入口，至少包含：
 - 读取顺序。
 - 评论、TargetRef 与附件清单的读取要求；不得只读正文而忽略图片或文件。
 - 每个附件的 Request 管理本机绝对路径和相对回退路径；明确禁止追踪外部原始文件。
-- 唯一 output 路径。
+- 唯一 output 路径，以及由 PageRoot 已计算的原用户文件名、文件版本号和固定输出文件名。
 - 完整 finalizer 命令。
 - “完成全部写入后最后执行 finalizer”的明确要求。
 - finalizer 返回 `status=cancelled` 时立即停止、不重试、也不改写到其他路径的明确要求。
@@ -359,9 +374,11 @@ Prompt 不让 AI 手写 `completion.json`，也不让 AI猜候选版本号。
 
 ## 9. AI 写入规则
 
-内部 AI 可直接写：
+内部 AI 可直接写 Prompt 列出的唯一文件：
 
-- `attempts/<attemptId>/output/index.html`
+- `attempts/<attemptId>/output/<原用户文件名>-V1.x.html`
+
+AI 不得从 `input/base/index.html` 推导文件名，也不得用 `index.html`、自行递增的版本号或其他名称替换该路径。
 
 `USER_SUPPLEMENT.json` 只能由受控 helper 追加，内部 AI 不得直接编辑。helper 可把内部 AI 当前对话新增的文件或图片复制到 `supplement-attachments/` 并记录字节数与 SHA-256；无法取得原件时只能写 `description-only`，历史中明确显示“原件未归档”。旧记录不可覆盖，只能通过 `add / amend / retract` 形成审计链。`add.refersTo` 可以指向它所补充的原始 `instructionId`；`amend / retract` 必须引用原始 instruction 或更早的 supplement record。所有写入、封存、建版与历史读取都使用同一组冻结 instruction 身份校验。
 
@@ -444,7 +461,7 @@ finalizer 必须：
   "candidateVersionLabel": "V9",
   "baseSnapshotSha256": "sha256:...",
   "inputManifestSha256": "sha256:...",
-  "outputRelativePath": "output/index.html",
+  "outputRelativePath": "output/仪表盘-V1.8.html",
   "outputSha256": "sha256:...",
   "baseComparisonSha256": "sha256:...",
   "outputComparisonSha256": "sha256:...",
@@ -589,7 +606,7 @@ Attempt 不生成它们。`scope-validator.mjs` 继续服务直接 source patch�
 
 1. 再读 runtime state，确认 active run。
 2. 分配 `transactionId`。
-3. 写 `transaction.json`，包含 `previousSourcePath`、冻结源 Hash、候选 Hash、`activeWorkingCopyRelativePath=working/V1.x.html` 与全部身份。
+3. 写 `transaction.json`，包含 `previousSourcePath`、冻结源 Hash、候选 Hash、冻结的 Attempt 输出路径、`activeWorkingCopyRelativePath=working/<原用户文件名>-V1.x.html` 与全部身份。
 4. 将 output 复制到 `prepared-version/files/index.html`。
 5. 写 v3 `version.json` 和 annotations archive；assessment 留在 Attempt，并由同一 `requestId + attemptId` 关联。
 6. 校验准备内容 Hash。
@@ -601,7 +618,7 @@ Attempt 不生成它们。`scope-validator.mjs` 继续服务直接 source patch�
 ### 14.2 应用
 
 1. 再次确认源 Hash 等于 `expectedSourceSha256`。
-2. 以 create-new/no-clobber 语义写入候选工作文件 `working/V1.x.html`；同名不同内容时失败关闭。
+2. 以 create-new/no-clobber 语义写入候选工作文件 `working/<原用户文件名>-V1.x.html`；同名不同内容时失败关闭。
 3. 重读候选工作文件并校验候选 Hash，同时再次确认提交前当前 HTML 未被修改。
 4. 标记 `source-applied`；该状态表示候选工作文件已完整落盘，不表示旧源文件被替换。
 5. 原子发布 Version 目录。

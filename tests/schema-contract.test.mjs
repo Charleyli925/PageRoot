@@ -40,6 +40,8 @@ const pairs = [
   ["committed-marker.v1.schema.json", "committed-marker.valid.json"],
   ["completion.v1.schema.json", "completion.no-change.json"],
   ["completion.v1.schema.json", "completion.valid.json"],
+  ["completion.v1.schema.json", "completion.versioned-output.json"],
+  ["change-request.v3.schema.json", "change-request.versioned-output.json"],
   ["input-manifest.v1.schema.json", "input-manifest.frozen.json"],
   ["project-state.v3.schema.json", "project-state.current-edited.json"],
   ["project-state.v3.schema.json", "project-state.current-version.json"],
@@ -50,6 +52,7 @@ const pairs = [
     "runtime-state.awaiting-conflict-resolution.json",
   ],
   ["runtime-state.v3.schema.json", "runtime-state.processing.json"],
+  ["runtime-state.v3.schema.json", "runtime-state.versioned-output.json"],
   ["runtime-state.v3.schema.json", "runtime-state.ready-to-open.json"],
   ["runtime-state.v3.schema.json", "runtime-state.ready.json"],
   ["runtime-state.v3.schema.json", "runtime-state.submitting.json"],
@@ -1062,6 +1065,20 @@ test("transaction contract keeps immutable AI input separate from the replace pr
   const unpairedConfirmation = structuredClone(adopted);
   delete unpairedConfirmation.conflictConfirmedAt;
   assert.equal(validate(unpairedConfirmation), false);
+
+  const versionedOutput = {
+    ...prepared,
+    outputRelativePath:
+      "requests/req_metrics_cards/attempts/attempt_001/output/仪表盘-V1.8.html",
+  };
+  assert.equal(validate(versionedOutput), true);
+
+  const unsafeVersionedOutput = {
+    ...versionedOutput,
+    outputRelativePath:
+      "requests/req_metrics_cards/attempts/attempt_001/output/subdir/仪表盘-V1.8.html",
+  };
+  assert.equal(validate(unsafeVersionedOutput), false);
 });
 
 test("project state cannot become a second active-run authority", async () => {

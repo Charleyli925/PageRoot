@@ -476,7 +476,17 @@
       ],
       "properties": {
         "outputRelativePath": {
-          "const": "output/index.html"
+          "oneOf": [
+            {
+              "const": "output/index.html",
+              "description": "Legacy frozen Attempt output path."
+            },
+            {
+              "type": "string",
+              "pattern": "^output/(?:V1\\.[0-9]+|[^/\\\\]+-V1\\.[0-9]+)\\.html$",
+              "description": "PageRoot-generated original-name plus semantic Version output path."
+            }
+          ]
         },
         "completionRelativePath": {
           "const": "completion.json"

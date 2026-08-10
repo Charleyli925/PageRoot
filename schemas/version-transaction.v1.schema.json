@@ -120,6 +120,11 @@
     "completionSha256": {
       "$ref": "#/$defs/sha256"
     },
+    "outputRelativePath": {
+      "type": "string",
+      "pattern": "^requests/req_[A-Za-z0-9_-]+/attempts/attempt_[0-9]{3}/output/(?:index\\.html|(?:V1\\.[0-9]+|[^/\\\\]+-V1\\.[0-9]+)\\.html)$",
+      "description": "Frozen Attempt output path retained for transaction recovery. Absent only for legacy in-flight transactions."
+    },
     "completionRelativePath": {
       "type": "string",
       "pattern": "^requests/req_[A-Za-z0-9_-]+/attempts/attempt_[0-9]{3}/completion\\.json$"
