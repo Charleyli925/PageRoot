@@ -98,6 +98,34 @@ PR 批量是建议而非固定限制：用 CI Health 的 Ready 次数、candidat
   Node oracle 必须分别覆盖唯一空 Canvas/SVG/表单/容器的兼容配对、重复
   class-only 空节点保持 unmatched、深层子变化不拆稳定祖先，以及第 25 个
   trusted projection fact 明确失败；解析端超限仍必须 fail-closed。
+- Electron E2E 夹具与场景归属：`tests/e2e/electron/helpers/pageroot-app-fixture.mjs`
+  只拥有独立 userData/workspace/source、隐藏窗口启动、Bridge 路径、close-first
+  cleanup、诊断输出和已加载 frame；它不包含产品断言、整条用户流程或自动重试。
+  fixture 的 Node contract 必须证明 close event 或已确认的 Electron process exit 先于
+  cleanup、close listener 覆盖 exit request 与 SIGTERM/SIGKILL 的完整有界 shutdown budget、stop 幂等、
+  SIGTERM/SIGKILL 有界 fallback，以及两者均未确认时不删除
+  Bridge-owned 文件。AI 闭环保留 verified
+  review/accept、pre-load navigation、顺序 Version/relaunch、internal supplement、
+  no-change、return、clipboard failure、A/B 隔离、double-click、cancel/restart、
+  unknown reconcile、missing finalizer、malformed HTML、broad related、activation
+  failure；legacy global comment 的跨重启恢复仍处在兼容窗口，继续保留为独立
+  Electron 场景。Native Electron 拥有 rapid switch/close 的真实 DOM 与磁盘 oracle；
+  project rules/drain 与 update/About 均由其更窄的 Node/Preload/UI owner 覆盖。首个
+  review/accept 场景的 geometry helper
+  必须把每个表驱动 case 的 fixture、filter/page/context、change type、element/Range
+  owner、frame/mask count、tolerance 与负例写全；表只能消除样板，不能合并不同
+  故障模型。
+
+  基线的 21 个 AI Electron 场景中，15 个核心 AI 场景与 legacy restart 场景仍在
+  `ai-handoff-closed-loop.spec.mjs`；其余 5 个非 AI/重复排列按下表有明确 owner。
+
+  | 已收敛场景 | 唯一 owner |
+  | --- | --- |
+  | first project registration 的 global comment | `comment-rail-layout`: `global comments stay before local comments regardless of canvas position`；Browser `native-dom-comment-stress`: `comments virtualize immediately above the threshold and remain navigable`（首个保存等待 lazy registration committed） |
+  | multiple orphan relink | Native Electron: `multiple orphaned comments relink in sequence and resume the original send`（两个 orphan target 依次选择后只恢复一次 send） |
+  | project resources/drain | Native Electron: `project resources drain edited rules before leaving`（从 Rules UI 离开时通过 Bridge 保存精确字节）；Node owners 仍覆盖 DraftSession 与 read-only inspector |
+  | update/About | Native Electron: `automatic update actions keep the header geometry and About lifecycle`（update badge、About/restart dialog 与 header placement）；Node/Preload owners 继续覆盖 update protocol |
+  | rapid switch/close | `tests/e2e/electron/native-dom-electron.spec.mjs` |
 - 完整 HTML 持久化性能决策：`npm run benchmark:persistence` 只构建一次
   renderer，并在同一机器、同一 frozen main 与固定的 0.5/1.25/2.5MiB
   synthetic HTML 上串行运行。它必须同时保留 external-write conflict、

@@ -1,20 +1,15 @@
 import { spawnSync } from "node:child_process";
-import { createRequire } from "node:module";
 import {
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
   realpathSync,
   readdirSync,
-  rmSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { expect, test } from "@playwright/test";
-import { _electron as electron } from "playwright";
 
 import {
   activateNativeEdit,
@@ -23,9 +18,26 @@ import {
   productRoot,
   setTextSelection,
 } from "../browser/pageroot-driver.mjs";
+import {
+  closePageRootGracefully as closeSharedPageRootGracefully,
+  createSourceFixture as createSharedSourceFixture,
+  launchPageRoot as launchSharedPageRoot,
+  loadedDiskFrame,
+  removeValidatedTemporaryDirectory,
+  removeSourceFixture as removeSharedSourceFixture,
+  stopPageRoot,
+} from "./helpers/pageroot-app-fixture.mjs";
 
-const require = createRequire(import.meta.url);
-const electronExecutable = require("electron");
+async function launchPageRoot(options = {}) {
+  return launchSharedPageRoot({
+    userDataPrefix: "pageroot-native-e2e-ai-loop-",
+    ...options,
+  });
+}
+
+async function closePageRootGracefully(electronApp, page) {
+  return closeSharedPageRootGracefully(electronApp, page, { timeout: 20_000 });
+}
 const ORIGINAL_TEXT = "列表项中的文字保持项目符号和缩进。";
 const UPDATED_TEXT = "自动闭环验收通过";
 const SECOND_UPDATED_TEXT = "自动闭环第二版通过";
@@ -77,268 +89,28 @@ const REVIEW_METRIC_AFTER_CSS = `
       [data-review-logical-card] { block-size: 84px; inline-size: 240px; overflow: hidden; }
 `;
 
-function seedActiveDiskProject(
-  isolatedUserData,
-  sourcePath,
-  recentSourcePaths = [sourcePath],
-) {
-  writeFileSync(
-    path.join(isolatedUserData, "html-projects.json"),
-    JSON.stringify({
-      version: 1,
-      activePath: sourcePath,
-      recent: recentSourcePaths.map((recentPath, index) => ({
-        path: recentPath,
-        name: path.basename(recentPath),
-        lastOpenedAt: Date.now() - index,
-      })),
-    }),
-    "utf8",
-  );
-}
-
-async function launchPageRoot({
-  activeSourcePath = null,
-  recentSourcePaths = activeSourcePath ? [activeSourcePath] : [],
-  isolatedUserData: existingUserData = null,
-  injectedEnv = {},
-} = {}) {
-  const isolatedUserData = existingUserData || mkdtempSync(
-    path.join(tmpdir(), "pageroot-native-e2e-ai-loop-"),
-  );
-  const workspace = path.join(isolatedUserData, "workspace");
-  if (activeSourcePath) {
-    seedActiveDiskProject(isolatedUserData, activeSourcePath, recentSourcePaths);
-  }
-  const electronApp = await electron.launch({
-    executablePath: electronExecutable,
-    args: [path.join(productRoot, "desktop/main.mjs")],
-    cwd: productRoot,
-    env: {
-      ...process.env,
-      PAGEROOT_E2E: "1",
-      PAGEROOT_E2E_USER_DATA_DIR: isolatedUserData,
-      HTML_AI_WORKSPACE: workspace,
-      ...injectedEnv,
-    },
-  });
-  const page = await electronApp.firstWindow();
-  const mainRendererUrl = page.url();
-  const nativeWindow = await electronApp.evaluate(({ BrowserWindow }, rendererUrl) => {
-    const window = BrowserWindow.getAllWindows().find((candidate) => (
-      candidate.webContents.getURL() === rendererUrl
-    ));
-    if (!window) {
-      throw new Error("PageRoot main BrowserWindow is unavailable during launch.");
-    }
-    window?.webContents.setBackgroundThrottling(false);
-    return {
-      focused: window?.isFocused() || false,
-      visible: window?.isVisible() || false,
-    };
-  }, mainRendererUrl);
-  const foreground = (
-    injectedEnv.PAGEROOT_E2E_FOREGROUND
-    ?? process.env.PAGEROOT_E2E_FOREGROUND
-  ) === "1";
-  expect(nativeWindow.visible).toBe(foreground);
-  if (!foreground) expect(nativeWindow.focused).toBe(false);
-  await page.waitForLoadState("domcontentloaded");
-  await page.waitForFunction(() => document.visibilityState === "visible");
-  await page.evaluate(() => new Promise((resolve) => {
-    requestAnimationFrame(() => requestAnimationFrame(resolve));
-  }));
-  return { electronApp, page, isolatedUserData, workspace };
-}
-
-function removeAiLoopUserData(isolatedUserData) {
-  const resolved = path.resolve(isolatedUserData);
-  if (
-    path.dirname(resolved) !== path.resolve(tmpdir())
-    || !path.basename(resolved).startsWith("pageroot-native-e2e-ai-loop-")
-  ) {
-    throw new Error(`Refusing to clean a non-E2E directory: ${resolved}`);
-  }
-  rmSync(resolved, {
-    recursive: true,
-    force: true,
-    maxRetries: 10,
-    retryDelay: 100,
-  });
-}
-
-async function stopPageRoot(electronApp, isolatedUserData) {
-  const electronProcess = electronApp.process();
-  const applicationClosed = electronApp
-    .waitForEvent("close", { timeout: 5_000 })
-    .then(() => true)
-    .catch(() => false);
-  const waitForExit = (timeout) => new Promise((resolve) => {
-    if (electronProcess.exitCode !== null || electronProcess.signalCode !== null) {
-      resolve(true);
-      return;
-    }
-    let timer = null;
-    const onExit = () => {
-      if (timer) clearTimeout(timer);
-      resolve(true);
-    };
-    timer = setTimeout(() => {
-      electronProcess.off("exit", onExit);
-      resolve(false);
-    }, timeout);
-    electronProcess.once("exit", onExit);
-  });
-
-  const exitRequest = electronApp
-    .evaluate(({ app }) => app.exit(0))
-    .catch(() => {});
-  await Promise.race([
-    exitRequest,
-    new Promise((resolve) => setTimeout(resolve, 1_000)),
-  ]);
-  if (!await waitForExit(3_000)) {
-    electronProcess.kill("SIGKILL");
-    await waitForExit(3_000);
-  }
-  await applicationClosed;
-
-  removeAiLoopUserData(isolatedUserData);
-}
-
-async function closePageRootGracefully(electronApp, page) {
-  const mainRendererUrl = page?.url();
-  if (!mainRendererUrl) {
-    throw new Error("PageRoot main renderer URL is unavailable for graceful close.");
-  }
-  const closed = electronApp.waitForEvent("close", { timeout: 20_000 });
-  const requested = await electronApp.evaluate(({ BrowserWindow }, rendererUrl) => {
-    // Runtime snapshots own hidden offscreen BrowserWindows. The E2E close
-    // must target the known app renderer instead of assuming array order.
-    const mainWindow = BrowserWindow.getAllWindows().find((candidate) => (
-      candidate.webContents.getURL() === rendererUrl
-    ));
-    if (!mainWindow) return false;
-    mainWindow.close();
-    return true;
-  }, mainRendererUrl);
-  if (!requested) {
-    throw new Error("PageRoot main BrowserWindow was unavailable for graceful close.");
-  }
-  await closed;
-}
-
-async function sendToMainRenderer(electronApp, page, channel, payload) {
-  const mainRendererUrl = page?.url();
-  if (!mainRendererUrl) {
-    throw new Error("PageRoot main renderer URL is unavailable for renderer IPC.");
-  }
-  const delivered = await electronApp.evaluate(
-    ({ BrowserWindow }, { rendererUrl, messageChannel, messagePayload }) => {
-      const mainWindow = BrowserWindow.getAllWindows().find((candidate) => (
-        candidate.webContents.getURL() === rendererUrl
-      ));
-      if (!mainWindow) return false;
-      mainWindow.webContents.send(messageChannel, messagePayload);
-      return true;
-    },
-    {
-      rendererUrl: mainRendererUrl,
-      messageChannel: channel,
-      messagePayload: payload,
-    },
-  );
-  if (!delivered) {
-    throw new Error("PageRoot main BrowserWindow was unavailable for renderer IPC.");
-  }
-}
 
 function createSourceFixture(
   fileName = "generated-ai-loop.html",
   transform = (source) => source,
 ) {
-  const sourceDirectory = mkdtempSync(
-    path.join(tmpdir(), "pageroot-ai-loop-source-"),
-  );
-  const sourcePath = path.join(sourceDirectory, fileName);
-  const source = fixtureBuffer("complex-layout.html").toString("utf8");
-  writeFileSync(sourcePath, transform(source), "utf8");
-  return { sourceDirectory, sourcePath, original: readFileSync(sourcePath) };
-}
-
-function removeSourceFixture(sourceDirectory) {
-  const resolved = path.resolve(sourceDirectory);
-  if (
-    path.dirname(resolved) !== path.resolve(tmpdir())
-    || !path.basename(resolved).startsWith("pageroot-ai-loop-source-")
-  ) {
-    throw new Error(`Refusing to clean a non-E2E source directory: ${resolved}`);
-  }
-  rmSync(resolved, {
-    recursive: true,
-    force: true,
-    maxRetries: 10,
-    retryDelay: 100,
+  return createSharedSourceFixture({
+    fileName,
+    transform,
+    sourceDirectoryPrefix: "pageroot-ai-loop-source-",
   });
 }
 
-async function waitForProjectReady(page, timeout = 60_000) {
-  await expect.poll(async () => {
-    const state = await page.locator("main.workbench").getAttribute("data-project-state");
-    if (state === "ready") return state;
-    const stage = await page.evaluate(() => window.__PAGEROOT_HYDRATION_STAGE__);
-    const visibleFailure = state === "failed"
-      ? await page.locator('[aria-label="项目读取失败"]').textContent().catch(() => "")
-      : "";
-    return `${state}:${stage || "unmarked"}:${visibleFailure || "no-detail"}`;
-  }, { timeout }).toBe("ready");
+function removeSourceFixture(sourceDirectory) {
+  removeSharedSourceFixture(sourceDirectory, "pageroot-ai-loop-source-");
 }
 
-async function loadedDiskFrame(
-  page,
-  sourcePath,
-  { editable = true, expectedCase = "list-item" } = {},
-) {
-  const canonicalSourcePath = realpathSync(sourcePath);
-  await expect.poll(
-    async () => (await page.evaluate(() => window.htmlAIProjects?.getActiveProject()))?.sourcePath,
-    { timeout: 20_000 },
-  ).toBe(canonicalSourcePath);
-  await waitForProjectReady(page);
-  await expect(page.locator('[aria-label="项目读取失败"]')).toHaveCount(0);
-  // The former loading card is no longer rendered, so its absence cannot
-  // prove that hydration finished. Wait on the actual interaction boundary
-  // before selecting, commenting, or starting a native edit.
-  await expect(page.getByRole("button", { name: "项目", exact: true }))
-    .toBeEnabled({ timeout: 60_000 });
-  if (editable) {
-    await expect(page.getByRole("button", { name: "全局评论", exact: true }))
-      .toBeEnabled({ timeout: 60_000 });
-  }
-  await expect(page.locator('[aria-label="项目读取失败"]')).toHaveCount(0);
-  const editor = page.getByTestId("html-canvas-editor").filter({ visible: true }).first();
-  await editor.waitFor({ state: "visible", timeout: 60_000 });
-  const editorHandle = await editor.elementHandle();
-  await page.waitForFunction(
-    (element) => element?.getAttribute("data-render-verified") === "true",
-    editorHandle,
-    { timeout: 60_000 },
+
+function removeAiLoopUserData(isolatedUserData) {
+  removeValidatedTemporaryDirectory(
+    isolatedUserData,
+    "pageroot-native-e2e-ai-loop-",
   );
-  const iframe = editor.locator('iframe[title*="HTML"]').first();
-  await iframe.waitFor({ state: "attached", timeout: 60_000 });
-  let frame = null;
-  await expect.poll(async () => {
-    const iframeHandle = await iframe.elementHandle();
-    frame = await iframeHandle?.contentFrame() || null;
-    return Boolean(frame);
-  }, { timeout: 60_000 }).toBe(true);
-  if (!frame) throw new Error("PageRoot did not expose the Electron edit frame.");
-  await frame.waitForFunction(
-    (selector) => Boolean(document.querySelector(selector)),
-    caseSelector(expectedCase),
-    { timeout: 60_000 },
-  );
-  return frame;
 }
 
 async function addCommentAndSubmit(
@@ -568,6 +340,134 @@ function workingHtmlFiles(workspace, projectId) {
   return readdirSync(directory)
     .filter((fileName) => fileName.endsWith(".html"))
     .map((fileName) => path.join(directory, fileName));
+}
+
+const REVIEW_PROJECTION_CASES = Object.freeze([
+  {
+    id: "added-table-row",
+    sourceFixture: "generated-ai-loop.html",
+    filter: "all",
+    pageMode: "split",
+    contextPercent: "18",
+    changeType: "structure",
+    ownerSelector: '[data-review-brand-row="added"]',
+    rangeSelector: null,
+    expectedFrameCount: 1,
+    expectedMaskCount: 1,
+    tolerance: 0.75,
+    negativeSelectors: [
+      '[data-review-brand-row="alpha"] [data-pageroot-review-overlay-box]',
+      '[data-review-brand-row="beta"] [data-pageroot-review-overlay-box]',
+    ],
+  },
+]);
+
+async function assertReviewControlDefaults(page, beforeReviewFrame) {
+  await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
+    "data-pageroot-review-filter",
+  ), { timeout: 30_000 }).toBe("all");
+  await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
+    "data-pageroot-review-focus",
+  )).not.toBe("all");
+  await expect(page.getByRole("slider", {
+    name: "非修改区域上下文可见度",
+  })).toHaveValue("18");
+  await expect(page.locator('[data-view="split"]')).toBeVisible();
+  await expect(page.getByRole("button", {
+    name: "双页对比（修改前与 AI 修改后）",
+  })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "查看全部变化" }))
+    .toHaveAttribute("aria-pressed", "true");
+}
+
+async function assertReviewChangeOutline(beforeReviewFrame, afterReviewFrame) {
+  await expect.poll(async () => Promise.all(
+    [beforeReviewFrame, afterReviewFrame].map(async (frame) => (
+      (await frame.locator("[data-pageroot-review-overlay-box]").count()) > 0
+    )),
+  ).then((states) => states.every(Boolean))).toBe(true);
+}
+
+async function assertProjectionGeometryCase(frame, geometryCase) {
+  const owner = await frame.locator(geometryCase.ownerSelector)
+    .getAttribute("data-pageroot-review-semantic-owner");
+  expect(owner, `${geometryCase.id} must retain a semantic owner`).toBeTruthy();
+  const frames = frame.locator(
+    `[data-pageroot-review-overlay-box][data-tone="${geometryCase.changeType}"][data-pageroot-review-semantic-owner="${owner}"]`,
+  );
+  const masks = frame.locator(
+    `[data-pageroot-review-mask-hole][data-pageroot-review-semantic-owner="${owner}"]`,
+  );
+  await expect(frames).toHaveCount(geometryCase.expectedFrameCount);
+  await expect(masks).toHaveCount(geometryCase.expectedMaskCount);
+  await expect.poll(() => frames.evaluate((overlay, { ownerSelector, tolerance }) => {
+    const owner = document.querySelector(ownerSelector);
+    if (!owner) return false;
+    const overlayRect = overlay.getBoundingClientRect();
+    const ownerRect = owner.getBoundingClientRect();
+    return Math.abs(overlayRect.left - (ownerRect.left - 3)) < tolerance
+      && Math.abs(overlayRect.top - (ownerRect.top - 3)) < tolerance
+      && Math.abs(overlayRect.width - (ownerRect.width + 6)) < tolerance
+      && Math.abs(overlayRect.height - (ownerRect.height + 6)) < tolerance;
+  }, geometryCase)).toBe(true);
+  for (const selector of geometryCase.negativeSelectors) {
+    await expect(frame.locator(selector)).toHaveCount(0);
+  }
+  return owner;
+}
+
+async function assertOverlayMaskEquivalence(frame) {
+  return frame.locator("html").evaluate(() => {
+    const boxes = [...document.querySelectorAll("[data-pageroot-review-overlay-box]")];
+    const holes = [...document.querySelectorAll("[data-pageroot-review-mask-hole]")];
+    return boxes.length === holes.length && boxes.every((box, index) => {
+      const hole = holes[index];
+      return Math.abs(Number(box.getAttribute("data-left")) - Number(hole.getAttribute("data-left"))) < .02
+        && Math.abs(Number(box.getAttribute("data-top")) - Number(hole.getAttribute("data-top"))) < .02
+        && Math.abs(Number(box.getAttribute("data-width")) - Number(hole.getAttribute("data-width"))) < .02
+        && Math.abs(Number(box.getAttribute("data-height")) - Number(hole.getAttribute("data-height"))) < .02
+        && Boolean(box.getAttribute("data-path"))
+        && box.getAttribute("data-path") === hole.getAttribute("d");
+    });
+  });
+}
+
+async function assertRuntimeVisualSupplement(beforeReviewFrame, afterReviewFrame) {
+  const runtimeSnapshotSection = "section[data-review-runtime-snapshot]";
+  for (const frame of [beforeReviewFrame, afterReviewFrame]) {
+    await expect(frame.locator(runtimeSnapshotSection)).toHaveAttribute(
+      "data-pageroot-review-runtime-marker",
+      "true",
+    );
+    await expect(frame.locator("#review-runtime-snapshot-canvas"))
+      .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
+    await expect(frame.locator(
+      "[data-pageroot-review-runtime-host], [data-pageroot-review-runtime-source-box]",
+    )).toHaveCount(0);
+  }
+}
+
+async function assertReviewAcceptPersistence({
+  page,
+  sourcePath,
+  original,
+  expectedText,
+  versionPathPattern,
+}) {
+  await expect.poll(async () => page.evaluate(async () => {
+    const project = await window.htmlAIProjects?.getActiveProject();
+    const reviewVisible = Boolean(document.querySelector('[data-testid="ai-review-workspace"]'));
+    return { sourcePath: project?.sourcePath || "", reviewVisible };
+  }), { timeout: 30_000 }).toMatchObject({
+    sourcePath: expect.stringMatching(versionPathPattern),
+    reviewVisible: false,
+  });
+  const opened = await page.evaluate(() => window.htmlAIProjects?.getActiveProject());
+  expect(opened.sourcePath).not.toBe(sourcePath);
+  expect(opened.sourcePath).toMatch(versionPathPattern);
+  expect(readFileSync(sourcePath).equals(original)).toBe(true);
+  expect(readFileSync(opened.sourcePath, "utf8")).toContain(expectedText);
+  return opened;
 }
 
 test("a verified AI result stays pending through desktop review until the user accepts it", async () => {
@@ -910,52 +810,14 @@ test("a verified AI result stays pending through desktop review until the user a
     const afterReviewFrame = launched.page.frameLocator(
       'iframe[title^="修改后"]',
     );
-    const projectionIsCanonical = (frame) => frame.locator("html").evaluate(() => {
-      const boxes = [...document.querySelectorAll("[data-pageroot-review-overlay-box]")];
-      const holes = [...document.querySelectorAll("[data-pageroot-review-mask-hole]")];
-      return boxes.length === holes.length && boxes.every((box, index) => {
-        const hole = holes[index];
-        return Math.abs(Number(box.getAttribute("data-left")) - Number(hole.getAttribute("data-left"))) < .02
-          && Math.abs(Number(box.getAttribute("data-top")) - Number(hole.getAttribute("data-top"))) < .02
-          && Math.abs(Number(box.getAttribute("data-width")) - Number(hole.getAttribute("data-width"))) < .02
-          && Math.abs(Number(box.getAttribute("data-height")) - Number(hole.getAttribute("data-height"))) < .02
-          && Boolean(box.getAttribute("data-path"))
-          && box.getAttribute("data-path") === hole.getAttribute("d");
-      });
-    });
-    await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
-      "data-pageroot-review-filter",
-    ), { timeout: 30_000 }).toBe("all");
-    await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
-      "data-pageroot-review-focus",
-    )).not.toBe("all");
-    await expect(launched.page.getByRole("slider", {
-      name: "非修改区域上下文可见度",
-    })).toHaveValue("18");
-    await expect(launched.page.locator('[data-view="split"]')).toBeVisible();
-    await expect(launched.page.getByRole("button", {
-      name: "双页对比（修改前与 AI 修改后）",
-    })).toHaveAttribute("aria-pressed", "true");
-    await expect(launched.page.getByRole("button", { name: "查看全部变化" }))
-      .toHaveAttribute("aria-pressed", "true");
+    await assertReviewControlDefaults(launched.page, beforeReviewFrame);
     await expect(beforeReviewFrame.locator("html"))
       .toHaveAttribute("data-author-script-ran", "true");
     await expect(beforeReviewFrame.locator("html"))
       .toHaveAttribute("data-review-fixture-ready", "true");
     await expect(afterReviewFrame.locator("html"))
       .toHaveAttribute("data-review-fixture-ready", "true");
-    const runtimeSnapshotSection = "section[data-review-runtime-snapshot]";
-    for (const frame of [beforeReviewFrame, afterReviewFrame]) {
-      await expect(frame.locator(runtimeSnapshotSection)).toHaveAttribute(
-        "data-pageroot-review-runtime-marker",
-        "true",
-      );
-      await expect(frame.locator("#review-runtime-snapshot-canvas"))
-        .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
-      await expect(frame.locator(
-        "[data-pageroot-review-runtime-host], [data-pageroot-review-runtime-source-box]",
-      )).toHaveCount(0);
-    }
+    await assertRuntimeVisualSupplement(beforeReviewFrame, afterReviewFrame);
     await afterReviewFrame.locator("html").evaluate(() => {
       document.documentElement.dataset.reviewPostLoadNavigationAttempted = "true";
       location.replace(
@@ -1116,12 +978,7 @@ test("a verified AI result stays pending through desktop review until the user a
     await expect(beforeReviewFrame.getByRole("textbox", { name: "审阅同步输入" }))
       .toHaveValue("反向动作同步");
     await launched.page.getByRole("button", { name: "同步滚动" }).click();
-    await expect.poll(() => beforeReviewFrame.locator(
-      "[data-pageroot-review-overlay-box]",
-    ).count()).toBeGreaterThan(0);
-    await expect.poll(() => afterReviewFrame.locator(
-      "[data-pageroot-review-overlay-box]",
-    ).count()).toBeGreaterThan(0);
+    await assertReviewChangeOutline(beforeReviewFrame, afterReviewFrame);
     await expect.poll(() => afterReviewFrame.locator(
       '[data-pageroot-review-overlay-box][data-tone="text-added"], [data-pageroot-review-overlay-box][data-tone="structure"], [data-pageroot-review-overlay-box][data-tone="style"], [data-pageroot-review-overlay-box][data-tone="mixed"]',
     ).count()).toBeGreaterThan(0);
@@ -1200,28 +1057,10 @@ test("a verified AI result stays pending through desktop review until the user a
       });
     }));
     expect(nestedOverlayPairs).toEqual([]);
-    const addedRowSemanticOwner = await afterReviewFrame.locator(
-      '[data-review-brand-row="added"]',
-    ).getAttribute("data-pageroot-review-semantic-owner");
-    expect(addedRowSemanticOwner).toBeTruthy();
-    const allModeAddedRowFrames = afterReviewFrame.locator(
-      `[data-pageroot-review-overlay-box][data-pageroot-review-semantic-owner="${addedRowSemanticOwner}"]`,
+    const addedRowSemanticOwner = await assertProjectionGeometryCase(
+      afterReviewFrame,
+      REVIEW_PROJECTION_CASES[0],
     );
-    await expect(allModeAddedRowFrames).toHaveCount(1);
-    await expect(allModeAddedRowFrames).toHaveAttribute("data-tone", "structure");
-    await expect(afterReviewFrame.locator(
-      `[data-pageroot-review-mask-hole][data-pageroot-review-semantic-owner="${addedRowSemanticOwner}"]`,
-    )).toHaveCount(1);
-    await expect.poll(() => allModeAddedRowFrames.evaluate((frame) => {
-      const row = document.querySelector('[data-review-brand-row="added"]');
-      if (!row) return false;
-      const frameRect = frame.getBoundingClientRect();
-      const rowRect = row.getBoundingClientRect();
-      return Math.abs(frameRect.left - (rowRect.left - 3)) < .75
-        && Math.abs(frameRect.top - (rowRect.top - 3)) < .75
-        && Math.abs(frameRect.width - (rowRect.width + 6)) < .75
-        && Math.abs(frameRect.height - (rowRect.height + 6)) < .75;
-    })).toBe(true);
     const removedAtomicOwner = await beforeReviewFrame.locator(
       "[data-review-atomic-removed]",
     ).getAttribute("data-pageroot-review-semantic-owner");
@@ -2445,7 +2284,7 @@ test("a verified AI result stays pending through desktop review until the user a
     await expect(launched.page.getByRole("button", { name: "适应", exact: true }))
       .toHaveAttribute("aria-pressed", "true");
     await expect.poll(crossLineProjectionState).toMatchObject({ matches: true });
-    await expect.poll(() => projectionIsCanonical(afterReviewFrame)).toBe(true);
+    await expect.poll(() => assertOverlayMaskEquivalence(afterReviewFrame)).toBe(true);
     await launched.page.getByRole("button", { name: "100%", exact: true }).click();
     await expect(launched.page.getByRole("button", { name: "100%", exact: true }))
       .toHaveAttribute("aria-pressed", "true");
@@ -2471,7 +2310,7 @@ test("a verified AI result stays pending through desktop review until the user a
       originalViewportWidth,
     )).toBe(true);
     await expect.poll(crossLineProjectionState).toMatchObject({ matches: true });
-    await expect.poll(() => projectionIsCanonical(afterReviewFrame)).toBe(true);
+    await expect.poll(() => assertOverlayMaskEquivalence(afterReviewFrame)).toBe(true);
     await launched.electronApp.evaluate(({ BrowserWindow }, bounds) => {
       BrowserWindow.getAllWindows().find((candidate) => (
         candidate.webContents.getURL().includes("/dist-desktop/renderer/")
@@ -2716,20 +2555,13 @@ test("a verified AI result stays pending through desktop review until the user a
       window.__pagerootHandoffObserver.observe(document.body, { childList: true, subtree: true });
     });
     await launched.page.getByRole("button", { name: "确认并打开" }).click();
-    await expect.poll(async () => launched.page.evaluate(async () => {
-      const project = await window.htmlAIProjects?.getActiveProject();
-      const reviewVisible = Boolean(document.querySelector('[data-testid="ai-review-workspace"]'));
-      const visibleAlert = [...document.querySelectorAll('[role="alert"]')]
-        .find((element) => element.getClientRects().length > 0)?.textContent || "";
-      return `${project?.sourcePath || ""}|review=${reviewVisible}|alert=${visibleAlert}`;
-    }), { timeout: 30_000 }).toMatch(/\/working\/generated-ai-loop-V1\.1\.html\|review=false/u);
-    const opened = await launched.page.evaluate(
-      () => window.htmlAIProjects?.getActiveProject(),
-    );
-    expect(opened.sourcePath).not.toBe(fixture.sourcePath);
-    expect(opened.sourcePath).toMatch(/\/working\/generated-ai-loop-V1\.1\.html$/u);
-    expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
-    expect(readFileSync(opened.sourcePath, "utf8")).toContain(UPDATED_TEXT);
+    const opened = await assertReviewAcceptPersistence({
+      page: launched.page,
+      sourcePath: fixture.sourcePath,
+      original: fixture.original,
+      expectedText: UPDATED_TEXT,
+      versionPathPattern: /\/working\/generated-ai-loop-V1\.1\.html$/u,
+    });
     expect(await launched.page.evaluate(() => {
       window.__pagerootHandoffObserver?.disconnect();
       return window.__pagerootHandoffFlashEvents;
@@ -3495,101 +3327,7 @@ test("an unknown Request outcome stays fail-closed and reconciles automatically"
   }
 });
 
-test("project resources expose clear rules and drain edits before leaving", async () => {
-  const fixture = createSourceFixture("project-resources.html");
-  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
-  try {
-    await loadedDiskFrame(launched.page, fixture.sourcePath);
-    const projectCount = () => {
-      const projectsRoot = path.join(launched.workspace, "projects");
-      return existsSync(projectsRoot)
-        ? readdirSync(projectsRoot).filter((entry) => !entry.startsWith(".")).length
-        : 0;
-    };
-    expect(projectCount()).toBe(0);
-    await launched.page.getByRole("button", { name: "项目", exact: true }).click();
-    await launched.page.waitForTimeout(250);
-    expect(projectCount()).toBe(0);
-    await launched.page.getByText("项目资料", { exact: true }).click();
-    const rulesButton = launched.page.getByRole("button", {
-      name: /项目长期规则.*以后每次 AI 修改都会读取.*可编辑/u,
-    });
-    await expect(rulesButton).toBeVisible();
-    await expect(launched.page.getByRole("button", {
-      name: /项目记录文件夹.*查看每轮要求、AI 返回与历史文件.*Finder/u,
-    })).toBeVisible();
-    await rulesButton.click();
-    await expect(launched.page.getByText("管理 AI 修改规则", { exact: true }))
-      .toBeVisible();
-    await expect(launched.page.getByText(
-      "修改会自动保存。每次发送至 Qoder 时，源页都会把这份规则与本轮要求一起交接；规则只影响后续任务，不会修改当前 HTML。",
-      { exact: true },
-    )).toBeVisible();
-    const rulesEditor = launched.page.getByRole("textbox", { name: "项目长期规则" });
-    await expect(rulesEditor).toBeEnabled();
-    const originalRules = await rulesEditor.inputValue();
-    const updatedRules = `${originalRules}\n\n- 测试自动保存保护`;
-    await rulesEditor.fill(updatedRules);
-    await launched.page.getByRole("button", { name: "返回项目" }).click();
-    await expect(launched.page.getByText("当前文件", { exact: true })).toBeVisible();
-    const projectsRoot = path.join(launched.workspace, "projects");
-    const [projectDirectoryName] = readdirSync(projectsRoot)
-      .filter((entry) => !entry.startsWith("."));
-    const projectRulesPath = path.join(
-      projectsRoot,
-      projectDirectoryName,
-      "PROJECT.md",
-    );
-    await expect.poll(
-      () => readFileSync(projectRulesPath, "utf8"),
-      { timeout: 20_000 },
-    ).toBe(updatedRules);
 
-    await launched.page.getByText("项目资料", { exact: true }).click();
-    await rulesButton.click();
-    await expect(rulesEditor).toHaveValue(updatedRules);
-    await rulesEditor.fill(`${updatedRules}\n- 这行只用于验证还原`);
-    await launched.page.getByRole("button", { name: "还原修改" }).click();
-    await expect(rulesEditor).toHaveValue(updatedRules);
-    await launched.page.getByRole("button", { name: "返回项目" }).click();
-    await expect(launched.page.getByText("当前文件", { exact: true })).toBeVisible();
-    expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
-  } finally {
-    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
-    removeSourceFixture(fixture.sourceDirectory);
-  }
-});
-
-test("a global comment stays exact through first project registration", async () => {
-  const fixture = createSourceFixture("global-comment-registration.html");
-  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
-  try {
-    const frame = await loadedDiskFrame(launched.page, fixture.sourcePath);
-    await launched.page.getByRole("button", { name: "全局评论" }).click();
-    await launched.page.getByRole("textbox", { name: "评论内容" })
-      .fill("保持整个页面的视觉层级。");
-    await launched.page.getByRole("button", { name: "评论", exact: true }).click();
-    const globalComment = launched.page.locator(".comment-card")
-      .filter({ hasText: "保持整个页面的视觉层级。" });
-    await expect(globalComment).toHaveAttribute("data-resolution", "exact");
-
-    await activateNativeEdit(frame, "list-item");
-    await setTextSelection(frame, "list-item", 0, ORIGINAL_TEXT.length);
-    await launched.page.keyboard.insertText("首次登记后仍精确");
-    await expect.poll(
-      () => readFileSync(fixture.sourcePath, "utf8"),
-      { timeout: 20_000 },
-    ).toContain("首次登记后仍精确");
-
-    await expect(globalComment).toHaveAttribute("data-resolution", "exact");
-    await expect(globalComment.getByText("原位置已变化")).toHaveCount(0);
-    await expect(launched.page.getByRole("button", { name: /发送至 Qoder/u }))
-      .toBeEnabled();
-  } finally {
-    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
-    removeSourceFixture(fixture.sourceDirectory);
-  }
-});
 
 test("a persisted legacy global comment stays exact after restart and sends directly", async () => {
   test.setTimeout(120_000);
@@ -3651,296 +3389,6 @@ test("a persisted legacy global comment stays exact after restart and sends dire
   }
 });
 
-test("multiple orphaned comments relink in sequence and resume the original send", async () => {
-  test.setTimeout(120_000);
-  const fixture = createSourceFixture("orphaned-comments-resume-send.html");
-  const firstLaunch = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
-  const firstComment = "把原列表项改成更简洁的表达。";
-  const secondComment = "把原表格单元格改成更清楚的说明。";
-  let activeLaunch = firstLaunch;
-  try {
-    const frame = await loadedDiskFrame(firstLaunch.page, fixture.sourcePath);
-    await addComment(firstLaunch.page, fixture.sourcePath, firstComment, "list-item");
-    await addComment(firstLaunch.page, fixture.sourcePath, secondComment, "table-cell");
-
-    await activateNativeEdit(frame, "list-item");
-    await setTextSelection(frame, "list-item", 0, ORIGINAL_TEXT.length);
-    await firstLaunch.page.keyboard.insertText("失联评论登记测试");
-    await expect.poll(
-      () => workspaceContainsDraftComment(firstLaunch.workspace, secondComment),
-      { timeout: 20_000 },
-    ).toBe(true);
-    await closePageRootGracefully(firstLaunch.electronApp, firstLaunch.page);
-
-    const externallyChanged = readFileSync(fixture.sourcePath, "utf8")
-      .replace(
-        /<li data-native-case="list-item"[^>]*>[\s\S]*?<\/li>/u,
-        "",
-      )
-      .replace(
-        /<td data-native-case="table-cell"[^>]*>[\s\S]*?<\/td>/u,
-        "",
-      );
-    writeFileSync(fixture.sourcePath, externallyChanged, "utf8");
-
-    activeLaunch = await launchPageRoot({
-      activeSourcePath: fixture.sourcePath,
-      isolatedUserData: firstLaunch.isolatedUserData,
-    });
-    const recoveredFrame = await loadedDiskFrame(
-      activeLaunch.page,
-      fixture.sourcePath,
-      { expectedCase: "flex-copy" },
-    );
-    const recoveredComments = activeLaunch.page.locator(".comment-card");
-    await expect(recoveredComments).toHaveCount(2);
-    await expect(recoveredComments.filter({ hasText: firstComment }))
-      .toHaveAttribute("data-resolution", "orphaned");
-    await expect(recoveredComments.filter({ hasText: secondComment }))
-      .toHaveAttribute("data-resolution", "orphaned");
-
-    await activeLaunch.page.getByRole("button", { name: /发送至 Qoder/u }).click();
-    await expect(activeLaunch.page.getByText("2 条评论需要重新定位", { exact: true }))
-      .toBeVisible();
-    await activeLaunch.page.getByRole("button", { name: "开始重新定位" }).click();
-
-    await recoveredFrame.locator(caseSelector("flex-copy")).click();
-    await expect(activeLaunch.page.getByText("1 条评论需要重新定位", { exact: true }))
-      .toBeVisible();
-    await expect(recoveredComments.filter({ hasText: firstComment }))
-      .toHaveAttribute("data-resolution", "exact");
-    await expect(recoveredComments.filter({ hasText: secondComment }))
-      .toHaveAttribute("data-resolution", "orphaned");
-
-    await recoveredFrame.locator(caseSelector("grid-card")).click();
-    await expect(activeLaunch.page.getByText(
-      "等待 QoderWork 返回修改结果",
-      { exact: true },
-    )).toBeVisible({ timeout: 30_000 });
-    await expect.poll(
-      () => requestDirectoryCount(activeLaunch.workspace),
-      { timeout: 20_000 },
-    ).toBe(1);
-  } finally {
-    await stopPageRoot(activeLaunch.electronApp, firstLaunch.isolatedUserData);
-    removeSourceFixture(fixture.sourceDirectory);
-  }
-});
-
-test("automatic update actions sit on the HTML icon and the icon opens About", async () => {
-  const fixture = createSourceFixture("update-indicator.html");
-  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
-  try {
-    await loadedDiskFrame(launched.page, fixture.sourcePath);
-    const evidenceDirectory = path.join(
-      productRoot,
-      "output/design-qa/comment-presentation-header-polish",
-    );
-    mkdirSync(evidenceDirectory, { recursive: true });
-    const captureHeader = async (fileName, { badgeExpected = true } = {}) => {
-      const geometry = await launched.page.evaluate(() => {
-        const rect = (selector) => {
-          const element = document.querySelector(selector);
-          if (!element) return null;
-          const box = element.getBoundingClientRect();
-          return {
-            left: box.left,
-            top: box.top,
-            right: box.right,
-            bottom: box.bottom,
-            width: box.width,
-            height: box.height,
-          };
-        };
-        return {
-          viewportWidth: window.innerWidth,
-          header: rect(".workbench-header"),
-          cluster: rect(".window-file-icon-cluster"),
-          icon: rect(".window-file-about-button"),
-          badge: rect(".window-file-update-badge"),
-          badgeLabel: rect(".window-file-update-badge > span"),
-          fileCopy: rect(".window-file-copy"),
-        };
-      });
-      expect(geometry.header).not.toBeNull();
-      expect(geometry.cluster).not.toBeNull();
-      expect(geometry.icon).not.toBeNull();
-      expect(geometry.fileCopy).not.toBeNull();
-      expect(Math.abs(
-        (geometry.icon.top + geometry.icon.bottom) / 2
-        - (geometry.cluster.top + geometry.cluster.bottom) / 2,
-      )).toBeLessThanOrEqual(0.5);
-      if (badgeExpected) {
-        expect(geometry.badge).not.toBeNull();
-        expect(geometry.badgeLabel).not.toBeNull();
-        expect(geometry.badgeLabel.top).toBeGreaterThanOrEqual(
-          geometry.header.top,
-        );
-        expect(geometry.badgeLabel.bottom).toBeLessThanOrEqual(
-          geometry.header.bottom,
-        );
-        expect(geometry.badgeLabel.right).toBeLessThanOrEqual(
-          geometry.fileCopy.left - 8,
-        );
-        expect(geometry.badgeLabel.top).toBeLessThan(geometry.icon.bottom);
-      } else {
-        expect(geometry.badge).toBeNull();
-        expect(geometry.badgeLabel).toBeNull();
-      }
-      await launched.page.screenshot({
-        path: path.join(evidenceDirectory, fileName),
-        clip: {
-          x: 0,
-          y: 0,
-          width: Math.min(900, geometry.viewportWidth),
-          height: geometry.header.height,
-        },
-      });
-      return geometry;
-    };
-
-    const noUpdateGeometry = await captureHeader("no-update.png", {
-      badgeExpected: false,
-    });
-
-    await sendToMainRenderer(
-      launched.electronApp,
-      launched.page,
-      "html-updates:status",
-      {
-        status: "available",
-        currentVersion: "0.8.6",
-        latestVersion: "9.9.9",
-        minimumMacOS: "12.0",
-        architecture: "arm64",
-        publishedAt: "2026-07-23T00:00:00.000Z",
-      },
-    );
-    await expect(launched.page.getByRole("button", {
-      name: "发现 PageRoot 9.9.9，下载更新",
-    })).toBeVisible();
-    const newGeometry = await captureHeader("new-update.png");
-
-    await launched.page.getByRole("button", { name: "关于源页" }).click();
-    await expect(launched.page.getByRole("dialog", { name: "源页" }))
-      .toBeVisible();
-    await launched.page.getByRole("button", { name: "关闭关于源页" }).click();
-    await expect(launched.page.locator("dialog.about-dialog[open]"))
-      .toHaveCount(0);
-    await launched.page.evaluate(() => new Promise((resolve) => {
-      requestAnimationFrame(() => requestAnimationFrame(resolve));
-    }));
-
-    await sendToMainRenderer(
-      launched.electronApp,
-      launched.page,
-      "html-updates:status",
-      {
-        status: "downloaded",
-        currentVersion: "0.8.6",
-        latestVersion: "9.9.9",
-        minimumMacOS: "12.0",
-        architecture: "arm64",
-        publishedAt: "2026-07-23T00:00:00.000Z",
-      },
-    );
-    await expect(launched.page.getByRole("button", {
-      name: "PageRoot 9.9.9 已下载，重启更新",
-    })).toBeVisible();
-    await expect(launched.page.getByRole("dialog", {
-      name: "现在重启并安装更新？",
-    })).toBeVisible();
-    await launched.page.getByRole("button", { name: "稍后" }).click();
-    await expect(launched.page.locator("dialog.restart-update-dialog[open]"))
-      .toHaveCount(0);
-    await launched.page.evaluate(() => new Promise((resolve) => {
-      requestAnimationFrame(() => requestAnimationFrame(resolve));
-    }));
-    const restartGeometry = await captureHeader("restart-update.png");
-    for (const geometry of [newGeometry, restartGeometry]) {
-      expect(geometry.icon).toEqual(noUpdateGeometry.icon);
-      expect(geometry.cluster).toEqual(noUpdateGeometry.cluster);
-      expect(geometry.fileCopy).toEqual(noUpdateGeometry.fileCopy);
-    }
-    writeFileSync(
-      path.join(evidenceDirectory, "header-geometry.json"),
-      JSON.stringify({
-        viewport: { width: newGeometry.viewportWidth },
-        none: noUpdateGeometry,
-        available: newGeometry,
-        downloaded: restartGeometry,
-      }, null, 2),
-      "utf8",
-    );
-  } finally {
-    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
-    removeSourceFixture(fixture.sourceDirectory);
-  }
-});
-
-test("rapid project switching and immediate close preserve the last native edit", async () => {
-  test.setTimeout(180_000);
-  const projectA = createSourceFixture("close-switch-a.html");
-  const projectB = createSourceFixture("close-switch-b.html");
-  const firstLaunch = await launchPageRoot({
-    activeSourcePath: projectA.sourcePath,
-    recentSourcePaths: [projectA.sourcePath, projectB.sourcePath],
-  });
-  let firstClosed = false;
-  let reopened = null;
-  try {
-    const switchedText = "快速切换仍然安全写回";
-    const closeText = "关闭前最后一次原位编辑";
-    let frame = await loadedDiskFrame(firstLaunch.page, projectA.sourcePath);
-    await activateNativeEdit(frame, "list-item");
-    await setTextSelection(frame, "list-item", 0, ORIGINAL_TEXT.length);
-    await firstLaunch.page.keyboard.insertText(switchedText);
-    await expect(frame.locator(caseSelector("list-item"))).toHaveText(switchedText);
-
-    await firstLaunch.page.getByRole("button", { name: "项目", exact: true }).click();
-    await firstLaunch.page.locator(".recent-file-row")
-      .filter({ hasText: "close-switch-b.html" })
-      .click();
-    await loadedDiskFrame(firstLaunch.page, projectB.sourcePath);
-    await expect.poll(
-      () => readFileSync(projectA.sourcePath, "utf8"),
-      { timeout: 20_000 },
-    ).toContain(switchedText);
-
-    frame = await openRecentProject(firstLaunch.page, projectA.sourcePath);
-    await expect(frame.locator(caseSelector("list-item"))).toHaveText(switchedText);
-    await activateNativeEdit(frame, "list-item");
-    await setTextSelection(frame, "list-item", 0, switchedText.length);
-    await firstLaunch.page.keyboard.insertText(closeText);
-    await expect(frame.locator(caseSelector("list-item"))).toHaveText(closeText);
-
-    await closePageRootGracefully(firstLaunch.electronApp, firstLaunch.page);
-    firstClosed = true;
-    reopened = await launchPageRoot({
-      isolatedUserData: firstLaunch.isolatedUserData,
-    });
-    const reopenedFrame = await loadedDiskFrame(
-      reopened.page,
-      projectA.sourcePath,
-    );
-    await expect(reopenedFrame.locator(caseSelector("list-item")))
-      .toHaveText(closeText);
-    expect(readFileSync(projectA.sourcePath, "utf8")).toContain(closeText);
-  } finally {
-    if (reopened) {
-      await stopPageRoot(reopened.electronApp, reopened.isolatedUserData);
-    } else if (!firstClosed) {
-      await stopPageRoot(
-        firstLaunch.electronApp,
-        firstLaunch.isolatedUserData,
-      );
-    } else {
-      removeAiLoopUserData(firstLaunch.isolatedUserData);
-    }
-    removeSourceFixture(projectA.sourceDirectory);
-    removeSourceFixture(projectB.sourceDirectory);
-  }
-});
 
 test("output without the mandatory finalizer never creates or opens a version", async () => {
   const fixture = createSourceFixture();
