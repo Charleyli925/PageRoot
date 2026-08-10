@@ -1,18 +1,15 @@
-import { createRequire } from "node:module";
 import {
   existsSync,
-  mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
-  rmSync,
+  readdirSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { expect, test } from "@playwright/test";
-import { _electron as electron } from "playwright";
 
 import {
   activateNativeEdit,
@@ -25,7 +22,6 @@ import {
   keyShortcut,
   loadFixture,
   nativeEditingState,
-  productRoot,
   recordedInputEvents,
   replaceEditableIslandBytes,
   replaceUniqueBytes,
@@ -33,203 +29,64 @@ import {
   setTextSelection,
   withBomAndCrLf,
 } from "../browser/pageroot-driver.mjs";
+import {
+  closePageRootGracefully,
+  createSourceFixture as createSharedSourceFixture,
+  launchPageRoot,
+  loadedDiskFrame as loadDiskFrame,
+  removeValidatedTemporaryDirectory,
+  removeSourceFixture as removeSharedSourceFixture,
+  sendToMainRenderer,
+  stopPageRoot,
+  waitForProjectReady as waitForSharedProjectReady,
+} from "./helpers/pageroot-app-fixture.mjs";
 
-const require = createRequire(import.meta.url);
-const electronExecutable = require("electron");
-
-function seedActiveDiskProject(isolatedUserData, sourcePath) {
-  writeFileSync(
-    path.join(isolatedUserData, "html-projects.json"),
-    JSON.stringify({
-      version: 1,
-      activePath: sourcePath,
-      recent: [{
-        path: sourcePath,
-        name: path.basename(sourcePath),
-        lastOpenedAt: Date.now(),
-      }],
-    }),
-    "utf8",
-  );
-}
-
-async function launchPageRoot(options = {}) {
-  const isolatedUserData = options.isolatedUserData
-    || mkdtempSync(path.join(tmpdir(), "pageroot-native-e2e-"));
-  mkdirSync(isolatedUserData, { recursive: true });
-  if (options.activeSourcePath) {
-    seedActiveDiskProject(isolatedUserData, options.activeSourcePath);
-  }
-  const electronApp = await electron.launch({
-    executablePath: electronExecutable,
-    args: [path.join(productRoot, "desktop/main.mjs")],
-    cwd: productRoot,
-    env: {
-      ...process.env,
-      PAGEROOT_E2E: "1",
-      PAGEROOT_E2E_USER_DATA_DIR: isolatedUserData,
-      HTML_AI_WORKSPACE: path.join(isolatedUserData, "workspace"),
-    },
-  });
-  const page = await electronApp.firstWindow();
-  await page.waitForLoadState("domcontentloaded");
-  const mainRendererUrl = page.url();
-  const nativeWindow = await electronApp.evaluate(({ BrowserWindow }, rendererUrl) => {
-    const window = BrowserWindow.getAllWindows().find((candidate) => (
-      candidate.webContents.getURL() === rendererUrl
-    ));
-    if (!window) {
-      throw new Error("PageRoot main BrowserWindow is unavailable during launch.");
-    }
-    window?.webContents.setBackgroundThrottling(false);
-    return {
-      focused: window?.isFocused() || false,
-      visible: window?.isVisible() || false,
-    };
-  }, mainRendererUrl);
-  const foreground = process.env.PAGEROOT_E2E_FOREGROUND === "1";
-  expect(nativeWindow.visible).toBe(foreground);
-  if (!foreground) expect(nativeWindow.focused).toBe(false);
-  await page.waitForFunction(() => document.visibilityState === "visible");
-  await page.evaluate(() => new Promise((resolve) => {
-    requestAnimationFrame(() => requestAnimationFrame(resolve));
-  }));
-  return { electronApp, page, isolatedUserData };
-}
-
-function removeValidatedTemporaryDirectory(directoryPath, namePrefix) {
-  const resolved = path.resolve(directoryPath);
-  if (
-    path.dirname(resolved) !== path.resolve(tmpdir())
-    || !path.basename(resolved).startsWith(namePrefix)
-  ) {
-    throw new Error(`Refusing to remove non-E2E temporary data: ${directoryPath}`);
-  }
-  rmSync(resolved, {
-    recursive: true,
-    force: true,
-    maxRetries: 10,
-    retryDelay: 100,
-  });
-}
+const ORIGINAL_LIST_TEXT = "列表项中的文字保持项目符号和缩进。";
 
 function removeIsolatedUserData(isolatedUserData) {
   removeValidatedTemporaryDirectory(isolatedUserData, "pageroot-native-e2e-");
 }
 
-async function stopPageRoot(electronApp, isolatedUserData, { cleanup = true } = {}) {
-  const electronProcess = electronApp.process();
-  const applicationClosed = electronApp
-    .waitForEvent("close", { timeout: 5_000 })
-    .then(() => true)
-    .catch(() => false);
-  const waitForExit = (timeout) => new Promise((resolve) => {
-    if (electronProcess.exitCode !== null || electronProcess.signalCode !== null) {
-      resolve(true);
-      return;
-    }
-    let timer = null;
-    const onExit = () => {
-      if (timer) clearTimeout(timer);
-      resolve(true);
-    };
-    timer = setTimeout(() => {
-      electronProcess.off("exit", onExit);
-      resolve(false);
-    }, timeout);
-    electronProcess.once("exit", onExit);
-  });
-
-  const exitRequest = electronApp
-    .evaluate(({ app }) => app.exit(0))
-    .catch(() => {});
-  await Promise.race([
-    exitRequest,
-    new Promise((resolve) => setTimeout(resolve, 1_000)),
-  ]);
-  if (!await waitForExit(3_000)) {
-    electronProcess.kill("SIGKILL");
-    await waitForExit(3_000);
-  }
-  await applicationClosed;
-  if (cleanup) removeIsolatedUserData(isolatedUserData);
+function createSourceFixture(
+  fileName = "generated-native-e2e.html",
+  transform = (source) => source,
+) {
+  return createSharedSourceFixture({ fileName, transform });
 }
 
-async function closePageRootGracefully(electronApp, page) {
-  const mainRendererUrl = page?.url();
-  if (!mainRendererUrl) {
-    throw new Error("PageRoot main renderer URL is unavailable for graceful close.");
-  }
-  await page?.evaluate(() => {
-    window.__PAGEROOT_CLOSE_ABORT_REASON__ = null;
-    window.addEventListener("html-ai:close-aborted", (event) => {
-      window.__PAGEROOT_CLOSE_ABORT_REASON__ = event.detail?.reason || "unknown";
-    }, { once: true });
-  });
-  const closed = electronApp.waitForEvent("close", { timeout: 35_000 });
-  const requested = await electronApp.evaluate(({ BrowserWindow }, rendererUrl) => {
-    // Runtime snapshots own hidden offscreen BrowserWindows. The E2E close
-    // must target the known app renderer instead of assuming array order.
-    const mainWindow = BrowserWindow.getAllWindows().find((candidate) => (
-      candidate.webContents.getURL() === rendererUrl
-    ));
-    if (!mainWindow) return false;
-    mainWindow.close();
-    return true;
-  }, mainRendererUrl);
-  if (!requested) {
-    throw new Error("PageRoot main BrowserWindow was unavailable for graceful close.");
-  }
-  try {
-    await closed;
-  } catch (error) {
-    const reason = await page?.evaluate(
-      () => window.__PAGEROOT_CLOSE_ABORT_REASON__,
-    ).catch(() => null);
-    throw new Error(
-      `PageRoot graceful close did not complete${reason ? `: ${reason}` : "."}`,
-      { cause: error },
-    );
-  }
+function removeSourceFixture(sourceDirectory) {
+  removeSharedSourceFixture(sourceDirectory);
 }
 
 async function waitForProjectReady(page, timeout = 30_000) {
-  await expect.poll(async () => {
-    const state = await page.locator("main.workbench").getAttribute("data-project-state");
-    if (state === "ready") return state;
-    const stage = await page.evaluate(() => window.__PAGEROOT_HYDRATION_STAGE__);
-    return `${state}:${stage || "unmarked"}`;
-  }, { timeout }).toBe("ready");
+  return waitForSharedProjectReady(page, { timeout, includeFailureDetail: false });
 }
 
 async function loadedDiskFrame(page, sourcePath, caseId) {
-  await expect.poll(
-    async () => (await page.evaluate(() => window.htmlAIProjects?.getActiveProject()))?.sourcePath,
-    { timeout: 15_000 },
-  ).toBe(realpathSync(sourcePath));
-  await waitForProjectReady(page);
-  await expect(page.locator('[aria-label="项目读取失败"]')).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "项目", exact: true }))
-    .toBeEnabled({ timeout: 30_000 });
-  await expect(page.getByRole("button", { name: "全局评论", exact: true }))
-    .toBeEnabled({ timeout: 30_000 });
-  await expect(page.locator('[aria-label="项目读取失败"]')).toHaveCount(0);
-  const editor = page.getByTestId("html-canvas-editor").filter({ visible: true }).first();
-  await editor.waitFor({ state: "visible" });
-  const editorHandle = await editor.elementHandle();
-  await page.waitForFunction(
-    (element) => element?.getAttribute("data-render-verified") === "true",
-    editorHandle,
-  );
-  const iframe = editor.locator('iframe[title*="HTML"]');
-  const iframeHandle = await iframe.elementHandle();
-  const frame = await iframeHandle?.contentFrame();
-  if (!frame) throw new Error("PageRoot Electron canvas did not expose its edit frame.");
-  await frame.waitForFunction(
-    (selector) => Boolean(document.querySelector(selector)),
-    caseSelector(caseId),
-  );
-  return { editor, frame };
+  return loadDiskFrame(page, sourcePath, {
+    expectedCase: caseId,
+    includeEditor: true,
+    timeout: 30_000,
+  });
+}
+
+async function openRecentProject(page, sourcePath, caseId = "list-item") {
+  const visibleToast = page.locator(".toast.show");
+  await visibleToast.waitFor({ state: "visible", timeout: 2_000 }).catch(() => {});
+  if (await visibleToast.isVisible()) {
+    await visibleToast.getByRole("button", { name: "关闭提醒" }).click();
+    await expect(visibleToast).toBeHidden();
+  }
+  const processingDialog = page.getByRole("dialog", { name: "本轮处理" });
+  if (await processingDialog.isVisible()) {
+    await page.keyboard.press("Escape");
+    await expect(processingDialog).toBeHidden();
+  }
+  await page.getByRole("button", { name: "项目", exact: true }).click();
+  await page.locator(".recent-file-row")
+    .filter({ hasText: path.basename(sourcePath) })
+    .click();
+  return loadedDiskFrame(page, sourcePath, caseId);
 }
 
 async function waitForFreshDiskFrame(page, previousDocumentToken, caseId) {
@@ -363,6 +220,40 @@ async function addCanvasComment(page, frame, caseId, text) {
   await expect(card).toHaveCount(1);
   await expect(card).toHaveAttribute("data-resolution", /^(?:exact|rebound)$/u);
   return card;
+}
+
+function requestDirectoryCount(workspace) {
+  const projectsRoot = path.join(workspace, "projects");
+  if (!existsSync(projectsRoot)) return 0;
+  return readdirSync(projectsRoot).reduce((total, projectDirectoryName) => {
+    const requestsRoot = path.join(
+      projectsRoot,
+      projectDirectoryName,
+      "requests",
+    );
+    return total + (
+      existsSync(requestsRoot)
+        ? readdirSync(requestsRoot).filter((entry) => !entry.startsWith(".")).length
+        : 0
+    );
+  }, 0);
+}
+
+function workspaceContainsDraftComment(workspace, text) {
+  const projectsRoot = path.join(workspace, "projects");
+  if (!existsSync(projectsRoot)) return false;
+  return readdirSync(projectsRoot).some((projectDirectoryName) => {
+    const draftPath = path.join(
+      projectsRoot,
+      projectDirectoryName,
+      "draft",
+      "annotations.json",
+    );
+    if (!existsSync(draftPath)) return false;
+    const draft = JSON.parse(readFileSync(draftPath, "utf8"));
+    return Array.isArray(draft.comments)
+      && draft.comments.some((comment) => comment.text === text);
+  });
 }
 
 async function replayApplePinyinStyledWrapperCommit(frame, caseId) {
@@ -1046,6 +937,361 @@ test("Electron proves one V2 editable-island lane across complex projections", a
     )).toContain("电观察器保护");
   } finally {
     await stopPageRoot(electronApp, isolatedUserData);
+  }
+});
+
+test("Electron rapid project switching and immediate close preserve the last native edit", async () => {
+  test.setTimeout(180_000);
+  const projectA = createSourceFixture("close-switch-a.html");
+  const projectB = createSourceFixture("close-switch-b.html");
+  const firstLaunch = await launchPageRoot({
+    activeSourcePath: projectA.sourcePath,
+    recentSourcePaths: [projectA.sourcePath, projectB.sourcePath],
+  });
+  let firstClosed = false;
+  let reopened = null;
+  try {
+    const switchedText = "快速切换仍然安全写回";
+    const closeText = "关闭前最后一次原位编辑";
+    let { frame } = await loadedDiskFrame(
+      firstLaunch.page,
+      projectA.sourcePath,
+      "list-item",
+    );
+    await activateNativeEdit(frame, "list-item");
+    await setTextSelection(frame, "list-item", 0, ORIGINAL_LIST_TEXT.length);
+    await firstLaunch.page.keyboard.insertText(switchedText);
+    await expect(frame.locator(caseSelector("list-item"))).toHaveText(switchedText);
+
+    await firstLaunch.page.getByRole("button", { name: "项目", exact: true }).click();
+    await firstLaunch.page.locator(".recent-file-row")
+      .filter({ hasText: "close-switch-b.html" })
+      .click();
+    await loadedDiskFrame(firstLaunch.page, projectB.sourcePath, "list-item");
+    await expect.poll(
+      () => readFileSync(projectA.sourcePath, "utf8"),
+      { timeout: 20_000 },
+    ).toContain(switchedText);
+
+    ({ frame } = await openRecentProject(
+      firstLaunch.page,
+      projectA.sourcePath,
+      "list-item",
+    ));
+    await expect(frame.locator(caseSelector("list-item"))).toHaveText(switchedText);
+    await activateNativeEdit(frame, "list-item");
+    await setTextSelection(frame, "list-item", 0, switchedText.length);
+    await firstLaunch.page.keyboard.insertText(closeText);
+    await expect(frame.locator(caseSelector("list-item"))).toHaveText(closeText);
+
+    await closePageRootGracefully(firstLaunch.electronApp, firstLaunch.page);
+    firstClosed = true;
+    reopened = await launchPageRoot({
+      isolatedUserData: firstLaunch.isolatedUserData,
+    });
+    const { frame: reopenedFrame } = await loadedDiskFrame(
+      reopened.page,
+      projectA.sourcePath,
+      "list-item",
+    );
+    await expect(reopenedFrame.locator(caseSelector("list-item")))
+      .toHaveText(closeText);
+    expect(readFileSync(projectA.sourcePath, "utf8")).toContain(closeText);
+  } finally {
+    if (reopened) {
+      await stopPageRoot(reopened.electronApp, reopened.isolatedUserData);
+    } else if (!firstClosed) {
+      await stopPageRoot(
+        firstLaunch.electronApp,
+        firstLaunch.isolatedUserData,
+      );
+    } else {
+      removeIsolatedUserData(firstLaunch.isolatedUserData);
+    }
+    removeSourceFixture(projectA.sourceDirectory);
+    removeSourceFixture(projectB.sourceDirectory);
+  }
+});
+
+test("project resources drain edited rules before leaving", async () => {
+  const fixture = createSourceFixture("project-resources.html");
+  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  try {
+    await loadedDiskFrame(launched.page, fixture.sourcePath, "list-item");
+    const projectCount = () => {
+      const projectsRoot = path.join(launched.workspace, "projects");
+      return existsSync(projectsRoot)
+        ? readdirSync(projectsRoot).filter((entry) => !entry.startsWith(".")).length
+        : 0;
+    };
+    expect(projectCount()).toBe(0);
+    await launched.page.getByRole("button", { name: "项目", exact: true }).click();
+    expect(projectCount()).toBe(0);
+    await launched.page.getByText("项目资料", { exact: true }).click();
+    const rulesButton = launched.page.getByRole("button", {
+      name: /项目长期规则.*以后每次 AI 修改都会读取.*可编辑/u,
+    });
+    await expect(rulesButton).toBeVisible();
+    await expect(launched.page.getByRole("button", {
+      name: /项目记录文件夹.*查看每轮要求、AI 返回与历史文件.*Finder/u,
+    })).toBeVisible();
+    await rulesButton.click();
+    await expect(launched.page.getByText("管理 AI 修改规则", { exact: true }))
+      .toBeVisible();
+    await expect(launched.page.getByText(
+      "修改会自动保存。每次发送至 Qoder 时，源页都会把这份规则与本轮要求一起交接；规则只影响后续任务，不会修改当前 HTML。",
+      { exact: true },
+    )).toBeVisible();
+    const rulesEditor = launched.page.getByRole("textbox", { name: "项目长期规则" });
+    await expect(rulesEditor).toBeEnabled();
+    const originalRules = await rulesEditor.inputValue();
+    const updatedRules = `${originalRules}\n\n- 测试自动保存保护`;
+    await rulesEditor.fill(updatedRules);
+    await launched.page.getByRole("button", { name: "返回项目" }).click();
+    await expect(launched.page.getByText("当前文件", { exact: true })).toBeVisible();
+    const projectsRoot = path.join(launched.workspace, "projects");
+    const [projectDirectoryName] = readdirSync(projectsRoot)
+      .filter((entry) => !entry.startsWith("."));
+    const projectRulesPath = path.join(
+      projectsRoot,
+      projectDirectoryName,
+      "PROJECT.md",
+    );
+    await expect.poll(
+      () => readFileSync(projectRulesPath, "utf8"),
+      { timeout: 20_000 },
+    ).toBe(updatedRules);
+
+    await launched.page.getByText("项目资料", { exact: true }).click();
+    await rulesButton.click();
+    await expect(rulesEditor).toHaveValue(updatedRules);
+    await rulesEditor.fill(`${updatedRules}\n- 这行只用于验证还原`);
+    await launched.page.getByRole("button", { name: "还原修改" }).click();
+    await expect(rulesEditor).toHaveValue(updatedRules);
+    await launched.page.getByRole("button", { name: "返回项目" }).click();
+    await expect(launched.page.getByText("当前文件", { exact: true })).toBeVisible();
+    expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
+  } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
+
+test("multiple orphaned comments relink in sequence and resume the original send", async () => {
+  test.setTimeout(120_000);
+  const fixture = createSourceFixture("orphaned-comments-resume-send.html");
+  const firstLaunch = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  const firstComment = "把原列表项改成更简洁的表达。";
+  const secondComment = "把原表格单元格改成更清楚的说明。";
+  let activeLaunch = firstLaunch;
+  let firstAppClosed = false;
+  try {
+    const { frame: firstCommentFrame } = await loadedDiskFrame(
+      firstLaunch.page,
+      fixture.sourcePath,
+      "list-item",
+    );
+    await addCanvasComment(
+      firstLaunch.page,
+      firstCommentFrame,
+      "list-item",
+      firstComment,
+    );
+    const { frame: secondCommentFrame } = await loadedDiskFrame(
+      firstLaunch.page,
+      fixture.sourcePath,
+      "table-cell",
+    );
+    await addCanvasComment(
+      firstLaunch.page,
+      secondCommentFrame,
+      "table-cell",
+      secondComment,
+    );
+    const { frame: editingFrame } = await loadedDiskFrame(
+      firstLaunch.page,
+      fixture.sourcePath,
+      "list-item",
+    );
+
+    await activateNativeEdit(editingFrame, "list-item");
+    await setTextSelection(editingFrame, "list-item", 0, ORIGINAL_LIST_TEXT.length);
+    await firstLaunch.page.keyboard.insertText("失联评论登记测试");
+    await expect.poll(
+      () => workspaceContainsDraftComment(firstLaunch.workspace, secondComment),
+      { timeout: 20_000 },
+    ).toBe(true);
+    await closePageRootGracefully(firstLaunch.electronApp, firstLaunch.page);
+    firstAppClosed = true;
+
+    const externallyChanged = readFileSync(fixture.sourcePath, "utf8")
+      .replace(
+        /<li data-native-case="list-item"[^>]*>[\s\S]*?<\/li>/u,
+        "",
+      )
+      .replace(
+        /<td data-native-case="table-cell"[^>]*>[\s\S]*?<\/td>/u,
+        "",
+      );
+    writeFileSync(fixture.sourcePath, externallyChanged, "utf8");
+
+    activeLaunch = await launchPageRoot({
+      activeSourcePath: fixture.sourcePath,
+      isolatedUserData: firstLaunch.isolatedUserData,
+    });
+    const { frame: recoveredFrame } = await loadedDiskFrame(
+      activeLaunch.page,
+      fixture.sourcePath,
+      "flex-copy",
+    );
+    const recoveredComments = activeLaunch.page.locator(".comment-card");
+    await expect(recoveredComments).toHaveCount(2);
+    await expect(recoveredComments.filter({ hasText: firstComment }))
+      .toHaveAttribute("data-resolution", "orphaned");
+    await expect(recoveredComments.filter({ hasText: secondComment }))
+      .toHaveAttribute("data-resolution", "orphaned");
+
+    await activeLaunch.page.getByRole("button", { name: /发送至 Qoder/u }).click();
+    await expect(activeLaunch.page.getByText("2 条评论需要重新定位", { exact: true }))
+      .toBeVisible();
+    await activeLaunch.page.getByRole("button", { name: "开始重新定位" }).click();
+
+    await recoveredFrame.locator(caseSelector("flex-copy")).click();
+    await expect(activeLaunch.page.getByText("1 条评论需要重新定位", { exact: true }))
+      .toBeVisible();
+    await expect(recoveredComments.filter({ hasText: firstComment }))
+      .toHaveAttribute("data-resolution", "exact");
+    await expect(recoveredComments.filter({ hasText: secondComment }))
+      .toHaveAttribute("data-resolution", "orphaned");
+
+    await recoveredFrame.locator(caseSelector("grid-card")).click();
+    await expect(activeLaunch.page.getByText(
+      "等待 QoderWork 返回修改结果",
+      { exact: true },
+    )).toBeVisible({ timeout: 30_000 });
+    await expect.poll(
+      () => requestDirectoryCount(activeLaunch.workspace),
+      { timeout: 20_000 },
+    ).toBe(1);
+  } finally {
+    if (activeLaunch !== firstLaunch) {
+      await stopPageRoot(activeLaunch.electronApp, firstLaunch.isolatedUserData);
+    } else if (!firstAppClosed) {
+      await stopPageRoot(firstLaunch.electronApp, firstLaunch.isolatedUserData);
+    } else {
+      removeIsolatedUserData(firstLaunch.isolatedUserData);
+    }
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
+
+test("automatic update actions keep the header geometry and About lifecycle", async () => {
+  const fixture = createSourceFixture("update-indicator.html");
+  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  try {
+    await loadedDiskFrame(launched.page, fixture.sourcePath, "list-item");
+    const captureHeader = async ({ badgeExpected = true } = {}) => {
+      const geometry = await launched.page.evaluate(() => {
+        const rect = (selector) => {
+          const element = document.querySelector(selector);
+          if (!element) return null;
+          const box = element.getBoundingClientRect();
+          return {
+            left: box.left,
+            top: box.top,
+            right: box.right,
+            bottom: box.bottom,
+            width: box.width,
+            height: box.height,
+          };
+        };
+        return {
+          header: rect(".workbench-header"),
+          cluster: rect(".window-file-icon-cluster"),
+          icon: rect(".window-file-about-button"),
+          badge: rect(".window-file-update-badge"),
+          badgeLabel: rect(".window-file-update-badge > span"),
+          fileCopy: rect(".window-file-copy"),
+        };
+      });
+      expect(geometry.header).not.toBeNull();
+      expect(geometry.cluster).not.toBeNull();
+      expect(geometry.icon).not.toBeNull();
+      expect(geometry.fileCopy).not.toBeNull();
+      expect(Math.abs(
+        (geometry.icon.top + geometry.icon.bottom) / 2
+        - (geometry.cluster.top + geometry.cluster.bottom) / 2,
+      )).toBeLessThanOrEqual(0.5);
+      if (badgeExpected) {
+        expect(geometry.badge).not.toBeNull();
+        expect(geometry.badgeLabel).not.toBeNull();
+        expect(geometry.badgeLabel.top).toBeGreaterThanOrEqual(
+          geometry.header.top,
+        );
+        expect(geometry.badgeLabel.bottom).toBeLessThanOrEqual(
+          geometry.header.bottom,
+        );
+        expect(geometry.badgeLabel.right).toBeLessThanOrEqual(
+          geometry.fileCopy.left - 8,
+        );
+        expect(geometry.badgeLabel.top).toBeLessThan(geometry.icon.bottom);
+      } else {
+        expect(geometry.badge).toBeNull();
+        expect(geometry.badgeLabel).toBeNull();
+      }
+      return geometry;
+    };
+
+    const noUpdateGeometry = await captureHeader({ badgeExpected: false });
+    const updateStatus = {
+      currentVersion: "0.8.6",
+      latestVersion: "9.9.9",
+      minimumMacOS: "12.0",
+      architecture: "arm64",
+      publishedAt: "2026-07-23T00:00:00.000Z",
+    };
+    await sendToMainRenderer(
+      launched.electronApp,
+      launched.page,
+      "html-updates:status",
+      { ...updateStatus, status: "available" },
+    );
+    await expect(launched.page.getByRole("button", {
+      name: "发现 PageRoot 9.9.9，下载更新",
+    })).toBeVisible();
+    const availableGeometry = await captureHeader();
+
+    await launched.page.getByRole("button", { name: "关于源页" }).click();
+    await expect(launched.page.getByRole("dialog", { name: "源页" }))
+      .toBeVisible();
+    await launched.page.getByRole("button", { name: "关闭关于源页" }).click();
+    await expect(launched.page.locator("dialog.about-dialog[open]"))
+      .toHaveCount(0);
+
+    await sendToMainRenderer(
+      launched.electronApp,
+      launched.page,
+      "html-updates:status",
+      { ...updateStatus, status: "downloaded" },
+    );
+    await expect(launched.page.getByRole("button", {
+      name: "PageRoot 9.9.9 已下载，重启更新",
+    })).toBeVisible();
+    await expect(launched.page.getByRole("dialog", {
+      name: "现在重启并安装更新？",
+    })).toBeVisible();
+    await launched.page.getByRole("button", { name: "稍后" }).click();
+    await expect(launched.page.locator("dialog.restart-update-dialog[open]"))
+      .toHaveCount(0);
+    const downloadedGeometry = await captureHeader();
+    for (const geometry of [availableGeometry, downloadedGeometry]) {
+      expect(geometry.icon).toEqual(noUpdateGeometry.icon);
+      expect(geometry.cluster).toEqual(noUpdateGeometry.cluster);
+      expect(geometry.fileCopy).toEqual(noUpdateGeometry.fileCopy);
+    }
+  } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeSourceFixture(fixture.sourceDirectory);
   }
 });
 

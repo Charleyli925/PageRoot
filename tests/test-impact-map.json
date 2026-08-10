@@ -811,6 +811,22 @@
       "nodeTests": ["tests/electron-window-policy.test.mjs"]
     },
     {
+      "id": "electron-app-fixture",
+      "patterns": [
+        "^tests/e2e/electron/helpers/pageroot-app-fixture\\.mjs$"
+      ],
+      "suites": ["electron-smoke", "ai-smoke"],
+      "nodeTests": ["tests/electron-app-fixture.test.mjs"]
+    },
+    {
+      "id": "electron-app-fixture-contract",
+      "patterns": [
+        "^tests/electron-app-fixture\\.test\\.mjs$"
+      ],
+      "suites": [],
+      "nodeTests": ["tests/electron-app-fixture.test.mjs"]
+    },
+    {
       "id": "ai-e2e",
       "patterns": [
         "^tests/e2e/electron/ai-handoff-closed-loop\\.spec\\.mjs$",

@@ -261,6 +261,34 @@ test("the shared fixture driver schedules both browser and Electron smoke", () =
   ]);
 });
 
+test("the shared Electron app fixture schedules Native and AI smoke with its cleanup contract", () => {
+  const plan = selectGatePlan({
+    map,
+    lane: "task",
+    changedFiles: ["tests/e2e/electron/helpers/pageroot-app-fixture.mjs"],
+  });
+  assert.deepEqual(suiteIds(plan), [
+    "typecheck",
+    "lint",
+    "node-targeted",
+    "build-desktop",
+    "electron-smoke",
+    "ai-smoke",
+  ]);
+  assert.ok(plan.selectedNodeTests.includes("tests/electron-app-fixture.test.mjs"));
+  assert.ok(plan.selectedNodeTests.includes("tests/electron-window-policy.test.mjs"));
+});
+
+test("the Electron app fixture contract test selects itself without a desktop launch", () => {
+  const plan = selectGatePlan({
+    map,
+    lane: "edit",
+    changedFiles: ["tests/electron-app-fixture.test.mjs"],
+  });
+  assert.deepEqual(suiteIds(plan), ["node-targeted"]);
+  assert.deepEqual(plan.selectedNodeTests, ["tests/electron-app-fixture.test.mjs"]);
+});
+
 test("packaged-runtime test changes wait for the artifact boundary instead of running unrelated Electron smoke", () => {
   const plan = selectGatePlan({
     map,
