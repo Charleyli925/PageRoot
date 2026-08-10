@@ -136,6 +136,64 @@ test("recovery ownership is decided before presentation", () => {
   );
 });
 
+test("disposition matrix keeps timeout and user-action ownership explicit", () => {
+  const cases = [
+    {
+      name: "silent recovery stays in its owning surface",
+      notice: { disposition: "silent-recover", tone: "warning" },
+      present: false,
+      timeout: 5_000,
+    },
+    {
+      name: "deferred recovery stays in its owning surface",
+      notice: { disposition: "defer-and-resume", tone: "info" },
+      present: false,
+      timeout: 2_500,
+    },
+    {
+      name: "direct action waits for the user",
+      notice: {
+        disposition: "direct-action",
+        tone: "warning",
+        action: { id: "retry", label: "重新选择" },
+      },
+      present: true,
+      timeout: null,
+    },
+    {
+      name: "user choice waits for the user",
+      notice: {
+        disposition: "user-choice",
+        tone: "info",
+        action: { id: "choose", label: "选择位置" },
+      },
+      present: true,
+      timeout: null,
+    },
+    {
+      name: "background results are transient",
+      notice: { disposition: "background-result", tone: "success" },
+      present: true,
+      timeout: 7_000,
+    },
+    {
+      name: "in-place feedback remains with its caller",
+      notice: {
+        disposition: "inform-in-place",
+        tone: "warning",
+        action: { id: "ignored", label: "不应显示" },
+      },
+      present: false,
+      timeout: 5_000,
+    },
+  ];
+
+  for (const { name, notice, present, timeout } of cases) {
+    assert.equal(shouldPresentNotice(notice), present, name);
+    assert.equal(noticeAutoDismissMs(notice), timeout, name);
+  }
+});
+
 test("low-priority feedback cannot hide a persistent critical notice", () => {
   assert.equal(
     shouldReplaceNotice(

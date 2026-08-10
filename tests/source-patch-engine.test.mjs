@@ -18,6 +18,15 @@ function elementBy(index, predicate) {
   return element;
 }
 
+function resolvedElement(index, targetRef) {
+  const resolution = resolveTargetRef(index, targetRef);
+  assert.ok(
+    resolution.resolution === "exact" || resolution.resolution === "rebound",
+  );
+  assert.equal(resolution.target?.type, "element");
+  return resolution.target;
+}
+
 function assertPatchError(code, callback) {
   assert.throws(
     callback,
@@ -651,6 +660,165 @@ test("target mappings preserve editable-island identity through apply, inverse, 
   assert.equal(reapplied.html, result.html);
   assert.equal(reapplied.targetMappings[0].targetId, "editable-island-target");
   assert.equal(reapplied.targetMappings[0].resolution, "exact");
+});
+
+test("a tracked comment stays on the same element after text edit and inverse restoration", () => {
+  const source = "<!doctype html><html><body><main><p>before</p></main></body></html>";
+  const index = buildSourceIndex(source);
+  const paragraph = elementBy(index, (element) => element.tagName === "p");
+  const editTarget = createTargetRef(index, paragraph, {
+    targetId: "target_edit",
+    level: "subregion",
+  });
+  const commentTarget = createTargetRef(index, paragraph, {
+    targetId: "target_comment",
+    level: "subregion",
+  });
+  const plan = planSourcePatch({
+    type: "replace-editable-island",
+    targetRef: editTarget,
+    beforeInnerHtml: "before",
+    nextInnerHtml: "after",
+    expectedSourceSha256: index.sourceSha256,
+  }, index);
+  const applied = applyPatchPlan(plan, source, {
+    trackedTargetRefs: [commentTarget],
+  });
+
+  assert.match(applied.html, /<p>after<\/p>/u);
+  const refreshed = applied.refreshedTrackedTargetRefs.find(
+    (target) => target.targetId === "target_comment",
+  );
+  assert.ok(refreshed);
+  assert.equal(refreshed.targetId, commentTarget.targetId);
+  assert.equal(refreshed.sourceAnchor?.sourceSha256, applied.sourceSha256);
+  assert.equal(resolvedElement(applied.sourceIndex, refreshed).textContent, "after");
+
+  const restoredResult = applyPatchPlan(applied.inversePlan, applied.html, {
+    trackedTargetRefs: [refreshed],
+  });
+  const restored = restoredResult.refreshedTrackedTargetRefs.find(
+    (target) => target.targetId === "target_comment",
+  );
+  assert.equal(restoredResult.html, source);
+  assert.ok(restored);
+  assert.equal(restored.targetId, commentTarget.targetId);
+  assert.equal(resolvedElement(restoredResult.sourceIndex, restored).textContent, "before");
+});
+
+test("a tracked comment follows its exact sibling through reorder and inverse restoration", () => {
+  const source = [
+    "<!doctype html><html><body><main>",
+    "<section><p>one</p></section>",
+    "<section><p>two</p></section>",
+    "</main></body></html>",
+  ].join("\n");
+  const index = buildSourceIndex(source);
+  const parent = elementBy(index, (element) => element.tagName === "main");
+  const sections = parent.childElementIds.map((nodeId) => index.byNodeId.get(nodeId));
+  assert.equal(sections.length, 2);
+  const editTarget = createTargetRef(index, sections[0], {
+    targetId: "target_reorder_edit",
+    level: "module",
+  });
+  const commentTarget = createTargetRef(index, sections[0], {
+    targetId: "target_reorder_comment",
+    level: "module",
+  });
+  const plan = planSourcePatch({
+    type: "reorder-sibling",
+    targetRef: editTarget,
+    toIndex: 1,
+    beforeOrder: [...parent.childElementIds],
+    expectedSourceSha256: index.sourceSha256,
+  }, index);
+  const applied = applyPatchPlan(plan, source, {
+    trackedTargetRefs: [commentTarget],
+  });
+  const refreshed = applied.refreshedTrackedTargetRefs.find(
+    (target) => target.targetId === "target_reorder_comment",
+  );
+  assert.ok(refreshed);
+  const moved = resolvedElement(applied.sourceIndex, refreshed);
+  assert.equal(moved.textContent, "one");
+  assert.equal(moved.siblingIndex, 1);
+
+  const restoredResult = applyPatchPlan(applied.inversePlan, applied.html, {
+    trackedTargetRefs: [refreshed],
+  });
+  const restored = restoredResult.refreshedTrackedTargetRefs.find(
+    (target) => target.targetId === "target_reorder_comment",
+  );
+  assert.equal(restoredResult.html, source);
+  assert.ok(restored);
+  const originalPosition = resolvedElement(restoredResult.sourceIndex, restored);
+  assert.equal(originalPosition.textContent, "one");
+  assert.equal(originalPosition.siblingIndex, 0);
+});
+
+test("consecutive source-backed moves remain serializable through inverse round trips", () => {
+  const source = [
+    "<!doctype html><html><body><main>",
+    '<section data-key="a">A</section>',
+    '<section data-key="b">B</section>',
+    '<section data-key="c">C</section>',
+    '<section data-key="d">D</section>',
+    "</main></body></html>",
+  ].join("\n");
+  let currentSource = source;
+  let currentIndex = buildSourceIndex(currentSource);
+  let movingTarget = createTargetRef(
+    currentIndex,
+    elementBy(currentIndex, (element) => element.stableAttributes["data-key"] === "a"),
+    { targetId: "rapid-reorder-a", level: "module" },
+  );
+  const roundTripPlans = [];
+  const order = (index) => {
+    const parent = elementBy(index, (element) => element.tagName === "main");
+    return parent.childElementIds.map(
+      (nodeId) => index.byNodeId.get(nodeId).stableAttributes["data-key"],
+    );
+  };
+
+  for (const expectedIndex of [1, 2, 3]) {
+    const moving = resolvedElement(currentIndex, movingTarget);
+    const parent = currentIndex.byNodeId.get(moving.parentId);
+    assert.equal(parent?.type, "element");
+    const forwardPlan = planSourcePatch({
+      type: "reorder-sibling",
+      targetRef: movingTarget,
+      toIndex: expectedIndex,
+      beforeOrder: [...parent.childElementIds],
+      expectedSourceSha256: currentIndex.sourceSha256,
+    }, currentIndex);
+    const applied = applyPatchPlan(forwardPlan, currentSource);
+    roundTripPlans.push({ inversePlan: applied.inversePlan });
+    currentSource = applied.html;
+    currentIndex = applied.sourceIndex;
+    movingTarget = applied.refreshedTargetRefs.find(
+      (target) => target.targetId === "rapid-reorder-a",
+    );
+    assert.ok(movingTarget);
+    assert.equal(resolvedElement(currentIndex, movingTarget).siblingIndex, expectedIndex);
+  }
+  assert.deepEqual(order(currentIndex), ["b", "c", "d", "a"]);
+
+  const reapplyPlans = [];
+  for (const entry of roundTripPlans.toReversed()) {
+    const restoredResult = applyPatchPlan(entry.inversePlan, currentSource);
+    reapplyPlans.push(restoredResult.inversePlan);
+    currentSource = restoredResult.html;
+    currentIndex = restoredResult.sourceIndex;
+  }
+  assert.equal(currentSource, source);
+  assert.deepEqual(order(currentIndex), ["a", "b", "c", "d"]);
+
+  for (const reapplyPlan of reapplyPlans.toReversed()) {
+    const reapplied = applyPatchPlan(reapplyPlan, currentSource);
+    currentSource = reapplied.html;
+    currentIndex = reapplied.sourceIndex;
+  }
+  assert.deepEqual(order(currentIndex), ["b", "c", "d", "a"]);
 });
 
 test("tracked insertion points refresh deterministically through offset-shifting edits and inverse", () => {

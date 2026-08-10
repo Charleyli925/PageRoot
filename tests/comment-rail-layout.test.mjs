@@ -77,16 +77,40 @@ test("measured heights and the shared gap prevent overlapping cards", () => {
   assert.equal(result.bottom, 453);
 });
 
-test("comment rail rejects a target without a measured coordinate", () => {
-  assert.throws(
-    () => layoutCommentRailItems({
-      minimumTop: 80,
-      items: [
-        { key: "missing", targetTop: Number.NaN, height: 120, order: 1 },
-      ],
-    }),
-    /has no measured coordinate/u,
+test("finite long-document targets and dynamic card heights remain non-overlapping", () => {
+  const items = [
+    { key: "first", targetTop: 100_001, height: 24, order: 1 },
+    { key: "second", targetTop: 100_010, height: 24, order: 2 },
+  ];
+  const initial = layoutCommentRailItems({ minimumTop: 80, gap: 20, items });
+  const remeasured = layoutCommentRailItems({
+    minimumTop: 80,
+    gap: 20,
+    items: [{ ...items[0], height: 180 }, items[1]],
+  });
+
+  assert.deepEqual(initial.orderedKeys, ["first", "second"]);
+  assert.deepEqual(remeasured.orderedKeys, initial.orderedKeys);
+  assert.equal(initial.positions.first, 100_001);
+  assert.ok(
+    initial.positions.second >= initial.positions.first + initial.heights.first + 20,
   );
+  assert.ok(
+    remeasured.positions.second >= remeasured.positions.first + remeasured.heights.first + 20,
+  );
+  assert.ok(remeasured.positions.second > initial.positions.second);
+});
+
+test("comment rail rejects non-finite target coordinates", () => {
+  for (const targetTop of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+    assert.throws(
+      () => layoutCommentRailItems({
+        minimumTop: 80,
+        items: [{ key: "missing", targetTop, height: 120, order: 1 }],
+      }),
+      /has no measured coordinate/u,
+    );
+  }
 });
 
 test("focused alignment translates the queue without changing its order", () => {
