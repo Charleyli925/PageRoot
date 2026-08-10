@@ -239,6 +239,10 @@ test("recovery workflow uses trusted default-branch code and narrowly scoped rer
   assert.match(workflow, /ref: \$\{\{ github\.event\.repository\.default_branch \}\}/u);
   assert.match(workflow, /persist-credentials: false/u);
   assert.match(workflow, /recover-pr-review-gate\.mjs/u);
+  assert.match(
+    workflow,
+    /if ! test -f scripts\/recover-pr-review-gate\.mjs; then[\s\S]*bootstrap_pending_default_branch/u,
+  );
   assert.doesNotMatch(workflow, /pull_request_target|gh pr merge|mergePullRequest/u);
   assert.match(script, /\/rerun-failed-jobs/u);
   assert.doesNotMatch(script, /\/rerun(?:["'`]|\?)/u);

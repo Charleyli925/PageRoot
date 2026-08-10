@@ -42,14 +42,22 @@ jobs:
       - name: Recover an exact-pair review timeout without rerunning green jobs
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: >-
-          node scripts/recover-pr-review-gate.mjs
-          --repository "$GITHUB_REPOSITORY"
-          --event-name "$GITHUB_EVENT_NAME"
-          --event-path "$GITHUB_EVENT_PATH"
-          --settle-seconds 30
-          --wait-seconds 120
-          --poll-seconds 10
+        run: |
+          if ! test -f scripts/recover-pr-review-gate.mjs; then
+            mkdir -p output/review-gate-recovery
+            printf '%s\n' '{"status":"skipped","reason":"bootstrap_pending_default_branch"}' \
+              > output/review-gate-recovery/recovery.json
+            echo "Review recovery is awaiting its first trusted default-branch promotion." \
+              >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          node scripts/recover-pr-review-gate.mjs \
+            --repository "$GITHUB_REPOSITORY" \
+            --event-name "$GITHUB_EVENT_NAME" \
+            --event-path "$GITHUB_EVENT_PATH" \
+            --settle-seconds 30 \
+            --wait-seconds 120 \
+            --poll-seconds 10
       - name: Upload review-gate recovery decision
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
