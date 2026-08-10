@@ -94,7 +94,9 @@ PR 批量是建议而非固定限制：用 CI Health 的 Ready 次数、candidat
 - 完整 HTML 持久化性能决策：`npm run benchmark:persistence` 只构建一次
   renderer，并在同一机器、同一 frozen main 与固定的 0.5/1.25/2.5MiB
   synthetic HTML 上串行运行。它必须同时保留 external-write conflict、
-  restart recovery 与 exact-byte oracle，并报告样本数、p50/p95/max、
+  restart recovery 与 exact-byte oracle；restart recovery 不仅验证磁盘
+  字节，也必须重新打开已注册 workspace 并验证项目/文档身份、Hash 和
+  persisted revision；并报告样本数、p50/p95/max、
   request/response bytes、renderer/Bridge RSS、renderer rAF gap 和明确的
   `skip-12` 或 `authorize-12-pr1` 决策；不同 SHA、并行负载或旧诊断样本
   不得混合。

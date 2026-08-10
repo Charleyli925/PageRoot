@@ -309,15 +309,43 @@ async function openWorkspace(baseUrl, sourcePath) {
     baseUrl,
     `/workspace?sourcePath=${encodeURIComponent(sourcePath)}`,
   );
-  if (preview.status !== 200 || preview.body.registered !== false) return preview.body;
+  assert(
+    preview.status === 200 && preview.body?.ok === true,
+    `Bridge could not open benchmark workspace: ${preview.status} ${JSON.stringify(preview.body)}`,
+  );
+  if (preview.body.registered !== false) {
+    assert(preview.body.registered === true, "Bridge workspace response did not report registration state.");
+    return preview.body;
+  }
   const ensured = await requestJson(baseUrl, "/project/ensure", {
     body: {
       sourcePath,
       expectedSourceSha256: preview.body.currentHtmlSha256,
     },
   });
-  assert(ensured.status === 200, `Bridge could not register benchmark source: ${ensured.status}`);
+  assert(
+    ensured.status === 200 && ensured.body?.ok === true && ensured.body.registered === true,
+    `Bridge could not register benchmark source: ${ensured.status} ${JSON.stringify(ensured.body)}`,
+  );
   return ensured.body;
+}
+
+function assertRecoveredWorkspace(workspace, {
+  projectId,
+  documentId,
+  expectedSha256,
+  persistedRevision,
+}) {
+  assert(workspace.registered === true, "Restart recovery did not reopen a registered workspace.");
+  assert(workspace.projectId === projectId, "Restart recovery reopened a different project.");
+  assert(workspace.documentId === documentId, "Restart recovery reopened a different document.");
+  assert(workspace.currentHtmlSha256 === expectedSha256, "Restart recovery workspace Hash did not match recovered source bytes.");
+  assert(workspace.current?.sha256 === expectedSha256, "Restart recovery current source Hash did not match recovered source bytes.");
+  assert(
+    workspace.runtimeState?.editRevision === persistedRevision
+      && workspace.runtimeState?.lastPersistedRevision === persistedRevision,
+    "Restart recovery workspace revision did not match the recovered autosave.",
+  );
 }
 
 async function readRssKiB(pid) {
@@ -525,8 +553,14 @@ async function runSafetyChecks(runRoot, sizeMiB) {
     await stopBridge(failedBridge.child);
     failedBridge = null;
     recoveredBridge = await startBridge(recovery.workspace);
-    await openWorkspace(recoveredBridge.baseUrl, recovery.sourcePath);
+    const recoveredWorkspace = await openWorkspace(recoveredBridge.baseUrl, recovery.sourcePath);
     assert(await readFile(recovery.sourcePath, "utf8") === recoveryTarget, "Restart recovery did not restore exact source bytes.");
+    assertRecoveredWorkspace(recoveredWorkspace, {
+      projectId: recoveringProject.projectId,
+      documentId: recoveringProject.documentId,
+      expectedSha256: sha256(recoveryTarget),
+      persistedRevision: 1,
+    });
     return {
       externalConflict: "passed",
       restartRecovery: "passed",
