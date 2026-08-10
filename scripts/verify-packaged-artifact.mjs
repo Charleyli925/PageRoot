@@ -53,6 +53,7 @@ const REQUIRED_BRIDGE_FILES = [
   "draft-command-decoder.mjs",
   "project-context-service.mjs",
   "source-history-service.mjs",
+  "source-transaction-service.mjs",
 ];
 const REQUIRED_PACKAGED_MODULES = [
   "argparse",
