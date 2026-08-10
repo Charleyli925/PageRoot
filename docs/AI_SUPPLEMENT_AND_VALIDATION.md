@@ -59,6 +59,8 @@ AI 结果通过校验后先创建不可变 Version 和独立 working HTML，运�
 - 只有 `ready` 用户点击“直接打开”，或任一可审阅候选在审阅页确认“打开 AI 修改后”，项目当前路径和左侧画布才切换；
 - 点击前如果当前源文件被外部改动，系统拒绝切换并保留新 Version。
 
+审阅投影中，框与上下文遮罩消费同一组最终 canonical footprint records。每一页的遮罩使用以 session、side 和 projection epoch 唯一命名的 SVG luminance mask：整页白色背景保留虚化，每个 canonical path 作为黑色透明孔；因此相交的独立事实始终取几何并集，不能再用 `evenodd` 让交集重新变暗。受管 mask 背景、孔和 dim rect 会隔离作者 `svg path`、`mask rect` 与通用 `path/rect` 的 fill、stroke、opacity、filter、transform 污染，但仍保留用户选择的上下文可见度。
+
 ## 4. 历史展示
 
 每个 AI Version 按四组展示：

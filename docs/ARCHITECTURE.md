@@ -165,11 +165,14 @@ Comments + frozen input
   a bounded line-local width and promotes dense multi-line rewrites to their
   smallest semantic text owner. Local wrapped copy renders as separate
   rectangular line frames with one group label instead of a stepped union
-  polygon. Global context masking punches holes from those same final
-  rectangles, so mask and frame cannot diverge. The disposable
+  polygon. Global context masking consumes those same final canonical records:
+  one SVG luminance mask keeps a full-page white background and adds the record
+  paths as black holes, so overlapping holes remain a set union rather than an
+  `evenodd` XOR and mask and frame cannot diverge. Its per-render identifier is
+  scoped to the review session, side and projection epoch. The disposable
   projection uses reserved attributes plus an explicit presentation reset and
   important geometry, preventing authored `svg`/`div` rules from restyling its
-  mask or frames. Stable
+  mask primitives or frames. Stable
   outline regions remain navigation-only. `page-presentation-dom` is the
   shared explicit-ID and strict indexed-Tab discovery contract consumed by
   Canvas comment presentation and formal review. Before/after panel and action keys

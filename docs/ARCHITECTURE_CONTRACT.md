@@ -232,6 +232,15 @@ cancellation or late result is a silent static-only outcome. There is no second
 fresh pair, confirmation coordinator, runtime UI or Review cache. Edit does
 not invoke the resolver or owner and has no snapshot state.
 
+For each Review side and active filter, overlay frames and context masking
+consume the same final canonical projection records. The mask is a session-,
+side- and projection-epoch-scoped SVG luminance mask: a white full-page
+background retains the dim rectangle and each record path is a black transparent
+hole. Therefore overlapping independent facts stay transparent as a geometric
+union; a full-page `evenodd` path is not a permitted representation. Reserved
+mask background, hole and dim primitives reset authored fill, stroke, opacity,
+filter and transform while preserving the current context-opacity value.
+
 Comment layout is measured only after current disposable presentation is
 applied. The Workbench accepts no card coordinates until the Canvas reports a
 complete target set for the current rendered source Hash and applied generation;

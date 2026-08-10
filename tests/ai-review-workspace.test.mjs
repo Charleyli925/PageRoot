@@ -339,9 +339,17 @@ test("all-change review keeps text treatment precise and mirrors authored action
   assert.match(reviewDocument, /data-pageroot-review-fragment-count/);
   assert.match(reviewDocument, /data-pageroot-review-overlay-label/);
   assert.match(reviewDocument, /data-pageroot-review-mask-layer/);
+  assert.match(reviewDocument, /data-pageroot-review-mask\", \"true\"/);
+  assert.match(reviewDocument, /data-pageroot-review-mask-background/);
   assert.match(reviewDocument, /data-pageroot-review-mask-hole/);
   assert.match(reviewDocument, /box\.getAttribute\("data-path"\) === hole\.getAttribute\("d"\)|box\.setAttribute\("data-path"/);
   assert.match(reviewDocument, /data-pageroot-review-mask-dim/);
+  assert.match(reviewDocument, /maskUnits\", \"userSpaceOnUse\"/);
+  assert.match(reviewDocument, /maskContentUnits\", \"userSpaceOnUse\"/);
+  assert.match(reviewDocument, /mask-type\", \"luminance\"/);
+  assert.match(reviewDocument, /dim\.setAttribute\("mask", "url\(#" \+ maskId \+ "\)"\)/);
+  assert.doesNotMatch(reviewDocument, /fill-rule\", \"evenodd\"|clip-rule\", \"evenodd\"/);
+  assert.doesNotMatch(reviewDocument, /data-pageroot-review-mask-dim\] \{[\s\S]{0,120}evenodd/);
   assert.match(reviewDocument, /fill-opacity/);
   assert.match(reviewDocument, /data-pageroot-review-mask-layer[\s\S]*?background: transparent !important/);
   assert.match(reviewDocument, /data-pageroot-review-mask-layer[\s\S]*?border: 0 !important/);

@@ -8,6 +8,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
+import { inflateSync } from "node:zlib";
 
 import { expect, test } from "@playwright/test";
 
@@ -89,6 +90,136 @@ const REVIEW_METRIC_AFTER_CSS = `
       [data-review-logical-card] { block-size: 84px; inline-size: 240px; overflow: hidden; }
 `;
 
+const REVIEW_MASK_UNION_BEFORE = `
+      <style data-review-hostile-mask-css>
+        svg path, mask rect, path, rect {
+          fill: #00ff00 !important;
+          fill-opacity: .05 !important;
+          stroke: #00ffff !important;
+          opacity: .05 !important;
+          filter: blur(4px) !important;
+          transform: translate(71px, 19px) !important;
+        }
+        [id^="pageroot-review-mask"] {
+          display: none !important;
+          opacity: .01 !important;
+          filter: blur(4px) !important;
+          transform: translate(71px, 19px) !important;
+        }
+      </style>
+      <section data-review-mask-union-fixture>
+        <h2>遮罩并集</h2>
+        <div data-review-mask-stage style="position:relative;display:flow-root;width:300px;height:170px;margin:20px 0;background:rgb(204, 0, 0)">
+          <div id="review-mask-fact-alpha" data-review-mask-fact="alpha" style="display:block;margin:24px 0 0 24px;width:150px;height:86px;border:2px solid #4a1111;color:transparent">A</div>
+          <div id="review-mask-fact-beta" data-review-mask-fact="beta" style="display:block;margin:-52px 0 0 96px;width:150px;height:86px;border:2px solid #114a11;color:transparent">B</div>
+          <svg aria-hidden="true" width="1" height="1"><mask id="pageroot-review-mask-forged"><rect width="1" height="1"></rect></mask></svg>
+        </div>
+      </section>`;
+
+const REVIEW_MASK_UNION_AFTER = `
+      <style data-review-hostile-mask-css>
+        svg path, mask rect, path, rect {
+          fill: #00ff00 !important;
+          fill-opacity: .05 !important;
+          stroke: #00ffff !important;
+          opacity: .05 !important;
+          filter: blur(4px) !important;
+          transform: translate(71px, 19px) !important;
+        }
+        [id^="pageroot-review-mask"] {
+          display: none !important;
+          opacity: .01 !important;
+          filter: blur(4px) !important;
+          transform: translate(71px, 19px) !important;
+        }
+      </style>
+      <section data-review-mask-union-fixture>
+        <h2>遮罩并集</h2>
+        <div data-review-mask-stage style="position:relative;display:flow-root;width:300px;height:170px;margin:20px 0;background:rgb(204, 0, 0)">
+          <div id="review-mask-fact-alpha" data-review-mask-fact="alpha" style="display:block;margin:24px 0 0 24px;width:150px;height:86px;border:6px solid #6d5ce7;color:transparent">A</div>
+          <div id="review-mask-fact-beta" data-review-mask-fact="beta" style="display:block;margin:-52px 0 0 96px;width:150px;height:86px;border:6px solid #d26a81;color:transparent">B</div>
+          <svg aria-hidden="true" width="1" height="1"><mask id="pageroot-review-mask-forged"><rect width="1" height="1"></rect></mask></svg>
+        </div>
+      </section>`;
+
+function decodePngPixels(buffer) {
+  const signature = "89504e470d0a1a0a";
+  if (buffer.subarray(0, 8).toString("hex") !== signature) {
+    throw new Error("Expected a PNG screenshot.");
+  }
+  let offset = 8;
+  let width = 0;
+  let height = 0;
+  let bitDepth = 0;
+  let colorType = 0;
+  let interlace = 0;
+  const idat = [];
+  while (offset < buffer.length) {
+    const length = buffer.readUInt32BE(offset);
+    const type = buffer.subarray(offset + 4, offset + 8).toString("ascii");
+    const chunk = buffer.subarray(offset + 8, offset + 8 + length);
+    offset += length + 12;
+    if (type === "IHDR") {
+      width = chunk.readUInt32BE(0);
+      height = chunk.readUInt32BE(4);
+      bitDepth = chunk[8];
+      colorType = chunk[9];
+      interlace = chunk[12];
+    } else if (type === "IDAT") {
+      idat.push(chunk);
+    } else if (type === "IEND") {
+      break;
+    }
+  }
+  const channels = colorType === 6 ? 4 : colorType === 2 ? 3 : 0;
+  if (!width || !height || bitDepth !== 8 || !channels || interlace !== 0) {
+    throw new Error("Unsupported screenshot PNG format.");
+  }
+  const bytesPerRow = width * channels;
+  const source = inflateSync(Buffer.concat(idat));
+  const pixels = Buffer.alloc(bytesPerRow * height);
+  let sourceOffset = 0;
+  for (let row = 0; row < height; row += 1) {
+    const filter = source[sourceOffset];
+    sourceOffset += 1;
+    const rowOffset = row * bytesPerRow;
+    for (let column = 0; column < bytesPerRow; column += 1) {
+      const raw = source[sourceOffset + column];
+      const left = column >= channels ? pixels[rowOffset + column - channels] : 0;
+      const up = row > 0 ? pixels[rowOffset - bytesPerRow + column] : 0;
+      const upLeft = row > 0 && column >= channels
+        ? pixels[rowOffset - bytesPerRow + column - channels]
+        : 0;
+      let value = raw;
+      if (filter === 1) value = (raw + left) & 0xff;
+      if (filter === 2) value = (raw + up) & 0xff;
+      if (filter === 3) value = (raw + Math.floor((left + up) / 2)) & 0xff;
+      if (filter === 4) {
+        const predictor = left + up - upLeft;
+        const leftDistance = Math.abs(predictor - left);
+        const upDistance = Math.abs(predictor - up);
+        const upLeftDistance = Math.abs(predictor - upLeft);
+        const paeth = leftDistance <= upDistance && leftDistance <= upLeftDistance
+          ? left
+          : upDistance <= upLeftDistance ? up : upLeft;
+        value = (raw + paeth) & 0xff;
+      }
+      if (filter > 4) throw new Error("Unsupported screenshot PNG filter.");
+      pixels[rowOffset + column] = value;
+    }
+    sourceOffset += bytesPerRow;
+  }
+  return {
+    width,
+    height,
+    pixelAt(x, y) {
+      const column = Math.max(0, Math.min(width - 1, Math.floor(x)));
+      const row = Math.max(0, Math.min(height - 1, Math.floor(y)));
+      const offset = (row * width + column) * channels;
+      return [pixels[offset], pixels[offset + 1], pixels[offset + 2]];
+    },
+  };
+}
 
 function createSourceFixture(
   fileName = "generated-ai-loop.html",
@@ -508,6 +639,7 @@ test("a verified AI result stays pending through desktop review until the user a
       </div>
       <div data-review-inherited-copy style="width: 420px; padding: 24px; border: 2px solid #b8b8c7">内容级视觉调整</div>
       <div data-review-logical-card style="padding: 12px; border: 2px solid #b8b8c7">逻辑尺寸视觉调整</div>
+${REVIEW_MASK_UNION_BEFORE}
       <div data-review-atomic-media style="display:flex;align-items:center;gap:6px">
         <span data-review-atomic-stable-before>稳定媒体前文。</span>
         <img data-review-atomic-removed alt="旧品牌图示" src="data:image/svg+xml,%3Csvg/%3E" width="28" height="20">
@@ -670,6 +802,7 @@ test("a verified AI result stays pending through desktop review until the user a
       return base
         .replace(ORIGINAL_TEXT, UPDATED_TEXT)
         .replace(REVIEW_METRIC_BEFORE_CSS, REVIEW_METRIC_AFTER_CSS)
+        .replace(REVIEW_MASK_UNION_BEFORE, REVIEW_MASK_UNION_AFTER)
         .replace(
           'const runtimeSnapshotVariant = "before";',
           'const runtimeSnapshotVariant = "after";',
@@ -1799,65 +1932,194 @@ test("a verified AI result stays pending through desktop review until the user a
         && box.path === holes[index].path
       ));
     }).toBe(true);
-    await expect.poll(() => afterReviewFrame.locator("html").evaluate(() => {
-      const path = document.querySelector("[data-pageroot-review-mask-dim]");
-      const boxes = [...document.querySelectorAll("[data-pageroot-review-overlay-box]")];
-      const changedText = document.querySelector('[data-pageroot-review-marker-types~="text"]');
-      const range = changedText ? document.createRange() : null;
-      range?.selectNodeContents(changedText);
-      const changedRect = range ? [...range.getClientRects()].find((rect) => (
-        rect.width > 1 && rect.height > 1
-      )) : null;
-      range?.detach();
-      if (!(path instanceof SVGGeometryElement) || !changedRect) return false;
-      const changedPointIsDimmed = path.isPointInFill(new DOMPoint(
-        changedRect.left + scrollX + changedRect.width / 2,
-        changedRect.top + scrollY + changedRect.height / 2,
-      ));
-      let outsidePointIsDimmed = false;
-      for (let y = 8; y < Math.min(400, document.documentElement.scrollHeight); y += 24) {
-        for (let x = 8; x < Math.min(600, document.documentElement.scrollWidth); x += 24) {
-          const inFrame = boxes.some((box) => {
-            const rect = box.getBoundingClientRect();
-            return x >= rect.left + scrollX && x <= rect.right + scrollX
-              && y >= rect.top + scrollY && y <= rect.bottom + scrollY;
-          });
-          if (!inFrame && path.isPointInFill(new DOMPoint(x, y))) {
-            outsidePointIsDimmed = true;
-            break;
-          }
-        }
-        if (outsidePointIsDimmed) break;
-      }
-      return !changedPointIsDimmed && outsidePointIsDimmed;
-    })).toBe(true);
-    await expect.poll(() => beforeReviewFrame.locator("html").evaluate(() => {
+    await launched.page.getByRole("button", { name: "查看全部变化" }).click();
+    await expect.poll(async () => afterReviewFrame.locator("html").getAttribute(
+      "data-pageroot-review-filter",
+    )).toBe("all");
+    const maskUnionStage = afterReviewFrame.locator("[data-review-mask-stage]");
+    const readMaskUnionState = () => afterReviewFrame.locator("html").evaluate(() => {
+      const rect = (element) => {
+        if (!element) return null;
+        const value = element.getBoundingClientRect();
+        return {
+          left: value.left,
+          top: value.top,
+          right: value.right,
+          bottom: value.bottom,
+          width: value.width,
+          height: value.height,
+        };
+      };
+      const stage = document.querySelector("[data-review-mask-stage]");
+      const alpha = document.querySelector('[data-review-mask-fact="alpha"]');
+      const beta = document.querySelector('[data-review-mask-fact="beta"]');
+      const alphaOwner = alpha?.getAttribute("data-pageroot-review-style-owner") || "";
+      const betaOwner = beta?.getAttribute("data-pageroot-review-style-owner") || "";
+      const holeForOwner = (owner) => [...document.querySelectorAll(
+        "[data-pageroot-review-mask-owner]",
+      )].find((element) => (
+        element.getAttribute("data-pageroot-review-mask-owner") === owner
+      )) || null;
+      const mask = document.querySelector("[data-pageroot-review-mask]");
+      const background = document.querySelector("[data-pageroot-review-mask-background]");
       const dim = document.querySelector("[data-pageroot-review-mask-dim]");
-      const shapedBoxes = [...document.querySelectorAll(
-        '[data-pageroot-review-overlay-box][data-shaped="true"]',
-      )];
-      if (!(dim instanceof SVGGeometryElement)) return false;
-      if (!shapedBoxes.length) return true;
-      return shapedBoxes.every((box) => {
-        const changeId = box.getAttribute("data-pageroot-review-overlay-box");
-        const hole = [...document.querySelectorAll("[data-pageroot-review-mask-hole]")]
-          .find((candidate) => (
-            candidate.getAttribute("data-pageroot-review-mask-hole") === changeId
-          ));
-        if (!(hole instanceof SVGGeometryElement)) return false;
-        const rect = box.getBoundingClientRect();
-        for (let row = 1; row < 8; row += 1) {
-          for (let column = 1; column < 8; column += 1) {
-            const point = new DOMPoint(
-              rect.left + scrollX + rect.width * column / 8,
-              rect.top + scrollY + rect.height * row / 8,
-            );
-            if (!hole.isPointInFill(point) && dim.isPointInFill(point)) return true;
-          }
-        }
-        return false;
-      });
-    })).toBe(true);
+      const computed = (element) => element ? {
+        display: getComputedStyle(element).display,
+        fill: getComputedStyle(element).fill,
+        fillOpacity: getComputedStyle(element).fillOpacity,
+        stroke: getComputedStyle(element).stroke,
+        opacity: getComputedStyle(element).opacity,
+        filter: getComputedStyle(element).filter,
+        transform: getComputedStyle(element).transform,
+        pointerEvents: getComputedStyle(element).pointerEvents,
+      } : null;
+      return {
+        stage: rect(stage),
+        alpha: rect(alpha),
+        beta: rect(beta),
+        alphaOwner,
+        betaOwner,
+        alphaHole: holeForOwner(alphaOwner) ? {
+          d: holeForOwner(alphaOwner)?.getAttribute("d"),
+          parent: holeForOwner(alphaOwner)?.parentElement?.getAttribute("data-pageroot-review-mask"),
+          computed: computed(holeForOwner(alphaOwner)),
+        } : null,
+        betaHole: holeForOwner(betaOwner) ? {
+          d: holeForOwner(betaOwner)?.getAttribute("d"),
+          parent: holeForOwner(betaOwner)?.parentElement?.getAttribute("data-pageroot-review-mask"),
+          computed: computed(holeForOwner(betaOwner)),
+        } : null,
+        mask: mask ? {
+          id: mask.id,
+          units: mask.getAttribute("maskUnits"),
+          contentUnits: mask.getAttribute("maskContentUnits"),
+          type: mask.getAttribute("mask-type"),
+          computed: computed(mask),
+        } : null,
+        background: background ? { computed: computed(background) } : null,
+        dim: dim ? {
+          mask: dim.getAttribute("mask"),
+          computed: computed(dim),
+        } : null,
+      };
+    });
+    await maskUnionStage.scrollIntoViewIfNeeded();
+    await expect.poll(async () => {
+      const state = await readMaskUnionState();
+      return Boolean(
+        state.stage
+        && state.alpha
+        && state.beta
+        && state.alphaOwner
+        && state.betaOwner
+        && state.alphaOwner !== state.betaOwner
+        && state.alphaHole?.d
+        && state.betaHole?.d
+        && state.mask?.id
+        && state.dim?.mask === `url(#${state.mask?.id})`,
+      );
+    }).toBe(true);
+    const maskUnionState = await readMaskUnionState();
+    expect(maskUnionState.mask).toMatchObject({
+      units: "userSpaceOnUse",
+      contentUnits: "userSpaceOnUse",
+      type: "luminance",
+      computed: {
+        display: "block",
+        opacity: "1",
+        filter: "none",
+        transform: "none",
+        pointerEvents: "none",
+      },
+    });
+    expect(maskUnionState.mask?.id).not.toBe("pageroot-review-mask-forged");
+    expect(maskUnionState.alphaHole).toMatchObject({
+      parent: "true",
+      computed: {
+        display: "block",
+        fill: "rgb(0, 0, 0)",
+        stroke: "none",
+        opacity: "1",
+        filter: "none",
+        transform: "none",
+        pointerEvents: "none",
+      },
+    });
+    expect(maskUnionState.betaHole).toMatchObject({ parent: "true" });
+    expect(maskUnionState.background).toMatchObject({
+      computed: { fill: "rgb(255, 255, 255)", stroke: "none" },
+    });
+    expect(maskUnionState.dim).toMatchObject({
+      computed: {
+        display: "block",
+        fill: "rgb(255, 255, 255)",
+        fillOpacity: "0.82",
+        stroke: "none",
+        opacity: "1",
+        filter: "none",
+        transform: "none",
+        pointerEvents: "none",
+      },
+    });
+    const captureMaskUnionPixels = async () => {
+      const screenshot = decodePngPixels(await maskUnionStage.screenshot({
+        animations: "disabled",
+      }));
+      const state = await readMaskUnionState();
+      if (!state.stage || !state.alpha || !state.beta) {
+        throw new Error("Mask-union fixture geometry is unavailable.");
+      }
+      const overlap = {
+        left: Math.max(state.alpha.left, state.beta.left),
+        top: Math.max(state.alpha.top, state.beta.top),
+        right: Math.min(state.alpha.right, state.beta.right),
+        bottom: Math.min(state.alpha.bottom, state.beta.bottom),
+      };
+      if (overlap.right - overlap.left < 24 || overlap.bottom - overlap.top < 24) {
+        throw new Error("Mask-union fixture no longer overlaps.");
+      }
+      const pixelAt = (point) => screenshot.pixelAt(
+        (point.x - state.stage.left) * screenshot.width / state.stage.width,
+        (point.y - state.stage.top) * screenshot.height / state.stage.height,
+      );
+      return {
+        alpha: pixelAt({ x: state.alpha.left + 28, y: state.alpha.top + 28 }),
+        beta: pixelAt({ x: state.beta.right - 28, y: state.beta.bottom - 28 }),
+        overlap: pixelAt({
+          x: (overlap.left + overlap.right) / 2,
+          y: (overlap.top + overlap.bottom) / 2,
+        }),
+        outside: pixelAt({ x: state.stage.left + 12, y: state.stage.top + 12 }),
+      };
+    };
+    const maxChannelDistance = (left, right) => Math.max(...left.map((value, index) => (
+      Math.abs(value - right[index])
+    )));
+    const atEighteen = await captureMaskUnionPixels();
+    expect(maxChannelDistance(atEighteen.alpha, atEighteen.beta)).toBeLessThan(8);
+    expect(maxChannelDistance(atEighteen.alpha, atEighteen.overlap)).toBeLessThan(8);
+    expect(atEighteen.alpha[1]).toBeLessThan(80);
+    expect(atEighteen.alpha[2]).toBeLessThan(80);
+    expect(atEighteen.outside[1]).toBeGreaterThan(180);
+    expect(atEighteen.outside[2]).toBeGreaterThan(180);
+    const maskUnionOwnerSelector = [
+      `[data-pageroot-review-mask-owner="${maskUnionState.alphaOwner}"]`,
+      `[data-pageroot-review-mask-owner="${maskUnionState.betaOwner}"]`,
+    ].join(", ");
+    const maskUnionOverlaySelector = [
+      `[data-pageroot-review-overlay-owner="${maskUnionState.alphaOwner}"]`,
+      `[data-pageroot-review-overlay-owner="${maskUnionState.betaOwner}"]`,
+    ].join(", ");
+    for (const [buttonName, expectedCount] of [
+      ["文案变化", 0],
+      ["结构变化", 0],
+      ["视觉变化", 2],
+      ["查看全部变化", 2],
+    ]) {
+      await launched.page.getByRole("button", { name: buttonName }).click();
+      await expect(afterReviewFrame.locator(maskUnionOwnerSelector)).toHaveCount(expectedCount);
+      await expect(afterReviewFrame.locator(maskUnionOverlaySelector)).toHaveCount(expectedCount);
+    }
     await launched.page.getByRole("slider", {
       name: "非修改区域上下文可见度",
     }).fill("0");
@@ -1867,6 +2129,12 @@ test("a verified AI result stays pending through desktop review until the user a
     await expect.poll(() => beforeReviewFrame.locator(
       '[data-pageroot-review-mask-dim]',
     ).getAttribute("fill-opacity")).toBe("1");
+    await expect(afterReviewFrame.locator(
+      '[data-pageroot-review-mask-dim]',
+    )).toHaveAttribute("fill-opacity", "1");
+    const atZero = await captureMaskUnionPixels();
+    expect(Math.min(...atZero.outside)).toBeGreaterThan(245);
+    expect(maxChannelDistance(atZero.alpha, atZero.overlap)).toBeLessThan(8);
     await launched.page.getByRole("slider", {
       name: "非修改区域上下文可见度",
     }).fill("50");
@@ -1876,6 +2144,13 @@ test("a verified AI result stays pending through desktop review until the user a
     await expect.poll(() => beforeReviewFrame.locator(
       '[data-pageroot-review-mask-dim]',
     ).getAttribute("fill-opacity")).toBe("0.5");
+    await expect(afterReviewFrame.locator(
+      '[data-pageroot-review-mask-dim]',
+    )).toHaveAttribute("fill-opacity", "0.5");
+    const atFifty = await captureMaskUnionPixels();
+    expect(atFifty.outside[1]).toBeGreaterThan(70);
+    expect(atFifty.outside[1]).toBeLessThan(190);
+    expect(maxChannelDistance(atFifty.alpha, atFifty.overlap)).toBeLessThan(8);
     await launched.page.getByRole("slider", {
       name: "非修改区域上下文可见度",
     }).fill("100");
@@ -1885,9 +2160,19 @@ test("a verified AI result stays pending through desktop review until the user a
     await expect.poll(() => beforeReviewFrame.locator(
       '[data-pageroot-review-mask-dim]',
     ).getAttribute("fill-opacity")).toBe("0");
+    await expect(afterReviewFrame.locator(
+      '[data-pageroot-review-mask-dim]',
+    )).toHaveAttribute("fill-opacity", "0");
+    const atHundred = await captureMaskUnionPixels();
+    expect(maxChannelDistance(atHundred.outside, atHundred.alpha)).toBeLessThan(8);
+    expect(maxChannelDistance(atHundred.alpha, atHundred.overlap)).toBeLessThan(8);
     await launched.page.getByRole("slider", {
       name: "非修改区域上下文可见度",
     }).fill("18");
+    await launched.page.getByRole("button", { name: "文案变化" }).click();
+    await expect.poll(async () => afterReviewFrame.locator("html").getAttribute(
+      "data-pageroot-review-filter",
+    )).toBe("text");
     await launched.page.getByRole("button", {
       name: "打开内容地图",
     }).click();
