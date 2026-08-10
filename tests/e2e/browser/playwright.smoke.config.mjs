@@ -30,6 +30,10 @@ const smokeTitles = [
   "path-only review comments keep a bound target when a later same-tag node is unrelated",
   "identical path-only comment siblings keep their separate frozen paths",
   "mixed-shape path-only comment decoys fail closed",
+  "runtime projection binds exact hosts and adds facts without outline geometry",
+  "hostile authored listeners cannot observe or forge runtime projection capability",
+  "empty runtime projection preserves static facts",
+  "parser-time target replacement fails closed without rebinding",
 ];
 const escapedTitles = smokeTitles.map((title) => title.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"));
 

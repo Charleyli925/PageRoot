@@ -43,5 +43,5 @@ export function mergeReviewRuntimeVisualChanges<
 }, changedCandidateKeys: readonly string[]): Readonly<{
   changes: readonly TChange[];
   outline: readonly TOutline[];
-  markers: readonly Readonly<{ changeId: string; outlineId: string }>[];
+  markers: readonly Readonly<{ candidateKey: string; changeId: string }>[];
 }>;

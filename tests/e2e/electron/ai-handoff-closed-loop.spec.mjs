@@ -572,16 +572,66 @@ async function assertOverlayMaskEquivalence(frame) {
 
 async function assertRuntimeVisualSupplement(beforeReviewFrame, afterReviewFrame) {
   const runtimeSnapshotSection = "section[data-review-runtime-snapshot]";
+  const staticBoxFactsBySide = await Promise.all(
+    [beforeReviewFrame, afterReviewFrame].map((frame) => (
+      frame.locator("#review-runtime-static-box-canvas").evaluate((element) => JSON.parse(
+        element.getAttribute("data-pageroot-review-projection-facts") || "[]",
+      ))
+    )),
+  );
+  const staticBoxFactBySide = staticBoxFactsBySide.map((facts) => facts.find((fact) => (
+    fact.type === "style" && fact.scope === "box" && fact.operation !== "layout"
+  )));
+  expect(staticBoxFactBySide.every(Boolean)).toBe(true);
+  expect(staticBoxFactBySide[0].geometryOwnerId).toBeTruthy();
+  expect(staticBoxFactBySide[1].geometryOwnerId)
+    .toBe(staticBoxFactBySide[0].geometryOwnerId);
   for (const frame of [beforeReviewFrame, afterReviewFrame]) {
-    await expect(frame.locator(runtimeSnapshotSection)).toHaveAttribute(
-      "data-pageroot-review-runtime-marker",
-      "true",
+    const runtimeBoxes = frame.locator(
+      '[data-pageroot-review-overlay-box][data-pageroot-review-fact^="style:runtime-projection-"]',
     );
-    await expect(frame.locator("#review-runtime-snapshot-canvas"))
+    await expect.poll(async () => {
+      const count = await runtimeBoxes.count();
+      return count >= 1 && count <= 2;
+    }).toBe(true);
+    await expect(frame.locator(runtimeSnapshotSection))
       .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
     await expect(frame.locator(
-      "[data-pageroot-review-runtime-host], [data-pageroot-review-runtime-source-box]",
+      "[data-pageroot-review-runtime-marker], [data-pageroot-review-runtime-host], [data-pageroot-review-runtime-source-box]",
     )).toHaveCount(0);
+    await expect.poll(() => runtimeBoxes.evaluateAll((overlays) => {
+      const allowedTargets = [
+        document.querySelector("#review-runtime-snapshot-canvas"),
+        document.querySelector("#review-runtime-snapshot-host"),
+      ].filter(Boolean);
+      const suppressedTarget = document.querySelector("#review-runtime-static-box-canvas");
+      if (allowedTargets.length !== 2 || !suppressedTarget) return false;
+      const overlayRects = overlays.map((overlay) => ({
+        left: Number(overlay.getAttribute("data-left")),
+        top: Number(overlay.getAttribute("data-top")),
+        width: Number(overlay.getAttribute("data-width")),
+        height: Number(overlay.getAttribute("data-height")),
+      }));
+      const matches = (overlay, target) => {
+        const rect = target.getBoundingClientRect();
+        return Math.abs(overlay.left - (rect.left + scrollX - 3)) < .3
+          && Math.abs(overlay.top - (rect.top + scrollY - 3)) < .3
+          && Math.abs(overlay.width - (rect.width + 6)) < .3
+          && Math.abs(overlay.height - (rect.height + 6)) < .3;
+      };
+      const matchedTargets = overlayRects.map((overlay) => (
+        allowedTargets.findIndex((target) => matches(overlay, target))
+      ));
+      return matchedTargets.every((index) => index >= 0)
+        && new Set(matchedTargets).size === overlayRects.length
+        && overlayRects.every((overlay) => !matches(overlay, suppressedTarget));
+    })).toBe(true);
+    const authoredAttributes = await frame.locator("html").evaluate(() => (
+      [...document.querySelectorAll("*")].flatMap((element) => (
+        [...element.attributes].map((attribute) => `${attribute.name}=${attribute.value}`)
+      )).join("\n")
+    ));
+    expect(authoredAttributes).not.toContain("runtime-host-");
   }
 }
 
@@ -678,11 +728,6 @@ ${REVIEW_MASK_UNION_BEFORE}
       <p data-review-anchor-only style="line-height:48px">稳定开头。<br>稳定中段。<br>只删除这句定位文字。稳定结尾。</p>
       <div style="height:360px" aria-hidden="true"></div>
     </section>
-    <section data-review-runtime-snapshot>
-      <h2>运行态 Snapshot</h2>
-      <canvas id="review-runtime-snapshot-canvas" width="320" height="96"></canvas>
-      <div id="review-runtime-snapshot-host" data-runtime-snapshot-host></div>
-    </section>
     <div class="tabs" role="tablist" aria-label="Review interaction fixture">
       <button type="button" data-review-tab-button data-p="review-p1">审阅标签一</button>
       <button type="button" data-review-tab-button data-p="review-p2">审阅标签二</button>
@@ -691,6 +736,12 @@ ${REVIEW_MASK_UNION_BEFORE}
     <button type="button" id="review-counter" data-review-counter>交互计数 <span>0</span></button>
     <input id="review-sync-input" aria-label="审阅同步输入" value="">
     <div class="panel" id="review-p1" data-review-tab-panel="one">
+      <section data-review-runtime-snapshot>
+        <h2>运行态 Snapshot</h2>
+        <canvas id="review-runtime-snapshot-canvas" width="320" height="96"></canvas>
+        <canvas id="review-runtime-static-box-canvas" width="120" height="36" style="border: 1px solid #9aaec2"></canvas>
+        <div id="review-runtime-snapshot-host" data-runtime-snapshot-host></div>
+      </section>
       <article id="review-tab-one-overview"><h2>标签一概览</h2><p>第一块完整内容</p></article>
       <article id="review-tab-one-detail"><h2>标签一详情</h2><p>第二块完整内容</p></article>
     </div>
@@ -746,6 +797,10 @@ ${REVIEW_MASK_UNION_BEFORE}
       runtimeSnapshotContext.fillRect(0, 0, 320, 96);
       runtimeSnapshotContext.fillStyle = runtimeSnapshotColor;
       runtimeSnapshotContext.fillRect(24, 20, runtimeSnapshotWidth, 56);
+      const runtimeStaticBoxCanvas = document.querySelector("#review-runtime-static-box-canvas");
+      const runtimeStaticBoxContext = runtimeStaticBoxCanvas.getContext("2d");
+      runtimeStaticBoxContext.fillStyle = runtimeSnapshotColor;
+      runtimeStaticBoxContext.fillRect(8, 8, runtimeSnapshotVariant === "before" ? 48 : 88, 20);
       const runtimeSnapshotHost = document.querySelector("#review-runtime-snapshot-host");
       runtimeSnapshotHost.innerHTML = '<svg viewBox="0 0 320 96" width="320" height="96" aria-label="运行态 SVG"><rect x="24" y="20" width="' + runtimeSnapshotWidth + '" height="56" fill="' + runtimeSnapshotColor + '"></rect></svg>';
       document.documentElement.dataset.reviewFixtureReady = "true";
@@ -806,6 +861,10 @@ ${REVIEW_MASK_UNION_BEFORE}
         .replace(
           'const runtimeSnapshotVariant = "before";',
           'const runtimeSnapshotVariant = "after";',
+        )
+        .replace(
+          'style="border: 1px solid #9aaec2"',
+          'style="border: 3px solid #6d5ce7"',
         )
         .replace(
           "      <div data-review-regression-summary>",
@@ -1113,6 +1172,24 @@ ${REVIEW_MASK_UNION_BEFORE}
           });
       })),
     ).then((states) => states.every(Boolean))).toBe(true);
+    await expect(beforeReviewFrame.locator(
+      '[data-pageroot-review-overlay-box][data-pageroot-review-fact^="style:runtime-projection-"]',
+    )).toHaveCount(0);
+    await expect(afterReviewFrame.locator(
+      '[data-pageroot-review-overlay-box][data-pageroot-review-fact^="style:runtime-projection-"]',
+    )).toHaveCount(0);
+    await beforeReviewFrame.getByRole("button", { name: "审阅标签一" })
+      .evaluate((button) => button.click());
+    await expect(beforeReviewFrame.locator('[data-review-tab-panel="one"]'))
+      .toBeVisible();
+    await expect(afterReviewFrame.locator('[data-review-tab-panel="one"]'))
+      .toBeVisible();
+    await expect.poll(async () => Promise.all(
+      [beforeReviewFrame, afterReviewFrame].map((frame) => frame.locator("html").evaluate(() => (
+        !document.documentElement.hasAttribute("data-pageroot-review-transitioning")
+      ))),
+    ).then((states) => states.every(Boolean))).toBe(true);
+    await assertRuntimeVisualSupplement(beforeReviewFrame, afterReviewFrame);
     await expect(beforeReviewFrame.locator("#indexed-review-panel-one")).toBeVisible();
     await expect(afterReviewFrame.locator("#indexed-review-panel-one")).toBeVisible();
     await afterReviewFrame.getByRole("button", { name: "抖音搜盘表现" })

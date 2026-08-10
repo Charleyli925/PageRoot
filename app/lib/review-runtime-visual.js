@@ -53,9 +53,9 @@ function helperForTypes(types) {
 }
 
 /**
- * Runtime evidence can add a single opaque style marker to an already static
- * review outline. It cannot change source bytes, acceptance semantics, or the
- * authored review page's knowledge of source-host identities.
+ * Runtime evidence can add one opaque style projection per changed source
+ * host. Outline aggregation remains navigation metadata; it is never runtime
+ * geometry authority.
  */
 export function mergeReviewRuntimeVisualChanges(documents, changedCandidateKeys) {
   const changes = Array.isArray(documents?.changes) ? documents.changes : [];
@@ -128,15 +128,10 @@ export function mergeReviewRuntimeVisualChanges(documents, changedCandidateKeys)
       helper: helperForTypes(types),
     });
   });
-  const seenMarkerOutlineIds = new Set();
-  const markers = changedCandidates.flatMap((candidate) => {
-    if (seenMarkerOutlineIds.has(candidate.outlineId)) return [];
-    seenMarkerOutlineIds.add(candidate.outlineId);
-    return [Object.freeze({
-      changeId: candidate.changeId,
-      outlineId: candidate.outlineId,
-    })];
-  });
+  const markers = changedCandidates.map((candidate) => Object.freeze({
+    candidateKey: candidate.key,
+    changeId: candidate.changeId,
+  }));
   return Object.freeze({
     changes: Object.freeze(mergedChanges),
     outline: Object.freeze(mergedOutline),

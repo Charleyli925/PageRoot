@@ -64,12 +64,21 @@ or image data.
 
 After both static Review frames are ready, `AiReviewWorkspace` sends one
 bounded before/after pair through the same owner and validates the same snapshot
-envelope and parser. A difference in matching captured PNGs may add one opaque
-style marker to the existing static outline. An unavailable, malformed, late or
-mismatched result adds no marker and has no user-visible capture status.
+envelope and parser. A difference in matching captured PNGs emits one opaque
+`{candidateKey, changeId}` fact per changed source host. Outline aggregation may
+update the content map but never chooses geometry. Each side's first managed
+bootstrap privately binds those keys to exact source `Element` references by a
+path plus complete narrow fingerprint; later bootstrap reads are unbound. The
+trusted parent delivers facts through a distinct challenged private port fenced
+by contract version, session, side and full source SHA. The bootstrap keeps a
+disposable `Map<Element, facts[]>` and unions it with static serialized facts.
+It never writes runtime marker attributes, and replacement, disconnect or
+fingerprint drift has no outline fallback. An unavailable, malformed, late or
+mismatched result adds no runtime fact and has no user-visible capture status.
 
 There is no second fresh pair, deterministic coordinator, Review cache or
-capture/retry UI. Static Review never waits for the owner.
+capture/retry UI. Static Review never waits for the owner, and empty or failed
+runtime delivery never clears static facts.
 
 ## Shared limits
 

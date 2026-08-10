@@ -9,7 +9,11 @@ const reviewDocument = await readFile(
   "utf8",
 );
 
-export function generatedReviewBootstrap(reviewCommentBindings = []) {
+export function generatedReviewBootstrap(
+  reviewCommentBindings = [],
+  runtimeProjectionBindings = [],
+  side = "before",
+) {
   const sourceFile = ts.createSourceFile(
     "review-document.ts",
     reviewDocument,
@@ -44,6 +48,7 @@ export function generatedReviewBootstrap(reviewCommentBindings = []) {
         valueLength: 400_000,
       },
     },
+    REVIEW_PROJECTION_FACTS_PER_ELEMENT_LIMIT: 24,
     REVIEW_RUNTIME_VISUAL_CANDIDATE_LIMIT: 128,
     REVIEW_RUNTIME_VISUAL_SOURCE_BOX_ATTRIBUTES: [
       "class",
@@ -56,8 +61,9 @@ export function generatedReviewBootstrap(reviewCommentBindings = []) {
   new vm.Script(transpiled).runInContext(context);
   return context.reviewBootstrap(
     "review-session",
-    "before",
+    side,
     `sha256:${"a".repeat(64)}`,
     reviewCommentBindings,
+    runtimeProjectionBindings,
   );
 }

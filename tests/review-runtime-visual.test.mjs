@@ -140,7 +140,7 @@ test("runtime comparison uses one before/after PNG pair and fails closed", () =>
   }), []);
 });
 
-test("runtime visual merge reuses a static change and emits one opaque marker per outline", () => {
+test("runtime visual merge reuses outline metadata but preserves one marker per candidate", () => {
   const documents = {
     changes: [{
       id: "change-1",
@@ -197,7 +197,8 @@ test("runtime visual merge reuses a static change and emits one opaque marker pe
   assert.deepEqual(merged.changes[0].types, ["text", "style"]);
   assert.equal(merged.changes[1].id, "runtime-change-outline-2");
   assert.deepEqual(merged.markers, [
-    { changeId: "change-1", outlineId: "outline-1" },
-    { changeId: "runtime-change-outline-2", outlineId: "outline-2" },
+    { candidateKey: "runtime-host-1", changeId: "change-1" },
+    { candidateKey: "runtime-host-2", changeId: "runtime-change-outline-2" },
+    { candidateKey: "runtime-host-3", changeId: "runtime-change-outline-2" },
   ]);
 });

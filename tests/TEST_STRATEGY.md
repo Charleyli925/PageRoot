@@ -108,6 +108,15 @@ PR 批量是建议而非固定限制：用 CI Health 的 Ready 次数、candidat
   Node oracle 必须分别覆盖唯一空 Canvas/SVG/表单/容器的兼容配对、重复
   class-only 空节点保持 unmatched、深层子变化不拆稳定祖先，以及第 25 个
   trusted projection fact 明确失败；解析端超限仍必须 fail-closed。
+  Runtime Snapshot 投影的 Node oracle 必须保留每个 changed candidate key，
+  即使多个候选共享同一 outline 也不得去重。真实 Chromium 另证明每侧首个
+  bootstrap 的私有 key→`Element` 绑定、`sessionId + side + sourceSha256` 端口
+  fence、同元素静态/运行态 facts 加法合并、同 outline 多宿主独立 border box、
+  普通 window message 无权注入，以及替换、断连、fingerprint 漂移时不回退
+  outline；作者 capture listener 不得看到 challenge、port 或 candidate key。
+  Electron AI 闭环必须确认 Canvas/SVG 运行态差异框命中精确宿主而非 section，
+  并覆盖隐藏 Tab 在既有 presentation epoch 稳定后重测。Capture owner、preload、
+  IPC 与 package 测试只作回归证明，PR-C 不修改这些 owner。
 - Electron E2E 夹具与场景归属：`tests/e2e/electron/helpers/pageroot-app-fixture.mjs`
   只拥有独立 userData/workspace/source、隐藏窗口启动、Bridge 路径、close-first
   cleanup、诊断输出和已加载 frame；它不包含产品断言、整条用户流程或自动重试。

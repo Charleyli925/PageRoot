@@ -510,7 +510,7 @@
         "^app/workbench/review-runtime-capture-adapter\\.ts$",
         "^app/components/desktop-runtime-snapshot-api\\.ts$"
       ],
-      "suites": ["typecheck", "ai-smoke"],
+      "suites": ["typecheck", "browser-smoke", "ai-smoke"],
       "nodeTests": [
         "tests/review-runtime-capture-owner.test.mjs",
         "tests/review-runtime-visual.test.mjs",
