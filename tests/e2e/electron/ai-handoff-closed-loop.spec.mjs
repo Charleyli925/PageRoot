@@ -492,14 +492,28 @@ function writeAiOutput(requestRoot, transform) {
     "utf8",
   );
   const output = transform(base);
-  const outputDirectory = path.join(
+  const changeRequest = JSON.parse(readFileSync(
+    path.join(requestRoot, "change-request.json"),
+    "utf8",
+  ));
+  const outputRelativePath = changeRequest.finalization?.outputRelativePath;
+  if (
+    typeof outputRelativePath !== "string"
+    || !outputRelativePath.startsWith("output/")
+  ) {
+    throw new Error("Request is missing its frozen AI output path.");
+  }
+  const attemptRoot = path.join(
     requestRoot,
     "attempts",
     "attempt_001",
-    "output",
   );
-  mkdirSync(outputDirectory, { recursive: true });
-  writeFileSync(path.join(outputDirectory, "index.html"), output, "utf8");
+  const outputPath = path.join(
+    attemptRoot,
+    ...outputRelativePath.split("/"),
+  );
+  mkdirSync(path.dirname(outputPath), { recursive: true });
+  writeFileSync(outputPath, output, "utf8");
 }
 
 function runOfficialFinalizer(requestRoot, changeRequest) {
