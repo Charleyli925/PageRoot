@@ -775,12 +775,13 @@ async function runElectronSession(runRoot, sizeMiB, sequence, sampleIndex) {
       ]);
       const startedAt = performance.now();
       await closeElectronGracefully(electronApp, launched.rendererUrl);
+      const dirtyCloseDurationMs = Number(formatNumber(performance.now() - startedAt));
       const [rendererGap, rendererMemory] = await Promise.all([gap.stop().catch(() => ({ maxGapMs: 0, samples: 0 })), memory.stop()]);
       electronApp = null;
       await assertSourceBytes(sourceA, replacement(initialSourceA, dirtyToken), "Dirty close");
       return {
         dirtyClose: {
-          durationMs: Number(formatNumber(performance.now() - startedAt)),
+          durationMs: dirtyCloseDurationMs,
           rendererGapMs: Number(formatNumber(rendererGap.maxGapMs)),
           rendererMemory,
         },
@@ -795,6 +796,7 @@ async function runElectronSession(runRoot, sizeMiB, sequence, sampleIndex) {
     const autosaveStartedAt = performance.now();
     await activateAndReplace(launched.page, frame, autosaveToken);
     await persistedRevision(launched.page, initialRevision);
+    const autosaveDurationMs = Number(formatNumber(performance.now() - autosaveStartedAt));
     const [autosaveRendererGap, autosaveRendererMemory] = await Promise.all([autosaveGap.stop(), autosaveMemory.stop()]);
     await assertSourceBytes(sourceA, replacement(initialSourceA, autosaveToken), "Electron autosave");
 
@@ -809,6 +811,7 @@ async function runElectronSession(runRoot, sizeMiB, sequence, sampleIndex) {
     const switchStartedAt = performance.now();
     await launched.page.locator(".recent-file-row").filter({ hasText: path.basename(sourceB) }).click();
     await currentFrame(launched.page, canonicalB, token(6_000));
+    const dirtySwitchDurationMs = Number(formatNumber(performance.now() - switchStartedAt));
     const [switchRendererGap, switchRendererMemory] = await Promise.all([switchGap.stop(), switchMemory.stop()]);
     await assertSourceBytes(sourceA, replacement(initialSourceA, switchToken), "Dirty switch");
 
@@ -818,21 +821,22 @@ async function runElectronSession(runRoot, sizeMiB, sequence, sampleIndex) {
     ]);
     const closeStartedAt = performance.now();
     await closeElectronGracefully(electronApp, launched.rendererUrl);
+    const cleanCloseDurationMs = Number(formatNumber(performance.now() - closeStartedAt));
     const [cleanCloseRendererGap, cleanCloseRendererMemory] = await Promise.all([closeGap.stop().catch(() => ({ maxGapMs: 0, samples: 0 })), closeMemory.stop()]);
     electronApp = null;
     return {
       autosave: {
-        durationMs: Number(formatNumber(performance.now() - autosaveStartedAt)),
+        durationMs: autosaveDurationMs,
         rendererGapMs: Number(formatNumber(autosaveRendererGap.maxGapMs)),
         rendererMemory: autosaveRendererMemory,
       },
       dirtySwitch: {
-        durationMs: Number(formatNumber(performance.now() - switchStartedAt)),
+        durationMs: dirtySwitchDurationMs,
         rendererGapMs: Number(formatNumber(switchRendererGap.maxGapMs)),
         rendererMemory: switchRendererMemory,
       },
       cleanClose: {
-        durationMs: Number(formatNumber(performance.now() - closeStartedAt)),
+        durationMs: cleanCloseDurationMs,
         rendererGapMs: Number(formatNumber(cleanCloseRendererGap.maxGapMs)),
         rendererMemory: cleanCloseRendererMemory,
       },

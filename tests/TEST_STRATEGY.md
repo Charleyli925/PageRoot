@@ -101,7 +101,8 @@ PR 批量是建议而非固定限制：用 CI Health 的 Ready 次数、candidat
   除其明确的 harness、报告与命令元数据外，任何受版本控制的运行时输入
   相对 `origin/main` 的变化都会在测量前拒绝；Electron autosave、dirty
   switch 与 dirty close 都必须按完整预期 HTML 字节比较，不能只验证 token
-  存在。
+  存在。每个操作的 elapsed 必须在自身的持久化、目标 frame 或关闭事件完成时
+  立即截取，不能混入后续 switch、close、监控停止或 byte oracle 的耗时。
   任务级跑正常闭环和一个硬失败代表场景；
   发布级覆盖复制失败、缺失 finalizer、非法 HTML、版本激活失败与终态
   返回/重开。正式 Electron 审阅用例还必须证明默认“双页 + 全部变化 +
