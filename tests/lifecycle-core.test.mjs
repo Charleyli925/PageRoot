@@ -1,9 +1,13 @@
 import assert from "node:assert/strict";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
 import {
   CANONICALIZATION_VERSION,
   MANAGED_META_NAMES,
+  atomicWriteFile,
   comparisonSha256,
   findUnexpectedAttemptEntry,
   findUnexpectedAttemptOutputEntry,
@@ -11,6 +15,18 @@ import {
   sha256,
   stripManagedMeta,
 } from "../scripts/lifecycle-core.mjs";
+
+test("atomic writes support a 255-byte output filename", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "pageroot-atomic-write-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const fileName = `${"x".repeat(250)}.html`;
+  assert.equal(Buffer.byteLength(fileName), 255);
+  const filePath = join(directory, fileName);
+
+  await atomicWriteFile(filePath, "complete");
+
+  assert.equal(await readFile(filePath, "utf8"), "complete");
+});
 
 function directoryEntry(name, kind = "file") {
   return {

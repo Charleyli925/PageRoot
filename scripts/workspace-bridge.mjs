@@ -747,6 +747,42 @@ function isAttemptOutputRelativePath(value) {
   return isGeneratedWorkingCopyFileName(value.slice("output/".length));
 }
 
+function outputPathIdentityFromTransaction(transaction) {
+  const attemptRelativePath =
+    `requests/${transaction.requestId}/attempts/${transaction.attemptId}`;
+  const outputRelativePath = transaction.outputRelativePath
+    ?? `${attemptRelativePath}/output/index.html`;
+  const expectedPrefix = `${attemptRelativePath}/`;
+  if (
+    typeof outputRelativePath !== "string"
+    || !outputRelativePath.startsWith(expectedPrefix)
+  ) {
+    throw new HttpError(
+      409,
+      "OUTPUT_PATH_IDENTITY_MISMATCH",
+      "The transaction output path does not match its Request and Attempt.",
+      {
+        expectedPrefix,
+        actual: outputRelativePath,
+      },
+    );
+  }
+  const attemptOutputRelativePath = outputRelativePath.slice(
+    expectedPrefix.length,
+  );
+  if (!isAttemptOutputRelativePath(attemptOutputRelativePath)) {
+    throw new HttpError(
+      409,
+      "OUTPUT_PATH_IDENTITY_MISMATCH",
+      "The transaction output path is not a supported Attempt output name.",
+      {
+        actual: outputRelativePath,
+      },
+    );
+  }
+  return { outputRelativePath, attemptOutputRelativePath };
+}
+
 async function outputRelativePathForActiveRun(context, activeRun, changeRequest) {
   const outputRelativePath = changeRequest?.finalization?.outputRelativePath;
   if (!isAttemptOutputRelativePath(outputRelativePath)) {
@@ -954,7 +990,7 @@ async function ensureWorkingCopyRaw(context, transaction, content) {
   await ensureDirectory(directory);
   const temporary = path.join(
     directory,
-    `.${path.basename(identity.absolutePath)}.${process.pid}.${randomUUID()}.tmp`,
+    `.pageroot-working-${process.pid}-${randomUUID()}.tmp`,
   );
   await atomicWriteFile(temporary, buffer);
   let created = false;
@@ -6068,8 +6104,7 @@ function activeRunFromTransaction(context, transaction) {
     "attempts",
     transaction.attemptId,
   );
-  const outputRelativePath = transaction.outputRelativePath
-    ?? `requests/${transaction.requestId}/attempts/${transaction.attemptId}/output/index.html`;
+  const { outputRelativePath } = outputPathIdentityFromTransaction(transaction);
   return {
     projectId: context.projectId,
     documentId: context.documentId,
@@ -7048,24 +7083,56 @@ async function statusFor(sourcePath, requestId, attemptId = "attempt_001") {
             completionPath,
             "completion.json",
           );
-          const outputRelativePath =
-            typeof completion.outputRelativePath === "string"
-              ? completion.outputRelativePath
-              : "output/index.html";
-          const outputPath = path.join(
-            attemptRoot,
-            ...outputRelativePath.split("/"),
+          const transactionId = `txn_${requestId}_${attemptId}`;
+          const transaction = await readAuxiliaryJson(
+            path.join(
+              transactionDirectory(context, transactionId),
+              "transaction.json",
+            ),
+            "transaction.json",
           );
-          const outputSha256 = (await exists(outputPath))
-            ? sha256(await readFile(outputPath))
-            : null;
-          if (outputSha256 !== completion.outputSha256) {
+          if (
+            transaction.requestId !== requestId
+            || transaction.attemptId !== attemptId
+            || transaction.candidateVersionId !== outcome.versionId
+          ) {
             protocolViolation = {
-              code: "OUTPUT_MUTATED_AFTER_FINALIZATION",
-              expectedSha256: completion.outputSha256,
-              actualSha256: outputSha256,
+              code: "OUTPUT_PATH_IDENTITY_MISMATCH",
+              expectedRequestId: requestId,
+              actualRequestId: transaction.requestId,
+              expectedAttemptId: attemptId,
+              actualAttemptId: transaction.attemptId,
+              expectedVersionId: outcome.versionId,
+              actualVersionId: transaction.candidateVersionId,
               detectedAt: nowIso(),
             };
+          } else {
+            const { attemptOutputRelativePath } =
+              outputPathIdentityFromTransaction(transaction);
+            if (completion.outputRelativePath !== attemptOutputRelativePath) {
+              protocolViolation = {
+                code: "OUTPUT_PATH_IDENTITY_MISMATCH",
+                expectedOutputRelativePath: attemptOutputRelativePath,
+                actualOutputRelativePath: completion.outputRelativePath,
+                detectedAt: nowIso(),
+              };
+            } else {
+              const outputPath = path.join(
+                attemptRoot,
+                ...attemptOutputRelativePath.split("/"),
+              );
+              const outputSha256 = (await exists(outputPath))
+                ? sha256(await readFile(outputPath))
+                : null;
+              if (outputSha256 !== completion.outputSha256) {
+                protocolViolation = {
+                  code: "OUTPUT_MUTATED_AFTER_FINALIZATION",
+                  expectedSha256: completion.outputSha256,
+                  actualSha256: outputSha256,
+                  detectedAt: nowIso(),
+                };
+              }
+            }
           }
         }
         return {

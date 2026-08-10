@@ -183,9 +183,11 @@ export async function syncDirectory(directory) {
 export async function atomicWriteFile(filePath, content, options = {}) {
   const parent = path.dirname(filePath);
   await ensureDirectory(parent);
+  // The final component may intentionally consume the filesystem's full
+  // 255-byte budget, so the temporary sibling must not include that name.
   const temporary = path.join(
     parent,
-    `.${path.basename(filePath)}.${process.pid}.${randomUUID()}.tmp`,
+    `.pageroot-write-${process.pid}-${randomUUID()}.tmp`,
   );
   const handle = await open(temporary, "wx", options.mode ?? 0o600);
   try {

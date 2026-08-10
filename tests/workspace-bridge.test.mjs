@@ -3087,6 +3087,27 @@ test("mandatory finalizer controls completion, identity, no-change, and cancella
     mutationDetected.body.protocolViolation.code,
     "OUTPUT_MUTATED_AFTER_FINALIZATION",
   );
+  const originalCompletionText = await readFile(run.completionPath, "utf8");
+  const pathTamperedCompletion = JSON.parse(originalCompletionText);
+  pathTamperedCompletion.outputRelativePath = "../../outside.html";
+  await writeFile(
+    run.completionPath,
+    `${JSON.stringify(pathTamperedCompletion, null, 2)}\n`,
+    "utf8",
+  );
+  const pathTamperingDetected = await requestJson(
+    bridge.baseUrl,
+    `/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
+  );
+  assert.equal(
+    pathTamperingDetected.body.protocolViolation.code,
+    "OUTPUT_PATH_IDENTITY_MISMATCH",
+  );
+  assert.equal(
+    pathTamperingDetected.body.protocolViolation.expectedOutputRelativePath,
+    completionEvidence.outputRelativePath,
+  );
+  await writeFile(run.completionPath, originalCompletionText, "utf8");
   assert.equal(
     await readFile(created.body.currentPath, "utf8"),
     committedSource,
