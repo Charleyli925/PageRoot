@@ -34,6 +34,7 @@ const INTEGRATION_TESTS = new Set([
   "attachment-storage.test.mjs",
   "bridge-startup.test.mjs",
   "bridge-shutdown.test.mjs",
+  "bridge-test-environment.test.mjs",
   "desktop-close-recovery.test.mjs",
   "desktop-file-writer.test.mjs",
   "desktop-preload-ipc.test.mjs",

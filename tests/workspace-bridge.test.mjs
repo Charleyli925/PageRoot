@@ -1,10 +1,8 @@
 import assert from "node:assert/strict";
-import { execFile, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   access,
   mkdir,
-  mkdtemp,
   readFile,
   readdir,
   realpath,
@@ -13,14 +11,17 @@ import {
   symlink,
   writeFile,
 } from "node:fs/promises";
-import { createServer } from "node:net";
-import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import test from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
-import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 
+import {
+  runOfficialFinalizer,
+} from "./helpers/ai-attempt-fixture.mjs";
+import {
+  createBridgeTestEnvironment,
+} from "./helpers/bridge-test-environment.mjs";
 import {
   assertProjectStorageDirectoryName,
   comparisonSha256,
@@ -37,10 +38,8 @@ import {
 } from "../scripts/target-resolver.mjs";
 import { rebaseDraftMutation } from "../scripts/draft-aggregate.mjs";
 
-const execFileAsync = promisify(execFile);
 const productRoot = fileURLToPath(new URL("../", import.meta.url));
-const bridgeScript = join(productRoot, "scripts", "workspace-bridge.mjs");
-const finalizerScript = join(productRoot, "scripts", "finalize-attempt.mjs");
+const workspaceBridgeScript = join(productRoot, "scripts", "workspace-bridge.mjs");
 
 async function registeredProjectRoot(workspace, projectId) {
   const registry = JSON.parse(
@@ -84,7 +83,7 @@ test("readable project directory names stay safe, bounded, and tied to project i
 
 test("workspace Bridge local imports stay inside the packaged Bridge dependency closure", async () => {
   const [bridgeSource, packageSource] = await Promise.all([
-    readFile(bridgeScript, "utf8"),
+    readFile(workspaceBridgeScript, "utf8"),
     readFile(join(productRoot, "package.json"), "utf8"),
   ]);
   const packageJson = JSON.parse(packageSource);
@@ -131,165 +130,50 @@ function hash(value) {
   return `sha256:${createHash("sha256").update(value).digest("hex")}`;
 }
 
-async function reservePort() {
-  const server = createServer();
-  await new Promise((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", resolve);
-  });
-  const address = server.address();
-  assert.ok(address && typeof address === "object");
-  const port = address.port;
-  await new Promise((resolve, reject) =>
-    server.close((error) => (error ? reject(error) : resolve()))
-  );
-  return port;
-}
-
-async function requestJson(baseUrl, pathname, init) {
-  const response = await fetch(`${baseUrl}${pathname}`, init);
-  const body = await response.json();
-  return { response, body };
-}
-
-async function waitForHealth(baseUrl, child, logs, authToken = "") {
-  const deadline = Date.now() + 15_000;
-  let lastError;
-  while (Date.now() < deadline) {
-    if (child.exitCode !== null) {
-      throw new Error(
-        `bridge exited with ${child.exitCode}\n${logs.stdout}\n${logs.stderr}`,
-      );
-    }
-    try {
-      const result = await requestJson(baseUrl, "/health", {
-        headers: authToken
-          ? { "x-html-ai-bridge-token": authToken }
-          : undefined,
-      });
-      if (result.response.status === 200) return result.body;
-    } catch (error) {
-      lastError = error;
-    }
-    await delay(30);
-  }
-  throw new Error(
-    `bridge health timeout: ${lastError ?? "unknown"}\n${logs.stdout}\n${logs.stderr}`,
-  );
-}
-
-async function stopChild(child) {
-  if (!child || child.exitCode !== null) return;
-  child.kill("SIGTERM");
-  const exited = new Promise((resolve) => child.once("exit", resolve));
-  const timedOut = await Promise.race([
-    exited.then(() => false),
-    delay(2_000).then(() => true),
-  ]);
-  if (timedOut && child.exitCode === null) {
-    child.kill("SIGKILL");
-    await new Promise((resolve) => child.once("exit", resolve));
-  }
-}
-
-async function startBridge(workspace, extraEnvironment = {}) {
-  const port = await reservePort();
-  const baseUrl = `http://127.0.0.1:${port}`;
-  const logs = { stdout: "", stderr: "" };
-  const child = spawn(process.execPath, [bridgeScript], {
-    cwd: productRoot,
-    env: {
-      ...process.env,
-      HTML_AI_WORKSPACE: workspace,
-      HTML_AI_BRIDGE_PORT: String(port),
-      ...extraEnvironment,
-    },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  child.stdout.setEncoding("utf8");
-  child.stderr.setEncoding("utf8");
-  child.stdout.on("data", (chunk) => {
-    logs.stdout += chunk;
-  });
-  child.stderr.on("data", (chunk) => {
-    logs.stderr += chunk;
-  });
-  await waitForHealth(
-    baseUrl,
-    child,
-    logs,
-    extraEnvironment.HTML_AI_BRIDGE_AUTH_TOKEN ?? "",
-  );
-  return { child, baseUrl, logs };
-}
-
 async function createEnvironment(t) {
-  const root = await realpath(
-    await mkdtemp(join(tmpdir(), "html-ai-lifecycle-v3-")),
-  );
-  const workspace = join(root, "workspace");
-  const sources = join(root, "sources");
-  await mkdir(workspace);
-  await mkdir(sources);
-  const children = [];
-  t.after(async () => {
-    for (const child of children) await stopChild(child);
-    await rm(root, { recursive: true, force: true });
+  return createBridgeTestEnvironment(t, {
+    prefix: "html-ai-lifecycle-v3-",
   });
-  return {
-    root,
-    workspace,
-    sources,
-    children,
-    async start(extraEnvironment) {
-      const bridge = await startBridge(workspace, extraEnvironment);
-      children.push(bridge.child);
-      return bridge;
-    },
-  };
 }
 
-async function previewWorkspace(baseUrl, sourcePath) {
-  return requestJson(
-    baseUrl,
+async function previewWorkspace(bridge, sourcePath) {
+  return bridge.requestJson(
     `/workspace?sourcePath=${encodeURIComponent(sourcePath)}`,
   );
 }
 
-async function openWorkspace(baseUrl, sourcePath) {
-  const preview = await previewWorkspace(baseUrl, sourcePath);
+async function openWorkspace(bridge, sourcePath) {
+  const preview = await previewWorkspace(bridge, sourcePath);
   if (
     preview.response.status !== 200
     || preview.body.registered !== false
   ) return preview;
-  return postJson(baseUrl, "/project/ensure", {
+  return postJson(bridge, "/project/ensure", {
     sourcePath,
     expectedSourceSha256: preview.body.currentHtmlSha256,
   });
 }
 
 test("fresh launch and read-only preview do not create PageRoot storage", async (t) => {
-  const root = await realpath(
-    await mkdtemp(join(tmpdir(), "html-ai-lazy-workspace-")),
-  );
-  const workspace = join(root, "PageRoot", "项目记录");
-  const sources = join(root, "sources");
-  await mkdir(sources);
-  const sourcePath = join(sources, "first-open.html");
-  await writeFile(sourcePath, htmlPage("首次打开"), "utf8");
-  const bridge = await startBridge(workspace);
-  t.after(async () => {
-    await stopChild(bridge.child);
-    await rm(root, { recursive: true, force: true });
+  const environment = await createBridgeTestEnvironment(t, {
+    prefix: "html-ai-lazy-workspace-",
+    workspaceRelativePath: join("PageRoot", "项目记录"),
+    createWorkspace: false,
   });
+  const { workspace } = environment;
+  const sourcePath = await environment.createSource(
+    "first-open.html",
+    htmlPage("首次打开"),
+  );
+  const bridge = await environment.start();
 
   await assert.rejects(access(workspace));
-  const preview = await previewWorkspace(bridge.baseUrl, sourcePath);
+  const preview = await previewWorkspace(bridge, sourcePath);
   assert.equal(preview.response.status, 200, JSON.stringify(preview.body));
   assert.equal(preview.body.registered, false);
   await assert.rejects(access(workspace));
 
-  const ensured = await postJson(bridge.baseUrl, "/project/ensure", {
+  const ensured = await postJson(bridge, "/project/ensure", {
     sourcePath,
     expectedSourceSha256: preview.body.currentHtmlSha256,
   });
@@ -300,21 +184,21 @@ test("fresh launch and read-only preview do not create PageRoot storage", async 
 });
 
 test("managed welcome HTML registers the same workspace and V1 lifecycle as any opened HTML", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "pageroot-welcome-workspace-"));
-  const workspace = join(root, "PageRoot", "项目记录");
-  const welcome = await ensureManagedWelcomeHtml({ workspaceRoot: workspace });
-  const bridge = await startBridge(workspace);
-  t.after(async () => {
-    await stopChild(bridge.child);
-    await rm(root, { recursive: true, force: true });
+  const environment = await createBridgeTestEnvironment(t, {
+    prefix: "pageroot-welcome-workspace-",
+    workspaceRelativePath: join("PageRoot", "项目记录"),
+    createWorkspace: false,
   });
+  const { workspace } = environment;
+  const welcome = await ensureManagedWelcomeHtml({ workspaceRoot: workspace });
+  const bridge = await environment.start();
 
   await assert.rejects(access(workspace));
-  const preview = await previewWorkspace(bridge.baseUrl, welcome.sourcePath);
+  const preview = await previewWorkspace(bridge, welcome.sourcePath);
   assert.equal(preview.response.status, 200, JSON.stringify(preview.body));
   assert.equal(preview.body.registered, false);
 
-  const ensured = await postJson(bridge.baseUrl, "/project/ensure", {
+  const ensured = await postJson(bridge, "/project/ensure", {
     sourcePath: welcome.sourcePath,
     expectedSourceSha256: welcome.sha256,
   });
@@ -349,7 +233,7 @@ test("workspace Bridge rejects non-UTF-8 source bytes without creating a project
   await writeFile(sourcePath, original);
   const bridge = await environment.start();
 
-  const response = await previewWorkspace(bridge.baseUrl, sourcePath);
+  const response = await previewWorkspace(bridge, sourcePath);
   assert.equal(response.response.status, 415);
   assert.equal(response.body.error.code, "UNSUPPORTED_HTML_ENCODING");
   assert.deepEqual(await readFile(sourcePath), original);
@@ -368,21 +252,17 @@ function exactDocumentTarget() {
   };
 }
 
-async function postJson(baseUrl, pathname, body) {
+async function postJson(bridge, pathname, body) {
   const requestBody =
     pathname === "/request" && !Object.hasOwn(body, "targets")
       ? { ...body, targets: [exactDocumentTarget()] }
       : body;
-  return requestJson(baseUrl, pathname, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(requestBody),
-  });
+  return bridge.postJson(pathname, requestBody);
 }
 
-async function activateReadyVersion(baseUrl, ready) {
+async function activateReadyVersion(bridge, ready) {
   assert.equal(ready.status, "ready-to-open");
-  const activated = await postJson(baseUrl, "/ready-version/activate", {
+  const activated = await postJson(bridge, "/ready-version/activate", {
     sourcePath: ready.sourcePath,
     projectId: ready.projectId,
     documentId: ready.documentId,
@@ -397,29 +277,6 @@ async function activateReadyVersion(baseUrl, ready) {
   );
   assert.equal(activated.body.status, "version-activated");
   return activated.body;
-}
-
-async function runFinalizer(workspace, run, overrides = {}) {
-  return execFileAsync(
-    process.execPath,
-    [
-      finalizerScript,
-      "--workspace",
-      workspace,
-      "--project-id",
-      overrides.projectId ?? run.projectId,
-      "--request-id",
-      overrides.requestId ?? run.requestId,
-      "--attempt-id",
-      overrides.attemptId ?? run.attemptId,
-    ],
-    {
-      env: {
-        ...process.env,
-        ...(overrides.environment ?? {}),
-      },
-    },
-  );
 }
 
 function manualCompletionFor(run, baseHtml, outputHtml) {
@@ -451,6 +308,52 @@ function manualCompletionFor(run, baseHtml, outputHtml) {
   };
 }
 
+function createSourceHistoryTextOperation({
+  operationId,
+  editRevision,
+  createdAt,
+  beforeHtml,
+  afterHtml,
+  beforeText,
+  afterText,
+  targetId,
+  includeTargetText = true,
+}) {
+  const headingOffset = beforeHtml.indexOf(`<h1>${beforeText}</h1>`);
+  assert.notEqual(headingOffset, -1, `missing source-history text ${beforeText}`);
+  const startOffset = headingOffset + 4;
+  const beforeTarget = { id: targetId };
+  const afterTarget = { id: targetId };
+  if (includeTargetText) {
+    Object.assign(beforeTarget, { text: beforeText, resolution: "exact" });
+    Object.assign(afterTarget, { text: afterText, resolution: "exact" });
+  }
+  return {
+    operationId,
+    kind: "text",
+    editRevision,
+    createdAt,
+    beforeSourceSha256: hash(beforeHtml),
+    afterSourceSha256: hash(afterHtml),
+    forwardPatches: [{
+      startOffset,
+      endOffset: startOffset + beforeText.length,
+      before: beforeText,
+      after: afterText,
+      kind: "text",
+    }],
+    reversePatches: [{
+      startOffset,
+      endOffset: startOffset + afterText.length,
+      before: afterText,
+      after: beforeText,
+      kind: "inverse:text",
+    }],
+    beforeTarget,
+    afterTarget,
+  };
+}
+
 test("v2 registries are rejected without migration or mutation", async (t) => {
   const environment = await createEnvironment(t);
   const registryPath = join(
@@ -471,7 +374,7 @@ test("v2 registries are rejected without migration or mutation", async (t) => {
   await writeFile(registryPath, v2Registry, "utf8");
 
   await assert.rejects(
-    startBridge(environment.workspace),
+    environment.start(),
     /schema 3\.0\.0/,
   );
   assert.equal(await readFile(registryPath, "utf8"), v2Registry);
@@ -517,7 +420,7 @@ test("incomplete legacy UUID project directories are rejected without mutation",
   await writeFile(registryPath, legacyRegistry, "utf8");
 
   await assert.rejects(
-    startBridge(environment.workspace),
+    environment.start(),
     /cannot be migrated: legacy project records are missing or invalid/,
   );
   assert.equal(await readFile(registryPath, "utf8"), legacyRegistry);
@@ -530,8 +433,8 @@ test("0.9.0 project metadata upgrades in place without moving history", async (t
   const sourceHtml = htmlPage("已有项目");
   await writeFile(sourcePath, sourceHtml, "utf8");
   const firstBridge = await environment.start();
-  const opened = (await openWorkspace(firstBridge.baseUrl, sourcePath)).body;
-  await stopChild(firstBridge.child);
+  const opened = (await openWorkspace(firstBridge, sourcePath)).body;
+  await firstBridge.stop();
 
   const registryPath = join(environment.workspace, "project-registry.json");
   const readableProjectRoot = opened.projectRoot;
@@ -563,7 +466,7 @@ test("0.9.0 project metadata upgrades in place without moving history", async (t
   await writeFile(projectPath, `${JSON.stringify(project, null, 2)}\n`, "utf8");
 
   const restarted = await environment.start();
-  const migrated = (await openWorkspace(restarted.baseUrl, sourcePath)).body;
+  const migrated = (await openWorkspace(restarted, sourcePath)).body;
   assert.equal(migrated.projectId, opened.projectId);
   assert.equal(migrated.documentId, opened.documentId);
   assert.equal(migrated.projectRoot, legacyProjectRoot);
@@ -628,7 +531,7 @@ test("registration and first edit keep document identity sidecar-only", async (t
   const registryBefore = await readFile(registryPath, "utf8");
   const projectsBefore = await readdir(join(environment.workspace, "projects"));
 
-  const preview = await previewWorkspace(bridge.baseUrl, sourcePath);
+  const preview = await previewWorkspace(bridge, sourcePath);
   assert.equal(preview.response.status, 200);
   assert.equal(preview.body.registered, false);
   assert.equal(preview.body.projectId, null);
@@ -638,9 +541,7 @@ test("registration and first edit keep document identity sidecar-only", async (t
   assert.deepEqual(preview.body.versions, []);
   assert.equal(await readFile(sourcePath, "utf8"), staleHtml);
 
-  const sourcePreview = await requestJson(
-    bridge.baseUrl,
-    `/source?sourcePath=${encodeURIComponent(sourcePath)}`,
+  const sourcePreview = await bridge.requestJson(`/source?sourcePath=${encodeURIComponent(sourcePath)}`,
   );
   assert.equal(sourcePreview.response.status, 200);
   assert.equal(sourcePreview.body.registered, false);
@@ -649,7 +550,7 @@ test("registration and first edit keep document identity sidecar-only", async (t
     `/project-file?sourcePath=${encodeURIComponent(sourcePath)}`,
     `/file?sourcePath=${encodeURIComponent(sourcePath)}&path=PROJECT.md`,
   ]) {
-    const result = await requestJson(bridge.baseUrl, endpoint);
+    const result = await bridge.requestJson(endpoint);
     assert.equal(result.response.status, 404);
     assert.equal(result.body.error.code, "PROJECT_NOT_FOUND");
   }
@@ -660,7 +561,7 @@ test("registration and first edit keep document identity sidecar-only", async (t
     projectsBefore,
   );
 
-  const opened = await postJson(bridge.baseUrl, "/project/ensure", {
+  const opened = await postJson(bridge, "/project/ensure", {
     sourcePath,
     expectedSourceSha256: hash(staleHtml),
   });
@@ -684,7 +585,7 @@ test("registration and first edit keep document identity sidecar-only", async (t
   assert.doesNotMatch(registeredHtml, new RegExp(opened.body.documentId));
   assert.match(registeredHtml, /ver_0099|V99|ver_0042|req_0099/);
   assert.match(registeredHtml, /旧快照正文保持原样/);
-  const ensuredAgain = await postJson(bridge.baseUrl, "/project/ensure", {
+  const ensuredAgain = await postJson(bridge, "/project/ensure", {
     sourcePath,
     expectedSourceSha256: opened.body.currentHtmlSha256,
   });
@@ -699,7 +600,7 @@ test("registration and first edit keep document identity sidecar-only", async (t
     "旧快照正文保持原样",
     "第一次真实编辑",
   );
-  const autosaved = await postJson(bridge.baseUrl, "/autosave", {
+  const autosaved = await postJson(bridge, "/autosave", {
     sourcePath,
     projectId: opened.body.projectId,
     documentId: opened.body.documentId,
@@ -774,7 +675,7 @@ test("registered v3 artifacts reject v2 schema versions", async (t) => {
   const sourcePath = join(environment.sources, "strict-v3.html");
   await writeFile(sourcePath, htmlPage("严格 V3"), "utf8");
   const bridge = await environment.start();
-  const opened = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
+  const opened = (await openWorkspace(bridge, sourcePath)).body;
   const projectRoot = opened.projectRoot;
   const projectPath = join(projectRoot, "project.json");
   const runtimePath = join(projectRoot, "runtime-state.json");
@@ -794,7 +695,7 @@ test("registered v3 artifacts reject v2 schema versions", async (t) => {
       `${JSON.stringify(artifact, null, 2)}\n`,
       "utf8",
     );
-    const rejected = await openWorkspace(bridge.baseUrl, sourcePath);
+    const rejected = await openWorkspace(bridge, sourcePath);
     assert.equal(rejected.response.status, 409);
     assert.equal(
       rejected.body.error.code,
@@ -804,7 +705,7 @@ test("registered v3 artifacts reject v2 schema versions", async (t) => {
   }
 
   const run = (
-    await postJson(bridge.baseUrl, "/request", {
+    await postJson(bridge, "/request", {
       sourcePath,
       expectedSourceSha256: opened.currentHtmlSha256,
       freezeCutoffRevision: 0,
@@ -827,7 +728,7 @@ test("registered v3 artifacts reject v2 schema versions", async (t) => {
       `${JSON.stringify(artifact, null, 2)}\n`,
       "utf8",
     );
-    const rejected = await openWorkspace(bridge.baseUrl, sourcePath);
+    const rejected = await openWorkspace(bridge, sourcePath);
     assert.equal(rejected.response.status, 409);
     assert.equal(
       rejected.body.error.code,
@@ -842,9 +743,9 @@ test("finalizer rejects old or missing persisted schemas before mutating output"
   const sourcePath = join(environment.sources, "finalizer-schema.html");
   await writeFile(sourcePath, htmlPage("最终化 Schema"), "utf8");
   const bridge = await environment.start();
-  const opened = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
+  const opened = (await openWorkspace(bridge, sourcePath)).body;
   const run = (
-    await postJson(bridge.baseUrl, "/request", {
+    await postJson(bridge, "/request", {
       sourcePath,
       expectedSourceSha256: opened.currentHtmlSha256,
       freezeCutoffRevision: 0,
@@ -875,7 +776,7 @@ test("finalizer rejects old or missing persisted schemas before mutating output"
       "utf8",
     );
     await assert.rejects(
-      runFinalizer(environment.workspace, run),
+      runOfficialFinalizer(environment.workspace, run),
       (error) => {
         assert.match(
           String(error.stderr ?? error.message),
@@ -893,7 +794,7 @@ test("finalizer rejects old or missing persisted schemas before mutating output"
   }, null, 2)}\n`;
   await writeFile(run.completionPath, unsupportedCompletion, "utf8");
   await assert.rejects(
-    runFinalizer(environment.workspace, run),
+    runOfficialFinalizer(environment.workspace, run),
     (error) => {
       assert.match(
         String(error.stderr ?? error.message),
@@ -914,7 +815,7 @@ test("manual completion cannot commit spoofed or duplicate lifecycle metadata", 
   const sourcePath = join(environment.sources, "managed-meta-spoof.html");
   await writeFile(sourcePath, htmlPage("Meta spoof"), "utf8");
   const bridge = await environment.start();
-  let workspaceState = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
+  let workspaceState = (await openWorkspace(bridge, sourcePath)).body;
   const originalSource = await readFile(sourcePath, "utf8");
 
   const attempts = [
@@ -940,7 +841,7 @@ test("manual completion cannot commit spoofed or duplicate lifecycle metadata", 
 
   for (const item of attempts) {
     const run = (
-      await postJson(bridge.baseUrl, "/request", {
+      await postJson(bridge, "/request", {
         sourcePath,
         expectedSourceSha256: workspaceState.currentHtmlSha256,
         freezeCutoffRevision: workspaceState.runtimeState.editRevision,
@@ -970,9 +871,7 @@ test("manual completion cannot commit spoofed or duplicate lifecycle metadata", 
       )}\n`,
       "utf8",
     );
-    const rejected = await requestJson(
-      bridge.baseUrl,
-      `/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
+    const rejected = await bridge.requestJson(`/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
     );
     assert.equal(rejected.response.status, 200, item.label);
     assert.equal(rejected.body.status, "error", item.label);
@@ -983,7 +882,7 @@ test("manual completion cannot commit spoofed or duplicate lifecycle metadata", 
     );
     await access(join(run.attemptPath, "outcome.json"));
     assert.equal(await readFile(sourcePath, "utf8"), originalSource);
-    workspaceState = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
+    workspaceState = (await openWorkspace(bridge, sourcePath)).body;
     assert.equal(workspaceState.versions.length, 1);
     assert.equal(workspaceState.runtimeState.lifecycleState, "editing");
   }
@@ -994,9 +893,9 @@ test("status rejects an unsupported completion schema without mutating run state
   const sourcePath = join(environment.sources, "completion-schema.html");
   await writeFile(sourcePath, htmlPage("Completion schema"), "utf8");
   const bridge = await environment.start();
-  const opened = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
+  const opened = (await openWorkspace(bridge, sourcePath)).body;
   const run = (
-    await postJson(bridge.baseUrl, "/request", {
+    await postJson(bridge, "/request", {
       sourcePath,
       expectedSourceSha256: opened.currentHtmlSha256,
       freezeCutoffRevision: 0,
@@ -1008,7 +907,7 @@ test("status rejects an unsupported completion schema without mutating run state
     htmlPage("Completion schema", "<p>candidate</p>"),
     "utf8",
   );
-  await runFinalizer(environment.workspace, run);
+  await runOfficialFinalizer(environment.workspace, run);
   const completion = JSON.parse(
     await readFile(run.completionPath, "utf8"),
   );
@@ -1022,9 +921,7 @@ test("status rejects an unsupported completion schema without mutating run state
   const runtimePath = join(projectRoot, "runtime-state.json");
   const runtimeBefore = await readFile(runtimePath, "utf8");
   const sourceBefore = await readFile(sourcePath, "utf8");
-  const rejected = await requestJson(
-    bridge.baseUrl,
-    `/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
+  const rejected = await bridge.requestJson(`/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
   );
   assert.equal(rejected.response.status, 409);
   assert.equal(rejected.body.error.code, "UNSUPPORTED_SCHEMA_VERSION");
@@ -1042,7 +939,7 @@ test("Request submission rejects missing, unresolved, and compatibility TargetRe
   const sourcePath = join(environment.sources, "strict-targets.html");
   await writeFile(sourcePath, htmlPage("严格目标"), "utf8");
   const bridge = await environment.start();
-  const opened = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
+  const opened = (await openWorkspace(bridge, sourcePath)).body;
   const baseBody = {
     sourcePath,
     expectedSourceSha256: opened.currentHtmlSha256,
@@ -1118,18 +1015,18 @@ test("Request submission rejects missing, unresolved, and compatibility TargetRe
     },
   ];
   for (const item of cases) {
-    const rejected = await postJson(bridge.baseUrl, "/request", {
+    const rejected = await postJson(bridge, "/request", {
       ...baseBody,
       targets: item.targets,
     });
     assert.equal(rejected.response.status, 422);
     assert.equal(rejected.body.error.code, item.code);
-    const state = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
+    const state = (await openWorkspace(bridge, sourcePath)).body;
     assert.equal(state.runtimeState.lifecycleState, "editing");
     assert.equal(state.versions.length, 1);
   }
 
-  const accepted = await postJson(bridge.baseUrl, "/request", {
+  const accepted = await postJson(bridge, "/request", {
     ...baseBody,
     targets: [
       {
@@ -1149,7 +1046,7 @@ test("AI readOrder excludes the full audit archive and compacts long module quot
   const sourcePath = join(environment.sources, "compact-ai-input.html");
   await writeFile(sourcePath, htmlPage("精简 AI 输入"), "utf8");
   const bridge = await environment.start();
-  const opened = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
+  const opened = (await openWorkspace(bridge, sourcePath)).body;
   const longTextQuote = `整页可见文本 ${"上下文".repeat(2_000)}`.slice(0, 5_000);
   const target = {
     targetId: "target_compact_document",
@@ -1164,7 +1061,7 @@ test("AI readOrder excludes the full audit archive and compacts long module quot
     },
     resolution: "exact",
   };
-  const submitted = await postJson(bridge.baseUrl, "/request", {
+  const submitted = await postJson(bridge, "/request", {
     sourcePath,
     expectedSourceSha256: opened.currentHtmlSha256,
     freezeCutoffRevision: 0,
@@ -1268,10 +1165,10 @@ test("historical direct-edit targets never block a resolved Request", async (t) 
   const sourcePath = join(environment.sources, "historical-audit-target.html");
   await writeFile(sourcePath, htmlPage("历史修改目标"), "utf8");
   const bridge = await environment.start();
-  const opened = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
+  const opened = (await openWorkspace(bridge, sourcePath)).body;
   const currentHtml = await readFile(sourcePath, "utf8");
   const nextHtml = currentHtml.replace("</body>", "<p>已直接修改</p></body>");
-  const saved = await postJson(bridge.baseUrl, "/autosave", {
+  const saved = await postJson(bridge, "/autosave", {
     sourcePath,
     editRevision: 1,
     expectedSourceSha256: opened.currentHtmlSha256,
@@ -1287,9 +1184,9 @@ test("historical direct-edit targets never block a resolved Request", async (t) 
     let requestHash = saved.body.currentHtmlSha256;
     if (requestSource !== sourcePath) {
       await writeFile(requestSource, htmlPage("历史失联目标"), "utf8");
-      const secondOpened = (await openWorkspace(bridge.baseUrl, requestSource)).body;
+      const secondOpened = (await openWorkspace(bridge, requestSource)).body;
       const secondHtml = await readFile(requestSource, "utf8");
-      const secondSaved = await postJson(bridge.baseUrl, "/autosave", {
+      const secondSaved = await postJson(bridge, "/autosave", {
         sourcePath: requestSource,
         editRevision: 1,
         expectedSourceSha256: secondOpened.currentHtmlSha256,
@@ -1304,7 +1201,7 @@ test("historical direct-edit targets never block a resolved Request", async (t) 
       targetId: `target_historical_${resolution}`,
       resolution,
     };
-    const submitted = await postJson(bridge.baseUrl, "/request", {
+    const submitted = await postJson(bridge, "/request", {
       sourcePath: requestSource,
       expectedSourceSha256: requestHash,
       freezeCutoffRevision: 1,
@@ -1341,7 +1238,7 @@ test("autosave writes the real source without Versions and projects stay isolate
   await writeFile(sourceB, initialB, "utf8");
   const bridge = await environment.start();
 
-  const openedA = await openWorkspace(bridge.baseUrl, sourceA);
+  const openedA = await openWorkspace(bridge, sourceA);
   assert.equal(openedA.response.status, 200);
   assert.equal(openedA.body.latestVersionId, "ver_0001");
   assert.equal(openedA.body.currentBasedOnVersionId, "ver_0001");
@@ -1362,7 +1259,7 @@ test("autosave writes the real source without Versions and projects stay isolate
         `<p id="revision">第 ${revision} 次自动写回</p>`,
       ].join(""),
     );
-    const saved = await postJson(bridge.baseUrl, "/autosave", {
+    const saved = await postJson(bridge, "/autosave", {
       sourcePath: sourceA,
       editRevision: revision,
       expectedSourceSha256,
@@ -1386,14 +1283,14 @@ test("autosave writes the real source without Versions and projects stay isolate
     );
   }
 
-  const afterTwenty = await openWorkspace(bridge.baseUrl, sourceA);
+  const afterTwenty = await openWorkspace(bridge, sourceA);
   assert.equal(afterTwenty.body.versions.length, 1);
   assert.equal(afterTwenty.body.latestVersionId, "ver_0001");
   assert.equal(afterTwenty.body.currentExactVersionId, null);
   assert.equal(afterTwenty.body.runtimeState.editRevision, 20);
   assert.equal(afterTwenty.body.runtimeState.lastPersistedRevision, 20);
 
-  const lateRevision = await postJson(bridge.baseUrl, "/autosave", {
+  const lateRevision = await postJson(bridge, "/autosave", {
     sourcePath: sourceA,
     editRevision: 19,
     expectedSourceSha256,
@@ -1402,9 +1299,7 @@ test("autosave writes the real source without Versions and projects stay isolate
   assert.equal(lateRevision.body.status, "stale-revision-ignored");
   assert.match(await readFile(sourceA, "utf8"), /第 20 次自动写回/);
 
-  const removedVersionEndpoint = await postJson(
-    bridge.baseUrl,
-    "/version",
+  const removedVersionEndpoint = await postJson(bridge, "/version",
     {
       sourcePath: sourceA,
       html: htmlPage("不能建版本"),
@@ -1432,7 +1327,7 @@ test("autosave writes the real source without Versions and projects stay isolate
       level: "subregion",
     },
   );
-  const draft = await postJson(bridge.baseUrl, "/draft", {
+  const draft = await postJson(bridge, "/draft", {
     sourcePath: sourceA,
     expectedDraftRevision: 0,
     comments: [
@@ -1449,13 +1344,13 @@ test("autosave writes the real source without Versions and projects stay isolate
     }],
   });
   assert.equal(draft.body.activeDraft.comments[0].commentId, "comment_a");
-  const draftReloaded = await openWorkspace(bridge.baseUrl, sourceA);
+  const draftReloaded = await openWorkspace(bridge, sourceA);
   assert.equal(
     draftReloaded.body.runtimeState.draft.comments[0].commentId,
     "comment_a",
   );
 
-  const openedB = await openWorkspace(bridge.baseUrl, sourceB);
+  const openedB = await openWorkspace(bridge, sourceB);
   assert.equal(openedB.body.versions.length, 1);
   assert.notEqual(openedB.body.projectId, openedA.body.projectId);
   assert.notEqual(openedB.body.documentId, openedA.body.documentId);
@@ -1463,11 +1358,11 @@ test("autosave writes the real source without Versions and projects stay isolate
     openedB.body.currentHtmlSha256,
     hash(initialB),
   );
-  const aStillIndependent = await openWorkspace(bridge.baseUrl, sourceA);
+  const aStillIndependent = await openWorkspace(bridge, sourceA);
   assert.equal(aStillIndependent.body.versions.length, 1);
   assert.equal(aStillIndependent.body.projectId, openedA.body.projectId);
 
-  const restoreUnavailable = await postJson(bridge.baseUrl, "/restore", {
+  const restoreUnavailable = await postJson(bridge, "/restore", {
     sourcePath: sourceA,
     versionId: "ver_0001",
     expectedSourceSha256,
@@ -1475,7 +1370,7 @@ test("autosave writes the real source without Versions and projects stay isolate
   assert.equal(restoreUnavailable.response.status, 404);
   assert.equal(restoreUnavailable.body.error.code, "NOT_FOUND");
   assert.equal(await readFile(sourceA, "utf8"), draftSource);
-  const afterUnavailableRestore = await openWorkspace(bridge.baseUrl, sourceA);
+  const afterUnavailableRestore = await openWorkspace(bridge, sourceA);
   assert.equal(afterUnavailableRestore.body.versions.length, 1);
   assert.equal(afterUnavailableRestore.body.currentBasedOnVersionId, "ver_0001");
   assert.equal(afterUnavailableRestore.body.currentExactVersionId, null);
@@ -1494,21 +1389,17 @@ test("autosave writes the real source without Versions and projects stay isolate
   assert.equal(preservedCommentResolution.resolution, "exact");
   assert.ok(preservedCommentResolution.target);
 
-  const exactHistory = await requestJson(
-    bridge.baseUrl,
-    `/version-file?sourcePath=${encodeURIComponent(sourceA)}&versionId=ver_0001`,
+  const exactHistory = await bridge.requestJson(`/version-file?sourcePath=${encodeURIComponent(sourceA)}&versionId=ver_0001`,
   );
   assert.equal(exactHistory.body.readOnly, true);
   assert.equal(exactHistory.body.content, initialSourceA);
   assert.equal(exactHistory.body.sha256, hash(initialSourceA));
 
-  const currentSource = await requestJson(
-    bridge.baseUrl,
-    `/source?sourcePath=${encodeURIComponent(sourceA)}`,
+  const currentSource = await bridge.requestJson(`/source?sourcePath=${encodeURIComponent(sourceA)}`,
   );
   assert.equal(currentSource.body.content, draftSource);
   assert.equal(currentSource.body.sha256, hash(draftSource));
-  const requestAfterUnavailableRestore = await postJson(bridge.baseUrl, "/request", {
+  const requestAfterUnavailableRestore = await postJson(bridge, "/request", {
     sourcePath: sourceA,
     projectId: afterUnavailableRestore.body.projectId,
     documentId: afterUnavailableRestore.body.documentId,
@@ -1566,34 +1457,19 @@ test("source history survives restart and routes exact undo and redo through the
   const after = before.replace("<h1>one</h1>", "<h1>two</h1>");
   await writeFile(sourcePath, before, "utf8");
   const firstBridge = await environment.start();
-  const opened = await openWorkspace(firstBridge.baseUrl, sourcePath);
+  const opened = await openWorkspace(firstBridge, sourcePath);
   assert.equal(opened.response.status, 200);
-  const startOffset = before.indexOf("<h1>one</h1>") + 4;
-  const operation = {
+  const operation = createSourceHistoryTextOperation({
     operationId: "sourceop_workspace_history_001",
-    kind: "text",
     editRevision: 1,
     createdAt: "2026-07-31T08:00:00.000Z",
-    beforeSourceSha256: hash(before),
-    afterSourceSha256: hash(after),
-    forwardPatches: [{
-      startOffset,
-      endOffset: startOffset + 3,
-      before: "one",
-      after: "two",
-      kind: "text",
-    }],
-    reversePatches: [{
-      startOffset,
-      endOffset: startOffset + 3,
-      before: "two",
-      after: "one",
-      kind: "inverse:text",
-    }],
-    beforeTarget: { id: "heading", text: "one", resolution: "exact" },
-    afterTarget: { id: "heading", text: "two", resolution: "exact" },
-  };
-  const saved = await postJson(firstBridge.baseUrl, "/autosave", {
+    beforeHtml: before,
+    afterHtml: after,
+    beforeText: "one",
+    afterText: "two",
+    targetId: "heading",
+  });
+  const saved = await postJson(firstBridge, "/autosave", {
     sourcePath,
     projectId: opened.body.projectId,
     documentId: opened.body.documentId,
@@ -1613,9 +1489,9 @@ test("source history survives restart and routes exact undo and redo through the
   assert.equal(saved.body.sourceHistory.capabilities.canRedo, false);
   assert.equal(await readFile(sourcePath, "utf8"), after);
 
-  await stopChild(firstBridge.child);
+  await firstBridge.stop();
   const secondBridge = await environment.start();
-  const reopened = await openWorkspace(secondBridge.baseUrl, sourcePath);
+  const reopened = await openWorkspace(secondBridge, sourcePath);
   assert.equal(reopened.body.sourceHistory.cursor, 1);
   assert.equal(reopened.body.sourceHistory.entries.length, 1);
 
@@ -1629,9 +1505,7 @@ test("source history survives restart and routes exact undo and redo through the
     expectedHistoryRevision: 1,
     expectedHistoryCursor: 1,
   };
-  const undone = await postJson(
-    secondBridge.baseUrl,
-    "/source-history/action",
+  const undone = await postJson(secondBridge, "/source-history/action",
     undoBody,
   );
   assert.equal(undone.response.status, 200, JSON.stringify(undone.body));
@@ -1643,18 +1517,14 @@ test("source history survives restart and routes exact undo and redo through the
   );
   assert.equal(await readFile(sourcePath, "utf8"), before);
 
-  const replayed = await postJson(
-    secondBridge.baseUrl,
-    "/source-history/action",
+  const replayed = await postJson(secondBridge, "/source-history/action",
     undoBody,
   );
   assert.equal(replayed.response.status, 200, JSON.stringify(replayed.body));
   assert.equal(replayed.body.status, "history-action-replayed");
   assert.equal(replayed.body.content, before);
 
-  const redone = await postJson(
-    secondBridge.baseUrl,
-    "/source-history/action",
+  const redone = await postJson(secondBridge, "/source-history/action",
     {
       sourcePath,
       projectId: opened.body.projectId,
@@ -1673,72 +1543,63 @@ test("source history survives restart and routes exact undo and redo through the
 });
 
 test("source history recovery fails safe on both sides of the source commit point", async (t) => {
-  for (const {
-    failpoint,
-    expectedSource,
-    expectedHistoryDepth,
-  } of [
+  const cases = [
     {
+      name: "autosave prepared keeps old disk bytes and empty history",
       failpoint: "after-autosave-prepared",
-      expectedSource: "before",
-      expectedHistoryDepth: 0,
+      operation: "autosave",
+      expectedDisk: "before",
+      expectedRuntime: { pendingWrite: null },
+      expectedHistory: { entries: 0, cursor: 0 },
+      restart: true,
     },
     {
+      name: "autosave source application keeps recovered bytes and history",
       failpoint: "after-autosave-source-applied",
-      expectedSource: "after",
-      expectedHistoryDepth: 1,
+      operation: "autosave",
+      expectedDisk: "after",
+      expectedRuntime: { pendingWrite: null },
+      expectedHistory: { entries: 1, cursor: 1 },
+      restart: true,
     },
-  ]) {
+  ];
+  for (const scenario of cases) await t.test(scenario.name, async (t) => {
     const environment = await createEnvironment(t);
-    const sourcePath = join(
-      environment.sources,
-      `source-history-recovery-${failpoint}.html`,
-    );
+    const { failpoint } = scenario;
     const before = htmlPage(`history ${failpoint}`);
     const after = before.replace(
       `<h1>history ${failpoint}</h1>`,
       `<h1>recovered ${failpoint}</h1>`,
     );
-    await writeFile(sourcePath, before, "utf8");
+    const sourcePath = await environment.createSource(
+      `source-history-recovery-${failpoint}.html`,
+      before,
+    );
     const bridge = await environment.start({
       HTML_AI_FAILPOINT: failpoint,
     });
-    const opened = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
+    const opened = (await openWorkspace(bridge, sourcePath)).body;
     const beforeText = `history ${failpoint}`;
     const afterText = `recovered ${failpoint}`;
-    const startOffset = before.indexOf(`<h1>${beforeText}</h1>`) + 4;
-    const interrupted = await postJson(bridge.baseUrl, "/autosave", {
+    const interrupted = await postJson(bridge, "/autosave", {
       sourcePath,
       projectId: opened.projectId,
       documentId: opened.documentId,
       editRevision: 1,
       expectedSourceSha256: hash(before),
       html: after,
-      sourceHistoryOperations: [{
+      sourceHistoryOperations: [createSourceHistoryTextOperation({
         operationId:
           `sourceop_recovery_${failpoint.replaceAll("-", "_")}_001`,
-        kind: "text",
         editRevision: 1,
         createdAt: "2026-07-31T08:00:00.000Z",
-        beforeSourceSha256: hash(before),
-        afterSourceSha256: hash(after),
-        forwardPatches: [{
-          startOffset,
-          endOffset: startOffset + beforeText.length,
-          before: beforeText,
-          after: afterText,
-          kind: "text",
-        }],
-        reversePatches: [{
-          startOffset,
-          endOffset: startOffset + afterText.length,
-          before: afterText,
-          after: beforeText,
-          kind: "inverse:text",
-        }],
-        beforeTarget: { id: "recovery-heading" },
-        afterTarget: { id: "recovery-heading" },
-      }],
+        beforeHtml: before,
+        afterHtml: after,
+        beforeText,
+        afterText,
+        targetId: "recovery-heading",
+        includeTargetText: false,
+      })],
       changeEvents: [{
         eventId: `history_recovery_${failpoint.replaceAll("-", "_")}`,
         kind: "text",
@@ -1759,11 +1620,11 @@ test("source history recovery fails safe on both sides of the source commit poin
       projectRoot,
       ...runtime.pendingWrite.recoverySourceHistoryRelativePath.split("/"),
     );
-    await stopChild(bridge.child);
+    await bridge.stop();
     await rm(historyRecoveryPath, { force: true });
 
     const restarted = await environment.start();
-    const recovered = await openWorkspace(restarted.baseUrl, sourcePath);
+    const recovered = await openWorkspace(restarted, sourcePath);
     assert.equal(
       recovered.response.status,
       200,
@@ -1771,122 +1632,195 @@ test("source history recovery fails safe on both sides of the source commit poin
     );
     assert.equal(
       await readFile(sourcePath, "utf8"),
-      expectedSource === "before" ? before : after,
+      scenario.expectedDisk === "before" ? before : after,
     );
-    assert.equal(recovered.body.runtimeState.pendingWrite, null);
-    assert.equal(
-      recovered.body.sourceHistory.entries.length,
-      expectedHistoryDepth,
+    assert.deepEqual(
+      { pendingWrite: recovered.body.runtimeState.pendingWrite },
+      scenario.expectedRuntime,
     );
-    assert.equal(
-      recovered.body.sourceHistory.cursor,
-      expectedHistoryDepth,
+    assert.deepEqual(
+      {
+        entries: recovered.body.sourceHistory.entries.length,
+        cursor: recovered.body.sourceHistory.cursor,
+      },
+      scenario.expectedHistory,
     );
-  }
+    assert.equal(scenario.operation, "autosave");
+    assert.equal(scenario.restart, true);
+  });
 });
 
 test("source-history actions share every SourceTransaction crash boundary", async (t) => {
-  for (const failpoint of [
-    "after-autosave-prepared",
-    "after-autosave-source-applied",
-    "after-autosave-project-applied",
-    "after-autosave-audit-applied",
-  ]) {
+  const boundaries = [
+    {
+      name: "after prepare",
+      failpoint: "after-autosave-prepared",
+      sourceApplied: false,
+    },
+    {
+      name: "after source application",
+      failpoint: "after-autosave-source-applied",
+      sourceApplied: true,
+    },
+    {
+      name: "after project application",
+      failpoint: "after-autosave-project-applied",
+      sourceApplied: true,
+    },
+    {
+      name: "after audit application",
+      failpoint: "after-autosave-audit-applied",
+      sourceApplied: true,
+    },
+  ];
+  const cases = boundaries.flatMap((boundary) => [
+    {
+      ...boundary,
+      name: `undo ${boundary.name} settles one source-history action`,
+      operation: "undo",
+      expectedInterruptedDisk: boundary.sourceApplied ? "before" : "after",
+      expectedDisk: "before",
+      expectedRuntime: { pendingWrite: null, lastPersistedRevision: 2 },
+      expectedHistory: { entries: 1, cursor: 0 },
+      expectedAuditCount: 1,
+      restart: true,
+    },
+    {
+      ...boundary,
+      name: `redo ${boundary.name} settles one source-history action`,
+      operation: "redo",
+      expectedInterruptedDisk: boundary.sourceApplied ? "after" : "before",
+      expectedDisk: "after",
+      expectedRuntime: { pendingWrite: null, lastPersistedRevision: 3 },
+      expectedHistory: { entries: 1, cursor: 1 },
+      expectedAuditCount: 1,
+      restart: true,
+    },
+  ]);
+  for (const scenario of cases) await t.test(scenario.name, async (t) => {
+    const { failpoint } = scenario;
     const environment = await createEnvironment(t);
-    const sourcePath = join(
-      environment.sources,
-      `source-history-action-${failpoint}.html`,
-    );
     const before = htmlPage(`history action ${failpoint}`);
     const after = before.replace(
       `<h1>history action ${failpoint}</h1>`,
       `<h1>history action changed ${failpoint}</h1>`,
     );
-    await writeFile(sourcePath, before, "utf8");
+    const sourcePath = await environment.createSource(
+      `source-history-action-${failpoint}.html`,
+      before,
+    );
     const initialBridge = await environment.start();
-    const opened = (await openWorkspace(initialBridge.baseUrl, sourcePath)).body;
+    const opened = (await openWorkspace(initialBridge, sourcePath)).body;
     const beforeText = `history action ${failpoint}`;
     const afterText = `history action changed ${failpoint}`;
-    const startOffset = before.indexOf(`<h1>${beforeText}</h1>`) + 4;
-    const saved = await postJson(initialBridge.baseUrl, "/autosave", {
+    const saved = await postJson(initialBridge, "/autosave", {
       sourcePath,
       projectId: opened.projectId,
       documentId: opened.documentId,
       editRevision: 1,
       expectedSourceSha256: hash(before),
       html: after,
-      sourceHistoryOperations: [{
+      sourceHistoryOperations: [createSourceHistoryTextOperation({
         operationId:
           `sourceop_action_${failpoint.replaceAll("-", "_")}_001`,
-        kind: "text",
         editRevision: 1,
         createdAt: "2026-08-10T08:00:00.000Z",
-        beforeSourceSha256: hash(before),
-        afterSourceSha256: hash(after),
-        forwardPatches: [{
-          startOffset,
-          endOffset: startOffset + beforeText.length,
-          before: beforeText,
-          after: afterText,
-          kind: "text",
-        }],
-        reversePatches: [{
-          startOffset,
-          endOffset: startOffset + afterText.length,
-          before: afterText,
-          after: beforeText,
-          kind: "inverse:text",
-        }],
-        beforeTarget: { id: "history-action-heading" },
-        afterTarget: { id: "history-action-heading" },
-      }],
+        beforeHtml: before,
+        afterHtml: after,
+        beforeText,
+        afterText,
+        targetId: "history-action-heading",
+        includeTargetText: false,
+      })],
     });
     assert.equal(saved.response.status, 200, JSON.stringify(saved.body));
-    await stopChild(initialBridge.child);
 
-    const interruptedBridge = await environment.start({
-      HTML_AI_FAILPOINT: failpoint,
-    });
-    const actionId =
-      `sourceaction_${failpoint.replaceAll("-", "_")}_undo_001`;
-    const interrupted = await postJson(
-      interruptedBridge.baseUrl,
-      "/source-history/action",
-      {
+    let actionInput = {
+      content: after,
+      sourceSha256: hash(after),
+      historyRevision: 1,
+      historyCursor: 1,
+    };
+    if (scenario.operation === "redo") {
+      const preparedUndo = await postJson(initialBridge, "/source-history/action", {
         sourcePath,
         projectId: opened.projectId,
         documentId: opened.documentId,
         direction: "undo",
+        actionId:
+          `sourceaction_${failpoint.replaceAll("-", "_")}_redo_setup_001`,
+        expectedSourceSha256: actionInput.sourceSha256,
+        expectedHistoryRevision: actionInput.historyRevision,
+        expectedHistoryCursor: actionInput.historyCursor,
+      });
+      assert.equal(
+        preparedUndo.response.status,
+        200,
+        JSON.stringify(preparedUndo.body),
+      );
+      actionInput = {
+        content: before,
+        sourceSha256: hash(before),
+        historyRevision: 2,
+        historyCursor: 0,
+      };
+    }
+    await initialBridge.stop();
+
+    const interruptedBridge = await environment.start({
+      HTML_AI_FAILPOINT: failpoint,
+    });
+    const actionId = `sourceaction_${failpoint.replaceAll("-", "_")}_${scenario.operation}_001`;
+    const interrupted = await postJson(interruptedBridge, "/source-history/action",
+      {
+        sourcePath,
+        projectId: opened.projectId,
+        documentId: opened.documentId,
+        direction: scenario.operation,
         actionId,
-        expectedSourceSha256: hash(after),
-        expectedHistoryRevision: 1,
-        expectedHistoryCursor: 1,
+        expectedSourceSha256: actionInput.sourceSha256,
+        expectedHistoryRevision: actionInput.historyRevision,
+        expectedHistoryCursor: actionInput.historyCursor,
       },
     );
     assert.equal(interrupted.response.status, 500, JSON.stringify(interrupted.body));
     assert.equal(
       await readFile(sourcePath, "utf8"),
-      failpoint === "after-autosave-prepared" ? after : before,
+      scenario.expectedInterruptedDisk === "after" ? after : before,
     );
-    await stopChild(interruptedBridge.child);
+    await interruptedBridge.stop();
 
     const restarted = await environment.start();
-    const recovered = await openWorkspace(restarted.baseUrl, sourcePath);
+    const recovered = await openWorkspace(restarted, sourcePath);
     assert.equal(recovered.response.status, 200, JSON.stringify(recovered.body));
-    assert.equal(await readFile(sourcePath, "utf8"), before);
-    assert.equal(recovered.body.runtimeState.pendingWrite, null);
-    assert.equal(recovered.body.runtimeState.lastPersistedRevision, 2);
-    assert.equal(recovered.body.sourceHistory.entries.length, 1);
-    assert.equal(recovered.body.sourceHistory.cursor, 0);
+    assert.equal(
+      await readFile(sourcePath, "utf8"),
+      scenario.expectedDisk === "before" ? before : after,
+    );
+    assert.deepEqual(
+      {
+        pendingWrite: recovered.body.runtimeState.pendingWrite,
+        lastPersistedRevision: recovered.body.runtimeState.lastPersistedRevision,
+      },
+      scenario.expectedRuntime,
+    );
+    assert.deepEqual(
+      {
+        entries: recovered.body.sourceHistory.entries.length,
+        cursor: recovered.body.sourceHistory.cursor,
+      },
+      scenario.expectedHistory,
+    );
     const auditLines = (await readFile(
       join(opened.projectRoot, "edit-audit.jsonl"),
       "utf8",
     )).trim().split("\n").map((line) => JSON.parse(line));
     assert.equal(
       auditLines.filter((event) => event.eventId === `history_${actionId}`).length,
-      1,
+      scenario.expectedAuditCount,
     );
-  }
+    assert.equal(scenario.restart, true);
+  });
 });
 
 test("version history stays read-only and the restore endpoint is unavailable", async (t) => {
@@ -1894,14 +1828,12 @@ test("version history stays read-only and the restore endpoint is unavailable", 
   const sourcePath = join(environment.sources, "read-only-history.html");
   await writeFile(sourcePath, htmlPage("只读历史"), "utf8");
   const bridge = await environment.start();
-  const opened = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
-  const version = await requestJson(
-    bridge.baseUrl,
-    `/version-file?sourcePath=${encodeURIComponent(sourcePath)}&versionId=ver_0001`,
+  const opened = (await openWorkspace(bridge, sourcePath)).body;
+  const version = await bridge.requestJson(`/version-file?sourcePath=${encodeURIComponent(sourcePath)}&versionId=ver_0001`,
   );
   assert.equal(version.response.status, 200);
   assert.equal(version.body.readOnly, true);
-  const restoreUnavailable = await postJson(bridge.baseUrl, "/restore", {
+  const restoreUnavailable = await postJson(bridge, "/restore", {
     sourcePath,
     projectId: opened.projectId,
     documentId: opened.documentId,
@@ -1910,7 +1842,7 @@ test("version history stays read-only and the restore endpoint is unavailable", 
   });
   assert.equal(restoreUnavailable.response.status, 404);
   assert.equal(restoreUnavailable.body.error.code, "NOT_FOUND");
-  const unchanged = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
+  const unchanged = (await openWorkspace(bridge, sourcePath)).body;
   assert.equal(unchanged.currentHtmlSha256, opened.currentHtmlSha256);
   assert.equal(unchanged.currentExactVersionId, "ver_0001");
 });
@@ -1920,12 +1852,12 @@ test("sequential AI successes preserve every prior source and activate semantic 
   const originalPath = join(environment.sources, "复杂HTML综合测试页.html");
   await writeFile(originalPath, htmlPage("不可覆盖的原文件"), "utf8");
   let bridge = await environment.start();
-  const opened = (await openWorkspace(bridge.baseUrl, originalPath)).body;
+  const opened = (await openWorkspace(bridge, originalPath)).body;
   const originalBytes = await readFile(originalPath);
   const originalSha256 = hash(originalBytes);
 
   const firstRun = (
-    await postJson(bridge.baseUrl, "/request", {
+    await postJson(bridge, "/request", {
       sourcePath: originalPath,
       expectedSourceSha256: opened.currentHtmlSha256,
       freezeCutoffRevision: opened.runtimeState.editRevision,
@@ -1940,11 +1872,9 @@ test("sequential AI successes preserve every prior source and activate semantic 
     htmlPage("第一个 AI 版本", '<p id="ai-v11">V1.1 完整结果</p>'),
     "utf8",
   );
-  await runFinalizer(environment.workspace, firstRun);
+  await runOfficialFinalizer(environment.workspace, firstRun);
   const firstReady = (
-    await requestJson(
-      bridge.baseUrl,
-      `/status?sourcePath=${encodeURIComponent(originalPath)}&requestId=${firstRun.requestId}&attemptId=${firstRun.attemptId}`,
+    await bridge.requestJson(`/status?sourcePath=${encodeURIComponent(originalPath)}&requestId=${firstRun.requestId}&attemptId=${firstRun.attemptId}`,
     )
   ).body;
   assert.equal(firstReady.status, "ready-to-open");
@@ -1961,7 +1891,7 @@ test("sequential AI successes preserve every prior source and activate semantic 
     await readFile(firstReady.versionEntryPath),
     firstWorkingBytes,
   );
-  const firstCreated = await activateReadyVersion(bridge.baseUrl, firstReady);
+  const firstCreated = await activateReadyVersion(bridge, firstReady);
   assert.equal(firstCreated.currentPath, firstReady.workingCopyPath);
 
   const workingAliasRoot = join(environment.root, "working-directory-alias");
@@ -1975,16 +1905,16 @@ test("sequential AI successes preserve every prior source and activate semantic 
     basename(firstCreated.currentPath),
   );
   const openedThroughAlias = (
-    await openWorkspace(bridge.baseUrl, aliasedFirstWorkingPath)
+    await openWorkspace(bridge, aliasedFirstWorkingPath)
   ).body;
   assert.equal(openedThroughAlias.projectId, opened.projectId);
   assert.equal(openedThroughAlias.documentId, opened.documentId);
   assert.equal(openedThroughAlias.sourcePath, canonicalFirstWorkingPath);
 
-  const afterFirst = (await openWorkspace(bridge.baseUrl, originalPath)).body;
+  const afterFirst = (await openWorkspace(bridge, originalPath)).body;
   assert.equal(afterFirst.sourcePath, firstCreated.currentPath);
   const secondRun = (
-    await postJson(bridge.baseUrl, "/request", {
+    await postJson(bridge, "/request", {
       // Desktop state may spell the same workspace directory through a
       // symlink alias such as /private/var instead of /var.
       sourcePath: aliasedFirstWorkingPath,
@@ -2004,11 +1934,9 @@ test("sequential AI successes preserve every prior source and activate semantic 
     htmlPage("第二个 AI 版本", '<p id="ai-v12">V1.2 完整结果</p>'),
     "utf8",
   );
-  await runFinalizer(environment.workspace, secondRun);
+  await runOfficialFinalizer(environment.workspace, secondRun);
   const secondReady = (
-    await requestJson(
-      bridge.baseUrl,
-      `/status?sourcePath=${encodeURIComponent(firstCreated.currentPath)}&requestId=${secondRun.requestId}&attemptId=${secondRun.attemptId}`,
+    await bridge.requestJson(`/status?sourcePath=${encodeURIComponent(firstCreated.currentPath)}&requestId=${secondRun.requestId}&attemptId=${secondRun.attemptId}`,
     )
   ).body;
   assert.equal(secondReady.status, "ready-to-open");
@@ -2023,7 +1951,7 @@ test("sequential AI successes preserve every prior source and activate semantic 
     await readFile(secondReady.versionEntryPath),
     await readFile(secondReady.workingCopyPath),
   );
-  const secondCreated = await activateReadyVersion(bridge.baseUrl, secondReady);
+  const secondCreated = await activateReadyVersion(bridge, secondReady);
 
   const registry = JSON.parse(
     await readFile(
@@ -2061,17 +1989,17 @@ test("sequential AI successes preserve every prior source and activate semantic 
     ),
   );
 
-  await stopChild(bridge.child);
+  await bridge.stop();
   bridge = await environment.start();
-  const afterRestart = (await openWorkspace(bridge.baseUrl, originalPath)).body;
+  const afterRestart = (await openWorkspace(bridge, originalPath)).body;
   assert.equal(afterRestart.projectId, opened.projectId);
   assert.equal(afterRestart.documentId, opened.documentId);
   assert.equal(afterRestart.sourcePath, secondCreated.currentPath);
   assert.equal(afterRestart.currentHtmlSha256, secondCreated.contentSha256);
 
-  const afterSecond = (await openWorkspace(bridge.baseUrl, originalPath)).body;
+  const afterSecond = (await openWorkspace(bridge, originalPath)).body;
   const noChangeRun = (
-    await postJson(bridge.baseUrl, "/request", {
+    await postJson(bridge, "/request", {
       sourcePath: originalPath,
       expectedSourceSha256: afterSecond.currentHtmlSha256,
       freezeCutoffRevision: afterSecond.runtimeState.editRevision,
@@ -2083,19 +2011,17 @@ test("sequential AI successes preserve every prior source and activate semantic 
     noChangeRun.outputPath,
     await readFile(noChangeRun.inputPath),
   );
-  await runFinalizer(environment.workspace, noChangeRun);
+  await runOfficialFinalizer(environment.workspace, noChangeRun);
   const noChange = (
-    await requestJson(
-      bridge.baseUrl,
-      `/status?sourcePath=${encodeURIComponent(originalPath)}&requestId=${noChangeRun.requestId}&attemptId=${noChangeRun.attemptId}`,
+    await bridge.requestJson(`/status?sourcePath=${encodeURIComponent(originalPath)}&requestId=${noChangeRun.requestId}&attemptId=${noChangeRun.attemptId}`,
     )
   ).body;
   assert.equal(noChange.status, "no-change");
   await assert.rejects(access(noChangeRun.plannedWorkingCopyPath));
 
-  const afterNoChange = (await openWorkspace(bridge.baseUrl, originalPath)).body;
+  const afterNoChange = (await openWorkspace(bridge, originalPath)).body;
   const cancelledRun = (
-    await postJson(bridge.baseUrl, "/request", {
+    await postJson(bridge, "/request", {
       sourcePath: originalPath,
       expectedSourceSha256: afterNoChange.currentHtmlSha256,
       freezeCutoffRevision: afterNoChange.runtimeState.editRevision,
@@ -2103,7 +2029,7 @@ test("sequential AI successes preserve every prior source and activate semantic 
     })
   ).body;
   assert.equal(cancelledRun.candidateDisplayVersionLabel, "版本 4");
-  const cancelled = await postJson(bridge.baseUrl, "/active-run/cancel", {
+  const cancelled = await postJson(bridge, "/active-run/cancel", {
     sourcePath: originalPath,
     requestId: cancelledRun.requestId,
     attemptId: cancelledRun.attemptId,
@@ -2125,7 +2051,7 @@ test("document identity survives a move and same-path replacement starts isolate
   await writeFile(originalPath, initial, "utf8");
   const bridge = await environment.start();
 
-  const original = (await openWorkspace(bridge.baseUrl, originalPath)).body;
+  const original = (await openWorkspace(bridge, originalPath)).body;
   assert.equal(await readFile(originalPath, "utf8"), initial);
   assert.equal(original.currentExactVersionId, "ver_0001");
 
@@ -2136,7 +2062,7 @@ test("document identity survives a move and same-path replacement starts isolate
   staleRegistry.projects[original.projectId].fileIdentity.ino = "stale-owned-write-window";
   staleRegistry.documents[original.documentId].fileIdentity.ino = "stale-owned-write-window";
   await writeFile(registryPath, `${JSON.stringify(staleRegistry, null, 2)}\n`, "utf8");
-  const repaired = (await openWorkspace(bridge.baseUrl, originalPath)).body;
+  const repaired = (await openWorkspace(bridge, originalPath)).body;
   assert.equal(repaired.projectId, original.projectId);
   assert.equal(repaired.documentId, original.documentId);
   const repairedRegistry = JSON.parse(await readFile(registryPath, "utf8"));
@@ -2146,7 +2072,7 @@ test("document identity survives a move and same-path replacement starts isolate
   );
 
   await rename(originalPath, movedPath);
-  const movedResponse = await openWorkspace(bridge.baseUrl, movedPath);
+  const movedResponse = await openWorkspace(bridge, movedPath);
   assert.equal(movedResponse.response.status, 200);
   const moved = movedResponse.body;
   assert.equal(moved.projectId, original.projectId);
@@ -2172,7 +2098,7 @@ test("document identity survives a move and same-path replacement starts isolate
   const replacementPath = join(environment.sources, "identity-replacement.tmp");
   await writeFile(replacementPath, replacement, "utf8");
   await rename(replacementPath, movedPath);
-  const replacementResponse = await openWorkspace(bridge.baseUrl, movedPath);
+  const replacementResponse = await openWorkspace(bridge, movedPath);
   assert.equal(replacementResponse.response.status, 200);
   const replacementWorkspace = replacementResponse.body;
   assert.notEqual(replacementWorkspace.projectId, original.projectId);
@@ -2207,12 +2133,12 @@ test("registered mutations reject an unrelated same-path source replacement", as
   const replacement = htmlPage("External replacement", "<p>unrelated bytes</p>");
   await writeFile(sourcePath, initial, "utf8");
   const bridge = await environment.start();
-  const opened = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
+  const opened = (await openWorkspace(bridge, sourcePath)).body;
 
   await writeFile(replacementPath, replacement, "utf8");
   await rename(replacementPath, sourcePath);
   const bytes = Buffer.from("must-not-be-attached");
-  const rejected = await postJson(bridge.baseUrl, "/attachment", {
+  const rejected = await postJson(bridge, "/attachment", {
     sourcePath,
     projectId: opened.projectId,
     documentId: opened.documentId,
@@ -2246,9 +2172,9 @@ test("a legacy embedded document id only relinks a registry that has no file ide
   const initial = htmlPage("旧身份兼容");
   await writeFile(sourcePath, initial, "utf8");
   const bridge = await environment.start();
-  const opened = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
+  const opened = (await openWorkspace(bridge, sourcePath)).body;
   const legacyHtml = withDocumentIdentity(initial, opened.documentId);
-  const saved = await postJson(bridge.baseUrl, "/autosave", {
+  const saved = await postJson(bridge, "/autosave", {
     sourcePath,
     projectId: opened.projectId,
     documentId: opened.documentId,
@@ -2270,7 +2196,7 @@ test("a legacy embedded document id only relinks a registry that has no file ide
   await writeFile(registryPath, `${JSON.stringify(registry, null, 2)}\n`, "utf8");
 
   await rename(sourcePath, movedPath);
-  const moved = (await openWorkspace(bridge.baseUrl, movedPath)).body;
+  const moved = (await openWorkspace(bridge, movedPath)).body;
   assert.equal(moved.projectId, opened.projectId);
   assert.equal(moved.documentId, opened.documentId);
   assert.equal(await readFile(movedPath, "utf8"), legacyHtml);
@@ -2285,25 +2211,26 @@ test("configured bridge authentication protects every route and leaves CORS pref
     HTML_AI_BRIDGE_AUTH_TOKEN: authToken,
   });
 
-  const missing = await requestJson(bridge.baseUrl, "/health");
+  const missing = await bridge.requestJson("/health", undefined, {
+    auth: false,
+  });
   assert.equal(missing.response.status, 401);
   assert.equal(missing.body.error.code, "UNAUTHORIZED");
 
-  const incorrect = await requestJson(bridge.baseUrl, "/health", {
+  const incorrect = await bridge.requestJson("/health", {
     headers: { "x-html-ai-bridge-token": "wrong-token" },
   });
   assert.equal(incorrect.response.status, 401);
   assert.equal(incorrect.body.error.code, "UNAUTHORIZED");
 
-  const authorized = await requestJson(bridge.baseUrl, "/health", {
-    headers: { "x-html-ai-bridge-token": authToken },
-  });
+  const authorized = await bridge.requestJson("/health");
   assert.equal(authorized.response.status, 200);
   assert.equal(authorized.body.ok, true);
 
-  const unauthorizedUnknownRoute = await requestJson(
-    bridge.baseUrl,
+  const unauthorizedUnknownRoute = await bridge.requestJson(
     "/not-a-route",
+    undefined,
+    { auth: false },
   );
   assert.equal(unauthorizedUnknownRoute.response.status, 401);
 
@@ -2329,13 +2256,13 @@ test("autosave conflict preserves its exact candidate across restart and keep-ex
   const initialHtml = htmlPage("自动保存冲突基线");
   await writeFile(sourcePath, initialHtml, "utf8");
   const firstBridge = await environment.start();
-  const opened = (await openWorkspace(firstBridge.baseUrl, sourcePath)).body;
+  const opened = (await openWorkspace(firstBridge, sourcePath)).body;
 
   const editorHtml = htmlPage(
     "自动保存冲突基线",
     '<p id="saved-editor-change">先完成一次正常写回</p>',
   );
-  const saved = await postJson(firstBridge.baseUrl, "/autosave", {
+  const saved = await postJson(firstBridge, "/autosave", {
     sourcePath,
     editRevision: 1,
     expectedSourceSha256: opened.currentHtmlSha256,
@@ -2353,7 +2280,7 @@ test("autosave conflict preserves its exact candidate across restart and keep-ex
     "编辑器恢复候选",
     '<p id="candidate-only">尚未覆盖外部文件的编辑器内容</p>',
   );
-  const conflicted = await postJson(firstBridge.baseUrl, "/autosave", {
+  const conflicted = await postJson(firstBridge, "/autosave", {
     sourcePath,
     editRevision: 2,
     expectedSourceSha256: saved.body.currentHtmlSha256,
@@ -2376,7 +2303,7 @@ test("autosave conflict preserves its exact candidate across restart and keep-ex
   );
   assert.equal(await readFile(sourcePath, "utf8"), externalHtml);
 
-  const draftWhileConflicted = await postJson(firstBridge.baseUrl, "/draft", {
+  const draftWhileConflicted = await postJson(firstBridge, "/draft", {
     sourcePath,
     projectId: opened.projectId,
     documentId: opened.documentId,
@@ -2389,9 +2316,9 @@ test("autosave conflict preserves its exact candidate across restart and keep-ex
   assert.equal(draftWhileConflicted.response.status, 423);
   assert.equal(draftWhileConflicted.body.error.code, "PROJECT_LOCKED");
 
-  await stopChild(firstBridge.child);
+  await firstBridge.stop();
   const restartedBridge = await environment.start();
-  const reloaded = await openWorkspace(restartedBridge.baseUrl, sourcePath);
+  const reloaded = await openWorkspace(restartedBridge, sourcePath);
   assert.equal(reloaded.response.status, 200);
   assert.equal(
     reloaded.body.runtimeState.lifecycleState,
@@ -2404,9 +2331,7 @@ test("autosave conflict preserves its exact candidate across restart and keep-ex
   );
   assert.equal(reloaded.body.versions.length, 1);
 
-  const candidate = await requestJson(
-    restartedBridge.baseUrl,
-    `/conflict-candidate?sourcePath=${encodeURIComponent(sourcePath)}`,
+  const candidate = await restartedBridge.requestJson(`/conflict-candidate?sourcePath=${encodeURIComponent(sourcePath)}`,
   );
   assert.equal(candidate.response.status, 200);
   assert.equal(candidate.body.conflictId, conflicted.body.error.details.conflictId);
@@ -2416,7 +2341,7 @@ test("autosave conflict preserves its exact candidate across restart and keep-ex
   assert.equal(candidate.body.externalSourceSha256, hash(externalHtml));
   assert.equal(candidate.body.editRevision, 2);
 
-  const kept = await postJson(restartedBridge.baseUrl, "/conflict/resolve", {
+  const kept = await postJson(restartedBridge, "/conflict/resolve", {
     sourcePath,
     action: "keep-external",
   });
@@ -2426,7 +2351,7 @@ test("autosave conflict preserves its exact candidate across restart and keep-ex
   assert.equal(kept.body.sourceSha256, hash(externalHtml));
   assert.equal(await readFile(sourcePath, "utf8"), externalHtml);
 
-  const afterKeep = await openWorkspace(restartedBridge.baseUrl, sourcePath);
+  const afterKeep = await openWorkspace(restartedBridge, sourcePath);
   assert.equal(afterKeep.response.status, 200);
   assert.equal(afterKeep.body.runtimeState.lifecycleState, "editing");
   assert.equal(afterKeep.body.runtimeState.conflict, null);
@@ -2434,9 +2359,7 @@ test("autosave conflict preserves its exact candidate across restart and keep-ex
   assert.equal(afterKeep.body.versions.length, 1);
   assert.equal(afterKeep.body.latestVersionId, "ver_0001");
 
-  const draftAfterResolution = await postJson(
-    restartedBridge.baseUrl,
-    "/draft",
+  const draftAfterResolution = await postJson(restartedBridge, "/draft",
     {
       sourcePath,
       projectId: opened.projectId,
@@ -2457,9 +2380,7 @@ test("autosave conflict preserves its exact candidate across restart and keep-ex
     ["comment_after_conflict"],
   );
 
-  const removedCandidate = await requestJson(
-    restartedBridge.baseUrl,
-    `/conflict-candidate?sourcePath=${encodeURIComponent(sourcePath)}`,
+  const removedCandidate = await restartedBridge.requestJson(`/conflict-candidate?sourcePath=${encodeURIComponent(sourcePath)}`,
   );
   assert.equal(removedCandidate.response.status, 404);
   assert.equal(
@@ -2473,10 +2394,10 @@ test("request body is the authoritative frozen snapshot after a draft deletion",
   const sourcePath = join(environment.sources, "authoritative-freeze.html");
   await writeFile(sourcePath, htmlPage("精确冻结"), "utf8");
   const bridge = await environment.start();
-  const opened = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
+  const opened = (await openWorkspace(bridge, sourcePath)).body;
   const submittedTarget = exactDocumentTarget();
 
-  const staleDraft = await postJson(bridge.baseUrl, "/draft", {
+  const staleDraft = await postJson(bridge, "/draft", {
     sourcePath,
     projectId: opened.projectId,
     documentId: opened.documentId,
@@ -2501,7 +2422,7 @@ test("request body is the authoritative frozen snapshot after a draft deletion",
   });
   assert.equal(staleDraft.response.status, 200);
 
-  const frozen = await postJson(bridge.baseUrl, "/request", {
+  const frozen = await postJson(bridge, "/request", {
     sourcePath,
     projectId: opened.projectId,
     documentId: opened.documentId,
@@ -2573,11 +2494,11 @@ test("comment attachments persist in the project and freeze with comment-target 
   const sourcePath = join(environment.sources, "comment-attachments.html");
   await writeFile(sourcePath, htmlPage("评论附件"), "utf8");
   const bridge = await environment.start();
-  const opened = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
+  const opened = (await openWorkspace(bridge, sourcePath)).body;
   const target = exactDocumentTarget();
   const imageBytes = Buffer.from("project-local-comment-image");
 
-  const uploaded = await postJson(bridge.baseUrl, "/attachment", {
+  const uploaded = await postJson(bridge, "/attachment", {
     sourcePath,
     projectId: opened.projectId,
     documentId: opened.documentId,
@@ -2606,7 +2527,7 @@ test("comment attachments persist in the project and freeze with comment-target 
     imageBytes,
   );
 
-  const savedDraft = await postJson(bridge.baseUrl, "/draft", {
+  const savedDraft = await postJson(bridge, "/draft", {
     sourcePath,
     projectId: opened.projectId,
     documentId: opened.documentId,
@@ -2627,7 +2548,7 @@ test("comment attachments persist in the project and freeze with comment-target 
     "attachment_reference_image",
   );
 
-  const submitted = await postJson(bridge.baseUrl, "/request", {
+  const submitted = await postJson(bridge, "/request", {
     sourcePath,
     projectId: opened.projectId,
     documentId: opened.documentId,
@@ -2744,11 +2665,11 @@ test("request creation rejects a project attachment changed after selection", as
   const sourcePath = join(environment.sources, "changed-comment-attachment.html");
   await writeFile(sourcePath, htmlPage("附件变更"), "utf8");
   const bridge = await environment.start();
-  const opened = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
+  const opened = (await openWorkspace(bridge, sourcePath)).body;
   const target = exactDocumentTarget();
   const originalBytes = Buffer.from("original-attachment");
 
-  const uploaded = await postJson(bridge.baseUrl, "/attachment", {
+  const uploaded = await postJson(bridge, "/attachment", {
     sourcePath,
     projectId: opened.projectId,
     documentId: opened.documentId,
@@ -2769,7 +2690,7 @@ test("request creation rejects a project attachment changed after selection", as
   );
   await writeFile(draftAttachmentPath, "changed-after-selection", "utf8");
 
-  const submitted = await postJson(bridge.baseUrl, "/request", {
+  const submitted = await postJson(bridge, "/request", {
     sourcePath,
     projectId: opened.projectId,
     documentId: opened.documentId,
@@ -2791,7 +2712,7 @@ test("request creation rejects a project attachment changed after selection", as
   assert.equal(submitted.response.status, 409);
   assert.equal(submitted.body.error.code, "ATTACHMENT_CHANGED");
   assert.equal(
-    (await openWorkspace(bridge.baseUrl, sourcePath)).body.activeRun,
+    (await openWorkspace(bridge, sourcePath)).body.activeRun,
     null,
   );
 });
@@ -2801,9 +2722,9 @@ test("read-only file inspector exposes only runtime, audit, and request artifact
   const sourcePath = join(environment.sources, "file-inspector.html");
   await writeFile(sourcePath, htmlPage("只读检查器"), "utf8");
   const bridge = await environment.start();
-  const opened = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
+  const opened = (await openWorkspace(bridge, sourcePath)).body;
 
-  const saved = await postJson(bridge.baseUrl, "/autosave", {
+  const saved = await postJson(bridge, "/autosave", {
     sourcePath,
     editRevision: 1,
     expectedSourceSha256: opened.currentHtmlSha256,
@@ -2822,7 +2743,7 @@ test("read-only file inspector exposes only runtime, audit, and request artifact
   assert.equal(saved.response.status, 200);
 
   const run = (
-    await postJson(bridge.baseUrl, "/request", {
+    await postJson(bridge, "/request", {
       sourcePath,
       expectedSourceSha256: saved.body.currentHtmlSha256,
       freezeCutoffRevision: 1,
@@ -2832,9 +2753,7 @@ test("read-only file inspector exposes only runtime, audit, and request artifact
   ).body;
 
   const inspect = (relativePath) =>
-    requestJson(
-      bridge.baseUrl,
-      `/file?sourcePath=${encodeURIComponent(sourcePath)}&path=${encodeURIComponent(relativePath)}`,
+    bridge.requestJson(`/file?sourcePath=${encodeURIComponent(sourcePath)}&path=${encodeURIComponent(relativePath)}`,
     );
   const readableArtifacts = [
     "runtime-state.json",
@@ -2893,7 +2812,7 @@ test("read-only file inspector exposes only runtime, audit, and request artifact
     "PROJECT_FILE_NOT_INSPECTABLE",
   );
 
-  await postJson(bridge.baseUrl, "/active-run/cancel", {
+  await postJson(bridge, "/active-run/cancel", {
     sourcePath,
     requestId: run.requestId,
     attemptId: run.attemptId,
@@ -2905,12 +2824,12 @@ test("mandatory finalizer controls completion, identity, no-change, and cancella
   const sourcePath = join(environment.sources, "finalizer.html");
   await writeFile(sourcePath, htmlPage("最终化"), "utf8");
   const bridge = await environment.start();
-  const opened = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
+  const opened = (await openWorkspace(bridge, sourcePath)).body;
   const originalSource = await readFile(sourcePath, "utf8");
   const originalSourceSha256 = hash(originalSource);
 
   const run = (
-    await postJson(bridge.baseUrl, "/request", {
+    await postJson(bridge, "/request", {
       sourcePath,
       expectedSourceSha256: opened.currentHtmlSha256,
       freezeCutoffRevision: 0,
@@ -2941,9 +2860,7 @@ test("mandatory finalizer controls completion, identity, no-change, and cancella
 
   for (let index = 0; index < 2; index += 1) {
     await delay(120);
-    const waiting = await requestJson(
-      bridge.baseUrl,
-      `/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
+    const waiting = await bridge.requestJson(`/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
     );
     assert.equal(waiting.response.status, 200);
     assert.equal(waiting.body.status, "waiting");
@@ -2952,25 +2869,23 @@ test("mandatory finalizer controls completion, identity, no-change, and cancella
       "awaiting-mandatory-completion",
     );
   }
-  assert.equal((await openWorkspace(bridge.baseUrl, sourcePath)).body.versions.length, 1);
+  assert.equal((await openWorkspace(bridge, sourcePath)).body.versions.length, 1);
 
   const frozenPrompt = await readFile(run.promptPath, "utf8");
   await writeFile(run.promptPath, `${frozenPrompt}\n被篡改\n`, "utf8");
   await assert.rejects(
-    runFinalizer(environment.workspace, run),
+    runOfficialFinalizer(environment.workspace, run),
     /FROZEN_INPUT_HASH_MISMATCH|no longer matches input-manifest/,
   );
   await writeFile(run.promptPath, frozenPrompt, "utf8");
-  await runFinalizer(environment.workspace, run);
+  await runOfficialFinalizer(environment.workspace, run);
   await access(run.completionPath);
   const completionEvidence = JSON.parse(
     await readFile(run.completionPath, "utf8"),
   );
   assert.equal(completionEvidence.outputRelativePath, "output/finalizer-V1.1.html");
   await delay(20);
-  const ready = await requestJson(
-    bridge.baseUrl,
-    `/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
+  const ready = await bridge.requestJson(`/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
   );
   assert.equal(ready.response.status, 200);
   assert.equal(ready.body.status, "ready-to-open");
@@ -2984,7 +2899,7 @@ test("mandatory finalizer controls completion, identity, no-change, and cancella
   );
   assert.equal(hash(await readFile(sourcePath, "utf8")), originalSourceSha256);
   assert.equal(await readFile(sourcePath, "utf8"), originalSource);
-  const activated = await activateReadyVersion(bridge.baseUrl, ready.body);
+  const activated = await activateReadyVersion(bridge, ready.body);
   const created = {
     response: ready.response,
     body: { ...ready.body, ...activated },
@@ -3064,8 +2979,7 @@ test("mandatory finalizer controls completion, identity, no-change, and cancella
     created.body.contentSha256,
   );
   assert.equal(transaction.outputRelativePath, run.activeRun.outputRelativePath);
-  const exactV2 = await requestJson(
-    bridge.baseUrl,
+  const exactV2 = await bridge.requestJson(
     `/version-file?sourcePath=${encodeURIComponent(sourcePath)}&versionId=ver_0002`,
   );
   assert.equal(exactV2.body.sha256, created.body.contentSha256);
@@ -3079,9 +2993,7 @@ test("mandatory finalizer controls completion, identity, no-change, and cancella
     htmlPage("完成后篡改", "<p>不得静默改变已提交 V2</p>"),
     "utf8",
   );
-  const mutationDetected = await requestJson(
-    bridge.baseUrl,
-    `/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
+  const mutationDetected = await bridge.requestJson(`/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
   );
   assert.equal(
     mutationDetected.body.protocolViolation.code,
@@ -3095,8 +3007,7 @@ test("mandatory finalizer controls completion, identity, no-change, and cancella
     `${JSON.stringify(pathTamperedCompletion, null, 2)}\n`,
     "utf8",
   );
-  const pathTamperingDetected = await requestJson(
-    bridge.baseUrl,
+  const pathTamperingDetected = await bridge.requestJson(
     `/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
   );
   assert.equal(
@@ -3115,16 +3026,14 @@ test("mandatory finalizer controls completion, identity, no-change, and cancella
   assert.equal(hash(await readFile(sourcePath, "utf8")), originalSourceSha256);
   assert.equal(
     (
-      await requestJson(
-        bridge.baseUrl,
-        `/version-file?sourcePath=${encodeURIComponent(sourcePath)}&versionId=ver_0002`,
+      await bridge.requestJson(`/version-file?sourcePath=${encodeURIComponent(sourcePath)}&versionId=ver_0002`,
       )
     ).body.content,
     committedSource,
   );
 
-  const afterV2 = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
-  const restoreUnavailable = await postJson(bridge.baseUrl, "/restore", {
+  const afterV2 = (await openWorkspace(bridge, sourcePath)).body;
+  const restoreUnavailable = await postJson(bridge, "/restore", {
     projectId: afterV2.projectId,
     documentId: afterV2.documentId,
     sourcePath,
@@ -3136,7 +3045,7 @@ test("mandatory finalizer controls completion, identity, no-change, and cancella
   assert.equal(hash(await readFile(sourcePath, "utf8")), originalSourceSha256);
 
   const invalidIdentityRun = (
-    await postJson(bridge.baseUrl, "/request", {
+    await postJson(bridge, "/request", {
       sourcePath,
       expectedSourceSha256: afterV2.currentHtmlSha256,
       freezeCutoffRevision: afterV2.runtimeState.editRevision,
@@ -3149,11 +3058,11 @@ test("mandatory finalizer controls completion, identity, no-change, and cancella
     "utf8",
   );
   await assert.rejects(
-    runFinalizer(environment.workspace, invalidIdentityRun, {
+    runOfficialFinalizer(environment.workspace, invalidIdentityRun, {
       requestId: "req_9999",
     }),
   );
-  await runFinalizer(environment.workspace, invalidIdentityRun);
+  await runOfficialFinalizer(environment.workspace, invalidIdentityRun);
   const tamperedCompletion = JSON.parse(
     await readFile(invalidIdentityRun.completionPath, "utf8"),
   );
@@ -3163,9 +3072,7 @@ test("mandatory finalizer controls completion, identity, no-change, and cancella
     `${JSON.stringify(tamperedCompletion, null, 2)}\n`,
     "utf8",
   );
-  const rejectedIdentity = await requestJson(
-    bridge.baseUrl,
-    `/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${invalidIdentityRun.requestId}&attemptId=${invalidIdentityRun.attemptId}`,
+  const rejectedIdentity = await bridge.requestJson(`/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${invalidIdentityRun.requestId}&attemptId=${invalidIdentityRun.attemptId}`,
   );
   assert.equal(rejectedIdentity.response.status, 200);
   assert.equal(rejectedIdentity.body.status, "error");
@@ -3174,7 +3081,7 @@ test("mandatory finalizer controls completion, identity, no-change, and cancella
     "COMPLETION_IDENTITY_MISMATCH",
   );
 
-  const beforeNoChange = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
+  const beforeNoChange = (await openWorkspace(bridge, sourcePath)).body;
   assert.equal(beforeNoChange.recentRunOutcome.status, "error");
   assert.equal(
     beforeNoChange.recentRunOutcome.error.code,
@@ -3185,7 +3092,7 @@ test("mandatory finalizer controls completion, identity, no-change, and cancella
     invalidIdentityRun.requestId,
   );
   const noChangeRun = (
-    await postJson(bridge.baseUrl, "/request", {
+    await postJson(bridge, "/request", {
       sourcePath,
       expectedSourceSha256: beforeNoChange.currentHtmlSha256,
       freezeCutoffRevision: beforeNoChange.runtimeState.editRevision,
@@ -3198,21 +3105,19 @@ test("mandatory finalizer controls completion, identity, no-change, and cancella
     await readFile(noChangeRun.inputPath, "utf8"),
     "utf8",
   );
-  await runFinalizer(environment.workspace, noChangeRun);
-  const noChange = await requestJson(
-    bridge.baseUrl,
-    `/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${noChangeRun.requestId}&attemptId=${noChangeRun.attemptId}`,
+  await runOfficialFinalizer(environment.workspace, noChangeRun);
+  const noChange = await bridge.requestJson(`/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${noChangeRun.requestId}&attemptId=${noChangeRun.attemptId}`,
   );
   assert.equal(noChange.response.status, 200);
   assert.equal(noChange.body.status, "no-change");
-  const afterNoChange = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
+  const afterNoChange = (await openWorkspace(bridge, sourcePath)).body;
   assert.equal(afterNoChange.versions.length, 2);
   assert.equal(afterNoChange.recentRunOutcome.status, "no-change");
   assert.equal(afterNoChange.recentRunOutcome.requestId, noChangeRun.requestId);
   assert.equal(afterNoChange.recentRunOutcome.completionObserved, true);
 
   const cancelledRun = (
-    await postJson(bridge.baseUrl, "/request", {
+    await postJson(bridge, "/request", {
       sourcePath,
       expectedSourceSha256: afterNoChange.currentHtmlSha256,
       freezeCutoffRevision: afterNoChange.runtimeState.editRevision,
@@ -3226,9 +3131,7 @@ test("mandatory finalizer controls completion, identity, no-change, and cancella
     lateCandidateHtml,
     "utf8",
   );
-  const cancelled = await postJson(
-    bridge.baseUrl,
-    "/active-run/cancel",
+  const cancelled = await postJson(bridge, "/active-run/cancel",
     {
       sourcePath,
       requestId: cancelledRun.requestId,
@@ -3236,7 +3139,7 @@ test("mandatory finalizer controls completion, identity, no-change, and cancella
     },
   );
   assert.equal(cancelled.body.status, "cancelled");
-  const lateFinalization = await runFinalizer(
+  const lateFinalization = await runOfficialFinalizer(
     environment.workspace,
     cancelledRun,
   );
@@ -3270,7 +3173,7 @@ test("mandatory finalizer controls completion, identity, no-change, and cancella
   );
   await assert.rejects(access(cancelledRun.completionPath));
   const repeatedLateTerminal = JSON.parse(
-    (await runFinalizer(environment.workspace, cancelledRun)).stdout,
+    (await runOfficialFinalizer(environment.workspace, cancelledRun)).stdout,
   );
   assert.equal(repeatedLateTerminal.status, "cancelled");
   assert.equal(repeatedLateTerminal.accepted, false);
@@ -3289,7 +3192,7 @@ test("mandatory finalizer controls completion, identity, no-change, and cancella
     "utf8",
   );
   await assert.rejects(
-    runFinalizer(environment.workspace, cancelledRun),
+    runOfficialFinalizer(environment.workspace, cancelledRun),
     /CANCELLATION_IDENTITY_MISMATCH/,
   );
   await writeFile(
@@ -3297,7 +3200,7 @@ test("mandatory finalizer controls completion, identity, no-change, and cancella
     `${JSON.stringify(cancellationMarker, null, 2)}\n`,
     "utf8",
   );
-  assert.equal((await openWorkspace(bridge.baseUrl, sourcePath)).body.versions.length, 2);
+  assert.equal((await openWorkspace(bridge, sourcePath)).body.versions.length, 2);
 });
 
 test("Bridge enforces the complete completion.v1 runtime contract before committing", async (t) => {
@@ -3345,9 +3248,9 @@ test("Bridge enforces the complete completion.v1 runtime contract before committ
   ];
 
   for (const [index, malformedCase] of malformedCases.entries()) {
-    const current = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
+    const current = (await openWorkspace(bridge, sourcePath)).body;
     const run = (
-      await postJson(bridge.baseUrl, "/request", {
+      await postJson(bridge, "/request", {
         sourcePath,
         expectedSourceSha256: current.currentHtmlSha256,
         freezeCutoffRevision: current.runtimeState.editRevision,
@@ -3362,7 +3265,7 @@ test("Bridge enforces the complete completion.v1 runtime contract before committ
       ),
       "utf8",
     );
-    await runFinalizer(environment.workspace, run);
+    await runOfficialFinalizer(environment.workspace, run);
     const completion = JSON.parse(
       await readFile(run.completionPath, "utf8"),
     );
@@ -3373,9 +3276,7 @@ test("Bridge enforces the complete completion.v1 runtime contract before committ
       "utf8",
     );
 
-    const rejected = await requestJson(
-      bridge.baseUrl,
-      `/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
+    const rejected = await bridge.requestJson(`/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
     );
     assert.equal(rejected.response.status, 200, malformedCase.label);
     assert.equal(rejected.body.status, "error", malformedCase.label);
@@ -3391,15 +3292,15 @@ test("Bridge enforces the complete completion.v1 runtime contract before committ
       malformedCase.label,
     );
     assert.equal(
-      (await openWorkspace(bridge.baseUrl, sourcePath)).body.versions.length,
+      (await openWorkspace(bridge, sourcePath)).body.versions.length,
       1,
       `${malformedCase.label} must not create a Version`,
     );
   }
 
-  const current = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
+  const current = (await openWorkspace(bridge, sourcePath)).body;
   const validRun = (
-    await postJson(bridge.baseUrl, "/request", {
+    await postJson(bridge, "/request", {
       sourcePath,
       expectedSourceSha256: current.currentHtmlSha256,
       freezeCutoffRevision: current.runtimeState.editRevision,
@@ -3411,15 +3312,13 @@ test("Bridge enforces the complete completion.v1 runtime contract before committ
     htmlPage("严格完成信号 V2", "<p>由官方 finalizer 完成。</p>"),
     "utf8",
   );
-  await runFinalizer(environment.workspace, validRun);
-  const accepted = await requestJson(
-    bridge.baseUrl,
-    `/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${validRun.requestId}&attemptId=${validRun.attemptId}`,
+  await runOfficialFinalizer(environment.workspace, validRun);
+  const accepted = await bridge.requestJson(`/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${validRun.requestId}&attemptId=${validRun.attemptId}`,
   );
   assert.equal(accepted.response.status, 200);
   assert.equal(accepted.body.status, "ready-to-open");
   assert.equal(accepted.body.versionId, "ver_0002");
-  assert.equal((await openWorkspace(bridge.baseUrl, sourcePath)).body.versions.length, 2);
+  assert.equal((await openWorkspace(bridge, sourcePath)).body.versions.length, 2);
 });
 
 test("external changes become persistent conflicts with keep-external and adopt-ai outcomes", async (t) => {
@@ -3427,10 +3326,10 @@ test("external changes become persistent conflicts with keep-external and adopt-
   const sourcePath = join(environment.sources, "conflict.html");
   await writeFile(sourcePath, htmlPage("冲突基线"), "utf8");
   const bridge = await environment.start();
-  const opened = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
+  const opened = (await openWorkspace(bridge, sourcePath)).body;
 
   const firstRun = (
-    await postJson(bridge.baseUrl, "/request", {
+    await postJson(bridge, "/request", {
       sourcePath,
       expectedSourceSha256: opened.currentHtmlSha256,
       freezeCutoffRevision: 0,
@@ -3442,35 +3341,33 @@ test("external changes become persistent conflicts with keep-external and adopt-
     htmlPage("AI 候选一", "<p>AI candidate one</p>"),
     "utf8",
   );
-  await runFinalizer(environment.workspace, firstRun);
+  await runOfficialFinalizer(environment.workspace, firstRun);
   const externalOne = htmlPage("外部内容一", "<p>external one</p>");
   await writeFile(sourcePath, externalOne, "utf8");
-  const conflictedOne = await requestJson(
-    bridge.baseUrl,
-    `/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${firstRun.requestId}&attemptId=${firstRun.attemptId}`,
+  const conflictedOne = await bridge.requestJson(`/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${firstRun.requestId}&attemptId=${firstRun.attemptId}`,
   );
   assert.equal(conflictedOne.body.status, "awaiting-conflict-resolution");
   assert.equal(
     conflictedOne.body.conflict.externalSourceSha256,
     hash(externalOne),
   );
-  const persistedConflict = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
+  const persistedConflict = (await openWorkspace(bridge, sourcePath)).body;
   assert.equal(
     persistedConflict.runtimeState.lifecycleState,
     "awaiting-conflict-resolution",
   );
-  const kept = await postJson(bridge.baseUrl, "/conflict/resolve", {
+  const kept = await postJson(bridge, "/conflict/resolve", {
     sourcePath,
     action: "keep-external",
   });
   assert.equal(kept.body.status, "conflict-kept-external");
   assert.equal(kept.body.versionCreated, false);
   assert.equal(await readFile(sourcePath, "utf8"), externalOne);
-  assert.equal((await openWorkspace(bridge.baseUrl, sourcePath)).body.versions.length, 1);
+  assert.equal((await openWorkspace(bridge, sourcePath)).body.versions.length, 1);
 
-  const afterKeep = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
+  const afterKeep = (await openWorkspace(bridge, sourcePath)).body;
   const secondRun = (
-    await postJson(bridge.baseUrl, "/request", {
+    await postJson(bridge, "/request", {
       sourcePath,
       expectedSourceSha256: afterKeep.currentHtmlSha256,
       freezeCutoffRevision: afterKeep.runtimeState.editRevision,
@@ -3480,12 +3377,10 @@ test("external changes become persistent conflicts with keep-external and adopt-
   assert.equal(secondRun.candidateVersionId, "ver_0002");
   const aiCandidateTwo = htmlPage("AI 候选二", "<p>AI candidate two</p>");
   await writeFile(secondRun.outputPath, aiCandidateTwo, "utf8");
-  await runFinalizer(environment.workspace, secondRun);
+  await runOfficialFinalizer(environment.workspace, secondRun);
   const externalTwo = htmlPage("外部内容二", "<p>external two</p>");
   await writeFile(sourcePath, externalTwo, "utf8");
-  const conflictedTwo = await requestJson(
-    bridge.baseUrl,
-    `/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${secondRun.requestId}&attemptId=${secondRun.attemptId}`,
+  const conflictedTwo = await bridge.requestJson(`/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${secondRun.requestId}&attemptId=${secondRun.attemptId}`,
   );
   assert.equal(conflictedTwo.body.status, "awaiting-conflict-resolution");
   const secondTransactionRoot = join(
@@ -3500,7 +3395,7 @@ test("external changes become persistent conflicts with keep-external and adopt-
     ),
   );
   await delay(30);
-  const adopted = await postJson(bridge.baseUrl, "/conflict/resolve", {
+  const adopted = await postJson(bridge, "/conflict/resolve", {
     sourcePath,
     action: "adopt-ai",
     confirmedSourceSha256: hash(externalTwo),
@@ -3514,9 +3409,7 @@ test("external changes become persistent conflicts with keep-external and adopt-
   assert.equal(adopted.body.versionId, "ver_0002");
   assert.equal(await readFile(sourcePath, "utf8"), externalTwo);
   assert.equal(adopted.body.currentPath, sourcePath);
-  const adoptedVersion = await activateReadyVersion(
-    bridge.baseUrl,
-    adopted.body,
+  const adoptedVersion = await activateReadyVersion(bridge, adopted.body,
   );
   assert.match(
     await readFile(adoptedVersion.currentPath, "utf8"),
@@ -3562,7 +3455,7 @@ test("external changes become persistent conflicts with keep-external and adopt-
     committedTransaction.versionGeneratedAt,
     committedMarker.committedAt,
   );
-  const afterAdopt = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
+  const afterAdopt = (await openWorkspace(bridge, sourcePath)).body;
   assert.equal(afterAdopt.versions.length, 2);
   assert.equal(afterAdopt.latestVersionId, "ver_0002");
   assert.equal(afterAdopt.currentExactVersionId, "ver_0002");
@@ -3573,9 +3466,9 @@ test("AI conflict candidate and both hashes survive restart for read-only compar
   const sourcePath = join(environment.sources, "ai-conflict-candidate.html");
   await writeFile(sourcePath, htmlPage("AI 冲突候选"), "utf8");
   const firstBridge = await environment.start();
-  const opened = (await openWorkspace(firstBridge.baseUrl, sourcePath)).body;
+  const opened = (await openWorkspace(firstBridge, sourcePath)).body;
   const run = (
-    await postJson(firstBridge.baseUrl, "/request", {
+    await postJson(firstBridge, "/request", {
       sourcePath,
       expectedSourceSha256: opened.currentHtmlSha256,
       freezeCutoffRevision: 0,
@@ -3586,7 +3479,7 @@ test("AI conflict candidate and both hashes survive restart for read-only compar
     run.outputPath,
     htmlPage("AI 冲突候选", '<p id="candidate">候选内容</p>'),
   );
-  await runFinalizer(environment.workspace, run);
+  await runOfficialFinalizer(environment.workspace, run);
   const candidateContent = await readFile(run.outputPath, "utf8");
   const candidateOutputSha256 = hash(candidateContent);
   const externalContent = htmlPage(
@@ -3596,9 +3489,7 @@ test("AI conflict candidate and both hashes survive restart for read-only compar
   await writeFile(sourcePath, externalContent);
   const externalSourceSha256 = hash(externalContent);
 
-  const conflicted = await requestJson(
-    firstBridge.baseUrl,
-    `/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
+  const conflicted = await firstBridge.requestJson(`/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
   );
   assert.equal(conflicted.body.status, "awaiting-conflict-resolution");
   assert.equal(
@@ -3609,9 +3500,7 @@ test("AI conflict candidate and both hashes survive restart for read-only compar
     conflicted.body.conflict.externalSourceSha256,
     externalSourceSha256,
   );
-  const candidateBeforeRestart = await requestJson(
-    firstBridge.baseUrl,
-    `/conflict-candidate?sourcePath=${encodeURIComponent(sourcePath)}`,
+  const candidateBeforeRestart = await firstBridge.requestJson(`/conflict-candidate?sourcePath=${encodeURIComponent(sourcePath)}`,
   );
   assert.equal(candidateBeforeRestart.response.status, 200);
   assert.equal(candidateBeforeRestart.body.type, "ai-source");
@@ -3634,10 +3523,10 @@ test("AI conflict candidate and both hashes survive restart for read-only compar
   assert.equal(candidateBeforeRestart.body.content, candidateContent);
   assert.equal(candidateBeforeRestart.body.sha256, candidateOutputSha256);
 
-  await stopChild(firstBridge.child);
+  await firstBridge.stop();
   const restarted = await environment.start();
   const restoredWorkspace = (
-    await openWorkspace(restarted.baseUrl, sourcePath)
+    await openWorkspace(restarted, sourcePath)
   ).body;
   assert.equal(
     restoredWorkspace.runtimeState.lifecycleState,
@@ -3651,9 +3540,7 @@ test("AI conflict candidate and both hashes survive restart for read-only compar
     restoredWorkspace.runtimeState.conflict.externalSourceSha256,
     externalSourceSha256,
   );
-  const restoredStatus = await requestJson(
-    restarted.baseUrl,
-    `/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
+  const restoredStatus = await restarted.requestJson(`/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
   );
   assert.equal(restoredStatus.body.status, "awaiting-conflict-resolution");
   assert.equal(
@@ -3664,15 +3551,13 @@ test("AI conflict candidate and both hashes survive restart for read-only compar
     restoredStatus.body.conflict.externalSourceSha256,
     externalSourceSha256,
   );
-  const candidateAfterRestart = await requestJson(
-    restarted.baseUrl,
-    `/conflict-candidate?sourcePath=${encodeURIComponent(sourcePath)}`,
+  const candidateAfterRestart = await restarted.requestJson(`/conflict-candidate?sourcePath=${encodeURIComponent(sourcePath)}`,
   );
   assert.equal(candidateAfterRestart.response.status, 200);
   assert.equal(candidateAfterRestart.body.content, candidateContent);
   assert.equal(candidateAfterRestart.body.sha256, candidateOutputSha256);
 
-  const kept = await postJson(restarted.baseUrl, "/conflict/resolve", {
+  const kept = await postJson(restarted, "/conflict/resolve", {
     sourcePath,
     action: "keep-external",
   });
@@ -3687,9 +3572,9 @@ test("source-applied transaction is recovered on bridge restart", async (t) => {
   const firstBridge = await environment.start({
     HTML_AI_FAILPOINT: "after-source-applied",
   });
-  const opened = (await openWorkspace(firstBridge.baseUrl, sourcePath)).body;
+  const opened = (await openWorkspace(firstBridge, sourcePath)).body;
   const run = (
-    await postJson(firstBridge.baseUrl, "/request", {
+    await postJson(firstBridge, "/request", {
       sourcePath,
       expectedSourceSha256: opened.currentHtmlSha256,
       freezeCutoffRevision: 0,
@@ -3701,10 +3586,8 @@ test("source-applied transaction is recovered on bridge restart", async (t) => {
     htmlPage("事务恢复", "<p id=\"recovered\">恢复同一 V2</p>"),
     "utf8",
   );
-  await runFinalizer(environment.workspace, run);
-  const failedAtBoundary = await requestJson(
-    firstBridge.baseUrl,
-    `/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
+  await runOfficialFinalizer(environment.workspace, run);
+  const failedAtBoundary = await firstBridge.requestJson(`/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
   );
   assert.equal(failedAtBoundary.response.status, 500);
   assert.doesNotMatch(await readFile(sourcePath, "utf8"), /recovered/);
@@ -3712,19 +3595,17 @@ test("source-applied transaction is recovered on bridge restart", async (t) => {
     await readFile(run.plannedWorkingCopyPath, "utf8"),
     /recovered/,
   );
-  await stopChild(firstBridge.child);
+  await firstBridge.stop();
 
   const secondBridge = await environment.start();
-  const recoveredStatus = await requestJson(
-    secondBridge.baseUrl,
-    `/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
+  const recoveredStatus = await secondBridge.requestJson(`/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
   );
   assert.equal(recoveredStatus.response.status, 200);
   assert.equal(recoveredStatus.body.status, "ready-to-open");
   assert.equal(recoveredStatus.body.versionId, "ver_0002");
   assert.doesNotMatch(await readFile(sourcePath, "utf8"), /recovered/);
-  await activateReadyVersion(secondBridge.baseUrl, recoveredStatus.body);
-  const workspace = (await openWorkspace(secondBridge.baseUrl, sourcePath)).body;
+  await activateReadyVersion(secondBridge, recoveredStatus.body);
+  const workspace = (await openWorkspace(secondBridge, sourcePath)).body;
   assert.equal(workspace.versions.length, 2);
   assert.equal(workspace.latestVersionId, "ver_0002");
   assert.equal(workspace.runtimeState.activeRun, null);
@@ -3736,9 +3617,9 @@ test("a ready Version survives restart without replacing the current HTML", asyn
   const originalHtml = htmlPage("重启前的当前版");
   await writeFile(sourcePath, originalHtml, "utf8");
   const firstBridge = await environment.start();
-  const opened = (await openWorkspace(firstBridge.baseUrl, sourcePath)).body;
+  const opened = (await openWorkspace(firstBridge, sourcePath)).body;
   const run = (
-    await postJson(firstBridge.baseUrl, "/request", {
+    await postJson(firstBridge, "/request", {
       sourcePath,
       expectedSourceSha256: opened.currentHtmlSha256,
       freezeCutoffRevision: 0,
@@ -3750,37 +3631,31 @@ test("a ready Version survives restart without replacing the current HTML", asyn
     htmlPage("重启后待打开", '<p id="ready-after-restart">已返回</p>'),
     "utf8",
   );
-  await runFinalizer(environment.workspace, run);
-  const beforeRestart = await requestJson(
-    firstBridge.baseUrl,
-    `/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
+  await runOfficialFinalizer(environment.workspace, run);
+  const beforeRestart = await firstBridge.requestJson(`/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
   );
   assert.equal(beforeRestart.body.status, "ready-to-open");
   assert.equal(beforeRestart.body.currentPath, sourcePath);
   assert.equal(await readFile(sourcePath, "utf8"), originalHtml);
-  await stopChild(firstBridge.child);
+  await firstBridge.stop();
 
   const restarted = await environment.start();
   const restoredWorkspace = (
-    await openWorkspace(restarted.baseUrl, sourcePath)
+    await openWorkspace(restarted, sourcePath)
   ).body;
   assert.equal(restoredWorkspace.runtimeState.lifecycleState, "ready-to-open");
   assert.equal(restoredWorkspace.runtimeState.activeRun.requestId, run.requestId);
   assert.equal(restoredWorkspace.sourcePath, sourcePath);
   assert.equal(await readFile(sourcePath, "utf8"), originalHtml);
 
-  const afterRestart = await requestJson(
-    restarted.baseUrl,
-    `/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
+  const afterRestart = await restarted.requestJson(`/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
   );
   assert.equal(afterRestart.body.status, "ready-to-open");
   assert.equal(
     afterRestart.body.workingCopyPath,
     beforeRestart.body.workingCopyPath,
   );
-  const activated = await activateReadyVersion(
-    restarted.baseUrl,
-    afterRestart.body,
+  const activated = await activateReadyVersion(restarted, afterRestart.body,
   );
   assert.match(
     await readFile(activated.currentPath, "utf8"),
@@ -3790,25 +3665,69 @@ test("a ready Version survives restart without replacing the current HTML", asyn
 });
 
 test("native text autosave intent and source-application crash boundaries recover exactly once", async (t) => {
-  for (const failpoint of [
-    "after-autosave-prepared",
-    "after-autosave-source-applied",
-    "after-autosave-project-applied",
-    "after-autosave-audit-applied",
-  ]) {
+  const cases = [
+    {
+      name: "prepared native autosave keeps old bytes until restart",
+      failpoint: "after-autosave-prepared",
+      operation: "autosave",
+      expectedInterruptedDisk: "initial",
+      expectedDisk: "target",
+      expectedRuntime: { pendingWrite: null, lastPersistedRevision: 1 },
+      expectedHistory: { entries: 0, cursor: 0 },
+      expectedAuditCount: 1,
+      restart: true,
+    },
+    {
+      name: "source-applied native autosave recovers exactly once",
+      failpoint: "after-autosave-source-applied",
+      operation: "autosave",
+      expectedInterruptedDisk: "target",
+      expectedDisk: "target",
+      expectedRuntime: { pendingWrite: null, lastPersistedRevision: 1 },
+      expectedHistory: { entries: 0, cursor: 0 },
+      expectedAuditCount: 1,
+      restart: true,
+    },
+    {
+      name: "project-applied native autosave recovers exactly once",
+      failpoint: "after-autosave-project-applied",
+      operation: "autosave",
+      expectedInterruptedDisk: "target",
+      expectedDisk: "target",
+      expectedRuntime: { pendingWrite: null, lastPersistedRevision: 1 },
+      expectedHistory: { entries: 0, cursor: 0 },
+      expectedAuditCount: 1,
+      restart: true,
+    },
+    {
+      name: "audit-applied native autosave does not duplicate the audit event",
+      failpoint: "after-autosave-audit-applied",
+      operation: "autosave",
+      expectedInterruptedDisk: "target",
+      expectedDisk: "target",
+      expectedRuntime: { pendingWrite: null, lastPersistedRevision: 1 },
+      expectedHistory: { entries: 0, cursor: 0 },
+      expectedAuditCount: 1,
+      restart: true,
+    },
+  ];
+  for (const scenario of cases) await t.test(scenario.name, async (t) => {
+    const { failpoint } = scenario;
     const environment = await createEnvironment(t);
-    const sourcePath = join(environment.sources, `${failpoint}.html`);
+    const sourcePath = await environment.createSource(
+      `${failpoint}.html`,
+      htmlPage(`自动保存 ${failpoint}`),
+    );
     const initial = htmlPage(`自动保存 ${failpoint}`);
     const target = htmlPage(
       `自动保存 ${failpoint}`,
       `<p id="durable">${failpoint}</p>`,
     );
-    await writeFile(sourcePath, initial, "utf8");
     const firstBridge = await environment.start({
       HTML_AI_FAILPOINT: failpoint,
     });
-    const opened = (await openWorkspace(firstBridge.baseUrl, sourcePath)).body;
-    const interrupted = await postJson(firstBridge.baseUrl, "/autosave", {
+    const opened = (await openWorkspace(firstBridge, sourcePath)).body;
+    const interrupted = await postJson(firstBridge, "/autosave", {
       sourcePath,
       editRevision: 1,
       expectedSourceSha256: opened.currentHtmlSha256,
@@ -3822,17 +3741,14 @@ test("native text autosave intent and source-application crash boundaries recove
       }],
     });
     assert.equal(interrupted.response.status, 500);
-    if (failpoint === "after-autosave-prepared") {
-      assert.equal(await readFile(sourcePath, "utf8"), initial);
-    } else {
-      assert.equal(await readFile(sourcePath, "utf8"), target);
-    }
-    await stopChild(firstBridge.child);
+    assert.equal(
+      await readFile(sourcePath, "utf8"),
+      scenario.expectedInterruptedDisk === "initial" ? initial : target,
+    );
+    await firstBridge.stop();
 
     const restarted = await environment.start();
-    const recoveredResponse = await openWorkspace(
-      restarted.baseUrl,
-      sourcePath,
+    const recoveredResponse = await openWorkspace(restarted, sourcePath,
     );
     assert.equal(
       recoveredResponse.response.status,
@@ -3840,9 +3756,24 @@ test("native text autosave intent and source-application crash boundaries recove
       JSON.stringify(recoveredResponse.body),
     );
     const recovered = recoveredResponse.body;
-    assert.equal(await readFile(sourcePath, "utf8"), target);
-    assert.equal(recovered.runtimeState.pendingWrite, null);
-    assert.equal(recovered.runtimeState.lastPersistedRevision, 1);
+    assert.equal(
+      await readFile(sourcePath, "utf8"),
+      scenario.expectedDisk === "initial" ? initial : target,
+    );
+    assert.deepEqual(
+      {
+        pendingWrite: recovered.runtimeState.pendingWrite,
+        lastPersistedRevision: recovered.runtimeState.lastPersistedRevision,
+      },
+      scenario.expectedRuntime,
+    );
+    assert.deepEqual(
+      {
+        entries: recovered.sourceHistory.entries.length,
+        cursor: recovered.sourceHistory.cursor,
+      },
+      scenario.expectedHistory,
+    );
     assert.equal(recovered.currentHtmlSha256, hash(target));
     assert.equal(recovered.projectId, opened.projectId);
     assert.equal(recovered.documentId, opened.documentId);
@@ -3861,9 +3792,11 @@ test("native text autosave intent and source-application crash boundaries recove
         event.eventId === auditEventId
         && event.editRevision === 1
       );
-    assert.equal(recoveredNativeEvents.length, 1);
+    assert.equal(recoveredNativeEvents.length, scenario.expectedAuditCount);
     assert.equal(recoveredNativeEvents[0].property, "nativeText");
-  }
+    assert.equal(scenario.operation, "autosave");
+    assert.equal(scenario.restart, true);
+  });
 });
 
 test("a registered attachment cannot split the project during an atomic autosave recovery window", async (t) => {
@@ -3875,9 +3808,9 @@ test("a registered attachment cannot split the project during an atomic autosave
   const bridge = await environment.start({
     HTML_AI_FAILPOINT: "after-autosave-source-applied",
   });
-  const opened = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
+  const opened = (await openWorkspace(bridge, sourcePath)).body;
 
-  const interrupted = await postJson(bridge.baseUrl, "/autosave", {
+  const interrupted = await postJson(bridge, "/autosave", {
     sourcePath,
     projectId: opened.projectId,
     documentId: opened.documentId,
@@ -3889,7 +3822,7 @@ test("a registered attachment cannot split the project during an atomic autosave
   assert.equal(await readFile(sourcePath, "utf8"), target);
 
   const bytes = Buffer.from("attachment-during-pending-write");
-  const uploaded = await postJson(bridge.baseUrl, "/attachment", {
+  const uploaded = await postJson(bridge, "/attachment", {
     sourcePath,
     projectId: opened.projectId,
     documentId: opened.documentId,
@@ -3917,7 +3850,7 @@ test("a registered attachment cannot split the project during an atomic autosave
     ),
     true,
   );
-  const recovered = await openWorkspace(bridge.baseUrl, sourcePath);
+  const recovered = await openWorkspace(bridge, sourcePath);
   assert.equal(recovered.response.status, 200, JSON.stringify(recovered.body));
   assert.equal(recovered.body.projectId, opened.projectId);
   assert.equal(recovered.body.runtimeState.pendingWrite, null);
@@ -3933,9 +3866,9 @@ test("project ensure reuses the registered identity during an atomic autosave re
   const bridge = await environment.start({
     HTML_AI_FAILPOINT: "after-autosave-source-applied",
   });
-  const opened = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
+  const opened = (await openWorkspace(bridge, sourcePath)).body;
 
-  const interrupted = await postJson(bridge.baseUrl, "/autosave", {
+  const interrupted = await postJson(bridge, "/autosave", {
     sourcePath,
     projectId: opened.projectId,
     documentId: opened.documentId,
@@ -3946,7 +3879,7 @@ test("project ensure reuses the registered identity during an atomic autosave re
   assert.equal(interrupted.response.status, 500);
   assert.equal(await readFile(sourcePath, "utf8"), target);
 
-  const ensured = await postJson(bridge.baseUrl, "/project/ensure", {
+  const ensured = await postJson(bridge, "/project/ensure", {
     sourcePath,
     expectedSourceSha256: hash(target),
   });
@@ -3968,9 +3901,9 @@ test("draft writes use monotonic CAS and reject a stale client snapshot", async 
   const sourcePath = join(environment.sources, "draft-cas.html");
   await writeFile(sourcePath, htmlPage("Draft CAS"), "utf8");
   const bridge = await environment.start();
-  const opened = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
+  const opened = (await openWorkspace(bridge, sourcePath)).body;
 
-  const first = await postJson(bridge.baseUrl, "/draft", {
+  const first = await postJson(bridge, "/draft", {
     sourcePath,
     projectId: opened.projectId,
     documentId: opened.documentId,
@@ -3981,7 +3914,7 @@ test("draft writes use monotonic CAS and reject a stale client snapshot", async 
   assert.equal(first.response.status, 200);
   assert.equal(first.body.activeDraft.draftRevision, 1);
 
-  const stale = await postJson(bridge.baseUrl, "/draft", {
+  const stale = await postJson(bridge, "/draft", {
     sourcePath,
     projectId: opened.projectId,
     documentId: opened.documentId,
@@ -3992,7 +3925,7 @@ test("draft writes use monotonic CAS and reject a stale client snapshot", async 
   assert.equal(stale.response.status, 409);
   assert.equal(stale.body.error.code, "DRAFT_REVISION_CONFLICT");
 
-  const reloaded = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
+  const reloaded = (await openWorkspace(bridge, sourcePath)).body;
   assert.equal(reloaded.runtimeState.draft.draftRevision, 1);
   assert.deepEqual(
     reloaded.runtimeState.draft.comments.map((comment) => comment.commentId),
@@ -4005,7 +3938,7 @@ test("draft operations rebase stale revisions, persist deletes, and replay exact
   const sourcePath = join(environment.sources, "draft-operation-rebase.html");
   await writeFile(sourcePath, htmlPage("Draft operation rebase"), "utf8");
   const bridge = await environment.start();
-  const opened = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
+  const opened = (await openWorkspace(bridge, sourcePath)).body;
 
   const firstOperation = {
     operationId: "draftop_first_operation_0001",
@@ -4022,11 +3955,11 @@ test("draft operations rebase stale revisions, persist deletes, and replay exact
     changeEvents: [],
     deletedCommentIds: [],
   };
-  const first = await postJson(bridge.baseUrl, "/draft", firstOperation);
+  const first = await postJson(bridge, "/draft", firstOperation);
   assert.equal(first.response.status, 200, JSON.stringify(first.body));
   assert.equal(first.body.activeDraft.draftRevision, 1);
 
-  const replayed = await postJson(bridge.baseUrl, "/draft", {
+  const replayed = await postJson(bridge, "/draft", {
     ...firstOperation,
     comments: [{ commentId: "comment_must_not_duplicate", text: "ignored" }],
   });
@@ -4038,7 +3971,7 @@ test("draft operations rebase stale revisions, persist deletes, and replay exact
     ["comment_first"],
   );
 
-  const deleteOperation = await postJson(bridge.baseUrl, "/draft", {
+  const deleteOperation = await postJson(bridge, "/draft", {
     operationId: "draftop_delete_operation_0002",
     sourcePath,
     projectId: opened.projectId,
@@ -4076,7 +4009,7 @@ test("draft operations rebase stale revisions, persist deletes, and replay exact
     changeEvents: [],
     deletedCommentIds: [],
   };
-  const conflict = await postJson(bridge.baseUrl, "/draft", staleMutation);
+  const conflict = await postJson(bridge, "/draft", staleMutation);
   assert.equal(conflict.response.status, 409, JSON.stringify(conflict.body));
   assert.equal(conflict.body.error.code, "DRAFT_REVISION_CONFLICT");
   assert.equal(conflict.body.error.details.currentDraftRevision, 2);
@@ -4086,7 +4019,7 @@ test("draft operations rebase stale revisions, persist deletes, and replay exact
     staleMutation,
     conflict.body.error.details.activeDraft,
   );
-  const recovered = await postJson(bridge.baseUrl, "/draft", rebasedMutation);
+  const recovered = await postJson(bridge, "/draft", rebasedMutation);
   assert.equal(recovered.response.status, 200, JSON.stringify(recovered.body));
   assert.equal(recovered.body.activeDraft.draftRevision, 3);
   assert.deepEqual(
@@ -4100,11 +4033,9 @@ test("draft operations rebase stale revisions, persist deletes, and replay exact
     ["comment_first"],
   );
 
-  await stopChild(bridge.child);
+  await bridge.stop();
   const restarted = await environment.start();
-  const afterRestart = (await openWorkspace(
-    restarted.baseUrl,
-    sourcePath,
+  const afterRestart = (await openWorkspace(restarted, sourcePath,
   )).body.runtimeState.draft;
   assert.equal(afterRestart.draftRevision, 3);
   assert.deepEqual(afterRestart.deletedCommentIds, ["comment_first"]);
@@ -4123,9 +4054,7 @@ test("a draft artifact written before a Bridge crash restores revision and ackno
   const interruptedBridge = await environment.start({
     HTML_AI_FAILPOINT: "after-draft-artifact-written",
   });
-  const opened = (await openWorkspace(
-    interruptedBridge.baseUrl,
-    sourcePath,
+  const opened = (await openWorkspace(interruptedBridge, sourcePath,
   )).body;
   const operation = {
     operationId: "draftop_crash_recovery_0001",
@@ -4142,16 +4071,14 @@ test("a draft artifact written before a Bridge crash restores revision and ackno
     changeEvents: [],
     deletedCommentIds: [],
   };
-  const interrupted = await postJson(
-    interruptedBridge.baseUrl,
-    "/draft",
+  const interrupted = await postJson(interruptedBridge, "/draft",
     operation,
   );
   assert.equal(interrupted.response.status, 500);
-  await stopChild(interruptedBridge.child);
+  await interruptedBridge.stop();
 
   const restarted = await environment.start();
-  const recovered = (await openWorkspace(restarted.baseUrl, sourcePath)).body;
+  const recovered = (await openWorkspace(restarted, sourcePath)).body;
   assert.equal(recovered.activeDraft.draftRevision, 1);
   assert.equal(recovered.runtimeState.draft.draftRevision, 1);
   assert.deepEqual(
@@ -4163,7 +4090,7 @@ test("a draft artifact written before a Bridge crash restores revision and ackno
     true,
   );
 
-  const replayed = await postJson(restarted.baseUrl, "/draft", operation);
+  const replayed = await postJson(restarted, "/draft", operation);
   assert.equal(replayed.response.status, 200, JSON.stringify(replayed.body));
   assert.equal(replayed.body.replayed, true);
   assert.equal(replayed.body.activeDraft.draftRevision, 1);
@@ -4174,7 +4101,7 @@ test("a draft artifact cannot jump beyond the single-write crash window", async 
   const sourcePath = join(environment.sources, "draft-artifact-jump.html");
   await writeFile(sourcePath, htmlPage("Draft artifact jump"), "utf8");
   const bridge = await environment.start();
-  const opened = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
+  const opened = (await openWorkspace(bridge, sourcePath)).body;
   const annotationsPath = join(
     opened.projectRoot,
     "draft",
@@ -4191,7 +4118,7 @@ test("a draft artifact cannot jump beyond the single-write crash window", async 
     `${JSON.stringify(annotations, null, 2)}\n`,
   );
 
-  const rejected = await openWorkspace(bridge.baseUrl, sourcePath);
+  const rejected = await openWorkspace(bridge, sourcePath);
   assert.equal(rejected.response.status, 409, JSON.stringify(rejected.body));
   assert.equal(rejected.body.error.code, "DRAFT_ARTIFACT_REVISION_JUMP");
   assert.deepEqual(rejected.body.error.details, {
@@ -4205,9 +4132,9 @@ test("corrupt frozen annotations do not block status polling or cancellation", a
   const sourcePath = join(environment.sources, "cancel-corrupt-annotations.html");
   await writeFile(sourcePath, htmlPage("Cancel degraded run"), "utf8");
   const bridge = await environment.start();
-  const opened = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
+  const opened = (await openWorkspace(bridge, sourcePath)).body;
   const run = (
-    await postJson(bridge.baseUrl, "/request", {
+    await postJson(bridge, "/request", {
       sourcePath,
       projectId: opened.projectId,
       documentId: opened.documentId,
@@ -4226,14 +4153,12 @@ test("corrupt frozen annotations do not block status polling or cancellation", a
   annotations.schemaVersion = "2.0.0";
   await writeFile(annotationsPath, `${JSON.stringify(annotations, null, 2)}\n`);
 
-  const status = await requestJson(
-    bridge.baseUrl,
-    `/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
+  const status = await bridge.requestJson(`/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
   );
   assert.equal(status.response.status, 200);
   assert.equal(status.body.status, "waiting");
 
-  const cancelled = await postJson(bridge.baseUrl, "/active-run/cancel", {
+  const cancelled = await postJson(bridge, "/active-run/cancel", {
     sourcePath,
     projectId: opened.projectId,
     documentId: opened.documentId,
@@ -4256,20 +4181,18 @@ test("submitting Request crash boundaries roll back or publish deterministically
     const firstBridge = await environment.start({
       HTML_AI_FAILPOINT: failpoint,
     });
-    const opened = (await openWorkspace(firstBridge.baseUrl, sourcePath)).body;
-    const interrupted = await postJson(firstBridge.baseUrl, "/request", {
+    const opened = (await openWorkspace(firstBridge, sourcePath)).body;
+    const interrupted = await postJson(firstBridge, "/request", {
       sourcePath,
       expectedSourceSha256: opened.currentHtmlSha256,
       freezeCutoffRevision: 0,
       summary: failpoint,
     });
     assert.equal(interrupted.response.status, 500);
-    await stopChild(firstBridge.child);
+    await firstBridge.stop();
 
     const restarted = await environment.start();
-    const recoveredResponse = await openWorkspace(
-      restarted.baseUrl,
-      sourcePath,
+    const recoveredResponse = await openWorkspace(restarted, sourcePath,
     );
     assert.equal(
       recoveredResponse.response.status,
@@ -4288,7 +4211,7 @@ test("submitting Request crash boundaries roll back or publish deterministically
         recovered.runtimeState.activeRun.inputManifestSha256,
         /^sha256:[a-f0-9]{64}$/,
       );
-      await postJson(restarted.baseUrl, "/active-run/cancel", {
+      await postJson(restarted, "/active-run/cancel", {
         sourcePath,
         requestId: recovered.runtimeState.activeRun.requestId,
         attemptId: recovered.runtimeState.activeRun.attemptId,
@@ -4304,9 +4227,9 @@ test("transaction recovery rejects an unsupported schema before recovery mutatio
   const firstBridge = await environment.start({
     HTML_AI_FAILPOINT: "after-prepared",
   });
-  const opened = (await openWorkspace(firstBridge.baseUrl, sourcePath)).body;
+  const opened = (await openWorkspace(firstBridge, sourcePath)).body;
   const run = (
-    await postJson(firstBridge.baseUrl, "/request", {
+    await postJson(firstBridge, "/request", {
       sourcePath,
       expectedSourceSha256: opened.currentHtmlSha256,
       freezeCutoffRevision: 0,
@@ -4318,13 +4241,11 @@ test("transaction recovery rejects an unsupported schema before recovery mutatio
     htmlPage("Transaction schema", "<p>candidate</p>"),
     "utf8",
   );
-  await runFinalizer(environment.workspace, run);
-  const interrupted = await requestJson(
-    firstBridge.baseUrl,
-    `/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
+  await runOfficialFinalizer(environment.workspace, run);
+  const interrupted = await firstBridge.requestJson(`/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
   );
   assert.equal(interrupted.response.status, 500);
-  await stopChild(firstBridge.child);
+  await firstBridge.stop();
   const projectRoot = projectRootFromRun(run);
   const transactionPath = join(
     projectRoot,
@@ -4344,9 +4265,7 @@ test("transaction recovery rejects an unsupported schema before recovery mutatio
   const sourceBefore = await readFile(sourcePath, "utf8");
   const restarted = await environment.start();
   assert.equal(await readFile(runtimePath, "utf8"), runtimeBefore);
-  const rejected = await requestJson(
-    restarted.baseUrl,
-    `/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
+  const rejected = await restarted.requestJson(`/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
   );
   assert.equal(rejected.response.status, 409);
   assert.equal(rejected.body.error.code, "UNSUPPORTED_SCHEMA_VERSION");
@@ -4375,10 +4294,10 @@ test("every Version transaction boundary recovers one committed candidate", asyn
     const firstBridge = await environment.start({
       HTML_AI_FAILPOINT: failpoint,
     });
-    const opened = (await openWorkspace(firstBridge.baseUrl, sourcePath)).body;
+    const opened = (await openWorkspace(firstBridge, sourcePath)).body;
     const originalSourceBeforeRun = await readFile(sourcePath, "utf8");
     const run = (
-      await postJson(firstBridge.baseUrl, "/request", {
+      await postJson(firstBridge, "/request", {
         sourcePath,
         expectedSourceSha256: opened.currentHtmlSha256,
         freezeCutoffRevision: 0,
@@ -4393,25 +4312,21 @@ test("every Version transaction boundary recovers one committed candidate", asyn
       ),
       "utf8",
     );
-    await runFinalizer(environment.workspace, run);
-    const interrupted = await requestJson(
-      firstBridge.baseUrl,
-      `/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
+    await runOfficialFinalizer(environment.workspace, run);
+    const interrupted = await firstBridge.requestJson(`/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
     );
     assert.equal(interrupted.response.status, 500);
-    await stopChild(firstBridge.child);
+    await firstBridge.stop();
 
     const restarted = await environment.start();
-    const recovered = await requestJson(
-      restarted.baseUrl,
-      `/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
+    const recovered = await restarted.requestJson(`/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
     );
     assert.equal(recovered.response.status, 200);
     assert.equal(recovered.body.status, "ready-to-open");
     assert.equal(recovered.body.versionId, "ver_0002");
     assert.equal(await readFile(sourcePath, "utf8"), originalSourceBeforeRun);
-    await activateReadyVersion(restarted.baseUrl, recovered.body);
-    const workspace = (await openWorkspace(restarted.baseUrl, sourcePath)).body;
+    await activateReadyVersion(restarted, recovered.body);
+    const workspace = (await openWorkspace(restarted, sourcePath)).body;
     assert.equal(workspace.versions.length, 2);
     assert.equal(workspace.latestVersionId, "ver_0002");
     assert.equal(await readFile(sourcePath, "utf8"), originalSourceBeforeRun);
@@ -4455,9 +4370,9 @@ test("finalizer crash boundaries preserve frozen evidence and remain retry-safe"
   const sourcePath = join(environment.sources, "finalizer-boundaries.html");
   await writeFile(sourcePath, htmlPage("最终化边界"), "utf8");
   const bridge = await environment.start();
-  const opened = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
+  const opened = (await openWorkspace(bridge, sourcePath)).body;
   const firstRun = (
-    await postJson(bridge.baseUrl, "/request", {
+    await postJson(bridge, "/request", {
       sourcePath,
       expectedSourceSha256: opened.currentHtmlSha256,
       freezeCutoffRevision: 0,
@@ -4470,24 +4385,22 @@ test("finalizer crash boundaries preserve frozen evidence and remain retry-safe"
     "utf8",
   );
   await assert.rejects(
-    runFinalizer(environment.workspace, firstRun, {
+    runOfficialFinalizer(environment.workspace, firstRun, {
       environment: {
         HTML_AI_FAILPOINT: "after-finalization-output",
       },
     }),
   );
   await assert.rejects(access(firstRun.completionPath));
-  await runFinalizer(environment.workspace, firstRun);
-  const firstCommitted = await requestJson(
-    bridge.baseUrl,
-    `/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${firstRun.requestId}&attemptId=${firstRun.attemptId}`,
+  await runOfficialFinalizer(environment.workspace, firstRun);
+  const firstCommitted = await bridge.requestJson(`/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${firstRun.requestId}&attemptId=${firstRun.attemptId}`,
   );
   assert.equal(firstCommitted.body.status, "ready-to-open");
-  await activateReadyVersion(bridge.baseUrl, firstCommitted.body);
+  await activateReadyVersion(bridge, firstCommitted.body);
 
-  const afterFirst = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
+  const afterFirst = (await openWorkspace(bridge, sourcePath)).body;
   const secondRun = (
-    await postJson(bridge.baseUrl, "/request", {
+    await postJson(bridge, "/request", {
       sourcePath,
       expectedSourceSha256: afterFirst.currentHtmlSha256,
       freezeCutoffRevision: afterFirst.runtimeState.editRevision,
@@ -4500,16 +4413,14 @@ test("finalizer crash boundaries preserve frozen evidence and remain retry-safe"
     "utf8",
   );
   await assert.rejects(
-    runFinalizer(environment.workspace, secondRun, {
+    runOfficialFinalizer(environment.workspace, secondRun, {
       environment: {
         HTML_AI_FAILPOINT: "after-finalization",
       },
     }),
   );
   await access(secondRun.completionPath);
-  const secondCommitted = await requestJson(
-    bridge.baseUrl,
-    `/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${secondRun.requestId}&attemptId=${secondRun.attemptId}`,
+  const secondCommitted = await bridge.requestJson(`/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${secondRun.requestId}&attemptId=${secondRun.attemptId}`,
   );
   assert.equal(secondCommitted.body.status, "ready-to-open");
   assert.equal(secondCommitted.body.versionId, "ver_0003");
@@ -4520,7 +4431,7 @@ test("version list returns hash-validated comments, local edits, and AI dialogue
   const sourcePath = join(environment.sources, "history-annotations.html");
   await writeFile(sourcePath, htmlPage("历史审计"), "utf8");
   const bridge = await environment.start();
-  const opened = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
+  const opened = (await openWorkspace(bridge, sourcePath)).body;
   const editCreatedAt = "2026-07-18T06:01:02.000Z";
   const commentCreatedAt = "2026-07-18T06:02:03.000Z";
   const target = {
@@ -4539,7 +4450,7 @@ test("version list returns hash-validated comments, local edits, and AI dialogue
     after: "历史审计（已手动调整）",
     capturedRevision: 1,
   };
-  const saved = await postJson(bridge.baseUrl, "/autosave", {
+  const saved = await postJson(bridge, "/autosave", {
     sourcePath,
     projectId: opened.projectId,
     documentId: opened.documentId,
@@ -4551,7 +4462,7 @@ test("version list returns hash-validated comments, local edits, and AI dialogue
   assert.equal(saved.response.status, 200);
 
   const run = (
-    await postJson(bridge.baseUrl, "/request", {
+    await postJson(bridge, "/request", {
       sourcePath,
       projectId: opened.projectId,
       documentId: opened.documentId,
@@ -4601,16 +4512,14 @@ test("version list returns hash-validated comments, local edits, and AI dialogue
     ),
     "utf8",
   );
-  await runFinalizer(environment.workspace, run);
-  const committed = await requestJson(
-    bridge.baseUrl,
-    `/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
+  await runOfficialFinalizer(environment.workspace, run);
+  const committed = await bridge.requestJson(`/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
   );
   assert.equal(committed.body.status, "ready-to-open");
   assert.equal(committed.body.supplement.status, "sealed");
   assert.equal(committed.body.supplement.recordCount, 1);
 
-  const workspace = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
+  const workspace = (await openWorkspace(bridge, sourcePath)).body;
   const version = workspace.versions.find(
     (item) => item.versionId === "ver_0002",
   );
@@ -4669,7 +4578,7 @@ test("version list returns hash-validated comments, local edits, and AI dialogue
     `${JSON.stringify(tamperedAnnotations, null, 2)}\n`,
     "utf8",
   );
-  const rejected = await openWorkspace(bridge.baseUrl, sourcePath);
+  const rejected = await openWorkspace(bridge, sourcePath);
   assert.equal(rejected.response.status, 409);
   assert.equal(
     rejected.body.error.code,
@@ -4685,9 +4594,9 @@ test("workspace verifies and normalizes retired executable fields without rewrit
   );
   await writeFile(sourcePath, htmlPage("旧版候选评估"), "utf8");
   const bridge = await environment.start();
-  const opened = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
+  const opened = (await openWorkspace(bridge, sourcePath)).body;
   const run = (
-    await postJson(bridge.baseUrl, "/request", {
+    await postJson(bridge, "/request", {
       sourcePath,
       projectId: opened.projectId,
       documentId: opened.documentId,
@@ -4705,14 +4614,12 @@ test("workspace verifies and normalizes retired executable fields without rewrit
     ),
     "utf8",
   );
-  await runFinalizer(environment.workspace, run);
-  const ready = await requestJson(
-    bridge.baseUrl,
-    `/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
+  await runOfficialFinalizer(environment.workspace, run);
+  const ready = await bridge.requestJson(`/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
   );
   assert.equal(ready.response.status, 200, JSON.stringify(ready.body));
   assert.equal(ready.body.status, "ready-to-open");
-  const activated = await activateReadyVersion(bridge.baseUrl, ready.body);
+  const activated = await activateReadyVersion(bridge, ready.body);
   const activatedHtml = await readFile(activated.currentPath, "utf8");
 
   const assessmentPath = join(
@@ -4734,9 +4641,7 @@ test("workspace verifies and normalizes retired executable fields without rewrit
   const persistedLegacyText = `${JSON.stringify(legacyAssessment, null, 2)}\n`;
   await writeFile(assessmentPath, persistedLegacyText, "utf8");
 
-  const restored = await previewWorkspace(
-    bridge.baseUrl,
-    activated.currentPath,
+  const restored = await previewWorkspace(bridge, activated.currentPath,
   );
   assert.equal(restored.response.status, 200, JSON.stringify(restored.body));
   const restoredVersion = restored.body.versions.find(
@@ -4758,9 +4663,7 @@ test("workspace verifies and normalizes retired executable fields without rewrit
     `${JSON.stringify(legacyAssessment, null, 2)}\n`,
     "utf8",
   );
-  const rejected = await previewWorkspace(
-    bridge.baseUrl,
-    activated.currentPath,
+  const rejected = await previewWorkspace(bridge, activated.currentPath,
   );
   assert.equal(rejected.response.status, 409);
   assert.equal(rejected.body.error.code, "CANDIDATE_ASSESSMENT_INVALID");
@@ -4778,10 +4681,10 @@ test("workspace normalizes retired fields for an archived failed terminal outcom
   );
   await writeFile(sourcePath, htmlPage("旧版失败终态评估"), "utf8");
   const bridge = await environment.start();
-  const opened = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
+  const opened = (await openWorkspace(bridge, sourcePath)).body;
   const originalSource = await readFile(sourcePath, "utf8");
   const run = (
-    await postJson(bridge.baseUrl, "/request", {
+    await postJson(bridge, "/request", {
       sourcePath,
       projectId: opened.projectId,
       documentId: opened.documentId,
@@ -4795,10 +4698,8 @@ test("workspace normalizes retired fields for an archived failed terminal outcom
     "<!doctype html><html><head><title>空页面</title></head><body></body></html>",
     "utf8",
   );
-  await runFinalizer(environment.workspace, run);
-  const rejected = await requestJson(
-    bridge.baseUrl,
-    `/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
+  await runOfficialFinalizer(environment.workspace, run);
+  const rejected = await bridge.requestJson(`/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
   );
   assert.equal(rejected.response.status, 200, JSON.stringify(rejected.body));
   assert.equal(rejected.body.status, "error");
@@ -4821,7 +4722,7 @@ test("workspace normalizes retired fields for an archived failed terminal outcom
   const persistedLegacyText = `${JSON.stringify(legacyAssessment, null, 2)}\n`;
   await writeFile(assessmentPath, persistedLegacyText, "utf8");
 
-  const restored = await openWorkspace(bridge.baseUrl, sourcePath);
+  const restored = await openWorkspace(bridge, sourcePath);
   assert.equal(restored.response.status, 200, JSON.stringify(restored.body));
   assert.equal(restored.body.runtimeState.lifecycleState, "editing");
   assert.equal(restored.body.recentRunOutcome.status, "error");
@@ -4851,9 +4752,9 @@ test("history endpoints reject marker, manifest, and entry tampering", async (t)
   const sourcePath = join(environment.sources, "integrity.html");
   await writeFile(sourcePath, htmlPage("完整性"), "utf8");
   const bridge = await environment.start();
-  const opened = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
+  const opened = (await openWorkspace(bridge, sourcePath)).body;
   const run = (
-    await postJson(bridge.baseUrl, "/request", {
+    await postJson(bridge, "/request", {
       sourcePath,
       expectedSourceSha256: opened.currentHtmlSha256,
       freezeCutoffRevision: 0,
@@ -4865,13 +4766,11 @@ test("history endpoints reject marker, manifest, and entry tampering", async (t)
     htmlPage("完整性", "<p>immutable V2</p>"),
     "utf8",
   );
-  await runFinalizer(environment.workspace, run);
-  const ready = await requestJson(
-    bridge.baseUrl,
-    `/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
+  await runOfficialFinalizer(environment.workspace, run);
+  const ready = await bridge.requestJson(`/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
   );
   assert.equal(ready.body.status, "ready-to-open");
-  await activateReadyVersion(bridge.baseUrl, ready.body);
+  await activateReadyVersion(bridge, ready.body);
   const versionRoot = join(
     projectRootFromRun(run),
     "versions",
@@ -4885,9 +4784,7 @@ test("history endpoints reject marker, manifest, and entry tampering", async (t)
   const originalMarker = await readFile(markerPath);
 
   await writeFile(entryPath, htmlPage("tampered entry"), "utf8");
-  const entryRejected = await requestJson(
-    bridge.baseUrl,
-    `/version-file?sourcePath=${encodeURIComponent(sourcePath)}&versionId=ver_0002`,
+  const entryRejected = await bridge.requestJson(`/version-file?sourcePath=${encodeURIComponent(sourcePath)}&versionId=ver_0002`,
   );
   assert.equal(entryRejected.response.status, 409);
   assert.equal(
@@ -4899,7 +4796,7 @@ test("history endpoints reject marker, manifest, and entry tampering", async (t)
   const manifest = JSON.parse(originalManifest.toString("utf8"));
   manifest.summary = "tampered manifest";
   await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
-  const manifestRejected = await openWorkspace(bridge.baseUrl, sourcePath);
+  const manifestRejected = await openWorkspace(bridge, sourcePath);
   assert.equal(manifestRejected.response.status, 409);
   assert.equal(
     manifestRejected.body.error.code,
@@ -4910,9 +4807,7 @@ test("history endpoints reject marker, manifest, and entry tampering", async (t)
   const marker = JSON.parse(originalMarker.toString("utf8"));
   marker.contentSha256 = hash("not the entry");
   await writeFile(markerPath, `${JSON.stringify(marker, null, 2)}\n`);
-  const markerRejected = await requestJson(
-    bridge.baseUrl,
-    `/version-file?sourcePath=${encodeURIComponent(sourcePath)}&versionId=ver_0002`,
+  const markerRejected = await bridge.requestJson(`/version-file?sourcePath=${encodeURIComponent(sourcePath)}&versionId=ver_0002`,
   );
   assert.equal(markerRejected.response.status, 409);
   assert.equal(
@@ -4926,9 +4821,9 @@ test("output PROJECT.md is rejected as a protocol violation", async (t) => {
   const sourcePath = join(environment.sources, "protocol-violation.html");
   await writeFile(sourcePath, htmlPage("协议错误"), "utf8");
   const bridge = await environment.start();
-  const opened = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
+  const opened = (await openWorkspace(bridge, sourcePath)).body;
   const run = (
-    await postJson(bridge.baseUrl, "/request", {
+    await postJson(bridge, "/request", {
       sourcePath,
       expectedSourceSha256: opened.currentHtmlSha256,
       freezeCutoffRevision: 0,
@@ -4939,9 +4834,7 @@ test("output PROJECT.md is rejected as a protocol violation", async (t) => {
     join(run.attemptPath, "output", "PROJECT.md"),
     "# unauthorized project-rule update",
   );
-  const status = await requestJson(
-    bridge.baseUrl,
-    `/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
+  const status = await bridge.requestJson(`/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
   );
   assert.equal(status.response.status, 200);
   assert.equal(status.body.status, "error");
@@ -4955,9 +4848,7 @@ test("output PROJECT.md is rejected as a protocol violation", async (t) => {
   );
   assert.equal(archived.status, "failed");
   assert.equal(archived.error.code, "OUTPUT_PROTOCOL_VIOLATION");
-  const reconciledCancel = await postJson(
-    bridge.baseUrl,
-    "/active-run/cancel",
+  const reconciledCancel = await postJson(bridge, "/active-run/cancel",
     {
       sourcePath,
       requestId: run.requestId,
@@ -4967,7 +4858,7 @@ test("output PROJECT.md is rejected as a protocol violation", async (t) => {
   assert.equal(reconciledCancel.response.status, 200);
   assert.equal(reconciledCancel.body.status, "already-inactive");
   assert.equal(reconciledCancel.body.terminalStatus, "failed");
-  const workspace = (await openWorkspace(bridge.baseUrl, sourcePath)).body;
+  const workspace = (await openWorkspace(bridge, sourcePath)).body;
   assert.equal(workspace.runtimeState.lifecycleState, "editing");
   assert.equal(workspace.runtimeState.activeRun, null);
   assert.equal(workspace.recentRunOutcome.status, "error");

@@ -112,6 +112,18 @@ const TASK_OWNER_CASES = [
     directOwners: ["tests/workspace-bridge.test.mjs"],
     unrelatedOwners: ["tests/desktop-package.test.mjs", "tests/review-runtime-capture-owner.test.mjs"],
   },
+  {
+    file: "tests/helpers/bridge-test-environment.mjs",
+    nodeTests: [
+      "tests/bridge-test-environment.test.mjs",
+      "tests/schema-contract.test.mjs",
+      "tests/scope-validator.test.mjs",
+      "tests/workspace-bridge.test.mjs",
+    ],
+    suites: ["typecheck", "lint", "node-targeted"],
+    directOwners: ["tests/bridge-test-environment.test.mjs"],
+    unrelatedOwners: ["tests/desktop-package.test.mjs", "tests/review-runtime-capture-owner.test.mjs"],
+  },
 ];
 
 test("edit and task gates select deterministic impact-based coverage", () => {
@@ -172,6 +184,23 @@ test("owner rules select only the direct regression coverage for representative 
     totalNodeTests += plan.selectedNodeTests.length;
   }
   assert.ok(totalNodeTests <= 56, `representative ownership selected ${totalNodeTests} Node tests`);
+});
+
+test("Bridge fixture changes select the helper and its schema, scope, and workspace owners", () => {
+  const expected = [
+    "tests/bridge-test-environment.test.mjs",
+    "tests/schema-contract.test.mjs",
+    "tests/scope-validator.test.mjs",
+    "tests/workspace-bridge.test.mjs",
+  ];
+  for (const file of [
+    "tests/helpers/bridge-test-environment.mjs",
+    "tests/helpers/ai-attempt-fixture.mjs",
+  ]) {
+    const plan = selectGatePlan({ map, lane: "edit", changedFiles: [file] });
+    assert.deepEqual(plan.selectedNodeTests, expected, file);
+    assert.deepEqual(suiteIds(plan), ["node-targeted"], file);
+  }
 });
 
 test("unmapped code still falls back to the core Node group", () => {
