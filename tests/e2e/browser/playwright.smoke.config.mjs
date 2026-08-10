@@ -18,6 +18,7 @@ const smokeTitles = [
   "bare-text fragments persist toolbar and shortcut formatting through guarded source patches",
   "deleting a bare-text fragment ends its session without a blocked resume",
   "IME confirmation replays at the frozen left-style caret",
+  "a repeated header command waits for composition and replays only once",
   "out-of-band mutation restores the last safe draft and reports in the viewport",
   "one unsaved comment blocks a second target and Canvas selection keeps its scroll",
   "indexed script tabs keep hidden comments grouped, suppress ghost markers, and shrink the canvas",

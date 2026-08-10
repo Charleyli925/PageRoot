@@ -32,7 +32,6 @@ const TASK_OWNER_CASES = [
   {
     file: "app/workbench/review-document.ts",
     nodeTests: [
-      "tests/ai-review-workspace.test.mjs",
       "tests/review-comment-source-map.test.mjs",
       "tests/review-projection-facts.test.mjs",
       "tests/review-runtime-visual.test.mjs",
@@ -41,7 +40,15 @@ const TASK_OWNER_CASES = [
       "tests/runtime-snapshot-hosts.test.mjs",
       "tests/runtime-visual-contract.test.mjs",
     ],
-    suites: ["typecheck", "lint", "node-targeted", "build-desktop", "ai-smoke"],
+    suites: [
+      "typecheck",
+      "lint",
+      "node-targeted",
+      "build-web",
+      "browser-smoke",
+      "build-desktop",
+      "ai-smoke",
+    ],
     directOwners: ["tests/review-text-diff.test.mjs", "tests/runtime-visual-contract.test.mjs"],
     unrelatedOwners: [
       "tests/desktop-package.test.mjs",
@@ -54,7 +61,7 @@ const TASK_OWNER_CASES = [
     nodeTests: ["tests/notification-policy.test.mjs"],
     suites: ["typecheck", "lint", "node-targeted", "build-web", "browser-smoke"],
     directOwners: ["tests/notification-policy.test.mjs"],
-    unrelatedOwners: ["tests/html-preview-sandbox.test.mjs", "tests/native-command-queue-contract.test.mjs"],
+    unrelatedOwners: ["tests/architecture-boundaries.test.mjs", "tests/html-preview-sandbox.test.mjs"],
   },
   {
     file: "app/application/comment-session.js",
@@ -312,6 +319,53 @@ test("the one rendered Node test schedules its production build before the targe
   assert.deepEqual(plan.selectedNodeTests, ["tests/rendered-html.test.mjs"]);
 });
 
+test("Workbench and review surfaces route to architecture or observable runtime owners", () => {
+  const workbench = selectGatePlan({
+    map,
+    lane: "task",
+    changedFiles: ["app/workbench.tsx"],
+  });
+  assert.deepEqual(workbench.selectedNodeTests, [
+    "tests/architecture-boundaries.test.mjs",
+  ]);
+  assert.deepEqual(suiteIds(workbench), [
+    "typecheck",
+    "lint",
+    "node-targeted",
+    "build-web",
+    "browser-smoke",
+    "build-desktop",
+    "electron-smoke",
+    "ai-smoke",
+  ]);
+
+  const reviewUi = selectGatePlan({
+    map,
+    lane: "task",
+    changedFiles: ["app/workbench/AiReviewWorkspace.tsx"],
+  });
+  assert.deepEqual(reviewUi.selectedNodeTests, []);
+  assert.deepEqual(suiteIds(reviewUi), [
+    "typecheck",
+    "lint",
+    "build-desktop",
+    "ai-smoke",
+  ]);
+
+  const bootstrap = selectGatePlan({
+    map,
+    lane: "task",
+    changedFiles: ["tests/helpers/generated-review-bootstrap.mjs"],
+  });
+  assert.deepEqual(bootstrap.selectedNodeTests, []);
+  assert.deepEqual(suiteIds(bootstrap), [
+    "typecheck",
+    "lint",
+    "build-web",
+    "browser-smoke",
+  ]);
+});
+
 test("documentation-only changes produce an explicit no-test plan", () => {
   const plan = selectGatePlan({
     map,
@@ -536,7 +590,7 @@ test("Node groups partition every top-level test exactly once outside full", asy
   ].map(relative);
   assert.equal(new Set(categorized).size, categorized.length);
   assert.deepEqual([...new Set(categorized)].sort(), groups.full.map(relative).sort());
-  assert.ok(groups.contract.some((file) => file.endsWith("native-command-queue-contract.test.mjs")));
+  assert.deepEqual(groups.contract.map(relative), ["architecture-boundaries.test.mjs"]);
   assert.ok(groups.core.some((file) => file.endsWith("notification-policy.test.mjs")));
   assert.equal(
     groups.contract.some((file) => /(?:notification-ui|workbench-shell-ux)\.test\.mjs$/u.test(file)),

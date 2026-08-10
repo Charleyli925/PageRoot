@@ -53,6 +53,22 @@ function importedSpecifiers(source) {
   ].map((match) => match[1]);
 }
 
+function sourceSection(source, startMarker, endMarker) {
+  const start = source.indexOf(startMarker);
+  const end = source.indexOf(endMarker, start + startMarker.length);
+  return start >= 0 && end > start ? source.slice(start, end) : "";
+}
+
+function includesInOrder(source, markers) {
+  let cursor = -1;
+  for (const marker of markers) {
+    const next = source.indexOf(marker, cursor + 1);
+    if (next < 0) return false;
+    cursor = next;
+  }
+  return true;
+}
+
 export async function architectureViolations() {
   const files = await sourceFiles(path.join(PRODUCT_ROOT, "app"));
   const violations = [];
@@ -210,6 +226,10 @@ export async function architectureViolations() {
     path.join(PRODUCT_ROOT, "app", "workbench.tsx"),
     "utf8",
   );
+  const canvasEditor = await readFile(
+    path.join(PRODUCT_ROOT, "app", "components", "HtmlCanvasEditor.tsx"),
+    "utf8",
+  );
   const projectSession = await readFile(
     path.join(
       PRODUCT_ROOT,
@@ -313,6 +333,105 @@ export async function architectureViolations() {
         `app/workbench.tsx: ${boundary} must use the shared DrainCoordinator`,
       );
     }
+  }
+
+  const sourcePatchBoundary = sourceSection(
+    canvasEditor,
+    "const applySourceCommand = useCallback",
+    "const clearNativeEditCheckpointTimer",
+  );
+  if (
+    !includesInOrder(sourcePatchBoundary, [
+      "planSourcePatch(command, sourceIndex)",
+      "applyPatchPlan(",
+      "const sourceTransaction: HtmlCanvasSourceTransaction",
+      "onChangeRef.current(",
+      "result.html",
+      "sourceTransaction",
+    ])
+    || /\b(?:serializeDocument|getSerializedHtml)\b|\.innerHTML\b|onChangeRef\.current\([^)]*outerHTML/su.test(
+      canvasEditor,
+    )
+  ) {
+    violations.push(
+      "app/components/HtmlCanvasEditor.tsx: source edits must publish SourcePatch bytes plus their SourceTransaction and must never serialize preview DOM",
+    );
+  }
+
+  const nativeCommandBoundary = sourceSection(
+    canvasEditor,
+    "const deferNativeCommand = useCallback",
+    "deferNativeCommandRef.current = deferNativeCommand",
+  );
+  if (!includesInOrder(nativeCommandBoundary, [
+    "const incumbent = pendingNativeCommandCallbackRef.current",
+    "authority === \"system\" && incumbent?.authority === \"user-explicit\"",
+    "options.onDiscard?.(\"blocked-by-user-command\")",
+    "return true",
+    "active.session.queuePendingCommand",
+  ])) {
+    violations.push(
+      "app/components/HtmlCanvasEditor.tsx: native command arbitration must reject lower-priority system work before the controller queue",
+    );
+  }
+
+  const canonicalReplacementBoundary = sourceSection(
+    canvasEditor,
+    "restartCanonicalNativeEditRef.current = (",
+    "const moveSelected = useCallback",
+  );
+  if (!includesInOrder(canonicalReplacementBoundary, [
+    "currentNativeEditLeaseRef.current = null",
+    "activeNativeEditRef.current = null",
+    "discardPendingNativeCommands(\"session-ended\")",
+    "active.session.fenceDispose()",
+    "nativeDomGenerationRef.current += 1",
+    "parentNode.replaceChild(nextRoot, active.rootElement)",
+  ])) {
+    violations.push(
+      "app/components/HtmlCanvasEditor.tsx: canonical host replacement must retire the native lease before removing the authored DOM host",
+    );
+  }
+
+  const sourceFreezeBoundary = sourceSection(
+    workbench,
+    "const fenceAndFreezeCurrentCanvas = useCallback",
+    "const fileInputRef",
+  );
+  if (!includesInOrder(sourceFreezeBoundary, [
+    "const editor = editorRef.current",
+    "if (!editor)",
+    "const frozen = editor.freezeNow()",
+    "if (!frozen.ok)",
+    "editor.getSourceHtml() !== frozen.html",
+    "return { ok: true",
+  ])) {
+    violations.push(
+      "app/workbench.tsx: source transitions must fail closed unless Canvas freezes the exact current source bytes",
+    );
+  }
+
+  const requestBoundary = sourceSection(
+    workbench,
+    "const generateRequest = useCallback",
+    "const openCommittedVersion = useCallback",
+  );
+  if (
+    !includesInOrder(requestBoundary, [
+      "const frozen = editorRef.current?.freezeNow()",
+      "const capturedHtml = frozen.html",
+      "const persistedSourceSha256 = documentSessionRef.current.sourceSha256",
+      "persistedSourceSha256 !== frozen.sourceSha256",
+      "bridgeClient.createRequest({",
+      "expectedSourceSha256: persistedSourceSha256",
+    ])
+    || /EditRuntimeSnapshotSession|runtimeVisualProjection|runtimeVisualViewport|htmlAIRuntimeSnapshots|data-pageroot-readonly-visual/u.test(
+      workbench,
+    )
+  ) {
+    violations.push(
+      "app/workbench.tsx: AI requests must bind the exact frozen persisted source and Edit must not own a runtime projection",
+    );
   }
   return violations;
 }

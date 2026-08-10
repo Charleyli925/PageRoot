@@ -465,14 +465,12 @@
       ],
       "suites": ["typecheck", "browser-smoke", "electron-smoke"],
       "nodeTests": [
+        "tests/architecture-boundaries.test.mjs",
         "tests/editable-island.test.mjs",
         "tests/runtime-dom-source-map.test.mjs",
         "tests/source-text-map.test.mjs",
-        "tests/native-command-queue-contract.test.mjs",
         "tests/native-layout-guard.test.mjs",
-        "tests/html-preview-sandbox.test.mjs",
-        "tests/rendered-html.test.mjs",
-        "tests/workbench-source-fence-contract.test.mjs"
+        "tests/html-preview-sandbox.test.mjs"
       ]
     },
     {
@@ -493,9 +491,8 @@
         "^app/workbench/review-document\\.ts$",
         "^scripts/benchmark-review-analysis\\.mjs$"
       ],
-      "suites": ["typecheck", "ai-smoke"],
+      "suites": ["typecheck", "browser-smoke", "ai-smoke"],
       "nodeTests": [
-        "tests/ai-review-workspace.test.mjs",
         "tests/review-comment-source-map.test.mjs",
         "tests/review-projection-facts.test.mjs",
         "tests/review-runtime-visual.test.mjs",
@@ -524,15 +521,27 @@
     {
       "id": "review-ui-state",
       "patterns": [
-        "^app/lib/(?:page-presentation-dom|review-scroll-sync)\\.(?:d\\.ts|js|ts)$",
         "^app/workbench/(?:AiReviewWorkspace|handoff-view|presentation|review-state|workbench-header-shell)\\.(?:ts|tsx)$",
         "^app/workbench/ai-review-workspace\\.module\\.css$"
       ],
-      "suites": ["typecheck", "browser-smoke"],
-      "nodeTests": [
-        "tests/ai-review-workspace.test.mjs",
-        "tests/review-scroll-sync.test.mjs"
-      ]
+      "suites": ["typecheck", "ai-smoke"],
+      "nodeTests": []
+    },
+    {
+      "id": "review-scroll-sync",
+      "patterns": [
+        "^app/lib/review-scroll-sync\\.(?:d\\.ts|js)$"
+      ],
+      "suites": ["typecheck", "ai-smoke"],
+      "nodeTests": ["tests/review-scroll-sync.test.mjs"]
+    },
+    {
+      "id": "review-bootstrap-browser",
+      "patterns": [
+        "^tests/helpers/generated-review-bootstrap\\.mjs$"
+      ],
+      "suites": ["browser-smoke"],
+      "nodeTests": []
     },
     {
       "id": "workbench-orchestration",
@@ -541,11 +550,7 @@
         "^app/workbench/(?:browser-io|comment-model|project-model|record-model|types)\\.ts$"
       ],
       "suites": ["typecheck", "browser-smoke", "electron-smoke", "ai-smoke"],
-      "nodeTests": [
-        "tests/ai-review-workspace.test.mjs",
-        "tests/native-command-queue-contract.test.mjs",
-        "tests/workbench-source-fence-contract.test.mjs"
-      ]
+      "nodeTests": ["tests/architecture-boundaries.test.mjs"]
     },
     {
       "id": "workbench-audit-events",

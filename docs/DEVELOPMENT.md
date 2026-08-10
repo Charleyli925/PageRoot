@@ -71,6 +71,14 @@ changing `tests/test-impact-map.json`, run
 selection contract keeps direct-owner coverage narrow while the `release` lane
 remains a fixed complete suite.
 
+Node business tests use public Session/algorithm outcomes rather than scanning
+Workbench, Canvas, JSX, CSS, or callback source. Explicit application
+source-shape invariants are centralized in `scripts/check-architecture.mjs` and
+executed by `tests/architecture-boundaries.test.mjs`; package, dependency,
+security, and workflow scans remain with their dedicated owners. The one SSR
+test, `tests/rendered-html.test.mjs`, imports the real `dist/server/index.js`, so
+impact selection schedules `build-web` before running it.
+
 The developer-preview, release and artifact lanes stop if the worktree is dirty or if HEAD/tree changes during the run. Test reports are written to the ignored `output/test-runs/` directory; successful installer lanes additionally write `package-delivery-report.json` and `.md` below `output/`. The final report step requires live GitHub PR metadata and fails the installer handoff if it cannot enumerate the exact tag-to-commit range. Package commands always build the exact current clean Tree; they do not discover or merge other PRs. For an unqualified "latest" package request, prepare the required `origin/main` plus non-excluded-PR integration Tree first as documented in `docs/GIT_WORKFLOW.md`. `package:developer` is never called by another lane: run it only after an explicit developer request. Its ad-hoc, unnotarized DMG is retained for short installation feedback and is never release-eligible. See `docs/DEVELOPER_PREVIEW_PLAYBOOK.md`.
 
 Desktop development and Electron E2E disable live update checks. The pure
