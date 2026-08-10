@@ -34,18 +34,12 @@ import {
   selectGatePlan,
   validateImpactMap,
 } from "../scripts/test-gate-core.mjs";
+import { fixturePackageJson } from "./helpers/release-evidence-fixtures.mjs";
 
 const productRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const sourcePackageJson = Object.freeze({
-  name: "pageroot",
-  version: "0.9.5",
-  main: "desktop/main.mjs",
-  build: {
-    appId: "com.htmlai.workbench",
-    productName: "PageRoot",
-    artifactName: "PageRoot-${version}-${arch}.${ext}",
-  },
-});
+function developerPreviewSourcePackageJson() {
+  return fixturePackageJson("release", { version: "0.9.5" });
+}
 
 function runGit(repository, arguments_) {
   const result = spawnSync("git", arguments_, {
@@ -145,7 +139,7 @@ test("developer preview identity uses committed first-parent order after the lat
     const firstCommit = runGit(repository, ["rev-parse", "HEAD"]);
     const first = resolveDeveloperPreviewIdentity({
       productRoot: repository,
-      packageJson: sourcePackageJson,
+      packageJson: developerPreviewSourcePackageJson(),
     });
     assert.equal(first.stableTag, "v0.9.5");
     assert.equal(first.buildSequence, 1);
@@ -159,7 +153,7 @@ test("developer preview identity uses committed first-parent order after the lat
     const secondCommit = runGit(repository, ["rev-parse", "HEAD"]);
     const second = resolveDeveloperPreviewIdentity({
       productRoot: repository,
-      packageJson: sourcePackageJson,
+      packageJson: developerPreviewSourcePackageJson(),
     });
     assert.equal(second.buildSequence, 2);
     assert.equal(second.sequenceVersion, "0.9.69992");
@@ -186,7 +180,7 @@ test("developer preview ignores non-official semver-shaped tags", async () => {
 
     const identity = resolveDeveloperPreviewIdentity({
       productRoot: repository,
-      packageJson: sourcePackageJson,
+      packageJson: developerPreviewSourcePackageJson(),
     });
     assert.equal(identity.stableTag, "v0.9.5");
     assert.equal(identity.sequenceVersion, "0.9.69991");
@@ -196,6 +190,7 @@ test("developer preview ignores non-official semver-shaped tags", async () => {
 });
 
 test("developer preview is an explicit ad-hoc DMG profile while release packaging stays unchanged", () => {
+  const sourcePackageJson = developerPreviewSourcePackageJson();
   assert.deepEqual(
     parseBuildOptions(["--arch", "arm64"]),
     { architecture: "arm64", prepackagedAppPath: null, profile: "release" },
@@ -295,7 +290,7 @@ test("developer preview attestation is explicitly non-release and binds exact by
   const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), "pageroot-preview-contract-"));
   try {
     const identity = createDeveloperPreviewIdentity({
-      packageJson: sourcePackageJson,
+      packageJson: developerPreviewSourcePackageJson(),
       stableVersion: "0.9.5",
       buildSequence: 2,
       commitSha: "a".repeat(40),

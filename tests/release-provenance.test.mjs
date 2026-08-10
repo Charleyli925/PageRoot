@@ -9,21 +9,17 @@ import {
   expectedBuildInfo,
   readRepositoryIdentity,
 } from "../scripts/release-provenance.mjs";
+import { fixtureBuildInfo } from "./helpers/release-evidence-fixtures.mjs";
 
 const productRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 function fixture(overrides = {}) {
-  return {
-    schemaVersion: 1,
-    name: "pageroot",
+  return fixtureBuildInfo({
     version: "0.8.6",
     architecture: "arm64",
-    sourceRepository: "https://github.com/Charleyli925/PageRoot",
-    commitSha: "a".repeat(40),
-    treeSha: "b".repeat(40),
     builtAt: "2026-07-23T00:00:00.000Z",
     ...overrides,
-  };
+  });
 }
 
 test("build provenance is strict and identifies one source tree", () => {

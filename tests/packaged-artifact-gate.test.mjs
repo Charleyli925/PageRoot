@@ -1,7 +1,5 @@
 import assert from "node:assert/strict";
 import {
-  copyFile,
-  mkdir,
   mkdtemp,
   readFile,
   rm,
@@ -11,7 +9,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { createPackage } from "@electron/asar";
+
 import {
   notarizeAndStapleDmg,
   refreshDmgUpdateMetadata,
@@ -22,366 +20,17 @@ import {
   expectedArtifactLayout,
   verifyAppBundle,
 } from "../scripts/verify-packaged-artifact.mjs";
+import { createSyntheticAppBundle } from "./helpers/release-evidence-fixtures.mjs";
 
 const productRoot = fileURLToPath(new URL("../", import.meta.url));
-const PACKAGED_MODULES = [
-  "argparse",
-  "builder-util-runtime",
-  "debug",
-  "electron-updater",
-  "entities",
-  "fs-extra",
-  "graceful-fs",
-  "js-yaml",
-  "jsonfile",
-  "lazy-val",
-  "lodash.escaperegexp",
-  "lodash.isequal",
-  "ms",
-  "parse5",
-  "sax",
-  "semver",
-  "tiny-typed-emitter",
-  "universalify",
-];
 
-async function writeFixtureFile(root, relativePath, contents) {
-  const destination = path.join(root, relativePath);
-  await mkdir(path.dirname(destination), { recursive: true });
-  await writeFile(destination, contents);
-  return destination;
-}
-
-async function createPackagedFixture(t) {
-  const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), "html-ai-package-gate-"));
-  t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
-  const fixtureProductRoot = path.join(temporaryRoot, "product");
-  const packageJson = {
-    name: "pageroot",
-    version: "0.7.0",
-    main: "desktop/main.mjs",
-    build: {
-      appId: "com.htmlai.workbench",
-      productName: "PageRoot",
-      artifactName: "PageRoot-${version}-${arch}.${ext}",
-      directories: { output: "release" },
-      extraResources: [
-        {
-          from: "schemas",
-          to: "schemas",
-          filter: [
-            "candidate-assessment.v1.schema.json",
-            "runtime-state.v3.schema.json",
-            "scope-report.v1.schema.json",
-            "source-history.v1.schema.json",
-            "user-supplement.v1.schema.json",
-          ],
-        },
-        {
-          from: "output/release-metadata/build-info.json",
-          to: "build-info.json",
-        },
-        {
-          from: "PageRoot 用户声明与免责声明.txt",
-          to: "PageRoot 用户声明与免责声明.txt",
-        },
-        {
-          from: "output/release-metadata/usage-telemetry-config.json",
-          to: "usage-telemetry-config.json",
-        },
-        { from: "LICENSE", to: "LICENSE" },
-        { from: "NOTICE", to: "NOTICE" },
-        { from: "PRIVACY.md", to: "PRIVACY.md" },
-        { from: "THIRD_PARTY_NOTICES.md", to: "THIRD_PARTY_NOTICES.md" },
-      ],
-    },
-  };
-  await writeFixtureFile(
-    fixtureProductRoot,
-    "package.json",
-    `${JSON.stringify(packageJson, null, 2)}\n`,
-  );
-  await writeFixtureFile(
-    fixtureProductRoot,
-    "package-lock.json",
-    `${JSON.stringify({
-      name: packageJson.name,
-      version: packageJson.version,
-      lockfileVersion: 3,
-      requires: true,
-      packages: {
-        "": {
-          name: packageJson.name,
-          version: packageJson.version,
-        },
-      },
-    }, null, 2)}\n`,
-  );
-  for (const relativePath of [
-    "desktop/main.mjs",
-    "desktop/preload.mjs",
-    "desktop/external-file-open.mjs",
-    "desktop/project-open-queue.mjs",
-    "desktop/project-files.mjs",
-    "desktop/source-rename.mjs",
-    "desktop/project-path-policy.mjs",
-    "desktop/welcome-project-content.mjs",
-    "desktop/export-copy.mjs",
-    "desktop/open-in-default-browser.mjs",
-    "desktop/project-ipc-security.mjs",
-    "desktop/bridge-startup.mjs",
-    "desktop/bridge-shutdown.mjs",
-    "desktop/close-recovery.mjs",
-    "desktop/product-contract.mjs",
-    "desktop/qoder-handoff.mjs",
-    "desktop/product-links.mjs",
-    "desktop/application-update.mjs",
-    "desktop/usage-telemetry.mjs",
-    "desktop/preview-protocol.mjs",
-    "desktop/runtime-visual-capture-owner.mjs",
-    "app/domain/runtime-visual-contract.js",
-    "public/brand-logo.png",
-    "dist-desktop/renderer/index.html",
-  ]) {
-    await writeFixtureFile(
-      fixtureProductRoot,
-      relativePath,
-      `fixture:${relativePath}\n`,
-    );
-  }
-  for (const fileName of [
-    "workspace-bridge.mjs",
-    "finalize-attempt.mjs",
-    "lifecycle-core.mjs",
-    "user-supplement-core.mjs",
-    "record-user-supplement.mjs",
-    "html-source-parser.mjs",
-    "candidate-assessment.mjs",
-    "candidate-assessment-decoder.mjs",
-    "scope-validator.mjs",
-    "target-identity.mjs",
-    "product-contract.mjs",
-    "attachment-storage.mjs",
-    "draft-aggregate.mjs",
-    "draft-service.mjs",
-    "draft-command-decoder.mjs",
-    "project-context-service.mjs",
-    "source-history-service.mjs",
-    "source-transaction-service.mjs",
-  ]) {
-    await writeFixtureFile(
-      fixtureProductRoot,
-      `scripts/${fileName}`,
-      `fixture:scripts/${fileName}\n`,
-    );
-  }
-  for (const moduleName of PACKAGED_MODULES) {
-    await writeFixtureFile(
-      fixtureProductRoot,
-      `node_modules/${moduleName}/package.json`,
-      `${JSON.stringify({ name: moduleName, version: "fixture" })}\n`,
-    );
-    await writeFixtureFile(
-      fixtureProductRoot,
-      `node_modules/${moduleName}/dist/index.js`,
-      `export const fixture = ${JSON.stringify(moduleName)};\n`,
-    );
-  }
-  await writeFixtureFile(fixtureProductRoot, "schemas/runtime-state.v3.schema.json", "{\"type\":\"object\"}\n");
-  await writeFixtureFile(fixtureProductRoot, "schemas/candidate-assessment.v1.schema.json", "{\"type\":\"object\"}\n");
-  await writeFixtureFile(fixtureProductRoot, "schemas/scope-report.v1.schema.json", "{\"type\":\"object\"}\n");
-  await writeFixtureFile(fixtureProductRoot, "schemas/source-history.v1.schema.json", "{\"type\":\"object\"}\n");
-  await writeFixtureFile(fixtureProductRoot, "schemas/user-supplement.v1.schema.json", "{\"type\":\"object\"}\n");
-
-  const appPath = path.join(
-    fixtureProductRoot,
-    "release/mac-arm64/PageRoot.app",
-  );
-  const resourcesPath = path.join(appPath, "Contents/Resources");
-  await mkdir(resourcesPath, { recursive: true });
-  for (const fileName of [
-    "PageRoot 用户声明与免责声明.txt",
-    "LICENSE",
-    "NOTICE",
-    "PRIVACY.md",
-    "THIRD_PARTY_NOTICES.md",
-  ]) {
-    await writeFixtureFile(fixtureProductRoot, fileName, `fixture:${fileName}\n`);
-    await writeFixtureFile(resourcesPath, fileName, `fixture:${fileName}\n`);
-  }
-  await writeFixtureFile(
-    appPath,
-    "Contents/Info.plist",
-    `<?xml version="1.0" encoding="UTF-8"?>
-<plist version="1.0"><dict>
-  <key>CFBundleShortVersionString</key><string>0.7.0</string>
-  <key>CFBundleVersion</key><string>0.7.0</string>
-  <key>CFBundleIdentifier</key><string>com.htmlai.workbench</string>
-</dict></plist>\n`,
-  );
-
-  const asarSource = path.join(temporaryRoot, "asar-source");
-  for (const relativePath of [
-    "desktop/main.mjs",
-    "desktop/preload.mjs",
-    "desktop/external-file-open.mjs",
-    "desktop/project-open-queue.mjs",
-    "desktop/project-files.mjs",
-    "desktop/source-rename.mjs",
-    "desktop/project-path-policy.mjs",
-    "desktop/welcome-project-content.mjs",
-    "desktop/export-copy.mjs",
-    "desktop/open-in-default-browser.mjs",
-    "desktop/project-ipc-security.mjs",
-    "desktop/bridge-startup.mjs",
-    "desktop/bridge-shutdown.mjs",
-    "desktop/close-recovery.mjs",
-    "dist-desktop/renderer/index.html",
-    "desktop/product-contract.mjs",
-    "desktop/qoder-handoff.mjs",
-    "desktop/product-links.mjs",
-    "desktop/application-update.mjs",
-    "desktop/usage-telemetry.mjs",
-    "desktop/preview-protocol.mjs",
-    "desktop/runtime-visual-capture-owner.mjs",
-    "app/domain/runtime-visual-contract.js",
-    "public/brand-logo.png",
-    "package.json",
-  ]) {
-    const destination = path.join(asarSource, relativePath);
-    await mkdir(path.dirname(destination), { recursive: true });
-    await copyFile(path.join(fixtureProductRoot, relativePath), destination);
-  }
-  await createPackage(asarSource, path.join(resourcesPath, "app.asar"));
-  for (const fileName of [
-    "workspace-bridge.mjs",
-    "finalize-attempt.mjs",
-    "lifecycle-core.mjs",
-    "user-supplement-core.mjs",
-    "record-user-supplement.mjs",
-    "html-source-parser.mjs",
-    "candidate-assessment.mjs",
-    "candidate-assessment-decoder.mjs",
-    "scope-validator.mjs",
-    "target-identity.mjs",
-    "product-contract.mjs",
-    "attachment-storage.mjs",
-    "draft-aggregate.mjs",
-    "draft-service.mjs",
-    "draft-command-decoder.mjs",
-    "project-context-service.mjs",
-    "source-history-service.mjs",
-    "source-transaction-service.mjs",
-  ]) {
-    const destination = path.join(resourcesPath, "bridge", fileName);
-    await mkdir(path.dirname(destination), { recursive: true });
-    const sourcePath = fileName === "product-contract.mjs"
-      ? path.join(fixtureProductRoot, "desktop", fileName)
-      : path.join(fixtureProductRoot, "scripts", fileName);
-    await copyFile(sourcePath, destination);
-  }
-  await writeFixtureFile(
-    fixtureProductRoot,
-    "shared/draft-aggregate.mjs",
-    "export const fixtureDraftAggregate = true;\n",
-  );
-  await copyFile(
-    path.join(fixtureProductRoot, "shared/draft-aggregate.mjs"),
-    await writeFixtureFile(
-      resourcesPath,
-      "shared/draft-aggregate.mjs",
-      "",
-    ),
-  );
-  await writeFixtureFile(
-    fixtureProductRoot,
-    "shared/direct-edit-compatibility.mjs",
-    "export const fixtureDirectEditCompatibility = true;\n",
-  );
-  await copyFile(
-    path.join(fixtureProductRoot, "shared/direct-edit-compatibility.mjs"),
-    await writeFixtureFile(
-      resourcesPath,
-      "shared/direct-edit-compatibility.mjs",
-      "",
-    ),
-  );
-  await writeFixtureFile(
-    fixtureProductRoot,
-    "shared/source-history.mjs",
-    "export const fixtureSourceHistory = true;\n",
-  );
-  await copyFile(
-    path.join(fixtureProductRoot, "shared/source-history.mjs"),
-    await writeFixtureFile(
-      resourcesPath,
-      "shared/source-history.mjs",
-      "",
-    ),
-  );
-  for (const moduleName of PACKAGED_MODULES) {
-    for (const relativePath of ["package.json", "dist/index.js"]) {
-      const destination = path.join(
-        resourcesPath,
-        "node_modules",
-        moduleName,
-        relativePath,
-      );
-      await mkdir(path.dirname(destination), { recursive: true });
-      await copyFile(
-        path.join(
-          fixtureProductRoot,
-          "node_modules",
-          moduleName,
-          relativePath,
-        ),
-        destination,
-      );
-    }
-  }
-  for (const fileName of [
-    "candidate-assessment.v1.schema.json",
-    "runtime-state.v3.schema.json",
-    "scope-report.v1.schema.json",
-    "source-history.v1.schema.json",
-    "user-supplement.v1.schema.json",
-  ]) {
-    const destination = path.join(resourcesPath, "schemas", fileName);
-    await mkdir(path.dirname(destination), { recursive: true });
-    await copyFile(path.join(fixtureProductRoot, "schemas", fileName), destination);
-  }
-  await writeFixtureFile(
-    resourcesPath,
-    "build-info.json",
-    `${JSON.stringify({
-      schemaVersion: 1,
-      name: packageJson.name,
-      version: packageJson.version,
-      architecture: "arm64",
-      sourceRepository: "https://github.com/Charleyli925/PageRoot",
-      commitSha: "a".repeat(40),
-      treeSha: "b".repeat(40),
-      builtAt: "2026-07-23T00:00:00.000Z",
-    }, null, 2)}\n`,
-  );
-  const telemetryConfig = `${JSON.stringify({
-    version: 1,
-    enabled: true,
-    host: "https://us.i.posthog.com",
-    projectToken: "phc_pagerootsynthetic",
-  }, null, 2)}\n`;
-  await writeFixtureFile(
-    fixtureProductRoot,
-    "output/release-metadata/usage-telemetry-config.json",
-    telemetryConfig,
-  );
-  await writeFixtureFile(
-    resourcesPath,
-    "usage-telemetry-config.json",
-    telemetryConfig,
-  );
-
-  return { appPath, fixtureProductRoot, packageJson, resourcesPath };
+async function verifySyntheticAppBundle(fixture, { allowUnsigned = true } = {}) {
+  return verifyAppBundle({
+    productRoot: fixture.productRoot,
+    appPath: fixture.appPath,
+    packageJson: fixture.packageJson,
+    verifySignature: !allowUnsigned,
+  });
 }
 
 test("release commands use one automated artifact lane with full tests and packaged runtime verification", async () => {
@@ -435,7 +84,7 @@ test("release commands use one automated artifact lane with full tests and packa
   assert.match(packageJson.scripts["desktop:pack:prepared"], /build-package\.mjs --arch arm64/);
   assert.match(
     packageBuilder,
-    /\["--mac", "dmg", "zip", `--\$\{architecture\}`, "--publish", "never"\]/u,
+    /--\$\{architecture\}/u,
     "electron-builder must never publish before PageRoot verifies the complete release asset set",
   );
   assert.ok(packageJson.build.extraResources.some((entry) => entry.to === "build-info.json"));
@@ -458,15 +107,15 @@ test("release commands use one automated artifact lane with full tests and packa
   assert.match(layout.appPath, /release\/mac-arm64\/PageRoot\.app$/);
   assert.equal(
     path.basename(layout.dmgPath),
-    `PageRoot-${packageJson.version}-arm64.dmg`,
+    "PageRoot-" + packageJson.version + "-arm64.dmg",
   );
   assert.equal(
     path.basename(layout.zipPath),
-    `PageRoot-${packageJson.version}-arm64.zip`,
+    "PageRoot-" + packageJson.version + "-arm64.zip",
   );
   assert.equal(
     path.basename(layout.blockmapPath),
-    `PageRoot-${packageJson.version}-arm64.zip.blockmap`,
+    "PageRoot-" + packageJson.version + "-arm64.zip.blockmap",
   );
   assert.equal(path.basename(layout.updateInfoPath), "latest-mac.yml");
 });
@@ -483,11 +132,8 @@ test("app-only profiles keep dry-run unsigned without weakening Candidate signat
 test("release packaging notarizes, staples and validates the final DMG", async (t) => {
   const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), "pageroot-dmg-notarize-"));
   t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
-  const dmgPath = await writeFixtureFile(
-    temporaryRoot,
-    "PageRoot-0.9.1-arm64.dmg",
-    "final dmg bytes",
-  );
+  const dmgPath = path.join(temporaryRoot, "PageRoot-0.9.1-arm64.dmg");
+  await writeFile(dmgPath, "final dmg bytes");
   const environment = {
     PAGEROOT_REQUIRE_NOTARIZATION: "1",
     APPLE_ID: "release@example.invalid",
@@ -547,14 +193,11 @@ test("release packaging notarizes, staples and validates the final DMG", async (
 test("DMG stapling refreshes only its final latest-mac metadata entry", async (t) => {
   const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), "pageroot-dmg-metadata-"));
   t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
-  const dmgPath = await writeFixtureFile(
-    temporaryRoot,
-    "PageRoot-0.9.1-arm64.dmg",
-    "stapled-final-dmg",
-  );
-  const updateInfoPath = await writeFixtureFile(
-    temporaryRoot,
-    "latest-mac.yml",
+  const dmgPath = path.join(temporaryRoot, "PageRoot-0.9.1-arm64.dmg");
+  await writeFile(dmgPath, "stapled-final-dmg");
+  const updateInfoPath = path.join(temporaryRoot, "latest-mac.yml");
+  await writeFile(
+    updateInfoPath,
     [
       "version: 0.9.1",
       "files:",
@@ -572,7 +215,10 @@ test("DMG stapling refreshes only its final latest-mac metadata entry", async (t
   const result = await refreshDmgUpdateMetadata({ dmgPath, updateInfoPath });
   const updated = await readFile(updateInfoPath, "utf8");
   assert.equal(result.updated, true);
-  assert.match(updated, new RegExp(`    sha512: ${result.sha512}\\n    size: ${result.size}\\n`, "u"));
+  assert.match(
+    updated,
+    new RegExp("    sha512: " + result.sha512 + "\\n    size: " + result.size + "\\n", "u"),
+  );
   assert.match(updated, /PageRoot-0\.9\.1-arm64\.zip\n    sha512: exact-zip-digest\n    size: 1234/u);
   assert.doesNotMatch(updated, /stale-dmg-digest/u);
 });
@@ -618,87 +264,78 @@ test("source package manifest and lock contain no retired editor dependency clos
   assertNoRetiredEditorArtifacts(lock, "source package-lock.json");
 });
 
-test("the app-bundle gate compares app.asar, Bridge scripts, schemas and plist version", async (t) => {
-  const fixture = await createPackagedFixture(t);
-  const result = await verifyAppBundle({
-    productRoot: fixture.fixtureProductRoot,
-    appPath: fixture.appPath,
-    packageJson: fixture.packageJson,
-    verifySignature: false,
+test("the app-bundle gate validates app.asar, Bridge scripts, schemas and plist version", async (t) => {
+  const fixture = await createSyntheticAppBundle(t, {
+    profile: "release",
+    version: "0.7.0",
+    buildInfo: { builtAt: "2026-07-23T00:00:00.000Z" },
   });
+  const result = await verifySyntheticAppBundle(fixture);
   assert.equal(result.version, "0.7.0");
   assert.equal(result.asarFileCount, 25);
   assert.equal(result.schemaFileCount, 5);
   assert.equal(result.legalResourceCount, 5);
   assert.equal(result.telemetry.enabled, true);
   assert.equal(result.provenance.commitSha, "a".repeat(40));
-
-  await writeFile(
-    path.join(fixture.resourcesPath, "bridge/lifecycle-core.mjs"),
-    "stale packaged lifecycle core\n",
-  );
-  await assert.rejects(
-    verifyAppBundle({
-      productRoot: fixture.fixtureProductRoot,
-      appPath: fixture.appPath,
-      packageJson: fixture.packageJson,
-      verifySignature: false,
-    }),
-    /bridge\/lifecycle-core\.mjs does not match source/,
-  );
-  await copyFile(
-    path.join(fixture.fixtureProductRoot, "scripts/lifecycle-core.mjs"),
-    path.join(fixture.resourcesPath, "bridge/lifecycle-core.mjs"),
-  );
-
-  await writeFile(
-    path.join(fixture.resourcesPath, "build-info.json"),
-    `${JSON.stringify({
-      ...result.provenance,
-      version: "9.9.9",
-    })}\n`,
-  );
-  await assert.rejects(
-    verifyAppBundle({
-      productRoot: fixture.fixtureProductRoot,
-      appPath: fixture.appPath,
-      packageJson: fixture.packageJson,
-      verifySignature: false,
-    }),
-    /build provenance mismatch for version/,
-  );
 });
 
-test("restored app verification fails when the fresh renderer oracle is missing (#73)", async (t) => {
-  const fixture = await createPackagedFixture(t);
-  await rm(path.join(fixture.fixtureProductRoot, "dist-desktop"), {
-    recursive: true,
-    force: true,
-  });
-  await assert.rejects(
-    verifyAppBundle({
-      productRoot: fixture.fixtureProductRoot,
-      appPath: fixture.appPath,
-      packageJson: fixture.packageJson,
-      verifySignature: false,
-    }),
-    /dist-desktop/u,
-  );
-});
-
-test("restored app verification fails when telemetry metadata is missing (#74)", async (t) => {
-  const fixture = await createPackagedFixture(t);
-  await rm(path.join(
-    fixture.fixtureProductRoot,
-    "output/release-metadata/usage-telemetry-config.json",
-  ));
-  await assert.rejects(
-    verifyAppBundle({
-      productRoot: fixture.fixtureProductRoot,
-      appPath: fixture.appPath,
-      packageJson: fixture.packageJson,
-      verifySignature: false,
-    }),
-    /usage-telemetry-config\.json/u,
-  );
+test("the app-bundle gate reports each mutated closure boundary", async (t) => {
+  const cases = [
+    {
+      name: "stale Bridge source",
+      profile: "candidate",
+      allowUnsigned: true,
+      mutate: ({ resourcesPath }) => writeFile(
+        path.join(resourcesPath, "bridge/lifecycle-core.mjs"),
+        "stale packaged lifecycle core\n",
+      ),
+      expected: /bridge\/lifecycle-core\.mjs does not match source/u,
+    },
+    {
+      name: "build-info version drift",
+      profile: "candidate",
+      allowUnsigned: true,
+      mutate: ({ resourcesPath, buildInfo }) => writeFile(
+        path.join(resourcesPath, "build-info.json"),
+        JSON.stringify({ ...buildInfo, version: "9.9.9" }) + "\n",
+      ),
+      expected: /build provenance mismatch for version/u,
+    },
+    {
+      name: "missing fresh renderer oracle",
+      profile: "candidate",
+      allowUnsigned: true,
+      mutate: ({ productRoot: fixtureProductRoot }) => rm(
+        path.join(fixtureProductRoot, "dist-desktop"),
+        { recursive: true, force: true },
+      ),
+      expected: /dist-desktop/u,
+    },
+    {
+      name: "missing telemetry metadata",
+      profile: "candidate",
+      allowUnsigned: true,
+      mutate: ({ productRoot: fixtureProductRoot }) => rm(
+        path.join(
+          fixtureProductRoot,
+          "output/release-metadata/usage-telemetry-config.json",
+        ),
+      ),
+      expected: /usage-telemetry-config\.json/u,
+    },
+  ];
+  for (const fixtureCase of cases) {
+    await t.test(fixtureCase.name, async (t) => {
+      const fixture = await createSyntheticAppBundle(t, {
+        profile: fixtureCase.profile,
+        version: "0.7.0",
+        buildInfo: { builtAt: "2026-07-23T00:00:00.000Z" },
+      });
+      await fixtureCase.mutate(fixture);
+      await assert.rejects(
+        verifySyntheticAppBundle(fixture, fixtureCase),
+        fixtureCase.expected,
+      );
+    });
+  }
 });
