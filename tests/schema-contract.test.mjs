@@ -1,28 +1,21 @@
 import assert from "node:assert/strict";
-import { execFile, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
-  mkdir,
-  mkdtemp,
   readFile,
-  realpath,
-  rm,
-  writeFile,
 } from "node:fs/promises";
-import { createServer } from "node:net";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { setTimeout as delay } from "node:timers/promises";
-import { promisify } from "node:util";
-import { fileURLToPath } from "node:url";
 
 import Ajv2020 from "../node_modules/schema-utils/node_modules/ajv/dist/2020.js";
-
-const execFileAsync = promisify(execFile);
-const productRoot = fileURLToPath(new URL("../", import.meta.url));
-const bridgeScript = join(productRoot, "scripts", "workspace-bridge.mjs");
-const finalizerScript = join(productRoot, "scripts", "finalize-attempt.mjs");
+import {
+  readStatus,
+  runOfficialFinalizer,
+  submitRequest,
+  writeAttemptOutput,
+} from "./helpers/ai-attempt-fixture.mjs";
+import {
+  createBridgeTestEnvironment,
+} from "./helpers/bridge-test-environment.mjs";
 
 const pairs = [
   ["annotation-records.v3.schema.json", "annotation-records.frozen.json"],
@@ -508,103 +501,6 @@ function validateRuntimeSemantics(runtime) {
 
 function sha256(value) {
   return `sha256:${createHash("sha256").update(value).digest("hex")}`;
-}
-
-async function reservePort() {
-  const server = createServer();
-  await new Promise((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", resolve);
-  });
-  const address = server.address();
-  assert.ok(address && typeof address === "object");
-  await new Promise((resolve, reject) => {
-    server.close((error) => (error ? reject(error) : resolve()));
-  });
-  return address.port;
-}
-
-async function stopChild(child) {
-  if (!child || child.exitCode !== null) return;
-  child.kill("SIGTERM");
-  const exited = new Promise((resolve) => child.once("exit", resolve));
-  const timedOut = await Promise.race([
-    exited.then(() => false),
-    delay(2_000).then(() => true),
-  ]);
-  if (timedOut && child.exitCode === null) {
-    child.kill("SIGKILL");
-    await new Promise((resolve) => child.once("exit", resolve));
-  }
-}
-
-async function requestJson(baseUrl, pathname, init) {
-  const response = await fetch(`${baseUrl}${pathname}`, init);
-  const body = await response.json();
-  return { response, body };
-}
-
-async function postJson(baseUrl, pathname, body) {
-  const requestBody =
-    pathname === "/request" && !Object.hasOwn(body, "targets")
-      ? {
-          ...body,
-          targets: [
-            {
-              targetId: "target_document",
-              label: "整个页面",
-              level: "module",
-              selector: "html",
-              resolution: "exact",
-            },
-          ],
-        }
-      : body;
-  return requestJson(baseUrl, pathname, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(requestBody),
-  });
-}
-
-async function startBridge(workspace) {
-  const port = await reservePort();
-  const baseUrl = `http://127.0.0.1:${port}`;
-  const logs = { stdout: "", stderr: "" };
-  const child = spawn(process.execPath, [bridgeScript], {
-    cwd: productRoot,
-    env: {
-      ...process.env,
-      HTML_AI_WORKSPACE: workspace,
-      HTML_AI_BRIDGE_PORT: String(port),
-    },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  child.stdout.setEncoding("utf8");
-  child.stderr.setEncoding("utf8");
-  child.stdout.on("data", (chunk) => {
-    logs.stdout += chunk;
-  });
-  child.stderr.on("data", (chunk) => {
-    logs.stderr += chunk;
-  });
-
-  const deadline = Date.now() + 15_000;
-  while (Date.now() < deadline) {
-    if (child.exitCode !== null) {
-      throw new Error(
-        `bridge exited with ${child.exitCode}\n${logs.stdout}\n${logs.stderr}`,
-      );
-    }
-    try {
-      const health = await requestJson(baseUrl, "/health");
-      if (health.response.status === 200) return { child, baseUrl, logs };
-    } catch {
-      // The loopback listener may not have bound yet.
-    }
-    await delay(30);
-  }
-  throw new Error(`bridge health timeout\n${logs.stdout}\n${logs.stderr}`);
 }
 
 test("every lifecycle fixture satisfies a meta-valid strict JSON Schema", async () => {
@@ -1102,25 +998,15 @@ test(
   "a real Bridge run emits a fully schema-valid and semantically aligned lifecycle bundle",
   { timeout: 30_000 },
   async (t) => {
-    const root = await realpath(
-      await mkdtemp(join(tmpdir(), "html-ai-schema-export-")),
-    );
-    const workspace = join(root, "workspace");
-    const sources = join(root, "sources");
-    await mkdir(workspace);
-    await mkdir(sources);
-    const sourcePath = join(sources, "contract.html");
+    const environment = await createBridgeTestEnvironment(t, {
+      prefix: "html-ai-schema-export-",
+    });
     const initialHtml =
       "<!doctype html><html><head><meta charset=\"utf-8\"><title>合同</title></head><body><main id=\"main\"><h1>合同</h1></main></body></html>";
-    await writeFile(sourcePath, initialHtml, "utf8");
-    const bridge = await startBridge(workspace);
-    t.after(async () => {
-      await stopChild(bridge.child);
-      await rm(root, { recursive: true, force: true });
-    });
+    const sourcePath = await environment.createSource("contract.html", initialHtml);
+    const bridge = await environment.start();
 
-    const preview = await requestJson(
-      bridge.baseUrl,
+    const preview = await bridge.requestJson(
       `/workspace?sourcePath=${encodeURIComponent(sourcePath)}`,
     );
     assert.equal(
@@ -1129,7 +1015,7 @@ test(
       `${JSON.stringify(preview.body)}\n${bridge.logs.stderr}`,
     );
     assert.equal(preview.body.registered, false);
-    const opened = await postJson(bridge.baseUrl, "/project/ensure", {
+    const opened = await bridge.postJson("/project/ensure", {
       sourcePath,
       expectedSourceSha256: preview.body.currentHtmlSha256,
     });
@@ -1183,7 +1069,7 @@ test(
       selector: "#main",
       resolution: "exact",
     };
-    const submitted = await postJson(bridge.baseUrl, "/request", {
+    const submitted = await submitRequest(bridge, {
       sourcePath,
       expectedSourceSha256: opened.body.currentHtmlSha256,
       freezeCutoffRevision: 0,
@@ -1217,22 +1103,9 @@ test(
     const run = submitted.body;
     const generatedHtml =
       "<!doctype html><html><head><meta charset=\"utf-8\"><title>合同</title></head><body><main id=\"main\"><h1>合同</h1><p id=\"verified\">验证通过</p></main></body></html>";
-    await writeFile(run.outputPath, generatedHtml, "utf8");
-    await execFileAsync(process.execPath, [
-      finalizerScript,
-      "--workspace",
-      workspace,
-      "--project-id",
-      run.projectId,
-      "--request-id",
-      run.requestId,
-      "--attempt-id",
-      run.attemptId,
-    ]);
-    const completed = await requestJson(
-      bridge.baseUrl,
-      `/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${encodeURIComponent(run.requestId)}&attemptId=${encodeURIComponent(run.attemptId)}`,
-    );
+    await writeAttemptOutput(run, generatedHtml);
+    await runOfficialFinalizer(environment.workspace, run);
+    const completed = await readStatus(bridge, { sourcePath, ...run });
     assert.equal(completed.response.status, 200);
     assert.equal(completed.body.status, "ready-to-open");
     assert.equal(completed.body.currentPath, sourcePath);
@@ -1340,8 +1213,7 @@ test(
       artifacts.manifest.annotationArchive.sha256,
     );
 
-    const activated = await postJson(
-      bridge.baseUrl,
+    const activated = await bridge.postJson(
       "/ready-version/activate",
       {
         sourcePath,

@@ -1,24 +1,24 @@
 import assert from "node:assert/strict";
-import { execFile, spawn } from "node:child_process";
 import {
   access,
-  mkdtemp,
-  mkdir,
   readFile,
   readdir,
-  realpath,
-  rm,
   writeFile,
 } from "node:fs/promises";
-import { createServer } from "node:net";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { setTimeout as delay } from "node:timers/promises";
-import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 
 import Ajv2020 from "../node_modules/schema-utils/node_modules/ajv/dist/2020.js";
+import {
+  readStatus,
+  runOfficialFinalizer,
+  submitRequest,
+  writeAttemptOutput,
+} from "./helpers/ai-attempt-fixture.mjs";
+import {
+  createBridgeTestEnvironment,
+} from "./helpers/bridge-test-environment.mjs";
 
 import { buildSourceIndex } from "../app/lib/source-index.js";
 import {
@@ -34,10 +34,7 @@ import {
 import { injectManagedMeta, sha256 } from "../scripts/lifecycle-core.mjs";
 import { validateScope } from "../scripts/scope-validator.mjs";
 
-const execFileAsync = promisify(execFile);
 const productRoot = fileURLToPath(new URL("../", import.meta.url));
-const bridgeScript = join(productRoot, "scripts", "workspace-bridge.mjs");
-const finalizerScript = join(productRoot, "scripts", "finalize-attempt.mjs");
 
 function documentHtml() {
   return `<!doctype html>
@@ -933,128 +930,24 @@ test("a stale positional selector cannot retarget an inserted sibling", () => {
   assert.ok(selectorOnlyReport.violationCodes.includes("TARGET_ORPHANED"));
 });
 
-async function reservePort() {
-  const server = createServer();
-  await new Promise((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", resolve);
-  });
-  const address = server.address();
-  assert.ok(address && typeof address === "object");
-  const port = address.port;
-  await new Promise((resolve, reject) =>
-    server.close((error) => (error ? reject(error) : resolve()))
-  );
-  return port;
-}
-
-async function requestJson(baseUrl, pathname, init) {
-  const response = await fetch(`${baseUrl}${pathname}`, init);
-  return { response, body: await response.json() };
-}
-
-async function postJson(baseUrl, pathname, body) {
-  return requestJson(baseUrl, pathname, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  });
-}
-
-async function stopChild(child) {
-  if (!child || child.exitCode !== null) return;
-  child.kill("SIGTERM");
-  const exited = new Promise((resolve) => child.once("exit", resolve));
-  const timedOut = await Promise.race([
-    exited.then(() => false),
-    delay(2_000).then(() => true),
-  ]);
-  if (timedOut && child.exitCode === null) {
-    child.kill("SIGKILL");
-    await new Promise((resolve) => child.once("exit", resolve));
-  }
-}
-
-async function startBridge(workspace) {
-  const port = await reservePort();
-  const baseUrl = `http://127.0.0.1:${port}`;
-  const logs = { stdout: "", stderr: "" };
-  const child = spawn(process.execPath, [bridgeScript], {
-    cwd: productRoot,
-    env: {
-      ...process.env,
-      HTML_AI_WORKSPACE: workspace,
-      HTML_AI_BRIDGE_PORT: String(port),
-    },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  child.stdout.setEncoding("utf8");
-  child.stderr.setEncoding("utf8");
-  child.stdout.on("data", (chunk) => {
-    logs.stdout += chunk;
-  });
-  child.stderr.on("data", (chunk) => {
-    logs.stderr += chunk;
-  });
-  const deadline = Date.now() + 15_000;
-  while (Date.now() < deadline) {
-    if (child.exitCode !== null) {
-      throw new Error(
-        `Bridge exited with ${child.exitCode}\n${logs.stdout}\n${logs.stderr}`,
-      );
-    }
-    try {
-      const health = await requestJson(baseUrl, "/health");
-      if (health.response.status === 200) {
-        return { child, baseUrl, logs };
-      }
-    } catch {
-      // Keep polling until the bounded deadline.
-    }
-    await delay(30);
-  }
-  throw new Error(`Bridge health timeout\n${logs.stdout}\n${logs.stderr}`);
-}
-
-async function runFinalizer(workspace, run) {
-  await execFileAsync(process.execPath, [
-    finalizerScript,
-    "--workspace",
-    workspace,
-    "--project-id",
-    run.projectId,
-    "--request-id",
-    run.requestId,
-    "--attempt-id",
-    run.attemptId,
-  ]);
-}
-
 test("workspace lifecycle treats comment targets as guidance for every HTML change", async (t) => {
-  const root = await realpath(
-    await mkdtemp(join(tmpdir(), "html-ai-text-scope-")),
-  );
-  const workspace = join(root, "workspace");
-  const sources = join(root, "sources");
-  await mkdir(workspace);
-  await mkdir(sources);
-  const sourcePath = join(sources, "text-scope.html");
-  await writeFile(sourcePath, documentHtml(), "utf8");
-  const bridge = await startBridge(workspace);
-  t.after(async () => {
-    await stopChild(bridge.child);
-    await rm(root, { recursive: true, force: true });
+  const environment = await createBridgeTestEnvironment(t, {
+    prefix: "html-ai-text-scope-",
   });
+  const sourcePath = await environment.createSource(
+    "text-scope.html",
+    documentHtml(),
+  );
+  const bridge = await environment.start();
 
   const preview = (
-    await requestJson(
-      bridge.baseUrl,
+    await bridge.requestJson(
       `/workspace?sourcePath=${encodeURIComponent(sourcePath)}`,
     )
   ).body;
   assert.equal(preview.registered, false);
   const opened = (
-    await postJson(bridge.baseUrl, "/project/ensure", {
+    await bridge.postJson("/project/ensure", {
       sourcePath,
       expectedSourceSha256: preview.currentHtmlSha256,
     })
@@ -1087,7 +980,7 @@ test("workspace lifecycle treats comment targets as guidance for every HTML chan
   let nextVersionOrdinal = 2;
   for (const [expectedKind, mutate] of candidateCases) {
     const run = (
-      await postJson(bridge.baseUrl, "/request", {
+      await submitRequest(bridge, {
         sourcePath,
         projectId: opened.projectId,
         documentId: opened.documentId,
@@ -1109,12 +1002,9 @@ test("workspace lifecycle treats comment targets as guidance for every HTML chan
       `ver_${String(nextVersionOrdinal).padStart(4, "0")}`,
     );
     const base = await readFile(run.inputPath, "utf8");
-    await writeFile(run.outputPath, mutate(base), "utf8");
-    await runFinalizer(workspace, run);
-    const status = await requestJson(
-      bridge.baseUrl,
-      `/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
-    );
+    await writeAttemptOutput(run, mutate(base));
+    await runOfficialFinalizer(environment.workspace, run);
+    const status = await readStatus(bridge, { sourcePath, ...run });
     const candidateAssessment = status.body.candidateAssessment || JSON.parse(
       await readFile(join(run.attemptPath, "candidate-assessment.json"), "utf8"),
     );
@@ -1122,8 +1012,7 @@ test("workspace lifecycle treats comment targets as guidance for every HTML chan
     assert.equal(status.body.status, "ready-to-open");
     assert.equal(candidateAssessment.status, "ready");
     assert.equal("executable" in candidateAssessment, false);
-    const cancelled = await postJson(
-      bridge.baseUrl,
+    const cancelled = await bridge.postJson(
       "/active-run/cancel",
       {
         sourcePath,
@@ -1141,7 +1030,7 @@ test("workspace lifecycle treats comment targets as guidance for every HTML chan
   assert.equal(readyCaseCount, 3);
 
   const acceptedRun = (
-    await postJson(bridge.baseUrl, "/request", {
+    await submitRequest(bridge, {
       sourcePath,
       projectId: opened.projectId,
       documentId: opened.documentId,
@@ -1160,53 +1049,39 @@ test("workspace lifecycle treats comment targets as guidance for every HTML chan
   ).body;
   assert.match(acceptedRun.candidateVersionId, /^ver_\d{4,}$/);
   const acceptedBase = await readFile(acceptedRun.inputPath, "utf8");
-  await writeFile(
-    acceptedRun.outputPath,
+  await writeAttemptOutput(
+    acceptedRun,
     acceptedBase.replace("目标正文", "目标正文已更新"),
-    "utf8",
   );
-  await runFinalizer(workspace, acceptedRun);
-  const accepted = await requestJson(
-    bridge.baseUrl,
-    `/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${acceptedRun.requestId}&attemptId=${acceptedRun.attemptId}`,
-  );
+  await runOfficialFinalizer(environment.workspace, acceptedRun);
+  const accepted = await readStatus(bridge, { sourcePath, ...acceptedRun });
   assert.equal(accepted.body.status, "ready-to-open");
   assert.equal(accepted.body.versionId, acceptedRun.candidateVersionId);
   assert.equal(accepted.body.candidateAssessment.status, "ready");
 });
 
 test("an unrelated but usable HTML candidate is preserved with mandatory-review attention", async (t) => {
-  const root = await realpath(
-    await mkdtemp(join(tmpdir(), "html-ai-soft-scope-observed-")),
-  );
-  const workspace = join(root, "workspace");
-  const sources = join(root, "sources");
-  await mkdir(workspace);
-  await mkdir(sources);
-  const sourcePath = join(sources, "soft-scope.html");
-  const originalHtml = documentHtml();
-  await writeFile(sourcePath, originalHtml, "utf8");
-  const bridge = await startBridge(workspace);
-  t.after(async () => {
-    await stopChild(bridge.child);
-    await rm(root, { recursive: true, force: true });
+  const environment = await createBridgeTestEnvironment(t, {
+    prefix: "html-ai-soft-scope-observed-",
   });
+  const originalHtml = documentHtml();
+  const sourcePath = await environment.createSource("soft-scope.html", originalHtml);
+  const bridge = await environment.start();
 
   const preview = (
-    await requestJson(
-      bridge.baseUrl,
+    await bridge.requestJson(
       `/workspace?sourcePath=${encodeURIComponent(sourcePath)}`,
     )
   ).body;
   const opened = (
-    await postJson(bridge.baseUrl, "/project/ensure", {
+    await bridge.postJson("/project/ensure", {
       sourcePath,
       expectedSourceSha256: preview.currentHtmlSha256,
     })
   ).body;
   const target = regularTarget();
   const run = (
-    await postJson(bridge.baseUrl, "/request", {
+    await submitRequest(bridge, {
       sourcePath,
       projectId: opened.projectId,
       documentId: opened.documentId,
@@ -1221,11 +1096,11 @@ test("an unrelated but usable HTML candidate is preserved with mandatory-review 
           targetRefs: [target.targetId],
         },
       ],
-    })
+  })
   ).body;
   const frozenHtml = await readFile(run.inputPath, "utf8");
-  await writeFile(
-    run.outputPath,
+  await writeAttemptOutput(
+    run,
     `<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -1237,14 +1112,10 @@ test("an unrelated but usable HTML candidate is preserved with mandatory-review 
   <article><h1>另一份产品说明</h1><p>这里没有沿用原页面内容。</p></article>
 </body>
 </html>`,
-    "utf8",
   );
-  await runFinalizer(workspace, run);
+  await runOfficialFinalizer(environment.workspace, run);
 
-  const ready = await requestJson(
-    bridge.baseUrl,
-    `/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
-  );
+  const ready = await readStatus(bridge, { sourcePath, ...run });
   assert.equal(ready.response.status, 200, JSON.stringify(ready.body));
   assert.equal(ready.body.status, "ready-to-open");
   assert.equal(ready.body.candidateAssessment.status, "attention");
@@ -1271,10 +1142,7 @@ test("an unrelated but usable HTML candidate is preserved with mandatory-review 
     `${JSON.stringify(persistedAssessment, null, 2)}\n`,
     "utf8",
   );
-  const tampered = await requestJson(
-    bridge.baseUrl,
-    `/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
-  );
+  const tampered = await readStatus(bridge, { sourcePath, ...run });
   assert.equal(tampered.response.status, 409);
   assert.equal(
     tampered.body.error.code,
@@ -1283,30 +1151,20 @@ test("an unrelated but usable HTML candidate is preserved with mandatory-review 
 });
 
 test("workspace lifecycle accepts broad page and script edits without content-based blocking", async (t) => {
-  const root = await realpath(
-    await mkdtemp(join(tmpdir(), "html-ai-scope-lifecycle-")),
-  );
-  const workspace = join(root, "workspace");
-  const sources = join(root, "sources");
-  await mkdir(workspace);
-  await mkdir(sources);
-  const sourcePath = join(sources, "scope.html");
-  await writeFile(sourcePath, documentHtml(), "utf8");
-  const bridge = await startBridge(workspace);
-  t.after(async () => {
-    await stopChild(bridge.child);
-    await rm(root, { recursive: true, force: true });
+  const environment = await createBridgeTestEnvironment(t, {
+    prefix: "html-ai-scope-lifecycle-",
   });
+  const sourcePath = await environment.createSource("scope.html", documentHtml());
+  const bridge = await environment.start();
 
   const preview = (
-    await requestJson(
-      bridge.baseUrl,
+    await bridge.requestJson(
       `/workspace?sourcePath=${encodeURIComponent(sourcePath)}`,
     )
   ).body;
   assert.equal(preview.registered, false);
   const opened = (
-    await postJson(bridge.baseUrl, "/project/ensure", {
+    await bridge.postJson("/project/ensure", {
       sourcePath,
       expectedSourceSha256: preview.currentHtmlSha256,
     })
@@ -1344,7 +1202,7 @@ test("workspace lifecycle accepts broad page and script edits without content-ba
   const expectedVersionIds = ["ver_0001"];
   for (const [expectedKind, mutate] of candidateCases) {
     const run = (
-      await postJson(bridge.baseUrl, "/request", {
+      await submitRequest(bridge, {
         sourcePath,
         projectId: opened.projectId,
         documentId: opened.documentId,
@@ -1365,12 +1223,9 @@ test("workspace lifecycle accepts broad page and script edits without content-ba
       `ver_${String(nextVersionOrdinal).padStart(4, "0")}`;
     assert.equal(run.candidateVersionId, expectedCandidateVersionId, expectedKind);
     const frozenHtml = await readFile(run.inputPath, "utf8");
-    await writeFile(run.outputPath, mutate(frozenHtml), "utf8");
-    await runFinalizer(workspace, run);
-    const status = await requestJson(
-      bridge.baseUrl,
-      `/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
-    );
+    await writeAttemptOutput(run, mutate(frozenHtml));
+    await runOfficialFinalizer(environment.workspace, run);
+    const status = await readStatus(bridge, { sourcePath, ...run });
     assert.equal(status.response.status, 200, expectedKind);
     assert.equal(status.body.status, "ready-to-open", expectedKind);
     assert.equal(status.body.candidateAssessment.status, "ready", expectedKind);
@@ -1389,8 +1244,7 @@ test("workspace lifecycle accepts broad page and script edits without content-ba
     assert.equal("executable" in persistedAssessment, false, expectedKind);
     await assert.rejects(access(join(run.attemptPath, "scope-report.json")));
     await assert.rejects(access(join(run.attemptPath, "validation-review.json")));
-    const cancelled = await postJson(
-      bridge.baseUrl,
+    const cancelled = await bridge.postJson(
       "/active-run/cancel",
       {
         sourcePath,
@@ -1428,7 +1282,7 @@ test("workspace lifecycle accepts broad page and script edits without content-ba
   }
 
   const acceptedRun = (
-    await postJson(bridge.baseUrl, "/request", {
+    await submitRequest(bridge, {
       sourcePath,
       projectId: opened.projectId,
       documentId: opened.documentId,
@@ -1448,16 +1302,12 @@ test("workspace lifecycle accepts broad page and script edits without content-ba
   const acceptedVersionId = `ver_${String(nextVersionOrdinal).padStart(4, "0")}`;
   assert.equal(acceptedRun.candidateVersionId, acceptedVersionId);
   const acceptedBase = await readFile(acceptedRun.inputPath, "utf8");
-  await writeFile(
-    acceptedRun.outputPath,
+  await writeAttemptOutput(
+    acceptedRun,
     acceptedBase.replace("目标正文", "目标正文已更新"),
-    "utf8",
   );
-  await runFinalizer(workspace, acceptedRun);
-  const accepted = await requestJson(
-    bridge.baseUrl,
-    `/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${acceptedRun.requestId}&attemptId=${acceptedRun.attemptId}`,
-  );
+  await runOfficialFinalizer(environment.workspace, acceptedRun);
+  const accepted = await readStatus(bridge, { sourcePath, ...acceptedRun });
   assert.equal(accepted.response.status, 200);
   assert.equal(accepted.body.status, "ready-to-open");
   assert.equal(accepted.body.versionId, acceptedVersionId);

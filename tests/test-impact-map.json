@@ -731,6 +731,19 @@
       ]
     },
     {
+      "id": "bridge-test-harness",
+      "patterns": [
+        "^tests/(?:bridge-test-environment\\.test|helpers/(?:bridge-test-environment|ai-attempt-fixture))\\.mjs$"
+      ],
+      "suites": [],
+      "nodeTests": [
+        "tests/bridge-test-environment.test.mjs",
+        "tests/schema-contract.test.mjs",
+        "tests/scope-validator.test.mjs",
+        "tests/workspace-bridge.test.mjs"
+      ]
+    },
+    {
       "id": "schemas",
       "patterns": [
         "^schemas/.*\\.json$",
