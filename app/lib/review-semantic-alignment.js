@@ -27,6 +27,13 @@ function exactKey(unit) {
     : null;
 }
 
+function compatibilityKey(unit) {
+  const signature = String(unit.compatibilitySignature || "").trim();
+  return signature
+    ? `${normalizedParent(unit)}\u0000${unit.kind}\u0000${signature}`
+    : null;
+}
+
 function uniqueIndexes(items, keyForUnit, excluded = new Set()) {
   const indexes = new Map();
   items.forEach((unit, index) => {
@@ -89,10 +96,24 @@ function longestIncreasingPairSet(pairs) {
 
 function markMovedStrongPairs(pairs) {
   const stableOrder = longestIncreasingPairSet(pairs);
+  const beforeOrder = [...pairs].sort((left, right) => (
+    left.beforeIndex - right.beforeIndex || left.afterIndex - right.afterIndex
+  ));
+  const afterOrder = [...pairs].sort((left, right) => (
+    left.afterIndex - right.afterIndex || left.beforeIndex - right.beforeIndex
+  ));
+  const beforeRank = new Map(beforeOrder.map((pair, index) => [pair, index]));
+  const afterRank = new Map(afterOrder.map((pair, index) => [pair, index]));
   pairs.forEach((pair) => {
-    pair.moved = !stableOrder.has(pair);
+    // Exact equality can prove that two units are the same content, but only
+    // an explicit stable identity is allowed to turn a changed sibling rank
+    // into a user-visible movement fact. The LIS remains only an alignment
+    // anchor: a transposition has two moved stable identities, not an
+    // arbitrary one selected as the anchor.
+    pair.moved = pair.match === "stable-id"
+      && beforeRank.get(pair) !== afterRank.get(pair);
   });
-  return pairs;
+  return stableOrder;
 }
 
 function sharedAffinityCount(before, after) {
@@ -132,7 +153,21 @@ function weightedPairScore(before, after) {
   if (identityKey(before) || identityKey(after)) return Number.NEGATIVE_INFINITY;
   const beforeText = normalizedText(before);
   const afterText = normalizedText(after);
-  if (!beforeText || !afterText) return Number.NEGATIVE_INFINITY;
+  if (!beforeText || !afterText) {
+    const beforeCompatibility = compatibilityKey(before);
+    const afterCompatibility = compatibilityKey(after);
+    if (
+      beforeText
+      || afterText
+      || !beforeCompatibility
+      || beforeCompatibility !== afterCompatibility
+    ) return Number.NEGATIVE_INFINITY;
+    // Empty visual/atomic units have no textual similarity signal. They can
+    // only be paired inside the already matched parent when their own
+    // compatibility descriptor agrees; duplicates remain ambiguous in the
+    // unique-best stage below instead of being guessed by position.
+    return 200 + Math.min(72, sharedAffinityCount(before, after) * 24);
+  }
   const exact = beforeText === afterText;
   const similarity = reviewTextSimilarity(beforeText, afterText);
   const boundaryAffinity = stableBoundaryAffinity(beforeText, afterText);
@@ -387,9 +422,9 @@ export function alignReviewSemanticUnits(before, after, options = {}) {
   );
   const lookahead = Math.max(1, Math.trunc(options.lookahead || DEFAULT_LOOKAHEAD));
   const strong = collectStrongPairs(before, after);
-  markMovedStrongPairs(strong.pairs);
+  const stableOrder = markMovedStrongPairs(strong.pairs);
   const stableAnchors = strong.pairs
-    .filter((pair) => !pair.moved)
+    .filter((pair) => stableOrder.has(pair))
     .sort((left, right) => left.beforeIndex - right.beforeIndex);
   const boundaries = [
     { beforeIndex: -1, afterIndex: -1 },
@@ -411,7 +446,7 @@ export function alignReviewSemanticUnits(before, after, options = {}) {
       aligned.push(right);
     }
   }
-  aligned.push(...strong.pairs.filter((pair) => pair.moved));
+  aligned.push(...strong.pairs.filter((pair) => !stableOrder.has(pair)));
   return aligned.sort((left, right) => (
     pairSortPosition(left) - pairSortPosition(right)
     || (left.beforeIndex ?? Number.MAX_SAFE_INTEGER) - (right.beforeIndex ?? Number.MAX_SAFE_INTEGER)

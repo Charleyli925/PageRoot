@@ -12,8 +12,16 @@ const FACT_TEXT_SCOPES = new Set(["inline", "sentence", "block"]);
 const FACT_OPERATIONS = new Set(["none", "insert", "delete", "replace", "layout"]);
 const FACT_TONES = new Set(["added", "removed"]);
 const FACT_KEY_PATTERN = /^[a-z0-9:_-]{1,160}$/iu;
-const MAX_FACTS_PER_ELEMENT = 24;
+export const REVIEW_PROJECTION_FACTS_PER_ELEMENT_LIMIT = 24;
 const MAX_SUMMARY_LENGTH = 80;
+
+export class ReviewProjectionFactOverflowError extends Error {
+  constructor(limit = REVIEW_PROJECTION_FACTS_PER_ELEMENT_LIMIT) {
+    super(`Review projection fact limit (${limit}) exceeded for one element.`);
+    this.name = "ReviewProjectionFactOverflowError";
+    this.code = "REVIEW_PROJECTION_FACTS_OVERFLOW";
+  }
+}
 
 function optionalKey(value) {
   const normalized = typeof value === "string" ? value.trim() : "";
@@ -102,21 +110,44 @@ export function reviewProjectionFactsCanMerge(left, right) {
   );
 }
 
-export function appendReviewProjectionFact(facts, value) {
-  const next = normalizeReviewProjectionFact(value);
-  const normalized = Array.isArray(facts)
-    ? facts.map(normalizeReviewProjectionFact).filter(Boolean).slice(0, MAX_FACTS_PER_ELEMENT)
-    : [];
-  if (!next) return normalized;
-  const existingIndex = normalized.findIndex((fact) => reviewProjectionFactsCanMerge(fact, next));
-  if (existingIndex < 0) {
-    return normalized.length < MAX_FACTS_PER_ELEMENT ? [...normalized, next] : normalized;
+function appendNormalizedFact(facts, next, overflow) {
+  if (!next) return facts;
+  const existingIndex = facts.findIndex((fact) => reviewProjectionFactsCanMerge(fact, next));
+  if (existingIndex >= 0) {
+    const updated = [...facts];
+    updated[existingIndex] = { ...updated[existingIndex], ...next };
+    return updated;
   }
-  const existing = normalized[existingIndex];
-  if (!reviewProjectionFactsCanMerge(existing, next)) return normalized;
-  const updated = [...normalized];
-  updated[existingIndex] = { ...existing, ...next };
-  return updated;
+  if (facts.length < REVIEW_PROJECTION_FACTS_PER_ELEMENT_LIMIT) return [...facts, next];
+  if (overflow === "throw") throw new ReviewProjectionFactOverflowError();
+  return overflow === "fail-closed" ? null : facts;
+}
+
+function normalizedReviewProjectionFacts(facts, overflow = "truncate") {
+  if (!Array.isArray(facts)) return [];
+  let normalized = [];
+  for (const value of facts) {
+    const next = normalizeReviewProjectionFact(value);
+    const appended = appendNormalizedFact(normalized, next, overflow);
+    if (appended === null) return null;
+    normalized = appended;
+  }
+  return normalized;
+}
+
+/**
+ * Parse or compatibility callers stay bounded and never trust an oversized
+ * payload. Trusted analysis must use appendTrustedReviewProjectionFact so an
+ * incomplete projection can never masquerade as a complete one.
+ */
+export function appendReviewProjectionFact(facts, value) {
+  const normalized = normalizedReviewProjectionFacts(facts);
+  return appendNormalizedFact(normalized, normalizeReviewProjectionFact(value), "truncate");
+}
+
+export function appendTrustedReviewProjectionFact(facts, value) {
+  const normalized = normalizedReviewProjectionFacts(facts, "throw");
+  return appendNormalizedFact(normalized, normalizeReviewProjectionFact(value), "throw");
 }
 
 export function serializeReviewProjectionFacts(facts) {
@@ -131,7 +162,7 @@ export function parseReviewProjectionFacts(value) {
   try {
     const parsed = JSON.parse(value);
     if (!Array.isArray(parsed)) return [];
-    return parsed.reduce((result, fact) => appendReviewProjectionFact(result, fact), []);
+    return normalizedReviewProjectionFacts(parsed, "fail-closed") || [];
   } catch {
     return [];
   }

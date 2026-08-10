@@ -99,7 +99,10 @@ PR 批量是建议而非固定限制：用 CI Health 的 Ready 次数、candidat
   大型多 section/深层卡片 HTML 记录总耗时及各 `pageroot:review-analysis:*`
   phase，确认 fuzzy pairing 只在兼容 bucket 内运行，并以正式 Electron 闭环
   证明变化数量和类型没有因性能优化改变；可复现实测入口是
-  `npm run benchmark:review-analysis`，该诊断不增加产品内提示。
+  `npm run benchmark:review-analysis`，该诊断不增加产品内提示。语义配对
+  Node oracle 必须分别覆盖唯一空 Canvas/SVG/表单/容器的兼容配对、重复
+  class-only 空节点保持 unmatched、深层子变化不拆稳定祖先，以及第 25 个
+  trusted projection fact 明确失败；解析端超限仍必须 fail-closed。
 - Electron E2E 夹具与场景归属：`tests/e2e/electron/helpers/pageroot-app-fixture.mjs`
   只拥有独立 userData/workspace/source、隐藏窗口启动、Bridge 路径、close-first
   cleanup、诊断输出和已加载 frame；它不包含产品断言、整条用户流程或自动重试。

@@ -189,14 +189,26 @@ test("change discovery builds a complete outline and precise change markers", ()
   assert.match(reviewDocument, /attachChangeMarkerMetadata/);
   assert.match(reviewDocument, /data-pageroot-review-structure/);
   assert.match(reviewDocument, /data-pageroot-review-style/);
-  assert.match(reviewDocument, /markMovedPairs/);
+  assert.match(reviewDocument, /function pairSections[\s\S]*?alignReviewSemanticUnits/);
+  assert.match(
+    reviewDocument,
+    /function pairSections[\s\S]*?panelPathForElement\(element\)[\s\S]*?panel-path:/,
+  );
   assert.match(reviewDocument, /if \(pair\?\.moved[\s\S]*?return "位置调整"/);
   assert.match(reviewDocument, /VISUAL_ATTRIBUTE_NAMES/);
-  assert.match(reviewDocument, /pairVisualElements/);
-  assert.match(reviewDocument, /elementPairScore/);
-  assert.match(reviewDocument, /pairSiblingElements/);
-  assert.match(reviewDocument, /similarity >= \.46/);
-  assert.match(reviewDocument, /markStructureDifferences/);
+  assert.match(reviewDocument, /reviewAttributeRole/);
+  assert.match(reviewDocument, /createReviewSignatureCache/);
+  assert.match(reviewDocument, /exactSubtreeSignature/);
+  assert.match(reviewDocument, /selfCompatibilitySignature/);
+  assert.match(reviewDocument, /alignElementSiblings/);
+  assert.match(reviewDocument, /pairedVisualElements/);
+  assert.match(reviewDocument, /alignReviewSemanticUnits\([\s\S]*?visualElementDescriptor/);
+  assert.doesNotMatch(reviewDocument, /function pairVisualElements/);
+  assert.doesNotMatch(reviewDocument, /function pairSiblingElements/);
+  assert.doesNotMatch(reviewDocument, /\.slice\(0, 501\)/);
+  assert.doesNotMatch(reviewDocument, /depth > 12|inspected >= 800|marked >= 40|\.slice\(0, 40\)/);
+  assert.match(reviewDocument, /compatibilitySignature/);
+  assert.match(reviewDocument, /markStructureDifferenceSteps/);
   assert.match(reviewDocument, /changedStylesheetSelectors/);
   assert.match(reviewDocument, /styleScopeForProperties/);
   assert.match(reviewDocument, /"block-size"/);
@@ -211,7 +223,7 @@ test("change discovery builds a complete outline and precise change markers", ()
   assert.doesNotMatch(reviewDocument, /beforeTokenRanges\.length \?/);
   assert.doesNotMatch(reviewDocument, /afterTokenRanges\.length \?/);
   assert.match(reviewDocument, /const layoutPairs = semanticLayoutPairs\(graph\)/);
-  assert.match(reviewDocument, /const structureChanged = markStructureDifferences\(graph\)/);
+  assert.match(reviewDocument, /const structureChanged = yield\* markStructureDifferenceSteps\(graph\)/);
   assert.match(reviewDocument, /const styleChanged = markStyleDifferences\(graph, layoutPairs\)/);
   assert.match(reviewDocument, /const textMarking = markSemanticTextDifferences\(graph\)/);
   assert.match(reviewDocument, /REVIEW_PROJECTION_FACTS_ATTRIBUTE/);
