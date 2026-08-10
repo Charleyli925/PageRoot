@@ -74,6 +74,8 @@ capture/retry UI. Static Review never waits for the owner.
 ## Shared limits
 
 `app/domain/runtime-visual-contract.js` is the frozen production limit source:
-contract version, source/session identity, 1.5-second owner deadline, 32
-snapshots, 4,194,304 pixels and 16,000,000 aggregate PNG bytes. The shared
-snapshot parser additionally rejects an individual PNG over 2,000,000 bytes.
+contract version, source/session identity, 1.5-second owner deadline, a
+320–4,096 by 320–2,400 viewport, 32 snapshots, 4,194,304 pixels, a
+2,000,000-byte individual PNG cap, a 4,096-pixel single-edge cap and
+16,000,000 aggregate PNG bytes. The owner and trusted snapshot parser read
+the same frozen limits and fail closed on an over-limit result.

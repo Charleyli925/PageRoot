@@ -23,10 +23,19 @@ test("runtime snapshot producers and consumers share one immutable contract", ()
   assert.equal(RUNTIME_VISUAL_CONTRACT.identityAttributeLimit, 24);
   assert.equal(RUNTIME_VISUAL_CONTRACT.ownerDeadlineMs, 1_500);
   assert.equal(RUNTIME_VISUAL_CONTRACT.pageBudget.visualLimit, 32);
+  assert.deepEqual(RUNTIME_VISUAL_CONTRACT.pageBudget.viewport, {
+    minWidth: 320,
+    minHeight: 320,
+    maxWidth: 4_096,
+    maxHeight: 2_400,
+  });
   assert.equal(RUNTIME_VISUAL_CONTRACT.pageBudget.canvasPixels, 4_194_304);
-  assert.equal(RUNTIME_VISUAL_CONTRACT.pageBudget.visualBytes, 16_000_000);
+  assert.equal(RUNTIME_VISUAL_CONTRACT.pageBudget.pngBytes, 2_000_000);
+  assert.equal(RUNTIME_VISUAL_CONTRACT.pageBudget.pngDimension, 4_096);
+  assert.equal(RUNTIME_VISUAL_CONTRACT.pageBudget.aggregatePngBytes, 16_000_000);
   assert.equal(Object.isFrozen(RUNTIME_VISUAL_CONTRACT), true);
   assert.equal(Object.isFrozen(RUNTIME_VISUAL_CONTRACT.pageBudget), true);
+  assert.equal(Object.isFrozen(RUNTIME_VISUAL_CONTRACT.pageBudget.viewport), true);
 });
 
 test("runtime snapshot envelopes bind contract, session, and full source SHA", () => {

@@ -10,6 +10,7 @@ import {
   changedReviewRuntimeVisualCandidateKeys,
   mergeReviewRuntimeVisualChanges,
 } from "../app/lib/review-runtime-visual.js";
+import { RUNTIME_VISUAL_CONTRACT } from "../app/domain/runtime-visual-contract.js";
 
 const PNG = new Uint8Array(Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAEElEQVR42mNk+M/wHwAEAQH/2p9Z5QAAAABJRU5ErkJggg==",
@@ -17,6 +18,15 @@ const PNG = new Uint8Array(Buffer.from(
 ));
 const CHANGED_PNG = new Uint8Array(PNG);
 CHANGED_PNG[CHANGED_PNG.length - 1] ^= 1;
+
+function pngWithDimensions(width, height, byteLength = PNG.byteLength) {
+  const png = new Uint8Array(Math.max(byteLength, PNG.byteLength));
+  png.set(PNG);
+  const view = new DataView(png.buffer, png.byteOffset, png.byteLength);
+  view.setUint32(16, width, false);
+  view.setUint32(20, height, false);
+  return png;
+}
 
 function hash(bytes) {
   return `sha256:${bytesToHex(sha256(bytes))}`;
@@ -81,6 +91,24 @@ test("runtime snapshots accept only bounded declared PNG results", () => {
     [],
     new Set(Array.from({ length: 33 }, (_, index) => `runtime-host-${index + 1}`)),
   ), null);
+});
+
+test("trusted runtime snapshot parser fails closed for hostile >2MB and >4096 results", () => {
+  const allowed = new Set(["runtime-host-1"]);
+  const { pngBytes, pngDimension } = RUNTIME_VISUAL_CONTRACT.pageBudget;
+  const overByteLimit = pngWithDimensions(1, 1, pngBytes + 1);
+  const overWidthLimit = pngWithDimensions(pngDimension + 1, 1);
+  const overHeightLimit = pngWithDimensions(1, pngDimension + 1);
+
+  assert.equal(acceptRuntimeVisualSnapshots([
+    snapshot("runtime-host-1", overByteLimit),
+  ], allowed), null);
+  assert.equal(acceptRuntimeVisualSnapshots([
+    snapshot("runtime-host-1", overWidthLimit, { width: pngDimension + 1 }),
+  ], allowed), null);
+  assert.equal(acceptRuntimeVisualSnapshots([
+    snapshot("runtime-host-1", overHeightLimit, { height: pngDimension + 1 }),
+  ], allowed), null);
 });
 
 test("runtime comparison uses one before/after PNG pair and fails closed", () => {

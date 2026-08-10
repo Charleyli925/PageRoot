@@ -1,13 +1,23 @@
+export interface RuntimeVisualViewportBudget {
+  readonly minWidth: 320;
+  readonly minHeight: 320;
+  readonly maxWidth: 4096;
+  readonly maxHeight: 2400;
+}
+
 export interface RuntimeVisualPageBudget {
   readonly htmlBytes: 26214400;
   readonly visualLimit: 32;
+  readonly viewport: RuntimeVisualViewportBudget;
   readonly hostAtoms: 4096;
   readonly atoms: 8192;
   readonly nodes: 8192;
   readonly hostValueLength: 200000;
   readonly valueLength: 400000;
   readonly canvasPixels: 4194304;
-  readonly visualBytes: 16000000;
+  readonly pngBytes: 2000000;
+  readonly pngDimension: 4096;
+  readonly aggregatePngBytes: 16000000;
 }
 
 export interface RuntimeVisualContract {

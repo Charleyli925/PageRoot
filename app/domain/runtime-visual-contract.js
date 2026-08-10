@@ -8,13 +8,16 @@ export const RUNTIME_VISUAL_CONTRACT = Object.freeze({
   pageBudget: Object.freeze({
     htmlBytes: 25 * 1024 * 1024,
     visualLimit: 32,
+    viewport: Object.freeze({ minWidth: 320, minHeight: 320, maxWidth: 4_096, maxHeight: 2_400 }),
     hostAtoms: 4_096,
     atoms: 8_192,
     nodes: 8_192,
     hostValueLength: 200_000,
     valueLength: 400_000,
     canvasPixels: 4_194_304,
-    visualBytes: 16_000_000,
+    pngBytes: 2_000_000,
+    pngDimension: 4_096,
+    aggregatePngBytes: 16_000_000,
   }),
 });
 
