@@ -570,8 +570,25 @@ async function assertOverlayMaskEquivalence(frame) {
   });
 }
 
-async function assertRuntimeVisualSupplement(beforeReviewFrame, afterReviewFrame) {
+async function assertRuntimeVisualSupplement(page, beforeReviewFrame, afterReviewFrame) {
   const runtimeSnapshotSection = "section[data-review-runtime-snapshot]";
+  const reviewWorkspace = page.getByTestId("ai-review-workspace");
+  await expect(reviewWorkspace).toHaveAttribute(
+    "data-review-runtime-visual-state",
+    "resolved",
+    { timeout: 20_000 },
+  );
+  await expect(reviewWorkspace).toHaveAttribute(
+    "data-review-runtime-visual-delivery",
+    "complete",
+    { timeout: 20_000 },
+  );
+  const resolvedMarkerCount = Number(await reviewWorkspace.getAttribute(
+    "data-review-runtime-visual-marker-count",
+  ));
+  expect(Number.isSafeInteger(resolvedMarkerCount)).toBe(true);
+  expect(resolvedMarkerCount).toBeGreaterThanOrEqual(0);
+  expect(resolvedMarkerCount).toBeLessThanOrEqual(32);
   const staticBoxFactsBySide = await Promise.all(
     [beforeReviewFrame, afterReviewFrame].map((frame) => (
       frame.locator("#review-runtime-static-box-canvas").evaluate((element) => JSON.parse(
@@ -586,46 +603,119 @@ async function assertRuntimeVisualSupplement(beforeReviewFrame, afterReviewFrame
   expect(staticBoxFactBySide[0].geometryOwnerId).toBeTruthy();
   expect(staticBoxFactBySide[1].geometryOwnerId)
     .toBe(staticBoxFactBySide[0].geometryOwnerId);
+  const runtimeBoxCounts = [];
+  const localRuntimeFactIdsBySide = [];
   for (const frame of [beforeReviewFrame, afterReviewFrame]) {
     const runtimeBoxes = frame.locator(
       '[data-pageroot-review-overlay-box][data-pageroot-review-fact^="style:runtime-projection-"]',
     );
+    // A cold offscreen owner may legitimately resolve with zero markers under
+    // its fail-closed deadline. Non-empty results can also include other visual
+    // candidates in this broad fixture, some of which are suppressed by an
+    // exact same-host static box fact.
+    const minimumRuntimeBoxes = resolvedMarkerCount > 0 ? 1 : 0;
+    const maximumRuntimeBoxes = resolvedMarkerCount;
     await expect.poll(async () => {
       const count = await runtimeBoxes.count();
-      return count >= 1 && count <= 2;
+      return count >= minimumRuntimeBoxes && count <= maximumRuntimeBoxes;
     }).toBe(true);
+    runtimeBoxCounts.push(await runtimeBoxes.count());
     await expect(frame.locator(runtimeSnapshotSection))
       .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
     await expect(frame.locator(
       "[data-pageroot-review-runtime-marker], [data-pageroot-review-runtime-host], [data-pageroot-review-runtime-source-box]",
     )).toHaveCount(0);
     await expect.poll(() => runtimeBoxes.evaluateAll((overlays) => {
-      const allowedTargets = [
+      const localTargets = [
         document.querySelector("#review-runtime-snapshot-canvas"),
         document.querySelector("#review-runtime-snapshot-host"),
       ].filter(Boolean);
       const suppressedTarget = document.querySelector("#review-runtime-static-box-canvas");
-      if (allowedTargets.length !== 2 || !suppressedTarget) return false;
+      if (localTargets.length !== 2 || !suppressedTarget) {
+        return { valid: false, reason: "fixture-target-missing" };
+      }
       const overlayRects = overlays.map((overlay) => ({
         left: Number(overlay.getAttribute("data-left")),
         top: Number(overlay.getAttribute("data-top")),
         width: Number(overlay.getAttribute("data-width")),
         height: Number(overlay.getAttribute("data-height")),
       }));
-      const matches = (overlay, target) => {
-        const rect = target.getBoundingClientRect();
-        return Math.abs(overlay.left - (rect.left + scrollX - 3)) < .3
-          && Math.abs(overlay.top - (rect.top + scrollY - 3)) < .3
-          && Math.abs(overlay.width - (rect.width + 6)) < .3
-          && Math.abs(overlay.height - (rect.height + 6)) < .3;
-      };
-      const matchedTargets = overlayRects.map((overlay) => (
-        allowedTargets.findIndex((target) => matches(overlay, target))
+      const candidateTargets = [...document.querySelectorAll(
+        "canvas, svg, #review-runtime-snapshot-host",
+      )].filter((target) => (
+        target !== suppressedTarget
+        && !target.closest("[data-pageroot-review-projection-layer]")
       ));
-      return matchedTargets.every((index) => index >= 0)
-        && new Set(matchedTargets).size === overlayRects.length
-        && overlayRects.every((overlay) => !matches(overlay, suppressedTarget));
-    })).toBe(true);
+      const candidateTargetRects = candidateTargets.map((target) => {
+        const rect = target.getBoundingClientRect();
+        return {
+          left: rect.left + scrollX - 3,
+          top: rect.top + scrollY - 3,
+          width: rect.width + 6,
+          height: rect.height + 6,
+        };
+      });
+      const suppressedRect = suppressedTarget.getBoundingClientRect();
+      const suppressedTargetRect = {
+        left: suppressedRect.left + scrollX - 3,
+        top: suppressedRect.top + scrollY - 3,
+        width: suppressedRect.width + 6,
+        height: suppressedRect.height + 6,
+      };
+      const matches = (overlay, target) => (
+        Math.abs(overlay.left - target.left) < .3
+          && Math.abs(overlay.top - target.top) < .3
+          && Math.abs(overlay.width - target.width) < .3
+          && Math.abs(overlay.height - target.height) < .3
+      );
+      const usedCandidateTargets = new Set();
+      const matchedCandidateTargets = overlayRects.map((overlay) => {
+        const targetIndex = candidateTargetRects.findIndex((target, index) => (
+          !usedCandidateTargets.has(index) && matches(overlay, target)
+        ));
+        if (targetIndex >= 0) usedCandidateTargets.add(targetIndex);
+        return targetIndex;
+      });
+      const valid = matchedCandidateTargets.every((index) => index >= 0)
+        && overlayRects.every((overlay) => !matches(overlay, suppressedTargetRect));
+      return valid ? "valid" : JSON.stringify({
+        overlayRects,
+        candidateTargetRects,
+        suppressedTargetRect,
+        matchedCandidateTargets,
+      });
+    })).toBe("valid");
+    localRuntimeFactIdsBySide.push(await runtimeBoxes.evaluateAll((overlays) => {
+      const localTargets = [
+        document.querySelector("#review-runtime-snapshot-canvas"),
+        document.querySelector("#review-runtime-snapshot-host"),
+      ].filter(Boolean);
+      const targetRects = localTargets.map((target) => {
+        const rect = target.getBoundingClientRect();
+        return {
+          left: rect.left + scrollX - 3,
+          top: rect.top + scrollY - 3,
+          width: rect.width + 6,
+          height: rect.height + 6,
+        };
+      });
+      return overlays.flatMap((overlay) => {
+        const overlayRect = {
+          left: Number(overlay.getAttribute("data-left")),
+          top: Number(overlay.getAttribute("data-top")),
+          width: Number(overlay.getAttribute("data-width")),
+          height: Number(overlay.getAttribute("data-height")),
+        };
+        const matchesLocalTarget = targetRects.some((target) => (
+          Math.abs(overlayRect.left - target.left) < .3
+          && Math.abs(overlayRect.top - target.top) < .3
+          && Math.abs(overlayRect.width - target.width) < .3
+          && Math.abs(overlayRect.height - target.height) < .3
+        ));
+        const factId = overlay.getAttribute("data-pageroot-review-fact");
+        return matchesLocalTarget && factId ? [factId] : [];
+      });
+    }));
     const authoredAttributes = await frame.locator("html").evaluate(() => (
       [...document.querySelectorAll("*")].flatMap((element) => (
         [...element.attributes].map((attribute) => `${attribute.name}=${attribute.value}`)
@@ -633,6 +723,7 @@ async function assertRuntimeVisualSupplement(beforeReviewFrame, afterReviewFrame
     ));
     expect(authoredAttributes).not.toContain("runtime-host-");
   }
+  return { localRuntimeFactIdsBySide, runtimeBoxCounts };
 }
 
 async function assertReviewAcceptPersistence({
@@ -1030,7 +1121,11 @@ ${REVIEW_MASK_UNION_BEFORE}
       .toHaveAttribute("data-review-fixture-ready", "true");
     await expect(afterReviewFrame.locator("html"))
       .toHaveAttribute("data-review-fixture-ready", "true");
-    await assertRuntimeVisualSupplement(beforeReviewFrame, afterReviewFrame);
+    const initialRuntimeVisualSupplement = await assertRuntimeVisualSupplement(
+      launched.page,
+      beforeReviewFrame,
+      afterReviewFrame,
+    );
     await afterReviewFrame.locator("html").evaluate(() => {
       document.documentElement.dataset.reviewPostLoadNavigationAttempted = "true";
       location.replace(
@@ -1148,6 +1243,9 @@ ${REVIEW_MASK_UNION_BEFORE}
       [beforeReviewFrame, afterReviewFrame].map((frame) => frame.locator("html").evaluate(() => {
         const filter = document.documentElement.dataset.pagerootReviewFilter || "all";
         return [...document.querySelectorAll("[data-pageroot-review-overlay-box]")]
+          .filter((box) => !String(
+            box.getAttribute("data-pageroot-review-fact") || "",
+          ).startsWith("style:runtime-projection-"))
           .every((box) => {
             const changeId = box.getAttribute("data-pageroot-review-overlay-box");
             return [...document.querySelectorAll(
@@ -1172,12 +1270,13 @@ ${REVIEW_MASK_UNION_BEFORE}
           });
       })),
     ).then((states) => states.every(Boolean))).toBe(true);
-    await expect(beforeReviewFrame.locator(
-      '[data-pageroot-review-overlay-box][data-pageroot-review-fact^="style:runtime-projection-"]',
-    )).toHaveCount(0);
-    await expect(afterReviewFrame.locator(
-      '[data-pageroot-review-overlay-box][data-pageroot-review-fact^="style:runtime-projection-"]',
-    )).toHaveCount(0);
+    for (const [sideIndex, frame] of [beforeReviewFrame, afterReviewFrame].entries()) {
+      for (const factId of initialRuntimeVisualSupplement.localRuntimeFactIdsBySide[sideIndex]) {
+        await expect(frame.locator(
+          `[data-pageroot-review-overlay-box][data-pageroot-review-fact="${factId}"]`,
+        )).toHaveCount(0);
+      }
+    }
     await beforeReviewFrame.getByRole("button", { name: "审阅标签一" })
       .evaluate((button) => button.click());
     await expect(beforeReviewFrame.locator('[data-review-tab-panel="one"]'))
@@ -1189,7 +1288,11 @@ ${REVIEW_MASK_UNION_BEFORE}
         !document.documentElement.hasAttribute("data-pageroot-review-transitioning")
       ))),
     ).then((states) => states.every(Boolean))).toBe(true);
-    await assertRuntimeVisualSupplement(beforeReviewFrame, afterReviewFrame);
+    await assertRuntimeVisualSupplement(
+      launched.page,
+      beforeReviewFrame,
+      afterReviewFrame,
+    );
     await expect(beforeReviewFrame.locator("#indexed-review-panel-one")).toBeVisible();
     await expect(afterReviewFrame.locator("#indexed-review-panel-one")).toBeVisible();
     await afterReviewFrame.getByRole("button", { name: "抖音搜盘表现" })

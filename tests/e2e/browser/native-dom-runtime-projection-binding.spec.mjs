@@ -14,7 +14,10 @@ function sourceBoxSignature(values = {}) {
   ]);
 }
 
-async function installRuntimeProjectionFrame(page, { replaceBeforeReady = false } = {}) {
+async function installRuntimeProjectionFrame(page, {
+  replaceBeforeReady = false,
+  withCommentBinding = false,
+} = {}) {
   const sharedStyle = "width: 140px; height: 24px";
   const bindings = [
     {
@@ -38,8 +41,24 @@ async function installRuntimeProjectionFrame(page, { replaceBeforeReady = false 
       sourceBoxSignature: sourceBoxSignature({ style: "width: 160px; height: 30px" }),
       identityAttributes: [["id", "runtime-chart-b"]],
     },
+    {
+      candidateKey: "runtime-host-4",
+      path: [1, 0, 3, 0, 0, 0, 0],
+      tagName: "svg",
+      sourceBoxSignature: sourceBoxSignature({ height: "30", width: "90" }),
+      identityAttributes: [["id", "runtime-svg-in-table"], ["viewBox", "0 0 90 30"]],
+    },
   ];
-  const bootstrap = generatedReviewBootstrap([], bindings).replace(/<\/script/giu, "<\\/script");
+  const commentBindings = withCommentBinding ? [{
+    sourceNodeId: "element:1:1:p",
+    path: [1, 0, 0],
+    tagName: "P",
+    sourceBoxSignature: sourceBoxSignature({ style: sharedStyle }),
+    identityAttributes: [["id", "shared-static-runtime"]],
+    identityText: "静态文本与运行态样式共存",
+  }] : [];
+  const bootstrap = generatedReviewBootstrap(commentBindings, bindings)
+    .replace(/<\/script/giu, "<\\/script");
   const staticFacts = JSON.stringify([{
     id: "static-text",
     type: "text",
@@ -54,7 +73,7 @@ async function installRuntimeProjectionFrame(page, { replaceBeforeReady = false 
   const srcdoc = `<!doctype html>
 <html>
   <head>
-    <style>html,body{margin:0}section{padding:20px}canvas,div,p{display:block;margin:12px}</style>
+    <style>html,body{margin:0}section{padding:20px}canvas,div,p,svg{display:block;margin:12px}</style>
     <script>${bootstrap}</script>
   </head>
   <body>
@@ -62,6 +81,7 @@ async function installRuntimeProjectionFrame(page, { replaceBeforeReady = false 
       <p id="shared-static-runtime" style="${sharedStyle}" data-pageroot-review-marker="change-1" data-pageroot-review-projection-facts='${staticFacts}'>静态文本与运行态样式共存</p>
       <canvas id="runtime-chart-a" width="120" height="40"></canvas>
       <div style="display: none"><div id="runtime-chart-b" style="width: 160px; height: 30px"></div></div>
+      <table><tr><td><svg id="runtime-svg-in-table" viewBox="0 0 90 30" width="90" height="30"><rect width="90" height="30"></rect></svg></td></tr></table>
     </section>
     <script>
       ${replaceBeforeReady ? `
@@ -96,8 +116,11 @@ async function installRuntimeProjectionFrame(page, { replaceBeforeReady = false 
     const frame = document.querySelector("#review-frame");
     window.runtimeProjectionTest = {
       challenge: "b".repeat(32),
+      commentChallenge: "c".repeat(32),
       forgedResponses: 0,
       port: null,
+      commentPort: null,
+      commentLayouts: [],
       ready: false,
     };
     addEventListener("message", (event) => {
@@ -106,6 +129,27 @@ async function installRuntimeProjectionFrame(page, { replaceBeforeReady = false 
       const state = window.runtimeProjectionTest;
       if (message?.type === "ready") {
         state.ready = true;
+        return;
+      }
+      if (message?.type === "comment-layout") {
+        state.commentLayouts.push(...(message.commentLayouts || []));
+        return;
+      }
+      if (message?.type === "review-comment-channel") {
+        const port = event.ports?.length === 1 ? event.ports[0] : null;
+        if (
+          message.source === "pageroot-ai-review"
+          && message.sessionId === "review-session"
+          && message.side === "before"
+          && message.challenge === state.commentChallenge
+          && port
+          && !state.commentPort
+        ) {
+          state.commentPort = port;
+          port.start();
+        } else {
+          port?.close();
+        }
         return;
       }
       if (message?.type !== "runtime-projection-channel") return;
@@ -131,9 +175,17 @@ async function installRuntimeProjectionFrame(page, { replaceBeforeReady = false 
   }, { source: srcdoc });
 
   await expect.poll(() => page.evaluate(() => window.runtimeProjectionTest.ready)).toBe(true);
-  await page.evaluate(({ sourceSha256 }) => {
+  await page.evaluate(({ sourceSha256, requestCommentChannel }) => {
     const frame = document.querySelector("#review-frame");
     const state = window.runtimeProjectionTest;
+    if (requestCommentChannel) {
+      frame.contentWindow.postMessage({
+        source: "pageroot-ai-review-parent",
+        sessionId: "review-session",
+        type: "request-review-comment-channel",
+        challenge: state.commentChallenge,
+      }, "*");
+    }
     frame.contentWindow.postMessage({
       source: "pageroot-ai-review-parent",
       contractVersion: 1,
@@ -143,13 +195,18 @@ async function installRuntimeProjectionFrame(page, { replaceBeforeReady = false 
       type: "request-runtime-projection-channel",
       challenge: state.challenge,
     }, "*");
-  }, { sourceSha256: SOURCE_SHA256 });
+  }, { sourceSha256: SOURCE_SHA256, requestCommentChannel: withCommentBinding });
   await expect.poll(() => page.evaluate(() => Boolean(window.runtimeProjectionTest.port))).toBe(true);
+  if (withCommentBinding) {
+    await expect.poll(() => page.evaluate(() => (
+      Boolean(window.runtimeProjectionTest.commentPort)
+    ))).toBe(true);
+  }
   return page.frameLocator("#review-frame");
 }
 
-async function postRuntimeFacts(page, markers) {
-  await page.evaluate(({ projectionMarkers, sourceSha256 }) => {
+async function postRuntimeFacts(page, markers, overrides = {}) {
+  await page.evaluate(({ projectionMarkers, sourceSha256, messageOverrides }) => {
     const port = window.runtimeProjectionTest.port;
     port.postMessage({
       source: "pageroot-ai-review-runtime-projection",
@@ -159,9 +216,30 @@ async function postRuntimeFacts(page, markers) {
       sourceSha256,
       type: "runtime-projection-facts",
       markers: projectionMarkers,
+      ...messageOverrides,
     });
     port.close();
-  }, { projectionMarkers: markers, sourceSha256: SOURCE_SHA256 });
+  }, {
+    projectionMarkers: markers,
+    sourceSha256: SOURCE_SHA256,
+    messageOverrides: overrides,
+  });
+}
+
+async function postCommentTargets(page) {
+  await page.evaluate(() => {
+    window.runtimeProjectionTest.commentPort.postMessage({
+      source: "pageroot-ai-review-comment-targets",
+      sessionId: "review-session",
+      side: "before",
+      type: "comment-targets",
+      reviewCommentTargets: [{
+        key: "comment-1",
+        selector: "#shared-static-runtime",
+        sourceNodeId: "element:1:1:p",
+      }],
+    });
+  });
 }
 
 async function postReviewState(page, filter = "all") {
@@ -181,6 +259,7 @@ test("runtime projection binds exact hosts and adds facts without outline geomet
     { candidateKey: "runtime-host-1", changeId: "change-1" },
     { candidateKey: "runtime-host-2", changeId: "change-1" },
     { candidateKey: "runtime-host-3", changeId: "change-1" },
+    { candidateKey: "runtime-host-4", changeId: "change-1" },
   ]);
 
   const sharedRuntimeBox = frame.locator(
@@ -192,12 +271,16 @@ test("runtime projection binds exact hosts and adds facts without outline geomet
   const hiddenRuntimeBox = frame.locator(
     '[data-pageroot-review-overlay-box][data-pageroot-review-fact="style:runtime-projection-3"]',
   );
+  const svgRuntimeBox = frame.locator(
+    '[data-pageroot-review-overlay-box][data-pageroot-review-fact="style:runtime-projection-4"]',
+  );
   const staticTextBox = frame.locator(
     '[data-pageroot-review-overlay-box][data-pageroot-review-fact="text:static-text"]',
   );
   await expect(sharedRuntimeBox).toHaveCount(1);
   await expect(canvasRuntimeBox).toHaveCount(1);
   await expect(hiddenRuntimeBox).toHaveCount(0);
+  await expect(svgRuntimeBox).toHaveCount(1);
   await expect.poll(() => staticTextBox.count()).toBeGreaterThan(0);
   await expect(frame.locator("section[data-pageroot-outline-id='outline-1']"))
     .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
@@ -212,14 +295,26 @@ test("runtime projection binds exact hosts and adds facts without outline geomet
       && Math.abs(Number(overlay.getAttribute("data-top")) - (targetRect.top - 3)) < 0.2
       && Math.abs(Number(overlay.getAttribute("data-width")) - (targetRect.width + 6)) < 0.2;
   })).toBe(true);
+  await expect.poll(() => svgRuntimeBox.evaluate((overlay) => {
+    const target = document.querySelector("#runtime-svg-in-table");
+    const targetRect = target.getBoundingClientRect();
+    return target.namespaceURI === "http://www.w3.org/2000/svg"
+      && target.parentElement.parentElement.parentElement.tagName === "TBODY"
+      && Math.abs(Number(overlay.getAttribute("data-left")) - (targetRect.left - 3)) < 0.2
+      && Math.abs(Number(overlay.getAttribute("data-top")) - (targetRect.top - 3)) < 0.2
+      && Math.abs(Number(overlay.getAttribute("data-width")) - (targetRect.width + 6)) < 0.2
+      && Math.abs(Number(overlay.getAttribute("data-height")) - (targetRect.height + 6)) < 0.2;
+  })).toBe(true);
 
   await postReviewState(page, "text");
   await expect.poll(() => staticTextBox.count()).toBeGreaterThan(0);
   await expect(sharedRuntimeBox).toHaveCount(0);
   await expect(canvasRuntimeBox).toHaveCount(0);
+  await expect(svgRuntimeBox).toHaveCount(0);
   await postReviewState(page, "style");
   await expect(sharedRuntimeBox).toHaveCount(1);
   await expect(canvasRuntimeBox).toHaveCount(1);
+  await expect(svgRuntimeBox).toHaveCount(1);
 
   await page.evaluate(() => {
     document.querySelector("#review-frame").contentWindow.postMessage({
@@ -275,6 +370,31 @@ test("hostile authored listeners cannot observe or forge runtime projection capa
   expect(JSON.stringify(leaked)).not.toContain("runtime-host-2");
 });
 
+test("comment and runtime bindings keep separate ports in the same first bootstrap", async ({ page }) => {
+  const frame = await installRuntimeProjectionFrame(page, { withCommentBinding: true });
+  expect(await page.evaluate(() => (
+    window.runtimeProjectionTest.commentPort !== window.runtimeProjectionTest.port
+  ))).toBe(true);
+
+  await postCommentTargets(page);
+  await postRuntimeFacts(page, [{ candidateKey: "runtime-host-2", changeId: "change-1" }]);
+
+  await expect.poll(() => page.evaluate(() => (
+    window.runtimeProjectionTest.commentLayouts.some((layout) => layout.key === "comment-1")
+  ))).toBe(true);
+  await expect(frame.locator(
+    '[data-pageroot-review-overlay-box][data-pageroot-review-fact="style:runtime-projection-1"]',
+  )).toHaveCount(1);
+  const observed = await frame.locator("html").evaluate(() => window.authoredObservedMessages);
+  expect(observed.some((message) => (
+    message.type === "request-review-comment-channel"
+    || message.type === "request-runtime-projection-channel"
+    || message.challenge === "b".repeat(32)
+    || message.challenge === "c".repeat(32)
+    || message.portCount > 0
+  ))).toBe(false);
+});
+
 test("empty runtime projection preserves static facts", async ({ page }) => {
   const frame = await installRuntimeProjectionFrame(page);
   const staticTextBox = frame.locator(
@@ -286,6 +406,30 @@ test("empty runtime projection preserves static facts", async ({ page }) => {
   await expect(frame.locator(
     '[data-pageroot-review-overlay-box][data-pageroot-review-fact^="style:runtime-projection-"]',
   )).toHaveCount(0);
+});
+
+test("cross-session side and source runtime results preserve static facts", async ({ page }) => {
+  const invalidEnvelopes = [
+    { sessionId: "review-session-stale" },
+    { side: "after" },
+    { sourceSha256: `sha256:${"d".repeat(64)}` },
+  ];
+  for (const invalidEnvelope of invalidEnvelopes) {
+    const frame = await installRuntimeProjectionFrame(page);
+    const staticTextBox = frame.locator(
+      '[data-pageroot-review-overlay-box][data-pageroot-review-fact="text:static-text"]',
+    );
+    await expect.poll(() => staticTextBox.count()).toBeGreaterThan(0);
+    await postRuntimeFacts(
+      page,
+      [{ candidateKey: "runtime-host-2", changeId: "change-1" }],
+      invalidEnvelope,
+    );
+    await expect.poll(() => staticTextBox.count()).toBeGreaterThan(0);
+    await expect(frame.locator(
+      '[data-pageroot-review-overlay-box][data-pageroot-review-fact^="style:runtime-projection-"]',
+    )).toHaveCount(0);
+  }
 });
 
 test("parser-time target replacement fails closed without rebinding", async ({ page }) => {

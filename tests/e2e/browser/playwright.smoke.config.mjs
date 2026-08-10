@@ -32,7 +32,9 @@ const smokeTitles = [
   "mixed-shape path-only comment decoys fail closed",
   "runtime projection binds exact hosts and adds facts without outline geometry",
   "hostile authored listeners cannot observe or forge runtime projection capability",
+  "comment and runtime bindings keep separate ports in the same first bootstrap",
   "empty runtime projection preserves static facts",
+  "cross-session side and source runtime results preserve static facts",
   "parser-time target replacement fails closed without rebinding",
 ];
 const escapedTitles = smokeTitles.map((title) => title.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"));
