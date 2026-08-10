@@ -30,6 +30,14 @@ const editableCase = "persistence-benchmark";
 const tempPrefix = "pageroot-persistence-benchmark-";
 const defaultSamples = 7;
 const defaultWarmups = 1;
+const benchmarkCommand = "npm run desktop:renderer && node scripts/benchmark-persistence.mjs";
+const frozenMainAllowlist = new Set([
+  "docs/DEVELOPMENT.md",
+  "docs/PERSISTENCE_PERFORMANCE_DECISION.md",
+  "package.json",
+  "scripts/benchmark-persistence.mjs",
+  "tests/TEST_STRATEGY.md",
+]);
 
 const budgets = Object.freeze({
   bridgeTransactionP95Ms: 500,
@@ -69,9 +77,22 @@ function replacement(html, nextToken) {
   return result;
 }
 
+async function assertSourceBytes(sourcePath, expectedHtml, operation) {
+  const actualHtml = await readFile(sourcePath, "utf8");
+  if (actualHtml === expectedHtml) return;
+  let offset = 0;
+  while (offset < actualHtml.length && actualHtml[offset] === expectedHtml[offset]) offset += 1;
+  const start = Math.max(0, offset - 80);
+  const end = offset + 160;
+  throw new Error(
+    `${operation} did not preserve the complete edited source bytes at offset ${offset}. `
+      + `Expected ${JSON.stringify(expectedHtml.slice(start, end))}; received ${JSON.stringify(actualHtml.slice(start, end))}.`,
+  );
+}
+
 function fixtureHtml(sizeMiB, initialToken = token(0)) {
   const targetBytes = Math.round(sizeMiB * 1024 * 1024);
-  const header = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>PageRoot persistence benchmark</title><style>body{font:14px system-ui}.card{border:1px solid #ddd;margin:8px;padding:8px}</style></head><body><main><p data-native-case="${editableCase}" data-native-mode="native-editable"><span>${initialToken}</span></p>`;
+  const header = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>PageRoot persistence benchmark</title><style>body{font:14px system-ui}.card{border:1px solid #ddd;margin:8px;padding:8px}</style></head><body><main><p data-native-case="${editableCase}" data-native-mode="native-editable">${initialToken}</p>`;
   const footer = "</main></body></html>";
   const paragraph = "structured-persistence-content-".repeat(56);
   const card = `<section class="card"><h2>Structured section</h2><p>${paragraph}</p><ul><li>source bytes stay authoritative</li><li>atomic recovery stays enabled</li></ul></section>`;
@@ -142,6 +163,33 @@ async function command(commandName, args) {
 
 async function gitValue(...args) {
   return command("git", args);
+}
+
+async function assertFrozenMainRuntimeInputs() {
+  const [changed, baselinePackageText, currentPackageText] = await Promise.all([
+    gitValue("diff", "--name-only", "origin/main"),
+    command("git", ["show", "origin/main:package.json"]),
+    readFile(path.join(productRoot, "package.json"), "utf8"),
+  ]);
+  const changedFiles = changed.split("\n").filter(Boolean);
+  const unexpected = changedFiles.filter((file) => !frozenMainAllowlist.has(file));
+  assert(
+    unexpected.length === 0,
+    `Benchmark branch changed frozen-main runtime inputs: ${unexpected.join(", ")}`,
+  );
+
+  const baselinePackage = JSON.parse(baselinePackageText);
+  const currentPackage = JSON.parse(currentPackageText);
+  assert(
+    currentPackage.scripts?.["benchmark:persistence"] === benchmarkCommand,
+    "Benchmark package command drifted from the frozen-main harness command.",
+  );
+  delete currentPackage.scripts["benchmark:persistence"];
+  assert(
+    JSON.stringify(currentPackage) === JSON.stringify(baselinePackage),
+    "Benchmark branch modified package.json beyond the benchmark command.",
+  );
+  return changedFiles;
 }
 
 async function directoryDigest(directory) {
@@ -602,15 +650,21 @@ async function activateAndReplace(page, frame, nextToken) {
       && document.activeElement === targetElement;
   }, editableCase, { timeout: 10_000 });
   await target.evaluate((element) => {
-    const text = document.createTreeWalker(element, NodeFilter.SHOW_TEXT).nextNode();
-    if (!text) throw new Error("Benchmark editable token is unavailable.");
+    element.focus();
     const range = document.createRange();
-    range.selectNodeContents(text);
+    range.selectNodeContents(element);
     const selection = document.getSelection();
     selection?.removeAllRanges();
     selection?.addRange(range);
+    if (document.activeElement !== element || selection?.toString() !== element.textContent) {
+      throw new Error("Benchmark editable token selection did not remain active.");
+    }
   });
   await page.keyboard.insertText(nextToken);
+  await frame.waitForFunction(({ caseId, expectedToken }) => {
+    const targetElement = document.querySelector(`[data-native-case=${JSON.stringify(caseId)}]`);
+    return targetElement?.textContent === expectedToken;
+  }, { caseId: editableCase, expectedToken: nextToken }, { timeout: 10_000 });
 }
 
 async function persistedRevision(page, minimumRevision) {
@@ -697,9 +751,11 @@ async function runElectronSession(runRoot, sizeMiB, sequence, sampleIndex) {
   const userData = await mkdtemp(path.join(temporaryParent, "pageroot-native-e2e-"));
   const sourceA = path.join(sources, `persistence-${sizeMiB}-A.html`);
   const sourceB = path.join(sources, `persistence-${sizeMiB}-B.html`);
+  const initialSourceA = fixtureHtml(sizeMiB);
+  const initialSourceB = fixtureHtml(sizeMiB, token(6_000));
   await mkdir(sources, { recursive: true });
-  await writeFile(sourceA, fixtureHtml(sizeMiB), "utf8");
-  await writeFile(sourceB, fixtureHtml(sizeMiB, token(6_000)), "utf8");
+  await writeFile(sourceA, initialSourceA, "utf8");
+  await writeFile(sourceB, initialSourceB, "utf8");
   let electronApp = null;
   try {
     const launched = await launchElectron(userData, sourceA, [sourceA, sourceB]);
@@ -721,7 +777,7 @@ async function runElectronSession(runRoot, sizeMiB, sequence, sampleIndex) {
       await closeElectronGracefully(electronApp, launched.rendererUrl);
       const [rendererGap, rendererMemory] = await Promise.all([gap.stop().catch(() => ({ maxGapMs: 0, samples: 0 })), memory.stop()]);
       electronApp = null;
-      assert((await readFile(sourceA, "utf8")).includes(dirtyToken), "Dirty close did not persist the edited source bytes.");
+      await assertSourceBytes(sourceA, replacement(initialSourceA, dirtyToken), "Dirty close");
       return {
         dirtyClose: {
           durationMs: Number(formatNumber(performance.now() - startedAt)),
@@ -740,7 +796,7 @@ async function runElectronSession(runRoot, sizeMiB, sequence, sampleIndex) {
     await activateAndReplace(launched.page, frame, autosaveToken);
     await persistedRevision(launched.page, initialRevision);
     const [autosaveRendererGap, autosaveRendererMemory] = await Promise.all([autosaveGap.stop(), autosaveMemory.stop()]);
-    assert((await readFile(sourceA, "utf8")).includes(autosaveToken), "Electron autosave did not persist the edited source bytes.");
+    await assertSourceBytes(sourceA, replacement(initialSourceA, autosaveToken), "Electron autosave");
 
     frame = await currentFrame(launched.page, canonicalA, autosaveToken);
     const switchToken = token(2_000 + sampleIndex);
@@ -754,7 +810,7 @@ async function runElectronSession(runRoot, sizeMiB, sequence, sampleIndex) {
     await launched.page.locator(".recent-file-row").filter({ hasText: path.basename(sourceB) }).click();
     await currentFrame(launched.page, canonicalB, token(6_000));
     const [switchRendererGap, switchRendererMemory] = await Promise.all([switchGap.stop(), switchMemory.stop()]);
-    assert((await readFile(sourceA, "utf8")).includes(switchToken), "Dirty switch did not drain the edited source bytes.");
+    await assertSourceBytes(sourceA, replacement(initialSourceA, switchToken), "Dirty switch");
 
     const [closeGap, closeMemory] = await Promise.all([
       startRendererGapMonitor(launched.page),
@@ -883,10 +939,8 @@ async function main() {
       directoryDigest(rendererDirectory),
       readFile(path.join(productRoot, "desktop", "vite.config.ts"), "utf8").then(sha256),
       Promise.resolve(require("electron/package.json").version),
-      gitValue("diff", "--name-only", "origin/main"),
+      assertFrozenMainRuntimeInputs(),
     ]);
-    const productionChanges = changedFiles.split("\n").filter(Boolean).filter((file) => /^(?:app|desktop|shared|schemas)\//u.test(file));
-    assert(productionChanges.length === 0, `Benchmark branch changed production paths: ${productionChanges.join(", ")}`);
     const fixtures = [];
     for (const sizeMiB of fixtureSizesMiB) {
       const bridge = await runBridgeSamples(runRoot, sizeMiB, options);
@@ -898,7 +952,7 @@ async function main() {
       generatedAt: new Date().toISOString(),
       options,
       baseline: { mainSha, treeSha },
-      harness: { commitSha: harnessCommitSha, productionChanges },
+      harness: { commitSha: harnessCommitSha, changedFiles },
       build: { rendererDigest, viteConfigSha256: viteConfig },
       machine: {
         platform: os.platform(),
