@@ -106,14 +106,14 @@ delivery arrives first, so an older mailbox snapshot cannot replace a newer
 external intent. The session fences only an
 older request that has not yet been accepted when a newer request is queued,
 and it freezes the Canvas from the final safe switch fence through the awaited
-external acceptance; a newer external request inherits that freeze. Its
-snapshot includes a monotonically increasing deferred-transition sequence.
-Workbench observes a new sequence but never resumes from that snapshot alone:
-automatic retry requires a relevant safe-switch blocker to be observed and
-then clear. If no tracked blocker is present, Workbench keeps the current HTML
-and offers an explicit retry action instead. If the final fence captures a
-post-cutoff native edit, it does not begin the IPC, releases that edit to normal
-persistence, and resumes only after that source blocker clears.
+external acceptance; a newer external request inherits that freeze. Each
+renderer open/application session owns its own deferred retry transition. It
+records whether `DrainCoordinator.inspect("switch")` observed a relevant
+blocker, resumes only after that blocker clears, and otherwise leaves the
+explicit retry action available. Project hydration is an explicit switch
+obligation rather than a copied Workbench boolean. If the final fence captures
+a post-cutoff native edit, it does not begin the IPC, releases that edit to
+normal persistence, and resumes only after that source blocker clears.
 
 An external delivery that arrives while the Electron close handshake is still
 awaiting the renderer cancels that exact close attempt before the request is

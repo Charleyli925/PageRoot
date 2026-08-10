@@ -133,6 +133,41 @@ test("external file session gives every deferred transition a new sequence", asy
   assert.deepEqual(calls, ["external_retry-sequence", "external_retry-sequence"]);
 });
 
+test("external file session resumes only after an observed switch blocker clears", async () => {
+  const session = new ExternalFileOpenSession();
+  const calls = [];
+  const execute = async (value) => {
+    calls.push(value.requestId);
+    return calls.length === 1 ? "deferred" : "complete";
+  };
+
+  assert.equal(session.enqueue(request("blocker"), execute), true);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(
+    session.reconcileDeferredSwitch({ switchBlocked: false, execute }),
+    "action-required",
+  );
+  assert.equal(
+    session.reconcileDeferredSwitch({ switchBlocked: false, execute }),
+    "blocked",
+  );
+  assert.deepEqual(calls, ["external_blocker"]);
+
+  assert.equal(
+    session.reconcileDeferredSwitch({ switchBlocked: true, execute }),
+    "blocked",
+  );
+  assert.equal(
+    session.reconcileDeferredSwitch({ switchBlocked: false, execute }),
+    "resumed",
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(calls, ["external_blocker", "external_blocker"]);
+  assert.equal(session.snapshot.status, "idle");
+});
+
 test("a newer external request supersedes a deferred request before it resumes", async () => {
   const session = new ExternalFileOpenSession();
   const calls = [];

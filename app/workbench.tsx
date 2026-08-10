@@ -319,12 +319,6 @@ type AcceptedProjectApplication = Readonly<{
   onFailure: (cause: unknown) => void;
 }>;
 
-type DeferredProjectApplicationRetry = {
-  requestId: string | null;
-  deferredSequence: number;
-  sawSwitchBlocker: boolean;
-};
-
 const AUTOSAVE_DELAY_MS = 700;
 const bridgeClient = createRuntimeBridgeClient();
 const recoveryStore = createBrowserRecoveryStore();
@@ -366,6 +360,13 @@ const INITIAL_PROJECT_APPLICATION_SNAPSHOT: ProjectApplicationSnapshot = {
   queuedApplicationId: null,
   deferredApplicationId: null,
   deferredSequence: 0,
+};
+const INITIAL_PROJECT_SESSION_SNAPSHOT: ProjectSessionSnapshot = {
+  epoch: 0,
+  sourcePath: null,
+  projectId: "",
+  documentId: "",
+  registered: false,
 };
 const INITIAL_VERSION_SNAPSHOT: VersionSessionSnapshot<Version> = {
   versions: [],
@@ -612,7 +613,6 @@ export default function Workbench() {
   const auditInFlightKeysRef = useRef<Set<string>>(new Set());
   const attachmentUploadCountRef = useRef(0);
   const attachmentObjectUrlsRef = useRef<Map<string, string>>(new Map());
-  const draftPersistenceAuthorityRef = useRef<ProjectContext | null>(null);
   const draftRecoverySequenceRef = useRef(0);
   const draftRecoveryOperationIdRef = useRef<string | null>(null);
   const projectRegistrationPromiseRef =
@@ -633,17 +633,6 @@ export default function Workbench() {
     recentPath?: string;
     requestedAt: number;
   } | null>(null);
-  const externalDeferredRetryRef = useRef<DeferredProjectApplicationRetry>({
-    requestId: null,
-    deferredSequence: 0,
-    sawSwitchBlocker: false,
-  });
-  const projectApplicationDeferredRetryRef =
-    useRef<DeferredProjectApplicationRetry>({
-      requestId: null,
-      deferredSequence: 0,
-      sawSwitchBlocker: false,
-    });
   const closeLifecycleRef = useRef<CloseLifecycle>({
     preparingRequestId: null,
     frozenRequestId: null,
@@ -661,22 +650,6 @@ export default function Workbench() {
     useState<ExternalFileOpenSnapshot>(INITIAL_EXTERNAL_FILE_OPEN_SNAPSHOT);
   const [projectApplicationSnapshot, setProjectApplicationSnapshot] =
     useState<ProjectApplicationSnapshot>(INITIAL_PROJECT_APPLICATION_SNAPSHOT);
-  const externalDeferredRequestId =
-    externalFileOpenSnapshot.status === "deferred"
-      ? externalFileOpenSnapshot.deferredRequestId
-      : null;
-  const externalDeferredSequence =
-    externalFileOpenSnapshot.status === "deferred"
-      ? externalFileOpenSnapshot.deferredSequence
-      : 0;
-  const projectApplicationDeferredId =
-    projectApplicationSnapshot.status === "deferred"
-      ? projectApplicationSnapshot.deferredApplicationId
-      : null;
-  const projectApplicationDeferredSequence =
-    projectApplicationSnapshot.status === "deferred"
-      ? projectApplicationSnapshot.deferredSequence
-      : 0;
   const html = documentSnapshot.html;
   const sourceSha256 = documentSnapshot.sourceSha256;
   const canvasGeneration = documentSnapshot.canvasGeneration;
@@ -685,9 +658,9 @@ export default function Workbench() {
   const persistState = documentSnapshot.persistState;
   const persistError = documentSnapshot.persistError;
   const [projectName, setProjectName] = useState(WELCOME_PROJECT.name);
-  const [sourcePath, setSourcePath] = useState<string | null>(WELCOME_PROJECT.sourcePath);
-  const [projectId, setProjectId] = useState("");
-  const [documentId, setDocumentId] = useState("");
+  const [projectSnapshot, setProjectSnapshot] =
+    useState<ProjectSessionSnapshot>(INITIAL_PROJECT_SESSION_SNAPSHOT);
+  const { sourcePath, projectId, documentId } = projectSnapshot;
   const [projectRecordsPath, setProjectRecordsPath] =
     useState<string | null>(null);
   const [lastModifiedAt, setLastModifiedAt] = useState<string | null>(null);
@@ -864,11 +837,8 @@ export default function Workbench() {
   );
   useEffect(() => {
     const session = projectSessionRef.current;
-    session.setObserver((snapshot) => {
-      setSourcePath(snapshot.sourcePath);
-      setProjectId(snapshot.projectId);
-      setDocumentId(snapshot.documentId);
-    });
+    session.setObserver(setProjectSnapshot);
+    setProjectSnapshot(session.snapshot);
     return () => session.setObserver(null);
   }, []);
   useEffect(() => () => reviewAnalysisSessionRef.current.dispose(), []);
@@ -1877,7 +1847,6 @@ export default function Workbench() {
           authoritativeDraftRevision(authoritativeDraft),
           authoritativeDraft,
         );
-        draftPersistenceAuthorityRef.current = existingContext;
       }
       return existingContext;
     }
@@ -2011,7 +1980,6 @@ export default function Workbench() {
           { preservePending: true },
         );
       }
-      draftPersistenceAuthorityRef.current = registeredContext;
       return registeredContext;
     })();
     projectRegistrationPromiseRef.current = registration;
@@ -2774,7 +2742,6 @@ export default function Workbench() {
     draftSessionRef.current.deactivate();
     sourceHistorySessionRef.current.deactivate();
     projectRulesSessionRef.current.close();
-    draftPersistenceAuthorityRef.current = null;
     draftRecoveryOperationIdRef.current = null;
     setProjectName(project.name);
     setProjectRecordsPath(null);
@@ -3669,12 +3636,6 @@ export default function Workbench() {
         );
         commentEditResumePendingRef.current = null;
         setEditingCommentId(null);
-        draftPersistenceAuthorityRef.current = {
-          epoch,
-          projectId: nextProjectId,
-          documentId: nextDocumentId,
-          sourcePath: activeSource,
-        };
         const recoveredComposerTarget = recoveredDraft.composerTarget
           ? recoveredTargetById.get(recoveredDraft.composerTarget.id)
             || { ...recoveredDraft.composerTarget, resolution: "orphaned" as const }
@@ -4100,6 +4061,17 @@ export default function Workbench() {
         () => projectApplicationSessionRef.current.snapshot.status === "idle",
       ),
     });
+    coordinator.replace("project-hydration", {
+      label: "等待项目读取完成",
+      inspect: (boundary) => (
+        boundary === "switch" && projectHydratingRef.current
+      )
+        ? {
+            state: "pending",
+            reason: "当前项目仍在读取，不能开始新的项目切换。",
+          }
+        : { state: "resolved" },
+    });
     coordinator.replace("view-transition", {
       label: "等待页面切换完成",
       inspect: (boundary) => (
@@ -4156,6 +4128,13 @@ export default function Workbench() {
           return {
             state: "blocked",
             reason: "当前 HTML 与外部文件存在冲突，请先选择保留哪一份。",
+          };
+        }
+        if (documentSessionRef.current.persistState === "failed") {
+          return {
+            state: "blocked",
+            reason: documentSessionRef.current.persistError
+              || "当前 HTML 尚未安全写回，请先处理保存失败。",
           };
         }
         if (
@@ -4785,27 +4764,16 @@ export default function Workbench() {
   }, [attachmentBlob]);
 
   useEffect(() => {
+    const draftSession = draftSessionRef.current;
+    const context = draftSession.context;
     if (
-      !sourcePath
-      || !projectId
-    ) return;
-    const authority = draftPersistenceAuthorityRef.current;
-    if (
-      !authority
-      || authority.epoch !== projectSessionRef.current.epoch
-      || authority.projectId !== projectId
-      || authority.documentId !== documentId
-      || !sameLocalSourcePath(authority.sourcePath, sourcePath)
+      !context
+      || !draftSession.isActive(context)
       || projectHydratingRef.current
       || projectHydrating
     ) return;
-    const snapshot = draftSessionRef.current.createSnapshot({
-      context: {
-      epoch: projectSessionRef.current.epoch,
-      projectId,
-      documentId,
-      sourcePath,
-      },
+    const snapshot = draftSession.createSnapshot({
+      context,
       basedOnVersionId: currentBasedOnVersionId,
       comments,
       changeEvents,
@@ -4821,33 +4789,23 @@ export default function Workbench() {
     changeEvents,
     comments,
     currentBasedOnVersionId,
-    documentId,
     flushDraftPersistence,
     persistDraftRecovery,
     projectHydrating,
-    projectId,
     projectLocked,
-    sourcePath,
+    projectSnapshot,
   ]);
 
   useEffect(() => {
-    if (!sourcePath || !projectId) return;
-    const authority = draftPersistenceAuthorityRef.current;
+    const draftSession = draftSessionRef.current;
+    const context = draftSession.context;
     if (
-      !authority
-      || authority.epoch !== projectSessionRef.current.epoch
-      || authority.projectId !== projectId
-      || authority.documentId !== documentId
-      || !sameLocalSourcePath(authority.sourcePath, sourcePath)
+      !context
+      || !draftSession.isActive(context)
       || projectHydratingRef.current
     ) return;
-    const snapshot = draftSessionRef.current.createSnapshot({
-      context: {
-        epoch: projectSessionRef.current.epoch,
-        projectId,
-        documentId,
-        sourcePath,
-      },
+    const snapshot = draftSession.createSnapshot({
+      context,
       basedOnVersionId: currentBasedOnVersionId,
       comments: commentSessionRef.current.comments,
       changeEvents: commentSessionRef.current.changeEvents,
@@ -4857,14 +4815,12 @@ export default function Workbench() {
     if (snapshot) persistDraftRecovery(snapshot);
   }, [
     currentBasedOnVersionId,
-    documentId,
     draft,
     draftAttachments,
     draftCommentId,
     draftTarget,
     persistDraftRecovery,
-    projectId,
-    sourcePath,
+    projectSnapshot,
   ]);
 
   useEffect(() => {
@@ -5623,70 +5579,27 @@ export default function Workbench() {
 
   useEffect(() => {
     const pending = pendingProjectOpenRef.current;
+    const projectApplicationDeferred =
+      projectApplicationSnapshot.status === "deferred";
+    const externalOpenDeferred = externalFileOpenSnapshot.status === "deferred";
     if (
       !pending
-      && !projectApplicationDeferredId
-      && !externalDeferredRequestId
+      && !projectApplicationDeferred
+      && !externalOpenDeferred
     ) return;
-    const projectRulesUnsaved = projectRulesSessionRef.current
-      .inspect({ locked: runSessionRef.current.activeLocked }).state !== "resolved";
-    const draftState = draftSessionRef.current.inspect();
-    const switchBlocked = Boolean(
-      generating
-      || submissionPending
-      || attachmentUploadCount > 0
-      || projectHydrating
-      || viewTransitioning
-      || projectRulesUnsaved
-      || persistState !== "idle"
-      || documentSessionRef.current.pendingWrite
-      || documentSessionRef.current.flushPromise
-      || draftState.pending
-      || draftState.writing
-      || draftState.error
-      || editRevision > lastPersistedRevision
-    );
-    const advanceDeferredRetry = (
-      retryRef: { current: DeferredProjectApplicationRetry },
-      requestId: string,
-      deferredSequence: number,
-      resume: () => boolean,
-      requestManualRetry: () => void,
-    ) => {
-      const retryState = retryRef.current;
-      if (
-        retryState.requestId !== requestId
-        || retryState.deferredSequence !== deferredSequence
-      ) {
-        // A deferred snapshot acknowledges one failed boundary attempt. It is
-        // not itself permission to repeat that attempt: doing so can loop
-        // while Canvas authority recovery remains unresolved but ordinary
-        // projections already look clean.
-        retryRef.current = {
-          requestId,
-          deferredSequence,
-          sawSwitchBlocker: switchBlocked,
-        };
-        if (!switchBlocked) requestManualRetry();
-        return;
-      }
-      if (switchBlocked) {
-        retryState.sawSwitchBlocker = true;
-        return;
-      }
-      if (!retryState.sawSwitchBlocker) return;
-      retryState.sawSwitchBlocker = false;
-      resume();
-    };
+    const switchBlocked = drainCoordinatorRef.current
+      .inspect("switch")
+      .some((status) => status.state !== "resolved");
     // Accepted results own the earlier renderer FIFO position, so they resume
     // before a still-unaccepted external request or a picker retry.
-    if (projectApplicationDeferredId) {
-      advanceDeferredRetry(
-        projectApplicationDeferredRetryRef,
-        projectApplicationDeferredId,
-        projectApplicationDeferredSequence,
-        resumeDeferredProjectApplication,
-        () => setToast({
+    if (projectApplicationDeferred) {
+      const retry = projectApplicationSessionRef.current
+        .reconcileDeferredSwitch({
+          switchBlocked,
+          execute: applyAcceptedProject,
+        });
+      if (retry === "action-required") {
+        setToast({
           title: "当前 HTML 尚未完成安全切换",
           message: "已保留已接受的 HTML；当前画布恢复后可手动继续切换。",
           tone: "warning",
@@ -5694,17 +5607,18 @@ export default function Workbench() {
           disposition: "direct-action",
           dedupeKey: "project-application-deferred",
           action: { id: "retry-project-application", label: "继续切换" },
-        }),
-      );
+        });
+      }
       return;
     }
-    if (externalDeferredRequestId) {
-      advanceDeferredRetry(
-        externalDeferredRetryRef,
-        externalDeferredRequestId,
-        externalDeferredSequence,
-        resumeDeferredExternalProject,
-        () => setToast({
+    if (externalOpenDeferred) {
+      const retry = externalFileOpenSessionRef.current
+        .reconcileDeferredSwitch({
+          switchBlocked,
+          execute: openExternalProject,
+        });
+      if (retry === "action-required") {
+        setToast({
           title: "暂不能切换到 QoderWork 中的 HTML",
           message: "当前画布仍在安全恢复；已保留当前 HTML。恢复后可手动重试打开。",
           tone: "warning",
@@ -5712,30 +5626,28 @@ export default function Workbench() {
           disposition: "direct-action",
           dedupeKey: "external-project-open-deferred",
           action: { id: "retry-external-project-open", label: "重试打开" },
-        }),
-      );
+        });
+      }
       return;
     }
     if (!pending || switchBlocked) return;
     pendingProjectOpenRef.current = null;
     void openProject(pending.recentPath);
   }, [
-    draftPersistError,
+    applyAcceptedProject,
     attachmentUploadCount,
-    editRevision,
-    externalDeferredRequestId,
-    externalDeferredSequence,
-    generating,
-    lastPersistedRevision,
+    commentSnapshot,
+    documentSnapshot,
+    draftPersistError,
+    externalFileOpenSnapshot.status,
+    openExternalProject,
     openProject,
-    persistState,
-    projectApplicationDeferredId,
-    projectApplicationDeferredSequence,
-    projectRulesSnapshot,
+    projectApplicationSnapshot.status,
     projectHydrating,
-    resumeDeferredProjectApplication,
-    resumeDeferredExternalProject,
-    submissionPending,
+    projectLoadError,
+    projectRulesSnapshot,
+    projectSnapshot,
+    runSnapshot,
     viewTransitioning,
   ]);
   useEffect(() => {
@@ -6029,7 +5941,6 @@ export default function Workbench() {
       });
       recoveryIdentityRef.current = null;
       projectRegistrationPromiseRef.current = null;
-      draftPersistenceAuthorityRef.current = null;
       draftRecoveryOperationIdRef.current = null;
       draftSessionRef.current.deactivate();
       sourceHistorySessionRef.current.deactivate();

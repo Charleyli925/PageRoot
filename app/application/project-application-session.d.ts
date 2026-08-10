@@ -15,12 +15,18 @@ export type ProjectApplicationExecution<T> = (
   application: ProjectApplication<T>,
 ) => Promise<"complete" | "deferred" | void> | "complete" | "deferred" | void;
 
+export type ProjectApplicationDeferredSwitchRetry = "idle" | "blocked" | "action-required" | "resumed";
+
 export class ProjectApplicationSession<T> {
   setObserver(
     observer: ((snapshot: ProjectApplicationSnapshot) => void) | null,
   ): void;
   enqueue(application: ProjectApplication<T>, execute: ProjectApplicationExecution<T>): boolean;
   resume(execute: ProjectApplicationExecution<T>): boolean;
+  reconcileDeferredSwitch(options: {
+    switchBlocked: boolean;
+    execute: ProjectApplicationExecution<T>;
+  }): ProjectApplicationDeferredSwitchRetry;
   dispose(): void;
   readonly snapshot: ProjectApplicationSnapshot;
 }
