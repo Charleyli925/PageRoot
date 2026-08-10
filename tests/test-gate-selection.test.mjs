@@ -24,13 +24,10 @@ function suiteIds(plan) {
 const TASK_OWNER_CASES = [
   {
     file: "app/lib/comment-rail-layout.js",
-    nodeTests: [
-      "tests/comment-rail-layout.test.mjs",
-      "tests/workbench-shell-ux.test.mjs",
-    ],
+    nodeTests: ["tests/comment-rail-layout.test.mjs"],
     suites: ["typecheck", "lint", "node-targeted", "build-web", "browser-smoke"],
     directOwners: ["tests/comment-rail-layout.test.mjs"],
-    unrelatedOwners: ["tests/application-update.test.mjs", "tests/review-runtime-visual.test.mjs"],
+    unrelatedOwners: ["tests/application-update.test.mjs", "tests/notification-policy.test.mjs"],
   },
   {
     file: "app/workbench/review-document.ts",
@@ -49,15 +46,15 @@ const TASK_OWNER_CASES = [
     unrelatedOwners: [
       "tests/desktop-package.test.mjs",
       "tests/desktop-preload-ipc.test.mjs",
-      "tests/workbench-shell-ux.test.mjs",
+      "tests/notification-policy.test.mjs",
     ],
   },
   {
     file: "app/components/NoticeBar.tsx",
-    nodeTests: ["tests/notification-policy.test.mjs", "tests/notification-ui.test.mjs"],
+    nodeTests: ["tests/notification-policy.test.mjs"],
     suites: ["typecheck", "lint", "node-targeted", "build-web", "browser-smoke"],
-    directOwners: ["tests/notification-ui.test.mjs"],
-    unrelatedOwners: ["tests/html-preview-sandbox.test.mjs", "tests/workbench-shell-ux.test.mjs"],
+    directOwners: ["tests/notification-policy.test.mjs"],
+    unrelatedOwners: ["tests/html-preview-sandbox.test.mjs", "tests/native-command-queue-contract.test.mjs"],
   },
   {
     file: "app/application/comment-session.js",
@@ -304,6 +301,22 @@ test("desktop handoff changes select Electron and deterministic AI closed-loop c
   assert.ok(plan.selectedNodeTests.includes("tests/qoder-handoff.test.mjs"));
 });
 
+test("notification, comment, and presentation Browser owners select their own smoke lane", () => {
+  for (const file of [
+    "tests/e2e/browser/native-dom-notification-recovery.spec.mjs",
+    "tests/e2e/browser/native-dom-comment-tabs.spec.mjs",
+    "tests/e2e/browser/native-dom-presentation-actions.spec.mjs",
+  ]) {
+    const plan = selectGatePlan({ map, lane: "task", changedFiles: [file] });
+    assert.deepEqual(
+      suiteIds(plan),
+      ["typecheck", "lint", "build-web", "browser-smoke"],
+      file,
+    );
+    assert.deepEqual(plan.selectedNodeTests, [], file);
+  }
+});
+
 test("release and artifact lanes use complete automated coverage and never smoke aliases", () => {
   const release = assertFullyAutomatedPlan(selectGatePlan({ map, lane: "release" }));
   assert.deepEqual(suiteIds(release), [
@@ -395,7 +408,12 @@ test("Node groups partition every top-level test exactly once outside full", asy
   ].map(relative);
   assert.equal(new Set(categorized).size, categorized.length);
   assert.deepEqual([...new Set(categorized)].sort(), groups.full.map(relative).sort());
-  assert.ok(groups.contract.some((file) => file.endsWith("workbench-shell-ux.test.mjs")));
+  assert.ok(groups.contract.some((file) => file.endsWith("native-command-queue-contract.test.mjs")));
+  assert.ok(groups.core.some((file) => file.endsWith("notification-policy.test.mjs")));
+  assert.equal(
+    groups.contract.some((file) => /(?:notification-ui|workbench-shell-ux)\.test\.mjs$/u.test(file)),
+    false,
+  );
   assert.ok(groups.package.some((file) => file.endsWith("packaged-artifact-gate.test.mjs")));
   assert.deepEqual(
     groups.smoke.map(relative).sort(),

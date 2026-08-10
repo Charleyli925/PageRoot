@@ -52,6 +52,29 @@ test.describe("notification recovery paths", () => {
     await expect(notice).toHaveCount(0);
   });
 
+  test("a notice dismissal is keyboard-accessible and keeps the current page visible", async ({
+    page,
+  }) => {
+    await openFixture(page);
+
+    const htmlInput = page.locator('input[type="file"][accept*=".html"]').first();
+    await htmlInput.setInputFiles({
+      name: "not-utf8.html",
+      mimeType: "text/html",
+      buffer: Buffer.from([0xc3, 0x28]),
+    });
+
+    const notice = page.locator(".toast.show");
+    await expect(notice).toHaveAttribute("role", "status");
+    const dismiss = notice.getByRole("button", { name: "关闭提醒" });
+    await dismiss.focus();
+    await page.keyboard.press("Enter");
+
+    await expect(notice).toHaveCount(0);
+    await expect(page.getByText("notification-recovery", { exact: true }).first())
+      .toBeVisible();
+  });
+
   test("a full attachment batch leads back to removable attachments before retry", async ({
     page,
   }) => {

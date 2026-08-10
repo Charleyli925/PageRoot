@@ -1244,8 +1244,7 @@ viewport-fixed 定位，不随 HTML 页面滚动，不遮挡右侧评论栏。
 主要自动化证据：
 
 - `tests/notification-policy.test.mjs`
-- `tests/notification-ui.test.mjs`
-- `tests/workbench-shell-ux.test.mjs`
+- `tests/e2e/browser/native-dom-notification-recovery.spec.mjs`
 - `tests/e2e/browser/native-dom-comment-stress.spec.mjs`
 - `tests/e2e/electron/ai-handoff-closed-loop.spec.mjs`
 

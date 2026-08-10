@@ -474,8 +474,7 @@
       ],
       "suites": ["typecheck", "browser-smoke"],
       "nodeTests": [
-        "tests/comment-rail-layout.test.mjs",
-        "tests/workbench-shell-ux.test.mjs"
+        "tests/comment-rail-layout.test.mjs"
       ]
     },
     {
@@ -535,11 +534,7 @@
       "suites": ["typecheck", "browser-smoke", "electron-smoke", "ai-smoke"],
       "nodeTests": [
         "tests/ai-review-workspace.test.mjs",
-        "tests/frontend-target-refresh.test.mjs",
         "tests/native-command-queue-contract.test.mjs",
-        "tests/notification-policy.test.mjs",
-        "tests/notification-ui.test.mjs",
-        "tests/workbench-shell-ux.test.mjs",
         "tests/workbench-source-fence-contract.test.mjs"
       ]
     },
@@ -565,8 +560,7 @@
       ],
       "suites": ["typecheck", "browser-smoke"],
       "nodeTests": [
-        "tests/notification-policy.test.mjs",
-        "tests/notification-ui.test.mjs"
+        "tests/notification-policy.test.mjs"
       ]
     },
     {
@@ -576,12 +570,7 @@
         "^app/(?:page|layout)\\.tsx$"
       ],
       "suites": ["typecheck", "browser-smoke"],
-      "nodeTests": [
-        "tests/frontend-target-refresh.test.mjs",
-        "tests/html-preview-sandbox.test.mjs",
-        "tests/notification-ui.test.mjs",
-        "tests/workbench-shell-ux.test.mjs"
-      ]
+      "nodeTests": []
     },
     {
       "id": "usage-telemetry",
