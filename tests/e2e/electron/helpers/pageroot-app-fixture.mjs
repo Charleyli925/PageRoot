@@ -28,6 +28,7 @@ const DEFAULT_EXIT_TIMEOUT = 3_000;
 const DEFAULT_TERMINATE_TIMEOUT = 1_000;
 const DEFAULT_CLOSE_OBSERVATION_GRACE = 1_000;
 const DEFAULT_SOURCE_PREFIX = "pageroot-native-e2e-source-";
+const DEFAULT_MAIN_WINDOW_TIMEOUT = 15_000;
 const stopPromiseKey = Symbol("pagerootAppFixtureStopPromise");
 
 /**
@@ -157,6 +158,33 @@ export function removeSourceFixture(
   removeValidatedTemporaryDirectory(sourceDirectory, sourceDirectoryPrefix);
 }
 
+export async function waitForMainBrowserWindow(
+  electronApp,
+  rendererUrl,
+  { timeout = DEFAULT_MAIN_WINDOW_TIMEOUT } = {},
+) {
+  let nativeWindow = null;
+  await expect.poll(async () => {
+    nativeWindow = await electronApp.evaluate(({ BrowserWindow }, expectedRendererUrl) => {
+      const window = BrowserWindow.getAllWindows().find((candidate) => (
+        !candidate.isDestroyed()
+        && candidate.webContents.getURL() === expectedRendererUrl
+      ));
+      if (!window) return null;
+      window.webContents.setBackgroundThrottling(false);
+      return {
+        focused: window.isFocused(),
+        visible: window.isVisible(),
+      };
+    }, rendererUrl);
+    return nativeWindow !== null;
+  }, {
+    timeout,
+    message: "PageRoot main BrowserWindow did not become available during launch.",
+  }).toBe(true);
+  return nativeWindow;
+}
+
 export async function launchPageRoot({
   activeSourcePath = null,
   recentSourcePaths = activeSourcePath ? [activeSourcePath] : [],
@@ -186,31 +214,19 @@ export async function launchPageRoot({
   });
   const diagnostics = collectProcessDiagnostics(electronApp.process());
   const page = await electronApp.firstWindow();
+  await page.waitForLoadState("domcontentloaded");
+  await page.waitForFunction(() => document.visibilityState === "visible");
+  await page.evaluate(() => new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(resolve));
+  }));
   const mainRendererUrl = page.url();
-  const nativeWindow = await electronApp.evaluate(({ BrowserWindow }, rendererUrl) => {
-    const window = BrowserWindow.getAllWindows().find((candidate) => (
-      candidate.webContents.getURL() === rendererUrl
-    ));
-    if (!window) {
-      throw new Error("PageRoot main BrowserWindow is unavailable during launch.");
-    }
-    window.webContents.setBackgroundThrottling(false);
-    return {
-      focused: window.isFocused(),
-      visible: window.isVisible(),
-    };
-  }, mainRendererUrl);
+  const nativeWindow = await waitForMainBrowserWindow(electronApp, mainRendererUrl);
   const foreground = (
     injectedEnv.PAGEROOT_E2E_FOREGROUND
     ?? process.env.PAGEROOT_E2E_FOREGROUND
   ) === "1";
   expect(nativeWindow.visible).toBe(foreground);
   if (!foreground) expect(nativeWindow.focused).toBe(false);
-  await page.waitForLoadState("domcontentloaded");
-  await page.waitForFunction(() => document.visibilityState === "visible");
-  await page.evaluate(() => new Promise((resolve) => {
-    requestAnimationFrame(() => requestAnimationFrame(resolve));
-  }));
   return {
     electronApp,
     page,
