@@ -46,7 +46,9 @@ Bridge route adapters
 - Runtime capability decoding has one ingress:
   `app/application/runtime-capabilities.js`. Source editing, project opening,
   attachment persistence, close coordination and interactive preview transport
-  are independent declarations;
+  are independent declarations. The immutable preload manifest is the only
+  authority: a missing or malformed manifest fails closed to the browser
+  capability set;
   consumers may not infer the whole runtime from the presence of one preload
   API. Electron owns desktop close safety through its acknowledged handshake;
   `beforeunload` is only the browser fallback.

@@ -45,7 +45,6 @@ export const DESKTOP_RUNTIME_CAPABILITIES = freezeManifest({
 
 export function resolveRuntimeCapabilities({
   runtimeConfig,
-  projectsApi,
 } = {}) {
   const declared = isRecord(runtimeConfig)
     ? runtimeConfig.capabilities
@@ -56,13 +55,5 @@ export function resolveRuntimeCapabilities({
       : BROWSER_RUNTIME_CAPABILITIES;
   }
 
-  // Compatibility for packaged renderers from before the capability manifest.
-  // The preload and renderer ship together, so this branch can be removed after
-  // the first release that requires an explicit manifest.
-  return isRecord(projectsApi)
-    && typeof projectsApi.openHtml === "function"
-    && typeof projectsApi.listRecentProjects === "function"
-    && typeof projectsApi.openRecent === "function"
-    ? DESKTOP_RUNTIME_CAPABILITIES
-    : BROWSER_RUNTIME_CAPABILITIES;
+  return BROWSER_RUNTIME_CAPABILITIES;
 }

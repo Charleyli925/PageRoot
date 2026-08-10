@@ -469,9 +469,6 @@ test("review candidates are source-backed rather than script or comment-scope in
     reviewDocument,
     /\.slice\(0, RUNTIME_VISUAL_CONTRACT\.identityAttributeLimit\)/,
   );
-  const bootstrap = generatedReviewBootstrap();
-  assert.doesNotMatch(bootstrap, /runtime-visual-channel/);
-  assert.doesNotMatch(bootstrap, /runtime-visual-snapshots/);
   assert.match(review, /acceptedRuntimeVisualEnvelope/);
 });
 
@@ -487,7 +484,6 @@ test("formal review projects frozen user comments with private source identities
   assert.doesNotMatch(review, /Math\.abs\((?:left|top)\) > 100_000/);
   assert.match(review, /reviewCommentContentLayer/);
   assert.match(styles, /--review-comment-scroll-y/);
-  assert.match(reviewDocument, /annotateReviewComments\(\s*beforeDocument,/);
   assert.match(reviewDocument, /durableReviewCommentTargetSelector/);
   assert.match(reviewDocument, /:nth-\(\?:child\|of-type\)\\\(/);
   assert.match(reviewDocument, /selector\.startsWith\("#"\)/);

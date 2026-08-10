@@ -13,5 +13,4 @@ export function resolveRuntimeCapabilities(options?: {
   runtimeConfig?: {
     capabilities?: unknown;
   } | null;
-  projectsApi?: unknown;
 }): RuntimeCapabilities;

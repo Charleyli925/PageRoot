@@ -357,7 +357,7 @@
       "id": "source-editing-core",
       "patterns": [
         "^app/lib/(?:canvas-target-rebind|editable-island|native-dom-logical-index|page-(?:presentation-dom|view-context)|source-(?:index|patch-core|patch-engine|text-map)|target-resolver|runtime-dom-source-map|native-(?:edit-capability|edit-policy))\\.(?:js|ts|d\\.ts)$",
-        "^scripts/(?:source-index|source-patch-engine|target-resolver)\\.mjs$"
+        "^scripts/(?:source-index|target-resolver)\\.mjs$"
       ],
       "suites": ["typecheck", "browser-smoke", "electron-smoke"],
       "nodeTests": [

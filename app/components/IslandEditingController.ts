@@ -77,7 +77,6 @@ export type IslandExternalBaselineOptions = {
   preserveLiveSelection?: boolean;
   lease?: NativeEditLeaseStamp;
   reconcileDomBeforeRebase?: () => unknown;
-  getFormatSkeleton?: () => unknown;
 };
 
 type SavedAttribute = {

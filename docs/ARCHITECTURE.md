@@ -379,6 +379,9 @@ verification is a no-op: it neither POSTs the draft nor advances its revision.
 The runtime capability manifest selects exactly one close coordinator:
 Electron's acknowledged handshake for the desktop app, or `beforeunload` for a
 browser runtime. They never compete over the same close.
+The immutable preload manifest is the only capability authority: absent or
+malformed declarations fail closed to browser capabilities, and the presence
+of an individual preload API cannot restore desktop authority.
 
 The renderer close result also classifies who owns presentation. Known
 recoverable blockers remain in their Canvas/banner/panel and cause Electron to
