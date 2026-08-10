@@ -9,6 +9,7 @@
 | Registered mutation context resolution and atomic-replacement source observation | Bridge project-context service | project/document registry graph plus the owning runtime `pendingWrite` target Hash | Bridge mutation routes and `/project/ensure` |
 | Explicit source filename transition, pending operation and active/recent path rebase | Desktop source-rename transaction | active-file `pendingRename` / `lastRename`, then filesystem path | project session, Bridge relink, views |
 | Current source bytes, Hash, edit revision, persistence projection, pending write, single-flight source flush, Canvas authority generation and exact-byte boundary reconciliation | Renderer `DocumentSession` | source HTML, runtime autosave record and recovery log; the generation itself is disposable | Canvas, preview readiness, source-history session and drain coordinator |
+| Current-source commit/recovery WAL, same-directory atomic replacement, acknowledged source-history application, project/runtime settlement and exactly-once audit outbox cleanup | Bridge `SourceTransaction` service | source HTML, `history/source-operations.json`, `project.json`, `runtime-state.json` and `pendingWrite` recovery bytes | `/autosave` and `/source-history/action` route adapters, project-context service and restart recovery |
 | Canvas source-history context, pending Patch operations, cursor and applied action IDs | Renderer `SourceHistorySession` for pending intent; Bridge source-history service for acknowledged authority | `history/source-operations.json`, committed with the source through the runtime `pendingWrite` outbox | Canvas, Document session, desktop Edit intent router |
 | Focused comment/rules/filename text input undo history and active composition | The native text control and Electron/Chromium editing engine; project-rules session owns autosave eligibility and explicit restore fencing | in-memory control-local history only | desktop Edit intent router, project-rules drain |
 | Active renderer draft revision, pending command and unknown-outcome reconciliation | Draft session | acknowledged aggregate fingerprint plus crash-only recovery outbox | comment rail, drain coordinator |
@@ -102,6 +103,11 @@ Rules:
   only `/project/ensure` may create a new registration. A `pendingWrite` target
   Hash may repair PageRoot's own atomic-replacement window but never authorize
   an unrelated external replacement.
+- `/autosave` and `/source-history/action` may each decide their own command
+  preconditions, but neither may own a partial write path. One Bridge
+  `SourceTransaction` service alone advances `pendingWrite`, source/history,
+  project/runtime and audit settlement; AI Version publication remains outside
+  that transaction.
 - Cross-owner operations are coordinated explicitly; they do not synchronize
   through incidental React effects.
 - A current-source transition first stages one complete candidate containing

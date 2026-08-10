@@ -167,6 +167,7 @@ async function createPackagedFixture(t) {
     "draft-command-decoder.mjs",
     "project-context-service.mjs",
     "source-history-service.mjs",
+    "source-transaction-service.mjs",
   ]) {
     await writeFixtureFile(
       fixtureProductRoot,
@@ -270,6 +271,7 @@ async function createPackagedFixture(t) {
     "draft-command-decoder.mjs",
     "project-context-service.mjs",
     "source-history-service.mjs",
+    "source-transaction-service.mjs",
   ]) {
     const destination = path.join(resourcesPath, "bridge", fileName);
     await mkdir(path.dirname(destination), { recursive: true });

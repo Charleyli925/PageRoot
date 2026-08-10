@@ -152,6 +152,7 @@ test("desktop package carries the v3 patch engine, candidate assessment and acti
     "bridge/draft-command-decoder.mjs",
     "bridge/project-context-service.mjs",
     "bridge/source-history-service.mjs",
+    "bridge/source-transaction-service.mjs",
     "shared/direct-edit-compatibility.mjs",
     "node_modules/parse5",
     "node_modules/entities",
