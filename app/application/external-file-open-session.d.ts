@@ -18,12 +18,18 @@ export type ExternalFileOpenExecution = (
   }>,
 ) => Promise<"complete" | "deferred" | void> | "complete" | "deferred" | void;
 
+export type DeferredSwitchRetry = "idle" | "blocked" | "action-required" | "resumed";
+
 export class ExternalFileOpenSession {
   setObserver(
     observer: ((snapshot: ExternalFileOpenSnapshot) => void) | null,
   ): void;
   enqueue(request: ExternalFileOpenRequest, execute: ExternalFileOpenExecution): boolean;
   resume(execute: ExternalFileOpenExecution): boolean;
+  reconcileDeferredSwitch(options: {
+    switchBlocked: boolean;
+    execute: ExternalFileOpenExecution;
+  }): DeferredSwitchRetry;
   dispose(): void;
   readonly snapshot: ExternalFileOpenSnapshot;
 }

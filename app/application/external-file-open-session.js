@@ -43,6 +43,10 @@ export class ExternalFileOpenSession {
 
   #deferredSequence = 0;
 
+  #observedDeferredSequence = 0;
+
+  #sawSwitchBlocker = false;
+
   #execute = null;
 
   #drainPromise = null;
@@ -116,6 +120,7 @@ export class ExternalFileOpenSession {
         if (result === "deferred" && !this.#queued) {
           this.#deferred = request;
           this.#deferredSequence += 1;
+          this.#sawSwitchBlocker = false;
           this.#emit();
           break;
         }
@@ -160,12 +165,34 @@ export class ExternalFileOpenSession {
     return true;
   }
 
+  // A new deferred request retries only after an observed blocker clears;
+  // otherwise it awaits the explicit retry action.
+  reconcileDeferredSwitch({ switchBlocked, execute }) {
+    if (!this.#deferred || typeof execute !== "function") return "idle";
+    this.#execute = execute;
+
+    if (this.#observedDeferredSequence !== this.#deferredSequence) {
+      this.#observedDeferredSequence = this.#deferredSequence;
+      this.#sawSwitchBlocker = Boolean(switchBlocked);
+      return switchBlocked ? "blocked" : "action-required";
+    }
+    if (switchBlocked) {
+      this.#sawSwitchBlocker = true;
+      return "blocked";
+    }
+    if (!this.#sawSwitchBlocker) return "blocked";
+    this.#sawSwitchBlocker = false;
+    return this.resume(execute) ? "resumed" : "idle";
+  }
+
   dispose() {
     this.#generation += 1;
     this.#observer = null;
     this.#active = null;
     this.#queued = null;
     this.#deferred = null;
+    this.#observedDeferredSequence = 0;
+    this.#sawSwitchBlocker = false;
     this.#execute = null;
     this.#emit();
   }

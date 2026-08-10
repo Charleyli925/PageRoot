@@ -39,6 +39,10 @@ export class ProjectApplicationSession {
 
   #deferredSequence = 0;
 
+  #observedDeferredSequence = 0;
+
+  #sawSwitchBlocker = false;
+
   #execute = null;
 
   #drainPromise = null;
@@ -95,6 +99,7 @@ export class ProjectApplicationSession {
         if (result === "deferred") {
           this.#deferred = application;
           this.#deferredSequence += 1;
+          this.#sawSwitchBlocker = false;
           this.#emit();
           break;
         }
@@ -134,12 +139,34 @@ export class ProjectApplicationSession {
     return true;
   }
 
+  // This session owns the FIFO predecessor's blocker transition, so Workbench
+  // keeps no second retry history for an accepted project result.
+  reconcileDeferredSwitch({ switchBlocked, execute }) {
+    if (!this.#deferred || typeof execute !== "function") return "idle";
+    this.#execute = execute;
+
+    if (this.#observedDeferredSequence !== this.#deferredSequence) {
+      this.#observedDeferredSequence = this.#deferredSequence;
+      this.#sawSwitchBlocker = Boolean(switchBlocked);
+      return switchBlocked ? "blocked" : "action-required";
+    }
+    if (switchBlocked) {
+      this.#sawSwitchBlocker = true;
+      return "blocked";
+    }
+    if (!this.#sawSwitchBlocker) return "blocked";
+    this.#sawSwitchBlocker = false;
+    return this.resume(execute) ? "resumed" : "idle";
+  }
+
   dispose() {
     this.#generation += 1;
     this.#observer = null;
     this.#active = null;
     this.#queued = [];
     this.#deferred = null;
+    this.#observedDeferredSequence = 0;
+    this.#sawSwitchBlocker = false;
     this.#execute = null;
     this.#emit();
   }

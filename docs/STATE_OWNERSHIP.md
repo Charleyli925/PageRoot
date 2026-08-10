@@ -4,8 +4,8 @@
 | --- | --- | --- | --- |
 | Open source locator before first durable action, registered identity, renderer generation and late-query fence | Renderer `ProjectSession` | active-file record before registration; project registry and `project.json` afterwards | Workbench composition root and all durable sessions |
 | Latest unaccepted OS/QoderWork HTML-open request, committed-exit one-shot handoff, plus FIFO active/recent-project transitions | Main-process external-file-open mailbox and `ProjectOpenQueue` | in-memory for the current process plus one private, validated `userData` handoff record after close commits; no renderer-supplied path authority | preload lifecycle delivery, startup adoption and trusted project IPC |
-| External HTML request IDs, active/queued/deferred renderer delivery, snapshot notification and unaccepted-result fence | Renderer `ExternalFileOpenSession` | none; bounded in-memory state only | Workbench composition root and the project-switch boundary |
-| Accepted local/external project results, their FIFO renderer publication and deferred final-fence retry | Renderer `ProjectApplicationSession` | none; bounded in-memory state only | Workbench composition root and the final project-application boundary |
+| External HTML request IDs, active/queued/deferred renderer delivery, blocker-transition/manual retry policy and unaccepted-result fence | Renderer `ExternalFileOpenSession` | none; bounded in-memory state only | Workbench composition root and the project-switch boundary |
+| Accepted local/external project results, their FIFO renderer publication and deferred final-fence blocker-transition/manual retry policy | Renderer `ProjectApplicationSession` | none; bounded in-memory state only | Workbench composition root and the final project-application boundary |
 | Registered mutation context resolution and atomic-replacement source observation | Bridge project-context service | project/document registry graph plus the owning runtime `pendingWrite` target Hash | Bridge mutation routes and `/project/ensure` |
 | Explicit source filename transition, pending operation and active/recent path rebase | Desktop source-rename transaction | active-file `pendingRename` / `lastRename`, then filesystem path | project session, Bridge relink, views |
 | Current source bytes, Hash, edit revision, persistence projection, pending write, single-flight source flush, Canvas authority generation and exact-byte boundary reconciliation | Renderer `DocumentSession` | source HTML, runtime autosave record and recovery log; the generation itself is disposable | Canvas, preview readiness, source-history session and drain coordinator |
@@ -54,13 +54,14 @@ Rules:
   order cannot reverse at the renderer boundary; Workbench's ordinary
   project-picker retry ref never stores an external request. A newer queued
   external request fences only older work that has not yet been accepted and
-  inherits its Canvas freeze. The session emits a monotonically increasing
-  deferred-transition sequence when a request enters `deferred`. Workbench
-  observes that sequence but does not retry from the same snapshot: automatic
-  retry needs a relevant safe-switch blocker to become clear; otherwise an
-  explicit retry action delegates back to the session. If the final pre-IPC
-  fence itself captures a post-cutoff native edit, no external activation
-  starts; that edit returns to normal persistence before the session retries.
+  inherits its Canvas freeze. Each renderer session owns its deferred retry
+  transition: it records whether `DrainCoordinator.inspect("switch")` has
+  observed a relevant blocker, resumes only after that blocker clears, and
+  otherwise reports that the explicit retry action remains necessary. Project
+  hydration is an explicit switch obligation rather than a copied Workbench
+  boolean. If the final pre-IPC fence itself captures a post-cutoff native
+  edit, no external activation starts; that edit returns to normal persistence
+  before the session retries.
   Once main-process acceptance succeeds, `ProjectApplicationSession` becomes
   the sole owner of renderer publication. It retains local and external
   results FIFO, repeats the switch drain and takes a synchronous final Canvas

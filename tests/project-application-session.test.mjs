@@ -72,3 +72,38 @@ test("project application session sequences each repeated deferred transition", 
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(session.snapshot.deferredSequence, 2);
 });
+
+test("project application session resumes its FIFO predecessor only after a switch blocker clears", async () => {
+  const session = new ProjectApplicationSession();
+  const order = [];
+  const execute = async (entry) => {
+    order.push(entry.applicationId);
+    return order.length === 1 ? "deferred" : "complete";
+  };
+
+  assert.equal(session.enqueue(application("blocker"), execute), true);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(
+    session.reconcileDeferredSwitch({ switchBlocked: false, execute }),
+    "action-required",
+  );
+  assert.equal(
+    session.reconcileDeferredSwitch({ switchBlocked: false, execute }),
+    "blocked",
+  );
+  assert.deepEqual(order, ["application_blocker"]);
+
+  assert.equal(
+    session.reconcileDeferredSwitch({ switchBlocked: true, execute }),
+    "blocked",
+  );
+  assert.equal(
+    session.reconcileDeferredSwitch({ switchBlocked: false, execute }),
+    "resumed",
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(order, ["application_blocker", "application_blocker"]);
+  assert.equal(session.snapshot.status, "idle");
+});
