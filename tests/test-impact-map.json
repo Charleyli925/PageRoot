@@ -312,46 +312,122 @@
       "nodeTests": ["tests/task-workflow.test.mjs"]
     },
     {
-      "id": "state-architecture",
+      "id": "bridge-client",
+      "patterns": ["^app/application/bridge-client\\.(?:js|d\\.ts)$"],
+      "suites": ["typecheck"],
+      "nodeTests": ["tests/bridge-client.test.mjs"]
+    },
+    {
+      "id": "comment-session",
+      "patterns": ["^app/application/comment-session\\.(?:js|d\\.ts)$"],
+      "suites": ["typecheck"],
+      "nodeTests": ["tests/comment-session.test.mjs"]
+    },
+    {
+      "id": "document-session",
       "patterns": [
-        "^app/application/(?:bridge-client|comment-session|document-session|draft-session|drain-coordinator|external-file-open-session|local-action-outcomes|project-application-session|project-query-fence|project-rules-session|project-session|recovery-store|review-analysis-session|run-session|runtime-capabilities|source-history-session|version-session)\\.(?:js|d\\.ts)$",
-        "^desktop/project-open-queue\\.mjs$",
-        "^app/domain/(?:draft-aggregate|run-lifecycle|runtime-snapshot-hosts|runtime-visual-contract|source-history)\\.(?:js|d\\.ts)$",
+        "^app/application/(?:document-session|recovery-store)\\.(?:js|d\\.ts)$"
+      ],
+      "suites": ["typecheck"],
+      "nodeTests": [
+        "tests/document-session.test.mjs",
+        "tests/recovery-store.test.mjs"
+      ]
+    },
+    {
+      "id": "draft-session",
+      "patterns": [
+        "^app/application/(?:draft-session|drain-coordinator)\\.(?:js|d\\.ts)$",
+        "^app/domain/draft-aggregate\\.(?:js|d\\.ts)$",
+        "^shared/draft-aggregate\\.mjs$",
+        "^scripts/(?:draft-aggregate|draft-command-decoder|draft-service)\\.mjs$"
+      ],
+      "suites": ["typecheck"],
+      "nodeTests": [
+        "tests/compatibility-decoders.test.mjs",
+        "tests/draft-aggregate.test.mjs",
+        "tests/draft-service.test.mjs",
+        "tests/draft-session.test.mjs",
+        "tests/drain-coordinator.test.mjs"
+      ]
+    },
+    {
+      "id": "project-session",
+      "patterns": [
+        "^app/application/(?:external-file-open-session|local-action-outcomes|project-application-session|project-query-fence|project-rules-session|project-session)\\.(?:js|d\\.ts)$",
+        "^scripts/project-context-service\\.mjs$"
+      ],
+      "suites": ["typecheck"],
+      "nodeTests": [
+        "tests/external-file-open-session.test.mjs",
+        "tests/local-action-outcomes.test.mjs",
+        "tests/project-application-session.test.mjs",
+        "tests/project-context-service.test.mjs",
+        "tests/project-query-fence.test.mjs",
+        "tests/project-rules-session.test.mjs",
+        "tests/project-session.test.mjs"
+      ]
+    },
+    {
+      "id": "run-session",
+      "patterns": [
+        "^app/application/run-session\\.(?:js|d\\.ts)$",
+        "^app/domain/run-lifecycle\\.(?:js|d\\.ts)$"
+      ],
+      "suites": ["typecheck"],
+      "nodeTests": [
+        "tests/run-lifecycle.test.mjs",
+        "tests/run-session.test.mjs"
+      ]
+    },
+    {
+      "id": "version-session",
+      "patterns": [
+        "^app/application/version-session\\.(?:js|d\\.ts)$",
         "^app/workbench/(?:version-model|version-compatibility-decoder)\\.(?:js|ts)$",
-        "^shared/(?:direct-edit-compatibility|draft-aggregate|source-history)\\.mjs$",
-        "^scripts/(?:check-architecture|draft-aggregate|draft-command-decoder|draft-service|project-context-service|source-history-service|source-transaction-service)\\.mjs$",
-        "^tests/(?:architecture-boundaries|bridge-client|comment-session|compatibility-decoders|document-session|draft-aggregate|draft-service|draft-session|drain-coordinator|external-file-open-session|local-action-outcomes|project-application-session|project-open-queue|project-query-fence|project-rules-session|project-session|recovery-store|review-analysis-session|run-lifecycle|run-session|runtime-capabilities|source-history|source-history-session|version-session)\\.test\\.mjs$",
+        "^shared/direct-edit-compatibility\\.mjs$"
+      ],
+      "suites": ["typecheck"],
+      "nodeTests": [
+        "tests/compatibility-decoders.test.mjs",
+        "tests/version-session.test.mjs"
+      ]
+    },
+    {
+      "id": "source-history",
+      "patterns": [
+        "^app/application/source-history-session\\.(?:js|d\\.ts)$",
+        "^app/domain/source-history\\.(?:js|d\\.ts)$",
+        "^shared/source-history\\.mjs$",
+        "^scripts/source-(?:history|transaction)-service\\.mjs$"
+      ],
+      "suites": ["typecheck"],
+      "nodeTests": [
+        "tests/source-history.test.mjs",
+        "tests/source-history-session.test.mjs"
+      ]
+    },
+    {
+      "id": "runtime-capabilities",
+      "patterns": ["^app/application/runtime-capabilities\\.(?:js|d\\.ts)$"],
+      "suites": ["typecheck"],
+      "nodeTests": ["tests/runtime-capabilities.test.mjs"]
+    },
+    {
+      "id": "review-analysis-session",
+      "patterns": ["^app/application/review-analysis-session\\.(?:js|d\\.ts)$"],
+      "suites": ["typecheck", "ai-smoke"],
+      "nodeTests": ["tests/review-analysis-session.test.mjs"]
+    },
+    {
+      "id": "architecture-contract",
+      "patterns": [
+        "^scripts/check-architecture\\.mjs$",
         "^(?:CONTRIBUTING|docs/(?:ARCHITECTURE|ARCHITECTURE_CONTRACT|COMPATIBILITY|STATE_OWNERSHIP|ENGINEERING_STANDARDS|SECURITY_MODEL|RUNTIME_VISUAL_CONTRACT))\\.md$",
         "^docs/decisions/(?:0003-session-ownership-and-mutation-outcomes|0004-v2-editable-islands|0007-independent-interactive-preview|0008-safe-presentation-actions-in-edit-mode|0009-persistent-source-patch-history|0011-workbench-session-decomposition|0012-id-first-project-context|0013-edit-runtime-visual-projection|0015-safe-host-fallback-and-direct-text-nodes|0016-owner-controlled-review-runtime-capture|0017-shared-runtime-snapshot-owner|0018-source-transaction-kernel)\\.md$"
       ],
       "suites": ["typecheck"],
-      "nodeTests": [
-        "tests/architecture-boundaries.test.mjs",
-        "tests/bridge-client.test.mjs",
-        "tests/comment-session.test.mjs",
-        "tests/compatibility-decoders.test.mjs",
-        "tests/document-session.test.mjs",
-        "tests/draft-aggregate.test.mjs",
-        "tests/draft-service.test.mjs",
-        "tests/draft-session.test.mjs",
-        "tests/drain-coordinator.test.mjs",
-        "tests/external-file-open-session.test.mjs",
-        "tests/local-action-outcomes.test.mjs",
-        "tests/project-application-session.test.mjs",
-        "tests/project-open-queue.test.mjs",
-        "tests/project-query-fence.test.mjs",
-        "tests/project-context-service.test.mjs",
-        "tests/project-rules-session.test.mjs",
-        "tests/project-session.test.mjs",
-        "tests/recovery-store.test.mjs",
-        "tests/review-analysis-session.test.mjs",
-        "tests/run-lifecycle.test.mjs",
-        "tests/run-session.test.mjs",
-        "tests/runtime-capabilities.test.mjs",
-        "tests/source-history.test.mjs",
-        "tests/source-history-session.test.mjs",
-        "tests/version-session.test.mjs"
-      ]
+      "nodeTests": ["tests/architecture-boundaries.test.mjs"]
     },
     {
       "id": "source-editing-core",
@@ -403,69 +479,102 @@
       ]
     },
     {
-      "id": "ai-review-workspace",
+      "id": "review-document-analysis",
       "patterns": [
-        "^app/application/review-analysis-session\\.(?:js|d\\.ts)$",
-        "^app/domain/runtime-snapshot-hosts\\.(?:d\\.ts|js)$",
-        "^app/lib/(?:review-(?:projection-facts|runtime-visual|semantic-alignment|text-diff)|runtime-visual-snapshots)\\.(?:d\\.ts|js)$",
-        "^app/lib/review-comment-source-map\\.js$",
-        "^app/lib/page-presentation-dom\\.ts$",
-        "^app/lib/review-scroll-sync\\.(?:js|d\\.ts)$",
-        "^app/workbench/(?:AiReviewWorkspace|review-document|review-runtime-capture-adapter|review-state)\\.(?:ts|tsx)$",
-        "^app/components/desktop-runtime-snapshot-api\\.ts$",
-        "^desktop/runtime-visual-capture-owner\\.mjs$",
-        "^app/workbench/ai-review-workspace\\.module\\.css$",
-        "^scripts/benchmark-review-analysis\\.mjs$",
-        "^tests/(?:ai-review-workspace|review-analysis-session|review-comment-source-map|review-projection-facts|review-runtime-capture-owner|review-runtime-visual|review-scroll-sync|review-semantic-alignment|review-text-diff|runtime-snapshot-hosts|runtime-visual-contract)\\.test\\.mjs$",
-        "^tests/e2e/electron/ai-handoff-closed-loop\\.spec\\.mjs$",
-        "^docs/(?:AI_SUPPLEMENT_AND_VALIDATION|ARCHITECTURE|ARCHITECTURE_CONTRACT|CHANGE_REQUEST_PROTOCOL|INTERACTION_FLOW|MVP_PRD|RUNTIME_VISUAL_CONTRACT|SECURITY_MODEL|STATE_OWNERSHIP)\\.md$",
-        "^docs/decisions/(?:0016-owner-controlled-review-runtime-capture|0017-shared-runtime-snapshot-owner)\\.md$"
+        "^app/lib/(?:review-(?:projection-facts|semantic-alignment|text-diff)|review-comment-source-map)\\.(?:d\\.ts|js)$",
+        "^app/workbench/review-document\\.ts$",
+        "^scripts/benchmark-review-analysis\\.mjs$"
       ],
       "suites": ["typecheck", "ai-smoke"],
       "nodeTests": [
         "tests/ai-review-workspace.test.mjs",
-        "tests/review-analysis-session.test.mjs",
         "tests/review-comment-source-map.test.mjs",
         "tests/review-projection-facts.test.mjs",
-        "tests/review-runtime-capture-owner.test.mjs",
         "tests/review-runtime-visual.test.mjs",
-        "tests/runtime-snapshot-hosts.test.mjs",
-        "tests/runtime-visual-contract.test.mjs",
-        "tests/desktop-preload-ipc.test.mjs",
-        "tests/desktop-package.test.mjs",
-        "tests/preview-protocol.test.mjs",
-        "tests/review-scroll-sync.test.mjs",
         "tests/review-semantic-alignment.test.mjs",
-        "tests/review-text-diff.test.mjs"
+        "tests/review-text-diff.test.mjs",
+        "tests/runtime-snapshot-hosts.test.mjs",
+        "tests/runtime-visual-contract.test.mjs"
       ]
     },
     {
-      "id": "workbench-lifecycle",
+      "id": "review-runtime-capture",
       "patterns": [
-        "^app/workbench(?:\\.tsx|/.*\\.(?:ts|tsx))$",
-        "^tests/notification-contract\\.typecheck\\.ts$",
-        "^app/lib/(?:audit-events|direct-edit-events)\\.js$",
-        "^app/lib/comment-rail-layout\\.js$",
-        "^tests/(?:audit-events|comment-rail-layout|direct-edit-events)\\.test\\.mjs$",
-        "^tests/source-architecture-fixture\\.mjs$",
-        "^tests/native-command-queue-contract\\.test\\.mjs$"
+        "^app/domain/(?:runtime-snapshot-hosts|runtime-visual-contract)\\.(?:d\\.ts|js)$",
+        "^app/lib/(?:review-runtime-visual|runtime-visual-snapshots)\\.(?:d\\.ts|js)$",
+        "^app/workbench/review-runtime-capture-adapter\\.ts$",
+        "^app/components/desktop-runtime-snapshot-api\\.ts$"
+      ],
+      "suites": ["typecheck", "ai-smoke"],
+      "nodeTests": [
+        "tests/review-runtime-capture-owner.test.mjs",
+        "tests/review-runtime-visual.test.mjs",
+        "tests/runtime-snapshot-hosts.test.mjs",
+        "tests/runtime-visual-contract.test.mjs"
+      ]
+    },
+    {
+      "id": "review-ui-state",
+      "patterns": [
+        "^app/lib/(?:page-presentation-dom|review-scroll-sync)\\.(?:d\\.ts|js|ts)$",
+        "^app/workbench/(?:AiReviewWorkspace|handoff-view|presentation|review-state|workbench-header-shell)\\.(?:ts|tsx)$",
+        "^app/workbench/ai-review-workspace\\.module\\.css$"
+      ],
+      "suites": ["typecheck", "browser-smoke"],
+      "nodeTests": [
+        "tests/ai-review-workspace.test.mjs",
+        "tests/review-scroll-sync.test.mjs"
+      ]
+    },
+    {
+      "id": "workbench-orchestration",
+      "patterns": [
+        "^app/workbench\\.tsx$",
+        "^app/workbench/(?:browser-io|comment-model|project-model|record-model|types)\\.ts$"
       ],
       "suites": ["typecheck", "browser-smoke", "electron-smoke", "ai-smoke"],
       "nodeTests": [
-        "tests/audit-events.test.mjs",
-        "tests/direct-edit-events.test.mjs",
-        "tests/comment-rail-layout.test.mjs",
-        "tests/native-command-queue-contract.test.mjs",
+        "tests/ai-review-workspace.test.mjs",
         "tests/frontend-target-refresh.test.mjs",
+        "tests/native-command-queue-contract.test.mjs",
         "tests/notification-policy.test.mjs",
         "tests/notification-ui.test.mjs",
-        "tests/workbench-source-fence-contract.test.mjs",
-        "tests/workbench-shell-ux.test.mjs"
+        "tests/workbench-shell-ux.test.mjs",
+        "tests/workbench-source-fence-contract.test.mjs"
+      ]
+    },
+    {
+      "id": "workbench-audit-events",
+      "patterns": ["^app/lib/audit-events\\.js$"],
+      "suites": ["typecheck"],
+      "nodeTests": ["tests/audit-events.test.mjs"]
+    },
+    {
+      "id": "workbench-direct-edit-events",
+      "patterns": ["^app/lib/direct-edit-events\\.js$"],
+      "suites": ["typecheck"],
+      "nodeTests": ["tests/direct-edit-events.test.mjs"]
+    },
+    {
+      "id": "notification-ui",
+      "patterns": [
+        "^app/components/NoticeBar\\.tsx$",
+        "^app/components/NoticeBar\\.module\\.css$",
+        "^app/lib/notification-policy\\.js$",
+        "^tests/notification-contract\\.typecheck\\.ts$"
+      ],
+      "suites": ["typecheck", "browser-smoke"],
+      "nodeTests": [
+        "tests/notification-policy.test.mjs",
+        "tests/notification-ui.test.mjs"
       ]
     },
     {
       "id": "web-ui",
-      "patterns": ["^app/(?:components/.*|page|layout)\\.(?:tsx|ts|js)$"],
+      "patterns": [
+        "^app/components/(?:AboutPageRootDialog|CancelAiRunDialog|RestartUpdateDialog)\\.tsx$",
+        "^app/(?:page|layout)\\.tsx$"
+      ],
       "suites": ["typecheck", "browser-smoke"],
       "nodeTests": [
         "tests/frontend-target-refresh.test.mjs",
@@ -479,50 +588,125 @@
       "patterns": [
         "^desktop/usage-telemetry\\.mjs$",
         "^app/application/usage-telemetry\\.ts$",
-        "^tests/usage-telemetry\\.test\\.mjs$",
         "^docs/decisions/0006-pseudonymous-usage-telemetry\\.md$",
         "^docs/USAGE_TELEMETRY\\.md$",
         "^PRIVACY\\.md$"
       ],
       "suites": ["typecheck"],
-      "nodeTests": [
-        "tests/usage-telemetry.test.mjs",
-        "tests/desktop-preload-ipc.test.mjs",
-        "tests/desktop-package.test.mjs",
-        "tests/notification-ui.test.mjs",
-        "tests/workbench-shell-ux.test.mjs"
-      ]
+      "nodeTests": ["tests/usage-telemetry.test.mjs"]
     },
     {
-      "id": "desktop-runtime",
+      "id": "desktop-update",
+      "patterns": ["^desktop/application-update\\.mjs$"],
+      "suites": ["electron-smoke"],
+      "nodeTests": ["tests/application-update.test.mjs"]
+    },
+    {
+      "id": "desktop-project-storage",
       "patterns": [
-        "^desktop/.*\\.(?:mjs|tsx|ts|html)$",
-        "^tests/(?:bridge-startup|electron-window-policy|open-in-default-browser|preview-protocol|review-runtime-capture-owner)\\.test\\.mjs$"
+        "^desktop/(?:project-files|welcome-project-content)\\.mjs$"
       ],
       "suites": ["electron-smoke"],
       "nodeTests": [
-        "tests/application-update.test.mjs",
-        "tests/desktop-close-recovery.test.mjs",
         "tests/desktop-file-writer.test.mjs",
-        "tests/desktop-preload-ipc.test.mjs",
-        "tests/source-rename.test.mjs",
-        "tests/bridge-startup.test.mjs",
-        "tests/bridge-shutdown.test.mjs",
         "tests/export-copy.test.mjs",
         "tests/external-file-open.test.mjs",
-        "tests/project-open-queue.test.mjs",
-        "tests/electron-window-policy.test.mjs",
         "tests/open-in-default-browser.test.mjs",
-        "tests/preview-protocol.test.mjs",
-        "tests/review-runtime-capture-owner.test.mjs",
+        "tests/source-rename.test.mjs"
+      ]
+    },
+    {
+      "id": "desktop-source-rename",
+      "patterns": ["^desktop/source-rename\\.mjs$"],
+      "suites": ["electron-smoke"],
+      "nodeTests": ["tests/source-rename.test.mjs"]
+    },
+    {
+      "id": "desktop-export-copy",
+      "patterns": ["^desktop/export-copy\\.mjs$"],
+      "suites": ["electron-smoke"],
+      "nodeTests": ["tests/export-copy.test.mjs"]
+    },
+    {
+      "id": "desktop-external-file-open",
+      "patterns": ["^desktop/external-file-open\\.mjs$"],
+      "suites": ["electron-smoke"],
+      "nodeTests": ["tests/external-file-open.test.mjs"]
+    },
+    {
+      "id": "desktop-open-in-default-browser",
+      "patterns": ["^desktop/open-in-default-browser\\.mjs$"],
+      "suites": ["electron-smoke"],
+      "nodeTests": ["tests/open-in-default-browser.test.mjs"]
+    },
+    {
+      "id": "desktop-project-security",
+      "patterns": [
+        "^desktop/project-(?:ipc-security|path-policy)\\.mjs$"
+      ],
+      "suites": ["electron-smoke"],
+      "nodeTests": [
+        "tests/desktop-project-path-policy.test.mjs",
+        "tests/open-in-default-browser.test.mjs"
+      ]
+    },
+    {
+      "id": "desktop-project-open-queue",
+      "patterns": ["^desktop/project-open-queue\\.mjs$"],
+      "suites": ["electron-smoke"],
+      "nodeTests": ["tests/project-open-queue.test.mjs"]
+    },
+    {
+      "id": "desktop-preview",
+      "patterns": ["^desktop/preview-protocol\\.mjs$"],
+      "suites": ["electron-smoke"],
+      "nodeTests": ["tests/preview-protocol.test.mjs"]
+    },
+    {
+      "id": "desktop-lifecycle",
+      "patterns": [
+        "^desktop/(?:bridge-startup|bridge-shutdown|close-recovery)\\.mjs$"
+      ],
+      "suites": ["electron-smoke"],
+      "nodeTests": [
+        "tests/bridge-shutdown.test.mjs",
+        "tests/bridge-startup.test.mjs",
+        "tests/desktop-close-recovery.test.mjs"
+      ]
+    },
+    {
+      "id": "desktop-main-preload",
+      "patterns": [
+        "^desktop/(?:main|preload|product-contract|product-links)\\.mjs$",
+        "^desktop/renderer/(?:index\\.html|main\\.tsx)$",
+        "^desktop/vite\\.config\\.ts$"
+      ],
+      "suites": ["electron-smoke"],
+      "nodeTests": [
+        "tests/bridge-shutdown.test.mjs",
+        "tests/bridge-startup.test.mjs",
+        "tests/desktop-close-recovery.test.mjs",
         "tests/desktop-package.test.mjs",
-        "tests/usage-telemetry.test.mjs"
+        "tests/desktop-preload-ipc.test.mjs",
+        "tests/electron-window-policy.test.mjs",
+        "tests/product-contract.test.mjs"
+      ]
+    },
+    {
+      "id": "desktop-runtime-capture",
+      "patterns": ["^desktop/runtime-visual-capture-owner\\.mjs$"],
+      "suites": ["electron-smoke", "ai-smoke"],
+      "nodeTests": [
+        "tests/review-runtime-capture-owner.test.mjs",
+        "tests/review-runtime-visual.test.mjs",
+        "tests/runtime-snapshot-hosts.test.mjs",
+        "tests/runtime-visual-contract.test.mjs"
       ]
     },
     {
       "id": "desktop-ai-handoff",
       "patterns": ["^desktop/(?:main|qoder-handoff|product-contract)\\.mjs$"],
-      "suites": ["ai-smoke"],
+      "suites": ["electron-smoke", "ai-smoke"],
       "nodeTests": [
         "tests/qoder-handoff.test.mjs",
         "tests/product-contract.test.mjs"
@@ -531,8 +715,7 @@
     {
       "id": "bridge-lifecycle",
       "patterns": [
-        "^scripts/(?:workspace-bridge|lifecycle-core|finalize-attempt|record-user-supplement|user-supplement-core|candidate-assessment(?:-decoder)?|scope-validator|html-source-parser|attachment-storage|draft-aggregate|draft-command-decoder|draft-service|project-context-service|source-history-service|source-transaction-service|product-contract|target-identity)\\.mjs$",
-        "^app/workbench/(?:version-model|version-compatibility-decoder)\\.(?:js|ts)$"
+        "^scripts/(?:workspace-bridge|lifecycle-core|finalize-attempt|record-user-supplement|user-supplement-core|candidate-assessment(?:-decoder)?|scope-validator|html-source-parser|attachment-storage|product-contract|target-identity)\\.mjs$"
       ],
       "suites": ["ai-smoke"],
       "nodeTests": [

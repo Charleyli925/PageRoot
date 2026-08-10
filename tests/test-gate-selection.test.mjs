@@ -21,6 +21,102 @@ function suiteIds(plan) {
   return plan.suites.map(({ id }) => id);
 }
 
+const TASK_OWNER_CASES = [
+  {
+    file: "app/lib/comment-rail-layout.js",
+    nodeTests: [
+      "tests/comment-rail-layout.test.mjs",
+      "tests/workbench-shell-ux.test.mjs",
+    ],
+    suites: ["typecheck", "lint", "node-targeted", "build-web", "browser-smoke"],
+    directOwners: ["tests/comment-rail-layout.test.mjs"],
+    unrelatedOwners: ["tests/application-update.test.mjs", "tests/review-runtime-visual.test.mjs"],
+  },
+  {
+    file: "app/workbench/review-document.ts",
+    nodeTests: [
+      "tests/ai-review-workspace.test.mjs",
+      "tests/review-comment-source-map.test.mjs",
+      "tests/review-projection-facts.test.mjs",
+      "tests/review-runtime-visual.test.mjs",
+      "tests/review-semantic-alignment.test.mjs",
+      "tests/review-text-diff.test.mjs",
+      "tests/runtime-snapshot-hosts.test.mjs",
+      "tests/runtime-visual-contract.test.mjs",
+    ],
+    suites: ["typecheck", "lint", "node-targeted", "build-desktop", "ai-smoke"],
+    directOwners: ["tests/review-text-diff.test.mjs", "tests/runtime-visual-contract.test.mjs"],
+    unrelatedOwners: [
+      "tests/desktop-package.test.mjs",
+      "tests/desktop-preload-ipc.test.mjs",
+      "tests/workbench-shell-ux.test.mjs",
+    ],
+  },
+  {
+    file: "app/components/NoticeBar.tsx",
+    nodeTests: ["tests/notification-policy.test.mjs", "tests/notification-ui.test.mjs"],
+    suites: ["typecheck", "lint", "node-targeted", "build-web", "browser-smoke"],
+    directOwners: ["tests/notification-ui.test.mjs"],
+    unrelatedOwners: ["tests/html-preview-sandbox.test.mjs", "tests/workbench-shell-ux.test.mjs"],
+  },
+  {
+    file: "app/application/comment-session.js",
+    nodeTests: ["tests/comment-session.test.mjs"],
+    suites: ["typecheck", "lint", "node-targeted"],
+    directOwners: ["tests/comment-session.test.mjs"],
+    unrelatedOwners: [
+      "tests/draft-session.test.mjs",
+      "tests/project-session.test.mjs",
+      "tests/run-session.test.mjs",
+      "tests/version-session.test.mjs",
+    ],
+  },
+  {
+    file: "desktop/application-update.mjs",
+    nodeTests: ["tests/application-update.test.mjs"],
+    suites: ["typecheck", "lint", "node-targeted", "build-desktop", "electron-smoke"],
+    directOwners: ["tests/application-update.test.mjs"],
+    unrelatedOwners: ["tests/desktop-file-writer.test.mjs", "tests/review-runtime-capture-owner.test.mjs"],
+  },
+  {
+    file: "desktop/runtime-visual-capture-owner.mjs",
+    nodeTests: [
+      "tests/review-runtime-capture-owner.test.mjs",
+      "tests/review-runtime-visual.test.mjs",
+      "tests/runtime-snapshot-hosts.test.mjs",
+      "tests/runtime-visual-contract.test.mjs",
+    ],
+    suites: [
+      "typecheck",
+      "lint",
+      "node-targeted",
+      "build-desktop",
+      "electron-smoke",
+      "ai-smoke",
+    ],
+    directOwners: ["tests/review-runtime-capture-owner.test.mjs"],
+    unrelatedOwners: ["tests/application-update.test.mjs", "tests/source-rename.test.mjs"],
+  },
+  {
+    file: "scripts/workspace-bridge.mjs",
+    nodeTests: [
+      "tests/attachment-storage.test.mjs",
+      "tests/compatibility-decoders.test.mjs",
+      "tests/html-source-parser.test.mjs",
+      "tests/lifecycle-core.test.mjs",
+      "tests/product-contract.test.mjs",
+      "tests/project-context-service.test.mjs",
+      "tests/scope-validator.test.mjs",
+      "tests/targeted-change-schema.test.mjs",
+      "tests/user-supplement.test.mjs",
+      "tests/workspace-bridge.test.mjs",
+    ],
+    suites: ["typecheck", "lint", "node-targeted", "build-desktop", "ai-smoke"],
+    directOwners: ["tests/workspace-bridge.test.mjs"],
+    unrelatedOwners: ["tests/desktop-package.test.mjs", "tests/review-runtime-capture-owner.test.mjs"],
+  },
+];
+
 test("edit and task gates select deterministic impact-based coverage", () => {
   const changedFiles = ["app/lib/source-patch-engine.js"];
   const edit = assertFullyAutomatedPlan(selectGatePlan({ map, lane: "edit", changedFiles }));
@@ -48,6 +144,65 @@ test("a changed Node test runs itself without expanding to the full Node suite",
   });
   assert.deepEqual(suiteIds(plan), ["node-targeted"]);
   assert.deepEqual(plan.selectedNodeTests, ["tests/source-text-map.test.mjs"]);
+});
+
+test("a changed owned Node test still runs only itself", () => {
+  const plan = selectGatePlan({
+    map,
+    lane: "edit",
+    changedFiles: ["tests/comment-session.test.mjs"],
+  });
+  assert.deepEqual(suiteIds(plan), ["node-targeted"]);
+  assert.deepEqual(plan.selectedNodeTests, ["tests/comment-session.test.mjs"]);
+});
+
+test("owner rules select only the direct regression coverage for representative files", () => {
+  let totalNodeTests = 0;
+  for (const ownerCase of TASK_OWNER_CASES) {
+    const plan = assertFullyAutomatedPlan(selectGatePlan({
+      map,
+      lane: "task",
+      changedFiles: [ownerCase.file],
+    }));
+    assert.deepEqual(plan.selectedNodeTests, ownerCase.nodeTests, ownerCase.file);
+    assert.deepEqual(suiteIds(plan), ownerCase.suites, ownerCase.file);
+    for (const owner of ownerCase.directOwners) {
+      assert.ok(plan.selectedNodeTests.includes(owner), `${ownerCase.file} must keep ${owner}`);
+    }
+    for (const owner of ownerCase.unrelatedOwners) {
+      assert.equal(plan.selectedNodeTests.includes(owner), false, `${ownerCase.file} must omit ${owner}`);
+    }
+    totalNodeTests += plan.selectedNodeTests.length;
+  }
+  assert.ok(totalNodeTests <= 56, `representative ownership selected ${totalNodeTests} Node tests`);
+});
+
+test("unmapped code still falls back to the core Node group", () => {
+  const plan = selectGatePlan({
+    map,
+    lane: "edit",
+    changedFiles: ["app/unmapped-owner.ts"],
+  });
+  assert.deepEqual(suiteIds(plan), ["node-core"]);
+  assert.deepEqual(plan.selectedNodeTests, []);
+});
+
+test("a file with two direct owners safely unions their coverage", () => {
+  const plan = selectGatePlan({
+    map,
+    lane: "task",
+    changedFiles: ["desktop/main.mjs"],
+  });
+  assert.ok(plan.selectedNodeTests.includes("tests/desktop-preload-ipc.test.mjs"));
+  assert.ok(plan.selectedNodeTests.includes("tests/qoder-handoff.test.mjs"));
+  assert.deepEqual(suiteIds(plan), [
+    "typecheck",
+    "lint",
+    "node-targeted",
+    "build-desktop",
+    "electron-smoke",
+    "ai-smoke",
+  ]);
 });
 
 test("the one rendered Node test schedules its production build before the targeted test", () => {

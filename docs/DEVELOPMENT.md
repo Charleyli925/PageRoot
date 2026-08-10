@@ -63,6 +63,14 @@ boundary.
 | `npm run test:electron:ci-preflight:prepared` | Synthetic hosted-macOS window, timer and animation-frame preflight used before Electron product suites |
 | `npm run benchmark:persistence` | Build one Electron renderer, then serially collect frozen-main full-HTML persistence decision evidence: it rejects changed runtime inputs outside its explicit harness/report allowlist; each autosave, switch and close duration stops at that operation's own endpoint; and it measures memory, event-loop and safety oracles |
 
+Every `gate:edit` or `gate:task` run writes its selected files, suites and reasons
+to `output/test-runs/<run-id>/selection.json`; inspect that file when validating a
+local ownership change instead of inferring selection from command duration. When
+changing `tests/test-impact-map.json`, run
+`node --test tests/test-gate-selection.test.mjs` before the ordinary gate. The
+selection contract keeps direct-owner coverage narrow while the `release` lane
+remains a fixed complete suite.
+
 The developer-preview, release and artifact lanes stop if the worktree is dirty or if HEAD/tree changes during the run. Test reports are written to the ignored `output/test-runs/` directory; successful installer lanes additionally write `package-delivery-report.json` and `.md` below `output/`. The final report step requires live GitHub PR metadata and fails the installer handoff if it cannot enumerate the exact tag-to-commit range. Package commands always build the exact current clean Tree; they do not discover or merge other PRs. For an unqualified "latest" package request, prepare the required `origin/main` plus non-excluded-PR integration Tree first as documented in `docs/GIT_WORKFLOW.md`. `package:developer` is never called by another lane: run it only after an explicit developer request. Its ad-hoc, unnotarized DMG is retained for short installation feedback and is never release-eligible. See `docs/DEVELOPER_PREVIEW_PLAYBOOK.md`.
 
 Desktop development and Electron E2E disable live update checks. The pure
