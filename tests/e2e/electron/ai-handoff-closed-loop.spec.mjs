@@ -559,6 +559,10 @@ test("a verified AI result stays pending through desktop review until the user a
       <article><h2>标签二概览</h2><p>第三块完整内容</p></article>
       <article><h2>标签二详情</h2><p>第四块完整内容</p></article>
     </div>
+    <div class="panels" data-review-anonymous-panels>
+      <div class="panel" role="tabpanel"><article><p data-review-anonymous-panel-copy="one">匿名面板甲内容</p></article><article><p>匿名面板稳定说明</p></article></div>
+      <div class="panel" role="tabpanel"><article><p data-review-anonymous-panel-copy="two">匿名面板乙内容</p></article><article><p>匿名面板稳定说明</p></article></div>
+    </div>
     <div class="indexed-review-tabs">
       <button type="button" class="indexed-review-tab active" onclick="switchIndexedReviewTab(0)">分行业表现</button>
       <button type="button" class="indexed-review-tab" onclick="switchIndexedReviewTab(1)">抖音搜盘表现</button>
@@ -765,6 +769,16 @@ test("a verified AI result stays pending through desktop review until the user a
         .replace(
           "<article><h2>标签二详情</h2><p>第四块完整内容</p></article>",
           "<article style=\"padding: 24px; border-radius: 16px\"><h2>标签二详情</h2><p>第四块完整内容</p></article>",
+        )
+        .replace(
+          `    <div class="panels" data-review-anonymous-panels>
+      <div class="panel" role="tabpanel"><article><p data-review-anonymous-panel-copy="one">匿名面板甲内容</p></article><article><p>匿名面板稳定说明</p></article></div>
+      <div class="panel" role="tabpanel"><article><p data-review-anonymous-panel-copy="two">匿名面板乙内容</p></article><article><p>匿名面板稳定说明</p></article></div>
+    </div>`,
+          `    <div class="panels" data-review-anonymous-panels>
+      <div class="panel" role="tabpanel"><article><p data-review-anonymous-panel-copy="two">匿名面板乙内容</p></article><article><p>匿名面板稳定说明</p></article></div>
+      <div class="panel" role="tabpanel"><article><p data-review-anonymous-panel-copy="one">匿名面板甲内容</p></article><article><p>匿名面板稳定说明</p></article></div>
+    </div>`,
         );
     });
     runOfficialFinalizer(request.requestRoot, request.changeRequest);
@@ -832,6 +846,25 @@ test("a verified AI result stays pending through desktop review until the user a
       .not.toHaveAttribute("data-pageroot-preview-navigation-fallback", "true");
     await expect(afterReviewFrame.locator("html"))
       .toHaveAttribute("data-pageroot-review-filter", "all");
+    await expect.poll(async () => afterReviewFrame.locator(
+      "[data-review-anonymous-panel-copy]",
+    ).evaluateAll((elements) => elements.map((element) => ({
+      copy: element.getAttribute("data-review-anonymous-panel-copy"),
+      changeId: element.closest("[data-pageroot-review-id]")
+        ?.getAttribute("data-pageroot-review-id") || "",
+      panelKey: element.closest('[data-pageroot-review-panel-container="true"]')
+        ?.getAttribute("data-pageroot-review-panel-key") || "",
+    })))).toEqual([
+      expect.objectContaining({ copy: "two", changeId: expect.any(String) }),
+      expect.objectContaining({ copy: "one", changeId: expect.any(String) }),
+    ]);
+    const anonymousPanelKeys = await afterReviewFrame.locator(
+      "[data-review-anonymous-panel-copy]",
+    ).evaluateAll((elements) => elements.map((element) => (
+      element.closest('[data-pageroot-review-panel-container="true"]')
+        ?.getAttribute("data-pageroot-review-panel-key") || ""
+    )));
+    expect(new Set(anonymousPanelKeys).size).toBe(2);
     await expect(beforeReviewFrame.locator('meta[http-equiv="refresh"]'))
       .toHaveCount(0);
     const reviewCommentMarkers = launched.page.locator(

@@ -190,6 +190,10 @@ test("change discovery builds a complete outline and precise change markers", ()
   assert.match(reviewDocument, /data-pageroot-review-structure/);
   assert.match(reviewDocument, /data-pageroot-review-style/);
   assert.match(reviewDocument, /function pairSections[\s\S]*?alignReviewSemanticUnits/);
+  assert.match(
+    reviewDocument,
+    /function pairSections[\s\S]*?panelPathForElement\(element\)[\s\S]*?panel-path:/,
+  );
   assert.match(reviewDocument, /if \(pair\?\.moved[\s\S]*?return "位置调整"/);
   assert.match(reviewDocument, /VISUAL_ATTRIBUTE_NAMES/);
   assert.match(reviewDocument, /reviewAttributeRole/);

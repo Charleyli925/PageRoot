@@ -1130,9 +1130,17 @@ function pairSections(before: Element[], after: Element[]): SectionPair[] {
   const signatures = createReviewSignatureCache();
   const parentKey = (element: Element) => {
     const parent = element.parentElement;
+    // The panel key is disposable review markup for element compatibility, but
+    // it is persistent pairing context: identical sections must not migrate
+    // across independently paired panels merely because their parents look
+    // alike after presentation attributes are ignored.
+    const panelPath = panelPathForElement(element);
+    const panelContext = panelPath.length
+      ? `\u0000panel-path:${panelPath.join("\u0001")}`
+      : "";
     return parent
-      ? `section-parent:${selfCompatibilitySignature(parent, signatures)}`
-      : "section-document";
+      ? `section-parent:${selfCompatibilitySignature(parent, signatures)}${panelContext}`
+      : `section-document${panelContext}`;
   };
   return alignReviewSemanticUnits(
     before.map((element) => visualElementDescriptor(element, parentKey(element), signatures)),
