@@ -4,7 +4,23 @@ import test from "node:test";
 import {
   closeObservationTimeout,
   createCloseFirstCleanup,
+  waitForMainBrowserWindow,
 } from "./e2e/electron/helpers/pageroot-app-fixture.mjs";
+
+test("Electron app fixture waits for the matching native BrowserWindow registration", async () => {
+  let evaluations = 0;
+  const expected = { focused: false, visible: false };
+  const nativeWindow = await waitForMainBrowserWindow({
+    evaluate: async (_callback, rendererUrl) => {
+      assert.equal(rendererUrl, "file:///pageroot/index.html");
+      evaluations += 1;
+      return evaluations === 1 ? null : expected;
+    },
+  }, "file:///pageroot/index.html", { timeout: 1_000 });
+
+  assert.equal(evaluations, 2);
+  assert.deepEqual(nativeWindow, expected);
+});
 
 test("Electron app fixture keeps its close listener alive through the forced-termination budget", () => {
   assert.equal(closeObservationTimeout(), 7_000);

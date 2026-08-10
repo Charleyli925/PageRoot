@@ -244,6 +244,16 @@
       "nodeTests": ["tests/pr-review-policy.test.mjs"]
     },
     {
+      "id": "review-gate-recovery",
+      "patterns": [
+        "^scripts/(?:check-pr-review-policy|recover-pr-review-gate)\\.mjs$",
+        "^tests/review-gate-recovery\\.test\\.mjs$",
+        "^\\.github/workflows/(?:ci|review-gate-recovery)\\.yml$"
+      ],
+      "suites": [],
+      "nodeTests": ["tests/review-gate-recovery.test.mjs"]
+    },
+    {
       "id": "pr-candidate-classification",
       "patterns": [
         "^scripts/classify-pr-candidate\\.mjs$",
