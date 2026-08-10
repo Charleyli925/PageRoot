@@ -980,7 +980,7 @@
         },
         "outputRelativePath": {
           "type": "string",
-          "pattern": "^requests/req_[A-Za-z0-9_-]+/attempts/attempt_[0-9]{3}/output/index\\.html$"
+          "pattern": "^requests/req_[A-Za-z0-9_-]+/attempts/attempt_[0-9]{3}/output/(?:index\\.html|(?:V1\\.[0-9]+|[^/\\\\]+-V1\\.[0-9]+)\\.html)$"
         },
         "completionRelativePath": {
           "type": "string",

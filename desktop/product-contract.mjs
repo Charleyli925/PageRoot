@@ -9,6 +9,17 @@ export function productHtmlLimitLabel() {
   return `${PRODUCT_MAX_HTML_BYTES / (1024 * 1024)} MB`;
 }
 
+// The persisted Version ordinal is the single source for the human-readable
+// file suffix. V1.0 is the initial baseline; every accepted AI candidate
+// advances the fractional part by one. Keep this separate from the strict
+// protocol label (V1, V2, ...) used for backwards-compatible identity fields.
+export function semanticVersionLabel(versionOrdinal) {
+  if (!Number.isSafeInteger(versionOrdinal) || versionOrdinal < 1) {
+    throw new TypeError("Generated Version ordinal is invalid.");
+  }
+  return `V1.${versionOrdinal - 1}`;
+}
+
 function utf8Truncate(value, maximumBytes) {
   let result = "";
   for (const character of value) {

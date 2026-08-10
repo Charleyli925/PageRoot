@@ -33,6 +33,16 @@ test("Attempt surfaces ignore only regular Finder metadata", () => {
     undefined,
   );
   assert.equal(
+    findUnexpectedAttemptOutputEntry(
+      [
+        directoryEntry("市场概览-V1.9.html"),
+        directoryEntry(".DS_Store"),
+      ],
+      "市场概览-V1.9.html",
+    ),
+    undefined,
+  );
+  assert.equal(
     findUnexpectedAttemptEntry([
       directoryEntry(".DS_Store", "symlink"),
     ])?.name,
@@ -47,6 +57,16 @@ test("Attempt surfaces ignore only regular Finder metadata", () => {
       directoryEntry("index.html"),
       directoryEntry("extra.html"),
     ])?.name,
+    "extra.html",
+  );
+  assert.equal(
+    findUnexpectedAttemptOutputEntry(
+      [
+        directoryEntry("市场概览-V1.9.html"),
+        directoryEntry("extra.html"),
+      ],
+      "市场概览-V1.9.html",
+    )?.name,
     "extra.html",
   );
 });

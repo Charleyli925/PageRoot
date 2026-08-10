@@ -70,6 +70,8 @@ import {
 import {
   PRODUCT_MAX_BRIDGE_BODY_BYTES,
   PRODUCT_MAX_HTML_BYTES,
+  isGeneratedWorkingCopyFileName,
+  semanticVersionLabel,
   workingCopyFileName,
   workingCopyStem,
 } from "./product-contract.mjs";
@@ -417,7 +419,11 @@ function documentIdFromHtml(html) {
   return /^doc_[a-f0-9]{16,64}$/.test(value ?? "") ? value : null;
 }
 
-function assertCanonicalManagedMeta(html, activeRun) {
+function assertCanonicalManagedMeta(
+  html,
+  activeRun,
+  outputRelativePath = "output/index.html",
+) {
   const expected = new Map([
     ["html-ai-document-id", activeRun.documentId],
     ["html-ai-version-id", activeRun.candidateVersionId],
@@ -473,7 +479,7 @@ function assertCanonicalManagedMeta(html, activeRun) {
     throw new HttpError(
       422,
       "OUTPUT_MANAGED_META_MISMATCH",
-      "output/index.html must contain exactly one canonical lifecycle meta for every active-run identity field.",
+      `${outputRelativePath} must contain exactly one canonical lifecycle meta for every active-run identity field.`,
       { problems },
     );
   }
@@ -661,7 +667,6 @@ function validateCompletionSchema(completion) {
     schemaVersion: COMPLETION_SCHEMA_VERSION,
     finalizerVersion: FINALIZER_VERSION,
     status: "completed",
-    outputRelativePath: "output/index.html",
     canonicalizationVersion: CANONICALIZATION_VERSION,
   };
   for (const [key, expected] of Object.entries(constants)) {
@@ -671,6 +676,12 @@ function validateCompletionSchema(completion) {
         { keyword: "const", field: key, expected, actual: completion[key] },
       );
     }
+  }
+  if (!isAttemptOutputRelativePath(completion.outputRelativePath)) {
+    completionSchemaError(
+      "completion.json outputRelativePath does not match a supported Attempt output name.",
+      { keyword: "pattern", field: "outputRelativePath" },
+    );
   }
   if (
     !Number.isInteger(completion.candidateVersionOrdinal)
@@ -699,17 +710,6 @@ function versionOrdinal(versionId) {
   return match ? Number.parseInt(match[1], 10) : 0;
 }
 
-function semanticVersionLabel(ordinal) {
-  if (!Number.isSafeInteger(ordinal) || ordinal < 1) {
-    throw new HttpError(
-      500,
-      "INVALID_VERSION_ORDINAL",
-      "Version ordinal must be a positive integer.",
-    );
-  }
-  return `V1.${ordinal - 1}`;
-}
-
 function userVersionLabel(ordinal) {
   if (!Number.isSafeInteger(ordinal) || ordinal < 1) {
     throw new HttpError(
@@ -724,11 +724,72 @@ function userVersionLabel(ordinal) {
 function workingCopyDescriptor(projectName, ordinal) {
   const versionLabel = semanticVersionLabel(ordinal);
   const stem = workingCopyStem(projectName, versionLabel);
+  const fileName = workingCopyFileName(stem, versionLabel);
   return {
     versionLabel,
     stem,
-    relativePath: `working/${workingCopyFileName(stem, versionLabel)}`,
+    fileName,
+    relativePath: `working/${fileName}`,
   };
+}
+
+function attemptOutputDescriptor(projectName, ordinal) {
+  const workingCopy = workingCopyDescriptor(projectName, ordinal);
+  return {
+    fileName: workingCopy.fileName,
+    relativePath: `output/${workingCopy.fileName}`,
+  };
+}
+
+function isAttemptOutputRelativePath(value) {
+  if (value === "output/index.html") return true;
+  if (typeof value !== "string" || !value.startsWith("output/")) return false;
+  return isGeneratedWorkingCopyFileName(value.slice("output/".length));
+}
+
+async function outputRelativePathForActiveRun(context, activeRun, changeRequest) {
+  const outputRelativePath = changeRequest?.finalization?.outputRelativePath;
+  if (!isAttemptOutputRelativePath(outputRelativePath)) {
+    throw new HttpError(
+      422,
+      "OUTPUT_PATH_IDENTITY_MISMATCH",
+      "The frozen Request declares an invalid Attempt output path.",
+    );
+  }
+  const expectedActiveRunPath =
+    `requests/${activeRun.requestId}/attempts/${activeRun.attemptId}/${outputRelativePath}`;
+  if (activeRun.outputRelativePath !== expectedActiveRunPath) {
+    throw new HttpError(
+      422,
+      "OUTPUT_PATH_IDENTITY_MISMATCH",
+      "The active run output path does not match the frozen Request.",
+      {
+        expected: expectedActiveRunPath,
+        actual: activeRun.outputRelativePath,
+      },
+    );
+  }
+  // Existing frozen Attempts retain their historic staging filename. Newly
+  // submitted Requests always use the PageRoot-computed original-name + V1.x
+  // filename and cannot ask the AI to choose another name.
+  if (outputRelativePath === "output/index.html") return outputRelativePath;
+  const project = await readProject(context);
+  const expectedOutputRelativePath = attemptOutputDescriptor(
+    project.displayName,
+    activeRun.candidateVersionOrdinal,
+  ).relativePath;
+  if (outputRelativePath !== expectedOutputRelativePath) {
+    throw new HttpError(
+      422,
+      "OUTPUT_PATH_IDENTITY_MISMATCH",
+      "The frozen Request output path does not match its user filename and Version.",
+      {
+        expected: expectedOutputRelativePath,
+        actual: outputRelativePath,
+      },
+    );
+  }
+  return outputRelativePath;
 }
 
 function paddedId(prefix, ordinal, width) {
@@ -2556,6 +2617,8 @@ async function readRuntime(context, { hydrateArtifacts = true } = {}) {
       "attempts",
       activeRun.attemptId,
     );
+    const outputRelativePath = activeRun.outputRelativePath
+      ?? `requests/${activeRun.requestId}/attempts/${activeRun.attemptId}/output/index.html`;
     Object.assign(activeRun, {
       projectId: context.projectId,
       documentId: context.documentId,
@@ -2564,7 +2627,7 @@ async function readRuntime(context, { hydrateArtifacts = true } = {}) {
       requestPath: requestRoot,
       attemptPath: attemptRoot,
       promptPath: path.join(requestRoot, "PROMPT.md"),
-      outputPath: path.join(attemptRoot, "output", "index.html"),
+      outputPath: path.join(context.projectRoot, ...outputRelativePath.split("/")),
       completionPath: path.join(attemptRoot, "completion.json"),
       freezeCutoffRevision: runtime.freezeCutoffRevision,
       createdAt: activeRun.submittedAt,
@@ -4582,14 +4645,15 @@ function managedAiRules() {
 
 ## 写入与对话补充
 
-- 唯一 HTML 输出是当前 Attempt 的 output/index.html。
+- 唯一 HTML 输出必须是 PROMPT.md 明确列出的绝对路径；文件名由 PageRoot 固定为“原用户文件名-V1.x.html”，不得自行计算、改名或改写成 index.html。
+- 冻结输入的 input/base/index.html 只是受控存储名，不是用户原始文件名，也绝不能作为输出路径。
 - 不得修改 PROJECT.md、冻结输入或协议文件，也不得直接编辑 USER_SUPPLEMENT.json。
 - 用户在当前对话中新增、修订或撤销要求时，先运行 PROMPT.md 中的“记录对话补充”命令；只有记录成功后才能执行该条要求。失败时停止执行并说明原因。
 - 不得伪造附件路径、字节数或 SHA-256。
 
 ## 完成
 
-- 写完 output/index.html 后，最后运行 PROMPT.md 中的最终化（finalizer）命令。
+- 写完 PROMPT.md 指定的唯一输出文件后，最后运行其中的最终化（finalizer）命令。
 - 不得手写 completion.json；只有 finalizer 生成有效的 completion.json，PageRoot 才会创建新版本。
 - 如果 finalizer 返回 \`status=cancelled\`，本轮已在源页结束；立即停止，不要重试，也不要写入其他路径。
 `;
@@ -4644,6 +4708,17 @@ function promptForRun(
 ) {
   const command = finalizerCommandForRun(context, activeRun);
   const supplementCommand = supplementCommandForRun(context, activeRun);
+  const output = attemptOutputDescriptor(
+    project.displayName,
+    activeRun.candidateVersionOrdinal,
+  );
+  const outputPath = path.join(
+    attemptRoot,
+    ...output.relativePath.split("/"),
+  );
+  const semanticVersion = semanticVersionLabel(
+    activeRun.candidateVersionOrdinal,
+  );
   const attachmentLines = (activeRun.frozenComments ?? []).flatMap(
     (comment) => (comment.attachments ?? []).map((attachment) => [
       `- 附件 ${attachment.attachmentId} · 评论 ${comment.commentId} · 目标 ${comment.target.targetId}`,
@@ -4672,6 +4747,9 @@ ${attachmentLines.join("\n")}
 - 项目 / 文档：\`${context.projectId}\` / \`${context.documentId}\`
 - Request / Attempt：\`${activeRun.requestId}\` / \`${activeRun.attemptId}\`
 - 版本身份：上一版 \`${activeRun.previousVersionId}\` · 基于 \`${activeRun.basedOnVersionId}\` · 候选 \`${activeRun.candidateVersionId}\`（\`${activeRun.candidateVersionLabel}\`）
+- 原用户文件名：\`${project.displayName}\`
+- 本轮文件版本号：\`${semanticVersion}\`
+- 固定输出文件名：\`${output.fileName}\`
 
 ## 执行顺序
 
@@ -4680,7 +4758,7 @@ ${attachmentLines.join("\n")}
 3. 同时遵守 input/AI_RULES.md 和 input/PROJECT.md；冻结输入与用户源 HTML 都是只读的。
 4. change-request.json 已包含完整的评论、目标和附件关系；如有附件，必须把附件内容与用户原话一起理解。
 5. 只修改用户明确指定的区域，以及完成要求所必需的关联内容；不要顺手重构、美化或修复其他区域。
-6. 只把一个完整 HTML 写入当前 Attempt 的 output/index.html；不得直接编辑 USER_SUPPLEMENT.json、PROJECT.md、冻结输入或其他协议文件。
+6. 只把一个完整 HTML 写入下方“唯一 HTML 输出”的精确路径；不得改名、不得自行递增版本号、不得写 output/index.html 或其他路径。input/base/index.html 只是冻结输入的固定存储名，不代表用户文件名。不得直接编辑 USER_SUPPLEMENT.json、PROJECT.md、冻结输入或其他协议文件。
 
 ## 文件位置
 
@@ -4692,7 +4770,7 @@ ${attachmentLines.join("\n")}
 - 本轮修改要求：\`${path.join(requestRoot, "change-request.json")}\`
 - 冻结输入清单：\`${path.join(requestRoot, "input-manifest.json")}\`
 - 对话补充记录：\`${path.join(attemptRoot, "USER_SUPPLEMENT.json")}\`
-- 唯一 HTML 输出：\`${path.join(attemptRoot, "output", "index.html")}\`
+- 唯一 HTML 输出：\`${outputPath}\`
 
 ## 记录对话补充
 
@@ -4727,7 +4805,7 @@ ${attachmentSection}
 
 ## 完成
 
-确认 output/index.html 已完整写入后，最后执行以下唯一最终化（finalizer）命令：
+确认 \`${output.relativePath}\` 已完整写入后，最后执行以下唯一最终化（finalizer）命令：
 
 \`\`\`sh
 ${command}
@@ -4801,6 +4879,10 @@ async function createRequest(body) {
     const requestId = await nextRequestId(context.projectRoot);
     const attemptId = "attempt_001";
     const candidate = await nextVersionIdentity(context.projectRoot);
+    const output = attemptOutputDescriptor(
+      project.displayName,
+      candidate.versionOrdinal,
+    );
     const requestsRoot = path.join(context.projectRoot, "requests");
     const requestRoot = path.join(requestsRoot, requestId);
     const attemptRoot = path.join(
@@ -4857,7 +4939,7 @@ async function createRequest(body) {
       requestPath: requestRoot,
       attemptPath: attemptRoot,
       promptPath: path.join(requestRoot, "PROMPT.md"),
-      outputPath: path.join(attemptRoot, "output", "index.html"),
+      outputPath: path.join(attemptRoot, ...output.relativePath.split("/")),
       completionPath: path.join(attemptRoot, "completion.json"),
       handoffMessage:
         `请执行 ${requestRoot}/PROMPT.md 中的单轮任务，完成后运行其中的最终化（finalizer）命令。`,
@@ -5119,7 +5201,7 @@ async function createRequest(body) {
           attachmentCount: requestAttachments.length,
         },
         finalization: {
-          outputRelativePath: "output/index.html",
+          outputRelativePath: output.relativePath,
           completionRelativePath: "completion.json",
           completionSchema: "completion.v1.schema.json",
           supportedFinalizerVersion: FINALIZER_VERSION,
@@ -5207,7 +5289,7 @@ async function createRequest(body) {
       activeRun.attemptRelativePath =
         `requests/${requestId}/attempts/${attemptId}`;
       activeRun.outputRelativePath =
-        `${activeRun.attemptRelativePath}/output/index.html`;
+        `${activeRun.attemptRelativePath}/${output.relativePath}`;
       activeRun.completionRelativePath =
         `${activeRun.attemptRelativePath}/completion.json`;
       activeRun.frozenAnnotationsRelativePath =
@@ -5275,7 +5357,7 @@ async function createRequest(body) {
       attemptPath: attemptRoot,
       promptPath: path.join(requestRoot, "PROMPT.md"),
       inputPath: path.join(requestRoot, "input", "base", "index.html"),
-      outputPath: path.join(attemptRoot, "output", "index.html"),
+      outputPath: path.join(attemptRoot, ...output.relativePath.split("/")),
       completionPath: path.join(attemptRoot, "completion.json"),
       resultPath: path.join(attemptRoot, "result.json"),
       activeRun,
@@ -5284,7 +5366,10 @@ async function createRequest(body) {
   });
 }
 
-async function assertAttemptProtocolSurfaceRaw(attemptRoot) {
+async function assertAttemptProtocolSurfaceRaw(
+  attemptRoot,
+  outputRelativePath,
+) {
   const entries = await readdir(attemptRoot, { withFileTypes: true });
   const unexpected = findUnexpectedAttemptEntry(entries);
   if (unexpected) {
@@ -5296,7 +5381,10 @@ async function assertAttemptProtocolSurfaceRaw(attemptRoot) {
   }
   const outputRoot = path.join(attemptRoot, "output");
   const outputEntries = await readdir(outputRoot, { withFileTypes: true });
-  const unexpectedOutput = findUnexpectedAttemptOutputEntry(outputEntries);
+  const unexpectedOutput = findUnexpectedAttemptOutputEntry(
+    outputEntries,
+    path.posix.basename(outputRelativePath),
+  );
   if (unexpectedOutput) {
     throw new HttpError(
       422,
@@ -5327,7 +5415,16 @@ async function validateCompletionRaw(context, runtime) {
     path.join(requestRoot, "input", "annotations", "records.json"),
     "input/annotations/records.json",
   );
-  await assertAttemptProtocolSurfaceRaw(attemptRoot);
+  const changeRequest = await readLifecycleJson(
+    path.join(requestRoot, "change-request.json"),
+    "change-request.json",
+  );
+  const outputRelativePath = await outputRelativePathForActiveRun(
+    context,
+    activeRun,
+    changeRequest,
+  );
+  await assertAttemptProtocolSurfaceRaw(attemptRoot, outputRelativePath);
   if (!(await exists(completionPath))) {
     return { waiting: true, requestRoot, attemptRoot, completionPath };
   }
@@ -5357,7 +5454,7 @@ async function validateCompletionRaw(context, runtime) {
     candidateVersionOrdinal: activeRun.candidateVersionOrdinal,
     candidateVersionLabel: activeRun.candidateVersionLabel,
     baseSnapshotSha256: activeRun.baseSnapshotSha256,
-    outputRelativePath: "output/index.html",
+    outputRelativePath,
     canonicalizationVersion: CANONICALIZATION_VERSION,
     inputManifestSha256: activeRun.inputManifestSha256,
   };
@@ -5380,16 +5477,19 @@ async function validateCompletionRaw(context, runtime) {
     completion.outputComparisonSha256,
     "completion.outputComparisonSha256",
   );
-  const outputPath = path.join(attemptRoot, "output", "index.html");
+  const outputPath = path.join(
+    attemptRoot,
+    ...outputRelativePath.split("/"),
+  );
   const outputBuffer = await readFile(outputPath);
   const outputHtml = outputBuffer.toString("utf8");
-  requireCompleteHtml(outputHtml, "output/index.html");
-  assertCanonicalManagedMeta(outputHtml, activeRun);
+  requireCompleteHtml(outputHtml, outputRelativePath);
+  assertCanonicalManagedMeta(outputHtml, activeRun, outputRelativePath);
   if (sha256(outputBuffer) !== completion.outputSha256) {
     throw new HttpError(
       422,
       "OUTPUT_HASH_MISMATCH",
-      "output/index.html changed after finalization.",
+      `${outputRelativePath} changed after finalization.`,
     );
   }
   const baseBuffer = await readFile(
@@ -5418,10 +5518,6 @@ async function validateCompletionRaw(context, runtime) {
       "Completion comparison hashes do not match actual HTML.",
     );
   }
-  const changeRequest = await readLifecycleJson(
-    path.join(requestRoot, "change-request.json"),
-    "change-request.json",
-  );
   const supplement = await validateAttemptSupplement(context, {
     requestId: activeRun.requestId,
     attemptId: activeRun.attemptId,
@@ -5478,9 +5574,16 @@ async function readHistoricalCandidateAssessment(
     "files",
     "index.html",
   );
+  const completionPath = path.join(attemptRoot, "completion.json");
+  const completion = await exists(completionPath)
+    ? await readAuxiliaryJson(completionPath, "completion.json")
+    : null;
+  const outputRelativePath = typeof completion?.outputRelativePath === "string"
+    ? completion.outputRelativePath
+    : "output/index.html";
   const candidateEvidencePath = await exists(committedCandidatePath)
     ? committedCandidatePath
-    : path.join(attemptRoot, "output", "index.html");
+    : path.join(attemptRoot, ...outputRelativePath.split("/"));
   const sources = [
     [path.join(requestRoot, "input", "base", "index.html"), "frozen base"],
     [candidateEvidencePath, "immutable candidate"],
@@ -5889,6 +5992,7 @@ async function prepareTransactionRaw(
     candidateContentSha256: validated.completion.outputSha256,
     candidateManifestSha256,
     completionSha256,
+    outputRelativePath: activeRun.outputRelativePath,
     completionRelativePath: path.relative(
       context.projectRoot,
       validated.completionPath,
@@ -5939,8 +6043,7 @@ async function markAiConflictRaw(
     expectedSourceSha256: activeRun.baseSnapshotSha256,
     externalSourceSha256: actualSourceSha256,
     candidateOutputSha256: validated.completion.outputSha256,
-    candidateRelativePath:
-      `requests/${activeRun.requestId}/attempts/${activeRun.attemptId}/output/index.html`,
+    candidateRelativePath: activeRun.outputRelativePath,
     detectedAt: nowIso(),
   };
   runtime.lifecycleState = "awaiting-conflict-resolution";
@@ -5965,6 +6068,8 @@ function activeRunFromTransaction(context, transaction) {
     "attempts",
     transaction.attemptId,
   );
+  const outputRelativePath = transaction.outputRelativePath
+    ?? `requests/${transaction.requestId}/attempts/${transaction.attemptId}/output/index.html`;
   return {
     projectId: context.projectId,
     documentId: context.documentId,
@@ -5975,7 +6080,8 @@ function activeRunFromTransaction(context, transaction) {
     requestPath: requestRoot,
     attemptPath: attemptRoot,
     promptPath: path.join(requestRoot, "PROMPT.md"),
-    outputPath: path.join(attemptRoot, "output", "index.html"),
+    outputRelativePath,
+    outputPath: path.join(context.projectRoot, ...outputRelativePath.split("/")),
     completionPath: path.join(attemptRoot, "completion.json"),
     previousVersionId: transaction.previousVersionId,
     basedOnVersionId: transaction.basedOnVersionId,
@@ -6936,12 +7042,19 @@ async function statusFor(sourcePath, requestId, attemptId = "attempt_001") {
         }
         const source = await readSourceFile(context.sourcePath);
         let protocolViolation = null;
-        const outputPath = path.join(attemptRoot, "output", "index.html");
         let completion = null;
         if (await exists(completionPath)) {
           completion = await readAuxiliaryJson(
             completionPath,
             "completion.json",
+          );
+          const outputRelativePath =
+            typeof completion.outputRelativePath === "string"
+              ? completion.outputRelativePath
+              : "output/index.html";
+          const outputPath = path.join(
+            attemptRoot,
+            ...outputRelativePath.split("/"),
           );
           const outputSha256 = (await exists(outputPath))
             ? sha256(await readFile(outputPath))
@@ -7033,7 +7146,16 @@ async function statusFor(sourcePath, requestId, attemptId = "attempt_001") {
       if (!(await exists(completionPath))) {
         // The protocol surface is independent of frozen annotations and must
         // still reject unauthorized output while a completion is absent.
-        await assertAttemptProtocolSurfaceRaw(attemptRoot);
+        const changeRequest = await readLifecycleJson(
+          path.join(requestRoot, "change-request.json"),
+          "change-request.json",
+        );
+        const outputRelativePath = await outputRelativePathForActiveRun(
+          context,
+          runtime.activeRun,
+          changeRequest,
+        );
+        await assertAttemptProtocolSurfaceRaw(attemptRoot, outputRelativePath);
         validated = {
           waiting: true,
           requestRoot,
@@ -7060,6 +7182,7 @@ async function statusFor(sourcePath, requestId, attemptId = "attempt_001") {
         "UNEXPECTED_ATTEMPT_OUTPUT",
         "UNEXPECTED_OUTPUT_FILE",
         "OUTPUT_PROTOCOL_VIOLATION",
+        "OUTPUT_PATH_IDENTITY_MISMATCH",
         "OUTPUT_MANAGED_META_MISMATCH",
       ]);
       const protocolViolation = protocolViolationCodes.has(error?.code)

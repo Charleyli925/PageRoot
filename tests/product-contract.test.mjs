@@ -7,6 +7,7 @@ import {
   PRODUCT_MAX_HTML_BYTES,
   WORKING_COPY_COMPONENT_MAX_BYTES,
   isGeneratedWorkingCopyFileName,
+  semanticVersionLabel,
   workingCopyFileName,
 } from "../desktop/product-contract.mjs";
 import {
@@ -66,6 +67,10 @@ test("frontend and ScopeValidator consume the same positional identity primitive
 });
 
 test("generated working-copy names retain the stable user name safely", () => {
+  assert.equal(semanticVersionLabel(1), "V1.0");
+  assert.equal(semanticVersionLabel(2), "V1.1");
+  assert.equal(semanticVersionLabel(10), "V1.9");
+  assert.throws(() => semanticVersionLabel(0));
   assert.equal(
     workingCopyFileName("复杂HTML综合测试页", "V1.2"),
     "复杂HTML综合测试页-V1.2.html",
@@ -116,11 +121,12 @@ test("Prompt, protocol, helper, and finalizer agree on frozen input plus control
     bridge,
     /不得修改 PROJECT\.md、冻结输入或协议文件，也不得直接编辑 USER_SUPPLEMENT\.json/,
   );
-  assert.match(
-    lifecycle,
-    /entry\.name !== "index\.html"[\s\S]*?UNEXPECTED_OUTPUT_FILE/,
-  );
+  assert.match(lifecycle, /expectedFileName = "index\.html"/);
+  assert.match(lifecycle, /user-name-plus-version filename/);
+  assert.match(bridge, /原用户文件名-V1\.x\.html/);
+  assert.match(bridge, /不得写 output\/index\.html 或其他路径/);
   assert.match(protocol, /output 只有一个完整 HTML，不得创建 `PROJECT\.md`/);
+  assert.match(protocol, /AI 输出文件命名/);
   assert.match(protocol, /`USER_SUPPLEMENT\.json` 只能由受控 helper 追加/);
   assert.match(protocol, /长期项目规则不得在本轮任务中修改/);
   assert.match(protocol, /^# PageRoot Change Request 协议$/m);

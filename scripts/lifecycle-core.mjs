@@ -17,6 +17,10 @@ import {
   removeElementTokens,
   serializeHtmlWithoutElementTokens,
 } from "./html-source-parser.mjs";
+import {
+  semanticVersionLabel,
+  workingCopyFileName,
+} from "./product-contract.mjs";
 
 export const LIFECYCLE_SCHEMA_VERSION = "3.0.0";
 export const COMPLETION_SCHEMA_VERSION = "1.0.0";
@@ -149,12 +153,15 @@ export function findUnexpectedAttemptEntry(entries) {
   );
 }
 
-export function findUnexpectedAttemptOutputEntry(entries) {
+export function findUnexpectedAttemptOutputEntry(
+  entries,
+  expectedFileName = "index.html",
+) {
   return entries.find(
     (entry) =>
       !isFinderMetadataFile(entry)
       && (
-        entry.name !== "index.html"
+        entry.name !== expectedFileName
         || entry.isSymbolicLink()
         || !entry.isFile()
       ),
@@ -293,8 +300,12 @@ function escapeHtmlAttribute(value) {
     .replaceAll(">", "&gt;");
 }
 
-export function injectManagedMeta(html, identity) {
-  requireCompleteHtml(html, "output/index.html");
+export function injectManagedMeta(
+  html,
+  identity,
+  outputLabel = "output/index.html",
+) {
+  requireCompleteHtml(html, outputLabel);
   const withoutManagedMeta = stripManagedMeta(html);
   const required = {
     "html-ai-document-id": identity.documentId,
@@ -321,7 +332,7 @@ export function injectManagedMeta(html, identity) {
   if (!closingHead) {
     throw new LifecycleError(
       "INCOMPLETE_HTML",
-      "output/index.html does not contain a closing head element.",
+      `${outputLabel} does not contain a closing head element.`,
     );
   }
   return (
@@ -1504,7 +1515,54 @@ export async function recordUserSupplement({
   });
 }
 
-async function assertAttemptWriteSurface(attemptRoot) {
+function outputRelativePathForAttempt(project, activeRun, changeRequest) {
+  const outputRelativePath = changeRequest?.finalization?.outputRelativePath;
+  if (
+    typeof outputRelativePath !== "string"
+    || !outputRelativePath.startsWith("output/")
+    || outputRelativePath.includes("\0")
+    || outputRelativePath.slice("output/".length).includes("/")
+    || outputRelativePath.slice("output/".length).includes("\\")
+  ) {
+    throw new LifecycleError(
+      "OUTPUT_PATH_IDENTITY_MISMATCH",
+      "change-request.json declares an invalid Attempt output path.",
+    );
+  }
+  const expectedActiveRunPath =
+    `requests/${activeRun.requestId}/attempts/${activeRun.attemptId}/${outputRelativePath}`;
+  if (activeRun.outputRelativePath !== expectedActiveRunPath) {
+    throw new LifecycleError(
+      "OUTPUT_PATH_IDENTITY_MISMATCH",
+      "The active run output path does not match the frozen Request.",
+      {
+        expected: expectedActiveRunPath,
+        actual: activeRun.outputRelativePath,
+      },
+    );
+  }
+  // Older frozen Attempts keep their fixed staging name so a newly installed
+  // PageRoot never strands an in-flight task. New Requests must use the exact
+  // user-name-plus-version filename computed by PageRoot itself.
+  if (outputRelativePath === "output/index.html") return outputRelativePath;
+  const expectedOutputRelativePath = `output/${workingCopyFileName(
+    project.displayName,
+    semanticVersionLabel(activeRun.candidateVersionOrdinal),
+  )}`;
+  if (outputRelativePath !== expectedOutputRelativePath) {
+    throw new LifecycleError(
+      "OUTPUT_PATH_IDENTITY_MISMATCH",
+      "The frozen Request output path does not match its user filename and Version.",
+      {
+        expected: expectedOutputRelativePath,
+        actual: outputRelativePath,
+      },
+    );
+  }
+  return outputRelativePath;
+}
+
+async function assertAttemptWriteSurface(attemptRoot, outputRelativePath) {
   const entries = await readdir(attemptRoot, { withFileTypes: true });
   const unexpected = findUnexpectedAttemptEntry(entries);
   if (unexpected) {
@@ -1535,7 +1593,10 @@ async function assertAttemptWriteSurface(attemptRoot) {
     );
   }
   const outputEntries = await readdir(outputRoot, { withFileTypes: true });
-  const unexpectedOutput = findUnexpectedAttemptOutputEntry(outputEntries);
+  const unexpectedOutput = findUnexpectedAttemptOutputEntry(
+    outputEntries,
+    path.posix.basename(outputRelativePath),
+  );
   if (unexpectedOutput) {
     throw new LifecycleError(
       "UNEXPECTED_OUTPUT_FILE",
@@ -1920,7 +1981,12 @@ export async function finalizeAttempt({
           COMPLETION_SCHEMA_VERSION,
         )
       : null;
-    await assertAttemptWriteSurface(attemptRoot);
+    const outputRelativePath = outputRelativePathForAttempt(
+      project,
+      activeRun,
+      changeRequest,
+    );
+    await assertAttemptWriteSurface(attemptRoot, outputRelativePath);
     const frozenInput = await verifyFrozenInputManifest(
       requestRoot,
       activeRun,
@@ -1969,6 +2035,11 @@ export async function finalizeAttempt({
         activeRun.candidateVersionId,
       ],
       [
+        "versionIdentity.candidateVersionOrdinal",
+        changeRequest.versionIdentity?.candidateVersionOrdinal,
+        activeRun.candidateVersionOrdinal,
+      ],
+      [
         "versionIdentity.candidateVersionLabel",
         changeRequest.versionIdentity?.candidateVersionLabel,
         activeRun.candidateVersionLabel,
@@ -1996,12 +2067,15 @@ export async function finalizeAttempt({
         "The frozen base snapshot has changed.",
       );
     }
-    const outputPath = path.join(attemptRoot, "output", "index.html");
+    const outputPath = path.join(
+      attemptRoot,
+      ...outputRelativePath.split("/"),
+    );
     const outputInformation = await lstat(outputPath).catch((error) => {
       if (error?.code === "ENOENT") {
         throw new LifecycleError(
           "OUTPUT_NOT_FOUND",
-          "output/index.html was not found.",
+          `${outputRelativePath} was not found.`,
           undefined,
           404,
         );
@@ -2011,18 +2085,18 @@ export async function finalizeAttempt({
     if (outputInformation.isSymbolicLink() || !outputInformation.isFile()) {
       throw new LifecycleError(
         "UNSAFE_OUTPUT_ENTRY",
-        "output/index.html must be a regular file.",
+        `${outputRelativePath} must be a regular file.`,
       );
     }
     const rawOutput = await readFile(outputPath, "utf8");
-    requireCompleteHtml(rawOutput, "output/index.html");
+    requireCompleteHtml(rawOutput, outputRelativePath);
     const finalizedHtml = injectManagedMeta(rawOutput, {
       documentId: activeRun.documentId,
       versionId: activeRun.candidateVersionId,
       versionLabel: activeRun.candidateVersionLabel,
       basedOnVersionId: activeRun.basedOnVersionId,
       requestId: activeRun.requestId,
-    });
+    }, outputRelativePath);
     await atomicWriteFile(outputPath, finalizedHtml);
     const finalizedBuffer = await readFile(outputPath);
     await maybeFinalizerFailpoint("after-finalization-output", attemptRoot);
@@ -2041,7 +2115,7 @@ export async function finalizeAttempt({
       candidateVersionOrdinal: activeRun.candidateVersionOrdinal,
       candidateVersionLabel: activeRun.candidateVersionLabel,
       baseSnapshotSha256: activeRun.baseSnapshotSha256,
-      outputRelativePath: "output/index.html",
+      outputRelativePath,
       outputSha256: sha256(finalizedBuffer),
       baseComparisonSha256: comparisonSha256(baseBuffer.toString("utf8")),
       outputComparisonSha256: comparisonSha256(

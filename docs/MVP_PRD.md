@@ -47,7 +47,7 @@ PageRoot 让用户在真实本地 HTML 上完成两类工作：
 - 不把临时文件、自动写回、事务恢复快照或恢复日志显示为 Version。
 - 不把文件名、页面标题或文件系统修改时间当作版本身份。
 - 不依赖固定时间窗口推断内部 AI 已完成。
-- 不维护一个会被反复覆盖、可能与项目当前路径分叉的含糊 `current/index.html`。有效 AI 成功创建按版本命名的 `working/V1.x.html` 并自动切换项目路径，不要求用户手动管理副本。
+- 不维护一个会被反复覆盖、可能与项目当前路径分叉的含糊 `current/index.html`。有效 AI 成功创建按原用户文件名与版本命名的 `working/<原用户文件名>-V1.x.html` 并自动切换项目路径，不要求用户手动管理副本。
 - 不让预览 DOM 序列化结果成为保存事实源。
 - 不把运行时生成的节点、文字、Canvas 像素、表单值或滚动位置伪装成
   可编辑源码；编辑态完整视觉内容由源码内联 SVG、静态 HTML 或 PNG
@@ -61,7 +61,7 @@ PageRoot 让用户在真实本地 HTML 上完成两类工作：
 |---|---|
 | Project | 工作台中的独立项目，拥有自己的状态、锁、版本与 Request |
 | Document | 项目绑定的源 HTML 稳定身份，由 `documentId` 表示 |
-| Current HTML | `project.json.sourcePath` 当前指向、用户正在编辑的真实 HTML；AI 成功后可以切换到新的 `working/V1.x.html` |
+| Current HTML | `project.json.sourcePath` 当前指向、用户正在编辑的真实 HTML；AI 成功后可以切换到新的 `working/<原用户文件名>-V1.x.html` |
 | Version | 初始 V1 或一次有效内部 AI 返回形成的不可变里程碑 |
 | Request | 一次冻结的用户意图和精确输入 |
 | Attempt | 内部 AI 对某个 Request 的一次执行 |
@@ -85,6 +85,7 @@ PageRoot 让用户在真实本地 HTML 上完成两类工作：
 | `versionId` | 机器版本 ID，例如 `ver_0009` |
 | `versionOrdinal` | 连续序号，例如 `9` |
 | `versionLabel` | 内部兼容标签，例如 `V9`；界面和工作文件按同一 ordinal 显示为 `V1.8` |
+| `outputRelativePath` | 冻结的 AI 唯一输出路径，例如 `output/仪表盘-V1.8.html`；不由 AI 推导或改名 |
 | `basedOnVersionId` | 当前提交内容的谱系基础 |
 | `previousVersionId` | 时间线上前一个正式 Version |
 | `requestId` | 本轮用户意图 |
@@ -110,7 +111,7 @@ PageRoot 让用户在真实本地 HTML 上完成两类工作：
 
 桌面版在当前 HTML 已安全保存、项目空闲且没有冲突时，允许用户双击顶部文件名原位重命名。输入只包含主文件名，现有 `.html/.htm` 后缀和所在目录保持不变；`Enter` 或失焦提交，`Escape` 取消。同名文件不得覆盖。成功重命名只改变当前真实文件路径、桌面活动/最近记录和项目显示名，不改变 HTML 字节、`projectId`、`documentId`、Version 或历史。事务必须有稳定 operation ID、预期源 Hash 和崩溃恢复记录。
 
-初始 Version 的内部标签为 `V1 / ver_0001`，界面显示“版本 1”。第一次有效 AI 成功使用内部 `V2 / ver_0002`，界面显示“版本 2”；之后依次递增。兼容工作文件名仍可使用 `working/V1.1.html`、`working/V1.2.html`，但不得把该文件标签当作用户界面的版本身份，也不得回写并破坏严格 v3 Schema。
+初始 Version 的内部标签为 `V1 / ver_0001`，界面显示“版本 1”。第一次有效 AI 成功使用内部 `V2 / ver_0002`，界面显示“版本 2”；之后依次递增。PageRoot 固定把候选 ordinal 映射为文件版本号 `V1.<ordinal - 1>`，并生成 `working/<原用户文件名>-V1.1.html`、`working/<原用户文件名>-V1.2.html` 等工作文件。`input/base/index.html` 是冻结输入的机器名，不是用户文件名；AI 只能写入 Prompt 给出的 `output/<原用户文件名>-V1.x.html`。该文件标签不得当作用户界面的版本身份，也不得回写并破坏严格 v3 Schema。
 
 ### 5.2 直接编辑与自动写回
 
@@ -325,7 +326,7 @@ editing
 
 ### 5.8 内部 AI 输出与 finalizer
 
-每个 Attempt 的唯一 HTML 输出是 `output/index.html`。
+每个新 Attempt 的唯一 HTML 输出是 PageRoot 冻结的 `output/<原用户文件名>-V1.x.html`。原用户文件名主干取冻结时的 `displayName`，去掉扩展名和已有 `-V1.x` 后缀后按安全文件名规范化；版本号取 `V1.<candidateVersionOrdinal - 1>`。Prompt 必须同时给出原用户文件名、版本号、精确文件名和绝对输出路径，AI 不得自行命名。已冻结的历史 Attempt 仍可使用 `output/index.html`，以便完成而不被升级中断。
 
 内部 AI 完成全部修改后必须执行 Prompt 中的完整 finalizer 命令。finalizer：
 
@@ -408,7 +409,7 @@ editing
 应用阶段：
 
 1. 再次核对源 Hash。
-2. 以 create-new/no-clobber 语义创建候选 `working/V1.x.html`；同名不同内容时失败关闭，不覆盖。
+2. 以 create-new/no-clobber 语义创建候选 `working/<原用户文件名>-V1.x.html`；同名不同内容时失败关闭，不覆盖。
 3. 重读新工作文件并校验候选 Hash，标记 `source-applied`；提交前当前 HTML 保持不变。
 4. 原子发布到 `versions/<version-id>/`。
 5. 原子写入 `committed.json`，这是唯一提交点。
@@ -436,7 +437,7 @@ editing
 2. 将外部内容保存为恢复文件。
 3. 将事务 `expectedSourceHash` 更新为经确认的外部 Hash。
 4. 再次确认外部内容未继续变化。
-5. 创建新的 `working/V1.x.html` 并继续两阶段事务；外部修改后的旧文件仍完整保留。
+5. 创建新的 `working/<原用户文件名>-V1.x.html` 并继续两阶段事务；外部修改后的旧文件仍完整保留。
 
 用户选择保留外部内容或取消：
 
@@ -504,8 +505,8 @@ editing
         ├── history/
         │   └── source-operations.json
         ├── working/
-        │   ├── V1.1.html
-        │   └── V1.2.html
+        │   ├── <原用户文件名>-V1.1.html
+        │   └── <原用户文件名>-V1.2.html
         ├── recovery/
         ├── transactions/
         ├── versions/
@@ -516,7 +517,7 @@ editing
 
 | 事实 | 权威位置 |
 |---|---|
-| 当前可编辑 HTML | `project.json.sourcePath` 当前指向的原始 HTML 或 `working/V1.x.html` |
+| 当前可编辑 HTML | `project.json.sourcePath` 当前指向的原始 HTML 或 `working/<原用户文件名>-V1.x.html` |
 | 项目/文档身份、显示名、创建时间、目录名与可重建缓存 | `project.json` 与 `project-registry.json` |
 | 整个项目长期使用的 AI 规则 | `PROJECT.md` |
 | active run、项目锁、冲突与恢复事务 | `runtime-state.json` |
@@ -636,7 +637,7 @@ Prompt、AI 返回、附件、剪贴板、文件名/路径、账号、电脑序�
 
 - 新写入只有 `initial` 和 `internal-ai` 两类。
 - 本地编辑、自动写回、评论、导出、历史恢复、失败、取消和冲突未采用都不建版。
-- no-change、失败、取消和冲突未采用也不创建 `working/V1.x.html`。
+- no-change、失败、取消和冲突未采用也不创建 `working/<原用户文件名>-V1.x.html`。
 - 新版提示只在新工作文件、不可变快照、画布 Hash 一致且 canonical path 已切换后显示。
 - 历史查看永远只读且只打开精确 Version 路径。
 - 每个历史版本可一键在 Finder 中显示精确 `files/index.html`。
