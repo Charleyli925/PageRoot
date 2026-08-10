@@ -106,6 +106,13 @@ and review result, then revalidates the exact pair before attesting the tree.
 The candidate classifier records PR scope and size only as advisory information;
 it never rejects a PR for being large.
 
+If `review-policy` alone times out before the exact-commit Codex result arrives,
+`Review Gate Recovery` handles the late result from trusted default-branch code.
+It revalidates the current Ready head/base and timeout artifact, requires every
+source job to be green, and reruns only the failed jobs of that same CI run.
+Never use this path for a product-test failure, active P0/P1, Draft PR, changed
+head/base or a new commit; those require the normal fix-and-promote flow.
+
 A Ready event freezes the expected head/base and must not be followed by a
 commit. A new commit cancels any in-flight stale candidate and receives only PR
 feedback. The new head cannot merge because it has no `release-gate`; convert it

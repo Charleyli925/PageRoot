@@ -10,6 +10,7 @@
 | `npm run gate:task` | 一个开发任务完成时 | 静态检查、受影响 Node 文件，以及相关 Browser/Electron/AI 冒烟 | 在较短时间内证明生产链路已经接通 |
 | PR `pr-feedback` | `opened/synchronize/reopened` | 按影响映射选择 Node/编译检查 | 普通推送无论 Draft/Ready 都不重复消费完整矩阵；仅切回 Draft 不产生 Feedback |
 | `review-policy` | 最终 Tree 从 Draft 转为 Ready，由 Ready 唯一触发最终审阅 | 实时 head/base、post-Ready exact-commit Codex review 或不可变 clean comment、30 秒 settle window、活动非 outdated P0/P1 线程和 P0/P1 `CHANGES_REQUESTED` | 旧 head/base、未结束 review、P0/P1 阻断时不能通过；P2/P3/unclassified 写为债务而不阻断 |
+| `Review Gate Recovery` | Codex 精确提交的 review/clean comment 在 `review-policy` 超时后到达 | trusted default-branch code 重验 live Ready head/base、当前 review policy、原 run timeout artifact、所有非 review job 结果 | 仅对原 run 调用 failed-job rerun；测试失败、P0/P1、Draft/closed、SHA/base 改变或 artifact 不符全部 fail closed |
 | `baseline-policy` | 分支策略通过，与 review-policy 并行 | 全局依赖 advisory policy 与 packaged-runtime closure | 基线红时不启动 Linux build、Browser 或 macOS Electron runner |
 | 一次性晋升 `release-gate` | review、baseline、完整测试和相关 dry run 都完成的最终 PR Tree | 全量 Node、三分片完整 Browser、独立 Native Electron、独立确定性 AI 闭环、真实 HTML 发现式门禁、即时 review revalidation 与 Tree Hash 凭证 | 每个最终候选只跑一次；后续新 SHA 必须重新 Draft 后 Ready |
 | `Release Dry Run` | `candidate-context` 判定 Ready 候选有打包、release metadata、Electron、Bridge、Schema 或资源风险 | clean job 组装/静态校验显式未签名（`identity=null`）App → 非发布 checkpoint → 第二 clean job 恢复 metadata、重建 renderer oracle、再次校验并启动核对名称/版本/Bundle ID | 不读取签名或 Apple 凭证、不生成 DMG/updater、不成为 Candidate、不创建 tag、不发布；PR 大小只作建议，不作为触发或阻断 |
@@ -43,6 +44,10 @@ Codex comment。它在每轮轮询中重验 live head/base，完成后等待 30 
 未解决且未 outdated 的 P0/P1 线程。只有明确标为 P0/P1 的 `CHANGES_REQUESTED` 必须阻断；
 P2/P3/unclassified finding 则写入 review debt，不应为了清理它们额外生成
 候选 SHA。空 review、错误 commit、普通讨论文本和早于 Ready 的信号不参与判定。
+若唯一失败是 `review_wait_timed_out` 与其下游 `release-gate`，晚到的 Codex
+事件会触发恢复工作流；恢复器必须读取原 attempt 的 review-policy artifact，
+确认当前 pair/Ready 未变、live policy 已通过、11 个必需 non-review job 全绿且
+没有第三个失败 job，才允许 GitHub 只重跑该 run 的失败任务。
 
 `branch-policy`、`baseline-policy`、`review-policy` 与 `candidate-context` 按依赖
 并行：baseline 不等待 review，完整 Linux/Browser/Electron job 只等待基线，
@@ -94,7 +99,38 @@ PR 批量是建议而非固定限制：用 CI Health 的 Ready 次数、candidat
   大型多 section/深层卡片 HTML 记录总耗时及各 `pageroot:review-analysis:*`
   phase，确认 fuzzy pairing 只在兼容 bucket 内运行，并以正式 Electron 闭环
   证明变化数量和类型没有因性能优化改变；可复现实测入口是
-  `npm run benchmark:review-analysis`，该诊断不增加产品内提示。
+  `npm run benchmark:review-analysis`，该诊断不增加产品内提示。语义配对
+  Node oracle 必须分别覆盖唯一空 Canvas/SVG/表单/容器的兼容配对、重复
+  class-only 空节点保持 unmatched、深层子变化不拆稳定祖先，以及第 25 个
+  trusted projection fact 明确失败；解析端超限仍必须 fail-closed。
+- Electron E2E 夹具与场景归属：`tests/e2e/electron/helpers/pageroot-app-fixture.mjs`
+  只拥有独立 userData/workspace/source、隐藏窗口启动、Bridge 路径、close-first
+  cleanup、诊断输出和已加载 frame；它不包含产品断言、整条用户流程或自动重试。
+  fixture 的 Node contract 必须证明 close event 或已确认的 Electron process exit 先于
+  cleanup、close listener 覆盖 exit request 与 SIGTERM/SIGKILL 的完整有界 shutdown budget、stop 幂等、
+  SIGTERM/SIGKILL 有界 fallback，以及两者均未确认时不删除
+  Bridge-owned 文件。AI 闭环保留 verified
+  review/accept、pre-load navigation、顺序 Version/relaunch、internal supplement、
+  no-change、return、clipboard failure、A/B 隔离、double-click、cancel/restart、
+  unknown reconcile、missing finalizer、malformed HTML、broad related、activation
+  failure；legacy global comment 的跨重启恢复仍处在兼容窗口，继续保留为独立
+  Electron 场景。Native Electron 拥有 rapid switch/close 的真实 DOM 与磁盘 oracle；
+  project rules/drain 与 update/About 均由其更窄的 Node/Preload/UI owner 覆盖。首个
+  review/accept 场景的 geometry helper
+  必须把每个表驱动 case 的 fixture、filter/page/context、change type、element/Range
+  owner、frame/mask count、tolerance 与负例写全；表只能消除样板，不能合并不同
+  故障模型。
+
+  基线的 21 个 AI Electron 场景中，15 个核心 AI 场景与 legacy restart 场景仍在
+  `ai-handoff-closed-loop.spec.mjs`；其余 5 个非 AI/重复排列按下表有明确 owner。
+
+  | 已收敛场景 | 唯一 owner |
+  | --- | --- |
+  | first project registration 的 global comment | `comment-rail-layout`: `global comments stay before local comments regardless of canvas position`；Browser `native-dom-comment-stress`: `comments virtualize immediately above the threshold and remain navigable`（首个保存等待 lazy registration committed） |
+  | multiple orphan relink | Native Electron: `multiple orphaned comments relink in sequence and resume the original send`（两个 orphan target 依次选择后只恢复一次 send） |
+  | project resources/drain | Native Electron: `project resources drain edited rules before leaving`（从 Rules UI 离开时通过 Bridge 保存精确字节）；Node owners 仍覆盖 DraftSession 与 read-only inspector |
+  | update/About | Native Electron: `automatic update actions keep the header geometry and About lifecycle`（update badge、About/restart dialog 与 header placement）；Node/Preload owners 继续覆盖 update protocol |
+  | rapid switch/close | `tests/e2e/electron/native-dom-electron.spec.mjs` |
 - 完整 HTML 持久化性能决策：`npm run benchmark:persistence` 只构建一次
   renderer，并在同一机器、同一 frozen main 与固定的 0.5/1.25/2.5MiB
   synthetic HTML 上串行运行。它必须同时保留 external-write conflict、

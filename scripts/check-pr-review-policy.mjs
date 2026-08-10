@@ -540,7 +540,7 @@ async function collectReviewThreads({ graphqlUrl, owner, name, pullRequest, toke
   });
 }
 
-async function collectSnapshot(options, token) {
+export async function collectReviewPolicySnapshot(options, token) {
   const apiBase = (process.env.GITHUB_API_URL || "https://api.github.com").replace(/\/$/u, "");
   const graphqlUrl = process.env.GITHUB_GRAPHQL_URL || `${apiBase.replace(/\/api\/v3$/u, "/api")}/graphql`;
   const [owner, name] = options.repository.split("/");
@@ -611,7 +611,7 @@ async function run(options) {
   for (;;) {
     let snapshot;
     try {
-      snapshot = await collectSnapshot(options, token);
+      snapshot = await collectReviewPolicySnapshot(options, token);
     } catch (error) {
       if (options.mode === "revalidate" || Date.now() >= deadline) throw error;
       if (lastReason !== "github_evidence_unavailable") {

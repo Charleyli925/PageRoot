@@ -15,11 +15,6 @@ test("AI smoke configuration selects review activation and broad-edit regression
     "a verified AI result stays pending through desktop review until the user accepts it",
     "a broad but related AI return is accepted without a target-scope error",
   ]);
-  assert.match(
-    source,
-    /await applicationClosed;[\s\S]*?rmSync\(resolved/u,
-    "AI teardown must observe the Electron close event before deleting Bridge-owned files",
-  );
   assert.doesNotMatch(
     source,
     /if \(await processButton\.isVisible\(\)\) await processButton\.click\(\)/u,

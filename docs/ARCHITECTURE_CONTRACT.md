@@ -191,9 +191,16 @@ Prepared formal-review documents are owned by a cancellable
 `ReviewAnalysisSession` keyed to exact operation/source/comment identity. Its
 multi-entry cache is byte bounded. Parsing and annotation yield between phases,
 and stale work stops before publication. Fuzzy node pairing may compare only
-compatible tag/context/stable-key buckets after exact and unique identity
+compatible tag/context buckets after exact and unique explicit identity
 matches; it cannot restore a page-wide Cartesian candidate set or change the
-existing evidence thresholds.
+existing evidence thresholds. Stable identity, exact subtree equality and own
+non-presentation compatibility have different roles: exact equality skips only
+an unchanged branch, while an empty Canvas/SVG/control/container needs the same
+parent, kind and compatibility to become a candidate. Ambiguous alternatives
+remain unmatched. Analysis-local signature caches and projection facts are
+disposable; a trusted 25th distinct fact is an explicit analysis failure, while
+an oversized serialized payload fails closed rather than being treated as a
+complete review.
 
 Formal Review has an optional, narrower runtime-snapshot supplement. One
 `SourceHostResolver` pairs only direct source Canvas/SVG roots and source-empty
