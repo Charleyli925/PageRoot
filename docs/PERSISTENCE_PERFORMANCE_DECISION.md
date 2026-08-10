@@ -1,10 +1,10 @@
 # 完整 HTML 持久化性能决策
 
-- 测量时间：2026-08-10T07:47:50.925Z
+- 测量时间：2026-08-10T10:16:50.676Z
 - Frozen main：`31e3bea58a5124cd56c87119e459877968de5109`（tree `71f443a8542edf67317c104082a69fbaa23e8f99`）
-- Harness commit：`b2b31046137858a040e54ebc610ed738981e9202`
+- Harness commit：`435c8876a99b9c396bf3dfccbaf4d808a8ef4e0d`
 - Renderer artifact：`sha256:86c5eb6e74dfc95e190e194057d6d13ce2f6681c3c29bb723cad93a81817816b`
-- Node / Electron：v22.23.2 / 43.2.0
+- Node / Electron：v25.7.0 / 43.2.0
 - 机器：darwin 25.5.0 · arm64 · Apple M5 Pro
 - 样本：每个尺寸 7 个有效样本，1 个 warmup；所有操作串行执行。
 
@@ -16,17 +16,17 @@
 
 | HTML | Bridge transaction | Electron autosave（含 700ms debounce） | dirty switch | dirty close | clean close |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| 0.5MiB | 185.4 / 206.7 / 206.7 | 2376 / 2441.2 / 2441.2 | 821.9 / 852.7 / 852.7 | 545.3 / 562 / 562 | 46.2 / 49.5 / 49.5 |
-| 1.25MiB | 345.3 / 350.1 / 350.1 | 3373 / 3451.7 / 3451.7 | 1170.8 / 1185.4 / 1185.4 | 925.1 / 957 / 957 | 52.3 / 54 / 54 |
-| 2.5MiB | 521.8 / 530.9 / 530.9 | 16978.9 / 20602.7 / 20602.7 | 1818.2 / 1872.9 / 1872.9 | 1367.6 / 1392 / 1392 | 72.5 / 76 / 76 |
+| 0.5MiB | 157.4 / 162.9 / 162.9 | 2447.5 / 2484.2 / 2484.2 | 851 / 869 / 869 | 565.4 / 575.8 / 575.8 | 49.3 / 65.8 / 65.8 |
+| 1.25MiB | 244.9 / 269 / 269 | 3404.1 / 3480.2 / 3480.2 | 1182.6 / 1209.7 / 1209.7 | 868.2 / 971.3 / 971.3 | 50.7 / 70.1 / 70.1 |
+| 2.5MiB | 484.8 / 492 / 492 | 18616.3 / 18948.1 / 18948.1 | 1812.8 / 1884.9 / 1884.9 | 1386.7 / 3689.4 / 3689.4 | 84.9 / 150 / 150 |
 
 ## 传输、内存与事件循环（p95）
 
 | HTML | request / response bytes | Bridge RSS delta MiB | renderer RSS delta MiB | renderer rAF gap ms | Bridge health-probe gap ms |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| 0.5MiB | 525242 / 526511 | 70.7 | 135.7 | 103 | 27.7 |
-| 1.25MiB | 1312508 / 1313777 | 97.3 | 190.3 | 234.6 | 55.7 |
-| 2.5MiB | 2624614 / 2625883 | 8.1 | 438 | 2486.4 | 84 |
+| 0.5MiB | 525242 / 526511 | 5.9 | 133.1 | 113.4 | 15 |
+| 1.25MiB | 1312508 / 1313777 | 7 | 177.3 | 232.3 | 32.9 |
+| 2.5MiB | 2624614 / 2625883 | 9.6 | 425.6 | 2485.1 | 97.4 |
 
 Bridge health-probe gap 是对独立 Bridge 进程可服务性的外部观测，不把它伪称为内部 event-loop profiler。renderer rAF gap 来自真实隐藏 Electron 窗口，并显式关闭 background throttling。
 
@@ -34,16 +34,16 @@ Bridge health-probe gap 是对独立 Bridge 进程可服务性的外部观测，
 
 | 指标 | 实测 p95 | 预算 | 结果 |
 | --- | ---: | ---: | --- |
-| Bridge transaction p95 | 530.9 ms | ≤500 ms | fail |
-| Electron autosave p95 | 20602.7 ms | ≤1250 ms | fail |
-| Dirty switch p95 | 1872.9 ms | ≤750 ms | fail |
-| Dirty close p95 | 1392 ms | ≤750 ms | fail |
-| Clean close p95 | 76 ms | ≤50 ms | fail |
-| Renderer event-loop gap p95 | 2486.4 ms | ≤50 ms | fail |
-| Bridge operation RSS delta p95 | 8.1 MiB | ≤32 MiB | pass |
-| Renderer operation RSS delta p95 | 438 MiB | ≤32 MiB | fail |
+| Bridge transaction p95 | 492 ms | ≤500 ms | pass |
+| Electron autosave p95 | 18948.1 ms | ≤1250 ms | fail |
+| Dirty switch p95 | 1884.9 ms | ≤750 ms | fail |
+| Dirty close p95 | 3689.4 ms | ≤750 ms | fail |
+| Clean close p95 | 150 ms | ≤50 ms | fail |
+| Renderer event-loop gap p95 | 2485.1 ms | ≤50 ms | fail |
+| Bridge operation RSS delta p95 | 9.6 MiB | ≤32 MiB | pass |
+| Renderer operation RSS delta p95 | 425.6 MiB | ≤32 MiB | fail |
 
-- Bridge warm RSS 严格单调增长：0.5MiB=no；1.25MiB=no；2.5MiB=no。
+- Bridge warm RSS 严格单调增长：0.5MiB=yes；1.25MiB=no；2.5MiB=no。
 
 ## 安全 oracle
 
