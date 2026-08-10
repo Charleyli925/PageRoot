@@ -521,6 +521,26 @@ test("accepted desktop results re-fence in renderer FIFO before publication", ()
   );
 });
 
+test("deferred renderer owners re-observe every deferred transition", () => {
+  const deferredRetry = section(
+    workbench,
+    "const pending = pendingProjectOpenRef.current;",
+    "  useEffect(() => {\n    if (\n      externalFileOpenSnapshot.status",
+  );
+  const dependencies = deferredRetry.slice(deferredRetry.lastIndexOf("}, ["));
+
+  assert.match(
+    dependencies,
+    /externalFileOpenSnapshot\.status,[\s\S]*?externalFileOpenSnapshot\.deferredSequence,/u,
+    "an external retry must rerun when a new deferred owner snapshot keeps the same status",
+  );
+  assert.match(
+    dependencies,
+    /projectApplicationSnapshot\.status,[\s\S]*?projectApplicationSnapshot\.deferredSequence,/u,
+    "an accepted-project retry must rerun when a new deferred owner snapshot keeps the same status",
+  );
+});
+
 test("desktop project opens publish successful FIFO predecessors", () => {
   const localOpen = section(
     workbench,
