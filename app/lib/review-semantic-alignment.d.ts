@@ -1,8 +1,12 @@
 export type ReviewSemanticAlignmentUnit = {
   kind: string;
   text?: string;
+  /** Only a unique, explicit identity may establish an identity pair. */
   stableId?: string | null;
+  /** Exact subtree/unit equality, not a durable identity. */
   exactSignature?: string | null;
+  /** Own non-presentation structure used only for compatible empty units. */
+  compatibilitySignature?: string | null;
   affinities?: readonly string[];
   parentKey?: string | null;
 };

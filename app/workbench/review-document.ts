@@ -20,7 +20,6 @@ import {
   mergeReviewTextRanges,
   readableReviewTextFootprintPlan,
   reviewSentenceRanges,
-  reviewTextSimilarity,
   sentenceAwareTextDifferences,
 } from "../lib/review-text-diff.js";
 import type {
@@ -28,7 +27,7 @@ import type {
   ReviewTextChangeScope,
 } from "../lib/review-text-diff.js";
 import {
-  appendReviewProjectionFact,
+  appendTrustedReviewProjectionFact,
   parseReviewProjectionFacts,
   serializeReviewProjectionFacts,
 } from "../lib/review-projection-facts.js";
@@ -539,20 +538,126 @@ const VISUAL_ATTRIBUTE_NAMES = new Set([
   "cellspacing",
   "class",
   "color",
+  "d",
   "data-state",
   "fill",
   "height",
   "hidden",
+  "marker-end",
+  "marker-mid",
+  "marker-start",
   "media",
+  "opacity",
+  "pathlength",
+  "points",
   "poster",
+  "preserveaspectratio",
+  "r",
+  "rx",
+  "ry",
   "sizes",
   "src",
   "srcset",
   "stroke",
   "style",
+  "transform",
   "valign",
+  "viewbox",
   "width",
+  "x",
+  "x1",
+  "x2",
+  "y",
+  "y1",
+  "y2",
 ]);
+
+const REVIEW_STABLE_IDENTITY_ATTRIBUTE_NAMES = new Set([
+  "id",
+  "data-test-module",
+  "data-native-case",
+  "data-section",
+  "data-page",
+  "data-p",
+  "data-tab",
+]);
+
+type ReviewAttributeRole = "stable-identity" | "structural" | "presentation" | "disposable";
+
+type ReviewSignatureCache = {
+  stableIdentity: WeakMap<Element, string | null>;
+  selfCompatibility: WeakMap<Element, string>;
+  exactSubtree: WeakMap<Element, string>;
+};
+
+function createReviewSignatureCache(): ReviewSignatureCache {
+  return {
+    stableIdentity: new WeakMap<Element, string | null>(),
+    selfCompatibility: new WeakMap<Element, string>(),
+    exactSubtree: new WeakMap<Element, string>(),
+  };
+}
+
+function reviewAttributeRole(attribute: Attr): ReviewAttributeRole {
+  const name = attribute.name.toLowerCase();
+  if (name.startsWith("data-pageroot-")) return "disposable";
+  if (REVIEW_STABLE_IDENTITY_ATTRIBUTE_NAMES.has(name)) return "stable-identity";
+  if (VISUAL_ATTRIBUTE_NAMES.has(name)) return "presentation";
+  return "structural";
+}
+
+function explicitStableElementIdentity(element: Element): string | null {
+  for (const name of [
+    "id",
+    "data-test-module",
+    "data-native-case",
+    "data-section",
+    "data-page",
+    "data-p",
+    "data-tab",
+  ]) {
+    const value = element.getAttribute(name)?.trim();
+    if (value) return `${name}:${value}`;
+  }
+  return null;
+}
+
+function stableElementIdentity(element: Element, signatures: ReviewSignatureCache): string | null {
+  const cached = signatures.stableIdentity.get(element);
+  if (cached !== undefined) return cached;
+  const value = explicitStableElementIdentity(element);
+  signatures.stableIdentity.set(element, value);
+  return value;
+}
+
+function selfCompatibilitySignature(element: Element, signatures: ReviewSignatureCache): string {
+  const cached = signatures.selfCompatibility.get(element);
+  if (cached !== undefined) return cached;
+  const attributes = [...element.attributes]
+    .filter((attribute) => {
+      const role = reviewAttributeRole(attribute);
+      return role === "stable-identity" || role === "structural";
+    })
+    .sort((left, right) => left.name.localeCompare(right.name))
+    .map((attribute) => `${attribute.name.toLowerCase()}=${attribute.value}`);
+  const value = [element.namespaceURI || "", element.localName.toLowerCase(), ...attributes]
+    .join("\u0000");
+  signatures.selfCompatibility.set(element, value);
+  return value;
+}
+
+function exactSubtreeSignature(element: Element, signatures: ReviewSignatureCache): string {
+  const cached = signatures.exactSubtree.get(element);
+  if (cached !== undefined) return cached;
+  const value = element.outerHTML
+    .replace(REVIEW_COMMENT_MARKUP_ATTRIBUTE_PATTERN, "")
+    .replace(/\sdata-pageroot-(?:review|ai-review|outline-id)[^=\s]*="[^"]*"/gu, "")
+    .replace(/\s+/gu, " ")
+    .replace(/>\s+</gu, "><")
+    .trim();
+  signatures.exactSubtree.set(element, value);
+  return value;
+}
 
 function normalizedCss(value: string): string {
   return value
@@ -1013,132 +1118,6 @@ function candidateSections(document: Document): Element[] {
   return regions;
 }
 
-function pairKey(element: Element): string | null {
-  if (element.id) return `id:${element.id}`;
-  for (const attribute of [
-    "data-test-module",
-    "data-native-case",
-    "data-section",
-    "data-page",
-    "data-p",
-    "data-tab",
-  ]) {
-    const value = element.getAttribute(attribute);
-    if (value) return `${attribute}:${value}`;
-  }
-  return null;
-}
-
-function regionContextKey(element: Element): string {
-  const panel = closestPanelContainer(element);
-  if (!panel) return "page";
-  const identity = panel.getAttribute("data-pageroot-review-panel-key")
-    || panel.id
-    || panel.getAttribute("data-page")
-    || panel.getAttribute("aria-label")
-    || classTokens(panel).join(".");
-  return `panel:${identity || "anonymous"}`;
-}
-
-function sectionPairScore(
-  before: Element,
-  after: Element,
-  beforeIndex: number,
-  afterIndex: number,
-): number {
-  if (before.tagName !== after.tagName) return Number.NEGATIVE_INFINITY;
-  const beforeKey = pairKey(before);
-  const afterKey = pairKey(after);
-  if (beforeKey || afterKey) {
-    return beforeKey && beforeKey === afterKey
-      ? 1_000 - Math.abs(beforeIndex - afterIndex)
-      : Number.NEGATIVE_INFINITY;
-  }
-
-  let score = 0;
-  const beforeContext = regionContextKey(before);
-  const afterContext = regionContextKey(after);
-  if (beforeContext !== afterContext) return Number.NEGATIVE_INFINITY;
-
-  const beforeClasses = new Set(classTokens(before));
-  const sharedClasses = classTokens(after).filter((token) => beforeClasses.has(token));
-  const distinctiveClasses = sharedClasses.filter((token) => ![
-    "active", "card", "col", "column", "container", "content", "grid", "item",
-    "main", "panel", "row", "section", "selected", "wrap", "wrapper",
-  ].includes(token));
-
-  const beforeHeading = conciseElementText(directHeading(before));
-  const afterHeading = conciseElementText(directHeading(after));
-  const headingMatches = Boolean(beforeHeading && beforeHeading === afterHeading);
-  const beforeText = normalizedText(before);
-  const afterText = normalizedText(after);
-  const exactText = Boolean(beforeText && beforeText === afterText);
-  const similarity = reviewTextSimilarity(beforeText, afterText);
-  const accessibleIdentity = ["aria-label", "data-title", "name", "title"].some((attribute) => {
-    const value = before.getAttribute(attribute)?.trim();
-    return Boolean(value && value === after.getAttribute(attribute)?.trim());
-  });
-  const hasEvidence = exactText
-    || headingMatches
-    || accessibleIdentity
-    || similarity >= .46
-    || (distinctiveClasses.length > 0 && similarity >= .2)
-    || (distinctiveClasses.length > 0 && !beforeText && !afterText);
-  if (!hasEvidence) return Number.NEGATIVE_INFINITY;
-
-  if (exactText) score += 220;
-  if (headingMatches) score += 130;
-  if (accessibleIdentity) score += 120;
-  score += Math.round(similarity * 100);
-  score += Math.min(48, distinctiveClasses.length * 16);
-  score += Math.max(0, 16 - Math.abs(beforeIndex - afterIndex) * 3);
-  return score;
-}
-
-function elementPairScore(
-  before: Element,
-  after: Element,
-  beforeIndex: number,
-  afterIndex: number,
-): number {
-  if (before.tagName !== after.tagName) return Number.NEGATIVE_INFINITY;
-  const beforeKey = pairKey(before);
-  const afterKey = pairKey(after);
-  if (beforeKey || afterKey) {
-    return beforeKey && beforeKey === afterKey
-      ? 1_000 - Math.abs(beforeIndex - afterIndex)
-      : Number.NEGATIVE_INFINITY;
-  }
-  if (normalizedMarkup(before) === normalizedMarkup(after)) {
-    return 800 - Math.abs(beforeIndex - afterIndex);
-  }
-  const beforeText = normalizedText(before);
-  const afterText = normalizedText(after);
-  const exactText = Boolean(beforeText && beforeText === afterText);
-  const similarity = reviewTextSimilarity(beforeText, afterText);
-  const beforeClasses = new Set(classTokens(before));
-  const sharedClasses = classTokens(after).filter((token) => beforeClasses.has(token));
-  const distinctiveClasses = sharedClasses.filter((token) => ![
-    "active", "card", "col", "column", "container", "content", "grid", "item",
-    "main", "panel", "row", "section", "selected", "wrap", "wrapper",
-  ].includes(token));
-  const sameIdentityAttribute = ["aria-label", "name", "title", "alt"].some((attribute) => {
-    const value = before.getAttribute(attribute)?.trim();
-    return Boolean(value && value === after.getAttribute(attribute)?.trim());
-  });
-  const hasEvidence = exactText
-    || sameIdentityAttribute
-    || similarity >= .52
-    || (distinctiveClasses.length > 0 && similarity >= .24)
-    || (distinctiveClasses.length > 0 && !beforeText && !afterText);
-  if (!hasEvidence) return Number.NEGATIVE_INFINITY;
-  return (exactText ? 260 : 0)
-    + (sameIdentityAttribute ? 180 : 0)
-    + Math.round(similarity * 100)
-    + Math.min(60, distinctiveClasses.length * 20)
-    + Math.max(0, 16 - Math.abs(beforeIndex - afterIndex) * 2);
-}
-
 type SectionPair = {
   before: Element | null;
   after: Element | null;
@@ -1147,154 +1126,24 @@ type SectionPair = {
   moved?: boolean;
 };
 
-function uniqueSignatureMap<T>(
-  items: T[],
-  signature: (item: T) => string | null,
-): Map<string, T | null> {
-  const result = new Map<string, T | null>();
-  items.forEach((item) => {
-    const key = signature(item);
-    if (!key) return;
-    result.set(key, result.has(key) ? null : item);
-  });
-  return result;
-}
-
-function markMovedPairs(pairs: SectionPair[]): SectionPair[] {
-  const matched = pairs.filter((pair) => pair.before && pair.after);
-  const beforeOrder = [...matched].sort((left, right) => left.beforeIndex - right.beforeIndex);
-  const afterOrder = [...matched].sort((left, right) => left.afterIndex - right.afterIndex);
-  const afterRank = new Map(afterOrder.map((pair, index) => [pair, index]));
-  beforeOrder.forEach((pair, index) => {
-    pair.moved = afterRank.get(pair) !== index;
-  });
-  return pairs;
-}
-
 function pairSections(before: Element[], after: Element[]): SectionPair[] {
-  const assignments = new Map<Element, Element>();
-  const usedAfter = new Set<Element>();
-  const afterByKey = new Map<string, Element | null>();
-  const afterIndexByElement = new Map(
-    after.map((element, index) => [element, index]),
-  );
-  after.forEach((element) => {
-    const key = pairKey(element);
-    if (!key) return;
-    afterByKey.set(key, afterByKey.has(key) ? null : element);
-  });
-
-  before.forEach((beforeElement) => {
-    const key = pairKey(beforeElement);
-    const afterElement = key ? afterByKey.get(key) || null : null;
-    if (!afterElement || usedAfter.has(afterElement)) return;
-    assignments.set(beforeElement, afterElement);
-    usedAfter.add(afterElement);
-  });
-
-  const exactSectionSignature = (element: Element) => (
-    pairKey(element)
-      ? null
-      : `${element.tagName}\u0000${regionContextKey(element)}\u0000${normalizedMarkup(element)}`
-  );
-  const uniqueBeforeMarkup = uniqueSignatureMap(before, exactSectionSignature);
-  const uniqueAfterMarkup = uniqueSignatureMap(after, exactSectionSignature);
-  uniqueBeforeMarkup.forEach((beforeElement, signature) => {
-    const afterElement = uniqueAfterMarkup.get(signature);
-    if (
-      !beforeElement
-      || !afterElement
-      || assignments.has(beforeElement)
-      || usedAfter.has(afterElement)
-    ) return;
-    assignments.set(beforeElement, afterElement);
-    usedAfter.add(afterElement);
-  });
-
-  const stableSectionSignature = (element: Element) => {
-    if (pairKey(element)) return null;
-    const accessibleIdentity = ["aria-label", "data-title", "name", "title"]
-      .map((attribute) => element.getAttribute(attribute)?.trim() || "")
-      .filter(Boolean);
-    const heading = conciseElementText(directHeading(element));
-    const distinctiveClasses = classTokens(element).filter((token) => ![
-      "active", "card", "col", "column", "container", "content", "grid", "item",
-      "main", "panel", "row", "section", "selected", "wrap", "wrapper",
-    ].includes(token));
-    if (!accessibleIdentity.length && !heading && !distinctiveClasses.length) {
-      return null;
-    }
-    return [
-      element.tagName,
-      regionContextKey(element),
-      accessibleIdentity.join("\u001f"),
-      heading,
-      distinctiveClasses.sort().join("\u001f"),
-    ].join("\u0000");
+  const signatures = createReviewSignatureCache();
+  const parentKey = (element: Element) => {
+    const parent = element.parentElement;
+    return parent
+      ? `section-parent:${selfCompatibilitySignature(parent, signatures)}`
+      : "section-document";
   };
-  const uniqueBeforeIdentity = uniqueSignatureMap(
-    before.filter((element) => !assignments.has(element)),
-    stableSectionSignature,
-  );
-  const uniqueAfterIdentity = uniqueSignatureMap(
-    after.filter((element) => !usedAfter.has(element)),
-    stableSectionSignature,
-  );
-  uniqueBeforeIdentity.forEach((beforeElement, signature) => {
-    const afterElement = uniqueAfterIdentity.get(signature);
-    if (!beforeElement || !afterElement) return;
-    assignments.set(beforeElement, afterElement);
-    usedAfter.add(afterElement);
-  });
-
-  const afterBuckets = new Map<string, Element[]>();
-  after.forEach((afterElement) => {
-    if (pairKey(afterElement) || usedAfter.has(afterElement)) return;
-    const bucketKey = `${afterElement.tagName}\u0000${regionContextKey(afterElement)}`;
-    const bucket = afterBuckets.get(bucketKey) ?? [];
-    bucket.push(afterElement);
-    afterBuckets.set(bucketKey, bucket);
-  });
-  const edges = before.flatMap((beforeElement, beforeIndex) => (
-    assignments.has(beforeElement) || pairKey(beforeElement)
-      ? []
-      : (afterBuckets.get(
-          `${beforeElement.tagName}\u0000${regionContextKey(beforeElement)}`,
-        ) ?? []).map((afterElement) => ({
-        beforeElement,
-        afterElement,
-        score: sectionPairScore(
-          beforeElement,
-          afterElement,
-          beforeIndex,
-          afterIndexByElement.get(afterElement) ?? -1,
-        ),
-      }))
-  )).filter((edge) => Number.isFinite(edge.score))
-    .sort((left, right) => right.score - left.score);
-  edges.forEach(({ beforeElement, afterElement }) => {
-    if (assignments.has(beforeElement) || usedAfter.has(afterElement)) return;
-    assignments.set(beforeElement, afterElement);
-    usedAfter.add(afterElement);
-  });
-
-  const pairs: SectionPair[] = before.map((beforeElement, index) => {
-    const afterElement = assignments.get(beforeElement) || null;
-    return {
-      before: beforeElement,
-      after: afterElement,
-      beforeIndex: index,
-      afterIndex: afterElement
-        ? afterIndexByElement.get(afterElement) ?? -1
-        : -1,
-    };
-  });
-  after.forEach((afterElement, index) => {
-    if (!usedAfter.has(afterElement)) {
-      pairs.push({ before: null, after: afterElement, beforeIndex: -1, afterIndex: index });
-    }
-  });
-  return markMovedPairs(pairs);
+  return alignReviewSemanticUnits(
+    before.map((element) => visualElementDescriptor(element, parentKey(element), signatures)),
+    after.map((element) => visualElementDescriptor(element, parentKey(element), signatures)),
+  ).map((pair) => ({
+    before: pair.beforeIndex === null ? null : before[pair.beforeIndex],
+    after: pair.afterIndex === null ? null : after[pair.afterIndex],
+    beforeIndex: pair.beforeIndex ?? -1,
+    afterIndex: pair.afterIndex ?? -1,
+    ...(pair.moved ? { moved: true } : {}),
+  }));
 }
 
 type ReviewBootstrapElementBinding = {
@@ -1749,6 +1598,7 @@ type ReviewSemanticPairNode = {
 
 type ReviewSemanticPairGraph = {
   root: ReviewSemanticPairNode;
+  signatures: ReviewSignatureCache;
 };
 
 const REVIEW_LEAF_TEXT_OWNER_TAGS = new Set([
@@ -1807,30 +1657,6 @@ const REVIEW_ATOMIC_CONTENT_TAGS = new Set([
 function isReviewAtomicContentElement(element: Element): boolean {
   return element.namespaceURI !== "http://www.w3.org/1999/xhtml"
     || REVIEW_ATOMIC_CONTENT_TAGS.has(element.tagName);
-}
-
-function atomicContentSemanticSignature(element: Element): string | null {
-  const identityAttributes = [...element.attributes]
-    .filter((attribute) => (
-      !VISUAL_ATTRIBUTE_NAMES.has(attribute.name.toLowerCase())
-      && !attribute.name.startsWith("data-pageroot-review-")
-      && (
-        attribute.value.trim().length > 0
-        // A present authored data attribute is an intentional, stable
-        // identity even when written in HTML boolean form (`data-key`).
-        || attribute.name.startsWith("data-")
-      )
-    ))
-    .sort((left, right) => left.name.localeCompare(right.name))
-    .map((attribute) => `${attribute.name.toLowerCase()}=${attribute.value}`);
-  // A bare tag is not a high-confidence identity. Let repeated or anonymous
-  // media remain unmatched rather than guessing that a replacement is a move.
-  if (!identityAttributes.length) return null;
-  return [
-    element.namespaceURI || "",
-    element.localName.toLowerCase(),
-    ...identityAttributes,
-  ].join("\u0000");
 }
 
 function atomicContentSemanticUnit(element: Element): ReviewSemanticUnit {
@@ -2035,7 +1861,11 @@ function semanticUnitText(unit: ReviewSemanticUnit): string {
   return normalizedText(unit.element);
 }
 
-function semanticUnitDescriptor(unit: ReviewSemanticUnit, parentKey: string) {
+function semanticUnitDescriptor(
+  unit: ReviewSemanticUnit,
+  parentKey: string,
+  signatures: ReviewSignatureCache,
+) {
   const logicalCell = unit.kind === "table-cell"
     ? `:${unit.element.tagName}:${unit.columnStart ?? -1}:${unit.columnSpan ?? 1}`
     : `:${unit.element.tagName}`;
@@ -2044,16 +1874,21 @@ function semanticUnitDescriptor(unit: ReviewSemanticUnit, parentKey: string) {
     ? text.match(NUMBERED_TEXT_LINE_PATTERN)?.[0]?.trim() || ""
     : "";
   const ownsElementIdentity = unit.kind !== "direct-flow" && unit.kind !== "br-line";
-  const atomicSignature = unit.kind === "atomic-content"
-    ? atomicContentSemanticSignature(unit.element)
+  const textExactSignature = text
+    ? `${unit.kind}\u0000${logicalCell}\u0000${text}`
     : null;
+  const exactSignature = unit.kind === "direct-flow" || unit.kind === "br-line"
+    ? textExactSignature
+    : `${unit.kind}\u0000${logicalCell}\u0000${exactSubtreeSignature(unit.element, signatures)}`;
   return {
     kind: `${unit.kind}${logicalCell}`,
     text,
-    stableId: ownsElementIdentity ? pairKey(unit.element) : null,
-    exactSignature: atomicSignature
-      ? `${unit.kind}\u0000${logicalCell}\u0000${atomicSignature}`
-      : text ? `${unit.kind}\u0000${logicalCell}\u0000${text}` : null,
+    stableId: ownsElementIdentity ? stableElementIdentity(unit.element, signatures) : null,
+    exactSignature,
+    compatibilitySignature: `${unit.kind}\u0000${logicalCell}\u0000${selfCompatibilitySignature(
+      unit.element,
+      signatures,
+    )}`,
     affinities: [
       ...classTokens(unit.element).filter((token) => !GENERIC_REVIEW_TEXT_CLASSES.has(token)),
       ...(numberedPrefix ? [`number:${numberedPrefix}`] : []),
@@ -2078,6 +1913,7 @@ function sameLogicalCellPattern(
 function* buildReviewSemanticPairGraphSteps(
   pair: SectionPair,
 ): Generator<"semantic-row", ReviewSemanticPairGraph, void> {
+  const signatures = createReviewSignatureCache();
   let semanticOwnerSequence = 0;
   let geometryOwnerSequence = 0;
   let parentSequence = 0;
@@ -2156,8 +1992,8 @@ function* buildReviewSemanticPairGraphSteps(
     }
     const parentKey = `semantic-parent-${++parentSequence}`;
     const aligned = alignReviewSemanticUnits(
-      before.children.map((unit) => semanticUnitDescriptor(unit, parentKey)),
-      after.children.map((unit) => semanticUnitDescriptor(unit, parentKey)),
+      before.children.map((unit) => semanticUnitDescriptor(unit, parentKey, signatures)),
+      after.children.map((unit) => semanticUnitDescriptor(unit, parentKey, signatures)),
     );
     for (const childPair of aligned) {
       node.children.push(yield* createPair(
@@ -2187,6 +2023,7 @@ function* buildReviewSemanticPairGraphSteps(
       beforeRoot && afterRoot ? "weighted" : "unmatched",
       Boolean(pair.moved),
     ),
+    signatures,
   };
 }
 
@@ -2342,103 +2179,65 @@ function selfPresentationSignature(element: Element): string {
   return elementVisualSignature(element);
 }
 
-function visualPairKey(element: Element): string | null {
-  const explicitKey = pairKey(element);
-  if (explicitKey) return `${element.tagName}:${explicitKey}`;
-  for (const attribute of ["name", "aria-label", "alt", "title"]) {
-    const value = element.getAttribute(attribute)?.trim();
-    if (value) return `${element.tagName}:${attribute}:${value}`;
-  }
-  const text = element.childElementCount <= 3
-    ? (element.textContent || "").replace(/\s+/g, " ").trim()
-    : "";
-  if (text && text.length <= 80) return `${element.tagName}:text:${text}`;
-  return null;
+function visualElementDescriptor(
+  element: Element,
+  parentKey: string,
+  signatures: ReviewSignatureCache,
+) {
+  return {
+    kind: `${element.namespaceURI || ""}:${element.localName.toLowerCase()}`,
+    text: normalizedText(element),
+    stableId: stableElementIdentity(element, signatures),
+    exactSignature: exactSubtreeSignature(element, signatures),
+    compatibilitySignature: selfCompatibilitySignature(element, signatures),
+    parentKey,
+  };
 }
 
-function pairVisualElements(
+/**
+ * Element-level visual analysis deliberately shares the semantic matching
+ * kernel. It only ever receives direct children of an already paired parent,
+ * so it cannot turn an unrelated page descendant into a visual counterpart.
+ */
+function alignElementSiblings(
+  before: Element[],
+  after: Element[],
+  signatures: ReviewSignatureCache,
+): Map<Element, Element> {
+  const parentKey = "paired-element-siblings";
+  const assignments = new Map<Element, Element>();
+  const pairs = alignReviewSemanticUnits(
+    before.map((element) => visualElementDescriptor(element, parentKey, signatures)),
+    after.map((element) => visualElementDescriptor(element, parentKey, signatures)),
+  );
+  pairs.forEach((pair) => {
+    if (pair.beforeIndex === null || pair.afterIndex === null) return;
+    assignments.set(before[pair.beforeIndex], after[pair.afterIndex]);
+  });
+  return assignments;
+}
+
+function pairedVisualElements(
   beforeRoot: Element,
   afterRoot: Element,
+  signatures: ReviewSignatureCache,
 ): Array<{ before: Element; after: Element }> {
-  const beforeElements = [beforeRoot, ...beforeRoot.querySelectorAll("*")].slice(0, 501);
-  const afterElements = [afterRoot, ...afterRoot.querySelectorAll("*")].slice(0, 501);
-  const afterIndexByElement = new Map(
-    afterElements.map((element, index) => [element, index]),
-  );
-  const afterBuckets = new Map<string, Element[]>();
-  afterElements.forEach((element) => {
-    const key = visualPairKey(element);
-    if (!key) return;
-    const bucket = afterBuckets.get(key) || [];
-    bucket.push(element);
-    afterBuckets.set(key, bucket);
-  });
-  const usedAfter = new Set<Element>();
-  const assignments = new Map<Element, Element>();
-  beforeElements.forEach((beforeElement) => {
-    const key = visualPairKey(beforeElement);
-    const keyed = key && afterBuckets.get(key)?.length === 1
-      ? afterBuckets.get(key)?.[0] || null
-      : null;
-    if (!keyed || usedAfter.has(keyed)) return;
-    assignments.set(beforeElement, keyed);
-    usedAfter.add(keyed);
-  });
-
-  const compatibleIdentity = (element: Element) => {
-    const identity = pairKey(element);
-    return `${element.tagName}\u0000${identity ? `key:${identity}` : "unkeyed"}`;
-  };
-  const exactMarkupSignature = (element: Element) => (
-    `${compatibleIdentity(element)}\u0000${normalizedMarkup(element)}`
-  );
-  const uniqueBeforeMarkup = uniqueSignatureMap(
-    beforeElements.filter((element) => !assignments.has(element)),
-    exactMarkupSignature,
-  );
-  const uniqueAfterMarkup = uniqueSignatureMap(
-    afterElements.filter((element) => !usedAfter.has(element)),
-    exactMarkupSignature,
-  );
-  uniqueBeforeMarkup.forEach((beforeElement, signature) => {
-    const afterElement = uniqueAfterMarkup.get(signature);
-    if (!beforeElement || !afterElement) return;
-    assignments.set(beforeElement, afterElement);
-    usedAfter.add(afterElement);
-  });
-  const compatibleAfterBuckets = new Map<string, Element[]>();
-  afterElements.forEach((afterElement) => {
-    if (usedAfter.has(afterElement)) return;
-    const key = compatibleIdentity(afterElement);
-    const bucket = compatibleAfterBuckets.get(key) ?? [];
-    bucket.push(afterElement);
-    compatibleAfterBuckets.set(key, bucket);
-  });
-  const edges = beforeElements.flatMap((beforeElement, beforeIndex) => (
-    assignments.has(beforeElement)
-      ? []
-      : (compatibleAfterBuckets.get(compatibleIdentity(beforeElement)) ?? [])
-        .map((afterElement) => ({
-        beforeElement,
-        afterElement,
-        score: elementPairScore(
-          beforeElement,
-          afterElement,
-          beforeIndex,
-          afterIndexByElement.get(afterElement) ?? -1,
-        ),
-      }))
-  )).filter((edge) => Number.isFinite(edge.score))
-    .sort((left, right) => right.score - left.score);
-  edges.forEach(({ beforeElement, afterElement }) => {
-    if (assignments.has(beforeElement) || usedAfter.has(afterElement)) return;
-    assignments.set(beforeElement, afterElement);
-    usedAfter.add(afterElement);
-  });
-  return [...assignments].map(([beforeElement, afterElement]) => ({
-    before: beforeElement,
-    after: afterElement,
-  }));
+  const pairs: Array<{ before: Element; after: Element }> = [{
+    before: beforeRoot,
+    after: afterRoot,
+  }];
+  for (let cursor = 0; cursor < pairs.length; cursor += 1) {
+    const pair = pairs[cursor];
+    const siblings = alignElementSiblings(
+      [...pair.before.children],
+      [...pair.after.children],
+      signatures,
+    );
+    siblings.forEach((afterElement, beforeElement) => {
+      pairs.push({ before: beforeElement, after: afterElement });
+    });
+  }
+  return pairs;
 }
 
 function semanticElementName(element: Element): string {
@@ -2459,16 +2258,11 @@ type StructureDifferenceStats = {
   replaced: string[];
 };
 
-function structuralSelfSignature(element: Element): string {
-  return [element.tagName.toLowerCase(), ...[...element.attributes]
-    .filter((attribute) => (
-      !VISUAL_ATTRIBUTE_NAMES.has(attribute.name.toLowerCase())
-      && !attribute.name.startsWith("data-pageroot-review-")
-      && attribute.name !== "data-pageroot-outline-id"
-    ))
-    .sort((left, right) => left.name.localeCompare(right.name))
-    .map((attribute) => `${attribute.name}=${attribute.value}`)]
-    .join("|");
+function structuralSelfSignature(
+  element: Element,
+  signatures: ReviewSignatureCache,
+): string {
+  return selfCompatibilitySignature(element, signatures);
 }
 
 function markStructureElement(element: Element, tone: string, semanticOwnerId: string) {
@@ -2476,102 +2270,58 @@ function markStructureElement(element: Element, tone: string, semanticOwnerId: s
   element.setAttribute("data-pageroot-review-semantic-owner", semanticOwnerId);
 }
 
-function pairSiblingElements(before: Element[], after: Element[]): Map<Element, Element> {
-  const assignments = new Map<Element, Element>();
-  const usedAfter = new Set<Element>();
-  const compatibleIdentity = (element: Element) => {
-    const identity = pairKey(element);
-    return `${element.tagName}\u0000${identity ? `key:${identity}` : "unkeyed"}`;
-  };
-  const exactMarkupSignature = (element: Element) => (
-    `${compatibleIdentity(element)}\u0000${normalizedMarkup(element)}`
-  );
-  const uniqueBeforeMarkup = uniqueSignatureMap(before, exactMarkupSignature);
-  const uniqueAfterMarkup = uniqueSignatureMap(after, exactMarkupSignature);
-  uniqueBeforeMarkup.forEach((beforeElement, signature) => {
-    const afterElement = uniqueAfterMarkup.get(signature);
-    if (!beforeElement || !afterElement) return;
-    assignments.set(beforeElement, afterElement);
-    usedAfter.add(afterElement);
-  });
-  const afterIndexByElement = new Map(
-    after.map((element, index) => [element, index]),
-  );
-  const afterBuckets = new Map<string, Element[]>();
-  after.forEach((afterElement) => {
-    if (usedAfter.has(afterElement)) return;
-    const key = compatibleIdentity(afterElement);
-    const bucket = afterBuckets.get(key) ?? [];
-    bucket.push(afterElement);
-    afterBuckets.set(key, bucket);
-  });
-  const edges = before.flatMap((beforeElement, beforeIndex) => (
-    assignments.has(beforeElement)
-      ? []
-      : (afterBuckets.get(compatibleIdentity(beforeElement)) ?? [])
-        .map((afterElement) => ({
-          beforeElement,
-          afterElement,
-          score: elementPairScore(
-            beforeElement,
-            afterElement,
-            beforeIndex,
-            afterIndexByElement.get(afterElement) ?? -1,
-          ),
-        }))
-  )).filter((edge) => Number.isFinite(edge.score))
-    .sort((left, right) => right.score - left.score);
-  edges.forEach(({ beforeElement, afterElement }) => {
-    if (assignments.has(beforeElement) || usedAfter.has(afterElement)) return;
-    assignments.set(beforeElement, afterElement);
-    usedAfter.add(afterElement);
-  });
-  return assignments;
-}
-
-function markStructureDifferences(graph: ReviewSemanticPairGraph): boolean {
+function* markStructureDifferenceSteps(
+  graph: ReviewSemanticPairGraph,
+): Generator<"semantic-row", boolean, void> {
   const stats: StructureDifferenceStats = { added: [], removed: [], moved: [], replaced: [] };
+  const pending = [graph.root];
   let inspected = 0;
-  const compare = (pair: ReviewSemanticPairNode, depth: number) => {
-    if (depth > 12 || inspected >= 800) return;
+  while (pending.length) {
+    const pair = pending.pop()!;
     inspected += 1;
     const beforeElement = pair.before?.element || null;
     const afterElement = pair.after?.element || null;
     if (!beforeElement && afterElement) {
       markStructureElement(afterElement, "added", pair.semanticOwnerId);
       stats.added.push(semanticElementName(afterElement));
-      return;
-    }
-    if (beforeElement && !afterElement) {
+    } else if (beforeElement && !afterElement) {
       markStructureElement(beforeElement, "removed", pair.semanticOwnerId);
       stats.removed.push(semanticElementName(beforeElement));
-      return;
+    } else if (beforeElement && afterElement && pair.before && pair.after) {
+      if (pair.moved) {
+        markStructureElement(beforeElement, "from", pair.semanticOwnerId);
+        markStructureElement(afterElement, "to", pair.semanticOwnerId);
+        stats.moved.push(semanticElementName(afterElement));
+      }
+      // Equality is a subtree property. A mismatch only tells us to continue
+      // through the already paired hierarchy; it never turns the ancestor
+      // itself into a structural replacement.
+      if (exactSubtreeSignature(beforeElement, graph.signatures)
+        !== exactSubtreeSignature(afterElement, graph.signatures)) {
+        if (pair.structureFallback) {
+          markStructureElement(beforeElement, "before", pair.semanticOwnerId);
+          markStructureElement(afterElement, "after", pair.semanticOwnerId);
+          stats.replaced.push(semanticElementName(afterElement));
+        } else {
+          const ownsStructuralElement = pair.before.kind !== "direct-flow"
+            && pair.before.kind !== "br-line";
+          if (
+            ownsStructuralElement
+            && structuralSelfSignature(beforeElement, graph.signatures)
+              !== structuralSelfSignature(afterElement, graph.signatures)
+          ) {
+            markStructureElement(beforeElement, "before", pair.semanticOwnerId);
+            markStructureElement(afterElement, "after", pair.semanticOwnerId);
+            stats.replaced.push(semanticElementName(afterElement));
+          }
+          for (let index = pair.children.length - 1; index >= 0; index -= 1) {
+            pending.push(pair.children[index]);
+          }
+        }
+      }
     }
-    if (!beforeElement || !afterElement || !pair.before || !pair.after) return;
-    if (pair.moved) {
-      markStructureElement(beforeElement, "from", pair.semanticOwnerId);
-      markStructureElement(afterElement, "to", pair.semanticOwnerId);
-      stats.moved.push(semanticElementName(afterElement));
-    }
-    if (pair.structureFallback) {
-      markStructureElement(beforeElement, "before", pair.semanticOwnerId);
-      markStructureElement(afterElement, "after", pair.semanticOwnerId);
-      stats.replaced.push(semanticElementName(afterElement));
-      return;
-    }
-    const ownsStructuralElement = pair.before.kind !== "direct-flow"
-      && pair.before.kind !== "br-line";
-    if (
-      ownsStructuralElement
-      && structuralSelfSignature(beforeElement) !== structuralSelfSignature(afterElement)
-    ) {
-      markStructureElement(beforeElement, "before", pair.semanticOwnerId);
-      markStructureElement(afterElement, "after", pair.semanticOwnerId);
-      stats.replaced.push(semanticElementName(afterElement));
-    }
-    pair.children.forEach((child) => compare(child, depth + 1));
-  };
-  compare(graph.root, 0);
+    if (inspected % 24 === 0) yield "semantic-row";
+  }
   return Object.values(stats).some((entries) => entries.length > 0);
 }
 
@@ -2654,7 +2404,7 @@ function appendProjectionFactToElement(
   element: Element,
   fact: ReviewProjectionFact,
 ) {
-  const facts = appendReviewProjectionFact(reviewProjectionFactsForElement(element), fact);
+  const facts = appendTrustedReviewProjectionFact(reviewProjectionFactsForElement(element), fact);
   element.setAttribute(REVIEW_PROJECTION_FACTS_ATTRIBUTE, serializeReviewProjectionFacts(facts));
 }
 
@@ -2807,12 +2557,17 @@ function semanticStylePairs(graph: ReviewSemanticPairGraph): Array<{
           return elements;
         }) || [],
       )];
-      pairSiblingElements(
+      alignElementSiblings(
         inlineElements(pair.before),
         inlineElements(pair.after),
+        graph.signatures,
       ).forEach((afterElement, beforeElement) => add(beforeElement, afterElement));
     } else if (pair.children.length === 0) {
-      pairVisualElements(pair.before.element, pair.after.element).forEach((visualPair) => {
+      pairedVisualElements(
+        pair.before.element,
+        pair.after.element,
+        graph.signatures,
+      ).forEach((visualPair) => {
         add(visualPair.before, visualPair.after);
       });
     }
@@ -2901,7 +2656,6 @@ function markStyleDifferences(
       pair.semanticOwnerId,
       pair.geometryOwnerId,
     );
-    if (marked >= 40) break;
   }
   const changedRules = changedStylesheetSelectors(before.ownerDocument, after.ownerDocument);
   changedRules.forEach(({ selector, labels }) => {
@@ -2911,7 +2665,6 @@ function markStyleDifferences(
       const afterMatches = new Set(elementsMatchingSelector(after, part));
       boundedPairs
         .filter((pair) => beforeMatches.has(pair.before) && afterMatches.has(pair.after))
-        .slice(0, 40)
         .forEach((pair) => {
           markPair(pair.before, pair.after, scope, pair.semanticOwnerId, pair.geometryOwnerId);
         });
@@ -2956,14 +2709,14 @@ function semanticLayoutPairs(graph: ReviewSemanticPairGraph): ReviewSemanticPair
   });
 }
 
-function changeTypesForSemanticGraph(
+function* changeTypesForSemanticGraphSteps(
   graph: ReviewSemanticPairGraph,
-): ReviewChangeType[] {
+): Generator<"semantic-row", ReviewChangeType[], void> {
   // Style inspection still runs against the unwrapped source DOM. The same
   // layout planner identifies visual-only pairs first; text marking consumes
   // it again below to avoid fabricating red/green evidence.
   const layoutPairs = semanticLayoutPairs(graph);
-  const structureChanged = markStructureDifferences(graph);
+  const structureChanged = yield* markStructureDifferenceSteps(graph);
   const styleChanged = markStyleDifferences(graph, layoutPairs);
   const textMarking = markSemanticTextDifferences(graph);
   return [
@@ -2977,7 +2730,7 @@ function* annotateChangePairSteps(
   pair: SectionPair,
 ): Generator<"semantic-row", ReviewChangeType[], void> {
   const graph = yield* buildReviewSemanticPairGraphSteps(pair);
-  return changeTypesForSemanticGraph(graph);
+  return yield* changeTypesForSemanticGraphSteps(graph);
 }
 
 function attachChangeMarkerMetadata(
@@ -3032,7 +2785,7 @@ function attachChangeMarkerMetadata(
         const geometryOwnerId = element.getAttribute("data-pageroot-review-geometry-owner") || "";
         const textGroup = element.getAttribute("data-pageroot-review-text-group")
           || `text-marker-${index + 1}`;
-        facts = appendReviewProjectionFact(facts, {
+        facts = appendTrustedReviewProjectionFact(facts, {
           id: textGroup,
           type: "text",
           semanticOwnerId,
@@ -3053,7 +2806,7 @@ function attachChangeMarkerMetadata(
           || `fallback-owner-${changeId}-structure-${index + 1}`;
         const geometryOwnerId = element.getAttribute("data-pageroot-review-geometry-owner") || "";
         const structureChange = element.getAttribute("data-pageroot-review-structure") || "changed";
-        facts = appendReviewProjectionFact(facts, {
+        facts = appendTrustedReviewProjectionFact(facts, {
           id: `structure-${semanticOwnerId}-${structureChange}`,
           type: "structure",
           semanticOwnerId,

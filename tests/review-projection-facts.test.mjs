@@ -3,7 +3,10 @@ import test from "node:test";
 
 import {
   appendReviewProjectionFact,
+  appendTrustedReviewProjectionFact,
   parseReviewProjectionFacts,
+  ReviewProjectionFactOverflowError,
+  REVIEW_PROJECTION_FACTS_PER_ELEMENT_LIMIT,
   reviewProjectionFactKey,
   reviewProjectionFactsCanMerge,
   reviewProjectionFactsForFilter,
@@ -78,4 +81,25 @@ test("malformed serialized facts fail closed without creating a projection recor
     type: "style",
     semanticOwnerId: "semantic-owner-4",
   }])), []);
+});
+
+test("trusted analysis fails explicitly instead of silently dropping a twenty-fifth fact", () => {
+  const facts = Array.from({ length: REVIEW_PROJECTION_FACTS_PER_ELEMENT_LIMIT }, (_, index) => ({
+    ...boxStyle,
+    id: `style-owner-${index + 1}`,
+    ownerKey: `style-owner-${index + 1}`,
+  })).reduce((current, fact) => appendTrustedReviewProjectionFact(current, fact), []);
+  const overflow = {
+    ...boxStyle,
+    id: "style-owner-overflow",
+    ownerKey: "style-owner-overflow",
+  };
+
+  assert.equal(facts.length, REVIEW_PROJECTION_FACTS_PER_ELEMENT_LIMIT);
+  assert.throws(
+    () => appendTrustedReviewProjectionFact(facts, overflow),
+    ReviewProjectionFactOverflowError,
+  );
+  assert.equal(appendReviewProjectionFact(facts, overflow).length, facts.length);
+  assert.deepEqual(parseReviewProjectionFacts(JSON.stringify([...facts, overflow])), []);
 });

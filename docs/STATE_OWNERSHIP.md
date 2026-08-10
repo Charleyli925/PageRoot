@@ -156,7 +156,12 @@ Rules:
   offsets may annotate the disposable prepared
   documents so the projection can group one frozen review result, but they have
   no database, source, Version, comment locator, Bridge or IPC authority and
-  are discarded with that review session or its bounded cache entry.
+  are discarded with that review session or its bounded cache entry. Its
+  analysis-local signatures distinguish unique explicit identity, exact subtree
+  equality and own non-presentation compatibility; a deep child change cannot
+  unpair a stable ancestor, and an ambiguous empty sibling never gains a
+  positional identity. Trusted fact generation reports an overflow instead of
+  silently publishing a partial fact set.
 - The Review runtime-snapshot path starts only from source-backed candidates:
   direct Canvas/SVG roots or source-empty stable hosts paired by
   `SourceHostResolver`. It never derives candidates from scripts, comment

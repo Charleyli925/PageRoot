@@ -81,6 +81,54 @@ test("units from different parent keys never pair", () => {
   assert.equal(matchedPairs(pairs).length, 0);
 });
 
+test("a unique empty atomic unit pairs only through its self compatibility signature", () => {
+  const pairs = alignReviewSemanticUnits(
+    [unit("", {
+      kind: "atomic-content:CANVAS",
+      compatibilitySignature: "html\u0000canvas\u0000aria-label=趋势图",
+    })],
+    [unit("", {
+      kind: "atomic-content:CANVAS",
+      compatibilitySignature: "html\u0000canvas\u0000aria-label=趋势图",
+    })],
+  );
+
+  assert.deepEqual(matchedPairs(pairs).map(({ beforeIndex, afterIndex, match }) => (
+    { beforeIndex, afterIndex, match }
+  )), [{ beforeIndex: 0, afterIndex: 0, match: "weighted" }]);
+});
+
+test("empty visual units with a different compatibility signature stay unmatched", () => {
+  const pairs = alignReviewSemanticUnits(
+    [unit("", {
+      kind: "atomic-content:SVG",
+      compatibilitySignature: "svg\u0000svg\u0000role=img",
+    })],
+    [unit("", {
+      kind: "atomic-content:SVG",
+      compatibilitySignature: "svg\u0000svg\u0000role=presentation",
+    })],
+  );
+
+  assert.equal(matchedPairs(pairs).length, 0);
+  assert.deepEqual(unmatchedAfter(pairs), [0]);
+});
+
+test("repeated empty class-only nodes remain unmatched instead of becoming positional pairs", () => {
+  const repeated = () => unit("", {
+    kind: "container:DIV",
+    compatibilitySignature: "html\u0000div",
+  });
+  const pairs = alignReviewSemanticUnits(
+    [repeated(), repeated()],
+    [repeated(), repeated()],
+  );
+
+  assert.equal(matchedPairs(pairs).length, 0);
+  assert.equal(pairs.filter((pair) => pair.beforeIndex === null).length, 2);
+  assert.equal(pairs.filter((pair) => pair.afterIndex === null).length, 2);
+});
+
 test("only a unique stable identity can establish an explicit move", () => {
   const before = [
     unit("项目甲", { stableId: "a" }),
@@ -90,9 +138,23 @@ test("only a unique stable identity can establish an explicit move", () => {
   const after = [before[1], before[0], before[2]];
   const pairs = alignReviewSemanticUnits(before, after);
 
-  assert.ok(matchedPairs(pairs).some((pair) => pair.moved));
-  assert.ok(matchedPairs(pairs).filter((pair) => pair.moved)
-    .every((pair) => pair.match === "stable-id"));
+  assert.deepEqual(
+    matchedPairs(pairs).filter((pair) => pair.moved).map((pair) => (
+      [pair.beforeIndex, pair.afterIndex, pair.match]
+    )).sort((left, right) => left[0] - right[0]),
+    [[0, 1, "stable-id"], [1, 0, "stable-id"]],
+  );
+});
+
+test("a reordered exact signature is not promoted into a movement fact", () => {
+  const before = [
+    unit("完全相同甲", { exactSignature: "exact-a" }),
+    unit("完全相同乙", { exactSignature: "exact-b" }),
+  ];
+  const pairs = alignReviewSemanticUnits(before, [before[1], before[0]]);
+
+  assert.equal(matchedPairs(pairs).length, 2);
+  assert.ok(matchedPairs(pairs).every((pair) => pair.moved === false));
 });
 
 test("an ordinary insertion without identity is never reported as movement", () => {

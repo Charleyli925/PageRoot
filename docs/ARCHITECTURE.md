@@ -102,10 +102,17 @@ Comments + frozen input
   foreign-namespace graphics), then aligns only siblings of an already-paired
   parent.
   `review-semantic-alignment` is the pure, bounded alignment helper: it consumes
-  unique stable keys and exact signatures first, cuts remaining intervals on
-  those anchors, then uses a weighted monotonic alignment or a finite-lookahead
-  fallback. Repeated, low-confidence and ambiguous candidates remain unmatched;
-  it never promotes tag, position or geometric proximity into a change fact.
+  only unique explicit stable identities and exact-equality signatures first,
+  cuts remaining intervals on those anchors, then uses a weighted monotonic
+  alignment or a finite-lookahead fallback. Stable identity, exact equality and
+  self compatibility are separate facts: an exact subtree can skip an unchanged
+  branch but can never replace the identity of a paired container. Analysis-local
+  `WeakMap` signatures describe stable identity, own non-presentation
+  compatibility and exact subtree equality; empty Canvas/SVG/media/control and
+  empty-container units may enter weighted matching only when that own
+  compatibility agrees under the same paired parent. Repeated, low-confidence
+  and ambiguous candidates remain unmatched; it never promotes tag, class,
+  position or geometric proximity into a change fact.
   The shared pair graph derives copy, structure and visual facts once, and only
   then emits a typed canonical fact list. One prepared element may carry more
   than one independent fact (for example, a box-style change and a layout
@@ -114,6 +121,9 @@ Comments + frozen input
   are geometrically close; final projection rectangles require the same fact
   and owners, except for the explicit structural-owner dominance rule. Neither
   identity is persisted, sent over IPC, or available to comments. The
+  trusted analyzer fails explicitly rather than silently discarding a 25th
+  distinct fact for one element; untrusted serialized input remains bounded by
+  the 24-fact/12,000-byte parser limit and fails closed when it exceeds it.
   ready-review session prepares that immutable document pair for the exact
   operation/source/comment identity before the React review surface mounts;
   rerenders and bounded cache hits reuse it. Static source analysis remains the
