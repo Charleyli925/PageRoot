@@ -3,7 +3,6 @@ const PROJECT_OPENING = new Set(["desktop-dialog", "browser-file"]);
 const ATTACHMENT_PERSISTENCE = new Set(["bridge", "memory", "none"]);
 const CLOSE_COORDINATION = new Set(["electron-handshake", "browser-beforeunload"]);
 const INTERACTIVE_PREVIEW = new Set(["independent-url", "srcdoc"]);
-const RUNTIME_SNAPSHOT_CAPTURE = new Set(["owner-isolated", "none"]);
 
 function isRecord(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -15,8 +14,7 @@ function isCapabilityManifest(value) {
     && PROJECT_OPENING.has(value.projectOpening)
     && ATTACHMENT_PERSISTENCE.has(value.attachmentPersistence)
     && CLOSE_COORDINATION.has(value.closeCoordination)
-    && INTERACTIVE_PREVIEW.has(value.interactivePreview)
-    && RUNTIME_SNAPSHOT_CAPTURE.has(value.runtimeSnapshotCapture);
+    && INTERACTIVE_PREVIEW.has(value.interactivePreview);
 }
 
 function freezeManifest(value) {
@@ -26,7 +24,6 @@ function freezeManifest(value) {
     attachmentPersistence: value.attachmentPersistence,
     closeCoordination: value.closeCoordination,
     interactivePreview: value.interactivePreview,
-    runtimeSnapshotCapture: value.runtimeSnapshotCapture,
   });
 }
 
@@ -36,7 +33,6 @@ export const BROWSER_RUNTIME_CAPABILITIES = freezeManifest({
   attachmentPersistence: "none",
   closeCoordination: "browser-beforeunload",
   interactivePreview: "srcdoc",
-  runtimeSnapshotCapture: "none",
 });
 
 export const DESKTOP_RUNTIME_CAPABILITIES = freezeManifest({
@@ -45,7 +41,6 @@ export const DESKTOP_RUNTIME_CAPABILITIES = freezeManifest({
   attachmentPersistence: "bridge",
   closeCoordination: "electron-handshake",
   interactivePreview: "independent-url",
-  runtimeSnapshotCapture: "owner-isolated",
 });
 
 export function resolveRuntimeCapabilities({

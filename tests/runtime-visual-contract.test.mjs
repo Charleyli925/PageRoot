@@ -12,6 +12,10 @@ const runtimeVisualContractDocument = await readFile(
   new URL("../docs/RUNTIME_VISUAL_CONTRACT.md", import.meta.url),
   "utf8",
 );
+const architectureContractDocument = await readFile(
+  new URL("../docs/ARCHITECTURE_CONTRACT.md", import.meta.url),
+  "utf8",
+);
 
 test("runtime snapshot producers and consumers share one immutable contract", () => {
   assert.equal(RUNTIME_VISUAL_CONTRACT_VERSION, 1);
@@ -48,11 +52,17 @@ test("runtime snapshot envelopes bind contract, session, and full source SHA", (
   }, expected), null);
 });
 
-test("the published contract names the shared Edit and Review snapshot boundary", () => {
+test("the published contract names the Review-only snapshot boundary", () => {
   assert.match(runtimeVisualContractDocument, /SourceHostResolver/u);
   assert.match(runtimeVisualContractDocument, /RuntimeSnapshotOwner/u);
-  assert.match(runtimeVisualContractDocument, /EditRuntimeSnapshotSession/u);
+  assert.match(runtimeVisualContractDocument, /Review-only/u);
   assert.match(runtimeVisualContractDocument, /one\s+bounded before\/after pair through the same owner/u);
   assert.match(runtimeVisualContractDocument, /no second fresh pair/u);
+  assert.doesNotMatch(runtimeVisualContractDocument, /EditRuntimeSnapshotSession|side \(`edit`/u);
   assert.doesNotMatch(runtimeVisualContractDocument, /settlement matrix|thirteen tracked threads/u);
+  assert.match(architectureContractDocument, /Edit does\s+not invoke the resolver or owner/u);
+  assert.doesNotMatch(
+    architectureContractDocument,
+    /Edit uses the\s+same owner and resolver/u,
+  );
 });

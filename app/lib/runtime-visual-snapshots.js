@@ -123,7 +123,7 @@ function acceptedCapturedSnapshot(rawSnapshot, key) {
 
 /**
  * Accepts only the snapshots corresponding to the bounded candidate set the
- * trusted renderer requested. Both Edit and Review consume this same parser.
+ * trusted renderer requested for one Review capture pair.
  */
 export function acceptRuntimeVisualSnapshots(value, allowedCandidateKeys) {
   if (
@@ -162,12 +162,4 @@ export function acceptRuntimeVisualSnapshots(value, allowedCandidateKeys) {
     accepted.push(snapshot);
   }
   return Object.freeze(accepted);
-}
-
-export function runtimeVisualSnapshotsByteSize(snapshots) {
-  return Array.isArray(snapshots)
-    ? snapshots.reduce((total, snapshot) => (
-      total + Math.max(0, Number(snapshot?.byteLength) || 0)
-    ), 0)
-    : 0;
 }

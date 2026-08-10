@@ -42,8 +42,8 @@ Bridge route adapters
   weaken the gate to land a feature.
 - Runtime capability decoding has one ingress:
   `app/application/runtime-capabilities.js`. Source editing, project opening,
-  attachment persistence, close coordination, interactive preview transport
-  and runtime snapshot capture are independent declarations;
+  attachment persistence, close coordination and interactive preview transport
+  are independent declarations;
   consumers may not infer the whole runtime from the presence of one preload
   API. Electron owns desktop close safety through its acknowledged handshake;
   `beforeunload` is only the browser fallback.
@@ -160,37 +160,27 @@ history navigation, a newer preview generation or a failed capture discard it.
 It never registers a drain obligation and never changes source, Draft or
 Version authority.
 
-Edit and Review use one `SourceHostResolver`, one narrow owner request schema,
-one `RuntimeSnapshotOwner`, and one trusted PNG parser. The resolver admits
-only direct source Canvas/SVG roots and source-empty hosts with a unique stable
+Edit has no runtime snapshot authority. It remains script-disabled and renders
+only source-static content: authored inline SVG stays source-backed and
+non-editable, while runtime-only Canvas/SVG remains in Preview. No Edit cache,
+IPC request, bitmap projection, Blob URL or temporary projection attribute is
+allowed.
+
+Review alone uses one `SourceHostResolver`, one narrow owner request schema,
+one `RuntimeSnapshotOwner` and one trusted PNG parser. The resolver admits only
+direct source Canvas/SVG roots and source-empty hosts with a unique stable
 source binding. It does not infer candidates from JavaScript, runtime DOM,
 computed selectors, comments, arbitrary HTML or `tbody`.
 
-`EditRuntimeSnapshotSession` owns Edit's disposable current-document cache. Its
-request key is document identity, a coarse hash of supported host markup plus
-`base`/`link`/`script`/`style` sources, and a 64px viewport bucket. Normal text
-edits and Preview/Edit or tab/mode changes re-resolve current hosts and reuse a
-verified image. A supported runtime-input change retains a compatible prior
-image only while one background capture runs; a stale, unavailable or failed
-replacement clears only the projection. The session never accepts a source
-path, a `PageViewContext`, a full-document cache identity or a speculative
-JavaScript dependency graph. Its cache is bounded by entry count and bytes, and
-resetting document authority clears it.
-
 The main-process owner creates one hidden authored-page window and preview
-session per active capture; replacement, timeout and disposal destroy both. It
-accepts only exact source HTML/SHA, side, viewport and frozen bindings, then
-confirms the host in an isolated world before bounded PNG capture. A PNG has no
-drain, persistence, review-diff, source-history or AI authority. The Canvas may
-mount it only as pointer-transparent presentation on the original source host;
-comments and edits still resolve that host. Direct Canvas/SVG backgrounds and
-stable empty-host images stage/decode their replacement before switching, and
-all retired Blob URLs are revoked. A stale or invalid projection cannot clear a
-current verified image.
-The renderer request never carries a project path. For an active desktop
-document, main may supply the preview protocol with only that document's
-declared, contained relative-asset allowlist; the authored page still receives
-no filesystem or project capability.
+session per active Review capture; replacement, timeout and disposal destroy
+both. It accepts only exact source HTML/SHA, `before`/`after` side, viewport and
+frozen bindings, then confirms the host in an isolated world before bounded PNG
+capture. A PNG has no drain, persistence, review-diff, source-history or AI
+authority. The renderer request never carries a project path. For an active
+desktop document, main may supply the preview protocol with only that
+document's declared, contained relative-asset allowlist; the authored page
+still receives no filesystem or project capability.
 
 Prepared formal-review documents are owned by a cancellable
 `ReviewAnalysisSession` keyed to exact operation/source/comment identity. Its
@@ -227,8 +217,8 @@ The one before/after snapshot pair is compared once. Only captured snapshots
 with different PNG presentation can add an opaque `changeId`/`outlineId` style
 marker. A missing desktop API, unmapped host, malformed envelope, timeout,
 cancellation or late result is a silent static-only outcome. There is no second
-fresh pair, confirmation coordinator, runtime UI or Review cache. Edit uses the
-same owner and resolver under its separate disposable cache/session owner.
+fresh pair, confirmation coordinator, runtime UI or Review cache. Edit does
+not invoke the resolver or owner and has no snapshot state.
 
 Comment layout is measured only after current disposable presentation is
 applied. The Workbench accepts no card coordinates until the Canvas reports a

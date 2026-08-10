@@ -2,24 +2,24 @@ import type { RuntimeSnapshotCaptureCandidate } from "../domain/runtime-snapshot
 import type { RuntimeVisualEnvelope } from "../domain/runtime-visual-contract.js";
 import type { RuntimeVisualSnapshot } from "../lib/runtime-visual-snapshots.js";
 
-export type RuntimeSnapshotCaptureSide = "before" | "after" | "edit";
+export type ReviewRuntimeSnapshotCaptureSide = "before" | "after";
 
 /**
  * A trusted-renderer-to-main owner request. Candidate bindings stay inside this
  * narrow IPC request and the isolated owner; authored documents never receive
  * a target reference, binding, screenshot, or response channel.
  */
-export type RuntimeSnapshotCaptureRequest = Readonly<{
+export type ReviewRuntimeSnapshotCaptureRequest = Readonly<{
   contractVersion: 1;
   captureSessionId: string;
   sourceSha256: string;
-  side: RuntimeSnapshotCaptureSide;
+  side: ReviewRuntimeSnapshotCaptureSide;
   html: string;
   candidates: readonly RuntimeSnapshotCaptureCandidate[];
   viewport: Readonly<{ width: number; height: number }>;
 }>;
 
-export type RuntimeSnapshotCaptureResult =
+export type ReviewRuntimeSnapshotCaptureResult =
   | Readonly<{
     outcome: "captured";
     envelope: RuntimeVisualEnvelope & Readonly<{
@@ -31,14 +31,14 @@ export type RuntimeSnapshotCaptureResult =
     reason: string;
   }>;
 
-export type DesktopRuntimeSnapshotApi = Readonly<{
+export type DesktopReviewRuntimeSnapshotApi = Readonly<{
   capture: (
-    payload: RuntimeSnapshotCaptureRequest,
-  ) => Promise<RuntimeSnapshotCaptureResult>;
+    payload: ReviewRuntimeSnapshotCaptureRequest,
+  ) => Promise<ReviewRuntimeSnapshotCaptureResult>;
 }>;
 
 declare global {
   interface Window {
-    htmlAIRuntimeSnapshots?: DesktopRuntimeSnapshotApi;
+    htmlAIReviewRuntimeSnapshots?: DesktopReviewRuntimeSnapshotApi;
   }
 }

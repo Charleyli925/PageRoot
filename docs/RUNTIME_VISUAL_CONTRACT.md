@@ -1,40 +1,48 @@
-# Runtime Snapshot contract
+# Review Runtime Snapshot contract
 
-Runtime snapshots are disposable presentation data. They never become Source
-HTML, a `TargetRef`, a review acceptance decision, a Version, a save payload or
-AI input. Source bytes and static Review remain authoritative if capture does
-not run, fails, or returns late.
+Review Runtime Snapshots are disposable supplemental presentation data. They
+never become Source HTML, a `TargetRef`, a review acceptance decision, a
+Version, a save payload or AI input. Source bytes and static Review remain
+authoritative if capture does not run, fails or returns late.
 
-## One source-host resolver
+## Review-only source-host resolver
 
-`app/domain/runtime-snapshot-hosts.js` is the only `SourceHostResolver` for
-both Edit and Review. Before authored scripts execute, it starts from
-`SourceIndex` and `TargetRef` and accepts only:
+`app/domain/runtime-snapshot-hosts.js` is the sole `SourceHostResolver` for
+Review. Before authored scripts execute, it starts from `SourceIndex` and
+`TargetRef` and accepts only:
 
 - a direct source `<canvas>`;
-- a direct source `<svg>` (including authored SVG children);
+- a direct source `<svg>` (including authored SVG children); or
 - a source-empty stable host with one unique `id`, `name`, `aria-label`,
-  `data-*` value, or class token.
+  `data-*` value or class token.
 
 Direct Canvas/SVG roots may use their exact source path as a conservative
 fallback. Ordinary source-empty hosts must retain their unique stable binding.
-Deleted, ambiguous, type-changed, or non-empty hosts are omitted. Candidate
+Deleted, ambiguous, type-changed or non-empty hosts are omitted. Candidate
 selection never parses JavaScript, follows a computed selector, consumes a
-comment scope, inspects arbitrary HTML/`tbody`, or discovers runtime DOM.
+comment scope, inspects arbitrary HTML/`tbody` or discovers runtime DOM.
 
-The resolver exposes bindings only to trusted renderer memory. It does not put a
-`TargetRef`, candidate binding, or screenshot into authored Edit or Review
-documents.
+Bindings remain in trusted renderer memory. A `TargetRef`, candidate binding or
+screenshot never enters authored Edit or Review documents.
 
-## One snapshot owner
+## Edit behavior
+
+Edit renders only what the source can statically present. It disables authored
+scripts and does not create a snapshot request, cache, bitmap projection, Blob
+URL or `data-pageroot-readonly-visual*` attribute. Authored inline SVG remains
+native, source-backed and non-editable; script-generated Canvas/SVG remains
+available in Preview. There is no runtime-capture status, placeholder, retry or
+fallback UI in Edit.
+
+## One Review snapshot owner
 
 `desktop/runtime-visual-capture-owner.mjs` is the single
-`RuntimeSnapshotOwner`. Its one narrow preload route accepts exact source HTML,
-full source SHA-256, a side (`edit`, `before`, or `after`), viewport and bounded
-source-host bindings. It validates the raw binding before scripts run, then uses
-a one-use isolated session to confirm the same rendered host and, for a stable
-container, visible Canvas/SVG paint. Each candidate fails independently as an
-unavailable snapshot.
+`RuntimeSnapshotOwner`. The narrow `htmlAIReviewRuntimeSnapshots` preload route
+accepts exact source HTML, full source SHA-256, a `before` or `after` side,
+viewport and bounded source-host bindings. It validates the raw binding before
+scripts run, then uses a one-use isolated session to confirm the same rendered
+host and, for a stable container, visible Canvas/SVG paint. Each candidate may
+silently become an unavailable snapshot.
 
 The owner always has these containment properties:
 
@@ -43,53 +51,24 @@ The owner always has these containment properties:
 - only main-owned, declared source-relative assets for the active document;
 - denied permissions, navigation, popups, downloads, webviews and other URLs;
 - one isolated rect pass, at most one PNG per host, bounded PNG/pixel budgets,
-  a main-process deadline, and forced cleanup.
+  a main-process deadline and forced cleanup.
 
 It returns only a captured/unavailable key plus an envelope, PNG
-bytes/hash/bitmap size, and the owner-measured CSS-pixel layout width/height.
+bytes/hash/bitmap size and the owner-measured CSS-pixel layout width/height.
 Trusted renderer memory revalidates PNG headers, bitmap dimensions, layout
 bounds, byte length, SHA-256, per-page pixels and aggregate bytes. Raw DOM/node
 handles never leave the owner; authored pages receive no owner channel, binding
 or image data.
 
-## Edit behavior
-
-`EditRuntimeSnapshotSession` owns Edit's one bounded last-snapshot cache. Its
-coarse input hash includes supported host markup plus authored `base`, `link`,
-`script`, and `style` sources—not the whole document and not a speculative
-JavaScript dependency graph. The cache is additionally keyed by document and a
-64px viewport bucket, and is bounded to four entries and 16 MiB.
-
-For ordinary text edits, undo/redo that leaves those inputs unchanged, and
-Preview/Edit or tab/mode transitions, the session re-resolves the current
-`SourceIndex` and reuses the existing verified image without capture. A changed
-runtime input keeps a compatible previous image mounted while one quiet
-background owner capture runs; its decoded replacement is swapped in place. A
-failed, unavailable, stale, or late replacement clears only the disposable
-projection and cannot affect source, selection, IME, comments, save, history,
-Review, or AI input.
-
-`HtmlCanvasEditor` mounts a direct Canvas/SVG image as a reversible background
-or a stable empty host image as pointer-transparent presentation. Direct roots
-use the owner-measured CSS-pixel rectangle rather than DPR-dependent PNG
-dimensions, so an authored script that changes Canvas/SVG size keeps its runtime
-geometry in the script-disabled Edit frame. Positive axis-aligned transforms and
-zoom retained by the Edit DOM are divided out before assigning that underlying
-host size, avoiding a second painted scale. Projection overrides track only
-their own inline values: an in-place SourcePatch that changes a host style stays
-the current baseline when a bitmap is replaced or cleared. New Blob URLs stage
-off-DOM before replacement and retired URLs are revoked. The original source
-host remains the comment and edit target.
-
 ## Review behavior
 
 After both static Review frames are ready, `AiReviewWorkspace` sends one
 bounded before/after pair through the same owner and validates the same snapshot
-envelope/parser. A difference in matching captured PNGs may add one opaque
-style marker to the existing static outline. An unavailable, malformed, late,
-or mismatched result adds no marker and has no user-visible capture status.
+envelope and parser. A difference in matching captured PNGs may add one opaque
+style marker to the existing static outline. An unavailable, malformed, late or
+mismatched result adds no marker and has no user-visible capture status.
 
-There is no second fresh pair, deterministic coordinator, review cache, or
+There is no second fresh pair, deterministic coordinator, Review cache or
 capture/retry UI. Static Review never waits for the owner.
 
 ## Shared limits

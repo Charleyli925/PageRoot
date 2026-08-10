@@ -281,7 +281,7 @@ export function validateRuntimeSnapshotCaptureRequest(value) {
   ) {
     throw new TypeError("Runtime snapshot capture source identity is invalid.");
   }
-  if (value.side !== "before" && value.side !== "after" && value.side !== "edit") {
+  if (value.side !== "before" && value.side !== "after") {
     throw new TypeError("Runtime snapshot capture side is invalid.");
   }
   if (

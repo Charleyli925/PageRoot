@@ -115,10 +115,6 @@ import {
   type ProjectApplicationSnapshot,
 } from "./application/project-application-session.js";
 import {
-  EditRuntimeSnapshotSession,
-  type EditRuntimeSnapshot,
-} from "./application/edit-runtime-snapshot-session.js";
-import {
   ReviewAnalysisCancelledError,
   ReviewAnalysisSession,
 } from "./application/review-analysis-session.js";
@@ -389,14 +385,6 @@ const INITIAL_DOCUMENT_SNAPSHOT: DocumentSessionSnapshot = {
   persistState: "idle",
   persistError: "",
 };
-const INITIAL_RUNTIME_VISUAL_PROJECTION_SNAPSHOT:
-EditRuntimeSnapshot = Object.freeze({
-  status: "idle",
-  documentKey: null,
-  sourceSha256: null,
-  requestKey: null,
-  projection: null,
-});
 const INITIAL_COMMENT_SNAPSHOT: CommentSessionSnapshot<
   CommentItem,
   DirectEditEvent,
@@ -447,12 +435,6 @@ function preparedReviewByteSize(prepared: PreparedReviewDocuments): number {
     + JSON.stringify(prepared.documents.commentTargets).length
   );
 }
-
-type RuntimeVisualViewport = {
-  width: number;
-  height: number;
-  sourceIndex?: { source?: unknown };
-};
 
 function waitFor(delayMs: number): Promise<void> {
   return new Promise((resolve) => globalThis.setTimeout(resolve, delayMs));
@@ -583,7 +565,6 @@ export default function Workbench() {
     itemKey: string;
   } | null>(null);
   const pagePresentationScrollRequestRef = useRef(0);
-  const runtimeVisualViewportRef = useRef<RuntimeVisualViewport | null>(null);
   const projectOpenRequestRef = useRef(0);
   const reviewAnalysisSessionRef = useRef(
     new ReviewAnalysisSession<PreparedReviewDocuments>({
@@ -599,15 +580,6 @@ export default function Workbench() {
   const projectApplicationCounterRef = useRef(0);
   const runtimeCapabilitiesRef =
     useRef<RuntimeCapabilities>(BROWSER_RUNTIME_CAPABILITIES);
-  const runtimeVisualProjectionSessionRef = useRef(
-    new EditRuntimeSnapshotSession({
-      capture: async (payload) => {
-        const api = globalThis.window?.htmlAIRuntimeSnapshots;
-        if (!api) throw new Error("Runtime snapshot capture is unavailable.");
-        return api.capture(payload);
-      },
-    }),
-  );
   const draftSessionRef = useRef(new DraftSession<CommentItem, DirectEditEvent>({
     bridgeClient,
     encodeComment: persistedComment,
@@ -793,10 +765,6 @@ export default function Workbench() {
   const [canvasMode, setCanvasMode] = useState<CanvasMode>("edit");
   const [pageViewContext, setPageViewContext] =
     useState<PageViewContext | null>(null);
-  const [runtimeVisualProjectionSnapshot, setRuntimeVisualProjectionSnapshot] =
-    useState<EditRuntimeSnapshot>(
-      INITIAL_RUNTIME_VISUAL_PROJECTION_SNAPSHOT,
-    );
   const [interactivePreviewTransport, setInteractivePreviewTransport] =
     useState<RuntimeCapabilities["interactivePreview"]>(
       BROWSER_RUNTIME_CAPABILITIES.interactivePreview,
@@ -902,11 +870,6 @@ export default function Workbench() {
       setDocumentId(snapshot.documentId);
     });
     return () => session.setObserver(null);
-  }, []);
-  useEffect(() => {
-    const session = runtimeVisualProjectionSessionRef.current;
-    session.setObserver(setRuntimeVisualProjectionSnapshot);
-    return () => session.dispose();
   }, []);
   useEffect(() => () => reviewAnalysisSessionRef.current.dispose(), []);
   useEffect(() => {
@@ -1365,79 +1328,6 @@ export default function Workbench() {
   const activePageViewContext = (
     pageViewContext?.documentKey === pageViewDocumentKey
   ) ? pageViewContext : null;
-  const activeRuntimeVisualProjection = (
-    runtimeVisualProjectionSnapshot.projection?.documentKey
-      === pageViewDocumentKey
-  ) ? runtimeVisualProjectionSnapshot.projection : null;
-  const handleRuntimeVisualViewport = useCallback((viewport: RuntimeVisualViewport) => {
-    if (
-      Number.isFinite(viewport.width)
-      && Number.isFinite(viewport.height)
-      && viewport.width > 0
-      && viewport.height > 0
-    ) {
-      runtimeVisualViewportRef.current = viewport;
-    }
-    const currentViewport = runtimeVisualViewportRef.current;
-    if (
-      canvasMode === "edit"
-      && (
-        commentLayoutAuthority.textEditing
-        || editorRef.current?.hasPendingNativeEdit()
-      )
-    ) {
-      return;
-    }
-    const available = (
-      runtimeCapabilitiesReady
-      && runtimeCapabilitiesRef.current.runtimeSnapshotCapture
-        === "owner-isolated"
-      && !browserPreviewOnly
-      && viewMode === "current"
-      && Boolean(sourcePath)
-      && !projectHydrating
-      && !projectLoadError
-      && !workspaceIssue
-    );
-    if (!available || !currentViewport || !sourcePath) {
-      runtimeVisualProjectionSessionRef.current.reset();
-      return;
-    }
-    if (canvasMode !== "edit" || interactionLocked) {
-      runtimeVisualProjectionSessionRef.current.suspend();
-      return;
-    }
-    if (currentViewport.sourceIndex?.source !== html) {
-      // The Canvas publishes its already-built exact SourceIndex after a source
-      // transition. Waiting for that callback avoids reparsing a large document
-      // from this parent effect and cannot authorize a stale projection.
-      return;
-    }
-    runtimeVisualProjectionSessionRef.current.request({
-      html,
-      documentKey: pageViewDocumentKey,
-      viewportWidth: currentViewport.width,
-      sourceIndex: currentViewport.sourceIndex,
-    });
-  }, [
-    browserPreviewOnly,
-    canvasMode,
-    commentLayoutAuthority.textEditing,
-    html,
-    interactionLocked,
-    pageViewDocumentKey,
-    projectHydrating,
-    projectLoadError,
-    runtimeCapabilitiesReady,
-    sourcePath,
-    viewMode,
-    workspaceIssue,
-  ]);
-  useEffect(() => {
-    handleRuntimeVisualViewport(
-      runtimeVisualViewportRef.current ?? { width: 0, height: 0 },
-    );
-  }, [handleRuntimeVisualViewport]);
   const expectedCommentLayoutSourceSha256 = renderedContentSha256 || "";
   const otherTabCommentsContextKey = [
     canvasMode,
@@ -2892,8 +2782,6 @@ export default function Workbench() {
     setSelection(null);
     setPageViewContext(null);
     reviewAnalysisSessionRef.current.clear();
-    runtimeVisualProjectionSessionRef.current.reset();
-    runtimeVisualViewportRef.current = null;
     editorRef.current?.applyPageViewContext(null);
     setComposerOpen(false);
     commentSessionRef.current.reset();
@@ -10906,10 +10794,6 @@ export default function Workbench() {
             className="canvas-edit-surface"
             hidden={canvasMode !== "edit"}
             aria-hidden={canvasMode !== "edit"}
-            data-runtime-visual-status={runtimeVisualProjectionSnapshot.status}
-            data-runtime-visual-count={
-              activeRuntimeVisualProjection?.visuals.length ?? 0
-            }
           >
             {!runtimeCapabilitiesReady ? (
               <div className="canvas-loading" role="status">正在识别运行环境…</div>
@@ -10952,8 +10836,6 @@ export default function Workbench() {
                   commentedTargets={commentedTargets}
                   trackedTargets={trackedAuditTargets}
                   pageViewContext={activePageViewContext}
-                  runtimeVisualProjection={activeRuntimeVisualProjection}
-                  onRuntimeVisualViewport={handleRuntimeVisualViewport}
                   pageViewDocumentKey={pageViewDocumentKey}
                   onPageViewContextChange={acceptPageViewContext}
                   locked={

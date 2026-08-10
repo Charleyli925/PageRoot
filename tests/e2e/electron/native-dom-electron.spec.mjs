@@ -72,6 +72,7 @@ async function launchPageRoot(options = {}) {
     },
   });
   const page = await electronApp.firstWindow();
+  await page.waitForLoadState("domcontentloaded");
   const mainRendererUrl = page.url();
   const nativeWindow = await electronApp.evaluate(({ BrowserWindow }, rendererUrl) => {
     const window = BrowserWindow.getAllWindows().find((candidate) => (
@@ -89,7 +90,6 @@ async function launchPageRoot(options = {}) {
   const foreground = process.env.PAGEROOT_E2E_FOREGROUND === "1";
   expect(nativeWindow.visible).toBe(foreground);
   if (!foreground) expect(nativeWindow.focused).toBe(false);
-  await page.waitForLoadState("domcontentloaded");
   await page.waitForFunction(() => document.visibilityState === "visible");
   await page.evaluate(() => new Promise((resolve) => {
     requestAnimationFrame(() => requestAnimationFrame(resolve));
@@ -612,7 +612,7 @@ test("Electron safely renames the saved current HTML without starting a new proj
   }
 });
 
-test("Electron interactive preview runs authored scripts and edits the selected Tab", async () => {
+test("Electron keeps runtime visuals in Preview and source-backed static content in Edit", async () => {
   const sourceDirectory = mkdtempSync(
     path.join(tmpdir(), "pageroot-preview-source-e2e-"),
   );
@@ -753,48 +753,13 @@ test("Electron interactive preview runs authored scripts and edits the selected 
       "preview-tab-copy",
     );
 
-    await expect(launched.page.locator(".canvas-edit-surface"))
-      .toHaveAttribute("data-runtime-visual-status", "ready", { timeout: 20_000 });
-    await expect(launched.page.locator(".canvas-edit-surface"))
-      .toHaveAttribute("data-runtime-visual-count", "4");
-
-    await expect(editFrame.locator(
-      '#runtime-canvas img[data-pageroot-readonly-visual="runtime-bitmap"]',
-    )).toBeVisible({ timeout: 20_000 });
-    await expect(editFrame.locator(
-      '#runtime-svg img[data-pageroot-readonly-visual="runtime-bitmap"]',
-    )).toBeVisible();
-    await expect(editFrame.locator("#direct-runtime-canvas"))
-      .toHaveAttribute(
-        "data-pageroot-readonly-visual-host",
-        "runtime-bitmap",
-      );
-    await expect(editFrame.locator("#direct-runtime-svg"))
-      .toHaveAttribute(
-        "data-pageroot-readonly-visual-host",
-        "runtime-bitmap",
-      );
-    expect(await editFrame.locator("#direct-runtime-canvas").evaluate(
-      (element) => getComputedStyle(element).backgroundImage.startsWith(
-        'url("blob:',
-      ),
-    )).toBe(true);
-    expect(await editFrame.locator("#direct-runtime-svg").evaluate(
-      (element) => getComputedStyle(element).backgroundImage.startsWith(
-        'url("blob:',
-      ),
-    )).toBe(true);
     await expect(editFrame.locator("#runtime-canvas canvas")).toHaveCount(0);
     await expect(editFrame.locator("#runtime-svg svg")).toHaveCount(0);
     await expect(editFrame.locator("[data-runtime-row]")).toHaveCount(0);
-    await addCanvasComment(
-      launched.page,
-      editFrame,
-      "runtime-visual-host",
-      "请调整这张运行时图表",
-    );
+    await expect(editFrame.locator("#direct-runtime-svg rect")).toHaveCount(0);
+    await expect(editFrame.locator("[data-pageroot-readonly-visual]")).toHaveCount(0);
     expect(readFileSync(sourcePath, "utf8")).not.toMatch(
-      /data-pageroot-readonly-visual|data-runtime-row|data-runtime-chart|data-drawn|(?:data:image\/png|blob:)|background-size:\s*contain/u,
+      /data-pageroot-readonly-visual|data-runtime-row|data-runtime-chart|data-drawn|(?:data:image\/png|blob:)/u,
     );
 
     await launched.page.getByRole("button", {
@@ -845,50 +810,30 @@ test("Electron interactive preview runs authored scripts and edits the selected 
       name: "编辑",
       exact: true,
     })).toHaveAttribute("aria-pressed", "true");
-    await expect(launched.page.locator(".canvas-edit-surface"))
-      .toHaveAttribute("data-runtime-visual-status", "ready", {
-        timeout: 20_000,
-      });
-
     const resumedEditFrame = await currentEditorFrame(launched.page);
     await expect(resumedEditFrame.locator("#panel-two")).toBeVisible();
     await expect(resumedEditFrame.locator("#panel-two")).toHaveClass(/active/u);
     await expect(resumedEditFrame.locator("#panel-one")).toBeHidden();
     await expect(resumedEditFrame.locator("#static-chart")).toBeVisible();
-    await expect(resumedEditFrame.locator(
-      '#runtime-canvas img[data-pageroot-readonly-visual="runtime-bitmap"]',
-    )).toHaveCount(1, { timeout: 20_000 });
     await expect(resumedEditFrame.locator("#runtime-canvas canvas")).toHaveCount(0);
-    await expect(resumedEditFrame.locator(
-      '#runtime-svg img[data-pageroot-readonly-visual="runtime-bitmap"]',
-    )).toHaveCount(1);
+    await expect(resumedEditFrame.locator("#runtime-svg svg")).toHaveCount(0);
     await expect(resumedEditFrame.locator("[data-runtime-chart]")).toHaveCount(0);
+    await expect(resumedEditFrame.locator("[data-pageroot-readonly-visual]")).toHaveCount(0);
     expect(readFileSync(sourcePath, "utf8")).not.toMatch(
-      /data-pageroot-readonly-visual|data-runtime-row|data-runtime-chart|data-drawn|(?:data:image\/png|blob:)|background-size:\s*contain/u,
+      /data-pageroot-readonly-visual|data-runtime-row|data-runtime-chart|data-drawn|(?:data:image\/png|blob:)/u,
     );
 
     await activateNativeEdit(resumedEditFrame, "preview-tab-copy");
     await expect(resumedEditFrame.locator(caseSelector("preview-tab-copy")))
       .toHaveAttribute("contenteditable", "true");
-    await resumedEditFrame.locator(
-      '#runtime-svg img[data-pageroot-readonly-visual="runtime-bitmap"]',
-    ).evaluate((image) => {
-      window.__PAGEROOT_E2E_RUNTIME_VISUAL__ = image;
-    });
     await setTextSelection(resumedEditFrame, "preview-tab-copy", 0);
     await launched.page.keyboard.insertText("原位");
     await expect.poll(() => resumedEditFrame.locator(
       caseSelector("preview-tab-copy"),
     ).textContent()).toContain("原位");
-    await expect.poll(() => resumedEditFrame.evaluate(() => (
-      window.__PAGEROOT_E2E_RUNTIME_VISUAL__
-        === document.querySelector(
-          '#runtime-svg img[data-pageroot-readonly-visual="runtime-bitmap"]',
-      )
-    ))).toBe(true);
     await expect.poll(() => readFileSync(sourcePath, "utf8")).toContain("原位");
     expect(readFileSync(sourcePath, "utf8")).not.toMatch(
-      /data-pageroot-readonly-visual|data-runtime-row|data-runtime-chart|data-drawn|(?:data:image\/png|blob:)|background-size:\s*contain/u,
+      /data-pageroot-readonly-visual|data-runtime-row|data-runtime-chart|data-drawn|(?:data:image\/png|blob:)/u,
     );
   } finally {
     if (electronApp && isolatedUserData) {
@@ -901,7 +846,7 @@ test("Electron interactive preview runs authored scripts and edits the selected 
   }
 });
 
-test("Electron edit mode projects a source-empty Canvas host populated by an inline load handler", async () => {
+test("Electron Edit does not execute an inline authored runtime script", async () => {
   const sourceDirectory = mkdtempSync(
     path.join(tmpdir(), "pageroot-inline-handler-source-e2e-"),
   );
@@ -927,8 +872,9 @@ test("Electron edit mode projects a source-empty Canvas host populated by an inl
       "inline-handler-runtime",
     );
     await expect(editFrame.locator(
-      '[data-native-case="inline-handler-runtime"] img[data-pageroot-readonly-visual="runtime-bitmap"]',
-    )).toBeVisible({ timeout: 20_000 });
+      '[data-native-case="inline-handler-runtime"] canvas',
+    )).toHaveCount(0);
+    await expect(editFrame.locator("[data-pageroot-readonly-visual]")).toHaveCount(0);
     expect(readFileSync(sourcePath, "utf8")).toBe(source);
   } finally {
     if (electronApp && isolatedUserData) {
@@ -938,36 +884,6 @@ test("Electron edit mode projects a source-empty Canvas host populated by an inl
       sourceDirectory,
       "pageroot-inline-handler-source-e2e-",
     );
-  }
-});
-
-test("Electron edit mode projects runtime visuals in an opt-in real HTML file", async () => {
-  const sourcePath = process.env.PAGEROOT_REAL_HTML_PATH;
-  test.skip(
-    !sourcePath || !existsSync(sourcePath),
-    "Set PAGEROOT_REAL_HTML_PATH to an existing local HTML file.",
-  );
-  const originalBytes = readFileSync(sourcePath);
-  const launched = await launchPageRoot({ activeSourcePath: sourcePath });
-  try {
-    const editFrame = await currentEditorFrame(launched.page);
-    await editFrame.waitForFunction(() => Boolean(document.querySelector("#np1a")));
-    await expect(editFrame.locator(
-      '#np1a img[data-pageroot-readonly-visual="runtime-bitmap"]',
-    )).toBeVisible({ timeout: 30_000 });
-    await expect(editFrame.locator(
-      '#np1b img[data-pageroot-readonly-visual="runtime-bitmap"]',
-    )).toBeVisible();
-    await editFrame.locator('.tab[data-p="p3"]').click();
-    await launched.page.getByRole("button", {
-      name: "切换到此页签",
-      exact: true,
-    }).click();
-    await expect(editFrame.locator("#p3")).toBeVisible();
-    await expect(editFrame.locator("#np1a svg, #np1a canvas")).toHaveCount(0);
-    expect(readFileSync(sourcePath)).toEqual(originalBytes);
-  } finally {
-    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
   }
 });
 

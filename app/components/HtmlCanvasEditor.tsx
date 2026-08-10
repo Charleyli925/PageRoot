@@ -18,7 +18,6 @@ import {
   type PagePresentationAction,
   type PageViewContext,
 } from "../lib/page-view-context.js";
-import type { RuntimeVisualProjection } from "../domain/runtime-snapshot-hosts.js";
 import {
   SOURCE_NODE_ATTRIBUTE,
   applyPatchPlan,
@@ -99,7 +98,6 @@ import {
   tabAssociationForElement,
   tabAssociations,
 } from "./html-canvas-page-view";
-import { applyRuntimeVisualProjectionToDocument } from "./html-canvas-runtime-visual";
 import {
   adoptCanonicalHistoryIslandInPlace,
   canonicalNativeHostPreview,
@@ -314,19 +312,6 @@ const EDITOR_DOCUMENT_STYLES = `
     user-select: text !important;
   }
 
-  [data-pageroot-readonly-visual],
-  [data-pageroot-readonly-visual] * {
-    pointer-events: none !important;
-    -webkit-user-select: none !important;
-    user-select: none !important;
-  }
-
-  img[data-pageroot-readonly-visual] {
-    width: 100% !important;
-    height: 100% !important;
-    display: block !important;
-    object-fit: contain !important;
-  }
 `;
 
 const EMPTY_COMMENTED_TARGETS: readonly HtmlCanvasCommentedTarget[] = [];
@@ -472,8 +457,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     commentedTargets = EMPTY_COMMENTED_TARGETS,
     trackedTargets = EMPTY_TRACKED_TARGETS,
     pageViewContext = null,
-    runtimeVisualProjection = null,
-    onRuntimeVisualViewport,
     pageViewDocumentKey = "",
     onPageViewContextChange,
   },
@@ -578,10 +561,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const pageViewContextRef = useRef<PageViewContext | null>(pageViewContext);
   const lastPageViewContextPropRef = useRef<PageViewContext | null>(pageViewContext);
   const appliedPageViewContextRef = useRef<PageViewContext | null>(null);
-  const runtimeVisualProjectionRef = useRef<RuntimeVisualProjection | null>(
-    runtimeVisualProjection,
-  );
-  const onRuntimeVisualViewportRef = useRef(onRuntimeVisualViewport);
   const pageViewDocumentKeyRef = useRef(pageViewDocumentKey);
   const onPageViewContextChangeRef = useRef(onPageViewContextChange);
   const controlledMode = locked ? "processing" : interactionMode;
@@ -613,8 +592,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     lastPageViewContextPropRef.current = pageViewContext;
     pageViewContextRef.current = pageViewContext;
   }
-  runtimeVisualProjectionRef.current = runtimeVisualProjection;
-  onRuntimeVisualViewportRef.current = onRuntimeVisualViewport;
   pageViewDocumentKeyRef.current = pageViewDocumentKey;
   onPageViewContextChangeRef.current = onPageViewContextChange;
 
@@ -885,17 +862,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     const frameOffsetTop = iframeRect.top - containerRect.top;
     const frameHeight = iframe.clientHeight;
     const frameWidth = iframe.clientWidth;
-    try {
-      onRuntimeVisualViewportRef.current?.({
-        width: Math.max(1, Math.round(frameWidth)),
-        height: Math.max(1, Math.round(frameHeight)),
-        ...(sourceIndexRef.current
-          ? { sourceIndex: sourceIndexRef.current }
-          : {}),
-      });
-    } catch {
-      // Runtime visual capture is optional and cannot interrupt edit layout.
-    }
     const scrollingElement = documentNode.scrollingElement || documentNode.documentElement;
     const frameView = documentNode.defaultView;
     const scrollTop = Math.max(
@@ -1501,14 +1467,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       frameSourceHtmlRef.current = result.html;
       renderedSourceHtmlRef.current = result.html;
       containerRef.current?.setAttribute("data-render-verified", "true");
-      // A direct source patch may replace the host's inline style while an
-      // unchanged runtime bitmap is retained for the replacement capture.
-      // Reapply only the disposable projection against the exact new source.
-      applyRuntimeVisualProjectionToDocument(
-        documentNode,
-        result.html,
-        runtimeVisualProjectionRef.current,
-      );
       pendingFrameRestoreEpochRef.current += 1;
       pendingSelectionRef.current = null;
       pendingToolbarVisibleRef.current = false;
@@ -3672,11 +3630,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         appliedPageViewContextRef.current,
       );
       appliedPageViewContextRef.current = pageViewContextRef.current;
-      applyRuntimeVisualProjectionToDocument(
-        documentNode,
-        source,
-        runtimeVisualProjectionRef.current,
-      );
       const restoredTarget = selectTarget(target, {
         reveal: false,
         showToolbar: bookmark.toolbarVisible,
@@ -3826,21 +3779,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     });
   }, []);
 
-  const applyRuntimeVisualProjectionNow = useCallback((
-    projection: RuntimeVisualProjection | null,
-  ): boolean => {
-    runtimeVisualProjectionRef.current = projection;
-    const documentNode = iframeRef.current?.contentDocument;
-    if (!documentNode?.documentElement) return false;
-    applyRuntimeVisualProjectionToDocument(
-      documentNode,
-      frameSourceHtmlRef.current,
-      projection,
-    );
-    requestAnimationFrame(updateOverlayPosition);
-    return true;
-  }, [updateOverlayPosition]);
-
   const applyPageViewContextNow = useCallback((
     nextContext: PageViewContext | null,
   ): boolean => {
@@ -3854,11 +3792,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       appliedPageViewContextRef.current,
     );
     appliedPageViewContextRef.current = nextContext;
-    applyRuntimeVisualProjectionToDocument(
-      documentNode,
-      frameSourceHtmlRef.current,
-      runtimeVisualProjectionRef.current,
-    );
     requestAnimationFrame(updateOverlayPosition);
     return true;
   }, [updateOverlayPosition]);
@@ -3993,10 +3926,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   useEffect(() => {
     applyPageViewContextNow(pageViewContext);
   }, [applyPageViewContextNow, pageViewContext]);
-
-  useEffect(() => {
-    applyRuntimeVisualProjectionNow(runtimeVisualProjection);
-  }, [applyRuntimeVisualProjectionNow, runtimeVisualProjection]);
 
   useEffect(() => {
     onReady?.(api);
@@ -4148,12 +4077,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       null,
     );
     appliedPageViewContextRef.current = pageViewContextRef.current;
-    applyRuntimeVisualProjectionToDocument(
-      documentNode,
-      frameSourceHtmlRef.current,
-      runtimeVisualProjectionRef.current,
-    );
-
     const handleClick = (event: MouseEvent) => {
       if (isCanvasRootElement(event.target)) {
         if (!lockedRef.current) {

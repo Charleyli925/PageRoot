@@ -38,7 +38,7 @@ import {
   type ReviewSide,
 } from "./review-document";
 import type {
-  RuntimeSnapshotCaptureResult,
+  ReviewRuntimeSnapshotCaptureResult,
 } from "../components/desktop-runtime-snapshot-api";
 import {
   acceptRuntimeVisualSnapshots,
@@ -740,7 +740,7 @@ export default function AiReviewWorkspace({
       || runtimeVisualResolutionRef.current?.documents === documents
     ) return;
     const candidateKeys = new Set(documents.runtimeVisualCandidates.map(({ key }) => key));
-    const captureApi = window.htmlAIRuntimeSnapshots;
+    const captureApi = window.htmlAIReviewRuntimeSnapshots;
     if (!captureApi) {
       resolveRuntimeVisuals([]);
       return;
@@ -758,7 +758,7 @@ export default function AiReviewWorkspace({
       };
       if (!candidates.length) return [];
       try {
-        const capture: RuntimeSnapshotCaptureResult = await captureApi.capture({
+        const capture: ReviewRuntimeSnapshotCaptureResult = await captureApi.capture({
           contractVersion: documents.runtimeVisualCaptureIdentity.contractVersion,
           captureSessionId: expected.sessionId,
           sourceSha256: expected.sourceSha256,

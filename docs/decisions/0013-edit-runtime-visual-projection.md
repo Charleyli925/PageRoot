@@ -5,9 +5,9 @@
 
 ## Context
 
-> Historical decision. The Edit-only controller, full-source cache identity,
-> `tbody` support and projection protocol described below were removed by the
-> shared owner convergence. The current contract is ADR 0017.
+> Historical decision. Stage 08 removed the remaining Edit runtime capture,
+> cache and bitmap projection described below. The current contract is the
+> Review-only owner in ADR 0017.
 
 The edit iframe deliberately disables authored scripts so source mapping,
 Selection, IME and SourcePatch remain authoritative. Many existing reports,
