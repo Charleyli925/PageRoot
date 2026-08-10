@@ -176,6 +176,13 @@ async function addComment(page, sourcePath, text = (
   const composer = page.getByRole("textbox", { name: "评论内容" });
   await composer.fill(text);
   await page.getByRole("button", { name: "评论", exact: true }).click();
+  // Saving the first comment may need the Bridge's bounded project/draft
+  // authority recovery (two 15 s read attempts). Wait for the actual save
+  // boundary and the resulting geometry authority instead of racing the
+  // default 20 s assertion timeout against that recovery path.
+  await expect(composer).toBeHidden({ timeout: 45_000 });
+  await expect(page.getByRole("complementary", { name: "本轮评论" }))
+    .toHaveAttribute("data-layout-ready", "true", { timeout: 45_000 });
   await expect(page.locator(".comment-card").filter({ hasText: text }))
     .toHaveCount(1);
 }
