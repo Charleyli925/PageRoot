@@ -365,6 +365,7 @@ export async function architectureViolations() {
   );
   if (!includesInOrder(nativeCommandBoundary, [
     "const incumbent = pendingNativeCommandCallbackRef.current",
+    "?? scheduledNativeCommandCallbackRef.current",
     "authority === \"system\" && incumbent?.authority === \"user-explicit\"",
     "options.onDiscard?.(\"blocked-by-user-command\")",
     "return true",
@@ -416,6 +417,11 @@ export async function architectureViolations() {
     "const generateRequest = useCallback",
     "const openCommittedVersion = useCallback",
   );
+  const createRequestPayload = sourceSection(
+    requestBoundary,
+    "const payload = await bridgeClient.createRequest({",
+    "const run = activeRunFromRecord",
+  );
   if (
     !includesInOrder(requestBoundary, [
       "const frozen = editorRef.current?.freezeNow()",
@@ -425,6 +431,8 @@ export async function architectureViolations() {
       "bridgeClient.createRequest({",
       "expectedSourceSha256: persistedSourceSha256",
     ])
+    || !createRequestPayload
+    || /\b(?:html|baseHtml|projection)\s*:/u.test(createRequestPayload)
     || /EditRuntimeSnapshotSession|runtimeVisualProjection|runtimeVisualViewport|htmlAIRuntimeSnapshots|data-pageroot-readonly-visual/u.test(
       workbench,
     )
