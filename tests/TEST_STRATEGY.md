@@ -91,6 +91,13 @@ PR 批量是建议而非固定限制：用 CI Health 的 Ready 次数、candidat
   phase，确认 fuzzy pairing 只在兼容 bucket 内运行，并以正式 Electron 闭环
   证明变化数量和类型没有因性能优化改变；可复现实测入口是
   `npm run benchmark:review-analysis`，该诊断不增加产品内提示。
+- 完整 HTML 持久化性能决策：`npm run benchmark:persistence` 只构建一次
+  renderer，并在同一机器、同一 frozen main 与固定的 0.5/1.25/2.5MiB
+  synthetic HTML 上串行运行。它必须同时保留 external-write conflict、
+  restart recovery 与 exact-byte oracle，并报告样本数、p50/p95/max、
+  request/response bytes、renderer/Bridge RSS、renderer rAF gap 和明确的
+  `skip-12` 或 `authorize-12-pr1` 决策；不同 SHA、并行负载或旧诊断样本
+  不得混合。
   任务级跑正常闭环和一个硬失败代表场景；
   发布级覆盖复制失败、缺失 finalizer、非法 HTML、版本激活失败与终态
   返回/重开。正式 Electron 审阅用例还必须证明默认“双页 + 全部变化 +
