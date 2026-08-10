@@ -215,7 +215,7 @@ test("application boundaries encode the v3 single-source lifecycle instead of sa
   assert.doesNotMatch(
     canvasEditor,
     /textRangeToSourceEdit/,
-    "native DOM commits must use FormatSkeleton descriptors rather than the legacy flat range mapper",
+    "native DOM commits must use V2 island/direct-text scopes rather than the legacy flat range mapper",
   );
   assert.match(canvasEditor, /new IslandEditingController\(/);
   assert.match(canvasEditor, /type: "set-inline-style"/);

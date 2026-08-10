@@ -1521,7 +1521,6 @@ export default function Workbench() {
   useEffect(() => {
     const capabilities = resolveRuntimeCapabilities({
       runtimeConfig: window.htmlAIRuntime,
-      projectsApi: window.htmlAIProjects,
     });
     runtimeCapabilitiesRef.current = capabilities;
     const previewOnly = capabilities.sourceEditing !== "enabled";

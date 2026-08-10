@@ -7,8 +7,17 @@ import {
   resolveRuntimeCapabilities,
 } from "../app/application/runtime-capabilities.js";
 
-test("pure browser runtime is read-only and has no persistence authority", () => {
-  assert.deepEqual(resolveRuntimeCapabilities(), BROWSER_RUNTIME_CAPABILITIES);
+test("missing manifests fail closed even when an old projects API is present", () => {
+  assert.deepEqual(
+    resolveRuntimeCapabilities({
+      projectsApi: {
+        openHtml() {},
+        listRecentProjects() {},
+        openRecent() {},
+      },
+    }),
+    BROWSER_RUNTIME_CAPABILITIES,
+  );
 });
 
 test("the explicit desktop manifest owns editor, picker, attachment, and close capabilities", () => {
@@ -62,25 +71,7 @@ test("an invalid explicit manifest fails closed instead of guessing from APIs", 
           interactivePreview: "independent-url",
         },
       },
-      projectsApi: {
-        openHtml() {},
-        listRecentProjects() {},
-        openRecent() {},
-      },
     }),
     BROWSER_RUNTIME_CAPABILITIES,
-  );
-});
-
-test("the pre-manifest desktop API is decoded only at the compatibility ingress", () => {
-  assert.deepEqual(
-    resolveRuntimeCapabilities({
-      projectsApi: {
-        openHtml() {},
-        listRecentProjects() {},
-        openRecent() {},
-      },
-    }),
-    DESKTOP_RUNTIME_CAPABILITIES,
   );
 });
