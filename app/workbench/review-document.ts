@@ -239,15 +239,37 @@ const REVIEW_DOCUMENT_STYLE = String.raw`
     pointer-events: none !important;
   }
 
+  [data-pageroot-review-mask],
+  [data-pageroot-review-mask-background],
+  [data-pageroot-review-mask-hole],
   [data-pageroot-review-mask-dim] {
+    display: block !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    outline: none !important;
+    opacity: 1 !important;
+    filter: none !important;
+    transform: none !important;
+    pointer-events: none !important;
+  }
+
+  [data-pageroot-review-mask] {
+    mask-type: luminance !important;
+  }
+
+  [data-pageroot-review-mask-background] {
     fill: #ffffff !important;
-    fill-rule: evenodd !important;
     stroke: none !important;
   }
 
   [data-pageroot-review-mask-hole] {
-    display: none !important;
-    fill: none !important;
+    fill: #000000 !important;
+    stroke: none !important;
+  }
+
+  [data-pageroot-review-mask-dim] {
+    fill: #ffffff !important;
     stroke: none !important;
   }
 
@@ -3461,6 +3483,11 @@ function reviewBootstrap(
     }
     return runtimeVisualArrayJoin(values, "");
   };
+  // The first managed script runs before authored script. Freeze the
+  // session-derived fragment now so later authored prototype changes cannot
+  // influence a reserved SVG mask identifier.
+  const reviewMaskSessionKey = RuntimeVisualString(sessionId)
+    .replace(/[^a-z0-9_-]/giu, "_") || "session";
   const runtimeVisualQueryElements = (selector) => {
     const list = runtimeVisualDocumentQuerySelectorAll(document, selector);
     const values = [];
@@ -3480,6 +3507,7 @@ function reviewBootstrap(
   let followerGestureId = 0;
   let acceptsFollowerScroll = false;
   let projectionEpoch = 0;
+  let overlayMaskSequence = 0;
   let projectionTransitioning = false;
   let initialProjectionCommitted = false;
   let mirroringPanel = false;
@@ -5242,7 +5270,44 @@ function reviewBootstrap(
     svg.setAttribute("viewBox", "0 0 " + documentWidth + " " + height);
     svg.style.setProperty("width", documentWidth + "px", "important");
     svg.style.setProperty("height", height + "px", "important");
-    const holePaths = [];
+    const resetMaskPrimitive = (element, fill = "") => {
+      element.style.setProperty("display", "block", "important");
+      element.style.setProperty("margin", "0", "important");
+      element.style.setProperty("padding", "0", "important");
+      element.style.setProperty("border", "0", "important");
+      element.style.setProperty("outline", "none", "important");
+      element.style.setProperty("opacity", "1", "important");
+      element.style.setProperty("filter", "none", "important");
+      element.style.setProperty("transform", "none", "important");
+      element.style.setProperty("pointer-events", "none", "important");
+      if (!fill) return;
+      element.style.setProperty("fill", fill, "important");
+      element.style.setProperty("fill-opacity", "1", "important");
+      element.style.setProperty("stroke", "none", "important");
+    };
+    const mask = document.createElementNS(namespace, "mask");
+    const maskId = "pageroot-review-mask-"
+      + reviewMaskSessionKey + "-" + side + "-" + projectionEpoch + "-" + (++overlayMaskSequence);
+    mask.setAttribute("data-pageroot-review-mask", "true");
+    mask.setAttribute("id", maskId);
+    mask.setAttribute("maskUnits", "userSpaceOnUse");
+    mask.setAttribute("maskContentUnits", "userSpaceOnUse");
+    mask.setAttribute("mask-type", "luminance");
+    mask.setAttribute("x", "0");
+    mask.setAttribute("y", "0");
+    mask.setAttribute("width", String(documentWidth));
+    mask.setAttribute("height", String(height));
+    resetMaskPrimitive(mask);
+    mask.style.setProperty("mask-type", "luminance", "important");
+    const maskBackground = document.createElementNS(namespace, "rect");
+    maskBackground.setAttribute("data-pageroot-review-mask-background", "true");
+    maskBackground.setAttribute("x", "0");
+    maskBackground.setAttribute("y", "0");
+    maskBackground.setAttribute("width", String(documentWidth));
+    maskBackground.setAttribute("height", String(height));
+    maskBackground.setAttribute("fill", "#ffffff");
+    resetMaskPrimitive(maskBackground, "#ffffff");
+    mask.append(maskBackground);
     merged.forEach((record) => {
       const horizontalInset = record.types.length === 1 && record.types[0] === "text"
         ? 0
@@ -5279,22 +5344,27 @@ function reviewBootstrap(
       hole.setAttribute("data-top", String(top));
       hole.setAttribute("data-width", String(width));
       hole.setAttribute("data-height", String(holeHeight));
-      hole.setAttribute("fill", "none");
-      holePaths.push(pathData);
-      svg.append(hole);
+      hole.setAttribute("fill", "#000000");
+      resetMaskPrimitive(hole, "#000000");
+      mask.append(hole);
     });
-    const dim = document.createElementNS(namespace, "path");
+    const defs = document.createElementNS(namespace, "defs");
+    defs.append(mask);
+    svg.append(defs);
+    const dim = document.createElementNS(namespace, "rect");
     dim.setAttribute("data-pageroot-review-mask-dim", "true");
-    dim.setAttribute(
-      "d",
-      "M 0 0 H " + documentWidth + " V " + height + " H 0 Z " + holePaths.join(" "),
-    );
+    dim.setAttribute("x", "0");
+    dim.setAttribute("y", "0");
+    dim.setAttribute("width", String(documentWidth));
+    dim.setAttribute("height", String(height));
     dim.setAttribute("fill", "#ffffff");
-    dim.setAttribute("fill-rule", "evenodd");
-    dim.setAttribute("clip-rule", "evenodd");
+    dim.setAttribute("mask", "url(#" + maskId + ")");
     const contextVisibility = Math.max(0, Math.min(100, Number(currentState.transparency ?? 18))) / 100;
-    dim.setAttribute("fill-opacity", String(Math.round((1 - contextVisibility) * 1_000) / 1_000));
-    svg.prepend(dim);
+    const dimOpacity = String(Math.round((1 - contextVisibility) * 1_000) / 1_000);
+    dim.setAttribute("fill-opacity", dimOpacity);
+    resetMaskPrimitive(dim, "#ffffff");
+    dim.style.setProperty("fill-opacity", dimOpacity, "important");
+    svg.append(dim);
     layer.append(svg);
     merged.forEach((record) => {
       const horizontalInset = record.types.length === 1 && record.types[0] === "text"
