@@ -206,6 +206,7 @@ they do not import application services.
 | Pure source-history validation, cursor transitions and exact Patch replay | `shared/source-history.mjs`, re-exported through `app/domain/source-history.js` |
 | Bridge-side draft command validation and CAS | `scripts/draft-service.mjs` |
 | Bridge-side source-history repository, autosave preparation and action application | `scripts/source-history-service.mjs` |
+| Bridge-side current-source commit/recovery WAL, same-directory replacement, history application, metadata settlement and exactly-once audit outbox | `scripts/source-transaction-service.mjs` |
 | Bridge-side registered command identity and source-observation classification | `scripts/project-context-service.mjs` |
 | Close, switch, submit and history obligations | `app/application/drain-coordinator.js` |
 | Late query rejection and monotonic draft reads | `app/application/project-query-fence.js` |
@@ -253,6 +254,13 @@ the only production text and source-mutation route.
 ## Persistence
 
 Direct edits form ordered revisions and are written through a single queue. Every write checks the expected source Hash, uses a same-directory temporary file and atomic replacement, then rereads the result. External modification causes a fail-closed conflict.
+
+`/autosave` and `/source-history/action` retain their own transport decoding,
+revision/action checks and response shapes, but both enter the one Bridge
+`SourceTransaction` kernel. That kernel owns recovery-byte preparation, the
+durable `pendingWrite` WAL, source/history application, project/runtime
+settlement, exactly-once audit replay and cleanup. There is no second inline
+current-source writer or recovery state machine.
 
 At close, `DocumentSession` independently hashes the frozen renderer HTML and
 accepts any acknowledged persisted revision at or beyond the close cutoff. A

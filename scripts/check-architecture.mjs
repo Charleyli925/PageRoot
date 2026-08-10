@@ -168,6 +168,44 @@ export async function architectureViolations() {
     }
   }
 
+  const workspaceBridge = await readFile(
+    path.join(PRODUCT_ROOT, "scripts", "workspace-bridge.mjs"),
+    "utf8",
+  );
+  const sourceTransactionService = await readFile(
+    path.join(PRODUCT_ROOT, "scripts", "source-transaction-service.mjs"),
+    "utf8",
+  );
+  if (
+    !workspaceBridge.includes('from "./source-transaction-service.mjs"')
+    || !workspaceBridge.includes("commitSourceTransaction(")
+    || !workspaceBridge.includes("recoverPendingSourceTransaction(")
+  ) {
+    violations.push(
+      "scripts/workspace-bridge.mjs: autosave and source-history routes must delegate to SourceTransaction",
+    );
+  }
+  if (
+    /async function atomicReplaceSource\b/.test(workspaceBridge)
+    || /\bwriteSourceHistory\s*\(/.test(workspaceBridge)
+  ) {
+    violations.push(
+      "scripts/workspace-bridge.mjs: current-source writer belongs to source-transaction-service",
+    );
+  }
+  if (
+    !sourceTransactionService.includes("export async function commitSourceTransaction")
+    || !sourceTransactionService.includes(
+      "export async function recoverPendingSourceTransaction",
+    )
+    || !/async function atomicReplaceSource\b/.test(sourceTransactionService)
+    || !/\bwriteSourceHistory\s*\(/.test(sourceTransactionService)
+  ) {
+    violations.push(
+      "scripts/source-transaction-service.mjs: SourceTransaction must own commit, recovery, and source-history application",
+    );
+  }
+
   const workbench = await readFile(
     path.join(PRODUCT_ROOT, "app", "workbench.tsx"),
     "utf8",

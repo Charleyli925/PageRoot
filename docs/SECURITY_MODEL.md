@@ -9,7 +9,9 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
 - Project-path allowlisting and real-path checks for privileged file operations
 - Registry-bound readable project-directory validation; names are one safe path
   segment and must carry the short token of their internal `projectId`
-- Hash-checked atomic writes that stop on external modification
+- One hash-checked Bridge SourceTransaction kernel for autosave and source
+  history, with same-directory atomic replacement, durable recovery bytes,
+  pending-write/audit replay and fail-closed external-modification checks
 - Bounded source-history writes that accept only the actual forward and inverse
   SourcePatch ranges, verify the complete before/after Hash chain, and reject a
   stale cursor, reused action identity or inconsistent replay ledger

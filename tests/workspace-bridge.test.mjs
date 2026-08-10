@@ -1762,6 +1762,110 @@ test("source history recovery fails safe on both sides of the source commit poin
   }
 });
 
+test("source-history actions share every SourceTransaction crash boundary", async (t) => {
+  for (const failpoint of [
+    "after-autosave-prepared",
+    "after-autosave-source-applied",
+    "after-autosave-project-applied",
+    "after-autosave-audit-applied",
+  ]) {
+    const environment = await createEnvironment(t);
+    const sourcePath = join(
+      environment.sources,
+      `source-history-action-${failpoint}.html`,
+    );
+    const before = htmlPage(`history action ${failpoint}`);
+    const after = before.replace(
+      `<h1>history action ${failpoint}</h1>`,
+      `<h1>history action changed ${failpoint}</h1>`,
+    );
+    await writeFile(sourcePath, before, "utf8");
+    const initialBridge = await environment.start();
+    const opened = (await openWorkspace(initialBridge.baseUrl, sourcePath)).body;
+    const beforeText = `history action ${failpoint}`;
+    const afterText = `history action changed ${failpoint}`;
+    const startOffset = before.indexOf(`<h1>${beforeText}</h1>`) + 4;
+    const saved = await postJson(initialBridge.baseUrl, "/autosave", {
+      sourcePath,
+      projectId: opened.projectId,
+      documentId: opened.documentId,
+      editRevision: 1,
+      expectedSourceSha256: hash(before),
+      html: after,
+      sourceHistoryOperations: [{
+        operationId:
+          `sourceop_action_${failpoint.replaceAll("-", "_")}_001`,
+        kind: "text",
+        editRevision: 1,
+        createdAt: "2026-08-10T08:00:00.000Z",
+        beforeSourceSha256: hash(before),
+        afterSourceSha256: hash(after),
+        forwardPatches: [{
+          startOffset,
+          endOffset: startOffset + beforeText.length,
+          before: beforeText,
+          after: afterText,
+          kind: "text",
+        }],
+        reversePatches: [{
+          startOffset,
+          endOffset: startOffset + afterText.length,
+          before: afterText,
+          after: beforeText,
+          kind: "inverse:text",
+        }],
+        beforeTarget: { id: "history-action-heading" },
+        afterTarget: { id: "history-action-heading" },
+      }],
+    });
+    assert.equal(saved.response.status, 200, JSON.stringify(saved.body));
+    await stopChild(initialBridge.child);
+
+    const interruptedBridge = await environment.start({
+      HTML_AI_FAILPOINT: failpoint,
+    });
+    const actionId =
+      `sourceaction_${failpoint.replaceAll("-", "_")}_undo_001`;
+    const interrupted = await postJson(
+      interruptedBridge.baseUrl,
+      "/source-history/action",
+      {
+        sourcePath,
+        projectId: opened.projectId,
+        documentId: opened.documentId,
+        direction: "undo",
+        actionId,
+        expectedSourceSha256: hash(after),
+        expectedHistoryRevision: 1,
+        expectedHistoryCursor: 1,
+      },
+    );
+    assert.equal(interrupted.response.status, 500, JSON.stringify(interrupted.body));
+    assert.equal(
+      await readFile(sourcePath, "utf8"),
+      failpoint === "after-autosave-prepared" ? after : before,
+    );
+    await stopChild(interruptedBridge.child);
+
+    const restarted = await environment.start();
+    const recovered = await openWorkspace(restarted.baseUrl, sourcePath);
+    assert.equal(recovered.response.status, 200, JSON.stringify(recovered.body));
+    assert.equal(await readFile(sourcePath, "utf8"), before);
+    assert.equal(recovered.body.runtimeState.pendingWrite, null);
+    assert.equal(recovered.body.runtimeState.lastPersistedRevision, 2);
+    assert.equal(recovered.body.sourceHistory.entries.length, 1);
+    assert.equal(recovered.body.sourceHistory.cursor, 0);
+    const auditLines = (await readFile(
+      join(opened.projectRoot, "edit-audit.jsonl"),
+      "utf8",
+    )).trim().split("\n").map((line) => JSON.parse(line));
+    assert.equal(
+      auditLines.filter((event) => event.eventId === `history_${actionId}`).length,
+      1,
+    );
+  }
+});
+
 test("version history stays read-only and the restore endpoint is unavailable", async (t) => {
   const environment = await createEnvironment(t);
   const sourcePath = join(environment.sources, "read-only-history.html");

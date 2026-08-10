@@ -319,10 +319,10 @@
         "^app/domain/(?:draft-aggregate|run-lifecycle|runtime-snapshot-hosts|runtime-visual-contract|source-history)\\.(?:js|d\\.ts)$",
         "^app/workbench/(?:version-model|version-compatibility-decoder)\\.(?:js|ts)$",
         "^shared/(?:direct-edit-compatibility|draft-aggregate|source-history)\\.mjs$",
-        "^scripts/(?:check-architecture|draft-aggregate|draft-command-decoder|draft-service|project-context-service|source-history-service)\\.mjs$",
+        "^scripts/(?:check-architecture|draft-aggregate|draft-command-decoder|draft-service|project-context-service|source-history-service|source-transaction-service)\\.mjs$",
         "^tests/(?:architecture-boundaries|bridge-client|comment-session|compatibility-decoders|document-session|draft-aggregate|draft-service|draft-session|drain-coordinator|external-file-open-session|local-action-outcomes|project-application-session|project-open-queue|project-query-fence|project-rules-session|project-session|recovery-store|review-analysis-session|run-lifecycle|run-session|runtime-capabilities|source-history|source-history-session|version-session)\\.test\\.mjs$",
         "^(?:CONTRIBUTING|docs/(?:ARCHITECTURE|ARCHITECTURE_CONTRACT|COMPATIBILITY|STATE_OWNERSHIP|ENGINEERING_STANDARDS|SECURITY_MODEL|RUNTIME_VISUAL_CONTRACT))\\.md$",
-        "^docs/decisions/(?:0003-session-ownership-and-mutation-outcomes|0004-v2-editable-islands|0007-independent-interactive-preview|0008-safe-presentation-actions-in-edit-mode|0009-persistent-source-patch-history|0011-workbench-session-decomposition|0012-id-first-project-context|0013-edit-runtime-visual-projection|0015-safe-host-fallback-and-direct-text-nodes|0016-owner-controlled-review-runtime-capture|0017-shared-runtime-snapshot-owner)\\.md$"
+        "^docs/decisions/(?:0003-session-ownership-and-mutation-outcomes|0004-v2-editable-islands|0007-independent-interactive-preview|0008-safe-presentation-actions-in-edit-mode|0009-persistent-source-patch-history|0011-workbench-session-decomposition|0012-id-first-project-context|0013-edit-runtime-visual-projection|0015-safe-host-fallback-and-direct-text-nodes|0016-owner-controlled-review-runtime-capture|0017-shared-runtime-snapshot-owner|0018-source-transaction-kernel)\\.md$"
       ],
       "suites": ["typecheck"],
       "nodeTests": [
@@ -531,7 +531,7 @@
     {
       "id": "bridge-lifecycle",
       "patterns": [
-        "^scripts/(?:workspace-bridge|lifecycle-core|finalize-attempt|record-user-supplement|user-supplement-core|candidate-assessment(?:-decoder)?|scope-validator|html-source-parser|attachment-storage|draft-aggregate|draft-command-decoder|draft-service|project-context-service|source-history-service|product-contract|target-identity)\\.mjs$",
+        "^scripts/(?:workspace-bridge|lifecycle-core|finalize-attempt|record-user-supplement|user-supplement-core|candidate-assessment(?:-decoder)?|scope-validator|html-source-parser|attachment-storage|draft-aggregate|draft-command-decoder|draft-service|project-context-service|source-history-service|source-transaction-service|product-contract|target-identity)\\.mjs$",
         "^app/workbench/(?:version-model|version-compatibility-decoder)\\.(?:js|ts)$"
       ],
       "suites": ["ai-smoke"],
