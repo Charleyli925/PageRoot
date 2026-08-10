@@ -6,6 +6,7 @@ import {
   createRuntimeSnapshotCaptureController,
   validateRuntimeSnapshotCaptureRequest,
 } from "../desktop/runtime-visual-capture-owner.mjs";
+import { RUNTIME_VISUAL_CONTRACT } from "../app/domain/runtime-visual-contract.js";
 
 const PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAEElEQVR42mNk+M/wHwAEAQH/2p9Z5QAAAABJRU5ErkJggg==",
@@ -14,6 +15,15 @@ const PNG = Buffer.from(
 const HTML = "<!doctype html><html><body><main><canvas id=chart></canvas></main></body></html>";
 const SOURCE_SHA256 = `sha256:${createHash("sha256").update(HTML, "utf8").digest("hex")}`;
 const MULTI_HOST_HTML = "<!doctype html><html><body><main><canvas id=chart></canvas><canvas id=chart-two></canvas></main></body></html>";
+
+function pngWithDimensions(width, height, byteLength = PNG.byteLength) {
+  const png = new Uint8Array(Math.max(byteLength, PNG.byteLength));
+  png.set(PNG);
+  const view = new DataView(png.buffer, png.byteOffset, png.byteLength);
+  view.setUint32(16, width, false);
+  view.setUint32(20, height, false);
+  return png;
+}
 
 function request(overrides = {}) {
   return {
@@ -197,6 +207,15 @@ test("runtime snapshot owner rejects non-authoritative or unsupported capture in
     })),
     /identity/u,
   );
+  assert.throws(
+    () => validateRuntimeSnapshotCaptureRequest(request({
+      viewport: {
+        width: RUNTIME_VISUAL_CONTRACT.pageBudget.viewport.maxWidth + 1,
+        height: 640,
+      },
+    })),
+    /viewport/u,
+  );
 });
 
 test("runtime snapshot owner captures once through an isolated one-use Electron session", async () => {
@@ -351,6 +370,22 @@ test("runtime snapshot owner silently marks invalid PNG output unavailable", asy
     byteLength: 0,
     pngBytes: new Uint8Array(),
   });
+});
+
+test("runtime snapshot owner fails closed for hostile >2MB and >4096 PNG results", async () => {
+  const { pngBytes, pngDimension } = RUNTIME_VISUAL_CONTRACT.pageBudget;
+  const hostilePngs = [
+    pngWithDimensions(1, 1, pngBytes + 1),
+    pngWithDimensions(pngDimension + 1, 1),
+    pngWithDimensions(1, pngDimension + 1),
+  ];
+
+  for (const png of hostilePngs) {
+    const { controller } = fakeOwner({ png });
+    const captured = await controller.capture(request());
+    assert.equal(captured.outcome, "captured");
+    assert.equal(captured.envelope.runtimeVisualSnapshots[0].state, "unavailable");
+  }
 });
 
 test("runtime snapshot owner reports its hard deadline and cleans up", async () => {

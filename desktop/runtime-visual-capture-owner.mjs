@@ -10,15 +10,10 @@ import {
 
 const RUNTIME_SNAPSHOT_CAPTURE_WORLD_ID = 91_117;
 const RUNTIME_SNAPSHOT_CAPTURE_PARTITION_PREFIX = "pageroot-runtime-snapshot-";
-const MAX_VIEWPORT_WIDTH = 4_096;
-const MAX_VIEWPORT_HEIGHT = 2_400;
-const MIN_VIEWPORT_WIDTH = 320;
-const MIN_VIEWPORT_HEIGHT = 320;
 const MAX_PATH_DEPTH = 256;
 const MAX_IDENTITY_VALUE_LENGTH = 2_048;
-const MAX_PNG_BYTES = 2_000_000;
-const MAX_PNG_DIMENSION = 4_096;
 const OWNER_CLEANUP_GRACE_MS = 250;
+const RUNTIME_VISUAL_PAGE_BUDGET = RUNTIME_VISUAL_CONTRACT.pageBudget;
 const CAPTURE_REQUEST_KEYS = new Set([
   "contractVersion",
   "captureSessionId",
@@ -290,8 +285,8 @@ export function validateRuntimeSnapshotCaptureRequest(value) {
   ) {
     throw new TypeError("Runtime snapshot capture viewport is invalid.");
   }
-  const width = boundedInteger(value.viewport.width, MIN_VIEWPORT_WIDTH, MAX_VIEWPORT_WIDTH);
-  const height = boundedInteger(value.viewport.height, MIN_VIEWPORT_HEIGHT, MAX_VIEWPORT_HEIGHT);
+  const width = boundedInteger(value.viewport.width, RUNTIME_VISUAL_PAGE_BUDGET.viewport.minWidth, RUNTIME_VISUAL_PAGE_BUDGET.viewport.maxWidth);
+  const height = boundedInteger(value.viewport.height, RUNTIME_VISUAL_PAGE_BUDGET.viewport.minHeight, RUNTIME_VISUAL_PAGE_BUDGET.viewport.maxHeight);
   if (width === null || height === null) {
     throw new TypeError("Runtime snapshot capture viewport is invalid.");
   }
@@ -457,7 +452,7 @@ function unavailableSnapshot(key) {
 function validatedPng(image) {
   if (!image || typeof image.isEmpty !== "function" || image.isEmpty()) return null;
   const png = image.toPNG?.();
-  if (!(png instanceof Uint8Array) || png.byteLength < 24 || png.byteLength > MAX_PNG_BYTES) {
+  if (!(png instanceof Uint8Array) || png.byteLength < 24 || png.byteLength > RUNTIME_VISUAL_PAGE_BUDGET.pngBytes) {
     return null;
   }
   if (![137, 80, 78, 71, 13, 10, 26, 10].every((byte, index) => png[index] === byte)) {
@@ -470,9 +465,8 @@ function validatedPng(image) {
   if (
     width < 1
     || height < 1
-    || width > MAX_PNG_DIMENSION
-    || height > MAX_PNG_DIMENSION
-    || width * height > RUNTIME_VISUAL_CONTRACT.pageBudget.canvasPixels
+    || Math.max(width, height) > RUNTIME_VISUAL_PAGE_BUDGET.pngDimension
+    || width * height > RUNTIME_VISUAL_PAGE_BUDGET.canvasPixels
   ) return null;
   const pngBytes = new Uint8Array(png);
   return Object.freeze({
@@ -685,8 +679,8 @@ export function createRuntimeSnapshotCaptureController({
           continue;
         }
         try {
-          const remainingPixels = RUNTIME_VISUAL_CONTRACT.pageBudget.canvasPixels - capturedPixels;
-          const remainingBytes = RUNTIME_VISUAL_CONTRACT.pageBudget.visualBytes - capturedBytes;
+          const remainingPixels = RUNTIME_VISUAL_PAGE_BUDGET.canvasPixels - capturedPixels;
+          const remainingBytes = RUNTIME_VISUAL_PAGE_BUDGET.aggregatePngBytes - capturedBytes;
           if (remainingPixels < 1 || remainingBytes < 1) {
             snapshots.push(unavailableSnapshot(candidate.key));
             continue;

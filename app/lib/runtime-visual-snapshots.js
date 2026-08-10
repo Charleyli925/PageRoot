@@ -6,10 +6,7 @@ import { RUNTIME_VISUAL_CONTRACT } from "../domain/runtime-visual-contract.js";
 export const RUNTIME_VISUAL_SNAPSHOT_LIMIT =
   RUNTIME_VISUAL_CONTRACT.pageBudget.visualLimit;
 
-const MAX_PNG_BYTES = RUNTIME_VISUAL_CONTRACT.pageBudget.visualBytes;
-const MAX_PNG_PIXELS = RUNTIME_VISUAL_CONTRACT.pageBudget.canvasPixels;
-const MAX_LAYOUT_WIDTH = 4_096;
-const MAX_LAYOUT_HEIGHT = 2_400;
+const RUNTIME_VISUAL_PAGE_BUDGET = RUNTIME_VISUAL_CONTRACT.pageBudget;
 const SNAPSHOT_KEYS = new Set([
   "key",
   "state",
@@ -41,7 +38,7 @@ function boundedPositiveInteger(value, maximum) {
 }
 
 function copiedPngBytes(value) {
-  return value instanceof Uint8Array ? new Uint8Array(value) : null;
+  return value instanceof Uint8Array && value.byteLength <= RUNTIME_VISUAL_PAGE_BUDGET.pngBytes ? new Uint8Array(value) : null;
 }
 
 function pngDimensions(pngBytes) {
@@ -56,7 +53,8 @@ function pngDimensions(pngBytes) {
   if (
     width < 1
     || height < 1
-    || width * height > MAX_PNG_PIXELS
+    || Math.max(width, height) > RUNTIME_VISUAL_PAGE_BUDGET.pngDimension
+    || width * height > RUNTIME_VISUAL_PAGE_BUDGET.canvasPixels
   ) return null;
   return Object.freeze({ width, height });
 }
@@ -88,9 +86,9 @@ function acceptedUnavailableSnapshot(rawSnapshot, key) {
 
 function acceptedCapturedSnapshot(rawSnapshot, key) {
   const pngBytes = copiedPngBytes(rawSnapshot.pngBytes);
-  const byteLength = boundedInteger(rawSnapshot.byteLength, MAX_PNG_BYTES);
-  const layoutWidth = boundedPositiveInteger(rawSnapshot.layoutWidth, MAX_LAYOUT_WIDTH);
-  const layoutHeight = boundedPositiveInteger(rawSnapshot.layoutHeight, MAX_LAYOUT_HEIGHT);
+  const byteLength = boundedInteger(rawSnapshot.byteLength, RUNTIME_VISUAL_PAGE_BUDGET.pngBytes);
+  const layoutWidth = boundedPositiveInteger(rawSnapshot.layoutWidth, RUNTIME_VISUAL_PAGE_BUDGET.viewport.maxWidth);
+  const layoutHeight = boundedPositiveInteger(rawSnapshot.layoutHeight, RUNTIME_VISUAL_PAGE_BUDGET.viewport.maxHeight);
   if (
     !pngBytes
     || byteLength === null
@@ -155,8 +153,8 @@ export function acceptRuntimeVisualSnapshots(value, allowedCandidateKeys) {
     pageBytes += snapshot.byteLength;
     pagePixels += snapshot.width * snapshot.height;
     if (
-      pageBytes > RUNTIME_VISUAL_CONTRACT.pageBudget.visualBytes
-      || pagePixels > MAX_PNG_PIXELS
+      pageBytes > RUNTIME_VISUAL_PAGE_BUDGET.aggregatePngBytes
+      || pagePixels > RUNTIME_VISUAL_PAGE_BUDGET.canvasPixels
     ) return null;
     seen.add(snapshot.key);
     accepted.push(snapshot);
