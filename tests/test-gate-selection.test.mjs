@@ -73,7 +73,11 @@ const TASK_OWNER_CASES = [
     nodeTests: ["tests/application-update.test.mjs"],
     suites: ["typecheck", "lint", "node-targeted", "build-desktop", "electron-smoke"],
     directOwners: ["tests/application-update.test.mjs"],
-    unrelatedOwners: ["tests/desktop-file-writer.test.mjs", "tests/review-runtime-capture-owner.test.mjs"],
+    unrelatedOwners: [
+      "tests/desktop-file-writer.test.mjs",
+      "tests/desktop-package.test.mjs",
+      "tests/review-runtime-capture-owner.test.mjs",
+    ],
   },
   {
     file: "desktop/runtime-visual-capture-owner.mjs",
@@ -228,6 +232,73 @@ test("a file with two direct owners safely unions their coverage", () => {
     "build-desktop",
     "electron-smoke",
     "ai-smoke",
+  ]);
+});
+
+test("delivery contracts select their direct package, verifier and release-architecture owners", () => {
+  const packageManifest = selectGatePlan({
+    map,
+    lane: "edit",
+    changedFiles: ["package.json"],
+  });
+  assert.deepEqual(packageManifest.selectedNodeTests, [
+    "tests/dependency-audit-policy.test.mjs",
+    "tests/desktop-package.test.mjs",
+    "tests/packaged-artifact-gate.test.mjs",
+  ]);
+
+  const verifier = selectGatePlan({
+    map,
+    lane: "edit",
+    changedFiles: ["scripts/verify-packaged-artifact.mjs"],
+  });
+  assert.deepEqual(verifier.selectedNodeTests, [
+    "tests/desktop-package.test.mjs",
+    "tests/packaged-artifact-gate.test.mjs",
+  ]);
+
+  const releaseWorkflow = selectGatePlan({
+    map,
+    lane: "edit",
+    changedFiles: [".github/workflows/release-candidate.yml"],
+  });
+  for (const owner of [
+    "tests/package-delivery-report.test.mjs",
+    "tests/release-app-stage.test.mjs",
+    "tests/release-candidate-provenance.test.mjs",
+    "tests/source-gate-provenance.test.mjs",
+  ]) {
+    assert.ok(releaseWorkflow.selectedNodeTests.includes(owner));
+  }
+  assert.equal(
+    releaseWorkflow.selectedNodeTests.includes("tests/desktop-package.test.mjs"),
+    false,
+  );
+
+  const updateController = selectGatePlan({
+    map,
+    lane: "edit",
+    changedFiles: ["desktop/application-update.mjs"],
+  });
+  assert.deepEqual(updateController.selectedNodeTests, [
+    "tests/application-update.test.mjs",
+  ]);
+});
+
+test("shared release evidence fixtures select every direct consumer and their own freshness contract", () => {
+  const plan = selectGatePlan({
+    map,
+    lane: "edit",
+    changedFiles: ["tests/helpers/release-evidence-fixtures.mjs"],
+  });
+  assert.deepEqual(plan.selectedNodeTests, [
+    "tests/developer-preview-package.test.mjs",
+    "tests/packaged-artifact-gate.test.mjs",
+    "tests/release-app-stage.test.mjs",
+    "tests/release-candidate-provenance.test.mjs",
+    "tests/release-evidence-fixtures.test.mjs",
+    "tests/release-provenance.test.mjs",
+    "tests/source-gate-provenance.test.mjs",
   ]);
 });
 

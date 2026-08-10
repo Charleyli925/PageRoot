@@ -17,32 +17,49 @@ import {
   releaseCandidateArtifactName,
   verifyReleaseCandidateBundle,
 } from "../scripts/release-candidate-provenance.mjs";
+import {
+  fixtureBuildInfo,
+  fixtureCandidateIdentity,
+} from "./helpers/release-evidence-fixtures.mjs";
 
 const productRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const commitSha = "a".repeat(40);
-const treeSha = "b".repeat(40);
-const packageVersion = "0.8.9";
+const candidateFixture = fixtureCandidateIdentity();
+const {
+  commitSha,
+  treeSha,
+  packageVersion,
+} = candidateFixture;
 const artifactName = releaseCandidateArtifactName(treeSha, packageVersion, "arm64", 1);
 const now = new Date("2026-07-24T12:00:00.000Z");
 
 function evidence(overrides = {}) {
+  const identity = fixtureCandidateIdentity();
   return {
-    currentCommitSha: commitSha,
-    currentTreeSha: treeSha,
-    packageVersion,
+    currentCommitSha: identity.commitSha,
+    currentTreeSha: identity.treeSha,
+    packageVersion: identity.packageVersion,
     architecture: "arm64",
     workflowRuns: [{
       id: 501,
       event: "workflow_dispatch",
       status: "completed",
       conclusion: "success",
-      head_sha: commitSha,
+      head_sha: identity.commitSha,
       head_branch: "main",
       run_attempt: 1,
       updated_at: "2026-07-24T11:00:00.000Z",
     }],
     artifactsByRunId: {
-      501: [{ id: 601, name: artifactName, expired: false }],
+      501: [{
+        id: 601,
+        name: releaseCandidateArtifactName(
+          identity.treeSha,
+          identity.packageVersion,
+          "arm64",
+          1,
+        ),
+        expired: false,
+      }],
     },
     now,
     maxAgeHours: 72,
@@ -129,17 +146,11 @@ test("a rerun resolves only the artifact created by its exact run attempt", () =
   })).reason, "matching_candidate_artifact_missing");
 });
 
-test("downloaded candidate verification rejects any changed release byte", async (t) => {
+test("downloaded candidate verification rejects changed release bytes and malformed provenance", async (t) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "pageroot-release-candidate-test-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const builtAt = "2026-07-24T11:00:00.000Z";
-  const identity = {
-    commitSha,
-    treeSha,
-    packageVersion,
-    lockVersion: packageVersion,
-    packageJson: { name: "pageroot" },
-  };
+  const identity = fixtureCandidateIdentity({ packageVersion });
   const zipName = `PageRoot-${packageVersion}-arm64.zip`;
   const files = {
     [`PageRoot-${packageVersion}-arm64.dmg`]: Buffer.from("synthetic dmg bytes"),
@@ -155,16 +166,15 @@ test("downloaded candidate verification rejects any changed release byte", async
       architectures: ["arm64"],
       publishedAt: builtAt,
     }, null, 2)}\n`),
-    "build-info.json": Buffer.from(`${JSON.stringify({
-      schemaVersion: 1,
-      name: "pageroot",
-      version: packageVersion,
-      architecture: "arm64",
-      sourceRepository: "https://github.com/Charleyli925/PageRoot",
-      commitSha,
-      treeSha,
-      builtAt,
-    }, null, 2)}\n`),
+    "build-info.json": Buffer.from(
+      JSON.stringify(fixtureBuildInfo({
+        version: packageVersion,
+        architecture: "arm64",
+        commitSha,
+        treeSha,
+        builtAt,
+      }), null, 2) + "\n",
+    ),
   };
   const dmgName = `PageRoot-${packageVersion}-arm64.dmg`;
   files["SHA256SUMS.txt"] = Buffer.from(
@@ -183,28 +193,30 @@ test("downloaded candidate verification rejects any changed release byte", async
     sha256: `sha256:${createHash("sha256").update(files[name]).digest("hex")}`,
     size: (await stat(path.join(directory, name))).size,
   })));
-  await writeFile(
-    path.join(directory, "release-candidate.json"),
-    `${JSON.stringify({
-      schemaVersion: 1,
-      repository: "Charleyli925/PageRoot",
-      event: "workflow_dispatch",
-      architecture: "arm64",
-      candidateCommitSha: commitSha,
-      candidateTreeSha: treeSha,
+  const attestation = {
+    schemaVersion: 1,
+    repository: "Charleyli925/PageRoot",
+    event: "workflow_dispatch",
+    architecture: "arm64",
+    candidateCommitSha: commitSha,
+    candidateTreeSha: treeSha,
+    packageVersion,
+    packageLockVersion: packageVersion,
+    sourceGate: {
+      workflowRunId: 400,
+      treeSha,
       packageVersion,
-      packageLockVersion: packageVersion,
-      sourceGate: {
-        workflowRunId: 400,
-        treeSha,
-        packageVersion,
-      },
-      workflowRunId: 501,
-      workflowRunAttempt: 1,
-      artifactName,
-      createdAt: now.toISOString(),
-      assets,
-    }, null, 2)}\n`,
+    },
+    workflowRunId: 501,
+    workflowRunAttempt: 1,
+    artifactName,
+    createdAt: now.toISOString(),
+    assets,
+  };
+  const attestationPath = path.join(directory, "release-candidate.json");
+  await writeFile(
+    attestationPath,
+    JSON.stringify(attestation, null, 2) + "\n",
   );
 
   await assert.doesNotReject(() => verifyReleaseCandidateBundle({
@@ -215,18 +227,66 @@ test("downloaded candidate verification rejects any changed release byte", async
     runId: 501,
     runAttempt: 1,
   }));
-  await writeFile(path.join(directory, dmgName), "tampered");
-  await assert.rejects(
-    () => verifyReleaseCandidateBundle({
-      directory,
-      identity,
-      architecture: "arm64",
-      repository: "Charleyli925/PageRoot",
-      runId: 501,
-      runAttempt: 1,
-    }),
-    /asset bytes do not match/u,
-  );
+  const cases = [
+    {
+      name: "changed release byte",
+      mutate: () => writeFile(path.join(directory, dmgName), "tampered"),
+      expected: /asset bytes do not match/u,
+    },
+    {
+      name: "candidate tree drift",
+      mutate: () => writeFile(
+        attestationPath,
+        JSON.stringify({
+          ...attestation,
+          candidateTreeSha: "c".repeat(40),
+        }, null, 2) + "\n",
+      ),
+      expected: /provenance mismatch for candidateTreeSha/u,
+    },
+    {
+      name: "missing source-gate identity",
+      mutate: () => {
+        const withoutSourceGate = { ...attestation };
+        delete withoutSourceGate.sourceGate;
+        return writeFile(
+          attestationPath,
+          JSON.stringify(withoutSourceGate, null, 2) + "\n",
+        );
+      },
+      expected: /source-gate identity does not match/u,
+    },
+    {
+      name: "incomplete asset manifest",
+      mutate: () => writeFile(
+        attestationPath,
+        JSON.stringify({
+          ...attestation,
+          assets: attestation.assets.slice(1),
+        }, null, 2) + "\n",
+      ),
+      expected: /asset manifest has an unexpected shape/u,
+    },
+  ];
+  for (const fixtureCase of cases) {
+    await fixtureCase.mutate();
+    await assert.rejects(
+      () => verifyReleaseCandidateBundle({
+        directory,
+        identity,
+        architecture: "arm64",
+        repository: "Charleyli925/PageRoot",
+        runId: 501,
+        runAttempt: 1,
+      }),
+      fixtureCase.expected,
+      fixtureCase.name,
+    );
+    await Promise.all([
+      writeFile(path.join(directory, dmgName), files[dmgName]),
+      writeFile(attestationPath, JSON.stringify(attestation, null, 2) + "\n"),
+    ]);
+  }
 });
 
 test("release workflows build before tagging and publish the verified candidate bytes", async () => {

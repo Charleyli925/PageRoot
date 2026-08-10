@@ -314,7 +314,6 @@
         "^CONTRIBUTING\\.md$",
         "^docs/(?:CODEX_WORKFLOW|DEVELOPMENT|GIT_WORKFLOW)\\.md$",
         "^docs/decisions/0010-worktree-branch-lifecycle\\.md$",
-        "^package\\.json$",
         "^scripts/task-workflow\\.mjs$",
         "^tests/task-workflow\\.test\\.mjs$"
       ],
@@ -685,7 +684,6 @@
         "tests/bridge-shutdown.test.mjs",
         "tests/bridge-startup.test.mjs",
         "tests/desktop-close-recovery.test.mjs",
-        "tests/desktop-package.test.mjs",
         "tests/desktop-preload-ipc.test.mjs",
         "tests/electron-window-policy.test.mjs",
         "tests/product-contract.test.mjs"
@@ -772,21 +770,97 @@
       "nodeTests": ["tests/dependency-audit-policy.test.mjs"]
     },
     {
-      "id": "packaging",
+      "id": "package-manifest-contract",
       "patterns": [
-        "^(?:\\.github/workflows/(?:developer-preview|release-candidate|release-dry-run|release)\\.yml|package(?:-lock)?\\.json|PageRoot 用户声明与免责声明\\.txt|desktop/after-pack\\.mjs|desktop/resources/.*|scripts/(?:build-package|create-release-assets|developer-preview|package-delivery-report|packaged-app-identity|release-app-(?:checkpoint|stage)|release-candidate-provenance|release-provenance|source-gate-provenance|verify-packaged-artifact)\\.mjs)$"
+        "^package\\.json$",
+        "^tests/desktop-package\\.test\\.mjs$",
+        "^desktop/main\\.mjs$",
+        "^desktop/after-pack\\.mjs$",
+        "^desktop/renderer/index\\.html$",
+        "^desktop/resources/(?:entitlements\\.mac\\.plist|icon\\.icns)$",
+        "^PageRoot 用户声明与免责声明\\.txt$"
       ],
       "suites": [],
       "nodeTests": [
         "tests/desktop-package.test.mjs",
-        "tests/developer-preview-package.test.mjs",
-        "tests/package-delivery-report.test.mjs",
+        "tests/packaged-artifact-gate.test.mjs"
+      ]
+    },
+    {
+      "id": "package-verifier-contract",
+      "patterns": [
+        "^scripts/verify-packaged-artifact\\.mjs$"
+      ],
+      "suites": [],
+      "nodeTests": [
+        "tests/desktop-package.test.mjs",
+        "tests/packaged-artifact-gate.test.mjs"
+      ]
+    },
+    {
+      "id": "packaged-artifact-verifier",
+      "patterns": [
+        "^package-lock\\.json$",
+        "^tests/packaged-artifact-gate\\.test\\.mjs$"
+      ],
+      "suites": [],
+      "nodeTests": ["tests/packaged-artifact-gate.test.mjs"]
+    },
+    {
+      "id": "release-evidence-fixtures",
+      "patterns": [
+        "^tests/helpers/release-evidence-fixtures\\.mjs$",
+        "^tests/release-evidence-fixtures\\.test\\.mjs$"
+      ],
+      "suites": [],
+      "nodeTests": [
+        "tests/release-evidence-fixtures.test.mjs",
         "tests/packaged-artifact-gate.test.mjs",
+        "tests/developer-preview-package.test.mjs",
         "tests/release-app-stage.test.mjs",
         "tests/release-provenance.test.mjs",
         "tests/source-gate-provenance.test.mjs",
-        "tests/usage-telemetry.test.mjs"
+        "tests/release-candidate-provenance.test.mjs"
       ]
+    },
+    {
+      "id": "release-app-stage",
+      "patterns": [
+        "^scripts/(?:build-package|packaged-app-identity|release-app-(?:checkpoint|stage))\\.mjs$",
+        "^tests/release-app-stage\\.test\\.mjs$",
+        "^\\.github/workflows/(?:release-candidate|release-dry-run)\\.yml$"
+      ],
+      "suites": [],
+      "nodeTests": ["tests/release-app-stage.test.mjs"]
+    },
+    {
+      "id": "developer-preview-delivery",
+      "patterns": [
+        "^scripts/developer-preview\\.mjs$",
+        "^tests/developer-preview-package\\.test\\.mjs$",
+        "^\\.github/workflows/developer-preview\\.yml$"
+      ],
+      "suites": [],
+      "nodeTests": ["tests/developer-preview-package.test.mjs"]
+    },
+    {
+      "id": "package-delivery-report",
+      "patterns": [
+        "^scripts/package-delivery-report\\.mjs$",
+        "^tests/package-delivery-report\\.test\\.mjs$",
+        "^\\.github/workflows/(?:developer-preview|release-candidate|release)\\.yml$"
+      ],
+      "suites": [],
+      "nodeTests": ["tests/package-delivery-report.test.mjs"]
+    },
+    {
+      "id": "release-provenance",
+      "patterns": [
+        "^scripts/(?:create-release-assets|release-provenance)\\.mjs$",
+        "^tests/release-provenance\\.test\\.mjs$"
+      ],
+      "suites": [],
+      "nodeTests": ["tests/release-provenance.test.mjs"]
     },
     {
       "id": "real-html-e2e",

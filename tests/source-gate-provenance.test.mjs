@@ -9,6 +9,7 @@ import {
   readPackageVersions,
   sourceGateArtifactName,
 } from "../scripts/source-gate-provenance.mjs";
+import { fixtureSourceGateIdentity } from "./helpers/release-evidence-fixtures.mjs";
 
 const productRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -20,38 +21,46 @@ function workflowJob(workflow, jobId) {
   const nextJob = remainder.search(/^  [a-z0-9-]+:\n/mu);
   return nextJob === -1 ? remainder : remainder.slice(0, nextJob);
 }
-const commitSha = "a".repeat(40);
-const treeSha = "b".repeat(40);
-const headSha = "c".repeat(40);
-const packageVersion = "0.8.4";
-const now = new Date("2026-07-23T12:00:00.000Z");
+const sourceFixture = fixtureSourceGateIdentity();
+const {
+  currentTreeSha: treeSha,
+  packageVersion,
+} = sourceFixture;
 const artifactName = sourceGateArtifactName(treeSha, packageVersion);
 
 function evidence(overrides = {}) {
+  const identity = fixtureSourceGateIdentity();
   return {
-    currentCommitSha: commitSha,
-    currentTreeSha: treeSha,
-    packageVersion,
+    currentCommitSha: identity.currentCommitSha,
+    currentTreeSha: identity.currentTreeSha,
+    packageVersion: identity.packageVersion,
     pullRequests: [{
       number: 25,
       merged_at: "2026-07-23T11:00:00.000Z",
-      merge_commit_sha: commitSha,
+      merge_commit_sha: identity.currentCommitSha,
       base: { ref: "main" },
-      head: { sha: headSha },
+      head: { sha: identity.headSha },
     }],
     workflowRuns: [{
       id: 300,
       event: "pull_request",
       status: "completed",
       conclusion: "success",
-      head_sha: headSha,
+      head_sha: identity.headSha,
       updated_at: "2026-07-23T11:30:00.000Z",
     }],
     artifactsByRunId: {
-      300: [{ id: 901, name: artifactName, expired: false }],
+      300: [{
+        id: 901,
+        name: sourceGateArtifactName(
+          identity.currentTreeSha,
+          identity.packageVersion,
+        ),
+        expired: false,
+      }],
     },
-    now,
-    maxAgeHours: 168,
+    now: identity.now,
+    maxAgeHours: identity.maxAgeHours,
     ...overrides,
   };
 }
