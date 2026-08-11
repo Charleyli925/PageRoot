@@ -1,6 +1,6 @@
 # Workbench 应用编排收口执行计划
 
-- 状态：**PR-1 至 PR-3 已合并至 `main`；PR-4 已完成实现与验证，交付仅允许 Draft PR（未 Ready、未合并）；PR-5 至 PR-7 尚未授权**
+- 状态：**PR-1 至 PR-4 已合并至 `main`；PR-5 已完成实现与验证，交付仅允许 Draft PR（未 Ready、未合并）；PR-6 至 PR-7 尚未授权**
 - 规划基线：`main@37bba7779b27c0a42a52f98ec84a377b964bf4eb`
 - 基线 Tree：`0e074849493e5f9db9e89621e0a1c1a4910b8fa1`
 - 基线日期：2026-08-11
@@ -1112,6 +1112,32 @@ submission reconciliation 或 Run mutation IO。
   会产生多余 timer restart 需要 fake scheduler 证明；
 - clipboard integration 是宿主 side effect，成功/失败 presentation 与 durable Request
   outcome 必须继续分离。
+
+### 11.8 实际执行状态（2026-08-11）
+
+- 以 `origin/main@a1b8a2a1e91d83c46b925c8ef35bcc8ba3e04967`（PR-4 已合并）建立
+  `refactor/request-run-workflow` 隔离分支；未改动 Change Request/Attempt schema、
+  finalizer 或 Bridge route。
+- 新增 `RunWorkflow`，由 `WorkspaceController` 组合并投影。它在现有
+  `RunSession` 事实所有权之上执行 native fence、freeze、Drain、persisted
+  SHA/revision 核对、一次 Request POST、unknown POST 的只读 workspace 对账、tracked
+  run polling、cancel/conflict 和 handoff confirmation；`RunSession` 仅增加可并存的
+  controller subscription，不含 Bridge I/O。
+- Workbench 已删除 Request/Run 的 Bridge 调用、poll/reconcile interval 和 run
+  mutation orchestration，只保留 Canvas/Handoff host port、intent 和 Drawer/Toast/review
+  presentation。直接 Bridge 调用精确降为 6：`source` 2、`versionFile` 3、
+  `activateReadyVersion` 1，留待 PR-6。
+- 覆盖 double-send、POST response lost/malformed authority reconciliation、authority
+  read 暂失败后的锁定恢复、A/B 并行 polling 与 late callback fence、dispose、clipboard
+  retry、cancel/conflict scoped identity；同时更新 impact map、TEST_STRATEGY、状态所有权
+  和 architecture gate。
+- 修复 polling 终态写回时把 `state` 误解码为浏览器全局 `status` 的 P0：`no-change`
+  与 `error` 现在保留 canonical terminal state，不会重新显示为 processing。新增 Node
+  覆盖终态解锁/可重开及 malformed Request response 的只读 authority reconciliation。
+- 已通过本节指定 Node 集 38/38、`npm run architecture:check`、`npm run lint`、
+  `npm run typecheck` 与 `npm run test:ai-closed-loop` 16/16，以及 `npm run task:finish`
+  （136 targeted Node、28 Browser smoke、8 Electron smoke、2 AI smoke）。PR-6 及其
+  Version/source migration 未提前实施。
 
 ## 12. PR-6：Version Activation、Review Preparation 与 History Navigation
 

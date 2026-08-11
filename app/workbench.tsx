@@ -97,6 +97,7 @@ import type { WorkspaceControllerSnapshot } from "./application/workspace-contro
 import { createCommentWorkflowCodecs } from "./application/comment-workflow-codecs.js";
 import type { DocumentWorkflowOutcome } from "./application/document-workflow.js";
 import { createDocumentWorkflowCodecs } from "./application/document-workflow-codecs.js";
+import { createRunWorkflowCodecs } from "./application/run-workflow-codecs.js";
 import { createWorkspaceControllerCodecs } from "./application/workspace-controller-codecs.js";
 import {
   CommentSession,
@@ -149,7 +150,6 @@ import {
 } from "./application/usage-telemetry";
 import {
   activeRunFromRecord,
-  candidateAssessmentFromRecord,
   canonicalLifecycleState,
   deriveRunProgressSteps,
   isLockedLifecycleState,
@@ -249,8 +249,6 @@ import type {
   PersistState,
   PrepareCloseDetail,
   ProjectContext,
-  ProjectQoderHandoffState,
-  QoderHandoffUiStatus,
   RecentProject,
   StartupIssue,
   Toast,
@@ -599,14 +597,7 @@ export default function Workbench() {
   const relinkSelectionArmedRef = useRef(false);
   const resumeSubmissionAfterRelinkRef = useRef(false);
   const saveProjectRulesRef = useRef<() => Promise<boolean>>(async () => false);
-  const projectWorkflowLegacyRef = useRef<{
-    hydrateRecentRuns(
-      projects: RecentProject[],
-      activeSourcePath: string | null,
-    ): Promise<void>;
-  }>({
-    hydrateRecentRuns: async () => {},
-  });
+  const normalizeCurrentGlobalCommentsRef = useRef<() => CommentItem[]>(() => []);
   const projectRulesEditorRef = useRef<HTMLTextAreaElement | null>(null);
   const fileRenameInputRef = useRef<HTMLInputElement | null>(null);
   const fileRenameEditingRef = useRef(false);
@@ -915,18 +906,65 @@ export default function Workbench() {
             isHistoryView: () => versionSessionRef.current.snapshot.viewMode === "history",
             isViewTransitioning: () => viewTransitioningRef.current,
             saveProjectRules: () => saveProjectRulesRef.current(),
-            hydrateRecentRuns: (
-              projects: RecentProject[],
-              activeSourcePath: string | null,
-            ) => projectWorkflowLegacyRef.current.hydrateRecentRuns(
-              projects,
-              activeSourcePath,
-            ),
           },
         },
         policies: {
           canCloseDuringHydration,
           shouldRecoverAfterCloseAbort: shouldRecoverEditorAfterCloseAbort,
+        },
+      },
+      runWorkflow: {
+        runSession: runSessionRef.current,
+        codecs: createRunWorkflowCodecs({
+          isRecord,
+          sameSourcePath: sameLocalSourcePath,
+          activeRunFromRecord,
+          canonicalLifecycleState,
+          commentHasContent,
+          commentEditSessionHasChanges,
+          canLocateTarget,
+          persistedComment,
+          persistedChangeEvent,
+          persistedTargetRef,
+          uniqueTargets,
+          fileStem,
+          projectMarkdown,
+          operationKey: activeRunOperationKey,
+          errorMessage: productErrorMessage,
+        }),
+        canvas: {
+          fencePendingEdit: (options: Record<string, unknown>) => (
+            editorRef.current?.fencePendingEdit(options)
+          ),
+          freeze: (reason: string) => fenceAndFreezeCurrentCanvasRef.current(reason),
+          unlock: () => editorRef.current?.unlockNow?.(),
+          normalizeComments: () => normalizeCurrentGlobalCommentsRef.current(),
+        },
+        handoff: {
+          copy: async ({ message }: { message: string }) => {
+            const integrations = window.htmlAIIntegrations;
+            if (integrations?.handoffToQoderWork) {
+              const result = await integrations.handoffToQoderWork({ message });
+              if (result.status !== "copied" || result.copied !== true) {
+                throw new Error("桌面应用没有确认剪贴板写入并读回成功。");
+              }
+              return result;
+            }
+            if (!navigator.clipboard?.readText) {
+              throw new Error("当前环境无法读回剪贴板内容，不能确认交接成功。");
+            }
+            await copyText(message);
+            if (await navigator.clipboard.readText() !== message) {
+              throw new Error("剪贴板读回内容与交接内容不一致。");
+            }
+            return { status: "copied", copied: true };
+          },
+        },
+        scheduler: {
+          setInterval: (callback: () => void, delayMs: number) => (
+            window.setInterval(callback, delayMs)
+          ),
+          clearInterval: (handle: unknown) => window.clearInterval(handle as number),
         },
       },
       clock: { now: Date.now },
@@ -961,7 +999,6 @@ export default function Workbench() {
   const activeRun = runSnapshot.activeRun;
   const recentRunOutcome = runSnapshot.recentOutcome;
   const projectLocked = runSnapshot.activeLocked;
-  const submissionPending = runSnapshot.submissionPending;
   const generating = runSnapshot.activeSubmission?.phase === "preparing";
   const activeRunOperation = activeRun ? activeRunOperationKey(activeRun) : "";
   const isActiveRunOperationBusy = (kind: RunOperationKind) => (
@@ -1059,6 +1096,104 @@ export default function Workbench() {
           disposition: "background-result",
           dedupeKey: `attachment-cleanup-${attachmentEvent.attachment?.attachmentId || "unknown"}`,
         });
+        return;
+      }
+      const runEvent = event as Readonly<{
+        type: string;
+        run?: ActiveRun | null;
+        state?: LifecycleState;
+        current?: boolean;
+        previousState?: LifecycleState;
+        agentMayBeRunning?: boolean;
+        message?: string;
+      }>;
+      if (runEvent.type === "run-submission-started" || runEvent.type === "run-submitted") {
+        if (runEvent.current) {
+          setHandoffPreviewOpen(false);
+          setCanvasMode("edit");
+          setDrawer("handoff");
+        }
+        return;
+      }
+      if (runEvent.type === "run-submission-uncertain") {
+        if (runEvent.current) setDrawer("handoff");
+        return;
+      }
+      if (runEvent.type === "run-submission-failed") {
+        if (runEvent.current) setDrawer("handoff");
+        return;
+      }
+      if (runEvent.type === "run-handoff-failed") {
+        if (runEvent.current && runEvent.run) {
+          setToast({
+            title: "交接内容还没有复制",
+            message: runEvent.message || "本轮 Request 已保留；请打开处理详情后重试复制。",
+            tone: "error",
+            sticky: true,
+            dedupeKey: `qoder-handoff:${runEvent.run.sourcePath}`,
+            action: { id: "open-handoff", label: "查看处理详情" },
+          });
+        }
+        return;
+      }
+      if (runEvent.type === "run-status") {
+        const run = runEvent.run;
+        const state = runEvent.state;
+        if (runEvent.current) {
+          if (state === "cancelled") {
+            setHandoffPreviewOpen(false);
+            setCanvasMode("edit");
+            setDrawer(null);
+          } else if (
+            state === "ready-to-open"
+            || state === "no-change"
+            || state === "error"
+            || state === "awaiting-conflict-resolution"
+            || state === "recovering-transaction"
+          ) {
+            setDrawer("handoff");
+            if (state === "ready-to-open" && toastRef.current?.dedupeKey === "ai-submit") {
+              setToast(null);
+            }
+          }
+        } else if (
+          run
+          && state === "ready-to-open"
+          && runEvent.previousState !== "ready-to-open"
+        ) {
+          setToast({
+            title: `${run.candidateVersionLabel} 可以打开了`,
+            message: "切回项目确认后再打开，当前画布没有被替换。",
+            tone: "success",
+            disposition: "background-result",
+            dedupeKey: `background-version:${run.sourcePath}`,
+            action: { id: "open-project", label: "打开项目", sourcePath: run.sourcePath },
+          });
+        }
+        return;
+      }
+      if (runEvent.type === "run-cancelled") {
+        if (runEvent.current) {
+          setHandoffPreviewOpen(false);
+          setCanvasMode("edit");
+          setDrawer(null);
+        }
+        if (runEvent.agentMayBeRunning && runEvent.run) {
+          setToast({
+            title: runEvent.current ? "本轮已结束，已恢复编辑" : "本轮已结束",
+            message: "AI Agent 不会被自动停止；如仍在运行，请手动停止。",
+            tone: "info",
+            disposition: "background-result",
+            dedupeKey: `ai-run-cancelled:${runEvent.run.sourcePath}`,
+          });
+        } else if (!runEvent.current && runEvent.run) {
+          setToast({
+            title: `${runEvent.run.candidateVersionLabel} 已取消`,
+            message: "对应项目的评论仍然保留，迟到的完成信号不会被接纳。",
+            tone: "success",
+            dedupeKey: `background-version:${runEvent.run.sourcePath}`,
+          });
+        }
         return;
       }
       const projectEvent = event as Readonly<{
@@ -2031,17 +2166,6 @@ export default function Workbench() {
     attachmentObjectUrlsRef.current.clear();
   }, []);
 
-  const markBackgroundProjectResult = useCallback((
-    activeSourcePath: string,
-    result: BackgroundProjectResult,
-  ) => {
-    runSessionRef.current.markResult(activeSourcePath, result);
-  }, []);
-
-  const clearBackgroundProjectResult = useCallback((activeSourcePath: string) => {
-    runSessionRef.current.clearResult(activeSourcePath);
-  }, []);
-
   const handleCommentLayout = useCallback((layout: HtmlCanvasCommentLayoutState) => {
     const targetIdsKey = layout.targetIds.join("\u0000");
     setCommentLayoutAuthority((current) => {
@@ -2435,6 +2559,9 @@ export default function Workbench() {
     commentSessionRef.current.setComments(nextComments);
     return nextComments.filter(commentHasContent);
   }, []);
+  useEffect(() => {
+    normalizeCurrentGlobalCommentsRef.current = normalizeCurrentGlobalComments;
+  }, [normalizeCurrentGlobalComments]);
 
   // Workbench only creates CanvasChangeInput and delegates durable source
   // authority to the composed application Workflow.
@@ -2623,45 +2750,6 @@ export default function Workbench() {
       sourceTransitionToken,
     });
   }, [workspaceController]);
-  const hydrateRecentProjectRuns = useCallback(async (
-    projects: RecentProject[],
-    activeSourcePath: string | null,
-  ) => {
-    const sourcePaths = [...new Set(
-      projects
-        .map((project) => project.sourcePath)
-        .filter((value) => value && !sameLocalSourcePath(value, activeSourcePath)),
-    )];
-    await Promise.allSettled(sourcePaths.map(async (recentSourcePath) => {
-      const payload = await bridgeClient.workspace(recentSourcePath);
-      const runtime = isRecord(payload.runtimeState) ? payload.runtimeState : {};
-      const runtimeConflict = isRecord(runtime.conflict) ? runtime.conflict : null;
-      const recoveredRunRecord = isRecord(runtime.activeRun)
-        ? runtime.activeRun
-        : isRecord(payload.activeRun)
-          ? payload.activeRun
-          : null;
-      const recoveredRun = activeRunFromRecord(
-        recoveredRunRecord
-          ? { ...recoveredRunRecord, ...(runtimeConflict ? { conflict: runtimeConflict } : {}) }
-          : null,
-      );
-      const recoveredOutcome = activeRunFromRecord(payload.recentRunOutcome);
-      if (recoveredOutcome) {
-        runSessionRef.current.rememberOutcome(recoveredOutcome);
-      }
-      if (recoveredRun && isLockedLifecycleState(recoveredRun.status)) {
-        runSessionRef.current.trackRun(recoveredRun, {
-          activate: "never",
-          recovered: true,
-        });
-      }
-    }));
-  }, []);
-  useEffect(() => {
-    projectWorkflowLegacyRef.current.hydrateRecentRuns = hydrateRecentProjectRuns;
-  }, [hydrateRecentProjectRuns]);
-
   useEffect(() => {
     if (!workspaceController || !window.htmlAIProjects) return;
     void workspaceController.openProject({ kind: "startup" });
@@ -4955,62 +5043,6 @@ export default function Workbench() {
     saveProjectRulesRef.current = saveProjectRules;
   }, [saveProjectRules]);
 
-  const sendToQoderWork = useCallback(async (
-    handoffMessage: string,
-    run: Pick<ActiveRun, "sourcePath" | "requestId" | "attemptId">,
-  ) => {
-    if (
-      !handoffMessage.trim()
-      || !run.sourcePath
-      || !run.requestId
-      || run.requestId === "pending"
-    ) return;
-
-    const publishStatus = (status: QoderHandoffUiStatus) => {
-      const nextState: ProjectQoderHandoffState = {
-        sourcePath: run.sourcePath,
-        requestId: run.requestId,
-        attemptId: run.attemptId,
-        status,
-      };
-      runSessionRef.current.publishHandoff(nextState);
-    };
-    publishStatus("copying");
-
-    try {
-      const integrations = window.htmlAIIntegrations;
-      if (integrations?.handoffToQoderWork) {
-        const result = await integrations.handoffToQoderWork({ message: handoffMessage });
-        if (result.status !== "copied" || result.copied !== true) {
-          throw new Error("桌面应用没有确认剪贴板写入成功。");
-        }
-      } else {
-        await copyText(handoffMessage);
-      }
-      publishStatus("copied");
-    } catch (cause) {
-      publishStatus("failed");
-      const visibleRun = runSessionRef.current.activeRun;
-      if (
-        sameLocalSourcePath(projectSessionRef.current.sourcePath, run.sourcePath)
-        && visibleRun?.requestId === run.requestId
-        && visibleRun.attemptId === run.attemptId
-      ) {
-        setToast({
-          title: "交接内容还没有复制",
-          message: productErrorMessage(
-            cause,
-            "本轮 Request 已保留；请打开处理详情后重试复制。",
-          ),
-          tone: "error",
-          sticky: true,
-          dedupeKey: `qoder-handoff:${run.sourcePath}`,
-          action: { id: "open-handoff", label: "查看处理详情" },
-        });
-      }
-    }
-  }, []);
-
   const revealActiveRunInFinder = useCallback(async () => {
     const activeSourcePath = projectSessionRef.current.sourcePath;
     const requestPath = activeRun?.requestPath;
@@ -5064,18 +5096,14 @@ export default function Workbench() {
       return;
     }
     if (
-      projectHydrating
+      !workspaceController
+      || projectHydrating
       || projectLoadError
       || viewTransitioningRef.current
-    ) {
-      return;
-    }
-    if (viewMode === "history") {
-      return;
-    }
-    if (documentSessionRef.current.persistState === "failed" || documentSessionRef.current.persistState === "conflict") {
-      return;
-    }
+      || viewMode === "history"
+      || documentSessionRef.current.persistState === "failed"
+      || documentSessionRef.current.persistState === "conflict"
+    ) return;
     if (runSessionRef.current.activeLocked) {
       setDrawer("handoff");
       return;
@@ -5111,335 +5139,83 @@ export default function Workbench() {
       )
     ) return;
 
-    // Commit the native DOM editing session while the project is still unlocked. The
-    // SourcePatchEngine callback synchronously refreshes comment and audit
-    // targets, so the Request cannot retain pre-edit TargetRefs.
-    const committed = editorRef.current?.fencePendingEdit({
-      resumeEditing: false,
-      trigger: "ai",
-    });
-    if (!committed || !committed.ok) {
-      editorRef.current?.showCommitBlocked(
-        committed?.reason || "请点回文字完成输入，再发送本轮要求。",
-      );
-      return;
-    }
-    let activeComments = normalizeCurrentGlobalComments();
-    if (activeComments.length === 0) {
-      requestComposerFocus();
-      return;
-    }
-    const unsafeTargets = activeComments.filter(
-      (comment) => !canLocateTarget(comment.target),
-    );
-    if (unsafeTargets.length > 0) {
-      setToast(unsafeCommentTargetsNotice(unsafeTargets));
-      return;
-    }
-
-    const submissionEpoch = projectSessionRef.current.epoch;
-    const submission = runSessionRef.current.beginSubmission({
-      sourcePath: submissionSourcePath,
-    });
-    if (!submission) return;
-    const releaseSubmission = () => {
-      runSessionRef.current.releaseSubmission(submission);
-    };
-
-    try {
-      const registered = registrationContextFromOutcome(
-        await requiredWorkspaceController(workspaceController).ensureRegistered(),
-      );
-      if (!registered) throw new Error("当前项目已经切换，请重试。");
-      if (
-        projectSessionRef.current.epoch !== submissionEpoch
-        || !sameLocalSourcePath(projectSessionRef.current.sourcePath, submission.sourcePath)
-      ) {
-        throw new Error("当前项目已经切换，请重试。");
-      }
-    } catch (cause) {
-      setToast({
-        title: "项目记录尚未建立",
-        message: productErrorMessage(
-          cause,
-          "请确认源 HTML 没有被外部修改后重试。",
-        ),
-        tone: "warning",
-        sticky: true,
-        disposition: "direct-action",
-        dedupeKey: "project-registration",
-        action: { id: "retry-submit", label: "重新建立并发送" },
+    const outcome = await requiredWorkspaceController(workspaceController)
+      .submitRequest({
+        projectName,
+        previousVersionId: latestVersionId,
+        basedOnVersionId: currentBasedOnVersionId,
+        deadlineAt: Date.now() + 60_000,
       });
-      releaseSubmission();
+    if (outcome.status === "succeeded" || outcome.status === "stale") return;
+    if (outcome.status === "unknown") {
+      setDrawer("handoff");
       return;
     }
-    activeComments = normalizeCurrentGlobalComments();
-    if (activeComments.length === 0) {
-      requestComposerFocus();
-      releaseSubmission();
-      return;
-    }
-    const unsafeRegisteredTargets = activeComments.filter(
-      (comment) => !canLocateTarget(comment.target),
-    );
-    if (unsafeRegisteredTargets.length > 0) {
-      setToast(unsafeCommentTargetsNotice(unsafeRegisteredTargets));
-      releaseSubmission();
-      return;
-    }
-
-    // This synchronous section is the freeze boundary. No await is allowed before
-    // the ref and the editor's native event guards are both locked.
-    const frozen = editorRef.current?.freezeNow();
-    if (
-      !frozen
-      || !frozen.ok
-      || !/^sha256:[a-f0-9]{64}$/u.test(frozen.sourceSha256)
-    ) {
-      if (frozen?.ok) editorRef.current?.unlockNow();
-      editorRef.current?.showCommitBlocked(
-        frozen?.reason || "画布还没有形成可验证的 HTML 快照，本轮不会发送。",
-      );
-      releaseSubmission();
-      return;
-    }
-    if (!runSessionRef.current.freezeSubmission(submission)) {
-      editorRef.current?.unlockNow?.();
-      releaseSubmission();
-      return;
-    }
-    const capturedHtml = frozen.html;
-    if (capturedHtml !== documentSessionRef.current.html) {
-      const enqueued = enqueueAutosave(
-        capturedHtml,
-        frozen.pendingMutation || undefined,
-      );
-      if (enqueued.status !== "succeeded") {
+    if (outcome.status === "blocked") {
+      if (outcome.code === "RUN_SUBMISSION_COMMENT_EDIT") {
+        const currentEdit = commentSessionRef.current.editSession;
+        if (currentEdit) showUnfinishedCommentEditNotice(currentEdit);
+        return;
+      }
+      if (outcome.code === "RUN_SUBMISSION_COMMENTS_EMPTY") {
+        requestComposerFocus();
+        return;
+      }
+      if (outcome.code === "RUN_SUBMISSION_TARGET_UNSAFE") {
+        const unsafeTargets = commentSessionRef.current.comments.filter(
+          (comment) => commentHasContent(comment) && !canLocateTarget(comment.target),
+        );
+        setToast(unsafeCommentTargetsNotice(unsafeTargets));
+        return;
+      }
+      if (
+        outcome.code === "RUN_SUBMISSION_NATIVE_EDIT"
+        || outcome.code === "RUN_SUBMISSION_FREEZE"
+      ) {
+        editorRef.current?.showCommitBlocked(outcome.reason);
+        return;
+      }
+      if (outcome.code === "RUN_SUBMISSION_LOCKED") {
+        setDrawer("handoff");
+        return;
+      }
+      if (outcome.code === "RUN_SUBMISSION_DOCUMENT_EDIT") {
         setToast({
           title: "当前编辑没有进入撤销历史",
-          message: documentEditFailureReason(enqueued),
+          message: outcome.reason,
           tone: "warning",
           sticky: true,
           disposition: "direct-action",
           dedupeKey: "source-history-record-failed",
           action: { id: "retry-submit", label: "重新发送" },
         });
-        editorRef.current?.unlockNow?.();
-        releaseSubmission();
         return;
       }
     }
-    const freezeCutoffRevision = documentSessionRef.current.editRevision;
-    const submissionContext = {
-      epoch: submissionEpoch,
-      projectId: projectSessionRef.current.projectId,
-      documentId: projectSessionRef.current.documentId,
-      sourcePath: submission.sourcePath,
-      projectName,
-      comments: activeComments.map((comment) => ({ ...comment })),
-      changeEvents: commentSessionRef.current.changeEvents.map((event) => ({ ...event })),
-    };
-    const pendingRun: ActiveRun = {
-      projectId: submissionContext.projectId,
-      documentId: submissionContext.documentId,
-      requestId: "pending",
-      attemptId: "attempt_001",
-      requestPath: "",
-      attemptPath: "",
-      handoffMessage: "",
-      status: "submitting",
-      sourcePath: submissionContext.sourcePath,
-      baseSnapshotSha256: frozen.sourceSha256,
-      previousVersionId: latestVersionId,
-      basedOnVersionId: currentBasedOnVersionId,
-      freezeCutoffRevision,
-      candidateVersionId: "",
-      candidateVersionLabel: "下一版",
-      submittedAt: new Date().toISOString(),
-      summary: activeComments.map((comment) => (
-        comment.text.trim()
-        || `参考附件：${(comment.attachments ?? []).map((item) => item.fileName).join("、")}`
-      )).join("；").slice(0, 5000),
-      commentCount: activeComments.length,
-      changeEventCount: submissionContext.changeEvents.length,
-    };
-    runSessionRef.current.forgetOutcome(submissionContext.sourcePath);
-    setActiveRun(pendingRun);
-    setHandoffPreviewOpen(false);
-    setCanvasMode("edit");
-    setDrawer("handoff");
-
-    let requestDispatched = false;
-    let durableRun: ActiveRun | null = null;
-    let confirmedNoRun = false;
-    let submissionUncertain = false;
-    try {
-      const drained = await requiredWorkspaceController(workspaceController)
-        .drainBoundary("submit", {
-        deadlineAt: Date.now() + 60_000,
-      });
-      if (
-        !drained.ok
-        || documentSessionRef.current.lastPersistedRevision !== freezeCutoffRevision
-        || documentSessionRef.current.editRevision !== freezeCutoffRevision
-      ) {
-        throw new Error(
-          drained.ok
-            ? "冻结前的最后一次修改尚未安全写入源 HTML。"
-            : drained.reason,
-        );
-      }
-      const persistedSourceSha256 = documentSessionRef.current.sourceSha256;
-      if (
-        persistedSourceSha256 !== frozen.sourceSha256
-        || !isCurrentProjectContext(submissionContext)
-      ) {
-        throw new Error("冻结 HTML 的 Hash 与已写回源文件不一致。");
-      }
-      const persistedComments = commentSessionRef.current.comments.filter(commentHasContent);
-      const unsafePersistedTargets = persistedComments.filter(
-        (comment) => (
-          !canLocateTarget(comment.target)
-          || (
-            comment.target.sourceAnchor
-            && comment.target.sourceAnchor.sourceSha256
-              !== persistedSourceSha256
-          )
-        ),
-      );
-      if (
-        persistedComments.length !== submissionContext.comments.length
-        || unsafePersistedTargets.length > 0
-      ) {
-        throw new Error("最新评论目标与已保存的源 HTML 不一致，请重新选择后再提交。");
-      }
-      submissionContext.comments = persistedComments.map(
-        (comment) => ({ ...comment }),
-      );
-      submissionContext.changeEvents = commentSessionRef.current.changeEvents.map(
-        (event) => ({ ...event }),
-      );
-      if (!isCurrentProjectContext(submissionContext)) {
-        throw new Error("冻结边界内的最新评论与修改审计尚未安全记录。");
-      }
-      const targets = uniqueTargets(submissionContext.comments);
-      requestDispatched = true;
-      const payload = await bridgeClient.createRequest({
-        projectId: submissionContext.projectId,
-        documentId: submissionContext.documentId,
-        projectName: fileStem(submissionContext.projectName),
-        projectMd: projectMarkdown(submissionContext.projectName),
-        sourcePath: submissionContext.sourcePath,
-        expectedSourceSha256: persistedSourceSha256,
-        freezeCutoffRevision,
-        lastPersistedRevision: documentSessionRef.current.lastPersistedRevision,
-        summary: submissionContext.comments.map((comment) => (
-          comment.text.trim()
-          || `参考附件：${(comment.attachments ?? []).map((item) => item.fileName).join("、")}`
-        )).join("；").slice(0, 5000),
-        targets: targets.map(persistedTargetRef),
-        instructions: submissionContext.comments.map((comment) => ({
-          instructionId: `instruction_${comment.commentId.replace(/^comment_/, "")}`,
-          text: comment.text.trim() || "请结合本条评论所附附件完成修改。",
-          targetRefs: [comment.target.id],
-          attachmentRefs: (comment.attachments ?? []).map(
-            (attachment) => attachment.attachmentId,
-          ),
-        })),
-        comments: submissionContext.comments.map(persistedComment),
-        changeEvents: submissionContext.changeEvents.map(persistedChangeEvent),
-      });
-      const run = activeRunFromRecord(
-        isRecord(payload.activeRun)
-          ? {
-              ...payload.activeRun,
-              candidateDisplayVersionLabel:
-                payload.candidateDisplayVersionLabel,
-            }
-          : payload,
-      );
-      if (!run) throw new Error("任务已创建，但缺少可验证的 Request 身份。");
-      durableRun = run;
-      runSessionRef.current.trackRun(run);
-      if (isCurrentProjectContext(submissionContext)) {
-        setDrawer("handoff");
-      }
-    } catch (cause) {
-      if (requestDispatched) {
-        try {
-          const reconcilePayload = await bridgeClient.workspace(
-            submissionContext.sourcePath,
-          );
-          durableRun = activeRunFromRecord(
-            (isRecord(reconcilePayload.runtimeState)
-              ? reconcilePayload.runtimeState.activeRun
-              : null)
-            || reconcilePayload.activeRun,
-          );
-          if (durableRun) {
-            runSessionRef.current.trackRun(durableRun);
-          } else if (isCurrentProjectContext(submissionContext)) {
-            confirmedNoRun = true;
-            runSessionRef.current.clearActiveRun();
-            editorRef.current?.unlockNow?.();
-          }
-        } catch {
-          // Unknown POST outcome is intentionally kept locked until workspace
-          // reconciliation succeeds; unlocking here could split client/server state.
-        }
-      } else if (isCurrentProjectContext(submissionContext)) {
-        editorRef.current?.unlockNow?.();
-        runSessionRef.current.clearActiveRun();
-      }
-      if (
-        !durableRun
-        && requestDispatched
-        && !confirmedNoRun
-        && isCurrentProjectContext(submissionContext)
-      ) {
-        const unknownRun = {
-          ...pendingRun,
-          status: "error",
-          error: "本轮任务状态暂时无法确认。当前项目保持只读，避免重复建立任务。",
-        } as ActiveRun;
-        setActiveRun(unknownRun);
-        submissionUncertain = runSessionRef.current
-          .markSubmissionUncertain(submission);
-      }
-      if (!durableRun && requestDispatched && !confirmedNoRun) {
-        setDrawer("handoff");
-      } else if (!durableRun) {
-        const failedRun: ActiveRun = {
-          ...pendingRun,
-          status: "error",
-          error: productErrorMessage(
-            cause,
-            "这次发送没有成功。页面和评论仍然保留。",
-          ),
-        };
-        setActiveRun(failedRun);
-        setDrawer("handoff");
-      }
-    } finally {
-      if (!submissionUncertain) releaseSubmission();
-    }
-    if (durableRun?.handoffMessage) {
-      await sendToQoderWork(durableRun.handoffMessage, durableRun);
-    }
+    const registrationFailure = outcome.code === "PROJECT_REGISTRATION_REJECTED"
+      || outcome.code === "PROJECT_REGISTRATION_UNKNOWN"
+      || outcome.code === "RUN_SUBMISSION_REGISTRATION_INVALID";
+    setToast({
+      title: registrationFailure ? "项目记录尚未建立" : "暂时无法发送本轮要求",
+      message: outcome.reason,
+      tone: registrationFailure ? "warning" : "error",
+      sticky: true,
+      disposition: "direct-action",
+      dedupeKey: registrationFailure ? "project-registration" : "run-submission-failed",
+      action: {
+        id: "retry-submit",
+        label: registrationFailure ? "重新建立并发送" : "重新发送",
+      },
+    });
   }, [
-    deferEditorCommand,
-    enqueueAutosave,
-    isCurrentProjectContext,
-    latestVersionId,
     currentBasedOnVersionId,
-    normalizeCurrentGlobalComments,
+    deferEditorCommand,
+    latestVersionId,
     openProject,
-    projectName,
     projectHydrating,
     projectLoadError,
+    projectName,
     requestComposerFocus,
-    sendToQoderWork,
-    setActiveRun,
     showUnfinishedCommentEditNotice,
     viewMode,
     workspaceController,
@@ -6012,281 +5788,6 @@ export default function Workbench() {
     return undefined;
   }, [activeRun, openingReadyVersion, readyReviewSession]);
 
-  const processRunStatus = useCallback(async (
-    run: ActiveRun,
-    payload: Record<string, unknown>,
-  ) => {
-    const trackedRun = runSessionRef.current.runForSource(run.sourcePath);
-    if (
-      !trackedRun
-      || trackedRun.requestId !== run.requestId
-      || trackedRun.attemptId !== run.attemptId
-    ) return;
-    const deleteTrackedRun = () => {
-      runSessionRef.current.removeRun(run);
-    };
-    const rawState = String(payload.status || payload.lifecycleState || "processing");
-    const state = canonicalLifecycleState(rawState, {
-      readyVersion: Boolean(payload.versionId),
-    });
-    const isCurrentProject = (
-      (
-        Boolean(run.projectId)
-        && Boolean(projectSessionRef.current.projectId)
-        && run.projectId === projectSessionRef.current.projectId
-      )
-      || sameLocalSourcePath(projectSessionRef.current.sourcePath, run.sourcePath)
-    );
-    const previousBackgroundState =
-      runSessionRef.current.runForSource(run.sourcePath)?.status;
-    if (state === "ready-to-open") {
-      const candidateAssessment = candidateAssessmentFromRecord(
-        payload.candidateAssessment,
-      );
-      const nextRun: ActiveRun = {
-        ...run,
-        status: "ready-to-open",
-        readyPayload: payload,
-        ...(candidateAssessment ? { candidateAssessment } : {}),
-        completionObserved: true,
-      };
-      runSessionRef.current.trackRun(nextRun, {
-        activate: isCurrentProject ? "always" : "never",
-      });
-      if (isCurrentProject) {
-        clearBackgroundProjectResult(run.sourcePath);
-        setDrawer("handoff");
-        if (toastRef.current?.dedupeKey === "ai-submit") setToast(null);
-      } else if (previousBackgroundState !== "ready-to-open") {
-        markBackgroundProjectResult(run.sourcePath, {
-          state: "ready",
-          label: "新版本可查看",
-          updatedAt: Date.now(),
-        });
-        setToast({
-          title: `${run.candidateVersionLabel} 可以打开了`,
-          message: "切回项目确认后再打开，当前画布没有被替换。",
-          tone: "success",
-          disposition: "background-result",
-          dedupeKey: `background-version:${run.sourcePath}`,
-          action: {
-            id: "open-project",
-            label: "打开项目",
-            sourcePath: run.sourcePath,
-          },
-        });
-      }
-      return;
-    }
-    if (state === "no-change") {
-      deleteTrackedRun();
-      const noChangeRun = activeRunFromRecord({
-        ...run,
-        ...payload,
-        status: "no-change",
-      }) || { ...run, status: "no-change" as const, completionObserved: true };
-      runSessionRef.current.rememberOutcome(noChangeRun);
-      if (isCurrentProject) {
-        clearBackgroundProjectResult(run.sourcePath);
-        editorRef.current?.unlockNow?.();
-        setActiveRun(noChangeRun);
-        setDrawer("handoff");
-      } else {
-        markBackgroundProjectResult(run.sourcePath, {
-          state: "no-change",
-          label: "已完成 · 无变化",
-          updatedAt: Date.now(),
-        });
-      }
-      return;
-    }
-    if (state === "cancelled") {
-      deleteTrackedRun();
-      if (isCurrentProject) {
-        clearBackgroundProjectResult(run.sourcePath);
-        editorRef.current?.unlockNow?.();
-        runSessionRef.current.clearActiveRun();
-        setDrawer(null);
-      }
-      return;
-    }
-    if (state === "error") {
-      deleteTrackedRun();
-      const errorRun = activeRunFromRecord({
-        ...run,
-        ...payload,
-        status: "error",
-      }) || {
-        ...run,
-        status: "error" as const,
-        error: "返回的 HTML 无法安全采用，当前页面没有被覆盖。",
-        completionObserved: payload.completionObserved === true,
-      };
-      runSessionRef.current.rememberOutcome(errorRun);
-      if (isCurrentProject) {
-        editorRef.current?.unlockNow?.();
-        setActiveRun(errorRun);
-        setDrawer("handoff");
-      } else {
-        markBackgroundProjectResult(run.sourcePath, {
-          state: "error",
-          label: "需要处理",
-          updatedAt: Date.now(),
-        });
-      }
-      return;
-    }
-    const nextRun = activeRunFromRecord(
-      isRecord(payload.activeRun)
-        ? { ...payload.activeRun, ...(isRecord(payload.conflict) ? { conflict: payload.conflict } : {}) }
-        : { ...run, ...payload, status: state },
-    )
-      || { ...run, status: state };
-    runSessionRef.current.trackRun(nextRun, {
-      activate: isCurrentProject ? "always" : "never",
-    });
-    if (isCurrentProject) {
-      clearBackgroundProjectResult(run.sourcePath);
-      if (nextRun.status === "awaiting-conflict-resolution"
-        || nextRun.status === "recovering-transaction") {
-        setDrawer("handoff");
-      }
-    } else if (
-      nextRun.status === "awaiting-conflict-resolution"
-      && previousBackgroundState !== nextRun.status
-    ) {
-      markBackgroundProjectResult(run.sourcePath, {
-        state: "conflict",
-        label: "需要处理",
-        updatedAt: Date.now(),
-      });
-    } else if (!isCurrentProject) {
-      markBackgroundProjectResult(run.sourcePath, {
-        state: "processing",
-        label: "正在处理",
-        updatedAt: Date.now(),
-      });
-    }
-  }, [
-    clearBackgroundProjectResult,
-    markBackgroundProjectResult,
-    setActiveRun,
-  ]);
-
-  useEffect(() => {
-    const poll = async () => {
-      const runs = runSessionRef.current.runs;
-      if (runs.length === 0) return;
-      await Promise.allSettled(
-        runs.map(async (run) => {
-          if (!run.requestId || run.requestId === "pending") return;
-          const operationKey = activeRunOperationKey(run);
-          if (!runSessionRef.current.beginOperation("poll", operationKey)) {
-            return;
-          }
-          try {
-            const payload = await bridgeClient.status(
-              run.sourcePath,
-              run.requestId,
-              run.attemptId,
-            );
-            await processRunStatus(run, payload);
-          } catch {
-            // Temporary polling failures are recovered by the next automatic pass.
-            // The workspace-level unavailable state remains the user-facing boundary.
-          } finally {
-            runSessionRef.current.endOperation("poll", operationKey);
-          }
-        }),
-      );
-    };
-    void poll();
-    const timer = window.setInterval(() => void poll(), 1600);
-    return () => window.clearInterval(timer);
-  }, [processRunStatus]);
-
-  const reconcilePendingRun = useCallback(async (): Promise<void> => {
-    const pendingRun = runSessionRef.current.activeRun;
-    if (
-      runSessionRef.current.submissionPending
-      || !runSessionRef.current.activeLocked
-      || pendingRun?.requestId !== "pending"
-      || !projectSessionRef.current.sourcePath
-    ) return;
-    const context = captureProjectContext();
-    if (!context) return;
-    const operationKey = activeRunOperationKey(pendingRun);
-    if (!runSessionRef.current.beginOperation("poll", operationKey)) return;
-    try {
-      const payload = await bridgeClient.workspace(context.sourcePath);
-      if (!isCurrentProjectContext(context)) return;
-      const runtime = isRecord(payload.runtimeState) ? payload.runtimeState : {};
-      const runtimeConflict = isRecord(runtime.conflict) ? runtime.conflict : null;
-      const recoveredRunRecord = isRecord(runtime.activeRun)
-        ? runtime.activeRun
-        : isRecord(payload.activeRun)
-          ? payload.activeRun
-          : null;
-      const recoveredRun = activeRunFromRecord(
-        recoveredRunRecord
-          ? { ...recoveredRunRecord, ...(runtimeConflict ? { conflict: runtimeConflict } : {}) }
-          : null,
-      );
-      if (recoveredRun) {
-        runSessionRef.current.trackRun(recoveredRun, {
-          activate: "always",
-          recovered: true,
-        });
-        runSessionRef.current.clearActiveSubmission();
-        setDrawer("handoff");
-        return;
-      }
-      const recoveredOutcome = activeRunFromRecord(payload.recentRunOutcome);
-      if (recoveredOutcome) {
-        runSessionRef.current.rememberOutcome(recoveredOutcome);
-        runSessionRef.current.setActiveRun(recoveredOutcome);
-        runSessionRef.current.clearActiveSubmission();
-        editorRef.current?.unlockNow?.();
-        setDrawer("handoff");
-        return;
-      }
-      runSessionRef.current.clearActiveSubmission();
-      editorRef.current?.unlockNow?.();
-      runSessionRef.current.clearActiveRun();
-      setDrawer(null);
-    } catch {
-      if (!isCurrentProjectContext(context)) return;
-    } finally {
-      runSessionRef.current.endOperation("poll", operationKey);
-    }
-  }, [captureProjectContext, isCurrentProjectContext]);
-
-  useEffect(() => {
-    if (
-      generating
-      || submissionPending
-      || !projectLocked
-      || activeRun?.requestId !== "pending"
-      || !sourcePath
-    ) return;
-    const initialReconcile = window.setTimeout(
-      () => void reconcilePendingRun(),
-      0,
-    );
-    const timer = window.setInterval(() => void reconcilePendingRun(), 4_000);
-    return () => {
-      window.clearTimeout(initialReconcile);
-      window.clearInterval(timer);
-    };
-  }, [
-    activeRun?.requestId,
-    generating,
-    projectLocked,
-    reconcilePendingRun,
-    sourcePath,
-    submissionPending,
-  ]);
-
   const cancelActiveRun = useCallback(async ({
     agentMayBeRunning = false,
     reason,
@@ -6294,96 +5795,14 @@ export default function Workbench() {
     agentMayBeRunning?: boolean;
     reason?: string;
   } = {}) => {
-    if (!activeRun || !activeRun.requestId || activeRun.requestId === "pending") return false;
-    const run = { ...activeRun };
-    const operationKey = activeRunOperationKey(run);
-    if (!runSessionRef.current.beginOperation("cancel", operationKey)) return false;
-    const showAgentReminder = (title: string) => {
-      if (!agentMayBeRunning) return;
-      setToast({
-        title,
-        message: "AI Agent 不会被自动停止；如仍在运行，请手动停止。",
-        tone: "info",
-        disposition: "background-result",
-        dedupeKey: `ai-run-cancelled:${run.sourcePath}`,
-      });
-    };
-    if (run.sourcePath === "preview://welcome") {
-      editorRef.current?.unlockNow?.();
-      runSessionRef.current.clearActiveRun();
-      runSessionRef.current.clearActiveHandoff();
-      setHandoffPreviewOpen(false);
-      setCanvasMode("edit");
-      setDrawer(null);
-      showAgentReminder("本轮已结束，已恢复编辑");
-      runSessionRef.current.endOperation("cancel", operationKey);
-      return true;
-    }
-    const context = (
-      (
-        Boolean(run.projectId)
-        && Boolean(projectSessionRef.current.projectId)
-        && run.projectId === projectSessionRef.current.projectId
-      )
-      || sameLocalSourcePath(projectSessionRef.current.sourcePath, run.sourcePath)
-    )
-      ? captureProjectContext()
-      : null;
-    try {
-      await bridgeClient.cancelActiveRun({
-        projectId: run.projectId,
-        documentId: run.documentId,
-        sourcePath: run.sourcePath,
-        requestId: run.requestId,
-        attemptId: run.attemptId,
-        reason: reason || (agentMayBeRunning
-          ? "cancelled-by-user-after-agent-handoff"
-          : "cancelled-by-user"),
-      });
-      if (runSessionRef.current.hasRun(run)) {
-        runSessionRef.current.removeRun(run);
-      }
-      if (context && isCurrentProjectContext(context)) {
-        editorRef.current?.unlockNow?.();
-        runSessionRef.current.clearActiveRun();
-        setHandoffPreviewOpen(false);
-        setCanvasMode("edit");
-        setDrawer(null);
-        showAgentReminder("本轮已结束，已恢复编辑");
-      } else {
-        if (agentMayBeRunning) {
-          showAgentReminder("本轮已结束");
-        } else {
-          setToast({
-            title: `${run.candidateVersionLabel} 已取消`,
-            message: "对应项目的评论仍然保留，迟到的完成信号不会被接纳。",
-            tone: "success",
-            dedupeKey: `background-version:${run.sourcePath}`,
-          });
-        }
-      }
-      return true;
-    } catch (cause) {
-      if (context && !isCurrentProjectContext(context)) return false;
-      if (context) {
-        const nextRun = {
-          ...run,
-          error: productErrorMessage(
-            cause,
-            "取消结果暂时无法确认。源页会继续在后台核对。",
-          ),
-        };
-        runSessionRef.current.trackRun(nextRun, { activate: "always" });
-      }
-      return false;
-    } finally {
-      runSessionRef.current.endOperation("cancel", operationKey);
-    }
-  }, [
-    activeRun,
-    captureProjectContext,
-    isCurrentProjectContext,
-  ]);
+    if (!activeRun || !workspaceController) return false;
+    const outcome = await requiredWorkspaceController(workspaceController).cancelRun({
+      run: activeRun,
+      agentMayBeRunning,
+      reason,
+    });
+    return outcome.status === "succeeded";
+  }, [activeRun, workspaceController]);
 
   const requestActiveRunEnd = useCallback(() => {
     if (!activeRun) return;
@@ -6399,85 +5818,40 @@ export default function Workbench() {
   ]);
 
   const resolveAiConflict = useCallback(async (action: "adopt-ai" | "keep-external") => {
-    if (!activeRun || activeRun.status !== "awaiting-conflict-resolution") return;
-    const run = { ...activeRun };
-    const operationKey = activeRunOperationKey(run);
-    if (!runSessionRef.current.beginOperation("resolve", operationKey)) return;
-    const context = (
-      (
-        Boolean(run.projectId)
-        && Boolean(projectSessionRef.current.projectId)
-        && run.projectId === projectSessionRef.current.projectId
-      )
-      || sameLocalSourcePath(projectSessionRef.current.sourcePath, run.sourcePath)
-    )
-      ? captureProjectContext()
-      : null;
-    try {
-      const payload = await bridgeClient.resolveConflict({
-        projectId: run.projectId,
-        documentId: run.documentId,
-        sourcePath: run.sourcePath,
-        requestId: run.requestId,
-        attemptId: run.attemptId,
-        conflictId: run.conflictId,
-        action,
-      });
-      if (action === "keep-external") {
-        if (runSessionRef.current.hasRun(run)) {
-          runSessionRef.current.removeRun(run);
-        }
-        if (context && isCurrentProjectContext(context)) {
-          runSessionRef.current.clearActiveRun();
-          await reloadCurrentSource({
-            skipConfirmation: true,
-            externalAuthorityAccepted: true,
-          });
-        } else {
-          setToast({
-            title: "已保留外部 HTML",
-            message: "对应项目的 AI 候选没有覆盖源文件；切回时会读取外部内容。",
-            tone: "success",
-            dedupeKey: `background-version:${run.sourcePath}`,
-          });
-        }
+    if (
+      !activeRun
+      || activeRun.status !== "awaiting-conflict-resolution"
+      || !workspaceController
+    ) return;
+    const outcome = await requiredWorkspaceController(workspaceController)
+      .resolveRunConflict({ run: activeRun, action });
+    if (outcome.status !== "succeeded") {
+      if (outcome.status !== "stale") setDrawer("handoff");
+      return;
+    }
+    const result = outcome.value as {
+      current?: boolean;
+      reloadCurrentSource?: boolean;
+    };
+    if (action === "keep-external") {
+      if (result.reloadCurrentSource) {
+        await reloadCurrentSource({
+          skipConfirmation: true,
+          externalAuthorityAccepted: true,
+        });
       } else {
-        const nextRun = activeRunFromRecord(
-          isRecord(payload.activeRun)
-            ? { ...payload.activeRun, ...(isRecord(payload.conflict) ? { conflict: payload.conflict } : {}) }
-            : payload,
-        ) || {
-          ...run,
-          status: "committing" as LifecycleState,
-        };
-        runSessionRef.current.trackRun(nextRun, {
-          activate:
-            context && isCurrentProjectContext(context) ? "always" : "never",
+        setToast({
+          title: "已保留外部 HTML",
+          message: "对应项目的 AI 候选没有覆盖源文件；切回时会读取外部内容。",
+          tone: "success",
+          dedupeKey: `background-version:${activeRun.sourcePath}`,
         });
       }
-    } catch (cause) {
-      if (context && !isCurrentProjectContext(context)) return;
-      const nextRun = {
-        ...run,
-        error: productErrorMessage(
-          cause,
-          "这次选择还没有记录，外部文件和 AI 候选都仍被保留。",
-        ),
-      };
-      runSessionRef.current.trackRun(nextRun, {
-        activate: context ? "always" : "never",
-      });
-      if (context) {
-        setDrawer("handoff");
-      }
-    } finally {
-      runSessionRef.current.endOperation("resolve", operationKey);
     }
   }, [
     activeRun,
-    captureProjectContext,
-    isCurrentProjectContext,
     reloadCurrentSource,
+    workspaceController,
   ]);
 
   const viewHistoryVersion = useCallback(async (
@@ -9132,10 +8506,10 @@ export default function Workbench() {
             )}
             onReviewReadyResult={() => void reviewReadyResult()}
             onActivateReadyResult={() => void activateReadyResult()}
-            onSend={() => void sendToQoderWork(
-              activeRun.handoffMessage,
-              activeRun,
-            )}
+            onSend={() => {
+              if (!workspaceController) return;
+              void workspaceController.copyRunHandoff({ run: activeRun });
+            }}
             onCancel={requestActiveRunEnd}
             onResolveConflict={(choice) => void resolveAiConflict(choice)}
             onRevealRequestFolder={() => void revealActiveRunInFinder()}

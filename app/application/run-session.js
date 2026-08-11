@@ -92,6 +92,8 @@ export class RunSession {
 
   #observer = null;
 
+  #listeners = new Set();
+
   constructor({ sourcePath = null } = {}) {
     this.#activeSourcePath = normalizedPath(sourcePath);
   }
@@ -100,11 +102,27 @@ export class RunSession {
     this.#observer = typeof observer === "function" ? observer : null;
   }
 
+  subscribe(listener) {
+    if (typeof listener !== "function") {
+      throw new TypeError("RunSession listener must be a function.");
+    }
+    this.#listeners.add(listener);
+    listener(this.snapshot);
+    return () => this.#listeners.delete(listener);
+  }
+
   #emit() {
     try {
       this.#observer?.(this.snapshot);
     } catch {
       // A view observer cannot change run authority.
+    }
+    for (const listener of this.#listeners) {
+      try {
+        listener(this.snapshot);
+      } catch {
+        // Supplemental subscribers cannot change run authority.
+      }
     }
   }
 

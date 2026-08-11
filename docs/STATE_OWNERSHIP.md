@@ -19,8 +19,9 @@
 | Renderer comment/edit-event working copy, deletion tombstones, composer fields and saved-comment edit session | Renderer `CommentSession` | none; disposable projection until Draft acknowledgement | Workbench views, Draft session and Request preparation |
 | Acknowledged comments, edit events, tombstones and operation identities | Draft aggregate and Bridge draft service | `draft/annotations.json`; runtime stores only its pointer and revision | Draft session and Request freeze |
 | Staged comment attachments and references | Draft aggregate attachment repository | managed draft attachment directory plus draft references | composer and Request freeze |
-| Active/background AI run projections, Qoder handoff status and recovered handoff-risk disposition, background results, submission preparation/freeze/unknown-outcome lock and renderer operation locks | Renderer `RunSession` | none beyond authoritative runtime and immutable Request/Attempt records | Workbench process panel, drain coordinator and project list |
-| AI Request/Attempt lifecycle transition | Bridge run lifecycle | runtime state and immutable Request/Attempt records | Run session and finalizer |
+| Active/background AI run projections, Qoder handoff status and recovered handoff-risk disposition, background results, submission phase/unknown-outcome lock and renderer operation locks | Renderer `RunSession` | none beyond authoritative runtime and immutable Request/Attempt records | `RunWorkflow`, Workbench process panel, drain coordinator and project list |
+| AI Request freeze, persisted-boundary verification, unknown-POST authority reconciliation, polling lifecycle, cancellation and conflict command sequence | Renderer `RunWorkflow`, composed by `WorkspaceController` | none; it publishes only through `RunSession` and reads Bridge runtime/immutable Request records | Workbench intent/Drawer/Toast adapter and Bridge run lifecycle |
+| AI Request/Attempt lifecycle transition | Bridge run lifecycle | runtime state and immutable Request/Attempt records | `RunWorkflow`, RunSession and finalizer |
 | Immutable Version list, based-on/exact/restored identities and history-view transition | Renderer `VersionSession` | immutable Version records and current runtime pointers | Workbench history and Canvas projection |
 | `PROJECT.md` content, editor generation, composition fence, autosave eligibility and save status | Renderer `ProjectRulesSession` | managed `PROJECT.md` | project panel, drain coordinator and Request freeze |
 | Close/switch/submit/history readiness and desktop close lifecycle | The unique `DrainCoordinator` owned by `WorkspaceController`; `ProjectWorkflow` owns the request-scoped close operation | composed owner snapshots, request identity and bounded presentation class; no copied dirty booleans | Electron close handshake, browser fallback and navigation |
@@ -90,11 +91,11 @@ Rules:
   values, adapts narrow host ports and dispatches user intent to the owning
   Session or workflow facade.
 - `WorkspaceController` owns the renderer's unique `DrainCoordinator` and
-  composes `ProjectWorkflow`. The workflow owns operation state only: it creates
+  composes `ProjectWorkflow`, `CommentWorkflow` and `RunWorkflow`. The workflows own operation state only: they create
   the narrow external-open/application protocol Sessions, receives the existing
   Project, Document, Comment, Draft, Run, Version and SourceHistory owners, and
   must never duplicate their facts. Workbench's temporary direct Bridge-call
-  allowance is locked to the exact PR-3 allowlist of 16 calls and remains a
+  allowance is locked to the exact PR-5 allowlist of 6 calls and remains a
   decreasing migration gate, not a permanent architecture exception.
 - `RunSession` owns the one in-memory submission lifecycle. `preparing` blocks
   duplicate intent and drain without freezing the current canvas; `frozen`
@@ -102,6 +103,11 @@ Rules:
   read-only fence while reconciliation determines whether a durable run exists.
   Workbench must derive its active lock and submission presentation from that
   snapshot rather than maintain a second boolean or ref.
+- `RunWorkflow` owns the I/O sequence around that Session fact: it fences native
+  input, freezes and drains the authoritative source, submits only one Request,
+  reconciles an unknown POST with read-only workspace authority, and fences
+  timer/late callbacks by run identity and disposal generation. Clipboard
+  success means exact readback only; it never implies an external Agent has run.
 - Workbench presentation modules receive snapshots and callbacks only. They
   may not import application sessions, Bridge services or persistence
   adapters.

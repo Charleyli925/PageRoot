@@ -5,6 +5,7 @@ import { DrainCoordinator } from "./drain-coordinator.js";
 import { ExternalFileOpenSession } from "./external-file-open-session.js";
 import { ProjectApplicationSession } from "./project-application-session.js";
 import { ProjectWorkflow } from "./project-workflow.js";
+import { RunWorkflow } from "./run-workflow.js";
 import { createWorkspaceControllerCodecs } from "./workspace-controller-codecs.js";
 
 function copyLocator({
@@ -124,12 +125,17 @@ export class WorkspaceController {
   #commentWorkflowUnsubscribe = null;
   #projectWorkflow = null;
   #projectWorkflowUnsubscribe = null;
+  #runWorkflow = null;
+  #runWorkflowUnsubscribe = null;
+  #runSessionUnsubscribe = null;
   #registration = registrationSnapshot().registration;
   #projectSnapshot = null;
+  #runSnapshot = null;
   #snapshot = Object.freeze({
     registration: this.#registration,
     comment: null,
     project: null,
+    run: null,
   });
   #listeners = new Set();
   #eventListeners = new Set();
@@ -150,6 +156,7 @@ export class WorkspaceController {
     documentWorkflow = null,
     commentWorkflow = null,
     projectWorkflow = null,
+    runWorkflow = null,
     clock,
   } = {}) {
     if (!bridgeClient || typeof bridgeClient.ensureProject !== "function") {
@@ -288,6 +295,11 @@ export class WorkspaceController {
           ...projectWorkflow.ports,
           legacy: {
             ...legacy,
+            hydrateRecentRuns: (projects, activeSourcePath) => (
+              this.#runWorkflow
+                ? this.#runWorkflow.hydrateRecentRuns({ projects, activeSourcePath })
+                : legacy.hydrateRecentRuns?.(projects, activeSourcePath)
+            ),
             emit: (event) => this.#emitEvent(event),
           },
         },
@@ -301,6 +313,45 @@ export class WorkspaceController {
           this.#publishAggregateSnapshot();
         },
       );
+    }
+    if (runWorkflow) {
+      if (!this.#documentWorkflow || !this.#projectWorkflow) {
+        throw new TypeError(
+          "WorkspaceController RunWorkflow requires DocumentWorkflow and ProjectWorkflow.",
+        );
+      }
+      this.#runWorkflow = new RunWorkflow({
+        bridgeClient,
+        ensureRegistered: (input) => this.ensureRegistered(input),
+        projectSession,
+        documentSession,
+        commentSession,
+        versionSession,
+        runSession: runWorkflow.runSession,
+        documentWorkflow: this.#documentWorkflow,
+        drain: ({ boundary, deadlineAt }) => this.#projectWorkflow.drain(
+          boundary,
+          { deadlineAt },
+        ),
+        codecs: runWorkflow.codecs,
+        ports: {
+          canvas: runWorkflow.canvas,
+          handoff: runWorkflow.handoff,
+          hash: this.#hashPort,
+        },
+        scheduler: runWorkflow.scheduler,
+        clock,
+      });
+      this.#runWorkflowUnsubscribe = this.#runWorkflow.subscribe((snapshot) => {
+        this.#runSnapshot = snapshot;
+        this.#publishAggregateSnapshot();
+      });
+      this.#runWorkflow.subscribeEvents((event) => this.#emitEvent(event));
+      this.#runSessionUnsubscribe = runWorkflow.runSession.subscribe(() => {
+        this.#runWorkflow?.syncPolling();
+        this.#publishAggregateSnapshot();
+      });
+      this.#runWorkflow.syncPolling();
     }
   }
 
@@ -331,6 +382,12 @@ export class WorkspaceController {
 
   dispose() {
     this.#disposed = true;
+    this.#runSessionUnsubscribe?.();
+    this.#runSessionUnsubscribe = null;
+    this.#runWorkflowUnsubscribe?.();
+    this.#runWorkflowUnsubscribe = null;
+    this.#runWorkflow?.dispose();
+    this.#runWorkflow = null;
     this.#projectWorkflowUnsubscribe?.();
     this.#projectWorkflowUnsubscribe = null;
     this.#projectWorkflow?.dispose();
@@ -433,6 +490,30 @@ export class WorkspaceController {
 
   refreshRecentProjects() {
     return this.#requireProjectWorkflow().refreshRecents();
+  }
+
+  submitRequest(input) {
+    return this.#requireRunWorkflow().submit(input);
+  }
+
+  reconcileRunSubmission(input) {
+    return this.#requireRunWorkflow().reconcileSubmission(input);
+  }
+
+  pollRuns(input) {
+    return this.#requireRunWorkflow().pollNow(input);
+  }
+
+  copyRunHandoff(input) {
+    return this.#requireRunWorkflow().copyHandoff(input);
+  }
+
+  cancelRun(input) {
+    return this.#requireRunWorkflow().cancel(input);
+  }
+
+  resolveRunConflict(input) {
+    return this.#requireRunWorkflow().resolveConflict(input);
   }
 
   enqueueDocumentEdit(input) {
@@ -568,6 +649,13 @@ export class WorkspaceController {
     return this.#commentWorkflow;
   }
 
+  #requireRunWorkflow() {
+    if (!this.#runWorkflow) {
+      throw new Error("任务运行工作流尚未完成组合。");
+    }
+    return this.#runWorkflow;
+  }
+
   ensureRegistered({
     sourcePath,
     expectedSourceSha256,
@@ -661,6 +749,7 @@ export class WorkspaceController {
       registration: this.#registration,
       comment: this.#commentWorkflow?.getSnapshot() || null,
       project: this.#projectSnapshot,
+      run: this.#runSnapshot,
     });
     for (const listener of this.#listeners) {
       try {

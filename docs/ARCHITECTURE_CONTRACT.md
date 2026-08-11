@@ -81,6 +81,10 @@ The renderer's main workspace facts are partitioned as follows:
 - `RunSession`: current/background run projections, Qoder status, background
   outcomes, the one preparing/frozen/uncertain submission lock, and operation
   locks;
+- `RunWorkflow`: Request freeze/persisted-boundary verification, unknown-POST
+  authority reconciliation, tracked-run polling, cancellation, conflict
+  commands and confirmed clipboard handoff. It publishes through `RunSession`
+  and never creates a second run store;
 - `VersionSession`: immutable Version projection and history-view transition;
 - `SourceHistorySession`: pending exact Patch operations and history action.
 - `ExternalFileOpenSession`: opaque external-open delivery IDs, one active
@@ -110,9 +114,11 @@ the Controller also owns the unique `DrainCoordinator`, creates the narrow
 external-open/application protocol Sessions and composes `ProjectWorkflow`.
 In PR-4 it additionally composes `CommentWorkflow`, which owns the
 DraftSession observer, recovery operation sequence, attachment upload count and
-captured-context stale/cancel cleanup. Its temporary direct-Bridge allowance is
-an exact checked upper bound of 13, not a permanent View exception; the final
-composition stage removes it entirely.
+captured-context stale/cancel cleanup. In PR-5 it composes `RunWorkflow`, whose
+poll lifecycle is driven by tracked `RunSession` facts rather than a React
+effect. Its temporary Workbench direct-Bridge allowance is now an exact checked
+upper bound of 6, not a permanent View exception; the final composition stage
+removes it entirely.
 
 An asynchronous result may update state only when its complete identity is
 current:
