@@ -544,13 +544,13 @@ export class VersionWorkflow {
       if (!this.#isNavigationCurrent(operation)) return stale(current);
       if (previous.version.viewMode === "current") {
         const drained = await this.#projectWorkflow.drain("history", { deadlineAt });
+        // A drain can advance durable Document authority before a later
+        // obligation rejects. Rollback must retain that settled projection in
+        // either case rather than restoring a stale pending write.
+        previous = this.#captureNavigationSnapshot(current);
         if (!drained.ok) {
           throw new Error(drained.reason || "当前编辑没有完成安全收口。");
         }
-        // A successful drain may have advanced durable Document authority. A
-        // later failed history read must restore that settled projection rather
-        // than reviving its pre-drain pending write.
-        previous = this.#captureNavigationSnapshot(current);
       }
       const payload = await this.#bridgeClient.versionFile(current.sourcePath, String(version.id));
       if (!this.#isNavigationCurrent(operation)) return stale(current);

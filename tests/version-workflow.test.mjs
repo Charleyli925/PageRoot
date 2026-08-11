@@ -513,6 +513,52 @@ test("history rollback retains persistence advanced by a successful drain", asyn
   assert.equal(harness.calls.render.at(-1)?.html, DRAINED_HTML);
 });
 
+test("history rollback retains persistence advanced before a later drain failure", async () => {
+  const harness = createHarness({
+    onDrain: async ({ documentSession }) => {
+      documentSession.publishAuthority({
+        html: DRAINED_HTML,
+        sourceSha256: sha256(DRAINED_HTML),
+        editRevision: 1,
+        lastPersistedRevision: 1,
+        persistState: "idle",
+        persistError: "",
+        pendingWrite: null,
+      });
+      return { ok: false, reason: "draft persistence failed" };
+    },
+  });
+  harness.documentSession.publishAuthority({
+    html: DRAINED_HTML,
+    sourceSha256: sha256(BASE_HTML),
+    editRevision: 1,
+    lastPersistedRevision: 0,
+    persistState: "writing",
+    pendingWrite: {
+      revision: 1,
+      targetHtmlSha256: sha256(DRAINED_HTML),
+    },
+  });
+
+  const outcome = await harness.workflow.viewHistory({
+    version: {
+      id: "ver_0001",
+      contentSha256: sha256(HISTORY_HTML),
+    },
+    context: harness.context,
+  });
+
+  assert.equal(outcome.status, "rejected");
+  assert.equal(harness.calls.versionFile.length, 0);
+  assert.equal(harness.documentSession.html, DRAINED_HTML);
+  assert.equal(harness.documentSession.sourceSha256, sha256(DRAINED_HTML));
+  assert.equal(harness.documentSession.editRevision, 1);
+  assert.equal(harness.documentSession.lastPersistedRevision, 1);
+  assert.equal(harness.documentSession.persistState, "idle");
+  assert.equal(harness.documentSession.pendingWrite, null);
+  assert.equal(harness.calls.render.at(-1)?.html, DRAINED_HTML);
+});
+
 test("history stays read-only and return-current validates canonical source identity", async () => {
   const harness = createHarness();
   const history = await harness.workflow.viewHistory({
