@@ -303,9 +303,12 @@ export async function architectureViolations() {
     || !workbench.includes(
       "requiredWorkspaceController(workspaceController).ensureRegistered(",
     )
+    || /workspaceController\.getSnapshot\(\)\.registration\.phase\s*===\s*"registering"/.test(
+      workbench,
+    )
   ) {
     violations.push(
-      "app/workbench.tsx: project registration must delegate to WorkspaceController",
+      "app/workbench.tsx: project registration must delegate to WorkspaceController without blocking a newer locator",
     );
   }
   const bridgeCalls = [...workbench.matchAll(

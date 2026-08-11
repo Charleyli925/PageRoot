@@ -1877,7 +1877,6 @@ export default function Workbench() {
       !workspaceController
       || !activeSource
       || (projectSessionRef.current.projectId && projectSessionRef.current.documentId)
-      || workspaceController.getSnapshot().registration.phase === "registering"
     ) return;
     setProjectRecordsPreparing(true);
     setProjectRecordsError("");
