@@ -1,6 +1,6 @@
 # Workbench 应用编排收口执行计划
 
-- 状态：**PR-1、PR-2 已合并至 `main`；PR-3 已获授权并在隔离分支实现（未 Ready、未合并）；PR-4 至 PR-7 尚未授权**
+- 状态：**PR-1、PR-2 已合并至 `main`；PR-3 Draft PR #152 已建立（未 Ready、未合并）；PR-4 至 PR-7 尚未授权**
 - 规划基线：`main@37bba7779b27c0a42a52f98ec84a377b964bf4eb`
 - 基线 Tree：`0e074849493e5f9db9e89621e0a1c1a4910b8fa1`
 - 基线日期：2026-08-11
@@ -867,7 +867,8 @@ timer/Promise/ref 不再由 React 拥有。
 ### 9.8 实施记录（2026-08-11）
 
 - 隔离分支：`refactor/project-workflow`，基于
-  `main@643a472d7cde4818ab4fe3303b7214596ca89f13`；本记录时尚未 Ready 或合并。
+  `main@643a472d7cde4818ab4fe3303b7214596ca89f13`；Draft PR #152 已建立，尚未
+  Ready 或合并。
 - 新增 `project-workflow.js/.d.ts`。`WorkspaceController` 现在拥有唯一
   `DrainCoordinator`，创建窄的 `ExternalFileOpenSession` 与
   `ProjectApplicationSession`，并把既有 Project/Document/Comment/Draft/Run/Version/
