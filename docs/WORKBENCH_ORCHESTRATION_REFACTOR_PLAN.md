@@ -867,7 +867,7 @@ timer/Promise/ref 不再由 React 拥有。
 ### 9.8 实施记录（2026-08-11）
 
 - 隔离分支：`refactor/project-workflow`，基于
-  `main@848c6984dd49958c57e0377e03402f3a693c191d`；本记录时尚未 Ready 或合并。
+  `main@643a472d7cde4818ab4fe3303b7214596ca89f13`；本记录时尚未 Ready 或合并。
 - 新增 `project-workflow.js/.d.ts`。`WorkspaceController` 现在拥有唯一
   `DrainCoordinator`，创建窄的 `ExternalFileOpenSession` 与
   `ProjectApplicationSession`，并把既有 Project/Document/Comment/Draft/Run/Version/
@@ -885,8 +885,11 @@ timer/Promise/ref 不再由 React 拥有。
   `desktop/main.mjs`、preload IPC、`ProjectOpenQueue`、external mailbox、persisted
   schema 或 Patch transport。
 - 新增 `tests/project-workflow.test.mjs` 并同步 impact map、TEST_STRATEGY、状态所有权
-  与 architecture gate。完整验收结果将在本分支最终门禁后记录；PR-4 至 PR-7 未获
-  授权，本分支不进入 Ready、合并、版本或发布流程。
+  与 architecture gate。已通过 9.5 的指定 Node 集 42/42、
+  `npm run test:electron:full` 19/19、`npm run architecture:check`、
+  `npm run typecheck`、`npm run gate:edit -- --base origin/main` 113/113，以及
+  `npm run task:finish`（113 Node、28 Browser、8 Electron、2 AI smoke）。PR-4 至
+  PR-7 未获授权，本分支不进入 Ready、合并、版本或发布流程。
 
 ## 10. PR-4：Comment、Draft 与 Attachment Workflow
 
