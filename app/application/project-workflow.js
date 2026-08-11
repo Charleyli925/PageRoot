@@ -1,0 +1,2357 @@
+import { isBridgeRequestError } from "./bridge-client.js";
+
+const SHA256 = /^sha256:[a-f0-9]{64}$/u;
+const SWITCH_DEADLINE_MS = 15_000;
+
+function succeeded(value) {
+  return Object.freeze({ status: "succeeded", value });
+}
+
+function blocked(code, reason) {
+  return Object.freeze({
+    status: "blocked",
+    code: String(code),
+    reason: String(reason),
+  });
+}
+
+function rejected(code, reason) {
+  return Object.freeze({
+    status: "rejected",
+    code: String(code),
+    reason: String(reason),
+  });
+}
+
+function unknown(operationId, reason) {
+  return Object.freeze({
+    status: "unknown",
+    operationId: String(operationId),
+    reason: String(reason),
+  });
+}
+
+function stale(identity) {
+  return Object.freeze({
+    status: "stale",
+    identity: Object.freeze({ ...identity }),
+  });
+}
+
+function copyOpenRequest(value) {
+  if (!value || typeof value.requestId !== "string" || !value.requestId) return null;
+  return Object.freeze({
+    requestId: value.requestId,
+    sourcePath: typeof value.sourcePath === "string" ? value.sourcePath : "",
+  });
+}
+
+function copyProject(value) {
+  if (!value || typeof value.name !== "string" || typeof value.html !== "string") {
+    return null;
+  }
+  const sourcePath = value.sourcePath ? String(value.sourcePath) : null;
+  const sha256 = value.sha256 ? String(value.sha256) : null;
+  return Object.freeze({
+    ...(value.path ? { path: String(value.path) } : {}),
+    name: value.name,
+    sourcePath,
+    html: value.html,
+    sha256,
+    ...(value.lastModifiedAt
+      ? { lastModifiedAt: String(value.lastModifiedAt) }
+      : {}),
+  });
+}
+
+function initialSnapshot(externalFileOpenSession, projectApplicationSession) {
+  return Object.freeze({
+    hydration: Object.freeze({
+      phase: "idle",
+      generation: 0,
+      epoch: 0,
+      sourcePath: null,
+      error: null,
+    }),
+    switch: Object.freeze({ phase: "idle", operationId: null }),
+    open: Object.freeze({ phase: "idle", operationId: null, pendingKind: null }),
+    close: Object.freeze({ phase: "idle", requestId: null }),
+    externalOpen: externalFileOpenSession.snapshot,
+    projectApplication: projectApplicationSession.snapshot,
+  });
+}
+
+function projectErrorCode(cause, fallback) {
+  if (isBridgeRequestError(cause) && cause.code) return cause.code;
+  return cause && typeof cause === "object" && cause.code
+    ? String(cause.code)
+    : fallback;
+}
+
+function projectErrorMessage(codecs, cause, fallback) {
+  return codecs.errorMessage(cause, fallback);
+}
+
+function registrationContext(outcome) {
+  if (outcome?.status === "succeeded") return outcome.value;
+  if (outcome?.status === "rejected" || outcome?.status === "unknown") {
+    throw new Error(outcome.reason);
+  }
+  return null;
+}
+
+// ProjectWorkflow is the PR-3 renderer project-transition boundary. Main owns
+// durable project-open ordering; the injected renderer Sessions keep their
+// existing fact ownership. This workflow owns only hydration/switch/close
+// operations, accepted-result execution and their stale-result fences.
+export class ProjectWorkflow {
+  #bridgeClient;
+  #ensureRegistered;
+  #projectSession;
+  #documentSession;
+  #commentSession;
+  #draftSession;
+  #versionSession;
+  #runSession;
+  #projectRulesSession;
+  #externalFileOpenSession;
+  #projectApplicationSession;
+  #documentWorkflow;
+  #drainCoordinator;
+  #codecs;
+  #hashPort;
+  #canvasPort;
+  #projectOpenPort;
+  #legacyPort;
+  #policies;
+  #scheduler;
+  #clock;
+  #listeners = new Set();
+  #snapshot;
+  #hydrationGeneration = 0;
+  #operationSequence = 0;
+  #openSequence = 0;
+  #applicationSequence = 0;
+  #pendingOpen = null;
+  #browserOpenOperationId = null;
+  #reconcileScheduled = false;
+  #disposed = false;
+  #closeLifecycle = {
+    preparingRequestId: null,
+    frozenRequestId: null,
+    abortedRequestIds: new Set(),
+  };
+
+  constructor({
+    bridgeClient,
+    ensureRegistered,
+    projectSession,
+    documentSession,
+    commentSession,
+    draftSession,
+    versionSession,
+    runSession,
+    projectRulesSession,
+    externalFileOpenSession,
+    projectApplicationSession,
+    documentWorkflow,
+    drainCoordinator,
+    codecs,
+    ports = {},
+    policies = {},
+    scheduler = globalThis,
+    clock,
+  } = {}) {
+    if (
+      !bridgeClient
+      || typeof bridgeClient.workspace !== "function"
+      || typeof bridgeClient.source !== "function"
+      || typeof bridgeClient.projectFile !== "function"
+      || typeof bridgeClient.openFolder !== "function"
+    ) {
+      throw new TypeError("ProjectWorkflow requires its project Bridge methods.");
+    }
+    if (typeof ensureRegistered !== "function") {
+      throw new TypeError("ProjectWorkflow requires registration authority.");
+    }
+    if (!projectSession || typeof projectSession.openLocator !== "function") {
+      throw new TypeError("ProjectWorkflow requires ProjectSession injection.");
+    }
+    if (!documentSession || typeof documentSession.reset !== "function") {
+      throw new TypeError("ProjectWorkflow requires DocumentSession injection.");
+    }
+    if (!commentSession || typeof commentSession.reset !== "function") {
+      throw new TypeError("ProjectWorkflow requires CommentSession injection.");
+    }
+    if (!draftSession || typeof draftSession.deactivate !== "function") {
+      throw new TypeError("ProjectWorkflow requires DraftSession injection.");
+    }
+    if (!versionSession || typeof versionSession.reset !== "function") {
+      throw new TypeError("ProjectWorkflow requires VersionSession injection.");
+    }
+    if (!runSession || typeof runSession.activate !== "function") {
+      throw new TypeError("ProjectWorkflow requires RunSession injection.");
+    }
+    if (!projectRulesSession || typeof projectRulesSession.inspect !== "function") {
+      throw new TypeError("ProjectWorkflow requires ProjectRulesSession injection.");
+    }
+    if (!externalFileOpenSession || typeof externalFileOpenSession.enqueue !== "function") {
+      throw new TypeError("ProjectWorkflow requires ExternalFileOpenSession injection.");
+    }
+    if (!projectApplicationSession || typeof projectApplicationSession.enqueue !== "function") {
+      throw new TypeError("ProjectWorkflow requires ProjectApplicationSession injection.");
+    }
+    if (
+      !documentWorkflow
+      || typeof documentWorkflow.flush !== "function"
+      || typeof documentWorkflow.captureProjectTransitionAuthority !== "function"
+      || typeof documentWorkflow.restoreProjectTransitionAuthority !== "function"
+    ) {
+      throw new TypeError("ProjectWorkflow requires DocumentWorkflow composition.");
+    }
+    if (!drainCoordinator || typeof drainCoordinator.replace !== "function") {
+      throw new TypeError("ProjectWorkflow requires the Controller DrainCoordinator.");
+    }
+    if (!ports.hash || typeof ports.hash.sha256 !== "function") {
+      throw new TypeError("ProjectWorkflow requires a HashPort.");
+    }
+    if (!ports.canvas || typeof ports.canvas.freeze !== "function") {
+      throw new TypeError("ProjectWorkflow requires a CanvasAuthorityPort.");
+    }
+    if (!ports.projectOpen || typeof ports.projectOpen.mode !== "function") {
+      throw new TypeError("ProjectWorkflow requires a ProjectOpenPort.");
+    }
+    if (!ports.legacy) {
+      throw new TypeError("ProjectWorkflow requires staged legacy obligations.");
+    }
+    if (
+      typeof policies.canCloseDuringHydration !== "function"
+      || typeof policies.shouldRecoverAfterCloseAbort !== "function"
+    ) {
+      throw new TypeError("ProjectWorkflow requires close coordination policies.");
+    }
+    if (
+      !scheduler
+      || typeof scheduler.setTimeout !== "function"
+      || typeof scheduler.clearTimeout !== "function"
+    ) {
+      throw new TypeError("ProjectWorkflow requires a SchedulerPort.");
+    }
+    if (!clock || typeof clock.now !== "function") {
+      throw new TypeError("ProjectWorkflow requires a ClockPort.");
+    }
+    for (const method of [
+      "isRecord",
+      "sameSourcePath",
+      "versionsFromWorkspace",
+      "draftAuthorityFromWorkspace",
+      "authoritativeDraftRevision",
+      "commentsFromRecords",
+      "changesFromDraftRecords",
+      "rebindTargetsPreservingGlobal",
+      "activeRunFromRecord",
+      "isLockedLifecycleState",
+      "commentEditSessionHasChanges",
+      "recoveryIdentityFromRecord",
+      "errorMessage",
+    ]) {
+      if (typeof codecs?.[method] !== "function") {
+        throw new TypeError(`ProjectWorkflow codec ${method} is required.`);
+      }
+    }
+
+    this.#bridgeClient = bridgeClient;
+    this.#ensureRegistered = ensureRegistered;
+    this.#projectSession = projectSession;
+    this.#documentSession = documentSession;
+    this.#commentSession = commentSession;
+    this.#draftSession = draftSession;
+    this.#versionSession = versionSession;
+    this.#runSession = runSession;
+    this.#projectRulesSession = projectRulesSession;
+    this.#externalFileOpenSession = externalFileOpenSession;
+    this.#projectApplicationSession = projectApplicationSession;
+    this.#documentWorkflow = documentWorkflow;
+    this.#drainCoordinator = drainCoordinator;
+    this.#codecs = codecs;
+    this.#hashPort = ports.hash;
+    this.#canvasPort = ports.canvas;
+    this.#projectOpenPort = ports.projectOpen;
+    this.#legacyPort = ports.legacy;
+    this.#policies = policies;
+    this.#scheduler = scheduler;
+    this.#clock = clock;
+    this.#snapshot = initialSnapshot(
+      externalFileOpenSession,
+      projectApplicationSession,
+    );
+
+    this.#externalFileOpenSession.setObserver(() => {
+      this.#publishSnapshot();
+      this.#scheduleDeferredReconciliation();
+    });
+    this.#projectApplicationSession.setObserver(() => {
+      this.#publishSnapshot();
+      this.#scheduleDeferredReconciliation();
+    });
+    this.#registerDrainObligations();
+  }
+
+  getSnapshot() {
+    return this.#snapshot;
+  }
+
+  subscribe(listener) {
+    if (typeof listener !== "function") {
+      throw new TypeError("ProjectWorkflow listener must be a function.");
+    }
+    this.#listeners.add(listener);
+    listener(this.#snapshot);
+    return () => this.#listeners.delete(listener);
+  }
+
+  dispose() {
+    this.#disposed = true;
+    this.#externalFileOpenSession.setObserver(null);
+    this.#projectApplicationSession.setObserver(null);
+    this.#externalFileOpenSession.dispose();
+    this.#projectApplicationSession.dispose();
+    for (const name of [
+      "external-file-open",
+      "project-application",
+      "project-hydration",
+      "view-transition",
+      "submission",
+      "attachments",
+      "project-rules",
+      "source",
+      "draft",
+      "native-edit",
+    ]) this.#drainCoordinator.remove(name);
+    this.#listeners.clear();
+  }
+
+  get projectHydrating() {
+    return this.#snapshot.hydration.phase === "hydrating";
+  }
+
+  get projectLoadError() {
+    return this.#snapshot.hydration.phase === "failed"
+      ? this.#snapshot.hydration.error
+      : null;
+  }
+
+  reportLoadFailure(message) {
+    const reason = String(message || "项目状态需要重新读取。");
+    this.#setHydration({
+      phase: "failed",
+      epoch: this.#projectSession.epoch,
+      sourcePath: this.#projectSession.sourcePath,
+      error: reason,
+    });
+  }
+
+  async retryHydration() {
+    const sourcePath = this.#projectSession.sourcePath;
+    if (!sourcePath) {
+      return blocked("PROJECT_SOURCE_REQUIRED", "当前页面没有可重新读取的源文件。");
+    }
+    const epoch = this.#projectSession.epoch;
+    this.#setHydration({ phase: "hydrating", epoch, sourcePath, error: null });
+    return this.refreshWorkspace({
+      sourcePath,
+      epoch,
+      sourceTransitionToken: epoch,
+    });
+  }
+
+  async refreshWorkspace({
+    sourcePath,
+    epoch,
+    fromDeferred = false,
+    sourceTransitionToken,
+  } = {}) {
+    if (this.#disposed) {
+      return blocked("PROJECT_WORKFLOW_DISPOSED", "项目读取工作流已经停止。");
+    }
+    if (!fromDeferred && sourceTransitionToken === undefined) {
+      const deferred = this.#deferCanvasCommand(
+        "external-refresh",
+        () => this.refreshWorkspace({
+          sourcePath,
+          epoch,
+          fromDeferred: true,
+          sourceTransitionToken,
+        }),
+        { authority: "system" },
+      );
+      if (deferred) return deferred;
+    }
+    return this.#hydrateWorkspace({
+      sourcePath,
+      epoch,
+      sourceTransitionToken,
+    });
+  }
+
+  async prepareSwitch({ fromDeferred = false } = {}) {
+    if (this.#disposed) {
+      return blocked("PROJECT_WORKFLOW_DISPOSED", "项目切换工作流已经停止。");
+    }
+    if (!fromDeferred) {
+      const deferred = this.#deferCanvasCommand(
+        "project-switch",
+        () => this.prepareSwitch({ fromDeferred: true }),
+      );
+      if (deferred) return deferred;
+    }
+
+    const operationId = this.#nextOperationId("switch");
+    this.#setSwitch("preparing", operationId);
+    try {
+      const hardBlocker = this.#drainCoordinator
+        .inspect("switch")
+        .find((status) => status.state === "blocked");
+      if (hardBlocker) {
+        return blocked("PROJECT_SWITCH_BLOCKED", hardBlocker.reason);
+      }
+      if (this.projectLoadError) {
+        this.#draftSession.deactivate();
+        this.#documentWorkflow.resetForProjectTransition();
+        return succeeded({ operationId });
+      }
+      if (this.#runSession.activeLocked) {
+        const drained = await this.#drainCoordinator.drain("switch", {
+          deadlineAt: this.#clock.now() + SWITCH_DEADLINE_MS,
+        });
+        return drained.ok
+          ? succeeded({ operationId })
+          : blocked("PROJECT_SWITCH_DRAIN_BLOCKED", drained.reason);
+      }
+      if (this.#documentWorkflow.hasHistoryAction) {
+        const historyOutcome = await this.#documentWorkflow.waitForHistoryAction();
+        if (historyOutcome.status !== "succeeded") {
+          return blocked(
+            "PROJECT_SWITCH_HISTORY_PENDING",
+            "当前撤销或重做没有安全完成。",
+          );
+        }
+      }
+
+      const shouldCommitCanvas = !this.#legacyPort.isHistoryView();
+      let committed = shouldCommitCanvas
+        ? this.#canvasPort.fencePendingEdit({
+            resumeEditing: false,
+            trigger: "project-switch",
+          })
+        : null;
+      if (shouldCommitCanvas && (!committed || !committed.ok)) {
+        const reason = committed?.reason || "请点回文字完成输入，再切换项目。";
+        this.#canvasPort.showCommitBlocked?.(reason);
+        return blocked("PROJECT_SWITCH_NATIVE_EDIT", reason);
+      }
+
+      const cutoffRevision = this.#documentSession.editRevision;
+      const drained = await this.#drainCoordinator.drain("switch", {
+        deadlineAt: this.#clock.now() + SWITCH_DEADLINE_MS,
+      });
+      if (!drained.ok) {
+        return blocked("PROJECT_SWITCH_DRAIN_BLOCKED", drained.reason);
+      }
+      if (
+        this.#documentSession.editRevision !== cutoffRevision
+        || this.#documentSession.pendingWrite
+        || this.#documentSession.flushPromise
+        || this.#documentWorkflow.hasHistoryAction
+      ) {
+        return blocked(
+          "PROJECT_SWITCH_SOURCE_CHANGED",
+          "当前 HTML 在切换边界后仍有修改尚未安全写回。",
+        );
+      }
+      if (shouldCommitCanvas) {
+        const canvasOutcome = await this.#documentWorkflow.ensureCurrentCanvas({
+          context: this.#projectSession.context || undefined,
+        });
+        if (canvasOutcome.status !== "succeeded") {
+          return blocked(
+            "PROJECT_SWITCH_CANVAS_UNVERIFIED",
+            canvasOutcome.reason || "当前画布尚未完成自动恢复。",
+          );
+        }
+        committed = this.#canvasPort.fencePendingEdit({
+          resumeEditing: false,
+          trigger: "project-switch",
+        });
+        if (!committed || !committed.ok) {
+          return blocked(
+            "PROJECT_SWITCH_FINAL_FENCE",
+            committed?.reason || "当前画布尚未完成最终安全收口。",
+          );
+        }
+      }
+      if (
+        this.#projectSession.sourcePath
+        && committed
+        && (
+          this.#documentSession.lastPersistedRevision !== cutoffRevision
+          || this.#documentSession.sourceSha256 !== committed.sourceSha256
+        )
+      ) {
+        return blocked(
+          "PROJECT_SWITCH_SOURCE_MISMATCH",
+          "当前 HTML 与画布的最终身份不一致。",
+        );
+      }
+      return succeeded({ operationId });
+    } catch (cause) {
+      return rejected(
+        projectErrorCode(cause, "PROJECT_SWITCH_REJECTED"),
+        projectErrorMessage(this.#codecs, cause, "项目切换前的安全检查失败。"),
+      );
+    } finally {
+      this.#setSwitch("idle", null);
+    }
+  }
+
+  async openProject({ kind = "local", sourcePath, fromDeferred = false } = {}) {
+    if (this.#snapshot.close.phase === "ready") {
+      return blocked(
+        "PROJECT_OPEN_CLOSE_COMMITTED",
+        "当前窗口正在关闭，新的 HTML 将由下一次启动接收。",
+      );
+    }
+    if (kind === "startup") return this.#openStartup();
+    const operationId = this.#nextOpenOperation();
+    this.#setOpen("opening", operationId, null);
+    try {
+      const switchOutcome = await this.prepareSwitch({ fromDeferred });
+      if (this.#snapshot.close.phase === "ready") {
+        return blocked(
+          "PROJECT_OPEN_CLOSE_COMMITTED",
+          "当前窗口正在关闭，没有接收新的 HTML。",
+        );
+      }
+      if (switchOutcome.status !== "succeeded") {
+        this.#pendingOpen = Object.freeze({ kind, sourcePath: sourcePath || null });
+        this.#setOpen("deferred", null, kind);
+        return switchOutcome;
+      }
+      this.#pendingOpen = null;
+      if (
+        kind === "local"
+        && this.#projectOpenPort.mode() === "browser-file"
+      ) {
+        this.#browserOpenOperationId = operationId;
+        this.#emit({ type: "project-browser-file-requested", operationId });
+        return succeeded({ operationId, awaitingFile: true });
+      }
+      const project = kind === "recent"
+        ? await this.#projectOpenPort.openRecent(String(sourcePath || ""))
+        : await this.#projectOpenPort.openLocal();
+      if (!project) return succeeded({ operationId, opened: false });
+      if (this.#snapshot.close.phase === "ready") {
+        return blocked(
+          "PROJECT_OPEN_CLOSE_COMMITTED",
+          "当前窗口正在关闭，没有接收新的 HTML。",
+        );
+      }
+      const accepted = this.#enqueueAcceptedProject(project, {
+        kind,
+        operationId,
+        sourcePath: sourcePath || null,
+      });
+      if (!accepted) {
+        return rejected(
+          "PROJECT_APPLICATION_REJECTED",
+          "无法安排当前 HTML 的安全切换。",
+        );
+      }
+      return succeeded({ operationId, opened: true });
+    } catch (cause) {
+      const reason = projectErrorMessage(
+        this.#codecs,
+        cause,
+        kind === "recent"
+          ? "文件可能已移动；可重新选择当前位置，或移除旧记录。"
+          : "文件可能已移动或暂时不可读；可重新选择。",
+      );
+      this.#emit({
+        type: "project-open-failed",
+        kind,
+        operationId,
+        reason,
+        sourcePath: sourcePath || null,
+      });
+      return rejected(projectErrorCode(cause, "PROJECT_OPEN_REJECTED"), reason);
+    } finally {
+      if (this.#snapshot.open.operationId === operationId) {
+        this.#setOpen("idle", null, this.#pendingOpen?.kind || null);
+      }
+    }
+  }
+
+  acceptBrowserProject({ operationId, project } = {}) {
+    if (this.#snapshot.close.phase === "ready") {
+      return blocked(
+        "PROJECT_OPEN_CLOSE_COMMITTED",
+        "当前窗口正在关闭，没有接收新的 HTML。",
+      );
+    }
+    if (!operationId && !this.#browserOpenOperationId) {
+      // A trusted hidden file input can be populated directly (for example by
+      // accessibility automation) without the real picker command. It still
+      // enters the accepted FIFO, whose executor repeats the full switch fence.
+      return this.acceptProject(project, {
+        kind: "browser-file",
+        operationId: this.#nextOpenOperation(),
+        sourcePath: null,
+      });
+    }
+    if (!operationId || operationId !== this.#browserOpenOperationId) {
+      return stale({ operationId: String(operationId || ""), kind: "browser-file" });
+    }
+    this.#browserOpenOperationId = null;
+    const accepted = this.#enqueueAcceptedProject(project, {
+      kind: "browser-file",
+      operationId,
+      sourcePath: null,
+    });
+    this.#setOpen("idle", null, null);
+    return accepted
+      ? succeeded({ operationId, accepted: true })
+      : rejected("PROJECT_APPLICATION_REJECTED", "无法安排当前 HTML 的安全切换。");
+  }
+
+  acceptProject(project, {
+    kind = "accepted",
+    operationId = this.#nextOpenOperation(),
+    sourcePath = null,
+  } = {}) {
+    if (this.#snapshot.close.phase === "ready") {
+      return blocked(
+        "PROJECT_OPEN_CLOSE_COMMITTED",
+        "当前窗口正在关闭，没有接收新的 HTML。",
+      );
+    }
+    const accepted = this.#enqueueAcceptedProject(project, {
+      kind,
+      operationId,
+      sourcePath,
+    });
+    return accepted
+      ? succeeded({ operationId, accepted: true })
+      : rejected("PROJECT_APPLICATION_REJECTED", "无法安排当前 HTML 的安全切换。");
+  }
+
+  acceptExternalProject(value) {
+    if (this.#snapshot.close.phase === "ready") {
+      return blocked(
+        "EXTERNAL_PROJECT_CLOSE_COMMITTED",
+        "当前窗口正在关闭，外部 HTML 由下一次启动接收。",
+      );
+    }
+    const request = copyOpenRequest(value);
+    if (!request) {
+      return rejected("EXTERNAL_PROJECT_REQUEST_INVALID", "外部 HTML 请求身份无效。");
+    }
+    const accepted = this.#externalFileOpenSession.enqueue(
+      request,
+      (next, options) => this.#openExternalProject(next, options),
+    );
+    if (accepted) this.#pendingOpen = null;
+    this.#publishSnapshot();
+    return accepted
+      ? succeeded({ requestId: request.requestId })
+      : blocked("EXTERNAL_PROJECT_DUPLICATE", "这个外部 HTML 请求已经处理过。");
+  }
+
+  resumeDeferredExternalProject() {
+    const resumed = this.#externalFileOpenSession.resume(
+      (request, options) => this.#openExternalProject(request, options),
+    );
+    return resumed
+      ? succeeded({ resumed: true })
+      : blocked("EXTERNAL_PROJECT_NOT_DEFERRED", "没有等待重试的外部 HTML。");
+  }
+
+  resumeDeferredProjectApplication() {
+    const resumed = this.#projectApplicationSession.resume(
+      (application) => this.#applyAcceptedProject(application),
+    );
+    return resumed
+      ? succeeded({ resumed: true })
+      : blocked("PROJECT_APPLICATION_NOT_DEFERRED", "没有等待继续的 HTML 切换。");
+  }
+
+  reconcileDeferred() {
+    if (this.#disposed) return;
+    const switchBlocked = this.#drainCoordinator
+      .inspect("switch")
+      .some((status) => status.state !== "resolved");
+    if (this.#projectApplicationSession.snapshot.status === "deferred") {
+      const retry = this.#projectApplicationSession.reconcileDeferredSwitch({
+        switchBlocked,
+        execute: (application) => this.#applyAcceptedProject(application),
+      });
+      if (retry === "action-required") {
+        this.#emit({ type: "project-application-deferred" });
+      }
+      return;
+    }
+    if (this.#externalFileOpenSession.snapshot.status === "deferred") {
+      const retry = this.#externalFileOpenSession.reconcileDeferredSwitch({
+        switchBlocked,
+        execute: (request, options) => this.#openExternalProject(request, options),
+      });
+      if (retry === "action-required") {
+        this.#emit({ type: "external-project-open-deferred" });
+      }
+      return;
+    }
+    if (!this.#pendingOpen || switchBlocked) return;
+    const pending = this.#pendingOpen;
+    this.#pendingOpen = null;
+    void this.openProject({ ...pending, fromDeferred: true });
+  }
+
+  async prepareClose({ requestId, deadlineAt } = {}) {
+    const closeRequestId = String(requestId || "");
+    if (!closeRequestId || !Number.isFinite(Number(deadlineAt))) {
+      return {
+        ready: false,
+        reason: "桌面关闭请求缺少完整身份。",
+        presentation: "native",
+      };
+    }
+    let imposedEditorFreeze = false;
+    let frozenHtml = null;
+    let frozenSourceSha256 = null;
+    let ready = false;
+    const lifecycle = this.#closeLifecycle;
+    const inAppBlock = (reason) => ({
+      ready: false,
+      reason: String(reason),
+      presentation: "in-app",
+    });
+    const projectOpenInFlight = () => (
+      this.#snapshot.open.phase === "opening"
+      || this.#externalFileOpenSession.snapshot.status !== "idle"
+      || this.#projectApplicationSession.snapshot.status !== "idle"
+    );
+    const drainProjectOpenSessions = async () => {
+      while (projectOpenInFlight()) {
+        const result = await this.#drainCoordinator.drain("close", {
+          deadlineAt: Number(deadlineAt) - 250,
+        });
+        if (!result.ok) return inAppBlock(result.reason);
+      }
+      return null;
+    };
+    lifecycle.preparingRequestId = closeRequestId;
+    this.#setClose("preparing", closeRequestId);
+    try {
+      const projectOpenBlock = await drainProjectOpenSessions();
+      if (projectOpenBlock) return projectOpenBlock;
+      if (this.projectHydrating) {
+        if (projectOpenInFlight()) {
+          return inAppBlock("HTML 打开仍未安全完成，已取消关闭。");
+        }
+        const draftState = this.#draftSession.inspect();
+        if (this.#policies.canCloseDuringHydration({
+          projectHydrating: true,
+          viewTransitioning: this.#legacyPort.isViewTransitioning(),
+          submissionPending: this.#runSession.submissionPending,
+          persistState: this.#documentSession.persistState,
+          pendingWrite: Boolean(this.#documentSession.pendingWrite),
+          flushInProgress: Boolean(this.#documentSession.flushPromise),
+          draftPending: draftState.pending,
+          draftFlushInProgress: draftState.writing,
+          editRevision: this.#documentSession.editRevision,
+          lastPersistedRevision: this.#documentSession.lastPersistedRevision,
+        })) {
+          ready = true;
+          return { ready: true };
+        }
+        return inAppBlock("项目状态尚未读取完成，已取消关闭以避免覆盖未知编辑状态。");
+      }
+      if (this.projectLoadError) {
+        if (projectOpenInFlight()) {
+          return inAppBlock("HTML 打开仍未安全完成，已取消关闭。");
+        }
+        if (
+          this.#documentSession.pendingWrite
+          || this.#documentSession.flushPromise
+          || this.#documentWorkflow.hasHistoryAction
+        ) {
+          return inAppBlock("项目读取失败且仍有待恢复的 HTML 修改，请先重试读取或导出副本。");
+        }
+        ready = true;
+        return { ready: true };
+      }
+      if (this.#documentWorkflow.hasHistoryAction) {
+        const historyOutcome = await this.#documentWorkflow.waitForHistoryAction();
+        if (historyOutcome.status !== "succeeded") {
+          return inAppBlock("当前撤销或重做没有安全完成，已取消关闭。");
+        }
+      }
+      if (!this.#legacyPort.isHistoryView() && !this.#runSession.activeLocked) {
+        const frozen = this.#canvasPort.freeze();
+        if (!frozen) {
+          return inAppBlock("编辑画布尚未就绪，已取消关闭以避免丢失文字草稿。");
+        }
+        if (!frozen.ok) {
+          return inAppBlock(frozen.reason || "当前文字草稿无法安全提交，已取消关闭。");
+        }
+        imposedEditorFreeze = true;
+        frozenHtml = frozen.html;
+        frozenSourceSha256 = frozen.sourceSha256;
+        lifecycle.frozenRequestId = closeRequestId;
+        if (
+          frozen.html !== this.#documentSession.html
+          && (Boolean(this.#projectSession.sourcePath) || Boolean(frozen.pendingMutation))
+        ) {
+          const editOutcome = this.#documentWorkflow.enqueueEdit({
+            html: frozen.html,
+            mutation: frozen.pendingMutation || undefined,
+            context: this.#projectSession.context || undefined,
+          });
+          if (editOutcome.status !== "succeeded") {
+            return inAppBlock(editOutcome.reason || "当前文字没有进入安全写回队列。");
+          }
+        }
+      }
+      const cutoffRevision = this.#documentSession.editRevision;
+      const drained = await this.#drainCoordinator.drain("close", {
+        deadlineAt: Number(deadlineAt) - 250,
+      });
+      if (!drained.ok) return inAppBlock(drained.reason);
+      if (
+        imposedEditorFreeze
+        && this.#projectSession.sourcePath
+        && frozenHtml !== null
+      ) {
+        const boundaryOutcome = await this.#documentWorkflow.reconcileBoundary({
+          frozenHtml,
+          reportedSourceSha256: frozenSourceSha256,
+          cutoffRevision,
+          identity: this.#projectSession.snapshot,
+          timeoutMs: 2_500,
+        });
+        if (boundaryOutcome.status !== "succeeded") {
+          const reason = boundaryOutcome.reason
+            || "关闭核对期间当前项目已切换，当前页面仍保持开启。";
+          this.#emit({
+            type: "project-close-reconciliation-blocked",
+            code: boundaryOutcome.code || "",
+            reason,
+          });
+          return inAppBlock(reason);
+        }
+      }
+      if (lifecycle.abortedRequestIds.has(closeRequestId)) {
+        return inAppBlock("桌面外壳已取消本次关闭。");
+      }
+      if (projectOpenInFlight()) {
+        return inAppBlock("HTML 打开在关闭核对期间开始，已取消本次关闭。");
+      }
+      ready = true;
+      this.#setClose("ready", closeRequestId);
+      return { ready: true };
+    } catch (cause) {
+      return {
+        ready: false,
+        reason: cause instanceof Error ? cause.message : "关闭前安全写入检查失败。",
+        presentation: "native",
+      };
+    } finally {
+      if (lifecycle.preparingRequestId === closeRequestId) {
+        lifecycle.preparingRequestId = null;
+      }
+      if (!ready && imposedEditorFreeze && !this.#runSession.activeLocked) {
+        if (lifecycle.frozenRequestId === closeRequestId) {
+          lifecycle.frozenRequestId = null;
+        }
+        this.#canvasPort.unlock?.();
+      }
+      lifecycle.abortedRequestIds.delete(closeRequestId);
+      if (!ready) this.#setClose("idle", null);
+    }
+  }
+
+  abortClose({ requestId } = {}) {
+    const closeRequestId = String(requestId || "");
+    if (!closeRequestId) return;
+    const lifecycle = this.#closeLifecycle;
+    lifecycle.abortedRequestIds.add(closeRequestId);
+    if (lifecycle.preparingRequestId === closeRequestId) return;
+    if (
+      this.#snapshot.close.requestId === closeRequestId
+      && this.#snapshot.close.phase === "ready"
+    ) {
+      this.#setClose("idle", null);
+    }
+    if (lifecycle.frozenRequestId !== closeRequestId) {
+      lifecycle.abortedRequestIds.delete(closeRequestId);
+      return;
+    }
+    const draftState = this.#draftSession.inspect();
+    const mayRecover = this.#policies.shouldRecoverAfterCloseAbort({
+      approvedRequestId: lifecycle.frozenRequestId,
+      abortedRequestId: closeRequestId,
+      imposedEditorFreeze: true,
+      projectLocked: this.#runSession.activeLocked,
+      projectHydrating: this.projectHydrating,
+      projectLoadError: Boolean(this.projectLoadError),
+      viewTransitioning: this.#legacyPort.isViewTransitioning(),
+      submissionPending: this.#runSession.submissionPending,
+      persistState: this.#documentSession.persistState,
+      pendingWrite: Boolean(this.#documentSession.pendingWrite),
+      flushInProgress: Boolean(this.#documentSession.flushPromise),
+      draftPending: draftState.pending,
+      draftFlushInProgress: draftState.writing,
+      draftPersistError: Boolean(draftState.error),
+      editRevision: this.#documentSession.editRevision,
+      lastPersistedRevision: this.#documentSession.lastPersistedRevision,
+    });
+    if (!mayRecover) return;
+    lifecycle.frozenRequestId = null;
+    lifecycle.abortedRequestIds.delete(closeRequestId);
+    this.#canvasPort.unlock?.();
+    this.#setClose("idle", null);
+  }
+
+  hasPending(boundary) {
+    return this.#drainCoordinator.hasPending(boundary);
+  }
+
+  inspectDrain(boundary) {
+    return this.#drainCoordinator.inspect(boundary);
+  }
+
+  drain(boundary, options) {
+    return this.#drainCoordinator.drain(boundary, options);
+  }
+
+  drainCloseFallback({ deadlineAt } = {}) {
+    return this.#drainCoordinator.drain("close", {
+      deadlineAt: Number(deadlineAt) || this.#clock.now() + 3_000,
+    });
+  }
+
+  async readProjectFile({ context, relativePath } = {}) {
+    const activeContext = context || this.#projectSession.context;
+    if (!activeContext || !this.#projectSession.matches(activeContext)) {
+      return blocked("PROJECT_CONTEXT_REQUIRED", "当前项目身份尚未完成初始化。");
+    }
+    try {
+      const payload = await this.#bridgeClient.projectFile(
+        activeContext.sourcePath,
+        String(relativePath || ""),
+      );
+      if (!this.#projectSession.matches(activeContext)) return stale(activeContext);
+      return succeeded({ content: String(payload.content || "") });
+    } catch (cause) {
+      return this.#outcomeFromCause(
+        this.#nextOperationId("project-file"),
+        cause,
+        "PROJECT_FILE_REJECTED",
+        "项目文件暂时无法读取。",
+      );
+    }
+  }
+
+  async openProjectRecords({ context } = {}) {
+    const activeContext = context || this.#projectSession.context;
+    if (!activeContext || !this.#projectSession.matches(activeContext)) {
+      return blocked("PROJECT_CONTEXT_REQUIRED", "当前项目身份尚未完成初始化。");
+    }
+    const operationId = this.#nextOperationId("project-folder");
+    try {
+      const payload = await this.#bridgeClient.openFolder({
+        sourcePath: activeContext.sourcePath,
+      });
+      if (!this.#projectSession.matches(activeContext)) return stale(activeContext);
+      if (payload.ok === false) {
+        return rejected("PROJECT_FOLDER_REJECTED", "无法打开项目记录。");
+      }
+      return succeeded({ opened: true });
+    } catch (cause) {
+      return this.#outcomeFromCause(
+        operationId,
+        cause,
+        "PROJECT_FOLDER_REJECTED",
+        "项目记录暂时无法打开。",
+      );
+    }
+  }
+
+  async refreshRecents() {
+    if (typeof this.#projectOpenPort.listRecent !== "function") {
+      return succeeded({ projects: [] });
+    }
+    try {
+      const projects = await this.#projectOpenPort.listRecent();
+      this.#emit({ type: "project-recents-loaded", projects });
+      return succeeded({ projects });
+    } catch (cause) {
+      const reason = projectErrorMessage(
+        this.#codecs,
+        cause,
+        "最近打开记录暂时无法读取。",
+      );
+      this.#emit({ type: "project-recents-failed", reason });
+      return rejected("PROJECT_RECENTS_REJECTED", reason);
+    }
+  }
+
+  #registerDrainObligations() {
+    this.#drainCoordinator.replace("external-file-open", {
+      label: "等待外部 HTML 打开完成",
+      inspect: (boundary) => (
+        boundary === "close"
+        && this.#externalFileOpenSession.snapshot.status !== "idle"
+      ) ? {
+        state: "pending",
+        reason: "外部 HTML 正在读取或等待安全切换。",
+      } : { state: "resolved" },
+      drain: () => this.#waitUntil(
+        () => this.#externalFileOpenSession.snapshot.status === "idle",
+      ),
+    });
+    this.#drainCoordinator.replace("project-application", {
+      label: "等待已接收的 HTML 切换完成",
+      inspect: (boundary) => (
+        boundary === "close"
+        && this.#projectApplicationSession.snapshot.status !== "idle"
+      ) ? {
+        state: "pending",
+        reason: "已接收的 HTML 仍在完成安全切换。",
+      } : { state: "resolved" },
+      drain: () => this.#waitUntil(
+        () => this.#projectApplicationSession.snapshot.status === "idle",
+      ),
+    });
+    this.#drainCoordinator.replace("project-picker", {
+      label: "等待本地 HTML 选择完成",
+      inspect: (boundary) => (
+        boundary === "close" && this.#snapshot.open.phase === "opening"
+      ) ? {
+        state: "pending",
+        reason: "本地 HTML 选择仍在等待结果。",
+      } : { state: "resolved" },
+      drain: () => this.#waitUntil(
+        () => this.#snapshot.open.phase !== "opening",
+      ),
+    });
+    this.#drainCoordinator.replace("project-hydration", {
+      label: "等待项目读取完成",
+      inspect: (boundary) => (
+        boundary === "switch" && this.projectHydrating
+      ) ? {
+        state: "pending",
+        reason: "当前项目仍在读取，不能开始新的项目切换。",
+      } : { state: "resolved" },
+    });
+    this.#drainCoordinator.replace("view-transition", {
+      label: "等待页面切换完成",
+      inspect: (boundary) => (
+        this.#legacyPort.isViewTransitioning() && boundary !== "history"
+      ) ? {
+        state: "blocked",
+        reason: "正在核对历史或当前 HTML，请等待本次切换完成后再继续。",
+      } : { state: "resolved" },
+    });
+    this.#drainCoordinator.replace("submission", {
+      label: "等待本轮提交准备结束",
+      inspect: (boundary) => (
+        boundary !== "submit" && this.#runSession.submissionPending
+      ) ? {
+        state: "pending",
+        reason: "内部 AI 的冻结 Request 尚未安全建立。",
+      } : { state: "resolved" },
+      drain: () => this.#waitUntil(() => !this.#runSession.submissionPending),
+    });
+    this.#drainCoordinator.replace("attachments", {
+      label: "等待附件添加完成",
+      inspect: () => this.#legacyPort.attachmentUploadCount() > 0
+        ? { state: "pending", reason: "评论附件仍在写入项目记录。" }
+        : { state: "resolved" },
+      drain: () => this.#waitUntil(
+        () => this.#legacyPort.attachmentUploadCount() === 0,
+      ),
+    });
+    this.#drainCoordinator.replace("project-rules", {
+      label: "等待项目规则保存",
+      inspect: () => this.#projectRulesSession.inspect({
+        locked: this.#runSession.activeLocked,
+      }),
+      drain: () => this.#legacyPort.saveProjectRules(),
+    });
+    this.#drainCoordinator.replace("source", {
+      label: "等待当前 HTML 写回",
+      inspect: (boundary) => this.#inspectSourceObligation(boundary),
+      drain: async () => {
+        if (this.#documentWorkflow.hasHistoryAction) {
+          const history = await this.#documentWorkflow.waitForHistoryAction();
+          if (history.status !== "succeeded") return false;
+        }
+        const outcome = await this.#documentWorkflow.flush({
+          throughRevision: this.#documentSession.editRevision,
+        });
+        return outcome.status === "succeeded";
+      },
+    });
+    this.#drainCoordinator.replace("draft", {
+      label: "等待评论记录写入",
+      alwaysDrain: true,
+      inspect: (boundary) => this.#inspectDraftObligation(boundary),
+      drain: ({ boundary }) => this.#drainDraftObligation(boundary),
+    });
+    this.#drainCoordinator.replace("native-edit", {
+      label: "等待当前文字输入收口",
+      inspect: () => this.#canvasPort.hasPendingNativeEdit?.()
+        ? { state: "pending", reason: "当前文字尚未完成输入，不能离开编辑画布。" }
+        : { state: "resolved" },
+    });
+  }
+
+  #inspectSourceObligation(boundary) {
+    if (this.#runSession.activeLocked && boundary !== "submit") {
+      return { state: "resolved" };
+    }
+    if (!this.#projectSession.sourcePath && this.#documentSession.editRevision > 0) {
+      return {
+        state: "blocked",
+        reason: "当前编辑尚未绑定本地 HTML，请先导出或打开本地文件。",
+      };
+    }
+    if (this.#documentSession.persistState === "conflict") {
+      return {
+        state: "blocked",
+        reason: "当前 HTML 与外部文件存在冲突，请先选择保留哪一份。",
+      };
+    }
+    if (this.#documentSession.persistState === "failed") {
+      return {
+        state: "blocked",
+        reason: this.#documentSession.persistError
+          || "当前 HTML 尚未安全写回，请先处理保存失败。",
+      };
+    }
+    if (
+      this.#documentSession.pendingWrite
+      || this.#documentSession.flushPromise
+      || this.#documentWorkflow.hasHistoryAction
+      || this.#documentSession.editRevision > this.#documentSession.lastPersistedRevision
+    ) {
+      return { state: "pending", reason: "当前 HTML 仍有修改尚未安全写回源文件。" };
+    }
+    return { state: "resolved" };
+  }
+
+  #hasDraftMaterial() {
+    return Boolean(
+      this.#commentSession.comments.length > 0
+      || this.#commentSession.changeEvents.length > 0
+      || this.#commentSession.deletedCommentIds.size > 0
+      || this.#commentSession.composerDraft.trim()
+      || this.#commentSession.composerAttachments.length > 0
+      || this.#commentSession.composerTarget
+      || this.#codecs.commentEditSessionHasChanges(this.#commentSession.editSession)
+    );
+  }
+
+  #inspectDraftObligation(boundary) {
+    if (
+      (this.#runSession.activeLocked && boundary !== "submit")
+      || this.projectLoadError
+    ) return { state: "resolved" };
+    const context = this.#projectSession.context;
+    if (!context) {
+      return this.#hasDraftMaterial()
+        ? { state: "pending", reason: "正在为本轮评论建立唯一项目身份。" }
+        : { state: "resolved" };
+    }
+    const state = this.#draftSession.inspect();
+    if (!state.active) {
+      return { state: "pending", reason: "正在重新核对本轮评论的项目身份。" };
+    }
+    if (state.pending || state.writing || state.error) {
+      return { state: "pending", reason: "本轮评论或编辑审计仍未安全记录。" };
+    }
+    return { state: "resolved" };
+  }
+
+  async #drainDraftObligation(boundary) {
+    if (
+      (this.#runSession.activeLocked && boundary !== "submit")
+      || this.projectLoadError
+    ) return true;
+    let context = this.#projectSession.context;
+    if (!context && !this.#hasDraftMaterial()) return true;
+    if (!context) {
+      context = registrationContext(await this.#ensureRegistered());
+      if (!context) throw new Error("无法为本轮评论建立唯一项目身份。");
+    } else if (!this.#draftSession.isActive(context)) {
+      context = registrationContext(await this.#ensureRegistered({
+        sourcePath: context.sourcePath,
+        expectedSourceSha256: this.#documentSession.sourceSha256,
+        adoptCanonicalSource: false,
+      }));
+      if (!context || !this.#draftSession.isActive(context)) {
+        throw new Error("无法恢复本轮评论的项目身份。");
+      }
+    }
+    const snapshot = this.#draftSession.createSnapshot({
+      context,
+      basedOnVersionId: this.#versionSession.snapshot.currentBasedOnVersionId,
+      comments: this.#commentSession.comments,
+      changeEvents: this.#commentSession.changeEvents,
+      deletedCommentIds: this.#commentSession.deletedCommentIds,
+      operationId: this.#legacyPort.draftRecoveryOperationId() || undefined,
+    });
+    if (!snapshot) throw new Error("评论会话与当前项目身份不一致。");
+    this.#legacyPort.clearDraftRecoveryOperationId();
+    this.#legacyPort.persistDraftRecovery(snapshot);
+    const persisted = await this.#draftSession.drain(snapshot);
+    if (!persisted) {
+      throw this.#draftSession.lastError
+        || new Error("本轮评论或编辑审计没有完成安全记录。");
+    }
+    return true;
+  }
+
+  async #openStartup() {
+    const operationId = this.#nextOpenOperation();
+    this.#setOpen("opening", operationId, null);
+    try {
+      const [activeResult, recentResult] = await Promise.allSettled([
+        this.#projectOpenPort.getActive?.(),
+        this.#projectOpenPort.listRecent?.(),
+      ]);
+      const recent = recentResult.status === "fulfilled"
+        ? recentResult.value || []
+        : [];
+      if (recentResult.status === "fulfilled") {
+        this.#emit({ type: "project-recents-loaded", projects: recent });
+      } else {
+        this.#emit({
+          type: "project-recents-failed",
+          reason: projectErrorMessage(
+            this.#codecs,
+            recentResult.reason,
+            "最近打开记录暂时无法读取。",
+          ),
+        });
+      }
+      const active = activeResult.status === "fulfilled" ? activeResult.value : null;
+      if (activeResult.status === "rejected") {
+        this.#emit({
+          type: "project-startup-failed",
+          reason: projectErrorMessage(
+            this.#codecs,
+            activeResult.reason,
+            "文件可能已移动、删除或损坏。源页没有打开其他内容来替代它。",
+          ),
+        });
+      } else {
+        this.#emit({ type: "project-startup-ready" });
+      }
+      void this.#legacyPort.hydrateRecentRuns?.(recent, active?.sourcePath || null);
+      if (active) {
+        if (this.#snapshot.close.phase === "ready") {
+          return blocked(
+            "PROJECT_OPEN_CLOSE_COMMITTED",
+            "当前窗口正在关闭，没有接收新的 HTML。",
+          );
+        }
+        if (!this.#enqueueAcceptedProject(active, {
+          kind: "startup",
+          operationId,
+          sourcePath: active.sourcePath || null,
+        })) {
+          return rejected(
+            "PROJECT_APPLICATION_REJECTED",
+            "无法安排当前 HTML 的安全切换。",
+          );
+        }
+      }
+      return succeeded({ operationId, opened: Boolean(active) });
+    } catch (cause) {
+      return rejected(
+        "PROJECT_STARTUP_REJECTED",
+        projectErrorMessage(this.#codecs, cause, "上次打开的 HTML 无法恢复。"),
+      );
+    } finally {
+      this.#setOpen("idle", null, null);
+    }
+  }
+
+  #enqueueAcceptedProject(projectValue, metadata) {
+    if (this.#snapshot.close.phase === "ready") return false;
+    const project = copyProject(projectValue);
+    if (!project) return false;
+    this.#applicationSequence += 1;
+    return this.#projectApplicationSession.enqueue({
+      applicationId: `project-application-${this.#applicationSequence}`,
+      value: Object.freeze({ project, metadata: Object.freeze({ ...metadata }) }),
+    }, (application) => this.#applyAcceptedProject(application));
+  }
+
+  async #applyAcceptedProject(application) {
+    if (this.#snapshot.close.phase === "ready") return "complete";
+    const { project, metadata } = application.value;
+    if (this.projectHydrating && !this.#retireHydrationForAcceptedSuccessor()) {
+      return "deferred";
+    }
+    // epoch 0 has no previously opened renderer authority to drain or fence.
+    // Startup still enters the accepted-result FIFO, but its first publication
+    // must not depend on an edit Canvas that only mounts for an opened locator.
+    if (this.#projectSession.epoch > 0) {
+      const switchOutcome = await this.prepareSwitch();
+      if (switchOutcome.status !== "succeeded") return "deferred";
+    }
+    if (this.#snapshot.close.phase === "ready") return "complete";
+    let canvasFrozen = false;
+    let applied = false;
+    if (
+      this.#projectSession.sourcePath
+      && !this.projectLoadError
+      && !this.#legacyPort.isHistoryView()
+    ) {
+      const cutoff = this.#documentSession.editRevision;
+      const frozen = this.#canvasPort.freeze(
+        "当前编辑画布尚未完成安全收口，暂不能切换 HTML。",
+      );
+      if (!frozen?.ok) {
+        this.#canvasPort.showCommitBlocked?.(
+          frozen?.reason || "当前编辑画布尚未完成安全收口。",
+        );
+        return "deferred";
+      }
+      canvasFrozen = true;
+      if (
+        this.#documentSession.editRevision !== cutoff
+        || this.#documentSession.pendingWrite
+        || this.#documentSession.flushPromise
+      ) {
+        this.#canvasPort.unlock?.();
+        return "deferred";
+      }
+    }
+    try {
+      this.#applyProject(project);
+      applied = true;
+      const epoch = this.#projectSession.epoch;
+      // Accepted-result FIFO owns synchronous publication order, not remote
+      // hydration latency. A successor may retire this query only after the
+      // workflow proves that the just-published project has no mutable work.
+      void Promise.all([
+        this.refreshRecents(),
+        this.refreshWorkspace({
+          sourcePath: project.sourcePath,
+          epoch,
+          sourceTransitionToken: epoch,
+        }),
+      ]).catch((cause) => {
+        this.#emit({
+          type: "project-hydration-failed",
+          reason: projectErrorMessage(
+            this.#codecs,
+            cause,
+            "项目状态暂时无法读取，请重试。",
+          ),
+        });
+      });
+    } catch (cause) {
+      this.#emit({
+        type: "project-open-failed",
+        kind: metadata.kind,
+        operationId: metadata.operationId,
+        sourcePath: metadata.sourcePath,
+        reason: projectErrorMessage(
+          this.#codecs,
+          cause,
+          "文件暂时无法完成安全切换；当前项目仍保持打开。",
+        ),
+      });
+    } finally {
+      if (canvasFrozen && !applied) this.#canvasPort.unlock?.();
+    }
+    return "complete";
+  }
+
+  #retireHydrationForAcceptedSuccessor() {
+    const unsafe = this.#drainCoordinator
+      .inspect("switch")
+      .some((status) => (
+        status.name !== "project-hydration"
+        && status.state !== "resolved"
+      ));
+    if (unsafe) return false;
+    this.#hydrationGeneration += 1;
+    this.#setHydration({
+      phase: "idle",
+      epoch: this.#projectSession.epoch,
+      sourcePath: this.#projectSession.sourcePath,
+      error: null,
+    });
+    this.#markHydrationStage("superseded");
+    return true;
+  }
+
+  async #openExternalProject(request, { isSuperseded }) {
+    if (isSuperseded()) return "complete";
+    const switchOutcome = await this.prepareSwitch();
+    if (switchOutcome.status !== "succeeded") return "deferred";
+    if (isSuperseded()) return "complete";
+    let canvasFrozen = false;
+    if (
+      this.#projectSession.sourcePath
+      && !this.projectLoadError
+      && !this.#legacyPort.isHistoryView()
+    ) {
+      const cutoff = this.#documentSession.editRevision;
+      const frozen = this.#canvasPort.freeze(
+        "当前编辑画布尚未完成安全收口，暂不能切换 QoderWork 中的 HTML。",
+      );
+      if (!frozen?.ok) return "deferred";
+      canvasFrozen = true;
+      if (
+        this.#documentSession.editRevision !== cutoff
+        || this.#documentSession.pendingWrite
+        || this.#documentSession.flushPromise
+      ) {
+        this.#canvasPort.unlock?.();
+        return "deferred";
+      }
+    }
+    const operationId = this.#nextOpenOperation();
+    try {
+      if (typeof this.#projectOpenPort.acceptExternal !== "function") {
+        const reason = "当前 PageRoot 版本缺少外部文件打开通道，请重新安装最新版本。";
+        this.#emit({
+          type: "external-project-open-unavailable",
+          requestId: request.requestId,
+          reason,
+        });
+        return "complete";
+      }
+      const project = await this.#projectOpenPort.acceptExternal(request.requestId);
+      if (this.#snapshot.close.phase === "ready") return "complete";
+      if (!this.#enqueueAcceptedProject(project, {
+        kind: "external",
+        operationId,
+        sourcePath: request.sourcePath || null,
+      })) {
+        throw new Error("无法安排外部 HTML 的安全切换。");
+      }
+    } catch (cause) {
+      if (!isSuperseded()) {
+        this.#emit({
+          type: "project-open-failed",
+          kind: "external",
+          operationId,
+          sourcePath: request.sourcePath || null,
+          reason: projectErrorMessage(
+            this.#codecs,
+            cause,
+            "文件可能已移动、暂时不可读，或不是完整的 HTML 页面；当前项目仍保持打开。",
+          ),
+        });
+      }
+    } finally {
+      if (canvasFrozen && !isSuperseded()) this.#canvasPort.unlock?.();
+    }
+    return "complete";
+  }
+
+  #applyProject(project) {
+    this.#markHydrationStage("apply-start");
+    const outgoingRun = this.#runSession.activeRun;
+    const outgoingSourcePath = this.#projectSession.sourcePath;
+    if (
+      outgoingRun
+      && outgoingSourcePath
+      && !this.#codecs.sameSourcePath(outgoingSourcePath, project.sourcePath)
+    ) {
+      if (outgoingRun.status === "ready-to-open") {
+        this.#runSession.markResult(outgoingSourcePath, {
+          state: "ready",
+          label: "新版本可查看",
+          updatedAt: this.#clock.now(),
+        });
+      } else if (outgoingRun.status === "awaiting-conflict-resolution") {
+        this.#runSession.markResult(outgoingSourcePath, {
+          state: "conflict",
+          label: "需要处理",
+          updatedAt: this.#clock.now(),
+        });
+      } else if (this.#codecs.isLockedLifecycleState(outgoingRun.status)) {
+        this.#runSession.markResult(outgoingSourcePath, {
+          state: "processing",
+          label: "正在处理",
+          updatedAt: this.#clock.now(),
+        });
+      }
+    }
+    const locator = this.#projectSession.openLocator(project.sourcePath || null);
+    this.#runSession.activate(project.sourcePath || null);
+    this.#documentWorkflow.resetForProjectTransition();
+    this.#documentSession.reset({
+      html: project.html,
+      sourceSha256: project.sha256 || null,
+    });
+    this.#setHydration({
+      phase: project.sourcePath ? "hydrating" : "idle",
+      epoch: locator.epoch,
+      sourcePath: project.sourcePath || null,
+      error: null,
+    });
+    this.#markHydrationStage("apply-authority");
+    this.#draftSession.deactivate();
+    this.#projectRulesSession.close();
+    this.#legacyPort.clearDraftRecoveryOperationId();
+    this.#commentSession.reset();
+    this.#versionSession.reset();
+    this.#canvasPort.invalidateRenderAcks?.();
+    if (project.sourcePath) this.#runSession.clearResult(project.sourcePath);
+    this.#pendingOpen = null;
+    this.#emit({
+      type: "project-applied",
+      project,
+      epoch: locator.epoch,
+      activeLocked: this.#runSession.activeLocked,
+    });
+    this.#canvasPort.applyPageViewContext?.(null);
+    this.#canvasPort.clearSelection?.();
+    if (!this.#runSession.activeLocked) this.#canvasPort.unlock?.();
+    this.#markHydrationStage("apply-complete");
+  }
+
+  async #hydrateWorkspace({ sourcePath, epoch, sourceTransitionToken }) {
+    let activeSource = sourcePath === undefined
+      ? this.#projectSession.sourcePath
+      : sourcePath;
+    if (!activeSource) return succeeded({ hydrated: false });
+    let activeEpoch = epoch ?? this.#projectSession.epoch;
+    const hydrationGeneration = this.#hydrationGeneration;
+    const query = this.#projectSession.beginQuery("workspace", {
+      sourcePath: activeSource,
+    });
+    const queryIsCurrent = () => (
+      this.#projectSession.isQueryCurrent(query)
+      && hydrationGeneration === this.#hydrationGeneration
+      && activeEpoch === this.#projectSession.epoch
+      && this.#codecs.sameSourcePath(this.#projectSession.sourcePath, activeSource)
+    );
+    const transitionAuthorized = Boolean(
+      sourceTransitionToken !== undefined
+      && sourceTransitionToken === activeEpoch
+      && sourceTransitionToken === this.#projectSession.epoch
+      && this.projectHydrating,
+    );
+    let sourceBoundaryFrozen = false;
+    let mustAdoptSource = transitionAuthorized;
+    let recoveredAutosaveConflict = false;
+    const rollback = this.#captureHydrationAuthority();
+    let publicationStarted = false;
+    const operationId = this.#nextOperationId("hydration");
+    try {
+      this.#markHydrationStage("workspace-request");
+      if (this.projectHydrating && !transitionAuthorized) {
+        throw new Error("这次项目读取缺少与当前项目一致的源码切换令牌。");
+      }
+      const payload = await this.#bridgeClient.workspace(activeSource);
+      this.#markHydrationStage("workspace-response");
+      if (!queryIsCurrent()) return stale({ operationId, epoch: activeEpoch, sourcePath: activeSource });
+
+      const nextProjectId = String(payload.projectId || "");
+      const nextDocumentId = String(payload.documentId || "");
+      const canonicalSourcePath = String(
+        payload.sourcePath
+        || (this.#codecs.isRecord(payload.current) ? payload.current.path : "")
+        || activeSource,
+      );
+      const workspaceHash = String(payload.currentHtmlSha256 || "");
+      if (workspaceHash && !SHA256.test(workspaceHash)) {
+        throw new Error("项目状态返回的源 HTML Hash 无效。");
+      }
+      let preparedTransition = null;
+      if (!this.#codecs.sameSourcePath(canonicalSourcePath, activeSource)) {
+        if (!mustAdoptSource) {
+          const frozen = this.#canvasPort.freeze(
+            "项目状态包含新的源文件，但当前编辑画布尚未就绪。",
+          );
+          if (!frozen?.ok) {
+            throw new Error(frozen?.reason || "无法在安全收口当前编辑后切换源文件。");
+          }
+          sourceBoundaryFrozen = true;
+        }
+        const versionId = String(
+          payload.currentExactVersionId || payload.latestVersionId || "",
+        );
+        if (!nextProjectId || !nextDocumentId || !workspaceHash || !versionId) {
+          throw new Error("项目已经生成新文件，但缺少切换当前文件所需的完整身份。");
+        }
+        preparedTransition = await this.#prepareGeneratedSourceTransition({
+          previousSourcePath: activeSource,
+          nextSourcePath: canonicalSourcePath,
+          expectedSha256: workspaceHash,
+          nextProjectId,
+          nextDocumentId,
+          versionId,
+        });
+        if (!preparedTransition.updatesCurrentProject) return stale({
+          operationId,
+          epoch: activeEpoch,
+          sourcePath: activeSource,
+        });
+        if (!queryIsCurrent()) return stale({ operationId, epoch: activeEpoch, sourcePath: activeSource });
+        mustAdoptSource = true;
+      }
+
+      const projectRecord = this.#codecs.isRecord(payload.project) ? payload.project : {};
+      const workspacePaths = this.#codecs.isRecord(payload.paths) ? payload.paths : {};
+      const currentDocument = this.#documentSession.snapshot;
+      const currentHtmlHash = await this.#hashPort.sha256(currentDocument.html);
+      if (!queryIsCurrent()) return stale({ operationId, epoch: activeEpoch, sourcePath: activeSource });
+      const currentDocumentClean = Boolean(
+        currentDocument.persistState === "idle"
+        && currentDocument.editRevision === currentDocument.lastPersistedRevision
+        && !this.#documentSession.pendingWrite
+        && !this.#documentSession.flushPromise
+      );
+      const cleanProjectionMismatch = Boolean(
+        currentDocumentClean && workspaceHash && currentHtmlHash !== workspaceHash
+      );
+      let authoritativeHtml = currentDocument.html;
+      let authoritativeHash = currentDocument.sourceSha256 || workspaceHash;
+      let authoritativeLastModifiedAt = String(payload.lastModifiedAt || "");
+      let sourcePayload = null;
+      if (preparedTransition?.activatedProject) {
+        authoritativeHtml = preparedTransition.activatedProject.html;
+        authoritativeHash = preparedTransition.activatedProject.sha256;
+        authoritativeLastModifiedAt = String(
+          preparedTransition.activatedProject.lastModifiedAt
+          || payload.lastModifiedAt
+          || "",
+        );
+      } else if (mustAdoptSource || cleanProjectionMismatch) {
+        mustAdoptSource = true;
+        this.#markHydrationStage("source-request");
+        sourcePayload = await this.#bridgeClient.source(canonicalSourcePath);
+        if (!queryIsCurrent()) return stale({ operationId, epoch: activeEpoch, sourcePath: activeSource });
+        if (
+          String(sourcePayload.projectId || "") !== nextProjectId
+          || String(sourcePayload.documentId || "") !== nextDocumentId
+        ) {
+          throw new Error("读取期间源文件身份发生变化，已保持只读；请重新打开该文件。");
+        }
+        authoritativeHtml = String(sourcePayload.content || "");
+        authoritativeHash = String(sourcePayload.sha256 || "");
+        if (
+          !authoritativeHash
+          || await this.#hashPort.sha256(authoritativeHtml) !== authoritativeHash
+          || (workspaceHash && authoritativeHash !== workspaceHash)
+        ) {
+          throw new Error("源 HTML 内容与服务端 Hash 不一致，已拒绝开放编辑。");
+        }
+        authoritativeLastModifiedAt = String(
+          sourcePayload.lastModifiedAt || payload.lastModifiedAt || "",
+        );
+      } else if (currentDocumentClean && workspaceHash) {
+        authoritativeHash = workspaceHash;
+      } else if (
+        workspaceHash
+        && currentDocument.sourceSha256
+        && workspaceHash !== currentDocument.sourceSha256
+      ) {
+        throw new Error("本地编辑期间源文件身份发生变化，已停止刷新以保留当前内容。");
+      }
+      if (!authoritativeHash) throw new Error("项目状态缺少当前源 HTML Hash。");
+      if (!queryIsCurrent()) return stale({ operationId, epoch: activeEpoch, sourcePath: activeSource });
+
+      const publishVersion = () => this.#versionSession.hydrate({
+        versions: this.#codecs.versionsFromWorkspace(payload),
+        latestVersionId: payload.latestVersionId,
+        currentBasedOnVersionId:
+          sourcePayload?.currentBasedOnVersionId || payload.currentBasedOnVersionId,
+        currentExactVersionId:
+          sourcePayload?.currentExactVersionId || payload.currentExactVersionId,
+        restoredFromVersionId:
+          sourcePayload?.restoredFromVersionId
+          || payload.restoredFromVersionId
+          || projectRecord.restoredFromVersionId,
+      });
+      let context = null;
+      publicationStarted = true;
+      if (preparedTransition) {
+        context = this.#commitGeneratedSourceTransition({
+          prepared: preparedTransition,
+          html: authoritativeHtml,
+          sourceSha256: authoritativeHash,
+          publishVersion,
+        });
+      } else {
+        context = this.#projectSession.register({
+          epoch: activeEpoch,
+          projectId: nextProjectId,
+          documentId: nextDocumentId,
+          sourcePath: activeSource,
+        });
+        if (!context) return stale({ operationId, epoch: activeEpoch, sourcePath: activeSource });
+        if (mustAdoptSource || authoritativeHtml !== currentDocument.html) {
+          this.#documentSession.publishAuthority({
+            html: authoritativeHtml,
+            sourceSha256: authoritativeHash,
+          });
+          this.#canvasPort.invalidateRenderAcks?.();
+        } else {
+          this.#documentSession.update({
+            html: authoritativeHtml,
+            sourceSha256: authoritativeHash,
+          });
+        }
+        publishVersion();
+      }
+      if (!context) return stale({ operationId, epoch: activeEpoch, sourcePath: activeSource });
+      activeSource = context.sourcePath;
+      activeEpoch = context.epoch;
+      this.#documentWorkflow.replaceRecoveryIdentity(
+        this.#codecs.recoveryIdentityFromRecord(payload.recoveryIdentity),
+      );
+      const runtime = this.#codecs.isRecord(payload.runtimeState)
+        ? payload.runtimeState
+        : {};
+      const runtimeConflict = this.#codecs.isRecord(runtime.conflict)
+        ? runtime.conflict
+        : null;
+      const edit = this.#codecs.isRecord(runtime.edit) ? runtime.edit : {};
+      const serverRevision = Number(runtime.editRevision || edit.editRevision || 0);
+      const serverPersistedRevision = Number(
+        runtime.lastPersistedRevision
+        || edit.lastPersistedRevision
+        || serverRevision,
+      );
+      this.#documentSession.update({
+        editRevision: Math.max(this.#documentSession.editRevision, serverRevision),
+        lastPersistedRevision: Math.max(
+          this.#documentSession.lastPersistedRevision,
+          serverPersistedRevision,
+        ),
+      });
+
+      const draftRecord = this.#codecs.draftAuthorityFromWorkspace(payload);
+      const serverDraftRevision = this.#codecs.authoritativeDraftRevision(draftRecord);
+      let recoveredEvents = this.#commentSession.changeEvents;
+      if (
+        nextProjectId
+        && nextDocumentId
+        && authoritativeHash
+        && this.#codecs.isRecord(payload.sourceHistory)
+      ) {
+        this.#documentWorkflow.activateSourceHistory({
+          context,
+          sourceSha256: authoritativeHash,
+          history: payload.sourceHistory,
+          preservePending: Boolean(this.#documentSession.pendingWrite),
+        });
+      }
+      if (!this.#draftSession.isActive(context) || serverDraftRevision >= this.#draftSession.revision) {
+        this.#draftSession.activate(context, serverDraftRevision, draftRecord);
+        const recovered = this.#legacyPort.recoverDraft({
+          context,
+          serverComments: this.#codecs.commentsFromRecords(draftRecord.comments),
+          serverEvents: this.#codecs.changesFromDraftRecords(draftRecord.changeEvents),
+          serverDraftRevision: this.#draftSession.revision,
+          serverDeletedCommentIds: Array.isArray(draftRecord.deletedCommentIds)
+            ? draftRecord.deletedCommentIds.map(String)
+            : [],
+          serverAppliedOperationIds: Array.isArray(draftRecord.appliedOperationIds)
+            ? draftRecord.appliedOperationIds.map(String)
+            : [],
+          serverBasedOnVersionId: payload.currentBasedOnVersionId
+            ? String(payload.currentBasedOnVersionId)
+            : null,
+        });
+        const rebound = this.#codecs.rebindTargetsPreservingGlobal(
+          this.#documentSession.html,
+          [
+            ...recovered.comments.map((comment) => comment.target),
+            ...(recovered.composerTarget ? [recovered.composerTarget] : []),
+          ],
+        );
+        const targets = new Map(rebound.map((target) => [target.id, target]));
+        const recoveredComments = recovered.comments.map((comment) => ({
+          ...comment,
+          target: targets.get(comment.target.id) || {
+            ...comment.target,
+            resolution: "orphaned",
+          },
+        }));
+        recoveredEvents = recovered.changeEvents;
+        const recoveredEditComment = recovered.commentEdit
+          ? recoveredComments.find(
+              (comment) => comment.commentId === recovered.commentEdit?.commentId,
+            ) || null
+          : null;
+        const recoveredEditSession = recovered.commentEdit && recoveredEditComment
+          ? {
+              commentId: recoveredEditComment.commentId,
+              baselineText: recoveredEditComment.text,
+              baselineAttachments: [...(recoveredEditComment.attachments || [])],
+              draftText: recovered.commentEdit.draftText,
+              draftAttachments: [...recovered.commentEdit.draftAttachments],
+            }
+          : null;
+        const nextEditSession = this.#codecs.commentEditSessionHasChanges(recoveredEditSession)
+          ? recoveredEditSession
+          : null;
+        const composerTarget = recovered.composerTarget
+          ? targets.get(recovered.composerTarget.id) || {
+              ...recovered.composerTarget,
+              resolution: "orphaned",
+            }
+          : null;
+        this.#commentSession.update({
+          comments: recoveredComments,
+          changeEvents: recoveredEvents,
+          composerDraft: recovered.composerDraft,
+          composerCommentId: recovered.composerCommentId,
+          composerAttachments: recovered.composerAttachments,
+          composerTarget,
+          editSession: nextEditSession,
+        });
+        this.#emit({ type: "project-draft-recovered" });
+      }
+
+      const recoveredRunRecord = this.#codecs.isRecord(runtime.activeRun)
+        ? runtime.activeRun
+        : this.#codecs.isRecord(payload.activeRun)
+          ? payload.activeRun
+          : null;
+      const recoveredRun = this.#codecs.activeRunFromRecord(
+        recoveredRunRecord
+          ? { ...recoveredRunRecord, ...(runtimeConflict ? { conflict: runtimeConflict } : {}) }
+          : null,
+      );
+      const recoveredOutcome = this.#codecs.activeRunFromRecord(payload.recentRunOutcome);
+      if (recoveredOutcome) this.#runSession.rememberOutcome(recoveredOutcome);
+      else if (!recoveredRun) this.#runSession.forgetOutcome(activeSource);
+      let showHandoff = false;
+      if (recoveredRun && this.#codecs.isLockedLifecycleState(recoveredRun.status)) {
+        this.#runSession.trackRun(recoveredRun, { recovered: true });
+        showHandoff = this.projectHydrating;
+      } else {
+        const tracked = this.#runSession.runForSource(activeSource);
+        if (tracked) this.#runSession.removeRun(tracked);
+        else {
+          const visible = this.#runSession.activeRun;
+          const keepTerminal = Boolean(
+            recoveredOutcome
+            && visible
+            && ["error", "no-change"].includes(visible.status)
+            && visible.requestId === recoveredOutcome.requestId
+            && visible.attemptId === recoveredOutcome.attemptId,
+          );
+          if (!keepTerminal) this.#runSession.clearActiveRun();
+        }
+        if (!sourceBoundaryFrozen && !this.projectHydrating) this.#canvasPort.unlock?.();
+      }
+      if (transitionAuthorized && authoritativeHash) {
+        const recoveredLocally = await this.#documentWorkflow.recoverAutosave({
+          context,
+          currentSourceSha256: authoritativeHash,
+          serverRevision,
+        });
+        if (!this.#projectSession.matches(context)) return stale(context);
+        if (
+          recoveredLocally.status === "succeeded"
+          && !recoveredLocally.value.recovered
+          && runtimeConflict
+          && String(runtimeConflict.type || "") === "autosave-source"
+          && typeof this.#bridgeClient.conflictCandidate === "function"
+        ) {
+          const conflictPayload = await this.#bridgeClient
+            .conflictCandidate(activeSource)
+            .catch(() => ({}));
+          if (
+            this.#projectSession.matches(context)
+            && typeof conflictPayload.content === "string"
+          ) {
+            const candidateHtml = conflictPayload.content;
+            const candidateHash = await this.#hashPort.sha256(candidateHtml);
+            if (
+              candidateHash !== String(conflictPayload.sha256 || "")
+              || !this.#projectSession.matches(context)
+            ) throw new Error("恢复候选的内容 Hash 与冲突记录不一致。");
+            this.#documentWorkflow.adoptConflictCandidate({
+              context,
+              html: candidateHtml,
+              authoritativeSourceSha256: authoritativeHash,
+              expectedSourceSha256: String(
+                conflictPayload.expectedSourceSha256
+                || runtimeConflict.expectedSourceSha256
+                || "",
+              ),
+              revision: Math.max(
+                serverRevision,
+                Number(conflictPayload.editRevision || runtimeConflict.editRevision || 0),
+              ),
+              events: recoveredEvents,
+            });
+          }
+          recoveredAutosaveConflict = true;
+        }
+      }
+      if (mustAdoptSource) {
+        const expectedHtml = this.#documentSession.html;
+        const expectedHash = await this.#hashPort.sha256(expectedHtml);
+        await this.#canvasPort.verifyRendered?.(expectedHtml, expectedHash, context);
+        if (!this.#projectSession.matches(context)) return stale(context);
+      }
+      if (recoveredAutosaveConflict) {
+        const frozen = this.#canvasPort.freeze(
+          "冲突候选已恢复，但编辑画布尚未就绪。",
+        );
+        if (!frozen?.ok) throw new Error(frozen?.reason || "无法冻结已恢复的冲突候选。");
+        this.#documentSession.setPersistence({
+          state: "conflict",
+          error: "源 HTML 在自动写回前被外部修改。工作台候选和外部文件均已保留，请比较后重新载入或导出当前编辑。",
+        });
+      }
+      this.#setHydration({
+        phase: "idle",
+        epoch: activeEpoch,
+        sourcePath: activeSource,
+        error: null,
+      });
+      this.#emit({
+        type: "project-hydrated",
+        context,
+        projectName: projectRecord.displayName ? String(projectRecord.displayName) : null,
+        projectRecordsPath: String(
+          workspacePaths.projectRecords || payload.projectRoot || "",
+        ) || null,
+        lastModifiedAt: authoritativeLastModifiedAt || null,
+        showHandoff,
+      });
+      this.#markHydrationStage("ready");
+      if (sourceBoundaryFrozen && !recoveredAutosaveConflict && !this.#runSession.activeLocked) {
+        this.#canvasPort.requestFrame?.(() => this.#canvasPort.unlock?.());
+      }
+      return succeeded({ context, hydrated: true });
+    } catch (cause) {
+      if (
+        publicationStarted
+        && activeEpoch === this.#projectSession.epoch
+        && this.#codecs.sameSourcePath(this.#projectSession.sourcePath, activeSource)
+      ) {
+        const restored = this.#rollbackHydrationAuthority(rollback);
+        activeEpoch = restored.epoch;
+        activeSource = restored.sourcePath;
+      }
+      if (
+        activeEpoch === this.#projectSession.epoch
+        && this.#codecs.sameSourcePath(this.#projectSession.sourcePath, activeSource)
+      ) {
+        const reason = projectErrorMessage(
+          this.#codecs,
+          cause,
+          "项目状态暂时无法读取，请重试；源文件没有被改动。",
+        );
+        this.#setHydration({
+          phase: "failed",
+          epoch: activeEpoch,
+          sourcePath: activeSource,
+          error: reason,
+        });
+        this.#canvasPort.invalidateRenderAcks?.();
+        this.#emit({ type: "project-hydration-failed", reason });
+        this.#markHydrationStage("failed");
+      }
+      return this.#outcomeFromCause(
+        operationId,
+        cause,
+        "PROJECT_HYDRATION_REJECTED",
+        projectErrorMessage(
+          this.#codecs,
+          cause,
+          "项目状态暂时无法读取，请重试；源文件没有被改动。",
+        ),
+      );
+    } finally {
+      if (
+        transitionAuthorized
+        && this.projectHydrating
+        && activeEpoch === this.#projectSession.epoch
+        && this.#codecs.sameSourcePath(this.#projectSession.sourcePath, activeSource)
+      ) {
+        this.#setHydration({
+          phase: "idle",
+          epoch: activeEpoch,
+          sourcePath: activeSource,
+          error: null,
+        });
+        this.#markHydrationStage("released");
+      }
+    }
+  }
+
+  #captureHydrationAuthority() {
+    return Object.freeze({
+      project: this.#projectSession.snapshot,
+      document: this.#documentSession.snapshot,
+      pendingWrite: this.#documentSession.pendingWrite,
+      version: this.#versionSession.snapshot,
+      comment: this.#commentSession.snapshot,
+      draftContext: this.#draftSession.context,
+      draftRevision: this.#draftSession.revision,
+      documentWorkflow: this.#documentWorkflow.captureProjectTransitionAuthority(),
+      run: Object.freeze({
+        activeSourcePath: this.#runSession.snapshot.activeSourcePath,
+        activeRun: this.#runSession.activeRun,
+        recentOutcome: this.#runSession.snapshot.recentOutcome,
+        runs: [...this.#runSession.runs],
+        backgroundResults: [...this.#runSession.snapshot.backgroundResults],
+      }),
+    });
+  }
+
+  #rollbackHydrationAuthority(previous) {
+    const priorProject = previous.project;
+    let locator = this.#projectSession.locator;
+    let context = null;
+    if (
+      priorProject.sourcePath
+      && priorProject.epoch === this.#projectSession.epoch
+      && this.#codecs.sameSourcePath(
+        priorProject.sourcePath,
+        this.#projectSession.sourcePath,
+      )
+    ) {
+      locator = this.#projectSession.locator;
+    } else {
+      locator = this.#projectSession.openLocator(priorProject.sourcePath || null);
+    }
+    if (
+      priorProject.registered
+      && priorProject.sourcePath
+      && priorProject.projectId
+      && priorProject.documentId
+    ) {
+      context = this.#projectSession.register({
+        epoch: locator.epoch,
+        sourcePath: priorProject.sourcePath,
+        projectId: priorProject.projectId,
+        documentId: priorProject.documentId,
+      });
+    } else if (this.#projectSession.context) {
+      locator = this.#projectSession.openLocator(priorProject.sourcePath || null);
+    }
+
+    this.#documentWorkflow.resetForProjectTransition();
+    this.#documentSession.publishAuthority({
+      html: previous.document.html,
+      sourceSha256: previous.document.sourceSha256,
+      editRevision: previous.document.editRevision,
+      lastPersistedRevision: previous.document.lastPersistedRevision,
+      persistState: previous.document.persistState,
+      persistError: previous.document.persistError,
+      pendingWrite: previous.pendingWrite,
+    });
+    this.#versionSession.hydrate({
+      versions: previous.version.versions,
+      latestVersionId: previous.version.latestVersionId,
+      currentBasedOnVersionId: previous.version.currentBasedOnVersionId,
+      currentExactVersionId: previous.version.currentExactVersionId,
+      restoredFromVersionId: previous.version.restoredFromVersionId,
+    });
+    if (previous.version.viewMode === "history") {
+      this.#versionSession.restoreView?.({
+        viewMode: "history",
+        viewingVersionId: previous.version.viewingVersionId,
+      });
+    }
+    this.#commentSession.update(previous.comment);
+    if (context && typeof this.#draftSession.replaceAuthority === "function") {
+      this.#draftSession.replaceAuthority(context, previous.draftRevision, {
+        draftRevision: previous.draftRevision,
+        comments: previous.comment.comments,
+        changeEvents: previous.comment.changeEvents,
+        deletedCommentIds: previous.comment.deletedCommentIds,
+        appliedOperationIds: [],
+      });
+    } else {
+      this.#draftSession.deactivate();
+    }
+
+    for (const run of this.#runSession.runs) this.#runSession.removeRun(run);
+    this.#runSession.activate(previous.run.activeSourcePath);
+    for (const run of previous.run.runs) {
+      this.#runSession.trackRun(run, { activate: "never" });
+    }
+    this.#runSession.setActiveRun(previous.run.activeRun);
+    if (previous.run.recentOutcome) {
+      this.#runSession.rememberOutcome(previous.run.recentOutcome);
+    } else {
+      this.#runSession.forgetOutcome(previous.run.activeSourcePath);
+    }
+    for (const [sourcePath] of this.#runSession.snapshot.backgroundResults) {
+      this.#runSession.clearResult(sourcePath);
+    }
+    for (const [sourcePath, result] of previous.run.backgroundResults) {
+      this.#runSession.markResult(sourcePath, result);
+    }
+    this.#documentWorkflow.restoreProjectTransitionAuthority({
+      authority: previous.documentWorkflow,
+      context,
+      sourceSha256: previous.document.sourceSha256,
+    });
+    this.#canvasPort.invalidateRenderAcks?.();
+    return Object.freeze({
+      epoch: this.#projectSession.epoch,
+      sourcePath: this.#projectSession.sourcePath,
+    });
+  }
+
+  async #prepareGeneratedSourceTransition({
+    previousSourcePath,
+    nextSourcePath,
+    expectedSha256,
+    nextProjectId,
+    nextDocumentId,
+    versionId,
+  }) {
+    const updatesCurrentProject = Boolean(
+      (
+        nextProjectId
+        && this.#projectSession.projectId
+        && this.#projectSession.projectId === nextProjectId
+      )
+      || this.#codecs.sameSourcePath(this.#projectSession.sourcePath, previousSourcePath)
+      || this.#codecs.sameSourcePath(this.#projectSession.sourcePath, nextSourcePath)
+    );
+    if (!nextSourcePath || this.#codecs.sameSourcePath(nextSourcePath, previousSourcePath)) {
+      return Object.freeze({
+        previousSourcePath,
+        nextSourcePath,
+        projectId: nextProjectId,
+        documentId: nextDocumentId,
+        updatesCurrentProject,
+        activatedProject: null,
+      });
+    }
+    if (typeof this.#projectOpenPort.activateGeneratedVersion !== "function") {
+      throw new Error("当前运行环境不能安全切换到生成的新版本文件。");
+    }
+    const activatedProject = await this.#projectOpenPort.activateGeneratedVersion({
+      previousSourcePath,
+      nextSourcePath,
+      expectedSha256,
+      projectId: nextProjectId,
+      versionId,
+    });
+    if (
+      !this.#codecs.sameSourcePath(activatedProject.sourcePath, nextSourcePath)
+      || activatedProject.sha256 !== expectedSha256
+      || await this.#hashPort.sha256(activatedProject.html) !== expectedSha256
+    ) throw new Error("生成版本的路径、HTML 与 Hash 没有形成完整一致的候选。");
+    void this.refreshRecents();
+    return Object.freeze({
+      previousSourcePath,
+      nextSourcePath,
+      projectId: nextProjectId,
+      documentId: nextDocumentId,
+      updatesCurrentProject,
+      activatedProject,
+    });
+  }
+
+  #commitGeneratedSourceTransition({ prepared, html, sourceSha256, publishVersion }) {
+    if (!prepared.updatesCurrentProject) return null;
+    const changesSourcePath = !this.#codecs.sameSourcePath(
+      this.#projectSession.sourcePath,
+      prepared.nextSourcePath,
+    );
+    if (changesSourcePath) {
+      this.#runSession.rebaseSource({
+        previousSourcePath: prepared.previousSourcePath,
+        sourcePath: prepared.nextSourcePath,
+        projectId: prepared.projectId,
+      });
+    }
+    const transition = changesSourcePath
+      ? this.#projectSession.transitionSource({
+          previousSourcePath: prepared.previousSourcePath,
+          sourcePath: prepared.nextSourcePath,
+          projectId: prepared.projectId,
+          documentId: prepared.documentId,
+        })
+      : this.#projectSession.context || this.#projectSession.register({
+          epoch: this.#projectSession.epoch,
+          projectId: prepared.projectId,
+          documentId: prepared.documentId,
+          sourcePath: prepared.nextSourcePath,
+        });
+    if (!transition || !this.#projectSession.context) return null;
+
+    // Publication is deliberately synchronous: no consumer can observe a new
+    // Project without the complete Document tuple, Version authority and new
+    // Canvas generation.
+    this.#documentSession.publishAuthority({
+      html,
+      sourceSha256,
+      pendingWrite: null,
+    });
+    publishVersion();
+    this.#canvasPort.invalidateRenderAcks?.();
+    if (changesSourcePath) {
+      this.#documentWorkflow.resetForProjectTransition();
+      this.#draftSession.deactivate();
+      this.#legacyPort.clearDraftRecoveryOperationId();
+    }
+    return this.#projectSession.context;
+  }
+
+  #deferCanvasCommand(kind, run, options = {}) {
+    if (typeof this.#canvasPort.deferCommand !== "function") return null;
+    let resolveDeferred;
+    const outcome = new Promise((resolve) => {
+      resolveDeferred = resolve;
+    });
+    const deferred = this.#canvasPort.deferCommand(
+      kind,
+      () => Promise.resolve(run()).then(resolveDeferred, (cause) => {
+        resolveDeferred(rejected(
+          "PROJECT_DEFERRED_COMMAND_REJECTED",
+          projectErrorMessage(this.#codecs, cause, "延后的项目操作失败。"),
+        ));
+      }),
+      {
+        ...options,
+        onDiscard: () => resolveDeferred(blocked(
+          "PROJECT_DEFERRED_COMMAND_DISCARDED",
+          "当前项目已经变化，延后的操作没有执行。",
+        )),
+      },
+    );
+    return deferred ? outcome : null;
+  }
+
+  #scheduleDeferredReconciliation() {
+    if (this.#reconcileScheduled || this.#disposed) return;
+    this.#reconcileScheduled = true;
+    Promise.resolve().then(() => {
+      this.#reconcileScheduled = false;
+      this.reconcileDeferred();
+    });
+  }
+
+  #waitUntil(predicate) {
+    if (predicate()) return Promise.resolve();
+    return new Promise((resolve) => {
+      const poll = () => {
+        if (predicate()) {
+          resolve();
+          return;
+        }
+        this.#scheduler.setTimeout(poll, 40);
+      };
+      this.#scheduler.setTimeout(poll, 40);
+    });
+  }
+
+  #setHydration({ phase, epoch, sourcePath, error }) {
+    if (phase === "hydrating") this.#hydrationGeneration += 1;
+    this.#snapshot = Object.freeze({
+      ...this.#snapshot,
+      hydration: Object.freeze({
+        phase,
+        generation: this.#hydrationGeneration,
+        epoch: Number(epoch) || 0,
+        sourcePath: sourcePath ? String(sourcePath) : null,
+        error: error ? String(error) : null,
+      }),
+    });
+    this.#notify();
+  }
+
+  #setSwitch(phase, operationId) {
+    this.#snapshot = Object.freeze({
+      ...this.#snapshot,
+      switch: Object.freeze({ phase, operationId }),
+    });
+    this.#notify();
+  }
+
+  #setOpen(phase, operationId, pendingKind) {
+    this.#snapshot = Object.freeze({
+      ...this.#snapshot,
+      open: Object.freeze({ phase, operationId, pendingKind }),
+    });
+    this.#notify();
+  }
+
+  #setClose(phase, requestId) {
+    this.#snapshot = Object.freeze({
+      ...this.#snapshot,
+      close: Object.freeze({ phase, requestId }),
+    });
+    this.#notify();
+  }
+
+  #publishSnapshot() {
+    this.#snapshot = Object.freeze({
+      ...this.#snapshot,
+      externalOpen: this.#externalFileOpenSession.snapshot,
+      projectApplication: this.#projectApplicationSession.snapshot,
+    });
+    this.#notify();
+  }
+
+  #notify() {
+    for (const listener of this.#listeners) {
+      try {
+        listener(this.#snapshot);
+      } catch {
+        // A presentation subscriber cannot affect project authority.
+      }
+    }
+  }
+
+  #emit(event) {
+    this.#legacyPort.emit(Object.freeze(event));
+  }
+
+  #markHydrationStage(stage) {
+    this.#emit({ type: "project-hydration-stage", stage: String(stage) });
+  }
+
+  #nextOperationId(prefix) {
+    this.#operationSequence += 1;
+    return [
+      prefix,
+      Math.max(0, Number(this.#clock.now()) || 0).toString(36),
+      this.#operationSequence.toString(36),
+    ].join("_");
+  }
+
+  #nextOpenOperation() {
+    this.#openSequence += 1;
+    return [
+      "project-open",
+      Math.max(0, Number(this.#clock.now()) || 0).toString(36),
+      this.#openSequence.toString(36),
+    ].join("_");
+  }
+
+  #outcomeFromCause(operationId, cause, fallbackCode, fallbackMessage) {
+    if (isBridgeRequestError(cause) && cause.outcome === "unknown") {
+      return unknown(operationId, fallbackMessage);
+    }
+    return rejected(projectErrorCode(cause, fallbackCode), fallbackMessage);
+  }
+}

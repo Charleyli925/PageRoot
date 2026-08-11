@@ -1,6 +1,6 @@
 # Workbench 应用编排收口执行计划
 
-- 状态：**PR-1 已合并至 `main`；PR-2 Draft PR #150 已建立（未 Ready、未合并）；PR-3 至 PR-7 尚未授权**
+- 状态：**PR-1、PR-2 已合并至 `main`；PR-3 Draft PR #152 已建立（未 Ready、未合并）；PR-4 至 PR-7 尚未授权**
 - 规划基线：`main@37bba7779b27c0a42a52f98ec84a377b964bf4eb`
 - 基线 Tree：`0e074849493e5f9db9e89621e0a1c1a4910b8fa1`
 - 基线日期：2026-08-11
@@ -863,6 +863,34 @@ timer/Promise/ref 不再由 React 拥有。
 - `ProjectRulesSession` 已自带 Bridge 和 autosave，是否纳入 Controller aggregate
   snapshot 需以最小改动决定；本 PR 不重写它；
 - file input 的用户手势和 desktop async dialog 时序不同，Port contract 必须同时覆盖。
+
+### 9.8 实施记录（2026-08-11）
+
+- 隔离分支：`refactor/project-workflow`，基于
+  `main@643a472d7cde4818ab4fe3303b7214596ca89f13`；Draft PR #152 已建立，尚未
+  Ready 或合并。
+- 新增 `project-workflow.js/.d.ts`。`WorkspaceController` 现在拥有唯一
+  `DrainCoordinator`，创建窄的 `ExternalFileOpenSession` 与
+  `ProjectApplicationSession`，并把既有 Project/Document/Comment/Draft/Run/Version/
+  SourceHistory owner、Canvas Port 和 ProjectOpen Port 组合进 workflow；没有创建第
+  二份事实 owner。
+- Workflow 拥有 hydration generation/load outcome、switch/open operation、accepted
+  FIFO 执行与 deferred resume、request-scoped close lifecycle。完整 candidate 的
+  Project/Document/Version/Canvas publication 保持同步；Canvas acknowledgement 失败
+  时只在当前 generation 上回滚旧权威。
+- Workbench 已删除 hydration/load/switch/close workflow refs、startup/external/deferred
+  orchestration 和 Drain 组合；桌面 close listener 只同步注册
+  `detail.waitUntil(controller.prepareClose(...))`。project resource read/open 也改由
+  Controller query/action 执行。
+- Workbench 直接 Bridge 调用由 20 收敛并锁定为精确 16 项；未修改
+  `desktop/main.mjs`、preload IPC、`ProjectOpenQueue`、external mailbox、persisted
+  schema 或 Patch transport。
+- 新增 `tests/project-workflow.test.mjs` 并同步 impact map、TEST_STRATEGY、状态所有权
+  与 architecture gate。已通过 9.5 的指定 Node 集 42/42、
+  `npm run test:electron:full` 19/19、`npm run architecture:check`、
+  `npm run typecheck`、`npm run gate:edit -- --base origin/main` 113/113，以及
+  `npm run task:finish`（113 Node、28 Browser、8 Electron、2 AI smoke）。PR-4 至
+  PR-7 未获授权，本分支不进入 Ready、合并、版本或发布流程。
 
 ## 10. PR-4：Comment、Draft 与 Attachment Workflow
 

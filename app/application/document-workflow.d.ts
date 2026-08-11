@@ -5,6 +5,7 @@ import type { ProjectContext, ProjectSession } from "./project-session.js";
 import type { SourceHistorySession } from "./source-history-session.js";
 import type { VersionSession } from "./version-session.js";
 import type { DocumentWorkflowCodecs } from "./document-workflow-codecs.js";
+import type { SourceHistoryEntry, SourceHistoryState } from "../domain/source-history.js";
 
 export type DocumentWorkflowOutcome<T> =
   | Readonly<{ status: "succeeded"; value: T }>
@@ -17,6 +18,12 @@ export type DocumentWorkflowRecoveryStore = Readonly<{
   readRecords(keys: string | string[]): Array<{ key: string; value: unknown }>;
   write(keys: string | string[], value: unknown): boolean;
   remove(keys: string | string[]): boolean;
+}>;
+
+export type DocumentWorkflowTransitionAuthority = Readonly<{
+  recoveryIdentity: unknown;
+  sourceHistory: SourceHistoryState | null;
+  sourceHistoryOperations: SourceHistoryEntry[];
 }>;
 
 export type DocumentWorkflowCanvasPort = Readonly<{
@@ -66,6 +73,12 @@ export class DocumentWorkflow {
   readonly recoveryIdentity: unknown;
   readonly pendingAuditEvents: unknown[];
   replaceRecoveryIdentity(identity: unknown): unknown;
+  captureProjectTransitionAuthority(): DocumentWorkflowTransitionAuthority;
+  restoreProjectTransitionAuthority(input?: {
+    authority?: DocumentWorkflowTransitionAuthority | null;
+    context?: ProjectContext;
+    sourceSha256?: string | null;
+  }): boolean;
   resetForProjectTransition(options?: { clearRecovery?: boolean; context?: Partial<ProjectContext> }): void;
   clearRecovery(context?: Partial<ProjectContext>): void;
   clearAutosaveTimer(): void;

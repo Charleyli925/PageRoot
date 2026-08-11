@@ -236,6 +236,40 @@ function createHarness({
   };
 }
 
+test("DocumentWorkflow restores source-history and recovery authority after a project transition reset", () => {
+  const before = "<!doctype html><html><body><p>one</p></body></html>";
+  const after = before.replace("one", "two");
+  const harness = createHarness({ html: before });
+  const recoveryIdentity = {
+    schemaVersion: "1.0.0",
+    token: sha256("transition-recovery"),
+    projectId: PROJECT_ID,
+    documentId: DOCUMENT_ID,
+    sourcePath: SOURCE_PATH,
+    basedOnVersionId: "version_001",
+    sourceSha256: sha256(before),
+    editRevision: 1,
+  };
+  const pending = operation(before, after);
+  harness.workflow.replaceRecoveryIdentity(recoveryIdentity);
+  harness.sourceHistorySession.restorePending(harness.context, [pending]);
+  const authority = harness.workflow.captureProjectTransitionAuthority();
+
+  harness.workflow.resetForProjectTransition();
+  assert.equal(harness.workflow.recoveryIdentity, null);
+  assert.equal(harness.sourceHistorySession.snapshot, null);
+  assert.deepEqual(harness.sourceHistorySession.pendingOperations, []);
+
+  assert.equal(harness.workflow.restoreProjectTransitionAuthority({
+    authority,
+    context: harness.context,
+    sourceSha256: sha256(before),
+  }), true);
+  assert.deepEqual(harness.workflow.recoveryIdentity, recoveryIdentity);
+  assert.deepEqual(harness.sourceHistorySession.snapshot, authority.sourceHistory);
+  assert.deepEqual(harness.sourceHistorySession.pendingOperations, [pending]);
+});
+
 test("DocumentWorkflow coalesces a 700ms source write and only accepts exact HTML/Hash acknowledgement", async () => {
   const before = "<!doctype html><html><body><p>one</p></body></html>";
   const after = before.replace("one", "two");

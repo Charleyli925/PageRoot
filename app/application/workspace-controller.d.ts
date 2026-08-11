@@ -11,6 +11,13 @@ import type { DraftSession } from "./draft-session.js";
 import type { ProjectContext, ProjectSession } from "./project-session.js";
 import type { SourceHistorySession } from "./source-history-session.js";
 import type { VersionSession } from "./version-session.js";
+import type {
+  ProjectWorkflowConstruction,
+  ProjectWorkflowEvent,
+  ProjectWorkflowOutcome,
+  ProjectWorkflowProject,
+  ProjectWorkflowSnapshot,
+} from "./project-workflow.js";
 
 export type OperationIdentity = Readonly<{
   operationId: string;
@@ -43,6 +50,7 @@ export type WorkspaceControllerSnapshot = Readonly<{
     identity: OperationIdentity | null;
     outcome: CommandOutcome<ProjectContext> | null;
   }>;
+  project: ProjectWorkflowSnapshot | null;
 }>;
 
 export type WorkspaceEvent =
@@ -72,7 +80,8 @@ export type WorkspaceEvent =
         | "document-history-applied";
       context?: ProjectContext;
       [key: string]: unknown;
-    }>;
+    }>
+  | ProjectWorkflowEvent;
 
 export type RegistrationInput = Readonly<{
   sourcePath?: string;
@@ -120,6 +129,9 @@ export type WorkspaceControllerConstruction = Readonly<{
     | "source"
     | "sourceHistoryAction"
     | "resolveConflict"
+    | "conflictCandidate"
+    | "projectFile"
+    | "openFolder"
   >;
   projectSession: ProjectSession;
   documentSession: DocumentSession;
@@ -142,6 +154,15 @@ export type WorkspaceControllerConstruction = Readonly<{
       clearTimeout(handle: unknown): void;
     }>;
   }>;
+  projectWorkflow?: Pick<
+    ProjectWorkflowConstruction,
+    | "runSession"
+    | "projectRulesSession"
+    | "codecs"
+    | "ports"
+    | "policies"
+    | "scheduler"
+  >;
   clock: ClockPort;
 }>;
 
@@ -164,6 +185,62 @@ export class WorkspaceController {
     listener: (snapshot: WorkspaceControllerSnapshot) => void,
   ): () => void;
   subscribeEvents(listener: (event: WorkspaceEvent) => void): () => void;
+  readonly projectHydrating: boolean;
+  readonly projectLoadError: string | null;
+  refreshProject(input?: Record<string, unknown>): Promise<ProjectWorkflowOutcome>;
+  retryProjectHydration(): Promise<ProjectWorkflowOutcome>;
+  prepareProjectSwitch(input?: {
+    fromDeferred?: boolean;
+  }): Promise<ProjectWorkflowOutcome>;
+  openProject(input?: {
+    kind?: "local" | "recent" | "startup";
+    sourcePath?: string | null;
+    fromDeferred?: boolean;
+  }): Promise<ProjectWorkflowOutcome>;
+  acceptProject(
+    project: ProjectWorkflowProject,
+    input?: { kind?: string; operationId?: string; sourcePath?: string | null },
+  ): ProjectWorkflowOutcome;
+  acceptBrowserProject(input: {
+    operationId?: string;
+    project: ProjectWorkflowProject;
+  }): ProjectWorkflowOutcome;
+  acceptExternalProject(input: {
+    requestId: string;
+    sourcePath: string;
+  }): ProjectWorkflowOutcome;
+  resumeDeferredExternalProject(): ProjectWorkflowOutcome;
+  resumeDeferredProjectApplication(): ProjectWorkflowOutcome;
+  reconcileProjectTransitions(): void;
+  prepareClose(input: {
+    requestId: string;
+    deadlineAt: number;
+  }): Promise<Readonly<{
+    ready: boolean;
+    reason?: string;
+    presentation?: "in-app" | "native";
+  }>>;
+  abortClose(input: { requestId: string }): void;
+  hasPendingDrain(boundary: string): boolean;
+  inspectDrain(boundary: string): ReadonlyArray<Record<string, unknown>>;
+  drainBoundary(boundary: string, input: { deadlineAt: number }): Promise<Readonly<{
+    ok: boolean;
+    obligation?: string;
+    reason?: string;
+  }>>;
+  drainCloseFallback(input?: { deadlineAt?: number }): Promise<Readonly<{
+    ok: boolean;
+    obligation?: string;
+    reason?: string;
+  }>>;
+  readProjectFile(input?: {
+    context?: ProjectContext;
+    relativePath?: string;
+  }): Promise<ProjectWorkflowOutcome<{ content: string }>>;
+  openProjectRecords(input?: {
+    context?: ProjectContext;
+  }): Promise<ProjectWorkflowOutcome<{ opened: boolean }>>;
+  refreshRecentProjects(): Promise<ProjectWorkflowOutcome<{ projects: unknown[] }>>;
   ensureRegistered(
     input?: RegistrationInput,
   ): Promise<CommandOutcome<ProjectContext>>;
