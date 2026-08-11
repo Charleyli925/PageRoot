@@ -532,6 +532,10 @@ export class WorkspaceController {
     return this.#requireProjectWorkflow().refreshRecents();
   }
 
+  renameProjectSource(input) {
+    return this.#requireProjectWorkflow().renameSource(input);
+  }
+
   submitRequest(input) {
     return this.#requireRunWorkflow().submit(input);
   }

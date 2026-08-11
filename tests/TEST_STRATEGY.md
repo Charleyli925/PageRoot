@@ -70,6 +70,8 @@ PR 批量是建议而非固定限制：用 CI Health 的 Ready 次数、candidat
   hydration generation fence、accepted-result FIFO、drain 后 native input 延后与恢复、
   close-awaiting external cancellation、committed close/abort freeze 身份、stuck hydration
   快速关闭、load/source stale fence，以及 Canvas acknowledgement 失败时旧页面权威回滚。
+  同一集还验证安全文件重命名的完整 Hash/context fence、丢失桌面响应的 active-file
+  对账、单飞与迟到结果不能 rebase 新项目。
   Workbench 只保留 file input 和 Outcome/Event 的展示映射；专项 Node 集与完整 Electron
   套件共同证明真实 close/open/hydration 路径。
 - `CommentWorkflow`：fake Bridge、RecoveryStore 和现有 Comment/Draft Session 证明

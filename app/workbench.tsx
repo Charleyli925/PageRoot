@@ -215,7 +215,6 @@ import {
   projectMarkdown,
   safeVersionLabel,
   sameLocalSourcePath,
-  sourceRenameOperationId,
   workspaceFileLabel,
 } from "./workbench/project-model";
 import {
@@ -241,7 +240,6 @@ import type {
   CommentEditSession,
   CommentItem,
   DirectEditEvent,
-  DesktopProjectsApi,
   Drawer,
   HtmlProject,
   OtherTabCommentEntry,
@@ -565,6 +563,7 @@ export default function Workbench() {
     throw new Error("画布核对尚未完成初始化。");
   });
   const sourceTransitioningRef = useRef(false);
+  const renameTransitioningRef = useRef(false);
   const sourceTransitionOperationRef = useRef(0);
   const versionTransitioningRef = useRef(false);
   const attachmentObjectUrlsRef = useRef<Map<string, string>>(new Map());
@@ -705,11 +704,18 @@ export default function Workbench() {
     setSourceTransitioning(transitioning);
   }, []);
   const isViewTransitioning = useCallback(() => (
-    sourceTransitioningRef.current || versionTransitioningRef.current
+    sourceTransitioningRef.current
+    || versionTransitioningRef.current
+    || renameTransitioningRef.current
   ), []);
   const versionTransitioning =
     (workspaceControllerSnapshot?.version?.navigation.phase || "idle") !== "idle";
-  const viewTransitioning = sourceTransitioning || versionTransitioning;
+  const renameTransitioning =
+    workspaceControllerSnapshot?.project?.rename?.phase === "renaming";
+  const viewTransitioning = sourceTransitioning || versionTransitioning || renameTransitioning;
+  useEffect(() => {
+    renameTransitioningRef.current = renameTransitioning;
+  }, [renameTransitioning]);
   const invalidateCanvasRenderAcks = useCallback(() => {
     setCanvasRenderAcks({ edit: null, preview: null });
   }, []);
@@ -895,6 +901,16 @@ export default function Workbench() {
               const activate = window.htmlAIProjects?.activateGeneratedVersion;
               if (!activate) throw new Error("当前运行环境不能安全切换生成版本。");
               return activate(input);
+            },
+            renameSource: async (input: {
+              operationId: string;
+              sourcePath: string;
+              stem: string;
+              expectedSha256: string;
+            }) => {
+              const rename = window.htmlAIProjects?.renameHtml;
+              if (!rename) throw new Error("当前运行环境不能安全修改 HTML 文件名。");
+              return rename(input);
             },
           },
           legacy: {
@@ -3236,187 +3252,30 @@ export default function Workbench() {
 
   const commitFileRename = useCallback(async () => {
     if (!fileRenameEditingRef.current || fileRenameBusyRef.current) return;
-    const api = window.htmlAIProjects;
-    const renameFile = api?.renameHtml;
-    const previousSourcePath = projectSessionRef.current.sourcePath;
-    const previousEpoch = projectSessionRef.current.epoch;
-    const previousProjectId = projectSessionRef.current.projectId;
-    const previousDocumentId = projectSessionRef.current.documentId;
-    const extension = fileExtension(
-      localFileNameFromSourcePath(previousSourcePath),
-    );
-    let requestedStem = fileRenameDraft.normalize("NFC").trim();
     if (
-      extension
-      && requestedStem.toLowerCase().endsWith(extension.toLowerCase())
-    ) {
-      requestedStem = requestedStem.slice(0, -extension.length).trim();
-    }
-    if (
-      !renameFile
-      || !previousSourcePath
-      || !documentSessionRef.current.sourceSha256
-      || viewMode !== "current"
-      || runInProgress
-      || projectHydrating
-      || projectLoadError
-      || workspaceIssue
+      !workspaceController
+      || !canOfferFileRename
     ) {
       setFileRenameError("当前状态还不能重命名，请等待文件安全保存。");
-      return;
-    }
-    if (requestedStem === currentSourceFileStem) {
-      cancelFileRename();
       return;
     }
 
     fileRenameBusyRef.current = true;
     setFileRenameBusy(true);
     setFileRenameError("");
-    let transitionOwnsCanvas = false;
-    let renameCommitted = false;
     try {
-      const committed = editorRef.current?.fencePendingEdit({
-        resumeEditing: true,
-        trigger: "project-switch",
-      });
-      if (!committed || !committed.ok) {
+      const outcome = await requiredWorkspaceController(workspaceController)
+        .renameProjectSource({ stem: fileRenameDraft });
+      if (outcome.status !== "succeeded") {
         throw new Error(
-          committed?.reason || "请先完成当前文字输入，再修改文件名。",
+          outcome.status === "unknown"
+            ? "文件名已经修改，但项目状态还没有完成刷新。"
+            : ("reason" in outcome && outcome.reason)
+              || "文件名没有修改，请检查名称后重试。",
         );
       }
-      if (
-        committed.html !== documentSessionRef.current.html
-        || committed.pendingMutation
-      ) {
-        const enqueued = enqueueAutosave(
-          committed.html,
-          committed.pendingMutation || undefined,
-        );
-        if (enqueued.status !== "succeeded") {
-          throw new Error(documentEditFailureReason(enqueued));
-        }
-      }
-      const drained = await requiredWorkspaceController(workspaceController)
-        .drainBoundary("switch", {
-        deadlineAt: Date.now() + 15_000,
-      });
-      if (!drained.ok) throw new Error(drained.reason);
-      if (
-        previousEpoch !== projectSessionRef.current.epoch
-        || !sameLocalSourcePath(projectSessionRef.current.sourcePath, previousSourcePath)
-        || documentSessionRef.current.pendingWrite
-        || documentSessionRef.current.flushPromise
-        || workspaceController?.hasDocumentHistoryAction
-        || documentSessionRef.current.persistState !== "idle"
-        || documentSessionRef.current.editRevision !== documentSessionRef.current.lastPersistedRevision
-      ) {
-        throw new Error("文件状态刚刚发生变化，请等到“已安全保存”后重试。");
-      }
-
-      const frozen = editorRef.current?.freezeNow();
-      if (!frozen || !frozen.ok) {
-        throw new Error(
-          frozen?.reason || "编辑画布尚未完成安全收口。",
-        );
-      }
-      if (
-        frozen.html !== documentSessionRef.current.html
-        || frozen.pendingMutation
-      ) {
-        const enqueued = enqueueAutosave(
-          frozen.html,
-          frozen.pendingMutation || undefined,
-        );
-        if (enqueued.status !== "succeeded") {
-          throw new Error(documentEditFailureReason(enqueued));
-        }
-        throw new Error("刚刚还有文字输入，源页正在安全保存，请稍后再试。");
-      }
-      transitionOwnsCanvas = true;
-      setSourceViewTransitioning(true);
-
-      const expectedSha256 = documentSessionRef.current.sourceSha256;
-      const operationId = sourceRenameOperationId();
-      let result: Awaited<ReturnType<NonNullable<DesktopProjectsApi["renameHtml"]>>>;
-      try {
-        result = await renameFile({
-          operationId,
-          sourcePath: previousSourcePath,
-          stem: requestedStem,
-          expectedSha256,
-        });
-      } catch (cause) {
-        const active = await api?.getActiveProject().catch(() => null);
-        const expectedFileName = `${requestedStem}${extension}`;
-        if (
-          !active
-          || active.sha256 !== expectedSha256
-          || localFileNameFromSourcePath(active.sourcePath).normalize("NFC")
-            !== expectedFileName.normalize("NFC")
-        ) throw cause;
-        result = {
-          ...active,
-          operationId,
-          previousSourcePath,
-          fileName: expectedFileName,
-          stem: requestedStem,
-          extension,
-          renamed: true,
-          replayed: true,
-          workspaceRelinked: false,
-        };
-      }
-      if (
-        result.operationId !== operationId
-        || !sameLocalSourcePath(
-          result.previousSourcePath,
-          previousSourcePath,
-        )
-        || result.sha256 !== expectedSha256
-        || !result.sourcePath
-      ) {
-        throw new Error("重命名结果与当前文件身份不一致。");
-      }
-      renameCommitted = true;
-      const nextSourcePath = result.sourcePath;
-
-      runSessionRef.current.rebaseSource({
-        previousSourcePath,
-        sourcePath: nextSourcePath,
-        projectId: previousProjectId,
-      });
-
-      const transitionedProject = projectSessionRef.current.transitionSource({
-        previousSourcePath,
-        sourcePath: nextSourcePath,
-        projectId: previousProjectId,
-        documentId: previousDocumentId,
-      });
-      if (!transitionedProject) {
-        throw new Error("文件已重命名，但当前项目身份已经变化。");
-      }
-      documentSessionRef.current.publishAuthority({
-        html: documentSessionRef.current.html,
-        sourceSha256: result.sha256,
-        pendingWrite: null,
-      });
-      workspaceController?.clearDocumentRecovery({
-        documentId: previousDocumentId,
-        sourcePath: previousSourcePath,
-      });
-      workspaceController?.resetDocumentWorkflow();
-      workspaceController?.resetCommentWorkflow();
-      setProjectName(result.stem || requestedStem);
-      setLastModifiedAt(result.lastModifiedAt || null);
-      await Promise.all([
-        refreshRecents(),
-        refreshWorkspace(
-          nextSourcePath,
-          projectSessionRef.current.epoch,
-          true,
-        ),
-      ]);
+      if (outcome.value.projectName) setProjectName(outcome.value.projectName);
+      setLastModifiedAt(outcome.value.lastModifiedAt || null);
       fileRenameEditingRef.current = false;
       setFileRenameEditing(false);
       setFileRenameDraft("");
@@ -3424,35 +3283,20 @@ export default function Workbench() {
     } catch (cause) {
       setFileRenameError(productErrorMessage(
         cause,
-        renameCommitted
-          ? "文件名已经修改，但项目状态还没有完成刷新。"
-          : "文件名没有修改，请检查名称后重试。",
+        "文件名没有修改，请检查名称后重试。",
       ));
       window.requestAnimationFrame(() => {
         fileRenameInputRef.current?.focus();
         fileRenameInputRef.current?.select();
       });
     } finally {
-      if (transitionOwnsCanvas) {
-        setSourceViewTransitioning(false);
-        window.requestAnimationFrame(() => editorRef.current?.unlockNow?.());
-      }
       fileRenameBusyRef.current = false;
       setFileRenameBusy(false);
     }
   }, [
-    cancelFileRename,
-    currentSourceFileStem,
-    enqueueAutosave,
+    canOfferFileRename,
     fileRenameDraft,
-    projectHydrating,
-    projectLoadError,
-    refreshRecents,
-    refreshWorkspace,
-    runInProgress,
-    viewMode,
     workspaceController,
-    workspaceIssue,
   ]);
 
   useEffect(() => {

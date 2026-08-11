@@ -40,6 +40,10 @@ export type ProjectWorkflowSnapshot = Readonly<{
     phase: "idle" | "preparing";
     operationId: string | null;
   }>;
+  rename: Readonly<{
+    phase: "idle" | "renaming";
+    operationId: string | null;
+  }>;
   open: Readonly<{
     phase: "idle" | "opening" | "deferred";
     operationId: string | null;
@@ -153,6 +157,16 @@ export class ProjectWorkflow {
     context?: ProjectContext;
   }): Promise<ProjectWorkflowOutcome<{ opened: boolean }>>;
   refreshRecents(): Promise<ProjectWorkflowOutcome<{ projects: unknown[] }>>;
+  renameSource(input: {
+    stem: string;
+    deadlineAt?: number;
+  }): Promise<ProjectWorkflowOutcome<{
+    context: ProjectContext;
+    sourcePath: string;
+    projectName?: string;
+    lastModifiedAt?: string | null;
+    unchanged?: boolean;
+  }>>;
   prepareGeneratedSourceTransition(input: {
     previousSourcePath: string;
     nextSourcePath: string;
