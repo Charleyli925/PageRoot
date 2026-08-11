@@ -1,4 +1,5 @@
 import type { BridgeClient } from "./bridge-client.js";
+import type { CommentWorkflow } from "./comment-workflow.js";
 import type { CommentSession } from "./comment-session.js";
 import type { DocumentSession } from "./document-session.js";
 import type { DraftSession } from "./draft-session.js";
@@ -67,6 +68,7 @@ export type ProjectWorkflowConstruction = Readonly<{
   commentSession: CommentSession;
   draftSession: DraftSession;
   versionSession: VersionSession;
+  commentWorkflow: CommentWorkflow;
   runSession: RunSession;
   projectRulesSession: ProjectRulesSession;
   codecs: object;

@@ -1,6 +1,6 @@
 # Workbench 应用编排收口执行计划
 
-- 状态：**PR-1、PR-2 已合并至 `main`；PR-3 Draft PR #152 已建立（未 Ready、未合并）；PR-4 至 PR-7 尚未授权**
+- 状态：**PR-1 至 PR-3 已合并至 `main`；PR-4 已完成实现与验证，交付仅允许 Draft PR（未 Ready、未合并）；PR-5 至 PR-7 尚未授权**
 - 规划基线：`main@37bba7779b27c0a42a52f98ec84a377b964bf4eb`
 - 基线 Tree：`0e074849493e5f9db9e89621e0a1c1a4910b8fa1`
 - 基线日期：2026-08-11
@@ -990,6 +990,28 @@ Promise、upload count 或 compensation owner 留在 React。
   不能假设“点击保存”必须等待 Bridge；
 - attachment cleanup 失败目前是 warning，是否需要 durable cleanup ledger 不属于
   本计划；若发现实际孤儿文件不可接受，停止并另立存储计划。
+
+### 10.8 实施记录（2026-08-11）
+
+- 隔离分支：`refactor/comment-draft-attachment-workflow`，基于已合并的 PR-3
+  `origin/main@043d78f0aff7ac0b8db8966cf08adbcfe925f5b2`。本次交付只创建 Draft
+  PR；不进入 Ready、合并、版本或发布流程。
+- 新增 `comment-workflow.js/.d.ts` 及其纯 codec。它是 Draft snapshot/recovery、
+  DraftSession observer、附件 upload count、完整 ProjectContext + composer/edit
+  identity 捕获，以及 stale/cancel cleanup 的唯一应用层 owner；`CommentSession`
+  保持 disposable working copy，`DraftSession` 保持 CAS durable authority。
+- `WorkspaceController` 组合并投影 CommentWorkflow，`ProjectWorkflow` 的 draft 与
+  attachment drain obligation 统一委托它。Workbench 只保留 File/Object URL、焦点和
+  Toast 映射，删除 Draft observer/recovery/upload-count owner 及 attachment
+  Bridge 调用；直接 Bridge 调用精确收敛至 13。
+- 新增/更新 CommentWorkflow、CommentSession、ProjectWorkflow 回归、影响映射、
+  测试策略、状态所有权和 architecture contract。覆盖 lazy registration 单次 Draft
+  写入、部分附件失败、browser-memory 无 Bridge、跨项目迟到上传补偿、取消编辑只清
+  staged 附件，以及 unknown Draft POST authority reconciliation。
+- 已通过本节指定 Node 集 33/33、`npm run architecture:check`、`npm run typecheck`、
+  `npm run test:browser:full` 73/73、`npm run test:ai-closed-loop:smoke` 2/2，及
+  `npm run task:finish`（137 targeted Node、28 Browser smoke、8 Electron smoke、
+  2 AI smoke）。
 
 ## 11. PR-5：Request、Run Polling、取消与冲突 Workflow
 

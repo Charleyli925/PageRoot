@@ -28,20 +28,19 @@ const RETIRED_WORKBENCH_DOCUMENT_AUTHORITIES =
   /\b(?:htmlRef|sourceShaRef|editRevisionRef|lastPersistedRevisionRef|persistStateRef|pendingWriteRef|flushPromiseRef)\b/;
 const RETIRED_WORKBENCH_COMMENT_AUTHORITIES =
   /\b(?:commentsRef|changeEventsRef|deletedCommentIdsRef|composerDraftRef|composerCommentIdRef|composerAttachmentsRef|draftTargetRef|commentEditSessionRef)\b/;
+const RETIRED_WORKBENCH_COMMENT_WORKFLOW_OWNERS =
+  /\b(?:handleDraftSessionEvent|flushDraftPersistence|persistDraftRecovery|persistCurrentDraftRecovery|attachmentUploadCountRef|draftRecoveryOperationIdRef|deleteAttachmentFile)\b/;
 const WORKBENCH_BRIDGE_CALL_ALLOWLIST = new Map([
   ["workspace", 3],
   ["source", 2],
   ["versionFile", 3],
   ["resolveConflict", 1],
   ["activateReadyVersion", 1],
-  ["attachment", 1],
   ["cancelActiveRun", 1],
   ["createRequest", 1],
-  ["deleteAttachment", 1],
-  ["saveAttachment", 1],
   ["status", 1],
 ]);
-const WORKBENCH_BRIDGE_CALL_LIMIT = 16;
+const WORKBENCH_BRIDGE_CALL_LIMIT = 13;
 const RETIRED_WORKBENCH_PROJECT_WORKFLOW_OWNERS =
   /\b(?:drainCoordinatorRef|externalFileOpenSessionRef|projectApplicationSessionRef|projectHydratingRef|projectLoadErrorRef|pendingProjectOpenRef|closeLifecycleRef|projectOpenRequestRef|applyProject|prepareProjectSwitch|applyAcceptedProject|enqueueAcceptedProject|openExternalProject)\b/;
 
@@ -288,6 +287,15 @@ export async function architectureViolations() {
     ),
     "utf8",
   );
+  const commentWorkflow = await readFile(
+    path.join(
+      PRODUCT_ROOT,
+      "app",
+      "application",
+      "comment-workflow.js",
+    ),
+    "utf8",
+  );
   if (
     !workspaceController.includes("export class WorkspaceController")
     || !workspaceController.includes("ensureRegistered({")
@@ -372,19 +380,19 @@ export async function architectureViolations() {
     bridgeCallCounts.set(method, (bridgeCallCounts.get(method) || 0) + 1);
     if (!WORKBENCH_BRIDGE_CALL_ALLOWLIST.has(method)) {
       violations.push(
-        `app/workbench.tsx: Bridge call ${method} is outside the PR-3 migration allowlist`,
+        `app/workbench.tsx: Bridge call ${method} is outside the PR-4 migration allowlist`,
       );
     }
   }
   if (bridgeCalls.length > WORKBENCH_BRIDGE_CALL_LIMIT) {
     violations.push(
-      `app/workbench.tsx: PR-3 allows at most ${WORKBENCH_BRIDGE_CALL_LIMIT} direct Bridge calls`,
+      `app/workbench.tsx: PR-4 allows at most ${WORKBENCH_BRIDGE_CALL_LIMIT} direct Bridge calls`,
     );
   }
   for (const [method, limit] of WORKBENCH_BRIDGE_CALL_ALLOWLIST) {
     if ((bridgeCallCounts.get(method) || 0) > limit) {
       violations.push(
-        `app/workbench.tsx: Bridge call ${method} exceeds its PR-3 migration allowance of ${limit}`,
+        `app/workbench.tsx: Bridge call ${method} exceeds its PR-4 migration allowance of ${limit}`,
       );
     }
   }
@@ -469,6 +477,54 @@ export async function architectureViolations() {
   ) {
     violations.push(
       "app/workbench.tsx: comment working-copy state belongs to CommentSession",
+    );
+  }
+  if (
+    RETIRED_WORKBENCH_COMMENT_WORKFLOW_OWNERS.test(workbench)
+    || /\bbridgeClient\.(?:attachment|saveAttachment|deleteAttachment)\s*\(/.test(workbench)
+    || !workbench.includes("commentWorkflow: {")
+    || !workbench.includes(".commitComment({ commentId })")
+    || !workbench.includes(".uploadAttachments({")
+    || !workbench.includes(".flushDraft()")
+  ) {
+    violations.push(
+      "app/workbench.tsx: PR-4 comment persistence and attachment IO must delegate to CommentWorkflow",
+    );
+  }
+  if (
+    !workspaceController.includes("import { CommentWorkflow }")
+    || !workspaceController.includes("this.#commentWorkflow = new CommentWorkflow({")
+    || !workspaceController.includes("comment: this.#commentWorkflow?.getSnapshot() || null")
+    || !workspaceController.includes("commitComment(input)")
+    || !workspaceController.includes("uploadAttachments(input)")
+    || !workspaceController.includes("flushDraft(input)")
+  ) {
+    violations.push(
+      "app/application/workspace-controller.js: PR-4 must compose and expose CommentWorkflow commands and projection",
+    );
+  }
+  if (
+    !commentWorkflow.includes("export class CommentWorkflow")
+    || !commentWorkflow.includes("#uploadCount")
+    || !commentWorkflow.includes("#recoveryOperationId")
+    || !commentWorkflow.includes("this.#draftSession.setObserver(")
+    || !commentWorkflow.includes("async uploadAttachments(")
+    || !commentWorkflow.includes("async deleteAttachment(")
+    || !commentWorkflow.includes("async flushDraft(")
+    || /(?:^|\/)(?:workbench|components|desktop)(?:\/|$)/.test(
+      importedSpecifiers(commentWorkflow).join("\n"),
+    )
+  ) {
+    violations.push(
+      "app/application/comment-workflow.js: Draft recovery, upload compensation, and durable attachment commands must stay in the application boundary",
+    );
+  }
+  if (
+    !projectWorkflow.includes("this.#commentWorkflow.inspectAttachment()")
+    || !projectWorkflow.includes("this.#commentWorkflow.drainDraft({")
+  ) {
+    violations.push(
+      "app/application/project-workflow.js: PR-4 drain obligations must delegate to CommentWorkflow",
     );
   }
   for (const boundary of ["close", "switch"]) {

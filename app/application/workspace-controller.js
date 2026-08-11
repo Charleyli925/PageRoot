@@ -1,4 +1,5 @@
 import { isBridgeRequestError } from "./bridge-client.js";
+import { CommentWorkflow } from "./comment-workflow.js";
 import { DocumentWorkflow } from "./document-workflow.js";
 import { DrainCoordinator } from "./drain-coordinator.js";
 import { ExternalFileOpenSession } from "./external-file-open-session.js";
@@ -119,11 +120,17 @@ export class WorkspaceController {
   #drainCoordinator = new DrainCoordinator();
   #documentWorkflow = null;
   #documentWorkflowUnsubscribe = null;
+  #commentWorkflow = null;
+  #commentWorkflowUnsubscribe = null;
   #projectWorkflow = null;
   #projectWorkflowUnsubscribe = null;
   #registration = registrationSnapshot().registration;
   #projectSnapshot = null;
-  #snapshot = Object.freeze({ registration: this.#registration, project: null });
+  #snapshot = Object.freeze({
+    registration: this.#registration,
+    comment: null,
+    project: null,
+  });
   #listeners = new Set();
   #eventListeners = new Set();
   #registrationPromise = null;
@@ -141,6 +148,7 @@ export class WorkspaceController {
     codecs,
     ports = {},
     documentWorkflow = null,
+    commentWorkflow = null,
     projectWorkflow = null,
     clock,
   } = {}) {
@@ -230,9 +238,34 @@ export class WorkspaceController {
         },
       );
     }
+    if (commentWorkflow) {
+      this.#commentWorkflow = new CommentWorkflow({
+        bridgeClient,
+        ensureRegistered: (input) => this.ensureRegistered(input),
+        projectSession,
+        documentSession,
+        commentSession,
+        draftSession,
+        versionSession,
+        runSession: commentWorkflow.runSession,
+        codecs: commentWorkflow.codecs,
+        ports: {
+          recoveryStore: commentWorkflow.recoveryStore,
+          attachmentBinary: commentWorkflow.attachmentBinary,
+        },
+        clock,
+      });
+      this.#commentWorkflowUnsubscribe = this.#commentWorkflow.subscribe(
+        () => this.#publishAggregateSnapshot(),
+      );
+      this.#commentWorkflow.subscribeEvents((event) => this.#emitEvent(event));
+    }
     if (projectWorkflow) {
       if (!this.#documentWorkflow) {
         throw new TypeError("WorkspaceController ProjectWorkflow requires DocumentWorkflow.");
+      }
+      if (!this.#commentWorkflow) {
+        throw new TypeError("WorkspaceController ProjectWorkflow requires CommentWorkflow.");
       }
       const legacy = projectWorkflow.ports?.legacy || {};
       this.#projectWorkflow = new ProjectWorkflow({
@@ -243,6 +276,7 @@ export class WorkspaceController {
         commentSession,
         draftSession,
         versionSession,
+        commentWorkflow: this.#commentWorkflow,
         runSession: projectWorkflow.runSession,
         projectRulesSession: projectWorkflow.projectRulesSession,
         externalFileOpenSession: new ExternalFileOpenSession(),
@@ -301,6 +335,10 @@ export class WorkspaceController {
     this.#projectWorkflowUnsubscribe = null;
     this.#projectWorkflow?.dispose();
     this.#projectWorkflow = null;
+    this.#commentWorkflowUnsubscribe?.();
+    this.#commentWorkflowUnsubscribe = null;
+    this.#commentWorkflow?.dispose();
+    this.#commentWorkflow = null;
     this.#documentWorkflowUnsubscribe?.();
     this.#documentWorkflowUnsubscribe = null;
     this.#documentWorkflow?.dispose();
@@ -457,6 +495,58 @@ export class WorkspaceController {
     return this.#requireDocumentWorkflow().waitForHistoryAction();
   }
 
+  queueDraft() {
+    return this.#requireCommentWorkflow().queueDraft();
+  }
+
+  flushDraft(input) {
+    return this.#requireCommentWorkflow().flushDraft(input);
+  }
+
+  commitComment(input) {
+    return this.#requireCommentWorkflow().commitComment(input);
+  }
+
+  editComment(input) {
+    return this.#requireCommentWorkflow().editComment(input);
+  }
+
+  deleteComment(input) {
+    return this.#requireCommentWorkflow().deleteComment(input);
+  }
+
+  discardCommentComposer() {
+    return this.#requireCommentWorkflow().discardComposer();
+  }
+
+  cancelCommentEdit(input) {
+    return this.#requireCommentWorkflow().cancelCommentEdit(input);
+  }
+
+  removeComposerAttachment(input) {
+    return this.#requireCommentWorkflow().removeComposerAttachment(input);
+  }
+
+  removeCommentEditAttachment(input) {
+    return this.#requireCommentWorkflow().removeEditAttachment(input);
+  }
+
+  uploadAttachments(input) {
+    return this.#requireCommentWorkflow().uploadAttachments(input);
+  }
+
+  readAttachment(input) {
+    return this.#requireCommentWorkflow().readAttachment(input);
+  }
+
+  deleteAttachment(input) {
+    return this.#requireCommentWorkflow().deleteAttachment(input);
+  }
+
+  resetCommentWorkflow() {
+    return this.#requireCommentWorkflow().resetForProjectTransition();
+  }
+
   #requireDocumentWorkflow() {
     if (!this.#documentWorkflow) {
       throw new Error("文档持久化工作流尚未完成组合。");
@@ -469,6 +559,13 @@ export class WorkspaceController {
       throw new Error("项目切换工作流尚未完成组合。");
     }
     return this.#projectWorkflow;
+  }
+
+  #requireCommentWorkflow() {
+    if (!this.#commentWorkflow) {
+      throw new Error("评论工作流尚未完成组合。");
+    }
+    return this.#commentWorkflow;
   }
 
   ensureRegistered({
@@ -562,6 +659,7 @@ export class WorkspaceController {
   #publishAggregateSnapshot() {
     this.#snapshot = Object.freeze({
       registration: this.#registration,
+      comment: this.#commentWorkflow?.getSnapshot() || null,
       project: this.#projectSnapshot,
     });
     for (const listener of this.#listeners) {
@@ -632,6 +730,7 @@ export class WorkspaceController {
         this.#codecs.authoritativeDraftRevision(authoritativeDraft),
         authoritativeDraft,
       );
+      this.#commentWorkflow?.reconcileAuthority();
       this.#emitEvent({
         type: "draft-authority-rebound",
         context: existingContext,
@@ -779,6 +878,7 @@ export class WorkspaceController {
         this.#codecs.authoritativeDraftRevision(authoritativeDraft),
         authoritativeDraft,
       );
+      this.#commentWorkflow?.reconcileAuthority();
       if (this.#codecs.isRecord(payload.sourceHistory)) {
         this.#sourceHistorySession.activate(
           registeredContext,

@@ -72,6 +72,10 @@ The renderer's main workspace facts are partitioned as follows:
   saved-comment edit session;
 - `DraftSession`: acknowledged Draft revision, pending mutation and
   unknown-outcome reconciliation;
+- `CommentWorkflow`: durable-comment command sequencing, crash-only Draft
+  recovery projection, attachment staging/upload count and stale/cancel
+  compensation; it publishes through `CommentSession` and `DraftSession` and
+  is not a second Draft aggregate owner;
 - `ProjectRulesSession`: `PROJECT.md` working copy, composition fence,
   autosave and reconciliation;
 - `RunSession`: current/background run projections, Qoder status, background
@@ -104,8 +108,11 @@ structured outcome, and synchronously binds Project, Document, Version, Draft
 and SourceHistory authority only after the Bridge response validates. In PR-3
 the Controller also owns the unique `DrainCoordinator`, creates the narrow
 external-open/application protocol Sessions and composes `ProjectWorkflow`.
-Its temporary direct-Bridge allowance is an exact checked upper bound of 16,
-not a permanent View exception; the final composition stage removes it entirely.
+In PR-4 it additionally composes `CommentWorkflow`, which owns the
+DraftSession observer, recovery operation sequence, attachment upload count and
+captured-context stale/cancel cleanup. Its temporary direct-Bridge allowance is
+an exact checked upper bound of 13, not a permanent View exception; the final
+composition stage removes it entirely.
 
 An asynchronous result may update state only when its complete identity is
 current:
@@ -305,7 +312,10 @@ inside the registered source or an explicit alias. Supplying exactly one ID is
 invalid. Omitting both IDs is a temporary compatibility route that may address
 an existing registration but may not create one; `/project/ensure` is the sole
 creation boundary. Attachments and their compensating cleanup use the same
-captured context for their complete asynchronous lifetime.
+captured context, plus their composer/edit identity, for their complete
+asynchronous lifetime. `CommentWorkflow` is the only renderer application
+owner that may stage an attachment, call its Bridge repository, or compensate a
+late write; browser-memory attachments never acquire that Bridge capability.
 
 Canvas operation history has split but non-overlapping ownership:
 `SourceHistorySession` owns the renderer context, unsaved operation outbox and
@@ -416,6 +426,11 @@ dirty booleans in React. `ProjectWorkflow` owns the request-scoped desktop close
 lifecycle. The Workbench close listener synchronously registers only
 `detail.waitUntil(controller.prepareClose(...))`; abort and browser fallback are
 commands to the same workflow, not parallel close authorities.
+
+`CommentWorkflow` supplies the `draft/comment persistence` and `attachment
+staging` obligations. `ProjectWorkflow` delegates those obligations without
+reading React refs or reproducing Draft snapshots; Workbench only renders the
+Controller projection and dispatches durable commands.
 
 A Canvas undo/redo request uses the same native-edit checkpoint and source
 autosave obligations before it reads the durable history cursor. It does not

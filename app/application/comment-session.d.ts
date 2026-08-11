@@ -33,6 +33,17 @@ export class CommentSession<
       >,
     ) => void) | null,
   ): void;
+  subscribe(
+    listener: (
+      snapshot: CommentSessionSnapshot<
+        TComment,
+        TEvent,
+        TAttachment,
+        TTarget,
+        TEditSession
+      >,
+    ) => void,
+  ): () => void;
   reset(): CommentSessionSnapshot<
     TComment,
     TEvent,

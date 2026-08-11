@@ -26,6 +26,28 @@ test("comment session publishes one atomic working-copy snapshot", () => {
   assert.equal(session.editSession.commentId, "comment_one");
 });
 
+test("workflow subscriptions observe the same atomic snapshot without replacing the view observer", () => {
+  const session = new CommentSession();
+  const viewSnapshots = [];
+  const workflowSnapshots = [];
+  session.setObserver((snapshot) => viewSnapshots.push(snapshot));
+  const unsubscribe = session.subscribe((snapshot) => {
+    workflowSnapshots.push(snapshot);
+  });
+
+  session.update({
+    comments: [{ commentId: "comment_one" }],
+    composerDraft: "draft",
+  });
+  unsubscribe();
+  session.setComposerDraft("next draft");
+
+  assert.equal(viewSnapshots.length, 2);
+  assert.equal(workflowSnapshots.length, 1);
+  assert.equal(workflowSnapshots[0], viewSnapshots[0]);
+  assert.equal(session.composerDraft, "next draft");
+});
+
 test("comment deletion tombstones can only change through session methods", () => {
   const session = new CommentSession();
   assert.equal(session.markDeleted("comment_one"), true);
