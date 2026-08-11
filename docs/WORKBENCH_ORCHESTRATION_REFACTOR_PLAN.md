@@ -1,6 +1,6 @@
 # Workbench 应用编排收口执行计划
 
-- 状态：**PR-1 至 PR-5 已合并至 `main`；PR-6 已完成实现与本地验证，交付边界为 Draft PR；PR-7 尚未授权**
+- 状态：**PR-1 至 PR-6 已合并至 `main`；PR-7 已获实施授权，但审计触发 §13.6：必须先以独立 PR 接管安全重命名与 `PROJECT.md` 规则工作流，随后才可执行最终收口**
 - 规划基线：`main@37bba7779b27c0a42a52f98ec84a377b964bf4eb`
 - 基线 Tree：`0e074849493e5f9db9e89621e0a1c1a4910b8fa1`
 - 基线日期：2026-08-11
@@ -419,7 +419,9 @@ PR-1 Controller contract + registration seam
       -> PR-4 Comment + Draft + attachment
         -> PR-5 Request + Run lifecycle
           -> PR-6 Version activation + history navigation
-            -> PR-7 Final composition cleanup + hard architecture gate
+            -> PR-7a Source rename transition workflow
+              -> PR-7b Project rules workflow
+                -> PR-7 Final composition cleanup + hard architecture gate
 ```
 
 ### 6.2 Bridge 调用收敛预算
@@ -445,7 +447,8 @@ owner 和迁移 PR，并更新本文后汇报。
 
 生产实现：
 
-- PR-1 至 PR-7 严格串行建立最终候选和合并；
+- PR-1 至 PR-7 严格串行建立最终候选和合并；若 §13.6 发现遗漏 owner，必须先插入
+  独立前置 PR，再回到 PR-7；
 - 后一个 PR 必须从前一个已合并的最新 `origin/main` 创建；
 - 不建立七层长期 stacked PR；
 - 每个 PR 独立 Draft、独立测试、独立回滚；Ready/合并仍需授权；
@@ -1264,6 +1267,63 @@ identity、Hash、rollback 和 exact Canvas oracle 保持。
   impact-map selection contract，以及 `npm run task:finish` 的 8/8 task gate（typecheck、
   lint、167 个 targeted Node、Web/Browser、Desktop/Electron、AI smoke）。现在只可创建
   Draft PR；不 Ready、不合并、不打 tag、不发布。
+
+## 12.9 PR-7a：安全文件重命名 Transition Workflow
+
+### 12.9.1 触发事实与边界
+
+PR-7 审计发现 `commitFileRename` 仍由 Workbench 直接协调 desktop rename、Run source
+rebase、Project source transition、Document publication、Document/Comment workflow reset、
+recent-list refresh 和 workspace hydration。这是未在 PR-1 至 PR-6 中列出的跨 Session
+业务流程，命中 §13.6，不能塞入 PR-7 cleanup。
+
+本 PR 只把该 renderer-side transition 交给现有 `ProjectWorkflow`；desktop
+`source-rename` 的 operation journal、IPC capability、Bridge relink、filesystem 操作与
+持久 Schema 完全不变。`ProjectOpenPort.renameSource` 是窄的宿主端口，不是 generic
+Bridge executor。
+
+### 12.9.2 修改清单
+
+- `ProjectWorkflow.renameSource` 捕获 Project context + expected source Hash，完成 native
+  edit checkpoint、唯一 Drain、final Canvas freeze、desktop result validation、lost-response
+  active-file reconciliation、late-result fence 与同步 Run/Project/Document publication；
+- `WorkspaceController.renameProjectSource` 只暴露该 typed command；
+- Workbench 只传递 filename intent 与展示 Outcome，删除 desktop call、operation ID、
+  Hash/result 对账和跨 Session mutation；
+- 增加 ProjectWorkflow Node 覆盖：成功 publication、丢失响应的 single-flight 对账、
+  晚到结果不能重写新项目；更新 owner 文档、测试策略与 impact map。
+
+### 12.9.3 不变量与验收
+
+- desktop rename 成功前不得改变任何 renderer Session；成功后不得 publish partial
+  Project/Document/Run tuple；
+- 只有 active file 的 expected renamed filename 与 expected Hash 同时匹配，才可把失去的
+  desktop response 视为已提交；
+- 迟到结果、dispose 或新的 Project context 一律返回 `stale`，不得 rebase 当前项目；
+- 不新增 Bridge route、desktop API、schema、UI 或 generic command；
+- 必须通过：
+
+```bash
+node --test tests/project-workflow.test.mjs tests/source-rename.test.mjs
+npm run architecture:check
+npm run typecheck
+npm run lint
+npm run task:finish
+```
+
+### 12.9.4 实施记录（2026-08-12）
+
+- 分支 `refactor/project-rename-workflow` 从
+  `origin/main@12dcddd93a728144ff789c22df5460b3556618bb` 创建；它是 PR-7 的独立前置
+  候选，不修改 PR-7 的最终 Composition/hard-gate 范围。
+- 该候选只迁移安全重命名的 renderer operation owner；`PROJECT.md` workflow 仍保留给
+  下一独立前置 PR。完成并合并这两个前置 PR 后，PR-7 才从新的 `origin/main` 重建。
+- P1 并发复核确认：desktop rename 未决期间的切换/关闭阻断是
+  `ProjectWorkflow` 自身的 Drain fact，不依赖异步 React snapshot projection；定向回归覆盖
+  pending rename 不能开始新的 project transition。
+- 已通过 `npm run gate:edit -- --base origin/main` 和 `npm run task:finish`；最终 task
+  evidence 为 `output/test-runs/2026-08-11T19-38-29-482Z-task/results.json`（typecheck、lint、
+  171 个 targeted Node、Web build、28 个 Browser smoke、Desktop/Electron 与 AI smoke 全部通过）。
 
 ## 13. PR-7：最终 Composition 收口、Aggregate Snapshot 与硬门禁
 

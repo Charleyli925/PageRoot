@@ -101,9 +101,12 @@ The renderer's main workspace facts are partitioned as follows:
   switch fence, deferred application retry and successor preservation.
 - `ProjectWorkflow`: hydration generation/load outcome, picker/external/switch
   operation identity, accepted-result execution, close request lifecycle,
-  project-switch publication, and the narrow generated-source prepare/commit
-  handoff used by `VersionWorkflow`. It is an operation owner, not a second
-  owner of any Session fact.
+  project-switch publication, typed source-rename transition and the narrow
+  generated-source prepare/commit handoff used by `VersionWorkflow`. The rename
+  command fences/drains existing owners, validates the expected source Hash and
+  trusted desktop result (including lost-response reconciliation), then
+  synchronously publishes through existing Run/Project/Document Sessions. It
+  is an operation owner, not a second owner of any Session fact.
 
 `CommentSession` does not replace the Draft aggregate or Bridge CAS authority,
 and `VersionSession` does not make mutable copies of immutable Version files.

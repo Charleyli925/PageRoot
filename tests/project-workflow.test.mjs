@@ -13,6 +13,7 @@ import { RunSession } from "../app/application/run-session.js";
 import { VersionSession } from "../app/application/version-session.js";
 
 const OLD_PATH = "/tmp/project-workflow-old.html";
+const RENAMED_PATH = "/tmp/project-workflow-renamed.html";
 const A_PATH = "/tmp/project-workflow-a.html";
 const B_PATH = "/tmp/project-workflow-b.html";
 const OLD_HTML = "<!doctype html><html><body><p>old</p></body></html>";
@@ -236,6 +237,7 @@ function createHarness({
       this.resetCount += 1;
       this.projectTransitionAuthority = null;
     },
+    clearRecovery() {},
     captureProjectTransitionAuthority() {
       return this.projectTransitionAuthority;
     },
@@ -904,4 +906,158 @@ test("a Canvas acknowledgement failure rolls the hydration publication back", as
     harness.documentWorkflow.restoredProjectTransitionAuthority.sourceSha256,
     sha256(OLD_HTML),
   );
+});
+
+test("source rename is a typed ProjectWorkflow transition with one synchronous Session publication", async (t) => {
+  let renamePayload = null;
+  const harness = createHarness({
+    bridge: {
+      async workspace(sourcePath) {
+        if (sourcePath !== RENAMED_PATH) return workspacePayload(sourcePath, OLD_HTML);
+        return {
+          ...workspacePayload(RENAMED_PATH, OLD_HTML),
+          projectId: "project_old",
+          documentId: "document_old",
+          sourcePath: RENAMED_PATH,
+          project: { displayName: "renamed" },
+        };
+      },
+    },
+    projectOpen: {
+      async renameSource(payload) {
+        renamePayload = payload;
+        return {
+          operationId: payload.operationId,
+          previousSourcePath: OLD_PATH,
+          sourcePath: RENAMED_PATH,
+          sha256: sha256(OLD_HTML),
+          stem: "renamed",
+          lastModifiedAt: "2026-08-12T00:00:00.000Z",
+        };
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+
+  const outcome = await harness.workflow.renameSource({ stem: "renamed" });
+
+  assert.equal(outcome.status, "succeeded");
+  assert.deepEqual(renamePayload, {
+    operationId: renamePayload.operationId,
+    sourcePath: OLD_PATH,
+    stem: "renamed",
+    expectedSha256: sha256(OLD_HTML),
+  });
+  assert.equal(harness.projectSession.context?.sourcePath, RENAMED_PATH);
+  assert.equal(harness.projectSession.context?.projectId, "project_old");
+  assert.equal(harness.documentSession.sourceSha256, sha256(OLD_HTML));
+  assert.equal(harness.runSession.snapshot.activeSourcePath, RENAMED_PATH);
+  assert.equal(harness.documentWorkflow.resetCount, 1);
+  assert.equal(harness.commentWorkflow.resetCount, 1);
+  assert.ok(harness.unlockCount >= 1);
+});
+
+test("source rename reconciles a lost desktop response only against the expected new file identity", async (t) => {
+  let renameCount = 0;
+  const harness = createHarness({
+    bridge: {
+      async workspace(sourcePath) {
+        return {
+          ...workspacePayload(sourcePath, OLD_HTML),
+          projectId: "project_old",
+          documentId: "document_old",
+          sourcePath,
+        };
+      },
+    },
+    projectOpen: {
+      async renameSource() {
+        renameCount += 1;
+        throw new Error("desktop response lost");
+      },
+      async getActive() {
+        return {
+          name: "project-workflow-renamed.html",
+          sourcePath: RENAMED_PATH,
+          html: OLD_HTML,
+          sha256: sha256(OLD_HTML),
+        };
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+
+  const first = harness.workflow.renameSource({ stem: "project-workflow-renamed" });
+  const second = harness.workflow.renameSource({ stem: "project-workflow-renamed" });
+  assert.equal(first, second);
+  const outcome = await first;
+
+  assert.equal(outcome.status, "succeeded");
+  assert.equal(renameCount, 1);
+  assert.equal(harness.projectSession.context?.sourcePath, RENAMED_PATH);
+});
+
+test("a late source rename result cannot rebase a newer project Session", async (t) => {
+  let resolveRename;
+  let renamePayload;
+  const harness = createHarness({
+    projectOpen: {
+      renameSource(payload) {
+        renamePayload = payload;
+        return new Promise((resolve) => {
+          resolveRename = resolve;
+        });
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+
+  const pending = harness.workflow.renameSource({ stem: "renamed" });
+  await waitFor(() => Boolean(resolveRename));
+  harness.projectSession.openLocator(B_PATH);
+  harness.documentSession.reset({ html: B_HTML, sourceSha256: sha256(B_HTML) });
+  resolveRename({
+    operationId: renamePayload.operationId,
+    previousSourcePath: OLD_PATH,
+    sourcePath: RENAMED_PATH,
+    sha256: sha256(OLD_HTML),
+    stem: "renamed",
+  });
+
+  const outcome = await pending;
+  assert.equal(outcome.status, "stale");
+  assert.equal(harness.projectSession.sourcePath, B_PATH);
+  assert.equal(harness.runSession.snapshot.activeSourcePath, OLD_PATH);
+});
+
+test("a pending source rename blocks another project transition at the workflow boundary", async (t) => {
+  let resolveRename;
+  const harness = createHarness({
+    projectOpen: {
+      renameSource(payload) {
+        return new Promise((resolve) => {
+          resolveRename = () => resolve({
+            operationId: payload.operationId,
+            previousSourcePath: OLD_PATH,
+            sourcePath: RENAMED_PATH,
+            sha256: sha256(OLD_HTML),
+            stem: "renamed",
+          });
+        });
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+
+  const rename = harness.workflow.renameSource({ stem: "renamed" });
+  await waitFor(() => Boolean(resolveRename));
+  const transition = await harness.workflow.prepareSwitch();
+
+  assert.deepEqual(transition, {
+    status: "blocked",
+    code: "PROJECT_SWITCH_BLOCKED",
+    reason: "正在安全修改 HTML 文件名，请等待本次操作完成后再继续。",
+  });
+  resolveRename();
+  assert.equal((await rename).status, "succeeded");
 });

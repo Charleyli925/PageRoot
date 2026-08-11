@@ -74,11 +74,41 @@ function initialSnapshot(externalFileOpenSession, projectApplicationSession) {
       error: null,
     }),
     switch: Object.freeze({ phase: "idle", operationId: null }),
+    rename: Object.freeze({ phase: "idle", operationId: null }),
     open: Object.freeze({ phase: "idle", operationId: null, pendingKind: null }),
     close: Object.freeze({ phase: "idle", requestId: null }),
     externalOpen: externalFileOpenSession.snapshot,
     projectApplication: projectApplicationSession.snapshot,
   });
+}
+
+function sourceFileName(sourcePath) {
+  const value = String(sourcePath || "");
+  const separator = Math.max(value.lastIndexOf("/"), value.lastIndexOf("\\"));
+  return value.slice(separator + 1);
+}
+
+function sourceExtension(sourcePath) {
+  return sourceFileName(sourcePath).match(/(\.html?)$/iu)?.[1] || "";
+}
+
+function normalizedRenameStem(value, sourcePath) {
+  const extension = sourceExtension(sourcePath);
+  let stem = String(value || "").normalize("NFC").trim();
+  if (extension && stem.toLowerCase().endsWith(extension.toLowerCase())) {
+    stem = stem.slice(0, -extension.length).trim();
+  }
+  return stem;
+}
+
+function documentIsStable(session) {
+  return Boolean(
+    session
+    && !session.pendingWrite
+    && !session.flushPromise
+    && session.persistState === "idle"
+    && session.editRevision === session.lastPersistedRevision
+  );
 }
 
 function projectErrorCode(cause, fallback) {
@@ -127,6 +157,7 @@ export class ProjectWorkflow {
   #applicationSequence = 0;
   #pendingOpen = null;
   #browserOpenOperationId = null;
+  #renamePromise = null;
   #reconcileScheduled = false;
   #disposed = false;
   #closeLifecycle = {
@@ -209,6 +240,9 @@ export class ProjectWorkflow {
     if (
       !documentWorkflow
       || typeof documentWorkflow.flush !== "function"
+      || typeof documentWorkflow.enqueueEdit !== "function"
+      || typeof documentWorkflow.clearRecovery !== "function"
+      || typeof documentWorkflow.resetForProjectTransition !== "function"
       || typeof documentWorkflow.captureProjectTransitionAuthority !== "function"
       || typeof documentWorkflow.restoreProjectTransitionAuthority !== "function"
     ) {
@@ -1012,6 +1046,288 @@ export class ProjectWorkflow {
     }
   }
 
+  renameSource({ stem, deadlineAt } = {}) {
+    if (this.#disposed) {
+      return Promise.resolve(blocked(
+        "PROJECT_WORKFLOW_DISPOSED",
+        "项目工作流已经停止。",
+      ));
+    }
+    if (this.#renamePromise) return this.#renamePromise;
+    const operation = this.#runSourceRename({ stem, deadlineAt });
+    this.#renamePromise = operation;
+    operation.finally(() => {
+      if (this.#renamePromise === operation) this.#renamePromise = null;
+    }).catch(() => {
+      // #runSourceRename always converts failures to typed outcomes.
+    });
+    return operation;
+  }
+
+  async #runSourceRename({ stem, deadlineAt } = {}) {
+    const context = this.#projectSession.context;
+    const previousSourcePath = context?.sourcePath || "";
+    const expectedSha256 = this.#documentSession.sourceSha256;
+    const requestedStem = normalizedRenameStem(stem, previousSourcePath);
+    const operationId = this.#nextOperationId("source-rename");
+    const renameDeadline = Number(deadlineAt) || Date.now() + SWITCH_DEADLINE_MS;
+    let canvasFrozen = false;
+    let renameCommitted = false;
+    try {
+      if (!context || !this.#projectSession.matches(context)) {
+        return blocked("SOURCE_RENAME_CONTEXT_REQUIRED", "当前项目身份尚未完成初始化。");
+      }
+      if (!previousSourcePath || !expectedSha256 || !SHA256.test(expectedSha256)) {
+        return blocked("SOURCE_RENAME_SOURCE_REQUIRED", "当前源 HTML 尚未形成可验证的文件身份。");
+      }
+      if (!requestedStem) {
+        return rejected("SOURCE_RENAME_STEM_REQUIRED", "请输入新的 HTML 文件名。");
+      }
+      if (this.#runSession.activeLocked) {
+        return blocked("SOURCE_RENAME_RUN_LOCKED", "当前 AI 任务仍在处理，不能修改文件名。");
+      }
+      if (this.projectHydrating || this.projectLoadError || this.#legacyPort.isHistoryView()) {
+        return blocked("SOURCE_RENAME_VIEW_UNAVAILABLE", "当前视图尚未形成可安全重命名的源页面。");
+      }
+      if (typeof this.#projectOpenPort.renameSource !== "function") {
+        return blocked("SOURCE_RENAME_UNAVAILABLE", "当前运行环境不能安全修改 HTML 文件名。");
+      }
+
+      const currentStem = sourceFileName(previousSourcePath)
+        .slice(0, Math.max(0, sourceFileName(previousSourcePath).length - sourceExtension(previousSourcePath).length))
+        .normalize("NFC");
+      if (requestedStem === currentStem) {
+        return succeeded({ context, unchanged: true, sourcePath: previousSourcePath });
+      }
+
+      const committed = this.#canvasPort.fencePendingEdit?.({
+        resumeEditing: true,
+        trigger: "project-rename",
+      });
+      if (!committed || !committed.ok) {
+        return blocked(
+          "SOURCE_RENAME_NATIVE_EDIT_PENDING",
+          String(committed?.reason || "请先完成当前文字输入，再修改文件名。"),
+        );
+      }
+      if (
+        committed.html !== this.#documentSession.html
+        || committed.pendingMutation
+      ) {
+        const enqueued = this.#documentWorkflow.enqueueEdit({
+          html: committed.html,
+          mutation: committed.pendingMutation || undefined,
+          context,
+        });
+        if (enqueued.status !== "succeeded") {
+          return this.#dependencyOutcome(
+            enqueued,
+            context,
+            "SOURCE_RENAME_DOCUMENT_EDIT_REJECTED",
+            "当前文字尚未安全进入源 HTML 写回队列。",
+          );
+        }
+      }
+
+      const drained = await this.#drainCoordinator.drain("switch", {
+        deadlineAt: renameDeadline,
+      });
+      if (!drained.ok) {
+        return blocked(
+          "SOURCE_RENAME_DRAIN_INCOMPLETE",
+          String(drained.reason || "当前项目尚未完成安全保存。"),
+        );
+      }
+      if (
+        this.#disposed
+        || !this.#projectSession.matches(context)
+        || !this.#codecs.sameSourcePath(this.#projectSession.sourcePath, previousSourcePath)
+        || this.#documentSession.sourceSha256 !== expectedSha256
+        || !documentIsStable(this.#documentSession)
+        || this.#documentWorkflow.hasHistoryAction
+      ) {
+        return stale(context);
+      }
+
+      const frozen = this.#canvasPort.freeze(
+        "编辑画布尚未完成安全收口，不能修改文件名。",
+      );
+      if (!frozen?.ok) {
+        return blocked(
+          "SOURCE_RENAME_CANVAS_FENCE_REJECTED",
+          String(frozen?.reason || "编辑画布尚未完成安全收口。"),
+        );
+      }
+      canvasFrozen = true;
+      if (
+        frozen.html !== this.#documentSession.html
+        || frozen.pendingMutation
+      ) {
+        const enqueued = this.#documentWorkflow.enqueueEdit({
+          html: frozen.html,
+          mutation: frozen.pendingMutation || undefined,
+          context,
+        });
+        if (enqueued.status !== "succeeded") {
+          return this.#dependencyOutcome(
+            enqueued,
+            context,
+            "SOURCE_RENAME_FINAL_EDIT_REJECTED",
+            "刚刚的文字输入没有安全写入源 HTML。",
+          );
+        }
+        return blocked(
+          "SOURCE_RENAME_FINAL_EDIT_QUEUED",
+          "刚刚还有文字输入，源页正在安全保存，请稍后再试。",
+        );
+      }
+
+      this.#setRename("renaming", operationId);
+      let result;
+      try {
+        result = await this.#projectOpenPort.renameSource({
+          operationId,
+          sourcePath: previousSourcePath,
+          stem: requestedStem,
+          expectedSha256,
+        });
+      } catch (cause) {
+        const active = typeof this.#projectOpenPort.getActive === "function"
+          ? await this.#projectOpenPort.getActive().catch(() => null)
+          : null;
+        const expectedFileName = `${requestedStem}${sourceExtension(previousSourcePath)}`;
+        if (
+          !active
+          || active.sha256 !== expectedSha256
+          || sourceFileName(active.sourcePath).normalize("NFC")
+            !== expectedFileName.normalize("NFC")
+        ) throw cause;
+        result = {
+          ...active,
+          operationId,
+          previousSourcePath,
+          fileName: expectedFileName,
+          stem: requestedStem,
+          extension: sourceExtension(previousSourcePath),
+          renamed: true,
+          replayed: true,
+          workspaceRelinked: false,
+        };
+      }
+      if (
+        !result
+        || String(result.operationId || "") !== operationId
+        || !this.#codecs.sameSourcePath(result.previousSourcePath, previousSourcePath)
+        || String(result.sha256 || "") !== expectedSha256
+        || !String(result.sourcePath || "")
+      ) {
+        throw new Error("重命名结果与当前文件身份不一致。");
+      }
+      renameCommitted = true;
+      if (
+        this.#disposed
+        || !this.#projectSession.matches(context)
+        || this.#documentSession.sourceSha256 !== expectedSha256
+      ) return stale(context);
+
+      const nextSourcePath = String(result.sourcePath);
+      this.#runSession.rebaseSource({
+        previousSourcePath,
+        sourcePath: nextSourcePath,
+        projectId: context.projectId,
+      });
+      const transitioned = this.#projectSession.transitionSource({
+        previousSourcePath,
+        sourcePath: nextSourcePath,
+        projectId: context.projectId,
+        documentId: context.documentId,
+      });
+      if (!transitioned || !this.#projectSession.context) {
+        throw new Error("文件已重命名，但当前项目身份已经变化。");
+      }
+      this.#documentSession.publishAuthority({
+        html: this.#documentSession.html,
+        sourceSha256: expectedSha256,
+        pendingWrite: null,
+      });
+      this.#documentWorkflow.clearRecovery({
+        documentId: context.documentId,
+        sourcePath: previousSourcePath,
+      });
+      this.#documentWorkflow.resetForProjectTransition();
+      this.#commentWorkflow.resetForProjectTransition();
+
+      const [recents, hydrated] = await Promise.all([
+        this.refreshRecents(),
+        this.refreshWorkspace({
+          sourcePath: nextSourcePath,
+          epoch: transitioned.epoch,
+          fromDeferred: true,
+        }),
+      ]);
+      if (recents.status !== "succeeded" || hydrated.status !== "succeeded") {
+        return unknown(
+          operationId,
+          "文件名已经修改，但项目状态还没有完成刷新。",
+        );
+      }
+      const nextContext = this.#projectSession.context;
+      if (!nextContext || !this.#codecs.sameSourcePath(nextContext.sourcePath, nextSourcePath)) {
+        return stale(transitioned);
+      }
+      this.#emit({
+        type: "project-source-renamed",
+        context: nextContext,
+        operationId,
+        previousSourcePath,
+        sourcePath: nextSourcePath,
+        projectName: String(result.stem || requestedStem),
+        lastModifiedAt: result.lastModifiedAt ? String(result.lastModifiedAt) : null,
+      });
+      return succeeded({
+        context: nextContext,
+        sourcePath: nextSourcePath,
+        projectName: String(result.stem || requestedStem),
+        lastModifiedAt: result.lastModifiedAt ? String(result.lastModifiedAt) : null,
+      });
+    } catch (cause) {
+      const reason = projectErrorMessage(
+        this.#codecs,
+        cause,
+        renameCommitted
+          ? "文件名已经修改，但项目状态还没有完成刷新。"
+          : "文件名没有修改，请检查名称后重试。",
+      );
+      if (renameCommitted) {
+        this.#emit({
+          type: "project-source-rename-unknown",
+          context,
+          operationId,
+          reason,
+        });
+        return unknown(operationId, reason);
+      }
+      return this.#outcomeFromCause(
+        operationId,
+        cause,
+        "SOURCE_RENAME_REJECTED",
+        reason,
+      );
+    } finally {
+      if (canvasFrozen) {
+        this.#setRename("idle", null);
+        const unlock = () => {
+          if (!this.#disposed) this.#canvasPort.unlock?.();
+        };
+        if (typeof this.#canvasPort.requestFrame === "function") {
+          this.#canvasPort.requestFrame(unlock);
+        } else {
+          unlock();
+        }
+      }
+    }
+  }
+
   #registerDrainObligations() {
     this.#drainCoordinator.replace("external-file-open", {
       label: "等待外部 HTML 打开完成",
@@ -1062,12 +1378,25 @@ export class ProjectWorkflow {
     });
     this.#drainCoordinator.replace("view-transition", {
       label: "等待页面切换完成",
-      inspect: (boundary) => (
-        this.#legacyPort.isViewTransitioning() && boundary !== "history"
-      ) ? {
-        state: "blocked",
-        reason: "正在核对历史或当前 HTML，请等待本次切换完成后再继续。",
-      } : { state: "resolved" },
+      inspect: (boundary) => {
+        // A source rename owns the final Canvas fence while its desktop
+        // transaction is unresolved. This must be an Application fact rather
+        // than depending on the asynchronous React projection of the
+        // workflow snapshot; otherwise a close or project switch could slip
+        // between the desktop call and the next presentation render.
+        if (this.#snapshot.rename.phase !== "idle") {
+          return {
+            state: "blocked",
+            reason: "正在安全修改 HTML 文件名，请等待本次操作完成后再继续。",
+          };
+        }
+        return this.#legacyPort.isViewTransitioning() && boundary !== "history"
+          ? {
+              state: "blocked",
+              reason: "正在核对历史或当前 HTML，请等待本次切换完成后再继续。",
+            }
+          : { state: "resolved" };
+      },
     });
     this.#drainCoordinator.replace("submission", {
       label: "等待本轮提交准备结束",
@@ -2212,6 +2541,19 @@ export class ProjectWorkflow {
     });
   }
 
+  #dependencyOutcome(outcome, identity, fallbackCode, fallbackReason) {
+    if (outcome?.status === "stale") return stale(identity);
+    if (outcome?.status === "unknown") {
+      return unknown(outcome.operationId || this.#nextOperationId("source-rename"), (
+        outcome.reason || fallbackReason
+      ));
+    }
+    if (outcome?.status === "rejected") {
+      return rejected(outcome.code || fallbackCode, outcome.reason || fallbackReason);
+    }
+    return blocked(outcome?.code || fallbackCode, outcome?.reason || fallbackReason);
+  }
+
   #setHydration({ phase, epoch, sourcePath, error }) {
     if (phase === "hydrating") this.#hydrationGeneration += 1;
     this.#snapshot = Object.freeze({
@@ -2231,6 +2573,14 @@ export class ProjectWorkflow {
     this.#snapshot = Object.freeze({
       ...this.#snapshot,
       switch: Object.freeze({ phase, operationId }),
+    });
+    this.#notify();
+  }
+
+  #setRename(phase, operationId) {
+    this.#snapshot = Object.freeze({
+      ...this.#snapshot,
+      rename: Object.freeze({ phase, operationId }),
     });
     this.#notify();
   }

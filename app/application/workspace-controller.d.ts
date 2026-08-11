@@ -318,6 +318,16 @@ export class WorkspaceController {
     context?: ProjectContext;
   }): Promise<ProjectWorkflowOutcome<{ opened: boolean }>>;
   refreshRecentProjects(): Promise<ProjectWorkflowOutcome<{ projects: unknown[] }>>;
+  renameProjectSource(input: {
+    stem: string;
+    deadlineAt?: number;
+  }): Promise<ProjectWorkflowOutcome<{
+    context: ProjectContext;
+    sourcePath: string;
+    projectName?: string;
+    lastModifiedAt?: string | null;
+    unchanged?: boolean;
+  }>>;
   submitRequest(input?: {
     projectName?: string;
     previousVersionId?: string | null;

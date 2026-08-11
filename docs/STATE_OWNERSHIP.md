@@ -9,7 +9,8 @@
 | Registered mutation context resolution and atomic-replacement source observation | Bridge project-context service | project/document registry graph plus the owning runtime `pendingWrite` target Hash | Bridge mutation routes and `/project/ensure` |
 | Registration operation identity, single-flight, stale-result fence and cross-Session publication sequence | `WorkspaceController` workflow owner during staged migration | none; it publishes through existing Project, Document, Comment, Draft, Version and SourceHistory owners | Workbench commands and presentation-event adapter |
 | Project hydration generation and load outcome, switch/open operation, accepted-result execution, close request identity, project-switch publication, and the narrow generated-source prepare/commit handoff | Renderer `ProjectWorkflow`, composed by `WorkspaceController` | none; it publishes through existing Session owners and trusted ProjectOpen/Canvas ports | Workbench commands and presentation-event adapter |
-| Explicit source filename transition, pending operation and active/recent path rebase | Desktop source-rename transaction | active-file `pendingRename` / `lastRename`, then filesystem path | project session, Bridge relink, views |
+| Durable source filename transaction, pending operation and active/recent path rebase | Desktop source-rename transaction | active-file `pendingRename` / `lastRename`, then filesystem path | trusted desktop rename port and Bridge relink |
+| Renderer source-rename operation, expected Hash/context fence, lost-response reconciliation and synchronous Project/Document/Run publication | `ProjectWorkflow`, composed by `WorkspaceController` | none; it publishes through the existing Session owners after the desktop transaction validates | Workbench filename intent and presentation-event adapter |
 | Current source bytes, Hash, edit revision, persistence projection, pending write, single-flight source flush, Canvas authority generation and exact-byte boundary reconciliation | Renderer `DocumentSession` | source HTML, runtime autosave record and recovery log; the generation itself is disposable | Canvas, preview readiness, source-history session and drain coordinator |
 | Current-source commit/recovery WAL, same-directory atomic replacement, acknowledged source-history application, project/runtime settlement and exactly-once audit outbox cleanup | Bridge `SourceTransaction` service | source HTML, `history/source-operations.json`, `project.json`, `runtime-state.json` and `pendingWrite` recovery bytes | `/autosave` and `/source-history/action` route adapters, project-context service and restart recovery |
 | Canvas source-history context, pending Patch operations, cursor and applied action IDs | Renderer `SourceHistorySession` for pending intent; Bridge source-history service for acknowledged authority | `history/source-operations.json`, committed with the source through the runtime `pendingWrite` outbox | Canvas, Document session, desktop Edit intent router |
@@ -140,7 +141,11 @@ Rules:
   is discarded and cannot make persistence appear safe.
 - A filename transition never owns HTML bytes or Document identity. It may
   advance the source locator only after the expected source Hash is verified;
-  the project session then adopts the Bridge-confirmed path for the same
+  `ProjectWorkflow` then rebases the existing Run/Project/Document facts as one
+  typed renderer operation. A lost response may reconcile only against the
+  trusted active file's expected path and Hash; a late result is stale and
+  cannot rebase a newer Project context. After validation, the project session
+  adopts the Bridge-confirmed path for the same
   `projectId` and `documentId`.
 - Runtime features are declared independently. The presence of a project-picker
   API never implies source-edit or attachment-persistence authority.

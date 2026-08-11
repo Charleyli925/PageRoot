@@ -235,7 +235,8 @@ they do not import application services.
 | Late query rejection and monotonic draft reads | `app/application/project-query-fence.js` |
 | Crash-only browser recovery | `app/application/recovery-store.js` |
 | Renderer, project-picker, attachment, interactive-preview and close capabilities | `app/application/runtime-capabilities.js` |
-| Same-directory source rename, operation journal and active/recent path rebase | `desktop/source-rename.mjs` |
+| Same-directory source rename, operation journal and durable active/recent path rebase | `desktop/source-rename.mjs` |
+| Renderer source-rename operation, Hash/identity fence, lost-response reconciliation and synchronous Project/Document/Run publication | `app/application/project-workflow.js` through its narrow `ProjectOpenPort.renameSource` |
 | Known-source Finder reveal | narrow project IPC in `desktop/main.mjs` |
 | Validated default-browser HTML launch | `desktop/open-in-default-browser.mjs`, behind `desktop/project-ipc-security.mjs` sender authority |
 | Pseudonymous identity, strict event schemas, local queue and PostHog delivery | `desktop/usage-telemetry.mjs` |
@@ -352,6 +353,16 @@ reconciles the prepared operation from the old/new paths and expected Hash.
 The Bridge's existing physical-file identity relink keeps
 the same Project and Document and updates only canonical `sourcePath` and
 display name; no Version is created.
+
+After the desktop transaction returns a complete identity, `ProjectWorkflow`
+owns the renderer-side transition. It first drains the existing source, draft,
+attachment and rule obligations, fences the native Canvas, and captures the
+current Project context plus source Hash. A lost desktop response is reconciled
+only through the trusted active-project port when the expected renamed filename
+and Hash both match. It then synchronously rebases `RunSession`, advances
+`ProjectSession`, publishes `DocumentSession`, clears stale recovery state and
+refreshes canonical workspace authority. A late result never mutates a newer
+Project context; no generic desktop executor or duplicate Session fact is used.
 
 When no desktop project can be restored, the main process provisions the built-in welcome content once as a regular HTML source beside the selected workspace and immediately registers its initial V1 through the authenticated Bridge. Existing welcome bytes are never replaced on startup. From that point onward it uses the same source, comment, Request, handoff and Version boundaries as any user-opened HTML.
 

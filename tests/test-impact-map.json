@@ -449,6 +449,7 @@
         "tests/drain-coordinator.test.mjs",
         "tests/desktop-close-recovery.test.mjs",
         "tests/external-file-open.test.mjs",
+        "tests/source-rename.test.mjs",
         "tests/version-workflow.test.mjs"
       ]
     },
@@ -659,7 +660,11 @@
         "^app/workbench/(?:browser-io|comment-model|project-model|record-model|types)\\.ts$"
       ],
       "suites": ["typecheck", "browser-smoke", "electron-smoke", "ai-smoke"],
-      "nodeTests": ["tests/architecture-boundaries.test.mjs"]
+      "nodeTests": [
+        "tests/architecture-boundaries.test.mjs",
+        "tests/project-workflow.test.mjs",
+        "tests/source-rename.test.mjs"
+      ]
     },
     {
       "id": "workbench-audit-events",
