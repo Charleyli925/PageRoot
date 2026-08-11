@@ -522,16 +522,22 @@ export class ProjectWorkflow {
       );
     }
     if (kind === "startup") return this.#openStartup();
-    const switchOutcome = await this.prepareSwitch({ fromDeferred });
-    if (switchOutcome.status !== "succeeded") {
-      this.#pendingOpen = Object.freeze({ kind, sourcePath: sourcePath || null });
-      this.#setOpen("deferred", null, kind);
-      return switchOutcome;
-    }
-    this.#pendingOpen = null;
     const operationId = this.#nextOpenOperation();
     this.#setOpen("opening", operationId, null);
     try {
+      const switchOutcome = await this.prepareSwitch({ fromDeferred });
+      if (this.#snapshot.close.phase === "ready") {
+        return blocked(
+          "PROJECT_OPEN_CLOSE_COMMITTED",
+          "当前窗口正在关闭，没有接收新的 HTML。",
+        );
+      }
+      if (switchOutcome.status !== "succeeded") {
+        this.#pendingOpen = Object.freeze({ kind, sourcePath: sourcePath || null });
+        this.#setOpen("deferred", null, kind);
+        return switchOutcome;
+      }
+      this.#pendingOpen = null;
       if (
         kind === "local"
         && this.#projectOpenPort.mode() === "browser-file"
@@ -579,7 +585,9 @@ export class ProjectWorkflow {
       });
       return rejected(projectErrorCode(cause, "PROJECT_OPEN_REJECTED"), reason);
     } finally {
-      this.#setOpen("idle", null, this.#pendingOpen?.kind || null);
+      if (this.#snapshot.open.operationId === operationId) {
+        this.#setOpen("idle", null, this.#pendingOpen?.kind || null);
+      }
     }
   }
 

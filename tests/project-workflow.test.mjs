@@ -675,6 +675,40 @@ test("close drains an in-flight local picker before it commits", async (t) => {
   assert.equal(harness.workflow.getSnapshot().close.phase, "ready");
 });
 
+test("close drains project switch preparation before it commits", async (t) => {
+  let resolveCanvas;
+  const harness = createHarness();
+  t.after(() => harness.workflow.dispose());
+  harness.documentWorkflow.ensureCurrentCanvas = () => new Promise((resolve) => {
+    resolveCanvas = () => resolve(succeeded({ ready: true }));
+  });
+
+  const opening = harness.workflow.openProject({ kind: "local" });
+  await waitFor(
+    () => Boolean(resolveCanvas) && harness.workflow.getSnapshot().open.phase === "opening",
+    "project switch preparation did not enter the open operation",
+  );
+  let closeSettled = false;
+  const closing = harness.workflow.prepareClose({
+    requestId: "close_pending_switch_preparation",
+    deadlineAt: Date.now() + 2_000,
+  }).then((outcome) => {
+    closeSettled = true;
+    return outcome;
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  assert.equal(closeSettled, false);
+  assert.equal(harness.workflow.getSnapshot().close.phase, "preparing");
+
+  resolveCanvas();
+  const [opened, readiness] = await Promise.all([opening, closing]);
+  assert.equal(opened.status, "succeeded");
+  assert.equal(opened.value.opened, false);
+  assert.deepEqual(readiness, { ready: true });
+  assert.equal(harness.workflow.getSnapshot().close.phase, "ready");
+});
+
 test("close drains an in-flight startup active-project read before it commits", async (t) => {
   let resolveActive;
   const harness = createHarness({
