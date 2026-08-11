@@ -756,18 +756,11 @@ export class VersionWorkflow {
     });
     if (!context || !this.#projectSession.matches(context)) return stale(this.#runIdentity(run));
 
+    await this.#canvasPort.verifyRendered(content, versionSha256, context);
+    if (!this.#projectSession.matches(context)) return stale(context);
+
     this.#documentWorkflow.clearAudit();
     this.#documentSession.setPersistence({ state: "idle", error: "" });
-    let verificationWarning = "";
-    try {
-      await this.#canvasPort.verifyRendered(content, versionSha256, context);
-      if (!this.#projectSession.matches(context)) return stale(context);
-    } catch (cause) {
-      verificationWarning = this.#codecs.errorMessage(
-        cause,
-        "新版本已经提交，但画布尚未完成内容核对。",
-      );
-    }
 
     this.#commentWorkflow.resetForProjectTransition();
     this.#commentSession.reset();
@@ -800,7 +793,6 @@ export class VersionWorkflow {
       aiCompletedAt: completion.aiCompletedAt,
       committedSourcePath,
       lastModifiedAt,
-      verificationWarning,
       refreshWarning,
     });
   }

@@ -363,6 +363,31 @@ test("activation validates all content and synchronously publishes Project, Docu
   assert.equal(harness.calls.resetComments, 1);
 });
 
+test("activation keeps the Canvas locked when rendered-byte verification fails", async () => {
+  const harness = createHarness({
+    verifyRendered: async (html) => {
+      if (html === CANDIDATE_HTML) throw new Error("canvas did not acknowledge candidate");
+    },
+  });
+  const run = readyRun();
+  harness.runSession.trackRun(run, { activate: "always" });
+
+  const outcome = await harness.workflow.activateReadyVersion({ run });
+
+  assert.equal(outcome.status, "rejected");
+  assert.equal(harness.calls.activate, 1);
+  assert.equal(harness.calls.commit.length, 1);
+  assert.equal(harness.documentSession.html, CANDIDATE_HTML);
+  assert.equal(harness.versionSession.snapshot.currentExactVersionId, "ver_0002");
+  assert.equal(harness.runSession.activeRun?.status, "ready-to-open");
+  assert.equal(harness.runSession.activeLocked, true);
+  assert.equal(harness.calls.unlock, 0);
+  assert.equal(harness.calls.clearAudit, 0);
+  assert.equal(harness.calls.resetComments, 0);
+  assert.equal(harness.calls.queueDraft, 0);
+  assert.equal(harness.calls.refresh.length, 0);
+});
+
 test("activation rejects completion/version hash drift before publishing current source", async () => {
   const harness = createHarness({
     activation: async (input) => ({
