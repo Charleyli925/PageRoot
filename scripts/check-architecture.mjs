@@ -30,12 +30,10 @@ const RETIRED_WORKBENCH_COMMENT_AUTHORITIES =
   /\b(?:commentsRef|changeEventsRef|deletedCommentIdsRef|composerDraftRef|composerCommentIdRef|composerAttachmentsRef|draftTargetRef|commentEditSessionRef)\b/;
 const RETIRED_WORKBENCH_COMMENT_WORKFLOW_OWNERS =
   /\b(?:handleDraftSessionEvent|flushDraftPersistence|persistDraftRecovery|persistCurrentDraftRecovery|attachmentUploadCountRef|draftRecoveryOperationIdRef|deleteAttachmentFile)\b/;
-const WORKBENCH_BRIDGE_CALL_ALLOWLIST = new Map([
-  ["source", 2],
-  ["versionFile", 3],
-  ["activateReadyVersion", 1],
-]);
-const WORKBENCH_BRIDGE_CALL_LIMIT = 6;
+// PR-6 closes the final View-to-Bridge migration budget. PR-7 removes this
+// transitional accounting shape altogether and forbids the client import too.
+const WORKBENCH_BRIDGE_CALL_ALLOWLIST = new Map();
+const WORKBENCH_BRIDGE_CALL_LIMIT = 0;
 const RETIRED_WORKBENCH_PROJECT_WORKFLOW_OWNERS =
   /\b(?:drainCoordinatorRef|externalFileOpenSessionRef|projectApplicationSessionRef|projectHydratingRef|projectLoadErrorRef|pendingProjectOpenRef|closeLifecycleRef|projectOpenRequestRef|applyProject|prepareProjectSwitch|applyAcceptedProject|enqueueAcceptedProject|openExternalProject)\b/;
 
@@ -300,6 +298,15 @@ export async function architectureViolations() {
     ),
     "utf8",
   );
+  const versionWorkflow = await readFile(
+    path.join(
+      PRODUCT_ROOT,
+      "app",
+      "application",
+      "version-workflow.js",
+    ),
+    "utf8",
+  );
   if (
     !workspaceController.includes("export class WorkspaceController")
     || !workspaceController.includes("ensureRegistered({")
@@ -384,19 +391,19 @@ export async function architectureViolations() {
     bridgeCallCounts.set(method, (bridgeCallCounts.get(method) || 0) + 1);
     if (!WORKBENCH_BRIDGE_CALL_ALLOWLIST.has(method)) {
       violations.push(
-        `app/workbench.tsx: Bridge call ${method} is outside the PR-5 migration allowlist`,
+        `app/workbench.tsx: Bridge call ${method} is outside the PR-6 migration allowlist`,
       );
     }
   }
   if (bridgeCalls.length > WORKBENCH_BRIDGE_CALL_LIMIT) {
     violations.push(
-      `app/workbench.tsx: PR-5 allows at most ${WORKBENCH_BRIDGE_CALL_LIMIT} direct Bridge calls`,
+      `app/workbench.tsx: PR-6 allows at most ${WORKBENCH_BRIDGE_CALL_LIMIT} direct Bridge calls`,
     );
   }
   for (const [method, limit] of WORKBENCH_BRIDGE_CALL_ALLOWLIST) {
     if ((bridgeCallCounts.get(method) || 0) > limit) {
       violations.push(
-        `app/workbench.tsx: Bridge call ${method} exceeds its PR-5 migration allowance of ${limit}`,
+        `app/workbench.tsx: Bridge call ${method} exceeds its PR-6 migration allowance of ${limit}`,
       );
     }
   }
@@ -590,9 +597,68 @@ export async function architectureViolations() {
       );
     }
   }
-  if (!/\.drainBoundary\("history"/.test(workbench)) {
+  if (
+    !versionWorkflow.includes('this.#projectWorkflow.drain("history"')
+    || !workbench.includes(".viewHistory({ version, context")
+  ) {
     violations.push(
-      "app/workbench.tsx: history must delegate to the Controller DrainCoordinator",
+      "app/application/version-workflow.js: history must delegate to the Controller DrainCoordinator",
+    );
+  }
+
+  if (
+    !workspaceController.includes("import { VersionWorkflow }")
+    || !workspaceController.includes("this.#versionWorkflow = new VersionWorkflow({")
+    || !workspaceController.includes("version: this.#versionSnapshot")
+    || !workspaceController.includes("prepareReviewCandidate(input)")
+    || !workspaceController.includes("activateReadyVersion(input)")
+    || !workspaceController.includes("viewHistory(input)")
+    || !workspaceController.includes("returnToCurrent(input)")
+    || !workspaceController.includes("this.#versionWorkflow?.dispose()")
+  ) {
+    violations.push(
+      "app/application/workspace-controller.js: PR-6 must compose VersionWorkflow, expose its commands, project navigation state and dispose it",
+    );
+  }
+  if (
+    !versionWorkflow.includes("export class VersionWorkflow")
+    || !versionWorkflow.includes("async prepareReviewCandidate({ run }")
+    || !versionWorkflow.includes("async activateReadyVersion({")
+    || !versionWorkflow.includes("async openCommittedVersion({")
+    || !versionWorkflow.includes("async viewHistory({")
+    || !versionWorkflow.includes("async returnToCurrent({")
+    || !versionWorkflow.includes("this.#bridgeClient.versionFile(")
+    || !versionWorkflow.includes("this.#bridgeClient.source(")
+    || !versionWorkflow.includes("this.#bridgeClient.activateReadyVersion({")
+    || !versionWorkflow.includes("this.#projectWorkflow.commitGeneratedSourceTransition({")
+    || !versionWorkflow.includes("#rollbackNavigation(operation, previous)")
+    || /(?:^|\/)(?:workbench|components|desktop)(?:\/|$)|\breact\b/u.test(
+      importedSpecifiers(versionWorkflow).join("\n"),
+    )
+  ) {
+    violations.push(
+      "app/application/version-workflow.js: Version validation, activation, immutable review preparation and rollback navigation must stay in the application boundary",
+    );
+  }
+  if (
+    !projectWorkflow.includes("async prepareGeneratedSourceTransition({")
+    || !projectWorkflow.includes("commitGeneratedSourceTransition({ prepared, html, sourceSha256, publishVersion })")
+  ) {
+    violations.push(
+      "app/application/project-workflow.js: PR-6 Version activation must reuse the synchronous generated-source publication API",
+    );
+  }
+  if (
+    bridgeCalls.length !== 0
+    || !workbench.includes("versionWorkflow: {")
+    || !workbench.includes(".prepareReviewCandidate({ run })")
+    || !workbench.includes(".activateReadyVersion({")
+    || !workbench.includes(".viewHistory({ version, context")
+    || !workbench.includes(".returnToCurrent({ context })")
+    || /\b(?:openCommittedVersion|prepareGeneratedSourceTransition|commitGeneratedSourceTransition|navigationOperationRef|viewTransitioningRef)\b/.test(workbench)
+  ) {
+    violations.push(
+      "app/workbench.tsx: PR-6 Version IO and navigation ownership must delegate to WorkspaceController; Workbench keeps only review presentation and outcome mapping",
     );
   }
 

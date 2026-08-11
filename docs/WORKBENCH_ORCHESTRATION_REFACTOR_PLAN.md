@@ -1,6 +1,6 @@
 # Workbench 应用编排收口执行计划
 
-- 状态：**PR-1 至 PR-4 已合并至 `main`；PR-5 已完成实现与验证，Ready/合并仍须独立授权；PR-6 至 PR-7 尚未授权**
+- 状态：**PR-1 至 PR-5 已合并至 `main`；PR-6 已完成实现与本地验证，交付边界为 Draft PR；PR-7 尚未授权**
 - 规划基线：`main@37bba7779b27c0a42a52f98ec84a377b964bf4eb`
 - 基线 Tree：`0e074849493e5f9db9e89621e0a1c1a4910b8fa1`
 - 基线日期：2026-08-11
@@ -1240,6 +1240,30 @@ identity、Hash、rollback 和 exact Canvas oracle 保持。
   同步顺序需以现有 tests 为 oracle；
 - review preparation 当前读取 candidate HTML，是否与 PR-5 的 background poll 形成
   cancel race，需要 operation identity test 证明。
+
+### 12.8 实施记录（2026-08-12）
+
+- 实施分支 `refactor/version-activation-history-workflow` 从
+  `origin/main@8c4298caad31eec955d741ba21d7749ec12447bf` 开始；本节只实现 PR-6，
+  不提前处理 PR-7 的最终 composition 收口。
+- 新增 `VersionWorkflow`，由 `WorkspaceController` 组合并投影 navigation/review
+  snapshot 与 event。它在明确 activation 之前校验 persisted ready record 的完整
+  project/document/request/attempt/version identity、candidate Hash 与时间戳；随后才
+  执行 Bridge mutation、同步 Project/Document/Version publication，并以完整
+  Document + Version snapshot 回滚失败的 history/current navigation。
+- Workbench 已删除 Version/source Bridge 访问、activation/history navigation Promise
+  与旧 operation ref。Review 继续保留在 presentation：filters/layout、review lease、
+  Canvas review analysis、动画以及 Drawer/Toast 映射；`bridgeClient.*` 直接调用为 0。
+- `ProjectWorkflow` 提供窄的 generated-source prepare/commit publication API，
+  `VersionSession` 仅增加完整 immutable projection snapshot/restore。
+- 新增 Node 覆盖：Review 不激活、late candidate stale fence、activation 的全量
+  identity/hash/time fail-closed 校验、background result 不抢占 Canvas、history rollback
+  byte oracle，以及 return-current 的 canonical source reread/identity 校验。
+- 本地验证已通过：本节指定 Node 集 26/26、`npm run test:ai-closed-loop`、
+  `npm run test:electron:full`、`npm run architecture:check`、`npm run typecheck` 和
+  impact-map selection contract，以及 `npm run task:finish` 的 8/8 task gate（typecheck、
+  lint、167 个 targeted Node、Web/Browser、Desktop/Electron、AI smoke）。现在只可创建
+  Draft PR；不 Ready、不合并、不打 tag、不发布。
 
 ## 13. PR-7：最终 Composition 收口、Aggregate Snapshot 与硬门禁
 

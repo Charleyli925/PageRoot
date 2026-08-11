@@ -242,6 +242,31 @@ test("a file with two direct owners safely unions their coverage", () => {
   ]);
 });
 
+test("version workflow changes retain candidate, history, Canvas and AI coverage", () => {
+  const plan = selectGatePlan({
+    map,
+    lane: "task",
+    changedFiles: ["app/application/version-workflow.js"],
+  });
+  assert.deepEqual(plan.selectedNodeTests, [
+    "tests/architecture-boundaries.test.mjs",
+    "tests/run-session.test.mjs",
+    "tests/version-history-records.test.mjs",
+    "tests/version-session.test.mjs",
+    "tests/version-workflow.test.mjs",
+  ]);
+  assert.deepEqual(suiteIds(plan), [
+    "typecheck",
+    "lint",
+    "node-targeted",
+    "build-web",
+    "browser-smoke",
+    "build-desktop",
+    "electron-smoke",
+    "ai-smoke",
+  ]);
+});
+
 test("delivery contracts select their direct package, verifier and release-architecture owners", () => {
   const packageManifest = selectGatePlan({
     map,

@@ -6,6 +6,7 @@ import { ExternalFileOpenSession } from "./external-file-open-session.js";
 import { ProjectApplicationSession } from "./project-application-session.js";
 import { ProjectWorkflow } from "./project-workflow.js";
 import { RunWorkflow } from "./run-workflow.js";
+import { VersionWorkflow } from "./version-workflow.js";
 import { createWorkspaceControllerCodecs } from "./workspace-controller-codecs.js";
 
 function copyLocator({
@@ -127,15 +128,19 @@ export class WorkspaceController {
   #projectWorkflowUnsubscribe = null;
   #runWorkflow = null;
   #runWorkflowUnsubscribe = null;
+  #versionWorkflow = null;
+  #versionWorkflowUnsubscribe = null;
   #runSessionUnsubscribe = null;
   #registration = registrationSnapshot().registration;
   #projectSnapshot = null;
   #runSnapshot = null;
+  #versionSnapshot = null;
   #snapshot = Object.freeze({
     registration: this.#registration,
     comment: null,
     project: null,
     run: null,
+    version: null,
   });
   #listeners = new Set();
   #eventListeners = new Set();
@@ -157,6 +162,7 @@ export class WorkspaceController {
     commentWorkflow = null,
     projectWorkflow = null,
     runWorkflow = null,
+    versionWorkflow = null,
     clock,
   } = {}) {
     if (!bridgeClient || typeof bridgeClient.ensureProject !== "function") {
@@ -353,6 +359,36 @@ export class WorkspaceController {
       });
       this.#runWorkflow.syncPolling();
     }
+    if (versionWorkflow) {
+      if (!this.#documentWorkflow || !this.#commentWorkflow || !this.#projectWorkflow) {
+        throw new TypeError(
+          "WorkspaceController VersionWorkflow requires Document, Comment and Project workflows.",
+        );
+      }
+      this.#versionWorkflow = new VersionWorkflow({
+        bridgeClient,
+        projectSession,
+        documentSession,
+        versionSession,
+        runSession: versionWorkflow.runSession,
+        projectWorkflow: this.#projectWorkflow,
+        documentWorkflow: this.#documentWorkflow,
+        commentWorkflow: this.#commentWorkflow,
+        commentSession,
+        draftSession,
+        codecs: versionWorkflow.codecs,
+        ports: {
+          hash: this.#hashPort,
+          canvas: versionWorkflow.canvas,
+        },
+        clock,
+      });
+      this.#versionWorkflowUnsubscribe = this.#versionWorkflow.subscribe((snapshot) => {
+        this.#versionSnapshot = snapshot;
+        this.#publishAggregateSnapshot();
+      });
+      this.#versionWorkflow.subscribeEvents((event) => this.#emitEvent(event));
+    }
   }
 
   getSnapshot() {
@@ -382,6 +418,10 @@ export class WorkspaceController {
 
   dispose() {
     this.#disposed = true;
+    this.#versionWorkflowUnsubscribe?.();
+    this.#versionWorkflowUnsubscribe = null;
+    this.#versionWorkflow?.dispose();
+    this.#versionWorkflow = null;
     this.#runSessionUnsubscribe?.();
     this.#runSessionUnsubscribe = null;
     this.#runWorkflowUnsubscribe?.();
@@ -514,6 +554,26 @@ export class WorkspaceController {
 
   resolveRunConflict(input) {
     return this.#requireRunWorkflow().resolveConflict(input);
+  }
+
+  prepareReviewCandidate(input) {
+    return this.#requireVersionWorkflow().prepareReviewCandidate(input);
+  }
+
+  activateReadyVersion(input) {
+    return this.#requireVersionWorkflow().activateReadyVersion(input);
+  }
+
+  openCommittedVersion(input) {
+    return this.#requireVersionWorkflow().openCommittedVersion(input);
+  }
+
+  viewHistory(input) {
+    return this.#requireVersionWorkflow().viewHistory(input);
+  }
+
+  returnToCurrent(input) {
+    return this.#requireVersionWorkflow().returnToCurrent(input);
   }
 
   enqueueDocumentEdit(input) {
@@ -656,6 +716,13 @@ export class WorkspaceController {
     return this.#runWorkflow;
   }
 
+  #requireVersionWorkflow() {
+    if (!this.#versionWorkflow) {
+      throw new Error("版本工作流尚未完成组合。");
+    }
+    return this.#versionWorkflow;
+  }
+
   ensureRegistered({
     sourcePath,
     expectedSourceSha256,
@@ -750,6 +817,7 @@ export class WorkspaceController {
       comment: this.#commentWorkflow?.getSnapshot() || null,
       project: this.#projectSnapshot,
       run: this.#runSnapshot,
+      version: this.#versionSnapshot,
     });
     for (const listener of this.#listeners) {
       try {

@@ -427,6 +427,7 @@
         "tests/draft-session.test.mjs",
         "tests/document-session.test.mjs",
         "tests/version-session.test.mjs",
+        "tests/version-workflow.test.mjs",
         "tests/source-history-session.test.mjs",
         "tests/run-workflow.test.mjs",
         "tests/architecture-boundaries.test.mjs"
@@ -447,7 +448,8 @@
         "tests/project-application-session.test.mjs",
         "tests/drain-coordinator.test.mjs",
         "tests/desktop-close-recovery.test.mjs",
-        "tests/external-file-open.test.mjs"
+        "tests/external-file-open.test.mjs",
+        "tests/version-workflow.test.mjs"
       ]
     },
     {
@@ -476,6 +478,21 @@
       "nodeTests": [
         "tests/run-lifecycle.test.mjs",
         "tests/run-session.test.mjs"
+      ]
+    },
+    {
+      "id": "version-workflow",
+      "patterns": [
+        "^app/application/version-workflow\\.(?:js|d\\.ts)$",
+        "^tests/version-workflow\\.test\\.mjs$"
+      ],
+      "suites": ["typecheck", "browser-smoke", "electron-smoke", "ai-smoke"],
+      "nodeTests": [
+        "tests/version-workflow.test.mjs",
+        "tests/version-session.test.mjs",
+        "tests/version-history-records.test.mjs",
+        "tests/run-session.test.mjs",
+        "tests/architecture-boundaries.test.mjs"
       ]
     },
     {
