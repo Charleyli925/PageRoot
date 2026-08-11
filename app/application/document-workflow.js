@@ -227,6 +227,38 @@ export class DocumentWorkflow {
     return this.#recoveryIdentity;
   }
 
+  captureProjectTransitionAuthority() {
+    return Object.freeze({
+      recoveryIdentity: this.#recoveryIdentity,
+      sourceHistory: this.#sourceHistorySession.snapshot,
+      sourceHistoryOperations: this.#sourceHistorySession.pendingOperations,
+    });
+  }
+
+  restoreProjectTransitionAuthority({
+    authority,
+    context,
+    sourceSha256,
+  } = {}) {
+    this.#recoveryIdentity = authority?.recoveryIdentity || null;
+    const activeContext = copyContext(context);
+    const history = authority?.sourceHistory;
+    if (!activeContext || !this.#isCurrent(activeContext) || !history || !sourceSha256) {
+      this.#sourceHistorySession.deactivate?.();
+      return false;
+    }
+    this.#sourceHistorySession.activate(
+      activeContext,
+      String(sourceSha256),
+      history,
+    );
+    this.#sourceHistorySession.restorePending(
+      activeContext,
+      authority.sourceHistoryOperations,
+    );
+    return true;
+  }
+
   resetForProjectTransition({ clearRecovery = false, context } = {}) {
     this.#clearAutosaveTimer();
     this.#auditPending = [];

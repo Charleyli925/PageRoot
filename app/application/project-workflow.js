@@ -201,7 +201,12 @@ export class ProjectWorkflow {
     if (!projectApplicationSession || typeof projectApplicationSession.enqueue !== "function") {
       throw new TypeError("ProjectWorkflow requires ProjectApplicationSession injection.");
     }
-    if (!documentWorkflow || typeof documentWorkflow.flush !== "function") {
+    if (
+      !documentWorkflow
+      || typeof documentWorkflow.flush !== "function"
+      || typeof documentWorkflow.captureProjectTransitionAuthority !== "function"
+      || typeof documentWorkflow.restoreProjectTransitionAuthority !== "function"
+    ) {
       throw new TypeError("ProjectWorkflow requires DocumentWorkflow composition.");
     }
     if (!drainCoordinator || typeof drainCoordinator.replace !== "function") {
@@ -1962,6 +1967,7 @@ export class ProjectWorkflow {
       comment: this.#commentSession.snapshot,
       draftContext: this.#draftSession.context,
       draftRevision: this.#draftSession.revision,
+      documentWorkflow: this.#documentWorkflow.captureProjectTransitionAuthority(),
       run: Object.freeze({
         activeSourcePath: this.#runSession.snapshot.activeSourcePath,
         activeRun: this.#runSession.activeRun,
@@ -2057,7 +2063,11 @@ export class ProjectWorkflow {
     for (const [sourcePath, result] of previous.run.backgroundResults) {
       this.#runSession.markResult(sourcePath, result);
     }
-    this.#documentWorkflow.replaceRecoveryIdentity(null);
+    this.#documentWorkflow.restoreProjectTransitionAuthority({
+      authority: previous.documentWorkflow,
+      context,
+      sourceSha256: previous.document.sourceSha256,
+    });
     this.#canvasPort.invalidateRenderAcks?.();
     return Object.freeze({
       epoch: this.#projectSession.epoch,

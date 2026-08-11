@@ -211,8 +211,38 @@ function createHarness({
   const documentWorkflow = {
     hasHistoryAction: false,
     resetCount: 0,
+    projectTransitionAuthority: Object.freeze({
+      recoveryIdentity: {
+        token: "recovery_old",
+        projectId: "project_old",
+        documentId: "document_old",
+        sourcePath: OLD_PATH,
+      },
+      sourceHistory: {
+        schemaVersion: "1.0.0",
+        projectId: "project_old",
+        documentId: "document_old",
+        baseSourceSha256: sha256(OLD_HTML),
+        cursor: 0,
+        revision: 0,
+        entries: [],
+        appliedActions: [],
+        updatedAt: "2026-08-11T00:00:00.000Z",
+      },
+      sourceHistoryOperations: [],
+    }),
+    restoredProjectTransitionAuthority: null,
     resetForProjectTransition() {
       this.resetCount += 1;
+      this.projectTransitionAuthority = null;
+    },
+    captureProjectTransitionAuthority() {
+      return this.projectTransitionAuthority;
+    },
+    restoreProjectTransitionAuthority(input) {
+      this.projectTransitionAuthority = input.authority;
+      this.restoredProjectTransitionAuthority = input;
+      return true;
     },
     async flush({ throughRevision } = {}) {
       documentSession.update({ lastPersistedRevision: throughRevision });
@@ -723,4 +753,35 @@ test("a Canvas acknowledgement failure rolls the hydration publication back", as
   assert.equal(harness.documentSession.sourceSha256, sha256(OLD_HTML));
   assert.equal(harness.projectSession.context.projectId, "project_old");
   assert.equal(harness.versionSession.snapshot.latestVersionId, "version_old");
+  assert.deepEqual(
+    harness.documentWorkflow.projectTransitionAuthority,
+    {
+      recoveryIdentity: {
+        token: "recovery_old",
+        projectId: "project_old",
+        documentId: "document_old",
+        sourcePath: OLD_PATH,
+      },
+      sourceHistory: {
+        schemaVersion: "1.0.0",
+        projectId: "project_old",
+        documentId: "document_old",
+        baseSourceSha256: sha256(OLD_HTML),
+        cursor: 0,
+        revision: 0,
+        entries: [],
+        appliedActions: [],
+        updatedAt: "2026-08-11T00:00:00.000Z",
+      },
+      sourceHistoryOperations: [],
+    },
+  );
+  assert.equal(
+    harness.documentWorkflow.restoredProjectTransitionAuthority.context.sourcePath,
+    OLD_PATH,
+  );
+  assert.equal(
+    harness.documentWorkflow.restoredProjectTransitionAuthority.sourceSha256,
+    sha256(OLD_HTML),
+  );
 });
