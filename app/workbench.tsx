@@ -237,7 +237,7 @@ import {
   sourceHistoryOperationsFromRecord,
 } from "./workbench/record-model";
 import {
-  changesFromRecords,
+  changesFromDraftRecords,
   versionsFromWorkspace,
 } from "./workbench/version-model";
 import type {
@@ -2214,14 +2214,15 @@ export default function Workbench() {
     if (!context) return;
     const snapshot = draftSessionRef.current.createSnapshot({
       context,
-      basedOnVersionId: currentBasedOnVersionId,
+      basedOnVersionId:
+        versionSessionRef.current.snapshot.currentBasedOnVersionId,
       comments: nextComments,
       changeEvents: nextEvents,
       deletedCommentIds: commentSessionRef.current.deletedCommentIds,
       operationId: draftRecoveryOperationIdRef.current || undefined,
     });
     if (snapshot) persistDraftRecovery(snapshot);
-  }, [captureProjectContext, currentBasedOnVersionId, persistDraftRecovery]);
+  }, [captureProjectContext, persistDraftRecovery]);
 
   const normalizeCurrentGlobalComments = useCallback((): CommentItem[] => {
     const normalized = normalizeGlobalCommentTargets(
@@ -2627,7 +2628,8 @@ export default function Workbench() {
         mutation,
         revision: nextRevision,
         createdAt: new Date().toISOString(),
-        basedOnVersionId: currentBasedOnVersionId,
+        basedOnVersionId:
+          versionSessionRef.current.snapshot.currentBasedOnVersionId,
         events: commentSessionRef.current.changeEvents,
         pendingEvents: auditPendingRef.current,
         inFlightKeys: auditInFlightKeysRef.current,
@@ -2681,7 +2683,6 @@ export default function Workbench() {
     return nextRevision;
   }, [
     clearAutosaveTimer,
-    currentBasedOnVersionId,
     flushAutosave,
     invalidateCanvasRenderAcks,
     persistCurrentDraftRecovery,
@@ -3043,7 +3044,7 @@ export default function Workbench() {
       serverRevision,
       Number.isSafeInteger(Number(raw.revision)) ? Number(raw.revision) : 0,
     ) + 1;
-    const recoveredEvents = changesFromRecords(raw.changeEvents);
+    const recoveredEvents = changesFromDraftRecords(raw.changeEvents);
     const existingIds = new Set(commentSessionRef.current.changeEvents.map((event) => event.eventId));
     const mergedEvents = [
       ...commentSessionRef.current.changeEvents,
@@ -3215,7 +3216,7 @@ export default function Workbench() {
         ? (
             operationAlreadyApplied
               ? serverEvents
-              : changesFromRecords(latest.changeEvents)
+              : changesFromDraftRecords(latest.changeEvents)
           )
         : serverEvents,
       deletedCommentIds: operationAlreadyApplied
@@ -3576,7 +3577,7 @@ export default function Workbench() {
         draftSession.activate(draftContext, serverDraftRevision, draftRecord);
         const recoveredDraft = recoverDraftLog(draftContext,
         commentsFromRecords(draftRecord.comments),
-        changesFromRecords(draftRecord.changeEvents),
+        changesFromDraftRecords(draftRecord.changeEvents),
         draftSession.revision,
         Array.isArray(draftRecord.deletedCommentIds)
           ? draftRecord.deletedCommentIds.map((value) => String(value))
@@ -3995,19 +3996,21 @@ export default function Workbench() {
     const acknowledgedComments = commentsFromRecords(
       event.authoritative.comments,
     );
-    const acknowledgedEvents = changesFromRecords(
+    const acknowledgedEvents = changesFromDraftRecords(
       event.authoritative.changeEvents,
     );
     const sessionState = draftSessionRef.current.inspect();
-    if (event.rebaseCount > 0 && !sessionState.pending) {
-      commentSessionRef.current.update({
-        comments: acknowledgedComments,
-        changeEvents: acknowledgedEvents,
-      });
-    }
     setDraftPersistError("");
     if (!sessionState.pending) {
-      commentSessionRef.current.clearDeletedCommentIds();
+      if (event.rebaseCount > 0) {
+        commentSessionRef.current.update({
+          comments: acknowledgedComments,
+          changeEvents: acknowledgedEvents,
+          deletedCommentIds: [],
+        });
+      } else {
+        commentSessionRef.current.clearDeletedCommentIds();
+      }
       persistDraftRecovery({
         ...event.write,
         expectedDraftRevision: event.authoritative.draftRevision,
@@ -4234,7 +4237,8 @@ export default function Workbench() {
         }
         const snapshot = draftSessionRef.current.createSnapshot({
           context,
-          basedOnVersionId: currentBasedOnVersionId,
+          basedOnVersionId:
+            versionSessionRef.current.snapshot.currentBasedOnVersionId,
           comments: commentSessionRef.current.comments,
           changeEvents: commentSessionRef.current.changeEvents,
           deletedCommentIds: commentSessionRef.current.deletedCommentIds,
@@ -4273,7 +4277,6 @@ export default function Workbench() {
     });
   }, [
     captureProjectContext,
-    currentBasedOnVersionId,
     ensureProjectRegistered,
     flushAutosave,
     flushDraftPersistence,
@@ -4771,12 +4774,18 @@ export default function Workbench() {
       || projectHydratingRef.current
       || projectHydrating
     ) return;
+    // CommentSession is the synchronous owner of the complete working copy.
+    // An acknowledgement observer can adopt a rebased aggregate after this
+    // React effect was scheduled, so mixing render-captured fields with the
+    // live tombstones could otherwise enqueue a stale partial replacement.
+    const workingCopy = commentSessionRef.current;
     const snapshot = draftSession.createSnapshot({
       context,
-      basedOnVersionId: currentBasedOnVersionId,
-      comments,
-      changeEvents,
-      deletedCommentIds: commentSessionRef.current.deletedCommentIds,
+      basedOnVersionId:
+        versionSessionRef.current.snapshot.currentBasedOnVersionId,
+      comments: workingCopy.comments,
+      changeEvents: workingCopy.changeEvents,
+      deletedCommentIds: workingCopy.deletedCommentIds,
       operationId: draftRecoveryOperationIdRef.current || undefined,
     });
     if (!snapshot) return;
@@ -4805,7 +4814,8 @@ export default function Workbench() {
     ) return;
     const snapshot = draftSession.createSnapshot({
       context,
-      basedOnVersionId: currentBasedOnVersionId,
+      basedOnVersionId:
+        versionSessionRef.current.snapshot.currentBasedOnVersionId,
       comments: commentSessionRef.current.comments,
       changeEvents: commentSessionRef.current.changeEvents,
       deletedCommentIds: commentSessionRef.current.deletedCommentIds,

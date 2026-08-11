@@ -6,7 +6,10 @@ import { versionAuditCollections } from "../lib/version-audit-records";
 import { commentsFromRecords, selectionFromRecord } from "./comment-model";
 import { displayVersionLabel } from "./project-model";
 import { isRecord } from "./record-model";
-import { decodeVersionAuditChange } from "./version-compatibility-decoder.js";
+import {
+  decodeDraftAuditChange,
+  decodeVersionAuditChange,
+} from "./version-compatibility-decoder.js";
 import type {
   DirectEditEvent,
   UserSupplementRecord,
@@ -17,6 +20,27 @@ export function changesFromRecords(raw: unknown): DirectEditEvent[] {
   if (!Array.isArray(raw)) return [];
   return raw.flatMap((value) => {
     const decoded = decodeVersionAuditChange(value);
+    if (!decoded) return [];
+    return [{
+      eventId: decoded.eventId,
+      createdAt: decoded.createdAt,
+      kind: decoded.kind as DirectEditEvent["kind"],
+      target: selectionFromRecord(decoded.target),
+      ...(decoded.property ? { property: decoded.property } : {}),
+      before: decoded.before,
+      after: decoded.after,
+      basedOnVersionId: decoded.basedOnVersionId,
+      revision: decoded.revision,
+    }];
+  });
+}
+
+export function changesFromDraftRecords(
+  raw: unknown,
+): DirectEditEvent[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((value) => {
+    const decoded = decodeDraftAuditChange(value);
     if (!decoded) return [];
     return [{
       eventId: decoded.eventId,

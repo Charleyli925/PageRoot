@@ -8,16 +8,18 @@ function isRecord(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-/**
- * Version archive ingress. The view receives only DirectEditEvent's canonical
- * basedOnVersionId/revision names; retired wire names never escape this
- * decoder.
- */
-export function decodeVersionAuditChange(value) {
+function decodeAuditChange(value, {
+  label,
+  eventIdPattern,
+  fallbackBasedOnVersionId,
+  preserveUnassignedVersion = false,
+}) {
   if (!isRecord(value)) return null;
   try {
     const identity = decodeDirectEditIdentity(value, {
-      label: "Version edit event",
+      fallbackBasedOnVersionId,
+      preserveUnassignedVersion,
+      label,
     });
     const hasEventId = Object.hasOwn(value, "eventId");
     const hasLegacyId = Object.hasOwn(value, "id");
@@ -25,7 +27,7 @@ export function decodeVersionAuditChange(value) {
     const eventId = String(hasEventId ? value.eventId : value.id ?? "");
     const kind = String(value.kind ?? "");
     if (
-      !/^edit_[A-Za-z0-9_-]+$/u.test(eventId)
+      !eventIdPattern.test(eventId)
       || typeof value.createdAt !== "string"
       || !CHANGE_KINDS.has(kind)
       || !isRecord(value.target)
@@ -50,4 +52,28 @@ export function decodeVersionAuditChange(value) {
   } catch {
     return null;
   }
+}
+
+/**
+ * Version archive ingress. Immutable Version records have normalized edit_*
+ * identities and must carry their own complete Version identity.
+ */
+export function decodeVersionAuditChange(value) {
+  return decodeAuditChange(value, {
+    label: "Version edit event",
+    eventIdPattern: /^edit_[A-Za-z0-9_-]+$/u,
+  });
+}
+
+/**
+ * Mutable Draft ingress. Workbench events retain their change_* identity and
+ * an explicitly unassigned based-on Version until Request freeze can apply its
+ * trusted fallback.
+ */
+export function decodeDraftAuditChange(value) {
+  return decodeAuditChange(value, {
+    label: "Draft edit event",
+    eventIdPattern: /^(?:change|edit)_[A-Za-z0-9_-]+$/u,
+    preserveUnassignedVersion: true,
+  });
 }

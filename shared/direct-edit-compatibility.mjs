@@ -88,12 +88,14 @@ function fallbackRevision(value, label) {
 
 /**
  * Converts both historic direct-edit field names to the persisted v3 identity.
- * A caller may supply trusted freeze fallbacks for an unsaved current Draft;
- * these defaults never apply when decoding an immutable Version archive.
+ * A caller may supply trusted freeze fallbacks for an unsaved current Draft,
+ * or explicitly preserve an unassigned mutable-Draft Version; neither option
+ * applies when decoding an immutable Version archive.
  */
 export function decodeDirectEditIdentity(value, {
   fallbackBasedOnVersionId,
   fallbackRevision: revisionFallback,
+  preserveUnassignedVersion = false,
   allowUnassignedRevision = false,
   label = "direct edit",
 } = {}) {
@@ -114,7 +116,9 @@ export function decodeDirectEditIdentity(value, {
   const basedOnVersionId = rawVersion === undefined
     || rawVersion === null
     || rawVersion === ""
-    ? fallbackVersionId(fallbackBasedOnVersionId, label)
+    ? preserveUnassignedVersion
+      ? null
+      : fallbackVersionId(fallbackBasedOnVersionId, label)
     : decodeVersionId(rawVersion, `${label}.basedOnVersionId`);
 
   const hasCurrentRevision = Object.hasOwn(record, "revision");

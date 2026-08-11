@@ -224,11 +224,19 @@ test("packaged PageRoot preserves outside-island bytes and reconciles draft revi
         comments: workspace.runtimeState.draft.comments.map(
           (comment) => comment.text,
         ),
+        changeEventCount: workspace.runtimeState.draft.changeEvents.length,
+        changeEventsUseCanonicalIdentity: workspace.runtimeState.draft.changeEvents
+          .every((event) => (
+            Object.hasOwn(event, "basedOnVersionId")
+            && !Object.hasOwn(event, "baseVersionId")
+          )),
         deletedCommentIds: workspace.runtimeState.draft.deletedCommentIds,
       };
     }, { timeout: 30_000 }).toEqual({
       revision: expectedRevision,
       comments: ["打包环境 Revision 自动合并"],
+      changeEventCount: 1,
+      changeEventsUseCanonicalIdentity: true,
       deletedCommentIds: ["comment_packaged_external_deleted"],
     });
 
@@ -260,6 +268,11 @@ test("packaged PageRoot preserves outside-island bytes and reconciles draft revi
       .toEqual(["comment_packaged_external_deleted"]);
     expect(reopenedAfterClose.runtimeState.draft.comments.map((comment) => comment.text))
       .toEqual(["打包环境 Revision 自动合并"]);
+    expect(reopenedAfterClose.runtimeState.draft.changeEvents).toHaveLength(1);
+    expect(reopenedAfterClose.runtimeState.draft.changeEvents[0])
+      .toHaveProperty("basedOnVersionId");
+    expect(reopenedAfterClose.runtimeState.draft.changeEvents[0])
+      .not.toHaveProperty("baseVersionId");
   } finally {
     if (electronApp) {
       const electronProcess = electronApp.process();
