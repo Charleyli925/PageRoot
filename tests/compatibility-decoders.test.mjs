@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
+  decodeDraftAuditChange,
   decodeVersionAuditChange,
 } from "../app/workbench/version-compatibility-decoder.js";
 import {
@@ -118,6 +119,28 @@ test("direct-edit aliases decode once and reject unknown, ambiguous, and out-of-
     (error) => error.code === "DIRECT_EDIT_VERSION_OUT_OF_RANGE",
   );
   assert.equal(decodeVersionAuditChange({ ...legacy, unknown: true }), null);
+
+  const draftAuthority = await fixture(
+    "compatibility-decoders/draft-authority.current.json",
+  );
+  const draftEvent = draftAuthority.editEvents[0];
+  assert.equal(decodeVersionAuditChange(draftEvent), null);
+  assert.deepEqual(
+    decodeDraftAuditChange({
+      ...draftEvent,
+      baseVersionId: null,
+    }),
+    {
+      eventId: "change_fixture_current",
+      createdAt: "2026-08-04T07:45:14.371Z",
+      kind: "text",
+      target: draftEvent.target,
+      before: "旧标题",
+      after: "新标题",
+      basedOnVersionId: null,
+      revision: 4,
+    },
+  );
 });
 
 test("Developer Preview candidate-assessment shapes decode to one sealed canonical record", async () => {

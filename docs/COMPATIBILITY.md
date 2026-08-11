@@ -103,20 +103,26 @@ collected. A guessed date is not a support-window policy.
   stored semantic version used `baseVersionId` and `capturedRevision`; current
   immutable Version archives use `basedOnVersionId` and `revision`.
 - Current consumer: the Request freeze adapter in
-  `scripts/workspace-bridge.mjs` and Version history ingress in
-  `app/workbench/version-model.ts`.
+  `scripts/workspace-bridge.mjs`, mutable Draft ingress and immutable Version
+  history ingress in `app/workbench/version-model.ts`.
 - Decoder and canonical output:
   `shared/direct-edit-compatibility.mjs` yields the persisted canonical pair
   `{ basedOnVersionId, revision }`. The Workbench-only
   `app/workbench/version-compatibility-decoder.js` passes that same canonical
-  pair into the `DirectEditEvent` view model. New Workbench producers emit
-  only those canonical names. A transient
+  pair into the `DirectEditEvent` view model. Mutable Draft ingress retains the
+  Workbench `change_*` event identity and an explicitly unassigned based-on
+  Version until Request freeze can apply its trusted fallback; immutable
+  Version ingress still requires its normalized `edit_*` identity and complete
+  local Version pair. New Workbench producers emit only canonical identity
+  names and read the synchronous `VersionSession` authority when assigned. A
+  transient
   `capturedRevision: 0` may use only the trusted freeze revision and is never
   written into a Version archive. The existing legacy envelope `id` is also
   accepted only here when `eventId` is absent; both forms together fail closed.
 - Historical fixtures:
-  `fixtures/compatibility-decoders/version-edit-event.legacy-aliases.json`;
-  the current disk archive oracle is
+  `fixtures/compatibility-decoders/version-edit-event.legacy-aliases.json` and
+  `fixtures/compatibility-decoders/draft-authority.current.json`; the current
+  disk archive oracle is
   `fixtures/v3/annotation-records.frozen.json`.
 - Disk persistence read: yes. Draft input may be frozen; immutable Version
   archive records are read-only. Unknown keys, dual alias pairs, invalid
