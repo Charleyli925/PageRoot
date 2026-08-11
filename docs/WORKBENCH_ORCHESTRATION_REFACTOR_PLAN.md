@@ -1,6 +1,6 @@
 # Workbench 应用编排收口执行计划
 
-- 状态：**PR-1 已建立本地候选（未 Ready、未合并）；PR-2 至 PR-7 尚未授权**
+- 状态：**PR-1 已合并至 `main`；PR-2 Draft PR #150 已建立（未 Ready、未合并）；PR-3 至 PR-7 尚未授权**
 - 规划基线：`main@37bba7779b27c0a42a52f98ec84a377b964bf4eb`
 - 基线 Tree：`0e074849493e5f9db9e89621e0a1c1a4910b8fa1`
 - 基线日期：2026-08-11
@@ -586,9 +586,9 @@ npm run task:finish
 
 ### 7.8 实施记录（2026-08-11）
 
-- 候选分支：`refactor/workspace-controller-registration`；功能实现提交：
-  `3bf94fb`、`50b903b`（最终候选仍须以本分支的 `task:finish` 冻结）。本 PR 不
-  进入 Ready、合并、版本或发布流程。
+- `refactor/workspace-controller-registration` 的实现已以
+  `main@9f6ad44e2350c18c7a8c2eb741456dd68ef71fe5` 合并。PR-1 不再作为本轮候选；
+  后续 PR 仍须独立冻结、Ready 和合并，不能沿用 PR-1 的授权。
 - 实际新增 `workspace-controller.js/.d.ts` 和
   `workspace-controller-codecs.js/.d.ts`。Controller 只接收 Workbench 已有的
   Project、Document、Comment、Draft、Version、SourceHistory Session；没有创建
@@ -614,8 +614,8 @@ npm run task:finish
   `npm run typecheck`、`npm run gate:edit`，以及 `npm run test:browser:smoke`
   28/28；最终 `npm run task:finish` 通过（60 项定向 Node、28 项 Browser、8 项
   Electron、2 项 AI smoke）。
-- 后续：PR-2 的 Document persistence/SourceHistory workflow 边界仍成立，但未获
-  本轮授权，不能提前实施。
+- 后续：PR-2 已在隔离分支完成，仍未 Ready 或合并；PR-3 至 PR-7 未获授权，不能
+  提前实施。
 
 ## 8. PR-2：Document 持久化、恢复与 Source History Workflow
 
@@ -728,6 +728,30 @@ owner 留在 React。
   验证；
 - 历史 action 与 autosave 共用 source authority，但现有两个 renderer Session 是否
   需要一个更窄的内部 queue，要以测试证明，不能先合并 owner。
+
+### 8.8 实施记录（2026-08-11）
+
+- 隔离分支：`refactor/document-workflow`，基于
+  `main@9f6ad44e2350c18c7a8c2eb741456dd68ef71fe5`；本记录时尚未 Ready 或合并。
+- 新增 `document-workflow.js/.d.ts` 与纯注入的
+  `document-workflow-codecs.js/.d.ts`。Workflow 接收现有 Session 和
+  Scheduler/Hash/Recovery/Canvas Port，拥有 700ms autosave、pending/in-flight
+  audit、history single-flight、unknown-result authority reconciliation；没有创建第
+  二份 Document 或 SourceHistory owner。
+- `WorkspaceController` 组合并转发 Document command；Workbench 仅构造
+  CanvasChangeInput、保留 Canvas adapter 与 UI event 映射。已删除 React 中的
+  autosave timer、recovery/audit/history Promise refs 和对应 Bridge 编排 callback。
+- Workbench 的直接 Bridge 调用由 28 收敛至 20；architecture gate 对 20 个调用的
+  精确 allowlist 和禁留 timer/flush/history owner 都已锁定。未改变 `/autosave`、
+  `/source-history/action`、Bridge SourceTransaction、persisted schema 或 Patch
+  transport。
+- 新增 Node workflow 回归覆盖 700ms 合并、较早 ack 不覆盖较新 write、未登记首次
+  写入、recovery reconstruction、stale race、ack 失配、unknown autosave authority
+  reconciliation、unknown history action 的同 actionId 重放。
+- 已通过 8.5 的指定 Node 集、`npm run test:bridge`、`npm run architecture:check`、
+  `npm run typecheck`、`npm run task:finish`（79 Node、28 Browser、8 Electron、2 AI
+  smoke），以及 `npm run test:electron:full` 19/19。Draft PR #150 已建立；不进入
+  Ready、合并、版本或发布流程。
 
 ## 9. PR-3：Project Hydration、Switch、External Open 与 Close
 

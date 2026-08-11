@@ -29,14 +29,12 @@ const RETIRED_WORKBENCH_DOCUMENT_AUTHORITIES =
 const RETIRED_WORKBENCH_COMMENT_AUTHORITIES =
   /\b(?:commentsRef|changeEventsRef|deletedCommentIdsRef|composerDraftRef|composerCommentIdRef|composerAttachmentsRef|draftTargetRef|commentEditSessionRef)\b/;
 const WORKBENCH_BRIDGE_CALL_ALLOWLIST = new Map([
-  ["workspace", 5],
-  ["source", 6],
+  ["workspace", 4],
+  ["source", 3],
   ["versionFile", 3],
-  ["sourceHistoryAction", 2],
-  ["resolveConflict", 2],
+  ["resolveConflict", 1],
   ["activateReadyVersion", 1],
   ["attachment", 1],
-  ["autosave", 1],
   ["cancelActiveRun", 1],
   ["createRequest", 1],
   ["deleteAttachment", 1],
@@ -45,7 +43,7 @@ const WORKBENCH_BRIDGE_CALL_ALLOWLIST = new Map([
   ["saveAttachment", 1],
   ["status", 1],
 ]);
-const WORKBENCH_BRIDGE_CALL_LIMIT = 28;
+const WORKBENCH_BRIDGE_CALL_LIMIT = 20;
 
 async function sourceFiles(directory) {
   const entries = await readdir(directory, { withFileTypes: true });
@@ -325,15 +323,28 @@ export async function architectureViolations() {
   }
   if (bridgeCalls.length > WORKBENCH_BRIDGE_CALL_LIMIT) {
     violations.push(
-      `app/workbench.tsx: PR-1 allows at most ${WORKBENCH_BRIDGE_CALL_LIMIT} direct Bridge calls`,
+      `app/workbench.tsx: PR-2 allows at most ${WORKBENCH_BRIDGE_CALL_LIMIT} direct Bridge calls`,
     );
   }
   for (const [method, limit] of WORKBENCH_BRIDGE_CALL_ALLOWLIST) {
     if ((bridgeCallCounts.get(method) || 0) > limit) {
       violations.push(
-        `app/workbench.tsx: Bridge call ${method} exceeds its PR-1 migration allowance of ${limit}`,
+        `app/workbench.tsx: Bridge call ${method} exceeds its PR-2 migration allowance of ${limit}`,
       );
     }
+  }
+  if (
+    !workbench.includes("documentWorkflow: {")
+    || !workbench.includes(".enqueueDocumentEdit({")
+    || !workbench.includes(".flushDocument({ throughRevision })")
+    || !workbench.includes(".performDocumentHistoryAction({ direction, context })")
+    || !workbench.includes(".reloadDocumentAuthority({")
+    || !workbench.includes(".reconcileDocumentBoundary({")
+    || /\b(?:autosaveTimerRef|auditPendingRef|auditInFlightKeysRef|historyActionPromiseRef|recoveryIdentityRef)\b/.test(workbench)
+  ) {
+    violations.push(
+      "app/workbench.tsx: PR-2 document persistence, recovery and source history must delegate to WorkspaceController",
+    );
   }
   if (
     !projectSession.includes(
