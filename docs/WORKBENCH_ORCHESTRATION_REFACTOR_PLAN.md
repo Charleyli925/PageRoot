@@ -587,8 +587,8 @@ npm run task:finish
 ### 7.8 实施记录（2026-08-11）
 
 - 候选分支：`refactor/workspace-controller-registration`；功能实现提交：
-  `3bf94fb`（最终候选仍须以本分支的 `task:finish` 冻结）。本 PR 不进入 Ready、
-  合并、版本或发布流程。
+  `3bf94fb`、`50b903b`（最终候选仍须以本分支的 `task:finish` 冻结）。本 PR 不
+  进入 Ready、合并、版本或发布流程。
 - 实际新增 `workspace-controller.js/.d.ts` 和
   `workspace-controller-codecs.js/.d.ts`。Controller 只接收 Workbench 已有的
   Project、Document、Comment、Draft、Version、SourceHistory Session；没有创建
@@ -600,7 +600,8 @@ npm run task:finish
 - Workbench 已删除 `projectRegistrationPromiseRef` 和
   `ensureProjectRegistered`，登记调用统一委托 Controller；仅把
   `registration-published` event 映射回 `projectRecordsPath`、`projectName` 等
-  presentation state。现有 pure codec 保持注入，未反向 import Workbench。
+  presentation state。Controller 在 `useLayoutEffect` 中创建和释放，避免 render
+  期间读写 ref；现有 pure codec 保持注入，未反向 import Workbench。
 - 直接 Workbench Bridge 调用从 30 降至 28：已移除 registration 的 `workspace`
   和 `ensureProject`。剩余预算已由 architecture gate 精确锁定为 `workspace` 5、
   `source` 6、`versionFile` 3、`sourceHistoryAction` 2、`resolveConflict` 2，及
