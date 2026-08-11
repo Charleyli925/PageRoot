@@ -86,6 +86,31 @@ function attachmentById(attachments, attachmentId) {
   ) || null;
 }
 
+function composerState(commentSession) {
+  const target = commentSession.composerTarget;
+  return Object.freeze({
+    target,
+    targetId: String(target?.id || ""),
+    commentId: String(commentSession.composerCommentId || ""),
+    draft: String(commentSession.composerDraft || ""),
+    attachments: frozenItems(commentSession.composerAttachments),
+  });
+}
+
+function composerStateIsCurrent(state, commentSession) {
+  const currentAttachments = commentSession.composerAttachments;
+  return Boolean(
+    state
+    && state.targetId === String(commentSession.composerTarget?.id || "")
+    && state.commentId === String(commentSession.composerCommentId || "")
+    && state.draft === String(commentSession.composerDraft || "")
+    && state.attachments.length === currentAttachments.length
+    && state.attachments.every(
+      (attachment, index) => attachment === currentAttachments[index],
+    ),
+  );
+}
+
 function attachmentIdentity(context, target, operationId) {
   return Object.freeze({
     context: copyContext(context),
@@ -405,7 +430,8 @@ export class CommentWorkflow {
   }
 
   async commitComment({ commentId } = {}) {
-    const target = this.#commentSession.composerTarget;
+    const composer = composerState(this.#commentSession);
+    const target = composer.target;
     if (!target) {
       return blocked("COMMENT_TARGET_MISSING", "请先选择要评论的内容。");
     }
@@ -415,8 +441,8 @@ export class CommentWorkflow {
     if (this.#uploadCount > 0) {
       return blocked("ATTACHMENT_UPLOAD_PENDING", "请等待附件添加完成后再保存评论。");
     }
-    const text = this.#commentSession.composerDraft.trim();
-    const attachments = [...this.#commentSession.composerAttachments];
+    const text = composer.draft.trim();
+    const attachments = [...composer.attachments];
     if (!text && attachments.length === 0) {
       return blocked("COMMENT_EMPTY", "请输入评论内容或添加附件。");
     }
@@ -427,15 +453,28 @@ export class CommentWorkflow {
     }
     const context = this.#projectSession.context;
     if (context && !this.#isCurrentContext(context)) return stale(context);
+    // Registration is asynchronous. Do not clear a newer composer working copy
+    // after the first save has waited for its project authority.
+    if (!composerStateIsCurrent(composer, this.#commentSession)) {
+      return stale(
+        context || { sourcePath, epoch: this.#projectSession.epoch },
+        "composer_changed",
+      );
+    }
+    const currentTarget = this.#commentSession.composerTarget;
     if (
-      !this.#commentSession.composerTarget
-      || this.#commentSession.composerTarget.id !== target.id
+      !currentTarget
+      || currentTarget.id !== target.id
+      || currentTarget.resolution !== "exact"
       || this.#uploadCount > 0
     ) return stale(context || { sourcePath, epoch: this.#projectSession.epoch });
 
     const nextCommentId = String(commentId || this.#nextCommentId());
     const now = safeDate(this.#clock.now());
-    const commentTarget = this.#codecs.independentCommentTarget(target, nextCommentId);
+    const commentTarget = this.#codecs.independentCommentTarget(
+      currentTarget,
+      nextCommentId,
+    );
     const comment = {
       commentId: nextCommentId,
       createdAt: now,

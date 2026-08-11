@@ -103,6 +103,7 @@ function deferred() {
 
 function createHarness({
   registered = true,
+  registrationGate = null,
   runSession = new RunSession({ sourcePath: SOURCE_PATH }),
   documentSession = new DocumentSession({
     html: "<main><p>正文</p></main>",
@@ -171,6 +172,7 @@ function createHarness({
   let registrations = 0;
   const ensureRegistered = async () => {
     registrations += 1;
+    if (registrationGate) await registrationGate.promise;
     if (!context) {
       context = projectSession.register({
         epoch: projectSession.epoch,
@@ -269,6 +271,60 @@ test("first comment lazily registers once and commits one durable Draft", async 
   assert.equal(flushed.status, "succeeded");
   assert.equal(harness.draftWrites.length, 1);
   assert.equal(harness.draftWrites[0].comments[0].commentId, "comment_first");
+});
+
+test("lazy registration preserves composer changes that arrive before the save resumes", async () => {
+  const registrationGate = deferred();
+  const harness = createHarness({ registered: false, registrationGate });
+  const initialAttachment = attachment({
+    attachmentId: "attachment_late",
+    commentId: "comment_race",
+    fileName: "late.png",
+  });
+  harness.commentSession.update({
+    composerCommentId: "comment_race",
+    composerTarget: target(),
+    composerDraft: "初始评论。",
+  });
+
+  const pending = harness.workflow.commitComment({ commentId: "comment_race" });
+  assert.equal(harness.registrations, 1);
+  harness.commentSession.update({
+    composerDraft: "初始评论，加上的新内容。",
+    composerAttachments: [initialAttachment],
+  });
+  registrationGate.resolve();
+
+  const stale = await pending;
+  assert.equal(stale.status, "stale");
+  assert.equal(stale.identity.operationId, "composer_changed");
+  assert.equal(harness.commentSession.comments.length, 0);
+  assert.equal(harness.commentSession.composerDraft, "初始评论，加上的新内容。");
+  assert.deepEqual(harness.commentSession.composerAttachments, [initialAttachment]);
+
+  const retried = await harness.workflow.commitComment({ commentId: "comment_race" });
+  assert.equal(retried.status, "succeeded");
+  assert.equal(retried.value.comment.text, "初始评论，加上的新内容。");
+  assert.deepEqual(retried.value.comment.attachments, [initialAttachment]);
+});
+
+test("lazy registration ignores a non-composer working-copy refresh", async () => {
+  const registrationGate = deferred();
+  const harness = createHarness({ registered: false, registrationGate });
+  harness.commentSession.update({
+    composerCommentId: "comment_refresh",
+    composerTarget: target(),
+    composerDraft: "不会被无关同步取消。",
+  });
+
+  const pending = harness.workflow.commitComment({ commentId: "comment_refresh" });
+  assert.equal(harness.registrations, 1);
+  harness.commentSession.setComments([]);
+  registrationGate.resolve();
+
+  const outcome = await pending;
+  assert.equal(outcome.status, "succeeded");
+  assert.equal(outcome.value.comment.text, "不会被无关同步取消。");
 });
 
 test("attachment batches retain successful files while reporting individual failures", async () => {
