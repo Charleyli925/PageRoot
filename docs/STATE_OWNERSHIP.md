@@ -7,6 +7,7 @@
 | External HTML request IDs, active/queued/deferred renderer delivery, blocker-transition/manual retry policy and unaccepted-result fence | Renderer `ExternalFileOpenSession` | none; bounded in-memory state only | Workbench composition root and the project-switch boundary |
 | Accepted local/external project results, their FIFO renderer publication and deferred final-fence blocker-transition/manual retry policy | Renderer `ProjectApplicationSession` | none; bounded in-memory state only | Workbench composition root and the final project-application boundary |
 | Registered mutation context resolution and atomic-replacement source observation | Bridge project-context service | project/document registry graph plus the owning runtime `pendingWrite` target Hash | Bridge mutation routes and `/project/ensure` |
+| Registration operation identity, single-flight, stale-result fence and cross-Session publication sequence | `WorkspaceController` workflow owner during staged migration | none; it publishes through existing Project, Document, Comment, Draft, Version and SourceHistory owners | Workbench commands and presentation-event adapter |
 | Explicit source filename transition, pending operation and active/recent path rebase | Desktop source-rename transaction | active-file `pendingRename` / `lastRename`, then filesystem path | project session, Bridge relink, views |
 | Current source bytes, Hash, edit revision, persistence projection, pending write, single-flight source flush, Canvas authority generation and exact-byte boundary reconciliation | Renderer `DocumentSession` | source HTML, runtime autosave record and recovery log; the generation itself is disposable | Canvas, preview readiness, source-history session and drain coordinator |
 | Current-source commit/recovery WAL, same-directory atomic replacement, acknowledged source-history application, project/runtime settlement and exactly-once audit outbox cleanup | Bridge `SourceTransaction` service | source HTML, `history/source-operations.json`, `project.json`, `runtime-state.json` and `pendingWrite` recovery bytes | `/autosave` and `/source-history/action` route adapters, project-context service and restart recovery |
@@ -83,8 +84,14 @@ Rules:
   the latest validated path in a one-shot handoff that only the next
   single-instance owner claims and deletes before normal delivery.
 - `workbench.tsx` is a composition root, not an additional state owner. It
-  subscribes to session snapshots, derives read-only presentation values and
-  dispatches user intent back to the owning session.
+  subscribes to Session/Controller snapshots, derives read-only presentation
+  values, adapts narrow host ports and dispatches user intent to the owning
+  Session or workflow facade.
+- `WorkspaceController` owns workflow-local operation state only. It receives
+  the existing Session instances during migration and must never create a
+  duplicate Project, Document, Comment, Draft, Version or SourceHistory owner.
+  Its temporary Workbench Bridge-call allowance is a decreasing migration gate,
+  not a permanent architecture exception.
 - `RunSession` owns the one in-memory submission lifecycle. `preparing` blocks
   duplicate intent and drain without freezing the current canvas; `frozen`
   blocks edits until the Request is known; `uncertain` preserves a current
