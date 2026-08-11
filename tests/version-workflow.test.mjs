@@ -296,6 +296,7 @@ function createHarness({
     documentSession,
     versionSession,
     runSession,
+    projectWorkflow,
     calls,
     context,
   };
@@ -408,6 +409,23 @@ test("activation rejects malformed ready identity before the explicit Bridge mut
   assert.equal(harness.calls.activate, 0);
   assert.equal(harness.documentSession.html, BASE_HTML);
   assert.equal(harness.versionSession.snapshot.currentExactVersionId, "ver_0001");
+});
+
+test("activation remains read-only while project hydration is in flight", async () => {
+  const harness = createHarness();
+  const run = readyRun();
+  harness.runSession.trackRun(run, { activate: "always" });
+  harness.projectWorkflow.projectHydrating = true;
+
+  const outcome = await harness.workflow.activateReadyVersion({ run });
+
+  assert.equal(outcome.status, "blocked");
+  assert.equal(outcome.code, "VERSION_ACTIVATION_PROJECT_UNAVAILABLE");
+  assert.equal(harness.calls.activate, 0);
+  assert.equal(harness.calls.commit.length, 0);
+  assert.equal(harness.documentSession.html, BASE_HTML);
+  assert.equal(harness.versionSession.snapshot.currentExactVersionId, "ver_0001");
+  assert.equal(harness.runSession.activeRun?.status, "ready-to-open");
 });
 
 test("background activation never replaces the active Canvas", async () => {

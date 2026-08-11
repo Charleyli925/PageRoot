@@ -373,6 +373,12 @@ export class VersionWorkflow {
         "当前候选的完成资料不完整，不能打开。",
       );
     }
+    if (this.#projectWorkflow.projectHydrating) {
+      return blocked(
+        "VERSION_ACTIVATION_PROJECT_UNAVAILABLE",
+        "项目状态仍在读取，不能打开候选版本。",
+      );
+    }
     if (!fromDeferred) {
       const deferred = this.#deferCanvasCommand(
         "external-refresh",
