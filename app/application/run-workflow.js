@@ -757,6 +757,12 @@ export class RunWorkflow {
     if (!this.#runSession.beginOperation("cancel", operationKey)) {
       return blocked("RUN_CANCEL_BUSY", "本轮结束操作正在进行。");
     }
+    // Cancellation may outlive a switch away and reopen of the same project.
+    // Stable project IDs alone must not let a late response mutate the newer
+    // editor generation or its active run.
+    const context = this.#isCurrentRun(run)
+      ? copyContext(this.#projectSession.context)
+      : null;
     try {
       if (run.sourcePath !== "preview://welcome") {
         await this.#bridgeClient.cancelActiveRun({
@@ -770,9 +776,16 @@ export class RunWorkflow {
             : "cancelled-by-user"),
         });
       }
-      const current = this.#isCurrentRun(run);
-      if (this.#runSession.hasRun(run)) this.#runSession.removeRun(run);
-      this.#runSession.clearHandoff(run.sourcePath);
+      const tracked = this.#runSession.hasRun(run);
+      const current = Boolean(tracked && context && this.#isCurrentContext(context));
+      if (tracked) {
+        this.#runSession.removeRun(run);
+        const handoff = this.#runSession.handoffForSource(run.sourcePath);
+        if (
+          handoff?.requestId === run.requestId
+          && handoff?.attemptId === run.attemptId
+        ) this.#runSession.clearHandoff(run.sourcePath);
+      }
       if (current) {
         this.#runSession.clearActiveRun();
         this.#canvasPort.unlock();
@@ -786,19 +799,21 @@ export class RunWorkflow {
       this.syncPolling();
       return succeeded({ run, current });
     } catch (cause) {
-      if (this.#runSession.hasRun(run)) {
+      const tracked = this.#runSession.hasRun(run);
+      const current = Boolean(tracked && context && this.#isCurrentContext(context));
+      if (tracked) {
         this.#runSession.trackRun({
           ...run,
           error: this.#codecs.errorMessage(
             cause,
             "取消结果暂时无法确认。源页会继续在后台核对。",
           ),
-        }, { activate: this.#isCurrentRun(run) ? "always" : "never" });
+        }, { activate: current ? "always" : "never" });
       }
       this.#emitEvent({
         type: "run-cancel-failed",
         run,
-        current: this.#isCurrentRun(run),
+        current,
         cause,
       });
       return rejected(errorCode(cause, "RUN_CANCEL_REJECTED"), this.#codecs.errorMessage(

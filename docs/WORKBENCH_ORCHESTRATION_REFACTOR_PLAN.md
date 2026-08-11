@@ -1,6 +1,6 @@
 # Workbench 应用编排收口执行计划
 
-- 状态：**PR-1 至 PR-4 已合并至 `main`；PR-5 已完成实现与验证，交付仅允许 Draft PR（未 Ready、未合并）；PR-6 至 PR-7 尚未授权**
+- 状态：**PR-1 至 PR-4 已合并至 `main`；PR-5 已完成实现与验证，Ready/合并仍须独立授权；PR-6 至 PR-7 尚未授权**
 - 规划基线：`main@37bba7779b27c0a42a52f98ec84a377b964bf4eb`
 - 基线 Tree：`0e074849493e5f9db9e89621e0a1c1a4910b8fa1`
 - 基线日期：2026-08-11
@@ -1136,10 +1136,12 @@ submission reconciliation 或 Run mutation IO。
   覆盖终态解锁/可重开及 malformed Request response 的只读 authority reconciliation。
 - 最终审查修复 P1：`resolveConflict` 在等待 Bridge 前冻结完整 `ProjectSession`
   context；`keep-external` 的迟到结果不能对切走又重新打开的同项目新 epoch 解锁或
-  无确认 reload。新增该 project-generation fence 的 Node 回归覆盖。
-- 已通过本节指定 Node 集 39/39、`npm run architecture:check`、`npm run lint`、
+  无确认 reload。后续 Ready 复审同样为 `cancel` 加入该 context/epoch fence；迟到的
+  取消结果不能清除、解锁或擦除重新打开项目中新 run 的 handoff。新增两条
+  project-generation fence 的 Node 回归覆盖。
+- 已通过本节指定 Node 集 40/40、`npm run architecture:check`、`npm run lint`、
   `npm run typecheck` 与 `npm run test:ai-closed-loop` 16/16，以及 `npm run task:finish`
-  （137 targeted Node、28 Browser smoke、8 Electron smoke、2 AI smoke）。PR-6 及其
+  （138 targeted Node、28 Browser smoke、8 Electron smoke、2 AI smoke）。PR-6 及其
   Version/source migration 未提前实施。
 
 ## 12. PR-6：Version Activation、Review Preparation 与 History Navigation

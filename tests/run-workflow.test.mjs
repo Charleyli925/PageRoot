@@ -512,6 +512,63 @@ test("cancel and conflict commands keep their scoped identities and do not alter
   assert.equal(harness.calls.cancel[0].sourcePath, SOURCE_B);
 });
 
+test("a late cancel result cannot unlock or clear a reopened project generation", async () => {
+  const cancellation = deferred();
+  const harness = createHarness({
+    bridge: {
+      async cancelActiveRun() {
+        return cancellation.promise;
+      },
+    },
+  });
+  const run = runRecord();
+  const events = [];
+  harness.workflow.subscribeEvents((event) => events.push(event));
+  harness.runSession.trackRun(run, { activate: "always" });
+
+  const cancelling = harness.workflow.cancel({ run });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  harness.projectSession.openLocator(SOURCE_B);
+  harness.projectSession.register({
+    epoch: harness.projectSession.epoch,
+    sourcePath: SOURCE_B,
+    projectId: "project_b",
+    documentId: "document_b",
+  });
+  harness.projectSession.openLocator(SOURCE_A);
+  const reopened = harness.projectSession.register({
+    epoch: harness.projectSession.epoch,
+    sourcePath: SOURCE_A,
+    projectId: "project_a",
+    documentId: "document_a",
+  });
+  assert.notEqual(reopened.epoch, harness.context.epoch);
+  const newerRun = runRecord({
+    requestId: "request_reopened",
+    attemptId: "attempt_002",
+  });
+  harness.runSession.trackRun(newerRun, { activate: "always" });
+  harness.runSession.publishHandoff({
+    sourcePath: SOURCE_A,
+    requestId: newerRun.requestId,
+    attemptId: newerRun.attemptId,
+    status: "copied",
+  });
+
+  cancellation.resolve({});
+  const outcome = await cancelling;
+
+  assert.equal(outcome.status, "succeeded");
+  assert.equal(outcome.value.current, false);
+  assert.equal(harness.runSession.activeRun?.requestId, newerRun.requestId);
+  assert.equal(harness.runSession.runForSource(SOURCE_A)?.requestId, newerRun.requestId);
+  assert.equal(harness.runSession.handoffForSource(SOURCE_A)?.requestId, newerRun.requestId);
+  assert.equal(harness.calls.unlock, 0);
+  const event = events.find((entry) => entry.type === "run-cancelled");
+  assert.equal(event?.current, false);
+});
+
 test("a late keep-external result cannot reload a reopened project generation", async () => {
   const resolution = deferred();
   const harness = createHarness({
