@@ -402,6 +402,72 @@ test("DocumentWorkflow registers an unbound source write before its first autosa
   assert.equal(harness.documentSession.sourceSha256, sha256(after));
 });
 
+test("DocumentWorkflow settles a failed first registration as a retryable persistence failure", async () => {
+  const before = "<!doctype html><html><body><p>one</p></body></html>";
+  const after = before.replace("one", "two");
+  let registrationAttempts = 0;
+  let autosaves = 0;
+  const events = [];
+  const harness = createHarness({
+    html: before,
+    registered: false,
+    ensureRegistered: async () => {
+      registrationAttempts += 1;
+      if (registrationAttempts === 1) {
+        return {
+          status: "blocked",
+          code: "PROJECT_REGISTRATION_UNAVAILABLE",
+          reason: "项目资料暂时无法建立，修改已保留在恢复记录中。",
+        };
+      }
+      const context = harness.projectSession.register({
+        epoch: harness.projectSession.epoch,
+        projectId: PROJECT_ID,
+        documentId: DOCUMENT_ID,
+        sourcePath: SOURCE_PATH,
+      });
+      return { status: "succeeded", value: context };
+    },
+    bridge: {
+      async autosave(body) {
+        autosaves += 1;
+        return {
+          ok: true,
+          content: body.html,
+          sha256: sha256(body.html),
+          persistedRevision: body.editRevision,
+          lastModifiedAt: "2026-08-11T00:00:01.000Z",
+          sourceHistory: sourceHistory({ sourceSha256: sha256(before) }),
+        };
+      },
+    },
+  });
+  harness.workflow.subscribeEvents((event) => events.push(event));
+
+  harness.workflow.enqueueEdit({ html: after });
+  const first = await harness.workflow.flush();
+
+  assert.deepEqual(first, {
+    status: "blocked",
+    code: "PROJECT_REGISTRATION_UNAVAILABLE",
+    reason: "项目资料暂时无法建立，修改已保留在恢复记录中。",
+  });
+  assert.equal(autosaves, 0);
+  assert.equal(harness.documentSession.persistState, "failed");
+  assert.equal(harness.documentSession.pendingWrite?.html, after);
+  assert.equal(harness.recoveryStore.values.size, 1);
+  const failure = events.find((event) => event.type === "document-persistence-failed");
+  assert.equal(failure?.code, "PROJECT_REGISTRATION_UNAVAILABLE");
+  assert.equal(failure?.fatal, false);
+
+  const second = await harness.workflow.flush();
+
+  assert.equal(second.status, "succeeded");
+  assert.equal(registrationAttempts, 2);
+  assert.equal(autosaves, 1);
+  assert.equal(harness.documentSession.persistState, "idle");
+});
+
 test("DocumentWorkflow rekeys recovery to registered identity before the first autosave resolves", async () => {
   const before = "<!doctype html><html><body><p>one</p></body></html>";
   const after = before.replace("one", "two");

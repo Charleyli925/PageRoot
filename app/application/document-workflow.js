@@ -955,11 +955,11 @@ export class DocumentWorkflow {
             adoptCanonicalSource: false,
           });
           if (!registration || registration.status !== "succeeded") {
-            this.#restoreWriteAfterFailure(write, writeContext);
-            return registration || blocked(
-              "PROJECT_REGISTRATION_UNAVAILABLE",
-              "项目资料暂时无法建立，修改已保留在恢复记录中。",
-            );
+            return this.#settleRegistrationFailure({
+              registration,
+              write,
+              writeContext,
+            });
           }
           write = {
             ...write,
@@ -1144,6 +1144,34 @@ export class DocumentWorkflow {
     }
     this.#persistRecovery(recoveryWrite, context);
     return recoveryWrite;
+  }
+
+  #settleRegistrationFailure({ registration, write, writeContext }) {
+    const outcome = registration || blocked(
+      "PROJECT_REGISTRATION_UNAVAILABLE",
+      "项目资料暂时无法建立，修改已保留在恢复记录中。",
+    );
+    const message = String(
+      outcome.reason || "项目资料暂时无法建立，修改已保留在恢复记录中。",
+    );
+    const code = outcome.status === "unknown"
+      ? "PROJECT_REGISTRATION_UNKNOWN"
+      : String(outcome.code || "PROJECT_REGISTRATION_UNAVAILABLE");
+    const recoveryWrite = this.#restoreWriteAfterFailure(write, writeContext);
+    if (outcome.status !== "stale" && this.#isCurrent(writeContext)) {
+      this.#documentSession.setPersistence({ state: "failed", error: message });
+      this.#emit({
+        type: "document-persistence-failed",
+        context: writeContext,
+        code,
+        message,
+        conflict: false,
+        protocolError: false,
+        recoveryWrite,
+        fatal: false,
+      });
+    }
+    return outcome;
   }
 
   async #handleFlushFailure({ cause, operationId, write, writeContext }) {
