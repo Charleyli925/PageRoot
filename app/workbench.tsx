@@ -94,6 +94,7 @@ import {
   registrationContextFromOutcome,
 } from "./application/workspace-controller.js";
 import type { WorkspaceControllerSnapshot } from "./application/workspace-controller.js";
+import { createCommentWorkflowCodecs } from "./application/comment-workflow-codecs.js";
 import type { DocumentWorkflowOutcome } from "./application/document-workflow.js";
 import { createDocumentWorkflowCodecs } from "./application/document-workflow-codecs.js";
 import { createWorkspaceControllerCodecs } from "./application/workspace-controller-codecs.js";
@@ -103,7 +104,6 @@ import {
 } from "./application/comment-session.js";
 import {
   DraftSession,
-  type DraftSessionEvent,
 } from "./application/draft-session.js";
 import {
   DocumentSession,
@@ -147,11 +147,6 @@ import {
   noticeUsageCode,
   usageFingerprint,
 } from "./application/usage-telemetry";
-import {
-  createDraftOperationId,
-  isDraftOperationId,
-  rebaseDraftMutation,
-} from "./domain/draft-aggregate.js";
 import {
   activeRunFromRecord,
   candidateAssessmentFromRecord,
@@ -250,7 +245,6 @@ import type {
   Drawer,
   HtmlProject,
   OtherTabCommentEntry,
-  PendingDraft,
   PendingWrite,
   PersistState,
   PrepareCloseDetail,
@@ -293,20 +287,6 @@ type CanvasRenderAck = Readonly<{
 }>;
 
 type CanvasRenderAcks = Readonly<Record<CanvasMode, CanvasRenderAck | null>>;
-
-type RecoveredDraftProjection = Readonly<{
-  comments: CommentItem[];
-  changeEvents: DirectEditEvent[];
-  composerDraft: string;
-  composerCommentId: string | null;
-  composerAttachments: CommentAttachment[];
-  composerTarget: HtmlCanvasSelection | null;
-  commentEdit: Readonly<{
-    commentId: string;
-    draftText: string;
-    draftAttachments: CommentAttachment[];
-  }> | null;
-}>;
 
 type PreparedGeneratedSourceTransition = Readonly<{
   previousSourcePath: string;
@@ -556,7 +536,6 @@ export default function Workbench() {
   const commentsHeaderRef = useRef<HTMLElement>(null);
   const reviewStageRef = useRef<HTMLDivElement>(null);
   const commentCounter = useRef(1);
-  const attachmentCounter = useRef(1);
   const focusedCommentIdRef = useRef<string | null>(null);
   const commentEditResumePendingRef = useRef<string | null>(null);
   const commentRailOffsetRef = useRef(0);
@@ -606,18 +585,7 @@ export default function Workbench() {
   });
   const viewTransitioningRef = useRef(false);
   const navigationOperationRef = useRef(0);
-  const attachmentUploadCountRef = useRef(0);
   const attachmentObjectUrlsRef = useRef<Map<string, string>>(new Map());
-  const draftRecoverySequenceRef = useRef(0);
-  const draftRecoveryOperationIdRef = useRef<string | null>(null);
-  const persistCurrentDraftRecoveryRef = useRef<(
-    nextComments?: CommentItem[],
-    nextEvents?: DirectEditEvent[],
-  ) => void>(() => {});
-  const persistDraftRecoveryRef = useRef<(
-    snapshot: PendingDraft | null,
-    context?: Partial<ProjectContext>,
-  ) => void>(() => {});
   const runSessionRef = useRef(new RunSession({
     sourcePath: WELCOME_PROJECT.sourcePath,
   }));
@@ -632,23 +600,11 @@ export default function Workbench() {
   const resumeSubmissionAfterRelinkRef = useRef(false);
   const saveProjectRulesRef = useRef<() => Promise<boolean>>(async () => false);
   const projectWorkflowLegacyRef = useRef<{
-    recoverDraft(input: Readonly<{
-      context: ProjectContext;
-      serverComments: CommentItem[];
-      serverEvents: DirectEditEvent[];
-      serverDraftRevision: number;
-      serverDeletedCommentIds: string[];
-      serverAppliedOperationIds: string[];
-      serverBasedOnVersionId: string | null;
-    }>): RecoveredDraftProjection;
     hydrateRecentRuns(
       projects: RecentProject[],
       activeSourcePath: string | null,
     ): Promise<void>;
   }>({
-    recoverDraft: () => {
-      throw new Error("评论恢复适配器尚未完成初始化。");
-    },
     hydrateRecentRuns: async () => {},
   });
   const projectRulesEditorRef = useRef<HTMLTextAreaElement | null>(null);
@@ -698,7 +654,10 @@ export default function Workbench() {
   const changeEvents = commentSnapshot.changeEvents;
   const commentEditSession = commentSnapshot.editSession;
   const [attachmentObjectUrls, setAttachmentObjectUrls] = useState<Record<string, string>>({});
-  const [attachmentUploadCount, setAttachmentUploadCount] = useState(0);
+  const attachmentUploadCount =
+    workspaceControllerSnapshot?.comment?.attachmentUploadCount ?? 0;
+  const draftPersistError =
+    workspaceControllerSnapshot?.comment?.draft.error ?? "";
   const [runSnapshot, setRunSnapshot] = useState<RunSessionSnapshot>(
     INITIAL_RUN_SNAPSHOT,
   );
@@ -831,6 +790,40 @@ export default function Workbench() {
           },
         },
       },
+      commentWorkflow: {
+        runSession: runSessionRef.current,
+        codecs: createCommentWorkflowCodecs({
+          isRecord,
+          sameSourcePath: sameLocalSourcePath,
+          persistedComment,
+          persistedChangeEvent,
+          persistedAttachment,
+          persistedTargetRef,
+          commentsFromRecords,
+          changesFromDraftRecords,
+          attachmentFromRecord,
+          selectionFromRecord,
+          independentCommentTarget,
+          commentEditSessionHasChanges,
+          errorMessage: productErrorMessage,
+        }),
+        recoveryStore,
+        attachmentBinary: {
+          prepare: async (
+            file: File,
+            options: { includeDataBase64: boolean },
+          ) => ({
+            fileName: file.name || "附件",
+            mediaType: file.type || "application/octet-stream",
+            byteLength: file.size,
+            kind: isImageFile(file) ? "image" : "file",
+            ...(options.includeDataBase64
+              ? { dataBase64: await fileAsBase64(file) }
+              : {}),
+            sourceFile: file,
+          }),
+        },
+      },
       projectWorkflow: {
         runSession: runSessionRef.current,
         projectRulesSession: projectRulesSessionRef.current,
@@ -921,18 +914,7 @@ export default function Workbench() {
           legacy: {
             isHistoryView: () => versionSessionRef.current.snapshot.viewMode === "history",
             isViewTransitioning: () => viewTransitioningRef.current,
-            attachmentUploadCount: () => attachmentUploadCountRef.current,
             saveProjectRules: () => saveProjectRulesRef.current(),
-            draftRecoveryOperationId: () => draftRecoveryOperationIdRef.current,
-            clearDraftRecoveryOperationId: () => {
-              draftRecoveryOperationIdRef.current = null;
-            },
-            persistDraftRecovery: (snapshot: PendingDraft) => (
-              persistDraftRecoveryRef.current(snapshot)
-            ),
-            recoverDraft: (input: Parameters<
-              typeof projectWorkflowLegacyRef.current.recoverDraft
-            >[0]) => projectWorkflowLegacyRef.current.recoverDraft(input),
             hydrateRecentRuns: (
               projects: RecentProject[],
               activeSourcePath: string | null,
@@ -1010,7 +992,6 @@ export default function Workbench() {
   const [startupIssue, setStartupIssue] = useState<StartupIssue | null>(null);
   const [workspaceIssue, setWorkspaceIssue] = useState<WorkspaceIssue | null>(null);
   const [viewTransitioning, setViewTransitioning] = useState(false);
-  const [draftPersistError, setDraftPersistError] = useState("");
   const [cancelRunConfirmationKey, setCancelRunConfirmationKey] =
     useState<string | null>(null);
   const [reviewPreparing, setReviewPreparing] = useState(false);
@@ -1056,6 +1037,28 @@ export default function Workbench() {
         if (!projectSessionRef.current.matches(registrationEvent.context)) return;
         setProjectRecordsPath(registrationEvent.projectRecordsPath);
         if (registrationEvent.projectName) setProjectName(registrationEvent.projectName);
+        return;
+      }
+      if (event.type === "attachment-cleanup-failed") {
+        const attachmentEvent = event as Readonly<{
+          context?: ProjectContext | null;
+          attachment?: CommentAttachment;
+          outcome?: { reason?: unknown };
+        }>;
+        if (
+          attachmentEvent.context
+          && !projectSessionRef.current.matches(attachmentEvent.context)
+        ) return;
+        const fileName = attachmentEvent.attachment?.fileName || "附件";
+        setToast({
+          title: "附件已从评论中移除",
+          message: `${fileName} 的项目副本暂时无法清理：${String(
+            attachmentEvent.outcome?.reason || "请稍后重新打开项目核对。",
+          )}`,
+          tone: "warning",
+          disposition: "background-result",
+          dedupeKey: `attachment-cleanup-${attachmentEvent.attachment?.attachmentId || "unknown"}`,
+        });
         return;
       }
       const projectEvent = event as Readonly<{
@@ -1105,8 +1108,6 @@ export default function Workbench() {
         }
         attachmentObjectUrlsRef.current.clear();
         setAttachmentObjectUrls({});
-        attachmentUploadCountRef.current = 0;
-        setAttachmentUploadCount(0);
         setPreviewAttachment(null);
         setEditingCommentId(null);
         commentEditResumePendingRef.current = null;
@@ -1137,7 +1138,6 @@ export default function Workbench() {
             : "edit",
         );
         setViewTransitioning(false);
-        setDraftPersistError("");
         setProjectRecordsPreparing(false);
         setProjectRecordsError("");
         setOpeningReadyVersion(Boolean(
@@ -1309,10 +1309,6 @@ export default function Workbench() {
         && !projectSessionRef.current.matches(documentEvent.context)
       ) return;
       if (documentEvent.type === "document-direct-edit-recorded") {
-        const events = Array.isArray(documentEvent.events)
-          ? documentEvent.events as DirectEditEvent[]
-          : undefined;
-        persistCurrentDraftRecoveryRef.current(undefined, events);
         if (documentEvent.mutation) {
           captureUsageEvent("direct_edit_committed", {
             edit_kind: documentEvent.mutation.kind,
@@ -2015,9 +2011,6 @@ export default function Workbench() {
     commentRailOffsetRef.current = commentRailOffset;
   }, [commentRailOffset]);
   useEffect(() => {
-    attachmentUploadCountRef.current = attachmentUploadCount;
-  }, [attachmentUploadCount]);
-  useEffect(() => {
     const capabilities = resolveRuntimeCapabilities({
       runtimeConfig: window.htmlAIRuntime,
     });
@@ -2428,98 +2421,6 @@ export default function Workbench() {
     workspaceController?.clearDocumentAutosaveTimer();
   }, [workspaceController]);
 
-  const persistDraftRecovery = useCallback((
-    snapshot: PendingDraft | null,
-    context?: Partial<ProjectContext>,
-  ) => {
-    const documentKeyPart = snapshot?.documentId
-      || context?.documentId
-      || projectSessionRef.current.documentId;
-    const sourceKeyPart = snapshot?.sourcePath
-      || context?.sourcePath
-      || projectSessionRef.current.sourcePath;
-    const keys = [
-      documentKeyPart ? `html-ai-draft-recovery:${documentKeyPart}` : "",
-      sourceKeyPart ? `html-ai-draft-recovery:${sourceKeyPart}` : "",
-    ].filter(Boolean);
-    if (!snapshot) {
-      recoveryStore.remove(keys);
-      return;
-    }
-      const composerText = commentSessionRef.current.composerDraft;
-      const composerTarget = commentSessionRef.current.composerTarget;
-      const composerAttachments = commentSessionRef.current.composerAttachments;
-      const commentEdit = commentEditSessionHasChanges(
-        commentSessionRef.current.editSession,
-      )
-        ? commentSessionRef.current.editSession
-        : null;
-      if (
-        snapshot.comments.length === 0
-        && snapshot.changeEvents.length === 0
-        && snapshot.deletedCommentIds.length === 0
-        && !composerText.trim()
-        && composerAttachments.length === 0
-        && !composerTarget
-        && !commentEdit
-      ) {
-        recoveryStore.remove(keys);
-        return;
-      }
-      recoveryStore.write(keys, {
-        schemaVersion: "3.2.0",
-        projectId: snapshot.projectId,
-        documentId: snapshot.documentId,
-        sourcePath: snapshot.sourcePath,
-        basedOnVersionId: snapshot.basedOnVersionId,
-        baseDraftRevision: snapshot.expectedDraftRevision,
-        operationId: snapshot.operationId,
-        localSequence: ++draftRecoverySequenceRef.current,
-        comments: snapshot.comments.map(persistedComment),
-        changeEvents: snapshot.changeEvents.map(persistedChangeEvent),
-        deletedCommentIds: snapshot.deletedCommentIds,
-        composerDraft: composerText,
-        composerCommentId: commentSessionRef.current.composerCommentId,
-        composerAttachments: composerAttachments.map(persistedAttachment),
-        composerTarget: composerTarget ? persistedTargetRef(composerTarget) : null,
-        commentEdit: commentEdit
-          ? {
-              commentId: commentEdit.commentId,
-              draftText: commentEdit.draftText,
-              draftAttachments: commentEdit.draftAttachments.map(
-                persistedAttachment,
-              ),
-            }
-          : null,
-      });
-    // The Bridge remains authoritative after acknowledgement; this is only a
-    // crash fallback and storage failure cannot downgrade the Bridge result.
-  }, []);
-  useEffect(() => {
-    persistDraftRecoveryRef.current = persistDraftRecovery;
-  }, [persistDraftRecovery]);
-
-  const persistCurrentDraftRecovery = useCallback((
-    nextComments = commentSessionRef.current.comments,
-    nextEvents = commentSessionRef.current.changeEvents,
-  ) => {
-    const context = captureProjectContext();
-    if (!context) return;
-    const snapshot = draftSessionRef.current.createSnapshot({
-      context,
-      basedOnVersionId:
-        versionSessionRef.current.snapshot.currentBasedOnVersionId,
-      comments: nextComments,
-      changeEvents: nextEvents,
-      deletedCommentIds: commentSessionRef.current.deletedCommentIds,
-      operationId: draftRecoveryOperationIdRef.current || undefined,
-    });
-    if (snapshot) persistDraftRecovery(snapshot);
-  }, [captureProjectContext, persistDraftRecovery]);
-  useEffect(() => {
-    persistCurrentDraftRecoveryRef.current = persistCurrentDraftRecovery;
-  }, [persistCurrentDraftRecovery]);
-
   const normalizeCurrentGlobalComments = useCallback((): CommentItem[] => {
     const normalized = normalizeGlobalCommentTargets(
       commentSessionRef.current.comments.filter(commentHasContent),
@@ -2532,9 +2433,8 @@ export default function Workbench() {
       (comment) => normalizedById.get(comment.commentId) || comment,
     );
     commentSessionRef.current.setComments(nextComments);
-    persistCurrentDraftRecovery(nextComments);
     return nextComments.filter(commentHasContent);
-  }, [persistCurrentDraftRecovery]);
+  }, []);
 
   // Workbench only creates CanvasChangeInput and delegates durable source
   // authority to the composed application Workflow.
@@ -2704,154 +2604,10 @@ export default function Workbench() {
     invalidateCanvasRenderAcks();
     if (changesSourcePath) {
       workspaceController?.resetDocumentWorkflow();
-      draftSessionRef.current.deactivate();
-      draftRecoveryOperationIdRef.current = null;
+      workspaceController?.resetCommentWorkflow();
     }
     return context;
   }, [invalidateCanvasRenderAcks, workspaceController]);
-
-  const recoverDraftLog = useCallback((
-    context: ProjectContext,
-    serverComments: CommentItem[],
-    serverEvents: DirectEditEvent[],
-    serverDraftRevision: number,
-    serverDeletedCommentIds: string[],
-    serverAppliedOperationIds: string[],
-    serverBasedOnVersionId: string | null,
-  ): {
-    comments: CommentItem[];
-    changeEvents: DirectEditEvent[];
-    composerDraft: string;
-    composerCommentId: string | null;
-    composerAttachments: CommentAttachment[];
-    composerTarget: HtmlCanvasSelection | null;
-    commentEdit: {
-      commentId: string;
-      draftText: string;
-      draftAttachments: CommentAttachment[];
-    } | null;
-  } => {
-    const keys = [
-      `html-ai-draft-recovery:${context.documentId}`,
-      `html-ai-draft-recovery:${context.sourcePath}`,
-    ];
-    let latest: Record<string, unknown> | null = null;
-    for (const { value: parsed } of recoveryStore.readRecords(keys)) {
-        if (
-          !isRecord(parsed)
-          || String(parsed.sourcePath || "") !== context.sourcePath
-          || (parsed.documentId && String(parsed.documentId) !== context.documentId)
-          || String(parsed.projectId || "") !== context.projectId
-          || String(parsed.documentId || "") !== context.documentId
-          || String(parsed.basedOnVersionId || "")
-            !== String(serverBasedOnVersionId || "")
-        ) continue;
-        if (
-          !latest
-          || Number(parsed.localSequence || 0) > Number(latest.localSequence || 0)
-        ) latest = parsed;
-    }
-    if (!latest) {
-      draftRecoveryOperationIdRef.current = null;
-      return {
-        comments: serverComments,
-        changeEvents: serverEvents,
-        composerDraft: "",
-        composerCommentId: null,
-        composerAttachments: [],
-        composerTarget: null,
-        commentEdit: null,
-      };
-    }
-    const localComments = Array.isArray(latest.comments)
-      ? commentsFromRecords(latest.comments)
-      : [];
-    const recoveredOperationId = isDraftOperationId(latest.operationId)
-      ? String(latest.operationId)
-      : createDraftOperationId();
-    const operationAlreadyApplied =
-      serverAppliedOperationIds.includes(recoveredOperationId);
-    const localDeletedCommentIds = new Set(
-      Array.isArray(latest.deletedCommentIds)
-        ? latest.deletedCommentIds.map((value) => String(value))
-        : [],
-    );
-    const rebased = rebaseDraftMutation({
-      operationId: recoveredOperationId,
-      expectedDraftRevision: Number(latest.baseDraftRevision || 0),
-      comments: operationAlreadyApplied ? serverComments : localComments,
-      changeEvents: Array.isArray(latest.changeEvents)
-        ? (
-            operationAlreadyApplied
-              ? serverEvents
-              : changesFromDraftRecords(latest.changeEvents)
-          )
-        : serverEvents,
-      deletedCommentIds: operationAlreadyApplied
-        ? serverDeletedCommentIds
-        : [...localDeletedCommentIds],
-    }, {
-      draftRevision: serverDraftRevision,
-      comments: serverComments,
-      changeEvents: serverEvents,
-      deletedCommentIds: serverDeletedCommentIds,
-    });
-    commentSessionRef.current.replaceDeletedCommentIds(
-      operationAlreadyApplied ? [] : rebased.deletedCommentIds,
-    );
-    draftRecoveryOperationIdRef.current = operationAlreadyApplied
-      ? null
-      : recoveredOperationId;
-    return {
-      comments: rebased.comments,
-      changeEvents: rebased.changeEvents,
-      composerDraft: typeof latest.composerDraft === "string"
-        ? latest.composerDraft
-        : "",
-      composerCommentId: /^comment_[A-Za-z0-9_-]+$/.test(
-        String(latest.composerCommentId || ""),
-      )
-        ? String(latest.composerCommentId)
-        : null,
-      composerAttachments: Array.isArray(latest.composerAttachments)
-        ? latest.composerAttachments
-            .map(attachmentFromRecord)
-            .filter((item): item is CommentAttachment => Boolean(item))
-        : [],
-      composerTarget: isRecord(latest.composerTarget)
-        ? selectionFromRecord(latest.composerTarget)
-        : null,
-      commentEdit: isRecord(latest.commentEdit)
-        && /^comment_[A-Za-z0-9_-]+$/.test(
-          String(latest.commentEdit.commentId || ""),
-        )
-        ? {
-            commentId: String(latest.commentEdit.commentId),
-            draftText: String(latest.commentEdit.draftText || ""),
-            draftAttachments: Array.isArray(
-              latest.commentEdit.draftAttachments,
-            )
-              ? latest.commentEdit.draftAttachments
-                  .map(attachmentFromRecord)
-                  .filter(
-                    (item): item is CommentAttachment => Boolean(item),
-                  )
-              : [],
-          }
-        : null,
-    };
-  }, []);
-  useEffect(() => {
-    projectWorkflowLegacyRef.current.recoverDraft = (input) => recoverDraftLog(
-      input.context,
-      input.serverComments,
-      input.serverEvents,
-      input.serverDraftRevision,
-      input.serverDeletedCommentIds,
-      input.serverAppliedOperationIds,
-      input.serverBasedOnVersionId,
-    );
-  }, [recoverDraftLog]);
 
   const refreshWorkspace = useCallback(async (
     sourceOverride?: string | null,
@@ -2945,58 +2701,6 @@ export default function Workbench() {
     return () => window.removeEventListener("keydown", closeDrawer);
   }, [drawer, previewAttachment]);
 
-  const handleDraftSessionEvent = useCallback((
-    event: DraftSessionEvent<CommentItem, DirectEditEvent>,
-  ) => {
-    if (event.type === "failed") {
-      if (!isCurrentProjectContext(event.write)) return;
-      setDraftPersistError(productErrorMessage(
-        event.error,
-        "本轮评论自动恢复后仍无法记录，请稍后重试。",
-      ));
-      return;
-    }
-    if (event.type !== "acknowledged") return;
-    if (!isCurrentProjectContext(event.write)) return;
-
-    const acknowledgedComments = commentsFromRecords(
-      event.authoritative.comments,
-    );
-    const acknowledgedEvents = changesFromDraftRecords(
-      event.authoritative.changeEvents,
-    );
-    const sessionState = draftSessionRef.current.inspect();
-    setDraftPersistError("");
-    if (!sessionState.pending) {
-      if (event.rebaseCount > 0) {
-        commentSessionRef.current.update({
-          comments: acknowledgedComments,
-          changeEvents: acknowledgedEvents,
-          deletedCommentIds: [],
-        });
-      } else {
-        commentSessionRef.current.clearDeletedCommentIds();
-      }
-      persistDraftRecovery({
-        ...event.write,
-        expectedDraftRevision: event.authoritative.draftRevision,
-        comments: acknowledgedComments,
-        changeEvents: acknowledgedEvents,
-        deletedCommentIds: [],
-      });
-    }
-  }, [isCurrentProjectContext, persistDraftRecovery]);
-
-  useEffect(() => {
-    const session = draftSessionRef.current;
-    session.setObserver(handleDraftSessionEvent);
-    return () => session.setObserver(null);
-  }, [handleDraftSessionEvent]);
-
-  const flushDraftPersistence = useCallback(async (
-    snapshot?: PendingDraft,
-  ): Promise<boolean> => draftSessionRef.current.drain(snapshot), []);
-
   const rememberAttachmentObjectUrl = useCallback((
     attachmentId: string,
     objectUrl: string,
@@ -3025,10 +2729,13 @@ export default function Workbench() {
   const attachmentBlob = useCallback(async (
     attachment: CommentAttachment,
   ): Promise<Blob> => {
-    const activeSource = projectSessionRef.current.sourcePath;
-    if (!activeSource) throw new Error("当前评论还没有绑定本地项目。");
-    return bridgeClient.attachment(activeSource, attachment.relativePath);
-  }, []);
+    const outcome = await requiredWorkspaceController(workspaceController)
+      .readAttachment({ attachment });
+    if (outcome.status === "succeeded") return outcome.value;
+    throw new Error(
+      ("reason" in outcome && outcome.reason) || "附件暂时无法读取。",
+    );
+  }, [workspaceController]);
 
   const ensureAttachmentObjectUrl = useCallback(async (
     attachment: CommentAttachment,
@@ -3040,64 +2747,25 @@ export default function Workbench() {
     return objectUrl;
   }, [attachmentBlob, rememberAttachmentObjectUrl]);
 
-  const deleteAttachmentFile = useCallback(async (
-    attachment: CommentAttachment,
-    context: ProjectContext | null = captureProjectContext(),
-  ) => {
-    if (!context) return;
-    try {
-      await bridgeClient.deleteAttachment({
-        projectId: context.projectId,
-        documentId: context.documentId,
-        sourcePath: context.sourcePath,
-        relativePath: attachment.relativePath,
-      });
-    } catch (cause) {
-      setToast({
-        title: "附件已从评论移除",
-        message: productErrorMessage(cause, "项目中的附件副本暂时无法清理。"),
-        tone: "warning",
-        dedupeKey: `attachment-cleanup-${attachment.attachmentId}`,
-      });
-    }
-  }, [captureProjectContext]);
-
   const removeComposerAttachment = useCallback((attachment: CommentAttachment) => {
-    const next = commentSessionRef.current.composerAttachments.filter(
-      (item) => item.attachmentId !== attachment.attachmentId,
-    );
-    commentSessionRef.current.setComposerAttachments(next);
+    const outcome = workspaceController?.removeComposerAttachment({
+      attachmentId: attachment.attachmentId,
+    });
+    if (outcome?.status !== "succeeded") return;
     forgetAttachmentObjectUrl(attachment.attachmentId);
-    persistCurrentDraftRecovery();
-    void deleteAttachmentFile(attachment);
-  }, [deleteAttachmentFile, forgetAttachmentObjectUrl, persistCurrentDraftRecovery]);
+  }, [forgetAttachmentObjectUrl, workspaceController]);
 
   const removeCommentAttachment = useCallback((
     commentId: string,
     attachment: CommentAttachment,
   ) => {
-    const current = commentSessionRef.current.editSession;
-    if (!current || current.commentId !== commentId) return;
-    const wasSavedBeforeEdit = current.baselineAttachments.some(
-      (item) => item.attachmentId === attachment.attachmentId,
-    );
-    const nextSession = {
-      ...current,
-      draftAttachments: current.draftAttachments.filter(
-        (item) => item.attachmentId !== attachment.attachmentId,
-      ),
-    };
-    commentSessionRef.current.setEditSession(nextSession);
+    const outcome = workspaceController?.removeCommentEditAttachment({
+      commentId,
+      attachmentId: attachment.attachmentId,
+    });
+    if (outcome?.status !== "succeeded") return;
     forgetAttachmentObjectUrl(attachment.attachmentId);
-    persistCurrentDraftRecovery();
-    if (!wasSavedBeforeEdit) {
-      void deleteAttachmentFile(attachment);
-    }
-  }, [
-    deleteAttachmentFile,
-    forgetAttachmentObjectUrl,
-    persistCurrentDraftRecovery,
-  ]);
+  }, [forgetAttachmentObjectUrl, workspaceController]);
 
   const uploadAttachments = useCallback(async (
     files: File[],
@@ -3171,193 +2839,54 @@ export default function Workbench() {
       });
       return;
     }
-    const attachmentPersistence =
-      runtimeCapabilitiesRef.current.attachmentPersistence;
-    if (attachmentPersistence === "memory") {
-      const memoryAttachments = selected.map((file) => {
-        const attachmentId = recordId("attachment", attachmentCounter.current++);
-        const attachment: CommentAttachment = {
-          attachmentId,
-          kind: isImageFile(file) ? "image" : "file",
-          fileName: file.name || "附件",
-          mediaType: file.type || "application/octet-stream",
-          byteLength: file.size,
-          sha256: `memory:${attachmentId}`,
-          relativePath: `memory/${attachmentId}/${file.name || "attachment"}`,
-          source,
-        };
-        if (attachment.kind === "image") {
-          rememberAttachmentObjectUrl(attachmentId, URL.createObjectURL(file));
-        }
-        return attachment;
-      });
-      if (target.kind === "composer") {
-        const next = [...commentSessionRef.current.composerAttachments, ...memoryAttachments];
-        commentSessionRef.current.setComposerAttachments(next);
-      } else {
-        const current = commentSessionRef.current.editSession;
-        if (!current || current.commentId !== target.commentId) return;
-        const nextSession = {
-          ...current,
-          draftAttachments: [
-            ...current.draftAttachments,
-            ...memoryAttachments,
-          ],
-        };
-        commentSessionRef.current.setEditSession(nextSession);
-        persistCurrentDraftRecovery();
-      }
-      addedAttachmentCount = memoryAttachments.length;
-      if (issueNotes.length > 0) {
-        const needsRemoval = attachmentPlan.overLimit.length > 0
-          && existingCount + addedAttachmentCount >= MAX_COMMENT_ATTACHMENTS;
-        setToast({
-          title: addedAttachmentCount > 0
-            ? "部分附件没有加入"
-            : "附件没有加入",
-          message: `${issueNotes.join("；")}。${
-            addedAttachmentCount > 0
-              ? needsRemoval
-                ? "已加入的附件仍然保留；如需加入其余文件，请先移除一个附件。"
-                : "已加入的附件仍然保留。"
-              : needsRemoval
-                ? "请先移除一个附件，再重新选择。"
-                : "请选择其他文件。"
-          }`,
-          tone: "warning",
-          sticky: true,
-          disposition: "direct-action",
-          dedupeKey: `attachment-batch-${target.commentId}`,
-          action: attachmentRecoveryAction(needsRemoval),
-        });
-      }
-      return;
-    }
-    if (attachmentPersistence !== "bridge") return;
-    const activeSource = projectSessionRef.current.sourcePath;
-    if (!activeSource) {
-      setToast({
-        title: "请先打开本地 HTML",
-        message: "附件需要保存在当前项目记录中；打开 HTML 后即可添加。",
-        tone: "warning",
-        disposition: "direct-action",
-        dedupeKey: "submit-blocked",
-        action: { id: "retry-project-open", label: "打开本地 HTML" },
-      });
-      return;
-    }
-    let attachmentContext: ProjectContext;
-    try {
-      const registered = registrationContextFromOutcome(
-        await requiredWorkspaceController(workspaceController).ensureRegistered({
-          sourcePath: activeSource,
-        }),
-      );
-      if (!registered) throw new Error("当前项目已经切换，请重试。");
-      attachmentContext = registered;
-    } catch (cause) {
-      setToast({
-        title: "附件尚未加入",
-        message: productErrorMessage(
-          cause,
-          "项目资料暂时无法建立；附件没有丢失，请重试选择。",
-        ),
-        tone: "warning",
-        disposition: "direct-action",
-        dedupeKey: "submit-blocked",
-        action: {
-          id: "open-attachment-picker",
-          label: "重新选择",
-          target,
-        },
-      });
-      return;
-    }
-    for (const originalFile of selected) {
-      const file = source === "clipboard" && !originalFile.name
+    const uploadFiles = selected.map((originalFile) => (
+      source === "clipboard" && !originalFile.name
         ? new File(
             [originalFile],
             `粘贴图片-${Date.now()}.${originalFile.type.split("/")[1] || "png"}`,
             { type: originalFile.type || "image/png" },
           )
-        : originalFile;
-      attachmentUploadCountRef.current += 1;
-      setAttachmentUploadCount(attachmentUploadCountRef.current);
-      try {
-        const attachmentId = recordId("attachment", attachmentCounter.current++);
-        const payload = await bridgeClient.saveAttachment({
-          projectId: attachmentContext.projectId,
-          documentId: attachmentContext.documentId,
-          sourcePath: attachmentContext.sourcePath,
-          commentId: target.commentId,
-          attachmentId,
-          fileName: file.name || "附件",
-          mediaType: file.type || "application/octet-stream",
-          byteLength: file.size,
-          kind: isImageFile(file) ? "image" : "file",
-          source,
-          dataBase64: await fileAsBase64(file),
-        });
-        const attachment = attachmentFromRecord(
-          isRecord(payload.attachment) ? payload.attachment : null,
+        : originalFile
+    ));
+    const outcome = await requiredWorkspaceController(workspaceController)
+      .uploadAttachments({
+        files: uploadFiles,
+        target,
+        source,
+        persistence: runtimeCapabilitiesRef.current.attachmentPersistence,
+      });
+    if (outcome.status !== "succeeded") {
+      setToast({
+        title: "附件尚未加入",
+        message: (
+          "reason" in outcome && outcome.reason
+        ) || "项目资料暂时无法建立；附件没有丢失，请重试选择。",
+        tone: "warning",
+        disposition: "direct-action",
+        dedupeKey: "submit-blocked",
+        action: { id: "open-attachment-picker", label: "重新选择", target },
+      });
+      return;
+    }
+    const uploaded = outcome.value as {
+      attachments: Array<{
+        attachment: CommentAttachment;
+        sourceFile?: File;
+      }>;
+      failures: Array<{ fileName: string; reason: string }>;
+    };
+    addedAttachmentCount = uploaded.attachments.length;
+    for (const item of uploaded.attachments) {
+      if (item.attachment.kind === "image" && item.sourceFile) {
+        rememberAttachmentObjectUrl(
+          item.attachment.attachmentId,
+          URL.createObjectURL(item.sourceFile),
         );
-        if (!attachment) throw new Error("附件已写入，但返回的记录不完整。");
-        if (target.kind === "composer") {
-          if (commentSessionRef.current.composerCommentId !== target.commentId) {
-            void deleteAttachmentFile(attachment, attachmentContext);
-            continue;
-          }
-          if (attachment.kind === "image") {
-            rememberAttachmentObjectUrl(
-              attachment.attachmentId,
-              URL.createObjectURL(file),
-            );
-          }
-          const next = [...commentSessionRef.current.composerAttachments, attachment];
-          commentSessionRef.current.setComposerAttachments(next);
-          persistCurrentDraftRecovery();
-          addedAttachmentCount += 1;
-        } else {
-          const current = commentSessionRef.current.editSession;
-          if (
-            !current
-            || current.commentId !== target.commentId
-            || !commentSessionRef.current.comments.some(
-              (comment) => comment.commentId === target.commentId,
-            )
-          ) {
-            void deleteAttachmentFile(attachment, attachmentContext);
-            continue;
-          }
-          if (attachment.kind === "image") {
-            rememberAttachmentObjectUrl(
-              attachment.attachmentId,
-              URL.createObjectURL(file),
-            );
-          }
-          const nextSession = {
-            ...current,
-            draftAttachments: [...current.draftAttachments, attachment],
-          };
-          commentSessionRef.current.setEditSession(nextSession);
-          persistCurrentDraftRecovery();
-          addedAttachmentCount += 1;
-        }
-      } catch (cause) {
-        failedNames.push(file.name || "未命名文件");
-        if (failedNames.length === 1) {
-          issueNotes.push(productErrorMessage(
-            cause,
-            "本地项目资料暂时没有响应。",
-          ));
-        }
-      } finally {
-        attachmentUploadCountRef.current = Math.max(
-          0,
-          attachmentUploadCountRef.current - 1,
-        );
-        setAttachmentUploadCount(attachmentUploadCountRef.current);
       }
+    }
+    for (const failure of uploaded.failures) {
+      failedNames.push(failure.fileName);
+      if (failedNames.length === 1) issueNotes.push(failure.reason);
     }
     if (failedNames.length > 0) {
       issueNotes.push(`${failedNames.join("、")} 未加入评论`);
@@ -3402,8 +2931,6 @@ export default function Workbench() {
       }
     }
   }, [
-    deleteAttachmentFile,
-    persistCurrentDraftRecovery,
     rememberAttachmentObjectUrl,
     workspaceController,
   ]);
@@ -3482,73 +3009,6 @@ export default function Workbench() {
       });
     }
   }, [attachmentBlob]);
-
-  useEffect(() => {
-    const draftSession = draftSessionRef.current;
-    const context = draftSession.context;
-    if (
-      !context
-      || !draftSession.isActive(context)
-      || projectHydrating
-    ) return;
-    // CommentSession is the synchronous owner of the complete working copy.
-    // An acknowledgement observer can adopt a rebased aggregate after this
-    // React effect was scheduled, so mixing render-captured fields with the
-    // live tombstones could otherwise enqueue a stale partial replacement.
-    const workingCopy = commentSessionRef.current;
-    const snapshot = draftSession.createSnapshot({
-      context,
-      basedOnVersionId:
-        versionSessionRef.current.snapshot.currentBasedOnVersionId,
-      comments: workingCopy.comments,
-      changeEvents: workingCopy.changeEvents,
-      deletedCommentIds: workingCopy.deletedCommentIds,
-      operationId: draftRecoveryOperationIdRef.current || undefined,
-    });
-    if (!snapshot) return;
-    draftRecoveryOperationIdRef.current = null;
-    persistDraftRecovery(snapshot);
-    if (runSessionRef.current.activeLocked) return;
-    void flushDraftPersistence(snapshot);
-  }, [
-    changeEvents,
-    comments,
-    currentBasedOnVersionId,
-    flushDraftPersistence,
-    persistDraftRecovery,
-    projectHydrating,
-    projectLocked,
-    projectSnapshot,
-  ]);
-
-  useEffect(() => {
-    const draftSession = draftSessionRef.current;
-    const context = draftSession.context;
-    if (
-      !context
-      || !draftSession.isActive(context)
-      || projectHydrating
-    ) return;
-    const snapshot = draftSession.createSnapshot({
-      context,
-      basedOnVersionId:
-        versionSessionRef.current.snapshot.currentBasedOnVersionId,
-      comments: commentSessionRef.current.comments,
-      changeEvents: commentSessionRef.current.changeEvents,
-      deletedCommentIds: commentSessionRef.current.deletedCommentIds,
-      operationId: draftRecoveryOperationIdRef.current || undefined,
-    });
-    if (snapshot) persistDraftRecovery(snapshot);
-  }, [
-    currentBasedOnVersionId,
-    draft,
-    draftAttachments,
-    draftCommentId,
-    draftTarget,
-    persistDraftRecovery,
-    projectHydrating,
-    projectSnapshot,
-  ]);
 
   useEffect(() => {
     if (!workspaceController) return undefined;
@@ -3952,9 +3412,7 @@ export default function Workbench() {
         sourcePath: previousSourcePath,
       });
       workspaceController?.resetDocumentWorkflow();
-      draftRecoveryOperationIdRef.current = null;
-      draftSessionRef.current.deactivate();
-      recoveryStore.remove(`html-ai-draft-recovery:${previousSourcePath}`);
+      workspaceController?.resetCommentWorkflow();
       setProjectName(result.stem || requestedStem);
       setLastModifiedAt(result.lastModifiedAt || null);
       await Promise.all([
@@ -3965,7 +3423,6 @@ export default function Workbench() {
           true,
         ),
       ]);
-      persistCurrentDraftRecovery();
       fileRenameEditingRef.current = false;
       setFileRenameEditing(false);
       setFileRenameDraft("");
@@ -3995,7 +3452,6 @@ export default function Workbench() {
     currentSourceFileStem,
     enqueueAutosave,
     fileRenameDraft,
-    persistCurrentDraftRecovery,
     projectHydrating,
     projectLoadError,
     refreshRecents,
@@ -4695,7 +4151,6 @@ export default function Workbench() {
       relinkSelectionArmedRef.current = false;
       setRelinkingTarget(null);
       setComposerOpen(true);
-      persistCurrentDraftRecovery();
       queueReviewPairReveal(nextTarget, "__composer");
       requestComposerFocus();
       return true;
@@ -4724,7 +4179,6 @@ export default function Workbench() {
     relinkingTargetRef.current = null;
     relinkSelectionArmedRef.current = false;
     setRelinkingTarget(null);
-    persistCurrentDraftRecovery(nextComments);
     updateFocusedComment(relinkingId);
     queueReviewPairReveal(nextTarget, relinkingId);
     const remainingUnsafe = nextComments.filter(
@@ -4745,7 +4199,6 @@ export default function Workbench() {
     return true;
   }, [
     beginTargetRelink,
-    persistCurrentDraftRecovery,
     queueReviewPairReveal,
     requestComposerFocus,
     updateFocusedComment,
@@ -4816,7 +4269,7 @@ export default function Workbench() {
 
   const openCommentComposer = useCallback((target: HtmlCanvasSelection) => {
     if (relinkingTargetRef.current && finishTargetRelink(target)) return;
-    if (attachmentUploadCountRef.current > 0) return;
+    if (attachmentUploadCount > 0) return;
     if (
       runSessionRef.current.activeLocked
       || projectHydrating
@@ -4886,6 +4339,7 @@ export default function Workbench() {
     queueReviewPairReveal(target, "__composer");
     requestComposerFocus();
   }, [
+    attachmentUploadCount,
     finishTargetRelink,
     prepareProjectRecords,
     projectHydrating,
@@ -4930,7 +4384,7 @@ export default function Workbench() {
   ]);
 
   const closeCommentComposer = useCallback(() => {
-    if (attachmentUploadCountRef.current > 0) return;
+    if (attachmentUploadCount > 0) return;
     setPendingDeleteCommentId(null);
     if (
       commentSessionRef.current.composerDraft.trim()
@@ -4938,43 +4392,42 @@ export default function Workbench() {
     ) {
       setComposerOpen(false);
       updateFocusedComment(null);
-      persistCurrentDraftRecovery();
       return;
     }
     clearCurrentComposer();
-    persistCurrentDraftRecovery();
   }, [
+    attachmentUploadCount,
     clearCurrentComposer,
-    persistCurrentDraftRecovery,
     updateFocusedComment,
   ]);
 
   const discardCurrentComposer = useCallback(() => {
-    if (attachmentUploadCountRef.current > 0) return;
-    const discardedCommentId = commentSessionRef.current.composerCommentId;
-    const discardedAttachments = [...commentSessionRef.current.composerAttachments];
+    if (attachmentUploadCount > 0) return;
+    const outcome = workspaceController?.discardCommentComposer();
+    if (outcome?.status !== "succeeded") return;
     if (relinkingTargetRef.current === "__composer") {
       relinkingTargetRef.current = null;
       relinkSelectionArmedRef.current = false;
       setRelinkingTarget(null);
     }
-    if (discardedCommentId) {
-      commentSessionRef.current.markDeleted(discardedCommentId);
-    }
-    clearCurrentComposer();
-    persistCurrentDraftRecovery();
+    composerFocusPendingRef.current = false;
+    setComposerOpen(false);
+    setPendingDeleteCommentId(null);
+    updateFocusedComment(null);
+    const discardedAttachments = (
+      outcome.value as { attachments?: CommentAttachment[] }
+    ).attachments ?? [];
     for (const attachment of discardedAttachments) {
       forgetAttachmentObjectUrl(attachment.attachmentId);
-      void deleteAttachmentFile(attachment);
     }
     if (toastRef.current?.dedupeKey === "unfinished-comment-draft") {
       setToast(null);
     }
   }, [
-    clearCurrentComposer,
-    deleteAttachmentFile,
+    attachmentUploadCount,
     forgetAttachmentObjectUrl,
-    persistCurrentDraftRecovery,
+    updateFocusedComment,
+    workspaceController,
   ]);
 
   const addComment = useCallback(async () => {
@@ -4998,101 +4451,48 @@ export default function Workbench() {
       return;
     }
     if (attachmentUploadCount > 0) return;
-    const commentEpoch = projectSessionRef.current.epoch;
-    const requestedTargetId = draftTarget.id;
-    if (projectSessionRef.current.sourcePath) {
-      try {
-        const registered = registrationContextFromOutcome(
-          await requiredWorkspaceController(workspaceController).ensureRegistered(),
-        );
-        if (!registered) throw new Error("当前项目已经切换，请重试。");
-      } catch (cause) {
-        if (commentEpoch !== projectSessionRef.current.epoch) return;
-        setToast({
-          title: "评论尚未保存",
-          message: productErrorMessage(
-            cause,
-            "项目记录暂时无法建立；评论内容仍保留在输入框中。",
-          ),
-          tone: "warning",
-          sticky: true,
-          disposition: "direct-action",
-          dedupeKey: "project-registration",
-          action: { id: "resume-draft", label: "继续填写" },
-        });
-        requestComposerFocus();
-        return;
-      }
-    }
-    const currentTarget = commentSessionRef.current.composerTarget;
-    if (
-      commentEpoch !== projectSessionRef.current.epoch
-      || runSessionRef.current.activeLocked
-      || projectHydrating
-      || projectLoadError
-      || viewTransitioningRef.current
-      || String(documentSessionRef.current.persistState) === "conflict"
-      || !currentTarget
-      || currentTarget.id !== requestedTargetId
-      || !canSaveCommentTarget(currentTarget)
-    ) return;
-    const currentText = commentSessionRef.current.composerDraft.trim();
-    const currentAttachments = [...commentSessionRef.current.composerAttachments];
-    if (!currentText && currentAttachments.length === 0) {
-      requestComposerFocus();
-      return;
-    }
-    const now = new Date().toISOString();
     const commentId = commentSessionRef.current.composerCommentId
       || draftCommentId
       || recordId("comment", commentCounter.current++);
-    const commentTarget = independentCommentTarget(currentTarget, commentId);
-    const nextComments = [...commentSessionRef.current.comments, {
-      commentId,
-      createdAt: now,
-      updatedAt: now,
-      target: commentTarget,
-      text: currentText,
-      ...(currentAttachments.length > 0
-        ? { attachments: currentAttachments.map(persistedAttachment) }
-        : {}),
-      baseVersionId: currentBasedOnVersionId,
-    }];
-    const nextDeletedCommentIds = commentSessionRef.current.deletedCommentIds;
-    nextDeletedCommentIds.delete(nextComments.at(-1)?.commentId || "");
-    commentSessionRef.current.update({
-      comments: nextComments,
-      deletedCommentIds: nextDeletedCommentIds,
-      composerDraft: "",
-      composerCommentId: null,
-      composerAttachments: [],
-      composerTarget: null,
-    });
+    const outcome = await requiredWorkspaceController(workspaceController)
+      .commitComment({ commentId });
+    if (outcome.status !== "succeeded") {
+      if (outcome.status === "stale") return;
+      setToast({
+        title: "评论尚未保存",
+        message: outcome.reason || "项目记录暂时无法建立；评论内容仍保留在输入框中。",
+        tone: "warning",
+        sticky: true,
+        disposition: "direct-action",
+        dedupeKey: "project-registration",
+        action: { id: "resume-draft", label: "继续填写" },
+      });
+      requestComposerFocus();
+      return;
+    }
+    const comment = (outcome.value as { comment: CommentItem }).comment;
     setComposerOpen(false);
     setPendingDeleteCommentId(null);
     if (toastRef.current?.dedupeKey === "unfinished-comment-draft") {
       setToast(null);
     }
-    updateFocusedComment(commentId);
-    persistCurrentDraftRecovery(nextComments);
-    queueReviewPairReveal(commentTarget, commentId);
+    updateFocusedComment(comment.commentId);
+    queueReviewPairReveal(comment.target, comment.commentId);
     captureUsageEvent("comment_saved", {
-      target_level: commentTarget.level === "insertion"
+      target_level: comment.target.level === "insertion"
         ? "insertion"
-        : commentTarget.level === "part" ? "part" : "module",
-      has_text: Boolean(currentText),
-      attachment_count: countBucket(currentAttachments.length),
-      has_image: currentAttachments.some((attachment) => attachment.kind === "image"),
-      has_file: currentAttachments.some((attachment) => attachment.kind === "file"),
+        : comment.target.level === "part" ? "part" : "module",
+      has_text: Boolean(comment.text),
+      attachment_count: countBucket((comment.attachments ?? []).length),
+      has_image: (comment.attachments ?? []).some((attachment) => attachment.kind === "image"),
+      has_file: (comment.attachments ?? []).some((attachment) => attachment.kind === "file"),
     }, projectSessionRef.current.projectId || undefined);
   }, [
-    currentBasedOnVersionId,
     draft,
     draftAttachments,
     draftCommentId,
     draftTarget,
     attachmentUploadCount,
-    persistCurrentDraftRecovery,
     projectHydrating,
     projectLoadError,
     queueReviewPairReveal,
@@ -5173,26 +4573,22 @@ export default function Workbench() {
   ]);
 
   const cancelCommentEdit = useCallback((revealComment = true) => {
-    if (attachmentUploadCountRef.current > 0) return;
+    if (attachmentUploadCount > 0) return;
     const session = commentSessionRef.current.editSession;
     const current = commentSessionRef.current.comments.find(
       (comment) => comment.commentId === session?.commentId,
     );
-    const baselineIds = new Set(
-      session?.baselineAttachments.map(
-        (attachment) => attachment.attachmentId,
-      ) ?? [],
-    );
-    const stagedAttachments = session?.draftAttachments.filter(
-      (attachment) => !baselineIds.has(attachment.attachmentId),
-    ) ?? [];
-    commentSessionRef.current.setEditSession(null);
+    const outcome = workspaceController?.cancelCommentEdit({
+      commentId: session?.commentId,
+    });
+    if (outcome?.status !== "succeeded") return;
     commentEditResumePendingRef.current = null;
     setEditingCommentId(null);
-    persistCurrentDraftRecovery();
+    const stagedAttachments = (
+      outcome.value as { stagedAttachments?: CommentAttachment[] }
+    ).stagedAttachments ?? [];
     for (const attachment of stagedAttachments) {
       forgetAttachmentObjectUrl(attachment.attachmentId);
-      void deleteAttachmentFile(attachment);
     }
     if (toastRef.current?.dedupeKey === "unfinished-comment-edit") {
       setToast(null);
@@ -5201,10 +4597,10 @@ export default function Workbench() {
       queueReviewCommentFocus(current.target, current.commentId);
     }
   }, [
-    deleteAttachmentFile,
+    attachmentUploadCount,
     forgetAttachmentObjectUrl,
-    persistCurrentDraftRecovery,
     queueReviewCommentFocus,
+    workspaceController,
   ]);
 
   const resumeCommentEdit = useCallback((commentId?: string) => {
@@ -5217,7 +4613,6 @@ export default function Workbench() {
       commentSessionRef.current.setEditSession(null);
       commentEditResumePendingRef.current = null;
       setEditingCommentId(null);
-      persistCurrentDraftRecovery();
       return;
     }
     const located = editorRef.current?.select(
@@ -5245,7 +4640,6 @@ export default function Workbench() {
     }
   }, [
     commentTargetLayouts,
-    persistCurrentDraftRecovery,
     queueReviewCommentFocus,
   ]);
 
@@ -5254,8 +4648,7 @@ export default function Workbench() {
     if (!current) return;
     const nextSession = { ...current, draftText };
     commentSessionRef.current.setEditSession(nextSession);
-    persistCurrentDraftRecovery();
-  }, [persistCurrentDraftRecovery]);
+  }, []);
 
   const confirmCommentEdit = useCallback((commentId: string) => {
     const current = commentSessionRef.current.comments.find((comment) => comment.commentId === commentId);
@@ -5264,93 +4657,54 @@ export default function Workbench() {
       cancelCommentEdit();
       return;
     }
-    if (attachmentUploadCountRef.current > 0) return;
-    const nextText = session.draftText.trim();
-    const nextAttachments = session.draftAttachments.map(persistedAttachment);
-    if (!nextText && nextAttachments.length === 0) return;
-    const nextComments = commentSessionRef.current.comments.map((comment) => (
-      comment.commentId === commentId
-        ? {
-            ...comment,
-            text: nextText,
-            ...(nextAttachments.length > 0
-              ? { attachments: nextAttachments }
-              : { attachments: undefined }),
-            updatedAt: new Date().toISOString(),
-          }
-        : comment
-    ));
-    const nextAttachmentIds = new Set(
-      nextAttachments.map((attachment) => attachment.attachmentId),
-    );
-    const removedAttachments = session.baselineAttachments.filter(
-      (attachment) => !nextAttachmentIds.has(attachment.attachmentId),
-    );
-    commentSessionRef.current.update({
-      comments: nextComments,
-      editSession: null,
-    });
+    if (attachmentUploadCount > 0) return;
+    const outcome = workspaceController?.editComment({ commentId });
+    if (outcome?.status !== "succeeded") return;
     commentEditResumePendingRef.current = null;
     setEditingCommentId(null);
-    persistCurrentDraftRecovery(nextComments);
+    const removedAttachments = (
+      outcome.value as { removedAttachments?: CommentAttachment[] }
+    ).removedAttachments ?? [];
     for (const attachment of removedAttachments) {
       forgetAttachmentObjectUrl(attachment.attachmentId);
-      void deleteAttachmentFile(attachment);
     }
     if (toastRef.current?.dedupeKey === "unfinished-comment-edit") {
       setToast(null);
     }
     queueReviewCommentFocus(current.target, current.commentId);
   }, [
+    attachmentUploadCount,
     cancelCommentEdit,
-    deleteAttachmentFile,
     forgetAttachmentObjectUrl,
-    persistCurrentDraftRecovery,
     queueReviewCommentFocus,
+    workspaceController,
   ]);
 
   const deleteComment = useCallback((commentId: string) => {
-    const deleted = commentSessionRef.current.comments.find((item) => item.commentId === commentId);
-    const editSession = commentSessionRef.current.editSession?.commentId === commentId
-      ? commentSessionRef.current.editSession
-      : null;
-    const nextComments = commentSessionRef.current.comments.filter(
-      (item) => item.commentId !== commentId,
-    );
-    commentSessionRef.current.update({
-      comments: nextComments,
-      deletedCommentIds: [
-        ...commentSessionRef.current.deletedCommentIds,
-        commentId,
-      ],
-      ...(editSession ? { editSession: null } : {}),
-    });
+    const outcome = workspaceController?.deleteComment({ commentId });
+    if (outcome?.status !== "succeeded") return;
+    const { deleted, editSession, attachments = [] } = outcome.value as {
+      deleted?: CommentItem | null;
+      editSession?: CommentEditSession | null;
+      attachments?: CommentAttachment[];
+    };
     setPendingDeleteCommentId(null);
     if (editSession) {
       commentEditResumePendingRef.current = null;
       setEditingCommentId(null);
     }
-    persistCurrentDraftRecovery(nextComments);
-    const attachmentsToDelete = new Map(
-      [
-        ...(deleted?.attachments ?? []),
-        ...(editSession?.draftAttachments ?? []),
-      ].map((attachment) => [attachment.attachmentId, attachment]),
-    );
-    for (const attachment of attachmentsToDelete.values()) {
+    for (const attachment of attachments) {
       forgetAttachmentObjectUrl(attachment.attachmentId);
-      void deleteAttachmentFile(attachment);
     }
     if (deleted) {
       updateFocusedComment(null);
       queueReviewPairReveal(deleted.target, "");
     }
   }, [
-    deleteAttachmentFile,
     forgetAttachmentObjectUrl,
-    persistCurrentDraftRecovery,
     queueReviewPairReveal,
     updateFocusedComment,
+    workspaceController,
   ]);
 
   useEffect(() => {
@@ -6296,7 +5650,7 @@ export default function Workbench() {
     await verifyCanvasRendered(content, versionHash, adoptedContext);
     if (!isCurrentProjectContext(adoptedContext)) return;
     setLastModifiedAt(sourceLastModifiedAt);
-    persistDraftRecovery(null, adoptedContext);
+    workspaceController?.resetCommentWorkflow();
     commentSessionRef.current.reset();
     draftSessionRef.current.replaceAuthority(adoptedContext, 0, {
       draftRevision: 0,
@@ -6305,7 +5659,7 @@ export default function Workbench() {
       deletedCommentIds: [],
       appliedOperationIds: [],
     });
-    draftRecoveryOperationIdRef.current = null;
+    workspaceController?.queueDraft();
     setSelection(null);
     setComposerOpen(false);
     commentEditResumePendingRef.current = null;
@@ -6368,7 +5722,6 @@ export default function Workbench() {
     deferEditorCommand,
     fenceAndFreezeCurrentCanvas,
     isCurrentProjectContext,
-    persistDraftRecovery,
     prepareGeneratedSourceTransition,
     projectLoadError,
     refreshWorkspace,
@@ -7886,7 +7239,7 @@ export default function Workbench() {
         void relaunchApp();
         return;
       case "retry-draft-persist":
-        void flushDraftPersistence();
+        void workspaceController?.flushDraft();
         return;
       case "review-project-rules":
         setDrawer("files");
@@ -8424,7 +7777,7 @@ export default function Workbench() {
               "本轮评论暂时无法记录；当前内容仍保留在页面中。",
             )}</span>
           </div>
-          <button type="button" onClick={() => void flushDraftPersistence()}>
+          <button type="button" onClick={() => void workspaceController?.flushDraft()}>
             重试记录评论
           </button>
         </section>
@@ -8815,7 +8168,6 @@ export default function Workbench() {
                     commentSessionRef.current.setComposerDraft(
                       event.target.value,
                     );
-                    persistCurrentDraftRecovery();
                   }}
                   onPaste={(event) => {
                     const commentId = draftCommentId || commentSessionRef.current.composerCommentId;

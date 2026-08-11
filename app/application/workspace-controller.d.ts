@@ -1,5 +1,11 @@
 import type { BridgeClient } from "./bridge-client.js";
 import type {
+  AttachmentBinaryPort,
+  CommentWorkflowOutcome,
+  CommentWorkflowSnapshot,
+} from "./comment-workflow.js";
+import type { CommentWorkflowCodecs } from "./comment-workflow-codecs.js";
+import type {
   DocumentWorkflowCanvasPort,
   DocumentWorkflowOutcome,
   DocumentWorkflowRecoveryStore,
@@ -50,6 +56,7 @@ export type WorkspaceControllerSnapshot = Readonly<{
     identity: OperationIdentity | null;
     outcome: CommandOutcome<ProjectContext> | null;
   }>;
+  comment: CommentWorkflowSnapshot | null;
   project: ProjectWorkflowSnapshot | null;
 }>;
 
@@ -79,6 +86,15 @@ export type WorkspaceEvent =
         | "document-history-failed"
         | "document-history-applied";
       context?: ProjectContext;
+      [key: string]: unknown;
+    }>
+  | Readonly<{
+      type:
+        | "comment-draft-persistence-failed"
+        | "comment-draft-persisted"
+        | "attachment-uploaded"
+        | "attachment-cleanup-failed";
+      context?: ProjectContext | null;
       [key: string]: unknown;
     }>
   | ProjectWorkflowEvent;
@@ -132,6 +148,9 @@ export type WorkspaceControllerConstruction = Readonly<{
     | "conflictCandidate"
     | "projectFile"
     | "openFolder"
+    | "attachment"
+    | "saveAttachment"
+    | "deleteAttachment"
   >;
   projectSession: ProjectSession;
   documentSession: DocumentSession;
@@ -153,6 +172,12 @@ export type WorkspaceControllerConstruction = Readonly<{
       setTimeout(callback: () => void, delayMs: number): unknown;
       clearTimeout(handle: unknown): void;
     }>;
+  }>;
+  commentWorkflow?: Readonly<{
+    runSession: import("./run-session.js").RunSession;
+    codecs: CommentWorkflowCodecs;
+    recoveryStore: import("./recovery-store.js").RecoveryStore;
+    attachmentBinary: AttachmentBinaryPort;
   }>;
   projectWorkflow?: Pick<
     ProjectWorkflowConstruction,
@@ -280,5 +305,21 @@ export class WorkspaceController {
     preservePending?: boolean;
   }): DocumentWorkflowOutcome<{ active: boolean }>;
   waitForDocumentHistoryAction(): Promise<DocumentWorkflowOutcome<{ idle: boolean }>>;
+  queueDraft(): CommentWorkflowOutcome;
+  flushDraft(input?: Record<string, unknown>): Promise<CommentWorkflowOutcome>;
+  commitComment(input?: { commentId?: string }): Promise<CommentWorkflowOutcome>;
+  editComment(input: { commentId: string }): CommentWorkflowOutcome;
+  deleteComment(input: { commentId: string }): CommentWorkflowOutcome;
+  discardCommentComposer(): CommentWorkflowOutcome;
+  cancelCommentEdit(input?: { commentId?: string }): CommentWorkflowOutcome;
+  removeComposerAttachment(input: { attachmentId: string }): CommentWorkflowOutcome;
+  removeCommentEditAttachment(input: {
+    commentId: string;
+    attachmentId: string;
+  }): CommentWorkflowOutcome;
+  uploadAttachments(input: Record<string, unknown>): Promise<CommentWorkflowOutcome>;
+  readAttachment(input: Record<string, unknown>): Promise<CommentWorkflowOutcome<Blob>>;
+  deleteAttachment(input: Record<string, unknown>): Promise<CommentWorkflowOutcome>;
+  resetCommentWorkflow(): void;
   dispose(): void;
 }

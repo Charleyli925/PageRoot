@@ -333,6 +333,24 @@
       "nodeTests": ["tests/comment-session.test.mjs"]
     },
     {
+      "id": "comment-workflow",
+      "patterns": [
+        "^app/application/comment-workflow(?:-codecs)?\\.(?:js|d\\.ts)$",
+        "^tests/comment-workflow\\.test\\.mjs$"
+      ],
+      "suites": ["typecheck", "browser-smoke", "electron-smoke", "ai-smoke"],
+      "nodeTests": [
+        "tests/comment-workflow.test.mjs",
+        "tests/comment-session.test.mjs",
+        "tests/draft-session.test.mjs",
+        "tests/attachment-selection.test.mjs",
+        "tests/attachment-storage.test.mjs",
+        "tests/drain-coordinator.test.mjs",
+        "tests/project-workflow.test.mjs",
+        "tests/architecture-boundaries.test.mjs"
+      ]
+    },
+    {
       "id": "document-session",
       "patterns": [
         "^app/application/(?:document-session|recovery-store)\\.(?:js|d\\.ts)$"
@@ -402,6 +420,7 @@
       "suites": ["typecheck", "browser-smoke", "electron-smoke"],
       "nodeTests": [
         "tests/workspace-controller.test.mjs",
+        "tests/comment-workflow.test.mjs",
         "tests/project-workflow.test.mjs",
         "tests/document-workflow.test.mjs",
         "tests/project-session.test.mjs",
@@ -421,6 +440,7 @@
       "suites": ["typecheck", "electron-smoke"],
       "nodeTests": [
         "tests/project-workflow.test.mjs",
+        "tests/comment-workflow.test.mjs",
         "tests/project-session.test.mjs",
         "tests/external-file-open-session.test.mjs",
         "tests/project-application-session.test.mjs",

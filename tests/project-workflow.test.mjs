@@ -319,11 +319,23 @@ function createHarness({
   const legacy = {
     isHistoryView: () => false,
     isViewTransitioning: () => false,
-    attachmentUploadCount: () => 0,
     saveProjectRules: async () => true,
-    draftRecoveryOperationId: () => null,
-    clearDraftRecoveryOperationId() {},
-    persistDraftRecovery() {},
+    async hydrateRecentRuns() {},
+    emit: (event) => events.push(event),
+  };
+  const commentWorkflow = {
+    resetCount: 0,
+    resetForProjectTransition() {
+      this.resetCount += 1;
+    },
+    inspectAttachment: () => ({ state: "resolved" }),
+    async waitForAttachments() {
+      return true;
+    },
+    inspectDraft: () => ({ state: "resolved" }),
+    async drainDraft() {
+      return true;
+    },
     recoverDraft({ serverComments, serverEvents }) {
       return {
         comments: serverComments,
@@ -335,8 +347,6 @@ function createHarness({
         commentEdit: null,
       };
     },
-    async hydrateRecentRuns() {},
-    emit: (event) => events.push(event),
   };
   const workflow = new ProjectWorkflow({
     bridgeClient: client,
@@ -346,6 +356,7 @@ function createHarness({
     commentSession,
     draftSession,
     versionSession,
+    commentWorkflow,
     runSession,
     projectRulesSession: {
       close() {},
@@ -424,6 +435,7 @@ function createHarness({
     versionSession,
     runSession,
     documentWorkflow,
+    commentWorkflow,
     canvasPort,
     oldContext,
     get unlockCount() {

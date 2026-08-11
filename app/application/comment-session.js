@@ -28,10 +28,20 @@ function initialSnapshot() {
 export class CommentSession {
   #observer = null;
 
+  #listeners = new Set();
+
   #snapshot = initialSnapshot();
 
   setObserver(observer) {
     this.#observer = typeof observer === "function" ? observer : null;
+  }
+
+  subscribe(listener) {
+    if (typeof listener !== "function") {
+      throw new TypeError("CommentSession listener must be a function.");
+    }
+    this.#listeners.add(listener);
+    return () => this.#listeners.delete(listener);
   }
 
   #emit(next) {
@@ -50,6 +60,13 @@ export class CommentSession {
       this.#observer?.(this.#snapshot);
     } catch {
       // A view observer cannot change comment working-copy authority.
+    }
+    for (const listener of this.#listeners) {
+      try {
+        listener(this.#snapshot);
+      } catch {
+        // Workflow observers cannot change the committed working copy.
+      }
     }
   }
 

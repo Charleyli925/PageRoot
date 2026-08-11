@@ -92,14 +92,6 @@ function projectErrorMessage(codecs, cause, fallback) {
   return codecs.errorMessage(cause, fallback);
 }
 
-function registrationContext(outcome) {
-  if (outcome?.status === "succeeded") return outcome.value;
-  if (outcome?.status === "rejected" || outcome?.status === "unknown") {
-    throw new Error(outcome.reason);
-  }
-  return null;
-}
-
 // ProjectWorkflow is the PR-3 renderer project-transition boundary. Main owns
 // durable project-open ordering; the injected renderer Sessions keep their
 // existing fact ownership. This workflow owns only hydration/switch/close
@@ -112,6 +104,7 @@ export class ProjectWorkflow {
   #commentSession;
   #draftSession;
   #versionSession;
+  #commentWorkflow;
   #runSession;
   #projectRulesSession;
   #externalFileOpenSession;
@@ -150,6 +143,7 @@ export class ProjectWorkflow {
     commentSession,
     draftSession,
     versionSession,
+    commentWorkflow,
     runSession,
     projectRulesSession,
     externalFileOpenSession,
@@ -188,6 +182,17 @@ export class ProjectWorkflow {
     }
     if (!versionSession || typeof versionSession.reset !== "function") {
       throw new TypeError("ProjectWorkflow requires VersionSession injection.");
+    }
+    if (
+      !commentWorkflow
+      || typeof commentWorkflow.inspectDraft !== "function"
+      || typeof commentWorkflow.drainDraft !== "function"
+      || typeof commentWorkflow.recoverDraft !== "function"
+      || typeof commentWorkflow.inspectAttachment !== "function"
+      || typeof commentWorkflow.waitForAttachments !== "function"
+      || typeof commentWorkflow.resetForProjectTransition !== "function"
+    ) {
+      throw new TypeError("ProjectWorkflow requires CommentWorkflow composition.");
     }
     if (!runSession || typeof runSession.activate !== "function") {
       throw new TypeError("ProjectWorkflow requires RunSession injection.");
@@ -267,6 +272,7 @@ export class ProjectWorkflow {
     this.#commentSession = commentSession;
     this.#draftSession = draftSession;
     this.#versionSession = versionSession;
+    this.#commentWorkflow = commentWorkflow;
     this.#runSession = runSession;
     this.#projectRulesSession = projectRulesSession;
     this.#externalFileOpenSession = externalFileOpenSession;
@@ -416,6 +422,7 @@ export class ProjectWorkflow {
         return blocked("PROJECT_SWITCH_BLOCKED", hardBlocker.reason);
       }
       if (this.projectLoadError) {
+        this.#commentWorkflow.resetForProjectTransition();
         this.#draftSession.deactivate();
         this.#documentWorkflow.resetForProjectTransition();
         return succeeded({ operationId });
@@ -1074,12 +1081,8 @@ export class ProjectWorkflow {
     });
     this.#drainCoordinator.replace("attachments", {
       label: "等待附件添加完成",
-      inspect: () => this.#legacyPort.attachmentUploadCount() > 0
-        ? { state: "pending", reason: "评论附件仍在写入项目记录。" }
-        : { state: "resolved" },
-      drain: () => this.#waitUntil(
-        () => this.#legacyPort.attachmentUploadCount() === 0,
-      ),
+      inspect: () => this.#commentWorkflow.inspectAttachment(),
+      drain: () => this.#commentWorkflow.waitForAttachments(),
     });
     this.#drainCoordinator.replace("project-rules", {
       label: "等待项目规则保存",
@@ -1150,76 +1153,18 @@ export class ProjectWorkflow {
     return { state: "resolved" };
   }
 
-  #hasDraftMaterial() {
-    return Boolean(
-      this.#commentSession.comments.length > 0
-      || this.#commentSession.changeEvents.length > 0
-      || this.#commentSession.deletedCommentIds.size > 0
-      || this.#commentSession.composerDraft.trim()
-      || this.#commentSession.composerAttachments.length > 0
-      || this.#commentSession.composerTarget
-      || this.#codecs.commentEditSessionHasChanges(this.#commentSession.editSession)
-    );
-  }
-
   #inspectDraftObligation(boundary) {
-    if (
-      (this.#runSession.activeLocked && boundary !== "submit")
-      || this.projectLoadError
-    ) return { state: "resolved" };
-    const context = this.#projectSession.context;
-    if (!context) {
-      return this.#hasDraftMaterial()
-        ? { state: "pending", reason: "正在为本轮评论建立唯一项目身份。" }
-        : { state: "resolved" };
-    }
-    const state = this.#draftSession.inspect();
-    if (!state.active) {
-      return { state: "pending", reason: "正在重新核对本轮评论的项目身份。" };
-    }
-    if (state.pending || state.writing || state.error) {
-      return { state: "pending", reason: "本轮评论或编辑审计仍未安全记录。" };
-    }
-    return { state: "resolved" };
+    return this.#commentWorkflow.inspectDraft({
+      boundary,
+      projectLoadError: this.projectLoadError,
+    });
   }
 
   async #drainDraftObligation(boundary) {
-    if (
-      (this.#runSession.activeLocked && boundary !== "submit")
-      || this.projectLoadError
-    ) return true;
-    let context = this.#projectSession.context;
-    if (!context && !this.#hasDraftMaterial()) return true;
-    if (!context) {
-      context = registrationContext(await this.#ensureRegistered());
-      if (!context) throw new Error("无法为本轮评论建立唯一项目身份。");
-    } else if (!this.#draftSession.isActive(context)) {
-      context = registrationContext(await this.#ensureRegistered({
-        sourcePath: context.sourcePath,
-        expectedSourceSha256: this.#documentSession.sourceSha256,
-        adoptCanonicalSource: false,
-      }));
-      if (!context || !this.#draftSession.isActive(context)) {
-        throw new Error("无法恢复本轮评论的项目身份。");
-      }
-    }
-    const snapshot = this.#draftSession.createSnapshot({
-      context,
-      basedOnVersionId: this.#versionSession.snapshot.currentBasedOnVersionId,
-      comments: this.#commentSession.comments,
-      changeEvents: this.#commentSession.changeEvents,
-      deletedCommentIds: this.#commentSession.deletedCommentIds,
-      operationId: this.#legacyPort.draftRecoveryOperationId() || undefined,
+    return this.#commentWorkflow.drainDraft({
+      boundary,
+      projectLoadError: this.projectLoadError,
     });
-    if (!snapshot) throw new Error("评论会话与当前项目身份不一致。");
-    this.#legacyPort.clearDraftRecoveryOperationId();
-    this.#legacyPort.persistDraftRecovery(snapshot);
-    const persisted = await this.#draftSession.drain(snapshot);
-    if (!persisted) {
-      throw this.#draftSession.lastError
-        || new Error("本轮评论或编辑审计没有完成安全记录。");
-    }
-    return true;
   }
 
   async #openStartup() {
@@ -1510,9 +1455,9 @@ export class ProjectWorkflow {
       error: null,
     });
     this.#markHydrationStage("apply-authority");
+    this.#commentWorkflow.resetForProjectTransition();
     this.#draftSession.deactivate();
     this.#projectRulesSession.close();
-    this.#legacyPort.clearDraftRecoveryOperationId();
     this.#commentSession.reset();
     this.#versionSession.reset();
     this.#canvasPort.invalidateRenderAcks?.();
@@ -1761,7 +1706,7 @@ export class ProjectWorkflow {
       }
       if (!this.#draftSession.isActive(context) || serverDraftRevision >= this.#draftSession.revision) {
         this.#draftSession.activate(context, serverDraftRevision, draftRecord);
-        const recovered = this.#legacyPort.recoverDraft({
+        const recovered = this.#commentWorkflow.recoverDraft({
           context,
           serverComments: this.#codecs.commentsFromRecords(draftRecord.comments),
           serverEvents: this.#codecs.changesFromDraftRecords(draftRecord.changeEvents),
@@ -2210,8 +2155,8 @@ export class ProjectWorkflow {
     this.#canvasPort.invalidateRenderAcks?.();
     if (changesSourcePath) {
       this.#documentWorkflow.resetForProjectTransition();
+      this.#commentWorkflow.resetForProjectTransition();
       this.#draftSession.deactivate();
-      this.#legacyPort.clearDraftRecoveryOperationId();
     }
     return this.#projectSession.context;
   }
