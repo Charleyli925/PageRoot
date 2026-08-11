@@ -134,6 +134,7 @@ export async function candidatePayloadEntries(appPath) {
   const resourcesPath = path.join(appPath, "Contents", "Resources");
   const requiredFiles = [
     path.join(resourcesPath, "app.asar"),
+    path.join(resourcesPath, "app-update.yml"),
     path.join(resourcesPath, "build-info.json"),
     path.join(resourcesPath, "usage-telemetry-config.json"),
     ...LEGAL_RESOURCES.map((name) => path.join(resourcesPath, name)),

@@ -20,6 +20,7 @@ import {
   developerPreviewReleaseDirectory,
   resolveDeveloperPreviewIdentity,
 } from "./developer-preview.mjs";
+import { writeApplicationUpdateConfig } from "./application-update-config.mjs";
 import {
   candidateAppBuilderArguments,
   candidateAppEnvironment,
@@ -299,6 +300,7 @@ async function main() {
           : process.env;
   let buildInfo;
   let telemetryConfig;
+  let applicationUpdateConfig;
   if (isCandidateArtifacts) {
     const restored = await restoreReleaseMetadataFromApp({
       productRoot,
@@ -307,6 +309,7 @@ async function main() {
     });
     buildInfo = restored.buildInfo;
     telemetryConfig = restored.telemetry;
+    applicationUpdateConfig = restored.applicationUpdate;
     console.log(`Build provenance restored from signed app: ${prepackagedAppPath}`);
   } else {
     const provenance = await writeBuildInfo({
@@ -319,7 +322,13 @@ async function main() {
       productRoot,
       environment: buildEnvironment,
     });
+    const updateMetadata = await writeApplicationUpdateConfig({
+      productRoot,
+      packageJson: packagedPackageJson,
+    });
+    applicationUpdateConfig = updateMetadata.config;
     console.log(`Build provenance: ${provenance.destination}`);
+    console.log(`Application update config: ${updateMetadata.destination}`);
   }
   console.log(`Git commit: ${buildInfo.commitSha}`);
   console.log(`Package profile: ${profile}`);
@@ -334,6 +343,10 @@ async function main() {
     telemetryConfig.enabled
       ? `Usage telemetry configured for ${telemetryConfig.host}`
       : "Usage telemetry build config has no project token; collection will remain inactive.",
+  );
+  console.log(
+    `Application update channel: ${applicationUpdateConfig.owner}`
+      + `/${applicationUpdateConfig.repo} (${applicationUpdateConfig.releaseType})`,
   );
 
   const executable = path.join(

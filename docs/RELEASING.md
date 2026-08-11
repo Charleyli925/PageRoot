@@ -167,6 +167,9 @@ The workflow:
 - requires a successful PR source-gate attestation for the exact Tree Hash and package/lockfile version, no older than seven days;
 - requires the PostHog Project token and embeds a generated public ingestion
   configuration whose host is fixed to the selected cloud region;
+- derives the stable GitHub provider and updater cache name from the reviewed
+  package manifest, writes `app-update.yml` before App assembly, and rejects
+  missing, extra or drifted channel fields before signing;
 - first assembles one ad-hoc App with `electron-builder --publish never`, then
   verifies app.asar, Bridge, schemas, resources and the complete packaged
   runtime oracle before it exposes signing or Apple credentials to a build
@@ -178,13 +181,14 @@ The workflow:
 - archives the exact signed/notarized App plus source, payload and archive
   hashes as an attempt-qualified checkpoint retained for 14 days;
 - starts a separate job from that checkpoint, validates every checkpoint byte,
-  restores the exact embedded build and telemetry metadata as local comparison
-  inputs, rebuilds only the deterministic renderer comparison output from the
+  restores the exact embedded build, telemetry and application-update metadata
+  as local comparison inputs, rebuilds only the deterministic renderer comparison output from the
   same source tree, and passes the unchanged App to electron-builder with
   `--prepackaged` rather than rebuilding it;
 - creates the DMG, update ZIP, blockmap and `latest-mac.yml`, submits only the
   final DMG to Apple in that job, then verifies Team ID, tickets, Gatekeeper,
-  DMG integrity, updater metadata and read-only mounted/extracted contents;
+  DMG integrity, embedded provider configuration, updater metadata and read-only
+  mounted/extracted contents;
 - creates checksums for every public payload and metadata file, retains the
   legacy `update-manifest.json`, and copies `build-info.json`;
 - freezes those files with `release-candidate.json` in an artifact named for the exact Tree Hash, version, architecture and workflow run attempt.
@@ -249,9 +253,11 @@ transfer when available, and falls back to a full ZIP on the first migration or
 if a differential request cannot be completed.
 
 The first signed release is a trust-boundary migration. Existing ad-hoc clients
-show the legacy manual update entry and require one manual DMG install. Once the
-signed build is installed, later stable releases download automatically and
-prompt for an explicit safe restart.
+show the legacy manual update entry and require one manual DMG install. Formal
+0.9.8 also omitted its embedded provider configuration, so those installations
+require one manual patched-release install. Once a signed build carrying the
+validated `app-update.yml` is installed, later stable releases download
+automatically and prompt for an explicit safe restart.
 
 ## Failures
 

@@ -142,6 +142,7 @@ test("desktop package manifest owns the exact application and Bridge resource cl
       ...SHARED_FILES.map((fileName) => "shared/" + fileName),
       ...PACKAGED_MODULES.map((moduleName) => "node_modules/" + moduleName),
       "schemas",
+      "app-update.yml",
       "build-info.json",
       "usage-telemetry-config.json",
       ...LEGAL_RESOURCE_FILES,
@@ -177,6 +178,14 @@ test("desktop package identity and artifact profile stay fixed", async () => {
   assert.equal(packageJson.build.productName, "PageRoot");
   assert.equal(packageJson.build.artifactName, "PageRoot-${version}-${arch}.${ext}");
   assert.equal(packageJson.build.afterPack, "desktop/after-pack.mjs");
+  assert.deepEqual(packageJson.build.publish, [
+    {
+      provider: "github",
+      owner: "Charleyli925",
+      repo: "PageRoot",
+      releaseType: "release",
+    },
+  ]);
   assert.equal(packageJson.build.forceCodeSigning, true);
   assert.deepEqual(packageJson.build.fileAssociations, [{
     ext: ["html", "htm"],

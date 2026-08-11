@@ -4,6 +4,14 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
+- Fixed formal macOS packages omitting the signed `app-update.yml` provider
+  configuration, which made every update check appear unavailable even when
+  GitHub Release metadata was healthy. Candidate assembly now generates the
+  stable channel before signing, includes it in the signed-App checkpoint, and
+  rejects missing or drifted provider/cache settings in both dry-run and final
+  artifact verification. Existing 0.9.8 installations need one final manual
+  update to a patched release before automatic updates can resume.
+
 ## [0.9.8] - 2026-08-11
 
 - Fixed a Draft revision-reconciliation feedback loop that could issue a
