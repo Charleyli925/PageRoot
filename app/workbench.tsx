@@ -478,6 +478,15 @@ function noticeReducer(current: Toast, next: Toast): Toast {
   return shouldReplaceNotice(current, next) ? next : current;
 }
 
+function requiredWorkspaceController(
+  controller: WorkspaceController | null,
+): WorkspaceController {
+  if (!controller) {
+    throw new Error("项目资料初始化尚未就绪，请稍后重试。");
+  }
+  return controller;
+}
+
 export default function Workbench() {
   const editorRef = useRef<HtmlCanvasEditorHandle>(null);
   const interactionPreviewRef = useRef<HtmlInteractionPreviewHandle>(null);
@@ -620,7 +629,6 @@ export default function Workbench() {
   const attachmentObjectUrlsRef = useRef<Map<string, string>>(new Map());
   const draftRecoverySequenceRef = useRef(0);
   const draftRecoveryOperationIdRef = useRef<string | null>(null);
-  const workspaceControllerRef = useRef<WorkspaceController | null>(null);
   const runSessionRef = useRef(new RunSession({
     sourcePath: WELCOME_PROJECT.sourcePath,
   }));
@@ -751,11 +759,13 @@ export default function Workbench() {
     edit: null,
     preview: null,
   });
+  const [workspaceController, setWorkspaceController] =
+    useState<WorkspaceController | null>(null);
   const invalidateCanvasRenderAcks = useCallback(() => {
     setCanvasRenderAcks({ edit: null, preview: null });
   }, []);
-  if (!workspaceControllerRef.current) {
-    workspaceControllerRef.current = new WorkspaceController({
+  useLayoutEffect(() => {
+    const controller = new WorkspaceController({
       bridgeClient,
       projectSession: projectSessionRef.current,
       documentSession: documentSessionRef.current,
@@ -781,11 +791,13 @@ export default function Workbench() {
         },
         canvas: { invalidateRenderAcks: invalidateCanvasRenderAcks },
       },
-      clock: { now: () => Date.now() },
+      clock: { now: Date.now },
     });
-  }
-  const workspaceController = workspaceControllerRef.current;
+    setWorkspaceController(controller);
+    return () => controller.dispose();
+  }, [invalidateCanvasRenderAcks]);
   useEffect(() => {
+    if (!workspaceController) return undefined;
     const unsubscribe = workspaceController.subscribeEvents((event) => {
       if (event.type !== "registration-published") return;
       if (!projectSessionRef.current.matches(event.context)) return;
@@ -1862,7 +1874,8 @@ export default function Workbench() {
     const activeSource = projectSessionRef.current.sourcePath;
     const epoch = projectSessionRef.current.epoch;
     if (
-      !activeSource
+      !workspaceController
+      || !activeSource
       || (projectSessionRef.current.projectId && projectSessionRef.current.documentId)
       || workspaceController.getSnapshot().registration.phase === "registering"
     ) return;
@@ -1870,7 +1883,7 @@ export default function Workbench() {
     setProjectRecordsError("");
     try {
       const registered = registrationContextFromOutcome(
-        await workspaceController.ensureRegistered(),
+        await requiredWorkspaceController(workspaceController).ensureRegistered(),
       );
       if (
         !registered
@@ -2182,7 +2195,7 @@ export default function Workbench() {
         try {
           if (!write.projectId || !write.documentId) {
             const registered = registrationContextFromOutcome(
-              await workspaceController.ensureRegistered({
+              await requiredWorkspaceController(workspaceController).ensureRegistered({
                 sourcePath: write.sourcePath,
                 expectedSourceSha256: write.expectedSourceSha256,
                 adoptCanonicalSource: false,
@@ -4092,14 +4105,14 @@ export default function Workbench() {
         if (!context && !hasLocalDraftMaterial) return true;
         if (!context) {
           context = registrationContextFromOutcome(
-            await workspaceController.ensureRegistered(),
+            await requiredWorkspaceController(workspaceController).ensureRegistered(),
           );
           if (!context) {
             throw new Error("无法为本轮评论建立唯一项目身份。");
           }
         } else if (!draftSessionRef.current.isActive(context)) {
           context = registrationContextFromOutcome(
-            await workspaceController.ensureRegistered({
+            await requiredWorkspaceController(workspaceController).ensureRegistered({
               sourcePath: context.sourcePath,
               expectedSourceSha256: documentSessionRef.current.sourceSha256,
               adoptCanonicalSource: false,
@@ -4409,7 +4422,9 @@ export default function Workbench() {
     let attachmentContext: ProjectContext;
     try {
       const registered = registrationContextFromOutcome(
-        await workspaceController.ensureRegistered({ sourcePath: activeSource }),
+        await requiredWorkspaceController(workspaceController).ensureRegistered({
+          sourcePath: activeSource,
+        }),
       );
       if (!registered) throw new Error("当前项目已经切换，请重试。");
       attachmentContext = registered;
@@ -7166,7 +7181,7 @@ export default function Workbench() {
     if (projectSessionRef.current.sourcePath) {
       try {
         const registered = registrationContextFromOutcome(
-          await workspaceController.ensureRegistered(),
+          await requiredWorkspaceController(workspaceController).ensureRegistered(),
         );
         if (!registered) throw new Error("当前项目已经切换，请重试。");
       } catch (cause) {
@@ -7953,7 +7968,7 @@ export default function Workbench() {
 
     try {
       const registered = registrationContextFromOutcome(
-        await workspaceController.ensureRegistered(),
+        await requiredWorkspaceController(workspaceController).ensureRegistered(),
       );
       if (!registered) throw new Error("当前项目已经切换，请重试。");
       if (

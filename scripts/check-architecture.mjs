@@ -300,7 +300,9 @@ export async function architectureViolations() {
   if (
     /\bensureProjectRegistered\b|\bprojectRegistrationPromiseRef\b/.test(workbench)
     || !workbench.includes("new WorkspaceController({")
-    || !workbench.includes("workspaceController.ensureRegistered(")
+    || !workbench.includes(
+      "requiredWorkspaceController(workspaceController).ensureRegistered(",
+    )
   ) {
     violations.push(
       "app/workbench.tsx: project registration must delegate to WorkspaceController",
