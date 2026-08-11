@@ -235,9 +235,9 @@ v3 TargetRef 保存 label、层级、selector/结构锚点、源码位置、源 
 
 本地直接编辑写入 `edit-audit.jsonl` 或等价追加记录，至少包含稳定事件 ID、revision、时间、类型、目标、before 和 after。
 
-### 5.5 提交给 QoderWork
+### 5.5 复制 AI 任务 Prompt
 
-提交入口为主按钮“一键发送至 QoderWork”。
+提交入口为主按钮“复制AI任务Prompt”。
 
 用户触发提交后必须按唯一顺序执行：
 

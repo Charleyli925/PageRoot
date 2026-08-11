@@ -8334,10 +8334,10 @@ export default function Workbench() {
                 : currentQoderHandoffStatus === "copying"
                   ? "正在复制交接内容…"
                   : currentQoderHandoffStatus === "copied"
-                    ? "本轮要求已复制"
+                    ? "已复制，可粘贴到 AI Agent对话框"
                     : currentQoderHandoffStatus === "failed"
                       ? "复制失败 · 查看"
-                      : "发送至 Qoder"}
+                      : "复制AI任务Prompt"}
             </span>
             {!runInProgress && currentQoderHandoffStatus !== "copied"
               ? <small>{pendingSendItemCount}</small>
