@@ -17,6 +17,11 @@ import {
 import { TmpDir } from "temp-file";
 
 import {
+  APPLICATION_UPDATE_CONFIG_FILE,
+  APPLICATION_UPDATE_CONFIG_SOURCE,
+  parseApplicationUpdateConfig,
+} from "./application-update-config.mjs";
+import {
   assertBuildInfo,
   buildInfoRelativePath,
   expectedBuildInfo,
@@ -372,10 +377,13 @@ export async function restoreReleaseMetadataFromApp({
 }) {
   const resolvedAppPath = assertManagedReleaseApp(productRoot, appPath, profile);
   const resourcesPath = path.join(resolvedAppPath, "Contents", "Resources");
-  const buildInfoBytes = await readFile(path.join(resourcesPath, "build-info.json"));
-  const telemetryBytes = await readFile(
-    path.join(resourcesPath, "usage-telemetry-config.json"),
-  );
+  const [buildInfoBytes, telemetryBytes, applicationUpdateBytes, packageJson] =
+    await Promise.all([
+      readFile(path.join(resourcesPath, "build-info.json")),
+      readFile(path.join(resourcesPath, "usage-telemetry-config.json")),
+      readFile(path.join(resourcesPath, APPLICATION_UPDATE_CONFIG_FILE)),
+      readFile(path.join(productRoot, "package.json"), "utf8").then(JSON.parse),
+    ]);
   const expected = await expectedBuildInfoResolver({
     productRoot,
     architecture,
@@ -395,6 +403,10 @@ export async function restoreReleaseMetadataFromApp({
     "https://us.i.posthog.com",
     "candidate telemetry host is unexpected",
   );
+  const applicationUpdate = parseApplicationUpdateConfig(
+    applicationUpdateBytes,
+    packageJson,
+  );
   const metadataDirectory = path.join(productRoot, "output", "release-metadata");
   await mkdir(metadataDirectory, { recursive: true });
   await Promise.all([
@@ -404,8 +416,14 @@ export async function restoreReleaseMetadataFromApp({
       telemetryBytes,
       { mode: 0o600 },
     ),
+    writeFile(
+      path.join(productRoot, APPLICATION_UPDATE_CONFIG_SOURCE),
+      applicationUpdateBytes,
+      { mode: 0o644 },
+    ),
   ]);
   return {
+    applicationUpdate,
     buildInfo,
     telemetry,
   };

@@ -439,6 +439,10 @@
         "to": "build-info.json"
       },
       {
+        "from": "output/release-metadata/app-update.yml",
+        "to": "app-update.yml"
+      },
+      {
         "from": "PageRoot 用户声明与免责声明.txt",
         "to": "PageRoot 用户声明与免责声明.txt"
       },

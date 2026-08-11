@@ -53,7 +53,7 @@ boundary.
 | `npm run gate:edit` | Fast, impact-selected feedback for uncommitted work |
 | `npm run gate:task` | Static checks plus impacted Node/browser/Electron coverage |
 | `npm run gate:main:auto` | Optional local/diagnostic Node/browser smoke; it is not part of the automatic post-merge path |
-| `Release Dry Run` Actions workflow | Candidate-classified Ready packaging check: assemble an explicitly unsigned (`identity=null`) App, cross a clean-job checkpoint, rebuild metadata/renderer oracles and launch-check identity without credentials; source-only candidates skip it |
+| `Release Dry Run` Actions workflow | Candidate-classified Ready packaging check: generate the stable application-update config, assemble an explicitly unsigned (`identity=null`) App, cross a clean-job checkpoint, rebuild metadata/renderer oracles and launch-check identity without credentials; source-only candidates skip it |
 | `npm run gate:release:auto` | Complete source gate on a clean commit |
 | `npm run package:developer` | Optional arm64 developer preview requested explicitly: distinct app/Bundle identity, stable-tag-derived test version, ad-hoc DMG, packaged-content verification, one isolated startup, and an exact live PR/content delivery report; no notarization or publication |
 | `npm run package:developer:x64` | The same optional developer preview and delivery report for Intel Macs |
@@ -87,10 +87,11 @@ lane owns the installed-App, Developer ID, notarization, signed-App checkpoint,
 ZIP/blockmap and `latest-mac.yml` evidence. It validates contents and full
 packaged runtime against a pre-sign App, proves signed startup, then passes the
 same notarized App to the final artifact job without rebuilding. That fresh job
-restores the App's exact embedded build and telemetry metadata, then builds only
+restores the App's exact embedded build, telemetry and application-update
+metadata, then builds only
 the deterministic Electron renderer used to compare the restored App payload
-against the identical source tree. It does not regenerate telemetry
-configuration or receive the project token. Formal local
+against the identical source tree. It does not regenerate telemetry or
+application-update configuration, or receive the project token. Formal local
 packaging is a distribution build and therefore requires a valid Developer ID
 identity; publication credentials remain in GitHub encrypted secrets. The
 separate developer-preview profile removes those credentials from its child
@@ -99,11 +100,12 @@ environment and intentionally uses only an ad-hoc signature.
 Final Ready candidates that touch packaging, release metadata, Electron, packaged
 Bridge, Schema or bundled-resource paths run `Release Dry Run` through the
 candidate classifier. Source-only candidates skip it successfully. Its first
-macOS job builds the renderer, generates build metadata plus an enabled
-synthetic telemetry configuration, assembles and verifies an explicitly unsigned
+macOS job builds the renderer, generates build metadata, the stable GitHub
+application-update configuration, plus an enabled synthetic telemetry
+configuration, assembles and verifies an explicitly unsigned
 (`identity=null`) App, then
 uploads a source-bound checkpoint. A second clean macOS job restores the
-checkpoint and its metadata, rebuilds the renderer comparison oracle,
+checkpoint and its exact metadata, rebuilds the renderer comparison oracle,
 revalidates the payload and launches the App to compare `app.getName()`, the
 runtime version and `CFBundleIdentifier` with `package.json`. The workflow does
 not reference repository secrets, build a DMG or updater asset, sign with

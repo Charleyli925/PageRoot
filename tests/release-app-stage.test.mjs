@@ -233,7 +233,7 @@ test("pre-sign assembly keeps public telemetry but cannot see signing or notariz
   }
 });
 
-test("final artifact packaging restores the exact embedded provenance and telemetry bytes", async (t) => {
+test("final artifact packaging restores the exact embedded release metadata bytes", async (t) => {
   const fixture = await createStagedApp(
     t,
     "candidate",
@@ -247,6 +247,7 @@ test("final artifact packaging restores the exact embedded provenance and teleme
   });
   assert.equal(record.buildInfo.builtAt, builtAt);
   assert.equal(record.telemetry.enabled, true);
+  assert.equal(record.applicationUpdate.updaterCacheDirName, "pageroot-updater");
   assert.deepEqual(
     await readFile(path.join(
       fixture.productRoot,
@@ -260,6 +261,13 @@ test("final artifact packaging restores the exact embedded provenance and teleme
       "output/release-metadata/usage-telemetry-config.json",
     )),
     await readFile(path.join(fixture.resourcesPath, "usage-telemetry-config.json")),
+  );
+  assert.deepEqual(
+    await readFile(path.join(
+      fixture.productRoot,
+      "output/release-metadata/app-update.yml",
+    )),
+    await readFile(path.join(fixture.resourcesPath, "app-update.yml")),
   );
 });
 
@@ -388,6 +396,11 @@ test("signed-app checkpoint binds source and archive bytes and restores the same
   });
   assert.equal(record.attestation.kind, "signed-app-checkpoint");
   assert.equal(record.attestation.publicReleaseEligible, false);
+  assert.ok(
+    record.attestation.payload.some(
+      (entry) => entry.path === "Contents/Resources/app-update.yml",
+    ),
+  );
   assert.equal(
     record.attestation.artifactName,
     releaseAppCheckpointArtifactName({
@@ -436,6 +449,10 @@ test("signed-app checkpoint binds source and archive bytes and restores the same
   assert.deepEqual(
     await readFile(path.join(root, "output/release-metadata/usage-telemetry-config.json")),
     await readFile(path.join(restoredResources, "usage-telemetry-config.json")),
+  );
+  assert.deepEqual(
+    await readFile(path.join(root, "output/release-metadata/app-update.yml")),
+    await readFile(path.join(restoredResources, "app-update.yml")),
   );
 
   await writeFile(record.archivePath, "tampered archive");
@@ -519,6 +536,10 @@ test("release dry-run checkpoint is non-release, restores metadata and cannot en
     path.join(root, "output/release-dry-run/restored/PageRoot.app"),
   );
   assert.equal(restored.metadata.telemetry.enabled, true);
+  assert.equal(
+    restored.metadata.applicationUpdate.updaterCacheDirName,
+    "pageroot-updater",
+  );
 
   await assert.rejects(
     restoreReleaseDryRunCheckpoint({
@@ -540,6 +561,28 @@ test("release dry-run checkpoint is non-release, restores metadata and cannot en
       },
     }),
     /usage-telemetry-config\.json/u,
+  );
+
+  await assert.rejects(
+    restoreReleaseDryRunCheckpoint({
+      productRoot: root,
+      directory: outputDirectory,
+      outputDirectory: "output/release-dry-run/missing-update-config",
+      architecture: "arm64",
+      repository: "Charleyli925/PageRoot",
+      workflowRunId: 700,
+      identity,
+      expectedBuildInfoResolver: fixtureExpectedBuildInfo,
+      async commandRunner(_command, arguments_) {
+        const destination = path.join(arguments_.at(-1), "PageRoot.app");
+        await cp(fixture.appPath, destination, { recursive: true });
+        await rm(path.join(
+          destination,
+          "Contents/Resources/app-update.yml",
+        ));
+      },
+    }),
+    /app-update\.yml/u,
   );
 
   const renamedFormalDirectory = path.join(

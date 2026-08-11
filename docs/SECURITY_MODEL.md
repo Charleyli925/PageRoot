@@ -257,14 +257,16 @@ network infrastructure, so product copy must not claim absolute anonymity.
 
 ## Distribution and update trust
 
-Public macOS candidates fail closed unless they are signed by the expected Developer ID team, use Hardened Runtime, pass Apple notarization, and carry a stapled ticket. The candidate gate verifies the signature, Team ID, Gatekeeper assessment, DMG, update ZIP, blockmap, update metadata and frozen hashes before publication.
+Public macOS candidates fail closed unless they are signed by the expected Developer ID team, use Hardened Runtime, pass Apple notarization, carry a stapled ticket, and embed the reviewed stable GitHub `app-update.yml` before signing. The candidate gate validates the exact provider, owner, repository, release type and updater-cache contract; includes those bytes in the signed-App checkpoint; and verifies the signature, Team ID, Gatekeeper assessment, DMG, update ZIP, blockmap, update metadata and frozen hashes before publication.
 
 The main-process update controller accepts only the stable GitHub Release channel, owns both the startup-plus-four-hour schedule and coalesced manual checks, downloads the hash-described ZIP only after an explicit renderer intent, keeps differential transfer enabled, and disables install-on-ordinary-quit. The renderer receives only a bounded immutable status snapshot and narrow check/download/install intents. The About entry opens only the main-process constant for the project repository; renderer input can never choose an external URL. The same surface opens the user statement and disclaimer only from its fixed signed-app resource path and accepts neither renderer paths nor URLs. A downloaded update can install only after a second explicit restart confirmation and the normal renderer/Bridge drain succeeds; update metadata never gains filesystem or editor authority.
 
 The current application contains no legacy manifest parser, fetch client, or
 version decision path. Clients from the earlier ad-hoc update era cannot
-securely self-bootstrap into this trust chain; they must manually install the
-first signed and notarized migration release once. The legacy
+securely self-bootstrap into this trust chain; they must manually install a
+signed and notarized migration release once. Formal 0.9.8 also lacks the
+embedded provider configuration and therefore requires one manual install of a
+patched signed release before automatic updates can resume. The legacy
 `update-manifest.json` remains a Release-produced compatibility artifact only,
 so already-published clients can find that migration release without restoring
 the retired client code to the current application.

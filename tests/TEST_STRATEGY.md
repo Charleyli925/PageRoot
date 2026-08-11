@@ -13,7 +13,7 @@
 | `Review Gate Recovery` | Codex 精确提交的 review/clean comment 在 `review-policy` 超时后到达 | trusted default-branch code 重验 live Ready head/base、当前 review policy、原 run timeout artifact、所有非 review job 结果 | 仅对原 run 调用 failed-job rerun；测试失败、P0/P1、Draft/closed、SHA/base 改变或 artifact 不符全部 fail closed |
 | `baseline-policy` | 分支策略通过，与 review-policy 并行 | 全局依赖 advisory policy 与 packaged-runtime closure | 基线红时不启动 Linux build、Browser 或 macOS Electron runner |
 | 一次性晋升 `release-gate` | review、baseline、完整测试和相关 dry run 都完成的最终 PR Tree | 全量 Node、三分片完整 Browser、独立 Native Electron、独立确定性 AI 闭环、真实 HTML 发现式门禁、即时 review revalidation 与 Tree Hash 凭证 | 每个最终候选只跑一次；后续新 SHA 必须重新 Draft 后 Ready |
-| `Release Dry Run` | `candidate-context` 判定 Ready 候选有打包、release metadata、Electron、Bridge、Schema 或资源风险 | clean job 组装/静态校验显式未签名（`identity=null`）App → 非发布 checkpoint → 第二 clean job 恢复 metadata、重建 renderer oracle、再次校验并启动核对名称/版本/Bundle ID | 不读取签名或 Apple 凭证、不生成 DMG/updater、不成为 Candidate、不创建 tag、不发布；PR 大小只作建议，不作为触发或阻断 |
+| `Release Dry Run` | `candidate-context` 判定 Ready 候选有打包、release metadata、Electron、Bridge、Schema 或资源风险 | clean job 生成 stable `app-update.yml`、组装/静态校验显式未签名（`identity=null`）App → 非发布 checkpoint → 第二 clean job 恢复精确 metadata、重建 renderer oracle、再次校验并启动核对名称/版本/Bundle ID | 不读取签名或 Apple 凭证、不生成 DMG/updater 制品、不成为 Candidate、不创建 tag、不发布；PR 大小只作建议，不作为触发或阻断 |
 | `Review Debt` | 每周 trusted default-branch schedule/manual run | 汇总最近 PR 的行内线程和 review-level P2/P3/unclassified `CHANGES_REQUESTED` finding 到滚动 Issue；超出活动窗口但尚未重新验证的项以 machine-readable state carry forward | 不 checkout PR head、不改代码、不合并、不成为必需检查 |
 | `main-integrity` | 合并到 `main` | 校验合并 PR、Tree Hash、package/lockfile 版本和凭证时效 | 相等即复用完整源码证据，不重复 Node、Browser 或 Electron 测试；不相等直接失败 |
 | 按需 `Developer Preview` | 仅在开发者明确要求时 | 干净 Tree、最新 renderer、ad-hoc DMG、包内容完整性、一次隔离启动和精确 PR/内容交付报告 | 在消耗签名/公证时间前发现“漏打包或根本跑不起来”；不成为正式门禁 |
@@ -71,7 +71,7 @@ PR 批量是建议而非固定限制：用 CI Health 的 Ready 次数、candidat
 - 通知合同：TypeScript 判别联合拥有 `disposition × action` 合法矩阵；`direct-action` 和 `user-choice` 必须携带受限恢复 action，`silent-recover` 与 `defer-and-resume` 明确禁止 action。Node policy 测试拥有 priority、dedupe、sticky 与 timeout；Browser 测试拥有 `aria-live`、键盘、按钮和 hover/focus pause。不得再扫描 Workbench AST 或内部 helper 名称来证明某个 `setToast` 调用是否合法。
 - 源码字符串合同只保留显式 architecture/security/packaging/dependency/workflow boundary。应用架构形状由 `scripts/check-architecture.mjs` 唯一拥有，`tests/architecture-boundaries.test.mjs` 只执行该 checker；当前显式清单为层级 import/retired operation，raw Bridge/storage，Session/drain owner，SourcePatch + SourceTransaction 发布，精确 source freeze 及 AI 请求绑定，Edit runtime projection 禁止，native user/system priority 和 DOM replacement 前 lease retirement。业务测试不得读取、拼接 Workbench/Canvas 大文件或扫描 JSX/CSS/copy/callback 顺序；它们使用 Session、算法、Browser 或 Electron 的可观察结果。`tests/rendered-html.test.mjs` 是独立例外：它必须执行真实 `dist/server/index.js`/`worker.fetch`，只验证公开 SSR 入口与已退役托管/编辑器 surface，不读取生产实现源码。
 - 交付合同按 owner 分层：desktop-package.test.mjs 只拥有 package.json allowlist、Bridge/Schema/资源闭包、CSP、entitlements、Info.plist 清理和固定包身份；packaged-artifact-gate.test.mjs 必须调用真实 verifier，拥有 app.asar、Bridge、Schema、metadata、retired closure、签名 profile 和 DMG/ZIP 边界；预加载 IPC、更新、Preview、窗口、Bridge 生命周期、遥测和 Workbench 行为必须留在各自 Node 或 Electron owner，不能因它们被打包而回流到 package 测试。
-- Developer Preview、Release Dry Run、Candidate 和 Release 是四个显式 trust profile。公共 release fixture 每次创建独立 package/build-info/telemetry/identity 值和独立临时目录；它不签名、不调用 Apple 命令、不访问网络，也不能以无 profile 的宽泛对象混淆正式与非正式通道。fixture Hash 期望值必须继续由测试侧独立 crypto 计算，不能调用被测 evaluator。
+- Developer Preview、Release Dry Run、Candidate 和 Release 是四个显式 trust profile。公共 release fixture 每次创建独立 package/build-info/telemetry/application-update/identity 值和独立临时目录；它不签名、不调用 Apple 命令、不访问网络，也不能以无 profile 的宽泛对象混淆正式与非正式通道。fixture Hash 期望值必须继续由测试侧独立 crypto 计算，不能调用被测 evaluator。
 - Workflow 源码扫描只证明凭证、exact Tree、权限和阶段顺序等 release architecture 边界；普通步骤文案和已由 verifier/owner 覆盖的行为不得作为第二个字符串 oracle。
 - Browser 冒烟：固定覆盖脚本隔离、源码字节、可编辑岛、源码权威围栏和能力降级五类关键风险；完整 Browser 包含全部活动 V2 回归。V1 的 per-keystroke tracker、FormatSkeleton 和 IME tail 状态机实现及测试已从仓库删除；V2 岛内字节 oracle、输入矩阵和 composition 快照用例是唯一产品合同。
 - Electron 冒烟：固定覆盖真实 authored DOM 输入和一次带磁盘持久化的 composition；完整 Electron 保留保存、关闭重开和逐字节 forward 结果等全部路径。
@@ -203,11 +203,11 @@ PR 批量是建议而非固定限制：用 CI Health 的 Ready 次数、candidat
   必须同时注入 HTML、评论、Prompt、附件名、文件路径和原始异常，最终
   批次及本地队列都不得出现这些值；测试永不访问真实 PostHog。
 - 开发者测试包：先证明正式 tag 后的提交序号被确定性映射为独立测试版本（例如 `0.9.5` 后依次为 `0.9.69991`、`0.9.69992`），再对独立名称/Bundle ID 的 ad-hoc `.app` 做 app.asar、Bridge、Schema、资源、版本和 DMG 静态校验，并从真实可执行文件做一次应用名/版本/首窗/Bridge/Workbench/正常退出冒烟；最后把 DMG Hash、tag-to-commit 范围、全部关联 PR 的实时状态/一句话摘要及无 PR 直接提交写入 JSON/Markdown 交付报告。GitHub 元数据缺失时交付失败，但不把可变 PR 状态嵌入 App 或正式字节凭证。
-- 发布 dry-run：只在相关 PR 路径变化时运行。第一台 macOS runner 用固定合成 PostHog 项目 token 生成启用态 telemetry metadata，与 build metadata 一起装入显式未签名（`identity=null`）App，复用正式 verifier 检查 app.asar、Bridge、Schema、资源和身份字段，并创建 `releaseEligible: false` 的独立 checkpoint。第二台 clean runner 验证 archive/payload Hash、恢复原 metadata、重建 `dist-desktop` renderer oracle、再次复用正式 verifier，再从真实可执行文件核对 `app.getName()`、版本和 `CFBundleIdentifier`。workflow 不引用 `secrets.*`，dry-run kind/目录/文件名均不能被正式 signed-App restore 接受。
-- 候选包：先对 ad-hoc 预签名 `.app` 校验 app.asar、Bridge、Schema、资源闭包并从真实可执行文件运行完整源码字节 oracle；通过后才做 Developer ID 签名，并在 Apple 请求前做一次 Hardened Runtime 启动。App 公证后冻结 archive/payload/Tree Hash checkpoint，下一 job 只把同一 App 作为 `--prepackaged` 输入生成 DMG、ZIP、blockmap 和 `latest-mac.yml`，再校验 Team、App/DMG 公证票据、Gatekeeper、只读挂载与 ZIP 解包内容。
-  新 job 会先从 checkpoint App 原样恢复 build-info 与遥测配置作为比较输入，
+- 发布 dry-run：只在相关 PR 路径变化时运行。第一台 macOS runner 用固定合成 PostHog 项目 token 生成启用态 telemetry metadata，同时从唯一 stable GitHub publish 契约生成 `app-update.yml`，与 build metadata 一起装入显式未签名（`identity=null`）App，复用正式 verifier 检查 app.asar、Bridge、Schema、资源、更新通道和身份字段，并创建 `releaseEligible: false` 的独立 checkpoint。第二台 clean runner 验证 archive/payload Hash、原样恢复 metadata、重建 `dist-desktop` renderer oracle、再次复用正式 verifier，再从真实可执行文件核对 `app.getName()`、版本和 `CFBundleIdentifier`。workflow 不引用 `secrets.*`，dry-run kind/目录/文件名均不能被正式 signed-App restore 接受。
+- 候选包：先在签名前生成 stable `app-update.yml`，并对 ad-hoc `.app` 校验 app.asar、Bridge、Schema、资源闭包、更新通道，再从真实可执行文件运行完整源码字节 oracle；通过后才做 Developer ID 签名，并在 Apple 请求前做一次 Hardened Runtime 启动。App 公证后冻结包含更新配置的 archive/payload/Tree Hash checkpoint，下一 job 只把同一 App 作为 `--prepackaged` 输入生成 DMG、ZIP、blockmap 和 `latest-mac.yml`，再校验 Team、App/DMG 公证票据、Gatekeeper、只读挂载与 ZIP 解包内容。
+  新 job 会先从 checkpoint App 原样恢复 build-info、遥测与应用更新配置作为比较输入，
   再从同一源码 Tree 重建确定性的 Electron renderer 作为 payload oracle；
-  不得重新生成遥测配置，也不得重新组装、签名、公证或替换 checkpoint App。
+  不得重新生成遥测或应用更新配置，也不得重新组装、签名、公证或替换 checkpoint App。
   最终 DMG 通过后另生成实时安装包内容报告；发布阶段对下载的同一 DMG
   刷新 PR 状态，报告不参与冻结字节 Hash，避免可变协作状态污染不可变候选。
 

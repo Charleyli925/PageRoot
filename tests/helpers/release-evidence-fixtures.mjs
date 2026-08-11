@@ -10,6 +10,11 @@ import os from "node:os";
 import path from "node:path";
 import { createPackage } from "@electron/asar";
 
+import {
+  expectedApplicationUpdateConfig,
+  serializeApplicationUpdateConfig,
+} from "../../scripts/application-update-config.mjs";
+
 const FIXTURE_COMMIT_SHA = "a".repeat(40);
 const FIXTURE_TREE_SHA = "b".repeat(40);
 const FIXTURE_HEAD_SHA = "c".repeat(40);
@@ -143,6 +148,10 @@ function fixtureExtraResources() {
       to: "build-info.json",
     },
     {
+      from: "output/release-metadata/app-update.yml",
+      to: "app-update.yml",
+    },
+    {
       from: "PageRoot 用户声明与免责声明.txt",
       to: "PageRoot 用户声明与免责声明.txt",
     },
@@ -175,6 +184,14 @@ export function fixturePackageJson(profile, overrides = {}) {
         : "PageRoot-${version}-${arch}.${ext}",
       directories: { output: "release" },
       extraResources: fixtureExtraResources(),
+      publish: [
+        {
+          provider: "github",
+          owner: "Charleyli925",
+          repo: "PageRoot",
+          releaseType: "release",
+        },
+      ],
       mac: {
         entitlements: "desktop/resources/entitlements.mac.plist",
         entitlementsInherit: "desktop/resources/entitlements.mac.plist",
@@ -295,6 +312,8 @@ export async function createSyntheticAppBundle(t, {
     ...buildInfoOverrides,
   });
   const telemetry = fixtureTelemetryConfig(profile, telemetryOverrides);
+  const applicationUpdate = expectedApplicationUpdateConfig(packageJson);
+  const applicationUpdateContents = serializeApplicationUpdateConfig(packageJson);
 
   await writeFixtureFile(
     productRoot,
@@ -448,6 +467,11 @@ export async function createSyntheticAppBundle(t, {
       JSON.stringify(telemetry, null, 2) + "\n",
     ),
     writeFixtureFile(
+      productRoot,
+      "output/release-metadata/app-update.yml",
+      applicationUpdateContents,
+    ),
+    writeFixtureFile(
       resourcesPath,
       "build-info.json",
       JSON.stringify(effectiveBuildInfo, null, 2) + "\n",
@@ -457,10 +481,16 @@ export async function createSyntheticAppBundle(t, {
       "usage-telemetry-config.json",
       JSON.stringify(telemetry, null, 2) + "\n",
     ),
+    writeFixtureFile(
+      resourcesPath,
+      "app-update.yml",
+      applicationUpdateContents,
+    ),
   ]);
 
   return {
     appPath,
+    applicationUpdate: structuredClone(applicationUpdate),
     buildInfo: structuredClone(effectiveBuildInfo),
     packageJson: structuredClone(packageJson),
     productRoot,

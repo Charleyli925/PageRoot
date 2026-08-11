@@ -88,6 +88,7 @@ test("release commands use one automated artifact lane with full tests and packa
     "electron-builder must never publish before PageRoot verifies the complete release asset set",
   );
   assert.ok(packageJson.build.extraResources.some((entry) => entry.to === "build-info.json"));
+  assert.ok(packageJson.build.extraResources.some((entry) => entry.to === "app-update.yml"));
   assert.ok(
     packageJson.build.extraResources.some(
       (entry) => entry.to === "usage-telemetry-config.json",
@@ -275,6 +276,13 @@ test("the app-bundle gate validates app.asar, Bridge scripts, schemas and plist 
   assert.equal(result.asarFileCount, 25);
   assert.equal(result.schemaFileCount, 5);
   assert.equal(result.legalResourceCount, 5);
+  assert.deepEqual(result.applicationUpdate, {
+    owner: "Charleyli925",
+    repo: "PageRoot",
+    provider: "github",
+    releaseType: "release",
+    updaterCacheDirName: "pageroot-updater",
+  });
   assert.equal(result.telemetry.enabled, true);
   assert.equal(result.provenance.commitSha, "a".repeat(40));
 });
@@ -322,6 +330,32 @@ test("the app-bundle gate reports each mutated closure boundary", async (t) => {
         ),
       ),
       expected: /usage-telemetry-config\.json/u,
+    },
+    {
+      name: "missing packaged application update config",
+      profile: "candidate",
+      allowUnsigned: true,
+      mutate: ({ resourcesPath }) => rm(
+        path.join(resourcesPath, "app-update.yml"),
+      ),
+      expected: /app-update\.yml/u,
+    },
+    {
+      name: "application update channel drift",
+      profile: "candidate",
+      allowUnsigned: true,
+      mutate: ({ resourcesPath }) => writeFile(
+        path.join(resourcesPath, "app-update.yml"),
+        [
+          "owner: attacker",
+          "repo: PageRoot",
+          "provider: github",
+          "releaseType: release",
+          "updaterCacheDirName: pageroot-updater",
+          "",
+        ].join("\n"),
+      ),
+      expected: /does not match the stable GitHub channel/u,
     },
   ];
   for (const fixtureCase of cases) {

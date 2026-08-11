@@ -809,6 +809,19 @@
       "nodeTests": ["tests/dependency-audit-policy.test.mjs"]
     },
     {
+      "id": "application-update-config",
+      "patterns": [
+        "^scripts/application-update-config\\.mjs$",
+        "^tests/application-update-config\\.test\\.mjs$"
+      ],
+      "suites": [],
+      "nodeTests": [
+        "tests/application-update-config.test.mjs",
+        "tests/packaged-artifact-gate.test.mjs",
+        "tests/release-app-stage.test.mjs"
+      ]
+    },
+    {
       "id": "package-manifest-contract",
       "patterns": [
         "^package\\.json$",

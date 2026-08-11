@@ -18,6 +18,11 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { gunzipSync } from "node:zlib";
 import { extractFile, listPackage, statFile } from "@electron/asar";
 import {
+  APPLICATION_UPDATE_CONFIG_FILE,
+  APPLICATION_UPDATE_CONFIG_SOURCE,
+  parseApplicationUpdateConfig,
+} from "./application-update-config.mjs";
+import {
   DEVELOPER_PREVIEW_ARTIFACT_PATTERN,
   developerPreviewPackageJson,
   developerPreviewReleaseDirectory,
@@ -372,6 +377,27 @@ async function assertUsageTelemetryConfig({
   return config;
 }
 
+async function assertApplicationUpdateConfig({
+  productRoot,
+  resourcesPath,
+  packageJson,
+}) {
+  const updateResource = packageJson.build?.extraResources?.find(
+    (entry) => entry?.to === APPLICATION_UPDATE_CONFIG_FILE,
+  );
+  assert.equal(
+    updateResource?.from,
+    APPLICATION_UPDATE_CONFIG_SOURCE,
+    "the packaged application update config must come from release metadata",
+  );
+  const [sourceConfig, packagedConfig] = await Promise.all([
+    readFile(path.resolve(productRoot, APPLICATION_UPDATE_CONFIG_SOURCE), "utf8"),
+    readFile(path.join(resourcesPath, APPLICATION_UPDATE_CONFIG_FILE), "utf8"),
+  ]);
+  parseApplicationUpdateConfig(sourceConfig, packageJson);
+  return parseApplicationUpdateConfig(packagedConfig, packageJson);
+}
+
 function commandExists(commandPath) {
   return existsSync(commandPath);
 }
@@ -600,6 +626,11 @@ export async function verifyAppBundle({
     resourcesPath,
     packageJson,
   });
+  const applicationUpdate = await assertApplicationUpdateConfig({
+    productRoot,
+    resourcesPath,
+    packageJson,
+  });
   for (const fileName of REQUIRED_LEGAL_RESOURCES) {
     await assertFilesEqual(
       path.join(productRoot, fileName),
@@ -674,6 +705,7 @@ export async function verifyAppBundle({
     asarFileCount: expectedAsarFiles.length,
     schemaFileCount: schemas.length,
     legalResourceCount: REQUIRED_LEGAL_RESOURCES.length,
+    applicationUpdate,
     provenance,
     telemetry,
   };
