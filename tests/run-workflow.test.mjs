@@ -511,3 +511,54 @@ test("cancel and conflict commands keep their scoped identities and do not alter
   assert.equal(harness.runSession.activeRun?.requestId, "request_a");
   assert.equal(harness.calls.cancel[0].sourcePath, SOURCE_B);
 });
+
+test("a late keep-external result cannot reload a reopened project generation", async () => {
+  const resolution = deferred();
+  const harness = createHarness({
+    bridge: {
+      async resolveConflict() {
+        return resolution.promise;
+      },
+    },
+  });
+  const conflict = runRecord({
+    status: "awaiting-conflict-resolution",
+    conflictId: "conflict_a",
+  });
+  const events = [];
+  harness.workflow.subscribeEvents((event) => events.push(event));
+  harness.runSession.trackRun(conflict, { activate: "always" });
+
+  const resolving = harness.workflow.resolveConflict({
+    run: conflict,
+    action: "keep-external",
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  harness.projectSession.openLocator(SOURCE_B);
+  harness.projectSession.register({
+    epoch: harness.projectSession.epoch,
+    sourcePath: SOURCE_B,
+    projectId: "project_b",
+    documentId: "document_b",
+  });
+  harness.projectSession.openLocator(SOURCE_A);
+  const reopened = harness.projectSession.register({
+    epoch: harness.projectSession.epoch,
+    sourcePath: SOURCE_A,
+    projectId: "project_a",
+    documentId: "document_a",
+  });
+  assert.notEqual(reopened.epoch, harness.context.epoch);
+
+  resolution.resolve({});
+  const outcome = await resolving;
+
+  assert.equal(outcome.status, "succeeded");
+  assert.equal(outcome.value.current, false);
+  assert.equal(outcome.value.reloadCurrentSource, false);
+  assert.equal(harness.calls.unlock, 0);
+  const event = events.find((entry) => entry.type === "run-conflict-resolved");
+  assert.equal(event?.current, false);
+  assert.equal(event?.reloadCurrentSource, false);
+});

@@ -1134,9 +1134,12 @@ submission reconciliation 或 Run mutation IO。
 - 修复 polling 终态写回时把 `state` 误解码为浏览器全局 `status` 的 P0：`no-change`
   与 `error` 现在保留 canonical terminal state，不会重新显示为 processing。新增 Node
   覆盖终态解锁/可重开及 malformed Request response 的只读 authority reconciliation。
-- 已通过本节指定 Node 集 38/38、`npm run architecture:check`、`npm run lint`、
+- 最终审查修复 P1：`resolveConflict` 在等待 Bridge 前冻结完整 `ProjectSession`
+  context；`keep-external` 的迟到结果不能对切走又重新打开的同项目新 epoch 解锁或
+  无确认 reload。新增该 project-generation fence 的 Node 回归覆盖。
+- 已通过本节指定 Node 集 39/39、`npm run architecture:check`、`npm run lint`、
   `npm run typecheck` 与 `npm run test:ai-closed-loop` 16/16，以及 `npm run task:finish`
-  （136 targeted Node、28 Browser smoke、8 Electron smoke、2 AI smoke）。PR-6 及其
+  （137 targeted Node、28 Browser smoke、8 Electron smoke、2 AI smoke）。PR-6 及其
   Version/source migration 未提前实施。
 
 ## 12. PR-6：Version Activation、Review Preparation 与 History Navigation

@@ -824,6 +824,12 @@ export class RunWorkflow {
     if (!this.#runSession.beginOperation("resolve", operationKey)) {
       return blocked("RUN_CONFLICT_BUSY", "冲突处理正在进行。");
     }
+    // Conflict resolution may outlive a switch away and reopen of the same
+    // project. The stable project IDs alone are not enough to authorize a
+    // late result to unlock or reload the newer editor generation.
+    const context = this.#isCurrentRun(run)
+      ? copyContext(this.#projectSession.context)
+      : null;
     try {
       const payload = await this.#bridgeClient.resolveConflict({
         projectId: run.projectId,
@@ -834,7 +840,7 @@ export class RunWorkflow {
         conflictId: run.conflictId,
         action,
       });
-      const current = this.#isCurrentRun(run);
+      const current = Boolean(context && this.#isCurrentContext(context));
       if (!this.#runSession.hasRun(run)) return stale(run);
       if (action === "keep-external") {
         this.#runSession.removeRun(run);
@@ -872,6 +878,7 @@ export class RunWorkflow {
       this.syncPolling();
       return succeeded({ run: nextRun, action, current, reloadCurrentSource: false });
     } catch (cause) {
+      const current = Boolean(context && this.#isCurrentContext(context));
       if (this.#runSession.hasRun(run)) {
         this.#runSession.trackRun({
           ...run,
@@ -879,13 +886,13 @@ export class RunWorkflow {
             cause,
             "这次选择还没有记录，外部文件和 AI 候选都仍被保留。",
           ),
-        }, { activate: this.#isCurrentRun(run) ? "always" : "never" });
+        }, { activate: current ? "always" : "never" });
       }
       this.#emitEvent({
         type: "run-conflict-failed",
         run,
         action,
-        current: this.#isCurrentRun(run),
+        current,
         cause,
       });
       return rejected(errorCode(cause, "RUN_CONFLICT_REJECTED"), this.#codecs.errorMessage(
