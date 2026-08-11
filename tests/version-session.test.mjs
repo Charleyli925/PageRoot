@@ -41,3 +41,21 @@ test("source edits retire only exact-version identity", () => {
   assert.equal(session.snapshot.currentBasedOnVersionId, "version_002");
   assert.equal(session.snapshot.latestVersionId, "version_002");
 });
+
+test("version session restores a complete immutable projection snapshot", () => {
+  const session = new VersionSession();
+  session.hydrate({
+    versions: [{ id: "version_001" }],
+    latestVersionId: "version_001",
+    currentBasedOnVersionId: "version_001",
+    currentExactVersionId: "version_001",
+  });
+  const snapshot = session.captureSnapshot();
+  session.adoptCommitted("version_002");
+  session.enterHistory("version_001");
+
+  assert.equal(session.restoreSnapshot(snapshot), true);
+  assert.deepEqual(session.snapshot.versions, [{ id: "version_001" }]);
+  assert.equal(session.snapshot.currentExactVersionId, "version_001");
+  assert.equal(session.snapshot.viewMode, "current");
+});

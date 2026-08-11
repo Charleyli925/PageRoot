@@ -1540,7 +1540,7 @@ export class ProjectWorkflow {
         if (!nextProjectId || !nextDocumentId || !workspaceHash || !versionId) {
           throw new Error("项目已经生成新文件，但缺少切换当前文件所需的完整身份。");
         }
-        preparedTransition = await this.#prepareGeneratedSourceTransition({
+        preparedTransition = await this.prepareGeneratedSourceTransition({
           previousSourcePath: activeSource,
           nextSourcePath: canonicalSourcePath,
           expectedSha256: workspaceHash,
@@ -1633,7 +1633,7 @@ export class ProjectWorkflow {
       let context = null;
       publicationStarted = true;
       if (preparedTransition) {
-        context = this.#commitGeneratedSourceTransition({
+        context = this.commitGeneratedSourceTransition({
           prepared: preparedTransition,
           html: authoritativeHtml,
           sourceSha256: authoritativeHash,
@@ -2062,7 +2062,10 @@ export class ProjectWorkflow {
     });
   }
 
-  async #prepareGeneratedSourceTransition({
+  // VersionWorkflow shares this narrow transition primitive with hydration.
+  // The caller prepares async host work first; this method never publishes a
+  // partial Project/Document/Version tuple.
+  async prepareGeneratedSourceTransition({
     previousSourcePath,
     nextSourcePath,
     expectedSha256,
@@ -2115,7 +2118,7 @@ export class ProjectWorkflow {
     });
   }
 
-  #commitGeneratedSourceTransition({ prepared, html, sourceSha256, publishVersion }) {
+  commitGeneratedSourceTransition({ prepared, html, sourceSha256, publishVersion }) {
     if (!prepared.updatesCurrentProject) return null;
     const changesSourcePath = !this.#codecs.sameSourcePath(
       this.#projectSession.sourcePath,

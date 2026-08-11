@@ -286,15 +286,6 @@ type CanvasRenderAck = Readonly<{
 
 type CanvasRenderAcks = Readonly<Record<CanvasMode, CanvasRenderAck | null>>;
 
-type PreparedGeneratedSourceTransition = Readonly<{
-  previousSourcePath: string;
-  nextSourcePath: string;
-  projectId: string;
-  documentId: string;
-  updatesCurrentProject: boolean;
-  activatedProject: HtmlProject | null;
-}>;
-
 const bridgeClient = createRuntimeBridgeClient();
 const recoveryStore = createBrowserRecoveryStore();
 const PROJECT_RULES_AUTOSAVE_DELAY_MS = 700;
@@ -475,14 +466,6 @@ export default function Workbench() {
       direction: SourceHistoryDirection,
     ) => Promise<boolean>;
     generateRequest?: () => void;
-    openCommittedVersion?: (
-      run: ActiveRun,
-      payload: Record<string, unknown>,
-      resolve: () => void,
-      reject: (reason: unknown) => void,
-    ) => void;
-    viewHistoryVersion?: (version: Version) => void;
-    returnToCurrent?: () => void;
   }>({});
   const deferEditorCommand = useCallback((
     kind: string,
@@ -581,8 +564,9 @@ export default function Workbench() {
   ) => Promise<void>>(async () => {
     throw new Error("画布核对尚未完成初始化。");
   });
-  const viewTransitioningRef = useRef(false);
-  const navigationOperationRef = useRef(0);
+  const sourceTransitioningRef = useRef(false);
+  const sourceTransitionOperationRef = useRef(0);
+  const versionTransitioningRef = useRef(false);
   const attachmentObjectUrlsRef = useRef<Map<string, string>>(new Map());
   const runSessionRef = useRef(new RunSession({
     sourcePath: WELCOME_PROJECT.sourcePath,
@@ -715,6 +699,17 @@ export default function Workbench() {
   });
   const [workspaceController, setWorkspaceController] =
     useState<WorkspaceController | null>(null);
+  const [sourceTransitioning, setSourceTransitioning] = useState(false);
+  const setSourceViewTransitioning = useCallback((transitioning: boolean) => {
+    sourceTransitioningRef.current = transitioning;
+    setSourceTransitioning(transitioning);
+  }, []);
+  const isViewTransitioning = useCallback(() => (
+    sourceTransitioningRef.current || versionTransitioningRef.current
+  ), []);
+  const versionTransitioning =
+    (workspaceControllerSnapshot?.version?.navigation.phase || "idle") !== "idle";
+  const viewTransitioning = sourceTransitioning || versionTransitioning;
   const invalidateCanvasRenderAcks = useCallback(() => {
     setCanvasRenderAcks({ edit: null, preview: null });
   }, []);
@@ -904,7 +899,7 @@ export default function Workbench() {
           },
           legacy: {
             isHistoryView: () => versionSessionRef.current.snapshot.viewMode === "history",
-            isViewTransitioning: () => viewTransitioningRef.current,
+            isViewTransitioning: () => isViewTransitioning(),
             saveProjectRules: () => saveProjectRulesRef.current(),
           },
         },
@@ -967,11 +962,45 @@ export default function Workbench() {
           clearInterval: (handle: unknown) => window.clearInterval(handle as number),
         },
       },
+      versionWorkflow: {
+        runSession: runSessionRef.current,
+        codecs: {
+          isRecord,
+          sameSourcePath: sameLocalSourcePath,
+          operationKey: activeRunOperationKey,
+          errorMessage: productErrorMessage,
+        },
+        canvas: {
+          deferCommand: (
+            kind: string,
+            run: () => void,
+            options?: {
+              authority?: NativeDeferredCommandAuthority;
+              onDiscard?: (reason: NativeDeferredCommandDiscardReason) => void;
+            },
+          ) => deferEditorCommand(kind, run, undefined, options),
+          fencePendingEdit: (options: Record<string, unknown>) => (
+            editorRef.current?.fencePendingEdit(options)
+          ),
+          freeze: (reason: string) => fenceAndFreezeCurrentCanvasRef.current(reason),
+          verifyRendered: (
+            expectedHtml: string,
+            expectedSha256: string,
+            context?: ProjectContext,
+          ) => verifyCanvasRenderedRef.current(expectedHtml, expectedSha256, context),
+          invalidateRenderAcks: invalidateCanvasRenderAcks,
+          unlock: () => editorRef.current?.unlockNow?.(),
+          requestFrame: (callback: () => void) => window.requestAnimationFrame(callback),
+          onNavigationChange: (transitioning: boolean) => {
+            versionTransitioningRef.current = transitioning;
+          },
+        },
+      },
       clock: { now: Date.now },
     });
     setWorkspaceController(controller);
     return () => controller.dispose();
-  }, [deferEditorCommand, invalidateCanvasRenderAcks]);
+  }, [deferEditorCommand, invalidateCanvasRenderAcks, isViewTransitioning]);
   const invalidateEditCanvasRenderAck = useCallback(() => {
     setCanvasRenderAcks((current) => (
       current.edit ? { ...current, edit: null } : current
@@ -1028,7 +1057,6 @@ export default function Workbench() {
       : null;
   const [startupIssue, setStartupIssue] = useState<StartupIssue | null>(null);
   const [workspaceIssue, setWorkspaceIssue] = useState<WorkspaceIssue | null>(null);
-  const [viewTransitioning, setViewTransitioning] = useState(false);
   const [cancelRunConfirmationKey, setCancelRunConfirmationKey] =
     useState<string | null>(null);
   const [reviewPreparing, setReviewPreparing] = useState(false);
@@ -1272,7 +1300,7 @@ export default function Workbench() {
             ? "preview"
             : "edit",
         );
-        setViewTransitioning(false);
+        setSourceViewTransitioning(false);
         setProjectRecordsPreparing(false);
         setProjectRecordsError("");
         setOpeningReadyVersion(Boolean(
@@ -2615,127 +2643,6 @@ export default function Workbench() {
     }
   }, []);
 
-  const prepareGeneratedSourceTransition = useCallback(async ({
-    previousSourcePath,
-    nextSourcePath,
-    expectedSha256,
-    nextProjectId,
-    nextDocumentId,
-    versionId,
-  }: {
-    previousSourcePath: string;
-    nextSourcePath: string;
-    expectedSha256: string;
-    nextProjectId: string;
-    nextDocumentId: string;
-    versionId: string;
-  }): Promise<PreparedGeneratedSourceTransition> => {
-    const updatesCurrentProject =
-      (
-        Boolean(nextProjectId)
-        && Boolean(projectSessionRef.current.projectId)
-        && projectSessionRef.current.projectId === nextProjectId
-      )
-      || sameLocalSourcePath(projectSessionRef.current.sourcePath, previousSourcePath)
-      || sameLocalSourcePath(projectSessionRef.current.sourcePath, nextSourcePath);
-    if (!nextSourcePath || sameLocalSourcePath(nextSourcePath, previousSourcePath)) {
-      return Object.freeze({
-        previousSourcePath,
-        nextSourcePath,
-        projectId: nextProjectId,
-        documentId: nextDocumentId,
-        updatesCurrentProject,
-        activatedProject: null,
-      });
-    }
-
-    const api = window.htmlAIProjects;
-    if (!api?.activateGeneratedVersion) {
-      throw new Error("当前运行环境不能安全切换到生成的新版本文件。");
-    }
-    const activatedProject = await api.activateGeneratedVersion({
-      previousSourcePath,
-      nextSourcePath,
-      expectedSha256,
-      projectId: nextProjectId,
-      versionId,
-    });
-    if (
-      !sameLocalSourcePath(activatedProject.sourcePath, nextSourcePath)
-      || activatedProject.sha256 !== expectedSha256
-      || await browserSha256(activatedProject.html) !== expectedSha256
-    ) {
-      throw new Error("生成版本的路径、HTML 与 Hash 没有形成完整一致的候选。");
-    }
-    void refreshRecents();
-    return Object.freeze({
-      previousSourcePath,
-      nextSourcePath,
-      projectId: nextProjectId,
-      documentId: nextDocumentId,
-      updatesCurrentProject,
-      activatedProject,
-    });
-  }, [refreshRecents]);
-
-  const commitGeneratedSourceTransition = useCallback(({
-    prepared,
-    html: nextHtml,
-    sourceSha256: nextSourceSha256,
-    publishVersion,
-  }: {
-    prepared: PreparedGeneratedSourceTransition;
-    html: string;
-    sourceSha256: string;
-    publishVersion: () => void;
-  }): ProjectContext | null => {
-    if (!prepared.updatesCurrentProject) return null;
-    const changesSourcePath = !sameLocalSourcePath(
-      projectSessionRef.current.sourcePath,
-      prepared.nextSourcePath,
-    );
-    if (changesSourcePath) {
-      runSessionRef.current.rebaseSource({
-        previousSourcePath: prepared.previousSourcePath,
-        sourcePath: prepared.nextSourcePath,
-        projectId: prepared.projectId,
-      });
-    }
-    const transition = changesSourcePath
-      ? projectSessionRef.current.transitionSource({
-          previousSourcePath: prepared.previousSourcePath,
-          sourcePath: prepared.nextSourcePath,
-          projectId: prepared.projectId,
-          documentId: prepared.documentId,
-        })
-      : projectSessionRef.current.context
-        || projectSessionRef.current.register({
-          epoch: projectSessionRef.current.epoch,
-          projectId: prepared.projectId,
-          documentId: prepared.documentId,
-          sourcePath: prepared.nextSourcePath,
-        });
-    if (!transition) return null;
-    const context = projectSessionRef.current.context;
-    if (!context) return null;
-
-    // No asynchronous boundary is permitted here. React observes the new
-    // project, complete Document tuple, Version authority and Canvas generation
-    // in one renderer commit instead of rendering any partial combination.
-    documentSessionRef.current.publishAuthority({
-      html: nextHtml,
-      sourceSha256: nextSourceSha256,
-      pendingWrite: null,
-    });
-    publishVersion();
-    invalidateCanvasRenderAcks();
-    if (changesSourcePath) {
-      workspaceController?.resetDocumentWorkflow();
-      workspaceController?.resetCommentWorkflow();
-    }
-    return context;
-  }, [invalidateCanvasRenderAcks, workspaceController]);
-
   const refreshWorkspace = useCallback(async (
     sourceOverride?: string | null,
     epochOverride?: number,
@@ -3427,8 +3334,7 @@ export default function Workbench() {
         throw new Error("刚刚还有文字输入，源页正在安全保存，请稍后再试。");
       }
       transitionOwnsCanvas = true;
-      viewTransitioningRef.current = true;
-      setViewTransitioning(true);
+      setSourceViewTransitioning(true);
 
       const expectedSha256 = documentSessionRef.current.sourceSha256;
       const operationId = sourceRenameOperationId();
@@ -3528,8 +3434,7 @@ export default function Workbench() {
       });
     } finally {
       if (transitionOwnsCanvas) {
-        viewTransitioningRef.current = false;
-        setViewTransitioning(false);
+        setSourceViewTransitioning(false);
         window.requestAnimationFrame(() => editorRef.current?.unlockNow?.());
       }
       fileRenameBusyRef.current = false;
@@ -3635,7 +3540,7 @@ export default function Workbench() {
       runSessionRef.current.activeLocked
       || projectHydrating
       || projectLoadError
-      || viewTransitioningRef.current
+      || isViewTransitioning()
       || workspaceController?.hasDocumentHistoryAction
       || String(documentSessionRef.current.persistState) === "conflict"
       || viewMode === "history"
@@ -3735,7 +3640,7 @@ export default function Workbench() {
   ]);
 
   const exportCurrentHtml = useCallback(async (fromDeferred = false) => {
-    if (viewTransitioningRef.current) return;
+    if (isViewTransitioning()) return;
     if (
       !fromDeferred
       && deferEditorCommand(
@@ -3809,44 +3714,41 @@ export default function Workbench() {
     };
   }, [exportCurrentHtml]);
 
-  const beginNavigationOperation = useCallback((allowSupersede = false): number | null => {
-    if (viewTransitioningRef.current && !allowSupersede) return null;
-    const wasAlreadyTransitioning = viewTransitioningRef.current;
-    const operationId = navigationOperationRef.current + 1;
-    if (!wasAlreadyTransitioning) {
-      const fenced = editorRef.current?.fencePendingEdit({
-        resumeEditing: false,
-        trigger: "project-switch",
-      });
-      if (!fenced || !fenced.ok) {
-        editorRef.current?.showCommitBlocked(
-          fenced?.reason || "请点回文字完成输入，再切换 HTML 视图。",
-        );
-        return null;
-      }
-      const frozen = editorRef.current?.freezeNow();
-      if (!frozen || !frozen.ok) {
-        editorRef.current?.showCommitBlocked(
-          frozen?.reason || "请点回文字完成输入，再切换 HTML 视图。",
-        );
-        return null;
-      }
+  // External document reload remains a narrow presentation host action. Version
+  // activation/history navigation has its own operation owner in VersionWorkflow.
+  const beginSourceTransition = useCallback((): number | null => {
+    if (isViewTransitioning()) return null;
+    const fenced = editorRef.current?.fencePendingEdit({
+      resumeEditing: false,
+      trigger: "project-switch",
+    });
+    if (!fenced || !fenced.ok) {
+      editorRef.current?.showCommitBlocked(
+        fenced?.reason || "请点回文字完成输入，再切换 HTML 视图。",
+      );
+      return null;
     }
-    navigationOperationRef.current = operationId;
-    viewTransitioningRef.current = true;
-    setViewTransitioning(true);
+    const frozen = editorRef.current?.freezeNow();
+    if (!frozen || !frozen.ok) {
+      editorRef.current?.showCommitBlocked(
+        frozen?.reason || "请点回文字完成输入，再切换 HTML 视图。",
+      );
+      return null;
+    }
+    const operationId = sourceTransitionOperationRef.current + 1;
+    sourceTransitionOperationRef.current = operationId;
+    setSourceViewTransitioning(true);
     clearAutosaveTimer();
     return operationId;
-  }, [clearAutosaveTimer]);
+  }, [clearAutosaveTimer, isViewTransitioning, setSourceViewTransitioning]);
 
-  const finishNavigationOperation = useCallback((operationId: number) => {
-    if (navigationOperationRef.current !== operationId) return;
-    viewTransitioningRef.current = false;
-    setViewTransitioning(false);
+  const finishSourceTransition = useCallback((operationId: number) => {
+    if (sourceTransitionOperationRef.current !== operationId) return;
+    setSourceViewTransitioning(false);
     window.requestAnimationFrame(() => {
       if (!projectLoadError) editorRef.current?.unlockNow?.();
     });
-  }, [projectLoadError]);
+  }, [projectLoadError, setSourceViewTransitioning]);
 
   const reloadCurrentSource = useCallback(async ({
     skipConfirmation = false,
@@ -3881,7 +3783,7 @@ export default function Workbench() {
       && hasUnwrittenLocalChanges
       && !window.confirm("重新载入会舍弃尚未写回的当前编辑内容。建议先导出副本，仍要继续吗？")
     ) return;
-    const operationId = beginNavigationOperation();
+    const operationId = beginSourceTransition();
     if (operationId === null) return;
     try {
       const outcome = await requiredWorkspaceController(workspaceController)
@@ -3892,7 +3794,7 @@ export default function Workbench() {
         });
       if (
         outcome.status === "stale"
-        || navigationOperationRef.current !== operationId
+        || sourceTransitionOperationRef.current !== operationId
         || !isCurrentProjectContext(context)
       ) return;
       if (outcome.status !== "succeeded") {
@@ -3902,7 +3804,7 @@ export default function Workbench() {
       if (lastModified) setLastModifiedAt(lastModified);
       await refreshWorkspace(context.sourcePath, context.epoch);
       if (
-        navigationOperationRef.current !== operationId
+        sourceTransitionOperationRef.current !== operationId
         || !isCurrentProjectContext(context)
       ) return;
       setToast({
@@ -3921,13 +3823,13 @@ export default function Workbench() {
         dedupeKey: "source-reload",
       });
     } finally {
-      finishNavigationOperation(operationId);
+      finishSourceTransition(operationId);
     }
   }, [
-    beginNavigationOperation,
+    beginSourceTransition,
     captureProjectContext,
     deferEditorCommand,
-    finishNavigationOperation,
+    finishSourceTransition,
     isCurrentProjectContext,
     persistState,
     projectLoadError,
@@ -3978,7 +3880,7 @@ export default function Workbench() {
       || runSessionRef.current.activeLocked
       || projectHydrating
       || projectLoadError
-      || viewTransitioningRef.current
+      || isViewTransitioning()
       || viewMode === "history"
       || documentSessionRef.current.persistState === "conflict"
       || !workspaceController
@@ -4362,7 +4264,7 @@ export default function Workbench() {
       runSessionRef.current.activeLocked
       || projectHydrating
       || projectLoadError
-      || viewTransitioningRef.current
+      || isViewTransitioning()
       || documentSessionRef.current.persistState === "conflict"
       || viewMode === "history"
     ) return;
@@ -4523,7 +4425,7 @@ export default function Workbench() {
       runSessionRef.current.activeLocked
       || projectHydrating
       || projectLoadError
-      || viewTransitioningRef.current
+      || isViewTransitioning()
       || documentSessionRef.current.persistState === "conflict"
       || viewMode === "history"
     ) return;
@@ -5099,7 +5001,7 @@ export default function Workbench() {
       !workspaceController
       || projectHydrating
       || projectLoadError
-      || viewTransitioningRef.current
+      || isViewTransitioning()
       || viewMode === "history"
       || documentSessionRef.current.persistState === "failed"
       || documentSessionRef.current.persistState === "conflict"
@@ -5226,303 +5128,13 @@ export default function Workbench() {
     };
   }, [generateRequest]);
 
-  const openCommittedVersion = useCallback(async (
-    run: ActiveRun,
-    payload: Record<string, unknown>,
-    fromDeferred = false,
-  ) => {
-    const affectsCurrentCanvas = Boolean(projectSessionRef.current.sourcePath)
-      && projectSessionRef.current.projectId === run.projectId;
-    if (!fromDeferred && affectsCurrentCanvas) {
-      let resolveDeferred: (() => void) | null = null;
-      let rejectDeferred: ((reason: unknown) => void) | null = null;
-      const deferredResult = new Promise<void>((resolve, reject) => {
-        resolveDeferred = resolve;
-        rejectDeferred = reject;
-      });
-      if (deferEditorCommand(
-        "external-refresh",
-        () => {
-          const replay = deferredEditorReplayRef.current.openCommittedVersion;
-          if (!replay) {
-            rejectDeferred?.(
-              new DeferredEditorCommandDiscardedError("stale-session"),
-            );
-            return;
-          }
-          replay(
-            run,
-            payload,
-            () => resolveDeferred?.(),
-            (reason) => rejectDeferred?.(reason),
-          );
-        },
-        undefined,
-        {
-          authority: "system",
-          onDiscard: (reason) => rejectDeferred?.(
-            new DeferredEditorCommandDiscardedError(reason),
-          ),
-        },
-      )) return deferredResult;
-    }
-    const versionRecord = isRecord(payload.version) ? payload.version : {};
-    const outcomeRecord = isRecord(payload.outcome) ? payload.outcome : {};
-    const completionRecord = isRecord(payload.completion) ? payload.completion : {};
-    const candidateLabel = String(
-      payload.candidateDisplayVersionLabel
-      || run.candidateVersionLabel,
-    );
-    const aiCompletedAt = String(
-      completionRecord.completedAt
-      || "",
-    );
-    const versionGeneratedAt = String(
-      versionRecord.generatedAt
-      || "",
-    );
-    if (
-      !aiCompletedAt
-      || Number.isNaN(Date.parse(aiCompletedAt))
-      || !versionGeneratedAt
-      || Number.isNaN(Date.parse(versionGeneratedAt))
-    ) {
-      throw new Error("完成结果缺少可审计的 AI 完成时间或版本生成时间。");
-    }
-    const protocolViolation = Boolean(
-      payload.protocolViolation || outcomeRecord.protocolViolation,
-    );
-    const versionId = String(
-      payload.versionId
-      || versionRecord.versionId
-      || run.candidateVersionId
-      || "",
-    );
-    const expectedHash = String(
-      payload.contentSha256
-      || versionRecord.contentSha256
-      || payload.sourceSha256
-      || payload.currentHtmlSha256
-      || "",
-    );
-    if (!versionId || !expectedHash) throw new Error("完成结果缺少版本 ID 或内容 Hash。");
-    const identities: Array<[string, string, unknown[]]> = [
-      ["projectId", run.projectId, [payload.projectId, versionRecord.projectId, outcomeRecord.projectId]],
-      ["documentId", run.documentId, [payload.documentId, versionRecord.documentId, outcomeRecord.documentId]],
-      ["requestId", run.requestId, [payload.requestId, versionRecord.requestId, outcomeRecord.requestId]],
-      ["attemptId", run.attemptId, [payload.attemptId, versionRecord.attemptId, outcomeRecord.attemptId]],
-    ];
-    for (const [field, expected, values] of identities) {
-      const declared = values.filter((value) => value !== undefined && value !== null && value !== "");
-      if (declared.some((value) => String(value) !== expected)) {
-        throw new Error(`完成结果的 ${field} 与当前冻结任务不一致，已拒绝打开。`);
-      }
-    }
-    if (run.candidateVersionId && versionId !== run.candidateVersionId) {
-      throw new Error("完成结果的版本 ID 与系统预留候选版本不一致，已拒绝打开。");
-    }
-    const [versionPayload, sourcePayload] = await Promise.all([
-      bridgeClient.versionFile(run.sourcePath, versionId),
-      bridgeClient.source(run.sourcePath),
-    ]);
-    const versionHash = String(versionPayload.sha256 || "");
-    const sourceHash = String(sourcePayload.sha256 || "");
-    const content = String(versionPayload.content || "");
-    const sourceContent = String(sourcePayload.content || "");
-    const sourceLastModifiedAt = String(sourcePayload.lastModifiedAt || "");
-    const committedSourcePath = String(
-      sourcePayload.sourcePath
-      || payload.currentPath
-      || payload.workingCopyPath
-      || payload.sourcePath
-      || run.sourcePath,
-    );
-    if (versionHash !== expectedHash || sourceHash !== expectedHash) {
-      throw new Error("版本快照、源 HTML 与完成记录的 Hash 不一致，已停止打开。");
-    }
-    if (
-      content !== sourceContent
-      || await browserSha256(content) !== versionHash
-      || await browserSha256(sourceContent) !== sourceHash
-    ) {
-      throw new Error("版本快照或源 HTML 的实际内容与声明 Hash 不一致，已停止打开。");
-    }
-    if (!sourceLastModifiedAt || Number.isNaN(Date.parse(sourceLastModifiedAt))) {
-      throw new Error("当前源 HTML 缺少独立的最后修改时间，已停止打开。");
-    }
-    const transitionAffectsCurrentCanvas =
-      projectSessionRef.current.projectId === run.projectId
-      && Boolean(projectSessionRef.current.sourcePath)
-      && (
-        sameLocalSourcePath(projectSessionRef.current.sourcePath, run.sourcePath)
-        || sameLocalSourcePath(projectSessionRef.current.sourcePath, committedSourcePath)
-      );
-    if (transitionAffectsCurrentCanvas) {
-      const transitionContext = captureProjectContext();
-      if (!transitionContext) {
-        throw new Error("新版本已生成，但当前画布缺少可核对的项目身份。");
-      }
-      const alreadyFencedForReview = Boolean(
-        readyReviewSession
-        && readyReviewSession.operationKey === activeRunOperationKey(run)
-        && readyReviewSession.beforeHtml === documentSessionRef.current.html,
-      );
-      if (!alreadyFencedForReview) {
-        const frozen = fenceAndFreezeCurrentCanvas(
-          "新版本已生成，但当前编辑画布尚未就绪。",
-        );
-        if (!frozen.ok) {
-          throw new Error(frozen.reason || "新版本已生成，但当前编辑会话尚未安全收口。");
-        }
-      }
-      if (!isCurrentProjectContext(transitionContext)) {
-        throw new DeferredEditorCommandDiscardedError("stale-session");
-      }
-      // Recovery is cleared only after the live Canvas has crossed the Fence.
-      workspaceController?.clearDocumentRecovery(transitionContext);
-    }
-    const preparedTransition = await prepareGeneratedSourceTransition({
-      previousSourcePath: run.sourcePath,
-      nextSourcePath: committedSourcePath,
-      expectedSha256: sourceHash,
-      nextProjectId: run.projectId,
-      nextDocumentId: run.documentId,
-      versionId,
-    });
-    if (!preparedTransition.updatesCurrentProject) {
-      setToast({
-        title: protocolViolation
-          ? `${candidateLabel} 已生成，但需要检查`
-          : `${candidateLabel} 已生成`,
-        message: protocolViolation
-          ? "新版本本身已经安全提交，但检测到内部 AI 在完成后又改动了临时输出；打开项目查看详情。"
-          : `${aiCompletedAt ? `内部 AI 于 ${formatTime(aiCompletedAt, true)} 完成；` : ""}打开该项目后会核对并显示新版本。`,
-        tone: protocolViolation ? "warning" : "success",
-        sticky: protocolViolation,
-        disposition: "background-result",
-        dedupeKey: `background-version:${run.sourcePath}`,
-        action: {
-          id: "open-project",
-          label: "打开项目",
-          sourcePath: committedSourcePath,
-        },
-      });
-      return;
-    }
-    const adoptedContext = commitGeneratedSourceTransition({
-      prepared: preparedTransition,
-      html: content,
-      sourceSha256: sourceHash,
-      publishVersion: () => versionSessionRef.current.adoptCommitted(versionId),
-    });
-    if (!adoptedContext) {
-      throw new DeferredEditorCommandDiscardedError("stale-session");
-    }
-    workspaceController?.clearDocumentAudit();
-    documentSessionRef.current.setPersistence({
-      state: "idle",
-      error: "",
-    });
-    await verifyCanvasRendered(content, versionHash, adoptedContext);
-    if (!isCurrentProjectContext(adoptedContext)) return;
-    setLastModifiedAt(sourceLastModifiedAt);
-    workspaceController?.resetCommentWorkflow();
-    commentSessionRef.current.reset();
-    draftSessionRef.current.replaceAuthority(adoptedContext, 0, {
-      draftRevision: 0,
-      comments: [],
-      changeEvents: [],
-      deletedCommentIds: [],
-      appliedOperationIds: [],
-    });
-    workspaceController?.queueDraft();
-    setSelection(null);
-    setComposerOpen(false);
-    commentEditResumePendingRef.current = null;
-    setEditingCommentId(null);
-    setPreviewAttachment(null);
-    viewTransitioningRef.current = true;
-    setViewTransitioning(true);
-    const completedRun: ActiveRun = {
-      ...run,
-      sourcePath: committedSourcePath,
-      candidateVersionLabel: candidateLabel,
-      status: protocolViolation ? "error" : "complete",
-      completionObserved: true,
-    };
-    setHandoffPreviewOpen(false);
-    setCanvasMode("edit");
-    setDrawer(null);
-    workspaceController?.clearDocumentRecovery(adoptedContext);
-    await refreshWorkspace(committedSourcePath, adoptedContext.epoch);
-    if (!isCurrentProjectContext(adoptedContext)) return;
-    if (projectLoadError) {
-      throw new Error(`新版本已精确打开，但项目状态复核失败：${projectLoadError}`);
-    }
-    setActiveRun(completedRun);
-    setDrawer(null);
-    viewTransitioningRef.current = false;
-    setViewTransitioning(false);
-    window.requestAnimationFrame(() => editorRef.current?.unlockNow?.());
-    if (protocolViolation) {
-      const warning = "内部 AI 的临时输出在最终化后又被修改；已提交版本本身未受影响。";
-      const warningRun: ActiveRun = {
-        ...run,
-        sourcePath: committedSourcePath,
-        candidateVersionLabel: candidateLabel,
-        status: "error",
-        error: warning,
-        completionObserved: true,
-      };
-      setActiveRun(warningRun);
-      setDrawer("handoff");
-      setToast({
-        title: `${candidateLabel} 已打开，但需要检查`,
-        message: `${warning} 新版本内容已经核对一致；详情已保留在本轮处理记录中。`,
-        tone: "warning",
-        sticky: true,
-        dedupeKey: "current-version-result",
-        action: { id: "open-handoff", label: "查看处理详情" },
-      });
-    } else {
-      if (
-        toastRef.current?.dedupeKey === "activate-ready-version"
-        || toastRef.current?.dedupeKey === "current-version-result"
-      ) {
-        setToast(null);
-      }
-    }
-  }, [
-    captureProjectContext,
-    commitGeneratedSourceTransition,
-    deferEditorCommand,
-    fenceAndFreezeCurrentCanvas,
-    isCurrentProjectContext,
-    prepareGeneratedSourceTransition,
-    projectLoadError,
-    refreshWorkspace,
-    readyReviewSession,
-    setActiveRun,
-    verifyCanvasRendered,
-    workspaceController,
-  ]);
-  useEffect(() => {
-    deferredEditorReplayRef.current.openCommittedVersion = (
-      run,
-      payload,
-      resolve,
-      reject,
-    ) => {
-      void openCommittedVersion(run, payload, true).then(resolve, reject);
-    };
-  }, [openCommittedVersion]);
-
   const activateReadyResult = useCallback(async (
     { reviewed = false }: { reviewed?: boolean } = {},
   ) => {
     const run = activeRun;
     if (
       !run
+      || !workspaceController
       || run.status !== "ready-to-open"
       || !run.readyPayload
       || (
@@ -5531,27 +5143,42 @@ export default function Workbench() {
       )
     ) return;
     const operationKey = activeRunOperationKey(run);
-    if (!runSessionRef.current.beginOperation("activate", operationKey)) return;
     setOpeningReadyVersion(true);
-    const clearedRun = { ...run, error: undefined };
-    setActiveRun(clearedRun);
     try {
-      const activatedPayload = await bridgeClient.activateReadyVersion({
-        sourcePath: run.sourcePath,
-        projectId: run.projectId,
-        documentId: run.documentId,
-        requestId: run.requestId,
-        attemptId: run.attemptId,
-        versionId: run.candidateVersionId,
-      });
-      const mergedPayload = {
-        ...run.readyPayload,
-        ...activatedPayload,
-        completion: run.readyPayload.completion,
-        outcome: run.readyPayload.outcome,
-        version: activatedPayload.version || run.readyPayload.version,
+      const outcome = await requiredWorkspaceController(workspaceController)
+        .activateReadyVersion({
+          run,
+          reviewLease: readyReviewSession?.operationKey === operationKey
+            ? {
+                operationKey: readyReviewSession.operationKey,
+                beforeHtml: readyReviewSession.beforeHtml,
+              }
+            : null,
+        });
+      if (outcome.status !== "succeeded") {
+        if (outcome.status !== "stale") {
+          setDrawer("handoff");
+          setToast({
+            title: "最新版暂时无法打开",
+            message: outcome.reason,
+            tone: outcome.status === "blocked" ? "warning" : "error",
+            sticky: outcome.status !== "blocked",
+            disposition: "background-result",
+            dedupeKey: "activate-ready-version",
+          });
+        }
+        return;
+      }
+      const result = outcome.value as {
+        current: boolean;
+        candidateLabel: string;
+        protocolViolation: boolean;
+        aiCompletedAt: string;
+        committedSourcePath: string;
+        lastModifiedAt: string;
+        verificationWarning?: string;
+        refreshWarning?: string;
       };
-      await openCommittedVersion(run, mergedPayload);
       if (readyReviewSession?.operationKey === operationKey) {
         setDrawer(null);
         await new Promise<void>((resolve) => {
@@ -5561,23 +5188,62 @@ export default function Workbench() {
         });
         setReadyReviewSession(null);
       }
-      runSessionRef.current.removeRun(run, { clearActive: false });
-      runSessionRef.current.clearActiveHandoff();
-    } catch (cause) {
-      if (isDeferredEditorCommandDiscardedError(cause)) return;
-      const error = productErrorMessage(cause, "最新版暂时无法打开。");
-      const nextRun = { ...run, status: "ready-to-open" as const, error };
-      runSessionRef.current.trackRun(nextRun);
-      const visibleRun = runSessionRef.current.activeRun;
-      if (
-        sameLocalSourcePath(projectSessionRef.current.sourcePath, run.sourcePath)
-        && visibleRun?.requestId === run.requestId
-        && visibleRun.attemptId === run.attemptId
-      ) {
+      if (!result.current) {
+        setToast({
+          title: result.protocolViolation
+            ? `${result.candidateLabel} 已生成，但需要检查`
+            : `${result.candidateLabel} 已生成`,
+          message: result.protocolViolation
+            ? "新版本本身已经安全提交，但检测到内部 AI 在完成后又改动了临时输出；打开项目查看详情。"
+            : `${result.aiCompletedAt ? `内部 AI 于 ${formatTime(result.aiCompletedAt, true)} 完成；` : ""}打开该项目后会核对并显示新版本。`,
+          tone: result.protocolViolation ? "warning" : "success",
+          sticky: result.protocolViolation,
+          disposition: "background-result",
+          dedupeKey: `background-version:${run.sourcePath}`,
+          action: {
+            id: "open-project",
+            label: "打开项目",
+            sourcePath: result.committedSourcePath,
+          },
+        });
+        return;
+      }
+      setLastModifiedAt(result.lastModifiedAt || null);
+      setSelection(null);
+      setComposerOpen(false);
+      commentEditResumePendingRef.current = null;
+      setEditingCommentId(null);
+      setPreviewAttachment(null);
+      setHandoffPreviewOpen(false);
+      setCanvasMode("edit");
+      setDrawer(null);
+      if (result.protocolViolation) {
+        const warning = "内部 AI 的临时输出在最终化后又被修改；已提交版本本身未受影响。";
         setDrawer("handoff");
+        setToast({
+          title: `${result.candidateLabel} 已打开，但需要检查`,
+          message: `${warning} 新版本内容已经核对一致；详情已保留在本轮处理记录中。`,
+          tone: "warning",
+          sticky: true,
+          dedupeKey: "current-version-result",
+          action: { id: "open-handoff", label: "查看处理详情" },
+        });
+      } else if (result.verificationWarning || result.refreshWarning) {
+        setToast({
+          title: `${result.candidateLabel} 已打开，但需要复核`,
+          message: result.verificationWarning || result.refreshWarning || "",
+          tone: "warning",
+          sticky: true,
+          disposition: "background-result",
+          dedupeKey: "current-version-result",
+        });
+      } else if (
+        toastRef.current?.dedupeKey === "activate-ready-version"
+        || toastRef.current?.dedupeKey === "current-version-result"
+      ) {
+        setToast(null);
       }
     } finally {
-      runSessionRef.current.endOperation("activate", operationKey);
       const visibleRun = runSessionRef.current.activeRun;
       if (
         sameLocalSourcePath(projectSessionRef.current.sourcePath, run.sourcePath)
@@ -5593,56 +5259,33 @@ export default function Workbench() {
         setOpeningReadyVersion(false);
       }
     }
-  }, [activeRun, openCommittedVersion, readyReviewSession, setActiveRun]);
+  }, [activeRun, readyReviewSession, workspaceController]);
 
   const reviewReadyResult = useCallback(async () => {
     const run = runSessionRef.current.activeRun;
     if (
       !run
+      || !workspaceController
       || run.status !== "ready-to-open"
       || !run.readyPayload
       || reviewPreparing
     ) return;
-    const operationKey = activeRunOperationKey(run);
     setReviewPreparing(true);
     try {
-      const payload = await bridgeClient.versionFile(
-        run.sourcePath,
-        run.candidateVersionId,
-      );
+      const outcome = await requiredWorkspaceController(workspaceController)
+        .prepareReviewCandidate({ run });
+      if (outcome.status !== "succeeded") {
+        if (outcome.status === "stale") return;
+        throw new Error(outcome.reason);
+      }
+      const candidate = outcome.value;
+      const operationKey = candidate.operationKey;
       const currentRun = runSessionRef.current.activeRun;
       if (
         !currentRun
         || currentRun.status !== "ready-to-open"
         || activeRunOperationKey(currentRun) !== operationKey
       ) return;
-      const declaredIdentities: Array<[string, string, unknown]> = [
-        ["projectId", run.projectId, payload.projectId],
-        ["documentId", run.documentId, payload.documentId],
-        ["versionId", run.candidateVersionId, payload.versionId],
-      ];
-      for (const [field, expected, actual] of declaredIdentities) {
-        if (String(actual || "") !== expected) {
-          throw new Error(`审阅版本的 ${field} 与当前冻结任务不一致。`);
-        }
-      }
-      const candidateHtml = String(payload.content || "");
-      const candidateHash = String(payload.sha256 || payload.contentSha256 || "");
-      const expectedCandidateHash = String(
-        run.readyPayload.contentSha256
-        || (isRecord(run.readyPayload.version)
-          ? run.readyPayload.version.contentSha256
-          : "")
-        || candidateHash,
-      );
-      if (
-        !candidateHtml
-        || !candidateHash
-        || candidateHash !== expectedCandidateHash
-        || await browserSha256(candidateHtml) !== candidateHash
-      ) {
-        throw new Error("审阅候选与已校验版本的内容 Hash 不一致。");
-      }
       const reviewContext = captureProjectContext();
       if (!reviewContext) {
         throw new Error("当前画布缺少可核对的项目身份，无法开始安全审阅。");
@@ -5658,48 +5301,48 @@ export default function Workbench() {
       }
       const frozenHtml = frozen.html;
       if (
-        !run.baseSnapshotSha256
-        || await browserSha256(frozenHtml) !== run.baseSnapshotSha256
+        !candidate.baseSnapshotSha256
+        || await browserSha256(frozenHtml) !== candidate.baseSnapshotSha256
       ) {
         throw new Error("当前冻结 HTML 已发生变化，无法开始安全对比。");
       }
       const reviewComments = commentSessionRef.current.comments
         .filter(commentHasContent)
         .map((comment) => ({
-            ...comment,
-            target: {
-              ...comment.target,
-              ...(comment.target.sourceAnchor
-                ? { sourceAnchor: { ...comment.target.sourceAnchor } }
-                : {}),
-              ...(comment.target.fingerprint
-                ? {
-                    fingerprint: {
-                      ...comment.target.fingerprint,
-                      stableAttributes: {
-                        ...comment.target.fingerprint.stableAttributes,
-                      },
-                      ancestorFingerprint: [
-                        ...comment.target.fingerprint.ancestorFingerprint,
-                      ],
-                    },
-                  }
-                : {}),
-              ...(comment.target.boundingBox
-                ? { boundingBox: { ...comment.target.boundingBox } }
-                : {}),
-            },
-            ...(comment.attachments?.length
-              ? { attachments: comment.attachments.map((item) => ({ ...item })) }
+          ...comment,
+          target: {
+            ...comment.target,
+            ...(comment.target.sourceAnchor
+              ? { sourceAnchor: { ...comment.target.sourceAnchor } }
               : {}),
-          }));
+            ...(comment.target.fingerprint
+              ? {
+                  fingerprint: {
+                    ...comment.target.fingerprint,
+                    stableAttributes: {
+                      ...comment.target.fingerprint.stableAttributes,
+                    },
+                    ancestorFingerprint: [
+                      ...comment.target.fingerprint.ancestorFingerprint,
+                    ],
+                  },
+                }
+              : {}),
+            ...(comment.target.boundingBox
+              ? { boundingBox: { ...comment.target.boundingBox } }
+              : {}),
+          },
+          ...(comment.attachments?.length
+            ? { attachments: comment.attachments.map((item) => ({ ...item })) }
+            : {}),
+        }));
       const commentsKey = JSON.stringify(reviewComments);
       const externalBootstrap = Boolean(window.htmlAIPreview);
       const reviewCacheKey = [
         operationKey,
-        run.baseSnapshotSha256,
-        candidateHash,
-        run.sourcePath,
+        candidate.baseSnapshotSha256,
+        candidate.sha256,
+        candidate.sourcePath,
         externalBootstrap ? "external" : "inline",
         await browserSha256(commentsKey),
       ].join("\u0000");
@@ -5707,21 +5350,21 @@ export default function Workbench() {
         key: reviewCacheKey,
         compute: async ({ isCancelled }) => {
           const sessionId = `review-${Date.now().toString(36)}-${++reviewSessionSequenceRef.current}`;
-          const documents = await buildReviewDocumentsAsync(frozenHtml, candidateHtml, {
+          const documents = await buildReviewDocumentsAsync(frozenHtml, candidate.content, {
             sessionId,
             sourceSha256BySide: {
-              before: run.baseSnapshotSha256,
-              after: candidateHash,
+              before: candidate.baseSnapshotSha256,
+              after: candidate.sha256,
             },
-            sourcePath: run.sourcePath,
+            sourcePath: candidate.sourcePath,
             externalBootstrap,
             comments: reviewComments,
           }, { isCancelled });
           return {
             operationKey,
             beforeHtml: frozenHtml,
-            afterHtml: candidateHtml,
-            sourcePath: run.sourcePath,
+            afterHtml: candidate.content,
+            sourcePath: candidate.sourcePath,
             commentsKey,
             sessionId,
             documents,
@@ -5769,6 +5412,7 @@ export default function Workbench() {
     fenceAndFreezeCurrentCanvas,
     isCurrentProjectContext,
     reviewPreparing,
+    workspaceController,
   ]);
 
   useEffect(() => {
@@ -5854,219 +5498,65 @@ export default function Workbench() {
     workspaceController,
   ]);
 
-  const viewHistoryVersion = useCallback(async (
-    version: Version,
-    fromDeferred = false,
-  ) => {
+  const viewHistoryVersion = useCallback(async (version: Version) => {
     if (
       runInProgress
       || projectHydrating
       || projectLoadError
-      || viewTransitioningRef.current
-    ) return;
-    if (
-      !fromDeferred
-      && deferEditorCommand(
-        "project-switch",
-        () => deferredEditorReplayRef.current.viewHistoryVersion?.(version),
-      )
+      || isViewTransitioning()
+      || !workspaceController
     ) return;
     const context = captureProjectContext();
     if (!context) return;
-    const operationId = beginNavigationOperation();
-    if (operationId === null) return;
-    const previousDocument = documentSessionRef.current.snapshot;
-    const previousHtml = previousDocument.html;
-    const previousVersionView = versionSessionRef.current.captureView();
-    try {
-      if (viewMode === "current") {
-        const drained = await requiredWorkspaceController(workspaceController)
-          .drainBoundary("history", {
-          deadlineAt: Date.now() + 15_000,
-        });
-        if (!drained.ok) throw new Error(drained.reason);
-      }
-      const payload = await bridgeClient.versionFile(
-        context.sourcePath,
-        version.id,
-      );
-      if (
-        navigationOperationRef.current !== operationId
-        || !isCurrentProjectContext(context)
-      ) return;
-      const hash = String(payload.sha256 || "");
-      const content = String(payload.content || "");
-      if (version.contentSha256 && hash !== version.contentSha256) {
-        throw new Error("历史文件 Hash 与版本记录不一致，已拒绝打开。");
-      }
-      if (!hash || await browserSha256(content) !== hash) {
-        throw new Error("历史文件内容与声明 Hash 不一致，已拒绝打开。");
-      }
-      documentSessionRef.current.publishAuthority({
-        html: content,
-        sourceSha256: previousDocument.sourceSha256,
-      });
-      versionSessionRef.current.enterHistory(version.id);
-      invalidateCanvasRenderAcks();
-      await verifyCanvasRendered(content, hash, context);
-      if (
-        navigationOperationRef.current !== operationId
-        || !isCurrentProjectContext(context)
-      ) return;
+    const outcome = await requiredWorkspaceController(workspaceController)
+      .viewHistory({ version, context, deadlineAt: Date.now() + 15_000 });
+    if (outcome.status === "succeeded") {
       setDrawer(null);
       editorRef.current?.clearSelection();
-    } catch (cause) {
-      if (!isCurrentProjectContext(context)) return;
-      if (navigationOperationRef.current === operationId) {
-        documentSessionRef.current.publishAuthority({
-          html: previousHtml,
-          sourceSha256: previousDocument.sourceSha256,
-        });
-        versionSessionRef.current.restoreView(previousVersionView);
-        invalidateCanvasRenderAcks();
-        try {
-          await verifyCanvasRendered(
-            previousHtml,
-            await browserSha256(previousHtml),
-            context,
-          );
-        } catch {
-          // Keep the prior view state; the error message below explains the failed transition.
-        }
-      }
-      setToast({
-        title: "无法打开这个历史版本",
-        message: productErrorMessage(
-          cause,
-          "历史版本没有打开；原来的画布仍保持不变。",
-        ),
-        tone: "error",
-        disposition: "background-result",
-        dedupeKey: "history-navigation",
-      });
-    } finally {
-      finishNavigationOperation(operationId);
+      return;
     }
+    if (outcome.status === "stale") return;
+    setToast({
+      title: "无法打开这个历史版本",
+      message: outcome.reason,
+      tone: "error",
+      disposition: "background-result",
+      dedupeKey: "history-navigation",
+    });
   }, [
-    beginNavigationOperation,
     captureProjectContext,
-    deferEditorCommand,
-    finishNavigationOperation,
-    invalidateCanvasRenderAcks,
-    isCurrentProjectContext,
+    isViewTransitioning,
     projectHydrating,
     projectLoadError,
     runInProgress,
-    verifyCanvasRendered,
-    viewMode,
     workspaceController,
   ]);
-  useEffect(() => {
-    deferredEditorReplayRef.current.viewHistoryVersion = (version) => {
-      void viewHistoryVersion(version, true);
-    };
-  }, [viewHistoryVersion]);
 
-  const returnToCurrent = useCallback(async (fromDeferred = false) => {
-    if (viewTransitioningRef.current || projectLoadError) return;
-    if (
-      !fromDeferred
-      && deferEditorCommand(
-        "project-switch",
-        () => deferredEditorReplayRef.current.returnToCurrent?.(),
-      )
-    ) return;
+  const returnToCurrent = useCallback(async () => {
+    if (isViewTransitioning() || projectLoadError || !workspaceController) return;
     const context = captureProjectContext();
     if (!context) return;
-    const operationId = beginNavigationOperation();
-    if (operationId === null) return;
-    const previousDocument = documentSessionRef.current.snapshot;
-    const previousHtml = previousDocument.html;
-    const previousVersionView = versionSessionRef.current.captureView();
-    try {
-      const payload = await bridgeClient.source(context.sourcePath);
-      if (
-        navigationOperationRef.current !== operationId
-        || !isCurrentProjectContext(context)
-      ) return;
-      if (
-        String(payload.projectId || "") !== context.projectId
-        || String(payload.documentId || "") !== context.documentId
-      ) {
-        throw new Error("当前源 HTML 的项目身份发生变化，已拒绝切换视图。");
-      }
-      const content = String(payload.content || "");
-      const hash = String(payload.sha256 || "");
-      if (!hash || await browserSha256(content) !== hash) {
-        throw new Error("当前源 HTML 与声明 Hash 不一致。");
-      }
-      documentSessionRef.current.publishAuthority({
-        html: content,
-        sourceSha256: hash,
-      });
-      versionSessionRef.current.returnCurrent({
-        currentBasedOnVersionId:
-          payload.currentBasedOnVersionId || currentBasedOnVersionId,
-        currentExactVersionId: payload.currentExactVersionId || null,
-        restoredFromVersionId:
-          payload.restoredFromVersionId || restoredFromVersionId,
-      });
-      invalidateCanvasRenderAcks();
-      await verifyCanvasRendered(content, hash, context);
-      if (
-        navigationOperationRef.current !== operationId
-        || !isCurrentProjectContext(context)
-      ) return;
-      setLastModifiedAt(String(payload.lastModifiedAt || ""));
-    } catch (cause) {
-      if (!isCurrentProjectContext(context)) return;
-      if (navigationOperationRef.current === operationId) {
-        documentSessionRef.current.publishAuthority({
-          html: previousHtml,
-          sourceSha256: previousDocument.sourceSha256,
-        });
-        versionSessionRef.current.restoreView(previousVersionView);
-        invalidateCanvasRenderAcks();
-        try {
-          await verifyCanvasRendered(
-            previousHtml,
-            await browserSha256(previousHtml),
-            context,
-          );
-        } catch {
-          // The prior immutable history view remains the committed UI state.
-        }
-      }
-      setToast({
-        title: "无法返回当前 HTML",
-        message: productErrorMessage(
-          cause,
-          "当前画布仍停留在原来的历史版本；源文件没有被改动。",
-        ),
-        tone: "error",
-        disposition: "background-result",
-        dedupeKey: "history-navigation",
-      });
-    } finally {
-      finishNavigationOperation(operationId);
+    const outcome = await requiredWorkspaceController(workspaceController)
+      .returnToCurrent({ context });
+    if (outcome.status === "succeeded") {
+      const lastModifiedAt = String(outcome.value.lastModifiedAt || "");
+      if (lastModifiedAt) setLastModifiedAt(lastModifiedAt);
+      return;
     }
+    if (outcome.status === "stale") return;
+    setToast({
+      title: "无法返回当前 HTML",
+      message: outcome.reason,
+      tone: "error",
+      disposition: "background-result",
+      dedupeKey: "history-navigation",
+    });
   }, [
-    beginNavigationOperation,
     captureProjectContext,
-    currentBasedOnVersionId,
-    deferEditorCommand,
-    finishNavigationOperation,
-    invalidateCanvasRenderAcks,
-    isCurrentProjectContext,
+    isViewTransitioning,
     projectLoadError,
-    restoredFromVersionId,
-    verifyCanvasRendered,
+    workspaceController,
   ]);
-  useEffect(() => {
-    deferredEditorReplayRef.current.returnToCurrent = () => {
-      void returnToCurrent(true);
-    };
-  }, [returnToCurrent]);
 
   const persistLabel = persistState === "writing"
     ? "正在更新文件…"
@@ -6920,7 +6410,7 @@ export default function Workbench() {
                   .then((capturedContext) => {
                     if (
                       pageViewDocumentKeyRef.current !== expectedDocumentKey
-                      || viewTransitioningRef.current
+                      || isViewTransitioning()
                     ) return;
                     const nextContext = (
                       capturedContext?.documentKey === expectedDocumentKey

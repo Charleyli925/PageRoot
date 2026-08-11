@@ -9,6 +9,7 @@ import type {
   DocumentWorkflowCanvasPort,
   DocumentWorkflowOutcome,
   DocumentWorkflowRecoveryStore,
+  DocumentWorkflow,
 } from "./document-workflow.js";
 import type { DocumentWorkflowCodecs } from "./document-workflow-codecs.js";
 import type { CommentSession } from "./comment-session.js";
@@ -30,6 +31,14 @@ import type {
   RunWorkflowOutcome,
   RunWorkflowSnapshot,
 } from "./run-workflow.js";
+import type {
+  VersionWorkflowCanvasPort,
+  VersionWorkflowCodecs,
+  VersionWorkflowEvent,
+  VersionWorkflowOutcome,
+  VersionReviewCandidate,
+  VersionWorkflowSnapshot,
+} from "./version-workflow.js";
 
 export type OperationIdentity = Readonly<{
   operationId: string;
@@ -65,6 +74,7 @@ export type WorkspaceControllerSnapshot = Readonly<{
   comment: CommentWorkflowSnapshot | null;
   project: ProjectWorkflowSnapshot | null;
   run: RunWorkflowSnapshot | null;
+  version: VersionWorkflowSnapshot | null;
 }>;
 
 export type WorkspaceEvent =
@@ -105,7 +115,8 @@ export type WorkspaceEvent =
       [key: string]: unknown;
     }>
   | ProjectWorkflowEvent
-  | RunWorkflowEvent;
+  | RunWorkflowEvent
+  | VersionWorkflowEvent;
 
 export type RegistrationInput = Readonly<{
   sourcePath?: string;
@@ -162,6 +173,8 @@ export type WorkspaceControllerConstruction = Readonly<{
     | "createRequest"
     | "status"
     | "cancelActiveRun"
+    | "versionFile"
+    | "activateReadyVersion"
   >;
   projectSession: ProjectSession;
   documentSession: DocumentSession;
@@ -221,6 +234,11 @@ export type WorkspaceControllerConstruction = Readonly<{
       setInterval(callback: () => void, delayMs: number): unknown;
       clearInterval(handle: unknown): void;
     }>;
+  }>;
+  versionWorkflow?: Readonly<{
+    runSession: import("./run-session.js").RunSession;
+    codecs: VersionWorkflowCodecs;
+    canvas: VersionWorkflowCanvasPort;
   }>;
   clock: ClockPort;
 }>;
@@ -323,6 +341,16 @@ export class WorkspaceController {
     run?: import("../domain/run-lifecycle.js").ActiveRun | null;
     action: "adopt-ai" | "keep-external";
   }): Promise<RunWorkflowOutcome>;
+  prepareReviewCandidate(input: {
+    run?: import("../domain/run-lifecycle.js").ActiveRun | null;
+  }): Promise<VersionWorkflowOutcome<VersionReviewCandidate>>;
+  activateReadyVersion(input: {
+    run?: import("../domain/run-lifecycle.js").ActiveRun | null;
+    reviewLease?: Readonly<{ operationKey: string; beforeHtml: string }> | null;
+  }): Promise<VersionWorkflowOutcome>;
+  openCommittedVersion(input: Record<string, unknown>): Promise<VersionWorkflowOutcome>;
+  viewHistory(input: Record<string, unknown>): Promise<VersionWorkflowOutcome>;
+  returnToCurrent(input?: Record<string, unknown>): Promise<VersionWorkflowOutcome>;
   ensureRegistered(
     input?: RegistrationInput,
   ): Promise<CommandOutcome<ProjectContext>>;

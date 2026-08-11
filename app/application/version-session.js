@@ -164,6 +164,36 @@ export class VersionSession {
     return true;
   }
 
+  // Navigation rollback needs the complete immutable Version projection, not
+  // merely the visible history/current toggle. The returned object contains no
+  // mutable Session references and can therefore safely cross an async Canvas
+  // verification boundary inside VersionWorkflow.
+  captureSnapshot() {
+    return Object.freeze({
+      ...this.#snapshot,
+      versions: Object.freeze([...this.#snapshot.versions]),
+    });
+  }
+
+  restoreSnapshot(snapshot) {
+    if (
+      !snapshot
+      || !["current", "history"].includes(snapshot.viewMode)
+    ) return false;
+    this.#emit({
+      versions: Array.isArray(snapshot.versions) ? snapshot.versions : [],
+      latestVersionId: optionalId(snapshot.latestVersionId),
+      currentBasedOnVersionId: optionalId(snapshot.currentBasedOnVersionId),
+      currentExactVersionId: optionalId(snapshot.currentExactVersionId),
+      restoredFromVersionId: optionalId(snapshot.restoredFromVersionId),
+      viewMode: snapshot.viewMode,
+      viewingVersionId: snapshot.viewMode === "history"
+        ? optionalId(snapshot.viewingVersionId)
+        : null,
+    });
+    return true;
+  }
+
   get snapshot() {
     return this.#snapshot;
   }

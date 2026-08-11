@@ -71,8 +71,7 @@ PR 批量是建议而非固定限制：用 CI Health 的 Ready 次数、candidat
   close-awaiting external cancellation、committed close/abort freeze 身份、stuck hydration
   快速关闭、load/source stale fence，以及 Canvas acknowledgement 失败时旧页面权威回滚。
   Workbench 只保留 file input 和 Outcome/Event 的展示映射；专项 Node 集与完整 Electron
-  套件共同证明真实 close/open/hydration 路径；PR-5 后 architecture gate 将 Workbench
-  直接 Bridge 调用锁定为精确 6 项。
+  套件共同证明真实 close/open/hydration 路径。
 - `CommentWorkflow`：fake Bridge、RecoveryStore 和现有 Comment/Draft Session 证明
   lazy registration、单次 Draft 持久化、附件部分成功、跨项目迟到上传补偿、编辑取消
   仅删除 staged 附件，以及 unknown Draft POST 只通过 authority query 收敛而不重复
@@ -84,6 +83,12 @@ PR 批量是建议而非固定限制：用 CI Health 的 Ready 次数、candidat
   late-callback fence、取消/冲突 scoped identity，以及 clipboard failure 后只重试复制。
   Workbench 只保留 intent 和 Outcome/Event 的 Drawer/Toast 映射，不持有 poll timer 或
   run mutation I/O。
+- `VersionWorkflow`：fake Bridge、Project/Document/Version/Run Session 与 Canvas/Hash
+  Port 证明 Review candidate 只读且不可变、明确 activation 的完整 identity/hash/time
+  校验、Project/Document/Version 同步 publication、background result 不抢占当前 Canvas，
+  以及 history/current navigation 的完整 Document + Version rollback 与 byte oracle。
+  Workbench 只保留 review filters/layout/lease、动画和 Outcome/Toast 映射；architecture
+  gate 将其直接 Bridge 调用锁定为 0。
 - Bridge 集成环境：每个真实 Bridge 测试各自创建临时 root、workspace、sources、端口、子进程与 stdout/stderr；同一测试可为重启恢复顺序启动新进程，但不同测试绝不共享 workspace 或长寿命 Bridge。环境默认携带配置的 Bridge auth token，测试缺失/错误 token 时必须显式关闭或覆盖它；HTTP/连接失败保留 response text 与 Bridge 日志，不重试 mutation。
 - Schema 与 scope 的纯函数矩阵继续独立拥有 strict union、identity/path/hash drift、TargetRef/topology 与 guidance 判定；真实 lifecycle 集成只证明产物 bundle、official finalizer、ready/attention 和 activation 的持久化边界。SourceTransaction failpoint 表逐 case 保留独立的 disk、runtime、history 与 audit exactly-once oracle，不以最终 200 取代 commit-point 断言。
 - 通知合同：TypeScript 判别联合拥有 `disposition × action` 合法矩阵；`direct-action` 和 `user-choice` 必须携带受限恢复 action，`silent-recover` 与 `defer-and-resume` 明确禁止 action。Node policy 测试拥有 priority、dedupe、sticky 与 timeout；Browser 测试拥有 `aria-live`、键盘、按钮和 hover/focus pause。不得再扫描 Workbench AST 或内部 helper 名称来证明某个 `setToast` 调用是否合法。

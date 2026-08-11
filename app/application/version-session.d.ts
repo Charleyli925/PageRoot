@@ -42,5 +42,7 @@ export class VersionSession<TVersion = unknown> {
   }): VersionSessionSnapshot<TVersion>;
   captureView(): VersionViewSnapshot;
   restoreView(view: VersionViewSnapshot): boolean;
+  captureSnapshot(): VersionSessionSnapshot<TVersion>;
+  restoreSnapshot(snapshot: VersionSessionSnapshot<TVersion>): boolean;
   readonly snapshot: VersionSessionSnapshot<TVersion>;
 }

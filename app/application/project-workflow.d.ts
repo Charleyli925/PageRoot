@@ -58,6 +58,15 @@ export type ProjectWorkflowEvent = Readonly<{
   [key: string]: unknown;
 }>;
 
+export type PreparedGeneratedSourceTransition = Readonly<{
+  previousSourcePath: string;
+  nextSourcePath: string;
+  projectId: string;
+  documentId: string;
+  updatesCurrentProject: boolean;
+  activatedProject: ProjectWorkflowProject | null;
+}>;
+
 export type ProjectWorkflowConstruction = Readonly<{
   bridgeClient: Pick<
     BridgeClient,
@@ -144,5 +153,19 @@ export class ProjectWorkflow {
     context?: ProjectContext;
   }): Promise<ProjectWorkflowOutcome<{ opened: boolean }>>;
   refreshRecents(): Promise<ProjectWorkflowOutcome<{ projects: unknown[] }>>;
+  prepareGeneratedSourceTransition(input: {
+    previousSourcePath: string;
+    nextSourcePath: string;
+    expectedSha256: string;
+    nextProjectId: string;
+    nextDocumentId: string;
+    versionId: string;
+  }): Promise<PreparedGeneratedSourceTransition>;
+  commitGeneratedSourceTransition(input: {
+    prepared: PreparedGeneratedSourceTransition;
+    html: string;
+    sourceSha256: string;
+    publishVersion(): void;
+  }): ProjectContext | null;
   dispose(): void;
 }
