@@ -612,7 +612,8 @@ npm run task:finish
   Canvas invalidation 以窄 Port 注入，保留 canonical source adoption 的现有行为。
 - 已通过：PR-1 指定 Node 回归 34/34、`npm run architecture:check`、
   `npm run typecheck`、`npm run gate:edit`，以及 `npm run test:browser:smoke`
-  28/28。最终候选仍执行 `npm run task:finish`。
+  28/28；最终 `npm run task:finish` 通过（60 项定向 Node、28 项 Browser、8 项
+  Electron、2 项 AI smoke）。
 - 后续：PR-2 的 Document persistence/SourceHistory workflow 边界仍成立，但未获
   本轮授权，不能提前实施。
 
