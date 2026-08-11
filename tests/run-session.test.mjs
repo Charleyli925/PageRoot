@@ -227,3 +227,19 @@ test("run session owns exact-once operation locks", () => {
   assert.equal(session.beginOperation("cancel", "operation"), true);
   assert.equal(snapshots.length, 3);
 });
+
+test("run session allows the controller to observe alongside the existing view observer", () => {
+  const session = new RunSession({ sourcePath: "/tmp/page.html" });
+  const viewSnapshots = [];
+  const controllerSnapshots = [];
+  session.setObserver((snapshot) => viewSnapshots.push(snapshot));
+  const unsubscribe = session.subscribe((snapshot) => controllerSnapshots.push(snapshot));
+
+  session.trackRun(run());
+  unsubscribe();
+  session.clearActiveRun();
+
+  assert.equal(viewSnapshots.length, 2);
+  assert.equal(controllerSnapshots.length, 2);
+  assert.equal(controllerSnapshots[1].activeRun?.requestId, "request");
+});

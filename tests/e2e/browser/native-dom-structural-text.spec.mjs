@@ -333,12 +333,13 @@ test("deleting a bare-text fragment ends its session without a blocked resume", 
     '，裸文本<span data-keep="tail">',
     '<span data-keep="tail">',
   );
-  await expect.poll(async () => (
-    await exportCurrentHtml(page)
-  ).toString("utf8"), { timeout: 20_000 }).toBe(expected.toString("utf8"));
   await expect(fragmentHost).toHaveCount(0);
   await expect(mixedParent).not.toHaveAttribute("contenteditable", "true");
   await expect.poll(() => editor.getAttribute("data-edit-block-detail")).toBeNull();
+  await expect(editor).toHaveAttribute("data-render-verified", "true");
+  // Export only after the terminal source patch has reconnected its iframe;
+  // otherwise this assertion races a keyboard event against navigation.
+  expect((await exportCurrentHtml(page, "Control+Shift+E")).equals(expected)).toBe(true);
   await expect(page.locator(".toast.show")).toHaveCount(0);
   await expect(mixedParent.locator(':scope > div[data-keep="chart"]')).toHaveText(
     "图表结构保持",

@@ -767,14 +767,14 @@ export function keyShortcut(key) {
   return `${process.platform === "darwin" ? "Meta" : "Control"}+${key}`;
 }
 
-export async function requestExportCurrentHtml(page) {
-  await page.keyboard.press(keyShortcut("Shift+E"));
+export async function requestExportCurrentHtml(page, shortcut = keyShortcut("Shift+E")) {
+  await page.keyboard.press(shortcut);
 }
 
-export async function exportCurrentHtml(page) {
+export async function exportCurrentHtml(page, shortcut) {
   const [download] = await Promise.all([
     page.waitForEvent("download"),
-    requestExportCurrentHtml(page),
+    requestExportCurrentHtml(page, shortcut),
   ]);
   const stream = await download.createReadStream();
   if (!stream) throw new Error("Export download did not expose a readable stream.");

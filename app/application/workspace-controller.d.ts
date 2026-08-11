@@ -24,6 +24,12 @@ import type {
   ProjectWorkflowProject,
   ProjectWorkflowSnapshot,
 } from "./project-workflow.js";
+import type {
+  RunWorkflowCodecs,
+  RunWorkflowEvent,
+  RunWorkflowOutcome,
+  RunWorkflowSnapshot,
+} from "./run-workflow.js";
 
 export type OperationIdentity = Readonly<{
   operationId: string;
@@ -58,6 +64,7 @@ export type WorkspaceControllerSnapshot = Readonly<{
   }>;
   comment: CommentWorkflowSnapshot | null;
   project: ProjectWorkflowSnapshot | null;
+  run: RunWorkflowSnapshot | null;
 }>;
 
 export type WorkspaceEvent =
@@ -97,7 +104,8 @@ export type WorkspaceEvent =
       context?: ProjectContext | null;
       [key: string]: unknown;
     }>
-  | ProjectWorkflowEvent;
+  | ProjectWorkflowEvent
+  | RunWorkflowEvent;
 
 export type RegistrationInput = Readonly<{
   sourcePath?: string;
@@ -151,6 +159,9 @@ export type WorkspaceControllerConstruction = Readonly<{
     | "attachment"
     | "saveAttachment"
     | "deleteAttachment"
+    | "createRequest"
+    | "status"
+    | "cancelActiveRun"
   >;
   projectSession: ProjectSession;
   documentSession: DocumentSession;
@@ -188,6 +199,29 @@ export type WorkspaceControllerConstruction = Readonly<{
     | "policies"
     | "scheduler"
   >;
+  runWorkflow?: Readonly<{
+    runSession: import("./run-session.js").RunSession;
+    codecs: RunWorkflowCodecs;
+    canvas: Readonly<{
+      fencePendingEdit?(input: Record<string, unknown>): {
+        ok: boolean;
+        reason?: string;
+      } | undefined;
+      freeze(reason: string): Record<string, unknown>;
+      unlock(): void;
+      normalizeComments?(): unknown[];
+    }>;
+    handoff: Readonly<{
+      copy(input: {
+        message: string;
+        run: import("../domain/run-lifecycle.js").ActiveRun;
+      }): Promise<{ status: string; copied: boolean }>;
+    }>;
+    scheduler?: Readonly<{
+      setInterval(callback: () => void, delayMs: number): unknown;
+      clearInterval(handle: unknown): void;
+    }>;
+  }>;
   clock: ClockPort;
 }>;
 
@@ -266,6 +300,29 @@ export class WorkspaceController {
     context?: ProjectContext;
   }): Promise<ProjectWorkflowOutcome<{ opened: boolean }>>;
   refreshRecentProjects(): Promise<ProjectWorkflowOutcome<{ projects: unknown[] }>>;
+  submitRequest(input?: {
+    projectName?: string;
+    previousVersionId?: string | null;
+    basedOnVersionId?: string | null;
+    deadlineAt?: number;
+  }): Promise<RunWorkflowOutcome>;
+  reconcileRunSubmission(input?: {
+    sourcePath?: string | null;
+    generation?: number;
+  }): Promise<RunWorkflowOutcome>;
+  pollRuns(input?: { generation?: number }): Promise<RunWorkflowOutcome>;
+  copyRunHandoff(input?: {
+    run?: import("../domain/run-lifecycle.js").ActiveRun | null;
+  }): Promise<RunWorkflowOutcome>;
+  cancelRun(input?: {
+    run?: import("../domain/run-lifecycle.js").ActiveRun | null;
+    agentMayBeRunning?: boolean;
+    reason?: string;
+  }): Promise<RunWorkflowOutcome>;
+  resolveRunConflict(input: {
+    run?: import("../domain/run-lifecycle.js").ActiveRun | null;
+    action: "adopt-ai" | "keep-external";
+  }): Promise<RunWorkflowOutcome>;
   ensureRegistered(
     input?: RegistrationInput,
   ): Promise<CommandOutcome<ProjectContext>>;

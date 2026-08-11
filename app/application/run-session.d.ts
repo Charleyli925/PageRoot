@@ -39,6 +39,7 @@ export type RunSessionSnapshot = {
 export class RunSession {
   constructor(options?: { sourcePath?: string | null });
   setObserver(observer: ((snapshot: RunSessionSnapshot) => void) | null): void;
+  subscribe(listener: (snapshot: RunSessionSnapshot) => void): () => void;
   activate(sourcePath: string | null): RunSessionSnapshot;
   beginSubmission(value: {
     sourcePath: string;

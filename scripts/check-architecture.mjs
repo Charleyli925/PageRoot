@@ -31,16 +31,11 @@ const RETIRED_WORKBENCH_COMMENT_AUTHORITIES =
 const RETIRED_WORKBENCH_COMMENT_WORKFLOW_OWNERS =
   /\b(?:handleDraftSessionEvent|flushDraftPersistence|persistDraftRecovery|persistCurrentDraftRecovery|attachmentUploadCountRef|draftRecoveryOperationIdRef|deleteAttachmentFile)\b/;
 const WORKBENCH_BRIDGE_CALL_ALLOWLIST = new Map([
-  ["workspace", 3],
   ["source", 2],
   ["versionFile", 3],
-  ["resolveConflict", 1],
   ["activateReadyVersion", 1],
-  ["cancelActiveRun", 1],
-  ["createRequest", 1],
-  ["status", 1],
 ]);
-const WORKBENCH_BRIDGE_CALL_LIMIT = 13;
+const WORKBENCH_BRIDGE_CALL_LIMIT = 6;
 const RETIRED_WORKBENCH_PROJECT_WORKFLOW_OWNERS =
   /\b(?:drainCoordinatorRef|externalFileOpenSessionRef|projectApplicationSessionRef|projectHydratingRef|projectLoadErrorRef|pendingProjectOpenRef|closeLifecycleRef|projectOpenRequestRef|applyProject|prepareProjectSwitch|applyAcceptedProject|enqueueAcceptedProject|openExternalProject)\b/;
 
@@ -296,6 +291,15 @@ export async function architectureViolations() {
     ),
     "utf8",
   );
+  const runWorkflow = await readFile(
+    path.join(
+      PRODUCT_ROOT,
+      "app",
+      "application",
+      "run-workflow.js",
+    ),
+    "utf8",
+  );
   if (
     !workspaceController.includes("export class WorkspaceController")
     || !workspaceController.includes("ensureRegistered({")
@@ -380,19 +384,19 @@ export async function architectureViolations() {
     bridgeCallCounts.set(method, (bridgeCallCounts.get(method) || 0) + 1);
     if (!WORKBENCH_BRIDGE_CALL_ALLOWLIST.has(method)) {
       violations.push(
-        `app/workbench.tsx: Bridge call ${method} is outside the PR-4 migration allowlist`,
+        `app/workbench.tsx: Bridge call ${method} is outside the PR-5 migration allowlist`,
       );
     }
   }
   if (bridgeCalls.length > WORKBENCH_BRIDGE_CALL_LIMIT) {
     violations.push(
-      `app/workbench.tsx: PR-4 allows at most ${WORKBENCH_BRIDGE_CALL_LIMIT} direct Bridge calls`,
+      `app/workbench.tsx: PR-5 allows at most ${WORKBENCH_BRIDGE_CALL_LIMIT} direct Bridge calls`,
     );
   }
   for (const [method, limit] of WORKBENCH_BRIDGE_CALL_ALLOWLIST) {
     if ((bridgeCallCounts.get(method) || 0) > limit) {
       violations.push(
-        `app/workbench.tsx: Bridge call ${method} exceeds its PR-4 migration allowance of ${limit}`,
+        `app/workbench.tsx: Bridge call ${method} exceeds its PR-5 migration allowance of ${limit}`,
       );
     }
   }
@@ -504,6 +508,58 @@ export async function architectureViolations() {
     );
   }
   if (
+    !workspaceController.includes("import { RunWorkflow }")
+    || !workspaceController.includes("this.#runWorkflow = new RunWorkflow({")
+    || !workspaceController.includes("run: this.#runSnapshot")
+    || !workspaceController.includes("submitRequest(input)")
+    || !workspaceController.includes("cancelRun(input)")
+    || !workspaceController.includes("resolveRunConflict(input)")
+    || !workspaceController.includes("this.#runWorkflow?.dispose()")
+  ) {
+    violations.push(
+      "app/application/workspace-controller.js: PR-5 must compose RunWorkflow, expose commands, project its snapshot, and dispose its poller",
+    );
+  }
+  if (
+    !runWorkflow.includes("export class RunWorkflow")
+    || !runWorkflow.includes("async submit({")
+    || !runWorkflow.includes("async reconcileSubmission({")
+    || !runWorkflow.includes("async pollNow({")
+    || !runWorkflow.includes("async cancel({")
+    || !runWorkflow.includes("async resolveConflict({")
+    || !runWorkflow.includes("this.#bridgeClient.createRequest(request)")
+    || !runWorkflow.includes("this.#bridgeClient.workspace(entry.context.sourcePath)")
+    || !runWorkflow.includes("this.#bridgeClient.status(")
+    || !runWorkflow.includes("this.#bridgeClient.cancelActiveRun({")
+    || !runWorkflow.includes("this.#bridgeClient.resolveConflict({")
+    || !runWorkflow.includes("this.#runSession.markSubmissionUncertain(submission)")
+    || !runWorkflow.includes("this.#runSession.hasRun(run)")
+    || !runWorkflow.includes("#pollGeneration")
+    || !runWorkflow.includes("stopPolling()")
+    || !runWorkflow.includes("this.#handoffPort.copy({")
+    || /(?:^|\/)(?:workbench|components|desktop)(?:\/|$)|\breact\b/u.test(
+      importedSpecifiers(runWorkflow).join("\n"),
+    )
+  ) {
+    violations.push(
+      "app/application/run-workflow.js: Request, read-only reconciliation, fenced polling, cancellation, conflict resolution, and handoff confirmation must stay in the application boundary",
+    );
+  }
+  if (
+    !workbench.includes("runWorkflow: {")
+    || !workbench.includes(".submitRequest({")
+    || !workbench.includes(".copyRunHandoff({ run: activeRun })")
+    || !workbench.includes(".cancelRun({")
+    || !workbench.includes(".resolveRunConflict({ run: activeRun, action })")
+    || /\bbridgeClient\.(?:workspace|createRequest|status|cancelActiveRun|resolveConflict)\s*\(/.test(workbench)
+    || /\b(?:processRunStatus|reconcilePendingRun|sendToQoderWork|hydrateRecentProjectRuns)\b/.test(workbench)
+    || /const\s+timer\s*=\s*window\.setInterval\(/.test(workbench)
+  ) {
+    violations.push(
+      "app/workbench.tsx: PR-5 Run commands and timer lifecycle must delegate to WorkspaceController/RunWorkflow; Workbench keeps only host adapters and presentation",
+    );
+  }
+  if (
     !commentWorkflow.includes("export class CommentWorkflow")
     || !commentWorkflow.includes("#uploadCount")
     || !commentWorkflow.includes("#recoveryOperationId")
@@ -534,12 +590,10 @@ export async function architectureViolations() {
       );
     }
   }
-  for (const boundary of ["submit", "history"]) {
-    if (!new RegExp(`\\.drainBoundary\\("${boundary}"`).test(workbench)) {
-      violations.push(
-        `app/workbench.tsx: ${boundary} must delegate to the Controller DrainCoordinator`,
-      );
-    }
+  if (!/\.drainBoundary\("history"/.test(workbench)) {
+    violations.push(
+      "app/workbench.tsx: history must delegate to the Controller DrainCoordinator",
+    );
   }
 
   const sourcePatchBoundary = sourceSection(
@@ -619,24 +673,19 @@ export async function architectureViolations() {
     );
   }
 
-  const requestBoundary = sourceSection(
-    workbench,
-    "const generateRequest = useCallback",
-    "const openCommittedVersion = useCallback",
-  );
   const createRequestPayload = sourceSection(
-    requestBoundary,
-    "const payload = await bridgeClient.createRequest({",
-    "const run = activeRunFromRecord",
+    runWorkflow,
+    "const request = {",
+    "const operationId = this.#codecs.operationKey(pendingRun)",
   );
   if (
-    !includesInOrder(requestBoundary, [
-      "const frozen = editorRef.current?.freezeNow()",
-      "const capturedHtml = frozen.html",
-      "const persistedSourceSha256 = documentSessionRef.current.sourceSha256",
+    !includesInOrder(runWorkflow, [
+      "const frozen = this.#canvasPort.freeze(",
+      "const frozenHash = await this.#hashPort.sha256",
+      "const persistedSourceSha256 = this.#documentSession.sourceSha256",
       "persistedSourceSha256 !== frozen.sourceSha256",
-      "bridgeClient.createRequest({",
       "expectedSourceSha256: persistedSourceSha256",
+      "this.#bridgeClient.createRequest(request)",
     ])
     || !createRequestPayload
     || /\b(?:html|baseHtml|projection)\s*:/u.test(createRequestPayload)
@@ -645,7 +694,7 @@ export async function architectureViolations() {
     )
   ) {
     violations.push(
-      "app/workbench.tsx: AI requests must bind the exact frozen persisted source and Edit must not own a runtime projection",
+      "app/application/run-workflow.js: AI requests must bind the exact frozen persisted source and Edit must not own a runtime projection",
     );
   }
   return violations;
