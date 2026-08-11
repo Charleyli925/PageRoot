@@ -93,6 +93,7 @@ import {
   WorkspaceController,
   registrationContextFromOutcome,
 } from "./application/workspace-controller.js";
+import type { DocumentWorkflowOutcome } from "./application/document-workflow.js";
 import { createDocumentWorkflowCodecs } from "./application/document-workflow-codecs.js";
 import { createWorkspaceControllerCodecs } from "./application/workspace-controller-codecs.js";
 import {
@@ -483,6 +484,19 @@ function requiredWorkspaceController(
     throw new Error("项目资料初始化尚未就绪，请稍后重试。");
   }
   return controller;
+}
+
+type DocumentEditOutcome = DocumentWorkflowOutcome<{
+  revision: number;
+  queued: boolean;
+}>;
+
+function documentEditFailureReason(outcome: DocumentEditOutcome): string {
+  if (outcome.status === "succeeded") return "";
+  if (outcome.status === "stale") {
+    return "当前项目已经切换，当前修改没有被接受。";
+  }
+  return outcome.reason;
 }
 
 export default function Workbench() {
@@ -2206,18 +2220,21 @@ export default function Workbench() {
     nextHtml: string,
     mutation?: HtmlCanvasMutation,
     sourceTransaction?: HtmlCanvasSourceTransaction,
-  ): number => {
-    if (!workspaceController) return documentSessionRef.current.editRevision;
-    const outcome = requiredWorkspaceController(workspaceController)
+  ): DocumentEditOutcome => {
+    if (!workspaceController) {
+      return {
+        status: "blocked",
+        code: "DOCUMENT_WORKFLOW_UNAVAILABLE",
+        reason: "项目资料初始化尚未就绪，当前修改没有被接受。",
+      };
+    }
+    return requiredWorkspaceController(workspaceController)
       .enqueueDocumentEdit({
         html: nextHtml,
         mutation,
         sourceTransaction,
         context: projectSessionRef.current.context || undefined,
       });
-    return outcome.status === "succeeded"
-      ? outcome.value.revision
-      : documentSessionRef.current.editRevision;
   }, [workspaceController]);
 
   const applyProject = useCallback((project: HtmlProject | {
@@ -4337,7 +4354,13 @@ export default function Workbench() {
               frozen.html !== documentSessionRef.current.html
               && (Boolean(projectSessionRef.current.sourcePath) || Boolean(frozen.pendingMutation))
             ) {
-              enqueueAutosave(frozen.html, frozen.pendingMutation || undefined);
+              const enqueued = enqueueAutosave(
+                frozen.html,
+                frozen.pendingMutation || undefined,
+              );
+              if (enqueued.status !== "succeeded") {
+                return inAppBlock(documentEditFailureReason(enqueued));
+              }
             }
           }
 
@@ -5063,10 +5086,14 @@ export default function Workbench() {
           committed.html !== documentSessionRef.current.html
           || committed.pendingMutation
         ) {
-          launchRevision = enqueueAutosave(
+          const enqueued = enqueueAutosave(
             committed.html,
             committed.pendingMutation || undefined,
           );
+          if (enqueued.status !== "succeeded") {
+            throw new Error(documentEditFailureReason(enqueued));
+          }
+          launchRevision = enqueued.value.revision;
         }
         const persisted = await flushAutosave(launchRevision);
         if (
@@ -5186,10 +5213,13 @@ export default function Workbench() {
         committed.html !== documentSessionRef.current.html
         || committed.pendingMutation
       ) {
-        enqueueAutosave(
+        const enqueued = enqueueAutosave(
           committed.html,
           committed.pendingMutation || undefined,
         );
+        if (enqueued.status !== "succeeded") {
+          throw new Error(documentEditFailureReason(enqueued));
+        }
       }
       const drained = await drainCoordinatorRef.current.drain("switch", {
         deadlineAt: Date.now() + 15_000,
@@ -5217,10 +5247,13 @@ export default function Workbench() {
         frozen.html !== documentSessionRef.current.html
         || frozen.pendingMutation
       ) {
-        enqueueAutosave(
+        const enqueued = enqueueAutosave(
           frozen.html,
           frozen.pendingMutation || undefined,
         );
+        if (enqueued.status !== "succeeded") {
+          throw new Error(documentEditFailureReason(enqueued));
+        }
         throw new Error("刚刚还有文字输入，源页正在安全保存，请稍后再试。");
       }
       transitionOwnsCanvas = true;
@@ -5435,7 +5468,17 @@ export default function Workbench() {
       || viewMode === "history"
     ) return false;
     try {
-      enqueueAutosave(nextHtml, mutation, sourceTransaction);
+      const enqueued = enqueueAutosave(nextHtml, mutation, sourceTransaction);
+      if (enqueued.status !== "succeeded") {
+        setToast({
+          title: "这次编辑没有进入撤销历史",
+          message: documentEditFailureReason(enqueued),
+          tone: "warning",
+          disposition: "background-result",
+          dedupeKey: "source-history-record-failed",
+        });
+        return false;
+      }
     } catch (cause) {
       setToast({
         title: "这次编辑没有进入撤销历史",
@@ -7173,7 +7216,24 @@ export default function Workbench() {
     }
     const capturedHtml = frozen.html;
     if (capturedHtml !== documentSessionRef.current.html) {
-      enqueueAutosave(capturedHtml, frozen.pendingMutation || undefined);
+      const enqueued = enqueueAutosave(
+        capturedHtml,
+        frozen.pendingMutation || undefined,
+      );
+      if (enqueued.status !== "succeeded") {
+        setToast({
+          title: "当前编辑没有进入撤销历史",
+          message: documentEditFailureReason(enqueued),
+          tone: "warning",
+          sticky: true,
+          disposition: "direct-action",
+          dedupeKey: "source-history-record-failed",
+          action: { id: "retry-submit", label: "重新发送" },
+        });
+        editorRef.current?.unlockNow?.();
+        releaseSubmission();
+        return;
+      }
     }
     const freezeCutoffRevision = documentSessionRef.current.editRevision;
     const submissionContext = {

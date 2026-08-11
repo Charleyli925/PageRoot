@@ -274,6 +274,32 @@ test("DocumentWorkflow coalesces a 700ms source write and only accepts exact HTM
   assert.equal(harness.recoveryStore.values.size, 0);
 });
 
+test("DocumentWorkflow rejects an unchainable source transaction without publishing the canvas edit", () => {
+  const before = "<!doctype html><html><body><p>one</p></body></html>";
+  const after = before.replace("one", "two");
+  const harness = createHarness({ html: before });
+  const transaction = {
+    ...operation(before, after),
+    beforeSourceSha256: sha256("a different authoritative source"),
+  };
+
+  const outcome = harness.workflow.enqueueEdit({
+    html: after,
+    sourceTransaction: transaction,
+  });
+
+  assert.deepEqual(outcome, {
+    status: "rejected",
+    code: "SOURCE_HISTORY_RECORD_REJECTED",
+    reason: "源码历史与当前画布补丁链不一致。",
+  });
+  assert.equal(harness.documentSession.html, before);
+  assert.equal(harness.documentSession.editRevision, 0);
+  assert.equal(harness.documentSession.pendingWrite, null);
+  assert.deepEqual(harness.sourceHistorySession.pendingOperations, []);
+  assert.equal(harness.canvas.invalidations, 0);
+});
+
 test("DocumentWorkflow drains a newer queued write after an earlier acknowledgement", async () => {
   const before = "<!doctype html><html><body><p>one</p></body></html>";
   const middle = before.replace("one", "two");
