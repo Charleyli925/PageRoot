@@ -85,7 +85,14 @@ The renderer's main workspace facts are partitioned as follows:
   authority reconciliation, tracked-run polling, cancellation, conflict
   commands and confirmed clipboard handoff. It publishes through `RunSession`
   and never creates a second run store;
-- `VersionSession`: immutable Version projection and history-view transition;
+- `VersionSession`: immutable Version records plus the current/history
+  projection facts;
+- `VersionWorkflow`: Version operation identity/generation, Bridge version
+  reads and activation mutation, review-candidate preparation, complete
+  project/document/version identity and Hash validation, synchronous
+  cross-Session publication, and current/history navigation rollback. It
+  publishes through `ProjectSession`, `DocumentSession` and `VersionSession`;
+  it never owns a second mutable Version store;
 - `SourceHistorySession`: pending exact Patch operations and history action.
 - `ExternalFileOpenSession`: opaque external-open delivery IDs, one active
   switch, newest queued request, deferred safe-switch retry and stale-result
@@ -93,9 +100,10 @@ The renderer's main workspace facts are partitioned as follows:
 - `ProjectApplicationSession`: FIFO accepted project results, final renderer
   switch fence, deferred application retry and successor preservation.
 - `ProjectWorkflow`: hydration generation/load outcome, picker/external/switch
-  operation identity, accepted-result execution, close request lifecycle and
-  the synchronous Project/Document/Version/Canvas publication sequence. It is
-  an operation owner, not a second owner of any Session fact.
+  operation identity, accepted-result execution, close request lifecycle,
+  project-switch publication, and the narrow generated-source prepare/commit
+  handoff used by `VersionWorkflow`. It is an operation owner, not a second
+  owner of any Session fact.
 
 `CommentSession` does not replace the Draft aggregate or Bridge CAS authority,
 and `VersionSession` does not make mutable copies of immutable Version files.
@@ -116,9 +124,10 @@ In PR-4 it additionally composes `CommentWorkflow`, which owns the
 DraftSession observer, recovery operation sequence, attachment upload count and
 captured-context stale/cancel cleanup. In PR-5 it composes `RunWorkflow`, whose
 poll lifecycle is driven by tracked `RunSession` facts rather than a React
-effect. Its temporary Workbench direct-Bridge allowance is now an exact checked
-upper bound of 6, not a permanent View exception; the final composition stage
-removes it entirely.
+effect. In PR-6 it composes `VersionWorkflow`, which owns Version operation
+sequencing and Bridge I/O while preserving the existing Session fact owners.
+Workbench's direct-Bridge allowance is now exactly 0: the checked architecture
+gate permits no direct `bridgeClient.*` call from Workbench.
 
 An asynchronous result may update state only when its complete identity is
 current:

@@ -14,6 +14,7 @@ const SOURCE_B = "/tmp/version-workflow-b.html";
 const BASE_HTML = "<!doctype html><html><body><p>base</p></body></html>";
 const CANDIDATE_HTML = "<!doctype html><html><body><p>candidate</p></body></html>";
 const HISTORY_HTML = "<!doctype html><html><body><p>history</p></body></html>";
+const DRAINED_HTML = "<!doctype html><html><body><p>drained</p></body></html>";
 const B_HTML = "<!doctype html><html><body><p>B</p></body></html>";
 
 function sha256(value) {
@@ -102,6 +103,7 @@ function createHarness({
   sourceRead = null,
   activation = null,
   verifyRendered = null,
+  onDrain = null,
 } = {}) {
   const projectSession = new ProjectSession();
   const locator = projectSession.openLocator(currentPath);
@@ -194,6 +196,7 @@ function createHarness({
     projectLoadError: null,
     async drain(boundary, input) {
       calls.drain.push([boundary, input]);
+      if (onDrain) return onDrain({ boundary, input, documentSession });
       return { ok: true };
     },
     async prepareGeneratedSourceTransition(input) {
@@ -442,6 +445,54 @@ test("history failure restores the complete prior Document and Version snapshot"
   assert.equal(harness.versionSession.snapshot.viewMode, "current");
   assert.equal(harness.versionSession.snapshot.currentExactVersionId, "ver_0001");
   assert.equal(harness.calls.render.at(-1)?.html, BASE_HTML);
+});
+
+test("history rollback retains persistence advanced by a successful drain", async () => {
+  const harness = createHarness({
+    onDrain: async ({ documentSession }) => {
+      documentSession.publishAuthority({
+        html: DRAINED_HTML,
+        sourceSha256: sha256(DRAINED_HTML),
+        editRevision: 1,
+        lastPersistedRevision: 1,
+        persistState: "idle",
+        persistError: "",
+        pendingWrite: null,
+      });
+      return { ok: true };
+    },
+    verifyRendered: async (html) => {
+      if (html === HISTORY_HTML) throw new Error("history canvas failed");
+    },
+  });
+  harness.documentSession.publishAuthority({
+    html: DRAINED_HTML,
+    sourceSha256: sha256(BASE_HTML),
+    editRevision: 1,
+    lastPersistedRevision: 0,
+    persistState: "writing",
+    pendingWrite: {
+      revision: 1,
+      targetHtmlSha256: sha256(DRAINED_HTML),
+    },
+  });
+
+  const outcome = await harness.workflow.viewHistory({
+    version: {
+      id: "ver_0001",
+      contentSha256: sha256(HISTORY_HTML),
+    },
+    context: harness.context,
+  });
+
+  assert.equal(outcome.status, "rejected");
+  assert.equal(harness.documentSession.html, DRAINED_HTML);
+  assert.equal(harness.documentSession.sourceSha256, sha256(DRAINED_HTML));
+  assert.equal(harness.documentSession.editRevision, 1);
+  assert.equal(harness.documentSession.lastPersistedRevision, 1);
+  assert.equal(harness.documentSession.persistState, "idle");
+  assert.equal(harness.documentSession.pendingWrite, null);
+  assert.equal(harness.calls.render.at(-1)?.html, DRAINED_HTML);
 });
 
 test("history stays read-only and return-current validates canonical source identity", async () => {

@@ -8,7 +8,7 @@
 | Accepted local/external project results, their FIFO renderer publication and deferred final-fence blocker-transition/manual retry policy | Renderer `ProjectApplicationSession` | none; bounded in-memory state only | `ProjectWorkflow` composition and Workbench presentation |
 | Registered mutation context resolution and atomic-replacement source observation | Bridge project-context service | project/document registry graph plus the owning runtime `pendingWrite` target Hash | Bridge mutation routes and `/project/ensure` |
 | Registration operation identity, single-flight, stale-result fence and cross-Session publication sequence | `WorkspaceController` workflow owner during staged migration | none; it publishes through existing Project, Document, Comment, Draft, Version and SourceHistory owners | Workbench commands and presentation-event adapter |
-| Project hydration generation and load outcome, switch/open operation, accepted-result execution, close request identity and synchronous Project/Document/Version/Canvas publication sequence | Renderer `ProjectWorkflow`, composed by `WorkspaceController` | none; it publishes through existing Session owners and trusted ProjectOpen/Canvas ports | Workbench commands and presentation-event adapter |
+| Project hydration generation and load outcome, switch/open operation, accepted-result execution, close request identity, project-switch publication, and the narrow generated-source prepare/commit handoff | Renderer `ProjectWorkflow`, composed by `WorkspaceController` | none; it publishes through existing Session owners and trusted ProjectOpen/Canvas ports | Workbench commands and presentation-event adapter |
 | Explicit source filename transition, pending operation and active/recent path rebase | Desktop source-rename transaction | active-file `pendingRename` / `lastRename`, then filesystem path | project session, Bridge relink, views |
 | Current source bytes, Hash, edit revision, persistence projection, pending write, single-flight source flush, Canvas authority generation and exact-byte boundary reconciliation | Renderer `DocumentSession` | source HTML, runtime autosave record and recovery log; the generation itself is disposable | Canvas, preview readiness, source-history session and drain coordinator |
 | Current-source commit/recovery WAL, same-directory atomic replacement, acknowledged source-history application, project/runtime settlement and exactly-once audit outbox cleanup | Bridge `SourceTransaction` service | source HTML, `history/source-operations.json`, `project.json`, `runtime-state.json` and `pendingWrite` recovery bytes | `/autosave` and `/source-history/action` route adapters, project-context service and restart recovery |
@@ -22,7 +22,8 @@
 | Active/background AI run projections, Qoder handoff status and recovered handoff-risk disposition, background results, submission phase/unknown-outcome lock and renderer operation locks | Renderer `RunSession` | none beyond authoritative runtime and immutable Request/Attempt records | `RunWorkflow`, Workbench process panel, drain coordinator and project list |
 | AI Request freeze, persisted-boundary verification, unknown-POST authority reconciliation, polling lifecycle, cancellation and conflict command sequence | Renderer `RunWorkflow`, composed by `WorkspaceController` | none; it publishes only through `RunSession` and reads Bridge runtime/immutable Request records | Workbench intent/Drawer/Toast adapter and Bridge run lifecycle |
 | AI Request/Attempt lifecycle transition | Bridge run lifecycle | runtime state and immutable Request/Attempt records | `RunWorkflow`, RunSession and finalizer |
-| Immutable Version list, based-on/exact/restored identities and history-view transition | Renderer `VersionSession` | immutable Version records and current runtime pointers | Workbench history and Canvas projection |
+| Immutable Version list and based-on/exact/restored/current-history projection facts | Renderer `VersionSession` | immutable Version records and current runtime pointers | `VersionWorkflow`, Workbench history and Canvas projection |
+| Version activation, review-candidate preparation, current/history navigation operation identity, Bridge I/O, identity/Hash/time validation, synchronous cross-Session publication and navigation rollback | Renderer `VersionWorkflow`, composed by `WorkspaceController` | none; it publishes only through Project, Document and Version owners | Workbench review/history commands, presentation-event adapter and Bridge version lifecycle |
 | `PROJECT.md` content, editor generation, composition fence, autosave eligibility and save status | Renderer `ProjectRulesSession` | managed `PROJECT.md` | project panel, drain coordinator and Request freeze |
 | Close/switch/submit/history readiness and desktop close lifecycle | The unique `DrainCoordinator` owned by `WorkspaceController`; `ProjectWorkflow` owns the request-scoped close operation | composed owner snapshots, request identity and bounded presentation class; no copied dirty booleans | Electron close handshake, browser fallback and navigation |
 | Bridge transport, timeouts, error details and unknown outcomes | Typed Bridge client | no durable state | application sessions |
@@ -91,12 +92,13 @@ Rules:
   values, adapts narrow host ports and dispatches user intent to the owning
   Session or workflow facade.
 - `WorkspaceController` owns the renderer's unique `DrainCoordinator` and
-  composes `ProjectWorkflow`, `CommentWorkflow` and `RunWorkflow`. The workflows own operation state only: they create
-  the narrow external-open/application protocol Sessions, receives the existing
-  Project, Document, Comment, Draft, Run, Version and SourceHistory owners, and
-  must never duplicate their facts. Workbench's temporary direct Bridge-call
-  allowance is locked to the exact PR-5 allowlist of 6 calls and remains a
-  decreasing migration gate, not a permanent architecture exception.
+  composes `ProjectWorkflow`, `CommentWorkflow`, `RunWorkflow` and
+  `VersionWorkflow`. The workflows own operation state only: they create the
+  narrow external-open/application protocol Sessions, receive the existing
+  Project, Document, Comment, Draft, Run, Version and SourceHistory owners,
+  and must never duplicate their facts. Workbench's direct Bridge-call
+  allowance is exactly 0; the checked architecture gate permits no
+  `bridgeClient.*` call from Workbench.
 - `RunSession` owns the one in-memory submission lifecycle. `preparing` blocks
   duplicate intent and drain without freezing the current canvas; `frozen`
   blocks edits until the Request is known; `uncertain` preserves a current

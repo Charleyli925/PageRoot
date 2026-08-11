@@ -528,7 +528,7 @@ export class VersionWorkflow {
     if (!operation) {
       return blocked("VERSION_NAVIGATION_BUSY", "当前 HTML 视图正在切换，请稍后重试。");
     }
-    const previous = this.#captureNavigationSnapshot(current);
+    let previous = this.#captureNavigationSnapshot(current);
     try {
       const frozen = this.#freezeCurrentCanvas(
         "当前编辑画布尚未完成安全收口，无法打开历史版本。",
@@ -541,6 +541,10 @@ export class VersionWorkflow {
         if (!drained.ok) {
           throw new Error(drained.reason || "当前编辑没有完成安全收口。");
         }
+        // A successful drain may have advanced durable Document authority. A
+        // later failed history read must restore that settled projection rather
+        // than reviving its pre-drain pending write.
+        previous = this.#captureNavigationSnapshot(current);
       }
       const payload = await this.#bridgeClient.versionFile(current.sourcePath, String(version.id));
       if (!this.#isNavigationCurrent(operation)) return stale(current);
