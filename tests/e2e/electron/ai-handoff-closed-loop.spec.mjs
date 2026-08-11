@@ -570,19 +570,160 @@ async function assertOverlayMaskEquivalence(frame) {
   });
 }
 
-async function assertRuntimeVisualSupplement(beforeReviewFrame, afterReviewFrame) {
+async function assertRuntimeVisualSupplement(page, beforeReviewFrame, afterReviewFrame) {
   const runtimeSnapshotSection = "section[data-review-runtime-snapshot]";
+  const reviewWorkspace = page.getByTestId("ai-review-workspace");
+  await expect(reviewWorkspace).toHaveAttribute(
+    "data-review-runtime-visual-state",
+    "resolved",
+    { timeout: 20_000 },
+  );
+  await expect(reviewWorkspace).toHaveAttribute(
+    "data-review-runtime-visual-delivery",
+    "complete",
+    { timeout: 20_000 },
+  );
+  const resolvedMarkerCount = Number(await reviewWorkspace.getAttribute(
+    "data-review-runtime-visual-marker-count",
+  ));
+  expect(Number.isSafeInteger(resolvedMarkerCount)).toBe(true);
+  expect(resolvedMarkerCount).toBeGreaterThanOrEqual(0);
+  expect(resolvedMarkerCount).toBeLessThanOrEqual(32);
+  const staticBoxFactsBySide = await Promise.all(
+    [beforeReviewFrame, afterReviewFrame].map((frame) => (
+      frame.locator("#review-runtime-static-box-canvas").evaluate((element) => JSON.parse(
+        element.getAttribute("data-pageroot-review-projection-facts") || "[]",
+      ))
+    )),
+  );
+  const staticBoxFactBySide = staticBoxFactsBySide.map((facts) => facts.find((fact) => (
+    fact.type === "style" && fact.scope === "box" && fact.operation !== "layout"
+  )));
+  expect(staticBoxFactBySide.every(Boolean)).toBe(true);
+  expect(staticBoxFactBySide[0].geometryOwnerId).toBeTruthy();
+  expect(staticBoxFactBySide[1].geometryOwnerId)
+    .toBe(staticBoxFactBySide[0].geometryOwnerId);
+  const runtimeBoxCounts = [];
+  const localRuntimeFactIdsBySide = [];
   for (const frame of [beforeReviewFrame, afterReviewFrame]) {
-    await expect(frame.locator(runtimeSnapshotSection)).toHaveAttribute(
-      "data-pageroot-review-runtime-marker",
-      "true",
+    const runtimeBoxes = frame.locator(
+      '[data-pageroot-review-overlay-box][data-pageroot-review-fact^="style:runtime-projection-"]',
     );
-    await expect(frame.locator("#review-runtime-snapshot-canvas"))
+    // A cold offscreen owner may legitimately resolve with zero markers under
+    // its fail-closed deadline. Non-empty results can also include other visual
+    // candidates in this broad fixture, some of which are suppressed by an
+    // exact same-host static box fact.
+    const minimumRuntimeBoxes = resolvedMarkerCount > 0 ? 1 : 0;
+    const maximumRuntimeBoxes = resolvedMarkerCount;
+    await expect.poll(async () => {
+      const count = await runtimeBoxes.count();
+      return count >= minimumRuntimeBoxes && count <= maximumRuntimeBoxes;
+    }).toBe(true);
+    runtimeBoxCounts.push(await runtimeBoxes.count());
+    await expect(frame.locator(runtimeSnapshotSection))
       .not.toHaveAttribute("data-pageroot-review-runtime-marker", "true");
     await expect(frame.locator(
-      "[data-pageroot-review-runtime-host], [data-pageroot-review-runtime-source-box]",
+      "[data-pageroot-review-runtime-marker], [data-pageroot-review-runtime-host], [data-pageroot-review-runtime-source-box]",
     )).toHaveCount(0);
+    await expect.poll(() => runtimeBoxes.evaluateAll((overlays) => {
+      const localTargets = [
+        document.querySelector("#review-runtime-snapshot-canvas"),
+        document.querySelector("#review-runtime-snapshot-host"),
+      ].filter(Boolean);
+      const suppressedTarget = document.querySelector("#review-runtime-static-box-canvas");
+      if (localTargets.length !== 2 || !suppressedTarget) {
+        return { valid: false, reason: "fixture-target-missing" };
+      }
+      const overlayRects = overlays.map((overlay) => ({
+        left: Number(overlay.getAttribute("data-left")),
+        top: Number(overlay.getAttribute("data-top")),
+        width: Number(overlay.getAttribute("data-width")),
+        height: Number(overlay.getAttribute("data-height")),
+      }));
+      const candidateTargets = [...document.querySelectorAll(
+        "canvas, svg, #review-runtime-snapshot-host",
+      )].filter((target) => (
+        target !== suppressedTarget
+        && !target.closest("[data-pageroot-review-projection-layer]")
+      ));
+      const candidateTargetRects = candidateTargets.map((target) => {
+        const rect = target.getBoundingClientRect();
+        return {
+          left: rect.left + scrollX - 3,
+          top: rect.top + scrollY - 3,
+          width: rect.width + 6,
+          height: rect.height + 6,
+        };
+      });
+      const suppressedRect = suppressedTarget.getBoundingClientRect();
+      const suppressedTargetRect = {
+        left: suppressedRect.left + scrollX - 3,
+        top: suppressedRect.top + scrollY - 3,
+        width: suppressedRect.width + 6,
+        height: suppressedRect.height + 6,
+      };
+      const matches = (overlay, target) => (
+        Math.abs(overlay.left - target.left) < .3
+          && Math.abs(overlay.top - target.top) < .3
+          && Math.abs(overlay.width - target.width) < .3
+          && Math.abs(overlay.height - target.height) < .3
+      );
+      const usedCandidateTargets = new Set();
+      const matchedCandidateTargets = overlayRects.map((overlay) => {
+        const targetIndex = candidateTargetRects.findIndex((target, index) => (
+          !usedCandidateTargets.has(index) && matches(overlay, target)
+        ));
+        if (targetIndex >= 0) usedCandidateTargets.add(targetIndex);
+        return targetIndex;
+      });
+      const valid = matchedCandidateTargets.every((index) => index >= 0)
+        && overlayRects.every((overlay) => !matches(overlay, suppressedTargetRect));
+      return valid ? "valid" : JSON.stringify({
+        overlayRects,
+        candidateTargetRects,
+        suppressedTargetRect,
+        matchedCandidateTargets,
+      });
+    })).toBe("valid");
+    localRuntimeFactIdsBySide.push(await runtimeBoxes.evaluateAll((overlays) => {
+      const localTargets = [
+        document.querySelector("#review-runtime-snapshot-canvas"),
+        document.querySelector("#review-runtime-snapshot-host"),
+      ].filter(Boolean);
+      const targetRects = localTargets.map((target) => {
+        const rect = target.getBoundingClientRect();
+        return {
+          left: rect.left + scrollX - 3,
+          top: rect.top + scrollY - 3,
+          width: rect.width + 6,
+          height: rect.height + 6,
+        };
+      });
+      return overlays.flatMap((overlay) => {
+        const overlayRect = {
+          left: Number(overlay.getAttribute("data-left")),
+          top: Number(overlay.getAttribute("data-top")),
+          width: Number(overlay.getAttribute("data-width")),
+          height: Number(overlay.getAttribute("data-height")),
+        };
+        const matchesLocalTarget = targetRects.some((target) => (
+          Math.abs(overlayRect.left - target.left) < .3
+          && Math.abs(overlayRect.top - target.top) < .3
+          && Math.abs(overlayRect.width - target.width) < .3
+          && Math.abs(overlayRect.height - target.height) < .3
+        ));
+        const factId = overlay.getAttribute("data-pageroot-review-fact");
+        return matchesLocalTarget && factId ? [factId] : [];
+      });
+    }));
+    const authoredAttributes = await frame.locator("html").evaluate(() => (
+      [...document.querySelectorAll("*")].flatMap((element) => (
+        [...element.attributes].map((attribute) => `${attribute.name}=${attribute.value}`)
+      )).join("\n")
+    ));
+    expect(authoredAttributes).not.toContain("runtime-host-");
   }
+  return { localRuntimeFactIdsBySide, runtimeBoxCounts };
 }
 
 async function assertReviewAcceptPersistence({
@@ -678,11 +819,6 @@ ${REVIEW_MASK_UNION_BEFORE}
       <p data-review-anchor-only style="line-height:48px">稳定开头。<br>稳定中段。<br>只删除这句定位文字。稳定结尾。</p>
       <div style="height:360px" aria-hidden="true"></div>
     </section>
-    <section data-review-runtime-snapshot>
-      <h2>运行态 Snapshot</h2>
-      <canvas id="review-runtime-snapshot-canvas" width="320" height="96"></canvas>
-      <div id="review-runtime-snapshot-host" data-runtime-snapshot-host></div>
-    </section>
     <div class="tabs" role="tablist" aria-label="Review interaction fixture">
       <button type="button" data-review-tab-button data-p="review-p1">审阅标签一</button>
       <button type="button" data-review-tab-button data-p="review-p2">审阅标签二</button>
@@ -691,6 +827,12 @@ ${REVIEW_MASK_UNION_BEFORE}
     <button type="button" id="review-counter" data-review-counter>交互计数 <span>0</span></button>
     <input id="review-sync-input" aria-label="审阅同步输入" value="">
     <div class="panel" id="review-p1" data-review-tab-panel="one">
+      <section data-review-runtime-snapshot>
+        <h2>运行态 Snapshot</h2>
+        <canvas id="review-runtime-snapshot-canvas" width="320" height="96"></canvas>
+        <canvas id="review-runtime-static-box-canvas" width="120" height="36" style="border: 1px solid #9aaec2"></canvas>
+        <div id="review-runtime-snapshot-host" data-runtime-snapshot-host></div>
+      </section>
       <article id="review-tab-one-overview"><h2>标签一概览</h2><p>第一块完整内容</p></article>
       <article id="review-tab-one-detail"><h2>标签一详情</h2><p>第二块完整内容</p></article>
     </div>
@@ -746,6 +888,10 @@ ${REVIEW_MASK_UNION_BEFORE}
       runtimeSnapshotContext.fillRect(0, 0, 320, 96);
       runtimeSnapshotContext.fillStyle = runtimeSnapshotColor;
       runtimeSnapshotContext.fillRect(24, 20, runtimeSnapshotWidth, 56);
+      const runtimeStaticBoxCanvas = document.querySelector("#review-runtime-static-box-canvas");
+      const runtimeStaticBoxContext = runtimeStaticBoxCanvas.getContext("2d");
+      runtimeStaticBoxContext.fillStyle = runtimeSnapshotColor;
+      runtimeStaticBoxContext.fillRect(8, 8, runtimeSnapshotVariant === "before" ? 48 : 88, 20);
       const runtimeSnapshotHost = document.querySelector("#review-runtime-snapshot-host");
       runtimeSnapshotHost.innerHTML = '<svg viewBox="0 0 320 96" width="320" height="96" aria-label="运行态 SVG"><rect x="24" y="20" width="' + runtimeSnapshotWidth + '" height="56" fill="' + runtimeSnapshotColor + '"></rect></svg>';
       document.documentElement.dataset.reviewFixtureReady = "true";
@@ -806,6 +952,10 @@ ${REVIEW_MASK_UNION_BEFORE}
         .replace(
           'const runtimeSnapshotVariant = "before";',
           'const runtimeSnapshotVariant = "after";',
+        )
+        .replace(
+          'style="border: 1px solid #9aaec2"',
+          'style="border: 3px solid #6d5ce7"',
         )
         .replace(
           "      <div data-review-regression-summary>",
@@ -971,7 +1121,11 @@ ${REVIEW_MASK_UNION_BEFORE}
       .toHaveAttribute("data-review-fixture-ready", "true");
     await expect(afterReviewFrame.locator("html"))
       .toHaveAttribute("data-review-fixture-ready", "true");
-    await assertRuntimeVisualSupplement(beforeReviewFrame, afterReviewFrame);
+    const initialRuntimeVisualSupplement = await assertRuntimeVisualSupplement(
+      launched.page,
+      beforeReviewFrame,
+      afterReviewFrame,
+    );
     await afterReviewFrame.locator("html").evaluate(() => {
       document.documentElement.dataset.reviewPostLoadNavigationAttempted = "true";
       location.replace(
@@ -1089,6 +1243,9 @@ ${REVIEW_MASK_UNION_BEFORE}
       [beforeReviewFrame, afterReviewFrame].map((frame) => frame.locator("html").evaluate(() => {
         const filter = document.documentElement.dataset.pagerootReviewFilter || "all";
         return [...document.querySelectorAll("[data-pageroot-review-overlay-box]")]
+          .filter((box) => !String(
+            box.getAttribute("data-pageroot-review-fact") || "",
+          ).startsWith("style:runtime-projection-"))
           .every((box) => {
             const changeId = box.getAttribute("data-pageroot-review-overlay-box");
             return [...document.querySelectorAll(
@@ -1113,6 +1270,29 @@ ${REVIEW_MASK_UNION_BEFORE}
           });
       })),
     ).then((states) => states.every(Boolean))).toBe(true);
+    for (const [sideIndex, frame] of [beforeReviewFrame, afterReviewFrame].entries()) {
+      for (const factId of initialRuntimeVisualSupplement.localRuntimeFactIdsBySide[sideIndex]) {
+        await expect(frame.locator(
+          `[data-pageroot-review-overlay-box][data-pageroot-review-fact="${factId}"]`,
+        )).toHaveCount(0);
+      }
+    }
+    await beforeReviewFrame.getByRole("button", { name: "审阅标签一" })
+      .evaluate((button) => button.click());
+    await expect(beforeReviewFrame.locator('[data-review-tab-panel="one"]'))
+      .toBeVisible();
+    await expect(afterReviewFrame.locator('[data-review-tab-panel="one"]'))
+      .toBeVisible();
+    await expect.poll(async () => Promise.all(
+      [beforeReviewFrame, afterReviewFrame].map((frame) => frame.locator("html").evaluate(() => (
+        !document.documentElement.hasAttribute("data-pageroot-review-transitioning")
+      ))),
+    ).then((states) => states.every(Boolean))).toBe(true);
+    await assertRuntimeVisualSupplement(
+      launched.page,
+      beforeReviewFrame,
+      afterReviewFrame,
+    );
     await expect(beforeReviewFrame.locator("#indexed-review-panel-one")).toBeVisible();
     await expect(afterReviewFrame.locator("#indexed-review-panel-one")).toBeVisible();
     await afterReviewFrame.getByRole("button", { name: "抖音搜盘表现" })

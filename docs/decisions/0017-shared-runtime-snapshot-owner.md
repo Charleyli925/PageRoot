@@ -36,8 +36,11 @@ second consumer and presentation protocol without changing that contract.
   Blob URL, owner request or projection attributes. Authored inline SVG remains
   a source-backed non-editable root; runtime-only Canvas/SVG stays in Preview.
 - Review remains static-first and requests one before/after pair after both
-  frames are ready. It may add an opaque marker only for a verified difference;
-  unavailable, malformed, timed-out or late data is a static-only result.
+  frames are ready. It may add an opaque exact-host fact only for a verified
+  difference. Candidate results travel from the trusted parent to the first-
+  bootstrap-bound `Element` over a separate challenged private port; runtime
+  facts remain an additive in-memory map, and outline IDs never supply geometry.
+  Unavailable, malformed, timed-out or late data is a static-only result.
 
 ## Consequences
 

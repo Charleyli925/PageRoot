@@ -38,7 +38,12 @@ state machine without changing its source authority.
   `{ key, state, PNG bytes/hash/size }` snapshot. Trusted renderer memory
   revalidates PNG structure, dimensions, hash and page budgets before comparing
   one before/after pair. Only a completed captured pair with different PNG
-  presentation can add one opaque style marker to an existing static outline.
+  presentation can add one opaque exact-host style fact while the existing
+  outline remains navigation-only. The first managed bootstrap binds the
+  candidate key to the original per-side `Element`; a separate challenged,
+  session/side/source-SHA-fenced private port adds that fact to an in-memory
+  runtime map which is unioned with static facts. No runtime DOM attribute or
+  outline geometry fallback is permitted.
 - Capture failure, late completion, malformed data, unavailable hosts and
   missing desktop capability are silent static-only outcomes. There is no
   second fresh pair, confirmation coordinator, runtime status UI, runtime cache

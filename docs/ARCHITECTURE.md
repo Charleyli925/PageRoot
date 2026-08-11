@@ -139,11 +139,21 @@ Comments + frozen input
   isolated world. It collects one rect pass and at most one bounded PNG per
   host, with main-owned deadline, navigation/permission denial and mandatory
   cleanup. Renderer memory revalidates PNG bytes/hash/dimensions and compares
-  one before/after pair. A difference may add an opaque style marker to the
-  existing outline; unavailable, late or malformed evidence silently leaves
-  static Review unchanged. Candidate bindings, target references and PNG bytes
-  never enter review HTML, bootstrap code, page messages or persistence. There
-  is no confirmation coordinator or second fresh pair.
+  one before/after pair. A difference emits one opaque `{candidateKey,
+  changeId}` result per changed source host; outline IDs remain navigation and
+  summary metadata, never geometry authority. For each side, the analyzer puts
+  the exact source-host path and complete narrow fingerprint only in the first
+  parser-blocking bootstrap response. That bootstrap captures the original
+  `Element` before authored scripts, accepts changed keys only through a
+  separately challenged, session/side/source-SHA-fenced private port, and adds
+  disposable box-style facts in an in-memory `Map<Element, facts[]>`. Static
+  serialized facts and runtime facts are unioned during projection; an empty,
+  invalid, late or unavailable runtime result cannot erase static facts.
+  Candidate keys/bindings are absent from authored HTML, DOM attributes,
+  ordinary window messages and every later bootstrap response; TargetRefs and
+  PNG bytes never enter either review frame. Replaced, disconnected or
+  fingerprint-drifted elements lose only their runtime fact, with no outline
+  fallback. There is no confirmation coordinator or second fresh pair.
 
   Frozen comments use a separate private locator capability. For every
   source-resolved before target the analyzer keeps an opaque initial-bootstrap
@@ -244,8 +254,8 @@ they do not import application services.
 | Typed, per-element review projection fact normalization and filtering | `app/lib/review-projection-facts.js` |
 | Review-specific runtime-snapshot comparison and marker merge | `app/lib/review-runtime-visual.js` |
 | Review runtime-capture migration interface and capture identity | `app/workbench/review-runtime-capture-adapter.ts` |
-| Formal AI review analysis, paired runtime mapping, global mask and overlay projection | `app/workbench/review-document.ts` |
-| Formal AI review composition and isolated-frame coordination | `app/workbench/AiReviewWorkspace.tsx` |
+| Formal AI review analysis, first-bootstrap exact-element binding, additive static/runtime fact union, global mask and overlay projection | `app/workbench/review-document.ts` |
+| Formal AI review composition, private runtime-projection port lifecycle and isolated-frame coordination | `app/workbench/AiReviewWorkspace.tsx` |
 
 The V2 source-fidelity path remains a protected core: `SourceIndex`,
 `TargetResolver`, `editable-island`, direct-text-node normalization, `IslandEditingController`,

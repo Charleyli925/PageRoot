@@ -222,14 +222,22 @@ world. A source-empty host must contain visible Canvas/SVG paint. One rect pass
 and at most one `capturePage` PNG per host are bounded by the shared contract;
 the owner validates PNG shape, and trusted renderer memory validates bytes,
 dimensions, SHA-256 and aggregate budgets. Raw DOM/node handles never cross the
-owner boundary, and no candidate binding or PNG enters authored review HTML,
-bootstrap code or page messaging.
+owner boundary, and no TargetRef or PNG enters either review frame.
 
 The one before/after snapshot pair is compared once. Only captured snapshots
-with different PNG presentation can add an opaque `changeId`/`outlineId` style
-marker. A missing desktop API, unmapped host, malformed envelope, timeout,
-cancellation or late result is a silent static-only outcome. There is no second
-fresh pair, confirmation coordinator, runtime UI or Review cache. Edit does
+with different PNG presentation emit opaque `{candidateKey, changeId}` facts.
+The candidate key maps back to an exact per-side source `Element` captured by
+the first parser-blocking bootstrap from a path plus complete narrow
+fingerprint. The trusted parent transfers the result through a distinct random-
+challenge private port fenced by contract version, session, side and full
+source SHA. Candidate keys/bindings never enter authored HTML, DOM attributes,
+ordinary window messages or later bootstrap reads. The bootstrap stores runtime
+facts only in a disposable `Map<Element, facts[]>` and unions them with static
+serialized facts; outline IDs stay navigation-only. Replacement, disconnect or
+fingerprint drift removes that runtime fact without outline fallback. A missing
+desktop API, unmapped host, malformed envelope, timeout, cancellation or late
+result is a silent static-only outcome. There is no second fresh pair,
+confirmation coordinator, runtime UI or Review cache. Edit does
 not invoke the resolver or owner and has no snapshot state.
 
 For each Review side and active filter, overlay frames and context masking

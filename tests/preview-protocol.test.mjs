@@ -94,21 +94,33 @@ test("private preview bootstrap bytes are consumed before authored fetches", asy
       ` src="${PREVIEW_BOOTSTRAP_PATH}"></script>`,
       "<main>public preview bytes</main>",
     ].join(""),
-    bootstrapJavaScript: "const privateBinding = 'runtime-host-1';",
+    bootstrapJavaScript: [
+      "const reviewCommentInitialBindings = ['element:1:1:div'];",
+      "const runtimeProjectionInitialBindings = ['runtime-host-1'];",
+    ].join("\n"),
     bootstrapFallbackJavaScript: "const publicBootstrap = true;",
   });
   const documentResponse = await controller.handleRequest(new Request(session.url));
   const documentHtml = await documentResponse.text();
-  assert.doesNotMatch(documentHtml, /privateBinding|runtime-host-1/u);
+  assert.doesNotMatch(
+    documentHtml,
+    /reviewCommentInitialBindings|runtimeProjectionInitialBindings|runtime-host-1/u,
+  );
 
   const bootstrapUrl = `pageroot-preview://${session.sessionId}${PREVIEW_BOOTSTRAP_PATH}`;
   const firstBootstrap = await controller.handleRequest(new Request(bootstrapUrl));
-  assert.match(await firstBootstrap.text(), /privateBinding/u);
+  const firstBootstrapSource = await firstBootstrap.text();
+  assert.match(firstBootstrapSource, /reviewCommentInitialBindings/u);
+  assert.match(firstBootstrapSource, /runtimeProjectionInitialBindings/u);
+  assert.match(firstBootstrapSource, /runtime-host-1/u);
 
   const laterBootstrap = await controller.handleRequest(new Request(bootstrapUrl));
   const laterBootstrapSource = await laterBootstrap.text();
   assert.match(laterBootstrapSource, /publicBootstrap/u);
-  assert.doesNotMatch(laterBootstrapSource, /privateBinding|runtime-host-1/u);
+  assert.doesNotMatch(
+    laterBootstrapSource,
+    /reviewCommentInitialBindings|runtimeProjectionInitialBindings|runtime-host-1/u,
+  );
 
   const headBootstrap = await controller.handleRequest(new Request(bootstrapUrl, {
     method: "HEAD",

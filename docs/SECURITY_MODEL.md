@@ -151,7 +151,14 @@ and refresh/CSP meta directives are removed only from the disposable review copy
 so they cannot navigate the frame or suppress the trusted review bootstrap.
 Runtime-chart evidence is enabled only through the managed desktop owner.
 The authored review iframe remains presentation-only: it has no runtime capture
-request, candidate binding, screenshot result, or runtime `MessagePort`.
+request, screenshot result or host capability. A parser-blocking managed
+bootstrap may hold exact-element runtime bindings and one private projection
+`MessagePort` in closure. The port is a separate namespace and lifecycle from
+the before-only comment port, is transferred only after a random challenge is
+consumed by the earliest capture listener, and accepts only the current contract
+version, session, side and full source SHA. It carries `{candidateKey, changeId}`
+facts, never PNGs or TargetRefs. Candidate keys/bindings are absent from authored
+HTML, DOM attributes, ordinary window messages and later bootstrap fetches.
 For every capture, Electron main creates a fresh non-persistent partition and
 hidden sandboxed window that can load only its expected `pageroot-preview:` URL.
 Permissions, navigation, popups, downloads, webviews and all non-preview
@@ -165,10 +172,11 @@ the immutable Version or the activation transaction, and runtime interaction
 state is never serialized. The renderer accepts a snapshot result only when its
 envelope matches contract version, capture session, side and full source SHA.
 Candidates come only from the frozen `SourceHostResolver`: direct Canvas/SVG
-roots or source-empty stable hosts. Candidate bindings and TargetRefs remain in
-trusted renderer memory; they never enter review HTML, bootstrap bytes,
-attributes or page messages. An omitted, malformed, late or failed owner result
-leaves static Review authoritative.
+roots or source-empty stable hosts. TargetRefs remain in trusted renderer
+memory. The first private bootstrap response alone contains a path plus complete
+narrow fingerprint for each accepted exact host; the managed preview consumes
+that response once and serves an unbound fallback thereafter. An omitted,
+malformed, late or failed owner result leaves static Review authoritative.
 
 Before scripts run, the owner validates the source path/tag/identity. Its
 isolated-world program then confirms that same runtime host and, for a stable
@@ -176,6 +184,13 @@ container, visible Canvas/SVG paint. It performs one rect pass and at most one
 bounded PNG capture per host. Renderer memory revalidates PNG bytes, dimensions,
 hash and aggregate limits. The owner deadline is scheduled in main, so
 page-controlled promises or timers cannot extend it.
+
+Runtime projection never queries an outline for geometry and never writes a
+runtime marker or fact attribute to the source DOM. The bootstrap retains the
+original bound `Element` and a disposable `Map<Element, facts[]>`; a replaced,
+disconnected or fingerprint-drifted target contributes no runtime rectangle.
+Static facts remain independently complete and are not removed by empty,
+invalid or failed runtime delivery.
 
 Comment location remains separately private. Each source-resolved local target
 may use an opaque initial-bootstrap binding: an element path plus a narrow
