@@ -408,6 +408,38 @@ test("browser-memory attachments never invoke Bridge storage or deletion", async
   assert.equal(bridgeAttachmentCalls, 0);
 });
 
+test("disabled or unknown attachment persistence never registers or writes through Bridge", async () => {
+  let bridgeAttachmentCalls = 0;
+  const harness = createHarness({
+    registered: false,
+    bridge: {
+      async saveAttachment() {
+        bridgeAttachmentCalls += 1;
+        throw new Error("disabled persistence must not write through Bridge");
+      },
+    },
+  });
+  harness.commentSession.update({
+    composerCommentId: "comment_disabled_persistence",
+    composerTarget: target(),
+  });
+
+  for (const persistence of ["none", "unknown"]) {
+    const outcome = await harness.workflow.uploadAttachments({
+      files: [{ name: "disabled.png", type: "image/png", size: 8 }],
+      target: { kind: "composer", commentId: "comment_disabled_persistence" },
+      source: "file-picker",
+      persistence,
+    });
+    assert.equal(outcome.status, "blocked");
+    assert.equal(outcome.code, "ATTACHMENT_PERSISTENCE_UNAVAILABLE");
+  }
+
+  assert.equal(harness.registrations, 0);
+  assert.equal(bridgeAttachmentCalls, 0);
+  assert.equal(harness.commentSession.composerAttachments.length, 0);
+});
+
 test("a stale upload result is compensated against its captured project identity", async () => {
   const write = deferred();
   const started = deferred();

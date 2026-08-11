@@ -669,7 +669,15 @@ export class CommentWorkflow {
     }
     const acceptedFiles = Array.isArray(files) ? files : [];
     if (acceptedFiles.length === 0) return succeeded({ attachments: [], failures: [] });
-    const mode = persistence === "memory" ? "memory" : "bridge";
+    const mode = persistence === "memory" || persistence === "bridge"
+      ? persistence
+      : null;
+    if (!mode) {
+      return blocked(
+        "ATTACHMENT_PERSISTENCE_UNAVAILABLE",
+        "当前运行环境不支持保存评论附件。",
+      );
+    }
     let context = copyContext(this.#projectSession.context);
     if (mode === "bridge") {
       const sourcePath = this.#projectSession.sourcePath;
