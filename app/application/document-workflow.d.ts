@@ -91,6 +91,7 @@ export class DocumentWorkflow {
   reloadAuthority(input?: {
     context?: ProjectContext;
     acceptExternalConflict?: boolean;
+    externalAuthorityAccepted?: boolean;
   }): Promise<DocumentWorkflowOutcome<Record<string, unknown>>>;
   ensureCurrentCanvas(input?: {
     context?: ProjectContext;

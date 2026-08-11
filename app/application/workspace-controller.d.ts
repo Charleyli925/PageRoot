@@ -183,6 +183,7 @@ export class WorkspaceController {
   reloadDocumentAuthority(input?: {
     context?: ProjectContext;
     acceptExternalConflict?: boolean;
+    externalAuthorityAccepted?: boolean;
   }): Promise<DocumentWorkflowOutcome<Record<string, unknown>>>;
   ensureDocumentCanvas(input?: {
     context?: ProjectContext;

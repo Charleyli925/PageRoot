@@ -128,6 +128,7 @@ function createHarness({
   html = "<!doctype html><html><body><p>one</p></body></html>",
   bridge = {},
   codecOverrides = {},
+  canvasOverrides = {},
   registered = true,
   ensureRegistered,
 } = {}) {
@@ -163,6 +164,7 @@ function createHarness({
     adoptHistorySource(htmlValue, target, selection) {
       this.history.push({ html: htmlValue, target, selection });
     },
+    ...canvasOverrides,
   };
   const client = {
     async autosave() {
@@ -505,6 +507,107 @@ test("DocumentWorkflow preserves recovery and fails closed when autosave acknowl
   assert.equal(harness.documentSession.persistState, "failed");
   assert.equal(harness.documentSession.pendingWrite?.html, after);
   assert.equal(harness.recoveryStore.values.size, 2);
+});
+
+test("DocumentWorkflow keeps an externally accepted source fail-closed when its canvas cannot render", async () => {
+  const before = "<!doctype html><html><body><p>one</p></body></html>";
+  const external = before.replace("one", "external");
+  const conflictResolutions = [];
+  const events = [];
+  const harness = createHarness({
+    html: before,
+    canvasOverrides: {
+      async verifyRendered() {
+        throw new Error("canvas did not render external source");
+      },
+    },
+    bridge: {
+      async resolveConflict(request) {
+        conflictResolutions.push(request);
+        return { ok: true };
+      },
+      async source() {
+        return {
+          projectId: PROJECT_ID,
+          documentId: DOCUMENT_ID,
+          sourcePath: SOURCE_PATH,
+          content: external,
+          sha256: sha256(external),
+          lastModifiedAt: "2026-08-11T00:00:01.000Z",
+        };
+      },
+    },
+  });
+  harness.workflow.subscribeEvents((event) => events.push(event));
+
+  const outcome = await harness.workflow.reloadAuthority({
+    context: harness.context,
+    acceptExternalConflict: true,
+  });
+
+  assert.equal(outcome.status, "rejected");
+  assert.equal(outcome.code, "SOURCE_RELOAD_REJECTED");
+  assert.deepEqual(conflictResolutions, [{
+    ...harness.context,
+    action: "keep-external",
+  }]);
+  assert.equal(harness.documentSession.html, external);
+  assert.equal(harness.documentSession.sourceSha256, sha256(external));
+  assert.equal(harness.documentSession.pendingWrite, null);
+  assert.equal(harness.documentSession.persistState, "failed");
+  assert.equal(
+    harness.documentSession.persistError,
+    "外部 HTML 已被保留，但编辑画布未能安全显示该版本。当前项目已锁定，请重试读取或重新打开文件。",
+  );
+  const failure = events.find((event) => event.type === "document-authority-reload-failed");
+  assert.equal(failure?.externalAccepted, true);
+  assert.equal(failure?.fatal, true);
+  assert.equal(failure?.code, "SOURCE_RELOAD_REJECTED");
+});
+
+test("DocumentWorkflow preserves a prior external acceptance when reloading its authority", async () => {
+  const before = "<!doctype html><html><body><p>one</p></body></html>";
+  const external = before.replace("one", "external");
+  let conflictResolutions = 0;
+  const events = [];
+  const harness = createHarness({
+    html: before,
+    canvasOverrides: {
+      async verifyRendered() {
+        throw new Error("canvas did not render external source");
+      },
+    },
+    bridge: {
+      async resolveConflict() {
+        conflictResolutions += 1;
+        return { ok: true };
+      },
+      async source() {
+        return {
+          projectId: PROJECT_ID,
+          documentId: DOCUMENT_ID,
+          sourcePath: SOURCE_PATH,
+          content: external,
+          sha256: sha256(external),
+        };
+      },
+    },
+  });
+  harness.workflow.subscribeEvents((event) => events.push(event));
+
+  const outcome = await harness.workflow.reloadAuthority({
+    context: harness.context,
+    externalAuthorityAccepted: true,
+  });
+
+  assert.equal(outcome.status, "rejected");
+  assert.equal(conflictResolutions, 0);
+  assert.equal(harness.documentSession.html, external);
+  assert.equal(harness.documentSession.persistState, "failed");
+  assert.equal(
+    events.find((event) => event.type === "document-authority-reload-failed")?.fatal,
+    true,
+  );
 });
 
 test("DocumentWorkflow reconciles an unknown autosave only after reading matching authority", async () => {

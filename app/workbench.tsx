@@ -979,7 +979,10 @@ export default function Workbench() {
         });
       }
       if (
-        documentEvent.type === "document-persistence-failed"
+        [
+          "document-persistence-failed",
+          "document-authority-reload-failed",
+        ].includes(documentEvent.type)
         && documentEvent.fatal
       ) {
         const message = String(documentEvent.message || "源文件进入待复核状态。");
@@ -5622,13 +5625,20 @@ export default function Workbench() {
     if (navigationOperationRef.current !== operationId) return;
     viewTransitioningRef.current = false;
     setViewTransitioning(false);
-    window.requestAnimationFrame(() => editorRef.current?.unlockNow?.());
+    window.requestAnimationFrame(() => {
+      if (!projectLoadErrorRef.current) editorRef.current?.unlockNow?.();
+    });
   }, []);
 
-  const reloadCurrentSource = useCallback(async (
+  const reloadCurrentSource = useCallback(async ({
     skipConfirmation = false,
     fromDeferred = false,
-  ) => {
+    externalAuthorityAccepted = false,
+  }: {
+    skipConfirmation?: boolean;
+    fromDeferred?: boolean;
+    externalAuthorityAccepted?: boolean;
+  } = {}) => {
     const context = captureProjectContext();
     if (!context || projectLoadErrorRef.current || !workspaceController) return;
     if (requiredWorkspaceController(workspaceController).hasDocumentHistoryAction) return;
@@ -5659,7 +5669,8 @@ export default function Workbench() {
       const outcome = await requiredWorkspaceController(workspaceController)
         .reloadDocumentAuthority({
           context,
-          acceptExternalConflict: persistState === "conflict",
+          acceptExternalConflict: persistState === "conflict" && !externalAuthorityAccepted,
+          externalAuthorityAccepted,
         });
       if (
         outcome.status === "stale"
@@ -5706,7 +5717,7 @@ export default function Workbench() {
   ]);
   useEffect(() => {
     deferredEditorReplayRef.current.reloadCurrentSource = () => {
-      void reloadCurrentSource(false, true);
+      void reloadCurrentSource({ fromDeferred: true });
     };
   }, [reloadCurrentSource]);
 
@@ -8360,9 +8371,11 @@ export default function Workbench() {
           runSessionRef.current.removeRun(run);
         }
         if (context && isCurrentProjectContext(context)) {
-          editorRef.current?.unlockNow?.();
           runSessionRef.current.clearActiveRun();
-          await reloadCurrentSource(true);
+          await reloadCurrentSource({
+            skipConfirmation: true,
+            externalAuthorityAccepted: true,
+          });
         } else {
           setToast({
             title: "已保留外部 HTML",

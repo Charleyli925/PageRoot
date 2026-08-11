@@ -421,7 +421,11 @@ export class DocumentWorkflow {
     return operation;
   }
 
-  async reloadAuthority({ context, acceptExternalConflict = false } = {}) {
+  async reloadAuthority({
+    context,
+    acceptExternalConflict = false,
+    externalAuthorityAccepted = false,
+  } = {}) {
     const activeContext = copyContext(context) || this.#projectSession.context;
     if (!activeContext) {
       return blocked("DOCUMENT_CONTEXT_REQUIRED", "当前页面尚未完成项目身份初始化。");
@@ -430,9 +434,9 @@ export class DocumentWorkflow {
     const previousDocument = this.#documentSession.snapshot;
     const previousPendingWrite = this.#documentSession.pendingWrite;
     const previousVersionView = this.#versionSession.captureView();
-    let externalAccepted = false;
+    let externalAccepted = Boolean(externalAuthorityAccepted);
     try {
-      if (acceptExternalConflict) {
+      if (acceptExternalConflict && !externalAccepted) {
         try {
           await this.#bridgeClient.resolveConflict({
             ...activeContext,
@@ -508,12 +512,22 @@ export class DocumentWorkflow {
         }
       }
       if (!this.#isCurrent(activeContext)) return stale(activeContext);
-      const message = this.#codecs.errorMessage(cause, "请稍后重试，源文件没有被覆盖。");
+      const message = externalAccepted
+        ? "外部 HTML 已被保留，但编辑画布未能安全显示该版本。当前项目已锁定，请重试读取或重新打开文件。"
+        : this.#codecs.errorMessage(cause, "请稍后重试，源文件没有被覆盖。");
+      if (externalAccepted) {
+        // Once the user keeps the external source, the previous canvas is no
+        // longer persistence authority.  A failed render must remain closed
+        // until a later project read verifies the external bytes.
+        this.#documentSession.setPersistence({ state: "failed", error: message });
+      }
       this.#emit({
         type: "document-authority-reload-failed",
         context: activeContext,
+        code: sourceErrorCode(cause, "SOURCE_RELOAD_REJECTED"),
         message,
         externalAccepted,
+        fatal: externalAccepted,
       });
       return this.#outcomeFromCause(
         this.#nextOperationId("reload"),
