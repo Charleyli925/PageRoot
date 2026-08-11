@@ -1,6 +1,6 @@
 # Workbench 应用编排收口执行计划
 
-- 状态：**PR-1 已合并至 `main`；PR-2 已在隔离分支完成并通过本地验收，待建立 Draft PR（未 Ready、未合并）；PR-3 至 PR-7 尚未授权**
+- 状态：**PR-1 已合并至 `main`；PR-2 Draft PR #150 已建立（未 Ready、未合并）；PR-3 至 PR-7 尚未授权**
 - 规划基线：`main@37bba7779b27c0a42a52f98ec84a377b964bf4eb`
 - 基线 Tree：`0e074849493e5f9db9e89621e0a1c1a4910b8fa1`
 - 基线日期：2026-08-11
@@ -750,8 +750,8 @@ owner 留在 React。
   reconciliation、unknown history action 的同 actionId 重放。
 - 已通过 8.5 的指定 Node 集、`npm run test:bridge`、`npm run architecture:check`、
   `npm run typecheck`、`npm run task:finish`（79 Node、28 Browser、8 Electron、2 AI
-  smoke），以及 `npm run test:electron:full` 19/19。待提交、推送并建立 Draft PR；
-  不进入 Ready、合并、版本或发布流程。
+  smoke），以及 `npm run test:electron:full` 19/19。Draft PR #150 已建立；不进入
+  Ready、合并、版本或发布流程。
 
 ## 9. PR-3：Project Hydration、Switch、External Open 与 Close
 
