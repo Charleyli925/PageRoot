@@ -1,4 +1,5 @@
 import { isBridgeRequestError } from "./bridge-client.js";
+import { DocumentWorkflow } from "./document-workflow.js";
 import { createWorkspaceControllerCodecs } from "./workspace-controller-codecs.js";
 
 function copyLocator({
@@ -111,6 +112,8 @@ export class WorkspaceController {
   #recoveryPort;
   #canvasPort;
   #clock;
+  #documentWorkflow = null;
+  #documentWorkflowUnsubscribe = null;
   #snapshot = registrationSnapshot();
   #listeners = new Set();
   #eventListeners = new Set();
@@ -128,6 +131,7 @@ export class WorkspaceController {
     sourceHistorySession,
     codecs,
     ports = {},
+    documentWorkflow = null,
     clock,
   } = {}) {
     if (!bridgeClient || typeof bridgeClient.ensureProject !== "function") {
@@ -178,6 +182,33 @@ export class WorkspaceController {
       );
     }
     this.#clock = clock;
+    if (documentWorkflow) {
+      this.#documentWorkflow = new DocumentWorkflow({
+        bridgeClient,
+        ensureRegistered: (input) => this.ensureRegistered(input),
+        projectSession,
+        documentSession,
+        commentSession,
+        versionSession,
+        sourceHistorySession,
+        codecs: documentWorkflow.codecs,
+        ports: {
+          hash: this.#hashPort,
+          recoveryStore: documentWorkflow.recoveryStore,
+          canvas: {
+            invalidateRenderAcks: this.#canvasPort.invalidateRenderAcks,
+            verifyRendered: documentWorkflow.canvas?.verifyRendered,
+            freeze: documentWorkflow.canvas?.freeze,
+            adoptHistorySource: documentWorkflow.canvas?.adoptHistorySource,
+          },
+        },
+        scheduler: documentWorkflow.scheduler,
+        clock,
+      });
+      this.#documentWorkflowUnsubscribe = this.#documentWorkflow.subscribeEvents(
+        (event) => this.#emitEvent(event),
+      );
+    }
   }
 
   getSnapshot() {
@@ -207,8 +238,83 @@ export class WorkspaceController {
 
   dispose() {
     this.#disposed = true;
+    this.#documentWorkflowUnsubscribe?.();
+    this.#documentWorkflowUnsubscribe = null;
+    this.#documentWorkflow?.dispose();
+    this.#documentWorkflow = null;
     this.#listeners.clear();
     this.#eventListeners.clear();
+  }
+
+  get hasDocumentHistoryAction() {
+    return Boolean(this.#documentWorkflow?.hasHistoryAction);
+  }
+
+  enqueueDocumentEdit(input) {
+    return this.#requireDocumentWorkflow().enqueueEdit(input);
+  }
+
+  flushDocument(input) {
+    return this.#requireDocumentWorkflow().flush(input);
+  }
+
+  performDocumentHistoryAction(input) {
+    return this.#requireDocumentWorkflow().performHistoryAction(input);
+  }
+
+  reloadDocumentAuthority(input) {
+    return this.#requireDocumentWorkflow().reloadAuthority(input);
+  }
+
+  ensureDocumentCanvas(input) {
+    return this.#requireDocumentWorkflow().ensureCurrentCanvas(input);
+  }
+
+  reconcileDocumentBoundary(input) {
+    return this.#requireDocumentWorkflow().reconcileBoundary(input);
+  }
+
+  recoverDocumentAutosave(input) {
+    return this.#requireDocumentWorkflow().recoverAutosave(input);
+  }
+
+  adoptDocumentConflictCandidate(input) {
+    return this.#requireDocumentWorkflow().adoptConflictCandidate(input);
+  }
+
+  resetDocumentWorkflow(input) {
+    return this.#requireDocumentWorkflow().resetForProjectTransition(input);
+  }
+
+  clearDocumentRecovery(context) {
+    return this.#requireDocumentWorkflow().clearRecovery(context);
+  }
+
+  clearDocumentAutosaveTimer() {
+    return this.#requireDocumentWorkflow().clearAutosaveTimer();
+  }
+
+  clearDocumentAudit() {
+    return this.#requireDocumentWorkflow().clearAudit();
+  }
+
+  replaceDocumentRecoveryIdentity(identity) {
+    return this.#requireDocumentWorkflow().replaceRecoveryIdentity(identity);
+  }
+
+  activateDocumentSourceHistory(input) {
+    return this.#requireDocumentWorkflow().activateSourceHistory(input);
+  }
+
+  waitForDocumentHistoryAction() {
+    return this.#requireDocumentWorkflow().waitForHistoryAction();
+  }
+
+  #requireDocumentWorkflow() {
+    if (!this.#documentWorkflow) {
+      throw new Error("文档持久化工作流尚未完成组合。");
+    }
+    return this.#documentWorkflow;
   }
 
   ensureRegistered({
@@ -454,9 +560,11 @@ export class WorkspaceController {
       });
       if (!registeredContext) return stale(identity);
 
-      this.#recoveryPort.replace(
-        this.#codecs.recoveryIdentityFromRecord(payload.recoveryIdentity),
+      const recoveryIdentity = this.#codecs.recoveryIdentityFromRecord(
+        payload.recoveryIdentity,
       );
+      this.#recoveryPort.replace(recoveryIdentity);
+      this.#documentWorkflow?.replaceRecoveryIdentity(recoveryIdentity);
       if (shouldAdoptCanonicalSource) {
         this.#documentSession.publishAuthority({
           html: nextDocumentHtml,

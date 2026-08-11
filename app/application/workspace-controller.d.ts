@@ -1,6 +1,12 @@
 import type { BridgeClient } from "./bridge-client.js";
+import type {
+  DocumentWorkflowCanvasPort,
+  DocumentWorkflowOutcome,
+  DocumentWorkflowRecoveryStore,
+} from "./document-workflow.js";
+import type { DocumentWorkflowCodecs } from "./document-workflow-codecs.js";
 import type { CommentSession } from "./comment-session.js";
-import type { DocumentSession } from "./document-session.js";
+import type { DocumentSession, PersistedBoundaryResult } from "./document-session.js";
 import type { DraftSession } from "./draft-session.js";
 import type { ProjectContext, ProjectSession } from "./project-session.js";
 import type { SourceHistorySession } from "./source-history-session.js";
@@ -50,6 +56,22 @@ export type WorkspaceEvent =
   | Readonly<{
       type: "draft-authority-rebound";
       context: ProjectContext;
+    }>
+  | Readonly<{
+      type:
+        | "document-direct-edit-recorded"
+        | "document-edit-queued"
+        | "document-persisted"
+        | "document-persistence-failed"
+        | "document-authority-reloaded"
+        | "document-authority-reload-failed"
+        | "document-authority-repaired"
+        | "document-boundary-reconciled"
+        | "document-recovery-queued"
+        | "document-history-failed"
+        | "document-history-applied";
+      context?: ProjectContext;
+      [key: string]: unknown;
     }>;
 
 export type RegistrationInput = Readonly<{
@@ -90,7 +112,15 @@ export type WorkspaceControllerCodecs = Readonly<{
 }>;
 
 export type WorkspaceControllerConstruction = Readonly<{
-  bridgeClient: Pick<BridgeClient, "ensureProject" | "workspace">;
+  bridgeClient: Pick<
+    BridgeClient,
+    | "ensureProject"
+    | "workspace"
+    | "autosave"
+    | "source"
+    | "sourceHistoryAction"
+    | "resolveConflict"
+  >;
   projectSession: ProjectSession;
   documentSession: DocumentSession;
   commentSession: CommentSession;
@@ -102,6 +132,15 @@ export type WorkspaceControllerConstruction = Readonly<{
     hash: HashPort;
     recovery?: RecoveryPort;
     canvas?: CanvasAuthorityPort;
+  }>;
+  documentWorkflow?: Readonly<{
+    codecs: DocumentWorkflowCodecs;
+    recoveryStore: DocumentWorkflowRecoveryStore;
+    canvas?: Omit<DocumentWorkflowCanvasPort, "invalidateRenderAcks">;
+    scheduler?: Readonly<{
+      setTimeout(callback: () => void, delayMs: number): unknown;
+      clearTimeout(handle: unknown): void;
+    }>;
   }>;
   clock: ClockPort;
 }>;
@@ -128,5 +167,40 @@ export class WorkspaceController {
   ensureRegistered(
     input?: RegistrationInput,
   ): Promise<CommandOutcome<ProjectContext>>;
+  readonly hasDocumentHistoryAction: boolean;
+  enqueueDocumentEdit(input: Record<string, unknown>): DocumentWorkflowOutcome<{
+    revision: number;
+    queued: boolean;
+  }>;
+  flushDocument(input?: { throughRevision?: number }): Promise<DocumentWorkflowOutcome<{
+    revision: number;
+    idle?: boolean;
+  }>>;
+  performDocumentHistoryAction(input: {
+    direction: "undo" | "redo";
+    context?: ProjectContext;
+  }): Promise<DocumentWorkflowOutcome<Record<string, unknown>>>;
+  reloadDocumentAuthority(input?: {
+    context?: ProjectContext;
+    acceptExternalConflict?: boolean;
+  }): Promise<DocumentWorkflowOutcome<Record<string, unknown>>>;
+  ensureDocumentCanvas(input?: {
+    context?: ProjectContext;
+  }): Promise<DocumentWorkflowOutcome<Record<string, unknown>>>;
+  reconcileDocumentBoundary(input: Record<string, unknown>): Promise<DocumentWorkflowOutcome<PersistedBoundaryResult>>;
+  recoverDocumentAutosave(input: Record<string, unknown>): Promise<DocumentWorkflowOutcome<Record<string, unknown>>>;
+  adoptDocumentConflictCandidate(input: Record<string, unknown>): DocumentWorkflowOutcome<Record<string, unknown>>;
+  resetDocumentWorkflow(input?: Record<string, unknown>): void;
+  clearDocumentRecovery(context?: Partial<ProjectContext>): void;
+  clearDocumentAutosaveTimer(): void;
+  clearDocumentAudit(): void;
+  replaceDocumentRecoveryIdentity(identity: unknown): unknown;
+  activateDocumentSourceHistory(input: {
+    context: ProjectContext;
+    sourceSha256: string;
+    history: unknown;
+    preservePending?: boolean;
+  }): DocumentWorkflowOutcome<{ active: boolean }>;
+  waitForDocumentHistoryAction(): Promise<DocumentWorkflowOutcome<{ idle: boolean }>>;
   dispose(): void;
 }

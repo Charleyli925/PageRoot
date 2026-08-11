@@ -88,12 +88,12 @@ import {
 } from "../desktop/close-recovery.mjs";
 import {
   createRuntimeBridgeClient,
-  isBridgeRequestError,
 } from "./application/bridge-client.js";
 import {
   WorkspaceController,
   registrationContextFromOutcome,
 } from "./application/workspace-controller.js";
+import { createDocumentWorkflowCodecs } from "./application/document-workflow-codecs.js";
 import { createWorkspaceControllerCodecs } from "./application/workspace-controller-codecs.js";
 import {
   CommentSession,
@@ -268,7 +268,6 @@ import type {
   ProjectQoderHandoffState,
   QoderHandoffUiStatus,
   RecentProject,
-  RecoveryIdentity,
   StartupIssue,
   Toast,
   ToastAction,
@@ -324,7 +323,6 @@ type AcceptedProjectApplication = Readonly<{
   onFailure: (cause: unknown) => void;
 }>;
 
-const AUTOSAVE_DELAY_MS = 700;
 const bridgeClient = createRuntimeBridgeClient();
 const recoveryStore = createBrowserRecoveryStore();
 const PROJECT_RULES_AUTOSAVE_DELAY_MS = 700;
@@ -555,6 +553,7 @@ export default function Workbench() {
     }
     return { ok: true as const, html: frozen.html };
   }, []);
+  const fenceAndFreezeCurrentCanvasRef = useRef(fenceAndFreezeCurrentCanvas);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const attachmentInputRef = useRef<HTMLInputElement>(null);
   const attachmentInputTargetRef = useRef<{
@@ -568,7 +567,6 @@ export default function Workbench() {
   const commentsHeaderRef = useRef<HTMLElement>(null);
   const reviewStageRef = useRef<HTMLDivElement>(null);
   const commentCounter = useRef(1);
-  const changeCounter = useRef(1);
   const attachmentCounter = useRef(1);
   const focusedCommentIdRef = useRef<string | null>(null);
   const commentEditResumePendingRef = useRef<string | null>(null);
@@ -616,19 +614,25 @@ export default function Workbench() {
     bridgeClient,
     errorMessage: productErrorMessage,
   }));
-  const recoveryIdentityRef = useRef<RecoveryIdentity | null>(null);
+  const verifyCanvasRenderedRef = useRef<(
+    expectedHtml: string,
+    expectedSha256: string,
+    context?: ProjectContext,
+  ) => Promise<void>>(async () => {
+    throw new Error("画布核对尚未完成初始化。");
+  });
   const projectHydratingRef = useRef(false);
   const projectLoadErrorRef = useRef<string | null>(null);
   const viewTransitioningRef = useRef(false);
   const navigationOperationRef = useRef(0);
-  const historyActionPromiseRef = useRef<Promise<boolean> | null>(null);
-  const autosaveTimerRef = useRef<number | null>(null);
-  const auditPendingRef = useRef<DirectEditEvent[]>([]);
-  const auditInFlightKeysRef = useRef<Set<string>>(new Set());
   const attachmentUploadCountRef = useRef(0);
   const attachmentObjectUrlsRef = useRef<Map<string, string>>(new Map());
   const draftRecoverySequenceRef = useRef(0);
   const draftRecoveryOperationIdRef = useRef<string | null>(null);
+  const persistCurrentDraftRecoveryRef = useRef<(
+    nextComments?: CommentItem[],
+    nextEvents?: DirectEditEvent[],
+  ) => void>(() => {});
   const runSessionRef = useRef(new RunSession({
     sourcePath: WELCOME_PROJECT.sourcePath,
   }));
@@ -784,30 +788,54 @@ export default function Workbench() {
       }),
       ports: {
         hash: { sha256: browserSha256 },
-        recovery: {
-          replace: (identity) => {
-            recoveryIdentityRef.current = identity as RecoveryIdentity | null;
+        canvas: { invalidateRenderAcks: invalidateCanvasRenderAcks },
+      },
+      documentWorkflow: {
+        codecs: createDocumentWorkflowCodecs({
+          isRecord,
+          sameSourcePath: sameLocalSourcePath,
+          persistedChangeEvent,
+          recoveryIdentityFromRecord,
+          sourceHistoryOperationsFromRecord,
+          changesFromRecords: changesFromDraftRecords,
+          historyTextSelectionFromRecord,
+          selectionFromRecord,
+          rebindTargetsPreservingGlobal,
+          rebindTargetsAcrossHistoryPreservingGlobal,
+          canLocateTarget,
+          appendDirectEditEvent,
+          auditEventKey,
+          removeAcknowledgedAuditEvents,
+          errorMessage: productErrorMessage,
+        }),
+        recoveryStore,
+        canvas: {
+          verifyRendered: (expectedHtml, expectedSha256, context) => (
+            verifyCanvasRenderedRef.current(
+              expectedHtml,
+              expectedSha256,
+              context as ProjectContext | undefined,
+            )
+          ),
+          freeze: (reason) => fenceAndFreezeCurrentCanvasRef.current(reason),
+          adoptHistorySource: (nextHtml, target, textSelection) => {
+            editorRef.current?.adoptHistorySource(
+              nextHtml,
+              target as HtmlCanvasSelection | null,
+              textSelection as {
+                anchor: number;
+                focus: number;
+                affinity: "left" | "right";
+              } | null,
+            );
           },
         },
-        canvas: { invalidateRenderAcks: invalidateCanvasRenderAcks },
       },
       clock: { now: Date.now },
     });
     setWorkspaceController(controller);
     return () => controller.dispose();
   }, [invalidateCanvasRenderAcks]);
-  useEffect(() => {
-    if (!workspaceController) return undefined;
-    const unsubscribe = workspaceController.subscribeEvents((event) => {
-      if (event.type !== "registration-published") return;
-      if (!projectSessionRef.current.matches(event.context)) return;
-      setProjectRecordsPath(event.projectRecordsPath);
-      if (event.projectName) setProjectName(event.projectName);
-    });
-    return () => {
-      unsubscribe();
-    };
-  }, [workspaceController]);
   const invalidateEditCanvasRenderAck = useCallback(() => {
     setCanvasRenderAcks((current) => (
       current.edit ? { ...current, edit: null } : current
@@ -893,6 +921,76 @@ export default function Workbench() {
   const noticeTimerPaused = Boolean(
     noticeIdentity && pausedNoticeIdentity === noticeIdentity,
   );
+  useEffect(() => {
+    if (!workspaceController) return undefined;
+    const unsubscribe = workspaceController.subscribeEvents((event) => {
+      if (event.type === "registration-published") {
+        if (!projectSessionRef.current.matches(event.context)) return;
+        setProjectRecordsPath(event.projectRecordsPath);
+        if (event.projectName) setProjectName(event.projectName);
+        return;
+      }
+      const documentEvent = event as Readonly<{
+        type: string;
+        context?: ProjectContext;
+        lastModifiedAt?: unknown;
+        events?: unknown;
+        mutation?: HtmlCanvasMutation;
+        message?: unknown;
+        fatal?: unknown;
+      }>;
+      if (
+        documentEvent.context
+        && !projectSessionRef.current.matches(documentEvent.context)
+      ) return;
+      if (documentEvent.type === "document-direct-edit-recorded") {
+        const events = Array.isArray(documentEvent.events)
+          ? documentEvent.events as DirectEditEvent[]
+          : undefined;
+        persistCurrentDraftRecoveryRef.current(undefined, events);
+        if (documentEvent.mutation) {
+          captureUsageEvent("direct_edit_committed", {
+            edit_kind: documentEvent.mutation.kind,
+            property_group: documentEvent.mutation.kind === "text"
+              ? "text"
+              : editPropertyGroup(documentEvent.mutation.property),
+          }, documentEvent.context?.projectId || undefined);
+        }
+      }
+      if (
+        [
+          "document-persisted",
+          "document-authority-reloaded",
+          "document-authority-repaired",
+          "document-boundary-reconciled",
+          "document-history-applied",
+        ].includes(documentEvent.type)
+        && typeof documentEvent.lastModifiedAt === "string"
+        && documentEvent.lastModifiedAt
+      ) {
+        setLastModifiedAt(documentEvent.lastModifiedAt);
+      }
+      if (documentEvent.type === "document-recovery-queued") {
+        setToast({
+          title: "已恢复上次未写回的编辑",
+          message: "工作台正在把异常退出前的内容安全更新到源 HTML。",
+          tone: "info",
+          dedupeKey: "autosave-recovery",
+        });
+      }
+      if (
+        documentEvent.type === "document-persistence-failed"
+        && documentEvent.fatal
+      ) {
+        const message = String(documentEvent.message || "源文件进入待复核状态。");
+        projectLoadErrorRef.current = message;
+        setProjectLoadError(message);
+      }
+    });
+    return () => {
+      unsubscribe();
+    };
+  }, [workspaceController]);
   useEffect(() => {
     const session = projectSessionRef.current;
     session.setObserver(setProjectSnapshot);
@@ -1952,6 +2050,9 @@ export default function Workbench() {
     invalidateCanvasRenderAcks,
     isCurrentProjectContext,
   ]);
+  useEffect(() => {
+    verifyCanvasRenderedRef.current = verifyCanvasRendered;
+  }, [verifyCanvasRendered]);
 
   useEffect(() => {
     if (canvasMode !== "edit") return undefined;
@@ -1981,43 +2082,8 @@ export default function Workbench() {
   }, [acknowledgeCanvasRender, canvasGeneration, canvasMode, html]);
 
   const clearAutosaveTimer = useCallback(() => {
-    if (autosaveTimerRef.current !== null) {
-      window.clearTimeout(autosaveTimerRef.current);
-      autosaveTimerRef.current = null;
-    }
-  }, []);
-
-  const persistRecoveryLog = useCallback((
-    write: PendingWrite | null,
-    context?: Partial<ProjectContext>,
-  ) => {
-    const keyPart = write?.documentId
-      || context?.documentId
-      || projectSessionRef.current.documentId
-      || write?.sourcePath
-      || context?.sourcePath
-      || projectSessionRef.current.sourcePath
-      || "unbound";
-    const key = `html-ai-recovery:${keyPart}`;
-    if (!write) {
-      recoveryStore.remove(key);
-      return;
-    }
-    // A full browser-storage quota must never make the actual source write
-    // look successful; the store reports failure without changing write state.
-    recoveryStore.write(key, {
-      schemaVersion: "2.0.0",
-      projectId: write.projectId,
-      documentId: write.documentId,
-      sourcePath: write.sourcePath,
-      recoveryIdentity: write.recoveryIdentity,
-      expectedSourceSha256: write.expectedSourceSha256,
-      revision: write.revision,
-      html: write.html,
-      changeEvents: write.events.map(persistedChangeEvent),
-      sourceHistoryOperations: write.historyOperations,
-    });
-  }, []);
+    workspaceController?.clearDocumentAutosaveTimer();
+  }, [workspaceController]);
 
   const persistDraftRecovery = useCallback((
     snapshot: PendingDraft | null,
@@ -2104,6 +2170,9 @@ export default function Workbench() {
     });
     if (snapshot) persistDraftRecovery(snapshot);
   }, [captureProjectContext, persistDraftRecovery]);
+  useEffect(() => {
+    persistCurrentDraftRecoveryRef.current = persistCurrentDraftRecovery;
+  }, [persistCurrentDraftRecovery]);
 
   const normalizeCurrentGlobalComments = useCallback((): CommentItem[] => {
     const normalized = normalizeGlobalCommentTargets(
@@ -2121,456 +2190,32 @@ export default function Workbench() {
     return nextComments.filter(commentHasContent);
   }, [persistCurrentDraftRecovery]);
 
+  // Workbench only creates CanvasChangeInput and delegates durable source
+  // authority to the composed application Workflow.
   const flushAutosave = useCallback(async (throughRevision?: number): Promise<boolean> => {
-    clearAutosaveTimer();
-    if (documentSessionRef.current.flushPromise) {
-      const previous = await documentSessionRef.current.flushPromise;
-      if (!previous) return false;
-      if (
-        throughRevision !== undefined
-        && documentSessionRef.current.lastPersistedRevision >= throughRevision
-      ) return true;
-      if (
-        !documentSessionRef.current.pendingWrite
-        && documentSessionRef.current.editRevision <= documentSessionRef.current.lastPersistedRevision
-      ) return true;
-    }
-    if (
-      !documentSessionRef.current.pendingWrite
-      && projectSessionRef.current.sourcePath
-      && documentSessionRef.current.editRevision > documentSessionRef.current.lastPersistedRevision
-    ) {
-      const reconstructedWrite: PendingWrite = {
-        epoch: projectSessionRef.current.epoch,
-        projectId: projectSessionRef.current.projectId,
-        documentId: projectSessionRef.current.documentId,
-        sourcePath: projectSessionRef.current.sourcePath,
-        expectedSourceSha256: documentSessionRef.current.sourceSha256,
-        html: documentSessionRef.current.html,
-        revision: documentSessionRef.current.editRevision,
-        events: [...auditPendingRef.current],
-        historyOperations: sourceHistorySessionRef.current.pendingOperations,
-        recoveryIdentity: recoveryIdentityRef.current,
-      };
-      documentSessionRef.current.setPendingWrite(reconstructedWrite);
-      persistRecoveryLog(reconstructedWrite);
-      documentSessionRef.current.setPersistence({
-        state: "queued",
-        error: "",
-      });
-    }
-    if (!projectSessionRef.current.sourcePath && !documentSessionRef.current.pendingWrite?.sourcePath) return false;
-    if (
-      throughRevision !== undefined
-      && documentSessionRef.current.lastPersistedRevision >= throughRevision
-      && (!documentSessionRef.current.pendingWrite || documentSessionRef.current.pendingWrite.revision > throughRevision)
-    ) {
-      return true;
-    }
-
-    const run = async () => {
-      while (documentSessionRef.current.pendingWrite) {
-        const pendingWrite = documentSessionRef.current.takePendingWrite();
-        if (!pendingWrite) break;
-        let write = pendingWrite;
-        if (!write.sourcePath) return false;
-        if (throughRevision !== undefined && write.revision > throughRevision) break;
-        const inFlightAuditKeys = write.events.map(auditEventKey);
-        for (const key of inFlightAuditKeys) {
-          auditInFlightKeysRef.current.add(key);
-        }
-        let writeContext: ProjectContext = {
-          epoch: write.epoch,
-          projectId: write.projectId,
-          documentId: write.documentId,
-          sourcePath: write.sourcePath,
-        };
-        if (isCurrentProjectContext(writeContext)) {
-          documentSessionRef.current.setPersistence({
-            state: "writing",
-            error: "",
-          });
-        }
-        try {
-          if (!write.projectId || !write.documentId) {
-            const registered = registrationContextFromOutcome(
-              await requiredWorkspaceController(workspaceController).ensureRegistered({
-                sourcePath: write.sourcePath,
-                expectedSourceSha256: write.expectedSourceSha256,
-                adoptCanonicalSource: false,
-              }),
-            );
-            if (!registered) {
-              throw new Error("项目已切换，原项目的修改已保留在恢复记录中。");
-            }
-            write = {
-              ...write,
-              projectId: registered.projectId,
-              documentId: registered.documentId,
-              expectedSourceSha256: documentSessionRef.current.sourceSha256,
-            };
-            const queuedAfterRegistration =
-              documentSessionRef.current.pendingWrite as PendingWrite | null;
-            if (
-              queuedAfterRegistration
-              && queuedAfterRegistration.epoch === write.epoch
-              && sameLocalSourcePath(queuedAfterRegistration.sourcePath, write.sourcePath)
-            ) {
-              documentSessionRef.current.setPendingWrite({
-                ...queuedAfterRegistration,
-                projectId: registered.projectId,
-                documentId: registered.documentId,
-                expectedSourceSha256: documentSessionRef.current.sourceSha256,
-              });
-            }
-          }
-          if (!write.sourcePath) return false;
-          writeContext = {
-            epoch: write.epoch,
-            projectId: write.projectId,
-            documentId: write.documentId,
-            sourcePath: write.sourcePath,
-          };
-          const payload = await bridgeClient.autosave({
-            projectId: write.projectId,
-            documentId: write.documentId,
-            sourcePath: write.sourcePath,
-            html: write.html,
-            expectedSourceSha256: write.expectedSourceSha256,
-            editRevision: write.revision,
-            changeEvents: write.events.map(persistedChangeEvent),
-            sourceHistoryOperations: write.historyOperations,
-          });
-          if (payload.ok === false) {
-            throw new Error("无法把修改更新到源 HTML。");
-          }
-          const hasExactAcknowledgedHtml =
-            typeof payload.content === "string"
-            && payload.content === write.html;
-          const acknowledgedHtml = hasExactAcknowledgedHtml
-            ? payload.content as string
-            : write.html;
-          const targetSha256 = await browserSha256(write.html);
-          const nextHash = String(payload.sha256 || payload.currentHtmlSha256 || "");
-          const persistedRevision = Number(payload.persistedRevision);
-          const persistedAt = String(payload.lastModifiedAt || "");
-          if (
-            !hasExactAcknowledgedHtml
-            || !/^sha256:[a-f0-9]{64}$/.test(nextHash)
-            || nextHash !== targetSha256
-            || !Number.isSafeInteger(persistedRevision)
-            || persistedRevision < write.revision
-            || !persistedAt
-            || (payload.skipped === true && nextHash !== targetSha256)
-          ) {
-            const invalidAck = new Error(
-              "自动写回的确认内容与本次提交的原始字节不一致。",
-            ) as Error & { code?: string };
-            invalidAck.code = "INVALID_AUTOSAVE_ACK";
-            throw invalidAck;
-          }
-          if (!isRecord(payload.sourceHistory)) {
-            const invalidHistoryAck = new Error(
-              "自动写回缺少与源码一致的持久化撤销历史。",
-            ) as Error & { code?: string };
-            invalidHistoryAck.code = "INVALID_AUTOSAVE_ACK";
-            throw invalidHistoryAck;
-          }
-          if (!sourceHistorySessionRef.current.acknowledge(
-            writeContext,
-            write.historyOperations,
-            payload.sourceHistory,
-            nextHash,
-          )) {
-            sourceHistorySessionRef.current.activate(
-              writeContext,
-              nextHash,
-              payload.sourceHistory,
-            );
-          }
-          const queuedWrite = documentSessionRef.current.pendingWrite as PendingWrite | null;
-          if (
-            queuedWrite
-            && queuedWrite.epoch === write.epoch
-            && queuedWrite.projectId === write.projectId
-            && queuedWrite.documentId === write.documentId
-            && sameLocalSourcePath(queuedWrite.sourcePath, write.sourcePath)
-          ) {
-            documentSessionRef.current.setPendingWrite({
-              ...queuedWrite,
-              expectedSourceSha256: nextHash,
-              recoveryIdentity:
-                recoveryIdentityFromRecord(payload.recoveryIdentity)
-                || queuedWrite.recoveryIdentity,
-              events: removeAcknowledgedAuditEvents(queuedWrite.events, write.events),
-              historyOperations:
-                sourceHistorySessionRef.current.pendingOperations,
-            });
-            persistRecoveryLog(documentSessionRef.current.pendingWrite, writeContext);
-          } else {
-            persistRecoveryLog(null, writeContext);
-          }
-          if (isCurrentProjectContext(writeContext)) {
-            recoveryIdentityRef.current =
-              recoveryIdentityFromRecord(payload.recoveryIdentity)
-              || recoveryIdentityRef.current;
-            const writeCompletesCurrentDocument = Boolean(
-              documentSessionRef.current.editRevision === write.revision
-              && !documentSessionRef.current.pendingWrite
-            );
-            const persistedDocumentRevision = Math.max(
-              documentSessionRef.current.lastPersistedRevision,
-              persistedRevision,
-            );
-            documentSessionRef.current.update(writeCompletesCurrentDocument
-              ? {
-                  html: acknowledgedHtml,
-                  sourceSha256: nextHash,
-                  lastPersistedRevision: persistedDocumentRevision,
-                }
-              : {
-                  sourceSha256: nextHash,
-                  lastPersistedRevision: persistedDocumentRevision,
-                });
-            setLastModifiedAt(persistedAt);
-            if (writeCompletesCurrentDocument) {
-              const reboundTargets = rebindTargetsPreservingGlobal(
-                acknowledgedHtml,
-                [
-                  ...commentSessionRef.current.comments.map((comment) => comment.target),
-                  ...commentSessionRef.current.changeEvents.map((event) => event.target),
-                  ...(commentSessionRef.current.composerTarget ? [commentSessionRef.current.composerTarget] : []),
-                ],
-              );
-              const reboundById = new Map(
-                reboundTargets.map((target) => [target.id, target]),
-              );
-              const reboundComments = commentSessionRef.current.comments.map((comment) => ({
-                ...comment,
-                target: reboundById.get(comment.target.id) || comment.target,
-              }));
-              const reboundEvents = commentSessionRef.current.changeEvents.map((event) => ({
-                ...event,
-                target: reboundById.get(event.target.id) || event.target,
-              }));
-              commentSessionRef.current.update({
-                comments: reboundComments,
-                changeEvents: reboundEvents,
-              });
-              if (commentSessionRef.current.composerTarget) {
-                const reboundDraftTarget =
-                  reboundById.get(commentSessionRef.current.composerTarget.id)
-                  || commentSessionRef.current.composerTarget;
-                commentSessionRef.current.setComposerTarget(reboundDraftTarget);
-              }
-              versionSessionRef.current.updateAuthority({
-                currentExactVersionId: payload.currentExactVersionId,
-              });
-            }
-            auditPendingRef.current = removeAcknowledgedAuditEvents(
-              auditPendingRef.current,
-              write.events,
-            );
-            if (!documentSessionRef.current.pendingWrite) {
-              documentSessionRef.current.setPersistence({
-                state: "idle",
-                error: "",
-              });
-            }
-          }
-        } catch (cause) {
-          const error = cause as Error & { code?: string };
-          const visibleError = productErrorMessage(
-            error,
-            "当前修改还没有写入源 HTML，请重试或导出当前编辑。",
-          );
-          const conflict = error.code === "SOURCE_CHANGED"
-            || error.message.includes("SOURCE_CHANGED");
-          const protocolError = error.code === "INVALID_AUTOSAVE_ACK";
-          let boundaryFailure = "";
-          if (
-            isCurrentProjectContext(writeContext)
-            && (conflict || protocolError)
-          ) {
-            const frozen = fenceAndFreezeCurrentCanvas(
-              "编辑画布尚未就绪，已停止接受这次外部源码状态。",
-            );
-            if (!frozen.ok) boundaryFailure = frozen.reason;
-            clearAutosaveTimer();
-          }
-          const pendingAfterFailure = documentSessionRef.current.pendingWrite as PendingWrite | null;
-          const recoveryWrite = pendingAfterFailure
-            && pendingAfterFailure.epoch === write.epoch
-            && pendingAfterFailure.projectId === write.projectId
-            && pendingAfterFailure.documentId === write.documentId
-            && sameLocalSourcePath(pendingAfterFailure.sourcePath, write.sourcePath)
-            && pendingAfterFailure.revision > write.revision
-            ? pendingAfterFailure
-            : write;
-          if (
-            isCurrentProjectContext(writeContext)
-            && (
-              !pendingAfterFailure
-              || (
-                pendingAfterFailure.epoch === recoveryWrite.epoch
-                && sameLocalSourcePath(
-                  pendingAfterFailure.sourcePath,
-                  recoveryWrite.sourcePath,
-                )
-                && pendingAfterFailure.revision < recoveryWrite.revision
-              )
-            )
-          ) {
-            documentSessionRef.current.setPendingWrite(recoveryWrite);
-          }
-          persistRecoveryLog(recoveryWrite, writeContext);
-          if (isCurrentProjectContext(writeContext)) {
-            if (boundaryFailure) {
-              const failClosedMessage = `${visibleError} ${boundaryFailure}`;
-              projectLoadErrorRef.current = failClosedMessage;
-              setProjectLoadError(failClosedMessage);
-              documentSessionRef.current.setPersistence({
-                state: "failed",
-                error: failClosedMessage,
-              });
-            } else if (conflict) {
-              // The current native draft is now part of recoveryWrite and the
-              // editing host is frozen; only now may the conflict lock appear.
-              documentSessionRef.current.setPersistence({
-                state: "conflict",
-                error: visibleError,
-              });
-            } else if (protocolError) {
-              const failClosedMessage = `${visibleError} 源文件已进入待复核状态，不会采用服务端返回的不同内容。`;
-              projectLoadErrorRef.current = failClosedMessage;
-              setProjectLoadError(failClosedMessage);
-              documentSessionRef.current.setPersistence({
-                state: "failed",
-                error: failClosedMessage,
-              });
-            } else {
-              documentSessionRef.current.setPersistence({
-                state: "failed",
-                error: visibleError,
-              });
-            }
-          }
-          return false;
-        } finally {
-          for (const key of inFlightAuditKeys) {
-            auditInFlightKeysRef.current.delete(key);
-          }
-        }
-      }
-      return throughRevision === undefined
-        || documentSessionRef.current.lastPersistedRevision >= throughRevision;
-    };
-
-    const promise = run();
-    documentSessionRef.current.setFlushPromise(promise);
-    try {
-      return await promise;
-    } finally {
-      documentSessionRef.current.clearFlushPromise(promise);
-    }
-  }, [
-    clearAutosaveTimer,
-    fenceAndFreezeCurrentCanvas,
-    isCurrentProjectContext,
-    persistRecoveryLog,
-    workspaceController,
-  ]);
+    if (!workspaceController) return false;
+    const outcome = await requiredWorkspaceController(workspaceController)
+      .flushDocument({ throughRevision });
+    return outcome.status === "succeeded";
+  }, [workspaceController]);
 
   const enqueueAutosave = useCallback((
     nextHtml: string,
     mutation?: HtmlCanvasMutation,
     sourceTransaction?: HtmlCanvasSourceTransaction,
   ): number => {
-    if (documentSessionRef.current.persistState === "conflict") {
-      return documentSessionRef.current.editRevision;
-    }
-    const nextRevision = documentSessionRef.current.editRevision + 1;
-    if (sourceTransaction && projectSessionRef.current.sourcePath) {
-      sourceHistorySessionRef.current.record(
-        {
-          epoch: projectSessionRef.current.epoch,
-          projectId: projectSessionRef.current.projectId,
-          documentId: projectSessionRef.current.documentId,
-          sourcePath: projectSessionRef.current.sourcePath,
-        },
-        sourceTransaction,
-        nextRevision,
-      );
-    }
-    documentSessionRef.current.beginEdit(nextHtml);
-    versionSessionRef.current.markSourceEdited();
-    invalidateCanvasRenderAcks();
-
-    if (mutation) {
-      const nextEvents = appendDirectEditEvent({
+    if (!workspaceController) return documentSessionRef.current.editRevision;
+    const outcome = requiredWorkspaceController(workspaceController)
+      .enqueueDocumentEdit({
+        html: nextHtml,
         mutation,
-        revision: nextRevision,
-        createdAt: new Date().toISOString(),
-        basedOnVersionId:
-          versionSessionRef.current.snapshot.currentBasedOnVersionId,
-        events: commentSessionRef.current.changeEvents,
-        pendingEvents: auditPendingRef.current,
-        inFlightKeys: auditInFlightKeysRef.current,
-        nextEventId: () => recordId("change", changeCounter.current++),
+        sourceTransaction,
+        context: projectSessionRef.current.context || undefined,
       });
-      commentSessionRef.current.setChangeEvents(nextEvents.events);
-      auditPendingRef.current = nextEvents.pendingEvents;
-      persistCurrentDraftRecovery(commentSessionRef.current.comments, nextEvents.events);
-      captureUsageEvent("direct_edit_committed", {
-        edit_kind: mutation.kind,
-        property_group: mutation.kind === "text"
-          ? "text"
-          : editPropertyGroup(mutation.property),
-      }, projectSessionRef.current.projectId || undefined);
-    }
-
-    if (!projectSessionRef.current.sourcePath) {
-      documentSessionRef.current.update({
-        pendingWrite: null,
-        persistState: "preview-dirty",
-        persistError: "",
-      });
-      clearAutosaveTimer();
-      return nextRevision;
-    }
-
-    const write: PendingWrite = {
-      epoch: projectSessionRef.current.epoch,
-      projectId: projectSessionRef.current.projectId,
-      documentId: projectSessionRef.current.documentId,
-      sourcePath: projectSessionRef.current.sourcePath,
-      expectedSourceSha256: documentSessionRef.current.sourceSha256,
-      html: nextHtml,
-      revision: nextRevision,
-      events: [...auditPendingRef.current],
-      historyOperations: sourceHistorySessionRef.current.pendingOperations,
-      recoveryIdentity: recoveryIdentityRef.current,
-    };
-    documentSessionRef.current.setPendingWrite(write);
-    persistRecoveryLog(write);
-    documentSessionRef.current.setPersistence({
-      state: "queued",
-      error: "",
-    });
-    clearAutosaveTimer();
-    if (projectSessionRef.current.sourcePath) {
-      autosaveTimerRef.current = window.setTimeout(() => {
-        void flushAutosave();
-      }, AUTOSAVE_DELAY_MS);
-    }
-    return nextRevision;
-  }, [
-    clearAutosaveTimer,
-    flushAutosave,
-    invalidateCanvasRenderAcks,
-    persistCurrentDraftRecovery,
-    persistRecoveryLog,
-  ]);
+    return outcome.status === "succeeded"
+      ? outcome.value.revision
+      : documentSessionRef.current.editRevision;
+  }, [workspaceController]);
 
   const applyProject = useCallback((project: HtmlProject | {
     name: string;
@@ -2610,19 +2255,17 @@ export default function Workbench() {
     projectSessionRef.current.openLocator(project.sourcePath || null);
     runSessionRef.current.activate(project.sourcePath || null);
     clearAutosaveTimer();
+    workspaceController?.resetDocumentWorkflow();
     documentSessionRef.current.reset({
       html: project.html,
       sourceSha256: project.sha256 || null,
     });
-    auditPendingRef.current = [];
-    recoveryIdentityRef.current = null;
     projectHydratingRef.current = Boolean(project.sourcePath);
     markProjectHydrationStage("apply-authority");
     projectLoadErrorRef.current = null;
     viewTransitioningRef.current = false;
     navigationOperationRef.current += 1;
     draftSessionRef.current.deactivate();
-    sourceHistorySessionRef.current.deactivate();
     projectRulesSessionRef.current.close();
     draftRecoveryOperationIdRef.current = null;
     setProjectName(project.name);
@@ -2720,6 +2363,7 @@ export default function Workbench() {
     clearBackgroundProjectResult,
     invalidateCanvasRenderAcks,
     markBackgroundProjectResult,
+    workspaceController,
   ]);
 
   const refreshRecents = useCallback(async () => {
@@ -2868,161 +2512,33 @@ export default function Workbench() {
     publishVersion();
     invalidateCanvasRenderAcks();
     if (changesSourcePath) {
-      recoveryIdentityRef.current = null;
+      workspaceController?.resetDocumentWorkflow();
       draftSessionRef.current.deactivate();
-      sourceHistorySessionRef.current.deactivate();
       draftRecoveryOperationIdRef.current = null;
     }
     return context;
-  }, [invalidateCanvasRenderAcks]);
+  }, [invalidateCanvasRenderAcks, workspaceController]);
 
   const recoverAutosaveLog = useCallback(async (
     context: ProjectContext,
     currentSourceSha256: string,
     serverRevision: number,
   ): Promise<boolean> => {
-    const keys = [
-      `html-ai-recovery:${context.documentId}`,
-      `html-ai-recovery:${context.sourcePath}`,
-    ];
-    let raw: Record<string, unknown> | null = null;
-    let recoveredKey = "";
-    for (const record of recoveryStore.readRecords(keys)) {
-      if (isRecord(record.value)) {
-        raw = record.value;
-        recoveredKey = record.key;
-        break;
-      }
+    if (!workspaceController) return false;
+    const outcome = await requiredWorkspaceController(workspaceController)
+      .recoverDocumentAutosave({
+        context,
+        currentSourceSha256,
+        serverRevision,
+      });
+    if (outcome.status === "succeeded") {
+      return Boolean(outcome.value.recovered);
     }
-    if (
-      !raw
-      || String(raw.sourcePath || "") !== context.sourcePath
-      || String(raw.projectId || "") !== context.projectId
-      || String(raw.documentId || "") !== context.documentId
-      || typeof raw.html !== "string"
-      || !/<html(?:\s|>)/i.test(raw.html)
-    ) return false;
-
-    const recoveredHtml = raw.html;
-    const targetSha256 = await browserSha256(recoveredHtml);
-    if (!isCurrentProjectContext(context)) return false;
-    if (targetSha256 === currentSourceSha256) {
-      const recoveredRevision = Number.isSafeInteger(Number(raw.revision))
-        ? Number(raw.revision)
-        : 0;
-      const reconciledRevision = Math.max(serverRevision, recoveredRevision);
-      documentSessionRef.current.update({
-        editRevision: reconciledRevision,
-        lastPersistedRevision: reconciledRevision,
-        pendingWrite: null,
-        persistState: "idle",
-        persistError: "",
-      });
-      recoveryStore.remove(recoveredKey);
-      return false;
+    if (outcome.status === "rejected" || outcome.status === "unknown") {
+      throw new Error(outcome.reason);
     }
-
-    const revision = Math.max(
-      serverRevision,
-      Number.isSafeInteger(Number(raw.revision)) ? Number(raw.revision) : 0,
-    ) + 1;
-    const recoveredEvents = changesFromDraftRecords(raw.changeEvents);
-    const existingIds = new Set(commentSessionRef.current.changeEvents.map((event) => event.eventId));
-    const mergedEvents = [
-      ...commentSessionRef.current.changeEvents,
-      ...recoveredEvents.filter((event) => !existingIds.has(event.eventId)),
-    ];
-    const recoveredExpectedSha256 = String(raw.expectedSourceSha256 || "");
-    const storedRecoveryIdentity = recoveryIdentityFromRecord(raw.recoveryIdentity);
-    const currentRecoveryIdentity = recoveryIdentityRef.current;
-    const recoveryIdentityMatches = Boolean(
-      storedRecoveryIdentity
-      && currentRecoveryIdentity
-      && storedRecoveryIdentity.token === currentRecoveryIdentity.token
-      && storedRecoveryIdentity.projectId === context.projectId
-      && storedRecoveryIdentity.documentId === context.documentId
-      && sameLocalSourcePath(storedRecoveryIdentity.sourcePath, context.sourcePath)
-      && storedRecoveryIdentity.basedOnVersionId
-        === currentRecoveryIdentity.basedOnVersionId
-      && storedRecoveryIdentity.sourceSha256 === currentSourceSha256
-      && storedRecoveryIdentity.editRevision === serverRevision
-    );
-    const canRebaseSafely =
-      recoveryIdentityMatches
-      && recoveredExpectedSha256 === currentSourceSha256;
-    const job: PendingWrite = {
-      ...context,
-      expectedSourceSha256: canRebaseSafely
-        ? currentSourceSha256
-        : recoveredExpectedSha256 || currentSourceSha256,
-      html: recoveredHtml,
-      revision,
-      events: recoveredEvents,
-      historyOperations: sourceHistoryOperationsFromRecord(
-        raw.sourceHistoryOperations,
-      ),
-      recoveryIdentity: currentRecoveryIdentity,
-    };
-    sourceHistorySessionRef.current.restorePending(
-      context,
-      job.historyOperations,
-    );
-    auditPendingRef.current = recoveredEvents;
-    commentSessionRef.current.setChangeEvents(mergedEvents);
-    documentSessionRef.current.publishAuthority({
-      html: recoveredHtml,
-      sourceSha256: currentSourceSha256,
-      editRevision: revision,
-      pendingWrite: job,
-    });
-    versionSessionRef.current.markSourceEdited();
-    invalidateCanvasRenderAcks();
-    persistRecoveryLog(job);
-
-    if (canRebaseSafely) {
-      documentSessionRef.current.setPersistence({
-        state: "queued",
-        error: "",
-      });
-      clearAutosaveTimer();
-      autosaveTimerRef.current = window.setTimeout(() => {
-        void flushAutosave();
-      }, 0);
-      setToast({
-        title: "已恢复上次未写回的编辑",
-        message: "工作台正在把异常退出前的内容安全更新到源 HTML。",
-        tone: "info",
-        dedupeKey: "autosave-recovery",
-      });
-    } else {
-      await verifyCanvasRendered(recoveredHtml, targetSha256, context);
-      if (!isCurrentProjectContext(context)) return false;
-      const frozen = fenceAndFreezeCurrentCanvas(
-        "恢复记录已加载，但编辑画布尚未就绪。",
-      );
-      if (!frozen.ok) {
-        const failClosedMessage = `恢复记录与当前项目、版本或源文件身份不一致。${frozen.reason}`;
-        documentSessionRef.current.setPersistence({
-          state: "failed",
-          error: failClosedMessage,
-        });
-        throw new Error(failClosedMessage);
-      }
-      documentSessionRef.current.setPersistence({
-        state: "conflict",
-        error: "恢复记录与当前项目、版本或源文件身份不一致，请比较后选择重新载入或导出当前编辑。",
-      });
-    }
-    return true;
-  }, [
-    clearAutosaveTimer,
-    fenceAndFreezeCurrentCanvas,
-    flushAutosave,
-    invalidateCanvasRenderAcks,
-    isCurrentProjectContext,
-    persistRecoveryLog,
-    verifyCanvasRendered,
-  ]);
+    return false;
+  }, [workspaceController]);
 
   const recoverDraftLog = useCallback((
     context: ProjectContext,
@@ -3401,8 +2917,9 @@ export default function Workbench() {
       if (!registeredContext) return;
       activeSource = registeredContext.sourcePath;
       epoch = registeredContext.epoch;
-      recoveryIdentityRef.current =
-        recoveryIdentityFromRecord(payload.recoveryIdentity);
+      workspaceController?.replaceDocumentRecoveryIdentity(
+        recoveryIdentityFromRecord(payload.recoveryIdentity),
+      );
       if (projectRecord.displayName) {
         setProjectName(String(projectRecord.displayName));
       }
@@ -3445,12 +2962,12 @@ export default function Workbench() {
         && authoritativeSourceHash
         && isRecord(payload.sourceHistory)
       ) {
-        sourceHistorySessionRef.current.activate(
-          draftContext,
-          authoritativeSourceHash,
-          payload.sourceHistory,
-          { preservePending: Boolean(documentSessionRef.current.pendingWrite) },
-        );
+        workspaceController?.activateDocumentSourceHistory({
+          context: draftContext,
+          sourceSha256: authoritativeSourceHash,
+          history: payload.sourceHistory,
+          preservePending: Boolean(documentSessionRef.current.pendingWrite),
+        });
       }
       const draftSession = draftSessionRef.current;
       const canApplyDraftAuthority = !draftSession.isActive(draftContext)
@@ -3613,28 +3130,19 @@ export default function Workbench() {
               serverRevision,
               Number(conflictPayload.editRevision || runtimeConflict.editRevision || 0),
             );
-            const conflictWrite: PendingWrite = {
-              ...context,
-              expectedSourceSha256: String(
-                conflictPayload.expectedSourceSha256
-                || runtimeConflict.expectedSourceSha256
-                || "",
-              ),
-              html: candidateHtml,
-              revision,
-              events: recoveredEvents,
-              historyOperations: [],
-              recoveryIdentity: recoveryIdentityRef.current,
-            };
-            documentSessionRef.current.publishAuthority({
-              html: candidateHtml,
-              sourceSha256: authoritativeSourceHash,
-              editRevision: revision,
-              pendingWrite: conflictWrite,
-            });
-            versionSessionRef.current.markSourceEdited();
-            invalidateCanvasRenderAcks();
-            persistRecoveryLog(conflictWrite, context);
+            requiredWorkspaceController(workspaceController)
+              .adoptDocumentConflictCandidate({
+                context,
+                html: candidateHtml,
+                authoritativeSourceSha256: authoritativeSourceHash,
+                expectedSourceSha256: String(
+                  conflictPayload.expectedSourceSha256
+                  || runtimeConflict.expectedSourceSha256
+                  || "",
+                ),
+                revision,
+                events: recoveredEvents,
+              });
           }
           recoveredAutosaveConflict = true;
         }
@@ -3713,11 +3221,11 @@ export default function Workbench() {
     fenceAndFreezeCurrentCanvas,
     invalidateCanvasRenderAcks,
     isCurrentProjectContext,
-    persistRecoveryLog,
     prepareGeneratedSourceTransition,
     recoverAutosaveLog,
     recoverDraftLog,
     verifyCanvasRendered,
+    workspaceController,
   ]);
   useEffect(() => {
     deferredEditorReplayRef.current.refreshWorkspace = (
@@ -4024,7 +3532,7 @@ export default function Workbench() {
         if (
           documentSessionRef.current.pendingWrite
           || documentSessionRef.current.flushPromise
-          || historyActionPromiseRef.current
+          || workspaceController?.hasDocumentHistoryAction
           || documentSessionRef.current.editRevision > documentSessionRef.current.lastPersistedRevision
         ) {
           return {
@@ -4035,10 +3543,11 @@ export default function Workbench() {
         return { state: "resolved" };
       },
       drain: async () => {
-        if (
-          historyActionPromiseRef.current
-          && !await historyActionPromiseRef.current
-        ) return false;
+        if (workspaceController?.hasDocumentHistoryAction) {
+          const historyOutcome = await workspaceController
+            .waitForDocumentHistoryAction();
+          if (historyOutcome.status !== "succeeded") return false;
+        }
         return flushAutosave(documentSessionRef.current.editRevision);
       },
     });
@@ -4790,18 +4299,21 @@ export default function Workbench() {
             if (
               documentSessionRef.current.pendingWrite
               || documentSessionRef.current.flushPromise
-              || historyActionPromiseRef.current
+              || workspaceController?.hasDocumentHistoryAction
             ) {
               return inAppBlock("项目读取失败且仍有待恢复的 HTML 修改，请先重试读取或导出副本。");
             }
             ready = true;
             return { ready: true };
           }
-          if (
-            historyActionPromiseRef.current
-            && !await historyActionPromiseRef.current
-          ) {
+          if (workspaceController?.hasDocumentHistoryAction) {
+            const historyOutcome = await workspaceController
+              .waitForDocumentHistoryAction();
+            if (historyOutcome.status === "succeeded") {
+              // The workflow has reached a stable durable source boundary.
+            } else {
             return inAppBlock("当前撤销或重做没有安全完成，已取消关闭。");
+            }
           }
 
           if (viewMode !== "history" && !runSessionRef.current.activeLocked) {
@@ -4840,64 +4352,45 @@ export default function Workbench() {
           ) {
             const boundaryIdentity: ProjectSessionSnapshot =
               projectSessionRef.current.snapshot;
-            const identityIsCurrent = () => {
-              const current = projectSessionRef.current.snapshot;
-              return current.epoch === boundaryIdentity.epoch
-                && sameLocalSourcePath(
-                  current.sourcePath,
-                  boundaryIdentity.sourcePath,
-                )
-                && current.projectId === boundaryIdentity.projectId
-                && current.documentId === boundaryIdentity.documentId
-                && current.registered === boundaryIdentity.registered;
-            };
-            const sourceResult = await documentSessionRef.current
-              .reconcilePersistedBoundary({
+            if (!workspaceController) {
+              return inAppBlock("项目资料初始化尚未就绪，当前页面仍保持开启。");
+            }
+            const boundaryOutcome = await requiredWorkspaceController(workspaceController)
+              .reconcileDocumentBoundary({
                 frozenHtml,
                 reportedSourceSha256: frozenSourceSha256,
                 cutoffRevision,
-                hashHtml: browserSha256,
-                readSource: () => bridgeClient.source(
-                  boundaryIdentity.sourcePath || "",
-                  { timeoutMs: 2_500 },
-                ),
-                isCurrent: identityIsCurrent,
-                acceptsSource: (source) => Boolean(
-                  sameLocalSourcePath(
-                    String(source.sourcePath || ""),
-                    boundaryIdentity.sourcePath,
-                  )
-                  && source.registered === boundaryIdentity.registered
-                  && (
-                    !boundaryIdentity.registered
-                      ? !String(source.projectId || "")
-                        && !String(source.documentId || "")
-                      : (
-                        String(source.projectId || "") === boundaryIdentity.projectId
-                        && String(source.documentId || "") === boundaryIdentity.documentId
-                      )
-                  )
-                ),
+                identity: boundaryIdentity,
+                timeoutMs: 2_500,
               });
-            if (!sourceResult.ready) {
-              if (sourceResult.code === "source-integrity-failed") {
+            if (boundaryOutcome.status !== "succeeded") {
+              const boundaryCode = "code" in boundaryOutcome
+                ? boundaryOutcome.code
+                : "";
+              const boundaryReason = "reason" in boundaryOutcome
+                ? boundaryOutcome.reason
+                : "关闭核对期间当前项目已切换，当前页面仍保持开启。";
+              if (boundaryCode === "source-integrity-failed") {
                 setWorkspaceIssue({
                   title: "源文件需要重新核对",
-                  message: sourceResult.reason,
+                  message: boundaryReason,
                 });
-              } else if (!sourceResult.confirmed) {
+              } else {
                 setToast({
                   title: "当前页面仍保持开启",
-                  message: sourceResult.reason,
+                  message: boundaryReason,
                   tone: "info",
                   disposition: "background-result",
                   dedupeKey: "close-source-reconciliation",
                 });
               }
-              return inAppBlock(sourceResult.reason);
+              return inAppBlock(boundaryReason);
             }
-            if (sourceResult.lastModifiedAt) {
-              setLastModifiedAt(sourceResult.lastModifiedAt);
+            if (
+              boundaryOutcome.value.ready
+              && boundaryOutcome.value.lastModifiedAt
+            ) {
+              setLastModifiedAt(boundaryOutcome.value.lastModifiedAt);
             }
           }
 
@@ -4939,6 +4432,7 @@ export default function Workbench() {
   }, [
     enqueueAutosave,
     viewMode,
+    workspaceController,
   ]);
 
   useEffect(() => {
@@ -5003,69 +4497,18 @@ export default function Workbench() {
   }, []);
 
   const ensureCurrentDocumentCanvas = useCallback(async (): Promise<void> => {
-    const context = captureProjectContext();
-    let expectedHtml = documentSessionRef.current.html;
-    let expectedSha256 = await browserSha256(expectedHtml);
-    const persistedProjectionIsClean = Boolean(
-      context
-      && documentSessionRef.current.persistState === "idle"
-      && documentSessionRef.current.editRevision
-        === documentSessionRef.current.lastPersistedRevision
-      && !documentSessionRef.current.pendingWrite
-      && !documentSessionRef.current.flushPromise
-    );
-    if (
-      context
-      && persistedProjectionIsClean
-      && documentSessionRef.current.sourceSha256
-      && documentSessionRef.current.sourceSha256 !== expectedSha256
-    ) {
-      const sourcePayload = await bridgeClient.source(context.sourcePath);
-      if (!isCurrentProjectContext(context)) {
-        throw new DeferredEditorCommandDiscardedError("stale-session");
-      }
-      if (
-        String(sourcePayload.projectId || "") !== context.projectId
-        || String(sourcePayload.documentId || "") !== context.documentId
-      ) {
-        throw new Error("自动恢复时源文件身份发生变化。");
-      }
-      const repairedHtml = String(sourcePayload.content || "");
-      const repairedSha256 = String(sourcePayload.sha256 || "");
-      if (
-        !/^sha256:[a-f0-9]{64}$/.test(repairedSha256)
-        || await browserSha256(repairedHtml) !== repairedSha256
-      ) {
-        throw new Error("自动恢复读取到的源 HTML 与 Hash 不一致。");
-      }
-      if (!isCurrentProjectContext(context)) {
-        throw new DeferredEditorCommandDiscardedError("stale-session");
-      }
-      documentSessionRef.current.publishAuthority({
-        html: repairedHtml,
-        sourceSha256: repairedSha256,
-        pendingWrite: null,
-        persistState: "idle",
-        persistError: "",
-      });
-      versionSessionRef.current.updateAuthority({
-        currentBasedOnVersionId:
-          sourcePayload.currentBasedOnVersionId || undefined,
-        currentExactVersionId: sourcePayload.currentExactVersionId || null,
-        restoredFromVersionId: sourcePayload.restoredFromVersionId || null,
-      });
-      setLastModifiedAt(String(sourcePayload.lastModifiedAt || ""));
-      invalidateCanvasRenderAcks();
-      expectedHtml = repairedHtml;
-      expectedSha256 = repairedSha256;
+    if (!workspaceController) {
+      throw new Error("项目资料初始化尚未就绪，请稍后重试。");
     }
-    await verifyCanvasRendered(expectedHtml, expectedSha256, context || undefined);
-  }, [
-    captureProjectContext,
-    invalidateCanvasRenderAcks,
-    isCurrentProjectContext,
-    verifyCanvasRendered,
-  ]);
+    const context = captureProjectContext();
+    const outcome = await requiredWorkspaceController(workspaceController)
+      .ensureDocumentCanvas({ context: context || undefined });
+    if (outcome.status === "succeeded") return;
+    if (outcome.status === "stale") {
+      throw new DeferredEditorCommandDiscardedError("stale-session");
+    }
+    throw new Error(outcome.reason);
+  }, [captureProjectContext, workspaceController]);
 
   const prepareProjectSwitch = useCallback(async (
     fromDeferred = false,
@@ -5115,7 +4558,7 @@ export default function Workbench() {
     }
     if (projectLoadErrorRef.current) {
       draftSessionRef.current.deactivate();
-      sourceHistorySessionRef.current.deactivate();
+      workspaceController?.resetDocumentWorkflow();
       return true;
     }
     if (runSessionRef.current.activeLocked) {
@@ -5125,12 +4568,13 @@ export default function Workbench() {
       if (!drained.ok) rememberProjectOpen();
       return drained.ok;
     }
-    if (
-      historyActionPromiseRef.current
-      && !await historyActionPromiseRef.current
-    ) {
-      rememberProjectOpen();
-      return false;
+    if (workspaceController?.hasDocumentHistoryAction) {
+      const historyOutcome = await workspaceController
+        .waitForDocumentHistoryAction();
+      if (historyOutcome.status !== "succeeded") {
+        rememberProjectOpen();
+        return false;
+      }
     }
     const shouldCommitCurrentCanvas = viewMode !== "history";
     let committed = shouldCommitCurrentCanvas
@@ -5157,7 +4601,7 @@ export default function Workbench() {
       documentSessionRef.current.editRevision !== switchCutoffRevision
       || documentSessionRef.current.pendingWrite
       || documentSessionRef.current.flushPromise
-      || historyActionPromiseRef.current
+      || workspaceController?.hasDocumentHistoryAction
     ) {
       rememberProjectOpen();
       return false;
@@ -5200,6 +4644,7 @@ export default function Workbench() {
     deferEditorCommand,
     ensureCurrentDocumentCanvas,
     viewMode,
+    workspaceController,
   ]);
   useEffect(() => {
     deferredEditorReplayRef.current.prepareProjectSwitch = (resolve, options) => {
@@ -5627,7 +5072,7 @@ export default function Workbench() {
           || !sameLocalSourcePath(projectSessionRef.current.sourcePath, activeSourcePath)
           || documentSessionRef.current.pendingWrite
           || documentSessionRef.current.flushPromise
-          || historyActionPromiseRef.current
+          || workspaceController?.hasDocumentHistoryAction
           || documentSessionRef.current.persistState !== "idle"
           || documentSessionRef.current.lastPersistedRevision < launchRevision
         ) {
@@ -5648,7 +5093,7 @@ export default function Workbench() {
         dedupeKey: "open-project-in-default-browser-error",
       }),
     });
-  }, [enqueueAutosave, flushAutosave]);
+  }, [enqueueAutosave, flushAutosave, workspaceController]);
 
   const cancelFileRename = useCallback(() => {
     if (fileRenameBusyRef.current) return;
@@ -5666,7 +5111,7 @@ export default function Workbench() {
       || editorRef.current?.hasPendingNativeEdit()
       || documentSessionRef.current.pendingWrite
       || documentSessionRef.current.flushPromise
-      || historyActionPromiseRef.current
+      || workspaceController?.hasDocumentHistoryAction
       || documentSessionRef.current.editRevision !== documentSessionRef.current.lastPersistedRevision
     ) return;
     fileRenameEditingRef.current = true;
@@ -5677,7 +5122,11 @@ export default function Workbench() {
       fileRenameInputRef.current?.focus();
       fileRenameInputRef.current?.select();
     });
-  }, [canOfferFileRename, currentSourceFileStem]);
+  }, [
+    canOfferFileRename,
+    currentSourceFileStem,
+    workspaceController?.hasDocumentHistoryAction,
+  ]);
 
   const commitFileRename = useCallback(async () => {
     if (!fileRenameEditingRef.current || fileRenameBusyRef.current) return;
@@ -5748,7 +5197,7 @@ export default function Workbench() {
         || !sameLocalSourcePath(projectSessionRef.current.sourcePath, previousSourcePath)
         || documentSessionRef.current.pendingWrite
         || documentSessionRef.current.flushPromise
-        || historyActionPromiseRef.current
+        || workspaceController?.hasDocumentHistoryAction
         || documentSessionRef.current.persistState !== "idle"
         || documentSessionRef.current.editRevision !== documentSessionRef.current.lastPersistedRevision
       ) {
@@ -5840,14 +5289,14 @@ export default function Workbench() {
         sourceSha256: result.sha256,
         pendingWrite: null,
       });
-      recoveryIdentityRef.current = null;
+      workspaceController?.clearDocumentRecovery({
+        documentId: previousDocumentId,
+        sourcePath: previousSourcePath,
+      });
+      workspaceController?.resetDocumentWorkflow();
       draftRecoveryOperationIdRef.current = null;
       draftSessionRef.current.deactivate();
-      sourceHistorySessionRef.current.deactivate();
-      recoveryStore.remove([
-        `html-ai-recovery:${previousSourcePath}`,
-        `html-ai-draft-recovery:${previousSourcePath}`,
-      ]);
+      recoveryStore.remove(`html-ai-draft-recovery:${previousSourcePath}`);
       setProjectName(result.stem || requestedStem);
       setLastModifiedAt(result.lastModifiedAt || null);
       await Promise.all([
@@ -5893,6 +5342,7 @@ export default function Workbench() {
     refreshWorkspace,
     runInProgress,
     viewMode,
+    workspaceController,
     workspaceIssue,
   ]);
 
@@ -5977,7 +5427,7 @@ export default function Workbench() {
       || projectHydratingRef.current
       || projectLoadErrorRef.current
       || viewTransitioningRef.current
-      || historyActionPromiseRef.current
+      || workspaceController?.hasDocumentHistoryAction
       || String(documentSessionRef.current.persistState) === "conflict"
       || viewMode === "history"
     ) return false;
@@ -6055,7 +5505,13 @@ export default function Workbench() {
     });
     setActiveRun((run) => run?.status === "complete" ? null : run);
     return true;
-  }, [acknowledgeCanvasRender, enqueueAutosave, setActiveRun, viewMode]);
+  }, [
+    acknowledgeCanvasRender,
+    enqueueAutosave,
+    setActiveRun,
+    viewMode,
+    workspaceController,
+  ]);
 
   const exportCurrentHtml = useCallback(async (fromDeferred = false) => {
     if (viewTransitioningRef.current) return;
@@ -6174,8 +5630,8 @@ export default function Workbench() {
     fromDeferred = false,
   ) => {
     const context = captureProjectContext();
-    if (!context || projectLoadErrorRef.current) return;
-    if (historyActionPromiseRef.current) return;
+    if (!context || projectLoadErrorRef.current || !workspaceController) return;
+    if (requiredWorkspaceController(workspaceController).hasDocumentHistoryAction) return;
     if (
       !fromDeferred
       && deferEditorCommand(
@@ -6199,73 +5655,22 @@ export default function Workbench() {
     ) return;
     const operationId = beginNavigationOperation();
     if (operationId === null) return;
-    const previousDocument = documentSessionRef.current.snapshot;
-    const previousHtml = previousDocument.html;
-    const previousPendingWrite = documentSessionRef.current.pendingWrite;
-    const previousVersionView = versionSessionRef.current.captureView();
-    let externalAccepted = false;
     try {
-      if (persistState === "conflict") {
-        try {
-          await bridgeClient.resolveConflict({
-            projectId: context.projectId,
-            documentId: context.documentId,
-            sourcePath: context.sourcePath,
-            action: "keep-external",
-          });
-          externalAccepted = true;
-        } catch (cause) {
-          if (
-            !isBridgeRequestError(cause)
-            || cause.code !== "CONFLICT_NOT_FOUND"
-          ) throw cause;
-        }
-        if (
-          navigationOperationRef.current !== operationId
-          || !isCurrentProjectContext(context)
-        ) return;
-      }
-      const payload = await bridgeClient.source(context.sourcePath);
+      const outcome = await requiredWorkspaceController(workspaceController)
+        .reloadDocumentAuthority({
+          context,
+          acceptExternalConflict: persistState === "conflict",
+        });
       if (
-        navigationOperationRef.current !== operationId
+        outcome.status === "stale"
+        || navigationOperationRef.current !== operationId
         || !isCurrentProjectContext(context)
       ) return;
-      if (
-        String(payload.projectId || "") !== context.projectId
-        || String(payload.documentId || "") !== context.documentId
-      ) {
-        throw new Error("重新读取时文件身份发生变化，已拒绝覆盖当前项目。");
+      if (outcome.status !== "succeeded") {
+        throw new Error(outcome.reason);
       }
-      const content = String(payload.content || "");
-      const hash = String(payload.sha256 || "");
-      if (!hash || await browserSha256(content) !== hash) {
-        throw new Error("重新读取的源 HTML 与声明 Hash 不一致。");
-      }
-      documentSessionRef.current.publishAuthority({
-        html: content,
-        sourceSha256: hash,
-      });
-      versionSessionRef.current.returnCurrent({
-        currentExactVersionId: payload.currentExactVersionId || null,
-        currentBasedOnVersionId:
-          payload.currentBasedOnVersionId || currentBasedOnVersionId,
-        restoredFromVersionId: payload.restoredFromVersionId || null,
-      });
-      invalidateCanvasRenderAcks();
-      await verifyCanvasRendered(content, hash, context);
-      if (
-        navigationOperationRef.current !== operationId
-        || !isCurrentProjectContext(context)
-      ) return;
-      auditPendingRef.current = [];
-      commentSessionRef.current.setChangeEvents([]);
-      persistRecoveryLog(null, context);
-      documentSessionRef.current.update({
-        pendingWrite: null,
-        persistState: "idle",
-        persistError: "",
-      });
-      setLastModifiedAt(String(payload.lastModifiedAt || ""));
+      const lastModified = String(outcome.value.lastModifiedAt || "");
+      if (lastModified) setLastModifiedAt(lastModified);
       await refreshWorkspace(context.sourcePath, context.epoch);
       if (
         navigationOperationRef.current !== operationId
@@ -6279,35 +5684,6 @@ export default function Workbench() {
       });
     } catch (cause) {
       if (!isCurrentProjectContext(context)) return;
-      if (navigationOperationRef.current === operationId) {
-        if (!externalAccepted) {
-          documentSessionRef.current.publishAuthority({
-            html: previousHtml,
-            sourceSha256: previousDocument.sourceSha256,
-            pendingWrite: previousPendingWrite,
-            persistState: previousDocument.persistState,
-            persistError: previousDocument.persistError,
-          });
-          versionSessionRef.current.restoreView(previousVersionView);
-          invalidateCanvasRenderAcks();
-          try {
-            await verifyCanvasRendered(
-              previousHtml,
-              await browserSha256(previousHtml),
-              context,
-            );
-          } catch {
-            // The transition remains fail-closed until its lock is released below.
-          }
-        } else {
-          const message = productErrorMessage(
-            cause,
-            "外部版本已被接受，但重新读取失败。",
-          );
-          projectLoadErrorRef.current = message;
-          setProjectLoadError(message);
-        }
-      }
       setToast({
         title: "重新载入失败",
         message: productErrorMessage(cause, "请稍后重试，源文件没有被覆盖。"),
@@ -6321,15 +5697,12 @@ export default function Workbench() {
   }, [
     beginNavigationOperation,
     captureProjectContext,
-    currentBasedOnVersionId,
     deferEditorCommand,
     finishNavigationOperation,
-    invalidateCanvasRenderAcks,
     isCurrentProjectContext,
-    persistRecoveryLog,
     persistState,
     refreshWorkspace,
-    verifyCanvasRendered,
+    workspaceController,
   ]);
   useEffect(() => {
     deferredEditorReplayRef.current.reloadCurrentSource = () => {
@@ -6378,6 +5751,7 @@ export default function Workbench() {
       || viewTransitioningRef.current
       || viewMode === "history"
       || documentSessionRef.current.persistState === "conflict"
+      || !workspaceController
     ) return false;
     if (!fromDeferred) {
       let resolveDeferred: ((value: boolean) => void) | null = null;
@@ -6387,8 +5761,7 @@ export default function Workbench() {
       if (deferEditorCommand(
         `source-history:${direction}`,
         () => {
-          const replay =
-            deferredEditorReplayRef.current.requestSourceHistoryAction;
+          const replay = deferredEditorReplayRef.current.requestSourceHistoryAction;
           if (!replay) {
             resolveDeferred?.(false);
             return;
@@ -6399,283 +5772,43 @@ export default function Workbench() {
         { onDiscard: () => resolveDeferred?.(false) },
       )) return deferred;
     }
-    if (historyActionPromiseRef.current) {
-      return historyActionPromiseRef.current;
+    const fenced = editorRef.current?.fencePendingEdit({
+      resumeEditing: false,
+      preserveForHistory: true,
+      trigger: "fence",
+    });
+    if (!fenced || !fenced.ok) {
+      editorRef.current?.showCommitBlocked(
+        fenced?.reason || "请先完成当前文字输入，再撤销或重做。",
+      );
+      return false;
     }
-
-    const run = async (): Promise<boolean> => {
-      const fenced = editorRef.current?.fencePendingEdit({
-        resumeEditing: false,
-        preserveForHistory: true,
-        trigger: "fence",
-      });
-      if (!fenced || !fenced.ok) {
-        editorRef.current?.showCommitBlocked(
-          fenced?.reason || "请先完成当前文字输入，再撤销或重做。",
-        );
-        return false;
-      }
-      if (!await flushAutosave(documentSessionRef.current.editRevision)) {
-        editorRef.current?.cancelHistoryAction();
-        setToast({
-          title: direction === "undo" ? "暂时不能撤销" : "暂时不能重做",
-          message: "当前修改还没有安全写入源 HTML，本次操作未执行；保存状态区会保留具体原因。",
-          tone: "warning",
-          disposition: "background-result",
-          dedupeKey: "source-history-flush-blocked",
-        });
-        return false;
-      }
-      const context = captureProjectContext();
-      if (!context) {
-        editorRef.current?.cancelHistoryAction();
-        return false;
-      }
-      const action = sourceHistorySessionRef.current.createAction(
-        context,
-        direction,
-      );
-      if (!action) {
-        editorRef.current?.cancelHistoryAction();
-        return false;
-      }
-      const requestBody = {
-        ...context,
-        ...action,
-      };
-      documentSessionRef.current.setPersistence({
-        state: "writing",
-        error: "",
-      });
-
-      let payload: Record<string, unknown>;
-      try {
-        payload = await bridgeClient.sourceHistoryAction(requestBody);
-      } catch (cause) {
-        if (
-          !isBridgeRequestError(cause)
-          || (cause.outcome !== "unknown" && cause.status < 500)
-        ) {
-          throw cause;
-        }
-        const authority = await bridgeClient.workspace(context.sourcePath);
-        const authoritativeHistory = isRecord(authority.sourceHistory)
-          ? authority.sourceHistory
-          : null;
-        const authoritativeCapabilities = isRecord(
-          authoritativeHistory?.capabilities,
-        )
-          ? authoritativeHistory.capabilities
-          : null;
-        const actionApplied = Array.isArray(
-          authoritativeHistory?.appliedActions,
-        ) && authoritativeHistory.appliedActions.some((entry) => (
-          isRecord(entry) && entry.actionId === action.actionId
-        ));
-        const actionStillEligible = (
-          authority.projectId === context.projectId
-          && authority.documentId === context.documentId
-          && authority.sourcePath === context.sourcePath
-          && authority.currentHtmlSha256 === action.expectedSourceSha256
-          && Number(authoritativeCapabilities?.revision)
-            === action.expectedHistoryRevision
-          && Number(authoritativeCapabilities?.cursor)
-            === action.expectedHistoryCursor
-        );
-        if (
-          !isCurrentProjectContext(context)
-          || (!actionApplied && !actionStillEligible)
-        ) {
-          const conflict = new Error(
-            "无法确认上一次撤销或重做的结果，已停止重复操作。",
-          ) as Error & { code?: string };
-          conflict.code = "SOURCE_HISTORY_RECONCILIATION_CONFLICT";
-          throw conflict;
-        }
-        // Querying workspace authority either confirms the original action or
-        // proves that its original preconditions still hold. The same stable
-        // actionId can now be replayed once without double-applying a patch.
-        payload = await bridgeClient.sourceHistoryAction(requestBody);
-      }
-      const canonicalHtml =
-        typeof payload.content === "string" ? payload.content : "";
-      const nextSourceSha256 = String(
-        payload.sha256
-        || payload.sourceSha256
-        || payload.currentHtmlSha256
-        || "",
-      );
-      const persistedRevision = Number(
-        payload.persistedRevision
-        || payload.lastPersistedRevision,
-      );
-      if (
-        !canonicalHtml
-        || !/^sha256:[a-f0-9]{64}$/.test(nextSourceSha256)
-        || await browserSha256(canonicalHtml) !== nextSourceSha256
-        || !Number.isSafeInteger(persistedRevision)
-        || persistedRevision < documentSessionRef.current.lastPersistedRevision
-        || !isRecord(payload.sourceHistory)
-      ) {
-        const invalid = new Error(
-          "撤销结果与持久化源码历史不一致。",
-        ) as Error & { code?: string };
-        invalid.code = "INVALID_SOURCE_HISTORY_ACK";
-        throw invalid;
-      }
-      if (!isCurrentProjectContext(context)) {
-        editorRef.current?.cancelHistoryAction({ restore: false });
-        return false;
-      }
-      if (!sourceHistorySessionRef.current.replaceAuthority(
-        context,
-        payload.sourceHistory,
-        nextSourceSha256,
-      )) {
-        sourceHistorySessionRef.current.activate(
-          context,
-          nextSourceSha256,
-          payload.sourceHistory,
-        );
-      }
-
-      const rawHistoryTarget = isRecord(payload.target)
-        ? selectionFromRecord(payload.target)
-        : null;
-      const rawTransition = isRecord(payload.targetTransition)
-        ? payload.targetTransition
-        : null;
-      const historyTransition = {
-        fromTarget: isRecord(rawTransition?.fromTarget)
-          ? selectionFromRecord(rawTransition.fromTarget)
-          : null,
-        toTarget: isRecord(rawTransition?.toTarget)
-          ? selectionFromRecord(rawTransition.toTarget)
-          : null,
-      };
-      const historyTextSelection = historyTextSelectionFromRecord(
-        payload.selection,
-      );
-      const targets = [
-        ...commentSessionRef.current.comments.map((comment) => comment.target),
-        ...commentSessionRef.current.changeEvents.map((event) => event.target),
-        ...(commentSessionRef.current.composerTarget ? [commentSessionRef.current.composerTarget] : []),
-        ...(rawHistoryTarget ? [rawHistoryTarget] : []),
-      ];
-      const reboundTargets = historyTransition.fromTarget
-        && historyTransition.toTarget
-        ? rebindTargetsAcrossHistoryPreservingGlobal(
-            documentSessionRef.current.html,
-            canonicalHtml,
-            targets,
-            historyTransition,
-          )
-        : rebindTargetsPreservingGlobal(canonicalHtml, targets);
-      const reboundById = new Map(
-        reboundTargets.map((target) => [target.id, target]),
-      );
-      const nextComments = commentSessionRef.current.comments.map((comment) => ({
-        ...comment,
-        target: reboundById.get(comment.target.id) || {
-          ...comment.target,
-          resolution: "orphaned" as const,
-        },
-      }));
-      const nextEvents = commentSessionRef.current.changeEvents.map((event) => ({
-        ...event,
-        target: reboundById.get(event.target.id) || {
-          ...event.target,
-          resolution: "orphaned" as const,
-        },
-      }));
-      commentSessionRef.current.update({
-        comments: nextComments,
-        changeEvents: nextEvents,
-      });
-      if (commentSessionRef.current.composerTarget) {
-        const nextDraftTarget =
-          reboundById.get(commentSessionRef.current.composerTarget.id)
-          || { ...commentSessionRef.current.composerTarget, resolution: "orphaned" as const };
-        commentSessionRef.current.setComposerTarget(nextDraftTarget);
-      }
-      const nextHistoryTarget = rawHistoryTarget
-        ? reboundById.get(rawHistoryTarget.id) || rawHistoryTarget
-        : null;
-      editorRef.current?.adoptHistorySource(
-        canonicalHtml,
-        nextHistoryTarget,
-        historyTextSelection,
-      );
-      recoveryIdentityRef.current =
-        recoveryIdentityFromRecord(payload.recoveryIdentity)
-        || recoveryIdentityRef.current;
-      // Source history already performs canonical Canvas adoption (mounted
-      // island when proven safe, otherwise a fresh frame) and restores the
-      // active target/caret. Publish the complete Document tuple without
-      // advancing the project/version Canvas generation.
-      documentSessionRef.current.update({
-        html: canonicalHtml,
-        sourceSha256: nextSourceSha256,
-        editRevision: Math.max(
-          documentSessionRef.current.editRevision,
-          persistedRevision,
-        ),
-        lastPersistedRevision: Math.max(
-          documentSessionRef.current.lastPersistedRevision,
-          persistedRevision,
-        ),
-        pendingWrite: null,
-      });
-      setLastModifiedAt(String(payload.lastModifiedAt || ""));
-      versionSessionRef.current.updateAuthority({
-        currentExactVersionId: payload.currentExactVersionId,
-      });
-      invalidateCanvasRenderAcks();
-      persistRecoveryLog(null, context);
-      documentSessionRef.current.setPersistence({
-        state: "idle",
-        error: "",
-      });
-      return true;
-    };
-
-    const promise = run().catch((cause) => {
+    const context = captureProjectContext();
+    if (!context) {
       editorRef.current?.cancelHistoryAction();
-      const message = productErrorMessage(
-        cause,
-        direction === "undo"
-          ? "这次撤销没有完成，源 HTML 保持不变。"
-          : "这次重做没有完成，源 HTML 保持不变。",
-      );
-      documentSessionRef.current.setPersistence({
-        state: "failed",
-        error: message,
-      });
+      return false;
+    }
+    const outcome = await requiredWorkspaceController(workspaceController)
+      .performDocumentHistoryAction({ direction, context });
+    if (outcome.status === "succeeded") return true;
+    editorRef.current?.cancelHistoryAction({
+      restore: outcome.status !== "stale",
+    });
+    if (outcome.status !== "stale") {
       setToast({
         title: direction === "undo" ? "撤销未完成" : "重做未完成",
-        message,
+        message: outcome.reason,
         tone: "warning",
         disposition: "background-result",
         dedupeKey: `source-history-${direction}-failed`,
       });
-      return false;
-    });
-    historyActionPromiseRef.current = promise;
-    try {
-      return await promise;
-    } finally {
-      if (historyActionPromiseRef.current === promise) {
-        historyActionPromiseRef.current = null;
-      }
     }
+    return false;
   }, [
     captureProjectContext,
     deferEditorCommand,
-    flushAutosave,
-    invalidateCanvasRenderAcks,
-    isCurrentProjectContext,
-    persistRecoveryLog,
     viewMode,
+    workspaceController,
   ]);
   useEffect(() => {
     deferredEditorReplayRef.current.requestSourceHistoryAction = (
@@ -8402,7 +7535,7 @@ export default function Workbench() {
         throw new DeferredEditorCommandDiscardedError("stale-session");
       }
       // Recovery is cleared only after the live Canvas has crossed the Fence.
-      persistRecoveryLog(null, transitionContext);
+      workspaceController?.clearDocumentRecovery(transitionContext);
     }
     const preparedTransition = await prepareGeneratedSourceTransition({
       previousSourcePath: run.sourcePath,
@@ -8441,7 +7574,7 @@ export default function Workbench() {
     if (!adoptedContext) {
       throw new DeferredEditorCommandDiscardedError("stale-session");
     }
-    auditPendingRef.current = [];
+    workspaceController?.clearDocumentAudit();
     documentSessionRef.current.setPersistence({
       state: "idle",
       error: "",
@@ -8476,7 +7609,7 @@ export default function Workbench() {
     setHandoffPreviewOpen(false);
     setCanvasMode("edit");
     setDrawer(null);
-    persistRecoveryLog(null, adoptedContext);
+    workspaceController?.clearDocumentRecovery(adoptedContext);
     await refreshWorkspace(committedSourcePath, adoptedContext.epoch);
     if (!isCurrentProjectContext(adoptedContext)) return;
     if (projectLoadErrorRef.current) {
@@ -8522,12 +7655,12 @@ export default function Workbench() {
     fenceAndFreezeCurrentCanvas,
     isCurrentProjectContext,
     persistDraftRecovery,
-    persistRecoveryLog,
     prepareGeneratedSourceTransition,
     refreshWorkspace,
     readyReviewSession,
     setActiveRun,
     verifyCanvasRendered,
+    workspaceController,
   ]);
   useEffect(() => {
     deferredEditorReplayRef.current.openCommittedVersion = (

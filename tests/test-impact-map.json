@@ -344,6 +344,22 @@
       ]
     },
     {
+      "id": "document-workflow",
+      "patterns": [
+        "^app/application/document-workflow(?:-codecs)?\\.(?:js|d\\.ts)$",
+        "^tests/document-workflow\\.test\\.mjs$"
+      ],
+      "suites": ["typecheck"],
+      "nodeTests": [
+        "tests/document-workflow.test.mjs",
+        "tests/document-session.test.mjs",
+        "tests/recovery-store.test.mjs",
+        "tests/source-history-session.test.mjs",
+        "tests/source-history.test.mjs",
+        "tests/audit-events.test.mjs"
+      ]
+    },
+    {
       "id": "draft-session",
       "patterns": [
         "^app/application/(?:draft-session|drain-coordinator)\\.(?:js|d\\.ts)$",
@@ -386,6 +402,7 @@
       "suites": ["typecheck", "browser-smoke", "electron-smoke"],
       "nodeTests": [
         "tests/workspace-controller.test.mjs",
+        "tests/document-workflow.test.mjs",
         "tests/project-session.test.mjs",
         "tests/draft-session.test.mjs",
         "tests/document-session.test.mjs",
