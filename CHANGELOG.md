@@ -4,6 +4,8 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
+## [0.9.8] - 2026-08-11
+
 - Fixed a Draft revision-reconciliation feedback loop that could issue a
   second aggregate write after a successful rebase and drop an acknowledged
   direct-edit event. Mutable Draft events now use their dedicated compatibility
