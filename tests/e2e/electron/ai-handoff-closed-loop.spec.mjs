@@ -266,7 +266,7 @@ async function addCommentAndSubmit(
       comment.targetSelector,
     );
   }
-  await page.getByRole("button", { name: /发送至 Qoder/u }).click();
+  await page.getByRole("button", { name: /复制AI任务Prompt/u }).click();
   await expect(page.getByText("等待 QoderWork 返回修改结果", { exact: true }))
     .toBeVisible();
   let promptPath = "";
@@ -276,6 +276,10 @@ async function addCommentAndSubmit(
     promptPath = match?.[1] || "";
     return Boolean(promptPath && existsSync(promptPath));
   }, { timeout: 20_000 }).toBe(true);
+  await expect(page.getByRole("button", {
+    name: "已复制，可粘贴到 AI Agent对话框",
+    exact: true,
+  })).toBeVisible();
   const requestRoot = path.dirname(promptPath);
   const changeRequest = JSON.parse(
     readFileSync(path.join(requestRoot, "change-request.json"), "utf8"),
@@ -3402,7 +3406,7 @@ test("a no-change result returns to editing and remains reopenable", async () =>
     await launched.page.getByRole("button", { name: "返回编辑" }).click();
     await expect(launched.page.getByRole("button", { name: "上轮处理" }))
       .toBeVisible();
-    await expect(launched.page.getByRole("button", { name: /发送至 Qoder/u }))
+    await expect(launched.page.getByRole("button", { name: /复制AI任务Prompt/u }))
       .toBeEnabled();
     await launched.page.getByRole("button", { name: "上轮处理" }).click();
     await expect(launched.page.getByText(
@@ -3524,7 +3528,7 @@ test("a clipboard handoff failure keeps the frozen Request recoverable", async (
     await launched.page.getByRole("textbox", { name: "评论内容" })
       .fill(`改为 ${UPDATED_TEXT}`);
     await launched.page.getByRole("button", { name: "评论", exact: true }).click();
-    const sendToQoder = launched.page.getByRole("button", { name: /发送至 Qoder/u });
+    const sendToQoder = launched.page.getByRole("button", { name: /复制AI任务Prompt/u });
     await expect(sendToQoder).toBeEnabled();
     await sendToQoder.click();
     await expect(launched.page.getByText("等待 QoderWork 返回修改结果", { exact: true }))
@@ -3581,7 +3585,7 @@ test("a failed handoff in project A does not block project B or replace its stat
   });
   try {
     await addComment(launched.page, projectA.sourcePath);
-    await launched.page.getByRole("button", { name: /发送至 Qoder/u }).click();
+    await launched.page.getByRole("button", { name: /复制AI任务Prompt/u }).click();
     const processingDialog = launched.page.getByRole("dialog", { name: "本轮处理" });
     await expect(processingDialog.getByText(
       "交接内容尚未复制",
@@ -3603,12 +3607,12 @@ test("a failed handoff in project A does not block project B or replace its stat
       .filter({ hasText: path.basename(projectB.sourcePath) })
       .click();
     await loadedDiskFrame(launched.page, projectB.sourcePath);
-    await expect(launched.page.getByRole("button", { name: "发送至 Qoder" }))
+    await expect(launched.page.getByRole("button", { name: "复制AI任务Prompt" }))
       .toBeDisabled();
     await addComment(launched.page, projectB.sourcePath);
-    await expect(launched.page.getByRole("button", { name: /发送至 Qoder/u }))
+    await expect(launched.page.getByRole("button", { name: /复制AI任务Prompt/u }))
       .toBeEnabled();
-    await launched.page.getByRole("button", { name: /发送至 Qoder/u }).click();
+    await launched.page.getByRole("button", { name: /复制AI任务Prompt/u }).click();
     await expect(launched.page.getByText(
       "等待 QoderWork 返回修改结果",
       { exact: true },
@@ -3652,7 +3656,7 @@ test("a rapid double click creates exactly one durable Request", async () => {
   try {
     await launched.electronApp.evaluate(({ clipboard }) => clipboard.clear());
     await addComment(launched.page, fixture.sourcePath);
-    await launched.page.getByRole("button", { name: /发送至 Qoder/u }).dblclick({
+    await launched.page.getByRole("button", { name: /复制AI任务Prompt/u }).dblclick({
       delay: 0,
     });
     await expect(launched.page.getByText(
@@ -3801,7 +3805,7 @@ test("an unknown Request outcome stays fail-closed and reconciles automatically"
     };
     await launched.page.route(bridgeRoute, injectUnknownRequestOutcome);
 
-    await launched.page.getByRole("button", { name: /发送至 Qoder/u }).click();
+    await launched.page.getByRole("button", { name: /复制AI任务Prompt/u }).click();
     await expect(launched.page.getByText(
       "正在确认这次发送是否成功",
       { exact: true },
@@ -3882,7 +3886,7 @@ test("a persisted legacy global comment stays exact after restart and sends dire
     await expect(recoveredComment).toHaveAttribute("data-resolution", "exact");
     await expect(recoveredComment.getByText("原位置已变化")).toHaveCount(0);
 
-    await activeLaunch.page.getByRole("button", { name: /发送至 Qoder/u }).click();
+    await activeLaunch.page.getByRole("button", { name: /复制AI任务Prompt/u }).click();
     await expect(activeLaunch.page.getByText(
       "等待 QoderWork 返回修改结果",
       { exact: true },

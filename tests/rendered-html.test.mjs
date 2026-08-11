@@ -50,7 +50,7 @@ test("server-renders the public workbench without retired hosting or editor surf
     "预览",
     "项目",
     "全局评论",
-    "发送至 Qoder",
+    "复制AI任务Prompt",
     "评论会显示在这里",
   ]) {
     assert.match(html, new RegExp(entryPoint, "u"));

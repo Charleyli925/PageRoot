@@ -373,7 +373,7 @@ test("Electron first launch registers the welcome HTML and sends its comment to 
     await launched.page.getByRole("textbox", { name: "评论内容" })
       .fill("把欢迎页主标题改得更简洁。");
     await launched.page.getByRole("button", { name: "评论", exact: true }).click();
-    await launched.page.getByRole("button", { name: /发送至 Qoder/u }).click();
+    await launched.page.getByRole("button", { name: /复制AI任务Prompt/u }).click();
     await expect(
       launched.page.getByText("等待 QoderWork 返回修改结果", { exact: true }),
     ).toBeVisible();
@@ -1151,7 +1151,7 @@ test("multiple orphaned comments relink in sequence and resume the original send
     await expect(recoveredComments.filter({ hasText: secondComment }))
       .toHaveAttribute("data-resolution", "orphaned");
 
-    await activeLaunch.page.getByRole("button", { name: /发送至 Qoder/u }).click();
+    await activeLaunch.page.getByRole("button", { name: /复制AI任务Prompt/u }).click();
     await expect(activeLaunch.page.getByText("2 条评论需要重新定位", { exact: true }))
       .toBeVisible();
     await activeLaunch.page.getByRole("button", { name: "开始重新定位" }).click();
