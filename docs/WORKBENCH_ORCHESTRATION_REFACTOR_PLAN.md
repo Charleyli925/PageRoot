@@ -1,6 +1,6 @@
 # Workbench 应用编排收口执行计划
 
-- 状态：**Proposed / 仅规划，尚未授权实施**
+- 状态：**PR-1 已建立本地候选（未 Ready、未合并）；PR-2 至 PR-7 尚未授权**
 - 规划基线：`main@37bba7779b27c0a42a52f98ec84a377b964bf4eb`
 - 基线 Tree：`0e074849493e5f9db9e89621e0a1c1a4910b8fa1`
 - 基线日期：2026-08-11
@@ -583,6 +583,37 @@ npm run task:finish
   access；PR-7 必须删除，不能成为永久 API；
 - Session 目前多为单 observer，aggregate snapshot 的最终切换可能需要 PR-7
   调整 observer wiring，但不能在 PR-1 顺手扩成事件框架。
+
+### 7.8 实施记录（2026-08-11）
+
+- 候选分支：`refactor/workspace-controller-registration`；功能实现提交：
+  `3bf94fb`（最终候选仍须以本分支的 `task:finish` 冻结）。本 PR 不进入 Ready、
+  合并、版本或发布流程。
+- 实际新增 `workspace-controller.js/.d.ts` 和
+  `workspace-controller-codecs.js/.d.ts`。Controller 只接收 Workbench 已有的
+  Project、Document、Comment、Draft、Version、SourceHistory Session；没有创建
+  第二套 owner 或全局 Store。
+- `ensureRegistered()` 现在返回显式 `succeeded / blocked / rejected / unknown /
+  stale` outcome，持有 single-flight、`epoch + sourcePath + expectedSourceSha256 +
+  operationId` 围栏，并在 Bridge 结果仍 current 时同步发布 Session authority。
+  当前 source Hash 在等待期间变化也会返回 `stale`，不会写入 Session。
+- Workbench 已删除 `projectRegistrationPromiseRef` 和
+  `ensureProjectRegistered`，登记调用统一委托 Controller；仅把
+  `registration-published` event 映射回 `projectRecordsPath`、`projectName` 等
+  presentation state。现有 pure codec 保持注入，未反向 import Workbench。
+- 直接 Workbench Bridge 调用从 30 降至 28：已移除 registration 的 `workspace`
+  和 `ensureProject`。剩余预算已由 architecture gate 精确锁定为 `workspace` 5、
+  `source` 6、`versionFile` 3、`sourceHistoryAction` 2、`resolveConflict` 2，及
+  `activateReadyVersion`、`attachment`、`autosave`、`cancelActiveRun`、
+  `createRequest`、`deleteAttachment`、`openFolder`、`projectFile`、
+  `saveAttachment`、`status` 各 1。
+- 未发生计划外 Bridge payload、desktop/IPC、persisted schema、依赖或 UI 变更；
+  Canvas invalidation 以窄 Port 注入，保留 canonical source adoption 的现有行为。
+- 已通过：PR-1 指定 Node 回归 34/34、`npm run architecture:check`、
+  `npm run typecheck`、`npm run gate:edit`，以及 `npm run test:browser:smoke`
+  28/28。最终候选仍执行 `npm run task:finish`。
+- 后续：PR-2 的 Document persistence/SourceHistory workflow 边界仍成立，但未获
+  本轮授权，不能提前实施。
 
 ## 8. PR-2：Document 持久化、恢复与 Source History Workflow
 
