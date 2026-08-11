@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Iframe root scrollbar feedback fixture</title>
+  <style>
+    html {
+      overflow-y: scroll;
+    }
+
+    html::-webkit-scrollbar {
+      width: 15px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      overflow-y: scroll !important;
+      color: #172033;
+      background: #f8fafc;
+      font: 16px/1.5 Arial, sans-serif;
+    }
+
+    main {
+      padding: 24px;
+    }
+
+    .threshold-layout {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 20px;
+    }
+
+    .threshold-card {
+      min-height: 180px;
+      padding: 18px;
+      border: 1px solid #cbd5e1;
+      border-radius: 12px;
+      background: #fff;
+    }
+
+    .nested-scroll {
+      height: 64px;
+      overflow: auto;
+      border: 1px solid #94a3b8;
+      border-radius: 6px;
+      background: #fff;
+    }
+
+    .nested-scroll > div {
+      height: 132px;
+      padding: 10px;
+    }
+
+    .fractional-tail {
+      height: 1260.25px;
+    }
+
+    @media (max-width: 900px) {
+      .threshold-layout {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main data-native-case="iframe-root-scroll-feedback">
+    <h1>Scrollbar feedback threshold</h1>
+    <p>
+      This synthetic page reserves a root scrollbar and changes its authored
+      layout at the 900px viewport breakpoint.
+    </p>
+    <section class="threshold-layout" aria-label="threshold layout">
+      <article class="threshold-card">
+        <h2>Measured source content</h2>
+        <p>Fractional natural height must be rounded only after it is measured.</p>
+      </article>
+      <article class="threshold-card">
+        <h2>Nested authored scroll</h2>
+        <div id="nested-scroll-probe" class="nested-scroll" data-scroll-probe>
+          <div>Nested overflow remains available after the root is locked.</div>
+        </div>
+      </article>
+    </section>
+    <div class="fractional-tail" aria-hidden="true"></div>
+  </main>
+</body>
+</html>

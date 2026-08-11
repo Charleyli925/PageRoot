@@ -48,6 +48,10 @@ export function naturalDocumentContentHeight(
   clientHeight: number,
 ): number {
   const scrollingElement = documentNode.scrollingElement || documentNode.documentElement;
+  const renderedHeight = Math.max(
+    documentNode.documentElement.getBoundingClientRect().height,
+    documentNode.body.getBoundingClientRect().height,
+  );
   const offsetHeight = Math.max(
     documentNode.documentElement.offsetHeight,
     documentNode.body.offsetHeight,
@@ -61,8 +65,8 @@ export function naturalDocumentContentHeight(
     0,
     Math.ceil(
       scrollHeight > clientHeight + 1
-        ? Math.max(offsetHeight, scrollHeight)
-        : offsetHeight,
+        ? Math.max(renderedHeight, offsetHeight, scrollHeight)
+        : Math.max(renderedHeight, offsetHeight),
     ),
   );
 }

@@ -778,6 +778,201 @@ test("Electron Edit does not execute an inline authored runtime script", async (
   }
 });
 
+test("Electron edit Canvas keeps root scrolling in the shared stage across a scrollbar threshold", async () => {
+  test.setTimeout(90_000);
+  const sourceDirectory = mkdtempSync(path.join(tmpdir(), "pageroot-native-source-e2e-"));
+  const sourcePath = path.join(sourceDirectory, "iframe-root-scroll-feedback.html");
+  const original = fixtureBuffer("iframe-root-scroll-feedback.html");
+  writeFileSync(sourcePath, original);
+
+  const isolatedUserData = mkdtempSync(path.join(tmpdir(), "pageroot-native-e2e-"));
+  let electronApp = null;
+  try {
+    const launched = await launchPageRoot({
+      isolatedUserData,
+      activeSourcePath: sourcePath,
+    });
+    electronApp = launched.electronApp;
+    const { editor } = await loadedDiskFrame(
+      launched.page,
+      sourcePath,
+      "iframe-root-scroll-feedback",
+    );
+    const iframe = editor.locator('iframe[title*="HTML"]');
+    const mainRendererUrl = launched.page.url();
+
+    const waitForAnimationFrames = (count) => launched.page.evaluate(
+      (frameCount) => new Promise((resolve) => {
+        let remaining = frameCount;
+        const nextFrame = () => {
+          remaining -= 1;
+          if (remaining <= 0) {
+            resolve();
+            return;
+          }
+          requestAnimationFrame(nextFrame);
+        };
+        requestAnimationFrame(nextFrame);
+      }),
+      count,
+    );
+    const resizeMainWindow = async (width, height = 960) => {
+      await electronApp.evaluate(
+        ({ BrowserWindow }, { rendererUrl, nextWidth, nextHeight }) => {
+          const mainWindow = BrowserWindow.getAllWindows().find((candidate) => (
+            candidate.webContents.getURL() === rendererUrl
+          ));
+          if (!mainWindow) {
+            throw new Error("PageRoot main BrowserWindow is unavailable for scrollbar feedback.");
+          }
+          mainWindow.setContentSize(nextWidth, nextHeight);
+        },
+        {
+          rendererUrl: mainRendererUrl,
+          nextWidth: width,
+          nextHeight: height,
+        },
+      );
+      await expect.poll(async () => electronApp.evaluate(
+        ({ BrowserWindow }, rendererUrl) => {
+          const mainWindow = BrowserWindow.getAllWindows().find((candidate) => (
+            candidate.webContents.getURL() === rendererUrl
+          ));
+          return mainWindow?.getContentSize() || null;
+        },
+        mainRendererUrl,
+      )).toEqual([width, height]);
+      await waitForAnimationFrames(4);
+    };
+    const rootMetrics = () => iframe.evaluate((frameElement) => {
+      const documentNode = frameElement.contentDocument;
+      const frameWindow = frameElement.contentWindow;
+      if (!documentNode?.body || !frameWindow) {
+        throw new Error("Iframe document is unavailable for scrollbar feedback metrics.");
+      }
+      const root = documentNode.documentElement;
+      const body = documentNode.body;
+      return {
+        iframeWidth: frameElement.clientWidth,
+        iframeHeight: frameElement.clientHeight,
+        generation: frameElement.getAttribute("data-frame-generation"),
+        rootClientWidth: root.clientWidth,
+        viewportWidth: frameWindow.innerWidth,
+        rootOverflowY: getComputedStyle(root).overflowY,
+        bodyOverflowY: getComputedStyle(body).overflowY,
+        rootScrollY: frameWindow.scrollY,
+        naturalContentHeight: Math.ceil(Math.max(
+          root.getBoundingClientRect().height,
+          body.getBoundingClientRect().height,
+        )),
+      };
+    });
+    const resizeForIframeWidth = async (targetWidth) => {
+      for (let attempt = 0; attempt < 4; attempt += 1) {
+        const metrics = await rootMetrics();
+        if (metrics.iframeWidth === targetWidth) return metrics;
+        const pageWidth = await launched.page.evaluate(() => (
+          document.documentElement.clientWidth
+        ));
+        await resizeMainWindow(Math.max(
+          1_100,
+          Math.round(pageWidth + targetWidth - metrics.iframeWidth),
+        ));
+      }
+      throw new Error(`Could not reach iframe width ${targetWidth}px for scrollbar feedback.`);
+    };
+
+    await iframe.evaluate((frameElement) => {
+      window.__PAGEROOT_SCROLLBAR_FEEDBACK_DOCUMENT__ = frameElement.contentDocument;
+      window.__PAGEROOT_SCROLLBAR_FEEDBACK_GENERATION__ =
+        frameElement.getAttribute("data-frame-generation");
+    });
+
+    await resizeForIframeWidth(899);
+    const thresholdMetrics = await resizeForIframeWidth(900);
+    expect(thresholdMetrics.iframeWidth).toBe(900);
+    await expect.poll(async () => {
+      const metrics = await rootMetrics();
+      return (
+        metrics.rootOverflowY === "hidden"
+        && metrics.bodyOverflowY === "hidden"
+        && metrics.rootClientWidth === metrics.viewportWidth
+        && metrics.iframeHeight >= metrics.naturalContentHeight
+      );
+    }).toBe(true);
+
+    const stableSamples = await iframe.evaluate(async (frameElement) => {
+      const samples = [];
+      for (let index = 0; index < 120; index += 1) {
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+        const documentNode = frameElement.contentDocument;
+        const frameWindow = frameElement.contentWindow;
+        if (!documentNode?.body || !frameWindow) {
+          throw new Error("Iframe document was replaced during scrollbar sampling.");
+        }
+        samples.push({
+          iframeHeight: frameElement.clientHeight,
+          rootClientWidth: documentNode.documentElement.clientWidth,
+          viewportWidth: frameWindow.innerWidth,
+          rootScrollY: frameWindow.scrollY,
+        });
+      }
+      return samples;
+    });
+    expect(new Set(stableSamples.map((sample) => sample.iframeHeight)).size).toBe(1);
+    expect(stableSamples.every((sample) => (
+      sample.rootClientWidth === sample.viewportWidth && sample.rootScrollY === 0
+    ))).toBe(true);
+
+    const nestedScroll = await iframe.evaluate((frameElement) => {
+      const frameWindow = frameElement.contentWindow;
+      const nested = frameElement.contentDocument?.getElementById("nested-scroll-probe");
+      if (!frameWindow || !(nested instanceof frameWindow.HTMLElement)) {
+        throw new Error("Nested authored scroll probe is missing.");
+      }
+      nested.scrollTop = 48;
+      return {
+        overflowY: getComputedStyle(nested).overflowY,
+        scrollTop: nested.scrollTop,
+      };
+    });
+    expect(nestedScroll.overflowY).toBe("auto");
+    expect(nestedScroll.scrollTop).toBeGreaterThan(0);
+
+    const reviewStage = launched.page.locator(".review-scroll-stage");
+    await reviewStage.evaluate((element) => {
+      element.scrollTop = 0;
+    });
+    const iframeBox = await iframe.boundingBox();
+    if (!iframeBox) throw new Error("Iframe is not visible for shared-stage wheel routing.");
+    await launched.page.mouse.move(
+      iframeBox.x + Math.min(120, iframeBox.width / 2),
+      iframeBox.y + Math.min(120, iframeBox.height / 2),
+    );
+    await launched.page.mouse.wheel(0, 720);
+    await expect.poll(() => reviewStage.evaluate((element) => element.scrollTop))
+      .toBeGreaterThan(0);
+    expect((await rootMetrics()).rootScrollY).toBe(0);
+
+    await resizeForIframeWidth(901);
+    await waitForAnimationFrames(8);
+    expect(await iframe.evaluate((frameElement) => (
+      frameElement.contentDocument
+        === window.__PAGEROOT_SCROLLBAR_FEEDBACK_DOCUMENT__
+      && frameElement.getAttribute("data-frame-generation")
+        === window.__PAGEROOT_SCROLLBAR_FEEDBACK_GENERATION__
+    ))).toBe(true);
+    expect(readFileSync(sourcePath).equals(original)).toBe(true);
+  } finally {
+    if (electronApp) await stopPageRoot(electronApp, isolatedUserData, { cleanup: false });
+    removeIsolatedUserData(isolatedUserData);
+    removeValidatedTemporaryDirectory(
+      sourceDirectory,
+      "pageroot-native-source-e2e-",
+    );
+  }
+});
+
 test("Electron edit mode reveals safe semantic content without changing disk bytes", async () => {
   const sourceDirectory = mkdtempSync(
     path.join(tmpdir(), "pageroot-presentation-source-e2e-"),

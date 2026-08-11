@@ -4,6 +4,11 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
+- Fixed the edit Canvas shaking continuously at window widths where the source
+  iframe would gain or lose a vertical scrollbar. The shared page scroll stage
+  now owns page-level vertical scrolling, while Canvas measures fractional
+  natural content height before rounding so a sub-pixel overflow cannot reopen
+  the scrollbar feedback loop. Nested authored scroll containers are unchanged.
 - Fixed formal macOS packages omitting the signed `app-update.yml` provider
   configuration, which made every update check appear unavailable even when
   GitHub Release metadata was healthy. Candidate assembly now generates the
