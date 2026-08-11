@@ -280,6 +280,24 @@ export async function architectureViolations() {
     ),
     "utf8",
   );
+  const projectRulesSession = await readFile(
+    path.join(
+      PRODUCT_ROOT,
+      "app",
+      "application",
+      "project-rules-session.js",
+    ),
+    "utf8",
+  );
+  const projectRulesWorkflow = await readFile(
+    path.join(
+      PRODUCT_ROOT,
+      "app",
+      "application",
+      "project-rules-workflow.js",
+    ),
+    "utf8",
+  );
   const commentWorkflow = await readFile(
     path.join(
       PRODUCT_ROOT,
@@ -512,6 +530,70 @@ export async function architectureViolations() {
   ) {
     violations.push(
       "app/application/workspace-controller.js: PR-4 must compose and expose CommentWorkflow commands and projection",
+    );
+  }
+  if (
+    !workspaceController.includes("import { ProjectRulesSession }")
+    || !workspaceController.includes("import { ProjectRulesWorkflow }")
+    || !workspaceController.includes("this.#projectRulesWorkflow = new ProjectRulesWorkflow({")
+    || !workspaceController.includes("new ProjectRulesSession()")
+    || !workspaceController.includes("projectRules: this.#projectRulesSnapshot")
+    || !workspaceController.includes("openProjectRules(input)")
+    || !workspaceController.includes("saveProjectRules()")
+    || !workspaceController.includes("this.#projectRulesWorkflow?.dispose()")
+  ) {
+    violations.push(
+      "app/application/workspace-controller.js: PROJECT.md workflow must be composed, projected and disposed by WorkspaceController",
+    );
+  }
+  if (
+    !projectRulesSession.includes("export class ProjectRulesSession")
+    || !projectRulesSession.includes("beginOpen(context)")
+    || !projectRulesSession.includes("completeOpen(token, payload)")
+    || !projectRulesSession.includes("beginSave()")
+    || !projectRulesSession.includes("completeSave(token)")
+    || /(?:#bridgeClient|\.projectFile\(|\.updateProjectFile\()/.test(projectRulesSession)
+  ) {
+    violations.push(
+      "app/application/project-rules-session.js: PROJECT.md mutable editor facts must remain free of Bridge I/O",
+    );
+  }
+  if (
+    !projectRulesWorkflow.includes("export class ProjectRulesWorkflow")
+    || !projectRulesWorkflow.includes("const AUTOSAVE_DELAY_MS = 700")
+    || !projectRulesWorkflow.includes("async open({ context }")
+    || !projectRulesWorkflow.includes("this.#bridgeClient.projectFile(")
+    || !projectRulesWorkflow.includes("this.#bridgeClient.updateProjectFile({")
+    || !projectRulesWorkflow.includes("resetForProjectTransition()")
+    || !projectRulesWorkflow.includes("async drain()")
+    || !projectRulesWorkflow.includes("this.#presentationPort.restoreEditor({")
+    || /(?:^|\/)(?:workbench|components|desktop)(?:\/|$)|\breact\b/u.test(
+      importedSpecifiers(projectRulesWorkflow).join("\n"),
+    )
+  ) {
+    violations.push(
+      "app/application/project-rules-workflow.js: PROJECT.md Bridge I/O, 700ms autosave, reconciliation and drain must stay in the application boundary",
+    );
+  }
+  if (
+    !projectWorkflow.includes("this.#projectRulesWorkflow.inspect()")
+    || !projectWorkflow.includes("this.#projectRulesWorkflow.drain()")
+    || /\bprojectRulesSession\b/.test(projectWorkflow)
+  ) {
+    violations.push(
+      "app/application/project-workflow.js: project-rule drain must delegate to ProjectRulesWorkflow without a legacy Session callback",
+    );
+  }
+  if (
+    !workbench.includes("projectRulesWorkflow: {")
+    || !workbench.includes(".openProjectRules({")
+    || !workbench.includes(".updateProjectRules({")
+    || !workbench.includes(".saveProjectRules()")
+    || !workbench.includes(".closeProjectRules()")
+    || /\b(?:projectRulesSessionRef|saveProjectRulesRef|PROJECT_RULES_AUTOSAVE_DELAY_MS)\b/.test(workbench)
+  ) {
+    violations.push(
+      "app/workbench.tsx: PROJECT.md must use Controller commands and a snapshot projection; Workbench cannot own its timer, Session or Bridge I/O",
     );
   }
   if (

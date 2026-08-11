@@ -136,7 +136,7 @@ export class ProjectWorkflow {
   #versionSession;
   #commentWorkflow;
   #runSession;
-  #projectRulesSession;
+  #projectRulesWorkflow;
   #externalFileOpenSession;
   #projectApplicationSession;
   #documentWorkflow;
@@ -176,7 +176,7 @@ export class ProjectWorkflow {
     versionSession,
     commentWorkflow,
     runSession,
-    projectRulesSession,
+    projectRulesWorkflow,
     externalFileOpenSession,
     projectApplicationSession,
     documentWorkflow,
@@ -228,8 +228,13 @@ export class ProjectWorkflow {
     if (!runSession || typeof runSession.activate !== "function") {
       throw new TypeError("ProjectWorkflow requires RunSession injection.");
     }
-    if (!projectRulesSession || typeof projectRulesSession.inspect !== "function") {
-      throw new TypeError("ProjectWorkflow requires ProjectRulesSession injection.");
+    if (
+      !projectRulesWorkflow
+      || typeof projectRulesWorkflow.inspect !== "function"
+      || typeof projectRulesWorkflow.drain !== "function"
+      || typeof projectRulesWorkflow.resetForProjectTransition !== "function"
+    ) {
+      throw new TypeError("ProjectWorkflow requires ProjectRulesWorkflow composition.");
     }
     if (!externalFileOpenSession || typeof externalFileOpenSession.enqueue !== "function") {
       throw new TypeError("ProjectWorkflow requires ExternalFileOpenSession injection.");
@@ -308,7 +313,7 @@ export class ProjectWorkflow {
     this.#versionSession = versionSession;
     this.#commentWorkflow = commentWorkflow;
     this.#runSession = runSession;
-    this.#projectRulesSession = projectRulesSession;
+    this.#projectRulesWorkflow = projectRulesWorkflow;
     this.#externalFileOpenSession = externalFileOpenSession;
     this.#projectApplicationSession = projectApplicationSession;
     this.#documentWorkflow = documentWorkflow;
@@ -1256,6 +1261,7 @@ export class ProjectWorkflow {
       });
       this.#documentWorkflow.resetForProjectTransition();
       this.#commentWorkflow.resetForProjectTransition();
+      this.#projectRulesWorkflow.resetForProjectTransition();
 
       const [recents, hydrated] = await Promise.all([
         this.refreshRecents(),
@@ -1415,10 +1421,8 @@ export class ProjectWorkflow {
     });
     this.#drainCoordinator.replace("project-rules", {
       label: "等待项目规则保存",
-      inspect: () => this.#projectRulesSession.inspect({
-        locked: this.#runSession.activeLocked,
-      }),
-      drain: () => this.#legacyPort.saveProjectRules(),
+      inspect: () => this.#projectRulesWorkflow.inspect(),
+      drain: () => this.#projectRulesWorkflow.drain(),
     });
     this.#drainCoordinator.replace("source", {
       label: "等待当前 HTML 写回",
@@ -1786,7 +1790,7 @@ export class ProjectWorkflow {
     this.#markHydrationStage("apply-authority");
     this.#commentWorkflow.resetForProjectTransition();
     this.#draftSession.deactivate();
-    this.#projectRulesSession.close();
+    this.#projectRulesWorkflow.resetForProjectTransition();
     this.#commentSession.reset();
     this.#versionSession.reset();
     this.#canvasPort.invalidateRenderAcks?.();
@@ -2488,6 +2492,7 @@ export class ProjectWorkflow {
     if (changesSourcePath) {
       this.#documentWorkflow.resetForProjectTransition();
       this.#commentWorkflow.resetForProjectTransition();
+      this.#projectRulesWorkflow.resetForProjectTransition();
       this.#draftSession.deactivate();
     }
     return this.#projectSession.context;

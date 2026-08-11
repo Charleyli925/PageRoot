@@ -6,6 +6,7 @@ import { CommentSession } from "../app/application/comment-session.js";
 import { DocumentSession } from "../app/application/document-session.js";
 import { DraftSession } from "../app/application/draft-session.js";
 import { ProjectSession } from "../app/application/project-session.js";
+import { RunSession } from "../app/application/run-session.js";
 import { SourceHistorySession } from "../app/application/source-history-session.js";
 import { VersionSession } from "../app/application/version-session.js";
 import {
@@ -144,6 +145,71 @@ function createHarness({
   };
 }
 
+function createProjectRulesHarness() {
+  const projectSession = new ProjectSession();
+  projectSession.openLocator(SOURCE_PATH);
+  const context = projectSession.register({
+    epoch: 1,
+    projectId: "project_rules_controller",
+    documentId: "document_rules_controller",
+    sourcePath: SOURCE_PATH,
+  });
+  const runSession = new RunSession({ sourcePath: SOURCE_PATH });
+  const documentSession = new DocumentSession({
+    html: "<main>local source</main>",
+    sourceSha256: sha256("<main>local source</main>"),
+  });
+  const commentSession = new CommentSession();
+  let persisted = "# Original rules";
+  const client = {
+    async ensureProject() {
+      return registrationPayload();
+    },
+    async workspace() {
+      return registrationPayload();
+    },
+    async saveDraft() {
+      return {};
+    },
+    async projectFile(sourcePath, relativePath) {
+      assert.equal(sourcePath, SOURCE_PATH);
+      assert.equal(relativePath, "PROJECT.md");
+      return { content: persisted };
+    },
+    async updateProjectFile(payload) {
+      persisted = payload.content;
+      return {};
+    },
+  };
+  const controller = new WorkspaceController({
+    bridgeClient: client,
+    projectSession,
+    documentSession,
+    commentSession,
+    draftSession: new DraftSession({ bridgeClient: client }),
+    versionSession: new VersionSession(),
+    sourceHistorySession: new SourceHistorySession(),
+    codecs,
+    ports: {
+      hash: { sha256: async (value) => sha256(value) },
+    },
+    projectRulesWorkflow: {
+      runSession,
+      scheduler: {
+        setTimeout: () => 1,
+        clearTimeout() {},
+      },
+      presentation: {
+        restoreEditor({ settle }) {
+          settle();
+        },
+      },
+    },
+    clock: { now: () => 1_726_000_000_000 },
+  });
+  return { context, controller, get persisted() { return persisted; } };
+}
+
 test("workspace controller registers one injected Session set and publishes canonical authority", async () => {
   const harness = createHarness();
   harness.commentSession.update({
@@ -184,6 +250,58 @@ test("workspace controller registers one injected Session set and publishes cano
     projectName: "Canonical project",
     canonicalSourceAdopted: true,
   }]);
+});
+
+test("workspace controller aggregates and dispatches the typed PROJECT.md workflow", async () => {
+  const harness = createProjectRulesHarness();
+  const snapshots = [];
+  const unsubscribe = harness.controller.subscribe((snapshot) => snapshots.push(snapshot));
+
+  assert.equal(
+    (await harness.controller.openProjectRules({ context: harness.context })).status,
+    "succeeded",
+  );
+  assert.equal(harness.controller.getSnapshot().projectRules?.content, "# Original rules");
+  assert.equal(
+    harness.controller.updateProjectRules({ content: "# Updated rules" }).status,
+    "succeeded",
+  );
+  assert.equal((await harness.controller.saveProjectRules()).status, "succeeded");
+  assert.equal(harness.persisted, "# Updated rules");
+  assert.equal(
+    snapshots.at(-1)?.projectRules?.savedContent,
+    "# Updated rules",
+  );
+
+  unsubscribe();
+  harness.controller.dispose();
+});
+
+test("workspace controller rejects split RunSession composition for project rules", () => {
+  const projectRulesRunSession = new RunSession({ sourcePath: SOURCE_PATH });
+  const projectWorkflowRunSession = new RunSession({ sourcePath: SOURCE_PATH });
+
+  assert.throws(() => new WorkspaceController({
+    bridgeClient: {
+      async ensureProject() {
+        return registrationPayload();
+      },
+    },
+    projectSession: new ProjectSession(),
+    documentSession: new DocumentSession({
+      html: "<main>source</main>",
+      sourceSha256: sha256("<main>source</main>"),
+    }),
+    commentSession: new CommentSession(),
+    draftSession: new DraftSession({ bridgeClient: { async saveDraft() {} } }),
+    versionSession: new VersionSession(),
+    sourceHistorySession: new SourceHistorySession(),
+    codecs,
+    ports: { hash: { sha256: async (value) => sha256(value) } },
+    projectRulesWorkflow: { runSession: projectRulesRunSession },
+    projectWorkflow: { runSession: projectWorkflowRunSession },
+    clock: { now: () => 1 },
+  }), /one RunSession/);
 });
 
 test("workspace controller shares one registration Promise across durable callers", async () => {

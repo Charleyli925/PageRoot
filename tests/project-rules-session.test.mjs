@@ -12,90 +12,81 @@ const CONTEXT = Object.freeze({
   sourcePath: "/tmp/rules.html",
 });
 
-test("project rules session owns load, edit, save, and unknown-outcome reconciliation", async () => {
-  let persisted = "# Original";
-  let rejectAfterWrite = true;
-  let savedPayload = null;
-  const session = new ProjectRulesSession({
-    bridgeClient: {
-      async projectFile() {
-        return { content: persisted };
-      },
-      async updateProjectFile(payload) {
-        savedPayload = payload;
-        persisted = payload.content;
-        if (rejectAfterWrite) {
-          rejectAfterWrite = false;
-          throw new Error("response lost");
-        }
-      },
-    },
-  });
+test("project rules session owns working-copy and save acknowledgement facts without Bridge IO", () => {
+  const session = new ProjectRulesSession();
+  const snapshots = [];
+  const unsubscribe = session.subscribe((snapshot) => snapshots.push(snapshot));
 
-  assert.equal(await session.open(CONTEXT), true);
+  const read = session.beginOpen(CONTEXT);
+  assert.ok(read);
+  assert.equal(session.snapshot.loading, true);
+  assert.equal(session.completeOpen(read, { content: "# Original" }), true);
   assert.equal(session.snapshot.savedContent, "# Original");
+
   assert.equal(session.updateContent("# Updated"), true);
-  assert.equal(session.inspect().state, "pending");
-  assert.equal(await session.save(), true);
-  assert.equal(session.snapshot.content, "# Updated");
+  const save = session.beginSave();
+  assert.ok(save);
+  assert.equal(session.snapshot.saving, true);
+  assert.equal(session.updateContent("# Updated again"), true);
+  assert.equal(session.completeSave(save), true);
+
+  assert.equal(session.snapshot.content, "# Updated again");
   assert.equal(session.snapshot.savedContent, "# Updated");
-  assert.equal(session.inspect().state, "resolved");
-  assert.deepEqual(savedPayload, {
-    sourcePath: CONTEXT.sourcePath,
-    projectId: CONTEXT.projectId,
-    documentId: CONTEXT.documentId,
-    content: "# Updated",
-  });
+  assert.equal(session.inspect().state, "pending");
+  assert.ok(snapshots.length >= 5);
+  unsubscribe();
 });
 
-test("project rules composition fences autosave and explicit restore retires late input", async () => {
+test("project rules composition fences explicit restore and retires late input", () => {
   const target = {};
-  const session = new ProjectRulesSession({
-    bridgeClient: {
-      async projectFile() {
-        return { content: "saved" };
-      },
-      async updateProjectFile() {},
-    },
-  });
-  await session.open(CONTEXT);
+  const session = new ProjectRulesSession();
+  const read = session.beginOpen(CONTEXT);
+  assert.ok(read);
+  session.completeOpen(read, { content: "saved" });
   session.updateContent("draft");
   const compositionEpoch = session.beginComposition(target, "draft");
+  assert.equal(typeof compositionEpoch, "number");
   session.updateContent("marked text");
 
-  assert.equal(await session.save(), false);
   assert.equal(session.inspect().state, "pending");
-  assert.equal(session.restore(), compositionEpoch);
+  const restore = session.restore();
+  assert.deepEqual(restore, {
+    compositionEpoch,
+    editorGeneration: 1,
+  });
   assert.equal(session.snapshot.content, "saved");
-  assert.equal(session.snapshot.editorGeneration, 1);
   assert.equal(session.updateContent("late marked text"), false);
   assert.equal(session.settleRestore(compositionEpoch), true);
   assert.equal(session.snapshot.content, "saved");
+  assert.equal(session.snapshot.compositionActive, false);
 });
 
-test("late project-rule reads cannot replace the next project", async () => {
-  let releaseFirst;
-  const firstRead = new Promise((resolve) => {
-    releaseFirst = resolve;
-  });
-  const session = new ProjectRulesSession({
-    bridgeClient: {
-      async projectFile(sourcePath) {
-        if (sourcePath === CONTEXT.sourcePath) return firstRead;
-        return { content: "second" };
-      },
-      async updateProjectFile() {},
-    },
-  });
-
-  const firstOpen = session.open(CONTEXT);
+test("late project-rule reads and saves cannot replace a newer editor context", () => {
+  const session = new ProjectRulesSession();
+  const firstRead = session.beginOpen(CONTEXT);
+  assert.ok(firstRead);
   const secondContext = {
     ...CONTEXT,
     epoch: 4,
     sourcePath: "/tmp/second.html",
   };
-  assert.equal(await session.open(secondContext), true);
-  releaseFirst({ content: "stale" });
-  assert.equal(await firstOpen, false);
+  const secondRead = session.beginOpen(secondContext);
+  assert.ok(secondRead);
+
+  assert.equal(session.completeOpen(secondRead, { content: "second" }), true);
+  assert.equal(session.completeOpen(firstRead, { content: "stale" }), false);
   assert.equal(session.snapshot.content, "second");
+
+  session.updateContent("second draft");
+  const save = session.beginSave();
+  assert.ok(save);
+  const thirdRead = session.beginOpen({
+    ...CONTEXT,
+    epoch: 5,
+    sourcePath: "/tmp/third.html",
+  });
+  assert.ok(thirdRead);
+  assert.equal(session.completeSave(save), false);
+  assert.equal(session.completeOpen(thirdRead, { content: "third" }), true);
+  assert.equal(session.snapshot.content, "third");
 });

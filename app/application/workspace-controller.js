@@ -4,6 +4,8 @@ import { DocumentWorkflow } from "./document-workflow.js";
 import { DrainCoordinator } from "./drain-coordinator.js";
 import { ExternalFileOpenSession } from "./external-file-open-session.js";
 import { ProjectApplicationSession } from "./project-application-session.js";
+import { ProjectRulesSession } from "./project-rules-session.js";
+import { ProjectRulesWorkflow } from "./project-rules-workflow.js";
 import { ProjectWorkflow } from "./project-workflow.js";
 import { RunWorkflow } from "./run-workflow.js";
 import { VersionWorkflow } from "./version-workflow.js";
@@ -124,6 +126,8 @@ export class WorkspaceController {
   #documentWorkflowUnsubscribe = null;
   #commentWorkflow = null;
   #commentWorkflowUnsubscribe = null;
+  #projectRulesWorkflow = null;
+  #projectRulesWorkflowUnsubscribe = null;
   #projectWorkflow = null;
   #projectWorkflowUnsubscribe = null;
   #runWorkflow = null;
@@ -133,11 +137,13 @@ export class WorkspaceController {
   #runSessionUnsubscribe = null;
   #registration = registrationSnapshot().registration;
   #projectSnapshot = null;
+  #projectRulesSnapshot = null;
   #runSnapshot = null;
   #versionSnapshot = null;
   #snapshot = Object.freeze({
     registration: this.#registration,
     comment: null,
+    projectRules: null,
     project: null,
     run: null,
     version: null,
@@ -160,6 +166,7 @@ export class WorkspaceController {
     ports = {},
     documentWorkflow = null,
     commentWorkflow = null,
+    projectRulesWorkflow = null,
     projectWorkflow = null,
     runWorkflow = null,
     versionWorkflow = null,
@@ -191,6 +198,15 @@ export class WorkspaceController {
     }
     if (!clock || typeof clock.now !== "function") {
       throw new TypeError("WorkspaceController requires a ClockPort.");
+    }
+    if (
+      projectRulesWorkflow
+      && projectWorkflow
+      && projectRulesWorkflow.runSession !== projectWorkflow.runSession
+    ) {
+      throw new TypeError(
+        "WorkspaceController ProjectRulesWorkflow and ProjectWorkflow require one RunSession.",
+      );
     }
 
     this.#bridgeClient = bridgeClient;
@@ -273,12 +289,35 @@ export class WorkspaceController {
       );
       this.#commentWorkflow.subscribeEvents((event) => this.#emitEvent(event));
     }
+    if (projectRulesWorkflow) {
+      this.#projectRulesWorkflow = new ProjectRulesWorkflow({
+        bridgeClient,
+        projectSession,
+        runSession: projectWorkflow?.runSession || projectRulesWorkflow.runSession,
+        projectRulesSession: new ProjectRulesSession(),
+        errorMessage: projectRulesWorkflow.errorMessage,
+        ports: {
+          presentation: projectRulesWorkflow.presentation,
+        },
+        scheduler: projectRulesWorkflow.scheduler,
+        clock,
+      });
+      this.#projectRulesWorkflowUnsubscribe = this.#projectRulesWorkflow.subscribe(
+        (snapshot) => {
+          this.#projectRulesSnapshot = snapshot;
+          this.#publishAggregateSnapshot();
+        },
+      );
+    }
     if (projectWorkflow) {
       if (!this.#documentWorkflow) {
         throw new TypeError("WorkspaceController ProjectWorkflow requires DocumentWorkflow.");
       }
       if (!this.#commentWorkflow) {
         throw new TypeError("WorkspaceController ProjectWorkflow requires CommentWorkflow.");
+      }
+      if (!this.#projectRulesWorkflow) {
+        throw new TypeError("WorkspaceController ProjectWorkflow requires ProjectRulesWorkflow.");
       }
       const legacy = projectWorkflow.ports?.legacy || {};
       this.#projectWorkflow = new ProjectWorkflow({
@@ -291,7 +330,7 @@ export class WorkspaceController {
         versionSession,
         commentWorkflow: this.#commentWorkflow,
         runSession: projectWorkflow.runSession,
-        projectRulesSession: projectWorkflow.projectRulesSession,
+        projectRulesWorkflow: this.#projectRulesWorkflow,
         externalFileOpenSession: new ExternalFileOpenSession(),
         projectApplicationSession: new ProjectApplicationSession(),
         documentWorkflow: this.#documentWorkflow,
@@ -432,6 +471,10 @@ export class WorkspaceController {
     this.#projectWorkflowUnsubscribe = null;
     this.#projectWorkflow?.dispose();
     this.#projectWorkflow = null;
+    this.#projectRulesWorkflowUnsubscribe?.();
+    this.#projectRulesWorkflowUnsubscribe = null;
+    this.#projectRulesWorkflow?.dispose();
+    this.#projectRulesWorkflow = null;
     this.#commentWorkflowUnsubscribe?.();
     this.#commentWorkflowUnsubscribe = null;
     this.#commentWorkflow?.dispose();
@@ -530,6 +573,38 @@ export class WorkspaceController {
 
   refreshRecentProjects() {
     return this.#requireProjectWorkflow().refreshRecents();
+  }
+
+  openProjectRules(input) {
+    return this.#requireProjectRulesWorkflow().open(input);
+  }
+
+  updateProjectRules(input) {
+    return this.#requireProjectRulesWorkflow().updateContent(input);
+  }
+
+  beginProjectRulesComposition(input) {
+    return this.#requireProjectRulesWorkflow().beginComposition(input);
+  }
+
+  finishProjectRulesComposition(input) {
+    return this.#requireProjectRulesWorkflow().finishComposition(input);
+  }
+
+  leaveProjectRulesEditor() {
+    return this.#requireProjectRulesWorkflow().leaveEditor();
+  }
+
+  restoreProjectRules() {
+    return this.#requireProjectRulesWorkflow().restore();
+  }
+
+  saveProjectRules() {
+    return this.#requireProjectRulesWorkflow().save();
+  }
+
+  closeProjectRules() {
+    return this.#requireProjectRulesWorkflow().close();
   }
 
   renameProjectSource(input) {
@@ -706,6 +781,13 @@ export class WorkspaceController {
     return this.#projectWorkflow;
   }
 
+  #requireProjectRulesWorkflow() {
+    if (!this.#projectRulesWorkflow) {
+      throw new Error("项目规则工作流尚未完成组合。");
+    }
+    return this.#projectRulesWorkflow;
+  }
+
   #requireCommentWorkflow() {
     if (!this.#commentWorkflow) {
       throw new Error("评论工作流尚未完成组合。");
@@ -819,6 +901,7 @@ export class WorkspaceController {
     this.#snapshot = Object.freeze({
       registration: this.#registration,
       comment: this.#commentWorkflow?.getSnapshot() || null,
+      projectRules: this.#projectRulesSnapshot,
       project: this.#projectSnapshot,
       run: this.#runSnapshot,
       version: this.#versionSnapshot,

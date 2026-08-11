@@ -397,7 +397,7 @@
     {
       "id": "project-session",
       "patterns": [
-        "^app/application/(?:external-file-open-session|local-action-outcomes|project-application-session|project-query-fence|project-rules-session|project-session)\\.(?:js|d\\.ts)$",
+        "^app/application/(?:external-file-open-session|local-action-outcomes|project-application-session|project-query-fence|project-session)\\.(?:js|d\\.ts)$",
         "^scripts/project-context-service\\.mjs$"
       ],
       "suites": ["typecheck"],
@@ -407,8 +407,22 @@
         "tests/project-application-session.test.mjs",
         "tests/project-context-service.test.mjs",
         "tests/project-query-fence.test.mjs",
-        "tests/project-rules-session.test.mjs",
         "tests/project-session.test.mjs"
+      ]
+    },
+    {
+      "id": "project-rules-workflow",
+      "patterns": [
+        "^app/application/project-rules-(?:session|workflow)\\.(?:js|d\\.ts)$",
+        "^tests/project-rules-(?:session|workflow)\\.test\\.mjs$"
+      ],
+      "suites": ["typecheck", "electron-smoke"],
+      "nodeTests": [
+        "tests/project-rules-session.test.mjs",
+        "tests/project-rules-workflow.test.mjs",
+        "tests/project-workflow.test.mjs",
+        "tests/drain-coordinator.test.mjs",
+        "tests/architecture-boundaries.test.mjs"
       ]
     },
     {
@@ -421,6 +435,7 @@
       "nodeTests": [
         "tests/workspace-controller.test.mjs",
         "tests/comment-workflow.test.mjs",
+        "tests/project-rules-workflow.test.mjs",
         "tests/project-workflow.test.mjs",
         "tests/document-workflow.test.mjs",
         "tests/project-session.test.mjs",
@@ -449,6 +464,7 @@
         "tests/drain-coordinator.test.mjs",
         "tests/desktop-close-recovery.test.mjs",
         "tests/external-file-open.test.mjs",
+        "tests/project-rules-workflow.test.mjs",
         "tests/source-rename.test.mjs",
         "tests/version-workflow.test.mjs"
       ]
@@ -545,6 +561,7 @@
       "suites": ["typecheck"],
       "nodeTests": [
         "tests/architecture-boundaries.test.mjs",
+        "tests/project-rules-workflow.test.mjs",
         "tests/project-workflow.test.mjs"
       ]
     },
@@ -662,6 +679,7 @@
       "suites": ["typecheck", "browser-smoke", "electron-smoke", "ai-smoke"],
       "nodeTests": [
         "tests/architecture-boundaries.test.mjs",
+        "tests/project-rules-workflow.test.mjs",
         "tests/project-workflow.test.mjs",
         "tests/source-rename.test.mjs"
       ]

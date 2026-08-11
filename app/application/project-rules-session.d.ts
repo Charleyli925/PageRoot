@@ -1,11 +1,11 @@
-export type ProjectRulesContext = {
+export type ProjectRulesContext = Readonly<{
   epoch: number;
   projectId: string;
   documentId: string;
   sourcePath: string;
-};
+}>;
 
-export type ProjectRulesSnapshot = {
+export type ProjectRulesSnapshot = Readonly<{
   open: boolean;
   path: "PROJECT.md";
   content: string;
@@ -16,35 +16,39 @@ export type ProjectRulesSnapshot = {
   saveError: string;
   compositionActive: boolean;
   editorGeneration: number;
-};
+}>;
+
+export type ProjectRulesOperation = Readonly<{
+  context: ProjectRulesContext;
+  generation: number;
+  content?: string;
+}>;
 
 export class ProjectRulesSession {
-  constructor(options: {
-    bridgeClient: {
-      projectFile: (
-        sourcePath: string,
-        relativePath: string,
-      ) => Promise<{ content?: unknown }>;
-      updateProjectFile: (payload: {
-        sourcePath: string;
-        projectId: string;
-        documentId: string;
-        content: string;
-      }) => Promise<unknown>;
-    };
-    errorMessage?: (cause: unknown, fallback: string) => string;
-  });
-  setObserver(observer: ((snapshot: ProjectRulesSnapshot) => void) | null): void;
-  open(context: ProjectRulesContext): Promise<boolean>;
+  subscribe(listener: (snapshot: ProjectRulesSnapshot) => void): () => void;
+  beginOpen(context: ProjectRulesContext): ProjectRulesOperation | null;
+  completeOpen(
+    token: ProjectRulesOperation,
+    payload: { content?: unknown } | null | undefined,
+  ): boolean;
+  failOpen(token: ProjectRulesOperation, error: string): boolean;
   close(): void;
+  matchesContext(context: ProjectRulesContext): boolean;
+  isCurrent(token: ProjectRulesOperation | null | undefined): boolean;
   updateContent(content: string): boolean;
   beginComposition(target: unknown, baselineValue: string): number | null;
   finishComposition(target: unknown): boolean;
   leaveEditor(): boolean;
-  restore(): number | null;
+  restore(): Readonly<{
+    compositionEpoch: number | null;
+    editorGeneration: number;
+  }> | null;
   settleRestore(compositionEpoch: number | null): boolean;
+  beginSave(): ProjectRulesOperation | null;
+  completeSave(token: ProjectRulesOperation): boolean;
+  failSave(token: ProjectRulesOperation, error: string): boolean;
+  abandonSave(token: ProjectRulesOperation): boolean;
   readonly compositionActive: boolean;
-  save(options?: { locked?: boolean }): Promise<boolean>;
   inspect(options?: { locked?: boolean }):
     | { state: "resolved" }
     | { state: "pending" | "blocked"; reason: string };

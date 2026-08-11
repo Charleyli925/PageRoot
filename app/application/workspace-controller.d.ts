@@ -16,6 +16,12 @@ import type { CommentSession } from "./comment-session.js";
 import type { DocumentSession, PersistedBoundaryResult } from "./document-session.js";
 import type { DraftSession } from "./draft-session.js";
 import type { ProjectContext, ProjectSession } from "./project-session.js";
+import type {
+  ProjectRulesPresentationPort,
+  ProjectRulesScheduler,
+  ProjectRulesWorkflowOutcome,
+} from "./project-rules-workflow.js";
+import type { ProjectRulesSnapshot } from "./project-rules-session.js";
 import type { SourceHistorySession } from "./source-history-session.js";
 import type { VersionSession } from "./version-session.js";
 import type {
@@ -72,6 +78,7 @@ export type WorkspaceControllerSnapshot = Readonly<{
     outcome: CommandOutcome<ProjectContext> | null;
   }>;
   comment: CommentWorkflowSnapshot | null;
+  projectRules: ProjectRulesSnapshot | null;
   project: ProjectWorkflowSnapshot | null;
   run: RunWorkflowSnapshot | null;
   version: VersionWorkflowSnapshot | null;
@@ -175,6 +182,7 @@ export type WorkspaceControllerConstruction = Readonly<{
     | "cancelActiveRun"
     | "versionFile"
     | "activateReadyVersion"
+    | "updateProjectFile"
   >;
   projectSession: ProjectSession;
   documentSession: DocumentSession;
@@ -203,10 +211,15 @@ export type WorkspaceControllerConstruction = Readonly<{
     recoveryStore: import("./recovery-store.js").RecoveryStore;
     attachmentBinary: AttachmentBinaryPort;
   }>;
+  projectRulesWorkflow?: Readonly<{
+    runSession: import("./run-session.js").RunSession;
+    errorMessage?: (cause: unknown, fallback: string) => string;
+    presentation?: ProjectRulesPresentationPort;
+    scheduler?: ProjectRulesScheduler;
+  }>;
   projectWorkflow?: Pick<
     ProjectWorkflowConstruction,
     | "runSession"
-    | "projectRulesSession"
     | "codecs"
     | "ports"
     | "policies"
@@ -318,6 +331,30 @@ export class WorkspaceController {
     context?: ProjectContext;
   }): Promise<ProjectWorkflowOutcome<{ opened: boolean }>>;
   refreshRecentProjects(): Promise<ProjectWorkflowOutcome<{ projects: unknown[] }>>;
+  openProjectRules(input: {
+    context: ProjectContext;
+  }): Promise<ProjectRulesWorkflowOutcome<{
+    opened: boolean;
+    reused?: boolean;
+  }>>;
+  updateProjectRules(input: { content: string }): ProjectRulesWorkflowOutcome<{
+    updated: boolean;
+  }>;
+  beginProjectRulesComposition(input: {
+    target: unknown;
+    baselineValue: string;
+  }): number | null;
+  finishProjectRulesComposition(input: { target: unknown }): boolean;
+  leaveProjectRulesEditor(): boolean;
+  restoreProjectRules(): ProjectRulesWorkflowOutcome<{
+    restored: boolean;
+    editorGeneration: number;
+  }>;
+  saveProjectRules(): Promise<ProjectRulesWorkflowOutcome<{
+    saved: boolean;
+    reconciled?: boolean;
+  }>>;
+  closeProjectRules(): Promise<ProjectRulesWorkflowOutcome<{ closed: boolean }>>;
   renameProjectSource(input: {
     stem: string;
     deadlineAt?: number;

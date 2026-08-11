@@ -74,6 +74,11 @@ PR 批量是建议而非固定限制：用 CI Health 的 Ready 次数、candidat
   对账、单飞与迟到结果不能 rebase 新项目。
   Workbench 只保留 file input 和 Outcome/Event 的展示映射；专项 Node 集与完整 Electron
   套件共同证明真实 close/open/hydration 路径。
+- `ProjectRulesWorkflow`：fake Bridge、Scheduler、Project/Run Session 与窄
+  presentation port 验证 `PROJECT.md` 的 700ms debounce、保存中继续输入时的完整 drain、
+  unknown-write 单次 authority reconciliation、late read/write stale fence、run lock、
+  dispose timer fence 与显式还原先退役原生输入节点。`ProjectRulesSession` 只验证 working
+  copy/composition/save projection；Workbench 只投影 Controller snapshot 并转发 intent。
 - `CommentWorkflow`：fake Bridge、RecoveryStore 和现有 Comment/Draft Session 证明
   lazy registration、单次 Draft 持久化、附件部分成功、跨项目迟到上传补偿、编辑取消
   仅删除 staged 附件，以及 unknown Draft POST 只通过 authority query 收敛而不重复
