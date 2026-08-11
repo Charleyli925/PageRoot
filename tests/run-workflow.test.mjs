@@ -15,6 +15,7 @@ import {
 
 const SOURCE_A = "/tmp/run-workflow-a.html";
 const SOURCE_B = "/tmp/run-workflow-b.html";
+const ACTIVATED_SOURCE = "/tmp/run-workflow-a-activated.html";
 const HTML_A = "<main>source A</main>";
 const HTML_B = "<main>source B</main>";
 
@@ -67,6 +68,10 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
+function operationKey(run) {
+  return `${run.sourcePath}\n${run.requestId}\n${run.attemptId}`;
+}
+
 function createScheduler() {
   let nextId = 0;
   const callbacks = new Map();
@@ -109,7 +114,7 @@ function codecs() {
     },
     fileStem: (name) => String(name).replace(/\.html?$/iu, "") || "未命名页面",
     projectMarkdown: (name) => `# ${name}`,
-    operationKey: (run) => `${run.sourcePath}\n${run.requestId}\n${run.attemptId}`,
+    operationKey,
     errorMessage: (cause, fallback) => String(cause?.message || fallback),
   };
 }
@@ -427,6 +432,64 @@ test("a terminal no-change poll unlocks the current project and remains reopenab
   assert.equal(harness.runSession.activeRun?.status, "no-change");
   assert.equal(harness.runSession.outcomeForSource(SOURCE_A)?.status, "no-change");
   assert.equal(harness.calls.unlock, 1);
+});
+
+test("polling does not start a ready-run status read while activation owns it", async () => {
+  let statusCalls = 0;
+  const harness = createHarness({
+    bridge: {
+      async status() {
+        statusCalls += 1;
+        return { status: "version-created", sourcePath: ACTIVATED_SOURCE };
+      },
+    },
+  });
+  const run = runRecord({ status: "ready-to-open", completionObserved: true });
+  harness.runSession.trackRun(run, { activate: "always" });
+  const activationKey = operationKey(run);
+  assert.equal(harness.runSession.beginOperation("activate", activationKey), true);
+
+  await harness.workflow.pollNow();
+
+  assert.equal(statusCalls, 0);
+  assert.equal(harness.runSession.runForSource(SOURCE_A)?.sourcePath, SOURCE_A);
+  assert.equal(harness.runSession.runForSource(ACTIVATED_SOURCE), null);
+  harness.runSession.endOperation("activate", activationKey);
+  harness.workflow.dispose();
+});
+
+test("polling discards a ready-run status response that overlaps activation", async () => {
+  const pendingStatus = deferred();
+  let statusCalls = 0;
+  const harness = createHarness({
+    bridge: {
+      async status() {
+        statusCalls += 1;
+        return pendingStatus.promise;
+      },
+    },
+  });
+  const run = runRecord({ status: "ready-to-open", completionObserved: true });
+  harness.runSession.trackRun(run, { activate: "always" });
+
+  const polling = harness.workflow.pollNow();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(statusCalls, 1);
+  const activationKey = operationKey(run);
+  assert.equal(harness.runSession.beginOperation("activate", activationKey), true);
+  pendingStatus.resolve({
+    status: "version-created",
+    sourcePath: ACTIVATED_SOURCE,
+    versionId: "version_002",
+  });
+
+  await polling;
+
+  assert.equal(harness.runSession.runForSource(SOURCE_A)?.sourcePath, SOURCE_A);
+  assert.equal(harness.runSession.runForSource(ACTIVATED_SOURCE), null);
+  assert.equal(harness.runSession.activeRun?.sourcePath, SOURCE_A);
+  harness.runSession.endOperation("activate", activationKey);
+  harness.workflow.dispose();
 });
 
 test("parallel polling keeps projects isolated and rejects a late result after its run is removed", async () => {

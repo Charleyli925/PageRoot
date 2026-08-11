@@ -156,7 +156,11 @@ export class RunWorkflow {
     if (!versionSession || !versionSession.snapshot) {
       throw new TypeError("RunWorkflow requires VersionSession injection.");
     }
-    if (!runSession || typeof runSession.trackRun !== "function") {
+    if (
+      !runSession
+      || typeof runSession.trackRun !== "function"
+      || typeof runSession.isOperationBusy !== "function"
+    ) {
       throw new TypeError("RunWorkflow requires RunSession injection.");
     }
     if (!documentWorkflow || typeof documentWorkflow.enqueueEdit !== "function") {
@@ -960,6 +964,12 @@ export class RunWorkflow {
       return stale(run);
     }
     const operationKey = this.#codecs.operationKey(run);
+    if (this.#runSession.isOperationBusy("activate", operationKey)) {
+      return blocked(
+        "RUN_POLL_ACTIVATION_BUSY",
+        "当前候选版本正在打开，状态核对已延后。",
+      );
+    }
     if (!this.#runSession.beginOperation("poll", operationKey)) {
       return blocked("RUN_POLL_BUSY", "本轮状态正在核对。");
     }
@@ -969,7 +979,11 @@ export class RunWorkflow {
         run.requestId,
         run.attemptId,
       );
-      if (!this.#isPollCurrent(generation) || !this.#runSession.hasRun(run)) {
+      if (
+        !this.#isPollCurrent(generation)
+        || !this.#runSession.hasRun(run)
+        || this.#runSession.isOperationBusy("activate", operationKey)
+      ) {
         return stale(run);
       }
       return this.#processStatus(run, payload);
