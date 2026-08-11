@@ -29,8 +29,8 @@ const RETIRED_WORKBENCH_DOCUMENT_AUTHORITIES =
 const RETIRED_WORKBENCH_COMMENT_AUTHORITIES =
   /\b(?:commentsRef|changeEventsRef|deletedCommentIdsRef|composerDraftRef|composerCommentIdRef|composerAttachmentsRef|draftTargetRef|commentEditSessionRef)\b/;
 const WORKBENCH_BRIDGE_CALL_ALLOWLIST = new Map([
-  ["workspace", 4],
-  ["source", 3],
+  ["workspace", 3],
+  ["source", 2],
   ["versionFile", 3],
   ["resolveConflict", 1],
   ["activateReadyVersion", 1],
@@ -38,12 +38,12 @@ const WORKBENCH_BRIDGE_CALL_ALLOWLIST = new Map([
   ["cancelActiveRun", 1],
   ["createRequest", 1],
   ["deleteAttachment", 1],
-  ["openFolder", 1],
-  ["projectFile", 1],
   ["saveAttachment", 1],
   ["status", 1],
 ]);
-const WORKBENCH_BRIDGE_CALL_LIMIT = 20;
+const WORKBENCH_BRIDGE_CALL_LIMIT = 16;
+const RETIRED_WORKBENCH_PROJECT_WORKFLOW_OWNERS =
+  /\b(?:drainCoordinatorRef|externalFileOpenSessionRef|projectApplicationSessionRef|projectHydratingRef|projectLoadErrorRef|pendingProjectOpenRef|closeLifecycleRef|projectOpenRequestRef|applyProject|prepareProjectSwitch|applyAcceptedProject|enqueueAcceptedProject|openExternalProject)\b/;
 
 async function sourceFiles(directory) {
   const entries = await readdir(directory, { withFileTypes: true });
@@ -279,6 +279,15 @@ export async function architectureViolations() {
     ),
     "utf8",
   );
+  const projectWorkflow = await readFile(
+    path.join(
+      PRODUCT_ROOT,
+      "app",
+      "application",
+      "project-workflow.js",
+    ),
+    "utf8",
+  );
   if (
     !workspaceController.includes("export class WorkspaceController")
     || !workspaceController.includes("ensureRegistered({")
@@ -309,6 +318,52 @@ export async function architectureViolations() {
       "app/workbench.tsx: project registration must delegate to WorkspaceController without blocking a newer locator",
     );
   }
+  if (
+    !workspaceController.includes("#drainCoordinator = new DrainCoordinator()")
+    || !workspaceController.includes("this.#projectWorkflow = new ProjectWorkflow({")
+    || !workspaceController.includes("new ExternalFileOpenSession()")
+    || !workspaceController.includes("new ProjectApplicationSession()")
+    || !workspaceController.includes("prepareClose(input)")
+    || !workspaceController.includes("readProjectFile(input)")
+    || !workspaceController.includes("openProjectRecords(input)")
+  ) {
+    violations.push(
+      "app/application/workspace-controller.js: PR-3 must own one DrainCoordinator and compose the project transition workflow",
+    );
+  }
+  if (
+    !projectWorkflow.includes("export class ProjectWorkflow")
+    || !projectWorkflow.includes("async prepareSwitch(")
+    || !projectWorkflow.includes("acceptProject(project,")
+    || !projectWorkflow.includes("async openProject(")
+    || !projectWorkflow.includes("async prepareClose(")
+    || !projectWorkflow.includes("abortClose(")
+    || !projectWorkflow.includes("#hydrationGeneration")
+    || !projectWorkflow.includes("#projectApplicationSession.enqueue({")
+    || !projectWorkflow.includes("this.#projectSession.openLocator(")
+    || !projectWorkflow.includes("this.#documentSession.publishAuthority({")
+    || !projectWorkflow.includes("this.#versionSession.hydrate({")
+    || !projectWorkflow.includes("this.#canvasPort.invalidateRenderAcks?.()")
+    || !projectWorkflow.includes("this.#bridgeClient.projectFile(")
+    || !projectWorkflow.includes("this.#bridgeClient.openFolder(")
+  ) {
+    violations.push(
+      "app/application/project-workflow.js: hydration, accepted FIFO, switch, close and project resources must share one typed workflow boundary",
+    );
+  }
+  if (
+    RETIRED_WORKBENCH_PROJECT_WORKFLOW_OWNERS.test(workbench)
+    || !workbench.includes("projectWorkflow: {")
+    || !workbench.includes("detail.waitUntil(workspaceController.prepareClose({")
+    || !workbench.includes("workspaceController.acceptExternalProject(request)")
+    || !workbench.includes("workspaceController.acceptBrowserProject({")
+    || !workbench.includes(".readProjectFile({ context, relativePath })")
+    || !workbench.includes(".openProjectRecords({ context })")
+  ) {
+    violations.push(
+      "app/workbench.tsx: PR-3 project hydration, open, switch and close must be Controller commands with presentation-only host adapters",
+    );
+  }
   const bridgeCalls = [...workbench.matchAll(
     /\bbridgeClient\.([A-Za-z0-9_]+)\s*\(/g,
   )].map((match) => match[1]);
@@ -317,19 +372,19 @@ export async function architectureViolations() {
     bridgeCallCounts.set(method, (bridgeCallCounts.get(method) || 0) + 1);
     if (!WORKBENCH_BRIDGE_CALL_ALLOWLIST.has(method)) {
       violations.push(
-        `app/workbench.tsx: Bridge call ${method} is outside the PR-1 migration allowlist`,
+        `app/workbench.tsx: Bridge call ${method} is outside the PR-3 migration allowlist`,
       );
     }
   }
   if (bridgeCalls.length > WORKBENCH_BRIDGE_CALL_LIMIT) {
     violations.push(
-      `app/workbench.tsx: PR-2 allows at most ${WORKBENCH_BRIDGE_CALL_LIMIT} direct Bridge calls`,
+      `app/workbench.tsx: PR-3 allows at most ${WORKBENCH_BRIDGE_CALL_LIMIT} direct Bridge calls`,
     );
   }
   for (const [method, limit] of WORKBENCH_BRIDGE_CALL_ALLOWLIST) {
     if ((bridgeCallCounts.get(method) || 0) > limit) {
       violations.push(
-        `app/workbench.tsx: Bridge call ${method} exceeds its PR-2 migration allowance of ${limit}`,
+        `app/workbench.tsx: Bridge call ${method} exceeds its PR-3 migration allowance of ${limit}`,
       );
     }
   }
@@ -339,7 +394,7 @@ export async function architectureViolations() {
     || !workbench.includes(".flushDocument({ throughRevision })")
     || !workbench.includes(".performDocumentHistoryAction({ direction, context })")
     || !workbench.includes(".reloadDocumentAuthority({")
-    || !workbench.includes(".reconcileDocumentBoundary({")
+    || !projectWorkflow.includes("this.#documentWorkflow.reconcileBoundary({")
     || /\b(?:autosaveTimerRef|auditPendingRef|auditInFlightKeysRef|historyActionPromiseRef|recoveryIdentityRef)\b/.test(workbench)
   ) {
     violations.push(
@@ -362,7 +417,7 @@ export async function architectureViolations() {
       'runtimeCapabilitiesRef.current.sourceEditing !== "enabled"',
     )
     || !workbench.includes(
-      'runtimeCapabilitiesRef.current.projectOpening === "browser-file"',
+      "mode: () => runtimeCapabilitiesRef.current.projectOpening",
     )
     || !workbench.includes(
       "runtimeCapabilitiesRef.current.attachmentPersistence",
@@ -416,10 +471,17 @@ export async function architectureViolations() {
       "app/workbench.tsx: comment working-copy state belongs to CommentSession",
     );
   }
-  for (const boundary of ["close", "switch", "submit", "history"]) {
-    if (!new RegExp(`\\.drain\\("${boundary}"`).test(workbench)) {
+  for (const boundary of ["close", "switch"]) {
+    if (!new RegExp(`\\.drain\\("${boundary}"`).test(projectWorkflow)) {
       violations.push(
-        `app/workbench.tsx: ${boundary} must use the shared DrainCoordinator`,
+        `app/application/project-workflow.js: ${boundary} must use the Controller DrainCoordinator`,
+      );
+    }
+  }
+  for (const boundary of ["submit", "history"]) {
+    if (!new RegExp(`\\.drainBoundary\\("${boundary}"`).test(workbench)) {
+      violations.push(
+        `app/workbench.tsx: ${boundary} must delegate to the Controller DrainCoordinator`,
       );
     }
   }
@@ -494,7 +556,7 @@ export async function architectureViolations() {
     "const frozen = editor.freezeNow()",
     "if (!frozen.ok)",
     "editor.getSourceHtml() !== frozen.html",
-    "return { ok: true",
+    "return { ...frozen, ok: true",
   ])) {
     violations.push(
       "app/workbench.tsx: source transitions must fail closed unless Canvas freezes the exact current source bytes",

@@ -4,10 +4,11 @@
 | --- | --- | --- | --- |
 | Open source locator before first durable action, registered identity, renderer generation and late-query fence | Renderer `ProjectSession` | active-file record before registration; project registry and `project.json` afterwards | Workbench composition root and all durable sessions |
 | Latest unaccepted OS/QoderWork HTML-open request, committed-exit one-shot handoff, plus FIFO active/recent-project transitions | Main-process external-file-open mailbox and `ProjectOpenQueue` | in-memory for the current process plus one private, validated `userData` handoff record after close commits; no renderer-supplied path authority | preload lifecycle delivery, startup adoption and trusted project IPC |
-| External HTML request IDs, active/queued/deferred renderer delivery, blocker-transition/manual retry policy and unaccepted-result fence | Renderer `ExternalFileOpenSession` | none; bounded in-memory state only | Workbench composition root and the project-switch boundary |
-| Accepted local/external project results, their FIFO renderer publication and deferred final-fence blocker-transition/manual retry policy | Renderer `ProjectApplicationSession` | none; bounded in-memory state only | Workbench composition root and the final project-application boundary |
+| External HTML request IDs, active/queued/deferred renderer delivery, blocker-transition/manual retry policy and unaccepted-result fence | Renderer `ExternalFileOpenSession` | none; bounded in-memory state only | `ProjectWorkflow` composition and Workbench presentation |
+| Accepted local/external project results, their FIFO renderer publication and deferred final-fence blocker-transition/manual retry policy | Renderer `ProjectApplicationSession` | none; bounded in-memory state only | `ProjectWorkflow` composition and Workbench presentation |
 | Registered mutation context resolution and atomic-replacement source observation | Bridge project-context service | project/document registry graph plus the owning runtime `pendingWrite` target Hash | Bridge mutation routes and `/project/ensure` |
 | Registration operation identity, single-flight, stale-result fence and cross-Session publication sequence | `WorkspaceController` workflow owner during staged migration | none; it publishes through existing Project, Document, Comment, Draft, Version and SourceHistory owners | Workbench commands and presentation-event adapter |
+| Project hydration generation and load outcome, switch/open operation, accepted-result execution, close request identity and synchronous Project/Document/Version/Canvas publication sequence | Renderer `ProjectWorkflow`, composed by `WorkspaceController` | none; it publishes through existing Session owners and trusted ProjectOpen/Canvas ports | Workbench commands and presentation-event adapter |
 | Explicit source filename transition, pending operation and active/recent path rebase | Desktop source-rename transaction | active-file `pendingRename` / `lastRename`, then filesystem path | project session, Bridge relink, views |
 | Current source bytes, Hash, edit revision, persistence projection, pending write, single-flight source flush, Canvas authority generation and exact-byte boundary reconciliation | Renderer `DocumentSession` | source HTML, runtime autosave record and recovery log; the generation itself is disposable | Canvas, preview readiness, source-history session and drain coordinator |
 | Current-source commit/recovery WAL, same-directory atomic replacement, acknowledged source-history application, project/runtime settlement and exactly-once audit outbox cleanup | Bridge `SourceTransaction` service | source HTML, `history/source-operations.json`, `project.json`, `runtime-state.json` and `pendingWrite` recovery bytes | `/autosave` and `/source-history/action` route adapters, project-context service and restart recovery |
@@ -21,7 +22,7 @@
 | AI Request/Attempt lifecycle transition | Bridge run lifecycle | runtime state and immutable Request/Attempt records | Run session and finalizer |
 | Immutable Version list, based-on/exact/restored identities and history-view transition | Renderer `VersionSession` | immutable Version records and current runtime pointers | Workbench history and Canvas projection |
 | `PROJECT.md` content, editor generation, composition fence, autosave eligibility and save status | Renderer `ProjectRulesSession` | managed `PROJECT.md` | project panel, drain coordinator and Request freeze |
-| Close/switch/submit/history readiness and desktop close lifecycle | Drain coordinator plus one renderer close lifecycle | composed owner snapshots, request identity and bounded presentation class; no copied dirty booleans | Electron close handshake, browser fallback and navigation |
+| Close/switch/submit/history readiness and desktop close lifecycle | The unique `DrainCoordinator` owned by `WorkspaceController`; `ProjectWorkflow` owns the request-scoped close operation | composed owner snapshots, request identity and bounded presentation class; no copied dirty booleans | Electron close handshake, browser fallback and navigation |
 | Bridge transport, timeouts, error details and unknown outcomes | Typed Bridge client | no durable state | application sessions |
 | Bridge startup operation, live utility process and ready-only port | Main-process Bridge startup lifecycle | no durable state; one in-memory single-flight operation per app process | window bootstrap, graceful shutdown and workspace-unavailable recovery |
 | Undelivered Bridge-unavailable recovery issue and renderer-listener readiness | Main-process recovery mailbox | in-memory for the current app process | preload handshake, native fallback and Workbench banner |
@@ -54,8 +55,8 @@ Rules:
   state boundary. The renderer `ExternalFileOpenSession` deduplicates delivery
   IDs and owns active, queued and deferred switching. Preload suppresses an
   older readiness catch-up once it has observed a live request, so delivery
-  order cannot reverse at the renderer boundary; Workbench's ordinary
-  project-picker retry ref never stores an external request. A newer queued
+  order cannot reverse at the renderer boundary; `ProjectWorkflow` never stores
+  an external request in an ordinary picker retry. A newer queued
   external request fences only older work that has not yet been accepted and
   inherits its Canvas freeze. Each renderer session owns its deferred retry
   transition: it records whether `DrainCoordinator.inspect("switch")` has
@@ -66,9 +67,9 @@ Rules:
   edit, no external activation starts; that edit returns to normal persistence
   before the session retries.
   Once main-process acceptance succeeds, `ProjectApplicationSession` becomes
-  the sole owner of renderer publication. It retains local and external
-  results FIFO, repeats the switch drain and takes a synchronous final Canvas
-  freeze immediately before every `applyProject`. A deferred final fence keeps
+  the sole owner of accepted-result FIFO and deferred application state.
+  `ProjectWorkflow` executes those results, repeats the switch drain and takes
+  a synchronous final Canvas freeze immediately before every publication. A deferred final fence keeps
   its already-accepted result until a relevant blocker clears or the user
   explicitly continues. An accepted project therefore publishes before a later
   queued result runs, and that later result replaces it only on its own safe
@@ -87,11 +88,13 @@ Rules:
   subscribes to Session/Controller snapshots, derives read-only presentation
   values, adapts narrow host ports and dispatches user intent to the owning
   Session or workflow facade.
-- `WorkspaceController` owns workflow-local operation state only. It receives
-  the existing Session instances during migration and must never create a
-  duplicate Project, Document, Comment, Draft, Version or SourceHistory owner.
-  Its temporary Workbench Bridge-call allowance is a decreasing migration gate,
-  not a permanent architecture exception.
+- `WorkspaceController` owns the renderer's unique `DrainCoordinator` and
+  composes `ProjectWorkflow`. The workflow owns operation state only: it creates
+  the narrow external-open/application protocol Sessions, receives the existing
+  Project, Document, Comment, Draft, Run, Version and SourceHistory owners, and
+  must never duplicate their facts. Workbench's temporary direct Bridge-call
+  allowance is locked to the exact PR-3 allowlist of 16 calls and remains a
+  decreasing migration gate, not a permanent architecture exception.
 - `RunSession` owns the one in-memory submission lifecycle. `preparing` blocks
   duplicate intent and drain without freezing the current canvas; `frozen`
   blocks edits until the Request is known; `uncertain` preserves a current

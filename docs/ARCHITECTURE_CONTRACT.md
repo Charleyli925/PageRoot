@@ -84,6 +84,10 @@ The renderer's main workspace facts are partitioned as follows:
   fencing for work that has not yet been accepted.
 - `ProjectApplicationSession`: FIFO accepted project results, final renderer
   switch fence, deferred application retry and successor preservation.
+- `ProjectWorkflow`: hydration generation/load outcome, picker/external/switch
+  operation identity, accepted-result execution, close request lifecycle and
+  the synchronous Project/Document/Version/Canvas publication sequence. It is
+  an operation owner, not a second owner of any Session fact.
 
 `CommentSession` does not replace the Draft aggregate or Bridge CAS authority,
 and `VersionSession` does not make mutable copies of immutable Version files.
@@ -93,13 +97,15 @@ data from these snapshots, but all writes return to the listed owner.
 Fact ownership and workflow ownership are separate. A workflow may hold only
 its operation identity, single-flight, timer, reconciliation and publication
 sequence; it must publish through the existing fact-owning Sessions. During the
-staged migration, `WorkspaceController` receives the Workbench's existing
+staged migration, `WorkspaceController` receives the Workbench's existing fact
 Session instances rather than constructing replacements. Its PR-1 registration
 command captures the locator epoch, source path and expected Hash, returns a
 structured outcome, and synchronously binds Project, Document, Version, Draft
-and SourceHistory authority only after the Bridge response validates. Its
-temporary direct-Bridge allowance is a checked decreasing upper bound, not a
-permanent View exception; the final composition stage removes it entirely.
+and SourceHistory authority only after the Bridge response validates. In PR-3
+the Controller also owns the unique `DrainCoordinator`, creates the narrow
+external-open/application protocol Sessions and composes `ProjectWorkflow`.
+Its temporary direct-Bridge allowance is an exact checked upper bound of 16,
+not a permanent View exception; the final composition stage removes it entirely.
 
 An asynchronous result may update state only when its complete identity is
 current:
@@ -147,9 +153,9 @@ authority without a matching renderer publication.
 `ProjectApplicationSession` owns every successful local or external project
 result after main-process acceptance and before renderer publication. It keeps
 those results FIFO, so a later accepted result cannot erase a deferred or
-successfully published predecessor. Before applying each result, Workbench
-re-enters the complete switch boundary and takes one synchronous final Canvas
-freeze. A post-drain native edit leaves that accepted result in the session
+successfully published predecessor. `ProjectWorkflow` consumes the FIFO and,
+before applying each result, re-enters the complete switch boundary and takes
+one synchronous final Canvas freeze. A post-drain native edit leaves that accepted result in the session
 until a relevant blocker transition or explicit continuation makes another
 attempt safe. Thus a slow later read cannot unlock the Canvas through an older
 result and then discard an intervening edit. Ordinary Workbench project-picker
@@ -404,6 +410,13 @@ registered obligations:
 - project-rule persistence;
 - Request freeze or outcome reconciliation.
 
+`WorkspaceController` owns exactly one `DrainCoordinator`; workflows and
+injected Sessions register obligations on that coordinator instead of composing
+dirty booleans in React. `ProjectWorkflow` owns the request-scoped desktop close
+lifecycle. The Workbench close listener synchronously registers only
+`detail.waitUntil(controller.prepareClose(...))`; abort and browser fallback are
+commands to the same workflow, not parallel close authorities.
+
 A Canvas undo/redo request uses the same native-edit checkpoint and source
 autosave obligations before it reads the durable history cursor. It does not
 drain or mutate comment cards, attachments or project rules. Focused native
@@ -418,8 +431,9 @@ copy their own boolean lists. An obligation may request a final verification
 without reporting permanent pending state; an already acknowledged aggregate
 must drain as a no-op without advancing its revision.
 
-After the aggregate drains, source close readiness is reconciled by
-`DocumentSession` against the independently hashed frozen HTML. An acknowledged
+After the aggregate drains, `ProjectWorkflow` asks `DocumentWorkflow` to
+reconcile source close readiness against the independently hashed frozen HTML
+and `DocumentSession` authority. An acknowledged
 revision may be ahead of the cutoff. A stale Canvas Hash or renderer projection
 is not itself a blocker; only an unresolved exact-byte check may trigger the
 bounded authoritative source read. Matching bytes repair the projection, while

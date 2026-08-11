@@ -1,5 +1,9 @@
 import { isBridgeRequestError } from "./bridge-client.js";
 import { DocumentWorkflow } from "./document-workflow.js";
+import { DrainCoordinator } from "./drain-coordinator.js";
+import { ExternalFileOpenSession } from "./external-file-open-session.js";
+import { ProjectApplicationSession } from "./project-application-session.js";
+import { ProjectWorkflow } from "./project-workflow.js";
 import { createWorkspaceControllerCodecs } from "./workspace-controller-codecs.js";
 
 function copyLocator({
@@ -112,9 +116,14 @@ export class WorkspaceController {
   #recoveryPort;
   #canvasPort;
   #clock;
+  #drainCoordinator = new DrainCoordinator();
   #documentWorkflow = null;
   #documentWorkflowUnsubscribe = null;
-  #snapshot = registrationSnapshot();
+  #projectWorkflow = null;
+  #projectWorkflowUnsubscribe = null;
+  #registration = registrationSnapshot().registration;
+  #projectSnapshot = null;
+  #snapshot = Object.freeze({ registration: this.#registration, project: null });
   #listeners = new Set();
   #eventListeners = new Set();
   #registrationPromise = null;
@@ -132,6 +141,7 @@ export class WorkspaceController {
     codecs,
     ports = {},
     documentWorkflow = null,
+    projectWorkflow = null,
     clock,
   } = {}) {
     if (!bridgeClient || typeof bridgeClient.ensureProject !== "function") {
@@ -206,7 +216,56 @@ export class WorkspaceController {
         clock,
       });
       this.#documentWorkflowUnsubscribe = this.#documentWorkflow.subscribeEvents(
-        (event) => this.#emitEvent(event),
+        (event) => {
+          if (
+            event?.fatal
+            && [
+              "document-persistence-failed",
+              "document-authority-reload-failed",
+            ].includes(event.type)
+          ) {
+            this.#projectWorkflow?.reportLoadFailure(event.message);
+          }
+          this.#emitEvent(event);
+        },
+      );
+    }
+    if (projectWorkflow) {
+      if (!this.#documentWorkflow) {
+        throw new TypeError("WorkspaceController ProjectWorkflow requires DocumentWorkflow.");
+      }
+      const legacy = projectWorkflow.ports?.legacy || {};
+      this.#projectWorkflow = new ProjectWorkflow({
+        bridgeClient,
+        ensureRegistered: (input) => this.ensureRegistered(input),
+        projectSession,
+        documentSession,
+        commentSession,
+        draftSession,
+        versionSession,
+        runSession: projectWorkflow.runSession,
+        projectRulesSession: projectWorkflow.projectRulesSession,
+        externalFileOpenSession: new ExternalFileOpenSession(),
+        projectApplicationSession: new ProjectApplicationSession(),
+        documentWorkflow: this.#documentWorkflow,
+        drainCoordinator: this.#drainCoordinator,
+        codecs: projectWorkflow.codecs,
+        ports: {
+          ...projectWorkflow.ports,
+          legacy: {
+            ...legacy,
+            emit: (event) => this.#emitEvent(event),
+          },
+        },
+        policies: projectWorkflow.policies,
+        scheduler: projectWorkflow.scheduler,
+        clock,
+      });
+      this.#projectWorkflowUnsubscribe = this.#projectWorkflow.subscribe(
+        (snapshot) => {
+          this.#projectSnapshot = snapshot;
+          this.#publishAggregateSnapshot();
+        },
       );
     }
   }
@@ -238,6 +297,10 @@ export class WorkspaceController {
 
   dispose() {
     this.#disposed = true;
+    this.#projectWorkflowUnsubscribe?.();
+    this.#projectWorkflowUnsubscribe = null;
+    this.#projectWorkflow?.dispose();
+    this.#projectWorkflow = null;
     this.#documentWorkflowUnsubscribe?.();
     this.#documentWorkflowUnsubscribe = null;
     this.#documentWorkflow?.dispose();
@@ -248,6 +311,90 @@ export class WorkspaceController {
 
   get hasDocumentHistoryAction() {
     return Boolean(this.#documentWorkflow?.hasHistoryAction);
+  }
+
+  get projectHydrating() {
+    return Boolean(this.#projectWorkflow?.projectHydrating);
+  }
+
+  get projectLoadError() {
+    return this.#projectWorkflow?.projectLoadError || null;
+  }
+
+  refreshProject(input) {
+    return this.#requireProjectWorkflow().refreshWorkspace(input);
+  }
+
+  retryProjectHydration() {
+    return this.#requireProjectWorkflow().retryHydration();
+  }
+
+  prepareProjectSwitch(input) {
+    return this.#requireProjectWorkflow().prepareSwitch(input);
+  }
+
+  openProject(input) {
+    return this.#requireProjectWorkflow().openProject(input);
+  }
+
+  acceptProject(project, input) {
+    return this.#requireProjectWorkflow().acceptProject(project, input);
+  }
+
+  acceptBrowserProject(input) {
+    return this.#requireProjectWorkflow().acceptBrowserProject(input);
+  }
+
+  acceptExternalProject(input) {
+    return this.#requireProjectWorkflow().acceptExternalProject(input);
+  }
+
+  resumeDeferredExternalProject() {
+    return this.#requireProjectWorkflow().resumeDeferredExternalProject();
+  }
+
+  resumeDeferredProjectApplication() {
+    return this.#requireProjectWorkflow().resumeDeferredProjectApplication();
+  }
+
+  reconcileProjectTransitions() {
+    return this.#requireProjectWorkflow().reconcileDeferred();
+  }
+
+  prepareClose(input) {
+    return this.#requireProjectWorkflow().prepareClose(input);
+  }
+
+  abortClose(input) {
+    return this.#requireProjectWorkflow().abortClose(input);
+  }
+
+  hasPendingDrain(boundary) {
+    return this.#requireProjectWorkflow().hasPending(boundary);
+  }
+
+  inspectDrain(boundary) {
+    return this.#requireProjectWorkflow().inspectDrain(boundary);
+  }
+
+  drainBoundary(boundary, input) {
+    return this.#requireProjectWorkflow().drain(boundary, input);
+  }
+
+  drainCloseFallback(input) {
+    return this.#requireProjectWorkflow().drainCloseFallback(input);
+  }
+
+  readProjectFile(input) {
+    return this.#requireProjectWorkflow().readProjectFile(input);
+  }
+
+  openProjectRecords(input) {
+    return this.#requireProjectWorkflow().openProjectRecords(input);
+  }
+
+  refreshRecentProjects() {
+    return this.#requireProjectWorkflow().refreshRecents();
   }
 
   enqueueDocumentEdit(input) {
@@ -315,6 +462,13 @@ export class WorkspaceController {
       throw new Error("文档持久化工作流尚未完成组合。");
     }
     return this.#documentWorkflow;
+  }
+
+  #requireProjectWorkflow() {
+    if (!this.#projectWorkflow) {
+      throw new Error("项目切换工作流尚未完成组合。");
+    }
+    return this.#projectWorkflow;
   }
 
   ensureRegistered({
@@ -396,11 +550,19 @@ export class WorkspaceController {
   }
 
   #publishSnapshot({ phase, operationId = null, identity = null, outcome = null }) {
-    this.#snapshot = registrationSnapshot({
+    this.#registration = registrationSnapshot({
       phase,
       operationId,
       identity,
       outcome,
+    }).registration;
+    this.#publishAggregateSnapshot();
+  }
+
+  #publishAggregateSnapshot() {
+    this.#snapshot = Object.freeze({
+      registration: this.#registration,
+      project: this.#projectSnapshot,
     });
     for (const listener of this.#listeners) {
       try {
