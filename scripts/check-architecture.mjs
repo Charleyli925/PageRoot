@@ -28,6 +28,24 @@ const RETIRED_WORKBENCH_DOCUMENT_AUTHORITIES =
   /\b(?:htmlRef|sourceShaRef|editRevisionRef|lastPersistedRevisionRef|persistStateRef|pendingWriteRef|flushPromiseRef)\b/;
 const RETIRED_WORKBENCH_COMMENT_AUTHORITIES =
   /\b(?:commentsRef|changeEventsRef|deletedCommentIdsRef|composerDraftRef|composerCommentIdRef|composerAttachmentsRef|draftTargetRef|commentEditSessionRef)\b/;
+const WORKBENCH_BRIDGE_CALL_ALLOWLIST = new Map([
+  ["workspace", 5],
+  ["source", 6],
+  ["versionFile", 3],
+  ["sourceHistoryAction", 2],
+  ["resolveConflict", 2],
+  ["activateReadyVersion", 1],
+  ["attachment", 1],
+  ["autosave", 1],
+  ["cancelActiveRun", 1],
+  ["createRequest", 1],
+  ["deleteAttachment", 1],
+  ["openFolder", 1],
+  ["projectFile", 1],
+  ["saveAttachment", 1],
+  ["status", 1],
+]);
+const WORKBENCH_BRIDGE_CALL_LIMIT = 28;
 
 async function sourceFiles(directory) {
   const entries = await readdir(directory, { withFileTypes: true });
@@ -138,6 +156,21 @@ export async function architectureViolations() {
         }
       }
     }
+    if (
+      file === "app/application/workspace-controller.js"
+      || file === "app/application/workspace-controller-codecs.js"
+    ) {
+      for (const specifier of imports) {
+        if (
+          specifier === "react"
+          || /(?:^|\/)(?:workbench|components|desktop)(?:\/|$)/.test(specifier)
+        ) {
+          violations.push(
+            `${file}: WorkspaceController cannot import presentation or desktop code ${specifier}`,
+          );
+        }
+      }
+    }
     if (file.startsWith("app/components/")) {
       for (const specifier of imports) {
         if (/(?:^|\/)application(?:\/|$)/.test(specifier)) {
@@ -239,23 +272,68 @@ export async function architectureViolations() {
     ),
     "utf8",
   );
-  const registrationStart = workbench.indexOf(
-    "const ensureProjectRegistered = useCallback",
+  const workspaceController = await readFile(
+    path.join(
+      PRODUCT_ROOT,
+      "app",
+      "application",
+      "workspace-controller.js",
+    ),
+    "utf8",
   );
-  const registrationEnd = workbench.indexOf(
-    "const prepareProjectRecords = useCallback",
-    registrationStart,
-  );
-  const registrationBoundary = registrationStart >= 0 && registrationEnd > registrationStart
-    ? workbench.slice(registrationStart, registrationEnd)
-    : "";
   if (
-    !registrationBoundary.includes("draftSessionRef.current.replaceAuthority(")
-    || !registrationBoundary.includes("draftAuthorityFromWorkspace(payload)")
+    !workspaceController.includes("export class WorkspaceController")
+    || !workspaceController.includes("ensureRegistered({")
+    || !workspaceController.includes("#registrationPromise")
+    || !workspaceController.includes("this.#projectSession.register({")
+    || !workspaceController.includes("this.#draftSession.replaceAuthority(")
+    || !workspaceController.includes("this.#sourceHistorySession.activate(")
+    || !workspaceController.includes("return stale(identity)")
+    || /\bnew\s+(?:ProjectSession|DocumentSession|CommentSession|DraftSession|VersionSession|SourceHistorySession)\b/.test(
+      workspaceController,
+    )
   ) {
     violations.push(
-      "app/workbench.tsx: project registration must bind authoritative DraftSession state",
+      "app/application/workspace-controller.js: registration must own the injected Session transition, single-flight, and stale fence",
     );
+  }
+  if (
+    /\bensureProjectRegistered\b|\bprojectRegistrationPromiseRef\b/.test(workbench)
+    || !workbench.includes("new WorkspaceController({")
+    || !workbench.includes(
+      "requiredWorkspaceController(workspaceController).ensureRegistered(",
+    )
+    || /workspaceController\.getSnapshot\(\)\.registration\.phase\s*===\s*"registering"/.test(
+      workbench,
+    )
+  ) {
+    violations.push(
+      "app/workbench.tsx: project registration must delegate to WorkspaceController without blocking a newer locator",
+    );
+  }
+  const bridgeCalls = [...workbench.matchAll(
+    /\bbridgeClient\.([A-Za-z0-9_]+)\s*\(/g,
+  )].map((match) => match[1]);
+  const bridgeCallCounts = new Map();
+  for (const method of bridgeCalls) {
+    bridgeCallCounts.set(method, (bridgeCallCounts.get(method) || 0) + 1);
+    if (!WORKBENCH_BRIDGE_CALL_ALLOWLIST.has(method)) {
+      violations.push(
+        `app/workbench.tsx: Bridge call ${method} is outside the PR-1 migration allowlist`,
+      );
+    }
+  }
+  if (bridgeCalls.length > WORKBENCH_BRIDGE_CALL_LIMIT) {
+    violations.push(
+      `app/workbench.tsx: PR-1 allows at most ${WORKBENCH_BRIDGE_CALL_LIMIT} direct Bridge calls`,
+    );
+  }
+  for (const [method, limit] of WORKBENCH_BRIDGE_CALL_ALLOWLIST) {
+    if ((bridgeCallCounts.get(method) || 0) > limit) {
+      violations.push(
+        `app/workbench.tsx: Bridge call ${method} exceeds its PR-1 migration allowance of ${limit}`,
+      );
+    }
   }
   if (
     !projectSession.includes(

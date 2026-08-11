@@ -30,7 +30,10 @@ Bridge route adapters
   snapshot-and-callback views. They may import domain types and pure Workbench
   models, but not `app/application` sessions or services.
 - Application modules own session identity, request generations, mutation
-  outcomes, recovery and orchestration.
+  outcomes, recovery and orchestration. `WorkspaceController` is the public
+  workflow facade: it may sequence injected Session transitions, but it is not
+  a second fact store and may not import React, Workbench presentation,
+  components or desktop code.
 - Domain modules are pure and may be shared by the renderer and Bridge. They do
   not import React, DOM components, Electron or filesystem adapters.
 - Existing source-fidelity engines under `app/lib` are also pure shared core;
@@ -86,6 +89,17 @@ The renderer's main workspace facts are partitioned as follows:
 and `VersionSession` does not make mutable copies of immutable Version files.
 The composition root may derive labels, availability and other read-only view
 data from these snapshots, but all writes return to the listed owner.
+
+Fact ownership and workflow ownership are separate. A workflow may hold only
+its operation identity, single-flight, timer, reconciliation and publication
+sequence; it must publish through the existing fact-owning Sessions. During the
+staged migration, `WorkspaceController` receives the Workbench's existing
+Session instances rather than constructing replacements. Its PR-1 registration
+command captures the locator epoch, source path and expected Hash, returns a
+structured outcome, and synchronously binds Project, Document, Version, Draft
+and SourceHistory authority only after the Bridge response validates. Its
+temporary direct-Bridge allowance is a checked decreasing upper bound, not a
+permanent View exception; the final composition stage removes it entirely.
 
 An asynchronous result may update state only when its complete identity is
 current:
@@ -272,11 +286,11 @@ Opening a user HTML may remain lazy until the first durable product action.
 During that interval the renderer owns only an `epoch + sourcePath` locator,
 not a registered project context. A registered context always has non-empty
 `projectId`, `documentId` and canonical `sourcePath`. Registration is one
-application transition: it adopts those identifiers and activates Draft
-authority from the same Bridge response. If a registered page later finds its
-Draft session inactive or bound to another context, it queries current
-workspace authority and safely rebinds before creating a mutation; it does not
-leave an unchangeable close blocker.
+application transition owned by `WorkspaceController`: it adopts those
+identifiers and activates Draft authority from the same Bridge response. If a
+registered page later finds its Draft session inactive or bound to another
+context, the Controller queries current workspace authority and safely rebinds
+before creating a mutation; it does not leave an unchangeable close blocker.
 
 Every registered mutation captures that complete ProjectContext once. The
 Bridge resolves `projectId + documentId` against the registry before consulting

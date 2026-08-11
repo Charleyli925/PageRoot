@@ -91,6 +91,11 @@ import {
   isBridgeRequestError,
 } from "./application/bridge-client.js";
 import {
+  WorkspaceController,
+  registrationContextFromOutcome,
+} from "./application/workspace-controller.js";
+import { createWorkspaceControllerCodecs } from "./application/workspace-controller-codecs.js";
+import {
   CommentSession,
   type CommentSessionSnapshot,
 } from "./application/comment-session.js";
@@ -473,6 +478,15 @@ function noticeReducer(current: Toast, next: Toast): Toast {
   return shouldReplaceNotice(current, next) ? next : current;
 }
 
+function requiredWorkspaceController(
+  controller: WorkspaceController | null,
+): WorkspaceController {
+  if (!controller) {
+    throw new Error("项目资料初始化尚未就绪，请稍后重试。");
+  }
+  return controller;
+}
+
 export default function Workbench() {
   const editorRef = useRef<HtmlCanvasEditorHandle>(null);
   const interactionPreviewRef = useRef<HtmlInteractionPreviewHandle>(null);
@@ -615,8 +629,6 @@ export default function Workbench() {
   const attachmentObjectUrlsRef = useRef<Map<string, string>>(new Map());
   const draftRecoverySequenceRef = useRef(0);
   const draftRecoveryOperationIdRef = useRef<string | null>(null);
-  const projectRegistrationPromiseRef =
-    useRef<Promise<ProjectContext | null> | null>(null);
   const runSessionRef = useRef(new RunSession({
     sourcePath: WELCOME_PROJECT.sourcePath,
   }));
@@ -747,9 +759,55 @@ export default function Workbench() {
     edit: null,
     preview: null,
   });
+  const [workspaceController, setWorkspaceController] =
+    useState<WorkspaceController | null>(null);
   const invalidateCanvasRenderAcks = useCallback(() => {
     setCanvasRenderAcks({ edit: null, preview: null });
   }, []);
+  useLayoutEffect(() => {
+    const controller = new WorkspaceController({
+      bridgeClient,
+      projectSession: projectSessionRef.current,
+      documentSession: documentSessionRef.current,
+      commentSession: commentSessionRef.current,
+      draftSession: draftSessionRef.current,
+      versionSession: versionSessionRef.current,
+      sourceHistorySession: sourceHistorySessionRef.current,
+      codecs: createWorkspaceControllerCodecs({
+        isRecord,
+        sameSourcePath: sameLocalSourcePath,
+        draftAuthorityFromWorkspace,
+        authoritativeDraftRevision,
+        recoveryIdentityFromRecord,
+        versionsFromWorkspace,
+        rebindTargetsPreservingGlobal,
+      }),
+      ports: {
+        hash: { sha256: browserSha256 },
+        recovery: {
+          replace: (identity) => {
+            recoveryIdentityRef.current = identity as RecoveryIdentity | null;
+          },
+        },
+        canvas: { invalidateRenderAcks: invalidateCanvasRenderAcks },
+      },
+      clock: { now: Date.now },
+    });
+    setWorkspaceController(controller);
+    return () => controller.dispose();
+  }, [invalidateCanvasRenderAcks]);
+  useEffect(() => {
+    if (!workspaceController) return undefined;
+    const unsubscribe = workspaceController.subscribeEvents((event) => {
+      if (event.type !== "registration-published") return;
+      if (!projectSessionRef.current.matches(event.context)) return;
+      setProjectRecordsPath(event.projectRecordsPath);
+      if (event.projectName) setProjectName(event.projectName);
+    });
+    return () => {
+      unsubscribe();
+    };
+  }, [workspaceController]);
   const invalidateEditCanvasRenderAck = useCallback(() => {
     setCanvasRenderAcks((current) => (
       current.edit ? { ...current, edit: null } : current
@@ -1812,197 +1870,20 @@ export default function Workbench() {
     [],
   );
 
-  const ensureProjectRegistered = useCallback(async (
-    sourceOverride?: string,
-    expectedHashOverride?: string | null,
-    adoptCanonicalSource = true,
-  ): Promise<ProjectContext | null> => {
-    const activeSource = sourceOverride || projectSessionRef.current.sourcePath;
-    const expectedSourceSha256 =
-      expectedHashOverride || documentSessionRef.current.sourceSha256;
-    if (!activeSource || !expectedSourceSha256) return null;
-    const currentContext = projectSessionRef.current.context;
-    if (currentContext) {
-      const existingContext = currentContext;
-      if (!draftSessionRef.current.isActive(existingContext)) {
-        const payload = await bridgeClient.workspace(activeSource);
-        if (
-          existingContext.epoch !== projectSessionRef.current.epoch
-          || !sameLocalSourcePath(projectSessionRef.current.sourcePath, activeSource)
-        ) return null;
-        if (
-          String(payload.projectId || "") !== existingContext.projectId
-          || String(payload.documentId || "") !== existingContext.documentId
-          || !sameLocalSourcePath(
-            String(payload.sourcePath || activeSource),
-            activeSource,
-          )
-        ) {
-          throw new Error("项目记录的身份与当前页面不一致，已停止恢复评论会话。");
-        }
-        const authoritativeDraft = draftAuthorityFromWorkspace(payload);
-        draftSessionRef.current.replaceAuthority(
-          existingContext,
-          authoritativeDraftRevision(authoritativeDraft),
-          authoritativeDraft,
-        );
-      }
-      return existingContext;
-    }
-    if (projectRegistrationPromiseRef.current) {
-      return projectRegistrationPromiseRef.current;
-    }
-    const epoch = projectSessionRef.current.epoch;
-    const registration = (async () => {
-      const payload = await bridgeClient.ensureProject({
-        sourcePath: activeSource,
-        expectedSourceSha256,
-      });
-      if (payload.ok === false) throw new Error("无法建立项目记录。");
-      if (
-        epoch !== projectSessionRef.current.epoch
-        || !sameLocalSourcePath(projectSessionRef.current.sourcePath, activeSource)
-      ) return null;
-      const nextProjectId = String(payload.projectId || "");
-      const nextDocumentId = String(payload.documentId || "");
-      const nextSourceSha256 = String(
-        payload.currentHtmlSha256 || payload.sourceSha256 || "",
-      );
-      const canonicalSource =
-        typeof payload.content === "string" ? payload.content : "";
-      const hasCanonicalSource = typeof payload.content === "string";
-      if (
-        !nextProjectId
-        || !nextDocumentId
-        || !/^sha256:[a-f0-9]{64}$/.test(nextSourceSha256)
-        || (
-          hasCanonicalSource
-          && await browserSha256(canonicalSource) !== nextSourceSha256
-        )
-      ) {
-        throw new Error("项目记录已建立，但返回的身份或源文件校验不完整。");
-      }
-      const currentDocument = documentSessionRef.current.snapshot;
-      const currentHtmlSha256 = await browserSha256(currentDocument.html);
-      if (
-        epoch !== projectSessionRef.current.epoch
-        || !sameLocalSourcePath(projectSessionRef.current.sourcePath, activeSource)
-      ) return null;
-      const currentDocumentClean = Boolean(
-        currentDocument.editRevision === currentDocument.lastPersistedRevision
-        && !documentSessionRef.current.pendingWrite
-        && !documentSessionRef.current.flushPromise
-      );
-      const mustRepairCleanProjection = Boolean(
-        currentDocumentClean && currentHtmlSha256 !== nextSourceSha256
-      );
-      if (mustRepairCleanProjection && !hasCanonicalSource) {
-        throw new Error("项目记录与当前画布不一致，且缺少可自动恢复的完整源 HTML。");
-      }
-      const shouldAdoptCanonicalSource = Boolean(
-        hasCanonicalSource
-        && currentDocumentClean
-        && (adoptCanonicalSource || mustRepairCleanProjection)
-      );
-      const nextDocumentHtml = shouldAdoptCanonicalSource
-        ? canonicalSource
-        : currentDocument.html;
-      const projectRecord = isRecord(payload.project) ? payload.project : {};
-      const paths = isRecord(payload.paths) ? payload.paths : {};
-      const registeredContext = projectSessionRef.current.register({
-        epoch,
-        projectId: nextProjectId,
-        documentId: nextDocumentId,
-        sourcePath: activeSource,
-      });
-      if (!registeredContext) return null;
-      recoveryIdentityRef.current =
-        recoveryIdentityFromRecord(payload.recoveryIdentity);
-      if (shouldAdoptCanonicalSource) {
-        documentSessionRef.current.publishAuthority({
-          html: nextDocumentHtml,
-          sourceSha256: nextSourceSha256,
-        });
-        invalidateCanvasRenderAcks();
-      } else {
-        documentSessionRef.current.update({
-          html: nextDocumentHtml,
-          sourceSha256: nextSourceSha256,
-        });
-      }
-      setProjectRecordsPath(
-        String(paths.projectRecords || payload.projectRoot || "") || null,
-      );
-      if (projectRecord.displayName) {
-        setProjectName(String(projectRecord.displayName));
-      }
-      versionSessionRef.current.hydrate({
-        versions: versionsFromWorkspace(payload),
-        latestVersionId: payload.latestVersionId,
-        currentBasedOnVersionId: payload.currentBasedOnVersionId,
-        currentExactVersionId: payload.currentExactVersionId,
-      });
-      if (shouldAdoptCanonicalSource) {
-        const reboundTargets = rebindTargetsPreservingGlobal(
-          canonicalSource,
-          [
-            ...commentSessionRef.current.comments.map((comment) => comment.target),
-            ...(commentSessionRef.current.composerTarget ? [commentSessionRef.current.composerTarget] : []),
-          ],
-        );
-        const reboundById = new Map(
-          reboundTargets.map((target) => [target.id, target]),
-        );
-        const reboundComments = commentSessionRef.current.comments.map((comment) => ({
-          ...comment,
-          target: reboundById.get(comment.target.id) || comment.target,
-        }));
-        commentSessionRef.current.setComments(reboundComments);
-        if (commentSessionRef.current.composerTarget) {
-          const reboundDraftTarget =
-            reboundById.get(commentSessionRef.current.composerTarget.id)
-            || commentSessionRef.current.composerTarget;
-          commentSessionRef.current.setComposerTarget(reboundDraftTarget);
-        }
-      }
-      const authoritativeDraft = draftAuthorityFromWorkspace(payload);
-      draftSessionRef.current.replaceAuthority(
-        registeredContext,
-        authoritativeDraftRevision(authoritativeDraft),
-        authoritativeDraft,
-      );
-      if (isRecord(payload.sourceHistory)) {
-        sourceHistorySessionRef.current.activate(
-          registeredContext,
-          nextSourceSha256,
-          payload.sourceHistory,
-          { preservePending: true },
-        );
-      }
-      return registeredContext;
-    })();
-    projectRegistrationPromiseRef.current = registration;
-    try {
-      return await registration;
-    } finally {
-      if (projectRegistrationPromiseRef.current === registration) {
-        projectRegistrationPromiseRef.current = null;
-      }
-    }
-  }, [invalidateCanvasRenderAcks]);
-
   const prepareProjectRecords = useCallback(async () => {
     const activeSource = projectSessionRef.current.sourcePath;
     const epoch = projectSessionRef.current.epoch;
     if (
-      !activeSource
+      !workspaceController
+      || !activeSource
       || (projectSessionRef.current.projectId && projectSessionRef.current.documentId)
-      || projectRegistrationPromiseRef.current
     ) return;
     setProjectRecordsPreparing(true);
     setProjectRecordsError("");
     try {
-      const registered = await ensureProjectRegistered();
+      const registered = registrationContextFromOutcome(
+        await requiredWorkspaceController(workspaceController).ensureRegistered(),
+      );
       if (
         !registered
         && projectSessionRef.current.epoch === epoch
@@ -2027,7 +1908,7 @@ export default function Workbench() {
         setProjectRecordsPreparing(false);
       }
     }
-  }, [ensureProjectRegistered]);
+  }, [workspaceController]);
 
   const verifyCanvasRendered = useCallback(async (
     expectedHtml: string,
@@ -2312,10 +2193,12 @@ export default function Workbench() {
         }
         try {
           if (!write.projectId || !write.documentId) {
-            const registered = await ensureProjectRegistered(
-              write.sourcePath,
-              write.expectedSourceSha256,
-              false,
+            const registered = registrationContextFromOutcome(
+              await requiredWorkspaceController(workspaceController).ensureRegistered({
+                sourcePath: write.sourcePath,
+                expectedSourceSha256: write.expectedSourceSha256,
+                adoptCanonicalSource: false,
+              }),
             );
             if (!registered) {
               throw new Error("项目已切换，原项目的修改已保留在恢复记录中。");
@@ -2592,10 +2475,10 @@ export default function Workbench() {
     }
   }, [
     clearAutosaveTimer,
-    ensureProjectRegistered,
     fenceAndFreezeCurrentCanvas,
     isCurrentProjectContext,
     persistRecoveryLog,
+    workspaceController,
   ]);
 
   const enqueueAutosave = useCallback((
@@ -2733,7 +2616,6 @@ export default function Workbench() {
     });
     auditPendingRef.current = [];
     recoveryIdentityRef.current = null;
-    projectRegistrationPromiseRef.current = null;
     projectHydratingRef.current = Boolean(project.sourcePath);
     markProjectHydrationStage("apply-authority");
     projectLoadErrorRef.current = null;
@@ -4221,15 +4103,19 @@ export default function Workbench() {
         ) return true;
         if (!context && !hasLocalDraftMaterial) return true;
         if (!context) {
-          context = await ensureProjectRegistered();
+          context = registrationContextFromOutcome(
+            await requiredWorkspaceController(workspaceController).ensureRegistered(),
+          );
           if (!context) {
             throw new Error("无法为本轮评论建立唯一项目身份。");
           }
         } else if (!draftSessionRef.current.isActive(context)) {
-          context = await ensureProjectRegistered(
-            context.sourcePath,
-            documentSessionRef.current.sourceSha256,
-            false,
+          context = registrationContextFromOutcome(
+            await requiredWorkspaceController(workspaceController).ensureRegistered({
+              sourcePath: context.sourcePath,
+              expectedSourceSha256: documentSessionRef.current.sourceSha256,
+              adoptCanonicalSource: false,
+            }),
           );
           if (!context || !draftSessionRef.current.isActive(context)) {
             throw new Error("无法恢复本轮评论的项目身份。");
@@ -4277,10 +4163,10 @@ export default function Workbench() {
     });
   }, [
     captureProjectContext,
-    ensureProjectRegistered,
     flushAutosave,
     flushDraftPersistence,
     persistDraftRecovery,
+    workspaceController,
   ]);
 
   const rememberAttachmentObjectUrl = useCallback((
@@ -4534,7 +4420,11 @@ export default function Workbench() {
     }
     let attachmentContext: ProjectContext;
     try {
-      const registered = await ensureProjectRegistered(activeSource);
+      const registered = registrationContextFromOutcome(
+        await requiredWorkspaceController(workspaceController).ensureRegistered({
+          sourcePath: activeSource,
+        }),
+      );
       if (!registered) throw new Error("当前项目已经切换，请重试。");
       attachmentContext = registered;
     } catch (cause) {
@@ -4685,9 +4575,9 @@ export default function Workbench() {
     }
   }, [
     deleteAttachmentFile,
-    ensureProjectRegistered,
     persistCurrentDraftRecovery,
     rememberAttachmentObjectUrl,
+    workspaceController,
   ]);
 
   const openAttachmentPicker = useCallback((
@@ -5951,7 +5841,6 @@ export default function Workbench() {
         pendingWrite: null,
       });
       recoveryIdentityRef.current = null;
-      projectRegistrationPromiseRef.current = null;
       draftRecoveryOperationIdRef.current = null;
       draftSessionRef.current.deactivate();
       sourceHistorySessionRef.current.deactivate();
@@ -7290,7 +7179,9 @@ export default function Workbench() {
     const requestedTargetId = draftTarget.id;
     if (projectSessionRef.current.sourcePath) {
       try {
-        const registered = await ensureProjectRegistered();
+        const registered = registrationContextFromOutcome(
+          await requiredWorkspaceController(workspaceController).ensureRegistered(),
+        );
         if (!registered) throw new Error("当前项目已经切换，请重试。");
       } catch (cause) {
         if (commentEpoch !== projectSessionRef.current.epoch) return;
@@ -7378,12 +7269,12 @@ export default function Workbench() {
     draftCommentId,
     draftTarget,
     attachmentUploadCount,
-    ensureProjectRegistered,
     persistCurrentDraftRecovery,
     queueReviewPairReveal,
     requestComposerFocus,
     updateFocusedComment,
     viewMode,
+    workspaceController,
   ]);
 
   const queueReviewCommentFocus = useCallback((
@@ -8075,7 +7966,9 @@ export default function Workbench() {
     };
 
     try {
-      const registered = await ensureProjectRegistered();
+      const registered = registrationContextFromOutcome(
+        await requiredWorkspaceController(workspaceController).ensureRegistered(),
+      );
       if (!registered) throw new Error("当前项目已经切换，请重试。");
       if (
         projectSessionRef.current.epoch !== submissionEpoch
@@ -8337,7 +8230,6 @@ export default function Workbench() {
   }, [
     deferEditorCommand,
     enqueueAutosave,
-    ensureProjectRegistered,
     isCurrentProjectContext,
     latestVersionId,
     currentBasedOnVersionId,
@@ -8349,6 +8241,7 @@ export default function Workbench() {
     setActiveRun,
     showUnfinishedCommentEditNotice,
     viewMode,
+    workspaceController,
   ]);
   useEffect(() => {
     deferredEditorReplayRef.current.generateRequest = () => {

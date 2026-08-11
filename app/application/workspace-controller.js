@@ -1,0 +1,548 @@
+import { isBridgeRequestError } from "./bridge-client.js";
+import { createWorkspaceControllerCodecs } from "./workspace-controller-codecs.js";
+
+function copyLocator({
+  operationId,
+  epoch,
+  sourcePath,
+  expectedSourceSha256,
+} = {}) {
+  return Object.freeze({
+    operationId: String(operationId || ""),
+    epoch: Number.isSafeInteger(Number(epoch)) ? Number(epoch) : 0,
+    sourcePath: String(sourcePath || ""),
+    expectedSourceSha256: expectedSourceSha256
+      ? String(expectedSourceSha256)
+      : null,
+  });
+}
+
+function succeeded(value) {
+  return Object.freeze({ status: "succeeded", value });
+}
+
+function blocked(code, reason) {
+  return Object.freeze({
+    status: "blocked",
+    code: String(code),
+    reason: String(reason),
+  });
+}
+
+function rejected(code, reason) {
+  return Object.freeze({
+    status: "rejected",
+    code: String(code),
+    reason: String(reason),
+  });
+}
+
+function unknown(operationId, reason) {
+  return Object.freeze({
+    status: "unknown",
+    operationId: String(operationId),
+    reason: String(reason),
+  });
+}
+
+function stale(identity) {
+  return Object.freeze({ status: "stale", identity });
+}
+
+function registrationSnapshot({
+  phase = "idle",
+  operationId = null,
+  identity = null,
+  outcome = null,
+} = {}) {
+  return Object.freeze({
+    registration: Object.freeze({
+      phase,
+      operationId: operationId ? String(operationId) : null,
+      identity: identity ? copyLocator(identity) : null,
+      outcome,
+    }),
+  });
+}
+
+function registrationErrorCode(cause) {
+  if (isBridgeRequestError(cause) && cause.code) return cause.code;
+  return "PROJECT_REGISTRATION_REJECTED";
+}
+
+export class WorkspaceRegistrationError extends Error {
+  constructor(outcome) {
+    super(outcome.reason);
+    this.name = "WorkspaceRegistrationError";
+    this.code = outcome.status === "unknown"
+      ? "PROJECT_REGISTRATION_UNKNOWN"
+      : outcome.code;
+    if (outcome.status === "unknown") {
+      this.operationId = outcome.operationId;
+    }
+  }
+}
+
+// Workbench presentation callbacks still consume a ProjectContext while the
+// migration is in progress. The conversion remains a pure Outcome mapping: all
+// registration IO, single-flight and Session publication live in the facade.
+export function registrationContextFromOutcome(outcome) {
+  if (outcome?.status === "succeeded") return outcome.value;
+  if (outcome?.status === "blocked" || outcome?.status === "stale") return null;
+  if (outcome?.status === "rejected" || outcome?.status === "unknown") {
+    throw new WorkspaceRegistrationError(outcome);
+  }
+  throw new WorkspaceRegistrationError(rejected(
+    "PROJECT_REGISTRATION_INVALID_OUTCOME",
+    "项目资料初始化返回了无效结果。",
+  ));
+}
+
+export class WorkspaceController {
+  #bridgeClient;
+  #projectSession;
+  #documentSession;
+  #commentSession;
+  #draftSession;
+  #versionSession;
+  #sourceHistorySession;
+  #codecs;
+  #hashPort;
+  #recoveryPort;
+  #canvasPort;
+  #clock;
+  #snapshot = registrationSnapshot();
+  #listeners = new Set();
+  #eventListeners = new Set();
+  #registrationPromise = null;
+  #registrationSequence = 0;
+  #disposed = false;
+
+  constructor({
+    bridgeClient,
+    projectSession,
+    documentSession,
+    commentSession,
+    draftSession,
+    versionSession,
+    sourceHistorySession,
+    codecs,
+    ports = {},
+    clock,
+  } = {}) {
+    if (!bridgeClient || typeof bridgeClient.ensureProject !== "function") {
+      throw new TypeError("WorkspaceController requires a Bridge client.");
+    }
+    if (!projectSession || typeof projectSession.register !== "function") {
+      throw new TypeError("WorkspaceController requires ProjectSession injection.");
+    }
+    if (!documentSession || typeof documentSession.update !== "function") {
+      throw new TypeError("WorkspaceController requires DocumentSession injection.");
+    }
+    if (!commentSession || typeof commentSession.setComments !== "function") {
+      throw new TypeError("WorkspaceController requires CommentSession injection.");
+    }
+    if (!draftSession || typeof draftSession.replaceAuthority !== "function") {
+      throw new TypeError("WorkspaceController requires DraftSession injection.");
+    }
+    if (!versionSession || typeof versionSession.hydrate !== "function") {
+      throw new TypeError("WorkspaceController requires VersionSession injection.");
+    }
+    if (!sourceHistorySession || typeof sourceHistorySession.activate !== "function") {
+      throw new TypeError("WorkspaceController requires SourceHistorySession injection.");
+    }
+    if (!ports.hash || typeof ports.hash.sha256 !== "function") {
+      throw new TypeError("WorkspaceController requires a HashPort.");
+    }
+    if (!clock || typeof clock.now !== "function") {
+      throw new TypeError("WorkspaceController requires a ClockPort.");
+    }
+
+    this.#bridgeClient = bridgeClient;
+    this.#projectSession = projectSession;
+    this.#documentSession = documentSession;
+    this.#commentSession = commentSession;
+    this.#draftSession = draftSession;
+    this.#versionSession = versionSession;
+    this.#sourceHistorySession = sourceHistorySession;
+    this.#codecs = createWorkspaceControllerCodecs(codecs);
+    this.#hashPort = ports.hash;
+    this.#recoveryPort = ports.recovery || { replace: () => {} };
+    this.#canvasPort = ports.canvas || { invalidateRenderAcks: () => {} };
+    if (typeof this.#recoveryPort.replace !== "function") {
+      throw new TypeError("WorkspaceController RecoveryPort must provide replace.");
+    }
+    if (typeof this.#canvasPort.invalidateRenderAcks !== "function") {
+      throw new TypeError(
+        "WorkspaceController CanvasAuthorityPort must provide invalidateRenderAcks.",
+      );
+    }
+    this.#clock = clock;
+  }
+
+  getSnapshot() {
+    return this.#snapshot;
+  }
+
+  subscribe(listener) {
+    if (typeof listener !== "function") {
+      throw new TypeError("WorkspaceController listener must be a function.");
+    }
+    this.#listeners.add(listener);
+    listener(this.#snapshot);
+    return () => {
+      this.#listeners.delete(listener);
+    };
+  }
+
+  subscribeEvents(listener) {
+    if (typeof listener !== "function") {
+      throw new TypeError("WorkspaceController event listener must be a function.");
+    }
+    this.#eventListeners.add(listener);
+    return () => {
+      this.#eventListeners.delete(listener);
+    };
+  }
+
+  dispose() {
+    this.#disposed = true;
+    this.#listeners.clear();
+    this.#eventListeners.clear();
+  }
+
+  ensureRegistered({
+    sourcePath,
+    expectedSourceSha256,
+    adoptCanonicalSource = true,
+  } = {}) {
+    if (this.#disposed) {
+      return Promise.resolve(blocked(
+        "WORKSPACE_CONTROLLER_DISPOSED",
+        "项目资料初始化已停止。",
+      ));
+    }
+    const activeSource = sourcePath || this.#projectSession.sourcePath;
+    const expectedHash = expectedSourceSha256 || this.#documentSession.sourceSha256;
+    if (!activeSource || !expectedHash) {
+      return Promise.resolve(blocked(
+        "PROJECT_REGISTRATION_PRECONDITION",
+        "当前页面缺少可验证的源文件身份。",
+      ));
+    }
+    if (this.#registrationPromise) {
+      const inFlight = this.#snapshot.registration.identity;
+      if (
+        inFlight
+        && inFlight.epoch === this.#projectSession.epoch
+        && this.#codecs.sameSourcePath(inFlight.sourcePath, activeSource)
+      ) {
+        return this.#registrationPromise;
+      }
+      // A source switch retires the older operation. Do not force the new
+      // project to await a result that can only become stale.
+      this.#registrationPromise = null;
+    }
+
+    const existingContext = this.#projectSession.context;
+    if (existingContext && this.#draftSession.isActive(existingContext)) {
+      return Promise.resolve(succeeded(existingContext));
+    }
+
+    const operationId = this.#nextOperationId();
+    const identity = copyLocator({
+      operationId,
+      epoch: existingContext?.epoch ?? this.#projectSession.epoch,
+      sourcePath: activeSource,
+      expectedSourceSha256: expectedHash,
+    });
+    this.#publishSnapshot({
+      phase: "registering",
+      operationId,
+      identity,
+    });
+    const registration = existingContext
+      ? this.#restoreDraftAuthority({ existingContext, activeSource, identity })
+      : this.#createRegistration({
+          activeSource,
+          expectedHash,
+          adoptCanonicalSource,
+          identity,
+        });
+    this.#registrationPromise = registration;
+    registration.then(
+      (outcome) => this.#settleRegistration(registration, outcome),
+      (cause) => this.#settleRegistration(
+        registration,
+        rejected(registrationErrorCode(cause), String(cause?.message || cause)),
+      ),
+    );
+    return registration;
+  }
+
+  #nextOperationId() {
+    this.#registrationSequence += 1;
+    return [
+      "registration",
+      Math.max(0, Number(this.#clock.now()) || 0).toString(36),
+      this.#registrationSequence.toString(36),
+    ].join("_");
+  }
+
+  #publishSnapshot({ phase, operationId = null, identity = null, outcome = null }) {
+    this.#snapshot = registrationSnapshot({
+      phase,
+      operationId,
+      identity,
+      outcome,
+    });
+    for (const listener of this.#listeners) {
+      try {
+        listener(this.#snapshot);
+      } catch {
+        // Presentation listeners cannot affect application authority.
+      }
+    }
+  }
+
+  #emitEvent(event) {
+    const frozen = Object.freeze(event);
+    for (const listener of this.#eventListeners) {
+      try {
+        listener(frozen);
+      } catch {
+        // Presentation listeners cannot affect application authority.
+      }
+    }
+  }
+
+  #isCurrentLocator(identity) {
+    return Boolean(
+      !this.#disposed
+      && this.#projectSession.epoch === identity.epoch
+      && this.#codecs.sameSourcePath(
+        this.#projectSession.sourcePath,
+        identity.sourcePath,
+      )
+      && this.#documentSession.sourceSha256 === identity.expectedSourceSha256,
+    );
+  }
+
+  #outcomeFromCause(identity, cause) {
+    if (isBridgeRequestError(cause) && cause.outcome === "unknown") {
+      return unknown(identity.operationId, String(cause.message || "项目资料初始化结果未知。"));
+    }
+    return rejected(
+      registrationErrorCode(cause),
+      String(cause?.message || "项目资料暂时无法建立。"),
+    );
+  }
+
+  async #restoreDraftAuthority({ existingContext, activeSource, identity }) {
+    try {
+      const payload = await this.#bridgeClient.workspace(activeSource);
+      if (
+        !this.#isCurrentLocator(identity)
+        || !this.#projectSession.matches(existingContext)
+      ) return stale(identity);
+      if (
+        String(payload.projectId || "") !== existingContext.projectId
+        || String(payload.documentId || "") !== existingContext.documentId
+        || !this.#codecs.sameSourcePath(
+          String(payload.sourcePath || activeSource),
+          activeSource,
+        )
+      ) {
+        return rejected(
+          "PROJECT_REGISTRATION_IDENTITY_MISMATCH",
+          "项目记录的身份与当前页面不一致，已停止恢复评论会话。",
+        );
+      }
+      const authoritativeDraft = this.#codecs.draftAuthorityFromWorkspace(payload);
+      this.#draftSession.replaceAuthority(
+        existingContext,
+        this.#codecs.authoritativeDraftRevision(authoritativeDraft),
+        authoritativeDraft,
+      );
+      this.#emitEvent({
+        type: "draft-authority-rebound",
+        context: existingContext,
+      });
+      return succeeded(existingContext);
+    } catch (cause) {
+      return this.#outcomeFromCause(identity, cause);
+    }
+  }
+
+  async #createRegistration({
+    activeSource,
+    expectedHash,
+    adoptCanonicalSource,
+    identity,
+  }) {
+    try {
+      const payload = await this.#bridgeClient.ensureProject({
+        sourcePath: activeSource,
+        expectedSourceSha256: expectedHash,
+      });
+      if (payload.ok === false) {
+        return rejected(
+          "PROJECT_REGISTRATION_REJECTED",
+          "无法建立项目记录。",
+        );
+      }
+      if (!this.#isCurrentLocator(identity)) return stale(identity);
+
+      const nextProjectId = String(payload.projectId || "");
+      const nextDocumentId = String(payload.documentId || "");
+      const nextSourceSha256 = String(
+        payload.currentHtmlSha256 || payload.sourceSha256 || "",
+      );
+      const canonicalSource =
+        typeof payload.content === "string" ? payload.content : "";
+      const hasCanonicalSource = typeof payload.content === "string";
+      if (
+        !nextProjectId
+        || !nextDocumentId
+        || !/^sha256:[a-f0-9]{64}$/u.test(nextSourceSha256)
+        || (
+          hasCanonicalSource
+          && await this.#hashPort.sha256(canonicalSource) !== nextSourceSha256
+        )
+      ) {
+        return rejected(
+          "PROJECT_REGISTRATION_PAYLOAD_INVALID",
+          "项目记录已建立，但返回的身份或源文件校验不完整。",
+        );
+      }
+
+      const currentDocument = this.#documentSession.snapshot;
+      const currentHtmlSha256 = await this.#hashPort.sha256(currentDocument.html);
+      if (!this.#isCurrentLocator(identity)) return stale(identity);
+      const currentDocumentClean = Boolean(
+        currentDocument.editRevision === currentDocument.lastPersistedRevision
+        && !this.#documentSession.pendingWrite
+        && !this.#documentSession.flushPromise,
+      );
+      const mustRepairCleanProjection = Boolean(
+        currentDocumentClean && currentHtmlSha256 !== nextSourceSha256,
+      );
+      if (mustRepairCleanProjection && !hasCanonicalSource) {
+        return rejected(
+          "PROJECT_REGISTRATION_CANONICAL_SOURCE_MISSING",
+          "项目记录与当前画布不一致，且缺少可自动恢复的完整源 HTML。",
+        );
+      }
+      const shouldAdoptCanonicalSource = Boolean(
+        hasCanonicalSource
+        && currentDocumentClean
+        && (adoptCanonicalSource || mustRepairCleanProjection),
+      );
+      const nextDocumentHtml = shouldAdoptCanonicalSource
+        ? canonicalSource
+        : currentDocument.html;
+      const projectRecord = this.#codecs.isRecord(payload.project)
+        ? payload.project
+        : {};
+      const paths = this.#codecs.isRecord(payload.paths) ? payload.paths : {};
+      if (this.#projectSession.context) return stale(identity);
+      const registeredContext = this.#projectSession.register({
+        epoch: identity.epoch,
+        projectId: nextProjectId,
+        documentId: nextDocumentId,
+        sourcePath: activeSource,
+      });
+      if (!registeredContext) return stale(identity);
+
+      this.#recoveryPort.replace(
+        this.#codecs.recoveryIdentityFromRecord(payload.recoveryIdentity),
+      );
+      if (shouldAdoptCanonicalSource) {
+        this.#documentSession.publishAuthority({
+          html: nextDocumentHtml,
+          sourceSha256: nextSourceSha256,
+        });
+        this.#canvasPort.invalidateRenderAcks();
+      } else {
+        this.#documentSession.update({
+          html: nextDocumentHtml,
+          sourceSha256: nextSourceSha256,
+        });
+      }
+      this.#versionSession.hydrate({
+        versions: this.#codecs.versionsFromWorkspace(payload),
+        latestVersionId: payload.latestVersionId,
+        currentBasedOnVersionId: payload.currentBasedOnVersionId,
+        currentExactVersionId: payload.currentExactVersionId,
+      });
+      if (shouldAdoptCanonicalSource) {
+        const reboundTargets = this.#codecs.rebindTargetsPreservingGlobal(
+          canonicalSource,
+          [
+            ...this.#commentSession.comments.map((comment) => comment.target),
+            ...(
+              this.#commentSession.composerTarget
+                ? [this.#commentSession.composerTarget]
+                : []
+            ),
+          ],
+        );
+        const reboundById = new Map(
+          reboundTargets.map((target) => [target.id, target]),
+        );
+        this.#commentSession.setComments(
+          this.#commentSession.comments.map((comment) => ({
+            ...comment,
+            target: reboundById.get(comment.target.id) || comment.target,
+          })),
+        );
+        if (this.#commentSession.composerTarget) {
+          this.#commentSession.setComposerTarget(
+            reboundById.get(this.#commentSession.composerTarget.id)
+              || this.#commentSession.composerTarget,
+          );
+        }
+      }
+      const authoritativeDraft = this.#codecs.draftAuthorityFromWorkspace(payload);
+      this.#draftSession.replaceAuthority(
+        registeredContext,
+        this.#codecs.authoritativeDraftRevision(authoritativeDraft),
+        authoritativeDraft,
+      );
+      if (this.#codecs.isRecord(payload.sourceHistory)) {
+        this.#sourceHistorySession.activate(
+          registeredContext,
+          nextSourceSha256,
+          payload.sourceHistory,
+          { preservePending: true },
+        );
+      }
+      this.#emitEvent({
+        type: "registration-published",
+        context: registeredContext,
+        projectRecordsPath: String(
+          paths.projectRecords || payload.projectRoot || "",
+        ) || null,
+        projectName: projectRecord.displayName
+          ? String(projectRecord.displayName)
+          : null,
+        canonicalSourceAdopted: shouldAdoptCanonicalSource,
+      });
+      return succeeded(registeredContext);
+    } catch (cause) {
+      return this.#outcomeFromCause(identity, cause);
+    }
+  }
+
+  #settleRegistration(registration, outcome) {
+    if (this.#registrationPromise !== registration) return;
+    this.#registrationPromise = null;
+    this.#publishSnapshot({
+      phase: "idle",
+      outcome,
+      identity: outcome.status === "stale"
+        ? outcome.identity
+        : this.#snapshot.registration.identity,
+    });
+  }
+}
