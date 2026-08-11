@@ -631,11 +631,85 @@ test("an external request arriving during close preparation cancels that exact c
 
   const readiness = await closing;
   assert.equal(readiness.ready, false);
-  assert.match(readiness.reason, /外部 HTML/u);
+  assert.match(readiness.reason, /HTML 打开/u);
   assert.equal(harness.workflow.getSnapshot().close.phase, "idle");
   await waitFor(() => Boolean(resolveExternal));
   resolveExternal(null);
   await waitFor(() => harness.workflow.getSnapshot().externalOpen.status === "idle");
+});
+
+test("close drains an in-flight local picker before it commits", async (t) => {
+  let resolveLocal;
+  const harness = createHarness({
+    projectOpen: {
+      openLocal: () => new Promise((resolve) => {
+        resolveLocal = resolve;
+      }),
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+
+  const opening = harness.workflow.openProject({ kind: "local" });
+  await waitFor(
+    () => Boolean(resolveLocal) && harness.workflow.getSnapshot().open.phase === "opening",
+    "local picker did not enter the open operation",
+  );
+  let closeSettled = false;
+  const closing = harness.workflow.prepareClose({
+    requestId: "close_pending_local_picker",
+    deadlineAt: Date.now() + 2_000,
+  }).then((outcome) => {
+    closeSettled = true;
+    return outcome;
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  assert.equal(closeSettled, false);
+  assert.equal(harness.workflow.getSnapshot().close.phase, "preparing");
+
+  resolveLocal(null);
+  const [opened, readiness] = await Promise.all([opening, closing]);
+  assert.equal(opened.status, "succeeded");
+  assert.equal(opened.value.opened, false);
+  assert.deepEqual(readiness, { ready: true });
+  assert.equal(harness.workflow.getSnapshot().close.phase, "ready");
+});
+
+test("close drains an in-flight startup active-project read before it commits", async (t) => {
+  let resolveActive;
+  const harness = createHarness({
+    projectOpen: {
+      getActive: () => new Promise((resolve) => {
+        resolveActive = resolve;
+      }),
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+
+  const opening = harness.workflow.openProject({ kind: "startup" });
+  await waitFor(
+    () => Boolean(resolveActive) && harness.workflow.getSnapshot().open.phase === "opening",
+    "startup active-project read did not enter the open operation",
+  );
+  let closeSettled = false;
+  const closing = harness.workflow.prepareClose({
+    requestId: "close_pending_startup_read",
+    deadlineAt: Date.now() + 2_000,
+  }).then((outcome) => {
+    closeSettled = true;
+    return outcome;
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  assert.equal(closeSettled, false);
+  assert.equal(harness.workflow.getSnapshot().close.phase, "preparing");
+
+  resolveActive(null);
+  const [opened, readiness] = await Promise.all([opening, closing]);
+  assert.equal(opened.status, "succeeded");
+  assert.equal(opened.value.opened, false);
+  assert.deepEqual(readiness, { ready: true });
+  assert.equal(harness.workflow.getSnapshot().close.phase, "ready");
 });
 
 test("committed close rejects new external work and abort unlocks only its own freeze", async (t) => {

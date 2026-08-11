@@ -544,6 +544,12 @@ export class ProjectWorkflow {
         ? await this.#projectOpenPort.openRecent(String(sourcePath || ""))
         : await this.#projectOpenPort.openLocal();
       if (!project) return succeeded({ operationId, opened: false });
+      if (this.#snapshot.close.phase === "ready") {
+        return blocked(
+          "PROJECT_OPEN_CLOSE_COMMITTED",
+          "当前窗口正在关闭，没有接收新的 HTML。",
+        );
+      }
       const accepted = this.#enqueueAcceptedProject(project, {
         kind,
         operationId,
@@ -721,7 +727,8 @@ export class ProjectWorkflow {
       presentation: "in-app",
     });
     const projectOpenInFlight = () => (
-      this.#externalFileOpenSession.snapshot.status !== "idle"
+      this.#snapshot.open.phase === "opening"
+      || this.#externalFileOpenSession.snapshot.status !== "idle"
       || this.#projectApplicationSession.snapshot.status !== "idle"
     );
     const drainProjectOpenSessions = async () => {
@@ -740,7 +747,7 @@ export class ProjectWorkflow {
       if (projectOpenBlock) return projectOpenBlock;
       if (this.projectHydrating) {
         if (projectOpenInFlight()) {
-          return inAppBlock("外部 HTML 切换仍未安全完成，已取消关闭。");
+          return inAppBlock("HTML 打开仍未安全完成，已取消关闭。");
         }
         const draftState = this.#draftSession.inspect();
         if (this.#policies.canCloseDuringHydration({
@@ -762,7 +769,7 @@ export class ProjectWorkflow {
       }
       if (this.projectLoadError) {
         if (projectOpenInFlight()) {
-          return inAppBlock("外部 HTML 切换仍未安全完成，已取消关闭。");
+          return inAppBlock("HTML 打开仍未安全完成，已取消关闭。");
         }
         if (
           this.#documentSession.pendingWrite
@@ -838,7 +845,7 @@ export class ProjectWorkflow {
         return inAppBlock("桌面外壳已取消本次关闭。");
       }
       if (projectOpenInFlight()) {
-        return inAppBlock("外部 HTML 切换在关闭核对期间开始，已取消本次关闭。");
+        return inAppBlock("HTML 打开在关闭核对期间开始，已取消本次关闭。");
       }
       ready = true;
       this.#setClose("ready", closeRequestId);
@@ -1015,6 +1022,18 @@ export class ProjectWorkflow {
       } : { state: "resolved" },
       drain: () => this.#waitUntil(
         () => this.#projectApplicationSession.snapshot.status === "idle",
+      ),
+    });
+    this.#drainCoordinator.replace("project-picker", {
+      label: "等待本地 HTML 选择完成",
+      inspect: (boundary) => (
+        boundary === "close" && this.#snapshot.open.phase === "opening"
+      ) ? {
+        state: "pending",
+        reason: "本地 HTML 选择仍在等待结果。",
+      } : { state: "resolved" },
+      drain: () => this.#waitUntil(
+        () => this.#snapshot.open.phase !== "opening",
       ),
     });
     this.#drainCoordinator.replace("project-hydration", {
@@ -1233,11 +1252,22 @@ export class ProjectWorkflow {
       }
       void this.#legacyPort.hydrateRecentRuns?.(recent, active?.sourcePath || null);
       if (active) {
-        this.#enqueueAcceptedProject(active, {
+        if (this.#snapshot.close.phase === "ready") {
+          return blocked(
+            "PROJECT_OPEN_CLOSE_COMMITTED",
+            "当前窗口正在关闭，没有接收新的 HTML。",
+          );
+        }
+        if (!this.#enqueueAcceptedProject(active, {
           kind: "startup",
           operationId,
           sourcePath: active.sourcePath || null,
-        });
+        })) {
+          return rejected(
+            "PROJECT_APPLICATION_REJECTED",
+            "无法安排当前 HTML 的安全切换。",
+          );
+        }
       }
       return succeeded({ operationId, opened: Boolean(active) });
     } catch (cause) {
@@ -1251,6 +1281,7 @@ export class ProjectWorkflow {
   }
 
   #enqueueAcceptedProject(projectValue, metadata) {
+    if (this.#snapshot.close.phase === "ready") return false;
     const project = copyProject(projectValue);
     if (!project) return false;
     this.#applicationSequence += 1;
@@ -1261,6 +1292,7 @@ export class ProjectWorkflow {
   }
 
   async #applyAcceptedProject(application) {
+    if (this.#snapshot.close.phase === "ready") return "complete";
     const { project, metadata } = application.value;
     if (this.projectHydrating && !this.#retireHydrationForAcceptedSuccessor()) {
       return "deferred";
@@ -1272,6 +1304,7 @@ export class ProjectWorkflow {
       const switchOutcome = await this.prepareSwitch();
       if (switchOutcome.status !== "succeeded") return "deferred";
     }
+    if (this.#snapshot.close.phase === "ready") return "complete";
     let canvasFrozen = false;
     let applied = false;
     if (
@@ -1398,6 +1431,7 @@ export class ProjectWorkflow {
         return "complete";
       }
       const project = await this.#projectOpenPort.acceptExternal(request.requestId);
+      if (this.#snapshot.close.phase === "ready") return "complete";
       if (!this.#enqueueAcceptedProject(project, {
         kind: "external",
         operationId,
