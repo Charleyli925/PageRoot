@@ -14,6 +14,14 @@ verified compatible fix.
 
 ## Reviewed fixes
 
+The 2026-08-12 declarative Edit Chart contract pins Apache ECharts 6.1.0.
+PageRoot imports only the bar, line, scatter, grid, legend, title and SVG
+renderer modules; Vite will bundle that code into the trusted desktop renderer
+when the staged feature is connected. Authored HTML never imports or selects
+this dependency, and ECharts is not copied as a Node module into the packaged
+runtime closure. Its `zrender` and `tslib` dependencies remain lockfile-pinned,
+and the dependency audit reports no advisory.
+
 The 2026-08-08 security baseline moves the PostCSS-selected `nanoid` closure
 to 3.3.17 and selects `vinext` 0.0.45 in place of 0.2.1. This is the
 compatible remediation path identified by the audit; the release is verified

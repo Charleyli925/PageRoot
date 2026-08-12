@@ -13,6 +13,7 @@ Primary runtime dependencies include:
 | entities | BSD-2-Clause |
 | @noble/hashes | MIT |
 | @phosphor-icons/react | MIT |
+| Apache ECharts | Apache-2.0; zrender is BSD-3-Clause and tslib is 0BSD |
 
 Build and test dependencies include TypeScript, Vite, Playwright, ESLint, Tailwind CSS, electron-builder, Wrangler and their transitive dependencies under their respective licenses. The packaged Electron application includes Electron and Chromium license material. Some transitive build-only packages use Apache-2.0, BSD, ISC, MPL-2.0, LGPL, CC-BY or other OSI-compatible terms.
 

@@ -140,6 +140,15 @@ Save, review comparison and Request creation continue from authoritative source
 bytes (the Bridge copies those exact bytes to `input/base/index.html`), and the
 SourcePatch checks remain unchanged.
 
+ADR 0020 defines a staged declarative exception without weakening that script
+boundary. PR-1 has no production caller: it only accepts a closed, versioned
+JSON Chart Spec, maps it to fixed PageRoot-owned ECharts options, renders at
+declared dimensions and rejects SVG outside a closed element/reference budget.
+It never evaluates authored ECharts, raw options, functions, URLs or runtime
+DOM. Any future Edit integration must keep generated SVG inside a source-empty
+host's disposable Shadow DOM, pointer-transparent and absent from SourceIndex,
+TargetRef, SourcePatch, persistence, Review, Version and AI input.
+
 The AI review workspace is an isolated interactive review preview with no
 activation or persistence authority. It preserves the identity/Hash-validated authored
 scripts and inline events in a disposable review copy so source-backed Tabs,

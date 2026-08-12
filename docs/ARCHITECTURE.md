@@ -56,10 +56,13 @@ Comments + frozen input
 - Preview-to-edit carries only a bounded `PageViewContext`: source-backed
   active/inactive class transitions and `hidden`, `open`, `aria-selected` or
   `aria-expanded` state. It never carries runtime DOM, pixels or table markup.
-- Edit is script-disabled and renders only source-static content. It has no
-  runtime snapshot session, cache, IPC request, bitmap projection or Blob URL;
-  authored inline SVG remains source-backed while runtime-only Canvas/SVG stays
-  in Preview.
+- Production Edit is currently script-disabled and renders only source-static
+  content. It has no runtime snapshot session, cache, IPC request, bitmap
+  projection or Blob URL; authored inline SVG remains source-backed while
+  runtime-only Canvas/SVG stays in Preview. ADR 0020 stages one narrower future
+  exception: an explicitly authored, fixed-size JSON Chart Spec may be rendered
+  by PageRoot into disposable same-slot SVG without executing authored script.
+  PR-1 contains only that dormant pure contract and has no Edit caller.
 - Review alone has a disposable runtime-snapshot supplement. Its
   `SourceHostResolver` admits only direct source Canvas/SVG roots and stable,
   source-empty hosts; it never uses script causality, computed selectors,
@@ -251,6 +254,7 @@ services.
 | Preview sanitization and verified frame injection | `app/components/html-preview-sandbox.js` |
 | Volatile desktop preview sessions and contained local-asset serving | `desktop/preview-protocol.mjs` |
 | Source-backed preview/edit display-state filtering, rebinding and safe action resolution | `app/lib/page-view-context.js` |
+| Dormant Edit Chart Spec grammar, fixed ECharts mapping and validated SVG SSR (no product caller until ADR 0020 PR-2) | `app/domain/edit-chart-spec.js`, `app/lib/edit-chart-svg.js` |
 | Review source-host discovery and Review-only capture request shape | `app/domain/runtime-snapshot-hosts.js`, `app/components/desktop-runtime-snapshot-api.ts` |
 | Review runtime-snapshot limits, source/session envelope and PNG validation | `app/domain/runtime-visual-contract.js`, `app/lib/runtime-visual-snapshots.js` |
 | Sandboxed offscreen page execution and bounded bitmap capture for Review | `desktop/runtime-visual-capture-owner.mjs` |

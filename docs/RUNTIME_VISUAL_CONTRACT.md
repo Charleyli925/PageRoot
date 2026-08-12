@@ -34,6 +34,10 @@ native, source-backed and non-editable; script-generated Canvas/SVG remains
 available in Preview. There is no runtime-capture status, placeholder, retry or
 fallback UI in Edit.
 
+This remains the active production behavior. ADR 0020 PR-1 adds only a dormant
+JSON Chart Spec and same-slot SVG library; it does not start the Review snapshot
+owner or alter Edit until its separately gated PR-2 integration.
+
 ## One Review snapshot owner
 
 `desktop/runtime-visual-capture-owner.mjs` is the single
