@@ -120,7 +120,9 @@ PR 批量是建议而非固定限制：用 CI Health 的 Ready 次数、candidat
   direct Canvas/SVG 与唯一稳定的 source-empty 宿主，删除/歧义/类型冲突、任意
   HTML/`tbody`、computed selector 和脚本依赖猜测都 fail-closed。owner 测试拥有
   Review-only 窄请求、source SHA/绑定、isolated world、一次 rect/PNG、PNG
-  SHA/像素/字节预算、deadline 和 cleanup。Electron 用一份合成报告证明 Edit
+  SHA/像素/字节预算、可见 DOM/SVG 文字哈希、deadline 和 cleanup。Node 还直接
+  覆盖文字/数字哈希严格变化，以及同文字单次 PNG 的 RGB 误差预算不会把微小
+  栅格噪声判作变化。Electron 用一份合成报告证明 Edit
   不执行作者脚本、不请求或挂载运行态位图，Preview 中同一 Canvas/SVG 正常运行，
   authored inline SVG 仍在 Edit 原生可见且源文件字节不变。
   桌面编辑画布还必须
@@ -232,7 +234,7 @@ PR 批量是建议而非固定限制：用 CI Health 的 Ready 次数、candidat
   编辑且保留评论与候选文件，以及确认打开全程不显示等待 AI 页面。
   同一正式 Electron 用例覆盖支持范围内的 source-empty host、直接 Canvas/SVG、静态审阅优先呈现，以及 owner 失败或迟到时不改变静态数量、文本、TargetRef 或 UI。Node 覆盖 SourceHostResolver 的唯一配对、删除/歧义/类型冲突的静默省略，owner 的窄请求、原始 source SHA/绑定验证、isolated world、一次 rect/PNG、PNG/像素/字节预算、deadline 和 cleanup。Browser 另外证明点击页面 padding 与 App 空白会一起结束编辑、选区和工具栏。测试自动生成受控 AI 输出并执行正式 finalizer，不等待外部模型或真人接力。
 - Review Runtime Snapshot：Review 通过其唯一 owner、请求 envelope 和 PNG parser 完成一个 before/after pair。Electron 回归验证静态审阅先呈现，owner 失败或迟到不改变静态审阅；作者页不能读取 candidate binding、TargetRef、截图或 owner 结果。新 owner 文件必须在 package allowlist、packaged artifact gate 和启动 smoke 中出现。
-- 运行态视觉合同只有一个 Review-only 生产声明：Node 直接验证 contract、32 个 Snapshot 上限、1500ms owner deadline、完整 source SHA 与 contractVersion + sessionId + side 封包；Review 的生产者、消费者不得各自重复边界。测试覆盖 direct Canvas/SVG、source-empty 稳定宿主、删除/歧义/类型冲突、超大 PNG、无限脚本与 navigation/popup/download/permission 拒绝。任意脚本因果、computed selector、评论范围分组、第二轮确认和 hostile 组合矩阵不再是候选 oracle。
+- 运行态视觉合同只有一个 Review-only 生产声明：Node 直接验证 contract、32 个 Snapshot 上限、1500ms owner deadline、完整 source SHA 与 contractVersion + sessionId + side 封包；Review 的生产者、消费者不得各自重复边界。测试覆盖 direct Canvas/SVG、source-empty 稳定宿主、删除/歧义/类型冲突、超大 PNG、可见文字哈希不泄露原文、同文字截图的 RGB 噪声预算、无限脚本与 navigation/popup/download/permission 拒绝。任意脚本因果、computed selector、评论范围分组、第二轮确认和 hostile 组合矩阵不再是候选 oracle。
 - 评论标记必须覆盖无 `id`、`data-*`、`name`、`aria-label` 的 class-only 普通目标：即使作者插入或重排同标签兄弟，before bootstrap 也必须仅凭首个私有响应中的冻结源 `sourceNodeId` 路径/指纹绑定解析器创建的原元素并保留 marker。测试还必须证明 HTML、后续 bootstrap 读取和作者可枚举 DOM 均不含该绑定、评论正文、评论 key 或定位映射；恶意作者脚本读取当前页面或 bootstrap 地址后仍不得产生伪造 marker。恶意的作者 capture listener 即使尝试读取 challenge、以同一 challenge 伪造评论端口，也既看不到评论 channel 请求，也收不到 `comment-targets`。
 - Review 只比较一个冻结的 before/after owner pair。任一侧 unavailable、无效、超时、取消或迟到时静默省略该 marker，不影响静态审阅或其他已验证候选；不为动画、随机或任意 hostile 行为启动第二轮取证。
 - 审阅滚动回归必须直接证明页面概览会递增手势代次、取消待执行跟随帧并保留语义映射；评论布局契约还必须接受超出 100,000px 的有限长文档坐标，同时继续拒绝非有限值和超过安全上限的坐标。

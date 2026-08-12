@@ -59,7 +59,8 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
   preview session after each capture or superseding request. Every page-realm
   evaluation and bitmap operation is bounded by the shared owner deadline;
   authored clocks cannot keep the window alive. It returns only bounded PNG
-  bytes plus validated dimensions/content SHA/byte length, never runtime HTML,
+  bytes plus validated dimensions/content SHA/byte length and a bounded
+  SHA-256 of normalized visible DOM/SVG text, never raw runtime text, HTML,
   SVG, script state, TargetRefs or filesystem data.
 - Strict schemas, frozen inputs and identity/Hash/path checks before accepting
   AI output; complete-document and non-empty-body checks remain protocol
@@ -180,10 +181,14 @@ malformed, late or failed owner result leaves static Review authoritative.
 
 Before scripts run, the owner validates the source path/tag/identity. Its
 isolated-world program then confirms that same runtime host and, for a stable
-container, visible Canvas/SVG paint. It performs one rect pass and at most one
-bounded PNG capture per host. Renderer memory revalidates PNG bytes, dimensions,
-hash and aggregate limits. The owner deadline is scheduled in main, so
-page-controlled promises or timers cannot extend it.
+container, visible Canvas/SVG paint, and hashes a bounded normalized sequence
+of visible DOM/SVG text without returning the text itself. It performs one rect
+pass and at most one bounded PNG capture per host. Renderer memory revalidates
+PNG bytes, dimensions, hash and aggregate limits. It treats layout and the
+text hash strictly; only an equal-text PNG mismatch reaches the one local mean
+absolute RGB comparison, whose `0.04` budget rejects encoder/tile noise. The
+owner deadline is scheduled in main, so page-controlled promises or timers
+cannot extend it.
 
 Runtime projection never queries an outline for geometry and never writes a
 runtime marker or fact attribute to the source DOM. The bootstrap retains the

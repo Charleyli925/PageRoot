@@ -16,6 +16,19 @@ export type ReviewRuntimeVisualCandidate = Readonly<{
 }>;
 
 export const REVIEW_RUNTIME_VISUAL_CANDIDATE_LIMIT: 32;
+export const REVIEW_RUNTIME_VISUAL_RASTER_MEAN_RGB_DIFFERENCE_BUDGET: 0.04;
+
+export function reviewRuntimeVisualSnapshotComparison(
+  before: ReviewRuntimeVisualSnapshot | undefined,
+  after: ReviewRuntimeVisualSnapshot | undefined,
+): "unavailable" | "unchanged" | "changed" | "raster";
+
+export function reviewRuntimeVisualMeanRgbDifference(
+  beforePixels: Uint8Array | Uint8ClampedArray | unknown,
+  afterPixels: Uint8Array | Uint8ClampedArray | unknown,
+): number | null;
+
+export function isReviewRuntimeVisualRasterDifferenceMeaningful(value: unknown): boolean;
 
 export function acceptRuntimeVisualSnapshots(
   value: unknown,
@@ -26,6 +39,7 @@ export function changedReviewRuntimeVisualCandidateKeys(options?: {
   candidates?: readonly ReviewRuntimeVisualCandidate[];
   before?: readonly ReviewRuntimeVisualSnapshot[];
   after?: readonly ReviewRuntimeVisualSnapshot[];
+  rasterMeanRgbDifferenceByKey?: ReadonlyMap<string, number>;
 }): readonly string[];
 
 export function mergeReviewRuntimeVisualChanges<

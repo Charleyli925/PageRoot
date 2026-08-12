@@ -93,7 +93,7 @@ test("preload exposes one narrow Review-only Runtime Snapshot capture method", a
     return success({ outcome: "failed", reason: "capture-failed" });
   });
   const payload = {
-    contractVersion: 1,
+    contractVersion: 2,
     captureSessionId: "review-owner-session-0001",
     sourceSha256: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     side: "before",

@@ -64,9 +64,10 @@ Comments + frozen input
   `SourceHostResolver` admits only direct source Canvas/SVG roots and stable,
   source-empty hosts; it never uses script causality, computed selectors,
   arbitrary HTML or `tbody`. `RuntimeSnapshotOwner` accepts bounded `before`/
-  `after` PNG evidence only after exact source/binding validation in an isolated
-  world. Runtime DOM and PNGs never enter SourcePatch, save, Version, Review
-  source analysis or AI Request input.
+  `after` PNG evidence plus a hash of visible DOM/SVG text only after exact
+  source/binding validation in an isolated world. Runtime DOM, raw text and
+  PNGs never enter SourcePatch, save, Version, Review source analysis or AI
+  Request input.
 - Comment selection remains source-node exact inside foreign content. Authored
   SVG children retain their own instrumented SourceIndex identity; runtime-only
   children fail closed and are never promoted to an ancestor `svg`.
@@ -139,9 +140,12 @@ Comments + frozen input
   isolated world. It collects one rect pass and at most one bounded PNG per
   host, with main-owned deadline, navigation/permission denial and mandatory
   cleanup. Renderer memory revalidates PNG bytes/hash/dimensions and compares
-  one before/after pair. A difference emits one opaque `{candidateKey,
-  changeId}` result per changed source host; outline IDs remain navigation and
-  summary metadata, never geometry authority. For each side, the analyzer puts
+  one before/after pair: layout and the owner-isolated visible-text hash are
+  strict, while equal-text PNG hash differences require a bounded mean absolute
+  RGB-channel error above `0.04`. This filters raster tile/sub-pixel noise
+  without a retry, OCR or script inspection. A difference emits one opaque
+  `{candidateKey, changeId}` result per changed source host; outline IDs remain
+  navigation and summary metadata, never geometry authority. For each side, the analyzer puts
   the exact source-host path and complete narrow fingerprint only in the first
   parser-blocking bootstrap response. That bootstrap captures the original
   `Element` before authored scripts, accepts changed keys only through a
@@ -252,7 +256,7 @@ services.
 | Volatile desktop preview sessions and contained local-asset serving | `desktop/preview-protocol.mjs` |
 | Source-backed preview/edit display-state filtering, rebinding and safe action resolution | `app/lib/page-view-context.js` |
 | Review source-host discovery and Review-only capture request shape | `app/domain/runtime-snapshot-hosts.js`, `app/components/desktop-runtime-snapshot-api.ts` |
-| Review runtime-snapshot limits, source/session envelope and PNG validation | `app/domain/runtime-visual-contract.js`, `app/lib/runtime-visual-snapshots.js` |
+| Review runtime-snapshot limits, source/session envelope, PNG and visible-text-hash validation | `app/domain/runtime-visual-contract.js`, `app/lib/runtime-visual-snapshots.js` |
 | Sandboxed offscreen page execution and bounded bitmap capture for Review | `desktop/runtime-visual-capture-owner.mjs` |
 | Run lifecycle decoding and transition policy | `app/domain/run-lifecycle.js` |
 | Request freeze/persisted-boundary validation, authority reconciliation, run polling, cancellation, conflict commands and confirmed handoff | `app/application/run-workflow.js` |
@@ -262,7 +266,7 @@ services.
 | Formal AI review state transitions | `app/workbench/review-state.ts` |
 | Bounded pure sibling alignment for semantic review units | `app/lib/review-semantic-alignment.js` |
 | Typed, per-element review projection fact normalization and filtering | `app/lib/review-projection-facts.js` |
-| Review-specific runtime-snapshot comparison and marker merge | `app/lib/review-runtime-visual.js` |
+| Review-specific strict text/raster-tolerant snapshot comparison and marker merge | `app/lib/review-runtime-visual.js` |
 | Review runtime-capture migration interface and capture identity | `app/workbench/review-runtime-capture-adapter.ts` |
 | Formal AI review analysis, first-bootstrap exact-element binding, additive static/runtime fact union, global mask and overlay projection | `app/workbench/review-document.ts` |
 | Formal AI review composition, private runtime-projection port lifecycle and isolated-frame coordination | `app/workbench/AiReviewWorkspace.tsx` |

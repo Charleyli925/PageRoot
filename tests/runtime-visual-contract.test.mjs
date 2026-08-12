@@ -18,7 +18,7 @@ const architectureContractDocument = await readFile(
 );
 
 test("runtime snapshot producers and consumers share one immutable contract", () => {
-  assert.equal(RUNTIME_VISUAL_CONTRACT_VERSION, 1);
+  assert.equal(RUNTIME_VISUAL_CONTRACT_VERSION, 2);
   assert.equal(RUNTIME_VISUAL_CONTRACT.candidateLimit, 128);
   assert.equal(RUNTIME_VISUAL_CONTRACT.identityAttributeLimit, 24);
   assert.equal(RUNTIME_VISUAL_CONTRACT.ownerDeadlineMs, 1_500);
@@ -33,6 +33,7 @@ test("runtime snapshot producers and consumers share one immutable contract", ()
   assert.equal(RUNTIME_VISUAL_CONTRACT.pageBudget.pngBytes, 2_000_000);
   assert.equal(RUNTIME_VISUAL_CONTRACT.pageBudget.pngDimension, 4_096);
   assert.equal(RUNTIME_VISUAL_CONTRACT.pageBudget.aggregatePngBytes, 16_000_000);
+  assert.equal(RUNTIME_VISUAL_CONTRACT.pageBudget.renderedTextBytes, 64 * 1024);
   assert.equal(Object.isFrozen(RUNTIME_VISUAL_CONTRACT), true);
   assert.equal(Object.isFrozen(RUNTIME_VISUAL_CONTRACT.pageBudget), true);
   assert.equal(Object.isFrozen(RUNTIME_VISUAL_CONTRACT.pageBudget.viewport), true);
@@ -59,6 +60,10 @@ test("runtime snapshot envelopes bind contract, session, and full source SHA", (
     contractVersion: 0,
     ...expected,
   }, expected), null);
+  assert.equal(acceptedRuntimeVisualEnvelope({
+    contractVersion: 1,
+    ...expected,
+  }, expected), null, "the prior visual snapshot schema must not mix with version 2");
 });
 
 test("the published contract names the Review-only snapshot boundary", () => {
@@ -67,6 +72,8 @@ test("the published contract names the Review-only snapshot boundary", () => {
   assert.match(runtimeVisualContractDocument, /Review-only/u);
   assert.match(runtimeVisualContractDocument, /one\s+bounded before\/after pair through the same owner/u);
   assert.match(runtimeVisualContractDocument, /no second fresh pair/u);
+  assert.match(runtimeVisualContractDocument, /renderedTextSha256/u);
+  assert.match(runtimeVisualContractDocument, /mean absolute\s+RGB-channel error/u);
   assert.doesNotMatch(runtimeVisualContractDocument, /EditRuntimeSnapshotSession|side \(`edit`/u);
   assert.doesNotMatch(runtimeVisualContractDocument, /settlement matrix|thirteen tracked threads/u);
   assert.match(architectureContractDocument, /Edit does\s+not invoke the resolver or owner/u);

@@ -54,27 +54,44 @@ The owner always has these containment properties:
   a main-process deadline and forced cleanup.
 
 It returns only a captured/unavailable key plus an envelope, PNG
-bytes/hash/bitmap size and the owner-measured CSS-pixel layout width/height.
-Trusted renderer memory revalidates PNG headers, bitmap dimensions, layout
-bounds, byte length, SHA-256, per-page pixels and aggregate bytes. Raw DOM/node
-handles never leave the owner; authored pages receive no owner channel, binding
-or image data.
+bytes/hash/bitmap size, the owner-measured CSS-pixel layout width/height and a
+`renderedTextSha256`. The hash is calculated in the isolated owner from a
+normalized sequence of visible DOM/SVG text inside the captured host; raw text,
+raw DOM and node handles never leave the owner. Trusted renderer memory
+revalidates PNG headers, bitmap dimensions, layout bounds, byte length,
+SHA-256, per-page pixels and aggregate bytes. Authored pages receive no owner
+channel, binding, image data or text summary.
 
 ## Review behavior
 
 After both static Review frames are ready, `AiReviewWorkspace` sends one
 bounded before/after pair through the same owner and validates the same snapshot
-envelope and parser. A difference in matching captured PNGs emits one opaque
-`{candidateKey, changeId}` fact per changed source host. Outline aggregation may
-update the content map but never chooses geometry. Each side's first managed
-bootstrap privately binds those keys to exact source `Element` references by a
-path plus complete narrow fingerprint; later bootstrap reads are unbound. The
-trusted parent delivers facts through a distinct challenged private port fenced
-by contract version, session, side and full source SHA. The bootstrap keeps a
-disposable `Map<Element, facts[]>` and unions it with static serialized facts.
-It never writes runtime marker attributes, and replacement, disconnect or
-fingerprint drift has no outline fallback. An unavailable, malformed, late or
-mismatched result adds no runtime fact and has no user-visible capture status.
+envelope and parser. It compares exactly that one pair in three ordered steps:
+
+1. Bitmap and owner-measured layout dimensions differ strictly.
+2. Matching captured hosts with different `renderedTextSha256` values differ
+   strictly. This covers visible DOM/SVG labels and numeric characters without
+   allowing a style tolerance to hide a character edit.
+3. When text and dimensions match but PNG hashes differ, trusted browser memory
+   decodes the already captured pair once and calculates mean absolute
+   RGB-channel error. Only an error greater than the fixed `0.04` budget
+   (0–255 channel scale) emits a fact; PNG byte length, encoder output and a
+   small tile/sub-pixel raster difference are not facts by themselves.
+
+Canvas-internal text has no DOM/SVG semantic representation at this boundary,
+so it follows the bounded raster rule; this contract does not add OCR, canvas
+instrumentation, script causality or a second capture. A qualifying difference
+emits one opaque `{candidateKey, changeId}` fact per changed source host.
+Outline aggregation may update the content map but never chooses geometry. Each
+side's first managed bootstrap privately binds those keys to exact source
+`Element` references by a path plus complete narrow fingerprint; later
+bootstrap reads are unbound. The trusted parent delivers facts through a
+distinct challenged private port fenced by contract version, session, side and
+full source SHA. The bootstrap keeps a disposable `Map<Element, facts[]>` and
+unions it with static serialized facts. It never writes runtime marker
+attributes, and replacement, disconnect or fingerprint drift has no outline
+fallback. An unavailable, malformed, late or mismatched result adds no runtime
+fact and has no user-visible capture status.
 
 There is no second fresh pair, deterministic coordinator, Review cache or
 capture/retry UI. Static Review never waits for the owner, and empty or failed
@@ -86,5 +103,6 @@ runtime delivery never clears static facts.
 contract version, source/session identity, 1.5-second owner deadline, a
 320–4,096 by 320–2,400 viewport, 32 snapshots, 4,194,304 pixels, a
 2,000,000-byte individual PNG cap, a 4,096-pixel single-edge cap and
-16,000,000 aggregate PNG bytes. The owner and trusted snapshot parser read
-the same frozen limits and fail closed on an over-limit result.
+16,000,000 aggregate PNG bytes, plus a 65,536-byte pre-hash visible-text
+summary cap. The owner and trusted snapshot parser read the same frozen limits
+and fail closed on an over-limit result.

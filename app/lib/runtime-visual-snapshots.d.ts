@@ -9,6 +9,8 @@ export type RuntimeVisualSnapshot = Readonly<{
   layoutHeight: number;
   byteLength: number;
   pngBytes: Uint8Array;
+  /** SHA-256 of the owner-isolated, normalized visible DOM/SVG text. */
+  renderedTextSha256: string;
 }>;
 
 export const RUNTIME_VISUAL_SNAPSHOT_LIMIT: 32;

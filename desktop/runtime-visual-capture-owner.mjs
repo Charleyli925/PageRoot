@@ -30,7 +30,7 @@ const CAPTURE_CANDIDATE_KEYS = new Set([
   "kind",
   "identityAttributes",
 ]);
-const OWNER_RECT_KEYS = new Set(["key", "state", "rect"]);
+const OWNER_RECT_KEYS = new Set(["key", "state", "rect", "renderedText"]);
 const RECT_KEYS = new Set(["x", "y", "width", "height"]);
 
 class CaptureCancelledError extends Error {
@@ -65,6 +65,10 @@ function sourceSha256(value) {
 
 function pngSha256(value) {
   return `sha256:${createHash("sha256").update(value).digest("hex")}`;
+}
+
+function renderedTextSha256(value) {
+  return `sha256:${createHash("sha256").update(value, "utf8").digest("hex")}`;
 }
 
 function result(outcome, reason) {
@@ -317,10 +321,18 @@ function isolatedSnapshotRectScript(candidate) {
   "use strict";
   const __pagerootRuntimeSnapshotRects = true;
   const candidate = ${safeScriptValue(candidate)};
+  const maxTextNodes = ${safeScriptValue(RUNTIME_VISUAL_PAGE_BUDGET.hostAtoms)};
+  const maxRenderedTextBytes = ${safeScriptValue(RUNTIME_VISUAL_PAGE_BUDGET.renderedTextBytes)};
   const queryElements = Function.prototype.call.bind(Element.prototype.querySelectorAll);
   const getAttribute = Function.prototype.call.bind(Element.prototype.getAttribute);
   const getRect = Function.prototype.call.bind(Element.prototype.getBoundingClientRect);
   const scrollIntoView = Function.prototype.call.bind(Element.prototype.scrollIntoView);
+  const getComputedStyle = Function.prototype.call.bind(Window.prototype.getComputedStyle);
+  const createTreeWalker = Function.prototype.call.bind(Document.prototype.createTreeWalker);
+  const nextTreeNode = Function.prototype.call.bind(TreeWalker.prototype.nextNode);
+  const createRange = Function.prototype.call.bind(Document.prototype.createRange);
+  const selectNodeContents = Function.prototype.call.bind(Range.prototype.selectNodeContents);
+  const rangeClientRects = Function.prototype.call.bind(Range.prototype.getClientRects);
   const childAtPath = (path) => {
     let element = document.documentElement;
     for (const index of path) {
@@ -358,9 +370,69 @@ function isolatedSnapshotRectScript(candidate) {
       height: Math.max(1, Math.ceil(rect.height)),
     };
   };
+  const textNodeIsVisible = (node, host, hostRect) => {
+    let element = node.parentElement;
+    while (element instanceof Element) {
+      const style = getComputedStyle(window, element);
+      const opacity = Number.parseFloat(style.opacity);
+      if (
+        style.display === "none"
+        || style.visibility === "hidden"
+        || style.visibility === "collapse"
+        || style.contentVisibility === "hidden"
+        || (Number.isFinite(opacity) && opacity <= 0)
+      ) return false;
+      if (element === host) break;
+      element = element.parentElement;
+    }
+    if (!(element instanceof Element)) return false;
+    const range = createRange(document);
+    selectNodeContents(range, node);
+    return Array.from(rangeClientRects(range)).some((rect) => (
+      Number.isFinite(rect.x)
+      && Number.isFinite(rect.y)
+      && Number.isFinite(rect.width)
+      && Number.isFinite(rect.height)
+      && rect.width > 0
+      && rect.height > 0
+      && rect.x < hostRect.x + hostRect.width
+      && rect.x + rect.width > hostRect.x
+      && rect.y < hostRect.y + hostRect.height
+      && rect.y + rect.height > hostRect.y
+    ));
+  };
+  const visibleRenderedText = (host, hostRect) => {
+    try {
+      const walker = createTreeWalker(document, host, 4);
+      const chunks = [];
+      const encoder = new TextEncoder();
+      let textNodeCount = 0;
+      let textBytes = 0;
+      let node = nextTreeNode(walker);
+      while (node) {
+        textNodeCount += 1;
+        if (textNodeCount > maxTextNodes) return null;
+        const rawValue = String(node.nodeValue || "");
+        if (rawValue.length > maxRenderedTextBytes) return null;
+        const value = rawValue.replace(/\s+/gu, " ");
+        if (value && textNodeIsVisible(node, host, hostRect)) {
+          textBytes += encoder.encode(value).byteLength;
+          if (textBytes > maxRenderedTextBytes) return null;
+          chunks.push(value);
+        }
+        node = nextTreeNode(walker);
+      }
+      const summary = chunks.join("").trim().replace(/\s+/gu, " ");
+      return encoder.encode(summary).byteLength <= maxRenderedTextBytes
+        ? summary
+        : null;
+    } catch {
+      return null;
+    }
+  };
   const unavailable = () => ({
     status: "captured",
-    snapshots: [{ key: candidate.key, state: "unavailable", rect: null }],
+    snapshots: [{ key: candidate.key, state: "unavailable", rect: null, renderedText: "" }],
   });
   const host = childAtPath(candidate.path);
   if (!bindingMatches(host, candidate)) return unavailable();
@@ -372,12 +444,15 @@ function isolatedSnapshotRectScript(candidate) {
     ? Array.from(queryElements(host, "canvas,svg"))
     : [host];
   const hasVisiblePaint = paintTargets.some((target) => usableRect(target) !== null);
+  const renderedText = hostRect && hasVisiblePaint
+    ? visibleRenderedText(host, hostRect)
+    : null;
   return {
     status: "captured",
     snapshots: [
-      hostRect && hasVisiblePaint
-        ? { key: candidate.key, state: "captured", rect: hostRect }
-        : { key: candidate.key, state: "unavailable", rect: null },
+      hostRect && hasVisiblePaint && renderedText !== null
+        ? { key: candidate.key, state: "captured", rect: hostRect, renderedText }
+        : { key: candidate.key, state: "unavailable", rect: null, renderedText: "" },
     ],
   };
 })()`;
@@ -424,12 +499,25 @@ function normalizedOwnerRects(value, request) {
     const rect = rawSnapshot.state === "captured"
       ? normalizedViewportRect(rawSnapshot.rect, request)
       : rawSnapshot.rect === null ? null : undefined;
-    if (rect === undefined || (rawSnapshot.state === "captured" && !rect)) return null;
+    const renderedText = rawSnapshot.state === "captured"
+      ? normalizedString(rawSnapshot.renderedText, RUNTIME_VISUAL_PAGE_BUDGET.renderedTextBytes)
+      : rawSnapshot.renderedText === "" ? "" : undefined;
+    if (
+      rect === undefined
+      || renderedText === undefined
+      || renderedText === null
+      || (rawSnapshot.state === "captured" && !rect)
+      || (
+        typeof renderedText === "string"
+        && Buffer.byteLength(renderedText, "utf8") > RUNTIME_VISUAL_PAGE_BUDGET.renderedTextBytes
+      )
+    ) return null;
     seen.add(rawSnapshot.key);
     snapshots.push(Object.freeze({
       key: rawSnapshot.key,
       state: rawSnapshot.state,
       rect,
+      renderedText,
     }));
   }
   return Object.freeze({ snapshots: Object.freeze(snapshots) });
@@ -446,6 +534,7 @@ function unavailableSnapshot(key) {
     layoutHeight: 0,
     byteLength: 0,
     pngBytes: new Uint8Array(),
+    renderedTextSha256: "",
   });
 }
 
@@ -722,6 +811,7 @@ export function createRuntimeSnapshotCaptureController({
             ...png,
             layoutWidth: ownerSnapshot.rect.width,
             layoutHeight: ownerSnapshot.rect.height,
+            renderedTextSha256: renderedTextSha256(ownerSnapshot.renderedText),
           }));
         } catch (error) {
           if (error instanceof CaptureTimedOutError || error instanceof CaptureCancelledError) {

@@ -27,7 +27,7 @@ function pngWithDimensions(width, height, byteLength = PNG.byteLength) {
 
 function request(overrides = {}) {
   return {
-    contractVersion: 1,
+    contractVersion: RUNTIME_VISUAL_CONTRACT.version,
     captureSessionId: "review-owner-session-0001",
     sourceSha256: SOURCE_SHA256,
     side: "before",
@@ -44,21 +44,22 @@ function request(overrides = {}) {
   };
 }
 
-function ownerRects() {
+function ownerRects(renderedText = "图表 9.54") {
   return {
     status: "captured",
     snapshots: [{
       key: "runtime-host-1",
       state: "captured",
       rect: { x: 0, y: 0, width: 1, height: 1 },
+      renderedText,
     }],
   };
 }
 
-function ownerRectsFor(key, rect) {
+function ownerRectsFor(key, rect, renderedText = "图表 9.54") {
   return {
     status: "captured",
-    snapshots: [{ key, state: "captured", rect }],
+    snapshots: [{ key, state: "captured", rect, renderedText }],
   };
 }
 
@@ -192,6 +193,10 @@ test("runtime snapshot owner rejects non-authoritative or unsupported capture in
     /side is invalid/u,
   );
   assert.throws(
+    () => validateRuntimeSnapshotCaptureRequest(request({ contractVersion: 1 })),
+    /contract version is invalid/u,
+  );
+  assert.throws(
     () => validateRuntimeSnapshotCaptureRequest(request({ sourcePath: "/private/report.html" })),
     /invalid/u,
   );
@@ -233,12 +238,22 @@ test("runtime snapshot owner captures once through an isolated one-use Electron 
   assert.equal(snapshot.layoutHeight, 1);
   assert.equal(snapshot.byteLength, PNG.byteLength);
   assert.deepEqual([...snapshot.pngBytes], [...PNG]);
+  assert.equal(
+    snapshot.renderedTextSha256,
+    `sha256:${createHash("sha256").update("图表 9.54", "utf8").digest("hex")}`,
+  );
+  assert.equal(Object.hasOwn(snapshot, "renderedText"), false, "raw rendered text must not leave the owner");
   assert.deepEqual(state.createRequests, [{ html: HTML, bootstrapJavaScript: "" }]);
   assert.deepEqual(state.revoked, ["review-preview-0001"]);
   assert.equal(state.windows[0].destroyed, true);
   assert.equal(state.capturePage.length, 1);
   assert.equal(state.isolatedSources.length, 1, "no second owner fact pass is allowed");
   assert.match(state.isolatedSources[0].scripts[0].code, /__pagerootRuntimeSnapshotRects/);
+  assert.match(
+    state.isolatedSources[0].scripts[0].code,
+    /replace\(\/\\s\+\/gu, " "\)/u,
+    "the isolated owner must normalize visible-text whitespace rather than a literal backslash sequence",
+  );
   assert.equal(state.windows[0].options.webPreferences.contextIsolation, true);
   assert.equal(state.windows[0].options.webPreferences.nodeIntegration, false);
   assert.equal(state.windows[0].options.webPreferences.sandbox, true);
@@ -291,6 +306,7 @@ test("runtime snapshot owner keeps valid hosts when another frozen binding is re
     layoutHeight: 0,
     byteLength: 0,
     pngBytes: new Uint8Array(),
+    renderedTextSha256: "",
   });
   assert.equal(state.capturePage.length, 1);
 });
@@ -369,6 +385,7 @@ test("runtime snapshot owner silently marks invalid PNG output unavailable", asy
     layoutHeight: 0,
     byteLength: 0,
     pngBytes: new Uint8Array(),
+    renderedTextSha256: "",
   });
 });
 
@@ -386,6 +403,27 @@ test("runtime snapshot owner fails closed for hostile >2MB and >4096 PNG results
     assert.equal(captured.outcome, "captured");
     assert.equal(captured.envelope.runtimeVisualSnapshots[0].state, "unavailable");
   }
+});
+
+test("runtime snapshot owner hashes bounded visible text and suppresses an over-limit owner response", async () => {
+  const overTextBudget = "x".repeat(RUNTIME_VISUAL_CONTRACT.pageBudget.renderedTextBytes + 1);
+  const { controller, state } = fakeOwner({ rects: ownerRects(overTextBudget) });
+  const captured = await controller.capture(request());
+
+  assert.equal(captured.outcome, "captured");
+  assert.deepEqual(captured.envelope.runtimeVisualSnapshots[0], {
+    key: "runtime-host-1",
+    state: "unavailable",
+    pngSha256: "",
+    width: 0,
+    height: 0,
+    layoutWidth: 0,
+    layoutHeight: 0,
+    byteLength: 0,
+    pngBytes: new Uint8Array(),
+    renderedTextSha256: "",
+  });
+  assert.deepEqual(state.capturePage || [], []);
 });
 
 test("runtime snapshot owner reports its hard deadline and cleans up", async () => {

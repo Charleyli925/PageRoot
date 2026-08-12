@@ -279,8 +279,13 @@ the owner validates PNG shape, and trusted renderer memory validates bytes,
 dimensions, SHA-256 and aggregate budgets. Raw DOM/node handles never cross the
 owner boundary, and no TargetRef or PNG enters either review frame.
 
-The one before/after snapshot pair is compared once. Only captured snapshots
-with different PNG presentation emit opaque `{candidateKey, changeId}` facts.
+The one before/after snapshot pair is compared once. Captured layout dimensions
+and the owner-isolated visible DOM/SVG-text hash are strict. When both match,
+different PNG hashes are decoded only in trusted renderer memory and emit an
+opaque `{candidateKey, changeId}` fact only above the fixed `0.04` mean absolute
+RGB-channel error budget; byte/encoder variance and small raster tile noise do
+not emit a fact. Raw text never leaves the owner, and this path has no OCR,
+script causality or second pair.
 The candidate key maps back to an exact per-side source `Element` captured by
 the first parser-blocking bootstrap from a path plus complete narrow
 fingerprint. The trusted parent transfers the result through a distinct random-
