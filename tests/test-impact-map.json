@@ -590,12 +590,13 @@
       "id": "edit-chart-contract",
       "patterns": [
         "^app/domain/edit-chart-spec\\.(?:d\\.ts|js)$",
-        "^app/lib/edit-chart-svg\\.(?:d\\.ts|js)$",
-        "^tests/edit-chart-(?:source-contract|spec|svg)\\.test\\.mjs$",
+        "^app/lib/edit-chart-(?:projection|svg)\\.(?:d\\.ts|js)$",
+        "^tests/edit-chart-(?:projection|source-contract|spec|svg)\\.test\\.mjs$",
         "^docs/EDIT_CHART_VISUALS\\.md$"
       ],
-      "suites": ["typecheck"],
+      "suites": ["typecheck", "browser-smoke", "electron-smoke"],
       "nodeTests": [
+        "tests/edit-chart-projection.test.mjs",
         "tests/edit-chart-source-contract.test.mjs",
         "tests/edit-chart-spec.test.mjs",
         "tests/edit-chart-svg.test.mjs"

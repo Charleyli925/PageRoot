@@ -7,6 +7,13 @@ import type {
 
 export const EDIT_CHART_RENDERER_VERSION: string;
 
+export function isEditChartSvgElementNameAllowed(value: unknown): boolean;
+
+export function isEditChartSvgAttributeAllowed(
+  name: unknown,
+  value: unknown,
+): boolean;
+
 export function validateEditChartSvg(
   source: unknown,
   dimensions: Readonly<{ width: number; height: number }>,

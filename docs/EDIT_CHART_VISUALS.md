@@ -1,9 +1,11 @@
 # 编辑态白名单图表：PRD 与执行计划
 
 - 决策状态：已接受，分两次 PR 实施。
-- 当前产品状态：PR-1 仅提供纯合同、校验器和 SVG SSR 内核，尚未接入
-  `HtmlCanvasEditor`，用户行为保持不变。
-- 目标状态：PR-2 通过真实 Electron 门禁后，合格图表在原源码槽位中自动显示。
+- 实施边界：PR-1 冻结纯合同、校验器和 SVG SSR 内核；PR-2 只在现有
+  `HtmlCanvasEditor` Canvas generation 内完成一次性原位挂载。两部分及完整
+  Browser/Electron 门禁同时成立后，才构成可进入产品的能力。
+- 产品状态：合格图表在原源码槽位中自动显示；不合格和未声明内容继续静默
+  保持原有脚本禁用状态。
 - 对应决策：`docs/decisions/0020-same-slot-edit-chart-svg.md`。
 
 ## 1. 问题与目标
@@ -119,15 +121,24 @@ PageRoot 固定并打包 ECharts 6.1.0。作者页面引用 5.x、6.x、CDN 版�
 - 脚本临时拼出的自定义 DOM/SVG 信息图，应由生成端直接输出静态 HTML/SVG；
 - 需要交互、动画或完整作者逻辑的页面继续在 Preview 中使用。
 
+对 4 份用户提供 HTML 的本地只读核对结果是：它们当前都没有 Chart Spec，
+所以本能力不会猜测或执行其中的脚本。源码中已经存在的 HTML/SVG 信息图继续按
+静态内容显示；包含 9 个 ECharts 实例的柱状/散点样本，以及另一份堆叠面积样本，
+只有生成端补出 v0.1 Spec 后才会在 Edit 原位显示。它们的基础数据可映射，但原有
+tooltip、formatter、气泡第三维、markPoint 和 resize 行为仍明确不支持。样本文件
+本身没有被复制、改写或提交到仓库。
+
 ## 5. 页面内部 Tab 的用户体验
 
 同一代 Edit iframe 创建时处理全部合格图表：
 
 1. 从该代权威源 HTML 发现并校验所有宿主和 Spec；
 2. 使用源码中的固定宽高生成全部 SVG 字符串；
-3. iframe 加载完成后，在同一个 pre-ready 提交中先应用当前
+3. 对确有合格图表的文档，只等 `document.readyState` 离开 `loading`，确认正文
+   宿主已经解析；不等待图片、字体或其他外部资源；
+4. 在同一个 pre-ready 提交中先应用当前
    `PageViewContext`，再把全部合格 SVG 挂到各自宿主；
-4. 只有完成本次提交后，才确认该代 Edit Canvas ready。
+5. 只有完成本次提交后，才确认该代 Edit Canvas ready。
 
 未激活 Tab 仍由现有 `PageViewContext` 使用 `hidden` 或 `display:none` 隐藏。
 它的宿主和 Shadow SVG 都保留在同一个 iframe 中。切换 Tab 只改变现有的
@@ -140,8 +151,9 @@ PageRoot 固定并打包 ECharts 6.1.0。作者页面引用 5.x、6.x、CDN 版�
 - 不增加图表自己的 generation、缓存或生命周期。
 
 源 HTML 真正变化、打开另一文档、切换 Version 或权威 Canvas 重建时，现有
-`DocumentSession` Canvas generation 会销毁旧 iframe。新一代 iframe 再按同一
-流程渲染一次。这是已有 Canvas 生命周期，不是图表刷新循环。
+`DocumentSession` Canvas generation 会销毁旧 iframe。初次打开时既有的临时
+Canvas 被项目注册后的权威 Canvas 替换，也属于同一类已有换代。新一代 iframe
+再按同一流程渲染一次，并在 ready 前完成挂载；这不是图表自己的刷新循环。
 
 ## 6. 评论、选择和编辑
 
@@ -175,9 +187,12 @@ PageRoot 固定并打包 ECharts 6.1.0。作者页面引用 5.x、6.x、CDN 版�
 - 初次建立 Edit iframe 需要同步生成一批 SVG，Canvas ready 可能比纯静态页稍晚；
 - Edit 是静态、无 tooltip 和动画的视觉，可能与 Preview 的交互态存在细节差异；
 - 窗口缩窄时 SVG 只按 viewBox 等比缩放，不重新排版，标签可能变小；
+- 页面原有的外部样式、字体或图片晚到时仍可能带来整页布局移动；图表跟随宿主
+  移动或缩放，但不会自行重新生成或闪一次；
 - 超出白名单的图表继续不可见，而且产品不会主动解释原因；
 - 一个图表只有一个评论锚点，无法精确指向内部数据点；
-- 作者 CSS 若覆盖声明的宽高比，图表会被静默拒绝，而不是猜测尺寸。
+- 作者样式表若在运行时覆盖源码槽位比例，SVG 仍按声明 viewBox 缩放，可能出现
+  压缩或留白；v0.1 不等待样式加载、不读取可见宽高，也不建立重测循环。
 
 这些代价是有意边界。任何为了消除它们而引入重测、重渲染、缓存、提示系统
 或脚本执行的需求，都必须重新做架构决策。
@@ -200,14 +215,21 @@ PageRoot 固定并打包 ECharts 6.1.0。作者页面引用 5.x、6.x、CDN 版�
 
 输出 SVG 还必须通过独立校验：固定且匹配的 `width`、`height`、`viewBox`，
 封闭元素集合，无脚本、foreignObject、image、事件属性、外部引用、危险 CSS、
-DOCTYPE 或 ENTITY。PR-2 导入 iframe 时还要使用 XML parser 逐节点复验，不能
-直接把未经复验的字符串写入 light DOM。
+DOCTYPE 或 ENTITY。导入 iframe 时使用该 realm 的 XML parser 再逐节点复验和
+重建；ECharts `<style>` 中的 CDATA 只会被转换成普通文本节点，SVG 字符串不会
+通过 `innerHTML` 直接写入 light DOM。
 
 ## 9. 生命周期和复杂度预算
 
 本功能不创建新的事实 owner。合同和 option 映射是纯函数，ECharts 只在可信
 renderer 中进行同步 SSR。生成字符串只活到当前 Canvas generation；Shadow
 节点由现有 iframe realm 持有，iframe 销毁即全部释放。
+
+生产构建的明确代价是 `HtmlCanvasEditor` chunk 从 127.85 KiB（gzip 38.31 KiB）
+增长到 674.11 KiB（gzip 223.09 KiB）。这部分仍隔离在编辑器 chunk，换取的是
+ready 前同步完成和零额外异步生命周期；v0.1 不为节省包体再引入按需加载、
+旧代结果丢弃、loading 占位或重试 owner。未来若包体继续增长，先重新评审渲染
+内核，而不是在当前 Canvas 生命周期上叠加补丁。
 
 浏览器不允许从一个仍存活的宿主上移除 Shadow root。因此，若同一源码宿主从
 图表槽位变成普通内容，不尝试原地复用；权威源变化必须走已有 iframe 换代。
@@ -251,5 +273,5 @@ Tab 或评论代码、启用默认行为。
   只作本地只读核对，不进入仓库。
 
 PR-2 的 Go 条件：全部门禁证明上面的产品体验，且实现没有新增页面、窗口、
-IPC、缓存、独立 generation、ResizeObserver 或生命周期 owner。否则停止，
-不通过补丁式特例继续扩张。
+IPC、缓存、独立 generation、ResizeObserver 或生命周期 owner；包体增长必须
+被记录为显式产品成本。否则停止，不通过补丁式特例继续扩张。

@@ -16,11 +16,20 @@ verified compatible fix.
 
 The 2026-08-12 declarative Edit Chart contract pins Apache ECharts 6.1.0.
 PageRoot imports only the bar, line, scatter, grid, legend, title and SVG
-renderer modules; Vite will bundle that code into the trusted desktop renderer
-when the staged feature is connected. Authored HTML never imports or selects
-this dependency, and ECharts is not copied as a Node module into the packaged
-runtime closure. Its `zrender` and `tslib` dependencies remain lockfile-pinned,
-and the dependency audit reports no advisory.
+renderer modules. Vite bundles that code into the existing lazy
+`HtmlCanvasEditor` asset in the trusted renderer. Authored HTML never imports or
+selects this dependency, and ECharts is not copied as a Node module into the
+packaged runtime closure. Its `zrender` and `tslib` dependencies remain
+lockfile-pinned, and the dependency audit reports no advisory.
+
+The PR-2 production build comparison records the deliberate package cost:
+the minified `HtmlCanvasEditor` chunk grows from 127.85 KiB (38.31 KiB gzip) to
+674.11 KiB (223.09 KiB gzip), a 546.26 KiB / 184.78 KiB gzip increase, while
+the application index chunk remains effectively unchanged. The integration
+keeps one synchronous pre-ready render instead of adding a conditional dynamic
+import lifecycle, stale-generation fence, loading placeholder or retry path.
+Every future ECharts upgrade must remeasure this chunk as well as SVG output,
+security, visual compatibility and ready-time behavior.
 
 The 2026-08-08 security baseline moves the PostCSS-selected `nanoid` closure
 to 3.3.17 and selects `vinext` 0.0.45 in place of 0.2.1. This is the

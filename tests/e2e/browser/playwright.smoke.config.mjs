@@ -36,6 +36,9 @@ const smokeTitles = [
   "empty runtime projection preserves static facts",
   "cross-session side and source runtime results preserve static facts",
   "parser-time target replacement fails closed without rebinding",
+  "eligible charts mount before Edit ready and hidden Tabs reuse the same SVG nodes",
+  "the source host owns pointer selection and comments across Tab visibility changes",
+  "adjacent native editing patches only source text and never serializes SVG",
 ];
 const escapedTitles = smokeTitles.map((title) => title.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"));
 

@@ -7,7 +7,7 @@ const productRoot = path.resolve(currentDirectory, "../../..");
 
 export default defineConfig({
   testDir: currentDirectory,
-  testMatch: /native-dom-electron\.spec\.mjs/,
+  testMatch: /(?:native-dom|edit-chart-visuals)-electron\.spec\.mjs/,
   outputDir: path.join(productRoot, "output/playwright/native-dom-electron/results"),
   workers: 1,
   retries: 0,

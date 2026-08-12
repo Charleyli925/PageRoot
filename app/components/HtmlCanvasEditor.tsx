@@ -29,6 +29,11 @@ import {
   resolveTargetRef,
 } from "../lib/source-patch-core.js";
 import {
+  mountEditChartProjection,
+  prepareEditChartProjection,
+  type EditChartProjection,
+} from "../lib/edit-chart-projection.js";
+import {
   editableIslandForTarget,
   isEditableIslandTarget,
   normalizeEditableTextFragmentHtml,
@@ -534,6 +539,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const renderedSourceHtmlRef = useRef<string | null>(null);
   const frameSourceHtmlRef = useRef(html);
   const sourceIndexRef = useRef<SourceIndexValue | null>(null);
+  const editChartProjectionRef = useRef<EditChartProjection | null>(null);
   const pendingSelectionRef = useRef<HtmlCanvasSelection | null>(null);
   const pendingToolbarVisibleRef = useRef(false);
   const pendingFrameRestoreEpochRef = useRef(0);
@@ -710,12 +716,19 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     try {
       const sourceIndex = buildSourceIndex(source);
       sourceIndexRef.current = sourceIndex;
+      try {
+        const projection = prepareEditChartProjection(sourceIndex);
+        editChartProjectionRef.current = projection.ok ? projection : null;
+      } catch {
+        editChartProjectionRef.current = null;
+      }
       instrumentedSource = instrumentPreviewHtml(sourceIndex, {
         attributeName: SOURCE_NODE_ATTRIBUTE,
       }).html;
       setEditFeedback(null);
     } catch (cause) {
       sourceIndexRef.current = null;
+      editChartProjectionRef.current = null;
       void cause;
       const message = "页面仍可正常浏览。请重新载入后再试，或添加评论说明要改什么。";
       setEditFeedback({
@@ -4023,6 +4036,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       pendingNativeEditResumeRef.current = null;
       pendingHistoryBookmarkRef.current = null;
       pendingHistoryCanonicalFenceRef.current = false;
+      editChartProjectionRef.current = null;
       fencedDocumentCleanupRef.current();
       cleanupFrameRef.current();
       resizeObserverRef.current?.disconnect();
@@ -4036,7 +4050,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     if (
       iframe !== iframeRef.current
       || connectedFrameGeneration !== frameLoadGenerationRef.current
-    ) return;
+    ) return false;
     cleanupFrameRef.current();
     const documentNode = iframe.contentDocument;
     const expectedFrameHtml = expectedFrameHtmlRef.current;
@@ -4044,7 +4058,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     if (!documentNode?.documentElement || !expectedFrameHtml || !expectedToken) {
       renderedSourceHtmlRef.current = null;
       containerRef.current?.setAttribute("data-render-verified", "false");
-      return;
+      return false;
     }
     const marker = documentNode.head.querySelector<HTMLMetaElement>(
       `meta[${FRAME_VERIFICATION_ATTRIBUTE}]`,
@@ -4056,10 +4070,25 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     ) {
       renderedSourceHtmlRef.current = null;
       containerRef.current?.setAttribute("data-render-verified", "false");
-      return;
+      return false;
     }
-    renderedSourceHtmlRef.current = frameSourceHtmlRef.current;
-    containerRef.current?.setAttribute("data-render-verified", "true");
+    const chartProjection = editChartProjectionRef.current;
+    const currentChartProjection = (
+      chartProjection?.sourceSha256 === sourceIndexRef.current?.sourceSha256
+    ) ? chartProjection : null;
+    if (
+      currentChartProjection
+      && currentChartProjection.visuals.length > 0
+      && documentNode.readyState === "loading"
+    ) {
+      // The verification marker lives in <head>, so a large document can be
+      // identifiable before its chart hosts at the end of <body> exist. Wait
+      // only for parsing to finish; images, fonts, and external resources do
+      // not become part of Canvas readiness.
+      renderedSourceHtmlRef.current = null;
+      containerRef.current?.setAttribute("data-render-verified", "false");
+      return false;
+    }
     fencedDocumentCleanupRef.current();
 
     let editorStyle = documentNode.head.querySelector<HTMLStyleElement>(`style[${EDITOR_STYLE_ATTRIBUTE}]`);
@@ -4077,6 +4106,16 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       null,
     );
     appliedPageViewContextRef.current = pageViewContextRef.current;
+    if (currentChartProjection) {
+      try {
+        mountEditChartProjection(documentNode, currentChartProjection);
+      } catch {
+        // Chart visuals are a silent enhancement. The verified source Canvas
+        // remains ready even if this disposable projection cannot be mounted.
+      }
+    }
+    renderedSourceHtmlRef.current = frameSourceHtmlRef.current;
+    containerRef.current?.setAttribute("data-render-verified", "true");
     const handleClick = (event: MouseEvent) => {
       if (isCanvasRootElement(event.target)) {
         if (!lockedRef.current) {
@@ -4567,6 +4606,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         updateOverlayPosition();
       }
     });
+    return true;
   }, [
     captureTextRange,
     clearSelection,
@@ -4609,8 +4649,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         // DOM parsing is sufficient to validate and connect the inert preview.
         // Slow images, fonts, or stylesheets may delay the iframe load event;
         // the body ResizeObserver keeps layout chrome current as they settle.
-        connectFrame(iframe, connectedFrameGeneration);
-        return;
+        if (connectFrame(iframe, connectedFrameGeneration)) return;
       }
       attempts += 1;
       if (attempts < 120) {

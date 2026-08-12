@@ -140,14 +140,21 @@ Save, review comparison and Request creation continue from authoritative source
 bytes (the Bridge copies those exact bytes to `input/base/index.html`), and the
 SourcePatch checks remain unchanged.
 
-ADR 0020 defines a staged declarative exception without weakening that script
-boundary. PR-1 has no production caller: it only accepts a closed, versioned
-JSON Chart Spec, maps it to fixed PageRoot-owned ECharts options, renders at
-declared dimensions and rejects SVG outside a closed element/reference budget.
-It never evaluates authored ECharts, raw options, functions, URLs or runtime
-DOM. Any future Edit integration must keep generated SVG inside a source-empty
-host's disposable Shadow DOM, pointer-transparent and absent from SourceIndex,
-TargetRef, SourcePatch, persistence, Review, Version and AI input.
+ADR 0020 defines one declarative exception without weakening that script
+boundary. It accepts only a closed, versioned JSON Chart Spec, maps it to fixed
+PageRoot-owned ECharts options, renders at declared dimensions and rejects SVG
+outside the fixed element/reference and byte budgets. It never evaluates
+authored ECharts, raw options, functions, URLs or runtime DOM.
+
+The source pass and live iframe pass independently revalidate unique source
+node IDs, the empty host, inert template text, fixed inline aspect-ratio
+declaration and exact Spec bytes. Generated SVG is reparsed with the iframe
+realm's XML parser,
+revalidated, and recreated node by node inside the source host's disposable
+Shadow DOM; ECharts style CDATA is normalized to an ordinary text node during
+that safe clone. The SVG is pointer-transparent and absent from SourceIndex,
+TargetRef, SourcePatch, persistence, Review, Version and AI input. Any mismatch
+silently skips only the projection and cannot enable authored script.
 
 The AI review workspace is an isolated interactive review preview with no
 activation or persistence authority. It preserves the identity/Hash-validated authored

@@ -25,12 +25,25 @@ const TASK_OWNER_CASES = [
   {
     file: "app/domain/edit-chart-spec.js",
     nodeTests: [
+      "tests/edit-chart-projection.test.mjs",
       "tests/edit-chart-source-contract.test.mjs",
       "tests/edit-chart-spec.test.mjs",
       "tests/edit-chart-svg.test.mjs",
     ],
-    suites: ["typecheck", "lint", "node-targeted"],
-    directOwners: ["tests/edit-chart-spec.test.mjs", "tests/edit-chart-svg.test.mjs"],
+    suites: [
+      "typecheck",
+      "lint",
+      "node-targeted",
+      "build-web",
+      "browser-smoke",
+      "build-desktop",
+      "electron-smoke",
+    ],
+    directOwners: [
+      "tests/edit-chart-projection.test.mjs",
+      "tests/edit-chart-spec.test.mjs",
+      "tests/edit-chart-svg.test.mjs",
+    ],
     unrelatedOwners: ["tests/runtime-snapshot-hosts.test.mjs", "tests/source-patch-engine.test.mjs"],
   },
   {

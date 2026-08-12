@@ -34,7 +34,7 @@
 | Renderer edit, project-picker, attachment-persistence, close-coordination and interactive-preview capabilities | Runtime capability resolver | immutable preload manifest; fail-closed browser default | Workbench presentation host adapters |
 | Volatile interactive-preview document, bootstrap, allowed source-relative asset root, completed-frame identity set and one-way pre-load scriptless navigation-fallback flag | Main-process preview protocol controller plus the owning window's navigation fence | none; bounded in-memory session/window state only; the fallback cannot be reversed inside a session | isolated preview iframe and the script-disabled edit iframe's resource base |
 | Current preview/edit display context, safe reveal transition and per-surface render acknowledgement | Workbench page-view context state | none; source-bound in-memory projection tagged by `DocumentSession` Canvas generation and rendered source Hash | `HtmlCanvasEditor`, `HtmlInteractionPreview`, save-status projection and toolbar |
-| Dormant Edit Chart Spec grammar and SVG SSR contract | `app/domain/edit-chart-spec.js` and `app/lib/edit-chart-svg.js` | none; pure validation/mapping plus synchronous renderer output, with no production caller in PR-1 | ADR 0020 PR-2 may consume it inside the existing `DocumentSession` Canvas generation only |
+| Edit Chart Spec validation, SVG SSR and disposable same-slot Shadow nodes | Pure contracts in `app/domain/edit-chart-spec.js` and `app/lib/edit-chart-svg.js`; the current `HtmlCanvasEditor` iframe realm owns mounted nodes | none; the prepared projection and Shadow nodes exist only for the current Canvas generation | Edit presentation, source-host selection and comment geometry; never persistence, Review, Version or AI input |
 | Review runtime-snapshot limits, page budget, owner deadline, envelope and PNG parser | `runtime-visual-contract.js` and `runtime-visual-snapshots.js`; consumers may validate but not redeclare either | none; frozen process-local contract only | Review pair, shared owner and hostile-page gates |
 | AI review page view, change filter, context visibility, navigation target, canonical page-presentation path, scroll mode and zoom mode | `AiReviewWorkspace` review reducer | none; disposable state bound to the frozen before/after pair | review toolbar, content map and isolated review frames |
 | AI review semantic sibling pair graph, typed change facts (including multiple independent facts on one prepared element), disposable fact/semantic/geometry owner IDs, prepared immutable review documents and canonical frame/mask geometry | Cancellable `ReviewAnalysisSession` plus `review-document` analyzer, ready-review session and isolated-frame projection runtime | none; byte-bounded multi-entry cache keyed only by exact operation/source/comment identity; fact identities are analysis-only and never persisted | review outline, semantic frames and context mask |
@@ -154,14 +154,16 @@ Rules:
 - Interactive-preview sessions, page-view context and Review runtime snapshots
   are disposable. They do not participate in save, switch, submit or close
   drains, and cannot become a second copy of the source HTML. Edit owns no
-  runtime bitmap/cache/projection state; it remains a script-disabled static
-  source surface.
-- The staged Edit Chart Spec contract owns no mutable state. If ADR 0020 PR-2
-  is integrated, one Canvas generation may hold its disposable same-slot
-  Shadow SVG nodes. The iframe realm remains their only lifetime owner; there
-  is no chart Session, cache, observer, IPC, retry, drain obligation or second
+  runtime bitmap or cache; its only generated visual state is the bounded
+  declarative chart projection below.
+- The Edit Chart Spec contract owns no mutable state. One existing Canvas
+  generation may hold its prepared projection and disposable same-slot Shadow
+  SVG nodes. The iframe realm remains their only lifetime owner; there is no
+  chart Session, cache, observer, IPC, retry, drain obligation or second
   generation. A source-authority change destroys the iframe instead of
-  rebinding an old Shadow root.
+  rebinding an old Shadow root. Existing provisional/project-registration or
+  canonical-source Canvas replacement also recreates the projection before the
+  replacement is acknowledged ready; charts add no extra replacement cycle.
 - AI review state fields are orthogonal. Page, filter, visibility, navigation,
   page presentation, scroll and zoom actions may update only their own reducer field. Review
   navigation can reveal a hidden panel in both frames but cannot become a

@@ -46,9 +46,11 @@ nodes are pointer-transparent, inaccessible to TargetResolver and absent from
 source, persistence, Review, Version and AI input. There is no new Session,
 cache, observer, IPC route, drain obligation or failure UI.
 
-PR-1 introduces the dormant pure contract and renderer only. It does not alter
-production Edit. PR-2 is the sole authorized integration step and must prove
-the full behavior in real Electron before the feature is considered active.
+PR-1 introduces the pure contract and renderer only. PR-2 is the sole
+integration step: `HtmlCanvasEditor` prepares the projection from SourceIndex,
+then mounts it after `PageViewContext` and before the existing generation is
+acknowledged ready. The integration is acceptable only with full Browser and
+real Electron evidence.
 
 ## Consequences
 
@@ -59,6 +61,9 @@ the full behavior in real Electron before the feature is considered active.
 - Tab return is immediate because it neither reruns ECharts nor rebuilds SVG.
 - A chart is one source-backed comment box; data points are not targets.
 - Initial Canvas readiness includes bounded one-shot SVG generation cost.
+- The existing lazy editor chunk carries a measured 546.26 KiB minified /
+  184.78 KiB gzip increase; keeping generation synchronous avoids a second
+  asynchronous loading and stale-generation lifecycle.
 - Responsive behavior is vector scaling only; label layout does not rerun.
 - Existing arbitrary-script documents need generator-authored Chart Spec or
   static HTML/SVG and are not automatically compatible.

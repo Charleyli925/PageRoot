@@ -77,6 +77,25 @@ function cssReferencesAreLocal(source) {
   return true;
 }
 
+export function isEditChartSvgElementNameAllowed(value) {
+  return typeof value === "string" && ALLOWED_SVG_ELEMENTS.has(value.toLowerCase());
+}
+
+export function isEditChartSvgAttributeAllowed(name, value) {
+  if (typeof name !== "string" || typeof value !== "string") return false;
+  const normalizedName = name.toLowerCase();
+  if (/^on[a-z][a-z0-9:_-]*$/u.test(normalizedName)) return false;
+  if (
+    (normalizedName === "href" || normalizedName === "xlink:href")
+    && !value.trim().startsWith("#")
+  ) return false;
+  if (
+    /@import|expression\s*\(|(?:javascript|data|blob|file):/iu.test(value)
+    || !cssReferencesAreLocal(value)
+  ) return false;
+  return true;
+}
+
 export function validateEditChartSvg(source, dimensions) {
   // This verifier accepts only output from the fixed mapper and pinned
   // renderer. It is not a sanitizer for authored or arbitrary SVG input.
@@ -116,7 +135,7 @@ export function validateEditChartSvg(source, dimensions) {
     || !cssReferencesAreLocal(source)
   ) return fail("edit-chart-svg-capability-forbidden");
   for (const match of source.matchAll(/<(?!\/|!)([A-Za-z][A-Za-z0-9:-]*)\b/gu)) {
-    if (!ALLOWED_SVG_ELEMENTS.has(match[1].toLowerCase())) {
+    if (!isEditChartSvgElementNameAllowed(match[1])) {
       return fail("edit-chart-svg-element-forbidden");
     }
   }

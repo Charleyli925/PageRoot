@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>编辑态固定槽位图表</title>
+  <style>
+    html,
+    body {
+      margin: 0;
+    }
+
+    body {
+      padding: 32px;
+      color: #272a3a;
+      background: #f5f6fa;
+      font: 16px/1.6 system-ui, sans-serif;
+    }
+
+    .tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 18px;
+    }
+
+    .tab {
+      padding: 8px 14px;
+      border: 1px solid #d6d8e2;
+      border-radius: 8px;
+      background: #fff;
+    }
+
+    .tab.active {
+      color: #fff;
+      background: #514bd8;
+    }
+
+    .panel {
+      display: none;
+    }
+
+    .panel.active {
+      display: block;
+    }
+
+    .chart-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 20px;
+      max-width: 1120px;
+    }
+
+    .chart-card {
+      padding: 16px;
+      border: 1px solid #e1e3eb;
+      border-radius: 14px;
+      background: #fff;
+    }
+
+    .chart-card h2 {
+      margin: 0 0 10px;
+      font-size: 17px;
+    }
+
+    .editable-copy {
+      max-width: 760px;
+      margin-top: 24px;
+      padding: 14px 16px;
+      border-radius: 10px;
+      background: #fff;
+    }
+
+  </style>
+</head>
+<body>
+  <nav class="tabs" aria-label="图表页签">
+    <button
+      class="tab active"
+      type="button"
+      role="tab"
+      aria-selected="true"
+      aria-controls="chart-panel-overview"
+      data-native-case="chart-tab-overview"
+      data-p="chart-panel-overview"
+      onclick="switchChartPanel(0)"
+    >趋势概览</button>
+    <button
+      class="tab"
+      type="button"
+      role="tab"
+      aria-selected="false"
+      aria-controls="chart-panel-scatter"
+      data-native-case="chart-tab-scatter"
+      data-p="chart-panel-scatter"
+      onclick="switchChartPanel(1)"
+    >量价分布</button>
+  </nav>
+
+  <main>
+    <section class="panel active" id="chart-panel-overview" role="tabpanel">
+      <div class="chart-grid">
+        <article class="chart-card">
+          <h2>柱线混合</h2>
+          <div id="chart-mixed" data-native-case="chart-mixed" data-report-chart-slot="cartesian-v0.1" data-report-chart-spec-id="chart-mixed-spec" data-report-chart-width="640" data-report-chart-height="320" role="img" aria-label="成交额与订单趋势图" style="display:block;width:100%;aspect-ratio:640 / 320;overflow:hidden"></div>
+          <template id="chart-mixed-spec" data-report-chart-spec="0.1">
+            {"version":"0.1","mode":"category","title":"成交额与订单趋势","categories":["1月","2月","3月","4月"],"series":[{"id":"gmv","name":"成交额","type":"bar","values":[120,168,210,260],"color":"#514BD8"},{"id":"orders","name":"订单","type":"line","values":[80,112,150,188],"color":"#12A594","smooth":true,"symbol":"circle"}]}
+          </template>
+        </article>
+
+        <article class="chart-card">
+          <h2>堆叠柱状</h2>
+          <div id="chart-stacked-bar" data-native-case="chart-stacked-bar" data-report-chart-slot="cartesian-v0.1" data-report-chart-spec-id="chart-stacked-bar-spec" data-report-chart-width="640" data-report-chart-height="320" role="img" aria-label="渠道成交额堆叠图" style="display:block;width:100%;aspect-ratio:2 / 1;overflow:hidden"></div>
+          <template id="chart-stacked-bar-spec" data-report-chart-spec="0.1">
+            {"version":"0.1","mode":"category","title":"渠道成交额","categories":["Q1","Q2","Q3","Q4"],"series":[{"id":"search","name":"搜索","type":"bar","values":[45,52,68,76],"stack":"total"},{"id":"recommend","name":"推荐","type":"bar","values":[34,48,59,72],"stack":"total"}]}
+          </template>
+        </article>
+
+        <article class="chart-card">
+          <h2>堆叠面积</h2>
+          <div id="chart-area" data-native-case="chart-area" data-report-chart-slot="cartesian-v0.1" data-report-chart-spec-id="chart-area-spec" data-report-chart-width="640" data-report-chart-height="320" role="img" aria-label="用户规模堆叠面积图" style="display:block;width:100%;aspect-ratio:2 / 1;overflow:hidden"></div>
+          <template id="chart-area-spec" data-report-chart-spec="0.1">
+            {"version":"0.1","mode":"category","title":"用户规模","categories":["周一","周二","周三","周四"],"series":[{"id":"new","name":"新增","type":"line","values":[12,18,21,28],"stack":"users","area":true,"smooth":true},{"id":"returning","name":"回访","type":"line","values":[20,24,31,36],"stack":"users","area":true,"smooth":true}]}
+          </template>
+        </article>
+
+        <article class="chart-card">
+          <h2>横向柱状</h2>
+          <div id="chart-horizontal" data-native-case="chart-horizontal" data-report-chart-slot="cartesian-v0.1" data-report-chart-spec-id="chart-horizontal-spec" data-report-chart-width="640" data-report-chart-height="320" role="img" aria-label="平台渗透率横向柱状图" style="display:block;width:100%;aspect-ratio:2 / 1;overflow:hidden"></div>
+          <template id="chart-horizontal-spec" data-report-chart-spec="0.1">
+            {"version":"0.1","mode":"category","orientation":"horizontal","title":"平台渗透率","categories":["平台A","平台B","平台C"],"series":[{"id":"penetration","name":"渗透率","type":"bar","values":[72,58,41],"color":"#E66B3D"}]}
+          </template>
+        </article>
+      </div>
+    </section>
+
+    <section class="panel" id="chart-panel-scatter" role="tabpanel">
+      <div class="chart-grid">
+        <article class="chart-card">
+          <h2>量价散点</h2>
+          <div id="chart-scatter" data-native-case="chart-scatter" data-report-chart-slot="cartesian-v0.1" data-report-chart-spec-id="chart-scatter-spec" data-report-chart-width="640" data-report-chart-height="320" role="img" aria-label="商品量价分布散点图" style="display:block;width:100%;aspect-ratio:2 / 1;overflow:hidden"></div>
+          <template id="chart-scatter-spec" data-report-chart-spec="0.1">
+            {"version":"0.1","mode":"numeric","title":"商品量价分布","xAxisName":"价格","yAxisName":"销量","series":[{"id":"products","name":"商品","type":"scatter","points":[[10,32],[18,27],[26,43],[38,18],[46,35]],"symbolSize":12,"color":"#12A594"}]}
+          </template>
+        </article>
+
+        <article class="chart-card">
+          <h2>单折线</h2>
+          <div id="chart-line" data-native-case="chart-line" data-report-chart-slot="cartesian-v0.1" data-report-chart-spec-id="chart-line-spec" data-report-chart-width="640" data-report-chart-height="320" role="img" aria-label="日活用户折线图" style="display:block;width:100%;aspect-ratio:2 / 1;overflow:hidden"></div>
+          <template id="chart-line-spec" data-report-chart-spec="0.1">
+            {"version":"0.1","mode":"category","title":"日活用户","categories":["周一","周二","周三","周四"],"series":[{"id":"dau","name":"DAU","type":"line","values":[120,132,148,171],"smooth":true,"symbol":"circle","color":"#514BD8"}]}
+          </template>
+        </article>
+      </div>
+    </section>
+
+    <p class="editable-copy" data-native-case="chart-adjacent-copy">图表旁边的正文仍然使用原生选择和中文输入。</p>
+
+  </main>
+
+  <script>
+    window.__editChartAuthorScriptRan = true;
+    function switchChartPanel(index) {
+      document.querySelectorAll(".tab").forEach((tab, tabIndex) => {
+        const active = tabIndex === index;
+        tab.classList.toggle("active", active);
+        tab.setAttribute("aria-selected", active ? "true" : "false");
+      });
+      document.querySelectorAll(".panel").forEach((panel, panelIndex) => {
+        panel.classList.toggle("active", panelIndex === index);
+      });
+    }
+  </script>
+</body>
+</html>

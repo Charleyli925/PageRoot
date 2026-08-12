@@ -27,16 +27,18 @@ screenshot never enters authored Edit or Review documents.
 
 ## Edit behavior
 
-Edit renders only what the source can statically present. It disables authored
-scripts and does not create a snapshot request, cache, bitmap projection, Blob
-URL or `data-pageroot-readonly-visual*` attribute. Authored inline SVG remains
-native, source-backed and non-editable; script-generated Canvas/SVG remains
-available in Preview. There is no runtime-capture status, placeholder, retry or
-fallback UI in Edit.
+Edit disables authored scripts and does not create a snapshot request, cache,
+bitmap projection, Blob URL or `data-pageroot-readonly-visual*` attribute.
+Authored inline SVG remains native, source-backed and non-editable; arbitrary
+script-generated Canvas/SVG remains available only in Preview. There is no
+runtime-capture status, placeholder, retry or fallback UI in Edit.
 
-This remains the active production behavior. ADR 0020 PR-1 adds only a dormant
-JSON Chart Spec and same-slot SVG library; it does not start the Review snapshot
-owner or alter Edit until its separately gated PR-2 integration.
+ADR 0020 adds a separate declarative path for eligible source-empty chart slots.
+PageRoot renders their closed JSON Chart Spec synchronously and mounts validated
+SVG once in same-slot Shadow DOM before the existing Edit Canvas is ready. This
+does not start or consume the Review snapshot owner: no pixels, capture session,
+host binding or runtime DOM cross that boundary, and unsupported declarations
+still preserve the script-disabled static behavior above.
 
 ## One Review snapshot owner
 

@@ -144,11 +144,16 @@ PR 批量是建议而非固定限制：用 CI Health 的 Ready 次数、candidat
   固定槽位宽高比、未知 ECharts capability、恶意文本/URL/原型/访问器、数据与
   SVG 字节预算、固定 viewBox、输出元素/引用白名单，以及 Spec 文本变化时空宿主
   TargetRef 仍可重绑。PR-1 没有 Browser/Electron 产品断言，因为尚无生产调用者。
-  PR-2 接入后，Browser/Electron 必须证明同一 Canvas generation 在 ready 前一次
-  挂载全部合格图表，初始隐藏 Tab 不读取零宽高，往返切换不重跑 ECharts、不重建
-  SVG、不闪屏，隐藏评论暂不画标记且切回后用当前 page-view generation 重测；还要
-  覆盖宿主整框评论、周围文字跨槽位选择、中文 IME、作者脚本仍未运行、源/磁盘字节
-  不变，以及无效/超预算/已有 Shadow root 的槽位静默保持当前状态。
+  PR-2 的 `edit-chart-projection` Node owner 追加一对一发现、整页预算、任意作者
+  ECharts 忽略和兄弟槽位静默失败。`native-dom-edit-chart-visuals` Browser oracle
+  证明同一 Canvas generation 只在文档离开 `loading` 后、ready 前一次挂载全部
+  合格图表，初始隐藏 Tab 不读零宽高，往返切换不重跑 ECharts、不重建 SVG、
+  不闪屏，以及隐藏评论切回后仍精确重测。它还覆盖宿主整框点击/评论、相邻
+  原生文字修改、作者脚本未运行、
+  导出字节精确且运行时 SVG 不进入源码。
+  `edit-chart-visuals-electron` 再用真实磁盘文件和 CDP composition 证明中文 IME、
+  精确落盘、评论 TargetRef、Tab、Canvas 换代和 Shadow/light DOM 边界。两类 smoke
+  配置都必须点名这些用例，不能只依赖完整套件偶然覆盖。
 - AI 闭环：Node 集成必须分别证明普通/跨标签相关改动可建版、不相关但可用
   HTML 进入 `attention` 并强制审阅、脚本/inline handler 等作者内容变化
   照常建版且不生成检测字段或提示，以及身份/Hash/路径/协议失败与
