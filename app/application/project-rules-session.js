@@ -42,13 +42,18 @@ function emptySnapshot(editorGeneration = 0) {
   });
 }
 
+function operationToken(context, generation, content = undefined) {
+  return Object.freeze({
+    context,
+    generation,
+    ...(content === undefined ? {} : { content: String(content) }),
+  });
+}
+
+// ProjectRulesSession owns only the disposable editor facts. Bridge reads,
+// writes, delayed autosave and unknown-outcome reconciliation belong to
+// ProjectRulesWorkflow so this Session never becomes an IO owner.
 export class ProjectRulesSession {
-  #bridgeClient;
-
-  #errorMessage;
-
-  #observer = null;
-
   #context = null;
 
   #generation = 0;
@@ -57,39 +62,18 @@ export class ProjectRulesSession {
 
   #composition = null;
 
-  #savePromise = null;
-
   #snapshot = emptySnapshot();
 
-  constructor({
-    bridgeClient,
-    errorMessage = (cause, fallback) => (
-      cause instanceof Error && cause.message ? cause.message : fallback
-    ),
-  }) {
-    if (
-      !bridgeClient
-      || typeof bridgeClient.projectFile !== "function"
-      || typeof bridgeClient.updateProjectFile !== "function"
-    ) {
-      throw new TypeError(
-        "ProjectRulesSession requires project-file Bridge commands.",
-      );
-    }
-    this.#bridgeClient = bridgeClient;
-    this.#errorMessage = errorMessage;
-  }
-
-  setObserver(observer) {
-    this.#observer = typeof observer === "function" ? observer : null;
-  }
+  #listeners = new Set();
 
   #emit(next) {
     this.#snapshot = Object.freeze({ ...next });
-    try {
-      this.#observer?.(this.#snapshot);
-    } catch {
-      // A view observer cannot change project-rule authority.
+    for (const listener of this.#listeners) {
+      try {
+        listener(this.#snapshot);
+      } catch {
+        // Presentation and workflow listeners cannot change rule authority.
+      }
     }
   }
 
@@ -98,17 +82,25 @@ export class ProjectRulesSession {
       && sameContext(this.#context, context);
   }
 
-  async open(context) {
+  subscribe(listener) {
+    if (typeof listener !== "function") {
+      throw new TypeError("ProjectRulesSession listener must be a function.");
+    }
+    this.#listeners.add(listener);
+    listener(this.#snapshot);
+    return () => this.#listeners.delete(listener);
+  }
+
+  beginOpen(context) {
     const nextContext = copyContext(context);
     if (!nextContext) {
       this.close();
-      return false;
+      return null;
     }
     this.#generation += 1;
     const generation = this.#generation;
     this.#context = nextContext;
     this.#composition = null;
-    this.#savePromise = null;
     this.#emit({
       ...emptySnapshot(this.#snapshot.editorGeneration),
       open: true,
@@ -116,43 +108,50 @@ export class ProjectRulesSession {
       content: "正在读取…",
       savedContent: "正在读取…",
     });
-    try {
-      const payload = await this.#bridgeClient.projectFile(
-        nextContext.sourcePath,
-        "PROJECT.md",
-      );
-      if (!this.#isCurrent(nextContext, generation)) return false;
-      const content = String(payload?.content || "");
-      this.#emit({
-        ...this.#snapshot,
-        content,
-        savedContent: content,
-        loading: false,
-        error: "",
-      });
-      return true;
-    } catch (cause) {
-      if (!this.#isCurrent(nextContext, generation)) return false;
-      this.#emit({
-        ...this.#snapshot,
-        content: "",
-        savedContent: "",
-        loading: false,
-        error: this.#errorMessage(
-          cause,
-          "项目文件暂时无法读取；未显示任何可编辑的替代内容。",
-        ),
-      });
-      return false;
-    }
+    return operationToken(nextContext, generation);
+  }
+
+  completeOpen(token, payload) {
+    if (!this.isCurrent(token)) return false;
+    const content = String(payload?.content || "");
+    this.#emit({
+      ...this.#snapshot,
+      content,
+      savedContent: content,
+      loading: false,
+      error: "",
+    });
+    return true;
+  }
+
+  failOpen(token, error) {
+    if (!this.isCurrent(token)) return false;
+    this.#emit({
+      ...this.#snapshot,
+      content: "",
+      savedContent: "",
+      loading: false,
+      error: String(error || "项目文件暂时无法读取；未显示任何可编辑的替代内容。"),
+    });
+    return true;
   }
 
   close() {
     this.#generation += 1;
     this.#context = null;
     this.#composition = null;
-    this.#savePromise = null;
     this.#emit(emptySnapshot(this.#snapshot.editorGeneration));
+  }
+
+  matchesContext(context) {
+    return sameContext(this.#context, copyContext(context));
+  }
+
+  isCurrent(token) {
+    return Boolean(
+      token
+      && this.#isCurrent(token.context, Number(token.generation)),
+    );
   }
 
   updateContent(content) {
@@ -171,7 +170,11 @@ export class ProjectRulesSession {
   }
 
   beginComposition(target, baselineValue) {
-    if (!this.#snapshot.open || this.#snapshot.loading) return null;
+    if (
+      !this.#snapshot.open
+      || this.#snapshot.loading
+      || this.#snapshot.error
+    ) return null;
     this.#compositionSequence += 1;
     this.#composition = {
       epoch: this.#compositionSequence,
@@ -208,7 +211,9 @@ export class ProjectRulesSession {
   }
 
   restore() {
-    if (!this.#snapshot.open) return null;
+    if (!this.#snapshot.open || this.#snapshot.loading || this.#snapshot.error) {
+      return null;
+    }
     const active = this.#composition;
     if (active) active.restoreRequested = true;
     this.#emit({
@@ -218,7 +223,10 @@ export class ProjectRulesSession {
       compositionActive: false,
       editorGeneration: this.#snapshot.editorGeneration + 1,
     });
-    return active?.epoch ?? null;
+    return Object.freeze({
+      compositionEpoch: active?.epoch ?? null,
+      editorGeneration: this.#snapshot.editorGeneration,
+    });
   }
 
   settleRestore(compositionEpoch) {
@@ -232,82 +240,54 @@ export class ProjectRulesSession {
     return false;
   }
 
-  get compositionActive() {
-    return Boolean(this.#composition);
-  }
-
-  async save({ locked = false } = {}) {
-    if (this.#savePromise) return this.#savePromise;
-    if (this.#composition) return false;
-    if (
-      this.#snapshot.open
-      && !this.#snapshot.loading
-      && !this.#snapshot.error
-      && this.#snapshot.content === this.#snapshot.savedContent
-    ) return true;
+  beginSave() {
     if (
       !this.#snapshot.open
       || this.#snapshot.loading
       || this.#snapshot.error
-      || locked
+      || this.#snapshot.saving
+      || this.#composition
       || !this.#context
-    ) return false;
+      || this.#snapshot.content === this.#snapshot.savedContent
+    ) return null;
+    const token = operationToken(
+      this.#context,
+      this.#generation,
+      this.#snapshot.content,
+    );
+    this.#emit({ ...this.#snapshot, saving: true, saveError: "" });
+    return token;
+  }
 
-    const context = this.#context;
-    const generation = this.#generation;
-    const nextContent = this.#snapshot.content;
-    const save = async () => {
-      this.#emit({ ...this.#snapshot, saving: true, saveError: "" });
-      const markSaved = () => {
-        this.#emit({
-          ...this.#snapshot,
-          savedContent: nextContent,
-          saving: false,
-          saveError: "",
-        });
-      };
-      try {
-        await this.#bridgeClient.updateProjectFile({
-          sourcePath: context.sourcePath,
-          projectId: context.projectId,
-          documentId: context.documentId,
-          content: nextContent,
-        });
-        if (!this.#isCurrent(context, generation)) return false;
-        markSaved();
-        return true;
-      } catch (cause) {
-        if (!this.#isCurrent(context, generation)) return false;
-        try {
-          const persisted = await this.#bridgeClient.projectFile(
-            context.sourcePath,
-            "PROJECT.md",
-          );
-          if (!this.#isCurrent(context, generation)) return false;
-          if (String(persisted?.content || "") === nextContent) {
-            markSaved();
-            return true;
-          }
-        } catch {
-          // The original mutation failure remains the useful explanation.
-        }
-        if (!this.#isCurrent(context, generation)) return false;
-        this.#emit({
-          ...this.#snapshot,
-          saving: false,
-          saveError: this.#errorMessage(
-            cause,
-            "项目规则暂时没有保存；内容仍保留在这里，可以再次保存。",
-          ),
-        });
-        return false;
-      }
-    };
-    const promise = save().finally(() => {
-      if (this.#savePromise === promise) this.#savePromise = null;
+  completeSave(token) {
+    if (!this.isCurrent(token) || !this.#snapshot.saving) return false;
+    this.#emit({
+      ...this.#snapshot,
+      savedContent: token.content,
+      saving: false,
+      saveError: "",
     });
-    this.#savePromise = promise;
-    return promise;
+    return true;
+  }
+
+  failSave(token, error) {
+    if (!this.isCurrent(token) || !this.#snapshot.saving) return false;
+    this.#emit({
+      ...this.#snapshot,
+      saving: false,
+      saveError: String(error || "项目规则暂时没有保存；内容仍保留在这里，可以再次保存。"),
+    });
+    return true;
+  }
+
+  abandonSave(token) {
+    if (!this.isCurrent(token) || !this.#snapshot.saving) return false;
+    this.#emit({ ...this.#snapshot, saving: false });
+    return true;
+  }
+
+  get compositionActive() {
+    return Boolean(this.#composition);
   }
 
   inspect({ locked = false } = {}) {

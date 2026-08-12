@@ -321,7 +321,6 @@ function createHarness({
   const legacy = {
     isHistoryView: () => false,
     isViewTransitioning: () => false,
-    saveProjectRules: async () => true,
     async hydrateRecentRuns() {},
     emit: (event) => events.push(event),
   };
@@ -360,9 +359,12 @@ function createHarness({
     versionSession,
     commentWorkflow,
     runSession,
-    projectRulesSession: {
-      close() {},
+    projectRulesWorkflow: {
+      resetForProjectTransition() {},
       inspect: () => ({ state: "resolved" }),
+      async drain() {
+        return true;
+      },
     },
     externalFileOpenSession: new ExternalFileOpenSession(),
     projectApplicationSession: new ProjectApplicationSession(),

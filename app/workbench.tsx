@@ -117,10 +117,6 @@ import {
 } from "./application/review-analysis-session.js";
 import type { PageViewContext } from "./lib/page-view-context.js";
 import {
-  ProjectRulesSession,
-  type ProjectRulesSnapshot,
-} from "./application/project-rules-session.js";
-import {
   ProjectSession,
   type ProjectSessionSnapshot,
 } from "./application/project-session.js";
@@ -286,8 +282,7 @@ type CanvasRenderAcks = Readonly<Record<CanvasMode, CanvasRenderAck | null>>;
 
 const bridgeClient = createRuntimeBridgeClient();
 const recoveryStore = createBrowserRecoveryStore();
-const PROJECT_RULES_AUTOSAVE_DELAY_MS = 700;
-const INITIAL_PROJECT_RULES_SNAPSHOT: ProjectRulesSnapshot = {
+const EMPTY_PROJECT_RULES_SNAPSHOT = {
   open: false,
   path: "PROJECT.md",
   content: "",
@@ -298,7 +293,7 @@ const INITIAL_PROJECT_RULES_SNAPSHOT: ProjectRulesSnapshot = {
   saveError: "",
   compositionActive: false,
   editorGeneration: 0,
-};
+} as const;
 const INITIAL_RUN_SNAPSHOT: RunSessionSnapshot = {
   activeSourcePath: null,
   activeRun: null,
@@ -551,10 +546,6 @@ export default function Workbench() {
     HtmlCanvasSelection,
     CommentEditSession
   >());
-  const projectRulesSessionRef = useRef(new ProjectRulesSession({
-    bridgeClient,
-    errorMessage: productErrorMessage,
-  }));
   const verifyCanvasRenderedRef = useRef<(
     expectedHtml: string,
     expectedSha256: string,
@@ -579,7 +570,6 @@ export default function Workbench() {
   const relinkingTargetRef = useRef<string | null>(null);
   const relinkSelectionArmedRef = useRef(false);
   const resumeSubmissionAfterRelinkRef = useRef(false);
-  const saveProjectRulesRef = useRef<() => Promise<boolean>>(async () => false);
   const normalizeCurrentGlobalCommentsRef = useRef<() => CommentItem[]>(() => []);
   const projectRulesEditorRef = useRef<HTMLTextAreaElement | null>(null);
   const fileRenameInputRef = useRef<HTMLInputElement | null>(null);
@@ -667,8 +657,17 @@ export default function Workbench() {
   const [commentRailOffset, setCommentRailOffset] = useState(0);
   const [commentRailFollowsFocus, setCommentRailFollowsFocus] = useState(false);
   const [fileView, setFileView] = useState<WorkspaceFileView | null>(null);
-  const [projectRulesSnapshot, setProjectRulesSnapshot] =
-    useState<ProjectRulesSnapshot>(INITIAL_PROJECT_RULES_SNAPSHOT);
+  const projectRulesSnapshot = workspaceControllerSnapshot?.projectRules
+    ?? EMPTY_PROJECT_RULES_SNAPSHOT;
+  const activeFileView = projectRulesSnapshot.open
+    ? {
+        path: projectRulesSnapshot.path,
+        content: projectRulesSnapshot.content,
+        savedContent: projectRulesSnapshot.savedContent,
+        loading: projectRulesSnapshot.loading,
+        ...(projectRulesSnapshot.error ? { error: projectRulesSnapshot.error } : {}),
+      }
+    : fileView?.path === "PROJECT.md" ? null : fileView;
   const projectRulesEditorGeneration = projectRulesSnapshot.editorGeneration;
   const projectRulesCompositionActive =
     projectRulesSnapshot.compositionActive;
@@ -816,9 +815,33 @@ export default function Workbench() {
           }),
         },
       },
+      projectRulesWorkflow: {
+        runSession: runSessionRef.current,
+        errorMessage: productErrorMessage,
+        presentation: {
+          restoreEditor: ({ settle }: { settle: () => void }) => {
+            // Retire the exact textarea that owns macOS marked text. A late
+            // composition input from that detached control can no longer
+            // overwrite the explicit restore result.
+            window.requestAnimationFrame(() => {
+              window.requestAnimationFrame(() => {
+                settle();
+                const editor = projectRulesEditorRef.current;
+                editor?.focus({ preventScroll: true });
+                editor?.setSelectionRange(editor.value.length, editor.value.length);
+              });
+            });
+          },
+        },
+        scheduler: {
+          setTimeout: (callback: () => void, delayMs: number) => (
+            window.setTimeout(callback, delayMs)
+          ),
+          clearTimeout: (handle: unknown) => window.clearTimeout(handle as number),
+        },
+      },
       projectWorkflow: {
         runSession: runSessionRef.current,
-        projectRulesSession: projectRulesSessionRef.current,
         codecs: {
           isRecord,
           sameSourcePath: sameLocalSourcePath,
@@ -916,7 +939,6 @@ export default function Workbench() {
           legacy: {
             isHistoryView: () => versionSessionRef.current.snapshot.viewMode === "history",
             isViewTransitioning: () => isViewTransitioning(),
-            saveProjectRules: () => saveProjectRulesRef.current(),
           },
         },
         policies: {
@@ -1532,25 +1554,6 @@ export default function Workbench() {
   }, []);
   useEffect(() => () => reviewAnalysisSessionRef.current.dispose(), []);
   useEffect(() => {
-    const session = projectRulesSessionRef.current;
-    session.setObserver((snapshot) => {
-      setProjectRulesSnapshot(snapshot);
-      setFileView((current) => {
-        if (snapshot.open) {
-          return {
-            path: snapshot.path,
-            content: snapshot.content,
-            savedContent: snapshot.savedContent,
-            loading: snapshot.loading,
-            ...(snapshot.error ? { error: snapshot.error } : {}),
-          };
-        }
-        return current?.path === "PROJECT.md" ? null : current;
-      });
-    });
-    return () => session.setObserver(null);
-  }, []);
-  useEffect(() => {
     const session = runSessionRef.current;
     session.setObserver(setRunSnapshot);
     return () => session.setObserver(null);
@@ -1623,14 +1626,14 @@ export default function Workbench() {
   }, [aboutOpen, projectId]);
 
   useEffect(() => {
-    if (fileView?.path === "PROJECT.md") {
+    if (activeFileView?.path === "PROJECT.md") {
       captureUsageEvent(
         "module_viewed",
         { module: "project_rules" },
         projectId || undefined,
       );
     }
-  }, [fileView?.path, projectId]);
+  }, [activeFileView?.path, projectId]);
 
   useEffect(() => {
     const localScope = projectId || usageFingerprint(sourcePath || "unregistered");
@@ -4686,10 +4689,14 @@ export default function Workbench() {
     const context = captureProjectContext();
     if (!context) return;
     if (path === "PROJECT.md") {
-      await projectRulesSessionRef.current.open(context);
+      await requiredWorkspaceController(workspaceController).openProjectRules({
+        context,
+      });
       return;
     }
-    projectRulesSessionRef.current.close();
+    const closedRules = await requiredWorkspaceController(workspaceController)
+      .closeProjectRules();
+    if (closedRules.status !== "succeeded") return;
     setFileView({
       path,
       content: "正在读取…",
@@ -4713,81 +4720,52 @@ export default function Workbench() {
         ),
       });
     }
-  }, [captureProjectContext, isCurrentProjectContext, readWorkspaceFile]);
+  }, [
+    captureProjectContext,
+    isCurrentProjectContext,
+    readWorkspaceFile,
+    workspaceController,
+  ]);
 
   const beginProjectRulesComposition = useCallback((
     target: HTMLTextAreaElement,
   ) => {
-    projectRulesSessionRef.current.beginComposition(target, target.value);
-  }, []);
+    workspaceController?.beginProjectRulesComposition({
+      target,
+      baselineValue: target.value,
+    });
+  }, [workspaceController]);
 
   const finishProjectRulesComposition = useCallback((
     target: HTMLTextAreaElement,
   ) => {
-    projectRulesSessionRef.current.finishComposition(target);
-  }, []);
+    workspaceController?.finishProjectRulesComposition({ target });
+  }, [workspaceController]);
 
   useEffect(() => {
-    if (drawer === "files" && fileView?.path === "PROJECT.md") return;
-    projectRulesSessionRef.current.leaveEditor();
-  }, [drawer, fileView?.path]);
+    if (drawer === "files" && activeFileView?.path === "PROJECT.md") return;
+    workspaceController?.leaveProjectRulesEditor();
+  }, [activeFileView?.path, drawer, workspaceController]);
 
   const restoreProjectRules = useCallback(() => {
-    const restoreEpoch = projectRulesSessionRef.current.restore();
-    // Retire the exact textarea that owns macOS marked text. A late
-    // composition input from that detached control can no longer overwrite
-    // the explicit restore result.
-    window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(() => {
-        projectRulesSessionRef.current.settleRestore(restoreEpoch);
-        const editor = projectRulesEditorRef.current;
-        editor?.focus({ preventScroll: true });
-        editor?.setSelectionRange(editor.value.length, editor.value.length);
-      });
-    });
-  }, []);
+    workspaceController?.restoreProjectRules();
+  }, [workspaceController]);
 
   const saveProjectRules = useCallback(async (): Promise<boolean> => {
-    return projectRulesSessionRef.current.save({ locked: runInProgress });
-  }, [runInProgress]);
-
-  useEffect(() => {
-    if (
-      !projectRulesSnapshot.open
-      || projectRulesSnapshot.loading
-      || projectRulesSnapshot.error
-      || projectRulesSnapshot.content === projectRulesSnapshot.savedContent
-      || projectRulesSaving
-      || projectRulesCompositionActive
-      || runInProgress
-    ) return;
-    const timer = window.setTimeout(() => {
-      void saveProjectRules();
-    }, PROJECT_RULES_AUTOSAVE_DELAY_MS);
-    return () => window.clearTimeout(timer);
-  }, [
-    projectRulesSnapshot,
-    projectRulesCompositionActive,
-    projectRulesSaving,
-    runInProgress,
-    saveProjectRules,
-  ]);
+    const outcome = await requiredWorkspaceController(workspaceController)
+      .saveProjectRules();
+    return outcome.status === "succeeded";
+  }, [workspaceController]);
 
   const closeFileView = useCallback(async (): Promise<boolean> => {
-    if (
-      projectRulesSnapshot.open
-      && !projectRulesSnapshot.error
-      && projectRulesSnapshot.content !== projectRulesSnapshot.savedContent
-      && !await saveProjectRules()
-    ) return false;
-    projectRulesSessionRef.current.close();
+    if (projectRulesSnapshot.open) {
+      const outcome = await requiredWorkspaceController(workspaceController)
+        .closeProjectRules();
+      if (outcome.status !== "succeeded") return false;
+    }
     setFileView(null);
     return true;
-  }, [projectRulesSnapshot, saveProjectRules]);
-
-  useEffect(() => {
-    saveProjectRulesRef.current = saveProjectRules;
-  }, [saveProjectRules]);
+  }, [projectRulesSnapshot.open, workspaceController]);
 
   const revealActiveRunInFinder = useCallback(async () => {
     const activeSourcePath = projectSessionRef.current.sourcePath;
@@ -5951,7 +5929,7 @@ export default function Workbench() {
         return;
       case "review-project-rules":
         setDrawer("files");
-        if (fileView?.path !== "PROJECT.md") void viewFile("PROJECT.md");
+        if (activeFileView?.path !== "PROJECT.md") void viewFile("PROJECT.md");
         return;
       case "resume-draft":
         setCanvasMode("edit");
@@ -7466,11 +7444,11 @@ export default function Workbench() {
           ) : null}
 
           {drawer === "files" ? (
-            fileView ? (
+            activeFileView ? (
               <div
                 className="file-view"
                 data-editable={
-                  fileView.path === "PROJECT.md" && !fileView.error
+                  activeFileView.path === "PROJECT.md" && !activeFileView.error
                     ? "true"
                     : "false"
                 }
@@ -7483,22 +7461,22 @@ export default function Workbench() {
                   <CaretRightIcon aria-hidden="true" size={13} weight="bold" />
                   返回项目
                 </button>
-                {fileView.error ? (
+                {activeFileView.error ? (
                   <section className="project-file-read-error" role="alert">
                     <span className="project-resource-icon">
                       <TriangleIcon aria-hidden="true" size={20} weight="duotone" />
                     </span>
                     <div>
-                      <small>{workspaceFileLabel(fileView.path)}</small>
+                      <small>{workspaceFileLabel(activeFileView.path)}</small>
                       <strong>内容没有读取成功</strong>
-                      <p>{fileView.error}</p>
+                      <p>{activeFileView.error}</p>
                     </div>
                     <button
                       type="button"
-                      onClick={() => void viewFile(fileView.path)}
+                      onClick={() => void viewFile(activeFileView.path)}
                     >重试读取</button>
                   </section>
-                ) : fileView.path === "PROJECT.md" ? (
+                ) : activeFileView.path === "PROJECT.md" ? (
                   <>
                     <header className="project-rules-heading">
                       <span className="project-resource-icon">
@@ -7509,29 +7487,29 @@ export default function Workbench() {
                         <strong>管理 AI 修改规则</strong>
                       </span>
                       <em
-                        data-state={fileView.loading
+                        data-state={activeFileView.loading
                           ? "loading"
                           : runInProgress
                           ? "locked"
                           : projectRulesSaving
                             ? "loading"
-                          : fileView.content === fileView.savedContent
+                          : activeFileView.content === activeFileView.savedContent
                             ? "saved"
                             : "dirty"}
                       >
-                        {fileView.loading
+                        {activeFileView.loading
                           ? "正在读取"
                           : runInProgress
                           ? "处理中 · 只读"
                           : projectRulesSaving
                             ? "正在保存"
-                          : fileView.content === fileView.savedContent
+                          : activeFileView.content === activeFileView.savedContent
                             ? "已保存"
                             : "等待自动保存"}
                       </em>
                     </header>
                     <p className="project-file-note" id="project-rules-help">
-                      {fileView.loading
+                      {activeFileView.loading
                         ? "正在读取项目规则。内容核对完成前暂不接受编辑。"
                         : runInProgress
                         ? "本轮已经使用冻结时的规则。AI 处理完成前这里保持只读，不会把临时修改追加入本轮。"
@@ -7544,8 +7522,8 @@ export default function Workbench() {
                       aria-label="项目长期规则"
                       aria-describedby="project-rules-help"
                       spellCheck={false}
-                      disabled={fileView.loading || runInProgress}
-                      value={fileView.content}
+                      disabled={activeFileView.loading || runInProgress}
+                      value={activeFileView.content}
                       onCompositionStart={(event) => {
                         beginProjectRulesComposition(event.currentTarget);
                       }}
@@ -7553,9 +7531,9 @@ export default function Workbench() {
                         finishProjectRulesComposition(event.currentTarget);
                       }}
                       onChange={(event) => {
-                        projectRulesSessionRef.current.updateContent(
-                          event.target.value,
-                        );
+                        workspaceController?.updateProjectRules({
+                          content: event.target.value,
+                        });
                       }}
                     />
                     {projectRulesSaveError ? (
@@ -7567,25 +7545,25 @@ export default function Workbench() {
                       <small>
                         {projectRulesSaving
                           ? "正在自动保存"
-                          : fileView.content === fileView.savedContent
+                          : activeFileView.content === activeFileView.savedContent
                           ? "当前内容已记录"
                           : "修改将在稍后自动保存"}
                       </small>
                       <button
                         type="button"
                         disabled={
-                          fileView.loading
+                          activeFileView.loading
                           || projectRulesSaving
                           || runInProgress
-                          || fileView.content === fileView.savedContent
+                          || activeFileView.content === activeFileView.savedContent
                         }
                         onPointerDown={(event) => {
-                          if (projectRulesSessionRef.current.compositionActive) {
+                          if (projectRulesCompositionActive) {
                             event.preventDefault();
                           }
                         }}
                         onMouseDown={(event) => {
-                          if (projectRulesSessionRef.current.compositionActive) {
+                          if (projectRulesCompositionActive) {
                             event.preventDefault();
                           }
                         }}
@@ -7603,8 +7581,8 @@ export default function Workbench() {
                   </>
                 ) : (
                   <>
-                    <strong>{workspaceFileLabel(fileView.path)}</strong>
-                    <pre>{fileView.content}</pre>
+                    <strong>{workspaceFileLabel(activeFileView.path)}</strong>
+                    <pre>{activeFileView.content}</pre>
                   </>
                 )}
               </div>

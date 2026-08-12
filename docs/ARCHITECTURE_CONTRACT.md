@@ -76,8 +76,12 @@ The renderer's main workspace facts are partitioned as follows:
   recovery projection, attachment staging/upload count and stale/cancel
   compensation; it publishes through `CommentSession` and `DraftSession` and
   is not a second Draft aggregate owner;
-- `ProjectRulesSession`: `PROJECT.md` working copy, composition fence,
-  autosave and reconciliation;
+- `ProjectRulesSession`: `PROJECT.md` working copy, generation, composition
+  fence and save projection facts;
+- `ProjectRulesWorkflow`: `PROJECT.md` Bridge read/write, 700ms autosave,
+  unknown-write authority reconciliation, close/switch drain and narrow native
+  editor-restore host port. It publishes through `ProjectRulesSession` and is
+  not a second editor-state owner;
 - `RunSession`: current/background run projections, Qoder status, background
   outcomes, the one preparing/frozen/uncertain submission lock, and operation
   locks;
@@ -446,8 +450,9 @@ lifecycle. The Workbench close listener synchronously registers only
 commands to the same workflow, not parallel close authorities.
 
 `CommentWorkflow` supplies the `draft/comment persistence` and `attachment
-staging` obligations. `ProjectWorkflow` delegates those obligations without
-reading React refs or reproducing Draft snapshots; Workbench only renders the
+staging` obligations; `ProjectRulesWorkflow` supplies `project-rule
+persistence`. `ProjectWorkflow` delegates those obligations without reading
+React refs or reproducing mutable snapshots; Workbench only renders the
 Controller projection and dispatches durable commands.
 
 A Canvas undo/redo request uses the same native-edit checkpoint and source

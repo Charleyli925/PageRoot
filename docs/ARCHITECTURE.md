@@ -223,7 +223,8 @@ they do not import application services.
 | Renderer comment working copy, composer and saved-comment edit projection | `app/application/comment-session.js` |
 | Active/background runs, Qoder status, background outcomes, submission lifecycle locks and operation locks | `app/application/run-session.js` |
 | Immutable Version projection and history-view transition | `app/application/version-session.js` |
-| `PROJECT.md` editor, composition fence, autosave and reconciliation | `app/application/project-rules-session.js` |
+| `PROJECT.md` editor working copy, generation, composition fence and save projection facts | `app/application/project-rules-session.js` |
+| `PROJECT.md` Bridge read/write, 700ms autosave, unknown-write reconciliation, close/switch drain and editor-restore host port | `app/application/project-rules-workflow.js`, composed by `WorkspaceController` |
 | Renderer source-history context, pending Patch operations and action intent | `app/application/source-history-session.js` |
 | Pure comment/edit-event/tombstone transition rules | `shared/draft-aggregate.mjs` |
 | Pure source-history validation, cursor transitions and exact Patch replay | `shared/source-history.mjs`, re-exported through `app/domain/source-history.js` |
@@ -386,7 +387,7 @@ unchanged. Script conclusions from an old record never affect current status or
 review routing. Archived outcomes remain terminal and cannot become openable
 candidates through this adapter.
 
-`PROJECT.md` uses debounced autosave and is flushed before project switch or close. One recoverable unsaved comment composer is allowed at a time. Attachment uploads, rule saves and ordinary source writes are finished or surfaced in their owning panel before navigation proceeds.
+`ProjectRulesWorkflow` owns `PROJECT.md`'s debounced autosave and is flushed before project switch or close; its Session retains only the working copy and composition fence. One recoverable unsaved comment composer is allowed at a time. Attachment uploads, rule saves and ordinary source writes are finished or surfaced in their owning panel before navigation proceeds.
 
 Persistent source and Draft failures share the single workspace status-banner
 surface, ordered by safety priority. The source failure owns its export and
