@@ -27,10 +27,11 @@ No user-facing text, display state or Review geometry is added or changed.
 - In the owner-isolated world, each captured host derives a bounded normalized
   sequence of DOM/SVG text whose paint can be established and returns only its
   SHA-256 `renderedTextSha256`; raw text does not cross the owner boundary.
-  Transparent/zero-opacity paint, fully or partially clipped runs, and any
-  CSS/SVG mask are excluded from this strict summary. General mask grammars
-  cannot be proved from computed style alone, so masked text uses the existing
-  raster layer rather than producing a false marker from text with no pixels.
+  Transparent/zero-opacity paint, decoration-only runs, fully or partially
+  clipped runs, and any CSS/SVG mask are excluded from this strict summary.
+  General mask grammars cannot be proved from computed style alone, so masked
+  text uses the existing raster layer rather than producing a false marker from
+  text with no pixels.
   Unresolved SVG paint servers are treated the same way; common
   background-clipped gradient text remains strict only when a nontransparent
   computed gradient stop proves paint. Runs subject to CSS `text-transform`

@@ -522,10 +522,6 @@ export function isolatedSnapshotRectScript(candidate) {
       || backgroundTextPaintIsVisible(style)
       || textShadowIsVisible(style.textShadow, style.color)
       || (
-        style.textDecorationLine !== "none"
-        && colorIsVisible(style.textDecorationColor, style.color)
-      )
-      || (
         strokeWidth > 0
         && colorIsVisible(style.webkitTextStrokeColor, style.color)
       );

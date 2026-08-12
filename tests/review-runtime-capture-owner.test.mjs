@@ -468,6 +468,11 @@ test("isolated visible-text summary excludes transparent paint but keeps a visib
   }), "");
   assert.equal(isolatedVisibleText({
     color: "transparent",
+    textDecorationLine: "underline",
+    textDecorationColor: "rgb(0, 0, 0)",
+  }), "");
+  assert.equal(isolatedVisibleText({
+    color: "transparent",
     textFill: "rgb(0, 0, 255)",
   }), "visible chart label");
   assert.equal(isolatedVisibleText({
