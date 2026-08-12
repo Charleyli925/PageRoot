@@ -6,7 +6,7 @@
 - 产品依据：[固定视觉槽位与编辑态自动原位显示 PRD](INLINE_RUNTIME_VISUALS_PRD.md)
 - 当前生产合同：[Architecture](ARCHITECTURE.md)、[Architecture contract](ARCHITECTURE_CONTRACT.md)、[State ownership](STATE_OWNERSHIP.md)、[Security model](SECURITY_MODEL.md)、[Runtime visual contract](RUNTIME_VISUAL_CONTRACT.md)
 
-> 本文是可审查的串行实施方案，不是开始生产实现、Ready、合并或发布的授权。
+> 本文是可审查的三合并点实施方案，不是开始生产实现、Ready、合并或发布的授权。
 > 在 Phase 0 形成可复现实证并获得 Go 结论前，现行行为保持不变：Edit 脚本禁用且
 > 不拥有运行视觉，Preview 执行作者脚本，Review 独占现有有界截图补充。
 
@@ -21,21 +21,21 @@
 4. 滚动、缩放、DPR、字体、资源延迟和源码 generation 变化时，系统能够准确显示或
    准确隐藏，而不是靠缓存旧图掩盖问题。
 
-因此采用一项可行性阶段和七个串行 PR：
+因此采用三个合并 PR。原先七项工作仍保留为 PR 内部工作流和硬检查点，不再各自形成
+一次合并：
 
-| 阶段 | 交付 | 是否改变用户行为 |
+| 合并点 | 包含的交付 | 是否改变用户行为 |
 | --- | --- | --- |
-| Phase 0 | 独立技术探针与 Go/No-go 报告 | 否，不进入生产路径 |
-| PR-1 | Profile v0.1、静态 Validator 与诊断合同 | 否 |
-| PR-2 | 单运行页 owner、一次性 Session 与最小安全协议 | 否，feature flag 强制关闭 |
-| PR-3 | 仅 `profile-fixed` 的固定槽位原位显示 | 是，但只在内部 flag/canary |
-| PR-4 | Edit 生命周期、源码失效、Selection 与 PageViewContext 收口 | 是，仍在 canary |
-| PR-5 | 机械、窄范围的 `legacy-fixed` 兼容 | 是，可独立关闭 |
-| PR-6 | 精确离线资源映射（有数据且另行授权时） | 条件项，可跳过 |
-| PR-7 | 默认启用决策、规范同步、硬门禁和灰度发布 | 取决于验收结论 |
+| PR-1：可行性与合同 | Phase 0 探针、Go/No-go、Profile v0.1、静态 Validator、诊断与 ADR | 否 |
+| PR-2：完整纵向能力 | 单运行页 owner、Session、安全协议、`profile-fixed` 原位显示、生命周期、Selection、PageViewContext 和完整 Electron 门禁 | 否；feature flag 默认关闭 |
+| PR-3：灰度与启用 | canary 修正、现行合同同步、默认启用决策；`legacy-fixed` 和精确离线资产仅在证据充分时作为独立关闭的条件工作流 | 取决于验收结论 |
 
-Phase 0 的任何 No-go 都意味着停止运行视觉实现，转而只交付 Profile/Validator 和内容
-迁移建议。后续 PR 不得用扩大容差、添加页面特判或恢复截图来“救活”这个方向。
+Phase 0 是 PR-1 的合并前硬门禁，不单独占一次合并。任何 No-go 都意味着停止运行视觉
+实现，PR-1 只保留 Profile/Validator、失败证据和内容迁移建议。后续 PR 不得用扩大
+容差、添加页面特判或恢复截图来“救活”这个方向。
+
+三个 PR 是推荐下限。继续压成两个，会把“默认关闭的完整能力”和“灰度后默认启用”
+放在同一次合并中，失去真实 Electron canary 和安全回滚窗口，因此不建议。
 
 ## 2. 为什么先做可行性门禁
 
@@ -251,40 +251,74 @@ type InlineVisualRuntimeReport = {
 
 ## 8. 串行与并行规则
 
-- Phase 0 必须在任何生产 owner/协议代码之前完成；
-- PR-1 必须先于 PR-2，runtime 只能消费已冻结的 profile/admission 合同；
-- PR-2 必须先于 PR-3，不能由 UI effect 临时创建窗口；
-- PR-3 和 PR-4 串行，先证明静态 generation，再接源码/视口生命周期；
-- PR-5 只能在 `profile-fixed` 真实 Electron 路径稳定后开始；
-- PR-6 是条件项，不得阻塞不依赖远程资源的首发；
-- PR-7 必须基于冻结的 exact head/base 和全量证据；
+- 三次合并保持串行：PR-1 冻结可行性/合同，PR-2 交付默认关闭的完整纵向能力，PR-3
+  才处理灰度和默认启用；
+- PR-1 内，Profile/Validator 与隔离终止、几何裁剪、pointer pass-through 探针可并行；
+  任何生产 owner/协议仍必须等待 Phase 0 Go；
+- PR-2 内，domain/Session、desktop owner/security、renderer overlay/lifecycle、hostile/E2E
+  fixtures 可在冻结 Port/schema 后并行，最后在同一集成 head 汇合；
+- PR-2 不允许只合入“能打开窗口”或“能显示第一帧”的半成品；owner、安全、显示、
+  刷新、Selection、IME、清理和打包门禁必须一起通过，且默认 flag 关闭；
+- PR-3 必须基于 PR-2 的冻结 exact head/base 和真实 Electron canary 证据；
+- `legacy-fixed` 只能在 Profile 路径稳定后进入 PR-3 条件工作流；证据不足就从 V1 删除，
+  不为凑兼容率新增第四个必需 PR；
+- 精确离线资源映射不阻塞首发；没有明确失败数据和独立授权时直接省略；
 - 每个 PR 都必须可独立回滚，不允许跨 PR 临时双写；
-- 发现需要修改上一阶段合同，先回到上一 PR/ADR，不在下游加兼容分支。
+- 每个并行工作流使用独立提交、明确 owner 和测试证据，内部检查点不等于合并点；
+- 发现需要修改上一合并点合同，先更新该合同/ADR，不在下游加兼容分支。
 
 ### 8.1 PRD 决策追踪
 
 | PRD 决策 | 首次冻结/证明阶段 | 持续门禁 |
 | --- | --- | --- |
 | D-01 Source 唯一权威 | PR-1 | exact-byte 与 SourcePatch 回归 |
-| D-02 Edit 脚本禁用 | Phase 0 / PR-2 | capability 与 Electron 安全门禁 |
-| D-03 自动原位显示 | PR-3 | 无点击主路径 E2E |
-| D-04 固定源码槽位 | PR-1 / PR-3 | Validator + geometry admission |
-| D-05 每文档单运行页 | Phase 0 / PR-2 | owner/surface 数量断言 |
-| D-06 零视觉缓存 | PR-2 / PR-4 | 状态机和 teardown 断言 |
-| D-07 不传 DOM/像素 | Phase 0 / PR-2 | 协议 schema/字节 allowlist |
-| D-08 pointer-transparent | Phase 0 / PR-3 | input/IME Electron E2E |
-| D-09 原子大框选择 | PR-3 | Selection/comment E2E |
-| D-10 不支持动态高度 | PR-1 / PR-3 | 负向 geometry fixture |
-| D-11 不按库/版本白名单 | PR-1 / PR-5 | 禁止脚本扫描与 legacy 规则审查 |
-| D-12 fail closed | Phase 0 起所有阶段 | hostile/negative corpus |
-| D-13 Preview 保留完整交互 | PR-3 / PR-4 | Preview 回归和模式切换 |
-| D-14 只用 PageViewContext | PR-4 | context allowlist 与事件禁发 |
-| D-15 自动运行更严格 | Phase 0 / PR-2 | Security Model 和权限矩阵 |
-| D-16 Profile 优先 | PR-1 / PR-5 | tier precedence tests |
-| D-17 失败不持久、不阻塞 | PR-2 / PR-4 | outcome、drain、recovery tests |
-| D-18 可行性先于合同修改 | Phase 0 / PR-7 | Go 记录与串行发布门禁 |
+| D-02 Edit 脚本禁用 | PR-1 探针 / PR-2 | capability 与 Electron 安全门禁 |
+| D-03 自动原位显示 | PR-2 | 无点击主路径 E2E |
+| D-04 固定源码槽位 | PR-1 / PR-2 | Validator + geometry admission |
+| D-05 每文档单运行页 | PR-1 探针 / PR-2 | owner/surface 数量断言 |
+| D-06 零视觉缓存 | PR-2 | 状态机和 teardown 断言 |
+| D-07 不传 DOM/像素 | PR-1 探针 / PR-2 | 协议 schema/字节 allowlist |
+| D-08 pointer-transparent | PR-1 探针 / PR-2 | input/IME Electron E2E |
+| D-09 原子大框选择 | PR-2 | Selection/comment E2E |
+| D-10 不支持动态高度 | PR-1 / PR-2 | 负向 geometry fixture |
+| D-11 不按库/版本白名单 | PR-1 / PR-3 条件工作流 | 禁止脚本扫描与 legacy 规则审查 |
+| D-12 fail closed | PR-1 起所有阶段 | hostile/negative corpus |
+| D-13 Preview 保留完整交互 | PR-2 | Preview 回归和模式切换 |
+| D-14 只用 PageViewContext | PR-2 | context allowlist 与事件禁发 |
+| D-15 自动运行更严格 | PR-1 探针 / PR-2 | Security Model 和权限矩阵 |
+| D-16 Profile 优先 | PR-1 / PR-3 条件工作流 | tier precedence tests |
+| D-17 失败不持久、不阻塞 | PR-2 | outcome、drain、recovery tests |
+| D-18 可行性先于合同修改 | PR-1 / PR-3 | Go 记录与串行发布门禁 |
 
-## 9. Phase 0：技术可行性与 Go/No-go
+### 8.2 PR 内部质量门禁
+
+减少合并次数不减少验收次数。内部工作流只有通过对应门禁后才能进入同一 PR 的下一
+集成检查点：
+
+| 门禁 | 所在 PR | 必须证明 |
+| --- | --- | --- |
+| G-1 可行性 Go | PR-1 | 独立终止、单页多矩形、可信绑定、pointer pass-through、零 DOM/像素传输 |
+| G-2 Profile 合同冻结 | PR-1 | Validator 确定性、诊断、exact-byte、兼容等级 |
+| G-3 Owner 与安全闭包 | PR-2 | 单 owner、私有协议、权限全拒绝、deadline、清理、打包闭包 |
+| G-4 原位显示正确性 | PR-2 | 零错槽、零 mask 泄漏、无页面跳动、原子大框选择 |
+| G-5 生命周期完整性 | PR-2 | source/viewport/context fence、IME、无逐键重建、无 Drain/缓存 |
+| G-6 灰度启用 | PR-3 | canary、性能、安全、隐私、现行合同、exact-SHA 全量门禁 |
+
+PR-2 只有 G-3、G-4、G-5 同时通过才可合并。不能把未通过的工作流以“下一 PR 再补”
+为由留在主干，即使功能默认关闭。
+
+### 8.3 可并行工作流
+
+| PR | 可并行工作流 | 汇合约束 |
+| --- | --- | --- |
+| PR-1 | A Profile/Validator；B 隔离与硬终止探针；C 几何/滚动/input 探针；D hostile fixtures/Go 报告 | A 先冻结候选 schema；B/C 不进入生产入口；最终一个 Go/No-go 结论 |
+| PR-2 | A domain + Session；B desktop owner + security；C overlay + Canvas Port + 生命周期；D Electron/hostile/package tests | 只消费 PR-1 冻结 Port/schema；每条线独立提交；最终同一 exact head 全量集成 |
+| PR-3 | A canary/性能；B 合同/架构门禁；C `legacy-fixed`（条件）；D 离线资产（条件） | C/D 有独立 flag；任一条件线不成熟可直接删除，不影响 Profile 默认启用评审 |
+
+并行工作流可以使用独立 worktree/提交，但不分别开长期合并 PR。必要的代码审查在 Draft
+PR 内按提交或文件责任进行，最终只形成上述三个合并点。
+
+## 9. PR-1 工作流 A：Phase 0 技术可行性与 Go/No-go
 
 ### 9.1 目标
 
@@ -325,7 +359,7 @@ type InlineVisualRuntimeReport = {
 - 不接入 Workbench、preload 稳定 API、打包入口或现有 Review owner；
 - 不提交真实 HTML；必要的现实结构必须重写成最小合成 fixture；
 - 输出原始测量、失败案例和环境信息，不输出业务页面内容；
-- Phase 0 结束后由 Go/No-go PR 明确删除探针或将其转成正式 hostile fixtures；
+- PR-1 合并前明确删除探针或将其转成正式 hostile fixtures；
 - 探针成功不能直接作为生产安全结论，正式 owner 仍需重新实现和测试。
 
 ### 9.5 暂定通过阈值
@@ -371,12 +405,13 @@ CPU、峰值内存、DOM 节点、协议总字节、几何容差和稳定窗口�
 - 只做 Profile/Validator/内容规范化的替代路线；
 - 明确禁止后续绕过条件的 ADR。
 
-## 10. PR-1：Profile v0.1 与静态 Validator
+## 10. PR-1 工作流 B：Profile v0.1 与静态 Validator
 
 ### 10.1 目标
 
-先把“哪些页面有资格运行”变成纯函数、可解释、可版本化的内容合同。PR-1 不创建
-运行页、不改变 Edit UI，也不执行 JavaScript。
+先把“哪些页面有资格运行”变成纯函数、可解释、可版本化的内容合同。本工作流不创建
+生产运行页、不改变 Edit UI，也不执行 JavaScript；PR-1 中只有隔离的 Phase 0 探针
+可以运行合成页面。
 
 ### 10.2 范围
 
@@ -433,7 +468,7 @@ CPU、峰值内存、DOM 节点、协议总字节、几何容差和稳定窗口�
 停止：如果固定槽位不能仅凭源码/Profile 建立候选，回到 Profile 设计，不允许 PR-2
 从运行 DOM 猜候选。
 
-## 11. PR-2：单运行页 Owner 与安全协议
+## 11. PR-2 工作流 A：单运行页 Owner 与安全协议
 
 ### 11.1 目标
 
@@ -496,12 +531,13 @@ type InlineVisualStartOutcome =
 停止：若硬终止依赖杀死主应用进程、需要复用 Review 截图 owner、或一个页面无法承载
 多个槽位，终止路线。
 
-## 12. PR-3：`profile-fixed` 自动原位显示
+## 12. PR-2 工作流 B：`profile-fixed` 自动原位显示
 
 ### 12.1 目标
 
 在内部 flag 下，让 Profile 合规、初始源码 generation 的固定槽位进入 Edit 后自动
-原位可见。此 PR 只解决“第一次打开时准确显示”，不同时接入全部源码刷新逻辑。
+原位可见。本工作流先解决“第一次打开时准确显示”，再与同一 PR 的生命周期工作流
+一起进入 G-5；它不能脱离生命周期工作流单独合并。
 
 ### 12.2 范围
 
@@ -557,7 +593,7 @@ type InlineVisualStartOutcome =
 停止：如果准确显示需要读取 Canvas 像素、复制 SVG、对每类 CSS 写特判或保留旧视觉，
 回到 Phase 0/No-go。
 
-## 13. PR-4：生命周期、源码变化与页面状态
+## 13. PR-2 工作流 C：生命周期、源码变化与页面状态
 
 ### 13.1 目标
 
@@ -625,7 +661,7 @@ authoritative source/context change
 停止：若必须监听任意 runtime DOM 变化持续同步、为无闪烁保留两页、或把运行视觉加入
 DrainCoordinator，则停止扩大功能。
 
-## 14. PR-5：窄 `legacy-fixed` 兼容
+## 14. PR-3 条件工作流 A：窄 `legacy-fixed` 兼容
 
 ### 14.1 前置条件
 
@@ -666,12 +702,13 @@ DrainCoordinator，则停止扩大功能。
 
 验收：兼容集合可以用一页规则表完整描述，关闭 legacy flag 后 Profile 行为完全相同。
 
-## 15. PR-6：精确离线资源映射（条件项）
+## 15. PR-3 条件工作流 B：精确离线资源映射
 
 ### 15.1 决策门槛
 
 只有 canary 数据证明大量已准入固定槽位的唯一失败原因是少数明确远程资源，并获得
-单独产品/安全授权时才实施。否则跳过本 PR，用户通过内嵌或源码相对资源获得支持。
+单独产品/安全授权时才实施。否则从 PR-3 删除本工作流，用户通过内嵌或源码相对资源
+获得支持；它不成为 V1 的第四个必需合并点。
 
 ### 15.2 允许模型
 
@@ -701,7 +738,7 @@ DrainCoordinator，则停止扩大功能。
 
 验收：映射集合有限、可审计、可删除，不产生通用依赖解析器或缓存系统。
 
-## 16. PR-7：默认启用、合同同步与发布门禁
+## 16. PR-3：灰度、默认启用与合同同步
 
 ### 16.1 目标
 
@@ -735,7 +772,7 @@ DrainCoordinator，则停止扩大功能。
 
 ### 16.4 默认开启门槛
 
-- Phase 0 和 PR-1 至 PR-4 的所有不变量持续成立；
+- PR-1 和 PR-2 的所有不变量持续成立；
 - Profile canary 错槽、错裁、mask 泄漏和 stale 可见为 0；
 - Selection、IME、评论、SourcePatch、save、switch、close 回归为 0；
 - P95 ready、CPU、内存、重建和清理达到冻结预算；
@@ -842,16 +879,16 @@ Phase 0 必须把 TBD 转为带证据的常量；PR 不得各自声明不同预�
 | --- | --- | --- |
 | 作者脚本冻结应用 | Phase 0 | 独立故障域+硬终止；失败即 No-go |
 | 单页无法做准确多矩形显示 | Phase 0 | 不转每图页/截图；失败即 No-go |
-| runtime/Edit 字体布局漂移 | Phase 0/PR-3 | 固定策略+稳定窗口；不一致隐藏 |
-| 生命周期重建风暴 | PR-4 | 权威事件表+速率上限+suspend |
+| runtime/Edit 字体布局漂移 | PR-1 探针/PR-2 | 固定策略+稳定窗口；不一致隐藏 |
+| 生命周期重建风暴 | PR-2 | 权威事件表+速率上限+suspend |
 | 为无闪烁引入旧视觉 | 所有 PR | 状态机硬禁 stale-visible |
-| legacy 规则无限增长 | PR-5 | Profile 优先、机械规则、独立 flag |
-| 外部资源驱动开放网络 | PR-6 | 仅 exact URL+Hash 离线映射；可跳过 |
-| 点击体验让人误解可编辑图内元素 | PR-3 | 原子大框、只读说明、Preview 交互 |
-| 运行高度推动正文 | PR-3 | 几何 admission 拒绝，永不投影高度 |
-| 新 owner 侵入 Drain | PR-2/PR-4 | disposable outcome，无 durable state |
+| legacy 规则无限增长 | PR-3 条件工作流 | Profile 优先、机械规则、独立 flag |
+| 外部资源驱动开放网络 | PR-3 条件工作流 | 仅 exact URL+Hash 离线映射；可省略 |
+| 点击体验让人误解可编辑图内元素 | PR-2 | 原子大框、只读说明、Preview 交互 |
+| 运行高度推动正文 | PR-2 | 几何 admission 拒绝，永不投影高度 |
+| 新 owner 侵入 Drain | PR-2 | disposable outcome，无 durable state |
 | 运行内容进入日志/遥测 | PR-1/PR-2 | 稳定 code、allowlist、privacy tests |
-| 开发成功但打包失败 | PR-2/PR-7 | package closure + fresh-user Electron gate |
+| 开发成功但打包失败 | PR-2/PR-3 | package closure + fresh-user Electron gate |
 
 ## 21. 全局停止条件
 
@@ -940,7 +977,7 @@ Phase 0 必须把 TBD 转为带证据的常量；PR 不得各自声明不同预�
 - 单运行页、固定槽位、自动原位、pointer-transparent 和无缓存有明确 owner；
 - 裁剪准确、选择大框、源码刷新频率和生命周期问题都有机械边界；
 - Phase 0 能在不碰生产路径的前提下给出 Go/No-go；
-- 七个 PR 均可独立评审、回滚和停止；
+- 三个合并 PR 均可独立评审、回滚和停止，内部质量门禁没有减少；
 - 真实用户文件不进入仓库；
 - 当前生产合同没有被本规划文档提前改写；
 - 后续实现、Ready、合并和发布仍分别等待明确授权。
