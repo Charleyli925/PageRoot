@@ -13,7 +13,7 @@ const DEFAULT_SETTLE_SECONDS = 30;
 const DEFAULT_TIMEOUT_SECONDS = 15 * 60;
 const DEFAULT_POLL_SECONDS = 15;
 const MAX_REST_PAGES = 20;
-const POLICY_VERSION = "2026-08-09.1";
+const POLICY_VERSION = "2026-08-12.1";
 const PRIORITY_BADGE_PATTERN = /\bP([0-3])\s+Badge\b/giu;
 const PRIORITY_LINE_PATTERN = /(?:^|\r?\n)\s*(?:[-*]\s*)?(?:\*\*)?\[?P([0-3])\]?(?:\*\*)?\s*[:：-]/gimu;
 const REVIEWED_COMMIT_PATTERN = /\*\*Reviewed commit:\*\*\s*`([0-9a-f]{10,40})`/iu;
@@ -236,11 +236,27 @@ function completionCommentSignal(comment, expectedHeadSha, readyAt) {
   });
 }
 
+function completionReactionSignal(reaction, readyAt) {
+  const createdAt = timestamp(reaction?.created_at || reaction?.createdAt);
+  if (
+    !isCodexActor(actorLogin(reaction))
+    || reaction?.content !== "+1"
+    || !inOpenInterval(createdAt, readyAt)
+  ) return null;
+  return Object.freeze({
+    kind: "codex_clean_reaction",
+    id: reaction?.id || reaction?.databaseId || null,
+    at: createdAt,
+    reviewState: "COMMENTED",
+  });
+}
+
 // This is intentionally shared with CI Health so that the reported review
 // latency uses the exact same evidence contract that controls release-gate.
 export function finalCodexCompletion({
   reviews = [],
   issueComments = [],
+  issueReactions = [],
   expectedHeadSha,
   readyAt,
 } = {}) {
@@ -250,6 +266,7 @@ export function finalCodexCompletion({
   const completions = [
     ...(reviews || []).map((review) => completionSignal(review, expectedHead, readyAtMs)).filter(Boolean),
     ...(issueComments || []).map((comment) => completionCommentSignal(comment, expectedHead, readyAtMs)).filter(Boolean),
+    ...(issueReactions || []).map((reaction) => completionReactionSignal(reaction, readyAtMs)).filter(Boolean),
   ].sort((left, right) => right.at - left.at);
   return completions[0] || null;
 }
@@ -270,6 +287,7 @@ function policyResult(identity, status, reason, fields = {}) {
     status,
     reason,
     reviewCompletedAt: null,
+    reviewCompletionKind: null,
     reviewLatencySeconds: null,
     readyAt: null,
     blockingFindings: [],
@@ -283,6 +301,7 @@ export function evaluateReviewPolicy({
   expectedBaseSha,
   pullRequest,
   issueComments = [],
+  issueReactions = [],
   timelineEvents = [],
   reviews = [],
   reviewThreads = [],
@@ -333,6 +352,7 @@ export function evaluateReviewPolicy({
   const completion = finalCodexCompletion({
     reviews,
     issueComments,
+    issueReactions,
     expectedHeadSha: expectedHead,
     readyAt: readyAtMs,
   });
@@ -341,6 +361,7 @@ export function evaluateReviewPolicy({
     blockingFindings,
     nonBlockingFindings,
     reviewCompletedAt: completion ? new Date(completion.at).toISOString() : null,
+    reviewCompletionKind: completion?.kind || null,
     reviewLatencySeconds: completion ? Math.max(0, Math.round((completion.at - readyAtMs) / 1000)) : null,
   };
   if (blockingFindings.length > 0) {
@@ -372,6 +393,7 @@ export function summarizeReviewPolicy(result) {
     currentBaseSha: result.currentBaseSha,
     readyAt: result.readyAt,
     reviewCompletedAt: result.reviewCompletedAt,
+    reviewCompletionKind: result.reviewCompletionKind,
     reviewLatencySeconds: result.reviewLatencySeconds,
     blockingFindings: result.blockingFindings,
     nonBlockingFindings: result.nonBlockingFindings,
@@ -546,14 +568,15 @@ export async function collectReviewPolicySnapshot(options, token) {
   const [owner, name] = options.repository.split("/");
   const repositoryPath = [owner, name].map(encodeURIComponent).join("/");
   const basePath = `/repos/${repositoryPath}`;
-  const [pullRequest, timelineEvents, reviews, issueComments, reviewThreads] = await Promise.all([
+  const [pullRequest, timelineEvents, reviews, issueComments, issueReactions, reviewThreads] = await Promise.all([
     githubJson(`${apiBase}${basePath}/pulls/${options.pullRequest}`, token),
     restPages(apiBase, `${basePath}/issues/${options.pullRequest}/events`, token),
     restPages(apiBase, `${basePath}/pulls/${options.pullRequest}/reviews`, token),
     collectIssueComments({ graphqlUrl, owner, name, pullRequest: options.pullRequest, token }),
+    restPages(apiBase, `${basePath}/issues/${options.pullRequest}/reactions`, token),
     collectReviewThreads({ graphqlUrl, owner, name, pullRequest: options.pullRequest, token }),
   ]);
-  return { pullRequest, timelineEvents, reviews, issueComments, reviewThreads };
+  return { pullRequest, timelineEvents, reviews, issueComments, issueReactions, reviewThreads };
 }
 
 function delay(milliseconds) {
@@ -579,7 +602,7 @@ async function appendSummary(result) {
     `- Expected/current head: \`${result.expectedHeadSha}\` / \`${result.currentHeadSha || "unavailable"}\``,
     `- Expected/current base: \`${result.expectedBaseSha}\` / \`${result.currentBaseSha || "unavailable"}\``,
     `- Ready transition: ${result.readyAt || "missing"}`,
-    `- Final Codex completion: ${result.reviewCompletedAt || "not observed"}`,
+    `- Final Codex completion: ${result.reviewCompletedAt || "not observed"} (${result.reviewCompletionKind || "none"})`,
     `- Review latency: ${result.reviewLatencySeconds ?? "n/a"} seconds`,
     `- Blocking P0/P1 or human findings: ${result.blockingFindings.length}`,
     `- Deferred P2/P3/unclassified findings: ${result.nonBlockingFindings.length}`,
@@ -595,6 +618,7 @@ async function persistResult(result, options) {
     reason: result.reason,
     artifact_path: destination,
     review_completed_at: result.reviewCompletedAt || "",
+    review_completion_kind: result.reviewCompletionKind || "",
     review_latency_seconds: result.reviewLatencySeconds ?? "",
     blocking_findings: result.blockingFindings.length,
     non_blocking_findings: result.nonBlockingFindings.length,

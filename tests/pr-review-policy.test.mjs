@@ -8,6 +8,7 @@ import {
   classifyReviewPriority,
   classifyReviewState,
   classifyReviewThread,
+  collectReviewPolicySnapshot,
   evaluateReviewPolicy,
   reviewedCommitPrefix,
   summarizeReviewPolicy,
@@ -42,6 +43,20 @@ function codexReview({
   };
 }
 
+function codexReaction({
+  createdAt = completedAt,
+  content = "+1",
+  actor = "chatgpt-codex-connector[bot]",
+  id = 30,
+} = {}) {
+  return {
+    id,
+    user: { login: actor },
+    content,
+    created_at: createdAt,
+  };
+}
+
 function thread({ priority = "P2", resolved = false, outdated = false, actor = "chatgpt-codex-connector", id = 20 } = {}) {
   return {
     isResolved: resolved,
@@ -58,6 +73,7 @@ function evaluate(overrides = {}) {
     timelineEvents: [{ id: 1, event: "ready_for_review", created_at: readyAt }],
     reviews: [codexReview()],
     issueComments: [],
+    issueReactions: [],
     reviewThreads: [],
     now: new Date("2026-08-09T04:01:31.000Z"),
     settleSeconds: 30,
@@ -106,6 +122,40 @@ test("the final Ready review on the exact head passes after a 30-second settle w
   assert.equal(result.reason, "final_review_policy_passed");
   assert.equal(result.reviewLatencySeconds, 60);
   assert.deepEqual(result.blockingFindings, []);
+});
+
+test("a post-Ready Codex thumbs-up reaction is an accepted clean completion", () => {
+  const result = evaluate({
+    reviews: [],
+    issueReactions: [codexReaction()],
+  });
+  assert.equal(result.status, "passed");
+  assert.equal(result.reviewCompletionKind, "codex_clean_reaction");
+  assert.equal(result.reviewLatencySeconds, 60);
+});
+
+test("only the Codex +1 created after the latest Ready transition can complete review", () => {
+  for (const reaction of [
+    codexReaction({ createdAt: "2026-08-09T03:59:59.000Z" }),
+    codexReaction({ actor: "maintainer" }),
+    codexReaction({ content: "heart" }),
+  ]) {
+    const result = evaluate({ reviews: [], issueReactions: [reaction] });
+    assert.equal(result.status, "waiting");
+    assert.equal(result.reason, "final_review_in_progress");
+  }
+
+  const result = evaluate({
+    reviews: [],
+    issueReactions: [codexReaction()],
+    timelineEvents: [
+      { id: 1, event: "ready_for_review", created_at: readyAt },
+      { id: 2, event: "ready_for_review", created_at: "2026-08-09T04:02:00.000Z" },
+    ],
+    now: new Date("2026-08-09T04:03:00.000Z"),
+  });
+  assert.equal(result.status, "waiting");
+  assert.equal(result.reason, "final_review_in_progress");
 });
 
 test("no Draft marker or Draft review is required", () => {
@@ -212,11 +262,58 @@ test("an immediate revalidation can use zero settle seconds", () => {
   assert.equal(result.status, "passed");
 });
 
-test("review-policy artifact carries machine-readable blocking and deferred findings", async () => {
+test("review-policy snapshot reads root Pull Request reactions from GitHub", async () => {
+  const originalFetch = globalThis.fetch;
+  const requestedUrls = [];
+  globalThis.fetch = async (url, init = {}) => {
+    const requestUrl = String(url);
+    requestedUrls.push(requestUrl);
+    if (requestUrl.endsWith("/graphql")) {
+      const query = JSON.parse(String(init.body || "{}")).query || "";
+      const connectionName = query.includes("reviewThreads") ? "reviewThreads" : "comments";
+      return new Response(JSON.stringify({
+        data: {
+          repository: {
+            pullRequest: {
+              [connectionName]: {
+                nodes: [],
+                pageInfo: { hasNextPage: false, endCursor: null },
+              },
+            },
+          },
+        },
+      }), { status: 200 });
+    }
+    if (new URL(requestUrl).pathname.endsWith("/pulls/158")) {
+      return new Response(JSON.stringify(pullRequest()), { status: 200 });
+    }
+    const entries = requestUrl.includes("/issues/158/reactions?")
+      ? [codexReaction()]
+      : [];
+    return new Response(JSON.stringify(entries), { status: 200 });
+  };
+  try {
+    const snapshot = await collectReviewPolicySnapshot({
+      repository: "Charleyli925/PageRoot",
+      pullRequest: 158,
+    }, "test-token");
+    assert.equal(snapshot.issueReactions.length, 1);
+    assert.equal(snapshot.issueReactions[0].content, "+1");
+    assert.ok(requestedUrls.some((url) => url.includes("/issues/158/reactions?per_page=100&page=1")));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("review-policy artifact carries machine-readable completion and findings", async () => {
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), "pageroot-review-policy-"));
   let destination = null;
   try {
-    const result = evaluate({ reviewThreads: [thread({ priority: "P2" })] });
+    const result = evaluate({
+      reviews: [],
+      issueReactions: [codexReaction()],
+      reviewThreads: [thread({ priority: "P2" })],
+    });
     const relative = path.relative(
       path.resolve(path.dirname(new URL("../scripts/check-pr-review-policy.mjs", import.meta.url).pathname), ".."),
       path.join(tempRoot, "review-policy.json"),
@@ -224,8 +321,9 @@ test("review-policy artifact carries machine-readable blocking and deferred find
     await assert.rejects(() => writeReviewPolicyArtifact(result, relative), /inside the repository/u);
     destination = await writeReviewPolicyArtifact(result, "output/review-policy/test-policy.json");
     const artifact = JSON.parse(await readFile(destination, "utf8"));
-    assert.equal(artifact.policyVersion, "2026-08-09.1");
+    assert.equal(artifact.policyVersion, "2026-08-12.1");
     assert.equal(artifact.status, "passed");
+    assert.equal(artifact.reviewCompletionKind, "codex_clean_reaction");
     assert.equal(artifact.nonBlockingFindings[0].priority, "P2");
   } finally {
     if (destination) await rm(destination, { force: true });

@@ -261,6 +261,17 @@ test("CI health accepts only exact-final-head Codex review evidence", () => {
     summarizeCandidateFlow({ pullRequests: [pullRequest] }).reviewMinutesP50,
     3,
   );
+
+  delete pullRequest.issueComments;
+  pullRequest.issueReactions = [{
+    user: { login: "chatgpt-codex-connector[bot]" },
+    content: "+1",
+    created_at: "2026-08-09T10:04:00.000Z",
+  }];
+  assert.equal(
+    summarizeCandidateFlow({ pullRequests: [pullRequest] }).reviewMinutesP50,
+    4,
+  );
 });
 
 test("CI health binds gate and test completion to the final promoted SHA", () => {

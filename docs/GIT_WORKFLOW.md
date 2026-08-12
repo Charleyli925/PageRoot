@@ -92,9 +92,11 @@ alone starts nothing. Batch implementation and accepted P0/P1 corrections while
 Draft. When the intended head is frozen, update it onto current `origin/main`
 and mark it Ready once. That single `ready_for_review` transition starts
 `review-policy` and the final Codex pass; do not post a Draft marker or another
-review command while it runs. A substantive exact-commit Codex review or
-immutable clean completion after Ready, a 30-second settle window and continuous
-live head/base validation are required. Active P0/P1 findings and P0/P1
+review command while it runs. A substantive exact-commit Codex review, an
+immutable clean exact-commit comment or a Codex Bot `+1` after Ready, a
+30-second settle window and continuous live head/base validation are required.
+The reaction is accepted only from Codex on the latest frozen Ready pair; older
+or human reactions are ignored. Active P0/P1 findings and P0/P1
 `CHANGES_REQUESTED` reviews block regardless of reviewer; P2/P3/unclassified findings become review debt and
 are triaged in regular maintenance work. Deterministic dependency, source,
 security and release checks remain hard gates regardless of review priority.

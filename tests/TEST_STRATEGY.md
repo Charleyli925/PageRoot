@@ -9,7 +9,7 @@
 | `npm run gate:edit` | 一次局部修改后 | 只运行影响映射命中的 Node 文件；必要时 typecheck | 快速发现局部逻辑错误，不启动浏览器或 Electron |
 | `npm run gate:task` | 一个开发任务完成时 | 静态检查、受影响 Node 文件，以及相关 Browser/Electron/AI 冒烟 | 在较短时间内证明生产链路已经接通 |
 | PR `pr-feedback` | `opened/synchronize/reopened` | 按影响映射选择 Node/编译检查 | 普通推送无论 Draft/Ready 都不重复消费完整矩阵；仅切回 Draft 不产生 Feedback |
-| `review-policy` | 最终 Tree 从 Draft 转为 Ready，由 Ready 唯一触发最终审阅 | 实时 head/base、post-Ready exact-commit Codex review 或不可变 clean comment、30 秒 settle window、活动非 outdated P0/P1 线程和 P0/P1 `CHANGES_REQUESTED` | 旧 head/base、未结束 review、P0/P1 阻断时不能通过；P2/P3/unclassified 写为债务而不阻断 |
+| `review-policy` | 最终 Tree 从 Draft 转为 Ready，由 Ready 唯一触发最终审阅 | 实时 head/base、post-Ready exact-commit Codex review、不可变 clean comment 或 Codex Bot root `+1`、30 秒 settle window、活动非 outdated P0/P1 线程和 P0/P1 `CHANGES_REQUESTED` | 旧 head/base、旧轮次/真人/非 `+1` reaction、未结束 review、P0/P1 阻断时不能通过；P2/P3/unclassified 写为债务而不阻断 |
 | `Review Gate Recovery` | Codex 精确提交的 review/clean comment 在 `review-policy` 超时后到达 | trusted default-branch code 重验 live Ready head/base、当前 review policy、原 run timeout artifact、所有非 review job 结果 | 仅对原 run 调用 failed-job rerun；测试失败、P0/P1、Draft/closed、SHA/base 改变或 artifact 不符全部 fail closed |
 | `baseline-policy` | 分支策略通过，与 review-policy 并行 | 全局依赖 advisory policy 与 packaged-runtime closure | 基线红时不启动 Linux build、Browser 或 macOS Electron runner |
 | 一次性晋升 `release-gate` | review、baseline、完整测试和相关 dry run 都完成的最终 PR Tree | 全量 Node、三分片完整 Browser、独立 Native Electron、独立确定性 AI 闭环、真实 HTML 发现式门禁、即时 review revalidation 与 Tree Hash 凭证 | 每个最终候选只跑一次；后续新 SHA 必须重新 Draft 后 Ready |
@@ -39,8 +39,10 @@ PR 必须从 Draft 开始。普通推送由独立的 `PR Feedback` workflow 处�
 完整通过。只切回 Draft 不触发 Feedback。冻结 head 并更新到当前 base 后，
 直接 Ready 一次；无需再用完整 head/base SHA marker 在 Draft 请求第二轮审阅。
 `review-policy` 只接受 Ready 后携带当前完整 `commit_id` 和匹配
-`Reviewed commit` marker 的 Codex review，或不可编辑的 exact-commit clean
-Codex comment。它在每轮轮询中重验 live head/base，完成后等待 30 秒，再检查
+`Reviewed commit` marker 的 Codex review、不可编辑的 exact-commit clean
+Codex comment，或最新 Ready 后由 `chatgpt-codex-connector[bot]` 加在 PR 根节点的
+`+1`。reaction 没有 SHA 字段，因此只通过最新 Ready 与持续重验的冻结 head/base
+绑定候选；旧轮次、真人和其他 reaction 都忽略。它在每轮轮询中重验 live head/base，完成后等待 30 秒，再检查
 未解决且未 outdated 的 P0/P1 线程。只有明确标为 P0/P1 的 `CHANGES_REQUESTED` 必须阻断；
 P2/P3/unclassified finding 则写入 review debt，不应为了清理它们额外生成
 候选 SHA。空 review、错误 commit、普通讨论文本和早于 Ready 的信号不参与判定。
