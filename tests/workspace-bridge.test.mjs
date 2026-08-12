@@ -1083,7 +1083,14 @@ test("AI readOrder excludes the full audit archive and compacts long module quot
   assert.match(submitted.body.handoffMessage, /中的单轮任务/);
   assert.match(submitted.body.handoffMessage, /最终化（finalizer）命令/);
 
-  const [changeRequest, annotations, inputManifest, prompt, aiRules] =
+  const [
+    changeRequest,
+    annotations,
+    inputManifest,
+    prompt,
+    aiRules,
+    editChartSpecProtocol,
+  ] =
     await Promise.all([
       readFile(join(submitted.body.requestPath, "change-request.json"), "utf8").then(JSON.parse),
       readFile(
@@ -1093,6 +1100,15 @@ test("AI readOrder excludes the full audit archive and compacts long module quot
       readFile(join(submitted.body.requestPath, "input-manifest.json"), "utf8").then(JSON.parse),
       readFile(join(submitted.body.requestPath, "PROMPT.md"), "utf8"),
       readFile(join(submitted.body.requestPath, "input", "AI_RULES.md"), "utf8"),
+      readFile(
+        join(
+          submitted.body.requestPath,
+          "input",
+          "references",
+          "EDIT_CHART_SPEC_V0.1.md",
+        ),
+        "utf8",
+      ),
     ]);
 
   assert.equal(
@@ -1107,6 +1123,17 @@ test("AI readOrder excludes the full audit archive and compacts long module quot
   )));
   assert.equal(
     inputManifest.readOrder.includes("input/annotations/records.json"),
+    false,
+  );
+  assert.ok(inputManifest.files.some((file) => (
+    file.path === "input/references/EDIT_CHART_SPEC_V0.1.md"
+    && file.role === "reference"
+    && file.mediaType === "text/markdown"
+  )));
+  assert.equal(
+    inputManifest.readOrder.includes(
+      "input/references/EDIT_CHART_SPEC_V0.1.md",
+    ),
     false,
   );
   assert.equal(
@@ -1131,6 +1158,17 @@ test("AI readOrder excludes the full audit archive and compacts long module quot
     /input\/base\/index\.html 只是冻结输入的固定存储名，不代表用户文件名/,
   );
   assert.match(prompt, /不要读取未列入 readOrder 的审计归档/);
+  assert.match(prompt, /编辑态图表兼容（条件执行）/u);
+  assert.match(prompt, /本轮与图表无关时，不读取协议/u);
+  assert.match(prompt, /不得改动原文案、数字、数据、顺序、颜色/u);
+  assert.ok(prompt.includes(join(
+    submitted.body.requestPath,
+    "input",
+    "references",
+    "EDIT_CHART_SPEC_V0.1.md",
+  )));
+  assert.doesNotMatch(prompt, /"mode":\s*"category"/u);
+  assert.doesNotMatch(prompt, /<template id=/u);
   assert.match(
     prompt,
     /status=cancelled.*立即停止，不要重试，也不要改写到其他路径/s,
@@ -1157,7 +1195,15 @@ test("AI readOrder excludes the full audit archive and compacts long module quot
     /本轮有效要求由 change-request\.json 中的冻结要求，以及当前 Attempt 的 USER_SUPPLEMENT\.json/,
   );
   assert.match(aiRules, /^# PageRoot 通用执行规则$/m);
-  assert.match(aiRules, /files 中未列入 readOrder 的条目只用于审计，不得读取/);
+  assert.match(
+    aiRules,
+    /PROMPT\.md 明确命名的冻结条件协议.*条件成立时读取/u,
+  );
+  assert.match(editChartSpecProtocol, /^# PageRoot Chart Spec 生成协议 v0\.1$/mu);
+  assert.match(editChartSpecProtocol, /data-report-chart-slot="cartesian-v0\.1"/u);
+  assert.match(editChartSpecProtocol, /本轮与图表无关：不修改/u);
+  assert.match(editChartSpecProtocol, /不支持或不确定.*跳过/u);
+  assert.match(editChartSpecProtocol, /原 Preview 的文案、数据、颜色/u);
 });
 
 test("historical direct-edit targets never block a resolved Request", async (t) => {

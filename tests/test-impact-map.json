@@ -883,6 +883,16 @@
       ]
     },
     {
+      "id": "bridge-edit-chart-protocol",
+      "patterns": ["^scripts/edit-chart-spec-protocol-v0\\.1\\.md$"],
+      "suites": ["ai-smoke"],
+      "nodeTests": [
+        "tests/desktop-package.test.mjs",
+        "tests/edit-chart-source-contract.test.mjs",
+        "tests/workspace-bridge.test.mjs"
+      ]
+    },
+    {
       "id": "bridge-test-harness",
       "patterns": [
         "^tests/(?:bridge-test-environment\\.test|helpers/(?:bridge-test-environment|ai-attempt-fixture))\\.mjs$"

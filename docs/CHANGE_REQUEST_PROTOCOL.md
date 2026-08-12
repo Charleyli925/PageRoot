@@ -347,10 +347,12 @@ Input manifest 同时包含完整冻结 Hash 清单 `files` 和 AI 执行读取�
 5. `input/base/index.html`
 6. `input/annotations/records.json`（完整审计归档）
 7. 评论附件 `input/attachments/...`（存在时逐个列出，角色为 `reference`）
-8. 其他明确列出的 references
-每项包含相对路径、角色、媒体类型、字节数和 SHA-256。`readOrder` 默认依次只读 PROMPT、AI_RULES、change-request、PROJECT、base HTML 和评论附件；不包含 `input/annotations/records.json`。AI 只能读取 `readOrder` 声明的执行输入，不扫描 files 中仅用于审计的条目、其他 Request、Version 或项目目录。
+8. 冻结条件协议 `input/references/EDIT_CHART_SPEC_V0.1.md`（角色为 `reference`）
+9. 其他明确列出的 references
 
-`input-manifest.json` 只描述冻结的原始输入。当前 Attempt 的 `USER_SUPPLEMENT.json` 是唯一允许在冻结后额外读取的动态执行记录；它不回写 manifest，也不能由内部 AI 直接编辑。
+每项包含相对路径、角色、媒体类型、字节数和 SHA-256。`readOrder` 默认依次只读 PROMPT、AI_RULES、change-request、PROJECT、base HTML 和评论附件；不包含 `input/annotations/records.json` 或条件图表协议。AI 必须读取 `readOrder` 声明的执行输入，不扫描 files 中仅用于审计的条目、其他 Request、Version 或项目目录。只有 `PROMPT.md` 明确命名的冻结条件协议，才能在 Prompt 所列条件成立时按需读取；条件不成立时不读取。
+
+`input-manifest.json` 只描述冻结的原始输入。当前 Attempt 的 `USER_SUPPLEMENT.json` 仍是唯一允许在冻结后产生的动态执行记录；它不回写 manifest，也不能由内部 AI 直接编辑。条件图表协议不是动态补充：它在 Request 创建时已冻结、已计入 manifest Hash，只是默认不占用 AI 上下文。
 
 ## 8. Prompt
 
@@ -360,13 +362,14 @@ Prompt 必须是当前 Attempt 的精简入口，至少包含：
 - 本机 Request 与 Attempt 绝对路径。
 - Request、Attempt、项目、文档与候选 Version 身份。
 - 读取顺序。
+- 条件图表协议的精确路径，以及“首次补齐、仅维护受影响图表、无关任务不读不改”的简短条件；完整字段和示例不内联进 Prompt。
 - 评论、TargetRef 与附件清单的读取要求；不得只读正文而忽略图片或文件。
 - 每个附件的 Request 管理本机绝对路径和相对回退路径；明确禁止追踪外部原始文件。
 - 唯一 output 路径，以及由 PageRoot 已计算的原用户文件名、文件版本号和固定输出文件名。
 - 完整 finalizer 命令。
 - “完成全部写入后最后执行 finalizer”的明确要求。
 - finalizer 返回 `status=cancelled` 时立即停止、不重试、也不改写到其他路径的明确要求。
-- 不得修改冻结输入、不得扫描其他任务；`preserveOutsideTargets=true` 是默认边界，只有已经通过 helper 记录的用户补充可以明确扩大本轮范围。
+- 不得修改冻结输入、不得扫描其他任务；`preserveOutsideTargets=true` 是默认边界。除已通过 helper 记录的用户补充外，只允许 Prompt 明确列出的首次 Chart Spec 补齐窄例外；它只能新增兼容属性和 Spec template，不授权任何其他全页修改。
 - 对话补充 helper 的完整命令、追加式 `add / amend / retract` 规则，以及“记录成功后才可执行”的停止条件。
 - `input/PROJECT.md` 只读；长期项目规则不得在本轮任务中修改。
 

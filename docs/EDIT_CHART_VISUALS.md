@@ -115,11 +115,25 @@ PageRoot 固定并打包 ECharts 6.1.0。作者页面引用 5.x、6.x、CDN 版�
 都不会在 Edit 中运行，也不会改变本功能的渲染结果。升级 PageRoot 所有的
 版本必须单独评审 SVG 输出、视觉差异、许可、包体和完整门禁。
 
-已有的任意脚本页面不会自动兼容：
+已有的任意脚本页面在首次打开时不会自动猜测或执行脚本：
 
-- 能表达为上述类型的图表，需要生成端同时输出 Chart Spec；
+- 能表达为上述类型的图表，需要生成端或后续 AI 候选版本同时输出 Chart Spec；
 - 脚本临时拼出的自定义 DOM/SVG 信息图，应由生成端直接输出静态 HTML/SVG；
 - 需要交互、动画或完整作者逻辑的页面继续在 Preview 中使用。
+
+每个 AI Request 冻结一份详细的 Chart Spec 生成协议，但不把它放入默认
+`readOrder`。精简 Prompt 只在两类情况授权读取：
+
+- 整份冻结 HTML 尚无 `data-report-chart-slot`，但存在由 JavaScript/ECharts
+  填充的源码空 `div` 图表时，作为首次补齐扫描整份 HTML；
+- 已有 Spec 的文档中，本轮确实新增、修改或删除某个图表时，只同步
+  该图表。
+
+若本轮与图表无关，AI 不读协议，也不触碰图表宿主和 Spec。首次补齐是
+仅限兼容属性与 Spec template 的窄范围例外；不得改动原文案、数字、数据、
+颜色、样式、布局、脚本、ECharts option、交互或 Preview 效果。不支持、不确定或无法在
+不改变 Preview 的前提下补齐的图表必须跳过。这是 AI 作者指令，不是新的候选
+输出硬校验；最终编辑态是否渲染仍由已有封闭校验器决定，无效声明静默跳过。
 
 对 4 份用户提供 HTML 的本地只读核对结果是：它们当前都没有 Chart Spec，
 所以本能力不会猜测或执行其中的脚本。源码中已经存在的 HTML/SVG 信息图继续按
@@ -264,6 +278,8 @@ Tab 或评论代码、启用默认行为。
 范围：
 
 - 在同一 Canvas generation 内发现、预渲染和一次性挂载全部合格图表；
+- 在每个 Request 中冻结条件 Chart Spec 协议，并用精简 Prompt 区分首次补齐、
+  受影响图表维护和无关任务；
 - Shadow DOM 导入端逐节点复验，保持 pointer/selection/ARIA 隔离；
 - 接入现有 iframe teardown，不增加新的 Session、缓存或 observer；
 - 覆盖初始激活 Tab、初始隐藏 Tab、往返切换、源换代和静默失败；

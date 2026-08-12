@@ -329,7 +329,10 @@ function validateLifecycleBundle(bundle) {
     [
       filePaths,
       inputManifest.files
-        .filter((file) => file.role !== "annotations")
+        .filter((file) => (
+          file.role !== "annotations"
+          && file.path !== "input/references/EDIT_CHART_SPEC_V0.1.md"
+        ))
         .map((file) => file.path),
     ].some((expected) => (
       JSON.stringify(inputManifest.readOrder) === JSON.stringify(expected)

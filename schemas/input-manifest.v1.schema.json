@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://html-change.local/schemas/input-manifest.v1.schema.json",
   "title": "HTML AI frozen input manifest v1",
-  "description": "The complete content-addressed Request inventory plus the ordered subset an internal-AI Attempt must read. Inventory-only audit files stay frozen and hashed without consuming AI context.",
+  "description": "The complete content-addressed Request inventory plus the ordered mandatory subset an internal-AI Attempt must read. Inventory-only audit files and explicitly prompted conditional references stay frozen and hashed without consuming default AI context.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -39,7 +39,7 @@
       "$ref": "#/$defs/timestamp"
     },
     "readOrder": {
-      "description": "The ordered execution inputs the internal AI must read. Every path is also present in files; inventory-only audit files are intentionally omitted.",
+      "description": "The ordered mandatory execution inputs the internal AI must read. Every path is also present in files; inventory-only audit files and explicitly prompted conditional references are intentionally omitted.",
       "type": "array",
       "minItems": 5,
       "uniqueItems": true,
@@ -48,7 +48,7 @@
       }
     },
     "files": {
-      "description": "The complete frozen and content-addressed Request inventory, including audit files that are not execution inputs.",
+      "description": "The complete frozen and content-addressed Request inventory, including audit files and conditional references that are not mandatory execution inputs.",
       "type": "array",
       "minItems": 6,
       "uniqueItems": true,

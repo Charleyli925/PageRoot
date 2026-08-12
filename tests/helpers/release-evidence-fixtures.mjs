@@ -52,6 +52,7 @@ const APP_SOURCE_FILES = [
 
 const BRIDGE_FILES = [
   "workspace-bridge.mjs",
+  "edit-chart-spec-protocol-v0.1.md",
   "finalize-attempt.mjs",
   "lifecycle-core.mjs",
   "user-supplement-core.mjs",

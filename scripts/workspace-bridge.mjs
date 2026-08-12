@@ -118,6 +118,11 @@ const FINALIZER_PATH = fileURLToPath(
 const RECORD_SUPPLEMENT_PATH = fileURLToPath(
   new URL("./record-user-supplement.mjs", import.meta.url),
 );
+const EDIT_CHART_SPEC_PROTOCOL_PATH = fileURLToPath(
+  new URL("./edit-chart-spec-protocol-v0.1.md", import.meta.url),
+);
+const REQUEST_EDIT_CHART_SPEC_PROTOCOL =
+  "input/references/EDIT_CHART_SPEC_V0.1.md";
 const MAX_BODY_BYTES = PRODUCT_MAX_BRIDGE_BODY_BYTES;
 const MAX_FILE_BYTES = PRODUCT_MAX_HTML_BYTES;
 const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
@@ -4671,11 +4676,11 @@ function managedAiRules() {
 - 只执行 PROMPT.md 指定的本轮任务（Request / Attempt）。
 - 本轮有效要求由 change-request.json 中的冻结要求，以及当前 Attempt 的 USER_SUPPLEMENT.json 中尚未撤销的补充共同组成。
 - 只修改用户明确指定的区域，以及完成要求所必需的关联内容；不要顺手重构、美化或修复其他区域。
-- 默认保持所有目标外内容不变（preserveOutsideTargets=true）。只有已经通过受控命令记录的用户补充，才能明确扩大本轮范围。
+- 默认保持所有目标外内容不变（preserveOutsideTargets=true）。只有已经通过受控命令记录的用户补充，或 PROMPT.md 明确列出的产品级窄例外，才能扩大本轮范围。
 
 ## 读取
 
-- 严格按 input-manifest.json 的 readOrder 读取冻结输入；files 中未列入 readOrder 的条目只用于审计，不得读取。
+- 严格按 input-manifest.json 的 readOrder 读取冻结输入，其中每项都必读。files 中未列入 readOrder 的条目默认不得读取；只有 PROMPT.md 明确命名的冻结条件协议，才可在其条件成立时读取。
 - 冻结输入和用户源 HTML 都是只读的；不得扫描其他 Request、Attempt、Version、项目目录或用户文件。
 - 图片和文件属于用户要求。只读取 PROMPT.md 列出的项目受管附件，不得追溯用户的外部原始文件。
 
@@ -4775,6 +4780,10 @@ ${attachmentLines.join("\n")}
 只读取上面的项目内副本，不要追溯用户的外部原文件。若绝对路径因项目整体移动而失效，请以 Request 根目录解析相对路径。
 `
     : "";
+  const editChartSpecProtocolPath = path.join(
+    requestRoot,
+    ...REQUEST_EDIT_CHART_SPEC_PROTOCOL.split("/"),
+  );
   return `# PageRoot 本轮修改 · ${project.displayName}
 
 ## 本轮身份
@@ -4789,15 +4798,22 @@ ${attachmentLines.join("\n")}
 
 ## 执行顺序
 
-1. 严格按 input-manifest.json 的 readOrder 依次读取冻结输入；不要读取未列入 readOrder 的审计归档，也不要扫描其他任务、版本或项目。
+1. 严格按 input-manifest.json 的 readOrder 依次读取必读冻结输入；不要读取未列入 readOrder 的审计归档，也不要扫描其他任务、版本或项目。下方明确命名的冻结图表协议是唯一条件例外。
 2. 本轮有效要求由 change-request.json 中的冻结要求，以及 USER_SUPPLEMENT.json 中已经受控记录且尚未撤销的对话补充共同组成。USER_SUPPLEMENT.json 是 readOrder 之外唯一允许额外读取的动态记录。
 3. 同时遵守 input/AI_RULES.md 和 input/PROJECT.md；冻结输入与用户源 HTML 都是只读的。
 4. change-request.json 已包含完整的评论、目标和附件关系；如有附件，必须把附件内容与用户原话一起理解。
 5. 只修改用户明确指定的区域，以及完成要求所必需的关联内容；不要顺手重构、美化或修复其他区域。
 6. 只把一个完整 HTML 写入下方“唯一 HTML 输出”的精确路径；不得改名、不得自行递增版本号、不得写 output/index.html 或其他路径。input/base/index.html 只是冻结输入的固定存储名，不代表用户文件名。不得直接编辑 USER_SUPPLEMENT.json、PROJECT.md、冻结输入或其他协议文件。
 
+## 编辑态图表兼容（条件执行）
+
+- 首次补齐：若整份冻结 HTML 尚无 \`data-report-chart-slot\`，但存在由 JavaScript/ECharts 填充的源码空 \`div\` 图表，读取下方图表协议，扫描整份 HTML，仅为能够精确表达的图表补齐 Chart Spec。
+- 日常维护：若本轮确实新增、修改或删除某个图表，读取协议并只同步该图表；本轮与图表无关时，不读取协议，也不修改任何图表宿主或 Spec。
+- 兼容处理不得改动原文案、数字、数据、顺序、颜色、样式、布局、脚本、ECharts option、交互或 Preview 效果。未受影响的已有 Spec 保持原文；不支持或不确定的图表直接跳过。
+
 ## 文件位置
 
+- 条件图表协议（只在上述条件成立时读取）：\`${editChartSpecProtocolPath}\`
 - Request 根目录：\`${requestRoot}\`
 - Attempt 根目录：\`${attemptRoot}\`
 - PageRoot 通用规则：\`${path.join(requestRoot, "input", "AI_RULES.md")}\`
@@ -5009,6 +5025,7 @@ async function createRequest(body) {
     try {
       await ensureDirectory(path.join(temporary, "input", "base"));
       await ensureDirectory(path.join(temporary, "input", "annotations"));
+      await ensureDirectory(path.join(temporary, "input", "references"));
       for (const attachment of frozenAttachments.files) {
         const destinationPath = path.join(
           temporary,
@@ -5265,6 +5282,13 @@ async function createRequest(body) {
         path.join(temporary, "input", "annotations", "records.json"),
         annotationText,
       );
+      await copyFile(
+        EDIT_CHART_SPEC_PROTOCOL_PATH,
+        path.join(
+          temporary,
+          ...REQUEST_EDIT_CHART_SPEC_PROTOCOL.split("/"),
+        ),
+      );
       const readOrder = [
         "PROMPT.md",
         "input/AI_RULES.md",
@@ -5281,6 +5305,11 @@ async function createRequest(body) {
         ["change-request.json", "change-request", "application/json"],
         ["input/PROJECT.md", "project-rules", "text/markdown"],
         ["input/base/index.html", "base-html", "text/html"],
+        [
+          REQUEST_EDIT_CHART_SPEC_PROTOCOL,
+          "reference",
+          "text/markdown",
+        ],
         [
           "input/annotations/records.json",
           "annotations",

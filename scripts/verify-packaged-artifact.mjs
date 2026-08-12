@@ -42,6 +42,7 @@ const SCRIPT_PATH = fileURLToPath(import.meta.url);
 const DEFAULT_PRODUCT_ROOT = path.resolve(path.dirname(SCRIPT_PATH), "..");
 const REQUIRED_BRIDGE_FILES = [
   "workspace-bridge.mjs",
+  "edit-chart-spec-protocol-v0.1.md",
   "finalize-attempt.mjs",
   "lifecycle-core.mjs",
   "user-supplement-core.mjs",

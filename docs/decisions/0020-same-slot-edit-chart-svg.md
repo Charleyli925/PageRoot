@@ -46,11 +46,22 @@ nodes are pointer-transparent, inaccessible to TargetResolver and absent from
 source, persistence, Review, Version and AI input. There is no new Session,
 cache, observer, IPC route, drain obligation or failure UI.
 
+Each AI Request freezes a detailed Chart Spec authoring protocol as a hashed
+conditional reference, outside the mandatory `readOrder`. The concise Prompt
+may authorize reading it only for a first fill of a document with no declared
+slots, or when the current request actually changes a chart. First fill may
+scan the frozen HTML but may add only compatibility attributes and inert Spec
+templates; later maintenance touches only the affected chart. Unrelated runs
+neither read the protocol nor rewrite existing declarations. This instruction
+does not replace the renderer's closed validation and adds no migration owner,
+cache or candidate-output hard gate.
+
 PR-1 introduces the pure contract and renderer only. PR-2 is the sole
 integration step: `HtmlCanvasEditor` prepares the projection from SourceIndex,
 then mounts it after `PageViewContext` and before the existing generation is
-acknowledged ready. The integration is acceptable only with full Browser and
-real Electron evidence.
+acknowledged ready. PR-2 also publishes the frozen conditional authoring
+protocol and concise Prompt handoff. The integration is acceptable only with
+full Browser and real Electron evidence.
 
 ## Consequences
 
@@ -65,8 +76,9 @@ real Electron evidence.
   184.80 kB gzip increase; keeping generation synchronous avoids a second
   asynchronous loading and stale-generation lifecycle.
 - Responsive behavior is vector scaling only; label layout does not rerun.
-- Existing arbitrary-script documents need generator-authored Chart Spec or
-  static HTML/SVG and are not automatically compatible.
+- Existing arbitrary-script documents remain blank on initial open. A later AI
+  candidate can add exact Chart Spec declarations under the conditional
+  protocol; unsupported or uncertain charts remain unchanged.
 - Updating the pinned ECharts version is a product renderer change, not author
   page compatibility work.
 

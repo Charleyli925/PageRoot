@@ -37,6 +37,7 @@ test("candidate classification preserves every former release-dry-run packaging 
     "scripts/developer-preview.mjs",
     "scripts/draft-aggregate.mjs",
     "scripts/draft-service.mjs",
+    "scripts/edit-chart-spec-protocol-v0.1.md",
     "scripts/finalize-attempt.mjs",
     "scripts/html-source-parser.mjs",
     "scripts/lifecycle-core.mjs",

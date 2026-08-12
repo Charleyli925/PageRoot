@@ -210,6 +210,10 @@
         "to": "bridge/workspace-bridge.mjs"
       },
       {
+        "from": "scripts/edit-chart-spec-protocol-v0.1.md",
+        "to": "bridge/edit-chart-spec-protocol-v0.1.md"
+      },
+      {
         "from": "scripts/finalize-attempt.mjs",
         "to": "bridge/finalize-attempt.mjs"
       },

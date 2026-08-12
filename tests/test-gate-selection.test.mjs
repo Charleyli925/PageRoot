@@ -221,6 +221,20 @@ test("owner rules select only the direct regression coverage for representative 
   assert.ok(totalNodeTests <= 56, `representative ownership selected ${totalNodeTests} Node tests`);
 });
 
+test("the conditional Chart Spec protocol keeps request, source-contract, and package owners", () => {
+  const plan = assertFullyAutomatedPlan(selectGatePlan({
+    map,
+    lane: "task",
+    changedFiles: ["scripts/edit-chart-spec-protocol-v0.1.md"],
+  }));
+  assert.deepEqual(plan.selectedNodeTests, [
+    "tests/desktop-package.test.mjs",
+    "tests/edit-chart-source-contract.test.mjs",
+    "tests/workspace-bridge.test.mjs",
+  ]);
+  assert.deepEqual(suiteIds(plan), ["node-targeted", "build-desktop", "ai-smoke"]);
+});
+
 test("Bridge fixture changes select the helper and its schema, scope, and workspace owners", () => {
   const expected = [
     "tests/bridge-test-environment.test.mjs",

@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
+import {
+  EDIT_CHART_LIMITS,
+  EDIT_CHART_SOURCE_CONTRACT,
+} from "../app/domain/edit-chart-spec.js";
 import { buildSourceIndex } from "../app/lib/source-index.js";
 import { createTargetRef, resolveTargetRef } from "../app/lib/target-resolver.js";
 
@@ -56,4 +61,27 @@ test("changing only Chart Spec data preserves the host TargetRef", () => {
   assert.notEqual(resolution.resolution, "ambiguous");
   assert.equal(resolution.target.stableAttributes.id, "quarterly-chart");
   assert.equal(resolution.target.textContent, "");
+});
+
+test("the conditional AI protocol stays aligned with the frozen Chart Spec contract", async () => {
+  const protocol = await readFile(
+    new URL("../scripts/edit-chart-spec-protocol-v0.1.md", import.meta.url),
+    "utf8",
+  );
+  assert.ok(protocol.includes(
+    `data-report-chart-slot="${EDIT_CHART_SOURCE_CONTRACT.chartKind}"`,
+  ));
+  assert.ok(protocol.includes(
+    `data-report-chart-spec="${EDIT_CHART_SOURCE_CONTRACT.specVersion}"`,
+  ));
+  assert.ok(protocol.includes(
+    `SSR 宽度为 ${EDIT_CHART_LIMITS.width.min}–${EDIT_CHART_LIMITS.width.max}`,
+  ));
+  assert.ok(protocol.includes(
+    `高度为 ${EDIT_CHART_LIMITS.height.min}–${EDIT_CHART_LIMITS.height.max}`,
+  ));
+  assert.ok(protocol.includes(`每份文档最多 ${EDIT_CHART_LIMITS.chartsPerDocument} 个图表`));
+  assert.ok(protocol.includes("本轮与图表无关：不修改任何图表宿主或 Spec"));
+  assert.ok(protocol.includes("未受影响的宿主和已有 Spec 保持原文"));
+  assert.ok(protocol.includes("原 Preview 的文案、数据、颜色、尺寸、CSS、脚本、option、交互和布局"));
 });
