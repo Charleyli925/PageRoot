@@ -212,6 +212,7 @@ Profile v0.1 推荐使用源码可读的业务属性，不使用 PageRoot 内部
     data-report-visual-kind="chart"
     role="img"
     aria-label="2024 至 2026 年搜索量趋势图"
+    style="width: 100%; aspect-ratio: 5 / 2; overflow: hidden"
   ></div>
   <figcaption>
     2026 年搜索量同比增长 18%，增长主要来自移动端。
@@ -219,13 +220,9 @@ Profile v0.1 推荐使用源码可读的业务属性，不使用 PageRoot 内部
 </figure>
 ```
 
-```css
-#search-volume-chart {
-  width: 100%;
-  height: 320px;
-  overflow: hidden;
-}
-```
+外部样式可以继续决定视觉样式；但 PR-1 的纯静态 Validator 只接受槽位自身
+`style` 中可机械读取的固定高度或 `width + aspect-ratio`。它不猜测任意 CSS
+级联、utility class 或计算样式，避免把 v0.1 变成无限 CSS 兼容器。
 
 ### 7.2 必须满足
 
@@ -233,8 +230,8 @@ Profile v0.1 推荐使用源码可读的业务属性，不使用 PageRoot 内部
 - 每个槽位有唯一 `id` 和稳定 `data-report-key` 所属语义组件；
 - `data-report-visual-slot="fixed"` 只标记真实图表 mount 元素；
 - 槽位在脚本前已经有非零、有限、可见的源码几何；
-- 高度由明确 `height`、`min-height + max-height`、固定 grid track 或稳定
-  `aspect-ratio` 决定；
+- 槽位在源码中明确声明固定高度、相等的 `min-height + max-height`，或
+  `width + aspect-ratio`；PR-1 不从外部 CSS 级联推断该事实；
 - 作者脚本只能增加、删除或更新槽位后代，不替换槽位自身；
 - 脚本前后槽位的 border box 必须保持一致；
 - 所有视觉绘制被槽位裁住，不依赖 `overflow: visible` 显示关键标签；
@@ -267,6 +264,13 @@ V1 可以在没有 Profile 标记的页面中识别以下候选，但其等级�
 
 兼容入口不得通过修改用户源码自动添加 Profile 标记。显式迁移属于未来独立功能，
 必须由用户选择并作为完整候选审阅。
+
+### 7.5 PR-1 当前边界
+
+PR-1 已将 Profile v0.1 冻结为 source-only Validator，但 Phase 0 对原生 overlay
+的 pointer/IME 穿透和可见 WindowServer 合成结论为 No-go。因此 `profile-fixed`
+目前只是静态候选等级：它不改变 Edit、不会执行作者脚本，也不会自动显示运行视觉。
+完整证据见 [Phase 0 evidence](INLINE_RUNTIME_VISUALS_PHASE0_EVIDENCE.md)。
 
 ## 8. 用户体验
 
@@ -336,8 +340,8 @@ V1 规则：
 
 | 等级 | 定义 | 默认行为 |
 | --- | --- | --- |
-| `profile-fixed` | 显式 Profile 固定槽位且全部静态条件通过 | 自动启用 |
-| `legacy-fixed` | 无 Profile，但通过窄历史宿主规则和运行几何门禁 | 受控启用；可按版本灰度 |
+| `profile-fixed` | 显式 Profile 固定槽位且全部静态条件通过 | 当前保持静态；未来实现仍需独立复审 |
+| `legacy-fixed` | 无 Profile，但通过窄历史宿主规则和运行几何门禁 | 当前不启用 |
 | `static-only` | 没有运行视觉，或运行能力不可用 | 保持当前 Edit |
 | `preview-only` | 动态布局、运行正文、交互依赖或不安全资源 | Edit 静态；Preview 中查看 |
 

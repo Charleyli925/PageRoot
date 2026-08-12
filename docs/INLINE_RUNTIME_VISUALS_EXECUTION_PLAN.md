@@ -1,6 +1,6 @@
 # PageRoot 固定视觉槽位与编辑态自动原位显示执行规划
 
-- 状态：**规划完成；生产实现尚未获授权**
+- 状态：**PR-1 完成；Phase 0 为 No-go，生产运行视觉未获授权**
 - 规划日期：2026-08-12
 - 规划基线：`main@8fffb0529239b537f25fc0463921325babdf167f`
 - 产品依据：[固定视觉槽位与编辑态自动原位显示 PRD](INLINE_RUNTIME_VISUALS_PRD.md)
@@ -9,6 +9,12 @@
 > 本文是可审查的三合并点实施方案，不是开始生产实现、Ready、合并或发布的授权。
 > 在 Phase 0 形成可复现实证并获得 Go 结论前，现行行为保持不变：Edit 脚本禁用且
 > 不拥有运行视觉，Preview 执行作者脚本，Review 独占现有有界截图补充。
+
+> 2026-08-12 结果：PR-1 的合成 Electron 探针通过独立终止、单页双矩形 mask、
+> 可信绑定和几何一致性，但未能以 CI-safe 方式证明原生 pointer/IME 穿透和可见
+> WindowServer 合成。因此按本计划的硬门禁记为 **No-go**；PR-2/PR-3 不得开始。
+> 证据见 [Phase 0 evidence](INLINE_RUNTIME_VISUALS_PHASE0_EVIDENCE.md)，决策见
+> [ADR 0020](decisions/0020-inline-runtime-visual-phase0-no-go.md)。
 
 ## 1. 执行结论
 
@@ -27,8 +33,8 @@
 | 合并点 | 包含的交付 | 是否改变用户行为 |
 | --- | --- | --- |
 | PR-1：可行性与合同 | Phase 0 探针、Go/No-go、Profile v0.1、静态 Validator、诊断与 ADR | 否 |
-| PR-2：完整纵向能力 | 单运行页 owner、Session、安全协议、`profile-fixed` 原位显示、生命周期、Selection、PageViewContext 和完整 Electron 门禁 | 否；feature flag 默认关闭 |
-| PR-3：灰度与启用 | canary 修正、现行合同同步、默认启用决策；`legacy-fixed` 和精确离线资产仅在证据充分时作为独立关闭的条件工作流 | 取决于验收结论 |
+| PR-2：完整纵向能力 | 已被 PR-1 No-go 阻断；不得创建 owner、Session、overlay 或 feature flag | 不适用 |
+| PR-3：灰度与启用 | 已被 PR-1 No-go 阻断 | 不适用 |
 
 Phase 0 是 PR-1 的合并前硬门禁，不单独占一次合并。任何 No-go 都意味着停止运行视觉
 实现，PR-1 只保留 Profile/Validator、失败证据和内容迁移建议。后续 PR 不得用扩大
@@ -359,7 +365,9 @@ PR 内按提交或文件责任进行，最终只形成上述三个合并点。
 - 不接入 Workbench、preload 稳定 API、打包入口或现有 Review owner；
 - 不提交真实 HTML；必要的现实结构必须重写成最小合成 fixture；
 - 输出原始测量、失败案例和环境信息，不输出业务页面内容；
-- PR-1 合并前明确删除探针或将其转成正式 hostile fixtures；
+- Go 结论下，PR-1 合并前删除探针或将其转成正式 hostile fixtures；No-go 结论下，
+  保留最小可复现实验及其证据，但它必须继续在 `experiments/`、不进入打包清单、
+  不获得任何生产 import；
 - 探针成功不能直接作为生产安全结论，正式 owner 仍需重新实现和测试。
 
 ### 9.5 暂定通过阈值
@@ -404,6 +412,18 @@ CPU、峰值内存、DOM 节点、协议总字节、几何容差和稳定窗口�
 - 对 PRD 未决问题的结论；
 - 只做 Profile/Validator/内容规范化的替代路线；
 - 明确禁止后续绕过条件的 ADR。
+
+### 9.8 PR-1 实际结论（2026-08-12）
+
+探针实现位于 `experiments/inline-visual-pr1/phase0-runner.mjs`，只使用合成
+Canvas/SVG/替换宿主和失控脚本 fixture。它证明了独立 renderer、2–3 ms 硬终止、
+两块不连续 SVG mask、resize/zoom/scroll 几何、私有 MessagePort 绑定、资源拒绝和
+owner registry cleanup。
+
+它没有在不扰动用户桌面的自动环境中证明原生 overlay 下的真实 click、drag、selection、
+contextmenu、wheel、keyboard、IME 以及可见 WindowServer 合成。根据 9.6，这两个
+缺口足以构成 No-go。PR-1 因而只交付 Profile/Validator、失败证据、迁移建议和 ADR；
+没有生产 runtime/UI/flag，也不得把“已通过的子项”解释为 PR-2 的开工授权。
 
 ## 10. PR-1 工作流 B：Profile v0.1 与静态 Validator
 

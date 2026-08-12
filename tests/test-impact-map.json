@@ -546,6 +546,17 @@
       "nodeTests": ["tests/runtime-capabilities.test.mjs"]
     },
     {
+      "id": "inline-visual-profile",
+      "patterns": [
+        "^app/domain/inline-visual-profile\\.js$",
+        "^experiments/inline-visual-pr1/phase0-runner\\.mjs$",
+        "^docs/(?:INLINE_VISUAL_PROFILE|INLINE_RUNTIME_VISUALS_PRD|INLINE_RUNTIME_VISUALS_EXECUTION_PLAN|INLINE_RUNTIME_VISUALS_PHASE0_EVIDENCE)\\.md$",
+        "^docs/decisions/0020-inline-runtime-visual-phase0-no-go\\.md$"
+      ],
+      "suites": ["typecheck"],
+      "nodeTests": ["tests/inline-visual-profile.test.mjs"]
+    },
+    {
       "id": "review-analysis-session",
       "patterns": ["^app/application/review-analysis-session\\.(?:js|d\\.ts)$"],
       "suites": ["typecheck", "ai-smoke"],

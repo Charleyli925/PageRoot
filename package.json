@@ -63,6 +63,7 @@
     "test:packaged-runtime:prepared": "playwright test --config tests/e2e/electron/playwright.packaged.config.mjs",
     "test:packaged-startup:prepared": "playwright test --config tests/e2e/electron/playwright.packaged-startup.config.mjs",
     "test:bridge": "node --test tests/workspace-bridge.test.mjs",
+    "experiment:inline-visual-phase0": "electron experiments/inline-visual-pr1/phase0-runner.mjs --json",
     "benchmark:review-analysis": "node scripts/benchmark-review-analysis.mjs",
     "benchmark:persistence": "npm run desktop:renderer && node scripts/benchmark-persistence.mjs",
     "test:package": "node scripts/test-node-group.mjs package",
