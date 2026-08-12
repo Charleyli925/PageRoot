@@ -145,11 +145,13 @@ export class ProjectWorkflow {
   #hashPort;
   #canvasPort;
   #projectOpenPort;
-  #legacyPort;
+  #viewStatePort;
+  #recentRunsPort;
   #policies;
   #scheduler;
   #clock;
   #listeners = new Set();
+  #eventListeners = new Set();
   #snapshot;
   #hydrationGeneration = 0;
   #operationSequence = 0;
@@ -265,8 +267,11 @@ export class ProjectWorkflow {
     if (!ports.projectOpen || typeof ports.projectOpen.mode !== "function") {
       throw new TypeError("ProjectWorkflow requires a ProjectOpenPort.");
     }
-    if (!ports.legacy) {
-      throw new TypeError("ProjectWorkflow requires staged legacy obligations.");
+    if (!ports.viewState || typeof ports.viewState.isTransitioning !== "function") {
+      throw new TypeError("ProjectWorkflow requires a ViewStatePort.");
+    }
+    if (!ports.recentRuns || typeof ports.recentRuns.hydrate !== "function") {
+      throw new TypeError("ProjectWorkflow requires a RecentRunsPort.");
     }
     if (
       typeof policies.canCloseDuringHydration !== "function"
@@ -322,7 +327,8 @@ export class ProjectWorkflow {
     this.#hashPort = ports.hash;
     this.#canvasPort = ports.canvas;
     this.#projectOpenPort = ports.projectOpen;
-    this.#legacyPort = ports.legacy;
+    this.#viewStatePort = ports.viewState;
+    this.#recentRunsPort = ports.recentRuns;
     this.#policies = policies;
     this.#scheduler = scheduler;
     this.#clock = clock;
@@ -355,6 +361,14 @@ export class ProjectWorkflow {
     return () => this.#listeners.delete(listener);
   }
 
+  subscribeEvents(listener) {
+    if (typeof listener !== "function") {
+      throw new TypeError("ProjectWorkflow event listener must be a function.");
+    }
+    this.#eventListeners.add(listener);
+    return () => this.#eventListeners.delete(listener);
+  }
+
   dispose() {
     this.#disposed = true;
     this.#externalFileOpenSession.setObserver(null);
@@ -374,6 +388,7 @@ export class ProjectWorkflow {
       "native-edit",
     ]) this.#drainCoordinator.remove(name);
     this.#listeners.clear();
+    this.#eventListeners.clear();
   }
 
   get projectHydrating() {
@@ -484,7 +499,7 @@ export class ProjectWorkflow {
         }
       }
 
-      const shouldCommitCanvas = !this.#legacyPort.isHistoryView();
+      const shouldCommitCanvas = !this.#isHistoryView();
       let committed = shouldCommitCanvas
         ? this.#canvasPort.fencePendingEdit({
             resumeEditing: false,
@@ -806,7 +821,7 @@ export class ProjectWorkflow {
         const draftState = this.#draftSession.inspect();
         if (this.#policies.canCloseDuringHydration({
           projectHydrating: true,
-          viewTransitioning: this.#legacyPort.isViewTransitioning(),
+          viewTransitioning: this.#viewStatePort.isTransitioning(),
           submissionPending: this.#runSession.submissionPending,
           persistState: this.#documentSession.persistState,
           pendingWrite: Boolean(this.#documentSession.pendingWrite),
@@ -841,7 +856,7 @@ export class ProjectWorkflow {
           return inAppBlock("当前撤销或重做没有安全完成，已取消关闭。");
         }
       }
-      if (!this.#legacyPort.isHistoryView() && !this.#runSession.activeLocked) {
+      if (!this.#isHistoryView() && !this.#runSession.activeLocked) {
         const frozen = this.#canvasPort.freeze();
         if (!frozen) {
           return inAppBlock("编辑画布尚未就绪，已取消关闭以避免丢失文字草稿。");
@@ -949,7 +964,7 @@ export class ProjectWorkflow {
       projectLocked: this.#runSession.activeLocked,
       projectHydrating: this.projectHydrating,
       projectLoadError: Boolean(this.projectLoadError),
-      viewTransitioning: this.#legacyPort.isViewTransitioning(),
+      viewTransitioning: this.#viewStatePort.isTransitioning(),
       submissionPending: this.#runSession.submissionPending,
       persistState: this.#documentSession.persistState,
       pendingWrite: Boolean(this.#documentSession.pendingWrite),
@@ -1091,7 +1106,7 @@ export class ProjectWorkflow {
       if (this.#runSession.activeLocked) {
         return blocked("SOURCE_RENAME_RUN_LOCKED", "当前 AI 任务仍在处理，不能修改文件名。");
       }
-      if (this.projectHydrating || this.projectLoadError || this.#legacyPort.isHistoryView()) {
+      if (this.projectHydrating || this.projectLoadError || this.#isHistoryView()) {
         return blocked("SOURCE_RENAME_VIEW_UNAVAILABLE", "当前视图尚未形成可安全重命名的源页面。");
       }
       if (typeof this.#projectOpenPort.renameSource !== "function") {
@@ -1396,7 +1411,7 @@ export class ProjectWorkflow {
             reason: "正在安全修改 HTML 文件名，请等待本次操作完成后再继续。",
           };
         }
-        return this.#legacyPort.isViewTransitioning() && boundary !== "history"
+        return this.#viewStatePort.isTransitioning() && boundary !== "history"
           ? {
               state: "blocked",
               reason: "正在核对历史或当前 HTML，请等待本次切换完成后再继续。",
@@ -1536,7 +1551,7 @@ export class ProjectWorkflow {
       } else {
         this.#emit({ type: "project-startup-ready" });
       }
-      void this.#legacyPort.hydrateRecentRuns?.(recent, active?.sourcePath || null);
+      void this.#recentRunsPort.hydrate(recent, active?.sourcePath || null);
       if (active) {
         if (this.#snapshot.close.phase === "ready") {
           return blocked(
@@ -1596,7 +1611,7 @@ export class ProjectWorkflow {
     if (
       this.#projectSession.sourcePath
       && !this.projectLoadError
-      && !this.#legacyPort.isHistoryView()
+      && !this.#isHistoryView()
     ) {
       const cutoff = this.#documentSession.editRevision;
       const frozen = this.#canvasPort.freeze(
@@ -1688,7 +1703,7 @@ export class ProjectWorkflow {
     if (
       this.#projectSession.sourcePath
       && !this.projectLoadError
-      && !this.#legacyPort.isHistoryView()
+      && !this.#isHistoryView()
     ) {
       const cutoff = this.#documentSession.editRevision;
       const frozen = this.#canvasPort.freeze(
@@ -2626,7 +2641,19 @@ export class ProjectWorkflow {
   }
 
   #emit(event) {
-    this.#legacyPort.emit(Object.freeze(event));
+    if (this.#disposed) return;
+    const frozen = Object.freeze(event);
+    for (const listener of this.#eventListeners) {
+      try {
+        listener(frozen);
+      } catch {
+        // A presentation event listener cannot affect project authority.
+      }
+    }
+  }
+
+  #isHistoryView() {
+    return this.#versionSession.snapshot.viewMode === "history";
   }
 
   #markHydrationStage(stage) {

@@ -13,7 +13,6 @@ import {
   type ChangeEvent,
   type ClipboardEvent,
   type CSSProperties,
-  type SetStateAction,
 } from "react";
 import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/csr/ArrowSquareOut";
 import { CaretRightIcon } from "@phosphor-icons/react/dist/csr/CaretRight";
@@ -87,50 +86,29 @@ import {
   shouldRecoverEditorAfterCloseAbort,
 } from "../desktop/close-recovery.mjs";
 import {
-  createRuntimeBridgeClient,
-} from "./application/bridge-client.js";
-import {
-  WorkspaceController,
+  createRuntimeWorkspaceController,
   registrationContextFromOutcome,
 } from "./application/workspace-controller.js";
-import type { WorkspaceControllerSnapshot } from "./application/workspace-controller.js";
+import type {
+  WorkspaceController,
+  WorkspaceControllerSnapshot,
+} from "./application/workspace-controller.js";
 import { createCommentWorkflowCodecs } from "./application/comment-workflow-codecs.js";
 import type { DocumentWorkflowOutcome } from "./application/document-workflow.js";
 import { createDocumentWorkflowCodecs } from "./application/document-workflow-codecs.js";
 import { createRunWorkflowCodecs } from "./application/run-workflow-codecs.js";
 import { createWorkspaceControllerCodecs } from "./application/workspace-controller-codecs.js";
-import {
-  CommentSession,
-  type CommentSessionSnapshot,
-} from "./application/comment-session.js";
-import {
-  DraftSession,
-} from "./application/draft-session.js";
-import {
-  DocumentSession,
-  type DocumentSessionSnapshot,
-} from "./application/document-session.js";
+import type { CommentSessionSnapshot } from "./application/comment-session.js";
+import type { DocumentSessionSnapshot } from "./application/document-session.js";
 import { runLocalUserAction } from "./application/local-action-outcomes.js";
 import {
   ReviewAnalysisCancelledError,
   ReviewAnalysisSession,
 } from "./application/review-analysis-session.js";
 import type { PageViewContext } from "./lib/page-view-context.js";
-import {
-  ProjectSession,
-  type ProjectSessionSnapshot,
-} from "./application/project-session.js";
-import {
-  RunSession,
-  type RunOperationKind,
-  type RunSessionSnapshot,
-} from "./application/run-session.js";
-import { createBrowserRecoveryStore } from "./application/recovery-store.js";
-import { SourceHistorySession } from "./application/source-history-session.js";
-import {
-  VersionSession,
-  type VersionSessionSnapshot,
-} from "./application/version-session.js";
+import type { ProjectSessionSnapshot } from "./application/project-session.js";
+import type { RunOperationKind, RunSessionSnapshot } from "./application/run-session.js";
+import type { VersionSessionSnapshot } from "./application/version-session.js";
 import type { SourceHistoryDirection } from "./domain/source-history.js";
 import {
   BROWSER_RUNTIME_CAPABILITIES,
@@ -239,7 +217,6 @@ import type {
   Drawer,
   HtmlProject,
   OtherTabCommentEntry,
-  PendingWrite,
   PersistState,
   PrepareCloseDetail,
   ProjectContext,
@@ -267,12 +244,6 @@ class DeferredEditorCommandDiscardedError extends Error {
   }
 }
 
-function isDeferredEditorCommandDiscardedError(
-  value: unknown,
-): value is DeferredEditorCommandDiscardedError {
-  return value instanceof DeferredEditorCommandDiscardedError;
-}
-
 type CanvasRenderAck = Readonly<{
   generation: number;
   sha256: string;
@@ -280,8 +251,6 @@ type CanvasRenderAck = Readonly<{
 
 type CanvasRenderAcks = Readonly<Record<CanvasMode, CanvasRenderAck | null>>;
 
-const bridgeClient = createRuntimeBridgeClient();
-const recoveryStore = createBrowserRecoveryStore();
 const EMPTY_PROJECT_RULES_SNAPSHOT = {
   open: false,
   path: "PROJECT.md",
@@ -344,6 +313,8 @@ const INITIAL_DOCUMENT_SNAPSHOT: DocumentSessionSnapshot = {
   lastPersistedRevision: 0,
   persistState: "idle",
   persistError: "",
+  hasPendingWrite: false,
+  isFlushing: false,
 };
 const INITIAL_COMMENT_SNAPSHOT: CommentSessionSnapshot<
   CommentItem,
@@ -526,26 +497,9 @@ export default function Workbench() {
     }),
   );
   const reviewSessionSequenceRef = useRef(0);
-  const projectSessionRef = useRef(new ProjectSession());
   const runtimeCapabilitiesRef =
     useRef<RuntimeCapabilities>(BROWSER_RUNTIME_CAPABILITIES);
-  const draftSessionRef = useRef(new DraftSession<CommentItem, DirectEditEvent>({
-    bridgeClient,
-    encodeComment: persistedComment,
-    encodeChangeEvent: persistedChangeEvent,
-  }));
-  const sourceHistorySessionRef = useRef(new SourceHistorySession());
-  const versionSessionRef = useRef(new VersionSession<Version>());
-  const documentSessionRef = useRef(new DocumentSession<PendingWrite>({
-    html: DEFAULT_PROJECT_HTML,
-  }));
-  const commentSessionRef = useRef(new CommentSession<
-    CommentItem,
-    DirectEditEvent,
-    CommentAttachment,
-    HtmlCanvasSelection,
-    CommentEditSession
-  >());
+  const workspaceControllerRef = useRef<WorkspaceController | null>(null);
   const verifyCanvasRenderedRef = useRef<(
     expectedHtml: string,
     expectedSha256: string,
@@ -558,9 +512,6 @@ export default function Workbench() {
   const sourceTransitionOperationRef = useRef(0);
   const versionTransitioningRef = useRef(false);
   const attachmentObjectUrlsRef = useRef<Map<string, string>>(new Map());
-  const runSessionRef = useRef(new RunSession({
-    sourcePath: WELCOME_PROJECT.sourcePath,
-  }));
   const toastRef = useRef<Toast>(null);
   const previousPersistStateRef = useRef(new Map<string, PersistState>());
   const previousRunStateRef = useRef(
@@ -576,10 +527,41 @@ export default function Workbench() {
   const fileRenameEditingRef = useRef(false);
   const fileRenameBusyRef = useRef(false);
 
-  const [documentSnapshot, setDocumentSnapshot] =
-    useState<DocumentSessionSnapshot>(INITIAL_DOCUMENT_SNAPSHOT);
   const [workspaceControllerSnapshot, setWorkspaceControllerSnapshot] =
     useState<WorkspaceControllerSnapshot | null>(null);
+  const [workspaceController, setWorkspaceController] =
+    useState<WorkspaceController | null>(null);
+  const currentControllerSnapshot = useCallback(
+    () => workspaceControllerRef.current?.getSnapshot() ?? null,
+    [],
+  );
+  const currentProjectSessionSnapshot = useCallback(
+    () => currentControllerSnapshot()?.projectSession
+      ?? INITIAL_PROJECT_SESSION_SNAPSHOT,
+    [currentControllerSnapshot],
+  );
+  const currentDocumentSessionSnapshot = useCallback(
+    () => currentControllerSnapshot()?.document ?? INITIAL_DOCUMENT_SNAPSHOT,
+    [currentControllerSnapshot],
+  );
+  const currentCommentSessionSnapshot = useCallback(
+    () => (
+      currentControllerSnapshot()?.commentSession as CommentSessionSnapshot<
+        CommentItem,
+        DirectEditEvent,
+        CommentAttachment,
+        HtmlCanvasSelection,
+        CommentEditSession
+      > | null
+    ) ?? INITIAL_COMMENT_SNAPSHOT,
+    [currentControllerSnapshot],
+  );
+  const currentRunSessionSnapshot = useCallback(
+    () => currentControllerSnapshot()?.runSession ?? INITIAL_RUN_SNAPSHOT,
+    [currentControllerSnapshot],
+  );
+  const documentSnapshot = workspaceControllerSnapshot?.document
+    ?? INITIAL_DOCUMENT_SNAPSHOT;
   const externalFileOpenSnapshot =
     workspaceControllerSnapshot?.project?.externalOpen
     ?? INITIAL_EXTERNAL_FILE_OPEN_SNAPSHOT;
@@ -594,8 +576,8 @@ export default function Workbench() {
   const persistState = documentSnapshot.persistState;
   const persistError = documentSnapshot.persistError;
   const [projectName, setProjectName] = useState(WELCOME_PROJECT.name);
-  const [projectSnapshot, setProjectSnapshot] =
-    useState<ProjectSessionSnapshot>(INITIAL_PROJECT_SESSION_SNAPSHOT);
+  const projectSnapshot = workspaceControllerSnapshot?.projectSession
+    ?? INITIAL_PROJECT_SESSION_SNAPSHOT;
   const { sourcePath, projectId, documentId } = projectSnapshot;
   const [projectRecordsPath, setProjectRecordsPath] =
     useState<string | null>(null);
@@ -607,9 +589,15 @@ export default function Workbench() {
   const [recentProjects, setRecentProjects] = useState<RecentProject[]>([]);
   const [recentProjectsError, setRecentProjectsError] = useState("");
   const [selection, setSelection] = useState<HtmlCanvasSelection | null>(null);
-  const [commentSnapshot, setCommentSnapshot] = useState(
-    INITIAL_COMMENT_SNAPSHOT,
-  );
+  const commentSnapshot = (
+    workspaceControllerSnapshot?.commentSession as CommentSessionSnapshot<
+      CommentItem,
+      DirectEditEvent,
+      CommentAttachment,
+      HtmlCanvasSelection,
+      CommentEditSession
+    > | null
+  ) ?? INITIAL_COMMENT_SNAPSHOT;
   const draftTarget = commentSnapshot.composerTarget;
   const draft = commentSnapshot.composerDraft;
   const draftCommentId = commentSnapshot.composerCommentId;
@@ -622,9 +610,8 @@ export default function Workbench() {
     workspaceControllerSnapshot?.comment?.attachmentUploadCount ?? 0;
   const draftPersistError =
     workspaceControllerSnapshot?.comment?.draft.error ?? "";
-  const [runSnapshot, setRunSnapshot] = useState<RunSessionSnapshot>(
-    INITIAL_RUN_SNAPSHOT,
-  );
+  const runSnapshot = workspaceControllerSnapshot?.runSession
+    ?? INITIAL_RUN_SNAPSHOT;
   const backgroundProjectResults = useMemo(
     () => new Map<string, BackgroundProjectResult>(
       runSnapshot.backgroundResults,
@@ -675,13 +662,13 @@ export default function Workbench() {
   const projectRulesSaveError = projectRulesSnapshot.saveError;
   const [projectRecordsPreparing, setProjectRecordsPreparing] = useState(false);
   const [projectRecordsError, setProjectRecordsError] = useState("");
-  const [versionSnapshot, setVersionSnapshot] =
-    useState<VersionSessionSnapshot<Version>>(INITIAL_VERSION_SNAPSHOT);
+  const versionSnapshot = (
+    workspaceControllerSnapshot?.versionSession as VersionSessionSnapshot<Version> | null
+  ) ?? INITIAL_VERSION_SNAPSHOT;
   const versions = versionSnapshot.versions;
   const latestVersionId = versionSnapshot.latestVersionId;
   const currentBasedOnVersionId =
     versionSnapshot.currentBasedOnVersionId;
-  const restoredFromVersionId = versionSnapshot.restoredFromVersionId;
   const viewMode = versionSnapshot.viewMode;
   const [canvasMode, setCanvasMode] = useState<CanvasMode>("edit");
   const [pageViewContext, setPageViewContext] =
@@ -695,8 +682,6 @@ export default function Workbench() {
     edit: null,
     preview: null,
   });
-  const [workspaceController, setWorkspaceController] =
-    useState<WorkspaceController | null>(null);
   const [sourceTransitioning, setSourceTransitioning] = useState(false);
   const setSourceViewTransitioning = useCallback((transitioning: boolean) => {
     sourceTransitioningRef.current = transitioning;
@@ -719,14 +704,15 @@ export default function Workbench() {
     setCanvasRenderAcks({ edit: null, preview: null });
   }, []);
   useLayoutEffect(() => {
-    const controller = new WorkspaceController({
-      bridgeClient,
-      projectSession: projectSessionRef.current,
-      documentSession: documentSessionRef.current,
-      commentSession: commentSessionRef.current,
-      draftSession: draftSessionRef.current,
-      versionSession: versionSessionRef.current,
-      sourceHistorySession: sourceHistorySessionRef.current,
+    const controller = createRuntimeWorkspaceController({
+      initial: {
+        documentHtml: DEFAULT_PROJECT_HTML,
+        runSourcePath: WELCOME_PROJECT.sourcePath,
+      },
+      draftSession: {
+        encodeComment: persistedComment,
+        encodeChangeEvent: persistedChangeEvent,
+      },
       codecs: createWorkspaceControllerCodecs({
         isRecord,
         sameSourcePath: sameLocalSourcePath,
@@ -758,7 +744,6 @@ export default function Workbench() {
           removeAcknowledgedAuditEvents,
           errorMessage: productErrorMessage,
         }),
-        recoveryStore,
         canvas: {
           verifyRendered: (expectedHtml, expectedSha256, context) => (
             verifyCanvasRenderedRef.current(
@@ -782,7 +767,6 @@ export default function Workbench() {
         },
       },
       commentWorkflow: {
-        runSession: runSessionRef.current,
         codecs: createCommentWorkflowCodecs({
           isRecord,
           sameSourcePath: sameLocalSourcePath,
@@ -798,7 +782,6 @@ export default function Workbench() {
           commentEditSessionHasChanges,
           errorMessage: productErrorMessage,
         }),
-        recoveryStore,
         attachmentBinary: {
           prepare: async (
             file: File,
@@ -816,7 +799,6 @@ export default function Workbench() {
         },
       },
       projectRulesWorkflow: {
-        runSession: runSessionRef.current,
         errorMessage: productErrorMessage,
         presentation: {
           restoreEditor: ({ settle }: { settle: () => void }) => {
@@ -841,7 +823,6 @@ export default function Workbench() {
         },
       },
       projectWorkflow: {
-        runSession: runSessionRef.current,
         codecs: {
           isRecord,
           sameSourcePath: sameLocalSourcePath,
@@ -936,9 +917,8 @@ export default function Workbench() {
               return rename(input);
             },
           },
-          legacy: {
-            isHistoryView: () => versionSessionRef.current.snapshot.viewMode === "history",
-            isViewTransitioning: () => isViewTransitioning(),
+          viewState: {
+            isTransitioning: () => isViewTransitioning(),
           },
         },
         policies: {
@@ -947,7 +927,6 @@ export default function Workbench() {
         },
       },
       runWorkflow: {
-        runSession: runSessionRef.current,
         codecs: createRunWorkflowCodecs({
           isRecord,
           sameSourcePath: sameLocalSourcePath,
@@ -1001,7 +980,6 @@ export default function Workbench() {
         },
       },
       versionWorkflow: {
-        runSession: runSessionRef.current,
         codecs: {
           isRecord,
           sameSourcePath: sameLocalSourcePath,
@@ -1036,8 +1014,16 @@ export default function Workbench() {
       },
       clock: { now: Date.now },
     });
+    workspaceControllerRef.current = controller;
     setWorkspaceController(controller);
-    return () => controller.dispose();
+    setWorkspaceControllerSnapshot(controller.getSnapshot());
+    return () => {
+      if (workspaceControllerRef.current === controller) {
+        workspaceControllerRef.current = null;
+      }
+      setWorkspaceController((current) => current === controller ? null : current);
+      controller.dispose();
+    };
   }, [deferEditorCommand, invalidateCanvasRenderAcks, isViewTransitioning]);
   const invalidateEditCanvasRenderAck = useCallback(() => {
     setCanvasRenderAcks((current) => (
@@ -1049,13 +1035,13 @@ export default function Workbench() {
     generation: number,
     sha256: string | null,
   ): boolean => {
-    if (generation !== documentSessionRef.current.canvasGeneration) return false;
+    if (generation !== currentDocumentSessionSnapshot().canvasGeneration) return false;
     setCanvasRenderAcks((current) => ({
       ...current,
       [surface]: sha256 ? { generation, sha256 } : null,
     }));
     return true;
-  }, []);
+  }, [currentDocumentSessionSnapshot]);
   const renderedContentSha256 =
     canvasRenderAcks.edit?.generation === canvasGeneration
       ? canvasRenderAcks.edit.sha256
@@ -1079,14 +1065,6 @@ export default function Workbench() {
     activeRun?.requestId === "pending"
     && isActiveRunOperationBusy("poll"),
   );
-  const setActiveRun = useCallback((
-    next: SetStateAction<ActiveRun | null>,
-  ) => {
-    const session = runSessionRef.current;
-    session.setActiveRun(
-      typeof next === "function" ? next(session.activeRun) : next,
-    );
-  }, []);
   const projectHydrating =
     workspaceControllerSnapshot?.project?.hydration.phase === "hydrating";
   const projectLoadError =
@@ -1137,7 +1115,7 @@ export default function Workbench() {
           projectRecordsPath: string | null;
           projectName: string | null;
         }>;
-        if (!projectSessionRef.current.matches(registrationEvent.context)) return;
+        if (!workspaceController.matchesCurrentProjectContext(registrationEvent.context)) return;
         setProjectRecordsPath(registrationEvent.projectRecordsPath);
         if (registrationEvent.projectName) setProjectName(registrationEvent.projectName);
         return;
@@ -1150,7 +1128,7 @@ export default function Workbench() {
         }>;
         if (
           attachmentEvent.context
-          && !projectSessionRef.current.matches(attachmentEvent.context)
+          && !workspaceController.matchesCurrentProjectContext(attachmentEvent.context)
         ) return;
         const fileName = attachmentEvent.attachment?.fileName || "附件";
         setToast({
@@ -1342,10 +1320,14 @@ export default function Workbench() {
         setProjectRecordsPreparing(false);
         setProjectRecordsError("");
         setOpeningReadyVersion(Boolean(
-          runSessionRef.current.activeRun
-          && runSessionRef.current.isOperationBusy(
-            "activate",
-            activeRunOperationKey(runSessionRef.current.activeRun),
+          workspaceController.getSnapshot().runSession?.activeRun
+          && workspaceController.getSnapshot().runSession?.operationKeys.some(
+            ([kind, key]) => (
+              kind === "activate"
+              && key === activeRunOperationKey(
+                workspaceController.getSnapshot().runSession?.activeRun as ActiveRun,
+              )
+            ),
           ),
         ));
         setDrawer(null);
@@ -1369,7 +1351,7 @@ export default function Workbench() {
       if (projectEvent.type === "project-hydrated") {
         if (
           projectEvent.context
-          && !projectSessionRef.current.matches(projectEvent.context)
+          && !workspaceController.matchesCurrentProjectContext(projectEvent.context)
         ) return;
         if (typeof projectEvent.projectName === "string" && projectEvent.projectName) {
           setProjectName(projectEvent.projectName);
@@ -1507,7 +1489,7 @@ export default function Workbench() {
       }>;
       if (
         documentEvent.context
-        && !projectSessionRef.current.matches(documentEvent.context)
+        && !workspaceController.matchesCurrentProjectContext(documentEvent.context)
       ) return;
       if (documentEvent.type === "document-direct-edit-recorded") {
         if (documentEvent.mutation) {
@@ -1545,34 +1527,8 @@ export default function Workbench() {
       unsubscribe();
       unsubscribeSnapshot();
     };
-  }, [workspaceController]);
-  useEffect(() => {
-    const session = projectSessionRef.current;
-    session.setObserver(setProjectSnapshot);
-    setProjectSnapshot(session.snapshot);
-    return () => session.setObserver(null);
-  }, []);
+  }, [setSourceViewTransitioning, workspaceController]);
   useEffect(() => () => reviewAnalysisSessionRef.current.dispose(), []);
-  useEffect(() => {
-    const session = runSessionRef.current;
-    session.setObserver(setRunSnapshot);
-    return () => session.setObserver(null);
-  }, []);
-  useEffect(() => {
-    const session = versionSessionRef.current;
-    session.setObserver(setVersionSnapshot);
-    return () => session.setObserver(null);
-  }, []);
-  useEffect(() => {
-    const session = documentSessionRef.current;
-    session.setObserver(setDocumentSnapshot);
-    return () => session.setObserver(null);
-  }, []);
-  useEffect(() => {
-    const session = commentSessionRef.current;
-    session.setObserver(setCommentSnapshot);
-    return () => session.setObserver(null);
-  }, []);
   const reportInterruptionPresence = useCallback((
     interruptionCode: string,
     present: boolean,
@@ -2465,23 +2421,24 @@ export default function Workbench() {
   }, [changeEvents]);
 
   const captureProjectContext = useCallback((): ProjectContext | null => {
-    return projectSessionRef.current.context;
+    return workspaceControllerRef.current?.getCurrentProjectContext() ?? null;
   }, []);
 
   const isCurrentProjectContext = useCallback(
     (context: ProjectContext): boolean => (
-      projectSessionRef.current.matches(context)
+      workspaceControllerRef.current?.matchesCurrentProjectContext(context) ?? false
     ),
     [],
   );
 
   const prepareProjectRecords = useCallback(async () => {
-    const activeSource = projectSessionRef.current.sourcePath;
-    const epoch = projectSessionRef.current.epoch;
+    const currentProject = currentProjectSessionSnapshot();
+    const activeSource = currentProject.sourcePath;
+    const epoch = currentProject.epoch;
     if (
       !workspaceController
       || !activeSource
-      || (projectSessionRef.current.projectId && projectSessionRef.current.documentId)
+      || (currentProject.projectId && currentProject.documentId)
     ) return;
     setProjectRecordsPreparing(true);
     setProjectRecordsError("");
@@ -2491,15 +2448,21 @@ export default function Workbench() {
       );
       if (
         !registered
-        && projectSessionRef.current.epoch === epoch
-        && sameLocalSourcePath(projectSessionRef.current.sourcePath, activeSource)
+        && currentProjectSessionSnapshot().epoch === epoch
+        && sameLocalSourcePath(
+          currentProjectSessionSnapshot().sourcePath,
+          activeSource,
+        )
       ) {
         throw new Error("项目资料没有完成初始化。");
       }
     } catch (cause) {
       if (
-        projectSessionRef.current.epoch !== epoch
-        || !sameLocalSourcePath(projectSessionRef.current.sourcePath, activeSource)
+        currentProjectSessionSnapshot().epoch !== epoch
+        || !sameLocalSourcePath(
+          currentProjectSessionSnapshot().sourcePath,
+          activeSource,
+        )
       ) return;
       setProjectRecordsError(productErrorMessage(
         cause,
@@ -2507,20 +2470,23 @@ export default function Workbench() {
       ));
     } finally {
       if (
-        projectSessionRef.current.epoch === epoch
-        && sameLocalSourcePath(projectSessionRef.current.sourcePath, activeSource)
+        currentProjectSessionSnapshot().epoch === epoch
+        && sameLocalSourcePath(
+          currentProjectSessionSnapshot().sourcePath,
+          activeSource,
+        )
       ) {
         setProjectRecordsPreparing(false);
       }
     }
-  }, [workspaceController]);
+  }, [currentProjectSessionSnapshot, workspaceController]);
 
   const verifyCanvasRendered = useCallback(async (
     expectedHtml: string,
     expectedSha256: string,
     context?: ProjectContext,
   ): Promise<void> => {
-    let expectedGeneration = documentSessionRef.current.canvasGeneration;
+    let expectedGeneration = currentDocumentSessionSnapshot().canvasGeneration;
     const waitForCurrentGeneration = async (): Promise<boolean> => {
       for (let attempt = 0; attempt < 40; attempt += 1) {
         await new Promise<void>((resolve) => window.setTimeout(resolve, 25));
@@ -2528,8 +2494,8 @@ export default function Workbench() {
           throw new Error("项目已切换，停止核对旧项目画布。");
         }
         if (
-          documentSessionRef.current.canvasGeneration !== expectedGeneration
-          || documentSessionRef.current.html !== expectedHtml
+          currentDocumentSessionSnapshot().canvasGeneration !== expectedGeneration
+          || currentDocumentSessionSnapshot().html !== expectedHtml
         ) {
           throw new Error("画布核对期间当前文档已经切换。");
         }
@@ -2548,12 +2514,15 @@ export default function Workbench() {
 
     // A missing acknowledgement is a disposable-Canvas failure, not a user
     // conflict. Rebuild exactly once from the authoritative Document snapshot.
-    expectedGeneration = documentSessionRef.current.reloadCanvas().canvasGeneration;
+    expectedGeneration = requiredWorkspaceController(
+      workspaceControllerRef.current,
+    ).reloadDocumentCanvas().canvasGeneration;
     invalidateCanvasRenderAcks();
     if (await waitForCurrentGeneration()) return;
     throw new Error("画布没有在时限内确认载入目标 HTML。");
   }, [
     acknowledgeCanvasRender,
+    currentDocumentSessionSnapshot,
     invalidateCanvasRenderAcks,
     isCurrentProjectContext,
   ]);
@@ -2574,8 +2543,8 @@ export default function Workbench() {
         const renderedSha256 = await browserSha256(expectedHtml);
         if (
           !cancelled
-          && documentSessionRef.current.html === expectedHtml
-          && documentSessionRef.current.canvasGeneration === expectedGeneration
+          && currentDocumentSessionSnapshot().html === expectedHtml
+          && currentDocumentSessionSnapshot().canvasGeneration === expectedGeneration
         ) {
           acknowledgeCanvasRender("edit", expectedGeneration, renderedSha256);
         }
@@ -2586,26 +2555,27 @@ export default function Workbench() {
     return () => {
       cancelled = true;
     };
-  }, [acknowledgeCanvasRender, canvasGeneration, canvasMode, html]);
+  }, [acknowledgeCanvasRender, canvasGeneration, canvasMode, currentDocumentSessionSnapshot, html]);
 
   const clearAutosaveTimer = useCallback(() => {
     workspaceController?.clearDocumentAutosaveTimer();
   }, [workspaceController]);
 
   const normalizeCurrentGlobalComments = useCallback((): CommentItem[] => {
+    const currentComments = currentCommentSessionSnapshot();
     const normalized = normalizeGlobalCommentTargets(
-      commentSessionRef.current.comments.filter(commentHasContent),
+      currentComments.comments.filter(commentHasContent),
     );
     if (!normalized.changed) return normalized.comments;
     const normalizedById = new Map(
       normalized.comments.map((comment) => [comment.commentId, comment]),
     );
-    const nextComments = commentSessionRef.current.comments.map(
+    const nextComments = currentComments.comments.map(
       (comment) => normalizedById.get(comment.commentId) || comment,
     );
-    commentSessionRef.current.setComments(nextComments);
+    workspaceControllerRef.current?.replaceCommentItems(nextComments);
     return nextComments.filter(commentHasContent);
-  }, []);
+  }, [currentCommentSessionSnapshot]);
   useEffect(() => {
     normalizeCurrentGlobalCommentsRef.current = normalizeCurrentGlobalComments;
   }, [normalizeCurrentGlobalComments]);
@@ -2636,7 +2606,7 @@ export default function Workbench() {
         html: nextHtml,
         mutation,
         sourceTransaction,
-        context: projectSessionRef.current.context || undefined,
+        context: workspaceControllerRef.current?.getCurrentProjectContext() || undefined,
       });
   }, [workspaceController]);
 
@@ -2691,11 +2661,11 @@ export default function Workbench() {
         notice_code: noticeUsageCode(toast.dedupeKey),
         interaction: "auto-dismiss",
         surface: "global",
-      }, projectSessionRef.current.projectId || undefined);
+      }, currentProjectSessionSnapshot().projectId || undefined);
       setToast(null);
     }, dismissAfter);
     return () => window.clearTimeout(timeout);
-  }, [noticeTimerPaused, toast]);
+  }, [currentProjectSessionSnapshot, noticeTimerPaused, toast]);
 
   useEffect(() => {
     if (!previewAttachment) return;
@@ -2787,18 +2757,19 @@ export default function Workbench() {
     source: "clipboard" | "file-picker",
   ) => {
     if (files.length === 0) return;
+    const currentComments = currentCommentSessionSnapshot();
     const targetIsOpen = target.kind === "composer"
-      ? commentSessionRef.current.composerCommentId === target.commentId
+      ? currentComments.composerCommentId === target.commentId
       : (
-          commentSessionRef.current.editSession?.commentId === target.commentId
-          && commentSessionRef.current.comments.some(
+          currentComments.editSession?.commentId === target.commentId
+          && currentComments.comments.some(
             (comment) => comment.commentId === target.commentId,
           )
         );
     if (!targetIsOpen) return;
     const existingCount = target.kind === "composer"
-      ? commentSessionRef.current.composerAttachments.length
-      : commentSessionRef.current.editSession?.draftAttachments.length ?? 0;
+      ? currentComments.composerAttachments.length
+      : currentComments.editSession?.draftAttachments.length ?? 0;
     const attachmentPlan = planAttachmentSelection(files, existingCount);
     const selected = attachmentPlan.accepted;
     const issueNotes: string[] = [];
@@ -2906,12 +2877,13 @@ export default function Workbench() {
       issueNotes.push(`${failedNames.join("、")} 未加入评论`);
     }
     if (issueNotes.length > 0) {
+      const settledComments = currentCommentSessionSnapshot();
       const targetStillOpen = target.kind === "composer"
-        ? commentSessionRef.current.composerCommentId === target.commentId
-        : commentSessionRef.current.editSession?.commentId === target.commentId;
+        ? settledComments.composerCommentId === target.commentId
+        : settledComments.editSession?.commentId === target.commentId;
       const currentAttachmentCount = target.kind === "composer"
-        ? commentSessionRef.current.composerAttachments.length
-        : commentSessionRef.current.editSession?.draftAttachments.length ?? 0;
+        ? settledComments.composerAttachments.length
+        : settledComments.editSession?.draftAttachments.length ?? 0;
       const needsRemoval = attachmentPlan.overLimit.length > 0
         && currentAttachmentCount >= MAX_COMMENT_ATTACHMENTS;
       const notice = {
@@ -2945,6 +2917,7 @@ export default function Workbench() {
       }
     }
   }, [
+    currentCommentSessionSnapshot,
     rememberAttachmentObjectUrl,
     workspaceController,
   ]);
@@ -3135,7 +3108,8 @@ export default function Workbench() {
   }, [projectApplicationSnapshot.status]);
 
   const showProjectInFolder = useCallback(async (requestedSourcePath?: string) => {
-    const activeSourcePath = requestedSourcePath || projectSessionRef.current.sourcePath;
+    const activeSourcePath = requestedSourcePath
+      || currentProjectSessionSnapshot().sourcePath;
     const showInFolder = window.htmlAIProjects?.showInFolder;
     if (!activeSourcePath || !showInFolder) return;
     await runLocalUserAction({
@@ -3152,11 +3126,12 @@ export default function Workbench() {
         dedupeKey: "show-project-in-folder-error",
       }),
     });
-  }, []);
+  }, [currentProjectSessionSnapshot]);
 
   const openCurrentHtmlInDefaultBrowser = useCallback(async () => {
-    const activeSourcePath = projectSessionRef.current.sourcePath;
-    const activeEpoch = projectSessionRef.current.epoch;
+    const activeProject = currentProjectSessionSnapshot();
+    const activeSourcePath = activeProject.sourcePath;
+    const activeEpoch = activeProject.epoch;
     const openInDefaultBrowser = window.htmlAIProjects?.openInDefaultBrowser;
     if (!activeSourcePath || !openInDefaultBrowser) return;
     await runLocalUserAction({
@@ -3176,9 +3151,9 @@ export default function Workbench() {
           );
           return;
         }
-        let launchRevision = documentSessionRef.current.editRevision;
+        let launchRevision = currentDocumentSessionSnapshot().editRevision;
         if (
-          committed.html !== documentSessionRef.current.html
+          committed.html !== currentDocumentSessionSnapshot().html
           || committed.pendingMutation
         ) {
           const enqueued = enqueueAutosave(
@@ -3191,15 +3166,17 @@ export default function Workbench() {
           launchRevision = enqueued.value.revision;
         }
         const persisted = await flushAutosave(launchRevision);
+        const settledProject = currentProjectSessionSnapshot();
+        const settledDocument = currentDocumentSessionSnapshot();
         if (
           !persisted
-          || activeEpoch !== projectSessionRef.current.epoch
-          || !sameLocalSourcePath(projectSessionRef.current.sourcePath, activeSourcePath)
-          || documentSessionRef.current.pendingWrite
-          || documentSessionRef.current.flushPromise
+          || activeEpoch !== settledProject.epoch
+          || !sameLocalSourcePath(settledProject.sourcePath, activeSourcePath)
+          || settledDocument.hasPendingWrite
+          || settledDocument.isFlushing
           || workspaceController?.hasDocumentHistoryAction
-          || documentSessionRef.current.persistState !== "idle"
-          || documentSessionRef.current.lastPersistedRevision < launchRevision
+          || settledDocument.persistState !== "idle"
+          || settledDocument.lastPersistedRevision < launchRevision
         ) {
           throw new Error(
             "当前修改尚未安全写入源 HTML，因此没有打开浏览器。请稍后重试。",
@@ -3218,7 +3195,13 @@ export default function Workbench() {
         dedupeKey: "open-project-in-default-browser-error",
       }),
     });
-  }, [enqueueAutosave, flushAutosave, workspaceController]);
+  }, [
+    currentDocumentSessionSnapshot,
+    currentProjectSessionSnapshot,
+    enqueueAutosave,
+    flushAutosave,
+    workspaceController,
+  ]);
 
   const cancelFileRename = useCallback(() => {
     if (fileRenameBusyRef.current) return;
@@ -3234,10 +3217,11 @@ export default function Workbench() {
       || fileRenameEditingRef.current
       || fileRenameBusyRef.current
       || editorRef.current?.hasPendingNativeEdit()
-      || documentSessionRef.current.pendingWrite
-      || documentSessionRef.current.flushPromise
+      || currentDocumentSessionSnapshot().hasPendingWrite
+      || currentDocumentSessionSnapshot().isFlushing
       || workspaceController?.hasDocumentHistoryAction
-      || documentSessionRef.current.editRevision !== documentSessionRef.current.lastPersistedRevision
+      || currentDocumentSessionSnapshot().editRevision
+        !== currentDocumentSessionSnapshot().lastPersistedRevision
     ) return;
     fileRenameEditingRef.current = true;
     setFileRenameEditing(true);
@@ -3249,6 +3233,7 @@ export default function Workbench() {
     });
   }, [
     canOfferFileRename,
+    currentDocumentSessionSnapshot,
     currentSourceFileStem,
     workspaceController?.hasDocumentHistoryAction,
   ]);
@@ -3316,7 +3301,7 @@ export default function Workbench() {
   ]);
 
   const showProjectRecordsInFolder = useCallback(async () => {
-    const context = projectSessionRef.current.context;
+    const context = workspaceControllerRef.current?.getCurrentProjectContext();
     if (!context || !projectRecordsPath || !workspaceController) return;
     await runLocalUserAction({
       kind: "open-project-records",
@@ -3381,15 +3366,17 @@ export default function Workbench() {
     mutation?: HtmlCanvasMutation,
     sourceTransaction?: HtmlCanvasSourceTransaction,
   ): boolean => {
+    const currentRun = currentRunSessionSnapshot();
+    const currentDocument = currentDocumentSessionSnapshot();
     if (
       runtimeCapabilitiesRef.current.sourceEditing !== "enabled"
       ||
-      runSessionRef.current.activeLocked
+      currentRun.activeLocked
       || projectHydrating
       || projectLoadError
       || isViewTransitioning()
       || workspaceController?.hasDocumentHistoryAction
-      || String(documentSessionRef.current.persistState) === "conflict"
+      || String(currentDocument.persistState) === "conflict"
       || viewMode === "history"
     ) return false;
     try {
@@ -3417,10 +3404,14 @@ export default function Workbench() {
       });
       return false;
     }
+    // enqueueDocumentEdit synchronously publishes its direct-edit audit event.
+    // Re-read the Controller aggregate before reconciling targets so this
+    // mutation cannot overwrite that new event with the pre-command snapshot.
+    const settledComments = currentCommentSessionSnapshot();
     const activeTargets = [
-      ...commentSessionRef.current.comments.map((comment) => comment.target),
-      ...commentSessionRef.current.changeEvents.map((event) => event.target),
-      ...(commentSessionRef.current.composerTarget ? [commentSessionRef.current.composerTarget] : []),
+      ...settledComments.comments.map((comment) => comment.target),
+      ...settledComments.changeEvents.map((event) => event.target),
+      ...(settledComments.composerTarget ? [settledComments.composerTarget] : []),
     ];
     if (activeTargets.length > 0) {
       const deterministicById = new Map(
@@ -3447,16 +3438,16 @@ export default function Workbench() {
           resolution: "orphaned",
         };
       };
-      const nextComments = commentSessionRef.current.comments.map((comment) => ({
+      const nextComments = settledComments.comments.map((comment) => ({
         ...comment,
         target: refreshedTarget(comment.target),
       }));
-      const nextEvents = commentSessionRef.current.changeEvents.map((event) => ({
+      const nextEvents = settledComments.changeEvents.map((event) => ({
         ...event,
         target: refreshedTarget(event.target),
       }));
-      const currentDraftTarget = commentSessionRef.current.composerTarget;
-      commentSessionRef.current.update({
+      const currentDraftTarget = settledComments.composerTarget;
+      workspaceController?.replaceCommentWorkingCopy({
         comments: nextComments,
         changeEvents: nextEvents,
         ...(currentDraftTarget
@@ -3464,24 +3455,28 @@ export default function Workbench() {
           : {}),
       });
     }
-    const renderGeneration = documentSessionRef.current.canvasGeneration;
+    const renderGeneration = currentDocument.canvasGeneration;
     void browserSha256(nextHtml).then((renderedSha256) => {
+      const settledDocument = currentDocumentSessionSnapshot();
       if (
-        documentSessionRef.current.html === nextHtml
-        && documentSessionRef.current.canvasGeneration === renderGeneration
+        settledDocument.html === nextHtml
+        && settledDocument.canvasGeneration === renderGeneration
         && editorRef.current?.getRenderedSourceHtml() === nextHtml
       ) {
         acknowledgeCanvasRender("edit", renderGeneration, renderedSha256);
       }
     });
-    setActiveRun((run) => run?.status === "complete" ? null : run);
+    workspaceController?.clearCompletedRun();
     return true;
   }, [
     acknowledgeCanvasRender,
+    currentCommentSessionSnapshot,
+    currentDocumentSessionSnapshot,
+    currentRunSessionSnapshot,
     enqueueAutosave,
+    isViewTransitioning,
     projectHydrating,
     projectLoadError,
-    setActiveRun,
     viewMode,
     workspaceController,
   ]);
@@ -3511,7 +3506,7 @@ export default function Workbench() {
     }
     const nextHtml = committed?.html
       || editorRef.current?.getSourceHtml()
-      || documentSessionRef.current.html;
+      || currentDocumentSessionSnapshot().html;
     const api = window.htmlAIProjects;
     if (!api?.exportHtmlCopy) {
       downloadHtml(nextHtml, projectName);
@@ -3526,7 +3521,7 @@ export default function Workbench() {
     try {
       const result = await api.exportHtmlCopy({
         html: nextHtml,
-        sourcePath: projectSessionRef.current.sourcePath,
+        sourcePath: currentProjectSessionSnapshot().sourcePath,
         suggestedName: projectName,
       });
       if (result) {
@@ -3554,7 +3549,13 @@ export default function Workbench() {
         action: { id: "retry-export", label: "重新选择位置" },
       });
     }
-  }, [deferEditorCommand, projectName]);
+  }, [
+    currentDocumentSessionSnapshot,
+    currentProjectSessionSnapshot,
+    deferEditorCommand,
+    isViewTransitioning,
+    projectName,
+  ]);
   useEffect(() => {
     deferredEditorReplayRef.current.exportCurrentHtml = () => {
       void exportCurrentHtml(true);
@@ -3618,9 +3619,10 @@ export default function Workbench() {
     ) return;
     const hasUnwrittenLocalChanges = Boolean(
       editorRef.current?.hasPendingNativeEdit()
-      || documentSessionRef.current.pendingWrite
-      || documentSessionRef.current.flushPromise
-      || documentSessionRef.current.editRevision > documentSessionRef.current.lastPersistedRevision
+      || currentDocumentSessionSnapshot().hasPendingWrite
+      || currentDocumentSessionSnapshot().isFlushing
+      || currentDocumentSessionSnapshot().editRevision
+        > currentDocumentSessionSnapshot().lastPersistedRevision
       || persistState === "failed"
       || persistState === "preview-dirty"
     );
@@ -3675,6 +3677,7 @@ export default function Workbench() {
   }, [
     beginSourceTransition,
     captureProjectContext,
+    currentDocumentSessionSnapshot,
     deferEditorCommand,
     finishSourceTransition,
     isCurrentProjectContext,
@@ -3723,13 +3726,13 @@ export default function Workbench() {
   ): Promise<boolean> => {
     if (
       runtimeCapabilitiesRef.current.sourceEditing !== "enabled"
-      || !projectSessionRef.current.sourcePath
-      || runSessionRef.current.activeLocked
+      || !currentProjectSessionSnapshot().sourcePath
+      || currentRunSessionSnapshot().activeLocked
       || projectHydrating
       || projectLoadError
       || isViewTransitioning()
       || viewMode === "history"
-      || documentSessionRef.current.persistState === "conflict"
+      || currentDocumentSessionSnapshot().persistState === "conflict"
       || !workspaceController
     ) return false;
     if (!fromDeferred) {
@@ -3785,7 +3788,11 @@ export default function Workbench() {
     return false;
   }, [
     captureProjectContext,
+    currentDocumentSessionSnapshot,
+    currentProjectSessionSnapshot,
+    currentRunSessionSnapshot,
     deferEditorCommand,
+    isViewTransitioning,
     projectHydrating,
     projectLoadError,
     viewMode,
@@ -3950,27 +3957,34 @@ export default function Workbench() {
   }, [canvasMode, composerOpen, editingCommentId, focusedCommentId]);
 
   const beginTargetRelink = useCallback((itemId: string) => {
+    const currentComments = currentCommentSessionSnapshot();
     relinkingTargetRef.current = itemId;
     relinkSelectionArmedRef.current = false;
     setRelinkingTarget(itemId);
     setPendingDeleteCommentId(null);
     setEditingCommentId(null);
-    if (!commentEditSessionHasChanges(commentSessionRef.current.editSession)) {
-      commentSessionRef.current.setEditSession(null);
+    if (!commentEditSessionHasChanges(currentComments.editSession)) {
+      workspaceControllerRef.current?.setCommentEditSession(null);
       commentEditResumePendingRef.current = null;
     }
     editorRef.current?.clearSelection();
     setSelection(null);
     if (itemId !== "__composer") {
       updateFocusedComment(itemId);
-      const comment = commentSessionRef.current.comments.find(
+      const comment = currentComments.comments.find(
         (item) => item.commentId === itemId,
       );
       if (comment) queueReviewPairReveal(comment.target, itemId);
     }
-  }, [queueReviewPairReveal, updateFocusedComment]);
+  }, [
+    currentCommentSessionSnapshot,
+    queueReviewPairReveal,
+    updateFocusedComment,
+  ]);
 
   const finishTargetRelink = useCallback((target: HtmlCanvasSelection): boolean => {
+    const controller = workspaceControllerRef.current;
+    const currentComments = currentCommentSessionSnapshot();
     const relinkingId = relinkingTargetRef.current;
     if (
       !relinkingId
@@ -3978,11 +3992,11 @@ export default function Workbench() {
       || !canSaveCommentTarget(target)
     ) return false;
     if (relinkingId === "__composer") {
-      const currentTarget = commentSessionRef.current.composerTarget;
+      const currentTarget = currentComments.composerTarget;
       const nextTarget = currentTarget
         ? { ...target, id: currentTarget.id }
         : target;
-      commentSessionRef.current.setComposerTarget(nextTarget);
+      controller?.setCommentComposerTarget(nextTarget);
       setSelection(nextTarget);
       relinkingTargetRef.current = null;
       relinkSelectionArmedRef.current = false;
@@ -3992,7 +4006,7 @@ export default function Workbench() {
       requestComposerFocus();
       return true;
     }
-    const current = commentSessionRef.current.comments.find(
+    const current = currentComments.comments.find(
       (comment) => comment.commentId === relinkingId,
     );
     if (!current) {
@@ -4002,7 +4016,7 @@ export default function Workbench() {
       return false;
     }
     const nextTarget = { ...target, id: current.target.id };
-    const nextComments = commentSessionRef.current.comments.map((comment) => (
+    const nextComments = currentComments.comments.map((comment) => (
       comment.commentId === relinkingId
         ? {
             ...comment,
@@ -4011,7 +4025,7 @@ export default function Workbench() {
           }
         : comment
     ));
-    commentSessionRef.current.setComments(nextComments);
+    controller?.replaceCommentItems(nextComments);
     setSelection(nextTarget);
     relinkingTargetRef.current = null;
     relinkSelectionArmedRef.current = false;
@@ -4036,6 +4050,7 @@ export default function Workbench() {
     return true;
   }, [
     beginTargetRelink,
+    currentCommentSessionSnapshot,
     queueReviewPairReveal,
     requestComposerFocus,
     updateFocusedComment,
@@ -4054,14 +4069,14 @@ export default function Workbench() {
 
   const clearCurrentComposer = useCallback(() => {
     composerFocusPendingRef.current = false;
-    commentSessionRef.current.clearComposer();
+    workspaceControllerRef.current?.clearCommentComposer();
     setComposerOpen(false);
     setPendingDeleteCommentId(null);
     updateFocusedComment(null);
   }, [updateFocusedComment]);
 
   const resumeCurrentComposer = useCallback(() => {
-    const target = commentSessionRef.current.composerTarget;
+    const target = currentCommentSessionSnapshot().composerTarget;
     if (!target) return;
     if (!canSaveCommentTarget(target)) {
       beginTargetRelink("__composer");
@@ -4069,7 +4084,7 @@ export default function Workbench() {
     }
     const located = editorRef.current?.select(target, { showToolbar: false });
     const nextTarget = located || target;
-    commentSessionRef.current.setComposerTarget(nextTarget);
+    workspaceControllerRef.current?.setCommentComposerTarget(nextTarget);
     setSelection(nextTarget);
     updateFocusedComment(null);
     setPendingDeleteCommentId(null);
@@ -4081,6 +4096,7 @@ export default function Workbench() {
     requestComposerFocus();
   }, [
     beginTargetRelink,
+    currentCommentSessionSnapshot,
     queueReviewPairReveal,
     requestComposerFocus,
     updateFocusedComment,
@@ -4105,26 +4121,31 @@ export default function Workbench() {
   }, []);
 
   const openCommentComposer = useCallback((target: HtmlCanvasSelection) => {
+    const controller = workspaceControllerRef.current;
+    const currentRun = currentRunSessionSnapshot();
+    const currentDocument = currentDocumentSessionSnapshot();
+    const currentComments = currentCommentSessionSnapshot();
+    if (!controller) return;
     if (relinkingTargetRef.current && finishTargetRelink(target)) return;
     if (attachmentUploadCount > 0) return;
     if (
-      runSessionRef.current.activeLocked
+      currentRun.activeLocked
       || projectHydrating
       || projectLoadError
       || isViewTransitioning()
-      || documentSessionRef.current.persistState === "conflict"
+      || currentDocument.persistState === "conflict"
       || viewMode === "history"
     ) return;
     if (!canSaveCommentTarget(target)) {
       return;
     }
-    const currentEdit = commentSessionRef.current.editSession;
+    const currentEdit = currentComments.editSession;
     if (currentEdit && commentEditSessionHasChanges(currentEdit)) {
       showUnfinishedCommentEditNotice(currentEdit);
       return;
     }
     if (currentEdit) {
-      commentSessionRef.current.setEditSession(null);
+      controller.setCommentEditSession(null);
       commentEditResumePendingRef.current = null;
       setEditingCommentId(null);
     }
@@ -4132,13 +4153,13 @@ export default function Workbench() {
     // registered HTML. Start identity creation before accepting text so crash
     // recovery and the Bridge draft share one authority.
     void prepareProjectRecords();
-    const recoveredDraftTarget = commentSessionRef.current.composerTarget;
+    const recoveredDraftTarget = currentComments.composerTarget;
     if (
       recoveredDraftTarget
       && recoveredDraftTarget.id !== target.id
       && (
-        commentSessionRef.current.composerDraft.trim()
-        || commentSessionRef.current.composerAttachments.length > 0
+        currentComments.composerDraft.trim()
+        || currentComments.composerAttachments.length > 0
       )
     ) {
       setToast({
@@ -4153,23 +4174,23 @@ export default function Workbench() {
       return;
     }
     setSelection(target);
-    const resumesRecoveredDraft = commentSessionRef.current.composerTarget?.id === target.id;
+    const resumesRecoveredDraft = currentComments.composerTarget?.id === target.id;
     if (!resumesRecoveredDraft) {
       const nextCommentId = recordId("comment", commentCounter.current++);
-      commentSessionRef.current.update({
+      controller.replaceCommentWorkingCopy({
         composerDraft: "",
         composerCommentId: nextCommentId,
         composerAttachments: [],
         composerTarget: target,
       });
-    } else if (!commentSessionRef.current.composerCommentId) {
+    } else if (!currentComments.composerCommentId) {
       const nextCommentId = recordId("comment", commentCounter.current++);
-      commentSessionRef.current.update({
+      controller.replaceCommentWorkingCopy({
         composerCommentId: nextCommentId,
         composerTarget: target,
       });
     } else {
-      commentSessionRef.current.setComposerTarget(target);
+      controller.setCommentComposerTarget(target);
     }
     updateFocusedComment(null);
     setComposerOpen(true);
@@ -4177,7 +4198,11 @@ export default function Workbench() {
     requestComposerFocus();
   }, [
     attachmentUploadCount,
+    currentCommentSessionSnapshot,
+    currentDocumentSessionSnapshot,
+    currentRunSessionSnapshot,
     finishTargetRelink,
+    isViewTransitioning,
     prepareProjectRecords,
     projectHydrating,
     projectLoadError,
@@ -4223,9 +4248,10 @@ export default function Workbench() {
   const closeCommentComposer = useCallback(() => {
     if (attachmentUploadCount > 0) return;
     setPendingDeleteCommentId(null);
+    const currentComments = currentCommentSessionSnapshot();
     if (
-      commentSessionRef.current.composerDraft.trim()
-      || commentSessionRef.current.composerAttachments.length > 0
+      currentComments.composerDraft.trim()
+      || currentComments.composerAttachments.length > 0
     ) {
       setComposerOpen(false);
       updateFocusedComment(null);
@@ -4235,6 +4261,7 @@ export default function Workbench() {
   }, [
     attachmentUploadCount,
     clearCurrentComposer,
+    currentCommentSessionSnapshot,
     updateFocusedComment,
   ]);
 
@@ -4268,12 +4295,15 @@ export default function Workbench() {
   ]);
 
   const addComment = useCallback(async () => {
+    const currentRun = currentRunSessionSnapshot();
+    const currentDocument = currentDocumentSessionSnapshot();
+    const currentComments = currentCommentSessionSnapshot();
     if (
-      runSessionRef.current.activeLocked
+      currentRun.activeLocked
       || projectHydrating
       || projectLoadError
       || isViewTransitioning()
-      || documentSessionRef.current.persistState === "conflict"
+      || currentDocument.persistState === "conflict"
       || viewMode === "history"
     ) return;
     if (!draftTarget) {
@@ -4288,7 +4318,7 @@ export default function Workbench() {
       return;
     }
     if (attachmentUploadCount > 0) return;
-    const commentId = commentSessionRef.current.composerCommentId
+    const commentId = currentComments.composerCommentId
       || draftCommentId
       || recordId("comment", commentCounter.current++);
     const outcome = await requiredWorkspaceController(workspaceController)
@@ -4323,13 +4353,18 @@ export default function Workbench() {
       attachment_count: countBucket((comment.attachments ?? []).length),
       has_image: (comment.attachments ?? []).some((attachment) => attachment.kind === "image"),
       has_file: (comment.attachments ?? []).some((attachment) => attachment.kind === "file"),
-    }, projectSessionRef.current.projectId || undefined);
+    }, currentProjectSessionSnapshot().projectId || undefined);
   }, [
     draft,
     draftAttachments,
     draftCommentId,
     draftTarget,
     attachmentUploadCount,
+    currentCommentSessionSnapshot,
+    currentDocumentSessionSnapshot,
+    currentProjectSessionSnapshot,
+    currentRunSessionSnapshot,
+    isViewTransitioning,
     projectHydrating,
     projectLoadError,
     queueReviewPairReveal,
@@ -4351,11 +4386,14 @@ export default function Workbench() {
     comment: CommentItem,
     focusText = true,
   ): boolean => {
+    const controller = workspaceControllerRef.current;
+    const currentComments = currentCommentSessionSnapshot();
+    if (!controller) return false;
     if (
-      commentSessionRef.current.composerTarget
+      currentComments.composerTarget
       && (
-        commentSessionRef.current.composerDraft.trim()
-        || commentSessionRef.current.composerAttachments.length > 0
+        currentComments.composerDraft.trim()
+        || currentComments.composerAttachments.length > 0
       )
     ) {
       setToast({
@@ -4369,8 +4407,8 @@ export default function Workbench() {
       });
       return false;
     }
-    if (commentSessionRef.current.composerTarget) clearCurrentComposer();
-    const currentSession = commentSessionRef.current.editSession;
+    if (currentComments.composerTarget) clearCurrentComposer();
+    const currentSession = currentComments.editSession;
     if (
       currentSession
       && currentSession.commentId !== comment.commentId
@@ -4390,7 +4428,7 @@ export default function Workbench() {
             draftAttachments: [...(comment.attachments ?? [])],
           }
     );
-    commentSessionRef.current.setEditSession(nextSession);
+    controller.setCommentEditSession(nextSession);
     setPendingDeleteCommentId(null);
     setEditingCommentId(comment.commentId);
     queueReviewCommentFocus(comment.target, comment.commentId);
@@ -4405,14 +4443,16 @@ export default function Workbench() {
     return true;
   }, [
     clearCurrentComposer,
+    currentCommentSessionSnapshot,
     queueReviewCommentFocus,
     showUnfinishedCommentEditNotice,
   ]);
 
   const cancelCommentEdit = useCallback((revealComment = true) => {
     if (attachmentUploadCount > 0) return;
-    const session = commentSessionRef.current.editSession;
-    const current = commentSessionRef.current.comments.find(
+    const currentComments = currentCommentSessionSnapshot();
+    const session = currentComments.editSession;
+    const current = currentComments.comments.find(
       (comment) => comment.commentId === session?.commentId,
     );
     const outcome = workspaceController?.cancelCommentEdit({
@@ -4435,19 +4475,22 @@ export default function Workbench() {
     }
   }, [
     attachmentUploadCount,
+    currentCommentSessionSnapshot,
     forgetAttachmentObjectUrl,
     queueReviewCommentFocus,
     workspaceController,
   ]);
 
   const resumeCommentEdit = useCallback((commentId?: string) => {
-    const session = commentSessionRef.current.editSession;
+    const controller = workspaceControllerRef.current;
+    const currentComments = currentCommentSessionSnapshot();
+    const session = currentComments.editSession;
     if (!session || (commentId && session.commentId !== commentId)) return;
-    const current = commentSessionRef.current.comments.find(
+    const current = currentComments.comments.find(
       (comment) => comment.commentId === session.commentId,
     );
     if (!current) {
-      commentSessionRef.current.setEditSession(null);
+      controller?.setCommentEditSession(null);
       commentEditResumePendingRef.current = null;
       setEditingCommentId(null);
       return;
@@ -4477,19 +4520,21 @@ export default function Workbench() {
     }
   }, [
     commentTargetLayouts,
+    currentCommentSessionSnapshot,
     queueReviewCommentFocus,
   ]);
 
   const updateCommentEditDraft = useCallback((draftText: string) => {
-    const current = commentSessionRef.current.editSession;
+    const current = currentCommentSessionSnapshot().editSession;
     if (!current) return;
     const nextSession = { ...current, draftText };
-    commentSessionRef.current.setEditSession(nextSession);
-  }, []);
+    workspaceControllerRef.current?.setCommentEditSession(nextSession);
+  }, [currentCommentSessionSnapshot]);
 
   const confirmCommentEdit = useCallback((commentId: string) => {
-    const current = commentSessionRef.current.comments.find((comment) => comment.commentId === commentId);
-    const session = commentSessionRef.current.editSession;
+    const currentComments = currentCommentSessionSnapshot();
+    const current = currentComments.comments.find((comment) => comment.commentId === commentId);
+    const session = currentComments.editSession;
     if (!current || !session || session.commentId !== commentId) {
       cancelCommentEdit();
       return;
@@ -4512,6 +4557,7 @@ export default function Workbench() {
   }, [
     attachmentUploadCount,
     cancelCommentEdit,
+    currentCommentSessionSnapshot,
     forgetAttachmentObjectUrl,
     queueReviewCommentFocus,
     workspaceController,
@@ -4545,16 +4591,19 @@ export default function Workbench() {
   ]);
 
   useEffect(() => {
-    const session = commentSessionRef.current.editSession;
+    const currentComments = currentCommentSessionSnapshot();
+    const session = currentComments.editSession;
     if (!session) return;
-    const editedComment = commentSessionRef.current.comments.find(
+    const editedComment = currentComments.comments.find(
       (comment) => comment.commentId === session.commentId,
     );
     if (!editedComment) {
-      commentSessionRef.current.setEditSession(null);
+      workspaceControllerRef.current?.setCommentEditSession(null);
       commentEditResumePendingRef.current = null;
-      setEditingCommentId(null);
-      return;
+      const frame = window.requestAnimationFrame(() => {
+        setEditingCommentId(null);
+      });
+      return () => window.cancelAnimationFrame(frame);
     }
     const targetStatus = commentTargetLayouts[editedComment.target.id]?.status;
     const leftEditingContext = (
@@ -4567,31 +4616,38 @@ export default function Workbench() {
     );
     if (!leftEditingContext) return;
     if (!commentEditSessionHasChanges(session)) {
-      cancelCommentEdit(false);
-      return;
+      const frame = window.requestAnimationFrame(() => {
+        cancelCommentEdit(false);
+      });
+      return () => window.cancelAnimationFrame(frame);
     }
     if (editingCommentId === session.commentId) {
-      setEditingCommentId(null);
+      const frame = window.requestAnimationFrame(() => {
+        setEditingCommentId(null);
+      });
+      return () => window.cancelAnimationFrame(frame);
     }
   }, [
     cancelCommentEdit,
     canvasMode,
     commentEditSession,
     commentTargetLayouts,
+    currentCommentSessionSnapshot,
     editingCommentId,
     focusedCommentId,
   ]);
 
   useEffect(() => {
     const pendingId = commentEditResumePendingRef.current;
-    const session = commentSessionRef.current.editSession;
+    const currentComments = currentCommentSessionSnapshot();
+    const session = currentComments.editSession;
     if (
       canvasMode !== "edit"
       || !pendingId
       || !session
       || session.commentId !== pendingId
     ) return;
-    const current = commentSessionRef.current.comments.find(
+    const current = currentComments.comments.find(
       (comment) => comment.commentId === pendingId,
     );
     if (!current) {
@@ -4613,6 +4669,7 @@ export default function Workbench() {
     canvasMode,
     commentEditSession,
     commentTargetLayouts,
+    currentCommentSessionSnapshot,
     queueReviewCommentFocus,
   ]);
 
@@ -4768,7 +4825,7 @@ export default function Workbench() {
   }, [projectRulesSnapshot.open, workspaceController]);
 
   const revealActiveRunInFinder = useCallback(async () => {
-    const activeSourcePath = projectSessionRef.current.sourcePath;
+    const activeSourcePath = currentProjectSessionSnapshot().sourcePath;
     const requestPath = activeRun?.requestPath;
     const revealRequestFolder = window.htmlAIProjects?.revealRequestFolder;
     if (!activeSourcePath || !requestPath || !revealRequestFolder) return;
@@ -4789,10 +4846,10 @@ export default function Workbench() {
         dedupeKey: "reveal-request-folder",
       }),
     });
-  }, [activeRun?.requestPath]);
+  }, [activeRun?.requestPath, currentProjectSessionSnapshot]);
 
   const revealVersionInFinder = useCallback(async (version: Pick<Version, "id">) => {
-    const activeSourcePath = projectSessionRef.current.sourcePath;
+    const activeSourcePath = currentProjectSessionSnapshot().sourcePath;
     const revealVersionFile = window.htmlAIProjects?.revealVersionFile;
     if (!activeSourcePath || !revealVersionFile) return;
     await runLocalUserAction({
@@ -4809,11 +4866,15 @@ export default function Workbench() {
         dedupeKey: `reveal-version-file-${version.id}`,
       }),
     });
-  }, []);
+  }, [currentProjectSessionSnapshot]);
 
   const generateRequest = useCallback(async (fromDeferred = false) => {
-    if (runSessionRef.current.submissionPending) return;
-    const submissionSourcePath = projectSessionRef.current.sourcePath;
+    const currentRun = currentRunSessionSnapshot();
+    const currentProject = currentProjectSessionSnapshot();
+    const currentDocument = currentDocumentSessionSnapshot();
+    const currentComments = currentCommentSessionSnapshot();
+    if (currentRun.submissionPending) return;
+    const submissionSourcePath = currentProject.sourcePath;
     if (!submissionSourcePath) {
       if (typeof window !== "undefined" && !window.htmlAIProjects) return;
       void openProject();
@@ -4825,18 +4886,18 @@ export default function Workbench() {
       || projectLoadError
       || isViewTransitioning()
       || viewMode === "history"
-      || documentSessionRef.current.persistState === "failed"
-      || documentSessionRef.current.persistState === "conflict"
+      || currentDocument.persistState === "failed"
+      || currentDocument.persistState === "conflict"
     ) return;
-    if (runSessionRef.current.activeLocked) {
+    if (currentRun.activeLocked) {
       setDrawer("handoff");
       return;
     }
     if (
-      commentSessionRef.current.composerTarget
+      currentComments.composerTarget
       && (
-        commentSessionRef.current.composerDraft.trim()
-        || commentSessionRef.current.composerAttachments.length > 0
+        currentComments.composerDraft.trim()
+        || currentComments.composerAttachments.length > 0
       )
     ) {
       setToast({
@@ -4850,7 +4911,7 @@ export default function Workbench() {
       });
       return;
     }
-    const unfinishedEdit = commentSessionRef.current.editSession;
+    const unfinishedEdit = currentComments.editSession;
     if (unfinishedEdit && commentEditSessionHasChanges(unfinishedEdit)) {
       showUnfinishedCommentEditNotice(unfinishedEdit);
       return;
@@ -4877,7 +4938,7 @@ export default function Workbench() {
     }
     if (outcome.status === "blocked") {
       if (outcome.code === "RUN_SUBMISSION_COMMENT_EDIT") {
-        const currentEdit = commentSessionRef.current.editSession;
+        const currentEdit = currentCommentSessionSnapshot().editSession;
         if (currentEdit) showUnfinishedCommentEditNotice(currentEdit);
         return;
       }
@@ -4886,7 +4947,7 @@ export default function Workbench() {
         return;
       }
       if (outcome.code === "RUN_SUBMISSION_TARGET_UNSAFE") {
-        const unsafeTargets = commentSessionRef.current.comments.filter(
+        const unsafeTargets = currentCommentSessionSnapshot().comments.filter(
           (comment) => commentHasContent(comment) && !canLocateTarget(comment.target),
         );
         setToast(unsafeCommentTargetsNotice(unsafeTargets));
@@ -4933,9 +4994,14 @@ export default function Workbench() {
     });
   }, [
     currentBasedOnVersionId,
+    currentCommentSessionSnapshot,
+    currentDocumentSessionSnapshot,
+    currentProjectSessionSnapshot,
+    currentRunSessionSnapshot,
     deferEditorCommand,
     latestVersionId,
     openProject,
+    isViewTransitioning,
     projectHydrating,
     projectLoadError,
     projectName,
@@ -5066,12 +5132,13 @@ export default function Workbench() {
         setToast(null);
       }
     } finally {
-      const visibleRun = runSessionRef.current.activeRun;
+      const visibleRun = currentRunSessionSnapshot().activeRun;
+      const currentProject = currentProjectSessionSnapshot();
       if (
-        sameLocalSourcePath(projectSessionRef.current.sourcePath, run.sourcePath)
+        sameLocalSourcePath(currentProject.sourcePath, run.sourcePath)
         || (
-          projectSessionRef.current.projectId === run.projectId
-          && projectSessionRef.current.documentId === run.documentId
+          currentProject.projectId === run.projectId
+          && currentProject.documentId === run.documentId
         )
         || (
           visibleRun?.requestId === run.requestId
@@ -5081,10 +5148,16 @@ export default function Workbench() {
         setOpeningReadyVersion(false);
       }
     }
-  }, [activeRun, readyReviewSession, workspaceController]);
+  }, [
+    activeRun,
+    currentProjectSessionSnapshot,
+    currentRunSessionSnapshot,
+    readyReviewSession,
+    workspaceController,
+  ]);
 
   const reviewReadyResult = useCallback(async () => {
-    const run = runSessionRef.current.activeRun;
+    const run = currentRunSessionSnapshot().activeRun;
     if (
       !run
       || !workspaceController
@@ -5102,7 +5175,7 @@ export default function Workbench() {
       }
       const candidate = outcome.value;
       const operationKey = candidate.operationKey;
-      const currentRun = runSessionRef.current.activeRun;
+      const currentRun = currentRunSessionSnapshot().activeRun;
       if (
         !currentRun
         || currentRun.status !== "ready-to-open"
@@ -5128,7 +5201,7 @@ export default function Workbench() {
       ) {
         throw new Error("当前冻结 HTML 已发生变化，无法开始安全对比。");
       }
-      const reviewComments = commentSessionRef.current.comments
+      const reviewComments = currentCommentSessionSnapshot().comments
         .filter(commentHasContent)
         .map((comment) => ({
           ...comment,
@@ -5193,7 +5266,7 @@ export default function Workbench() {
           };
         },
       });
-      const analyzedRun = runSessionRef.current.activeRun;
+      const analyzedRun = currentRunSessionSnapshot().activeRun;
       if (
         !analyzedRun
         || analyzedRun.status !== "ready-to-open"
@@ -5231,6 +5304,8 @@ export default function Workbench() {
     }
   }, [
     captureProjectContext,
+    currentCommentSessionSnapshot,
+    currentRunSessionSnapshot,
     fenceAndFreezeCurrentCanvas,
     isCurrentProjectContext,
     reviewPreparing,
@@ -5239,7 +5314,7 @@ export default function Workbench() {
 
   useEffect(() => {
     if (!readyReviewSession) return;
-    const currentRun = runSessionRef.current.activeRun;
+    const currentRun = currentRunSessionSnapshot().activeRun;
     if (
       !currentRun
       || currentRun.status !== "ready-to-open"
@@ -5252,7 +5327,12 @@ export default function Workbench() {
       return () => window.cancelAnimationFrame(frame);
     }
     return undefined;
-  }, [activeRun, openingReadyVersion, readyReviewSession]);
+  }, [
+    activeRun,
+    currentRunSessionSnapshot,
+    openingReadyVersion,
+    readyReviewSession,
+  ]);
 
   const cancelActiveRun = useCallback(async ({
     agentMayBeRunning = false,
@@ -5855,22 +5935,14 @@ export default function Workbench() {
     setCommentRailOffset(commentRailMinimumOffset);
   }, [commentRailFollowsFocus, commentRailMinimumOffset]);
   const returnToEditingFromTerminalRun = () => {
-    const completedRun = runSessionRef.current.activeRun;
-    if (completedRun?.sourcePath) {
-      runSessionRef.current.rememberOutcome(completedRun);
-      runSessionRef.current.clearHandoff(completedRun.sourcePath);
-    }
-    runSessionRef.current.clearActiveRun();
-    runSessionRef.current.clearActiveHandoff();
+    workspaceControllerRef.current?.dismissActiveRun();
     setHandoffPreviewOpen(false);
     setCanvasMode("edit");
     setDrawer(null);
     editorRef.current?.unlockNow?.();
   };
   const reopenRecentRunOutcome = () => {
-    const outcome = runSessionRef.current.outcomeForSource(sourcePath);
-    if (!outcome) return;
-    runSessionRef.current.setActiveRun(outcome);
+    if (!workspaceControllerRef.current?.reopenRecentRunOutcome(sourcePath)) return;
     setHandoffPreviewOpen(false);
     setCanvasMode("edit");
     setDrawer("handoff");
@@ -5898,10 +5970,12 @@ export default function Workbench() {
         openAttachmentPicker(action.target, action.accept || "all");
         return;
       case "review-comment-attachments":
+        {
+          const currentComments = currentCommentSessionSnapshot();
         if (action.target.kind === "composer") {
-          const target = commentSessionRef.current.composerTarget;
+          const target = currentComments.composerTarget;
           if (
-            commentSessionRef.current.composerCommentId === action.target.commentId
+            currentComments.composerCommentId === action.target.commentId
             && target
           ) {
             setComposerOpen(true);
@@ -5909,12 +5983,13 @@ export default function Workbench() {
             requestComposerFocus();
           }
         } else {
-          const comment = commentSessionRef.current.comments.find(
+          const comment = currentComments.comments.find(
             (item) => item.commentId === action.target.commentId,
           );
           if (comment) focusCommentTarget(comment.target, comment.commentId);
         }
         return;
+        }
       case "relink-target":
         resumeSubmissionAfterRelinkRef.current = action.resumeSubmission === true;
         beginTargetRelink(action.commentId);
@@ -6533,7 +6608,7 @@ export default function Workbench() {
                     void requestSourceHistoryAction(direction);
                   }}
                   onRequestReload={() => {
-                    if (projectSessionRef.current.sourcePath) {
+                    if (currentProjectSessionSnapshot().sourcePath) {
                       void reloadCurrentSource();
                     } else {
                       void openProject();
@@ -6851,12 +6926,13 @@ export default function Workbench() {
                     ? "输入对整个页面的修改要求…"
                     : "输入对这部分内容的修改要求…"}
                   onChange={(event) => {
-                    commentSessionRef.current.setComposerDraft(
+                    workspaceControllerRef.current?.setCommentComposerDraft(
                       event.target.value,
                     );
                   }}
                   onPaste={(event) => {
-                    const commentId = draftCommentId || commentSessionRef.current.composerCommentId;
+                    const commentId = draftCommentId
+                      || currentCommentSessionSnapshot().composerCommentId;
                     if (commentId) pasteImages(event, { kind: "composer", commentId });
                   }}
                   onKeyDown={(event) => {
@@ -7840,7 +7916,7 @@ export default function Workbench() {
         open={cancelRunConfirmationOpen}
         onClose={() => setCancelRunConfirmationKey(null)}
         onConfirm={() => {
-          const currentRun = runSessionRef.current.activeRun;
+          const currentRun = currentRunSessionSnapshot().activeRun;
           const matchesConfirmation = Boolean(
             currentRun
             && cancelRunConfirmationKey

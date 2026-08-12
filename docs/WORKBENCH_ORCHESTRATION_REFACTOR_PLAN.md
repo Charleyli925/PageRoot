@@ -1,9 +1,10 @@
 # Workbench 应用编排收口执行计划
 
-- 状态：**PR-1 至 PR-6 已合并至 `main`；PR-7 已获实施授权，但审计触发 §13.6：必须先以独立 PR 接管安全重命名与 `PROJECT.md` 规则工作流，随后才可执行最终收口**
+- 状态：**PR-1 至 PR-7b 已合并至 `main`；PR-7 最终 Composition/hard-gate 实现已在独立分支完成并通过任务门禁，待 Draft PR 审阅。尚未 Ready、合并、打 tag 或发布。**
 - 规划基线：`main@37bba7779b27c0a42a52f98ec84a377b964bf4eb`
 - 基线 Tree：`0e074849493e5f9db9e89621e0a1c1a4910b8fa1`
 - 基线日期：2026-08-11
+- PR-7 实施基线：`origin/main@8fffb0529239b537f25fc0463921325babdf167f`
 - 目标边界：Renderer Workbench 与现有 Application Sessions 之间的应用编排
 - 明确不属于本计划：大文件 Patch transport、Bridge 路由或持久 Schema 重写、UI 改版、全仓 TypeScript 迁移、打包与发布
 
@@ -1506,6 +1507,32 @@ npm run task:finish
   profiler/测试确认没有无界 rerender，但本计划不以微优化改变 owner；
 - JS + `.d.ts` 仍有类型漂移风险；本 PR 只保证公开 Controller contract 和 unit tests，
   全仓 TS 迁移仍是独立事项。
+
+### 13.8 实施记录（2026-08-12）
+
+- 隔离分支 `refactor/final-composition-hard-gate-pr7` 从
+  `origin/main@8fffb0529239b537f25fc0463921325babdf167f` 创建；它在 PR-7a、PR-7b
+  已合并后只完成本节最终收口，不提前进入任何后续重构。
+- 新增 `createRuntimeWorkspaceController()` 作为唯一生产组合入口：它构造唯一 typed
+  Bridge client、共享 `RunSession` 和其余事实 Session，再交给 `WorkspaceController`。
+  注入式 Controller construction 仅保留为 Node test seam；Controller 是
+  Project/Document/Comment/Run/Version 的唯一 Application aggregate observer，发布冻结
+  snapshot/event stream，并在 dispose 时断开 observer。
+- Workbench 已删除 Bridge import/module-level client 和业务 Session ref；它只订阅
+  Controller aggregate snapshot、调用 typed Controller command，并保留宿主 adapter 与
+  presentation state。`DocumentSession` 只向 aggregate 投影
+  `hasPendingWrite`/`isFlushing`，不暴露 pending-write payload 或 Promise。
+- `ProjectWorkflow` 删除最终 `legacy` adapter，改用窄 `ViewStatePort`/`RecentRunsPort`
+  和自身 typed event subscription；硬门禁删除临时 Bridge allowlist，拒绝 View Bridge
+  call、Controller React import、generic Bridge escape、duplicate Session owner、missing
+  drain command 等负例。未修改 Bridge route、desktop API、持久 schema/storage 或可见 UI。
+- 已通过 `npm run architecture:check`、`npm run typecheck`、`npm run lint`、
+  `npm run build`、`npm run test:node:core`（550 项）、`npm run test:browser:smoke`
+  （28 项）、`npm run test:electron:smoke`（8 项）、`npm run test:ai-closed-loop`
+  （16 项），以及 `npm run task:finish`。任务门禁 evidence：
+  `output/test-runs/2026-08-12T05-26-49-274Z-task/results.json`（186 项 impact-selected
+  Node、28 Browser、8 Electron、2 AI smoke）。下一步仅可创建 Draft PR；不得 Ready、合并、
+  打 tag 或发布。
 
 ## 14. 全局验收矩阵
 

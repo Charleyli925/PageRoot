@@ -318,11 +318,11 @@ function createHarness({
     },
     ...projectOpen,
   };
-  const legacy = {
-    isHistoryView: () => false,
-    isViewTransitioning: () => false,
-    async hydrateRecentRuns() {},
-    emit: (event) => events.push(event),
+  const viewState = {
+    isTransitioning: () => false,
+  };
+  const recentRuns = {
+    async hydrate() {},
   };
   const commentWorkflow = {
     resetCount: 0,
@@ -395,7 +395,8 @@ function createHarness({
       hash: { sha256: async (value) => sha256(value) },
       canvas: canvasPort,
       projectOpen: openPort,
-      legacy,
+      viewState,
+      recentRuns,
     },
     policies: {
       canCloseDuringHydration: (state) => Boolean(
@@ -427,6 +428,7 @@ function createHarness({
     },
     clock: { now: Date.now },
   });
+  workflow.subscribeEvents((event) => events.push(event));
   return {
     workflow,
     client,

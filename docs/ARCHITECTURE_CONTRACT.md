@@ -119,22 +119,28 @@ data from these snapshots, but all writes return to the listed owner.
 
 Fact ownership and workflow ownership are separate. A workflow may hold only
 its operation identity, single-flight, timer, reconciliation and publication
-sequence; it must publish through the existing fact-owning Sessions. During the
-staged migration, `WorkspaceController` receives the Workbench's existing fact
-Session instances rather than constructing replacements. Its PR-1 registration
-command captures the locator epoch, source path and expected Hash, returns a
-structured outcome, and synchronously binds Project, Document, Version, Draft
-and SourceHistory authority only after the Bridge response validates. In PR-3
-the Controller also owns the unique `DrainCoordinator`, creates the narrow
-external-open/application protocol Sessions and composes `ProjectWorkflow`.
-In PR-4 it additionally composes `CommentWorkflow`, which owns the
-DraftSession observer, recovery operation sequence, attachment upload count and
-captured-context stale/cancel cleanup. In PR-5 it composes `RunWorkflow`, whose
-poll lifecycle is driven by tracked `RunSession` facts rather than a React
-effect. In PR-6 it composes `VersionWorkflow`, which owns Version operation
-sequencing and Bridge I/O while preserving the existing Session fact owners.
-Workbench's direct-Bridge allowance is now exactly 0: the checked architecture
-gate permits no direct `bridgeClient.*` call from Workbench.
+sequence; it must publish through the existing fact-owning Sessions.
+`createRuntimeWorkspaceController()` is the sole production composition path:
+it creates one typed Bridge client, one shared `RunSession`, and the remaining
+Project, Document, Comment, Draft, Version and SourceHistory fact owners before
+constructing `WorkspaceController`. Its injected constructor remains a
+Node-test seam only; it may not become a second production composition path.
+
+`WorkspaceController` is the only Application observer of the Project,
+Document, Comment, Run and Version Sessions. It exposes their immutable
+aggregate snapshot through its fixed `getSnapshot()`/`subscribe()` contract and
+forwards typed workflow events through `subscribeEvents()`; it does not create a
+second mutable store. It owns the unique `DrainCoordinator`, protocol Sessions,
+and Project, Comment, Run and Version workflow composition. `DocumentSession`
+may derive `hasPendingWrite` and `isFlushing` for that snapshot, but neither a
+pending-write payload nor a Promise crosses into Workbench.
+
+Workbench owns only presentation state and narrow host adapters. It receives
+the aggregate snapshot and Controller commands, never a business Session or the
+Bridge client. Its direct-Bridge allowance is exactly 0: the checked architecture
+gate permits no `bridgeClient.*` call, generic Bridge-command escape, business
+Session construction or Session ref in Workbench. The gate also forbids React,
+Workbench, component or desktop imports from Application composition code.
 
 An asynchronous result may update state only when its complete identity is
 current:
