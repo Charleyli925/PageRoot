@@ -7,8 +7,11 @@
 - 验证策略：[测试策略](../tests/TEST_STRATEGY.md)
 - 协议文档：[Change Request 协议](CHANGE_REQUEST_PROTOCOL.md)
 - 交互文档：[交互流程](INTERACTION_FLOW.md)
+- 下一阶段专项 PRD：[版本与项目文件产品需求](VERSION_AND_PROJECT_FILES_PRD.md)
 
 本文描述目标产品，不描述 0.5.x 旧实现。若旧数据、旧说明或旧测试与本文冲突，以目标计划为准。
+
+> 版本、工作文件、AI 候选、项目可见目录和评论附件的下一阶段目标规则，以专项 PRD 为准；在对应实现与迁移合并前，本文现有 v3 协议仍是运行时事实。
 
 ## 1. 产品结论
 
