@@ -33,7 +33,10 @@ No user-facing text, display state or Review geometry is added or changed.
   raster layer rather than producing a false marker from text with no pixels.
   Unresolved SVG paint servers are treated the same way; common
   background-clipped gradient text remains strict only when a nontransparent
-  computed gradient stop proves paint.
+  computed gradient stop proves paint. Runs subject to CSS `text-transform`
+  use the raster layer because CSS owns their final glyph casing, while
+  `pre`, `pre-wrap`, and `break-spaces` whitespace remains exact and
+  `pre-line` retains its visible segment breaks.
 - Matching captured hosts compare layout dimensions and `renderedTextSha256`
   strictly. Any DOM/SVG text or numeric-character change whose paint can be
   established emits the existing opaque runtime fact regardless of its pixel

@@ -82,6 +82,7 @@ function isolatedVisibleText({
   clippingAncestor = null,
   hostStyle = null,
   textStyle = null,
+  textValue = "visible chart label",
   textRect = null,
   textRects = null,
 } = {}) {
@@ -119,6 +120,8 @@ function isolatedVisibleText({
         backgroundColor: "rgba(0, 0, 0, 0)",
         backgroundImage: "none",
         webkitBackgroundImage: "none",
+        textTransform: "none",
+        whiteSpace: "normal",
         getPropertyValue(name) {
           if (name === "-webkit-text-fill-color") return this.webkitTextFillColor;
           if (name === "mask-image") return this.maskImage;
@@ -128,6 +131,8 @@ function isolatedVisibleText({
           if (name === "background-color") return this.backgroundColor;
           if (name === "background-image") return this.backgroundImage;
           if (name === "-webkit-background-image") return this.webkitBackgroundImage;
+          if (name === "text-transform") return this.textTransform;
+          if (name === "white-space") return this.whiteSpace;
           return "";
         },
       };
@@ -215,7 +220,7 @@ function isolatedVisibleText({
   }
   Object.assign(textElement.style, textStyle || {});
   const text = {
-    nodeValue: "visible chart label",
+    nodeValue: textValue,
     parentElement: textElement,
     clientRects: textRects,
   };
@@ -566,6 +571,21 @@ test("isolated visible-text summary excludes post-paint zero-opacity filters", (
   assert.equal(isolatedVisibleText({
     hostStyle: { filter: "opacity(0.01)" },
   }), "visible chart label");
+});
+
+test("isolated visible-text summary defers transformed text but preserves visible whitespace", () => {
+  assert.equal(isolatedVisibleText({
+    textStyle: { textTransform: "uppercase" },
+  }), "");
+  assert.equal(isolatedVisibleText({
+    textValue: "A  B\nC",
+    textStyle: { whiteSpace: "pre-wrap" },
+  }), "A  B\nC");
+  assert.equal(isolatedVisibleText({
+    textValue: "A  B\nC",
+    textStyle: { whiteSpace: "pre-line" },
+  }), "A B\nC");
+  assert.equal(isolatedVisibleText({ textValue: "A  B\nC" }), "A B C");
 });
 
 test("isolated visible-text summary honors a descendant visibility override", () => {

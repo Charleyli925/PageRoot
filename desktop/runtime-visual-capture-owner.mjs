@@ -691,6 +691,56 @@ export function isolatedSnapshotRectScript(candidate) {
     return textRects.length > 0
       && textRects.every((rect) => rectIsVisibleThroughAncestors(rect, textElement, host, hostRect));
   };
+  const textSummaryChunk = (node, rawValue) => {
+    const textElement = node.parentElement;
+    if (!(textElement instanceof Element)) return null;
+    const style = getComputedStyle(window, textElement);
+    const transform = String(style.textTransform || style.getPropertyValue("text-transform") || "none")
+      .trim()
+      .toLowerCase();
+    // CSS owns locale-aware and glyph-level text transforms. Without a browser
+    // serialization of the final glyph text, transformed runs cannot prove a
+    // stable source-string summary, so they use the existing raster layer.
+    if (transform && transform !== "none") return null;
+    const whiteSpace = String(style.whiteSpace || style.getPropertyValue("white-space") || "normal")
+      .trim()
+      .toLowerCase();
+    const preservesAllWhitespace = whiteSpace === "pre"
+      || whiteSpace === "pre-wrap"
+      || whiteSpace === "break-spaces";
+    const preservesSegmentBreaks = whiteSpace === "pre-line";
+    const preservesWhitespace = preservesAllWhitespace || preservesSegmentBreaks;
+    const value = preservesAllWhitespace
+      ? rawValue
+      : preservesSegmentBreaks
+        ? rawValue.replace(/[ \t\f\r]+/gu, " ")
+      : rawValue.replace(/\s+/gu, " ");
+    return value ? { value, preservesWhitespace } : null;
+  };
+  const appendTextSummaryChunk = (chunks, chunk) => {
+    const previous = chunks[chunks.length - 1];
+    if (!chunk.preservesWhitespace && previous && !previous.preservesWhitespace) {
+      const value = previous.value.endsWith(" ") && chunk.value.startsWith(" ")
+        ? chunk.value.slice(1)
+        : chunk.value;
+      previous.value += value;
+      return;
+    }
+    chunks.push({ ...chunk });
+  };
+  const trimCollapsedSummaryEdges = (chunks) => {
+    while (chunks.length && !chunks[0].preservesWhitespace) {
+      chunks[0].value = chunks[0].value.replace(/^ +/u, "");
+      if (chunks[0].value) break;
+      chunks.shift();
+    }
+    while (chunks.length && !chunks[chunks.length - 1].preservesWhitespace) {
+      const last = chunks[chunks.length - 1];
+      last.value = last.value.replace(/ +$/u, "");
+      if (last.value) break;
+      chunks.pop();
+    }
+  };
   const visibleRenderedText = (host, hostRect) => {
     try {
       const walker = createTreeWalker(document, host, 4);
@@ -704,15 +754,16 @@ export function isolatedSnapshotRectScript(candidate) {
         if (textNodeCount > maxTextNodes) return null;
         const rawValue = String(node.nodeValue || "");
         if (rawValue.length > maxRenderedTextBytes) return null;
-        const value = rawValue.replace(/\s+/gu, " ");
-        if (value && textNodeIsVisible(node, host, hostRect)) {
-          textBytes += encoder.encode(value).byteLength;
+        const chunk = textSummaryChunk(node, rawValue);
+        if (chunk && textNodeIsVisible(node, host, hostRect)) {
+          textBytes += encoder.encode(chunk.value).byteLength;
           if (textBytes > maxRenderedTextBytes) return null;
-          chunks.push(value);
+          appendTextSummaryChunk(chunks, chunk);
         }
         node = nextTreeNode(walker);
       }
-      const summary = chunks.join("").trim().replace(/\s+/gu, " ");
+      trimCollapsedSummaryEdges(chunks);
+      const summary = chunks.map((chunk) => chunk.value).join("");
       return encoder.encode(summary).byteLength <= maxRenderedTextBytes
         ? summary
         : null;
