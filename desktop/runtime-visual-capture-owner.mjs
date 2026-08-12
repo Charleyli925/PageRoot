@@ -327,7 +327,7 @@ export function isolatedSnapshotRectScript(candidate) {
   const getAttribute = Function.prototype.call.bind(Element.prototype.getAttribute);
   const getRect = Function.prototype.call.bind(Element.prototype.getBoundingClientRect);
   const scrollIntoView = Function.prototype.call.bind(Element.prototype.scrollIntoView);
-  const getComputedStyle = Function.prototype.call.bind(Window.prototype.getComputedStyle);
+  const getComputedStyle = Function.prototype.call.bind(window.getComputedStyle);
   const createTreeWalker = Function.prototype.call.bind(Document.prototype.createTreeWalker);
   const nextTreeNode = Function.prototype.call.bind(TreeWalker.prototype.nextNode);
   const createRange = Function.prototype.call.bind(Document.prototype.createRange);
@@ -452,6 +452,128 @@ export function isolatedSnapshotRectScript(candidate) {
         && colorIsVisible(style.webkitTextStrokeColor, style.color)
       );
   };
+  const normalizedRect = (value) => {
+    if (
+      !value
+      || !Number.isFinite(value.x)
+      || !Number.isFinite(value.y)
+      || !Number.isFinite(value.width)
+      || !Number.isFinite(value.height)
+    ) return null;
+    const right = value.x + value.width;
+    const bottom = value.y + value.height;
+    return Number.isFinite(right) && Number.isFinite(bottom)
+      ? { x: value.x, y: value.y, right, bottom }
+      : null;
+  };
+  const rectContains = (outer, inner) => (
+    outer
+    && inner
+    && inner.x >= outer.x
+    && inner.y >= outer.y
+    && inner.right <= outer.right
+    && inner.bottom <= outer.bottom
+  );
+  const clipsOverflow = (value) => {
+    const overflow = String(value || "visible").trim().toLowerCase();
+    return overflow !== "" && overflow !== "visible";
+  };
+  const rectFitsOverflow = (rect, elementRect, style) => {
+    const clipsX = clipsOverflow(style.overflowX || style.overflow);
+    const clipsY = clipsOverflow(style.overflowY || style.overflow);
+    return (!clipsX || (rect.x >= elementRect.x && rect.right <= elementRect.right))
+      && (!clipsY || (rect.y >= elementRect.y && rect.bottom <= elementRect.bottom));
+  };
+  const numericClipEdge = (value, fallback) => {
+    const token = String(value || "").trim().toLowerCase();
+    if (!token || token === "auto") return fallback;
+    const number = Number.parseFloat(token);
+    return Number.isFinite(number) ? number : null;
+  };
+  const legacyClipRect = (elementRect, style) => {
+    if (style.position !== "absolute" && style.position !== "fixed") return null;
+    const value = String(style.clip || style.getPropertyValue("clip") || "").trim().toLowerCase();
+    if (!value.startsWith("rect(") || !value.endsWith(")")) return null;
+    const values = value.slice(5, -1).replaceAll(",", " ").split(" ").filter(Boolean);
+    if (values.length !== 4) return null;
+    const top = numericClipEdge(values[0], 0);
+    const right = numericClipEdge(values[1], elementRect.right - elementRect.x);
+    const bottom = numericClipEdge(values[2], elementRect.bottom - elementRect.y);
+    const left = numericClipEdge(values[3], 0);
+    if ([top, right, bottom, left].some((edge) => edge === null)) return null;
+    return {
+      x: elementRect.x + left,
+      y: elementRect.y + top,
+      right: elementRect.x + Math.max(left, right),
+      bottom: elementRect.y + Math.max(top, bottom),
+    };
+  };
+  const insetClipPathRect = (elementRect, style) => {
+    const value = String(style.clipPath || style.getPropertyValue("clip-path") || "").trim().toLowerCase();
+    if (!value.startsWith("inset(") || !value.endsWith(")")) return null;
+    const contents = value.slice(6, -1);
+    const roundIndex = contents.indexOf(" round ");
+    const values = (roundIndex >= 0 ? contents.slice(0, roundIndex) : contents)
+      .replaceAll(",", " ")
+      .split(" ")
+      .filter(Boolean);
+    if (values.length < 1 || values.length > 4) return null;
+    const parseInset = (token, size) => {
+      const number = Number.parseFloat(token);
+      if (!Number.isFinite(number)) return null;
+      return String(token).trim().endsWith("%") ? (number * size) / 100 : number;
+    };
+    const [topValue, rightValue, bottomValue, leftValue] = values.length === 1
+      ? [values[0], values[0], values[0], values[0]]
+      : values.length === 2
+        ? [values[0], values[1], values[0], values[1]]
+        : values.length === 3
+          ? [values[0], values[1], values[2], values[1]]
+          : values;
+    const top = parseInset(topValue, elementRect.bottom - elementRect.y);
+    const right = parseInset(rightValue, elementRect.right - elementRect.x);
+    const bottom = parseInset(bottomValue, elementRect.bottom - elementRect.y);
+    const left = parseInset(leftValue, elementRect.right - elementRect.x);
+    if ([top, right, bottom, left].some((edge) => edge === null)) return null;
+    return {
+      x: elementRect.x + left,
+      y: elementRect.y + top,
+      right: elementRect.right - right,
+      bottom: elementRect.bottom - bottom,
+    };
+  };
+  const rectIsVisibleThroughAncestors = (rect, textElement, host, hostRect) => {
+    const textRect = normalizedRect(rect);
+    if (!textRect || !rectContains(normalizedRect(hostRect), textRect)) return false;
+    let element = textElement;
+    while (element instanceof Element) {
+      const style = getComputedStyle(window, element);
+      const overflowX = clipsOverflow(style.overflowX || style.overflow);
+      const overflowY = clipsOverflow(style.overflowY || style.overflow);
+      const clip = String(style.clip || style.getPropertyValue("clip") || "").trim().toLowerCase();
+      const clipPath = String(style.clipPath || style.getPropertyValue("clip-path") || "").trim().toLowerCase();
+      const appliesLegacyClip = (style.position === "absolute" || style.position === "fixed")
+        && clip
+        && clip !== "auto";
+      if (overflowX || overflowY || appliesLegacyClip || (clipPath && clipPath !== "none")) {
+        const elementRect = normalizedRect(getRect(element));
+        if (!elementRect || !rectFitsOverflow(textRect, elementRect, style)) return false;
+        if (appliesLegacyClip) {
+          const clipped = legacyClipRect(elementRect, style);
+          if (!clipped || !rectContains(clipped, textRect)) return false;
+        }
+        if (clipPath && clipPath !== "none") {
+          const inset = insetClipPathRect(elementRect, style);
+          if (!inset || !rectContains(inset, textRect)) return false;
+        }
+      }
+      // A partially clipped text node has no stable semantic subset to hash;
+      // preserve the strict layer only for text that is fully painted.
+      if (element === host) return true;
+      element = element.parentElement;
+    }
+    return false;
+  };
   const textNodeIsVisible = (node, host, hostRect) => {
     const textElement = node.parentElement;
     let element = textElement;
@@ -478,10 +600,7 @@ export function isolatedSnapshotRectScript(candidate) {
       && Number.isFinite(rect.height)
       && rect.width > 0
       && rect.height > 0
-      && rect.x < hostRect.x + hostRect.width
-      && rect.x + rect.width > hostRect.x
-      && rect.y < hostRect.y + hostRect.height
-      && rect.y + rect.height > hostRect.y
+      && rectIsVisibleThroughAncestors(rect, textElement, host, hostRect)
     ));
   };
   const visibleRenderedText = (host, hostRect) => {

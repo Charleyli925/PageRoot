@@ -79,6 +79,8 @@ function isolatedVisibleText({
   stroke = "none",
   strokeOpacity = "1",
   strokeWidth = "0px",
+  clippingAncestor = null,
+  textRect = null,
 } = {}) {
   class Element {
     constructor(tagName, attributes = {}) {
@@ -167,20 +169,29 @@ function isolatedVisibleText({
     constructor() {
       this.innerWidth = 960;
       this.innerHeight = 640;
-    }
-
-    getComputedStyle(element) {
-      return element.style;
+      // Chromium exposes this as an instance method, not Window.prototype.
+      this.getComputedStyle = (element) => element.style;
     }
   }
 
   const root = new Element("HTML");
   const host = new Element(svg ? "SVG" : "CANVAS", { id: "chart" });
+  host.parentElement = root;
   root.children.push(host);
-  const textElement = svg ? new Element("text") : host;
-  if (svg) {
-    textElement.parentElement = host;
-    host.children.push(textElement);
+  let textParent = host;
+  if (clippingAncestor) {
+    const ancestor = new Element("SPAN");
+    ancestor.parentElement = host;
+    ancestor.rect = clippingAncestor.rect || ancestor.rect;
+    Object.assign(ancestor.style, clippingAncestor.style || {});
+    host.children.push(ancestor);
+    textParent = ancestor;
+  }
+  const textElement = svg || clippingAncestor ? new Element(svg ? "text" : "SPAN") : host;
+  if (textElement !== host) {
+    textElement.parentElement = textParent;
+    textElement.rect = textRect || textElement.rect;
+    textParent.children.push(textElement);
   }
   const text = { nodeValue: "visible chart label", parentElement: textElement };
   const document = new Document(root, [text]);
@@ -450,6 +461,42 @@ test("isolated visible-text summary excludes transparent paint but keeps a visib
     svg: true,
     fill: "rgb(0, 0, 0)",
     fillOpacity: "1",
+  }), "visible chart label");
+});
+
+test("isolated visible-text summary excludes text hidden by ancestor clipping", () => {
+  assert.equal(isolatedVisibleText({
+    clippingAncestor: {
+      rect: { x: 10, y: 10, width: 1, height: 1 },
+      style: { overflow: "hidden" },
+    },
+    textRect: { x: 20, y: 20, width: 100, height: 60 },
+  }), "");
+  assert.equal(isolatedVisibleText({
+    clippingAncestor: {
+      rect: { x: 10, y: 10, width: 200, height: 100 },
+      style: { overflow: "hidden" },
+    },
+  }), "visible chart label");
+  assert.equal(isolatedVisibleText({
+    clippingAncestor: {
+      style: { position: "absolute", clip: "rect(0px, 0px, 0px, 0px)" },
+    },
+  }), "");
+  assert.equal(isolatedVisibleText({
+    clippingAncestor: {
+      style: { clip: "rect(0px, 0px, 0px, 0px)" },
+    },
+  }), "visible chart label");
+  assert.equal(isolatedVisibleText({
+    clippingAncestor: {
+      style: { clipPath: "inset(50%)" },
+    },
+  }), "");
+  assert.equal(isolatedVisibleText({
+    clippingAncestor: {
+      style: { clipPath: "inset(0)" },
+    },
   }), "visible chart label");
 });
 
