@@ -3368,7 +3368,6 @@ export default function Workbench() {
   ): boolean => {
     const currentRun = currentRunSessionSnapshot();
     const currentDocument = currentDocumentSessionSnapshot();
-    const currentComments = currentCommentSessionSnapshot();
     if (
       runtimeCapabilitiesRef.current.sourceEditing !== "enabled"
       ||
@@ -3405,10 +3404,14 @@ export default function Workbench() {
       });
       return false;
     }
+    // enqueueDocumentEdit synchronously publishes its direct-edit audit event.
+    // Re-read the Controller aggregate before reconciling targets so this
+    // mutation cannot overwrite that new event with the pre-command snapshot.
+    const settledComments = currentCommentSessionSnapshot();
     const activeTargets = [
-      ...currentComments.comments.map((comment) => comment.target),
-      ...currentComments.changeEvents.map((event) => event.target),
-      ...(currentComments.composerTarget ? [currentComments.composerTarget] : []),
+      ...settledComments.comments.map((comment) => comment.target),
+      ...settledComments.changeEvents.map((event) => event.target),
+      ...(settledComments.composerTarget ? [settledComments.composerTarget] : []),
     ];
     if (activeTargets.length > 0) {
       const deterministicById = new Map(
@@ -3435,15 +3438,15 @@ export default function Workbench() {
           resolution: "orphaned",
         };
       };
-      const nextComments = currentComments.comments.map((comment) => ({
+      const nextComments = settledComments.comments.map((comment) => ({
         ...comment,
         target: refreshedTarget(comment.target),
       }));
-      const nextEvents = currentComments.changeEvents.map((event) => ({
+      const nextEvents = settledComments.changeEvents.map((event) => ({
         ...event,
         target: refreshedTarget(event.target),
       }));
-      const currentDraftTarget = currentComments.composerTarget;
+      const currentDraftTarget = settledComments.composerTarget;
       workspaceController?.replaceCommentWorkingCopy({
         comments: nextComments,
         changeEvents: nextEvents,
