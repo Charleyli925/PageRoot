@@ -73,13 +73,21 @@ function isolatedVisibleText({
   textDecorationLine = "none",
   textStrokeColor = "transparent",
   textStrokeWidth = "0px",
+  svg = false,
+  fill = "none",
+  fillOpacity = "1",
+  stroke = "none",
+  strokeOpacity = "1",
+  strokeWidth = "0px",
 } = {}) {
   class Element {
     constructor(tagName, attributes = {}) {
       this.tagName = tagName;
       this.attributes = attributes;
       this.children = [];
-      this.namespaceURI = "http://www.w3.org/1999/xhtml";
+      this.namespaceURI = svg
+        ? "http://www.w3.org/2000/svg"
+        : "http://www.w3.org/1999/xhtml";
       this.rect = { x: 10, y: 10, width: 100, height: 60 };
       this.style = {
         display: "block",
@@ -93,8 +101,11 @@ function isolatedVisibleText({
         textDecorationLine,
         webkitTextStrokeColor: textStrokeColor,
         webkitTextStrokeWidth: textStrokeWidth,
-        fill: "none",
-        stroke: "none",
+        fill,
+        fillOpacity,
+        stroke,
+        strokeOpacity,
+        strokeWidth,
         getPropertyValue(name) {
           return name === "-webkit-text-fill-color" ? textFill : "";
         },
@@ -164,16 +175,21 @@ function isolatedVisibleText({
   }
 
   const root = new Element("HTML");
-  const host = new Element("CANVAS", { id: "chart" });
+  const host = new Element(svg ? "SVG" : "CANVAS", { id: "chart" });
   root.children.push(host);
-  const text = { nodeValue: "visible chart label", parentElement: host };
+  const textElement = svg ? new Element("text") : host;
+  if (svg) {
+    textElement.parentElement = host;
+    host.children.push(textElement);
+  }
+  const text = { nodeValue: "visible chart label", parentElement: textElement };
   const document = new Document(root, [text]);
   const window = new Window();
   const result = runInNewContext(isolatedSnapshotRectScript({
     key: "runtime-host-1",
     path: [0],
-    tagName: "canvas",
-    kind: "canvas",
+    tagName: svg ? "svg" : "canvas",
+    kind: svg ? "svg" : "canvas",
     identityAttributes: [["id", "chart"]],
   }), {
     Array,
@@ -417,6 +433,23 @@ test("isolated visible-text summary excludes transparent paint but keeps a visib
     color: "transparent",
     textStrokeColor: "rgb(0, 0, 0)",
     textStrokeWidth: "1px",
+  }), "visible chart label");
+  assert.equal(isolatedVisibleText({
+    svg: true,
+    fill: "rgb(0, 0, 0)",
+    fillOpacity: "0",
+  }), "");
+  assert.equal(isolatedVisibleText({
+    svg: true,
+    fill: "none",
+    stroke: "rgb(0, 0, 0)",
+    strokeWidth: "1px",
+    strokeOpacity: "0",
+  }), "");
+  assert.equal(isolatedVisibleText({
+    svg: true,
+    fill: "rgb(0, 0, 0)",
+    fillOpacity: "1",
   }), "visible chart label");
 });
 

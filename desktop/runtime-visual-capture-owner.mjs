@@ -427,8 +427,12 @@ export function isolatedSnapshotRectScript(candidate) {
     const style = getComputedStyle(window, element);
     if (element.namespaceURI === "http://www.w3.org/2000/svg") {
       const strokeWidth = Number.parseFloat(style.strokeWidth || "0");
-      return colorIsVisible(style.fill, style.color)
-        || (strokeWidth > 0 && colorIsVisible(style.stroke, style.color));
+      const paintIsVisible = (color, opacity) => (
+        Number.parseFloat(opacity || "1") > 0
+        && colorIsVisible(color, style.color)
+      );
+      return paintIsVisible(style.fill, style.fillOpacity)
+        || (strokeWidth > 0 && paintIsVisible(style.stroke, style.strokeOpacity));
     }
     const textFill = String(
       style.webkitTextFillColor || style.getPropertyValue("-webkit-text-fill-color") || "",
