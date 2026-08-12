@@ -23,9 +23,9 @@ packaged runtime closure. Its `zrender` and `tslib` dependencies remain
 lockfile-pinned, and the dependency audit reports no advisory.
 
 The PR-2 production build comparison records the deliberate package cost:
-the minified `HtmlCanvasEditor` chunk grows from 127.85 KiB (38.31 KiB gzip) to
-674.11 KiB (223.09 KiB gzip), a 546.26 KiB / 184.78 KiB gzip increase, while
-the application index chunk remains effectively unchanged. The integration
+the minified `HtmlCanvasEditor` chunk grows from 127.85 kB (38.31 kB gzip) to
+674.23 kB (223.11 kB gzip), a 546.38 kB / 184.80 kB gzip increase. The
+application index changes by only 8 bytes / 3 gzip bytes. The integration
 keeps one synchronous pre-ready render instead of adding a conditional dynamic
 import lifecycle, stale-generation fence, loading placeholder or retry path.
 Every future ECharts upgrade must remeasure this chunk as well as SVG output,

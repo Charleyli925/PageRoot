@@ -61,8 +61,8 @@ real Electron evidence.
 - Tab return is immediate because it neither reruns ECharts nor rebuilds SVG.
 - A chart is one source-backed comment box; data points are not targets.
 - Initial Canvas readiness includes bounded one-shot SVG generation cost.
-- The existing lazy editor chunk carries a measured 546.26 KiB minified /
-  184.78 KiB gzip increase; keeping generation synchronous avoids a second
+- The existing lazy editor chunk carries a measured 546.38 kB minified /
+  184.80 kB gzip increase; keeping generation synchronous avoids a second
   asynchronous loading and stale-generation lifecycle.
 - Responsive behavior is vector scaling only; label layout does not rerun.
 - Existing arbitrary-script documents need generator-authored Chart Spec or

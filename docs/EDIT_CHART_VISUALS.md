@@ -225,8 +225,8 @@ DOCTYPE 或 ENTITY。导入 iframe 时使用该 realm 的 XML parser 再逐节�
 renderer 中进行同步 SSR。生成字符串只活到当前 Canvas generation；Shadow
 节点由现有 iframe realm 持有，iframe 销毁即全部释放。
 
-生产构建的明确代价是 `HtmlCanvasEditor` chunk 从 127.85 KiB（gzip 38.31 KiB）
-增长到 674.11 KiB（gzip 223.09 KiB）。这部分仍隔离在编辑器 chunk，换取的是
+生产构建的明确代价是 `HtmlCanvasEditor` chunk 从 127.85 kB（gzip 38.31 kB）
+增长到 674.23 kB（gzip 223.11 kB）。这部分仍隔离在编辑器 chunk，换取的是
 ready 前同步完成和零额外异步生命周期；v0.1 不为节省包体再引入按需加载、
 旧代结果丢弃、loading 占位或重试 owner。未来若包体继续增长，先重新评审渲染
 内核，而不是在当前 Canvas 生命周期上叠加补丁。

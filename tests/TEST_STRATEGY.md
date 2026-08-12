@@ -149,8 +149,7 @@ PR 批量是建议而非固定限制：用 CI Health 的 Ready 次数、candidat
   证明同一 Canvas generation 只在文档离开 `loading` 后、ready 前一次挂载全部
   合格图表，初始隐藏 Tab 不读零宽高，往返切换不重跑 ECharts、不重建 SVG、
   不闪屏，以及隐藏评论切回后仍精确重测。它还覆盖宿主整框点击/评论、相邻
-  原生文字修改、作者脚本未运行、
-  导出字节精确且运行时 SVG 不进入源码。
+  原生文字修改、作者脚本未运行、导出字节精确且运行时 SVG 不进入源码。
   `edit-chart-visuals-electron` 再用真实磁盘文件和 CDP composition 证明中文 IME、
   精确落盘、评论 TargetRef、Tab、Canvas 换代和 Shadow/light DOM 边界。两类 smoke
   配置都必须点名这些用例，不能只依赖完整套件偶然覆盖。
