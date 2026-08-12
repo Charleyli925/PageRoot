@@ -30,7 +30,7 @@ const CAPTURE_CANDIDATE_KEYS = new Set([
   "kind",
   "identityAttributes",
 ]);
-const OWNER_RECT_KEYS = new Set(["key", "state", "rect"]);
+const OWNER_RECT_KEYS = new Set(["key", "state", "rect", "renderedText"]);
 const RECT_KEYS = new Set(["x", "y", "width", "height"]);
 
 class CaptureCancelledError extends Error {
@@ -65,6 +65,10 @@ function sourceSha256(value) {
 
 function pngSha256(value) {
   return `sha256:${createHash("sha256").update(value).digest("hex")}`;
+}
+
+function renderedTextSha256(value) {
+  return `sha256:${createHash("sha256").update(value, "utf8").digest("hex")}`;
 }
 
 function result(outcome, reason) {
@@ -312,15 +316,23 @@ export function validateRuntimeSnapshotCaptureRequest(value) {
   });
 }
 
-function isolatedSnapshotRectScript(candidate) {
+export function isolatedSnapshotRectScript(candidate) {
   return String.raw`(() => {
   "use strict";
   const __pagerootRuntimeSnapshotRects = true;
   const candidate = ${safeScriptValue(candidate)};
+  const maxTextNodes = ${safeScriptValue(RUNTIME_VISUAL_PAGE_BUDGET.hostAtoms)};
+  const maxRenderedTextBytes = ${safeScriptValue(RUNTIME_VISUAL_PAGE_BUDGET.renderedTextBytes)};
   const queryElements = Function.prototype.call.bind(Element.prototype.querySelectorAll);
   const getAttribute = Function.prototype.call.bind(Element.prototype.getAttribute);
   const getRect = Function.prototype.call.bind(Element.prototype.getBoundingClientRect);
   const scrollIntoView = Function.prototype.call.bind(Element.prototype.scrollIntoView);
+  const getComputedStyle = Function.prototype.call.bind(window.getComputedStyle);
+  const createTreeWalker = Function.prototype.call.bind(Document.prototype.createTreeWalker);
+  const nextTreeNode = Function.prototype.call.bind(TreeWalker.prototype.nextNode);
+  const createRange = Function.prototype.call.bind(Document.prototype.createRange);
+  const selectNodeContents = Function.prototype.call.bind(Range.prototype.selectNodeContents);
+  const rangeClientRects = Function.prototype.call.bind(Range.prototype.getClientRects);
   const childAtPath = (path) => {
     let element = document.documentElement;
     for (const index of path) {
@@ -358,9 +370,406 @@ function isolatedSnapshotRectScript(candidate) {
       height: Math.max(1, Math.ceil(rect.height)),
     };
   };
+  const alphaTokenIsVisible = (value) => {
+    const token = String(value || "").trim();
+    if (!token) return false;
+    if (token.endsWith("%")) return Number.parseFloat(token.slice(0, -1)) > 0;
+    return Number.parseFloat(token) > 0;
+  };
+  const filterHidesPaint = (value) => {
+    const filter = String(value || "").trim().toLowerCase();
+    if (!filter || filter === "none") return false;
+    let cursor = 0;
+    while (cursor < filter.length) {
+      const offset = filter.slice(cursor).indexOf("opacity(");
+      if (offset < 0) return false;
+      const start = cursor + offset;
+      const previous = start === 0 ? " " : filter[start - 1];
+      const end = filter.indexOf(")", start + 8);
+      if (end < 0) return false;
+      if ((previous === " " || previous === "\t") && !alphaTokenIsVisible(filter.slice(start + 8, end))) {
+        return true;
+      }
+      cursor = end + 1;
+    }
+    return false;
+  };
+  const maskMakesTextPaintUnverifiable = (style) => {
+    const maskImages = [
+      style.maskImage || style.getPropertyValue("mask-image"),
+      style.webkitMaskImage || style.getPropertyValue("-webkit-mask-image"),
+    ];
+    // A CSS/SVG mask can make a subtree wholly transparent, but its general
+    // image grammar cannot be reduced to a reliable text-paint predicate.
+    // Keep the strict text layer for text whose paint can be proved; masked
+    // text falls back to the existing raster layer rather than causing a
+    // false marker from text with no captured pixels.
+    return maskImages.some((value) => {
+      const mask = String(value || "").trim().toLowerCase();
+      return Boolean(mask && mask !== "none");
+    });
+  };
+  const colorIsVisible = (value, fallback = "") => {
+    const color = String(value || "").trim().toLowerCase();
+    if (!color || color === "none" || color === "transparent") return false;
+    // SVG paint servers are not colors. A referenced gradient/pattern can be
+    // absent or fully transparent, so it cannot prove that this text has
+    // pixels without inspecting another authored resource.
+    if (color.startsWith("url(")) return false;
+    if (color === "currentcolor") {
+      const fallbackColor = String(fallback || "").trim().toLowerCase();
+      return fallbackColor && fallbackColor !== "currentcolor"
+        ? colorIsVisible(fallback)
+        : false;
+    }
+    if (color.startsWith("#")) {
+      const alpha = color.length === 5 ? color.slice(4) : color.length === 9 ? color.slice(7) : "";
+      return alpha ? Number.parseInt(alpha, 16) > 0 : true;
+    }
+    const open = color.indexOf("(");
+    const close = color.indexOf(")", open + 1);
+    if (open < 1 || close < open) return true;
+    const name = color.slice(0, open).trim();
+    const argumentsText = color.slice(open + 1, close);
+    const slash = argumentsText.lastIndexOf("/");
+    if (slash >= 0) return alphaTokenIsVisible(argumentsText.slice(slash + 1));
+    if (name === "rgba" || name === "hsla") {
+      const comma = argumentsText.lastIndexOf(",");
+      return comma >= 0 ? alphaTokenIsVisible(argumentsText.slice(comma + 1)) : false;
+    }
+    return true;
+  };
+  const textShadowIsVisible = (value, fallback) => {
+    const shadow = String(value || "").trim();
+    if (!shadow || shadow === "none") return false;
+    const functions = ["rgba(", "rgb(", "hsla(", "hsl(", "color(", "oklab(", "oklch(", "lab(", "lch("];
+    let cursor = 0;
+    let foundColor = false;
+    while (cursor < shadow.length) {
+      let start = -1;
+      for (const prefix of functions) {
+        const candidateStart = shadow.toLowerCase().indexOf(prefix, cursor);
+        if (candidateStart >= 0 && (start < 0 || candidateStart < start)) start = candidateStart;
+      }
+      if (start < 0) break;
+      const end = shadow.indexOf(")", start + 1);
+      if (end < 0) return false;
+      foundColor = true;
+      if (colorIsVisible(shadow.slice(start, end + 1), fallback)) return true;
+      cursor = end + 1;
+    }
+    return foundColor ? false : colorIsVisible(fallback);
+  };
+  const backgroundImageHasVisibleColor = (value, fallback) => {
+    const image = String(value || "").trim().toLowerCase();
+    if (!image || image === "none") return false;
+    // Computed gradient colors are serialized as color functions in Chromium.
+    // Accept only a positively visible stop; external images and unknown image
+    // grammars stay on the existing raster path.
+    const functions = ["rgba(", "rgb(", "hsla(", "hsl(", "color(", "oklab(", "oklch(", "lab(", "lch("];
+    let cursor = 0;
+    while (cursor < image.length) {
+      let start = -1;
+      for (const prefix of functions) {
+        const candidateStart = image.indexOf(prefix, cursor);
+        if (candidateStart >= 0 && (start < 0 || candidateStart < start)) start = candidateStart;
+      }
+      if (start < 0) return false;
+      const end = image.indexOf(")", start + 1);
+      if (end < 0) return false;
+      if (colorIsVisible(image.slice(start, end + 1), fallback)) return true;
+      cursor = end + 1;
+    }
+    return false;
+  };
+  const backgroundTextPaintIsVisible = (style) => {
+    const clips = [
+      style.backgroundClip || style.getPropertyValue("background-clip"),
+      style.webkitBackgroundClip || style.getPropertyValue("-webkit-background-clip"),
+    ];
+    if (!clips.some((value) => String(value || "").trim().toLowerCase().includes("text"))) {
+      return false;
+    }
+    const backgroundColor = style.backgroundColor || style.getPropertyValue("background-color");
+    if (colorIsVisible(backgroundColor, style.color)) return true;
+    return backgroundImageHasVisibleColor(
+      style.backgroundImage || style.getPropertyValue("background-image"),
+      style.color,
+    ) || backgroundImageHasVisibleColor(
+      style.webkitBackgroundImage || style.getPropertyValue("-webkit-background-image"),
+      style.color,
+    );
+  };
+  const textPaintIsVisible = (element) => {
+    const style = getComputedStyle(window, element);
+    if (element.namespaceURI === "http://www.w3.org/2000/svg") {
+      const strokeWidth = Number.parseFloat(style.strokeWidth || "0");
+      const paintIsVisible = (color, opacity) => (
+        Number.parseFloat(opacity || "1") > 0
+        && colorIsVisible(color, style.color)
+      );
+      return paintIsVisible(style.fill, style.fillOpacity)
+        || (strokeWidth > 0 && paintIsVisible(style.stroke, style.strokeOpacity));
+    }
+    const textFill = String(
+      style.webkitTextFillColor || style.getPropertyValue("-webkit-text-fill-color") || "",
+    ).trim();
+    const fill = textFill && textFill.toLowerCase() !== "currentcolor"
+      ? textFill
+      : style.color;
+    const strokeWidth = Number.parseFloat(style.webkitTextStrokeWidth || "0");
+    return colorIsVisible(fill, style.color)
+      || backgroundTextPaintIsVisible(style)
+      || textShadowIsVisible(style.textShadow, style.color)
+      || (
+        strokeWidth > 0
+        && colorIsVisible(style.webkitTextStrokeColor, style.color)
+      );
+  };
+  const normalizedRect = (value) => {
+    if (
+      !value
+      || !Number.isFinite(value.x)
+      || !Number.isFinite(value.y)
+      || !Number.isFinite(value.width)
+      || !Number.isFinite(value.height)
+    ) return null;
+    const right = value.x + value.width;
+    const bottom = value.y + value.height;
+    return Number.isFinite(right) && Number.isFinite(bottom)
+      ? { x: value.x, y: value.y, right, bottom }
+      : null;
+  };
+  const rectContains = (outer, inner) => (
+    outer
+    && inner
+    && inner.x >= outer.x
+    && inner.y >= outer.y
+    && inner.right <= outer.right
+    && inner.bottom <= outer.bottom
+  );
+  const clipsOverflow = (value) => {
+    const overflow = String(value || "visible").trim().toLowerCase();
+    return overflow !== "" && overflow !== "visible";
+  };
+  const rectFitsOverflow = (rect, elementRect, style) => {
+    const clipsX = clipsOverflow(style.overflowX || style.overflow);
+    const clipsY = clipsOverflow(style.overflowY || style.overflow);
+    return (!clipsX || (rect.x >= elementRect.x && rect.right <= elementRect.right))
+      && (!clipsY || (rect.y >= elementRect.y && rect.bottom <= elementRect.bottom));
+  };
+  const numericClipEdge = (value, fallback) => {
+    const token = String(value || "").trim().toLowerCase();
+    if (!token || token === "auto") return fallback;
+    const number = Number.parseFloat(token);
+    return Number.isFinite(number) ? number : null;
+  };
+  const legacyClipRect = (elementRect, style) => {
+    if (style.position !== "absolute" && style.position !== "fixed") return null;
+    const value = String(style.clip || style.getPropertyValue("clip") || "").trim().toLowerCase();
+    if (!value.startsWith("rect(") || !value.endsWith(")")) return null;
+    const values = value.slice(5, -1).replaceAll(",", " ").split(" ").filter(Boolean);
+    if (values.length !== 4) return null;
+    const top = numericClipEdge(values[0], 0);
+    const right = numericClipEdge(values[1], elementRect.right - elementRect.x);
+    const bottom = numericClipEdge(values[2], elementRect.bottom - elementRect.y);
+    const left = numericClipEdge(values[3], 0);
+    if ([top, right, bottom, left].some((edge) => edge === null)) return null;
+    return {
+      x: elementRect.x + left,
+      y: elementRect.y + top,
+      right: elementRect.x + Math.max(left, right),
+      bottom: elementRect.y + Math.max(top, bottom),
+    };
+  };
+  const insetClipPathRect = (elementRect, style) => {
+    const value = String(style.clipPath || style.getPropertyValue("clip-path") || "").trim().toLowerCase();
+    if (!value.startsWith("inset(") || !value.endsWith(")")) return null;
+    const contents = value.slice(6, -1);
+    const roundIndex = contents.indexOf(" round ");
+    const values = (roundIndex >= 0 ? contents.slice(0, roundIndex) : contents)
+      .replaceAll(",", " ")
+      .split(" ")
+      .filter(Boolean);
+    if (values.length < 1 || values.length > 4) return null;
+    const parseInset = (token, size) => {
+      const number = Number.parseFloat(token);
+      if (!Number.isFinite(number)) return null;
+      return String(token).trim().endsWith("%") ? (number * size) / 100 : number;
+    };
+    const [topValue, rightValue, bottomValue, leftValue] = values.length === 1
+      ? [values[0], values[0], values[0], values[0]]
+      : values.length === 2
+        ? [values[0], values[1], values[0], values[1]]
+        : values.length === 3
+          ? [values[0], values[1], values[2], values[1]]
+          : values;
+    const top = parseInset(topValue, elementRect.bottom - elementRect.y);
+    const right = parseInset(rightValue, elementRect.right - elementRect.x);
+    const bottom = parseInset(bottomValue, elementRect.bottom - elementRect.y);
+    const left = parseInset(leftValue, elementRect.right - elementRect.x);
+    if ([top, right, bottom, left].some((edge) => edge === null)) return null;
+    return {
+      x: elementRect.x + left,
+      y: elementRect.y + top,
+      right: elementRect.right - right,
+      bottom: elementRect.bottom - bottom,
+    };
+  };
+  const rectIsVisibleThroughAncestors = (rect, textElement, host, hostRect) => {
+    const textRect = normalizedRect(rect);
+    if (!textRect || !rectContains(normalizedRect(hostRect), textRect)) return false;
+    let element = textElement;
+    while (element instanceof Element) {
+      const style = getComputedStyle(window, element);
+      const overflowX = clipsOverflow(style.overflowX || style.overflow);
+      const overflowY = clipsOverflow(style.overflowY || style.overflow);
+      const clip = String(style.clip || style.getPropertyValue("clip") || "").trim().toLowerCase();
+      const clipPath = String(style.clipPath || style.getPropertyValue("clip-path") || "").trim().toLowerCase();
+      const appliesLegacyClip = (style.position === "absolute" || style.position === "fixed")
+        && clip
+        && clip !== "auto";
+      if (overflowX || overflowY || appliesLegacyClip || (clipPath && clipPath !== "none")) {
+        const elementRect = normalizedRect(getRect(element));
+        if (!elementRect || !rectFitsOverflow(textRect, elementRect, style)) return false;
+        if (appliesLegacyClip) {
+          const clipped = legacyClipRect(elementRect, style);
+          if (!clipped || !rectContains(clipped, textRect)) return false;
+        }
+        if (clipPath && clipPath !== "none") {
+          const inset = insetClipPathRect(elementRect, style);
+          if (!inset || !rectContains(inset, textRect)) return false;
+        }
+      }
+      // A partially clipped text node has no stable semantic subset to hash;
+      // preserve the strict layer only for text that is fully painted.
+      if (element === host) return true;
+      element = element.parentElement;
+    }
+    return false;
+  };
+  const textNodeIsVisible = (node, host, hostRect) => {
+    const textElement = node.parentElement;
+    let element = textElement;
+    while (element instanceof Element) {
+      const style = getComputedStyle(window, element);
+      const opacity = Number.parseFloat(style.opacity);
+      if (
+        style.display === "none"
+        || style.contentVisibility === "hidden"
+        || (Number.isFinite(opacity) && opacity <= 0)
+        || filterHidesPaint(style.filter || style.getPropertyValue("filter"))
+        || maskMakesTextPaintUnverifiable(style)
+      ) return false;
+      if (element === host) break;
+      element = element.parentElement;
+    }
+    const textStyle = textElement instanceof Element
+      ? getComputedStyle(window, textElement)
+      : null;
+    if (
+      !(element instanceof Element)
+      || !textStyle
+      || textStyle.visibility === "hidden"
+      || textStyle.visibility === "collapse"
+      || !textPaintIsVisible(textElement)
+    ) return false;
+    const range = createRange(document);
+    selectNodeContents(range, node);
+    const textRects = Array.from(rangeClientRects(range)).filter((rect) => (
+      Number.isFinite(rect.x)
+      && Number.isFinite(rect.y)
+      && Number.isFinite(rect.width)
+      && Number.isFinite(rect.height)
+      && rect.width > 0
+      && rect.height > 0
+    ));
+    return textRects.length > 0
+      && textRects.every((rect) => rectIsVisibleThroughAncestors(rect, textElement, host, hostRect));
+  };
+  const textSummaryChunk = (node, rawValue) => {
+    const textElement = node.parentElement;
+    if (!(textElement instanceof Element)) return null;
+    const style = getComputedStyle(window, textElement);
+    const transform = String(style.textTransform || style.getPropertyValue("text-transform") || "none")
+      .trim()
+      .toLowerCase();
+    // CSS owns locale-aware and glyph-level text transforms. Without a browser
+    // serialization of the final glyph text, transformed runs cannot prove a
+    // stable source-string summary, so they use the existing raster layer.
+    if (transform && transform !== "none") return null;
+    const whiteSpace = String(style.whiteSpace || style.getPropertyValue("white-space") || "normal")
+      .trim()
+      .toLowerCase();
+    const preservesAllWhitespace = whiteSpace === "pre"
+      || whiteSpace === "pre-wrap"
+      || whiteSpace === "break-spaces";
+    const preservesSegmentBreaks = whiteSpace === "pre-line";
+    const preservesWhitespace = preservesAllWhitespace || preservesSegmentBreaks;
+    const value = preservesAllWhitespace
+      ? rawValue
+      : preservesSegmentBreaks
+        ? rawValue.replace(/[ \t\f\r]+/gu, " ")
+      : rawValue.replace(/\s+/gu, " ");
+    return value ? { value, preservesWhitespace } : null;
+  };
+  const appendTextSummaryChunk = (chunks, chunk) => {
+    const previous = chunks[chunks.length - 1];
+    if (!chunk.preservesWhitespace && previous && !previous.preservesWhitespace) {
+      const value = previous.value.endsWith(" ") && chunk.value.startsWith(" ")
+        ? chunk.value.slice(1)
+        : chunk.value;
+      previous.value += value;
+      return;
+    }
+    chunks.push({ ...chunk });
+  };
+  const trimCollapsedSummaryEdges = (chunks) => {
+    while (chunks.length && !chunks[0].preservesWhitespace) {
+      chunks[0].value = chunks[0].value.replace(/^ +/u, "");
+      if (chunks[0].value) break;
+      chunks.shift();
+    }
+    while (chunks.length && !chunks[chunks.length - 1].preservesWhitespace) {
+      const last = chunks[chunks.length - 1];
+      last.value = last.value.replace(/ +$/u, "");
+      if (last.value) break;
+      chunks.pop();
+    }
+  };
+  const visibleRenderedText = (host, hostRect) => {
+    try {
+      const walker = createTreeWalker(document, host, 4);
+      const chunks = [];
+      const encoder = new TextEncoder();
+      let textNodeCount = 0;
+      let textBytes = 0;
+      let node = nextTreeNode(walker);
+      while (node) {
+        textNodeCount += 1;
+        if (textNodeCount > maxTextNodes) return null;
+        const rawValue = String(node.nodeValue || "");
+        if (rawValue.length > maxRenderedTextBytes) return null;
+        const chunk = textSummaryChunk(node, rawValue);
+        if (chunk && textNodeIsVisible(node, host, hostRect)) {
+          textBytes += encoder.encode(chunk.value).byteLength;
+          if (textBytes > maxRenderedTextBytes) return null;
+          appendTextSummaryChunk(chunks, chunk);
+        }
+        node = nextTreeNode(walker);
+      }
+      trimCollapsedSummaryEdges(chunks);
+      const summary = chunks.map((chunk) => chunk.value).join("");
+      return encoder.encode(summary).byteLength <= maxRenderedTextBytes
+        ? summary
+        : null;
+    } catch {
+      return null;
+    }
+  };
   const unavailable = () => ({
     status: "captured",
-    snapshots: [{ key: candidate.key, state: "unavailable", rect: null }],
+    snapshots: [{ key: candidate.key, state: "unavailable", rect: null, renderedText: "" }],
   });
   const host = childAtPath(candidate.path);
   if (!bindingMatches(host, candidate)) return unavailable();
@@ -372,12 +781,15 @@ function isolatedSnapshotRectScript(candidate) {
     ? Array.from(queryElements(host, "canvas,svg"))
     : [host];
   const hasVisiblePaint = paintTargets.some((target) => usableRect(target) !== null);
+  const renderedText = hostRect && hasVisiblePaint
+    ? visibleRenderedText(host, hostRect)
+    : null;
   return {
     status: "captured",
     snapshots: [
-      hostRect && hasVisiblePaint
-        ? { key: candidate.key, state: "captured", rect: hostRect }
-        : { key: candidate.key, state: "unavailable", rect: null },
+      hostRect && hasVisiblePaint && renderedText !== null
+        ? { key: candidate.key, state: "captured", rect: hostRect, renderedText }
+        : { key: candidate.key, state: "unavailable", rect: null, renderedText: "" },
     ],
   };
 })()`;
@@ -424,12 +836,25 @@ function normalizedOwnerRects(value, request) {
     const rect = rawSnapshot.state === "captured"
       ? normalizedViewportRect(rawSnapshot.rect, request)
       : rawSnapshot.rect === null ? null : undefined;
-    if (rect === undefined || (rawSnapshot.state === "captured" && !rect)) return null;
+    const renderedText = rawSnapshot.state === "captured"
+      ? normalizedString(rawSnapshot.renderedText, RUNTIME_VISUAL_PAGE_BUDGET.renderedTextBytes)
+      : rawSnapshot.renderedText === "" ? "" : undefined;
+    if (
+      rect === undefined
+      || renderedText === undefined
+      || renderedText === null
+      || (rawSnapshot.state === "captured" && !rect)
+      || (
+        typeof renderedText === "string"
+        && Buffer.byteLength(renderedText, "utf8") > RUNTIME_VISUAL_PAGE_BUDGET.renderedTextBytes
+      )
+    ) return null;
     seen.add(rawSnapshot.key);
     snapshots.push(Object.freeze({
       key: rawSnapshot.key,
       state: rawSnapshot.state,
       rect,
+      renderedText,
     }));
   }
   return Object.freeze({ snapshots: Object.freeze(snapshots) });
@@ -446,6 +871,7 @@ function unavailableSnapshot(key) {
     layoutHeight: 0,
     byteLength: 0,
     pngBytes: new Uint8Array(),
+    renderedTextSha256: "",
   });
 }
 
@@ -722,6 +1148,7 @@ export function createRuntimeSnapshotCaptureController({
             ...png,
             layoutWidth: ownerSnapshot.rect.width,
             layoutHeight: ownerSnapshot.rect.height,
+            renderedTextSha256: renderedTextSha256(ownerSnapshot.renderedText),
           }));
         } catch (error) {
           if (error instanceof CaptureTimedOutError || error instanceof CaptureCancelledError) {

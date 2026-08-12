@@ -17,6 +17,7 @@ const SNAPSHOT_KEYS = new Set([
   "layoutHeight",
   "byteLength",
   "pngBytes",
+  "renderedTextSha256",
 ]);
 const PNG_HEADER = Object.freeze([137, 80, 78, 71, 13, 10, 26, 10]);
 const PNG_HASH_PATTERN = /^sha256:[a-f0-9]{64}$/u;
@@ -68,6 +69,7 @@ function acceptedUnavailableSnapshot(rawSnapshot, key) {
     || rawSnapshot.layoutWidth !== 0
     || rawSnapshot.layoutHeight !== 0
     || rawSnapshot.byteLength !== 0
+    || rawSnapshot.renderedTextSha256 !== ""
     || !pngBytes
     || pngBytes.byteLength !== 0
   ) return null;
@@ -81,6 +83,7 @@ function acceptedUnavailableSnapshot(rawSnapshot, key) {
     layoutHeight: 0,
     byteLength: 0,
     pngBytes,
+    renderedTextSha256: "",
   });
 }
 
@@ -98,6 +101,8 @@ function acceptedCapturedSnapshot(rawSnapshot, key) {
     || byteLength < 24
     || typeof rawSnapshot.pngSha256 !== "string"
     || !PNG_HASH_PATTERN.test(rawSnapshot.pngSha256)
+    || typeof rawSnapshot.renderedTextSha256 !== "string"
+    || !PNG_HASH_PATTERN.test(rawSnapshot.renderedTextSha256)
   ) return null;
   const dimensions = pngDimensions(pngBytes);
   if (
@@ -116,6 +121,7 @@ function acceptedCapturedSnapshot(rawSnapshot, key) {
     layoutHeight,
     byteLength,
     pngBytes,
+    renderedTextSha256: rawSnapshot.renderedTextSha256,
   });
 }
 

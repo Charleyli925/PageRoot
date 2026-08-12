@@ -1,4 +1,4 @@
-export const RUNTIME_VISUAL_CONTRACT_VERSION = 1;
+export const RUNTIME_VISUAL_CONTRACT_VERSION = 2;
 
 export const RUNTIME_VISUAL_CONTRACT = Object.freeze({
   version: RUNTIME_VISUAL_CONTRACT_VERSION,
@@ -18,6 +18,7 @@ export const RUNTIME_VISUAL_CONTRACT = Object.freeze({
     pngBytes: 2_000_000,
     pngDimension: 4_096,
     aggregatePngBytes: 16_000_000,
+    renderedTextBytes: 64 * 1024,
   }),
 });
 

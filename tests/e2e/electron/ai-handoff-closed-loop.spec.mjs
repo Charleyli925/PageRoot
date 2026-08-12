@@ -4104,7 +4104,10 @@ test("a persisted legacy global comment stays exact after restart and sends dire
       activeSourcePath: fixture.sourcePath,
       isolatedUserData: firstLaunch.isolatedUserData,
     });
-    expect(workspaceContainsDraftComment(activeLaunch.workspace, commentText)).toBe(true);
+    await expect.poll(
+      () => workspaceContainsDraftComment(activeLaunch.workspace, commentText),
+      { timeout: 20_000 },
+    ).toBe(true);
     await loadedDiskFrame(activeLaunch.page, fixture.sourcePath);
     const recoveredComment = activeLaunch.page.locator(".comment-card")
       .filter({ hasText: commentText });

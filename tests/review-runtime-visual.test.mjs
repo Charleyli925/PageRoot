@@ -8,7 +8,10 @@ import { bytesToHex } from "@noble/hashes/utils.js";
 import {
   acceptRuntimeVisualSnapshots,
   changedReviewRuntimeVisualCandidateKeys,
+  isReviewRuntimeVisualRasterDifferenceMeaningful,
   mergeReviewRuntimeVisualChanges,
+  REVIEW_RUNTIME_VISUAL_RASTER_MEAN_RGB_DIFFERENCE_BUDGET,
+  reviewRuntimeVisualMeanRgbDifference,
 } from "../app/lib/review-runtime-visual.js";
 import { RUNTIME_VISUAL_CONTRACT } from "../app/domain/runtime-visual-contract.js";
 
@@ -32,6 +35,10 @@ function hash(bytes) {
   return `sha256:${bytesToHex(sha256(bytes))}`;
 }
 
+function renderedTextHash(value) {
+  return hash(new Uint8Array(Buffer.from(value, "utf8")));
+}
+
 function snapshot(key, pngBytes = PNG, overrides = {}) {
   return {
     key,
@@ -43,6 +50,7 @@ function snapshot(key, pngBytes = PNG, overrides = {}) {
     layoutHeight: 1,
     byteLength: pngBytes.byteLength,
     pngBytes: new Uint8Array(pngBytes),
+    renderedTextSha256: renderedTextHash("图表 9.54"),
     ...overrides,
   };
 }
@@ -58,6 +66,7 @@ function unavailable(key) {
     layoutHeight: 0,
     byteLength: 0,
     pngBytes: new Uint8Array(),
+    renderedTextSha256: "",
   };
 }
 
@@ -83,6 +92,9 @@ test("runtime snapshots accept only bounded declared PNG results", () => {
   ], allowed), null);
   assert.equal(acceptRuntimeVisualSnapshots([
     { ...snapshot("runtime-host-1"), layoutWidth: 0 },
+  ], allowed), null);
+  assert.equal(acceptRuntimeVisualSnapshots([
+    { ...snapshot("runtime-host-1"), renderedTextSha256: "" },
   ], allowed), null);
   assert.equal(acceptRuntimeVisualSnapshots([
     unavailable("runtime-host-1"),
@@ -111,7 +123,7 @@ test("trusted runtime snapshot parser fails closed for hostile >2MB and >4096 re
   ], allowed), null);
 });
 
-test("runtime comparison uses one before/after PNG pair and fails closed", () => {
+test("runtime comparison is strict for layout and rendered text, but requires a meaningful raster delta", () => {
   const candidates = [{ key: "runtime-host-1" }];
   assert.deepEqual(changedReviewRuntimeVisualCandidateKeys({
     candidates,
@@ -122,12 +134,35 @@ test("runtime comparison uses one before/after PNG pair and fails closed", () =>
     candidates,
     before: [snapshot("runtime-host-1")],
     after: [snapshot("runtime-host-1", CHANGED_PNG)],
+  }), []);
+  assert.deepEqual(changedReviewRuntimeVisualCandidateKeys({
+    candidates,
+    before: [snapshot("runtime-host-1")],
+    after: [snapshot("runtime-host-1", CHANGED_PNG)],
+    rasterMeanRgbDifferenceByKey: new Map([
+      ["runtime-host-1", REVIEW_RUNTIME_VISUAL_RASTER_MEAN_RGB_DIFFERENCE_BUDGET],
+    ]),
+  }), []);
+  assert.deepEqual(changedReviewRuntimeVisualCandidateKeys({
+    candidates,
+    before: [snapshot("runtime-host-1")],
+    after: [snapshot("runtime-host-1", CHANGED_PNG)],
+    rasterMeanRgbDifferenceByKey: new Map([
+      ["runtime-host-1", REVIEW_RUNTIME_VISUAL_RASTER_MEAN_RGB_DIFFERENCE_BUDGET + 0.001],
+    ]),
   }), ["runtime-host-1"]);
   assert.deepEqual(changedReviewRuntimeVisualCandidateKeys({
     candidates,
     before: [snapshot("runtime-host-1")],
     after: [snapshot("runtime-host-1", PNG, { layoutWidth: 2 })],
   }), ["runtime-host-1"]);
+  assert.deepEqual(changedReviewRuntimeVisualCandidateKeys({
+    candidates,
+    before: [snapshot("runtime-host-1")],
+    after: [snapshot("runtime-host-1", PNG, {
+      renderedTextSha256: renderedTextHash("图表 9.55"),
+    })],
+  }), ["runtime-host-1"], "a visible numeric character change has no raster tolerance");
   assert.deepEqual(changedReviewRuntimeVisualCandidateKeys({
     candidates,
     before: [snapshot("runtime-host-1")],
@@ -138,6 +173,29 @@ test("runtime comparison uses one before/after PNG pair and fails closed", () =>
     before: [],
     after: [snapshot("runtime-host-1", CHANGED_PNG)],
   }), []);
+});
+
+test("raster noise budget is an RGB mean, not a changed-pixel percentage", () => {
+  const before = new Uint8Array(100 * 4);
+  const singleChannelNoise = new Uint8Array(before);
+  singleChannelNoise[0] = 1;
+  const visibleDelta = new Uint8Array(before);
+  visibleDelta[0] = 13;
+
+  assert.equal(reviewRuntimeVisualMeanRgbDifference(before, before), 0);
+  assert.equal(reviewRuntimeVisualMeanRgbDifference(before, new Uint8Array(3)), null);
+  assert.equal(
+    isReviewRuntimeVisualRasterDifferenceMeaningful(
+      reviewRuntimeVisualMeanRgbDifference(before, singleChannelNoise),
+    ),
+    false,
+  );
+  assert.equal(
+    isReviewRuntimeVisualRasterDifferenceMeaningful(
+      reviewRuntimeVisualMeanRgbDifference(before, visibleDelta),
+    ),
+    true,
+  );
 });
 
 test("runtime visual merge reuses outline metadata but preserves one marker per candidate", () => {
