@@ -316,7 +316,7 @@ export function validateRuntimeSnapshotCaptureRequest(value) {
   });
 }
 
-function isolatedSnapshotRectScript(candidate) {
+export function isolatedSnapshotRectScript(candidate) {
   return String.raw`(() => {
   "use strict";
   const __pagerootRuntimeSnapshotRects = true;
@@ -370,8 +370,87 @@ function isolatedSnapshotRectScript(candidate) {
       height: Math.max(1, Math.ceil(rect.height)),
     };
   };
+  const alphaTokenIsVisible = (value) => {
+    const token = String(value || "").trim();
+    if (!token) return false;
+    if (token.endsWith("%")) return Number.parseFloat(token.slice(0, -1)) > 0;
+    return Number.parseFloat(token) > 0;
+  };
+  const colorIsVisible = (value, fallback = "") => {
+    const color = String(value || "").trim().toLowerCase();
+    if (!color || color === "none" || color === "transparent") return false;
+    if (color === "currentcolor") {
+      const fallbackColor = String(fallback || "").trim().toLowerCase();
+      return fallbackColor && fallbackColor !== "currentcolor"
+        ? colorIsVisible(fallback)
+        : false;
+    }
+    if (color.startsWith("#")) {
+      const alpha = color.length === 5 ? color.slice(4) : color.length === 9 ? color.slice(7) : "";
+      return alpha ? Number.parseInt(alpha, 16) > 0 : true;
+    }
+    const open = color.indexOf("(");
+    const close = color.indexOf(")", open + 1);
+    if (open < 1 || close < open) return true;
+    const name = color.slice(0, open).trim();
+    const argumentsText = color.slice(open + 1, close);
+    const slash = argumentsText.lastIndexOf("/");
+    if (slash >= 0) return alphaTokenIsVisible(argumentsText.slice(slash + 1));
+    if (name === "rgba" || name === "hsla") {
+      const comma = argumentsText.lastIndexOf(",");
+      return comma >= 0 ? alphaTokenIsVisible(argumentsText.slice(comma + 1)) : false;
+    }
+    return true;
+  };
+  const textShadowIsVisible = (value, fallback) => {
+    const shadow = String(value || "").trim();
+    if (!shadow || shadow === "none") return false;
+    const functions = ["rgba(", "rgb(", "hsla(", "hsl(", "color(", "oklab(", "oklch(", "lab(", "lch("];
+    let cursor = 0;
+    let foundColor = false;
+    while (cursor < shadow.length) {
+      let start = -1;
+      for (const prefix of functions) {
+        const candidateStart = shadow.toLowerCase().indexOf(prefix, cursor);
+        if (candidateStart >= 0 && (start < 0 || candidateStart < start)) start = candidateStart;
+      }
+      if (start < 0) break;
+      const end = shadow.indexOf(")", start + 1);
+      if (end < 0) return false;
+      foundColor = true;
+      if (colorIsVisible(shadow.slice(start, end + 1), fallback)) return true;
+      cursor = end + 1;
+    }
+    return foundColor ? false : colorIsVisible(fallback);
+  };
+  const textPaintIsVisible = (element) => {
+    const style = getComputedStyle(window, element);
+    if (element.namespaceURI === "http://www.w3.org/2000/svg") {
+      const strokeWidth = Number.parseFloat(style.strokeWidth || "0");
+      return colorIsVisible(style.fill, style.color)
+        || (strokeWidth > 0 && colorIsVisible(style.stroke, style.color));
+    }
+    const textFill = String(
+      style.webkitTextFillColor || style.getPropertyValue("-webkit-text-fill-color") || "",
+    ).trim();
+    const fill = textFill && textFill.toLowerCase() !== "currentcolor"
+      ? textFill
+      : style.color;
+    const strokeWidth = Number.parseFloat(style.webkitTextStrokeWidth || "0");
+    return colorIsVisible(fill, style.color)
+      || textShadowIsVisible(style.textShadow, style.color)
+      || (
+        style.textDecorationLine !== "none"
+        && colorIsVisible(style.textDecorationColor, style.color)
+      )
+      || (
+        strokeWidth > 0
+        && colorIsVisible(style.webkitTextStrokeColor, style.color)
+      );
+  };
   const textNodeIsVisible = (node, host, hostRect) => {
-    let element = node.parentElement;
+    const textElement = node.parentElement;
+    let element = textElement;
     while (element instanceof Element) {
       const style = getComputedStyle(window, element);
       const opacity = Number.parseFloat(style.opacity);
@@ -385,7 +464,7 @@ function isolatedSnapshotRectScript(candidate) {
       if (element === host) break;
       element = element.parentElement;
     }
-    if (!(element instanceof Element)) return false;
+    if (!(element instanceof Element) || !textPaintIsVisible(textElement)) return false;
     const range = createRange(document);
     selectNodeContents(range, node);
     return Array.from(rangeClientRects(range)).some((rect) => (

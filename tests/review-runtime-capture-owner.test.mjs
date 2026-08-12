@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
+import { runInNewContext } from "node:vm";
 
 import {
   createRuntimeSnapshotCaptureController,
+  isolatedSnapshotRectScript,
   validateRuntimeSnapshotCaptureRequest,
 } from "../desktop/runtime-visual-capture-owner.mjs";
 import { RUNTIME_VISUAL_CONTRACT } from "../app/domain/runtime-visual-contract.js";
@@ -61,6 +63,132 @@ function ownerRectsFor(key, rect, renderedText = "图表 9.54") {
     status: "captured",
     snapshots: [{ key, state: "captured", rect, renderedText }],
   };
+}
+
+function isolatedVisibleText({
+  color = "rgb(0, 0, 0)",
+  textFill = "currentcolor",
+  textShadow = "none",
+  textDecorationColor = "currentcolor",
+  textDecorationLine = "none",
+  textStrokeColor = "transparent",
+  textStrokeWidth = "0px",
+} = {}) {
+  class Element {
+    constructor(tagName, attributes = {}) {
+      this.tagName = tagName;
+      this.attributes = attributes;
+      this.children = [];
+      this.namespaceURI = "http://www.w3.org/1999/xhtml";
+      this.rect = { x: 10, y: 10, width: 100, height: 60 };
+      this.style = {
+        display: "block",
+        visibility: "visible",
+        contentVisibility: "visible",
+        opacity: "1",
+        color,
+        webkitTextFillColor: textFill,
+        textShadow,
+        textDecorationColor,
+        textDecorationLine,
+        webkitTextStrokeColor: textStrokeColor,
+        webkitTextStrokeWidth: textStrokeWidth,
+        fill: "none",
+        stroke: "none",
+        getPropertyValue(name) {
+          return name === "-webkit-text-fill-color" ? textFill : "";
+        },
+      };
+    }
+
+    getAttribute(name) {
+      return this.attributes[name] ?? null;
+    }
+
+    getBoundingClientRect() {
+      return this.rect;
+    }
+
+    querySelectorAll() {
+      return [];
+    }
+
+    scrollIntoView() {}
+  }
+
+  class TreeWalker {
+    constructor(nodes) {
+      this.nodes = nodes;
+      this.index = 0;
+    }
+
+    nextNode() {
+      return this.nodes[this.index++] || null;
+    }
+  }
+
+  class Range {
+    selectNodeContents(node) {
+      this.node = node;
+    }
+
+    getClientRects() {
+      return [this.node.parentElement.rect];
+    }
+  }
+
+  class Document {
+    constructor(root, nodes) {
+      this.documentElement = root;
+      this.nodes = nodes;
+    }
+
+    createTreeWalker() {
+      return new TreeWalker(this.nodes);
+    }
+
+    createRange() {
+      return new Range();
+    }
+  }
+
+  class Window {
+    constructor() {
+      this.innerWidth = 960;
+      this.innerHeight = 640;
+    }
+
+    getComputedStyle(element) {
+      return element.style;
+    }
+  }
+
+  const root = new Element("HTML");
+  const host = new Element("CANVAS", { id: "chart" });
+  root.children.push(host);
+  const text = { nodeValue: "visible chart label", parentElement: host };
+  const document = new Document(root, [text]);
+  const window = new Window();
+  const result = runInNewContext(isolatedSnapshotRectScript({
+    key: "runtime-host-1",
+    path: [0],
+    tagName: "canvas",
+    kind: "canvas",
+    identityAttributes: [["id", "chart"]],
+  }), {
+    Array,
+    Document,
+    Element,
+    Number,
+    Range,
+    String,
+    TextEncoder,
+    TreeWalker,
+    Window,
+    document,
+    window,
+  });
+  return result.snapshots[0].renderedText;
 }
 
 function fakeOwner({
@@ -268,6 +396,28 @@ test("runtime snapshot owner captures once through an isolated one-use Electron 
     requestDecision = value;
   });
   assert.deepEqual(requestDecision, { cancel: true });
+});
+
+test("isolated visible-text summary excludes transparent paint but keeps a visible text fill", () => {
+  assert.equal(isolatedVisibleText({ color: "transparent" }), "");
+  assert.equal(isolatedVisibleText({ color: "rgba(255, 0, 0, 0)" }), "");
+  assert.equal(isolatedVisibleText({
+    color: "color(srgb 1 0 0 / 0)",
+    textShadow: "0 0 2px rgba(0, 255, 0, 0)",
+  }), "");
+  assert.equal(isolatedVisibleText({
+    color: "rgb(255, 0, 0)",
+    textFill: "transparent",
+  }), "");
+  assert.equal(isolatedVisibleText({
+    color: "transparent",
+    textFill: "rgb(0, 0, 255)",
+  }), "visible chart label");
+  assert.equal(isolatedVisibleText({
+    color: "transparent",
+    textStrokeColor: "rgb(0, 0, 0)",
+    textStrokeWidth: "1px",
+  }), "visible chart label");
 });
 
 test("runtime snapshot owner omits a source binding mismatch before creating a preview session", async () => {
