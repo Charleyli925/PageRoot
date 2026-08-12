@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   appendReviewProjectionFact,
   appendTrustedReviewProjectionFact,
+  normalizeReviewProjectionFact,
   parseReviewProjectionFacts,
   ReviewProjectionFactOverflowError,
   REVIEW_PROJECTION_FACTS_PER_ELEMENT_LIMIT,
@@ -44,6 +45,32 @@ test("one element can preserve a box-style fact and a layout fact", () => {
   assert.deepEqual(parseReviewProjectionFacts(serializeReviewProjectionFacts(facts)), facts);
   assert.deepEqual(reviewProjectionFactsForFilter(facts, "style"), facts);
   assert.deepEqual(reviewProjectionFactsForFilter(facts, "text"), []);
+});
+
+test("legacy text scope heuristics are discarded at the projection boundary", () => {
+  const fact = normalizeReviewProjectionFact({
+    id: "text-change-1",
+    type: "text",
+    semanticOwnerId: "semantic-owner-1",
+    geometryOwnerId: "geometry-owner-1",
+    scope: "text",
+    operation: "replace",
+    tone: "added",
+    textGroup: "text-group-1",
+    textScope: "block",
+    textDensity: 0.92,
+  });
+
+  assert.deepEqual(fact, {
+    id: "text-change-1",
+    type: "text",
+    semanticOwnerId: "semantic-owner-1",
+    geometryOwnerId: "geometry-owner-1",
+    scope: "text",
+    operation: "replace",
+    tone: "added",
+    textGroup: "text-group-1",
+  });
 });
 
 test("only the same fact and owners may merge", () => {
