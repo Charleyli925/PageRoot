@@ -67,7 +67,6 @@ async function installRuntimeProjectionFrame(page, {
     scope: "text",
     tone: "added",
     textGroup: "static-text",
-    textScope: "inline",
     summary: "文本调整",
   }]);
   const srcdoc = `<!doctype html>

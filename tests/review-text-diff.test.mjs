@@ -49,10 +49,10 @@ test("pure insertion keeps evidence and visible footprint only on the after side
   });
   assert.equal(plan.operation, "insert");
   assert.deepEqual(plan.before.evidenceRanges, []);
-  assert.deepEqual(plan.before.footprintGroups, []);
+  assert.deepEqual(plan.before.phraseGroups, []);
   assert.equal(plan.before.anchorOffset, after.indexOf("主要"));
   assert.deepEqual(plan.after.evidenceRanges, differences.after);
-  assert.deepEqual(plan.after.footprintGroups, [differences.after]);
+  assert.deepEqual(plan.after.phraseGroups, [differences.after]);
   assert.equal(plan.after.anchorOffset, null);
 });
 
@@ -68,10 +68,10 @@ test("pure deletion keeps evidence and visible footprint only on the before side
   });
   assert.equal(plan.operation, "delete");
   assert.deepEqual(plan.before.evidenceRanges, differences.before);
-  assert.deepEqual(plan.before.footprintGroups, [differences.before]);
+  assert.deepEqual(plan.before.phraseGroups, [differences.before]);
   assert.equal(plan.before.anchorOffset, null);
   assert.deepEqual(plan.after.evidenceRanges, []);
-  assert.deepEqual(plan.after.footprintGroups, []);
+  assert.deepEqual(plan.after.phraseGroups, []);
   assert.equal(plan.after.anchorOffset, before.indexOf("换言之，"));
 });
 
@@ -89,7 +89,8 @@ test("insert and delete plans are strict mirrors when the sides are swapped", ()
   assert.equal(deleted.operation, "delete");
   assert.deepEqual(deleted.before, inserted.after);
   assert.deepEqual(deleted.after, inserted.before);
-  assert.equal(deleted.scope, inserted.scope);
+  assert.equal("scope" in inserted, false);
+  assert.equal("density" in inserted, false);
 });
 
 test("an invisible navigation anchor never implies a visible footprint", () => {
@@ -100,7 +101,7 @@ test("an invisible navigation anchor never implies a visible footprint", () => {
 
   assert.equal(plan.before.anchorOffset, 1);
   assert.deepEqual(plan.before.evidenceRanges, []);
-  assert.deepEqual(plan.before.footprintGroups, []);
+  assert.deepEqual(plan.before.phraseGroups, []);
 });
 
 test("no text evidence produces no operation, anchor, or visible footprint", () => {
@@ -112,12 +113,12 @@ test("no text evidence produces no operation, anchor, or visible footprint", () 
   assert.equal(plan.operation, "none");
   assert.deepEqual(plan.before, {
     evidenceRanges: [],
-    footprintGroups: [],
+    phraseGroups: [],
     anchorOffset: null,
   });
   assert.deepEqual(plan.after, {
     evidenceRanges: [],
-    footprintGroups: [],
+    phraseGroups: [],
     anchorOffset: null,
   });
 });
@@ -130,15 +131,14 @@ test("layout-only changes carry no red or green text evidence", () => {
   });
 
   assert.equal(plan.operation, "layout");
-  assert.equal(plan.scope, "inline");
   assert.deepEqual(plan.before, {
     evidenceRanges: [],
-    footprintGroups: [],
+    phraseGroups: [],
     anchorOffset: null,
   });
   assert.deepEqual(plan.after, {
     evidenceRanges: [],
-    footprintGroups: [],
+    phraseGroups: [],
     anchorOffset: null,
   });
 });
@@ -170,7 +170,7 @@ test("long punctuation-free copy keeps distant edits in separate precise ranges"
   });
 });
 
-test("dense multi-line copy rewrites promote to one readable block footprint", () => {
+test("dense rewrites keep exact phrase groups for the geometry stage", () => {
   const before = "综搜整体仍处于放缓背景，关键不在于单纯增加曝光，而在于识别商品需求，并用更匹配的供给承接；核心仍是让模型识别电商意图，再优化结果组织，把模糊兴趣转化为可验证需求。";
   const after = "综搜放缓，但电商搜索仍有较高大盘。关键是识别内容浏览中的潜在商品需求，并用匹配供给承接。供给可归纳为电商意图识别、优化结果组织，将模糊兴趣转为可验证需求。";
   const differences = sentenceAwareTextDifferences(before, after);
@@ -179,13 +179,15 @@ test("dense multi-line copy rewrites promote to one readable block footprint", (
   assert.equal(plan.operation, "replace");
   assert.equal(plan.before.anchorOffset, null);
   assert.equal(plan.after.anchorOffset, null);
-  assert.equal(plan.scope, "block");
-  assert.equal(plan.before.footprintGroups.length, 1);
-  assert.equal(plan.after.footprintGroups.length, 1);
-  assert.ok(plan.density >= 0.45);
+  assert.ok(plan.before.phraseGroups.length > 0);
+  assert.ok(plan.after.phraseGroups.length > 0);
+  assert.deepEqual(plan.before.phraseGroups.flat(), plan.before.evidenceRanges);
+  assert.deepEqual(plan.after.phraseGroups.flat(), plan.after.evidenceRanges);
+  assert.equal("scope" in plan, false);
+  assert.equal("density" in plan, false);
 });
 
-test("one-sided evidence can be a sentence but can never become a block", () => {
+test("one-sided evidence uses the same phrase plan in both directions", () => {
   const before = "稳定前句。稳定后句。";
   const after = "稳定前句。完整新增句。稳定后句。";
   const differences = sentenceAwareTextDifferences(before, after);
@@ -196,18 +198,18 @@ test("one-sided evidence can be a sentence but can never become a block", () => 
   });
 
   assert.equal(inserted.operation, "insert");
-  assert.equal(inserted.scope, "sentence");
   assert.equal(deleted.operation, "delete");
-  assert.equal(deleted.scope, "sentence");
+  assert.deepEqual(deleted.before.phraseGroups, inserted.after.phraseGroups);
+  assert.deepEqual(deleted.after.phraseGroups, inserted.before.phraseGroups);
 });
 
-test("stable outer sentences prevent dense evidence from swallowing the block", () => {
+test("stable outer sentences stay outside exact evidence without deciding geometry", () => {
   const before = "稳定前句。旧方案覆盖多个指标、多个渠道、多个阶段，并给出较长说明。稳定后句。";
   const after = "稳定前句。新方案改写全部口径、执行路径、验证方式，并补充另一组较长说明。稳定后句。";
   const differences = sentenceAwareTextDifferences(before, after);
   const plan = readableReviewTextFootprintPlan(before, after, differences);
 
-  assert.notEqual(plan.scope, "block");
+  assert.equal("scope" in plan, false);
   assert.ok(changedText(before, plan.before.evidenceRanges).every((value) => (
     !value.includes("稳定前句") && !value.includes("稳定后句")
   )));
@@ -236,9 +238,8 @@ test("a meaningful stable gap keeps precise phrase footprints separate", () => {
     before: ["扩大", "稳定"],
     after: ["收缩", "提升"],
   });
-  assert.equal(plan.scope, "inline");
-  assert.equal(plan.before.footprintGroups.length, 2);
-  assert.equal(plan.after.footprintGroups.length, 2);
+  assert.equal(plan.before.phraseGroups.length, 2);
+  assert.equal(plan.after.phraseGroups.length, 2);
 });
 
 test("tiny unchanged gaps are absorbed but sentence boundaries split footprints", () => {
@@ -259,8 +260,6 @@ test("tiny unchanged gaps are absorbed but sentence boundaries split footprints"
     },
   );
 
-  assert.equal(compact.scope, "inline");
-  assert.equal(compact.before.footprintGroups.length, 1);
-  assert.equal(separated.scope, "inline");
-  assert.equal(separated.before.footprintGroups.length, 2);
+  assert.equal(compact.before.phraseGroups.length, 1);
+  assert.equal(separated.before.phraseGroups.length, 2);
 });

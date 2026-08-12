@@ -8,7 +8,6 @@ const FACT_SCOPES = new Set([
   "box",
   "content",
 ]);
-const FACT_TEXT_SCOPES = new Set(["inline", "sentence", "block"]);
 const FACT_OPERATIONS = new Set(["none", "insert", "delete", "replace", "layout"]);
 const FACT_TONES = new Set(["added", "removed"]);
 const FACT_KEY_PATTERN = /^[a-z0-9:_-]{1,160}$/iu;
@@ -58,12 +57,8 @@ export function normalizeReviewProjectionFact(value) {
     ? value.tone
     : undefined;
   const textGroup = optionalKey(value.textGroup);
-  const textScope = typeof value.textScope === "string" && FACT_TEXT_SCOPES.has(value.textScope)
-    ? value.textScope
-    : undefined;
   const structureChange = optionalKey(value.structureChange);
   const summary = optionalSummary(value.summary);
-  const textDensity = Number(value.textDensity);
 
   if (geometryOwnerId) fact.geometryOwnerId = geometryOwnerId;
   if (scope) fact.scope = scope;
@@ -71,12 +66,8 @@ export function normalizeReviewProjectionFact(value) {
   if (operation) fact.operation = operation;
   if (tone) fact.tone = tone;
   if (textGroup) fact.textGroup = textGroup;
-  if (textScope) fact.textScope = textScope;
   if (structureChange) fact.structureChange = structureChange;
   if (summary) fact.summary = summary;
-  if (Number.isFinite(textDensity) && textDensity >= 0 && textDensity <= 1) {
-    fact.textDensity = textDensity;
-  }
   return fact;
 }
 
