@@ -81,6 +81,7 @@ function isolatedVisibleText({
   strokeWidth = "0px",
   clippingAncestor = null,
   hostStyle = null,
+  textStyle = null,
   textRect = null,
   textRects = null,
 } = {}) {
@@ -111,8 +112,13 @@ function isolatedVisibleText({
         strokeOpacity,
         strokeWidth,
         filter: "none",
+        maskImage: "none",
+        webkitMaskImage: "none",
         getPropertyValue(name) {
-          return name === "-webkit-text-fill-color" ? textFill : "";
+          if (name === "-webkit-text-fill-color") return this.webkitTextFillColor;
+          if (name === "mask-image") return this.maskImage;
+          if (name === "-webkit-mask-image") return this.webkitMaskImage;
+          return "";
         },
       };
     }
@@ -195,6 +201,7 @@ function isolatedVisibleText({
   if (textElement !== host) {
     textElement.parentElement = textParent;
     textElement.rect = textRect || textElement.rect;
+    Object.assign(textElement.style, textStyle || {});
     textParent.children.push(textElement);
   }
   const text = {
@@ -528,6 +535,27 @@ test("isolated visible-text summary excludes post-paint zero-opacity filters", (
   assert.equal(isolatedVisibleText({
     hostStyle: { filter: "opacity(0.01)" },
   }), "visible chart label");
+});
+
+test("isolated visible-text summary honors a descendant visibility override", () => {
+  assert.equal(isolatedVisibleText({
+    clippingAncestor: { style: { visibility: "hidden" } },
+    textStyle: { visibility: "visible" },
+  }), "visible chart label");
+  assert.equal(isolatedVisibleText({
+    clippingAncestor: { style: { visibility: "hidden" } },
+    textStyle: { visibility: "hidden" },
+  }), "");
+});
+
+test("isolated visible-text summary leaves masked text to the raster layer", () => {
+  assert.equal(isolatedVisibleText({
+    hostStyle: { maskImage: "linear-gradient(transparent, transparent)" },
+  }), "");
+  assert.equal(isolatedVisibleText({
+    clippingAncestor: { style: { webkitMaskImage: "url(#fully-hidden)" } },
+  }), "");
+  assert.equal(isolatedVisibleText({ hostStyle: { maskImage: "none" } }), "visible chart label");
 });
 
 test("runtime snapshot owner omits a source binding mismatch before creating a preview session", async () => {

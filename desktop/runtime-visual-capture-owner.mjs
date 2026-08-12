@@ -394,6 +394,21 @@ export function isolatedSnapshotRectScript(candidate) {
     }
     return false;
   };
+  const maskMakesTextPaintUnverifiable = (style) => {
+    const maskImages = [
+      style.maskImage || style.getPropertyValue("mask-image"),
+      style.webkitMaskImage || style.getPropertyValue("-webkit-mask-image"),
+    ];
+    // A CSS/SVG mask can make a subtree wholly transparent, but its general
+    // image grammar cannot be reduced to a reliable text-paint predicate.
+    // Keep the strict text layer for text whose paint can be proved; masked
+    // text falls back to the existing raster layer rather than causing a
+    // false marker from text with no captured pixels.
+    return maskImages.some((value) => {
+      const mask = String(value || "").trim().toLowerCase();
+      return Boolean(mask && mask !== "none");
+    });
+  };
   const colorIsVisible = (value, fallback = "") => {
     const color = String(value || "").trim().toLowerCase();
     if (!color || color === "none" || color === "transparent") return false;
@@ -600,16 +615,24 @@ export function isolatedSnapshotRectScript(candidate) {
       const opacity = Number.parseFloat(style.opacity);
       if (
         style.display === "none"
-        || style.visibility === "hidden"
-        || style.visibility === "collapse"
         || style.contentVisibility === "hidden"
         || (Number.isFinite(opacity) && opacity <= 0)
         || filterHidesPaint(style.filter || style.getPropertyValue("filter"))
+        || maskMakesTextPaintUnverifiable(style)
       ) return false;
       if (element === host) break;
       element = element.parentElement;
     }
-    if (!(element instanceof Element) || !textPaintIsVisible(textElement)) return false;
+    const textStyle = textElement instanceof Element
+      ? getComputedStyle(window, textElement)
+      : null;
+    if (
+      !(element instanceof Element)
+      || !textStyle
+      || textStyle.visibility === "hidden"
+      || textStyle.visibility === "collapse"
+      || !textPaintIsVisible(textElement)
+    ) return false;
     const range = createRange(document);
     selectNodeContents(range, node);
     const textRects = Array.from(rangeClientRects(range)).filter((rect) => (

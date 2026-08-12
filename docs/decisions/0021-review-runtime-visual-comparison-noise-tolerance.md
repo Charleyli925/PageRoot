@@ -25,11 +25,16 @@ The one existing Review before/after owner pair remains the only evidence pair.
 No user-facing text, display state or Review geometry is added or changed.
 
 - In the owner-isolated world, each captured host derives a bounded normalized
-  sequence of visible DOM/SVG text and returns only its SHA-256
-  `renderedTextSha256`; raw text does not cross the owner boundary.
+  sequence of DOM/SVG text whose paint can be established and returns only its
+  SHA-256 `renderedTextSha256`; raw text does not cross the owner boundary.
+  Transparent/zero-opacity paint, fully or partially clipped runs, and any
+  CSS/SVG mask are excluded from this strict summary. General mask grammars
+  cannot be proved from computed style alone, so masked text uses the existing
+  raster layer rather than producing a false marker from text with no pixels.
 - Matching captured hosts compare layout dimensions and `renderedTextSha256`
-  strictly. Any visible DOM/SVG text or numeric-character change emits the
-  existing opaque runtime fact regardless of its pixel area.
+  strictly. Any DOM/SVG text or numeric-character change whose paint can be
+  established emits the existing opaque runtime fact regardless of its pixel
+  area.
 - Only equal-text, equal-dimension PNG hash mismatches are decoded in trusted
   renderer memory. The existing bitmap pair is compared once by mean absolute
   RGB-channel error, and a value greater than `0.04` on the 0–255 channel scale
