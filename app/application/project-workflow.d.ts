@@ -89,7 +89,12 @@ export type ProjectWorkflowConstruction = Readonly<{
     hash: object;
     canvas: object;
     projectOpen: object;
-    legacy: object;
+    viewState: Readonly<{
+      isTransitioning(): boolean;
+    }>;
+    recentRuns: Readonly<{
+      hydrate(projects: unknown[], activeSourcePath: string | null): void | Promise<void>;
+    }>;
   }>;
   policies: object;
   scheduler?: Readonly<{
@@ -102,6 +107,7 @@ export class ProjectWorkflow {
   constructor(options: Readonly<Record<string, unknown>>);
   getSnapshot(): ProjectWorkflowSnapshot;
   subscribe(listener: (snapshot: ProjectWorkflowSnapshot) => void): () => void;
+  subscribeEvents(listener: (event: ProjectWorkflowEvent) => void): () => void;
   readonly projectHydrating: boolean;
   readonly projectLoadError: string | null;
   reportLoadFailure(message: string): void;

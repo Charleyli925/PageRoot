@@ -210,7 +210,7 @@ function createProjectRulesHarness() {
   return { context, controller, get persisted() { return persisted; } };
 }
 
-test("workspace controller registers one injected Session set and publishes canonical authority", async () => {
+test("workspace controller accepts its injected test Session set and publishes canonical authority", async () => {
   const harness = createHarness();
   harness.commentSession.update({
     comments: [{
@@ -250,6 +250,34 @@ test("workspace controller registers one injected Session set and publishes cano
     projectName: "Canonical project",
     canonicalSourceAdopted: true,
   }]);
+});
+
+test("workspace controller is the sole aggregate Session observer and disconnects on dispose", () => {
+  const harness = createHarness();
+  const snapshots = [];
+  const unsubscribe = harness.controller.subscribe((snapshot) => snapshots.push(snapshot));
+
+  assert.equal(snapshots.at(-1)?.document, harness.documentSession.snapshot);
+  assert.equal(snapshots.at(-1)?.commentSession, harness.commentSession.snapshot);
+  assert.equal(snapshots.at(-1)?.versionSession, harness.versionSession.snapshot);
+  assert.equal(snapshots.at(-1)?.runSession, null);
+
+  harness.documentSession.setPendingWrite({ revision: 1 });
+  harness.documentSession.setPersistence({ state: "queued" });
+  assert.equal(snapshots.at(-1)?.document?.hasPendingWrite, true);
+
+  harness.commentSession.setComments([{
+    commentId: "aggregate_comment",
+    target: { id: "aggregate_target", selector: "main" },
+  }]);
+  assert.equal(snapshots.at(-1)?.commentSession?.comments[0]?.commentId, "aggregate_comment");
+  assert.equal(Object.isFrozen(harness.controller.getSnapshot()), true);
+
+  const finalSnapshot = harness.controller.getSnapshot();
+  harness.controller.dispose();
+  harness.documentSession.setPersistence({ state: "idle" });
+  assert.equal(harness.controller.getSnapshot(), finalSnapshot);
+  unsubscribe();
 });
 
 test("workspace controller aggregates and dispatches the typed PROJECT.md workflow", async () => {

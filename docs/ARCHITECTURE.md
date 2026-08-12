@@ -206,16 +206,23 @@ Comments + frozen input
 
 ## Module map
 
-`app/workbench.tsx` is the composition root for the review workspace. It
-subscribes to owner snapshots, derives presentation values and dispatches user
-intent; it does not own persistence protocols or duplicate the sessions'
-mutable facts. Pure Workbench models hold deterministic formatting and
-transition helpers. Presentation modules receive snapshots and callbacks only;
-they do not import application services.
+`createRuntimeWorkspaceController()` in the Application layer is the runtime
+composition root for the review workspace. It creates the one typed Bridge
+client, shared `RunSession`, and remaining fact-owning Sessions, then hands
+their workflows to one `WorkspaceController`. The Controller is the only
+Application aggregate observer: it publishes one frozen Project/Document/
+Comment/Run/Version snapshot and an event stream without copying mutable facts.
+`app/workbench.tsx` is a presentation adapter: it subscribes to that aggregate,
+derives visual state, supplies narrow host adapters and dispatches user intent.
+It imports neither the Bridge client nor business Sessions. Pure Workbench
+models hold deterministic formatting and transition helpers. Presentation
+modules receive snapshots and callbacks only; they do not import application
+services.
 
 | Boundary | Owner |
 | --- | --- |
 | Bridge routes, timeouts and structured outcomes | `app/application/bridge-client.js` |
+| Runtime Bridge/Session/workflow composition, aggregate frozen snapshot and application event stream | `createRuntimeWorkspaceController()` and `WorkspaceController` in `app/application/workspace-controller.js` |
 | Open/registered project identity, session generation and late-query fencing | `app/application/project-session.js` |
 | External OS/QoderWork HTML-open delivery, opaque request deduplication, committed-exit one-shot handoff, cold-start native failure presentation from stable product codes, whole project-open transition ordering, monotonic deferred-transition notification, blocker-gated/manual safe-switch retry, accepted-result FIFO and final renderer fence | `desktop/external-file-open.mjs`, `desktop/project-open-queue.mjs`, `app/application/external-file-open-session.js`, `app/application/project-application-session.js` |
 | Current source bytes, Hash, revisions, persistence projection, source-write single flight and Canvas authority generation | `app/application/document-session.js` |
