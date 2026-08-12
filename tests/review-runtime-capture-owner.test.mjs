@@ -114,10 +114,20 @@ function isolatedVisibleText({
         filter: "none",
         maskImage: "none",
         webkitMaskImage: "none",
+        backgroundClip: "border-box",
+        webkitBackgroundClip: "border-box",
+        backgroundColor: "rgba(0, 0, 0, 0)",
+        backgroundImage: "none",
+        webkitBackgroundImage: "none",
         getPropertyValue(name) {
           if (name === "-webkit-text-fill-color") return this.webkitTextFillColor;
           if (name === "mask-image") return this.maskImage;
           if (name === "-webkit-mask-image") return this.webkitMaskImage;
+          if (name === "background-clip") return this.backgroundClip;
+          if (name === "-webkit-background-clip") return this.webkitBackgroundClip;
+          if (name === "background-color") return this.backgroundColor;
+          if (name === "background-image") return this.backgroundImage;
+          if (name === "-webkit-background-image") return this.webkitBackgroundImage;
           return "";
         },
       };
@@ -201,9 +211,9 @@ function isolatedVisibleText({
   if (textElement !== host) {
     textElement.parentElement = textParent;
     textElement.rect = textRect || textElement.rect;
-    Object.assign(textElement.style, textStyle || {});
     textParent.children.push(textElement);
   }
+  Object.assign(textElement.style, textStyle || {});
   const text = {
     nodeValue: "visible chart label",
     parentElement: textElement,
@@ -477,6 +487,27 @@ test("isolated visible-text summary excludes transparent paint but keeps a visib
     fill: "rgb(0, 0, 0)",
     fillOpacity: "1",
   }), "visible chart label");
+  assert.equal(isolatedVisibleText({
+    svg: true,
+    fill: "url(#possibly-transparent-gradient)",
+  }), "");
+  assert.equal(isolatedVisibleText({
+    color: "transparent",
+    textFill: "transparent",
+    textStyle: {
+      backgroundClip: "text",
+      webkitBackgroundClip: "text",
+      backgroundImage: "linear-gradient(rgb(255, 0, 0), rgb(0, 0, 255))",
+    },
+  }), "visible chart label");
+  assert.equal(isolatedVisibleText({
+    color: "transparent",
+    textFill: "transparent",
+    textStyle: {
+      backgroundClip: "text",
+      backgroundImage: "linear-gradient(rgba(255, 0, 0, 0), rgba(0, 0, 255, 0))",
+    },
+  }), "");
 });
 
 test("isolated visible-text summary excludes text hidden by ancestor clipping", () => {

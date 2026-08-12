@@ -31,6 +31,9 @@ No user-facing text, display state or Review geometry is added or changed.
   CSS/SVG mask are excluded from this strict summary. General mask grammars
   cannot be proved from computed style alone, so masked text uses the existing
   raster layer rather than producing a false marker from text with no pixels.
+  Unresolved SVG paint servers are treated the same way; common
+  background-clipped gradient text remains strict only when a nontransparent
+  computed gradient stop proves paint.
 - Matching captured hosts compare layout dimensions and `renderedTextSha256`
   strictly. Any DOM/SVG text or numeric-character change whose paint can be
   established emits the existing opaque runtime fact regardless of its pixel

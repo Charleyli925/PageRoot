@@ -412,6 +412,10 @@ export function isolatedSnapshotRectScript(candidate) {
   const colorIsVisible = (value, fallback = "") => {
     const color = String(value || "").trim().toLowerCase();
     if (!color || color === "none" || color === "transparent") return false;
+    // SVG paint servers are not colors. A referenced gradient/pattern can be
+    // absent or fully transparent, so it cannot prove that this text has
+    // pixels without inspecting another authored resource.
+    if (color.startsWith("url(")) return false;
     if (color === "currentcolor") {
       const fallbackColor = String(fallback || "").trim().toLowerCase();
       return fallbackColor && fallbackColor !== "currentcolor"
@@ -456,6 +460,46 @@ export function isolatedSnapshotRectScript(candidate) {
     }
     return foundColor ? false : colorIsVisible(fallback);
   };
+  const backgroundImageHasVisibleColor = (value, fallback) => {
+    const image = String(value || "").trim().toLowerCase();
+    if (!image || image === "none") return false;
+    // Computed gradient colors are serialized as color functions in Chromium.
+    // Accept only a positively visible stop; external images and unknown image
+    // grammars stay on the existing raster path.
+    const functions = ["rgba(", "rgb(", "hsla(", "hsl(", "color(", "oklab(", "oklch(", "lab(", "lch("];
+    let cursor = 0;
+    while (cursor < image.length) {
+      let start = -1;
+      for (const prefix of functions) {
+        const candidateStart = image.indexOf(prefix, cursor);
+        if (candidateStart >= 0 && (start < 0 || candidateStart < start)) start = candidateStart;
+      }
+      if (start < 0) return false;
+      const end = image.indexOf(")", start + 1);
+      if (end < 0) return false;
+      if (colorIsVisible(image.slice(start, end + 1), fallback)) return true;
+      cursor = end + 1;
+    }
+    return false;
+  };
+  const backgroundTextPaintIsVisible = (style) => {
+    const clips = [
+      style.backgroundClip || style.getPropertyValue("background-clip"),
+      style.webkitBackgroundClip || style.getPropertyValue("-webkit-background-clip"),
+    ];
+    if (!clips.some((value) => String(value || "").trim().toLowerCase().includes("text"))) {
+      return false;
+    }
+    const backgroundColor = style.backgroundColor || style.getPropertyValue("background-color");
+    if (colorIsVisible(backgroundColor, style.color)) return true;
+    return backgroundImageHasVisibleColor(
+      style.backgroundImage || style.getPropertyValue("background-image"),
+      style.color,
+    ) || backgroundImageHasVisibleColor(
+      style.webkitBackgroundImage || style.getPropertyValue("-webkit-background-image"),
+      style.color,
+    );
+  };
   const textPaintIsVisible = (element) => {
     const style = getComputedStyle(window, element);
     if (element.namespaceURI === "http://www.w3.org/2000/svg") {
@@ -475,6 +519,7 @@ export function isolatedSnapshotRectScript(candidate) {
       : style.color;
     const strokeWidth = Number.parseFloat(style.webkitTextStrokeWidth || "0");
     return colorIsVisible(fill, style.color)
+      || backgroundTextPaintIsVisible(style)
       || textShadowIsVisible(style.textShadow, style.color)
       || (
         style.textDecorationLine !== "none"
