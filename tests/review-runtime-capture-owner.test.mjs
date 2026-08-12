@@ -80,7 +80,9 @@ function isolatedVisibleText({
   strokeOpacity = "1",
   strokeWidth = "0px",
   clippingAncestor = null,
+  hostStyle = null,
   textRect = null,
+  textRects = null,
 } = {}) {
   class Element {
     constructor(tagName, attributes = {}) {
@@ -108,6 +110,7 @@ function isolatedVisibleText({
         stroke,
         strokeOpacity,
         strokeWidth,
+        filter: "none",
         getPropertyValue(name) {
           return name === "-webkit-text-fill-color" ? textFill : "";
         },
@@ -146,7 +149,7 @@ function isolatedVisibleText({
     }
 
     getClientRects() {
-      return [this.node.parentElement.rect];
+      return this.node.clientRects || [this.node.parentElement.rect];
     }
   }
 
@@ -176,6 +179,7 @@ function isolatedVisibleText({
 
   const root = new Element("HTML");
   const host = new Element(svg ? "SVG" : "CANVAS", { id: "chart" });
+  Object.assign(host.style, hostStyle || {});
   host.parentElement = root;
   root.children.push(host);
   let textParent = host;
@@ -193,7 +197,11 @@ function isolatedVisibleText({
     textElement.rect = textRect || textElement.rect;
     textParent.children.push(textElement);
   }
-  const text = { nodeValue: "visible chart label", parentElement: textElement };
+  const text = {
+    nodeValue: "visible chart label",
+    parentElement: textElement,
+    clientRects: textRects,
+  };
   const document = new Document(root, [text]);
   const window = new Window();
   const result = runInNewContext(isolatedSnapshotRectScript({
@@ -480,6 +488,16 @@ test("isolated visible-text summary excludes text hidden by ancestor clipping", 
   }), "visible chart label");
   assert.equal(isolatedVisibleText({
     clippingAncestor: {
+      rect: { x: 10, y: 10, width: 100, height: 20 },
+      style: { overflow: "hidden" },
+    },
+    textRects: [
+      { x: 10, y: 10, width: 100, height: 18 },
+      { x: 10, y: 28, width: 100, height: 18 },
+    ],
+  }), "");
+  assert.equal(isolatedVisibleText({
+    clippingAncestor: {
       style: { position: "absolute", clip: "rect(0px, 0px, 0px, 0px)" },
     },
   }), "");
@@ -497,6 +515,18 @@ test("isolated visible-text summary excludes text hidden by ancestor clipping", 
     clippingAncestor: {
       style: { clipPath: "inset(0)" },
     },
+  }), "visible chart label");
+});
+
+test("isolated visible-text summary excludes post-paint zero-opacity filters", () => {
+  assert.equal(isolatedVisibleText({
+    hostStyle: { filter: "opacity(0)" },
+  }), "");
+  assert.equal(isolatedVisibleText({
+    clippingAncestor: { style: { filter: "blur(1px) opacity(0%)" } },
+  }), "");
+  assert.equal(isolatedVisibleText({
+    hostStyle: { filter: "opacity(0.01)" },
   }), "visible chart label");
 });
 

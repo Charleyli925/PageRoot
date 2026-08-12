@@ -376,6 +376,24 @@ export function isolatedSnapshotRectScript(candidate) {
     if (token.endsWith("%")) return Number.parseFloat(token.slice(0, -1)) > 0;
     return Number.parseFloat(token) > 0;
   };
+  const filterHidesPaint = (value) => {
+    const filter = String(value || "").trim().toLowerCase();
+    if (!filter || filter === "none") return false;
+    let cursor = 0;
+    while (cursor < filter.length) {
+      const offset = filter.slice(cursor).indexOf("opacity(");
+      if (offset < 0) return false;
+      const start = cursor + offset;
+      const previous = start === 0 ? " " : filter[start - 1];
+      const end = filter.indexOf(")", start + 8);
+      if (end < 0) return false;
+      if ((previous === " " || previous === "\t") && !alphaTokenIsVisible(filter.slice(start + 8, end))) {
+        return true;
+      }
+      cursor = end + 1;
+    }
+    return false;
+  };
   const colorIsVisible = (value, fallback = "") => {
     const color = String(value || "").trim().toLowerCase();
     if (!color || color === "none" || color === "transparent") return false;
@@ -586,6 +604,7 @@ export function isolatedSnapshotRectScript(candidate) {
         || style.visibility === "collapse"
         || style.contentVisibility === "hidden"
         || (Number.isFinite(opacity) && opacity <= 0)
+        || filterHidesPaint(style.filter || style.getPropertyValue("filter"))
       ) return false;
       if (element === host) break;
       element = element.parentElement;
@@ -593,15 +612,16 @@ export function isolatedSnapshotRectScript(candidate) {
     if (!(element instanceof Element) || !textPaintIsVisible(textElement)) return false;
     const range = createRange(document);
     selectNodeContents(range, node);
-    return Array.from(rangeClientRects(range)).some((rect) => (
+    const textRects = Array.from(rangeClientRects(range)).filter((rect) => (
       Number.isFinite(rect.x)
       && Number.isFinite(rect.y)
       && Number.isFinite(rect.width)
       && Number.isFinite(rect.height)
       && rect.width > 0
       && rect.height > 0
-      && rectIsVisibleThroughAncestors(rect, textElement, host, hostRect)
     ));
+    return textRects.length > 0
+      && textRects.every((rect) => rectIsVisibleThroughAncestors(rect, textElement, host, hostRect));
   };
   const visibleRenderedText = (host, hostRect) => {
     try {
