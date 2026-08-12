@@ -90,6 +90,26 @@ test("document session clears only the matching flush promise", async () => {
   assert.equal(session.flushPromise, null);
 });
 
+test("document snapshot exposes only derived write and flush state", () => {
+  const session = new DocumentSession({ html: "<main>source</main>" });
+  const write = { revision: 1, html: session.html };
+  session.setPendingWrite(write);
+  session.setPersistence({ state: "queued" });
+  assert.equal(session.snapshot.hasPendingWrite, true);
+  assert.equal(session.snapshot.isFlushing, false);
+
+  const flush = Promise.resolve(true);
+  session.setFlushPromise(flush);
+  assert.equal(session.snapshot.hasPendingWrite, true);
+  assert.equal(session.snapshot.isFlushing, true);
+
+  assert.equal(session.clearFlushPromise(flush), true);
+  session.takePendingWrite();
+  session.setPersistence({ state: "idle" });
+  assert.equal(session.snapshot.hasPendingWrite, false);
+  assert.equal(session.snapshot.isFlushing, false);
+});
+
 test("a stale canvas hash does not block a boundary whose exact bytes were safely persisted", async () => {
   const html = "<main>saved</main>";
   const sourceSha256 = sha256(html);

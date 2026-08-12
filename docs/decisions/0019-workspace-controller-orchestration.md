@@ -22,31 +22,38 @@ Controller would create duplicate authority and violate ADR 0011.
 ## Decision
 
 Introduce `WorkspaceController` as the one public Application facade for
-Workbench workflows. It is not a global store and does not construct a second
+Workbench workflows. It is not a global store and never constructs a competing
 set of Sessions.
 
-For the PR-1 migration stage:
+At final composition:
 
-- Workbench constructs the Controller with its existing Session instances,
-  typed Bridge client, injected pure codecs and narrow Hash, Recovery, Canvas
-  and Clock ports.
+- `createRuntimeWorkspaceController()` is the sole production composition
+  entrypoint. It creates the one typed Bridge client, shared `RunSession` and
+  remaining fact-owning Sessions, then constructs the Controller and its
+  workflows. The injected Controller constructor remains a Node-test seam.
+- The Controller is the sole Application aggregate observer for Project,
+  Document, Comment, Run and Version Sessions. Its fixed frozen snapshot and
+  event stream are the only business-state input to Workbench; derived
+  Document write/flush flags reveal neither write contents nor Promises.
 - `ensureRegistered()` owns registration operation identity, single-flight,
   response validation, stale-result fencing and synchronous cross-Session
   publication. It returns an explicit `CommandOutcome`.
 - Project, Document, Comment, Draft, Version and SourceHistory Sessions remain
   the sole mutable-fact owners. The Controller owns only workflow-local
   operation state and a narrow registration snapshot/event stream.
-- Workbench maps Controller events and outcomes to presentation state. The
-  Controller does not import React, Workbench models, components, desktop code,
-  or operate Drawer, Toast or focus state.
+- Workbench maps Controller snapshots, events and outcomes to presentation
+  state, supplies only narrow host adapters, and dispatches Controller commands.
+  It imports neither Bridge nor business Session code. The Controller does not
+  import React, Workbench models, components or desktop code, or operate Drawer,
+  Toast or focus state.
 - Existing Workbench pure codecs are injected through
   `workspace-controller-codecs.js` until a later PR can relocate them without a
   reverse dependency. They are not reimplemented as a competing decoder.
 
-The migration is intentionally staged. PR-1 removes only the two registration
-Bridge calls from Workbench and uses a checked 28-call migration allowance.
-That allowance is an upper bound that may only decrease; it is removed in the
-final composition PR, where direct Workbench Bridge calls become forbidden.
+The migration was intentionally staged. PR-1 began with Workbench-provided
+Sessions and a checked 28-call Bridge allowance. PR-7 removes that temporary
+composition and allowance: direct Workbench Bridge calls, Session refs and
+generic command escape are forbidden by the architecture gate.
 
 ## Consequences
 
@@ -58,6 +65,8 @@ final composition PR, where direct Workbench Bridge calls become forbidden.
   retain their existing Hash and current-identity guards.
 - Later workflows may join the same facade only one at a time; they must not
   add a second Controller, temporary dual-write or persistent schema change.
+- A Controller disposal disconnects aggregate Session observers before a late
+  callback can publish; Workbench cannot retain a parallel business snapshot.
 
 ## Rejected alternatives
 

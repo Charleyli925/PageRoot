@@ -37,6 +37,8 @@ function initialSnapshot({
     lastPersistedRevision: 0,
     persistState: "idle",
     persistError: "",
+    hasPendingWrite: false,
+    isFlushing: false,
   });
 }
 
@@ -58,7 +60,11 @@ export class DocumentSession {
   }
 
   #emit(next) {
-    this.#snapshot = Object.freeze({ ...next });
+    this.#snapshot = Object.freeze({
+      ...next,
+      hasPendingWrite: Boolean(this.#pendingWrite),
+      isFlushing: Boolean(this.#flushPromise),
+    });
     try {
       this.#observer?.(this.#snapshot);
     } catch {
@@ -231,12 +237,14 @@ export class DocumentSession {
       throw new TypeError("Document flush authority must be a Promise.");
     }
     this.#flushPromise = promise;
+    this.#emit(this.#snapshot);
     return promise;
   }
 
   clearFlushPromise(promise) {
     if (this.#flushPromise !== promise) return false;
     this.#flushPromise = null;
+    this.#emit(this.#snapshot);
     return true;
   }
 
