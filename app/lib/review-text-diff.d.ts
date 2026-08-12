@@ -20,18 +20,14 @@ export type ReviewTextChangeOperation =
   | "replace"
   | "layout";
 
-export type ReviewTextChangeScope = "inline" | "sentence" | "block";
-
 export type ReviewTextChangeSide = {
   evidenceRanges: ReviewTextRange[];
-  footprintGroups: ReviewTextRange[][];
+  phraseGroups: ReviewTextRange[][];
   anchorOffset: number | null;
 };
 
 export type ReadableReviewTextFootprintPlan = {
   operation: ReviewTextChangeOperation;
-  scope: ReviewTextChangeScope;
-  density: number;
   before: ReviewTextChangeSide;
   after: ReviewTextChangeSide;
 };

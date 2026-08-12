@@ -19,8 +19,6 @@ export type ReviewProjectionFact = {
   operation?: "none" | "insert" | "delete" | "replace" | "layout";
   tone?: "added" | "removed";
   textGroup?: string;
-  textScope?: "inline" | "sentence" | "block";
-  textDensity?: number;
   structureChange?: string;
   summary?: string;
 };

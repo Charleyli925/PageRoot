@@ -218,11 +218,13 @@ PR 批量是建议而非固定限制：用 CI Health 的 Ready 次数、candidat
   返回/重开。正式 Electron 审阅用例还必须证明默认“双页 + 全部变化 +
   18%”、页面/筛选/可见度/导航彼此独立、左右单页和双页均铺满可用
   Canvas、完全相同文字不被标记、叶子级精确文字差异、重复短文案和中间
-  插入结构不会错配、未修改指标卡不产生文案/结构/视觉假阳性、文本新增
-  绿框且无下划线/删除红框和红色虚线删除线/结构蓝框/视觉紫框、每个语义
-  变化组只有一个简短标注且整块新增统一为“新增内容”、单字框具有受行边界
-  限制的最小可读宽度、局部跨行修改生成独立普通行框而非锯齿多边形、密集
-  多行改写只生成一个“段落改写”文本块框、整卡背景/
+  插入结构不会错配、未修改指标卡不产生文案/结构/视觉假阳性、新增字符
+  逐字显示绿色实点/删除字符逐字显示红色虚线删除线/文字范围统一紫色实线/
+  结构蓝框/视觉紫框、每个语义变化组只有一个简短标注且整块新增统一为
+  “新增内容”、单字框具有受行边界限制的最小可读宽度、局部跨行修改生成
+  独立普通短语框而非锯齿多边形、三组短语或 60% 首尾证据跨度提升为完整
+  行框、至少三行且 75% 行已提升时只生成一个“段落改写”文本块框、每个
+  字符证据都被最终范围框包含、整卡背景/
   边框/前景色同时变化时每张卡只生成一个贴合完整 border box 的普通矩形
   且相邻卡片不融合、`block-size` 仍归属完整盒子、仅继承文字颜色变化时
   直接测量文字 Range 而不框容器、每个最终框与遮罩透明孔几何一致、
@@ -243,7 +245,7 @@ PR 批量是建议而非固定限制：用 CI Health 的 Ready 次数、candidat
 - 评论标记必须覆盖无 `id`、`data-*`、`name`、`aria-label` 的 class-only 普通目标：即使作者插入或重排同标签兄弟，before bootstrap 也必须仅凭首个私有响应中的冻结源 `sourceNodeId` 路径/指纹绑定解析器创建的原元素并保留 marker。测试还必须证明 HTML、后续 bootstrap 读取和作者可枚举 DOM 均不含该绑定、评论正文、评论 key 或定位映射；恶意作者脚本读取当前页面或 bootstrap 地址后仍不得产生伪造 marker。恶意的作者 capture listener 即使尝试读取 challenge、以同一 challenge 伪造评论端口，也既看不到评论 channel 请求，也收不到 `comment-targets`。
 - Review 只比较一个冻结的 before/after owner pair。任一侧 unavailable、无效、超时、取消或迟到时静默省略该 marker，不影响静态审阅或其他已验证候选；不为动画、随机或任意 hostile 行为启动第二轮取证。
 - 审阅滚动回归必须直接证明页面概览会递增手势代次、取消待执行跟随帧并保留语义映射；评论布局契约还必须接受超出 100,000px 的有限长文档坐标，同时继续拒绝非有限值和超过安全上限的坐标。
-- 文案 footprint 算法由 Node 直接用字符范围 oracle 验证：覆盖有意义标点前后的独立替换、纯插入、纯删除、稳定句首词、短中文块的字符级辅助配对、超长无标点文本中的多处远距离精确修改、短间隔归组、稳定句拆分和密集成对改写提升，以及“品均基本持平”替换为“单品效率整体稳定，增幅仅+0.10%”时不能用偶然相同的“品”抵消增删。纯插入/纯删除必须严格镜像，并分别断言 operation、两侧 evidence ranges、无证据侧的不可见 anchor 与空 footprint groups；整句单侧变化只能得到 sentence scope，存在稳定外句或缺少任一侧 evidence 时不得提升为 block。仅换行变化使用 layout operation，且两侧均无红绿文字 evidence。语义对齐另以独立 Node oracle 覆盖头/中/尾新增、重复编号与表格类目、多解不猜、显式 ID 移动、普通插入不误判移动、稳定前后边界中的长插入、前后镜像，以及超过 60,000 DP 单元后的有限前瞻回退；结果必须保持父级边界和单调顺序。Electron 正式闭环必须按最终 geometry 验证：编号行修改前零 marker/框/孔/标签、修改后只有第四行；纯删除修改后零框零孔，但内容地图导航落到 collapsed Range 上下文而不是 section 顶；同一元素上的 box-style 与 layout 必须作为两个独立投影事实，分别产生自己的 canonical frame 和 mask hole，且互不覆盖；直接同父级的图片、SVG、Canvas 和输入控件必须作为原子语义单元保留，新增/删除生成自身结构事实，唯一稳定身份的样式变化进入视觉配对而稳定文字邻居零误报；新增表格行在全部模式只有一个 `tr` 框、结构模式只有父行框、文案模式只显示 cell 内 Range 行框，旧重复行零误报。窄 cell 跨行、四行文字、嵌套 inline/列表、authored marker/`div`/`svg` 样式、适应与 100% 缩放、单双页和主窗口 resize 后都必须重新测量；文字框数量与 Range 行盒一致、同组一个标签且无 shaped，overlay 与 mask hole 的数量、坐标和 path 逐项相同。
+- 文案差异算法由 Node 直接用字符范围 oracle 验证：覆盖有意义标点前后的独立替换、纯插入、纯删除、稳定句首词、短中文块的字符级辅助配对、超长无标点文本中的多处远距离精确修改、短间隔归组和稳定句拆分，以及“品均基本持平”替换为“单品效率整体稳定，增幅仅+0.10%”时不能用偶然相同的“品”抵消增删。纯插入/纯删除必须严格镜像，并分别断言 operation、两侧 `evidenceRanges`、语义 `phraseGroups`、无证据侧的不可见 anchor；规划结果不得再携带 `textScope`、`textDensity` 或事实层 block/sentence 决策。仅换行变化使用 layout operation，且两侧均无红绿文字 evidence。语义对齐另以独立 Node oracle 覆盖头/中/尾新增、重复编号与表格类目、多解不猜、显式 ID 移动、普通插入不误判移动、稳定前后边界中的长插入、前后镜像，以及超过 60,000 DP 单元后的有限前瞻回退；结果必须保持父级边界和单调顺序。Electron 正式闭环必须按最终 geometry 验证：编号行修改前零 marker/框/孔/标签、修改后只有第四行；纯删除修改后零框零孔，但内容地图导航落到 collapsed Range 上下文而不是 section 顶；同一元素上的 box-style 与 layout 必须作为两个独立投影事实，分别产生自己的 canonical frame 和 mask hole，且互不覆盖；直接同父级的图片、SVG、Canvas 和输入控件必须作为原子语义单元保留，新增/删除生成自身结构事实，唯一稳定身份的样式变化进入视觉配对而稳定文字邻居零误报；新增表格行在全部模式只有一个 `tr` 框、结构模式只有父行框、文案模式只显示 cell 内 Range 范围，旧重复行零误报。窄 cell 跨行、四行文字、嵌套 inline/列表、authored marker/`div`/`svg` 样式、适应与 100% 缩放、单双页和主窗口 resize 后都必须重新测量；逐字新增实点与删除线必须保持精确，短语/完整行/段落提升分别覆盖三组短语、60% 跨度和三行 75% 阈值，所有文字范围框必须完整包含字符证据、保持一个干净矩形且同组只有一个标签；overlay 与 mask hole 的数量、坐标和 path 逐项相同。
 - 遮罩投影必须另有真实 Electron 像素 oracle：两个不同 canonical facts 的部分重叠纯色夹具中，两个单孔与重叠区均保持清晰，孔外在 0/18/50/100 context visibility 下正确虚化；`all/text/structure/style` 的筛选应与框同步刷新。测试还验证 session/side/projection-epoch 唯一的 SVG luminance mask、white-background/black-hole 语义、mask units，以及 hostile `svg path`、`mask rect`、通用 `path/rect` CSS 和同名前缀 id 均不能污染受管遮罩。不得用 `isPointInFill` 或 DOM attached 断言取代该渲染 oracle。
 - 应用更新：Node 用伪 updater 证明 stable-only、点击后单次下载、差分开启、普通退出不安装、仅 downloaded 状态可安装和错误降级；Preload/Workbench 合同证明状态快照、下载/安装意图、无 Canvas 完成横幅与重启确认保持窄边界。
 - 本地外部动作：五类 Finder/默认浏览器/项目记录入口由 Node 以真实调用计数证明一次用户意图只执行一次副作用，失败会保留可见错误和可用项目，等待超过旧 retry delay 也不会重放；第二次调用只能来自新的用户意图。Bridge 的只读 GET/HEAD 重试保留在 transport 层，`openFolder` 等命令不复用它。默认浏览器打开还直接执行主进程操作与 sender 权限门，证明 malformed、非 HTML、未知项目、非普通文件和非可信 frame 均不会调用 shell；Workbench 合同只补充证明精确 edit revision 的围栏、写回和 IPC 顺序。
