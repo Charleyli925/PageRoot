@@ -1165,7 +1165,10 @@ test("AI readOrder excludes the full audit archive and compacts long module quot
   assert.match(prompt, /evidenceState=description-only/);
   assert.doesNotMatch(prompt, /## 本轮附件/);
   assert.match(aiRules, /^# PageRoot 通用执行规则$/m);
-  assert.match(aiRules, /不得读取当前 input-manifest\.json 的 readOrder 之外的文件/);
+  assert.match(
+    aiRules,
+    /当前 Attempt 的受控 USER_SUPPLEMENT\.json 是唯一可在 readOrder 之外读取的文件/,
+  );
   assert.match(aiRules, /只修改用户明确要求的区域/);
   assert.doesNotMatch(prompt, /只修改用户明确要求的区域/);
 });
@@ -2650,7 +2653,10 @@ test("comment attachments persist in the project and freeze with comment-target 
     "utf8",
   );
   assert.match(aiRules, /^# PageRoot 通用执行规则$/m);
-  assert.match(aiRules, /不得读取当前 input-manifest\.json 的 readOrder 之外的文件/);
+  assert.match(
+    aiRules,
+    /当前 Attempt 的受控 USER_SUPPLEMENT\.json 是唯一可在 readOrder 之外读取的文件/,
+  );
   assert.match(aiRules, /不得扫描其他任务、版本、项目目录或用户文件/);
   assert.match(aiRules, /只修改用户明确要求的区域/);
   assert.match(aiRules, /不得修改 PROJECT\.md、USER_SUPPLEMENT\.json、冻结输入或协议文件/);
