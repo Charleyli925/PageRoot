@@ -160,9 +160,9 @@ test("packaged app preserves identity and imports external HTML as V1 across sta
       ))?.sourcePath,
       { timeout: 30_000 },
     ).toMatch(/\/qoder-startup-V1\.html$/u);
-    const startupManagedSourcePath = await page.evaluate(
-      () => window.htmlAIProjects?.getActiveProject()?.sourcePath || "",
-    );
+    const startupManagedSourcePath = await page.evaluate(async () => (
+      await window.htmlAIProjects?.getActiveProject()
+    )?.sourcePath || "");
     expect(startupManagedSourcePath).not.toBe(startupSourcePath);
     expect(readFileSync(startupSourcePath)).toEqual(startupOriginal);
     expect(readFileSync(startupManagedSourcePath)).toEqual(startupOriginal);
@@ -176,9 +176,9 @@ test("packaged app preserves identity and imports external HTML as V1 across sta
       ))?.sourcePath,
       { timeout: 30_000 },
     ).toMatch(/\/qoder-live-V1\.htm$/u);
-    const liveManagedSourcePath = await page.evaluate(
-      () => window.htmlAIProjects?.getActiveProject()?.sourcePath || "",
-    );
+    const liveManagedSourcePath = await page.evaluate(async () => (
+      await window.htmlAIProjects?.getActiveProject()
+    )?.sourcePath || "");
     expect(liveManagedSourcePath).not.toBe(liveSourcePath);
     expect(readFileSync(liveSourcePath)).toEqual(liveOriginal);
     expect(readFileSync(liveManagedSourcePath)).toEqual(liveOriginal);

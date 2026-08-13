@@ -170,9 +170,9 @@ test("packaged PageRoot imports pre-v4 shell state as V1 and reconciles draft re
       ))?.sourcePath,
       { timeout: 30_000 },
     ).toMatch(/\/packaged-source-V1\.html$/u);
-    sourcePath = await page.evaluate(
-      () => window.htmlAIProjects?.getActiveProject()?.sourcePath || "",
-    );
+    sourcePath = await page.evaluate(async () => (
+      await window.htmlAIProjects?.getActiveProject()
+    )?.sourcePath || "");
     expect(sourcePath).not.toBe(externalSourcePath);
     expect(readFileSync(externalSourcePath)).toEqual(original);
     expect(readFileSync(sourcePath)).toEqual(original);
