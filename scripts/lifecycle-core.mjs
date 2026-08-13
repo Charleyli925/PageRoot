@@ -57,6 +57,9 @@ const SUPPLEMENT_EVIDENCE_STATES = new Set([
 ]);
 const ATTEMPT_ENTRY_NAMES = new Set([
   "output",
+  // A sealed, pending-review Candidate is stored beside the finalized output.
+  // It is not a formal Version artifact and must remain readable on retry.
+  "candidate.json",
   "candidate-assessment.json",
   "completion.json",
   "scope-report.json",

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { finalizeAttempt, LifecycleError } from "./lifecycle-core.mjs";
+import { finalizeProjectFileAttempt } from "./project-file-finalizer.mjs";
 
 function parseArguments(values) {
   const result = {};
@@ -21,6 +22,24 @@ function parseArguments(values) {
 const options = parseArguments(process.argv.slice(2));
 
 try {
+  if (options["project-root"]) {
+    for (const required of ["project-root", "request-id"]) {
+      if (!options[required]) {
+        throw new LifecycleError(
+          "ARGUMENT_REQUIRED",
+          `--${required} is required.`,
+          undefined,
+          400,
+        );
+      }
+    }
+    const result = await finalizeProjectFileAttempt({
+      projectRoot: options["project-root"],
+      requestId: options["request-id"],
+      attemptId: options["attempt-id"] ?? "attempt_001",
+    });
+    process.stdout.write(`${JSON.stringify(result)}\n`);
+  } else {
   for (const required of ["workspace", "project-id", "request-id"]) {
     if (!options[required]) {
       throw new LifecycleError(
@@ -38,6 +57,7 @@ try {
     attemptId: options["attempt-id"] ?? "attempt_001",
   });
   process.stdout.write(`${JSON.stringify(result)}\n`);
+  }
 } catch (error) {
   process.stderr.write(
     `${JSON.stringify({
