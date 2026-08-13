@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pageroot.local/schemas/project-registry.v4.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "updatedAt", "projects", "pendingImports"],
+  "properties": {
+    "schemaVersion": { "const": "4.0.0" },
+    "updatedAt": { "type": "string", "format": "date-time" },
+    "projects": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["registeredProjectRootPath", "rootFileIdentity", "updatedAt"],
+        "properties": {
+          "registeredProjectRootPath": { "type": "string", "pattern": "^(?:/|[A-Za-z]:[\\\\/])" },
+          "rootFileIdentity": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["device", "inode", "birthtimeMs"],
+            "properties": {
+              "device": { "type": "string" },
+              "inode": { "type": "string" },
+              "birthtimeMs": { "type": "number", "minimum": 0 }
+            }
+          },
+          "updatedAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "propertyNames": { "pattern": "^project_[a-f0-9]{16,64}$" }
+    },
+    "pendingImports": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["projectId", "documentId", "registeredProjectRootPath", "createdAt"],
+        "properties": {
+          "projectId": { "type": "string", "pattern": "^project_[a-f0-9]{16,64}$" },
+          "documentId": { "type": "string", "pattern": "^doc_[a-f0-9]{16,64}$" },
+          "registeredProjectRootPath": { "type": "string", "pattern": "^(?:/|[A-Za-z]:[\\\\/])" },
+          "createdAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "propertyNames": { "pattern": "^project_[a-f0-9]{16,64}$" }
+    }
+  }
+}

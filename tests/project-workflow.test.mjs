@@ -480,6 +480,66 @@ test("startup publishes the initial active project without fencing a nonexistent
   assert.equal(harness.projectSession.context.projectId, `project_${slug(A_PATH)}`);
 });
 
+test("a v4 Working Copy transition uses the exact managed desktop activation", async (t) => {
+  const calls = [];
+  const managedTarget = {
+    projectId: "project_old",
+    documentId: "document_old",
+    projectRootPath: "/tmp/PageRoot/项目/managed",
+    targetKind: "working-copy",
+    workingCopyId: "work_ver_0002",
+    versionId: "ver_0002",
+    exactSourcePath: B_PATH,
+    sourceSha256: sha256(B_HTML),
+  };
+  const harness = createHarness({
+    projectOpen: {
+      async activateManagedWorkingCopy(input) {
+        calls.push(input);
+        return {
+          sourcePath: B_PATH,
+          sha256: sha256(B_HTML),
+          html: B_HTML,
+        };
+      },
+      async listRecent() {
+        return [];
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+
+  const prepared = await harness.workflow.prepareGeneratedSourceTransition({
+    previousSourcePath: OLD_PATH,
+    nextSourcePath: B_PATH,
+    expectedSha256: sha256(B_HTML),
+    nextProjectId: "project_old",
+    nextDocumentId: "document_old",
+    versionId: "ver_0002",
+    openTarget: managedTarget,
+  });
+
+  assert.equal(prepared.updatesCurrentProject, true);
+  assert.equal(prepared.activatedProject?.sourcePath, B_PATH);
+  assert.deepEqual(calls, [{
+    previousSourcePath: OLD_PATH,
+    nextSourcePath: B_PATH,
+    expectedSha256: sha256(B_HTML),
+    projectId: "project_old",
+    documentId: "document_old",
+    workingCopyId: "work_ver_0002",
+    versionId: "ver_0002",
+    projectRootPath: "/tmp/PageRoot/项目/managed",
+  }]);
+});
+
+test("v4 exposes no relocation workflow that can retarget a moved project", (t) => {
+  const harness = createHarness();
+  t.after(() => harness.workflow.dispose());
+  assert.equal("relocateCurrentProject" in harness.workflow, false);
+  assert.equal("rebindRelocatedOpenTarget" in harness.documentWorkflow, false);
+});
+
 test("a trusted direct browser file submission still enters the accepted FIFO", async (t) => {
   const harness = createHarness();
   t.after(() => harness.workflow.dispose());

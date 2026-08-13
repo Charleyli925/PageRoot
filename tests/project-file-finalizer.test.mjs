@@ -64,4 +64,17 @@ test("project-file finalizer freezes a Candidate output without publishing a Ver
   ));
   assert.equal(manifest.latestOfficialVersionId, "ver_0001");
   assert.equal(manifest.versions.length, 1);
+
+  const registryPath = path.join(root, "projects", ".pageroot-registry.json");
+  const registry = JSON.parse(await readFile(registryPath, "utf8"));
+  delete registry.projects[imported.target.projectId];
+  await writeFile(registryPath, JSON.stringify(registry), "utf8");
+  await assert.rejects(
+    finalizeProjectFileAttempt({
+      projectRoot: imported.target.projectRootPath,
+      requestId: request.requestId,
+      attemptId: request.attemptId,
+    }),
+    (error) => error?.code === "REGISTERED_PROJECT_UNAVAILABLE",
+  );
 });

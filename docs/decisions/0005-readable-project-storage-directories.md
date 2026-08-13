@@ -1,7 +1,11 @@
 # ADR 0005: Project identity is separate from its readable storage directory
 
-- Status: Accepted
+- Status: Superseded by ADR 0022
 - Date: 2026-07-28
+
+> Historical decision.  ADR 0022 replaces this registry-owned directory model
+> for newly imported project files.  Existing v3 projects remain readable
+> under this historical layout until an explicit migration is approved.
 
 ## Context
 

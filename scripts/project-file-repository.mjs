@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   link,
   lstat,
+  realpath,
   readFile,
   readdir,
   rename,
@@ -13,7 +14,6 @@ import path from "node:path";
 
 import {
   atomicWriteFile,
-  atomicWriteJson,
   ensureDirectory,
   exists,
   jsonText,
@@ -37,6 +37,13 @@ const WORKING_COPY_ID = /^work_ver_\d{4,}$/u;
 const SHA256 = /^sha256:[a-f0-9]{64}$/u;
 const SAFE_REQUEST_ID = /^[A-Za-z0-9_-]{1,160}$/u;
 const MAX_HTML_BYTES = 20 * 1024 * 1024;
+const FROZEN_REQUEST_RULES = `# PageRoot AI Request Rules
+
+- Read the frozen files in input-manifest.json readOrder before editing.
+- Treat the frozen HTML, project rules, annotations and change request as read-only.
+- Write exactly one complete HTML document to the output path stated in PROMPT.md.
+- A valid output remains a Candidate until the user explicitly adopts it.
+`;
 
 function defaultProjectsRoot() {
   return path.join(os.homedir(), "Documents", "PageRoot", "项目");
@@ -47,7 +54,22 @@ function nowIso(clock) {
 }
 
 function normalizedPath(value) {
-  return path.resolve(String(value || "")).normalize("NFC");
+  const resolved = path.resolve(String(value || "")).normalize("NFC");
+  // macOS exposes the same temporary volume through both /var and
+  // /private/var (and likewise /tmp). Finder, realpath(), Electron and a
+  // bridge child can legitimately report different spellings for one inode.
+  // Normalize the spelling before any registry, containment or identity
+  // comparison so a managed Working Copy is not mistaken for a duplicate
+  // project immediately after import.
+  if (process.platform === "darwin") {
+    if (resolved === "/private/var" || resolved.startsWith("/private/var/")) {
+      return resolved.slice("/private".length);
+    }
+    if (resolved === "/private/tmp" || resolved.startsWith("/private/tmp/")) {
+      return resolved.slice("/private".length);
+    }
+  }
+  return resolved;
 }
 
 function samePath(left, right) {
@@ -63,8 +85,105 @@ function samePath(left, right) {
 function pathInside(root, candidate, { allowRoot = false } = {}) {
   const resolvedRoot = normalizedPath(root);
   const resolvedCandidate = normalizedPath(candidate);
-  if (allowRoot && resolvedRoot === resolvedCandidate) return true;
-  return resolvedCandidate.startsWith(`${resolvedRoot}${path.sep}`);
+  const comparableRoot = process.platform === "darwin" || process.platform === "win32"
+    ? resolvedRoot.toLocaleLowerCase("en-US")
+    : resolvedRoot;
+  const comparableCandidate = process.platform === "darwin" || process.platform === "win32"
+    ? resolvedCandidate.toLocaleLowerCase("en-US")
+    : resolvedCandidate;
+  if (allowRoot && comparableRoot === comparableCandidate) return true;
+  return comparableCandidate.startsWith(`${comparableRoot}${path.sep}`);
+}
+
+// A lexical `..` check is only the first half of managed-path validation. A
+// user can otherwise replace any intermediate directory with a symlink after
+// the manifest has been written and redirect a later save outside the project.
+// Walk every existing component with lstat(), then compare its resolved real
+// path to the resolved project root before doing a managed read or write.
+async function assertRealPathInsideProject(root, candidate, label, {
+  allowMissing = true,
+  expectedKind = null,
+} = {}) {
+  const projectRoot = normalizedPath(root);
+  const target = normalizedPath(candidate);
+  if (!pathInside(projectRoot, target, { allowRoot: true })) {
+    throw new ProjectFileRepositoryError(
+      "PATH_ESCAPES_PROJECT",
+      `${label} escapes its project.`,
+    );
+  }
+  const rootInformation = await lstat(projectRoot).catch((cause) => {
+    if (cause?.code === "ENOENT") return null;
+    throw cause;
+  });
+  if (!rootInformation) {
+    if (allowMissing) return { exists: false, path: target };
+    throw new ProjectFileRepositoryError(
+      "PROJECT_ROOT_NOT_FOUND",
+      `${label} has no project root.`,
+    );
+  }
+  if (rootInformation.isSymbolicLink() || !rootInformation.isDirectory()) {
+    throw new ProjectFileRepositoryError(
+      "UNSAFE_DIRECTORY",
+      "The project root must be a real directory.",
+    );
+  }
+  const realRoot = await realpath(projectRoot);
+  const relative = path.relative(projectRoot, target);
+  const parts = relative === "" ? [] : relative.split(path.sep);
+  if (parts.some((part) => !part || part === "." || part === "..")) {
+    throw new ProjectFileRepositoryError(
+      "PATH_ESCAPES_PROJECT",
+      `${label} escapes its project.`,
+    );
+  }
+
+  let current = projectRoot;
+  let information = rootInformation;
+  for (let index = 0; index < parts.length; index += 1) {
+    current = path.join(current, parts[index]);
+    try {
+      information = await lstat(current);
+    } catch (cause) {
+      if (cause?.code !== "ENOENT") throw cause;
+      if (!allowMissing) return null;
+      const parentRealPath = await realpath(path.dirname(current));
+      if (!pathInside(realRoot, parentRealPath, { allowRoot: true })) {
+        throw new ProjectFileRepositoryError(
+          "PATH_ESCAPES_PROJECT",
+          `${label} escapes its project through an unsafe parent.`,
+        );
+      }
+      return { exists: false, path: target };
+    }
+    if (information.isSymbolicLink()) {
+      throw new ProjectFileRepositoryError(
+        "PATH_ESCAPES_PROJECT",
+        `${label} reaches a symbolic link inside its project.`,
+      );
+    }
+    if (index < parts.length - 1 && !information.isDirectory()) {
+      throw new ProjectFileRepositoryError(
+        "UNSAFE_DIRECTORY",
+        `${label} has a non-directory parent.`,
+      );
+    }
+    const realCurrent = await realpath(current);
+    if (!pathInside(realRoot, realCurrent, { allowRoot: true })) {
+      throw new ProjectFileRepositoryError(
+        "PATH_ESCAPES_PROJECT",
+        `${label} escapes its project through an unsafe path.`,
+      );
+    }
+  }
+  if (expectedKind === "file" && !information.isFile()) {
+    throw new ProjectFileRepositoryError("UNSAFE_FILE", `${label} must be a regular file.`);
+  }
+  if (expectedKind === "directory" && !information.isDirectory()) {
+    throw new ProjectFileRepositoryError("UNSAFE_DIRECTORY", `${label} must be a real directory.`);
+  }
+  return { exists: true, path: target, information };
 }
 
 function ensureRelativePath(value, label) {
@@ -121,8 +240,67 @@ function safeProjectName(sourcePath) {
   return sanitized || "未命名项目";
 }
 
-function visibleFileName(stem, ordinal, extension) {
-  return `${stem}-V${ordinal}${extension}`;
+function assertPreferredFileStem(value, label = "preferredFileStem") {
+  const stem = String(value || "").normalize("NFC").trim();
+  if (!stem || /[\u0000-\u001f\u007f/\\]/u.test(stem)) {
+    throw new ProjectFileRepositoryError(
+      "INVALID_FILE_STEM",
+      label + " must be a non-empty file-name stem.",
+    );
+  }
+  return stem;
+}
+
+function workingCopyOrdinal(value) {
+  const id = assertId(value, WORKING_COPY_ID, "workingCopyId");
+  return Number.parseInt(id.slice("work_ver_".length), 10);
+}
+
+function topLevelHtmlRelativePath(value, label = "sourceRelativePath") {
+  const relative = ensureRelativePath(value, label);
+  if (relative.includes("/")) {
+    throw new ProjectFileRepositoryError(
+      "INVALID_RELATIVE_PATH",
+      label + " must be a top-level HTML file.",
+    );
+  }
+  htmlExtension(relative);
+  return relative;
+}
+
+function preferredNamingForWorkingCopyPath(relativePath, workingCopyIdValue) {
+  const relative = topLevelHtmlRelativePath(relativePath);
+  const extension = htmlExtension(relative);
+  const fileName = path.basename(relative, extension).normalize("NFC");
+  const ordinal = workingCopyOrdinal(workingCopyIdValue);
+  const suffix = "-V" + ordinal;
+  const stem = fileName.endsWith(suffix) && fileName.length > suffix.length
+    ? fileName.slice(0, -suffix.length)
+    : fileName;
+  return {
+    preferredFileStem: assertPreferredFileStem(stem),
+    preferredExtension: extension,
+  };
+}
+
+function visibleFileName(stem, ordinal, extension, allocationOrdinal = 0) {
+  const safeStem = assertPreferredFileStem(stem);
+  const safeExtension = HTML_EXTENSIONS.has(String(extension || "").toLowerCase())
+    ? String(extension).toLowerCase()
+    : null;
+  if (!safeExtension) {
+    throw new ProjectFileRepositoryError(
+      "UNSUPPORTED_HTML_EXTENSION",
+      "Only .html and .htm files can be managed.",
+    );
+  }
+  if (!Number.isSafeInteger(allocationOrdinal) || allocationOrdinal < 0) {
+    throw new ProjectFileRepositoryError(
+      "INVALID_PATH_ALLOCATION",
+      "The Promotion path allocation is invalid.",
+    );
+  }
+  return safeStem + ("-V" + ordinal).repeat(allocationOrdinal + 1) + safeExtension;
 }
 
 function versionId(ordinal) {
@@ -137,6 +315,11 @@ function randomId(prefix) {
   return `${prefix}_${randomUUID().replaceAll("-", "")}`;
 }
 
+function candidateIdForRequest(projectId, requestId) {
+  return `candidate_${sha256(Buffer.from(`${projectId}:${requestId}`, "utf8"))
+    .slice("sha256:".length, "sha256:".length + 32)}`;
+}
+
 function isObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
@@ -146,6 +329,36 @@ function copyFileIdentity(information) {
     device: String(information.dev),
     inode: String(information.ino),
     birthtimeMs: Number(information.birthtimeMs || 0),
+  };
+}
+
+function assertFileIdentity(value, label) {
+  if (
+    !isObject(value)
+    || !String(value.device || "")
+    || !String(value.inode || "")
+    || !Number.isFinite(Number(value.birthtimeMs))
+    || Number(value.birthtimeMs) < 0
+  ) {
+    throw new ProjectFileRepositoryError(
+      "INVALID_FILE_IDENTITY",
+      label + " is invalid.",
+    );
+  }
+  return {
+    device: String(value.device),
+    inode: String(value.inode),
+    birthtimeMs: Number(value.birthtimeMs),
+  };
+}
+
+function requestInputFileRecord(relativePath, role, mediaType, buffer) {
+  return {
+    path: String(relativePath).split(path.sep).join("/"),
+    role,
+    mediaType,
+    byteLength: buffer.byteLength,
+    sha256: sha256(buffer),
   };
 }
 
@@ -223,7 +436,12 @@ function hasUnsupportedRelativeResource(html) {
   return null;
 }
 
-async function regularInformation(filePath, label) {
+async function regularInformation(filePath, label, { projectRootPath = null } = {}) {
+  if (projectRootPath) {
+    await assertRealPathInsideProject(projectRootPath, filePath, label, {
+      expectedKind: "file",
+    });
+  }
   let information;
   try {
     information = await lstat(filePath);
@@ -240,7 +458,12 @@ async function regularInformation(filePath, label) {
   return information;
 }
 
-async function directoryInformation(directoryPath, label) {
+async function directoryInformation(directoryPath, label, { projectRootPath = null } = {}) {
+  if (projectRootPath) {
+    await assertRealPathInsideProject(projectRootPath, directoryPath, label, {
+      expectedKind: "directory",
+    });
+  }
   let information;
   try {
     information = await lstat(directoryPath);
@@ -257,8 +480,21 @@ async function directoryInformation(directoryPath, label) {
   return information;
 }
 
-async function readHtmlFile(filePath, label) {
-  const information = await regularInformation(filePath, label);
+async function listProjectDirectory(projectRootPath, directoryPath, label) {
+  const information = await directoryInformation(directoryPath, label, {
+    projectRootPath,
+  });
+  if (!information) {
+    throw new ProjectFileRepositoryError(
+      "PROJECT_CONTROL_NOT_FOUND",
+      `${label} was not found inside its project.`,
+    );
+  }
+  return readdir(directoryPath, { withFileTypes: true });
+}
+
+async function readHtmlFile(filePath, label, options = {}) {
+  const information = await regularInformation(filePath, label, options);
   if (!information) {
     throw new ProjectFileRepositoryError("SOURCE_NOT_FOUND", `${label} was not found.`);
   }
@@ -276,8 +512,8 @@ async function readHtmlFile(filePath, label) {
   };
 }
 
-async function readJsonFile(filePath, label) {
-  const information = await regularInformation(filePath, label);
+async function readJsonFile(filePath, label, options = {}) {
+  const information = await regularInformation(filePath, label, options);
   if (!information) return null;
   let value;
   try {
@@ -291,9 +527,14 @@ async function readJsonFile(filePath, label) {
   return value;
 }
 
-async function writeFileNoReplace(filePath, buffer, expectedSha256, label) {
+async function writeFileNoReplace(filePath, buffer, expectedSha256, label, {
+  projectRootPath = null,
+} = {}) {
+  if (projectRootPath) {
+    await assertRealPathInsideProject(projectRootPath, filePath, label);
+  }
   const expected = assertSha256(expectedSha256, `${label} hash`);
-  const current = await regularInformation(filePath, label);
+  const current = await regularInformation(filePath, label, { projectRootPath });
   if (current) {
     const existing = await readFile(filePath);
     if (sha256(existing) !== expected) {
@@ -307,7 +548,15 @@ async function writeFileNoReplace(filePath, buffer, expectedSha256, label) {
   }
 
   const parent = path.dirname(filePath);
+  if (projectRootPath) {
+    await assertRealPathInsideProject(projectRootPath, parent, `${label} parent`);
+  }
   await ensureDirectory(parent);
+  if (projectRootPath) {
+    await assertRealPathInsideProject(projectRootPath, parent, `${label} parent`, {
+      expectedKind: "directory",
+    });
+  }
   const temporary = path.join(
     parent,
     `.pageroot-new-${process.pid}-${randomUUID()}.tmp`,
@@ -322,7 +571,7 @@ async function writeFileNoReplace(filePath, buffer, expectedSha256, label) {
   } finally {
     await unlink(temporary).catch(() => {});
   }
-  const information = await regularInformation(filePath, label);
+  const information = await regularInformation(filePath, label, { projectRootPath });
   const existing = await readFile(filePath);
   if (!information || sha256(existing) !== expected) {
     throw new ProjectFileRepositoryError(
@@ -332,6 +581,36 @@ async function writeFileNoReplace(filePath, buffer, expectedSha256, label) {
   }
   await syncDirectory(parent);
   return { created: true, information };
+}
+
+async function atomicWriteProjectFile(projectRootPath, filePath, content, label) {
+  await assertRealPathInsideProject(projectRootPath, filePath, label);
+  await assertRealPathInsideProject(
+    projectRootPath,
+    path.dirname(filePath),
+    `${label} parent`,
+  );
+  await atomicWriteFile(filePath, content);
+  await assertRealPathInsideProject(projectRootPath, filePath, label, {
+    expectedKind: "file",
+  });
+}
+
+async function atomicWriteProjectJson(projectRootPath, filePath, value, label) {
+  await atomicWriteProjectFile(
+    projectRootPath,
+    filePath,
+    jsonText(value),
+    label,
+  );
+}
+
+async function ensureProjectDirectory(projectRootPath, directoryPath, label) {
+  await assertRealPathInsideProject(projectRootPath, directoryPath, label);
+  await ensureDirectory(directoryPath);
+  await assertRealPathInsideProject(projectRootPath, directoryPath, label, {
+    expectedKind: "directory",
+  });
 }
 
 function projectControlRoot(projectRootPath) {
@@ -360,7 +639,89 @@ function emptyRegistry(clock) {
     schemaVersion: PROJECT_FILE_SCHEMA_VERSION,
     updatedAt: nowIso(clock),
     projects: {},
+    pendingImports: {},
   };
+}
+
+function assertRegistryTimestamp(value, label) {
+  if (!value || Number.isNaN(Date.parse(value))) {
+    throw new ProjectFileRepositoryError(
+      "INVALID_REGISTRY",
+      label + " must be an RFC 3339 timestamp.",
+    );
+  }
+  return value;
+}
+
+function assertRegistryProjectRecord(projectId, record) {
+  if (
+    !isObject(record)
+    || Object.keys(record).some((key) => ![
+      "registeredProjectRootPath",
+      "rootFileIdentity",
+      "updatedAt",
+    ].includes(key))
+    || typeof record.registeredProjectRootPath !== "string"
+    || !path.isAbsolute(record.registeredProjectRootPath)
+  ) {
+    throw new ProjectFileRepositoryError(
+      "INVALID_REGISTRY",
+      "The registered project root record is invalid.",
+      { projectId },
+    );
+  }
+  assertFileIdentity(record.rootFileIdentity, "registered rootFileIdentity");
+  assertRegistryTimestamp(record.updatedAt, "registered root updatedAt");
+  return record;
+}
+
+function assertPendingImportRecord(projectId, record) {
+  if (
+    !isObject(record)
+    || Object.keys(record).some((key) => ![
+      "projectId",
+      "documentId",
+      "registeredProjectRootPath",
+      "createdAt",
+    ].includes(key))
+    || record.projectId !== projectId
+    || typeof record.registeredProjectRootPath !== "string"
+    || !path.isAbsolute(record.registeredProjectRootPath)
+  ) {
+    throw new ProjectFileRepositoryError(
+      "INVALID_REGISTRY",
+      "The pending import record is invalid.",
+      { projectId },
+    );
+  }
+  assertId(record.projectId, PROJECT_ID, "pending import projectId");
+  assertId(record.documentId, DOCUMENT_ID, "pending import documentId");
+  assertRegistryTimestamp(record.createdAt, "pending import createdAt");
+  return record;
+}
+
+function assertRegistry(registry) {
+  if (
+    !isObject(registry)
+    || registry.schemaVersion !== PROJECT_FILE_SCHEMA_VERSION
+    || !isObject(registry.projects)
+    || !isObject(registry.pendingImports)
+  ) {
+    throw new ProjectFileRepositoryError(
+      "UNSUPPORTED_REGISTRY_SCHEMA",
+      "The project Registry uses an unsupported schema.",
+    );
+  }
+  assertRegistryTimestamp(registry.updatedAt, "Registry updatedAt");
+  for (const [projectId, record] of Object.entries(registry.projects)) {
+    assertId(projectId, PROJECT_ID, "Registry projectId");
+    assertRegistryProjectRecord(projectId, record);
+  }
+  for (const [projectId, record] of Object.entries(registry.pendingImports)) {
+    assertId(projectId, PROJECT_ID, "pending import projectId");
+    assertPendingImportRecord(projectId, record);
+  }
+  return registry;
 }
 
 function assertProjectIdentity(project) {
@@ -388,9 +749,6 @@ function assertManifest(manifest, project) {
   if (
     manifest.projectId !== project.projectId
     || manifest.documentId !== project.documentId
-    || !isObject(manifest.fileNaming)
-    || !String(manifest.fileNaming.stem || "").trim()
-    || !HTML_EXTENSIONS.has(String(manifest.fileNaming.extension || "").toLowerCase())
     || !Array.isArray(manifest.versions)
     || !Array.isArray(manifest.workingCopies)
   ) {
@@ -421,6 +779,7 @@ function assertManifest(manifest, project) {
     throw new ProjectFileRepositoryError("INVALID_MANIFEST", "latestOfficialVersionId is unknown.");
   }
   const workingCopyIds = new Set();
+  const workingCopyPaths = new Set();
   for (const workingCopy of manifest.workingCopies) {
     if (!isObject(workingCopy)) {
       throw new ProjectFileRepositoryError("INVALID_MANIFEST", "A Working Copy entry is invalid.");
@@ -433,8 +792,26 @@ function assertManifest(manifest, project) {
     ) {
       throw new ProjectFileRepositoryError("INVALID_MANIFEST", "A Working Copy entry is inconsistent.");
     }
-    ensureRelativePath(workingCopy.sourceRelativePath, "sourceRelativePath");
+    const sourceRelativePath = topLevelHtmlRelativePath(
+      workingCopy.sourceRelativePath,
+      "sourceRelativePath",
+    );
+    if (workingCopyPaths.has(sourceRelativePath)) {
+      throw new ProjectFileRepositoryError(
+        "INVALID_MANIFEST",
+        "Working Copy source paths must be unique.",
+      );
+    }
+    workingCopyPaths.add(sourceRelativePath);
+    assertPreferredFileStem(workingCopy.preferredFileStem);
+    if (!HTML_EXTENSIONS.has(String(workingCopy.preferredExtension || "").toLowerCase())) {
+      throw new ProjectFileRepositoryError(
+        "INVALID_MANIFEST",
+        "A Working Copy preferred extension is invalid.",
+      );
+    }
     ensureRelativePath(workingCopy.stateRelativePath, "stateRelativePath");
+    assertFileIdentity(workingCopy.fileIdentity, "Working Copy fileIdentity");
     workingCopyIds.add(workingCopy.workingCopyId);
   }
   return manifest;
@@ -507,7 +884,10 @@ function draftPathForState(paths, workingCopy, state = {}) {
 }
 
 function workingCopySourcePath(paths, workingCopy) {
-  const relative = ensureRelativePath(workingCopy.sourceRelativePath, "sourceRelativePath");
+  const relative = topLevelHtmlRelativePath(
+    workingCopy.sourceRelativePath,
+    "sourceRelativePath",
+  );
   const resolved = resolveRelative(paths.projectRootPath, relative, "sourceRelativePath");
   if (pathInside(paths.controlRoot, resolved, { allowRoot: true })) {
     throw new ProjectFileRepositoryError(
@@ -647,8 +1027,14 @@ export class ProjectFileRepository {
   async initialize() {
     return this.#serial(async () => {
       await ensureDirectory(this.#projectsRoot);
+      await this.#assertProjectsRoot();
       if (!(await exists(this.#registryPath))) {
-        await atomicWriteJson(this.#registryPath, emptyRegistry(this.#clock));
+        await atomicWriteProjectJson(
+          this.#projectsRoot,
+          this.#registryPath,
+          emptyRegistry(this.#clock),
+          "project registry",
+        );
       }
       await this.#recoverPublishedImports();
     });
@@ -657,22 +1043,15 @@ export class ProjectFileRepository {
   async importExternal({
     sourcePath,
     expectedSourceSha256 = null,
-    duplicateResolution = null,
-    forceNew = false,
   } = {}) {
     return this.#serial(() => this.#importExternal({
       sourcePath,
       expectedSourceSha256,
-      duplicateResolution,
-      forceNew,
     }));
   }
 
-  async resolveOpenTarget({
-    sourcePath,
-    duplicateResolution = null,
-  } = {}) {
-    return this.#serial(() => this.#resolveOpenTarget({ sourcePath, duplicateResolution }));
+  async resolveOpenTarget({ sourcePath } = {}) {
+    return this.#serial(() => this.#resolveOpenTarget({ sourcePath }));
   }
 
   async saveWorkingCopy({
@@ -719,26 +1098,8 @@ export class ProjectFileRepository {
     return this.#serial(() => this.#recoverProject(projectRootPath));
   }
 
-  async reassociate({ projectRootPath, projectId } = {}) {
-    return this.#serial(async () => {
-      const loaded = await this.#loadProject(projectRootPath);
-      if (projectId && loaded.project.projectId !== projectId) {
-        throw new ProjectFileRepositoryError(
-          "PROJECT_ID_MISMATCH",
-          "The selected folder belongs to another project.",
-        );
-      }
-      await this.#writeRegistryAssociation(loaded.project.projectId, loaded.paths.projectRootPath);
-      return {
-        projectId: loaded.project.projectId,
-        documentId: loaded.project.documentId,
-        projectRootPath: loaded.paths.projectRootPath,
-      };
-    });
-  }
-
-  async workspace({ sourcePath, duplicateResolution = null } = {}) {
-    return this.#serial(() => this.#workspace({ sourcePath, duplicateResolution }));
+  async workspace({ sourcePath } = {}) {
+    return this.#serial(() => this.#workspace({ sourcePath }));
   }
 
   async prepareRequest({
@@ -821,7 +1182,9 @@ export class ProjectFileRepository {
     return this.#serial(async () => {
       const loaded = await this.#resolveMutationTarget(target);
       const filePath = path.join(loaded.paths.projectRootPath, "PROJECT.md");
-      const information = await regularInformation(filePath, "PROJECT.md");
+      const information = await regularInformation(filePath, "PROJECT.md", {
+        projectRootPath: loaded.paths.projectRootPath,
+      });
       if (!information) {
         throw new ProjectFileRepositoryError(
           "PROJECT_FILE_NOT_FOUND",
@@ -850,7 +1213,9 @@ export class ProjectFileRepository {
         );
       }
       const filePath = path.join(loaded.paths.projectRootPath, "PROJECT.md");
-      const information = await regularInformation(filePath, "PROJECT.md");
+      const information = await regularInformation(filePath, "PROJECT.md", {
+        projectRootPath: loaded.paths.projectRootPath,
+      });
       if (!information) {
         throw new ProjectFileRepositoryError(
           "PROJECT_FILE_NOT_FOUND",
@@ -860,7 +1225,14 @@ export class ProjectFileRepository {
       const previous = await readFile(filePath);
       const next = Buffer.from(content, "utf8");
       const updated = !previous.equals(next);
-      if (updated) await atomicWriteFile(filePath, next);
+      if (updated) {
+        await atomicWriteProjectFile(
+          loaded.paths.projectRootPath,
+          filePath,
+          next,
+          "PROJECT.md",
+        );
+      }
       return {
         projectId: loaded.project.projectId,
         documentId: loaded.project.documentId,
@@ -891,44 +1263,44 @@ export class ProjectFileRepository {
   }
 
   async #readRegistry() {
-    const registry = await readJsonFile(this.#registryPath, "project registry");
+    const registry = await readJsonFile(this.#registryPath, "project registry", {
+      projectRootPath: this.#projectsRoot,
+    });
     if (!registry) return emptyRegistry(this.#clock);
-    if (
-      registry.schemaVersion !== PROJECT_FILE_SCHEMA_VERSION
-      || !isObject(registry.projects)
-    ) {
-      throw new ProjectFileRepositoryError(
-        "UNSUPPORTED_REGISTRY_SCHEMA",
-        "The project location Registry uses an unsupported schema.",
-      );
-    }
-    return registry;
+    return assertRegistry(registry);
   }
 
-  async #workspace({ sourcePath, duplicateResolution }) {
-    let target = await this.#resolveOpenTarget({ sourcePath, duplicateResolution });
+  async #workspace({ sourcePath }) {
+    let target = await this.#resolveOpenTarget({ sourcePath });
     if (!target) return null;
     // A Promotion transaction means the user already chose adoption.  Resume
     // it before exposing any workspace facts, so a crash cannot leave a
     // half-Version between Candidate review and a formal Version.
     const recovered = await this.#recoverProject(target.projectRootPath);
     if (recovered.length > 0) {
-      target = await this.#resolveOpenTarget({ sourcePath, duplicateResolution });
+      target = await this.#resolveOpenTarget({ sourcePath });
       if (!target) return null;
     }
-    const loaded = await this.#loadProject(target.projectRootPath);
+    const loaded = await this.#loadRegisteredProject({
+      projectId: target.projectId,
+      documentId: target.documentId,
+      declaredProjectRootPath: target.projectRootPath,
+    });
     const workingCopy = target.workingCopyId
       ? loaded.manifest.workingCopies.find(
         (entry) => entry.workingCopyId === target.workingCopyId,
       )
       : null;
-    const state = workingCopy
-      ? await readJsonFile(workingCopyStatePath(loaded.paths, workingCopy), "Working Copy state")
+    let state = workingCopy
+      ? await readJsonFile(workingCopyStatePath(loaded.paths, workingCopy), "Working Copy state", {
+        projectRootPath: loaded.paths.projectRootPath,
+      })
       : null;
-    const draft = workingCopy && state
+    let draft = workingCopy && state
       ? await readJsonFile(
         draftPathForState(loaded.paths, workingCopy, state),
         "Working Copy draft",
+        { projectRootPath: loaded.paths.projectRootPath },
       )
       : null;
     const activeRequest = loaded.runtime.activeRequest
@@ -938,6 +1310,7 @@ export class ProjectFileRepository {
           "request.json",
         ),
         "active request.json",
+        { projectRootPath: loaded.paths.projectRootPath },
       )
       : null;
     if (activeRequest) {
@@ -955,7 +1328,27 @@ export class ProjectFileRepository {
         activeRequest.candidateId,
       )
       : null;
-    const source = await readHtmlFile(target.exactSourcePath, "managed HTML");
+    const source = await readHtmlFile(target.exactSourcePath, "managed HTML", {
+      projectRootPath: loaded.paths.projectRootPath,
+    });
+    let workingCopyRecovered = false;
+    if (workingCopy && state && target.targetKind === "working-copy") {
+      const reconciliation = await this.#reconcileExternalWorkingCopyState({
+        loaded,
+        workingCopy,
+        state,
+        source,
+      });
+      state = reconciliation.state;
+      workingCopyRecovered = reconciliation.recovered;
+      if (workingCopyRecovered) {
+        draft = await readJsonFile(
+          draftPathForState(loaded.paths, workingCopy, state),
+          "Working Copy draft",
+          { projectRootPath: loaded.paths.projectRootPath },
+        );
+      }
+    }
     return {
       target,
       project: structuredClone(loaded.project),
@@ -968,10 +1361,46 @@ export class ProjectFileRepository {
       activeCandidate: activeCandidate
         ? structuredClone(activeCandidate.candidate)
         : null,
+      workingCopyRecovered,
       content: source.html,
       sourceSha256: source.sha256,
       lastModifiedAt: source.lastModifiedAt,
     };
+  }
+
+  async #reconcileExternalWorkingCopyState({ loaded, workingCopy, state, source }) {
+    const recordedSha256 = String(state.currentSha256 || "");
+    if (recordedSha256 === source.sha256) return { state, recovered: false };
+    if (state.saveState !== "saved") {
+      throw new ProjectFileRepositoryError(
+        "WORKING_COPY_CONFLICT",
+        "The Working Copy changed on disk while PageRoot still retains unsaved edits.",
+        {
+          workingCopyId: workingCopy.workingCopyId,
+          recordedSha256,
+          diskSha256: source.sha256,
+          saveState: state.saveState || null,
+        },
+      );
+    }
+    const nextState = {
+      ...state,
+      schemaVersion: PROJECT_FILE_SCHEMA_VERSION,
+      projectId: loaded.project.projectId,
+      documentId: loaded.project.documentId,
+      workingCopyId: workingCopy.workingCopyId,
+      currentSha256: source.sha256,
+      differsFromBase: source.sha256 !== state.baseSha256,
+      saveState: "saved",
+      lastOpenedAt: nowIso(this.#clock),
+    };
+    await atomicWriteProjectJson(
+      loaded.paths.projectRootPath,
+      workingCopyStatePath(loaded.paths, workingCopy),
+      nextState,
+      "Working Copy state",
+    );
+    return { state: nextState, recovered: true };
   }
 
   async #prepareRequest({
@@ -1009,7 +1438,9 @@ export class ProjectFileRepository {
     }
     const requestRoot = requestRootPath(loaded.paths, id);
     const requestPath = path.join(requestRoot, "request.json");
-    const existing = await readJsonFile(requestPath, "request.json");
+    const existing = await readJsonFile(requestPath, "request.json", {
+      projectRootPath: loaded.paths.projectRootPath,
+    });
     if (existing) {
       this.#assertRequestRecord(existing, loaded, { requestId: id, attemptId: attempt });
       if (existing.expectedSourceSha256 !== expected) {
@@ -1018,22 +1449,123 @@ export class ProjectFileRepository {
           "This Request id belongs to another frozen source state.",
         );
       }
+      await this.#restoreRequestRuntime(loaded, existing);
       return this.#publicRequest(existing, loaded.paths.projectRootPath);
     }
     const latest = loaded.manifest.versions.find(
       (version) => version.versionId === loaded.manifest.latestOfficialVersionId,
     );
+    const workingState = await readJsonFile(
+      workingCopyStatePath(loaded.paths, loaded.workingCopy),
+      "Working Copy state",
+      { projectRootPath: loaded.paths.projectRootPath },
+    );
+    const frozenRequest = isObject(request) ? structuredClone(request) : {};
+    const freezeCutoffRevision = Number(frozenRequest.freezeCutoffRevision || 0);
+    if (
+      !Number.isSafeInteger(freezeCutoffRevision)
+      || freezeCutoffRevision < 0
+      || freezeCutoffRevision > Number(workingState?.lastPersistedRevision || 0)
+    ) {
+      throw new ProjectFileRepositoryError(
+        "FREEZE_REVISION_NOT_PERSISTED",
+        "The Request freeze revision has not been durably saved to its Working Copy.",
+        {
+          freezeCutoffRevision,
+          lastPersistedRevision: Number(workingState?.lastPersistedRevision || 0),
+        },
+      );
+    }
     const ordinal = latest.ordinal + 1;
     const proposedVersionId = versionId(ordinal);
-    const idForCandidate = randomId("candidate");
+    const idForCandidate = candidateIdForRequest(loaded.project.projectId, id);
     const inputRoot = path.join(requestRoot, "input", "base");
     const inputPath = path.join(inputRoot, "index.html");
+    const annotationsPath = path.join(requestRoot, "input", "annotations", "records.json");
+    const projectRulesPath = path.join(requestRoot, "input", "PROJECT.md");
+    const aiRulesPath = path.join(requestRoot, "input", "AI_RULES.md");
+    const changeRequestPath = path.join(requestRoot, "change-request.json");
+    const inputManifestPath = path.join(requestRoot, "input-manifest.json");
+    const promptPath = path.join(requestRoot, "PROMPT.md");
     const outputRelativePath = `requests/${id}/attempts/${attempt}/output/candidate.html`;
     const outputPath = resolveRelative(
       loaded.paths.controlRoot,
       outputRelativePath,
       "request output path",
     );
+    const projectNotesPath = path.join(loaded.paths.projectRootPath, "PROJECT.md");
+    const projectNotes = await regularInformation(projectNotesPath, "PROJECT.md", {
+      projectRootPath: loaded.paths.projectRootPath,
+    });
+    if (!projectNotes) {
+      throw new ProjectFileRepositoryError(
+        "PROJECT_FILE_NOT_FOUND",
+        "PROJECT.md must exist before an AI Request can be frozen.",
+      );
+    }
+    const projectNotesBuffer = await readFile(projectNotesPath);
+    const promptBuffer = Buffer.from(String(prompt || ""), "utf8");
+    const aiRulesBuffer = Buffer.from(FROZEN_REQUEST_RULES, "utf8");
+    const annotationsBuffer = Buffer.from(jsonText({
+      schemaVersion: PROJECT_FILE_SCHEMA_VERSION,
+      projectId: loaded.project.projectId,
+      documentId: loaded.project.documentId,
+      requestId: id,
+      attemptId: attempt,
+      sourceWorkingCopyId: loaded.workingCopy.workingCopyId,
+      basedOnVersionId: loaded.workingCopy.basedOnVersionId,
+      freezeCutoffRevision,
+      comments: Array.isArray(frozenRequest.comments)
+        ? frozenRequest.comments
+        : [],
+      changeEvents: Array.isArray(frozenRequest.changeEvents)
+        ? frozenRequest.changeEvents
+        : [],
+      targets: Array.isArray(frozenRequest.targets)
+        ? frozenRequest.targets
+        : [],
+    }), "utf8");
+    const changeRequestBuffer = Buffer.from(jsonText({
+      schemaVersion: PROJECT_FILE_SCHEMA_VERSION,
+      projectId: loaded.project.projectId,
+      documentId: loaded.project.documentId,
+      requestId: id,
+      attemptId: attempt,
+      sourceWorkingCopyId: loaded.workingCopy.workingCopyId,
+      expectedSourceSha256: expected,
+      proposedVersionId,
+      proposedVersionOrdinal: ordinal,
+      basedOnVersionId: loaded.workingCopy.basedOnVersionId,
+      previousVersionId: latest.versionId,
+      freezeCutoffRevision,
+      requirements: frozenRequest,
+    }), "utf8");
+    const inputManifestRelativePath = `requests/${id}/input-manifest.json`;
+    const inputManifest = {
+      schemaVersion: PROJECT_FILE_SCHEMA_VERSION,
+      projectId: loaded.project.projectId,
+      documentId: loaded.project.documentId,
+      requestId: id,
+      attemptId: attempt,
+      frozen: true,
+      readOrder: [
+        "PROMPT.md",
+        "input/AI_RULES.md",
+        "change-request.json",
+        "input/PROJECT.md",
+        "input/base/index.html",
+        "input/annotations/records.json",
+      ],
+      files: [
+        requestInputFileRecord("PROMPT.md", "prompt", "text/markdown", promptBuffer),
+        requestInputFileRecord("input/AI_RULES.md", "policy", "text/markdown", aiRulesBuffer),
+        requestInputFileRecord("change-request.json", "change-request", "application/json", changeRequestBuffer),
+        requestInputFileRecord("input/PROJECT.md", "project-rules", "text/markdown", projectNotesBuffer),
+        requestInputFileRecord("input/base/index.html", "base-html", "text/html", loaded.source.buffer),
+        requestInputFileRecord("input/annotations/records.json", "annotations", "application/json", annotationsBuffer),
+      ],
+    };
+    const inputManifestBuffer = Buffer.from(jsonText(inputManifest), "utf8");
     const record = {
       schemaVersion: PROJECT_FILE_SCHEMA_VERSION,
       requestId: id,
@@ -1048,18 +1580,75 @@ export class ProjectFileRepository {
       basedOnVersionId: loaded.workingCopy.basedOnVersionId,
       previousVersionId: latest.versionId,
       inputRelativePath: `requests/${id}/input/base/index.html`,
+      promptRelativePath: `requests/${id}/PROMPT.md`,
+      projectRulesRelativePath: `requests/${id}/input/PROJECT.md`,
+      annotationsRelativePath: `requests/${id}/input/annotations/records.json`,
+      changeRequestRelativePath: `requests/${id}/change-request.json`,
+      inputManifestRelativePath,
+      inputManifestSha256: sha256(inputManifestBuffer),
       outputRelativePath,
       status: "processing",
       createdAt: nowIso(this.#clock),
-      request: isObject(request) ? structuredClone(request) : {},
+      request: frozenRequest,
     };
-    await ensureDirectory(path.dirname(inputPath));
-    await writeFileNoReplace(inputPath, loaded.source.buffer, expected, "Request input HTML");
-    await ensureDirectory(path.dirname(outputPath));
-    const promptPath = path.join(requestRoot, "PROMPT.md");
-    const promptBuffer = Buffer.from(String(prompt || ""), "utf8");
-    await writeFileNoReplace(promptPath, promptBuffer, sha256(promptBuffer), "Request prompt");
-    await atomicWriteJson(requestPath, record);
+    await ensureProjectDirectory(
+      loaded.paths.projectRootPath,
+      path.dirname(inputPath),
+      "Request input directory",
+    );
+    await writeFileNoReplace(inputPath, loaded.source.buffer, expected, "Request input HTML", {
+      projectRootPath: loaded.paths.projectRootPath,
+    });
+    await this.#hit("request-input-written", { requestId: id, requestRoot });
+    await ensureProjectDirectory(
+      loaded.paths.projectRootPath,
+      path.dirname(projectRulesPath),
+      "Request project rules directory",
+    );
+    await writeFileNoReplace(projectRulesPath, projectNotesBuffer, sha256(projectNotesBuffer), "Request project rules", {
+      projectRootPath: loaded.paths.projectRootPath,
+    });
+    await writeFileNoReplace(aiRulesPath, aiRulesBuffer, sha256(aiRulesBuffer), "Request AI rules", {
+      projectRootPath: loaded.paths.projectRootPath,
+    });
+    await this.#hit("request-project-rules-written", { requestId: id, requestRoot });
+    await ensureProjectDirectory(
+      loaded.paths.projectRootPath,
+      path.dirname(annotationsPath),
+      "Request annotations directory",
+    );
+    await writeFileNoReplace(annotationsPath, annotationsBuffer, sha256(annotationsBuffer), "Request annotations", {
+      projectRootPath: loaded.paths.projectRootPath,
+    });
+    await this.#hit("request-annotations-written", { requestId: id, requestRoot });
+    await writeFileNoReplace(changeRequestPath, changeRequestBuffer, sha256(changeRequestBuffer), "Request change record", {
+      projectRootPath: loaded.paths.projectRootPath,
+    });
+    await this.#hit("request-change-record-written", { requestId: id, requestRoot });
+    await ensureProjectDirectory(
+      loaded.paths.projectRootPath,
+      path.dirname(outputPath),
+      "Request output directory",
+    );
+    await writeFileNoReplace(promptPath, promptBuffer, sha256(promptBuffer), "Request prompt", {
+      projectRootPath: loaded.paths.projectRootPath,
+    });
+    await this.#hit("request-prompt-written", { requestId: id, requestRoot });
+    await writeFileNoReplace(
+      inputManifestPath,
+      inputManifestBuffer,
+      sha256(inputManifestBuffer),
+      "Request input manifest",
+      { projectRootPath: loaded.paths.projectRootPath },
+    );
+    await this.#hit("request-input-manifest-written", { requestId: id, requestRoot });
+    await atomicWriteProjectJson(
+      loaded.paths.projectRootPath,
+      requestPath,
+      record,
+      "request.json",
+    );
+    await this.#hit("request-record-written", { requestId: id, requestRoot });
     loaded.runtime.activeRequest = {
       requestId: id,
       candidateId: null,
@@ -1067,7 +1656,13 @@ export class ProjectFileRepository {
       status: "processing",
     };
     loaded.runtime.activeCandidateId = null;
-    await atomicWriteJson(loaded.paths.runtimePath, loaded.runtime);
+    await atomicWriteProjectJson(
+      loaded.paths.projectRootPath,
+      loaded.paths.runtimePath,
+      loaded.runtime,
+      "runtime-state.json",
+    );
+    await this.#hit("request-runtime-written", { requestId: id, requestRoot });
     await this.#hit("request-prepared", { requestId: id, requestRoot });
     return this.#publicRequest(record, loaded.paths.projectRootPath);
   }
@@ -1097,6 +1692,18 @@ export class ProjectFileRepository {
     assertId(record.previousVersionId, VERSION_ID, "previousVersionId");
     ensureRelativePath(record.inputRelativePath, "request input path");
     ensureRelativePath(record.outputRelativePath, "request output path");
+    for (const [value, label] of [
+      [record.promptRelativePath, "request prompt path"],
+      [record.projectRulesRelativePath, "request project rules path"],
+      [record.annotationsRelativePath, "request annotations path"],
+      [record.changeRequestRelativePath, "request change record path"],
+      [record.inputManifestRelativePath, "request input manifest path"],
+    ]) {
+      if (value !== undefined) ensureRelativePath(value, label);
+    }
+    if (record.inputManifestSha256 !== undefined) {
+      assertSha256(record.inputManifestSha256, "request input manifest hash");
+    }
   }
 
   #assertCompletionRecord(completion, request) {
@@ -1145,15 +1752,102 @@ export class ProjectFileRepository {
       request: structuredClone(record.request || {}),
       projectRootPath,
       requestRelativePath: `requests/${record.requestId}`,
+      ...(record.promptRelativePath ? { promptRelativePath: record.promptRelativePath } : {}),
+      ...(record.projectRulesRelativePath
+        ? { projectRulesRelativePath: record.projectRulesRelativePath }
+        : {}),
+      ...(record.annotationsRelativePath
+        ? { annotationsRelativePath: record.annotationsRelativePath }
+        : {}),
+      ...(record.changeRequestRelativePath
+        ? { changeRequestRelativePath: record.changeRequestRelativePath }
+        : {}),
+      ...(record.inputManifestRelativePath
+        ? { inputManifestRelativePath: record.inputManifestRelativePath }
+        : {}),
+      ...(record.inputManifestSha256
+        ? { inputManifestSha256: record.inputManifestSha256 }
+        : {}),
       outputRelativePath: record.outputRelativePath,
       ...(isObject(record.error) ? { error: structuredClone(record.error) } : {}),
     };
   }
 
+  async #restoreRequestRuntime(loaded, record) {
+    this.#assertRequestRecord(record, loaded, {
+      requestId: record.requestId,
+      attemptId: record.attemptId,
+    });
+    let status = record.status;
+    let candidateId = null;
+    if (status === "processing") {
+      const candidatePath = path.join(
+        requestRootPath(loaded.paths, record.requestId),
+        "candidate.json",
+      );
+      const candidate = await readJsonFile(candidatePath, "candidate.json", {
+        projectRootPath: loaded.paths.projectRootPath,
+      });
+      if (candidate?.candidateId === record.candidateId && candidate.status === "pending-review") {
+        record.status = "candidate-ready";
+        record.completedAt = record.completedAt || nowIso(this.#clock);
+        await atomicWriteProjectJson(
+          loaded.paths.projectRootPath,
+          path.join(requestRootPath(loaded.paths, record.requestId), "request.json"),
+          record,
+          "request.json",
+        );
+        status = record.status;
+      }
+    }
+    if (status === "candidate-ready") {
+      candidateId = record.candidateId;
+    } else if (status !== "processing") {
+      if (loaded.runtime.activeRequest?.requestId === record.requestId) {
+        loaded.runtime.activeRequest = null;
+        loaded.runtime.activeCandidateId = null;
+        await atomicWriteProjectJson(
+          loaded.paths.projectRootPath,
+          loaded.paths.runtimePath,
+          loaded.runtime,
+          "runtime-state.json",
+        );
+      }
+      return false;
+    }
+    const nextActiveRequest = {
+      requestId: record.requestId,
+      candidateId,
+      attemptId: record.attemptId,
+      status: candidateId ? "pending-review" : "processing",
+    };
+    const active = loaded.runtime.activeRequest;
+    if (
+      active?.requestId !== nextActiveRequest.requestId
+      || active?.attemptId !== nextActiveRequest.attemptId
+      || active?.candidateId !== nextActiveRequest.candidateId
+      || active?.status !== nextActiveRequest.status
+      || loaded.runtime.activeCandidateId !== candidateId
+    ) {
+      loaded.runtime.activeRequest = nextActiveRequest;
+      loaded.runtime.activeCandidateId = candidateId;
+      await atomicWriteProjectJson(
+        loaded.paths.projectRootPath,
+        loaded.paths.runtimePath,
+        loaded.runtime,
+        "runtime-state.json",
+      );
+      return true;
+    }
+    return false;
+  }
+
   async #requestStatus({ target, requestId, attemptId }) {
     const loaded = await this.#resolveMutationTarget(target);
     const requestRoot = requestRootPath(loaded.paths, requestId);
-    const record = await readJsonFile(path.join(requestRoot, "request.json"), "request.json");
+    const record = await readJsonFile(path.join(requestRoot, "request.json"), "request.json", {
+      projectRootPath: loaded.paths.projectRootPath,
+    });
     this.#assertRequestRecord(record, loaded, { requestId, attemptId });
     if (record.status === "candidate-ready" || record.status === "promoted") {
       const candidate = await this.#readCandidateForLoaded(loaded, record.candidateId);
@@ -1176,7 +1870,9 @@ export class ProjectFileRepository {
       );
     }
     const completionPath = path.join(requestRoot, "attempts", attemptId, "completion.json");
-    const completion = await readJsonFile(completionPath, "completion.json");
+    const completion = await readJsonFile(completionPath, "completion.json", {
+      projectRootPath: loaded.paths.projectRootPath,
+    });
     if (!completion) {
       return {
         status: "processing",
@@ -1189,7 +1885,9 @@ export class ProjectFileRepository {
       completion.outputRelativePath,
       "completion output path",
     );
-    const output = await readHtmlFile(outputPath, "finalized Candidate output");
+    const output = await readHtmlFile(outputPath, "finalized Candidate output", {
+      projectRootPath: loaded.paths.projectRootPath,
+    });
     if (output.sha256 !== completion.outputSha256) {
       throw new ProjectFileRepositoryError(
         "REQUEST_OUTPUT_CHANGED",
@@ -1208,7 +1906,9 @@ export class ProjectFileRepository {
     const loaded = await this.#resolveMutationTarget(target);
     const requestRoot = requestRootPath(loaded.paths, requestId);
     const requestPath = path.join(requestRoot, "request.json");
-    const record = await readJsonFile(requestPath, "request.json");
+    const record = await readJsonFile(requestPath, "request.json", {
+      projectRootPath: loaded.paths.projectRootPath,
+    });
     this.#assertRequestRecord(record, loaded, { requestId, attemptId });
     if (record.status === "candidate-ready") {
       const rejected = await this.#rejectCandidate({ target, candidateId: record.candidateId });
@@ -1235,11 +1935,21 @@ export class ProjectFileRepository {
     }
     record.status = "cancelled";
     record.cancelledAt = nowIso(this.#clock);
-    await atomicWriteJson(requestPath, record);
+    await atomicWriteProjectJson(
+      loaded.paths.projectRootPath,
+      requestPath,
+      record,
+      "request.json",
+    );
     if (loaded.runtime.activeRequest?.requestId === requestId) {
       loaded.runtime.activeRequest = null;
       loaded.runtime.activeCandidateId = null;
-      await atomicWriteJson(loaded.paths.runtimePath, loaded.runtime);
+      await atomicWriteProjectJson(
+        loaded.paths.projectRootPath,
+        loaded.paths.runtimePath,
+        loaded.runtime,
+        "runtime-state.json",
+      );
     }
     return { requestId, attemptId, status: "cancelled" };
   }
@@ -1264,9 +1974,13 @@ export class ProjectFileRepository {
       );
     }
     const statePath = workingCopyStatePath(loaded.paths, loaded.workingCopy);
-    const state = await readJsonFile(statePath, "Working Copy state");
+    const state = await readJsonFile(statePath, "Working Copy state", {
+      projectRootPath: loaded.paths.projectRootPath,
+    });
     const draftPath = draftPathForState(loaded.paths, loaded.workingCopy, state);
-    const persisted = await readJsonFile(draftPath, "Working Copy draft");
+    const persisted = await readJsonFile(draftPath, "Working Copy draft", {
+      projectRootPath: loaded.paths.projectRootPath,
+    });
     let command;
     try {
       command = applyDraftCommand(
@@ -1303,14 +2017,19 @@ export class ProjectFileRepository {
         basedOnVersionId: loaded.workingCopy.basedOnVersionId,
         ...activeDraft,
       };
-      await atomicWriteJson(draftPath, stored);
+      await atomicWriteProjectJson(
+        loaded.paths.projectRootPath,
+        draftPath,
+        stored,
+        "Working Copy draft",
+      );
       const draftText = jsonText(stored);
-      await atomicWriteJson(statePath, {
+      await atomicWriteProjectJson(loaded.paths.projectRootPath, statePath, {
         ...state,
         draftRelativePath: draftRelativePathFor(loaded.workingCopy),
         draftSha256: sha256(Buffer.from(draftText, "utf8")),
         draftRevision: activeDraft.draftRevision,
-      });
+      }, "Working Copy state");
       await this.#hit("draft-saved", {
         workingCopyId: loaded.workingCopy.workingCopyId,
         operationId: command.operationId,
@@ -1329,7 +2048,9 @@ export class ProjectFileRepository {
     const version = loaded.manifest.versions.find((entry) => entry.versionId === id);
     if (version) {
       const snapshotPath = versionSnapshotPath(loaded.paths, version);
-      const snapshot = await readHtmlFile(snapshotPath, "Version snapshot");
+      const snapshot = await readHtmlFile(snapshotPath, "Version snapshot", {
+        projectRootPath: loaded.paths.projectRootPath,
+      });
       if (snapshot.sha256 !== version.contentSha256) {
         throw new ProjectFileRepositoryError(
           "VERSION_HASH_MISMATCH",
@@ -1377,7 +2098,9 @@ export class ProjectFileRepository {
     const loaded = await this.#resolveMutationTarget(target);
     const requestRoot = requestRootPath(loaded.paths, requestId);
     const requestPath = path.join(requestRoot, "request.json");
-    const record = await readJsonFile(requestPath, "request.json");
+    const record = await readJsonFile(requestPath, "request.json", {
+      projectRootPath: loaded.paths.projectRootPath,
+    });
     this.#assertRequestRecord(record, loaded, { requestId, attemptId });
     const outputHtml = String(html || "");
     requireCompleteHtml(outputHtml, "Candidate HTML");
@@ -1405,10 +2128,20 @@ export class ProjectFileRepository {
     if (outputSha256 === record.expectedSourceSha256) {
       record.status = "no-change";
       record.completedAt = nowIso(this.#clock);
-      await atomicWriteJson(requestPath, record);
+      await atomicWriteProjectJson(
+        loaded.paths.projectRootPath,
+        requestPath,
+        record,
+        "request.json",
+      );
       loaded.runtime.activeRequest = null;
       loaded.runtime.activeCandidateId = null;
-      await atomicWriteJson(loaded.paths.runtimePath, loaded.runtime);
+      await atomicWriteProjectJson(
+        loaded.paths.projectRootPath,
+        loaded.paths.runtimePath,
+        loaded.runtime,
+        "runtime-state.json",
+      );
       return {
         status: "no-change",
         request: this.#publicRequest(record, loaded.paths.projectRootPath),
@@ -1421,6 +2154,7 @@ export class ProjectFileRepository {
         "frozen Request input path",
       ),
       "frozen Request input",
+      { projectRootPath: loaded.paths.projectRootPath },
     );
     if (frozenInput.sha256 !== record.expectedSourceSha256) {
       throw new ProjectFileRepositoryError(
@@ -1457,10 +2191,20 @@ export class ProjectFileRepository {
           ? cause.details.issueCodes
           : [],
       };
-      await atomicWriteJson(requestPath, record);
+      await atomicWriteProjectJson(
+        loaded.paths.projectRootPath,
+        requestPath,
+        record,
+        "request.json",
+      );
       loaded.runtime.activeRequest = null;
       loaded.runtime.activeCandidateId = null;
-      await atomicWriteJson(loaded.paths.runtimePath, loaded.runtime);
+      await atomicWriteProjectJson(
+        loaded.paths.projectRootPath,
+        loaded.paths.runtimePath,
+        loaded.runtime,
+        "runtime-state.json",
+      );
       return {
         status: "error",
         request: this.#publicRequest(record, loaded.paths.projectRootPath),
@@ -1468,7 +2212,12 @@ export class ProjectFileRepository {
     }
     record.status = "candidate-ready";
     record.completedAt = nowIso(this.#clock);
-    await atomicWriteJson(requestPath, record);
+    await atomicWriteProjectJson(
+      loaded.paths.projectRootPath,
+      requestPath,
+      record,
+      "request.json",
+    );
     return {
       status: "candidate-ready",
       request: this.#publicRequest(record, loaded.paths.projectRootPath),
@@ -1476,79 +2225,198 @@ export class ProjectFileRepository {
     };
   }
 
-  async #writeRegistryAssociation(projectId, projectRootPath) {
-    await ensureDirectory(this.#projectsRoot);
-    const registry = await this.#readRegistry();
-    registry.projects[projectId] = {
-      projectRootPath: normalizedPath(projectRootPath),
-      updatedAt: nowIso(this.#clock),
-    };
-    registry.updatedAt = nowIso(this.#clock);
-    await atomicWriteJson(this.#registryPath, registry);
+  async #assertProjectsRoot() {
+    const information = await directoryInformation(
+      this.#projectsRoot,
+      "configured project directory",
+    );
+    if (!information) {
+      throw new ProjectFileRepositoryError(
+        "PROJECTS_ROOT_NOT_FOUND",
+        "The configured PageRoot project directory is unavailable.",
+      );
+    }
+    return information;
   }
 
-  async #removeRegistryAssociationIfMatches(projectId, projectRootPath) {
-    const registry = await this.#readRegistry();
-    const existing = registry.projects[projectId];
-    if (!existing?.projectRootPath || !samePath(
-      existing.projectRootPath,
-      projectRootPath,
-    )) return false;
-    delete registry.projects[projectId];
+  async #assertRegisteredProjectRootPath(projectRootPath, { allowMissing = false } = {}) {
+    await this.#assertProjectsRoot();
+    const root = normalizedPath(projectRootPath);
+    if (!samePath(path.dirname(root), this.#projectsRoot) || path.basename(root).startsWith(".")) {
+      throw new ProjectFileRepositoryError(
+        "UNREGISTERED_PROJECT_ROOT",
+        "A managed project root must be a direct child of the configured project directory.",
+        { projectRootPath: root },
+      );
+    }
+    const information = await directoryInformation(root, "registered project root", {
+      projectRootPath: this.#projectsRoot,
+    });
+    if (!information && !allowMissing) {
+      throw new ProjectFileRepositoryError(
+        "REGISTERED_PROJECT_UNAVAILABLE",
+        "The registered project root is unavailable.",
+        { projectRootPath: root },
+      );
+    }
+    return { projectRootPath: root, information };
+  }
+
+  async #writeRegistry(registry) {
+    await this.#assertProjectsRoot();
+    assertRegistry(registry);
     registry.updatedAt = nowIso(this.#clock);
-    await atomicWriteJson(this.#registryPath, registry);
+    await atomicWriteProjectJson(
+      this.#projectsRoot,
+      this.#registryPath,
+      registry,
+      "project registry",
+    );
+  }
+
+  async #preparePendingImport({ projectId, documentId, projectRootPath, createdAt }) {
+    const target = await this.#assertRegisteredProjectRootPath(projectRootPath, {
+      allowMissing: true,
+    });
+    if (target.information) {
+      throw new ProjectFileRepositoryError(
+        "PROJECT_DIRECTORY_COLLISION",
+        "The selected project directory is already occupied.",
+      );
+    }
+    const registry = await this.#readRegistry();
+    if (registry.projects[projectId] || registry.pendingImports[projectId]) {
+      throw new ProjectFileRepositoryError(
+        "PROJECT_ID_COLLISION",
+        "The new project identity is already registered.",
+      );
+    }
+    registry.pendingImports[projectId] = {
+      projectId,
+      documentId,
+      registeredProjectRootPath: target.projectRootPath,
+      createdAt,
+    };
+    await this.#writeRegistry(registry);
+  }
+
+  async #clearPendingImportIfMatches(projectId, projectRootPath) {
+    const registry = await this.#readRegistry();
+    const pending = registry.pendingImports[projectId];
+    if (
+      !pending
+      || !samePath(pending.registeredProjectRootPath, projectRootPath)
+    ) return false;
+    delete registry.pendingImports[projectId];
+    await this.#writeRegistry(registry);
     return true;
   }
 
-  // Import writes a complete recovery record before publishing the staged
-  // folder. A process can die between rename() and the registry write, where
-  // neither side alone is an authority. This is a deliberately bounded scan
-  // of the configured project root (never a disk-wide lost-project search):
-  // it completes only a structurally valid, unpublished import.
-  async #recoverPublishedImports() {
-    let entries;
-    try {
-      entries = await readdir(this.#projectsRoot, { withFileTypes: true });
-    } catch (cause) {
-      if (cause?.code === "ENOENT") return [];
-      throw cause;
-    }
-    const recovered = [];
-    for (const entry of entries) {
-      if (!entry.isDirectory() || entry.isSymbolicLink() || entry.name.startsWith(".")) {
-        continue;
+  async #publishPendingImport(projectId) {
+    const registry = await this.#readRegistry();
+    const pending = registry.pendingImports[projectId];
+    if (!pending) {
+      const existing = registry.projects[projectId];
+      if (!existing) {
+        throw new ProjectFileRepositoryError(
+          "IMPORT_INTENT_NOT_FOUND",
+          "The import has no registered publication intent.",
+          { projectId },
+        );
       }
-      const projectRootPath = path.join(this.#projectsRoot, entry.name);
+      return existing;
+    }
+    const target = await this.#assertRegisteredProjectRootPath(
+      pending.registeredProjectRootPath,
+    );
+    const loaded = await this.#loadProject(target.projectRootPath);
+    if (
+      loaded.project.projectId !== pending.projectId
+      || loaded.project.documentId !== pending.documentId
+    ) {
+      throw new ProjectFileRepositoryError(
+        "IMPORT_IDENTITY_MISMATCH",
+        "The published import does not match its Registry intent.",
+        { projectId },
+      );
+    }
+    const rootFileIdentity = copyFileIdentity(target.information);
+    const existing = registry.projects[projectId];
+    if (existing) {
+      if (
+        !samePath(existing.registeredProjectRootPath, target.projectRootPath)
+        || !sameFileIdentity(existing.rootFileIdentity, rootFileIdentity)
+      ) {
+        throw new ProjectFileRepositoryError(
+          "IMPORT_REGISTRY_CONFLICT",
+          "The import intent conflicts with an existing registered project.",
+          { projectId },
+        );
+      }
+    } else {
+      registry.projects[projectId] = {
+        registeredProjectRootPath: target.projectRootPath,
+        rootFileIdentity,
+        updatedAt: nowIso(this.#clock),
+      };
+      await this.#writeRegistry(registry);
+    }
+
+    const importPath = path.join(loaded.paths.recoveryRoot, "import.json");
+    const importRecord = await readJsonFile(importPath, "import recovery record", {
+      projectRootPath: loaded.paths.projectRootPath,
+    });
+    if (
+      !importRecord
+      || importRecord.schemaVersion !== PROJECT_FILE_SCHEMA_VERSION
+      || importRecord.kind !== "import"
+      || importRecord.projectId !== pending.projectId
+      || importRecord.documentId !== pending.documentId
+    ) {
+      throw new ProjectFileRepositoryError(
+        "IMPORT_RECOVERY_INVALID",
+        "The published import recovery record is invalid.",
+        { projectId },
+      );
+    }
+    if (importRecord.state !== "committed") {
+      await atomicWriteProjectJson(loaded.paths.projectRootPath, importPath, {
+        ...importRecord,
+        state: "committed",
+        committedAt: nowIso(this.#clock),
+      }, "import recovery record");
+    }
+
+    const latest = await this.#readRegistry();
+    const latestPending = latest.pendingImports[projectId];
+    const latestProject = latest.projects[projectId];
+    if (
+      latestPending
+      && latestProject
+      && samePath(
+        latestPending.registeredProjectRootPath,
+        latestProject.registeredProjectRootPath,
+      )
+    ) {
+      delete latest.pendingImports[projectId];
+      await this.#writeRegistry(latest);
+    }
+    return (await this.#readRegistry()).projects[projectId];
+  }
+
+  // Recovery has one authority: a Registry pending-import record. A copied
+  // half-finished directory cannot gain management merely because it contains
+  // a plausible .pageroot/recovery/import.json.
+  async #recoverPublishedImports() {
+    const registry = await this.#readRegistry();
+    const recovered = [];
+    for (const projectId of Object.keys(registry.pendingImports)) {
       try {
-        const paths = projectPaths(projectRootPath);
-        const importRecord = await readJsonFile(
-          path.join(paths.recoveryRoot, "import.json"),
-          "import recovery record",
-        );
-        if (
-          !importRecord
-          || importRecord.schemaVersion !== PROJECT_FILE_SCHEMA_VERSION
-          || importRecord.kind !== "import"
-          || importRecord.state !== "prepared"
-        ) continue;
-        const loaded = await this.#loadProject(projectRootPath);
-        if (
-          importRecord.projectId !== loaded.project.projectId
-          || importRecord.documentId !== loaded.project.documentId
-        ) continue;
-        await this.#writeRegistryAssociation(
-          loaded.project.projectId,
-          loaded.paths.projectRootPath,
-        );
-        await atomicWriteJson(path.join(paths.recoveryRoot, "import.json"), {
-          ...importRecord,
-          state: "committed",
-          committedAt: nowIso(this.#clock),
-        });
-        recovered.push(loaded.project.projectId);
+        await this.#publishPendingImport(projectId);
+        recovered.push(projectId);
       } catch {
-        // Unrecognized user folders and user-altered .pageroot metadata are
-        // not auto-repaired or removed by the import recovery pass.
+        // Invalid or user-altered directories remain unmanaged. The Registry
+        // intent is retained for an explicit, auditable recovery path.
       }
     }
     return recovered;
@@ -1557,21 +2425,14 @@ export class ProjectFileRepository {
   async #importExternal({
     sourcePath,
     expectedSourceSha256,
-    duplicateResolution,
-    forceNew,
   }) {
     await ensureDirectory(this.#projectsRoot);
+    await this.#assertProjectsRoot();
     await this.#recoverPublishedImports();
     const requestedPath = normalizedPath(sourcePath);
     htmlExtension(requestedPath);
-    const existingRoot = await this.#findProjectRoot(requestedPath);
-    if (existingRoot && !forceNew) {
-      const target = await this.#resolveOpenTarget({
-        sourcePath: requestedPath,
-        duplicateResolution,
-      });
-      return { imported: false, target };
-    }
+    const existingTarget = await this.#resolveOpenTarget({ sourcePath: requestedPath });
+    if (existingTarget) return { imported: false, target: existingTarget };
     const source = await readHtmlFile(requestedPath, "external HTML");
     if (expectedSourceSha256 && source.sha256 !== assertSha256(expectedSourceSha256, "expectedSourceSha256")) {
       throw new ProjectFileRepositoryError(
@@ -1600,8 +2461,19 @@ export class ProjectFileRepository {
     );
     const paths = projectPaths(stagingRoot);
     let published = false;
-    let registryAssociated = false;
+    let pendingPrepared = false;
     try {
+      await this.#preparePendingImport({
+        projectId,
+        documentId,
+        projectRootPath: allocated.projectRootPath,
+        createdAt,
+      });
+      pendingPrepared = true;
+      await this.#hit("import-intent-recorded", {
+        projectRootPath: allocated.projectRootPath,
+        projectId,
+      });
       await ensureDirectory(stagingRoot);
       for (const directory of [
         paths.controlRoot,
@@ -1624,11 +2496,17 @@ export class ProjectFileRepository {
         snapshotRelativePath,
         "snapshotRelativePath",
       );
-      await ensureDirectory(path.dirname(snapshotPath));
-      await atomicWriteFile(snapshotPath, source.buffer);
+      await ensureProjectDirectory(
+        stagingRoot,
+        path.dirname(snapshotPath),
+        "initial Version directory",
+      );
+      await atomicWriteProjectFile(stagingRoot, snapshotPath, source.buffer, "initial Version snapshot");
       await this.#hit("import-snapshot-written", { stagingRoot });
-      await atomicWriteFile(visiblePath, source.buffer);
-      const visibleInformation = await regularInformation(visiblePath, "initial Working Copy");
+      await atomicWriteProjectFile(stagingRoot, visiblePath, source.buffer, "initial Working Copy");
+      const visibleInformation = await regularInformation(visiblePath, "initial Working Copy", {
+        projectRootPath: stagingRoot,
+      });
       await this.#hit("import-working-copy-written", { stagingRoot });
 
       const project = {
@@ -1653,6 +2531,8 @@ export class ProjectFileRepository {
         versionId: firstVersionId,
         basedOnVersionId: firstVersionId,
         sourceRelativePath: visibleName,
+        preferredFileStem: stem,
+        preferredExtension: extension,
         stateRelativePath: `working-copies/${firstWorkingCopyId}.json`,
         fileIdentity: copyFileIdentity(visibleInformation),
       };
@@ -1660,7 +2540,6 @@ export class ProjectFileRepository {
         schemaVersion: PROJECT_FILE_SCHEMA_VERSION,
         projectId,
         documentId,
-        fileNaming: { stem, extension },
         latestOfficialVersionId: firstVersionId,
         versions: [firstVersion],
         workingCopies: [firstWorkingCopy],
@@ -1691,11 +2570,16 @@ export class ProjectFileRepository {
         activeRequest: null,
         activeCandidateId: null,
       };
-      await atomicWriteJson(paths.projectPath, project);
-      await atomicWriteJson(paths.manifestPath, manifest);
-      await atomicWriteJson(workingCopyStatePath(paths, firstWorkingCopy), workingState);
-      await atomicWriteJson(paths.runtimePath, runtime);
-      await atomicWriteJson(path.join(paths.recoveryRoot, "import.json"), {
+      await atomicWriteProjectJson(stagingRoot, paths.projectPath, project, "project.json");
+      await atomicWriteProjectJson(stagingRoot, paths.manifestPath, manifest, "manifest.json");
+      await atomicWriteProjectJson(
+        stagingRoot,
+        workingCopyStatePath(paths, firstWorkingCopy),
+        workingState,
+        "initial Working Copy state",
+      );
+      await atomicWriteProjectJson(stagingRoot, paths.runtimePath, runtime, "runtime-state.json");
+      await atomicWriteProjectJson(stagingRoot, path.join(paths.recoveryRoot, "import.json"), {
         schemaVersion: PROJECT_FILE_SCHEMA_VERSION,
         kind: "import",
         state: "prepared",
@@ -1703,10 +2587,12 @@ export class ProjectFileRepository {
         documentId,
         externalSourceSha256: source.sha256,
         createdAt,
-      });
-      await atomicWriteFile(
+      }, "import recovery record");
+      await atomicWriteProjectFile(
+        stagingRoot,
         path.join(stagingRoot, "PROJECT.md"),
         Buffer.from(`# ${stem}\n\n`, "utf8"),
+        "PROJECT.md",
       );
       await this.#hit("import-metadata-written", { stagingRoot });
 
@@ -1725,19 +2611,7 @@ export class ProjectFileRepository {
         projectRootPath: allocated.projectRootPath,
         projectId,
       });
-      await this.#writeRegistryAssociation(projectId, allocated.projectRootPath);
-      registryAssociated = true;
-      const publishedPaths = projectPaths(allocated.projectRootPath);
-      await atomicWriteJson(path.join(publishedPaths.recoveryRoot, "import.json"), {
-        schemaVersion: PROJECT_FILE_SCHEMA_VERSION,
-        kind: "import",
-        state: "committed",
-        projectId,
-        documentId,
-        externalSourceSha256: source.sha256,
-        createdAt,
-        committedAt: nowIso(this.#clock),
-      });
+      await this.#publishPendingImport(projectId);
       await this.#hit("import-registry-written", {
         projectRootPath: allocated.projectRootPath,
         projectId,
@@ -1757,12 +2631,12 @@ export class ProjectFileRepository {
     } catch (cause) {
       if (!published) {
         await rm(stagingRoot, { recursive: true, force: true });
-      } else if (!registryAssociated) {
-        await this.#removeRegistryAssociationIfMatches(
-          projectId,
-          allocated.projectRootPath,
-        ).catch(() => {});
-        await rm(allocated.projectRootPath, { recursive: true, force: true });
+        if (pendingPrepared) {
+          await this.#clearPendingImportIfMatches(
+            projectId,
+            allocated.projectRootPath,
+          ).catch(() => {});
+        }
       }
       throw cause;
     }
@@ -1782,23 +2656,6 @@ export class ProjectFileRepository {
     );
   }
 
-  async #findProjectRoot(sourcePath) {
-    let current = path.dirname(normalizedPath(sourcePath));
-    while (true) {
-      const controlRoot = projectControlRoot(current);
-      const projectPath = path.join(controlRoot, "project.json");
-      const projectInformation = await regularInformation(projectPath, "project.json");
-      if (projectInformation) {
-        await directoryInformation(current, "project root");
-        await directoryInformation(controlRoot, ".pageroot");
-        return current;
-      }
-      const parent = path.dirname(current);
-      if (parent === current) return null;
-      current = parent;
-    }
-  }
-
   async #loadProject(projectRootPath) {
     const root = normalizedPath(projectRootPath);
     const paths = projectPaths(root);
@@ -1809,79 +2666,306 @@ export class ProjectFileRepository {
         { projectRootPath: root },
       );
     }
-    if (!(await directoryInformation(paths.controlRoot, ".pageroot"))) {
+    if (!(await directoryInformation(paths.controlRoot, ".pageroot", {
+      projectRootPath: root,
+    }))) {
       throw new ProjectFileRepositoryError(
         "PROJECT_CONTROL_NOT_FOUND",
         "The project folder no longer contains its PageRoot identity.",
         { projectRootPath: root },
       );
     }
-    const project = assertProjectIdentity(await readJsonFile(paths.projectPath, "project.json"));
+    for (const [directoryPath, label] of [
+      [paths.versionsRoot, "versions"],
+      [paths.workingCopiesRoot, "working-copies"],
+      [paths.draftsRoot, "drafts"],
+      [paths.requestsRoot, "requests"],
+      [paths.transactionsRoot, "transactions"],
+      [paths.recoveryRoot, "recovery"],
+    ]) {
+      if (!(await directoryInformation(directoryPath, label, {
+        projectRootPath: root,
+      }))) {
+        throw new ProjectFileRepositoryError(
+          "PROJECT_CONTROL_NOT_FOUND",
+          `The project folder has no ${label} directory.`,
+          { projectRootPath: root },
+        );
+      }
+    }
+    const project = assertProjectIdentity(await readJsonFile(paths.projectPath, "project.json", {
+      projectRootPath: root,
+    }));
     const manifest = assertManifest(
-      await readJsonFile(paths.manifestPath, "manifest.json"),
+      await readJsonFile(paths.manifestPath, "manifest.json", {
+        projectRootPath: root,
+      }),
       project,
     );
     const runtime = assertRuntime(
-      await readJsonFile(paths.runtimePath, "runtime-state.json"),
+      await readJsonFile(paths.runtimePath, "runtime-state.json", {
+        projectRootPath: root,
+      }),
       project,
       manifest,
     );
     return { paths, project, manifest, runtime };
   }
 
-  async #resolveOpenTarget({ sourcePath, duplicateResolution }) {
-    const exactSourcePath = normalizedPath(sourcePath);
-    htmlExtension(exactSourcePath);
-    const source = await readHtmlFile(exactSourcePath, "HTML");
-    const projectRootPath = await this.#findProjectRoot(exactSourcePath);
-    if (!projectRootPath) return null;
-    const loaded = await this.#loadProject(projectRootPath);
-    await this.#assertRegistryAssociation(loaded, duplicateResolution);
-    const target = await this.#targetForExactPath(loaded, exactSourcePath, source);
-    if (!target) {
+  async #recoverRegisteredRootRename(projectId, record, { documentId = null } = {}) {
+    const registeredRootPath = normalizedPath(record.registeredProjectRootPath);
+    const known = await this.#assertRegisteredProjectRootPath(registeredRootPath, {
+      allowMissing: true,
+    });
+    if (known.information) {
+      const observedIdentity = copyFileIdentity(known.information);
+      if (!sameFileIdentity(record.rootFileIdentity, observedIdentity)) {
+        let loaded;
+        try {
+          loaded = await this.#loadProject(registeredRootPath);
+        } catch (cause) {
+          throw new ProjectFileRepositoryError(
+            "REGISTERED_PROJECT_IDENTITY_CHANGED",
+            "The project returned at its registered path but its identity cannot be verified.",
+            { projectId, registeredProjectRootPath: registeredRootPath, cause: cause?.code || null },
+          );
+        }
+        if (
+          loaded.project.projectId !== projectId
+          || (documentId && loaded.project.documentId !== documentId)
+        ) {
+          throw new ProjectFileRepositoryError(
+            "REGISTERED_PROJECT_IDENTITY_CHANGED",
+            "The project returned at its registered path with a different identity.",
+            { projectId, registeredProjectRootPath: registeredRootPath },
+          );
+        }
+        // Root filesystem identity is only a same-parent rename clue. A
+        // cross-volume move that returns to the exact registered path is
+        // allowed only after the stable IDs and manifest have been verified.
+        const latest = await this.#readRegistry();
+        const latestRecord = latest.projects[projectId];
+        if (
+          !latestRecord
+          || !samePath(latestRecord.registeredProjectRootPath, registeredRootPath)
+          || !sameFileIdentity(latestRecord.rootFileIdentity, record.rootFileIdentity)
+        ) {
+          throw new ProjectFileRepositoryError(
+            "REGISTERED_PROJECT_RACE",
+            "The registered project root changed while its return was being verified.",
+            { projectId },
+          );
+        }
+        latestRecord.rootFileIdentity = observedIdentity;
+        latestRecord.updatedAt = nowIso(this.#clock);
+        await this.#writeRegistry(latest);
+      }
+      return registeredRootPath;
+    }
+
+    let entries;
+    try {
+      entries = await readdir(this.#projectsRoot, { withFileTypes: true });
+    } catch (cause) {
+      if (cause?.code === "ENOENT") return null;
+      throw cause;
+    }
+    const candidates = [];
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.isSymbolicLink() || entry.name.startsWith(".")) continue;
+      const candidatePath = path.join(this.#projectsRoot, entry.name);
+      const candidate = await this.#assertRegisteredProjectRootPath(candidatePath, {
+        allowMissing: true,
+      });
+      if (
+        !candidate.information
+        || !sameFileIdentity(record.rootFileIdentity, copyFileIdentity(candidate.information))
+      ) continue;
+      try {
+        const loaded = await this.#loadProject(candidatePath);
+        if (
+          loaded.project.projectId === projectId
+          && (!documentId || loaded.project.documentId === documentId)
+        ) candidates.push({ candidatePath, information: candidate.information });
+      } catch {
+        // The directory has the same device/inode clue but no valid project
+        // contract. It cannot become the registered root.
+      }
+    }
+    if (candidates.length !== 1) return null;
+
+    const chosen = candidates[0];
+    const latest = await this.#readRegistry();
+    const latestRecord = latest.projects[projectId];
+    if (
+      !latestRecord
+      || !samePath(latestRecord.registeredProjectRootPath, registeredRootPath)
+      || !sameFileIdentity(latestRecord.rootFileIdentity, record.rootFileIdentity)
+    ) {
       throw new ProjectFileRepositoryError(
-        "MANAGED_SOURCE_AMBIGUOUS",
-        "This HTML is inside a PageRoot project but cannot be uniquely linked to a Working Copy.",
-        { projectId: loaded.project.projectId, sourcePath: exactSourcePath },
+        "REGISTERED_PROJECT_RACE",
+        "The registered project root changed while its rename was being recovered.",
+        { projectId },
       );
     }
+    latestRecord.registeredProjectRootPath = chosen.candidatePath;
+    latestRecord.rootFileIdentity = copyFileIdentity(chosen.information);
+    latestRecord.updatedAt = nowIso(this.#clock);
+    await this.#writeRegistry(latest);
+    return chosen.candidatePath;
+  }
+
+  async #loadRegisteredProject({
+    projectId,
+    documentId = null,
+    declaredProjectRootPath = null,
+  }) {
+    const id = assertId(projectId, PROJECT_ID, "projectId");
+    const expectedDocumentId = documentId
+      ? assertId(documentId, DOCUMENT_ID, "documentId")
+      : null;
+    const registry = await this.#readRegistry();
+    const record = registry.projects[id];
+    if (!record) {
+      throw new ProjectFileRepositoryError(
+        "REGISTERED_PROJECT_UNAVAILABLE",
+        "This project is no longer registered for PageRoot writes.",
+        { projectId: id },
+      );
+    }
+    if (
+      declaredProjectRootPath
+      && !samePath(declaredProjectRootPath, record.registeredProjectRootPath)
+    ) {
+      throw new ProjectFileRepositoryError(
+        "REGISTERED_PROJECT_PATH_MISMATCH",
+        "The supplied project path is not the registered PageRoot project root.",
+        {
+          projectId: id,
+          registeredProjectRootPath: record.registeredProjectRootPath,
+        },
+      );
+    }
+    const projectRootPath = await this.#recoverRegisteredRootRename(id, record, {
+      documentId: expectedDocumentId,
+    });
+    if (!projectRootPath) {
+      throw new ProjectFileRepositoryError(
+        "REGISTERED_PROJECT_UNAVAILABLE",
+        "The registered project is temporarily unavailable; its in-memory changes remain retained.",
+        {
+          projectId: id,
+          registeredProjectRootPath: record.registeredProjectRootPath,
+        },
+      );
+    }
+    const loaded = await this.#loadProject(projectRootPath);
+    if (
+      loaded.project.projectId !== id
+      || (expectedDocumentId && loaded.project.documentId !== expectedDocumentId)
+    ) {
+      throw new ProjectFileRepositoryError(
+        "PROJECT_IDENTITY_CHANGED",
+        "The registered project root no longer matches the active document identity.",
+        { projectId: id, projectRootPath },
+      );
+    }
+    return loaded;
+  }
+
+  async #registeredProjectForSource(sourcePath) {
+    const exactSourcePath = normalizedPath(sourcePath);
+    const registry = await this.#readRegistry();
+    const candidates = [];
+    for (const [projectId, record] of Object.entries(registry.projects)) {
+      const resolvedRoot = await this.#recoverRegisteredRootRename(projectId, record);
+      if (resolvedRoot && pathInside(resolvedRoot, exactSourcePath)) {
+        candidates.push({ projectId, projectRootPath: resolvedRoot });
+      }
+    }
+    if (candidates.length > 1) {
+      throw new ProjectFileRepositoryError(
+        "MANAGED_PATH_AMBIGUOUS",
+        "More than one registered project claims this HTML path.",
+        { sourcePath: exactSourcePath, projectIds: candidates.map((item) => item.projectId) },
+      );
+    }
+    if (candidates.length === 0) return null;
+    return this.#loadRegisteredProject({
+      projectId: candidates[0].projectId,
+      declaredProjectRootPath: candidates[0].projectRootPath,
+    });
+  }
+
+  async #resolveOpenTarget({ sourcePath }) {
+    const exactSourcePath = normalizedPath(sourcePath);
+    htmlExtension(exactSourcePath);
+    const loaded = await this.#registeredProjectForSource(exactSourcePath);
+    if (!loaded) return null;
+    const source = await readHtmlFile(exactSourcePath, "HTML", {
+      projectRootPath: loaded.paths.projectRootPath,
+    });
+    const target = await this.#targetForExactPath(loaded, exactSourcePath, source);
+    // An unlisted user HTML inside a project root is still an external file:
+    // PageRoot must never infer a Working Copy merely from its location.
     return target;
   }
 
-  async #assertRegistryAssociation(loaded, duplicateResolution) {
-    const registry = await this.#readRegistry();
-    const record = registry.projects[loaded.project.projectId];
-    const knownRoot = record?.projectRootPath ? normalizedPath(record.projectRootPath) : null;
-    if (knownRoot && !samePath(knownRoot, loaded.paths.projectRootPath)) {
-      const knownProject = await this.#tryReadProjectIdentity(knownRoot);
-      if (knownProject?.projectId === loaded.project.projectId) {
-        if (duplicateResolution !== "reassociate") {
-          throw new ProjectFileRepositoryError(
-            "DUPLICATE_PROJECT_ID",
-            "Another folder with this project identity is still registered. Choose whether to reassociate it or import this HTML as a new project.",
-            {
-              projectId: loaded.project.projectId,
-              knownProjectRootPath: knownRoot,
-              selectedProjectRootPath: loaded.paths.projectRootPath,
-              actions: ["reassociate", "import-as-new", "cancel"],
-            },
-          );
-        }
-      }
-    }
-    await this.#writeRegistryAssociation(loaded.project.projectId, loaded.paths.projectRootPath);
+  async #rebindWorkingCopyPath(loaded, workingCopy, exactSourcePath, information) {
+    const relative = path.relative(loaded.paths.projectRootPath, exactSourcePath)
+      .split(path.sep)
+      .join("/");
+    const sourceRelativePath = topLevelHtmlRelativePath(relative, "sourceRelativePath");
+    const naming = preferredNamingForWorkingCopyPath(
+      sourceRelativePath,
+      workingCopy.workingCopyId,
+    );
+    const changed = (
+      workingCopy.sourceRelativePath !== sourceRelativePath
+      || workingCopy.preferredFileStem !== naming.preferredFileStem
+      || workingCopy.preferredExtension !== naming.preferredExtension
+      || !sameFileIdentity(workingCopy.fileIdentity, copyFileIdentity(information))
+    );
+    if (!changed) return false;
+    workingCopy.sourceRelativePath = sourceRelativePath;
+    workingCopy.preferredFileStem = naming.preferredFileStem;
+    workingCopy.preferredExtension = naming.preferredExtension;
+    workingCopy.fileIdentity = copyFileIdentity(information);
+    await atomicWriteProjectJson(
+      loaded.paths.projectRootPath,
+      loaded.paths.manifestPath,
+      loaded.manifest,
+      "manifest.json",
+    );
+    return true;
   }
 
-  async #tryReadProjectIdentity(projectRootPath) {
-    try {
-      const candidate = projectPaths(projectRootPath);
-      if (!(await directoryInformation(projectRootPath, "project root"))) return null;
-      if (!(await directoryInformation(candidate.controlRoot, ".pageroot"))) return null;
-      const project = await readJsonFile(candidate.projectPath, "project.json");
-      return project ? assertProjectIdentity(project) : null;
-    } catch {
-      return null;
+  async #findMissingWorkingCopyByHash(loaded, source) {
+    const candidates = [];
+    for (const workingCopy of loaded.manifest.workingCopies) {
+      const mappedPath = workingCopySourcePath(loaded.paths, workingCopy);
+      const mappedInformation = await regularInformation(mappedPath, "Working Copy", {
+        projectRootPath: loaded.paths.projectRootPath,
+      });
+      if (mappedInformation) continue;
+      const state = await readJsonFile(
+        workingCopyStatePath(loaded.paths, workingCopy),
+        "Working Copy state",
+        { projectRootPath: loaded.paths.projectRootPath },
+      );
+      if (state?.currentSha256 === source.sha256) candidates.push(workingCopy);
     }
+    if (candidates.length > 1) {
+      throw new ProjectFileRepositoryError(
+        "MANAGED_PATH_AMBIGUOUS",
+        "More than one missing Working Copy matches this HTML content.",
+        {
+          projectId: loaded.project.projectId,
+          workingCopyIds: candidates.map((entry) => entry.workingCopyId),
+        },
+      );
+    }
+    return candidates[0] || null;
   }
 
   async #targetForExactPath(loaded, exactSourcePath, source) {
@@ -1909,6 +2993,9 @@ export class ProjectFileRepository {
       samePath(workingCopySourcePath(paths, workingCopy), exactSourcePath)
     ));
     if (direct) {
+      // Returning a Working Copy to its registered relative path restores the
+      // mapping even after a copy-and-delete changed its inode.
+      await this.#rebindWorkingCopyPath(loaded, direct, exactSourcePath, source.information);
       return publicOpenTarget({
         project,
         projectRootPath: paths.projectRootPath,
@@ -1922,13 +3009,20 @@ export class ProjectFileRepository {
     const matching = manifest.workingCopies.filter((workingCopy) => (
       sameFileIdentity(workingCopy.fileIdentity, copyFileIdentity(source.information))
     ));
-    if (matching.length !== 1) return null;
-    const workingCopy = matching[0];
-    const relative = path.relative(paths.projectRootPath, exactSourcePath).split(path.sep).join("/");
-    if (!relative || relative.startsWith("..") || relative.startsWith(".pageroot/")) return null;
-    workingCopy.sourceRelativePath = ensureRelativePath(relative, "sourceRelativePath");
-    workingCopy.fileIdentity = copyFileIdentity(source.information);
-    await atomicWriteJson(paths.manifestPath, manifest);
+    if (matching.length > 1) {
+      throw new ProjectFileRepositoryError(
+        "MANAGED_PATH_AMBIGUOUS",
+        "More than one Working Copy has the same filesystem identity.",
+        {
+          projectId: project.projectId,
+          workingCopyIds: matching.map((entry) => entry.workingCopyId),
+        },
+      );
+    }
+    const workingCopy = matching[0]
+      || await this.#findMissingWorkingCopyByHash(loaded, source);
+    if (!workingCopy) return null;
+    await this.#rebindWorkingCopyPath(loaded, workingCopy, exactSourcePath, source.information);
     return publicOpenTarget({
       project,
       projectRootPath: paths.projectRootPath,
@@ -1947,34 +3041,12 @@ export class ProjectFileRepository {
     const projectId = assertId(target.projectId, PROJECT_ID, "projectId");
     const documentId = assertId(target.documentId, DOCUMENT_ID, "documentId");
     const workingCopyIdValue = assertId(target.workingCopyId, WORKING_COPY_ID, "workingCopyId");
-    let projectRootPath = normalizedPath(target.projectRootPath);
-    let loaded;
-    try {
-      loaded = await this.#loadProject(projectRootPath);
-    } catch (cause) {
-      if (
-        cause?.code !== "UNSAFE_DIRECTORY"
-        && cause?.code !== "PROJECT_ROOT_NOT_FOUND"
-        && cause?.code !== "PROJECT_CONTROL_NOT_FOUND"
-      ) throw cause;
-      const relocated = await this.#locateWithinPreviousParent(projectId, projectRootPath);
-      if (!relocated) {
-        throw new ProjectFileRepositoryError(
-          "PROJECT_RELOCATION_REQUIRED",
-          "The current project moved. Its in-memory changes are retained; locate the project before saving.",
-          { projectId, lastKnownProjectRootPath: projectRootPath },
-        );
-      }
-      projectRootPath = relocated;
-      loaded = await this.#loadProject(projectRootPath);
-      await this.#writeRegistryAssociation(projectId, projectRootPath);
-    }
-    if (loaded.project.projectId !== projectId || loaded.project.documentId !== documentId) {
-      throw new ProjectFileRepositoryError(
-        "PROJECT_IDENTITY_CHANGED",
-        "The project root no longer matches the active document identity.",
-      );
-    }
+    const declaredProjectRootPath = normalizedPath(target.projectRootPath);
+    const loaded = await this.#loadRegisteredProject({
+      projectId,
+      documentId,
+      declaredProjectRootPath,
+    });
     const workingCopy = loaded.manifest.workingCopies.find(
       (entry) => entry.workingCopyId === workingCopyIdValue,
     );
@@ -1982,55 +3054,53 @@ export class ProjectFileRepository {
       throw new ProjectFileRepositoryError("WORKING_COPY_NOT_FOUND", "The active Working Copy no longer exists.");
     }
     let exactSourcePath = workingCopySourcePath(loaded.paths, workingCopy);
-    let sourceInformation = await regularInformation(exactSourcePath, "Working Copy");
-    if (!sourceInformation || !sameFileIdentity(workingCopy.fileIdentity, copyFileIdentity(sourceInformation))) {
+    let sourceInformation = await regularInformation(exactSourcePath, "Working Copy", {
+      projectRootPath: loaded.paths.projectRootPath,
+    });
+    if (!sourceInformation) {
       const recoveredPath = await this.#findWorkingCopyByFileIdentity(
         loaded.paths.projectRootPath,
         workingCopy.fileIdentity,
       );
       if (!recoveredPath) {
         throw new ProjectFileRepositoryError(
-          "WORKING_COPY_RELOCATION_REQUIRED",
-          "The active HTML was renamed or moved and cannot be uniquely recovered.",
+          "WORKING_COPY_UNAVAILABLE",
+          "The active HTML is temporarily unavailable; PageRoot did not write outside its registered path.",
           { workingCopyId: workingCopy.workingCopyId },
         );
       }
       exactSourcePath = recoveredPath;
-      sourceInformation = await regularInformation(exactSourcePath, "Working Copy");
-      const relative = path.relative(loaded.paths.projectRootPath, exactSourcePath)
-        .split(path.sep)
-        .join("/");
-      workingCopy.sourceRelativePath = ensureRelativePath(relative, "sourceRelativePath");
-      workingCopy.fileIdentity = copyFileIdentity(sourceInformation);
-      await atomicWriteJson(loaded.paths.manifestPath, loaded.manifest);
+      sourceInformation = await regularInformation(exactSourcePath, "Working Copy", {
+        projectRootPath: loaded.paths.projectRootPath,
+      });
+      await this.#rebindWorkingCopyPath(
+        loaded,
+        workingCopy,
+        exactSourcePath,
+        sourceInformation,
+      );
+    } else {
+      await this.#rebindWorkingCopyPath(
+        loaded,
+        workingCopy,
+        exactSourcePath,
+        sourceInformation,
+      );
     }
-    const source = await readHtmlFile(exactSourcePath, "Working Copy");
+    const source = await readHtmlFile(exactSourcePath, "Working Copy", {
+      projectRootPath: loaded.paths.projectRootPath,
+    });
     return { ...loaded, workingCopy, exactSourcePath, source };
-  }
-
-  async #locateWithinPreviousParent(projectId, previousRootPath) {
-    const parent = path.dirname(previousRootPath);
-    let entries;
-    try {
-      entries = await readdir(parent, { withFileTypes: true });
-    } catch (cause) {
-      if (cause?.code === "ENOENT") return null;
-      throw cause;
-    }
-    const candidates = [];
-    for (const entry of entries) {
-      if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
-      const candidate = path.join(parent, entry.name);
-      const project = await this.#tryReadProjectIdentity(candidate);
-      if (project?.projectId === projectId) candidates.push(candidate);
-    }
-    return candidates.length === 1 ? candidates[0] : null;
   }
 
   async #findWorkingCopyByFileIdentity(projectRootPath, identity) {
     let entries;
     try {
-      entries = await readdir(projectRootPath, { withFileTypes: true });
+      entries = await listProjectDirectory(
+        projectRootPath,
+        projectRootPath,
+        "project root",
+      );
     } catch (cause) {
       if (cause?.code === "ENOENT") return null;
       throw cause;
@@ -2040,7 +3110,9 @@ export class ProjectFileRepository {
       if (entry.isSymbolicLink() || !entry.isFile()) continue;
       const candidate = path.join(projectRootPath, entry.name);
       if (!HTML_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) continue;
-      const information = await regularInformation(candidate, "Working Copy");
+      const information = await regularInformation(candidate, "Working Copy", {
+        projectRootPath,
+      });
       if (information && sameFileIdentity(identity, copyFileIdentity(information))) {
         matches.push(candidate);
       }
@@ -2069,7 +3141,7 @@ export class ProjectFileRepository {
       loaded.paths.transactionsRoot,
       `save_${loaded.workingCopy.workingCopyId}_${revision || "current"}.json`,
     );
-    await atomicWriteJson(transactionPath, {
+    await atomicWriteProjectJson(loaded.paths.projectRootPath, transactionPath, {
       schemaVersion: PROJECT_FILE_SCHEMA_VERSION,
       kind: "save",
       state: "prepared",
@@ -2079,18 +3151,28 @@ export class ProjectFileRepository {
       sourceRelativePath: loaded.workingCopy.sourceRelativePath,
       expectedSourceSha256: expected,
       targetSourceSha256: nextSha256,
+      editRevision: revision,
       preparedAt: nowIso(this.#clock),
-    });
+    }, "save transaction");
     await this.#hit("save-prepared", { transactionPath });
-    await atomicWriteFile(loaded.exactSourcePath, nextBuffer);
-    const written = await readHtmlFile(loaded.exactSourcePath, "Working Copy");
+    await atomicWriteProjectFile(
+      loaded.paths.projectRootPath,
+      loaded.exactSourcePath,
+      nextBuffer,
+      "Working Copy",
+    );
+    const written = await readHtmlFile(loaded.exactSourcePath, "Working Copy", {
+      projectRootPath: loaded.paths.projectRootPath,
+    });
     if (written.sha256 !== nextSha256) {
       throw new ProjectFileRepositoryError("SAVE_HASH_MISMATCH", "The saved Working Copy does not match its requested bytes.");
     }
     await this.#hit("save-source-written", { transactionPath });
     loaded.workingCopy.fileIdentity = copyFileIdentity(written.information);
     const statePath = workingCopyStatePath(loaded.paths, loaded.workingCopy);
-    const currentState = await readJsonFile(statePath, "Working Copy state");
+    const currentState = await readJsonFile(statePath, "Working Copy state", {
+      projectRootPath: loaded.paths.projectRootPath,
+    });
     const nextState = {
       ...currentState,
       schemaVersion: PROJECT_FILE_SCHEMA_VERSION,
@@ -2106,13 +3188,27 @@ export class ProjectFileRepository {
       ),
       lastSavedAt: nowIso(this.#clock),
     };
-    await atomicWriteJson(statePath, nextState);
-    await atomicWriteJson(loaded.paths.manifestPath, loaded.manifest);
-    await atomicWriteJson(transactionPath, {
-      ...(await readJsonFile(transactionPath, "save transaction")),
+    await atomicWriteProjectJson(
+      loaded.paths.projectRootPath,
+      statePath,
+      nextState,
+      "Working Copy state",
+    );
+    await this.#hit("save-state-written", { transactionPath });
+    await atomicWriteProjectJson(
+      loaded.paths.projectRootPath,
+      loaded.paths.manifestPath,
+      loaded.manifest,
+      "manifest.json",
+    );
+    await this.#hit("save-manifest-written", { transactionPath });
+    await atomicWriteProjectJson(loaded.paths.projectRootPath, transactionPath, {
+      ...(await readJsonFile(transactionPath, "save transaction", {
+        projectRootPath: loaded.paths.projectRootPath,
+      })),
       state: "committed",
       committedAt: nowIso(this.#clock),
-    });
+    }, "save transaction");
     await this.#hit("save-committed", { transactionPath });
     return {
       target: publicOpenTarget({
@@ -2197,10 +3293,16 @@ export class ProjectFileRepository {
     const id = candidateId ? candidateId : randomId("candidate");
     assertCandidateId(id);
     const requestRoot = requestRootPath(loaded.paths, request);
-    await ensureDirectory(requestRoot);
+    await ensureProjectDirectory(
+      loaded.paths.projectRootPath,
+      requestRoot,
+      "Candidate request directory",
+    );
     const outputPath = path.join(requestRoot, "candidate.html");
     const candidatePath = path.join(requestRoot, "candidate.json");
-    const existingCandidate = await readJsonFile(candidatePath, "candidate.json");
+    const existingCandidate = await readJsonFile(candidatePath, "candidate.json", {
+      projectRootPath: loaded.paths.projectRootPath,
+    });
     if (existingCandidate) {
       if (
         existingCandidate.candidateId !== id
@@ -2219,8 +3321,10 @@ export class ProjectFileRepository {
         candidateHtml,
         this.#clock,
       );
-      await writeFileNoReplace(outputPath, outputBuffer, outputSha256, "Candidate HTML");
-      await atomicWriteJson(candidatePath, {
+      await writeFileNoReplace(outputPath, outputBuffer, outputSha256, "Candidate HTML", {
+        projectRootPath: loaded.paths.projectRootPath,
+      });
+      await atomicWriteProjectJson(loaded.paths.projectRootPath, candidatePath, {
         schemaVersion: PROJECT_FILE_SCHEMA_VERSION,
         candidateId: id,
         projectId: loaded.project.projectId,
@@ -2238,7 +3342,7 @@ export class ProjectFileRepository {
         assessment,
         status: "pending-review",
         createdAt: nowIso(this.#clock),
-      });
+      }, "candidate.json");
     }
     loaded.runtime.activeRequest = {
       requestId: request,
@@ -2247,7 +3351,12 @@ export class ProjectFileRepository {
       status: "pending-review",
     };
     loaded.runtime.activeCandidateId = id;
-    await atomicWriteJson(loaded.paths.runtimePath, loaded.runtime);
+    await atomicWriteProjectJson(
+      loaded.paths.projectRootPath,
+      loaded.paths.runtimePath,
+      loaded.runtime,
+      "runtime-state.json",
+    );
     await this.#hit("candidate-prepared", { requestId: request, candidateId: id });
     return await this.#readCandidateForLoaded(loaded, id);
   }
@@ -2262,7 +3371,9 @@ export class ProjectFileRepository {
       ? path.join(loaded.paths.requestsRoot, activeRequest.requestId, "candidate.json")
       : null;
     let candidate = candidatePath
-      ? await readJsonFile(candidatePath, "candidate.json")
+      ? await readJsonFile(candidatePath, "candidate.json", {
+        projectRootPath: loaded.paths.projectRootPath,
+      })
       : null;
     if (!candidate || candidate.candidateId !== requested) {
       ({ candidatePath, candidate } = await this.#findCandidateById(loaded, requested));
@@ -2281,7 +3392,9 @@ export class ProjectFileRepository {
       candidate.outputRelativePath,
       "candidate output path",
     );
-    const output = await readHtmlFile(outputPath, "Candidate HTML");
+    const output = await readHtmlFile(outputPath, "Candidate HTML", {
+      projectRootPath: loaded.paths.projectRootPath,
+    });
     if (output.sha256 !== candidate.outputSha256) {
       throw new ProjectFileRepositoryError(
         "CANDIDATE_HASH_MISMATCH",
@@ -2294,7 +3407,11 @@ export class ProjectFileRepository {
   async #findCandidateById(loaded, candidateId) {
     let entries;
     try {
-      entries = await readdir(loaded.paths.requestsRoot, { withFileTypes: true });
+      entries = await listProjectDirectory(
+        loaded.paths.projectRootPath,
+        loaded.paths.requestsRoot,
+        "requests",
+      );
     } catch (cause) {
       if (cause?.code === "ENOENT") {
         throw new ProjectFileRepositoryError("CANDIDATE_NOT_FOUND", "The requested Candidate was not found.");
@@ -2307,7 +3424,9 @@ export class ProjectFileRepository {
         continue;
       }
       const candidatePath = path.join(loaded.paths.requestsRoot, entry.name, "candidate.json");
-      const candidate = await readJsonFile(candidatePath, "candidate.json");
+      const candidate = await readJsonFile(candidatePath, "candidate.json", {
+        projectRootPath: loaded.paths.projectRootPath,
+      });
       if (candidate?.candidateId === candidateId) matches.push({ candidatePath, candidate });
     }
     if (matches.length !== 1) {
@@ -2324,25 +3443,136 @@ export class ProjectFileRepository {
     }
     current.candidate.status = "rejected";
     current.candidate.rejectedAt = nowIso(this.#clock);
-    await atomicWriteJson(current.candidatePath, current.candidate);
+    await atomicWriteProjectJson(
+      loaded.paths.projectRootPath,
+      current.candidatePath,
+      current.candidate,
+      "candidate.json",
+    );
     const requestPath = path.join(
       requestRootPath(loaded.paths, current.candidate.requestId),
       "request.json",
     );
-    const request = await readJsonFile(requestPath, "request.json");
+    const request = await readJsonFile(requestPath, "request.json", {
+      projectRootPath: loaded.paths.projectRootPath,
+    });
     if (request?.candidateId === current.candidate.candidateId) {
       request.status = "rejected";
       request.rejectedAt = nowIso(this.#clock);
-      await atomicWriteJson(requestPath, request);
+      await atomicWriteProjectJson(
+        loaded.paths.projectRootPath,
+        requestPath,
+        request,
+        "request.json",
+      );
     }
     loaded.runtime.activeRequest = null;
     loaded.runtime.activeCandidateId = null;
-    await atomicWriteJson(loaded.paths.runtimePath, loaded.runtime);
+    await atomicWriteProjectJson(
+      loaded.paths.projectRootPath,
+      loaded.paths.runtimePath,
+      loaded.runtime,
+      "runtime-state.json",
+    );
     return {
       candidateId: current.candidate.candidateId,
       status: "rejected",
       latestOfficialVersionId: loaded.manifest.latestOfficialVersionId,
     };
+  }
+
+  async #allocatePromotionWorkingCopy(loaded, {
+    preferredFileStem,
+    preferredExtension,
+    versionOrdinal,
+    startAt = 0,
+  }) {
+    for (let allocationOrdinal = startAt; allocationOrdinal < 10_000; allocationOrdinal += 1) {
+      const sourceRelativePath = visibleFileName(
+        preferredFileStem,
+        versionOrdinal,
+        preferredExtension,
+        allocationOrdinal,
+      );
+      const candidatePath = resolveRelative(
+        loaded.paths.projectRootPath,
+        sourceRelativePath,
+        "Promotion Working Copy path",
+      );
+      const information = await lstat(candidatePath).catch((cause) => {
+        if (cause?.code === "ENOENT") return null;
+        throw cause;
+      });
+      // lstat deliberately treats ordinary files, directories, hard links and
+      // symbolic links alike as user-owned collisions.
+      if (!information) return { sourceRelativePath, allocationOrdinal };
+    }
+    throw new ProjectFileRepositoryError(
+      "PROMOTION_PATH_ALLOCATION_EXHAUSTED",
+      "PageRoot could not allocate a collision-free Version Working Copy path.",
+    );
+  }
+
+  #preparedPromotionWorkingCopyPath(loaded, transaction) {
+    const relative = ensureRelativePath(
+      transaction.preparedWorkingCopyRelativePath,
+      "preparedWorkingCopyRelativePath",
+    );
+    const expectedPrefix = "transactions/" + transaction.transactionId + "/";
+    if (
+      !relative.startsWith(expectedPrefix)
+      || !relative.endsWith(transaction.preferredExtension)
+    ) {
+      throw new ProjectFileRepositoryError(
+        "PROMOTION_TRANSACTION_INVALID",
+        "The Promotion prepared Working Copy path is invalid.",
+      );
+    }
+    const resolved = resolveRelative(
+      loaded.paths.controlRoot,
+      relative,
+      "preparedWorkingCopyRelativePath",
+    );
+    if (!pathInside(loaded.paths.transactionsRoot, resolved)) {
+      throw new ProjectFileRepositoryError(
+        "PATH_ESCAPES_PROJECT",
+        "The Promotion prepared Working Copy must stay inside transactions/.",
+      );
+    }
+    return resolved;
+  }
+
+  async #writePromotionTransaction(loaded, transactionRoot, transaction) {
+    await atomicWriteProjectJson(
+      loaded.paths.projectRootPath,
+      path.join(transactionRoot, "transaction.json"),
+      transaction,
+      "promotion transaction",
+    );
+  }
+
+  async #reallocateUnstartedPromotion(loaded, transactionRoot, transaction) {
+    if (!["prepared", "snapshot-created"].includes(transaction.state)) return false;
+    const finalPath = path.join(
+      loaded.paths.projectRootPath,
+      topLevelHtmlRelativePath(transaction.finalWorkingCopyRelativePath),
+    );
+    const information = await lstat(finalPath).catch((cause) => {
+      if (cause?.code === "ENOENT") return null;
+      throw cause;
+    });
+    if (!information) return false;
+    const next = await this.#allocatePromotionWorkingCopy(loaded, {
+      preferredFileStem: transaction.preferredFileStem,
+      preferredExtension: transaction.preferredExtension,
+      versionOrdinal: transaction.versionOrdinal,
+      startAt: transaction.pathAllocationOrdinal + 1,
+    });
+    transaction.finalWorkingCopyRelativePath = next.sourceRelativePath;
+    transaction.pathAllocationOrdinal = next.allocationOrdinal;
+    transaction.reallocatedAt = nowIso(this.#clock);
+    await this.#writePromotionTransaction(loaded, transactionRoot, transaction);
+    return true;
   }
 
   async #promoteCandidate({ target, candidateId }) {
@@ -2363,12 +3593,29 @@ export class ProjectFileRepository {
         },
       );
     }
-    const transactionId = `promote_${candidateState.candidate.candidateId}`;
+    const transactionId = "promote_" + candidateState.candidate.candidateId;
     const transactionRoot = path.join(loaded.paths.transactionsRoot, transactionId);
     const transactionPath = path.join(transactionRoot, "transaction.json");
-    let transaction = await readJsonFile(transactionPath, "promotion transaction");
+    let transaction = await readJsonFile(transactionPath, "promotion transaction", {
+      projectRootPath: loaded.paths.projectRootPath,
+    });
     if (!transaction) {
-      await ensureDirectory(transactionRoot);
+      await ensureProjectDirectory(
+        loaded.paths.projectRootPath,
+        transactionRoot,
+        "Promotion transaction directory",
+      );
+      const preferredFileStem = assertPreferredFileStem(
+        loaded.workingCopy.preferredFileStem,
+      );
+      const preferredExtension = htmlExtension(
+        "x" + String(loaded.workingCopy.preferredExtension || ""),
+      );
+      const allocation = await this.#allocatePromotionWorkingCopy(loaded, {
+        preferredFileStem,
+        preferredExtension,
+        versionOrdinal: candidateState.candidate.proposedVersionOrdinal,
+      });
       transaction = {
         schemaVersion: PROJECT_FILE_SCHEMA_VERSION,
         kind: "promotion",
@@ -2383,9 +3630,17 @@ export class ProjectFileRepository {
         candidateOutputSha256: candidateState.candidate.outputSha256,
         basedOnVersionId: candidateState.candidate.basedOnVersionId,
         previousVersionId: candidateState.candidate.previousVersionId,
+        finalWorkingCopyRelativePath: allocation.sourceRelativePath,
+        preparedWorkingCopyRelativePath: "transactions/" + transactionId
+          + "/prepared-working-copy" + preferredExtension,
+        preferredFileStem,
+        preferredExtension,
+        pathAllocationOrdinal: allocation.allocationOrdinal,
+        preparedWorkingCopyFileIdentity: null,
+        workingCopy: null,
         createdAt: nowIso(this.#clock),
       };
-      await atomicWriteJson(transactionPath, transaction);
+      await this.#writePromotionTransaction(loaded, transactionRoot, transaction);
       await this.#hit("promotion-prepared", { transactionPath });
     }
     return this.#continuePromotion(loaded, candidateState, transactionRoot, transaction);
@@ -2393,13 +3648,42 @@ export class ProjectFileRepository {
 
   async #continuePromotion(loaded, candidateState, transactionRoot, transaction) {
     if (
-      transaction.projectId !== loaded.project.projectId
+      !isObject(transaction)
+      || transaction.schemaVersion !== PROJECT_FILE_SCHEMA_VERSION
+      || transaction.kind !== "promotion"
+      || ![
+        "prepared",
+        "snapshot-created",
+        "working-copy-prepared",
+        "working-copy-created",
+        "manifest-committed",
+        "completed",
+      ].includes(transaction.state)
+      || transaction.projectId !== loaded.project.projectId
       || transaction.documentId !== loaded.project.documentId
       || transaction.candidateId !== candidateState.candidate.candidateId
+      || transaction.candidateOutputSha256 !== candidateState.candidate.outputSha256
     ) {
       throw new ProjectFileRepositoryError(
         "PROMOTION_TRANSACTION_MISMATCH",
         "The Promotion transaction belongs to another Candidate.",
+      );
+    }
+    topLevelHtmlRelativePath(transaction.finalWorkingCopyRelativePath);
+    assertPreferredFileStem(transaction.preferredFileStem);
+    if (!HTML_EXTENSIONS.has(String(transaction.preferredExtension || "").toLowerCase())) {
+      throw new ProjectFileRepositoryError(
+        "PROMOTION_TRANSACTION_INVALID",
+        "The Promotion preferred extension is invalid.",
+      );
+    }
+    if (
+      !Number.isSafeInteger(transaction.pathAllocationOrdinal)
+      || transaction.pathAllocationOrdinal < 0
+    ) {
+      throw new ProjectFileRepositoryError(
+        "PROMOTION_TRANSACTION_INVALID",
+        "The Promotion path allocation is invalid.",
       );
     }
     const latest = loaded.manifest.versions.find(
@@ -2429,49 +3713,139 @@ export class ProjectFileRepository {
       basedOnVersionId: transaction.basedOnVersionId,
       previousVersionId: transaction.previousVersionId,
       contentSha256: transaction.candidateOutputSha256,
-      snapshotRelativePath: `versions/${transaction.versionId}/index.html`,
+      snapshotRelativePath: "versions/" + transaction.versionId + "/index.html",
       sourceRequestId: transaction.requestId,
       sourceCandidateId: transaction.candidateId,
-      createdAt: nowIso(this.#clock),
+      createdAt: transaction.createdAt,
     };
     const snapshotPath = versionSnapshotPath(loaded.paths, version);
-    const visibleName = visibleFileName(
-      loaded.manifest.fileNaming.stem,
-      version.ordinal,
-      loaded.manifest.fileNaming.extension,
-    );
-    const visiblePath = path.join(loaded.paths.projectRootPath, visibleName);
-    const nextWorkingCopy = {
-      workingCopyId: workingCopyId(version.ordinal),
-      versionId: version.versionId,
-      basedOnVersionId: version.versionId,
-      sourceRelativePath: visibleName,
-      stateRelativePath: `working-copies/${workingCopyId(version.ordinal)}.json`,
-      fileIdentity: null,
-    };
     if (transaction.state === "prepared") {
-      await ensureDirectory(path.dirname(snapshotPath));
+      await ensureProjectDirectory(
+        loaded.paths.projectRootPath,
+        path.dirname(snapshotPath),
+        "Version snapshot directory",
+      );
       await writeFileNoReplace(
         snapshotPath,
         candidateState.output.buffer,
         transaction.candidateOutputSha256,
         "Version snapshot",
+        { projectRootPath: loaded.paths.projectRootPath },
       );
       transaction.state = "snapshot-created";
       transaction.snapshotCreatedAt = nowIso(this.#clock);
-      await atomicWriteJson(path.join(transactionRoot, "transaction.json"), transaction);
+      await this.#writePromotionTransaction(loaded, transactionRoot, transaction);
       await this.#hit("promotion-snapshot-created", { transactionRoot });
     }
+    await this.#reallocateUnstartedPromotion(loaded, transactionRoot, transaction);
+    const preparedPath = this.#preparedPromotionWorkingCopyPath(loaded, transaction);
     if (transaction.state === "snapshot-created") {
-      const visible = await writeFileNoReplace(
-        visiblePath,
-        candidateState.output.buffer,
-        transaction.candidateOutputSha256,
-        "Version Working Copy",
+      let preparedInformation = await regularInformation(
+        preparedPath,
+        "prepared Version Working Copy",
+        { projectRootPath: loaded.paths.projectRootPath },
       );
-      nextWorkingCopy.fileIdentity = copyFileIdentity(visible.information);
+      if (preparedInformation) {
+        if (
+          !transaction.preparedWorkingCopyFileIdentity
+          || !sameFileIdentity(
+            transaction.preparedWorkingCopyFileIdentity,
+            copyFileIdentity(preparedInformation),
+          )
+        ) {
+          throw new ProjectFileRepositoryError(
+            "PROMOTION_PREPARED_PATH_CONFLICT",
+            "The Promotion preparation path is already occupied.",
+          );
+        }
+      } else {
+        const prepared = await writeFileNoReplace(
+          preparedPath,
+          candidateState.output.buffer,
+          transaction.candidateOutputSha256,
+          "prepared Version Working Copy",
+          { projectRootPath: loaded.paths.projectRootPath },
+        );
+        if (!prepared.created) {
+          throw new ProjectFileRepositoryError(
+            "PROMOTION_PREPARED_PATH_CONFLICT",
+            "The Promotion preparation path is already occupied.",
+          );
+        }
+        preparedInformation = prepared.information;
+      }
+      transaction.preparedWorkingCopyFileIdentity = copyFileIdentity(preparedInformation);
+      transaction.state = "working-copy-prepared";
+      transaction.workingCopyPreparedAt = nowIso(this.#clock);
+      await this.#writePromotionTransaction(loaded, transactionRoot, transaction);
+      await this.#hit("promotion-working-copy-prepared", { transactionRoot });
+    }
+    if (transaction.state === "working-copy-prepared") {
+      const preparedInformation = await regularInformation(
+        preparedPath,
+        "prepared Version Working Copy",
+        { projectRootPath: loaded.paths.projectRootPath },
+      );
+      if (
+        !preparedInformation
+        || !transaction.preparedWorkingCopyFileIdentity
+        || !sameFileIdentity(
+          transaction.preparedWorkingCopyFileIdentity,
+          copyFileIdentity(preparedInformation),
+        )
+      ) {
+        throw new ProjectFileRepositoryError(
+          "PROMOTION_PREPARED_FILE_CHANGED",
+          "The Promotion preparation file changed before publication.",
+        );
+      }
+      const visiblePath = path.join(
+        loaded.paths.projectRootPath,
+        topLevelHtmlRelativePath(transaction.finalWorkingCopyRelativePath),
+      );
+      let visibleInformation = await lstat(visiblePath).catch((cause) => {
+        if (cause?.code === "ENOENT") return null;
+        throw cause;
+      });
+      if (!visibleInformation) {
+        try {
+          await link(preparedPath, visiblePath);
+          await syncDirectory(loaded.paths.projectRootPath);
+        } catch (cause) {
+          if (cause?.code !== "EEXIST") throw cause;
+        }
+        visibleInformation = await lstat(visiblePath).catch((cause) => {
+          if (cause?.code === "ENOENT") return null;
+          throw cause;
+        });
+      }
+      if (
+        !visibleInformation
+        || visibleInformation.isSymbolicLink()
+        || !visibleInformation.isFile()
+        || !sameFileIdentity(
+          transaction.preparedWorkingCopyFileIdentity,
+          copyFileIdentity(visibleInformation),
+        )
+      ) {
+        throw new ProjectFileRepositoryError(
+          "PROMOTION_PATH_REPLACED",
+          "The allocated Version Working Copy path is no longer owned by this Promotion.",
+          { sourceRelativePath: transaction.finalWorkingCopyRelativePath },
+        );
+      }
+      const nextWorkingCopy = {
+        workingCopyId: workingCopyId(version.ordinal),
+        versionId: version.versionId,
+        basedOnVersionId: version.versionId,
+        sourceRelativePath: transaction.finalWorkingCopyRelativePath,
+        preferredFileStem: transaction.preferredFileStem,
+        preferredExtension: transaction.preferredExtension,
+        stateRelativePath: "working-copies/" + workingCopyId(version.ordinal) + ".json",
+        fileIdentity: copyFileIdentity(visibleInformation),
+      };
       const statePath = workingCopyStatePath(loaded.paths, nextWorkingCopy);
-      await atomicWriteJson(statePath, {
+      await atomicWriteProjectJson(loaded.paths.projectRootPath, statePath, {
         schemaVersion: PROJECT_FILE_SCHEMA_VERSION,
         projectId: loaded.project.projectId,
         documentId: loaded.project.documentId,
@@ -2480,7 +3854,7 @@ export class ProjectFileRepository {
         baseSha256: transaction.candidateOutputSha256,
         currentSha256: transaction.candidateOutputSha256,
         differsFromBase: false,
-        draftId: `draft_${nextWorkingCopy.workingCopyId}`,
+        draftId: "draft_" + nextWorkingCopy.workingCopyId,
         draftRelativePath: draftRelativePathFor(nextWorkingCopy),
         draftSha256: null,
         draftRevision: 0,
@@ -2488,26 +3862,49 @@ export class ProjectFileRepository {
         lastPersistedRevision: 0,
         lastSavedAt: nowIso(this.#clock),
         lastOpenedAt: nowIso(this.#clock),
-      });
+      }, "Version Working Copy state");
       transaction.state = "working-copy-created";
       transaction.workingCopyCreatedAt = nowIso(this.#clock);
       transaction.workingCopy = nextWorkingCopy;
-      await atomicWriteJson(path.join(transactionRoot, "transaction.json"), transaction);
+      await this.#writePromotionTransaction(loaded, transactionRoot, transaction);
       await this.#hit("promotion-working-copy-created", { transactionRoot });
     }
     if (transaction.state === "working-copy-created") {
       const committedWorkingCopy = transaction.workingCopy;
-      if (!committedWorkingCopy?.fileIdentity) {
-        const information = await regularInformation(visiblePath, "Version Working Copy");
-        committedWorkingCopy.fileIdentity = copyFileIdentity(information);
+      if (!committedWorkingCopy) {
+        throw new ProjectFileRepositoryError(
+          "PROMOTION_WORKING_COPY_MISSING",
+          "The Promotion did not record its Working Copy.",
+        );
+      }
+      const visiblePath = path.join(
+        loaded.paths.projectRootPath,
+        topLevelHtmlRelativePath(committedWorkingCopy.sourceRelativePath),
+      );
+      const information = await regularInformation(visiblePath, "Version Working Copy", {
+        projectRootPath: loaded.paths.projectRootPath,
+      });
+      if (
+        !information
+        || !sameFileIdentity(committedWorkingCopy.fileIdentity, copyFileIdentity(information))
+      ) {
+        throw new ProjectFileRepositoryError(
+          "PROMOTION_PATH_REPLACED",
+          "The allocated Version Working Copy was replaced before manifest publication.",
+        );
       }
       loaded.manifest.versions.push(version);
       loaded.manifest.workingCopies.push(committedWorkingCopy);
       loaded.manifest.latestOfficialVersionId = version.versionId;
-      await atomicWriteJson(loaded.paths.manifestPath, loaded.manifest);
+      await atomicWriteProjectJson(
+        loaded.paths.projectRootPath,
+        loaded.paths.manifestPath,
+        loaded.manifest,
+        "manifest.json",
+      );
       transaction.state = "manifest-committed";
       transaction.manifestCommittedAt = nowIso(this.#clock);
-      await atomicWriteJson(path.join(transactionRoot, "transaction.json"), transaction);
+      await this.#writePromotionTransaction(loaded, transactionRoot, transaction);
       await this.#hit("promotion-manifest-committed", { transactionRoot });
     }
     return this.#finishPromotedCandidate(loaded, candidateState, transactionRoot, transaction);
@@ -2536,29 +3933,53 @@ export class ProjectFileRepository {
       candidateState.candidate.status = "promoted";
       candidateState.candidate.promotedAt = nowIso(this.#clock);
       candidateState.candidate.promotedVersionId = committedVersion.versionId;
-      await atomicWriteJson(candidateState.candidatePath, candidateState.candidate);
+      await atomicWriteProjectJson(
+        loaded.paths.projectRootPath,
+        candidateState.candidatePath,
+        candidateState.candidate,
+        "candidate.json",
+      );
       const requestPath = path.join(
         requestRootPath(loaded.paths, candidateState.candidate.requestId),
         "request.json",
       );
-      const request = await readJsonFile(requestPath, "request.json");
+      const request = await readJsonFile(requestPath, "request.json", {
+        projectRootPath: loaded.paths.projectRootPath,
+      });
       if (request?.candidateId === candidateState.candidate.candidateId) {
         request.status = "promoted";
         request.promotedVersionId = committedVersion.versionId;
         request.promotedAt = nowIso(this.#clock);
-        await atomicWriteJson(requestPath, request);
+        await atomicWriteProjectJson(
+          loaded.paths.projectRootPath,
+          requestPath,
+          request,
+          "request.json",
+        );
       }
       loaded.runtime.activeWorkingCopyId = committedWorkingCopy.workingCopyId;
       loaded.runtime.activeRequest = null;
       loaded.runtime.activeCandidateId = null;
-      await atomicWriteJson(loaded.paths.runtimePath, loaded.runtime);
+      await atomicWriteProjectJson(
+        loaded.paths.projectRootPath,
+        loaded.paths.runtimePath,
+        loaded.runtime,
+        "runtime-state.json",
+      );
       transaction.state = "completed";
       transaction.completedAt = nowIso(this.#clock);
-      await atomicWriteJson(path.join(transactionRoot, "transaction.json"), transaction);
+      await atomicWriteProjectJson(
+        loaded.paths.projectRootPath,
+        path.join(transactionRoot, "transaction.json"),
+        transaction,
+        "promotion transaction",
+      );
       await this.#hit("promotion-completed", { transactionRoot });
     }
     const sourcePath = workingCopySourcePath(loaded.paths, committedWorkingCopy);
-    const source = await readHtmlFile(sourcePath, "Version Working Copy");
+    const source = await readHtmlFile(sourcePath, "Version Working Copy", {
+      projectRootPath: loaded.paths.projectRootPath,
+    });
     return {
       promoted: true,
       version: committedVersion,
@@ -2574,16 +3995,267 @@ export class ProjectFileRepository {
     };
   }
 
-  async #recoverProject(projectRootPath) {
-    const loaded = await this.#loadProject(projectRootPath);
-    const recovered = [];
-    const entries = await readdir(loaded.paths.transactionsRoot, { withFileTypes: true });
+  async #recoverSaveTransaction(loaded, transactionPath, transaction) {
+    if (
+      !isObject(transaction)
+      || transaction.schemaVersion !== PROJECT_FILE_SCHEMA_VERSION
+      || transaction.kind !== "save"
+      || !["prepared", "committed"].includes(transaction.state)
+      || transaction.projectId !== loaded.project.projectId
+      || transaction.documentId !== loaded.project.documentId
+    ) {
+      throw new ProjectFileRepositoryError(
+        "SAVE_TRANSACTION_INVALID",
+        "The Working Copy save transaction is invalid.",
+      );
+    }
+    const id = assertId(transaction.workingCopyId, WORKING_COPY_ID, "workingCopyId");
+    const workingCopy = loaded.manifest.workingCopies.find(
+      (entry) => entry.workingCopyId === id,
+    );
+    if (!workingCopy || transaction.sourceRelativePath !== workingCopy.sourceRelativePath) {
+      throw new ProjectFileRepositoryError(
+        "SAVE_TRANSACTION_IDENTITY_MISMATCH",
+        "The Working Copy save transaction no longer matches manifest.json.",
+      );
+    }
+    const expected = assertSha256(
+      transaction.expectedSourceSha256,
+      "save transaction expectedSourceSha256",
+    );
+    const target = assertSha256(
+      transaction.targetSourceSha256,
+      "save transaction targetSourceSha256",
+    );
+    const sourcePath = workingCopySourcePath(loaded.paths, workingCopy);
+    const source = await readHtmlFile(sourcePath, "Working Copy", {
+      projectRootPath: loaded.paths.projectRootPath,
+    });
+    const statePath = workingCopyStatePath(loaded.paths, workingCopy);
+    const currentState = await readJsonFile(statePath, "Working Copy state", {
+      projectRootPath: loaded.paths.projectRootPath,
+    });
+    if (!currentState) {
+      throw new ProjectFileRepositoryError(
+        "WORKING_COPY_STATE_NOT_FOUND",
+        "The Working Copy state is missing during save recovery.",
+      );
+    }
+    if (source.sha256 === target) {
+      const revision = Number.isSafeInteger(Number(transaction.editRevision))
+        && Number(transaction.editRevision) >= 0
+        ? Number(transaction.editRevision)
+        : Number(currentState.lastPersistedRevision || 0);
+      workingCopy.fileIdentity = copyFileIdentity(source.information);
+      const savedAt = String(transaction.committedAt || transaction.preparedAt || nowIso(this.#clock));
+      await atomicWriteProjectJson(loaded.paths.projectRootPath, statePath, {
+        ...currentState,
+        schemaVersion: PROJECT_FILE_SCHEMA_VERSION,
+        projectId: loaded.project.projectId,
+        documentId: loaded.project.documentId,
+        workingCopyId: workingCopy.workingCopyId,
+        currentSha256: target,
+        differsFromBase: target !== currentState.baseSha256,
+        saveState: "saved",
+        lastPersistedRevision: Math.max(
+          Number(currentState.lastPersistedRevision || 0),
+          revision,
+        ),
+        lastSavedAt: savedAt,
+      }, "Working Copy state");
+      await atomicWriteProjectJson(
+        loaded.paths.projectRootPath,
+        loaded.paths.manifestPath,
+        loaded.manifest,
+        "manifest.json",
+      );
+      if (transaction.state !== "committed") {
+        await atomicWriteProjectJson(loaded.paths.projectRootPath, transactionPath, {
+          ...transaction,
+          state: "committed",
+          committedAt: nowIso(this.#clock),
+          recoveredAt: nowIso(this.#clock),
+        }, "save transaction");
+      }
+      return {
+        kind: "save",
+        workingCopyId: workingCopy.workingCopyId,
+        state: "committed",
+      };
+    }
+    if (source.sha256 === expected && transaction.state === "prepared") {
+      await atomicWriteProjectJson(loaded.paths.projectRootPath, transactionPath, {
+        ...transaction,
+        state: "committed",
+        committedAt: nowIso(this.#clock),
+        recovery: "source-unchanged",
+      }, "save transaction");
+      return {
+        kind: "save",
+        workingCopyId: workingCopy.workingCopyId,
+        state: "rolled-back",
+      };
+    }
+    throw new ProjectFileRepositoryError(
+      "SAVE_RECOVERY_CONFLICT",
+      "The Working Copy changed during an interrupted save and was not overwritten.",
+      {
+        workingCopyId: workingCopy.workingCopyId,
+        expectedSourceSha256: expected,
+        targetSourceSha256: target,
+        actualSourceSha256: source.sha256,
+      },
+    );
+  }
+
+  async #recoverRequestRuntime(loaded) {
+    let entries;
+    try {
+      entries = await listProjectDirectory(
+        loaded.paths.projectRootPath,
+        loaded.paths.requestsRoot,
+        "requests",
+      );
+    } catch (cause) {
+      if (cause?.code === "ENOENT") return null;
+      throw cause;
+    }
+    const activeRecords = [];
     for (const entry of entries) {
-      if (!entry.isDirectory() || entry.isSymbolicLink() || !entry.name.startsWith("promote_")) continue;
+      if (!entry.isDirectory() || entry.isSymbolicLink() || !SAFE_REQUEST_ID.test(entry.name)) {
+        continue;
+      }
+      const requestPath = path.join(loaded.paths.requestsRoot, entry.name, "request.json");
+      const record = await readJsonFile(requestPath, "request.json", {
+        projectRootPath: loaded.paths.projectRootPath,
+      });
+      if (!record) continue;
+      const workingCopy = loaded.manifest.workingCopies.find(
+        (candidate) => candidate.workingCopyId === record.sourceWorkingCopyId,
+      );
+      if (!workingCopy) continue;
+      try {
+        this.#assertRequestRecord(record, { ...loaded, workingCopy }, {
+          requestId: entry.name,
+          attemptId: record.attemptId,
+        });
+      } catch {
+        // A user-altered inactive Request is not repaired or used to infer
+        // runtime state. Its explicit operation remains unavailable.
+        continue;
+      }
+      if (record.status === "processing") {
+        const candidate = await readJsonFile(
+          path.join(loaded.paths.requestsRoot, entry.name, "candidate.json"),
+          "candidate.json",
+          { projectRootPath: loaded.paths.projectRootPath },
+        );
+        if (candidate?.candidateId === record.candidateId && candidate.status === "pending-review") {
+          record.status = "candidate-ready";
+          record.completedAt = record.completedAt || nowIso(this.#clock);
+          await atomicWriteProjectJson(
+            loaded.paths.projectRootPath,
+            requestPath,
+            record,
+            "request.json",
+          );
+        }
+      }
+      if (["processing", "candidate-ready"].includes(record.status)) {
+        if (record.status === "candidate-ready") {
+          const candidate = await readJsonFile(
+            path.join(loaded.paths.requestsRoot, entry.name, "candidate.json"),
+            "candidate.json",
+            { projectRootPath: loaded.paths.projectRootPath },
+          );
+          if (candidate?.candidateId !== record.candidateId || candidate.status !== "pending-review") {
+            throw new ProjectFileRepositoryError(
+              "REQUEST_CANDIDATE_MISSING",
+              "A Request marked ready for review has no matching Candidate.",
+              { requestId: record.requestId },
+            );
+          }
+        }
+        activeRecords.push({ record, workingCopy });
+      }
+    }
+    if (activeRecords.length > 1) {
+      throw new ProjectFileRepositoryError(
+        "REQUEST_RECOVERY_AMBIGUOUS",
+        "More than one unfinished AI Request exists; PageRoot will not guess which one is active.",
+        { requestIds: activeRecords.map(({ record }) => record.requestId) },
+      );
+    }
+    if (activeRecords.length === 0) {
+      if (!loaded.runtime.activeRequest && !loaded.runtime.activeCandidateId) return null;
+      loaded.runtime.activeRequest = null;
+      loaded.runtime.activeCandidateId = null;
+      await atomicWriteProjectJson(
+        loaded.paths.projectRootPath,
+        loaded.paths.runtimePath,
+        loaded.runtime,
+        "runtime-state.json",
+      );
+      return { kind: "request-runtime", state: "cleared" };
+    }
+    const { record, workingCopy } = activeRecords[0];
+    const restored = await this.#restoreRequestRuntime(
+      { ...loaded, workingCopy },
+      record,
+    );
+    return restored
+      ? { kind: "request-runtime", requestId: record.requestId, state: record.status }
+      : null;
+  }
+
+  async #recoverProject(projectRootPath) {
+    const declaredProjectRootPath = normalizedPath(projectRootPath);
+    const registry = await this.#readRegistry();
+    const matched = Object.entries(registry.projects).find(([, record]) => (
+      samePath(record.registeredProjectRootPath, declaredProjectRootPath)
+    ));
+    if (!matched) {
+      throw new ProjectFileRepositoryError(
+        "REGISTERED_PROJECT_UNAVAILABLE",
+        "Recovery is limited to a Registry-authorized project root.",
+        { projectRootPath: declaredProjectRootPath },
+      );
+    }
+    const [projectId, record] = matched;
+    const loaded = await this.#loadRegisteredProject({
+      projectId,
+      declaredProjectRootPath: record.registeredProjectRootPath,
+    });
+    const recovered = [];
+    const requestRuntime = await this.#recoverRequestRuntime(loaded);
+    if (requestRuntime) recovered.push(requestRuntime);
+    const entries = await listProjectDirectory(
+      loaded.paths.projectRootPath,
+      loaded.paths.transactionsRoot,
+      "transactions",
+    );
+    for (const entry of entries) {
+      if (entry.isSymbolicLink()) continue;
+      if (entry.isFile() && entry.name.startsWith("save_") && entry.name.endsWith(".json")) {
+        const transactionPath = path.join(loaded.paths.transactionsRoot, entry.name);
+        const transaction = await readJsonFile(transactionPath, "save transaction", {
+          projectRootPath: loaded.paths.projectRootPath,
+        });
+        if (transaction?.state !== "committed") {
+          recovered.push(await this.#recoverSaveTransaction(
+            loaded,
+            transactionPath,
+            transaction,
+          ));
+        }
+        continue;
+      }
+      if (!entry.isDirectory() || !entry.name.startsWith("promote_")) continue;
       const transactionRoot = path.join(loaded.paths.transactionsRoot, entry.name);
       const transaction = await readJsonFile(
         path.join(transactionRoot, "transaction.json"),
         "promotion transaction",
+        { projectRootPath: loaded.paths.projectRootPath },
       );
       if (!transaction || transaction.kind !== "promotion" || transaction.state === "completed") continue;
       const candidatePath = path.join(
@@ -2591,14 +4263,18 @@ export class ProjectFileRepository {
         transaction.requestId,
         "candidate.json",
       );
-      const candidate = await readJsonFile(candidatePath, "candidate.json");
+      const candidate = await readJsonFile(candidatePath, "candidate.json", {
+        projectRootPath: loaded.paths.projectRootPath,
+      });
       if (!candidate) continue;
       const outputPath = resolveRelative(
         loaded.paths.controlRoot,
         candidate.outputRelativePath,
         "candidate output path",
       );
-      const output = await readHtmlFile(outputPath, "Candidate HTML");
+      const output = await readHtmlFile(outputPath, "Candidate HTML", {
+        projectRootPath: loaded.paths.projectRootPath,
+      });
       recovered.push(await this.#continuePromotion(
         loaded,
         { candidate, candidatePath, outputPath, output },

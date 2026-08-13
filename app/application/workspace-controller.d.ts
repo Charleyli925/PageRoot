@@ -145,7 +145,6 @@ export type RegistrationInput = Readonly<{
   sourcePath?: string;
   expectedSourceSha256?: string | null;
   adoptCanonicalSource?: boolean;
-  duplicateResolution?: "reassociate" | "import-as-new" | null;
 }>;
 
 export type HashPort = Readonly<{
@@ -158,6 +157,23 @@ export type RecoveryPort = Readonly<{
 
 export type CanvasAuthorityPort = Readonly<{
   invalidateRenderAcks(): void;
+}>;
+
+export type ProjectSourceActivationPort = Readonly<{
+  activateManagedWorkingCopy(input: Readonly<{
+    previousSourcePath: string;
+    nextSourcePath: string;
+    expectedSha256: string;
+    projectId: string;
+    documentId: string;
+    workingCopyId: string;
+    versionId: string;
+    projectRootPath: string;
+  }>): Promise<Readonly<{
+    sourcePath: string;
+    sha256: string;
+    html: string;
+  }>>;
 }>;
 
 export type ClockPort = Readonly<{
@@ -212,6 +228,7 @@ export type WorkspaceControllerConstruction = Readonly<{
     hash: HashPort;
     recovery?: RecoveryPort;
     canvas?: CanvasAuthorityPort;
+    projectSource?: ProjectSourceActivationPort;
   }>;
   documentWorkflow?: Readonly<{
     codecs: DocumentWorkflowCodecs;

@@ -61,6 +61,8 @@ function registrationPayload({
   documentId = "document_registration",
   html = "<main>canonical source</main>",
   draft = authoritativeDraft(4),
+  openTarget = null,
+  workingCopyRecovered = false,
 } = {}) {
   const sourceSha256 = sha256(html);
   return {
@@ -80,12 +82,15 @@ function registrationPayload({
       sourceSha256,
     }),
     recoveryIdentity: { token: "recovery_identity" },
+    ...(openTarget ? { openTarget } : {}),
+    ...(workingCopyRecovered ? { workingCopyRecovered: true } : {}),
   };
 }
 
 function createHarness({
   html = "<main>local source</main>",
   bridgeClient = null,
+  projectSource = null,
 } = {}) {
   const projectSession = new ProjectSession();
   projectSession.openLocator(SOURCE_PATH);
@@ -124,6 +129,7 @@ function createHarness({
       hash: { sha256: async (value) => sha256(value) },
       recovery: { replace: (identity) => recovery.push(identity) },
       canvas: { invalidateRenderAcks: () => { canvasInvalidations += 1; } },
+      ...(projectSource ? { projectSource } : {}),
     },
     clock: { now: () => 1_726_000_000_000 },
   });
@@ -250,6 +256,140 @@ test("workspace controller accepts its injected test Session set and publishes c
     projectName: "Canonical project",
     canonicalSourceAdopted: true,
   }]);
+});
+
+test("workspace controller publishes one recovered Working Copy signal from Bridge authority", async () => {
+  const harness = createHarness({
+    bridgeClient: {
+      async ensureProject() {
+        return registrationPayload({ workingCopyRecovered: true });
+      },
+      async workspace() {
+        return registrationPayload({ workingCopyRecovered: true });
+      },
+      async saveDraft() {
+        return {};
+      },
+    },
+  });
+
+  const outcome = await harness.controller.ensureRegistered();
+
+  assert.equal(outcome.status, "succeeded");
+  assert.equal(harness.events.length, 1);
+  assert.equal(harness.events[0].type, "registration-published");
+  assert.equal(harness.events[0].workingCopyRecovered, true);
+});
+
+test("managed registration activates the exact V1 Working Copy before publishing Sessions", async () => {
+  const workingCopyPath = "/tmp/PageRoot/项目/managed/managed-V1.html";
+  const managedHtml = "<main>managed V1 source</main>";
+  const target = {
+    projectId: "project_managed",
+    documentId: "document_managed",
+    projectRootPath: "/tmp/PageRoot/项目/managed",
+    targetKind: "working-copy",
+    workingCopyId: "work_ver_0001",
+    versionId: "ver_0001",
+    exactSourcePath: workingCopyPath,
+    sourceSha256: sha256(managedHtml),
+  };
+  const calls = [];
+  const harness = createHarness({
+    html: managedHtml,
+    bridgeClient: {
+      async ensureProject() {
+        return registrationPayload({
+          sourcePath: workingCopyPath,
+          projectId: target.projectId,
+          documentId: target.documentId,
+          html: managedHtml,
+          openTarget: target,
+        });
+      },
+      async workspace() {
+        return registrationPayload({
+          sourcePath: workingCopyPath,
+          projectId: target.projectId,
+          documentId: target.documentId,
+          html: managedHtml,
+          openTarget: target,
+        });
+      },
+      async saveDraft() {
+        return {};
+      },
+    },
+    projectSource: {
+      async activateManagedWorkingCopy(input) {
+        calls.push(input);
+        return {
+          sourcePath: workingCopyPath,
+          sha256: sha256(managedHtml),
+          html: managedHtml,
+        };
+      },
+    },
+  });
+
+  const outcome = await harness.controller.ensureRegistered();
+
+  assert.equal(outcome.status, "succeeded");
+  assert.equal(harness.projectSession.context?.sourcePath, workingCopyPath);
+  assert.equal(harness.projectSession.context?.workingCopyId, "work_ver_0001");
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0], {
+    previousSourcePath: SOURCE_PATH,
+    nextSourcePath: workingCopyPath,
+    expectedSha256: sha256(managedHtml),
+    projectId: "project_managed",
+    documentId: "document_managed",
+    workingCopyId: "work_ver_0001",
+    versionId: "ver_0001",
+    projectRootPath: "/tmp/PageRoot/项目/managed",
+  });
+});
+
+test("managed registration fails closed when its desktop Working Copy activation is unavailable", async () => {
+  const workingCopyPath = "/tmp/PageRoot/项目/unavailable/unavailable-V1.html";
+  const managedHtml = "<main>managed V1 source</main>";
+  const target = {
+    projectId: "project_unavailable",
+    documentId: "document_unavailable",
+    projectRootPath: "/tmp/PageRoot/项目/unavailable",
+    targetKind: "working-copy",
+    workingCopyId: "work_ver_0001",
+    versionId: "ver_0001",
+    exactSourcePath: workingCopyPath,
+    sourceSha256: sha256(managedHtml),
+  };
+  const harness = createHarness({
+    html: managedHtml,
+    bridgeClient: {
+      async ensureProject() {
+        return registrationPayload({
+          sourcePath: workingCopyPath,
+          projectId: target.projectId,
+          documentId: target.documentId,
+          html: managedHtml,
+          openTarget: target,
+        });
+      },
+      async workspace() {
+        return registrationPayload();
+      },
+      async saveDraft() {
+        return {};
+      },
+    },
+  });
+
+  const outcome = await harness.controller.ensureRegistered();
+
+  assert.equal(outcome.status, "rejected");
+  assert.equal(outcome.code, "PROJECT_WORKING_COPY_ACTIVATION_UNAVAILABLE");
+  assert.equal(harness.projectSession.context, null);
+  assert.equal(harness.projectSession.sourcePath, SOURCE_PATH);
 });
 
 test("workspace controller is the sole aggregate Session observer and disconnects on dispose", () => {

@@ -13,6 +13,7 @@ const channels = Object.freeze({
   openInDefaultBrowser: "html-projects:open-in-default-browser",
   renameHtml: "html-projects:rename",
   activateGeneratedVersion: "html-projects:activate-generated-version",
+  activateManagedWorkingCopy: "html-projects:activate-managed-working-copy",
   revealVersionFile: "html-projects:reveal-version-file",
   revealRequestFolder: "html-projects:reveal-request-folder",
   listRecentProjects: "html-projects:list-recent",
@@ -119,6 +120,10 @@ const projectsApi = Object.freeze({
   renameHtml: (payload) => invokeProject(channels.renameHtml, payload),
   activateGeneratedVersion: (payload) => invokeProject(
     channels.activateGeneratedVersion,
+    payload,
+  ),
+  activateManagedWorkingCopy: (payload) => invokeProject(
+    channels.activateManagedWorkingCopy,
     payload,
   ),
   revealVersionFile: (payload) => invokeProject(channels.revealVersionFile, payload),

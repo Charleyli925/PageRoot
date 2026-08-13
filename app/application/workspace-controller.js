@@ -207,6 +207,7 @@ export class WorkspaceController {
   #hashPort;
   #recoveryPort;
   #canvasPort;
+  #projectSourcePort;
   #clock;
   #drainCoordinator = new DrainCoordinator();
   #documentWorkflow = null;
@@ -327,12 +328,21 @@ export class WorkspaceController {
     this.#hashPort = ports.hash;
     this.#recoveryPort = ports.recovery || { replace: () => {} };
     this.#canvasPort = ports.canvas || { invalidateRenderAcks: () => {} };
+    this.#projectSourcePort = ports.projectSource || null;
     if (typeof this.#recoveryPort.replace !== "function") {
       throw new TypeError("WorkspaceController RecoveryPort must provide replace.");
     }
     if (typeof this.#canvasPort.invalidateRenderAcks !== "function") {
       throw new TypeError(
         "WorkspaceController CanvasAuthorityPort must provide invalidateRenderAcks.",
+      );
+    }
+    if (
+      this.#projectSourcePort
+      && typeof this.#projectSourcePort.activateManagedWorkingCopy !== "function"
+    ) {
+      throw new TypeError(
+        "WorkspaceController ProjectSourcePort must provide activateManagedWorkingCopy.",
       );
     }
     this.#clock = clock;
@@ -1023,7 +1033,6 @@ export class WorkspaceController {
     sourcePath,
     expectedSourceSha256,
     adoptCanonicalSource = true,
-    duplicateResolution = null,
   } = {}) {
     if (this.#disposed) {
       return Promise.resolve(blocked(
@@ -1072,11 +1081,10 @@ export class WorkspaceController {
     });
     const registration = existingContext
       ? this.#restoreDraftAuthority({ existingContext, activeSource, identity })
-      : this.#createRegistration({
+        : this.#createRegistration({
           activeSource,
           expectedHash,
           adoptCanonicalSource,
-          duplicateResolution,
           identity,
         });
     this.#registrationPromise = registration;
@@ -1236,14 +1244,12 @@ export class WorkspaceController {
     expectedHash,
     adoptCanonicalSource,
     identity,
-    duplicateResolution = null,
   }) {
     try {
       const payload = await this.#bridgeClient.ensureProject({
         sourcePath: activeSource,
         expectedSourceSha256: expectedHash,
         projectStorageVersion: "4.0.0",
-        ...(duplicateResolution ? { duplicateResolution } : {}),
       });
       if (payload.ok === false) {
         return rejected(
@@ -1311,6 +1317,57 @@ export class WorkspaceController {
       const registeredSourcePath = String(
         openTarget?.exactSourcePath || payload.sourcePath || activeSource,
       );
+      const requiresManagedWorkingCopyActivation = Boolean(
+        openTarget
+        && !this.#codecs.sameSourcePath(registeredSourcePath, activeSource),
+      );
+      if (requiresManagedWorkingCopyActivation) {
+        if (
+          openTarget.targetKind !== "working-copy"
+          || String(openTarget.projectId || "") !== nextProjectId
+          || String(openTarget.documentId || "") !== nextDocumentId
+          || !String(openTarget.workingCopyId || "")
+          || !String(openTarget.versionId || "")
+          || !String(openTarget.projectRootPath || "")
+        ) {
+          return rejected(
+            "PROJECT_REGISTRATION_OPEN_TARGET_INVALID",
+            "新项目缺少可验证的工作文件身份，未保存修改仍保留在当前页面。",
+          );
+        }
+        if (!this.#projectSourcePort) {
+          return rejected(
+            "PROJECT_WORKING_COPY_ACTIVATION_UNAVAILABLE",
+            "当前运行环境不能切换到新建立的工作文件；未保存修改仍保留在当前页面。",
+          );
+        }
+        const activated = await this.#projectSourcePort.activateManagedWorkingCopy({
+          previousSourcePath: activeSource,
+          nextSourcePath: registeredSourcePath,
+          expectedSha256: nextSourceSha256,
+          projectId: nextProjectId,
+          documentId: nextDocumentId,
+          workingCopyId: String(openTarget.workingCopyId),
+          versionId: String(openTarget.versionId),
+          projectRootPath: String(openTarget.projectRootPath),
+        });
+        if (!this.#isCurrentLocator(identity)) return stale(identity);
+        if (
+          !this.#codecs.isRecord(activated)
+          || !this.#codecs.sameSourcePath(
+            String(activated.sourcePath || ""),
+            registeredSourcePath,
+          )
+          || String(activated.sha256 || "") !== nextSourceSha256
+          || typeof activated.html !== "string"
+          || await this.#hashPort.sha256(activated.html) !== nextSourceSha256
+        ) {
+          return rejected(
+            "PROJECT_WORKING_COPY_ACTIVATION_INVALID",
+            "托管工作文件未通过路径和内容校验；未保存修改仍保留在当前页面。",
+          );
+        }
+      }
       if (this.#projectSession.context) return stale(identity);
       const registeredContext = (
         openTarget
@@ -1328,6 +1385,17 @@ export class WorkspaceController {
             ...(openTarget ? { openTarget } : {}),
           });
       if (!registeredContext) return stale(identity);
+      if (
+        requiresManagedWorkingCopyActivation
+        && this.#runSession
+        && typeof this.#runSession.rebaseSource === "function"
+      ) {
+        this.#runSession.rebaseSource({
+          previousSourcePath: activeSource,
+          sourcePath: registeredContext.sourcePath,
+          projectId: registeredContext.projectId,
+        });
+      }
 
       const recoveryIdentity = this.#codecs.recoveryIdentityFromRecord(
         payload.recoveryIdentity,
@@ -1405,6 +1473,7 @@ export class WorkspaceController {
           ? String(projectRecord.displayName)
           : null,
         ...(payload.imported === true ? { imported: true } : {}),
+        ...(payload.workingCopyRecovered === true ? { workingCopyRecovered: true } : {}),
         canonicalSourceAdopted: shouldAdoptCanonicalSource,
       });
       return succeeded(registeredContext);

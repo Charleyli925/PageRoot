@@ -62,6 +62,10 @@ test("v4 schemas accept repository-produced identity, Working Copy, Candidate an
   const controlRoot = path.join(imported.target.projectRootPath, ".pageroot");
   const initialManifest = await json(path.join(controlRoot, "manifest.json"));
   await Promise.all([
+    validate("project-registry.v4.schema.json", await json(path.join(
+      projectsRoot,
+      ".pageroot-registry.json",
+    ))),
     validate("project-identity.v4.schema.json", await json(path.join(controlRoot, "project.json"))),
     validate("project-manifest.v4.schema.json", initialManifest),
     validate("project-runtime-state.v4.schema.json", await json(path.join(controlRoot, "runtime-state.json"))),
@@ -103,7 +107,7 @@ test("v4 schemas accept repository-produced identity, Working Copy, Candidate an
   ]);
   assert.equal(promoted.version.versionId, "ver_0002");
 
-  const invalidManifest = { ...initialManifest, unexpected: true };
+  const invalidManifest = { ...initialManifest, fileNaming: { stem: "legacy" } };
   const schema = JSON.parse(await readFile(
     new URL("../schemas/project-manifest.v4.schema.json", import.meta.url),
     "utf8",
@@ -115,4 +119,7 @@ test("v4 schemas accept repository-produced identity, Working Copy, Candidate an
   );
   const check = ajv.compile(schema);
   assert.equal(check(invalidManifest), false);
+  const nestedWorkingCopy = structuredClone(initialManifest);
+  nestedWorkingCopy.workingCopies[0].sourceRelativePath = "nested/schema-V1.htm";
+  assert.equal(check(nestedWorkingCopy), false);
 });

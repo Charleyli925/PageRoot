@@ -43,7 +43,6 @@ import type {
 } from "./components/HtmlCanvasEditor";
 import AboutPageRootDialog from "./components/AboutPageRootDialog";
 import CancelAiRunDialog from "./components/CancelAiRunDialog";
-import DuplicateProjectDialog from "./components/DuplicateProjectDialog";
 import HtmlInteractionPreview, {
   type HtmlInteractionPreviewHandle,
 } from "./components/HtmlInteractionPreview";
@@ -580,6 +579,17 @@ export default function Workbench() {
   const projectSnapshot = workspaceControllerSnapshot?.projectSession
     ?? INITIAL_PROJECT_SESSION_SNAPSHOT;
   const { sourcePath, projectId, documentId } = projectSnapshot;
+  // The first durable import changes the ProjectSession source from the
+  // caller-owned HTML to V1's managed Working Copy without replacing the live
+  // DocumentSession canvas. ProjectFileRepository rejects relative resources
+  // on that import, so retaining the pre-import base for this canvas generation
+  // is semantically safe and, importantly, preserves the native/IME edit lease.
+  // A real document navigation always increments canvasGeneration and adopts
+  // the new source path here.
+  const canvasSourcePath = useMemo(
+    () => sourcePath || undefined,
+    [canvasGeneration],
+  );
   const [projectRecordsPath, setProjectRecordsPath] =
     useState<string | null>(null);
   const [lastModifiedAt, setLastModifiedAt] = useState<string | null>(null);
@@ -726,6 +736,24 @@ export default function Workbench() {
       ports: {
         hash: { sha256: browserSha256 },
         canvas: { invalidateRenderAcks: invalidateCanvasRenderAcks },
+        projectSource: {
+          activateManagedWorkingCopy: async (input: {
+            previousSourcePath: string;
+            nextSourcePath: string;
+            expectedSha256: string;
+            projectId: string;
+            documentId: string;
+            workingCopyId: string;
+            versionId: string;
+            projectRootPath: string;
+          }) => {
+            const activate = window.htmlAIProjects?.activateManagedWorkingCopy;
+            if (!activate) {
+              throw new Error("当前运行环境不能安全切换到托管工作文件。");
+            }
+            return activate(input);
+          },
+        },
       },
       documentWorkflow: {
         codecs: createDocumentWorkflowCodecs({
@@ -907,6 +935,22 @@ export default function Workbench() {
               if (!activate) throw new Error("当前运行环境不能安全切换生成版本。");
               return activate(input);
             },
+            activateManagedWorkingCopy: async (input: {
+              previousSourcePath: string;
+              nextSourcePath: string;
+              expectedSha256: string;
+              projectId: string;
+              documentId: string;
+              workingCopyId: string;
+              versionId: string;
+              projectRootPath: string;
+            }) => {
+              const activate = window.htmlAIProjects?.activateManagedWorkingCopy;
+              if (!activate) {
+                throw new Error("当前运行环境不能安全切换到托管工作文件。");
+              }
+              return activate(input);
+            },
             renameSource: async (input: {
               operationId: string;
               sourcePath: string;
@@ -1076,9 +1120,6 @@ export default function Workbench() {
   const [workspaceIssue, setWorkspaceIssue] = useState<WorkspaceIssue | null>(null);
   const [cancelRunConfirmationKey, setCancelRunConfirmationKey] =
     useState<string | null>(null);
-  const [dismissedDuplicateProjectKey, setDismissedDuplicateProjectKey] =
-    useState<string | null>(null);
-  const [duplicateProjectResolving, setDuplicateProjectResolving] = useState(false);
   const [reviewPreparing, setReviewPreparing] = useState(false);
   const [readyReviewSession, setReadyReviewSession] =
     useState<ReadyReviewSession | null>(null);
@@ -1119,6 +1160,7 @@ export default function Workbench() {
           projectRecordsPath: string | null;
           projectName: string | null;
           imported?: boolean;
+          workingCopyRecovered?: boolean;
         }>;
         if (!workspaceController.matchesCurrentProjectContext(registrationEvent.context)) return;
         setProjectRecordsPath(registrationEvent.projectRecordsPath);
@@ -1130,6 +1172,15 @@ export default function Workbench() {
             tone: "success",
             disposition: "background-result",
             dedupeKey: "project-file-imported",
+          });
+        }
+        if (registrationEvent.workingCopyRecovered) {
+          setToast({
+            title: "文件已自动恢复",
+            message: "已采用磁盘中的最新内容。",
+            tone: "success",
+            disposition: "background-result",
+            dedupeKey: "working-copy-recovered",
           });
         }
         return;
@@ -1516,22 +1567,62 @@ export default function Workbench() {
           }, documentEvent.context?.projectId || undefined);
         }
       }
-      if (
-        documentEvent.type === "document-persistence-failed"
-        && ["PROJECT_RELOCATION_REQUIRED", "WORKING_COPY_RELOCATION_REQUIRED"].includes(
-          String(documentEvent.code || ""),
-        )
-      ) {
+      if (documentEvent.type === "document-persistence-failed") {
+        const persistenceCode = String(documentEvent.code || "");
+        if (persistenceCode === "REGISTERED_PROJECT_UNAVAILABLE") {
+          setToast({
+            title: "项目暂不可用",
+            message: "修改仍保留；放回原登记位置后自动恢复",
+            tone: "warning",
+            sticky: true,
+            disposition: "inform-in-place",
+            dedupeKey: "registered-project-unavailable",
+          });
+          return;
+        }
+        if (persistenceCode === "WORKING_COPY_UNAVAILABLE") {
+          setToast({
+            title: "文件暂不可用",
+            message: "当前工作文件暂时不可用，修改仍保留。",
+            tone: "warning",
+            sticky: true,
+            disposition: "inform-in-place",
+            dedupeKey: "working-copy-unavailable",
+          });
+          return;
+        }
+        if (persistenceCode === "WORKING_COPY_CONFLICT") {
+          setToast({
+            title: "文件出现内容冲突",
+            message: "磁盘文件与未保存修改都已保留；请先核对内容后再决定如何继续。",
+            tone: "warning",
+            sticky: true,
+            disposition: "user-choice",
+            dedupeKey: "working-copy-content-conflict",
+            action: { id: "retry-project-open", label: "重新选择文件" },
+          });
+          return;
+        }
+        if (persistenceCode === "MANAGED_PATH_AMBIGUOUS") {
+          setToast({
+            title: "无法确定工作文件",
+            message: "检测到多个同等候选文件；修改仍保留，请先恢复唯一文件位置。",
+            tone: "warning",
+            sticky: true,
+            disposition: "user-choice",
+            dedupeKey: "managed-working-copy-ambiguous",
+            action: { id: "retry-project-open", label: "重新选择文件" },
+          });
+        }
+      }
+      if (documentEvent.type === "document-open-target-rebound") {
         setToast({
-          title: "项目已移动，修改仍安全保留",
-          message: "请选择移动后的项目 HTML；重新定位后会继续把当前未保存修改写入该项目。",
-          tone: "warning",
-          sticky: true,
-          disposition: "direct-action",
-          dedupeKey: "project-relocation-required",
-          action: { id: "retry-project-open", label: "定位项目" },
+          title: "项目位置已自动恢复",
+          message: "已核对项目身份并继续使用登记项目。",
+          tone: "success",
+          disposition: "background-result",
+          dedupeKey: "registered-project-recovered",
         });
-        return;
       }
       if (
         [
@@ -3085,68 +3176,6 @@ export default function Workbench() {
       sourcePath: recentPath || null,
     });
   }, [workspaceController]);
-
-  const duplicateProjectPrompt = (() => {
-    const registration = workspaceControllerSnapshot?.registration;
-    const outcome = registration?.outcome;
-    const identity = registration?.identity;
-    const expectedSourceSha256 = identity?.expectedSourceSha256;
-    if (
-      outcome?.status !== "rejected"
-      || outcome.code !== "DUPLICATE_PROJECT_ID"
-      || !identity?.sourcePath
-      || !expectedSourceSha256
-    ) return null;
-    return {
-      key: String(identity.operationId || `${identity.sourcePath}:${expectedSourceSha256}`),
-      sourcePath: identity.sourcePath,
-      expectedSourceSha256,
-    };
-  })();
-
-  const resolveDuplicateProject = useCallback(async (
-    duplicateResolution: "reassociate" | "import-as-new",
-  ) => {
-    const prompt = duplicateProjectPrompt;
-    if (!workspaceController || !prompt) return;
-    setDuplicateProjectResolving(true);
-    try {
-      const outcome = await workspaceController.ensureRegistered({
-        sourcePath: prompt.sourcePath,
-        expectedSourceSha256: prompt.expectedSourceSha256,
-        duplicateResolution,
-      });
-      if (outcome.status !== "succeeded") {
-        const reason = "reason" in outcome
-          ? String(outcome.reason || "")
-          : "";
-        setToast({
-          title: "项目身份尚未确定",
-          message: reason || "当前 HTML 保持不变，请稍后重试。",
-          tone: "warning",
-          sticky: true,
-          disposition: "user-choice",
-          dedupeKey: "duplicate-project-resolution-failed",
-          action: { id: "retry-project-open", label: "重新选择" },
-        });
-        return;
-      }
-      setDismissedDuplicateProjectKey(prompt.key);
-      setToast({
-        title: duplicateResolution === "reassociate"
-          ? "已重新关联项目位置"
-          : "已作为新项目导入",
-        message: duplicateResolution === "reassociate"
-          ? "后续保存将使用当前文件夹，不会修改另一位置的项目。"
-          : "当前 HTML 已建立为新的 V1 项目；原项目历史没有被复制。",
-        tone: "success",
-        disposition: "background-result",
-        dedupeKey: "duplicate-project-resolved",
-      });
-    } finally {
-      setDuplicateProjectResolving(false);
-    }
-  }, [duplicateProjectPrompt, workspaceController]);
 
   const resumeDeferredProjectApplication = useCallback(() => (
     workspaceController?.resumeDeferredProjectApplication().status === "succeeded"
@@ -6683,7 +6712,7 @@ export default function Workbench() {
                   key={`editor-authority-${canvasGeneration}`}
                   ref={editorRef}
                   html={html}
-                  sourcePath={sourcePath || undefined}
+                  sourcePath={canvasSourcePath}
                   height={`${canvasDocumentHeight}px`}
                   onChange={handleCanvasChange}
                   onInteraction={() => {
@@ -8020,25 +8049,6 @@ export default function Workbench() {
           if (matchesConfirmation) {
             void cancelActiveRun({ agentMayBeRunning: true });
           }
-        }}
-      />
-
-      <DuplicateProjectDialog
-        open={Boolean(
-          duplicateProjectPrompt
-          && dismissedDuplicateProjectKey !== duplicateProjectPrompt.key,
-        )}
-        busy={duplicateProjectResolving}
-        onClose={() => {
-          if (!duplicateProjectResolving) {
-            setDismissedDuplicateProjectKey(duplicateProjectPrompt?.key || null);
-          }
-        }}
-        onReassociate={() => {
-          void resolveDuplicateProject("reassociate");
-        }}
-        onImportAsNew={() => {
-          void resolveDuplicateProject("import-as-new");
         }}
       />
 

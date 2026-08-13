@@ -239,7 +239,7 @@ test("exact path, rather than equal bytes, determines the opened document", asyn
   assert.equal(reopenedSecond.exactSourcePath, second.target.exactSourcePath);
 });
 
-test("folder and HTML rename preserve stable identity; an unknown move pauses writes until reopened", async (t) => {
+test("same-parent root and Working Copy renames preserve identity; moves outside stop writes until return", async (t) => {
   const value = await fixture(t);
   const imported = await importSource(value);
   const renamedRoot = path.join(value.projects, "移动后项目");
@@ -264,6 +264,13 @@ test("folder and HTML rename preserve stable identity; an unknown move pauses wr
   });
   assert.equal(saved.target.exactSourcePath, renamedHtml);
   assert.equal(saved.target.projectId, imported.target.projectId);
+  const manifestAfterRename = await json(path.join(
+    renamedRoot,
+    ".pageroot",
+    "manifest.json",
+  ));
+  assert.equal(manifestAfterRename.workingCopies[0].sourceRelativePath, "用户改名.html");
+  assert.equal(manifestAfterRename.workingCopies[0].preferredFileStem, "用户改名");
 
   const outside = path.join(value.root, "outside");
   await mkdir(outside);
@@ -277,41 +284,490 @@ test("folder and HTML rename preserve stable identity; an unknown move pauses wr
       editRevision: 3,
     }),
     (error) => error instanceof ProjectFileRepositoryError
-      && error.code === "PROJECT_RELOCATION_REQUIRED",
+      && error.code === "REGISTERED_PROJECT_UNAVAILABLE",
   );
   assert.equal(await readFile(path.join(movedRoot, "用户改名.html"), "utf8"), html("after html rename"));
 
-  const rebound = await value.repository.resolveOpenTarget({
+  const external = await value.repository.resolveOpenTarget({
     sourcePath: path.join(movedRoot, "用户改名.html"),
   });
-  assert.equal(rebound.projectId, imported.target.projectId);
-  assert.equal(rebound.projectRootPath, movedRoot);
+  assert.equal(external, null);
+
+  await rename(movedRoot, renamedRoot);
+  const resumed = await value.repository.resolveOpenTarget({
+    sourcePath: path.join(renamedRoot, "用户改名.html"),
+  });
+  assert.equal(resumed.projectId, imported.target.projectId);
+  assert.equal(resumed.projectRootPath, renamedRoot);
+  const afterReturn = await value.repository.saveWorkingCopy({
+    target: resumed,
+    html: html("after return"),
+    expectedSourceSha256: resumed.sourceSha256,
+    editRevision: 3,
+  });
+  assert.equal(await readFile(afterReturn.target.exactSourcePath, "utf8"), html("after return"));
 });
 
-test("duplicate project identity requires an explicit reassociation choice", async (t) => {
+test("a cross-volume-style move remains external until the project returns to its exact registered path", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "跨卷.html");
+  const movedRoot = path.join(value.root, "other-volume", "跨卷项目");
+  await mkdir(path.dirname(movedRoot), { recursive: true });
+
+  // A real cross-volume Finder move is copy + delete.  cp() gives the moved
+  // tree new file identities even when the test runner has only one volume.
+  await cp(imported.target.projectRootPath, movedRoot, { recursive: true });
+  await rm(imported.target.projectRootPath, { recursive: true, force: true });
+  const movedHtml = path.join(movedRoot, path.basename(imported.target.exactSourcePath));
+
+  const restarted = new ProjectFileRepository({ projectsRoot: value.projects });
+  assert.equal(await restarted.resolveOpenTarget({ sourcePath: movedHtml }), null);
+  await assert.rejects(
+    restarted.saveWorkingCopy({
+      target: imported.target,
+      html: html("must not follow cross-volume move"),
+      expectedSourceSha256: imported.target.sourceSha256,
+      editRevision: 1,
+    }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "REGISTERED_PROJECT_UNAVAILABLE",
+  );
+  assert.equal(await readFile(movedHtml, "utf8"), html("V1"));
+
+  // A return to the exact registered path can safely resume after v4 IDs and
+  // manifest validate, even though the copied directory has a new inode.
+  await cp(movedRoot, imported.target.projectRootPath, { recursive: true });
+  const returnedHtml = path.join(
+    imported.target.projectRootPath,
+    path.basename(imported.target.exactSourcePath),
+  );
+  const returned = await restarted.resolveOpenTarget({ sourcePath: returnedHtml });
+  assert.equal(returned.projectId, imported.target.projectId);
+  const saved = await restarted.saveWorkingCopy({
+    target: returned,
+    html: html("after registered return"),
+    expectedSourceSha256: returned.sourceSha256,
+    editRevision: 1,
+  });
+  assert.equal(saved.target.projectId, imported.target.projectId);
+  assert.equal(await readFile(returnedHtml, "utf8"), html("after registered return"));
+
+  // A copied project is an external HTML, even when it carries a .pageroot
+  // directory. Its first persistence starts a fresh V1 without copied history.
+  const importedCopy = await restarted.importExternal({
+    sourcePath: movedHtml,
+    expectedSourceSha256: imported.target.sourceSha256,
+  });
+  assert.equal(importedCopy.imported, true);
+  assert.notEqual(importedCopy.target.projectId, imported.target.projectId);
+  const copiedManifest = await json(path.join(
+    importedCopy.target.projectRootPath,
+    ".pageroot",
+    "manifest.json",
+  ));
+  assert.deepEqual(copiedManifest.versions.map((version) => version.versionId), ["ver_0001"]);
+});
+
+test("macOS /private/var spelling resolves the same managed Working Copy without a duplicate prompt", async (t) => {
+  if (process.platform !== "darwin") {
+    t.skip("macOS path-alias regression");
+    return;
+  }
+  const value = await fixture(t);
+  const imported = await importSource(value, "路径别名.html");
+  const privateSpelling = imported.target.exactSourcePath === "/var"
+    || imported.target.exactSourcePath.startsWith("/var/")
+    ? `/private${imported.target.exactSourcePath}`
+    : imported.target.exactSourcePath;
+  if (privateSpelling === imported.target.exactSourcePath) {
+    t.skip("temporary directory is not exposed through /var");
+    return;
+  }
+
+  const resolved = await value.repository.resolveOpenTarget({
+    sourcePath: privateSpelling,
+  });
+  const workspace = await value.repository.workspace({
+    sourcePath: privateSpelling,
+  });
+  assert.equal(resolved.projectId, imported.target.projectId);
+  assert.equal(resolved.workingCopyId, imported.target.workingCopyId);
+  assert.equal(workspace.target.projectId, imported.target.projectId);
+  assert.equal(workspace.target.workingCopyId, imported.target.workingCopyId);
+});
+
+test("nested and symlinked Working Copy mappings are rejected before a save can escape", async (t) => {
   const value = await fixture(t);
   const imported = await importSource(value);
-  const copiedRoot = path.join(value.root, "copied-project");
-  await cp(imported.target.projectRootPath, copiedRoot, { recursive: true });
-  const copiedHtml = path.join(copiedRoot, path.basename(imported.target.exactSourcePath));
+  const outside = path.join(value.root, "outside");
+  const externalDirectory = path.join(outside, "nested");
+  const externalHtml = path.join(externalDirectory, "target.html");
+  await mkdir(externalDirectory, { recursive: true });
+  await writeFile(externalHtml, html("outside before"), "utf8");
+  await symlink(outside, path.join(imported.target.projectRootPath, "escape"), "dir");
+
+  const manifestPath = path.join(imported.target.projectRootPath, ".pageroot", "manifest.json");
+  const manifest = await json(manifestPath);
+  manifest.workingCopies[0].sourceRelativePath = "escape/nested/target.html";
+  await writeFile(manifestPath, JSON.stringify(manifest), "utf8");
 
   await assert.rejects(
-    value.repository.resolveOpenTarget({ sourcePath: copiedHtml }),
+    value.repository.saveWorkingCopy({
+      target: imported.target,
+      html: html("must stay in project"),
+      expectedSourceSha256: imported.target.sourceSha256,
+      editRevision: 1,
+    }),
     (error) => error instanceof ProjectFileRepositoryError
-      && error.code === "DUPLICATE_PROJECT_ID"
-      && error.details.actions.join(",") === "reassociate,import-as-new,cancel",
+      && error.code === "INVALID_RELATIVE_PATH",
   );
-  const reassociated = await value.repository.resolveOpenTarget({
-    sourcePath: copiedHtml,
-    duplicateResolution: "reassociate",
+  assert.equal(await readFile(externalHtml, "utf8"), html("outside before"));
+  assert.equal(
+    await readFile(imported.target.exactSourcePath, "utf8"),
+    html("V1"),
+  );
+});
+
+test("a clean Working Copy adopts external disk bytes; pending PageRoot edits remain a conflict", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "external-change.html");
+  const adoptedHtml = html("external clean change");
+  await writeFile(imported.target.exactSourcePath, adoptedHtml, "utf8");
+
+  const adopted = await value.repository.workspace({
+    sourcePath: imported.target.exactSourcePath,
   });
-  assert.equal(reassociated.projectId, imported.target.projectId);
-  assert.equal(reassociated.projectRootPath, copiedRoot);
+  assert.equal(adopted.workingCopyRecovered, true);
+  assert.equal(adopted.content, adoptedHtml);
+  assert.equal(adopted.workingCopyState.currentSha256, sha256(Buffer.from(adoptedHtml, "utf8")));
+
+  const statePath = path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "working-copies",
+    "work_ver_0001.json",
+  );
+  const state = await json(statePath);
+  await writeFile(statePath, JSON.stringify({ ...state, saveState: "failed" }), "utf8");
+  const conflictingDiskHtml = html("external while PageRoot pending");
+  await writeFile(imported.target.exactSourcePath, conflictingDiskHtml, "utf8");
+
+  await assert.rejects(
+    value.repository.workspace({ sourcePath: imported.target.exactSourcePath }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "WORKING_COPY_CONFLICT",
+  );
+  assert.equal(await readFile(imported.target.exactSourcePath, "utf8"), conflictingDiskHtml);
+});
+
+test("Registry and managed control paths reject symlinks", async (t) => {
+  const rootLink = await fixture(t);
+  const imported = await importSource(rootLink, "root-link.html");
+  const alias = path.join(rootLink.projects, "symlinked-project");
+  await symlink(imported.target.projectRootPath, alias, "dir");
+  const registryPath = path.join(rootLink.projects, ".pageroot-registry.json");
+  const registry = await json(registryPath);
+  registry.projects[imported.target.projectId].registeredProjectRootPath = alias;
+  await writeFile(registryPath, JSON.stringify(registry), "utf8");
+  await assert.rejects(
+    rootLink.repository.resolveOpenTarget({
+      sourcePath: path.join(alias, path.basename(imported.target.exactSourcePath)),
+    }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && (error.code === "PATH_ESCAPES_PROJECT" || error.code === "UNSAFE_DIRECTORY"),
+  );
+
+  const controlLink = await fixture(t);
+  const controlImported = await importSource(controlLink, "control-link.html");
+  const controlRoot = path.join(controlImported.target.projectRootPath, ".pageroot");
+  const relocatedControlRoot = path.join(controlLink.root, "relocated-control-root");
+  await rename(controlRoot, relocatedControlRoot);
+  await symlink(relocatedControlRoot, controlRoot, "dir");
+  await assert.rejects(
+    controlLink.repository.resolveOpenTarget({ sourcePath: controlImported.target.exactSourcePath }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && (error.code === "PATH_ESCAPES_PROJECT" || error.code === "UNSAFE_DIRECTORY"),
+  );
+});
+
+test("promotion uses the latest Working Copy name and allocates around file, directory and symlink collisions", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "A.html");
+  const candidate = await value.repository.createCandidate({
+    target: imported.target,
+    requestId: "req_renamed_promotion",
+    candidateId: "candidate_renamed_promotion_0001",
+    html: html("promoted from latest name"),
+    expectedSourceSha256: imported.target.sourceSha256,
+  });
+  const renamedPath = path.join(imported.target.projectRootPath, "B-V1.html");
+  await rename(imported.target.exactSourcePath, renamedPath);
+  const renamed = await value.repository.resolveOpenTarget({ sourcePath: renamedPath });
+  assert.equal(renamed.workingCopyId, "work_ver_0001");
+
+  const collisionFile = path.join(imported.target.projectRootPath, "B-V2.html");
+  const collisionDirectory = path.join(imported.target.projectRootPath, "B-V2-V2.html");
+  const collisionSymlink = path.join(imported.target.projectRootPath, "B-V2-V2-V2.html");
+  const outside = path.join(value.root, "promotion-collision.html");
+  await writeFile(collisionFile, html("user file collision"), "utf8");
+  await mkdir(collisionDirectory);
+  await writeFile(outside, html("user symlink collision"), "utf8");
+  await symlink(outside, collisionSymlink, "file");
+
+  const promoted = await value.repository.promoteCandidate({
+    target: renamed,
+    candidateId: candidate.candidate.candidateId,
+  });
+  assert.equal(
+    path.basename(promoted.target.exactSourcePath),
+    "B-V2-V2-V2-V2.html",
+  );
+  assert.equal(await readFile(collisionFile, "utf8"), html("user file collision"));
+  assert.equal((await lstat(collisionDirectory)).isDirectory(), true);
+  assert.equal((await lstat(collisionSymlink)).isSymbolicLink(), true);
+});
+
+test("save fault injection recovers a complete durable state or a retained old state", async (t) => {
+  for (const failpoint of [
+    "save-prepared",
+    "save-source-written",
+    "save-state-written",
+    "save-manifest-written",
+    "save-committed",
+  ]) {
+    const value = await fixture(t);
+    const imported = await importSource(value, "save-fault.html");
+    const nextHtml = html(`save fault ${failpoint}`);
+    const failing = new ProjectFileRepository({
+      projectsRoot: value.projects,
+      failpoint: async (name) => name === failpoint,
+    });
+    await assert.rejects(
+      failing.saveWorkingCopy({
+        target: imported.target,
+        html: nextHtml,
+        expectedSourceSha256: imported.target.sourceSha256,
+        editRevision: 7,
+      }),
+      (error) => error instanceof ProjectFileRepositoryError
+        && error.code === "INJECTED_FAILPOINT",
+      failpoint,
+    );
+
+    const restarted = new ProjectFileRepository({ projectsRoot: value.projects });
+    const workspace = await restarted.workspace({ sourcePath: imported.target.exactSourcePath });
+    const expectedHtml = failpoint === "save-prepared" ? html("V1") : nextHtml;
+    assert.equal(workspace.content, expectedHtml, failpoint);
+    assert.equal(workspace.workingCopyState.currentSha256, sha256(Buffer.from(expectedHtml)), failpoint);
+    assert.equal(workspace.workingCopyState.saveState, "saved", failpoint);
+    const transactions = (await readdir(path.join(
+      imported.target.projectRootPath,
+      ".pageroot",
+      "transactions",
+    ))).filter((entry) => entry.startsWith("save_"));
+    assert.equal(transactions.length, 1, failpoint);
+    const transaction = await json(path.join(
+      imported.target.projectRootPath,
+      ".pageroot",
+      "transactions",
+      transactions[0],
+    ));
+    assert.equal(transaction.state, "committed", failpoint);
+    const manifest = await json(path.join(
+      imported.target.projectRootPath,
+      ".pageroot",
+      "manifest.json",
+    ));
+    assert.deepEqual(manifest.versions.map((version) => version.versionId), ["ver_0001"], failpoint);
+  }
+});
+
+test("save recovery refuses an externally changed Working Copy instead of overwriting it", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "save-conflict.html");
+  const failing = new ProjectFileRepository({
+    projectsRoot: value.projects,
+    failpoint: async (name) => name === "save-source-written",
+  });
+  await assert.rejects(
+    failing.saveWorkingCopy({
+      target: imported.target,
+      html: html("interrupted PageRoot save"),
+      expectedSourceSha256: imported.target.sourceSha256,
+      editRevision: 1,
+    }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "INJECTED_FAILPOINT",
+  );
+  const externallyChanged = html("external change after interruption");
+  await writeFile(imported.target.exactSourcePath, externallyChanged, "utf8");
+
+  await assert.rejects(
+    new ProjectFileRepository({ projectsRoot: value.projects }).workspace({
+      sourcePath: imported.target.exactSourcePath,
+    }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "SAVE_RECOVERY_CONFLICT",
+  );
+  assert.equal(await readFile(imported.target.exactSourcePath, "utf8"), externallyChanged);
+});
+
+test("request preparation fault injection restores one immutable active Request", async (t) => {
+  for (const failpoint of [
+    "request-input-written",
+    "request-project-rules-written",
+    "request-annotations-written",
+    "request-change-record-written",
+    "request-prompt-written",
+    "request-input-manifest-written",
+    "request-record-written",
+    "request-runtime-written",
+    "request-prepared",
+  ]) {
+    const value = await fixture(t);
+    const imported = await importSource(value, "request-fault.html");
+    const request = { summary: `fault recovery ${failpoint}` };
+    const prompt = `# ${failpoint}\n`;
+    const failing = new ProjectFileRepository({
+      projectsRoot: value.projects,
+      failpoint: async (name) => name === failpoint,
+    });
+    await assert.rejects(
+      failing.prepareRequest({
+        target: imported.target,
+        requestId: "req_fault_recovery",
+        attemptId: "attempt_001",
+        expectedSourceSha256: imported.target.sourceSha256,
+        request,
+        prompt,
+      }),
+      (error) => error instanceof ProjectFileRepositoryError
+        && error.code === "INJECTED_FAILPOINT",
+      failpoint,
+    );
+
+    const restarted = new ProjectFileRepository({ projectsRoot: value.projects });
+    const prepared = await restarted.prepareRequest({
+      target: imported.target,
+      requestId: "req_fault_recovery",
+      attemptId: "attempt_001",
+      expectedSourceSha256: imported.target.sourceSha256,
+      request,
+      prompt,
+    });
+    assert.equal(prepared.status, "processing", failpoint);
+    const workspace = await restarted.workspace({ sourcePath: imported.target.exactSourcePath });
+    assert.equal(workspace.activeRequest.requestId, "req_fault_recovery", failpoint);
+    assert.equal(workspace.activeRequest.status, "processing", failpoint);
+    const requestRoots = (await readdir(path.join(
+      imported.target.projectRootPath,
+      ".pageroot",
+      "requests",
+    ), { withFileTypes: true })).filter((entry) => entry.isDirectory());
+    assert.deepEqual(requestRoots.map((entry) => entry.name), ["req_fault_recovery"], failpoint);
+  }
+});
+
+test("a Request freezes comments, targets and project rules alongside its exact HTML", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "frozen-request.html");
+  const saved = await value.repository.saveWorkingCopy({
+    target: imported.target,
+    html: html("persisted before request"),
+    expectedSourceSha256: imported.target.sourceSha256,
+    editRevision: 1,
+  });
+  await value.repository.updateProjectNotes({
+    target: saved.target,
+    content: "# 项目规则\n\n只修改首页标题。\n",
+  });
+  const comments = [{
+    commentId: "comment_001",
+    text: "把标题改成欢迎页",
+    target: { targetId: "target_title" },
+    attachments: [{
+      attachmentId: "attachment_001",
+      fileName: "参考.png",
+      relativePath: "draft/attachments/comment_001/attachment_001-参考.png",
+    }],
+  }];
+  const request = {
+    freezeCutoffRevision: 1,
+    summary: "按评论更新标题",
+    comments,
+    changeEvents: [{ eventId: "edit_001", kind: "text", target: { targetId: "target_title" } }],
+    instructions: [{ instructionId: "instruction_001", text: "保留其他内容" }],
+    targets: [{ targetId: "target_title", selector: "h1" }],
+  };
+  const prepared = await value.repository.prepareRequest({
+    target: saved.target,
+    requestId: "req_frozen_inputs",
+    attemptId: "attempt_001",
+    expectedSourceSha256: saved.target.sourceSha256,
+    request,
+    prompt: "# 本轮任务\n",
+  });
+  const requestRoot = path.join(
+    saved.target.projectRootPath,
+    ".pageroot",
+    "requests",
+    prepared.requestId,
+  );
+  const annotationsPath = path.join(requestRoot, "input", "annotations", "records.json");
+  const projectRulesPath = path.join(requestRoot, "input", "PROJECT.md");
+  const changeRequestPath = path.join(requestRoot, "change-request.json");
+  const inputManifestPath = path.join(requestRoot, "input-manifest.json");
+  const frozenAnnotations = await readFile(annotationsPath);
+  const frozenProjectRules = await readFile(projectRulesPath);
+  const frozenChangeRequest = await readFile(changeRequestPath);
+  const annotations = JSON.parse(frozenAnnotations.toString("utf8"));
+  const changeRequest = JSON.parse(frozenChangeRequest.toString("utf8"));
+  const inputManifest = await json(inputManifestPath);
+  assert.deepEqual(annotations.comments, comments);
+  assert.deepEqual(changeRequest.requirements, request);
+  assert.deepEqual(inputManifest.readOrder, [
+    "PROMPT.md",
+    "input/AI_RULES.md",
+    "change-request.json",
+    "input/PROJECT.md",
+    "input/base/index.html",
+    "input/annotations/records.json",
+  ]);
+  assert.equal(
+    inputManifest.files.find((entry) => entry.path === "input/base/index.html").sha256,
+    saved.target.sourceSha256,
+  );
+  assert.equal(prepared.inputManifestSha256, sha256(await readFile(inputManifestPath)));
+
+  await value.repository.updateProjectNotes({
+    target: saved.target,
+    content: "# 已修改的项目规则\n",
+  });
+  assert.deepEqual(await readFile(annotationsPath), frozenAnnotations);
+  assert.deepEqual(await readFile(projectRulesPath), frozenProjectRules);
+  assert.deepEqual(await readFile(changeRequestPath), frozenChangeRequest);
+});
+
+test("a copied project remains external and its first import creates an independent V1", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value);
+  const copiedRoot = path.join(value.projects, "copied-project");
+  await cp(imported.target.projectRootPath, copiedRoot, { recursive: true });
+  const copiedHtml = path.join(copiedRoot, path.basename(imported.target.exactSourcePath));
+  const copiedManifestBefore = await readFile(path.join(
+    copiedRoot,
+    ".pageroot",
+    "manifest.json",
+  ));
+
+  assert.equal(
+    await value.repository.resolveOpenTarget({ sourcePath: copiedHtml }),
+    null,
+  );
 
   const importedAsNew = await value.repository.importExternal({
     sourcePath: copiedHtml,
-    expectedSourceSha256: reassociated.sourceSha256,
-    forceNew: true,
+    expectedSourceSha256: imported.target.sourceSha256,
   });
   assert.equal(importedAsNew.imported, true);
   assert.notEqual(importedAsNew.target.projectId, imported.target.projectId);
@@ -321,6 +777,11 @@ test("duplicate project identity requires an explicit reassociation choice", asy
     "manifest.json",
   ));
   assert.deepEqual(newManifest.versions.map((version) => version.versionId), ["ver_0001"]);
+  assert.deepEqual(await readFile(path.join(
+    copiedRoot,
+    ".pageroot",
+    "manifest.json",
+  )), copiedManifestBefore);
 });
 
 test("import fails before publication without registration debris, and rejects symbolic links", async (t) => {
@@ -353,13 +814,12 @@ test("import fails before publication without registration debris, and rejects s
   );
 });
 
-test("import fault injection never leaves a half-registered project and bounded recovery completes a published import", async (t) => {
+test("only a Registry pending-import intent can recover a published import", async (t) => {
   for (const failpoint of [
     "import-directories-created",
     "import-snapshot-written",
     "import-working-copy-written",
     "import-metadata-written",
-    "import-project-published",
   ]) {
     const value = await fixture(t);
     const sourcePath = path.join(value.sources, "fault.html");
@@ -387,6 +847,44 @@ test("import fault injection never leaves a half-registered project and bounded 
       failpoint,
     );
   }
+
+  const published = await fixture(t);
+  const publishedSourcePath = path.join(published.sources, "published.html");
+  const publishedSource = html("pending registry intent");
+  await writeFile(publishedSourcePath, publishedSource, "utf8");
+  const interruptedAfterPublish = new ProjectFileRepository({
+    projectsRoot: published.projects,
+    failpoint: async (name) => name === "import-project-published",
+  });
+  await assert.rejects(
+    interruptedAfterPublish.importExternal({
+      sourcePath: publishedSourcePath,
+      expectedSourceSha256: sha256(Buffer.from(publishedSource, "utf8")),
+    }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "INJECTED_FAILPOINT",
+  );
+  const pendingRegistry = await json(path.join(
+    published.projects,
+    ".pageroot-registry.json",
+  ));
+  assert.equal(Object.keys(pendingRegistry.projects).length, 0);
+  assert.equal(Object.keys(pendingRegistry.pendingImports).length, 1);
+  const publishedRoots = (await readdir(published.projects, { withFileTypes: true }))
+    .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."));
+  assert.equal(publishedRoots.length, 1);
+  const recoveredPublish = new ProjectFileRepository({ projectsRoot: published.projects });
+  await recoveredPublish.initialize();
+  const reopenedPublished = await recoveredPublish.resolveOpenTarget({
+    sourcePath: path.join(published.projects, publishedRoots[0].name, "published-V1.html"),
+  });
+  assert.equal(reopenedPublished.targetKind, "working-copy");
+  const recoveredRegistry = await json(path.join(
+    published.projects,
+    ".pageroot-registry.json",
+  ));
+  assert.equal(Object.keys(recoveredRegistry.pendingImports).length, 0);
+  assert.equal(Object.keys(recoveredRegistry.projects).length, 1);
 
   const committed = await fixture(t);
   const committedSourcePath = path.join(committed.sources, "committed.html");
@@ -416,17 +914,8 @@ test("import fault injection never leaves a half-registered project and bounded 
 
   const recovered = await fixture(t);
   const imported = await importSource(recovered, "recovery.html");
-  const recoveryPath = path.join(
-    imported.target.projectRootPath,
-    ".pageroot",
-    "recovery",
-    "import.json",
-  );
-  const importRecovery = await json(recoveryPath);
-  await writeFile(recoveryPath, JSON.stringify({
-    ...importRecovery,
-    state: "prepared",
-  }), "utf8");
+  const copiedRoot = path.join(recovered.projects, "unregistered-copy");
+  await cp(imported.target.projectRootPath, copiedRoot, { recursive: true });
   const registryPath = path.join(recovered.projects, ".pageroot-registry.json");
   const registry = await json(registryPath);
   delete registry.projects[imported.target.projectId];
@@ -434,11 +923,14 @@ test("import fault injection never leaves a half-registered project and bounded 
 
   const restart = new ProjectFileRepository({ projectsRoot: recovered.projects });
   await restart.initialize();
-  const rebound = await restart.resolveOpenTarget({
+  const originalUnregistered = await restart.resolveOpenTarget({
     sourcePath: imported.target.exactSourcePath,
   });
-  assert.equal(rebound.projectId, imported.target.projectId);
-  assert.equal((await json(recoveryPath)).state, "committed");
+  const copiedUnregistered = await restart.resolveOpenTarget({
+    sourcePath: path.join(copiedRoot, path.basename(imported.target.exactSourcePath)),
+  });
+  assert.equal(originalUnregistered, null);
+  assert.equal(copiedUnregistered, null);
 });
 
 test("request finalization creates a reviewable Candidate only, and manifest path traversal is refused", async (t) => {
@@ -477,10 +969,60 @@ test("request finalization creates a reviewable Candidate only, and manifest pat
   );
 });
 
+test("a replaced private promotion file fails recovery without deleting user bytes", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "promotion-tamper.html");
+  const candidate = await value.repository.createCandidate({
+    target: imported.target,
+    requestId: "req_tampered_promotion",
+    candidateId: "candidate_tampered_promotion_0001",
+    html: html("candidate before user replacement"),
+    expectedSourceSha256: imported.target.sourceSha256,
+  });
+  const interrupted = new ProjectFileRepository({
+    projectsRoot: value.projects,
+    failpoint: async (name) => name === "promotion-working-copy-prepared",
+  });
+  await assert.rejects(
+    interrupted.promoteCandidate({
+      target: imported.target,
+      candidateId: candidate.candidate.candidateId,
+    }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "INJECTED_FAILPOINT",
+  );
+  const transactionPath = path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "transactions",
+    `promote_${candidate.candidate.candidateId}`,
+    "transaction.json",
+  );
+  const transaction = await json(transactionPath);
+  const preparedPath = path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    ...transaction.preparedWorkingCopyRelativePath.split("/"),
+  );
+  const replacement = html("user replaced preparation file");
+  await rm(preparedPath);
+  await writeFile(preparedPath, replacement, "utf8");
+
+  await assert.rejects(
+    new ProjectFileRepository({ projectsRoot: value.projects }).workspace({
+      sourcePath: imported.target.exactSourcePath,
+    }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "PROMOTION_PREPARED_FILE_CHANGED",
+  );
+  assert.equal(await readFile(preparedPath, "utf8"), replacement);
+});
+
 test("promotion fault recovery leaves exactly one formal Version and regular files at every commit point", async (t) => {
   for (const failpoint of [
     "promotion-prepared",
     "promotion-snapshot-created",
+    "promotion-working-copy-prepared",
     "promotion-working-copy-created",
     "promotion-manifest-committed",
     "promotion-completed",

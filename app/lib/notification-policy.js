@@ -37,12 +37,18 @@ const PRODUCT_ERROR_MESSAGES = Object.freeze({
     "源 HTML 已在其他位置发生变化；PageRoot 没有覆盖它。",
   SOURCE_HASH_CONFLICT:
     "源 HTML 已在其他位置发生变化；PageRoot 没有覆盖它。",
-  DUPLICATE_PROJECT_ID:
-    "发现相同的项目身份。请选择重新关联此位置，或将当前 HTML 作为新项目导入。",
-  PROJECT_RELOCATION_REQUIRED:
-    "项目文件夹已移动，PageRoot 已暂停向旧位置写入。请定位新位置的 HTML 后继续保存。",
-  WORKING_COPY_RELOCATION_REQUIRED:
-    "当前 HTML 已改名或移动，PageRoot 已暂停写入。请重新打开新位置的 HTML 后继续保存。",
+  REGISTERED_PROJECT_UNAVAILABLE:
+    "项目暂不可用，修改仍保留；放回原登记位置后自动恢复。",
+  WORKING_COPY_UNAVAILABLE:
+    "文件暂不可用，修改仍保留。",
+  WORKING_COPY_CONFLICT:
+    "磁盘文件与当前未保存修改都已保留；请先核对内容后再决定如何继续。",
+  MANAGED_PATH_AMBIGUOUS:
+    "当前文件无法唯一对应到工作文件。PageRoot 没有写入，请先恢复唯一位置。",
+  REGISTERED_PROJECT_PATH_MISMATCH:
+    "当前文件夹不是项目的登记位置。PageRoot 没有写入。",
+  REGISTERED_PROJECT_IDENTITY_CHANGED:
+    "登记位置的项目身份无法核对。PageRoot 没有写入。",
   PROJECT_IDENTITY_CHANGED:
     "当前文件夹的项目身份已变化，PageRoot 没有写入。请重新打开正确的项目。",
   MANAGED_SOURCE_AMBIGUOUS:

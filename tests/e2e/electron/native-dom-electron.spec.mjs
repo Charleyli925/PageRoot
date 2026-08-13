@@ -1,15 +1,21 @@
 import {
+  cpSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
   readdirSync,
+  renameSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { expect, test } from "@playwright/test";
+
+import { ProjectFileRepository } from "../../../scripts/project-file-repository.mjs";
 
 import {
   activateNativeEdit,
@@ -37,6 +43,7 @@ import {
   removeValidatedTemporaryDirectory,
   removeSourceFixture as removeSharedSourceFixture,
   sendToMainRenderer,
+  seedLegacyV3Project,
   stopPageRoot,
   waitForProjectReady as waitForSharedProjectReady,
 } from "./helpers/pageroot-app-fixture.mjs";
@@ -112,6 +119,39 @@ async function waitForFreshDiskFrame(page, previousDocumentToken, caseId) {
   return frame;
 }
 
+async function managedWorkingCopyPath(page, externalSourcePath) {
+  const externalPath = realpathSync(externalSourcePath);
+  let active = null;
+  await expect.poll(async () => {
+    active = await page.evaluate(() => window.htmlAIProjects?.getActiveProject());
+    return active?.sourcePath || "";
+  }).not.toBe(externalPath);
+  expect(active?.sourcePath).toBeTruthy();
+  return active.sourcePath;
+}
+
+async function bridgeJson(page, pathname, { method = "GET", body = null } = {}) {
+  const runtime = await page.evaluate(() => ({
+    port: window.htmlAIRuntime?.bridgePort || "",
+    token: window.htmlAIRuntime?.bridgeAuthToken || "",
+  }));
+  if (!runtime.port || !runtime.token) {
+    throw new Error("Electron did not expose a usable Bridge connection.");
+  }
+  const response = await fetch(`http://127.0.0.1:${runtime.port}${pathname}`, {
+    method,
+    headers: {
+      "X-HTML-AI-Bridge-Token": runtime.token,
+      ...(body ? { "content-type": "application/json" } : {}),
+    },
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  });
+  return {
+    status: response.status,
+    body: await response.json().catch(() => null),
+  };
+}
+
 async function rememberCurrentNativeHost(page, caseId) {
   const iframe = page
     .getByTestId("html-canvas-editor")
@@ -150,6 +190,7 @@ async function expectCheckpointPersisted(page, afterRevision) {
       state: element.getAttribute("data-persist-state"),
       editRevision,
       persistedRevision,
+      error: document.querySelector(".source-conflict-banner span")?.textContent || "",
       synchronized:
         Number.isSafeInteger(editRevision)
         && editRevision > minimumRevision
@@ -157,6 +198,7 @@ async function expectCheckpointPersisted(page, afterRevision) {
     };
   }, afterRevision), { timeout: 30_000 }).toMatchObject({
     state: "idle",
+    error: "",
     synchronized: true,
   });
   return Number(await indicator.getAttribute("data-persisted-revision"));
@@ -397,6 +439,170 @@ test("Electron first launch registers the welcome HTML and sends its comment to 
       launched.electronApp,
       launched.isolatedUserData,
     );
+  }
+});
+
+test("Electron v4 registry only recovers Finder rename and protects moved copies plus Promotion collisions", async () => {
+  test.setTimeout(120_000);
+  const sourceDirectory = mkdtempSync(path.join(tmpdir(), "pageroot-native-source-e2e-"));
+  const sourcePath = path.join(sourceDirectory, "finder-registry-state.html");
+  const originalExternal = fixtureBuffer("source-fidelity.html");
+  writeFileSync(sourcePath, originalExternal);
+  const isolatedUserData = mkdtempSync(path.join(tmpdir(), "pageroot-native-e2e-"));
+  const outsideRoot = mkdtempSync(path.join(tmpdir(), "pageroot-managed-root-outside-"));
+  let electronApp = null;
+  try {
+    const launched = await launchPageRoot({ isolatedUserData });
+    electronApp = launched.electronApp;
+
+    const preview = await bridgeJson(
+      launched.page,
+      `/workspace?sourcePath=${encodeURIComponent(sourcePath)}`,
+    );
+    expect(preview.status).toBe(200);
+    expect(preview.body).toMatchObject({ registered: false });
+    const ensured = await bridgeJson(launched.page, "/project/ensure", {
+      method: "POST",
+      body: {
+        sourcePath,
+        expectedSourceSha256: preview.body.sourceSha256,
+        projectStorageVersion: "4.0.0",
+      },
+    });
+    expect(ensured.status).toBe(200);
+    expect(ensured.body).toMatchObject({
+      registered: true,
+      projectFileSchemaVersion: "4.0.0",
+      imported: true,
+    });
+    expect(readFileSync(sourcePath)).toEqual(originalExternal);
+
+    const firstTarget = ensured.body.openTarget;
+    const projectsRoot = path.dirname(firstTarget.projectRootPath);
+    const finderRenamedRoot = path.join(projectsRoot, "Finder 改名项目");
+    const firstWorkingCopyName = path.basename(firstTarget.exactSourcePath);
+    renameSync(firstTarget.projectRootPath, finderRenamedRoot);
+    const finderRenamedPath = path.join(finderRenamedRoot, firstWorkingCopyName);
+
+    const rootRecovered = await bridgeJson(
+      launched.page,
+      `/workspace?sourcePath=${encodeURIComponent(finderRenamedPath)}`,
+    );
+    expect(rootRecovered.status).toBe(200);
+    expect(rootRecovered.body).toMatchObject({
+      registered: true,
+      projectId: firstTarget.projectId,
+      documentId: firstTarget.documentId,
+    });
+    expect(rootRecovered.body.openTarget.projectRootPath).toBe(finderRenamedRoot);
+
+    const finderRenamedHtml = path.join(finderRenamedRoot, "Finder-B-V1.html");
+    renameSync(finderRenamedPath, finderRenamedHtml);
+    const htmlRecovered = await bridgeJson(
+      launched.page,
+      `/workspace?sourcePath=${encodeURIComponent(finderRenamedHtml)}`,
+    );
+    expect(htmlRecovered.status).toBe(200);
+    expect(htmlRecovered.body.openTarget).toMatchObject({
+      projectId: firstTarget.projectId,
+      workingCopyId: firstTarget.workingCopyId,
+      exactSourcePath: finderRenamedHtml,
+    });
+    const renamedManifest = JSON.parse(readFileSync(
+      path.join(finderRenamedRoot, ".pageroot", "manifest.json"),
+      "utf8",
+    ));
+    expect(renamedManifest.workingCopies[0]).toMatchObject({
+      sourceRelativePath: "Finder-B-V1.html",
+      preferredFileStem: "Finder-B",
+      preferredExtension: ".html",
+      workingCopyId: firstTarget.workingCopyId,
+    });
+
+    const movedRoot = path.join(outsideRoot, "moved-project");
+    const bytesBeforeMove = readFileSync(finderRenamedHtml);
+    const targetBeforeMove = htmlRecovered.body.openTarget;
+    renameSync(finderRenamedRoot, movedRoot);
+    const movedHtml = path.join(movedRoot, "Finder-B-V1.html");
+    const blockedSave = await bridgeJson(launched.page, "/autosave", {
+      method: "POST",
+      body: {
+        ...targetBeforeMove,
+        html: "<!doctype html><html><head><title>blocked</title></head><body><p>blocked</p></body></html>",
+        expectedSourceSha256: targetBeforeMove.sourceSha256,
+        editRevision: 1,
+      },
+    });
+    expect(blockedSave.status).toBe(404);
+    expect(blockedSave.body?.error?.code).toBe("REGISTERED_PROJECT_UNAVAILABLE");
+    expect(readFileSync(movedHtml)).toEqual(bytesBeforeMove);
+
+    const movedPreview = await bridgeJson(
+      launched.page,
+      `/workspace?sourcePath=${encodeURIComponent(movedHtml)}`,
+    );
+    expect(movedPreview.status).toBe(200);
+    expect(movedPreview.body).toMatchObject({ registered: false });
+
+    renameSync(movedRoot, finderRenamedRoot);
+    const returned = await bridgeJson(
+      launched.page,
+      `/workspace?sourcePath=${encodeURIComponent(finderRenamedHtml)}`,
+    );
+    expect(returned.status).toBe(200);
+    expect(returned.body).toMatchObject({
+      registered: true,
+      projectId: firstTarget.projectId,
+      documentId: firstTarget.documentId,
+    });
+
+    const copiedRoot = path.join(projectsRoot, "Finder 副本项目");
+    cpSync(finderRenamedRoot, copiedRoot, { recursive: true });
+    const copiedHtml = path.join(copiedRoot, "Finder-B-V1.html");
+    const copiedManifestPath = path.join(copiedRoot, ".pageroot", "manifest.json");
+    const copiedManifestBefore = readFileSync(copiedManifestPath);
+    const copiedPreview = await bridgeJson(
+      launched.page,
+      `/workspace?sourcePath=${encodeURIComponent(copiedHtml)}`,
+    );
+    expect(copiedPreview.status).toBe(200);
+    expect(copiedPreview.body).toMatchObject({ registered: false });
+    expect(readFileSync(copiedManifestPath)).toEqual(copiedManifestBefore);
+
+    const repository = new ProjectFileRepository({ projectsRoot });
+    await repository.initialize();
+    const workspace = await repository.workspace({ sourcePath: finderRenamedHtml });
+    const candidate = await repository.createCandidate({
+      target: workspace.target,
+      requestId: "req_e2e_registered_root",
+      candidateId: "candidate_e2e_registered_root_0001",
+      html: "<!doctype html><html><head><title>Finder candidate</title></head><body><p>Candidate retained for explicit adoption.</p></body></html>",
+      expectedSourceSha256: workspace.sourceSha256,
+    });
+    const userFile = path.join(finderRenamedRoot, "Finder-B-V2.html");
+    const userDirectory = path.join(finderRenamedRoot, "Finder-B-V2-V2.html");
+    const userSymlink = path.join(finderRenamedRoot, "Finder-B-V2-V2-V2.html");
+    const userSymlinkTarget = path.join(outsideRoot, "user-symlink-target.html");
+    writeFileSync(userFile, "user file must not be overwritten", "utf8");
+    mkdirSync(userDirectory);
+    writeFileSync(userSymlinkTarget, "user symlink target", "utf8");
+    symlinkSync(userSymlinkTarget, userSymlink);
+
+    const promoted = await repository.promoteCandidate({
+      target: workspace.target,
+      candidateId: candidate.candidate.candidateId,
+    });
+    expect(path.basename(promoted.target.exactSourcePath)).toBe("Finder-B-V2-V2-V2-V2.html");
+    expect(readFileSync(userFile, "utf8")).toBe("user file must not be overwritten");
+    expect(readdirSync(userDirectory)).toEqual([]);
+    expect(readFileSync(userSymlinkTarget, "utf8")).toBe("user symlink target");
+  } finally {
+    if (electronApp) {
+      await stopPageRoot(electronApp, isolatedUserData, { cleanup: false });
+    }
+    removeIsolatedUserData(isolatedUserData);
+    removeValidatedTemporaryDirectory(outsideRoot, "pageroot-managed-root-outside-");
+    removeValidatedTemporaryDirectory(sourceDirectory, "pageroot-native-source-e2e-");
   }
 });
 
@@ -1435,6 +1641,7 @@ test("Electron autosaves one authorized disk patch and reopens the same forward 
   let firstApp = null;
   let reopenedApp = null;
   try {
+    await seedLegacyV3Project({ isolatedUserData, sourcePath });
     const firstLaunch = await launchPageRoot({
       isolatedUserData,
       activeSourcePath: sourcePath,
@@ -1542,6 +1749,7 @@ test("Electron persists text, style, structure, and reorder undo while focused f
   let firstApp = null;
   let reopenedApp = null;
   try {
+    await seedLegacyV3Project({ isolatedUserData, sourcePath });
     const firstLaunch = await launchPageRoot({
       isolatedUserData,
       activeSourcePath: sourcePath,
@@ -1791,6 +1999,7 @@ test("Electron restores the active text selection and keeps comment anchors stab
   const isolatedUserData = mkdtempSync(path.join(tmpdir(), "pageroot-native-e2e-"));
   let electronApp = null;
   try {
+    await seedLegacyV3Project({ isolatedUserData, sourcePath });
     const launched = await launchPageRoot({
       isolatedUserData,
       activeSourcePath: sourcePath,
@@ -2049,9 +2258,17 @@ test("Electron persists an Apple Pinyin boundary composition with left affinity"
       previousDocumentToken,
       "heading-inline",
     );
+    const managedSourcePath = await managedWorkingCopyPath(
+      firstLaunch.page,
+      sourcePath,
+    );
     expect(
-      readFileSync(sourcePath).equals(expected),
-      "boundary IME commit must persist only the left-affinity island change",
+      readFileSync(sourcePath).equals(original),
+      "the caller-owned HTML must remain byte-for-byte unchanged after V1 import",
+    ).toBe(true);
+    expect(
+      readFileSync(managedSourcePath).equals(expected),
+      "boundary IME commit must persist only the left-affinity island change in V1",
     ).toBe(true);
 
     await expect.poll(() => frame.locator(caseSelector("heading-inline")).innerHTML())
@@ -2059,35 +2276,37 @@ test("Electron persists an Apple Pinyin boundary composition with left affinity"
 
     await closePageRootGracefully(firstApp, firstLaunch.page);
     firstApp = null;
-    const workspace = path.join(isolatedUserData, "workspace");
-    const registry = JSON.parse(
-      readFileSync(path.join(workspace, "project-registry.json"), "utf8"),
+    const projectRoot = path.dirname(managedSourcePath);
+    const manifest = JSON.parse(
+      readFileSync(path.join(projectRoot, ".pageroot", "manifest.json"), "utf8"),
     );
-    const projectEntry = Object.entries(registry.projects).find(
-      ([, project]) => project.sourcePath === realpathSync(sourcePath),
+    const workingCopy = manifest.workingCopies.find(
+      (entry) => entry.workingCopyId === "work_ver_0001",
     );
-    expect(projectEntry, "the first durable edit must establish one project authority")
-      .toBeTruthy();
-    const [, persistedProject] = projectEntry;
-    const projectRoot = path.join(
-      workspace,
-      "projects",
-      persistedProject.storageDirectoryName,
-    );
-    const annotations = JSON.parse(
-      readFileSync(path.join(projectRoot, "draft", "annotations.json"), "utf8"),
+    expect(manifest.versions.map((entry) => entry.versionId)).toEqual(["ver_0001"]);
+    expect(workingCopy).toBeTruthy();
+    const draft = JSON.parse(
+      readFileSync(
+        path.join(
+          projectRoot,
+          ".pageroot",
+          "drafts",
+          `${workingCopy.workingCopyId}.json`,
+        ),
+        "utf8",
+      ),
     );
     const runtimeState = JSON.parse(
-      readFileSync(path.join(projectRoot, "runtime-state.json"), "utf8"),
+      readFileSync(path.join(projectRoot, ".pageroot", "runtime-state.json"), "utf8"),
     );
-    expect(annotations.draftRevision).toBeGreaterThan(0);
-    expect(annotations.editEvents.length).toBeGreaterThan(0);
-    expect(runtimeState.draft.draftRevision).toBe(annotations.draftRevision);
+    expect(draft.draftRevision).toBeGreaterThan(0);
+    expect(draft.changeEvents.length).toBeGreaterThan(0);
+    expect(runtimeState.activeWorkingCopyId).toBe(workingCopy.workingCopyId);
     const reopened = await launchPageRoot({ isolatedUserData });
     reopenedApp = reopened.electronApp;
     const { frame: reopenedFrame } = await loadedDiskFrame(
       reopened.page,
-      sourcePath,
+      managedSourcePath,
       "heading-inline",
     );
     const reopenedHtml = await reopenedFrame.locator(
@@ -2095,7 +2314,8 @@ test("Electron persists an Apple Pinyin boundary composition with left affinity"
     ).innerHTML();
     expect(reopenedHtml).toContain("你好<em");
     expect(reopenedHtml).not.toContain("<i>");
-    expect(readFileSync(sourcePath).equals(expected)).toBe(true);
+    expect(readFileSync(sourcePath).equals(original)).toBe(true);
+    expect(readFileSync(managedSourcePath).equals(expected)).toBe(true);
 
     await closePageRootGracefully(reopenedApp, reopened.page);
     reopenedApp = null;

@@ -7,7 +7,6 @@
     "schemaVersion",
     "projectId",
     "documentId",
-    "fileNaming",
     "latestOfficialVersionId",
     "versions",
     "workingCopies"
@@ -16,15 +15,6 @@
     "schemaVersion": { "const": "4.0.0" },
     "projectId": { "type": "string", "pattern": "^project_[a-f0-9]{16,64}$" },
     "documentId": { "type": "string", "pattern": "^doc_[a-f0-9]{16,64}$" },
-    "fileNaming": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["stem", "extension"],
-      "properties": {
-        "stem": { "type": "string", "minLength": 1, "maxLength": 255 },
-        "extension": { "enum": [".html", ".htm"] }
-      }
-    },
     "latestOfficialVersionId": { "type": "string", "pattern": "^ver_\\d{4,}$" },
     "versions": {
       "type": "array",
@@ -67,6 +57,8 @@
           "versionId",
           "basedOnVersionId",
           "sourceRelativePath",
+          "preferredFileStem",
+          "preferredExtension",
           "stateRelativePath",
           "fileIdentity"
         ],
@@ -74,7 +66,17 @@
           "workingCopyId": { "type": "string", "pattern": "^work_ver_\\d{4,}$" },
           "versionId": { "type": "string", "pattern": "^ver_\\d{4,}$" },
           "basedOnVersionId": { "type": "string", "pattern": "^ver_\\d{4,}$" },
-          "sourceRelativePath": { "type": "string", "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+" },
+          "sourceRelativePath": {
+            "type": "string",
+            "pattern": "^(?!.*[/\\\\\\u0000-\\u001F]).+\\.(?:html|htm)$"
+          },
+          "preferredFileStem": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255,
+            "pattern": "^(?!.*[\\u0000-\\u001F\\u007F/\\\\]).+$"
+          },
+          "preferredExtension": { "enum": [".html", ".htm"] },
           "stateRelativePath": { "type": "string", "pattern": "^working-copies/(?!.*(?:^|/)\\.\\.(?:/|$)).+\\.json$" },
           "fileIdentity": {
             "type": "object",

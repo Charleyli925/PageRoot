@@ -1871,6 +1871,9 @@ export class ProjectWorkflow {
       if (workspaceHash && !SHA256.test(workspaceHash)) {
         throw new Error("项目状态返回的源 HTML Hash 无效。");
       }
+      const openTarget = this.#codecs.isRecord(payload.openTarget)
+        ? payload.openTarget
+        : null;
       let preparedTransition = null;
       if (!this.#codecs.sameSourcePath(canonicalSourcePath, activeSource)) {
         if (!mustAdoptSource) {
@@ -1895,6 +1898,7 @@ export class ProjectWorkflow {
           nextProjectId,
           nextDocumentId,
           versionId,
+          openTarget,
         });
         if (!preparedTransition.updatesCurrentProject) return stale({
           operationId,
@@ -1907,9 +1911,6 @@ export class ProjectWorkflow {
 
       const projectRecord = this.#codecs.isRecord(payload.project) ? payload.project : {};
       const workspacePaths = this.#codecs.isRecord(payload.paths) ? payload.paths : {};
-      const openTarget = this.#codecs.isRecord(payload.openTarget)
-        ? payload.openTarget
-        : null;
       const currentDocument = this.#documentSession.snapshot;
       const currentHtmlHash = await this.#hashPort.sha256(currentDocument.html);
       if (!queryIsCurrent()) return stale({ operationId, epoch: activeEpoch, sourcePath: activeSource });
@@ -2447,16 +2448,33 @@ export class ProjectWorkflow {
         activatedProject: null,
       });
     }
-    if (typeof this.#projectOpenPort.activateGeneratedVersion !== "function") {
-      throw new Error("当前运行环境不能安全切换到生成的新版本文件。");
-    }
-    const activatedProject = await this.#projectOpenPort.activateGeneratedVersion({
-      previousSourcePath,
-      nextSourcePath,
-      expectedSha256,
-      projectId: nextProjectId,
-      versionId,
-    });
+    const isManagedWorkingCopy = Boolean(
+      openTarget
+      && openTarget.targetKind === "working-copy"
+      && String(openTarget.projectId || "") === String(nextProjectId || "")
+      && String(openTarget.documentId || "") === String(nextDocumentId || "")
+      && String(openTarget.workingCopyId || "")
+      && String(openTarget.versionId || "") === String(versionId || "")
+      && String(openTarget.projectRootPath || "")
+    );
+    const activatedProject = isManagedWorkingCopy
+      ? await this.#activateManagedWorkingCopy({
+          previousSourcePath,
+          nextSourcePath,
+          expectedSha256,
+          projectId: nextProjectId,
+          documentId: nextDocumentId,
+          workingCopyId: String(openTarget.workingCopyId),
+          versionId,
+          projectRootPath: String(openTarget.projectRootPath),
+        })
+      : await this.#activateGeneratedVersion({
+          previousSourcePath,
+          nextSourcePath,
+          expectedSha256,
+          projectId: nextProjectId,
+          versionId,
+        });
     if (
       !this.#codecs.sameSourcePath(activatedProject.sourcePath, nextSourcePath)
       || activatedProject.sha256 !== expectedSha256
@@ -2472,6 +2490,20 @@ export class ProjectWorkflow {
       updatesCurrentProject,
       activatedProject,
     });
+  }
+
+  async #activateGeneratedVersion(input) {
+    if (typeof this.#projectOpenPort.activateGeneratedVersion !== "function") {
+      throw new Error("当前运行环境不能安全切换到生成的新版本文件。");
+    }
+    return this.#projectOpenPort.activateGeneratedVersion(input);
+  }
+
+  async #activateManagedWorkingCopy(input) {
+    if (typeof this.#projectOpenPort.activateManagedWorkingCopy !== "function") {
+      throw new Error("当前运行环境不能安全切换到托管工作文件。");
+    }
+    return this.#projectOpenPort.activateManagedWorkingCopy(input);
   }
 
   commitGeneratedSourceTransition({ prepared, html, sourceSha256, publishVersion }) {

@@ -379,6 +379,11 @@ test("DocumentWorkflow rebinds a moved Working Copy before the next autosave", a
   assert.equal(calls[1].expectedSourceSha256, sha256(after));
 });
 
+test("DocumentWorkflow exposes no user-selected moved-project rebinding API", () => {
+  const harness = createHarness();
+  assert.equal("rebindRelocatedOpenTarget" in harness.workflow, false);
+});
+
 test("DocumentWorkflow rejects an unchainable source transaction without publishing the canvas edit", () => {
   const before = "<!doctype html><html><body><p>one</p></body></html>";
   const after = before.replace("one", "two");

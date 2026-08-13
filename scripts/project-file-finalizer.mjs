@@ -30,13 +30,66 @@ function safeId(value, label) {
 }
 
 function normalizedPath(value) {
-  return path.resolve(String(value || "")).normalize("NFC");
+  const resolved = path.resolve(String(value || "")).normalize("NFC");
+  if (process.platform === "darwin") {
+    if (resolved === "/private/var" || resolved.startsWith("/private/var/")) {
+      return resolved.slice("/private".length);
+    }
+    if (resolved === "/private/tmp" || resolved.startsWith("/private/tmp/")) {
+      return resolved.slice("/private".length);
+    }
+  }
+  return resolved;
 }
 
 function inside(root, candidate) {
   const resolvedRoot = normalizedPath(root);
   const resolvedCandidate = normalizedPath(candidate);
   return resolvedCandidate.startsWith(`${resolvedRoot}${path.sep}`);
+}
+
+function samePath(left, right) {
+  const first = normalizedPath(left);
+  const second = normalizedPath(right);
+  if (process.platform === "darwin" || process.platform === "win32") {
+    return first.toLocaleLowerCase("en-US") === second.toLocaleLowerCase("en-US");
+  }
+  return first === second;
+}
+
+function copyFileIdentity(information) {
+  return {
+    device: String(information.dev),
+    inode: String(information.ino),
+    birthtimeMs: Number(information.birthtimeMs || 0),
+  };
+}
+
+function validFileIdentity(value) {
+  return Boolean(
+    value
+    && typeof value === "object"
+    && String(value.device || "")
+    && String(value.inode || "")
+    && Number.isFinite(Number(value.birthtimeMs))
+    && Number(value.birthtimeMs) >= 0,
+  );
+}
+
+function sameFileIdentity(left, right) {
+  return Boolean(
+    validFileIdentity(left)
+    && validFileIdentity(right)
+    && String(left.device) !== "0"
+    && String(left.device) === String(right.device)
+    && String(left.inode) !== "0"
+    && String(left.inode) === String(right.inode)
+    && (
+      !Number(left.birthtimeMs)
+      || !Number(right.birthtimeMs)
+      || Number(left.birthtimeMs) === Number(right.birthtimeMs)
+    ),
+  );
 }
 
 async function regularFile(filePath, label) {
@@ -122,8 +175,58 @@ function validateRequest(record, { requestId, attemptId }) {
   return record;
 }
 
+async function validateRegistryAuthority({
+  projectRoot,
+  projectsRoot,
+  registryPath,
+  identity,
+}) {
+  const configuredRoot = normalizedPath(projectsRoot || path.dirname(projectRoot));
+  const expectedRegistryPath = normalizedPath(
+    registryPath || path.join(configuredRoot, ".pageroot-registry.json"),
+  );
+  if (!samePath(path.dirname(projectRoot), configuredRoot)) {
+    throw new ProjectFileFinalizerError(
+      "UNREGISTERED_PROJECT_ROOT",
+      "The finalizer only accepts a direct child of the configured PageRoot project directory.",
+    );
+  }
+  await regularDirectory(configuredRoot, "configured project directory");
+  const rootInformation = await regularDirectory(projectRoot, "project root");
+  const registry = await readJson(expectedRegistryPath, "project Registry");
+  const record = registry?.projects?.[identity.projectId];
+  if (
+    registry?.schemaVersion !== PROJECT_FILE_SCHEMA_VERSION
+    || !registry?.projects
+    || !registry?.pendingImports
+    || !record
+    || typeof record !== "object"
+    || !samePath(record.registeredProjectRootPath, projectRoot)
+    || !validFileIdentity(record.rootFileIdentity)
+  ) {
+    throw new ProjectFileFinalizerError(
+      "REGISTERED_PROJECT_UNAVAILABLE",
+      "The project is not authorized by the v4 Registry for finalization.",
+      { projectId: identity.projectId },
+    );
+  }
+  const observedIdentity = copyFileIdentity(rootInformation);
+  if (!sameFileIdentity(record.rootFileIdentity, observedIdentity)) {
+    // Returning a verified project to its exact registered path may change
+    // device/inode after a cross-volume move. The finalizer never follows a
+    // moved path; it only refreshes this rename clue after IDs are verified.
+    record.rootFileIdentity = observedIdentity;
+    record.updatedAt = new Date().toISOString();
+    registry.updatedAt = record.updatedAt;
+    await atomicWriteJson(expectedRegistryPath, registry);
+  }
+  return { configuredRoot, registryPath: expectedRegistryPath };
+}
+
 export async function finalizeProjectFileAttempt({
   projectRoot,
+  projectsRoot = null,
+  registryPath = null,
   requestId,
   attemptId = "attempt_001",
 } = {}) {
@@ -140,6 +243,12 @@ export async function finalizeProjectFileAttempt({
       "project.json is not a supported PageRoot project-file identity.",
     );
   }
+  await validateRegistryAuthority({
+    projectRoot: root,
+    projectsRoot,
+    registryPath,
+    identity,
+  });
   const requestRoot = path.join(controlRoot, "requests", request);
   const record = validateRequest(
     await readJson(path.join(requestRoot, "request.json"), "request.json"),

@@ -88,6 +88,30 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
   identifier, content, path, filename, raw exception or stack is accepted
 - No silent application update or binary replacement
 
+## V4 Registry and managed-root authority
+
+The v4 Registry is the canonical write allowlist, not a cache for locating
+projects. A privileged project-file write requires one Registry record whose
+`projectId`, registered root path, recovered root identity, `project.json`, and
+manifest mappings agree. The root must be a direct child of the configured
+projects directory, and every managed control path is real-path checked with no
+symlink traversal.
+
+A same-parent Finder rename can update that Registry record only through a
+compare-and-swap after the stable project identity and root filesystem identity
+match. Moving a root elsewhere, crossing a volume, or copying it never grants
+write authority: the in-memory session remains readable but writes fail closed
+until the exact registered location is available and revalidated. Import
+recovery is likewise limited to Registry-owned pending intents; a discovered
+`.pageroot/import.json` is never proof that an arbitrary copied root is managed.
+
+Working-copy filename changes retain their immutable IDs. A missing mapping may
+be repaired only by a unique direct-child file identity or a unique hash; an
+ambiguity is a content-preserving error. Promotion reserves a final relative
+path in a durable transaction before bytes become visible, prepares a private
+transaction file, and publishes without overwrite. A replaced preparation file
+or an untrusted collision fails closed rather than deleting user data.
+
 ## V2 editable-island trust boundary
 
 The rendered preview DOM is disposable and never becomes a whole-document

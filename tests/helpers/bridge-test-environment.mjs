@@ -266,6 +266,7 @@ export async function createBridgeTestEnvironment(t, options = {}) {
         env: {
           ...process.env,
           HTML_AI_WORKSPACE: workspace,
+          HTML_AI_PROJECT_FILES_ROOT: join(root, "project-files"),
           HTML_AI_BRIDGE_PORT: String(port),
           ...environmentOverrides,
         },

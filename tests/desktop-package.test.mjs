@@ -93,6 +93,7 @@ const SCHEMA_FILES = [
   "input-manifest.v1.schema.json",
   "project-state.v3.schema.json",
   "project-identity.v4.schema.json",
+  "project-registry.v4.schema.json",
   "project-manifest.v4.schema.json",
   "project-runtime-state.v4.schema.json",
   "promotion-transaction.v4.schema.json",

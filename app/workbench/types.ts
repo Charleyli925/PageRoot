@@ -63,6 +63,18 @@ export type DesktopProjectsApi = {
     previousSourcePath: string;
     versionId: string;
   }>;
+  activateManagedWorkingCopy?: (payload: {
+    previousSourcePath: string;
+    nextSourcePath: string;
+    expectedSha256: string;
+    projectId: string;
+    documentId: string;
+    workingCopyId: string;
+    versionId: string;
+    projectRootPath: string;
+  }) => Promise<HtmlProject & {
+    previousSourcePath: string;
+  }>;
   exportHtmlCopy?: (payload: {
     html: string;
     sourcePath?: string | null;
