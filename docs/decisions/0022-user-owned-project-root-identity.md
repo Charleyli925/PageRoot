@@ -19,9 +19,10 @@ root; they do not authorize PageRoot to write that root. A pathname alone also
 does not prove identity. The Registry must therefore be the durable write
 whitelist, with filesystem identity used only as a same-parent rename clue.
 
-Existing v3 projects remain an independent legacy protocol. This decision does
-not migrate, dual-write, clone, or reinterpret their frozen Request and Version
-evidence.
+Project states created before v4 are intentionally incompatible with this
+opening boundary. The v4 path does not migrate, dual-write, recover, clone,
+reinterpret, or read their frozen Request and Version evidence; their selected
+HTML is instead imported as a new v4 Project beginning at V1.
 
 ## Decision
 
@@ -117,8 +118,8 @@ operation enters a conflict state.
   bypass the Registry merely by retaining IDs and hidden files.
 - Candidate adoption gets deterministic names and crash recovery without
   overwriting user files.
-- v3 remains unchanged. It is neither migrated nor a fallback way to bypass
-  v4 Registry checks.
+- Pre-v4 project state is neither migrated nor a fallback way to bypass v4
+  Registry checks; it is not an opening-path input at all.
 
 ## Rejected alternatives
 

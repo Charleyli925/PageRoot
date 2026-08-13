@@ -527,11 +527,16 @@ export default function Workbench() {
   const fileRenameEditingRef = useRef(false);
   const fileRenameBusyRef = useRef(false);
   const automaticProjectRegistrationRef = useRef("");
+  const projectRecordsPreparationRef = useRef("");
 
   const [workspaceControllerSnapshot, setWorkspaceControllerSnapshot] =
     useState<WorkspaceControllerSnapshot | null>(null);
   const [workspaceController, setWorkspaceController] =
     useState<WorkspaceController | null>(null);
+  const [importedCanvasBase, setImportedCanvasBase] = useState<{
+    managedSourcePath: string;
+    externalSourcePath: string;
+  } | null>(null);
   const currentControllerSnapshot = useCallback(
     () => workspaceControllerRef.current?.getSnapshot() ?? null,
     [],
@@ -582,15 +587,16 @@ export default function Workbench() {
   const { sourcePath, projectId, documentId } = projectSnapshot;
   // The first durable import changes the ProjectSession source from the
   // caller-owned HTML to V1's managed Working Copy without replacing the live
-  // DocumentSession canvas. ProjectFileRepository rejects relative resources
-  // on that import, so retaining the pre-import base for this canvas generation
-  // is semantically safe and, importantly, preserves the native/IME edit lease.
-  // A real document navigation always increments canvasGeneration and adopts
-  // the new source path here.
-  const canvasSourcePath = useMemo(
-    () => sourcePath || undefined,
-    [canvasGeneration],
-  );
+  // DocumentSession canvas. Keep the selected external HTML as the preview
+  // base for that imported Working Copy during this session, so authored
+  // relative resources remain preview-only rather than being copied into or
+  // managed by the v4 Project. A subsequent navigation uses its own source.
+  const canvasSourcePath = (
+    importedCanvasBase
+    && sameLocalSourcePath(sourcePath, importedCanvasBase.managedSourcePath)
+  )
+    ? importedCanvasBase.externalSourcePath
+    : sourcePath || undefined;
   const [projectRecordsPath, setProjectRecordsPath] =
     useState<string | null>(null);
   const [lastModifiedAt, setLastModifiedAt] = useState<string | null>(null);
@@ -1111,12 +1117,23 @@ export default function Workbench() {
     activeRun?.requestId === "pending"
     && isActiveRunOperationBusy("poll"),
   );
+  // Opening is not complete until the source has either proved its existing
+  // v4 binding or been imported as a new V1. Keeping this in the same
+  // hydration fence prevents comments, edits, renames, and native commands
+  // from racing an automatic V4 registration on a just-opened HTML.
+  const projectRegistrationPending = Boolean(
+    workspaceController
+    && sourcePath
+    && (!projectId || !documentId)
+    && !projectRecordsError,
+  );
   const projectHydrating =
-    workspaceControllerSnapshot?.project?.hydration.phase === "hydrating";
+    workspaceControllerSnapshot?.project?.hydration.phase === "hydrating"
+    || projectRegistrationPending;
   const projectLoadError =
     workspaceControllerSnapshot?.project?.hydration.phase === "failed"
       ? workspaceControllerSnapshot.project.hydration.error
-      : null;
+      : projectRecordsError || null;
   const [startupIssue, setStartupIssue] = useState<StartupIssue | null>(null);
   const [workspaceIssue, setWorkspaceIssue] = useState<WorkspaceIssue | null>(null);
   const [cancelRunConfirmationKey, setCancelRunConfirmationKey] =
@@ -2566,19 +2583,34 @@ export default function Workbench() {
       || !activeSource
       || (currentProject.projectId && currentProject.documentId)
     ) return;
+    const preparationKey = `${epoch}\0${activeSource}`;
+    projectRecordsPreparationRef.current = preparationKey;
+    let registrationPublished = false;
     setProjectRecordsPreparing(true);
     setProjectRecordsError("");
     try {
       const registered = registrationContextFromOutcome(
         await requiredWorkspaceController(workspaceController).ensureRegistered(),
       );
+      registrationPublished = Boolean(registered);
+      if (
+        registered
+        && !sameLocalSourcePath(registered.sourcePath, activeSource)
+      ) {
+        setImportedCanvasBase({
+          managedSourcePath: registered.sourcePath,
+          externalSourcePath: activeSource,
+        });
+      }
+      const settledProject = currentProjectSessionSnapshot();
+      const hydrationPublishedBinding = Boolean(
+        settledProject.projectId && settledProject.documentId,
+      );
       if (
         !registered
-        && currentProjectSessionSnapshot().epoch === epoch
-        && sameLocalSourcePath(
-          currentProjectSessionSnapshot().sourcePath,
-          activeSource,
-        )
+        && !hydrationPublishedBinding
+        && settledProject.epoch === epoch
+        && sameLocalSourcePath(settledProject.sourcePath, activeSource)
       ) {
         throw new Error("项目资料没有完成初始化。");
       }
@@ -2595,11 +2627,19 @@ export default function Workbench() {
         "项目资料暂时无法建立；当前 HTML 和评论仍保留，可在这里重试。",
       ));
     } finally {
+      const settledProject = currentProjectSessionSnapshot();
+      const hasSettledProjectBinding = Boolean(
+        settledProject.projectId && settledProject.documentId,
+      );
       if (
-        currentProjectSessionSnapshot().epoch === epoch
-        && sameLocalSourcePath(
-          currentProjectSessionSnapshot().sourcePath,
-          activeSource,
+        projectRecordsPreparationRef.current === preparationKey
+        && (
+          registrationPublished
+          || hasSettledProjectBinding
+          || (
+            settledProject.epoch === epoch
+            && sameLocalSourcePath(settledProject.sourcePath, activeSource)
+          )
         )
       ) {
         setProjectRecordsPreparing(false);

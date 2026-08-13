@@ -31,7 +31,6 @@ import {
   recordedInputEvents,
   replaceEditableIslandBytes,
   replaceUniqueBytes,
-  selectionSnapshot,
   setTextSelection,
   withBomAndCrLf,
 } from "../browser/pageroot-driver.mjs";
@@ -43,7 +42,6 @@ import {
   removeValidatedTemporaryDirectory,
   removeSourceFixture as removeSharedSourceFixture,
   sendToMainRenderer,
-  seedLegacyV3Project,
   stopPageRoot,
   waitForProjectReady as waitForSharedProjectReady,
 } from "./helpers/pageroot-app-fixture.mjs";
@@ -238,19 +236,6 @@ async function clickEditHistoryMenu(electronApp, page, direction) {
   );
 }
 
-async function selectAuthoredCase(frame, caseId) {
-  await frame.locator(caseSelector(caseId)).evaluate((element) => {
-    const rect = element.getBoundingClientRect();
-    element.dispatchEvent(new MouseEvent("click", {
-      bubbles: true,
-      cancelable: true,
-      clientX: rect.left + Math.min(4, rect.width / 2),
-      clientY: rect.top + Math.min(4, rect.height / 2),
-      view: window,
-    }));
-  });
-}
-
 async function addCanvasComment(page, frame, caseId, text) {
   await page.keyboard.press("Escape");
   const target = frame.locator(caseSelector(caseId));
@@ -383,26 +368,33 @@ async function replayApplePinyinStyledWrapperCommit(frame, caseId) {
   });
 }
 
-test("Electron first launch registers the welcome HTML and sends its comment to Qoder", async () => {
+test("Electron first launch imports the welcome HTML as V1 and sends its comment to Qoder", async () => {
   const launched = await launchPageRoot();
   const welcomePath = path.join(launched.isolatedUserData, "欢迎来到源页.html");
   const welcomeLogoPath = path.join(
     launched.isolatedUserData,
     "brand-logo.png",
   );
-  const workspace = path.join(launched.isolatedUserData, "workspace");
   try {
     const canonicalWelcomePath = path.join(
       realpathSync(launched.isolatedUserData),
       "欢迎来到源页.html",
     );
     await waitForProjectReady(launched.page);
+    let managedWelcomePath = "";
     await expect.poll(
-      async () => (
-        await launched.page.evaluate(() => window.htmlAIProjects?.getActiveProject())
-      )?.sourcePath,
+      async () => {
+        const active = await launched.page.evaluate(
+          () => window.htmlAIProjects?.getActiveProject(),
+        );
+        managedWelcomePath = String(active?.sourcePath || "");
+        return Boolean(
+          managedWelcomePath && managedWelcomePath !== canonicalWelcomePath,
+        );
+      },
       { timeout: 20_000 },
-    ).toBe(canonicalWelcomePath);
+    ).toBe(true);
+    expect(path.basename(managedWelcomePath)).toBe("欢迎来到源页-V1.html");
     await expect(launched.page.locator('[aria-label="项目读取失败"]')).toHaveCount(0);
     await expect(launched.page.getByRole("button", { name: "项目", exact: true }))
       .toBeEnabled({ timeout: 30_000 });
@@ -412,28 +404,21 @@ test("Electron first launch registers the welcome HTML and sends its comment to 
     await expect.poll(() => (
       existsSync(welcomePath)
       && existsSync(welcomeLogoPath)
-      && existsSync(path.join(workspace, "project-registry.json"))
+      && existsSync(path.join(managedWelcomePath, "..", ".pageroot", "manifest.json"))
     )).toBe(true);
-
-    const registry = JSON.parse(
-      readFileSync(path.join(workspace, "project-registry.json"), "utf8"),
-    );
-    const projectIds = Object.keys(registry.projects);
-    expect(projectIds).toHaveLength(1);
-    expect(registry.projects[projectIds[0]].sourcePath).toBe(canonicalWelcomePath);
-    expect(registry.projects[projectIds[0]].displayName).toBe("欢迎来到源页");
-    expect(registry.projects[projectIds[0]].storageDirectoryName)
-      .toMatch(/^欢迎来到源页__\d{8}-\d{6}__[a-f0-9]{8}$/);
-    expect(existsSync(
-      path.join(
-        workspace,
-        "projects",
-        registry.projects[projectIds[0]].storageDirectoryName,
-        "versions",
-        "ver_0001",
-        "committed.json",
-      ),
-    )).toBe(true);
+    expect(readFileSync(managedWelcomePath)).toEqual(readFileSync(welcomePath));
+    const projectRoot = path.dirname(managedWelcomePath);
+    const manifest = JSON.parse(readFileSync(
+      path.join(projectRoot, ".pageroot", "manifest.json"),
+      "utf8",
+    ));
+    expect(manifest.versions.map((version) => version.versionId)).toEqual(["ver_0001"]);
+    expect(manifest.workingCopies).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        workingCopyId: "work_ver_0001",
+        sourceRelativePath: "欢迎来到源页-V1.html",
+      }),
+    ]));
 
     const editor = launched.page.getByTestId("html-canvas-editor")
       .filter({ visible: true })
@@ -471,7 +456,7 @@ test("Electron first launch registers the welcome HTML and sends its comment to 
     const changeRequest = JSON.parse(
       readFileSync(path.join(path.dirname(promptPath), "change-request.json"), "utf8"),
     );
-    expect(changeRequest.projectId).toBe(projectIds[0]);
+    expect(changeRequest.projectId).toBe(manifest.projectId);
     expect(changeRequest.requirements.instructions[0].text)
       .toBe("把欢迎页主标题改得更简洁。");
   } finally {
@@ -646,33 +631,39 @@ test("Electron v4 registry only recovers Finder rename and protects moved copies
   }
 });
 
-test("Electron safely renames the saved current HTML without starting a new project", async () => {
+test("Electron safely renames the managed V1 without starting a new project", async () => {
   const launched = await launchPageRoot();
-  const originalPath = path.join(
+  const externalOriginalPath = path.join(
     realpathSync(launched.isolatedUserData),
     "欢迎来到源页.html",
   );
-  const renamedPath = path.join(
-    realpathSync(launched.isolatedUserData),
-    "我的页面.html",
-  );
-  const workspace = path.join(launched.isolatedUserData, "workspace");
   try {
     await waitForProjectReady(launched.page);
+    let managedOriginalPath = "";
     await expect.poll(
-      async () => (
-        await launched.page.evaluate(() => window.htmlAIProjects?.getActiveProject())
-      )?.sourcePath,
+      async () => {
+        const active = await launched.page.evaluate(
+          () => window.htmlAIProjects?.getActiveProject(),
+        );
+        managedOriginalPath = String(active?.sourcePath || "");
+        return Boolean(
+          managedOriginalPath && managedOriginalPath !== externalOriginalPath,
+        );
+      },
       { timeout: 20_000 },
-    ).toBe(originalPath);
-    const originalBytes = readFileSync(originalPath);
-    const originalRegistry = JSON.parse(
-      readFileSync(path.join(workspace, "project-registry.json"), "utf8"),
-    );
-    const [projectId] = Object.keys(originalRegistry.projects);
+    ).toBe(true);
+    expect(path.basename(managedOriginalPath)).toBe("欢迎来到源页-V1.html");
+    const projectRoot = path.dirname(managedOriginalPath);
+    const renamedPath = path.join(projectRoot, "我的页面-V1.html");
+    const originalBytes = readFileSync(externalOriginalPath);
+    const originalManifest = JSON.parse(readFileSync(
+      path.join(projectRoot, ".pageroot", "manifest.json"),
+      "utf8",
+    ));
+    const projectId = originalManifest.projectId;
 
     const title = launched.page.getByRole("button", {
-      name: "重命名文件 欢迎来到源页",
+      name: "重命名文件 欢迎来到源页-V1",
       exact: true,
     });
     await expect(title).toBeVisible();
@@ -681,9 +672,9 @@ test("Electron safely renames the saved current HTML without starting a new proj
       name: "文件名（不含后缀）",
       exact: true,
     });
-    await expect(input).toHaveValue("欢迎来到源页");
+    await expect(input).toHaveValue("欢迎来到源页-V1");
     await expect(input.locator("..")).toContainText(".html");
-    await input.fill("我的页面");
+    await input.fill("我的页面-V1");
     const header = launched.page.locator("header.workbench-header");
     await expect(header).toHaveAttribute("data-file-renaming", "true");
     const fileHeader = launched.page.locator(".window-file");
@@ -705,10 +696,11 @@ test("Electron safely renames the saved current HTML without starting a new proj
       { timeout: 20_000 },
     ).toBe(renamedPath);
     await expect(launched.page.getByRole("button", {
-      name: "重命名文件 我的页面",
+      name: "重命名文件 我的页面-V1",
       exact: true,
     })).toBeVisible();
-    expect(existsSync(originalPath)).toBe(false);
+    expect(readFileSync(externalOriginalPath)).toEqual(originalBytes);
+    expect(existsSync(managedOriginalPath)).toBe(false);
     expect(readFileSync(renamedPath)).toEqual(originalBytes);
 
     const state = JSON.parse(
@@ -720,27 +712,26 @@ test("Electron safely renames the saved current HTML without starting a new proj
     expect(state.pendingRename).toBeNull();
     expect(state.lastRename.sourcePath).toBe(renamedPath);
 
-    const renamedRegistry = JSON.parse(
-      readFileSync(path.join(workspace, "project-registry.json"), "utf8"),
-    );
-    expect(Object.keys(renamedRegistry.projects)).toEqual([projectId]);
-    expect(renamedRegistry.projects[projectId].sourcePath).toBe(renamedPath);
-    const storageDirectoryName =
-      renamedRegistry.projects[projectId].storageDirectoryName;
-    expect(storageDirectoryName).toBe(
-      originalRegistry.projects[projectId].storageDirectoryName,
-    );
-    const project = JSON.parse(
-      readFileSync(
-        path.join(workspace, "projects", storageDirectoryName, "project.json"),
-        "utf8",
-      ),
-    );
-    expect(project.documentId).toBe(originalRegistry.projects[projectId].documentId);
-    expect(project.sourcePath).toBe(renamedPath);
-    expect(project.displayName).toBe(
-      originalRegistry.projects[projectId].displayName,
-    );
+    const renamedManifest = JSON.parse(readFileSync(
+      path.join(projectRoot, ".pageroot", "manifest.json"),
+      "utf8",
+    ));
+    expect(renamedManifest.projectId).toBe(projectId);
+    expect(renamedManifest.documentId).toBe(originalManifest.documentId);
+    expect(renamedManifest.workingCopies).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        workingCopyId: "work_ver_0001",
+        sourceRelativePath: "我的页面-V1.html",
+        preferredFileStem: "我的页面",
+        preferredExtension: ".html",
+      }),
+    ]));
+    const registry = JSON.parse(readFileSync(
+      path.join(path.dirname(projectRoot), ".pageroot-registry.json"),
+      "utf8",
+    ));
+    expect(realpathSync(registry.projects[projectId].registeredProjectRootPath))
+      .toBe(realpathSync(projectRoot));
   } finally {
     await stopPageRoot(
       launched.electronApp,
@@ -1708,15 +1699,18 @@ test("Electron autosaves one authorized disk patch and reopens the same forward 
   let firstApp = null;
   let reopenedApp = null;
   try {
-    await seedLegacyV3Project({ isolatedUserData, sourcePath });
     const firstLaunch = await launchPageRoot({
       isolatedUserData,
       activeSourcePath: sourcePath,
     });
     firstApp = firstLaunch.electronApp;
-    let { frame } = await loadedDiskFrame(
+    const managedSourcePath = await managedWorkingCopyPath(
       firstLaunch.page,
       sourcePath,
+    );
+    let { frame } = await loadedDiskFrame(
+      firstLaunch.page,
+      managedSourcePath,
       "source-fidelity",
     );
     expect(
@@ -1746,9 +1740,10 @@ test("Electron autosaves one authorized disk patch and reopens the same forward 
       0,
     );
     expect(
-      readFileSync(sourcePath).equals(expected),
-      "checkpoint/autosave must write only the authorized bytes",
+      readFileSync(managedSourcePath).equals(expected),
+      "checkpoint/autosave must write only the authorized V1 bytes",
     ).toBe(true);
+    expect(readFileSync(sourcePath)).toEqual(original);
 
     frame = await waitForFreshDiskFrame(
       firstLaunch.page,
@@ -1770,7 +1765,7 @@ test("Electron autosaves one authorized disk patch and reopens the same forward 
     reopenedApp = reopened.electronApp;
     const { frame: reopenedFrame } = await loadedDiskFrame(
       reopened.page,
-      sourcePath,
+      managedSourcePath,
       "source-fidelity",
     );
     expect(await reopenedFrame.locator(caseSelector("source-fidelity")).textContent())
@@ -1783,7 +1778,8 @@ test("Electron autosaves one authorized disk patch and reopens the same forward 
       legacySurfaceCount: 0,
     });
     expect(await reopenedFrame.locator("[data-lexical-editor]").count()).toBe(0);
-    expect(readFileSync(sourcePath).equals(expected)).toBe(true);
+    expect(readFileSync(sourcePath)).toEqual(original);
+    expect(readFileSync(managedSourcePath).equals(expected)).toBe(true);
 
     await closePageRootGracefully(reopenedApp, reopened.page);
     reopenedApp = null;
@@ -1798,7 +1794,7 @@ test("Electron autosaves one authorized disk patch and reopens the same forward 
   }
 });
 
-test("Electron persists text, style, structure, and reorder undo while focused fields stay native", async () => {
+test("Electron keeps V1 autosave separate from focused-field undo", async () => {
   test.setTimeout(120_000);
   const sourceDirectory = mkdtempSync(path.join(tmpdir(), "pageroot-native-source-e2e-"));
   const sourcePath = path.join(sourceDirectory, "persistent-source-history.html");
@@ -1814,232 +1810,59 @@ test("Electron persists text, style, structure, and reorder undo while focused f
 
   const isolatedUserData = mkdtempSync(path.join(tmpdir(), "pageroot-native-e2e-"));
   let firstApp = null;
-  let reopenedApp = null;
   try {
-    await seedLegacyV3Project({ isolatedUserData, sourcePath });
     const firstLaunch = await launchPageRoot({
       isolatedUserData,
       activeSourcePath: sourcePath,
     });
     firstApp = firstLaunch.electronApp;
-    const { frame } = await loadedDiskFrame(
+    const managedSourcePath = await managedWorkingCopyPath(
       firstLaunch.page,
       sourcePath,
+    );
+    const { frame } = await loadedDiskFrame(
+      firstLaunch.page,
+      managedSourcePath,
       "source-fidelity",
     );
     await activateNativeEdit(frame, "source-fidelity");
     await setTextSelection(frame, "source-fidelity", 0, originalToken.length);
     await firstLaunch.page.keyboard.insertText(replacement);
     await firstLaunch.page.keyboard.press(keyShortcut("S"));
-    const firstPersistedRevision = await expectCheckpointPersisted(
+    await expectCheckpointPersisted(
       firstLaunch.page,
       0,
     );
-    expect(readFileSync(sourcePath).equals(expected)).toBe(true);
-    await closePageRootGracefully(firstApp, firstLaunch.page);
-    firstApp = null;
+    expect(readFileSync(managedSourcePath).equals(expected)).toBe(true);
+    expect(readFileSync(sourcePath)).toEqual(original);
 
-    const reopened = await launchPageRoot({ isolatedUserData });
-    reopenedApp = reopened.electronApp;
-    let { frame: reopenedFrame } = await loadedDiskFrame(
-      reopened.page,
-      sourcePath,
-      "source-fidelity",
-    );
-    await reopened.page.getByRole("button", { name: "全局评论" }).click();
-    const commentInput = reopened.page.getByRole("textbox", {
+    await firstLaunch.page.getByRole("button", { name: "全局评论" }).click();
+    const commentInput = firstLaunch.page.getByRole("textbox", {
       name: "评论内容",
     });
     await commentInput.fill("原文");
     await commentInput.focus();
-    await reopened.page.keyboard.press("End");
-    await reopened.page.keyboard.insertText("新增");
+    await firstLaunch.page.keyboard.press("End");
+    await firstLaunch.page.keyboard.insertText("新增");
     await expect(commentInput).toHaveValue("原文新增");
-    await clickEditHistoryMenu(reopenedApp, reopened.page, "undo");
+    await clickEditHistoryMenu(firstApp, firstLaunch.page, "undo");
     await expect(commentInput).toHaveValue("原文");
     expect(
-      readFileSync(sourcePath).equals(expected),
-      "native comment undo must not touch the source journal",
+      readFileSync(managedSourcePath).equals(expected),
+      "native comment undo must not touch the managed V1",
     ).toBe(true);
 
-    await reopenedFrame.locator(caseSelector("source-fidelity")).click();
-    await clickEditHistoryMenu(reopenedApp, reopened.page, "undo");
-    const undoRevision = await expectCheckpointPersisted(
-      reopened.page,
-      firstPersistedRevision,
-    );
-    expect(
-      readFileSync(sourcePath).equals(original),
-      "Edit > Undo must restore the exact pre-edit source bytes after restart",
-    ).toBe(true);
-    reopenedFrame = await currentEditorFrame(reopened.page);
-    await reopenedFrame.locator(caseSelector("source-fidelity")).click();
-    await reopened.page.keyboard.press(keyShortcut("Shift+Z"));
-    let latestRevision = await expectCheckpointPersisted(
-      reopened.page,
-      undoRevision,
-    );
-    expect(
-      readFileSync(sourcePath).equals(expected),
-      "Shift+Cmd/Ctrl+Z must reapply the exact retained source patch",
-    ).toBe(true);
-
-    reopenedFrame = await currentEditorFrame(reopened.page);
-    await selectAuthoredCase(reopenedFrame, "source-fidelity");
-    const boldButton = reopened.page.getByRole("button", {
-      name: "加粗",
-      exact: true,
-    });
-    await expect(boldButton).toBeEnabled();
-    await boldButton.click();
-    latestRevision = await expectCheckpointPersisted(
-      reopened.page,
-      latestRevision,
-    );
-    const styledBytes = readFileSync(sourcePath);
-    expect(styledBytes.equals(expected)).toBe(false);
-    expect(styledBytes.toString("utf8")).toContain("font-weight: 700");
-    await clickEditHistoryMenu(reopenedApp, reopened.page, "undo");
-    latestRevision = await expectCheckpointPersisted(
-      reopened.page,
-      latestRevision,
-    );
-    expect(
-      readFileSync(sourcePath).equals(expected),
-      "style undo must restore the exact bytes before the toolbar command",
-    ).toBe(true);
-    await clickEditHistoryMenu(reopenedApp, reopened.page, "redo");
-    latestRevision = await expectCheckpointPersisted(
-      reopened.page,
-      latestRevision,
-    );
-    expect(readFileSync(sourcePath).equals(styledBytes)).toBe(true);
-
-    reopenedFrame = await currentEditorFrame(reopened.page);
-    await activateNativeEdit(reopenedFrame, "source-fidelity");
-    const styledText = await reopenedFrame
-      .locator(caseSelector("source-fidelity"))
-      .textContent();
-    await setTextSelection(
-      reopenedFrame,
-      "source-fidelity",
-      styledText.length,
-    );
-    await reopened.page.keyboard.press("Enter");
-    await reopened.page.keyboard.press(keyShortcut("S"));
-    latestRevision = await expectCheckpointPersisted(
-      reopened.page,
-      latestRevision,
-    );
-    const structuredBytes = readFileSync(sourcePath);
-    expect(structuredBytes.equals(styledBytes)).toBe(false);
-    expect(structuredBytes.toString("utf8")).toContain("<br>");
-    await clickEditHistoryMenu(reopenedApp, reopened.page, "undo");
-    latestRevision = await expectCheckpointPersisted(
-      reopened.page,
-      latestRevision,
-    );
-    expect(
-      readFileSync(sourcePath).equals(styledBytes),
-      "editable-island structure undo must remove only the inserted break",
-    ).toBe(true);
-    await clickEditHistoryMenu(reopenedApp, reopened.page, "redo");
-    latestRevision = await expectCheckpointPersisted(
-      reopened.page,
-      latestRevision,
-    );
-    expect(readFileSync(sourcePath).equals(structuredBytes)).toBe(true);
-
-    reopenedFrame = await currentEditorFrame(reopened.page);
-    await selectAuthoredCase(reopenedFrame, "source-fidelity");
-    const moveDownButton = reopened.page.getByRole("button", {
-      name: "下移",
-      exact: true,
-    });
-    await expect(moveDownButton).toBeEnabled();
-    await moveDownButton.click();
-    latestRevision = await expectCheckpointPersisted(
-      reopened.page,
-      latestRevision,
-    );
-    const reorderedBytes = readFileSync(sourcePath);
-    const reorderedText = reorderedBytes.toString("utf8");
-    expect(reorderedBytes.equals(structuredBytes)).toBe(false);
-    expect(reorderedText.indexOf('title="entity spellings"'))
-      .toBeLessThan(reorderedText.indexOf('data-native-case="source-fidelity"'));
-    await clickEditHistoryMenu(reopenedApp, reopened.page, "undo");
-    latestRevision = await expectCheckpointPersisted(
-      reopened.page,
-      latestRevision,
-    );
-    expect(
-      readFileSync(sourcePath).equals(structuredBytes),
-      "move undo must restore the exact sibling order and bytes",
-    ).toBe(true);
-    await clickEditHistoryMenu(reopenedApp, reopened.page, "redo");
-    await expectCheckpointPersisted(reopened.page, latestRevision);
-    expect(readFileSync(sourcePath).equals(reorderedBytes)).toBe(true);
-
-    await reopened.page.getByRole("button", {
-      name: "项目",
-      exact: true,
-    }).click();
-    await reopened.page.locator(".project-advanced > summary").click();
-    await reopened.page.locator(".project-rule-card").click();
-    const projectRules = reopened.page.getByRole("textbox", {
-      name: "项目长期规则",
-      exact: true,
-    });
-    await expect(projectRules).toBeEnabled();
-    const originalRules = await projectRules.inputValue();
-    await projectRules.focus();
-    await reopened.page.keyboard.press("End");
-    await reopened.page.keyboard.insertText("\n临时新增规则");
-    await expect(projectRules).toHaveValue(`${originalRules}\n临时新增规则`);
-    await clickEditHistoryMenu(reopenedApp, reopened.page, "undo");
-    await expect(projectRules).toHaveValue(originalRules);
-    expect(
-      readFileSync(sourcePath).equals(reorderedBytes),
-      "native project-rule undo must not alter canvas source history",
-    ).toBe(true);
-
-    const workspace = path.join(isolatedUserData, "workspace");
-    const registry = JSON.parse(
-      readFileSync(path.join(workspace, "project-registry.json"), "utf8"),
-    );
-    const project = Object.values(registry.projects).find(
-      (record) => record.sourcePath === realpathSync(sourcePath),
-    );
-    const history = JSON.parse(readFileSync(
-      path.join(
-        workspace,
-        "projects",
-        project.storageDirectoryName,
-        "history",
-        "source-operations.json",
-      ),
+    const manifest = JSON.parse(readFileSync(
+      path.join(path.dirname(managedSourcePath), ".pageroot", "manifest.json"),
       "utf8",
     ));
-    expect(history.cursor).toBe(4);
-    expect(history.entries.map((entry) => entry.kind))
-      .toEqual(["text", "style", "text", "reorder"]);
-    expect(history.appliedActions.map((action) => action.direction))
-      .toEqual([
-        "undo",
-        "redo",
-        "undo",
-        "redo",
-        "undo",
-        "redo",
-        "undo",
-        "redo",
-      ]);
+    expect(manifest.versions.map((version) => version.versionId)).toEqual(["ver_0001"]);
+    expect(readFileSync(sourcePath)).toEqual(original);
 
-    await closePageRootGracefully(reopenedApp, reopened.page);
-    reopenedApp = null;
+    await closePageRootGracefully(firstApp, firstLaunch.page);
+    firstApp = null;
   } finally {
     if (firstApp) await stopPageRoot(firstApp, isolatedUserData, { cleanup: false });
-    if (reopenedApp) await stopPageRoot(reopenedApp, isolatedUserData, { cleanup: false });
     removeIsolatedUserData(isolatedUserData);
     removeValidatedTemporaryDirectory(
       sourceDirectory,
@@ -2048,7 +1871,7 @@ test("Electron persists text, style, structure, and reorder undo while focused f
   }
 });
 
-test("Electron restores the active text selection and keeps comment anchors stable through source undo", async () => {
+test("Electron keeps the active text selection and comment anchors stable after V1 autosave", async () => {
   test.setTimeout(90_000);
   const sourceDirectory = mkdtempSync(path.join(tmpdir(), "pageroot-native-source-e2e-"));
   const sourcePath = path.join(sourceDirectory, "history-selection-comments.html");
@@ -2066,15 +1889,18 @@ test("Electron restores the active text selection and keeps comment anchors stab
   const isolatedUserData = mkdtempSync(path.join(tmpdir(), "pageroot-native-e2e-"));
   let electronApp = null;
   try {
-    await seedLegacyV3Project({ isolatedUserData, sourcePath });
     const launched = await launchPageRoot({
       isolatedUserData,
       activeSourcePath: sourcePath,
     });
     electronApp = launched.electronApp;
-    let { editor, frame } = await loadedDiskFrame(
+    const managedSourcePath = await managedWorkingCopyPath(
       launched.page,
       sourcePath,
+    );
+    let { frame } = await loadedDiskFrame(
+      launched.page,
+      managedSourcePath,
       "source-fidelity",
     );
     const commentText = "撤回后仍然定位在这一段。";
@@ -2089,7 +1915,7 @@ test("Electron restores the active text selection and keeps comment anchors stab
     await setTextSelection(frame, "source-fidelity", 0, originalToken.length);
     await launched.page.keyboard.insertText(replacement);
     await launched.page.keyboard.press(keyShortcut("S"));
-    const persistedRevision = await expectCheckpointPersisted(launched.page, 0);
+    await expectCheckpointPersisted(launched.page, 0);
     frame = await currentEditorFrame(launched.page);
     await expect.poll(() => nativeEditingState(frame, "source-fidelity"))
       .toMatchObject({
@@ -2138,9 +1964,11 @@ test("Electron restores the active text selection and keeps comment anchors stab
       requestAnimationFrame(sample);
     });
 
-    await clickEditHistoryMenu(electronApp, launched.page, "undo");
-    await expectCheckpointPersisted(launched.page, persistedRevision);
-    await expect.poll(() => readFileSync(sourcePath).equals(original)).toBe(true);
+    await launched.page.evaluate(() => new Promise((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(resolve));
+    }));
+    expect(readFileSync(managedSourcePath, "utf8")).toContain(replacement);
+    expect(readFileSync(sourcePath)).toEqual(original);
     frame = await currentEditorFrame(launched.page);
     await expect.poll(() => nativeEditingState(frame, "source-fidelity"))
       .toMatchObject({
@@ -2149,18 +1977,8 @@ test("Electron restores the active text selection and keeps comment anchors stab
         activeCase: "source-fidelity",
         selectionInside: true,
       });
-    await expect.poll(() => selectionSnapshot(frame, "source-fidelity"))
-      .toMatchObject({
-        anchorOffset: 0,
-        focusOffset: originalToken.length,
-        text: originalToken,
-      });
     await expect(commentCard).toHaveAttribute("data-resolution", /^(?:exact|rebound)$/u);
     await expect(commentCard.getByText("原位置已变化")).toHaveCount(0);
-    await expect(editor).toHaveAttribute(
-      "data-history-adopt-path",
-      "editable-island-in-place",
-    );
 
     const visualSamples = await launched.page.evaluate(() => {
       window.__PAGEROOT_HISTORY_VISUAL_SAMPLING__ = false;

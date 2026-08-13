@@ -215,6 +215,132 @@ test("a Candidate cannot be adopted after its frozen Working Copy changes", asyn
   assert.equal(persistedCandidate.status, "pending-review");
 });
 
+test("Request publication rechecks source bytes after freezing its input bundle", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "request-boundary.html");
+  const externalHtml = html("external edit during request freeze");
+  const repository = new ProjectFileRepository({
+    projectsRoot: value.projects,
+    failpoint: async (name) => {
+      if (name === "request-input-manifest-written") {
+        await writeFile(imported.target.exactSourcePath, externalHtml, "utf8");
+      }
+      return false;
+    },
+  });
+
+  await assert.rejects(
+    repository.prepareRequest({
+      target: imported.target,
+      requestId: "req_source_boundary",
+      expectedSourceSha256: imported.target.sourceSha256,
+      prompt: "# Request\n",
+    }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "SOURCE_HASH_CONFLICT",
+  );
+
+  assert.equal(await readFile(imported.target.exactSourcePath, "utf8"), externalHtml);
+  const runtime = await json(path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "runtime-state.json",
+  ));
+  assert.equal(runtime.activeRequest, null);
+  await assert.rejects(
+    readFile(path.join(
+      imported.target.projectRootPath,
+      ".pageroot",
+      "requests",
+      "req_source_boundary",
+      "request.json",
+    )),
+    (error) => error?.code === "ENOENT",
+  );
+});
+
+test("save rechecks source bytes immediately before its replacing write", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "save-boundary.html");
+  const externalHtml = html("external edit before save write");
+  const repository = new ProjectFileRepository({
+    projectsRoot: value.projects,
+    failpoint: async (name) => {
+      if (name === "save-prepared") {
+        await writeFile(imported.target.exactSourcePath, externalHtml, "utf8");
+      }
+      return false;
+    },
+  });
+
+  await assert.rejects(
+    repository.saveWorkingCopy({
+      target: imported.target,
+      html: html("PageRoot save that must not overwrite"),
+      expectedSourceSha256: imported.target.sourceSha256,
+      editRevision: 1,
+    }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "SOURCE_HASH_CONFLICT",
+  );
+
+  assert.equal(await readFile(imported.target.exactSourcePath, "utf8"), externalHtml);
+});
+
+test("promotion rechecks the Candidate base before manifest publication and recovery", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "promotion-boundary.html");
+  const candidate = await value.repository.createCandidate({
+    target: imported.target,
+    requestId: "req_promotion_boundary",
+    candidateId: "candidate_promotion_boundary_0001",
+    html: html("candidate based on V1"),
+    expectedSourceSha256: imported.target.sourceSha256,
+  });
+  const externalHtml = html("external edit before promotion commit");
+  const repository = new ProjectFileRepository({
+    projectsRoot: value.projects,
+    failpoint: async (name) => {
+      if (name === "promotion-working-copy-created") {
+        await writeFile(imported.target.exactSourcePath, externalHtml, "utf8");
+      }
+      return false;
+    },
+  });
+
+  await assert.rejects(
+    repository.promoteCandidate({
+      target: imported.target,
+      candidateId: candidate.candidate.candidateId,
+    }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "CANDIDATE_SOURCE_CHANGED",
+  );
+  await assert.rejects(
+    new ProjectFileRepository({ projectsRoot: value.projects }).recoverProject({
+      projectRootPath: imported.target.projectRootPath,
+    }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "CANDIDATE_SOURCE_CHANGED",
+  );
+
+  assert.equal(await readFile(imported.target.exactSourcePath, "utf8"), externalHtml);
+  const manifest = await json(path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "manifest.json",
+  ));
+  assert.deepEqual(manifest.versions.map((version) => version.versionId), ["ver_0001"]);
+  const persistedCandidate = await json(path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "requests",
+    "req_promotion_boundary",
+    "candidate.json",
+  ));
+  assert.equal(persistedCandidate.status, "pending-review");
+});
+
 test("exact path, rather than equal bytes, determines the opened document", async (t) => {
   const value = await fixture(t);
   const sameBytes = html("same bytes");
@@ -819,7 +945,7 @@ test("a damaged v4 record is ignored and its HTML imports as a fresh V1", async 
   assert.deepEqual(manifest.versions.map((version) => version.versionId), ["ver_0001"]);
 });
 
-test("external import rejects every supported relative resource form", async (t) => {
+test("external import creates a byte-preserving V1 for every relative resource form", async (t) => {
   const value = await fixture(t);
   const cases = [
     ["unquoted-src", "<img src=assets/chart.svg>"],
@@ -835,14 +961,16 @@ test("external import rejects every supported relative resource form", async (t)
     const source = `<!doctype html><html><head><title>${name}</title></head><body>${markup}</body></html>`;
     const buffer = Buffer.from(source, "utf8");
     await writeFile(sourcePath, buffer);
-    await assert.rejects(
-      value.repository.importExternal({
-        sourcePath,
-        expectedSourceSha256: sha256(buffer),
-      }),
-      (error) => error instanceof ProjectFileRepositoryError
-        && error.code === "UNSUPPORTED_RELATIVE_RESOURCE",
-      name,
+    const imported = await value.repository.importExternal({
+      sourcePath,
+      expectedSourceSha256: sha256(buffer),
+    });
+    assert.equal(imported.imported, true, name);
+    assert.deepEqual(await readFile(sourcePath), buffer, `${name} source`);
+    assert.deepEqual(
+      await readFile(imported.target.exactSourcePath),
+      buffer,
+      `${name} V1`,
     );
   }
 
@@ -855,6 +983,7 @@ test("external import rejects every supported relative resource form", async (t)
     expectedSourceSha256: sha256(safeBuffer),
   });
   assert.equal(imported.imported, true);
+  assert.deepEqual(await readFile(imported.target.exactSourcePath), safeBuffer);
 });
 
 test("import fails before publication without registration debris, and rejects symbolic links", async (t) => {

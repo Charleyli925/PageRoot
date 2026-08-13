@@ -388,10 +388,10 @@ the requested path; matching Hashes validate bytes but never redirect
 navigation. Managed paths require lexical containment plus component-by-
 component real-path validation. A root moved out of the configured projects
 directory is not followed or re-associated: writes pause until it returns to
-its exact registered path. Copies are external HTML and first persistence
-creates a fresh V1. Existing v3 workspace projects remain a separate
-compatibility ingress with no physical migration or dual write. The decision
-is recorded in
+its exact registered path. Copies, damaged registrations, and every pre-v4
+project state are external HTML at the v4 boundary and immediately create a
+fresh v4 V1 on open; the source HTML bytes remain untouched. There is no v3
+compatibility ingress, physical migration, or dual write. The decision is recorded in
 `docs/decisions/0022-user-owned-project-root-identity.md`.
 
 Initial and accepted AI results are immutable versions. Routine local edits do not create versions. A validated AI result is not activated until the user explicitly chooses it.

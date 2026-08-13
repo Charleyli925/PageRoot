@@ -3,9 +3,9 @@
 - Status: Superseded by ADR 0022
 - Date: 2026-07-28
 
-> Historical decision.  ADR 0022 replaces this registry-owned directory model
-> for newly imported project files.  Existing v3 projects remain readable
-> under this historical layout until an explicit migration is approved.
+> Historical decision. ADR 0022 replaces this registry-owned directory model
+> for newly imported project files. The v4 opening path does not read this
+> pre-v4 layout: its selected HTML is imported as a new v4 Project at V1.
 
 ## Context
 

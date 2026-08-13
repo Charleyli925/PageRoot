@@ -12,8 +12,6 @@ import {
 import os from "node:os";
 import path from "node:path";
 
-import { parse } from "parse5";
-
 import {
   atomicWriteFile,
   ensureDirectory,
@@ -419,189 +417,6 @@ function decodeHtml(buffer, label) {
     );
   }
   return html;
-}
-
-const RESOURCE_ATTRIBUTES = new Set([
-  "src",
-  "href",
-  "srcset",
-  "poster",
-  "data",
-  "background",
-]);
-
-function relativeResourceTarget(value) {
-  const target = String(value || "").trim();
-  if (
-    !target
-    || target.startsWith("#")
-    || target.startsWith("data:")
-    || target.startsWith("mailto:")
-    || target.startsWith("tel:")
-    || /^[a-z][a-z0-9+.-]*:/iu.test(target)
-    || target.startsWith("//")
-  ) return null;
-  return target;
-}
-
-function firstRelativeSrcsetTarget(value) {
-  const source = String(value || "");
-  let cursor = 0;
-  while (cursor < source.length) {
-    while (cursor < source.length && /[\s,]/u.test(source[cursor])) cursor += 1;
-    if (cursor >= source.length) break;
-    const start = cursor;
-    const dataUrl = source.slice(cursor, cursor + 5).toLowerCase() === "data:";
-    while (
-      cursor < source.length
-      && !/\s/u.test(source[cursor])
-      && (dataUrl || source[cursor] !== ",")
-    ) cursor += 1;
-    const target = relativeResourceTarget(source.slice(start, cursor));
-    if (target) return target;
-    while (cursor < source.length && source[cursor] !== ",") cursor += 1;
-    if (source[cursor] === ",") cursor += 1;
-  }
-  return null;
-}
-
-function cssWordAt(source, index, word) {
-  const before = source[index - 1] || "";
-  const after = source[index + word.length] || "";
-  return (
-    source.slice(index, index + word.length).toLowerCase() === word
-    && !/[a-z0-9_-]/iu.test(before)
-    && !/[a-z0-9_-]/iu.test(after)
-  );
-}
-
-function skipCssSpaceAndComments(source, initial) {
-  let cursor = initial;
-  while (cursor < source.length) {
-    if (/\s/u.test(source[cursor])) {
-      cursor += 1;
-      continue;
-    }
-    if (source.slice(cursor, cursor + 2) === "/*") {
-      const end = source.indexOf("*/", cursor + 2);
-      cursor = end === -1 ? source.length : end + 2;
-      continue;
-    }
-    break;
-  }
-  return cursor;
-}
-
-function readCssQuotedValue(source, initial) {
-  const quote = source[initial];
-  let cursor = initial + 1;
-  let value = "";
-  while (cursor < source.length) {
-    const character = source[cursor];
-    if (character === "\\") {
-      if (cursor + 1 < source.length) value += source[cursor + 1];
-      cursor += 2;
-      continue;
-    }
-    if (character === quote) {
-      return { value, next: cursor + 1 };
-    }
-    value += character;
-    cursor += 1;
-  }
-  return { value, next: cursor };
-}
-
-function readCssUrlValue(source, initial) {
-  let cursor = skipCssSpaceAndComments(source, initial);
-  if (source[cursor] === "'" || source[cursor] === '"') {
-    const quoted = readCssQuotedValue(source, cursor);
-    cursor = skipCssSpaceAndComments(source, quoted.next);
-    return { value: quoted.value, next: source[cursor] === ")" ? cursor + 1 : cursor };
-  }
-  const start = cursor;
-  while (cursor < source.length && source[cursor] !== ")") cursor += 1;
-  return {
-    value: source.slice(start, cursor).trim(),
-    next: source[cursor] === ")" ? cursor + 1 : cursor,
-  };
-}
-
-function firstRelativeCssResource(css) {
-  const source = String(css || "");
-  let cursor = 0;
-  while (cursor < source.length) {
-    if (source.slice(cursor, cursor + 2) === "/*") {
-      cursor = skipCssSpaceAndComments(source, cursor);
-      continue;
-    }
-    if (source[cursor] === "'" || source[cursor] === '"') {
-      cursor = readCssQuotedValue(source, cursor).next;
-      continue;
-    }
-    if (cssWordAt(source, cursor, "url")) {
-      const open = skipCssSpaceAndComments(source, cursor + 3);
-      if (source[open] === "(") {
-        const resource = readCssUrlValue(source, open + 1);
-        const target = relativeResourceTarget(resource.value);
-        if (target) return target;
-        cursor = resource.next;
-        continue;
-      }
-    }
-    if (source.slice(cursor, cursor + 7).toLowerCase() === "@import") {
-      let next = skipCssSpaceAndComments(source, cursor + 7);
-      let resource;
-      if (cssWordAt(source, next, "url")) {
-        const open = skipCssSpaceAndComments(source, next + 3);
-        resource = source[open] === "(" ? readCssUrlValue(source, open + 1) : null;
-      } else if (source[next] === "'" || source[next] === '"') {
-        resource = readCssQuotedValue(source, next);
-      } else {
-        const start = next;
-        while (next < source.length && !/[\s;]/u.test(source[next])) next += 1;
-        resource = { value: source.slice(start, next), next };
-      }
-      if (resource) {
-        const target = relativeResourceTarget(resource.value);
-        if (target) return target;
-        cursor = resource.next;
-        continue;
-      }
-    }
-    cursor += 1;
-  }
-  return null;
-}
-
-function hasUnsupportedRelativeResource(html) {
-  let resource = null;
-  const visit = (node) => {
-    if (resource || !node) return;
-    for (const attribute of node.attrs || []) {
-      const name = String(attribute.name || "").toLowerCase();
-      let target = null;
-      if (name === "srcset") {
-        target = firstRelativeSrcsetTarget(attribute.value);
-      } else if (RESOURCE_ATTRIBUTES.has(name)) {
-        target = relativeResourceTarget(attribute.value);
-      } else if (name === "style") {
-        target = firstRelativeCssResource(attribute.value);
-      }
-      if (target) {
-        resource = target;
-        return;
-      }
-    }
-    if (node.tagName === "style") {
-      const css = (node.childNodes || []).map((child) => child.value || "").join("");
-      resource = firstRelativeCssResource(css);
-      if (resource) return;
-    }
-    for (const child of node.childNodes || []) visit(child);
-  };
-  visit(parse(html));
-  return resource;
 }
 
 async function regularInformation(filePath, label, { projectRootPath = null } = {}) {
@@ -1836,6 +1651,19 @@ export class ProjectFileRepository {
       { projectRootPath: loaded.paths.projectRootPath },
     );
     await this.#hit("request-input-manifest-written", { requestId: id, requestRoot });
+    // Freezing the Request can span several durable writes. Re-read the
+    // Working Copy at the publication boundary so a concurrent external edit
+    // cannot turn the already-frozen, stale buffer into an active Request.
+    const sourceBeforePublish = await readHtmlFile(loaded.exactSourcePath, "Working Copy", {
+      projectRootPath: loaded.paths.projectRootPath,
+    });
+    if (sourceBeforePublish.sha256 !== expected) {
+      throw new ProjectFileRepositoryError(
+        "SOURCE_HASH_CONFLICT",
+        "The Working Copy changed while this Request was being frozen.",
+        { expectedSourceSha256: expected, actualSourceSha256: sourceBeforePublish.sha256 },
+      );
+    }
     await atomicWriteProjectJson(
       loaded.paths.projectRootPath,
       requestPath,
@@ -2636,14 +2464,6 @@ export class ProjectFileRepository {
         { expectedSourceSha256, actualSourceSha256: source.sha256 },
       );
     }
-    const unsupportedResource = hasUnsupportedRelativeResource(source.html);
-    if (unsupportedResource) {
-      throw new ProjectFileRepositoryError(
-        "UNSUPPORTED_RELATIVE_RESOURCE",
-        "The external HTML has a relative resource that cannot be safely imported yet.",
-        { resource: unsupportedResource },
-      );
-    }
     const stem = safeProjectName(requestedPath);
     const extension = htmlExtension(requestedPath);
     const projectId = randomId("project");
@@ -3366,6 +3186,19 @@ export class ProjectFileRepository {
       preparedAt: nowIso(this.#clock),
     }, "save transaction");
     await this.#hit("save-prepared", { transactionPath });
+    // The earlier read only proves the source at transaction preparation.
+    // Check it again immediately before the replacing write so PageRoot never
+    // knowingly turns an intervening external edit into last-writer-wins.
+    const sourceBeforeWrite = await readHtmlFile(loaded.exactSourcePath, "Working Copy", {
+      projectRootPath: loaded.paths.projectRootPath,
+    });
+    if (sourceBeforeWrite.sha256 !== expected) {
+      throw new ProjectFileRepositoryError(
+        "SOURCE_HASH_CONFLICT",
+        "The Working Copy changed before PageRoot could save it.",
+        { expectedSourceSha256: expected, actualSourceSha256: sourceBeforeWrite.sha256 },
+      );
+    }
     await atomicWriteProjectFile(
       loaded.paths.projectRootPath,
       loaded.exactSourcePath,
@@ -3789,21 +3622,7 @@ export class ProjectFileRepository {
   async #promoteCandidate({ target, candidateId }) {
     const loaded = await this.#resolveMutationTarget(target);
     const candidateState = await this.#readCandidateForLoaded(loaded, candidateId);
-    const expectedSourceSha256 = assertSha256(
-      candidateState.candidate.expectedSourceSha256,
-      "Candidate expectedSourceSha256",
-    );
-    if (loaded.source.sha256 !== expectedSourceSha256) {
-      throw new ProjectFileRepositoryError(
-        "CANDIDATE_SOURCE_CHANGED",
-        "The Working Copy changed after Candidate validation and cannot be adopted yet.",
-        {
-          expectedSourceSha256,
-          actualSourceSha256: loaded.source.sha256,
-          candidateId: candidateState.candidate.candidateId,
-        },
-      );
-    }
+    await this.#assertCandidateSourceCurrent(loaded, candidateState.candidate);
     const transactionId = "promote_" + candidateState.candidate.candidateId;
     const transactionRoot = path.join(loaded.paths.transactionsRoot, transactionId);
     const transactionPath = path.join(transactionRoot, "transaction.json");
@@ -3855,6 +3674,46 @@ export class ProjectFileRepository {
       await this.#hit("promotion-prepared", { transactionPath });
     }
     return this.#continuePromotion(loaded, candidateState, transactionRoot, transaction);
+  }
+
+  async #assertCandidateSourceCurrent(loaded, candidate) {
+    const sourceWorkingCopyId = assertId(
+      candidate.sourceWorkingCopyId,
+      WORKING_COPY_ID,
+      "Candidate sourceWorkingCopyId",
+    );
+    const expectedSourceSha256 = assertSha256(
+      candidate.expectedSourceSha256,
+      "Candidate expectedSourceSha256",
+    );
+    const sourceWorkingCopy = loaded.manifest.workingCopies.find(
+      (workingCopy) => workingCopy.workingCopyId === sourceWorkingCopyId,
+    );
+    if (!sourceWorkingCopy) {
+      throw new ProjectFileRepositoryError(
+        "CANDIDATE_WORKING_COPY_MISSING",
+        "The Candidate source Working Copy is no longer available.",
+        { candidateId: candidate.candidateId, sourceWorkingCopyId },
+      );
+    }
+    const source = await readHtmlFile(
+      workingCopySourcePath(loaded.paths, sourceWorkingCopy),
+      "Candidate Working Copy",
+      { projectRootPath: loaded.paths.projectRootPath },
+    );
+    if (source.sha256 !== expectedSourceSha256) {
+      throw new ProjectFileRepositoryError(
+        "CANDIDATE_SOURCE_CHANGED",
+        "The Working Copy changed after Candidate validation and cannot be adopted yet.",
+        {
+          expectedSourceSha256,
+          actualSourceSha256: source.sha256,
+          candidateId: candidate.candidateId,
+          sourceWorkingCopyId,
+        },
+      );
+    }
+    return source;
   }
 
   async #continuePromotion(loaded, candidateState, transactionRoot, transaction) {
@@ -4104,6 +3963,9 @@ export class ProjectFileRepository {
           "The allocated Version Working Copy was replaced before manifest publication.",
         );
       }
+      // Recovery enters #continuePromotion directly, so this must be the
+      // shared commit boundary rather than a check only at adoption start.
+      await this.#assertCandidateSourceCurrent(loaded, candidateState.candidate);
       loaded.manifest.versions.push(version);
       loaded.manifest.workingCopies.push(committedWorkingCopy);
       loaded.manifest.latestOfficialVersionId = version.versionId;

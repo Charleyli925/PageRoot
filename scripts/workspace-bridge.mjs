@@ -986,7 +986,6 @@ function projectFileHttpError(cause) {
         "UNSAFE_DIRECTORY",
         "UNSUPPORTED_HTML_EXTENSION",
         "UNSUPPORTED_HTML_ENCODING",
-        "UNSUPPORTED_RELATIVE_RESOURCE",
         "INCOMPLETE_HTML",
         "PATH_ESCAPES_PROJECT",
         "INVALID_RELATIVE_PATH",
