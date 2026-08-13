@@ -526,6 +526,18 @@ export async function finalizeProjectFileAttempt({
       "The Request does not belong to this project identity.",
     );
   }
+  // Cancellation is a terminal user decision. A late AI finalizer must be
+  // able to acknowledge it without creating completion evidence or trying to
+  // re-establish the now-cleared active Request runtime anchor.
+  if (record.status === "cancelled") {
+    return {
+      ok: true,
+      status: "cancelled",
+      accepted: false,
+      retryable: false,
+      message: "本轮已在源页结束。请停止 AI Agent，不要重试。",
+    };
+  }
   const [manifest, runtime] = await Promise.all([
     readJson(path.join(controlRoot, "manifest.json"), "manifest.json"),
     readJson(path.join(controlRoot, "runtime-state.json"), "runtime-state.json"),

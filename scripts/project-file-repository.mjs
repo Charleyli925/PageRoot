@@ -1162,6 +1162,27 @@ export class ProjectFileRepositoryError extends Error {
   }
 }
 
+function invalidRegisteredProjectError(cause) {
+  return cause instanceof ProjectFileRepositoryError
+    && new Set([
+      "REGISTERED_PROJECT_IDENTITY_CHANGED",
+      "REGISTERED_PROJECT_UNAVAILABLE",
+      "PROJECT_IDENTITY_CHANGED",
+      "UNREGISTERED_PROJECT_ROOT",
+      "PROJECT_ROOT_NOT_FOUND",
+      "PROJECT_CONTROL_NOT_FOUND",
+      "UNSUPPORTED_PROJECT_SCHEMA",
+      "INVALID_PROJECT_IDENTITY",
+      "UNSUPPORTED_MANIFEST_SCHEMA",
+      "MANIFEST_IDENTITY_MISMATCH",
+      "INVALID_MANIFEST",
+      "UNSUPPORTED_RUNTIME_SCHEMA",
+      "RUNTIME_IDENTITY_MISMATCH",
+      "INVALID_RUNTIME",
+      "INVALID_JSON",
+    ]).has(cause.code);
+}
+
 // This is a persistence repository, not a runtime Store. Sessions keep the
 // mutable UI facts; the repository only resolves and atomically records the
 // on-disk facts specified by VERSION_AND_PROJECT_FILES_PRD.md.
@@ -3052,22 +3073,16 @@ export class ProjectFileRepository {
     const registry = await this.#readRegistry();
     const candidates = [];
     for (const [projectId, record] of Object.entries(registry.projects)) {
-      const registeredRootPath = normalizedPath(record.registeredProjectRootPath);
       let resolvedRoot;
       try {
         resolvedRoot = await this.#recoverRegisteredRootRename(projectId, record);
       } catch (cause) {
-        // A damaged or replaced registered root must block access to files it
-        // actually owns, but it cannot prevent an unrelated managed project
-        // (or an external file) from resolving. A renamed root only claims a
-        // source after recovery has positively verified its stable identity.
-        if (
-          cause instanceof ProjectFileRepositoryError
-          && cause.code === "REGISTERED_PROJECT_IDENTITY_CHANGED"
-          && !pathInside(registeredRootPath, exactSourcePath)
-        ) {
-          continue;
-        }
+        // A v4 project only owns an HTML after its root, stable identity and
+        // on-disk contract all validate. A damaged record is therefore not an
+        // opening target, even for a file beneath its former root: callers
+        // can import that HTML as a fresh V1 instead of migrating or repairing
+        // pre-v4 state.
+        if (invalidRegisteredProjectError(cause)) continue;
         throw cause;
       }
       if (resolvedRoot && pathInside(resolvedRoot, exactSourcePath)) {
@@ -3082,10 +3097,15 @@ export class ProjectFileRepository {
       );
     }
     if (candidates.length === 0) return null;
-    return this.#loadRegisteredProject({
-      projectId: candidates[0].projectId,
-      declaredProjectRootPath: candidates[0].projectRootPath,
-    });
+    try {
+      return await this.#loadRegisteredProject({
+        projectId: candidates[0].projectId,
+        declaredProjectRootPath: candidates[0].projectRootPath,
+      });
+    } catch (cause) {
+      if (invalidRegisteredProjectError(cause)) return null;
+      throw cause;
+    }
   }
 
   async #resolveOpenTarget({ sourcePath }) {

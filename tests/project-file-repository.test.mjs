@@ -788,7 +788,7 @@ test("a copied project remains external and its first import creates an independ
   )), copiedManifestBefore);
 });
 
-test("a damaged unrelated registered project cannot block another source", async (t) => {
+test("a damaged v4 record is ignored and its HTML imports as a fresh V1", async (t) => {
   const value = await fixture(t);
   const damaged = await importSource(value, "damaged.html");
   const healthy = await importSource(value, "healthy.html");
@@ -801,11 +801,22 @@ test("a damaged unrelated registered project cannot block another source", async
     sourcePath: healthy.target.exactSourcePath,
   });
   assert.equal(resolvedHealthy.projectId, healthy.target.projectId);
-  await assert.rejects(
-    value.repository.resolveOpenTarget({ sourcePath: damagedHtml }),
-    (error) => error instanceof ProjectFileRepositoryError
-      && error.code === "REGISTERED_PROJECT_IDENTITY_CHANGED",
+  assert.equal(
+    await value.repository.resolveOpenTarget({ sourcePath: damagedHtml }),
+    null,
   );
+  const imported = await value.repository.importExternal({
+    sourcePath: damagedHtml,
+    expectedSourceSha256: sha256(await readFile(damagedHtml)),
+  });
+  assert.equal(imported.imported, true);
+  assert.notEqual(imported.target.projectId, damaged.target.projectId);
+  const manifest = await json(path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "manifest.json",
+  ));
+  assert.deepEqual(manifest.versions.map((version) => version.versionId), ["ver_0001"]);
 });
 
 test("external import rejects every supported relative resource form", async (t) => {

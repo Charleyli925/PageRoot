@@ -48,7 +48,7 @@ async function preparedRequest(t, requestId) {
     ...request.outputRelativePath.split("/"),
   );
   await writeFile(outputPath, html("Candidate"), "utf8");
-  return { imported, request, requestRoot };
+  return { repository, imported, request, requestRoot };
 }
 
 test("project-file finalizer freezes a Candidate output without publishing a Version", async (t) => {
@@ -112,6 +112,34 @@ test("project-file finalizer freezes a Candidate output without publishing a Ver
 });
 
 test("project-file finalizer seals the complete frozen Request bundle", async (t) => {
+  await t.test("acknowledges a cancelled Request without creating completion evidence", async (subtest) => {
+    const { repository, imported, request, requestRoot } = await preparedRequest(
+      subtest,
+      "req_cancelled_finalizer",
+    );
+    await repository.cancelRequest({
+      target: imported.target,
+      requestId: request.requestId,
+      attemptId: request.attemptId,
+    });
+
+    const finalized = await finalizeProjectFileAttempt({
+      projectRoot: imported.target.projectRootPath,
+      requestId: request.requestId,
+      attemptId: request.attemptId,
+    });
+    assert.deepEqual(finalized, {
+      ok: true,
+      status: "cancelled",
+      accepted: false,
+      retryable: false,
+      message: "本轮已在源页结束。请停止 AI Agent，不要重试。",
+    });
+    await assert.rejects(readFile(
+      path.join(requestRoot, "attempts", request.attemptId, "completion.json"),
+    ));
+  });
+
   await t.test("rejects a changed frozen input even when the base HTML is intact", async (subtest) => {
     const { imported, requestRoot } = await preparedRequest(subtest, "req_bundle_input");
     await writeFile(

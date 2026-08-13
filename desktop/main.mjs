@@ -1187,6 +1187,16 @@ async function activateManagedWorkingCopy(payload) {
 
 async function activateManagedWorkingCopyOperation(payload) {
   const requested = assertManagedWorkingCopyActivationPayload(payload);
+  if (
+    process.env.PAGEROOT_E2E === "1"
+    && process.env.PAGEROOT_E2E_GENERATED_VERSION_OPEN_FAILURE === "1"
+    && requested.versionId !== "ver_0001"
+  ) {
+    throw new ProjectFileError(
+      "E2E_MANAGED_WORKING_COPY_OPEN_FAILED",
+      "测试注入：新版本文件暂时无法打开。",
+    );
+  }
   const state = await loadProjectState();
   const [previousSourcePath, nextSourcePath] = await Promise.all([
     existingPathIdentity(requested.previousSourcePath),

@@ -142,7 +142,10 @@ test("Bridge client retries a transient read and attaches authorization", async 
   const payload = await client.workspace("/tmp/page.html");
   assert.equal(payload.projectId, "proj_1");
   assert.equal(requests.length, 2);
-  assert.match(requests[0].input, /workspace\?sourcePath=%2Ftmp%2Fpage\.html$/);
+  assert.match(
+    requests[0].input,
+    /workspace\?sourcePath=%2Ftmp%2Fpage\.html&projectStorageVersion=4\.0\.0$/,
+  );
   assert.equal(
     new Headers(requests[0].init.headers).get("x-html-ai-bridge-token"),
     "test-token",

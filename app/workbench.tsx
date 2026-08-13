@@ -526,6 +526,7 @@ export default function Workbench() {
   const fileRenameInputRef = useRef<HTMLInputElement | null>(null);
   const fileRenameEditingRef = useRef(false);
   const fileRenameBusyRef = useRef(false);
+  const automaticProjectRegistrationRef = useRef("");
 
   const [workspaceControllerSnapshot, setWorkspaceControllerSnapshot] =
     useState<WorkspaceControllerSnapshot | null>(null);
@@ -2606,6 +2607,25 @@ export default function Workbench() {
     }
   }, [currentProjectSessionSnapshot, workspaceController]);
 
+  useEffect(() => {
+    if (
+      !workspaceController
+      || !sourcePath
+      || (projectId && documentId)
+    ) return;
+    const registrationKey = `${projectSnapshot.epoch}\0${sourcePath}`;
+    if (automaticProjectRegistrationRef.current === registrationKey) return;
+    automaticProjectRegistrationRef.current = registrationKey;
+    void prepareProjectRecords();
+  }, [
+    documentId,
+    prepareProjectRecords,
+    projectId,
+    projectSnapshot.epoch,
+    sourcePath,
+    workspaceController,
+  ]);
+
   const verifyCanvasRendered = useCallback(async (
     expectedHtml: string,
     expectedSha256: string,
@@ -4274,9 +4294,8 @@ export default function Workbench() {
       commentEditResumePendingRef.current = null;
       setEditingCommentId(null);
     }
-    // Opening a composer is the first durable project action for a lazily
-    // registered HTML. Start identity creation before accepting text so crash
-    // recovery and the Bridge draft share one authority.
+    // Project identity starts at file open. Recheck here to serialize a
+    // just-opened composer with any still-pending registration.
     void prepareProjectRecords();
     const recoveredDraftTarget = currentComments.composerTarget;
     if (

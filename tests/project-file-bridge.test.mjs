@@ -66,6 +66,66 @@ test("project-file PR1 import switches to V1 before the queued save and leaves e
   assert.deepEqual(manifest.versions.map((version) => version.versionId), ["ver_0001"]);
 });
 
+test("a v4 client treats a pre-v4 project as a fresh V1 import", async (t) => {
+  const environment = await createBridgeTestEnvironment(t, {
+    prefix: "pageroot-project-file-pre-v4-",
+  });
+  const original = html("pre-v4 external source");
+  const sourcePath = await environment.createSource("pre-v4.html", original);
+  const bridge = await environment.start({
+    HTML_AI_PROJECT_FILES_ROOT: join(environment.root, "project-files"),
+  });
+  const legacyPreview = await bridge.requestJson(
+    `/workspace?sourcePath=${encodeURIComponent(sourcePath)}`,
+  );
+  assert.equal(legacyPreview.response.status, 200);
+  assert.equal(legacyPreview.body.registered, false);
+  const legacy = await postJson(bridge, "/project/ensure", {
+    sourcePath,
+    expectedSourceSha256: legacyPreview.body.currentHtmlSha256,
+  });
+  assert.equal(legacy.response.status, 200, JSON.stringify(legacy.body));
+  assert.equal(legacy.body.registered, true);
+  assert.notEqual(legacy.body.projectFileSchemaVersion, "4.0.0");
+
+  const v4Preview = await bridge.requestJson(
+    `/workspace?sourcePath=${encodeURIComponent(sourcePath)}&projectStorageVersion=4.0.0`,
+  );
+  assert.equal(v4Preview.response.status, 200, JSON.stringify(v4Preview.body));
+  assert.equal(v4Preview.body.registered, false);
+  assert.equal(v4Preview.body.projectId, null);
+  const v4Source = await bridge.requestJson(
+    `/source?sourcePath=${encodeURIComponent(sourcePath)}&projectStorageVersion=4.0.0`,
+  );
+  assert.equal(v4Source.response.status, 200, JSON.stringify(v4Source.body));
+  assert.equal(v4Source.body.registered, false);
+  assert.equal(v4Source.body.content, original);
+
+  const imported = await postJson(bridge, "/project/ensure", {
+    sourcePath,
+    expectedSourceSha256: v4Preview.body.currentHtmlSha256,
+    projectStorageVersion: "4.0.0",
+  });
+  assert.equal(imported.response.status, 200, JSON.stringify(imported.body));
+  assert.equal(imported.body.projectFileSchemaVersion, "4.0.0");
+  assert.equal(imported.body.imported, true);
+  assert.notEqual(imported.body.projectId, legacy.body.projectId);
+  assert.match(imported.body.sourcePath, /pre-v4-V1\.html$/u);
+  assert.equal(await readFile(sourcePath, "utf8"), original);
+  const manifest = JSON.parse(await readFile(
+    join(imported.body.projectRoot, ".pageroot", "manifest.json"),
+    "utf8",
+  ));
+  assert.deepEqual(manifest.versions.map((version) => version.versionId), ["ver_0001"]);
+
+  const reopened = await bridge.requestJson(
+    `/workspace?sourcePath=${encodeURIComponent(imported.body.sourcePath)}&projectStorageVersion=4.0.0`,
+  );
+  assert.equal(reopened.response.status, 200, JSON.stringify(reopened.body));
+  assert.equal(reopened.body.registered, true);
+  assert.equal(reopened.body.projectId, imported.body.projectId);
+});
+
 test("project-file PROJECT.md remains available through the shared project-file inspector", async (t) => {
   const environment = await createBridgeTestEnvironment(t, {
     prefix: "pageroot-project-file-rules-",

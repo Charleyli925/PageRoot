@@ -4423,57 +4423,67 @@ function recoveryIdentityFor(context, project, runtime, sourceSha256) {
   };
 }
 
-async function workspaceState(sourcePath) {
+async function unmanagedWorkspaceState(sourcePath) {
+  const normalizedSourcePath = normalizeSourcePath(sourcePath);
+  const source = await readSourceFile(normalizedSourcePath);
+  return {
+    ok: true,
+    registered: false,
+    workspace: WORKSPACE_ROOT,
+    projectRoot: null,
+    paths: {
+      currentHtml: normalizedSourcePath,
+      projectRecords: null,
+    },
+    projectId: null,
+    documentId: null,
+    sourcePath: normalizedSourcePath,
+    currentHtmlSha256: source.sha256,
+    sourceSha256: source.sha256,
+    lastModifiedAt: source.lastModifiedAt,
+    latestVersionId: null,
+    currentBasedOnVersionId: null,
+    currentExactVersionId: null,
+    restoredFromVersionId: null,
+    project: {
+      displayName: projectDisplayName(normalizedSourcePath),
+      sourcePath: normalizedSourcePath,
+    },
+    runtimeState: {
+      lifecycleState: "preview",
+      editRevision: 0,
+      lastPersistedRevision: 0,
+      activeRun: null,
+      conflict: null,
+    },
+    activeRun: null,
+    recentRunOutcome: null,
+    activeDraft: null,
+    recoveryIdentity: null,
+    versions: [],
+    current: {
+      path: normalizedSourcePath,
+      entryPath: normalizedSourcePath,
+      sha256: source.sha256,
+    },
+  };
+}
+
+async function workspaceState(sourcePath, { projectStorageVersion = "" } = {}) {
   const projectFileState = await projectFileWorkspaceState(sourcePath);
   if (projectFileState) return projectFileState;
+  // A v4 client never opens or migrates an older workspace. Its only
+  // admissible existing state is a valid Project File; every other HTML is
+  // deliberately presented as an external source for a fresh V1 import.
+  if (projectStorageVersion === "4.0.0") {
+    return unmanagedWorkspaceState(sourcePath);
+  }
   let context;
   try {
     context = await loadContextBySource(sourcePath, false);
   } catch (error) {
     if (error?.code !== "PROJECT_NOT_FOUND") throw error;
-    const normalizedSourcePath = normalizeSourcePath(sourcePath);
-    const source = await readSourceFile(normalizedSourcePath);
-    return {
-      ok: true,
-      registered: false,
-      workspace: WORKSPACE_ROOT,
-      projectRoot: null,
-      paths: {
-        currentHtml: normalizedSourcePath,
-        projectRecords: null,
-      },
-      projectId: null,
-      documentId: null,
-      sourcePath: normalizedSourcePath,
-      currentHtmlSha256: source.sha256,
-      sourceSha256: source.sha256,
-      lastModifiedAt: source.lastModifiedAt,
-      latestVersionId: null,
-      currentBasedOnVersionId: null,
-      currentExactVersionId: null,
-      restoredFromVersionId: null,
-      project: {
-        displayName: projectDisplayName(normalizedSourcePath),
-        sourcePath: normalizedSourcePath,
-      },
-      runtimeState: {
-        lifecycleState: "preview",
-        editRevision: 0,
-        lastPersistedRevision: 0,
-        activeRun: null,
-        conflict: null,
-      },
-      activeRun: null,
-      recentRunOutcome: null,
-      activeDraft: null,
-      recoveryIdentity: null,
-      versions: [],
-      current: {
-        path: normalizedSourcePath,
-        entryPath: normalizedSourcePath,
-        sha256: source.sha256,
-      },
-    };
+    return unmanagedWorkspaceState(sourcePath);
   }
   return withProjectMutation(context, async () => {
     await recoverPendingWriteRaw(context);
@@ -4544,16 +4554,11 @@ async function workspaceState(sourcePath) {
 }
 
 async function ensureProject(body) {
+  if (body.projectStorageVersion === "4.0.0") {
+    return ensureProjectFile(body);
+  }
   const existingProjectFile = await projectFileWorkspaceForSource(body.sourcePath);
   if (existingProjectFile) return ensureProjectFile(body);
-  if (body.projectStorageVersion === "4.0.0") {
-    try {
-      await loadContextBySource(body.sourcePath, false);
-    } catch (cause) {
-      if (cause?.code === "PROJECT_NOT_FOUND") return ensureProjectFile(body);
-      throw cause;
-    }
-  }
   const expectedSourceSha256 = requireSha256(
     body.expectedSourceSha256,
     "expectedSourceSha256",
@@ -8978,30 +8983,37 @@ async function versionFile(sourcePath, versionId) {
   };
 }
 
-async function sourceFile(sourcePath) {
+async function unmanagedSourceFile(sourcePath) {
+  const normalizedSourcePath = normalizeSourcePath(sourcePath);
+  const source = await readSourceFile(normalizedSourcePath);
+  return {
+    ok: true,
+    registered: false,
+    projectId: null,
+    documentId: null,
+    sourcePath: normalizedSourcePath,
+    content: source.html,
+    sha256: source.sha256,
+    sourceSha256: source.sha256,
+    currentBasedOnVersionId: null,
+    currentExactVersionId: null,
+    restoredFromVersionId: null,
+    lastModifiedAt: source.lastModifiedAt,
+  };
+}
+
+async function sourceFile(sourcePath, { projectStorageVersion = "" } = {}) {
   const projectFileSource = await sourceProjectFile(sourcePath);
   if (projectFileSource) return projectFileSource;
+  if (projectStorageVersion === "4.0.0") {
+    return unmanagedSourceFile(sourcePath);
+  }
   let context;
   try {
     context = await loadContextBySource(sourcePath, false);
   } catch (error) {
     if (error?.code !== "PROJECT_NOT_FOUND") throw error;
-    const normalizedSourcePath = normalizeSourcePath(sourcePath);
-    const source = await readSourceFile(normalizedSourcePath);
-    return {
-      ok: true,
-      registered: false,
-      projectId: null,
-      documentId: null,
-      sourcePath: normalizedSourcePath,
-      content: source.html,
-      sha256: source.sha256,
-      sourceSha256: source.sha256,
-      currentBasedOnVersionId: null,
-      currentExactVersionId: null,
-      restoredFromVersionId: null,
-      lastModifiedAt: source.lastModifiedAt,
-    };
+    return unmanagedSourceFile(sourcePath);
   }
   const source = await readSourceFile(context.sourcePath);
   const project = await readProject(context);
@@ -9464,6 +9476,7 @@ async function route(request, response) {
       200,
       await workspaceState(
         requiredSourcePath(url.searchParams.get("sourcePath")),
+        { projectStorageVersion: url.searchParams.get("projectStorageVersion") },
       ),
     );
     return;
@@ -9472,7 +9485,10 @@ async function route(request, response) {
     sendJson(
       response,
       200,
-      await sourceFile(requiredSourcePath(url.searchParams.get("sourcePath"))),
+      await sourceFile(
+        requiredSourcePath(url.searchParams.get("sourcePath")),
+        { projectStorageVersion: url.searchParams.get("projectStorageVersion") },
+      ),
     );
     return;
   }

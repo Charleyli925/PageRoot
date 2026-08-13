@@ -2,11 +2,13 @@ import { spawnSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
+  mkdtempSync,
   readFileSync,
   realpathSync,
   readdirSync,
   writeFileSync,
 } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { inflateSync } from "node:zlib";
 
@@ -26,6 +28,7 @@ import {
   loadedDiskFrame,
   removeValidatedTemporaryDirectory,
   removeSourceFixture as removeSharedSourceFixture,
+  seedLegacyV3Project,
   stopPageRoot,
 } from "./helpers/pageroot-app-fixture.mjs";
 
@@ -348,11 +351,23 @@ async function openRecentProject(page, sourcePath, options) {
     await page.keyboard.press("Escape");
     await expect(processingDialog).toBeHidden();
   }
+  const activeBefore = await page.evaluate(
+    async () => (await window.htmlAIProjects?.getActiveProject())?.sourcePath || "",
+  );
   await page.getByRole("button", { name: "项目", exact: true }).click();
   await page.locator(".recent-file-row")
     .filter({ hasText: path.basename(sourcePath) })
     .click();
-  return loadedDiskFrame(page, sourcePath, options);
+  await expect.poll(async () => {
+    const active = await page.evaluate(
+      async () => (await window.htmlAIProjects?.getActiveProject())?.sourcePath || "",
+    );
+    return active && active !== activeBefore ? active : "";
+  }, { timeout: 30_000 }).not.toBe("");
+  const activeSourcePath = await page.evaluate(
+    async () => (await window.htmlAIProjects?.getActiveProject())?.sourcePath || "",
+  );
+  return loadedDiskFrame(page, activeSourcePath, options);
 }
 
 function managedProjectRoots(workspace) {
@@ -516,31 +531,6 @@ function runOfficialFinalizer(requestRoot, changeRequest) {
   });
   if (result.status !== 0) {
     throw new Error(`Finalizer failed:\n${result.stdout}\n${result.stderr}`);
-  }
-  return JSON.parse(result.stdout);
-}
-
-function recordOfficialSupplement(workspace, requestRoot, changeRequest, payload) {
-  const request = JSON.parse(readFileSync(path.join(requestRoot, "request.json"), "utf8"));
-  const result = spawnSync(process.execPath, [
-    path.join(productRoot, "scripts", "record-user-supplement.mjs"),
-    "--workspace",
-    workspace,
-    "--project-id",
-    changeRequest.projectId,
-    "--request-id",
-    request.requestId,
-    "--attempt-id",
-    "attempt_001",
-  ], {
-    cwd: requestRoot,
-    encoding: "utf8",
-    input: JSON.stringify(payload),
-    env: process.env,
-    timeout: 60_000,
-  });
-  if (result.status !== 0) {
-    throw new Error(`Supplement recorder failed:\n${result.stdout}\n${result.stderr}`);
   }
   return JSON.parse(result.stdout);
 }
@@ -3538,7 +3528,7 @@ test("two AI versions activate in order and survive relaunch without identity dr
     await expect.poll(async () => (
       launched.page.evaluate(() => window.htmlAIProjects?.getActiveProject())
     ), { timeout: 30_000 }).toMatchObject({
-      sourcePath: expect.stringMatching(/\/working\/sequential-ai-loop-V1\.1\.html$/u),
+      sourcePath: expect.stringMatching(/\/sequential-ai-loop-V2\.html$/u),
     });
     const firstActive = await launched.page.evaluate(
       () => window.htmlAIProjects?.getActiveProject(),
@@ -3567,7 +3557,7 @@ test("two AI versions activate in order and survive relaunch without identity dr
     await expect.poll(async () => (
       launched.page.evaluate(() => window.htmlAIProjects?.getActiveProject())
     ), { timeout: 30_000 }).toMatchObject({
-      sourcePath: expect.stringMatching(/\/working\/sequential-ai-loop-V1\.2\.html$/u),
+      sourcePath: expect.stringMatching(/\/sequential-ai-loop-V3\.html$/u),
     });
     const secondActive = await launched.page.evaluate(
       () => window.htmlAIProjects?.getActiveProject(),
@@ -3582,16 +3572,19 @@ test("two AI versions activate in order and survive relaunch without identity dr
       secondActive.sourcePath,
     )).locator(caseSelector("list-item"))).toHaveText(SECOND_UPDATED_TEXT);
 
-    const registry = JSON.parse(readFileSync(
-      path.join(launched.workspace, "project-registry.json"),
+    const projectRoot = managedProjectRootForId(
+      launched.workspace,
+      secondRequest.changeRequest.projectId,
+    );
+    expect(projectRoot).toBeTruthy();
+    const manifest = JSON.parse(readFileSync(
+      path.join(projectRoot, ".pageroot", "manifest.json"),
       "utf8",
     ));
-    expect(Object.values(registry.projects)).toHaveLength(1);
-    const sourceRecords = Object.values(registry.sources).filter(
-      (record) => record.projectId === secondRequest.changeRequest.projectId,
-    );
-    expect(sourceRecords.filter((record) => record.role === "current"))
-      .toHaveLength(1);
+    expect(manifest.projectId).toBe(secondRequest.changeRequest.projectId);
+    expect(manifest.latestOfficialVersionId).toBe("ver_0003");
+    expect(manifest.versions.map((version) => version.versionId))
+      .toEqual(["ver_0001", "ver_0002", "ver_0003"]);
 
     await closePageRootGracefully(launched.electronApp, launched.page);
     activeAppClosed = true;
@@ -3619,83 +3612,54 @@ test("two AI versions activate in order and survive relaunch without identity dr
   }
 });
 
-test("an internal AI supplement is sealed, applied, opened, and shown in history", async () => {
-  test.setTimeout(180_000);
+test("opening a pre-v4 project imports its HTML as a new v4 V1", async () => {
+  test.setTimeout(120_000);
   const fixture = createSourceFixture("supplement-ai-loop.html");
-  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  const isolatedUserData = mkdtempSync(
+    path.join(tmpdir(), "pageroot-native-e2e-ai-loop-"),
+  );
+  const legacy = await seedLegacyV3Project({
+    isolatedUserData,
+    sourcePath: fixture.sourcePath,
+  });
+  const launched = await launchPageRoot({
+    activeSourcePath: fixture.sourcePath,
+    isolatedUserData,
+  });
   try {
-    const request = await addCommentAndSubmit(
-      launched.page,
-      launched.electronApp,
-      fixture.sourcePath,
-    );
-    const instructionId = request.changeRequest.requirements
-      .instructions[0].instructionId;
-    const supplementText = "把“校验通过”改为“补充指令已回写”。";
-    const supplement = recordOfficialSupplement(
-      launched.workspace,
-      request.requestRoot,
-      request.changeRequest,
-      {
-        idempotencyKey: "e2e-internal-ai-prompt-001",
-        action: "add",
-        refersTo: [instructionId],
-        userText: supplementText,
-        targetDescription: "独立校验结果",
-        evidenceState: "text-only",
-        attachments: [],
-      },
-    );
-    expect(supplement.recordId).toBe("supplement_0001");
-
-    writeAiOutput(request.requestRoot, (base) => base
-      .replace(ORIGINAL_TEXT, UPDATED_TEXT)
-      .replace("校验通过", "补充指令已回写"));
-    runOfficialFinalizer(request.requestRoot, request.changeRequest);
-    await expect(launched.page.getByText(
-      "修改结果已完成检查",
-      { exact: true },
-    ).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
-    await expect(launched.page.getByText(
-      "有一项范围校验需要你决定",
-      { exact: true },
-    )).toHaveCount(0);
-
-    const archive = JSON.parse(readFileSync(path.join(
-      request.requestRoot,
-      "attempts",
-      "attempt_001",
-      "USER_SUPPLEMENT.json",
-    ), "utf8"));
-    expect(archive.status).toBe("sealed");
-    expect(archive.records).toHaveLength(1);
-    expect(archive.records[0].refersTo).toContain(instructionId);
-
-    await adoptReadyResult(launched.page);
-    await expect.poll(async () => (
-      launched.page.evaluate(() => window.htmlAIProjects?.getActiveProject())
-    ), { timeout: 30_000 }).toMatchObject({
-      sourcePath: expect.stringMatching(/\/working\/supplement-ai-loop-V1\.1\.html$/u),
+    const externalSourcePath = realpathSync(fixture.sourcePath);
+    await expect.poll(async () => {
+      const active = await launched.page.evaluate(
+        async () => await window.htmlAIProjects?.getActiveProject(),
+      );
+      return active?.sourcePath && active.sourcePath !== externalSourcePath
+        ? active
+        : null;
+    }, { timeout: 45_000 }).toMatchObject({
+      sourcePath: expect.stringMatching(/\/supplement-ai-loop-V1\.html$/u),
     });
     const active = await launched.page.evaluate(
-      () => window.htmlAIProjects?.getActiveProject(),
+      async () => await window.htmlAIProjects?.getActiveProject(),
     );
-    const frame = await loadedDiskFrame(launched.page, active.sourcePath);
-    await expect(frame.locator(caseSelector("list-item"))).toHaveText(UPDATED_TEXT);
-    await expect(frame.locator(caseSelector("standalone-output")))
-      .toHaveText("补充指令已回写");
-
-    await launched.page.getByRole("button", { name: "项目", exact: true }).click();
-    await launched.page.getByRole("button", { name: "版本历史" }).click();
-    await launched.page.getByRole("button", { name: /V2 版本 2/u }).click();
-    await launched.page.getByText(
-      "查看本版修改来源与校验",
-      { exact: true },
-    ).click();
-    await expect(launched.page.getByText("内部 AI 对话补充", { exact: true }))
-      .toBeVisible();
-    await expect(launched.page.getByText(supplementText, { exact: true }))
-      .toBeVisible();
+    expect(active.sourcePath).not.toBe(externalSourcePath);
+    expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
+    const activeCanonicalPath = realpathSync(active.sourcePath);
+    const projectRoot = managedProjectRoots(launched.workspace).find((root) => (
+      activeCanonicalPath.startsWith(`${realpathSync(root)}${path.sep}`)
+    ));
+    expect(projectRoot).toBeTruthy();
+    const project = JSON.parse(readFileSync(
+      path.join(projectRoot, ".pageroot", "project.json"),
+      "utf8",
+    ));
+    expect(project.projectId).not.toBe(legacy.projectId);
+    const manifest = JSON.parse(readFileSync(
+      path.join(projectRoot, ".pageroot", "manifest.json"),
+      "utf8",
+    ));
+    expect(manifest.versions.map((version) => version.versionId)).toEqual(["ver_0001"]);
+    await expect((await loadedDiskFrame(launched.page, active.sourcePath))
+      .locator(caseSelector("list-item"))).toHaveText(ORIGINAL_TEXT);
   } finally {
     await stopPageRoot(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);
@@ -3826,8 +3790,19 @@ test("returning from review restores the editable pre-AI version and preserves t
       ".pageroot",
       "runtime-state.json",
     ), "utf8"));
-    expect(runtime.lifecycleState).toBe("editing");
-    expect(runtime.activeRun).toBeNull();
+    expect(runtime.schemaVersion).toBe("4.0.0");
+    expect(runtime.activeRequest).toBeNull();
+    expect(runtime.activeCandidateId).toBeNull();
+    const candidate = JSON.parse(readFileSync(
+      path.join(request.requestRoot, "candidate.json"),
+      "utf8",
+    ));
+    const requestRecord = JSON.parse(readFileSync(
+      path.join(request.requestRoot, "request.json"),
+      "utf8",
+    ));
+    expect(candidate.status).toBe("rejected");
+    expect(requestRecord.status).toBe("rejected");
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
     expect(existsSync(candidateFiles[0])).toBe(true);
     expect(readFileSync(candidateFiles[0], "utf8")).toContain(UPDATED_TEXT);
@@ -3908,6 +3883,7 @@ test("a failed handoff in project A does not block project B or replace its stat
       launched.page,
       projectA.sourcePath,
     );
+    expect(projectAWorkingCopyPath).not.toBe(realpathSync(projectA.sourcePath));
     await launched.page.getByRole("button", { name: /复制AI任务Prompt/u }).click();
     const processingDialog = launched.page.getByRole("dialog", { name: "本轮处理" });
     await expect(processingDialog.getByText(
@@ -3925,17 +3901,14 @@ test("a failed handoff in project A does not block project B or replace its stat
     await expect(processingDialog).toBeHidden();
     await launched.page.getByRole("button", { name: "复制失败 · 查看" }).click();
     await expect(processingDialog).toBeVisible();
-    await launched.page.getByRole("button", { name: "项目", exact: true }).click();
-    await launched.page.locator(".recent-file-row")
-      .filter({ hasText: path.basename(projectB.sourcePath) })
-      .click();
-    await loadedDiskFrame(launched.page, projectB.sourcePath);
+    await openRecentProject(launched.page, projectB.sourcePath);
     await expect(launched.page.getByRole("button", { name: "复制AI任务Prompt" }))
       .toBeDisabled();
     const projectBWorkingCopyPath = await addComment(
       launched.page,
       projectB.sourcePath,
     );
+    expect(projectBWorkingCopyPath).not.toBe(realpathSync(projectB.sourcePath));
     await expect(launched.page.getByRole("button", { name: /复制AI任务Prompt/u }))
       .toBeEnabled();
     await launched.page.getByRole("button", { name: /复制AI任务Prompt/u }).click();
@@ -3950,7 +3923,7 @@ test("a failed handoff in project A does not block project B or replace its stat
       { timeout: 20_000 },
     ).toBe(2);
 
-    await openRecentProject(launched.page, projectAWorkingCopyPath, { editable: false });
+    await openRecentProject(launched.page, projectA.sourcePath, { editable: false });
     await expect(processingDialog).toBeVisible();
     await expect(launched.page.getByText("交接内容尚未复制", { exact: true }))
       .toBeVisible();
@@ -3962,7 +3935,7 @@ test("a failed handoff in project A does not block project B or replace its stat
     await expect(launched.page.getByText("交接内容尚未复制", { exact: true }))
       .toBeVisible();
 
-    await openRecentProject(launched.page, projectBWorkingCopyPath, { editable: false });
+    await openRecentProject(launched.page, projectB.sourcePath, { editable: false });
     await expect(processingDialog).toBeVisible();
     await expect(launched.page.getByRole("button", { name: "复制失败 · 查看" }))
       .toBeVisible();
@@ -4163,14 +4136,14 @@ test("an unknown Request outcome stays fail-closed and reconciles automatically"
 
 
 
-test("a persisted legacy global comment stays exact after restart and sends directly", async () => {
+test("a persisted global comment stays exact after restart and sends directly", async () => {
   test.setTimeout(120_000);
   const fixture = createSourceFixture("global-comment-restart.html");
   const firstLaunch = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
   const commentText = "重启后仍然保持整个页面的视觉层级。";
   let activeLaunch = firstLaunch;
   try {
-    const frame = await loadedDiskFrame(firstLaunch.page, fixture.sourcePath);
+    await loadedDiskFrame(firstLaunch.page, fixture.sourcePath);
     await firstLaunch.page.getByRole("button", { name: "全局评论" }).click();
     await firstLaunch.page.getByRole("textbox", { name: "评论内容" })
       .fill(commentText);
@@ -4178,13 +4151,27 @@ test("a persisted legacy global comment stays exact after restart and sends dire
     await expect(firstLaunch.page.locator(".comment-card")
       .filter({ hasText: commentText }))
       .toHaveAttribute("data-resolution", "exact");
+    const externalSourcePath = realpathSync(fixture.sourcePath);
+    await expect.poll(async () => {
+      const activeSourcePath = await firstLaunch.page.evaluate(
+        async () => (await window.htmlAIProjects?.getActiveProject())?.sourcePath || "",
+      );
+      return activeSourcePath && activeSourcePath !== externalSourcePath
+        ? activeSourcePath
+        : "";
+    }, { timeout: 45_000 }).not.toBe("");
+    const managedSourcePath = await firstLaunch.page.evaluate(
+      async () => (await window.htmlAIProjects?.getActiveProject())?.sourcePath || "",
+    );
+    const frame = await loadedDiskFrame(firstLaunch.page, managedSourcePath);
     await activateNativeEdit(frame, "list-item");
     await setTextSelection(frame, "list-item", 0, ORIGINAL_TEXT.length);
     await firstLaunch.page.keyboard.insertText("重启兼容测试");
     await expect.poll(
-      () => readFileSync(fixture.sourcePath, "utf8"),
+      () => readFileSync(managedSourcePath, "utf8"),
       { timeout: 20_000 },
     ).toContain("重启兼容测试");
+    expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
     await expect.poll(
       () => workspaceContainsDraftComment(firstLaunch.workspace, commentText),
       { timeout: 20_000 },
@@ -4201,14 +4188,14 @@ test("a persisted legacy global comment stays exact after restart and sends dire
       },
     )).toBe(true);
     activeLaunch = await launchPageRoot({
-      activeSourcePath: fixture.sourcePath,
+      activeSourcePath: managedSourcePath,
       isolatedUserData: firstLaunch.isolatedUserData,
     });
     await expect.poll(
       () => workspaceContainsDraftComment(activeLaunch.workspace, commentText),
       { timeout: 20_000 },
     ).toBe(true);
-    await loadedDiskFrame(activeLaunch.page, fixture.sourcePath);
+    await loadedDiskFrame(activeLaunch.page, managedSourcePath);
     const recoveredComment = activeLaunch.page.locator(".comment-card")
       .filter({ hasText: commentText });
     await expect(recoveredComment).toHaveAttribute("data-resolution", "exact");
@@ -4350,7 +4337,7 @@ test("a committed version that the desktop cannot activate stays visibly blocked
     await expect.poll(
       () => workingHtmlFiles(launched.workspace, request.changeRequest.projectId).length,
       { timeout: 20_000 },
-    ).toBe(1);
+    ).toBe(2);
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
   } finally {
     await stopPageRoot(launched.electronApp, launched.isolatedUserData);

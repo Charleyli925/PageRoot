@@ -94,12 +94,8 @@ async function waitForSeedBridge(baseUrl, child, stderr) {
   );
 }
 
-/**
- * Creates a real v3 project before Electron starts.  PR-1 imports new files
- * into V1 Working Copies, while this fixture keeps the legacy regression
- * cases on their documented compatibility path instead of asking v4 imports
- * to provide PR-2 source-history behavior.
- */
+// Creates a pre-v4 project solely to verify the v4 incompatibility boundary:
+// the Electron client must ignore it and import the source as a fresh V1.
 export async function seedLegacyV3Project({ isolatedUserData, sourcePath }) {
   if (!isolatedUserData || !sourcePath) {
     throw new TypeError("旧项目预置需要隔离用户目录和源 HTML 路径。");
