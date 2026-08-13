@@ -12,6 +12,8 @@ import {
 import os from "node:os";
 import path from "node:path";
 
+import { parse } from "parse5";
+
 import {
   atomicWriteFile,
   ensureDirectory,
@@ -419,22 +421,187 @@ function decodeHtml(buffer, label) {
   return html;
 }
 
-function hasUnsupportedRelativeResource(html) {
-  const attributes = /\b(?:src|href)\s*=\s*(["'])(.*?)\1/giu;
-  for (const match of html.matchAll(attributes)) {
-    const target = String(match[2] || "").trim();
-    if (
-      !target
-      || target.startsWith("#")
-      || target.startsWith("data:")
-      || target.startsWith("mailto:")
-      || target.startsWith("tel:")
-      || /^[a-z][a-z0-9+.-]*:/iu.test(target)
-      || target.startsWith("//")
-    ) continue;
-    return target;
+const RESOURCE_ATTRIBUTES = new Set([
+  "src",
+  "href",
+  "srcset",
+  "poster",
+  "data",
+  "background",
+]);
+
+function relativeResourceTarget(value) {
+  const target = String(value || "").trim();
+  if (
+    !target
+    || target.startsWith("#")
+    || target.startsWith("data:")
+    || target.startsWith("mailto:")
+    || target.startsWith("tel:")
+    || /^[a-z][a-z0-9+.-]*:/iu.test(target)
+    || target.startsWith("//")
+  ) return null;
+  return target;
+}
+
+function firstRelativeSrcsetTarget(value) {
+  const source = String(value || "");
+  let cursor = 0;
+  while (cursor < source.length) {
+    while (cursor < source.length && /[\s,]/u.test(source[cursor])) cursor += 1;
+    if (cursor >= source.length) break;
+    const start = cursor;
+    const dataUrl = source.slice(cursor, cursor + 5).toLowerCase() === "data:";
+    while (
+      cursor < source.length
+      && !/\s/u.test(source[cursor])
+      && (dataUrl || source[cursor] !== ",")
+    ) cursor += 1;
+    const target = relativeResourceTarget(source.slice(start, cursor));
+    if (target) return target;
+    while (cursor < source.length && source[cursor] !== ",") cursor += 1;
+    if (source[cursor] === ",") cursor += 1;
   }
   return null;
+}
+
+function cssWordAt(source, index, word) {
+  const before = source[index - 1] || "";
+  const after = source[index + word.length] || "";
+  return (
+    source.slice(index, index + word.length).toLowerCase() === word
+    && !/[a-z0-9_-]/iu.test(before)
+    && !/[a-z0-9_-]/iu.test(after)
+  );
+}
+
+function skipCssSpaceAndComments(source, initial) {
+  let cursor = initial;
+  while (cursor < source.length) {
+    if (/\s/u.test(source[cursor])) {
+      cursor += 1;
+      continue;
+    }
+    if (source.slice(cursor, cursor + 2) === "/*") {
+      const end = source.indexOf("*/", cursor + 2);
+      cursor = end === -1 ? source.length : end + 2;
+      continue;
+    }
+    break;
+  }
+  return cursor;
+}
+
+function readCssQuotedValue(source, initial) {
+  const quote = source[initial];
+  let cursor = initial + 1;
+  let value = "";
+  while (cursor < source.length) {
+    const character = source[cursor];
+    if (character === "\\") {
+      if (cursor + 1 < source.length) value += source[cursor + 1];
+      cursor += 2;
+      continue;
+    }
+    if (character === quote) {
+      return { value, next: cursor + 1 };
+    }
+    value += character;
+    cursor += 1;
+  }
+  return { value, next: cursor };
+}
+
+function readCssUrlValue(source, initial) {
+  let cursor = skipCssSpaceAndComments(source, initial);
+  if (source[cursor] === "'" || source[cursor] === '"') {
+    const quoted = readCssQuotedValue(source, cursor);
+    cursor = skipCssSpaceAndComments(source, quoted.next);
+    return { value: quoted.value, next: source[cursor] === ")" ? cursor + 1 : cursor };
+  }
+  const start = cursor;
+  while (cursor < source.length && source[cursor] !== ")") cursor += 1;
+  return {
+    value: source.slice(start, cursor).trim(),
+    next: source[cursor] === ")" ? cursor + 1 : cursor,
+  };
+}
+
+function firstRelativeCssResource(css) {
+  const source = String(css || "");
+  let cursor = 0;
+  while (cursor < source.length) {
+    if (source.slice(cursor, cursor + 2) === "/*") {
+      cursor = skipCssSpaceAndComments(source, cursor);
+      continue;
+    }
+    if (source[cursor] === "'" || source[cursor] === '"') {
+      cursor = readCssQuotedValue(source, cursor).next;
+      continue;
+    }
+    if (cssWordAt(source, cursor, "url")) {
+      const open = skipCssSpaceAndComments(source, cursor + 3);
+      if (source[open] === "(") {
+        const resource = readCssUrlValue(source, open + 1);
+        const target = relativeResourceTarget(resource.value);
+        if (target) return target;
+        cursor = resource.next;
+        continue;
+      }
+    }
+    if (source.slice(cursor, cursor + 7).toLowerCase() === "@import") {
+      let next = skipCssSpaceAndComments(source, cursor + 7);
+      let resource;
+      if (cssWordAt(source, next, "url")) {
+        const open = skipCssSpaceAndComments(source, next + 3);
+        resource = source[open] === "(" ? readCssUrlValue(source, open + 1) : null;
+      } else if (source[next] === "'" || source[next] === '"') {
+        resource = readCssQuotedValue(source, next);
+      } else {
+        const start = next;
+        while (next < source.length && !/[\s;]/u.test(source[next])) next += 1;
+        resource = { value: source.slice(start, next), next };
+      }
+      if (resource) {
+        const target = relativeResourceTarget(resource.value);
+        if (target) return target;
+        cursor = resource.next;
+        continue;
+      }
+    }
+    cursor += 1;
+  }
+  return null;
+}
+
+function hasUnsupportedRelativeResource(html) {
+  let resource = null;
+  const visit = (node) => {
+    if (resource || !node) return;
+    for (const attribute of node.attrs || []) {
+      const name = String(attribute.name || "").toLowerCase();
+      let target = null;
+      if (name === "srcset") {
+        target = firstRelativeSrcsetTarget(attribute.value);
+      } else if (RESOURCE_ATTRIBUTES.has(name)) {
+        target = relativeResourceTarget(attribute.value);
+      } else if (name === "style") {
+        target = firstRelativeCssResource(attribute.value);
+      }
+      if (target) {
+        resource = target;
+        return;
+      }
+    }
+    if (node.tagName === "style") {
+      const css = (node.childNodes || []).map((child) => child.value || "").join("");
+      resource = firstRelativeCssResource(css);
+      if (resource) return;
+    }
+    for (const child of node.childNodes || []) visit(child);
+  };
+  visit(parse(html));
+  return resource;
 }
 
 async function regularInformation(filePath, label, { projectRootPath = null } = {}) {
@@ -1727,6 +1894,7 @@ export class ProjectFileRepository {
       || completion.basedOnVersionId !== request.basedOnVersionId
       || completion.previousVersionId !== request.previousVersionId
       || completion.expectedSourceSha256 !== request.expectedSourceSha256
+      || completion.inputManifestSha256 !== request.inputManifestSha256
       || completion.outputRelativePath !== request.outputRelativePath
       || !SHA256.test(String(completion.outputSha256 || ""))
       || !["completed", "no-change"].includes(completion.status)
@@ -2884,7 +3052,24 @@ export class ProjectFileRepository {
     const registry = await this.#readRegistry();
     const candidates = [];
     for (const [projectId, record] of Object.entries(registry.projects)) {
-      const resolvedRoot = await this.#recoverRegisteredRootRename(projectId, record);
+      const registeredRootPath = normalizedPath(record.registeredProjectRootPath);
+      let resolvedRoot;
+      try {
+        resolvedRoot = await this.#recoverRegisteredRootRename(projectId, record);
+      } catch (cause) {
+        // A damaged or replaced registered root must block access to files it
+        // actually owns, but it cannot prevent an unrelated managed project
+        // (or an external file) from resolving. A renamed root only claims a
+        // source after recovery has positively verified its stable identity.
+        if (
+          cause instanceof ProjectFileRepositoryError
+          && cause.code === "REGISTERED_PROJECT_IDENTITY_CHANGED"
+          && !pathInside(registeredRootPath, exactSourcePath)
+        ) {
+          continue;
+        }
+        throw cause;
+      }
       if (resolvedRoot && pathInside(resolvedRoot, exactSourcePath)) {
         candidates.push({ projectId, projectRootPath: resolvedRoot });
       }

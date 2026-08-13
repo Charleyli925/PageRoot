@@ -256,15 +256,15 @@ async function addCommentAndSubmit(
   additionalComments = [],
 ) {
   await electronApp.evaluate(({ clipboard }) => clipboard.clear());
-  await addComment(
+  let activeSourcePath = await addComment(
     page,
     sourcePath,
     `只把这个列表项改为“${updatedText}”，其他地方保持不变。`,
   );
   for (const comment of additionalComments) {
-    await addComment(
+    activeSourcePath = await addComment(
       page,
-      sourcePath,
+      activeSourcePath,
       comment.text,
       comment.targetCase,
       comment.targetSelector,
@@ -295,7 +295,7 @@ async function addCommentAndSubmit(
     (instruction) => instruction.text.includes(updatedText),
   )).toBe(true);
   expect(changeRequest.requirements.preserveOutsideTargets).toBe(true);
-  return { promptPath, requestRoot, changeRequest };
+  return { promptPath, requestRoot, changeRequest, sourcePath: activeSourcePath };
 }
 
 async function addComment(page, sourcePath, text = (
@@ -331,6 +331,9 @@ async function addComment(page, sourcePath, text = (
     .toHaveAttribute("data-layout-ready", "true", { timeout: 45_000 });
   await expect(page.locator(".comment-card").filter({ hasText: text }))
     .toHaveCount(1);
+  return (await page.evaluate(
+    () => window.htmlAIProjects?.getActiveProject(),
+  ))?.sourcePath || sourcePath;
 }
 
 async function openRecentProject(page, sourcePath, options) {
@@ -352,10 +355,28 @@ async function openRecentProject(page, sourcePath, options) {
   return loadedDiskFrame(page, sourcePath, options);
 }
 
+function managedProjectRoots(workspace) {
+  const projectsRoot = path.join(path.dirname(workspace), "project-files");
+  if (!existsSync(projectsRoot)) return [];
+  return readdirSync(projectsRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
+    .map((entry) => path.join(projectsRoot, entry.name))
+    .filter((projectRoot) => existsSync(path.join(projectRoot, ".pageroot", "project.json")));
+}
+
+function managedProjectRootForId(workspace, projectId) {
+  return managedProjectRoots(workspace).find((projectRoot) => {
+    const project = JSON.parse(readFileSync(
+      path.join(projectRoot, ".pageroot", "project.json"),
+      "utf8",
+    ));
+    return project.projectId === projectId;
+  }) || null;
+}
+
 function requestDirectoryCount(workspace) {
   const projectsRoot = path.join(workspace, "projects");
-  if (!existsSync(projectsRoot)) return 0;
-  return readdirSync(projectsRoot).reduce((total, projectDirectoryName) => {
+  const legacyCount = !existsSync(projectsRoot) ? 0 : readdirSync(projectsRoot).reduce((total, projectDirectoryName) => {
     const requestsRoot = path.join(
       projectsRoot,
       projectDirectoryName,
@@ -367,12 +388,19 @@ function requestDirectoryCount(workspace) {
         : 0
     );
   }, 0);
+  return legacyCount + managedProjectRoots(workspace).reduce((total, projectRoot) => {
+    const requestsRoot = path.join(projectRoot, ".pageroot", "requests");
+    return total + (
+      existsSync(requestsRoot)
+        ? readdirSync(requestsRoot).filter((name) => !name.startsWith(".")).length
+        : 0
+    );
+  }, 0);
 }
 
 function workspaceContainsDraftComment(workspace, text) {
   const projectsRoot = path.join(workspace, "projects");
-  if (!existsSync(projectsRoot)) return false;
-  return readdirSync(projectsRoot).some((projectDirectoryName) => {
+  const legacyContains = existsSync(projectsRoot) && readdirSync(projectsRoot).some((projectDirectoryName) => {
     const draftPath = path.join(
       projectsRoot,
       projectDirectoryName,
@@ -384,18 +412,37 @@ function workspaceContainsDraftComment(workspace, text) {
     return Array.isArray(draft.comments)
       && draft.comments.some((comment) => comment.text === text);
   });
+  if (legacyContains) return true;
+  return managedProjectRoots(workspace).some((projectRoot) => {
+    const draftsRoot = path.join(projectRoot, ".pageroot", "drafts");
+    return existsSync(draftsRoot) && readdirSync(draftsRoot)
+      .filter((name) => name.endsWith(".json"))
+      .some((name) => {
+        const draft = JSON.parse(readFileSync(path.join(draftsRoot, name), "utf8"));
+        return Array.isArray(draft.comments)
+          && draft.comments.some((comment) => comment.text === text);
+      });
+  });
 }
 
 function rewriteWorkspaceDraftComment(workspace, text, update) {
   const projectsRoot = path.join(workspace, "projects");
-  if (!existsSync(projectsRoot)) return false;
-  for (const projectDirectoryName of readdirSync(projectsRoot)) {
-    const draftPath = path.join(
+  const draftPaths = existsSync(projectsRoot)
+    ? readdirSync(projectsRoot).map((projectDirectoryName) => path.join(
       projectsRoot,
       projectDirectoryName,
       "draft",
       "annotations.json",
-    );
+    ))
+    : [];
+  for (const projectRoot of managedProjectRoots(workspace)) {
+    const draftsRoot = path.join(projectRoot, ".pageroot", "drafts");
+    if (!existsSync(draftsRoot)) continue;
+    for (const name of readdirSync(draftsRoot)) {
+      if (name.endsWith(".json")) draftPaths.push(path.join(draftsRoot, name));
+    }
+  }
+  for (const draftPath of draftPaths) {
     if (!existsSync(draftPath)) continue;
     const draft = JSON.parse(readFileSync(draftPath, "utf8"));
     const comment = Array.isArray(draft.comments)
@@ -474,6 +521,7 @@ function runOfficialFinalizer(requestRoot, changeRequest) {
 }
 
 function recordOfficialSupplement(workspace, requestRoot, changeRequest, payload) {
+  const request = JSON.parse(readFileSync(path.join(requestRoot, "request.json"), "utf8"));
   const result = spawnSync(process.execPath, [
     path.join(productRoot, "scripts", "record-user-supplement.mjs"),
     "--workspace",
@@ -481,7 +529,7 @@ function recordOfficialSupplement(workspace, requestRoot, changeRequest, payload
     "--project-id",
     changeRequest.projectId,
     "--request-id",
-    path.basename(requestRoot),
+    request.requestId,
     "--attempt-id",
     "attempt_001",
   ], {
@@ -502,32 +550,41 @@ function workingHtmlFiles(workspace, projectId) {
   if (existsSync(legacyRegistryPath)) {
     const registry = JSON.parse(readFileSync(legacyRegistryPath, "utf8"));
     const storageDirectoryName = registry.projects?.[projectId]?.storageDirectoryName;
-    if (!storageDirectoryName) return [];
-    const directory = path.join(workspace, "projects", storageDirectoryName, "working");
-    if (!existsSync(directory)) return [];
-    return readdirSync(directory)
-      .filter((fileName) => fileName.endsWith(".html"))
-      .map((fileName) => path.join(directory, fileName));
+    if (storageDirectoryName) {
+      const directory = path.join(workspace, "projects", storageDirectoryName, "working");
+      if (!existsSync(directory)) return [];
+      return readdirSync(directory)
+        .filter((fileName) => fileName.endsWith(".html"))
+        .map((fileName) => path.join(directory, fileName));
+    }
   }
 
-  const projectsRoot = path.join(path.dirname(workspace), "project-files");
-  if (!existsSync(projectsRoot)) return [];
-  for (const directory of readdirSync(projectsRoot, { withFileTypes: true })) {
-    if (!directory.isDirectory()) continue;
-    const projectRoot = path.join(projectsRoot, directory.name);
-    const projectPath = path.join(projectRoot, ".pageroot", "project.json");
-    const manifestPath = path.join(projectRoot, ".pageroot", "manifest.json");
-    if (!existsSync(projectPath) || !existsSync(manifestPath)) continue;
-    const project = JSON.parse(readFileSync(projectPath, "utf8"));
-    if (project.projectId !== projectId) continue;
-    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
-    return (Array.isArray(manifest.workingCopies) ? manifest.workingCopies : [])
-      .map((workingCopy) => String(workingCopy.sourceRelativePath || ""))
-      .filter((relativePath) => relativePath.endsWith(".html"))
-      .map((relativePath) => path.join(projectRoot, relativePath))
-      .filter((filePath) => existsSync(filePath));
-  }
-  return [];
+  const projectRoot = managedProjectRootForId(workspace, projectId);
+  if (!projectRoot) return [];
+  const manifest = JSON.parse(readFileSync(
+    path.join(projectRoot, ".pageroot", "manifest.json"),
+    "utf8",
+  ));
+  return (Array.isArray(manifest.workingCopies) ? manifest.workingCopies : [])
+    .map((workingCopy) => String(workingCopy.sourceRelativePath || ""))
+    .filter((relativePath) => relativePath.endsWith(".html"))
+    .map((relativePath) => path.join(projectRoot, relativePath))
+    .filter((filePath) => existsSync(filePath));
+}
+
+function candidateHtmlFiles(workspace, projectId) {
+  const projectRoot = managedProjectRootForId(workspace, projectId);
+  if (!projectRoot) return [];
+  const requestsRoot = path.join(projectRoot, ".pageroot", "requests");
+  if (!existsSync(requestsRoot)) return [];
+  return readdirSync(requestsRoot)
+    .filter((requestId) => !requestId.startsWith("."))
+    .map((requestId) => path.join(requestsRoot, requestId, "candidate.html"))
+    .filter((filePath) => existsSync(filePath));
+}
+
+async function adoptReadyResult(page) {
+  await page.getByRole("button", { name: "采纳并打开" }).click();
 }
 
 const REVIEW_PROJECTION_CASES = Object.freeze([
@@ -3477,7 +3534,7 @@ test("two AI versions activate in order and survive relaunch without identity dr
       "修改结果已完成检查",
       { exact: true },
     ).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
-    await launched.page.getByRole("button", { name: "直接打开" }).click();
+    await adoptReadyResult(launched.page);
     await expect.poll(async () => (
       launched.page.evaluate(() => window.htmlAIProjects?.getActiveProject())
     ), { timeout: 30_000 }).toMatchObject({
@@ -3506,7 +3563,7 @@ test("two AI versions activate in order and survive relaunch without identity dr
       "修改结果已完成检查",
       { exact: true },
     ).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
-    await launched.page.getByRole("button", { name: "直接打开" }).click();
+    await adoptReadyResult(launched.page);
     await expect.poll(async () => (
       launched.page.evaluate(() => window.htmlAIProjects?.getActiveProject())
     ), { timeout: 30_000 }).toMatchObject({
@@ -3614,7 +3671,7 @@ test("an internal AI supplement is sealed, applied, opened, and shown in history
     expect(archive.records).toHaveLength(1);
     expect(archive.records[0].refersTo).toContain(instructionId);
 
-    await launched.page.getByRole("button", { name: "直接打开" }).click();
+    await adoptReadyResult(launched.page);
     await expect.poll(async () => (
       launched.page.evaluate(() => window.htmlAIProjects?.getActiveProject())
     ), { timeout: 30_000 }).toMatchObject({
@@ -3708,7 +3765,7 @@ test("returning from review restores the editable pre-AI version and preserves t
       "修改结果已完成检查",
       { exact: true },
     ).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
-    const candidateFiles = workingHtmlFiles(
+    const candidateFiles = candidateHtmlFiles(
       launched.workspace,
       request.changeRequest.projectId,
     );
@@ -3748,21 +3805,25 @@ test("returning from review restores the editable pre-AI version and preserves t
     await dialog.getByRole("button", { name: "返回修改前版本" }).click();
 
     await expect(launched.page.getByTestId("ai-review-workspace")).toHaveCount(0);
-    await loadedDiskFrame(launched.page, fixture.sourcePath);
+    const [workingCopyPath] = workingHtmlFiles(
+      launched.workspace,
+      request.changeRequest.projectId,
+    );
+    await loadedDiskFrame(launched.page, workingCopyPath);
     await expect(launched.page.locator(".comment-card").filter({ hasText: commentText }))
       .toHaveCount(1);
     const restored = await launched.page.evaluate(
       () => window.htmlAIProjects?.getActiveProject(),
     );
-    expect(restored.sourcePath).toBe(realpathSync(fixture.sourcePath));
-    const registry = JSON.parse(readFileSync(
-      path.join(launched.workspace, "project-registry.json"),
-      "utf8",
-    ));
-    const runtime = JSON.parse(readFileSync(path.join(
+    expect(restored.sourcePath).toBe(realpathSync(workingCopyPath));
+    const projectRoot = managedProjectRootForId(
       launched.workspace,
-      "projects",
-      registry.projects[request.changeRequest.projectId].storageDirectoryName,
+      request.changeRequest.projectId,
+    );
+    expect(projectRoot).toBeTruthy();
+    const runtime = JSON.parse(readFileSync(path.join(
+      projectRoot,
+      ".pageroot",
       "runtime-state.json",
     ), "utf8"));
     expect(runtime.lifecycleState).toBe("editing");
@@ -3824,18 +3885,8 @@ test("a clipboard handoff failure keeps the frozen Request recoverable", async (
       .toBeVisible();
     await retryCopy.click();
     await expect(handoffError).toBeVisible();
-    const projectsRoot = path.join(launched.workspace, "projects");
-    await expect.poll(() => (
-      existsSync(projectsRoot)
-        ? readdirSync(projectsRoot).some((projectDirectoryName) => (
-            existsSync(path.join(
-              projectsRoot,
-              projectDirectoryName,
-              "requests",
-            ))
-          ))
-        : false
-    )).toBe(true);
+    await expect.poll(() => requestDirectoryCount(launched.workspace))
+      .toBe(1);
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
   } finally {
     await stopPageRoot(launched.electronApp, launched.isolatedUserData);
@@ -3853,7 +3904,10 @@ test("a failed handoff in project A does not block project B or replace its stat
     injectedEnv: { PAGEROOT_E2E_QODER_HANDOFF_FAILURE: "1" },
   });
   try {
-    await addComment(launched.page, projectA.sourcePath);
+    const projectAWorkingCopyPath = await addComment(
+      launched.page,
+      projectA.sourcePath,
+    );
     await launched.page.getByRole("button", { name: /复制AI任务Prompt/u }).click();
     const processingDialog = launched.page.getByRole("dialog", { name: "本轮处理" });
     await expect(processingDialog.getByText(
@@ -3878,7 +3932,10 @@ test("a failed handoff in project A does not block project B or replace its stat
     await loadedDiskFrame(launched.page, projectB.sourcePath);
     await expect(launched.page.getByRole("button", { name: "复制AI任务Prompt" }))
       .toBeDisabled();
-    await addComment(launched.page, projectB.sourcePath);
+    const projectBWorkingCopyPath = await addComment(
+      launched.page,
+      projectB.sourcePath,
+    );
     await expect(launched.page.getByRole("button", { name: /复制AI任务Prompt/u }))
       .toBeEnabled();
     await launched.page.getByRole("button", { name: /复制AI任务Prompt/u }).click();
@@ -3893,7 +3950,7 @@ test("a failed handoff in project A does not block project B or replace its stat
       { timeout: 20_000 },
     ).toBe(2);
 
-    await openRecentProject(launched.page, projectA.sourcePath, { editable: false });
+    await openRecentProject(launched.page, projectAWorkingCopyPath, { editable: false });
     await expect(processingDialog).toBeVisible();
     await expect(launched.page.getByText("交接内容尚未复制", { exact: true }))
       .toBeVisible();
@@ -3905,7 +3962,7 @@ test("a failed handoff in project A does not block project B or replace its stat
     await expect(launched.page.getByText("交接内容尚未复制", { exact: true }))
       .toBeVisible();
 
-    await openRecentProject(launched.page, projectB.sourcePath, { editable: false });
+    await openRecentProject(launched.page, projectBWorkingCopyPath, { editable: false });
     await expect(processingDialog).toBeVisible();
     await expect(launched.page.getByRole("button", { name: "复制失败 · 查看" }))
       .toBeVisible();
@@ -3961,7 +4018,6 @@ test("ending a copied run still warns after restart and blocks late finalization
     );
     await closePageRootGracefully(launched.electronApp, launched.page);
     launched = await launchPageRoot({
-      activeSourcePath: fixture.sourcePath,
       isolatedUserData: launched.isolatedUserData,
     });
     await expect(launched.page.getByText(
@@ -4033,7 +4089,7 @@ test("ending a copied run still warns after restart and blocks late finalization
         launched.workspace,
         request.changeRequest.projectId,
       ),
-    ).toHaveLength(0);
+    ).toHaveLength(1);
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
   } finally {
     await stopPageRoot(launched.electronApp, launched.isolatedUserData);
@@ -4184,7 +4240,7 @@ test("output without the mandatory finalizer never creates or opens a version", 
     await launched.page.waitForTimeout(3_500);
     await expect(launched.page.getByText("等待 QoderWork 返回修改结果", { exact: true }))
       .toBeVisible();
-    expect(workingHtmlFiles(launched.workspace, request.changeRequest.projectId)).toHaveLength(0);
+    expect(workingHtmlFiles(launched.workspace, request.changeRequest.projectId)).toHaveLength(1);
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
   } finally {
     await stopPageRoot(launched.electronApp, launched.isolatedUserData);
@@ -4216,7 +4272,7 @@ test("a malformed AI HTML return is rejected before completion or opening", asyn
     await launched.page.waitForTimeout(3_500);
     await expect(launched.page.getByText("等待 QoderWork 返回修改结果", { exact: true }))
       .toBeVisible();
-    expect(workingHtmlFiles(launched.workspace, request.changeRequest.projectId)).toHaveLength(0);
+    expect(workingHtmlFiles(launched.workspace, request.changeRequest.projectId)).toHaveLength(1);
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
   } finally {
     await stopPageRoot(launched.electronApp, launched.isolatedUserData);
@@ -4283,16 +4339,14 @@ test("a committed version that the desktop cannot activate stays visibly blocked
       "修改结果已完成检查",
       { exact: true },
     ).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
-    await launched.page.getByRole("button", {
-      name: "直接打开",
-    }).click();
+    await adoptReadyResult(launched.page);
     await expect(launched.page.getByText(/新版本文件暂时无法打开|最新版暂时无法打开/u)
       .filter({ visible: true }).first())
       .toBeVisible({ timeout: 30_000 });
     const active = await launched.page.evaluate(
       () => window.htmlAIProjects?.getActiveProject(),
     );
-    expect(active.sourcePath).toBe(realpathSync(fixture.sourcePath));
+    expect(active.sourcePath).toBe(realpathSync(request.sourcePath));
     await expect.poll(
       () => workingHtmlFiles(launched.workspace, request.changeRequest.projectId).length,
       { timeout: 20_000 },

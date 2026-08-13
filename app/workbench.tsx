@@ -1164,6 +1164,8 @@ export default function Workbench() {
         }>;
         if (!workspaceController.matchesCurrentProjectContext(registrationEvent.context)) return;
         setProjectRecordsPath(registrationEvent.projectRecordsPath);
+        setProjectRecordsPreparing(false);
+        setProjectRecordsError("");
         if (registrationEvent.projectName) setProjectName(registrationEvent.projectName);
         if (registrationEvent.imported) {
           setToast({

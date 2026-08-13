@@ -9049,6 +9049,21 @@ function safeInspectableProjectPath(context, relativePath) {
 }
 
 async function inspectProjectFile(sourcePath, relativePath) {
+  const projectFileWorkspace = await projectFileWorkspaceForSource(sourcePath);
+  if (projectFileWorkspace) {
+    const normalized = cleanText(relativePath, 500).replaceAll("\\", "/");
+    if (normalized !== "PROJECT.md") {
+      throw new HttpError(
+        403,
+        "PROJECT_FILE_NOT_INSPECTABLE",
+        "The requested project file is not available in the read-only inspector.",
+      );
+    }
+    return {
+      ...await projectFileGet(sourcePath),
+      readOnly: false,
+    };
+  }
   const context = await loadContextBySource(sourcePath, false);
   const inspected = safeInspectableProjectPath(context, relativePath);
   let information;

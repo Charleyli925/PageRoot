@@ -77,7 +77,12 @@ async function loadedDiskFrame(page, sourcePath, caseId) {
   });
 }
 
-async function openRecentProject(page, sourcePath, caseId = "list-item") {
+async function openRecentProject(
+  page,
+  sourcePath,
+  caseId = "list-item",
+  recentName = path.basename(sourcePath),
+) {
   const visibleToast = page.locator(".toast.show");
   await visibleToast.waitFor({ state: "visible", timeout: 2_000 }).catch(() => {});
   if (await visibleToast.isVisible()) {
@@ -91,7 +96,7 @@ async function openRecentProject(page, sourcePath, caseId = "list-item") {
   }
   await page.getByRole("button", { name: "项目", exact: true }).click();
   await page.locator(".recent-file-row")
-    .filter({ hasText: path.basename(sourcePath) })
+    .filter({ hasText: recentName })
     .click();
   return loadedDiskFrame(page, sourcePath, caseId);
 }
@@ -266,8 +271,7 @@ async function addCanvasComment(page, frame, caseId, text) {
 
 function requestDirectoryCount(workspace) {
   const projectsRoot = path.join(workspace, "projects");
-  if (!existsSync(projectsRoot)) return 0;
-  return readdirSync(projectsRoot).reduce((total, projectDirectoryName) => {
+  const legacyCount = !existsSync(projectsRoot) ? 0 : readdirSync(projectsRoot).reduce((total, projectDirectoryName) => {
     const requestsRoot = path.join(
       projectsRoot,
       projectDirectoryName,
@@ -279,12 +283,28 @@ function requestDirectoryCount(workspace) {
         : 0
     );
   }, 0);
+  const managedProjectsRoot = path.join(path.dirname(workspace), "project-files");
+  if (!existsSync(managedProjectsRoot)) return legacyCount;
+  return legacyCount + readdirSync(managedProjectsRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
+    .reduce((total, entry) => {
+      const requestsRoot = path.join(
+        managedProjectsRoot,
+        entry.name,
+        ".pageroot",
+        "requests",
+      );
+      return total + (
+        existsSync(requestsRoot)
+          ? readdirSync(requestsRoot).filter((name) => !name.startsWith(".")).length
+          : 0
+      );
+    }, 0);
 }
 
 function workspaceContainsDraftComment(workspace, text) {
   const projectsRoot = path.join(workspace, "projects");
-  if (!existsSync(projectsRoot)) return false;
-  return readdirSync(projectsRoot).some((projectDirectoryName) => {
+  const legacyContains = existsSync(projectsRoot) && readdirSync(projectsRoot).some((projectDirectoryName) => {
     const draftPath = path.join(
       projectsRoot,
       projectDirectoryName,
@@ -296,6 +316,26 @@ function workspaceContainsDraftComment(workspace, text) {
     return Array.isArray(draft.comments)
       && draft.comments.some((comment) => comment.text === text);
   });
+  if (legacyContains) return true;
+  const managedProjectsRoot = path.join(path.dirname(workspace), "project-files");
+  if (!existsSync(managedProjectsRoot)) return false;
+  return readdirSync(managedProjectsRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
+    .some((entry) => {
+      const draftsRoot = path.join(
+        managedProjectsRoot,
+        entry.name,
+        ".pageroot",
+        "drafts",
+      );
+      return existsSync(draftsRoot) && readdirSync(draftsRoot)
+        .filter((name) => name.endsWith(".json"))
+        .some((name) => {
+          const draft = JSON.parse(readFileSync(path.join(draftsRoot, name), "utf8"));
+          return Array.isArray(draft.comments)
+            && draft.comments.some((comment) => comment.text === text);
+        });
+    });
 }
 
 async function replayApplePinyinStyledWrapperCommit(frame, caseId) {
@@ -763,7 +803,7 @@ test("Electron keeps runtime visuals in Preview and source-backed static content
     <p data-native-case="preview-tab-copy" data-native-mode="native-editable">第二页可编辑正文</p>
     <svg id="static-chart" viewBox="0 0 10 10"><circle cx="5" cy="5" r="3"></circle></svg>
   </section>
-  <script src="./runtime.js"></script>
+  <script src="file://${runtimePath}"></script>
 </body>
 </html>`,
     "utf8",
@@ -837,6 +877,15 @@ test("Electron keeps runtime visuals in Preview and source-backed static content
 })();`,
     "utf8",
   );
+  writeFileSync(
+    sourcePath,
+    readFileSync(sourcePath, "utf8").replace(
+      `<script src="file://${runtimePath}"></script>`,
+      `<script>${readFileSync(runtimePath, "utf8")}</script>`,
+    ),
+    "utf8",
+  );
+  const originalSource = readFileSync(sourcePath);
 
   let electronApp = null;
   let isolatedUserData = null;
@@ -855,9 +904,7 @@ test("Electron keeps runtime visuals in Preview and source-backed static content
     await expect(editFrame.locator("[data-runtime-row]")).toHaveCount(0);
     await expect(editFrame.locator("#direct-runtime-svg rect")).toHaveCount(0);
     await expect(editFrame.locator("[data-pageroot-readonly-visual]")).toHaveCount(0);
-    expect(readFileSync(sourcePath, "utf8")).not.toMatch(
-      /data-pageroot-readonly-visual|data-runtime-row|data-runtime-chart|data-drawn|(?:data:image\/png|blob:)/u,
-    );
+    expect(readFileSync(sourcePath)).toEqual(originalSource);
 
     await launched.page.getByRole("button", {
       name: "预览",
@@ -916,9 +963,7 @@ test("Electron keeps runtime visuals in Preview and source-backed static content
     await expect(resumedEditFrame.locator("#runtime-svg svg")).toHaveCount(0);
     await expect(resumedEditFrame.locator("[data-runtime-chart]")).toHaveCount(0);
     await expect(resumedEditFrame.locator("[data-pageroot-readonly-visual]")).toHaveCount(0);
-    expect(readFileSync(sourcePath, "utf8")).not.toMatch(
-      /data-pageroot-readonly-visual|data-runtime-row|data-runtime-chart|data-drawn|(?:data:image\/png|blob:)/u,
-    );
+    expect(readFileSync(sourcePath)).toEqual(originalSource);
 
     await activateNativeEdit(resumedEditFrame, "preview-tab-copy");
     await expect(resumedEditFrame.locator(caseSelector("preview-tab-copy")))
@@ -928,10 +973,11 @@ test("Electron keeps runtime visuals in Preview and source-backed static content
     await expect.poll(() => resumedEditFrame.locator(
       caseSelector("preview-tab-copy"),
     ).textContent()).toContain("原位");
-    await expect.poll(() => readFileSync(sourcePath, "utf8")).toContain("原位");
-    expect(readFileSync(sourcePath, "utf8")).not.toMatch(
-      /data-pageroot-readonly-visual|data-runtime-row|data-runtime-chart|data-drawn|(?:data:image\/png|blob:)/u,
-    );
+    const managedSourcePath = await managedWorkingCopyPath(launched.page, sourcePath);
+    await expect.poll(() => readFileSync(managedSourcePath, "utf8"))
+      .toContain("原位");
+    expect(readFileSync(sourcePath, "utf8")).not.toContain("原位");
+    expect(readFileSync(sourcePath)).toEqual(originalSource);
   } finally {
     if (electronApp && isolatedUserData) {
       await stopPageRoot(electronApp, isolatedUserData);
@@ -1168,6 +1214,10 @@ test("Electron rapid project switching and immediate close preserve the last nat
     await setTextSelection(frame, "list-item", 0, ORIGINAL_LIST_TEXT.length);
     await firstLaunch.page.keyboard.insertText(switchedText);
     await expect(frame.locator(caseSelector("list-item"))).toHaveText(switchedText);
+    const projectAWorkingCopyPath = await managedWorkingCopyPath(
+      firstLaunch.page,
+      projectA.sourcePath,
+    );
 
     await firstLaunch.page.getByRole("button", { name: "项目", exact: true }).click();
     await firstLaunch.page.locator(".recent-file-row")
@@ -1175,14 +1225,16 @@ test("Electron rapid project switching and immediate close preserve the last nat
       .click();
     await loadedDiskFrame(firstLaunch.page, projectB.sourcePath, "list-item");
     await expect.poll(
-      () => readFileSync(projectA.sourcePath, "utf8"),
+      () => readFileSync(projectAWorkingCopyPath, "utf8"),
       { timeout: 20_000 },
     ).toContain(switchedText);
+    expect(readFileSync(projectA.sourcePath, "utf8")).not.toContain(switchedText);
 
     ({ frame } = await openRecentProject(
       firstLaunch.page,
-      projectA.sourcePath,
+      projectAWorkingCopyPath,
       "list-item",
+      path.basename(projectA.sourcePath),
     ));
     await expect(frame.locator(caseSelector("list-item"))).toHaveText(switchedText);
     await activateNativeEdit(frame, "list-item");
@@ -1197,12 +1249,13 @@ test("Electron rapid project switching and immediate close preserve the last nat
     });
     const { frame: reopenedFrame } = await loadedDiskFrame(
       reopened.page,
-      projectA.sourcePath,
+      projectAWorkingCopyPath,
       "list-item",
     );
     await expect(reopenedFrame.locator(caseSelector("list-item")))
       .toHaveText(closeText);
-    expect(readFileSync(projectA.sourcePath, "utf8")).toContain(closeText);
+    expect(readFileSync(projectAWorkingCopyPath, "utf8")).toContain(closeText);
+    expect(readFileSync(projectA.sourcePath, "utf8")).not.toContain(closeText);
   } finally {
     if (reopened) {
       await stopPageRoot(reopened.electronApp, reopened.isolatedUserData);
@@ -1223,16 +1276,26 @@ test("project resources drain edited rules before leaving", async () => {
   const fixture = createSourceFixture("project-resources.html");
   const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
   try {
-    await loadedDiskFrame(launched.page, fixture.sourcePath, "list-item");
+    const { frame } = await loadedDiskFrame(launched.page, fixture.sourcePath, "list-item");
     const projectCount = () => {
-      const projectsRoot = path.join(launched.workspace, "projects");
+      const projectsRoot = path.join(path.dirname(launched.workspace), "project-files");
       return existsSync(projectsRoot)
         ? readdirSync(projectsRoot).filter((entry) => !entry.startsWith(".")).length
         : 0;
     };
     expect(projectCount()).toBe(0);
+    await addCanvasComment(
+      launched.page,
+      frame,
+      "list-item",
+      "创建受管项目后再编辑项目资料。",
+    );
+    const managedSourcePath = await managedWorkingCopyPath(launched.page, fixture.sourcePath);
+    await loadedDiskFrame(launched.page, managedSourcePath, "list-item");
+    const projectRoot = path.dirname(managedSourcePath);
+    expect(projectCount()).toBe(1);
     await launched.page.getByRole("button", { name: "项目", exact: true }).click();
-    expect(projectCount()).toBe(0);
+    expect(projectCount()).toBe(1);
     await launched.page.getByText("项目资料", { exact: true }).click();
     const rulesButton = launched.page.getByRole("button", {
       name: /项目长期规则.*以后每次 AI 修改都会读取.*可编辑/u,
@@ -1255,14 +1318,7 @@ test("project resources drain edited rules before leaving", async () => {
     await rulesEditor.fill(updatedRules);
     await launched.page.getByRole("button", { name: "返回项目" }).click();
     await expect(launched.page.getByText("当前文件", { exact: true })).toBeVisible();
-    const projectsRoot = path.join(launched.workspace, "projects");
-    const [projectDirectoryName] = readdirSync(projectsRoot)
-      .filter((entry) => !entry.startsWith("."));
-    const projectRulesPath = path.join(
-      projectsRoot,
-      projectDirectoryName,
-      "PROJECT.md",
-    );
+    const projectRulesPath = path.join(projectRoot, "PROJECT.md");
     await expect.poll(
       () => readFileSync(projectRulesPath, "utf8"),
       { timeout: 20_000 },
@@ -1303,9 +1359,13 @@ test("multiple orphaned comments relink in sequence and resume the original send
       "list-item",
       firstComment,
     );
-    const { frame: secondCommentFrame } = await loadedDiskFrame(
+    const managedSourcePath = await managedWorkingCopyPath(
       firstLaunch.page,
       fixture.sourcePath,
+    );
+    const { frame: secondCommentFrame } = await loadedDiskFrame(
+      firstLaunch.page,
+      managedSourcePath,
       "table-cell",
     );
     await addCanvasComment(
@@ -1316,7 +1376,7 @@ test("multiple orphaned comments relink in sequence and resume the original send
     );
     const { frame: editingFrame } = await loadedDiskFrame(
       firstLaunch.page,
-      fixture.sourcePath,
+      managedSourcePath,
       "list-item",
     );
 
@@ -1330,7 +1390,7 @@ test("multiple orphaned comments relink in sequence and resume the original send
     await closePageRootGracefully(firstLaunch.electronApp, firstLaunch.page);
     firstAppClosed = true;
 
-    const externallyChanged = readFileSync(fixture.sourcePath, "utf8")
+    const externallyChanged = readFileSync(managedSourcePath, "utf8")
       .replace(
         /<li data-native-case="list-item"[^>]*>[\s\S]*?<\/li>/u,
         "",
@@ -1339,15 +1399,14 @@ test("multiple orphaned comments relink in sequence and resume the original send
         /<td data-native-case="table-cell"[^>]*>[\s\S]*?<\/td>/u,
         "",
       );
-    writeFileSync(fixture.sourcePath, externallyChanged, "utf8");
+    writeFileSync(managedSourcePath, externallyChanged, "utf8");
 
     activeLaunch = await launchPageRoot({
-      activeSourcePath: fixture.sourcePath,
       isolatedUserData: firstLaunch.isolatedUserData,
     });
     const { frame: recoveredFrame } = await loadedDiskFrame(
       activeLaunch.page,
-      fixture.sourcePath,
+      managedSourcePath,
       "flex-copy",
     );
     const recoveredComments = activeLaunch.page.locator(".comment-card");
@@ -1514,7 +1573,15 @@ test("PROJECT.md read failure never becomes editable data and recovers in place"
       activeSourcePath: sourcePath,
     });
     electronApp = launched.electronApp;
-    await loadedDiskFrame(launched.page, sourcePath, "list-item");
+    const { frame } = await loadedDiskFrame(launched.page, sourcePath, "list-item");
+    await addCanvasComment(
+      launched.page,
+      frame,
+      "list-item",
+      "创建受管项目以验证项目规则读取失败。",
+    );
+    const managedSourcePath = await managedWorkingCopyPath(launched.page, sourcePath);
+    await loadedDiskFrame(launched.page, managedSourcePath, "list-item");
 
     await launched.page.getByRole("button", { name: "项目", exact: true }).click();
     await launched.page.getByText("项目资料", { exact: true }).click();

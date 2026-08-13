@@ -788,6 +788,64 @@ test("a copied project remains external and its first import creates an independ
   )), copiedManifestBefore);
 });
 
+test("a damaged unrelated registered project cannot block another source", async (t) => {
+  const value = await fixture(t);
+  const damaged = await importSource(value, "damaged.html");
+  const healthy = await importSource(value, "healthy.html");
+  await rm(damaged.target.projectRootPath, { recursive: true, force: true });
+  await mkdir(damaged.target.projectRootPath);
+  const damagedHtml = path.join(damaged.target.projectRootPath, "damaged.html");
+  await writeFile(damagedHtml, html("replacement"), "utf8");
+
+  const resolvedHealthy = await value.repository.resolveOpenTarget({
+    sourcePath: healthy.target.exactSourcePath,
+  });
+  assert.equal(resolvedHealthy.projectId, healthy.target.projectId);
+  await assert.rejects(
+    value.repository.resolveOpenTarget({ sourcePath: damagedHtml }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "REGISTERED_PROJECT_IDENTITY_CHANGED",
+  );
+});
+
+test("external import rejects every supported relative resource form", async (t) => {
+  const value = await fixture(t);
+  const cases = [
+    ["unquoted-src", "<img src=assets/chart.svg>"],
+    ["srcset", "<source srcset='assets/hero.webp 1x, https://cdn.example/hero.webp 2x'>"],
+    ["poster", "<video poster='assets/poster.jpg'></video>"],
+    ["object-data", "<object data=assets/report.pdf></object>"],
+    ["style-attribute", "<div style=\"background-image: url(assets/background.png)\"></div>"],
+    ["style-url", "<style>.card { background: url('./assets/card.png'); }</style>"],
+    ["style-import", "<style>@import \"./assets/theme.css\";</style>"],
+  ];
+  for (const [name, markup] of cases) {
+    const sourcePath = path.join(value.sources, `${name}.html`);
+    const source = `<!doctype html><html><head><title>${name}</title></head><body>${markup}</body></html>`;
+    const buffer = Buffer.from(source, "utf8");
+    await writeFile(sourcePath, buffer);
+    await assert.rejects(
+      value.repository.importExternal({
+        sourcePath,
+        expectedSourceSha256: sha256(buffer),
+      }),
+      (error) => error instanceof ProjectFileRepositoryError
+        && error.code === "UNSUPPORTED_RELATIVE_RESOURCE",
+      name,
+    );
+  }
+
+  const safeSourcePath = path.join(value.sources, "safe-resources.html");
+  const safeSource = `<!doctype html><html><head><title>safe</title></head><body><img src=\"data:image/svg+xml;base64,PHN2Zy8+\"><source srcset=\"data:image/svg+xml;base64,PHN2Zy8+ 1x, https://cdn.example/image.webp 2x\"></body></html>`;
+  const safeBuffer = Buffer.from(safeSource, "utf8");
+  await writeFile(safeSourcePath, safeBuffer);
+  const imported = await value.repository.importExternal({
+    sourcePath: safeSourcePath,
+    expectedSourceSha256: sha256(safeBuffer),
+  });
+  assert.equal(imported.imported, true);
+});
+
 test("import fails before publication without registration debris, and rejects symbolic links", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "pageroot-project-files-fault-"));
   t.after(() => rm(root, { recursive: true, force: true }));

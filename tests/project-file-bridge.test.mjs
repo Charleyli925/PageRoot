@@ -66,6 +66,44 @@ test("project-file PR1 import switches to V1 before the queued save and leaves e
   assert.deepEqual(manifest.versions.map((version) => version.versionId), ["ver_0001"]);
 });
 
+test("project-file PROJECT.md remains available through the shared project-file inspector", async (t) => {
+  const environment = await createBridgeTestEnvironment(t, {
+    prefix: "pageroot-project-file-rules-",
+  });
+  const sourcePath = await environment.createSource("rules.html", html("external V1"));
+  const bridge = await environment.start();
+  const preview = await bridge.requestJson(
+    `/workspace?sourcePath=${encodeURIComponent(sourcePath)}`,
+  );
+  const ensured = await postJson(bridge, "/project/ensure", {
+    sourcePath,
+    expectedSourceSha256: preview.body.currentHtmlSha256,
+    projectStorageVersion: "4.0.0",
+  });
+  assert.equal(ensured.response.status, 200, JSON.stringify(ensured.body));
+
+  const inspect = async () => bridge.requestJson(
+    `/file?sourcePath=${encodeURIComponent(ensured.body.sourcePath)}&path=PROJECT.md`,
+  );
+  const initial = await inspect();
+  assert.equal(initial.response.status, 200, JSON.stringify(initial.body));
+  assert.equal(initial.body.relativePath, "PROJECT.md");
+  assert.equal(initial.body.readOnly, false);
+  assert.match(initial.body.content, /^# rules/u);
+
+  const content = "# 项目规则\n\n- 只修改首页标题。\n";
+  const saved = await postJson(bridge, "/project-file", {
+    sourcePath: ensured.body.sourcePath,
+    projectId: ensured.body.projectId,
+    documentId: ensured.body.documentId,
+    content,
+  });
+  assert.equal(saved.response.status, 200, JSON.stringify(saved.body));
+  const refreshed = await inspect();
+  assert.equal(refreshed.response.status, 200, JSON.stringify(refreshed.body));
+  assert.equal(refreshed.body.content, content);
+});
+
 test("project-file Request becomes a Candidate on finalization and a Version only on adoption", async (t) => {
   const environment = await createBridgeTestEnvironment(t, {
     prefix: "pageroot-project-file-candidate-",

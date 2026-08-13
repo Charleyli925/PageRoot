@@ -11,6 +11,13 @@ import { PROJECT_FILE_SCHEMA_VERSION } from "./project-file-repository.mjs";
 const SAFE_ID = /^[A-Za-z0-9_-]{1,160}$/u;
 const SHA256 = /^sha256:[a-f0-9]{64}$/u;
 const MAX_HTML_BYTES = 20 * 1024 * 1024;
+const FROZEN_REQUEST_FILES = Object.freeze([
+  ["PROMPT.md", "prompt"],
+  ["input/AI_RULES.md", "policy"],
+  ["change-request.json", "change-request"],
+  ["input/PROJECT.md", "project-rules"],
+  ["input/annotations/records.json", "annotations"],
+]);
 
 export class ProjectFileFinalizerError extends Error {
   constructor(code, message, details = {}) {
@@ -27,6 +34,10 @@ function safeId(value, label) {
     throw new ProjectFileFinalizerError("INVALID_ID", `${label} is invalid.`);
   }
   return id;
+}
+
+function isObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 function normalizedPath(value) {
@@ -55,6 +66,56 @@ function samePath(left, right) {
     return first.toLocaleLowerCase("en-US") === second.toLocaleLowerCase("en-US");
   }
   return first === second;
+}
+
+function safeRelativePath(value, label) {
+  const relative = String(value || "");
+  const segments = relative.split("/");
+  if (
+    !relative
+    || path.isAbsolute(relative)
+    || relative.includes("\\0")
+    || relative.includes("\\")
+    || segments.some((segment) => !segment || segment === "." || segment === "..")
+  ) {
+    throw new ProjectFileFinalizerError(
+      "FROZEN_REQUEST_BUNDLE_MISMATCH",
+      `${label} is not a safe Request-relative path.`,
+    );
+  }
+  return relative;
+}
+
+function pathInside(root, relativePath, label) {
+  const relative = safeRelativePath(relativePath, label);
+  const candidate = path.join(root, ...relative.split("/"));
+  if (!inside(root, candidate)) {
+    throw new ProjectFileFinalizerError(
+      "PATH_ESCAPES_PROJECT",
+      `${label} escapes its Request.`,
+    );
+  }
+  return candidate;
+}
+
+function requestRelativePath(requestId, value, label) {
+  const prefix = `requests/${requestId}/`;
+  const relative = safeRelativePath(value, label);
+  if (!relative.startsWith(prefix)) {
+    throw new ProjectFileFinalizerError(
+      "REQUEST_PATH_MISMATCH",
+      `${label} is not owned by this Request.`,
+    );
+  }
+  return relative.slice(prefix.length);
+}
+
+function canonicalJson(value) {
+  if (Array.isArray(value)) return `[${value.map((item) => canonicalJson(item)).join(",")}]`;
+  if (!isObject(value)) return JSON.stringify(value);
+  return `{${Object.keys(value).sort().map((key) => (
+    `${JSON.stringify(key)}:${canonicalJson(value[key])}`
+  )).join(",")}}`;
 }
 
 function copyFileIdentity(information) {
@@ -146,7 +207,10 @@ function validateRequest(record, { requestId, attemptId }) {
     "proposedVersionOrdinal",
     "basedOnVersionId",
     "previousVersionId",
+    "sourceWorkingCopyId",
     "inputRelativePath",
+    "inputManifestRelativePath",
+    "inputManifestSha256",
     "outputRelativePath",
   ];
   if (
@@ -162,10 +226,13 @@ function validateRequest(record, { requestId, attemptId }) {
     );
   }
   const expectedInput = `requests/${requestId}/input/base/index.html`;
+  const expectedInputManifest = `requests/${requestId}/input-manifest.json`;
   const expectedOutput = `requests/${requestId}/attempts/${attemptId}/output/candidate.html`;
   if (
     record.inputRelativePath !== expectedInput
+    || record.inputManifestRelativePath !== expectedInputManifest
     || record.outputRelativePath !== expectedOutput
+    || !SHA256.test(String(record.inputManifestSha256))
   ) {
     throw new ProjectFileFinalizerError(
       "REQUEST_PATH_MISMATCH",
@@ -173,6 +240,202 @@ function validateRequest(record, { requestId, attemptId }) {
     );
   }
   return record;
+}
+
+function assertRequestAnchor({ record, identity, manifest, runtime }) {
+  const workingCopies = Array.isArray(manifest?.workingCopies) ? manifest.workingCopies : [];
+  const versions = Array.isArray(manifest?.versions) ? manifest.versions : [];
+  const workingCopy = workingCopies.find((candidate) => (
+    candidate?.workingCopyId === record.sourceWorkingCopyId
+  ));
+  const latestVersion = versions.find((candidate) => (
+    candidate?.versionId === manifest?.latestOfficialVersionId
+  ));
+  const expectedOrdinal = Number(latestVersion?.ordinal) + 1;
+  const expectedVersionId = `ver_${String(expectedOrdinal).padStart(4, "0")}`;
+  const expectedCandidateId = `candidate_${sha256(
+    Buffer.from(`${identity.projectId}:${record.requestId}`, "utf8"),
+  ).slice("sha256:".length, "sha256:".length + 32)}`;
+  const activeRequest = runtime?.activeRequest;
+  const activeMatches = Boolean(
+    activeRequest
+    && activeRequest.requestId === record.requestId
+    && activeRequest.attemptId === record.attemptId
+    && (
+      (activeRequest.status === "processing" && activeRequest.candidateId === null)
+      || (
+        activeRequest.status === "pending-review"
+        && activeRequest.candidateId === record.candidateId
+        && runtime.activeCandidateId === record.candidateId
+      )
+    ),
+  );
+  if (
+    manifest?.schemaVersion !== PROJECT_FILE_SCHEMA_VERSION
+    || manifest?.projectId !== identity.projectId
+    || manifest?.documentId !== identity.documentId
+    || !workingCopy
+    || workingCopy.basedOnVersionId !== record.basedOnVersionId
+    || !latestVersion
+    || record.previousVersionId !== latestVersion.versionId
+    || record.proposedVersionOrdinal !== expectedOrdinal
+    || record.proposedVersionId !== expectedVersionId
+    || record.candidateId !== expectedCandidateId
+    || runtime?.schemaVersion !== PROJECT_FILE_SCHEMA_VERSION
+    || runtime?.projectId !== identity.projectId
+    || runtime?.documentId !== identity.documentId
+    || !activeMatches
+  ) {
+    throw new ProjectFileFinalizerError(
+      "REQUEST_IDENTITY_MISMATCH",
+      "The Request no longer matches the registered project's frozen identity.",
+    );
+  }
+}
+
+async function verifyFrozenRequestBundle({
+  requestRoot,
+  record,
+  identity,
+}) {
+  const manifestRelativePath = requestRelativePath(
+    record.requestId,
+    record.inputManifestRelativePath,
+    "input manifest path",
+  );
+  const manifestPath = pathInside(requestRoot, manifestRelativePath, "input manifest path");
+  await regularFile(manifestPath, "Frozen Request input manifest");
+  const manifestBuffer = await readFile(manifestPath);
+  if (sha256(manifestBuffer) !== record.inputManifestSha256) {
+    throw new ProjectFileFinalizerError(
+      "FROZEN_REQUEST_BUNDLE_MISMATCH",
+      "The frozen Request input manifest changed after submission.",
+    );
+  }
+
+  let inputManifest;
+  try {
+    inputManifest = JSON.parse(manifestBuffer.toString("utf8"));
+  } catch {
+    throw new ProjectFileFinalizerError(
+      "FROZEN_REQUEST_BUNDLE_MISMATCH",
+      "The frozen Request input manifest is not valid JSON.",
+    );
+  }
+  if (
+    !isObject(inputManifest)
+    || inputManifest.schemaVersion !== PROJECT_FILE_SCHEMA_VERSION
+    || inputManifest.projectId !== identity.projectId
+    || inputManifest.documentId !== identity.documentId
+    || inputManifest.requestId !== record.requestId
+    || inputManifest.attemptId !== record.attemptId
+    || inputManifest.frozen !== true
+    || !Array.isArray(inputManifest.readOrder)
+    || !Array.isArray(inputManifest.files)
+  ) {
+    throw new ProjectFileFinalizerError(
+      "FROZEN_REQUEST_BUNDLE_MISMATCH",
+      "The frozen Request input manifest no longer describes this Request.",
+    );
+  }
+
+  const files = new Map();
+  for (const entry of inputManifest.files) {
+    if (
+      !isObject(entry)
+      || typeof entry.role !== "string"
+      || typeof entry.mediaType !== "string"
+      || !Number.isSafeInteger(entry.byteLength)
+      || entry.byteLength < 0
+      || !SHA256.test(String(entry.sha256))
+    ) {
+      throw new ProjectFileFinalizerError(
+        "FROZEN_REQUEST_BUNDLE_MISMATCH",
+        "The frozen Request input manifest contains an invalid file record.",
+      );
+    }
+    const relativePath = safeRelativePath(entry.path, "frozen input path");
+    if (files.has(relativePath)) {
+      throw new ProjectFileFinalizerError(
+        "FROZEN_REQUEST_BUNDLE_MISMATCH",
+        "The frozen Request input manifest contains a duplicate file path.",
+      );
+    }
+    const filePath = pathInside(requestRoot, relativePath, "frozen input path");
+    await regularFile(filePath, `Frozen Request input ${relativePath}`);
+    const buffer = await readFile(filePath);
+    if (buffer.byteLength !== entry.byteLength || sha256(buffer) !== entry.sha256) {
+      throw new ProjectFileFinalizerError(
+        "FROZEN_REQUEST_BUNDLE_MISMATCH",
+        `Frozen Request input ${relativePath} changed after submission.`,
+      );
+    }
+    files.set(relativePath, { entry, buffer });
+  }
+
+  const readOrder = new Set();
+  for (const value of inputManifest.readOrder) {
+    const relativePath = safeRelativePath(value, "frozen input readOrder path");
+    if (readOrder.has(relativePath) || !files.has(relativePath)) {
+      throw new ProjectFileFinalizerError(
+        "FROZEN_REQUEST_BUNDLE_MISMATCH",
+        "The frozen Request input read order is inconsistent with its inventory.",
+      );
+    }
+    readOrder.add(relativePath);
+  }
+
+  const expectedInput = requestRelativePath(
+    record.requestId,
+    record.inputRelativePath,
+    "frozen HTML path",
+  );
+  for (const [relativePath, role] of [
+    ...FROZEN_REQUEST_FILES,
+    [expectedInput, "base-html"],
+  ]) {
+    const frozen = files.get(relativePath);
+    if (!frozen || frozen.entry.role !== role) {
+      throw new ProjectFileFinalizerError(
+        "FROZEN_REQUEST_BUNDLE_MISMATCH",
+        `The frozen Request is missing its required ${role} input.`,
+      );
+    }
+  }
+
+  let changeRequest;
+  try {
+    changeRequest = JSON.parse(files.get("change-request.json").buffer.toString("utf8"));
+  } catch {
+    throw new ProjectFileFinalizerError(
+      "FROZEN_REQUEST_BUNDLE_MISMATCH",
+      "The frozen change request is not valid JSON.",
+    );
+  }
+  const immutableKeys = [
+    "projectId",
+    "documentId",
+    "requestId",
+    "attemptId",
+    "sourceWorkingCopyId",
+    "expectedSourceSha256",
+    "proposedVersionId",
+    "proposedVersionOrdinal",
+    "basedOnVersionId",
+    "previousVersionId",
+  ];
+  if (
+    !isObject(changeRequest)
+    || immutableKeys.some((key) => changeRequest[key] !== record[key])
+    || canonicalJson(changeRequest.requirements) !== canonicalJson(record.request || {})
+  ) {
+    throw new ProjectFileFinalizerError(
+      "FROZEN_REQUEST_BUNDLE_MISMATCH",
+      "request.json no longer matches the frozen change request.",
+    );
+  }
+
+  return files.get(expectedInput).buffer;
 }
 
 async function validateRegistryAuthority({
@@ -263,13 +526,21 @@ export async function finalizeProjectFileAttempt({
       "The Request does not belong to this project identity.",
     );
   }
+  const [manifest, runtime] = await Promise.all([
+    readJson(path.join(controlRoot, "manifest.json"), "manifest.json"),
+    readJson(path.join(controlRoot, "runtime-state.json"), "runtime-state.json"),
+  ]);
+  assertRequestAnchor({ record, identity, manifest, runtime });
   const inputPath = path.join(controlRoot, ...record.inputRelativePath.split("/"));
   const outputPath = path.join(controlRoot, ...record.outputRelativePath.split("/"));
   if (!inside(controlRoot, inputPath) || !inside(controlRoot, outputPath)) {
     throw new ProjectFileFinalizerError("PATH_ESCAPES_PROJECT", "A frozen Request path escapes its project.");
   }
-  await regularFile(inputPath, "Frozen Request input");
-  const input = await readFile(inputPath);
+  const input = await verifyFrozenRequestBundle({
+    requestRoot,
+    record,
+    identity,
+  });
   if (sha256(input) !== record.expectedSourceSha256) {
     throw new ProjectFileFinalizerError(
       "FROZEN_INPUT_HASH_MISMATCH",
@@ -309,6 +580,7 @@ export async function finalizeProjectFileAttempt({
     basedOnVersionId: record.basedOnVersionId,
     previousVersionId: record.previousVersionId,
     expectedSourceSha256: record.expectedSourceSha256,
+    inputManifestSha256: record.inputManifestSha256,
     outputRelativePath: record.outputRelativePath,
     outputSha256,
     status: outputSha256 === record.expectedSourceSha256 ? "no-change" : "completed",
