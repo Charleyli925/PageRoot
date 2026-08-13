@@ -352,6 +352,7 @@ test("Workbench and review surfaces route to architecture or observable runtime 
   });
   assert.deepEqual(workbench.selectedNodeTests, [
     "tests/architecture-boundaries.test.mjs",
+    "tests/edit-author-runtime-session.test.mjs",
     "tests/project-rules-workflow.test.mjs",
     "tests/project-workflow.test.mjs",
     "tests/source-rename.test.mjs",

@@ -14,6 +14,14 @@ import {
 import { flushSync } from "react-dom";
 
 import {
+  EDIT_AUTHOR_RUNTIME_BUDGET,
+  EDIT_AUTHOR_RUNTIME_CONTRACT_VERSION,
+  EDIT_RUNTIME_FROZEN_ATTRIBUTE,
+  EDIT_RUNTIME_RESULT_ATTRIBUTE,
+  isEditRuntimeFrameToken,
+  type EditRuntimeGrant,
+} from "../domain/edit-runtime-contract.js";
+import {
   createPagePresentationAction,
   type PagePresentationAction,
   type PageViewContext,
@@ -126,6 +134,7 @@ import NoticeBar from "./NoticeBar";
 import type {
   HtmlCanvasCommentedTarget,
   HtmlCanvasCommitResult,
+  HtmlCanvasEditRuntimeLoadOutcome,
   HtmlCanvasEditorHandle,
   HtmlCanvasEditorProps,
   HtmlCanvasFreezeSnapshot,
@@ -143,6 +152,7 @@ export type {
   HtmlCanvasCommentedTarget,
   HtmlCanvasCommentLayoutState,
   HtmlCanvasCommitResult,
+  HtmlCanvasEditRuntimeLoadOutcome,
   HtmlCanvasEditorHandle,
   HtmlCanvasEditorProps,
   HtmlCanvasFingerprint,
@@ -161,6 +171,7 @@ import {
   FRAME_VERIFICATION_ATTRIBUTE,
   baseHrefFromSourcePath,
   disableExecutableMarkup,
+  prepareCanvasFrameDocument,
   prepareVerifiedFrameDocument,
 } from "./html-preview-sandbox.js";
 import styles from "./HtmlCanvasEditor.module.css";
@@ -428,12 +439,64 @@ type EditFeedback = {
 type SourcePatchCommand = Parameters<typeof planSourcePatch>[0];
 type SourcePatchPlan = NonNullable<ReturnType<typeof planSourcePatch>>;
 
+type RuntimeFrameContext = {
+  verificationToken: string;
+  grant: EditRuntimeGrant;
+  elementGeneration: number;
+  settled: boolean;
+};
+
+function sameRuntimeGrant(
+  left: EditRuntimeGrant | null | undefined,
+  right: EditRuntimeGrant | null | undefined,
+): boolean {
+  return Boolean(
+    left
+    && right
+    && left.sessionId === right.sessionId
+    && left.executionId === right.executionId
+    && left.sourceSha256 === right.sourceSha256
+    && left.canvasGeneration === right.canvasGeneration,
+  );
+}
+
+function isRuntimeFrameFrozenResult(
+  value: unknown,
+  frame: RuntimeFrameContext,
+): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const result = value as Record<string, unknown>;
+  if (
+    result.state !== "frozen"
+    || result.reason !== null
+    || result.contractVersion !== EDIT_AUTHOR_RUNTIME_CONTRACT_VERSION
+    || result.executionId !== frame.grant.executionId
+    || result.sessionId !== frame.grant.sessionId
+    || !Number.isSafeInteger(result.mutationRecords)
+    || Number(result.mutationRecords) < 0
+    || Number(result.mutationRecords) > EDIT_AUTHOR_RUNTIME_BUDGET.mutationRecordCount
+    || !Array.isArray(result.hostKeys)
+    || result.hostKeys.length !== frame.grant.hosts.length
+  ) return false;
+  const expected = new Set(frame.grant.hosts.map((host) => host.key));
+  const received = new Set<string>();
+  for (const key of result.hostKeys) {
+    if (typeof key !== "string" || !expected.has(key) || received.has(key)) return false;
+    received.add(key);
+  }
+  return received.size === expected.size;
+}
+
 const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProps>(function HtmlCanvasEditor(
   {
     html,
     onChange,
     onSelect,
     onInteraction,
+    editRuntimeGrant = null,
+    deferStaticFrameReveal = false,
+    onEditRuntimeLoadStart,
+    onEditRuntimeLoadOutcome,
     onCommentLayout,
     onRequestComment,
     onReady,
@@ -542,11 +605,15 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const expectedFrameHtmlRef = useRef<string | null>(null);
   const expectedFrameTokenRef = useRef<string | null>(null);
   const frameLoadGenerationRef = useRef(0);
+  const runtimeFrameRef = useRef<RuntimeFrameContext | null>(null);
+  const deferStaticFrameRevealRef = useRef(deferStaticFrameReveal);
   const imperativeLockRef = useRef(false);
   const lastPropRef = useRef({ html, baseHref: resolvedBaseHref });
   const onChangeRef = useRef(onChange);
   const onSelectRef = useRef(onSelect);
   const onInteractionRef = useRef(onInteraction);
+  const onEditRuntimeLoadStartRef = useRef(onEditRuntimeLoadStart);
+  const onEditRuntimeLoadOutcomeRef = useRef(onEditRuntimeLoadOutcome);
   const onCommentLayoutRef = useRef(onCommentLayout);
   const onRequestCommentRef = useRef(onRequestComment);
   const onRequestFlushRef = useRef(onRequestFlush);
@@ -577,6 +644,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   onChangeRef.current = onChange;
   onSelectRef.current = onSelect;
   onInteractionRef.current = onInteraction;
+  deferStaticFrameRevealRef.current = deferStaticFrameReveal;
+  onEditRuntimeLoadStartRef.current = onEditRuntimeLoadStart;
+  onEditRuntimeLoadOutcomeRef.current = onEditRuntimeLoadOutcome;
   onCommentLayoutRef.current = onCommentLayout;
   onRequestCommentRef.current = onRequestComment;
   onRequestFlushRef.current = onRequestFlush;
@@ -599,6 +669,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const [frameRender, setFrameRender] = useState(() => ({
     html: disableExecutableMarkup(html),
     elementGeneration: 0,
+    runtime: false,
   }));
   const [selection, setSelection] = useState<HtmlCanvasSelection | null>(null);
   const [overlayPosition, setOverlayPosition] = useState<OverlayPosition | null>(null);
@@ -684,7 +755,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
 
   const loadFrameSource = useCallback((
     source: string,
-    options: { preserveViewport?: boolean; immediate?: boolean } = {},
+    options: {
+      preserveViewport?: boolean;
+      immediate?: boolean;
+      forceStatic?: boolean;
+    } = {},
   ) => {
     const frameView = iframeRef.current?.contentWindow;
     pendingFrameViewportRef.current = options.preserveViewport && frameView
@@ -696,6 +771,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     // briefly dispatch against the next source map (or keep listeners forever
     // if the replacement document never reaches load).
     cleanupFrameRef.current();
+    const retiringRuntimeFrame = runtimeFrameRef.current;
+    runtimeFrameRef.current = null;
+    if (retiringRuntimeFrame && !retiringRuntimeFrame.settled) {
+      onEditRuntimeLoadOutcomeRef.current?.(retiringRuntimeFrame.grant, "failed");
+    }
     pendingFrameRestoreEpochRef.current += 1;
     frameLoadGenerationRef.current += 1;
     const nextFrameGeneration = frameLoadGenerationRef.current;
@@ -705,7 +785,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     currentNativeEditLeaseRef.current = null;
     const randomPart = globalThis.crypto?.randomUUID?.()
       ?? `${Date.now()}_${Math.random().toString(36).slice(2)}`;
-    const token = `frame_${frameLoadGenerationRef.current}_${randomPart}`;
+    const staticToken = `frame_${frameLoadGenerationRef.current}_${randomPart}`;
     let instrumentedSource = source;
     try {
       const sourceIndex = buildSourceIndex(source);
@@ -728,19 +808,69 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       });
       onEditBlockedRef.current?.(message);
     }
-    const prepared = prepareVerifiedFrameDocument(instrumentedSource, token, {
-      baseUrl: resolvedBaseHref,
-      editorStyles: EDITOR_DOCUMENT_STYLES,
-    });
+    const sourceIndex = sourceIndexRef.current;
+    const runtimeGrant = options.forceStatic ? null : editRuntimeGrant;
+    let runtimeFrame: RuntimeFrameContext | null = null;
+    let verificationToken = staticToken;
+    let prepared: string | null = null;
+    if (
+      runtimeGrant
+      && sourceIndex?.source === source
+      && sourceIndex.sourceSha256 === runtimeGrant.sourceSha256
+    ) {
+      const runtimeToken = `edit-runtime-frame-${runtimeGrant.executionId}`;
+      if (isEditRuntimeFrameToken(runtimeToken)) {
+        const runtimeDocument = prepareCanvasFrameDocument(
+          instrumentedSource,
+          runtimeToken,
+          {
+            mode: "one-shot-runtime",
+            sessionId: runtimeGrant.sessionId,
+            executionId: runtimeGrant.executionId,
+            hosts: runtimeGrant.hosts,
+            baseUrl: resolvedBaseHref,
+            editorStyles: EDITOR_DOCUMENT_STYLES,
+          },
+        );
+        if (runtimeDocument) {
+          prepared = runtimeDocument;
+          verificationToken = runtimeToken;
+          runtimeFrame = {
+            grant: runtimeGrant,
+            verificationToken: runtimeToken,
+            elementGeneration: nextFrameGeneration,
+            settled: false,
+          };
+        }
+      }
+    }
+    if (!prepared) {
+      prepared = prepareCanvasFrameDocument(instrumentedSource, staticToken, {
+        mode: "static",
+        baseUrl: resolvedBaseHref,
+        editorStyles: EDITOR_DOCUMENT_STYLES,
+      }) || prepareVerifiedFrameDocument(instrumentedSource, staticToken, {
+        baseUrl: resolvedBaseHref,
+        editorStyles: EDITOR_DOCUMENT_STYLES,
+      });
+    }
     frameSourceHtmlRef.current = source;
-    expectedFrameTokenRef.current = token;
+    expectedFrameTokenRef.current = verificationToken;
     expectedFrameHtmlRef.current = prepared;
     renderedSourceHtmlRef.current = null;
     containerRef.current?.setAttribute("data-render-verified", "false");
+    runtimeFrameRef.current = runtimeFrame;
+    if (runtimeFrame) {
+      // The one visible canvas frame is the second and final authorized
+      // execution. It stays hidden by the existing verification gate until
+      // the bootstrap reports a valid frozen result.
+      onEditRuntimeLoadStartRef.current?.(runtimeFrame.grant);
+    }
     const replaceFrameElement = () => {
       setFrameRender({
         html: prepared,
         elementGeneration: nextFrameGeneration,
+        runtime: Boolean(runtimeFrame),
       });
     };
     if (options.immediate) {
@@ -753,7 +883,72 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     } else {
       replaceFrameElement();
     }
-  }, [resolvedBaseHref]);
+  }, [editRuntimeGrant, resolvedBaseHref]);
+
+  const fallBackToStaticRuntimeFrame = useCallback((
+    frame: RuntimeFrameContext,
+    outcome: Exclude<HtmlCanvasEditRuntimeLoadOutcome, "ready">,
+  ): boolean => {
+    const current = runtimeFrameRef.current;
+    if (
+      !current
+      || current.settled
+      || current.elementGeneration !== frame.elementGeneration
+      || !sameRuntimeGrant(current.grant, frame.grant)
+    ) return false;
+    current.settled = true;
+    runtimeFrameRef.current = null;
+    // A failed direct runtime never replaces a usable document. Rebuild the
+    // same source as the normal static canvas and let the owner revoke the
+    // one-use protocol session afterwards.
+    loadFrameSource(frameSourceHtmlRef.current, {
+      preserveViewport: true,
+      immediate: true,
+      forceStatic: true,
+    });
+    onEditRuntimeLoadOutcomeRef.current?.(frame.grant, outcome);
+    return true;
+  }, [loadFrameSource]);
+
+  useEffect(() => {
+    if (!frameInitializedRef.current) return;
+    const current = runtimeFrameRef.current;
+    if (editRuntimeGrant) {
+      if (
+        current
+        && sameRuntimeGrant(current.grant, editRuntimeGrant)
+      ) return;
+      const sourceIndex = sourceIndexRef.current;
+      if (
+        sourceIndex?.source === frameSourceHtmlRef.current
+        && sourceIndex.sourceSha256 === editRuntimeGrant.sourceSha256
+      ) {
+        loadFrameSource(frameSourceHtmlRef.current, {
+          preserveViewport: true,
+          immediate: true,
+        });
+      }
+      return;
+    }
+    if (current && !current.settled) {
+      fallBackToStaticRuntimeFrame(current, "failed");
+    }
+  }, [editRuntimeGrant, fallBackToStaticRuntimeFrame, loadFrameSource]);
+
+  useEffect(() => {
+    if (deferStaticFrameReveal) {
+      if (!runtimeFrameRef.current) {
+        containerRef.current?.setAttribute("data-render-verified", "false");
+      }
+      return;
+    }
+    if (
+      !runtimeFrameRef.current
+      && renderedSourceHtmlRef.current === frameSourceHtmlRef.current
+    ) {
+      containerRef.current?.setAttribute("data-render-verified", "true");
+    }
+  }, [deferStaticFrameReveal]);
 
   const updateSelectedStyle = useCallback(() => {
     const element = selectedElementRef.current;
@@ -4032,11 +4227,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const connectFrame = useCallback((
     iframe: HTMLIFrameElement,
     connectedFrameGeneration: number,
-  ) => {
+  ): boolean => {
     if (
       iframe !== iframeRef.current
       || connectedFrameGeneration !== frameLoadGenerationRef.current
-    ) return;
+    ) return false;
     cleanupFrameRef.current();
     const documentNode = iframe.contentDocument;
     const expectedFrameHtml = expectedFrameHtmlRef.current;
@@ -4044,7 +4239,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     if (!documentNode?.documentElement || !expectedFrameHtml || !expectedToken) {
       renderedSourceHtmlRef.current = null;
       containerRef.current?.setAttribute("data-render-verified", "false");
-      return;
+      return false;
     }
     const marker = documentNode.head.querySelector<HTMLMetaElement>(
       `meta[${FRAME_VERIFICATION_ATTRIBUTE}]`,
@@ -4056,10 +4251,56 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     ) {
       renderedSourceHtmlRef.current = null;
       containerRef.current?.setAttribute("data-render-verified", "false");
-      return;
+      return false;
+    }
+    const runtimeFrame = runtimeFrameRef.current;
+    if (runtimeFrame?.elementGeneration === connectedFrameGeneration) {
+      if (runtimeFrame.verificationToken !== expectedToken) {
+        fallBackToStaticRuntimeFrame(runtimeFrame, "rejected");
+        return false;
+      }
+      const root = documentNode.documentElement;
+      const rawResult = root.getAttribute(EDIT_RUNTIME_RESULT_ATTRIBUTE);
+      const frozen = root.getAttribute(EDIT_RUNTIME_FROZEN_ATTRIBUTE) === "true";
+      if (!frozen) {
+        if (rawResult) {
+          try {
+            const result = JSON.parse(rawResult) as { state?: unknown };
+            if (result.state === "rejected") {
+              fallBackToStaticRuntimeFrame(runtimeFrame, "rejected");
+              return false;
+            }
+            if (result.state === "failed") {
+              fallBackToStaticRuntimeFrame(runtimeFrame, "failed");
+              return false;
+            }
+          } catch {
+            fallBackToStaticRuntimeFrame(runtimeFrame, "rejected");
+          }
+        }
+        return false;
+      }
+      let result: unknown = null;
+      try {
+        result = rawResult ? JSON.parse(rawResult) : null;
+      } catch {
+        fallBackToStaticRuntimeFrame(runtimeFrame, "rejected");
+        return false;
+      }
+      if (!isRuntimeFrameFrozenResult(result, runtimeFrame)) {
+        fallBackToStaticRuntimeFrame(runtimeFrame, "rejected");
+        return false;
+      }
+      if (!runtimeFrame.settled) {
+        runtimeFrame.settled = true;
+        onEditRuntimeLoadOutcomeRef.current?.(runtimeFrame.grant, "ready");
+      }
     }
     renderedSourceHtmlRef.current = frameSourceHtmlRef.current;
-    containerRef.current?.setAttribute("data-render-verified", "true");
+    containerRef.current?.setAttribute(
+      "data-render-verified",
+      runtimeFrame || !deferStaticFrameRevealRef.current ? "true" : "false",
+    );
     fencedDocumentCleanupRef.current();
 
     let editorStyle = documentNode.head.querySelector<HTMLStyleElement>(`style[${EDITOR_STYLE_ATTRIBUTE}]`);
@@ -4567,10 +4808,12 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         updateOverlayPosition();
       }
     });
+    return true;
   }, [
     captureTextRange,
     clearSelection,
     executePagePresentationAction,
+    fallBackToStaticRuntimeFrame,
     fencePendingEdit,
     finishNativeEditing,
     moveSelected,
@@ -4587,6 +4830,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     const connectedFrameGeneration = frameRender.elementGeneration;
     let animationFrame = 0;
     let attempts = 0;
+    const startedAt = performance.now();
     const connectParsedFrame = () => {
       if (
         iframe !== iframeRef.current
@@ -4606,14 +4850,22 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         && marker?.getAttribute(FRAME_VERIFICATION_ATTRIBUTE) === expectedToken
         && marker.getAttribute("content") === expectedToken
       ) {
-        // DOM parsing is sufficient to validate and connect the inert preview.
-        // Slow images, fonts, or stylesheets may delay the iframe load event;
-        // the body ResizeObserver keeps layout chrome current as they settle.
-        connectFrame(iframe, connectedFrameGeneration);
+        if (connectFrame(iframe, connectedFrameGeneration)) return;
+      }
+      const runtimeFrame = runtimeFrameRef.current;
+      if (
+        runtimeFrame?.elementGeneration === connectedFrameGeneration
+        && !runtimeFrame.settled
+        && performance.now() - startedAt >= EDIT_AUTHOR_RUNTIME_BUDGET.ownerDeadlineMs
+      ) {
+        fallBackToStaticRuntimeFrame(runtimeFrame, "failed");
         return;
       }
       attempts += 1;
-      if (attempts < 120) {
+      const retryLimit = frameRender.runtime
+        ? Math.ceil(EDIT_AUTHOR_RUNTIME_BUDGET.ownerDeadlineMs / 16) + 30
+        : 120;
+      if (attempts < retryLimit) {
         animationFrame = requestAnimationFrame(connectParsedFrame);
       }
     };
@@ -4621,8 +4873,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     return () => cancelAnimationFrame(animationFrame);
   }, [
     connectFrame,
+    fallBackToStaticRuntimeFrame,
     frameRender.elementGeneration,
     frameRender.html,
+    frameRender.runtime,
   ]);
 
   const applyInlineStyle = useCallback(
@@ -5004,11 +5258,12 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
               : iframeTitle
         }
         srcDoc={frameRender.html}
-        sandbox="allow-same-origin"
-        onLoad={(event) => connectFrame(
-          event.currentTarget,
-          frameRender.elementGeneration,
-        )}
+        sandbox={frameRender.runtime
+          ? "allow-same-origin allow-scripts"
+          : "allow-same-origin"}
+        onLoad={(event) => {
+          connectFrame(event.currentTarget, frameRender.elementGeneration);
+        }}
       />
 
       {editFeedback && !interactionLocked ? (

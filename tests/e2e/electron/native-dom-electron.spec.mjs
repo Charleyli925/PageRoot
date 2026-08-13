@@ -503,6 +503,84 @@ test("Electron safely renames the saved current HTML without starting a new proj
   }
 });
 
+test("Electron displays one frozen ECharts runtime document directly in Edit", async () => {
+  const sourceDirectory = mkdtempSync(
+    path.join(tmpdir(), "pageroot-edit-runtime-e2e-"),
+  );
+  const sourcePath = path.join(sourceDirectory, "echarts-report.html");
+  writeFileSync(
+    path.join(sourceDirectory, "echarts.min.js"),
+    `window.echarts = {
+  init(host) {
+    const canvas = document.createElement("canvas");
+    canvas.width = 240;
+    canvas.height = 120;
+    canvas.style.display = "block";
+    canvas.dataset.echartsFrozen = "true";
+    host.append(canvas);
+    return { setOption() {} };
+  },
+};`,
+    "utf8",
+  );
+  writeFileSync(
+    sourcePath,
+    `<!doctype html>
+<html>
+<head><meta charset="utf-8"></head>
+<body>
+  <div id="echarts-host" style="width:240px;height:120px"></div>
+  <p data-native-case="direct-runtime-copy">冻结后仍可编辑的正文。</p>
+  <script src="./echarts.min.js"></script>
+  <script>echarts.init(document.getElementById("echarts-host"));</script>
+</body></html>`,
+    "utf8",
+  );
+
+  let electronApp = null;
+  let isolatedUserData = null;
+  try {
+    const launched = await launchPageRoot({ activeSourcePath: sourcePath });
+    electronApp = launched.electronApp;
+    isolatedUserData = launched.isolatedUserData;
+    const { frame: editFrame } = await loadedDiskFrame(
+      launched.page,
+      sourcePath,
+      "direct-runtime-copy",
+    );
+    await expect(editFrame.locator("#echarts-host canvas")).toHaveCount(1);
+    await expect(editFrame.locator("#echarts-host canvas"))
+      .toHaveAttribute("data-echarts-frozen", "true");
+    await expect(editFrame.locator("html"))
+      .toHaveAttribute("data-pageroot-edit-runtime-frozen", "true");
+    const runtimeResult = await editFrame.locator("html").getAttribute(
+      "data-pageroot-edit-runtime-result",
+    );
+    expect(JSON.parse(runtimeResult || "{}")).toMatchObject({
+      state: "frozen",
+      reason: null,
+    });
+    const editorIframes = launched.page.getByTestId("html-canvas-editor")
+      .locator("iframe");
+    await expect(editorIframes).toHaveCount(1);
+    expect(await editorIframes.getAttribute("sandbox"))
+      .toContain("allow-scripts");
+    expect(readFileSync(sourcePath, "utf8")).not.toContain("echartsFrozen");
+
+    await activateNativeEdit(editFrame, "direct-runtime-copy");
+    await expect(editFrame.locator(caseSelector("direct-runtime-copy")))
+      .toHaveAttribute("contenteditable", "true");
+  } finally {
+    if (electronApp && isolatedUserData) {
+      await stopPageRoot(electronApp, isolatedUserData);
+    }
+    removeValidatedTemporaryDirectory(
+      sourceDirectory,
+      "pageroot-edit-runtime-e2e-",
+    );
+  }
+});
+
 test("Electron keeps runtime visuals in Preview and source-backed static content in Edit", async () => {
   const sourceDirectory = mkdtempSync(
     path.join(tmpdir(), "pageroot-preview-source-e2e-"),

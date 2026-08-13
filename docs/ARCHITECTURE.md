@@ -56,9 +56,21 @@ Comments + frozen input
 - Preview-to-edit carries only a bounded `PageViewContext`: source-backed
   active/inactive class transitions and `hidden`, `open`, `aria-selected` or
   `aria-expanded` state. It never carries runtime DOM, pixels or table markup.
-- Edit is script-disabled and renders only source-static content. It has no
-  runtime snapshot session, cache, IPC request, bitmap projection or Blob URL;
-  authored inline SVG remains source-backed while runtime-only Canvas/SVG stays
+- Edit normally uses the existing script-disabled, source-static canvas. On
+  desktop only, an explicit ECharts page with a source-empty stable chart host
+  may receive an optional
+  one-shot author-runtime attempt: `EditAuthorRuntimeSession` requests a
+  source-SHA/Canvas-generation-fenced compatibility grant from the hidden
+  `EditRuntimeProbeOwner` through the existing canvas verification/loading gate. A
+  compatible source then runs the fixed script bytes once in its one normal
+  Edit iframe, freezes them and audits source identity/layout before PageRoot
+  displays or binds that same document. There is no invisible staging iframe
+  and no later interaction- or IME-gated replacement. The owner returns a
+  grant and host bindings, never probe DOM, screenshots or source bytes.
+  Failure, timeout, cancellation or any uncertain audit silently displays the
+  static Edit canvas. Runtime DOM remains disposable and cannot enter
+  SourcePatch, save, Version, comments, Review analysis or AI input; authored
+  inline SVG remains source-backed while general runtime-only Canvas/SVG stays
   in Preview.
 - Review alone has a disposable runtime-snapshot supplement. Its
   `SourceHostResolver` admits only direct source Canvas/SVG roots and stable,

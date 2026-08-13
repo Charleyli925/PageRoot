@@ -103,6 +103,13 @@ import {
   registerPreviewProtocolScheme,
 } from "./preview-protocol.mjs";
 import {
+  createEditRuntimeProtocolController,
+  registerEditRuntimeProtocolScheme,
+} from "./edit-runtime-protocol.mjs";
+import {
+  createEditRuntimeProbeOwner,
+} from "./edit-runtime-probe-owner.mjs";
+import {
   createRuntimeSnapshotCaptureController,
 } from "./runtime-visual-capture-owner.mjs";
 
@@ -110,6 +117,7 @@ import {
 const { autoUpdater } = electronUpdater;
 
 registerPreviewProtocolScheme(protocol);
+registerEditRuntimeProtocolScheme(protocol);
 
 const directory = path.dirname(fileURLToPath(import.meta.url));
 const USER_NOTICE_FILE_NAME = "PageRoot 用户声明与免责声明.txt";
@@ -210,6 +218,10 @@ const PREVIEW_CHANNELS = Object.freeze({
 const REVIEW_RUNTIME_SNAPSHOT_CHANNELS = Object.freeze({
   capture: "html-review-runtime-snapshots:capture",
 });
+const EDIT_RUNTIME_CHANNELS = Object.freeze({
+  probe: "html-edit-runtime:probe",
+  revoke: "html-edit-runtime:revoke",
+});
 const EDIT_CHANNELS = Object.freeze({
   historyRequested: "html-edit:history-requested",
   nativeHistory: "html-edit:native-history",
@@ -236,6 +248,8 @@ let workspaceFailurePrompt = null;
 let managedWelcomeRegistration = null;
 let previewProtocolController = null;
 let reviewRuntimeSnapshotCaptureController = null;
+let editRuntimeProtocolController = null;
+let editRuntimeProbeOwner = null;
 const workspaceRecoveryMailbox = createWorkspaceRecoveryMailbox();
 const externalFileOpenMailbox = createExternalFileOpenMailbox();
 const externalFileOpenExitHandoff = createExternalFileOpenExitHandoff({
@@ -287,6 +301,65 @@ function ensureReviewRuntimeSnapshotCaptureController() {
     });
   }
   return reviewRuntimeSnapshotCaptureController;
+}
+
+function ensureEditRuntimeProtocolController() {
+  if (!editRuntimeProtocolController) {
+    editRuntimeProtocolController = createEditRuntimeProtocolController({
+      protocolApi: protocol,
+      netFetch: (url, options) => net.fetch(url, options),
+    });
+    editRuntimeProtocolController.install();
+  }
+  return editRuntimeProtocolController;
+}
+
+function ensureEditRuntimeProbeOwner() {
+  if (!editRuntimeProbeOwner) {
+    editRuntimeProbeOwner = createEditRuntimeProbeOwner({
+      BrowserWindowClass: BrowserWindow,
+      createSession: async (payload) => {
+        const sourcePath = await currentActivePath();
+        if (!sourcePath) throw new Error("Edit runtime requires an active source path.");
+        // The renderer may request only the exact persisted source currently
+        // active in main. Never turn a stale in-memory document (or a changed
+        // file after a renderer request) into executable author bytes.
+        const activeSource = await readHtmlFile({
+          sourcePath,
+          maxHtmlBytes: MAX_HTML_BYTES,
+        });
+        const requestedSha = String(payload?.sourceSha256 || "").toLowerCase();
+        if (
+          activeSource.sha256 !== requestedSha
+          || activeSource.html !== payload?.html
+        ) {
+          throw new Error("Edit runtime source is no longer the active persisted document.");
+        }
+        return ensureEditRuntimeProtocolController().createSession({
+          ...payload,
+          html: activeSource.html,
+          sourcePath: activeSource.sourcePath,
+        });
+      },
+      revokeSession: (sessionId) => Promise.resolve(
+        ensureEditRuntimeProtocolController().revokeSession(sessionId),
+      ),
+      createIsolatedSession: (partition) => {
+        const isolatedSession = electronSession.fromPartition(partition);
+        ensureEditRuntimeProtocolController().installFor(isolatedSession.protocol);
+        return isolatedSession;
+      },
+      async releaseIsolatedSession(isolatedSession) {
+        await Promise.all([
+          Promise.resolve(isolatedSession.clearStorageData?.()).catch(() => undefined),
+          Promise.resolve(
+            isolatedSession.protocol?.unhandle?.("pageroot-edit-runtime"),
+          ).catch(() => undefined),
+        ]);
+      },
+    });
+  }
+  return editRuntimeProbeOwner;
 }
 
 function telemetryFingerprint(value) {
@@ -1000,6 +1073,14 @@ const createPreviewSession = createPreviewSessionOperation({
 
 const captureReviewRuntimeSnapshot = (payload) => (
   ensureReviewRuntimeSnapshotCaptureController().capture(payload)
+);
+
+const probeEditAuthorRuntime = (payload) => (
+  ensureEditRuntimeProbeOwner().probe(payload)
+);
+
+const revokeEditAuthorRuntime = (sessionId) => (
+  ensureEditRuntimeProbeOwner().revoke(sessionId)
 );
 
 async function resolveKnownRenameSource(sourcePathInput) {
@@ -1734,6 +1815,14 @@ function registerProjectIpc() {
       "review_runtime_snapshot_capture",
     ),
   );
+  ipcMain.handle(
+    EDIT_RUNTIME_CHANNELS.probe,
+    trustedProject(probeEditAuthorRuntime, "edit_runtime_probe"),
+  );
+  ipcMain.handle(
+    EDIT_RUNTIME_CHANNELS.revoke,
+    trustedProject(revokeEditAuthorRuntime, "edit_runtime_revoke"),
+  );
   ipcMain.handle(APP_CHANNELS.closeResult, trusted(reportCloseResult));
   ipcMain.handle(
     APP_CHANNELS.workspaceRecoveryReady,
@@ -1911,6 +2000,7 @@ function unregisterIpc() {
     ...Object.values(INTEGRATION_CHANNELS),
     ...Object.values(UPDATE_CHANNELS),
     ...Object.values(REVIEW_RUNTIME_SNAPSHOT_CHANNELS),
+    ...Object.values(EDIT_RUNTIME_CHANNELS),
     APP_CHANNELS.closeResult,
     APP_CHANNELS.workspaceRecoveryReady,
     APP_CHANNELS.externalOpenReady,
@@ -2428,6 +2518,10 @@ async function createWindow() {
     applicationUpdate?.stopAutomaticChecks();
     reviewRuntimeSnapshotCaptureController?.dispose();
     reviewRuntimeSnapshotCaptureController = null;
+    editRuntimeProbeOwner?.dispose();
+    editRuntimeProbeOwner = null;
+    editRuntimeProtocolController?.dispose();
+    editRuntimeProtocolController = null;
     previewProtocolController?.dispose();
     rendererHasLoaded = false;
     workspaceRecoveryMailbox.beginRendererLoad();

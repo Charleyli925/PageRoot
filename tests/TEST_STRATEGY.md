@@ -135,6 +135,13 @@ PR 批量是建议而非固定限制：用 CI Health 的 Ready 次数、candidat
   入口，保存或明确删除才会移除，且草稿不增加主评论数或 `评N`。
   高密度短页面用例还必须证明 Canvas 自然底边保持不变，评论队列不会撑长
   共享页面；页面到底后可继续向下把底部卡片拉入，反向滚动可恢复自然位置。
+- Edit one-shot runtime：纯合同测试拥有 classic script 的确定性提取、显式
+  ECharts 候选限制、固定资源摘要与协议 ID；`EditAuthorRuntimeSession` 测试拥有
+  source SHA/Canvas generation 围栏、取消/迟到结果和 grant 撤销；Electron owner
+  测试拥有隐藏非持久 probe、超时和无 DOM/截图回传。Native Electron 用例必须证明
+  合格图表只在一个正式 Edit iframe 中运行、冻结并验证后才显示，运行时节点留在
+  获准的源码空宿主内，源码字节不变且普通文字仍可编辑；不兼容或失败时静默保留
+  静态 Edit。该路径没有 staging iframe、空闲/IME 后替换或运行时持久化 oracle。
 - 编辑模式安全内容切换：Node 证明语义 Tab/details/disclosure 与显式
   `data-p` / `data-tab` → panel-ID、固定数字处理器 → 唯一索引面板这两类
   旧式页签适配器的严格白名单，以及链接、弹窗、分组 details、重复/跳号

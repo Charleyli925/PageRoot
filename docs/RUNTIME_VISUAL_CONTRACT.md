@@ -27,12 +27,27 @@ screenshot never enters authored Edit or Review documents.
 
 ## Edit behavior
 
-Edit renders only what the source can statically present. It disables authored
-scripts and does not create a snapshot request, cache, bitmap projection, Blob
-URL or `data-pageroot-readonly-visual*` attribute. Authored inline SVG remains
-native, source-backed and non-editable; script-generated Canvas/SVG remains
-available in Preview. There is no runtime-capture status, placeholder, retry or
-fallback UI in Edit.
+Edit's static path renders a script-disabled source-static frame. It never
+consumes a Review snapshot, PNG/Blob projection or
+`data-pageroot-readonly-visual*` attribute. Authored inline SVG remains native
+and source-backed; general script-generated Canvas/SVG remains available in
+Preview.
+
+Desktop additionally permits one distinct Edit one-shot path only for an
+explicit ECharts candidate and a stable, source-empty, non-zero-sized host. It
+is not a runtime-snapshot feature:
+`EditRuntimeProbeOwner` validates exact source SHA/bindings in a hidden,
+non-persistent window and returns only a fixed-byte grant. The existing canvas
+verification/loading gate holds display for that decision, then its one normal iframe runs the
+authorized classic scripts in source order once, blocks later
+network/navigation/worker surfaces, freezes author timers/listeners/observers
+and audits that source nodes, text and geometry outside approved hosts did not
+change. PageRoot binds after validation to that same frozen iframe; there is no
+hidden staging frame or later idle/IME-gated replacement. The source remains
+authoritative; direct runtime DOM, grants and the bounded process LRU never
+enter SourcePatch, comments, save, Version, Review or AI input. Incompatible,
+late or failed work silently shows static Edit—there is no new status,
+placeholder, retry control or additional dialog.
 
 ## One Review snapshot owner
 

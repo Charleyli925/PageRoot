@@ -26,6 +26,10 @@ const APP_FILE_ALLOWLIST = [
   "desktop/preview-protocol.mjs",
   "desktop/runtime-visual-capture-owner.mjs",
   "app/domain/runtime-visual-contract.js",
+  "desktop/edit-runtime-bootstrap.mjs",
+  "desktop/edit-runtime-protocol.mjs",
+  "desktop/edit-runtime-probe-owner.mjs",
+  "app/domain/edit-runtime-contract.js",
   "public/brand-logo.png",
   "dist-desktop/renderer/**/*",
   "package.json",
@@ -222,7 +226,8 @@ test("package security boundaries retain CSP, entitlements and final plist clean
   ]);
   assert.match(rendererHtml, /Content-Security-Policy/u);
   assert.match(rendererHtml, /default-src 'none'/u);
-  assert.match(rendererHtml, /script-src 'self'/u);
+  assert.match(rendererHtml, /script-src 'self' pageroot-edit-runtime:/u);
+  assert.doesNotMatch(rendererHtml, /script-src[^;]*'unsafe-inline'/u);
   assert.match(rendererHtml, /connect-src http:\/\/127\.0\.0\.1:\*/u);
   assert.match(rendererHtml, /frame-src 'self' data: blob: pageroot-preview:/u);
   assert.match(rendererHtml, /object-src 'none'/u);

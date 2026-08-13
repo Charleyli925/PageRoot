@@ -33,6 +33,7 @@
 | Undelivered Bridge-unavailable recovery issue and renderer-listener readiness | Main-process recovery mailbox | in-memory for the current app process | preload handshake, native fallback and Workbench banner |
 | Renderer edit, project-picker, attachment-persistence, close-coordination and interactive-preview capabilities | Runtime capability resolver | immutable preload manifest; fail-closed browser default | Workbench presentation host adapters |
 | Volatile interactive-preview document, bootstrap, allowed source-relative asset root, completed-frame identity set and one-way pre-load scriptless navigation-fallback flag | Main-process preview protocol controller plus the owning window's navigation fence | none; bounded in-memory session/window state only; the fallback cannot be reversed inside a session | isolated preview iframe and the script-disabled edit iframe's resource base |
+| Edit one-shot script compatibility, source-SHA/Canvas-generation fence, fixed author-byte authorization, hidden probe/direct-load lifecycle and bounded process LRU | Renderer `EditAuthorRuntimeSession` for lifecycle; Electron `EditRuntimeProbeOwner` and `pageroot-edit-runtime:` protocol for privileged execution/resource ownership | none; grant, fixed bytes, LRU and frozen direct runtime DOM are process/disposable state only | `WorkspaceController` aggregate snapshot, one normal `HtmlCanvasEditor` runtime iframe and narrow preload `probe/revoke`; no DOM/screenshot/source bytes return to the renderer owner |
 | Current preview/edit display context, safe reveal transition and per-surface render acknowledgement | Workbench page-view context state | none; source-bound in-memory projection tagged by `DocumentSession` Canvas generation and rendered source Hash | `HtmlCanvasEditor`, `HtmlInteractionPreview`, save-status projection and toolbar |
 | Review runtime-snapshot limits, page budget, owner deadline, envelope and PNG/visible-text-hash parser | `runtime-visual-contract.js` and `runtime-visual-snapshots.js`; consumers may validate but not redeclare either | none; frozen process-local contract only | Review pair, shared owner and hostile-page gates |
 | AI review page view, change filter, context visibility, navigation target, canonical page-presentation path, scroll mode and zoom mode | `AiReviewWorkspace` review reducer | none; disposable state bound to the frozen before/after pair | review toolbar, content map and isolated review frames |
@@ -150,11 +151,13 @@ Rules:
   `projectId` and `documentId`.
 - Runtime features are declared independently. The presence of a project-picker
   API never implies source-edit or attachment-persistence authority.
-- Interactive-preview sessions, page-view context and Review runtime snapshots
-  are disposable. They do not participate in save, switch, submit or close
-  drains, and cannot become a second copy of the source HTML. Edit owns no
-  runtime bitmap/cache/projection state; it remains a script-disabled static
-  source surface.
+- Interactive-preview sessions, page-view context, Review runtime snapshots and
+  Edit one-shot grants are disposable. They do not participate in save, switch,
+  submit or close drains, and cannot become a second copy of the source HTML.
+  Static Edit remains the default source surface. A qualified one-shot load
+  may show a frozen runtime host only after its owner has audited it; the runtime
+  DOM, compatibility cache and grant still have no source, Draft, Version,
+  comment or AI authority.
 - AI review state fields are orthogonal. Page, filter, visibility, navigation,
   page presentation, scroll and zoom actions may update only their own reducer field. Review
   navigation can reveal a hidden panel in both frames but cannot become a

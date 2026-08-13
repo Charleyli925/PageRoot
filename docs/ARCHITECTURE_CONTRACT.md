@@ -220,11 +220,35 @@ history navigation, a newer preview generation or a failed capture discard it.
 It never registers a drain obligation and never changes source, Draft or
 Version authority.
 
-Edit has no runtime snapshot authority. It remains script-disabled and renders
-only source-static content: authored inline SVG stays source-backed and
-non-editable, while runtime-only Canvas/SVG remains in Preview. No Edit cache,
-IPC request, bitmap projection, Blob URL or temporary projection attribute is
-allowed.
+Edit has no runtime snapshot authority. For a candidate source, the existing
+canvas verification/loading gate holds display for the separate hidden compatibility probe; it
+then mounts either a script-disabled source-static frame or one direct runtime
+frame. Desktop attempts the one-shot contract only for a source-empty, stable,
+non-zero-sized host and deterministic classic scripts. `WorkspaceController`
+owns one `EditAuthorRuntimeSession` with the lifecycle
+`static → probing → compatible → loading → ready`; `loading` means the
+single direct canvas document is loading. Its identity is exact source SHA,
+Canvas generation and active source path, and an unpersisted, superseded or
+failed document returns to `static`.
+
+The main-process `EditRuntimeProbeOwner` owns the non-persistent hidden
+BrowserWindow, timeout, fixed resource bytes and bounded process-local
+compatibility LRU. It returns only an authorization grant with fixed script
+digest and approved host bindings. It never returns probe DOM, screenshot,
+raw source, TargetRefs or a persistence payload. The renderer's one direct
+`allow-same-origin allow-scripts` canvas document is reached only through
+`pageroot-edit-runtime:`; it runs the fixed bytes once, cancels tracked timers,
+listeners and observers, blocks later network/navigation/worker/form/media
+surfaces, verifies source identity/layout/text outside hosts, then lets PageRoot
+attach editing handlers to that same frozen document. It is visually gated
+until validation completes and is never replaced during editing or IME.
+
+The grant, cache and direct runtime DOM are disposable. No one-shot result may become
+SourcePatch input, a comment TargetRef, save/export bytes, Version data, Review
+analysis or AI input. Incompatible, timed-out, invalid or late execution has no
+user-facing prompt and leaves static Edit authoritative. Authored inline SVG
+remains source-backed; general runtime-only Canvas/SVG and ongoing interaction
+remain in Preview.
 
 Review alone uses one `SourceHostResolver`, one narrow owner request schema,
 one `RuntimeSnapshotOwner` and one trusted PNG parser. The resolver admits only

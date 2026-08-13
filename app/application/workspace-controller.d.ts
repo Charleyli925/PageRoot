@@ -19,6 +19,11 @@ import type {
 } from "./document-session.js";
 import type { DraftSession } from "./draft-session.js";
 import type {
+  EditAuthorRuntimePort,
+  EditAuthorRuntimeSession,
+  EditAuthorRuntimeSnapshot,
+} from "./edit-author-runtime-session.js";
+import type {
   ProjectContext,
   ProjectSession,
   ProjectSessionSnapshot,
@@ -91,6 +96,7 @@ export type WorkspaceControllerSnapshot = Readonly<{
   commentSession: CommentSessionSnapshot | null;
   runSession: RunSessionSnapshot | null;
   versionSession: VersionSessionSnapshot | null;
+  editRuntime: EditAuthorRuntimeSnapshot | null;
   comment: CommentWorkflowSnapshot | null;
   projectRules: ProjectRulesSnapshot | null;
   project: ProjectWorkflowSnapshot | null;
@@ -204,11 +210,13 @@ export type WorkspaceControllerConstruction = Readonly<{
   draftSession: DraftSession;
   versionSession: VersionSession;
   sourceHistorySession: SourceHistorySession;
+  editAuthorRuntimeSession?: EditAuthorRuntimeSession;
   codecs: WorkspaceControllerCodecs;
   ports: Readonly<{
     hash: HashPort;
     recovery?: RecoveryPort;
     canvas?: CanvasAuthorityPort;
+    editRuntime?: EditAuthorRuntimePort;
   }>;
   documentWorkflow?: Readonly<{
     codecs: DocumentWorkflowCodecs;
@@ -344,6 +352,17 @@ export class WorkspaceController {
   getCurrentProjectContext(): ProjectContext | null;
   matchesCurrentProjectContext(context: ProjectContext): boolean;
   reloadDocumentCanvas(): DocumentSessionSnapshot;
+  beginEditAuthorRuntimeLoad(input: {
+    sessionId?: string;
+    sourceSha256?: string;
+    canvasGeneration?: number;
+  }): boolean;
+  settleEditAuthorRuntimeLoad(input: {
+    sessionId?: string;
+    sourceSha256?: string;
+    canvasGeneration?: number;
+    outcome?: "ready" | "rejected" | "failed";
+  }): boolean;
   replaceCommentWorkingCopy(
     input: Record<string, unknown>,
   ): CommentSessionSnapshot;

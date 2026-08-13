@@ -5,6 +5,7 @@ import { DocumentSession } from "./document-session.js";
 import { DocumentWorkflow } from "./document-workflow.js";
 import { DraftSession } from "./draft-session.js";
 import { DrainCoordinator } from "./drain-coordinator.js";
+import { EditAuthorRuntimeSession } from "./edit-author-runtime-session.js";
 import { ExternalFileOpenSession } from "./external-file-open-session.js";
 import { ProjectApplicationSession } from "./project-application-session.js";
 import { ProjectSession } from "./project-session.js";
@@ -163,6 +164,9 @@ export function createRuntimeWorkspaceController({
     }),
     versionSession: new VersionSession(),
     sourceHistorySession: new SourceHistorySession(),
+    editAuthorRuntimeSession: new EditAuthorRuntimeSession({
+      port: ports?.editRuntime || null,
+    }),
     codecs,
     ports,
     documentWorkflow: {
@@ -202,6 +206,8 @@ export class WorkspaceController {
   #draftSession;
   #versionSession;
   #sourceHistorySession;
+  #editAuthorRuntimeSession = null;
+  #editAuthorRuntimeUnsubscribe = null;
   #runSession = null;
   #codecs;
   #hashPort;
@@ -229,6 +235,7 @@ export class WorkspaceController {
   #commentSessionSnapshot = null;
   #runSessionSnapshot = null;
   #versionSessionSnapshot = null;
+  #editAuthorRuntimeSnapshot = null;
   #projectSnapshot = null;
   #projectRulesSnapshot = null;
   #runSnapshot = null;
@@ -240,6 +247,7 @@ export class WorkspaceController {
     commentSession: null,
     runSession: null,
     versionSession: null,
+    editRuntime: null,
     comment: null,
     projectRules: null,
     project: null,
@@ -262,6 +270,9 @@ export class WorkspaceController {
     sourceHistorySession,
     codecs,
     ports = {},
+    editAuthorRuntimeSession = new EditAuthorRuntimeSession({
+      port: ports?.editRuntime || null,
+    }),
     documentWorkflow = null,
     commentWorkflow = null,
     projectRulesWorkflow = null,
@@ -291,6 +302,14 @@ export class WorkspaceController {
     if (!sourceHistorySession || typeof sourceHistorySession.activate !== "function") {
       throw new TypeError("WorkspaceController requires SourceHistorySession injection.");
     }
+    if (
+      !editAuthorRuntimeSession
+      || typeof editAuthorRuntimeSession.refresh !== "function"
+      || typeof editAuthorRuntimeSession.subscribe !== "function"
+      || typeof editAuthorRuntimeSession.dispose !== "function"
+    ) {
+      throw new TypeError("WorkspaceController requires EditAuthorRuntimeSession injection.");
+    }
     if (!ports.hash || typeof ports.hash.sha256 !== "function") {
       throw new TypeError("WorkspaceController requires a HashPort.");
     }
@@ -317,12 +336,14 @@ export class WorkspaceController {
     this.#draftSession = draftSession;
     this.#versionSession = versionSession;
     this.#sourceHistorySession = sourceHistorySession;
+    this.#editAuthorRuntimeSession = editAuthorRuntimeSession;
     this.#runSession = runSessions[0] || null;
     this.#projectSessionSnapshot = projectSession.snapshot;
     this.#documentSessionSnapshot = documentSession.snapshot;
     this.#commentSessionSnapshot = commentSession.snapshot;
     this.#runSessionSnapshot = this.#runSession?.snapshot || null;
     this.#versionSessionSnapshot = versionSession.snapshot;
+    this.#editAuthorRuntimeSnapshot = editAuthorRuntimeSession.snapshot;
     this.#codecs = createWorkspaceControllerCodecs(codecs);
     this.#hashPort = ports.hash;
     this.#recoveryPort = ports.recovery || { replace: () => {} };
@@ -538,6 +559,12 @@ export class WorkspaceController {
       this.#versionWorkflow.subscribeEvents((event) => this.#emitEvent(event));
     }
     this.#observeSessionSnapshots();
+    this.#editAuthorRuntimeUnsubscribe = this.#editAuthorRuntimeSession.subscribe((snapshot) => {
+      if (this.#disposed) return;
+      this.#editAuthorRuntimeSnapshot = snapshot;
+      this.#publishAggregateSnapshot();
+    });
+    this.#refreshEditAuthorRuntime();
     this.#publishAggregateSnapshot();
   }
 
@@ -573,6 +600,10 @@ export class WorkspaceController {
     this.#commentSession.setObserver(null);
     this.#runSession?.setObserver(null);
     this.#versionSession.setObserver(null);
+    this.#editAuthorRuntimeUnsubscribe?.();
+    this.#editAuthorRuntimeUnsubscribe = null;
+    this.#editAuthorRuntimeSession?.dispose();
+    this.#editAuthorRuntimeSession = null;
     this.#versionWorkflowUnsubscribe?.();
     this.#versionWorkflowUnsubscribe = null;
     this.#versionWorkflow?.dispose();
@@ -627,6 +658,14 @@ export class WorkspaceController {
 
   reloadDocumentCanvas() {
     return this.#documentSession.reloadCanvas();
+  }
+
+  beginEditAuthorRuntimeLoad(input) {
+    return this.#editAuthorRuntimeSession?.beginDirectLoad(input) || false;
+  }
+
+  settleEditAuthorRuntimeLoad(input) {
+    return this.#editAuthorRuntimeSession?.settleDirectLoad(input) || false;
   }
 
   replaceCommentWorkingCopy(input) {
@@ -1085,6 +1124,7 @@ export class WorkspaceController {
       commentSession: this.#commentSessionSnapshot,
       runSession: this.#runSessionSnapshot,
       versionSession: this.#versionSessionSnapshot,
+      editRuntime: this.#editAuthorRuntimeSnapshot,
       comment: this.#commentWorkflow?.getSnapshot() || null,
       projectRules: this.#projectRulesSnapshot,
       project: this.#projectSnapshot,
@@ -1116,11 +1156,13 @@ export class WorkspaceController {
     this.#projectSession.setObserver((snapshot) => {
       if (this.#disposed) return;
       this.#projectSessionSnapshot = snapshot;
+      this.#refreshEditAuthorRuntime();
       this.#publishAggregateSnapshot();
     });
     this.#documentSession.setObserver((snapshot) => {
       if (this.#disposed) return;
       this.#documentSessionSnapshot = snapshot;
+      this.#refreshEditAuthorRuntime();
       this.#publishAggregateSnapshot();
     });
     this.#commentSession.setObserver((snapshot) => {
@@ -1137,6 +1179,23 @@ export class WorkspaceController {
       if (this.#disposed) return;
       this.#versionSessionSnapshot = snapshot;
       this.#publishAggregateSnapshot();
+    });
+  }
+
+  #refreshEditAuthorRuntime() {
+    if (!this.#editAuthorRuntimeSession || this.#disposed) return;
+    const document = this.#documentSessionSnapshot;
+    this.#editAuthorRuntimeSession.refresh({
+      html: document?.html,
+      sourceSha256: document?.sourceSha256,
+      canvasGeneration: document?.canvasGeneration,
+      sourcePath: this.#projectSessionSnapshot?.sourcePath || null,
+      sourceIsAuthoritative: Boolean(
+        document
+        && document.sourceSha256
+        && document.editRevision === document.lastPersistedRevision
+        && document.persistState === "idle"
+      ),
     });
   }
 

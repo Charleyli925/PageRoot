@@ -55,6 +55,7 @@ async function loadPreloadApis(invoke) {
     preview: exposed.get("htmlAIPreview"),
     reviewRuntimeSnapshots: exposed.get("htmlAIReviewRuntimeSnapshots"),
     runtimeSnapshots: exposed.get("htmlAIRuntimeSnapshots"),
+    editRuntime: exposed.get("htmlAIEditRuntime"),
     edit: exposed.get("htmlAIEdit"),
     sent,
     emit(channel, payload) {
@@ -149,6 +150,39 @@ test("preload exposes only preview session creation and revocation", async () =>
     "createSession",
     "revokeSession",
   ]);
+});
+
+test("preload exposes only the narrow one-shot Edit runtime probe and revoke port", async () => {
+  const calls = [];
+  const { editRuntime } = await loadPreloadApis(async (...args) => {
+    calls.push(args);
+    return success({ outcome: "rejected", reason: "unsupported-program" });
+  });
+  const payload = {
+    contractVersion: 1,
+    requestId: "edit-runtime-01234567",
+    sourceSha256: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    html: "<!doctype html><main id=chart></main><script>void 0</script>",
+    hosts: [{
+      key: "edit-runtime-1",
+      path: [1, 0],
+      tagName: "main",
+      identityAttributes: [["id", "chart"]],
+    }],
+    canvasGeneration: 3,
+  };
+
+  assert.deepEqual(
+    await editRuntime.probe(payload),
+    { outcome: "rejected", reason: "unsupported-program" },
+  );
+  assert.deepEqual(calls[0], ["html-edit-runtime:probe", payload]);
+  await editRuntime.revoke("0123456789abcdef0123456789abcdef");
+  assert.deepEqual(calls[1], [
+    "html-edit-runtime:revoke",
+    "0123456789abcdef0123456789abcdef",
+  ]);
+  assert.deepEqual(Object.keys(editRuntime).sort(), ["probe", "revoke"]);
 });
 
 test("preload exposes one fire-and-forget usage channel with a narrow payload", async () => {

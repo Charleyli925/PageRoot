@@ -52,6 +52,18 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
   media, but not for renderer or authored scripts: `pageroot-preview:` is absent
   from `script-src`, the edit document remains sandboxed without script
   capability, and every source transition revokes the previous session.
+- Desktop Edit one-shot runtime is a separate, opt-in-by-compatibility path;
+  static Edit remains script-disabled. Its CSP changes only
+  `script-src 'self' pageroot-edit-runtime:`—never `unsafe-inline`,
+  `unsafe-eval` or a general network origin. The main process validates exact
+  source SHA and stable source-empty bindings, freezes local or explicit
+  ECharts-CDN bytes, and serves them only from a one-use
+  `pageroot-edit-runtime:` session. The hidden probe and the one direct runtime
+  canvas document deny permissions, navigation, popups, webviews, downloads,
+  worker/network APIs, form submission and media playback; the bootstrap tracks
+  and removes author timers, listeners and observers before that same document
+  receives PageRoot editing handlers. A grant returns no runtime DOM, source or
+  image; timeout/rejection revokes it and silently shows the static canvas.
 - Desktop Review runtime snapshot capture is one narrow IPC capability. The
   main process revalidates exact source HTML/SHA and a bounded
   source-host binding, owns one hidden sandboxed BrowserWindow with Node

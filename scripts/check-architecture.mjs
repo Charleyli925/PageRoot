@@ -33,6 +33,7 @@ const RUNTIME_SESSION_CONSTRUCTORS = [
   "ProjectRulesSession",
   "ExternalFileOpenSession",
   "ProjectApplicationSession",
+  "EditAuthorRuntimeSession",
 ];
 
 async function sourceFiles(directory) {
@@ -95,8 +96,8 @@ export function compositionBoundaryViolations({
     );
   }
   if (
-    /\bnew\s+(?:ProjectSession|DocumentSession|CommentSession|DraftSession|VersionSession|SourceHistorySession|RunSession|ProjectRulesSession|ExternalFileOpenSession|ProjectApplicationSession)\b/u.test(workbench)
-    || /\b(?:projectSessionRef|documentSessionRef|commentSessionRef|draftSessionRef|versionSessionRef|sourceHistorySessionRef|runSessionRef|projectRulesSessionRef)\b/u.test(workbench)
+    /\bnew\s+(?:ProjectSession|DocumentSession|CommentSession|DraftSession|VersionSession|SourceHistorySession|RunSession|ProjectRulesSession|ExternalFileOpenSession|ProjectApplicationSession|EditAuthorRuntimeSession)\b/u.test(workbench)
+    || /\b(?:projectSessionRef|documentSessionRef|commentSessionRef|draftSessionRef|versionSessionRef|sourceHistorySessionRef|runSessionRef|projectRulesSessionRef|editAuthorRuntimeSessionRef)\b/u.test(workbench)
   ) {
     violations.push(
       "app/workbench.tsx: Workbench cannot own runtime Session construction or refs",
@@ -495,6 +496,44 @@ export async function architectureViolations() {
     versionWorkflow,
     applicationSources,
   }));
+  if (
+    !workspaceController.includes('import { EditAuthorRuntimeSession }')
+    || !workspaceController.includes("editAuthorRuntimeSession: new EditAuthorRuntimeSession({")
+    || !workspaceController.includes("editRuntime: this.#editAuthorRuntimeSnapshot")
+    || !workspaceController.includes("#refreshEditAuthorRuntime()")
+    || !workspaceController.includes("sourceIsAuthoritative: Boolean(")
+    || !workspaceController.includes("this.#editAuthorRuntimeSession?.dispose()")
+  ) {
+    violations.push(
+      "app/application/workspace-controller.js: Edit one-shot runtime authorization must be Session-owned, source-fenced, aggregated, and disposed by WorkspaceController",
+    );
+  }
+  if (
+    !canvasEditor.includes('mode: "static"')
+    || !canvasEditor.includes('mode: "one-shot-runtime"')
+    || !canvasEditor.includes('sandbox={frameRender.runtime')
+    || !canvasEditor.includes('const runtimeFrameRef')
+    || !canvasEditor.includes('isRuntimeFrameFrozenResult')
+    || !canvasEditor.includes('fallBackToStaticRuntimeFrame')
+    || !canvasEditor.includes("onEditRuntimeLoadOutcomeRef.current?.(runtimeFrame.grant, \"ready\")")
+    || canvasEditor.includes('stagingIframeRef')
+    || canvasEditor.includes('setRuntimeStageRender')
+  ) {
+    violations.push(
+      "app/components/HtmlCanvasEditor.tsx: Edit runtime must use one direct runtime frame, verify it frozen before display, and silently fall back to static source on failure",
+    );
+  }
+  if (
+    !workspaceController.includes("EditAuthorRuntimeSession")
+    || !applicationSources.some(({ file, source }) => (
+      file.endsWith("edit-author-runtime-session.js")
+      && source.includes("isEditRuntimeEchartsCandidate")
+    ))
+  ) {
+    violations.push(
+      "app/application/edit-author-runtime-session.js: Edit one-shot authorization must remain limited to explicit ECharts candidates",
+    );
+  }
   if (
     !workspaceController.includes("export class WorkspaceController")
     || !workspaceController.includes("ensureRegistered({")

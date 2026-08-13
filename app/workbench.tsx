@@ -41,6 +41,7 @@ import type {
   NativeDeferredCommandAuthority,
   NativeDeferredCommandDiscardReason,
 } from "./components/HtmlCanvasEditor";
+import type { DesktopEditRuntimeApi } from "./components/desktop-edit-runtime-api";
 import AboutPageRootDialog from "./components/AboutPageRootDialog";
 import CancelAiRunDialog from "./components/CancelAiRunDialog";
 import HtmlInteractionPreview, {
@@ -671,6 +672,17 @@ export default function Workbench() {
     versionSnapshot.currentBasedOnVersionId;
   const viewMode = versionSnapshot.viewMode;
   const [canvasMode, setCanvasMode] = useState<CanvasMode>("edit");
+  const editRuntimeSnapshot = workspaceControllerSnapshot?.editRuntime ?? null;
+  const editRuntimeGrant = canvasMode === "edit"
+    ? editRuntimeSnapshot?.grant ?? null
+    : null;
+  const editRuntimeDefersStaticFrameReveal = Boolean(
+    canvasMode === "edit"
+    && sourcePath
+    && ["probing", "compatible", "loading"].includes(
+      editRuntimeSnapshot?.phase || "static",
+    ),
+  );
   const [pageViewContext, setPageViewContext] =
     useState<PageViewContext | null>(null);
   const [interactivePreviewTransport, setInteractivePreviewTransport] =
@@ -704,6 +716,7 @@ export default function Workbench() {
     setCanvasRenderAcks({ edit: null, preview: null });
   }, []);
   useLayoutEffect(() => {
+    const editRuntimeApi: DesktopEditRuntimeApi | undefined = window.htmlAIEditRuntime;
     const controller = createRuntimeWorkspaceController({
       initial: {
         documentHtml: DEFAULT_PROJECT_HTML,
@@ -725,6 +738,12 @@ export default function Workbench() {
       ports: {
         hash: { sha256: browserSha256 },
         canvas: { invalidateRenderAcks: invalidateCanvasRenderAcks },
+        ...(editRuntimeApi ? {
+          editRuntime: {
+            probe: (payload) => editRuntimeApi.probe(payload),
+            revoke: (sessionId) => editRuntimeApi.revoke(sessionId),
+          },
+        } : {}),
       },
       documentWorkflow: {
         codecs: createDocumentWorkflowCodecs({
@@ -6596,6 +6615,23 @@ export default function Workbench() {
                     if (relinkingTargetRef.current) {
                       relinkSelectionArmedRef.current = true;
                     }
+                  }}
+                  editRuntimeGrant={editRuntimeGrant}
+                  deferStaticFrameReveal={editRuntimeDefersStaticFrameReveal}
+                  onEditRuntimeLoadStart={(grant) => {
+                    workspaceControllerRef.current?.beginEditAuthorRuntimeLoad({
+                      sessionId: grant.sessionId,
+                      sourceSha256: grant.sourceSha256,
+                      canvasGeneration: grant.canvasGeneration,
+                    });
+                  }}
+                  onEditRuntimeLoadOutcome={(grant, outcome) => {
+                    workspaceControllerRef.current?.settleEditAuthorRuntimeLoad({
+                      sessionId: grant.sessionId,
+                      sourceSha256: grant.sourceSha256,
+                      canvasGeneration: grant.canvasGeneration,
+                      outcome,
+                    });
                   }}
                   onCommentLayout={handleCommentLayout}
                   onSelect={handleCanvasSelection}

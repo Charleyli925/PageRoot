@@ -546,6 +546,72 @@
       "nodeTests": ["tests/runtime-capabilities.test.mjs"]
     },
     {
+      "id": "edit-author-runtime-contract",
+      "patterns": [
+        "^app/domain/edit-runtime-contract\\.(?:js|d\\.ts)$",
+        "^tests/edit-runtime-contract\\.test\\.mjs$"
+      ],
+      "suites": ["typecheck"],
+      "nodeTests": ["tests/edit-runtime-contract.test.mjs"]
+    },
+    {
+      "id": "edit-author-runtime-session",
+      "patterns": [
+        "^app/application/edit-author-runtime-session\\.(?:js|d\\.ts)$",
+        "^tests/edit-author-runtime-session\\.test\\.mjs$"
+      ],
+      "suites": ["typecheck", "browser-smoke", "electron-smoke"],
+      "nodeTests": [
+        "tests/edit-author-runtime-session.test.mjs",
+        "tests/runtime-snapshot-hosts.test.mjs",
+        "tests/architecture-boundaries.test.mjs"
+      ]
+    },
+    {
+      "id": "edit-author-runtime-canvas",
+      "patterns": [
+        "^app/components/(?:desktop-edit-runtime-api|html-preview-sandbox)\\.(?:ts|js|d\\.ts)$",
+        "^app/components/HtmlCanvasEditor(?:\\.types)?\\.tsx$",
+        "^app/components/HtmlCanvasEditor\\.module\\.css$",
+        "^tests/edit-runtime-bootstrap\\.test\\.mjs$"
+      ],
+      "suites": ["typecheck", "browser-smoke", "electron-smoke"],
+      "nodeTests": [
+        "tests/edit-runtime-bootstrap.test.mjs",
+        "tests/html-preview-sandbox.test.mjs",
+        "tests/runtime-dom-source-map.test.mjs",
+        "tests/architecture-boundaries.test.mjs"
+      ]
+    },
+    {
+      "id": "edit-author-runtime-workbench",
+      "patterns": ["^app/workbench\\.tsx$"],
+      "suites": ["typecheck", "browser-smoke", "electron-smoke"],
+      "nodeTests": [
+        "tests/edit-author-runtime-session.test.mjs",
+        "tests/architecture-boundaries.test.mjs"
+      ]
+    },
+    {
+      "id": "desktop-edit-author-runtime",
+      "patterns": [
+        "^desktop/edit-runtime-(?:bootstrap|protocol|probe-owner)\\.mjs$",
+        "^tests/edit-runtime-(?:bootstrap|protocol|probe-owner)\\.test\\.mjs$"
+      ],
+      "suites": ["electron-smoke"],
+      "nodeTests": [
+        "tests/edit-runtime-bootstrap.test.mjs",
+        "tests/edit-runtime-protocol.test.mjs",
+        "tests/edit-runtime-probe-owner.test.mjs"
+      ]
+    },
+    {
+      "id": "edit-runtime-renderer-csp",
+      "patterns": ["^desktop/renderer/index\\.html$"],
+      "suites": ["electron-smoke"],
+      "nodeTests": ["tests/desktop-package.test.mjs"]
+    },
+    {
       "id": "review-analysis-session",
       "patterns": ["^app/application/review-analysis-session\\.(?:js|d\\.ts)$"],
       "suites": ["typecheck", "ai-smoke"],
@@ -556,8 +622,8 @@
       "patterns": [
         "^scripts/check-architecture\\.mjs$",
         "^tests/fixtures/architecture-boundaries/",
-        "^(?:CONTRIBUTING|docs/(?:ARCHITECTURE|ARCHITECTURE_CONTRACT|COMPATIBILITY|STATE_OWNERSHIP|ENGINEERING_STANDARDS|SECURITY_MODEL|RUNTIME_VISUAL_CONTRACT|WORKBENCH_ORCHESTRATION_REFACTOR_PLAN))\\.md$",
-        "^docs/decisions/(?:0003-session-ownership-and-mutation-outcomes|0004-v2-editable-islands|0007-independent-interactive-preview|0008-safe-presentation-actions-in-edit-mode|0009-persistent-source-patch-history|0011-workbench-session-decomposition|0012-id-first-project-context|0013-edit-runtime-visual-projection|0015-safe-host-fallback-and-direct-text-nodes|0016-owner-controlled-review-runtime-capture|0017-shared-runtime-snapshot-owner|0018-source-transaction-kernel|0019-workspace-controller-orchestration|0021-review-runtime-visual-comparison-noise-tolerance)\\.md$"
+        "^(?:CONTRIBUTING|docs/(?:ARCHITECTURE|ARCHITECTURE_CONTRACT|COMPATIBILITY|STATE_OWNERSHIP|ENGINEERING_STANDARDS|SECURITY_MODEL|INTERACTION_FLOW|RUNTIME_VISUAL_CONTRACT|TEST_STRATEGY|WORKBENCH_ORCHESTRATION_REFACTOR_PLAN))\\.md$",
+        "^docs/decisions/(?:0003-session-ownership-and-mutation-outcomes|0004-v2-editable-islands|0007-independent-interactive-preview|0008-safe-presentation-actions-in-edit-mode|0009-persistent-source-patch-history|0011-workbench-session-decomposition|0012-id-first-project-context|0013-edit-runtime-visual-projection|0015-safe-host-fallback-and-direct-text-nodes|0016-owner-controlled-review-runtime-capture|0017-shared-runtime-snapshot-owner|0018-source-transaction-kernel|0019-workspace-controller-orchestration|0021-review-runtime-visual-comparison-noise-tolerance|0022-edit-one-shot-author-runtime)\\.md$"
       ],
       "suites": ["typecheck"],
       "nodeTests": [
