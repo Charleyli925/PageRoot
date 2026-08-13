@@ -4038,6 +4038,10 @@ export class ProjectFileRepository {
         candidateState.candidate,
         "candidate.json",
       );
+      // Candidate and Request are separate durable facts. Preserve an
+      // explicit recovery boundary here: on restart, #recoverProject resumes
+      // the Promotion before it validates Request/runtime consistency.
+      await this.#hit("promotion-candidate-promoted", { transactionRoot });
       const requestPath = path.join(
         requestRootPath(loaded.paths, candidateState.candidate.requestId),
         "request.json",
@@ -4326,8 +4330,6 @@ export class ProjectFileRepository {
       declaredProjectRootPath: record.registeredProjectRootPath,
     });
     const recovered = [];
-    const requestRuntime = await this.#recoverRequestRuntime(loaded);
-    if (requestRuntime) recovered.push(requestRuntime);
     const entries = await listProjectDirectory(
       loaded.paths.projectRootPath,
       loaded.paths.transactionsRoot,
@@ -4381,6 +4383,11 @@ export class ProjectFileRepository {
         transaction,
       ));
     }
+    // A crash after candidate.json becomes promoted but before request.json
+    // follows leaves an intentional intermediate state. Finish every pending
+    // Promotion first, then use Request facts to restore runtime state.
+    const requestRuntime = await this.#recoverRequestRuntime(loaded);
+    if (requestRuntime) recovered.push(requestRuntime);
     return recovered;
   }
 }

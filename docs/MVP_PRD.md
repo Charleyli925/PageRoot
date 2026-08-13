@@ -87,8 +87,8 @@ PageRoot 让用户在真实本地 HTML 上完成两类工作：
 | `documentId` | 源 HTML 身份 |
 | `versionId` | 机器版本 ID，例如 `ver_0009` |
 | `versionOrdinal` | 连续序号，例如 `9` |
-| `versionLabel` | 内部兼容标签，例如 `V9`；界面和工作文件按同一 ordinal 显示为 `V1.8` |
-| `outputRelativePath` | 冻结的 AI 唯一输出路径，例如 `output/仪表盘-V1.8.html`；不由 AI 推导或改名 |
+| `versionLabel` | 用户可读标签，例如 `V9`；界面、正式 Version 与工作文件使用同一 ordinal |
+| `outputRelativePath` | 冻结的 AI 唯一输出路径，例如 `requests/<requestId>/attempts/<attemptId>/output/candidate.html`；不由 AI 推导或改名 |
 | `basedOnVersionId` | 当前提交内容的谱系基础 |
 | `previousVersionId` | 时间线上前一个正式 Version |
 | `requestId` | 本轮用户意图 |
@@ -114,7 +114,7 @@ PageRoot 让用户在真实本地 HTML 上完成两类工作：
 
 桌面版在当前 HTML 已安全保存、项目空闲且没有冲突时，允许用户双击顶部文件名原位重命名。输入只包含主文件名，现有 `.html/.htm` 后缀和所在目录保持不变；`Enter` 或失焦提交，`Escape` 取消。同名文件不得覆盖。成功重命名只改变当前真实文件路径、桌面活动/最近记录和项目显示名，不改变 HTML 字节、`projectId`、`documentId`、Version 或历史。事务必须有稳定 operation ID、预期源 Hash 和崩溃恢复记录。
 
-初始 Version 的内部标签为 `V1 / ver_0001`，界面显示“版本 1”。第一次有效 AI 成功使用内部 `V2 / ver_0002`，界面显示“版本 2”；之后依次递增。PageRoot 固定把候选 ordinal 映射为文件版本号 `V1.<ordinal - 1>`，并生成 `working/<原用户文件名>-V1.1.html`、`working/<原用户文件名>-V1.2.html` 等工作文件。`input/base/index.html` 是冻结输入的机器名，不是用户文件名；AI 只能写入 Prompt 给出的 `output/<原用户文件名>-V1.x.html`。该文件标签不得当作用户界面的版本身份，也不得回写并破坏严格 v4 Project Schema。
+初始 Version 的内部 ID 为 `ver_0001`，界面显示“版本 1”，可见工作文件为 `<原用户文件名>-V1.html`。用户采纳第一份有效 AI Candidate 后创建 `ver_0002`、显示“版本 2”，并生成 `<原用户文件名>-V2.html`；之后按同一 ordinal 递增。`input/base/index.html` 是冻结输入的机器名，不是用户文件名；AI 只能写入 Prompt 给出的固定 Attempt 输出 `requests/<requestId>/attempts/<attemptId>/output/candidate.html`。Candidate 在用户采纳前不是正式 Version，该文件路径和标签不得被用作用户界面的版本身份，也不得回写并破坏严格 v4 Project Schema。
 
 ### 5.2 直接编辑与自动写回
 

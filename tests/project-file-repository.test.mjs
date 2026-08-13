@@ -1263,6 +1263,7 @@ test("promotion fault recovery leaves exactly one formal Version and regular fil
     "promotion-working-copy-prepared",
     "promotion-working-copy-created",
     "promotion-manifest-committed",
+    "promotion-candidate-promoted",
     "promotion-completed",
   ]) {
     const value = await fixture(t);
