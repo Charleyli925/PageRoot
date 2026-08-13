@@ -301,7 +301,14 @@ async function addCommentAndSubmit(
 async function addComment(page, sourcePath, text = (
   `只把这个列表项改为“${UPDATED_TEXT}”，其他地方保持不变。`
 ), targetCase = "list-item", targetSelector = "") {
-  const frame = await loadedDiskFrame(page, sourcePath);
+  // Importing an external v4 project switches the active document to its
+  // managed Working Copy after the first persisted interaction. Subsequent
+  // comments must target that authoritative file, while the original source
+  // remains untouched.
+  const active = await page.evaluate(
+    () => window.htmlAIProjects?.getActiveProject(),
+  );
+  const frame = await loadedDiskFrame(page, active?.sourcePath || sourcePath);
   const target = frame.locator(targetSelector || caseSelector(targetCase));
   await page.keyboard.press("Escape");
   await frame.locator("body").click({ position: { x: 2, y: 2 } });
@@ -404,6 +411,36 @@ function rewriteWorkspaceDraftComment(workspace, text, update) {
   return false;
 }
 
+function frozenAiOutputPath(requestRoot, changeRequest) {
+  const legacyRelativePath = changeRequest.finalization?.outputRelativePath;
+  if (typeof legacyRelativePath === "string" && legacyRelativePath.startsWith("output/")) {
+    return path.join(
+      requestRoot,
+      "attempts",
+      "attempt_001",
+      ...legacyRelativePath.split("/"),
+    );
+  }
+  const requestRecord = JSON.parse(readFileSync(
+    path.join(requestRoot, "request.json"),
+    "utf8",
+  ));
+  const outputRelativePath = requestRecord.outputRelativePath;
+  const expectedPrefix = `requests/${changeRequest.requestId}/attempts/${changeRequest.attemptId}/output/`;
+  if (
+    typeof outputRelativePath !== "string"
+    || !outputRelativePath.startsWith(expectedPrefix)
+  ) {
+    throw new Error("Request is missing its frozen AI output path.");
+  }
+  const controlRoot = path.dirname(path.dirname(requestRoot));
+  const outputPath = path.resolve(controlRoot, ...outputRelativePath.split("/"));
+  if (!outputPath.startsWith(`${controlRoot}${path.sep}`)) {
+    throw new Error("Request output escaped its managed control directory.");
+  }
+  return outputPath;
+}
+
 function writeAiOutput(requestRoot, transform) {
   const base = readFileSync(
     path.join(requestRoot, "input", "base", "index.html"),
@@ -414,28 +451,16 @@ function writeAiOutput(requestRoot, transform) {
     path.join(requestRoot, "change-request.json"),
     "utf8",
   ));
-  const outputRelativePath = changeRequest.finalization?.outputRelativePath;
-  if (
-    typeof outputRelativePath !== "string"
-    || !outputRelativePath.startsWith("output/")
-  ) {
-    throw new Error("Request is missing its frozen AI output path.");
-  }
-  const attemptRoot = path.join(
-    requestRoot,
-    "attempts",
-    "attempt_001",
-  );
-  const outputPath = path.join(
-    attemptRoot,
-    ...outputRelativePath.split("/"),
-  );
+  const outputPath = frozenAiOutputPath(requestRoot, changeRequest);
   mkdirSync(path.dirname(outputPath), { recursive: true });
   writeFileSync(outputPath, output, "utf8");
 }
 
 function runOfficialFinalizer(requestRoot, changeRequest) {
-  const command = changeRequest.finalization.finalizerCommand;
+  const command = changeRequest.finalization?.finalizerCommand
+    || readFileSync(path.join(requestRoot, "PROMPT.md"), "utf8")
+      .match(/```sh\s*\r?\n([^\r\n]+)\r?\n```/u)?.[1];
+  if (!command) throw new Error("Request is missing its frozen finalizer command.");
   const result = spawnSync("/bin/zsh", ["-lc", command], {
     cwd: requestRoot,
     encoding: "utf8",
@@ -473,19 +498,36 @@ function recordOfficialSupplement(workspace, requestRoot, changeRequest, payload
 }
 
 function workingHtmlFiles(workspace, projectId) {
-  const registry = JSON.parse(
-    readFileSync(path.join(workspace, "project-registry.json"), "utf8"),
-  );
-  const directory = path.join(
-    workspace,
-    "projects",
-    registry.projects[projectId].storageDirectoryName,
-    "working",
-  );
-  if (!existsSync(directory)) return [];
-  return readdirSync(directory)
-    .filter((fileName) => fileName.endsWith(".html"))
-    .map((fileName) => path.join(directory, fileName));
+  const legacyRegistryPath = path.join(workspace, "project-registry.json");
+  if (existsSync(legacyRegistryPath)) {
+    const registry = JSON.parse(readFileSync(legacyRegistryPath, "utf8"));
+    const storageDirectoryName = registry.projects?.[projectId]?.storageDirectoryName;
+    if (!storageDirectoryName) return [];
+    const directory = path.join(workspace, "projects", storageDirectoryName, "working");
+    if (!existsSync(directory)) return [];
+    return readdirSync(directory)
+      .filter((fileName) => fileName.endsWith(".html"))
+      .map((fileName) => path.join(directory, fileName));
+  }
+
+  const projectsRoot = path.join(path.dirname(workspace), "project-files");
+  if (!existsSync(projectsRoot)) return [];
+  for (const directory of readdirSync(projectsRoot, { withFileTypes: true })) {
+    if (!directory.isDirectory()) continue;
+    const projectRoot = path.join(projectsRoot, directory.name);
+    const projectPath = path.join(projectRoot, ".pageroot", "project.json");
+    const manifestPath = path.join(projectRoot, ".pageroot", "manifest.json");
+    if (!existsSync(projectPath) || !existsSync(manifestPath)) continue;
+    const project = JSON.parse(readFileSync(projectPath, "utf8"));
+    if (project.projectId !== projectId) continue;
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    return (Array.isArray(manifest.workingCopies) ? manifest.workingCopies : [])
+      .map((workingCopy) => String(workingCopy.sourceRelativePath || ""))
+      .filter((relativePath) => relativePath.endsWith(".html"))
+      .map((relativePath) => path.join(projectRoot, relativePath))
+      .filter((filePath) => existsSync(filePath));
+  }
+  return [];
 }
 
 const REVIEW_PROJECTION_CASES = Object.freeze([
@@ -1101,12 +1143,14 @@ ${REVIEW_MASK_UNION_BEFORE}
     const pending = await launched.page.evaluate(
       () => window.htmlAIProjects?.getActiveProject(),
     );
-    expect(pending.sourcePath).toBe(realpathSync(fixture.sourcePath));
-    expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
     await expect.poll(
       () => workingHtmlFiles(launched.workspace, request.changeRequest.projectId).length,
       { timeout: 20_000 },
     ).toBe(1);
+    expect(pending.sourcePath).toBe(realpathSync(
+      workingHtmlFiles(launched.workspace, request.changeRequest.projectId)[0],
+    ));
+    expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
 
     await launched.page.getByRole("button", { name: "审阅对比" }).click();
     await expect(launched.page.getByTestId("ai-review-workspace"))
@@ -3258,10 +3302,10 @@ ${REVIEW_MASK_UNION_BEFORE}
       });
     }
     await launched.page.getByRole("button", {
-      name: "打开 AI 修改后",
+      name: "采纳 AI 修改",
     }).click();
     await expect(launched.page.getByRole("dialog", {
-      name: /打开 AI 修改后（.+）？/u,
+      name: /采纳 AI 修改后（.+）？/u,
     })).toBeVisible();
     await expect(launched.page.getByRole("button", { name: "继续审阅" }))
       .toBeFocused();
@@ -3288,13 +3332,13 @@ ${REVIEW_MASK_UNION_BEFORE}
       });
       window.__pagerootHandoffObserver.observe(document.body, { childList: true, subtree: true });
     });
-    await launched.page.getByRole("button", { name: "确认并打开" }).click();
+    await launched.page.getByRole("button", { name: "确认并采纳" }).click();
     const opened = await assertReviewAcceptPersistence({
       page: launched.page,
       sourcePath: fixture.sourcePath,
       original: fixture.original,
       expectedText: UPDATED_TEXT,
-      versionPathPattern: /\/working\/generated-ai-loop-V1\.1\.html$/u,
+      versionPathPattern: /\/generated-ai-loop-V2(?:-V2)*\.html$/u,
     });
     expect(await launched.page.evaluate(() => {
       window.__pagerootHandoffObserver?.disconnect();
@@ -4207,11 +4251,13 @@ test("a broad but related AI return is accepted without a target-scope error", a
     const active = await launched.page.evaluate(
       () => window.htmlAIProjects?.getActiveProject(),
     );
-    expect(active.sourcePath).toBe(realpathSync(fixture.sourcePath));
     await expect.poll(
       () => workingHtmlFiles(launched.workspace, request.changeRequest.projectId).length,
       { timeout: 20_000 },
     ).toBe(1);
+    expect(active.sourcePath).toBe(realpathSync(
+      workingHtmlFiles(launched.workspace, request.changeRequest.projectId)[0],
+    ));
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
   } finally {
     await stopPageRoot(launched.electronApp, launched.isolatedUserData);

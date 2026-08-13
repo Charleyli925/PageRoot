@@ -1527,6 +1527,7 @@ async function createProjectFileRequest(body) {
     changeEvents: Array.isArray(body.changeEvents) ? body.changeEvents : [],
     instructions: Array.isArray(body.instructions) ? body.instructions : [],
     targets: Array.isArray(body.targets) ? body.targets : [],
+    preserveOutsideTargets: true,
   };
   const promptDescriptor = {
     requestId,

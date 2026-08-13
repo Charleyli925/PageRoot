@@ -698,6 +698,7 @@ test("a Request freezes comments, targets and project rules alongside its exact 
     changeEvents: [{ eventId: "edit_001", kind: "text", target: { targetId: "target_title" } }],
     instructions: [{ instructionId: "instruction_001", text: "保留其他内容" }],
     targets: [{ targetId: "target_title", selector: "h1" }],
+    preserveOutsideTargets: false,
   };
   const prepared = await value.repository.prepareRequest({
     target: saved.target,
@@ -724,7 +725,10 @@ test("a Request freezes comments, targets and project rules alongside its exact 
   const changeRequest = JSON.parse(frozenChangeRequest.toString("utf8"));
   const inputManifest = await json(inputManifestPath);
   assert.deepEqual(annotations.comments, comments);
-  assert.deepEqual(changeRequest.requirements, request);
+  assert.deepEqual(changeRequest.requirements, {
+    ...request,
+    preserveOutsideTargets: true,
+  });
   assert.deepEqual(inputManifest.readOrder, [
     "PROMPT.md",
     "input/AI_RULES.md",

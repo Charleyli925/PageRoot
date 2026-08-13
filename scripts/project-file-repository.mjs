@@ -41,6 +41,7 @@ const FROZEN_REQUEST_RULES = `# PageRoot AI Request Rules
 
 - Read the frozen files in input-manifest.json readOrder before editing.
 - Treat the frozen HTML, project rules, annotations and change request as read-only.
+- Preserve content outside the explicitly frozen targets.
 - Write exactly one complete HTML document to the output path stated in PROMPT.md.
 - A valid output remains a Candidate until the user explicitly adopts it.
 `;
@@ -1460,7 +1461,12 @@ export class ProjectFileRepository {
       "Working Copy state",
       { projectRootPath: loaded.paths.projectRootPath },
     );
-    const frozenRequest = isObject(request) ? structuredClone(request) : {};
+    const frozenRequest = {
+      ...(isObject(request) ? structuredClone(request) : {}),
+      // The V4 protocol keeps the same source-preservation contract as V3.
+      // A caller cannot weaken it while a Request is being frozen.
+      preserveOutsideTargets: true,
+    };
     const freezeCutoffRevision = Number(frozenRequest.freezeCutoffRevision || 0);
     if (
       !Number.isSafeInteger(freezeCutoffRevision)
