@@ -69,3 +69,38 @@ test("project queries reject a later query with the same complete identity", () 
   assert.equal(session.isQueryCurrent(first), false);
   assert.equal(session.isQueryCurrent(second), true);
 });
+
+test("a managed OpenTarget preserves exact file identity through a Session epoch", () => {
+  const session = new ProjectSession();
+  const locator = session.openLocator("/tmp/external.html");
+  const context = session.adoptOpenTarget({
+    previousSourcePath: locator.sourcePath,
+    target: {
+      projectId: "project_0123456789abcdef",
+      documentId: "doc_0123456789abcdef",
+      projectRootPath: "/tmp/项目",
+      targetKind: "working-copy",
+      workingCopyId: "work_ver_0001",
+      versionId: "ver_0001",
+      exactSourcePath: "/tmp/项目/external-V1.html",
+      sourceSha256: "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    },
+  });
+
+  assert.deepEqual(context, {
+    epoch: 2,
+    projectId: "project_0123456789abcdef",
+    documentId: "doc_0123456789abcdef",
+    sourcePath: "/tmp/项目/external-V1.html",
+    projectRootPath: "/tmp/项目",
+    targetKind: "working-copy",
+    workingCopyId: "work_ver_0001",
+    versionId: "ver_0001",
+    exactSourcePath: "/tmp/项目/external-V1.html",
+    sourceSha256: "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    sessionEpoch: 2,
+  });
+  assert.equal(session.matches(context), true);
+  assert.equal(session.matches({ ...context, exactSourcePath: "/tmp/项目/other.html" }), false);
+  assert.equal(session.matches({ ...context, sourceSha256: "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff" }), false);
+});

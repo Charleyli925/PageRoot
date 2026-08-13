@@ -104,6 +104,7 @@ export type WorkspaceEvent =
       context: ProjectContext;
       projectRecordsPath: string | null;
       projectName: string | null;
+      imported?: boolean;
       canonicalSourceAdopted: boolean;
     }>
   | Readonly<{
@@ -115,6 +116,7 @@ export type WorkspaceEvent =
         | "document-direct-edit-recorded"
         | "document-edit-queued"
         | "document-persisted"
+        | "document-open-target-rebound"
         | "document-persistence-failed"
         | "document-authority-reloaded"
         | "document-authority-reload-failed"
@@ -143,6 +145,7 @@ export type RegistrationInput = Readonly<{
   sourcePath?: string;
   expectedSourceSha256?: string | null;
   adoptCanonicalSource?: boolean;
+  duplicateResolution?: "reassociate" | "import-as-new" | null;
 }>;
 
 export type HashPort = Readonly<{

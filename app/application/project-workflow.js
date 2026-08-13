@@ -1907,6 +1907,9 @@ export class ProjectWorkflow {
 
       const projectRecord = this.#codecs.isRecord(payload.project) ? payload.project : {};
       const workspacePaths = this.#codecs.isRecord(payload.paths) ? payload.paths : {};
+      const openTarget = this.#codecs.isRecord(payload.openTarget)
+        ? payload.openTarget
+        : null;
       const currentDocument = this.#documentSession.snapshot;
       const currentHtmlHash = await this.#hashPort.sha256(currentDocument.html);
       if (!queryIsCurrent()) return stale({ operationId, epoch: activeEpoch, sourcePath: activeSource });
@@ -1993,6 +1996,7 @@ export class ProjectWorkflow {
           projectId: nextProjectId,
           documentId: nextDocumentId,
           sourcePath: activeSource,
+          ...(openTarget ? { openTarget } : {}),
         });
         if (!context) return stale({ operationId, epoch: activeEpoch, sourcePath: activeSource });
         if (mustAdoptSource || authoritativeHtml !== currentDocument.html) {
@@ -2340,6 +2344,7 @@ export class ProjectWorkflow {
         sourcePath: priorProject.sourcePath,
         projectId: priorProject.projectId,
         documentId: priorProject.documentId,
+        ...(priorProject.openTarget ? { openTarget: priorProject.openTarget } : {}),
       });
     } else if (this.#projectSession.context) {
       locator = this.#projectSession.openLocator(priorProject.sourcePath || null);
@@ -2420,6 +2425,7 @@ export class ProjectWorkflow {
     nextProjectId,
     nextDocumentId,
     versionId,
+    openTarget = null,
   }) {
     const updatesCurrentProject = Boolean(
       (
@@ -2436,6 +2442,7 @@ export class ProjectWorkflow {
         nextSourcePath,
         projectId: nextProjectId,
         documentId: nextDocumentId,
+        openTarget,
         updatesCurrentProject,
         activatedProject: null,
       });
@@ -2461,6 +2468,7 @@ export class ProjectWorkflow {
       nextSourcePath,
       projectId: nextProjectId,
       documentId: nextDocumentId,
+      openTarget,
       updatesCurrentProject,
       activatedProject,
     });
@@ -2485,12 +2493,14 @@ export class ProjectWorkflow {
           sourcePath: prepared.nextSourcePath,
           projectId: prepared.projectId,
           documentId: prepared.documentId,
+          openTarget: prepared.openTarget,
         })
       : this.#projectSession.context || this.#projectSession.register({
           epoch: this.#projectSession.epoch,
           projectId: prepared.projectId,
           documentId: prepared.documentId,
           sourcePath: prepared.nextSourcePath,
+          ...(prepared.openTarget ? { openTarget: prepared.openTarget } : {}),
         });
     if (!transition || !this.#projectSession.context) return null;
 

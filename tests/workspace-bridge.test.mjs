@@ -1890,7 +1890,7 @@ test("version history stays read-only and the restore endpoint is unavailable", 
   assert.equal(unchanged.currentExactVersionId, "ver_0001");
 });
 
-test("sequential AI successes preserve every prior source and activate semantic working files", async (t) => {
+test("sequential AI Candidates preserve every prior source and promote semantic working files only on adoption", async (t) => {
   const environment = await createEnvironment(t);
   const originalPath = join(environment.sources, "复杂HTML综合测试页.html");
   await writeFile(originalPath, htmlPage("不可覆盖的原文件"), "utf8");
@@ -1923,19 +1923,15 @@ test("sequential AI successes preserve every prior source and activate semantic 
   assert.equal(firstReady.status, "ready-to-open");
   assert.equal(firstReady.candidateDisplayVersionLabel, "版本 2");
   assert.equal(firstReady.currentPath, originalPath);
-  assert.equal(firstReady.workingCopyPath, firstRun.plannedWorkingCopyPath);
-  assert.match(firstReady.workingCopyPath, /\/working\/复杂HTML综合测试页-V1\.1\.html$/u);
-  assert.notEqual(firstReady.workingCopyPath, originalPath);
+  assert.equal(firstReady.workingCopyPath, originalPath);
+  await assert.rejects(access(firstRun.plannedWorkingCopyPath));
   assert.equal(hash(await readFile(originalPath)), originalSha256);
   assert.deepEqual(await readFile(originalPath), originalBytes);
-  const firstWorkingBytes = await readFile(firstReady.workingCopyPath);
+  const firstWorkingBytes = await readFile(firstReady.candidateOutputPath);
   assert.equal(hash(firstWorkingBytes), firstReady.contentSha256);
-  assert.deepEqual(
-    await readFile(firstReady.versionEntryPath),
-    firstWorkingBytes,
-  );
   const firstCreated = await activateReadyVersion(bridge, firstReady);
-  assert.equal(firstCreated.currentPath, firstReady.workingCopyPath);
+  assert.equal(firstCreated.currentPath, firstRun.plannedWorkingCopyPath);
+  assert.deepEqual(await readFile(firstCreated.currentPath), firstWorkingBytes);
 
   const workingAliasRoot = join(environment.root, "working-directory-alias");
   await symlink(dirname(firstCreated.currentPath), workingAliasRoot, "dir");
@@ -1985,14 +1981,13 @@ test("sequential AI successes preserve every prior source and activate semantic 
   assert.equal(secondReady.status, "ready-to-open");
   assert.equal(secondReady.candidateDisplayVersionLabel, "版本 3");
   assert.equal(secondReady.currentPath, firstCreated.currentPath);
-  assert.match(secondReady.workingCopyPath, /\/working\/复杂HTML综合测试页-V1\.2\.html$/u);
-  assert.doesNotMatch(secondReady.workingCopyPath, /V1\.1-V1\.2/u);
-  assert.notEqual(secondReady.workingCopyPath, firstCreated.currentPath);
+  assert.equal(secondReady.workingCopyPath, firstCreated.currentPath);
+  await assert.rejects(access(secondRun.plannedWorkingCopyPath));
   assert.deepEqual(await readFile(originalPath), originalBytes);
   assert.deepEqual(await readFile(firstCreated.currentPath), firstWorkingBytes);
-  assert.deepEqual(
-    await readFile(secondReady.versionEntryPath),
-    await readFile(secondReady.workingCopyPath),
+  assert.equal(
+    hash(await readFile(secondReady.candidateOutputPath)),
+    secondReady.contentSha256,
   );
   const secondCreated = await activateReadyVersion(bridge, secondReady);
 
@@ -2934,7 +2929,8 @@ test("mandatory finalizer controls completion, identity, no-change, and cancella
   assert.equal(ready.body.status, "ready-to-open");
   assert.equal(ready.body.versionId, "ver_0002");
   assert.equal(ready.body.currentPath, sourcePath);
-  assert.notEqual(ready.body.workingCopyPath, sourcePath);
+  assert.equal(ready.body.workingCopyPath, sourcePath);
+  await assert.rejects(access(run.plannedWorkingCopyPath));
   assert.notEqual(ready.body.contentSha256, ready.body.sourceSha256);
   assert.equal(
     ready.body.completion.completedAt,
@@ -3361,6 +3357,8 @@ test("Bridge enforces the complete completion.v1 runtime contract before committ
   assert.equal(accepted.response.status, 200);
   assert.equal(accepted.body.status, "ready-to-open");
   assert.equal(accepted.body.versionId, "ver_0002");
+  assert.equal((await openWorkspace(bridge, sourcePath)).body.versions.length, 1);
+  await activateReadyVersion(bridge, accepted.body);
   assert.equal((await openWorkspace(bridge, sourcePath)).body.versions.length, 2);
 });
 
@@ -3387,6 +3385,22 @@ test("external changes become persistent conflicts with keep-external and adopt-
   await runOfficialFinalizer(environment.workspace, firstRun);
   const externalOne = htmlPage("外部内容一", "<p>external one</p>");
   await writeFile(sourcePath, externalOne, "utf8");
+  const candidateOne = await bridge.requestJson(`/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${firstRun.requestId}&attemptId=${firstRun.attemptId}`,
+  );
+  assert.equal(candidateOne.body.status, "ready-to-open");
+  const firstAdoptionAttempt = await postJson(bridge, "/ready-version/activate", {
+    sourcePath,
+    projectId: candidateOne.body.projectId,
+    documentId: candidateOne.body.documentId,
+    requestId: firstRun.requestId,
+    attemptId: firstRun.attemptId,
+    versionId: candidateOne.body.versionId,
+  });
+  assert.equal(firstAdoptionAttempt.response.status, 409);
+  assert.equal(
+    firstAdoptionAttempt.body.error.code,
+    "CURRENT_SOURCE_CHANGED_AFTER_VALIDATION",
+  );
   const conflictedOne = await bridge.requestJson(`/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${firstRun.requestId}&attemptId=${firstRun.attemptId}`,
   );
   assert.equal(conflictedOne.body.status, "awaiting-conflict-resolution");
@@ -3423,6 +3437,18 @@ test("external changes become persistent conflicts with keep-external and adopt-
   await runOfficialFinalizer(environment.workspace, secondRun);
   const externalTwo = htmlPage("外部内容二", "<p>external two</p>");
   await writeFile(sourcePath, externalTwo, "utf8");
+  const candidateTwo = await bridge.requestJson(`/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${secondRun.requestId}&attemptId=${secondRun.attemptId}`,
+  );
+  assert.equal(candidateTwo.body.status, "ready-to-open");
+  const secondAdoptionAttempt = await postJson(bridge, "/ready-version/activate", {
+    sourcePath,
+    projectId: candidateTwo.body.projectId,
+    documentId: candidateTwo.body.documentId,
+    requestId: secondRun.requestId,
+    attemptId: secondRun.attemptId,
+    versionId: candidateTwo.body.versionId,
+  });
+  assert.equal(secondAdoptionAttempt.response.status, 409);
   const conflictedTwo = await bridge.requestJson(`/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${secondRun.requestId}&attemptId=${secondRun.attemptId}`,
   );
   assert.equal(conflictedTwo.body.status, "awaiting-conflict-resolution");
@@ -3430,12 +3456,6 @@ test("external changes become persistent conflicts with keep-external and adopt-
     projectRootFromRun(secondRun),
     "transactions",
     `txn_${secondRun.requestId}_${secondRun.attemptId}`,
-  );
-  const provisionalManifest = JSON.parse(
-    await readFile(
-      join(secondTransactionRoot, "prepared-version", "version.json"),
-      "utf8",
-    ),
   );
   await delay(30);
   const adopted = await postJson(bridge, "/conflict/resolve", {
@@ -3486,10 +3506,6 @@ test("external changes become persistent conflicts with keep-external and adopt-
       "utf8",
     ),
   );
-  assert.notEqual(
-    committedManifest.generatedAt,
-    provisionalManifest.generatedAt,
-  );
   assert.equal(
     committedManifest.generatedAt,
     committedMarker.committedAt,
@@ -3532,6 +3548,18 @@ test("AI conflict candidate and both hashes survive restart for read-only compar
   await writeFile(sourcePath, externalContent);
   const externalSourceSha256 = hash(externalContent);
 
+  const ready = await firstBridge.requestJson(`/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
+  );
+  assert.equal(ready.body.status, "ready-to-open");
+  const adoptionAttempt = await postJson(firstBridge, "/ready-version/activate", {
+    sourcePath,
+    projectId: ready.body.projectId,
+    documentId: ready.body.documentId,
+    requestId: run.requestId,
+    attemptId: run.attemptId,
+    versionId: ready.body.versionId,
+  });
+  assert.equal(adoptionAttempt.response.status, 409);
   const conflicted = await firstBridge.requestJson(`/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
   );
   assert.equal(conflicted.body.status, "awaiting-conflict-resolution");
@@ -3630,8 +3658,17 @@ test("source-applied transaction is recovered on bridge restart", async (t) => {
     "utf8",
   );
   await runOfficialFinalizer(environment.workspace, run);
-  const failedAtBoundary = await firstBridge.requestJson(`/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
+  const readyForPromotion = await firstBridge.requestJson(`/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
   );
+  assert.equal(readyForPromotion.body.status, "ready-to-open");
+  const failedAtBoundary = await postJson(firstBridge, "/ready-version/activate", {
+    sourcePath,
+    projectId: readyForPromotion.body.projectId,
+    documentId: readyForPromotion.body.documentId,
+    requestId: run.requestId,
+    attemptId: run.attemptId,
+    versionId: readyForPromotion.body.versionId,
+  });
   assert.equal(failedAtBoundary.response.status, 500);
   assert.doesNotMatch(await readFile(sourcePath, "utf8"), /recovered/);
   assert.match(
@@ -4285,8 +4322,17 @@ test("transaction recovery rejects an unsupported schema before recovery mutatio
     "utf8",
   );
   await runOfficialFinalizer(environment.workspace, run);
-  const interrupted = await firstBridge.requestJson(`/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
+  const candidate = await firstBridge.requestJson(`/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
   );
+  assert.equal(candidate.body.status, "ready-to-open");
+  const interrupted = await postJson(firstBridge, "/ready-version/activate", {
+    sourcePath,
+    projectId: candidate.body.projectId,
+    documentId: candidate.body.documentId,
+    requestId: run.requestId,
+    attemptId: run.attemptId,
+    versionId: candidate.body.versionId,
+  });
   assert.equal(interrupted.response.status, 500);
   await firstBridge.stop();
   const projectRoot = projectRootFromRun(run);
@@ -4356,8 +4402,17 @@ test("every Version transaction boundary recovers one committed candidate", asyn
       "utf8",
     );
     await runOfficialFinalizer(environment.workspace, run);
-    const interrupted = await firstBridge.requestJson(`/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
+    const candidate = await firstBridge.requestJson(`/status?sourcePath=${encodeURIComponent(sourcePath)}&requestId=${run.requestId}&attemptId=${run.attemptId}`,
     );
+    assert.equal(candidate.body.status, "ready-to-open");
+    const interrupted = await postJson(firstBridge, "/ready-version/activate", {
+      sourcePath,
+      projectId: candidate.body.projectId,
+      documentId: candidate.body.documentId,
+      requestId: run.requestId,
+      attemptId: run.attemptId,
+      versionId: candidate.body.versionId,
+    });
     assert.equal(interrupted.response.status, 500);
     await firstBridge.stop();
 

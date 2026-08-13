@@ -362,6 +362,36 @@ export class WorkspaceController {
       this.#documentWorkflowUnsubscribe = this.#documentWorkflow.subscribeEvents(
         (event) => {
           if (
+            event?.type === "document-open-target-rebound"
+            && event.context
+            && this.#projectSession.matches(event.context)
+          ) {
+            const authoritativeDraft = this.#codecs.isRecord(event.activeDraft)
+              ? event.activeDraft
+              : {};
+            const revision = this.#codecs.authoritativeDraftRevision(
+              authoritativeDraft,
+            );
+            if (typeof this.#draftSession.activate === "function") {
+              this.#draftSession.activate(
+                event.context,
+                revision,
+                authoritativeDraft,
+              );
+            } else {
+              this.#draftSession.replaceAuthority(
+                event.context,
+                revision,
+                authoritativeDraft,
+              );
+            }
+            this.#commentWorkflow?.reconcileAuthority();
+            this.#emitEvent({
+              type: "draft-authority-rebound",
+              context: event.context,
+            });
+          }
+          if (
             event?.fatal
             && [
               "document-persistence-failed",
@@ -993,6 +1023,7 @@ export class WorkspaceController {
     sourcePath,
     expectedSourceSha256,
     adoptCanonicalSource = true,
+    duplicateResolution = null,
   } = {}) {
     if (this.#disposed) {
       return Promise.resolve(blocked(
@@ -1045,6 +1076,7 @@ export class WorkspaceController {
           activeSource,
           expectedHash,
           adoptCanonicalSource,
+          duplicateResolution,
           identity,
         });
     this.#registrationPromise = registration;
@@ -1204,11 +1236,14 @@ export class WorkspaceController {
     expectedHash,
     adoptCanonicalSource,
     identity,
+    duplicateResolution = null,
   }) {
     try {
       const payload = await this.#bridgeClient.ensureProject({
         sourcePath: activeSource,
         expectedSourceSha256: expectedHash,
+        projectStorageVersion: "4.0.0",
+        ...(duplicateResolution ? { duplicateResolution } : {}),
       });
       if (payload.ok === false) {
         return rejected(
@@ -1270,13 +1305,28 @@ export class WorkspaceController {
         ? payload.project
         : {};
       const paths = this.#codecs.isRecord(payload.paths) ? payload.paths : {};
+      const openTarget = this.#codecs.isRecord(payload.openTarget)
+        ? payload.openTarget
+        : null;
+      const registeredSourcePath = String(
+        openTarget?.exactSourcePath || payload.sourcePath || activeSource,
+      );
       if (this.#projectSession.context) return stale(identity);
-      const registeredContext = this.#projectSession.register({
-        epoch: identity.epoch,
-        projectId: nextProjectId,
-        documentId: nextDocumentId,
-        sourcePath: activeSource,
-      });
+      const registeredContext = (
+        openTarget
+        && !this.#codecs.sameSourcePath(registeredSourcePath, activeSource)
+      )
+        ? this.#projectSession.adoptOpenTarget({
+            previousSourcePath: activeSource,
+            target: openTarget,
+          })
+        : this.#projectSession.register({
+            epoch: identity.epoch,
+            projectId: nextProjectId,
+            documentId: nextDocumentId,
+            sourcePath: registeredSourcePath,
+            ...(openTarget ? { openTarget } : {}),
+          });
       if (!registeredContext) return stale(identity);
 
       const recoveryIdentity = this.#codecs.recoveryIdentityFromRecord(
@@ -1354,6 +1404,7 @@ export class WorkspaceController {
         projectName: projectRecord.displayName
           ? String(projectRecord.displayName)
           : null,
+        ...(payload.imported === true ? { imported: true } : {}),
         canonicalSourceAdopted: shouldAdoptCanonicalSource,
       });
       return succeeded(registeredContext);

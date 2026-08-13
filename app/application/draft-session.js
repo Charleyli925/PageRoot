@@ -36,11 +36,23 @@ function copyContext(context) {
   ) {
     return null;
   }
+  const target = context.projectRootPath && context.targetKind
+    ? {
+      projectRootPath: String(context.projectRootPath),
+      targetKind: String(context.targetKind),
+      workingCopyId: context.workingCopyId ? String(context.workingCopyId) : null,
+      versionId: context.versionId ? String(context.versionId) : null,
+      exactSourcePath: String(context.exactSourcePath || context.sourcePath),
+      sourceSha256: String(context.sourceSha256 || ""),
+      sessionEpoch: Number(context.sessionEpoch ?? context.epoch),
+    }
+    : {};
   return Object.freeze({
     epoch: Number(context.epoch),
     projectId: String(context.projectId),
     documentId: String(context.documentId),
     sourcePath: String(context.sourcePath),
+    ...target,
   });
 }
 
@@ -156,6 +168,10 @@ export class DraftSession {
       this.#revision,
       normalizedRevision(authoritativeRevision),
     );
+    // OpenTarget carries the current exact path and source hash. The stable
+    // draft identity is still this Session/project/document tuple, so retain
+    // any in-flight draft mutation while replacing its routing metadata.
+    this.#activeContext = nextContext;
     if (authoritativeDraft) {
       this.#acknowledgedDraft = normalizeAuthoritativeDraft(
         authoritativeDraft,
@@ -291,6 +307,13 @@ export class DraftSession {
     while (true) {
       try {
         const payload = await this.#bridgeClient.saveDraft({
+          projectRootPath: write.projectRootPath,
+          targetKind: write.targetKind,
+          workingCopyId: write.workingCopyId,
+          versionId: write.versionId,
+          exactSourcePath: write.exactSourcePath,
+          sourceSha256: write.sourceSha256,
+          sessionEpoch: write.sessionEpoch,
           operationId: write.operationId,
           projectId: write.projectId,
           documentId: write.documentId,
