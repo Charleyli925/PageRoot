@@ -1274,7 +1274,7 @@ test("project resources drain edited rules before leaving", async () => {
         ? readdirSync(projectsRoot).filter((entry) => !entry.startsWith(".")).length
         : 0;
     };
-    expect(projectCount()).toBe(0);
+    expect(projectCount()).toBe(1);
     await addCanvasComment(
       launched.page,
       frame,

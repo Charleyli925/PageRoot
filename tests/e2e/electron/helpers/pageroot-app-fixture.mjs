@@ -511,11 +511,31 @@ export async function loadedDiskFrame(
   } = {},
 ) {
   const canonicalSourcePath = realpathSync(sourcePath);
-  await expect.poll(
-    async () => (await page.evaluate(() => window.htmlAIProjects?.getActiveProject()))?.sourcePath,
-    { timeout: Math.min(timeout, 20_000) },
-  ).toBe(canonicalSourcePath);
   await waitForProjectReady(page, { timeout });
+  const extension = path.extname(canonicalSourcePath);
+  const expectedWorkingCopyName = `${path.basename(canonicalSourcePath, extension)}-V1${extension}`;
+  let activeSourcePath = "";
+  await expect.poll(
+    async () => {
+      activeSourcePath = (
+        await page.evaluate(() => window.htmlAIProjects?.getActiveProject())
+      )?.sourcePath || "";
+      if (!activeSourcePath) return "";
+      const canonicalActiveSourcePath = realpathSync(activeSourcePath);
+      return canonicalActiveSourcePath === canonicalSourcePath
+        || path.basename(canonicalActiveSourcePath) === expectedWorkingCopyName
+        ? canonicalActiveSourcePath
+        : "";
+    },
+    { timeout: Math.min(timeout, 20_000) },
+  ).not.toBe("");
+  const canonicalActiveSourcePath = realpathSync(activeSourcePath);
+  if (canonicalActiveSourcePath !== canonicalSourcePath) {
+    // The desktop v4 opening boundary immediately imports every external HTML
+    // into its own V1 Working Copy. Keep fixture callers honest about that
+    // transition instead of preserving the retired external-preview contract.
+    expect(path.basename(canonicalActiveSourcePath)).toBe(expectedWorkingCopyName);
+  }
   await expect(page.locator('[aria-label="项目读取失败"]')).toHaveCount(0);
   await expect(page.getByRole("button", { name: "项目", exact: true }))
     .toBeEnabled({ timeout });
@@ -548,5 +568,5 @@ export async function loadedDiskFrame(
     }
   }, { timeout }).toBe(true);
   if (!frame) throw new Error("PageRoot did not expose the Electron edit frame.");
-  return includeEditor ? { editor, frame } : frame;
+  return includeEditor ? { editor, frame, sourcePath: canonicalActiveSourcePath } : frame;
 }

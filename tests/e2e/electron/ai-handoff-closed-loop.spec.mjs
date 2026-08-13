@@ -304,10 +304,9 @@ async function addCommentAndSubmit(
 async function addComment(page, sourcePath, text = (
   `只把这个列表项改为“${UPDATED_TEXT}”，其他地方保持不变。`
 ), targetCase = "list-item", targetSelector = "") {
-  // Importing an external v4 project switches the active document to its
-  // managed Working Copy after the first persisted interaction. Subsequent
-  // comments must target that authoritative file, while the original source
-  // remains untouched.
+  // Opening an external HTML immediately switches the active document to its
+  // managed V1 Working Copy. Comments must target that authoritative file,
+  // while the original source remains untouched.
   const active = await page.evaluate(
     () => window.htmlAIProjects?.getActiveProject(),
   );
