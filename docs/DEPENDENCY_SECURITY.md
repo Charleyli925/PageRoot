@@ -14,8 +14,8 @@ verified compatible fix.
 
 ## Reviewed fixes
 
-The 2026-08-08 security baseline moves the PostCSS-selected `nanoid` closure
-to 3.3.17 and selects `vinext` 0.0.45 in place of 0.2.1. This is the
+The 2026-08-14 security baseline moves the PostCSS-selected `nanoid` closure
+to 3.3.18 and selects `vinext` 0.0.45 in place of 0.2.1. This is the
 compatible remediation path identified by the audit; the release is verified
 against this repository's Vite 8 and React 19.2 toolchain and does not depend
 on `image-size`, removing
