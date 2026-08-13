@@ -1,0 +1,18 @@
+{
+  "schemaVersion": "4.0.0",
+  "projectId": "project_0123456789abcdef",
+  "documentId": "doc_fedcba9876543210",
+  "workingCopyId": "work_ver_0001",
+  "basedOnVersionId": "ver_0001",
+  "baseSha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "currentSha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "differsFromBase": false,
+  "draftId": "draft_work_ver_0001",
+  "draftRelativePath": "drafts/work_ver_0001.json",
+  "draftSha256": null,
+  "draftRevision": 0,
+  "saveState": "saved",
+  "lastPersistedRevision": 0,
+  "lastSavedAt": "2026-08-14T00:00:00.000Z",
+  "lastOpenedAt": "2026-08-14T00:00:00.000Z"
+}

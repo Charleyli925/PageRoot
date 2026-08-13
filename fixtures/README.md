@@ -1,6 +1,6 @@
 # 合同 fixtures
 
-活动正例只位于 `v3/`。它们用于 Schema 校验和跨文件语义测试，不是运行时工作区，也不能被当作真实用户记录直接写入。
+活动正例位于 `v3/` 与 `v4/`。它们用于 Schema 校验和跨文件语义测试，不是运行时工作区，也不能被当作真实用户记录直接写入。
 
 `targeted-change/` 保存 SourceIndex、TargetResolver、SourcePatchEngine 和 ScopeValidator 的源码边界样本，覆盖 Unicode、CRLF/LF、属性引号、注释、template/table/script、样式来源与模块排序。
 
@@ -71,3 +71,10 @@ assessment、冻结 base 与候选 output。它代表仍受 v1 Schema 支持的�
 - `readOrder` 与 input manifest 的文件路径必须严格一一对应；评论和 edit event revision 不得越过冻结边界。
 - 只有带有效 marker 的 Version 可以出现在历史。
 - v3 TargetRef 只允许 `targetId`、`label`、`level`、`selector?`、`textQuote?`、`sourceAnchor?`、`fingerprint?` 和 `resolution`。
+
+## v4 项目文件
+
+`v4/` 保存 PageRoot 项目文件合同的独立正例：Registry、project identity、
+manifest、runtime state、Working Copy state、Candidate 和 Promotion transaction。
+其中 `project-manifest.unknown-field.json` 是旧 `fileNaming` 字段的拒绝样本；
+v4 打开路径不会迁移、补写或读取该旧语义。

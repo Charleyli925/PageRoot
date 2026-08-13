@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   link,
   lstat,
+  open,
   realpath,
   readFile,
   readdir,
@@ -37,6 +38,10 @@ const WORKING_COPY_ID = /^work_ver_\d{4,}$/u;
 const SHA256 = /^sha256:[a-f0-9]{64}$/u;
 const SAFE_REQUEST_ID = /^[A-Za-z0-9_-]{1,160}$/u;
 const MAX_HTML_BYTES = 20 * 1024 * 1024;
+const REPOSITORY_LOCK_FILE_NAME = ".pageroot-v4-repository.lock";
+const REPOSITORY_LOCK_RETRY_MS = 25;
+const REPOSITORY_LOCK_TIMEOUT_MS = 60_000;
+const REPOSITORY_LOCK_STALE_MS = 5 * 60_000;
 const FROZEN_REQUEST_RULES = `# PageRoot AI Request Rules
 
 - Read the frozen files in input-manifest.json readOrder before editing.
@@ -76,24 +81,20 @@ function normalizedPath(value) {
 function samePath(left, right) {
   const first = normalizedPath(left);
   const second = normalizedPath(right);
-  if (process.platform === "darwin" || process.platform === "win32") {
-    return first.toLocaleLowerCase("en-US")
-      === second.toLocaleLowerCase("en-US");
-  }
+  // Do not infer a case-insensitive filesystem from the operating-system
+  // name. macOS can use either case-sensitive or case-insensitive APFS; on a
+  // case-sensitive volume `A.html` and `a.html` are different user files.
+  // Exact lexical comparison is intentionally fail-closed on a differently
+  // cased alias. Existing managed paths are additionally tied to their file
+  // identity before they can be rebound.
   return first === second;
 }
 
 function pathInside(root, candidate, { allowRoot = false } = {}) {
   const resolvedRoot = normalizedPath(root);
   const resolvedCandidate = normalizedPath(candidate);
-  const comparableRoot = process.platform === "darwin" || process.platform === "win32"
-    ? resolvedRoot.toLocaleLowerCase("en-US")
-    : resolvedRoot;
-  const comparableCandidate = process.platform === "darwin" || process.platform === "win32"
-    ? resolvedCandidate.toLocaleLowerCase("en-US")
-    : resolvedCandidate;
-  if (allowRoot && comparableRoot === comparableCandidate) return true;
-  return comparableCandidate.startsWith(`${comparableRoot}${path.sep}`);
+  if (allowRoot && resolvedRoot === resolvedCandidate) return true;
+  return resolvedCandidate.startsWith(`${resolvedRoot}${path.sep}`);
 }
 
 // A lexical `..` check is only the first half of managed-path validation. A
@@ -325,6 +326,45 @@ function isObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+function assertExactObjectKeys(value, keys, label, code = "INVALID_SCHEMA_RECORD") {
+  if (
+    !isObject(value)
+    || keys.some((key) => !Object.hasOwn(value, key))
+    || Object.keys(value).some((key) => !keys.includes(key))
+  ) {
+    throw new ProjectFileRepositoryError(
+      code,
+      `${label} does not match its v4 schema contract.`,
+    );
+  }
+  return value;
+}
+
+function assertObjectKeysWithOptional(value, requiredKeys, optionalKeys, label, code) {
+  if (
+    !isObject(value)
+    || requiredKeys.some((key) => !Object.hasOwn(value, key))
+    || Object.keys(value).some((key) => ![...requiredKeys, ...optionalKeys].includes(key))
+  ) {
+    throw new ProjectFileRepositoryError(
+      code,
+      `${label} does not match its v4 schema contract.`,
+    );
+  }
+  return value;
+}
+
+function assertTimestamp(value, label, code = "INVALID_SCHEMA_RECORD") {
+  if (
+    typeof value !== "string"
+    || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/u.test(value)
+    || Number.isNaN(Date.parse(value))
+  ) {
+    throw new ProjectFileRepositoryError(code, `${label} must be an RFC 3339 timestamp.`);
+  }
+  return value;
+}
+
 function copyFileIdentity(information) {
   return {
     device: String(information.dev),
@@ -336,9 +376,16 @@ function copyFileIdentity(information) {
 function assertFileIdentity(value, label) {
   if (
     !isObject(value)
-    || !String(value.device || "")
-    || !String(value.inode || "")
-    || !Number.isFinite(Number(value.birthtimeMs))
+    || Object.keys(value).some((key) => !["device", "inode", "birthtimeMs"].includes(key))
+    || !Object.hasOwn(value, "device")
+    || !Object.hasOwn(value, "inode")
+    || !Object.hasOwn(value, "birthtimeMs")
+    || typeof value.device !== "string"
+    || !value.device
+    || typeof value.inode !== "string"
+    || !value.inode
+    || typeof value.birthtimeMs !== "number"
+    || !Number.isFinite(value.birthtimeMs)
     || Number(value.birthtimeMs) < 0
   ) {
     throw new ProjectFileRepositoryError(
@@ -349,7 +396,7 @@ function assertFileIdentity(value, label) {
   return {
     device: String(value.device),
     inode: String(value.inode),
-    birthtimeMs: Number(value.birthtimeMs),
+    birthtimeMs: value.birthtimeMs,
   };
 }
 
@@ -690,13 +737,7 @@ function emptyRegistry(clock) {
 }
 
 function assertRegistryTimestamp(value, label) {
-  if (!value || Number.isNaN(Date.parse(value))) {
-    throw new ProjectFileRepositoryError(
-      "INVALID_REGISTRY",
-      label + " must be an RFC 3339 timestamp.",
-    );
-  }
-  return value;
+  return assertTimestamp(value, label, "INVALID_REGISTRY");
 }
 
 function assertRegistryProjectRecord(projectId, record) {
@@ -749,6 +790,15 @@ function assertPendingImportRecord(projectId, record) {
 function assertRegistry(registry) {
   if (
     !isObject(registry)
+    || Object.keys(registry).some((key) => ![
+      "schemaVersion",
+      "updatedAt",
+      "projects",
+      "pendingImports",
+    ].includes(key))
+    || !["schemaVersion", "updatedAt", "projects", "pendingImports"].every(
+      (key) => Object.hasOwn(registry, key),
+    )
     || registry.schemaVersion !== PROJECT_FILE_SCHEMA_VERSION
     || !isObject(registry.projects)
     || !isObject(registry.pendingImports)
@@ -771,7 +821,19 @@ function assertRegistry(registry) {
 }
 
 function assertProjectIdentity(project) {
-  if (!isObject(project) || project.schemaVersion !== PROJECT_FILE_SCHEMA_VERSION) {
+  if (
+    !isObject(project)
+    || Object.keys(project).some((key) => ![
+      "schemaVersion",
+      "projectId",
+      "documentId",
+      "createdAt",
+    ].includes(key))
+    || !["schemaVersion", "projectId", "documentId", "createdAt"].every(
+      (key) => Object.hasOwn(project, key),
+    )
+    || project.schemaVersion !== PROJECT_FILE_SCHEMA_VERSION
+  ) {
     throw new ProjectFileRepositoryError(
       "UNSUPPORTED_PROJECT_SCHEMA",
       "project.json is not a supported PageRoot project identity.",
@@ -779,14 +841,108 @@ function assertProjectIdentity(project) {
   }
   assertId(project.projectId, PROJECT_ID, "projectId");
   assertId(project.documentId, DOCUMENT_ID, "documentId");
-  if (!project.createdAt || Number.isNaN(Date.parse(project.createdAt))) {
-    throw new ProjectFileRepositoryError("INVALID_PROJECT_IDENTITY", "project.json has no valid createdAt.");
-  }
+  assertTimestamp(project.createdAt, "project.json createdAt", "INVALID_PROJECT_IDENTITY");
   return project;
 }
 
+function assertManifestVersionEntry(version) {
+  assertExactObjectKeys(version, [
+    "versionId",
+    "ordinal",
+    "basedOnVersionId",
+    "previousVersionId",
+    "contentSha256",
+    "snapshotRelativePath",
+    "sourceRequestId",
+    "sourceCandidateId",
+    "createdAt",
+  ], "A Version entry", "INVALID_MANIFEST");
+  assertId(version.versionId, VERSION_ID, "versionId");
+  if (
+    !Number.isSafeInteger(version.ordinal)
+    || version.ordinal < 1
+    || version.versionId !== versionId(version.ordinal)
+    || !SHA256.test(String(version.contentSha256 || ""))
+    || ![null, "string"].includes(
+      version.sourceRequestId === null ? null : typeof version.sourceRequestId,
+    )
+    || ![null, "string"].includes(
+      version.sourceCandidateId === null ? null : typeof version.sourceCandidateId,
+    )
+  ) {
+    throw new ProjectFileRepositoryError("INVALID_MANIFEST", "A Version entry is inconsistent.");
+  }
+  if (version.basedOnVersionId !== null) {
+    assertId(version.basedOnVersionId, VERSION_ID, "basedOnVersionId");
+  }
+  if (version.previousVersionId !== null) {
+    assertId(version.previousVersionId, VERSION_ID, "previousVersionId");
+  }
+  ensureRelativePath(version.snapshotRelativePath, "snapshotRelativePath");
+  assertTimestamp(version.createdAt, "Version createdAt", "INVALID_MANIFEST");
+  return version;
+}
+
+function assertManifestWorkingCopyEntry(workingCopy) {
+  assertExactObjectKeys(workingCopy, [
+    "workingCopyId",
+    "versionId",
+    "basedOnVersionId",
+    "sourceRelativePath",
+    "preferredFileStem",
+    "preferredExtension",
+    "stateRelativePath",
+    "fileIdentity",
+  ], "A Working Copy entry", "INVALID_MANIFEST");
+  assertId(workingCopy.workingCopyId, WORKING_COPY_ID, "workingCopyId");
+  assertId(workingCopy.versionId, VERSION_ID, "versionId");
+  assertId(workingCopy.basedOnVersionId, VERSION_ID, "basedOnVersionId");
+  const sourceRelativePath = topLevelHtmlRelativePath(
+    workingCopy.sourceRelativePath,
+    "sourceRelativePath",
+  );
+  assertPreferredFileStem(workingCopy.preferredFileStem);
+  if (!HTML_EXTENSIONS.has(workingCopy.preferredExtension)) {
+    throw new ProjectFileRepositoryError(
+      "INVALID_MANIFEST",
+      "A Working Copy preferred extension is invalid.",
+    );
+  }
+  const stateRelativePath = ensureRelativePath(
+    workingCopy.stateRelativePath,
+    "stateRelativePath",
+  );
+  if (!stateRelativePath.startsWith("working-copies/") || !stateRelativePath.endsWith(".json")) {
+    throw new ProjectFileRepositoryError(
+      "INVALID_MANIFEST",
+      "A Working Copy state path is invalid.",
+    );
+  }
+  assertFileIdentity(workingCopy.fileIdentity, "Working Copy fileIdentity");
+  return { workingCopy, sourceRelativePath };
+}
+
 function assertManifest(manifest, project) {
-  if (!isObject(manifest) || manifest.schemaVersion !== PROJECT_FILE_SCHEMA_VERSION) {
+  if (
+    !isObject(manifest)
+    || Object.keys(manifest).some((key) => ![
+      "schemaVersion",
+      "projectId",
+      "documentId",
+      "latestOfficialVersionId",
+      "versions",
+      "workingCopies",
+    ].includes(key))
+    || ![
+      "schemaVersion",
+      "projectId",
+      "documentId",
+      "latestOfficialVersionId",
+      "versions",
+      "workingCopies",
+    ].every((key) => Object.hasOwn(manifest, key))
+    || manifest.schemaVersion !== PROJECT_FILE_SCHEMA_VERSION
+  ) {
     throw new ProjectFileRepositoryError(
       "UNSUPPORTED_MANIFEST_SCHEMA",
       "manifest.json is not a supported PageRoot manifest.",
@@ -797,6 +953,8 @@ function assertManifest(manifest, project) {
     || manifest.documentId !== project.documentId
     || !Array.isArray(manifest.versions)
     || !Array.isArray(manifest.workingCopies)
+    || manifest.versions.length === 0
+    || manifest.workingCopies.length === 0
   ) {
     throw new ProjectFileRepositoryError(
       "MANIFEST_IDENTITY_MISMATCH",
@@ -804,22 +962,17 @@ function assertManifest(manifest, project) {
     );
   }
   const versionIds = new Set();
+  const versionOrdinals = new Set();
   for (const version of manifest.versions) {
-    if (!isObject(version)) {
-      throw new ProjectFileRepositoryError("INVALID_MANIFEST", "A Version entry is invalid.");
-    }
-    assertId(version.versionId, VERSION_ID, "versionId");
+    assertManifestVersionEntry(version);
     if (
-      !Number.isSafeInteger(version.ordinal)
-      || version.ordinal < 1
-      || version.versionId !== versionId(version.ordinal)
-      || versionIds.has(version.versionId)
-      || !SHA256.test(String(version.contentSha256 || ""))
+      versionIds.has(version.versionId)
+      || versionOrdinals.has(version.ordinal)
     ) {
       throw new ProjectFileRepositoryError("INVALID_MANIFEST", "A Version entry is inconsistent.");
     }
     versionIds.add(version.versionId);
-    ensureRelativePath(version.snapshotRelativePath, "snapshotRelativePath");
+    versionOrdinals.add(version.ordinal);
   }
   if (!versionIds.has(manifest.latestOfficialVersionId)) {
     throw new ProjectFileRepositoryError("INVALID_MANIFEST", "latestOfficialVersionId is unknown.");
@@ -827,10 +980,7 @@ function assertManifest(manifest, project) {
   const workingCopyIds = new Set();
   const workingCopyPaths = new Set();
   for (const workingCopy of manifest.workingCopies) {
-    if (!isObject(workingCopy)) {
-      throw new ProjectFileRepositoryError("INVALID_MANIFEST", "A Working Copy entry is invalid.");
-    }
-    assertId(workingCopy.workingCopyId, WORKING_COPY_ID, "workingCopyId");
+    const { sourceRelativePath } = assertManifestWorkingCopyEntry(workingCopy);
     if (
       workingCopyIds.has(workingCopy.workingCopyId)
       || !versionIds.has(workingCopy.basedOnVersionId)
@@ -838,10 +988,6 @@ function assertManifest(manifest, project) {
     ) {
       throw new ProjectFileRepositoryError("INVALID_MANIFEST", "A Working Copy entry is inconsistent.");
     }
-    const sourceRelativePath = topLevelHtmlRelativePath(
-      workingCopy.sourceRelativePath,
-      "sourceRelativePath",
-    );
     if (workingCopyPaths.has(sourceRelativePath)) {
       throw new ProjectFileRepositoryError(
         "INVALID_MANIFEST",
@@ -849,22 +995,32 @@ function assertManifest(manifest, project) {
       );
     }
     workingCopyPaths.add(sourceRelativePath);
-    assertPreferredFileStem(workingCopy.preferredFileStem);
-    if (!HTML_EXTENSIONS.has(String(workingCopy.preferredExtension || "").toLowerCase())) {
-      throw new ProjectFileRepositoryError(
-        "INVALID_MANIFEST",
-        "A Working Copy preferred extension is invalid.",
-      );
-    }
-    ensureRelativePath(workingCopy.stateRelativePath, "stateRelativePath");
-    assertFileIdentity(workingCopy.fileIdentity, "Working Copy fileIdentity");
     workingCopyIds.add(workingCopy.workingCopyId);
   }
   return manifest;
 }
 
 function assertRuntime(runtime, project, manifest) {
-  if (!isObject(runtime) || runtime.schemaVersion !== PROJECT_FILE_SCHEMA_VERSION) {
+  if (
+    !isObject(runtime)
+    || Object.keys(runtime).some((key) => ![
+      "schemaVersion",
+      "projectId",
+      "documentId",
+      "activeWorkingCopyId",
+      "activeRequest",
+      "activeCandidateId",
+    ].includes(key))
+    || ![
+      "schemaVersion",
+      "projectId",
+      "documentId",
+      "activeWorkingCopyId",
+      "activeRequest",
+      "activeCandidateId",
+    ].every((key) => Object.hasOwn(runtime, key))
+    || runtime.schemaVersion !== PROJECT_FILE_SCHEMA_VERSION
+  ) {
     throw new ProjectFileRepositoryError(
       "UNSUPPORTED_RUNTIME_SCHEMA",
       "runtime-state.json is not a supported PageRoot runtime state.",
@@ -878,16 +1034,38 @@ function assertRuntime(runtime, project, manifest) {
   }
   if (
     runtime.activeWorkingCopyId !== null
-    && !manifest.workingCopies.some(
-      (workingCopy) => workingCopy.workingCopyId === runtime.activeWorkingCopyId,
+    && (
+      !WORKING_COPY_ID.test(String(runtime.activeWorkingCopyId || ""))
+      || !manifest.workingCopies.some(
+        (workingCopy) => workingCopy.workingCopyId === runtime.activeWorkingCopyId,
+      )
     )
   ) {
     throw new ProjectFileRepositoryError("INVALID_RUNTIME", "activeWorkingCopyId is unknown.");
   }
+  if (runtime.activeCandidateId !== null) assertCandidateId(runtime.activeCandidateId);
   if (runtime.activeRequest !== null) {
     const active = runtime.activeRequest;
     if (
       !isObject(active)
+      || Object.keys(active).some((key) => ![
+        "requestId",
+        "candidateId",
+        "attemptId",
+        "status",
+        "inputManifestSha256",
+        "candidateOutputSha256",
+        "candidateRecordSha256",
+      ].includes(key))
+      || ![
+        "requestId",
+        "candidateId",
+        "attemptId",
+        "status",
+        "inputManifestSha256",
+        "candidateOutputSha256",
+        "candidateRecordSha256",
+      ].every((key) => Object.hasOwn(active, key))
       || !SAFE_REQUEST_ID.test(active.requestId)
       || !SAFE_REQUEST_ID.test(active.attemptId)
       || !["processing", "pending-review"].includes(active.status)
@@ -1036,26 +1214,316 @@ function assessedCandidate(baseHtml, outputHtml, clock) {
 }
 
 function assertCandidateAssessment(assessment) {
+  const requiredContinuityKeys = [
+    "status",
+    "evidencePoints",
+    "sameTitle",
+    "text",
+    "anchors",
+    "classes",
+    "assets",
+    "baseVisibleTextLength",
+    "outputVisibleTextLength",
+    "baseBodyElementCount",
+    "outputBodyElementCount",
+    "baseParseErrorCount",
+    "outputParseErrorCount",
+  ];
+  const assertOverlap = (overlap) => {
+    assertExactObjectKeys(overlap, ["score", "shared", "base", "output"], "Candidate overlap", "CANDIDATE_VALIDATION_INVALID");
+    if (
+      !(overlap.score === null || (typeof overlap.score === "number" && overlap.score >= 0 && overlap.score <= 1))
+      || ![overlap.shared, overlap.base, overlap.output].every(
+        (value) => Number.isSafeInteger(value) && value >= 0,
+      )
+    ) {
+      throw new ProjectFileRepositoryError(
+        "CANDIDATE_VALIDATION_INVALID",
+        "Candidate overlap evidence is invalid.",
+      );
+    }
+  };
   if (
     !isObject(assessment)
+    || Object.keys(assessment).some((key) => ![
+      "schemaVersion",
+      "status",
+      "issueCodes",
+      "health",
+      "continuity",
+      "assessedAt",
+    ].includes(key))
+    || ![
+      "schemaVersion",
+      "status",
+      "issueCodes",
+      "health",
+      "continuity",
+      "assessedAt",
+    ].every((key) => Object.hasOwn(assessment, key))
     || assessment.schemaVersion !== "1.0.0"
     || !["ready", "attention"].includes(assessment.status)
     || !Array.isArray(assessment.issueCodes)
     || assessment.issueCodes.some((value) => typeof value !== "string" || !value)
+    || new Set(assessment.issueCodes).size !== assessment.issueCodes.length
     || !isObject(assessment.health)
+    || Object.keys(assessment.health).some((key) => ![
+      "completeDocument",
+      "bodyHasContent",
+    ].includes(key))
+    || !["completeDocument", "bodyHasContent"].every(
+      (key) => Object.hasOwn(assessment.health, key),
+    )
     || typeof assessment.health.completeDocument !== "boolean"
     || typeof assessment.health.bodyHasContent !== "boolean"
     || !isObject(assessment.continuity)
+    || Object.keys(assessment.continuity).some(
+      (key) => !requiredContinuityKeys.includes(key),
+    )
+    || !requiredContinuityKeys.every((key) => Object.hasOwn(assessment.continuity, key))
     || !["related", "uncertain"].includes(assessment.continuity.status)
-    || !assessment.assessedAt
-    || Number.isNaN(Date.parse(assessment.assessedAt))
+    || !Number.isSafeInteger(assessment.continuity.evidencePoints)
+    || assessment.continuity.evidencePoints < 0
+    || typeof assessment.continuity.sameTitle !== "boolean"
+    || ![
+      assessment.continuity.baseVisibleTextLength,
+      assessment.continuity.outputVisibleTextLength,
+      assessment.continuity.baseBodyElementCount,
+      assessment.continuity.outputBodyElementCount,
+      assessment.continuity.baseParseErrorCount,
+      assessment.continuity.outputParseErrorCount,
+    ].every((value) => Number.isSafeInteger(value) && value >= 0)
   ) {
     throw new ProjectFileRepositoryError(
       "CANDIDATE_VALIDATION_INVALID",
       "Candidate validation evidence is invalid.",
     );
   }
+  for (const key of ["text", "anchors", "classes", "assets"]) {
+    assertOverlap(assessment.continuity[key]);
+  }
+  assertTimestamp(assessment.assessedAt, "Candidate assessedAt", "CANDIDATE_VALIDATION_INVALID");
   return assessment;
+}
+
+function assertWorkingCopyState(state, project, workingCopy) {
+  assertExactObjectKeys(state, [
+    "schemaVersion",
+    "projectId",
+    "documentId",
+    "workingCopyId",
+    "basedOnVersionId",
+    "baseSha256",
+    "currentSha256",
+    "differsFromBase",
+    "draftId",
+    "draftRelativePath",
+    "draftSha256",
+    "draftRevision",
+    "saveState",
+    "lastPersistedRevision",
+    "lastSavedAt",
+    "lastOpenedAt",
+  ], "Working Copy state", "INVALID_WORKING_COPY_STATE");
+  if (
+    state.schemaVersion !== PROJECT_FILE_SCHEMA_VERSION
+    || state.projectId !== project.projectId
+    || state.documentId !== project.documentId
+    || state.workingCopyId !== workingCopy.workingCopyId
+    || state.basedOnVersionId !== workingCopy.basedOnVersionId
+    || !SHA256.test(String(state.baseSha256 || ""))
+    || !SHA256.test(String(state.currentSha256 || ""))
+    || typeof state.differsFromBase !== "boolean"
+    || state.differsFromBase !== (state.currentSha256 !== state.baseSha256)
+    || typeof state.draftId !== "string"
+    || !state.draftId
+    || state.draftRelativePath !== draftRelativePathFor(workingCopy)
+    || (state.draftSha256 !== null && !SHA256.test(String(state.draftSha256 || "")))
+    || !Number.isSafeInteger(state.draftRevision)
+    || state.draftRevision < 0
+    || !["saved", "saving", "failed"].includes(state.saveState)
+    || !Number.isSafeInteger(state.lastPersistedRevision)
+    || state.lastPersistedRevision < 0
+  ) {
+    throw new ProjectFileRepositoryError(
+      "INVALID_WORKING_COPY_STATE",
+      "Working Copy state does not match its v4 schema contract.",
+    );
+  }
+  assertTimestamp(state.lastSavedAt, "Working Copy lastSavedAt", "INVALID_WORKING_COPY_STATE");
+  assertTimestamp(state.lastOpenedAt, "Working Copy lastOpenedAt", "INVALID_WORKING_COPY_STATE");
+  return state;
+}
+
+function assertCandidateRecord(candidate, loaded) {
+  assertObjectKeysWithOptional(candidate, [
+    "schemaVersion",
+    "candidateId",
+    "projectId",
+    "documentId",
+    "requestId",
+    "attemptId",
+    "proposedVersionId",
+    "proposedVersionOrdinal",
+    "basedOnVersionId",
+    "previousVersionId",
+    "sourceWorkingCopyId",
+    "expectedSourceSha256",
+    "outputRelativePath",
+    "outputSha256",
+    "assessment",
+    "status",
+    "createdAt",
+  ], ["rejectedAt", "promotedAt", "promotedVersionId"], "Candidate", "INVALID_CANDIDATE");
+  if (
+    candidate.schemaVersion !== PROJECT_FILE_SCHEMA_VERSION
+    || candidate.projectId !== loaded.project.projectId
+    || candidate.documentId !== loaded.project.documentId
+    || !SAFE_REQUEST_ID.test(String(candidate.requestId || ""))
+    || !SAFE_REQUEST_ID.test(String(candidate.attemptId || ""))
+    || !Number.isSafeInteger(candidate.proposedVersionOrdinal)
+    || candidate.proposedVersionOrdinal < 2
+    || candidate.proposedVersionId !== versionId(candidate.proposedVersionOrdinal)
+    || candidate.outputRelativePath !== `requests/${candidate.requestId}/candidate.html`
+    || !SHA256.test(String(candidate.expectedSourceSha256 || ""))
+    || !SHA256.test(String(candidate.outputSha256 || ""))
+    || !["pending-review", "rejected", "promoted"].includes(candidate.status)
+  ) {
+    throw new ProjectFileRepositoryError(
+      "INVALID_CANDIDATE",
+      "Candidate does not match its v4 schema contract.",
+    );
+  }
+  assertCandidateId(candidate.candidateId);
+  assertId(candidate.proposedVersionId, VERSION_ID, "Candidate proposedVersionId");
+  assertId(candidate.basedOnVersionId, VERSION_ID, "Candidate basedOnVersionId");
+  assertId(candidate.previousVersionId, VERSION_ID, "Candidate previousVersionId");
+  assertId(candidate.sourceWorkingCopyId, WORKING_COPY_ID, "Candidate sourceWorkingCopyId");
+  assertCandidateAssessment(candidate.assessment);
+  assertTimestamp(candidate.createdAt, "Candidate createdAt", "INVALID_CANDIDATE");
+  if (Object.hasOwn(candidate, "rejectedAt")) {
+    assertTimestamp(candidate.rejectedAt, "Candidate rejectedAt", "INVALID_CANDIDATE");
+  }
+  if (Object.hasOwn(candidate, "promotedAt")) {
+    assertTimestamp(candidate.promotedAt, "Candidate promotedAt", "INVALID_CANDIDATE");
+  }
+  if (Object.hasOwn(candidate, "promotedVersionId")) {
+    assertId(candidate.promotedVersionId, VERSION_ID, "Candidate promotedVersionId");
+  }
+  if (candidate.status === "rejected" && !Object.hasOwn(candidate, "rejectedAt")) {
+    throw new ProjectFileRepositoryError("INVALID_CANDIDATE", "Rejected Candidate lacks rejectedAt.");
+  }
+  if (
+    candidate.status === "promoted"
+    && (!Object.hasOwn(candidate, "promotedAt") || candidate.promotedVersionId !== candidate.proposedVersionId)
+  ) {
+    throw new ProjectFileRepositoryError("INVALID_CANDIDATE", "Promoted Candidate lacks its Version identity.");
+  }
+  return candidate;
+}
+
+function assertPromotionTransaction(transaction) {
+  assertObjectKeysWithOptional(transaction, [
+    "schemaVersion",
+    "kind",
+    "state",
+    "transactionId",
+    "projectId",
+    "documentId",
+    "candidateId",
+    "requestId",
+    "versionId",
+    "versionOrdinal",
+    "candidateOutputSha256",
+    "basedOnVersionId",
+    "previousVersionId",
+    "finalWorkingCopyRelativePath",
+    "preparedWorkingCopyRelativePath",
+    "preferredFileStem",
+    "preferredExtension",
+    "pathAllocationOrdinal",
+    "preparedWorkingCopyFileIdentity",
+    "workingCopy",
+    "createdAt",
+  ], [
+    "snapshotCreatedAt",
+    "reallocatedAt",
+    "workingCopyPreparedAt",
+    "workingCopyCreatedAt",
+    "manifestCommittedAt",
+    "completedAt",
+  ], "Promotion transaction", "PROMOTION_TRANSACTION_INVALID");
+  if (
+    transaction.schemaVersion !== PROJECT_FILE_SCHEMA_VERSION
+    || transaction.kind !== "promotion"
+    || ![
+      "prepared",
+      "snapshot-created",
+      "working-copy-prepared",
+      "working-copy-created",
+      "manifest-committed",
+      "completed",
+    ].includes(transaction.state)
+    || !SAFE_REQUEST_ID.test(String(transaction.requestId || ""))
+    || !Number.isSafeInteger(transaction.versionOrdinal)
+    || transaction.versionOrdinal < 2
+    || transaction.versionId !== versionId(transaction.versionOrdinal)
+    || transaction.transactionId !== `promote_${transaction.candidateId}`
+    || !SHA256.test(String(transaction.candidateOutputSha256 || ""))
+    || !Number.isSafeInteger(transaction.pathAllocationOrdinal)
+    || transaction.pathAllocationOrdinal < 0
+  ) {
+    throw new ProjectFileRepositoryError(
+      "PROMOTION_TRANSACTION_INVALID",
+      "Promotion transaction does not match its v4 schema contract.",
+    );
+  }
+  assertCandidateId(transaction.candidateId);
+  assertId(transaction.projectId, PROJECT_ID, "Promotion projectId");
+  assertId(transaction.documentId, DOCUMENT_ID, "Promotion documentId");
+  assertId(transaction.versionId, VERSION_ID, "Promotion versionId");
+  assertId(transaction.basedOnVersionId, VERSION_ID, "Promotion basedOnVersionId");
+  assertId(transaction.previousVersionId, VERSION_ID, "Promotion previousVersionId");
+  topLevelHtmlRelativePath(transaction.finalWorkingCopyRelativePath);
+  assertPreferredFileStem(transaction.preferredFileStem);
+  if (!HTML_EXTENSIONS.has(transaction.preferredExtension)) {
+    throw new ProjectFileRepositoryError(
+      "PROMOTION_TRANSACTION_INVALID",
+      "The Promotion preferred extension is invalid.",
+    );
+  }
+  if (
+    transaction.preparedWorkingCopyRelativePath
+      !== `transactions/${transaction.transactionId}/prepared-working-copy${transaction.preferredExtension}`
+  ) {
+    throw new ProjectFileRepositoryError(
+      "PROMOTION_TRANSACTION_INVALID",
+      "The Promotion prepared Working Copy path is invalid.",
+    );
+  }
+  if (transaction.preparedWorkingCopyFileIdentity !== null) {
+    assertFileIdentity(
+      transaction.preparedWorkingCopyFileIdentity,
+      "Promotion prepared Working Copy fileIdentity",
+    );
+  }
+  if (transaction.workingCopy !== null) {
+    assertManifestWorkingCopyEntry(transaction.workingCopy);
+  }
+  for (const key of [
+    "createdAt",
+    "snapshotCreatedAt",
+    "reallocatedAt",
+    "workingCopyPreparedAt",
+    "workingCopyCreatedAt",
+    "manifestCommittedAt",
+    "completedAt",
+  ]) {
+    if (Object.hasOwn(transaction, key)) {
+      assertTimestamp(transaction[key], `Promotion ${key}`, "PROMOTION_TRANSACTION_INVALID");
+    }
+  }
+  return transaction;
 }
 
 export class ProjectFileRepositoryError extends Error {
@@ -1170,15 +1638,65 @@ export class ProjectFileRepository {
     html,
     expectedSourceSha256,
   } = {}) {
-    return this.#serial(() => this.#createCandidate({
-      target,
-      requestId,
-      attemptId,
-      candidateId,
-      html,
-      expectedSourceSha256,
-      inputManifestSha256: null,
-    }));
+    // Kept as a compatibility convenience for callers that formerly used
+    // createCandidate(). It is now strictly a completion of an already
+    // frozen Request; it can never create a Candidate without the immutable
+    // Request bundle and its runtime manifest seal.
+    return this.#serial(async () => {
+      const loaded = await this.#resolveMutationTarget(target);
+      const requestPath = path.join(
+        requestRootPath(loaded.paths, requestId),
+        "request.json",
+      );
+      const request = await readJsonFile(requestPath, "request.json", {
+        projectRootPath: loaded.paths.projectRootPath,
+      });
+      if (!request) {
+        throw new ProjectFileRepositoryError(
+          "REQUEST_REQUIRED",
+          "Candidate creation requires a frozen processing Request.",
+        );
+      }
+      this.#assertRequestRecord(request, loaded, { requestId, attemptId });
+      if (
+        expectedSourceSha256 !== undefined
+        && expectedSourceSha256 !== null
+        && assertSha256(expectedSourceSha256, "expectedSourceSha256")
+          !== request.expectedSourceSha256
+      ) {
+        throw new ProjectFileRepositoryError(
+          "REQUEST_SOURCE_MISMATCH",
+          "Candidate creation must use the frozen Request source hash.",
+        );
+      }
+      if (candidateId !== null && candidateId !== request.candidateId) {
+        throw new ProjectFileRepositoryError(
+          "REQUEST_CANDIDATE_MISMATCH",
+          "Candidate creation must use the frozen Request Candidate id.",
+        );
+      }
+      const completed = await this.#completeRequest({
+        target,
+        requestId,
+        attemptId,
+        html,
+      });
+      if (!completed.candidate) {
+        if (completed.request?.error?.code) {
+          throw new ProjectFileRepositoryError(
+            completed.request.error.code,
+            completed.request.error.message || "The Candidate could not be prepared.",
+            { issueCodes: completed.request.error.issueCodes || [] },
+          );
+        }
+        throw new ProjectFileRepositoryError(
+          "CANDIDATE_NOT_CREATED",
+          "The Request completed without an adoptable Candidate.",
+        );
+      }
+      const refreshed = await this.#resolveMutationTarget(target);
+      return this.#readCandidateForLoaded(refreshed, completed.candidate.candidateId);
+    });
   }
 
   async rejectCandidate({ target, candidateId } = {}) {
@@ -1298,7 +1816,7 @@ export class ProjectFileRepository {
     });
   }
 
-  async updateProjectNotes({ target, content } = {}) {
+  async updateProjectNotes({ target, content, expectedSha256 } = {}) {
     return this.#serial(async () => {
       const loaded = await this.#resolveMutationTarget(target);
       if (typeof content !== "string" || !content.trim()) {
@@ -1317,10 +1835,32 @@ export class ProjectFileRepository {
           "PROJECT.md was not found.",
         );
       }
+      const expected = assertSha256(expectedSha256, "expected PROJECT.md sha256");
       const previous = await readFile(filePath);
+      const actual = sha256(previous);
+      if (actual !== expected) {
+        throw new ProjectFileRepositoryError(
+          "PROJECT_FILE_CONFLICT",
+          "PROJECT.md changed outside PageRoot before this edit could be saved.",
+          { expectedSha256: expected, actualSha256: actual },
+        );
+      }
       const next = Buffer.from(content, "utf8");
       const updated = !previous.equals(next);
       if (updated) {
+        await this.#hit("project-notes-before-write", { filePath });
+        const immediatelyBeforeWrite = await readFile(filePath);
+        const immediatelyBeforeWriteSha256 = sha256(immediatelyBeforeWrite);
+        if (immediatelyBeforeWriteSha256 !== expected) {
+          throw new ProjectFileRepositoryError(
+            "PROJECT_FILE_CONFLICT",
+            "PROJECT.md changed outside PageRoot before publication.",
+            {
+              expectedSha256: expected,
+              actualSha256: immediatelyBeforeWriteSha256,
+            },
+          );
+        }
         await atomicWriteProjectFile(
           loaded.paths.projectRootPath,
           filePath,
@@ -1340,9 +1880,123 @@ export class ProjectFileRepository {
   }
 
   async #serial(operation) {
-    const current = this.#tail.then(operation, operation);
+    const run = () => this.#withSharedMutationLock(operation);
+    const current = this.#tail.then(run, run);
     this.#tail = current.catch(() => {});
     return current;
+  }
+
+  async #withSharedMutationLock(operation) {
+    await ensureDirectory(this.#projectsRoot);
+    await this.#assertProjectsRoot();
+    const lockPath = path.join(this.#projectsRoot, REPOSITORY_LOCK_FILE_NAME);
+    const deadline = Date.now() + REPOSITORY_LOCK_TIMEOUT_MS;
+    let handle = null;
+    let identity = null;
+    while (!handle) {
+      try {
+        handle = await open(lockPath, "wx", 0o600);
+        const information = await lstat(lockPath);
+        if (information.isSymbolicLink() || !information.isFile()) {
+          throw new ProjectFileRepositoryError(
+            "UNSAFE_REPOSITORY_LOCK",
+            "The shared PageRoot repository lock is not a regular file.",
+          );
+        }
+        identity = copyFileIdentity(information);
+        await handle.writeFile(jsonText({
+          pid: process.pid,
+          acquiredAt: new Date().toISOString(),
+        }));
+        await handle.sync();
+        await this.#hit("repository-lock-acquired", { lockPath });
+      } catch (cause) {
+        if (handle) {
+          await handle.close().catch(() => {});
+          handle = null;
+          if (identity) {
+            const information = await lstat(lockPath).catch((error) => {
+              if (error?.code === "ENOENT") return null;
+              throw error;
+            });
+            if (information && sameFileIdentity(identity, copyFileIdentity(information))) {
+              await unlink(lockPath).catch(() => {});
+              await syncDirectory(this.#projectsRoot);
+            }
+          }
+          identity = null;
+          throw cause;
+        }
+        if (cause?.code !== "EEXIST") throw cause;
+        const information = await lstat(lockPath).catch((error) => {
+          if (error?.code === "ENOENT") return null;
+          throw error;
+        });
+        if (!information) continue;
+        if (information.isSymbolicLink() || !information.isFile()) {
+          throw new ProjectFileRepositoryError(
+            "UNSAFE_REPOSITORY_LOCK",
+            "The shared PageRoot repository lock is not a regular file.",
+          );
+        }
+        const age = Date.now() - Number(information.mtimeMs || 0);
+        if (age >= REPOSITORY_LOCK_STALE_MS) {
+          let ownerPid = null;
+          try {
+            const owner = JSON.parse(await readFile(lockPath, "utf8"));
+            if (Number.isSafeInteger(owner?.pid) && owner.pid > 0) ownerPid = owner.pid;
+          } catch {
+            // An expired malformed lock has no live owner we can verify.
+          }
+          let ownerIsAlive = false;
+          if (ownerPid !== null) {
+            try {
+              process.kill(ownerPid, 0);
+              ownerIsAlive = true;
+            } catch (error) {
+              ownerIsAlive = error?.code !== "ESRCH";
+            }
+          }
+          if (!ownerIsAlive) {
+            const beforeRemoval = copyFileIdentity(information);
+            const latest = await lstat(lockPath).catch((error) => {
+              if (error?.code === "ENOENT") return null;
+              throw error;
+            });
+            if (latest && sameFileIdentity(beforeRemoval, copyFileIdentity(latest))) {
+              await unlink(lockPath).catch((error) => {
+                if (error?.code !== "ENOENT") throw error;
+              });
+              await syncDirectory(this.#projectsRoot);
+              continue;
+            }
+          }
+        }
+        if (Date.now() >= deadline) {
+          throw new ProjectFileRepositoryError(
+            "REPOSITORY_LOCK_TIMEOUT",
+            "Another PageRoot process is still updating this project directory.",
+            { lockPath },
+          );
+        }
+        await new Promise((resolve) => setTimeout(resolve, REPOSITORY_LOCK_RETRY_MS));
+      }
+    }
+    try {
+      return await operation();
+    } finally {
+      await handle.close().catch(() => {});
+      const information = await lstat(lockPath).catch((error) => {
+        if (error?.code === "ENOENT") return null;
+        throw error;
+      });
+      if (information && identity && sameFileIdentity(identity, copyFileIdentity(information))) {
+        await unlink(lockPath).catch((error) => {
+          if (error?.code !== "ENOENT") throw error;
+        });
+        await syncDirectory(this.#projectsRoot);
+      }
+    }
   }
 
   async #hit(name, details = {}) {
@@ -1400,6 +2054,13 @@ export class ProjectFileRepository {
         projectRootPath: loaded.paths.projectRootPath,
       })
       : null;
+    if (workingCopy && !state) {
+      throw new ProjectFileRepositoryError(
+        "WORKING_COPY_STATE_NOT_FOUND",
+        "The managed Working Copy has no v4 state record.",
+      );
+    }
+    if (workingCopy && state) assertWorkingCopyState(state, loaded.project, workingCopy);
     let draft = workingCopy && state
       ? await readJsonFile(
         draftPathForState(loaded.paths, workingCopy, state),
@@ -1564,6 +2225,13 @@ export class ProjectFileRepository {
       "Working Copy state",
       { projectRootPath: loaded.paths.projectRootPath },
     );
+    if (!workingState) {
+      throw new ProjectFileRepositoryError(
+        "WORKING_COPY_STATE_NOT_FOUND",
+        "The active Working Copy has no v4 state record.",
+      );
+    }
+    assertWorkingCopyState(workingState, loaded.project, loaded.workingCopy);
     const frozenRequest = {
       ...(isObject(request) ? structuredClone(request) : {}),
       // The V4 protocol keeps the same source-preservation contract as V3.
@@ -2162,6 +2830,13 @@ export class ProjectFileRepository {
     const state = await readJsonFile(statePath, "Working Copy state", {
       projectRootPath: loaded.paths.projectRootPath,
     });
+    if (!state) {
+      throw new ProjectFileRepositoryError(
+        "WORKING_COPY_STATE_NOT_FOUND",
+        "The active Working Copy has no v4 state record.",
+      );
+    }
+    assertWorkingCopyState(state, loaded.project, loaded.workingCopy);
     const draftPath = draftPathForState(loaded.paths, loaded.workingCopy, state);
     const persisted = await readJsonFile(draftPath, "Working Copy draft", {
       projectRootPath: loaded.paths.projectRootPath,
@@ -2287,6 +2962,45 @@ export class ProjectFileRepository {
       projectRootPath: loaded.paths.projectRootPath,
     });
     this.#assertRequestRecord(record, loaded, { requestId, attemptId });
+    if (record.status === "processing") {
+      const active = loaded.runtime.activeRequest;
+      if (
+        active?.requestId !== record.requestId
+        || active?.attemptId !== record.attemptId
+        || active.status !== "processing"
+        || active.candidateId !== null
+        || active.inputManifestSha256 !== record.inputManifestSha256
+        || active.candidateOutputSha256 !== null
+        || active.candidateRecordSha256 !== null
+        || loaded.runtime.activeCandidateId !== null
+      ) {
+        throw new ProjectFileRepositoryError(
+          "FROZEN_REQUEST_BUNDLE_MISMATCH",
+          "The processing Request no longer matches its runtime manifest anchor.",
+        );
+      }
+      if (!record.inputManifestRelativePath) {
+        throw new ProjectFileRepositoryError(
+          "FROZEN_REQUEST_BUNDLE_MISMATCH",
+          "The processing Request has no frozen input manifest path.",
+        );
+      }
+      const inputManifest = await readJsonFileWithSha256(
+        resolveRelative(
+          loaded.paths.controlRoot,
+          record.inputManifestRelativePath,
+          "request input manifest path",
+        ),
+        "request input manifest",
+        { projectRootPath: loaded.paths.projectRootPath },
+      );
+      if (!inputManifest || inputManifest.sha256 !== record.inputManifestSha256) {
+        throw new ProjectFileRepositoryError(
+          "FROZEN_REQUEST_BUNDLE_MISMATCH",
+          "The frozen Request input manifest changed after submission.",
+        );
+      }
+    }
     const outputHtml = String(html || "");
     requireCompleteHtml(outputHtml, "Candidate HTML");
     const outputSha256 = sha256(Buffer.from(outputHtml, "utf8"));
@@ -3147,7 +3861,14 @@ export class ProjectFileRepository {
         "Working Copy state",
         { projectRootPath: loaded.paths.projectRootPath },
       );
-      if (state?.currentSha256 === source.sha256) candidates.push(workingCopy);
+      if (!state) {
+        throw new ProjectFileRepositoryError(
+          "WORKING_COPY_STATE_NOT_FOUND",
+          "A managed Working Copy has no v4 state record.",
+        );
+      }
+      assertWorkingCopyState(state, loaded.project, workingCopy);
+      if (state.currentSha256 === source.sha256) candidates.push(workingCopy);
     }
     if (candidates.length > 1) {
       throw new ProjectFileRepositoryError(
@@ -3484,6 +4205,13 @@ export class ProjectFileRepository {
     const currentState = await readJsonFile(statePath, "Working Copy state", {
       projectRootPath: loaded.paths.projectRootPath,
     });
+    if (!currentState) {
+      throw new ProjectFileRepositoryError(
+        "WORKING_COPY_STATE_NOT_FOUND",
+        "The active Working Copy has no v4 state record.",
+      );
+    }
+    assertWorkingCopyState(currentState, loaded.project, loaded.workingCopy);
     const nextState = {
       ...currentState,
       schemaVersion: PROJECT_FILE_SCHEMA_VERSION,
@@ -3560,10 +4288,59 @@ export class ProjectFileRepository {
     if (!SAFE_REQUEST_ID.test(request)) {
       throw new ProjectFileRepositoryError("INVALID_REQUEST_ID", "requestId is invalid.");
     }
+    const attempt = String(attemptId || "attempt_001");
+    const requestRoot = requestRootPath(loaded.paths, request);
+    const requestRecord = await readJsonFile(
+      path.join(requestRoot, "request.json"),
+      "request.json",
+      { projectRootPath: loaded.paths.projectRootPath },
+    );
+    if (!requestRecord) {
+      throw new ProjectFileRepositoryError(
+        "REQUEST_REQUIRED",
+        "Candidate creation requires a frozen processing Request.",
+      );
+    }
+    this.#assertRequestRecord(requestRecord, loaded, { requestId: request, attemptId: attempt });
+    if (requestRecord.status !== "processing") {
+      throw new ProjectFileRepositoryError(
+        "REQUEST_NOT_PROCESSING",
+        "Only a processing Request can create its Candidate.",
+      );
+    }
+    const activeRequest = loaded.runtime.activeRequest;
+    if (
+      activeRequest?.requestId !== requestRecord.requestId
+      || activeRequest?.attemptId !== requestRecord.attemptId
+      || activeRequest.status !== "processing"
+      || activeRequest.candidateId !== null
+      || activeRequest.inputManifestSha256 !== requestRecord.inputManifestSha256
+      || activeRequest.candidateOutputSha256 !== null
+      || activeRequest.candidateRecordSha256 !== null
+      || loaded.runtime.activeCandidateId !== null
+    ) {
+      throw new ProjectFileRepositoryError(
+        "FROZEN_REQUEST_BUNDLE_MISMATCH",
+        "Candidate creation requires the processing Request runtime seal.",
+      );
+    }
     const expected = assertSha256(expectedSourceSha256, "expectedSourceSha256");
-    const manifestAnchor = inputManifestSha256 === null
-      ? null
-      : assertSha256(inputManifestSha256, "inputManifestSha256");
+    const manifestAnchor = assertSha256(inputManifestSha256, "inputManifestSha256");
+    if (
+      requestRecord.expectedSourceSha256 !== expected
+      || requestRecord.inputManifestSha256 !== manifestAnchor
+      || requestRecord.candidateId !== candidateId
+      || !isObject(candidateIdentity)
+      || candidateIdentity.proposedVersionId !== requestRecord.proposedVersionId
+      || Number(candidateIdentity.proposedVersionOrdinal) !== Number(requestRecord.proposedVersionOrdinal)
+      || candidateIdentity.basedOnVersionId !== requestRecord.basedOnVersionId
+      || candidateIdentity.previousVersionId !== requestRecord.previousVersionId
+    ) {
+      throw new ProjectFileRepositoryError(
+        "REQUEST_CANDIDATE_IDENTITY_MISMATCH",
+        "Candidate creation must use the frozen Request identity and manifest seal.",
+      );
+    }
     if (!allowSourceDivergence && loaded.source.sha256 !== expected) {
       throw new ProjectFileRepositoryError(
         "SOURCE_HASH_CONFLICT",
@@ -3574,34 +4351,24 @@ export class ProjectFileRepository {
     requireCompleteHtml(candidateHtml, "Candidate HTML");
     const outputBuffer = Buffer.from(candidateHtml, "utf8");
     const outputSha256 = sha256(outputBuffer);
-    const latest = loaded.manifest.versions.find(
-      (version) => version.versionId === loaded.manifest.latestOfficialVersionId,
-    );
-    const planned = candidateIdentity && isObject(candidateIdentity)
-      ? {
-          proposedVersionId: assertId(
-            candidateIdentity.proposedVersionId,
-            VERSION_ID,
-            "proposedVersionId",
-          ),
-          proposedVersionOrdinal: Number(candidateIdentity.proposedVersionOrdinal),
-          basedOnVersionId: assertId(
-            candidateIdentity.basedOnVersionId,
-            VERSION_ID,
-            "basedOnVersionId",
-          ),
-          previousVersionId: assertId(
-            candidateIdentity.previousVersionId,
-            VERSION_ID,
-            "previousVersionId",
-          ),
-        }
-      : {
-          proposedVersionId: versionId(latest.ordinal + 1),
-          proposedVersionOrdinal: latest.ordinal + 1,
-          basedOnVersionId: loaded.workingCopy.basedOnVersionId,
-          previousVersionId: latest.versionId,
-        };
+    const planned = {
+      proposedVersionId: assertId(
+        candidateIdentity.proposedVersionId,
+        VERSION_ID,
+        "proposedVersionId",
+      ),
+      proposedVersionOrdinal: Number(candidateIdentity.proposedVersionOrdinal),
+      basedOnVersionId: assertId(
+        candidateIdentity.basedOnVersionId,
+        VERSION_ID,
+        "basedOnVersionId",
+      ),
+      previousVersionId: assertId(
+        candidateIdentity.previousVersionId,
+        VERSION_ID,
+        "previousVersionId",
+      ),
+    };
     if (
       !Number.isSafeInteger(planned.proposedVersionOrdinal)
       || planned.proposedVersionOrdinal < 2
@@ -3609,9 +4376,8 @@ export class ProjectFileRepository {
     ) {
       throw new ProjectFileRepositoryError("INVALID_CANDIDATE", "Candidate Version identity is invalid.");
     }
-    const id = candidateId ? candidateId : randomId("candidate");
+    const id = candidateId;
     assertCandidateId(id);
-    const requestRoot = requestRootPath(loaded.paths, request);
     await ensureProjectDirectory(
       loaded.paths.projectRootPath,
       requestRoot,
@@ -3625,6 +4391,7 @@ export class ProjectFileRepository {
     const existingCandidate = existingCandidateRecord?.value || null;
     let candidateRecordSha256;
     if (existingCandidate) {
+      assertCandidateRecord(existingCandidate, loaded);
       if (
         existingCandidate.candidateId !== id
         || existingCandidate.outputSha256 !== outputSha256
@@ -3640,7 +4407,7 @@ export class ProjectFileRepository {
       const active = loaded.runtime.activeRequest;
       if (
         active?.requestId !== request
-        || active?.attemptId !== String(attemptId || "attempt_001")
+        || active?.attemptId !== attempt
         || active.status !== "pending-review"
         || active.candidateId !== id
         || active.inputManifestSha256 !== manifestAnchor
@@ -3670,7 +4437,7 @@ export class ProjectFileRepository {
         projectId: loaded.project.projectId,
         documentId: loaded.project.documentId,
         requestId: request,
-        attemptId: String(attemptId || "attempt_001"),
+        attemptId: attempt,
         proposedVersionId: planned.proposedVersionId,
         proposedVersionOrdinal: planned.proposedVersionOrdinal,
         basedOnVersionId: planned.basedOnVersionId,
@@ -3683,6 +4450,7 @@ export class ProjectFileRepository {
         status: "pending-review",
         createdAt: nowIso(this.#clock),
       };
+      assertCandidateRecord(candidateRecord, loaded);
       const candidateRecordBuffer = Buffer.from(jsonText(candidateRecord), "utf8");
       candidateRecordSha256 = sha256(candidateRecordBuffer);
       await atomicWriteProjectFile(
@@ -3695,7 +4463,7 @@ export class ProjectFileRepository {
     loaded.runtime.activeRequest = {
       requestId: request,
       candidateId: id,
-      attemptId: String(attemptId || "attempt_001"),
+      attemptId: attempt,
       status: "pending-review",
       inputManifestSha256: manifestAnchor,
       candidateOutputSha256: outputSha256,
@@ -3744,7 +4512,7 @@ export class ProjectFileRepository {
     ) {
       throw new ProjectFileRepositoryError("CANDIDATE_NOT_FOUND", "The requested Candidate was not found.");
     }
-    assertCandidateAssessment(candidate.assessment);
+    assertCandidateRecord(candidate, loaded);
     const outputPath = resolveRelative(
       loaded.paths.controlRoot,
       candidate.outputRelativePath,
@@ -3927,6 +4695,7 @@ export class ProjectFileRepository {
   }
 
   async #writePromotionTransaction(loaded, transactionRoot, transaction) {
+    assertPromotionTransaction(transaction);
     await atomicWriteProjectJson(
       loaded.paths.projectRootPath,
       path.join(transactionRoot, "transaction.json"),
@@ -4057,6 +4826,7 @@ export class ProjectFileRepository {
   }
 
   async #continuePromotion(loaded, candidateState, transactionRoot, transaction) {
+    assertPromotionTransaction(transaction);
     if (
       !isObject(transaction)
       || transaction.schemaVersion !== PROJECT_FILE_SCHEMA_VERSION
@@ -4081,7 +4851,7 @@ export class ProjectFileRepository {
     }
     topLevelHtmlRelativePath(transaction.finalWorkingCopyRelativePath);
     assertPreferredFileStem(transaction.preferredFileStem);
-    if (!HTML_EXTENSIONS.has(String(transaction.preferredExtension || "").toLowerCase())) {
+    if (!HTML_EXTENSIONS.has(transaction.preferredExtension)) {
       throw new ProjectFileRepositoryError(
         "PROMOTION_TRANSACTION_INVALID",
         "The Promotion preferred extension is invalid.",
@@ -4521,6 +5291,7 @@ export class ProjectFileRepository {
         "The Working Copy state is missing during save recovery.",
       );
     }
+    assertWorkingCopyState(currentState, loaded.project, workingCopy);
     if (source.sha256 === target) {
       if (artifacts) {
         await Promise.all([
@@ -4721,7 +5492,9 @@ export class ProjectFileRepository {
         "promotion transaction",
         { projectRootPath: loaded.paths.projectRootPath },
       );
-      if (!transaction || transaction.kind !== "promotion" || transaction.state === "completed") continue;
+      if (!transaction) continue;
+      assertPromotionTransaction(transaction);
+      if (transaction.state === "completed") continue;
       const candidatePath = path.join(
         loaded.paths.requestsRoot,
         transaction.requestId,
@@ -4731,6 +5504,7 @@ export class ProjectFileRepository {
         projectRootPath: loaded.paths.projectRootPath,
       });
       if (!candidate) continue;
+      assertCandidateRecord(candidate, loaded);
       const outputPath = resolveRelative(
         loaded.paths.controlRoot,
         candidate.outputRelativePath,

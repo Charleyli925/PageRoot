@@ -1,0 +1,16 @@
+{
+  "schemaVersion": "4.0.0",
+  "projectId": "project_0123456789abcdef",
+  "documentId": "doc_fedcba9876543210",
+  "activeWorkingCopyId": "work_ver_0001",
+  "activeRequest": {
+    "requestId": "req_fixture",
+    "candidateId": null,
+    "attemptId": "attempt_001",
+    "status": "processing",
+    "inputManifestSha256": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "candidateOutputSha256": null,
+    "candidateRecordSha256": null
+  },
+  "activeCandidateId": null
+}

@@ -60,6 +60,31 @@ async function importSource(fixtureValue, name = "原文件.html", content = htm
   return { sourcePath, buffer, target: imported.target };
 }
 
+async function completeFrozenCandidate(value, {
+  target,
+  requestId,
+  html: candidateHtml,
+  expectedSourceSha256,
+  attemptId = "attempt_001",
+} = {}) {
+  const request = await value.repository.prepareRequest({
+    target,
+    requestId,
+    attemptId,
+    expectedSourceSha256,
+    request: { summary: `Candidate ${requestId}` },
+    prompt: `# Candidate ${requestId}\n`,
+  });
+  return value.repository.createCandidate({
+    target,
+    requestId,
+    attemptId,
+    candidateId: request.candidateId,
+    html: candidateHtml,
+    expectedSourceSha256,
+  });
+}
+
 test("atomic import creates V1 facts once and ordinary saves never create a Version", async (t) => {
   const value = await fixture(t);
   const imported = await importSource(value, "原文件.htm");
@@ -101,13 +126,86 @@ test("atomic import creates V1 facts once and ordinary saves never create a Vers
   assert.equal(await readFile(imported.sourcePath, "utf8"), original.toString("utf8"));
 });
 
+test("Candidate creation cannot bypass a frozen Request", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "request-required.html");
+  await assert.rejects(
+    value.repository.createCandidate({
+      target: imported.target,
+      requestId: "req_missing",
+      candidateId: "candidate_missing_0001",
+      html: html("must not become a candidate"),
+      expectedSourceSha256: imported.target.sourceSha256,
+    }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "REQUEST_REQUIRED",
+  );
+  const manifest = await json(path.join(imported.target.projectRootPath, ".pageroot", "manifest.json"));
+  assert.deepEqual(manifest.versions.map((version) => version.versionId), ["ver_0001"]);
+});
+
+test("shared repository lock preserves concurrent Registry updates across instances", async (t) => {
+  const value = await fixture(t);
+  const firstPath = path.join(value.sources, "first.html");
+  const secondPath = path.join(value.sources, "second.html");
+  const firstHtml = html("first concurrent import");
+  const secondHtml = html("second concurrent import");
+  await Promise.all([
+    writeFile(firstPath, firstHtml, "utf8"),
+    writeFile(secondPath, secondHtml, "utf8"),
+  ]);
+  let releaseFirstLock;
+  const firstLockReleased = new Promise((resolve) => {
+    releaseFirstLock = resolve;
+  });
+  let reportFirstLock;
+  const firstLockEntered = new Promise((resolve) => {
+    reportFirstLock = resolve;
+  });
+  let held = false;
+  const firstRepository = new ProjectFileRepository({
+    projectsRoot: value.projects,
+    failpoint: async (name) => {
+      if (name === "repository-lock-acquired" && !held) {
+        held = true;
+        reportFirstLock();
+        await firstLockReleased;
+      }
+      return false;
+    },
+  });
+  const secondRepository = new ProjectFileRepository({ projectsRoot: value.projects });
+  const firstImport = firstRepository.importExternal({
+    sourcePath: firstPath,
+    expectedSourceSha256: sha256(Buffer.from(firstHtml, "utf8")),
+  });
+  await firstLockEntered;
+  let secondCompleted = false;
+  const secondImport = secondRepository.importExternal({
+    sourcePath: secondPath,
+    expectedSourceSha256: sha256(Buffer.from(secondHtml, "utf8")),
+  }).then((result) => {
+    secondCompleted = true;
+    return result;
+  });
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  assert.equal(secondCompleted, false);
+  releaseFirstLock();
+  const [first, second] = await Promise.all([firstImport, secondImport]);
+  assert.notEqual(first.target.projectId, second.target.projectId);
+  const registry = await json(path.join(value.projects, ".pageroot-registry.json"));
+  assert.deepEqual(Object.keys(registry.projects).sort(), [
+    first.target.projectId,
+    second.target.projectId,
+  ].sort());
+});
+
 test("a Candidate is not a Version until adoption, rejection consumes no ordinal, and promotion is idempotent", async (t) => {
   const value = await fixture(t);
   const imported = await importSource(value);
-  const firstCandidate = await value.repository.createCandidate({
+  const firstCandidate = await completeFrozenCandidate(value, {
     target: imported.target,
     requestId: "req_rejected",
-    candidateId: "candidate_rejected_0001",
     html: html("rejected candidate"),
     expectedSourceSha256: imported.target.sourceSha256,
   });
@@ -126,10 +224,9 @@ test("a Candidate is not a Version until adoption, rejection consumes no ordinal
   assert.equal(rejected.status, "rejected");
   assert.equal(rejected.latestOfficialVersionId, "ver_0001");
 
-  const secondCandidate = await value.repository.createCandidate({
+  const secondCandidate = await completeFrozenCandidate(value, {
     target: imported.target,
     requestId: "req_adopted",
-    candidateId: "candidate_adopted_0001",
     html: html("adopted candidate"),
     expectedSourceSha256: imported.target.sourceSha256,
   });
@@ -157,10 +254,9 @@ test("blocked Candidate validation never reserves a Version", async (t) => {
   const value = await fixture(t);
   const imported = await importSource(value);
   await assert.rejects(
-    value.repository.createCandidate({
+    completeFrozenCandidate(value, {
       target: imported.target,
       requestId: "req_empty_candidate",
-      candidateId: "candidate_empty_0001",
       html: "<!doctype html><html><head><title>empty</title></head><body></body></html>",
       expectedSourceSha256: imported.target.sourceSha256,
     }),
@@ -178,10 +274,9 @@ test("blocked Candidate validation never reserves a Version", async (t) => {
 test("runtime authority seals Candidate record and output after review begins", async (t) => {
   const value = await fixture(t);
   const imported = await importSource(value);
-  const candidate = await value.repository.createCandidate({
+  const candidate = await completeFrozenCandidate(value, {
     target: imported.target,
     requestId: "req_candidate_authority",
-    candidateId: "candidate_authority_0001",
     html: html("reviewed candidate"),
     expectedSourceSha256: imported.target.sourceSha256,
   });
@@ -263,10 +358,9 @@ test("request recovery promotes a prepared Candidate only when its runtime seal 
 test("a Candidate cannot be adopted after its frozen Working Copy changes", async (t) => {
   const value = await fixture(t);
   const imported = await importSource(value);
-  const candidate = await value.repository.createCandidate({
+  const candidate = await completeFrozenCandidate(value, {
     target: imported.target,
     requestId: "req_stale_candidate",
-    candidateId: "candidate_stale_0001",
     html: html("candidate from V1"),
     expectedSourceSha256: imported.target.sourceSha256,
   });
@@ -452,10 +546,9 @@ test("save restores an external write through an already-open Working Copy handl
 test("promotion rechecks the Candidate base before manifest publication and recovery", async (t) => {
   const value = await fixture(t);
   const imported = await importSource(value, "promotion-boundary.html");
-  const candidate = await value.repository.createCandidate({
+  const candidate = await completeFrozenCandidate(value, {
     target: imported.target,
     requestId: "req_promotion_boundary",
-    candidateId: "candidate_promotion_boundary_0001",
     html: html("candidate based on V1"),
     expectedSourceSha256: imported.target.sourceSha256,
   });
@@ -525,6 +618,29 @@ test("exact path, rather than equal bytes, determines the opened document", asyn
   assert.equal(reopenedFirst.exactSourcePath, first.target.exactSourcePath);
   assert.equal(reopenedSecond.projectId, second.target.projectId);
   assert.equal(reopenedSecond.exactSourcePath, second.target.exactSourcePath);
+});
+
+test("case-distinct Working Copy paths never rebind on a case-sensitive volume", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "Case.html");
+  const lowerCasePath = path.join(imported.target.projectRootPath, "case-V1.html");
+  await writeFile(lowerCasePath, html("different lower-case file"), "utf8");
+  const originalInformation = await lstat(imported.target.exactSourcePath);
+  const lowerInformation = await lstat(lowerCasePath);
+  if (
+    String(originalInformation.dev) === String(lowerInformation.dev)
+    && String(originalInformation.ino) === String(lowerInformation.ino)
+  ) {
+    t.skip("the current volume is case-insensitive");
+    return;
+  }
+
+  assert.equal(await value.repository.resolveOpenTarget({ sourcePath: lowerCasePath }), null);
+  const original = await value.repository.resolveOpenTarget({
+    sourcePath: imported.target.exactSourcePath,
+  });
+  assert.equal(original.workingCopyId, imported.target.workingCopyId);
+  assert.equal(original.exactSourcePath, imported.target.exactSourcePath);
 });
 
 test("same-parent root and Working Copy renames preserve identity; moves outside stop writes until return", async (t) => {
@@ -781,10 +897,9 @@ test("Registry and managed control paths reject symlinks", async (t) => {
 test("promotion uses the latest Working Copy name and allocates around file, directory and symlink collisions", async (t) => {
   const value = await fixture(t);
   const imported = await importSource(value, "A.html");
-  const candidate = await value.repository.createCandidate({
+  const candidate = await completeFrozenCandidate(value, {
     target: imported.target,
     requestId: "req_renamed_promotion",
-    candidateId: "candidate_renamed_promotion_0001",
     html: html("promoted from latest name"),
     expectedSourceSha256: imported.target.sourceSha256,
   });
@@ -995,6 +1110,81 @@ test("request recovery keeps the original runtime input-manifest anchor", async 
   );
 });
 
+test("Candidate completion rejects a Request whose manifest anchor no longer matches runtime", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "request-anchor-candidate.html");
+  const prepared = await value.repository.prepareRequest({
+    target: imported.target,
+    requestId: "req_anchor_candidate",
+    attemptId: "attempt_001",
+    expectedSourceSha256: imported.target.sourceSha256,
+    request: { summary: "sealed candidate" },
+    prompt: "# sealed candidate\n",
+  });
+  const requestPath = path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "requests",
+    prepared.requestId,
+    "request.json",
+  );
+  const request = await json(requestPath);
+  request.inputManifestSha256 = sha256(Buffer.from("replaced manifest", "utf8"));
+  await writeFile(requestPath, JSON.stringify(request), "utf8");
+
+  await assert.rejects(
+    value.repository.completeRequest({
+      target: imported.target,
+      requestId: prepared.requestId,
+      attemptId: prepared.attemptId,
+      html: html("must not become a candidate"),
+    }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "FROZEN_REQUEST_BUNDLE_MISMATCH",
+  );
+  await assert.rejects(
+    readFile(path.join(
+      imported.target.projectRootPath,
+      ".pageroot",
+      "requests",
+      prepared.requestId,
+      "candidate.json",
+    )),
+    (error) => error?.code === "ENOENT",
+  );
+});
+
+test("Candidate completion rejects a changed frozen input manifest", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "request-manifest-bytes.html");
+  const prepared = await value.repository.prepareRequest({
+    target: imported.target,
+    requestId: "req_manifest_bytes",
+    attemptId: "attempt_001",
+    expectedSourceSha256: imported.target.sourceSha256,
+    request: { summary: "manifest bytes" },
+    prompt: "# manifest bytes\n",
+  });
+  const inputManifestPath = path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "requests",
+    prepared.requestId,
+    "input-manifest.json",
+  );
+  await writeFile(inputManifestPath, JSON.stringify({ changed: true }), "utf8");
+  await assert.rejects(
+    value.repository.completeRequest({
+      target: imported.target,
+      requestId: prepared.requestId,
+      attemptId: prepared.attemptId,
+      html: html("must not trust changed manifest"),
+    }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "FROZEN_REQUEST_BUNDLE_MISMATCH",
+  );
+});
+
 test("a Request freezes comments, targets and project rules alongside its exact HTML", async (t) => {
   const value = await fixture(t);
   const imported = await importSource(value, "frozen-request.html");
@@ -1004,9 +1194,11 @@ test("a Request freezes comments, targets and project rules alongside its exact 
     expectedSourceSha256: imported.target.sourceSha256,
     editRevision: 1,
   });
+  const initialNotes = await value.repository.readProjectNotes({ target: saved.target });
   await value.repository.updateProjectNotes({
     target: saved.target,
     content: "# 项目规则\n\n只修改首页标题。\n",
+    expectedSha256: initialNotes.sha256,
   });
   const comments = [{
     commentId: "comment_001",
@@ -1070,13 +1262,63 @@ test("a Request freezes comments, targets and project rules alongside its exact 
   );
   assert.equal(prepared.inputManifestSha256, sha256(await readFile(inputManifestPath)));
 
+  const notesBeforeExternalUpdate = await value.repository.readProjectNotes({
+    target: saved.target,
+  });
   await value.repository.updateProjectNotes({
     target: saved.target,
     content: "# 已修改的项目规则\n",
+    expectedSha256: notesBeforeExternalUpdate.sha256,
   });
   assert.deepEqual(await readFile(annotationsPath), frozenAnnotations);
   assert.deepEqual(await readFile(projectRulesPath), frozenProjectRules);
   assert.deepEqual(await readFile(changeRequestPath), frozenChangeRequest);
+});
+
+test("PROJECT.md rejects a stale editor write and preserves external bytes", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "project-notes-conflict.html");
+  const before = await value.repository.readProjectNotes({ target: imported.target });
+  const projectNotesPath = path.join(imported.target.projectRootPath, "PROJECT.md");
+  const externalContent = "# 外部项目规则\n\n不要被旧编辑覆盖。\n";
+  await writeFile(projectNotesPath, externalContent, "utf8");
+  await assert.rejects(
+    value.repository.updateProjectNotes({
+      target: imported.target,
+      content: "# 过期界面内容\n",
+      expectedSha256: before.sha256,
+    }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "PROJECT_FILE_CONFLICT",
+  );
+  assert.equal(await readFile(projectNotesPath, "utf8"), externalContent);
+});
+
+test("PROJECT.md rechecks its hash at the publication boundary", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "project-notes-boundary.html");
+  const before = await value.repository.readProjectNotes({ target: imported.target });
+  const projectNotesPath = path.join(imported.target.projectRootPath, "PROJECT.md");
+  const externalContent = "# 外部边界修改\n";
+  const repository = new ProjectFileRepository({
+    projectsRoot: value.projects,
+    failpoint: async (name) => {
+      if (name === "project-notes-before-write") {
+        await writeFile(projectNotesPath, externalContent, "utf8");
+      }
+      return false;
+    },
+  });
+  await assert.rejects(
+    repository.updateProjectNotes({
+      target: imported.target,
+      content: "# PageRoot 修改\n",
+      expectedSha256: before.sha256,
+    }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "PROJECT_FILE_CONFLICT",
+  );
+  assert.equal(await readFile(projectNotesPath, "utf8"), externalContent);
 });
 
 test("a copied project remains external and its first import creates an independent V1", async (t) => {
@@ -1144,6 +1386,26 @@ test("a damaged v4 record is ignored and its HTML imports as a fresh V1", async 
     "manifest.json",
   ));
   assert.deepEqual(manifest.versions.map((version) => version.versionId), ["ver_0001"]);
+});
+
+test("unknown v4 manifest fields lose managed authority instead of reviving legacy semantics", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "strict-manifest.html");
+  const manifestPath = path.join(imported.target.projectRootPath, ".pageroot", "manifest.json");
+  const manifest = await json(manifestPath);
+  manifest.fileNaming = { stem: "legacy" };
+  await writeFile(manifestPath, JSON.stringify(manifest), "utf8");
+
+  assert.equal(
+    await value.repository.resolveOpenTarget({ sourcePath: imported.target.exactSourcePath }),
+    null,
+  );
+  const reimported = await value.repository.importExternal({
+    sourcePath: imported.target.exactSourcePath,
+    expectedSourceSha256: imported.target.sourceSha256,
+  });
+  assert.equal(reimported.imported, true);
+  assert.notEqual(reimported.target.projectId, imported.target.projectId);
 });
 
 test("external import creates a byte-preserving V1 for every relative resource form", async (t) => {
@@ -1375,10 +1637,9 @@ test("request finalization creates a reviewable Candidate only, and manifest pat
 test("a replaced private promotion file fails recovery without deleting user bytes", async (t) => {
   const value = await fixture(t);
   const imported = await importSource(value, "promotion-tamper.html");
-  const candidate = await value.repository.createCandidate({
+  const candidate = await completeFrozenCandidate(value, {
     target: imported.target,
     requestId: "req_tampered_promotion",
-    candidateId: "candidate_tampered_promotion_0001",
     html: html("candidate before user replacement"),
     expectedSourceSha256: imported.target.sourceSha256,
   });
@@ -1433,10 +1694,9 @@ test("promotion fault recovery leaves exactly one formal Version and regular fil
   ]) {
     const value = await fixture(t);
     const imported = await importSource(value);
-    const candidate = await value.repository.createCandidate({
+    const candidate = await completeFrozenCandidate(value, {
       target: imported.target,
       requestId: "req_fault",
-      candidateId: "candidate_fault_0001",
       html: html("fault recovery candidate"),
       expectedSourceSha256: imported.target.sourceSha256,
     });

@@ -1,0 +1,43 @@
+{
+  "schemaVersion": "4.0.0",
+  "candidateId": "candidate_fixture_0001",
+  "projectId": "project_0123456789abcdef",
+  "documentId": "doc_fedcba9876543210",
+  "requestId": "req_fixture",
+  "attemptId": "attempt_001",
+  "proposedVersionId": "ver_0002",
+  "proposedVersionOrdinal": 2,
+  "basedOnVersionId": "ver_0001",
+  "previousVersionId": "ver_0001",
+  "sourceWorkingCopyId": "work_ver_0001",
+  "expectedSourceSha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "outputRelativePath": "requests/req_fixture/candidate.html",
+  "outputSha256": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "assessment": {
+    "schemaVersion": "1.0.0",
+    "status": "ready",
+    "issueCodes": [],
+    "health": {
+      "completeDocument": true,
+      "bodyHasContent": true
+    },
+    "continuity": {
+      "status": "related",
+      "evidencePoints": 4,
+      "sameTitle": true,
+      "text": { "score": 1, "shared": 1, "base": 1, "output": 1 },
+      "anchors": { "score": null, "shared": 0, "base": 0, "output": 0 },
+      "classes": { "score": null, "shared": 0, "base": 0, "output": 0 },
+      "assets": { "score": null, "shared": 0, "base": 0, "output": 0 },
+      "baseVisibleTextLength": 1,
+      "outputVisibleTextLength": 1,
+      "baseBodyElementCount": 1,
+      "outputBodyElementCount": 1,
+      "baseParseErrorCount": 0,
+      "outputParseErrorCount": 0
+    },
+    "assessedAt": "2026-08-14T00:00:00.000Z"
+  },
+  "status": "pending-review",
+  "createdAt": "2026-08-14T00:00:00.000Z"
+}

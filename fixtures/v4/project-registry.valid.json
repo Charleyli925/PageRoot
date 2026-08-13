@@ -1,0 +1,16 @@
+{
+  "schemaVersion": "4.0.0",
+  "updatedAt": "2026-08-14T00:00:00.000Z",
+  "projects": {
+    "project_0123456789abcdef": {
+      "registeredProjectRootPath": "/Users/example/Documents/PageRoot/项目/fixture",
+      "rootFileIdentity": {
+        "device": "1",
+        "inode": "2",
+        "birthtimeMs": 1
+      },
+      "updatedAt": "2026-08-14T00:00:00.000Z"
+    }
+  },
+  "pendingImports": {}
+}

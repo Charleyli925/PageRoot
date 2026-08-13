@@ -1,0 +1,35 @@
+{
+  "schemaVersion": "4.0.0",
+  "projectId": "project_0123456789abcdef",
+  "documentId": "doc_fedcba9876543210",
+  "latestOfficialVersionId": "ver_0001",
+  "versions": [
+    {
+      "versionId": "ver_0001",
+      "ordinal": 1,
+      "basedOnVersionId": null,
+      "previousVersionId": null,
+      "contentSha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "snapshotRelativePath": "versions/ver_0001/index.html",
+      "sourceRequestId": null,
+      "sourceCandidateId": null,
+      "createdAt": "2026-08-14T00:00:00.000Z"
+    }
+  ],
+  "workingCopies": [
+    {
+      "workingCopyId": "work_ver_0001",
+      "versionId": "ver_0001",
+      "basedOnVersionId": "ver_0001",
+      "sourceRelativePath": "fixture-V1.html",
+      "preferredFileStem": "fixture",
+      "preferredExtension": ".html",
+      "stateRelativePath": "working-copies/work_ver_0001.json",
+      "fileIdentity": {
+        "device": "1",
+        "inode": "3",
+        "birthtimeMs": 1
+      }
+    }
+  ]
+}

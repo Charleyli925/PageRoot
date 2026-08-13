@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "4.0.0",
+  "kind": "promotion",
+  "state": "prepared",
+  "transactionId": "promote_candidate_fixture_0001",
+  "projectId": "project_0123456789abcdef",
+  "documentId": "doc_fedcba9876543210",
+  "candidateId": "candidate_fixture_0001",
+  "requestId": "req_fixture",
+  "versionId": "ver_0002",
+  "versionOrdinal": 2,
+  "candidateOutputSha256": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "basedOnVersionId": "ver_0001",
+  "previousVersionId": "ver_0001",
+  "finalWorkingCopyRelativePath": "fixture-V2.html",
+  "preparedWorkingCopyRelativePath": "transactions/promote_candidate_fixture_0001/prepared-working-copy.html",
+  "preferredFileStem": "fixture",
+  "preferredExtension": ".html",
+  "pathAllocationOrdinal": 0,
+  "preparedWorkingCopyFileIdentity": null,
+  "workingCopy": null,
+  "createdAt": "2026-08-14T00:00:00.000Z"
+}

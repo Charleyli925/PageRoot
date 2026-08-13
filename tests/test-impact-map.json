@@ -852,7 +852,8 @@
       "patterns": [
         "^scripts/project-file-repository\\.mjs$",
         "^tests/project-file-(?:repository|schema)\\.test\\.mjs$",
-        "^schemas/(?:candidate|project-identity|project-manifest|project-registry|project-runtime-state|promotion-transaction|working-copy-state)\\.v4\\.schema\\.json$"
+        "^schemas/(?:candidate|project-identity|project-manifest|project-registry|project-runtime-state|promotion-transaction|working-copy-state)\\.v4\\.schema\\.json$",
+        "^fixtures/v4/.*\\.json$"
       ],
       "suites": ["ai-smoke"],
       "nodeTests": [
