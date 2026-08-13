@@ -848,6 +848,20 @@
       ]
     },
     {
+      "id": "project-file-lifecycle",
+      "patterns": [
+        "^scripts/project-file-(?:repository|finalizer)\\.mjs$",
+        "^tests/project-file-(?:repository|finalizer|bridge|schema)\\.test\\.mjs$"
+      ],
+      "suites": ["ai-smoke"],
+      "nodeTests": [
+        "tests/project-file-repository.test.mjs",
+        "tests/project-file-finalizer.test.mjs",
+        "tests/project-file-bridge.test.mjs",
+        "tests/project-file-schema.test.mjs"
+      ]
+    },
+    {
       "id": "bridge-lifecycle",
       "patterns": [
         "^scripts/(?:workspace-bridge|lifecycle-core|finalize-attempt|record-user-supplement|user-supplement-core|candidate-assessment(?:-decoder)?|scope-validator|html-source-parser|attachment-storage|product-contract|target-identity)\\.mjs$"
@@ -863,7 +877,8 @@
         "tests/product-contract.test.mjs",
         "tests/project-context-service.test.mjs",
         "tests/targeted-change-schema.test.mjs",
-        "tests/user-supplement.test.mjs"
+        "tests/user-supplement.test.mjs",
+        "tests/project-file-bridge.test.mjs"
       ]
     },
     {
@@ -892,7 +907,9 @@
         "tests/compatibility-decoders.test.mjs",
         "tests/targeted-change-schema.test.mjs",
         "tests/scope-validator.test.mjs",
-        "tests/workspace-bridge.test.mjs"
+        "tests/workspace-bridge.test.mjs",
+        "tests/project-file-schema.test.mjs",
+        "tests/project-file-repository.test.mjs"
       ]
     },
     {

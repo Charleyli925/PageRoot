@@ -114,6 +114,7 @@ const TASK_OWNER_CASES = [
       "tests/lifecycle-core.test.mjs",
       "tests/product-contract.test.mjs",
       "tests/project-context-service.test.mjs",
+      "tests/project-file-bridge.test.mjs",
       "tests/scope-validator.test.mjs",
       "tests/targeted-change-schema.test.mjs",
       "tests/user-supplement.test.mjs",
@@ -121,6 +122,18 @@ const TASK_OWNER_CASES = [
     ],
     suites: ["typecheck", "lint", "node-targeted", "build-desktop", "ai-smoke"],
     directOwners: ["tests/workspace-bridge.test.mjs"],
+    unrelatedOwners: ["tests/desktop-package.test.mjs", "tests/review-runtime-capture-owner.test.mjs"],
+  },
+  {
+    file: "scripts/project-file-repository.mjs",
+    nodeTests: [
+      "tests/project-file-bridge.test.mjs",
+      "tests/project-file-finalizer.test.mjs",
+      "tests/project-file-repository.test.mjs",
+      "tests/project-file-schema.test.mjs",
+    ],
+    suites: ["typecheck", "lint", "node-targeted", "build-desktop", "ai-smoke"],
+    directOwners: ["tests/project-file-repository.test.mjs"],
     unrelatedOwners: ["tests/desktop-package.test.mjs", "tests/review-runtime-capture-owner.test.mjs"],
   },
   {
