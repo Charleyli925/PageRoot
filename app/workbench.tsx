@@ -43,6 +43,7 @@ import type {
 } from "./components/HtmlCanvasEditor";
 import AboutPageRootDialog from "./components/AboutPageRootDialog";
 import CancelAiRunDialog from "./components/CancelAiRunDialog";
+import DuplicateProjectDialog from "./components/DuplicateProjectDialog";
 import HtmlInteractionPreview, {
   type HtmlInteractionPreviewHandle,
 } from "./components/HtmlInteractionPreview";
@@ -1075,6 +1076,9 @@ export default function Workbench() {
   const [workspaceIssue, setWorkspaceIssue] = useState<WorkspaceIssue | null>(null);
   const [cancelRunConfirmationKey, setCancelRunConfirmationKey] =
     useState<string | null>(null);
+  const [dismissedDuplicateProjectKey, setDismissedDuplicateProjectKey] =
+    useState<string | null>(null);
+  const [duplicateProjectResolving, setDuplicateProjectResolving] = useState(false);
   const [reviewPreparing, setReviewPreparing] = useState(false);
   const [readyReviewSession, setReadyReviewSession] =
     useState<ReadyReviewSession | null>(null);
@@ -1114,10 +1118,20 @@ export default function Workbench() {
           context: ProjectContext;
           projectRecordsPath: string | null;
           projectName: string | null;
+          imported?: boolean;
         }>;
         if (!workspaceController.matchesCurrentProjectContext(registrationEvent.context)) return;
         setProjectRecordsPath(registrationEvent.projectRecordsPath);
         if (registrationEvent.projectName) setProjectName(registrationEvent.projectName);
+        if (registrationEvent.imported) {
+          setToast({
+            title: "已建立托管项目",
+            message: "已创建 V1 工作文件；原始 HTML 保持不变。",
+            tone: "success",
+            disposition: "background-result",
+            dedupeKey: "project-file-imported",
+          });
+        }
         return;
       }
       if (event.type === "attachment-cleanup-failed") {
@@ -1484,6 +1498,7 @@ export default function Workbench() {
         lastModifiedAt?: unknown;
         events?: unknown;
         mutation?: HtmlCanvasMutation;
+        code?: unknown;
         message?: unknown;
         fatal?: unknown;
       }>;
@@ -1500,6 +1515,23 @@ export default function Workbench() {
               : editPropertyGroup(documentEvent.mutation.property),
           }, documentEvent.context?.projectId || undefined);
         }
+      }
+      if (
+        documentEvent.type === "document-persistence-failed"
+        && ["PROJECT_RELOCATION_REQUIRED", "WORKING_COPY_RELOCATION_REQUIRED"].includes(
+          String(documentEvent.code || ""),
+        )
+      ) {
+        setToast({
+          title: "项目已移动，修改仍安全保留",
+          message: "请选择移动后的项目 HTML；重新定位后会继续把当前未保存修改写入该项目。",
+          tone: "warning",
+          sticky: true,
+          disposition: "direct-action",
+          dedupeKey: "project-relocation-required",
+          action: { id: "retry-project-open", label: "定位项目" },
+        });
+        return;
       }
       if (
         [
@@ -3053,6 +3085,68 @@ export default function Workbench() {
       sourcePath: recentPath || null,
     });
   }, [workspaceController]);
+
+  const duplicateProjectPrompt = (() => {
+    const registration = workspaceControllerSnapshot?.registration;
+    const outcome = registration?.outcome;
+    const identity = registration?.identity;
+    const expectedSourceSha256 = identity?.expectedSourceSha256;
+    if (
+      outcome?.status !== "rejected"
+      || outcome.code !== "DUPLICATE_PROJECT_ID"
+      || !identity?.sourcePath
+      || !expectedSourceSha256
+    ) return null;
+    return {
+      key: String(identity.operationId || `${identity.sourcePath}:${expectedSourceSha256}`),
+      sourcePath: identity.sourcePath,
+      expectedSourceSha256,
+    };
+  })();
+
+  const resolveDuplicateProject = useCallback(async (
+    duplicateResolution: "reassociate" | "import-as-new",
+  ) => {
+    const prompt = duplicateProjectPrompt;
+    if (!workspaceController || !prompt) return;
+    setDuplicateProjectResolving(true);
+    try {
+      const outcome = await workspaceController.ensureRegistered({
+        sourcePath: prompt.sourcePath,
+        expectedSourceSha256: prompt.expectedSourceSha256,
+        duplicateResolution,
+      });
+      if (outcome.status !== "succeeded") {
+        const reason = "reason" in outcome
+          ? String(outcome.reason || "")
+          : "";
+        setToast({
+          title: "项目身份尚未确定",
+          message: reason || "当前 HTML 保持不变，请稍后重试。",
+          tone: "warning",
+          sticky: true,
+          disposition: "user-choice",
+          dedupeKey: "duplicate-project-resolution-failed",
+          action: { id: "retry-project-open", label: "重新选择" },
+        });
+        return;
+      }
+      setDismissedDuplicateProjectKey(prompt.key);
+      setToast({
+        title: duplicateResolution === "reassociate"
+          ? "已重新关联项目位置"
+          : "已作为新项目导入",
+        message: duplicateResolution === "reassociate"
+          ? "后续保存将使用当前文件夹，不会修改另一位置的项目。"
+          : "当前 HTML 已建立为新的 V1 项目；原项目历史没有被复制。",
+        tone: "success",
+        disposition: "background-result",
+        dedupeKey: "duplicate-project-resolved",
+      });
+    } finally {
+      setDuplicateProjectResolving(false);
+    }
+  }, [duplicateProjectPrompt, workspaceController]);
 
   const resumeDeferredProjectApplication = useCallback(() => (
     workspaceController?.resumeDeferredProjectApplication().status === "succeeded"
@@ -7926,6 +8020,25 @@ export default function Workbench() {
           if (matchesConfirmation) {
             void cancelActiveRun({ agentMayBeRunning: true });
           }
+        }}
+      />
+
+      <DuplicateProjectDialog
+        open={Boolean(
+          duplicateProjectPrompt
+          && dismissedDuplicateProjectKey !== duplicateProjectPrompt.key,
+        )}
+        busy={duplicateProjectResolving}
+        onClose={() => {
+          if (!duplicateProjectResolving) {
+            setDismissedDuplicateProjectKey(duplicateProjectPrompt?.key || null);
+          }
+        }}
+        onReassociate={() => {
+          void resolveDuplicateProject("reassociate");
+        }}
+        onImportAsNew={() => {
+          void resolveDuplicateProject("import-as-new");
         }}
       />
 

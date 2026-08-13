@@ -7230,6 +7230,16 @@ body {
   outline-offset: 2px;
 }
 
+.duplicate-project-card footer {
+  flex-wrap: wrap;
+}
+
+.duplicate-project-import {
+  border: 1px solid #c9c7bf;
+  background: #f5f4f0;
+  color: #34343a;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .window-file-title-action,
   .window-file-rename-icon,
