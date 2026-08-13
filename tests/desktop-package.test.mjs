@@ -3,6 +3,8 @@ import { readFile, stat } from "node:fs/promises";
 import test from "node:test";
 import semver from "semver";
 
+import { REQUIRED_APP_SOURCE_FILES } from "../scripts/verify-packaged-artifact.mjs";
+
 const APP_FILE_ALLOWLIST = [
   "desktop/main.mjs",
   "desktop/preload.mjs",
@@ -35,6 +37,12 @@ const APP_FILE_ALLOWLIST = [
   "package.json",
   "!node_modules/**/*",
 ];
+
+const APP_SOURCE_FILE_ALLOWLIST = APP_FILE_ALLOWLIST.filter((entry) => (
+  entry !== "dist-desktop/renderer/**/*"
+  && entry !== "package.json"
+  && !entry.startsWith("!")
+));
 
 const BRIDGE_FILES = [
   "workspace-bridge.mjs",
@@ -124,6 +132,11 @@ test("desktop package manifest owns the exact application and Bridge resource cl
   ]);
   const packageJson = readPackage(packageText);
   assert.deepEqual(sorted(packageJson.build.files), sorted(APP_FILE_ALLOWLIST));
+  assert.deepEqual(
+    sorted(REQUIRED_APP_SOURCE_FILES),
+    sorted(APP_SOURCE_FILE_ALLOWLIST),
+    "app.asar verifier must cover every source file in the package manifest",
+  );
 
   // Package owner: this source-side import closure catches a new main-process
   // dependency before an artifact exists; the imported module's behavior stays

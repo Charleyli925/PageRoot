@@ -93,7 +93,7 @@ const REQUIRED_LEGAL_RESOURCES = [
   "THIRD_PARTY_NOTICES.md",
 ];
 const EXPECTED_MAC_TEAM_ID = "RNK9RB969G";
-const REQUIRED_APP_SOURCE_FILES = [
+export const REQUIRED_APP_SOURCE_FILES = [
   "desktop/main.mjs",
   "desktop/preload.mjs",
   "desktop/external-file-open.mjs",
@@ -116,6 +116,10 @@ const REQUIRED_APP_SOURCE_FILES = [
   "desktop/preview-protocol.mjs",
   "desktop/runtime-visual-capture-owner.mjs",
   "app/domain/runtime-visual-contract.js",
+  "desktop/edit-runtime-bootstrap.mjs",
+  "desktop/edit-runtime-protocol.mjs",
+  "desktop/edit-runtime-probe-owner.mjs",
+  "app/domain/edit-runtime-contract.js",
   "public/brand-logo.png",
 ];
 const RETIRED_EDITOR_ARTIFACTS = [

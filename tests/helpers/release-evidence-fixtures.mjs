@@ -46,6 +46,10 @@ const APP_SOURCE_FILES = [
   "desktop/preview-protocol.mjs",
   "desktop/runtime-visual-capture-owner.mjs",
   "app/domain/runtime-visual-contract.js",
+  "desktop/edit-runtime-bootstrap.mjs",
+  "desktop/edit-runtime-protocol.mjs",
+  "desktop/edit-runtime-probe-owner.mjs",
+  "app/domain/edit-runtime-contract.js",
   "public/brand-logo.png",
   "dist-desktop/renderer/index.html",
 ];
