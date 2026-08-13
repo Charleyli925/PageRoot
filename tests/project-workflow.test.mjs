@@ -318,12 +318,11 @@ function createHarness({
     },
     ...projectOpen,
   };
-  const legacy = {
-    isHistoryView: () => false,
-    isViewTransitioning: () => false,
-    saveProjectRules: async () => true,
-    async hydrateRecentRuns() {},
-    emit: (event) => events.push(event),
+  const viewState = {
+    isTransitioning: () => false,
+  };
+  const recentRuns = {
+    async hydrate() {},
   };
   const commentWorkflow = {
     resetCount: 0,
@@ -360,9 +359,12 @@ function createHarness({
     versionSession,
     commentWorkflow,
     runSession,
-    projectRulesSession: {
-      close() {},
+    projectRulesWorkflow: {
+      resetForProjectTransition() {},
       inspect: () => ({ state: "resolved" }),
+      async drain() {
+        return true;
+      },
     },
     externalFileOpenSession: new ExternalFileOpenSession(),
     projectApplicationSession: new ProjectApplicationSession(),
@@ -393,7 +395,8 @@ function createHarness({
       hash: { sha256: async (value) => sha256(value) },
       canvas: canvasPort,
       projectOpen: openPort,
-      legacy,
+      viewState,
+      recentRuns,
     },
     policies: {
       canCloseDuringHydration: (state) => Boolean(
@@ -425,6 +428,7 @@ function createHarness({
     },
     clock: { now: Date.now },
   });
+  workflow.subscribeEvents((event) => events.push(event));
   return {
     workflow,
     client,

@@ -67,7 +67,6 @@ async function installRuntimeProjectionFrame(page, {
     scope: "text",
     tone: "added",
     textGroup: "static-text",
-    textScope: "inline",
     summary: "文本调整",
   }]);
   const srcdoc = `<!doctype html>
@@ -100,7 +99,7 @@ async function installRuntimeProjectionFrame(page, {
       const forgedChannel = new MessageChannel();
       parent.postMessage({
         source: "pageroot-ai-review",
-        contractVersion: 1,
+        contractVersion: 2,
         sessionId: "review-session",
         side: "before",
         sourceSha256: "${SOURCE_SHA256}",
@@ -156,7 +155,7 @@ async function installRuntimeProjectionFrame(page, {
       const port = event.ports?.length === 1 ? event.ports[0] : null;
       if (
         message.source === "pageroot-ai-review"
-        && message.contractVersion === 1
+        && message.contractVersion === 2
         && message.sessionId === "review-session"
         && message.side === "before"
         && message.sourceSha256 === `sha256:${"a".repeat(64)}`
@@ -188,7 +187,7 @@ async function installRuntimeProjectionFrame(page, {
     }
     frame.contentWindow.postMessage({
       source: "pageroot-ai-review-parent",
-      contractVersion: 1,
+      contractVersion: 2,
       sessionId: "review-session",
       side: "before",
       sourceSha256,
@@ -210,7 +209,7 @@ async function postRuntimeFacts(page, markers, overrides = {}) {
     const port = window.runtimeProjectionTest.port;
     port.postMessage({
       source: "pageroot-ai-review-runtime-projection",
-      contractVersion: 1,
+      contractVersion: 2,
       sessionId: "review-session",
       side: "before",
       sourceSha256,

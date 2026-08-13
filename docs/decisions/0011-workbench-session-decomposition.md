@@ -33,8 +33,10 @@ explicit application sessions:
 - `CommentSession` owns the renderer comment working copy, composer,
   tombstones and saved-comment edit session. `DraftSession` remains the
   acknowledged durable mutation authority.
-- `ProjectRulesSession` owns the rules editor, composition fence, autosave and
-  reconciliation.
+- `ProjectRulesSession` owns the rules editor working copy, generation,
+  composition fence and save projection. `ProjectRulesWorkflow` owns its
+  Bridge read/write, debounced autosave and authority reconciliation without
+  creating a second editor-state owner.
 - `RunSession` owns active/background run projections, Qoder handoff state,
   background results and renderer operation locks.
 - `VersionSession` owns immutable Version projection and history-view

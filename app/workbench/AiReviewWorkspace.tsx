@@ -42,9 +42,11 @@ import type {
 } from "../components/desktop-runtime-snapshot-api";
 import {
   acceptRuntimeVisualSnapshots,
-  changedReviewRuntimeVisualCandidateKeys,
   mergeReviewRuntimeVisualChanges,
 } from "../lib/review-runtime-visual.js";
+import {
+  changedReviewRuntimeVisualCandidateKeys,
+} from "./review-runtime-capture-adapter";
 import {
   acceptedRuntimeVisualEnvelope,
 } from "../domain/runtime-visual-contract.js";
@@ -895,17 +897,18 @@ export default function AiReviewWorkspace({
     void (async () => {
       const before = await captureSide("before");
       const after = await captureSide("after");
-      return { before, after };
-    })().then(({ before, after }) => {
+      const changedCandidateKeys = await changedReviewRuntimeVisualCandidateKeys({
+        candidates: documents.runtimeVisualCandidates,
+        before,
+        after,
+      });
+      return { changedCandidateKeys };
+    })().then(({ changedCandidateKeys }) => {
       if (
         runtimeVisualOwnerDocumentsRef.current !== documents
         || runtimeVisualResolutionRef.current?.documents === documents
       ) return;
-      resolveRuntimeVisuals(changedReviewRuntimeVisualCandidateKeys({
-        candidates: documents.runtimeVisualCandidates,
-        before,
-        after,
-      }));
+      resolveRuntimeVisuals(changedCandidateKeys);
     }).catch(() => {
       if (runtimeVisualOwnerDocumentsRef.current === documents) {
         resolveRuntimeVisuals([]);

@@ -20,22 +20,20 @@ const RETIRED_SOURCE_PATCH_OPERATIONS =
   /\b(?:replace-text|replace-text-range|replace-text-flow-range|delete-hard-break|split-text-block|planTextPatch|planTextRangePatch|planTextFlowRangePatch|planDeleteHardBreakPatch|planSplitTextBlockPatch|textRangeToSourceEdit)\b/;
 const LEGACY_RENDERER_STATE =
   /["'](?:waiting|importing|result-ready|awaiting-check-decision|version-created|completed|canceled|waived)["']/;
-const RETIRED_WORKBENCH_RUN_AUTHORITIES =
-  /\b(?:backgroundRunsRef|backgroundProjectResultsRef|qoderHandoffStatesRef|activeRunRef|activatingRunsRef|cancellingRunsRef|resolvingRunsRef|statusPollBusyRef)\b/;
-const RETIRED_WORKBENCH_VERSION_WRITERS =
-  /\b(?:setVersions|setLatestVersionId|setCurrentBasedOnVersionId|setCurrentExactVersionId|setRestoredFromVersionId|setViewMode|setViewingVersionId)\b/;
-const RETIRED_WORKBENCH_DOCUMENT_AUTHORITIES =
-  /\b(?:htmlRef|sourceShaRef|editRevisionRef|lastPersistedRevisionRef|persistStateRef|pendingWriteRef|flushPromiseRef)\b/;
-const RETIRED_WORKBENCH_COMMENT_AUTHORITIES =
-  /\b(?:commentsRef|changeEventsRef|deletedCommentIdsRef|composerDraftRef|composerCommentIdRef|composerAttachmentsRef|draftTargetRef|commentEditSessionRef)\b/;
-const RETIRED_WORKBENCH_COMMENT_WORKFLOW_OWNERS =
-  /\b(?:handleDraftSessionEvent|flushDraftPersistence|persistDraftRecovery|persistCurrentDraftRecovery|attachmentUploadCountRef|draftRecoveryOperationIdRef|deleteAttachmentFile)\b/;
-// PR-6 closes the final View-to-Bridge migration budget. PR-7 removes this
-// transitional accounting shape altogether and forbids the client import too.
-const WORKBENCH_BRIDGE_CALL_ALLOWLIST = new Map();
-const WORKBENCH_BRIDGE_CALL_LIMIT = 0;
-const RETIRED_WORKBENCH_PROJECT_WORKFLOW_OWNERS =
-  /\b(?:drainCoordinatorRef|externalFileOpenSessionRef|projectApplicationSessionRef|projectHydratingRef|projectLoadErrorRef|pendingProjectOpenRef|closeLifecycleRef|projectOpenRequestRef|applyProject|prepareProjectSwitch|applyAcceptedProject|enqueueAcceptedProject|openExternalProject)\b/;
+const RETIRED_WORKBENCH_MIGRATION_OWNERS =
+  /\b(?:backgroundRunsRef|backgroundProjectResultsRef|qoderHandoffStatesRef|activeRunRef|activatingRunsRef|cancellingRunsRef|resolvingRunsRef|statusPollBusyRef|htmlRef|sourceShaRef|editRevisionRef|lastPersistedRevisionRef|persistStateRef|pendingWriteRef|flushPromiseRef|commentsRef|changeEventsRef|deletedCommentIdsRef|composerDraftRef|composerCommentIdRef|composerAttachmentsRef|draftTargetRef|commentEditSessionRef|handleDraftSessionEvent|flushDraftPersistence|persistDraftRecovery|persistCurrentDraftRecovery|attachmentUploadCountRef|draftRecoveryOperationIdRef|deleteAttachmentFile|drainCoordinatorRef|externalFileOpenSessionRef|projectApplicationSessionRef|projectHydratingRef|projectLoadErrorRef|pendingProjectOpenRef|closeLifecycleRef|projectOpenRequestRef|applyProject|prepareProjectSwitch|applyAcceptedProject|enqueueAcceptedProject|openExternalProject)\b/;
+const RUNTIME_SESSION_CONSTRUCTORS = [
+  "ProjectSession",
+  "DocumentSession",
+  "CommentSession",
+  "DraftSession",
+  "VersionSession",
+  "SourceHistorySession",
+  "RunSession",
+  "ProjectRulesSession",
+  "ExternalFileOpenSession",
+  "ProjectApplicationSession",
+];
 
 async function sourceFiles(directory) {
   const entries = await readdir(directory, { withFileTypes: true });
@@ -77,12 +75,173 @@ function includesInOrder(source, markers) {
   return true;
 }
 
+// PR-7 closes the composition boundary. These checks deliberately inspect
+// responsibility-shaped code (imports, constructors, typed commands and drain
+// calls), rather than preserving a temporary allowlist or matching line-level
+// migration scaffolding.
+export function compositionBoundaryViolations({
+  workbench = "",
+  workspaceController = "",
+  projectWorkflow = "",
+  runWorkflow = "",
+  versionWorkflow = "",
+  applicationSources = [],
+} = {}) {
+  const violations = [];
+  const workbenchBridgeEscape = /(?:application\/bridge-client|\bcreateRuntimeBridgeClient\b|\bbridgeClient\s*\.)/u;
+  if (workbenchBridgeEscape.test(workbench)) {
+    violations.push(
+      "app/workbench.tsx: View code cannot import or call the Bridge client",
+    );
+  }
+  if (
+    /\bnew\s+(?:ProjectSession|DocumentSession|CommentSession|DraftSession|VersionSession|SourceHistorySession|RunSession|ProjectRulesSession|ExternalFileOpenSession|ProjectApplicationSession)\b/u.test(workbench)
+    || /\b(?:projectSessionRef|documentSessionRef|commentSessionRef|draftSessionRef|versionSessionRef|sourceHistorySessionRef|runSessionRef|projectRulesSessionRef)\b/u.test(workbench)
+  ) {
+    violations.push(
+      "app/workbench.tsx: Workbench cannot own runtime Session construction or refs",
+    );
+  }
+  if (
+    RETIRED_WORKBENCH_MIGRATION_OWNERS.test(workbench)
+    || /\b(?:executeBridge|executeCommand|command)\s*\(/u.test(workbench)
+  ) {
+    violations.push(
+      "app/workbench.tsx: retired workflow owners and generic command escapes are forbidden",
+    );
+  }
+  if (/\blegacy(?:Port)?\b/u.test(workbench)) {
+    violations.push(
+      "app/workbench.tsx: final composition cannot retain a legacy workflow adapter",
+    );
+  }
+  if (
+    !/\bcreateRuntimeWorkspaceController\s*\(/u.test(workbench)
+    || !/\bworkspaceControllerRef\b/u.test(workbench)
+    || !/\.subscribe\s*\(\s*setWorkspaceControllerSnapshot/u.test(workbench)
+    || !/\.subscribeEvents\s*\(/u.test(workbench)
+  ) {
+    violations.push(
+      "app/workbench.tsx: Workbench must compose one runtime Controller and render its aggregate snapshot",
+    );
+  }
+
+  const controllerBoundaryImports = importedSpecifiers(workspaceController);
+  if (controllerBoundaryImports.some((specifier) => (
+    specifier === "react"
+    || /(?:^|\/)(?:workbench|components|desktop)(?:\/|$)/u.test(specifier)
+  ))) {
+    violations.push(
+      "app/application/workspace-controller.js: Controller cannot import React, presentation, or desktop code",
+    );
+  }
+  if (/\b(?:executeBridge|executeCommand|command)\s*\(/u.test(workspaceController)) {
+    violations.push(
+      "app/application/workspace-controller.js: generic Bridge command escapes are forbidden",
+    );
+  }
+  if (
+    !/\bexport\s+function\s+createRuntimeWorkspaceController\b/u.test(workspaceController)
+    || !/\bcreateRuntimeBridgeClient\s*\(/u.test(workspaceController)
+    || !/\bnew\s+WorkspaceController\s*\(/u.test(workspaceController)
+    || !/\bgetSnapshot\s*\(/u.test(workspaceController)
+    || !/\bsubscribe\s*\(/u.test(workspaceController)
+    || !/\bsubscribeEvents\s*\(/u.test(workspaceController)
+    || !/\bdispose\s*\(/u.test(workspaceController)
+  ) {
+    violations.push(
+      "app/application/workspace-controller.js: runtime factory and public aggregate contract must stay complete",
+    );
+  }
+  if (
+    !/#observeSessionSnapshots\s*\(/u.test(workspaceController)
+    || !/#publishAggregateSnapshot\s*\(/u.test(workspaceController)
+    || !/\bprojectSession:\s*this\.#projectSessionSnapshot/u.test(workspaceController)
+    || !/\bdocument:\s*this\.#documentSessionSnapshot/u.test(workspaceController)
+    || !/\bcommentSession:\s*this\.#commentSessionSnapshot/u.test(workspaceController)
+    || !/\brunSession:\s*this\.#runSessionSnapshot/u.test(workspaceController)
+    || !/\bversionSession:\s*this\.#versionSessionSnapshot/u.test(workspaceController)
+    || !/\bsetObserver\(null\)/u.test(workspaceController)
+  ) {
+    violations.push(
+      "app/application/workspace-controller.js: Controller must be the sole disposed aggregate observer for Session snapshots",
+    );
+  }
+  if (
+    !/\bensureRegistered\s*\(/u.test(workspaceController)
+    || !/#registrationPromise\b/u.test(workspaceController)
+    || !/\bthis\.#projectSession\.register\s*\(/u.test(workspaceController)
+    || !/\bthis\.#sourceHistorySession\.activate\s*\(/u.test(workspaceController)
+    || !/\bthis\.#draftSession\.replaceAuthority\s*\(/u.test(workspaceController)
+    || !/\breturn\s+stale\(/u.test(workspaceController)
+  ) {
+    violations.push(
+      "app/application/workspace-controller.js: registration publication must remain session-fenced and stale-safe",
+    );
+  }
+  if (
+    /\blegacy(?:Port)?\b/u.test(workspaceController)
+    || /\blegacy(?:Port)?\b/u.test(projectWorkflow)
+    || !/\.subscribeEvents\s*\(/u.test(workspaceController)
+  ) {
+    violations.push(
+      "app/application: final composition must use typed workflow events instead of a legacy adapter",
+    );
+  }
+
+  for (const { file, source } of applicationSources) {
+    if (
+      file !== "app/application/workspace-controller.js"
+      && new RegExp(`\\bnew\\s+(?:${RUNTIME_SESSION_CONSTRUCTORS.join("|")})\\b`, "u").test(source)
+    ) {
+      violations.push(
+        `${file}: runtime Session construction belongs only to WorkspaceController factory`,
+      );
+    }
+    if (
+      file !== "app/application/bridge-client.js"
+      && /\b(?:executeBridge|executeCommand|command)\s*\(/u.test(source)
+    ) {
+      violations.push(
+        `${file}: application commands must remain typed; generic Bridge escape is forbidden`,
+      );
+    }
+  }
+
+  if (
+    !/\bthis\.#drainCoordinator\.drain\("switch"/u.test(projectWorkflow)
+    || !/\bthis\.#drainCoordinator\.drain\("close"/u.test(projectWorkflow)
+    || !/\bthis\.#projectRulesWorkflow\.drain\s*\(/u.test(projectWorkflow)
+    || !/\bthis\.#projectWorkflow\.drain\("history"/u.test(versionWorkflow)
+    || !/\bthis\.#drain\s*\(/u.test(runWorkflow)
+  ) {
+    violations.push(
+      "app/application: switch, close, history, and request boundaries must use typed DrainCoordinator commands",
+    );
+  }
+  if (
+    !/\bthis\.#documentWorkflow\.reconcileBoundary\s*\(/u.test(projectWorkflow)
+    || !/\bthis\.#canvasPort\.freeze\s*\(/u.test(runWorkflow)
+    || !/\bthis\.#bridgeClient\.createRequest\s*\(/u.test(runWorkflow)
+    || !/\bthis\.#projectWorkflow\.commitGeneratedSourceTransition\s*\(/u.test(versionWorkflow)
+  ) {
+    violations.push(
+      "app/application: publication, freeze, and request checks must stay in their typed workflows",
+    );
+  }
+  return violations;
+}
+
 export async function architectureViolations() {
   const files = await sourceFiles(path.join(PRODUCT_ROOT, "app"));
   const violations = [];
+  const applicationSources = [];
   for (const filePath of files) {
     const file = relative(filePath);
     const source = await readFile(filePath, "utf8");
+    if (file.startsWith("app/application/")) {
+      applicationSources.push({ file, source });
+    }
     if (RETIRED_V1_MODULES.has(file)) {
       violations.push(`${file}: retired V1 editing modules cannot return to production`);
     }
@@ -141,7 +300,10 @@ export async function architectureViolations() {
     }
     if (file.startsWith("app/application/")) {
       for (const specifier of imports) {
-        if (/(?:^|\/)(?:components|desktop)(?:\/|$)/.test(specifier)) {
+        if (
+          specifier === "react"
+          || /(?:^|\/)(?:workbench|components|desktop)(?:\/|$)/.test(specifier)
+        ) {
           violations.push(`${file}: application code cannot import ${specifier}`);
         }
       }
@@ -280,6 +442,24 @@ export async function architectureViolations() {
     ),
     "utf8",
   );
+  const projectRulesSession = await readFile(
+    path.join(
+      PRODUCT_ROOT,
+      "app",
+      "application",
+      "project-rules-session.js",
+    ),
+    "utf8",
+  );
+  const projectRulesWorkflow = await readFile(
+    path.join(
+      PRODUCT_ROOT,
+      "app",
+      "application",
+      "project-rules-workflow.js",
+    ),
+    "utf8",
+  );
   const commentWorkflow = await readFile(
     path.join(
       PRODUCT_ROOT,
@@ -307,6 +487,14 @@ export async function architectureViolations() {
     ),
     "utf8",
   );
+  violations.push(...compositionBoundaryViolations({
+    workbench,
+    workspaceController,
+    projectWorkflow,
+    runWorkflow,
+    versionWorkflow,
+    applicationSources,
+  }));
   if (
     !workspaceController.includes("export class WorkspaceController")
     || !workspaceController.includes("ensureRegistered({")
@@ -315,9 +503,6 @@ export async function architectureViolations() {
     || !workspaceController.includes("this.#draftSession.replaceAuthority(")
     || !workspaceController.includes("this.#sourceHistorySession.activate(")
     || !workspaceController.includes("return stale(identity)")
-    || /\bnew\s+(?:ProjectSession|DocumentSession|CommentSession|DraftSession|VersionSession|SourceHistorySession)\b/.test(
-      workspaceController,
-    )
   ) {
     violations.push(
       "app/application/workspace-controller.js: registration must own the injected Session transition, single-flight, and stale fence",
@@ -325,7 +510,7 @@ export async function architectureViolations() {
   }
   if (
     /\bensureProjectRegistered\b|\bprojectRegistrationPromiseRef\b/.test(workbench)
-    || !workbench.includes("new WorkspaceController({")
+    || !workbench.includes("createRuntimeWorkspaceController({")
     || !workbench.includes(
       "requiredWorkspaceController(workspaceController).ensureRegistered(",
     )
@@ -371,7 +556,7 @@ export async function architectureViolations() {
     );
   }
   if (
-    RETIRED_WORKBENCH_PROJECT_WORKFLOW_OWNERS.test(workbench)
+    RETIRED_WORKBENCH_MIGRATION_OWNERS.test(workbench)
     || !workbench.includes("projectWorkflow: {")
     || !workbench.includes("detail.waitUntil(workspaceController.prepareClose({")
     || !workbench.includes("workspaceController.acceptExternalProject(request)")
@@ -386,26 +571,10 @@ export async function architectureViolations() {
   const bridgeCalls = [...workbench.matchAll(
     /\bbridgeClient\.([A-Za-z0-9_]+)\s*\(/g,
   )].map((match) => match[1]);
-  const bridgeCallCounts = new Map();
-  for (const method of bridgeCalls) {
-    bridgeCallCounts.set(method, (bridgeCallCounts.get(method) || 0) + 1);
-    if (!WORKBENCH_BRIDGE_CALL_ALLOWLIST.has(method)) {
-      violations.push(
-        `app/workbench.tsx: Bridge call ${method} is outside the PR-6 migration allowlist`,
-      );
-    }
-  }
-  if (bridgeCalls.length > WORKBENCH_BRIDGE_CALL_LIMIT) {
+  if (bridgeCalls.length > 0) {
     violations.push(
-      `app/workbench.tsx: PR-6 allows at most ${WORKBENCH_BRIDGE_CALL_LIMIT} direct Bridge calls`,
+      "app/workbench.tsx: direct Bridge calls are absolutely forbidden after PR-7",
     );
-  }
-  for (const [method, limit] of WORKBENCH_BRIDGE_CALL_ALLOWLIST) {
-    if ((bridgeCallCounts.get(method) || 0) > limit) {
-      violations.push(
-        `app/workbench.tsx: Bridge call ${method} exceeds its PR-6 migration allowance of ${limit}`,
-      );
-    }
   }
   if (
     !workbench.includes("documentWorkflow: {")
@@ -424,7 +593,7 @@ export async function architectureViolations() {
     !projectSession.includes(
       "if (!this.#sourcePath || !this.#projectId || !this.#documentId) return null;",
     )
-    || !workbench.includes("return projectSessionRef.current.context;")
+    || !workbench.includes("getCurrentProjectContext()")
   ) {
     violations.push(
       "app/application/project-session.js: registered contexts cannot contain empty identities",
@@ -455,43 +624,39 @@ export async function architectureViolations() {
     );
   }
   if (
-    !workbench.includes("const runSessionRef = useRef(new RunSession(")
-    || RETIRED_WORKBENCH_RUN_AUTHORITIES.test(workbench)
+    !workbench.includes("workspaceControllerSnapshot?.runSession")
+    || /\b(?:backgroundRunsRef|backgroundProjectResultsRef|qoderHandoffStatesRef|activeRunRef|activatingRunsRef|cancellingRunsRef|resolvingRunsRef|statusPollBusyRef)\b/.test(workbench)
   ) {
     violations.push(
       "app/workbench.tsx: AI run state and operation locks belong to RunSession",
     );
   }
   if (
-    !workbench.includes(
-      "const versionSessionRef = useRef(new VersionSession<Version>());",
-    )
-    || RETIRED_WORKBENCH_VERSION_WRITERS.test(workbench)
+    !workbench.includes("workspaceControllerSnapshot?.versionSession")
+    || /\b(?:setVersions|setLatestVersionId|setCurrentBasedOnVersionId|setCurrentExactVersionId|setRestoredFromVersionId|setViewMode|setViewingVersionId)\b/.test(workbench)
   ) {
     violations.push(
       "app/workbench.tsx: Version authority and history view transitions belong to VersionSession",
     );
   }
   if (
-    !workbench.includes(
-      "const documentSessionRef = useRef(new DocumentSession<PendingWrite>({",
-    )
-    || RETIRED_WORKBENCH_DOCUMENT_AUTHORITIES.test(workbench)
+    !workbench.includes("workspaceControllerSnapshot?.document")
+    || /\b(?:htmlRef|sourceShaRef|editRevisionRef|lastPersistedRevisionRef|persistStateRef|pendingWriteRef|flushPromiseRef)\b/.test(workbench)
   ) {
     violations.push(
       "app/workbench.tsx: source bytes, revisions and write state belong to DocumentSession",
     );
   }
   if (
-    !workbench.includes("const commentSessionRef = useRef(new CommentSession<")
-    || RETIRED_WORKBENCH_COMMENT_AUTHORITIES.test(workbench)
+    !workbench.includes("workspaceControllerSnapshot?.commentSession")
+    || /\b(?:commentsRef|changeEventsRef|deletedCommentIdsRef|composerDraftRef|composerCommentIdRef|composerAttachmentsRef|draftTargetRef|commentEditSessionRef)\b/.test(workbench)
   ) {
     violations.push(
       "app/workbench.tsx: comment working-copy state belongs to CommentSession",
     );
   }
   if (
-    RETIRED_WORKBENCH_COMMENT_WORKFLOW_OWNERS.test(workbench)
+    /\b(?:handleDraftSessionEvent|flushDraftPersistence|persistDraftRecovery|persistCurrentDraftRecovery|attachmentUploadCountRef|draftRecoveryOperationIdRef|deleteAttachmentFile)\b/.test(workbench)
     || /\bbridgeClient\.(?:attachment|saveAttachment|deleteAttachment)\s*\(/.test(workbench)
     || !workbench.includes("commentWorkflow: {")
     || !workbench.includes(".commitComment({ commentId })")
@@ -512,6 +677,70 @@ export async function architectureViolations() {
   ) {
     violations.push(
       "app/application/workspace-controller.js: PR-4 must compose and expose CommentWorkflow commands and projection",
+    );
+  }
+  if (
+    !workspaceController.includes("import { ProjectRulesSession }")
+    || !workspaceController.includes("import { ProjectRulesWorkflow }")
+    || !workspaceController.includes("this.#projectRulesWorkflow = new ProjectRulesWorkflow({")
+    || !workspaceController.includes("new ProjectRulesSession()")
+    || !workspaceController.includes("projectRules: this.#projectRulesSnapshot")
+    || !workspaceController.includes("openProjectRules(input)")
+    || !workspaceController.includes("saveProjectRules()")
+    || !workspaceController.includes("this.#projectRulesWorkflow?.dispose()")
+  ) {
+    violations.push(
+      "app/application/workspace-controller.js: PROJECT.md workflow must be composed, projected and disposed by WorkspaceController",
+    );
+  }
+  if (
+    !projectRulesSession.includes("export class ProjectRulesSession")
+    || !projectRulesSession.includes("beginOpen(context)")
+    || !projectRulesSession.includes("completeOpen(token, payload)")
+    || !projectRulesSession.includes("beginSave()")
+    || !projectRulesSession.includes("completeSave(token)")
+    || /(?:#bridgeClient|\.projectFile\(|\.updateProjectFile\()/.test(projectRulesSession)
+  ) {
+    violations.push(
+      "app/application/project-rules-session.js: PROJECT.md mutable editor facts must remain free of Bridge I/O",
+    );
+  }
+  if (
+    !projectRulesWorkflow.includes("export class ProjectRulesWorkflow")
+    || !projectRulesWorkflow.includes("const AUTOSAVE_DELAY_MS = 700")
+    || !projectRulesWorkflow.includes("async open({ context }")
+    || !projectRulesWorkflow.includes("this.#bridgeClient.projectFile(")
+    || !projectRulesWorkflow.includes("this.#bridgeClient.updateProjectFile({")
+    || !projectRulesWorkflow.includes("resetForProjectTransition()")
+    || !projectRulesWorkflow.includes("async drain()")
+    || !projectRulesWorkflow.includes("this.#presentationPort.restoreEditor({")
+    || /(?:^|\/)(?:workbench|components|desktop)(?:\/|$)|\breact\b/u.test(
+      importedSpecifiers(projectRulesWorkflow).join("\n"),
+    )
+  ) {
+    violations.push(
+      "app/application/project-rules-workflow.js: PROJECT.md Bridge I/O, 700ms autosave, reconciliation and drain must stay in the application boundary",
+    );
+  }
+  if (
+    !projectWorkflow.includes("this.#projectRulesWorkflow.inspect()")
+    || !projectWorkflow.includes("this.#projectRulesWorkflow.drain()")
+    || /\bprojectRulesSession\b/.test(projectWorkflow)
+  ) {
+    violations.push(
+      "app/application/project-workflow.js: project-rule drain must delegate to ProjectRulesWorkflow without a legacy Session callback",
+    );
+  }
+  if (
+    !workbench.includes("projectRulesWorkflow: {")
+    || !workbench.includes(".openProjectRules({")
+    || !workbench.includes(".updateProjectRules({")
+    || !workbench.includes(".saveProjectRules()")
+    || !workbench.includes(".closeProjectRules()")
+    || /\b(?:projectRulesSessionRef|saveProjectRulesRef|PROJECT_RULES_AUTOSAVE_DELAY_MS)\b/.test(workbench)
+  ) {
+    violations.push(
+      "app/workbench.tsx: PROJECT.md must use Controller commands and a snapshot projection; Workbench cannot own its timer, Session or Bridge I/O",
     );
   }
   if (

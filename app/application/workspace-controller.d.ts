@@ -9,15 +9,30 @@ import type {
   DocumentWorkflowCanvasPort,
   DocumentWorkflowOutcome,
   DocumentWorkflowRecoveryStore,
-  DocumentWorkflow,
 } from "./document-workflow.js";
 import type { DocumentWorkflowCodecs } from "./document-workflow-codecs.js";
-import type { CommentSession } from "./comment-session.js";
-import type { DocumentSession, PersistedBoundaryResult } from "./document-session.js";
+import type { CommentSession, CommentSessionSnapshot } from "./comment-session.js";
+import type {
+  DocumentSession,
+  DocumentSessionSnapshot,
+  PersistedBoundaryResult,
+} from "./document-session.js";
 import type { DraftSession } from "./draft-session.js";
-import type { ProjectContext, ProjectSession } from "./project-session.js";
+import type {
+  ProjectContext,
+  ProjectSession,
+  ProjectSessionSnapshot,
+} from "./project-session.js";
+import type {
+  ProjectRulesPresentationPort,
+  ProjectRulesScheduler,
+  ProjectRulesWorkflowOutcome,
+} from "./project-rules-workflow.js";
+import type { ProjectRulesSnapshot } from "./project-rules-session.js";
+import type { RecoveryStore } from "./recovery-store.js";
+import type { RunSessionSnapshot } from "./run-session.js";
 import type { SourceHistorySession } from "./source-history-session.js";
-import type { VersionSession } from "./version-session.js";
+import type { VersionSession, VersionSessionSnapshot } from "./version-session.js";
 import type {
   ProjectWorkflowConstruction,
   ProjectWorkflowEvent,
@@ -71,7 +86,13 @@ export type WorkspaceControllerSnapshot = Readonly<{
     identity: OperationIdentity | null;
     outcome: CommandOutcome<ProjectContext> | null;
   }>;
+  projectSession: ProjectSessionSnapshot | null;
+  document: DocumentSessionSnapshot | null;
+  commentSession: CommentSessionSnapshot | null;
+  runSession: RunSessionSnapshot | null;
+  versionSession: VersionSessionSnapshot | null;
   comment: CommentWorkflowSnapshot | null;
+  projectRules: ProjectRulesSnapshot | null;
   project: ProjectWorkflowSnapshot | null;
   run: RunWorkflowSnapshot | null;
   version: VersionWorkflowSnapshot | null;
@@ -175,6 +196,7 @@ export type WorkspaceControllerConstruction = Readonly<{
     | "cancelActiveRun"
     | "versionFile"
     | "activateReadyVersion"
+    | "updateProjectFile"
   >;
   projectSession: ProjectSession;
   documentSession: DocumentSession;
@@ -203,10 +225,15 @@ export type WorkspaceControllerConstruction = Readonly<{
     recoveryStore: import("./recovery-store.js").RecoveryStore;
     attachmentBinary: AttachmentBinaryPort;
   }>;
+  projectRulesWorkflow?: Readonly<{
+    runSession: import("./run-session.js").RunSession;
+    errorMessage?: (cause: unknown, fallback: string) => string;
+    presentation?: ProjectRulesPresentationPort;
+    scheduler?: ProjectRulesScheduler;
+  }>;
   projectWorkflow?: Pick<
     ProjectWorkflowConstruction,
     | "runSession"
-    | "projectRulesSession"
     | "codecs"
     | "ports"
     | "policies"
@@ -243,6 +270,53 @@ export type WorkspaceControllerConstruction = Readonly<{
   clock: ClockPort;
 }>;
 
+export type RuntimeWorkspaceControllerConstruction = Readonly<{
+  initial?: Readonly<{
+    documentHtml?: string;
+    runSourcePath?: string | null;
+  }>;
+  draftSession?: Readonly<{
+    encodeComment?: (value: never) => unknown;
+    encodeChangeEvent?: (value: never) => unknown;
+  }>;
+  codecs: WorkspaceControllerCodecs;
+  ports: WorkspaceControllerConstruction["ports"];
+  recoveryStore?: RecoveryStore;
+  documentWorkflow: Omit<
+    NonNullable<WorkspaceControllerConstruction["documentWorkflow"]>,
+    "recoveryStore"
+  > & Partial<Pick<
+    NonNullable<WorkspaceControllerConstruction["documentWorkflow"]>,
+    "recoveryStore"
+  >>;
+  commentWorkflow: Omit<
+    NonNullable<WorkspaceControllerConstruction["commentWorkflow"]>,
+    "runSession" | "recoveryStore"
+  > & Partial<Pick<
+    NonNullable<WorkspaceControllerConstruction["commentWorkflow"]>,
+    "recoveryStore"
+  >>;
+  projectRulesWorkflow: Omit<
+    NonNullable<WorkspaceControllerConstruction["projectRulesWorkflow"]>,
+    "runSession"
+  >;
+  projectWorkflow: Omit<
+    NonNullable<WorkspaceControllerConstruction["projectWorkflow"]>,
+    "runSession" | "ports"
+  > & Readonly<{
+    ports: Omit<ProjectWorkflowConstruction["ports"], "recentRuns">;
+  }>;
+  runWorkflow: Omit<
+    NonNullable<WorkspaceControllerConstruction["runWorkflow"]>,
+    "runSession"
+  >;
+  versionWorkflow: Omit<
+    NonNullable<WorkspaceControllerConstruction["versionWorkflow"]>,
+    "runSession"
+  >;
+  clock: ClockPort;
+}>;
+
 export class WorkspaceRegistrationError extends Error {
   readonly code: string;
   readonly operationId?: string;
@@ -252,9 +326,12 @@ export function registrationContextFromOutcome(
   outcome: CommandOutcome<ProjectContext>,
 ): ProjectContext | null;
 
-// Migration-only construction: the facade receives the Workbench's existing
-// Session instances. It neither creates duplicate Session authority nor owns a
-// global store; PR-7 removes this construction seam after aggregate wiring.
+export function createRuntimeWorkspaceController(
+  options: RuntimeWorkspaceControllerConstruction,
+): WorkspaceController;
+
+// The class retains injected construction for isolated Application tests. The
+// production renderer must use createRuntimeWorkspaceController instead.
 export class WorkspaceController {
   constructor(options: WorkspaceControllerConstruction);
   getSnapshot(): WorkspaceControllerSnapshot;
@@ -264,6 +341,20 @@ export class WorkspaceController {
   subscribeEvents(listener: (event: WorkspaceEvent) => void): () => void;
   readonly projectHydrating: boolean;
   readonly projectLoadError: string | null;
+  getCurrentProjectContext(): ProjectContext | null;
+  matchesCurrentProjectContext(context: ProjectContext): boolean;
+  reloadDocumentCanvas(): DocumentSessionSnapshot;
+  replaceCommentWorkingCopy(
+    input: Record<string, unknown>,
+  ): CommentSessionSnapshot;
+  replaceCommentItems(comments: unknown[]): CommentSessionSnapshot;
+  setCommentComposerTarget(target: unknown): CommentSessionSnapshot;
+  setCommentComposerDraft(draft: string): CommentSessionSnapshot;
+  setCommentEditSession(session: unknown): CommentSessionSnapshot;
+  clearCommentComposer(): CommentSessionSnapshot;
+  clearCompletedRun(): boolean;
+  dismissActiveRun(): import("../domain/run-lifecycle.js").ActiveRun | null;
+  reopenRecentRunOutcome(sourcePath: string | null | undefined): boolean;
   refreshProject(input?: Record<string, unknown>): Promise<ProjectWorkflowOutcome>;
   retryProjectHydration(): Promise<ProjectWorkflowOutcome>;
   prepareProjectSwitch(input?: {
@@ -318,6 +409,30 @@ export class WorkspaceController {
     context?: ProjectContext;
   }): Promise<ProjectWorkflowOutcome<{ opened: boolean }>>;
   refreshRecentProjects(): Promise<ProjectWorkflowOutcome<{ projects: unknown[] }>>;
+  openProjectRules(input: {
+    context: ProjectContext;
+  }): Promise<ProjectRulesWorkflowOutcome<{
+    opened: boolean;
+    reused?: boolean;
+  }>>;
+  updateProjectRules(input: { content: string }): ProjectRulesWorkflowOutcome<{
+    updated: boolean;
+  }>;
+  beginProjectRulesComposition(input: {
+    target: unknown;
+    baselineValue: string;
+  }): number | null;
+  finishProjectRulesComposition(input: { target: unknown }): boolean;
+  leaveProjectRulesEditor(): boolean;
+  restoreProjectRules(): ProjectRulesWorkflowOutcome<{
+    restored: boolean;
+    editorGeneration: number;
+  }>;
+  saveProjectRules(): Promise<ProjectRulesWorkflowOutcome<{
+    saved: boolean;
+    reconciled?: boolean;
+  }>>;
+  closeProjectRules(): Promise<ProjectRulesWorkflowOutcome<{ closed: boolean }>>;
   renameProjectSource(input: {
     stem: string;
     deadlineAt?: number;

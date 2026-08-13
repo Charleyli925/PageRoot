@@ -4,7 +4,7 @@ import type { CommentSession } from "./comment-session.js";
 import type { DocumentSession } from "./document-session.js";
 import type { DraftSession } from "./draft-session.js";
 import type { ProjectContext, ProjectSession } from "./project-session.js";
-import type { ProjectRulesSession } from "./project-rules-session.js";
+import type { ProjectRulesWorkflow } from "./project-rules-workflow.js";
 import type { RunSession } from "./run-session.js";
 import type { VersionSession } from "./version-session.js";
 import type { ExternalFileOpenSnapshot } from "./external-file-open-session.js";
@@ -83,13 +83,18 @@ export type ProjectWorkflowConstruction = Readonly<{
   versionSession: VersionSession;
   commentWorkflow: CommentWorkflow;
   runSession: RunSession;
-  projectRulesSession: ProjectRulesSession;
+  projectRulesWorkflow: ProjectRulesWorkflow;
   codecs: object;
   ports: Readonly<{
     hash: object;
     canvas: object;
     projectOpen: object;
-    legacy: object;
+    viewState: Readonly<{
+      isTransitioning(): boolean;
+    }>;
+    recentRuns: Readonly<{
+      hydrate(projects: unknown[], activeSourcePath: string | null): void | Promise<void>;
+    }>;
   }>;
   policies: object;
   scheduler?: Readonly<{
@@ -102,6 +107,7 @@ export class ProjectWorkflow {
   constructor(options: Readonly<Record<string, unknown>>);
   getSnapshot(): ProjectWorkflowSnapshot;
   subscribe(listener: (snapshot: ProjectWorkflowSnapshot) => void): () => void;
+  subscribeEvents(listener: (event: ProjectWorkflowEvent) => void): () => void;
   readonly projectHydrating: boolean;
   readonly projectLoadError: string | null;
   reportLoadFailure(message: string): void;

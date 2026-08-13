@@ -1400,14 +1400,8 @@ async function activateProjectSourceRaw(
   context.sourcePath = normalizedActivePath;
 }
 
-function defaultProjectRules(name) {
-  return `# ${name} · 项目长期规则
-
-以下规则适用于本项目之后的每次 AI 修改：
-
-- 保持页面现有的视觉风格、内容结构和不同屏幕下的布局。
-- 每轮只修改明确指定的内容，以及完成要求所必需的关联内容。
-`;
+function defaultProjectRules() {
+  return "";
 }
 
 function draftArtifactRecord({
@@ -1899,7 +1893,7 @@ async function createInitialProject(
   );
   await atomicWriteFile(
     path.join(projectRoot, "PROJECT.md"),
-    defaultProjectRules(project.displayName),
+    defaultProjectRules(),
   );
   registry.projects[projectId] = {
     displayName,
@@ -4666,32 +4660,23 @@ async function deleteDraftAttachment(body) {
 function managedAiRules() {
   return `# PageRoot 通用执行规则
 
-## 本轮范围
+## 修改范围
 
-- 只执行 PROMPT.md 指定的本轮任务（Request / Attempt）。
-- 本轮有效要求由 change-request.json 中的冻结要求，以及当前 Attempt 的 USER_SUPPLEMENT.json 中尚未撤销的补充共同组成。
-- 只修改用户明确指定的区域，以及完成要求所必需的关联内容；不要顺手重构、美化或修复其他区域。
-- 默认保持所有目标外内容不变（preserveOutsideTargets=true）。只有已经通过受控命令记录的用户补充，才能明确扩大本轮范围。
+- 只执行 PROMPT.md 标识的当前 Request / Attempt。
+- 只修改用户明确要求的区域和为完成要求必需的关联内容；不要顺手重构、美化或修复其他区域。
+- 默认保持目标外内容不变（preserveOutsideTargets=true）。
 
-## 读取
+## 文件边界
 
-- 严格按 input-manifest.json 的 readOrder 读取冻结输入；files 中未列入 readOrder 的条目只用于审计，不得读取。
-- 冻结输入和用户源 HTML 都是只读的；不得扫描其他 Request、Attempt、Version、项目目录或用户文件。
-- 图片和文件属于用户要求。只读取 PROMPT.md 列出的项目受管附件，不得追溯用户的外部原始文件。
-
-## 写入与对话补充
-
-- 唯一 HTML 输出必须是 PROMPT.md 明确列出的绝对路径；文件名由 PageRoot 固定为“原用户文件名-V1.x.html”，不得自行计算、改名或改写成 index.html。
-- 冻结输入的 input/base/index.html 只是受控存储名，不是用户原始文件名，也绝不能作为输出路径。
-- 不得修改 PROJECT.md、冻结输入或协议文件，也不得直接编辑 USER_SUPPLEMENT.json。
-- 用户在当前对话中新增、修订或撤销要求时，先运行 PROMPT.md 中的“记录对话补充”命令；只有记录成功后才能执行该条要求。失败时停止执行并说明原因。
-- 不得伪造附件路径、字节数或 SHA-256。
+- 冻结输入和用户源 HTML 都是只读的。严格按 input-manifest.json 的 readOrder 读取冻结输入；当前 Attempt 的受控 USER_SUPPLEMENT.json，以及其中尚未撤销的受控补充所引用的 supplement-attachments/ 附件，是 readOrder 之外唯一可读取的内容。不得扫描其他任务、版本、项目目录或用户文件。
+- 只读取 PROMPT.md 列出的项目受管附件，以及 USER_SUPPLEMENT.json 中当前有效补充所引用的当前 Attempt 附件；不得追溯用户的外部原文件，也不得伪造附件路径、字节数或 SHA-256。
+- 只把一个完整 HTML 写入 PROMPT.md 的“唯一 HTML 输出”绝对路径。输出文件名已经固定，不得自行计算、改名或写入 input/base/index.html、output/index.html 等其他路径。
+- 不得修改 PROJECT.md、USER_SUPPLEMENT.json、冻结输入或协议文件。
 
 ## 完成
 
-- 写完 PROMPT.md 指定的唯一输出文件后，最后运行其中的最终化（finalizer）命令。
-- 不得手写 completion.json；只有 finalizer 生成有效的 completion.json，PageRoot 才会创建新版本。
-- 如果 finalizer 返回 \`status=cancelled\`，本轮已在源页结束；立即停止，不要重试，也不要写入其他路径。
+- 不得手写 completion.json；只有 finalizer 生成的有效 completion.json 才表示完成。
+- finalizer 返回 \`status=cancelled\` 时立即停止，不要重试或写入其他路径。
 `;
 }
 
@@ -4752,9 +4737,6 @@ function promptForRun(
     attemptRoot,
     ...output.relativePath.split("/"),
   );
-  const semanticVersion = semanticVersionLabel(
-    activeRun.candidateVersionOrdinal,
-  );
   const attachmentLines = (activeRun.frozenComments ?? []).flatMap(
     (comment) => (comment.attachments ?? []).map((attachment) => [
       `- 附件 ${attachment.attachmentId} · 评论 ${comment.commentId} · 目标 ${comment.target.targetId}`,
@@ -4772,7 +4754,7 @@ function promptForRun(
 
 ${attachmentLines.join("\n")}
 
-只读取上面的项目内副本，不要追溯用户的外部原文件。若绝对路径因项目整体移动而失效，请以 Request 根目录解析相对路径。
+若绝对路径因项目整体移动而失效，请以 Request 根目录解析相对路径。
 `
     : "";
   return `# PageRoot 本轮修改 · ${project.displayName}
@@ -4783,42 +4765,36 @@ ${attachmentLines.join("\n")}
 - 项目 / 文档：\`${context.projectId}\` / \`${context.documentId}\`
 - Request / Attempt：\`${activeRun.requestId}\` / \`${activeRun.attemptId}\`
 - 版本身份：上一版 \`${activeRun.previousVersionId}\` · 基于 \`${activeRun.basedOnVersionId}\` · 候选 \`${activeRun.candidateVersionId}\`（\`${activeRun.candidateVersionLabel}\`）
-- 原用户文件名：\`${project.displayName}\`
-- 本轮文件版本号：\`${semanticVersion}\`
-- 固定输出文件名：\`${output.fileName}\`
+- 输入文件 / 输出文件：\`${project.displayName}\` / \`${output.fileName}\`
 
-## 执行顺序
+## 执行
 
-1. 严格按 input-manifest.json 的 readOrder 依次读取冻结输入；不要读取未列入 readOrder 的审计归档，也不要扫描其他任务、版本或项目。
-2. 本轮有效要求由 change-request.json 中的冻结要求，以及 USER_SUPPLEMENT.json 中已经受控记录且尚未撤销的对话补充共同组成。USER_SUPPLEMENT.json 是 readOrder 之外唯一允许额外读取的动态记录。
-3. 同时遵守 input/AI_RULES.md 和 input/PROJECT.md；冻结输入与用户源 HTML 都是只读的。
-4. change-request.json 已包含完整的评论、目标和附件关系；如有附件，必须把附件内容与用户原话一起理解。
-5. 只修改用户明确指定的区域，以及完成要求所必需的关联内容；不要顺手重构、美化或修复其他区域。
-6. 只把一个完整 HTML 写入下方“唯一 HTML 输出”的精确路径；不得改名、不得自行递增版本号、不得写 output/index.html 或其他路径。input/base/index.html 只是冻结输入的固定存储名，不代表用户文件名。不得直接编辑 USER_SUPPLEMENT.json、PROJECT.md、冻结输入或其他协议文件。
+1. 从下方“冻结输入清单”开始，严格按其 readOrder 读取本轮输入。
+2. 以 change-request.json 的冻结要求和 USER_SUPPLEMENT.json 中尚未撤销的受控补充为本轮有效要求，同时遵守 AI_RULES.md 和 PROJECT.md。
+3. change-request.json 已包含评论、目标和附件的完整关系；如有附件，将附件内容与用户原话一起理解。
+4. 完成本轮修改后，按“完成”章节结束任务。
 
 ## 文件位置
 
-- Request 根目录：\`${requestRoot}\`
-- Attempt 根目录：\`${attemptRoot}\`
+- Request / Attempt 根目录：\`${requestRoot}\` / \`${attemptRoot}\`
+- 冻结输入清单：\`${path.join(requestRoot, "input-manifest.json")}\`
 - PageRoot 通用规则：\`${path.join(requestRoot, "input", "AI_RULES.md")}\`
+- 本轮修改要求：\`${path.join(requestRoot, "change-request.json")}\`
 - 项目长期规则：\`${path.join(requestRoot, "input", "PROJECT.md")}\`
 - 冻结 HTML：\`${path.join(requestRoot, "input", "base", "index.html")}\`
-- 本轮修改要求：\`${path.join(requestRoot, "change-request.json")}\`
-- 冻结输入清单：\`${path.join(requestRoot, "input-manifest.json")}\`
 - 对话补充记录：\`${path.join(attemptRoot, "USER_SUPPLEMENT.json")}\`
 - 唯一 HTML 输出：\`${outputPath}\`
 
 ## 记录对话补充
 
-用户在当前对话中新增、修订或撤销要求时，每一条都必须先单独记录：
+用户在当前对话中新增、修订或撤销要求时，先为每条消息运行一次下方命令：
 
-- \`userText\` 保留用户原话。
-- \`action\` 只能是 \`add\`、\`amend\` 或 \`retract\`。
+- \`idempotencyKey\` 对同一条消息保持稳定且唯一，\`userText\` 保留用户原话。
+- \`action\` 使用 \`add\`、\`amend\` 或 \`retract\`。
 - \`add\` 可用 \`refersTo\` 指向它补充的原始 \`instructionId\`；\`amend\` / \`retract\` 必须引用已有的 \`instructionId\` 或 supplement \`recordId\`。
-- 能取得用户发送的原始图片或文件时，在 \`attachments\` 中传入本机普通文件的绝对路径，helper 会复制、计算 SHA-256 并归档。
-- 只能看到附件但拿不到原件时，使用 \`evidenceState=description-only\` 和 \`evidenceDescription\`；绝不能伪造附件路径。
+- 能取得原始附件时，在 \`attachments\` 中传入本机普通文件的绝对路径；只能看到附件时，改用 \`evidenceState=description-only\` 和 \`evidenceDescription\`。
 
-示例（替换 JSON 内容；每条消息使用稳定且唯一的 \`idempotencyKey\`）：
+示例（替换 JSON 内容）：
 
 \`\`\`sh
 ${supplementCommand} <<'PAGEROOT_SUPPLEMENT_JSON'
@@ -4835,20 +4811,18 @@ ${supplementCommand} <<'PAGEROOT_SUPPLEMENT_JSON'
 PAGEROOT_SUPPLEMENT_JSON
 \`\`\`
 
-只有命令返回 \`ok=true\` 后才能执行该条要求。成功后重新读取 USER_SUPPLEMENT.json；失败时停止该条修改并说明原因。最终化完成后，本 Attempt 会封存；之后的新要求必须回到源页开启新一轮。
+命令返回 \`ok=true\` 后，重新读取 USER_SUPPLEMENT.json 并执行该条要求；否则停止该条修改并说明原因。finalizer 完成后，本 Attempt 会封存，之后的新要求必须回到源页开启新一轮。
 
 ${attachmentSection}
 
 ## 完成
 
-确认 \`${output.relativePath}\` 已完整写入后，最后执行以下唯一最终化（finalizer）命令：
+完整写入 \`${output.relativePath}\` 后，执行以下 finalizer 命令：
 
 \`\`\`sh
 ${command}
 \`\`\`
 
-不要手写 completion.json。只有 finalizer 生成有效的 completion.json，PageRoot 才会创建新版本。
-如果命令返回 \`status=cancelled\`，表示本轮已在源页结束：立即停止，不要重试，也不要改写到其他路径。
 `;
 }
 

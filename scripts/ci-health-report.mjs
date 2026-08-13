@@ -258,6 +258,7 @@ function reviewCompletionAfterReady(pullRequest, readyAt) {
   return finalCodexCompletion({
     reviews: pullRequest?.reviews || [],
     issueComments: pullRequest?.issueComments || pullRequest?.issue_comments || [],
+    issueReactions: pullRequest?.issueReactions || pullRequest?.issue_reactions || [],
     expectedHeadSha: headSha,
     readyAt,
   });
@@ -801,11 +802,12 @@ export async function pullRequestMetrics({ repositoryPath, token, since }) {
     const batch = pullRequests.slice(index, index + batchSize);
     const entries = await Promise.all(batch.map(async (pullRequest) => {
       const number = Number(pullRequest.number);
-      const [timelineEvents, reviews, reviewComments, issueComments] = await Promise.all([
+      const [timelineEvents, reviews, reviewComments, issueComments, issueReactions] = await Promise.all([
         restPages({ apiPath: `/repos/${repositoryPath}/issues/${number}/events`, token }),
         restPages({ apiPath: `/repos/${repositoryPath}/pulls/${number}/reviews`, token }),
         restPages({ apiPath: `/repos/${repositoryPath}/pulls/${number}/comments`, token }),
         restPages({ apiPath: `/repos/${repositoryPath}/issues/${number}/comments`, token }),
+        restPages({ apiPath: `/repos/${repositoryPath}/issues/${number}/reactions`, token }),
       ]);
       return {
         ...pullRequest,
@@ -813,6 +815,7 @@ export async function pullRequestMetrics({ repositoryPath, token, since }) {
         reviews,
         reviewComments,
         issueComments,
+        issueReactions,
       };
     }));
     enriched.push(...entries);

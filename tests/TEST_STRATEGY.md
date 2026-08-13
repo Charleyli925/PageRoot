@@ -9,7 +9,7 @@
 | `npm run gate:edit` | 一次局部修改后 | 只运行影响映射命中的 Node 文件；必要时 typecheck | 快速发现局部逻辑错误，不启动浏览器或 Electron |
 | `npm run gate:task` | 一个开发任务完成时 | 静态检查、受影响 Node 文件，以及相关 Browser/Electron/AI 冒烟 | 在较短时间内证明生产链路已经接通 |
 | PR `pr-feedback` | `opened/synchronize/reopened` | 按影响映射选择 Node/编译检查 | 普通推送无论 Draft/Ready 都不重复消费完整矩阵；仅切回 Draft 不产生 Feedback |
-| `review-policy` | 最终 Tree 从 Draft 转为 Ready，由 Ready 唯一触发最终审阅 | 实时 head/base、post-Ready exact-commit Codex review 或不可变 clean comment、30 秒 settle window、活动非 outdated P0/P1 线程和 P0/P1 `CHANGES_REQUESTED` | 旧 head/base、未结束 review、P0/P1 阻断时不能通过；P2/P3/unclassified 写为债务而不阻断 |
+| `review-policy` | 最终 Tree 从 Draft 转为 Ready，由 Ready 唯一触发最终审阅 | 实时 head/base、post-Ready exact-commit Codex review、不可变 clean comment 或 Codex Bot root `+1`、30 秒 settle window、活动非 outdated P0/P1 线程和 P0/P1 `CHANGES_REQUESTED` | 旧 head/base、旧轮次/真人/非 `+1` reaction、未结束 review、P0/P1 阻断时不能通过；P2/P3/unclassified 写为债务而不阻断 |
 | `Review Gate Recovery` | Codex 精确提交的 review/clean comment 在 `review-policy` 超时后到达 | trusted default-branch code 重验 live Ready head/base、当前 review policy、原 run timeout artifact、所有非 review job 结果 | 仅对原 run 调用 failed-job rerun；测试失败、P0/P1、Draft/closed、SHA/base 改变或 artifact 不符全部 fail closed |
 | `baseline-policy` | 分支策略通过，与 review-policy 并行 | 全局依赖 advisory policy 与 packaged-runtime closure | 基线红时不启动 Linux build、Browser 或 macOS Electron runner |
 | 一次性晋升 `release-gate` | review、baseline、完整测试和相关 dry run 都完成的最终 PR Tree | 全量 Node、三分片完整 Browser、独立 Native Electron、独立确定性 AI 闭环、真实 HTML 发现式门禁、即时 review revalidation 与 Tree Hash 凭证 | 每个最终候选只跑一次；后续新 SHA 必须重新 Draft 后 Ready |
@@ -39,8 +39,10 @@ PR 必须从 Draft 开始。普通推送由独立的 `PR Feedback` workflow 处�
 完整通过。只切回 Draft 不触发 Feedback。冻结 head 并更新到当前 base 后，
 直接 Ready 一次；无需再用完整 head/base SHA marker 在 Draft 请求第二轮审阅。
 `review-policy` 只接受 Ready 后携带当前完整 `commit_id` 和匹配
-`Reviewed commit` marker 的 Codex review，或不可编辑的 exact-commit clean
-Codex comment。它在每轮轮询中重验 live head/base，完成后等待 30 秒，再检查
+`Reviewed commit` marker 的 Codex review、不可编辑的 exact-commit clean
+Codex comment，或最新 Ready 后由 `chatgpt-codex-connector[bot]` 加在 PR 根节点的
+`+1`。reaction 没有 SHA 字段，因此只通过最新 Ready 与持续重验的冻结 head/base
+绑定候选；旧轮次、真人和其他 reaction 都忽略。它在每轮轮询中重验 live head/base，完成后等待 30 秒，再检查
 未解决且未 outdated 的 P0/P1 线程。只有明确标为 P0/P1 的 `CHANGES_REQUESTED` 必须阻断；
 P2/P3/unclassified finding 则写入 review debt，不应为了清理它们额外生成
 候选 SHA。空 review、错误 commit、普通讨论文本和早于 Ready 的信号不参与判定。
@@ -66,14 +68,22 @@ PR 批量是建议而非固定限制：用 CI Health 的 Ready 次数、candidat
   回执、未知 history action 的权威核对与同一 actionId 重放、恢复记录与 stale context。
   Workbench 只把 Canvas 输入及结构化 Outcome/Event 映射为界面，不再持有 timer、
   audit in-flight、recovery identity 或 history Promise。
-- `ProjectWorkflow`：fake Canvas/ProjectOpen Port 与既有 Session owner 直接验证
+- `ProjectWorkflow`：fake Canvas/ProjectOpen Port、窄 `ViewStatePort`/`RecentRunsPort`
+  与既有 Session owner 直接验证
   hydration generation fence、accepted-result FIFO、drain 后 native input 延后与恢复、
   close-awaiting external cancellation、committed close/abort freeze 身份、stuck hydration
   快速关闭、load/source stale fence，以及 Canvas acknowledgement 失败时旧页面权威回滚。
   同一集还验证安全文件重命名的完整 Hash/context fence、丢失桌面响应的 active-file
   对账、单飞与迟到结果不能 rebase 新项目。
-  Workbench 只保留 file input 和 Outcome/Event 的展示映射；专项 Node 集与完整 Electron
-  套件共同证明真实 close/open/hydration 路径。
+  `WorkspaceController` 负责把 `RecentRunsPort` 和 ProjectWorkflow event channel 接回
+  aggregate snapshot/event stream。Workbench 只保留 file input、host adapter 和
+  Outcome/Event 的展示映射；专项 Node 集与完整 Electron 套件共同证明真实
+  close/open/hydration 路径。
+- `ProjectRulesWorkflow`：fake Bridge、Scheduler、Project/Run Session 与窄
+  presentation port 验证 `PROJECT.md` 的 700ms debounce、保存中继续输入时的完整 drain、
+  unknown-write 单次 authority reconciliation、late read/write stale fence、run lock、
+  dispose timer fence 与显式还原先退役原生输入节点。`ProjectRulesSession` 只验证 working
+  copy/composition/save projection；Workbench 只投影 Controller snapshot 并转发 intent。
 - `CommentWorkflow`：fake Bridge、RecoveryStore 和现有 Comment/Draft Session 证明
   lazy registration、单次 Draft 持久化、附件部分成功、跨项目迟到上传补偿、编辑取消
   仅删除 staged 附件，以及 unknown Draft POST 只通过 authority query 收敛而不重复
@@ -91,10 +101,15 @@ PR 批量是建议而非固定限制：用 CI Health 的 Ready 次数、candidat
   以及 history/current navigation 的完整 Document + Version rollback 与 byte oracle。
   Workbench 只保留 review filters/layout/lease、动画和 Outcome/Toast 映射；architecture
   gate 将其直接 Bridge 调用锁定为 0。
+- `WorkspaceController`：runtime factory 是生产组合的唯一入口；它构造唯一的 Bridge
+  client、共享 RunSession 与各业务 Session，并作为唯一 application aggregate observer
+  生成冻结的 Project/Document/Comment/Run/Version snapshot。Node 测试证明晚到 observer
+  在 `dispose()` 后不再发布；Document snapshot 只投影 `hasPendingWrite`/`isFlushing`，
+  不泄露写入内容或 Promise。Workbench 只能订阅该 aggregate snapshot 与 event stream。
 - Bridge 集成环境：每个真实 Bridge 测试各自创建临时 root、workspace、sources、端口、子进程与 stdout/stderr；同一测试可为重启恢复顺序启动新进程，但不同测试绝不共享 workspace 或长寿命 Bridge。环境默认携带配置的 Bridge auth token，测试缺失/错误 token 时必须显式关闭或覆盖它；HTTP/连接失败保留 response text 与 Bridge 日志，不重试 mutation。
 - Schema 与 scope 的纯函数矩阵继续独立拥有 strict union、identity/path/hash drift、TargetRef/topology 与 guidance 判定；真实 lifecycle 集成只证明产物 bundle、official finalizer、ready/attention 和 activation 的持久化边界。SourceTransaction failpoint 表逐 case 保留独立的 disk、runtime、history 与 audit exactly-once oracle，不以最终 200 取代 commit-point 断言。
 - 通知合同：TypeScript 判别联合拥有 `disposition × action` 合法矩阵；`direct-action` 和 `user-choice` 必须携带受限恢复 action，`silent-recover` 与 `defer-and-resume` 明确禁止 action。Node policy 测试拥有 priority、dedupe、sticky 与 timeout；Browser 测试拥有 `aria-live`、键盘、按钮和 hover/focus pause。不得再扫描 Workbench AST 或内部 helper 名称来证明某个 `setToast` 调用是否合法。
-- 源码字符串合同只保留显式 architecture/security/packaging/dependency/workflow boundary。应用架构形状由 `scripts/check-architecture.mjs` 唯一拥有，`tests/architecture-boundaries.test.mjs` 只执行该 checker；当前显式清单为层级 import/retired operation，raw Bridge/storage，Session/drain owner，SourcePatch + SourceTransaction 发布，精确 source freeze 及 AI 请求绑定，Edit runtime projection 禁止，native user/system priority 和 DOM replacement 前 lease retirement。业务测试不得读取、拼接 Workbench/Canvas 大文件或扫描 JSX/CSS/copy/callback 顺序；它们使用 Session、算法、Browser 或 Electron 的可观察结果。`tests/rendered-html.test.mjs` 是独立例外：它必须执行真实 `dist/server/index.js`/`worker.fetch`，只验证公开 SSR 入口与已退役托管/编辑器 surface，不读取生产实现源码。
+- 源码字符串合同只保留显式 architecture/security/packaging/dependency/workflow boundary。应用架构形状由 `scripts/check-architecture.mjs` 唯一拥有，`tests/architecture-boundaries.test.mjs` 只执行该 checker；当前显式清单为层级 import/retired operation，Workbench Bridge 调用为 0、final runtime factory、aggregate Session observer、唯一 Session construction owner、typed drain owner、Controller 反向 UI import 和 generic Bridge escape，及 SourcePatch + SourceTransaction 发布、精确 source freeze 及 AI 请求绑定、Edit runtime projection 禁止、native user/system priority 和 DOM replacement 前 lease retirement。该集还必须保留 View Bridge call、Controller React import、generic Bridge escape、duplicate Session owner、missing drain command 的负 fixture。业务测试不得读取、拼接 Workbench/Canvas 大文件或扫描 JSX/CSS/copy/callback 顺序；它们使用 Session、算法、Browser 或 Electron 的可观察结果。`tests/rendered-html.test.mjs` 是独立例外：它必须执行真实 `dist/server/index.js`/`worker.fetch`，只验证公开 SSR 入口与已退役托管/编辑器 surface，不读取生产实现源码。
 - 交付合同按 owner 分层：desktop-package.test.mjs 只拥有 package.json allowlist、Bridge/Schema/资源闭包、CSP、entitlements、Info.plist 清理和固定包身份；packaged-artifact-gate.test.mjs 必须调用真实 verifier，拥有 app.asar、Bridge、Schema、metadata、retired closure、签名 profile 和 DMG/ZIP 边界；预加载 IPC、更新、Preview、窗口、Bridge 生命周期、遥测和 Workbench 行为必须留在各自 Node 或 Electron owner，不能因它们被打包而回流到 package 测试。
 - Developer Preview、Release Dry Run、Candidate 和 Release 是四个显式 trust profile。公共 release fixture 每次创建独立 package/build-info/telemetry/application-update/identity 值和独立临时目录；它不签名、不调用 Apple 命令、不访问网络，也不能以无 profile 的宽泛对象混淆正式与非正式通道。fixture Hash 期望值必须继续由测试侧独立 crypto 计算，不能调用被测 evaluator。
 - Workflow 源码扫描只证明凭证、exact Tree、权限和阶段顺序等 release architecture 边界；普通步骤文案和已由 verifier/owner 覆盖的行为不得作为第二个字符串 oracle。
@@ -105,7 +120,9 @@ PR 批量是建议而非固定限制：用 CI Health 的 Ready 次数、candidat
   direct Canvas/SVG 与唯一稳定的 source-empty 宿主，删除/歧义/类型冲突、任意
   HTML/`tbody`、computed selector 和脚本依赖猜测都 fail-closed。owner 测试拥有
   Review-only 窄请求、source SHA/绑定、isolated world、一次 rect/PNG、PNG
-  SHA/像素/字节预算、deadline 和 cleanup。Electron 用一份合成报告证明 Edit
+  SHA/像素/字节预算、可见 DOM/SVG 文字哈希、deadline 和 cleanup。Node 还直接
+  覆盖文字/数字哈希严格变化，以及同文字单次 PNG 的 RGB 误差预算不会把微小
+  栅格噪声判作变化。Electron 用一份合成报告证明 Edit
   不执行作者脚本、不请求或挂载运行态位图，Preview 中同一 Canvas/SVG 正常运行，
   authored inline SVG 仍在 Edit 原生可见且源文件字节不变。
   桌面编辑画布还必须
@@ -194,11 +211,13 @@ PR 批量是建议而非固定限制：用 CI Health 的 Ready 次数、candidat
   返回/重开。正式 Electron 审阅用例还必须证明默认“双页 + 全部变化 +
   18%”、页面/筛选/可见度/导航彼此独立、左右单页和双页均铺满可用
   Canvas、完全相同文字不被标记、叶子级精确文字差异、重复短文案和中间
-  插入结构不会错配、未修改指标卡不产生文案/结构/视觉假阳性、文本新增
-  绿框且无下划线/删除红框和红色虚线删除线/结构蓝框/视觉紫框、每个语义
-  变化组只有一个简短标注且整块新增统一为“新增内容”、单字框具有受行边界
-  限制的最小可读宽度、局部跨行修改生成独立普通行框而非锯齿多边形、密集
-  多行改写只生成一个“段落改写”文本块框、整卡背景/
+  插入结构不会错配、未修改指标卡不产生文案/结构/视觉假阳性、新增字符
+  逐字显示绿色实点/删除字符逐字显示红色虚线删除线/文字范围统一紫色实线/
+  结构蓝框/视觉紫框、每个语义变化组只有一个简短标注且整块新增统一为
+  “新增内容”、单字框具有受行边界限制的最小可读宽度、局部跨行修改生成
+  独立普通短语框而非锯齿多边形、三组短语或 60% 首尾证据跨度提升为完整
+  行框、至少三行且 75% 行已提升时只生成一个“段落改写”文本块框、每个
+  字符证据都被最终范围框包含、整卡背景/
   边框/前景色同时变化时每张卡只生成一个贴合完整 border box 的普通矩形
   且相邻卡片不融合、`block-size` 仍归属完整盒子、仅继承文字颜色变化时
   直接测量文字 Range 而不框容器、每个最终框与遮罩透明孔几何一致、
@@ -215,11 +234,11 @@ PR 批量是建议而非固定限制：用 CI Health 的 Ready 次数、candidat
   编辑且保留评论与候选文件，以及确认打开全程不显示等待 AI 页面。
   同一正式 Electron 用例覆盖支持范围内的 source-empty host、直接 Canvas/SVG、静态审阅优先呈现，以及 owner 失败或迟到时不改变静态数量、文本、TargetRef 或 UI。Node 覆盖 SourceHostResolver 的唯一配对、删除/歧义/类型冲突的静默省略，owner 的窄请求、原始 source SHA/绑定验证、isolated world、一次 rect/PNG、PNG/像素/字节预算、deadline 和 cleanup。Browser 另外证明点击页面 padding 与 App 空白会一起结束编辑、选区和工具栏。测试自动生成受控 AI 输出并执行正式 finalizer，不等待外部模型或真人接力。
 - Review Runtime Snapshot：Review 通过其唯一 owner、请求 envelope 和 PNG parser 完成一个 before/after pair。Electron 回归验证静态审阅先呈现，owner 失败或迟到不改变静态审阅；作者页不能读取 candidate binding、TargetRef、截图或 owner 结果。新 owner 文件必须在 package allowlist、packaged artifact gate 和启动 smoke 中出现。
-- 运行态视觉合同只有一个 Review-only 生产声明：Node 直接验证 contract、32 个 Snapshot 上限、1500ms owner deadline、完整 source SHA 与 contractVersion + sessionId + side 封包；Review 的生产者、消费者不得各自重复边界。测试覆盖 direct Canvas/SVG、source-empty 稳定宿主、删除/歧义/类型冲突、超大 PNG、无限脚本与 navigation/popup/download/permission 拒绝。任意脚本因果、computed selector、评论范围分组、第二轮确认和 hostile 组合矩阵不再是候选 oracle。
+- 运行态视觉合同只有一个 Review-only 生产声明：Node 直接验证 contract、32 个 Snapshot 上限、1500ms owner deadline、完整 source SHA 与 contractVersion + sessionId + side 封包；Review 的生产者、消费者不得各自重复边界。测试覆盖 direct Canvas/SVG、source-empty 稳定宿主、删除/歧义/类型冲突、超大 PNG、可见文字哈希不泄露原文、同文字截图的 RGB 噪声预算、无限脚本与 navigation/popup/download/permission 拒绝。任意脚本因果、computed selector、评论范围分组、第二轮确认和 hostile 组合矩阵不再是候选 oracle。
 - 评论标记必须覆盖无 `id`、`data-*`、`name`、`aria-label` 的 class-only 普通目标：即使作者插入或重排同标签兄弟，before bootstrap 也必须仅凭首个私有响应中的冻结源 `sourceNodeId` 路径/指纹绑定解析器创建的原元素并保留 marker。测试还必须证明 HTML、后续 bootstrap 读取和作者可枚举 DOM 均不含该绑定、评论正文、评论 key 或定位映射；恶意作者脚本读取当前页面或 bootstrap 地址后仍不得产生伪造 marker。恶意的作者 capture listener 即使尝试读取 challenge、以同一 challenge 伪造评论端口，也既看不到评论 channel 请求，也收不到 `comment-targets`。
 - Review 只比较一个冻结的 before/after owner pair。任一侧 unavailable、无效、超时、取消或迟到时静默省略该 marker，不影响静态审阅或其他已验证候选；不为动画、随机或任意 hostile 行为启动第二轮取证。
 - 审阅滚动回归必须直接证明页面概览会递增手势代次、取消待执行跟随帧并保留语义映射；评论布局契约还必须接受超出 100,000px 的有限长文档坐标，同时继续拒绝非有限值和超过安全上限的坐标。
-- 文案 footprint 算法由 Node 直接用字符范围 oracle 验证：覆盖有意义标点前后的独立替换、纯插入、纯删除、稳定句首词、短中文块的字符级辅助配对、超长无标点文本中的多处远距离精确修改、短间隔归组、稳定句拆分和密集成对改写提升，以及“品均基本持平”替换为“单品效率整体稳定，增幅仅+0.10%”时不能用偶然相同的“品”抵消增删。纯插入/纯删除必须严格镜像，并分别断言 operation、两侧 evidence ranges、无证据侧的不可见 anchor 与空 footprint groups；整句单侧变化只能得到 sentence scope，存在稳定外句或缺少任一侧 evidence 时不得提升为 block。仅换行变化使用 layout operation，且两侧均无红绿文字 evidence。语义对齐另以独立 Node oracle 覆盖头/中/尾新增、重复编号与表格类目、多解不猜、显式 ID 移动、普通插入不误判移动、稳定前后边界中的长插入、前后镜像，以及超过 60,000 DP 单元后的有限前瞻回退；结果必须保持父级边界和单调顺序。Electron 正式闭环必须按最终 geometry 验证：编号行修改前零 marker/框/孔/标签、修改后只有第四行；纯删除修改后零框零孔，但内容地图导航落到 collapsed Range 上下文而不是 section 顶；同一元素上的 box-style 与 layout 必须作为两个独立投影事实，分别产生自己的 canonical frame 和 mask hole，且互不覆盖；直接同父级的图片、SVG、Canvas 和输入控件必须作为原子语义单元保留，新增/删除生成自身结构事实，唯一稳定身份的样式变化进入视觉配对而稳定文字邻居零误报；新增表格行在全部模式只有一个 `tr` 框、结构模式只有父行框、文案模式只显示 cell 内 Range 行框，旧重复行零误报。窄 cell 跨行、四行文字、嵌套 inline/列表、authored marker/`div`/`svg` 样式、适应与 100% 缩放、单双页和主窗口 resize 后都必须重新测量；文字框数量与 Range 行盒一致、同组一个标签且无 shaped，overlay 与 mask hole 的数量、坐标和 path 逐项相同。
+- 文案差异算法由 Node 直接用字符范围 oracle 验证：覆盖有意义标点前后的独立替换、纯插入、纯删除、稳定句首词、短中文块的字符级辅助配对、超长无标点文本中的多处远距离精确修改、短间隔归组和稳定句拆分，以及“品均基本持平”替换为“单品效率整体稳定，增幅仅+0.10%”时不能用偶然相同的“品”抵消增删。纯插入/纯删除必须严格镜像，并分别断言 operation、两侧 `evidenceRanges`、语义 `phraseGroups`、无证据侧的不可见 anchor；规划结果不得再携带 `textScope`、`textDensity` 或事实层 block/sentence 决策。仅换行变化使用 layout operation，且两侧均无红绿文字 evidence。语义对齐另以独立 Node oracle 覆盖头/中/尾新增、重复编号与表格类目、多解不猜、显式 ID 移动、普通插入不误判移动、稳定前后边界中的长插入、前后镜像，以及超过 60,000 DP 单元后的有限前瞻回退；结果必须保持父级边界和单调顺序。Electron 正式闭环必须按最终 geometry 验证：编号行修改前零 marker/框/孔/标签、修改后只有第四行；纯删除修改后零框零孔，但内容地图导航落到 collapsed Range 上下文而不是 section 顶；同一元素上的 box-style 与 layout 必须作为两个独立投影事实，分别产生自己的 canonical frame 和 mask hole，且互不覆盖；直接同父级的图片、SVG、Canvas 和输入控件必须作为原子语义单元保留，新增/删除生成自身结构事实，唯一稳定身份的样式变化进入视觉配对而稳定文字邻居零误报；新增表格行在全部模式只有一个 `tr` 框、结构模式只有父行框、文案模式只显示 cell 内 Range 范围，旧重复行零误报。窄 cell 跨行、四行文字、嵌套 inline/列表、authored marker/`div`/`svg` 样式、适应与 100% 缩放、单双页和主窗口 resize 后都必须重新测量；逐字新增实点与删除线必须保持精确，短语/完整行/段落提升分别覆盖三组短语、60% 跨度和三行 75% 阈值，所有文字范围框必须完整包含字符证据、保持一个干净矩形且同组只有一个标签；overlay 与 mask hole 的数量、坐标和 path 逐项相同。
 - 遮罩投影必须另有真实 Electron 像素 oracle：两个不同 canonical facts 的部分重叠纯色夹具中，两个单孔与重叠区均保持清晰，孔外在 0/18/50/100 context visibility 下正确虚化；`all/text/structure/style` 的筛选应与框同步刷新。测试还验证 session/side/projection-epoch 唯一的 SVG luminance mask、white-background/black-hole 语义、mask units，以及 hostile `svg path`、`mask rect`、通用 `path/rect` CSS 和同名前缀 id 均不能污染受管遮罩。不得用 `isPointInFill` 或 DOM attached 断言取代该渲染 oracle。
 - 应用更新：Node 用伪 updater 证明 stable-only、点击后单次下载、差分开启、普通退出不安装、仅 downloaded 状态可安装和错误降级；Preload/Workbench 合同证明状态快照、下载/安装意图、无 Canvas 完成横幅与重启确认保持窄边界。
 - 本地外部动作：五类 Finder/默认浏览器/项目记录入口由 Node 以真实调用计数证明一次用户意图只执行一次副作用，失败会保留可见错误和可用项目，等待超过旧 retry delay 也不会重放；第二次调用只能来自新的用户意图。Bridge 的只读 GET/HEAD 重试保留在 transport 层，`openFolder` 等命令不复用它。默认浏览器打开还直接执行主进程操作与 sender 权限门，证明 malformed、非 HTML、未知项目、非普通文件和非可信 frame 均不会调用 shell；Workbench 合同只补充证明精确 edit revision 的围栏、写回和 IPC 顺序。

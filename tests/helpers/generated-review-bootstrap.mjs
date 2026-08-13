@@ -36,7 +36,7 @@ export function generatedReviewBootstrap(
     },
   ).outputText;
   const context = vm.createContext({
-    RUNTIME_VISUAL_CONTRACT_VERSION: 1,
+    RUNTIME_VISUAL_CONTRACT_VERSION: 2,
     RUNTIME_VISUAL_CONTRACT: {
       identityAttributeLimit: 24,
       pageBudget: {

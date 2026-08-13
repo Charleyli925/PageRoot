@@ -14,6 +14,8 @@ export type DocumentSessionSnapshot = {
   lastPersistedRevision: number;
   persistState: DocumentPersistState;
   persistError: string;
+  hasPendingWrite: boolean;
+  isFlushing: boolean;
 };
 
 export type PersistedBoundaryResult =

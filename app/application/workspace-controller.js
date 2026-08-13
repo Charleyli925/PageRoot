@@ -1,11 +1,21 @@
-import { isBridgeRequestError } from "./bridge-client.js";
+import { createRuntimeBridgeClient, isBridgeRequestError } from "./bridge-client.js";
+import { CommentSession } from "./comment-session.js";
 import { CommentWorkflow } from "./comment-workflow.js";
+import { DocumentSession } from "./document-session.js";
 import { DocumentWorkflow } from "./document-workflow.js";
+import { DraftSession } from "./draft-session.js";
 import { DrainCoordinator } from "./drain-coordinator.js";
 import { ExternalFileOpenSession } from "./external-file-open-session.js";
 import { ProjectApplicationSession } from "./project-application-session.js";
+import { ProjectSession } from "./project-session.js";
+import { ProjectRulesSession } from "./project-rules-session.js";
+import { ProjectRulesWorkflow } from "./project-rules-workflow.js";
 import { ProjectWorkflow } from "./project-workflow.js";
+import { createBrowserRecoveryStore } from "./recovery-store.js";
+import { RunSession } from "./run-session.js";
 import { RunWorkflow } from "./run-workflow.js";
+import { SourceHistorySession } from "./source-history-session.js";
+import { VersionSession } from "./version-session.js";
 import { VersionWorkflow } from "./version-workflow.js";
 import { createWorkspaceControllerCodecs } from "./workspace-controller-codecs.js";
 
@@ -106,6 +116,84 @@ export function registrationContextFromOutcome(outcome) {
   ));
 }
 
+// Runtime composition belongs to the Application boundary. Workbench supplies
+// only pure codecs and narrow browser/desktop host ports; it never constructs
+// mutable Session facts or a Bridge client.
+export function createRuntimeWorkspaceController({
+  initial = {},
+  draftSession: draftSessionOptions = {},
+  codecs,
+  ports,
+  documentWorkflow,
+  commentWorkflow,
+  projectRulesWorkflow,
+  projectWorkflow,
+  runWorkflow,
+  versionWorkflow,
+  clock,
+  recoveryStore = createBrowserRecoveryStore(),
+} = {}) {
+  if (
+    !documentWorkflow
+    || !commentWorkflow
+    || !projectRulesWorkflow
+    || !projectWorkflow
+    || !runWorkflow
+    || !versionWorkflow
+  ) {
+    throw new TypeError(
+      "Runtime WorkspaceController requires every application workflow.",
+    );
+  }
+  const bridgeClient = createRuntimeBridgeClient();
+  const runSession = new RunSession({
+    sourcePath: initial.runSourcePath || null,
+  });
+  return new WorkspaceController({
+    bridgeClient,
+    projectSession: new ProjectSession(),
+    documentSession: new DocumentSession({
+      html: typeof initial.documentHtml === "string" ? initial.documentHtml : "",
+    }),
+    commentSession: new CommentSession(),
+    draftSession: new DraftSession({
+      bridgeClient,
+      encodeComment: draftSessionOptions.encodeComment,
+      encodeChangeEvent: draftSessionOptions.encodeChangeEvent,
+    }),
+    versionSession: new VersionSession(),
+    sourceHistorySession: new SourceHistorySession(),
+    codecs,
+    ports,
+    documentWorkflow: {
+      ...documentWorkflow,
+      recoveryStore: documentWorkflow.recoveryStore || recoveryStore,
+    },
+    commentWorkflow: {
+      ...commentWorkflow,
+      runSession,
+      recoveryStore: commentWorkflow.recoveryStore || recoveryStore,
+    },
+    projectRulesWorkflow: {
+      ...projectRulesWorkflow,
+      runSession,
+    },
+    projectWorkflow: {
+      ...projectWorkflow,
+      runSession,
+    },
+    runWorkflow: {
+      ...runWorkflow,
+      runSession,
+    },
+    versionWorkflow: {
+      ...versionWorkflow,
+      runSession,
+    },
+    clock,
+  });
+}
+
 export class WorkspaceController {
   #bridgeClient;
   #projectSession;
@@ -114,6 +202,7 @@ export class WorkspaceController {
   #draftSession;
   #versionSession;
   #sourceHistorySession;
+  #runSession = null;
   #codecs;
   #hashPort;
   #recoveryPort;
@@ -124,20 +213,35 @@ export class WorkspaceController {
   #documentWorkflowUnsubscribe = null;
   #commentWorkflow = null;
   #commentWorkflowUnsubscribe = null;
+  #projectRulesWorkflow = null;
+  #projectRulesWorkflowUnsubscribe = null;
   #projectWorkflow = null;
   #projectWorkflowUnsubscribe = null;
+  #projectWorkflowEventsUnsubscribe = null;
   #runWorkflow = null;
   #runWorkflowUnsubscribe = null;
   #versionWorkflow = null;
   #versionWorkflowUnsubscribe = null;
   #runSessionUnsubscribe = null;
   #registration = registrationSnapshot().registration;
+  #projectSessionSnapshot = null;
+  #documentSessionSnapshot = null;
+  #commentSessionSnapshot = null;
+  #runSessionSnapshot = null;
+  #versionSessionSnapshot = null;
   #projectSnapshot = null;
+  #projectRulesSnapshot = null;
   #runSnapshot = null;
   #versionSnapshot = null;
   #snapshot = Object.freeze({
     registration: this.#registration,
+    projectSession: null,
+    document: null,
+    commentSession: null,
+    runSession: null,
+    versionSession: null,
     comment: null,
+    projectRules: null,
     project: null,
     run: null,
     version: null,
@@ -160,6 +264,7 @@ export class WorkspaceController {
     ports = {},
     documentWorkflow = null,
     commentWorkflow = null,
+    projectRulesWorkflow = null,
     projectWorkflow = null,
     runWorkflow = null,
     versionWorkflow = null,
@@ -192,6 +297,18 @@ export class WorkspaceController {
     if (!clock || typeof clock.now !== "function") {
       throw new TypeError("WorkspaceController requires a ClockPort.");
     }
+    const runSessions = [
+      commentWorkflow?.runSession,
+      projectRulesWorkflow?.runSession,
+      projectWorkflow?.runSession,
+      runWorkflow?.runSession,
+      versionWorkflow?.runSession,
+    ].filter(Boolean);
+    if (new Set(runSessions).size > 1) {
+      throw new TypeError(
+        "WorkspaceController workflows require one RunSession.",
+      );
+    }
 
     this.#bridgeClient = bridgeClient;
     this.#projectSession = projectSession;
@@ -200,6 +317,12 @@ export class WorkspaceController {
     this.#draftSession = draftSession;
     this.#versionSession = versionSession;
     this.#sourceHistorySession = sourceHistorySession;
+    this.#runSession = runSessions[0] || null;
+    this.#projectSessionSnapshot = projectSession.snapshot;
+    this.#documentSessionSnapshot = documentSession.snapshot;
+    this.#commentSessionSnapshot = commentSession.snapshot;
+    this.#runSessionSnapshot = this.#runSession?.snapshot || null;
+    this.#versionSessionSnapshot = versionSession.snapshot;
     this.#codecs = createWorkspaceControllerCodecs(codecs);
     this.#hashPort = ports.hash;
     this.#recoveryPort = ports.recovery || { replace: () => {} };
@@ -273,6 +396,26 @@ export class WorkspaceController {
       );
       this.#commentWorkflow.subscribeEvents((event) => this.#emitEvent(event));
     }
+    if (projectRulesWorkflow) {
+      this.#projectRulesWorkflow = new ProjectRulesWorkflow({
+        bridgeClient,
+        projectSession,
+        runSession: projectWorkflow?.runSession || projectRulesWorkflow.runSession,
+        projectRulesSession: new ProjectRulesSession(),
+        errorMessage: projectRulesWorkflow.errorMessage,
+        ports: {
+          presentation: projectRulesWorkflow.presentation,
+        },
+        scheduler: projectRulesWorkflow.scheduler,
+        clock,
+      });
+      this.#projectRulesWorkflowUnsubscribe = this.#projectRulesWorkflow.subscribe(
+        (snapshot) => {
+          this.#projectRulesSnapshot = snapshot;
+          this.#publishAggregateSnapshot();
+        },
+      );
+    }
     if (projectWorkflow) {
       if (!this.#documentWorkflow) {
         throw new TypeError("WorkspaceController ProjectWorkflow requires DocumentWorkflow.");
@@ -280,7 +423,9 @@ export class WorkspaceController {
       if (!this.#commentWorkflow) {
         throw new TypeError("WorkspaceController ProjectWorkflow requires CommentWorkflow.");
       }
-      const legacy = projectWorkflow.ports?.legacy || {};
+      if (!this.#projectRulesWorkflow) {
+        throw new TypeError("WorkspaceController ProjectWorkflow requires ProjectRulesWorkflow.");
+      }
       this.#projectWorkflow = new ProjectWorkflow({
         bridgeClient,
         ensureRegistered: (input) => this.ensureRegistered(input),
@@ -291,7 +436,7 @@ export class WorkspaceController {
         versionSession,
         commentWorkflow: this.#commentWorkflow,
         runSession: projectWorkflow.runSession,
-        projectRulesSession: projectWorkflow.projectRulesSession,
+        projectRulesWorkflow: this.#projectRulesWorkflow,
         externalFileOpenSession: new ExternalFileOpenSession(),
         projectApplicationSession: new ProjectApplicationSession(),
         documentWorkflow: this.#documentWorkflow,
@@ -299,14 +444,14 @@ export class WorkspaceController {
         codecs: projectWorkflow.codecs,
         ports: {
           ...projectWorkflow.ports,
-          legacy: {
-            ...legacy,
-            hydrateRecentRuns: (projects, activeSourcePath) => (
-              this.#runWorkflow
-                ? this.#runWorkflow.hydrateRecentRuns({ projects, activeSourcePath })
-                : legacy.hydrateRecentRuns?.(projects, activeSourcePath)
-            ),
-            emit: (event) => this.#emitEvent(event),
+          recentRuns: {
+            hydrate: (projects, activeSourcePath) => {
+              if (!this.#runWorkflow) return undefined;
+              return this.#runWorkflow.hydrateRecentRuns({
+                projects,
+                activeSourcePath,
+              });
+            },
           },
         },
         policies: projectWorkflow.policies,
@@ -318,6 +463,9 @@ export class WorkspaceController {
           this.#projectSnapshot = snapshot;
           this.#publishAggregateSnapshot();
         },
+      );
+      this.#projectWorkflowEventsUnsubscribe = this.#projectWorkflow.subscribeEvents(
+        (event) => this.#emitEvent(event),
       );
     }
     if (runWorkflow) {
@@ -389,6 +537,8 @@ export class WorkspaceController {
       });
       this.#versionWorkflow.subscribeEvents((event) => this.#emitEvent(event));
     }
+    this.#observeSessionSnapshots();
+    this.#publishAggregateSnapshot();
   }
 
   getSnapshot() {
@@ -418,6 +568,11 @@ export class WorkspaceController {
 
   dispose() {
     this.#disposed = true;
+    this.#projectSession.setObserver(null);
+    this.#documentSession.setObserver(null);
+    this.#commentSession.setObserver(null);
+    this.#runSession?.setObserver(null);
+    this.#versionSession.setObserver(null);
     this.#versionWorkflowUnsubscribe?.();
     this.#versionWorkflowUnsubscribe = null;
     this.#versionWorkflow?.dispose();
@@ -430,8 +585,14 @@ export class WorkspaceController {
     this.#runWorkflow = null;
     this.#projectWorkflowUnsubscribe?.();
     this.#projectWorkflowUnsubscribe = null;
+    this.#projectWorkflowEventsUnsubscribe?.();
+    this.#projectWorkflowEventsUnsubscribe = null;
     this.#projectWorkflow?.dispose();
     this.#projectWorkflow = null;
+    this.#projectRulesWorkflowUnsubscribe?.();
+    this.#projectRulesWorkflowUnsubscribe = null;
+    this.#projectRulesWorkflow?.dispose();
+    this.#projectRulesWorkflow = null;
     this.#commentWorkflowUnsubscribe?.();
     this.#commentWorkflowUnsubscribe = null;
     this.#commentWorkflow?.dispose();
@@ -454,6 +615,68 @@ export class WorkspaceController {
 
   get projectLoadError() {
     return this.#projectWorkflow?.projectLoadError || null;
+  }
+
+  getCurrentProjectContext() {
+    return this.#projectSession.context;
+  }
+
+  matchesCurrentProjectContext(context) {
+    return this.#projectSession.matches(context);
+  }
+
+  reloadDocumentCanvas() {
+    return this.#documentSession.reloadCanvas();
+  }
+
+  replaceCommentWorkingCopy(input) {
+    return this.#commentSession.update(input);
+  }
+
+  replaceCommentItems(comments) {
+    return this.#commentSession.setComments(comments);
+  }
+
+  setCommentComposerTarget(target) {
+    return this.#commentSession.setComposerTarget(target);
+  }
+
+  setCommentComposerDraft(draft) {
+    return this.#commentSession.setComposerDraft(draft);
+  }
+
+  setCommentEditSession(session) {
+    return this.#commentSession.setEditSession(session);
+  }
+
+  clearCommentComposer() {
+    return this.#commentSession.clearComposer();
+  }
+
+  clearCompletedRun() {
+    if (this.#runSession?.activeRun?.status !== "complete") return false;
+    this.#runSession.clearActiveRun();
+    return true;
+  }
+
+  dismissActiveRun() {
+    if (!this.#runSession) return null;
+    const activeRun = this.#runSession.activeRun;
+    if (activeRun?.sourcePath) {
+      this.#runSession.rememberOutcome(activeRun);
+      this.#runSession.clearHandoff(activeRun.sourcePath);
+    }
+    this.#runSession.clearActiveRun();
+    this.#runSession.clearActiveHandoff();
+    return activeRun;
+  }
+
+  reopenRecentRunOutcome(sourcePath) {
+    if (!this.#runSession) return false;
+    const outcome = this.#runSession.outcomeForSource(sourcePath);
+    if (!outcome) return false;
+    this.#runSession.setActiveRun(outcome);
+    return true;
   }
 
   refreshProject(input) {
@@ -530,6 +753,38 @@ export class WorkspaceController {
 
   refreshRecentProjects() {
     return this.#requireProjectWorkflow().refreshRecents();
+  }
+
+  openProjectRules(input) {
+    return this.#requireProjectRulesWorkflow().open(input);
+  }
+
+  updateProjectRules(input) {
+    return this.#requireProjectRulesWorkflow().updateContent(input);
+  }
+
+  beginProjectRulesComposition(input) {
+    return this.#requireProjectRulesWorkflow().beginComposition(input);
+  }
+
+  finishProjectRulesComposition(input) {
+    return this.#requireProjectRulesWorkflow().finishComposition(input);
+  }
+
+  leaveProjectRulesEditor() {
+    return this.#requireProjectRulesWorkflow().leaveEditor();
+  }
+
+  restoreProjectRules() {
+    return this.#requireProjectRulesWorkflow().restore();
+  }
+
+  saveProjectRules() {
+    return this.#requireProjectRulesWorkflow().save();
+  }
+
+  closeProjectRules() {
+    return this.#requireProjectRulesWorkflow().close();
   }
 
   renameProjectSource(input) {
@@ -706,6 +961,13 @@ export class WorkspaceController {
     return this.#projectWorkflow;
   }
 
+  #requireProjectRulesWorkflow() {
+    if (!this.#projectRulesWorkflow) {
+      throw new Error("项目规则工作流尚未完成组合。");
+    }
+    return this.#projectRulesWorkflow;
+  }
+
   #requireCommentWorkflow() {
     if (!this.#commentWorkflow) {
       throw new Error("评论工作流尚未完成组合。");
@@ -818,7 +1080,13 @@ export class WorkspaceController {
   #publishAggregateSnapshot() {
     this.#snapshot = Object.freeze({
       registration: this.#registration,
+      projectSession: this.#projectSessionSnapshot,
+      document: this.#documentSessionSnapshot,
+      commentSession: this.#commentSessionSnapshot,
+      runSession: this.#runSessionSnapshot,
+      versionSession: this.#versionSessionSnapshot,
       comment: this.#commentWorkflow?.getSnapshot() || null,
+      projectRules: this.#projectRulesSnapshot,
       project: this.#projectSnapshot,
       run: this.#runSnapshot,
       version: this.#versionSnapshot,
@@ -833,6 +1101,7 @@ export class WorkspaceController {
   }
 
   #emitEvent(event) {
+    if (this.#disposed) return;
     const frozen = Object.freeze(event);
     for (const listener of this.#eventListeners) {
       try {
@@ -841,6 +1110,34 @@ export class WorkspaceController {
         // Presentation listeners cannot affect application authority.
       }
     }
+  }
+
+  #observeSessionSnapshots() {
+    this.#projectSession.setObserver((snapshot) => {
+      if (this.#disposed) return;
+      this.#projectSessionSnapshot = snapshot;
+      this.#publishAggregateSnapshot();
+    });
+    this.#documentSession.setObserver((snapshot) => {
+      if (this.#disposed) return;
+      this.#documentSessionSnapshot = snapshot;
+      this.#publishAggregateSnapshot();
+    });
+    this.#commentSession.setObserver((snapshot) => {
+      if (this.#disposed) return;
+      this.#commentSessionSnapshot = snapshot;
+      this.#publishAggregateSnapshot();
+    });
+    this.#runSession?.setObserver((snapshot) => {
+      if (this.#disposed) return;
+      this.#runSessionSnapshot = snapshot;
+      this.#publishAggregateSnapshot();
+    });
+    this.#versionSession.setObserver((snapshot) => {
+      if (this.#disposed) return;
+      this.#versionSessionSnapshot = snapshot;
+      this.#publishAggregateSnapshot();
+    });
   }
 
   #isCurrentLocator(identity) {

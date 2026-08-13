@@ -9,6 +9,19 @@ Notable user-visible changes are documented here. This project follows Semantic 
   now owns page-level vertical scrolling, while Canvas measures fractional
   natural content height before rounding so a sub-pixel overflow cannot reopen
   the scrollbar feedback loop. Nested authored scroll containers are unchanged.
+- New projects now start with an empty `PROJECT.md` instead of generic preset
+  sentences. Generated AI handoffs keep stable scope, file and completion
+  boundaries in `AI_RULES.md`, while `PROMPT.md` contains only current-run
+  identity, paths, attachments and commands, removing duplicated instructions.
+- Simplified AI review text highlighting into two independent layers. Exact
+  deletions now retain character-level red dashed strike-throughs, exact
+  additions use one solid green dot below each added character, and both sides
+  share a low-emphasis purple scope frame. Layout alone promotes phrase frames
+  to one clean line rectangle at three changed phrase groups or 60% evidence
+  span, then to one paragraph rectangle when at least 75% of three or more
+  visual lines are promoted. The scope frame and dim-mask hole share identical
+  geometry and always contain the character evidence; the former density,
+  stable-sentence and shaped-outline decisions have been removed.
 - Fixed formal macOS packages omitting the signed `app-update.yml` provider
   configuration, which made every update check appear unavailable even when
   GitHub Release metadata was healthy. Candidate assembly now generates the

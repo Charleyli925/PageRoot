@@ -10,7 +10,7 @@ export type ReviewRuntimeSnapshotCaptureSide = "before" | "after";
  * a target reference, binding, screenshot, or response channel.
  */
 export type ReviewRuntimeSnapshotCaptureRequest = Readonly<{
-  contractVersion: 1;
+  contractVersion: 2;
   captureSessionId: string;
   sourceSha256: string;
   side: ReviewRuntimeSnapshotCaptureSide;

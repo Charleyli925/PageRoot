@@ -45,6 +45,10 @@ const SECOND_UPDATED_TEXT = "自动闭环第二版通过";
 const PICKER_TEXT = "项目切换原子发布验收通过";
 const READABLE_REWRITE_BEFORE = "综搜整体仍处于放缓背景，关键不在于单纯增加曝光，而在于识别商品需求，并用更匹配的供给承接；核心仍是让模型识别电商意图，再优化结果组织，把模糊兴趣转化为可验证需求。";
 const READABLE_REWRITE_AFTER = "综搜放缓，但电商搜索仍有较高大盘。关键是识别内容浏览中的潜在商品需求，并用匹配供给承接。供给可归纳为电商意图识别、优化结果组织，将模糊兴趣转为可验证需求。";
+const LINE_SCOPE_BEFORE = "甲旧，中间稳定文字保持不变，乙旧。";
+const LINE_SCOPE_AFTER = "甲新，中间稳定文字保持不变，乙新。";
+const SCOPE_PROMOTION_BEFORE = "稳定开场。甲旧，稳甲，乙旧，稳乙，丙旧。<br>丁旧，稳丁，戊旧，稳戊，己旧。<br>庚旧，稳庚，辛旧，稳辛，壬旧。<br>稳定收尾行。";
+const SCOPE_PROMOTION_AFTER = "稳定开场。甲新，稳甲，乙新，稳乙，丙新。<br>丁新，稳丁，戊新，稳戊，己新。<br>庚新，稳庚，辛新，稳辛，壬新。<br>稳定收尾行。";
 const REVIEW_METRIC_BEFORE_CSS = `
       [data-review-metrics] {
         display: grid;
@@ -763,6 +767,8 @@ test("a verified AI result stays pending through desktop review until the user a
       <div data-review-regression-summary>在守住 EBITA 率底线的基础上，锁单确收实现 +8.52% 增长；21 天日均增量 +4.12 万，累计增量 +86.6 万。</div>
       <div data-review-semantic-copy>而非「让每个商品卖得更好」（品均基本持平）。这说明增长主要来自有效成交覆盖扩大。</div>
       <div data-review-readable-rewrite style="width: 360px; line-height: 1.7">${READABLE_REWRITE_BEFORE}</div>
+      <p data-review-line-scope style="width: 360px; white-space: nowrap; line-height: 1.7">${LINE_SCOPE_BEFORE}</p>
+      <p data-review-scope-promotion style="width: 360px; line-height: 1.7">${SCOPE_PROMOTION_BEFORE}</p>
       <p data-review-layout-only style="width: 240px; padding: 4px; border: 1px solid #c9ceda">同一段文字保持不变<br>只是换行位置调整。</p>
       <p data-review-cross-line style="width: 150px; line-height: 1.6">稳定前缀，稳定后缀。</p>
       <p data-review-stable-sentence-rewrite style="width: 150px; line-height: 1.6">稳定前句。旧方案覆盖多个指标、多个渠道、多个阶段，并给出较长说明。稳定后句。</p>
@@ -1003,6 +1009,14 @@ ${REVIEW_MASK_UNION_BEFORE}
         .replace(
           `<div data-review-readable-rewrite style="width: 360px; line-height: 1.7">${READABLE_REWRITE_BEFORE}</div>`,
           `<div data-review-readable-rewrite style="width: 360px; line-height: 1.7">${READABLE_REWRITE_AFTER}</div>`,
+        )
+        .replace(
+          `<p data-review-line-scope style="width: 360px; white-space: nowrap; line-height: 1.7">${LINE_SCOPE_BEFORE}</p>`,
+          `<p data-review-line-scope style="width: 360px; white-space: nowrap; line-height: 1.7">${LINE_SCOPE_AFTER}</p>`,
+        )
+        .replace(
+          `<p data-review-scope-promotion style="width: 360px; line-height: 1.7">${SCOPE_PROMOTION_BEFORE}</p>`,
+          `<p data-review-scope-promotion style="width: 360px; line-height: 1.7">${SCOPE_PROMOTION_AFTER}</p>`,
         )
         .replace(
           '<p data-review-layout-only style="width: 240px; padding: 4px; border: 1px solid #c9ceda">同一段文字保持不变<br>只是换行位置调整。</p>',
@@ -1347,12 +1361,15 @@ ${REVIEW_MASK_UNION_BEFORE}
         const textGroups = new Map();
         const standaloneBoxes = [];
         boxes.forEach((box) => {
-          const textGroup = box.getAttribute("data-text-group");
-          const key = textGroup
+          const textBox = (box.getAttribute("data-types") || "")
+            .split(/\s+/).includes("text");
+          const key = textBox
             ? [
               box.getAttribute("data-pageroot-review-overlay-box"),
               box.getAttribute("data-tone"),
-              textGroup,
+              box.getAttribute("data-pageroot-review-semantic-owner"),
+              box.getAttribute("data-pageroot-review-geometry-owner"),
+              box.getAttribute("data-text-operation"),
             ].join("|")
             : "";
           if (!key) {
@@ -1489,6 +1506,15 @@ ${REVIEW_MASK_UNION_BEFORE}
     await expect.poll(() => addedText.evaluate(
       (element) => getComputedStyle(element).textDecorationLine,
     )).toBe("none");
+    await expect.poll(() => addedText.evaluate(
+      (element) => getComputedStyle(element).textEmphasisStyle,
+    )).toContain("dot");
+    await expect.poll(() => addedText.evaluate(
+      (element) => getComputedStyle(element).textEmphasisColor,
+    )).toBe("rgb(35, 155, 86)");
+    await expect.poll(() => addedText.evaluate(
+      (element) => getComputedStyle(element).textEmphasisPosition,
+    )).toContain("under");
     expect(await addedText.evaluate((element) => getComputedStyle(element).color))
       .toBe(await addedText.evaluate((element) => getComputedStyle(element.parentElement).color));
     await expect.poll(async () => Promise.all(
@@ -1537,20 +1563,62 @@ ${REVIEW_MASK_UNION_BEFORE}
       const shape = element.querySelector("[data-pageroot-review-overlay-shape]");
       return shape ? getComputedStyle(shape).stroke : getComputedStyle(element).borderTopColor;
     }))
-      .toBe("rgb(35, 155, 86)");
+      .toBe("rgb(109, 92, 231)");
     await expect.poll(() => beforeReviewFrame.locator(
       '[data-pageroot-review-overlay-box][data-tone="text-removed"]',
     ).first().evaluate((element) => {
       const shape = element.querySelector("[data-pageroot-review-overlay-shape]");
       return shape ? getComputedStyle(shape).stroke : getComputedStyle(element).borderTopColor;
     }))
-      .toBe("rgb(209, 75, 68)");
+      .toBe("rgb(109, 92, 231)");
     await expect(beforeReviewFrame.locator(
       '[data-pageroot-review-overlay-box][data-tone="text-removed"][data-shaped="true"]',
     )).toHaveCount(0);
     await expect(afterReviewFrame.locator(
       '[data-pageroot-review-overlay-box][data-tone="text-added"][data-shaped="true"]',
     )).toHaveCount(0);
+    await expect.poll(async () => Promise.all(
+      [beforeReviewFrame, afterReviewFrame].map((frame) => frame.locator("html").evaluate(() => {
+        const tolerance = .75;
+        const contains = (outer, inner) => (
+          outer.left <= inner.left + tolerance
+          && outer.top <= inner.top + tolerance
+          && outer.right >= inner.right - tolerance
+          && outer.bottom >= inner.bottom - tolerance
+        );
+        return [...document.querySelectorAll("[data-pageroot-review-text]")].every((marker) => {
+          const groupId = marker.getAttribute("data-pageroot-review-text-group") || "";
+          const tone = marker.getAttribute("data-pageroot-review-text") === "removed"
+            ? "text-removed"
+            : "text-added";
+          const frames = [...document.querySelectorAll(
+            '[data-pageroot-review-overlay-box][data-tone="' + tone + '"]',
+          )].filter((box) => (
+            (box.getAttribute("data-text-groups") || box.getAttribute("data-text-group") || "")
+              .split(/\s+/).includes(groupId)
+          ));
+          const fontSize = Number.parseFloat(getComputedStyle(marker).fontSize || "0");
+          const dotClearance = tone === "text-added"
+            ? Math.max(4, Number.isFinite(fontSize) ? fontSize * .55 : 8)
+            : 0;
+          const range = document.createRange();
+          range.selectNodeContents(marker);
+          const evidenceRects = [...range.getClientRects()]
+            .filter((rect) => rect.width > 1 && rect.height > 1)
+            .map((rect) => ({
+              left: rect.left,
+              top: rect.top,
+              right: rect.right,
+              bottom: rect.bottom + dotClearance,
+            }));
+          range.detach();
+          if (!evidenceRects.length) return true;
+          return frames.length > 0 && evidenceRects.every((evidence) => (
+            frames.some((box) => contains(box.getBoundingClientRect(), evidence))
+          ));
+        });
+      })),
+    ).then((states) => states.every(Boolean))).toBe(true);
     await expect.poll(async () => Promise.all(
       [beforeReviewFrame, afterReviewFrame].map((frame) => frame.locator(
         '[data-pageroot-review-overlay-box][data-scope="text-phrase"]',
@@ -1566,11 +1634,11 @@ ${REVIEW_MASK_UNION_BEFORE}
     ).first();
     await expect(beforeRewriteMarker).toHaveAttribute(
       "data-pageroot-review-summary",
-      "段落改写",
+      "文本调整",
     );
     await expect(afterRewriteMarker).toHaveAttribute(
       "data-pageroot-review-summary",
-      "段落改写",
+      "文本调整",
     );
     const beforeRewriteGroup = await beforeRewriteMarker.getAttribute(
       "data-pageroot-review-text-group",
@@ -1607,11 +1675,159 @@ ${REVIEW_MASK_UNION_BEFORE}
     await expect.poll(() => beforeRewriteFrame.evaluate((element) => ({
       color: getComputedStyle(element).borderTopColor,
       style: getComputedStyle(element).borderTopStyle,
-    }))).toEqual({ color: "rgb(209, 75, 68)", style: "dashed" });
+    }))).toEqual({ color: "rgb(109, 92, 231)", style: "solid" });
     await expect.poll(() => afterRewriteFrame.evaluate((element) => ({
       color: getComputedStyle(element).borderTopColor,
       style: getComputedStyle(element).borderTopStyle,
-    }))).toEqual({ color: "rgb(35, 155, 86)", style: "dashed" });
+    }))).toEqual({ color: "rgb(109, 92, 231)", style: "solid" });
+    for (const [frame, tone, evidenceCharacter] of [
+      [beforeReviewFrame, "removed", "旧"],
+      [afterReviewFrame, "added", "新"],
+    ]) {
+      const lineOwner = frame.locator("[data-review-line-scope]");
+      const lineMarkers = lineOwner.locator(
+        `[data-pageroot-review-text="${tone}"]`,
+      );
+      await expect(lineMarkers).toHaveCount(2);
+      expect(await lineMarkers.allTextContents()).toEqual([
+        evidenceCharacter,
+        evidenceCharacter,
+      ]);
+      const semanticOwnerId = await lineMarkers.first().getAttribute(
+        "data-pageroot-review-semantic-owner",
+      );
+      expect(semanticOwnerId).toBeTruthy();
+      const lineGroups = await lineMarkers.evaluateAll((markers) => (
+        [...new Set(markers.map((marker) => (
+          marker.getAttribute("data-pageroot-review-text-group") || ""
+        )).filter(Boolean))]
+      ));
+      expect(lineGroups).toHaveLength(2);
+      const lineFrame = frame.locator(
+        `[data-pageroot-review-overlay-box][data-tone="text-${tone}"]`
+          + `[data-pageroot-review-semantic-owner="${semanticOwnerId}"]`,
+      );
+      const lineHole = frame.locator(
+        `[data-pageroot-review-mask-hole]`
+          + `[data-pageroot-review-semantic-owner="${semanticOwnerId}"]`,
+      );
+      await expect(lineFrame).toHaveCount(1);
+      await expect(lineHole).toHaveCount(1);
+      await expect(lineFrame).toHaveAttribute("data-scope", "text-line");
+      await expect(lineFrame).not.toHaveAttribute("data-shaped", "true");
+      await expect(lineFrame).toHaveAttribute(
+        "data-pageroot-review-fragment-count",
+        "1",
+      );
+      await expect(lineFrame.locator(
+        "[data-pageroot-review-overlay-label]",
+      )).toHaveText("文本调整");
+      expect((await lineFrame.getAttribute("data-text-groups") || "")
+        .split(/\s+/).filter(Boolean)).toEqual(lineGroups);
+      await expect.poll(async () => {
+        const frameGeometry = await lineFrame.evaluate((element) => ({
+          left: Number(element.getAttribute("data-left")),
+          top: Number(element.getAttribute("data-top")),
+          width: Number(element.getAttribute("data-width")),
+          height: Number(element.getAttribute("data-height")),
+        }));
+        const holeGeometry = await lineHole.evaluate((element) => ({
+          left: Number(element.getAttribute("data-left")),
+          top: Number(element.getAttribute("data-top")),
+          width: Number(element.getAttribute("data-width")),
+          height: Number(element.getAttribute("data-height")),
+        }));
+        return Object.keys(frameGeometry).every((key) => (
+          Math.abs(frameGeometry[key] - holeGeometry[key]) < .01
+        ));
+      }).toBe(true);
+    }
+    for (const [frame, tone, evidenceCharacter] of [
+      [beforeReviewFrame, "removed", "旧"],
+      [afterReviewFrame, "added", "新"],
+    ]) {
+      const promotionOwner = frame.locator("[data-review-scope-promotion]");
+      const promotionMarkers = promotionOwner.locator(
+        `[data-pageroot-review-text="${tone}"]`,
+      );
+      await expect(promotionMarkers).toHaveCount(9);
+      expect(await promotionMarkers.allTextContents()).toEqual(
+        Array.from({ length: 9 }, () => evidenceCharacter),
+      );
+      await expect(promotionOwner.locator(
+        `[data-pageroot-review-text="${tone}"]`,
+      ).filter({ hasText: "稳定开场" })).toHaveCount(0);
+      const semanticOwnerId = await promotionMarkers.first().getAttribute(
+        "data-pageroot-review-semantic-owner",
+      );
+      expect(semanticOwnerId).toBeTruthy();
+      const promotionGroups = await promotionMarkers.evaluateAll((markers) => (
+        [...new Set(markers.map((marker) => (
+          marker.getAttribute("data-pageroot-review-text-group") || ""
+        )).filter(Boolean))]
+      ));
+      expect(promotionGroups).toHaveLength(9);
+      const promotionFrame = frame.locator(
+        `[data-pageroot-review-overlay-box][data-tone="text-${tone}"]`
+          + `[data-pageroot-review-semantic-owner="${semanticOwnerId}"]`,
+      );
+      const promotionHole = frame.locator(
+        `[data-pageroot-review-mask-hole]`
+          + `[data-pageroot-review-semantic-owner="${semanticOwnerId}"]`,
+      );
+      await expect(promotionFrame).toHaveCount(1);
+      await expect(promotionHole).toHaveCount(1);
+      await expect(promotionFrame).toHaveAttribute("data-scope", "text-block");
+      await expect(promotionFrame).not.toHaveAttribute("data-shaped", "true");
+      await expect(promotionFrame).toHaveAttribute(
+        "data-pageroot-review-fragment-count",
+        "1",
+      );
+      await expect(promotionFrame.locator(
+        "[data-pageroot-review-overlay-label]",
+      )).toHaveText("段落改写");
+      expect((await promotionFrame.getAttribute("data-text-groups") || "")
+        .split(/\s+/).filter(Boolean)).toEqual(promotionGroups);
+      await expect.poll(async () => {
+        const frameBox = await promotionFrame.boundingBox();
+        const ownerBox = await promotionOwner.boundingBox();
+        const frameGeometry = await promotionFrame.evaluate((element) => ({
+          left: Number(element.getAttribute("data-left")),
+          top: Number(element.getAttribute("data-top")),
+          width: Number(element.getAttribute("data-width")),
+          height: Number(element.getAttribute("data-height")),
+        }));
+        const holeGeometry = await promotionHole.evaluate((element) => ({
+          left: Number(element.getAttribute("data-left")),
+          top: Number(element.getAttribute("data-top")),
+          width: Number(element.getAttribute("data-width")),
+          height: Number(element.getAttribute("data-height")),
+        }));
+        return Boolean(
+          frameBox
+          && ownerBox
+          && frameBox.x >= ownerBox.x - 4
+          && frameBox.x + frameBox.width <= ownerBox.x + ownerBox.width + 4
+          && frameBox.height >= ownerBox.height * .75
+          && Object.keys(frameGeometry).every((key) => (
+            Math.abs(frameGeometry[key] - holeGeometry[key]) < .01
+          )),
+        );
+      }).toBe(true);
+    }
+    if (process.env.PAGEROOT_CAPTURE_REVIEW) {
+      for (const frame of [beforeReviewFrame, afterReviewFrame]) {
+        await frame.locator("[data-review-scope-promotion]").evaluate((element) => {
+          element.scrollIntoView({ block: "center", inline: "nearest" });
+        });
+      }
+      const captureDirectory = path.join(productRoot, "output", "design-qa");
+      mkdirSync(captureDirectory, { recursive: true });
+      await launched.page.screenshot({
+        path: path.join(captureDirectory, "ai-review-scope-promotion.png"),
+        animations: "disabled",
+      });
+    }
     await expect(afterReviewFrame.locator(
       '[data-review-added-chart] [data-pageroot-review-text="added"]',
     ).filter({ hasText: "实验效果概览" })).toHaveCount(1);
@@ -1766,12 +1982,12 @@ ${REVIEW_MASK_UNION_BEFORE}
       return total + count;
     }, 0));
     expect(addedRowRangeRectCount).toBeGreaterThan(3);
-    await expect(addedRowFrames).toHaveCount(addedRowRangeRectCount);
-    await expect.poll(() => addedRowFrames.evaluateAll((frames) => {
+    await expect(addedRowFrames).toHaveCount(addedRowGroups.length);
+    const addedRowFrameState = await addedRowFrames.evaluateAll((frames) => {
       const row = document.querySelector('[data-review-brand-row="added"]');
-      if (!row) return false;
+      if (!row) return { matches: false, reason: "row-missing" };
       const rowRect = row.getBoundingClientRect();
-      return frames.every((frame) => {
+      const details = frames.map((frame) => {
         const rect = frame.getBoundingClientRect();
         const geometryOwnerId = frame.getAttribute("data-pageroot-review-geometry-owner");
         const geometryOwner = [...document.querySelectorAll(
@@ -1781,7 +1997,10 @@ ${REVIEW_MASK_UNION_BEFORE}
           && !candidate.hasAttribute("data-pageroot-review-text")
         ));
         const ownerRect = geometryOwner?.getBoundingClientRect();
-        return frame.getAttribute("data-scope") !== "text-block"
+        return {
+          matches: ["text-phrase", "text-line", "text-block"].includes(
+            frame.getAttribute("data-scope") || "",
+          )
           && frame.getAttribute("data-shaped") !== "true"
           && frame.getAttribute("data-pageroot-review-fragment-count") === "1"
           && Boolean(ownerRect)
@@ -1789,10 +2008,24 @@ ${REVIEW_MASK_UNION_BEFORE}
           && rect.right <= ownerRect.right + 4
           && rect.left >= rowRect.left - 4
           && rect.top >= rowRect.top - 4
-          && rect.right <= rowRect.right + 4
-          && rect.bottom <= rowRect.bottom + 4;
+          && rect.right <= rowRect.right + 4,
+          scope: frame.getAttribute("data-scope"),
+          rect: [rect.left, rect.top, rect.right, rect.bottom],
+          ownerRect: ownerRect
+            ? [ownerRect.left, ownerRect.top, ownerRect.right, ownerRect.bottom]
+            : null,
+          rowRect: [rowRect.left, rowRect.top, rowRect.right, rowRect.bottom],
+        };
       });
-    })).toBe(true);
+      return { matches: details.every((detail) => detail.matches), details };
+    });
+    expect(
+      addedRowFrameState.matches,
+      JSON.stringify(addedRowFrameState.details, null, 2),
+    ).toBe(true);
+    expect(addedRowFrameState.details.filter((detail) => (
+      detail.scope === "text-block"
+    ))).toHaveLength(1);
     await expect(afterReviewFrame.locator(
       '[data-review-brand-row]:not([data-review-brand-row="added"]) [data-pageroot-review-text]',
     )).toHaveCount(0);
@@ -1868,7 +2101,9 @@ ${REVIEW_MASK_UNION_BEFORE}
     );
     await expect(crossLineFrames).toHaveCount(crossLineRectCount);
     await expect.poll(() => crossLineFrames.evaluateAll((frames) => frames.every((frame) => (
-      frame.getAttribute("data-scope") === "text-line"
+      ["text-phrase", "text-line", "text-block"].includes(
+        frame.getAttribute("data-scope") || "",
+      )
       && frame.getAttribute("data-shaped") !== "true"
       && frame.getAttribute("data-pageroot-review-fragment-count") === "1"
     )))).toBe(true);
@@ -1881,14 +2116,14 @@ ${REVIEW_MASK_UNION_BEFORE}
     ]) {
       await expect.poll(() => frame.locator("html").evaluate((_documentElement, expectedTone) => {
         const owner = document.querySelector("[data-review-stable-sentence-rewrite]");
-        const marker = owner?.querySelector(
-          '[data-pageroot-review-text="' + expectedTone + '"]',
-        );
-        if (!owner || !marker) return { matches: false, reason: "marker-missing" };
-        const groupId = marker.getAttribute("data-pageroot-review-text-group") || "";
+        if (!owner) return { matches: false, reason: "owner-missing" };
         const markers = [...owner.querySelectorAll(
-          '[data-pageroot-review-text="' + expectedTone + '"][data-pageroot-review-text-group="' + groupId + '"]',
+          '[data-pageroot-review-text="' + expectedTone + '"]',
         )];
+        if (!markers.length) return { matches: false, reason: "marker-missing" };
+        const semanticOwnerId = markers[0].getAttribute(
+          "data-pageroot-review-semantic-owner",
+        ) || "";
         const markerRects = markers.flatMap((candidate) => {
           const markerRange = document.createRange();
           markerRange.selectNodeContents(candidate);
@@ -1903,84 +2138,20 @@ ${REVIEW_MASK_UNION_BEFORE}
           markerRange.detach();
           return rects;
         });
-        const markerRectCount = markerRects.length;
-        const markerLineCount = markerRects.reduce((lines, rect) => {
-          const matchingLine = lines.find((line) => line.some((candidate) => {
-            const overlap = Math.max(0, Math.min(candidate.bottom, rect.bottom)
-              - Math.max(candidate.top, rect.top));
-            const height = Math.max(1, Math.min(
-              candidate.bottom - candidate.top,
-              rect.bottom - rect.top,
-            ));
-            return overlap / height >= .5;
-          }));
-          if (matchingLine) matchingLine.push(rect);
-          else lines.push([rect]);
-          return lines;
-        }, []).length;
-        const stableRanges = String(
-          owner.getAttribute("data-pageroot-review-stable-text-ranges") || "",
-        ).split(/\s+/).map((value) => {
-          const match = /^(\d+):(\d+)$/u.exec(value);
-          return match ? { start: Number(match[1]), end: Number(match[2]) } : null;
-        }).filter((range) => range && range.end > range.start);
-        const textNodes = [];
-        const textWalker = document.createTreeWalker(owner, NodeFilter.SHOW_TEXT);
-        let textNode = textWalker.nextNode();
-        while (textNode) {
-          if (!textNode.parentElement?.closest("script, style, noscript, template")) {
-            textNodes.push(textNode);
-          }
-          textNode = textWalker.nextNode();
-        }
-        const boundaryAt = (offset) => {
-          let remaining = Math.max(0, Math.trunc(offset));
-          for (const node of textNodes) {
-            const length = node.textContent?.length || 0;
-            if (remaining <= length) return { node, offset: remaining };
-            remaining -= length;
-          }
-          const node = textNodes.at(-1);
-          return node ? { node, offset: node.textContent?.length || 0 } : null;
-        };
-        const stableRects = stableRanges.flatMap((sourceRange) => {
-          const start = boundaryAt(sourceRange.start);
-          const end = boundaryAt(sourceRange.end);
-          if (!start || !end) return [];
-          const range = document.createRange();
-          range.setStart(start.node, start.offset);
-          range.setEnd(end.node, end.offset);
-          const rects = [...range.getClientRects()]
-            .filter((rect) => rect.width > 1 && rect.height > 1)
-            .map((rect) => ({
-              left: rect.left,
-              top: rect.top,
-              right: rect.right,
-              bottom: rect.bottom,
-            }));
-          range.detach();
-          return rects;
-        });
         const frames = [...document.querySelectorAll(
-          '[data-pageroot-review-overlay-box][data-text-group="' + groupId + '"]',
+          '[data-pageroot-review-overlay-box][data-tone="text-' + expectedTone + '"]'
+            + '[data-pageroot-review-semantic-owner="' + semanticOwnerId + '"]',
         )];
         const holes = [...document.querySelectorAll(
-          '[data-pageroot-review-mask-hole][data-text-group="' + groupId + '"]',
+          '[data-pageroot-review-mask-hole]'
+            + '[data-pageroot-review-semantic-owner="' + semanticOwnerId + '"]',
         )];
-        const intersectsStableText = frames.some((frame) => {
-          const rect = frame.getBoundingClientRect();
-          return stableRects.some((stableRect) => (
-            Math.min(rect.right, stableRect.right) - Math.max(rect.left, stableRect.left) > 1
-            && Math.min(rect.bottom, stableRect.bottom) - Math.max(rect.top, stableRect.top) > 1
-          ));
-        });
         const overlaps = (left, right) => (
           Math.min(left.right, right.right) - Math.max(left.left, right.left) > 1
           && Math.min(left.bottom, right.bottom) - Math.max(left.top, right.top) > 1
         );
-        const matches = markerRectCount >= 3
-            && markerLineCount >= 3
-            && frames.length >= markerLineCount
+        const matches = markerRects.length >= 3
+            && frames.length >= 1
             && holes.length === frames.length
             && markerRects.every((rect) => frames.some((frame) => (
               overlaps(rect, frame.getBoundingClientRect())
@@ -1996,22 +2167,16 @@ ${REVIEW_MASK_UNION_BEFORE}
             && frames.filter((frame) => (
               frame.querySelector("[data-pageroot-review-overlay-label]")
             )).length === 1
-            && stableRanges.length === 2
-            && stableRects.length >= 2
-            && !intersectsStableText
             && ![...owner.querySelectorAll("[data-pageroot-review-text]")].some((candidate) => (
               /稳定(?:前|后)句/u.test(candidate.textContent || "")
             ));
         return {
           matches,
-          markerRectCount,
-          markerLineCount,
+          markerRectCount: markerRects.length,
           markerCount: markers.length,
           frameCount: frames.length,
           holeCount: holes.length,
-          stableRangeCount: stableRanges.length,
-          stableRectCount: stableRects.length,
-          intersectsStableText,
+          scopes: frames.map((candidate) => candidate.getAttribute("data-scope")),
         };
       }, tone)).toMatchObject({ matches: true });
     }
@@ -2789,15 +2954,73 @@ ${REVIEW_MASK_UNION_BEFORE}
           filter: document.documentElement.dataset.pagerootReviewFilter,
         };
       });
+    const promotedScopeProjectionState = () => afterReviewFrame.locator("html").evaluate(() => {
+      const inspect = (ownerSelector, expectedScope, expectedMarkers, expectedGroups) => {
+        const owner = document.querySelector(ownerSelector);
+        const markers = owner
+          ? [...owner.querySelectorAll('[data-pageroot-review-text="added"]')]
+          : [];
+        const semanticOwnerId = markers[0]?.getAttribute(
+          "data-pageroot-review-semantic-owner",
+        ) || "";
+        const frames = semanticOwnerId ? [...document.querySelectorAll(
+          '[data-pageroot-review-overlay-box][data-tone="text-added"]'
+            + '[data-pageroot-review-semantic-owner="' + semanticOwnerId + '"]',
+        )] : [];
+        const holes = semanticOwnerId ? [...document.querySelectorAll(
+          '[data-pageroot-review-mask-hole]'
+            + '[data-pageroot-review-semantic-owner="' + semanticOwnerId + '"]',
+        )] : [];
+        const groups = new Set(markers.map((marker) => (
+          marker.getAttribute("data-pageroot-review-text-group") || ""
+        )).filter(Boolean));
+        const frame = frames[0];
+        const hole = holes[0];
+        const geometryMatches = Boolean(frame && hole && [
+          "data-left",
+          "data-top",
+          "data-width",
+          "data-height",
+        ].every((attribute) => (
+          Math.abs(Number(frame.getAttribute(attribute)) - Number(hole.getAttribute(attribute)))
+            < .01
+        )));
+        const frameGroups = new Set((frame?.getAttribute("data-text-groups") || "")
+          .split(/\s+/).filter(Boolean));
+        return {
+          matches: markers.length === expectedMarkers
+            && groups.size === expectedGroups
+            && frames.length === 1
+            && holes.length === 1
+            && frame?.getAttribute("data-scope") === expectedScope
+            && frame?.getAttribute("data-shaped") !== "true"
+            && frame?.getAttribute("data-pageroot-review-fragment-count") === "1"
+            && frameGroups.size === groups.size
+            && [...groups].every((group) => frameGroups.has(group))
+            && geometryMatches,
+          markerCount: markers.length,
+          groupCount: groups.size,
+          frameCount: frames.length,
+          holeCount: holes.length,
+          scope: frame?.getAttribute("data-scope") || "",
+          geometryMatches,
+        };
+      };
+      const line = inspect("[data-review-line-scope]", "text-line", 2, 2);
+      const paragraph = inspect("[data-review-scope-promotion]", "text-block", 9, 9);
+      return { matches: line.matches && paragraph.matches, line, paragraph };
+    });
     await launched.page.getByRole("button", { name: "适应", exact: true }).click();
     await expect(launched.page.getByRole("button", { name: "适应", exact: true }))
       .toHaveAttribute("aria-pressed", "true");
     await expect.poll(crossLineProjectionState).toMatchObject({ matches: true });
+    await expect.poll(promotedScopeProjectionState).toMatchObject({ matches: true });
     await expect.poll(() => assertOverlayMaskEquivalence(afterReviewFrame)).toBe(true);
     await launched.page.getByRole("button", { name: "100%", exact: true }).click();
     await expect(launched.page.getByRole("button", { name: "100%", exact: true }))
       .toHaveAttribute("aria-pressed", "true");
     await expect.poll(crossLineProjectionState).toMatchObject({ matches: true });
+    await expect.poll(promotedScopeProjectionState).toMatchObject({ matches: true });
     const originalWindowBounds = await launched.electronApp.evaluate(({ BrowserWindow }) => {
       const window = BrowserWindow.getAllWindows().find((candidate) => (
         candidate.webContents.getURL().includes("/dist-desktop/renderer/")
@@ -2819,6 +3042,7 @@ ${REVIEW_MASK_UNION_BEFORE}
       originalViewportWidth,
     )).toBe(true);
     await expect.poll(crossLineProjectionState).toMatchObject({ matches: true });
+    await expect.poll(promotedScopeProjectionState).toMatchObject({ matches: true });
     await expect.poll(() => assertOverlayMaskEquivalence(afterReviewFrame)).toBe(true);
     await launched.electronApp.evaluate(({ BrowserWindow }, bounds) => {
       BrowserWindow.getAllWindows().find((candidate) => (
@@ -2831,6 +3055,7 @@ ${REVIEW_MASK_UNION_BEFORE}
       originalViewportWidth,
     )).toBe(true);
     await expect.poll(crossLineProjectionState).toMatchObject({ matches: true });
+    await expect.poll(promotedScopeProjectionState).toMatchObject({ matches: true });
     const beforeViewport = launched.page.locator('[aria-label="修改前画布滚动区"]');
     const afterViewport = launched.page.locator('[aria-label="修改后画布滚动区"]');
     await launched.page.waitForTimeout(450);
@@ -3879,7 +4104,10 @@ test("a persisted legacy global comment stays exact after restart and sends dire
       activeSourcePath: fixture.sourcePath,
       isolatedUserData: firstLaunch.isolatedUserData,
     });
-    expect(workspaceContainsDraftComment(activeLaunch.workspace, commentText)).toBe(true);
+    await expect.poll(
+      () => workspaceContainsDraftComment(activeLaunch.workspace, commentText),
+      { timeout: 20_000 },
+    ).toBe(true);
     await loadedDiskFrame(activeLaunch.page, fixture.sourcePath);
     const recoveredComment = activeLaunch.page.locator(".comment-card")
       .filter({ hasText: commentText });

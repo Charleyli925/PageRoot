@@ -1,9 +1,10 @@
 # Workbench 应用编排收口执行计划
 
-- 状态：**PR-1 至 PR-6 已合并至 `main`；PR-7 已获实施授权，但审计触发 §13.6：必须先以独立 PR 接管安全重命名与 `PROJECT.md` 规则工作流，随后才可执行最终收口**
+- 状态：**PR-1 至 PR-7b 已合并至 `main`；PR-7 最终 Composition/hard-gate 实现已在独立分支完成并通过任务门禁，待 Draft PR 审阅。尚未 Ready、合并、打 tag 或发布。**
 - 规划基线：`main@37bba7779b27c0a42a52f98ec84a377b964bf4eb`
 - 基线 Tree：`0e074849493e5f9db9e89621e0a1c1a4910b8fa1`
 - 基线日期：2026-08-11
+- PR-7 实施基线：`origin/main@8fffb0529239b537f25fc0463921325babdf167f`
 - 目标边界：Renderer Workbench 与现有 Application Sessions 之间的应用编排
 - 明确不属于本计划：大文件 Patch transport、Bridge 路由或持久 Schema 重写、UI 改版、全仓 TypeScript 迁移、打包与发布
 
@@ -1325,6 +1326,84 @@ npm run task:finish
   evidence 为 `output/test-runs/2026-08-11T19-38-29-482Z-task/results.json`（typecheck、lint、
   171 个 targeted Node、Web build、28 个 Browser smoke、Desktop/Electron 与 AI smoke 全部通过）。
 
+## 12.10 PR-7b：`PROJECT.md` Rules Workflow
+
+### 12.10.1 触发事实与边界
+
+PR-7 审计还发现 `ProjectRulesSession` 自带 `projectFile`/`updateProjectFile` Bridge I/O 和
+保存对账，Workbench 则持有 700ms timer、observer、打开/关闭、composition restore 和 legacy
+`saveProjectRules` callback，`ProjectWorkflow` 通过该 callback 参与 drain。这是未在 PR-1 至
+PR-6 中列出的跨 Session 编排，命中 §13.6，不能作为 PR-7 cleanup 混入。
+
+本 PR 只把 `PROJECT.md` 的 renderer-side read/write、700ms autosave、unknown-write authority
+reconciliation、close/switch drain 与窄的 restore presentation port 收进新的
+`ProjectRulesWorkflow`。不改变 Bridge route、desktop API、schema、`PROJECT.md` 语义、UI 文案或
+IME 交互合同；`ProjectRulesSession` 仍是唯一的 working-copy/composition/save projection owner。
+
+### 12.10.2 修改清单
+
+- 新增 `ProjectRulesWorkflow`：注入 Bridge、Project/Run Session、Scheduler、Clock 和窄的
+  presentation port；每次 I/O 捕获 context/generation，单次 authority read 只用于确认未知
+  写结果；
+- 将 `ProjectRulesSession` 纯化为 editor working copy、generation、composition fence 与
+  save acknowledgement projection，不再持有 Bridge、timer 或 Promise；
+- `WorkspaceController` 组合 workflow、投影只读 `projectRules` aggregate snapshot，并暴露
+  typed open/edit/composition/restore/save/close facade；
+- `ProjectWorkflow` 的 `project-rules` obligation 只委托 workflow 的 inspect/drain，项目、
+  source rename 和 generated-source transition 使用同一 reset fence；
+- Workbench 只订阅 aggregate snapshot、转发 intent，并把 double-rAF/focus 留在 restore
+  presentation port；删除 React timer、Session observer/ref 与 legacy callback；
+- 增加 deterministic Scheduler、late result、unknown reconciliation、saving-time edit/close、
+  stale-transition、Controller aggregate 和 IME restore 回归；同步 owner 文档、architecture
+  gate 与 impact map。
+
+### 12.10.3 不变量与验收
+
+- Session context/generation、Project context 或 dispose 任一失效时，迟到 read/write 只能
+  返回 `stale`，不得覆盖新项目 working copy；
+- 700ms timer 只在规则已读、未锁定、非 composition、非 saving 且 dirty 时存在；锁定、
+  close/transition 或 dispose 必须清除它；
+- write response 丢失时最多进行一次同 identity `projectFile` authority read，不能盲目重发
+  mutation；
+- close/switch drain 必须覆盖 save 中继续输入产生的最新 working copy，不能在旧 ack 后丢弃
+  新内容；composition 仍阻止保存，显式 restore 先退役原生输入节点；
+- Application 不 import React/components/desktop/workbench；Workbench 不重新持有
+  `ProjectRulesSession`、Bridge I/O、timer 或独立可写 copy。
+
+```bash
+node --test \
+  tests/project-rules-session.test.mjs \
+  tests/project-rules-workflow.test.mjs \
+  tests/project-workflow.test.mjs \
+  tests/workspace-controller.test.mjs
+npm run architecture:check
+npm run typecheck
+npm run gate:edit -- --base origin/main
+npm run task:finish
+```
+
+### 12.10.4 实施记录（2026-08-12）
+
+- 隔离分支 `refactor/project-rules-workflow` 从
+  `origin/main@04cd7a283a55fdd9b0fe9d95a0f9d444e106678a` 创建；它只实现本节的独立
+  `PROJECT.md` workflow，不进入 PR-7 最终 composition/hard-gate 收口。
+- 新增 `ProjectRulesWorkflow`，由 `WorkspaceController` 组合、只读投影和 dispose；
+  `ProjectRulesSession` 现只保存 editor fact。保存或 authority read 捕获完整 context/
+  generation；unknown write 最多进行一次 authority read；close/switch drain 会继续写入
+  save 中到达的最新内容。
+- Workbench 已删除 rules Session/observer、700ms React timer、legacy drain callback 与直接
+  save owner，仅保留 Controller snapshot、typed intent 和 native textarea retirement adapter。
+  未改变 Bridge/desktop/schema/UI contract。
+- 新增 Node 回归覆盖 deterministic 700ms、unknown success/failure reconciliation、late
+  read/write、save-time edit/close、transition stale fence、RunSession composition、Controller
+  aggregate 与 IME restore；architecture gate 也拒绝 rules Session Bridge I/O、Workbench rules
+  timer/ref 和 legacy ProjectWorkflow callback。
+- 本地验证：`npm run gate:edit -- --base origin/main` 的 183 个 targeted Node 和 typecheck
+  通过（evidence `output/test-runs/2026-08-11T20-33-34-713Z-edit/results.json`）；
+  最终 `npm run task:finish` 的 typecheck、lint、184 个 targeted Node、Web build、28 Browser
+  smoke、8 Electron smoke、2 AI smoke 均通过（evidence
+  `output/test-runs/2026-08-11T20-36-48-878Z-task/results.json`）。
+
 ## 13. PR-7：最终 Composition 收口、Aggregate Snapshot 与硬门禁
 
 ### 13.1 背景和目标
@@ -1428,6 +1507,32 @@ npm run task:finish
   profiler/测试确认没有无界 rerender，但本计划不以微优化改变 owner；
 - JS + `.d.ts` 仍有类型漂移风险；本 PR 只保证公开 Controller contract 和 unit tests，
   全仓 TS 迁移仍是独立事项。
+
+### 13.8 实施记录（2026-08-12）
+
+- 隔离分支 `refactor/final-composition-hard-gate-pr7` 从
+  `origin/main@8fffb0529239b537f25fc0463921325babdf167f` 创建；它在 PR-7a、PR-7b
+  已合并后只完成本节最终收口，不提前进入任何后续重构。
+- 新增 `createRuntimeWorkspaceController()` 作为唯一生产组合入口：它构造唯一 typed
+  Bridge client、共享 `RunSession` 和其余事实 Session，再交给 `WorkspaceController`。
+  注入式 Controller construction 仅保留为 Node test seam；Controller 是
+  Project/Document/Comment/Run/Version 的唯一 Application aggregate observer，发布冻结
+  snapshot/event stream，并在 dispose 时断开 observer。
+- Workbench 已删除 Bridge import/module-level client 和业务 Session ref；它只订阅
+  Controller aggregate snapshot、调用 typed Controller command，并保留宿主 adapter 与
+  presentation state。`DocumentSession` 只向 aggregate 投影
+  `hasPendingWrite`/`isFlushing`，不暴露 pending-write payload 或 Promise。
+- `ProjectWorkflow` 删除最终 `legacy` adapter，改用窄 `ViewStatePort`/`RecentRunsPort`
+  和自身 typed event subscription；硬门禁删除临时 Bridge allowlist，拒绝 View Bridge
+  call、Controller React import、generic Bridge escape、duplicate Session owner、missing
+  drain command 等负例。未修改 Bridge route、desktop API、持久 schema/storage 或可见 UI。
+- 已通过 `npm run architecture:check`、`npm run typecheck`、`npm run lint`、
+  `npm run build`、`npm run test:node:core`（550 项）、`npm run test:browser:smoke`
+  （28 项）、`npm run test:electron:smoke`（8 项）、`npm run test:ai-closed-loop`
+  （16 项），以及 `npm run task:finish`。任务门禁 evidence：
+  `output/test-runs/2026-08-12T05-26-49-274Z-task/results.json`（186 项 impact-selected
+  Node、28 Browser、8 Electron、2 AI smoke）。下一步仅可创建 Draft PR；不得 Ready、合并、
+  打 tag 或发布。
 
 ## 14. 全局验收矩阵
 

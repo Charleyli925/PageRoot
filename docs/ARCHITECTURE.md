@@ -64,9 +64,10 @@ Comments + frozen input
   `SourceHostResolver` admits only direct source Canvas/SVG roots and stable,
   source-empty hosts; it never uses script causality, computed selectors,
   arbitrary HTML or `tbody`. `RuntimeSnapshotOwner` accepts bounded `before`/
-  `after` PNG evidence only after exact source/binding validation in an isolated
-  world. Runtime DOM and PNGs never enter SourcePatch, save, Version, Review
-  source analysis or AI Request input.
+  `after` PNG evidence plus a hash of visible DOM/SVG text only after exact
+  source/binding validation in an isolated world. Runtime DOM, raw text and
+  PNGs never enter SourcePatch, save, Version, Review source analysis or AI
+  Request input.
 - Comment selection remains source-node exact inside foreign content. Authored
   SVG children retain their own instrumented SourceIndex identity; runtime-only
   children fail closed and are never promoted to an ancestor `svg`.
@@ -145,9 +146,12 @@ Comments + frozen input
   isolated world. It collects one rect pass and at most one bounded PNG per
   host, with main-owned deadline, navigation/permission denial and mandatory
   cleanup. Renderer memory revalidates PNG bytes/hash/dimensions and compares
-  one before/after pair. A difference emits one opaque `{candidateKey,
-  changeId}` result per changed source host; outline IDs remain navigation and
-  summary metadata, never geometry authority. For each side, the analyzer puts
+  one before/after pair: layout and the owner-isolated visible-text hash are
+  strict, while equal-text PNG hash differences require a bounded mean absolute
+  RGB-channel error above `0.04`. This filters raster tile/sub-pixel noise
+  without a retry, OCR or script inspection. A difference emits one opaque
+  `{candidateKey, changeId}` result per changed source host; outline IDs remain
+  navigation and summary metadata, never geometry authority. For each side, the analyzer puts
   the exact source-host path and complete narrow fingerprint only in the first
   parser-blocking bootstrap response. That bootstrap captures the original
   `Element` before authored scripts, accepts changed keys only through a
@@ -212,16 +216,23 @@ Comments + frozen input
 
 ## Module map
 
-`app/workbench.tsx` is the composition root for the review workspace. It
-subscribes to owner snapshots, derives presentation values and dispatches user
-intent; it does not own persistence protocols or duplicate the sessions'
-mutable facts. Pure Workbench models hold deterministic formatting and
-transition helpers. Presentation modules receive snapshots and callbacks only;
-they do not import application services.
+`createRuntimeWorkspaceController()` in the Application layer is the runtime
+composition root for the review workspace. It creates the one typed Bridge
+client, shared `RunSession`, and remaining fact-owning Sessions, then hands
+their workflows to one `WorkspaceController`. The Controller is the only
+Application aggregate observer: it publishes one frozen Project/Document/
+Comment/Run/Version snapshot and an event stream without copying mutable facts.
+`app/workbench.tsx` is a presentation adapter: it subscribes to that aggregate,
+derives visual state, supplies narrow host adapters and dispatches user intent.
+It imports neither the Bridge client nor business Sessions. Pure Workbench
+models hold deterministic formatting and transition helpers. Presentation
+modules receive snapshots and callbacks only; they do not import application
+services.
 
 | Boundary | Owner |
 | --- | --- |
 | Bridge routes, timeouts and structured outcomes | `app/application/bridge-client.js` |
+| Runtime Bridge/Session/workflow composition, aggregate frozen snapshot and application event stream | `createRuntimeWorkspaceController()` and `WorkspaceController` in `app/application/workspace-controller.js` |
 | Open/registered project identity, session generation and late-query fencing | `app/application/project-session.js` |
 | External OS/QoderWork HTML-open delivery, opaque request deduplication, committed-exit one-shot handoff, cold-start native failure presentation from stable product codes, whole project-open transition ordering, monotonic deferred-transition notification, blocker-gated/manual safe-switch retry, accepted-result FIFO and final renderer fence | `desktop/external-file-open.mjs`, `desktop/project-open-queue.mjs`, `app/application/external-file-open-session.js`, `app/application/project-application-session.js` |
 | Current source bytes, Hash, revisions, persistence projection, source-write single flight and Canvas authority generation | `app/application/document-session.js` |
@@ -229,7 +240,8 @@ they do not import application services.
 | Renderer comment working copy, composer and saved-comment edit projection | `app/application/comment-session.js` |
 | Active/background runs, Qoder status, background outcomes, submission lifecycle locks and operation locks | `app/application/run-session.js` |
 | Immutable Version projection and history-view transition | `app/application/version-session.js` |
-| `PROJECT.md` editor, composition fence, autosave and reconciliation | `app/application/project-rules-session.js` |
+| `PROJECT.md` editor working copy, generation, composition fence and save projection facts | `app/application/project-rules-session.js` |
+| `PROJECT.md` Bridge read/write, 700ms autosave, unknown-write reconciliation, close/switch drain and editor-restore host port | `app/application/project-rules-workflow.js`, composed by `WorkspaceController` |
 | Renderer source-history context, pending Patch operations and action intent | `app/application/source-history-session.js` |
 | Pure comment/edit-event/tombstone transition rules | `shared/draft-aggregate.mjs` |
 | Pure source-history validation, cursor transitions and exact Patch replay | `shared/source-history.mjs`, re-exported through `app/domain/source-history.js` |
@@ -250,7 +262,7 @@ they do not import application services.
 | Volatile desktop preview sessions and contained local-asset serving | `desktop/preview-protocol.mjs` |
 | Source-backed preview/edit display-state filtering, rebinding and safe action resolution | `app/lib/page-view-context.js` |
 | Review source-host discovery and Review-only capture request shape | `app/domain/runtime-snapshot-hosts.js`, `app/components/desktop-runtime-snapshot-api.ts` |
-| Review runtime-snapshot limits, source/session envelope and PNG validation | `app/domain/runtime-visual-contract.js`, `app/lib/runtime-visual-snapshots.js` |
+| Review runtime-snapshot limits, source/session envelope, PNG and visible-text-hash validation | `app/domain/runtime-visual-contract.js`, `app/lib/runtime-visual-snapshots.js` |
 | Sandboxed offscreen page execution and bounded bitmap capture for Review | `desktop/runtime-visual-capture-owner.mjs` |
 | Run lifecycle decoding and transition policy | `app/domain/run-lifecycle.js` |
 | Request freeze/persisted-boundary validation, authority reconciliation, run polling, cancellation, conflict commands and confirmed handoff | `app/application/run-workflow.js` |
@@ -260,7 +272,7 @@ they do not import application services.
 | Formal AI review state transitions | `app/workbench/review-state.ts` |
 | Bounded pure sibling alignment for semantic review units | `app/lib/review-semantic-alignment.js` |
 | Typed, per-element review projection fact normalization and filtering | `app/lib/review-projection-facts.js` |
-| Review-specific runtime-snapshot comparison and marker merge | `app/lib/review-runtime-visual.js` |
+| Review-specific strict text/raster-tolerant snapshot comparison and marker merge | `app/lib/review-runtime-visual.js` |
 | Review runtime-capture migration interface and capture identity | `app/workbench/review-runtime-capture-adapter.ts` |
 | Formal AI review analysis, first-bootstrap exact-element binding, additive static/runtime fact union, global mask and overlay projection | `app/workbench/review-document.ts` |
 | Formal AI review composition, private runtime-projection port lifecycle and isolated-frame coordination | `app/workbench/AiReviewWorkspace.tsx` |
@@ -392,7 +404,7 @@ unchanged. Script conclusions from an old record never affect current status or
 review routing. Archived outcomes remain terminal and cannot become openable
 candidates through this adapter.
 
-`PROJECT.md` uses debounced autosave and is flushed before project switch or close. One recoverable unsaved comment composer is allowed at a time. Attachment uploads, rule saves and ordinary source writes are finished or surfaced in their owning panel before navigation proceeds.
+`ProjectRulesWorkflow` owns `PROJECT.md`'s debounced autosave and is flushed before project switch or close; its Session retains only the working copy and composition fence. One recoverable unsaved comment composer is allowed at a time. Attachment uploads, rule saves and ordinary source writes are finished or surfaced in their owning panel before navigation proceeds.
 
 Persistent source and Draft failures share the single workspace status-banner
 surface, ordered by safety priority. The source failure owns its export and

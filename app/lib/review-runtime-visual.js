@@ -6,25 +6,74 @@ import {
 export const REVIEW_RUNTIME_VISUAL_CANDIDATE_LIMIT =
   RUNTIME_VISUAL_SNAPSHOT_LIMIT;
 
+/**
+ * Mean absolute RGB-channel error (0–255 scale) permitted after an unchanged
+ * visible-text summary. It absorbs Chromium's sub-pixel/tile raster noise
+ * without making a byte-level PNG encoding difference a Review fact.
+ */
+export const REVIEW_RUNTIME_VISUAL_RASTER_MEAN_RGB_DIFFERENCE_BUDGET = 0.04;
+
 export { acceptRuntimeVisualSnapshots };
 
-function runtimeSnapshotChanged(before, after) {
-  return before?.state === "captured"
-    && after?.state === "captured"
-    && (
-      before.pngSha256 !== after.pngSha256
-      || before.width !== after.width
-      || before.height !== after.height
-      || before.layoutWidth !== after.layoutWidth
-      || before.layoutHeight !== after.layoutHeight
-      || before.byteLength !== after.byteLength
-    );
+/**
+ * This is intentionally a pure classification step. Decoding untrusted-size
+ * bounded PNG bytes belongs to the trusted browser adapter, not this module.
+ */
+export function reviewRuntimeVisualSnapshotComparison(before, after) {
+  if (before?.state !== "captured" || after?.state !== "captured") {
+    return "unavailable";
+  }
+  if (
+    before.width !== after.width
+    || before.height !== after.height
+    || before.layoutWidth !== after.layoutWidth
+    || before.layoutHeight !== after.layoutHeight
+  ) return "changed";
+  if (before.renderedTextSha256 !== after.renderedTextSha256) return "changed";
+  if (before.pngSha256 === after.pngSha256) return "unchanged";
+  return "raster";
+}
+
+function rgbaPixels(value) {
+  return value instanceof Uint8Array || value instanceof Uint8ClampedArray
+    ? value
+    : null;
+}
+
+/**
+ * Returns a bounded mean absolute RGB-channel error, ignoring alpha. A null
+ * result means the caller must fail closed because the decoded images cannot
+ * be compared as one same-sized RGBA pair.
+ */
+export function reviewRuntimeVisualMeanRgbDifference(beforePixels, afterPixels) {
+  const before = rgbaPixels(beforePixels);
+  const after = rgbaPixels(afterPixels);
+  if (
+    !before
+    || !after
+    || before.byteLength === 0
+    || before.byteLength !== after.byteLength
+    || before.byteLength % 4 !== 0
+  ) return null;
+  let totalDifference = 0;
+  for (let index = 0; index < before.byteLength; index += 4) {
+    totalDifference += Math.abs(before[index] - after[index]);
+    totalDifference += Math.abs(before[index + 1] - after[index + 1]);
+    totalDifference += Math.abs(before[index + 2] - after[index + 2]);
+  }
+  return totalDifference / ((before.byteLength / 4) * 3);
+}
+
+export function isReviewRuntimeVisualRasterDifferenceMeaningful(value) {
+  return Number.isFinite(value)
+    && value > REVIEW_RUNTIME_VISUAL_RASTER_MEAN_RGB_DIFFERENCE_BUDGET;
 }
 
 export function changedReviewRuntimeVisualCandidateKeys({
   candidates,
   before,
   after,
+  rasterMeanRgbDifferenceByKey,
 } = {}) {
   if (!Array.isArray(candidates) || !Array.isArray(before) || !Array.isArray(after)) {
     return Object.freeze([]);
@@ -33,8 +82,17 @@ export function changedReviewRuntimeVisualCandidateKeys({
   const afterByKey = new Map(after.map((snapshot) => [snapshot.key, snapshot]));
   return Object.freeze(candidates.flatMap((candidate) => {
     const key = typeof candidate?.key === "string" ? candidate.key : "";
-    return key
-      && runtimeSnapshotChanged(beforeByKey.get(key), afterByKey.get(key))
+    if (!key) return [];
+    const comparison = reviewRuntimeVisualSnapshotComparison(
+      beforeByKey.get(key),
+      afterByKey.get(key),
+    );
+    if (comparison === "changed") return [key];
+    const rasterDifference = rasterMeanRgbDifferenceByKey instanceof Map
+      ? rasterMeanRgbDifferenceByKey.get(key)
+      : undefined;
+    return comparison === "raster"
+      && isReviewRuntimeVisualRasterDifferenceMeaningful(rasterDifference)
       ? [key]
       : [];
   }));
