@@ -223,8 +223,10 @@ Version authority.
 Edit has no runtime snapshot authority. For a candidate source, the existing
 canvas verification/loading gate holds display for the separate hidden compatibility probe; it
 then mounts either a script-disabled source-static frame or one direct runtime
-frame. Desktop attempts the one-shot contract only for a source-empty, stable,
-non-zero-sized host and deterministic classic scripts. `WorkspaceController`
+frame. Desktop attempts the one-shot contract only for bounded source-empty,
+stable hosts and deterministic classic scripts; an empty `tbody` is an
+Edit-only table-host addition. Hosts may begin hidden or zero-sized.
+`WorkspaceController`
 owns one `EditAuthorRuntimeSession` with the lifecycle
 `static → probing → compatible → loading → ready`; `loading` means the
 single direct canvas document is loading. Its identity is exact source SHA,
@@ -237,10 +239,14 @@ compatibility LRU. It returns only an authorization grant with fixed script
 digest and approved host bindings. It never returns probe DOM, screenshot,
 raw source, TargetRefs or a persistence payload. The renderer's one direct
 `allow-same-origin allow-scripts` canvas document is reached only through
-`pageroot-edit-runtime:`; it runs the fixed bytes once, cancels tracked timers,
+`pageroot-edit-runtime:`; it runs the fixed bytes once, waits a bounded
+final-frame settle window, cancels tracked timers,
 listeners and observers, blocks later network/navigation/worker/form/media
-surfaces, verifies source identity/layout/text outside hosts, then lets PageRoot
-attach editing handlers to that same frozen document. It is visually gated
+surfaces, verifies source identity/text/attributes outside hosts, then lets
+PageRoot attach editing handlers to that same frozen document. Approved empty
+hosts may gain generated DOM and change layout; their descendants are
+display-only and never become editable text or a comment TargetRef. The source
+host itself remains a normal comment target. It is visually gated
 until validation completes and is never replaced during editing or IME.
 
 The grant, cache and direct runtime DOM are disposable. No one-shot result may become

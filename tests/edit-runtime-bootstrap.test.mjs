@@ -16,6 +16,11 @@ test("Edit runtime bootstrap is a self-contained parser-first freezer with no am
   assert.match(source, /state\.baseline = baseline\(\);/u);
   assert.match(source, /installTracking\(\);/u);
   assert.match(source, /await twoFrames\(\);/u);
+  assert.match(source, /await waitForRuntimeSettle\(\);/u);
+  assert.match(source, /runtimeSettleMs/u);
+  assert.match(source, /prepareHiddenHostGeometry\(\);/u);
+  assert.match(source, /restoreHiddenHostGeometry\(\);/u);
+  assert.match(source, /data-pageroot-edit-runtime-preflight/u);
   assert.match(source, /clearTrackedAsync\(\);/u);
   assert.match(source, /observer\.disconnect\(\)/u);
   assert.match(source, /document\.getAnimations/);
@@ -23,6 +28,10 @@ test("Edit runtime bootstrap is a self-contained parser-first freezer with no am
   assert.match(source, /window\.Worker = function\(\)/u);
   assert.match(source, /window\.open = deny\("window\.open"\)/u);
   assert.match(source, /pointer-events", "none", "important"/u);
+  assert.match(source, /blockedRuntimeTags/u);
+  assert.doesNotMatch(source, /allowedRuntimeTags/u);
+  assert.doesNotMatch(source, /host-geometry-(?:unavailable|changed)/u);
+  assert.doesNotMatch(source, /source-layout-changed/u);
   assert.match(source, /data-pageroot-edit-runtime-frozen/u);
   assert.match(source, /data-pageroot-edit-runtime-result/u);
   assert.doesNotMatch(source, /eval\s*\(/u);

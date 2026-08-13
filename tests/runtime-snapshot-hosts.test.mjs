@@ -16,6 +16,7 @@ test("source host resolver admits only direct paint roots and stable empty hosts
     <div class="traffic-unique"></div>
     <div class="duplicate-chart"></div><div class="duplicate-chart"></div>
     <div id="not-empty">fallback text</div>
+    <table><tbody id="runtime-table-body"></tbody></table>
   </main></body></html>`;
   const afterHtml = beforeHtml;
   const resolved = resolveRuntimeSnapshotHosts({ beforeHtml, afterHtml });
@@ -47,6 +48,11 @@ test("source host resolver admits only direct paint roots and stable empty hosts
   assert.ok(dataHost);
   assert.equal(dataHost.before.hostTargetRef.level, "subregion");
   assert.match(dataHost.before.hostTargetRef.targetId, /^target_/u);
+  assert.equal(
+    resolved.hosts.some(({ before }) => before.binding.tagName === "tbody"),
+    false,
+    "Review keeps table bodies outside its narrower source-host contract",
+  );
 });
 
 test("source host resolver fails closed when a host is removed, ambiguous, or changes type", () => {

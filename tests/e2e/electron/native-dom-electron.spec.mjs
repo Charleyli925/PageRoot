@@ -512,12 +512,34 @@ test("Electron displays one frozen ECharts runtime document directly in Edit", a
     path.join(sourceDirectory, "echarts.min.js"),
     `window.echarts = {
   init(host) {
+    host.style.position = "relative";
+    host.style.userSelect = "none";
+    if (host.tagName === "TBODY") {
+      host.innerHTML = '<tr><td><b data-echarts-table-frozen="true">冻结表格行</b></td></tr>';
+      return { setOption() {} };
+    }
+    const shell = document.createElement("div");
+    const legend = document.createElement("b");
+    legend.textContent = "冻结图例";
     const canvas = document.createElement("canvas");
-    canvas.width = 240;
-    canvas.height = 120;
+    const bounds = host.getBoundingClientRect();
+    canvas.width = Math.max(1, Math.round(bounds.width));
+    canvas.height = Math.max(1, Math.round(bounds.height));
     canvas.style.display = "block";
     canvas.dataset.echartsFrozen = "true";
-    host.append(canvas);
+    canvas.dataset.echartsInitWidth = String(canvas.width);
+    shell.append(legend, canvas);
+    host.append(shell);
+    // Model ECharts' default initial animation: axes may exist after the
+    // first frames while the actual series is painted roughly one second
+    // later. The one-shot frame must freeze that final paint, not the empty
+    // animation start state.
+    window.setTimeout(() => {
+      const context = canvas.getContext("2d");
+      context.fillStyle = "#5b5ce2";
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      canvas.dataset.echartsSettled = "true";
+    }, 1000);
     return { setOption() {} };
   },
 };`,
@@ -529,10 +551,20 @@ test("Electron displays one frozen ECharts runtime document directly in Edit", a
 <html>
 <head><meta charset="utf-8"></head>
 <body>
-  <div id="echarts-host" style="width:240px;height:120px"></div>
+  <nav role="tablist">
+    <button id="runtime-tab-visible" role="tab" aria-selected="true" aria-controls="runtime-panel-visible">可见图表</button>
+    <button id="runtime-tab-hidden" role="tab" aria-selected="false" aria-controls="runtime-panel-hidden" tabindex="-1">隐藏图表</button>
+  </nav>
+  <section id="runtime-panel-visible" role="tabpanel" aria-labelledby="runtime-tab-visible">
+    <div id="echarts-host" data-native-case="direct-runtime-host" style="width:240px;height:120px"></div>
+  </section>
+  <section id="runtime-panel-hidden" role="tabpanel" aria-labelledby="runtime-tab-hidden" hidden>
+    <div id="hidden-echarts-host" style="width:240px;height:120px"></div>
+  </section>
+  <table><tbody id="echarts-table-body"></tbody></table>
   <p data-native-case="direct-runtime-copy">冻结后仍可编辑的正文。</p>
   <script src="./echarts.min.js"></script>
-  <script>echarts.init(document.getElementById("echarts-host"));</script>
+  <script>echarts.init(document.getElementById("echarts-host")); echarts.init(document.getElementById("hidden-echarts-host")); echarts.init(document.getElementById("echarts-table-body"));</script>
 </body></html>`,
     "utf8",
   );
@@ -543,7 +575,7 @@ test("Electron displays one frozen ECharts runtime document directly in Edit", a
     const launched = await launchPageRoot({ activeSourcePath: sourcePath });
     electronApp = launched.electronApp;
     isolatedUserData = launched.isolatedUserData;
-    const { frame: editFrame } = await loadedDiskFrame(
+    let { frame: editFrame } = await loadedDiskFrame(
       launched.page,
       sourcePath,
       "direct-runtime-copy",
@@ -551,6 +583,16 @@ test("Electron displays one frozen ECharts runtime document directly in Edit", a
     await expect(editFrame.locator("#echarts-host canvas")).toHaveCount(1);
     await expect(editFrame.locator("#echarts-host canvas"))
       .toHaveAttribute("data-echarts-frozen", "true");
+    await expect(editFrame.locator("#echarts-host canvas"))
+      .toHaveAttribute("data-echarts-settled", "true");
+    await expect(editFrame.locator("#hidden-echarts-host canvas"))
+      .toHaveAttribute("data-echarts-init-width", "240");
+    await expect(editFrame.locator("#hidden-echarts-host canvas"))
+      .toHaveAttribute("data-echarts-settled", "true");
+    await expect(editFrame.locator("#echarts-table-body tr td b"))
+      .toHaveAttribute("data-echarts-table-frozen", "true");
+    await expect(editFrame.locator("#echarts-host"))
+      .toHaveAttribute("style", /position:\s*relative/u);
     await expect(editFrame.locator("html"))
       .toHaveAttribute("data-pageroot-edit-runtime-frozen", "true");
     const runtimeResult = await editFrame.locator("html").getAttribute(
@@ -567,9 +609,51 @@ test("Electron displays one frozen ECharts runtime document directly in Edit", a
       .toContain("allow-scripts");
     expect(readFileSync(sourcePath, "utf8")).not.toContain("echartsFrozen");
 
+    await editFrame.locator("#runtime-tab-hidden").click({ modifiers: ["Alt"] });
+    await expect(editFrame.locator("#runtime-panel-hidden"))
+      .not.toHaveAttribute("hidden", "");
+    await expect(editFrame.locator("#hidden-echarts-host canvas"))
+      .toHaveAttribute("width", "240");
+
+    // Return to the visible source host before exercising the ordinary
+    // read-only/edit/comment interactions below. The preceding assertions
+    // already prove that PageRoot's safe Tab action can reveal the frozen
+    // hidden chart without replaying the author tab handler.
+    await editFrame.locator("#runtime-tab-visible").click({ modifiers: ["Alt"] });
+    await expect(editFrame.locator("#runtime-panel-visible"))
+      .not.toHaveAttribute("hidden", "");
+
+    await editFrame.locator("#echarts-host").dblclick();
+    await expect(launched.page.getByTestId("html-canvas-editor"))
+      .toHaveAttribute("data-native-start-status", "runtime-read-only");
+    await expect(editFrame.locator("#echarts-host"))
+      .not.toHaveAttribute("contenteditable", "true");
+    await addCanvasComment(
+      launched.page,
+      editFrame,
+      "direct-runtime-host",
+      "冻结图表宿主仍可正常留评论。",
+    );
+    // Saving a comment may replace the disposable Canvas frame. Continue the
+    // edit assertion against the current verified frame, just as the product
+    // does for an ordinary source-backed comment target.
+    editFrame = await currentEditorFrame(launched.page);
+
     await activateNativeEdit(editFrame, "direct-runtime-copy");
     await expect(editFrame.locator(caseSelector("direct-runtime-copy")))
       .toHaveAttribute("contenteditable", "true");
+    await setTextSelection(editFrame, "direct-runtime-copy", 0, 2);
+    await launched.page.keyboard.insertText("普通编辑");
+    await expect(editFrame.locator(caseSelector("direct-runtime-copy")))
+      .toContainText("普通编辑");
+    await launched.page.keyboard.press(keyShortcut("S"));
+    await expect.poll(() => readFileSync(sourcePath, "utf8"))
+      .toContain("普通编辑");
+    const persisted = readFileSync(sourcePath, "utf8");
+    expect(persisted).toContain("echarts.init(document.getElementById(\"echarts-host\"))");
+    expect(persisted).not.toContain("data-echarts-frozen");
+    expect(persisted).not.toContain("data-echarts-settled");
+    expect(persisted).not.toContain("data-pageroot-edit-runtime");
   } finally {
     if (electronApp && isolatedUserData) {
       await stopPageRoot(electronApp, isolatedUserData);

@@ -17,6 +17,7 @@ import {
   EDIT_AUTHOR_RUNTIME_BUDGET,
   EDIT_AUTHOR_RUNTIME_CONTRACT_VERSION,
   EDIT_RUNTIME_FROZEN_ATTRIBUTE,
+  EDIT_RUNTIME_HOST_ATTRIBUTE,
   EDIT_RUNTIME_RESULT_ATTRIBUTE,
   isEditRuntimeFrameToken,
   type EditRuntimeGrant,
@@ -321,6 +322,20 @@ const EDITOR_DOCUMENT_STYLES = `
   html:not([data-html-canvas-locked]) body * {
     -webkit-user-select: text !important;
     user-select: text !important;
+  }
+
+  html:not([data-html-canvas-locked]) [${EDIT_RUNTIME_HOST_ATTRIBUTE}],
+  html:not([data-html-canvas-locked]) [${EDIT_RUNTIME_HOST_ATTRIBUTE}] * {
+    -webkit-user-select: none !important;
+    user-select: none !important;
+  }
+
+  html:not([data-html-canvas-locked]) [${EDIT_RUNTIME_HOST_ATTRIBUTE}] {
+    cursor: default !important;
+  }
+
+  html:not([data-html-canvas-locked]) [${EDIT_RUNTIME_HOST_ATTRIBUTE}] * {
+    pointer-events: none !important;
   }
 
 `;
@@ -2861,6 +2876,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       );
       return false;
     }
+    if (selectedElement.closest(`[${EDIT_RUNTIME_HOST_ATTRIBUTE}]`)) {
+      containerRef.current?.setAttribute("data-native-start-status", "runtime-read-only");
+      return false;
+    }
     const priorRange = activeTextRangeRef.current;
     const islandHostElement = nativeEditHostForElement(selectedElement, sourceIndex);
     const fragmentCandidate = islandHostElement
@@ -4397,6 +4416,15 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       if (findNativeActionTarget(event.target)) event.preventDefault();
       const target = findCanvasSelectionElement(event.target);
       if (!target) return;
+      if (target.closest(`[${EDIT_RUNTIME_HOST_ATTRIBUTE}]`)) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!lockedRef.current) {
+          containerRef.current?.setAttribute("data-native-start-status", "runtime-read-only");
+          selectElement(target);
+        }
+        return;
+      }
       if (
         event.altKey
         && resolvePagePresentationAction(selectionForElement(
@@ -4609,7 +4637,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         clearSelection();
         return;
       }
-      if (event.key === "Enter" && selectedElementRef.current) {
+      if (
+        event.key === "Enter"
+        && selectedElementRef.current
+        && !selectedElementRef.current.closest(`[${EDIT_RUNTIME_HOST_ATTRIBUTE}]`)
+      ) {
         event.preventDefault();
         startEditing();
         return;

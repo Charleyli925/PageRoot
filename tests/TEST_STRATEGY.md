@@ -139,7 +139,7 @@ PR 批量是建议而非固定限制：用 CI Health 的 Ready 次数、candidat
   ECharts 候选限制、固定资源摘要与协议 ID；`EditAuthorRuntimeSession` 测试拥有
   source SHA/Canvas generation 围栏、取消/迟到结果和 grant 撤销；Electron owner
   测试拥有隐藏非持久 probe、超时和无 DOM/截图回传。Native Electron 用例必须证明
-  合格图表只在一个正式 Edit iframe 中运行、冻结并验证后才显示，运行时节点留在
+  合格图表只在一个正式 Edit iframe 中运行、经过固定受限的最终帧等待后冻结并验证后才显示，运行时节点留在
   获准的源码空宿主内，源码字节不变且普通文字仍可编辑；不兼容或失败时静默保留
   静态 Edit。该路径没有 staging iframe、空闲/IME 后替换或运行时持久化 oracle。
 - 编辑模式安全内容切换：Node 证明语义 Tab/details/disclosure 与显式

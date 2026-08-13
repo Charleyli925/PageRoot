@@ -34,15 +34,22 @@ and source-backed; general script-generated Canvas/SVG remains available in
 Preview.
 
 Desktop additionally permits one distinct Edit one-shot path only for an
-explicit ECharts candidate and a stable, source-empty, non-zero-sized host. It
-is not a runtime-snapshot feature:
+explicit ECharts candidate and up to 32 stable, source-empty hosts. Empty
+`tbody` hosts are an Edit-only addition for generated static tables; Review
+remains intentionally narrower. A host may start hidden or zero-sized. This is
+not a runtime-snapshot feature:
 `EditRuntimeProbeOwner` validates exact source SHA/bindings in a hidden,
 non-persistent window and returns only a fixed-byte grant. The existing canvas
 verification/loading gate holds display for that decision, then its one normal iframe runs the
-authorized classic scripts in source order once, blocks later
-network/navigation/worker surfaces, freezes author timers/listeners/observers
-and audits that source nodes, text and geometry outside approved hosts did not
-change. PageRoot binds after validation to that same frozen iframe; there is no
+authorized classic scripts in source order once, waits a bounded final-frame
+settle window, blocks later network/navigation/worker surfaces, freezes author
+timers/listeners/observers
+and audits that source nodes, text and attributes outside approved hosts did
+not change. Approved empty hosts may gain a generated DOM subtree and change
+layout/attributes. The generated subtree is display-only: PageRoot never turns
+it into editable text or a comment TargetRef, while the original host remains
+selectable as one normal comment target. PageRoot binds after validation to
+that same frozen iframe; there is no
 hidden staging frame or later idle/IME-gated replacement. The source remains
 authoritative; direct runtime DOM, grants and the bounded process LRU never
 enter SourcePatch, comments, save, Version, Review or AI input. Incompatible,

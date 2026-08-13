@@ -6,7 +6,7 @@ import {
   isEditRuntimeSourceSha256,
 } from "../domain/edit-runtime-contract.js";
 import {
-  resolveRuntimeSnapshotHosts,
+  resolveEditRuntimeHosts,
   runtimeSnapshotCaptureCandidate,
 } from "../domain/runtime-snapshot-hosts.js";
 
@@ -160,7 +160,7 @@ export class EditAuthorRuntimeSession {
   }
 
   #hostCandidates(html) {
-    const resolved = resolveRuntimeSnapshotHosts({
+    const resolved = resolveEditRuntimeHosts({
       beforeHtml: html,
       afterHtml: html,
       maximum: EDIT_AUTHOR_RUNTIME_BUDGET.hostCount,

@@ -50,6 +50,19 @@ export function resolveRuntimeSnapshotHosts(options?: {
   hosts: readonly RuntimeSnapshotHostPair[];
 }> | null;
 
+/** Edit-only source-empty host resolver. Review remains intentionally narrower. */
+export function resolveEditRuntimeHosts(options?: {
+  beforeHtml?: string;
+  afterHtml?: string;
+  beforeIndex?: unknown;
+  afterIndex?: unknown;
+  maximum?: number;
+}): Readonly<{
+  beforeIndex: unknown;
+  afterIndex: unknown;
+  hosts: readonly RuntimeSnapshotHostPair[];
+}> | null;
+
 export function runtimeSnapshotCaptureCandidate(
   key: string,
   host: RuntimeSnapshotHost,

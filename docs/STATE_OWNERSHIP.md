@@ -157,7 +157,8 @@ Rules:
   Static Edit remains the default source surface. A qualified one-shot load
   may show a frozen runtime host only after its owner has audited it; the runtime
   DOM, compatibility cache and grant still have no source, Draft, Version,
-  comment or AI authority.
+  comment or AI authority. Runtime descendants themselves have no comment
+  authority; the pre-existing source host remains the normal comment target.
 - AI review state fields are orthogonal. Page, filter, visibility, navigation,
   page presentation, scroll and zoom actions may update only their own reducer field. Review
   navigation can reveal a hidden panel in both frames but cannot become a

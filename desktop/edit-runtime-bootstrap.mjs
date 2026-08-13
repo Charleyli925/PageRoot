@@ -24,8 +24,8 @@ export function createEditRuntimeBootstrap({
   freezeKey,
   executionId,
   sessionId,
-  geometryTolerancePx = EDIT_AUTHOR_RUNTIME_BUDGET.geometryTolerancePx,
   mutationRecordLimit = EDIT_AUTHOR_RUNTIME_BUDGET.mutationRecordCount,
+  runtimeSettleMs = EDIT_AUTHOR_RUNTIME_BUDGET.runtimeSettleMs,
 } = {}) {
   if (typeof freezeKey !== "string" || freezeKey.length < 16) {
     throw new TypeError("Edit runtime bootstrap requires a private freeze key.");
@@ -40,13 +40,17 @@ export function createEditRuntimeBootstrap({
     freezeKey,
     executionId,
     sessionId,
-    geometryTolerancePx: Math.max(0, Number(geometryTolerancePx) || 0),
     mutationRecordLimit: Math.max(1, Math.floor(Number(mutationRecordLimit) || 1)),
+    runtimeSettleMs: Math.max(0, Math.min(
+      EDIT_AUTHOR_RUNTIME_BUDGET.ownerDeadlineMs,
+      Math.floor(Number(runtimeSettleMs) || 0),
+    )),
     attributes: {
       source: EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE,
       host: EDIT_RUNTIME_HOST_ATTRIBUTE,
       owned: EDIT_RUNTIME_OWNED_ATTRIBUTE,
       stub: EDIT_RUNTIME_SCRIPT_STUB_ATTRIBUTE,
+      preflight: "data-pageroot-edit-runtime-preflight",
       bootstrap: EDIT_RUNTIME_BOOTSTRAP_ATTRIBUTE,
       frozen: EDIT_RUNTIME_FROZEN_ATTRIBUTE,
       result: EDIT_RUNTIME_RESULT_ATTRIBUTE,
@@ -59,6 +63,7 @@ export function createEditRuntimeBootstrap({
   const hostAttribute = config.attributes.host;
   const ownedAttribute = config.attributes.owned;
   const stubAttribute = config.attributes.stub;
+  const preflightAttribute = config.attributes.preflight;
   const frozenAttribute = config.attributes.frozen;
   const resultAttribute = config.attributes.result;
   const sourceSelector = "[" + sourceAttribute + "]";
@@ -96,6 +101,7 @@ export function createEditRuntimeBootstrap({
     listeners: [],
     observers: [],
     auditObserver: null,
+    preflightStyle: null,
     mutationRecords: 0,
     baseline: null,
     result: null,
@@ -113,15 +119,17 @@ export function createEditRuntimeBootstrap({
     || name === frozenAttribute
     || name === resultAttribute
   );
+  const isPageRootOwned = (element) => (
+    element instanceof Element
+    && element.hasAttribute(ownedAttribute)
+    && element.getAttribute(ownedAttribute) !== "runtime"
+  );
   const isInsideOwned = (element) => (
-    element instanceof Element && (
-      element.hasAttribute(ownedAttribute)
-      || element.parentElement?.hasAttribute(ownedAttribute) === true
-    )
+    isPageRootOwned(element) || isPageRootOwned(element?.parentElement)
   );
   const isPageRootFrameNode = (element) => (
     element instanceof Element && (
-      element.hasAttribute(ownedAttribute)
+      isPageRootOwned(element)
       || element.hasAttribute(config.attributes.bootstrap)
       || element.tagName.toLowerCase() === "meta"
         && element.hasAttribute("data-html-canvas-render-verification")
@@ -166,24 +174,6 @@ export function createEditRuntimeBootstrap({
     }
     return attributes.sort().join("\u0000");
   };
-  const rectFor = (element) => {
-    try {
-      const rect = element.getBoundingClientRect();
-      return [rect.x, rect.y, rect.width, rect.height].every(Number.isFinite)
-        ? { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
-        : null;
-    } catch {
-      return null;
-    }
-  };
-  const comparedRect = (left, right) => {
-    if (!left || !right) return left === right;
-    const tolerance = config.geometryTolerancePx;
-    return Math.abs(left.x - right.x) <= tolerance
-      && Math.abs(left.y - right.y) <= tolerance
-      && Math.abs(left.width - right.width) <= tolerance
-      && Math.abs(left.height - right.height) <= tolerance;
-  };
   const textSnapshot = () => {
     const root = document.documentElement;
     if (!root) return [];
@@ -205,6 +195,41 @@ export function createEditRuntimeBootstrap({
     }
     return values;
   };
+  // ECharts measures a host at init time. A chart inside a source-backed hidden
+  // Tab would otherwise permanently initialize at 1px because author resize
+  // listeners are deliberately removed when this one-shot frame freezes.
+  // Temporarily reveal only the display:none ancestors of zero-geometry
+  // approved hosts, keep them visually hidden, and remove every owned mark
+  // before the document reaches PageRoot editing handlers.
+  const prepareHiddenHostGeometry = () => {
+    const hiddenAncestors = new Set();
+    for (const host of Array.from(document.querySelectorAll(hostSelector))) {
+      let rect = null;
+      try { rect = host.getBoundingClientRect(); } catch {}
+      if (rect && rect.width >= 1 && rect.height >= 1) continue;
+      let parent = host;
+      while (parent instanceof Element && parent !== document.documentElement) {
+        try {
+          if (getComputedStyle(parent).display === "none") hiddenAncestors.add(parent);
+        } catch {}
+        parent = parent.parentElement;
+      }
+    }
+    if (!hiddenAncestors.size) return;
+    for (const element of hiddenAncestors) element.setAttribute(preflightAttribute, "");
+    const style = native.createElement.call(document, "style");
+    style.setAttribute(ownedAttribute, "preflight");
+    style.textContent = "[" + preflightAttribute + "]{display:block!important;visibility:hidden!important}";
+    (document.head || document.documentElement).appendChild(style);
+    state.preflightStyle = style;
+  };
+  const restoreHiddenHostGeometry = () => {
+    try { state.preflightStyle?.remove(); } catch {}
+    state.preflightStyle = null;
+    for (const element of Array.from(document.querySelectorAll("[" + preflightAttribute + "]"))) {
+      try { element.removeAttribute(preflightAttribute); } catch {}
+    }
+  };
   const baseline = () => {
     const source = sourceNodes();
     if (!source.length || source.length > ${safeScriptValue(EDIT_AUTHOR_RUNTIME_BUDGET.sourceNodeCount)}) {
@@ -221,9 +246,6 @@ export function createEditRuntimeBootstrap({
         tagName: element.tagName.toLowerCase(),
         parentMarker: sourceParentMarker(element),
         attributes: attributesFor(element, host),
-        rect: /^(?:script|style|meta|link|title)$/u.test(element.tagName.toLowerCase())
-          ? null
-          : rectFor(element),
         host,
       };
       nodes.set(marker, record);
@@ -233,20 +255,27 @@ export function createEditRuntimeBootstrap({
           state.violations.add("host-identity-invalid");
           continue;
         }
-        if (!record.rect || record.rect.width < 1 || record.rect.height < 1) {
-          state.violations.add("host-geometry-unavailable");
-        }
         hosts.set(hostKey, record);
       }
     }
     if (!hosts.size) state.violations.add("no-approved-host");
     return { nodes, hosts, text: textSnapshot() };
   };
-  const allowedRuntimeTags = new Set([
-    "a", "canvas", "circle", "clipPath", "defs", "div", "ellipse", "g", "image",
-    "line", "linearGradient", "path", "polygon", "polyline", "rect", "span", "stop",
-    "svg", "text", "tspan", "use",
-  ].map((tag) => tag.toLowerCase()));
+  // Generated chart/table markup may use arbitrary presentational HTML/SVG.
+  // Keep it inside a source-empty host, but reject the small set of nodes that
+  // could create a new executable, navigable, form, media, or global-style
+  // surface after the author turn has frozen.
+  const blockedRuntimeTags = new Set([
+    "base", "embed", "form", "frame", "frameset", "iframe", "input", "link",
+    "meta", "object", "script", "select", "source", "style", "textarea", "track",
+    "video", "audio", "button", "dialog",
+  ]);
+  const sealRuntimeNode = (element) => {
+    element.style.setProperty("pointer-events", "none", "important");
+    element.style.setProperty("user-select", "none", "important");
+    element.setAttribute("tabindex", "-1");
+    element.setAttribute(ownedAttribute, "runtime");
+  };
   const audit = () => {
     const before = state.baseline;
     if (!before) return { state: "rejected", reason: "baseline-unavailable", hostKeys: [] };
@@ -267,16 +296,8 @@ export function createEditRuntimeBootstrap({
       if (
         element.tagName.toLowerCase() !== record.tagName
         || sourceParentMarker(element) !== record.parentMarker
-        || attributesFor(element, host) !== record.attributes
+        || (!host && attributesFor(element, false) !== record.attributes)
       ) state.violations.add("source-node-mutated");
-      const rect = record.rect ? rectFor(element) : null;
-      if (host) {
-        if (!rect || rect.width < 1 || rect.height < 1 || !comparedRect(record.rect, rect)) {
-          state.violations.add("host-geometry-changed");
-        }
-      } else if (record.rect && !comparedRect(record.rect, rect)) {
-        state.violations.add("source-layout-changed");
-      }
     }
     if (seen.size !== before.nodes.size) state.violations.add("source-node-missing");
     const afterText = textSnapshot();
@@ -295,13 +316,11 @@ export function createEditRuntimeBootstrap({
         state.violations.add("runtime-node-outside-host");
         continue;
       }
-      if (!allowedRuntimeTags.has(element.tagName.toLowerCase())) {
-        state.violations.add("runtime-node-tag-rejected");
+      if (blockedRuntimeTags.has(element.tagName.toLowerCase())) {
+        state.violations.add("runtime-node-surface-rejected");
         continue;
       }
-      element.style.setProperty("pointer-events", "none", "important");
-      element.style.setProperty("user-select", "none", "important");
-      element.setAttribute("tabindex", "-1");
+      sealRuntimeNode(element);
     }
     const hostKeys = [...before.hosts.keys()].sort();
     const reason = [...state.violations].sort()[0] || null;
@@ -526,11 +545,18 @@ export function createEditRuntimeBootstrap({
   const twoFrames = () => new Promise((resolve) => {
     native.requestAnimationFrame(() => native.requestAnimationFrame(resolve));
   });
+  // ECharts renders axes immediately but, by default, animates series over one
+  // second. A short, fixed settling window preserves the final visual result
+  // without allowing a continuing author runtime after Edit becomes ready.
+  const waitForRuntimeSettle = () => new Promise((resolve) => {
+    native.setTimeout(resolve, config.runtimeSettleMs);
+  });
   const begin = async () => {
     if (state.phase !== "booting") return;
     state.baseline = baseline();
     observeMutations();
     installTracking();
+    prepareHiddenHostGeometry();
     state.phase = "running";
     const bootstrap = document.currentScript
       || document.querySelector("script[${EDIT_RUNTIME_BOOTSTRAP_ATTRIBUTE}]");
@@ -552,10 +578,13 @@ export function createEditRuntimeBootstrap({
         await loadOne(scriptId, origin);
       }
       await twoFrames();
+      await waitForRuntimeSettle();
+      await twoFrames();
       await Promise.resolve();
     } catch {
       state.violations.add("author-script-failed");
     } finally {
+      restoreHiddenHostGeometry();
       freeze();
     }
   };

@@ -89,4 +89,7 @@ test("Edit one-shot contract keeps identifiers and protocol URLs source-bound an
   assert.equal(editRuntimeSourceMarker([1, -1]), null);
   assert.equal(EDIT_AUTHOR_RUNTIME_BUDGET.cacheEntries, 8);
   assert.equal(EDIT_AUTHOR_RUNTIME_BUDGET.cacheBytes, 32 * 1024 * 1024);
+  assert.equal(EDIT_AUTHOR_RUNTIME_BUDGET.hostCount, 32);
+  assert.equal(EDIT_AUTHOR_RUNTIME_BUDGET.runtimeSettleMs, 1_200);
+  assert.equal(EDIT_AUTHOR_RUNTIME_BUDGET.ownerDeadlineMs, 6_000);
 });

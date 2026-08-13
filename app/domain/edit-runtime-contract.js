@@ -13,14 +13,24 @@ export const EDIT_AUTHOR_RUNTIME_BUDGET = Object.freeze({
   scriptCount: 24,
   scriptBytes: 3 * 1024 * 1024,
   aggregateScriptBytes: 12 * 1024 * 1024,
-  hostCount: 16,
+  // The one-shot renderer is still bounded, but a normal multi-tab report can
+  // legitimately have more than sixteen independently addressed chart/table
+  // hosts. Keep this aligned with the existing 32-host visual contract.
+  hostCount: 32,
   sourceNodeCount: 4_096,
   mutationRecordCount: 4_096,
+  // ECharts defaults to a 1s initial animation. Edit does not preserve the
+  // animation, but it must wait for the final painted frame before freezing.
+  // This remains safely inside the 6s owner deadline.
+  runtimeSettleMs: 1_200,
   cacheEntries: 8,
   cacheBytes: 32 * 1024 * 1024,
   cacheTtlMs: 30 * 60 * 1_000,
-  ownerDeadlineMs: 4_500,
-  geometryTolerancePx: 2,
+  // A one-shot ECharts document has both an isolated compatibility pass and
+  // the final direct-frame paint. Leave headroom for the fixed final-frame
+  // settle window instead of turning a merely slower local page into a false
+  // static fallback.
+  ownerDeadlineMs: 6_000,
 });
 
 export const EDIT_RUNTIME_PROTOCOL_SCHEME = "pageroot-edit-runtime";

@@ -182,3 +182,42 @@ test("Edit author runtime Session never probes unpersisted or unsupported source
   assert.equal(probes, 0);
   assert.equal(session.snapshot.phase, "static");
 });
+
+test("Edit author runtime Session admits bounded multi-chart and empty table-body hosts", async () => {
+  const chartHosts = Array.from({ length: 17 }, (_, index) => (
+    `<div id="chart-${index + 1}" style="width:320px;height:180px"></div>`
+  )).join("");
+  const html = [
+    "<!doctype html><html><body>",
+    chartHosts,
+    '<table><tbody id="chart-table-body"></tbody></table>',
+    "<script>echarts.init(document.getElementById('chart-1'))</script>",
+    "</body></html>",
+  ].join("");
+  const sourceSha256 = `sha256:${createHash("sha256").update(html, "utf8").digest("hex")}`;
+  const calls = [];
+  const session = new EditAuthorRuntimeSession({
+    port: {
+      probe: async (request) => {
+        calls.push(request);
+        return compatibleResult(request);
+      },
+      revoke: async () => {},
+    },
+  });
+
+  session.refresh({
+    html,
+    sourceSha256,
+    canvasGeneration: 8,
+    sourcePath: "/Users/demo/multi-chart.html",
+    sourceIsAuthoritative: true,
+  });
+  await flushAsync();
+
+  assert.equal(session.snapshot.phase, "compatible");
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].hosts.length, 18);
+  assert.equal(calls[0].hosts.at(-1)?.tagName, "tbody");
+  assert.equal(calls[0].hosts.some((host) => host.tagName === "tbody"), true);
+});

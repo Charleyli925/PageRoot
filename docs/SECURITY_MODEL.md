@@ -61,9 +61,13 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
   `pageroot-edit-runtime:` session. The hidden probe and the one direct runtime
   canvas document deny permissions, navigation, popups, webviews, downloads,
   worker/network APIs, form submission and media playback; the bootstrap tracks
-  and removes author timers, listeners and observers before that same document
-  receives PageRoot editing handlers. A grant returns no runtime DOM, source or
-  image; timeout/rejection revokes it and silently shows the static canvas.
+  and removes author timers, listeners and observers after a bounded final-frame
+  settle window and before that same document
+  receives PageRoot editing handlers. Approved empty hosts may change their own
+  layout and generated subtree, but runtime descendants are sealed
+  display-only; only the original source host can be selected for a normal
+  comment. A grant returns no runtime DOM, source or image; timeout/rejection
+  revokes it and silently shows the static canvas.
 - Desktop Review runtime snapshot capture is one narrow IPC capability. The
   main process revalidates exact source HTML/SHA and a bounded
   source-host binding, owns one hidden sandboxed BrowserWindow with Node

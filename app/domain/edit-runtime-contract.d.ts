@@ -8,11 +8,11 @@ export const EDIT_AUTHOR_RUNTIME_BUDGET: Readonly<{
   hostCount: number;
   sourceNodeCount: number;
   mutationRecordCount: number;
+  runtimeSettleMs: number;
   cacheEntries: number;
   cacheBytes: number;
   cacheTtlMs: number;
   ownerDeadlineMs: number;
-  geometryTolerancePx: number;
 }>;
 
 export const EDIT_RUNTIME_PROTOCOL_SCHEME: "pageroot-edit-runtime";

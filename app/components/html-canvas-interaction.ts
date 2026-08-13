@@ -1,4 +1,5 @@
 import { SOURCE_NODE_ATTRIBUTE } from "../lib/source-patch-core.js";
+import { EDIT_RUNTIME_HOST_ATTRIBUTE } from "../domain/edit-runtime-contract.js";
 import { inferSelectionLevel, selectionForElement } from "./html-canvas-selection";
 import { sourceTextNodeForDomText } from "./html-canvas-preview-sync";
 import type { ActiveTextRange, SourceIndexValue, TextRangeSegment } from "./html-canvas-internal-types";
@@ -17,6 +18,10 @@ export function activeTextRangeFromDocument(
   const commonElement = commonNode.nodeType === 1
     ? commonNode as HTMLElement
     : commonNode.parentElement;
+  // Runtime descendants are deliberately display-only. Their empty source host
+  // can still be selected as a whole for an existing comment flow, but their
+  // generated text never becomes a source text range or editable island.
+  if (commonElement?.closest(`[${EDIT_RUNTIME_HOST_ATTRIBUTE}]`)) return null;
   const targetElement = commonElement?.closest<HTMLElement>(`[${SOURCE_NODE_ATTRIBUTE}]`) ?? null;
   if (
     !targetElement
@@ -229,6 +234,8 @@ function compoundValueSelectionRoot(element: HTMLElement): HTMLElement {
 export function findCanvasSelectionElement(target: EventTarget | null): HTMLElement | null {
   const selected = findSelectableElement(target);
   if (!selected) return null;
+  const runtimeHost = selected.closest<HTMLElement>(`[${EDIT_RUNTIME_HOST_ATTRIBUTE}]`);
+  if (runtimeHost) return runtimeHost;
   const element = compoundValueSelectionRoot(selected);
   const ownsMediaSurface = element.matches(MEDIA_SURFACE_SELECTOR)
     || Boolean(element.querySelector(MEDIA_SURFACE_SELECTOR));

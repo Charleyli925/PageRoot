@@ -22,6 +22,15 @@ const STABLE_HOST_TAGS = new Set([
   "section",
   "span",
 ]);
+// Review deliberately keeps the historical, narrow stable-host set. Edit has
+// a separate one-shot display contract and may additionally target an empty
+// table body: common chart reports populate it with static rows after their
+// chart script runs. It remains a source-empty host with a unique source
+// binding, never a runtime-discovered selector.
+const EDIT_RUNTIME_STABLE_HOST_TAGS = new Set([
+  ...STABLE_HOST_TAGS,
+  "tbody",
+]);
 const EXCLUDED_STABLE_ATTRIBUTES = new Set([
   "class",
   "id",
@@ -143,12 +152,12 @@ function stableBinding(index, element) {
   return uniqueClassBinding(index, element) || Object.freeze([]);
 }
 
-function hostDescriptor(index, element) {
+function hostDescriptor(index, element, stableHostTags = STABLE_HOST_TAGS) {
   if (!element || element.type !== "element") return null;
   const directKind = DIRECT_HOST_KINDS.get(element.tagName);
   const binding = stableBinding(index, element);
   const kind = directKind || (
-    STABLE_HOST_TAGS.has(element.tagName)
+    stableHostTags.has(element.tagName)
     && sourceContentIsEmpty(index, element)
     && binding.length > 0
       ? "host"
@@ -182,7 +191,7 @@ function compatibleHost(beforeHost, afterHost) {
     && beforeHost.binding.tagName === afterHost.binding.tagName;
 }
 
-function pairedAfterHost(beforeHost, afterIndex) {
+function pairedAfterHost(beforeHost, afterIndex, stableHostTags = STABLE_HOST_TAGS) {
   try {
     const resolution = resolveTargetRef(afterIndex, beforeHost.hostTargetRef);
     if (
@@ -190,7 +199,7 @@ function pairedAfterHost(beforeHost, afterIndex) {
       && resolution.resolution !== "orphaned"
       && resolution.target?.type === "element"
     ) {
-      const afterHost = hostDescriptor(afterIndex, resolution.target);
+      const afterHost = hostDescriptor(afterIndex, resolution.target, stableHostTags);
       if (compatibleHost(beforeHost, afterHost)) return afterHost;
     }
   } catch {
@@ -202,7 +211,7 @@ function pairedAfterHost(beforeHost, afterIndex) {
   // ordinary source-empty containers never use this positional route.
   if (beforeHost.kind === "host") return null;
   const atSamePath = elementAtPath(afterIndex, beforeHost.binding.path);
-  const afterHost = hostDescriptor(afterIndex, atSamePath);
+  const afterHost = hostDescriptor(afterIndex, atSamePath, stableHostTags);
   return compatibleHost(beforeHost, afterHost) ? afterHost : null;
 }
 
@@ -246,12 +255,13 @@ export function runtimeSnapshotCaptureCandidate(key, host) {
  * runtime DOM selector, script parser, comment scope or computed selector is
  * involved in candidate discovery.
  */
-export function resolveRuntimeSnapshotHosts({
+function resolveSourceBackedHosts({
   beforeHtml,
   afterHtml,
   beforeIndex: suppliedBeforeIndex = null,
   afterIndex: suppliedAfterIndex = null,
   maximum = RUNTIME_SNAPSHOT_HOST_LIMIT,
+  stableHostTags = STABLE_HOST_TAGS,
 } = {}) {
   if (typeof beforeHtml !== "string" || typeof afterHtml !== "string") return null;
   let beforeIndex;
@@ -268,9 +278,9 @@ export function resolveRuntimeSnapshotHosts({
   const hosts = [];
   for (const element of beforeIndex.elements) {
     if (hosts.length >= limit) break;
-    const before = hostDescriptor(beforeIndex, element);
+    const before = hostDescriptor(beforeIndex, element, stableHostTags);
     if (!before) continue;
-    const after = pairedAfterHost(before, afterIndex);
+    const after = pairedAfterHost(before, afterIndex, stableHostTags);
     if (!after) continue;
     hosts.push(Object.freeze({ before, after }));
   }
@@ -278,5 +288,28 @@ export function resolveRuntimeSnapshotHosts({
     beforeIndex,
     afterIndex,
     hosts: Object.freeze(hosts),
+  });
+}
+
+/**
+ * Review-only source host discovery. It intentionally does not widen its
+ * historical surface merely because Edit can display a frozen table body.
+ */
+export function resolveRuntimeSnapshotHosts(options = {}) {
+  return resolveSourceBackedHosts({
+    ...options,
+    stableHostTags: STABLE_HOST_TAGS,
+  });
+}
+
+/**
+ * Source-backed discovery for the optional Edit one-shot contract. It has the
+ * same identity/path rules as Review, with an explicit empty-`tbody` addition
+ * for generated static tables.
+ */
+export function resolveEditRuntimeHosts(options = {}) {
+  return resolveSourceBackedHosts({
+    ...options,
+    stableHostTags: EDIT_RUNTIME_STABLE_HOST_TAGS,
   });
 }
