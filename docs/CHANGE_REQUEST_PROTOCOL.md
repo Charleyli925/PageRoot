@@ -89,7 +89,7 @@ v3 是干净切换后的唯一运行时协议。v1/v2 记录在切换前整体�
   `storageDirectoryName` 定位可读项目目录。仅完整且身份可验证的 PageRoot
   0.9.0 v3 项目允许由单一兼容适配器在原目录补写
   `storageDirectoryName=projectId`；v1/v2、记录不完整或身份不一致的旧目录不迁移。
-- `PROJECT.md` 是整个项目长期使用的 AI 修改规则，不只属于某一次 Request；项目空闲时允许用户修改并由工作台自动保存，处理期间只读。Request 会把当时已持久化规则冻结到 `input/PROJECT.md`。
+- `PROJECT.md` 是整个项目长期使用的 AI 修改规则，不只属于某一次 Request；新项目默认创建空文件，由用户按需填写。项目空闲时允许用户修改并由工作台自动保存，处理期间只读。Request 会把当时已持久化规则冻结到 `input/PROJECT.md`；PageRoot 通用边界只写在 `AI_RULES.md`，不预填到项目规则中。
 - `runtime-state.json` 与 `edit-audit.jsonl` 是系统运行和本地直接编辑的审计文件，只建议查看，不提供普通用户编辑入口。
 - `working/<原用户文件名>-V1.x.html` 是有效 AI 结果通过校验后创建的完整 HTML。它先进入“可审阅/打开”状态；审阅只读不会切换项目当前源，只有用户点击“直接打开”或在审阅页确认“打开 AI 修改后”才成为项目当前源。旧工作文件永不原地改写。
 - input manifest、冻结 annotation 等可移植索引只使用项目或 Request 内相对路径。
@@ -354,23 +354,24 @@ Input manifest 同时包含完整冻结 Hash 清单 `files` 和 AI 执行读取�
 
 ## 8. Prompt
 
-Prompt 必须是当前 Attempt 的精简入口，至少包含：
+Prompt 必须是当前 Attempt 的精简入口，只承载本轮动态信息，至少包含：
 
-- PageRoot 品牌标题，并按“本轮身份、执行顺序、文件位置、对话补充、附件、完成”分组，避免把协议要求堆成一段难读的说明。
+- PageRoot 品牌标题，并按“本轮身份、执行、文件位置、对话补充、附件、完成”分组。
 - 本机 Request 与 Attempt 绝对路径。
 - Request、Attempt、项目、文档与候选 Version 身份。
-- 读取顺序。
+- 从 `input-manifest.json` 开始并按 `readOrder` 读取的短执行清单。
+- `change-request.json` 与当前 Attempt `USER_SUPPLEMENT.json` 共同组成有效要求，并同时遵守 `AI_RULES.md` 与 `PROJECT.md`。
 - 评论、TargetRef 与附件清单的读取要求；不得只读正文而忽略图片或文件。
-- 每个附件的 Request 管理本机绝对路径和相对回退路径；明确禁止追踪外部原始文件。
-- 唯一 output 路径，以及由 PageRoot 已计算的原用户文件名、文件版本号和固定输出文件名。
+- 每个附件的 Request 管理本机绝对路径和相对回退路径。
+- 唯一 output 路径，以及由 PageRoot 已计算的输入文件名和固定输出文件名。
 - 完整 finalizer 命令。
 - “完成全部写入后最后执行 finalizer”的明确要求。
-- finalizer 返回 `status=cancelled` 时立即停止、不重试、也不改写到其他路径的明确要求。
-- 不得修改冻结输入、不得扫描其他任务；`preserveOutsideTargets=true` 是默认边界，只有已经通过 helper 记录的用户补充可以明确扩大本轮范围。
 - 对话补充 helper 的完整命令、追加式 `add / amend / retract` 规则，以及“记录成功后才可执行”的停止条件。
-- `input/PROJECT.md` 只读；长期项目规则不得在本轮任务中修改。
 
-Prompt 不让 AI 手写 `completion.json`，也不让 AI猜候选版本号。
+跨任务不变的范围、只读输入、受管附件、禁止扫描、唯一写入、
+`preserveOutsideTargets=true`、`completion.json` 与 `status=cancelled` 规则只写在
+`AI_RULES.md`。Prompt 引用这份通用规则，不再逐条复制。Prompt 也不让 AI
+猜候选版本号。
 
 ## 9. AI 写入规则
 

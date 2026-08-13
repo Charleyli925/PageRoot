@@ -4,6 +4,10 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
+- New projects now start with an empty `PROJECT.md` instead of generic preset
+  sentences. Generated AI handoffs keep stable scope, file and completion
+  boundaries in `AI_RULES.md`, while `PROMPT.md` contains only current-run
+  identity, paths, attachments and commands, removing duplicated instructions.
 - Simplified AI review text highlighting into two independent layers. Exact
   deletions now retain character-level red dashed strike-throughs, exact
   additions use one solid green dot below each added character, and both sides
