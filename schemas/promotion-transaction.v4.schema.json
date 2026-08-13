@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pageroot.local/schemas/promotion-transaction.v4.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "kind",
+    "state",
+    "transactionId",
+    "projectId",
+    "documentId",
+    "candidateId",
+    "requestId",
+    "versionId",
+    "versionOrdinal",
+    "candidateOutputSha256",
+    "basedOnVersionId",
+    "previousVersionId",
+    "createdAt"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "4.0.0" },
+    "kind": { "const": "promotion" },
+    "state": { "enum": ["prepared", "snapshot-created", "working-copy-created", "manifest-committed", "completed"] },
+    "transactionId": { "type": "string", "pattern": "^promote_candidate_[A-Za-z0-9_-]{8,160}$" },
+    "projectId": { "type": "string", "pattern": "^project_[a-f0-9]{16,64}$" },
+    "documentId": { "type": "string", "pattern": "^doc_[a-f0-9]{16,64}$" },
+    "candidateId": { "type": "string", "pattern": "^candidate_[A-Za-z0-9_-]{8,160}$" },
+    "requestId": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,160}$" },
+    "versionId": { "type": "string", "pattern": "^ver_\\d{4,}$" },
+    "versionOrdinal": { "type": "integer", "minimum": 2 },
+    "candidateOutputSha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "basedOnVersionId": { "type": "string", "pattern": "^ver_\\d{4,}$" },
+    "previousVersionId": { "type": "string", "pattern": "^ver_\\d{4,}$" },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "snapshotCreatedAt": { "type": "string", "format": "date-time" },
+    "workingCopyCreatedAt": { "type": "string", "format": "date-time" },
+    "manifestCommittedAt": { "type": "string", "format": "date-time" },
+    "completedAt": { "type": "string", "format": "date-time" },
+    "workingCopy": { "type": "object" }
+  }
+}

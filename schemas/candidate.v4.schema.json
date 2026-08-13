@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pageroot.local/schemas/candidate.v4.schema.json",
+  "$defs": {
+    "overlap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["score", "shared", "base", "output"],
+      "properties": {
+        "score": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "shared": { "type": "integer", "minimum": 0 },
+        "base": { "type": "integer", "minimum": 0 },
+        "output": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "assessment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "status",
+        "issueCodes",
+        "health",
+        "continuity",
+        "assessedAt"
+      ],
+      "properties": {
+        "schemaVersion": { "const": "1.0.0" },
+        "status": { "enum": ["ready", "attention"] },
+        "issueCodes": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        },
+        "health": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["completeDocument", "bodyHasContent"],
+          "properties": {
+            "completeDocument": { "type": "boolean" },
+            "bodyHasContent": { "type": "boolean" }
+          }
+        },
+        "continuity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "evidencePoints",
+            "sameTitle",
+            "text",
+            "anchors",
+            "classes",
+            "assets",
+            "baseVisibleTextLength",
+            "outputVisibleTextLength",
+            "baseBodyElementCount",
+            "outputBodyElementCount",
+            "baseParseErrorCount",
+            "outputParseErrorCount"
+          ],
+          "properties": {
+            "status": { "enum": ["related", "uncertain"] },
+            "evidencePoints": { "type": "integer", "minimum": 0 },
+            "sameTitle": { "type": "boolean" },
+            "text": { "$ref": "#/$defs/overlap" },
+            "anchors": { "$ref": "#/$defs/overlap" },
+            "classes": { "$ref": "#/$defs/overlap" },
+            "assets": { "$ref": "#/$defs/overlap" },
+            "baseVisibleTextLength": { "type": "integer", "minimum": 0 },
+            "outputVisibleTextLength": { "type": "integer", "minimum": 0 },
+            "baseBodyElementCount": { "type": "integer", "minimum": 0 },
+            "outputBodyElementCount": { "type": "integer", "minimum": 0 },
+            "baseParseErrorCount": { "type": "integer", "minimum": 0 },
+            "outputParseErrorCount": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "assessedAt": { "type": "string", "format": "date-time" }
+      }
+    }
+  },
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "candidateId",
+    "projectId",
+    "documentId",
+    "requestId",
+    "attemptId",
+    "proposedVersionId",
+    "proposedVersionOrdinal",
+    "basedOnVersionId",
+    "previousVersionId",
+    "sourceWorkingCopyId",
+    "expectedSourceSha256",
+    "outputRelativePath",
+    "outputSha256",
+    "assessment",
+    "status",
+    "createdAt"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "4.0.0" },
+    "candidateId": { "type": "string", "pattern": "^candidate_[A-Za-z0-9_-]{8,160}$" },
+    "projectId": { "type": "string", "pattern": "^project_[a-f0-9]{16,64}$" },
+    "documentId": { "type": "string", "pattern": "^doc_[a-f0-9]{16,64}$" },
+    "requestId": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,160}$" },
+    "attemptId": { "type": "string", "minLength": 1, "maxLength": 160 },
+    "proposedVersionId": { "type": "string", "pattern": "^ver_\\d{4,}$" },
+    "proposedVersionOrdinal": { "type": "integer", "minimum": 2 },
+    "basedOnVersionId": { "type": "string", "pattern": "^ver_\\d{4,}$" },
+    "previousVersionId": { "type": "string", "pattern": "^ver_\\d{4,}$" },
+    "sourceWorkingCopyId": { "type": "string", "pattern": "^work_ver_\\d{4,}$" },
+    "expectedSourceSha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "outputRelativePath": { "type": "string", "pattern": "^requests/[A-Za-z0-9_-]{1,160}/candidate\\.html$" },
+    "outputSha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "assessment": { "$ref": "#/$defs/assessment" },
+    "status": { "enum": ["pending-review", "rejected", "promoted"] },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "rejectedAt": { "type": "string", "format": "date-time" },
+    "promotedAt": { "type": "string", "format": "date-time" },
+    "promotedVersionId": { "type": "string", "pattern": "^ver_\\d{4,}$" }
+  }
+}
