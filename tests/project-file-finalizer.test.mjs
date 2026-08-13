@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import {
+  mkdir,
   mkdtemp,
   readFile,
   rm,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import os from "node:os";
@@ -183,5 +185,69 @@ test("project-file finalizer seals the complete frozen Request bundle", async (t
       }),
       (error) => error?.code === "REQUEST_IDENTITY_MISMATCH",
     );
+  });
+
+  await t.test("rejects a coordinated Request rewrite that updates its local manifest hash", async (subtest) => {
+    const { imported, request, requestRoot } = await preparedRequest(subtest, "req_runtime_anchor");
+    const controlRoot = path.join(imported.target.projectRootPath, ".pageroot");
+    const requestPath = path.join(requestRoot, "request.json");
+    const changeRequestPath = path.join(requestRoot, "change-request.json");
+    const inputManifestPath = path.join(requestRoot, "input-manifest.json");
+    const runtimePath = path.join(controlRoot, "runtime-state.json");
+    const runtime = JSON.parse(await readFile(runtimePath, "utf8"));
+    const runtimeManifestSha256 = runtime.activeRequest?.inputManifestSha256;
+    assert.equal(runtimeManifestSha256, request.inputManifestSha256);
+
+    const requestRecord = JSON.parse(await readFile(requestPath, "utf8"));
+    const changeRequest = JSON.parse(await readFile(changeRequestPath, "utf8"));
+    const alteredRequirements = {
+      ...changeRequest.requirements,
+      untrustedRewrite: true,
+    };
+    changeRequest.requirements = alteredRequirements;
+    const changeRequestBuffer = Buffer.from(JSON.stringify(changeRequest), "utf8");
+    await writeFile(changeRequestPath, changeRequestBuffer);
+
+    const inputManifest = JSON.parse(await readFile(inputManifestPath, "utf8"));
+    const changeEntry = inputManifest.files.find((entry) => entry.path === "change-request.json");
+    changeEntry.byteLength = changeRequestBuffer.byteLength;
+    changeEntry.sha256 = sha256(changeRequestBuffer);
+    const inputManifestBuffer = Buffer.from(JSON.stringify(inputManifest), "utf8");
+    requestRecord.request = alteredRequirements;
+    requestRecord.inputManifestSha256 = sha256(inputManifestBuffer);
+    await writeFile(inputManifestPath, inputManifestBuffer);
+    await writeFile(requestPath, JSON.stringify(requestRecord), "utf8");
+
+    await assert.rejects(
+      finalizeProjectFileAttempt({
+        projectRoot: imported.target.projectRootPath,
+        requestId: request.requestId,
+      }),
+      (error) => error?.code === "FROZEN_REQUEST_BUNDLE_MISMATCH",
+    );
+    const runtimeAfter = JSON.parse(await readFile(runtimePath, "utf8"));
+    assert.equal(runtimeAfter.activeRequest?.inputManifestSha256, runtimeManifestSha256);
+  });
+
+  await t.test("rejects a symlinked Attempt ancestor before writing completion", async (subtest) => {
+    const { imported, request, requestRoot } = await preparedRequest(subtest, "req_symlink_attempt");
+    const attemptRoot = path.join(requestRoot, "attempts", request.attemptId);
+    const outsideAttemptRoot = path.join(
+      path.dirname(imported.target.projectRootPath),
+      "outside-attempt",
+    );
+    await mkdir(path.join(outsideAttemptRoot, "output"), { recursive: true });
+    await writeFile(path.join(outsideAttemptRoot, "output", "candidate.html"), html("Outside"), "utf8");
+    await rm(attemptRoot, { recursive: true, force: true });
+    await symlink(outsideAttemptRoot, attemptRoot, "dir");
+
+    await assert.rejects(
+      finalizeProjectFileAttempt({
+        projectRoot: imported.target.projectRootPath,
+        requestId: request.requestId,
+      }),
+      (error) => error?.code === "PATH_ESCAPES_PROJECT",
+    );
+    await assert.rejects(readFile(path.join(outsideAttemptRoot, "completion.json")));
   });
 });

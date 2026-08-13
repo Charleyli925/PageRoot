@@ -829,6 +829,11 @@ function assertRuntime(runtime, project, manifest) {
       || !SAFE_REQUEST_ID.test(active.attemptId)
       || !["processing", "pending-review"].includes(active.status)
       || (active.candidateId !== null && !/^candidate_[A-Za-z0-9_-]{8,160}$/u.test(active.candidateId))
+      || (
+        active.inputManifestSha256 !== null
+        && !SHA256.test(String(active.inputManifestSha256 || ""))
+      )
+      || (active.status === "processing" && !SHA256.test(String(active.inputManifestSha256 || "")))
       || (active.status === "processing" && active.candidateId !== null)
       || (active.status === "pending-review" && active.candidateId !== runtime.activeCandidateId)
     ) {
@@ -1087,6 +1092,7 @@ export class ProjectFileRepository {
       candidateId,
       html,
       expectedSourceSha256,
+      inputManifestSha256: null,
     }));
   }
 
@@ -1676,6 +1682,10 @@ export class ProjectFileRepository {
       candidateId: null,
       attemptId: attempt,
       status: "processing",
+      // The external Agent can write inside its Request tree, but this
+      // Runtime anchor remains outside it. The finalizer compares this digest
+      // before trusting any Request-owned manifest or frozen input.
+      inputManifestSha256: record.inputManifestSha256,
     };
     loaded.runtime.activeCandidateId = null;
     await atomicWriteProjectJson(
@@ -1723,9 +1733,7 @@ export class ProjectFileRepository {
     ]) {
       if (value !== undefined) ensureRelativePath(value, label);
     }
-    if (record.inputManifestSha256 !== undefined) {
-      assertSha256(record.inputManifestSha256, "request input manifest hash");
-    }
+    assertSha256(record.inputManifestSha256, "request input manifest hash");
   }
 
   #assertCompletionRecord(completion, request) {
@@ -1801,6 +1809,16 @@ export class ProjectFileRepository {
       requestId: record.requestId,
       attemptId: record.attemptId,
     });
+    const existingActiveRequest = loaded.runtime.activeRequest;
+    if (
+      existingActiveRequest?.requestId === record.requestId
+      && existingActiveRequest.inputManifestSha256 !== record.inputManifestSha256
+    ) {
+      throw new ProjectFileRepositoryError(
+        "FROZEN_REQUEST_BUNDLE_MISMATCH",
+        "The frozen Request input manifest no longer matches runtime authority.",
+      );
+    }
     let status = record.status;
     let candidateId = null;
     if (status === "processing") {
@@ -1843,6 +1861,7 @@ export class ProjectFileRepository {
       candidateId,
       attemptId: record.attemptId,
       status: candidateId ? "pending-review" : "processing",
+      inputManifestSha256: record.inputManifestSha256,
     };
     const active = loaded.runtime.activeRequest;
     if (
@@ -1850,6 +1869,7 @@ export class ProjectFileRepository {
       || active?.attemptId !== nextActiveRequest.attemptId
       || active?.candidateId !== nextActiveRequest.candidateId
       || active?.status !== nextActiveRequest.status
+      || active?.inputManifestSha256 !== nextActiveRequest.inputManifestSha256
       || loaded.runtime.activeCandidateId !== candidateId
     ) {
       loaded.runtime.activeRequest = nextActiveRequest;
@@ -2202,6 +2222,7 @@ export class ProjectFileRepository {
         },
         assessmentBaseHtml: frozenInput.html,
         allowSourceDivergence: true,
+        inputManifestSha256: record.inputManifestSha256,
       });
     } catch (cause) {
       if (cause?.code !== "CANDIDATE_UNUSABLE") throw cause;
@@ -3282,6 +3303,7 @@ export class ProjectFileRepository {
     candidateIdentity = null,
     assessmentBaseHtml = null,
     allowSourceDivergence = false,
+    inputManifestSha256 = null,
   }) {
     const loaded = await this.#resolveMutationTarget(target);
     const request = String(requestId || "");
@@ -3289,6 +3311,9 @@ export class ProjectFileRepository {
       throw new ProjectFileRepositoryError("INVALID_REQUEST_ID", "requestId is invalid.");
     }
     const expected = assertSha256(expectedSourceSha256, "expectedSourceSha256");
+    const manifestAnchor = inputManifestSha256 === null
+      ? null
+      : assertSha256(inputManifestSha256, "inputManifestSha256");
     if (!allowSourceDivergence && loaded.source.sha256 !== expected) {
       throw new ProjectFileRepositoryError(
         "SOURCE_HASH_CONFLICT",
@@ -3393,6 +3418,7 @@ export class ProjectFileRepository {
       candidateId: id,
       attemptId: String(attemptId || "attempt_001"),
       status: "pending-review",
+      inputManifestSha256: manifestAnchor,
     };
     loaded.runtime.activeCandidateId = id;
     await atomicWriteProjectJson(

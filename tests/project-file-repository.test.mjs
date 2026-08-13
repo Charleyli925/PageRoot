@@ -794,6 +794,42 @@ test("request preparation fault injection restores one immutable active Request"
   }
 });
 
+test("request recovery keeps the original runtime input-manifest anchor", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "runtime-anchor.html");
+  const prepared = await value.repository.prepareRequest({
+    target: imported.target,
+    requestId: "req_runtime_anchor",
+    attemptId: "attempt_001",
+    expectedSourceSha256: imported.target.sourceSha256,
+    request: { summary: "runtime anchor" },
+    prompt: "# Runtime anchor\n",
+  });
+  const controlRoot = path.join(imported.target.projectRootPath, ".pageroot");
+  const runtimePath = path.join(controlRoot, "runtime-state.json");
+  const requestPath = path.join(controlRoot, "requests", prepared.requestId, "request.json");
+  const runtimeBefore = await json(runtimePath);
+  const requestRecord = await json(requestPath);
+  requestRecord.inputManifestSha256 = sha256(Buffer.from("untrusted manifest", "utf8"));
+  await writeFile(requestPath, JSON.stringify(requestRecord), "utf8");
+
+  await assert.rejects(
+    value.repository.prepareRequest({
+      target: imported.target,
+      requestId: prepared.requestId,
+      attemptId: prepared.attemptId,
+      expectedSourceSha256: imported.target.sourceSha256,
+    }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "FROZEN_REQUEST_BUNDLE_MISMATCH",
+  );
+  const runtimeAfter = await json(runtimePath);
+  assert.equal(
+    runtimeAfter.activeRequest?.inputManifestSha256,
+    runtimeBefore.activeRequest?.inputManifestSha256,
+  );
+});
+
 test("a Request freezes comments, targets and project rules alongside its exact HTML", async (t) => {
   const value = await fixture(t);
   const imported = await importSource(value, "frozen-request.html");

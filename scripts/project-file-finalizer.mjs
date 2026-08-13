@@ -1,4 +1,4 @@
-import { lstat, readFile } from "node:fs/promises";
+import { lstat, realpath, readFile } from "node:fs/promises";
 import path from "node:path";
 
 import {
@@ -53,10 +53,20 @@ function normalizedPath(value) {
   return resolved;
 }
 
-function inside(root, candidate) {
+function inside(root, candidate, { allowRoot = false } = {}) {
   const resolvedRoot = normalizedPath(root);
   const resolvedCandidate = normalizedPath(candidate);
-  return resolvedCandidate.startsWith(`${resolvedRoot}${path.sep}`);
+  const comparableRoot = process.platform === "darwin" || process.platform === "win32"
+    ? resolvedRoot.toLocaleLowerCase("en-US")
+    : resolvedRoot;
+  const comparableCandidate = process.platform === "darwin" || process.platform === "win32"
+    ? resolvedCandidate.toLocaleLowerCase("en-US")
+    : resolvedCandidate;
+  if (allowRoot && comparableCandidate === comparableRoot) return true;
+  const prefix = comparableRoot.endsWith(path.sep)
+    ? comparableRoot
+    : `${comparableRoot}${path.sep}`;
+  return comparableCandidate.startsWith(prefix);
 }
 
 function samePath(left, right) {
@@ -74,7 +84,7 @@ function safeRelativePath(value, label) {
   if (
     !relative
     || path.isAbsolute(relative)
-    || relative.includes("\\0")
+    || relative.includes("\0")
     || relative.includes("\\")
     || segments.some((segment) => !segment || segment === "." || segment === "..")
   ) {
@@ -153,7 +163,16 @@ function sameFileIdentity(left, right) {
   );
 }
 
-async function regularFile(filePath, label) {
+async function regularFile(filePath, label, { projectRoot = null } = {}) {
+  if (projectRoot) {
+    const checked = await assertRealPathInsideProject(
+      projectRoot,
+      filePath,
+      label,
+      { expectedKind: "file" },
+    );
+    return checked.information;
+  }
   let information;
   try {
     information = await lstat(filePath);
@@ -169,7 +188,16 @@ async function regularFile(filePath, label) {
   return information;
 }
 
-async function regularDirectory(directoryPath, label) {
+async function regularDirectory(directoryPath, label, { projectRoot = null } = {}) {
+  if (projectRoot) {
+    const checked = await assertRealPathInsideProject(
+      projectRoot,
+      directoryPath,
+      label,
+      { expectedKind: "directory" },
+    );
+    return checked.information;
+  }
   let information;
   try {
     information = await lstat(directoryPath);
@@ -185,8 +213,8 @@ async function regularDirectory(directoryPath, label) {
   return information;
 }
 
-async function readJson(filePath, label) {
-  await regularFile(filePath, label);
+async function readJson(filePath, label, options = {}) {
+  await regularFile(filePath, label, options);
   try {
     const value = JSON.parse(await readFile(filePath, "utf8"));
     if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error();
@@ -195,6 +223,103 @@ async function readJson(filePath, label) {
     if (cause instanceof ProjectFileFinalizerError) throw cause;
     throw new ProjectFileFinalizerError("INVALID_JSON", `${label} is not valid JSON.`);
   }
+}
+
+// The finalizer receives an Agent-writable Request / Attempt path. A lexical
+// containment check is not enough: an Agent could replace `attempts/<id>`
+// (or any other ancestor) with a symbolic link and redirect a later read or
+// completion write outside the registered Project. Revalidate every existing
+// component against the real project root immediately before access.
+async function assertRealPathInsideProject(root, candidate, label, {
+  allowMissing = false,
+  expectedKind = null,
+} = {}) {
+  const projectRoot = normalizedPath(root);
+  const target = normalizedPath(candidate);
+  if (!inside(projectRoot, target, { allowRoot: true })) {
+    throw new ProjectFileFinalizerError(
+      "PATH_ESCAPES_PROJECT",
+      `${label} escapes its project.`,
+    );
+  }
+  let rootInformation;
+  try {
+    rootInformation = await lstat(projectRoot);
+  } catch (cause) {
+    if (cause?.code === "ENOENT") {
+      throw new ProjectFileFinalizerError(
+        "DIRECTORY_NOT_FOUND",
+        "The project root was not found.",
+      );
+    }
+    throw cause;
+  }
+  if (rootInformation.isSymbolicLink() || !rootInformation.isDirectory()) {
+    throw new ProjectFileFinalizerError(
+      "UNSAFE_DIRECTORY",
+      "The project root must be a real directory.",
+    );
+  }
+  const realRoot = normalizedPath(await realpath(projectRoot));
+  const relative = path.relative(projectRoot, target);
+  const parts = relative === "" ? [] : relative.split(path.sep);
+  if (parts.some((part) => !part || part === "." || part === "..")) {
+    throw new ProjectFileFinalizerError(
+      "PATH_ESCAPES_PROJECT",
+      `${label} escapes its project.`,
+    );
+  }
+
+  let current = projectRoot;
+  let information = rootInformation;
+  for (let index = 0; index < parts.length; index += 1) {
+    current = path.join(current, parts[index]);
+    try {
+      information = await lstat(current);
+    } catch (cause) {
+      if (cause?.code !== "ENOENT") throw cause;
+      if (!allowMissing) {
+        throw new ProjectFileFinalizerError(
+          expectedKind === "directory" ? "DIRECTORY_NOT_FOUND" : "FILE_NOT_FOUND",
+          `${label} was not found.`,
+        );
+      }
+      const parentRealPath = normalizedPath(await realpath(path.dirname(current)));
+      if (!inside(realRoot, parentRealPath, { allowRoot: true })) {
+        throw new ProjectFileFinalizerError(
+          "PATH_ESCAPES_PROJECT",
+          `${label} escapes its project through an unsafe parent.`,
+        );
+      }
+      return { exists: false, path: target, information: null };
+    }
+    if (information.isSymbolicLink()) {
+      throw new ProjectFileFinalizerError(
+        "PATH_ESCAPES_PROJECT",
+        `${label} reaches a symbolic link inside its project.`,
+      );
+    }
+    if (index < parts.length - 1 && !information.isDirectory()) {
+      throw new ProjectFileFinalizerError(
+        "UNSAFE_DIRECTORY",
+        `${label} has a non-directory parent.`,
+      );
+    }
+    const realCurrent = normalizedPath(await realpath(current));
+    if (!inside(realRoot, realCurrent, { allowRoot: true })) {
+      throw new ProjectFileFinalizerError(
+        "PATH_ESCAPES_PROJECT",
+        `${label} escapes its project through an unsafe path.`,
+      );
+    }
+  }
+  if (expectedKind === "file" && !information.isFile()) {
+    throw new ProjectFileFinalizerError("UNSAFE_FILE", `${label} must be a regular file.`);
+  }
+  if (expectedKind === "directory" && !information.isDirectory()) {
+    throw new ProjectFileFinalizerError("UNSAFE_DIRECTORY", `${label} must be a real directory.`);
+  }
+  return { exists: true, path: target, information };
 }
 
 function validateRequest(record, { requestId, attemptId }) {
@@ -291,12 +416,21 @@ function assertRequestAnchor({ record, identity, manifest, runtime }) {
       "The Request no longer matches the registered project's frozen identity.",
     );
   }
+  if (activeRequest.inputManifestSha256 !== record.inputManifestSha256) {
+    throw new ProjectFileFinalizerError(
+      "FROZEN_REQUEST_BUNDLE_MISMATCH",
+      "The frozen Request input manifest no longer matches runtime authority.",
+    );
+  }
+  return activeRequest.inputManifestSha256;
 }
 
 async function verifyFrozenRequestBundle({
+  projectRoot,
   requestRoot,
   record,
   identity,
+  expectedInputManifestSha256,
 }) {
   const manifestRelativePath = requestRelativePath(
     record.requestId,
@@ -304,9 +438,9 @@ async function verifyFrozenRequestBundle({
     "input manifest path",
   );
   const manifestPath = pathInside(requestRoot, manifestRelativePath, "input manifest path");
-  await regularFile(manifestPath, "Frozen Request input manifest");
+  await regularFile(manifestPath, "Frozen Request input manifest", { projectRoot });
   const manifestBuffer = await readFile(manifestPath);
-  if (sha256(manifestBuffer) !== record.inputManifestSha256) {
+  if (sha256(manifestBuffer) !== expectedInputManifestSha256) {
     throw new ProjectFileFinalizerError(
       "FROZEN_REQUEST_BUNDLE_MISMATCH",
       "The frozen Request input manifest changed after submission.",
@@ -362,7 +496,7 @@ async function verifyFrozenRequestBundle({
       );
     }
     const filePath = pathInside(requestRoot, relativePath, "frozen input path");
-    await regularFile(filePath, `Frozen Request input ${relativePath}`);
+    await regularFile(filePath, `Frozen Request input ${relativePath}`, { projectRoot });
     const buffer = await readFile(filePath);
     if (buffer.byteLength !== entry.byteLength || sha256(buffer) !== entry.sha256) {
       throw new ProjectFileFinalizerError(
@@ -455,8 +589,12 @@ async function validateRegistryAuthority({
     );
   }
   await regularDirectory(configuredRoot, "configured project directory");
-  const rootInformation = await regularDirectory(projectRoot, "project root");
-  const registry = await readJson(expectedRegistryPath, "project Registry");
+  const rootInformation = await regularDirectory(projectRoot, "project root", {
+    projectRoot: configuredRoot,
+  });
+  const registry = await readJson(expectedRegistryPath, "project Registry", {
+    projectRoot: configuredRoot,
+  });
   const record = registry?.projects?.[identity.projectId];
   if (
     registry?.schemaVersion !== PROJECT_FILE_SCHEMA_VERSION
@@ -498,8 +636,10 @@ export async function finalizeProjectFileAttempt({
   const attempt = safeId(attemptId, "attemptId");
   await regularDirectory(root, "project root");
   const controlRoot = path.join(root, ".pageroot");
-  await regularDirectory(controlRoot, ".pageroot");
-  const identity = await readJson(path.join(controlRoot, "project.json"), "project.json");
+  await regularDirectory(controlRoot, ".pageroot", { projectRoot: root });
+  const identity = await readJson(path.join(controlRoot, "project.json"), "project.json", {
+    projectRoot: root,
+  });
   if (identity.schemaVersion !== PROJECT_FILE_SCHEMA_VERSION) {
     throw new ProjectFileFinalizerError(
       "UNSUPPORTED_PROJECT_SCHEMA",
@@ -513,8 +653,11 @@ export async function finalizeProjectFileAttempt({
     identity,
   });
   const requestRoot = path.join(controlRoot, "requests", request);
+  await regularDirectory(requestRoot, "Request root", { projectRoot: root });
   const record = validateRequest(
-    await readJson(path.join(requestRoot, "request.json"), "request.json"),
+    await readJson(path.join(requestRoot, "request.json"), "request.json", {
+      projectRoot: root,
+    }),
     { requestId: request, attemptId: attempt },
   );
   if (
@@ -539,19 +682,21 @@ export async function finalizeProjectFileAttempt({
     };
   }
   const [manifest, runtime] = await Promise.all([
-    readJson(path.join(controlRoot, "manifest.json"), "manifest.json"),
-    readJson(path.join(controlRoot, "runtime-state.json"), "runtime-state.json"),
+    readJson(path.join(controlRoot, "manifest.json"), "manifest.json", { projectRoot: root }),
+    readJson(path.join(controlRoot, "runtime-state.json"), "runtime-state.json", { projectRoot: root }),
   ]);
-  assertRequestAnchor({ record, identity, manifest, runtime });
+  const inputManifestSha256 = assertRequestAnchor({ record, identity, manifest, runtime });
   const inputPath = path.join(controlRoot, ...record.inputRelativePath.split("/"));
   const outputPath = path.join(controlRoot, ...record.outputRelativePath.split("/"));
   if (!inside(controlRoot, inputPath) || !inside(controlRoot, outputPath)) {
     throw new ProjectFileFinalizerError("PATH_ESCAPES_PROJECT", "A frozen Request path escapes its project.");
   }
   const input = await verifyFrozenRequestBundle({
+    projectRoot: root,
     requestRoot,
     record,
     identity,
+    expectedInputManifestSha256: inputManifestSha256,
   });
   if (sha256(input) !== record.expectedSourceSha256) {
     throw new ProjectFileFinalizerError(
@@ -559,7 +704,7 @@ export async function finalizeProjectFileAttempt({
       "The frozen Request input changed after submission.",
     );
   }
-  const outputInfo = await regularFile(outputPath, "Candidate output");
+  const outputInfo = await regularFile(outputPath, "Candidate output", { projectRoot: root });
   if (outputInfo.size > MAX_HTML_BYTES) {
     throw new ProjectFileFinalizerError("OUTPUT_TOO_LARGE", "Candidate output is too large.");
   }
@@ -600,7 +745,7 @@ export async function finalizeProjectFileAttempt({
   };
   const completionPath = path.join(requestRoot, "attempts", attempt, "completion.json");
   try {
-    const existing = await readJson(completionPath, "completion.json");
+    const existing = await readJson(completionPath, "completion.json", { projectRoot: root });
     if (
       existing.projectId !== completion.projectId
       || existing.documentId !== completion.documentId
@@ -620,6 +765,9 @@ export async function finalizeProjectFileAttempt({
       throw cause;
     }
   }
+  await assertRealPathInsideProject(root, completionPath, "completion.json", {
+    allowMissing: true,
+  });
   await atomicWriteJson(completionPath, completion);
   return { ok: true, replayed: false, ...completion };
 }
