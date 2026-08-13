@@ -1167,7 +1167,37 @@ test("AI readOrder excludes the full audit archive and compacts long module quot
   assert.match(aiRules, /^# PageRoot 通用执行规则$/m);
   assert.match(
     aiRules,
-    /当前 Attempt 的受控 USER_SUPPLEMENT\.json 是唯一可在 readOrder 之外读取的文件/,
+    /当前 Attempt 的受控 USER_SUPPLEMENT\.json，以及其中尚未撤销的受控补充所引用的 supplement-attachments\/ 附件，是 readOrder 之外唯一可读取的内容/,
+  );
+  const supplementReference = join(environment.sources, "compact-supplement.png");
+  await writeFile(supplementReference, Buffer.from("managed-supplement-reference"));
+  const supplement = await recordUserSupplement({
+    workspaceRoot: environment.workspace,
+    projectId: submitted.body.projectId,
+    requestId: submitted.body.requestId,
+    attemptId: submitted.body.attemptId,
+    payload: {
+      idempotencyKey: "compact-supplement-attachment-001",
+      action: "add",
+      refersTo: [changeRequest.requirements.instructions[0].instructionId],
+      userText: "请参考这张补充图片调整页面留白。",
+      targetDescription: "整个页面",
+      attachments: [{ path: supplementReference, fileName: "compact-supplement.png" }],
+    },
+  });
+  assert.equal(supplement.ok, true);
+  const supplementArchive = JSON.parse(
+    await readFile(join(submitted.body.attemptPath, "USER_SUPPLEMENT.json"), "utf8"),
+  );
+  const supplementAttachment = supplementArchive.records[0].attachments[0];
+  assert.match(supplementAttachment.relativePath, /^supplement-attachments\//);
+  assert.equal(
+    inputManifest.readOrder.includes(supplementAttachment.relativePath),
+    false,
+  );
+  assert.deepEqual(
+    await readFile(join(submitted.body.attemptPath, supplementAttachment.relativePath)),
+    Buffer.from("managed-supplement-reference"),
   );
   assert.match(aiRules, /只修改用户明确要求的区域/);
   assert.doesNotMatch(prompt, /只修改用户明确要求的区域/);
@@ -2655,7 +2685,7 @@ test("comment attachments persist in the project and freeze with comment-target 
   assert.match(aiRules, /^# PageRoot 通用执行规则$/m);
   assert.match(
     aiRules,
-    /当前 Attempt 的受控 USER_SUPPLEMENT\.json 是唯一可在 readOrder 之外读取的文件/,
+    /当前 Attempt 的受控 USER_SUPPLEMENT\.json，以及其中尚未撤销的受控补充所引用的 supplement-attachments\/ 附件，是 readOrder 之外唯一可读取的内容/,
   );
   assert.match(aiRules, /不得扫描其他任务、版本、项目目录或用户文件/);
   assert.match(aiRules, /只修改用户明确要求的区域/);

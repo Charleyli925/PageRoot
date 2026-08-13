@@ -183,7 +183,7 @@
         },
         "byteLength": {
           "type": "integer",
-          "minimum": 1
+          "minimum": 0
         },
         "sha256": {
           "$ref": "#/$defs/sha256"
@@ -252,6 +252,14 @@
               },
               "mediaType": {
                 "const": "text/markdown"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "byteLength": {
+                "type": "integer",
+                "minimum": 1
               }
             }
           }

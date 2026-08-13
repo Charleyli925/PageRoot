@@ -510,6 +510,23 @@ test("every lifecycle fixture satisfies a meta-valid strict JSON Schema", async 
   }
 });
 
+test("only a frozen project rules file may be empty in an input manifest", async () => {
+  const { ajv, validate } = await validator("input-manifest.v1.schema.json");
+  const emptyProjectRules = await fixture("input-manifest.frozen.json");
+  const projectRules = emptyProjectRules.files.find(
+    (file) => file.role === "project-rules",
+  );
+  projectRules.byteLength = 0;
+  projectRules.sha256 = sha256("");
+  assertValid(ajv, validate, emptyProjectRules, "empty PROJECT.md input manifest");
+
+  const emptyBaseHtml = structuredClone(emptyProjectRules);
+  const baseHtml = emptyBaseHtml.files.find((file) => file.role === "base-html");
+  baseHtml.byteLength = 0;
+  baseHtml.sha256 = sha256("");
+  assert.equal(validate(emptyBaseHtml), false);
+});
+
 test("the candidate assessment Schema accepts only current and paired retired executable-field shapes", async () => {
   const { ajv, validate } = await validator(
     "candidate-assessment.v1.schema.json",

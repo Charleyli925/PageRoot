@@ -117,7 +117,7 @@ test("Prompt, protocol, helper, and finalizer agree on frozen input plus control
   );
   assert.match(
     bridge,
-    /当前 Attempt 的受控 USER_SUPPLEMENT\.json 是唯一可在 readOrder 之外读取的文件/,
+    /当前 Attempt 的受控 USER_SUPPLEMENT\.json，以及其中尚未撤销的受控补充所引用的 supplement-attachments\/ 附件，是 readOrder 之外唯一可读取的内容/,
   );
   assert.match(bridge, /命令返回 .*ok=true.* 后，重新读取 USER_SUPPLEMENT\.json/);
   assert.match(

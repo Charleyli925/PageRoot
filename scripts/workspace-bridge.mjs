@@ -4668,8 +4668,8 @@ function managedAiRules() {
 
 ## 文件边界
 
-- 冻结输入和用户源 HTML 都是只读的。严格按 input-manifest.json 的 readOrder 读取冻结输入；当前 Attempt 的受控 USER_SUPPLEMENT.json 是唯一可在 readOrder 之外读取的文件。不得扫描其他任务、版本、项目目录或用户文件。
-- 只读取 PROMPT.md 列出的项目受管附件；不得追溯用户的外部原文件，也不得伪造附件路径、字节数或 SHA-256。
+- 冻结输入和用户源 HTML 都是只读的。严格按 input-manifest.json 的 readOrder 读取冻结输入；当前 Attempt 的受控 USER_SUPPLEMENT.json，以及其中尚未撤销的受控补充所引用的 supplement-attachments/ 附件，是 readOrder 之外唯一可读取的内容。不得扫描其他任务、版本、项目目录或用户文件。
+- 只读取 PROMPT.md 列出的项目受管附件，以及 USER_SUPPLEMENT.json 中当前有效补充所引用的当前 Attempt 附件；不得追溯用户的外部原文件，也不得伪造附件路径、字节数或 SHA-256。
 - 只把一个完整 HTML 写入 PROMPT.md 的“唯一 HTML 输出”绝对路径。输出文件名已经固定，不得自行计算、改名或写入 input/base/index.html、output/index.html 等其他路径。
 - 不得修改 PROJECT.md、USER_SUPPLEMENT.json、冻结输入或协议文件。
 
