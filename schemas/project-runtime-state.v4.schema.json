@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pageroot.local/schemas/project-runtime-state.v4.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "projectId",
+    "documentId",
+    "activeWorkingCopyId",
+    "activeRequest",
+    "activeCandidateId"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "4.0.0" },
+    "projectId": { "type": "string", "pattern": "^project_[a-f0-9]{16,64}$" },
+    "documentId": { "type": "string", "pattern": "^doc_[a-f0-9]{16,64}$" },
+    "activeWorkingCopyId": { "type": ["string", "null"], "pattern": "^work_ver_\\d{4,}$" },
+    "activeRequest": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": [
+        "requestId",
+        "candidateId",
+        "attemptId",
+        "status",
+        "inputManifestSha256",
+        "candidateOutputSha256",
+        "candidateRecordSha256"
+      ],
+      "properties": {
+        "requestId": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,160}$" },
+        "candidateId": { "type": ["string", "null"], "pattern": "^candidate_[A-Za-z0-9_-]{8,160}$" },
+        "attemptId": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,160}$" },
+        "status": { "enum": ["processing", "pending-review"] },
+        "inputManifestSha256": {
+          "type": ["string", "null"],
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "candidateOutputSha256": {
+          "type": ["string", "null"],
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "candidateRecordSha256": {
+          "type": ["string", "null"],
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        }
+      }
+    },
+    "activeCandidateId": { "type": ["string", "null"], "pattern": "^candidate_[A-Za-z0-9_-]{8,160}$" }
+  }
+}

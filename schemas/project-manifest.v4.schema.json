@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pageroot.local/schemas/project-manifest.v4.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "projectId",
+    "documentId",
+    "latestOfficialVersionId",
+    "versions",
+    "workingCopies"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "4.0.0" },
+    "projectId": { "type": "string", "pattern": "^project_[a-f0-9]{16,64}$" },
+    "documentId": { "type": "string", "pattern": "^doc_[a-f0-9]{16,64}$" },
+    "latestOfficialVersionId": { "type": "string", "pattern": "^ver_\\d{4,}$" },
+    "versions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "versionId",
+          "ordinal",
+          "basedOnVersionId",
+          "previousVersionId",
+          "contentSha256",
+          "snapshotRelativePath",
+          "sourceRequestId",
+          "sourceCandidateId",
+          "createdAt"
+        ],
+        "properties": {
+          "versionId": { "type": "string", "pattern": "^ver_\\d{4,}$" },
+          "ordinal": { "type": "integer", "minimum": 1 },
+          "basedOnVersionId": { "type": ["string", "null"], "pattern": "^ver_\\d{4,}$" },
+          "previousVersionId": { "type": ["string", "null"], "pattern": "^ver_\\d{4,}$" },
+          "contentSha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+          "snapshotRelativePath": { "type": "string", "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+" },
+          "sourceRequestId": { "type": ["string", "null"] },
+          "sourceCandidateId": { "type": ["string", "null"] },
+          "createdAt": { "type": "string", "format": "date-time" }
+        }
+      }
+    },
+    "workingCopies": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "workingCopyId",
+          "versionId",
+          "basedOnVersionId",
+          "sourceRelativePath",
+          "preferredFileStem",
+          "preferredExtension",
+          "stateRelativePath",
+          "fileIdentity"
+        ],
+        "properties": {
+          "workingCopyId": { "type": "string", "pattern": "^work_ver_\\d{4,}$" },
+          "versionId": { "type": "string", "pattern": "^ver_\\d{4,}$" },
+          "basedOnVersionId": { "type": "string", "pattern": "^ver_\\d{4,}$" },
+          "sourceRelativePath": {
+            "type": "string",
+            "pattern": "^(?!.*[/\\\\\\u0000-\\u001F]).+\\.(?:html|htm)$"
+          },
+          "preferredFileStem": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255,
+            "pattern": "^(?!.*[\\u0000-\\u001F\\u007F/\\\\]).+$"
+          },
+          "preferredExtension": { "enum": [".html", ".htm"] },
+          "stateRelativePath": { "type": "string", "pattern": "^working-copies/(?!.*(?:^|/)\\.\\.(?:/|$)).+\\.json$" },
+          "fileIdentity": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["device", "inode", "birthtimeMs"],
+            "properties": {
+              "device": { "type": "string" },
+              "inode": { "type": "string" },
+              "birthtimeMs": { "type": "number", "minimum": 0 }
+            }
+          }
+        }
+      }
+    }
+  }
+}

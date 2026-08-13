@@ -848,6 +848,19 @@
       ]
     },
     {
+      "id": "project-file-foundation",
+      "patterns": [
+        "^scripts/project-file-repository\\.mjs$",
+        "^tests/project-file-(?:repository|schema)\\.test\\.mjs$",
+        "^schemas/(?:candidate|project-identity|project-manifest|project-registry|project-runtime-state|promotion-transaction|working-copy-state)\\.v4\\.schema\\.json$"
+      ],
+      "suites": ["ai-smoke"],
+      "nodeTests": [
+        "tests/project-file-repository.test.mjs",
+        "tests/project-file-schema.test.mjs"
+      ]
+    },
+    {
       "id": "bridge-lifecycle",
       "patterns": [
         "^scripts/(?:workspace-bridge|lifecycle-core|finalize-attempt|record-user-supplement|user-supplement-core|candidate-assessment(?:-decoder)?|scope-validator|html-source-parser|attachment-storage|product-contract|target-identity)\\.mjs$"

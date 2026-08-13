@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pageroot.local/schemas/project-identity.v4.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "projectId", "documentId", "createdAt"],
+  "properties": {
+    "schemaVersion": { "const": "4.0.0" },
+    "projectId": { "type": "string", "pattern": "^project_[a-f0-9]{16,64}$" },
+    "documentId": { "type": "string", "pattern": "^doc_[a-f0-9]{16,64}$" },
+    "createdAt": { "type": "string", "format": "date-time" }
+  }
+}
