@@ -1,7 +1,7 @@
 /**
  * The Edit author-runtime contract intentionally has no DOM, Electron, or
  * persistence dependency. Both the desktop owner and the renderer use these
- * small lexical rules to agree on which authored scripts may participate in a
+ * small syntactic rules to agree on which authored scripts may participate in a
  * one-shot execution. The source itself remains the authority; this module
  * only describes a disposable runtime grant.
  */
@@ -160,7 +160,7 @@ function scriptPolicy(attributes) {
 }
 
 /**
- * A deliberately small HTML script lexer. `</script>` terminates a script in
+ * A deliberately small HTML script scanner. `</script>` terminates a script in
  * the HTML parser even inside a JavaScript string, so matching that delimiter
  * is both conservative and aligned with browser parsing. Comments are skipped
  * so a documentation snippet cannot accidentally obtain an execution grant.
