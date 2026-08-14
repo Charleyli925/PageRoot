@@ -1854,6 +1854,24 @@ test("workspace follows only the v4 Working Copy saveState vocabulary", async (t
   );
 });
 
+test("workspace rejects a malformed Working Copy Draft instead of publishing an empty authority", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "malformed-draft.html");
+  const draftPath = path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "drafts",
+    "work_ver_0001.json",
+  );
+  await writeFile(draftPath, JSON.stringify({ draftRevision: 0, comments: [] }), "utf8");
+
+  await assert.rejects(
+    value.repository.workspace({ sourcePath: imported.target.exactSourcePath }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "WORKING_COPY_DRAFT_INVALID",
+  );
+});
+
 test("import reserves UTF-8 component space and skips every occupied project-root placeholder", async (t) => {
   const utf8 = await fixture(t);
   const longName = `${"中".repeat(80)}.html`;

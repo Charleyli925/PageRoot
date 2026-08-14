@@ -1131,6 +1131,33 @@ function assertWorkingCopyState(state, loaded, workingCopy) {
   return state;
 }
 
+function assertWorkingCopyDraft(draft, draftSha256, state, loaded, workingCopy) {
+  const validRevision = (value) => Number.isSafeInteger(value) && value >= 0;
+  if (
+    !isObject(draft)
+    || draft.schemaVersion !== PROJECT_FILE_SCHEMA_VERSION
+    || draft.projectId !== loaded.project.projectId
+    || draft.documentId !== loaded.project.documentId
+    || draft.workingCopyId !== workingCopy.workingCopyId
+    || draft.basedOnVersionId !== workingCopy.basedOnVersionId
+    || !validRevision(draft.draftRevision)
+    || draft.draftRevision !== state.draftRevision
+    || !Array.isArray(draft.comments)
+    || !Array.isArray(draft.changeEvents)
+    || !Array.isArray(draft.deletedCommentIds)
+    || !Array.isArray(draft.appliedOperationIds)
+    || state.draftSha256 === null
+    || state.draftSha256 !== draftSha256
+  ) {
+    throw new ProjectFileRepositoryError(
+      "WORKING_COPY_DRAFT_INVALID",
+      "The Working Copy Draft does not match its durable state.",
+      { workingCopyId: workingCopy.workingCopyId },
+    );
+  }
+  return draft;
+}
+
 function draftPathForState(paths, workingCopy, state) {
   const relative = state?.draftRelativePath;
   if (relative !== draftRelativePathFor(workingCopy)) {
@@ -1628,13 +1655,29 @@ export class ProjectFileRepository {
     if (workingCopy) {
       assertWorkingCopyState(state, loaded, workingCopy);
     }
-    let draft = workingCopy && state
-      ? await readJsonFile(
+    let draft = null;
+    if (workingCopy && state) {
+      const draftRecord = await readJsonFileWithSha256(
         draftPathForState(loaded.paths, workingCopy, state),
         "Working Copy draft",
         { projectRootPath: loaded.paths.projectRootPath },
-      )
-      : null;
+      );
+      if (draftRecord) {
+        draft = assertWorkingCopyDraft(
+          draftRecord.value,
+          draftRecord.sha256,
+          state,
+          loaded,
+          workingCopy,
+        );
+      } else if (state.draftSha256 !== null) {
+        throw new ProjectFileRepositoryError(
+          "WORKING_COPY_DRAFT_INVALID",
+          "The Working Copy Draft is missing while its durable state references it.",
+          { workingCopyId: workingCopy.workingCopyId },
+        );
+      }
+    }
     const activeRequest = loaded.runtime.activeRequest
       ? await readJsonFile(
         path.join(
