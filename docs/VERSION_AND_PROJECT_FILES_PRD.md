@@ -241,7 +241,7 @@ PR 1 内部按“文档与 Schema → Repository → Workflow → 最低限度 U
 
 ### 6.3 Markdown 文件
 
-- `PROJECT.md`：唯一由用户长期维护的项目规则、背景和约束；新项目可以是零字节，用户可随时清空。它不预填系统规则，也不承担身份或事务职责。
+- `PROJECT.md`：唯一由用户长期维护的项目规则、背景和约束；新项目只预填一行项目标题，用户可随时清空为零字节。它不预填系统规则，也不承担身份或事务职责。
 - `AI_RULES.md`：PageRoot 维护的稳定 AI 行为边界，例如冻结输入、唯一输出、附件、完成与取消规则。它是 Request 输入，不复制到 `PROJECT.md` 或每轮 Prompt。
 - `PROMPT.md`：当前 Request / Attempt 的精简入口，只包含本轮身份、读取顺序、当前附件/补充、唯一输出路径和 finalizer 命令；它引用 `AI_RULES.md`，不得重复稳定规则或要求 AI 推导文件名、版本号。
 - `.pageroot/requests/<requestId>/PROMPT.md`、冻结的 `input/PROJECT.md` 与 `input/AI_RULES.md` 是机器执行记录；第二期的 `AI任务/<轮次>/PROMPT.md` 若展示，只能是只读派生副本，不改变任何权威路径。
@@ -324,6 +324,7 @@ V2 工作文件第一次建立时与 V2 正式快照字节一致。此后用户�
 - 关闭窗口、切换项目、发送 AI 和退出应用前必须形成持久化边界。
 - 保存成功后，重启应用应恢复相同 HTML、评论、附件和撤销审计状态。
 - 保存失败必须保留内存草稿和恢复信息，并禁止发送基于错误文件的 AI Request。
+- 保存工作 HTML 时不得以无条件替换覆盖可见文件：系统先在私有恢复目录保留旧源字节，再以 no-replace 方式发布已验证的新字节。窗口期出现的外部写入必须保留并报告冲突；崩溃恢复只能完成已安全停放的事务或恢复旧字节，不能猜测或删除外部文件。
 - `Cmd+S` 可立即触发同一保存机制，但不创建正式版本。
 
 ### 8.3 从历史版本继续编辑
@@ -801,7 +802,7 @@ manifest 可记录平台文件标识（例如 device、inode、birthtime）作�
 |---|---|---|
 | Promotion 路径冻结 | 私有准备文件可先建立；只有 no-replace `link()` 成功后最终可见路径才冻结。发布前仅 `EEXIST` 可持久分配下一个同 ordinal 路径并重试，其他错误失败关闭。 | 事务、恢复和故障注入须区分“发布前 EEXIST”与“成功发布后恢复”。 |
 | Candidate 与可见 AI 任务 | AI 唯一写入固定 Attempt `output/candidate.html`；Request / Attempt 与 Candidate 记录才是权威。`AI任务/` 仅在第二期作为只读派生展示。 | 不得由 AI 直接写 Finder 可见正式 Version，也不得以可见副本作为 Promotion 输入。 |
-| AI Markdown 职责 | `PROJECT.md` 是可为空的用户长期规则；`AI_RULES.md` 是稳定系统边界；`PROMPT.md` 只给出本轮精简执行入口并引用规则。 | 禁止在 Prompt 重复稳定规则或要求 AI 推导输出文件名、版本号。 |
+| AI Markdown 职责 | `PROJECT.md` 默认只预填项目标题且可清空，是用户长期规则；`AI_RULES.md` 是稳定系统边界；`PROMPT.md` 只给出本轮精简执行入口并引用规则。 | 禁止在 Prompt 重复稳定规则或要求 AI 推导输出文件名、版本号。 |
 | Hash 与身份 | Hash 只验证内容，绝不单独补回 Working Copy 映射或授予管理权。 | ADR 0022 与恢复实现必须删除 Hash 身份回退。 |
 | 第二期可见体验 | 可见 AI 任务、附件与完整顶部/项目界面明确属于第二期。 | 第一期开箱与验收不以这些 Finder 目录或完整 UI 为前提。 |
 
@@ -818,6 +819,6 @@ manifest 可记录平台文件标识（例如 device、inode、birthtime）作�
 | 用户自行增加文件 | 未明确 PageRoot 是否会扫描或管理项目根目录中的其他文件 | 未注册文件和目录完全归用户；保留但不版本化、不冻结、不恢复、不删除，额外 HTML 按外部 HTML 处理 | 所有 Repository 写入改为 manifest/合同路径白名单，并补未知文件不变测试 |
 | 受管 HTML 改名 | 可恢复同一 Working Copy，但未定义未来版本命名 | 同一 Working Copy 不变；更新 manifest 相对路径、首选主干和扩展名，后续 Candidate / Promotion 继承新名称 | 增加 `A-V1.html → B-V1.html → B-V2.html` 验收；文件名仍不承担身份 |
 | 受管 HTML 移出与放回 | 移出后按外部文件处理；放回、改名放回和外部修改后的恢复不完整 | 移出后停止外部写入；原样放回、唯一可识别的改名放回应静默恢复；外部修改在 PageRoot 侧干净时自动采用，双方修改才进入冲突 | 补全丢失、返回和冲突状态机；默认非阻断提示，只有真实歧义或双边修改才要求选择 |
-| Promotion 文件名冲突 | 首选路径冲突时倾向失败关闭并提示 | 不覆盖、不提示，按同一 ordinal 连续追加后缀，例如 `A-V2-V2.html`；事务先冻结最终路径 | 增加目录/软链接占位、连续冲突及崩溃重试不重复追加测试 |
+| Promotion 文件名冲突 | 首选路径冲突时倾向失败关闭并提示 | 不覆盖、不提示，按同一 ordinal 连续追加后缀，例如 `A-V2-V2.html`；v1.3 以 no-replace 成功发布后冻结最终路径为准 | 增加目录/软链接占位、连续冲突及崩溃重试不重复追加测试 |
 | 候选待审阅期间改名 | 未明确 Candidate 建立后 HTML 再改名的结果 | Promotion 使用采纳时最新确认的 Working Copy 首选主干；Candidate 身份和内容 Hash 不变 | Candidate 文件名可与最终正式工作文件名不同，不能据此改变身份 |
 | 旧项目与 ADR | 旧项目兼容；ADR 0022 曾采用用户目录身份优先、Registry 缓存模型 | v4 以前状态完全不兼容；选中的 HTML 新建 v4 V1，ADR 0022 是 v4 Registry 白名单模型 | 旧状态不得成为绕过登记根目录的第二身份系统 |

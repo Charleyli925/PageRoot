@@ -99,6 +99,26 @@ test("atomic import creates V1 facts once and ordinary saves never create a Vers
   assert.deepEqual(manifest.versions.map((version) => version.versionId), ["ver_0001"]);
   assert.equal(manifest.latestOfficialVersionId, "ver_0001");
   assert.equal(await readFile(imported.sourcePath, "utf8"), original.toString("utf8"));
+  assert.deepEqual(
+    await readdir(path.join(target.projectRootPath, ".pageroot", "recovery")),
+    ["import.json"],
+  );
+});
+
+test("PROJECT.md starts with only the project title and can be cleared", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "项目规则.html");
+  const projectNotesPath = path.join(imported.target.projectRootPath, "PROJECT.md");
+
+  assert.equal(await readFile(projectNotesPath, "utf8"), "# 项目规则\n");
+  const cleared = await value.repository.updateProjectNotes({
+    target: imported.target,
+    content: "",
+  });
+
+  assert.equal(cleared.updated, true);
+  assert.equal(cleared.content, "");
+  assert.equal(await readFile(projectNotesPath, "utf8"), "");
 });
 
 test("a Candidate is not a Version until adoption, rejection consumes no ordinal, and promotion is idempotent", async (t) => {
@@ -421,6 +441,86 @@ test("save rechecks source bytes immediately before its replacing write", async 
   );
 
   assert.equal(await readFile(imported.target.exactSourcePath, "utf8"), externalHtml);
+});
+
+test("save preserves an external replacement that races after the final source check", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "save-atomic-boundary.html");
+  const externalHtml = html("external edit in the replacement window");
+  const repository = new ProjectFileRepository({
+    projectsRoot: value.projects,
+    failpoint: async (name) => {
+      if (name === "save-source-parking") {
+        await writeFile(imported.target.exactSourcePath, externalHtml, "utf8");
+      }
+      return false;
+    },
+  });
+
+  await assert.rejects(
+    repository.saveWorkingCopy({
+      target: imported.target,
+      html: html("PageRoot bytes must not win this race"),
+      expectedSourceSha256: imported.target.sourceSha256,
+      editRevision: 1,
+    }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "SOURCE_HASH_CONFLICT",
+  );
+
+  assert.equal(await readFile(imported.target.exactSourcePath, "utf8"), externalHtml);
+});
+
+test("save refuses a missing Working Copy state before replacing HTML", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "save-state-boundary.html");
+  const statePath = path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "working-copies",
+    `${imported.target.workingCopyId}.json`,
+  );
+  await rm(statePath);
+
+  await assert.rejects(
+    value.repository.saveWorkingCopy({
+      target: imported.target,
+      html: html("must stay in memory"),
+      expectedSourceSha256: imported.target.sourceSha256,
+      editRevision: 1,
+    }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "WORKING_COPY_STATE_NOT_FOUND",
+  );
+
+  assert.equal(await readFile(imported.target.exactSourcePath, "utf8"), html("V1"));
+});
+
+test("workspace recovers a source safely parked before publication", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "save-parked-recovery.html");
+  const nextHtml = html("recovered after safe parking");
+  const failing = new ProjectFileRepository({
+    projectsRoot: value.projects,
+    failpoint: async (name) => name === "save-source-parked",
+  });
+
+  await assert.rejects(
+    failing.saveWorkingCopy({
+      target: imported.target,
+      html: nextHtml,
+      expectedSourceSha256: imported.target.sourceSha256,
+      editRevision: 1,
+    }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "INJECTED_FAILPOINT",
+  );
+
+  const reopened = await new ProjectFileRepository({ projectsRoot: value.projects }).workspace({
+    sourcePath: imported.target.exactSourcePath,
+  });
+  assert.equal(reopened.content, nextHtml);
+  assert.equal(await readFile(imported.target.exactSourcePath, "utf8"), nextHtml);
 });
 
 test("promotion rechecks the Candidate base before manifest publication and recovery", async (t) => {

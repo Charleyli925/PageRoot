@@ -9283,11 +9283,11 @@ async function projectFileUpdate(body) {
   }
   const context = await loadMutationContext(body);
   assertBodyContext(context, body);
-  if (typeof body.content !== "string" || !body.content.trim()) {
+  if (typeof body.content !== "string") {
     throw new HttpError(
       400,
       "INVALID_PROJECT_FILE",
-      "content must be non-empty Markdown.",
+      "content must be Markdown text.",
     );
   }
   return withProjectMutation(context, async () => {

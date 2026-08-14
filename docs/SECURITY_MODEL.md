@@ -106,11 +106,12 @@ recovery is likewise limited to Registry-owned pending intents; a discovered
 `.pageroot/import.json` is never proof that an arbitrary copied root is managed.
 
 Working-copy filename changes retain their immutable IDs. A missing mapping may
-be repaired only by a unique direct-child file identity or a unique hash; an
-ambiguity is a content-preserving error. Promotion reserves a final relative
-path in a durable transaction before bytes become visible, prepares a private
-transaction file, and publishes without overwrite. A replaced preparation file
-or an untrusted collision fails closed rather than deleting user data.
+be repaired only by one unique direct-child file-identity continuity clue; Hash
+may validate bytes afterwards but never grants identity. An ambiguity is a
+content-preserving error. Promotion may prepare a provisional relative path in
+a durable transaction, but freezes the final visible path only after its
+no-replace publication succeeds. A replaced preparation file or an untrusted
+collision fails closed rather than deleting user data.
 
 ## V2 editable-island trust boundary
 

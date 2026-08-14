@@ -150,7 +150,7 @@ test("project-file PROJECT.md remains available through the shared project-file 
   assert.equal(initial.response.status, 200, JSON.stringify(initial.body));
   assert.equal(initial.body.relativePath, "PROJECT.md");
   assert.equal(initial.body.readOnly, false);
-  assert.match(initial.body.content, /^# rules/u);
+  assert.equal(initial.body.content, "# rules\n");
 
   const content = "# 项目规则\n\n- 只修改首页标题。\n";
   const saved = await postJson(bridge, "/project-file", {
@@ -163,6 +163,15 @@ test("project-file PROJECT.md remains available through the shared project-file 
   const refreshed = await inspect();
   assert.equal(refreshed.response.status, 200, JSON.stringify(refreshed.body));
   assert.equal(refreshed.body.content, content);
+
+  const cleared = await postJson(bridge, "/project-file", {
+    sourcePath: ensured.body.sourcePath,
+    projectId: ensured.body.projectId,
+    documentId: ensured.body.documentId,
+    content: "",
+  });
+  assert.equal(cleared.response.status, 200, JSON.stringify(cleared.body));
+  assert.equal((await inspect()).body.content, "");
 });
 
 test("project-file Request becomes a Candidate on finalization and a Version only on adoption", async (t) => {

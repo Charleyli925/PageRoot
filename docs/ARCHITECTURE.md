@@ -394,7 +394,7 @@ fresh v4 V1 on open; the source HTML bytes remain untouched. There is no v3
 compatibility ingress, physical migration, or dual write. The decision is recorded in
 `docs/decisions/0022-user-owned-project-root-identity.md`.
 
-Initial and accepted AI results are immutable versions. Routine local edits do not create versions. A validated AI result is not activated until the user explicitly chooses it.
+Initial and accepted AI results are immutable versions. Routine local edits do not create versions. A validated AI result is not activated until the user explicitly chooses it. Promotion may stage a provisional output path, but its final visible path is frozen only after the no-replace publication succeeds; a pre-publication collision reallocates and retries without overwriting user bytes.
 
 Candidate assessment is Attempt evidence, not current-source authority. The
 historical Version and archived terminal-outcome queries have one bounded
