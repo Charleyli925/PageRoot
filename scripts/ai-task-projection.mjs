@@ -367,7 +367,7 @@ function receiptMatchesIdentity(receipt, expected) {
     && receipt.proposedVersionId === expected.proposedVersionId
     && Number(receipt.proposedVersionOrdinal) === expected.proposedVersionOrdinal
     && receipt.promptSha256 === expected.promptSha256
-    && receipt.candidateFileName === expected.candidateFileName
+    && typeof receipt.candidateFileName === "string"
     && receipt.createdAt === expected.createdAt
     && typeof receipt.updatedAt === "string"
     && !Number.isNaN(Date.parse(receipt.updatedAt))
@@ -382,6 +382,11 @@ function assertReceipt(receipt, expected) {
       "The AI task projection receipt does not match the verified Request.",
     );
   }
+  // The candidate filename is a Finder-only display detail. A controlled
+  // same-root Working Copy rename may legitimately change its stem after this
+  // receipt publishes PROMPT.md, so the next materialization re-derives and
+  // rewrites that name instead of invalidating the hidden Candidate authority.
+  assertCandidateFileName(receipt.candidateFileName);
   const taskRelativePath = assertRelativeTaskPath(receipt.taskRelativePath);
   const taskName = taskRelativePath.slice(`${AI_TASK_DIRECTORY_NAME}/`.length);
   if (
@@ -655,6 +660,7 @@ export async function materializeAiTaskProjection({
 
     const needsReceipt = !receipt
       || receipt.taskRelativePath !== taskRelativePath
+      || receipt.candidateFileName !== expected.candidateFileName
       || receipt.candidateSha256 !== expected.candidateSha256
       || receipt.stage === "completed" && state.kind !== "rebuildable";
     if (needsReceipt) {

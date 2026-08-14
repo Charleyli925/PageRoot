@@ -429,6 +429,7 @@ AI 只能写入固定 Attempt 输出 `.pageroot/requests/<requestId>/attempts/<a
 3. P2 不创建 `附件快照说明.md`、`附件与图片/`、`AI_RULES.md` 或 `PROJECT.md` 副本，也不创建正式 Version。`PROMPT.md` 只复制本轮已冻结的精简 Prompt。
 4. 删除、篡改或用用户文件/目录/软链接占用派生位置时绝不覆盖；同一连续收据的完整投影可重建，冲突或篡改则分配新的安全展示目录。隐藏 Candidate、审阅和 Promotion 不读取此副本。
 5. 产品 UI 的 Finder 命令只提交当前 `sourcePath`；Bridge 重新解析并验证后才返回位于已登记根的 `AI任务/<单一子目录>`。它不接受 Renderer 提供的 Request 路径，也不打开 `.pageroot/requests/...`。
+6. `<主干>-Vn-待审阅.html` 是当前已验证 Working Copy 命名的展示结果，不是 Candidate 身份。若 Finder 在 `PROMPT.md` 发布后把同根 Working Copy 重命名，下一次投影会更新这一展示名，并仅在安全目录可复用时复用；已有不同展示文件时分配新的安全目录，绝不因此拒绝隐藏 Candidate、审阅或 Promotion。
 
 ### 10.3 用户审阅
 

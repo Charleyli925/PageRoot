@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { access, readFile, writeFile } from "node:fs/promises";
+import { access, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
@@ -124,6 +124,24 @@ test("the Bridge exposes every Registry member and opens one only by projectId",
   assert.equal(opened.body.openTarget.workingCopyId, "work_ver_0001");
   assert.equal(opened.body.sourcePath, b.body.sourcePath);
   assert.equal(opened.body.sourceSha256, opened.body.openTarget.sourceSha256);
+
+  const finderRenamedWorkingCopy = join(
+    b.body.projectRoot,
+    "B Finder renamed.html",
+  );
+  await rename(b.body.sourcePath, finderRenamedWorkingCopy);
+  const reboundCatalog = await bridge.requestJson("/registered-projects");
+  assert.equal(reboundCatalog.response.status, 200, JSON.stringify(reboundCatalog.body));
+  const reboundRow = reboundCatalog.body.projects.find(
+    (project) => project.projectId === b.body.projectId,
+  );
+  assert.equal(reboundRow?.availability, "ready");
+  assert.equal(reboundRow?.activeSourcePath, finderRenamedWorkingCopy);
+  const reboundOpen = await bridge.requestJson(
+    `/registered-project/open?projectId=${encodeURIComponent(b.body.projectId)}`,
+  );
+  assert.equal(reboundOpen.response.status, 200, JSON.stringify(reboundOpen.body));
+  assert.equal(reboundOpen.body.sourcePath, finderRenamedWorkingCopy);
 
   const invalid = await bridge.requestJson("/registered-project/open?projectId=project_not_valid");
   assert.equal(invalid.response.status, 400);

@@ -278,6 +278,30 @@ test("the Registry alone determines catalog membership and secure project opens"
   assert.equal(resolved.target.projectRootPath, renamedRoot);
   assert.equal(resolved.sourceSha256, resolved.target.sourceSha256);
 
+  const finderRenamedWorkingCopy = path.join(renamedRoot, "B Finder renamed.html");
+  await rename(resolved.target.exactSourcePath, finderRenamedWorkingCopy);
+  const afterWorkingCopyRename = await value.repository.listRegisteredProjects();
+  const bAfterWorkingCopyRename = afterWorkingCopyRename.find(
+    (row) => row.projectId === b.target.projectId,
+  );
+  assert.equal(bAfterWorkingCopyRename?.availability, "ready");
+  assert.equal(bAfterWorkingCopyRename?.activeSourcePath, finderRenamedWorkingCopy);
+  const rebound = await value.repository.resolveRegisteredProjectOpenTarget({
+    projectId: b.target.projectId,
+  });
+  assert.equal(rebound.target.exactSourcePath, finderRenamedWorkingCopy);
+  const reboundManifest = await json(path.join(
+    renamedRoot,
+    ".pageroot",
+    "manifest.json",
+  ));
+  assert.equal(
+    reboundManifest.workingCopies.find(
+      (entry) => entry.workingCopyId === rebound.target.workingCopyId,
+    )?.sourceRelativePath,
+    "B Finder renamed.html",
+  );
+
   const copiedRoot = path.join(value.root, "unregistered copy");
   await cp(renamedRoot, copiedRoot, { recursive: true });
   assert.equal((await value.repository.listRegisteredProjects()).length, 2);
@@ -370,6 +394,79 @@ test("AI task projections are re-creatable, collision-safe and never Candidate a
   });
   assert.equal(promoted.version.versionId, "ver_0002");
   assert.equal(await readFile(rebuilt.candidatePath, "utf8"), candidateHtml);
+});
+
+test("AI task projection rebinds its display filename after a controlled Working Copy rename", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "before-ai-task-rename.html");
+  const requestId = "req_ai_task_rename_0001";
+  const request = await prepareAiTaskRequest(value.repository, imported.target, requestId);
+  const processing = await value.repository.materializeAiTaskProjection({
+    target: imported.target,
+    requestId,
+    attemptId: "attempt_001",
+    candidateId: request.candidateId,
+  });
+  assert.equal(processing.candidatePath, null);
+
+  const renamedWorkingCopy = path.join(
+    imported.target.projectRootPath,
+    "after-ai-task-rename.html",
+  );
+  await rename(imported.target.exactSourcePath, renamedWorkingCopy);
+  const candidateHtml = html("Candidate after a Finder rename");
+  const completed = await value.repository.completeRequest({
+    target: imported.target,
+    requestId,
+    attemptId: "attempt_001",
+    html: candidateHtml,
+  });
+  assert.equal(completed.status, "candidate-ready");
+
+  const projection = await value.repository.materializeAiTaskProjection({
+    target: imported.target,
+    requestId,
+    attemptId: "attempt_001",
+    candidateId: request.candidateId,
+  });
+  assert.equal(projection.taskPath, processing.taskPath);
+  assert.match(
+    path.basename(projection.candidatePath),
+    /^after-ai-task-rename-V2-待审阅\.html$/u,
+  );
+  assert.equal(await readFile(projection.candidatePath, "utf8"), candidateHtml);
+  const receipt = await json(projection.receiptPath);
+  assert.equal(receipt.candidateFileName, path.basename(projection.candidatePath));
+
+  const replay = await value.repository.materializeAiTaskProjection({
+    target: imported.target,
+    requestId,
+    attemptId: "attempt_001",
+    candidateId: request.candidateId,
+  });
+  assert.equal(replay.taskPath, processing.taskPath);
+  assert.equal(replay.candidatePath, projection.candidatePath);
+
+  const renamedAgain = path.join(
+    imported.target.projectRootPath,
+    "after-candidate-rename.html",
+  );
+  await rename(renamedWorkingCopy, renamedAgain);
+  const rebuiltAfterCandidateRename = await value.repository.materializeAiTaskProjection({
+    target: imported.target,
+    requestId,
+    attemptId: "attempt_001",
+    candidateId: request.candidateId,
+  });
+  assert.notEqual(rebuiltAfterCandidateRename.taskPath, projection.taskPath);
+  assert.match(
+    path.basename(rebuiltAfterCandidateRename.candidatePath),
+    /^after-candidate-rename-V2-待审阅\.html$/u,
+  );
+  assert.equal(
+    await readFile(rebuiltAfterCandidateRename.candidatePath, "utf8"),
+    candidateHtml,
+  );
 });
 
 test("AI task display publication cannot make a sealed Candidate unavailable", async (t) => {

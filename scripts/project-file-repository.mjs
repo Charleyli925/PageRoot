@@ -4782,12 +4782,21 @@ export class ProjectFileRepository {
     const rows = [];
     for (const [projectId, record] of Object.entries(registry.projects)) {
       try {
+        // Catalog availability must use the same controlled Working Copy
+        // recovery as an actual open. Reading the old manifest path first
+        // would mark a safely Finder-renamed HTML unavailable before its
+        // stable file identity can rebind the manifest.
+        const opened = await this.#resolveRegisteredProjectOpenTarget({ projectId });
         const loaded = await this.#loadRegisteredProject({ projectId });
-        const workingCopy = await this.#activeRegisteredWorkingCopy(loaded);
-        const sourcePath = workingCopySourcePath(loaded.paths, workingCopy);
-        await readHtmlFile(sourcePath, "active Working Copy", {
-          projectRootPath: loaded.paths.projectRootPath,
-        });
+        const workingCopy = loaded.manifest.workingCopies.find(
+          (entry) => entry.workingCopyId === opened.target.workingCopyId,
+        );
+        if (!workingCopy) {
+          throw new ProjectFileRepositoryError(
+            "ACTIVE_WORKING_COPY_UNKNOWN",
+            "The registered project active Working Copy is unknown.",
+          );
+        }
         const state = await readJsonFile(
           workingCopyStatePath(loaded.paths, workingCopy),
           "active Working Copy state",
@@ -4800,7 +4809,7 @@ export class ProjectFileRepository {
           projectName: path.basename(loaded.paths.projectRootPath),
           registeredProjectRootPath: loaded.paths.projectRootPath,
           activeWorkingCopyId: workingCopy.workingCopyId,
-          activeSourcePath: sourcePath,
+          activeSourcePath: opened.target.exactSourcePath,
           currentBasedOnVersionId: workingCopy.basedOnVersionId,
           latestOfficialVersionId: loaded.manifest.latestOfficialVersionId,
           hasPendingCandidate: loaded.runtime.activeCandidateId !== null,
@@ -4824,27 +4833,18 @@ export class ProjectFileRepository {
     const id = assertId(projectId, PROJECT_ID, "projectId");
     const loaded = await this.#loadRegisteredProject({ projectId: id });
     const workingCopy = await this.#activeRegisteredWorkingCopy(loaded);
-    const initialSourcePath = workingCopySourcePath(loaded.paths, workingCopy);
-    const initialSource = await readHtmlFile(initialSourcePath, "active Working Copy", {
+    // This bootstrap identity intentionally contains no source bytes. The
+    // shared mutation resolver reads them only after it has recovered a
+    // supported same-root Finder rename by the Working Copy file identity.
+    const resolved = await this.#resolveMutationTarget({
+      projectId: loaded.project.projectId,
+      documentId: loaded.project.documentId,
       projectRootPath: loaded.paths.projectRootPath,
+      workingCopyId: workingCopy.workingCopyId,
     });
-    const tentative = publicOpenTarget({
-      project: loaded.project,
-      projectRootPath: loaded.paths.projectRootPath,
-      targetKind: "working-copy",
-      workingCopy,
-      version: loaded.manifest.versions.find(
-        (entry) => entry.versionId === workingCopy.versionId,
-      ),
-      exactSourcePath: initialSourcePath,
-      sourceSha256: initialSource.sha256,
-    });
-    // #resolveMutationTarget repeats Registry, root, Working Copy and real
-    // path checks, including controlled managed-HTML rename recovery.  The
-    // returned source bytes and digest form the Repository side of the exact
-    // Project/Document/OpenTarget/HTML/Hash tuple; Desktop repeats it before
-    // publishing a new Session.
-    const resolved = await this.#resolveMutationTarget(tentative);
+    // The returned source bytes and digest form the Repository side of the
+    // exact Project/Document/OpenTarget/HTML/Hash tuple; Desktop repeats it
+    // before publishing a new Session.
     const version = resolved.manifest.versions.find(
       (entry) => entry.versionId === resolved.workingCopy.versionId,
     );

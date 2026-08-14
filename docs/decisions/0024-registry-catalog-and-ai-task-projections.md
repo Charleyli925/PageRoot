@@ -27,6 +27,9 @@ scanning for unregistered copies. Desktop Recent is limited to ranking,
 authorize a catalog member. Renderer opens send only `projectId`; Bridge and
 Repository revalidate Registry, Project, Document, Working Copy, OpenTarget,
 HTML and Hash before the existing managed-source publication boundary.
+Catalog availability uses that same controlled Working Copy resolution before
+reading its visible path, so a supported same-root Finder rename rebinds by
+stable file identity instead of leaving an otherwise openable project disabled.
 
 `AI任务/` is a rebuildable display projection. Its only sources are the already
 durable hidden Request/Attempt/Candidate facts and their frozen hashes. Before
@@ -46,6 +49,12 @@ The receipt records display progress only; it cannot recreate a Request,
 Candidate, Version or runtime state. P2 does not publish `附件快照说明.md`,
 `附件与图片/`, `AI_RULES.md`, `PROJECT.md`, or a formal Version in this tree.
 AI writes only its fixed hidden Attempt `candidate.html` output.
+The Candidate display filename is likewise not receipt identity or Candidate
+authority: it is re-derived from the currently verified Working Copy naming.
+If a same-root Finder rename occurs after `PROMPT.md` is visible, the next
+materialization updates the display receipt and either completes the existing
+safe directory or allocates a collision-free one; it never rejects the hidden
+Candidate because of a display-only filename change.
 
 The Finder UI calls `revealAiTask` with the current source locator only. Bridge
 re-resolves the managed project and returns only a validated, root-contained,
