@@ -93,6 +93,15 @@ test("v4 schemas accept repository-produced identity, Working Copy, Candidate an
       await json(path.join(controlRoot, "working-copies", "work_ver_0001.json")),
     ),
   ]);
+  const legacyRuntimeWithoutHistoryActivation = await json(path.join(
+    controlRoot,
+    "runtime-state.json",
+  ));
+  delete legacyRuntimeWithoutHistoryActivation.historyActivation;
+  await validate(
+    "project-runtime-state.v4.schema.json",
+    legacyRuntimeWithoutHistoryActivation,
+  );
   const missingImportSourceHash = structuredClone(registry);
   delete missingImportSourceHash.projects[imported.target.projectId].importSourceSha256;
   await validateRejects("project-registry.v4.schema.json", missingImportSourceHash);

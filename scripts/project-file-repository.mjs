@@ -996,11 +996,30 @@ async function legacyV4RegistryMigrationLockLease({ projectsRoot, lockPath }) {
   if (markers.length !== 1) return null;
   const marker = markers[0];
   const ownerPath = path.join(lockPath, marker.name);
-  const owner = legacyV4RegistryMigrationLockOwner(await readJsonFile(
-    ownerPath,
-    "legacy V4 Registry migration lock",
-    { projectRootPath: projectsRoot },
-  ));
+  let ownerRecord;
+  try {
+    ownerRecord = await readJsonFile(
+      ownerPath,
+      "legacy V4 Registry migration lock",
+      { projectRootPath: projectsRoot },
+    );
+  } catch (cause) {
+    // readdir() only gives a point-in-time name. A concurrently releasing or
+    // retiring owner may rename that exact marker before its containment
+    // check/read pair completes. readJsonFile intentionally reports that
+    // post-stat ENOENT as INVALID_JSON; both forms are transient here. Do not
+    // reclaim or trust the lock from this stale observation—wait and inspect
+    // the stable directory again instead.
+    if (
+      cause?.code === "ENOENT"
+      || (
+        cause instanceof ProjectFileRepositoryError
+        && cause.code === "INVALID_JSON"
+      )
+    ) return null;
+    throw cause;
+  }
+  const owner = legacyV4RegistryMigrationLockOwner(ownerRecord);
   if (!owner || owner.token !== marker.marker.ownerToken) return null;
   return { owner, ownerPath };
 }
@@ -1298,6 +1317,30 @@ function assertHistoryActivation(runtime, project, manifest) {
     );
   }
   return activation;
+}
+
+// historyActivation was added after the first published v4 Runtime files.
+// Treat its absence as the no-activation state while preserving every other
+// Runtime validation.  Writes always materialize the explicit null so a
+// successfully persisted current operation converges the file without a
+// schema-version bump or a standalone migration pass.
+function normalizeRuntimeHistoryActivation(runtime) {
+  if (!isObject(runtime) || Object.hasOwn(runtime, "historyActivation")) return runtime;
+  return {
+    ...runtime,
+    historyActivation: null,
+  };
+}
+
+async function writeRuntimeState(projectRootPath, runtimePath, runtime) {
+  const normalized = normalizeRuntimeHistoryActivation(runtime);
+  await atomicWriteProjectJson(
+    projectRootPath,
+    runtimePath,
+    normalized,
+    "runtime-state.json",
+  );
+  return normalized;
 }
 
 function assertRuntime(runtime, project, manifest) {
@@ -1935,6 +1978,14 @@ export class ProjectFileRepository {
       if (!isExactLegacyV4Registry(record.value)) throw cause;
       return this.#migrateExactLegacyV4Registry();
     }
+  }
+
+  async #writeRuntime(loaded) {
+    loaded.runtime = await writeRuntimeState(
+      loaded.paths.projectRootPath,
+      loaded.paths.runtimePath,
+      loaded.runtime,
+    );
   }
 
   async #migrateExactLegacyV4Registry() {
@@ -2575,12 +2626,7 @@ export class ProjectFileRepository {
       candidateRecordSha256: null,
     };
     loaded.runtime.activeCandidateId = null;
-    await atomicWriteProjectJson(
-      loaded.paths.projectRootPath,
-      loaded.paths.runtimePath,
-      loaded.runtime,
-      "runtime-state.json",
-    );
+    await this.#writeRuntime(loaded);
     await this.#hit("request-runtime-written", { requestId: id, requestRoot });
     await this.#hit("request-prepared", { requestId: id, requestRoot });
     return this.#publicRequest(record, loaded.paths.projectRootPath);
@@ -2788,12 +2834,7 @@ export class ProjectFileRepository {
       if (loaded.runtime.activeRequest?.requestId === record.requestId) {
         loaded.runtime.activeRequest = null;
         loaded.runtime.activeCandidateId = null;
-        await atomicWriteProjectJson(
-          loaded.paths.projectRootPath,
-          loaded.paths.runtimePath,
-          loaded.runtime,
-          "runtime-state.json",
-        );
+        await this.#writeRuntime(loaded);
       }
       return false;
     }
@@ -2819,12 +2860,7 @@ export class ProjectFileRepository {
     ) {
       loaded.runtime.activeRequest = nextActiveRequest;
       loaded.runtime.activeCandidateId = candidateId;
-      await atomicWriteProjectJson(
-        loaded.paths.projectRootPath,
-        loaded.paths.runtimePath,
-        loaded.runtime,
-        "runtime-state.json",
-      );
+      await this.#writeRuntime(loaded);
       return true;
     }
     return false;
@@ -2991,12 +3027,7 @@ export class ProjectFileRepository {
     if (activeMatches) {
       loaded.runtime.activeRequest = null;
       loaded.runtime.activeCandidateId = null;
-      await atomicWriteProjectJson(
-        loaded.paths.projectRootPath,
-        loaded.paths.runtimePath,
-        loaded.runtime,
-        "runtime-state.json",
-      );
+      await this.#writeRuntime(loaded);
     }
     return { requestId, attemptId, status: "cancelled" };
   }
@@ -3275,12 +3306,7 @@ export class ProjectFileRepository {
     };
     loaded.runtime.activeWorkingCopyId = workingCopy.workingCopyId;
     loaded.runtime.historyActivation = historyActivation;
-    await atomicWriteProjectJson(
-      loaded.paths.projectRootPath,
-      loaded.paths.runtimePath,
-      loaded.runtime,
-      "runtime-state.json",
-    );
+    await this.#writeRuntime(loaded);
     return activationResult(historyActivation, { activated: true, replayed: false });
   }
 
@@ -3329,12 +3355,7 @@ export class ProjectFileRepository {
     }
     historyActivation.state = "desktop-confirmed";
     loaded.runtime.historyActivation = historyActivation;
-    await atomicWriteProjectJson(
-      loaded.paths.projectRootPath,
-      loaded.paths.runtimePath,
-      loaded.runtime,
-      "runtime-state.json",
-    );
+    await this.#writeRuntime(loaded);
     return {
       historyActivation: structuredClone(historyActivation),
       confirmed: true,
@@ -3383,12 +3404,7 @@ export class ProjectFileRepository {
       );
       loaded.runtime.activeRequest = null;
       loaded.runtime.activeCandidateId = null;
-      await atomicWriteProjectJson(
-        loaded.paths.projectRootPath,
-        loaded.paths.runtimePath,
-        loaded.runtime,
-        "runtime-state.json",
-      );
+      await this.#writeRuntime(loaded);
       return {
         status: "no-change",
         request: this.#publicRequest(record, loaded.paths.projectRootPath),
@@ -3447,12 +3463,7 @@ export class ProjectFileRepository {
       );
       loaded.runtime.activeRequest = null;
       loaded.runtime.activeCandidateId = null;
-      await atomicWriteProjectJson(
-        loaded.paths.projectRootPath,
-        loaded.paths.runtimePath,
-        loaded.runtime,
-        "runtime-state.json",
-      );
+      await this.#writeRuntime(loaded);
       return {
         status: "error",
         request: this.#publicRequest(record, loaded.paths.projectRootPath),
@@ -3900,7 +3911,7 @@ export class ProjectFileRepository {
         workingState,
         "initial Working Copy state",
       );
-      await atomicWriteProjectJson(stagingRoot, paths.runtimePath, runtime, "runtime-state.json");
+      await writeRuntimeState(stagingRoot, paths.runtimePath, runtime);
       await atomicWriteProjectJson(stagingRoot, path.join(paths.recoveryRoot, "import.json"), {
         schemaVersion: PROJECT_FILE_SCHEMA_VERSION,
         kind: "import",
@@ -4033,9 +4044,9 @@ export class ProjectFileRepository {
       project,
     );
     const runtime = assertRuntime(
-      await readJsonFile(paths.runtimePath, "runtime-state.json", {
+      normalizeRuntimeHistoryActivation(await readJsonFile(paths.runtimePath, "runtime-state.json", {
         projectRootPath: root,
-      }),
+      })),
       project,
       manifest,
     );
@@ -4739,6 +4750,7 @@ export class ProjectFileRepository {
       loaded.manifest,
       "manifest.json",
     );
+    await this.#writeRuntime(loaded);
     await this.#hit("save-manifest-written", { transactionPath });
     transaction = {
       ...(await readJsonFile(transactionPath, "save transaction", {
@@ -4976,12 +4988,7 @@ export class ProjectFileRepository {
       candidateRecordSha256,
     };
     loaded.runtime.activeCandidateId = id;
-    await atomicWriteProjectJson(
-      loaded.paths.projectRootPath,
-      loaded.paths.runtimePath,
-      loaded.runtime,
-      "runtime-state.json",
-    );
+    await this.#writeRuntime(loaded);
     await this.#hit("candidate-prepared", { requestId: request, candidateId: id });
     return await this.#readCandidateForLoaded(loaded, id);
   }
@@ -5118,12 +5125,7 @@ export class ProjectFileRepository {
     // the old sealed digest.
     loaded.runtime.activeRequest = null;
     loaded.runtime.activeCandidateId = null;
-    await atomicWriteProjectJson(
-      loaded.paths.projectRootPath,
-      loaded.paths.runtimePath,
-      loaded.runtime,
-      "runtime-state.json",
-    );
+    await this.#writeRuntime(loaded);
     current.candidate.status = "rejected";
     current.candidate.rejectedAt = nowIso(this.#clock);
     await atomicWriteProjectJson(
@@ -5904,12 +5906,7 @@ export class ProjectFileRepository {
       loaded.runtime.activeRequest = null;
       loaded.runtime.activeCandidateId = null;
       loaded.runtime.historyActivation = null;
-      await atomicWriteProjectJson(
-        loaded.paths.projectRootPath,
-        loaded.paths.runtimePath,
-        loaded.runtime,
-        "runtime-state.json",
-      );
+      await this.#writeRuntime(loaded);
       transaction.state = "completed";
       transaction.completedAt = nowIso(this.#clock);
       await atomicWriteProjectJson(

@@ -199,6 +199,33 @@ test("PROJECT.md starts with only the project title and can be cleared", async (
   assert.equal(await readFile(projectNotesPath, "utf8"), "");
 });
 
+test("a legacy v4 Runtime without historyActivation opens as null and normalizes on write", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "legacy-runtime.html");
+  const runtimePath = path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "runtime-state.json",
+  );
+  const legacyRuntime = await json(runtimePath);
+  delete legacyRuntime.historyActivation;
+  await writeFile(runtimePath, JSON.stringify(legacyRuntime), "utf8");
+
+  const restarted = new ProjectFileRepository({ projectsRoot: value.projects });
+  const workspace = await restarted.workspace({ sourcePath: imported.target.exactSourcePath });
+  assert.equal(workspace.runtime.historyActivation, null);
+  assert.equal("historyActivation" in await json(runtimePath), false);
+
+  const saved = await restarted.saveWorkingCopy({
+    target: workspace.target,
+    html: html("legacy runtime normalized"),
+    expectedSourceSha256: workspace.sourceSha256,
+    editRevision: 1,
+  });
+  assert.equal(saved.versionCreated, false);
+  assert.equal((await json(runtimePath)).historyActivation, null);
+});
+
 test("a Candidate is not a Version until adoption, rejection consumes no ordinal, and promotion is idempotent", async (t) => {
   const value = await fixture(t);
   const imported = await importSource(value);
