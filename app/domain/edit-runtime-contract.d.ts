@@ -5,6 +5,9 @@ export const EDIT_AUTHOR_RUNTIME_BUDGET: Readonly<{
   scriptCount: number;
   scriptBytes: number;
   aggregateScriptBytes: number;
+  declaredAssetCount: number;
+  declaredAssetReferenceCount: number;
+  declaredAssetBytes: number;
   hostCount: number;
   sourceNodeCount: number;
   runtimeSettleMs: number;

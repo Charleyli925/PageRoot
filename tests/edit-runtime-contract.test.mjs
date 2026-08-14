@@ -86,6 +86,9 @@ test("direct Edit runtime grants use one session and one execution identity", ()
   assert.equal(isEditRuntimeProtocolUrl(url, sessionId), true);
   assert.equal(editRuntimeProtocolUrl(sessionId, "relative.js"), null);
   assert.equal(EDIT_AUTHOR_RUNTIME_BUDGET.hostCount, 32);
+  assert.equal(EDIT_AUTHOR_RUNTIME_BUDGET.declaredAssetCount, 64);
+  assert.equal(EDIT_AUTHOR_RUNTIME_BUDGET.declaredAssetReferenceCount, 128);
+  assert.equal(EDIT_AUTHOR_RUNTIME_BUDGET.declaredAssetBytes, 2 * 1024 * 1024);
   assert.equal(EDIT_AUTHOR_RUNTIME_BUDGET.runtimeSettleMs, 1_200);
   assert.equal(EDIT_AUTHOR_RUNTIME_BUDGET.orphanSessionTtlMs, 60_000);
   assert.equal("cacheEntries" in EDIT_AUTHOR_RUNTIME_BUDGET, false);

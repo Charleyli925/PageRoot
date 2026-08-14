@@ -64,7 +64,12 @@ test("direct protocol serves one immutable resource session and consumes executi
   };
   const controller = createEditRuntimeProtocolController({
     protocolApi,
-    netFetch: async () => new Response("unexpected remote fetch", { status: 500 }),
+    netFetch: async (url) => new Response(
+      String(url).startsWith("file:")
+        ? "#chart-host { display: block; }"
+        : "unexpected remote fetch",
+      { status: String(url).startsWith("file:") ? 200 : 500 },
+    ),
     randomSessionId: () => SESSION_ID,
     randomExecutionId: () => EXECUTION_ID,
   });
@@ -293,14 +298,103 @@ test("direct protocol aborts a stalled headerless ECharts stream by the existing
         pull() {},
       }), { status: 200 });
     },
-    remoteScriptDeadlineMs: 20,
+    runtimePreparationDeadlineMs: 20,
     randomSessionId: () => "8".repeat(32),
     randomExecutionId: () => "9".repeat(24),
   });
 
   await assert.rejects(
     controller.createSession({ html: REMOTE_ECHARTS_HTML, sourcePath, bindings: BINDINGS }),
-    /CDN script timed out/u,
+    /timed out/u,
+  );
+  assert.ok(observedSignal instanceof AbortSignal);
+  assert.equal(observedSignal.aborted, true);
+});
+
+test("direct protocol streams bounded declared assets and never buffers an oversized asset in Main", async (t) => {
+  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "pageroot-edit-runtime-assets-"));
+  t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
+  const sourcePath = path.join(temporaryRoot, "report.html");
+  const html = HTML.replace(
+    "</body>",
+    '<img src="small.png"><img src="oversized.png"></body>',
+  );
+  await mkdir(path.join(temporaryRoot, "vendor"));
+  await Promise.all([
+    writeFile(sourcePath, html),
+    writeFile(path.join(temporaryRoot, "vendor", "echarts.js"), "window.echarts={init(){}};"),
+    writeFile(path.join(temporaryRoot, "small.png"), "small asset"),
+    writeFile(
+      path.join(temporaryRoot, "oversized.png"),
+      new Uint8Array(EDIT_AUTHOR_RUNTIME_BUDGET.declaredAssetBytes + 1),
+    ),
+  ]);
+
+  let handler = null;
+  const fetchedFileUrls = [];
+  const controller = createEditRuntimeProtocolController({
+    protocolApi: {
+      handle(_scheme, nextHandler) {
+        handler = nextHandler;
+      },
+    },
+    netFetch: async (url) => {
+      fetchedFileUrls.push(String(url));
+      return new Response("streamed asset", { status: 200 });
+    },
+    readFileImpl: async (filePath) => {
+      if (String(filePath).endsWith("vendor/echarts.js")) {
+        return "window.echarts={init(){}};";
+      }
+      throw new Error("Declared assets must not use readFile.");
+    },
+    randomSessionId: () => "a".repeat(32),
+    randomExecutionId: () => "b".repeat(24),
+  });
+  controller.install();
+  const session = await controller.createSession({ html, sourcePath, bindings: BINDINGS });
+
+  const small = await handler(new Request(
+    `pageroot-edit-runtime://${session.sessionId}/small.png`,
+  ));
+  assert.equal(small.status, 200);
+  assert.equal(await small.text(), "streamed asset");
+  assert.equal(fetchedFileUrls.length, 1);
+  assert.match(fetchedFileUrls[0], /^file:/u);
+
+  const oversized = await handler(new Request(
+    `pageroot-edit-runtime://${session.sessionId}/oversized.png`,
+  ));
+  assert.equal(oversized.status, 404);
+  assert.equal(fetchedFileUrls.length, 1);
+});
+
+test("direct protocol bounds declared-asset discovery by the shared preparation deadline", async (t) => {
+  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "pageroot-edit-runtime-assets-timeout-"));
+  t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
+  const sourcePath = path.join(temporaryRoot, "report.html");
+  await mkdir(path.join(temporaryRoot, "vendor"));
+  await Promise.all([
+    writeFile(sourcePath, HTML),
+    writeFile(path.join(temporaryRoot, "vendor", "echarts.js"), "window.echarts={init(){}};"),
+  ]);
+
+  let observedSignal = null;
+  const controller = createEditRuntimeProtocolController({
+    protocolApi: { handle() {} },
+    netFetch: async () => new Response("unexpected"),
+    collectDeclaredAssets: async ({ signal }) => {
+      observedSignal = signal;
+      await new Promise(() => {});
+    },
+    runtimePreparationDeadlineMs: 20,
+    randomSessionId: () => "c".repeat(32),
+    randomExecutionId: () => "d".repeat(24),
+  });
+
+  await assert.rejects(
+    controller.createSession({ html: HTML, sourcePath, bindings: BINDINGS }),
+    /preparation timed out/u,
   );
   assert.ok(observedSignal instanceof AbortSignal);
   assert.equal(observedSignal.aborted, true);
