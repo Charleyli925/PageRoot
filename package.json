@@ -221,6 +221,10 @@
         "to": "bridge/project-file-repository.mjs"
       },
       {
+        "from": "scripts/ai-task-projection.mjs",
+        "to": "bridge/ai-task-projection.mjs"
+      },
+      {
         "from": "scripts/project-file-finalizer.mjs",
         "to": "bridge/project-file-finalizer.mjs"
       },

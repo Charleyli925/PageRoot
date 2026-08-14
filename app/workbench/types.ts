@@ -59,10 +59,14 @@ export type DesktopProjectsApi = {
     replayed: boolean;
     workspaceRelinked: boolean;
   }>;
-  revealRequestFolder?: (payload: {
+  revealAiTask?: (payload: {
     sourcePath: string;
-    requestPath: string;
-  }) => Promise<{ requestPath: string }>;
+  }) => Promise<{
+    sourcePath: string;
+    aiTaskPath: string;
+    requestId: string;
+    candidateId: string;
+  }>;
   revealVersionFile?: (payload: {
     sourcePath: string;
     versionId: string;

@@ -5053,29 +5053,25 @@ export default function Workbench() {
     return true;
   }, [projectRulesSnapshot.open, workspaceController]);
 
-  const revealActiveRunInFinder = useCallback(async () => {
+  const revealAiTaskInFinder = useCallback(async () => {
     const activeSourcePath = currentProjectSessionSnapshot().sourcePath;
-    const requestPath = activeRun?.requestPath;
-    const revealRequestFolder = window.htmlAIProjects?.revealRequestFolder;
-    if (!activeSourcePath || !requestPath || !revealRequestFolder) return;
+    const revealAiTask = window.htmlAIProjects?.revealAiTask;
+    if (!activeSourcePath || !revealAiTask) return;
     await runLocalUserAction({
-      kind: "reveal-request-folder",
-      invoke: () => revealRequestFolder({
-        sourcePath: activeSourcePath,
-        requestPath,
-      }),
+      kind: "reveal-ai-task",
+      invoke: () => revealAiTask({ sourcePath: activeSourcePath }),
       onFailure: (cause: unknown) => setToast({
-        title: "本轮文件暂时无法打开",
+        title: "AI任务暂时无法打开",
         message: productErrorMessage(
           cause,
           "本轮任务仍在处理面板中，可以重新尝试。",
         ),
         tone: "warning",
         disposition: "background-result",
-        dedupeKey: "reveal-request-folder",
+        dedupeKey: "reveal-ai-task",
       }),
     });
-  }, [activeRun?.requestPath, currentProjectSessionSnapshot]);
+  }, [currentProjectSessionSnapshot]);
 
   const revealVersionInFinder = useCallback(async (version: Pick<Version, "id">) => {
     const activeSourcePath = currentProjectSessionSnapshot().sourcePath;
@@ -8244,11 +8240,11 @@ export default function Workbench() {
               runBasisLabel={runBasisLabel}
               runSubmittedLabel={runSubmittedLabel}
               pendingRunOutcome={pendingRunOutcome}
-              canRevealRequestFolder={Boolean(
+              canRevealAiTask={Boolean(
                 typeof window !== "undefined"
-                && window.htmlAIProjects?.revealRequestFolder,
+                && window.htmlAIProjects?.revealAiTask,
               )}
-              onRevealRequestFolder={() => void revealActiveRunInFinder()}
+              onRevealAiTask={() => void revealAiTaskInFinder()}
             />
           ) : null}
         </div>
@@ -8265,9 +8261,9 @@ export default function Workbench() {
             resolvingConflict={resolvingConflict}
             checkingRun={checkingRun}
             terminalRun={terminalRun}
-            canRevealRequestFolder={Boolean(
+            canRevealAiTask={Boolean(
               typeof window !== "undefined"
-              && window.htmlAIProjects?.revealRequestFolder,
+              && window.htmlAIProjects?.revealAiTask,
             )}
             onReviewReadyResult={() => void reviewReadyResult()}
             onActivateReadyResult={() => void activateReadyResult()}
@@ -8277,7 +8273,7 @@ export default function Workbench() {
             }}
             onCancel={requestActiveRunEnd}
             onResolveConflict={(choice) => void resolveAiConflict(choice)}
-            onRevealRequestFolder={() => void revealActiveRunInFinder()}
+            onRevealAiTask={() => void revealAiTaskInFinder()}
             onReturnToEditing={returnToEditingFromTerminalRun}
             onRequestEnd={requestActiveRunEnd}
             onPreviewSentHtml={() => {

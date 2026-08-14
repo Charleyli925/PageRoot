@@ -28,6 +28,10 @@ import {
   applyDraftCommand,
 } from "./draft-service.mjs";
 import { assessHtmlCandidate } from "./candidate-assessment.mjs";
+import {
+  AiTaskProjectionError,
+  materializeAiTaskProjection,
+} from "./ai-task-projection.mjs";
 
 export const PROJECT_FILE_SCHEMA_VERSION = "4.0.0";
 
@@ -356,6 +360,30 @@ function visibleFileName(stem, ordinal, extension, allocationOrdinal = 0) {
     ("-V" + ordinal).repeat(allocationOrdinal + 1),
     safeExtension,
     "Working Copy filename",
+  );
+}
+
+function aiTaskCandidateFileName(stem, ordinal, extension) {
+  const safeExtension = HTML_EXTENSIONS.has(String(extension || "").toLowerCase())
+    ? String(extension).toLowerCase()
+    : null;
+  if (!safeExtension) {
+    throw new ProjectFileRepositoryError(
+      "UNSUPPORTED_HTML_EXTENSION",
+      "Only .html and .htm files can be used for an AI task Candidate.",
+    );
+  }
+  if (!Number.isSafeInteger(Number(ordinal)) || Number(ordinal) < 2) {
+    throw new ProjectFileRepositoryError(
+      "INVALID_CANDIDATE",
+      "The AI task Candidate Version ordinal is invalid.",
+    );
+  }
+  return filenameWithReservedSuffix(
+    stem,
+    `-V${Number(ordinal)}-待审阅`,
+    safeExtension,
+    "AI task Candidate filename",
   );
 }
 
@@ -1319,21 +1347,78 @@ function assertHistoryActivation(runtime, project, manifest) {
   return activation;
 }
 
-// historyActivation was added after the first published v4 Runtime files.
-// Treat its absence as the no-activation state while preserving every other
-// Runtime validation.  Writes always materialize the explicit null so a
-// successfully persisted current operation converges the file without a
-// schema-version bump or a standalone migration pass.
-function normalizeRuntimeHistoryActivation(runtime) {
-  if (!isObject(runtime) || Object.hasOwn(runtime, "historyActivation")) return runtime;
+function assertLastAiTask(runtime, project, manifest) {
+  const task = runtime.lastAiTask;
+  if (task === undefined || task === null) return null;
+  if (
+    !hasExactKeys(task, [
+      "attemptId",
+      "candidateId",
+      "completedAt",
+      "documentId",
+      "expectedSourceSha256",
+      "inputManifestSha256",
+      "projectId",
+      "requestId",
+      "sourceWorkingCopyId",
+      "status",
+    ])
+    || task.projectId !== project.projectId
+    || task.documentId !== project.documentId
+    || !SAFE_REQUEST_ID.test(String(task.requestId || ""))
+    || !SAFE_REQUEST_ID.test(String(task.attemptId || ""))
+    || !/^candidate_[A-Za-z0-9_-]{8,160}$/u.test(String(task.candidateId || ""))
+    || !WORKING_COPY_ID.test(String(task.sourceWorkingCopyId || ""))
+    || !SHA256.test(String(task.expectedSourceSha256 || ""))
+    || !SHA256.test(String(task.inputManifestSha256 || ""))
+    || !["no-change", "error"].includes(task.status)
+    || !validStateTimestamp(task.completedAt)
+    || !manifest.workingCopies.some(
+      (workingCopy) => workingCopy.workingCopyId === task.sourceWorkingCopyId,
+    )
+  ) {
+    throw new ProjectFileRepositoryError(
+      "INVALID_RUNTIME",
+      "lastAiTask is inconsistent.",
+    );
+  }
+  return task;
+}
+
+function lastAiTaskAnchorFor(record) {
+  return {
+    requestId: record.requestId,
+    attemptId: record.attemptId,
+    candidateId: record.candidateId,
+    projectId: record.projectId,
+    documentId: record.documentId,
+    sourceWorkingCopyId: record.sourceWorkingCopyId,
+    expectedSourceSha256: record.expectedSourceSha256,
+    inputManifestSha256: record.inputManifestSha256,
+    status: record.status,
+    completedAt: record.completedAt,
+  };
+}
+
+// historyActivation and lastAiTask were added after the first published v4
+// Runtime files. Treat either absence as its explicit null state while
+// preserving every other Runtime validation. Writes converge old valid files
+// without a schema-version bump or a standalone migration pass.
+function normalizeRuntimeDisplayAnchors(runtime) {
+  if (!isObject(runtime)) return runtime;
+  if (
+    Object.hasOwn(runtime, "historyActivation")
+    && Object.hasOwn(runtime, "lastAiTask")
+  ) return runtime;
   return {
     ...runtime,
-    historyActivation: null,
+    ...(!Object.hasOwn(runtime, "historyActivation") ? { historyActivation: null } : {}),
+    ...(!Object.hasOwn(runtime, "lastAiTask") ? { lastAiTask: null } : {}),
   };
 }
 
 async function writeRuntimeState(projectRootPath, runtimePath, runtime) {
-  const normalized = normalizeRuntimeHistoryActivation(runtime);
+  const normalized = normalizeRuntimeDisplayAnchors(runtime);
   await atomicWriteProjectJson(
     projectRootPath,
     runtimePath,
@@ -1413,6 +1498,13 @@ function assertRuntime(runtime, project, manifest) {
     ) {
       throw new ProjectFileRepositoryError("INVALID_RUNTIME", "active Request is inconsistent.");
     }
+  }
+  const lastAiTask = assertLastAiTask(runtime, project, manifest);
+  if (runtime.activeRequest !== null && lastAiTask !== null) {
+    throw new ProjectFileRepositoryError(
+      "INVALID_RUNTIME",
+      "An active Request cannot retain a terminal AI task anchor.",
+    );
   }
   assertHistoryActivation(runtime, project, manifest);
   return runtime;
@@ -1899,6 +1991,24 @@ export class ProjectFileRepository {
     }));
   }
 
+  async materializeAiTaskProjection({
+    target,
+    requestId,
+    attemptId = "attempt_001",
+    candidateId = null,
+  } = {}) {
+    return this.#serial(() => this.#materializeAiTaskProjection({
+      target,
+      requestId,
+      attemptId,
+      candidateId,
+    }));
+  }
+
+  async materializeCurrentAiTaskProjection({ target } = {}) {
+    return this.#serial(() => this.#materializeCurrentAiTaskProjection({ target }));
+  }
+
   async readCandidate({ target, candidateId: requestedCandidateId } = {}) {
     return this.#serial(async () => {
       const loaded = await this.#resolveMutationTarget(target);
@@ -2278,24 +2388,6 @@ export class ProjectFileRepository {
         );
       }
     }
-    const workingCopies = [];
-    for (const entry of loaded.manifest.workingCopies) {
-      const workingCopyState = entry.workingCopyId === workingCopy?.workingCopyId
-        ? state
-        : await readJsonFile(
-          workingCopyStatePath(loaded.paths, entry),
-          "Working Copy state",
-          { projectRootPath: loaded.paths.projectRootPath },
-        );
-      assertWorkingCopyState(workingCopyState, loaded, entry);
-      workingCopies.push({
-        workingCopyId: entry.workingCopyId,
-        versionId: entry.versionId,
-        basedOnVersionId: entry.basedOnVersionId,
-        differsFromBase: workingCopyState.differsFromBase === true,
-        saveState: workingCopyState.saveState,
-      });
-    }
     const activeRequest = loaded.runtime.activeRequest
       ? await readJsonFile(
         path.join(
@@ -2341,6 +2433,27 @@ export class ProjectFileRepository {
           { projectRootPath: loaded.paths.projectRootPath },
         );
       }
+    }
+    // The active Working Copy can be reconciled from a clean external edit
+    // immediately above. Build this public list only after that mutation so
+    // the first hydration never returns a stale differsFromBase projection.
+    const workingCopies = [];
+    for (const entry of loaded.manifest.workingCopies) {
+      const workingCopyState = entry.workingCopyId === workingCopy?.workingCopyId
+        ? state
+        : await readJsonFile(
+          workingCopyStatePath(loaded.paths, entry),
+          "Working Copy state",
+          { projectRootPath: loaded.paths.projectRootPath },
+        );
+      assertWorkingCopyState(workingCopyState, loaded, entry);
+      workingCopies.push({
+        workingCopyId: entry.workingCopyId,
+        versionId: entry.versionId,
+        basedOnVersionId: entry.basedOnVersionId,
+        differsFromBase: workingCopyState.differsFromBase === true,
+        saveState: workingCopyState.saveState,
+      });
     }
     return {
       target,
@@ -2445,6 +2558,12 @@ export class ProjectFileRepository {
         );
       }
       await this.#restoreRequestRuntime(loaded, existing);
+      await this.#publishAiTaskProjectionIfPossible({
+        target,
+        requestId: id,
+        attemptId: attempt,
+        candidateId: existing.candidateId,
+      });
       return this.#publicRequest(existing, loaded.paths.projectRootPath);
     }
     const latest = loaded.manifest.versions.find(
@@ -2676,8 +2795,15 @@ export class ProjectFileRepository {
       candidateRecordSha256: null,
     };
     loaded.runtime.activeCandidateId = null;
+    loaded.runtime.lastAiTask = null;
     await this.#writeRuntime(loaded);
     await this.#hit("request-runtime-written", { requestId: id, requestRoot });
+    await this.#publishAiTaskProjectionIfPossible({
+      target,
+      requestId: id,
+      attemptId: attempt,
+      candidateId: idForCandidate,
+    });
     await this.#hit("request-prepared", { requestId: id, requestRoot });
     return this.#publicRequest(record, loaded.paths.projectRootPath);
   }
@@ -2717,6 +2843,246 @@ export class ProjectFileRepository {
       if (value !== undefined) ensureRelativePath(value, label);
     }
     assertSha256(record.inputManifestSha256, "request input manifest hash");
+  }
+
+  async #frozenPromptForAiTaskProjection(loaded, record) {
+    const inputManifestPath = resolveRelative(
+      loaded.paths.controlRoot,
+      record.inputManifestRelativePath,
+      "request input manifest path",
+    );
+    const inputManifestRecord = await readJsonFileWithSha256(
+      inputManifestPath,
+      "request input manifest",
+      { projectRootPath: loaded.paths.projectRootPath },
+    );
+    const inputManifest = inputManifestRecord?.value || null;
+    if (
+      !inputManifestRecord
+      || inputManifestRecord.sha256 !== record.inputManifestSha256
+      || !isObject(inputManifest)
+      || inputManifest.schemaVersion !== PROJECT_FILE_SCHEMA_VERSION
+      || inputManifest.projectId !== loaded.project.projectId
+      || inputManifest.documentId !== loaded.project.documentId
+      || inputManifest.requestId !== record.requestId
+      || inputManifest.attemptId !== record.attemptId
+      || inputManifest.frozen !== true
+      || !Array.isArray(inputManifest.files)
+    ) {
+      throw new ProjectFileRepositoryError(
+        "FROZEN_REQUEST_BUNDLE_MISMATCH",
+        "The frozen Request bundle cannot safely provide an AI task Prompt.",
+      );
+    }
+    const promptEntry = inputManifest.files.find((entry) => (
+      isObject(entry)
+      && entry.path === "PROMPT.md"
+      && entry.role === "prompt"
+      && entry.mediaType === "text/markdown"
+    ));
+    if (
+      !promptEntry
+      || !SHA256.test(String(promptEntry.sha256 || ""))
+      || !Number.isSafeInteger(Number(promptEntry.byteLength))
+      || Number(promptEntry.byteLength) < 0
+    ) {
+      throw new ProjectFileRepositoryError(
+        "FROZEN_REQUEST_BUNDLE_MISMATCH",
+        "The frozen Request bundle has no valid Prompt record.",
+      );
+    }
+    const promptPath = resolveRelative(
+      loaded.paths.controlRoot,
+      record.promptRelativePath,
+      "request prompt path",
+    );
+    const prompt = await readRegularFileWithSha256(
+      promptPath,
+      "Request prompt",
+      { projectRootPath: loaded.paths.projectRootPath },
+    );
+    if (
+      !prompt
+      || prompt.sha256 !== promptEntry.sha256
+      || prompt.buffer.byteLength !== Number(promptEntry.byteLength)
+    ) {
+      throw new ProjectFileRepositoryError(
+        "FROZEN_REQUEST_BUNDLE_MISMATCH",
+        "The frozen Request Prompt no longer matches its manifest.",
+      );
+    }
+    return {
+      path: promptPath,
+      buffer: prompt.buffer,
+      sha256: prompt.sha256,
+    };
+  }
+
+  // AI任务/ is a derived Finder display. Once a Request or Candidate has
+  // crossed its durable authority boundary, a publication failure must not
+  // retract that hidden fact. Explicit Finder requests remain strict through
+  // #materializeAiTaskProjection and can be retried independently.
+  async #publishAiTaskProjectionIfPossible(args) {
+    try {
+      return await this.#materializeAiTaskProjection(args);
+    } catch {
+      return null;
+    }
+  }
+
+  async #materializeCurrentAiTaskProjection({ target }) {
+    const loaded = await this.#resolveMutationTarget(target);
+    const active = loaded.runtime.activeRequest;
+    const terminal = loaded.runtime.lastAiTask;
+    const anchor = active || terminal;
+    if (!anchor) {
+      throw new ProjectFileRepositoryError(
+        "AI_TASK_NOT_ACTIVE",
+        "The current project has no active or terminal AI task to reveal.",
+      );
+    }
+    const requestPath = path.join(
+      requestRootPath(loaded.paths, anchor.requestId),
+      "request.json",
+    );
+    const record = await readJsonFile(requestPath, "request.json", {
+      projectRootPath: loaded.paths.projectRootPath,
+    });
+    this.#assertRequestRecord(record, loaded, {
+      requestId: anchor.requestId,
+      attemptId: anchor.attemptId,
+    });
+    if (active) {
+      if (
+        active.inputManifestSha256 !== record.inputManifestSha256
+        || (
+          active.status === "pending-review"
+          && active.candidateId !== record.candidateId
+        )
+      ) {
+        throw new ProjectFileRepositoryError(
+          "REQUEST_RUNTIME_ANCHOR_MISMATCH",
+          "The active Request no longer matches its runtime authority.",
+        );
+      }
+    } else if (
+      terminal.projectId !== record.projectId
+      || terminal.documentId !== record.documentId
+      || terminal.candidateId !== record.candidateId
+      || terminal.sourceWorkingCopyId !== record.sourceWorkingCopyId
+      || terminal.expectedSourceSha256 !== record.expectedSourceSha256
+      || terminal.inputManifestSha256 !== record.inputManifestSha256
+      || terminal.status !== record.status
+      || terminal.completedAt !== record.completedAt
+    ) {
+      throw new ProjectFileRepositoryError(
+        "REQUEST_RUNTIME_ANCHOR_MISMATCH",
+        "The terminal AI task no longer matches its sealed runtime anchor.",
+      );
+    }
+    return this.#materializeAiTaskProjection({
+      target,
+      requestId: record.requestId,
+      attemptId: record.attemptId,
+      candidateId: record.candidateId,
+    });
+  }
+
+  async #materializeAiTaskProjection({
+    target,
+    requestId,
+    attemptId,
+    candidateId,
+  }) {
+    const loaded = await this.#resolveMutationTarget(target);
+    const request = String(requestId || "");
+    const attempt = String(attemptId || "attempt_001");
+    if (!SAFE_REQUEST_ID.test(request) || !SAFE_REQUEST_ID.test(attempt)) {
+      throw new ProjectFileRepositoryError(
+        "INVALID_REQUEST_ID",
+        "The AI task projection Request identity is invalid.",
+      );
+    }
+    const requestPath = path.join(requestRootPath(loaded.paths, request), "request.json");
+    const record = await readJsonFile(requestPath, "request.json", {
+      projectRootPath: loaded.paths.projectRootPath,
+    });
+    this.#assertRequestRecord(record, loaded, { requestId: request, attemptId: attempt });
+    const expectedCandidateId = assertCandidateId(record.candidateId);
+    if (candidateId !== null && candidateId !== undefined) {
+      const requestedCandidateId = assertCandidateId(candidateId);
+      if (requestedCandidateId !== expectedCandidateId) {
+        throw new ProjectFileRepositoryError(
+          "CANDIDATE_IDENTITY_MISMATCH",
+          "The requested AI task Candidate does not belong to this Request.",
+        );
+      }
+    }
+    const frozenPrompt = await this.#frozenPromptForAiTaskProjection(loaded, record);
+    let candidateState = null;
+    if (["candidate-ready", "promoted", "rejected"].includes(record.status)) {
+      candidateState = await this.#readCandidateForLoaded(loaded, expectedCandidateId);
+      const candidate = candidateState.candidate;
+      if (
+        candidate.candidateId !== expectedCandidateId
+        || candidate.projectId !== loaded.project.projectId
+        || candidate.documentId !== loaded.project.documentId
+        || candidate.requestId !== record.requestId
+        || candidate.attemptId !== record.attemptId
+        || candidate.proposedVersionId !== record.proposedVersionId
+        || Number(candidate.proposedVersionOrdinal) !== Number(record.proposedVersionOrdinal)
+        || candidate.basedOnVersionId !== record.basedOnVersionId
+        || candidate.previousVersionId !== record.previousVersionId
+      ) {
+        throw new ProjectFileRepositoryError(
+          "CANDIDATE_AUTHORITY_MISMATCH",
+          "The Candidate does not match the frozen AI task identity.",
+        );
+      }
+    }
+    const candidateFileName = aiTaskCandidateFileName(
+      loaded.workingCopy.preferredFileStem,
+      record.proposedVersionOrdinal,
+      loaded.workingCopy.preferredExtension,
+    );
+    try {
+      const projection = await materializeAiTaskProjection({
+        projectRootPath: loaded.paths.projectRootPath,
+        recoveryRootPath: path.join(
+          loaded.paths.recoveryRoot,
+          "ai-task-projections",
+        ),
+        projectId: loaded.project.projectId,
+        documentId: loaded.project.documentId,
+        requestId: record.requestId,
+        attemptId: record.attemptId,
+        candidateId: expectedCandidateId,
+        proposedVersionId: record.proposedVersionId,
+        proposedVersionOrdinal: record.proposedVersionOrdinal,
+        createdAt: record.createdAt,
+        promptBuffer: frozenPrompt.buffer,
+        promptSha256: frozenPrompt.sha256,
+        candidateBuffer: candidateState?.output.buffer || null,
+        candidateSha256: candidateState?.output.sha256 || null,
+        candidateFileName,
+        onStage: (name, details) => this.#hit(name, {
+          requestId: record.requestId,
+          attemptId: record.attemptId,
+          candidateId: expectedCandidateId,
+          ...details,
+        }),
+      });
+      return {
+        ...projection,
+        status: record.status,
+        hasCandidate: candidateState !== null,
+      };
+    } catch (cause) {
+      if (cause instanceof AiTaskProjectionError) {
+        throw new ProjectFileRepositoryError(cause.code, cause.message, cause.details);
+      }
+      throw cause;
+    }
   }
 
   #assertCompletionRecord(completion, request) {
@@ -2884,6 +3250,12 @@ export class ProjectFileRepository {
       if (loaded.runtime.activeRequest?.requestId === record.requestId) {
         loaded.runtime.activeRequest = null;
         loaded.runtime.activeCandidateId = null;
+        if (
+          ["no-change", "error"].includes(status)
+          && validStateTimestamp(record.completedAt)
+        ) {
+          loaded.runtime.lastAiTask = lastAiTaskAnchorFor(record);
+        }
         await this.#writeRuntime(loaded);
       }
       return false;
@@ -2910,6 +3282,7 @@ export class ProjectFileRepository {
     ) {
       loaded.runtime.activeRequest = nextActiveRequest;
       loaded.runtime.activeCandidateId = candidateId;
+      loaded.runtime.lastAiTask = null;
       await this.#writeRuntime(loaded);
       return true;
     }
@@ -3481,6 +3854,12 @@ export class ProjectFileRepository {
           "The finalized Candidate output changed after review began.",
         );
       }
+      await this.#publishAiTaskProjectionIfPossible({
+        target,
+        requestId: record.requestId,
+        attemptId: record.attemptId,
+        candidateId: record.candidateId,
+      });
       return {
         status: record.status === "promoted" ? "promoted" : "candidate-ready",
         request: this.#publicRequest(record, loaded.paths.projectRootPath),
@@ -3504,6 +3883,7 @@ export class ProjectFileRepository {
       );
       loaded.runtime.activeRequest = null;
       loaded.runtime.activeCandidateId = null;
+      loaded.runtime.lastAiTask = lastAiTaskAnchorFor(record);
       await this.#writeRuntime(loaded);
       return {
         status: "no-change",
@@ -3563,6 +3943,7 @@ export class ProjectFileRepository {
       );
       loaded.runtime.activeRequest = null;
       loaded.runtime.activeCandidateId = null;
+      loaded.runtime.lastAiTask = lastAiTaskAnchorFor(record);
       await this.#writeRuntime(loaded);
       return {
         status: "error",
@@ -3577,6 +3958,12 @@ export class ProjectFileRepository {
       record,
       "request.json",
     );
+    await this.#publishAiTaskProjectionIfPossible({
+      target,
+      requestId: record.requestId,
+      attemptId: record.attemptId,
+      candidateId: record.candidateId,
+    });
     return {
       status: "candidate-ready",
       request: this.#publicRequest(record, loaded.paths.projectRootPath),
@@ -4002,6 +4389,7 @@ export class ProjectFileRepository {
         activeRequest: null,
         activeCandidateId: null,
         historyActivation: null,
+        lastAiTask: null,
       };
       await atomicWriteProjectJson(stagingRoot, paths.projectPath, project, "project.json");
       await atomicWriteProjectJson(stagingRoot, paths.manifestPath, manifest, "manifest.json");
@@ -4144,7 +4532,7 @@ export class ProjectFileRepository {
       project,
     );
     const runtime = assertRuntime(
-      normalizeRuntimeHistoryActivation(await readJsonFile(paths.runtimePath, "runtime-state.json", {
+      normalizeRuntimeDisplayAnchors(await readJsonFile(paths.runtimePath, "runtime-state.json", {
         projectRootPath: root,
       })),
       project,
@@ -4397,7 +4785,7 @@ export class ProjectFileRepository {
         const loaded = await this.#loadRegisteredProject({ projectId });
         const workingCopy = await this.#activeRegisteredWorkingCopy(loaded);
         const sourcePath = workingCopySourcePath(loaded.paths, workingCopy);
-        const source = await readHtmlFile(sourcePath, "active Working Copy", {
+        await readHtmlFile(sourcePath, "active Working Copy", {
           projectRootPath: loaded.paths.projectRootPath,
         });
         const state = await readJsonFile(
@@ -4417,10 +4805,6 @@ export class ProjectFileRepository {
           latestOfficialVersionId: loaded.manifest.latestOfficialVersionId,
           hasPendingCandidate: loaded.runtime.activeCandidateId !== null,
           availability: "ready",
-          // This hash stays within Repository authority and makes the list
-          // read verify the visible target before Desktop performs its own
-          // exact-target fetch-and-read transaction on open.
-          activeSourceSha256: source.sha256,
         });
       } catch (cause) {
         rows.push(this.#registeredProjectCatalogFallback(
@@ -4433,7 +4817,7 @@ export class ProjectFileRepository {
     return rows.sort((left, right) => (
       left.projectName.localeCompare(right.projectName, "zh-CN")
       || left.projectId.localeCompare(right.projectId)
-    )).map(({ activeSourceSha256, ...row }) => row);
+    ));
   }
 
   async #resolveRegisteredProjectOpenTarget({ projectId }) {
@@ -5218,6 +5602,7 @@ export class ProjectFileRepository {
       candidateRecordSha256,
     };
     loaded.runtime.activeCandidateId = id;
+    loaded.runtime.lastAiTask = null;
     await this.#writeRuntime(loaded);
     await this.#hit("candidate-prepared", { requestId: request, candidateId: id });
     return await this.#readCandidateForLoaded(loaded, id);

@@ -171,7 +171,7 @@ const PROJECT_CHANNELS = Object.freeze({
   activateGeneratedVersion: "html-projects:activate-generated-version",
   activateManagedWorkingCopy: "html-projects:activate-managed-working-copy",
   revealVersionFile: "html-projects:reveal-version-file",
-  revealRequestFolder: "html-projects:reveal-request-folder",
+  revealAiTask: "html-projects:reveal-ai-task",
   listRecentProjects: "html-projects:list-recent",
   listRegisteredProjects: "html-projects:list-registered",
   openRegisteredProject: "html-projects:open-registered",
@@ -1706,55 +1706,93 @@ async function revealVersionFile(payload) {
   };
 }
 
-async function revealRequestFolder(payload) {
+async function revealAiTask(payload) {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-    throw new TypeError("本轮目录参数无效。");
+    throw new TypeError("AI 任务参数无效。");
   }
-  const allowedKeys = new Set(["sourcePath", "requestPath"]);
+  const allowedKeys = new Set(["sourcePath"]);
   if (Object.keys(payload).some((key) => !allowedKeys.has(key))) {
-    throw new TypeError("本轮目录参数包含未支持的字段。");
+    throw new TypeError("AI 任务参数包含未支持的字段。");
   }
   const sourcePath = assertReadPayload(payload.sourcePath);
   await assertKnownProjectPath(sourcePath);
   await inspectHtmlFile(sourcePath);
-  if (
-    typeof payload.requestPath !== "string"
-    || !payload.requestPath
-    || payload.requestPath.length > MAX_PATH_LENGTH
-    || payload.requestPath.includes("\0")
-  ) {
-    throw new TypeError("本轮目录路径无效。");
+  if (!bridgePort) {
+    throw new ProjectFileError(
+      "BRIDGE_NOT_READY",
+      "项目记录服务尚未就绪，请稍后重试。",
+    );
   }
 
-  const [workspaceRoot, resolvedRequestPath] = await Promise.all([
-    workspacePath().then((value) => realpath(value)),
-    realpath(path.resolve(payload.requestPath)),
-  ]);
-  const relativeRequestPath = path.relative(workspaceRoot, resolvedRequestPath);
+  const endpoint = new URL(`http://127.0.0.1:${bridgePort}/ai-task`);
+  endpoint.searchParams.set("sourcePath", sourcePath);
+  const response = await net.fetch(endpoint, {
+    cache: "no-store",
+    headers: {
+      "X-HTML-AI-Bridge-Token": bridgeAuthToken,
+    },
+  });
+  const taskRecord = await response.json().catch(() => null);
   if (
-    !relativeRequestPath
-    || relativeRequestPath.startsWith(`..${path.sep}`)
-    || relativeRequestPath === ".."
-    || path.isAbsolute(relativeRequestPath)
-    || !/^req_[a-z\d_-]+$/i.test(path.basename(resolvedRequestPath))
+    !response.ok
+    || !taskRecord
+    || taskRecord.ok !== true
+    || taskRecord.projectFileSchemaVersion !== "4.0.0"
+    || typeof taskRecord.projectId !== "string"
+    || typeof taskRecord.documentId !== "string"
+    || typeof taskRecord.sourcePath !== "string"
+    || typeof taskRecord.projectRootPath !== "string"
+    || typeof taskRecord.aiTaskPath !== "string"
+    || typeof taskRecord.aiTaskRelativePath !== "string"
   ) {
     throw new ProjectFileError(
-      "UNSAFE_REQUEST_PATH",
-      "只能打开当前项目记录中的本轮目录。",
-      { requestPath: resolvedRequestPath },
+      "AI_TASK_UNAVAILABLE",
+      "这个 AI 任务暂时无法在 Finder 中显示，请稍后重试。",
     );
   }
-  const requestStats = await stat(resolvedRequestPath);
-  if (!requestStats.isDirectory()) {
+  const [resolvedSourcePath, returnedSourcePath, resolvedProjectRoot, resolvedTaskPath] = await Promise.all([
+    realpath(path.resolve(sourcePath)),
+    realpath(path.resolve(taskRecord.sourcePath)),
+    realpath(path.resolve(taskRecord.projectRootPath)),
+    realpath(path.resolve(taskRecord.aiTaskPath)),
+  ]);
+  const rootStats = await lstat(resolvedProjectRoot);
+  const relativeTaskPath = path.relative(resolvedProjectRoot, resolvedTaskPath);
+  const expectedRelativePath = taskRecord.aiTaskRelativePath.replaceAll("/", path.sep);
+  if (
+    returnedSourcePath !== resolvedSourcePath
+    || !rootStats.isDirectory()
+    || rootStats.isSymbolicLink()
+    || !relativeTaskPath
+    || relativeTaskPath.startsWith(`..${path.sep}`)
+    || relativeTaskPath === ".."
+    || path.isAbsolute(relativeTaskPath)
+    || relativeTaskPath !== expectedRelativePath
+    || !taskRecord.aiTaskRelativePath.startsWith("AI任务/")
+    || taskRecord.aiTaskRelativePath.split("/").length !== 2
+    || taskRecord.aiTaskRelativePath.includes("/.pageroot/")
+  ) {
     throw new ProjectFileError(
-      "REQUEST_PATH_NOT_DIRECTORY",
-      "本轮目录不存在。",
-      { requestPath: resolvedRequestPath },
+      "UNSAFE_AI_TASK_PATH",
+      "只能打开当前项目已经验证的 AI任务 文件夹。",
+      { aiTaskPath: resolvedTaskPath },
     );
   }
-  const openError = await shell.openPath(resolvedRequestPath);
+  const taskStats = await lstat(resolvedTaskPath);
+  if (!taskStats.isDirectory() || taskStats.isSymbolicLink()) {
+    throw new ProjectFileError(
+      "AI_TASK_NOT_DIRECTORY",
+      "这个 AI任务 不是可打开的普通文件夹。",
+    );
+  }
+  const openError = await shell.openPath(resolvedTaskPath);
   if (openError) throw new Error(openError);
-  return { requestPath: resolvedRequestPath };
+  return {
+    sourcePath,
+    aiTaskPath: resolvedTaskPath,
+    requestId: taskRecord.requestId,
+    candidateId: taskRecord.candidateId,
+  };
 }
 
 async function exportHtmlCopy(payload) {
@@ -2209,7 +2247,7 @@ function registerProjectIpc() {
     trustedProject(activateManagedWorkingCopy),
   );
   ipcMain.handle(PROJECT_CHANNELS.revealVersionFile, trustedProject(revealVersionFile));
-  ipcMain.handle(PROJECT_CHANNELS.revealRequestFolder, trustedProject(revealRequestFolder));
+  ipcMain.handle(PROJECT_CHANNELS.revealAiTask, trustedProject(revealAiTask));
   ipcMain.handle(PROJECT_CHANNELS.listRecentProjects, trustedProject(listRecentProjects));
   ipcMain.handle(
     PROJECT_CHANNELS.listRegisteredProjects,

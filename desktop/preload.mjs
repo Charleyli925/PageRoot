@@ -15,7 +15,7 @@ const channels = Object.freeze({
   activateGeneratedVersion: "html-projects:activate-generated-version",
   activateManagedWorkingCopy: "html-projects:activate-managed-working-copy",
   revealVersionFile: "html-projects:reveal-version-file",
-  revealRequestFolder: "html-projects:reveal-request-folder",
+  revealAiTask: "html-projects:reveal-ai-task",
   listRecentProjects: "html-projects:list-recent",
   listRegisteredProjects: "html-projects:list-registered",
   openRegisteredProject: "html-projects:open-registered",
@@ -129,7 +129,7 @@ const projectsApi = Object.freeze({
     payload,
   ),
   revealVersionFile: (payload) => invokeProject(channels.revealVersionFile, payload),
-  revealRequestFolder: (payload) => invokeProject(channels.revealRequestFolder, payload),
+  revealAiTask: (payload) => invokeProject(channels.revealAiTask, payload),
   listRecentProjects: () => invokeProject(channels.listRecentProjects),
   listRegisteredProjects: () => invokeProject(channels.listRegisteredProjects),
   openRegisteredProject: (projectId) => invokeProject(

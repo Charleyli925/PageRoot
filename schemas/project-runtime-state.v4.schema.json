@@ -79,6 +79,34 @@
       ]
     },
     "activeCandidateId": { "type": ["string", "null"], "pattern": "^candidate_[A-Za-z0-9_-]{8,160}$" },
+    "lastAiTask": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": [
+        "requestId",
+        "attemptId",
+        "candidateId",
+        "projectId",
+        "documentId",
+        "sourceWorkingCopyId",
+        "expectedSourceSha256",
+        "inputManifestSha256",
+        "status",
+        "completedAt"
+      ],
+      "properties": {
+        "requestId": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,160}$" },
+        "attemptId": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,160}$" },
+        "candidateId": { "type": "string", "pattern": "^candidate_[A-Za-z0-9_-]{8,160}$" },
+        "projectId": { "type": "string", "pattern": "^project_[a-f0-9]{16,64}$" },
+        "documentId": { "type": "string", "pattern": "^doc_[a-f0-9]{16,64}$" },
+        "sourceWorkingCopyId": { "type": "string", "pattern": "^work_ver_\\d{4,}$" },
+        "expectedSourceSha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+        "inputManifestSha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+        "status": { "enum": ["no-change", "error"] },
+        "completedAt": { "type": "string", "format": "date-time" }
+      }
+    },
     "historyActivation": {
       "type": ["object", "null"],
       "additionalProperties": false,
@@ -125,7 +153,8 @@
       },
       "then": {
         "properties": {
-          "activeWorkingCopyId": { "type": "string" }
+          "activeWorkingCopyId": { "type": "string" },
+          "lastAiTask": { "const": null }
         }
       }
     }

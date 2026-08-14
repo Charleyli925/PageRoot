@@ -519,6 +519,85 @@ test("project-file Request becomes a Candidate on finalization and a Version onl
   assert.deepEqual(afterAdoption.versions.map((version) => version.versionId), ["ver_0001", "ver_0002"]);
 });
 
+test("Bridge reveals a sealed terminal AI task after no-change", async (t) => {
+  const environment = await createBridgeTestEnvironment(t, {
+    prefix: "pageroot-project-file-no-change-ai-task-",
+  });
+  const original = html("no-change source");
+  const sourcePath = await environment.createSource("no-change.html", original);
+  const bridge = await environment.start({
+    HTML_AI_PROJECT_FILES_ROOT: join(environment.root, "project-files"),
+  });
+  const preview = await bridge.requestJson(
+    `/workspace?sourcePath=${encodeURIComponent(sourcePath)}`,
+  );
+  const ensured = await postJson(bridge, "/project/ensure", {
+    sourcePath,
+    expectedSourceSha256: preview.body.currentHtmlSha256,
+    projectStorageVersion: "4.0.0",
+  });
+  const request = await postJson(bridge, "/request", {
+    projectId: ensured.body.projectId,
+    documentId: ensured.body.documentId,
+    sourcePath: ensured.body.sourcePath,
+    expectedSourceSha256: ensured.body.sourceSha256,
+    freezeCutoffRevision: 0,
+    summary: "不修改当前 HTML",
+    comments: [],
+    changeEvents: [],
+  });
+  assert.equal(request.response.status, 201, JSON.stringify(request.body));
+  await writeFile(
+    join(
+      ensured.body.projectRoot,
+      ".pageroot",
+      ...request.body.outputRelativePath.split("/"),
+    ),
+    original,
+    "utf8",
+  );
+  await finalizeProjectFileAttempt({
+    projectRoot: ensured.body.projectRoot,
+    requestId: request.body.requestId,
+    attemptId: request.body.attemptId,
+  });
+
+  const status = await bridge.requestJson(
+    `/status?sourcePath=${encodeURIComponent(ensured.body.sourcePath)}&requestId=${encodeURIComponent(request.body.requestId)}&attemptId=${encodeURIComponent(request.body.attemptId)}`,
+  );
+  assert.equal(status.response.status, 200, JSON.stringify(status.body));
+  assert.equal(status.body.status, "no-change");
+  const terminalAiTask = await bridge.requestJson(
+    `/ai-task?sourcePath=${encodeURIComponent(ensured.body.sourcePath)}`,
+  );
+  assert.equal(terminalAiTask.response.status, 200, JSON.stringify(terminalAiTask.body));
+  assert.equal(terminalAiTask.body.status, "no-change");
+  assert.equal(terminalAiTask.body.requestId, request.body.requestId);
+  assert.equal(terminalAiTask.body.candidatePath, null);
+  assert.equal(
+    await readFile(join(terminalAiTask.body.aiTaskPath, "PROMPT.md"), "utf8"),
+    await readFile(
+      join(ensured.body.projectRoot, ".pageroot", "requests", request.body.requestId, "PROMPT.md"),
+      "utf8",
+    ),
+  );
+  const requestPath = join(
+    ensured.body.projectRoot,
+    ".pageroot",
+    "requests",
+    request.body.requestId,
+    "request.json",
+  );
+  const tamperedRequest = JSON.parse(await readFile(requestPath, "utf8"));
+  tamperedRequest.completedAt = "2000-01-01T00:00:00.000Z";
+  await writeFile(requestPath, JSON.stringify(tamperedRequest), "utf8");
+  const tamperRejected = await bridge.requestJson(
+    `/ai-task?sourcePath=${encodeURIComponent(ensured.body.sourcePath)}`,
+  );
+  assert.equal(tamperRejected.response.status, 409, JSON.stringify(tamperRejected.body));
+  assert.equal(tamperRejected.body.error.code, "REQUEST_RUNTIME_ANCHOR_MISMATCH");
+});
+
 test("a finalized but unusable Candidate remains an error and never creates a Version", async (t) => {
   const environment = await createBridgeTestEnvironment(t, {
     prefix: "pageroot-project-file-validation-",
@@ -568,6 +647,14 @@ test("a finalized but unusable Candidate remains an error and never creates a Ve
   assert.equal(status.response.status, 200, JSON.stringify(status.body));
   assert.equal(status.body.status, "error");
   assert.equal(status.body.request.error.code, "CANDIDATE_UNUSABLE");
+  const terminalAiTask = await bridge.requestJson(
+    `/ai-task?sourcePath=${encodeURIComponent(ensured.body.sourcePath)}`,
+  );
+  assert.equal(terminalAiTask.response.status, 200, JSON.stringify(terminalAiTask.body));
+  assert.equal(terminalAiTask.body.status, "error");
+  assert.equal(terminalAiTask.body.requestId, request.body.requestId);
+  assert.equal(terminalAiTask.body.candidatePath, null);
+  assert.equal(terminalAiTask.body.aiTaskPath.includes("/.pageroot/"), false);
   const manifest = JSON.parse(await readFile(
     join(ensured.body.projectRoot, ".pageroot", "manifest.json"),
     "utf8",

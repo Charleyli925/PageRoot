@@ -990,6 +990,7 @@ function projectFileHttpError(cause) {
       "HISTORY_ACTIVATION_RECEIPT_MISMATCH",
       "REQUEST_RUNTIME_ANCHOR_MISMATCH",
       "CANCELLATION_AUTHORITY_MISMATCH",
+      "AI_TASK_NOT_ACTIVE",
     ]).has(code)
       ? 409
       : new Set([
@@ -1762,6 +1763,34 @@ async function projectFileVersionFile(sourcePath, versionId) {
         workingCopySha256: visibleWorkingCopy.sourceSha256,
       } : {}),
       ...(file.kind === "candidate" ? { candidate: file.candidate } : {}),
+    };
+  } catch (cause) {
+    throw projectFileHttpError(cause);
+  }
+}
+
+async function projectFileAiTask(sourcePath) {
+  const workspace = await projectFileWorkspaceForSource(sourcePath);
+  if (!workspace) return null;
+  try {
+    const projection = await projectFileRepository.materializeCurrentAiTaskProjection({
+      target: projectFileTargetFromWorkspace(workspace),
+    });
+    return {
+      ok: true,
+      projectFileSchemaVersion: "4.0.0",
+      projectId: projection.projectId,
+      documentId: projection.documentId,
+      sourcePath: workspace.target.exactSourcePath,
+      projectRootPath: projection.projectRootPath,
+      requestId: projection.requestId,
+      attemptId: projection.attemptId,
+      candidateId: projection.candidateId,
+      status: projection.status,
+      aiTaskPath: projection.taskPath,
+      aiTaskRelativePath: projection.taskRelativePath,
+      candidatePath: projection.candidatePath,
+      candidateSha256: projection.candidateSha256,
     };
   } catch (cause) {
     throw projectFileHttpError(cause);
@@ -9814,6 +9843,16 @@ async function route(request, response) {
       await versionFile(
         requiredSourcePath(url.searchParams.get("sourcePath")),
         url.searchParams.get("versionId"),
+      ),
+    );
+    return;
+  }
+  if (request.method === "GET" && url.pathname === "/ai-task") {
+    sendJson(
+      response,
+      200,
+      await projectFileAiTask(
+        requiredSourcePath(url.searchParams.get("sourcePath")),
       ),
     );
     return;
