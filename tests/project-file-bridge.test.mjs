@@ -289,6 +289,7 @@ test("Bridge continues a historical Version through one durable Working Copy rec
 
   const repository = new ProjectFileRepository({ projectsRoot });
   let active = (await repository.workspace({ sourcePath: ensured.body.sourcePath })).target;
+  let v2WorkingCopyPath = null;
   const v2Html = html("immutable V2");
   for (let ordinal = 2; ordinal <= 6; ordinal += 1) {
     const candidate = await repository.createCandidate({
@@ -302,8 +303,15 @@ test("Bridge continues a historical Version through one durable Working Copy rec
       target: active,
       candidateId: candidate.candidate.candidateId,
     })).target;
+    if (ordinal === 2) v2WorkingCopyPath = active.exactSourcePath;
   }
   assert.equal(active.versionId, "ver_0006");
+
+  const finderRenamedV2 = join(
+    ensured.body.projectRoot,
+    "history-bridge-V2 Finder renamed.html",
+  );
+  await rename(v2WorkingCopyPath, finderRenamedV2);
 
   const viewed = await bridge.requestJson(
     `/version-file?sourcePath=${encodeURIComponent(active.exactSourcePath)}&versionId=ver_0002`,
@@ -313,9 +321,19 @@ test("Bridge continues a historical Version through one durable Working Copy rec
   assert.equal(viewed.body.content, v2Html);
   assert.equal(viewed.body.projectFileSchemaVersion, "4.0.0");
   assert.equal(viewed.body.workingCopyId, "work_ver_0002");
-  assert.match(viewed.body.visibleWorkingCopyPath, /history-bridge-V2\.html$/u);
+  assert.equal(viewed.body.visibleWorkingCopyPath, finderRenamedV2);
   assert.equal(viewed.body.visibleWorkingCopyPath.includes("/.pageroot/"), false);
   assert.match(viewed.body.workingCopySha256, /^sha256:[a-f0-9]{64}$/u);
+  const reboundManifest = JSON.parse(await readFile(
+    join(ensured.body.projectRoot, ".pageroot", "manifest.json"),
+    "utf8",
+  ));
+  assert.equal(
+    reboundManifest.workingCopies.find(
+      (entry) => entry.workingCopyId === "work_ver_0002",
+    )?.sourceRelativePath,
+    "history-bridge-V2 Finder renamed.html",
+  );
   const beforeContinue = await bridge.requestJson(
     `/workspace?sourcePath=${encodeURIComponent(active.exactSourcePath)}`,
   );
@@ -563,7 +581,7 @@ test("Bridge reveals a sealed terminal AI task after no-change", async (t) => {
   });
   const original = html("no-change source");
   const sourcePath = await environment.createSource("no-change.html", original);
-  const bridge = await environment.start({
+  let bridge = await environment.start({
     HTML_AI_PROJECT_FILES_ROOT: join(environment.root, "project-files"),
   });
   const preview = await bridge.requestJson(
@@ -605,6 +623,20 @@ test("Bridge reveals a sealed terminal AI task after no-change", async (t) => {
   );
   assert.equal(status.response.status, 200, JSON.stringify(status.body));
   assert.equal(status.body.status, "no-change");
+  await bridge.stop();
+  bridge = await environment.start({
+    HTML_AI_PROJECT_FILES_ROOT: join(environment.root, "project-files"),
+  });
+  const reopened = await bridge.requestJson(
+    `/workspace?sourcePath=${encodeURIComponent(ensured.body.sourcePath)}`,
+  );
+  assert.equal(reopened.response.status, 200, JSON.stringify(reopened.body));
+  assert.equal(reopened.body.activeRun, null);
+  assert.equal(reopened.body.runtimeState.activeRun, null);
+  assert.equal(reopened.body.recentRunOutcome?.status, "no-change");
+  assert.equal(reopened.body.recentRunOutcome?.requestId, request.body.requestId);
+  assert.equal(reopened.body.recentRunOutcome?.attemptId, request.body.attemptId);
+  assert.equal(reopened.body.recentRunOutcome?.completionObserved, true);
   const terminalAiTask = await bridge.requestJson(
     `/ai-task?sourcePath=${encodeURIComponent(ensured.body.sourcePath)}`,
   );

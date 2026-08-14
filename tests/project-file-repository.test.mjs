@@ -396,6 +396,46 @@ test("AI task projections are re-creatable, collision-safe and never Candidate a
   assert.equal(await readFile(rebuilt.candidatePath, "utf8"), candidateHtml);
 });
 
+test("AI task projection never adopts a directory that wins its allocation race", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "ai-task-directory-race.html");
+  let racedDirectoryPath = "";
+  let injected = false;
+  const racing = new ProjectFileRepository({
+    projectsRoot: value.projects,
+    failpoint: async (name, details) => {
+      if (name !== "ai-task-projection-before-directory-claim" || injected) return false;
+      injected = true;
+      racedDirectoryPath = details.taskDirectoryPath;
+      await mkdir(racedDirectoryPath, { recursive: true });
+      return false;
+    },
+  });
+  const requestId = "req_ai_task_directory_race_0001";
+  const request = await prepareAiTaskRequest(racing, imported.target, requestId);
+  assert.equal(injected, true);
+  assert.notEqual(racedDirectoryPath, "");
+  assert.deepEqual(await readdir(racedDirectoryPath), []);
+
+  const candidateHtml = html("Candidate after an allocation race");
+  const completed = await racing.completeRequest({
+    target: imported.target,
+    requestId,
+    attemptId: "attempt_001",
+    html: candidateHtml,
+  });
+  assert.equal(completed.status, "candidate-ready");
+  const projection = await racing.materializeAiTaskProjection({
+    target: imported.target,
+    requestId,
+    attemptId: "attempt_001",
+    candidateId: request.candidateId,
+  });
+  assert.notEqual(projection.taskPath, racedDirectoryPath);
+  assert.equal(await readFile(projection.candidatePath, "utf8"), candidateHtml);
+  assert.deepEqual(await readdir(racedDirectoryPath), []);
+});
+
 test("AI task projection rebinds its display filename after a controlled Working Copy rename", async (t) => {
   const value = await fixture(t);
   const imported = await importSource(value, "before-ai-task-rename.html");

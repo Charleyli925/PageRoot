@@ -30,6 +30,9 @@ HTML and Hash before the existing managed-source publication boundary.
 Catalog availability uses that same controlled Working Copy resolution before
 reading its visible path, so a supported same-root Finder rename rebinds by
 stable file identity instead of leaving an otherwise openable project disabled.
+The same resolution precedes a historical Version's Finder reveal, so a
+non-active Working Copy can rebind only through its stable ID and one unique
+same-root file-identity match.
 
 `AI任务/` is a rebuildable display projection. Its only sources are the already
 durable hidden Request/Attempt/Candidate facts and their frozen hashes. Before
@@ -55,6 +58,9 @@ If a same-root Finder rename occurs after `PROMPT.md` is visible, the next
 materialization updates the display receipt and either completes the existing
 safe directory or allocates a collision-free one; it never rejects the hidden
 Candidate because of a display-only filename change.
+The display leaf itself is claimed with an exclusive directory create: an
+`EEXIST` race is user/concurrent occupancy, not PageRoot ownership, and gets a
+fresh suffix without publishing into the raced directory.
 
 The Finder UI calls `revealAiTask` with the current source locator only. Bridge
 re-resolves the managed project and returns only a validated, root-contained,
@@ -64,7 +70,10 @@ validated project root; Version Finder opens the validated visible Working Copy,
 not an immutable snapshot. A no-change or unusable-Candidate terminal result
 retains a sealed `lastAiTask` display anchor in runtime so the existing terminal
 panel can still reveal its Prompt; that anchor is not an active run, Candidate
-or Promotion authority.
+or Promotion authority. On hydration, Repository verifies that anchor against
+its exact Request record before Bridge republishes it only as the recent
+terminal outcome, so a restart retains the Finder return path without scanning
+or resurrecting an active Request.
 
 ## Consequences
 

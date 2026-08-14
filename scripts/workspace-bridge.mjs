@@ -1139,10 +1139,20 @@ function projectFileDraftState(workspace) {
 }
 
 function projectFileActiveRun(workspace, target) {
-  const request = workspace.activeRequest;
+  return projectFileRunForRequest({
+    request: workspace.activeRequest,
+    candidate: workspace.activeCandidate,
+    target,
+  });
+}
+
+function projectFileRunForRequest({ request, candidate = null, target }) {
   if (!request || typeof request !== "object") return null;
-  const candidate = workspace.activeCandidate;
   const candidateReady = request.status === "candidate-ready" && candidate;
+  const terminalStatus = ["no-change", "error"].includes(request.status)
+    ? request.status
+    : null;
+  const status = candidateReady ? "ready-to-open" : terminalStatus || "processing";
   const sourcePath = target.exactSourcePath;
   const requestPath = path.join(
     target.projectRootPath,
@@ -1200,7 +1210,7 @@ function projectFileActiveRun(workspace, target) {
     documentId: request.documentId,
     requestId: request.requestId,
     attemptId: request.attemptId,
-    status: candidateReady ? "ready-to-open" : "processing",
+    status,
     sourcePath,
     requestPath,
     attemptPath,
@@ -1231,8 +1241,18 @@ function projectFileActiveRun(workspace, target) {
       candidateOutputSha256: candidate.outputSha256,
       candidateAssessment: candidate.assessment,
       readyPayload,
+    } : terminalStatus ? {
+      completionObserved: true,
+      ...(request.error ? { error: request.error } : {}),
     } : {}),
   };
+}
+
+function projectFileTerminalRunOutcome(workspace, target) {
+  return projectFileRunForRequest({
+    request: workspace.terminalRequest,
+    target,
+  });
 }
 
 function projectFileBaseWorkspaceState(workspace) {
@@ -1247,6 +1267,7 @@ function projectFileBaseWorkspaceState(workspace) {
   ) ? currentVersion.versionId : null;
   const activeDraft = projectFileDraftState(workspace);
   const activeRun = projectFileActiveRun(workspace, target);
+  const recentRunOutcome = projectFileTerminalRunOutcome(workspace, target);
   const runtime = {
     lifecycleState: activeRun?.status || "ready",
     activeRun,
@@ -1290,7 +1311,7 @@ function projectFileBaseWorkspaceState(workspace) {
     },
     runtimeState: runtime,
     activeRun,
-    recentRunOutcome: null,
+    recentRunOutcome,
     activeDraft,
     workingCopyRecovered: workspace.workingCopyRecovered === true,
     recoveryIdentity: null,

@@ -3690,7 +3690,7 @@ test("opening a pre-v4 project imports its HTML as a new v4 V1", async () => {
 test("a no-change result returns to editing and remains reopenable", async () => {
   test.setTimeout(120_000);
   const fixture = createSourceFixture("no-change-recovery.html");
-  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  let launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
   try {
     const request = await addCommentAndSubmit(
       launched.page,
@@ -3714,9 +3714,13 @@ test("a no-change result returns to editing and remains reopenable", async () =>
       .toHaveCount(0);
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
 
-    await launched.page.getByRole("button", { name: "返回编辑" }).click();
+    await closePageRootGracefully(launched.electronApp, launched.page);
+    launched = await launchPageRoot({
+      activeSourcePath: request.sourcePath,
+      isolatedUserData: launched.isolatedUserData,
+    });
     await expect(launched.page.getByRole("button", { name: "上轮处理" }))
-      .toBeVisible();
+      .toBeVisible({ timeout: 30_000 });
     await expect(launched.page.getByRole("button", { name: /复制AI任务Prompt/u }))
       .toBeEnabled();
     await launched.page.getByRole("button", { name: "上轮处理" }).click();
@@ -3724,6 +3728,12 @@ test("a no-change result returns to editing and remains reopenable", async () =>
       "这次没有产生有效变化",
       { exact: true },
     ).filter({ visible: true }).first()).toBeVisible();
+    const aiTask = await launched.page.evaluate((sourcePath) => (
+      window.htmlAIProjects?.revealAiTask({ sourcePath })
+    ), request.sourcePath);
+    expect(aiTask?.aiTaskPath).toMatch(/\/AI任务\//u);
+    expect(readFileSync(path.join(aiTask.aiTaskPath, "PROMPT.md"), "utf8"))
+      .toContain("只把这个列表项改为");
   } finally {
     await stopPageRoot(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);

@@ -261,6 +261,33 @@ async function ensureDirectoryInsideProject(projectRootPath, directoryPath, labe
   return target;
 }
 
+async function createDirectoryNoReplace(projectRootPath, directoryPath, label) {
+  const root = normalizedPath(projectRootPath);
+  const target = normalizedPath(directoryPath);
+  await ensureDirectoryInsideProject(root, path.dirname(target), `${label} parent`);
+  try {
+    await mkdir(target, { mode: 0o755 });
+  } catch (cause) {
+    if (cause?.code !== "EEXIST") throw cause;
+    // A missing preflight result is not ownership. If another writer creates
+    // this display leaf before our exclusive mkdir, leave it untouched and
+    // let the caller allocate a distinct AI task directory.
+    throw new AiTaskProjectionError(
+      "AI_TASK_PROJECTION_DIRECTORY_COLLISION",
+      `${label} appeared while being allocated.`,
+      { directoryPath: target },
+    );
+  }
+  const verified = await inspectInsideProject(root, target, label);
+  if (!verified.exists || !verified.information.isDirectory()) {
+    throw new AiTaskProjectionError(
+      "AI_TASK_PROJECTION_UNSAFE_DIRECTORY",
+      `${label} must be a real directory.`,
+    );
+  }
+  return target;
+}
+
 async function regularFileInsideProject(projectRootPath, filePath, label) {
   const inspected = await inspectInsideProject(projectRootPath, filePath, label);
   if (!inspected.exists) return null;
@@ -673,13 +700,31 @@ export async function materializeAiTaskProjection({
     }
 
     try {
-      await ensureDirectoryInsideProject(root, taskDirectoryPath, "AI task projection directory");
+      if (state.kind === "missing") {
+        await hit(onStage, "ai-task-projection-before-directory-claim", {
+          receiptPath,
+          taskRelativePath,
+          taskDirectoryPath,
+        });
+        await createDirectoryNoReplace(
+          root,
+          taskDirectoryPath,
+          "AI task projection directory",
+        );
+      } else {
+        await ensureDirectoryInsideProject(
+          root,
+          taskDirectoryPath,
+          "AI task projection directory",
+        );
+      }
     } catch (cause) {
       if (
         !(cause instanceof AiTaskProjectionError)
         || ![
           "AI_TASK_PROJECTION_PATH_ESCAPE",
           "AI_TASK_PROJECTION_UNSAFE_DIRECTORY",
+          "AI_TASK_PROJECTION_DIRECTORY_COLLISION",
         ].includes(cause.code)
       ) throw cause;
       taskRelativePath = await allocateFreshTaskRelativePath(root, baseName);

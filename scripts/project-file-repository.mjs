@@ -2413,6 +2413,13 @@ export class ProjectFileRepository {
         activeRequest.candidateId,
       )
       : null;
+    // A terminal no-change/error Request is not active runtime authority, but
+    // its sealed runtime anchor is enough to reconstruct the immutable
+    // display outcome after a relaunch. Do not scan Request directories: the
+    // anchor and its verified Request record remain the only admission path.
+    const terminalAiTask = !activeRequest && loaded.runtime.lastAiTask
+      ? await this.#terminalAiTaskForLoaded(loaded)
+      : null;
     const source = await readHtmlFile(target.exactSourcePath, "managed HTML", {
       projectRootPath: loaded.paths.projectRootPath,
     });
@@ -2467,6 +2474,9 @@ export class ProjectFileRepository {
       activeRequest: activeRequest ? structuredClone(activeRequest) : null,
       activeCandidate: activeCandidate
         ? structuredClone(activeCandidate.candidate)
+        : null,
+      terminalRequest: terminalAiTask
+        ? this.#publicRequest(terminalAiTask.record, loaded.paths.projectRootPath)
         : null,
       workingCopyRecovered,
       content: source.html,
@@ -2930,42 +2940,30 @@ export class ProjectFileRepository {
     }
   }
 
-  async #materializeCurrentAiTaskProjection({ target }) {
-    const loaded = await this.#resolveMutationTarget(target);
-    const active = loaded.runtime.activeRequest;
+  async #terminalAiTaskForLoaded(loaded) {
     const terminal = loaded.runtime.lastAiTask;
-    const anchor = active || terminal;
-    if (!anchor) {
+    if (!terminal) return null;
+    const workingCopy = loaded.manifest.workingCopies.find(
+      (entry) => entry.workingCopyId === terminal.sourceWorkingCopyId,
+    );
+    if (!workingCopy) {
       throw new ProjectFileRepositoryError(
-        "AI_TASK_NOT_ACTIVE",
-        "The current project has no active or terminal AI task to reveal.",
+        "REQUEST_RUNTIME_ANCHOR_MISMATCH",
+        "The terminal AI task no longer names a managed Working Copy.",
       );
     }
     const requestPath = path.join(
-      requestRootPath(loaded.paths, anchor.requestId),
+      requestRootPath(loaded.paths, terminal.requestId),
       "request.json",
     );
     const record = await readJsonFile(requestPath, "request.json", {
       projectRootPath: loaded.paths.projectRootPath,
     });
-    this.#assertRequestRecord(record, loaded, {
-      requestId: anchor.requestId,
-      attemptId: anchor.attemptId,
+    this.#assertRequestRecord(record, { ...loaded, workingCopy }, {
+      requestId: terminal.requestId,
+      attemptId: terminal.attemptId,
     });
-    if (active) {
-      if (
-        active.inputManifestSha256 !== record.inputManifestSha256
-        || (
-          active.status === "pending-review"
-          && active.candidateId !== record.candidateId
-        )
-      ) {
-        throw new ProjectFileRepositoryError(
-          "REQUEST_RUNTIME_ANCHOR_MISMATCH",
-          "The active Request no longer matches its runtime authority.",
-        );
-      }
-    } else if (
+    if (
       terminal.projectId !== record.projectId
       || terminal.documentId !== record.documentId
       || terminal.candidateId !== record.candidateId
@@ -2980,8 +2978,56 @@ export class ProjectFileRepository {
         "The terminal AI task no longer matches its sealed runtime anchor.",
       );
     }
+    return { record, workingCopy };
+  }
+
+  async #materializeCurrentAiTaskProjection({ target }) {
+    const loaded = await this.#resolveMutationTarget(target);
+    const active = loaded.runtime.activeRequest;
+    if (!active && !loaded.runtime.lastAiTask) {
+      throw new ProjectFileRepositoryError(
+        "AI_TASK_NOT_ACTIVE",
+        "The current project has no active or terminal AI task to reveal.",
+      );
+    }
+    let record;
+    let materializationTarget = target;
+    if (active) {
+      const requestPath = path.join(
+        requestRootPath(loaded.paths, active.requestId),
+        "request.json",
+      );
+      record = await readJsonFile(requestPath, "request.json", {
+        projectRootPath: loaded.paths.projectRootPath,
+      });
+      this.#assertRequestRecord(record, loaded, {
+        requestId: active.requestId,
+        attemptId: active.attemptId,
+      });
+      if (
+        active.inputManifestSha256 !== record.inputManifestSha256
+        || (
+          active.status === "pending-review"
+          && active.candidateId !== record.candidateId
+        )
+      ) {
+        throw new ProjectFileRepositoryError(
+          "REQUEST_RUNTIME_ANCHOR_MISMATCH",
+          "The active Request no longer matches its runtime authority.",
+        );
+      }
+    } else {
+      const terminal = await this.#terminalAiTaskForLoaded(loaded);
+      record = terminal.record;
+      materializationTarget = {
+        projectId: loaded.project.projectId,
+        documentId: loaded.project.documentId,
+        projectRootPath: loaded.paths.projectRootPath,
+        workingCopyId: terminal.workingCopy.workingCopyId,
+      };
+    }
     return this.#materializeAiTaskProjection({
-      target,
+      target: materializationTarget,
       requestId: record.requestId,
       attemptId: record.attemptId,
       candidateId: record.candidateId,
@@ -3618,21 +3664,25 @@ export class ProjectFileRepository {
       );
     }
     const workingCopy = matches[0];
+    // A historical Working Copy has the same controlled rename semantics as
+    // the active one. Resolve it by stable file identity before reading the
+    // visible path, so Finder renames do not make a valid Version reveal fail.
+    const resolvedSource = await this.#resolveWorkingCopySource(
+      loaded,
+      workingCopy,
+      "Version Working Copy",
+    );
     const state = await readJsonFile(
       workingCopyStatePath(loaded.paths, workingCopy),
       "Version Working Copy state",
       { projectRootPath: loaded.paths.projectRootPath },
     );
     assertWorkingCopyState(state, loaded, workingCopy);
-    const workingCopyPath = workingCopySourcePath(loaded.paths, workingCopy);
-    const source = await readHtmlFile(workingCopyPath, "Version Working Copy", {
-      projectRootPath: loaded.paths.projectRootPath,
-    });
     const reconciled = await this.#reconcileExternalWorkingCopyState({
       loaded,
       workingCopy,
       state,
-      source,
+      source: resolvedSource.source,
     });
     return {
       projectId: loaded.project.projectId,
@@ -3640,8 +3690,8 @@ export class ProjectFileRepository {
       projectRootPath: loaded.paths.projectRootPath,
       versionId: version.versionId,
       workingCopyId: workingCopy.workingCopyId,
-      workingCopyPath,
-      sourceSha256: source.sha256,
+      workingCopyPath: resolvedSource.exactSourcePath,
+      sourceSha256: resolvedSource.source.sha256,
       workingCopyState: structuredClone(reconciled.state),
     };
   }
@@ -4911,6 +4961,47 @@ export class ProjectFileRepository {
     return true;
   }
 
+  async #resolveWorkingCopySource(loaded, workingCopy, label = "Working Copy") {
+    let exactSourcePath = workingCopySourcePath(loaded.paths, workingCopy);
+    let sourceInformation = await regularInformation(exactSourcePath, label, {
+      projectRootPath: loaded.paths.projectRootPath,
+    });
+    if (!sourceInformation) {
+      const recoveredPath = await this.#findWorkingCopyByFileIdentity(
+        loaded.paths.projectRootPath,
+        workingCopy.fileIdentity,
+      );
+      if (!recoveredPath) {
+        throw new ProjectFileRepositoryError(
+          "WORKING_COPY_UNAVAILABLE",
+          "The Working Copy HTML is temporarily unavailable; PageRoot did not write outside its registered path.",
+          { workingCopyId: workingCopy.workingCopyId },
+        );
+      }
+      exactSourcePath = recoveredPath;
+      sourceInformation = await regularInformation(exactSourcePath, label, {
+        projectRootPath: loaded.paths.projectRootPath,
+      });
+      if (!sourceInformation) {
+        throw new ProjectFileRepositoryError(
+          "WORKING_COPY_UNAVAILABLE",
+          "The Working Copy HTML disappeared while PageRoot was recovering its registered path.",
+          { workingCopyId: workingCopy.workingCopyId },
+        );
+      }
+    }
+    await this.#rebindWorkingCopyPath(
+      loaded,
+      workingCopy,
+      exactSourcePath,
+      sourceInformation,
+    );
+    const source = await readHtmlFile(exactSourcePath, label, {
+      projectRootPath: loaded.paths.projectRootPath,
+    });
+    return { exactSourcePath, source };
+  }
+
   async #targetForExactPath(loaded, exactSourcePath, source) {
     const { paths, project, manifest } = loaded;
     for (const version of manifest.versions) {
@@ -5008,44 +5099,8 @@ export class ProjectFileRepository {
     if (!workingCopy) {
       throw new ProjectFileRepositoryError("WORKING_COPY_NOT_FOUND", "The active Working Copy no longer exists.");
     }
-    let exactSourcePath = workingCopySourcePath(loaded.paths, workingCopy);
-    let sourceInformation = await regularInformation(exactSourcePath, "Working Copy", {
-      projectRootPath: loaded.paths.projectRootPath,
-    });
-    if (!sourceInformation) {
-      const recoveredPath = await this.#findWorkingCopyByFileIdentity(
-        loaded.paths.projectRootPath,
-        workingCopy.fileIdentity,
-      );
-      if (!recoveredPath) {
-        throw new ProjectFileRepositoryError(
-          "WORKING_COPY_UNAVAILABLE",
-          "The active HTML is temporarily unavailable; PageRoot did not write outside its registered path.",
-          { workingCopyId: workingCopy.workingCopyId },
-        );
-      }
-      exactSourcePath = recoveredPath;
-      sourceInformation = await regularInformation(exactSourcePath, "Working Copy", {
-        projectRootPath: loaded.paths.projectRootPath,
-      });
-      await this.#rebindWorkingCopyPath(
-        loaded,
-        workingCopy,
-        exactSourcePath,
-        sourceInformation,
-      );
-    } else {
-      await this.#rebindWorkingCopyPath(
-        loaded,
-        workingCopy,
-        exactSourcePath,
-        sourceInformation,
-      );
-    }
-    const source = await readHtmlFile(exactSourcePath, "Working Copy", {
-      projectRootPath: loaded.paths.projectRootPath,
-    });
-    return { ...loaded, workingCopy, exactSourcePath, source };
+    const source = await this.#resolveWorkingCopySource(loaded, workingCopy);
+    return { ...loaded, workingCopy, ...source };
   }
 
   async #findWorkingCopyByFileIdentity(projectRootPath, identity) {

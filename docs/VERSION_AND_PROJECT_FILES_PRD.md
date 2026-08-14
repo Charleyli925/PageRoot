@@ -328,6 +328,7 @@ V2 工作文件第一次建立时与 V2 正式快照字节一致。此后用户�
 2. 用户点击“基于版本 2 继续编辑”后：
    - 系统只接受 manifest 中 `versionId=V2` 且 `basedOnVersionId=V2` 的唯一原有 Working Copy；缺失、重复、状态/快照 Hash 不完整时失败关闭，不从快照临时重建或猜测另一份文件。
    - 在切换前完整校验该 Working Copy state、可见工作文件、不可变 V2 快照、Registry 根目录和完整 OpenTarget 身份；成功后打开原有工作文件，并显示其本地修改状态。
+   - Finder 定位该历史 Version 的可见工作文件时也执行同一受控重命名恢复：只在旧映射缺失、`workingCopyId` 不变且同根文件标识唯一时更新 manifest，不能因非活动文件路径陈旧而改为定位隐藏快照或猜测另一份 HTML。
 3. 后续编辑全部保存到 V2 工作文件，不覆盖正式 V2，也不创建新项目。
 
 该动作是窄的、可重试的“激活指定 Version 的 Working Copy”操作。Repository 先原子写入 V2 指针和 `desktop-pending` 回执；Bridge、桌面激活或确认响应在提交后丢失时，重放该回执的 `operationId` 与 Version 必须仍指向同一 `workingCopyId`，不得因为当前 Registry runtime 已经指向 V2 而拒绝重试，也不得伪造回滚到 V6。Desktop 对新操作只接受仍以原 `previousSourcePath` 为活动文件的前序，完成字节 Hash 校验后 Bridge 确认同一回执；随后才在一个无 `await` 的发布边界同步更新 `ProjectSession`、`DocumentSession`、`VersionSession`、`DraftSession` 与 `CommentSession`，再允许新 Canvas generation 接受回报。
@@ -425,11 +426,12 @@ AI 只能写入固定 Attempt 输出 `.pageroot/requests/<requestId>/attempts/<a
 第一期的候选 HTML 与记录保存在 Request / Attempt 的隐藏路径中。PR 2B 的 `AI任务/<轮次>/` 只展示经校验后的派生副本，不能替代 Attempt 输出、Candidate 记录或 Promotion 输入：
 
 1. Repository 先重新验证 Registry 绑定、Project/Document、Request/Attempt、Candidate 身份与 Hash、`proposedVersionId`、`basedOnVersionId`、`previousVersionId` 和项目根真实路径，才把已验证字节交给派生写入器。
-2. 写入器先在 `.pageroot/recovery/ai-task-projections/` 持久记录投影收据，再排他创建 `AI任务/<日期>-候选版本N[/冲突后缀]/`，以 no-replace 写入冻结 `PROMPT.md`；Candidate 通过 finalizer 后才以 no-replace 写入 `<主干>-Vn-待审阅.html`。
+2. 写入器先在 `.pageroot/recovery/ai-task-projections/` 持久记录投影收据，再排他创建 `AI任务/<日期>-候选版本N[/冲突后缀]/`；目录预检后出现的 `EEXIST` 同样视为用户/并发占用，必须保留该目录并分配新后缀。随后才以 no-replace 写入冻结 `PROMPT.md`；Candidate 通过 finalizer 后才以 no-replace 写入 `<主干>-Vn-待审阅.html`。
 3. P2 不创建 `附件快照说明.md`、`附件与图片/`、`AI_RULES.md` 或 `PROJECT.md` 副本，也不创建正式 Version。`PROMPT.md` 只复制本轮已冻结的精简 Prompt。
 4. 删除、篡改或用用户文件/目录/软链接占用派生位置时绝不覆盖；同一连续收据的完整投影可重建，冲突或篡改则分配新的安全展示目录。隐藏 Candidate、审阅和 Promotion 不读取此副本。
 5. 产品 UI 的 Finder 命令只提交当前 `sourcePath`；Bridge 重新解析并验证后才返回位于已登记根的 `AI任务/<单一子目录>`。它不接受 Renderer 提供的 Request 路径，也不打开 `.pageroot/requests/...`。
 6. `<主干>-Vn-待审阅.html` 是当前已验证 Working Copy 命名的展示结果，不是 Candidate 身份。若 Finder 在 `PROMPT.md` 发布后把同根 Working Copy 重命名，下一次投影会更新这一展示名，并仅在安全目录可复用时复用；已有不同展示文件时分配新的安全目录，绝不因此拒绝隐藏 Candidate、审阅或 Promotion。
+7. `no-change` 或不可用输出的 `error` 只保留运行时封存的 `lastAiTask` 展示锚点，不恢复活动 Request。应用重启后必须先用该锚点校验精确 Request 记录，再把它投影为“上轮处理”，从而仍可定位该轮 `AI任务/`；锚点缺失或校验失败时不得扫描 Request 目录猜测终态。
 
 ### 10.3 用户审阅
 
