@@ -69,7 +69,7 @@ function removeSourceFixture(sourceDirectory) {
 }
 
 async function waitForProjectReady(page, timeout = 30_000) {
-  return waitForSharedProjectReady(page, { timeout, includeFailureDetail: false });
+  return waitForSharedProjectReady(page, { timeout, includeFailureDetail: true });
 }
 
 async function loadedDiskFrame(page, sourcePath, caseId) {

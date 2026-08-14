@@ -277,11 +277,13 @@
       "id": "ci-evidence",
       "patterns": [
         "^scripts/ci-evidence\\.mjs$",
+        "^scripts/playwright-flaky-summary\\.mjs$",
         "^tests/ci-evidence\\.test\\.mjs$",
+        "^tests/playwright-flaky-summary\\.test\\.mjs$",
         "^\\.github/workflows/(?:ci|pr-feedback|developer-preview|release|release-candidate|release-dry-run)\\.yml$"
       ],
       "suites": [],
-      "nodeTests": ["tests/ci-evidence.test.mjs"]
+      "nodeTests": ["tests/ci-evidence.test.mjs", "tests/playwright-flaky-summary.test.mjs"]
     },
     {
       "id": "ci-health-report",

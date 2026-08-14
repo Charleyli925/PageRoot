@@ -326,8 +326,19 @@ jobs:
           --stage source-test
           --
           npm run test:electron:full:prepared
-      - name: Upload native Electron failure diagnostics
-        if: failure()
+      - name: Record Playwright retry evidence
+        # Runs even after a failed suite so the flaky/retry counts and the
+        # first attempt's artifacts are never lost with the runner.
+        if: always()
+        run: >-
+          node scripts/playwright-flaky-summary.mjs
+          --report output/playwright/native-dom-electron/results.json
+          --suite electron-native
+      - name: Upload native Electron diagnostics and retry evidence
+        # Always uploaded so a retry-succeeded run still preserves the first
+        # attempt's trace, video and screenshot instead of discarding them
+        # with the runner.
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: PageRoot-electron-native-diagnostics-${{ github.run_attempt }}

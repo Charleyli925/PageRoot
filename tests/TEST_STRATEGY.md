@@ -8,8 +8,8 @@
 |---|---|---|---|
 | `npm run gate:edit` | 一次局部修改后 | 只运行影响映射命中的 Node 文件；必要时 typecheck | 快速发现局部逻辑错误，不启动浏览器或 Electron |
 | `npm run gate:task` | 一个开发任务完成时 | 静态检查、受影响 Node 文件，以及相关 Browser/Electron/AI 冒烟 | 在较短时间内证明生产链路已经接通 |
-| PR `pr-feedback` | `opened/synchronize/reopened` | 按影响映射选择 Node/编译检查 | 普通推送无论 Draft/Ready 都不重复消费完整矩阵；仅切回 Draft 不产生 Feedback |
-| `review-policy` | 最终 Tree 从 Draft 转为 Ready，由 Ready 唯一触发最终审阅 | 实时 head/base、post-Ready exact-commit Codex review、不可变 clean comment 或 Codex Bot root `+1`、30 秒 settle window、活动非 outdated P0/P1 线程和 P0/P1 `CHANGES_REQUESTED` | 旧 head/base、旧轮次/真人/非 `+1` reaction、未结束 review、P0/P1 阻断时不能通过；P2/P3/unclassified 写为债务而不阻断 |
+| PR `pr-feedback` | `opened/synchronize/reopened` | 按影响映射选择 Node/编译检查；并行跑非阻断 `review-advisory`，用与 `review-policy` 相同的证据合同对 live pair 做一次快照评估 | 普通推送无论 Draft/Ready 都不重复消费完整矩阵；当前活动的 Codex P0/P1 在晋升前就可见；仅切回 Draft 不产生 Feedback |
+| `review-policy` | 最终 Tree 从 Draft 转为 Ready，由 Ready 唯一触发最终审阅 | 实时 head/base、Ready 后提交的 exact-commit Codex review、不可变 clean comment、Ready 后的 Codex Bot root `+1`、30 秒 settle window、活动非 outdated P0/P1 线程和 P0/P1 `CHANGES_REQUESTED` | 旧 head/base、Ready 前信号、旧轮次/真人/非 `+1` reaction、未结束 review、P0/P1 阻断时不能通过；P2/P3/unclassified 写为债务而不阻断 |
 | `Review Gate Recovery` | Codex 精确提交的 review/clean comment 在 `review-policy` 超时后到达 | trusted default-branch code 重验 live Ready head/base、当前 review policy、原 run timeout artifact、所有非 review job 结果 | 仅对原 run 调用 failed-job rerun；测试失败、P0/P1、Draft/closed、SHA/base 改变或 artifact 不符全部 fail closed |
 | `baseline-policy` | 分支策略通过，与 review-policy 并行 | 全局依赖 advisory policy 与 packaged-runtime closure | 基线红时不启动 Linux build、Browser 或 macOS Electron runner |
 | 一次性晋升 `release-gate` | review、baseline、完整测试和相关 dry run 都完成的最终 PR Tree | 全量 Node、三分片完整 Browser、独立 Native Electron、独立确定性 AI 闭环、真实 HTML 发现式门禁、即时 review revalidation 与 Tree Hash 凭证 | 每个最终候选只跑一次；后续新 SHA 必须重新 Draft 后 Ready |
@@ -36,8 +36,12 @@ Tree，不在测试执行期间自动合并分支。组合 Tree 含任何未合�
 
 PR 必须从 Draft 开始。普通推送由独立的 `PR Feedback` workflow 处理，
 不会创建名为 `release-gate` 的跳过 job；因此分支保护不会把轻量反馈误当
-完整通过。只切回 Draft 不触发 Feedback。冻结 head 并更新到当前 base 后，
-直接 Ready 一次；无需再用完整 head/base SHA marker 在 Draft 请求第二轮审阅。
+完整通过。同一 workflow 的 `review-advisory` job 以相同证据合同对 live pair
+做一次非阻断快照，把当前活动的 P0/P1 暴露在晋升之前；Codex 只在 Ready
+转换后才评审，Draft 期轮询不可能观察到新评审，因此 advisory 是快照语义，
+`review-policy` 才是权威等待。只切回 Draft 不触发
+Feedback。冻结 head 并更新到当前 base 后，直接 Ready 一次；无需再用完整
+head/base SHA marker 在 Draft 请求第二轮审阅。
 `review-policy` 只接受 Ready 后携带当前完整 `commit_id` 和匹配
 `Reviewed commit` marker 的 Codex review、不可编辑的 exact-commit clean
 Codex comment，或最新 Ready 后由 `chatgpt-codex-connector[bot]` 加在 PR 根节点的
@@ -59,6 +63,16 @@ dry run 成功、针对 source-only 允许 dry run 跳过，随后即时重验 r
 重新转 Draft、批量修复必要 P0/P1 后再 Ready；base 更新同样使已审组合失效。
 PR 批量是建议而非固定限制：用 CI Health 的 Ready 次数、candidate churn 和
 30–40 分钟候选时长判断是否需要协调，而非机械限制并行 PR 数量。
+
+每个 macOS Electron lane 仍然本地构建 renderer（通常亚秒级，且排除
+Linux→macOS 构建产物变量），并各自跑 hosted-window preflight，保证各自
+runner 的环境证据确定可分类为 `ci_environment`。Browser 三分片与
+real HTML 保持 `retries: 0`；native Electron 全量 lane 仅在 CI 里允许一次
+重试以吸收瞬时启动/hydration 抖动，本地保持零重试。重试通过后第一轮失败
+证据不丢：lane 的 diagnostics 产物改为 `if: always()` 上传（trace/video/
+截图随失败尝试保留），JSON reporter 喂给 `playwright-flaky-summary.mjs`，
+machine-readable 的 flaky/retry 次数写入 `output/ci-evidence/` 并出现在
+step summary 里。
 
 ## 测试类型与去重
 
