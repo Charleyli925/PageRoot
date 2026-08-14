@@ -778,6 +778,132 @@ test("Electron Edit does not execute an inline authored runtime script", async (
   }
 });
 
+test("Electron Edit runs one bounded ECharts author runtime then preserves native source editing", async () => {
+  const sourceDirectory = mkdtempSync(
+    path.join(tmpdir(), "pageroot-edit-runtime-source-e2e-"),
+  );
+  const sourcePath = path.join(sourceDirectory, "echarts-runtime-report.html");
+  const runtimeScriptPath = path.join(sourceDirectory, "echarts.js");
+  const source = `<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>One-shot ECharts Edit runtime</title><link rel="stylesheet" href="echarts-runtime.css"></head>
+<body>
+  <main id="chart-host" data-native-case="runtime-chart" style="width: 640px; height: 360px"></main>
+  <p class="runtime-resource-probe" data-native-case="runtime-editable">静态来源文字保持可编辑。</p>
+  <script src="echarts.js"></script>
+  <script>
+    window.__PAGEROOT_ECHARTS_AUTHOR_EXECUTIONS__ = (window.__PAGEROOT_ECHARTS_AUTHOR_EXECUTIONS__ || 0) + 1;
+    const chart = window.echarts.init(document.querySelector("#chart-host"));
+    chart.setOption({ series: [] });
+  </script>
+</body>
+</html>`;
+  writeFileSync(runtimeScriptPath, `window.echarts = {
+  init(host) {
+    const canvas = document.createElement("canvas");
+    canvas.width = 640;
+    canvas.height = 360;
+    canvas.dataset.echartsRuntime = "true";
+    host.append(canvas);
+    return { setOption() { window.__PAGEROOT_ECHARTS_AUTHOR_SETTLED__ = true; } };
+  }
+};`, "utf8");
+  writeFileSync(
+    path.join(sourceDirectory, "echarts-runtime.css"),
+    ".runtime-resource-probe { color: rgb(1, 2, 3); }",
+    "utf8",
+  );
+  writeFileSync(sourcePath, source, "utf8");
+
+  let electronApp = null;
+  let isolatedUserData = null;
+  try {
+    const launched = await launchPageRoot({ activeSourcePath: sourcePath });
+    electronApp = launched.electronApp;
+    isolatedUserData = launched.isolatedUserData;
+    const { frame } = await loadedDiskFrame(
+      launched.page,
+      sourcePath,
+      "runtime-editable",
+    );
+    await expect.poll(() => frame.evaluate(() => ({
+      executions: window.__PAGEROOT_ECHARTS_AUTHOR_EXECUTIONS__ || 0,
+      chartCount: document.querySelectorAll("#chart-host canvas[data-echarts-runtime=true]").length,
+      chartSettled: window.__PAGEROOT_ECHARTS_AUTHOR_SETTLED__ || false,
+      frozen: document.documentElement.getAttribute("data-pageroot-edit-runtime-frozen"),
+      result: JSON.parse(
+        document.documentElement.getAttribute("data-pageroot-edit-runtime-result") || "null",
+      ),
+      bootstrapCount: document.querySelectorAll("[data-pageroot-edit-runtime-bootstrap]").length,
+      stubCount: document.querySelectorAll("[data-pageroot-edit-runtime-script]").length,
+      base: document.baseURI,
+      stylesheetColor: getComputedStyle(document.querySelector(".runtime-resource-probe")).color,
+    })), { timeout: 6_000 }).toMatchObject({
+      executions: 1,
+      chartCount: 1,
+      chartSettled: true,
+      frozen: "true",
+      result: { state: "frozen", reason: null },
+      bootstrapCount: 1,
+      stubCount: 2,
+      base: expect.stringMatching(/^pageroot-edit-runtime:\/\/[a-f0-9]{32}\/$/u),
+      stylesheetColor: "rgb(1, 2, 3)",
+    });
+    const runtimeDocument = await documentToken(frame);
+    const runtimeCanvasState = await launched.page.locator("[data-persist-state]").first().evaluate(
+      (element) => ({
+        canvasGeneration: element.getAttribute("data-canvas-generation"),
+        editRevision: element.getAttribute("data-edit-revision"),
+        persistedRevision: element.getAttribute("data-persisted-revision"),
+      }),
+    );
+
+    await addCanvasComment(
+      launched.page,
+      frame,
+      "runtime-editable",
+      "运行时图表旁的原生评论。",
+    );
+    expect({
+      document: await documentToken(launched.page),
+      canvas: await launched.page.locator("[data-persist-state]").first().evaluate(
+        (element) => ({
+          canvasGeneration: element.getAttribute("data-canvas-generation"),
+          editRevision: element.getAttribute("data-edit-revision"),
+          persistedRevision: element.getAttribute("data-persisted-revision"),
+        }),
+      ),
+    }).toEqual({ document: runtimeDocument, canvas: runtimeCanvasState });
+
+    const editable = await activateNativeEdit(frame, "runtime-editable");
+    await expect(editable).toHaveAttribute("contenteditable", "true");
+    await setTextSelection(frame, "runtime-editable", 0);
+    await launched.page.keyboard.insertText("原位");
+    await expect.poll(() => readFileSync(sourcePath, "utf8"))
+      .toContain("原位静态来源文字保持可编辑。");
+    expect(await documentToken(launched.page)).toBe(runtimeDocument);
+    expect(frame.isDetached()).toBe(false);
+    expect(await frame.evaluate(() => ({
+      executions: window.__PAGEROOT_ECHARTS_AUTHOR_EXECUTIONS__,
+      chartCount: document.querySelectorAll("#chart-host canvas[data-echarts-runtime=true]").length,
+    }))).toEqual({
+      executions: 1,
+      chartCount: 1,
+    });
+    expect(readFileSync(sourcePath, "utf8")).not.toMatch(
+      /data-pageroot-edit-runtime|data-echarts-runtime/u,
+    );
+  } finally {
+    if (electronApp && isolatedUserData) {
+      await stopPageRoot(electronApp, isolatedUserData);
+    }
+    removeValidatedTemporaryDirectory(
+      sourceDirectory,
+      "pageroot-edit-runtime-source-e2e-",
+    );
+  }
+});
+
 test("Electron edit mode reveals safe semantic content without changing disk bytes", async () => {
   const sourceDirectory = mkdtempSync(
     path.join(tmpdir(), "pageroot-presentation-source-e2e-"),

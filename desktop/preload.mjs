@@ -54,6 +54,10 @@ const previewChannels = Object.freeze({
 const reviewRuntimeSnapshotChannels = Object.freeze({
   capture: "html-review-runtime-snapshots:capture",
 });
+const editRuntimeChannels = Object.freeze({
+  prepare: "html-edit-runtime:prepare",
+  revoke: "html-edit-runtime:revoke",
+});
 const editChannels = Object.freeze({
   historyRequested: "html-edit:history-requested",
   nativeHistory: "html-edit:native-history",
@@ -196,6 +200,11 @@ const reviewRuntimeSnapshotApi = Object.freeze({
     reviewRuntimeSnapshotChannels.capture,
     payload,
   ),
+});
+
+const editRuntimeApi = Object.freeze({
+  prepare: (payload) => invokeProject(editRuntimeChannels.prepare, payload),
+  revoke: (sessionId) => invokeProject(editRuntimeChannels.revoke, sessionId),
 });
 
 const closeListeners = new Map();
@@ -414,6 +423,7 @@ contextBridge.exposeInMainWorld("htmlAIIntegrations", integrationsApi);
 contextBridge.exposeInMainWorld("htmlAIUpdates", updatesApi);
 contextBridge.exposeInMainWorld("htmlAIPreview", previewApi);
 contextBridge.exposeInMainWorld("htmlAIReviewRuntimeSnapshots", reviewRuntimeSnapshotApi);
+contextBridge.exposeInMainWorld("htmlAIEditRuntime", editRuntimeApi);
 contextBridge.exposeInMainWorld("htmlAIRuntime", runtimeConfig);
 contextBridge.exposeInMainWorld("htmlAIAppLifecycle", appLifecycleApi);
 contextBridge.exposeInMainWorld("htmlAIUsage", usageApi);

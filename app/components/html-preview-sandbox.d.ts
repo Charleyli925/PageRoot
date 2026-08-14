@@ -14,6 +14,43 @@ export function prepareVerifiedFrameDocument(
     editorStyles?: string;
   },
 ): string;
+export function prepareOneShotRuntimeFrameDocument(
+  source: string,
+  verificationToken: string,
+  options: {
+    sessionId: string;
+    executionId: string;
+    hosts: readonly {
+      key: string;
+      path: readonly number[];
+      tagName: string;
+      identityAttributes: readonly (readonly [string, string])[];
+    }[];
+    baseUrl?: string;
+    editorStyles?: string;
+  },
+): string | null;
+export function prepareCanvasFrameDocument(
+  source: string,
+  verificationToken: string,
+  options?: {
+    mode?: "static";
+    baseUrl?: string;
+    editorStyles?: string;
+  } | {
+    mode: "one-shot-runtime";
+    sessionId: string;
+    executionId: string;
+    hosts: readonly {
+      key: string;
+      path: readonly number[];
+      tagName: string;
+      identityAttributes: readonly (readonly [string, string])[];
+    }[];
+    baseUrl?: string;
+    editorStyles?: string;
+  },
+): string | null;
 export function baseHrefFromSourcePath(
   sourcePath?: string,
 ): string | undefined;

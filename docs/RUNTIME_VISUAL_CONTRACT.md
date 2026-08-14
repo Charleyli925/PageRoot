@@ -25,14 +25,30 @@ comment scope, inspects arbitrary HTML/`tbody` or discovers runtime DOM.
 Bindings remain in trusted renderer memory. A `TargetRef`, candidate binding or
 screenshot never enters authored Edit or Review documents.
 
-## Edit behavior
+## Edit one-shot ECharts behavior
 
-Edit renders only what the source can statically present. It disables authored
-scripts and does not create a snapshot request, cache, bitmap projection, Blob
-URL or `data-pageroot-readonly-visual*` attribute. Authored inline SVG remains
-native, source-backed and non-editable; script-generated Canvas/SVG remains
-available in Preview. There is no runtime-capture status, placeholder, retry or
-fallback UI in Edit.
+Edit never consumes a Review snapshot, PNG, bitmap projection or Blob URL. It
+normally renders only what source can statically present. Desktop has one narrow
+exception: before the initial editable frame is mounted, an exact persisted
+source with classic-script ECharts evidence may receive one direct resource
+session for its `(sourcePath, canvasGeneration)`.
+
+The session accepts no arbitrary source path or later source revision. Main
+rechecks active HTML/SHA, freezes declared local or allowlisted ECharts-CDN
+script bytes, and serves only that resource closure under
+`pageroot-edit-runtime:` without CSP bypass. The final frame runs those bytes in
+order once, waits 1.2 seconds, stops tracked runtime activity and audits that
+source nodes/text/attributes and the approved unique empty-host bindings stayed
+intact. At most 32 non-dangerous empty hosts are eligible; generated descendants
+remain display-only and select/comment through their original source host.
+
+Preparation, execution, audit or deadline failure silently mounts ordinary
+static Edit before interaction. Comments, autosave, IME and source echoes do
+not prepare, execute or replace the frame. A later necessary full rebuild is
+static for that generation. There is no status UI, retry, probe window,
+compatibility cache or background promotion. Authored inline SVG remains native
+and source-backed; unsupported runtime-only Canvas/SVG remains available in
+Preview.
 
 ## One Review snapshot owner
 

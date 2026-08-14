@@ -113,7 +113,7 @@ function isContainedPath(rootPath, candidatePath) {
     || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
-async function resolveSourceRoot(sourcePath) {
+export async function resolvePreviewSourceRoot(sourcePath) {
   if (sourcePath === undefined || sourcePath === null || sourcePath === "") {
     return null;
   }
@@ -132,7 +132,7 @@ async function resolveSourceRoot(sourcePath) {
   return realpath(path.dirname(sourceRealPath));
 }
 
-function normalizeRelativeAssetPath(value, basePath = "") {
+export function normalizeRelativeAssetPath(value, basePath = "") {
   if (typeof value !== "string") return null;
   const reference = value.trim();
   if (!reference || reference.length > 4096 || reference.startsWith("#")) {
@@ -359,7 +359,7 @@ async function resolveDeclaredAsset(sourceRoot, relativePath) {
   }
 }
 
-async function collectDeclaredAssets({
+export async function collectDeclaredPreviewAssets({
   html,
   sourceRoot,
   maxAssets = DEFAULT_MAX_DECLARED_ASSETS,
@@ -530,9 +530,9 @@ export function createPreviewProtocolController({
     ) {
       throw new TypeError("Interactive preview payload is invalid or too large.");
     }
-    const sourceRoot = await resolveSourceRoot(payload?.sourcePath);
+    const sourceRoot = await resolvePreviewSourceRoot(payload?.sourcePath);
     const declaredAssets = sourceRoot
-      ? await collectDeclaredAssets({ html, sourceRoot })
+      ? await collectDeclaredPreviewAssets({ html, sourceRoot })
       : new Map();
     removeExpiredSessions();
     while (sessions.size >= maxSessions) {

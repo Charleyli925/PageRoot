@@ -557,7 +557,7 @@
         "^scripts/check-architecture\\.mjs$",
         "^tests/fixtures/architecture-boundaries/",
         "^(?:CONTRIBUTING|docs/(?:ARCHITECTURE|ARCHITECTURE_CONTRACT|COMPATIBILITY|STATE_OWNERSHIP|ENGINEERING_STANDARDS|SECURITY_MODEL|RUNTIME_VISUAL_CONTRACT|WORKBENCH_ORCHESTRATION_REFACTOR_PLAN))\\.md$",
-        "^docs/decisions/(?:0003-session-ownership-and-mutation-outcomes|0004-v2-editable-islands|0007-independent-interactive-preview|0008-safe-presentation-actions-in-edit-mode|0009-persistent-source-patch-history|0011-workbench-session-decomposition|0012-id-first-project-context|0013-edit-runtime-visual-projection|0015-safe-host-fallback-and-direct-text-nodes|0016-owner-controlled-review-runtime-capture|0017-shared-runtime-snapshot-owner|0018-source-transaction-kernel|0019-workspace-controller-orchestration|0021-review-runtime-visual-comparison-noise-tolerance)\\.md$"
+        "^docs/decisions/(?:0003-session-ownership-and-mutation-outcomes|0004-v2-editable-islands|0007-independent-interactive-preview|0008-safe-presentation-actions-in-edit-mode|0009-persistent-source-patch-history|0011-workbench-session-decomposition|0012-id-first-project-context|0013-edit-runtime-visual-projection|0015-safe-host-fallback-and-direct-text-nodes|0016-owner-controlled-review-runtime-capture|0017-shared-runtime-snapshot-owner|0018-source-transaction-kernel|0019-workspace-controller-orchestration|0021-review-runtime-visual-comparison-noise-tolerance|0022-edit-one-shot-author-runtime)\\.md$"
       ],
       "suites": ["typecheck"],
       "nodeTests": [
@@ -599,6 +599,30 @@
         "tests/source-text-map.test.mjs",
         "tests/native-layout-guard.test.mjs",
         "tests/html-preview-sandbox.test.mjs"
+      ]
+    },
+    {
+      "id": "edit-one-shot-author-runtime",
+      "patterns": [
+        "^app/application/edit-author-runtime-session\\.(?:js|d\\.ts)$",
+        "^app/domain/edit-runtime-contract\\.(?:js|d\\.ts)$",
+        "^app/domain/runtime-snapshot-hosts\\.(?:js|d\\.ts)$",
+        "^app/components/(?:HtmlCanvasEditor(?:\\.types)?|desktop-edit-runtime-api|html-canvas-interaction|html-preview-sandbox)\\.(?:tsx|ts|js|d\\.ts)$",
+        "^app/workbench\\.tsx$",
+        "^desktop/(?:edit-runtime-bootstrap|edit-runtime-protocol)\\.mjs$",
+        "^tests/(?:edit-author-runtime-session|edit-runtime-bootstrap|edit-runtime-contract|edit-runtime-protocol)\\.test\\.mjs$"
+      ],
+      "suites": ["typecheck", "electron-smoke"],
+      "nodeTests": [
+        "tests/edit-author-runtime-session.test.mjs",
+        "tests/edit-runtime-bootstrap.test.mjs",
+        "tests/edit-runtime-contract.test.mjs",
+        "tests/edit-runtime-protocol.test.mjs",
+        "tests/runtime-snapshot-hosts.test.mjs",
+        "tests/html-preview-sandbox.test.mjs",
+        "tests/workspace-controller.test.mjs",
+        "tests/desktop-preload-ipc.test.mjs",
+        "tests/architecture-boundaries.test.mjs"
       ]
     },
     {

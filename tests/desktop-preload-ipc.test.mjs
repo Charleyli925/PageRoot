@@ -55,6 +55,7 @@ async function loadPreloadApis(invoke) {
     preview: exposed.get("htmlAIPreview"),
     reviewRuntimeSnapshots: exposed.get("htmlAIReviewRuntimeSnapshots"),
     runtimeSnapshots: exposed.get("htmlAIRuntimeSnapshots"),
+    editRuntime: exposed.get("htmlAIEditRuntime"),
     edit: exposed.get("htmlAIEdit"),
     sent,
     emit(channel, payload) {
@@ -109,6 +110,44 @@ test("preload exposes one narrow Review-only Runtime Snapshot capture method", a
   assert.deepEqual(calls, [["html-review-runtime-snapshots:capture", payload]]);
   assert.deepEqual(Object.keys(reviewRuntimeSnapshots), ["capture"]);
   assert.equal(runtimeSnapshots, undefined);
+});
+
+test("preload exposes one narrow one-shot Edit runtime preparation port", async () => {
+  const calls = [];
+  const { editRuntime } = await loadPreloadApis(async (...args) => {
+    calls.push(args);
+    if (args[0] === "html-edit-runtime:prepare") {
+      return success({
+        contractVersion: 1,
+        sessionId: "0123456789abcdef0123456789abcdef",
+        executionId: "abcdefabcdefabcdefabcdef",
+      });
+    }
+    return success({ revoked: true });
+  });
+  const payload = {
+    contractVersion: 1,
+    sourceSha256: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    html: "<!doctype html><main id=chart></main>",
+    canvasGeneration: 4,
+    bindings: [],
+  };
+
+  assert.deepEqual(await editRuntime.prepare(payload), {
+    contractVersion: 1,
+    sessionId: "0123456789abcdef0123456789abcdef",
+    executionId: "abcdefabcdefabcdefabcdef",
+  });
+  assert.deepEqual(calls[0], ["html-edit-runtime:prepare", payload]);
+  assert.deepEqual(
+    await editRuntime.revoke("0123456789abcdef0123456789abcdef"),
+    { revoked: true },
+  );
+  assert.deepEqual(calls[1], [
+    "html-edit-runtime:revoke",
+    "0123456789abcdef0123456789abcdef",
+  ]);
+  assert.deepEqual(Object.keys(editRuntime).sort(), ["prepare", "revoke"]);
 });
 
 test("preload exposes only preview session creation and revocation", async () => {

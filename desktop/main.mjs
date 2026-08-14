@@ -103,6 +103,14 @@ import {
   registerPreviewProtocolScheme,
 } from "./preview-protocol.mjs";
 import {
+  createEditRuntimeProtocolController,
+  registerEditRuntimeProtocolScheme,
+} from "./edit-runtime-protocol.mjs";
+import {
+  EDIT_AUTHOR_RUNTIME_CONTRACT_VERSION,
+  isEditRuntimeRequestId,
+} from "../app/domain/edit-runtime-contract.js";
+import {
   createRuntimeSnapshotCaptureController,
 } from "./runtime-visual-capture-owner.mjs";
 
@@ -110,6 +118,7 @@ import {
 const { autoUpdater } = electronUpdater;
 
 registerPreviewProtocolScheme(protocol);
+registerEditRuntimeProtocolScheme(protocol);
 
 const directory = path.dirname(fileURLToPath(import.meta.url));
 const USER_NOTICE_FILE_NAME = "PageRoot 用户声明与免责声明.txt";
@@ -210,6 +219,10 @@ const PREVIEW_CHANNELS = Object.freeze({
 const REVIEW_RUNTIME_SNAPSHOT_CHANNELS = Object.freeze({
   capture: "html-review-runtime-snapshots:capture",
 });
+const EDIT_RUNTIME_CHANNELS = Object.freeze({
+  prepare: "html-edit-runtime:prepare",
+  revoke: "html-edit-runtime:revoke",
+});
 const EDIT_CHANNELS = Object.freeze({
   historyRequested: "html-edit:history-requested",
   nativeHistory: "html-edit:native-history",
@@ -236,6 +249,7 @@ let workspaceFailurePrompt = null;
 let managedWelcomeRegistration = null;
 let previewProtocolController = null;
 let reviewRuntimeSnapshotCaptureController = null;
+let editRuntimeProtocolController = null;
 const workspaceRecoveryMailbox = createWorkspaceRecoveryMailbox();
 const externalFileOpenMailbox = createExternalFileOpenMailbox();
 const externalFileOpenExitHandoff = createExternalFileOpenExitHandoff({
@@ -253,6 +267,17 @@ function ensurePreviewProtocolController() {
     previewProtocolController.install();
   }
   return previewProtocolController;
+}
+
+function ensureEditRuntimeProtocolController() {
+  if (!editRuntimeProtocolController) {
+    editRuntimeProtocolController = createEditRuntimeProtocolController({
+      protocolApi: protocol,
+      netFetch: (url, options) => net.fetch(url, options),
+    });
+    editRuntimeProtocolController.install();
+  }
+  return editRuntimeProtocolController;
 }
 
 function ensureReviewRuntimeSnapshotCaptureController() {
@@ -1002,6 +1027,49 @@ const captureReviewRuntimeSnapshot = (payload) => (
   ensureReviewRuntimeSnapshotCaptureController().capture(payload)
 );
 
+async function prepareEditAuthorRuntime(payload) {
+  const sourcePath = await currentActivePath();
+  if (!sourcePath) throw new Error("Edit runtime requires an active source path.");
+  const activeSource = await readHtmlFile({
+    sourcePath,
+    maxHtmlBytes: MAX_HTML_BYTES,
+  });
+  if (
+    !payload
+    || typeof payload !== "object"
+    || payload.contractVersion !== EDIT_AUTHOR_RUNTIME_CONTRACT_VERSION
+    || !isEditRuntimeRequestId(payload.requestId)
+    || typeof payload.html !== "string"
+    || payload.html !== activeSource.html
+    || String(payload.sourceSha256 || "").toLowerCase() !== activeSource.sha256
+    || !Number.isSafeInteger(payload.canvasGeneration)
+    || payload.canvasGeneration < 0
+    || !Array.isArray(payload.hosts)
+  ) {
+    throw new Error("Edit runtime source is no longer the active persisted document.");
+  }
+  const session = await ensureEditRuntimeProtocolController().createSession({
+    html: activeSource.html,
+    sourcePath: activeSource.sourcePath,
+    bindings: payload.hosts,
+  });
+  return Object.freeze({
+    contractVersion: session.contractVersion,
+    sessionId: session.sessionId,
+    executionId: session.executionId,
+    sourceSha256: activeSource.sha256,
+    resourceSha256: session.resourceSha256,
+    scriptCount: session.scriptCount,
+    byteLength: session.byteLength,
+    canvasGeneration: payload.canvasGeneration,
+    hosts: session.bindings,
+  });
+}
+
+const revokeEditAuthorRuntime = (sessionId) => (
+  ensureEditRuntimeProtocolController().revokeSession(sessionId)
+);
+
 async function resolveKnownRenameSource(sourcePathInput) {
   const sourcePath = assertReadPayload(sourcePathInput);
   const state = await loadProjectState();
@@ -1734,6 +1802,14 @@ function registerProjectIpc() {
       "review_runtime_snapshot_capture",
     ),
   );
+  ipcMain.handle(
+    EDIT_RUNTIME_CHANNELS.prepare,
+    trustedProject(prepareEditAuthorRuntime, "edit_runtime_prepare"),
+  );
+  ipcMain.handle(
+    EDIT_RUNTIME_CHANNELS.revoke,
+    trustedProject(revokeEditAuthorRuntime, "edit_runtime_revoke"),
+  );
   ipcMain.handle(APP_CHANNELS.closeResult, trusted(reportCloseResult));
   ipcMain.handle(
     APP_CHANNELS.workspaceRecoveryReady,
@@ -1911,6 +1987,7 @@ function unregisterIpc() {
     ...Object.values(INTEGRATION_CHANNELS),
     ...Object.values(UPDATE_CHANNELS),
     ...Object.values(REVIEW_RUNTIME_SNAPSHOT_CHANNELS),
+    ...Object.values(EDIT_RUNTIME_CHANNELS),
     APP_CHANNELS.closeResult,
     APP_CHANNELS.workspaceRecoveryReady,
     APP_CHANNELS.externalOpenReady,
@@ -2428,6 +2505,8 @@ async function createWindow() {
     applicationUpdate?.stopAutomaticChecks();
     reviewRuntimeSnapshotCaptureController?.dispose();
     reviewRuntimeSnapshotCaptureController = null;
+    editRuntimeProtocolController?.dispose();
+    editRuntimeProtocolController = null;
     previewProtocolController?.dispose();
     rendererHasLoaded = false;
     workspaceRecoveryMailbox.beginRendererLoad();

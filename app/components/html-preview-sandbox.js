@@ -1,3 +1,17 @@
+import {
+  EDIT_RUNTIME_BOOTSTRAP_ATTRIBUTE,
+  EDIT_RUNTIME_HOST_ATTRIBUTE,
+  EDIT_RUNTIME_OWNED_ATTRIBUTE,
+  EDIT_RUNTIME_PROTOCOL_SCHEME,
+  EDIT_RUNTIME_SCRIPT_STUB_ATTRIBUTE,
+  EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE,
+  collectEditRuntimeScripts,
+  editRuntimeProtocolUrl,
+  isEditRuntimeEchartsCandidate,
+  isEditRuntimeExecutionId,
+  isEditRuntimeSessionId,
+} from "../domain/edit-runtime-contract.js";
+
 export const EDITOR_STYLE_ATTRIBUTE = "data-html-canvas-editor-style";
 export const FRAME_VERIFICATION_ATTRIBUTE =
   "data-html-canvas-render-verification";
@@ -7,6 +21,21 @@ const DISABLED_SCRIPT_ATTRIBUTE = "data-html-canvas-disabled-script";
 const ORIGINAL_SCRIPT_TYPE_ATTRIBUTE = "data-html-canvas-original-script-type";
 const DISABLED_REFRESH_ATTRIBUTE = "data-html-canvas-disabled-refresh";
 const MISSING_ATTRIBUTE_VALUE = "__html_canvas_missing__";
+const SOURCE_NODE_ATTRIBUTE = "data-html-ai-source-node-id";
+const EDIT_RUNTIME_CSP = [
+  "default-src 'none'",
+  "script-src pageroot-edit-runtime:",
+  "style-src 'unsafe-inline' data: http: https: pageroot-edit-runtime:",
+  "img-src data: blob: http: https: pageroot-edit-runtime:",
+  "font-src data: http: https: pageroot-edit-runtime:",
+  "media-src data: blob: http: https: pageroot-edit-runtime:",
+  "connect-src 'none'",
+  "worker-src 'none'",
+  "frame-src 'none'",
+  "object-src 'none'",
+  "form-action 'none'",
+  "base-uri pageroot-edit-runtime:",
+].join("; ");
 
 function escapeAttribute(value) {
   return value
@@ -83,6 +112,205 @@ export function prepareVerifiedFrameDocument(
   marker.setAttribute("content", verificationToken);
   parsed.head.prepend(marker);
   return `${doctypeString(parsed.doctype)}\n${parsed.documentElement.outerHTML}`;
+}
+
+function browserPathForElement(root, target) {
+  const path = [];
+  let current = target;
+  while (current && current !== root) {
+    const parent = current.parentElement;
+    if (!parent) return null;
+    const position = Array.prototype.indexOf.call(parent.children, current);
+    if (position < 0) return null;
+    path.unshift(position);
+    current = parent;
+  }
+  return current === root ? path : null;
+}
+
+function elementAtBrowserPath(root, path) {
+  let current = root;
+  for (const position of path) {
+    if (!Number.isSafeInteger(position) || position < 0) return null;
+    current = current.children.item(position);
+    if (!(current instanceof Element)) return null;
+  }
+  return current;
+}
+
+function sourceContentIsEmpty(element) {
+  return Array.from(element.childNodes).every((node) => (
+    node.nodeType === Node.COMMENT_NODE
+    || (node.nodeType === Node.TEXT_NODE && !String(node.nodeValue || "").trim())
+  ));
+}
+
+function runtimeHostMatches(element, binding) {
+  return element instanceof Element
+    && element.tagName.toLowerCase() === String(binding?.tagName || "").toLowerCase()
+    && sourceContentIsEmpty(element)
+    && Array.isArray(binding?.identityAttributes)
+    && binding.identityAttributes.length > 0
+    && binding.identityAttributes.every(([name, value]) => (
+      element.getAttribute(name) === value
+    ));
+}
+
+function uniqueRuntimeMarker(root, element) {
+  const sourceId = element.getAttribute(SOURCE_NODE_ATTRIBUTE);
+  if (sourceId) return sourceId;
+  const path = browserPathForElement(root, element);
+  return path ? `synthetic:${path.length ? path.join(".") : "root"}` : null;
+}
+
+function addFrameVerification(parsed, verificationToken, editorStyles) {
+  parsed.head
+    .querySelectorAll(`style[${EDITOR_STYLE_ATTRIBUTE}]`)
+    .forEach((node) => node.remove());
+  const editorStyle = parsed.createElement("style");
+  editorStyle.setAttribute(EDITOR_STYLE_ATTRIBUTE, "true");
+  editorStyle.setAttribute(EDIT_RUNTIME_OWNED_ATTRIBUTE, "editor-style");
+  editorStyle.textContent = String(editorStyles || "");
+  parsed.head.prepend(editorStyle);
+  const marker = parsed.createElement("meta");
+  marker.setAttribute(FRAME_VERIFICATION_ATTRIBUTE, verificationToken);
+  marker.setAttribute("content", verificationToken);
+  marker.setAttribute(EDIT_RUNTIME_OWNED_ATTRIBUTE, "verification");
+  parsed.head.prepend(marker);
+}
+
+function addRuntimeContentSecurityPolicy(parsed) {
+  parsed.head
+    .querySelectorAll('meta[http-equiv="Content-Security-Policy"]')
+    .forEach((node) => node.remove());
+  const csp = parsed.createElement("meta");
+  csp.setAttribute("http-equiv", "Content-Security-Policy");
+  csp.setAttribute("content", EDIT_RUNTIME_CSP);
+  csp.setAttribute(EDIT_RUNTIME_OWNED_ATTRIBUTE, "csp");
+  parsed.head.prepend(csp);
+}
+
+/**
+ * Runtime relative assets must resolve through the same immutable session as
+ * the fixed author scripts.  `srcdoc` is intentionally retained for direct
+ * editor DOM access, so the protocol base—not the iframe URL—closes this
+ * capability boundary.
+ */
+function addRuntimeResourceBase(parsed, sessionId) {
+  const resourceBase = editRuntimeProtocolUrl(sessionId, "/");
+  if (!resourceBase || !parsed.head) return false;
+  parsed.head.querySelectorAll("base").forEach((node) => node.remove());
+  const base = parsed.createElement("base");
+  base.href = resourceBase;
+  base.setAttribute(EDIT_RUNTIME_OWNED_ATTRIBUTE, "resource-base");
+  parsed.head.prepend(base);
+  return true;
+}
+
+/**
+ * Builds the sole direct Edit runtime document. Authored scripts remain inert
+ * markup; a fixed one-use protocol resource loads their frozen bytes in order.
+ */
+export function prepareOneShotRuntimeFrameDocument(
+  source,
+  verificationToken,
+  {
+    sessionId,
+    executionId,
+    hosts,
+    baseUrl,
+    editorStyles,
+  } = {},
+) {
+  if (
+    typeof source !== "string"
+    || !verificationToken
+    || !isEditRuntimeSessionId(sessionId)
+    || !isEditRuntimeExecutionId(executionId)
+    || !Array.isArray(hosts)
+    || hosts.length < 1
+  ) return null;
+  const scriptContract = collectEditRuntimeScripts(source);
+  if (
+    scriptContract.unsupportedReason
+    || scriptContract.executableScripts.length < 1
+    || !isEditRuntimeEchartsCandidate(source)
+  ) return null;
+  const sanitized = sanitizePreviewDocument(source, baseUrl);
+  if (typeof DOMParser === "undefined") return null;
+  const parsed = new DOMParser().parseFromString(sanitized, "text/html");
+  if (!parsed.documentElement || !parsed.head) return null;
+  if (!addRuntimeResourceBase(parsed, sessionId)) return null;
+  const root = parsed.documentElement;
+  const sourceElements = [root, ...root.querySelectorAll("*")];
+  const seenMarkers = new Set();
+  for (const element of sourceElements) {
+    const marker = uniqueRuntimeMarker(root, element);
+    if (!marker || seenMarkers.has(marker)) return null;
+    seenMarkers.add(marker);
+    element.setAttribute(EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE, marker);
+  }
+  const hostKeys = new Set();
+  for (const binding of hosts) {
+    if (
+      !binding
+      || typeof binding.key !== "string"
+      || hostKeys.has(binding.key)
+      || !Array.isArray(binding.path)
+    ) return null;
+    const element = elementAtBrowserPath(root, binding.path);
+    if (!runtimeHostMatches(element, binding)) return null;
+    hostKeys.add(binding.key);
+    element.setAttribute(EDIT_RUNTIME_HOST_ATTRIBUTE, binding.key);
+  }
+  const scriptNodes = Array.from(parsed.querySelectorAll("script"));
+  if (scriptNodes.length !== scriptContract.scripts.length) return null;
+  for (let ordinal = 0; ordinal < scriptNodes.length; ordinal += 1) {
+    const descriptor = scriptContract.scripts[ordinal];
+    if (!descriptor?.executable) continue;
+    const script = scriptNodes[ordinal];
+    script.removeAttribute("src");
+    script.removeAttribute("async");
+    script.removeAttribute("defer");
+    script.removeAttribute("nomodule");
+    script.type = "application/x-pageroot-edit-runtime-source";
+    script.setAttribute(EDIT_RUNTIME_SCRIPT_STUB_ATTRIBUTE, String(descriptor.index));
+    script.textContent = "";
+  }
+  addFrameVerification(parsed, String(verificationToken), editorStyles);
+  addRuntimeContentSecurityPolicy(parsed);
+  const bootstrapUrl = editRuntimeProtocolUrl(
+    sessionId,
+    `/.pageroot/bootstrap/${executionId}.js`,
+  );
+  if (!bootstrapUrl || !bootstrapUrl.startsWith(`${EDIT_RUNTIME_PROTOCOL_SCHEME}:`)) {
+    return null;
+  }
+  const bootstrap = parsed.createElement("script");
+  bootstrap.src = bootstrapUrl;
+  bootstrap.setAttribute(EDIT_RUNTIME_BOOTSTRAP_ATTRIBUTE, "true");
+  bootstrap.setAttribute(EDIT_RUNTIME_OWNED_ATTRIBUTE, "bootstrap");
+  parsed.head.prepend(bootstrap);
+  return `${doctypeString(parsed.doctype)}\n${parsed.documentElement.outerHTML}`;
+}
+
+/**
+ * A discriminated frame builder keeps the permanent canvas static unless a
+ * complete main-process grant explicitly selects the one-shot mode.
+ */
+export function prepareCanvasFrameDocument(
+  source,
+  verificationToken,
+  options = {},
+) {
+  const { mode = "static", ...rest } = options;
+  if (mode === "static") {
+    return prepareVerifiedFrameDocument(source, verificationToken, rest);
+  }
+  if (mode === "one-shot-runtime") {
+    return prepareOneShotRuntimeFrameDocument(source, verificationToken, rest);
+  }
+  throw new TypeError("Unknown HTML canvas frame mode.");
 }
 
 export function baseHrefFromSourcePath(sourcePath) {

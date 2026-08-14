@@ -19,6 +19,10 @@ import type {
 } from "./document-session.js";
 import type { DraftSession } from "./draft-session.js";
 import type {
+  EditAuthorRuntimePort,
+  EditAuthorRuntimeSnapshot,
+} from "./edit-author-runtime-session.js";
+import type {
   ProjectContext,
   ProjectSession,
   ProjectSessionSnapshot,
@@ -91,6 +95,7 @@ export type WorkspaceControllerSnapshot = Readonly<{
   commentSession: CommentSessionSnapshot | null;
   runSession: RunSessionSnapshot | null;
   versionSession: VersionSessionSnapshot | null;
+  editRuntime: EditAuthorRuntimeSnapshot | null;
   comment: CommentWorkflowSnapshot | null;
   projectRules: ProjectRulesSnapshot | null;
   project: ProjectWorkflowSnapshot | null;
@@ -209,6 +214,7 @@ export type WorkspaceControllerConstruction = Readonly<{
     hash: HashPort;
     recovery?: RecoveryPort;
     canvas?: CanvasAuthorityPort;
+    editRuntime?: EditAuthorRuntimePort;
   }>;
   documentWorkflow?: Readonly<{
     codecs: DocumentWorkflowCodecs;
@@ -341,6 +347,17 @@ export class WorkspaceController {
   subscribeEvents(listener: (event: WorkspaceEvent) => void): () => void;
   readonly projectHydrating: boolean;
   readonly projectLoadError: string | null;
+  beginEditAuthorRuntime(input: {
+    sessionId: string;
+    sourceSha256: string;
+    canvasGeneration: number;
+  }): boolean;
+  settleEditAuthorRuntime(input: {
+    sessionId: string;
+    sourceSha256: string;
+    canvasGeneration: number;
+    outcome: "ready" | "rejected" | "failed";
+  }): boolean;
   getCurrentProjectContext(): ProjectContext | null;
   matchesCurrentProjectContext(context: ProjectContext): boolean;
   reloadDocumentCanvas(): DocumentSessionSnapshot;
