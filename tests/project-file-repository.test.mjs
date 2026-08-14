@@ -5,6 +5,7 @@ import {
   lstat,
   mkdir,
   mkdtemp,
+  open,
   readFile,
   readdir,
   rename,
@@ -469,6 +470,73 @@ test("save preserves an external replacement that races after the final source c
   );
 
   assert.equal(await readFile(imported.target.exactSourcePath, "utf8"), externalHtml);
+});
+
+test("save retains an external descriptor write to the parked source inode", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "save-parked-descriptor.html");
+  const externalHtml = html("external descriptor write after publication");
+  const pageRootHtml = html("PageRoot save survives beside external write");
+  const externalHandle = await open(imported.target.exactSourcePath, "r+");
+  t.after(() => externalHandle.close().catch(() => {}));
+  let wroteThroughParkedDescriptor = false;
+  const repository = new ProjectFileRepository({
+    projectsRoot: value.projects,
+    failpoint: async (name) => {
+      if (name === "save-before-recovery-cleanup") {
+        await externalHandle.truncate(0);
+        await externalHandle.writeFile(externalHtml, "utf8");
+        await externalHandle.sync();
+        wroteThroughParkedDescriptor = true;
+      }
+      return false;
+    },
+  });
+
+  await assert.rejects(
+    repository.saveWorkingCopy({
+      target: imported.target,
+      html: pageRootHtml,
+      expectedSourceSha256: imported.target.sourceSha256,
+      editRevision: 1,
+    }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "SOURCE_HASH_CONFLICT",
+  );
+  assert.equal(wroteThroughParkedDescriptor, true);
+  await externalHandle.close();
+
+  assert.equal(await readFile(imported.target.exactSourcePath, "utf8"), pageRootHtml);
+  const recoveryRoot = path.join(imported.target.projectRootPath, ".pageroot", "recovery");
+  const recoveryDirectories = (await readdir(recoveryRoot, { withFileTypes: true }))
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name);
+  assert.equal(recoveryDirectories.length, 1);
+  assert.equal(
+    await readFile(path.join(recoveryRoot, recoveryDirectories[0], "previous.html"), "utf8"),
+    externalHtml,
+  );
+  const transaction = await json(path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "transactions",
+    `${recoveryDirectories[0]}.json`,
+  ));
+  assert.equal(transaction.state, "conflict");
+  assert.equal(transaction.recovery, "parked-source-changed-after-publish");
+  assert.equal(transaction.parkedSourceSha256, sha256(Buffer.from(externalHtml)));
+
+  await assert.rejects(
+    new ProjectFileRepository({ projectsRoot: value.projects }).workspace({
+      sourcePath: imported.target.exactSourcePath,
+    }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "SAVE_RECOVERY_CONFLICT",
+  );
+  assert.equal(
+    await readFile(path.join(recoveryRoot, recoveryDirectories[0], "previous.html"), "utf8"),
+    externalHtml,
+  );
 });
 
 test("save refuses a missing Working Copy state before replacing HTML", async (t) => {

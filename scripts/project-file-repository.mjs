@@ -3621,14 +3621,60 @@ export class ProjectFileRepository {
       "manifest.json",
     );
     await this.#hit("save-manifest-written", { transactionPath });
-    await atomicWriteProjectJson(loaded.paths.projectRootPath, transactionPath, {
+    transaction = {
       ...(await readJsonFile(transactionPath, "save transaction", {
         projectRootPath: loaded.paths.projectRootPath,
       })),
       state: "committed",
       committedAt: nowIso(this.#clock),
-    }, "save transaction");
+    };
+    await atomicWriteProjectJson(
+      loaded.paths.projectRootPath,
+      transactionPath,
+      transaction,
+      "save transaction",
+    );
     await this.#hit("save-committed", { transactionPath });
+    await this.#hit("save-before-recovery-cleanup", {
+      transactionPath,
+      previousPath: recoveryPaths.previousPath,
+    });
+
+    // Renaming the source preserves an external editor's already-open file
+    // descriptor at previousPath. Once PageRoot has published its new inode,
+    // that editor can still write to the parked inode. Check it immediately
+    // before cleanup; a changed parked file is an unresolved external write,
+    // not disposable transaction debris.
+    const parkedAfterPublish = await readRegularFileWithSha256(
+      recoveryPaths.previousPath,
+      "parked Working Copy",
+      { projectRootPath: loaded.paths.projectRootPath },
+    );
+    if (parkedAfterPublish && parkedAfterPublish.sha256 !== expected) {
+      transaction = {
+        ...transaction,
+        state: "conflict",
+        recovery: "parked-source-changed-after-publish",
+        parkedSourceSha256: parkedAfterPublish.sha256,
+        retainedAt: nowIso(this.#clock),
+      };
+      await atomicWriteProjectJson(
+        loaded.paths.projectRootPath,
+        transactionPath,
+        transaction,
+        "save transaction",
+      );
+      throw new ProjectFileRepositoryError(
+        "SOURCE_HASH_CONFLICT",
+        "The Working Copy changed through an already-open external file after PageRoot saved it; the external bytes were retained for recovery.",
+        {
+          expectedSourceSha256: expected,
+          targetSourceSha256: nextSha256,
+          parkedSourceSha256: parkedAfterPublish.sha256,
+        },
+      );
+    }
+
     // The visible Working Copy is now the sole required link to the new
     // bytes, and metadata is durable. Best-effort cleanup must not convert a
     // completed save into a user-visible failure.
@@ -4774,12 +4820,6 @@ export class ProjectFileRepository {
       "save replacement bytes",
       { projectRootPath: loaded.paths.projectRootPath },
     );
-    if (source?.sha256 === target) {
-      const saved = await readHtmlFile(sourcePath, "Working Copy", {
-        projectRootPath: loaded.paths.projectRootPath,
-      });
-      return commitSavedSource(saved);
-    }
     if (transaction.state === "conflict") {
       throw new ProjectFileRepositoryError(
         "SAVE_RECOVERY_CONFLICT",
@@ -4789,8 +4829,15 @@ export class ProjectFileRepository {
           expectedSourceSha256: expected,
           targetSourceSha256: target,
           actualSourceSha256: source?.sha256 || null,
+          parkedSourceSha256: previous?.sha256 || null,
         },
       );
+    }
+    if (source?.sha256 === target) {
+      const saved = await readHtmlFile(sourcePath, "Working Copy", {
+        projectRootPath: loaded.paths.projectRootPath,
+      });
+      return commitSavedSource(saved);
     }
     if (!source && previous) {
       if (previous.sha256 === expected && next?.sha256 === target) {
