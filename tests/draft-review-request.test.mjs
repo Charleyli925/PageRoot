@@ -3,11 +3,14 @@ import test from "node:test";
 
 import {
   buildDraftReviewCommand,
+  buildDraftReviewCommandMarker,
   buildDraftReviewRequestMarker,
   evaluateDraftReviewEligibility,
   findExistingDraftRequest,
   parseDraftReviewArguments,
+  parseDraftReviewCommandMarker,
   parseDraftReviewRequestMarker,
+  probeCompletion,
 } from "../scripts/draft-review-request.mjs";
 
 const headSha = "a".repeat(40);
@@ -74,8 +77,8 @@ test("draft review markers bind full head and base SHAs and reject malformed bod
     sourceRunId: "31780925844",
   });
   assert.match(marker, /pageroot-draft-review-request:v1/u);
-  assert.match(marker, new RegExp(`head=${headSha}`, "u"));
-  assert.match(marker, new RegExp(`base=${baseSha}`, "u"));
+  assert.match(marker, new RegExp("head=" + headSha, "u"));
+  assert.match(marker, new RegExp("base=" + baseSha, "u"));
   assert.match(marker, /source_run=31780925844/u);
   assert.deepEqual(parseDraftReviewRequestMarker(marker), {
     headSha,
@@ -85,25 +88,43 @@ test("draft review markers bind full head and base SHAs and reject malformed bod
   assert.equal(parseDraftReviewRequestMarker("no marker here"), null);
   assert.equal(
     parseDraftReviewRequestMarker(
-      `<!-- pageroot-draft-review-request:v1\nhead=${"d".repeat(39)}\nbase=${baseSha}\n-->`,
+      "<!-- pageroot-draft-review-request:v1\nhead=" + "d".repeat(39) + "\nbase=" + baseSha + "\n-->",
     ),
     null,
   );
   assert.equal(
-    parseDraftReviewRequestMarker(
-      `<!-- pageroot-draft-review-request:v1\nhead=${headSha}\n-->`,
-    ),
+    parseDraftReviewRequestMarker("<!-- pageroot-draft-review-request:v1\nhead=" + headSha + "\n-->"),
     null,
   );
   assert.equal(
     parseDraftReviewRequestMarker(
-      `<!-- pageroot-draft-review-request:v1\nhead=${headSha}\nbase=${baseSha}\nhead=${headSha}\n-->`,
+      "<!-- pageroot-draft-review-request:v1\nhead=" + headSha + "\nbase=" + baseSha + "\nhead=" + headSha + "\n-->",
     ),
     null,
   );
   assert.throws(
     () => buildDraftReviewRequestMarker({ headSha: "short", baseSha }),
     /40-character/u,
+  );
+});
+
+test("maintainer command markers bind mode, head and base and reject malformed bodies", () => {
+  const marker = buildDraftReviewCommandMarker({ mode: "request", headSha, baseSha });
+  assert.deepEqual(parseDraftReviewCommandMarker(marker), { mode: "request", headSha, baseSha });
+  assert.deepEqual(
+    parseDraftReviewCommandMarker(buildDraftReviewCommandMarker({ mode: "close", headSha, baseSha })),
+    { mode: "close", headSha, baseSha },
+  );
+  assert.equal(parseDraftReviewCommandMarker("ordinary text"), null);
+  assert.equal(
+    parseDraftReviewCommandMarker(
+      "<!-- pageroot-draft-review-command:v1\nmode=merge\nhead=" + headSha + "\nbase=" + baseSha + "\n-->",
+    ),
+    null,
+  );
+  assert.throws(
+    () => buildDraftReviewCommandMarker({ mode: "merge", headSha, baseSha }),
+    /mode must be request or close/u,
   );
 });
 
@@ -234,36 +255,68 @@ test("automatic requests only follow a successful PR Feedback run on the same PR
   );
 });
 
-test("CLI argument parsing validates repository, SHAs and modes", () => {
+test("probe completion only accepts post-request Codex evidence bound to the exact head", () => {
+  const after = Date.parse("2026-08-09T04:00:00.000Z");
+  const review = {
+    id: 1,
+    user: { login: "chatgpt-codex-connector[bot]" },
+    commit_id: headSha,
+    submitted_at: "2026-08-09T04:01:00.000Z",
+    body: "### Codex Review\n\n**Reviewed commit:** `" + headSha.slice(0, 10) + "`",
+  };
+  const result = probeCompletion({ reviews: [review], expectedHeadSha: headSha, afterMs: after });
+  assert.equal(result.kind, "codex_review");
+  assert.equal(result.priority, "unclassified");
+
+  assert.equal(
+    probeCompletion({
+      reviews: [{ ...review, commit_id: secondSha }],
+      expectedHeadSha: headSha,
+      afterMs: after,
+    }),
+    null,
+  );
+  assert.equal(
+    probeCompletion({
+      reviews: [{ ...review, submitted_at: "2026-08-09T03:59:00.000Z" }],
+      expectedHeadSha: headSha,
+      afterMs: after,
+    }),
+    null,
+  );
+  assert.equal(
+    probeCompletion({
+      reviews: [{ ...review, user: { login: "maintainer" } }],
+      expectedHeadSha: headSha,
+      afterMs: after,
+    }),
+    null,
+  );
+});
+
+test("CLI argument parsing validates repository, PR, comment and polling bounds", () => {
   const options = parseDraftReviewArguments([
     "--repository", "Charleyli925/PageRoot",
     "--pull-request", "12",
-    "--expected-head", headSha,
-    "--expected-base", baseSha,
-    "--mode", "plan",
+    "--comment-id", "31",
   ]);
   assert.equal(options.repository, "Charleyli925/PageRoot");
   assert.equal(options.pullRequest, 12);
-  assert.equal(options.expectedHeadSha, headSha);
-  assert.equal(options.expectedBaseSha, baseSha);
-  assert.equal(options.mode, "plan");
+  assert.equal(options.commentId, 31);
   assert.throws(
     () => parseDraftReviewArguments([
       "--repository", "Charleyli925/PageRoot",
       "--pull-request", "12",
-      "--expected-head", "short",
-      "--expected-base", baseSha,
+      "--comment-id", "31",
+      "--poll-seconds", "0",
     ]),
-    /40-character/u,
+    /--poll-seconds/u,
   );
   assert.throws(
     () => parseDraftReviewArguments([
       "--repository", "Charleyli925/PageRoot",
       "--pull-request", "12",
-      "--expected-head", headSha,
-      "--expected-base", baseSha,
-      "--mode", "merge",
     ]),
-    /--mode must be plan or request/u,
+    /--comment-id/u,
   );
 });

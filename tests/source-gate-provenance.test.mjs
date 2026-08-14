@@ -283,14 +283,15 @@ test("GitHub workflows run tests in parallel with one final-review policy and ke
   assert.doesNotMatch(release, /gate:artifact-only:auto/u);
 });
 
-test("the Draft Codex review probe stays a trusted manual default-branch workflow", async () => {
+test("the Draft Codex review probe stays a trusted default-branch issue-comment workflow", async () => {
   const workflow = await readFile(
     path.join(productRoot, ".github/workflows/draft-review.yml"),
     "utf8",
   );
-  assert.match(workflow, /on:\s*\n\s+workflow_dispatch:/u);
+  assert.match(workflow, /on:\s*\n\s+issue_comment:\s*\n\s+types: \[created\]/u);
+  assert.doesNotMatch(workflow, /workflow_dispatch:/u);
+  assert.doesNotMatch(workflow, /workflow_run:/u);
   assert.doesNotMatch(workflow, /^\s+pull_request(?:_target)?:/mu);
-  assert.doesNotMatch(workflow, /^\s+workflow_run:/mu);
   assert.doesNotMatch(workflow, /ref:\s*\$\{\{\s*github\.event\.pull_request\.head\.sha/u);
   assert.doesNotMatch(workflow, /refs\/pull\//u);
   assert.doesNotMatch(workflow, /actions\/download-artifact/u);
@@ -298,14 +299,14 @@ test("the Draft Codex review probe stays a trusted manual default-branch workflo
   assert.match(workflow, /permissions:\s*\n\s+contents: read\s*\n\s+pull-requests: write/u);
   assert.doesNotMatch(workflow, /contents: write|issues: write|actions: write|checks: write/u);
   assert.doesNotMatch(workflow, /gh pr merge|mergePullRequest|git push|git tag|gh release/u);
+  assert.match(workflow, /if: github\.event\.issue\.pull_request/u);
   assert.match(workflow, /draft-review-request\.mjs/u);
+  assert.match(workflow, /persist-credentials: false/u);
+  assert.match(workflow, /ISSUE_NUMBER: \$\{\{\s*github\.event\.issue\.number\s*\}\}/u);
+  assert.match(workflow, /COMMENT_ID: \$\{\{\s*github\.event\.comment\.id\s*\}\}/u);
+  assert.match(workflow, /--pull-request "\$ISSUE_NUMBER"/u);
+  assert.match(workflow, /--comment-id "\$COMMENT_ID"/u);
+  assert.doesNotMatch(workflow, /--(?:pull-request|comment-id) "\$\{\{/u);
   assert.match(workflow, /runs-on: ubuntu-24\.04/u);
   assert.doesNotMatch(workflow, /runs-on: macos-/u);
-  assert.match(workflow, /name: Refuse non-default-branch dispatch/u);
-  assert.match(workflow, /persist-credentials: false/u);
-  assert.match(workflow, /PR_NUMBER: \$\{\{\s*github\.event\.inputs\.pull_request_number/u);
-  assert.match(workflow, /--pull-request "\$PR_NUMBER"/u);
-  assert.match(workflow, /--expected-head "\$EXPECTED_HEAD_SHA"/u);
-  assert.match(workflow, /--mode "\$PR_MODE"/u);
-  assert.doesNotMatch(workflow, /--(?:pull-request|expected-head|expected-base|mode) "\$\{\{/u);
 });
