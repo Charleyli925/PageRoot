@@ -3717,6 +3717,35 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       };
     }
 
+    const runtimeFrame = runtimeFrameRef.current;
+    const retainsSettledRuntimeFrame = Boolean(
+      resumeEditing
+      && !preserveForHistory
+      && activeNativeEditRef.current
+      && runtimeFrame?.settled
+      && runtimeFrame.elementGeneration === frameLoadGenerationRef.current
+      && !nativeEditNeedsReloadRef.current
+      && renderedSourceHtmlRef.current === frameSourceHtmlRef.current,
+    );
+    if (retainsSettledRuntimeFrame && runtimeFrame) {
+      // A checkpoint has already rebased this active island against the exact
+      // new source. Keep its frozen snapshots mounted while editing resumes;
+      // replacing this settled one-shot frame would discard them and cannot
+      // execute the author program a second time.
+      pendingHistoryBookmarkRef.current = null;
+      pendingHistoryCanonicalFenceRef.current = false;
+      containerRef.current?.setAttribute(
+        "data-native-fence-resume",
+        `retained-runtime:${runtimeFrame.elementGeneration}`,
+      );
+      return {
+        ok: true,
+        html: frameSourceHtmlRef.current,
+        sourceSha256: sourceIndexRef.current?.sourceSha256 || "",
+        pendingMutation: committed.mutation,
+      };
+    }
+
     const bookmark = detachNativeEditForFence();
     const needsCanonicalFence = Boolean(bookmark)
       || nativeSessionNeedsCanonicalFenceRef.current;

@@ -1242,6 +1242,9 @@ test("Electron Edit preserves imported source-relative ECharts assets and native
       .toContain("原位静态来源文字保持可编辑。");
     expect(sha256(readFileSync(sourcePath, "utf8"))).toBe(sourceSha256);
     expect(readFileSync(sourcePath, "utf8")).toBe(source);
+    await launched.page.keyboard.press(process.platform === "darwin" ? "Meta+S" : "Control+S");
+    await expect(launched.page.locator(".save-status")).toHaveText("已安全保存");
+    await expect(launched.page.locator("[data-runtime-bootstrap-count=\"1\"]")).toHaveCount(1);
     expect(await documentToken(launched.page)).toBe(runtimeDocument);
     expect(frame.isDetached()).toBe(false);
     expect(await frame.evaluate(() => ({
