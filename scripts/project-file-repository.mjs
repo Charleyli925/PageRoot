@@ -30,6 +30,7 @@ import { assessHtmlCandidate } from "./candidate-assessment.mjs";
 export const PROJECT_FILE_SCHEMA_VERSION = "4.0.0";
 
 const HTML_EXTENSIONS = new Set([".html", ".htm"]);
+const LEGACY_V4_REGISTRY_BACKUP_DIRECTORY = ".pageroot-registry-backups";
 const PROJECT_ID = /^project_[a-f0-9]{16,64}$/u;
 const DOCUMENT_ID = /^doc_[a-f0-9]{16,64}$/u;
 const VERSION_ID = /^ver_\d{4,}$/u;
@@ -723,6 +724,40 @@ function emptyRegistry(clock) {
   };
 }
 
+function hasExactKeys(value, expectedKeys) {
+  if (!isObject(value)) return false;
+  const actual = Object.keys(value).sort();
+  const expected = [...expectedKeys].sort();
+  return actual.length === expected.length
+    && actual.every((key, index) => key === expected[index]);
+}
+
+// The pre-hardening V4 producer wrote the same schemaVersion but had not yet
+// added the Registry's durable root identity or pending-import state. This is
+// deliberately narrower than general Registry repair: unknown, mixed and
+// extended shapes continue through the current fail-closed validator.
+function isExactLegacyV4Registry(registry) {
+  return (
+    isObject(registry)
+    && registry.schemaVersion === PROJECT_FILE_SCHEMA_VERSION
+    && hasExactKeys(registry, ["schemaVersion", "updatedAt", "projects"])
+    && isObject(registry.projects)
+    && Object.values(registry.projects).every((record) => (
+      hasExactKeys(record, ["projectRootPath", "updatedAt"])
+    ))
+  );
+}
+
+function legacyV4RegistryBackupPath(projectsRoot, registrySha256) {
+  const digest = assertSha256(registrySha256, "legacy V4 project Registry hash")
+    .slice("sha256:".length);
+  return path.join(
+    projectsRoot,
+    LEGACY_V4_REGISTRY_BACKUP_DIRECTORY,
+    `${digest}.json`,
+  );
+}
+
 function assertRegistryTimestamp(value, label) {
   if (!value || Number.isNaN(Date.parse(value))) {
     throw new ProjectFileRepositoryError(
@@ -1401,11 +1436,185 @@ export class ProjectFileRepository {
   }
 
   async #readRegistry() {
-    const registry = await readJsonFile(this.#registryPath, "project registry", {
+    const record = await readJsonFileWithSha256(this.#registryPath, "project registry", {
       projectRootPath: this.#projectsRoot,
     });
-    if (!registry) return emptyRegistry(this.#clock);
-    return assertRegistry(registry);
+    if (!record) return emptyRegistry(this.#clock);
+    try {
+      // A current Registry is strictly read-only at this boundary. In
+      // particular, validation must not refresh its timestamp or normalize
+      // its bytes merely because it was opened.
+      return assertRegistry(record.value);
+    } catch (cause) {
+      if (!isExactLegacyV4Registry(record.value)) throw cause;
+      return this.#migrateExactLegacyV4Registry(record);
+    }
+  }
+
+  async #migrateExactLegacyV4Registry({ value: legacyRegistry, sha256: legacySha256 }) {
+    let migrated;
+    try {
+      assertRegistryTimestamp(legacyRegistry.updatedAt, "legacy Registry updatedAt");
+      const projects = {};
+      for (const [projectId, record] of Object.entries(legacyRegistry.projects)) {
+        assertId(projectId, PROJECT_ID, "legacy Registry projectId");
+        assertRegistryTimestamp(record.updatedAt, "legacy registered root updatedAt");
+        const registered = await this.#legacyV4RegisteredRoot(projectId, record);
+        projects[projectId] = {
+          registeredProjectRootPath: registered.projectRootPath,
+          rootFileIdentity: registered.rootFileIdentity,
+          updatedAt: record.updatedAt,
+        };
+      }
+      migrated = {
+        schemaVersion: PROJECT_FILE_SCHEMA_VERSION,
+        updatedAt: nowIso(this.#clock),
+        projects,
+        pendingImports: {},
+      };
+      assertRegistry(migrated);
+    } catch (cause) {
+      if (
+        cause instanceof ProjectFileRepositoryError
+        && cause.code.startsWith("LEGACY_V4_REGISTRY_")
+      ) {
+        throw cause;
+      }
+      throw new ProjectFileRepositoryError(
+        "LEGACY_V4_REGISTRY_MIGRATION_FAILED",
+        "The legacy V4 project Registry could not be safely migrated.",
+        { causeCode: cause?.code || "UNKNOWN" },
+      );
+    }
+
+    await this.#publishExactLegacyV4Registry({
+      legacySha256,
+      migrated,
+    });
+    return migrated;
+  }
+
+  async #legacyV4RegisteredRoot(projectId, record) {
+    const first = await this.#assertRegisteredProjectRootPath(record.projectRootPath);
+    const firstIdentity = copyFileIdentity(first.information);
+    const firstProject = await this.#legacyV4ProjectIdentity(first.projectRootPath);
+    if (firstProject.projectId !== projectId) {
+      throw new ProjectFileRepositoryError(
+        "LEGACY_V4_REGISTRY_PROJECT_ID_MISMATCH",
+        "The legacy Registry projectId does not match .pageroot/project.json.",
+        { projectId },
+      );
+    }
+
+    // Re-read both the root stat and its project identity after validation.
+    // Filesystem identity, never a name or HTML hash, is what becomes the
+    // current Registry's same-parent rename clue.
+    const latest = await this.#assertRegisteredProjectRootPath(first.projectRootPath);
+    const latestIdentity = copyFileIdentity(latest.information);
+    if (!sameFileIdentity(firstIdentity, latestIdentity)) {
+      throw new ProjectFileRepositoryError(
+        "LEGACY_V4_REGISTRY_ROOT_IDENTITY_CHANGED",
+        "The legacy Registry project root changed during migration.",
+        { projectId },
+      );
+    }
+    const latestProject = await this.#legacyV4ProjectIdentity(latest.projectRootPath);
+    if (latestProject.projectId !== projectId) {
+      throw new ProjectFileRepositoryError(
+        "LEGACY_V4_REGISTRY_PROJECT_ID_MISMATCH",
+        "The legacy Registry projectId does not match .pageroot/project.json.",
+        { projectId },
+      );
+    }
+    return {
+      projectRootPath: latest.projectRootPath,
+      rootFileIdentity: latestIdentity,
+    };
+  }
+
+  async #legacyV4ProjectIdentity(projectRootPath) {
+    const paths = projectPaths(projectRootPath);
+    if (!(await directoryInformation(paths.controlRoot, ".pageroot", {
+      projectRootPath,
+    }))) {
+      throw new ProjectFileRepositoryError(
+        "PROJECT_CONTROL_NOT_FOUND",
+        "The legacy Registry project folder has no PageRoot identity.",
+      );
+    }
+    return assertProjectIdentity(await readJsonFile(paths.projectPath, "project.json", {
+      projectRootPath,
+    }));
+  }
+
+  async #readExactLegacyV4RegistryBytes(expectedSha256) {
+    const current = await readRegularFileWithSha256(
+      this.#registryPath,
+      "project registry",
+      { projectRootPath: this.#projectsRoot },
+    );
+    if (!current || current.sha256 !== expectedSha256) {
+      throw new ProjectFileRepositoryError(
+        "LEGACY_V4_REGISTRY_MIGRATION_SOURCE_CHANGED",
+        "The legacy V4 project Registry changed while migration was being prepared.",
+        {
+          expectedSha256,
+          actualSha256: current?.sha256 || null,
+        },
+      );
+    }
+    return current;
+  }
+
+  async #publishExactLegacyV4Registry({ legacySha256, migrated }) {
+    try {
+      await this.#assertProjectsRoot();
+      assertRegistry(migrated);
+      const original = await this.#readExactLegacyV4RegistryBytes(legacySha256);
+      const backupPath = legacyV4RegistryBackupPath(this.#projectsRoot, legacySha256);
+      await writeFileNoReplace(
+        backupPath,
+        original.buffer,
+        legacySha256,
+        "legacy V4 project Registry backup",
+        { projectRootPath: this.#projectsRoot },
+      );
+      await this.#hit("legacy-v4-registry-migration-backup-written", {
+        backupPath,
+        legacySha256,
+      });
+      await this.#readExactLegacyV4RegistryBytes(legacySha256);
+      await this.#hit("legacy-v4-registry-migration-before-publish", {
+        backupPath,
+        legacySha256,
+      });
+      await this.#readExactLegacyV4RegistryBytes(legacySha256);
+      await atomicWriteProjectJson(
+        this.#projectsRoot,
+        this.#registryPath,
+        migrated,
+        "project registry",
+      );
+      await this.#hit("legacy-v4-registry-migration-published", {
+        backupPath,
+        legacySha256,
+      });
+    } catch (cause) {
+      if (
+        cause instanceof ProjectFileRepositoryError
+        && (
+          cause.code === "INJECTED_FAILPOINT"
+          || cause.code.startsWith("LEGACY_V4_REGISTRY_")
+        )
+      ) {
+        throw cause;
+      }
+      throw new ProjectFileRepositoryError(
+        "LEGACY_V4_REGISTRY_MIGRATION_PUBLISH_FAILED",
+        "The legacy V4 project Registry could not be atomically published.",
+        { causeCode: cause?.code || "UNKNOWN" },
+      );
+    }
   }
 
   async #workspace({ sourcePath }) {

@@ -19,6 +19,20 @@ async function postJson(bridge, pathname, body) {
   return bridge.postJson(pathname, body);
 }
 
+function legacyV4RegistryFromCurrent(current) {
+  return {
+    schemaVersion: "4.0.0",
+    updatedAt: current.updatedAt,
+    projects: Object.fromEntries(Object.entries(current.projects).map(([projectId, record]) => [
+      projectId,
+      {
+        projectRootPath: record.registeredProjectRootPath,
+        updatedAt: record.updatedAt,
+      },
+    ])),
+  };
+}
+
 test("project-file PR1 import switches to V1 before the queued save and leaves external bytes untouched", async (t) => {
   const environment = await createBridgeTestEnvironment(t, {
     prefix: "pageroot-project-file-bridge-",
@@ -65,6 +79,69 @@ test("project-file PR1 import switches to V1 before the queued save and leaves e
     "utf8",
   ));
   assert.deepEqual(manifest.versions.map((version) => version.versionId), ["ver_0001"]);
+});
+
+test("Bridge migrates an exact legacy V4 Registry before workspace GET and first ensureProject", async (t) => {
+  const environment = await createBridgeTestEnvironment(t, {
+    prefix: "pageroot-project-file-legacy-v4-bridge-",
+  });
+  const projectsRoot = join(environment.root, "project-files");
+  const seedSourcePath = await environment.createSource("legacy-seed.html", html("legacy seed"));
+  const openingSource = html("new external source");
+  const openingSourcePath = await environment.createSource("legacy-opening.html", openingSource);
+  const bridge = await environment.start({
+    HTML_AI_PROJECT_FILES_ROOT: projectsRoot,
+  });
+
+  const seedPreview = await bridge.requestJson(
+    `/workspace?sourcePath=${encodeURIComponent(seedSourcePath)}&projectStorageVersion=4.0.0`,
+  );
+  assert.equal(seedPreview.response.status, 200, JSON.stringify(seedPreview.body));
+  const seeded = await postJson(bridge, "/project/ensure", {
+    sourcePath: seedSourcePath,
+    expectedSourceSha256: seedPreview.body.currentHtmlSha256,
+    projectStorageVersion: "4.0.0",
+  });
+  assert.equal(seeded.response.status, 200, JSON.stringify(seeded.body));
+
+  const registryPath = join(projectsRoot, ".pageroot-registry.json");
+  const currentRegistry = JSON.parse(await readFile(registryPath, "utf8"));
+  const legacyRegistryBytes = Buffer.from(
+    `${JSON.stringify(legacyV4RegistryFromCurrent(currentRegistry), null, 2)}\n`,
+    "utf8",
+  );
+  const legacyRegistrySha256 = sha256(legacyRegistryBytes);
+  await writeFile(registryPath, legacyRegistryBytes);
+
+  const preview = await bridge.requestJson(
+    `/workspace?sourcePath=${encodeURIComponent(openingSourcePath)}&projectStorageVersion=4.0.0`,
+  );
+  assert.equal(preview.response.status, 200, JSON.stringify(preview.body));
+  assert.equal(preview.body.registered, false);
+  const migratedRegistry = JSON.parse(await readFile(registryPath, "utf8"));
+  assert.deepEqual(migratedRegistry.pendingImports, {});
+  const backupPath = join(
+    projectsRoot,
+    ".pageroot-registry-backups",
+    `${legacyRegistrySha256.slice("sha256:".length)}.json`,
+  );
+  assert.deepEqual(await readFile(backupPath), legacyRegistryBytes);
+
+  const ensured = await postJson(bridge, "/project/ensure", {
+    sourcePath: openingSourcePath,
+    expectedSourceSha256: preview.body.currentHtmlSha256,
+    projectStorageVersion: "4.0.0",
+  });
+  assert.equal(ensured.response.status, 200, JSON.stringify(ensured.body));
+  assert.equal(ensured.body.imported, true);
+  assert.equal(await readFile(openingSourcePath, "utf8"), openingSource);
+
+  const reopened = await bridge.requestJson(
+    `/workspace?sourcePath=${encodeURIComponent(ensured.body.sourcePath)}&projectStorageVersion=4.0.0`,
+  );
+  assert.equal(reopened.response.status, 200, JSON.stringify(reopened.body));
+  assert.equal(reopened.body.registered, true);
+  assert.equal(reopened.body.projectId, ensured.body.projectId);
 });
 
 test("a v4 client treats a pre-v4 project as a fresh V1 import", async (t) => {

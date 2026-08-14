@@ -97,6 +97,18 @@ manifest mappings agree. The root must be a direct child of the configured
 projects directory, and every managed control path is real-path checked with no
 symlink traversal.
 
+The only mutable Registry compatibility path is the exact pre-hardening V4
+shape with `schemaVersion: "4.0.0"`, no `pendingImports`, and no project-record
+fields beyond `projectRootPath` and `updatedAt`. The migration reader validates
+a current Registry read-only. Before completing that legacy shape, every record must
+prove its valid key, direct-child real non-symlink root and matching
+`.pageroot/project.json`; the new root identity comes only from the live
+directory stat. Validation finishes before the old Registry bytes are copied to
+a Hash-named backup and one atomic current Registry is published. The backup is
+not runtime authority. Any validation or publication failure leaves the old
+Registry bytes in place and never resets, drops, scans, imports or reassociates
+a Project. HTML Hashes and equal bytes never participate in this migration.
+
 A same-parent Finder rename can update that Registry record only through a
 compare-and-swap after the stable project identity and root filesystem identity
 match. Moving a root elsewhere, crossing a volume, or copying it never grants

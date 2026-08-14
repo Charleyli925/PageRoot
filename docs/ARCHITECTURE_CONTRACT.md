@@ -503,6 +503,19 @@ Inline aliases and permanent “just in case” branches are not allowed.
 
 The supported compatibility adapters are:
 
+- An exact pre-hardening V4 `.pageroot-registry.json` may complete its missing
+  Registry-only root identity metadata through `ProjectFileRepository`. The
+  current shape is validated and read without a write. The historical shape
+  must have exactly `schemaVersion: "4.0.0"`, no `pendingImports`, and only
+  `{ projectRootPath, updatedAt }` project records. Every record must prove its
+  ID, direct-child non-symlink root, real-path containment and matching
+  `.pageroot/project.json`; current `rootFileIdentity` comes from that live
+  root stat, never a filename or HTML Hash. All entries validate before the
+  old raw bytes are backed up by Hash and the full current Registry is
+  atomically published. A failure preserves the old Registry, cannot reset or
+  reassociate a project, and grants no write authority. Remove this migration
+  only after a read-only Registry census proves the exact historical shape is
+  outside the supported upgrade window.
 - Complete PageRoot 0.9.0 v3 project records whose registry, `project.json`,
   initial Version and existing `projects/<projectId>` directory prove one
   identity may gain `displayName`, `createdAt` and
