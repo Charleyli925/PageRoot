@@ -294,14 +294,33 @@ test("probe completion only accepts post-request Codex evidence bound to the exa
     }),
     null,
   );
+});
+
+test("probe settlement accepts only unedited exact-commit clean comments and never reactions", () => {
+  const after = Date.parse("2026-08-09T04:00:00.000Z");
+  const cleanBody = "Codex Review: Didn't find any major issues.\n\n**Reviewed commit:** `" + headSha.slice(0, 10) + "`";
+  const bound = {
+    databaseId: 7,
+    user: { login: "chatgpt-codex-connector[bot]" },
+    created_at: "2026-08-09T04:01:00.000Z",
+    updated_at: "2026-08-09T04:01:00.000Z",
+    body: cleanBody,
+  };
+  assert.equal(
+    probeCompletion({ issueComments: [bound], expectedHeadSha: headSha, afterMs: after }).kind,
+    "codex_clean_comment",
+  );
   assert.equal(
     probeCompletion({
-      issueComments: [{
-        databaseId: 7,
-        user: { login: "chatgpt-codex-connector[bot]" },
-        created_at: "2026-08-09T04:01:00.000Z",
-        body: "Codex Review: Didn't find any major issues.\n\n",
-      }],
+      issueComments: [{ ...bound, body: "Codex Review: Didn't find any major issues.\n\n" }],
+      expectedHeadSha: headSha,
+      afterMs: after,
+    }),
+    null,
+  );
+  assert.equal(
+    probeCompletion({
+      issueComments: [{ ...bound, last_edited_at: "2026-08-09T04:02:00.000Z" }],
       expectedHeadSha: headSha,
       afterMs: after,
     }),
