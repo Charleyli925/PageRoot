@@ -777,6 +777,102 @@ test("promotion verifies linked Version Working Copy bytes before manifest publi
   assert.deepEqual(manifest.versions.map((version) => version.versionId), ["ver_0001"]);
 });
 
+test("promotion rejects a late retained Version Working Copy write before manifest publication", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "late-publication.html");
+  const candidate = await completeFrozenCandidate(value, {
+    target: imported.target,
+    requestId: "req_late_publication",
+    html: html("candidate V2 bytes"),
+    expectedSourceSha256: imported.target.sourceSha256,
+  });
+  const versionWorkingCopyPath = path.join(
+    imported.target.projectRootPath,
+    "late-publication-V2.html",
+  );
+  const externalHtml = html("external write after guarded publication");
+  let externalHandle = null;
+  t.after(() => externalHandle?.close());
+  const repository = new ProjectFileRepository({
+    projectsRoot: value.projects,
+    failpoint: async (name) => {
+      if (name === "promotion-working-copy-published") {
+        externalHandle = await open(versionWorkingCopyPath, "r+");
+      }
+      if (name === "promotion-before-manifest-publication") {
+        const buffer = Buffer.from(externalHtml, "utf8");
+        await externalHandle.truncate(0);
+        await externalHandle.write(buffer, 0, buffer.byteLength, 0);
+      }
+      return false;
+    },
+  });
+
+  await assert.rejects(
+    repository.promoteCandidate({
+      target: imported.target,
+      candidateId: candidate.candidate.candidateId,
+    }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "PROMOTION_WORKING_COPY_HASH_MISMATCH",
+  );
+  assert.equal(await readFile(versionWorkingCopyPath, "utf8"), externalHtml);
+  const manifest = await json(path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "manifest.json",
+  ));
+  assert.deepEqual(manifest.versions.map((version) => version.versionId), ["ver_0001"]);
+});
+
+test("promotion restores a retained Version Working Copy handle before manifest publication", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "retained-handle.html");
+  const candidate = await completeFrozenCandidate(value, {
+    target: imported.target,
+    requestId: "req_retained_handle",
+    html: html("candidate V2 bytes"),
+    expectedSourceSha256: imported.target.sourceSha256,
+  });
+  const versionWorkingCopyPath = path.join(
+    imported.target.projectRootPath,
+    "retained-handle-V2.html",
+  );
+  const externalHtml = html("external write through retained Version Working Copy handle");
+  let externalHandle = null;
+  t.after(() => externalHandle?.close());
+  const repository = new ProjectFileRepository({
+    projectsRoot: value.projects,
+    failpoint: async (name) => {
+      if (name === "promotion-working-copy-created") {
+        externalHandle = await open(versionWorkingCopyPath, "r+");
+      }
+      if (name === "promotion-before-manifest-publication") {
+        const buffer = Buffer.from(externalHtml, "utf8");
+        await externalHandle.truncate(0);
+        await externalHandle.write(buffer, 0, buffer.byteLength, 0);
+      }
+      return false;
+    },
+  });
+
+  await assert.rejects(
+    repository.promoteCandidate({
+      target: imported.target,
+      candidateId: candidate.candidate.candidateId,
+    }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "PROMOTION_WORKING_COPY_HASH_MISMATCH",
+  );
+  assert.equal(await readFile(versionWorkingCopyPath, "utf8"), externalHtml);
+  const manifest = await json(path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "manifest.json",
+  ));
+  assert.deepEqual(manifest.versions.map((version) => version.versionId), ["ver_0001"]);
+});
+
 test("exact path, rather than equal bytes, determines the opened document", async (t) => {
   const value = await fixture(t);
   const sameBytes = html("same bytes");
@@ -799,6 +895,28 @@ test("exact path, rather than equal bytes, determines the opened document", asyn
   assert.equal(reopenedFirst.exactSourcePath, first.target.exactSourcePath);
   assert.equal(reopenedSecond.projectId, second.target.projectId);
   assert.equal(reopenedSecond.exactSourcePath, second.target.exactSourcePath);
+});
+
+test("an unmanaged same-byte HTML never adopts a missing Working Copy", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "managed.html");
+  const originalBytes = await readFile(imported.target.exactSourcePath);
+  const movedManagedPath = path.join(value.root, "moved-managed.html");
+  await rename(imported.target.exactSourcePath, movedManagedPath);
+  const unmanagedPath = path.join(imported.target.projectRootPath, "unmanaged-same-bytes.html");
+  await writeFile(unmanagedPath, originalBytes);
+
+  assert.equal(await value.repository.resolveOpenTarget({ sourcePath: unmanagedPath }), null);
+  const manifest = await json(path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "manifest.json",
+  ));
+  assert.equal(
+    manifest.workingCopies[0].sourceRelativePath,
+    path.basename(imported.target.exactSourcePath),
+  );
+  assert.deepEqual(await readFile(unmanagedPath), originalBytes);
 });
 
 test("case-distinct Working Copy paths never rebind on a case-sensitive volume", async (t) => {
@@ -2259,6 +2377,8 @@ test("promotion fault recovery leaves exactly one formal Version and regular fil
     "promotion-snapshot-created",
     "promotion-working-copy-prepared",
     "promotion-working-copy-created",
+    "promotion-working-copy-staged",
+    "promotion-working-copy-published",
     "promotion-manifest-committed",
     "promotion-candidate-promoted",
     "promotion-completed",

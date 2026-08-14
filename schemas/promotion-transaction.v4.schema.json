@@ -23,13 +23,15 @@
     "preferredExtension",
     "pathAllocationOrdinal",
     "preparedWorkingCopyFileIdentity",
+    "publicationWorkingCopyGuardRelativePath",
+    "publicationWorkingCopyReplacementRelativePath",
     "workingCopy",
     "createdAt"
   ],
   "properties": {
     "schemaVersion": { "const": "4.0.0" },
     "kind": { "const": "promotion" },
-    "state": { "enum": ["prepared", "snapshot-created", "working-copy-prepared", "working-copy-created", "manifest-committed", "completed"] },
+    "state": { "enum": ["prepared", "snapshot-created", "working-copy-prepared", "working-copy-created", "working-copy-staged", "working-copy-published", "manifest-committed", "completed"] },
     "transactionId": { "type": "string", "pattern": "^promote_candidate_[A-Za-z0-9_-]{8,160}$" },
     "projectId": { "type": "string", "pattern": "^project_[a-f0-9]{16,64}$" },
     "documentId": { "type": "string", "pattern": "^doc_[a-f0-9]{16,64}$" },
@@ -47,6 +49,14 @@
     "preparedWorkingCopyRelativePath": {
       "type": "string",
       "pattern": "^transactions/promote_candidate_[A-Za-z0-9_-]{8,160}/prepared-working-copy\\.(?:html|htm)$"
+    },
+    "publicationWorkingCopyGuardRelativePath": {
+      "type": "string",
+      "pattern": "^transactions/promote_candidate_[A-Za-z0-9_-]{8,160}/publication-working-copy-guard\\.(?:html|htm)$"
+    },
+    "publicationWorkingCopyReplacementRelativePath": {
+      "type": "string",
+      "pattern": "^transactions/promote_candidate_[A-Za-z0-9_-]{8,160}/publication-working-copy-replacement\\.(?:html|htm)$"
     },
     "preferredFileStem": {
       "type": "string",
@@ -71,6 +81,8 @@
     "reallocatedAt": { "type": "string", "format": "date-time" },
     "workingCopyPreparedAt": { "type": "string", "format": "date-time" },
     "workingCopyCreatedAt": { "type": "string", "format": "date-time" },
+    "workingCopyStagedAt": { "type": "string", "format": "date-time" },
+    "workingCopyPublishedAt": { "type": "string", "format": "date-time" },
     "manifestCommittedAt": { "type": "string", "format": "date-time" },
     "completedAt": { "type": "string", "format": "date-time" },
     "workingCopy": {

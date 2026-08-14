@@ -224,6 +224,24 @@ test("unmapped code still falls back to the core Node group", () => {
   assert.deepEqual(plan.selectedNodeTests, []);
 });
 
+test("Request schema changes select the v4 project-file protocol owners", () => {
+  const edit = selectGatePlan({
+    map,
+    lane: "edit",
+    changedFiles: ["schemas/request.v4.schema.json"],
+  });
+  const task = selectGatePlan({
+    map,
+    lane: "task",
+    changedFiles: ["schemas/request.v4.schema.json"],
+  });
+  for (const plan of [edit, task]) {
+    assert.ok(plan.selectedNodeTests.includes("tests/project-file-repository.test.mjs"));
+    assert.ok(plan.selectedNodeTests.includes("tests/project-file-schema.test.mjs"));
+  }
+  assert.ok(suiteIds(task).includes("ai-smoke"));
+});
+
 test("a file with two direct owners safely unions their coverage", () => {
   const plan = selectGatePlan({
     map,

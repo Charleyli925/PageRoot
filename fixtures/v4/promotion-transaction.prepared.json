@@ -14,6 +14,8 @@
   "previousVersionId": "ver_0001",
   "finalWorkingCopyRelativePath": "fixture-V2.html",
   "preparedWorkingCopyRelativePath": "transactions/promote_candidate_fixture_0001/prepared-working-copy.html",
+  "publicationWorkingCopyGuardRelativePath": "transactions/promote_candidate_fixture_0001/publication-working-copy-guard.html",
+  "publicationWorkingCopyReplacementRelativePath": "transactions/promote_candidate_fixture_0001/publication-working-copy-replacement.html",
   "preferredFileStem": "fixture",
   "preferredExtension": ".html",
   "pathAllocationOrdinal": 0,

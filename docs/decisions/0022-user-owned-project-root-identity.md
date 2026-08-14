@@ -70,10 +70,10 @@ reads or writes Candidate completion facts.
   no history is cloned and no duplicate-project dialog appears.
 - A root-level Working Copy rename preserves `workingCopyId` and updates its
   direct manifest mapping plus `preferredFileStem`/`preferredExtension`.
-  Missing mappings may be recovered only by a unique file identity, or by a
-  unique current Hash among missing Working Copies. Ambiguity fails closed.
-  Extra HTML files and HTML moved into another project remain external and
-  never alter a manifest.
+  Missing mappings may be recovered only by a unique file identity, or when
+  the file returns at its exact recorded path. Equal HTML Hashes never prove
+  ownership or cause a manifest rebind. Extra HTML files and HTML moved into
+  another project remain external and never alter a manifest.
 
 ### v4 paths and Promotion
 
@@ -87,14 +87,19 @@ creates `B-V2.html`. A file, directory, or symlink collision is user-owned and
 selects the next frozen path: `B-V2-V2.html`, then `B-V2-V2-V2.html`, and so
 on.
 
-Before visible Working Copy bytes exist, the Promotion transaction durably
-records final relative path, private preparation path, preferred naming,
-allocation ordinal, a strict Working Copy object, and the preparation file
-identity. It writes private transaction bytes first and hard-links them to a
-previously absent visible path. A collision before visible publication can
-allocate the next path; once preparation starts, no path changes. Replacing a
-prepared or visible transaction file makes recovery fail without deleting user
-bytes or overwriting a collision.
+Before the manifest can name visible Working Copy bytes, the Promotion
+transaction durably records the final relative path, private preparation,
+guard and replacement paths, preferred naming, allocation ordinal, a strict
+Working Copy object, and the preparation file identity. It writes private
+transaction bytes first, stages the initial visible link into a private guard,
+then creates a fresh visible path from the private replacement with
+no-replace `link()`. The manifest boundary rechecks both the fresh visible
+bytes and the guard: a retained external descriptor is restored visibly and
+causes a conflict, while an external path collision wins without being
+overwritten. A collision before visible publication can allocate the next
+path; once preparation starts, no path changes. Replacing a prepared, guarded
+or visible transaction file makes recovery fail without deleting user bytes
+or overwriting a collision.
 
 ### Product behavior
 
@@ -136,8 +141,8 @@ cross-volume copies acquire durable writes.
 ### Use equal HTML Hashes as global navigation identity
 
 Rejected because equal bytes at different paths are still different user
-files. Hashes are only a final, unique recovery clue for an otherwise missing
-registered Working Copy mapping.
+files. Hashes confirm bytes after a trusted path or filesystem-identity match;
+they never recover an otherwise missing registered Working Copy mapping.
 
 ### Overwrite or rename around an already-started Promotion
 

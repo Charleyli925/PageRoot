@@ -726,6 +726,44 @@ function saveTransactionArtifactPaths(paths, transactionPath, transaction) {
   };
 }
 
+function promotionTransactionArtifactPaths(paths, transaction) {
+  const prefix = `transactions/${transaction.transactionId}/`;
+  const workingCopyGuardRelativePath = `${prefix}publication-working-copy-guard${transaction.preferredExtension}`;
+  const workingCopyReplacementRelativePath = `${prefix}publication-working-copy-replacement${transaction.preferredExtension}`;
+  if (
+    transaction.publicationWorkingCopyGuardRelativePath !== workingCopyGuardRelativePath
+    || transaction.publicationWorkingCopyReplacementRelativePath !== workingCopyReplacementRelativePath
+  ) {
+    throw new ProjectFileRepositoryError(
+      "PROMOTION_TRANSACTION_INVALID",
+      "The Promotion Working Copy publication artifacts are invalid.",
+    );
+  }
+  const workingCopyGuardPath = resolveRelative(
+    paths.controlRoot,
+    workingCopyGuardRelativePath,
+    "Promotion Working Copy guard path",
+  );
+  const workingCopyReplacementPath = resolveRelative(
+    paths.controlRoot,
+    workingCopyReplacementRelativePath,
+    "Promotion Working Copy replacement path",
+  );
+  if (
+    !pathInside(paths.transactionsRoot, workingCopyGuardPath)
+    || !pathInside(paths.transactionsRoot, workingCopyReplacementPath)
+  ) {
+    throw new ProjectFileRepositoryError(
+      "PATH_ESCAPES_PROJECT",
+      "Promotion Working Copy publication artifacts must stay inside transactions/.",
+    );
+  }
+  return {
+    workingCopyGuardPath,
+    workingCopyReplacementPath,
+  };
+}
+
 function projectNotesTransactionArtifactPaths(paths, transactionPath, transaction) {
   const stem = path.basename(transactionPath, ".json");
   if (!/^project-notes_[a-f0-9-]{36}$/u.test(stem)) {
@@ -1671,6 +1709,8 @@ function assertPromotionTransaction(transaction) {
     "preferredExtension",
     "pathAllocationOrdinal",
     "preparedWorkingCopyFileIdentity",
+    "publicationWorkingCopyGuardRelativePath",
+    "publicationWorkingCopyReplacementRelativePath",
     "workingCopy",
     "createdAt",
   ], [
@@ -1678,6 +1718,8 @@ function assertPromotionTransaction(transaction) {
     "reallocatedAt",
     "workingCopyPreparedAt",
     "workingCopyCreatedAt",
+    "workingCopyStagedAt",
+    "workingCopyPublishedAt",
     "manifestCommittedAt",
     "completedAt",
   ], "Promotion transaction", "PROMOTION_TRANSACTION_INVALID");
@@ -1689,6 +1731,8 @@ function assertPromotionTransaction(transaction) {
       "snapshot-created",
       "working-copy-prepared",
       "working-copy-created",
+      "working-copy-staged",
+      "working-copy-published",
       "manifest-committed",
       "completed",
     ].includes(transaction.state)
@@ -1729,6 +1773,18 @@ function assertPromotionTransaction(transaction) {
       "The Promotion prepared Working Copy path is invalid.",
     );
   }
+  const publicationPrefix = `transactions/${transaction.transactionId}/`;
+  if (
+    transaction.publicationWorkingCopyGuardRelativePath
+      !== `${publicationPrefix}publication-working-copy-guard${transaction.preferredExtension}`
+    || transaction.publicationWorkingCopyReplacementRelativePath
+      !== `${publicationPrefix}publication-working-copy-replacement${transaction.preferredExtension}`
+  ) {
+    throw new ProjectFileRepositoryError(
+      "PROMOTION_TRANSACTION_INVALID",
+      "The Promotion Working Copy publication paths are invalid.",
+    );
+  }
   if (transaction.preparedWorkingCopyFileIdentity !== null) {
     assertFileIdentity(
       transaction.preparedWorkingCopyFileIdentity,
@@ -1744,6 +1800,8 @@ function assertPromotionTransaction(transaction) {
     "reallocatedAt",
     "workingCopyPreparedAt",
     "workingCopyCreatedAt",
+    "workingCopyStagedAt",
+    "workingCopyPublishedAt",
     "manifestCommittedAt",
     "completedAt",
   ]) {
@@ -4843,41 +4901,6 @@ export class ProjectFileRepository {
     return true;
   }
 
-  async #findMissingWorkingCopyByHash(loaded, source) {
-    const candidates = [];
-    for (const workingCopy of loaded.manifest.workingCopies) {
-      const mappedPath = workingCopySourcePath(loaded.paths, workingCopy);
-      const mappedInformation = await regularInformation(mappedPath, "Working Copy", {
-        projectRootPath: loaded.paths.projectRootPath,
-      });
-      if (mappedInformation) continue;
-      const state = await readJsonFile(
-        workingCopyStatePath(loaded.paths, workingCopy),
-        "Working Copy state",
-        { projectRootPath: loaded.paths.projectRootPath },
-      );
-      if (!state) {
-        throw new ProjectFileRepositoryError(
-          "WORKING_COPY_STATE_NOT_FOUND",
-          "A managed Working Copy has no v4 state record.",
-        );
-      }
-      assertWorkingCopyState(state, loaded.project, workingCopy);
-      if (state.currentSha256 === source.sha256) candidates.push(workingCopy);
-    }
-    if (candidates.length > 1) {
-      throw new ProjectFileRepositoryError(
-        "MANAGED_PATH_AMBIGUOUS",
-        "More than one missing Working Copy matches this HTML content.",
-        {
-          projectId: loaded.project.projectId,
-          workingCopyIds: candidates.map((entry) => entry.workingCopyId),
-        },
-      );
-    }
-    return candidates[0] || null;
-  }
-
   async #targetForExactPath(loaded, exactSourcePath, source) {
     const { paths, project, manifest } = loaded;
     for (const version of manifest.versions) {
@@ -4929,8 +4952,7 @@ export class ProjectFileRepository {
         },
       );
     }
-    const workingCopy = matching[0]
-      || await this.#findMissingWorkingCopyByHash(loaded, source);
+    const workingCopy = matching[0];
     if (!workingCopy) return null;
     await this.#rebindWorkingCopyPath(loaded, workingCopy, exactSourcePath, source.information);
     return publicOpenTarget({
@@ -5807,6 +5829,10 @@ export class ProjectFileRepository {
         finalWorkingCopyRelativePath: allocation.sourceRelativePath,
         preparedWorkingCopyRelativePath: "transactions/" + transactionId
           + "/prepared-working-copy" + preferredExtension,
+        publicationWorkingCopyGuardRelativePath: "transactions/" + transactionId
+          + "/publication-working-copy-guard" + preferredExtension,
+        publicationWorkingCopyReplacementRelativePath: "transactions/" + transactionId
+          + "/publication-working-copy-replacement" + preferredExtension,
         preferredFileStem,
         preferredExtension,
         pathAllocationOrdinal: allocation.allocationOrdinal,
@@ -5872,6 +5898,8 @@ export class ProjectFileRepository {
         "snapshot-created",
         "working-copy-prepared",
         "working-copy-created",
+        "working-copy-staged",
+        "working-copy-published",
         "manifest-committed",
         "completed",
       ].includes(transaction.state)
@@ -5955,6 +5983,7 @@ export class ProjectFileRepository {
     }
     await this.#reallocateUnstartedPromotion(loaded, transactionRoot, transaction);
     const preparedPath = this.#preparedPromotionWorkingCopyPath(loaded, transaction);
+    const publication = promotionTransactionArtifactPaths(loaded.paths, transaction);
     if (transaction.state === "snapshot-created") {
       let preparedInformation = await regularInformation(
         preparedPath,
@@ -5997,18 +6026,19 @@ export class ProjectFileRepository {
       await this.#hit("promotion-working-copy-prepared", { transactionRoot });
     }
     if (transaction.state === "working-copy-prepared") {
-      const preparedInformation = await regularInformation(
+      const prepared = await readRegularFileWithSha256(
         preparedPath,
         "prepared Version Working Copy",
         { projectRootPath: loaded.paths.projectRootPath },
       );
       if (
-        !preparedInformation
+        !prepared
         || !transaction.preparedWorkingCopyFileIdentity
         || !sameFileIdentity(
           transaction.preparedWorkingCopyFileIdentity,
-          copyFileIdentity(preparedInformation),
+          copyFileIdentity(prepared.information),
         )
+        || prepared.sha256 !== transaction.candidateOutputSha256
       ) {
         throw new ProjectFileRepositoryError(
           "PROMOTION_PREPARED_FILE_CHANGED",
@@ -6019,35 +6049,41 @@ export class ProjectFileRepository {
         loaded.paths.projectRootPath,
         topLevelHtmlRelativePath(transaction.finalWorkingCopyRelativePath),
       );
-      let visibleInformation = await lstat(visiblePath).catch((cause) => {
-        if (cause?.code === "ENOENT") return null;
-        throw cause;
+      let visible = await readRegularFileWithSha256(visiblePath, "Version Working Copy", {
+        projectRootPath: loaded.paths.projectRootPath,
       });
-      if (!visibleInformation) {
+      if (!visible) {
         try {
           await link(preparedPath, visiblePath);
           await syncDirectory(loaded.paths.projectRootPath);
         } catch (cause) {
           if (cause?.code !== "EEXIST") throw cause;
         }
-        visibleInformation = await lstat(visiblePath).catch((cause) => {
-          if (cause?.code === "ENOENT") return null;
-          throw cause;
+        visible = await readRegularFileWithSha256(visiblePath, "Version Working Copy", {
+          projectRootPath: loaded.paths.projectRootPath,
         });
       }
       if (
-        !visibleInformation
-        || visibleInformation.isSymbolicLink()
-        || !visibleInformation.isFile()
+        !visible
         || !sameFileIdentity(
           transaction.preparedWorkingCopyFileIdentity,
-          copyFileIdentity(visibleInformation),
+          copyFileIdentity(visible.information),
         )
       ) {
         throw new ProjectFileRepositoryError(
           "PROMOTION_PATH_REPLACED",
           "The allocated Version Working Copy path is no longer owned by this Promotion.",
           { sourceRelativePath: transaction.finalWorkingCopyRelativePath },
+        );
+      }
+      if (visible.sha256 !== transaction.candidateOutputSha256) {
+        throw new ProjectFileRepositoryError(
+          "PROMOTION_WORKING_COPY_HASH_MISMATCH",
+          "The Version Working Copy changed before guarded publication.",
+          {
+            expectedSourceSha256: transaction.candidateOutputSha256,
+            actualSourceSha256: visible.sha256,
+          },
         );
       }
       const nextWorkingCopy = {
@@ -6058,7 +6094,7 @@ export class ProjectFileRepository {
         preferredFileStem: transaction.preferredFileStem,
         preferredExtension: transaction.preferredExtension,
         stateRelativePath: "working-copies/" + workingCopyId(version.ordinal) + ".json",
-        fileIdentity: copyFileIdentity(visibleInformation),
+        fileIdentity: copyFileIdentity(visible.information),
       };
       const statePath = workingCopyStatePath(loaded.paths, nextWorkingCopy);
       await atomicWriteProjectJson(loaded.paths.projectRootPath, statePath, {
@@ -6086,6 +6122,231 @@ export class ProjectFileRepository {
       await this.#hit("promotion-working-copy-created", { transactionRoot });
     }
     if (transaction.state === "working-copy-created") {
+      const initialWorkingCopy = transaction.workingCopy;
+      if (!initialWorkingCopy) {
+        throw new ProjectFileRepositoryError(
+          "PROMOTION_WORKING_COPY_MISSING",
+          "The Promotion did not record its Working Copy.",
+        );
+      }
+      const visiblePath = path.join(
+        loaded.paths.projectRootPath,
+        topLevelHtmlRelativePath(initialWorkingCopy.sourceRelativePath),
+      );
+      // Stage the first public link into a private guard before the manifest
+      // can observe it. A retained external descriptor then writes to the
+      // guard, while a concurrent path creator wins the no-replace race.
+      await this.#assertCandidateSourceCurrent(loaded, candidateState.candidate);
+      await writeFileNoReplace(
+        publication.workingCopyReplacementPath,
+        candidateState.output.buffer,
+        transaction.candidateOutputSha256,
+        "Promotion Working Copy replacement",
+        { projectRootPath: loaded.paths.projectRootPath },
+      );
+      const guard = await readRegularFileWithSha256(
+        publication.workingCopyGuardPath,
+        "Promotion Working Copy guard",
+        { projectRootPath: loaded.paths.projectRootPath },
+      );
+      const visible = await readRegularFileWithSha256(visiblePath, "Version Working Copy", {
+        projectRootPath: loaded.paths.projectRootPath,
+      });
+      if (guard) {
+        if (
+          !transaction.preparedWorkingCopyFileIdentity
+          || !sameFileIdentity(
+            transaction.preparedWorkingCopyFileIdentity,
+            copyFileIdentity(guard.information),
+          )
+        ) {
+          throw new ProjectFileRepositoryError(
+            "PROMOTION_PATH_REPLACED",
+            "The Promotion Working Copy guard was replaced before publication.",
+          );
+        }
+        if (guard.sha256 !== transaction.candidateOutputSha256) {
+          throw new ProjectFileRepositoryError(
+            "PROMOTION_WORKING_COPY_HASH_MISMATCH",
+            "The Version Working Copy changed before guarded publication.",
+            {
+              expectedSourceSha256: transaction.candidateOutputSha256,
+              actualSourceSha256: guard.sha256,
+            },
+          );
+        }
+        if (visible) {
+          throw new ProjectFileRepositoryError(
+            "PROMOTION_PATH_REPLACED",
+            "The Version Working Copy path was recreated while Promotion was staging it.",
+          );
+        }
+      } else {
+        if (
+          !visible
+          || !sameFileIdentity(
+            initialWorkingCopy.fileIdentity,
+            copyFileIdentity(visible.information),
+          )
+        ) {
+          throw new ProjectFileRepositoryError(
+            "PROMOTION_PATH_REPLACED",
+            "The allocated Version Working Copy was replaced before guarded publication.",
+          );
+        }
+        if (visible.sha256 !== transaction.candidateOutputSha256) {
+          throw new ProjectFileRepositoryError(
+            "PROMOTION_WORKING_COPY_HASH_MISMATCH",
+            "The Version Working Copy changed before guarded publication.",
+            {
+              expectedSourceSha256: transaction.candidateOutputSha256,
+              actualSourceSha256: visible.sha256,
+            },
+          );
+        }
+        await rename(visiblePath, publication.workingCopyGuardPath);
+        await syncDirectory(loaded.paths.projectRootPath);
+      }
+      const staged = await readRegularFileWithSha256(
+        publication.workingCopyGuardPath,
+        "Promotion Working Copy guard",
+        { projectRootPath: loaded.paths.projectRootPath },
+      );
+      if (
+        !staged
+        || !transaction.preparedWorkingCopyFileIdentity
+        || !sameFileIdentity(
+          transaction.preparedWorkingCopyFileIdentity,
+          copyFileIdentity(staged.information),
+        )
+        || staged.sha256 !== transaction.candidateOutputSha256
+      ) {
+        throw new ProjectFileRepositoryError(
+          "PROMOTION_WORKING_COPY_HASH_MISMATCH",
+          "The Version Working Copy changed while guarded publication was starting.",
+          {
+            expectedSourceSha256: transaction.candidateOutputSha256,
+            actualSourceSha256: staged?.sha256 || null,
+          },
+        );
+      }
+      transaction.state = "working-copy-staged";
+      transaction.workingCopyStagedAt = nowIso(this.#clock);
+      await this.#writePromotionTransaction(loaded, transactionRoot, transaction);
+      await this.#hit("promotion-working-copy-staged", { transactionRoot });
+    }
+    if (transaction.state === "working-copy-staged") {
+      const initialWorkingCopy = transaction.workingCopy;
+      if (!initialWorkingCopy) {
+        throw new ProjectFileRepositoryError(
+          "PROMOTION_WORKING_COPY_MISSING",
+          "The Promotion did not record its Working Copy.",
+        );
+      }
+      const visiblePath = path.join(
+        loaded.paths.projectRootPath,
+        topLevelHtmlRelativePath(initialWorkingCopy.sourceRelativePath),
+      );
+      const guard = await readRegularFileWithSha256(
+        publication.workingCopyGuardPath,
+        "Promotion Working Copy guard",
+        { projectRootPath: loaded.paths.projectRootPath },
+      );
+      let visible = await readRegularFileWithSha256(visiblePath, "Version Working Copy", {
+        projectRootPath: loaded.paths.projectRootPath,
+      });
+      if (
+        !guard
+        || !transaction.preparedWorkingCopyFileIdentity
+        || !sameFileIdentity(
+          transaction.preparedWorkingCopyFileIdentity,
+          copyFileIdentity(guard.information),
+        )
+      ) {
+        throw new ProjectFileRepositoryError(
+          "PROMOTION_PATH_REPLACED",
+          "The Promotion Working Copy guard was replaced before publication.",
+        );
+      }
+      if (guard.sha256 !== transaction.candidateOutputSha256) {
+        // Preserve a write through a descriptor retained before the guard move.
+        // link() cannot replace a new user-visible path, so a concurrent writer
+        // remains visible even while this conflict is recovered.
+        if (!visible) {
+          try {
+            await link(publication.workingCopyGuardPath, visiblePath);
+            await syncDirectory(loaded.paths.projectRootPath);
+          } catch (cause) {
+            if (cause?.code !== "EEXIST") throw cause;
+          }
+        }
+        throw new ProjectFileRepositoryError(
+          "PROMOTION_WORKING_COPY_HASH_MISMATCH",
+          "The Version Working Copy changed through an already-open external file handle.",
+          {
+            expectedSourceSha256: transaction.candidateOutputSha256,
+            actualSourceSha256: guard.sha256,
+          },
+        );
+      }
+      const replacement = await readRegularFileWithSha256(
+        publication.workingCopyReplacementPath,
+        "Promotion Working Copy replacement",
+        { projectRootPath: loaded.paths.projectRootPath },
+      );
+      if (!replacement || replacement.sha256 !== transaction.candidateOutputSha256) {
+        throw new ProjectFileRepositoryError(
+          "PROMOTION_TRANSACTION_INVALID",
+          "The Promotion Working Copy replacement bytes are unavailable.",
+        );
+      }
+      if (!visible) {
+        try {
+          await link(publication.workingCopyReplacementPath, visiblePath);
+          await syncDirectory(loaded.paths.projectRootPath);
+        } catch (cause) {
+          if (cause?.code !== "EEXIST") throw cause;
+          throw new ProjectFileRepositoryError(
+            "PROMOTION_PATH_REPLACED",
+            "The Version Working Copy path was recreated during no-replace publication.",
+          );
+        }
+        visible = await readRegularFileWithSha256(visiblePath, "Version Working Copy", {
+          projectRootPath: loaded.paths.projectRootPath,
+        });
+      }
+      if (
+        !visible
+        || !sameFileIdentity(
+          copyFileIdentity(replacement.information),
+          copyFileIdentity(visible.information),
+        )
+      ) {
+        throw new ProjectFileRepositoryError(
+          "PROMOTION_PATH_REPLACED",
+          "The Version Working Copy path is not owned by no-replace publication.",
+        );
+      }
+      if (visible.sha256 !== transaction.candidateOutputSha256) {
+        throw new ProjectFileRepositoryError(
+          "PROMOTION_WORKING_COPY_HASH_MISMATCH",
+          "The Version Working Copy changed during no-replace publication.",
+          {
+            expectedSourceSha256: transaction.candidateOutputSha256,
+            actualSourceSha256: visible.sha256,
+          },
+        );
+      }
+      transaction.workingCopy = {
+        ...initialWorkingCopy,
+        fileIdentity: copyFileIdentity(visible.information),
+      };
+      transaction.state = "working-copy-published";
+      transaction.workingCopyPublishedAt = nowIso(this.#clock);
+      await this.#writePromotionTransaction(loaded, transactionRoot, transaction);
+      await this.#hit("promotion-working-copy-published", { transactionRoot });
+    }
+    if (transaction.state === "working-copy-published") {
       const committedWorkingCopy = transaction.workingCopy;
       if (!committedWorkingCopy) {
         throw new ProjectFileRepositoryError(
@@ -6097,31 +6358,97 @@ export class ProjectFileRepository {
         loaded.paths.projectRootPath,
         topLevelHtmlRelativePath(committedWorkingCopy.sourceRelativePath),
       );
-      // This is the final promotion boundary.  The hard-linked Version Working
-      // Copy can retain its identity while an external writer changes its
-      // bytes, so identity alone is not sufficient publication authority.
+      const assertPublishedWorkingCopy = async () => {
+        const visible = await readRegularFileWithSha256(visiblePath, "Version Working Copy", {
+          projectRootPath: loaded.paths.projectRootPath,
+        });
+        if (
+          !visible
+          || !sameFileIdentity(
+            committedWorkingCopy.fileIdentity,
+            copyFileIdentity(visible.information),
+          )
+        ) {
+          throw new ProjectFileRepositoryError(
+            "PROMOTION_PATH_REPLACED",
+            "The Version Working Copy was replaced before manifest publication.",
+          );
+        }
+        if (visible.sha256 !== transaction.candidateOutputSha256) {
+          throw new ProjectFileRepositoryError(
+            "PROMOTION_WORKING_COPY_HASH_MISMATCH",
+            "The Version Working Copy changed before manifest publication.",
+            {
+              expectedSourceSha256: transaction.candidateOutputSha256,
+              actualSourceSha256: visible.sha256,
+            },
+          );
+        }
+        const guard = await readRegularFileWithSha256(
+          publication.workingCopyGuardPath,
+          "Promotion Working Copy guard",
+          { projectRootPath: loaded.paths.projectRootPath },
+        );
+        if (
+          !guard
+          || !transaction.preparedWorkingCopyFileIdentity
+          || !sameFileIdentity(
+            transaction.preparedWorkingCopyFileIdentity,
+            copyFileIdentity(guard.information),
+          )
+        ) {
+          throw new ProjectFileRepositoryError(
+            "PROMOTION_PATH_REPLACED",
+            "The Promotion Working Copy guard was replaced before manifest publication.",
+          );
+        }
+        if (guard.sha256 !== transaction.candidateOutputSha256) {
+          const replacement = await readRegularFileWithSha256(
+            publication.workingCopyReplacementPath,
+            "Promotion Working Copy replacement",
+            { projectRootPath: loaded.paths.projectRootPath },
+          );
+          if (
+            replacement
+            && replacement.sha256 === transaction.candidateOutputSha256
+            && sameFileIdentity(
+              copyFileIdentity(replacement.information),
+              copyFileIdentity(visible.information),
+            )
+          ) {
+            // Move PageRoot's proposed bytes back into its private artifact,
+            // then restore the external guard with no replacement of a newly
+            // created visible path.
+            await unlinkIfPresent(publication.workingCopyReplacementPath);
+            await rename(visiblePath, publication.workingCopyReplacementPath);
+            try {
+              await link(publication.workingCopyGuardPath, visiblePath);
+            } catch (cause) {
+              if (cause?.code !== "EEXIST") throw cause;
+            }
+            await syncDirectory(loaded.paths.transactionsRoot);
+            await syncDirectory(loaded.paths.projectRootPath);
+          }
+          throw new ProjectFileRepositoryError(
+            "PROMOTION_WORKING_COPY_HASH_MISMATCH",
+            "The Version Working Copy changed through an already-open external file handle.",
+            {
+              expectedSourceSha256: transaction.candidateOutputSha256,
+              actualSourceSha256: guard.sha256,
+            },
+          );
+        }
+        return visible;
+      };
+      // A manifest can only name a Working Copy after the guarded publication
+      // validates both the new path and the moved old descriptor. Recheck once
+      // more immediately at the manifest boundary so a late external write
+      // fails closed instead of becoming a formal Version.
+      await assertPublishedWorkingCopy();
       await this.#assertCandidateSourceCurrent(loaded, candidateState.candidate);
-      const visible = await readHtmlFile(visiblePath, "Version Working Copy", {
-        projectRootPath: loaded.paths.projectRootPath,
-      });
-      if (
-        !sameFileIdentity(committedWorkingCopy.fileIdentity, copyFileIdentity(visible.information))
-      ) {
-        throw new ProjectFileRepositoryError(
-          "PROMOTION_PATH_REPLACED",
-          "The allocated Version Working Copy was replaced before manifest publication.",
-        );
-      }
-      if (visible.sha256 !== transaction.candidateOutputSha256) {
-        throw new ProjectFileRepositoryError(
-          "PROMOTION_WORKING_COPY_HASH_MISMATCH",
-          "The Version Working Copy changed before manifest publication.",
-          {
-            expectedSourceSha256: transaction.candidateOutputSha256,
-            actualSourceSha256: visible.sha256,
-          },
-        );
-      }
+      await this.#hit("promotion-before-manifest-publication", { transactionRoot });
+      await assertPublishedWorkingCopy();
+      await this.#assertCandidateSourceCurrent(loaded, candidateState.candidate);
       loaded.manifest.versions.push(version);
       loaded.manifest.workingCopies.push(committedWorkingCopy);
       loaded.manifest.latestOfficialVersionId = version.versionId;
