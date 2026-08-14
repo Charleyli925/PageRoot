@@ -350,6 +350,18 @@ export function classifyFreshSettlement(pullRequest, command) {
   return Object.freeze({ status: "draft", reason: "still_draft", isDraft: true });
 }
 
+export function closeCommandDecision(pullRequest, command) {
+  const recheck = classifyFreshSettlement(pullRequest, command);
+  if (recheck.status !== "draft") {
+    return Object.freeze({
+      ...recheck,
+      status: "refused",
+      reason: "close_refused_while_promotable",
+    });
+  }
+  return Object.freeze({ status: "closable", reason: "draft_pair_confirmed" });
+}
+
 function resolveOutputPath(output) {
   const destination = path.resolve(productRoot, output);
   if (!destination.startsWith(productRoot + path.sep)) {
@@ -742,6 +754,16 @@ async function runCommentCommand(options) {
   });
 
   if (command.mode === "close") {
+    const closeDecision = closeCommandDecision(snapshot.pullRequest, command);
+    if (closeDecision.status !== "closable") {
+      const refused = commandResult(options, {
+        ...closeDecision,
+        authorAssociation: association,
+        commentCreated: false,
+      });
+      await persistResult(refused, options);
+      throw new Error("Draft review close refused: the PR is not Draft on the exact head/base (" + closeDecision.reason + ").");
+    }
     const existing = findExistingDraftRequest(snapshot.comments, {
       headSha: command.headSha,
       baseSha: command.baseSha,

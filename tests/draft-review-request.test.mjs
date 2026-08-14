@@ -5,6 +5,7 @@ import {
   buildDraftReviewCommand,
   buildDraftReviewCommandMarker,
   buildDraftReviewRequestMarker,
+  closeCommandDecision,
   classifyFreshSettlement,
   evaluateDraftReviewEligibility,
   findExistingDraftRequest,
@@ -341,6 +342,22 @@ test("fresh settlement revalidation refuses to close the marker after promotion"
   assert.equal(
     classifyFreshSettlement(pullRequest({ base: { sha: secondSha } }), command).reason,
     "pair_changed_before_settlement",
+  );
+});
+
+test("a manual close refuses to remove an unsettled marker while the head can be promoted", () => {
+  const command = { mode: "close", headSha, baseSha };
+  assert.equal(closeCommandDecision(pullRequest(), command).status, "closable");
+  assert.equal(
+    closeCommandDecision(pullRequest({ draft: false }), command).reason,
+    "close_refused_while_promotable",
+  );
+  assert.equal(
+    closeCommandDecision(
+      pullRequest({ head: { sha: secondSha, repo: { full_name: "Charleyli925/PageRoot" } } }),
+      command,
+    ).reason,
+    "close_refused_while_promotable",
   );
 });
 
