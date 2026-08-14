@@ -875,6 +875,10 @@ export class WorkspaceController {
     return this.#requireVersionWorkflow().returnToCurrent(input);
   }
 
+  continueEditingHistoryVersion(input) {
+    return this.#requireVersionWorkflow().continueEditingHistoryVersion(input);
+  }
+
   enqueueDocumentEdit(input) {
     return this.#requireDocumentWorkflow().enqueueEdit(input);
   }

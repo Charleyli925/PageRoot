@@ -753,6 +753,7 @@ export default function Workbench() {
             workingCopyId: string;
             versionId: string;
             projectRootPath: string;
+            operationId?: string;
           }) => {
             const activate = window.htmlAIProjects?.activateManagedWorkingCopy;
             if (!activate) {
@@ -951,6 +952,7 @@ export default function Workbench() {
               workingCopyId: string;
               versionId: string;
               projectRootPath: string;
+              operationId?: string;
             }) => {
               const activate = window.htmlAIProjects?.activateManagedWorkingCopy;
               if (!activate) {
@@ -5644,6 +5646,49 @@ export default function Workbench() {
     workspaceController,
   ]);
 
+  const continueEditingHistoryVersion = useCallback(async () => {
+    if (
+      viewMode !== "history"
+      || !viewingVersionId
+      || isViewTransitioning()
+      || runInProgress
+      || projectHydrating
+      || projectLoadError
+      || !workspaceController
+    ) return;
+    const context = captureProjectContext();
+    if (!context) return;
+    const outcome = await requiredWorkspaceController(workspaceController)
+      .continueEditingHistoryVersion({
+        versionId: viewingVersionId,
+        context,
+      });
+    if (outcome.status === "succeeded") {
+      const lastModifiedAt = String(outcome.value.lastModifiedAt || "");
+      if (lastModifiedAt) setLastModifiedAt(lastModifiedAt);
+      setDrawer(null);
+      editorRef.current?.clearSelection();
+      return;
+    }
+    if (outcome.status === "stale") return;
+    setToast({
+      title: "无法基于此版本继续编辑",
+      message: outcome.reason,
+      tone: "error",
+      disposition: "background-result",
+      dedupeKey: "history-continue-editing",
+    });
+  }, [
+    captureProjectContext,
+    isViewTransitioning,
+    projectHydrating,
+    projectLoadError,
+    runInProgress,
+    viewMode,
+    viewingVersionId,
+    workspaceController,
+  ]);
+
   const persistLabel = persistState === "writing"
     ? "正在更新文件…"
     : persistState === "queued"
@@ -6750,6 +6795,14 @@ export default function Workbench() {
           detail={viewingVersion
             ? `只读 HTML 与 ${viewingVersion.comments.length} 条历史评论已在画布中展开`
             : "画布来自精确不可变版本文件"}
+          secondaryActionLabel="基于此版本继续编辑"
+          secondaryActionDisabled={
+            viewTransitioning
+            || runInProgress
+            || projectHydrating
+            || Boolean(projectLoadError)
+          }
+          onSecondaryAction={() => void continueEditingHistoryVersion()}
           actionLabel="回到当前版本"
           actionDisabled={viewTransitioning}
           onAction={() => void returnToCurrent()}

@@ -450,6 +450,7 @@ function emptyProjectState() {
     recent: [],
     pendingRename: null,
     lastRename: null,
+    lastManagedActivation: null,
   };
 }
 
@@ -580,6 +581,61 @@ function isValidRecentEntry(entry) {
   return Number.isFinite(entry.lastOpenedAt);
 }
 
+function normalizeManagedWorkingCopyActivation(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  try {
+    const operationId = String(value.operationId || "");
+    const projectId = String(value.projectId || "");
+    const documentId = String(value.documentId || "");
+    const workingCopyId = String(value.workingCopyId || "");
+    const versionId = String(value.versionId || "");
+    const expectedSha256 = String(value.expectedSha256 || "").trim().toLowerCase();
+    const projectRootPath = String(value.projectRootPath || "");
+    if (
+      !/^[A-Za-z0-9_-]{8,160}$/.test(operationId)
+      || !/^project_[A-Za-z0-9_-]+$/.test(projectId)
+      || !/^doc_[A-Za-z0-9_-]+$/.test(documentId)
+      || !/^work_ver_\d{4,}$/.test(workingCopyId)
+      || !/^ver_\d{4,}$/.test(versionId)
+      || !/^sha256:[a-f0-9]{64}$/.test(expectedSha256)
+      || !projectRootPath
+      || projectRootPath.length > MAX_PATH_LENGTH
+      || projectRootPath.includes("\0")
+      || !Number.isFinite(Number(value.completedAt))
+    ) return null;
+    return {
+      operationId,
+      projectId,
+      documentId,
+      workingCopyId,
+      versionId,
+      expectedSha256,
+      previousSourcePath: assertHtmlPath(value.previousSourcePath, "previousSourcePath"),
+      nextSourcePath: assertHtmlPath(value.nextSourcePath, "nextSourcePath"),
+      projectRootPath: path.resolve(projectRootPath),
+      completedAt: Number(value.completedAt),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function sameManagedWorkingCopyActivation(left, right) {
+  return Boolean(
+    left
+    && right
+    && left.operationId === right.operationId
+    && left.projectId === right.projectId
+    && left.documentId === right.documentId
+    && left.workingCopyId === right.workingCopyId
+    && left.versionId === right.versionId
+    && left.expectedSha256 === right.expectedSha256
+    && left.previousSourcePath === right.previousSourcePath
+    && left.nextSourcePath === right.nextSourcePath
+    && left.projectRootPath === right.projectRootPath,
+  );
+}
+
 async function loadProjectState() {
   if (projectState) return projectState;
 
@@ -613,6 +669,7 @@ async function loadProjectState() {
       recent,
       pendingRename: normalizePendingSourceRename(parsed.pendingRename),
       lastRename: normalizeCompletedSourceRename(parsed.lastRename),
+      lastManagedActivation: normalizeManagedWorkingCopyActivation(parsed.lastManagedActivation),
     };
     if (projectState.pendingRename) {
       await recoverPendingSourceRename({
@@ -661,6 +718,7 @@ async function activateProject(filePath) {
   );
   const now = Date.now();
   state.activePath = normalizedPath;
+  state.lastManagedActivation = null;
   state.recent = [
     {
       path: normalizedPath,
@@ -1081,6 +1139,7 @@ function assertManagedWorkingCopyActivationPayload(payload) {
     "workingCopyId",
     "versionId",
     "projectRootPath",
+    "operationId",
   ]);
   if (Object.keys(payload).some((key) => !allowedKeys.has(key))) {
     throw new TypeError("托管工作文件参数包含未支持的字段。");
@@ -1102,6 +1161,9 @@ function assertManagedWorkingCopyActivationPayload(payload) {
   const workingCopyId = String(payload.workingCopyId || "");
   const versionId = String(payload.versionId || "");
   const projectRootPath = String(payload.projectRootPath || "");
+  const operationId = payload.operationId === undefined || payload.operationId === null
+    ? null
+    : String(payload.operationId);
   if (
     !/^project_[A-Za-z0-9_-]+$/.test(projectId)
     || !/^doc_[A-Za-z0-9_-]+$/.test(documentId)
@@ -1110,6 +1172,7 @@ function assertManagedWorkingCopyActivationPayload(payload) {
     || !projectRootPath
     || projectRootPath.length > MAX_PATH_LENGTH
     || projectRootPath.includes("\0")
+    || (operationId !== null && !/^[A-Za-z0-9_-]{8,160}$/.test(operationId))
   ) {
     throw new TypeError("托管工作文件身份无效。");
   }
@@ -1122,6 +1185,7 @@ function assertManagedWorkingCopyActivationPayload(payload) {
     workingCopyId,
     versionId,
     projectRootPath: path.resolve(projectRootPath),
+    operationId,
   };
 }
 
@@ -1130,6 +1194,7 @@ async function commitActivatedProjectPath({
   previousSourcePath,
   nextSourcePath,
   project,
+  managedActivation = null,
 }) {
   const now = Date.now();
   const activePathIdentity = state.activePath
@@ -1174,6 +1239,7 @@ async function commitActivatedProjectPath({
     );
     state.recent = retained.slice(0, MAX_RECENT_PROJECTS);
   }
+  state.lastManagedActivation = managedActivation;
   await persistProjectState();
   return {
     ...project,
@@ -1202,16 +1268,70 @@ async function activateManagedWorkingCopyOperation(payload) {
     existingPathIdentity(requested.previousSourcePath),
     existingPathIdentity(requested.nextSourcePath),
   ]);
-  const knownPathIdentities = new Set(await Promise.all([
-    state.activePath,
-    ...state.recent.map((entry) => entry.path),
-  ].filter(Boolean).map(existingPathIdentity)));
-  if (!knownPathIdentities.has(previousSourcePath)) {
-    throw new ProjectFileError(
-      "UNKNOWN_SOURCE",
-      "只能从当前已经打开的 HTML 切换到托管工作文件。",
-      { previousSourcePath: requested.previousSourcePath },
-    );
+  const activePathIdentity = state.activePath
+    ? await existingPathIdentity(state.activePath)
+    : null;
+  const requestedActivation = requested.operationId
+    ? {
+      operationId: requested.operationId,
+      projectId: requested.projectId,
+      documentId: requested.documentId,
+      workingCopyId: requested.workingCopyId,
+      versionId: requested.versionId,
+      expectedSha256: requested.expectedSha256,
+      previousSourcePath,
+      nextSourcePath,
+      projectRootPath: requested.projectRootPath,
+      completedAt: Date.now(),
+    }
+    : null;
+  let managedActivation = null;
+  if (requestedActivation) {
+    const completed = state.lastManagedActivation;
+    if (completed?.operationId === requestedActivation.operationId) {
+      if (!sameManagedWorkingCopyActivation(completed, requestedActivation)) {
+        throw new ProjectFileError(
+          "MANAGED_WORKING_COPY_OPERATION_MISMATCH",
+          "同一托管工作文件操作不能改变目标或前序文件。",
+          { operationId: requestedActivation.operationId },
+        );
+      }
+      if (activePathIdentity !== nextSourcePath) {
+        throw new ProjectFileError(
+          "MANAGED_WORKING_COPY_OPERATION_NOT_COMMITTED",
+          "这次托管工作文件操作的桌面状态不完整，不能伪造重放结果。",
+          { operationId: requestedActivation.operationId },
+        );
+      }
+      managedActivation = completed;
+    } else {
+      if (activePathIdentity !== previousSourcePath) {
+        throw new ProjectFileError(
+          "MANAGED_WORKING_COPY_PREDECESSOR_CONFLICT",
+          "当前桌面文件已变化，不能提交过期的托管工作文件切换。",
+          {
+            previousSourcePath: requested.previousSourcePath,
+            activePath: state.activePath,
+          },
+        );
+      }
+      managedActivation = requestedActivation;
+    }
+  } else {
+    const knownPathIdentities = new Set(await Promise.all([
+      state.activePath,
+      ...state.recent.map((entry) => entry.path),
+    ].filter(Boolean).map(existingPathIdentity)));
+    if (
+      !knownPathIdentities.has(previousSourcePath)
+      && !knownPathIdentities.has(nextSourcePath)
+    ) {
+      throw new ProjectFileError(
+        "UNKNOWN_SOURCE",
+        "只能从当前已经打开的 HTML 切换到托管工作文件。",
+        { previousSourcePath: requested.previousSourcePath },
+      );
+    }
   }
   if (!bridgePort) {
     throw new ProjectFileError(
@@ -1274,6 +1394,7 @@ async function activateManagedWorkingCopyOperation(payload) {
     previousSourcePath,
     nextSourcePath,
     project,
+    managedActivation,
   });
 }
 

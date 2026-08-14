@@ -79,11 +79,12 @@ test("v4 schemas accept repository-produced identity, Working Copy, Candidate an
   });
   const controlRoot = path.join(imported.target.projectRootPath, ".pageroot");
   const initialManifest = await json(path.join(controlRoot, "manifest.json"));
+  const registry = await json(path.join(
+    projectsRoot,
+    ".pageroot-registry.json",
+  ));
   await Promise.all([
-    validate("project-registry.v4.schema.json", await json(path.join(
-      projectsRoot,
-      ".pageroot-registry.json",
-    ))),
+    validate("project-registry.v4.schema.json", registry),
     validate("project-identity.v4.schema.json", await json(path.join(controlRoot, "project.json"))),
     validate("project-manifest.v4.schema.json", initialManifest),
     validate("project-runtime-state.v4.schema.json", await json(path.join(controlRoot, "runtime-state.json"))),
@@ -92,6 +93,9 @@ test("v4 schemas accept repository-produced identity, Working Copy, Candidate an
       await json(path.join(controlRoot, "working-copies", "work_ver_0001.json")),
     ),
   ]);
+  const missingImportSourceHash = structuredClone(registry);
+  delete missingImportSourceHash.projects[imported.target.projectId].importSourceSha256;
+  await validateRejects("project-registry.v4.schema.json", missingImportSourceHash);
 
   const candidate = await repository.createCandidate({
     target: imported.target,
@@ -150,6 +154,21 @@ test("v4 schemas accept repository-produced identity, Working Copy, Candidate an
     ),
   ]);
   assert.equal(promoted.version.versionId, "ver_0002");
+
+  await repository.activateVersionWorkingCopy({
+    target: promoted.target,
+    versionId: "ver_0001",
+    operationId: "schema_history_continue_v1_0001",
+    expectedActiveWorkingCopyId: "work_ver_0002",
+  });
+  const historyRuntime = await json(path.join(controlRoot, "runtime-state.json"));
+  await validate("project-runtime-state.v4.schema.json", historyRuntime);
+  const malformedHistoryActivation = structuredClone(historyRuntime);
+  malformedHistoryActivation.historyActivation = {
+    ...malformedHistoryActivation.historyActivation,
+    operationId: "bad",
+  };
+  await validateRejects("project-runtime-state.v4.schema.json", malformedHistoryActivation);
 
   const invalidManifest = { ...initialManifest, fileNaming: { stem: "legacy" } };
   const schema = JSON.parse(await readFile(

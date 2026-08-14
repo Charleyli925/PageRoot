@@ -33,6 +33,8 @@ export type BridgeClient = {
   createRequest(body: BridgeJson): Promise<BridgeJson>;
   resolveConflict(body: BridgeJson): Promise<BridgeJson>;
   activateReadyVersion(body: BridgeJson): Promise<BridgeJson>;
+  continueEditingHistoryVersion(body: BridgeJson): Promise<BridgeJson>;
+  confirmEditingHistoryVersion(body: BridgeJson): Promise<BridgeJson>;
   cancelActiveRun(body: BridgeJson): Promise<BridgeJson>;
   updateProjectFile(body: BridgeJson): Promise<BridgeJson>;
   openFolder(body: BridgeJson): Promise<BridgeJson>;

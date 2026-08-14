@@ -333,9 +333,11 @@ V2 工作文件第一次建立时与 V2 正式快照字节一致。此后用户�
 
 1. 在版本历史中打开版本 2，先精确显示版本 2 的不可变快照，状态为只读。
 2. 用户点击“基于版本 2 继续编辑”后：
-   - 如果 V2 工作文件不存在，系统从 V2 快照原样创建它。
-   - 如果 V2 工作文件已经存在，系统打开原有工作文件，并显示其本地修改状态。
+   - 系统只接受 manifest 中 `versionId=V2` 且 `basedOnVersionId=V2` 的唯一原有 Working Copy；缺失、重复、状态/快照 Hash 不完整时失败关闭，不从快照临时重建或猜测另一份文件。
+   - 在切换前完整校验该 Working Copy state、可见工作文件、不可变 V2 快照、Registry 根目录和完整 OpenTarget 身份；成功后打开原有工作文件，并显示其本地修改状态。
 3. 后续编辑全部保存到 V2 工作文件，不覆盖正式 V2，也不创建新项目。
+
+该动作是窄的、可重试的“激活指定 Version 的 Working Copy”操作。Repository 先原子写入 V2 指针和 `desktop-pending` 回执；Bridge、桌面激活或确认响应在提交后丢失时，重放该回执的 `operationId` 与 Version 必须仍指向同一 `workingCopyId`，不得因为当前 Registry runtime 已经指向 V2 而拒绝重试，也不得伪造回滚到 V6。Desktop 对新操作只接受仍以原 `previousSourcePath` 为活动文件的前序，完成字节 Hash 校验后 Bridge 确认同一回执；随后才在一个无 `await` 的发布边界同步更新 `ProjectSession`、`DocumentSession`、`VersionSession`、`DraftSession` 与 `CommentSession`，再允许新 Canvas generation 接受回报。
 
 若项目最新正式版本已经是版本 6，界面必须同时显示：
 
@@ -708,6 +710,8 @@ manifest 可记录平台文件标识（例如 device、inode、birthtime）作�
 
 - [ ] 最新为版本 6 时打开历史版本 2，画布精确显示 V2 快照，不跳到 V6。`[第二期]`
 - [ ] 点击“基于版本 2 继续编辑”后打开 `A-V2.html`；本地修改保存但不覆盖隐藏 V2。`[第二期]`
+- [ ] 连续点击或在 Bridge/桌面响应丢失后重试“基于此版本继续编辑”，始终得到同一个 `work_ver_0002`；不会新建 V2 Working Copy。`[第二期]`
+- [ ] V2 Working Copy 修改并重启恢复后，隐藏 `versions/ver_0002/index.html` 仍保留原始 V2 字节。`[第二期]`
 - [ ] 基于 V2 的候选被采纳后创建版本 7，记录 `basedOnVersionId=V2`、`previousVersionId=V6`。`[第二期]`
 - [ ] 重新打开 `A-V2.html` 时继续原有 V2 本地编辑，不创建第二个 V2 工作文件或新项目。`[第二期]`
 - [ ] 两份内容 Hash 相同但路径不同的 HTML，用户打开哪一份就显示哪一份。`[第一期]`

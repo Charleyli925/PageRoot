@@ -84,7 +84,14 @@ export type VersionWorkflowCanvasPort = Readonly<{
 }>;
 
 export type VersionWorkflowConstruction = Readonly<{
-  bridgeClient: Pick<BridgeClient, "versionFile" | "source" | "activateReadyVersion">;
+  bridgeClient: Pick<
+    BridgeClient,
+    "versionFile"
+      | "source"
+      | "activateReadyVersion"
+      | "continueEditingHistoryVersion"
+      | "confirmEditingHistoryVersion"
+  >;
   projectSession: ProjectSession;
   documentSession: DocumentSession;
   versionSession: VersionSession;
@@ -128,6 +135,11 @@ export class VersionWorkflow {
     fromDeferred?: boolean;
   }): Promise<VersionWorkflowOutcome<Record<string, unknown>>>;
   returnToCurrent(input?: {
+    context?: ProjectContext | null;
+    fromDeferred?: boolean;
+  }): Promise<VersionWorkflowOutcome<Record<string, unknown>>>;
+  continueEditingHistoryVersion(input?: {
+    versionId?: string | null;
     context?: ProjectContext | null;
     fromDeferred?: boolean;
   }): Promise<VersionWorkflowOutcome<Record<string, unknown>>>;

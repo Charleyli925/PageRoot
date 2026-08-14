@@ -223,7 +223,7 @@ export function compositionBoundaryViolations({
     !/\bthis\.#documentWorkflow\.reconcileBoundary\s*\(/u.test(projectWorkflow)
     || !/\bthis\.#canvasPort\.freeze\s*\(/u.test(runWorkflow)
     || !/\bthis\.#bridgeClient\.createRequest\s*\(/u.test(runWorkflow)
-    || !/\bthis\.#projectWorkflow\.commitGeneratedSourceTransition\s*\(/u.test(versionWorkflow)
+    || !/\bthis\.#projectWorkflow\.commitManagedSourceTransition\s*\(/u.test(versionWorkflow)
   ) {
     violations.push(
       "app/application: publication, freeze, and request checks must stay in their typed workflows",
@@ -843,6 +843,7 @@ export async function architectureViolations() {
     || !workspaceController.includes("activateReadyVersion(input)")
     || !workspaceController.includes("viewHistory(input)")
     || !workspaceController.includes("returnToCurrent(input)")
+    || !workspaceController.includes("continueEditingHistoryVersion(input)")
     || !workspaceController.includes("this.#versionWorkflow?.dispose()")
   ) {
     violations.push(
@@ -856,25 +857,27 @@ export async function architectureViolations() {
     || !versionWorkflow.includes("async openCommittedVersion({")
     || !versionWorkflow.includes("async viewHistory({")
     || !versionWorkflow.includes("async returnToCurrent({")
+    || !versionWorkflow.includes("async continueEditingHistoryVersion({")
     || !versionWorkflow.includes("this.#bridgeClient.versionFile(")
     || !versionWorkflow.includes("this.#bridgeClient.source(")
     || !versionWorkflow.includes("this.#bridgeClient.activateReadyVersion({")
-    || !versionWorkflow.includes("this.#projectWorkflow.commitGeneratedSourceTransition({")
+    || !versionWorkflow.includes("this.#bridgeClient.continueEditingHistoryVersion({")
+    || !versionWorkflow.includes("this.#projectWorkflow.commitManagedSourceTransition({")
     || !versionWorkflow.includes("#rollbackNavigation(operation, previous)")
     || /(?:^|\/)(?:workbench|components|desktop)(?:\/|$)|\breact\b/u.test(
       importedSpecifiers(versionWorkflow).join("\n"),
     )
   ) {
     violations.push(
-      "app/application/version-workflow.js: Version validation, activation, immutable review preparation and rollback navigation must stay in the application boundary",
+      "app/application/version-workflow.js: Version validation, activation, historical Working Copy continuation, immutable review preparation and rollback navigation must stay in the application boundary",
     );
   }
   if (
-    !projectWorkflow.includes("async prepareGeneratedSourceTransition({")
-    || !projectWorkflow.includes("commitGeneratedSourceTransition({ prepared, html, sourceSha256, publishVersion })")
+    !projectWorkflow.includes("async prepareManagedSourceTransition({")
+    || !projectWorkflow.includes("commitManagedSourceTransition({")
   ) {
     violations.push(
-      "app/application/project-workflow.js: PR-6 Version activation must reuse the synchronous generated-source publication API",
+      "app/application/project-workflow.js: Version activation and historical continuation must reuse the synchronous managed-source publication API",
     );
   }
   if (
@@ -884,7 +887,8 @@ export async function architectureViolations() {
     || !workbench.includes(".activateReadyVersion({")
     || !workbench.includes(".viewHistory({ version, context")
     || !workbench.includes(".returnToCurrent({ context })")
-    || /\b(?:openCommittedVersion|prepareGeneratedSourceTransition|commitGeneratedSourceTransition|navigationOperationRef|viewTransitioningRef)\b/.test(workbench)
+    || !workbench.includes(".continueEditingHistoryVersion({")
+    || /\b(?:openCommittedVersion|prepareManagedSourceTransition|commitManagedSourceTransition|prepareGeneratedSourceTransition|commitGeneratedSourceTransition|navigationOperationRef|viewTransitioningRef)\b/.test(workbench)
   ) {
     violations.push(
       "app/workbench.tsx: PR-6 Version IO and navigation ownership must delegate to WorkspaceController; Workbench keeps only review presentation and outcome mapping",

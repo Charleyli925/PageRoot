@@ -949,6 +949,7 @@ function projectFileHttpError(cause) {
     "PROJECTS_ROOT_NOT_FOUND",
     "CANDIDATE_NOT_FOUND",
     "WORKING_COPY_NOT_FOUND",
+    "VERSION_NOT_FOUND",
     "REGISTERED_PROJECT_UNAVAILABLE",
     "WORKING_COPY_UNAVAILABLE",
   ]).has(code)
@@ -981,8 +982,14 @@ function projectFileHttpError(cause) {
       "IMPORT_REGISTRY_CONFLICT",
       "IMPORT_IDENTITY_MISMATCH",
       "IMPORT_RECOVERY_INVALID",
+      "IMPORT_RECOVERY_AMBIGUOUS",
       "IMPORT_INTENT_NOT_FOUND",
       "REGISTERED_PROJECT_RACE",
+      "WORKING_COPY_VERSION_MISMATCH",
+      "HISTORY_ACTIVATION_PREDECESSOR_CONFLICT",
+      "HISTORY_ACTIVATION_RECEIPT_MISMATCH",
+      "REQUEST_RUNTIME_ANCHOR_MISMATCH",
+      "CANCELLATION_AUTHORITY_MISMATCH",
     ]).has(code)
       ? 409
       : new Set([
@@ -995,14 +1002,17 @@ function projectFileHttpError(cause) {
         "INVALID_RELATIVE_PATH",
         "INVALID_ID",
         "INVALID_FILE_STEM",
+        "PATH_COMPONENT_TOO_LONG",
         "INVALID_CANDIDATE_ID",
         "CANDIDATE_UNUSABLE",
         "CANDIDATE_VALIDATION_INVALID",
         "INVALID_REQUEST_ID",
+        "INVALID_HISTORY_ACTIVATION_OPERATION",
         "INVALID_ATTEMPT_ID",
         "INVALID_REGISTRY",
         "UNSUPPORTED_REGISTRY_SCHEMA",
         "UNREGISTERED_PROJECT_ROOT",
+        "WORKING_COPY_STATE_INVALID",
       ]).has(code)
         ? 422
         : 500;
@@ -1124,6 +1134,10 @@ function projectFileActiveRun(workspace, target) {
       candidateDisplayVersionLabel: `版本 ${candidate.proposedVersionOrdinal}`,
       contentSha256: candidate.outputSha256,
       sourceSha256: request.expectedSourceSha256,
+      // A ready Candidate may belong to a background project while another
+      // project is currently mounted. Carry its complete managed OpenTarget
+      // so renderer activation never borrows identity fields from the screen.
+      openTarget: target,
       version: {
         versionId: candidate.proposedVersionId,
         generatedAt: candidate.createdAt,
@@ -1690,6 +1704,116 @@ async function projectFileVersionFile(sourcePath, versionId) {
         : file.version.snapshotRelativePath,
       readOnly: true,
       ...(file.kind === "candidate" ? { candidate: file.candidate } : {}),
+    };
+  } catch (cause) {
+    throw projectFileHttpError(cause);
+  }
+}
+
+async function continueProjectFileHistoryVersion(body) {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw new HttpError(400, "INVALID_HISTORY_CONTINUE", "The history continuation payload is invalid.");
+  }
+  const allowedKeys = new Set([
+    "sourcePath",
+    "projectId",
+    "documentId",
+    "versionId",
+    "operationId",
+  ]);
+  if (Object.keys(body).some((key) => !allowedKeys.has(key))) {
+    throw new HttpError(400, "INVALID_HISTORY_CONTINUE", "The history continuation payload has unsupported fields.");
+  }
+  if (!/^ver_\d{4,}$/.test(String(body.versionId || ""))) {
+    throw new HttpError(400, "INVALID_VERSION_ID", "versionId is invalid.");
+  }
+  if (!/^[A-Za-z0-9_-]{8,160}$/.test(String(body.operationId || ""))) {
+    throw new HttpError(400, "INVALID_OPERATION_ID", "operationId is invalid.");
+  }
+  const workspace = await projectFileWorkspaceForSource(body.sourcePath);
+  if (!workspace) return null;
+  if (!projectFileBodyIdentityMatches(workspace, body)) {
+    throw new HttpError(
+      409,
+      "PROJECT_CONTEXT_IDENTITY_MISMATCH",
+      "The history continuation identity does not match the selected project.",
+    );
+  }
+  try {
+    const sourceTarget = projectFileTargetFromWorkspace(workspace);
+    const activated = await projectFileRepository.activateVersionWorkingCopy({
+      target: sourceTarget,
+      versionId: String(body.versionId),
+      operationId: String(body.operationId),
+      expectedActiveWorkingCopyId: sourceTarget.workingCopyId,
+    });
+    const next = await projectFileWorkspaceForSource(activated.target.exactSourcePath);
+    return {
+      ...projectFileBaseWorkspaceState(next),
+      status: "history-working-copy-activated",
+      historyActivation: activated.historyActivation,
+      operationId: activated.historyActivation.operationId,
+      replayed: activated.replayed === true,
+    };
+  } catch (cause) {
+    throw projectFileHttpError(cause);
+  }
+}
+
+async function confirmProjectFileHistoryVersion(body) {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw new HttpError(400, "INVALID_HISTORY_CONFIRM", "The history activation confirmation payload is invalid.");
+  }
+  const allowedKeys = new Set([
+    "sourcePath",
+    "projectId",
+    "documentId",
+    "previousWorkingCopyId",
+    "activatedWorkingCopyId",
+    "versionId",
+    "operationId",
+  ]);
+  if (Object.keys(body).some((key) => !allowedKeys.has(key))) {
+    throw new HttpError(400, "INVALID_HISTORY_CONFIRM", "The history activation confirmation payload has unsupported fields.");
+  }
+  const workspace = await projectFileWorkspaceForSource(body.sourcePath);
+  if (!workspace) return null;
+  if (!projectFileBodyIdentityMatches(workspace, body)) {
+    throw new HttpError(
+      409,
+      "PROJECT_CONTEXT_IDENTITY_MISMATCH",
+      "The history activation confirmation identity does not match the selected project.",
+    );
+  }
+  if (
+    body.previousWorkingCopyId !== null
+    && !/^work_ver_\d{4,}$/.test(String(body.previousWorkingCopyId || ""))
+  ) {
+    throw new HttpError(400, "INVALID_WORKING_COPY_ID", "previousWorkingCopyId is invalid.");
+  }
+  if (
+    !/^[A-Za-z0-9_-]{8,160}$/.test(String(body.operationId || ""))
+    || !/^work_ver_\d{4,}$/.test(String(body.activatedWorkingCopyId || ""))
+    || !/^ver_\d{4,}$/.test(String(body.versionId || ""))
+  ) {
+    throw new HttpError(400, "INVALID_HISTORY_CONFIRM", "The history activation confirmation is invalid.");
+  }
+  try {
+    const confirmed = await projectFileRepository.confirmVersionWorkingCopyActivation({
+      target: projectFileTargetFromWorkspace(workspace),
+      operationId: String(body.operationId),
+      previousWorkingCopyId: body.previousWorkingCopyId,
+      activatedWorkingCopyId: String(body.activatedWorkingCopyId),
+      versionId: String(body.versionId),
+    });
+    return {
+      ok: true,
+      projectId: workspace.project.projectId,
+      documentId: workspace.project.documentId,
+      status: "history-working-copy-desktop-confirmed",
+      historyActivation: confirmed.historyActivation,
+      confirmed: confirmed.confirmed,
+      operationId: confirmed.historyActivation.operationId,
     };
   } catch (cause) {
     throw projectFileHttpError(cause);
@@ -9582,6 +9706,22 @@ async function route(request, response) {
   ) {
     const body = await readBody(request);
     sendJson(response, 200, await activateReadyVersion(body));
+    return;
+  }
+  if (
+    request.method === "POST"
+    && url.pathname === "/history-version/continue"
+  ) {
+    const body = await readBody(request);
+    sendJson(response, 200, await continueProjectFileHistoryVersion(body));
+    return;
+  }
+  if (
+    request.method === "POST"
+    && url.pathname === "/history-version/desktop-confirmed"
+  ) {
+    const body = await readBody(request);
+    sendJson(response, 200, await confirmProjectFileHistoryVersion(body));
     return;
   }
   if (
