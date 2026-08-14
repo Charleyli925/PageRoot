@@ -45,9 +45,11 @@ validates does it construct the entire current Registry in memory with
 Registry SHA, writes a byte-for-byte Hash-named backup under the configured
 projects root, rechecks the source SHA again, then atomically publishes the
 complete current Registry. The lock is transient coordination rather than
-Registry authority; a proved-dead owner is reclaimed only by moving its exact
-lock directory aside before cleanup. The backup is evidence only and is never
-read as a Registry authority.
+Registry authority. A proved-dead, sealed owner is reclaimed only after its
+token-named marker is atomically claimed, then that claimed directory is moved
+aside before cleanup; an unsealed or malformed lock fails busy rather than
+being guessed or deleted. The backup is evidence only and is never read as a
+Registry authority.
 
 Any invalid, mixed or changing Registry; escaping, missing or symlinked root;
 or project-ID mismatch fails closed. The original Registry remains unchanged on
@@ -68,7 +70,7 @@ HTML content. A second read of the published current shape is read-only.
   validation.
 - Tests must prove current no-op, valid single/multiple/empty migration,
   rejection without Registry SHA change, concurrent import serialization,
-  atomic old-or-complete recovery, Bridge first-open, and desktop
+  stale-owner replacement-lock safety, atomic old-or-complete recovery, Bridge first-open, and desktop
   edit/comment/reopen behavior with external HTML bytes unchanged.
 
 ## Rejected alternatives

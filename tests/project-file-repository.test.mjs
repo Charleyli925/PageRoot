@@ -87,6 +87,32 @@ function legacyV4RegistryBackupPath(fixtureValue, legacySha256) {
   );
 }
 
+function legacyV4RegistryMigrationLockPath(fixtureValue) {
+  return path.join(fixtureValue.projects, ".pageroot-registry-migration-lock");
+}
+
+function legacyV4RegistryMigrationLockOwnerPath(fixtureValue, token) {
+  return path.join(
+    legacyV4RegistryMigrationLockPath(fixtureValue),
+    `.owner-${token}.json`,
+  );
+}
+
+async function seedDeadLegacyV4RegistryMigrationLock(fixtureValue) {
+  const token = "00000000-0000-4000-8000-000000000001";
+  await mkdir(legacyV4RegistryMigrationLockPath(fixtureValue));
+  await writeFile(
+    legacyV4RegistryMigrationLockOwnerPath(fixtureValue, token),
+    `${JSON.stringify({
+      pid: 2_147_483_647,
+      token,
+      createdAt: "2026-08-14T00:00:00.000Z",
+    })}\n`,
+    "utf8",
+  );
+  return { token };
+}
+
 async function seedExactLegacyV4Registry(fixtureValue, transform = (value) => value) {
   const filePath = registryPath(fixtureValue);
   const current = await json(filePath);
@@ -1134,6 +1160,80 @@ test("legacy V4 migration serializes a concurrent import without dropping its Re
     [first.target.projectId, importedSecond.target.projectId].sort(),
   );
   assert.deepEqual(registry.pendingImports, {});
+  assert.deepEqual(await readFile(seeded.backupPath), seeded.bytes);
+});
+
+test("legacy V4 stale-lock retirement cannot move a replacement sealed lock", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "legacy-stale-lock.html");
+  const seeded = await seedExactLegacyV4Registry(value);
+  await seedDeadLegacyV4RegistryMigrationLock(value);
+
+  let releaseFirstRetirement = () => {};
+  const firstRetirementPaused = new Promise((resolve) => {
+    releaseFirstRetirement = resolve;
+  });
+  let firstRetirementReached;
+  const firstRetirementReady = new Promise((resolve) => {
+    firstRetirementReached = resolve;
+  });
+  let releaseSecondPublish = () => {};
+  const secondPublishPaused = new Promise((resolve) => {
+    releaseSecondPublish = resolve;
+  });
+  let secondPublishReached;
+  const secondPublishReady = new Promise((resolve) => {
+    secondPublishReached = resolve;
+  });
+  t.after(() => {
+    releaseFirstRetirement();
+    releaseSecondPublish();
+  });
+
+  const firstRepository = new ProjectFileRepository({
+    projectsRoot: value.projects,
+    failpoint: async (name) => {
+      if (name === "legacy-v4-registry-migration-lock-before-retire") {
+        firstRetirementReached();
+        await firstRetirementPaused;
+      }
+      return false;
+    },
+  });
+  const firstMigration = firstRepository.initialize();
+  await firstRetirementReady;
+
+  const secondRepository = new ProjectFileRepository({
+    projectsRoot: value.projects,
+    failpoint: async (name) => {
+      if (name === "legacy-v4-registry-migration-before-publish") {
+        secondPublishReached();
+        await secondPublishPaused;
+      }
+      return false;
+    },
+  });
+  const secondMigration = secondRepository.initialize();
+  await secondPublishReady;
+
+  const lockPath = legacyV4RegistryMigrationLockPath(value);
+  const replacementOwner = (await readdir(lockPath)).filter((name) => (
+    /^\.owner-[a-f0-9-]{36}\.json$/u.test(name)
+  ));
+  assert.equal(replacementOwner.length, 1);
+
+  releaseFirstRetirement();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.deepEqual(
+    (await readdir(lockPath)).filter((name) => /^\.owner-[a-f0-9-]{36}\.json$/u.test(name)),
+    replacementOwner,
+    "a delayed stale reclaimer must not move a newly sealed replacement lock",
+  );
+
+  releaseSecondPublish();
+  await Promise.all([firstMigration, secondMigration]);
+  const registry = await json(seeded.filePath);
+  assert.deepEqual(Object.keys(registry.projects), [imported.target.projectId]);
   assert.deepEqual(await readFile(seeded.backupPath), seeded.bytes);
 });
 

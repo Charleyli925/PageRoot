@@ -395,7 +395,8 @@ metadata exception is an exact pre-hardening V4 Registry shape: after current
 validation fails, the repository may complete its missing root stat identity
 and empty pending-import map only after every already-listed root, project
 identity and real path validates. A short-lived exclusive migration lock
-serializes that one Registry replacement across Bridge processes; a waiter
+serializes that one Registry replacement across Bridge processes; dead-owner
+reclamation is bound to its exact sealed token marker, and a waiter
 re-reads the Registry after acquiring it. It backs up the original Registry
 bytes by Hash before one atomic publication; the backup is never opening or
 write authority. It neither imports, reassociates nor changes a Project, Working

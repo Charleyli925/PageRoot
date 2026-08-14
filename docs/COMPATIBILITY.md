@@ -71,7 +71,8 @@ collected. A guessed date is not a support-window policy.
   `.pageroot/project.json` must validate before the repository constructs
   `registeredProjectRootPath`, a live-directory-stat `rootFileIdentity`, and
   `pendingImports: {}` in memory. A short-lived exclusive migration lock
-  serializes the one replacement across Bridge processes; a waiter re-reads
+  serializes the one replacement across Bridge processes; dead-owner recovery
+  claims the exact sealed token marker before moving its lock, and a waiter re-reads
   under that lock and returns a current Registry without rewriting it. It then
   writes a Hash-named byte-for-byte backup of the old Registry and atomically
   publishes the current Registry. The backup is not read as runtime authority.

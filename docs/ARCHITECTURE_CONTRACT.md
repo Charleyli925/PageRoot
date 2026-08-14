@@ -511,7 +511,9 @@ The supported compatibility adapters are:
   ID, direct-child non-symlink root, real-path containment and matching
   `.pageroot/project.json`; current `rootFileIdentity` comes from that live
 root stat, never a filename or HTML Hash. A short-lived exclusive migration
-lock serializes this replacement across Bridge processes; after acquiring it,
+lock serializes this replacement across Bridge processes; sealed dead-owner
+reclamation first atomically claims the exact token-named marker, while an
+unsealed or malformed lock fails busy. After acquiring it,
 the repository re-reads the Registry and returns a current record without a
 write when another process already completed it. All entries validate before
 the old raw bytes are backed up by Hash and the full current Registry is

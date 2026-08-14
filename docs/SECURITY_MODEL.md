@@ -104,7 +104,8 @@ a current Registry read-only. Before completing that legacy shape, every record 
 prove its valid key, direct-child real non-symlink root and matching
 `.pageroot/project.json`; the new root identity comes only from the live
 directory stat. A short-lived exclusive migration lock serializes the one
-replacement across Bridge processes, and every waiter re-reads under that lock
+replacement across Bridge processes; dead-owner reclamation atomically claims
+the exact sealed token marker, and every waiter re-reads under that lock
 before it may publish. Validation finishes before the old Registry bytes are
 copied to a Hash-named backup and one atomic current Registry is published. The
 backup is not runtime authority. Any validation or publication failure leaves the old
