@@ -393,9 +393,17 @@ test("Workbench and review surfaces route to architecture or observable runtime 
   });
   assert.deepEqual(workbench.selectedNodeTests, [
     "tests/architecture-boundaries.test.mjs",
+    "tests/desktop-preload-ipc.test.mjs",
+    "tests/edit-author-runtime-session.test.mjs",
+    "tests/edit-runtime-bootstrap.test.mjs",
+    "tests/edit-runtime-contract.test.mjs",
+    "tests/edit-runtime-protocol.test.mjs",
+    "tests/html-preview-sandbox.test.mjs",
     "tests/project-rules-workflow.test.mjs",
     "tests/project-workflow.test.mjs",
+    "tests/runtime-snapshot-hosts.test.mjs",
     "tests/source-rename.test.mjs",
+    "tests/workspace-controller.test.mjs",
   ]);
   assert.deepEqual(suiteIds(workbench), [
     "typecheck",

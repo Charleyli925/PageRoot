@@ -1,0 +1,517 @@
+import {
+  EDIT_AUTHOR_RUNTIME_BUDGET,
+  EDIT_AUTHOR_RUNTIME_CONTRACT_VERSION,
+  EDIT_RUNTIME_BOOTSTRAP_ATTRIBUTE,
+  EDIT_RUNTIME_FROZEN_ATTRIBUTE,
+  EDIT_RUNTIME_HOST_ATTRIBUTE,
+  EDIT_RUNTIME_OWNED_ATTRIBUTE,
+  EDIT_RUNTIME_RESULT_ATTRIBUTE,
+  EDIT_RUNTIME_SCRIPT_STUB_ATTRIBUTE,
+  EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE,
+} from "../app/domain/edit-runtime-contract.js";
+
+function safeScriptValue(value) {
+  return JSON.stringify(value).replace(/</gu, "\\u003c");
+}
+
+/*
+ * This function deliberately closes over nothing. createEditRuntimeBootstrap()
+ * serializes it into the one-use protocol resource so author code only gets a
+ * tiny, disposable final-frame surface.
+ */
+function oneShotRuntimeBootstrap(config) {
+  "use strict";
+  const attributes = config.attributes;
+  const sourceAttribute = attributes.source;
+  const hostAttribute = attributes.host;
+  const ownedAttribute = attributes.owned;
+  const stubAttribute = attributes.stub;
+  const frozenAttribute = attributes.frozen;
+  const resultAttribute = attributes.result;
+  const sourceSelector = "[" + sourceAttribute + "]";
+  const hostSelector = "[" + hostAttribute + "]";
+  const native = {
+    addEventListener: EventTarget.prototype.addEventListener,
+    removeEventListener: EventTarget.prototype.removeEventListener,
+    setTimeout: window.setTimeout.bind(window),
+    clearTimeout: window.clearTimeout.bind(window),
+    setInterval: window.setInterval.bind(window),
+    clearInterval: window.clearInterval.bind(window),
+    requestAnimationFrame: window.requestAnimationFrame.bind(window),
+    cancelAnimationFrame: window.cancelAnimationFrame.bind(window),
+    mutationObserver: window.MutationObserver,
+    resizeObserver: window.ResizeObserver,
+    intersectionObserver: window.IntersectionObserver,
+    createElement: Document.prototype.createElement,
+    documentOpen: Document.prototype.open,
+    documentWrite: Document.prototype.write,
+  };
+  const state = {
+    phase: "booting",
+    frozen: false,
+    violations: new Set(),
+    timeouts: new Set(),
+    intervals: new Set(),
+    animationFrames: new Set(),
+    listeners: [],
+    observers: [],
+    baseline: null,
+    preflightStyle: null,
+    result: null,
+  };
+  const runtimeForbiddenTags = new Set([
+    "audio", "base", "button", "dialog", "embed", "form", "frame", "frameset",
+    "iframe", "input", "link", "meta", "object", "option", "script", "select",
+    "source", "style", "textarea", "track", "video",
+  ]);
+  const eventProperties = [
+    "onanimationend", "onanimationstart", "onbeforeinput", "onblur", "onchange",
+    "onclick", "oncompositionend", "oncompositionstart", "oncontextmenu", "oncopy",
+    "oncut", "ondblclick", "ondrag", "ondrop", "onerror", "onfocus", "oninput",
+    "onkeydown", "onkeypress", "onkeyup", "onload", "onmousedown", "onmousemove",
+    "onmouseout", "onmouseover", "onmouseup", "onpointerdown", "onpointermove",
+    "onpointerup", "onresize", "onscroll", "onselect", "onsubmit", "ontouchend",
+    "ontouchmove", "ontouchstart", "onwheel",
+  ];
+  const violation = (value) => {
+    state.violations.add(String(value || "runtime-violation"));
+  };
+  const isOwned = (element) => (
+    element instanceof Element
+    && element.hasAttribute(ownedAttribute)
+  );
+  const hostFor = (node) => {
+    const element = node instanceof Element ? node : node?.parentElement;
+    return element instanceof Element ? element.closest(hostSelector) : null;
+  };
+  const sourceNodes = () => {
+    const root = document.documentElement;
+    if (!root) return [];
+    const seen = new Set();
+    return [root, ...root.querySelectorAll(sourceSelector)].filter((element) => {
+      const marker = element.getAttribute(sourceAttribute);
+      if (!marker || seen.has(marker)) return false;
+      seen.add(marker);
+      return true;
+    });
+  };
+  const parentMarker = (element) => {
+    let parent = element.parentElement;
+    while (parent instanceof Element) {
+      const marker = parent.getAttribute(sourceAttribute);
+      if (marker) return marker;
+      parent = parent.parentElement;
+    }
+    return null;
+  };
+  const sourceAttributes = (element) => {
+    const values = [];
+    for (const attribute of Array.from(element.attributes)) {
+      const name = String(attribute.name || "").toLowerCase();
+      if (name.startsWith("data-pageroot-edit-runtime-")) continue;
+      if (
+        name === "_echarts_instance_"
+        || name === "data-ecid"
+        || name === "data-zr-dom-id"
+      ) continue;
+      values.push(name + "=" + String(attribute.value || ""));
+    }
+    return values.sort().join("\u0000");
+  };
+  const textSnapshot = () => {
+    const root = document.documentElement;
+    if (!root) return [];
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    const values = [];
+    let node = walker.nextNode();
+    while (node) {
+      const parent = node.parentElement;
+      if (
+        parent
+        && !hostFor(parent)
+        && !isOwned(parent)
+        && !parent.closest("script,style")
+      ) {
+        values.push((parentMarker(parent) || "root") + "\u0000" + node.data);
+      }
+      node = walker.nextNode();
+    }
+    return values;
+  };
+  const captureBaseline = () => {
+    const nodes = new Map();
+    const hosts = new Map();
+    const source = sourceNodes();
+    if (!source.length || source.length > config.sourceNodeCount) {
+      violation("source-node-budget");
+      return null;
+    }
+    for (const element of source) {
+      const marker = element.getAttribute(sourceAttribute);
+      if (!marker || nodes.has(marker)) {
+        violation("source-node-identity-invalid");
+        continue;
+      }
+      const hostKey = element.getAttribute(hostAttribute);
+      if (hostKey) {
+        if (hosts.has(hostKey)) violation("host-identity-invalid");
+        hosts.set(hostKey, {
+          tagName: element.tagName.toLowerCase(),
+          marker,
+        });
+      }
+      nodes.set(marker, {
+        tagName: element.tagName.toLowerCase(),
+        parentMarker: parentMarker(element),
+        attributes: sourceAttributes(element),
+      });
+    }
+    if (!hosts.size) violation("no-approved-host");
+    return { nodes, hosts, text: textSnapshot() };
+  };
+  const sealRuntimeNode = (element) => {
+    try {
+      element.style.setProperty("pointer-events", "none", "important");
+      element.style.setProperty("user-select", "none", "important");
+      element.setAttribute("tabindex", "-1");
+      element.setAttribute(ownedAttribute, "runtime");
+    } catch {
+      violation("runtime-node-unsealable");
+    }
+  };
+  const audit = () => {
+    const before = state.baseline;
+    if (!before) return { state: "rejected", reason: "baseline-unavailable", hostKeys: [] };
+    const current = sourceNodes();
+    if (current.length !== before.nodes.size) violation("source-node-count-changed");
+    const seen = new Set();
+    for (const element of current) {
+      const marker = element.getAttribute(sourceAttribute);
+      const record = before.nodes.get(marker);
+      if (!record || seen.has(marker)) {
+        violation("source-node-identity-changed");
+        continue;
+      }
+      seen.add(marker);
+      if (
+        element.tagName.toLowerCase() !== record.tagName
+        || parentMarker(element) !== record.parentMarker
+        || sourceAttributes(element) !== record.attributes
+      ) violation("source-node-mutated");
+    }
+    if (seen.size !== before.nodes.size) violation("source-node-missing");
+    const texts = textSnapshot();
+    if (
+      texts.length !== before.text.length
+      || texts.some((value, index) => value !== before.text[index])
+    ) violation("source-text-changed");
+    const currentHosts = new Map();
+    for (const host of Array.from(document.querySelectorAll(hostSelector))) {
+      const key = host.getAttribute(hostAttribute);
+      if (!key || currentHosts.has(key)) {
+        violation("host-identity-invalid");
+        continue;
+      }
+      currentHosts.set(key, host);
+    }
+    if (currentHosts.size !== before.hosts.size) violation("host-binding-changed");
+    for (const [key, record] of before.hosts) {
+      const host = currentHosts.get(key);
+      if (
+        !host
+        || host.tagName.toLowerCase() !== record.tagName
+        || host.getAttribute(sourceAttribute) !== record.marker
+      ) violation("host-binding-changed");
+    }
+    for (const element of Array.from(document.querySelectorAll("*"))) {
+      if (element.hasAttribute(sourceAttribute) || isOwned(element)) continue;
+      const host = hostFor(element);
+      if (!host) {
+        violation("runtime-node-outside-host");
+        continue;
+      }
+      if (runtimeForbiddenTags.has(element.tagName.toLowerCase())) {
+        violation("runtime-node-surface-rejected");
+        continue;
+      }
+      sealRuntimeNode(element);
+    }
+    const reason = [...state.violations].sort()[0] || null;
+    return {
+      state: reason ? "rejected" : "frozen",
+      reason,
+      hostKeys: [...before.hosts.keys()].sort(),
+    };
+  };
+  const clearTrackedAsync = () => {
+    state.timeouts.forEach((value) => native.clearTimeout(value));
+    state.intervals.forEach((value) => native.clearInterval(value));
+    state.animationFrames.forEach((value) => native.cancelAnimationFrame(value));
+    state.timeouts.clear();
+    state.intervals.clear();
+    state.animationFrames.clear();
+  };
+  const removeTrackedListeners = () => {
+    for (const listener of state.listeners.splice(0)) {
+      try {
+        native.removeEventListener.call(
+          listener.target,
+          listener.type,
+          listener.listener,
+          listener.options,
+        );
+      } catch {
+        // A listener can become invalid while a page is being frozen.
+      }
+    }
+  };
+  const disconnectTrackedObservers = () => {
+    for (const observer of state.observers.splice(0)) {
+      try {
+        observer.disconnect();
+      } catch {
+        // A page observer cannot prevent final freeze.
+      }
+    }
+  };
+  const clearPropertyHandlers = () => {
+    const targets = [window, document, ...document.querySelectorAll("*")];
+    for (const target of targets) {
+      for (const property of eventProperties) {
+        try {
+          if (property in target) target[property] = null;
+        } catch {
+          // Some browser-owned properties are intentionally read-only.
+        }
+      }
+    }
+  };
+  const restorePrimitives = () => {
+    try { EventTarget.prototype.addEventListener = native.addEventListener; } catch {}
+    try { EventTarget.prototype.removeEventListener = native.removeEventListener; } catch {}
+    try { window.setTimeout = native.setTimeout; } catch {}
+    try { window.clearTimeout = native.clearTimeout; } catch {}
+    try { window.setInterval = native.setInterval; } catch {}
+    try { window.clearInterval = native.clearInterval; } catch {}
+    try { window.requestAnimationFrame = native.requestAnimationFrame; } catch {}
+    try { window.cancelAnimationFrame = native.cancelAnimationFrame; } catch {}
+    try { window.MutationObserver = native.mutationObserver; } catch {}
+    try { window.ResizeObserver = native.resizeObserver; } catch {}
+    try { window.IntersectionObserver = native.intersectionObserver; } catch {}
+    try { Document.prototype.open = native.documentOpen; } catch {}
+    try { Document.prototype.write = native.documentWrite; } catch {}
+  };
+  const freeze = () => {
+    if (state.frozen) return state.result;
+    state.frozen = true;
+    state.phase = "freezing";
+    clearTrackedAsync();
+    removeTrackedListeners();
+    disconnectTrackedObservers();
+    clearPropertyHandlers();
+    try {
+      document.getAnimations?.().forEach((animation) => animation.cancel());
+    } catch {
+      violation("animation-freeze-failed");
+    }
+    state.result = Object.freeze({
+      ...audit(),
+      contractVersion: config.contractVersion,
+      executionId: config.executionId,
+      sessionId: config.sessionId,
+    });
+    state.phase = state.result.state;
+    document.documentElement?.setAttribute(frozenAttribute, "true");
+    document.documentElement?.setAttribute(resultAttribute, JSON.stringify(state.result));
+    restorePrimitives();
+    return state.result;
+  };
+  const installTracking = () => {
+    EventTarget.prototype.addEventListener = function(type, listener, options) {
+      const result = native.addEventListener.call(this, type, listener, options);
+      if (!state.frozen && (typeof listener === "function" || typeof listener === "object")) {
+        state.listeners.push({ target: this, type, listener, options });
+      }
+      return result;
+    };
+    window.setTimeout = function(callback, delay, ...args) {
+      if (state.frozen) return 0;
+      const timer = native.setTimeout(callback, delay, ...args);
+      state.timeouts.add(timer);
+      return timer;
+    };
+    window.clearTimeout = function(timer) {
+      state.timeouts.delete(timer);
+      return native.clearTimeout(timer);
+    };
+    window.setInterval = function(callback, delay, ...args) {
+      if (state.frozen) return 0;
+      const timer = native.setInterval(callback, delay, ...args);
+      state.intervals.add(timer);
+      return timer;
+    };
+    window.clearInterval = function(timer) {
+      state.intervals.delete(timer);
+      return native.clearInterval(timer);
+    };
+    window.requestAnimationFrame = function(callback) {
+      if (state.frozen) return 0;
+      const frame = native.requestAnimationFrame(callback);
+      state.animationFrames.add(frame);
+      return frame;
+    };
+    window.cancelAnimationFrame = function(frame) {
+      state.animationFrames.delete(frame);
+      return native.cancelAnimationFrame(frame);
+    };
+    const trackObserver = (Constructor, name) => {
+      if (typeof Constructor !== "function") return Constructor;
+      const Wrapped = function(...args) {
+        const observer = new Constructor(...args);
+        state.observers.push(observer);
+        return observer;
+      };
+      Object.setPrototypeOf(Wrapped, Constructor);
+      Wrapped.prototype = Constructor.prototype;
+      try { Object.defineProperty(Wrapped, "name", { value: name }); } catch {}
+      return Wrapped;
+    };
+    window.MutationObserver = trackObserver(native.mutationObserver, "MutationObserver");
+    window.ResizeObserver = trackObserver(native.resizeObserver, "ResizeObserver");
+    window.IntersectionObserver = trackObserver(native.intersectionObserver, "IntersectionObserver");
+    const denyDocumentReplacement = () => {
+      violation("document-replacement");
+      throw new Error("PageRoot Edit runtime cannot replace its document.");
+    };
+    try { Document.prototype.open = denyDocumentReplacement; } catch {}
+    try { Document.prototype.write = denyDocumentReplacement; } catch {}
+  };
+  const prepareHiddenHostGeometry = () => {
+    const hiddenAncestors = new Set();
+    for (const host of Array.from(document.querySelectorAll(hostSelector))) {
+      let rect = null;
+      try { rect = host.getBoundingClientRect(); } catch {}
+      if (rect && rect.width >= 1 && rect.height >= 1) continue;
+      let parent = host;
+      while (parent instanceof Element && parent !== document.documentElement) {
+        try {
+          if (getComputedStyle(parent).display === "none") hiddenAncestors.add(parent);
+        } catch {}
+        parent = parent.parentElement;
+      }
+    }
+    if (!hiddenAncestors.size) return;
+    const marker = "data-pageroot-edit-runtime-preflight";
+    for (const element of hiddenAncestors) element.setAttribute(marker, "");
+    const style = native.createElement.call(document, "style");
+    style.setAttribute(ownedAttribute, "preflight");
+    style.textContent = "[" + marker + "]{display:block!important;visibility:hidden!important}";
+    (document.head || document.documentElement).appendChild(style);
+    state.preflightStyle = style;
+  };
+  const restoreHiddenHostGeometry = () => {
+    try { state.preflightStyle?.remove(); } catch {}
+    state.preflightStyle = null;
+    for (const element of Array.from(
+      document.querySelectorAll("[data-pageroot-edit-runtime-preflight]"),
+    )) {
+      try { element.removeAttribute("data-pageroot-edit-runtime-preflight"); } catch {}
+    }
+  };
+  const loadOne = (scriptId, origin) => new Promise((resolve, reject) => {
+    const script = native.createElement.call(document, "script");
+    script.setAttribute(ownedAttribute, "author-loader");
+    script.async = false;
+    script.src = origin + "/.pageroot/author/" + encodeURIComponent(scriptId) + ".js";
+    native.addEventListener.call(script, "load", () => {
+      script.remove();
+      resolve();
+    }, { once: true });
+    native.addEventListener.call(script, "error", () => {
+      script.remove();
+      reject(new Error("author-script-load-failed"));
+    }, { once: true });
+    (document.head || document.documentElement).appendChild(script);
+  });
+  const nextFrame = () => new Promise((resolve) => {
+    native.requestAnimationFrame(() => resolve());
+  });
+  const settle = () => new Promise((resolve) => {
+    native.setTimeout(resolve, config.runtimeSettleMs);
+  });
+  const begin = async () => {
+    if (state.phase !== "booting") return;
+    state.baseline = captureBaseline();
+    installTracking();
+    prepareHiddenHostGeometry();
+    state.phase = "running";
+    let origin = "";
+    try {
+      const bootstrap = document.currentScript
+        || document.querySelector("script[" + attributes.bootstrap + "]");
+      const url = new URL(bootstrap?.src || "");
+      origin = url.protocol + "//" + url.hostname;
+    } catch {
+      violation("bootstrap-origin-invalid");
+    }
+    try {
+      for (const stub of Array.from(document.querySelectorAll("script[" + stubAttribute + "]"))) {
+        const scriptId = stub.getAttribute(stubAttribute);
+        if (!/^[0-9]+$/u.test(scriptId || "") || !origin) {
+          violation("script-stub-invalid");
+          break;
+        }
+        await loadOne(scriptId, origin);
+      }
+      await nextFrame();
+      await settle();
+      await nextFrame();
+      await Promise.resolve();
+    } catch {
+      violation("author-script-failed");
+    } finally {
+      restoreHiddenHostGeometry();
+      freeze();
+    }
+  };
+  if (document.readyState === "loading") {
+    native.addEventListener.call(document, "DOMContentLoaded", () => {
+      void begin();
+    }, { once: true });
+  } else {
+    void begin();
+  }
+}
+
+export function createEditRuntimeBootstrap({
+  executionId,
+  sessionId,
+  runtimeSettleMs = EDIT_AUTHOR_RUNTIME_BUDGET.runtimeSettleMs,
+} = {}) {
+  if (!/^[a-f0-9]{24}$/u.test(String(executionId || ""))) {
+    throw new TypeError("Edit runtime bootstrap requires an execution identity.");
+  }
+  if (!/^[a-f0-9]{32}$/u.test(String(sessionId || ""))) {
+    throw new TypeError("Edit runtime bootstrap requires a session identity.");
+  }
+  const config = {
+    contractVersion: EDIT_AUTHOR_RUNTIME_CONTRACT_VERSION,
+    executionId: String(executionId).toLowerCase(),
+    sessionId: String(sessionId).toLowerCase(),
+    runtimeSettleMs: Math.max(0, Math.min(
+      EDIT_AUTHOR_RUNTIME_BUDGET.runtimeDeadlineMs,
+      Math.floor(Number(runtimeSettleMs) || 0),
+    )),
+    sourceNodeCount: EDIT_AUTHOR_RUNTIME_BUDGET.sourceNodeCount,
+    attributes: {
+      source: EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE,
+      host: EDIT_RUNTIME_HOST_ATTRIBUTE,
+      owned: EDIT_RUNTIME_OWNED_ATTRIBUTE,
+      stub: EDIT_RUNTIME_SCRIPT_STUB_ATTRIBUTE,
+      bootstrap: EDIT_RUNTIME_BOOTSTRAP_ATTRIBUTE,
+      frozen: EDIT_RUNTIME_FROZEN_ATTRIBUTE,
+      result: EDIT_RUNTIME_RESULT_ATTRIBUTE,
+    },
+  };
+  return "(" + oneShotRuntimeBootstrap.toString() + ")(" + safeScriptValue(config) + ");";
+}

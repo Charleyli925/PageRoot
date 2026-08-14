@@ -48,10 +48,28 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
   exposed. The document response blocks `file:` resource loading and authored
   base URLs. The application renderer's CSP remains strict and the preview
   scheme does not receive `bypassCSP`.
-- The edit iframe may use the same session root for images, fonts, styles and
-  media, but not for renderer or authored scripts: `pageroot-preview:` is absent
-  from `script-src`, the edit document remains sandboxed without script
-  capability, and every source transition revokes the previous session.
+- Ordinary static Edit may use the same contained resource root for images,
+  fonts, styles and media, but not for renderer or authored scripts:
+  `pageroot-preview:` is absent from `script-src` and every source transition
+  revokes the previous session. The separate one-shot ECharts path never reuses
+  that preview session.
+- Desktop one-shot Edit author runtime is a deliberately narrow, trusted-local
+  report capability rather than a general page-script sandbox. Main first
+  re-reads the active source and requires exact HTML/SHA, bounded classic
+  scripts, an ECharts signal and uniquely bound empty hosts; it freezes local
+  or allowlisted-CDN script bytes into a one-use `pageroot-edit-runtime:`
+  session. Its `srcdoc` base is forced to that session, so relative visual
+  assets resolve only through the declared, contained asset map; direct `file:`
+  assets and authored base URLs are blocked. The protocol has no `bypassCSP`,
+  exposes no directory listing or project path, blocks `connect-src` and
+  workers in the runtime document, and does not add a preload or filesystem
+  authority. The normal main-frame sender guard remains authoritative for every
+  privileged IPC request. A fixed
+  bootstrap freezes timers/listeners/observers/animations and audits source
+  fidelity before edit interaction; a failure revokes the session and renders
+  static Edit. This is intentionally not a defense against a pathological
+  synchronous author script; that report class is outside the supported
+  ECharts-only contract.
 - Desktop Review runtime snapshot capture is one narrow IPC capability. The
   main process revalidates exact source HTML/SHA and a bounded
   source-host binding, owns one hidden sandboxed BrowserWindow with Node
@@ -168,14 +186,16 @@ only to the trusted application main frame. A direct preview frame that tries
 to self-navigate is fenced by the main process; before its first load completes,
 its volatile session becomes a one-way scriptless fallback retaining only the
 owned external bootstrap, while later attempts leave the loaded page intact.
-When the user returns to editing, PageRoot accepts only an allowlisted
+When the user returns to ordinary editing, PageRoot accepts only an allowlisted
 source-backed presentation diff. It rejects unknown or duplicated source nodes,
 stale Hashes, arbitrary one-sided runtime classes, text/HTML, inline style,
 form state and runtime children. Edit never displays a captured PNG or creates
-runtime projection attributes: it is a normal script-disabled source surface.
-Save, review comparison and Request creation continue from authoritative source
-bytes (the Bridge copies those exact bytes to `input/base/index.html`), and the
-SourcePatch checks remain unchanged.
+runtime projection attributes. The desktop one-shot ECharts exception may keep
+audited descendants inside an approved empty source host, but those descendants
+are display-only and have no source or persistence authority. Save, review
+comparison and Request creation continue from authoritative source bytes (the
+Bridge copies those exact bytes to `input/base/index.html`), and the SourcePatch
+checks remain unchanged.
 
 The AI review workspace is an isolated interactive review preview with no
 activation or persistence authority. It preserves the identity/Hash-validated authored

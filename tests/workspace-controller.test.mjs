@@ -91,6 +91,7 @@ function createHarness({
   html = "<main>local source</main>",
   bridgeClient = null,
   projectSource = null,
+  editRuntimePort = null,
 } = {}) {
   const projectSession = new ProjectSession();
   projectSession.openLocator(SOURCE_PATH);
@@ -130,6 +131,7 @@ function createHarness({
       recovery: { replace: (identity) => recovery.push(identity) },
       canvas: { invalidateRenderAcks: () => { canvasInvalidations += 1; } },
       ...(projectSource ? { projectSource } : {}),
+      ...(editRuntimePort ? { editRuntime: editRuntimePort } : {}),
     },
     clock: { now: () => 1_726_000_000_000 },
   });
@@ -149,6 +151,11 @@ function createHarness({
       return canvasInvalidations;
     },
   };
+}
+
+async function settleAsyncRuntime() {
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
 }
 
 function createProjectRulesHarness() {
@@ -392,6 +399,19 @@ test("managed registration fails closed when its desktop Working Copy activation
   assert.equal(harness.projectSession.sourcePath, SOURCE_PATH);
 });
 
+test("workspace registration confirms matching canonical bytes without rebuilding the canvas", async () => {
+  const html = "<main>canonical source</main>";
+  const harness = createHarness({ html });
+  const beforeGeneration = harness.documentSession.canvasGeneration;
+
+  const outcome = await harness.controller.ensureRegistered();
+
+  assert.equal(outcome.status, "succeeded");
+  assert.equal(harness.documentSession.canvasGeneration, beforeGeneration);
+  assert.equal(harness.canvasInvalidations, 0);
+  harness.controller.dispose();
+});
+
 test("workspace controller is the sole aggregate Session observer and disconnects on dispose", () => {
   const harness = createHarness();
   const snapshots = [];
@@ -418,6 +438,77 @@ test("workspace controller is the sole aggregate Session observer and disconnect
   harness.documentSession.setPersistence({ state: "idle" });
   assert.equal(harness.controller.getSnapshot(), finalSnapshot);
   unsubscribe();
+});
+
+test("workspace controller owns one Edit runtime attempt per source path and canvas generation", async () => {
+  const html = [
+    "<!doctype html><html><body>",
+    '<main id="chart-host"></main>',
+    '<script>echarts.init(document.querySelector("#chart-host"))</script>',
+    "</body></html>",
+  ].join("");
+  const prepares = [];
+  const revocations = [];
+  const harness = createHarness({
+    html,
+    editRuntimePort: {
+      async prepare(request) {
+        prepares.push(request);
+        const ordinal = prepares.length.toString(16);
+        return {
+          contractVersion: 1,
+          sessionId: ordinal.padStart(32, "0"),
+          executionId: ordinal.padStart(24, "0"),
+          sourceSha256: request.sourceSha256,
+          resourceSha256: sha256(`resource:${ordinal}`),
+          scriptCount: 1,
+          byteLength: 1,
+          canvasGeneration: request.canvasGeneration,
+          hosts: request.hosts,
+        };
+      },
+      async revoke(sessionId) {
+        revocations.push(sessionId);
+        return { revoked: true };
+      },
+    },
+  });
+
+  await settleAsyncRuntime();
+  const ready = harness.controller.getSnapshot().editRuntime;
+  assert.equal(ready?.phase, "ready");
+  assert.equal(prepares.length, 1);
+  assert.equal(
+    harness.controller.beginEditAuthorRuntime({
+      sessionId: ready?.grant?.sessionId,
+      sourceSha256: ready?.grant?.sourceSha256,
+      canvasGeneration: ready?.grant?.canvasGeneration,
+    }),
+    true,
+  );
+  assert.equal(
+    harness.controller.settleEditAuthorRuntime({
+      sessionId: ready?.grant?.sessionId,
+      sourceSha256: ready?.grant?.sourceSha256,
+      canvasGeneration: ready?.grant?.canvasGeneration,
+      outcome: "ready",
+    }),
+    true,
+  );
+  assert.equal(harness.controller.getSnapshot().editRuntime?.phase, "settled");
+
+  harness.commentSession.setComments([{
+    commentId: "runtime_comment",
+    target: { id: "chart", selector: "#chart-host" },
+  }]);
+  await settleAsyncRuntime();
+  assert.equal(prepares.length, 1, "comments never refresh the runtime key");
+
+  harness.documentSession.reloadCanvas();
+  await settleAsyncRuntime();
+  assert.equal(prepares.length, 2);
+  assert.equal(revocations.length >= 1, true);
+  harness.controller.dispose();
 });
 
 test("workspace controller aggregates and dispatches the typed PROJECT.md workflow", async () => {
