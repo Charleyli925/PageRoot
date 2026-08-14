@@ -147,6 +147,7 @@ test("GitHub workflows run tests in parallel with one final-review policy and ke
   const sourceBrowser = workflowJob(ci, "source-browser");
   const electronNative = workflowJob(ci, "source-electron-native");
   const electronAi = workflowJob(ci, "source-electron-ai");
+  const electronRenderer = workflowJob(ci, "electron-renderer");
   const releaseDryRun = workflowJob(ci, "release-dry-run");
   const releaseGate = workflowJob(ci, "release-gate");
 
@@ -188,6 +189,8 @@ test("GitHub workflows run tests in parallel with one final-review policy and ke
   assert.doesNotMatch(sourceBrowser, /PageRoot-web-build-[^\n]*run_attempt/u);
   assert.match(electronNative, /needs:[\s\S]*- baseline-policy/u);
   assert.match(electronAi, /needs:[\s\S]*- baseline-policy/u);
+  assert.match(electronNative, /needs:[\s\S]*- electron-renderer/u);
+  assert.match(electronAi, /needs:[\s\S]*- electron-renderer/u);
   assert.doesNotMatch(electronNative, /review-policy/u);
   assert.doesNotMatch(electronAi, /review-policy/u);
   assert.match(ci, /name: release-gate/u);
@@ -211,11 +214,19 @@ test("GitHub workflows run tests in parallel with one final-review policy and ke
   assert.match(ci, /--fully-parallel --workers=1/u);
   assert.match(ci, /name: electron-native/u);
   assert.match(ci, /name: electron-ai/u);
+  assert.match(ci, /name: electron-renderer/u);
   assert.match(ci, /test:electron:ci-preflight:prepared/u);
   assert.match(ci, /--stage environment-preflight/u);
-  assert.match(ci, /npm run desktop:renderer/u);
-  assert.doesNotMatch(ci, /dist-desktop/u);
-  assert.doesNotMatch(ci, /Download shared source build/u);
+  assert.match(electronRenderer, /npm run desktop:renderer/u);
+  assert.match(electronRenderer, /name: PageRoot-electron-renderer-\$\{\{ github\.run_id \}\}/u);
+  assert.match(electronRenderer, /dist-desktop/u);
+  assert.match(electronNative, /PageRoot-electron-renderer-\$\{\{ github\.run_id \}\}/u);
+  assert.match(electronAi, /PageRoot-electron-renderer-\$\{\{ github\.run_id \}\}/u);
+  assert.doesNotMatch(electronNative, /npm run desktop:renderer/u);
+  assert.doesNotMatch(electronAi, /npm run desktop:renderer/u);
+  assert.doesNotMatch(electronAi, /test:electron:ci-preflight:prepared/u);
+  assert.doesNotMatch(electronNative, /Download shared source build/u);
+  assert.doesNotMatch(electronAi, /Download shared source build/u);
   assert.match(ci, /scripts\/ci-evidence\.mjs run/u);
   assert.match(ci, /Verify PR result, exact tree, version and freshness/u);
   assert.doesNotMatch(ci, /name: main-smoke|gate:main:auto/u);
@@ -229,6 +240,12 @@ test("GitHub workflows run tests in parallel with one final-review policy and ke
   assert.match(feedback, /group: pageroot-pr-/u);
   assert.match(ci, /group: pageroot-pr-/u);
   assert.doesNotMatch(feedback, /name: release-gate|test:browser:full|test:electron:full/u);
+  assert.match(feedback, /name: review-advisory/u);
+  assert.match(feedback, /check-pr-review-policy\.mjs/u);
+  assert.match(feedback, /--mode advisory/u);
+  assert.match(feedback, /output\/review-policy\/review-advisory\.json/u);
+  assert.match(feedback, /pull-requests: read/u);
+  assert.doesNotMatch(feedback, /contents: write|issues: write|pull-requests: write/u);
   assert.equal(
     packageJson.scripts["ci:source-build"],
     "npm run audit:dependencies && npm run ci:source-build:prepared",

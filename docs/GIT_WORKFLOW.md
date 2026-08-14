@@ -87,14 +87,17 @@ git push -u origin feature/short-name
 Open a Pull Request, wait for required CI, review the final diff, then squash-merge. Delete the merged branch. Never use a DMG, `.app`, copied folder or local backup as the basis for a new edit.
 
 Every Pull Request starts as Draft. `opened`, `synchronize` and `reopened`
-events run only the impact-selected `PR Feedback` workflow; returning to Draft
+events run only the impact-selected `PR Feedback` workflow plus its
+non-blocking review advisory; returning to Draft
 alone starts nothing. Batch implementation and accepted P0/P1 corrections while
 Draft. When the intended head is frozen, update it onto current `origin/main`
 and mark it Ready once. That single `ready_for_review` transition starts
 `review-policy` and the final Codex pass; do not post a Draft marker or another
-review command while it runs. A substantive exact-commit Codex review, an
-immutable clean exact-commit comment or a Codex Bot `+1` after Ready, a
-30-second settle window and continuous live head/base validation are required.
+review command while it runs. A substantive exact-commit Codex review or an
+immutable clean exact-commit comment written after the frozen base commit
+existed (including while the PR was still Draft), or a Codex Bot `+1` after
+Ready, a 30-second settle window and continuous live head/base validation are
+required.
 The reaction is accepted only from Codex on the latest frozen Ready pair; older
 or human reactions are ignored. Active P0/P1 findings and P0/P1
 `CHANGES_REQUESTED` reviews block regardless of reviewer; P2/P3/unclassified findings become review debt and

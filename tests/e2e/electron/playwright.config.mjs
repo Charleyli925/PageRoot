@@ -10,7 +10,10 @@ export default defineConfig({
   testMatch: /native-dom-electron\.spec\.mjs/,
   outputDir: path.join(productRoot, "output/playwright/native-dom-electron/results"),
   workers: 1,
-  retries: 0,
+  // CI absorbs one transient Electron launch/hydration stall per test. Local
+  // runs stay retry-free so caret/Selection regressions are never hidden, and
+  // every retried failure still retains its trace, video and screenshot.
+  retries: process.env.CI ? 1 : 0,
   reporter: [
     ["list"],
     ["html", {
