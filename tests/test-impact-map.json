@@ -624,14 +624,16 @@
         "^app/domain/runtime-snapshot-hosts\\.(?:js|d\\.ts)$",
         "^app/components/(?:HtmlCanvasEditor(?:\\.types)?|desktop-edit-runtime-api|html-canvas-interaction|html-preview-sandbox)\\.(?:tsx|ts|js|d\\.ts)$",
         "^app/workbench\\.tsx$",
-        "^desktop/(?:edit-runtime-bootstrap|edit-runtime-protocol|edit-runtime-capture-owner)\\.mjs$",
-        "^tests/(?:edit-author-runtime-session|edit-runtime-bootstrap|edit-runtime-capture-owner|edit-runtime-contract|edit-runtime-protocol)\\.test\\.mjs$"
+        "^desktop/(?:edit-runtime-bootstrap|edit-runtime-protocol|edit-runtime-capture-owner|edit-runtime-preparation-fence)\\.mjs$",
+        "^desktop/main\\.mjs$",
+        "^tests/(?:edit-author-runtime-session|edit-runtime-bootstrap|edit-runtime-capture-owner|edit-runtime-preparation-fence|edit-runtime-contract|edit-runtime-protocol)\\.test\\.mjs$"
       ],
       "suites": ["typecheck", "electron-smoke"],
       "nodeTests": [
         "tests/edit-author-runtime-session.test.mjs",
         "tests/edit-runtime-bootstrap.test.mjs",
         "tests/edit-runtime-capture-owner.test.mjs",
+        "tests/edit-runtime-preparation-fence.test.mjs",
         "tests/edit-runtime-contract.test.mjs",
         "tests/edit-runtime-protocol.test.mjs",
         "tests/runtime-snapshot-hosts.test.mjs",

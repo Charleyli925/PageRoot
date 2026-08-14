@@ -1209,6 +1209,55 @@ test("Electron Edit preserves imported source-relative ECharts assets and native
     await expect(launched.page.locator("[data-runtime-bootstrap-count=\"1\"]")).toHaveCount(1);
     expect(sha256(readFileSync(sourcePath, "utf8"))).toBe(sourceSha256);
     const runtimeDocument = await documentToken(frame);
+    const replay = await launched.page.evaluate(async () => {
+      const host = document.querySelector("main.workbench");
+      const fiberKey = host && Object.getOwnPropertyNames(host).find((key) => (
+        key.startsWith("__reactFiber$")
+      ));
+      const seed = fiberKey ? host?.[fiberKey] : null;
+      const visited = new Set();
+      const stack = seed ? [seed] : [];
+      let runtime = null;
+      while (stack.length && visited.size < 12_000) {
+        const fiber = stack.pop();
+        if (!fiber || visited.has(fiber)) continue;
+        visited.add(fiber);
+        for (let hook = fiber.memoizedState; hook; hook = hook.next) {
+          const candidate = hook.memoizedState?.editRuntime;
+          if (candidate?.grant?.hosts?.length) runtime = candidate;
+        }
+        if (runtime) break;
+        if (fiber.return) stack.push(fiber.return);
+        if (fiber.child) stack.push(fiber.child);
+        if (fiber.sibling) stack.push(fiber.sibling);
+      }
+      const active = await window.htmlAIProjects?.getActiveProject?.();
+      if (!runtime?.grant?.hosts?.length || !active?.html || !window.htmlAIEditRuntime) {
+        return { state: "setup-failed" };
+      }
+      try {
+        await window.htmlAIEditRuntime.prepare({
+          contractVersion: 1,
+          requestId: "edit-runtime-replay-fence-0001",
+          sourceSha256: runtime.sourceSha256,
+          html: active.html,
+          hosts: runtime.grant.hosts,
+          canvasGeneration: runtime.canvasGeneration,
+        });
+        return { state: "resolved" };
+      } catch (cause) {
+        return {
+          state: "rejected",
+          message: String(cause?.message || cause),
+        };
+      }
+    });
+    expect(replay).toMatchObject({
+      state: "rejected",
+      message: "当前画布的运行时准备已经完成。",
+    });
+    await expect(launched.page.locator("[data-runtime-bootstrap-count=\"1\"]")).toHaveCount(1);
+    expect(await documentToken(launched.page)).toBe(runtimeDocument);
     const runtimeCanvasState = await launched.page.locator("[data-persist-state]").first().evaluate(
       (element) => ({
         canvasGeneration: element.getAttribute("data-canvas-generation"),

@@ -398,6 +398,7 @@ test("Workbench and review surfaces route to architecture or observable runtime 
     "tests/edit-runtime-bootstrap.test.mjs",
     "tests/edit-runtime-capture-owner.test.mjs",
     "tests/edit-runtime-contract.test.mjs",
+    "tests/edit-runtime-preparation-fence.test.mjs",
     "tests/edit-runtime-protocol.test.mjs",
     "tests/html-preview-sandbox.test.mjs",
     "tests/project-rules-workflow.test.mjs",

@@ -51,6 +51,13 @@ hashes and the allowed host declarations (`position: relative`,
 `scale()` no greater than `1`); it cannot overwrite authored style or mutate
 another source attribute. At most 32 non-dangerous empty hosts are eligible.
 
+Main owns a bounded replay/admission fence before creating a resource session
+or hidden window: a request ID and Main-read `(sourcePath, source SHA, canvas
+generation)` can each consume one preparation. At most two captures may overlap
+in an app process, accommodating the external-source to Managed V1 hand-off;
+a duplicate, exhausted replay history or saturated request fails closed to
+ordinary static Edit.
+
 The visible Edit iframe remains source-static and script-disabled. Trusted
 renderer memory validates the bounded snapshot envelope, Base64/PNG header,
 byte and dimension budgets, while retaining Main's capture digest as

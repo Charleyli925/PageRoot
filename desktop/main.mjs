@@ -116,6 +116,9 @@ import {
 import {
   createEditRuntimeCaptureController,
 } from "./edit-runtime-capture-owner.mjs";
+import {
+  createEditRuntimePreparationFence,
+} from "./edit-runtime-preparation-fence.mjs";
 
 // electron-updater is CommonJS; the default import is the supported ESM bridge.
 const { autoUpdater } = electronUpdater;
@@ -255,6 +258,7 @@ let previewProtocolController = null;
 let reviewRuntimeSnapshotCaptureController = null;
 let editRuntimeProtocolController = null;
 let editRuntimeCaptureController = null;
+const editRuntimePreparationFence = createEditRuntimePreparationFence();
 // An imported V1 may be an HTML-only managed Working Copy while its selected
 // external source directory still owns declared relative assets. This is
 // session-only provenance established by Main during the verified hand-off;
@@ -1141,13 +1145,37 @@ async function prepareEditAuthorRuntime(payload) {
   ) {
     throw new Error("Edit runtime source is no longer the active persisted document.");
   }
-  const assetSourcePath = activeImportedAssetSourcePath || activeSource.sourcePath;
-  const session = await ensureEditRuntimeProtocolController().createSession({
-    html: activeSource.html,
-    sourcePath: assetSourcePath,
-    bindings: payload.hosts,
-  });
+  let releasePreparation;
   try {
+    releasePreparation = editRuntimePreparationFence.claim({
+      requestId: payload.requestId,
+      sourcePath: activeSource.sourcePath,
+      sourceSha256: activeSource.sha256,
+      canvasGeneration: payload.canvasGeneration,
+    });
+  } catch (cause) {
+    if (cause instanceof Error && /already consumed/u.test(cause.message)) {
+      throw new ProjectFileError(
+        "EDIT_RUNTIME_PREPARATION_REPLAYED",
+        "当前画布的运行时准备已经完成。",
+      );
+    }
+    if (cause instanceof Error && /in progress|at capacity/u.test(cause.message)) {
+      throw new ProjectFileError(
+        "EDIT_RUNTIME_PREPARATION_LIMITED",
+        "当前画布正在安全准备，请稍后重试。",
+      );
+    }
+    throw cause;
+  }
+  const assetSourcePath = activeImportedAssetSourcePath || activeSource.sourcePath;
+  let session = null;
+  try {
+    session = await ensureEditRuntimeProtocolController().createSession({
+      html: activeSource.html,
+      sourcePath: assetSourcePath,
+      bindings: payload.hosts,
+    });
     const capture = await ensureEditRuntimeCaptureController().capture({
       sessionId: session.sessionId,
       executionId: session.executionId,
@@ -1177,7 +1205,11 @@ async function prepareEditAuthorRuntime(payload) {
       snapshots: capture.snapshots,
     });
   } finally {
-    ensureEditRuntimeProtocolController().revokeSession(session.sessionId);
+    try {
+      if (session) ensureEditRuntimeProtocolController().revokeSession(session.sessionId);
+    } finally {
+      releasePreparation();
+    }
   }
 }
 
