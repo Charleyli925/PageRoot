@@ -1,0 +1,49 @@
+name: Draft Codex Review Auto
+
+# Trusted default-branch automation. `workflow_run` only ever executes the
+# default branch's file, so these bytes cannot be replaced by a Pull Request
+# branch. It follows a successful PR Feedback run, re-derives the exact head
+# and base from the live Pull Request, and runs the same one-request-per-head,
+# marker-closing Draft probe as the manual command workflow.
+on:
+  workflow_run:
+    workflows: [PR Feedback]
+    types: [completed]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: pageroot-draft-review-auto-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: false
+
+jobs:
+  auto-probe:
+    name: draft-review-auto-probe
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.13.0
+      - name: Request one exact-head Draft Codex review
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
+        run: >-
+          node scripts/draft-review-request.mjs
+          --repository "$GITHUB_REPOSITORY"
+          --workflow-run-id "$WORKFLOW_RUN_ID"
+      - name: Upload draft review evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: PageRoot-draft-review-auto-${{ github.run_id }}-${{ github.run_attempt }}
+          path: output/draft-review/draft-review.json
+          if-no-files-found: warn
+          retention-days: 14

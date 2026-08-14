@@ -5,15 +5,25 @@ import {
   buildDraftReviewCommand,
   buildDraftReviewCommandMarker,
   buildDraftReviewRequestMarker,
+  buildDraftReviewStatusText,
   closeCommandDecision,
+  classifyProbeOutcome,
   classifyFreshSettlement,
   evaluateDraftReviewEligibility,
   findExistingDraftRequest,
+  findDraftReviewStatusComment,
   parseDraftReviewArguments,
   parseDraftReviewCommandMarker,
   parseDraftReviewRequestMarker,
   probeCompletion,
+  validateAutoWorkflowRun,
 } from "../scripts/draft-review-request.mjs";
+import {
+  buildDraftReviewStatusMarker,
+  parseDraftReviewStatusMarker,
+  recordSettledHead,
+  settledHeadState,
+} from "../scripts/draft-review-marker.mjs";
 
 const headSha = "a".repeat(40);
 const baseSha = "b".repeat(40);
@@ -405,4 +415,54 @@ test("CLI argument parsing validates repository, PR, comment and polling bounds"
     ]),
     /--comment-id/u,
   );
+});
+test("automatic triggers only follow a successful PR Feedback run on the same PR and head", () => {
+  const base = { workflowRun: feedbackRun(), pullRequest: pullRequest(), repository: "Charleyli925/PageRoot" };
+  assert.equal(validateAutoWorkflowRun(base).status, "eligible");
+  assert.equal(validateAutoWorkflowRun({ ...base, workflowRun: feedbackRun({ path: ".github/workflows/ci.yml" }) }).reason, "untrusted_source_workflow");
+  assert.equal(validateAutoWorkflowRun({ ...base, workflowRun: feedbackRun({ conclusion: "failure" }) }).reason, "source_workflow_not_successful");
+  assert.equal(validateAutoWorkflowRun({ ...base, workflowRun: feedbackRun({ pull_requests: [] }) }).reason, "workflow_run_missing_pr");
+  assert.equal(validateAutoWorkflowRun({ ...base, workflowRun: feedbackRun({ pull_requests: [{ number: 1 }, { number: 2 }] }) }).reason, "workflow_run_multiple_prs");
+  assert.equal(validateAutoWorkflowRun({ ...base, workflowRun: feedbackRun({ pull_requests: [{ number: 7 }] }) }).reason, "workflow_run_pr_mismatch");
+  assert.equal(validateAutoWorkflowRun({ ...base, workflowRun: feedbackRun({ head_sha: secondSha }) }).reason, "workflow_run_stale");
+  assert.equal(validateAutoWorkflowRun({
+    ...base,
+    pullRequest: pullRequest({ head: { sha: headSha, repo: { full_name: "someone-else/PageRoot" } } }),
+  }).reason, "fork_pull_request");
+});
+
+test("probe outcome becomes action_required when the settled review or its threads are P0/P1", () => {
+  const completion = { kind: "codex_review", at: Date.now(), priority: "unclassified" };
+  assert.equal(classifyProbeOutcome({ completion }), "clean");
+  assert.equal(classifyProbeOutcome({ completion: { ...completion, priority: "P1" } }), "action_required");
+  const blockingThread = {
+    isResolved: false,
+    isOutdated: false,
+    comments: { nodes: [{ databaseId: 1, author: { login: "chatgpt-codex-connector" }, path: "a.js", body: "![P1 Badge](x) Finding" }] },
+  };
+  assert.equal(classifyProbeOutcome({ completion, reviewThreads: [blockingThread] }), "action_required");
+  assert.equal(classifyProbeOutcome({ completion, reviewThreads: [{ ...blockingThread, isResolved: true }] }), "clean");
+});
+
+test("status markers retain bounded settled-head history for a PR", () => {
+  const marker = buildDraftReviewStatusMarker({
+    pullRequest: 12,
+    entries: [{ headSha, state: "clean" }, { headSha: secondSha, state: "action_required" }],
+  });
+  assert.deepEqual(parseDraftReviewStatusMarker(marker), {
+    pullRequest: 12,
+    entries: [{ headSha, state: "clean" }, { headSha: secondSha, state: "action_required" }],
+  });
+  assert.deepEqual(recordSettledHead([{ headSha, state: "clean" }], { headSha, state: "timed_out" }), [{ headSha, state: "timed_out" }]);
+  assert.equal(settledHeadState([{ headSha, state: "timed_out" }], headSha), "timed_out");
+  assert.equal(settledHeadState([{ headSha, state: "timed_out" }], secondSha), null);
+  assert.throws(() => buildDraftReviewStatusMarker({ pullRequest: 12, entries: [{ headSha, state: "bogus" }] }), /state is invalid/u);
+});
+
+test("status comments are found by their trusted marker and render settled heads", () => {
+  const text = buildDraftReviewStatusText({ pullRequest: 12, entries: [{ headSha, state: "clean" }] });
+  const found = findDraftReviewStatusComment([comment({ author: "github-actions[bot]", body: text })]);
+  assert.equal(found.status.pullRequest, 12);
+  assert.equal(found.status.entries[0].headSha, headSha);
+  assert.equal(findDraftReviewStatusComment([comment({ author: "Charleyli925", body: text })]), null);
 });

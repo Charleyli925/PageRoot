@@ -4,22 +4,41 @@ import { appendFile, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import {
+  classifyReviewPriority,
+  classifyReviewThread,
+  reviewedCommitPrefix,
+} from "./check-pr-review-policy.mjs";
+import {
+  assertDraftReviewSha,
+  buildDraftReviewRequestMarker,
+  buildDraftReviewStatusMarker,
+  CODEX_LOGIN,
+  DEFAULT_TRUSTED_ACTOR,
+  parseDraftReviewCommandMarker,
+  parseDraftReviewRequestMarker,
+  parseDraftReviewStatusMarker,
+  recordSettledHead,
+  settledHeadState,
+  SETTLED_STATES,
+} from "./draft-review-marker.mjs";
+
+export {
+  buildDraftReviewCommandMarker,
+  buildDraftReviewRequestMarker,
+  parseDraftReviewCommandMarker,
+  parseDraftReviewRequestMarker,
+} from "./draft-review-marker.mjs";
+
 const scriptPath = fileURLToPath(import.meta.url);
 const productRoot = path.resolve(path.dirname(scriptPath), "..");
 const SHA_PATTERN = /^[0-9a-f]{40}$/u;
 const REPOSITORY_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u;
 const RUN_ID_PATTERN = /^\d{1,64}$/u;
-export const DEFAULT_TRUSTED_ACTOR = "github-actions[bot]";
 const SOURCE_WORKFLOW_PATH = ".github/workflows/pr-feedback.yml";
-const MARKER_NAME = "pageroot-draft-review-request:v1";
-const COMMAND_NAME = "pageroot-draft-review-command:v1";
 const GITHUB_API_VERSION = "2022-11-28";
 const MAX_REST_PAGES = 20;
-const CODEX_LOGIN = "chatgpt-codex-connector";
-const REVIEWED_COMMIT_PATTERN = /\*\*Reviewed commit:\*\*\s*`([0-9a-f]{10,40})`/iu;
 const CLEAN_COMPLETION_PATTERN = /^Codex Review:\s*Didn't find any major issues\.[^\r\n]*\r?\n\r?\n/iu;
-const PRIORITY_BADGE_PATTERN = /\bP([0-3])\s+Badge\b/giu;
-const PRIORITY_LINE_PATTERN = /(?:^|\r?\n)\s*(?:[-*]\s*)?(?:\*\*)?\[?P([0-3])\]?(?:\*\*)?\s*[:：-]/gimu;
 const TRUSTED_ASSOCIATIONS = new Set(["OWNER", "COLLABORATOR", "MEMBER"]);
 const DEFAULT_SETTLE_SECONDS = 30;
 const DEFAULT_TIMEOUT_SECONDS = 10 * 60;
@@ -31,14 +50,6 @@ function normalizedLogin(value) {
 
 function isCodexActor(value) {
   return normalizedLogin(value) === CODEX_LOGIN;
-}
-
-function assertSha(value, label) {
-  const normalized = String(value || "").toLowerCase();
-  if (!SHA_PATTERN.test(normalized)) {
-    throw new Error(label + " must be a 40-character lowercase Git SHA.");
-  }
-  return normalized;
 }
 
 function timestamp(value) {
@@ -56,117 +67,6 @@ function commentBody(value) {
 
 function delay(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
-}
-
-export function buildDraftReviewRequestMarker({ headSha, baseSha, sourceRunId = null } = {}) {
-  const head = assertSha(headSha, "headSha");
-  const base = assertSha(baseSha, "baseSha");
-  const lines = ["head=" + head, "base=" + base];
-  if (sourceRunId !== null && sourceRunId !== undefined && sourceRunId !== "") {
-    if (!RUN_ID_PATTERN.test(String(sourceRunId))) {
-      throw new Error("sourceRunId must contain only digits.");
-    }
-    lines.push("source_run=" + String(sourceRunId));
-  }
-  return "<!-- " + MARKER_NAME + "\n" + lines.join("\n") + "\n-->";
-}
-
-export function parseDraftReviewRequestMarker(body) {
-  const text = String(body ?? "");
-  const pattern = new RegExp("<!--\\s*" + MARKER_NAME + "\\s*([\\r\\n][\\s\\S]*?)-->", "iu");
-  const match = text.match(pattern);
-  if (!match) return null;
-  const fields = new Map();
-  for (const line of match[1].split(/\r?\n/u)) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    const separator = trimmed.indexOf("=");
-    if (separator === -1) return null;
-    const key = trimmed.slice(0, separator).trim();
-    const value = trimmed.slice(separator + 1).trim();
-    if (!["head", "base", "source_run"].includes(key)) return null;
-    if (fields.has(key)) return null;
-    fields.set(key, value);
-  }
-  const headSha = String(fields.get("head") ?? "").toLowerCase();
-  const baseSha = String(fields.get("base") ?? "").toLowerCase();
-  if (!SHA_PATTERN.test(headSha) || !SHA_PATTERN.test(baseSha)) return null;
-  const sourceRunId = fields.has("source_run") ? String(fields.get("source_run")) : null;
-  if (sourceRunId !== null && !RUN_ID_PATTERN.test(sourceRunId)) return null;
-  return Object.freeze({ headSha, baseSha, sourceRunId });
-}
-
-export function buildDraftReviewCommandMarker({ mode, headSha, baseSha } = {}) {
-  const normalizedMode = String(mode || "");
-  if (!["request", "close"].includes(normalizedMode)) {
-    throw new Error("command mode must be request or close.");
-  }
-  const head = assertSha(headSha, "headSha");
-  const base = assertSha(baseSha, "baseSha");
-  return [
-    "<!-- " + COMMAND_NAME,
-    "mode=" + normalizedMode,
-    "head=" + head,
-    "base=" + base,
-    "-->",
-  ].join("\n");
-}
-
-export function parseDraftReviewCommandMarker(body) {
-  const text = String(body ?? "");
-  const pattern = new RegExp("<!--\\s*" + COMMAND_NAME + "\\s*([\\r\\n][\\s\\S]*?)-->", "iu");
-  const match = text.match(pattern);
-  if (!match) return null;
-  const fields = new Map();
-  for (const line of match[1].split(/\r?\n/u)) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    const separator = trimmed.indexOf("=");
-    if (separator === -1) return null;
-    const key = trimmed.slice(0, separator).trim();
-    const value = trimmed.slice(separator + 1).trim();
-    if (!["mode", "head", "base"].includes(key)) return null;
-    if (fields.has(key)) return null;
-    fields.set(key, value);
-  }
-  const mode = String(fields.get("mode") ?? "");
-  const headSha = String(fields.get("head") ?? "").toLowerCase();
-  const baseSha = String(fields.get("base") ?? "").toLowerCase();
-  if (!["request", "close"].includes(mode)) return null;
-  if (!SHA_PATTERN.test(headSha) || !SHA_PATTERN.test(baseSha)) return null;
-  return Object.freeze({ mode, headSha, baseSha });
-}
-
-export function findExistingDraftRequest(
-  comments = [],
-  { headSha, baseSha, trustedActor = DEFAULT_TRUSTED_ACTOR } = {},
-) {
-  const head = assertSha(headSha, "headSha");
-  const base = assertSha(baseSha, "baseSha");
-  const actor = normalizedLogin(trustedActor);
-  if (!actor) throw new Error("trustedActor is required.");
-  for (const comment of comments) {
-    if (normalizedLogin(commentAuthor(comment)) !== actor) continue;
-    const marker = parseDraftReviewRequestMarker(commentBody(comment));
-    if (marker && marker.headSha === head && marker.baseSha === base) return comment;
-  }
-  return null;
-}
-
-export function buildDraftReviewCommand({ headSha, baseSha, sourceRunId = null } = {}) {
-  const head = assertSha(headSha, "headSha");
-  const base = assertSha(baseSha, "baseSha");
-  const marker = buildDraftReviewRequestMarker({ headSha: head, baseSha: base, sourceRunId });
-  return [
-    "@codex review",
-    "",
-    "PageRoot Draft advisory review for exact head `" + head + "`.",
-    "",
-    "This review cannot satisfy the final Ready merge gate; `review-policy` still requires post-Ready exact head/base evidence.",
-    "",
-    marker,
-    "",
-  ].join("\n");
 }
 
 function pullRequestFields(pullRequest) {
@@ -191,6 +91,38 @@ function workflowRunPullRequests(workflowRun) {
   return Array.isArray(workflowRun?.pull_requests) ? workflowRun.pull_requests : [];
 }
 
+export function buildDraftReviewCommand({ headSha, baseSha, sourceRunId = null } = {}) {
+  const head = assertDraftReviewSha(headSha, "headSha");
+  const base = assertDraftReviewSha(baseSha, "baseSha");
+  const marker = buildDraftReviewRequestMarker({ headSha: head, baseSha: base, sourceRunId });
+  return [
+    "@codex review",
+    "",
+    "PageRoot Draft advisory review for exact head `" + head + "`.",
+    "",
+    "This review cannot satisfy the final Ready merge gate; `review-policy` still requires post-Ready exact head/base evidence.",
+    "",
+    marker,
+    "",
+  ].join("\n");
+}
+
+export function findExistingDraftRequest(
+  comments = [],
+  { headSha, baseSha, trustedActor = DEFAULT_TRUSTED_ACTOR } = {},
+) {
+  const head = assertDraftReviewSha(headSha, "headSha");
+  const base = assertDraftReviewSha(baseSha, "baseSha");
+  const actor = normalizedLogin(trustedActor);
+  if (!actor) throw new Error("trustedActor is required.");
+  for (const comment of comments) {
+    if (normalizedLogin(commentAuthor(comment)) !== actor) continue;
+    const marker = parseDraftReviewRequestMarker(commentBody(comment));
+    if (marker && marker.headSha === head && marker.baseSha === base) return comment;
+  }
+  return null;
+}
+
 export function evaluateDraftReviewEligibility({
   repository = "",
   pullRequest = null,
@@ -201,8 +133,8 @@ export function evaluateDraftReviewEligibility({
   trustedActor = DEFAULT_TRUSTED_ACTOR,
   workflowRun = null,
 } = {}) {
-  const expectedHead = assertSha(expectedHeadSha, "expectedHeadSha");
-  const expectedBase = assertSha(expectedBaseSha, "expectedBaseSha");
+  const expectedHead = assertDraftReviewSha(expectedHeadSha, "expectedHeadSha");
+  const expectedBase = assertDraftReviewSha(expectedBaseSha, "expectedBaseSha");
   const actor = normalizedLogin(trustedActor);
   if (!actor) throw new Error("trustedActor is required.");
 
@@ -284,17 +216,6 @@ export function evaluateDraftReviewEligibility({
   return Object.freeze({ status: "eligible", reason: "eligible", ...common });
 }
 
-function classifyProbePriority(body) {
-  let highestRank = Number.POSITIVE_INFINITY;
-  const text = String(body || "");
-  for (const pattern of [PRIORITY_BADGE_PATTERN, PRIORITY_LINE_PATTERN]) {
-    for (const match of text.matchAll(pattern)) {
-      highestRank = Math.min(highestRank, Number(match[1]));
-    }
-  }
-  return Number.isFinite(highestRank) ? "P" + highestRank : "unclassified";
-}
-
 export function probeCompletion({
   reviews = [],
   issueComments = [],
@@ -304,20 +225,17 @@ export function probeCompletion({
   const head = String(expectedHeadSha || "").toLowerCase();
   if (!SHA_PATTERN.test(head) || !Number.isFinite(afterMs)) return null;
   const results = [];
-  // Reactions carry no head or request identity and can never prove that this
-  // exact head's round settled. Only an exact-commit Codex review or an
-  // unedited exact-commit clean comment may close the marker.
   for (const review of reviews) {
     if (!isCodexActor(review?.user?.login || review?.author?.login)) continue;
     const commit = String(review?.commit_id || review?.commit?.oid || "").toLowerCase();
     const at = timestamp(review?.submitted_at || review?.submittedAt);
     if (commit !== head || !Number.isFinite(at) || at <= afterMs) continue;
-    const prefix = (String(review?.body ?? "").match(REVIEWED_COMMIT_PATTERN)?.[1] || "").toLowerCase();
+    const prefix = reviewedCommitPrefix(review?.body);
     if (!prefix || !head.startsWith(prefix)) continue;
     results.push({
       kind: "codex_review",
       at,
-      priority: classifyProbePriority(review?.body),
+      priority: classifyReviewPriority(review?.body),
       reviewId: Number(review?.id || 0) || null,
     });
   }
@@ -327,7 +245,7 @@ export function probeCompletion({
     const createdAt = timestamp(comment?.created_at || comment?.createdAt);
     const updatedAt = timestamp(comment?.updated_at || comment?.updatedAt || comment?.created_at || comment?.createdAt);
     const lastEditedAt = comment?.last_edited_at || comment?.lastEditedAt || null;
-    const prefix = (body.match(REVIEWED_COMMIT_PATTERN)?.[1] || "").toLowerCase();
+    const prefix = reviewedCommitPrefix(body);
     if (
       Boolean(lastEditedAt)
       || createdAt !== updatedAt
@@ -346,6 +264,15 @@ export function probeCompletion({
   }
   results.sort((left, right) => right.at - left.at);
   return results[0] || null;
+}
+
+export function classifyProbeOutcome({ completion = null, reviewThreads = [] } = {}) {
+  if (!completion) return null;
+  const blockingThread = (reviewThreads || [])
+    .map(classifyReviewThread)
+    .some((finding) => finding.state === "blocking");
+  const blockingReview = completion.priority === "P0" || completion.priority === "P1";
+  return blockingThread || blockingReview ? "action_required" : "clean";
 }
 
 export function classifyFreshSettlement(pullRequest, command) {
@@ -387,6 +314,74 @@ export function closeCommandDecision(pullRequest, command) {
   return Object.freeze({ status: "closable", reason: "draft_pair_confirmed" });
 }
 
+export function validateAutoWorkflowRun({
+  workflowRun = null,
+  pullRequest = null,
+  repository = "",
+} = {}) {
+  const workflowPath = String(workflowRun?.path || "");
+  if (!(
+    workflowPath === SOURCE_WORKFLOW_PATH
+    || workflowPath.startsWith(SOURCE_WORKFLOW_PATH + "@")
+  )) {
+    return skipped("untrusted_source_workflow", { sourceWorkflowPath: workflowPath || null });
+  }
+  if (String(workflowRun?.event || "") !== "pull_request") {
+    return skipped("source_event_not_pull_request", { sourceEvent: workflowRun?.event || null });
+  }
+  if (String(workflowRun?.conclusion || "") !== "success") {
+    return skipped("source_workflow_not_successful", { sourceConclusion: workflowRun?.conclusion || null });
+  }
+  const runPullRequests = workflowRunPullRequests(workflowRun);
+  if (runPullRequests.length === 0) return skipped("workflow_run_missing_pr");
+  if (runPullRequests.length > 1) {
+    return skipped("workflow_run_multiple_prs", { pullRequestCount: runPullRequests.length });
+  }
+  const number = Number(pullRequest?.number || 0);
+  const runNumber = Number(runPullRequests[0]?.number || 0);
+  if (!number || runNumber !== number) {
+    return skipped("workflow_run_pr_mismatch", {
+      workflowPullRequest: runNumber || null,
+      livePullRequest: number || null,
+    });
+  }
+  const head = String(workflowRun?.head_sha || "").toLowerCase();
+  const live = pullRequestFields(pullRequest);
+  if (!SHA_PATTERN.test(head) || head !== live.headSha) {
+    return skipped("workflow_run_stale", { runHeadSha: head || null, liveHeadSha: live.headSha || null });
+  }
+  if (live.headRepo && repository && live.headRepo.toLowerCase() !== String(repository).toLowerCase()) {
+    return skipped("fork_pull_request", { headRepo: live.headRepo });
+  }
+  return Object.freeze({ status: "eligible", reason: "eligible", pullRequest: number, headSha: head });
+}
+
+export function findDraftReviewStatusComment(
+  comments = [],
+  trustedActor = DEFAULT_TRUSTED_ACTOR,
+) {
+  const actor = normalizedLogin(trustedActor);
+  for (const comment of comments) {
+    if (normalizedLogin(commentAuthor(comment)) !== actor) continue;
+    const status = parseDraftReviewStatusMarker(commentBody(comment));
+    if (status) return { comment, status };
+  }
+  return null;
+}
+
+export function buildDraftReviewStatusText({ pullRequest, entries = [] } = {}) {
+  const lines = ["### Draft Codex review status", ""];
+  if (entries.length === 0) {
+    lines.push("No settled Draft review rounds yet.");
+  } else {
+    for (const entry of entries) {
+      lines.push("- `" + entry.headSha + "`: " + entry.state);
+    }
+  }
+  lines.push("", buildDraftReviewStatusMarker({ pullRequest, entries }));
+  return lines.join("\n");
+}
+
 function resolveOutputPath(output) {
   const destination = path.resolve(productRoot, output);
   if (!destination.startsWith(productRoot + path.sep)) {
@@ -400,6 +395,7 @@ export function parseDraftReviewArguments(argv) {
     repository: process.env.GITHUB_REPOSITORY || "",
     pullRequest: Number(process.env.PR_NUMBER || 0),
     commentId: Number(process.env.COMMENT_ID || 0),
+    workflowRunId: Number(process.env.WORKFLOW_RUN_ID || 0),
     tokenEnv: "GITHUB_TOKEN",
     output: "output/draft-review/draft-review.json",
     trustedActor: DEFAULT_TRUSTED_ACTOR,
@@ -416,6 +412,7 @@ export function parseDraftReviewArguments(argv) {
     if (argument === "--repository") options.repository = value;
     else if (argument === "--pull-request") options.pullRequest = Number(value);
     else if (argument === "--comment-id") options.commentId = Number(value);
+    else if (argument === "--workflow-run-id") options.workflowRunId = Number(value);
     else if (argument === "--token-env") options.tokenEnv = value;
     else if (argument === "--output") options.output = value;
     else if (argument === "--actor") options.trustedActor = value;
@@ -428,12 +425,6 @@ export function parseDraftReviewArguments(argv) {
   }
   if (!REPOSITORY_PATTERN.test(options.repository)) {
     throw new Error("--repository must use owner/name.");
-  }
-  if (!Number.isInteger(options.pullRequest) || options.pullRequest <= 0) {
-    throw new Error("--pull-request must be a positive integer.");
-  }
-  if (!Number.isInteger(options.commentId) || options.commentId <= 0) {
-    throw new Error("--comment-id must be a positive integer.");
   }
   if (!options.tokenEnv) throw new Error("--token-env must name an environment variable.");
   if (!normalizedLogin(options.trustedActor)) {
@@ -450,6 +441,14 @@ export function parseDraftReviewArguments(argv) {
   }
   if (!Number.isInteger(options.pollSeconds) || options.pollSeconds < 1 || options.pollSeconds > 60) {
     throw new Error("--poll-seconds must be an integer from 1 to 60.");
+  }
+  const hasComment = Number.isInteger(options.commentId) && options.commentId > 0;
+  const hasRun = Number.isInteger(options.workflowRunId) && options.workflowRunId > 0;
+  if (hasComment === hasRun) {
+    throw new Error("Provide exactly one of --comment-id or --workflow-run-id.");
+  }
+  if (hasComment && (!Number.isInteger(options.pullRequest) || options.pullRequest <= 0)) {
+    throw new Error("--pull-request must be a positive integer in command mode.");
   }
   resolveOutputPath(options.output);
   return options;
@@ -488,18 +487,64 @@ async function restPages(apiBase, apiPath, token) {
   throw new Error("GitHub API pagination exceeded " + MAX_REST_PAGES + " pages for " + apiPath + ".");
 }
 
+async function graphqlConnection({ graphqlUrl, query, variables, pathSelector, token }) {
+  const entries = [];
+  let after = null;
+  for (;;) {
+    const response = await githubJson(graphqlUrl, token, {
+      method: "POST",
+      body: JSON.stringify({ query, variables: { ...variables, after } }),
+    });
+    if (response.errors?.length) {
+      throw new Error("GitHub GraphQL: " + response.errors.map((error) => error.message).join("; "));
+    }
+    const connection = pathSelector(response?.data);
+    if (!connection) throw new Error("Pull Request review evidence was unavailable.");
+    entries.push(...(connection.nodes || []));
+    if (!connection.pageInfo?.hasNextPage) return entries;
+    after = connection.pageInfo.endCursor;
+    if (!after) throw new Error("GitHub GraphQL pagination omitted endCursor.");
+  }
+}
+
+async function collectReviewThreads({ graphqlUrl, owner, name, pullRequest, token }) {
+  return graphqlConnection({
+    graphqlUrl,
+    token,
+    variables: { owner, name, number: pullRequest },
+    pathSelector: (data) => data?.repository?.pullRequest?.reviewThreads,
+    query: `
+      query($owner: String!, $name: String!, $number: Int!, $after: String) {
+        repository(owner: $owner, name: $name) {
+          pullRequest(number: $number) {
+            reviewThreads(first: 100, after: $after) {
+              nodes {
+                isResolved isOutdated
+                comments(first: 20) { nodes { databaseId path body author { login } } }
+              }
+              pageInfo { hasNextPage endCursor }
+            }
+          }
+        }
+      }
+    `,
+  });
+}
+
 export async function collectDraftReviewSnapshot(options, token) {
   const apiBase = (process.env.GITHUB_API_URL || "https://api.github.com").replace(/\/$/u, "");
+  const graphqlUrl = process.env.GITHUB_GRAPHQL_URL || apiBase.replace(/\/api\/v3$/u, "/api") + "/graphql";
   const [owner, name] = options.repository.split("/");
   const repositoryPath = [owner, name].map(encodeURIComponent).join("/");
   const basePath = "/repos/" + repositoryPath;
-  const [pullRequest, comments, reviews, issueReactions] = await Promise.all([
+  const [pullRequest, comments, reviews, issueReactions, reviewThreads] = await Promise.all([
     githubJson(apiBase + basePath + "/pulls/" + options.pullRequest, token),
     restPages(apiBase, basePath + "/issues/" + options.pullRequest + "/comments", token),
     restPages(apiBase, basePath + "/pulls/" + options.pullRequest + "/reviews", token),
     restPages(apiBase, basePath + "/issues/" + options.pullRequest + "/reactions", token),
+    collectReviewThreads({ graphqlUrl, owner, name, pullRequest: options.pullRequest, token }),
   ]);
-  return { pullRequest, comments, reviews, issueReactions };
+  return { pullRequest, comments, reviews, issueReactions, reviewThreads };
 }
 
 async function collectIssueComment(options, token, commentId) {
@@ -509,19 +554,26 @@ async function collectIssueComment(options, token, commentId) {
   return githubJson(apiBase + "/repos/" + repositoryPath + "/issues/comments/" + commentId, token);
 }
 
-async function collectPullRequestOnly(options, token) {
+async function collectPullRequestOnly(options, token, pullRequest = options.pullRequest) {
   const apiBase = (process.env.GITHUB_API_URL || "https://api.github.com").replace(/\/$/u, "");
   const [owner, name] = options.repository.split("/");
   const repositoryPath = [owner, name].map(encodeURIComponent).join("/");
-  return githubJson(apiBase + "/repos/" + repositoryPath + "/pulls/" + options.pullRequest, token);
+  return githubJson(apiBase + "/repos/" + repositoryPath + "/pulls/" + pullRequest, token);
 }
 
-async function postDraftReviewCommand(options, token, body) {
+async function collectWorkflowRun(options, token, runId) {
+  const apiBase = (process.env.GITHUB_API_URL || "https://api.github.com").replace(/\/$/u, "");
+  const [owner, name] = options.repository.split("/");
+  const repositoryPath = [owner, name].map(encodeURIComponent).join("/");
+  return githubJson(apiBase + "/repos/" + repositoryPath + "/actions/runs/" + runId, token);
+}
+
+async function postIssueComment(options, token, body, pullRequest = options.pullRequest) {
   const apiBase = (process.env.GITHUB_API_URL || "https://api.github.com").replace(/\/$/u, "");
   const [owner, name] = options.repository.split("/");
   const repositoryPath = [owner, name].map(encodeURIComponent).join("/");
   const response = await githubJson(
-    apiBase + "/repos/" + repositoryPath + "/issues/" + options.pullRequest + "/comments",
+    apiBase + "/repos/" + repositoryPath + "/issues/" + pullRequest + "/comments",
     token,
     { method: "POST", body: JSON.stringify({ body }) },
   );
@@ -530,6 +582,17 @@ async function postDraftReviewCommand(options, token, body) {
     url: response?.html_url || null,
     createdAt: response?.created_at || null,
   };
+}
+
+async function patchIssueComment(options, token, commentId, body) {
+  const apiBase = (process.env.GITHUB_API_URL || "https://api.github.com").replace(/\/$/u, "");
+  const [owner, name] = options.repository.split("/");
+  const repositoryPath = [owner, name].map(encodeURIComponent).join("/");
+  await githubJson(
+    apiBase + "/repos/" + repositoryPath + "/issues/comments/" + commentId,
+    token,
+    { method: "PATCH", body: JSON.stringify({ body }) },
+  );
 }
 
 async function deleteIssueComment(options, token, commentId) {
@@ -577,6 +640,7 @@ function summarizeDraftReview(result) {
     reviewCompletionKind: result.reviewCompletionKind ?? null,
     reviewPriority: result.reviewPriority ?? null,
     requestedAt: result.requestedAt ?? null,
+    statusCommentId: result.statusCommentId ?? null,
   };
 }
 
@@ -599,7 +663,7 @@ async function writeGithubOutput(destination, values) {
 async function appendSummary(result) {
   if (!process.env.GITHUB_STEP_SUMMARY) return;
   const lines = [
-    "### Draft Codex review command",
+    "### Draft Codex review",
     "",
     "- Result: **" + String(result.status).toUpperCase() + "** (" + result.reason + ")",
     "- Pull request: " + (result.pullRequest ?? "unavailable"),
@@ -629,7 +693,7 @@ function commandResult(options, fields) {
     repository: options.repository,
     trustedActor: options.trustedActor,
     pullRequest: options.pullRequest,
-    commentId: options.commentId,
+    commentId: options.commentId || null,
     sourceRunId: options.sourceRunId || null,
     ...fields,
   });
@@ -643,9 +707,22 @@ function unavailableResult(options) {
   });
 }
 
-async function waitForProbeSettlement(options, token, posted, command) {
+async function upsertDraftReviewStatus(options, token, existing, pullRequest, entries) {
+  const text = buildDraftReviewStatusText({ pullRequest, entries });
+  const existingId = Number(existing?.id || existing?.databaseId || 0);
+  if (existingId) {
+    await patchIssueComment(options, token, existingId, text);
+    return existingId;
+  }
+  const posted = await postIssueComment(options, token, text, pullRequest);
+  return posted.id;
+}
+
+async function waitForProbeSettlement(options, token, posted, command, snapshotAtStart) {
   const requestAt = timestamp(posted?.createdAt) ?? Date.now();
   const deadline = Date.now() + options.timeoutSeconds * 1000;
+  const existingStatus = findDraftReviewStatusComment(snapshotAtStart.comments, options.trustedActor);
+  const settledEntries = existingStatus?.status?.entries || [];
   for (;;) {
     await delay(Math.min(options.pollSeconds * 1000, Math.max(1, deadline - Date.now())));
     const snapshot = await collectDraftReviewSnapshot(options, token);
@@ -684,7 +761,6 @@ async function waitForProbeSettlement(options, token, posted, command) {
     const completion = probeCompletion({
       reviews: snapshot.reviews,
       issueComments: snapshot.comments,
-      issueReactions: snapshot.issueReactions,
       expectedHeadSha: command.headSha,
       afterMs: requestAt,
     });
@@ -702,11 +778,12 @@ async function waitForProbeSettlement(options, token, posted, command) {
           requestedAt: new Date(requestAt).toISOString(),
         });
       }
+      const outcome = classifyProbeOutcome({ completion, reviewThreads: snapshot.reviewThreads });
       await deleteIssueComment(options, token, posted.id);
+      const entries = recordSettledHead(settledEntries, { headSha: command.headSha, state: outcome });
+      const statusCommentId = await upsertDraftReviewStatus(options, token, existingStatus?.comment || null, options.pullRequest, entries);
       return commandResult(options, {
-        status: completion.priority === "P0" || completion.priority === "P1"
-          ? "action_required"
-          : "clean",
+        status: outcome,
         reason: "probe_settled",
         commentCreated: true,
         commentId: posted.id,
@@ -715,9 +792,12 @@ async function waitForProbeSettlement(options, token, posted, command) {
         reviewCompletedAt: new Date(completion.at).toISOString(),
         reviewCompletionKind: completion.kind,
         reviewPriority: completion.priority,
+        statusCommentId,
       });
     }
     if (Date.now() >= deadline) {
+      const entries = recordSettledHead(settledEntries, { headSha: command.headSha, state: "timed_out" });
+      const statusCommentId = await upsertDraftReviewStatus(options, token, existingStatus?.comment || null, options.pullRequest, entries);
       return commandResult(options, {
         status: "timed_out",
         reason: "probe_wait_timeout",
@@ -725,9 +805,68 @@ async function waitForProbeSettlement(options, token, posted, command) {
         commentId: posted.id,
         commentUrl: posted.url,
         requestedAt: new Date(requestAt).toISOString(),
+        statusCommentId,
       });
     }
   }
+}
+
+async function runCommandRequest(options, token, association, command, snapshot) {
+  const statusInfo = findDraftReviewStatusComment(snapshot.comments, options.trustedActor);
+  const previousState = settledHeadState(statusInfo?.status?.entries || [], command.headSha);
+  if (SETTLED_STATES.has(previousState)) {
+    const result = commandResult(options, {
+      status: "already_settled",
+      reason: "already_settled",
+      authorAssociation: association,
+      commentCreated: false,
+      settledState: previousState,
+    });
+    await persistResult(result, options);
+    return result;
+  }
+  const eligibility = evaluateDraftReviewEligibility({
+    repository: options.repository,
+    pullRequest: snapshot.pullRequest,
+    comments: snapshot.comments,
+    expectedHeadSha: command.headSha,
+    expectedBaseSha: command.baseSha,
+    sourceRunId: options.sourceRunId || null,
+    trustedActor: options.trustedActor,
+    workflowRun: null,
+  });
+  if (eligibility.status === "already_requested") {
+    const result = commandResult(options, { ...eligibility, authorAssociation: association, commentCreated: false });
+    await persistResult(result, options);
+    return result;
+  }
+  if (eligibility.status !== "eligible") {
+    const result = commandResult(options, { ...eligibility, authorAssociation: association, commentCreated: false });
+    await persistResult(result, options);
+    throw new Error("Draft review request blocked: " + eligibility.reason + ".");
+  }
+  const body = buildDraftReviewCommand({
+    headSha: command.headSha,
+    baseSha: command.baseSha,
+    sourceRunId: options.sourceRunId || null,
+  });
+  let posted;
+  try {
+    posted = await postIssueComment(options, token, body);
+  } catch (error) {
+    const failed = commandResult(options, {
+      ...eligibility,
+      status: "request_failed",
+      reason: "comment_post_failed",
+      authorAssociation: association,
+      commentCreated: false,
+    });
+    await persistResult(failed, options);
+    throw new Error("Draft review comment failed: " + (error instanceof Error ? error.message : String(error)));
+  }
+  const settled = await waitForProbeSettlement(options, token, posted, command, snapshot);
+  await persistResult(settled, options);
+  return settled;
 }
 
 async function runCommentCommand(options) {
@@ -767,17 +906,6 @@ async function runCommentCommand(options) {
     await persistResult(unrecognized, options);
     throw new Error("Draft review command rejected: no valid pageroot-draft-review-command marker.");
   }
-  const eligibility = evaluateDraftReviewEligibility({
-    repository: options.repository,
-    pullRequest: snapshot.pullRequest,
-    comments: snapshot.comments,
-    expectedHeadSha: command.headSha,
-    expectedBaseSha: command.baseSha,
-    sourceRunId: options.sourceRunId || null,
-    trustedActor: options.trustedActor,
-    workflowRun: null,
-  });
-
   if (command.mode === "close") {
     const closeDecision = closeCommandDecision(snapshot.pullRequest, command);
     if (closeDecision.status !== "closable") {
@@ -797,7 +925,6 @@ async function runCommentCommand(options) {
     const existingId = Number(existing?.id || existing?.databaseId || 0);
     if (!existingId) {
       const result = commandResult(options, {
-        ...eligibility,
         status: "nothing_to_close",
         reason: "nothing_to_close",
         authorAssociation: association,
@@ -817,7 +944,6 @@ async function runCommentCommand(options) {
       : null;
     if (!settlement) {
       const refused = commandResult(options, {
-        ...eligibility,
         status: "refused",
         reason: "close_refused_unsettled",
         authorAssociation: association,
@@ -829,7 +955,6 @@ async function runCommentCommand(options) {
     }
     await deleteIssueComment(options, token, existingId);
     const result = commandResult(options, {
-      ...eligibility,
       status: "closed",
       reason: "probe_marker_closed",
       authorAssociation: association,
@@ -839,28 +964,78 @@ async function runCommentCommand(options) {
     await persistResult(result, options);
     return result;
   }
+  return runCommandRequest(options, token, association, command, snapshot);
+}
 
-  const existing = findExistingDraftRequest(snapshot.comments, {
-    headSha: command.headSha,
-    baseSha: command.baseSha,
-    trustedActor: options.trustedActor,
+async function runAutoCommand(options) {
+  const token = process.env[options.tokenEnv] || "";
+  if (!token) throw new Error("Environment variable " + options.tokenEnv + " is required.");
+  let run;
+  let pullRequest;
+  let snapshot;
+  try {
+    run = await collectWorkflowRun(options, token, options.workflowRunId);
+    const runNumber = Number(workflowRunPullRequests(run)?.[0]?.number || 0);
+    if (!runNumber) throw new Error("The triggering workflow run names no Pull Request.");
+    options = { ...options, pullRequest: runNumber };
+    pullRequest = await collectPullRequestOnly(options, token, runNumber);
+    snapshot = await collectDraftReviewSnapshot(options, token);
+  } catch (error) {
+    const unavailable = unavailableResult(options);
+    await persistResult(unavailable, options);
+    throw new Error("Draft review evidence is unavailable: " + (error instanceof Error ? error.message : String(error)));
+  }
+  const trigger = validateAutoWorkflowRun({
+    workflowRun: run,
+    pullRequest,
+    repository: options.repository,
   });
-  if (existing) {
+  const common = commandResult(options, {
+    ...trigger,
+    pullRequest: trigger.pullRequest || null,
+    commentId: null,
+  });
+  if (trigger.status !== "eligible") {
+    await persistResult(common, options);
+    return common;
+  }
+  const command = Object.freeze({
+    mode: "request",
+    headSha: pullRequestFields(pullRequest).headSha,
+    baseSha: pullRequestFields(pullRequest).baseSha,
+  });
+  const statusInfo = findDraftReviewStatusComment(snapshot.comments, options.trustedActor);
+  const previousState = settledHeadState(statusInfo?.status?.entries || [], command.headSha);
+  if (SETTLED_STATES.has(previousState)) {
     const result = commandResult(options, {
-      ...eligibility,
-      status: "already_requested",
-      reason: "already_requested",
-      authorAssociation: association,
+      ...common,
+      status: "already_settled",
+      reason: "already_settled",
       commentCreated: false,
-      existingCommentId: Number(existing.id || existing.databaseId || 0) || null,
+      settledState: previousState,
     });
     await persistResult(result, options);
     return result;
   }
-  if (eligibility.status !== "eligible") {
-    const result = commandResult(options, { ...eligibility, authorAssociation: association, commentCreated: false });
+  const eligibility = evaluateDraftReviewEligibility({
+    repository: options.repository,
+    pullRequest: snapshot.pullRequest,
+    comments: snapshot.comments,
+    expectedHeadSha: command.headSha,
+    expectedBaseSha: command.baseSha,
+    sourceRunId: options.sourceRunId || null,
+    trustedActor: options.trustedActor,
+    workflowRun: run,
+  });
+  if (eligibility.status === "already_requested") {
+    const result = commandResult(options, { ...eligibility, commentCreated: false });
     await persistResult(result, options);
-    throw new Error("Draft review request blocked: " + eligibility.reason + ".");
+    return result;
+  }
+  if (eligibility.status !== "eligible") {
+    const result = commandResult(options, { ...eligibility, commentCreated: false });
+    await persistResult(result, options);
+    return result;
   }
   const body = buildDraftReviewCommand({
     headSha: command.headSha,
@@ -869,25 +1044,25 @@ async function runCommentCommand(options) {
   });
   let posted;
   try {
-    posted = await postDraftReviewCommand(options, token, body);
+    posted = await postIssueComment(options, token, body);
   } catch (error) {
     const failed = commandResult(options, {
       ...eligibility,
       status: "request_failed",
       reason: "comment_post_failed",
-      authorAssociation: association,
       commentCreated: false,
     });
     await persistResult(failed, options);
     throw new Error("Draft review comment failed: " + (error instanceof Error ? error.message : String(error)));
   }
-  const settled = await waitForProbeSettlement(options, token, posted, command);
+  const settled = await waitForProbeSettlement(options, token, posted, command, snapshot);
   await persistResult(settled, options);
   return settled;
 }
 
 async function run(options) {
-  return runCommentCommand(options);
+  if (options.commentId > 0) return runCommentCommand(options);
+  return runAutoCommand(options);
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === scriptPath) {
