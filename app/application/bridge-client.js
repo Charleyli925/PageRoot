@@ -259,6 +259,12 @@ export function createBridgeClient({
       "最新版暂时无法打开。",
       DEFAULT_REQUEST_TIMEOUT_MS,
     ),
+    continueEditingHistoryVersion: (body) => command(
+      "/history-version/continue",
+      body,
+      "暂时无法基于这份历史版本继续编辑。",
+      DEFAULT_REQUEST_TIMEOUT_MS,
+    ),
     cancelActiveRun: (body) => command(
       "/active-run/cancel",
       body,

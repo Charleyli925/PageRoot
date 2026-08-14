@@ -9,6 +9,7 @@ import {
 import {
   finalizeProjectFileAttempt,
 } from "../scripts/project-file-finalizer.mjs";
+import { ProjectFileRepository } from "../scripts/project-file-repository.mjs";
 import { sha256 } from "../scripts/lifecycle-core.mjs";
 
 function html(label) {
@@ -65,6 +66,75 @@ test("project-file PR1 import switches to V1 before the queued save and leaves e
     "utf8",
   ));
   assert.deepEqual(manifest.versions.map((version) => version.versionId), ["ver_0001"]);
+});
+
+test("history continuation activates the original Version Working Copy through the narrow Bridge route", async (t) => {
+  const environment = await createBridgeTestEnvironment(t, {
+    prefix: "pageroot-project-file-history-continue-",
+  });
+  const sourcePath = await environment.createSource("history-continue.html", html("external V1"));
+  const projectsRoot = join(environment.root, "project-files");
+  const bridge = await environment.start({ HTML_AI_PROJECT_FILES_ROOT: projectsRoot });
+  const preview = await bridge.requestJson(
+    `/workspace?sourcePath=${encodeURIComponent(sourcePath)}`,
+  );
+  const ensured = await postJson(bridge, "/project/ensure", {
+    sourcePath,
+    expectedSourceSha256: preview.body.currentHtmlSha256,
+    projectStorageVersion: "4.0.0",
+  });
+  assert.equal(ensured.response.status, 200, JSON.stringify(ensured.body));
+
+  const repository = new ProjectFileRepository({ projectsRoot });
+  let active = ensured.body.openTarget;
+  const v2Html = html("immutable V2");
+  for (let ordinal = 2; ordinal <= 6; ordinal += 1) {
+    const candidate = await repository.createCandidate({
+      target: active,
+      requestId: `req_bridge_history_${ordinal}`,
+      candidateId: `candidate_bridge_history_${ordinal}_0001`,
+      html: ordinal === 2 ? v2Html : html(`V${ordinal}`),
+      expectedSourceSha256: active.sourceSha256,
+    });
+    active = (await repository.promoteCandidate({
+      target: active,
+      candidateId: candidate.candidate.candidateId,
+    })).target;
+  }
+  assert.equal(active.versionId, "ver_0006");
+
+  const viewed = await bridge.requestJson(
+    `/version-file?sourcePath=${encodeURIComponent(active.exactSourcePath)}&versionId=ver_0002`,
+  );
+  assert.equal(viewed.response.status, 200, JSON.stringify(viewed.body));
+  assert.equal(viewed.body.content, v2Html);
+  const beforeContinue = await bridge.requestJson(
+    `/source?sourcePath=${encodeURIComponent(active.exactSourcePath)}`,
+  );
+  assert.equal(beforeContinue.body.currentBasedOnVersionId, "ver_0006");
+  assert.equal(beforeContinue.body.content, html("V6"));
+
+  const continuation = {
+    sourcePath: active.exactSourcePath,
+    projectId: ensured.body.projectId,
+    documentId: ensured.body.documentId,
+    versionId: "ver_0002",
+    operationId: "history_continue_v2_0001",
+  };
+  const continued = await postJson(bridge, "/history-version/continue", continuation);
+  assert.equal(continued.response.status, 200, JSON.stringify(continued.body));
+  assert.equal(continued.body.status, "history-working-copy-activated");
+  assert.equal(continued.body.sourcePath, continued.body.openTarget.exactSourcePath);
+  assert.equal(continued.body.openTarget.versionId, "ver_0002");
+  assert.equal(continued.body.openTarget.workingCopyId, "work_ver_0002");
+  assert.equal(continued.body.currentBasedOnVersionId, "ver_0002");
+  assert.equal(continued.body.latestVersionId, "ver_0006");
+  assert.equal(continued.body.content, v2Html);
+
+  const retried = await postJson(bridge, "/history-version/continue", continuation);
+  assert.equal(retried.response.status, 200, JSON.stringify(retried.body));
+  assert.equal(retried.body.openTarget.workingCopyId, continued.body.openTarget.workingCopyId);
+  assert.equal(retried.body.sourcePath, continued.body.sourcePath);
 });
 
 test("a v4 client treats a pre-v4 project as a fresh V1 import", async (t) => {

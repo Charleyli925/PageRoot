@@ -1206,7 +1206,14 @@ async function activateManagedWorkingCopyOperation(payload) {
     state.activePath,
     ...state.recent.map((entry) => entry.path),
   ].filter(Boolean).map(existingPathIdentity)));
-  if (!knownPathIdentities.has(previousSourcePath)) {
+  // A response can be lost after the main process has committed the new
+  // active path. Retrying the same managed activation must then recognize the
+  // already-active next source instead of rejecting the original predecessor
+  // as unknown.
+  if (
+    !knownPathIdentities.has(previousSourcePath)
+    && !knownPathIdentities.has(nextSourcePath)
+  ) {
     throw new ProjectFileError(
       "UNKNOWN_SOURCE",
       "只能从当前已经打开的 HTML 切换到托管工作文件。",

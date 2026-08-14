@@ -108,6 +108,31 @@ function emptyDraftAuthority() {
   });
 }
 
+function isRecord(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function draftAuthorityFromWorkspacePayload(payload) {
+  const runtime = isRecord(payload?.runtimeState) ? payload.runtimeState : {};
+  const source = isRecord(runtime.draft)
+    ? runtime.draft
+    : (isRecord(payload?.activeDraft) ? payload.activeDraft : {});
+  return Object.freeze({
+    draftRevision: Number.isSafeInteger(Number(source.draftRevision))
+      && Number(source.draftRevision) >= 0
+      ? Number(source.draftRevision)
+      : 0,
+    comments: Array.isArray(source.comments) ? source.comments : [],
+    changeEvents: Array.isArray(source.changeEvents) ? source.changeEvents : [],
+    deletedCommentIds: Array.isArray(source.deletedCommentIds)
+      ? source.deletedCommentIds
+      : [],
+    appliedOperationIds: Array.isArray(source.appliedOperationIds)
+      ? source.appliedOperationIds
+      : [],
+  });
+}
+
 // VersionWorkflow is the PR-6 application boundary. It owns only operation
 // identity, Bridge reads/mutations and cross-Session publication sequencing.
 // VersionSession remains the immutable Version projection, and Workbench keeps
@@ -155,6 +180,7 @@ export class VersionWorkflow {
       || typeof bridgeClient.versionFile !== "function"
       || typeof bridgeClient.source !== "function"
       || typeof bridgeClient.activateReadyVersion !== "function"
+      || typeof bridgeClient.continueEditingHistoryVersion !== "function"
     ) {
       throw new TypeError("VersionWorkflow requires its Version Bridge methods.");
     }
@@ -180,8 +206,10 @@ export class VersionWorkflow {
     }
     if (
       !projectWorkflow
-      || typeof projectWorkflow.prepareGeneratedSourceTransition !== "function"
-      || typeof projectWorkflow.commitGeneratedSourceTransition !== "function"
+      || typeof projectWorkflow.prepareManagedSourceTransition !== "function"
+      || typeof projectWorkflow.commitManagedSourceTransition !== "function"
+      || typeof projectWorkflow.captureManagedSourceTransitionAuthority !== "function"
+      || typeof projectWorkflow.restoreManagedSourceTransitionAuthority !== "function"
       || typeof projectWorkflow.drain !== "function"
       || typeof projectWorkflow.refreshWorkspace !== "function"
     ) {
@@ -414,8 +442,9 @@ export class VersionWorkflow {
     }
     this.#runSession.setActiveRun({ ...ready, error: undefined });
     try {
+      const readyTarget = this.#readyOpenTarget(ready);
       const activatedPayload = await this.#bridgeClient.activateReadyVersion({
-        ...this.#projectSession.context,
+        ...readyTarget,
         sourcePath: ready.sourcePath,
         projectId: ready.projectId,
         documentId: ready.documentId,
@@ -677,6 +706,156 @@ export class VersionWorkflow {
     }
   }
 
+  async continueEditingHistoryVersion({
+    versionId = this.#versionSession.snapshot.viewingVersionId,
+    context = this.#projectSession.context,
+    fromDeferred = false,
+  } = {}) {
+    if (this.#disposed) {
+      return blocked("VERSION_WORKFLOW_DISPOSED", "版本工作流已经停止。");
+    }
+    const current = copyContext(context);
+    const requestedVersionId = String(versionId || "");
+    if (!current || !this.#projectSession.matches(current)) {
+      return stale(current || {});
+    }
+    if (
+      this.#versionSession.snapshot.viewMode !== "history"
+      || this.#versionSession.snapshot.viewingVersionId !== requestedVersionId
+      || !/^ver_\d{4,}$/.test(requestedVersionId)
+    ) {
+      return blocked(
+        "VERSION_HISTORY_CONTINUE_PRECONDITION",
+        "请先只读查看一份明确的历史版本，再基于它继续编辑。",
+      );
+    }
+    if (this.#projectWorkflow.projectHydrating || this.#projectWorkflow.projectLoadError) {
+      return blocked(
+        "VERSION_HISTORY_CONTINUE_PROJECT_UNAVAILABLE",
+        "项目状态尚未准备完成，不能基于历史版本继续编辑。",
+      );
+    }
+    if (this.#runSession.activeLocked) {
+      return blocked(
+        "VERSION_HISTORY_CONTINUE_RUN_LOCKED",
+        "当前 AI 处理尚未完成，不能切换到历史工作文件。",
+      );
+    }
+    if (!fromDeferred) {
+      const deferred = this.#deferCanvasCommand(
+        "project-switch",
+        () => this.continueEditingHistoryVersion({
+          versionId: requestedVersionId,
+          context: current,
+          fromDeferred: true,
+        }),
+      );
+      if (deferred) return deferred;
+    }
+    const operation = this.#beginNavigation("history", current);
+    if (!operation) {
+      return blocked("VERSION_NAVIGATION_BUSY", "当前 HTML 视图正在切换，请稍后重试。");
+    }
+    const previous = this.#projectWorkflow.captureManagedSourceTransitionAuthority();
+    try {
+      const frozen = this.#freezeCurrentCanvas(
+        "当前历史视图尚未完成安全收口，无法切换到历史工作文件。",
+        "project-switch",
+      );
+      if (!frozen.ok) {
+        return blocked("VERSION_HISTORY_CONTINUE_CANVAS_FENCE", frozen.reason);
+      }
+      const payload = await this.#bridgeClient.continueEditingHistoryVersion({
+        sourcePath: current.sourcePath,
+        projectId: current.projectId,
+        documentId: current.documentId,
+        versionId: requestedVersionId,
+        operationId: operation.operationId,
+      });
+      if (!this.#isNavigationCurrent(operation)) return stale(current);
+      const resumed = this.#historyContinuationPayload(payload, current, requestedVersionId);
+      if (await this.#hashPort.sha256(resumed.content) !== resumed.sha256) {
+        throw new Error("历史工作文件内容与声明 Hash 不一致，不能继续编辑。");
+      }
+      const prepared = await this.#projectWorkflow.prepareManagedSourceTransition({
+        previousSourcePath: current.sourcePath,
+        nextSourcePath: resumed.openTarget.exactSourcePath,
+        expectedSha256: resumed.sha256,
+        nextProjectId: current.projectId,
+        nextDocumentId: current.documentId,
+        versionId: requestedVersionId,
+        openTarget: resumed.openTarget,
+      });
+      if (!this.#isNavigationCurrent(operation)) return stale(current);
+      const nextContext = this.#projectWorkflow.commitManagedSourceTransition({
+        prepared,
+        html: resumed.content,
+        sourceSha256: resumed.sha256,
+        publishSessions: (publishedContext) => {
+          this.#versionSession.hydrate({
+            versions: resumed.versions,
+            latestVersionId: resumed.latestVersionId,
+            currentBasedOnVersionId: requestedVersionId,
+            currentExactVersionId: resumed.currentExactVersionId,
+            restoredFromVersionId: resumed.restoredFromVersionId,
+          });
+          this.#versionSession.returnCurrent({
+            currentBasedOnVersionId: requestedVersionId,
+            currentExactVersionId: resumed.currentExactVersionId,
+            restoredFromVersionId: resumed.restoredFromVersionId,
+          });
+          this.#draftSession.replaceAuthority(
+            publishedContext,
+            resumed.draft.draftRevision,
+            resumed.draft,
+          );
+          this.#commentSession.update({
+            comments: resumed.draft.comments,
+            changeEvents: resumed.draft.changeEvents,
+            deletedCommentIds: resumed.draft.deletedCommentIds,
+            composerDraft: "",
+            composerCommentId: null,
+            composerAttachments: [],
+            composerTarget: null,
+            editSession: null,
+          });
+        },
+      });
+      if (!nextContext || !this.#projectSession.matches(nextContext)) return stale(current);
+      if (!this.#isNavigationActive(operation)) return stale(current);
+      await this.#canvasPort.verifyRendered(resumed.content, resumed.sha256, nextContext);
+      if (!this.#isNavigationActive(operation) || !this.#projectSession.matches(nextContext)) {
+        return stale(nextContext);
+      }
+      this.#documentWorkflow.clearAudit();
+      this.#documentSession.setPersistence({ state: "idle", error: "" });
+      this.#documentWorkflow.clearRecovery(nextContext);
+      const value = {
+        context: nextContext,
+        versionId: requestedVersionId,
+        workingCopyId: resumed.openTarget.workingCopyId,
+        content: resumed.content,
+        sha256: resumed.sha256,
+        lastModifiedAt: resumed.lastModifiedAt,
+      };
+      this.#emitEvent({ type: "version-history-editing-continued", ...value });
+      return succeeded(value);
+    } catch (cause) {
+      const rollback = await this.#rollbackManagedSourceTransition(operation, previous);
+      return rejected(
+        errorCode(cause, "VERSION_HISTORY_CONTINUE_REJECTED"),
+        this.#codecs.errorMessage(
+          cause,
+          rollback
+            ? "没有切换到历史工作文件；原来的历史视图仍保持不变。"
+            : "没有切换到历史工作文件。",
+        ),
+      );
+    } finally {
+      this.#finishNavigation(operation);
+    }
+  }
+
   async #openCommittedVersion({ run, payload, reviewLease, operation }) {
     const completion = this.#committedPayload(run, payload);
     const committedSourcePath = String(
@@ -743,7 +922,7 @@ export class VersionWorkflow {
       this.#documentWorkflow.clearRecovery(activeContext);
     }
 
-    const prepared = await this.#projectWorkflow.prepareGeneratedSourceTransition({
+    const prepared = await this.#projectWorkflow.prepareManagedSourceTransition({
       previousSourcePath: run.sourcePath,
       nextSourcePath: resolvedCommittedSourcePath,
       expectedSha256: sourceSha256,
@@ -765,11 +944,15 @@ export class VersionWorkflow {
         lastModifiedAt,
       });
     }
-    const context = this.#projectWorkflow.commitGeneratedSourceTransition({
+    const context = this.#projectWorkflow.commitManagedSourceTransition({
       prepared,
       html: content,
       sourceSha256,
-      publishVersion: () => this.#versionSession.adoptCommitted(completion.versionId),
+      publishSessions: (publishedContext) => {
+        this.#versionSession.adoptCommitted(completion.versionId);
+        this.#draftSession.replaceAuthority(publishedContext, 0, emptyDraftAuthority());
+        this.#commentSession.reset();
+      },
     });
     if (!context || !this.#projectSession.matches(context)) return stale(this.#runIdentity(run));
 
@@ -779,9 +962,6 @@ export class VersionWorkflow {
     this.#documentWorkflow.clearAudit();
     this.#documentSession.setPersistence({ state: "idle", error: "" });
 
-    this.#commentWorkflow.resetForProjectTransition();
-    this.#commentSession.reset();
-    this.#draftSession.replaceAuthority(context, 0, emptyDraftAuthority());
     this.#commentWorkflow.queueDraft();
     this.#documentWorkflow.clearRecovery(context);
 
@@ -898,6 +1078,26 @@ export class VersionWorkflow {
     return String(payload.contentSha256 || version.contentSha256 || fallback || "");
   }
 
+  #readyOpenTarget(run) {
+    const target = isRecord(run?.readyPayload?.openTarget)
+      ? run.readyPayload.openTarget
+      : null;
+    if (
+      !target
+      || target.targetKind !== "working-copy"
+      || String(target.projectId || "") !== String(run.projectId || "")
+      || String(target.documentId || "") !== String(run.documentId || "")
+      || !String(target.projectRootPath || "")
+      || !String(target.workingCopyId || "")
+      || !String(target.exactSourcePath || "")
+      || !this.#codecs.sameSourcePath(target.exactSourcePath, run.sourcePath)
+      || !SHA256.test(String(target.sourceSha256 || ""))
+    ) {
+      throw new Error("候选版本缺少其所属项目的完整工作文件身份，不能从其他项目借用当前页面。");
+    }
+    return target;
+  }
+
   #assertVersionFileIdentity(payload, owner, expectedVersionId) {
     const projectId = String(owner.projectId || "");
     const documentId = String(owner.documentId || "");
@@ -921,6 +1121,60 @@ export class VersionWorkflow {
     ) {
       throw new Error("当前源 HTML 的项目身份发生变化，已拒绝切换视图。");
     }
+  }
+
+  #historyContinuationPayload(payload, context, versionId) {
+    const openTarget = isRecord(payload?.openTarget) ? payload.openTarget : null;
+    const sha256 = String(
+      payload?.currentHtmlSha256
+      || payload?.sourceSha256
+      || openTarget?.sourceSha256
+      || "",
+    );
+    const content = String(payload?.content || "");
+    const latestVersionId = String(payload?.latestVersionId || "");
+    const versions = Array.isArray(payload?.versions) ? payload.versions : null;
+    if (
+      payload?.ok !== true
+      || payload?.status !== "history-working-copy-activated"
+      || String(payload?.projectId || "") !== context.projectId
+      || String(payload?.documentId || "") !== context.documentId
+      || String(payload?.currentBasedOnVersionId || "") !== versionId
+      || !openTarget
+      || openTarget.targetKind !== "working-copy"
+      || String(openTarget.projectId || "") !== context.projectId
+      || String(openTarget.documentId || "") !== context.documentId
+      || String(openTarget.versionId || "") !== versionId
+      || !String(openTarget.workingCopyId || "")
+      || !String(openTarget.projectRootPath || "")
+      || !String(openTarget.exactSourcePath || "")
+      || String(payload?.sourcePath || "") !== String(openTarget.exactSourcePath)
+      || String(openTarget.sourceSha256 || "") !== sha256
+      || !SHA256.test(sha256)
+      || !content
+      || !/^ver_\d{4,}$/.test(latestVersionId)
+      || !versions
+      || !versions.some((version) => String(version?.versionId || version?.id || "") === versionId)
+      || !validTimestamp(payload?.lastModifiedAt)
+    ) {
+      throw new Error("历史继续编辑响应缺少完整、同一项目的工作文件身份。");
+    }
+    const draft = draftAuthorityFromWorkspacePayload(payload);
+    return Object.freeze({
+      openTarget,
+      content,
+      sha256,
+      latestVersionId,
+      versions,
+      currentExactVersionId: payload.currentExactVersionId
+        ? String(payload.currentExactVersionId)
+        : null,
+      restoredFromVersionId: payload.restoredFromVersionId
+        ? String(payload.restoredFromVersionId)
+        : null,
+      lastModifiedAt: String(payload.lastModifiedAt),
+      draft,
+    });
   }
 
   #settleActivatedRun(run, value) {
@@ -948,6 +1202,24 @@ export class VersionWorkflow {
       pendingWrite: this.#documentSession.pendingWrite,
       version: this.#versionSession.captureSnapshot(),
     });
+  }
+
+  async #rollbackManagedSourceTransition(operation, previous) {
+    if (!this.#isNavigationActive(operation)) return false;
+    const restored = this.#projectWorkflow.restoreManagedSourceTransitionAuthority(previous);
+    if (!restored || !this.#projectSession.context) return false;
+    this.#canvasPort.invalidateRenderAcks();
+    try {
+      const sha256 = await this.#hashPort.sha256(this.#documentSession.html);
+      await this.#canvasPort.verifyRendered(
+        this.#documentSession.html,
+        sha256,
+        this.#projectSession.context,
+      );
+      return this.#isNavigationActive(operation);
+    } catch {
+      return false;
+    }
   }
 
   async #rollbackNavigation(operation, previous) {
@@ -1025,11 +1297,17 @@ export class VersionWorkflow {
 
   #isNavigationCurrent(operation) {
     return Boolean(
+      this.#isNavigationActive(operation)
+      && (!operation.context || this.#projectSession.matches(operation.context)),
+    );
+  }
+
+  #isNavigationActive(operation) {
+    return Boolean(
       !this.#disposed
       && operation
       && operation.generation === this.#navigationGeneration
-      && this.#snapshot.navigation.operationId === operation.operationId
-      && (!operation.context || this.#projectSession.matches(operation.context)),
+      && this.#snapshot.navigation.operationId === operation.operationId,
     );
   }
 
