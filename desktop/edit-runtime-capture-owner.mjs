@@ -109,33 +109,98 @@ function pngSha256(value) {
   return "sha256:" + createHash("sha256").update(value).digest("hex");
 }
 
-function validatedPng(image) {
+function pngDescription(image) {
   if (!image || typeof image.isEmpty !== "function" || image.isEmpty()) return null;
-  const png = image.toPNG?.();
+  let png = null;
+  try {
+    png = image.toPNG?.();
+  } catch {
+    return null;
+  }
   if (
     !(png instanceof Uint8Array)
     || png.byteLength < 24
-    || png.byteLength > EDIT_AUTHOR_RUNTIME_BUDGET.snapshotBytes
   ) return null;
   if (!PNG_SIGNATURE.every((byte, index) => png[index] === byte)) return null;
   if (![73, 72, 68, 82].every((byte, index) => png[12 + index] === byte)) return null;
   const view = new DataView(png.buffer, png.byteOffset, png.byteLength);
   const width = view.getUint32(16, false);
   const height = view.getUint32(20, false);
-  if (
-    width < 1
-    || height < 1
-    || Math.max(width, height) > EDIT_AUTHOR_RUNTIME_BUDGET.snapshotDimension
-    || width * height > EDIT_AUTHOR_RUNTIME_BUDGET.snapshotPixels
-  ) return null;
-  const bytes = new Uint8Array(png);
+  if (width < 1 || height < 1) return null;
   return Object.freeze({
-    pngSha256: pngSha256(bytes),
+    bytes: new Uint8Array(png),
     width,
     height,
-    byteLength: bytes.byteLength,
-    pngBase64: Buffer.from(bytes).toString("base64"),
+    byteLength: png.byteLength,
   });
+}
+
+function normalizedSnapshotPng(image, {
+  maximumBytes = EDIT_AUTHOR_RUNTIME_BUDGET.snapshotBytes,
+  maximumPixels = EDIT_AUTHOR_RUNTIME_BUDGET.snapshotPixels,
+} = {}) {
+  const description = pngDescription(image);
+  if (!description) return null;
+  if (
+    description.byteLength > maximumBytes
+    || Math.max(description.width, description.height) > EDIT_AUTHOR_RUNTIME_BUDGET.snapshotDimension
+    || description.width * description.height > maximumPixels
+  ) return null;
+  return Object.freeze({
+    pngSha256: pngSha256(description.bytes),
+    width: description.width,
+    height: description.height,
+    byteLength: description.byteLength,
+    pngBase64: Buffer.from(description.bytes).toString("base64"),
+  });
+}
+
+function resizedSnapshotPng(image, {
+  layoutWidth,
+  layoutHeight,
+  maximumBytes,
+  maximumPixels,
+} = {}) {
+  const allowedBytes = Math.max(24, Math.min(
+    EDIT_AUTHOR_RUNTIME_BUDGET.snapshotBytes,
+    Math.floor(Number(maximumBytes) || 0),
+  ));
+  const allowedPixels = Math.max(1, Math.min(
+    EDIT_AUTHOR_RUNTIME_BUDGET.snapshotPixels,
+    Math.floor(Number(maximumPixels) || 0),
+  ));
+  if (
+    !Number.isSafeInteger(layoutWidth)
+    || !Number.isSafeInteger(layoutHeight)
+    || layoutWidth < 1
+    || layoutHeight < 1
+  ) return null;
+  let candidate = image;
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const accepted = normalizedSnapshotPng(candidate, {
+      maximumBytes: allowedBytes,
+      maximumPixels: allowedPixels,
+    });
+    if (accepted) return accepted;
+    const current = pngDescription(candidate);
+    if (!current || typeof candidate?.resize !== "function") return null;
+    const widthScale = Math.min(1, layoutWidth / current.width);
+    const heightScale = Math.min(1, layoutHeight / current.height);
+    const pixelScale = Math.min(1, Math.sqrt(
+      allowedPixels / (current.width * current.height),
+    ));
+    const byteScale = Math.min(1, Math.sqrt(allowedBytes / current.byteLength));
+    const scale = Math.min(widthScale, heightScale, pixelScale, byteScale, 0.9);
+    const width = Math.max(1, Math.floor(current.width * scale));
+    const height = Math.max(1, Math.floor(current.height * scale));
+    if (width === current.width && height === current.height) return null;
+    try {
+      candidate = candidate.resize({ width, height, quality: "good" });
+    } catch {
+      return null;
+    }
+  }
+  return null;
 }
 
 function safeScriptValue(value) {
@@ -479,7 +544,8 @@ export function createEditRuntimeCaptureController({
       let aggregateBytes = 0;
       let aggregatePixels = 0;
       const snapshots = [];
-      for (const binding of bindings) {
+      for (let bindingIndex = 0; bindingIndex < bindings.length; bindingIndex += 1) {
+        const binding = bindings[bindingIndex];
         const rawProbe = await withOwnerDeadline(ownerExecutor(
           captureWindow.webContents,
           snapshotProbeScript({ sessionId, executionId, binding }),
@@ -494,7 +560,24 @@ export function createEditRuntimeCaptureController({
           probeSnapshot.rect,
           { stayHidden: true },
         ));
-        const png = validatedPng(image);
+        // capturePage uses device pixels while the visible static <img> is
+        // rendered at the host's CSS layout dimensions. Retain no invisible
+        // HiDPI surplus, then reserve an equal share of the fixed aggregate
+        // cap for the remaining approved hosts. This keeps every approved
+        // chart visible without relaxing any byte or pixel authority limit.
+        const remainingHostCount = bindings.length - bindingIndex;
+        const png = resizedSnapshotPng(image, {
+          layoutWidth: probeSnapshot.rect.width,
+          layoutHeight: probeSnapshot.rect.height,
+          maximumBytes: Math.floor(
+            (EDIT_AUTHOR_RUNTIME_BUDGET.snapshotAggregateBytes - aggregateBytes)
+              / remainingHostCount,
+          ),
+          maximumPixels: Math.floor(
+            (EDIT_AUTHOR_RUNTIME_BUDGET.snapshotAggregatePixels - aggregatePixels)
+              / remainingHostCount,
+          ),
+        });
         if (
           !png
           || aggregateBytes + png.byteLength > EDIT_AUTHOR_RUNTIME_BUDGET.snapshotAggregateBytes
