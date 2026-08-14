@@ -130,9 +130,13 @@ Workbench 只确认已提交 loading surface、传入窄 port 并消费快照。
   栅格噪声判作变化。Electron 用一份合成报告证明普通 Edit
   不执行作者脚本、不请求或挂载运行态位图，Preview 中同一 Canvas/SVG 正常运行，
   authored inline SVG 仍在 Edit 原生可见且源文件字节不变；另一个本地 ECharts
-  用例证明直接资源闭包、一次 execution、固定冻结审计、ECharts 仅新增受限宿主
-  布局样式/缩放且不覆盖源码样式、运行时后代回到源码宿主、评论/原生编辑后 iframe 与 execution count 不变且写盘字节不含 runtime
+  用例证明导入后的 V1 仍从 Main 绑定的原始同目录资源根冻结直接资源闭包、一次
+  execution、固定冻结审计、ECharts 仅新增受限宿主布局样式/缩放且不覆盖源码样式、
+  运行时后代回到源码宿主、评论/原生编辑后 iframe 与 execution count 不变且写盘字节不含 runtime
   marker。协议/bootstrap 单测拥有资源闭包、一次消费、revoke、CSP 和冻结边界。
+  Session 单测还覆盖外部来源切换至托管 V1 时，即使 SHA/Canvas generation
+  未变也会发布新的准备路径；而 macOS `/var` 与 `/private/var` 同一文件别名
+  不会消耗额外尝试。
   桌面编辑画布还必须
   证明同目录图片通过同一条受控资源根加载成功，而 `script-src` 没有因此
   获得自定义协议权限。Browser 的确定性

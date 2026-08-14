@@ -721,6 +721,7 @@ export default function Workbench() {
   }, [
     editRuntimePreparing,
     editRuntimeSnapshot?.canvasGeneration,
+    editRuntimeSnapshot?.sourcePath,
     editRuntimeSnapshot?.sourceSha256,
   ]);
   const [pageViewContext, setPageViewContext] =

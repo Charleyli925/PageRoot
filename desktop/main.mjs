@@ -251,6 +251,11 @@ let managedWelcomeRegistration = null;
 let previewProtocolController = null;
 let reviewRuntimeSnapshotCaptureController = null;
 let editRuntimeProtocolController = null;
+// An imported V1 may be an HTML-only managed Working Copy while its selected
+// external source directory still owns declared relative assets. This is
+// session-only provenance established by Main during the verified hand-off;
+// it is never accepted from the renderer or persisted as project authority.
+let activeImportedAssetSourcePath = null;
 const workspaceRecoveryMailbox = createWorkspaceRecoveryMailbox();
 const externalFileOpenMailbox = createExternalFileOpenMailbox();
 const externalFileOpenExitHandoff = createExternalFileOpenExitHandoff({
@@ -697,6 +702,7 @@ async function activateProject(filePath) {
     ),
   ].slice(0, MAX_RECENT_PROJECTS);
   await persistProjectState();
+  activeImportedAssetSourcePath = null;
 }
 
 async function forgetProject(filePath) {
@@ -1029,10 +1035,10 @@ const captureReviewRuntimeSnapshot = (payload) => (
 );
 
 async function prepareEditAuthorRuntime(payload) {
-  const sourcePath = await currentActivePath();
-  if (!sourcePath) throw new Error("Edit runtime requires an active source path.");
+  const activeSourcePath = await currentActivePath();
+  if (!activeSourcePath) throw new Error("Edit runtime requires an active source path.");
   const activeSource = await readHtmlFile({
-    sourcePath,
+    sourcePath: activeSourcePath,
     maxHtmlBytes: MAX_HTML_BYTES,
   });
   if (
@@ -1049,9 +1055,10 @@ async function prepareEditAuthorRuntime(payload) {
   ) {
     throw new Error("Edit runtime source is no longer the active persisted document.");
   }
+  const assetSourcePath = activeImportedAssetSourcePath || activeSource.sourcePath;
   const session = await ensureEditRuntimeProtocolController().createSession({
     html: activeSource.html,
-    sourcePath: activeSource.sourcePath,
+    sourcePath: assetSourcePath,
     bindings: payload.hosts,
   });
   return Object.freeze({
@@ -1198,6 +1205,7 @@ async function commitActivatedProjectPath({
   previousSourcePath,
   nextSourcePath,
   project,
+  importedAssetSourcePath = null,
 }) {
   const now = Date.now();
   const activePathIdentity = state.activePath
@@ -1243,6 +1251,12 @@ async function commitActivatedProjectPath({
     state.recent = retained.slice(0, MAX_RECENT_PROJECTS);
   }
   await persistProjectState();
+  if (activatesCurrentProject) {
+    activeImportedAssetSourcePath = (
+      importedAssetSourcePath
+      && importedAssetSourcePath !== nextSourcePath
+    ) ? importedAssetSourcePath : null;
+  }
   return {
     ...project,
     previousSourcePath,
@@ -1342,6 +1356,7 @@ async function activateManagedWorkingCopyOperation(payload) {
     previousSourcePath,
     nextSourcePath,
     project,
+    importedAssetSourcePath: previousSourcePath,
   });
 }
 

@@ -1021,7 +1021,7 @@ test("Electron Edit does not execute an inline authored runtime script", async (
   }
 });
 
-test("Electron Edit admits bounded ECharts host layout mutations and preserves native source editing", async () => {
+test("Electron Edit preserves imported source-relative ECharts assets and native source editing", async () => {
   const sourceDirectory = mkdtempSync(
     path.join(tmpdir(), "pageroot-edit-runtime-source-e2e-"),
   );
@@ -1073,6 +1073,15 @@ test("Electron Edit admits bounded ECharts host layout mutations and preserves n
       sourcePath,
       "runtime-editable",
     );
+    const activeProject = await launched.page.evaluate(() => (
+      window.htmlAIProjects?.getActiveProject()
+    ));
+    if (typeof activeProject?.sourcePath !== "string") {
+      throw new Error("The imported managed Working Copy did not become active.");
+    }
+    const managedSourcePath = activeProject.sourcePath;
+    expect(managedSourcePath).not.toBe(sourcePath);
+    expect(activeProject.html).toBe(source);
     await expect.poll(() => frame.evaluate(() => ({
       executions: window.__PAGEROOT_ECHARTS_AUTHOR_EXECUTIONS__ || 0,
       chartCount: document.querySelectorAll("#chart-host canvas[data-echarts-runtime=true]").length,
@@ -1131,8 +1140,9 @@ test("Electron Edit admits bounded ECharts host layout mutations and preserves n
     await expect(editable).toHaveAttribute("contenteditable", "true");
     await setTextSelection(frame, "runtime-editable", 0);
     await launched.page.keyboard.insertText("原位");
-    await expect.poll(() => readFileSync(sourcePath, "utf8"))
+    await expect.poll(() => readFileSync(managedSourcePath, "utf8"))
       .toContain("原位静态来源文字保持可编辑。");
+    expect(readFileSync(sourcePath, "utf8")).toBe(source);
     expect(await documentToken(launched.page)).toBe(runtimeDocument);
     expect(frame.isDetached()).toBe(false);
     expect(await frame.evaluate(() => ({
@@ -1142,7 +1152,7 @@ test("Electron Edit admits bounded ECharts host layout mutations and preserves n
       executions: 1,
       chartCount: 1,
     });
-    expect(readFileSync(sourcePath, "utf8")).not.toMatch(
+    expect(readFileSync(managedSourcePath, "utf8")).not.toMatch(
       /data-pageroot-edit-runtime|data-echarts-runtime/u,
     );
   } finally {

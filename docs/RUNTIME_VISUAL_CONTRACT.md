@@ -51,6 +51,12 @@ style or mutate another source attribute. At most 32 non-dangerous empty hosts
 are eligible; generated descendants
 remain display-only and select/comment through their original source host.
 
+When importing an external HTML into an HTML-only V1 Working Copy, Main may
+retain the selected external HTML directory as a session-only asset root for
+that same verified Working Copy. It is set only by the Main-process activation
+handoff, never sent by the renderer or written into project authority, and a
+missing or unsafe asset still fails closed to static Edit.
+
 Preparation, execution, audit or deadline failure silently mounts ordinary
 static Edit before interaction. Comments, autosave, IME and source echoes do
 not prepare, execute or replace the frame. A later necessary full rebuild is

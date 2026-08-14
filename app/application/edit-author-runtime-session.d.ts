@@ -14,6 +14,7 @@ export type EditAuthorRuntimePhase =
 export type EditAuthorRuntimeSnapshot = Readonly<{
   phase: EditAuthorRuntimePhase;
   sourceSha256: string | null;
+  sourcePath: string | null;
   canvasGeneration: number | null;
   grant: EditRuntimeGrant | null;
   lastOutcome: string | null;

@@ -17,6 +17,7 @@ function isRecord(value) {
 function frozenSnapshot({
   phase = "static",
   sourceSha256 = null,
+  sourcePath = null,
   canvasGeneration = null,
   grant = null,
   lastOutcome = null,
@@ -24,10 +25,25 @@ function frozenSnapshot({
   return Object.freeze({
     phase,
     sourceSha256: sourceSha256 ? String(sourceSha256) : null,
+    sourcePath: sourcePath ? String(sourcePath) : null,
     canvasGeneration: Number.isSafeInteger(canvasGeneration) ? canvasGeneration : null,
     grant,
     lastOutcome,
   });
+}
+
+function normalizedRuntimeSourcePath(value) {
+  const sourcePath = value ? String(value) : "";
+  // macOS exposes the same temporary-file tree through both /var and
+  // /private/var (and likewise /tmp). A renderer/Main round trip can switch
+  // between those spellings without changing the actual source authority.
+  if (sourcePath === "/private/var" || sourcePath.startsWith("/private/var/")) {
+    return sourcePath.slice("/private".length);
+  }
+  if (sourcePath === "/private/tmp" || sourcePath.startsWith("/private/tmp/")) {
+    return sourcePath.slice("/private".length);
+  }
+  return sourcePath;
 }
 
 function sameKey(left, right) {
@@ -142,6 +158,7 @@ export class EditAuthorRuntimeSession {
     this.#emit({
       phase,
       sourceSha256: identity?.sourceSha256 || null,
+      sourcePath: identity?.sourcePath || null,
       canvasGeneration: identity?.canvasGeneration ?? null,
       lastOutcome,
     });
@@ -180,17 +197,17 @@ export class EditAuthorRuntimeSession {
   } = {}) {
     if (this.#disposed) return this.#snapshot;
     const normalizedSourceSha = String(sourceSha256 || "").toLowerCase();
+    const normalizedSourcePath = normalizedRuntimeSourcePath(sourcePath);
     const identity = (
       typeof html === "string"
-      && typeof sourcePath === "string"
-      && sourcePath
+      && normalizedSourcePath
       && isEditRuntimeSourceSha256(normalizedSourceSha)
       && Number.isSafeInteger(canvasGeneration)
       && canvasGeneration >= 0
     ) ? Object.freeze({
       html,
       sourceSha256: normalizedSourceSha,
-      sourcePath,
+      sourcePath: normalizedSourcePath,
       canvasGeneration,
     }) : null;
 
@@ -224,6 +241,7 @@ export class EditAuthorRuntimeSession {
       this.#emit({
         phase: "static",
         sourceSha256: identity.sourceSha256,
+        sourcePath: identity.sourcePath,
         canvasGeneration: identity.canvasGeneration,
         lastOutcome: "source-not-authoritative",
       });
@@ -239,6 +257,7 @@ export class EditAuthorRuntimeSession {
       this.#emit({
         phase: "static",
         sourceSha256: identity.sourceSha256,
+        sourcePath: identity.sourcePath,
         canvasGeneration: identity.canvasGeneration,
         lastOutcome: "not-candidate",
       });
@@ -249,6 +268,7 @@ export class EditAuthorRuntimeSession {
       this.#emit({
         phase: "static",
         sourceSha256: identity.sourceSha256,
+        sourcePath: identity.sourcePath,
         canvasGeneration: identity.canvasGeneration,
         lastOutcome: hosts.length ? "desktop-unavailable" : "no-approved-hosts",
       });
@@ -273,6 +293,7 @@ export class EditAuthorRuntimeSession {
     this.#emit({
       phase: "preparing",
       sourceSha256: identity.sourceSha256,
+      sourcePath: identity.sourcePath,
       canvasGeneration: identity.canvasGeneration,
     });
     return this.#snapshot;
@@ -314,6 +335,7 @@ export class EditAuthorRuntimeSession {
       this.#emit({
         phase: "ready",
         sourceSha256: identity.sourceSha256,
+        sourcePath: identity.sourcePath,
         canvasGeneration: identity.canvasGeneration,
         grant,
       });
@@ -340,6 +362,7 @@ export class EditAuthorRuntimeSession {
     this.#emit({
       phase: "running",
       sourceSha256: grant.sourceSha256,
+      sourcePath: this.#identity?.sourcePath || null,
       canvasGeneration: grant.canvasGeneration,
       grant,
     });
@@ -360,6 +383,7 @@ export class EditAuthorRuntimeSession {
       this.#emit({
         phase: "settled",
         sourceSha256: grant.sourceSha256,
+        sourcePath: this.#identity?.sourcePath || null,
         canvasGeneration: grant.canvasGeneration,
         grant,
         lastOutcome: "ready",

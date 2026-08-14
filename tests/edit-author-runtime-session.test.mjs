@@ -123,6 +123,64 @@ test("authority confirmation prepares once within the same source and canvas ide
   assert.equal(requests.length, 1);
 });
 
+test("macOS /var aliases preserve a started preparation identity", async () => {
+  const pending = deferred();
+  const requests = [];
+  const session = new EditAuthorRuntimeSession({
+    port: {
+      prepare: (request) => {
+        requests.push(request);
+        return pending.promise;
+      },
+      revoke: async () => {},
+    },
+  });
+  const temporaryPath = "/var/folders/example/pageroot/report-V1.html";
+  const privateTemporaryPath = "/private/var/folders/example/pageroot/report-V1.html";
+
+  session.refresh(input({ sourcePath: temporaryPath }));
+  assert.equal(session.startPreparation(input({ sourcePath: temporaryPath })), true);
+  assert.equal(requests.length, 1);
+
+  // Main canonicalizes through realpath(), while renderer state can still
+  // carry the /var spelling. This is the same file and canvas, not a retry.
+  session.refresh(input({ sourcePath: privateTemporaryPath }));
+  assert.equal(session.snapshot.phase, "preparing");
+  assert.equal(
+    session.startPreparation(input({ sourcePath: privateTemporaryPath })),
+    false,
+  );
+  assert.equal(requests.length, 1);
+
+  pending.resolve(success(requests[0]));
+  await flushAsync();
+  assert.equal(session.snapshot.phase, "ready");
+});
+
+test("a managed source transition publishes its distinct preparation path", () => {
+  const session = new EditAuthorRuntimeSession({
+    port: {
+      prepare: async () => null,
+      revoke: async () => {},
+    },
+  });
+  const observedPreparationPaths = [];
+  session.subscribe((snapshot) => {
+    if (snapshot.phase === "preparing") {
+      observedPreparationPaths.push(snapshot.sourcePath);
+    }
+  });
+  const externalPath = "/Users/demo/report.html";
+  const managedPath = "/var/folders/example/project-files/report/report-V1.html";
+
+  session.refresh(input({ sourcePath: externalPath }));
+  session.refresh(input({ sourcePath: managedPath }));
+
+  assert.equal(session.snapshot.phase, "preparing");
+  assert.equal(session.snapshot.sourcePath, managedPath);
+  assert.deepEqual(observedPreparationPaths, [externalPath, managedPath]);
+});
+
 test("late preparation from an old generation is revoked and cannot publish", async () => {
   const oldRequest = deferred();
   const revoked = [];
