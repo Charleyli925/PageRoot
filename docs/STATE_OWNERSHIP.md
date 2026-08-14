@@ -7,6 +7,7 @@
 | External HTML request IDs, active/queued/deferred renderer delivery, blocker-transition/manual retry policy and unaccepted-result fence | Renderer `ExternalFileOpenSession` | none; bounded in-memory state only | `ProjectWorkflow` composition and Workbench presentation |
 | Accepted local/external project results, their FIFO renderer publication and deferred final-fence blocker-transition/manual retry policy | Renderer `ProjectApplicationSession` | none; bounded in-memory state only | `ProjectWorkflow` composition and Workbench presentation |
 | Registered mutation context resolution and atomic-replacement source observation | Bridge project-context service | project/document registry graph plus the owning runtime `pendingWrite` target Hash | Bridge mutation routes and `/project/ensure` |
+| Registry project-catalog membership, availability and validated registered-project OpenTarget resolution | `ProjectFileRepository` Registry reader | Registry `projectId → registeredProjectRootPath` records plus validated per-project metadata; Desktop Recent may rank but never add/remove/authorize a member | read-only catalog route, `ProjectWorkflow` projectId open command and Workbench project list |
 | Runtime Bridge/Session/workflow composition, aggregate-observer lifecycle, registration operation identity, single-flight, stale-result fence and cross-Session publication sequence | `createRuntimeWorkspaceController()` and `WorkspaceController` | none; the factory creates the one fact-owner set and the Controller publishes only frozen aggregate projections through existing Project, Document, Comment, Draft, Version and SourceHistory owners | Workbench aggregate-snapshot subscription, Controller commands and presentation-event adapter |
 | Project hydration generation and load outcome, switch/open operation, accepted-result execution, close request identity, project-switch publication, and the unified managed-source prepare/commit handoff for Candidate promotion, historical Working Copy continuation and future Registry opens | Renderer `ProjectWorkflow`, composed by `WorkspaceController` | none; it publishes through existing Session owners and trusted ProjectOpen/Canvas ports | Workbench commands and presentation-event adapter |
 | Durable source filename transaction, pending operation and active/recent path rebase | Desktop source-rename transaction | active-file `pendingRename` / `lastRename`, then filesystem path | trusted desktop rename port and Bridge relink |
@@ -23,6 +24,7 @@
 | Active/background AI run projections, Qoder handoff status and recovered handoff-risk disposition, background results, submission phase/unknown-outcome lock and renderer operation locks | Renderer `RunSession` | none beyond authoritative runtime and immutable Request/Attempt records | `RunWorkflow`, Workbench process panel, drain coordinator and project list |
 | AI Request freeze, persisted-boundary verification, unknown-POST authority reconciliation, polling lifecycle, cancellation and conflict command sequence | Renderer `RunWorkflow`, composed by `WorkspaceController` | none; it publishes only through `RunSession` and reads Bridge runtime/immutable Request records | Workbench intent/Drawer/Toast adapter and Bridge run lifecycle |
 | AI Request/Attempt lifecycle transition | Bridge run lifecycle | runtime state and immutable Request/Attempt records | `RunWorkflow`, RunSession and finalizer |
+| `AI任务/` derived prompt/Candidate publication, collision allocation and recovery stage | `ProjectFileRepository` plus narrow `ai-task-projection` materializer | immutable Request/Attempt/Candidate records remain authoritative; `.pageroot/recovery/ai-task-projections/` receipt is only a rebuildable display-progress record; runtime `lastAiTask` is a sealed no-change/error Finder anchor, never an active run or Candidate authority | `/ai-task`, trusted Desktop Finder port and handoff presentation |
 | Immutable Version list and based-on/exact/restored/current-history projection facts | Renderer `VersionSession` | immutable Version records and current runtime pointers | `VersionWorkflow`, Workbench history and Canvas projection |
 | Version activation, review-candidate preparation, current/history navigation and historical Working Copy continuation operation identity, Bridge I/O, full OpenTarget/Hash/time validation, receipt-forward recovery and synchronous cross-Session publication | Renderer `VersionWorkflow`, composed by `WorkspaceController` | Repository owns the durable history activation receipt; the workflow publishes only through Project, Document, Version, Draft and Comment owners | Workbench review/history commands, presentation-event adapter and Bridge version lifecycle |
 | `PROJECT.md` content, editor generation, composition fence and save projection | Renderer `ProjectRulesSession` | managed `PROJECT.md` | `ProjectRulesWorkflow` and project panel |
@@ -52,6 +54,20 @@
 Rules:
 
 - A consumer never writes another owner's fields directly.
+- Registry membership is distinct from Desktop Recent. The Repository may return a
+  registered row as ready, unavailable or invalid without granting a second
+  authority path; Recent contributes only ranking/last-opened presentation.
+  Renderer catalog commands carry only `projectId`, and every open revalidates
+  the Registry/Project/Document/Working Copy/OpenTarget/HTML/Hash tuple before
+  any Session publication.
+- `AI任务/` is a display projection, not a second Candidate store. The
+  materializer first validates the complete frozen identity and hashes, writes
+  a recovery receipt before no-replace output, and never reads a visible copy
+  for review or Promotion. A deleted, tampered, user-owned or symlinked target
+  is rebuilt only from hidden authority or allocated a different safe display
+  directory. The Finder port accepts only the current source locator and opens
+  only a Bridge-validated direct child of `AI任务/`; it never accepts a
+  renderer-supplied Request path or exposes `.pageroot/requests/...`.
 - External HTML delivery has four explicit owners. The main mailbox accepts
   only its latest unconsumed opaque request. `ProjectOpenQueue` assigns every
   active/recent-project transition its order before a picker, source read or

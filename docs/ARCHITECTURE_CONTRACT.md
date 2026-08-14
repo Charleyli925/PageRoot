@@ -220,6 +220,38 @@ it must not roll durable V2 back to V6. A background Candidate carries its own
 complete OpenTarget and may never use whichever target happens to be mounted in
 the foreground.
 
+## Registry catalog and AI-task display projections
+
+The Registry is the sole project-catalog membership and write-authority source.
+`ProjectFileRepository` may enumerate only its registered records, recover a
+verified same-parent root rename through the existing Registry path, and return
+ready/unavailable/invalid rows independently. Desktop Recent records contribute
+only sorting, `lastOpenedAt` and startup preference; they cannot add a member,
+remove a member or authorize an open. A Workbench catalog intent carries only
+`projectId`; the Bridge re-resolves and validates the complete Project,
+Document, Working Copy, OpenTarget, bytes and Hash tuple before the normal
+source-transition publication boundary.
+
+`AI任务/` is intentionally outside every authority chain. Once a durable
+Request or verified Candidate already exists, the Repository validates the
+frozen project/request/attempt/candidate lineage and hashes, then delegates
+only those verified bytes to the narrow `ai-task-projection` materializer. Its
+receipt under `.pageroot/recovery/ai-task-projections/` records display recovery
+progress; it cannot recreate an active Request, Candidate, Version or runtime
+state. The materializer publishes a frozen `PROMPT.md`, then a finalizer-verified
+`*-Vn-待审阅.html`, using exclusive directories and no-replace files. It neither
+writes nor reads `附件与图片/`, `附件快照说明.md`, `AI_RULES.md`, `PROJECT.md` or a
+formal Version in P2.
+
+Desktop's `revealAiTask` accepts the current source locator rather than a
+Renderer-supplied Request path. The Bridge returns a root-contained,
+non-symlink `AI任务/<single-child>` result only after validation. A deleted,
+tampered or user-occupied display path cannot affect review or Promotion and
+may only be rebuilt from hidden authority or replaced with a new safe display
+directory. The project Finder entry opens the validated project root; the
+Version Finder entry opens the validated visible Working Copy rather than the
+hidden immutable snapshot.
+
 Edit and preview surfaces acknowledge the exact Canvas authority generation and
 rendered source Hash. Acknowledgements are disposable and generation-fenced;
 they never become source authority. The safe-save projection requires both the
