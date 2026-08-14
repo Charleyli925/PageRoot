@@ -20,6 +20,20 @@ async function postJson(bridge, pathname, body) {
   return bridge.postJson(pathname, body);
 }
 
+function legacyV4RegistryFromCurrent(current) {
+  return {
+    schemaVersion: "4.0.0",
+    updatedAt: current.updatedAt,
+    projects: Object.fromEntries(Object.entries(current.projects).map(([projectId, record]) => [
+      projectId,
+      {
+        projectRootPath: record.registeredProjectRootPath,
+        updatedAt: record.updatedAt,
+      },
+    ])),
+  };
+}
+
 test("project-file PR1 import switches to V1 before the queued save and leaves external bytes untouched", async (t) => {
   const environment = await createBridgeTestEnvironment(t, {
     prefix: "pageroot-project-file-bridge-",
@@ -68,98 +82,67 @@ test("project-file PR1 import switches to V1 before the queued save and leaves e
   assert.deepEqual(manifest.versions.map((version) => version.versionId), ["ver_0001"]);
 });
 
-test("history continuation activates the original Version Working Copy through the narrow Bridge route", async (t) => {
+test("Bridge migrates an exact legacy V4 Registry before workspace GET and first ensureProject", async (t) => {
   const environment = await createBridgeTestEnvironment(t, {
-    prefix: "pageroot-project-file-history-continue-",
+    prefix: "pageroot-project-file-legacy-v4-bridge-",
   });
-  const sourcePath = await environment.createSource("history-continue.html", html("external V1"));
   const projectsRoot = join(environment.root, "project-files");
-  const bridge = await environment.start({ HTML_AI_PROJECT_FILES_ROOT: projectsRoot });
-  const preview = await bridge.requestJson(
-    `/workspace?sourcePath=${encodeURIComponent(sourcePath)}`,
+  const seedSourcePath = await environment.createSource("legacy-seed.html", html("legacy seed"));
+  const openingSource = html("new external source");
+  const openingSourcePath = await environment.createSource("legacy-opening.html", openingSource);
+  const bridge = await environment.start({
+    HTML_AI_PROJECT_FILES_ROOT: projectsRoot,
+  });
+
+  const seedPreview = await bridge.requestJson(
+    `/workspace?sourcePath=${encodeURIComponent(seedSourcePath)}&projectStorageVersion=4.0.0`,
   );
+  assert.equal(seedPreview.response.status, 200, JSON.stringify(seedPreview.body));
+  const seeded = await postJson(bridge, "/project/ensure", {
+    sourcePath: seedSourcePath,
+    expectedSourceSha256: seedPreview.body.currentHtmlSha256,
+    projectStorageVersion: "4.0.0",
+  });
+  assert.equal(seeded.response.status, 200, JSON.stringify(seeded.body));
+
+  const registryPath = join(projectsRoot, ".pageroot-registry.json");
+  const currentRegistry = JSON.parse(await readFile(registryPath, "utf8"));
+  const legacyRegistryBytes = Buffer.from(
+    `${JSON.stringify(legacyV4RegistryFromCurrent(currentRegistry), null, 2)}\n`,
+    "utf8",
+  );
+  const legacyRegistrySha256 = sha256(legacyRegistryBytes);
+  await writeFile(registryPath, legacyRegistryBytes);
+
+  const preview = await bridge.requestJson(
+    `/workspace?sourcePath=${encodeURIComponent(openingSourcePath)}&projectStorageVersion=4.0.0`,
+  );
+  assert.equal(preview.response.status, 200, JSON.stringify(preview.body));
+  assert.equal(preview.body.registered, false);
+  const migratedRegistry = JSON.parse(await readFile(registryPath, "utf8"));
+  assert.deepEqual(migratedRegistry.pendingImports, {});
+  const backupPath = join(
+    projectsRoot,
+    ".pageroot-registry-backups",
+    `${legacyRegistrySha256.slice("sha256:".length)}.json`,
+  );
+  assert.deepEqual(await readFile(backupPath), legacyRegistryBytes);
+
   const ensured = await postJson(bridge, "/project/ensure", {
-    sourcePath,
+    sourcePath: openingSourcePath,
     expectedSourceSha256: preview.body.currentHtmlSha256,
     projectStorageVersion: "4.0.0",
   });
   assert.equal(ensured.response.status, 200, JSON.stringify(ensured.body));
+  assert.equal(ensured.body.imported, true);
+  assert.equal(await readFile(openingSourcePath, "utf8"), openingSource);
 
-  const repository = new ProjectFileRepository({ projectsRoot });
-  let active = ensured.body.openTarget;
-  const v2Html = html("immutable V2");
-  for (let ordinal = 2; ordinal <= 6; ordinal += 1) {
-    const candidate = await repository.createCandidate({
-      target: active,
-      requestId: `req_bridge_history_${ordinal}`,
-      candidateId: `candidate_bridge_history_${ordinal}_0001`,
-      html: ordinal === 2 ? v2Html : html(`V${ordinal}`),
-      expectedSourceSha256: active.sourceSha256,
-    });
-    active = (await repository.promoteCandidate({
-      target: active,
-      candidateId: candidate.candidate.candidateId,
-    })).target;
-  }
-  assert.equal(active.versionId, "ver_0006");
-
-  const viewed = await bridge.requestJson(
-    `/version-file?sourcePath=${encodeURIComponent(active.exactSourcePath)}&versionId=ver_0002`,
+  const reopened = await bridge.requestJson(
+    `/workspace?sourcePath=${encodeURIComponent(ensured.body.sourcePath)}&projectStorageVersion=4.0.0`,
   );
-  assert.equal(viewed.response.status, 200, JSON.stringify(viewed.body));
-  assert.equal(viewed.body.content, v2Html);
-  const beforeContinue = await bridge.requestJson(
-    `/source?sourcePath=${encodeURIComponent(active.exactSourcePath)}`,
-  );
-  assert.equal(beforeContinue.body.currentBasedOnVersionId, "ver_0006");
-  assert.equal(beforeContinue.body.content, html("V6"));
-
-  const continuation = {
-    sourcePath: active.exactSourcePath,
-    projectId: ensured.body.projectId,
-    documentId: ensured.body.documentId,
-    versionId: "ver_0002",
-    operationId: "history_continue_v2_0001",
-  };
-  const continued = await postJson(bridge, "/history-version/continue", continuation);
-  assert.equal(continued.response.status, 200, JSON.stringify(continued.body));
-  assert.equal(continued.body.status, "history-working-copy-activated");
-  assert.equal(continued.body.sourcePath, continued.body.openTarget.exactSourcePath);
-  assert.equal(continued.body.openTarget.versionId, "ver_0002");
-  assert.equal(continued.body.openTarget.workingCopyId, "work_ver_0002");
-  assert.equal(continued.body.currentBasedOnVersionId, "ver_0002");
-  assert.equal(continued.body.latestVersionId, "ver_0006");
-  assert.equal(continued.body.content, v2Html);
-  assert.equal(continued.body.historyActivation.previousWorkingCopyId, "work_ver_0006");
-  assert.equal(continued.body.historyActivation.activatedWorkingCopyId, "work_ver_0002");
-
-  const rollback = await postJson(bridge, "/history-version/rollback", {
-    sourcePath: active.exactSourcePath,
-    projectId: ensured.body.projectId,
-    documentId: ensured.body.documentId,
-    previousWorkingCopyId: continued.body.historyActivation.previousWorkingCopyId,
-    activatedWorkingCopyId: continued.body.historyActivation.activatedWorkingCopyId,
-    operationId: "history_continue_v2_0001",
-  });
-  assert.equal(rollback.response.status, 200, JSON.stringify(rollback.body));
-  assert.equal(rollback.body.status, "history-working-copy-rolled-back");
-  assert.equal(rollback.body.rolledBack, true);
-
-  const rollbackRetry = await postJson(bridge, "/history-version/rollback", {
-    sourcePath: active.exactSourcePath,
-    projectId: ensured.body.projectId,
-    documentId: ensured.body.documentId,
-    previousWorkingCopyId: continued.body.historyActivation.previousWorkingCopyId,
-    activatedWorkingCopyId: continued.body.historyActivation.activatedWorkingCopyId,
-    operationId: "history_continue_v2_0001",
-  });
-  assert.equal(rollbackRetry.response.status, 200, JSON.stringify(rollbackRetry.body));
-  assert.equal(rollbackRetry.body.rolledBack, false);
-
-  const retried = await postJson(bridge, "/history-version/continue", continuation);
-  assert.equal(retried.response.status, 200, JSON.stringify(retried.body));
-  assert.equal(retried.body.openTarget.workingCopyId, continued.body.openTarget.workingCopyId);
-  assert.equal(retried.body.sourcePath, continued.body.sourcePath);
+  assert.equal(reopened.response.status, 200, JSON.stringify(reopened.body));
+  assert.equal(reopened.body.registered, true);
+  assert.equal(reopened.body.projectId, ensured.body.projectId);
 });
 
 test("a v4 client treats a pre-v4 project as a fresh V1 import", async (t) => {

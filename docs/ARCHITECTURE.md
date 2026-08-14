@@ -390,9 +390,20 @@ component real-path validation. A root moved out of the configured projects
 directory is not followed or re-associated: writes pause until it returns to
 its exact registered path. Copies, damaged registrations, and every pre-v4
 project state are external HTML at the v4 boundary and immediately create a
-fresh v4 V1 on open; the source HTML bytes remain untouched. There is no v3
-compatibility ingress, physical migration, or dual write. The decision is recorded in
-`docs/decisions/0022-user-owned-project-root-identity.md`.
+fresh v4 V1 on open; the source HTML bytes remain untouched. The sole bounded
+metadata exception is an exact pre-hardening V4 Registry shape: after current
+validation fails, the repository may complete its missing root stat identity
+and empty pending-import map only after every already-listed root, project
+identity and real path validates. A short-lived exclusive migration lock
+serializes that one Registry replacement across Bridge processes; dead-owner
+reclamation is bound to its exact sealed token marker, and a waiter
+re-reads the Registry after acquiring it. It backs up the original Registry
+bytes by Hash before one atomic publication; the backup is never opening or
+write authority. It neither imports, reassociates nor changes a Project, Working
+Copy, Version, Draft, comment, attachment or HTML. There is no v3 compatibility
+ingress, broader physical migration, or dual write. The decisions are recorded
+in `docs/decisions/0022-user-owned-project-root-identity.md` and
+`docs/decisions/0023-exact-legacy-v4-registry-migration.md`.
 
 Initial and accepted AI results are immutable versions. Routine local edits do not create versions. A validated AI result is not activated until the user explicitly chooses it. Promotion may stage a provisional output path, but its final visible path is frozen only after the no-replace publication succeeds; a pre-publication collision reallocates and retries without overwriting user bytes.
 
