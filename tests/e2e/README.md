@@ -68,8 +68,9 @@ the bridge workspace inside that directory, remove only validated test
 directories, and never change `HOME` or open the user's real HTML project. Set
 `PAGEROOT_E2E_FOREGROUND=1` only for deliberate visual debugging. Background
 mode keeps the macOS Dock icon (click it to inspect or minimize the window)
-and suppresses automatically triggered native dialogs, logging them instead.
-The real-file case checkpoints and autosaves a temporary disk HTML, proves that
+and all E2E modes suppress automatically triggered native dialogs, logging
+them instead. The real-file case checkpoints and autosaves a temporary disk
+HTML, proves that
 only the authorized bytes changed, and then closes and reopens the app against
 the same forward result.
 

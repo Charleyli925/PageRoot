@@ -134,6 +134,9 @@ const e2eWindowForeground = Boolean(e2eUserDataPath)
   && process.env.PAGEROOT_E2E_FOREGROUND === "1";
 const e2eWindowRunsInBackground = Boolean(e2eUserDataPath)
   && !e2eWindowForeground;
+// 前台调试只改变测试窗口的可见性，不应允许自动化测试弹出任何
+// macOS 原生对话框并打断用户；所有 E2E 启动方式都记录错误而不弹窗。
+const e2eNativeDialogsSuppressed = Boolean(e2eUserDataPath);
 const productUserDataPath = e2eUserDataPath || path.join(app.getPath("appData"), "PageRoot");
 app.setPath("userData", productUserDataPath);
 const applicationName = app.isPackaged
@@ -727,7 +730,7 @@ function showExternalOpenError(error) {
   const presentation = externalOpenFailurePresentation(error);
   const title = "无法打开这个 HTML";
   const message = `${presentation.message}\n\n错误代码：${presentation.code}`;
-  if (e2eWindowRunsInBackground) {
+  if (e2eNativeDialogsSuppressed) {
     reportSuppressedNativeDialog(title, message);
     return;
   }
@@ -2143,7 +2146,7 @@ async function coordinateApplicationExit(reason, intent = "quit") {
     }
     if (!result.ready) {
       const nativeBlock = (
-        !e2eWindowRunsInBackground
+        !e2eNativeDialogsSuppressed
         && shouldPresentNativeCloseBlock(result)
       );
       const interruptionSurface = nativeBlock ? "native" : "global";
@@ -2245,7 +2248,7 @@ async function coordinateApplicationExit(reason, intent = "quit") {
     coordinatedExit = null;
     isQuitting = false;
     resumeDeferredExternalFileOpenAfterExitAbort();
-    if (e2eWindowRunsInBackground) {
+    if (e2eNativeDialogsSuppressed) {
       reportSuppressedNativeDialog(
         exitIntent.errorTitle,
         error instanceof Error ? error.message : String(error),
@@ -2290,7 +2293,7 @@ async function showWorkspaceUnavailableRecovery() {
     );
     return;
   }
-  if (e2eWindowRunsInBackground) {
+  if (e2eNativeDialogsSuppressed) {
     reportSuppressedNativeDialog(
       delivery.issue.title,
       "源页的本地项目服务已停止。当前窗口中的内容仍保留。",
@@ -2688,7 +2691,7 @@ if (!hasSingleInstanceLock) {
       fingerprint: telemetryFingerprint(error),
     });
     await usageTelemetry?.shutdown({ reason: "quit" }).catch(() => {});
-    if (e2eWindowRunsInBackground) {
+    if (e2eNativeDialogsSuppressed) {
       reportSuppressedNativeDialog(
         "源页启动失败",
         error instanceof Error ? error.message : String(error),
