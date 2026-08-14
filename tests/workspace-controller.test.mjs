@@ -92,6 +92,7 @@ function createHarness({
   bridgeClient = null,
   projectSource = null,
   editRuntimePort = null,
+  initialDocument = null,
 } = {}) {
   const projectSession = new ProjectSession();
   projectSession.openLocator(SOURCE_PATH);
@@ -99,6 +100,7 @@ function createHarness({
     html,
     sourceSha256: sha256(html),
   });
+  if (initialDocument) documentSession.update(initialDocument);
   const client = bridgeClient || {
     async ensureProject() {
       return registrationPayload();
@@ -475,6 +477,14 @@ test("workspace controller owns one Edit runtime attempt per source path and can
   });
 
   await settleAsyncRuntime();
+  const preparing = harness.controller.getSnapshot().editRuntime;
+  assert.equal(preparing?.phase, "preparing");
+  assert.equal(prepares.length, 0);
+  assert.equal(harness.controller.startEditAuthorRuntimePreparation({
+    sourceSha256: preparing?.sourceSha256,
+    canvasGeneration: preparing?.canvasGeneration,
+  }), true);
+  await settleAsyncRuntime();
   const ready = harness.controller.getSnapshot().editRuntime;
   assert.equal(ready?.phase, "ready");
   assert.equal(prepares.length, 1);
@@ -506,8 +516,84 @@ test("workspace controller owns one Edit runtime attempt per source path and can
 
   harness.documentSession.reloadCanvas();
   await settleAsyncRuntime();
+  const nextPreparing = harness.controller.getSnapshot().editRuntime;
+  assert.equal(nextPreparing?.phase, "preparing");
+  assert.equal(harness.controller.startEditAuthorRuntimePreparation({
+    sourceSha256: nextPreparing?.sourceSha256,
+    canvasGeneration: nextPreparing?.canvasGeneration,
+  }), true);
+  await settleAsyncRuntime();
   assert.equal(prepares.length, 2);
   assert.equal(revocations.length >= 1, true);
+  harness.controller.dispose();
+});
+
+test("workspace controller starts the one-shot runtime when its initial source becomes authoritative", async () => {
+  const html = [
+    "<!doctype html><html><body>",
+    '<main id="chart-host"></main>',
+    '<script>echarts.init(document.querySelector("#chart-host"))</script>',
+    "</body></html>",
+  ].join("");
+  const prepares = [];
+  const harness = createHarness({
+    html,
+    initialDocument: {
+      editRevision: 1,
+      lastPersistedRevision: 0,
+      persistState: "writing",
+    },
+    editRuntimePort: {
+      async prepare(request) {
+        prepares.push(request);
+        return {
+          contractVersion: 1,
+          sessionId: "1".padStart(32, "0"),
+          executionId: "1".padStart(24, "0"),
+          sourceSha256: request.sourceSha256,
+          resourceSha256: sha256("authoritative-resource"),
+          scriptCount: 1,
+          byteLength: 1,
+          canvasGeneration: request.canvasGeneration,
+          hosts: request.hosts,
+        };
+      },
+      async revoke() {
+        return { revoked: true };
+      },
+    },
+  });
+
+  await settleAsyncRuntime();
+  const beforeAuthority = harness.controller.getSnapshot().editRuntime;
+  assert.equal(beforeAuthority?.phase, "static");
+  assert.equal(beforeAuthority?.lastOutcome, "source-not-authoritative");
+  assert.equal(prepares.length, 0);
+  const canvasGeneration = beforeAuthority?.canvasGeneration;
+
+  harness.documentSession.update({
+    editRevision: 1,
+    lastPersistedRevision: 1,
+    persistState: "idle",
+  });
+  await settleAsyncRuntime();
+
+  const preparing = harness.controller.getSnapshot().editRuntime;
+  assert.equal(preparing?.phase, "preparing");
+  assert.equal(prepares.length, 0);
+  assert.equal(harness.controller.startEditAuthorRuntimePreparation({
+    sourceSha256: preparing?.sourceSha256,
+    canvasGeneration: preparing?.canvasGeneration,
+  }), true);
+  await settleAsyncRuntime();
+  const ready = harness.controller.getSnapshot().editRuntime;
+  assert.equal(prepares.length, 1);
+  assert.equal(ready?.phase, "ready");
+  assert.equal(ready?.canvasGeneration, canvasGeneration);
+
+  harness.documentSession.setSourceSha256(sha256(html + "<!-- source echo -->"));
+  await settleAsyncRuntime();
+  assert.equal(prepares.length, 1);
   harness.controller.dispose();
 });
 

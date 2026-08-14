@@ -367,6 +367,10 @@ export class WorkspaceController {
   subscribeEvents(listener: (event: WorkspaceEvent) => void): () => void;
   readonly projectHydrating: boolean;
   readonly projectLoadError: string | null;
+  startEditAuthorRuntimePreparation(input: {
+    sourceSha256: string;
+    canvasGeneration: number;
+  }): boolean;
   beginEditAuthorRuntime(input: {
     sessionId: string;
     sourceSha256: string;

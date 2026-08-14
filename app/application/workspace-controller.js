@@ -676,6 +676,10 @@ export class WorkspaceController {
     return this.#projectWorkflow?.projectLoadError || null;
   }
 
+  startEditAuthorRuntimePreparation(input) {
+    return this.#editRuntimeSession?.startPreparation(input) || false;
+  }
+
   beginEditAuthorRuntime(input) {
     return this.#editRuntimeSession?.beginRuntime(input) || false;
   }

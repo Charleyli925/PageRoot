@@ -32,6 +32,10 @@ export class EditAuthorRuntimeSession {
     sourcePath?: string | null;
     sourceIsAuthoritative?: boolean;
   }): EditAuthorRuntimeSnapshot;
+  startPreparation(input?: {
+    sourceSha256?: string;
+    canvasGeneration?: number;
+  }): boolean;
   beginRuntime(input?: {
     sessionId?: string;
     sourceSha256?: string;

@@ -227,13 +227,21 @@ runtime before the initial editable frame becomes interactive. The sole
 to `(sourcePath, canvasGeneration)` rather than an autosave revision, source
 echo or comment state. It accepts one exact persisted-source prepare result
 only for the same source SHA and generation; a late old result is revoked and a
-settled session cannot prepare again.
+settled session cannot prepare again. Its `preparing` snapshot first commits
+the non-interactive loading surface; only that presentation acknowledgement
+starts the narrow prepare port, so a fast grant cannot promote a static iframe
+that has already mounted.
 
 The direct path permits only a bounded classic-script ECharts candidate, frozen
 local/allowlisted-CDN bytes and at most 32 uniquely bound, source-empty hosts.
 The final frame executes once, waits the fixed settle interval, then stops
 tracked runtime activity and audits source-node identity/text/attributes plus
-host containment before installing Canvas interaction. Runtime descendants are
+host containment before installing Canvas interaction. An approved empty host
+may add only absent ECharts layout declarations (`position: relative`,
+`user-select: none`, transparent `-webkit-tap-highlight-color`, or a positive
+`scale()` no greater than `1`);
+its authored declarations and every other
+attribute remain exact. Runtime descendants are
 display-only and map to their approved source host. They never become a
 `SourcePatch`, Source HTML, save, Version, export, Request or AI input. Any
 prepare, load, audit or deadline failure selects the ordinary static frame;

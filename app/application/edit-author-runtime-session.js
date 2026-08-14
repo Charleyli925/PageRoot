@@ -92,6 +92,7 @@ export class EditAuthorRuntimeSession {
   #listeners = new Set();
   #snapshot = frozenSnapshot();
   #identity = null;
+  #pendingPreparation = null;
   #attemptGeneration = 0;
   #requestSequence = 0;
   #disposed = false;
@@ -136,6 +137,7 @@ export class EditAuthorRuntimeSession {
   }
 
   #transitionToStatic(phase, lastOutcome, identity = this.#identity) {
+    this.#pendingPreparation = null;
     this.#revoke(this.#snapshot.grant);
     this.#emit({
       phase,
@@ -200,9 +202,21 @@ export class EditAuthorRuntimeSession {
       }
       return this.#snapshot;
     }
-    if (sameKey(this.#identity, identity)) return this.#snapshot;
+    const authorityJustBecameAvailable = (
+      sameKey(this.#identity, identity)
+      && sourceIsAuthoritative
+      && this.#snapshot.phase === "static"
+      && this.#snapshot.lastOutcome === "source-not-authoritative"
+    );
+    // A non-authoritative source cannot consume the one attempt for this
+    // canvas generation. It is only a precondition wait; the first matching
+    // authoritative snapshot must still be able to prepare the final frame.
+    if (sameKey(this.#identity, identity) && !authorityJustBecameAvailable) {
+      return this.#snapshot;
+    }
 
     this.#attemptGeneration += 1;
+    this.#pendingPreparation = null;
     this.#revoke(this.#snapshot.grant);
     this.#identity = identity;
     const attemptGeneration = this.#attemptGeneration;
@@ -250,11 +264,38 @@ export class EditAuthorRuntimeSession {
       hosts,
       canvasGeneration: identity.canvasGeneration,
     });
+    this.#pendingPreparation = Object.freeze({
+      attemptGeneration,
+      identity,
+      request,
+      started: false,
+    });
     this.#emit({
       phase: "preparing",
       sourceSha256: identity.sourceSha256,
       canvasGeneration: identity.canvasGeneration,
     });
+    return this.#snapshot;
+  }
+
+  /**
+   * The Workbench calls this only after the preparing snapshot has committed
+   * its no-interaction loading surface. That presentation acknowledgement is
+   * what prevents a fast main-process grant from racing a mounted static frame.
+   */
+  startPreparation({ sourceSha256, canvasGeneration } = {}) {
+    const pending = this.#pendingPreparation;
+    if (
+      this.#disposed
+      || !pending
+      || pending.started
+      || this.#snapshot.phase !== "preparing"
+      || !sameKey(this.#identity, pending.identity)
+      || pending.identity.sourceSha256 !== String(sourceSha256 || "").toLowerCase()
+      || pending.identity.canvasGeneration !== canvasGeneration
+    ) return false;
+    this.#pendingPreparation = Object.freeze({ ...pending, started: true });
+    const { attemptGeneration, identity, request } = pending;
     void Promise.resolve(this.#port.prepare(request)).then((result) => {
       if (
         this.#disposed
@@ -264,6 +305,7 @@ export class EditAuthorRuntimeSession {
         this.#revoke(result);
         return;
       }
+      this.#pendingPreparation = null;
       const grant = normalizedGrant(result, request);
       if (!grant) {
         this.#transitionToStatic("static-fallback", "prepare-failed", identity);
@@ -283,7 +325,7 @@ export class EditAuthorRuntimeSession {
       ) return;
       this.#transitionToStatic("static-fallback", "prepare-failed", identity);
     });
-    return this.#snapshot;
+    return true;
   }
 
   beginRuntime({ sessionId, sourceSha256, canvasGeneration } = {}) {
@@ -337,6 +379,7 @@ export class EditAuthorRuntimeSession {
     this.#attemptGeneration += 1;
     this.#revoke(this.#snapshot.grant);
     this.#identity = null;
+    this.#pendingPreparation = null;
     this.#listeners.clear();
     this.#snapshot = frozenSnapshot();
   }

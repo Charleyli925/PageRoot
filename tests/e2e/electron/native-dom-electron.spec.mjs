@@ -1021,7 +1021,7 @@ test("Electron Edit does not execute an inline authored runtime script", async (
   }
 });
 
-test("Electron Edit runs one bounded ECharts author runtime then preserves native source editing", async () => {
+test("Electron Edit admits bounded ECharts host layout mutations and preserves native source editing", async () => {
   const sourceDirectory = mkdtempSync(
     path.join(tmpdir(), "pageroot-edit-runtime-source-e2e-"),
   );
@@ -1043,6 +1043,10 @@ test("Electron Edit runs one bounded ECharts author runtime then preserves nativ
 </html>`;
   writeFileSync(runtimeScriptPath, `window.echarts = {
   init(host) {
+    host.style.userSelect = "none";
+    host.style.webkitTapHighlightColor = "rgba(0, 0, 0, 0)";
+    host.style.position = "relative";
+    host.style.transform = "scale(0.75)";
     const canvas = document.createElement("canvas");
     canvas.width = 640;
     canvas.height = 360;
@@ -1081,6 +1085,7 @@ test("Electron Edit runs one bounded ECharts author runtime then preserves nativ
       stubCount: document.querySelectorAll("[data-pageroot-edit-runtime-script]").length,
       base: document.baseURI,
       stylesheetColor: getComputedStyle(document.querySelector(".runtime-resource-probe")).color,
+      hostInlineStyle: document.querySelector("#chart-host").getAttribute("style"),
     })), { timeout: 6_000 }).toMatchObject({
       executions: 1,
       chartCount: 1,
@@ -1091,7 +1096,11 @@ test("Electron Edit runs one bounded ECharts author runtime then preserves nativ
       stubCount: 2,
       base: expect.stringMatching(/^pageroot-edit-runtime:\/\/[a-f0-9]{32}\/$/u),
       stylesheetColor: "rgb(1, 2, 3)",
+      hostInlineStyle: expect.stringMatching(
+        /(?=.*user-select: none)(?=.*transform: scale\(0\.75\))/u,
+      ),
     });
+    expect(readFileSync(sourcePath, "utf8")).toBe(source);
     const runtimeDocument = await documentToken(frame);
     const runtimeCanvasState = await launched.page.locator("[data-persist-state]").first().evaluate(
       (element) => ({
@@ -1143,6 +1152,76 @@ test("Electron Edit runs one bounded ECharts author runtime then preserves nativ
     removeValidatedTemporaryDirectory(
       sourceDirectory,
       "pageroot-edit-runtime-source-e2e-",
+    );
+  }
+});
+
+test("Electron Edit rejects unsafe ECharts host styling without persisting it", async () => {
+  const sourceDirectory = mkdtempSync(
+    path.join(tmpdir(), "pageroot-edit-runtime-rejection-source-e2e-"),
+  );
+  const sourcePath = path.join(sourceDirectory, "echarts-runtime-rejection.html");
+  const runtimeScriptPath = path.join(sourceDirectory, "echarts.js");
+  const source = `<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Rejected ECharts Edit runtime</title></head>
+<body>
+  <main id="chart-host" style="width: 640px; height: 360px"></main>
+  <p data-native-case="runtime-rejected-editable">静态来源文字保持可编辑。</p>
+  <script src="echarts.js"></script>
+  <script>
+    const chart = window.echarts.init(document.querySelector("#chart-host"));
+    chart.setOption({ series: [] });
+  </script>
+</body>
+</html>`;
+  writeFileSync(runtimeScriptPath, `window.echarts = {
+  init(host) {
+    host.style.position = "fixed";
+    const canvas = document.createElement("canvas");
+    canvas.dataset.echartsRuntime = "unsafe";
+    host.append(canvas);
+    return { setOption() {} };
+  }
+};`, "utf8");
+  writeFileSync(sourcePath, source, "utf8");
+
+  let electronApp = null;
+  let isolatedUserData = null;
+  try {
+    const launched = await launchPageRoot({ activeSourcePath: sourcePath });
+    electronApp = launched.electronApp;
+    isolatedUserData = launched.isolatedUserData;
+    await loadedDiskFrame(
+      launched.page,
+      sourcePath,
+      "runtime-rejected-editable",
+    );
+    // A rejected one-shot frame is replaced by the ordinary static frame; wait
+    // beyond the fixed runtime deadline before reading the current iframe.
+    await launched.page.waitForTimeout(4_500);
+    const frame = await currentEditorFrame(launched.page);
+    await expect.poll(() => frame.evaluate(() => ({
+      frozen: document.documentElement.getAttribute("data-pageroot-edit-runtime-frozen"),
+      result: document.documentElement.getAttribute("data-pageroot-edit-runtime-result"),
+      bootstrapCount: document.querySelectorAll("[data-pageroot-edit-runtime-bootstrap]").length,
+      canvasCount: document.querySelectorAll("#chart-host canvas").length,
+      hostStyle: document.querySelector("#chart-host").getAttribute("style"),
+    })), { timeout: 2_000 }).toMatchObject({
+      frozen: null,
+      result: null,
+      bootstrapCount: 0,
+      canvasCount: 0,
+      hostStyle: expect.stringMatching(/width:\s*640px.*height:\s*360px/u),
+    });
+    expect(readFileSync(sourcePath, "utf8")).toBe(source);
+  } finally {
+    if (electronApp && isolatedUserData) {
+      await stopPageRoot(electronApp, isolatedUserData);
+    }
+    removeValidatedTemporaryDirectory(
+      sourceDirectory,
+      "pageroot-edit-runtime-rejection-source-e2e-",
     );
   }
 });

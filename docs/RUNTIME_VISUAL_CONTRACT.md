@@ -33,13 +33,22 @@ exception: before the initial editable frame is mounted, an exact persisted
 source with classic-script ECharts evidence may receive one direct resource
 session for its `(sourcePath, canvasGeneration)`.
 
+The Session first publishes a non-interactive `preparing` state and the
+Workbench commits that loading surface before acknowledging the one port call.
+This makes even an immediately resolved grant choose the initial runtime frame,
+rather than becoming a forbidden late promotion of static Edit.
+
 The session accepts no arbitrary source path or later source revision. Main
 rechecks active HTML/SHA, freezes declared local or allowlisted ECharts-CDN
 script bytes, and serves only that resource closure under
 `pageroot-edit-runtime:` without CSP bypass. The final frame runs those bytes in
 order once, waits 1.2 seconds, stops tracked runtime activity and audits that
 source nodes/text/attributes and the approved unique empty-host bindings stayed
-intact. At most 32 non-dangerous empty hosts are eligible; generated descendants
+intact. A host may add only absent ECharts layout declarations (`position:
+relative`, `user-select: none`, transparent `-webkit-tap-highlight-color`, or a
+positive `scale()` no greater than `1`); it cannot overwrite authored
+style or mutate another source attribute. At most 32 non-dangerous empty hosts
+are eligible; generated descendants
 remain display-only and select/comment through their original source host.
 
 Preparation, execution, audit or deadline failure silently mounts ordinary

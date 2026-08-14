@@ -70,6 +70,9 @@ test("one canvas generation prepares at most once despite source and autosave ch
   });
 
   session.refresh(input());
+  assert.equal(session.snapshot.phase, "preparing");
+  assert.equal(requests.length, 0, "preparation waits for the committed loading surface");
+  assert.equal(session.startPreparation(input()), true);
   session.refresh(input({
     html: HTML + "<!-- autosave changed source -->",
     sourceSha256: "sha256:" + "c".repeat(64),
@@ -85,6 +88,41 @@ test("one canvas generation prepares at most once despite source and autosave ch
   assert.equal(session.snapshot.grant?.canvasGeneration, 4);
 });
 
+test("authority confirmation prepares once within the same source and canvas identity", async () => {
+  const requests = [];
+  const session = new EditAuthorRuntimeSession({
+    port: {
+      prepare: async (request) => {
+        requests.push(request);
+        return success(request);
+      },
+      revoke: async () => {},
+    },
+  });
+
+  session.refresh(input({ sourceIsAuthoritative: false }));
+  assert.equal(requests.length, 0);
+  assert.equal(session.snapshot.phase, "static");
+  assert.equal(session.snapshot.lastOutcome, "source-not-authoritative");
+
+  session.refresh(input({ sourceIsAuthoritative: true }));
+  assert.equal(session.snapshot.phase, "preparing");
+  assert.equal(requests.length, 0);
+  assert.equal(session.startPreparation(input()), true);
+  await flushAsync();
+
+  assert.equal(requests.length, 1);
+  assert.equal(session.snapshot.phase, "ready");
+  assert.equal(session.snapshot.grant?.canvasGeneration, 4);
+
+  session.refresh(input({
+    html: HTML + "<!-- ordinary source echo -->",
+    sourceSha256: "sha256:" + "c".repeat(64),
+  }));
+  await flushAsync();
+  assert.equal(requests.length, 1);
+});
+
 test("late preparation from an old generation is revoked and cannot publish", async () => {
   const oldRequest = deferred();
   const revoked = [];
@@ -96,6 +134,7 @@ test("late preparation from an old generation is revoked and cannot publish", as
   });
 
   session.refresh(input());
+  assert.equal(session.startPreparation(input()), true);
   session.refresh(input({
     canvasGeneration: 5,
     sourceSha256: "sha256:" + "e".repeat(64),
@@ -130,6 +169,7 @@ test("runtime settles once and later grants cannot re-enter preparation", async 
   });
 
   session.refresh(input());
+  assert.equal(session.startPreparation(input()), true);
   await flushAsync();
   const grant = session.snapshot.grant;
   assert.ok(grant);
@@ -155,6 +195,7 @@ test("failed preparation silently reaches static fallback", async () => {
   });
 
   session.refresh(input());
+  assert.equal(session.startPreparation(input()), true);
   await flushAsync();
 
   assert.equal(session.snapshot.phase, "static-fallback");

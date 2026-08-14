@@ -64,6 +64,23 @@ function oneShotRuntimeBootstrap(config) {
     "iframe", "input", "link", "meta", "object", "option", "script", "select",
     "source", "style", "textarea", "track", "video",
   ]);
+  // ECharts initializes an otherwise empty host by adding these layout-only
+  // declarations (and, below, a bounded scale transform). They are required
+  // for its owned descendants to paint, but may not overwrite source styling.
+  const isAllowedRuntimeHostStyle = (property, value, priority) => {
+    if (priority) return false;
+    const normalized = String(value || "").trim().toLowerCase();
+    if (property === "position") return normalized === "relative";
+    if (property === "user-select") return normalized === "none";
+    if (property === "-webkit-tap-highlight-color") {
+      return /^rgba\(\s*0\s*,\s*0\s*,\s*0\s*,\s*0\s*\)$/u.test(normalized);
+    }
+    if (property !== "transform") return false;
+    const match = /^scale\(\s*([0-9]+(?:\.[0-9]+)?)\s*\)$/u.exec(String(value || ""));
+    if (!match) return false;
+    const scale = Number(match[1]);
+    return Number.isFinite(scale) && scale > 0 && scale <= 1;
+  };
   const eventProperties = [
     "onanimationend", "onanimationstart", "onbeforeinput", "onblur", "onchange",
     "onclick", "oncompositionend", "oncompositionstart", "oncontextmenu", "oncopy",
@@ -104,11 +121,12 @@ function oneShotRuntimeBootstrap(config) {
     }
     return null;
   };
-  const sourceAttributes = (element) => {
+  const sourceAttributes = (element, ignoreStyle = false) => {
     const values = [];
     for (const attribute of Array.from(element.attributes)) {
       const name = String(attribute.name || "").toLowerCase();
       if (name.startsWith("data-pageroot-edit-runtime-")) continue;
+      if (ignoreStyle && name === "style") continue;
       if (
         name === "_echarts_instance_"
         || name === "data-ecid"
@@ -117,6 +135,38 @@ function oneShotRuntimeBootstrap(config) {
       values.push(name + "=" + String(attribute.value || ""));
     }
     return values.sort().join("\u0000");
+  };
+  const styleSnapshot = (element) => {
+    if (!(element instanceof Element) || !element.style) return [];
+    return Array.from(element.style).map((property) => [
+      property,
+      element.style.getPropertyValue(property),
+      element.style.getPropertyPriority(property),
+    ]).sort((left, right) => left[0].localeCompare(right[0]));
+  };
+  const hostStylePreservesSource = (element, before) => {
+    const styleMap = (snapshot) => new Map((snapshot || []).map(([
+      property,
+      value,
+      priority,
+    ]) => [property, [value, priority]]));
+    const initial = styleMap(before);
+    const current = styleMap(styleSnapshot(element));
+    for (const [property, value] of initial) {
+      const currentValue = current.has(property) ? current.get(property) : null;
+      if (JSON.stringify(currentValue) !== JSON.stringify(value)) {
+        return false;
+      }
+    }
+    for (const [property, [value, priority]] of current) {
+      if (
+        !initial.has(property)
+        && !isAllowedRuntimeHostStyle(property, value, priority)
+      ) {
+        return false;
+      }
+    }
+    return true;
   };
   const textSnapshot = () => {
     const root = document.documentElement;
@@ -153,6 +203,7 @@ function oneShotRuntimeBootstrap(config) {
         continue;
       }
       const hostKey = element.getAttribute(hostAttribute);
+      const approvedHost = Boolean(hostKey);
       if (hostKey) {
         if (hosts.has(hostKey)) violation("host-identity-invalid");
         hosts.set(hostKey, {
@@ -163,7 +214,8 @@ function oneShotRuntimeBootstrap(config) {
       nodes.set(marker, {
         tagName: element.tagName.toLowerCase(),
         parentMarker: parentMarker(element),
-        attributes: sourceAttributes(element),
+        attributes: sourceAttributes(element, approvedHost),
+        hostStyle: approvedHost ? styleSnapshot(element) : null,
       });
     }
     if (!hosts.size) violation("no-approved-host");
@@ -196,7 +248,11 @@ function oneShotRuntimeBootstrap(config) {
       if (
         element.tagName.toLowerCase() !== record.tagName
         || parentMarker(element) !== record.parentMarker
-        || sourceAttributes(element) !== record.attributes
+        || sourceAttributes(element, Boolean(element.getAttribute(hostAttribute))) !== record.attributes
+        || (
+          Boolean(element.getAttribute(hostAttribute))
+          && !hostStylePreservesSource(element, record.hostStyle)
+        )
       ) violation("source-node-mutated");
     }
     if (seen.size !== before.nodes.size) violation("source-node-missing");

@@ -702,6 +702,27 @@ export default function Workbench() {
     canvasMode === "edit"
     && ["ready", "running", "settled"].includes(editRuntimeSnapshot?.phase || "")
   ) ? editRuntimeSnapshot?.grant ?? null : null;
+  useLayoutEffect(() => {
+    const sourceSha256 = editRuntimeSnapshot?.sourceSha256;
+    const runtimeCanvasGeneration = editRuntimeSnapshot?.canvasGeneration;
+    if (
+      !editRuntimePreparing
+      || !sourceSha256
+      || typeof runtimeCanvasGeneration !== "number"
+      || !Number.isSafeInteger(runtimeCanvasGeneration)
+    ) return;
+    // This runs after the preparing snapshot has committed the loading surface
+    // and retired any static editor. The Session alone still owns the one
+    // attempt; Workbench only acknowledges that it is safe to start it.
+    workspaceControllerRef.current?.startEditAuthorRuntimePreparation({
+      sourceSha256,
+      canvasGeneration: runtimeCanvasGeneration,
+    });
+  }, [
+    editRuntimePreparing,
+    editRuntimeSnapshot?.canvasGeneration,
+    editRuntimeSnapshot?.sourceSha256,
+  ]);
   const [pageViewContext, setPageViewContext] =
     useState<PageViewContext | null>(null);
   const [interactivePreviewTransport, setInteractivePreviewTransport] =

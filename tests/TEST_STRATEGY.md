@@ -104,9 +104,10 @@ PR 批量是建议而非固定限制：用 CI Health 的 Ready 次数、candidat
 - `WorkspaceController`：runtime factory 是生产组合的唯一入口；它构造唯一的 Bridge
   client、共享 RunSession、`EditAuthorRuntimeSession` 与各业务 Session，并作为唯一
   application aggregate observer 生成冻结的 Project/Document/Comment/Run/Version/Edit
-  runtime snapshot。Edit runtime 的纯 Session 测试证明键仅为
-  `(sourcePath, canvasGeneration)`、同代不因 autosave/评论重试、旧结果只撤销；
-  Workbench 只传入窄 port 并消费快照。Node 测试证明晚到 observer
+runtime snapshot。Edit runtime 的纯 Session 测试证明键仅为
+`(sourcePath, canvasGeneration)`、非权威源码随后变为权威时仍可开始一次、准备
+loading surface 确认前不调用窄 port、同代不因 autosave/评论重试、旧结果只撤销；
+Workbench 只确认已提交 loading surface、传入窄 port 并消费快照。Node 测试证明晚到 observer
   在 `dispose()` 后不再发布；Document snapshot 只投影 `hasPendingWrite`/`isFlushing`，
   不泄露写入内容或 Promise。Workbench 只能订阅该 aggregate snapshot 与 event stream。
 - Bridge 集成环境：每个真实 Bridge 测试各自创建临时 root、workspace、sources、端口、子进程与 stdout/stderr；同一测试可为重启恢复顺序启动新进程，但不同测试绝不共享 workspace 或长寿命 Bridge。环境默认携带配置的 Bridge auth token，测试缺失/错误 token 时必须显式关闭或覆盖它；HTTP/连接失败保留 response text 与 Bridge 日志，不重试 mutation。
@@ -129,8 +130,8 @@ PR 批量是建议而非固定限制：用 CI Health 的 Ready 次数、candidat
   栅格噪声判作变化。Electron 用一份合成报告证明普通 Edit
   不执行作者脚本、不请求或挂载运行态位图，Preview 中同一 Canvas/SVG 正常运行，
   authored inline SVG 仍在 Edit 原生可见且源文件字节不变；另一个本地 ECharts
-  用例证明直接资源闭包、一次 execution、固定冻结审计、运行时后代回到源码
-  宿主、评论/原生编辑后 iframe 与 execution count 不变且写盘字节不含 runtime
+  用例证明直接资源闭包、一次 execution、固定冻结审计、ECharts 仅新增受限宿主
+  布局样式/缩放且不覆盖源码样式、运行时后代回到源码宿主、评论/原生编辑后 iframe 与 execution count 不变且写盘字节不含 runtime
   marker。协议/bootstrap 单测拥有资源闭包、一次消费、revoke、CSP 和冻结边界。
   桌面编辑画布还必须
   证明同目录图片通过同一条受控资源根加载成功，而 `script-src` 没有因此
