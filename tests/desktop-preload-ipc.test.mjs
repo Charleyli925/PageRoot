@@ -237,6 +237,42 @@ test("preload unwraps structured project IPC success results", async () => {
   assert.equal(calls[0][0], "html-projects:list-recent");
 });
 
+test("preload exposes Registry catalog reads and projectId-only opens", async () => {
+  const calls = [];
+  const api = await loadPreload(async (...args) => {
+    calls.push(args);
+    return success(args[0] === "html-projects:list-registered"
+      ? [{
+        projectId: "project_0123456789abcdef",
+        projectName: "报告",
+        availability: "ready",
+      }]
+      : {
+        sourcePath: "/Users/demo/Documents/PageRoot/项目/报告/报告-V1.html",
+        html: "<!doctype html><html><body>报告</body></html>",
+        sha256: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      });
+  });
+
+  assert.deepEqual(await api.listRegisteredProjects(), [{
+    projectId: "project_0123456789abcdef",
+    projectName: "报告",
+    availability: "ready",
+  }]);
+  assert.deepEqual(
+    await api.openRegisteredProject("project_0123456789abcdef"),
+    {
+      sourcePath: "/Users/demo/Documents/PageRoot/项目/报告/报告-V1.html",
+      html: "<!doctype html><html><body>报告</body></html>",
+      sha256: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    },
+  );
+  assert.deepEqual(calls, [
+    ["html-projects:list-registered"],
+    ["html-projects:open-registered", "project_0123456789abcdef"],
+  ]);
+});
+
 test("preload exposes the structured Finder reveal operation", async () => {
   const calls = [];
   const api = await loadPreload(async (...args) => {

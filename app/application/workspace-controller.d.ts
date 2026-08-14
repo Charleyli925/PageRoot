@@ -381,8 +381,9 @@ export class WorkspaceController {
     fromDeferred?: boolean;
   }): Promise<ProjectWorkflowOutcome>;
   openProject(input?: {
-    kind?: "local" | "recent" | "startup";
+    kind?: "local" | "recent" | "registered" | "startup";
     sourcePath?: string | null;
+    projectId?: string | null;
     fromDeferred?: boolean;
   }): Promise<ProjectWorkflowOutcome>;
   acceptProject(
@@ -429,6 +430,7 @@ export class WorkspaceController {
     context?: ProjectContext;
   }): Promise<ProjectWorkflowOutcome<{ opened: boolean }>>;
   refreshRecentProjects(): Promise<ProjectWorkflowOutcome<{ projects: unknown[] }>>;
+  refreshRegisteredProjects(): Promise<ProjectWorkflowOutcome<{ projects: unknown[] }>>;
   openProjectRules(input: {
     context: ProjectContext;
   }): Promise<ProjectRulesWorkflowOutcome<{

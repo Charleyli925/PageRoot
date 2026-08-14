@@ -1665,6 +1665,22 @@ function invalidRegisteredProjectError(cause) {
     ]).has(cause.code);
 }
 
+function registeredProjectCatalogAvailability(cause) {
+  if (!(cause instanceof ProjectFileRepositoryError)) return "invalid";
+  return new Set([
+    "REGISTERED_PROJECT_UNAVAILABLE",
+    "PROJECT_ROOT_NOT_FOUND",
+    "PROJECT_CONTROL_NOT_FOUND",
+    "WORKING_COPY_UNAVAILABLE",
+    "SOURCE_NOT_FOUND",
+    "UNREGISTERED_PROJECT_ROOT",
+    "PATH_ESCAPES_PROJECT",
+    "UNSAFE_DIRECTORY",
+  ]).has(cause.code)
+    ? "unavailable"
+    : "invalid";
+}
+
 // This is a persistence repository, not a runtime Store. Sessions keep the
 // mutable UI facts; the repository only resolves and atomically records the
 // on-disk facts specified by VERSION_AND_PROJECT_FILES_PRD.md.
@@ -1709,6 +1725,14 @@ export class ProjectFileRepository {
       }
       await this.#recoverPublishedImports();
     });
+  }
+
+  async listRegisteredProjects() {
+    return this.#serial(() => this.#listRegisteredProjects());
+  }
+
+  async resolveRegisteredProjectOpenTarget({ projectId } = {}) {
+    return this.#serial(() => this.#resolveRegisteredProjectOpenTarget({ projectId }));
   }
 
   async importExternal({
@@ -4252,6 +4276,136 @@ export class ProjectFileRepository {
       if (invalidRegisteredProjectError(cause)) return null;
       throw cause;
     }
+  }
+
+  #registeredProjectCatalogFallback(projectId, record, availability) {
+    return {
+      projectId,
+      documentId: null,
+      projectName: path.basename(record.registeredProjectRootPath),
+      registeredProjectRootPath: record.registeredProjectRootPath,
+      activeWorkingCopyId: null,
+      activeSourcePath: null,
+      currentBasedOnVersionId: null,
+      latestOfficialVersionId: null,
+      hasPendingCandidate: false,
+      availability,
+    };
+  }
+
+  async #activeRegisteredWorkingCopy(loaded) {
+    const workingCopyIdValue = loaded.runtime.activeWorkingCopyId;
+    if (!workingCopyIdValue) {
+      throw new ProjectFileRepositoryError(
+        "ACTIVE_WORKING_COPY_REQUIRED",
+        "The registered project has no active Working Copy to open.",
+      );
+    }
+    const workingCopy = loaded.manifest.workingCopies.find(
+      (entry) => entry.workingCopyId === workingCopyIdValue,
+    );
+    if (!workingCopy) {
+      throw new ProjectFileRepositoryError(
+        "ACTIVE_WORKING_COPY_UNKNOWN",
+        "The registered project active Working Copy is unknown.",
+      );
+    }
+    return workingCopy;
+  }
+
+  async #listRegisteredProjects() {
+    const registry = await this.#readRegistry();
+    const rows = [];
+    for (const [projectId, record] of Object.entries(registry.projects)) {
+      try {
+        const loaded = await this.#loadRegisteredProject({ projectId });
+        const workingCopy = await this.#activeRegisteredWorkingCopy(loaded);
+        const sourcePath = workingCopySourcePath(loaded.paths, workingCopy);
+        const source = await readHtmlFile(sourcePath, "active Working Copy", {
+          projectRootPath: loaded.paths.projectRootPath,
+        });
+        const state = await readJsonFile(
+          workingCopyStatePath(loaded.paths, workingCopy),
+          "active Working Copy state",
+          { projectRootPath: loaded.paths.projectRootPath },
+        );
+        assertWorkingCopyState(state, loaded, workingCopy);
+        rows.push({
+          projectId: loaded.project.projectId,
+          documentId: loaded.project.documentId,
+          projectName: path.basename(loaded.paths.projectRootPath),
+          registeredProjectRootPath: loaded.paths.projectRootPath,
+          activeWorkingCopyId: workingCopy.workingCopyId,
+          activeSourcePath: sourcePath,
+          currentBasedOnVersionId: workingCopy.basedOnVersionId,
+          latestOfficialVersionId: loaded.manifest.latestOfficialVersionId,
+          hasPendingCandidate: loaded.runtime.activeCandidateId !== null,
+          availability: "ready",
+          // This hash stays within Repository authority and makes the list
+          // read verify the visible target before Desktop performs its own
+          // exact-target fetch-and-read transaction on open.
+          activeSourceSha256: source.sha256,
+        });
+      } catch (cause) {
+        rows.push(this.#registeredProjectCatalogFallback(
+          projectId,
+          record,
+          registeredProjectCatalogAvailability(cause),
+        ));
+      }
+    }
+    return rows.sort((left, right) => (
+      left.projectName.localeCompare(right.projectName, "zh-CN")
+      || left.projectId.localeCompare(right.projectId)
+    )).map(({ activeSourceSha256, ...row }) => row);
+  }
+
+  async #resolveRegisteredProjectOpenTarget({ projectId }) {
+    const id = assertId(projectId, PROJECT_ID, "projectId");
+    const loaded = await this.#loadRegisteredProject({ projectId: id });
+    const workingCopy = await this.#activeRegisteredWorkingCopy(loaded);
+    const initialSourcePath = workingCopySourcePath(loaded.paths, workingCopy);
+    const initialSource = await readHtmlFile(initialSourcePath, "active Working Copy", {
+      projectRootPath: loaded.paths.projectRootPath,
+    });
+    const tentative = publicOpenTarget({
+      project: loaded.project,
+      projectRootPath: loaded.paths.projectRootPath,
+      targetKind: "working-copy",
+      workingCopy,
+      version: loaded.manifest.versions.find(
+        (entry) => entry.versionId === workingCopy.versionId,
+      ),
+      exactSourcePath: initialSourcePath,
+      sourceSha256: initialSource.sha256,
+    });
+    // #resolveMutationTarget repeats Registry, root, Working Copy and real
+    // path checks, including controlled managed-HTML rename recovery.  The
+    // returned source bytes and digest form the Repository side of the exact
+    // Project/Document/OpenTarget/HTML/Hash tuple; Desktop repeats it before
+    // publishing a new Session.
+    const resolved = await this.#resolveMutationTarget(tentative);
+    const version = resolved.manifest.versions.find(
+      (entry) => entry.versionId === resolved.workingCopy.versionId,
+    );
+    if (!version) {
+      throw new ProjectFileRepositoryError(
+        "WORKING_COPY_VERSION_UNKNOWN",
+        "The active Working Copy references an unknown Version.",
+      );
+    }
+    return {
+      target: publicOpenTarget({
+        project: resolved.project,
+        projectRootPath: resolved.paths.projectRootPath,
+        targetKind: "working-copy",
+        workingCopy: resolved.workingCopy,
+        version,
+        exactSourcePath: resolved.exactSourcePath,
+        sourceSha256: resolved.source.sha256,
+      }),
+      sourceSha256: resolved.source.sha256,
+    };
   }
 
   async #resolveOpenTarget({ sourcePath }) {

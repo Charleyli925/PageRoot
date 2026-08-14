@@ -1019,6 +1019,43 @@ function projectFileHttpError(cause) {
   return new HttpError(status, code, cause.message, cause.details);
 }
 
+function registeredProjectId(value) {
+  const projectId = String(value || "");
+  if (!/^project_[a-f0-9]{16,64}$/u.test(projectId)) {
+    throw new HttpError(400, "INVALID_PROJECT_ID", "projectId is invalid.");
+  }
+  return projectId;
+}
+
+async function registeredProjectCatalog() {
+  try {
+    return {
+      ok: true,
+      projects: await projectFileRepository.listRegisteredProjects(),
+    };
+  } catch (cause) {
+    throw projectFileHttpError(cause);
+  }
+}
+
+async function registeredProjectOpen(projectId) {
+  try {
+    const resolved = await projectFileRepository.resolveRegisteredProjectOpenTarget({
+      projectId: registeredProjectId(projectId),
+    });
+    return {
+      ok: true,
+      projectId: resolved.target.projectId,
+      documentId: resolved.target.documentId,
+      sourcePath: resolved.target.exactSourcePath,
+      sourceSha256: resolved.sourceSha256,
+      openTarget: resolved.target,
+    };
+  } catch (cause) {
+    throw projectFileHttpError(cause);
+  }
+}
+
 async function projectFileWorkspaceForSource(sourcePath) {
   try {
     return await projectFileRepository.workspace({ sourcePath });
@@ -9616,6 +9653,18 @@ async function route(request, response) {
         requiredSourcePath(url.searchParams.get("sourcePath")),
         { projectStorageVersion: url.searchParams.get("projectStorageVersion") },
       ),
+    );
+    return;
+  }
+  if (request.method === "GET" && url.pathname === "/registered-projects") {
+    sendJson(response, 200, await registeredProjectCatalog());
+    return;
+  }
+  if (request.method === "GET" && url.pathname === "/registered-project/open") {
+    sendJson(
+      response,
+      200,
+      await registeredProjectOpen(url.searchParams.get("projectId")),
     );
     return;
   }

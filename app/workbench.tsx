@@ -220,6 +220,7 @@ import type {
   PersistState,
   PrepareCloseDetail,
   ProjectContext,
+  RegisteredProject,
   RecentProject,
   StartupIssue,
   Toast,
@@ -606,6 +607,8 @@ export default function Workbench() {
   const [fileRenameError, setFileRenameError] = useState("");
   const [recentProjects, setRecentProjects] = useState<RecentProject[]>([]);
   const [recentProjectsError, setRecentProjectsError] = useState("");
+  const [registeredProjects, setRegisteredProjects] = useState<RegisteredProject[]>([]);
+  const [registeredProjectsError, setRegisteredProjectsError] = useState("");
   const [selection, setSelection] = useState<HtmlCanvasSelection | null>(null);
   const commentSnapshot = (
     workspaceControllerSnapshot?.commentSession as CommentSessionSnapshot<
@@ -927,6 +930,12 @@ export default function Workbench() {
             },
             getActive: async () => window.htmlAIProjects?.getActiveProject() ?? null,
             listRecent: async () => window.htmlAIProjects?.listRecentProjects() ?? [],
+            listRegistered: async () => window.htmlAIProjects?.listRegisteredProjects?.() ?? [],
+            openRegistered: async (registeredProjectId: string) => {
+              const open = window.htmlAIProjects?.openRegisteredProject;
+              if (!open) throw new Error("当前 PageRoot 版本缺少项目目录打开通道。");
+              return open(registeredProjectId);
+            },
             acceptExternal: async (requestId: string) => {
               const accept = window.htmlAIProjects?.acceptExternalOpen;
               if (!accept) throw new Error("当前 PageRoot 版本缺少外部文件打开通道。");
@@ -1472,6 +1481,21 @@ export default function Workbench() {
       if (projectEvent.type === "project-recents-failed") {
         setRecentProjectsError(String(
           projectEvent.reason || "最近打开记录暂时无法读取。",
+        ));
+        return;
+      }
+      if (projectEvent.type === "project-catalog-loaded") {
+        setRegisteredProjects(
+          Array.isArray(projectEvent.projects)
+            ? projectEvent.projects as RegisteredProject[]
+            : [],
+        );
+        setRegisteredProjectsError("");
+        return;
+      }
+      if (projectEvent.type === "project-catalog-failed") {
+        setRegisteredProjectsError(String(
+          projectEvent.reason || "项目目录暂时无法读取。",
         ));
         return;
       }
@@ -2802,6 +2826,15 @@ export default function Workbench() {
     await workspaceController.refreshRecentProjects();
   }, [workspaceController]);
 
+  const refreshRegisteredProjects = useCallback(async () => {
+    if (!workspaceController) return;
+    await workspaceController.refreshRegisteredProjects();
+  }, [workspaceController]);
+
+  useEffect(() => {
+    void refreshRegisteredProjects();
+  }, [refreshRegisteredProjects]);
+
   const forgetRecentProject = useCallback(async (recentSourcePath: string) => {
     const api = window.htmlAIProjects;
     if (!api?.forgetRecent) return;
@@ -3238,6 +3271,14 @@ export default function Workbench() {
     await workspaceController.openProject({
       kind: recentPath ? "recent" : "local",
       sourcePath: recentPath || null,
+    });
+  }, [workspaceController]);
+
+  const openRegisteredProject = useCallback(async (registeredProjectId: string) => {
+    if (!workspaceController) return;
+    await workspaceController.openProject({
+      kind: "registered",
+      projectId: registeredProjectId,
     });
   }, [workspaceController]);
 
@@ -7922,6 +7963,68 @@ export default function Workbench() {
                     <button type="button" onClick={() => void exportCurrentHtml()}>
                       导出 HTML 副本
                     </button>
+                  </div>
+                </section>
+
+                <section className="recent-files registered-projects">
+                  <header>
+                    <strong>所有项目</strong>
+                    <small>{registeredProjects.length} 个已登记项目</small>
+                  </header>
+                  <div>
+                    {registeredProjectsError ? (
+                      <section className="recent-projects-error" role="status">
+                        <span>{registeredProjectsError}</span>
+                        <button type="button" onClick={() => void refreshRegisteredProjects()}>
+                          重试读取
+                        </button>
+                      </section>
+                    ) : null}
+                    {registeredProjects.length ? registeredProjects.map((project) => (
+                      <div
+                        className="recent-file-item"
+                        data-project-id={project.projectId}
+                        key={project.projectId}
+                      >
+                        <button
+                          className="recent-file-row"
+                          type="button"
+                          disabled={
+                            attachmentUploadCount > 0
+                            || project.availability !== "ready"
+                          }
+                          onClick={() => void openRegisteredProject(project.projectId)}
+                        >
+                          <FileHtmlIcon aria-hidden="true" size={19} weight="duotone" />
+                          <span>
+                            <strong>{project.projectName}</strong>
+                            <small>{project.registeredProjectRootPath}</small>
+                          </span>
+                          {project.lastOpenedAt ? (
+                            <time dateTime={new Date(project.lastOpenedAt).toISOString()}>
+                              {formatProjectTimestamp(project.lastOpenedAt)}
+                            </time>
+                          ) : null}
+                          <em
+                            className="recent-project-status"
+                            data-state={project.availability}
+                          >{
+                            project.projectId === projectId
+                              ? "当前"
+                              : project.availability === "ready"
+                                ? project.hasPendingCandidate
+                                  ? "候选待审阅"
+                                  : "可打开"
+                                : project.availability === "unavailable"
+                                  ? "暂不可用"
+                                  : "需要修复"
+                          }</em>
+                          <CaretRightIcon aria-hidden="true" size={14} weight="bold" />
+                        </button>
+                      </div>
+                    )) : !registeredProjectsError ? (
+                      <span className="recent-projects-empty">还没有已登记项目</span>
+                    ) : null}
                   </div>
                 </section>
 

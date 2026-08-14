@@ -173,6 +173,8 @@ const PROJECT_CHANNELS = Object.freeze({
   revealVersionFile: "html-projects:reveal-version-file",
   revealRequestFolder: "html-projects:reveal-request-folder",
   listRecentProjects: "html-projects:list-recent",
+  listRegisteredProjects: "html-projects:list-registered",
+  openRegisteredProject: "html-projects:open-registered",
   openRecent: "html-projects:open-recent",
   forgetRecent: "html-projects:forget-recent",
   acceptExternalOpen: "html-projects:accept-external-open",
@@ -1772,6 +1774,210 @@ async function listRecentProjects() {
   }));
 }
 
+function assertRegisteredProjectId(value) {
+  const projectId = String(value || "");
+  if (!/^project_[a-f0-9]{16,64}$/u.test(projectId)) {
+    throw new TypeError("项目身份无效。");
+  }
+  return projectId;
+}
+
+function assertRegisteredProjectCatalogRow(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new ProjectFileError(
+      "REGISTERED_PROJECT_CATALOG_INVALID",
+      "项目目录返回了无效记录。",
+    );
+  }
+  const availability = String(value.availability || "");
+  const projectId = assertRegisteredProjectId(value.projectId);
+  if (
+    !["ready", "unavailable", "invalid"].includes(availability)
+    || typeof value.projectName !== "string"
+    || !value.projectName
+    || typeof value.registeredProjectRootPath !== "string"
+    || !value.registeredProjectRootPath
+  ) {
+    throw new ProjectFileError(
+      "REGISTERED_PROJECT_CATALOG_INVALID",
+      "项目目录包含无效记录。",
+    );
+  }
+  const ready = availability === "ready";
+  if (
+    ready
+    && (
+      !/^doc_[a-f0-9]{16,64}$/u.test(String(value.documentId || ""))
+      || !/^work_ver_\d{4,}$/u.test(String(value.activeWorkingCopyId || ""))
+      || !/^ver_\d{4,}$/u.test(String(value.currentBasedOnVersionId || ""))
+      || !/^ver_\d{4,}$/u.test(String(value.latestOfficialVersionId || ""))
+      || !value.activeSourcePath
+    )
+  ) {
+    throw new ProjectFileError(
+      "REGISTERED_PROJECT_CATALOG_INVALID",
+      "可打开项目缺少经过验证的目标。",
+    );
+  }
+  return Object.freeze({
+    projectId,
+    documentId: ready ? String(value.documentId) : null,
+    projectName: value.projectName,
+    registeredProjectRootPath: path.resolve(value.registeredProjectRootPath),
+    activeWorkingCopyId: ready ? String(value.activeWorkingCopyId) : null,
+    activeSourcePath: ready ? assertHtmlPath(value.activeSourcePath, "activeSourcePath") : null,
+    currentBasedOnVersionId: ready ? String(value.currentBasedOnVersionId) : null,
+    latestOfficialVersionId: ready ? String(value.latestOfficialVersionId) : null,
+    hasPendingCandidate: value.hasPendingCandidate === true,
+    availability,
+  });
+}
+
+async function fetchBridgeJson(pathname) {
+  if (!bridgePort) {
+    throw new ProjectFileError(
+      "BRIDGE_NOT_READY",
+      "项目记录服务尚未就绪，请稍后重试。",
+    );
+  }
+  const response = await net.fetch(`http://127.0.0.1:${bridgePort}${pathname}`, {
+    cache: "no-store",
+    headers: { "X-HTML-AI-Bridge-Token": bridgeAuthToken },
+  });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok || !payload || payload.ok !== true) {
+    throw new ProjectFileError(
+      "REGISTERED_PROJECT_BRIDGE_REJECTED",
+      "项目目录暂时无法完成安全核对。",
+    );
+  }
+  return payload;
+}
+
+async function listRegisteredProjects() {
+  const payload = await fetchBridgeJson("/registered-projects");
+  if (!Array.isArray(payload.projects)) {
+    throw new ProjectFileError(
+      "REGISTERED_PROJECT_CATALOG_INVALID",
+      "项目目录返回了无效列表。",
+    );
+  }
+  const state = await loadProjectState();
+  const recentTimes = new Map(state.recent.map((entry) => [
+    path.resolve(entry.path),
+    Number(entry.lastOpenedAt) || 0,
+  ]));
+  return payload.projects
+    .map(assertRegisteredProjectCatalogRow)
+    .map((project) => Object.freeze({
+      ...project,
+      lastOpenedAt: project.activeSourcePath
+        ? recentTimes.get(path.resolve(project.activeSourcePath)) || null
+        : null,
+    }))
+    .sort((left, right) => (
+      Number(right.lastOpenedAt || 0) - Number(left.lastOpenedAt || 0)
+      || left.projectName.localeCompare(right.projectName, "zh-CN")
+      || left.projectId.localeCompare(right.projectId)
+    ));
+}
+
+async function openRegisteredProject(projectIdInput) {
+  return projectOpenQueue.run(async () => {
+    const projectId = assertRegisteredProjectId(projectIdInput);
+    const payload = await fetchBridgeJson(
+      `/registered-project/open?projectId=${encodeURIComponent(projectId)}`,
+    );
+    const target = payload.openTarget;
+    if (
+      !target
+      || typeof target !== "object"
+      || target.targetKind !== "working-copy"
+      || target.projectId !== projectId
+      || payload.projectId !== projectId
+      || !/^doc_[a-f0-9]{16,64}$/u.test(String(target.documentId || ""))
+      || !/^work_ver_\d{4,}$/u.test(String(target.workingCopyId || ""))
+      || !/^ver_\d{4,}$/u.test(String(target.versionId || ""))
+      || typeof target.projectRootPath !== "string"
+      || !target.projectRootPath
+      || !/^sha256:[a-f0-9]{64}$/u.test(String(payload.sourceSha256 || ""))
+      || target.sourceSha256 !== payload.sourceSha256
+    ) {
+      throw new ProjectFileError(
+        "REGISTERED_PROJECT_TARGET_INVALID",
+        "项目目录未返回可安全打开的工作文件。",
+      );
+    }
+    const requestedSourcePath = assertHtmlPath(payload.sourcePath, "sourcePath");
+    const targetSourcePath = assertHtmlPath(target.exactSourcePath, "openTarget.exactSourcePath");
+    const [sourcePath, exactTargetPath] = await Promise.all([
+      existingPathIdentity(requestedSourcePath),
+      existingPathIdentity(targetSourcePath),
+    ]);
+    if (sourcePath !== exactTargetPath) {
+      throw new ProjectFileError(
+        "REGISTERED_PROJECT_PATH_MISMATCH",
+        "项目目录目标路径与经过验证的工作文件不一致。",
+      );
+    }
+
+    // The Renderer supplied only projectId.  Re-read the exact source through
+    // the Bridge immediately before Desktop reads bytes, then bind all five
+    // members of the Project/Document/OpenTarget/HTML/Hash tuple before any
+    // Project-state or Session publication can occur.
+    const workspace = await fetchBridgeJson(
+      `/workspace?sourcePath=${encodeURIComponent(sourcePath)}&projectStorageVersion=4.0.0`,
+    );
+    const verifiedTarget = workspace.openTarget;
+    if (
+      workspace.projectId !== projectId
+      || workspace.documentId !== target.documentId
+      || workspace.currentHtmlSha256 !== payload.sourceSha256
+      || !verifiedTarget
+      || verifiedTarget.targetKind !== "working-copy"
+      || verifiedTarget.projectId !== projectId
+      || verifiedTarget.documentId !== target.documentId
+      || verifiedTarget.workingCopyId !== target.workingCopyId
+      || verifiedTarget.versionId !== target.versionId
+      || verifiedTarget.sourceSha256 !== payload.sourceSha256
+      || typeof verifiedTarget.projectRootPath !== "string"
+      || path.resolve(verifiedTarget.projectRootPath) !== path.resolve(target.projectRootPath)
+      || await existingPathIdentity(verifiedTarget.exactSourcePath) !== sourcePath
+    ) {
+      throw new ProjectFileError(
+        "REGISTERED_PROJECT_IDENTITY_MISMATCH",
+        "项目目录在打开前发生变化，当前项目没有切换。",
+      );
+    }
+    const project = await readHtmlProject(sourcePath);
+    if (project.sha256 !== payload.sourceSha256) {
+      throw new ProjectFileError(
+        "REGISTERED_PROJECT_HASH_MISMATCH",
+        "项目 HTML 在读取期间发生变化，当前项目没有切换。",
+      );
+    }
+    const state = await loadProjectState();
+    const recentIdentities = await Promise.all(state.recent.map(async (entry) => ({
+      entry,
+      identity: await existingPathIdentity(entry.path).catch(() => null),
+    })));
+    state.activePath = sourcePath;
+    state.lastManagedActivation = null;
+    state.recent = [
+      {
+        path: sourcePath,
+        name: path.basename(sourcePath),
+        lastOpenedAt: Date.now(),
+      },
+      ...recentIdentities
+        .filter((entry) => entry.identity !== sourcePath)
+        .map((entry) => entry.entry),
+    ].slice(0, MAX_RECENT_PROJECTS);
+    await persistProjectState();
+    return project;
+  });
+}
+
 async function openRecent(filePath) {
   return projectOpenQueue.run(async () => {
     const normalizedPath = assertHtmlPath(filePath);
@@ -1940,6 +2146,14 @@ function registerProjectIpc() {
   ipcMain.handle(PROJECT_CHANNELS.revealVersionFile, trustedProject(revealVersionFile));
   ipcMain.handle(PROJECT_CHANNELS.revealRequestFolder, trustedProject(revealRequestFolder));
   ipcMain.handle(PROJECT_CHANNELS.listRecentProjects, trustedProject(listRecentProjects));
+  ipcMain.handle(
+    PROJECT_CHANNELS.listRegisteredProjects,
+    trustedProject(listRegisteredProjects),
+  );
+  ipcMain.handle(
+    PROJECT_CHANNELS.openRegisteredProject,
+    trustedProject(openRegisteredProject),
+  );
   ipcMain.handle(PROJECT_CHANNELS.openRecent, trustedProject(openRecent));
   ipcMain.handle(PROJECT_CHANNELS.forgetRecent, trustedProject(forgetRecentProject));
   ipcMain.handle(

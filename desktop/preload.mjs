@@ -17,6 +17,8 @@ const channels = Object.freeze({
   revealVersionFile: "html-projects:reveal-version-file",
   revealRequestFolder: "html-projects:reveal-request-folder",
   listRecentProjects: "html-projects:list-recent",
+  listRegisteredProjects: "html-projects:list-registered",
+  openRegisteredProject: "html-projects:open-registered",
   openRecent: "html-projects:open-recent",
   forgetRecent: "html-projects:forget-recent",
   acceptExternalOpen: "html-projects:accept-external-open",
@@ -129,6 +131,11 @@ const projectsApi = Object.freeze({
   revealVersionFile: (payload) => invokeProject(channels.revealVersionFile, payload),
   revealRequestFolder: (payload) => invokeProject(channels.revealRequestFolder, payload),
   listRecentProjects: () => invokeProject(channels.listRecentProjects),
+  listRegisteredProjects: () => invokeProject(channels.listRegisteredProjects),
+  openRegisteredProject: (projectId) => invokeProject(
+    channels.openRegisteredProject,
+    projectId,
+  ),
   openRecent: (sourcePath) => invokeProject(channels.openRecent, sourcePath),
   forgetRecent: (sourcePath) => invokeProject(channels.forgetRecent, sourcePath),
   acceptExternalOpen: (requestId) => invokeProject(

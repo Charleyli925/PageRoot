@@ -82,6 +82,53 @@ test("project-file PR1 import switches to V1 before the queued save and leaves e
   assert.deepEqual(manifest.versions.map((version) => version.versionId), ["ver_0001"]);
 });
 
+test("the Bridge exposes every Registry member and opens one only by projectId", async (t) => {
+  const environment = await createBridgeTestEnvironment(t, {
+    prefix: "pageroot-project-file-catalog-",
+  });
+  const aPath = await environment.createSource("A.html", html("A"));
+  const bPath = await environment.createSource("B.html", html("B"));
+  const bridge = await environment.start({
+    HTML_AI_PROJECT_FILES_ROOT: join(environment.root, "project-files"),
+  });
+
+  const ensure = async (sourcePath) => {
+    const preview = await bridge.requestJson(
+      `/workspace?sourcePath=${encodeURIComponent(sourcePath)}&projectStorageVersion=4.0.0`,
+    );
+    return postJson(bridge, "/project/ensure", {
+      sourcePath,
+      expectedSourceSha256: preview.body.currentHtmlSha256,
+      projectStorageVersion: "4.0.0",
+    });
+  };
+  const [a, b] = await Promise.all([ensure(aPath), ensure(bPath)]);
+  assert.equal(a.response.status, 200, JSON.stringify(a.body));
+  assert.equal(b.response.status, 200, JSON.stringify(b.body));
+
+  const catalog = await bridge.requestJson("/registered-projects");
+  assert.equal(catalog.response.status, 200, JSON.stringify(catalog.body));
+  assert.equal(catalog.body.ok, true);
+  assert.deepEqual(
+    new Set(catalog.body.projects.map((project) => project.projectId)),
+    new Set([a.body.projectId, b.body.projectId]),
+  );
+  assert.equal(catalog.body.projects.every((project) => project.availability === "ready"), true);
+
+  const opened = await bridge.requestJson(
+    `/registered-project/open?projectId=${encodeURIComponent(b.body.projectId)}`,
+  );
+  assert.equal(opened.response.status, 200, JSON.stringify(opened.body));
+  assert.equal(opened.body.projectId, b.body.projectId);
+  assert.equal(opened.body.documentId, b.body.documentId);
+  assert.equal(opened.body.openTarget.workingCopyId, "work_ver_0001");
+  assert.equal(opened.body.sourcePath, b.body.sourcePath);
+  assert.equal(opened.body.sourceSha256, opened.body.openTarget.sourceSha256);
+
+  const invalid = await bridge.requestJson("/registered-project/open?projectId=project_not_valid");
+  assert.equal(invalid.response.status, 400);
+});
+
 test("Bridge migrates an exact legacy V4 Registry before workspace GET and first ensureProject", async (t) => {
   const environment = await createBridgeTestEnvironment(t, {
     prefix: "pageroot-project-file-legacy-v4-bridge-",

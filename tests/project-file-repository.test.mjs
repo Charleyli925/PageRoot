@@ -226,6 +226,59 @@ test("a legacy v4 Runtime without historyActivation opens as null and normalizes
   assert.equal((await json(runtimePath)).historyActivation, null);
 });
 
+test("the Registry alone determines catalog membership and secure project opens", async (t) => {
+  const value = await fixture(t);
+  const a = await importSource(value, "A.html");
+  const b = await importSource(value, "B.html");
+
+  const initial = await value.repository.listRegisteredProjects();
+  assert.deepEqual(
+    new Set(initial.map((row) => row.projectId)),
+    new Set([a.target.projectId, b.target.projectId]),
+  );
+  assert.equal(initial.every((row) => row.availability === "ready"), true);
+
+  const bBeforeRename = initial.find((row) => row.projectId === b.target.projectId);
+  assert.equal(bBeforeRename?.activeWorkingCopyId, "work_ver_0001");
+  assert.equal(bBeforeRename?.currentBasedOnVersionId, "ver_0001");
+  assert.equal(bBeforeRename?.latestOfficialVersionId, "ver_0001");
+
+  const renamedRoot = path.join(value.projects, "B renamed");
+  await rename(b.target.projectRootPath, renamedRoot);
+  const afterRename = await value.repository.listRegisteredProjects();
+  const bAfterRename = afterRename.find((row) => row.projectId === b.target.projectId);
+  assert.equal(bAfterRename?.availability, "ready");
+  assert.equal(bAfterRename?.projectName, "B renamed");
+  assert.equal(bAfterRename?.registeredProjectRootPath, renamedRoot);
+
+  const resolved = await value.repository.resolveRegisteredProjectOpenTarget({
+    projectId: b.target.projectId,
+  });
+  assert.equal(resolved.target.projectId, b.target.projectId);
+  assert.equal(resolved.target.documentId, b.target.documentId);
+  assert.equal(resolved.target.workingCopyId, "work_ver_0001");
+  assert.equal(resolved.target.projectRootPath, renamedRoot);
+  assert.equal(resolved.sourceSha256, resolved.target.sourceSha256);
+
+  const copiedRoot = path.join(value.root, "unregistered copy");
+  await cp(renamedRoot, copiedRoot, { recursive: true });
+  assert.equal((await value.repository.listRegisteredProjects()).length, 2);
+
+  const movedRoot = path.join(value.root, "moved B");
+  await rename(renamedRoot, movedRoot);
+  await symlink(movedRoot, renamedRoot);
+  const unavailable = await value.repository.listRegisteredProjects();
+  const bUnavailable = unavailable.find((row) => row.projectId === b.target.projectId);
+  const aReady = unavailable.find((row) => row.projectId === a.target.projectId);
+  assert.equal(bUnavailable?.availability, "unavailable");
+  assert.equal(aReady?.availability, "ready");
+  await assert.rejects(
+    value.repository.resolveRegisteredProjectOpenTarget({ projectId: b.target.projectId }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && ["REGISTERED_PROJECT_UNAVAILABLE", "PATH_ESCAPES_PROJECT"].includes(error.code),
+  );
+});
+
 test("a Candidate is not a Version until adoption, rejection consumes no ordinal, and promotion is idempotent", async (t) => {
   const value = await fixture(t);
   const imported = await importSource(value);
