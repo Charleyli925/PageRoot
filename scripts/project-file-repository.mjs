@@ -45,8 +45,15 @@ const VERSION_ID = /^ver_\d{4,}$/u;
 const WORKING_COPY_ID = /^work_ver_\d{4,}$/u;
 const SHA256 = /^sha256:[a-f0-9]{64}$/u;
 const SAFE_REQUEST_ID = /^[A-Za-z0-9_-]{1,160}$/u;
+const SAFE_OPERATION_ID = /^[A-Za-z0-9_-]{8,160}$/u;
 const SAVE_RECOVERY_ID = /^save_work_ver_\d{4,}_(?:current|\d+)_[a-f0-9]{32}$/u;
 const MAX_HTML_BYTES = 20 * 1024 * 1024;
+const MAX_PATH_COMPONENT_BYTES = 255;
+const WORKING_COPY_SAVE_STATES = new Set(["saved", "saving", "failed"]);
+const IMPORT_STAGING_WRAPPER_BYTES = Buffer.byteLength(
+  "..pageroot-import-00000000-0000-0000-0000-000000000000",
+  "utf8",
+);
 const FROZEN_REQUEST_RULES = `# PageRoot AI Request Rules
 
 - Read the frozen files in input-manifest.json readOrder before editing.
@@ -262,6 +269,40 @@ function assertPreferredFileStem(value, label = "preferredFileStem") {
   return stem;
 }
 
+function utf8ByteLength(value) {
+  return Buffer.byteLength(String(value || ""), "utf8");
+}
+
+function truncateUtf8(value, maxBytes) {
+  const normalized = String(value || "").normalize("NFC");
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) return "";
+  let result = "";
+  for (const character of normalized) {
+    if (utf8ByteLength(result + character) > maxBytes) break;
+    result += character;
+  }
+  return result.trim();
+}
+
+function filenameWithReservedSuffix(stem, suffix, extension, label, extraReservedBytes = 0) {
+  const safeStem = assertPreferredFileStem(stem, label);
+  const reservedBytes = utf8ByteLength(`${suffix}${extension}`) + extraReservedBytes;
+  if (reservedBytes >= MAX_PATH_COMPONENT_BYTES) {
+    throw new ProjectFileRepositoryError(
+      "PATH_COMPONENT_TOO_LONG",
+      `${label} has no remaining space for its required suffix.`,
+    );
+  }
+  const truncated = truncateUtf8(safeStem, MAX_PATH_COMPONENT_BYTES - reservedBytes);
+  if (!truncated) {
+    throw new ProjectFileRepositoryError(
+      "PATH_COMPONENT_TOO_LONG",
+      `${label} has no remaining UTF-8 filename space.`,
+    );
+  }
+  return `${truncated}${suffix}${extension}`;
+}
+
 function workingCopyOrdinal(value) {
   const id = assertId(value, WORKING_COPY_ID, "workingCopyId");
   return Number.parseInt(id.slice("work_ver_".length), 10);
@@ -295,7 +336,6 @@ function preferredNamingForWorkingCopyPath(relativePath, workingCopyIdValue) {
 }
 
 function visibleFileName(stem, ordinal, extension, allocationOrdinal = 0) {
-  const safeStem = assertPreferredFileStem(stem);
   const safeExtension = HTML_EXTENSIONS.has(String(extension || "").toLowerCase())
     ? String(extension).toLowerCase()
     : null;
@@ -311,7 +351,27 @@ function visibleFileName(stem, ordinal, extension, allocationOrdinal = 0) {
       "The Promotion path allocation is invalid.",
     );
   }
-  return safeStem + ("-V" + ordinal).repeat(allocationOrdinal + 1) + safeExtension;
+  return filenameWithReservedSuffix(
+    stem,
+    ("-V" + ordinal).repeat(allocationOrdinal + 1),
+    safeExtension,
+    "Working Copy filename",
+  );
+}
+
+function projectDirectoryName(stem, ordinal) {
+  const suffix = ordinal === 1 ? "" : ` (${ordinal})`;
+  // Import first creates a hidden sibling staging directory. Reserve the
+  // exact fixed marker (including a UUID) before choosing the eventual
+  // project directory name so a valid UTF-8 source name cannot make staging
+  // fail after the Registry intent is durable.
+  return filenameWithReservedSuffix(
+    stem,
+    suffix,
+    "",
+    "project directory name",
+    IMPORT_STAGING_WRAPPER_BYTES,
+  );
 }
 
 function versionId(ordinal) {
@@ -494,7 +554,15 @@ async function readHtmlFile(filePath, label, options = {}) {
   if (information.size > MAX_HTML_BYTES) {
     throw new ProjectFileRepositoryError("SOURCE_TOO_LARGE", `${label} is too large.`);
   }
+  if (typeof options.beforeRead === "function") {
+    await options.beforeRead({ filePath, information });
+  }
   const buffer = await readFile(filePath);
+  // lstat() and readFile() are separate operations. Check the bytes that were
+  // actually read so a replacement between them cannot bypass the source cap.
+  if (buffer.byteLength > MAX_HTML_BYTES) {
+    throw new ProjectFileRepositoryError("SOURCE_TOO_LARGE", `${label} is too large.`);
+  }
   const html = decodeHtml(buffer, label);
   return {
     buffer,
@@ -984,6 +1052,8 @@ function assertRegistryProjectRecord(projectId, record) {
       "registeredProjectRootPath",
       "rootFileIdentity",
       "updatedAt",
+      "importSourceKey",
+      "importSourceSha256",
     ].includes(key))
     || typeof record.registeredProjectRootPath !== "string"
     || !path.isAbsolute(record.registeredProjectRootPath)
@@ -996,6 +1066,22 @@ function assertRegistryProjectRecord(projectId, record) {
   }
   assertFileIdentity(record.rootFileIdentity, "registered rootFileIdentity");
   assertRegistryTimestamp(record.updatedAt, "registered root updatedAt");
+  if (
+    Object.hasOwn(record, "importSourceKey") !== Object.hasOwn(record, "importSourceSha256")
+    || (
+      Object.hasOwn(record, "importSourceKey")
+      && (
+        !SHA256.test(String(record.importSourceKey || ""))
+        || !SHA256.test(String(record.importSourceSha256 || ""))
+      )
+    )
+  ) {
+    throw new ProjectFileRepositoryError(
+      "INVALID_REGISTRY",
+      "The registered import provenance is invalid.",
+      { projectId },
+    );
+  }
   return record;
 }
 
@@ -1007,6 +1093,8 @@ function assertPendingImportRecord(projectId, record) {
       "documentId",
       "registeredProjectRootPath",
       "createdAt",
+      "importSourceKey",
+      "importSourceSha256",
     ].includes(key))
     || record.projectId !== projectId
     || typeof record.registeredProjectRootPath !== "string"
@@ -1021,6 +1109,22 @@ function assertPendingImportRecord(projectId, record) {
   assertId(record.projectId, PROJECT_ID, "pending import projectId");
   assertId(record.documentId, DOCUMENT_ID, "pending import documentId");
   assertRegistryTimestamp(record.createdAt, "pending import createdAt");
+  if (
+    Object.hasOwn(record, "importSourceKey") !== Object.hasOwn(record, "importSourceSha256")
+    || (
+      Object.hasOwn(record, "importSourceKey")
+      && (
+        !SHA256.test(String(record.importSourceKey || ""))
+        || !SHA256.test(String(record.importSourceSha256 || ""))
+      )
+    )
+  ) {
+    throw new ProjectFileRepositoryError(
+      "INVALID_REGISTRY",
+      "The pending import provenance is invalid.",
+      { projectId },
+    );
+  }
   return record;
 }
 
@@ -1141,6 +1245,61 @@ function assertManifest(manifest, project) {
   return manifest;
 }
 
+function assertHistoryActivation(runtime, project, manifest) {
+  const activation = runtime.historyActivation;
+  if (activation === undefined || activation === null) return null;
+  if (
+    !hasExactKeys(activation, [
+      "activatedWorkingCopyId",
+      "createdAt",
+      "documentId",
+      "operationId",
+      "previousWorkingCopyId",
+      "projectId",
+      "state",
+      "versionId",
+    ])
+    || activation.projectId !== project.projectId
+    || activation.documentId !== project.documentId
+    || !SAFE_OPERATION_ID.test(String(activation.operationId || ""))
+    || !VERSION_ID.test(String(activation.versionId || ""))
+    || !WORKING_COPY_ID.test(String(activation.activatedWorkingCopyId || ""))
+    || (
+      activation.previousWorkingCopyId !== null
+      && !WORKING_COPY_ID.test(String(activation.previousWorkingCopyId || ""))
+    )
+    || !["desktop-pending", "desktop-confirmed"].includes(activation.state)
+    || !activation.createdAt
+    || Number.isNaN(Date.parse(activation.createdAt))
+  ) {
+    throw new ProjectFileRepositoryError(
+      "INVALID_RUNTIME",
+      "historyActivation is inconsistent.",
+    );
+  }
+  const activated = manifest.workingCopies.find(
+    (workingCopy) => workingCopy.workingCopyId === activation.activatedWorkingCopyId,
+  );
+  if (
+    !activated
+    || activated.versionId !== activation.versionId
+    || activated.basedOnVersionId !== activation.versionId
+    || runtime.activeWorkingCopyId !== activation.activatedWorkingCopyId
+    || (
+      activation.previousWorkingCopyId !== null
+      && !manifest.workingCopies.some(
+        (workingCopy) => workingCopy.workingCopyId === activation.previousWorkingCopyId,
+      )
+    )
+  ) {
+    throw new ProjectFileRepositoryError(
+      "INVALID_RUNTIME",
+      "historyActivation no longer matches the active Working Copy.",
+    );
+  }
+  return activation;
+}
+
 function assertRuntime(runtime, project, manifest) {
   if (!isObject(runtime) || runtime.schemaVersion !== PROJECT_FILE_SCHEMA_VERSION) {
     throw new ProjectFileRepositoryError(
@@ -1212,6 +1371,7 @@ function assertRuntime(runtime, project, manifest) {
       throw new ProjectFileRepositoryError("INVALID_RUNTIME", "active Request is inconsistent.");
     }
   }
+  assertHistoryActivation(runtime, project, manifest);
   return runtime;
 }
 
@@ -1231,8 +1391,83 @@ function draftRelativePathFor(workingCopy) {
   return `drafts/${workingCopy.workingCopyId}.json`;
 }
 
-function draftPathForState(paths, workingCopy, state = {}) {
-  const relative = state?.draftRelativePath || draftRelativePathFor(workingCopy);
+function validStateTimestamp(value) {
+  return typeof value === "string" && !Number.isNaN(Date.parse(value));
+}
+
+function assertWorkingCopyState(state, loaded, workingCopy) {
+  const expectedDraftRelativePath = draftRelativePathFor(workingCopy);
+  const validRevision = (value) => Number.isSafeInteger(value) && value >= 0;
+  const basedOnVersion = loaded.manifest.versions.find(
+    (version) => version.versionId === workingCopy.basedOnVersionId,
+  );
+  if (
+    !isObject(state)
+    || state.schemaVersion !== PROJECT_FILE_SCHEMA_VERSION
+    || state.projectId !== loaded.project.projectId
+    || state.documentId !== loaded.project.documentId
+    || state.workingCopyId !== workingCopy.workingCopyId
+    || state.basedOnVersionId !== workingCopy.basedOnVersionId
+    || !basedOnVersion
+    || !SHA256.test(String(state.baseSha256 || ""))
+    || state.baseSha256 !== basedOnVersion.contentSha256
+    || !SHA256.test(String(state.currentSha256 || ""))
+    || typeof state.differsFromBase !== "boolean"
+    || state.differsFromBase !== (state.currentSha256 !== state.baseSha256)
+    || state.draftId !== `draft_${workingCopy.workingCopyId}`
+    || state.draftRelativePath !== expectedDraftRelativePath
+    || (state.draftSha256 !== null && !SHA256.test(String(state.draftSha256 || "")))
+    || !validRevision(state.draftRevision)
+    || !WORKING_COPY_SAVE_STATES.has(state.saveState)
+    || !validRevision(state.lastPersistedRevision)
+    || !validStateTimestamp(state.lastSavedAt)
+    || !validStateTimestamp(state.lastOpenedAt)
+  ) {
+    throw new ProjectFileRepositoryError(
+      "WORKING_COPY_STATE_INVALID",
+      "The Working Copy state does not match its immutable project authority.",
+      { workingCopyId: workingCopy.workingCopyId },
+    );
+  }
+  return state;
+}
+
+function assertWorkingCopyDraft(draft, draftSha256, state, loaded, workingCopy) {
+  const validRevision = (value) => Number.isSafeInteger(value) && value >= 0;
+  if (
+    !isObject(draft)
+    || draft.schemaVersion !== PROJECT_FILE_SCHEMA_VERSION
+    || draft.projectId !== loaded.project.projectId
+    || draft.documentId !== loaded.project.documentId
+    || draft.workingCopyId !== workingCopy.workingCopyId
+    || draft.basedOnVersionId !== workingCopy.basedOnVersionId
+    || !validRevision(draft.draftRevision)
+    || draft.draftRevision !== state.draftRevision
+    || !Array.isArray(draft.comments)
+    || !Array.isArray(draft.changeEvents)
+    || !Array.isArray(draft.deletedCommentIds)
+    || !Array.isArray(draft.appliedOperationIds)
+    || state.draftSha256 === null
+    || state.draftSha256 !== draftSha256
+  ) {
+    throw new ProjectFileRepositoryError(
+      "WORKING_COPY_DRAFT_INVALID",
+      "The Working Copy Draft does not match its durable state.",
+      { workingCopyId: workingCopy.workingCopyId },
+    );
+  }
+  return draft;
+}
+
+function draftPathForState(paths, workingCopy, state) {
+  const relative = state?.draftRelativePath;
+  if (relative !== draftRelativePathFor(workingCopy)) {
+    throw new ProjectFileRepositoryError(
+      "WORKING_COPY_STATE_INVALID",
+      "The Working Copy state points to an unexpected Draft location.",
+      { workingCopyId: workingCopy.workingCopyId },
+    );
+  }
   const resolved = resolveRelative(paths.controlRoot, relative, "draftRelativePath");
   if (!pathInside(paths.draftsRoot, resolved)) {
     throw new ProjectFileRepositoryError(
@@ -1297,6 +1532,18 @@ function requestRootPath(paths, requestId) {
     throw new ProjectFileRepositoryError("INVALID_REQUEST_ID", "requestId is invalid.");
   }
   return path.join(paths.requestsRoot, id);
+}
+
+function cancellationAuthorityPath(paths, requestId, attemptId) {
+  const request = String(requestId || "");
+  const attempt = String(attemptId || "");
+  if (!SAFE_REQUEST_ID.test(request) || !SAFE_REQUEST_ID.test(attempt)) {
+    throw new ProjectFileRepositoryError(
+      "INVALID_REQUEST_ID",
+      "The cancellation authority identity is invalid.",
+    );
+  }
+  return path.join(paths.recoveryRoot, "cancellations", `${request}.${attempt}.json`);
 }
 
 function assertCandidateId(value) {
@@ -1482,6 +1729,36 @@ export class ProjectFileRepository {
 
   async workspace({ sourcePath } = {}) {
     return this.#serial(() => this.#workspace({ sourcePath }));
+  }
+
+  async activateVersionWorkingCopy({
+    target,
+    versionId: requestedVersionId,
+    operationId,
+    expectedActiveWorkingCopyId,
+  } = {}) {
+    return this.#serial(() => this.#activateVersionWorkingCopy({
+      target,
+      requestedVersionId,
+      operationId,
+      expectedActiveWorkingCopyId,
+    }));
+  }
+
+  async confirmVersionWorkingCopyActivation({
+    target,
+    operationId,
+    previousWorkingCopyId,
+    activatedWorkingCopyId,
+    versionId,
+  } = {}) {
+    return this.#serial(() => this.#confirmVersionWorkingCopyActivation({
+      target,
+      operationId,
+      previousWorkingCopyId,
+      activatedWorkingCopyId,
+      versionId,
+    }));
   }
 
   async prepareRequest({
@@ -1893,13 +2170,32 @@ export class ProjectFileRepository {
         projectRootPath: loaded.paths.projectRootPath,
       })
       : null;
-    let draft = workingCopy && state
-      ? await readJsonFile(
+    if (workingCopy) {
+      assertWorkingCopyState(state, loaded, workingCopy);
+    }
+    let draft = null;
+    if (workingCopy && state) {
+      const draftRecord = await readJsonFileWithSha256(
         draftPathForState(loaded.paths, workingCopy, state),
         "Working Copy draft",
         { projectRootPath: loaded.paths.projectRootPath },
-      )
-      : null;
+      );
+      if (draftRecord) {
+        draft = assertWorkingCopyDraft(
+          draftRecord.value,
+          draftRecord.sha256,
+          state,
+          loaded,
+          workingCopy,
+        );
+      } else if (state.draftSha256 !== null) {
+        throw new ProjectFileRepositoryError(
+          "WORKING_COPY_DRAFT_INVALID",
+          "The Working Copy Draft is missing while its durable state references it.",
+          { workingCopyId: workingCopy.workingCopyId },
+        );
+      }
+    }
     const activeRequest = loaded.runtime.activeRequest
       ? await readJsonFile(
         path.join(
@@ -1966,6 +2262,7 @@ export class ProjectFileRepository {
   }
 
   async #reconcileExternalWorkingCopyState({ loaded, workingCopy, state, source }) {
+    assertWorkingCopyState(state, loaded, workingCopy);
     const recordedSha256 = String(state.currentSha256 || "");
     if (recordedSha256 === source.sha256) return { state, recovered: false };
     if (state.saveState !== "saved") {
@@ -2057,6 +2354,7 @@ export class ProjectFileRepository {
       "Working Copy state",
       { projectRootPath: loaded.paths.projectRootPath },
     );
+    assertWorkingCopyState(workingState, loaded, loaded.workingCopy);
     const frozenRequest = {
       ...(isObject(request) ? structuredClone(request) : {}),
       // The V4 protocol keeps the same source-preservation contract as V3.
@@ -2609,7 +2907,7 @@ export class ProjectFileRepository {
         status: "cancelled",
       };
     }
-    if (["cancelled", "rejected", "no-change", "promoted", "error"].includes(record.status)) {
+    if (["rejected", "no-change", "promoted", "error"].includes(record.status)) {
       return {
         requestId,
         attemptId,
@@ -2617,10 +2915,69 @@ export class ProjectFileRepository {
         terminalStatus: record.status,
       };
     }
-    if (record.status !== "processing") {
+    if (!["processing", "cancelled"].includes(record.status)) {
       throw new ProjectFileRepositoryError(
         "INVALID_REQUEST_STATUS",
         "The Request has an unsupported lifecycle state.",
+      );
+    }
+    const authorityPath = cancellationAuthorityPath(loaded.paths, requestId, attemptId);
+    const authority = await readJsonFile(authorityPath, "request cancellation authority", {
+      projectRootPath: loaded.paths.projectRootPath,
+    });
+    const validAuthority = authority
+      && authority.schemaVersion === PROJECT_FILE_SCHEMA_VERSION
+      && authority.kind === "request-cancellation"
+      && authority.projectId === loaded.project.projectId
+      && authority.documentId === loaded.project.documentId
+      && authority.requestId === requestId
+      && authority.attemptId === attemptId
+      && authority.sourceWorkingCopyId === loaded.workingCopy.workingCopyId
+      && authority.expectedSourceSha256 === record.expectedSourceSha256
+      && authority.inputManifestSha256 === record.inputManifestSha256
+      && validStateTimestamp(authority.cancelledAt);
+    const active = loaded.runtime.activeRequest;
+    const activeMatches = active
+      && active.requestId === requestId
+      && active.attemptId === attemptId
+      && active.inputManifestSha256 === record.inputManifestSha256;
+    if (record.status === "cancelled" && !activeMatches) {
+      if (!validAuthority) {
+        throw new ProjectFileRepositoryError(
+          "CANCELLATION_AUTHORITY_MISMATCH",
+          "The Request cancellation is not sealed outside the Agent-writable Request tree.",
+        );
+      }
+      return { requestId, attemptId, status: "already-inactive", terminalStatus: "cancelled" };
+    }
+    if (!activeMatches) {
+      throw new ProjectFileRepositoryError(
+        "REQUEST_RUNTIME_ANCHOR_MISMATCH",
+        "The active Request runtime does not authorize this cancellation.",
+      );
+    }
+    if (!validAuthority) {
+      await ensureProjectDirectory(
+        loaded.paths.projectRootPath,
+        path.dirname(authorityPath),
+        "request cancellation authority directory",
+      );
+      await atomicWriteProjectJson(
+        loaded.paths.projectRootPath,
+        authorityPath,
+        {
+          schemaVersion: PROJECT_FILE_SCHEMA_VERSION,
+          kind: "request-cancellation",
+          projectId: loaded.project.projectId,
+          documentId: loaded.project.documentId,
+          requestId,
+          attemptId,
+          sourceWorkingCopyId: loaded.workingCopy.workingCopyId,
+          expectedSourceSha256: record.expectedSourceSha256,
+          inputManifestSha256: record.inputManifestSha256,
+          cancelledAt: nowIso(this.#clock),
+        },
+        "request cancellation authority",
       );
     }
     record.status = "cancelled";
@@ -2631,7 +2988,7 @@ export class ProjectFileRepository {
       record,
       "request.json",
     );
-    if (loaded.runtime.activeRequest?.requestId === requestId) {
+    if (activeMatches) {
       loaded.runtime.activeRequest = null;
       loaded.runtime.activeCandidateId = null;
       await atomicWriteProjectJson(
@@ -2667,6 +3024,7 @@ export class ProjectFileRepository {
     const state = await readJsonFile(statePath, "Working Copy state", {
       projectRootPath: loaded.paths.projectRootPath,
     });
+    assertWorkingCopyState(state, loaded, loaded.workingCopy);
     const draftPath = draftPathForState(loaded.paths, loaded.workingCopy, state);
     const persisted = await readJsonFile(draftPath, "Working Copy draft", {
       projectRootPath: loaded.paths.projectRootPath,
@@ -2781,6 +3139,205 @@ export class ProjectFileRepository {
       content: candidate.output.html,
       sha256: candidate.output.sha256,
       path: candidate.outputPath,
+    };
+  }
+
+  async #activateVersionWorkingCopy({
+    target,
+    requestedVersionId,
+    operationId: requestedOperationId,
+    expectedActiveWorkingCopyId: requestedExpectedActiveWorkingCopyId,
+  }) {
+    const loaded = await this.#resolveMutationTarget(target);
+    const requested = assertId(requestedVersionId, VERSION_ID, "versionId");
+    const operationId = String(requestedOperationId || "");
+    if (!SAFE_OPERATION_ID.test(operationId)) {
+      throw new ProjectFileRepositoryError(
+        "INVALID_HISTORY_ACTIVATION_OPERATION",
+        "The history Working Copy activation operationId is invalid.",
+      );
+    }
+    const expectedActiveWorkingCopyId = assertId(
+      requestedExpectedActiveWorkingCopyId,
+      WORKING_COPY_ID,
+      "expectedActiveWorkingCopyId",
+    );
+    const version = loaded.manifest.versions.find(
+      (entry) => entry.versionId === requested,
+    );
+    if (!version) {
+      throw new ProjectFileRepositoryError("VERSION_NOT_FOUND", "The requested Version was not found.");
+    }
+    const matches = loaded.manifest.workingCopies.filter((workingCopy) => (
+      workingCopy.versionId === requested
+      && workingCopy.basedOnVersionId === requested
+    ));
+    if (matches.length !== 1) {
+      throw new ProjectFileRepositoryError(
+        "WORKING_COPY_VERSION_MISMATCH",
+        "The requested Version does not have one unambiguous editable Working Copy.",
+        { versionId: requested, workingCopyIds: matches.map((entry) => entry.workingCopyId) },
+      );
+    }
+    const workingCopy = matches[0];
+    const previousWorkingCopyId = loaded.runtime.activeWorkingCopyId;
+    const state = await readJsonFile(
+      workingCopyStatePath(loaded.paths, workingCopy),
+      "Working Copy state",
+      { projectRootPath: loaded.paths.projectRootPath },
+    );
+    assertWorkingCopyState(state, loaded, workingCopy);
+    const snapshot = await readHtmlFile(
+      versionSnapshotPath(loaded.paths, version),
+      "Version snapshot",
+      { projectRootPath: loaded.paths.projectRootPath },
+    );
+    if (snapshot.sha256 !== version.contentSha256) {
+      throw new ProjectFileRepositoryError(
+        "VERSION_SNAPSHOT_HASH_MISMATCH",
+        "The immutable Version snapshot changed and cannot be activated.",
+      );
+    }
+    const exactSourcePath = workingCopySourcePath(loaded.paths, workingCopy);
+    const source = await readHtmlFile(exactSourcePath, "Version Working Copy", {
+      projectRootPath: loaded.paths.projectRootPath,
+    });
+    const reconciled = await this.#reconcileExternalWorkingCopyState({
+      loaded,
+      workingCopy,
+      state,
+      source,
+    });
+    const activationResult = (historyActivation, { activated, replayed }) => ({
+      target: publicOpenTarget({
+        project: loaded.project,
+        projectRootPath: loaded.paths.projectRootPath,
+        targetKind: "working-copy",
+        workingCopy,
+        version,
+        exactSourcePath,
+        sourceSha256: source.sha256,
+      }),
+      workingCopyState: structuredClone(reconciled.state),
+      activated,
+      replayed,
+      previousWorkingCopyId: historyActivation.previousWorkingCopyId,
+      historyActivation: structuredClone(historyActivation),
+    });
+    const existing = loaded.runtime.historyActivation || null;
+    const matchesExisting = (activation, { requireOperationId = false } = {}) => Boolean(
+      activation
+      && (!requireOperationId || activation.operationId === operationId)
+      && activation.projectId === loaded.project.projectId
+      && activation.documentId === loaded.project.documentId
+      && activation.versionId === requested
+      && activation.previousWorkingCopyId === expectedActiveWorkingCopyId
+      && activation.activatedWorkingCopyId === workingCopy.workingCopyId
+    );
+    if (matchesExisting(existing, { requireOperationId: true })) {
+      return activationResult(existing, { activated: false, replayed: true });
+    }
+    // A repeated click after a lost Bridge, Desktop, or confirmation response
+    // resumes the one durable operation. The receipt's original operationId is
+    // returned so Desktop and the confirmation replay against the same key.
+    if (
+      ["desktop-pending", "desktop-confirmed"].includes(existing?.state)
+      && matchesExisting(existing)
+    ) {
+      return activationResult(existing, { activated: false, replayed: true });
+    }
+    if (loaded.runtime.activeRequest) {
+      throw new ProjectFileRepositoryError(
+        "ACTIVE_REQUEST_EXISTS",
+        "A Working Copy cannot change while an AI Request remains active.",
+      );
+    }
+    if (loaded.runtime.activeWorkingCopyId !== expectedActiveWorkingCopyId) {
+      throw new ProjectFileRepositoryError(
+        "HISTORY_ACTIVATION_PREDECESSOR_CONFLICT",
+        "The active Working Copy changed before this history activation could commit.",
+        {
+          expectedActiveWorkingCopyId,
+          activeWorkingCopyId: loaded.runtime.activeWorkingCopyId,
+          versionId: requested,
+        },
+      );
+    }
+    const historyActivation = {
+      operationId,
+      projectId: loaded.project.projectId,
+      documentId: loaded.project.documentId,
+      previousWorkingCopyId,
+      activatedWorkingCopyId: workingCopy.workingCopyId,
+      versionId: requested,
+      state: "desktop-pending",
+      createdAt: nowIso(this.#clock),
+    };
+    loaded.runtime.activeWorkingCopyId = workingCopy.workingCopyId;
+    loaded.runtime.historyActivation = historyActivation;
+    await atomicWriteProjectJson(
+      loaded.paths.projectRootPath,
+      loaded.paths.runtimePath,
+      loaded.runtime,
+      "runtime-state.json",
+    );
+    return activationResult(historyActivation, { activated: true, replayed: false });
+  }
+
+  async #confirmVersionWorkingCopyActivation({
+    target,
+    operationId: requestedOperationId,
+    previousWorkingCopyId: requestedPreviousWorkingCopyId,
+    activatedWorkingCopyId: requestedActivatedWorkingCopyId,
+    versionId: requestedVersionId,
+  }) {
+    const loaded = await this.#resolveMutationTarget(target);
+    const operationId = String(requestedOperationId || "");
+    if (!SAFE_OPERATION_ID.test(operationId)) {
+      throw new ProjectFileRepositoryError(
+        "INVALID_HISTORY_ACTIVATION_OPERATION",
+        "The history Working Copy activation operationId is invalid.",
+      );
+    }
+    const previousWorkingCopyId = requestedPreviousWorkingCopyId === null
+      ? null
+      : assertId(requestedPreviousWorkingCopyId, WORKING_COPY_ID, "previousWorkingCopyId");
+    const activatedWorkingCopyId = assertId(
+      requestedActivatedWorkingCopyId,
+      WORKING_COPY_ID,
+      "activatedWorkingCopyId",
+    );
+    const versionId = assertId(requestedVersionId, VERSION_ID, "versionId");
+    const historyActivation = loaded.runtime.historyActivation || null;
+    if (
+      !historyActivation
+      || historyActivation.operationId !== operationId
+      || historyActivation.projectId !== loaded.project.projectId
+      || historyActivation.documentId !== loaded.project.documentId
+      || historyActivation.previousWorkingCopyId !== previousWorkingCopyId
+      || historyActivation.activatedWorkingCopyId !== activatedWorkingCopyId
+      || historyActivation.versionId !== versionId
+      || loaded.runtime.activeWorkingCopyId !== activatedWorkingCopyId
+    ) {
+      throw new ProjectFileRepositoryError(
+        "HISTORY_ACTIVATION_RECEIPT_MISMATCH",
+        "The history activation confirmation does not match the durable activation receipt.",
+      );
+    }
+    if (historyActivation.state === "desktop-confirmed") {
+      return { historyActivation: structuredClone(historyActivation), confirmed: false };
+    }
+    historyActivation.state = "desktop-confirmed";
+    loaded.runtime.historyActivation = historyActivation;
+    await atomicWriteProjectJson(
+      loaded.paths.projectRootPath,
+      loaded.paths.runtimePath,
+      loaded.runtime,
+      "runtime-state.json",
+    );
+    return {
+      historyActivation: structuredClone(historyActivation),
+      confirmed: true,
     };
   }
 
@@ -2965,7 +3522,14 @@ export class ProjectFileRepository {
     );
   }
 
-  async #preparePendingImport({ projectId, documentId, projectRootPath, createdAt }) {
+  async #preparePendingImport({
+    projectId,
+    documentId,
+    projectRootPath,
+    createdAt,
+    importSourceKey,
+    importSourceSha256,
+  }) {
     const target = await this.#assertRegisteredProjectRootPath(projectRootPath, {
       allowMissing: true,
     });
@@ -2987,6 +3551,8 @@ export class ProjectFileRepository {
       documentId,
       registeredProjectRootPath: target.projectRootPath,
       createdAt,
+      importSourceKey: assertSha256(importSourceKey, "importSourceKey"),
+      importSourceSha256: assertSha256(importSourceSha256, "importSourceSha256"),
     };
     await this.#writeRegistry(registry);
   }
@@ -3049,6 +3615,12 @@ export class ProjectFileRepository {
         registeredProjectRootPath: target.projectRootPath,
         rootFileIdentity,
         updatedAt: nowIso(this.#clock),
+        ...(pending.importSourceKey && pending.importSourceSha256
+          ? {
+            importSourceKey: pending.importSourceKey,
+            importSourceSha256: pending.importSourceSha256,
+          }
+          : {}),
       };
       await this.#writeRegistry(registry);
     }
@@ -3113,6 +3685,59 @@ export class ProjectFileRepository {
     return recovered;
   }
 
+  async #recoveredImportTarget({ importSourceKey, importSourceSha256 }) {
+    const registry = await this.#readRegistry();
+    const matches = Object.entries(registry.projects).filter(([, record]) => (
+      record.importSourceKey === importSourceKey
+      && record.importSourceSha256 === importSourceSha256
+    ));
+    if (matches.length > 1) {
+      throw new ProjectFileRepositoryError(
+        "IMPORT_RECOVERY_AMBIGUOUS",
+        "More than one registered project claims this external import retry.",
+      );
+    }
+    if (matches.length === 0) return null;
+    const [projectId, record] = matches[0];
+    const loaded = await this.#loadRegisteredProject({
+      projectId,
+      declaredProjectRootPath: record.registeredProjectRootPath,
+    });
+    const firstVersion = loaded.manifest.versions.find(
+      (version) => version.versionId === versionId(1),
+    );
+    const firstWorkingCopy = loaded.manifest.workingCopies.find(
+      (workingCopy) => (
+        workingCopy.workingCopyId === workingCopyId(1)
+        && workingCopy.versionId === firstVersion?.versionId
+        && workingCopy.basedOnVersionId === firstVersion?.versionId
+      ),
+    );
+    if (
+      !firstVersion
+      || !firstWorkingCopy
+      || loaded.manifest.latestOfficialVersionId !== firstVersion.versionId
+      || loaded.runtime.activeWorkingCopyId !== firstWorkingCopy.workingCopyId
+    ) return null;
+    const sourcePath = workingCopySourcePath(loaded.paths, firstWorkingCopy);
+    const source = await readHtmlFile(sourcePath, "recovered import Working Copy", {
+      projectRootPath: loaded.paths.projectRootPath,
+    });
+    if (
+      source.sha256 !== importSourceSha256
+      || firstVersion.contentSha256 !== importSourceSha256
+    ) return null;
+    return publicOpenTarget({
+      project: loaded.project,
+      projectRootPath: loaded.paths.projectRootPath,
+      targetKind: "working-copy",
+      workingCopy: firstWorkingCopy,
+      version: firstVersion,
+      exactSourcePath: sourcePath,
+      sourceSha256: source.sha256,
+    });
+  }
+
   async #importExternal({
     sourcePath,
     expectedSourceSha256,
@@ -3124,7 +3749,12 @@ export class ProjectFileRepository {
     htmlExtension(requestedPath);
     const existingTarget = await this.#resolveOpenTarget({ sourcePath: requestedPath });
     if (existingTarget) return { imported: false, target: existingTarget };
-    const source = await readHtmlFile(requestedPath, "external HTML");
+    const source = await readHtmlFile(requestedPath, "external HTML", {
+      beforeRead: ({ filePath, information }) => this.#hit("html-read-after-stat", {
+        filePath,
+        size: information.size,
+      }),
+    });
     if (expectedSourceSha256 && source.sha256 !== assertSha256(expectedSourceSha256, "expectedSourceSha256")) {
       throw new ProjectFileRepositoryError(
         "SOURCE_HASH_CONFLICT",
@@ -3132,6 +3762,12 @@ export class ProjectFileRepository {
         { expectedSourceSha256, actualSourceSha256: source.sha256 },
       );
     }
+    const importSourceKey = sha256(Buffer.from(requestedPath, "utf8"));
+    const recoveredTarget = await this.#recoveredImportTarget({
+      importSourceKey,
+      importSourceSha256: source.sha256,
+    });
+    if (recoveredTarget) return { imported: false, target: recoveredTarget };
     const stem = safeProjectName(requestedPath);
     const extension = htmlExtension(requestedPath);
     const projectId = randomId("project");
@@ -3151,6 +3787,8 @@ export class ProjectFileRepository {
         documentId,
         projectRootPath: allocated.projectRootPath,
         createdAt,
+        importSourceKey,
+        importSourceSha256: source.sha256,
       });
       pendingPrepared = true;
       await this.#hit("import-intent-recorded", {
@@ -3252,6 +3890,7 @@ export class ProjectFileRepository {
         activeWorkingCopyId: firstWorkingCopyId,
         activeRequest: null,
         activeCandidateId: null,
+        historyActivation: null,
       };
       await atomicWriteProjectJson(stagingRoot, paths.projectPath, project, "project.json");
       await atomicWriteProjectJson(stagingRoot, paths.manifestPath, manifest, "manifest.json");
@@ -3327,9 +3966,17 @@ export class ProjectFileRepository {
 
   async #allocateProjectRoot(stem) {
     for (let ordinal = 1; ordinal < 10000; ordinal += 1) {
-      const directoryName = ordinal === 1 ? stem : `${stem} (${ordinal})`;
+      const directoryName = projectDirectoryName(stem, ordinal);
       const candidate = path.join(this.#projectsRoot, directoryName);
-      if (!(await directoryInformation(candidate, "project directory"))) {
+      // Allocation is a collision probe, not a request to trust or inspect an
+      // existing entry. Files, directories and symlinks all reserve the name
+      // and are skipped without turning a harmless placeholder into an unsafe
+      // directory error.
+      const occupied = await lstat(candidate).catch((cause) => {
+        if (cause?.code === "ENOENT") return null;
+        throw cause;
+      });
+      if (!occupied) {
         return { directoryName, projectRootPath: candidate };
       }
     }
@@ -3833,6 +4480,7 @@ export class ProjectFileRepository {
         "The Working Copy state is missing; PageRoot did not modify its HTML.",
       );
     }
+    assertWorkingCopyState(currentState, loaded, loaded.workingCopy);
     const recoveryId = `save_${loaded.workingCopy.workingCopyId}_${revision || "current"}_${randomUUID().replaceAll("-", "")}`;
     const recoveryPaths = saveRecoveryPaths(
       loaded.paths,
@@ -5255,6 +5903,7 @@ export class ProjectFileRepository {
       loaded.runtime.activeWorkingCopyId = committedWorkingCopy.workingCopyId;
       loaded.runtime.activeRequest = null;
       loaded.runtime.activeCandidateId = null;
+      loaded.runtime.historyActivation = null;
       await atomicWriteProjectJson(
         loaded.paths.projectRootPath,
         loaded.paths.runtimePath,
@@ -5347,6 +5996,7 @@ export class ProjectFileRepository {
         "The Working Copy state is missing during save recovery.",
       );
     }
+    assertWorkingCopyState(currentState, loaded, workingCopy);
     const revision = Number.isSafeInteger(Number(transaction.editRevision))
       && Number(transaction.editRevision) >= 0
       ? Number(transaction.editRevision)

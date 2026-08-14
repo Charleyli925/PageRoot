@@ -14,6 +14,7 @@ import { inflateSync } from "node:zlib";
 
 import { expect, test } from "@playwright/test";
 
+import { sha256 } from "../../../scripts/lifecycle-core.mjs";
 import {
   activateNativeEdit,
   caseSelector,
@@ -466,7 +467,27 @@ function rewriteWorkspaceDraftComment(workspace, text, update) {
     update(comment);
     draft.draftRevision = Math.max(0, Number(draft.draftRevision) || 0) + 1;
     draft.updatedAt = new Date().toISOString();
-    writeFileSync(draftPath, `${JSON.stringify(draft, null, 2)}\n`, "utf8");
+    const draftBytes = Buffer.from(`${JSON.stringify(draft, null, 2)}\n`, "utf8");
+    const managedProjectRoot = managedProjectRoots(workspace).find((projectRoot) => (
+      draftPath.startsWith(`${path.join(projectRoot, ".pageroot", "drafts")}${path.sep}`)
+    ));
+    if (managedProjectRoot) {
+      const controlRoot = path.join(managedProjectRoot, ".pageroot");
+      const manifest = JSON.parse(readFileSync(path.join(controlRoot, "manifest.json"), "utf8"));
+      const workingCopy = manifest.workingCopies.find(
+        (entry) => entry.workingCopyId === draft.workingCopyId,
+      );
+      if (!workingCopy?.stateRelativePath) return false;
+      const statePath = path.join(
+        controlRoot,
+        ...String(workingCopy.stateRelativePath).split("/"),
+      );
+      const state = JSON.parse(readFileSync(statePath, "utf8"));
+      state.draftRevision = draft.draftRevision;
+      state.draftSha256 = sha256(draftBytes);
+      writeFileSync(statePath, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+    }
+    writeFileSync(draftPath, draftBytes);
     return true;
   }
   return false;

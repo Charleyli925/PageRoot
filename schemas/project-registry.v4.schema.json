@@ -13,6 +13,10 @@
         "type": "object",
         "additionalProperties": false,
         "required": ["registeredProjectRootPath", "rootFileIdentity", "updatedAt"],
+        "dependentRequired": {
+          "importSourceKey": ["importSourceSha256"],
+          "importSourceSha256": ["importSourceKey"]
+        },
         "properties": {
           "registeredProjectRootPath": { "type": "string", "pattern": "^(?:/|[A-Za-z]:[\\\\/])" },
           "rootFileIdentity": {
@@ -25,7 +29,9 @@
               "birthtimeMs": { "type": "number", "minimum": 0 }
             }
           },
-          "updatedAt": { "type": "string", "format": "date-time" }
+          "updatedAt": { "type": "string", "format": "date-time" },
+          "importSourceKey": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+          "importSourceSha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }
         }
       },
       "propertyNames": { "pattern": "^project_[a-f0-9]{16,64}$" }
@@ -36,11 +42,17 @@
         "type": "object",
         "additionalProperties": false,
         "required": ["projectId", "documentId", "registeredProjectRootPath", "createdAt"],
+        "dependentRequired": {
+          "importSourceKey": ["importSourceSha256"],
+          "importSourceSha256": ["importSourceKey"]
+        },
         "properties": {
           "projectId": { "type": "string", "pattern": "^project_[a-f0-9]{16,64}$" },
           "documentId": { "type": "string", "pattern": "^doc_[a-f0-9]{16,64}$" },
           "registeredProjectRootPath": { "type": "string", "pattern": "^(?:/|[A-Za-z]:[\\\\/])" },
-          "createdAt": { "type": "string", "format": "date-time" }
+          "createdAt": { "type": "string", "format": "date-time" },
+          "importSourceKey": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+          "importSourceSha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }
         }
       },
       "propertyNames": { "pattern": "^project_[a-f0-9]{16,64}$" }

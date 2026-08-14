@@ -72,6 +72,7 @@ export type DesktopProjectsApi = {
     workingCopyId: string;
     versionId: string;
     projectRootPath: string;
+    operationId?: string;
   }) => Promise<HtmlProject & {
     previousSourcePath: string;
   }>;

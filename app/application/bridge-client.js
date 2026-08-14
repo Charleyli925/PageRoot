@@ -259,6 +259,18 @@ export function createBridgeClient({
       "最新版暂时无法打开。",
       DEFAULT_REQUEST_TIMEOUT_MS,
     ),
+    continueEditingHistoryVersion: (body) => command(
+      "/history-version/continue",
+      body,
+      "暂时无法基于这份历史版本继续编辑。",
+      DEFAULT_REQUEST_TIMEOUT_MS,
+    ),
+    confirmEditingHistoryVersion: (body) => command(
+      "/history-version/desktop-confirmed",
+      body,
+      "历史工作文件桌面激活确认暂时没有响应。",
+      DEFAULT_REQUEST_TIMEOUT_MS,
+    ),
     cancelActiveRun: (body) => command(
       "/active-run/cancel",
       body,

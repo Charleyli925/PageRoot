@@ -664,16 +664,113 @@ async function validateRegistryAuthority({
     );
   }
   const observedIdentity = copyFileIdentity(rootInformation);
-  if (!sameFileIdentity(record.rootFileIdentity, observedIdentity)) {
-    // Returning a verified project to its exact registered path may change
-    // device/inode after a cross-volume move. The finalizer never follows a
-    // moved path; it only refreshes this rename clue after IDs are verified.
-    record.rootFileIdentity = observedIdentity;
-    record.updatedAt = new Date().toISOString();
-    registry.updatedAt = record.updatedAt;
-    await atomicWriteJson(expectedRegistryPath, registry);
+  // A finalizer may repair the root inode clue after a verified return to the
+  // exact registered path, but that write must happen only after every
+  // Request, frozen-input, Candidate and completion validation has passed.
+  // Keep this phase read-only so malformed Agent output never changes Registry
+  // authority as a side effect of being inspected.
+  return {
+    configuredRoot,
+    registryPath: expectedRegistryPath,
+    projectRoot,
+    projectId: identity.projectId,
+    registeredRootFileIdentity: record.rootFileIdentity,
+    observedRootFileIdentity: observedIdentity,
+  };
+}
+
+async function refreshRegistryAuthority(authority) {
+  if (sameFileIdentity(
+    authority.registeredRootFileIdentity,
+    authority.observedRootFileIdentity,
+  )) return;
+  const rootInformation = await regularDirectory(authority.projectRoot, "project root", {
+    projectRoot: authority.configuredRoot,
+  });
+  const observed = copyFileIdentity(rootInformation);
+  if (!sameFileIdentity(observed, authority.observedRootFileIdentity)) {
+    throw new ProjectFileFinalizerError(
+      "REGISTERED_PROJECT_RACE",
+      "The project root changed while finalization was being verified.",
+    );
   }
-  return { configuredRoot, registryPath: expectedRegistryPath };
+  const registry = await readJson(authority.registryPath, "project Registry", {
+    projectRoot: authority.configuredRoot,
+  });
+  const record = registry?.projects?.[authority.projectId];
+  if (
+    registry?.schemaVersion !== PROJECT_FILE_SCHEMA_VERSION
+    || !registry?.projects
+    || !registry?.pendingImports
+    || !record
+    || !samePath(record.registeredProjectRootPath, authority.projectRoot)
+    || !validFileIdentity(record.rootFileIdentity)
+  ) {
+    throw new ProjectFileFinalizerError(
+      "REGISTERED_PROJECT_UNAVAILABLE",
+      "The project Registry changed while finalization was being completed.",
+    );
+  }
+  if (sameFileIdentity(record.rootFileIdentity, observed)) return;
+  if (!sameFileIdentity(record.rootFileIdentity, authority.registeredRootFileIdentity)) {
+    throw new ProjectFileFinalizerError(
+      "REGISTERED_PROJECT_RACE",
+      "The Registry root authority changed while finalization was being completed.",
+    );
+  }
+  const refreshedAt = new Date().toISOString();
+  record.rootFileIdentity = observed;
+  record.updatedAt = refreshedAt;
+  registry.updatedAt = refreshedAt;
+  await atomicWriteJson(authority.registryPath, registry);
+}
+
+async function assertCancellationAuthority({
+  projectRoot,
+  controlRoot,
+  identity,
+  record,
+  requestId,
+  attemptId,
+}) {
+  const authorityPath = path.join(
+    controlRoot,
+    "recovery",
+    "cancellations",
+    `${requestId}.${attemptId}.json`,
+  );
+  let authority;
+  try {
+    authority = await readJson(authorityPath, "request cancellation authority", {
+      projectRoot,
+    });
+  } catch (cause) {
+    if (cause instanceof ProjectFileFinalizerError && cause.code === "FILE_NOT_FOUND") {
+      throw new ProjectFileFinalizerError(
+        "CANCELLATION_AUTHORITY_MISMATCH",
+        "The cancelled Request has no trusted cancellation authority outside its Request tree.",
+      );
+    }
+    throw cause;
+  }
+  if (
+    authority.schemaVersion !== PROJECT_FILE_SCHEMA_VERSION
+    || authority.kind !== "request-cancellation"
+    || authority.projectId !== identity.projectId
+    || authority.documentId !== identity.documentId
+    || authority.requestId !== requestId
+    || authority.attemptId !== attemptId
+    || authority.sourceWorkingCopyId !== record.sourceWorkingCopyId
+    || authority.expectedSourceSha256 !== record.expectedSourceSha256
+    || authority.inputManifestSha256 !== record.inputManifestSha256
+    || typeof authority.cancelledAt !== "string"
+    || Number.isNaN(Date.parse(authority.cancelledAt))
+  ) {
+    throw new ProjectFileFinalizerError(
+      "CANCELLATION_AUTHORITY_MISMATCH",
+      "The cancelled Request does not match its trusted cancellation authority.",
+    );
+  }
 }
 
 export async function finalizeProjectFileAttempt({
@@ -682,6 +779,7 @@ export async function finalizeProjectFileAttempt({
   registryPath = null,
   requestId,
   attemptId = "attempt_001",
+  testHooks = null,
 } = {}) {
   const root = normalizedPath(projectRoot);
   const request = safeId(requestId, "requestId");
@@ -698,7 +796,7 @@ export async function finalizeProjectFileAttempt({
       "project.json is not a supported PageRoot project-file identity.",
     );
   }
-  await validateRegistryAuthority({
+  const registryAuthority = await validateRegistryAuthority({
     projectRoot: root,
     projectsRoot,
     registryPath,
@@ -725,6 +823,14 @@ export async function finalizeProjectFileAttempt({
   // able to acknowledge it without creating completion evidence or trying to
   // re-establish the now-cleared active Request runtime anchor.
   if (record.status === "cancelled") {
+    await assertCancellationAuthority({
+      projectRoot: root,
+      controlRoot,
+      identity,
+      record,
+      requestId: request,
+      attemptId: attempt,
+    });
     return {
       ok: true,
       status: "cancelled",
@@ -767,7 +873,13 @@ export async function finalizeProjectFileAttempt({
   if (outputInfo.size > MAX_HTML_BYTES) {
     throw new ProjectFileFinalizerError("OUTPUT_TOO_LARGE", "Candidate output is too large.");
   }
+  if (typeof testHooks?.afterCandidateOutputStat === "function") {
+    await testHooks.afterCandidateOutputStat({ outputPath, outputInfo });
+  }
   const output = await readFile(outputPath);
+  if (output.byteLength > MAX_HTML_BYTES) {
+    throw new ProjectFileFinalizerError("OUTPUT_TOO_LARGE", "Candidate output is too large.");
+  }
   let html;
   try {
     html = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(output);
@@ -803,6 +915,7 @@ export async function finalizeProjectFileAttempt({
     completedAt: new Date().toISOString(),
   };
   const completionPath = path.join(requestRoot, "attempts", attempt, "completion.json");
+  let existingCompletion = null;
   try {
     const existing = await readJson(completionPath, "completion.json", { projectRoot: root });
     if (
@@ -818,7 +931,7 @@ export async function finalizeProjectFileAttempt({
         "A different completion is already recorded for this Attempt.",
       );
     }
-    return { ok: true, replayed: true, ...existing };
+    existingCompletion = existing;
   } catch (cause) {
     if (!(cause instanceof ProjectFileFinalizerError) || cause.code !== "FILE_NOT_FOUND") {
       throw cause;
@@ -827,6 +940,8 @@ export async function finalizeProjectFileAttempt({
   await assertRealPathInsideProject(root, completionPath, "completion.json", {
     allowMissing: true,
   });
+  await refreshRegistryAuthority(registryAuthority);
+  if (existingCompletion) return { ok: true, replayed: true, ...existingCompletion };
   await atomicWriteJson(completionPath, completion);
   return { ok: true, replayed: false, ...completion };
 }
