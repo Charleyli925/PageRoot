@@ -180,6 +180,7 @@ import {
 } from "./workbench/workbench-header-shell";
 import {
   activeRunOperationKey,
+  currentWorkingCopyPresentation,
   fileExtension,
   fileStem,
   folderFromSourcePath,
@@ -5775,6 +5776,22 @@ export default function Workbench() {
   const currentWorkingCopy = versions.find(
     (version) => version.id === currentBasedOnVersionId,
   ) || null;
+  const currentWorkingCopyStatus = currentWorkingCopy
+    ? currentWorkingCopyPresentation({
+      currentBasedOnVersionId,
+      currentExactVersionId,
+      persistState,
+      persistedDiffersFromBase: currentWorkingCopy.differsFromBase === true,
+      persistedSaveState: currentWorkingCopy.saveState,
+    })
+    : null;
+  const displayedVersions = currentWorkingCopy && currentWorkingCopyStatus
+    ? versions.map((version) => (
+      version.id === currentWorkingCopy.id
+        ? { ...version, ...currentWorkingCopyStatus }
+        : version
+    ))
+    : versions;
   const projectStatus = projectStatusProjection({
     currentBasedOnVersionId,
     currentExactVersionId,
@@ -5782,7 +5799,7 @@ export default function Workbench() {
     viewMode,
     viewingVersionId,
     persistState,
-    hasLocalModifications: currentWorkingCopy?.differsFromBase === true,
+    hasLocalModifications: currentWorkingCopyStatus?.differsFromBase === true,
     candidate: activeRun
       ? {
         versionId: activeRun.candidateVersionId || null,
@@ -5799,6 +5816,13 @@ export default function Workbench() {
     sourcePath
     && typeof window !== "undefined"
     && window.htmlAIProjects?.showInFolder,
+  );
+  const canRevealAiTask = Boolean(
+    activeRun
+    && activeRun.requestId !== "pending"
+    && activeRun.requestPath
+    && typeof window !== "undefined"
+    && window.htmlAIProjects?.revealAiTask,
   );
   const canOpenProjectRootInFolder = Boolean(
     projectRecordsPath
@@ -6356,12 +6380,7 @@ export default function Workbench() {
           reviewed: true,
         });
       }}
-      onRevealCandidateHtml={() => {
-        const candidateVersionId = activeRun?.candidateVersionId;
-        if (candidateVersionId) {
-          void revealVersionInFinder({ id: candidateVersionId });
-        }
-      }}
+      onRevealAiTask={() => void revealAiTaskInFinder()}
     />
   ) : null;
 
@@ -7785,7 +7804,7 @@ export default function Workbench() {
                 <div className="drawer-empty">首次编辑或发送给 AI 后，会建立版本 1。</div>
               ) : (
                 <div className="version-list">
-                  {versions.map((version) => (
+                  {displayedVersions.map((version) => (
                     <HistoryVersionItem
                       key={version.id}
                       version={version}
@@ -8240,10 +8259,7 @@ export default function Workbench() {
               runBasisLabel={runBasisLabel}
               runSubmittedLabel={runSubmittedLabel}
               pendingRunOutcome={pendingRunOutcome}
-              canRevealAiTask={Boolean(
-                typeof window !== "undefined"
-                && window.htmlAIProjects?.revealAiTask,
-              )}
+              canRevealAiTask={canRevealAiTask}
               onRevealAiTask={() => void revealAiTaskInFinder()}
             />
           ) : null}
@@ -8261,10 +8277,7 @@ export default function Workbench() {
             resolvingConflict={resolvingConflict}
             checkingRun={checkingRun}
             terminalRun={terminalRun}
-            canRevealAiTask={Boolean(
-              typeof window !== "undefined"
-              && window.htmlAIProjects?.revealAiTask,
-            )}
+            canRevealAiTask={canRevealAiTask}
             onReviewReadyResult={() => void reviewReadyResult()}
             onActivateReadyResult={() => void activateReadyResult()}
             onSend={() => {

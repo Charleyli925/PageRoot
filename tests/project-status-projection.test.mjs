@@ -20,7 +20,10 @@ async function loadProjection() {
   );
 }
 
-const { projectStatusProjection } = await loadProjection();
+const {
+  currentWorkingCopyPresentation,
+  projectStatusProjection,
+} = await loadProjection();
 
 function projection(input) {
   return projectStatusProjection({
@@ -88,4 +91,39 @@ test("history projection never changes the current editing basis", () => {
 
   assert.deepEqual(result.facts, ["正在查看 V2", "只读浏览"]);
   assert.equal(result.label, "正在查看 V2 · 只读浏览");
+});
+
+test("current Working Copy presentation follows the live autosave authority", () => {
+  assert.deepEqual(
+    currentWorkingCopyPresentation({
+      currentBasedOnVersionId: "ver_0002",
+      currentExactVersionId: null,
+      persistState: "idle",
+      persistedDiffersFromBase: false,
+      persistedSaveState: "saved",
+    }),
+    { differsFromBase: true, saveState: "saved" },
+  );
+
+  assert.deepEqual(
+    currentWorkingCopyPresentation({
+      currentBasedOnVersionId: "ver_0002",
+      currentExactVersionId: null,
+      persistState: "queued",
+      persistedDiffersFromBase: false,
+      persistedSaveState: "saved",
+    }),
+    { differsFromBase: false, saveState: "saving" },
+  );
+
+  assert.deepEqual(
+    currentWorkingCopyPresentation({
+      currentBasedOnVersionId: "ver_0002",
+      currentExactVersionId: "ver_0002",
+      persistState: "idle",
+      persistedDiffersFromBase: true,
+      persistedSaveState: "saved",
+    }),
+    { differsFromBase: false, saveState: "saved" },
+  );
 });

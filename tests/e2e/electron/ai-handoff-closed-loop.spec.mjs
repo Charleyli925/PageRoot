@@ -6,6 +6,7 @@ import {
   readFileSync,
   realpathSync,
   readdirSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -3776,9 +3777,19 @@ test("returning from review restores the editable pre-AI version and preserves t
       .toBeVisible();
     await expect(dialog.getByText(/将继续使用 版本 \d+（AI 修改前）为基线重新修改。/u))
       .toBeVisible();
-    await expect(dialog.getByRole("button", {
-      name: "AI 返回的 HTML 已自动保留，点击在 Finder 中显示。",
-    })).toBeVisible();
+    const projectRoot = managedProjectRootForId(
+      launched.workspace,
+      request.changeRequest.projectId,
+    );
+    expect(projectRoot).toBeTruthy();
+    const aiTasksRoot = path.join(projectRoot, "AI任务");
+    rmSync(aiTasksRoot, { recursive: true, force: true });
+    const revealCandidateTask = dialog.getByRole("button", {
+      name: "AI 返回的 HTML 已自动保留，点击在 Finder 中查看 AI任务。",
+    });
+    await expect(revealCandidateTask).toBeVisible();
+    await revealCandidateTask.click();
+    await expect.poll(() => existsSync(aiTasksRoot), { timeout: 30_000 }).toBe(true);
     const [returnBackground, continueBackground] = await Promise.all([
       dialog.getByRole("button", { name: "返回修改前版本" })
         .evaluate((element) => getComputedStyle(element).backgroundColor),
@@ -3800,11 +3811,6 @@ test("returning from review restores the editable pre-AI version and preserves t
       () => window.htmlAIProjects?.getActiveProject(),
     );
     expect(restored.sourcePath).toBe(realpathSync(workingCopyPath));
-    const projectRoot = managedProjectRootForId(
-      launched.workspace,
-      request.changeRequest.projectId,
-    );
-    expect(projectRoot).toBeTruthy();
     const runtime = JSON.parse(readFileSync(path.join(
       projectRoot,
       ".pageroot",

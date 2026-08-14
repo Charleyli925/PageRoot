@@ -165,6 +165,46 @@ export type ProjectStatusProjection = Readonly<{
   label: string;
 }>;
 
+export type CurrentWorkingCopyPresentation = Readonly<{
+  differsFromBase: boolean;
+  saveState: "saved" | "saving" | "failed" | null;
+}>;
+
+/**
+ * Version rows are hydrated snapshots, but the current Working Copy's exact
+ * Version identity is live authority owned by DocumentWorkflow. Keep the row
+ * in step with a completed autosave instead of waiting for the next workspace
+ * hydration to report that its bytes diverge from the base Version.
+ */
+export function currentWorkingCopyPresentation({
+  currentBasedOnVersionId,
+  currentExactVersionId,
+  persistState,
+  persistedDiffersFromBase,
+  persistedSaveState,
+}: {
+  currentBasedOnVersionId: string | null;
+  currentExactVersionId: string | null;
+  persistState: ProjectStatusProjectionInput["persistState"];
+  persistedDiffersFromBase: boolean;
+  persistedSaveState: "saved" | "saving" | "failed" | null | undefined;
+}): CurrentWorkingCopyPresentation {
+  const saveState = persistState === "writing" || persistState === "queued"
+    ? "saving"
+    : persistState === "failed" || persistState === "conflict"
+      ? "failed"
+      : persistedSaveState || null;
+  const differsFromBase = currentExactVersionId
+    ? false
+    : persistState === "idle" && currentBasedOnVersionId
+      ? true
+      : persistedDiffersFromBase;
+  return Object.freeze({
+    differsFromBase,
+    saveState,
+  });
+}
+
 function compactStatusVersionLabel(versionId: string): string {
   const match = versionId.match(/(\d+)$/);
   return match ? `V${Number(match[1])}` : versionId;
