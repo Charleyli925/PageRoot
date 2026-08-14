@@ -282,65 +282,11 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
-  # Builds the Electron renderer exactly once per candidate run. Both macOS
-  # lanes download these bytes instead of rebuilding them, so a single build
-  # serves the native and AI suites and one preflight proves hosted-renderer
-  # scheduling for both.
-  electron-renderer:
-    name: electron-renderer
-    if: github.event_name == 'pull_request'
-    needs:
-      - baseline-policy
-    runs-on: macos-14
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 22.13.0
-          cache: npm
-      - name: Restore Electron download cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/Library/Caches/electron
-            ~/Library/Caches/electron-builder
-          key: ${{ runner.os }}-electron-${{ hashFiles('package-lock.json') }}
-      - run: npm ci
-      - name: Build Electron renderer on the target OS
-        run: >-
-          node scripts/ci-evidence.mjs run
-          --suite electron-renderer
-          --stage source-build
-          --
-          npm run desktop:renderer
-      - name: Upload shared Electron renderer
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: PageRoot-electron-renderer-${{ github.run_id }}
-          path: |
-            dist-desktop
-            package.json
-          if-no-files-found: error
-          retention-days: 30
-          overwrite: true
-      - name: Upload Electron renderer evidence
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: PageRoot-electron-renderer-evidence-${{ github.run_id }}-${{ github.run_attempt }}
-          path: output/ci-evidence
-          if-no-files-found: warn
-          retention-days: 30
-
   source-electron-native:
     name: electron-native
     if: github.event_name == 'pull_request'
     needs:
       - baseline-policy
-      - electron-renderer
     runs-on: macos-14
     timeout-minutes: 45
     steps:
@@ -359,11 +305,6 @@ jobs:
             ~/Library/Caches/electron-builder
           key: ${{ runner.os }}-electron-${{ hashFiles('package-lock.json') }}
       - run: npm ci
-      - name: Download shared Electron renderer
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: PageRoot-electron-renderer-${{ github.run_id }}
-          path: .
       - name: Prove hosted renderer scheduling before product tests
         run: >-
           node scripts/ci-evidence.mjs run
@@ -371,6 +312,13 @@ jobs:
           --stage environment-preflight
           --
           npm run test:electron:ci-preflight:prepared
+      - name: Build Electron renderer on the target OS
+        run: >-
+          node scripts/ci-evidence.mjs run
+          --suite electron-native-renderer
+          --stage source-build
+          --
+          npm run desktop:renderer
       - name: Run native Electron suite
         run: >-
           node scripts/ci-evidence.mjs run
@@ -378,8 +326,19 @@ jobs:
           --stage source-test
           --
           npm run test:electron:full:prepared
-      - name: Upload native Electron failure diagnostics
-        if: failure()
+      - name: Record Playwright retry evidence
+        # Runs even after a failed suite so the flaky/retry counts and the
+        # first attempt's artifacts are never lost with the runner.
+        if: always()
+        run: >-
+          node scripts/playwright-flaky-summary.mjs
+          --report output/playwright/native-dom-electron/results.json
+          --suite electron-native
+      - name: Upload native Electron diagnostics and retry evidence
+        # Always uploaded so a retry-succeeded run still preserves the first
+        # attempt's trace, video and screenshot instead of discarding them
+        # with the runner.
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: PageRoot-electron-native-diagnostics-${{ github.run_attempt }}
@@ -400,7 +359,6 @@ jobs:
     if: github.event_name == 'pull_request'
     needs:
       - baseline-policy
-      - electron-renderer
     runs-on: macos-14
     timeout-minutes: 45
     steps:
@@ -419,11 +377,20 @@ jobs:
             ~/Library/Caches/electron-builder
           key: ${{ runner.os }}-electron-${{ hashFiles('package-lock.json') }}
       - run: npm ci
-      - name: Download shared Electron renderer
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: PageRoot-electron-renderer-${{ github.run_id }}
-          path: .
+      - name: Prove hosted renderer scheduling before AI tests
+        run: >-
+          node scripts/ci-evidence.mjs run
+          --suite electron-ai-preflight
+          --stage environment-preflight
+          --
+          npm run test:electron:ci-preflight:prepared
+      - name: Build Electron renderer on the target OS
+        run: >-
+          node scripts/ci-evidence.mjs run
+          --suite electron-ai-renderer
+          --stage source-build
+          --
+          npm run desktop:renderer
       - name: Run deterministic AI closed-loop suite
         run: >-
           node scripts/ci-evidence.mjs run

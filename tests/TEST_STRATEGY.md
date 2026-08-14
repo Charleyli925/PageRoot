@@ -8,8 +8,8 @@
 |---|---|---|---|
 | `npm run gate:edit` | 一次局部修改后 | 只运行影响映射命中的 Node 文件；必要时 typecheck | 快速发现局部逻辑错误，不启动浏览器或 Electron |
 | `npm run gate:task` | 一个开发任务完成时 | 静态检查、受影响 Node 文件，以及相关 Browser/Electron/AI 冒烟 | 在较短时间内证明生产链路已经接通 |
-| PR `pr-feedback` | `opened/synchronize/reopened` | 按影响映射选择 Node/编译检查；并行跑非阻断 `review-advisory`，用与 `review-policy` 相同的证据合同评估 live pair | 普通推送无论 Draft/Ready 都不重复消费完整矩阵；Draft 阶段的 Codex P0/P1 在晋升前就可见；仅切回 Draft 不产生 Feedback |
-| `review-policy` | 最终 Tree 从 Draft 转为 Ready，由 Ready 唯一触发最终审阅 | 实时 head/base、冻结 base commit 之后提交的 exact-commit Codex review（Draft 期评审同样有效）、不可变 clean comment、Ready 后的 Codex Bot root `+1`、30 秒 settle window、活动非 outdated P0/P1 线程和 P0/P1 `CHANGES_REQUESTED` | 旧 head/base、早于冻结 base commit 的 review、旧轮次/真人/非 `+1` 或 Ready 前 reaction、未结束 review、P0/P1 阻断时不能通过；P2/P3/unclassified 写为债务而不阻断 |
+| PR `pr-feedback` | `opened/synchronize/reopened` | 按影响映射选择 Node/编译检查；并行跑非阻断 `review-advisory`，用与 `review-policy` 相同的证据合同对 live pair 做一次快照评估 | 普通推送无论 Draft/Ready 都不重复消费完整矩阵；当前活动的 Codex P0/P1 在晋升前就可见；仅切回 Draft 不产生 Feedback |
+| `review-policy` | 最终 Tree 从 Draft 转为 Ready，由 Ready 唯一触发最终审阅 | 实时 head/base、Ready 后提交的 exact-commit Codex review、不可变 clean comment、Ready 后的 Codex Bot root `+1`、30 秒 settle window、活动非 outdated P0/P1 线程和 P0/P1 `CHANGES_REQUESTED` | 旧 head/base、Ready 前信号、旧轮次/真人/非 `+1` reaction、未结束 review、P0/P1 阻断时不能通过；P2/P3/unclassified 写为债务而不阻断 |
 | `Review Gate Recovery` | Codex 精确提交的 review/clean comment 在 `review-policy` 超时后到达 | trusted default-branch code 重验 live Ready head/base、当前 review policy、原 run timeout artifact、所有非 review job 结果 | 仅对原 run 调用 failed-job rerun；测试失败、P0/P1、Draft/closed、SHA/base 改变或 artifact 不符全部 fail closed |
 | `baseline-policy` | 分支策略通过，与 review-policy 并行 | 全局依赖 advisory policy 与 packaged-runtime closure | 基线红时不启动 Linux build、Browser 或 macOS Electron runner |
 | 一次性晋升 `release-gate` | review、baseline、完整测试和相关 dry run 都完成的最终 PR Tree | 全量 Node、三分片完整 Browser、独立 Native Electron、独立确定性 AI 闭环、真实 HTML 发现式门禁、即时 review revalidation 与 Tree Hash 凭证 | 每个最终候选只跑一次；后续新 SHA 必须重新 Draft 后 Ready |
@@ -36,21 +36,20 @@ Tree，不在测试执行期间自动合并分支。组合 Tree 含任何未合�
 
 PR 必须从 Draft 开始。普通推送由独立的 `PR Feedback` workflow 处理，
 不会创建名为 `release-gate` 的跳过 job；因此分支保护不会把轻量反馈误当
-完整通过。同一 workflow 的 `review-advisory` job 以相同证据合同非阻断地
-评估 live pair，把 Draft 阶段的 P0/P1 暴露在晋升之前。只切回 Draft 不触发
+完整通过。同一 workflow 的 `review-advisory` job 以相同证据合同对 live pair
+做一次非阻断快照，把当前活动的 P0/P1 暴露在晋升之前；Codex 只在 Ready
+转换后才评审，Draft 期轮询不可能观察到新评审，因此 advisory 是快照语义，
+`review-policy` 才是权威等待。只切回 Draft 不触发
 Feedback。冻结 head 并更新到当前 base 后，直接 Ready 一次；无需再用完整
 head/base SHA marker 在 Draft 请求第二轮审阅。
-`review-policy` 接受携带当前完整 `commit_id` 和匹配
-`Reviewed commit` marker、且提交时间晚于冻结 base commit 的 Codex review
-（Draft 期的同 head 评审同样有效；拿不到 base commit 日期时回退为只接受
-Ready 后证据）、不可编辑的 exact-commit clean
+`review-policy` 只接受 Ready 后携带当前完整 `commit_id` 和匹配
+`Reviewed commit` marker 的 Codex review、不可编辑的 exact-commit clean
 Codex comment，或最新 Ready 后由 `chatgpt-codex-connector[bot]` 加在 PR 根节点的
 `+1`。reaction 没有 SHA 字段，因此只通过最新 Ready 与持续重验的冻结 head/base
 绑定候选；旧轮次、真人和其他 reaction 都忽略。它在每轮轮询中重验 live head/base，完成后等待 30 秒，再检查
 未解决且未 outdated 的 P0/P1 线程。只有明确标为 P0/P1 的 `CHANGES_REQUESTED` 必须阻断；
 P2/P3/unclassified finding 则写入 review debt，不应为了清理它们额外生成
-候选 SHA。空 review、错误 commit、普通讨论文本和早于冻结 base commit 的
-信号不参与判定。
+候选 SHA。空 review、错误 commit、普通讨论文本和早于 Ready 的信号不参与判定。
 若唯一失败是 `review_wait_timed_out` 与其下游 `release-gate`，晚到的 Codex
 事件会触发恢复工作流；恢复器必须读取原 attempt 的 review-policy artifact，
 确认当前 pair/Ready 未变、live policy 已通过、11 个必需 non-review job 全绿且
@@ -65,12 +64,15 @@ dry run 成功、针对 source-only 允许 dry run 跳过，随后即时重验 r
 PR 批量是建议而非固定限制：用 CI Health 的 Ready 次数、candidate churn 和
 30–40 分钟候选时长判断是否需要协调，而非机械限制并行 PR 数量。
 
-每个候选 run 只构建一次 Electron renderer：专用 macOS `electron-renderer`
-job 上传 run-ID 稳定的产物，Native 与 AI lane 都下载同一份字节，native lane
-再跑 hosted-window preflight；单 lane 失败仍可独立重跑。Browser 三分片与
+每个 macOS Electron lane 仍然本地构建 renderer（通常亚秒级，且排除
+Linux→macOS 构建产物变量），并各自跑 hosted-window preflight，保证各自
+runner 的环境证据确定可分类为 `ci_environment`。Browser 三分片与
 real HTML 保持 `retries: 0`；native Electron 全量 lane 仅在 CI 里允许一次
-重试以吸收瞬时启动/hydration 抖动，本地保持零重试，重试失败的 trace/video/
-截图证据仍完整保留。
+重试以吸收瞬时启动/hydration 抖动，本地保持零重试。重试通过后第一轮失败
+证据不丢：lane 的 diagnostics 产物改为 `if: always()` 上传（trace/video/
+截图随失败尝试保留），JSON reporter 喂给 `playwright-flaky-summary.mjs`，
+machine-readable 的 flaky/retry 次数写入 `output/ci-evidence/` 并出现在
+step summary 里。
 
 ## 测试类型与去重
 
@@ -290,8 +292,7 @@ Request 的 Ready event、review、review comment 和 issue comment。除了同�
 的绿色 job 重跑，它还按 PR number（旧数据缺失时按 head branch）聚合不同 SHA 的
 完整门禁，记录 Ready 次数、P0/P1/P2/P3/unclassified finding、Ready-to-review、
 Ready-to-gate、gate-to-merge 和 candidate-to-merge。review 延迟只接受与
-`review-policy` 相同的最终 head、且晚于 Ready 的 Codex completion 子集
-（指标口径保持 post-Ready，不随 Draft 期评审提前）；测试完成取该 final
+`review-policy` 相同的最终 head、Ready 后 Codex completion；测试完成取该 final
 SHA 上最后一个成功 source/dry-run lane，而不是等待 review 的 `release-gate`。
 流量指标只采纳窗口内的 Ready/merge 区间，超过分页上限会显式失败。目标是正常候选
 P50 在 40 分钟内完成，其中 review 小于 15 分钟、测试小于 20 分钟、
