@@ -1,7 +1,7 @@
 # PageRoot 版本与项目文件产品需求
 
-- 文档版本：PRD v1.2
-- 最近更新：2026-08-13 16:25（Asia/Shanghai，UTC+8）
+- 文档版本：PRD v1.3
+- 最近更新：2026-08-14（Asia/Shanghai，UTC+8）
 - 状态：产品规则已确认，按两期串行实施
 - 适用范围：桌面版本地 HTML 导入、持续编辑、评论与附件、AI 候选审阅、正式版本历史、Finder 项目目录
 - 关联文档：[MVP 产品需求](MVP_PRD.md)、[交互流程](INTERACTION_FLOW.md)、[Change Request 协议](CHANGE_REQUEST_PROTOCOL.md)、[ADR 0022](decisions/0022-user-owned-project-root-identity.md)
@@ -97,6 +97,8 @@ Hash 相同只能说明内容相同，不能让系统把用户选择的文件“
 | 第二阶段（PR 2） | 历史继续编辑、正式版本独立工作文件、可见 AI 任务与附件、完整顶部状态和项目体验 | v4 以前项目状态的处理、完整项目克隆、多文件网站 |
 | 后续 | 完整项目克隆、资源包/多文件网站 | v4 以前项目状态继续保持不兼容，不在 PR 1 或 PR 2 中隐式实现 |
 
+第一期的 Candidate 权威数据始终位于 Request / Attempt 与 `.pageroot/`；它不以 Finder 可见的 AI 任务文件夹作为写入或身份事实。可见 `AI任务/`、附件目录和完整项目界面是第二期的派生展示，不得反向成为 Request、Candidate、Version 或 Promotion 的权威来源。
+
 PR 1 内部按“文档与 Schema → Repository → Workflow → 最低限度 UI → 故障注入”形成可回退的清晰提交；该顺序不是新的运行时全局 Store。状态仍由现有 `ProjectSession`、`DocumentSession` 与 `VersionSession` 各自拥有并扩展。
 
 ## 4. 产品术语
@@ -159,7 +161,7 @@ PR 1 内部按“文档与 Schema → Repository → Workflow → 最低限度 U
 - 候选尚未被采纳时只显示“候选版本 N”，不能显示成已经存在的“版本 N”。
 - 被拒绝的候选不占用正式版本序号；下一次发送仍可生成“候选版本 N”。每个候选另有稳定 `candidateId`，避免内部身份复用。
 - 如果首选 Promotion 路径已经存在，不覆盖、不复用、不提示用户，继续追加同一版本后缀直到得到空闲名称。例如 `A-V2.html` 已存在时创建 `A-V2-V2.html`；仍冲突则创建 `A-V2-V2-V2.html`。
-- 目录、软链接或任何文件都算路径已占用。Promotion 在可见工作文件出现前持久记录最终相对路径、私有准备路径、首选命名、分配 ordinal、准备文件身份和严格 Working Copy 对象；私有准备尚未开始时才可因碰撞改分配，开始后崩溃重试必须复用同一路径，不能再次追加后缀。只有该路径已被证明是同一事务的受管产物时才允许校验后续跑；manifest 自身出现不可解释的正式 ordinal 冲突时仍失败关闭。
+- 目录、软链接或任何文件都算路径已占用。Promotion 先持久记录候选可见相对路径、私有准备路径、首选命名、分配 ordinal、准备文件身份和严格 Working Copy 对象；私有准备文件属于该事务，但候选可见相对路径在成功发布前尚未冻结。必须以操作系统级 no-replace 发布私有准备文件：仅当最终 `link()` 返回 `EEXIST` 时，才持久记录下一个同 ordinal 后缀路径并重试；其他错误立即失败关闭并保留 Candidate。成功发布后，该可见路径才成为唯一冻结路径，崩溃恢复必须复用它。实现可设置有限但足够高的冲突尝试上限；到达上限同样失败关闭。准备文件或已发布文件被替换、manifest 出现不可解释的正式 ordinal 冲突时，均不得覆盖或删除用户文件。
 
 ## 6. 默认项目目录
 
@@ -182,19 +184,21 @@ PR 1 内部按“文档与 Schema → Repository → Workflow → 最低限度 U
 - Registry 因而不是普通“上次位置缓存”，而是 `projectId → registeredProjectRootPath` 的位置与写入白名单；当前 `ProjectSession` 只投影本次打开的有效绑定。
 - 重命名项目内的受管 HTML 不自动重命名项目文件夹，也不创建 Version；HTML 所属 Version / Working Copy 由 manifest 的稳定 ID 确定，文件名只影响后续可见文件命名。
 
-### 6.2 Finder 默认可见内容
+### 6.2 第二期：Finder 默认可见内容
+
+本节是第二期的用户可见投影，不是第一期的目录承诺。第一期只以根目录工作 HTML、`PROJECT.md` 和隐藏 `.pageroot/` 中的受管记录完成身份、Request、Candidate 与 Promotion；AI 不直接创建 Finder 可见的正式版本或候选权威文件。
 
 ```text
 ~/Documents/PageRoot/项目/复杂HTML综合测试页/
 ├── 复杂HTML综合测试页-V1.html
 ├── 复杂HTML综合测试页-V2.html
 ├── PROJECT.md
-├── AI任务/
+├── AI任务/                         # 第二期只读派生展示
 │   └── 2026-08-12-153012-候选版本3/
 │       ├── PROMPT.md
 │       ├── 复杂HTML综合测试页-V3-待审阅.html
 │       └── 附件快照说明.md
-├── 附件与图片/
+├── 附件与图片/                     # 第二期用户可见附件
 │   ├── 版本2-本轮评论/
 │   │   ├── 首页参考.png
 │   │   └── 产品说明.pdf
@@ -217,8 +221,8 @@ PR 1 内部按“文档与 Schema → Repository → Workflow → 最低限度 U
 
 - 所有版本工作 HTML。
 - 当前项目的关键 Markdown。
-- AI 返回、尚待审阅的完整 HTML 和该轮可读 Prompt。
-- 用户评论中上传、拖入或粘贴的附件与图片。
+- AI 返回、尚待审阅的完整 HTML 和该轮可读 Prompt。`[第二期]`
+- 用户评论中上传、拖入或粘贴的附件与图片。`[第二期]`
 
 用户默认不需要看见：
 
@@ -237,9 +241,10 @@ PR 1 内部按“文档与 Schema → Repository → Workflow → 最低限度 U
 
 ### 6.3 Markdown 文件
 
-- `PROJECT.md`：当前项目长期使用的 AI 规则、背景和约束，用户可阅读和编辑。
-- `AI任务/<轮次>/PROMPT.md`：发送时冻结的本轮 Prompt 可读副本，不随 `PROJECT.md` 后续编辑而变化。
-- 所有机器权威 JSON 仍保存在 `.pageroot/`；Markdown 是用户可读、可维护资料，不承担唯一身份或事务提交职责。
+- `PROJECT.md`：唯一由用户长期维护的项目规则、背景和约束；新项目可以是零字节，用户可随时清空。它不预填系统规则，也不承担身份或事务职责。
+- `AI_RULES.md`：PageRoot 维护的稳定 AI 行为边界，例如冻结输入、唯一输出、附件、完成与取消规则。它是 Request 输入，不复制到 `PROJECT.md` 或每轮 Prompt。
+- `PROMPT.md`：当前 Request / Attempt 的精简入口，只包含本轮身份、读取顺序、当前附件/补充、唯一输出路径和 finalizer 命令；它引用 `AI_RULES.md`，不得重复稳定规则或要求 AI 推导文件名、版本号。
+- `.pageroot/requests/<requestId>/PROMPT.md`、冻结的 `input/PROJECT.md` 与 `input/AI_RULES.md` 是机器执行记录；第二期的 `AI任务/<轮次>/PROMPT.md` 若展示，只能是只读派生副本，不改变任何权威路径。
 
 ## 7. 首次打开与导入
 
@@ -352,7 +357,9 @@ V2 工作文件第一次建立时与 V2 正式快照字节一致。此后用户�
 - PR 1 的受管工作 HTML 只位于登记项目根目录的可见顶层；不借本规则扩展任意嵌套 HTML 或多文件网站管理。
 - Hash 只校验内容和冲突，不能在多个路径间决定身份；无法唯一确认时保持未受管，直到用户明确操作需要一次选择。
 
-## 9. 评论、附件与图片
+## 9. 第二期：评论、附件与图片
+
+本节定义第二期的可见附件目录、归档和 Finder 体验。第一期可以保存其已存在的内部草稿状态，但不以此宣称已经交付本节的用户可见目录合同。
 
 ### 9.1 保存与可见性
 
@@ -415,11 +422,11 @@ V2 工作文件第一次建立时与 V2 正式快照字节一致。此后用户�
 输入工作文件 Hash：<sha256>
 ```
 
-AI 返回的文件必须先完成身份、输出路径、完整 HTML、Hash、连续性和安全校验。校验通过后才显示：
+AI 只能写入固定 Attempt 输出 `.pageroot/requests/<requestId>/attempts/<attemptId>/output/candidate.html`。它必须先完成身份、输出路径、完整 HTML、Hash、连续性和安全校验；通过 finalizer 后，隐藏 Request Candidate 记录才成为审阅事实。AI 不直接创建 Finder 可见的正式 Version 或其工作文件。校验通过后才显示：
 
 > 候选版本 7 · 基于版本 2 · 待审阅
 
-候选文件保存在可见 `AI任务/<轮次>/` 中，同时由隐藏 Attempt 记录保护其精确身份。
+第一期的候选 HTML 与记录保存在 Request / Attempt 的隐藏路径中。第二期如在 `AI任务/<轮次>/` 展示待审阅 HTML、Prompt 或附件说明，它们必须是经校验后的只读派生副本，不能替代 Attempt 输出、Candidate 记录或 Promotion 输入。
 
 ### 10.3 用户审阅
 
@@ -438,7 +445,7 @@ AI 返回的文件必须先完成身份、输出路径、完整 HTML、Hash、�
 
 1. 验证候选 Hash 仍与审阅内容一致。
 2. 验证 `basedOnVersionId`、`previousVersionId` 和当前项目身份。
-3. 根据当前 Working Copy 最新确认的首选主干与扩展名选择 V7 可见路径；若被占用则连续追加 `-V7`，并在 Promotion 事务中冻结最终相对路径。
+3. 根据当前 Working Copy 最新确认的首选主干与扩展名分配 V7 候选可见路径；若占用则连续追加 `-V7`。先在事务中准备私有字节，再以操作系统级 no-replace `link()` 发布。只有 `EEXIST` 可以持久分配下一个同 ordinal 路径并重试；其他发布错误失败关闭。成功 `link()` 后才冻结最终相对路径。
 4. 把候选精确字节写入 `.pageroot/versions/ver_0007/index.html`。
 5. 在根目录按事务冻结路径建立工作文件，初始字节与正式快照一致；不得覆盖任何用户已有文件。
 6. 提交正式版本元数据与项目 `latestOfficialVersionId=ver_0007`。
@@ -449,9 +456,11 @@ AI 返回的文件必须先完成身份、输出路径、完整 HTML、Hash、�
 
 > 版本 7 · 基于版本 2
 
-任一步失败，版本 7 不得半提交，V2 工作文件仍可继续编辑，候选仍可审阅或重试。重试必须复用事务已冻结的可见路径；正常命名冲突不弹窗，只在成功状态和 Finder 中展示实际采用的文件名。
+任一步失败，版本 7 不得半提交，V2 工作文件仍可继续编辑，Candidate 仍可审阅或重试。成功发布后的恢复必须复用事务已冻结的可见路径；发布前的 `EEXIST` 重试按本节重新持久分配下一个路径。正常命名冲突不弹窗，只在成功状态和 Finder 中展示实际采用的文件名。
 
-## 11. 界面要求
+## 11. 第二期：完整界面要求
+
+第一期只承诺导入成功提示、项目目录入口、Candidate 审阅和不把 Candidate 显示为正式 Version 所需的最低界面；本节的常驻顶部状态、完整项目/版本列表与 Finder 定位体验属于第二期。
 
 ### 11.1 顶部版本区
 
@@ -488,8 +497,8 @@ AI 返回的文件必须先完成身份、输出路径、完整 HTML、Hash、�
 
 - 项目顶部常驻“在文件夹中打开”。
 - 首次导入提示中的同名操作指向项目根目录，而不是 `.pageroot/` 或原下载目录。
-- 对附件提供“在 Finder 中显示”，定位到对应可见文件。
-- 对 AI 候选提供“在 Finder 中显示”，定位到该轮 `AI任务/` 文件。
+- 对附件提供“在 Finder 中显示”，定位到对应可见文件。`[第二期]`
+- 对 AI 候选提供“在 Finder 中显示”，定位到该轮 `AI任务/` 的派生展示。`[第二期]`
 
 ## 12. 数据与状态合同
 
@@ -685,6 +694,7 @@ manifest 可记录平台文件标识（例如 device、inode、birthtime）作�
 - [ ] 用户连续修改 `A-V1.html` 100 次并重启应用，内容全部保存，正式版本仍只有版本 1。`[第一期]`
 - [ ] 添加、删除、修改评论和附件后重启应用，草稿完整恢复，不创建正式版本 2。`[第二期]`
 - [ ] 发送 AI 后，界面显示候选版本 2；AI 返回但未采纳时，正式历史仍只有版本 1。`[第一期]`
+- [ ] AI 只能写入固定 Attempt `output/candidate.html`；未经用户采纳不得创建根目录正式工作文件或推进正式版本号。`[第一期]`
 - [ ] 用户采纳后才出现正式版本 2、隐藏 V2 快照和可见 `A-V2.html`，三者 ordinal 一致。`[第一期]`
 - [ ] 将受管 `A-V1.html` 改名为 `B-V1.html` 后采纳候选，创建 `B-V2.html`；项目文件夹改名则不改变该 HTML 主干。`[第一期]`
 - [ ] 用户已有 `B-V2.html` 时采纳候选，不覆盖、不弹窗，创建 `B-V2-V2.html`；继续冲突时继续追加 `-V2`。`[第一期]`
@@ -720,7 +730,7 @@ manifest 可记录平台文件标识（例如 device、inode、birthtime）作�
 
 - [ ] 在导入七步中的任一步注入崩溃，原外部文件不变，系统不留下半注册项目。`[第一期]`
 - [ ] 在保存、发送冻结、AI 返回和采纳提交各阶段注入崩溃，重启后都能回到唯一可解释状态。`[第一期]`
-- [ ] Promotion 选择 `B-V2-V2.html` 等冲突回避路径后，在各写入点注入崩溃并重试，始终复用同一冻结路径，不再次追加后缀。`[第一期]`
+- [ ] Promotion 成功 no-replace 发布后，在各后续写入点注入崩溃并重试，始终复用同一冻结路径；若最终发布前 `link()` 返回 `EEXIST`，持久分配下一个同 ordinal 路径并重试，其他错误失败关闭并保留 Candidate。`[第一期]`
 - [ ] 文件切换压力测试中，迟到异步回调不能改变新 Session 的路径、Hash 或画布。`[第一期]`
 - [ ] 保存失败时禁止用旧磁盘内容发送 AI，并提供恢复操作。`[第一期]`
 - [ ] Request 冻结后删除可见附件，不影响该 Request 的附件 Hash 和审阅。`[第二期]`
@@ -754,9 +764,9 @@ manifest 可记录平台文件标识（例如 device、inode、birthtime）作�
 - 配置项目目录内文件夹改名、受管 HTML 的改名/移出/放回、外部修改与低打扰重绑定。
 - 登记根目录写入白名单、项目副本不接管，以及跨卷路径的拒绝写入测试。
 - 任何旧 `V1.x` 项目迁移或兼容层。
-- [MVP 产品需求](MVP_PRD.md)、[交互流程](INTERACTION_FLOW.md)、[Change Request 协议](CHANGE_REQUEST_PROTOCOL.md)、Schema fixtures、测试策略和 ADR 0022；其中 ADR 0022 必须同步改为登记根目录边界。
+- [MVP 产品需求](MVP_PRD.md)、[交互流程](INTERACTION_FLOW.md)、[Change Request 协议](CHANGE_REQUEST_PROTOCOL.md)、Schema fixtures、测试策略和 ADR 0022；其中 v4 AI 交接必须保持 `PROJECT.md`、`AI_RULES.md`、`PROMPT.md` 职责不重叠，ADR 0022 必须同步登记根目录、Hash 与 Promotion 发布边界。
 
-现有实现若包含以下行为，均与 PRD v1.2 冲突，进入 PR 审查前必须删除、禁用或改写干净，不能作为无提示兼容分支继续保留：
+现有实现若包含以下行为，均与 PRD v1.3 冲突，进入 PR 审查前必须删除、禁用或改写干净，不能作为无提示兼容分支继续保留：
 
 - 整个项目文件夹移出或跨卷后自动定位、重新关联并继续写入。
 - 对复制项目弹出“重新关联到此位置 / 作为新项目”选择，并允许 Registry 跟随副本更新。
@@ -782,6 +792,18 @@ manifest 可记录平台文件标识（例如 device、inode、birthtime）作�
 5. **PageRoot 只管理“PageRoot/项目”里已登记的文件；整个项目文件夹搬走或复制出去后不会被两边同时写。**
 
 ## 19. 更新记录
+
+### 2026-08-14（Asia/Shanghai，UTC+8）— PRD v1.3
+
+本次更新澄清已确认的 v4 执行与展示边界：
+
+| 议题 | 修订后的判断 | 对实施与验收的影响 |
+|---|---|---|
+| Promotion 路径冻结 | 私有准备文件可先建立；只有 no-replace `link()` 成功后最终可见路径才冻结。发布前仅 `EEXIST` 可持久分配下一个同 ordinal 路径并重试，其他错误失败关闭。 | 事务、恢复和故障注入须区分“发布前 EEXIST”与“成功发布后恢复”。 |
+| Candidate 与可见 AI 任务 | AI 唯一写入固定 Attempt `output/candidate.html`；Request / Attempt 与 Candidate 记录才是权威。`AI任务/` 仅在第二期作为只读派生展示。 | 不得由 AI 直接写 Finder 可见正式 Version，也不得以可见副本作为 Promotion 输入。 |
+| AI Markdown 职责 | `PROJECT.md` 是可为空的用户长期规则；`AI_RULES.md` 是稳定系统边界；`PROMPT.md` 只给出本轮精简执行入口并引用规则。 | 禁止在 Prompt 重复稳定规则或要求 AI 推导输出文件名、版本号。 |
+| Hash 与身份 | Hash 只验证内容，绝不单独补回 Working Copy 映射或授予管理权。 | ADR 0022 与恢复实现必须删除 Hash 身份回退。 |
+| 第二期可见体验 | 可见 AI 任务、附件与完整顶部/项目界面明确属于第二期。 | 第一期开箱与验收不以这些 Finder 目录或完整 UI 为前提。 |
 
 ### 2026-08-13 16:25（Asia/Shanghai，UTC+8）— PRD v1.2
 

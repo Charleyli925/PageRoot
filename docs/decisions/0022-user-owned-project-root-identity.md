@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-08-13
+- Amended: 2026-08-14
 - Supersedes: ADR 0005
 - Extends: ADR 0011, ADR 0019
 
@@ -70,8 +71,11 @@ reads or writes Candidate completion facts.
   no history is cloned and no duplicate-project dialog appears.
 - A root-level Working Copy rename preserves `workingCopyId` and updates its
   direct manifest mapping plus `preferredFileStem`/`preferredExtension`.
-  Missing mappings may be recovered only by a unique file identity, or by a
-  unique current Hash among missing Working Copies. Ambiguity fails closed.
+  A missing mapping may be recovered only through the verified registered root,
+  a validated project/manifest and one unique filesystem-identity continuity
+  clue. Hash may validate the recovered bytes afterwards, but never selects a
+  missing Working Copy mapping or grants identity on its own. Ambiguity fails
+  closed.
   Extra HTML files and HTML moved into another project remain external and
   never alter a manifest.
 
@@ -88,13 +92,15 @@ selects the next frozen path: `B-V2-V2.html`, then `B-V2-V2-V2.html`, and so
 on.
 
 Before visible Working Copy bytes exist, the Promotion transaction durably
-records final relative path, private preparation path, preferred naming,
+records a candidate relative path, private preparation path, preferred naming,
 allocation ordinal, a strict Working Copy object, and the preparation file
-identity. It writes private transaction bytes first and hard-links them to a
-previously absent visible path. A collision before visible publication can
-allocate the next path; once preparation starts, no path changes. Replacing a
-prepared or visible transaction file makes recovery fail without deleting user
-bytes or overwriting a collision.
+identity. It writes private transaction bytes first and uses an operating-system
+no-replace hard link to publish them to the candidate path. If that `link()`
+returns `EEXIST`, the transaction persists the next same-ordinal path and
+retries; no other publication error may reallocate a path. A successful link
+freezes the final relative path, which recovery must reuse. Replacing either
+the prepared file or a successfully published file makes recovery fail without
+deleting user bytes or overwriting a collision.
 
 ### Product behavior
 
@@ -117,7 +123,8 @@ operation enters a conflict state.
 - A returned folder is recoverable only at the registered path; a copy cannot
   bypass the Registry merely by retaining IDs and hidden files.
 - Candidate adoption gets deterministic names and crash recovery without
-  overwriting user files.
+  overwriting user files; its final visible path becomes immutable only after
+  successful no-replace publication.
 - Pre-v4 project state is neither migrated nor a fallback way to bypass v4
   Registry checks; it is not an opening-path input at all.
 
@@ -136,10 +143,12 @@ cross-volume copies acquire durable writes.
 ### Use equal HTML Hashes as global navigation identity
 
 Rejected because equal bytes at different paths are still different user
-files. Hashes are only a final, unique recovery clue for an otherwise missing
-registered Working Copy mapping.
+files. Hashes validate bytes after a verified binding; they never recover a
+missing Working Copy mapping or grant write authority.
 
-### Overwrite or rename around an already-started Promotion
+### Overwrite or reuse a path after Promotion publication
 
 Rejected because a visible collision or replaced preparation file may be
-user-owned. The transaction must stop with recoverable evidence instead.
+user-owned. The transaction may allocate another path only after its
+no-replace publication attempt returns `EEXIST` and before any successful
+publication; it must never overwrite, delete or reuse a published path.
