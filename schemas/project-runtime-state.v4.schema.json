@@ -24,7 +24,9 @@
         "candidateId",
         "attemptId",
         "status",
-        "inputManifestSha256"
+        "inputManifestSha256",
+        "candidateOutputSha256",
+        "candidateRecordSha256"
       ],
       "properties": {
         "requestId": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,160}$" },
@@ -34,8 +36,47 @@
         "inputManifestSha256": {
           "type": ["string", "null"],
           "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "candidateOutputSha256": {
+          "type": ["string", "null"],
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "candidateRecordSha256": {
+          "type": ["string", "null"],
+          "pattern": "^sha256:[a-f0-9]{64}$"
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "processing" } } },
+          "then": {
+            "properties": {
+              "candidateId": { "const": null },
+              "candidateOutputSha256": { "const": null },
+              "candidateRecordSha256": { "const": null }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "status": { "const": "pending-review" } } },
+          "then": {
+            "properties": {
+              "candidateId": {
+                "type": "string",
+                "pattern": "^candidate_[A-Za-z0-9_-]{8,160}$"
+              },
+              "candidateOutputSha256": {
+                "type": "string",
+                "pattern": "^sha256:[a-f0-9]{64}$"
+              },
+              "candidateRecordSha256": {
+                "type": "string",
+                "pattern": "^sha256:[a-f0-9]{64}$"
+              }
+            }
+          }
+        }
+      ]
     },
     "activeCandidateId": { "type": ["string", "null"], "pattern": "^candidate_[A-Za-z0-9_-]{8,160}$" }
   }

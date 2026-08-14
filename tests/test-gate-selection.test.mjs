@@ -210,6 +210,34 @@ test("owner rules select only the direct regression coverage for representative 
   assert.ok(totalNodeTests <= 56, `representative ownership selected ${totalNodeTests} Node tests`);
 });
 
+test("Candidate runtime seals map schema changes to every producer and boundary consumer", () => {
+  const plan = selectGatePlan({
+    map,
+    lane: "task",
+    changedFiles: ["schemas/project-runtime-state.v4.schema.json"],
+  });
+  for (const owner of [
+    "tests/project-file-repository.test.mjs",
+    "tests/project-file-finalizer.test.mjs",
+    "tests/project-file-bridge.test.mjs",
+    "tests/project-file-schema.test.mjs",
+    "tests/bridge-test-environment.test.mjs",
+    "tests/electron-app-fixture.test.mjs",
+    "tests/desktop-preload-ipc.test.mjs",
+    "tests/desktop-package.test.mjs",
+  ]) {
+    assert.ok(plan.selectedNodeTests.includes(owner), owner);
+  }
+  assert.deepEqual(suiteIds(plan), [
+    "typecheck",
+    "lint",
+    "node-targeted",
+    "build-desktop",
+    "electron-smoke",
+    "ai-smoke",
+  ]);
+});
+
 test("Bridge fixture changes select the helper and its schema, scope, and workspace owners", () => {
   const expected = [
     "tests/bridge-test-environment.test.mjs",

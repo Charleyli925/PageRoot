@@ -387,11 +387,18 @@ function assertRequestAnchor({ record, identity, manifest, runtime }) {
     && activeRequest.requestId === record.requestId
     && activeRequest.attemptId === record.attemptId
     && (
-      (activeRequest.status === "processing" && activeRequest.candidateId === null)
+      (
+        activeRequest.status === "processing"
+        && activeRequest.candidateId === null
+        && activeRequest.candidateOutputSha256 === null
+        && activeRequest.candidateRecordSha256 === null
+      )
       || (
         activeRequest.status === "pending-review"
         && activeRequest.candidateId === record.candidateId
         && runtime.activeCandidateId === record.candidateId
+        && SHA256.test(String(activeRequest.candidateOutputSha256 || ""))
+        && SHA256.test(String(activeRequest.candidateRecordSha256 || ""))
       )
     ),
   );
@@ -423,6 +430,51 @@ function assertRequestAnchor({ record, identity, manifest, runtime }) {
     );
   }
   return activeRequest.inputManifestSha256;
+}
+
+async function assertCandidateRuntimeAuthority({
+  projectRoot,
+  controlRoot,
+  identity,
+  record,
+  runtime,
+}) {
+  const activeRequest = runtime?.activeRequest;
+  if (activeRequest?.status !== "pending-review") return;
+  const candidatePath = path.join(controlRoot, "requests", record.requestId, "candidate.json");
+  await regularFile(candidatePath, "Candidate record", { projectRoot });
+  const candidateBuffer = await readFile(candidatePath);
+  let candidate;
+  try {
+    candidate = JSON.parse(candidateBuffer.toString("utf8"));
+  } catch {
+    throw new ProjectFileFinalizerError(
+      "CANDIDATE_AUTHORITY_MISMATCH",
+      "The runtime-sealed Candidate record is not valid JSON.",
+    );
+  }
+  const expectedOutputRelativePath = `requests/${record.requestId}/candidate.html`;
+  const outputPath = path.join(controlRoot, "requests", record.requestId, "candidate.html");
+  await regularFile(outputPath, "Candidate output", { projectRoot });
+  const output = await readFile(outputPath);
+  if (
+    !isObject(candidate)
+    || candidate.candidateId !== record.candidateId
+    || candidate.projectId !== identity.projectId
+    || candidate.documentId !== identity.documentId
+    || candidate.requestId !== record.requestId
+    || candidate.attemptId !== record.attemptId
+    || candidate.status !== "pending-review"
+    || candidate.outputRelativePath !== expectedOutputRelativePath
+    || candidate.outputSha256 !== sha256(output)
+    || activeRequest.candidateOutputSha256 !== sha256(output)
+    || activeRequest.candidateRecordSha256 !== sha256(candidateBuffer)
+  ) {
+    throw new ProjectFileFinalizerError(
+      "CANDIDATE_AUTHORITY_MISMATCH",
+      "The pending-review Candidate no longer matches runtime authority.",
+    );
+  }
 }
 
 async function verifyFrozenRequestBundle({
@@ -686,6 +738,13 @@ export async function finalizeProjectFileAttempt({
     readJson(path.join(controlRoot, "runtime-state.json"), "runtime-state.json", { projectRoot: root }),
   ]);
   const inputManifestSha256 = assertRequestAnchor({ record, identity, manifest, runtime });
+  await assertCandidateRuntimeAuthority({
+    projectRoot: root,
+    controlRoot,
+    identity,
+    record,
+    runtime,
+  });
   const inputPath = path.join(controlRoot, ...record.inputRelativePath.split("/"));
   const outputPath = path.join(controlRoot, ...record.outputRelativePath.split("/"));
   if (!inside(controlRoot, inputPath) || !inside(controlRoot, outputPath)) {

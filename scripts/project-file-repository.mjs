@@ -495,19 +495,26 @@ async function readHtmlFile(filePath, label, options = {}) {
   };
 }
 
-async function readJsonFile(filePath, label, options = {}) {
+async function readJsonFileWithSha256(filePath, label, options = {}) {
   const information = await regularInformation(filePath, label, options);
   if (!information) return null;
+  let buffer;
   let value;
   try {
-    value = JSON.parse(await readFile(filePath, "utf8"));
+    buffer = await readFile(filePath);
+    value = JSON.parse(buffer.toString("utf8"));
   } catch {
     throw new ProjectFileRepositoryError("INVALID_JSON", `${label} is not valid JSON.`);
   }
   if (!isObject(value)) {
     throw new ProjectFileRepositoryError("INVALID_JSON", `${label} must be an object.`);
   }
-  return value;
+  return { value, sha256: sha256(buffer), information };
+}
+
+async function readJsonFile(filePath, label, options = {}) {
+  const result = await readJsonFileWithSha256(filePath, label, options);
+  return result?.value || null;
 }
 
 async function writeFileNoReplace(filePath, buffer, expectedSha256, label, {
@@ -833,9 +840,31 @@ function assertRuntime(runtime, project, manifest) {
         active.inputManifestSha256 !== null
         && !SHA256.test(String(active.inputManifestSha256 || ""))
       )
+      || (
+        active.candidateOutputSha256 !== null
+        && !SHA256.test(String(active.candidateOutputSha256 || ""))
+      )
+      || (
+        active.candidateRecordSha256 !== null
+        && !SHA256.test(String(active.candidateRecordSha256 || ""))
+      )
       || (active.status === "processing" && !SHA256.test(String(active.inputManifestSha256 || "")))
-      || (active.status === "processing" && active.candidateId !== null)
-      || (active.status === "pending-review" && active.candidateId !== runtime.activeCandidateId)
+      || (
+        active.status === "processing"
+        && (
+          active.candidateId !== null
+          || active.candidateOutputSha256 !== null
+          || active.candidateRecordSha256 !== null
+        )
+      )
+      || (
+        active.status === "pending-review"
+        && (
+          active.candidateId !== runtime.activeCandidateId
+          || !SHA256.test(String(active.candidateOutputSha256 || ""))
+          || !SHA256.test(String(active.candidateRecordSha256 || ""))
+        )
+      )
     ) {
       throw new ProjectFileRepositoryError("INVALID_RUNTIME", "active Request is inconsistent.");
     }
@@ -1686,6 +1715,8 @@ export class ProjectFileRepository {
       // Runtime anchor remains outside it. The finalizer compares this digest
       // before trusting any Request-owned manifest or frozen input.
       inputManifestSha256: record.inputManifestSha256,
+      candidateOutputSha256: null,
+      candidateRecordSha256: null,
     };
     loaded.runtime.activeCandidateId = null;
     await atomicWriteProjectJson(
@@ -1826,10 +1857,34 @@ export class ProjectFileRepository {
         requestRootPath(loaded.paths, record.requestId),
         "candidate.json",
       );
-      const candidate = await readJsonFile(candidatePath, "candidate.json", {
+      const candidateRecord = await readJsonFileWithSha256(candidatePath, "candidate.json", {
         projectRootPath: loaded.paths.projectRootPath,
       });
-      if (candidate?.candidateId === record.candidateId && candidate.status === "pending-review") {
+      const candidate = candidateRecord?.value || null;
+      if (candidate) {
+        const outputPath = resolveRelative(
+          loaded.paths.controlRoot,
+          candidate.outputRelativePath,
+          "candidate output path",
+        );
+        const output = await readHtmlFile(outputPath, "Candidate HTML", {
+          projectRootPath: loaded.paths.projectRootPath,
+        });
+        if (
+          candidate.candidateId !== record.candidateId
+          || candidate.status !== "pending-review"
+          || existingActiveRequest?.requestId !== record.requestId
+          || existingActiveRequest?.attemptId !== record.attemptId
+          || existingActiveRequest.status !== "pending-review"
+          || existingActiveRequest.candidateId !== record.candidateId
+          || existingActiveRequest.candidateOutputSha256 !== output.sha256
+          || existingActiveRequest.candidateRecordSha256 !== candidateRecord.sha256
+        ) {
+          throw new ProjectFileRepositoryError(
+            "CANDIDATE_AUTHORITY_MISMATCH",
+            "A Candidate exists without the runtime authority required for review.",
+          );
+        }
         record.status = "candidate-ready";
         record.completedAt = record.completedAt || nowIso(this.#clock);
         await atomicWriteProjectJson(
@@ -1841,8 +1896,26 @@ export class ProjectFileRepository {
         status = record.status;
       }
     }
+    let candidateOutputSha256 = null;
+    let candidateRecordSha256 = null;
     if (status === "candidate-ready") {
       candidateId = record.candidateId;
+      const candidateState = await this.#readCandidateForLoaded(loaded, candidateId);
+      candidateOutputSha256 = candidateState.output.sha256;
+      candidateRecordSha256 = candidateState.candidateRecordSha256;
+      if (
+        existingActiveRequest?.requestId !== record.requestId
+        || existingActiveRequest?.attemptId !== record.attemptId
+        || existingActiveRequest.status !== "pending-review"
+        || existingActiveRequest.candidateId !== candidateId
+        || existingActiveRequest.candidateOutputSha256 !== candidateOutputSha256
+        || existingActiveRequest.candidateRecordSha256 !== candidateRecordSha256
+      ) {
+        throw new ProjectFileRepositoryError(
+          "CANDIDATE_AUTHORITY_MISMATCH",
+          "A Candidate-ready Request is missing its sealed runtime authority.",
+        );
+      }
     } else if (status !== "processing") {
       if (loaded.runtime.activeRequest?.requestId === record.requestId) {
         loaded.runtime.activeRequest = null;
@@ -1862,6 +1935,8 @@ export class ProjectFileRepository {
       attemptId: record.attemptId,
       status: candidateId ? "pending-review" : "processing",
       inputManifestSha256: record.inputManifestSha256,
+      candidateOutputSha256,
+      candidateRecordSha256,
     };
     const active = loaded.runtime.activeRequest;
     if (
@@ -1870,6 +1945,8 @@ export class ProjectFileRepository {
       || active?.candidateId !== nextActiveRequest.candidateId
       || active?.status !== nextActiveRequest.status
       || active?.inputManifestSha256 !== nextActiveRequest.inputManifestSha256
+      || active?.candidateOutputSha256 !== nextActiveRequest.candidateOutputSha256
+      || active?.candidateRecordSha256 !== nextActiveRequest.candidateRecordSha256
       || loaded.runtime.activeCandidateId !== candidateId
     ) {
       loaded.runtime.activeRequest = nextActiveRequest;
@@ -2992,34 +3069,6 @@ export class ProjectFileRepository {
     return true;
   }
 
-  async #findMissingWorkingCopyByHash(loaded, source) {
-    const candidates = [];
-    for (const workingCopy of loaded.manifest.workingCopies) {
-      const mappedPath = workingCopySourcePath(loaded.paths, workingCopy);
-      const mappedInformation = await regularInformation(mappedPath, "Working Copy", {
-        projectRootPath: loaded.paths.projectRootPath,
-      });
-      if (mappedInformation) continue;
-      const state = await readJsonFile(
-        workingCopyStatePath(loaded.paths, workingCopy),
-        "Working Copy state",
-        { projectRootPath: loaded.paths.projectRootPath },
-      );
-      if (state?.currentSha256 === source.sha256) candidates.push(workingCopy);
-    }
-    if (candidates.length > 1) {
-      throw new ProjectFileRepositoryError(
-        "MANAGED_PATH_AMBIGUOUS",
-        "More than one missing Working Copy matches this HTML content.",
-        {
-          projectId: loaded.project.projectId,
-          workingCopyIds: candidates.map((entry) => entry.workingCopyId),
-        },
-      );
-    }
-    return candidates[0] || null;
-  }
-
   async #targetForExactPath(loaded, exactSourcePath, source) {
     const { paths, project, manifest } = loaded;
     for (const version of manifest.versions) {
@@ -3058,9 +3107,22 @@ export class ProjectFileRepository {
         sourceSha256: source.sha256,
       });
     }
-    const matching = manifest.workingCopies.filter((workingCopy) => (
-      sameFileIdentity(workingCopy.fileIdentity, copyFileIdentity(source.information))
-    ));
+    // A Finder rename is a controlled recovery only when the registered
+    // manifest mapping is actually absent.  A second hard link, copied file,
+    // same name or same bytes never becomes managed while the recorded member
+    // remains present.  The Registry, v4 IDs, missing registered mapping and
+    // one surviving file-identity clue are all required before rebinding.
+    const matching = [];
+    for (const workingCopy of manifest.workingCopies) {
+      const mappedPath = workingCopySourcePath(paths, workingCopy);
+      const mappedInformation = await regularInformation(mappedPath, "Working Copy", {
+        projectRootPath: paths.projectRootPath,
+      });
+      if (mappedInformation) continue;
+      if (sameFileIdentity(workingCopy.fileIdentity, copyFileIdentity(source.information))) {
+        matching.push(workingCopy);
+      }
+    }
     if (matching.length > 1) {
       throw new ProjectFileRepositoryError(
         "MANAGED_PATH_AMBIGUOUS",
@@ -3071,8 +3133,7 @@ export class ProjectFileRepository {
         },
       );
     }
-    const workingCopy = matching[0]
-      || await this.#findMissingWorkingCopyByHash(loaded, source);
+    const workingCopy = matching[0] || null;
     if (!workingCopy) return null;
     await this.#rebindWorkingCopyPath(loaded, workingCopy, exactSourcePath, source.information);
     return publicOpenTarget({
@@ -3369,9 +3430,11 @@ export class ProjectFileRepository {
     );
     const outputPath = path.join(requestRoot, "candidate.html");
     const candidatePath = path.join(requestRoot, "candidate.json");
-    const existingCandidate = await readJsonFile(candidatePath, "candidate.json", {
+    const existingCandidateRecord = await readJsonFileWithSha256(candidatePath, "candidate.json", {
       projectRootPath: loaded.paths.projectRootPath,
     });
+    const existingCandidate = existingCandidateRecord?.value || null;
+    let candidateRecordSha256;
     if (existingCandidate) {
       if (
         existingCandidate.candidateId !== id
@@ -3382,6 +3445,25 @@ export class ProjectFileRepository {
           "This Request already owns another Candidate.",
         );
       }
+      const existingOutput = await readHtmlFile(outputPath, "Candidate HTML", {
+        projectRootPath: loaded.paths.projectRootPath,
+      });
+      const active = loaded.runtime.activeRequest;
+      if (
+        active?.requestId !== request
+        || active?.attemptId !== String(attemptId || "attempt_001")
+        || active.status !== "pending-review"
+        || active.candidateId !== id
+        || active.inputManifestSha256 !== manifestAnchor
+        || active.candidateOutputSha256 !== existingOutput.sha256
+        || active.candidateRecordSha256 !== existingCandidateRecord.sha256
+      ) {
+        throw new ProjectFileRepositoryError(
+          "CANDIDATE_AUTHORITY_MISMATCH",
+          "An existing Candidate is not sealed by the active runtime authority.",
+        );
+      }
+      candidateRecordSha256 = existingCandidateRecord.sha256;
     } else {
       const assessment = assessedCandidate(
         typeof assessmentBaseHtml === "string"
@@ -3393,7 +3475,7 @@ export class ProjectFileRepository {
       await writeFileNoReplace(outputPath, outputBuffer, outputSha256, "Candidate HTML", {
         projectRootPath: loaded.paths.projectRootPath,
       });
-      await atomicWriteProjectJson(loaded.paths.projectRootPath, candidatePath, {
+      const candidateRecord = {
         schemaVersion: PROJECT_FILE_SCHEMA_VERSION,
         candidateId: id,
         projectId: loaded.project.projectId,
@@ -3411,7 +3493,15 @@ export class ProjectFileRepository {
         assessment,
         status: "pending-review",
         createdAt: nowIso(this.#clock),
-      }, "candidate.json");
+      };
+      const candidateRecordBuffer = Buffer.from(jsonText(candidateRecord), "utf8");
+      candidateRecordSha256 = sha256(candidateRecordBuffer);
+      await atomicWriteProjectFile(
+        loaded.paths.projectRootPath,
+        candidatePath,
+        candidateRecordBuffer,
+        "candidate.json",
+      );
     }
     loaded.runtime.activeRequest = {
       requestId: request,
@@ -3419,6 +3509,8 @@ export class ProjectFileRepository {
       attemptId: String(attemptId || "attempt_001"),
       status: "pending-review",
       inputManifestSha256: manifestAnchor,
+      candidateOutputSha256: outputSha256,
+      candidateRecordSha256,
     };
     loaded.runtime.activeCandidateId = id;
     await atomicWriteProjectJson(
@@ -3440,13 +3532,20 @@ export class ProjectFileRepository {
     let candidatePath = activeRequest?.requestId
       ? path.join(loaded.paths.requestsRoot, activeRequest.requestId, "candidate.json")
       : null;
-    let candidate = candidatePath
-      ? await readJsonFile(candidatePath, "candidate.json", {
+    let candidateRecord = candidatePath
+      ? await readJsonFileWithSha256(candidatePath, "candidate.json", {
         projectRootPath: loaded.paths.projectRootPath,
       })
       : null;
+    let candidate = candidateRecord?.value || null;
     if (!candidate || candidate.candidateId !== requested) {
-      ({ candidatePath, candidate } = await this.#findCandidateById(loaded, requested));
+      if (activeRequest?.status === "pending-review" && activeRequest.candidateId === requested) {
+        throw new ProjectFileRepositoryError(
+          "CANDIDATE_AUTHORITY_MISMATCH",
+          "The runtime-sealed Candidate record is no longer available.",
+        );
+      }
+      ({ candidatePath, candidate, candidateRecord } = await this.#findCandidateById(loaded, requested));
     }
     if (
       !candidate
@@ -3471,7 +3570,26 @@ export class ProjectFileRepository {
         "The Candidate changed after validation and must be reviewed again.",
       );
     }
-    return { candidate, candidatePath, outputPath, output };
+    if (candidate.status === "pending-review") {
+      if (
+        activeRequest?.status !== "pending-review"
+        || activeRequest.candidateId !== requested
+        || activeRequest.candidateOutputSha256 !== output.sha256
+        || activeRequest.candidateRecordSha256 !== candidateRecord?.sha256
+      ) {
+        throw new ProjectFileRepositoryError(
+          "CANDIDATE_AUTHORITY_MISMATCH",
+          "The Candidate no longer matches the runtime authority sealed for review.",
+        );
+      }
+    }
+    return {
+      candidate,
+      candidatePath,
+      candidateRecordSha256: candidateRecord?.sha256 || null,
+      outputPath,
+      output,
+    };
   }
 
   async #findCandidateById(loaded, candidateId) {
@@ -3494,10 +3612,13 @@ export class ProjectFileRepository {
         continue;
       }
       const candidatePath = path.join(loaded.paths.requestsRoot, entry.name, "candidate.json");
-      const candidate = await readJsonFile(candidatePath, "candidate.json", {
+      const candidateRecord = await readJsonFileWithSha256(candidatePath, "candidate.json", {
         projectRootPath: loaded.paths.projectRootPath,
       });
-      if (candidate?.candidateId === candidateId) matches.push({ candidatePath, candidate });
+      const candidate = candidateRecord?.value || null;
+      if (candidate?.candidateId === candidateId) {
+        matches.push({ candidatePath, candidate, candidateRecord });
+      }
     }
     if (matches.length !== 1) {
       throw new ProjectFileRepositoryError("CANDIDATE_NOT_FOUND", "The requested Candidate was not found.");
@@ -3511,14 +3632,6 @@ export class ProjectFileRepository {
     if (current.candidate.status === "promoted") {
       throw new ProjectFileRepositoryError("CANDIDATE_ALREADY_PROMOTED", "The Candidate is already a formal Version.");
     }
-    current.candidate.status = "rejected";
-    current.candidate.rejectedAt = nowIso(this.#clock);
-    await atomicWriteProjectJson(
-      loaded.paths.projectRootPath,
-      current.candidatePath,
-      current.candidate,
-      "candidate.json",
-    );
     const requestPath = path.join(
       requestRootPath(loaded.paths, current.candidate.requestId),
       "request.json",
@@ -3536,6 +3649,10 @@ export class ProjectFileRepository {
         "request.json",
       );
     }
+    // Record the terminal Request decision before releasing the runtime
+    // authority. A crash at either boundary then leaves a Candidate that is
+    // unavailable for adoption, rather than a mutable record still claiming
+    // the old sealed digest.
     loaded.runtime.activeRequest = null;
     loaded.runtime.activeCandidateId = null;
     await atomicWriteProjectJson(
@@ -3543,6 +3660,14 @@ export class ProjectFileRepository {
       loaded.paths.runtimePath,
       loaded.runtime,
       "runtime-state.json",
+    );
+    current.candidate.status = "rejected";
+    current.candidate.rejectedAt = nowIso(this.#clock);
+    await atomicWriteProjectJson(
+      loaded.paths.projectRootPath,
+      current.candidatePath,
+      current.candidate,
+      "candidate.json",
     );
     return {
       candidateId: current.candidate.candidateId,
@@ -3632,6 +3757,21 @@ export class ProjectFileRepository {
       throw cause;
     });
     if (!information) return false;
+    const next = await this.#allocatePromotionWorkingCopy(loaded, {
+      preferredFileStem: transaction.preferredFileStem,
+      preferredExtension: transaction.preferredExtension,
+      versionOrdinal: transaction.versionOrdinal,
+      startAt: transaction.pathAllocationOrdinal + 1,
+    });
+    transaction.finalWorkingCopyRelativePath = next.sourceRelativePath;
+    transaction.pathAllocationOrdinal = next.allocationOrdinal;
+    transaction.reallocatedAt = nowIso(this.#clock);
+    await this.#writePromotionTransaction(loaded, transactionRoot, transaction);
+    return true;
+  }
+
+  async #reallocatePreparedPromotion(loaded, transactionRoot, transaction) {
+    if (transaction.state !== "working-copy-prepared") return false;
     const next = await this.#allocatePromotionWorkingCopy(loaded, {
       preferredFileStem: transaction.preferredFileStem,
       preferredExtension: transaction.preferredExtension,
@@ -3765,6 +3905,22 @@ export class ProjectFileRepository {
         "The Promotion transaction belongs to another Candidate.",
       );
     }
+    // Promotion and crash recovery both start from the runtime-sealed
+    // Candidate.  A raw candidate.json/candidate.html pair is never enough to
+    // resume an adoption after review has begun.
+    candidateState = await this.#readCandidateForLoaded(
+      loaded,
+      transaction.candidateId,
+    );
+    if (
+      candidateState.candidate.candidateId !== transaction.candidateId
+      || candidateState.candidate.outputSha256 !== transaction.candidateOutputSha256
+    ) {
+      throw new ProjectFileRepositoryError(
+        "CANDIDATE_AUTHORITY_MISMATCH",
+        "The Promotion Candidate no longer matches its sealed transaction authority.",
+      );
+    }
     topLevelHtmlRelativePath(transaction.finalWorkingCopyRelativePath);
     assertPreferredFileStem(transaction.preferredFileStem);
     if (!HTML_EXTENSIONS.has(String(transaction.preferredExtension || "").toLowerCase())) {
@@ -3895,40 +4051,98 @@ export class ProjectFileRepository {
           "The Promotion preparation file changed before publication.",
         );
       }
-      const visiblePath = path.join(
-        loaded.paths.projectRootPath,
-        topLevelHtmlRelativePath(transaction.finalWorkingCopyRelativePath),
-      );
-      let visibleInformation = await lstat(visiblePath).catch((cause) => {
-        if (cause?.code === "ENOENT") return null;
-        throw cause;
+      const prepared = await readHtmlFile(preparedPath, "prepared Version Working Copy", {
+        projectRootPath: loaded.paths.projectRootPath,
       });
-      if (!visibleInformation) {
+      if (prepared.sha256 !== transaction.candidateOutputSha256) {
+        throw new ProjectFileRepositoryError(
+          "PROMOTION_PREPARED_FILE_CHANGED",
+          "The Promotion preparation file no longer matches the sealed Candidate bytes.",
+        );
+      }
+      let visibleInformation;
+      while (true) {
+        const visiblePath = path.join(
+          loaded.paths.projectRootPath,
+          topLevelHtmlRelativePath(transaction.finalWorkingCopyRelativePath),
+        );
+        visibleInformation = await lstat(visiblePath).catch((cause) => {
+          if (cause?.code === "ENOENT") return null;
+          throw cause;
+        });
+        const visibleIsPrepared = Boolean(
+          visibleInformation
+          && !visibleInformation.isSymbolicLink()
+          && visibleInformation.isFile()
+          && sameFileIdentity(
+            transaction.preparedWorkingCopyFileIdentity,
+            copyFileIdentity(visibleInformation),
+          ),
+        );
+        if (visibleIsPrepared) {
+          const visible = await readHtmlFile(visiblePath, "Version Working Copy", {
+            projectRootPath: loaded.paths.projectRootPath,
+          });
+          if (visible.sha256 !== transaction.candidateOutputSha256) {
+            throw new ProjectFileRepositoryError(
+              "PROMOTION_PATH_REPLACED",
+              "The allocated Version Working Copy changed after publication.",
+              { sourceRelativePath: transaction.finalWorkingCopyRelativePath },
+            );
+          }
+          break;
+        }
+        if (visibleInformation) {
+          await this.#reallocatePreparedPromotion(loaded, transactionRoot, transaction);
+          continue;
+        }
+        // The publication syscall, rather than this observation, owns the
+        // no-replace guarantee.  Keeping this test hook between them proves
+        // that a concurrent user file cannot be overwritten after a clean
+        // lstat result.
+        await this.#hit("promotion-visible-publication-before-link", {
+          transactionRoot,
+          sourceRelativePath: transaction.finalWorkingCopyRelativePath,
+          visiblePath,
+        });
         try {
           await link(preparedPath, visiblePath);
           await syncDirectory(loaded.paths.projectRootPath);
         } catch (cause) {
           if (cause?.code !== "EEXIST") throw cause;
+          await this.#reallocatePreparedPromotion(loaded, transactionRoot, transaction);
+          continue;
         }
         visibleInformation = await lstat(visiblePath).catch((cause) => {
           if (cause?.code === "ENOENT") return null;
           throw cause;
         });
-      }
-      if (
-        !visibleInformation
-        || visibleInformation.isSymbolicLink()
-        || !visibleInformation.isFile()
-        || !sameFileIdentity(
-          transaction.preparedWorkingCopyFileIdentity,
-          copyFileIdentity(visibleInformation),
-        )
-      ) {
-        throw new ProjectFileRepositoryError(
-          "PROMOTION_PATH_REPLACED",
-          "The allocated Version Working Copy path is no longer owned by this Promotion.",
-          { sourceRelativePath: transaction.finalWorkingCopyRelativePath },
-        );
+        if (
+          !visibleInformation
+          || visibleInformation.isSymbolicLink()
+          || !visibleInformation.isFile()
+          || !sameFileIdentity(
+            transaction.preparedWorkingCopyFileIdentity,
+            copyFileIdentity(visibleInformation),
+          )
+        ) {
+          throw new ProjectFileRepositoryError(
+            "PROMOTION_PATH_REPLACED",
+            "The allocated Version Working Copy path is no longer owned by this Promotion.",
+            { sourceRelativePath: transaction.finalWorkingCopyRelativePath },
+          );
+        }
+        const visible = await readHtmlFile(visiblePath, "Version Working Copy", {
+          projectRootPath: loaded.paths.projectRootPath,
+        });
+        if (visible.sha256 !== transaction.candidateOutputSha256) {
+          throw new ProjectFileRepositoryError(
+            "PROMOTION_PATH_REPLACED",
+            "The allocated Version Working Copy changed after publication.",
+            { sourceRelativePath: transaction.finalWorkingCopyRelativePath },
+          );
+        }
+        break;
       }
       const nextWorkingCopy = {
         workingCopyId: workingCopyId(version.ordinal),
@@ -3987,6 +4201,15 @@ export class ProjectFileRepository {
         throw new ProjectFileRepositoryError(
           "PROMOTION_PATH_REPLACED",
           "The allocated Version Working Copy was replaced before manifest publication.",
+        );
+      }
+      const visible = await readHtmlFile(visiblePath, "Version Working Copy", {
+        projectRootPath: loaded.paths.projectRootPath,
+      });
+      if (visible.sha256 !== transaction.candidateOutputSha256) {
+        throw new ProjectFileRepositoryError(
+          "PROMOTION_PATH_REPLACED",
+          "The allocated Version Working Copy bytes changed before manifest publication.",
         );
       }
       // Recovery enters #continuePromotion directly, so this must be the
@@ -4247,38 +4470,7 @@ export class ProjectFileRepository {
         // runtime state. Its explicit operation remains unavailable.
         continue;
       }
-      if (record.status === "processing") {
-        const candidate = await readJsonFile(
-          path.join(loaded.paths.requestsRoot, entry.name, "candidate.json"),
-          "candidate.json",
-          { projectRootPath: loaded.paths.projectRootPath },
-        );
-        if (candidate?.candidateId === record.candidateId && candidate.status === "pending-review") {
-          record.status = "candidate-ready";
-          record.completedAt = record.completedAt || nowIso(this.#clock);
-          await atomicWriteProjectJson(
-            loaded.paths.projectRootPath,
-            requestPath,
-            record,
-            "request.json",
-          );
-        }
-      }
       if (["processing", "candidate-ready"].includes(record.status)) {
-        if (record.status === "candidate-ready") {
-          const candidate = await readJsonFile(
-            path.join(loaded.paths.requestsRoot, entry.name, "candidate.json"),
-            "candidate.json",
-            { projectRootPath: loaded.paths.projectRootPath },
-          );
-          if (candidate?.candidateId !== record.candidateId || candidate.status !== "pending-review") {
-            throw new ProjectFileRepositoryError(
-              "REQUEST_CANDIDATE_MISSING",
-              "A Request marked ready for review has no matching Candidate.",
-              { requestId: record.requestId },
-            );
-          }
-        }
         activeRecords.push({ record, workingCopy });
       }
     }
@@ -4359,26 +4551,13 @@ export class ProjectFileRepository {
         { projectRootPath: loaded.paths.projectRootPath },
       );
       if (!transaction || transaction.kind !== "promotion" || transaction.state === "completed") continue;
-      const candidatePath = path.join(
-        loaded.paths.requestsRoot,
-        transaction.requestId,
-        "candidate.json",
+      const candidateState = await this.#readCandidateForLoaded(
+        loaded,
+        transaction.candidateId,
       );
-      const candidate = await readJsonFile(candidatePath, "candidate.json", {
-        projectRootPath: loaded.paths.projectRootPath,
-      });
-      if (!candidate) continue;
-      const outputPath = resolveRelative(
-        loaded.paths.controlRoot,
-        candidate.outputRelativePath,
-        "candidate output path",
-      );
-      const output = await readHtmlFile(outputPath, "Candidate HTML", {
-        projectRootPath: loaded.paths.projectRootPath,
-      });
       recovered.push(await this.#continuePromotion(
         loaded,
-        { candidate, candidatePath, outputPath, output },
+        candidateState,
         transactionRoot,
         transaction,
       ));

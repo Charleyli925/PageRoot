@@ -9,6 +9,7 @@ import {
 import {
   finalizeProjectFileAttempt,
 } from "../scripts/project-file-finalizer.mjs";
+import { sha256 } from "../scripts/lifecycle-core.mjs";
 
 function html(label) {
   return `<!doctype html><html><head><title>${label}</title></head><body><h1>${label}</h1></body></html>`;
@@ -222,6 +223,32 @@ test("project-file Request becomes a Candidate on finalization and a Version onl
   assert.equal(ready.body.status, "ready-to-open");
   assert.equal(ready.body.versionId, "ver_0002");
   assert.ok(["ready", "attention"].includes(ready.body.candidateAssessment.status));
+  const controlRoot = join(ensured.body.projectRoot, ".pageroot");
+  const candidateRecordPath = join(
+    controlRoot,
+    "requests",
+    request.body.requestId,
+    "candidate.json",
+  );
+  const [runtimeText, candidateRecord] = await Promise.all([
+    readFile(join(controlRoot, "runtime-state.json")),
+    readFile(candidateRecordPath),
+  ]);
+  const runtime = JSON.parse(runtimeText);
+  assert.equal(
+    runtime.activeRequest.candidateOutputSha256,
+    sha256(Buffer.from(candidateHtml, "utf8")),
+  );
+  assert.equal(runtime.activeRequest.candidateRecordSha256, sha256(candidateRecord));
+  const tamperedCandidateRecord = JSON.parse(candidateRecord.toString("utf8"));
+  tamperedCandidateRecord.createdAt = "2000-01-01T00:00:00.000Z";
+  await writeFile(candidateRecordPath, JSON.stringify(tamperedCandidateRecord), "utf8");
+  const sealRejected = await bridge.requestJson(
+    `/status?sourcePath=${encodeURIComponent(ensured.body.sourcePath)}&requestId=${encodeURIComponent(request.body.requestId)}&attemptId=${encodeURIComponent(request.body.attemptId)}`,
+  );
+  assert.equal(sealRejected.response.status, 409, JSON.stringify(sealRejected.body));
+  assert.equal(sealRejected.body.error.code, "CANDIDATE_AUTHORITY_MISMATCH");
+  await writeFile(candidateRecordPath, candidateRecord);
   const beforeAdoption = JSON.parse(await readFile(
     join(ensured.body.projectRoot, ".pageroot", "manifest.json"),
     "utf8",

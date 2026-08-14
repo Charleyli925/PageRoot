@@ -85,6 +85,12 @@ test("project-file finalizer freezes a Candidate output without publishing a Ver
   assert.equal(finalized.ok, true);
   assert.equal(finalized.status, "completed");
   assert.equal(finalized.proposedVersionId, "ver_0002");
+  const runtime = JSON.parse(await readFile(
+    path.join(imported.target.projectRootPath, ".pageroot", "runtime-state.json"),
+    "utf8",
+  ));
+  assert.equal(runtime.activeRequest.candidateOutputSha256, null);
+  assert.equal(runtime.activeRequest.candidateRecordSha256, null);
   const replayed = await finalizeProjectFileAttempt({
     projectRoot: imported.target.projectRootPath,
     requestId: request.requestId,
@@ -184,6 +190,59 @@ test("project-file finalizer seals the complete frozen Request bundle", async (t
         requestId: request.requestId,
       }),
       (error) => error?.code === "REQUEST_IDENTITY_MISMATCH",
+    );
+  });
+
+  await t.test("rejects non-null Candidate seals while the Request is still processing", async (subtest) => {
+    const { imported, request } = await preparedRequest(subtest, "req_candidate_seal_shape");
+    const runtimePath = path.join(
+      imported.target.projectRootPath,
+      ".pageroot",
+      "runtime-state.json",
+    );
+    const runtime = JSON.parse(await readFile(runtimePath, "utf8"));
+    runtime.activeRequest.candidateOutputSha256 = sha256(Buffer.from(html("untrusted"), "utf8"));
+    runtime.activeRequest.candidateRecordSha256 = sha256(Buffer.from("untrusted record", "utf8"));
+    await writeFile(runtimePath, JSON.stringify(runtime), "utf8");
+
+    await assert.rejects(
+      finalizeProjectFileAttempt({
+        projectRoot: imported.target.projectRootPath,
+        requestId: request.requestId,
+        attemptId: request.attemptId,
+      }),
+      (error) => error?.code === "REQUEST_IDENTITY_MISMATCH",
+    );
+  });
+
+  await t.test("replay verifies pending-review Candidate record and output seals", async (subtest) => {
+    const { repository, imported, request, requestRoot } = await preparedRequest(
+      subtest,
+      "req_candidate_seal_replay",
+    );
+    await finalizeProjectFileAttempt({
+      projectRoot: imported.target.projectRootPath,
+      requestId: request.requestId,
+      attemptId: request.attemptId,
+    });
+    await repository.completeRequest({
+      target: imported.target,
+      requestId: request.requestId,
+      attemptId: request.attemptId,
+      html: html("Candidate"),
+    });
+    const candidatePath = path.join(requestRoot, "candidate.json");
+    const candidate = JSON.parse(await readFile(candidatePath, "utf8"));
+    candidate.createdAt = "2000-01-01T00:00:00.000Z";
+    await writeFile(candidatePath, JSON.stringify(candidate), "utf8");
+
+    await assert.rejects(
+      finalizeProjectFileAttempt({
+        projectRoot: imported.target.projectRootPath,
+        requestId: request.requestId,
+        attemptId: request.attemptId,
+      }),
+      (error) => error?.code === "CANDIDATE_AUTHORITY_MISMATCH",
     );
   });
 

@@ -862,6 +862,23 @@
       ]
     },
     {
+      "id": "project-runtime-state-v4-candidate-seals",
+      "patterns": [
+        "^schemas/project-runtime-state\\.v4\\.schema\\.json$"
+      ],
+      "suites": ["electron-smoke", "ai-smoke"],
+      "nodeTests": [
+        "tests/project-file-repository.test.mjs",
+        "tests/project-file-finalizer.test.mjs",
+        "tests/project-file-bridge.test.mjs",
+        "tests/project-file-schema.test.mjs",
+        "tests/bridge-test-environment.test.mjs",
+        "tests/electron-app-fixture.test.mjs",
+        "tests/desktop-preload-ipc.test.mjs",
+        "tests/desktop-package.test.mjs"
+      ]
+    },
+    {
       "id": "bridge-lifecycle",
       "patterns": [
         "^scripts/(?:workspace-bridge|lifecycle-core|finalize-attempt|record-user-supplement|user-supplement-core|candidate-assessment(?:-decoder)?|scope-validator|html-source-parser|attachment-storage|product-contract|target-identity)\\.mjs$"

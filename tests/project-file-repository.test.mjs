@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   cp,
+  link,
   lstat,
   mkdir,
   mkdtemp,
@@ -172,6 +173,141 @@ test("blocked Candidate validation never reserves a Version", async (t) => {
     "manifest.json",
   ));
   assert.deepEqual(manifest.versions.map((version) => version.versionId), ["ver_0001"]);
+});
+
+test("runtime authority seals Candidate record and output after review begins", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value);
+  const candidate = await value.repository.createCandidate({
+    target: imported.target,
+    requestId: "req_candidate_authority",
+    candidateId: "candidate_authority_0001",
+    html: html("reviewed candidate"),
+    expectedSourceSha256: imported.target.sourceSha256,
+  });
+  const requestRoot = path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "requests",
+    "req_candidate_authority",
+  );
+  const runtimePath = path.join(imported.target.projectRootPath, ".pageroot", "runtime-state.json");
+  const runtimeBefore = await json(runtimePath);
+  const rewrittenHtml = html("unreviewed replacement");
+  const rewrittenRecord = await json(path.join(requestRoot, "candidate.json"));
+  rewrittenRecord.outputSha256 = sha256(Buffer.from(rewrittenHtml, "utf8"));
+  await writeFile(path.join(requestRoot, "candidate.html"), rewrittenHtml, "utf8");
+  await writeFile(path.join(requestRoot, "candidate.json"), JSON.stringify(rewrittenRecord), "utf8");
+
+  await assert.rejects(
+    value.repository.readCandidate({
+      target: imported.target,
+      candidateId: candidate.candidate.candidateId,
+    }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "CANDIDATE_AUTHORITY_MISMATCH",
+  );
+  await assert.rejects(
+    value.repository.promoteCandidate({
+      target: imported.target,
+      candidateId: candidate.candidate.candidateId,
+    }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "CANDIDATE_AUTHORITY_MISMATCH",
+  );
+
+  const runtimeAfter = await json(runtimePath);
+  assert.equal(
+    runtimeAfter.activeRequest.candidateOutputSha256,
+    runtimeBefore.activeRequest.candidateOutputSha256,
+  );
+  assert.equal(
+    runtimeAfter.activeRequest.candidateRecordSha256,
+    runtimeBefore.activeRequest.candidateRecordSha256,
+  );
+});
+
+test("request recovery promotes a prepared Candidate only when its runtime seal survives", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value);
+  const request = await value.repository.prepareRequest({
+    target: imported.target,
+    requestId: "req_candidate_recovery",
+    attemptId: "attempt_001",
+    expectedSourceSha256: imported.target.sourceSha256,
+    request: { summary: "recover sealed candidate" },
+    prompt: "# recover sealed candidate\n",
+  });
+  const interrupted = new ProjectFileRepository({
+    projectsRoot: value.projects,
+    failpoint: async (name) => name === "candidate-prepared",
+  });
+  await assert.rejects(
+    interrupted.completeRequest({
+      target: imported.target,
+      requestId: request.requestId,
+      attemptId: request.attemptId,
+      html: html("candidate after interrupted completion"),
+    }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "INJECTED_FAILPOINT",
+  );
+
+  const recovered = await new ProjectFileRepository({ projectsRoot: value.projects }).workspace({
+    sourcePath: imported.target.exactSourcePath,
+  });
+  assert.equal(recovered.activeRequest.status, "candidate-ready");
+  assert.equal(recovered.activeCandidate.candidateId, request.candidateId);
+});
+
+test("Promotion recovery does not bypass the runtime-sealed Candidate record", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "sealed-promotion.html");
+  const candidate = await value.repository.createCandidate({
+    target: imported.target,
+    requestId: "req_sealed_promotion",
+    candidateId: "candidate_sealed_promotion_0001",
+    html: html("sealed Candidate"),
+    expectedSourceSha256: imported.target.sourceSha256,
+  });
+  const interrupted = new ProjectFileRepository({
+    projectsRoot: value.projects,
+    failpoint: async (name) => name === "promotion-working-copy-prepared",
+  });
+  await assert.rejects(
+    interrupted.promoteCandidate({
+      target: imported.target,
+      candidateId: candidate.candidate.candidateId,
+    }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "INJECTED_FAILPOINT",
+  );
+
+  const candidatePath = path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "requests",
+    "req_sealed_promotion",
+    "candidate.json",
+  );
+  const replacement = await json(candidatePath);
+  replacement.createdAt = "2000-01-01T00:00:00.000Z";
+  await writeFile(candidatePath, JSON.stringify(replacement), "utf8");
+
+  await assert.rejects(
+    new ProjectFileRepository({ projectsRoot: value.projects }).workspace({
+      sourcePath: imported.target.exactSourcePath,
+    }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "CANDIDATE_AUTHORITY_MISMATCH",
+  );
+  const manifest = await json(path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "manifest.json",
+  ));
+  assert.deepEqual(manifest.versions.map((version) => version.versionId), ["ver_0001"]);
+  assert.equal(await readFile(imported.target.exactSourcePath, "utf8"), html("V1"));
 });
 
 test("a Candidate cannot be adopted after its frozen Working Copy changes", async (t) => {
@@ -363,6 +499,46 @@ test("exact path, rather than equal bytes, determines the opened document", asyn
   assert.equal(reopenedFirst.exactSourcePath, first.target.exactSourcePath);
   assert.equal(reopenedSecond.projectId, second.target.projectId);
   assert.equal(reopenedSecond.exactSourcePath, second.target.exactSourcePath);
+});
+
+test("unlisted HTML never acquires a v4 binding from equal bytes or an inode", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "managed.html");
+  const equalBytesPath = path.join(imported.target.projectRootPath, "unmanaged-copy.html");
+  const hardLinkPath = path.join(imported.target.projectRootPath, "unmanaged-hard-link.html");
+  await writeFile(equalBytesPath, await readFile(imported.target.exactSourcePath));
+  await link(imported.target.exactSourcePath, hardLinkPath);
+
+  for (const sourcePath of [equalBytesPath, hardLinkPath]) {
+    assert.equal(
+      await value.repository.resolveOpenTarget({ sourcePath }),
+      null,
+      sourcePath,
+    );
+    assert.equal(await value.repository.workspace({ sourcePath }), null, sourcePath);
+  }
+  const manifestBeforeImport = await json(path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "manifest.json",
+  ));
+  assert.deepEqual(
+    manifestBeforeImport.workingCopies.map((entry) => entry.sourceRelativePath),
+    ["managed-V1.html"],
+  );
+
+  const fresh = await value.repository.importExternal({
+    sourcePath: equalBytesPath,
+    expectedSourceSha256: sha256(await readFile(equalBytesPath)),
+  });
+  assert.notEqual(fresh.target.projectId, imported.target.projectId);
+  assert.equal(await readFile(hardLinkPath, "utf8"), html("V1"));
+  const manifestAfterImport = await json(path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "manifest.json",
+  ));
+  assert.deepEqual(manifestAfterImport, manifestBeforeImport);
 });
 
 test("same-parent root and Working Copy renames preserve identity; moves outside stop writes until return", async (t) => {
@@ -651,6 +827,54 @@ test("promotion uses the latest Working Copy name and allocates around file, dir
   assert.equal(await readFile(collisionFile, "utf8"), html("user file collision"));
   assert.equal((await lstat(collisionDirectory)).isDirectory(), true);
   assert.equal((await lstat(collisionSymlink)).isSymbolicLink(), true);
+});
+
+test("promotion retries the next same-ordinal path after an OS no-replace collision", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "A.html");
+  const candidateHtml = html("same bytes as concurrent user file");
+  const candidate = await value.repository.createCandidate({
+    target: imported.target,
+    requestId: "req_no_replace_race",
+    candidateId: "candidate_no_replace_race_0001",
+    html: candidateHtml,
+    expectedSourceSha256: imported.target.sourceSha256,
+  });
+  const renamedPath = path.join(imported.target.projectRootPath, "B-V1.html");
+  await rename(imported.target.exactSourcePath, renamedPath);
+  const renamed = await value.repository.resolveOpenTarget({ sourcePath: renamedPath });
+  let raced = false;
+  const repository = new ProjectFileRepository({
+    projectsRoot: value.projects,
+    failpoint: async (name, details) => {
+      if (name === "promotion-visible-publication-before-link" && !raced) {
+        raced = true;
+        await writeFile(details.visiblePath, candidateHtml, "utf8");
+      }
+      return false;
+    },
+  });
+
+  const promoted = await repository.promoteCandidate({
+    target: renamed,
+    candidateId: candidate.candidate.candidateId,
+  });
+  assert.equal(raced, true);
+  assert.equal(path.basename(promoted.target.exactSourcePath), "B-V2-V2.html");
+  assert.equal(
+    await readFile(path.join(imported.target.projectRootPath, "B-V2.html"), "utf8"),
+    candidateHtml,
+  );
+  assert.equal(await readFile(promoted.target.exactSourcePath, "utf8"), candidateHtml);
+  const transaction = await json(path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "transactions",
+    `promote_${candidate.candidate.candidateId}`,
+    "transaction.json",
+  ));
+  assert.equal(transaction.finalWorkingCopyRelativePath, "B-V2-V2.html");
+  assert.equal(transaction.pathAllocationOrdinal, 1);
 });
 
 test("save fault injection recovers a complete durable state or a retained old state", async (t) => {
@@ -1256,6 +1480,60 @@ test("a replaced private promotion file fails recovery without deleting user byt
   assert.equal(await readFile(preparedPath, "utf8"), replacement);
 });
 
+test("a replaced published promotion file fails recovery without deleting user bytes", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "published-promotion.html");
+  const candidate = await value.repository.createCandidate({
+    target: imported.target,
+    requestId: "req_replaced_published_promotion",
+    candidateId: "candidate_replaced_published_promotion_0001",
+    html: html("Candidate before visible replacement"),
+    expectedSourceSha256: imported.target.sourceSha256,
+  });
+  const replacement = html("user-owned replacement after publication");
+  let publishedPath = null;
+  const interrupted = new ProjectFileRepository({
+    projectsRoot: value.projects,
+    failpoint: async (name, details) => {
+      if (name === "promotion-working-copy-created") {
+        const transaction = await json(path.join(details.transactionRoot, "transaction.json"));
+        publishedPath = path.join(
+          imported.target.projectRootPath,
+          transaction.finalWorkingCopyRelativePath,
+        );
+        await rm(publishedPath);
+        await writeFile(publishedPath, replacement, "utf8");
+        return true;
+      }
+      return false;
+    },
+  });
+  await assert.rejects(
+    interrupted.promoteCandidate({
+      target: imported.target,
+      candidateId: candidate.candidate.candidateId,
+    }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "INJECTED_FAILPOINT",
+  );
+  assert.ok(publishedPath);
+
+  await assert.rejects(
+    new ProjectFileRepository({ projectsRoot: value.projects }).workspace({
+      sourcePath: imported.target.exactSourcePath,
+    }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "PROMOTION_PATH_REPLACED",
+  );
+  assert.equal(await readFile(publishedPath, "utf8"), replacement);
+  const manifest = await json(path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "manifest.json",
+  ));
+  assert.deepEqual(manifest.versions.map((version) => version.versionId), ["ver_0001"]);
+});
+
 test("promotion fault recovery leaves exactly one formal Version and regular files at every commit point", async (t) => {
   for (const failpoint of [
     "promotion-prepared",
@@ -1303,5 +1581,10 @@ test("promotion fault recovery leaves exactly one formal Version and regular fil
     const htmlInfo = await lstat(path.join(imported.target.projectRootPath, "原文件-V2.html"));
     assert.equal(htmlInfo.isFile(), true);
     assert.equal(htmlInfo.isSymbolicLink(), false);
+    await assert.rejects(
+      readFile(path.join(imported.target.projectRootPath, "原文件-V2-V2.html")),
+      (error) => error?.code === "ENOENT",
+      failpoint,
+    );
   }
 });

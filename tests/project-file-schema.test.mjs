@@ -44,6 +44,24 @@ async function validate(schemaName, value) {
   );
 }
 
+async function validateRejects(schemaName, value) {
+  const schema = JSON.parse(await readFile(
+    new URL(`../schemas/${schemaName}`, import.meta.url),
+    "utf8",
+  ));
+  const ajv = new Ajv2020({
+    allErrors: true,
+    strict: true,
+    strictRequired: false,
+  });
+  ajv.addFormat(
+    "date-time",
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/u,
+  );
+  const check = ajv.compile(schema);
+  assert.equal(check(value), false, `${schemaName} unexpectedly accepted invalid runtime authority`);
+}
+
 test("v4 schemas accept repository-produced identity, Working Copy, Candidate and Promotion facts", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "pageroot-project-file-schema-"));
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -83,7 +101,27 @@ test("v4 schemas accept repository-produced identity, Working Copy, Candidate an
     expectedSourceSha256: imported.target.sourceSha256,
   });
   const candidatePath = path.join(controlRoot, "requests", "req_schema", "candidate.json");
-  await validate("candidate.v4.schema.json", await json(candidatePath));
+  const candidateRuntime = await json(path.join(controlRoot, "runtime-state.json"));
+  await Promise.all([
+    validate("candidate.v4.schema.json", await json(candidatePath)),
+    validate("project-runtime-state.v4.schema.json", candidateRuntime),
+  ]);
+  assert.match(candidateRuntime.activeRequest.candidateOutputSha256, /^sha256:[a-f0-9]{64}$/u);
+  assert.match(candidateRuntime.activeRequest.candidateRecordSha256, /^sha256:[a-f0-9]{64}$/u);
+  const missingCandidateSeal = structuredClone(candidateRuntime);
+  delete missingCandidateSeal.activeRequest.candidateOutputSha256;
+  const wrongCandidateSealType = structuredClone(candidateRuntime);
+  wrongCandidateSealType.activeRequest.candidateRecordSha256 = 42;
+  const malformedCandidateSeal = structuredClone(candidateRuntime);
+  malformedCandidateSeal.activeRequest.candidateOutputSha256 = "sha256:not-a-digest";
+  const missingPendingReviewSeal = structuredClone(candidateRuntime);
+  missingPendingReviewSeal.activeRequest.candidateOutputSha256 = null;
+  await Promise.all([
+    validateRejects("project-runtime-state.v4.schema.json", missingCandidateSeal),
+    validateRejects("project-runtime-state.v4.schema.json", wrongCandidateSealType),
+    validateRejects("project-runtime-state.v4.schema.json", malformedCandidateSeal),
+    validateRejects("project-runtime-state.v4.schema.json", missingPendingReviewSeal),
+  ]);
 
   const promoted = await repository.promoteCandidate({
     target: imported.target,
