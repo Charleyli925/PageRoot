@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import {
   cpSync,
   existsSync,
@@ -49,10 +48,6 @@ import {
 } from "./helpers/pageroot-app-fixture.mjs";
 
 const ORIGINAL_LIST_TEXT = "列表项中的文字保持项目符号和缩进。";
-
-function sha256(value) {
-  return `sha256:${createHash("sha256").update(value).digest("hex")}`;
-}
 
 function removeIsolatedUserData(isolatedUserData) {
   removeValidatedTemporaryDirectory(isolatedUserData, "pageroot-native-e2e-");
