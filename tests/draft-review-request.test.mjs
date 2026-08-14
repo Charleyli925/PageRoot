@@ -293,6 +293,31 @@ test("probe completion only accepts post-request Codex evidence bound to the exa
     }),
     null,
   );
+  assert.equal(
+    probeCompletion({
+      issueComments: [{
+        databaseId: 7,
+        user: { login: "chatgpt-codex-connector[bot]" },
+        created_at: "2026-08-09T04:01:00.000Z",
+        body: "Codex Review: Didn't find any major issues.\n\n",
+      }],
+      expectedHeadSha: headSha,
+      afterMs: after,
+    }),
+    null,
+  );
+  assert.equal(
+    probeCompletion({
+      issueReactions: [{
+        user: { login: "chatgpt-codex-connector[bot]" },
+        content: "+1",
+        created_at: "2026-08-09T04:01:00.000Z",
+      }],
+      expectedHeadSha: headSha,
+      afterMs: after,
+    }),
+    null,
+  );
 });
 
 test("fresh settlement revalidation refuses to close the marker after promotion", () => {

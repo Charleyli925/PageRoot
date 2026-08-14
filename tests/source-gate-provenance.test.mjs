@@ -299,7 +299,7 @@ test("the Draft Codex review probe stays a trusted default-branch issue-comment 
   assert.match(workflow, /permissions:\s*\n\s+contents: read\s*\n\s+pull-requests: write/u);
   assert.doesNotMatch(workflow, /contents: write|issues: write|actions: write|checks: write/u);
   assert.doesNotMatch(workflow, /gh pr merge|mergePullRequest|git push|git tag|gh release/u);
-  assert.match(workflow, /if: github\.event\.issue\.pull_request/u);
+  assert.match(workflow, /if: >-\s*\n\s+github\.event\.issue\.pull_request\s*\n\s+&& contains\(github\.event\.comment\.body, 'pageroot-draft-review-command:v1'\)/u);
   assert.match(workflow, /draft-review-request\.mjs/u);
   assert.match(workflow, /persist-credentials: false/u);
   assert.match(workflow, /ISSUE_NUMBER: \$\{\{\s*github\.event\.issue\.number\s*\}\}/u);

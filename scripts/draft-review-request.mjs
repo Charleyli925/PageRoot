@@ -17,7 +17,6 @@ const GITHUB_API_VERSION = "2022-11-28";
 const MAX_REST_PAGES = 20;
 const CODEX_LOGIN = "chatgpt-codex-connector";
 const REVIEWED_COMMIT_PATTERN = /\*\*Reviewed commit:\*\*\s*`([0-9a-f]{10,40})`/iu;
-const CLEAN_COMPLETION_PATTERN = /^Codex Review:\s*Didn't find any major issues\.[^\r\n]*\r?\n\r?\n/iu;
 const PRIORITY_BADGE_PATTERN = /\bP([0-3])\s+Badge\b/giu;
 const PRIORITY_LINE_PATTERN = /(?:^|\r?\n)\s*(?:[-*]\s*)?(?:\*\*)?\[?P([0-3])\]?(?:\*\*)?\s*[:：-]/gimu;
 const TRUSTED_ASSOCIATIONS = new Set(["OWNER", "COLLABORATOR", "MEMBER"]);
@@ -297,14 +296,15 @@ function classifyProbePriority(body) {
 
 export function probeCompletion({
   reviews = [],
-  issueComments = [],
-  issueReactions = [],
   expectedHeadSha,
   afterMs,
 } = {}) {
   const head = String(expectedHeadSha || "").toLowerCase();
   if (!SHA_PATTERN.test(head) || !Number.isFinite(afterMs)) return null;
   const results = [];
+  // Reactions and clean comments carry no head or request identity, so they
+  // can never prove that this exact head's round settled. Only an exact-commit
+  // Codex review with a matching Reviewed commit prefix may close the marker.
   for (const review of reviews) {
     if (!isCodexActor(review?.user?.login || review?.author?.login)) continue;
     const commit = String(review?.commit_id || review?.commit?.oid || "").toLowerCase();
@@ -318,20 +318,6 @@ export function probeCompletion({
       priority: classifyProbePriority(review?.body),
       reviewId: Number(review?.id || 0) || null,
     });
-  }
-  for (const comment of issueComments) {
-    if (!isCodexActor(commentAuthor(comment))) continue;
-    const body = commentBody(comment);
-    const at = timestamp(comment?.created_at || comment?.createdAt);
-    if (!CLEAN_COMPLETION_PATTERN.test(body) || !Number.isFinite(at) || at <= afterMs) continue;
-    results.push({ kind: "codex_clean_comment", at, priority: "unclassified", commentId: Number(comment?.databaseId || 0) || null });
-  }
-  for (const reaction of issueReactions) {
-    if (!isCodexActor(reaction?.user?.login || reaction?.author?.login)) continue;
-    if (String(reaction?.content ?? "") !== "+1") continue;
-    const at = timestamp(reaction?.created_at || reaction?.createdAt);
-    if (!Number.isFinite(at) || at <= afterMs) continue;
-    results.push({ kind: "codex_clean_reaction", at, priority: "unclassified" });
   }
   results.sort((left, right) => right.at - left.at);
   return results[0] || null;
