@@ -36,11 +36,12 @@ Tree，不在测试执行期间自动合并分支。组合 Tree 含任何未合�
 
 PR 必须从 Draft 开始。普通推送由独立的 `PR Feedback` workflow 处理，
 不会创建名为 `release-gate` 的跳过 job；因此分支保护不会把轻量反馈误当
-完整通过。同一 workflow 的 `review-advisory` job 以相同证据合同对 live pair
-做一次非阻断快照，把当前活动的 P0/P1 暴露在晋升之前；Codex 只在 Ready
-转换后才评审，Draft 期轮询不可能观察到新评审，因此 advisory 是快照语义，
+做一次非阻断快照，把当前活动的 P0/P1 暴露在晋升之前。每次 `PR Feedback`
+成功后，可信的 `Draft Codex Review Auto` workflow 会为 exact head 自动请求
+一次 Codex 评审并把结轮状态写进滚动 status 评论；维护者也可用
+`pageroot-draft-review-command:v1` 评论手动请求或关闭一轮。Codex 只在 Ready
+转换后或受信 exact-head 请求后评审，Draft 期轮询不可能观察到新评审，因此 advisory 是快照语义，
 `review-policy` 才是权威等待。只切回 Draft 不触发
-Feedback。冻结 head 并更新到当前 base 后，直接 Ready 一次；无需再用完整
 head/base SHA marker 在 Draft 请求第二轮审阅。
 `review-policy` 只接受 Ready 后携带当前完整 `commit_id` 和匹配
 `Reviewed commit` marker 的 Codex review、不可编辑的 exact-commit clean

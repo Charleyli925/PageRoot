@@ -228,7 +228,7 @@
       "patterns": [
         "^scripts/source-gate-provenance\\.mjs$",
         "^tests/source-gate-provenance\\.test\\.mjs$",
-        "^\\.github/workflows/(?:ci|pr-feedback|developer-preview|release|release-candidate|release-dry-run)\\.yml$"
+        "^\\.github/workflows/(?:ci|pr-feedback|draft-review|draft-review-auto|developer-preview|release|release-candidate|release-dry-run)\\.yml$"
       ],
       "suites": [],
       "nodeTests": ["tests/source-gate-provenance.test.mjs"]
@@ -237,11 +237,24 @@
       "id": "pr-review-policy",
       "patterns": [
         "^scripts/check-pr-review-policy\\.mjs$",
+        "^scripts/draft-review-request\\.mjs$",
+        "^scripts/draft-review-marker\\.mjs$",
         "^tests/pr-review-policy\\.test\\.mjs$",
         "^\\.github/workflows/(?:ci|pr-feedback)\\.yml$"
       ],
       "suites": [],
       "nodeTests": ["tests/pr-review-policy.test.mjs"]
+    },
+    {
+      "id": "draft-review-request",
+      "patterns": [
+        "^scripts/draft-review-request\\.mjs$",
+        "^scripts/draft-review-marker\\.mjs$",
+        "^tests/draft-review-request\\.test\\.mjs$",
+        "^\\.github/workflows/draft-review(?:-auto)?\\.yml$"
+      ],
+      "suites": [],
+      "nodeTests": ["tests/draft-review-request.test.mjs"]
     },
     {
       "id": "review-gate-recovery",

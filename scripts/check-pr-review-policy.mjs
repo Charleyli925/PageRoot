@@ -4,6 +4,11 @@ import { appendFile, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import {
+  DEFAULT_TRUSTED_ACTOR,
+  parseDraftReviewRequestMarker,
+} from "./draft-review-marker.mjs";
+
 const scriptPath = fileURLToPath(import.meta.url);
 const productRoot = path.resolve(path.dirname(scriptPath), "..");
 const SHA_PATTERN = /^[0-9a-f]{40}$/u;
@@ -13,7 +18,7 @@ const DEFAULT_SETTLE_SECONDS = 30;
 const DEFAULT_TIMEOUT_SECONDS = 15 * 60;
 const DEFAULT_POLL_SECONDS = 15;
 const MAX_REST_PAGES = 20;
-const POLICY_VERSION = "2026-08-14.2";
+const POLICY_VERSION = "2026-08-14.3";
 const PRIORITY_BADGE_PATTERN = /\bP([0-3])\s+Badge\b/giu;
 const PRIORITY_LINE_PATTERN = /(?:^|\r?\n)\s*(?:[-*]\s*)?(?:\*\*)?\[?P([0-3])\]?(?:\*\*)?\s*[:：-]/gimu;
 const REVIEWED_COMMIT_PATTERN = /\*\*Reviewed commit:\*\*\s*`([0-9a-f]{10,40})`/iu;
@@ -30,6 +35,30 @@ function isCodexActor(value) {
 
 function actorLogin(value) {
   return value?.user?.login || value?.author?.login || value?.author || "";
+}
+
+function issueCommentBody(value) {
+  return String(value?.body ?? "");
+}
+
+// A trusted Draft-phase probe request carries an exact-head marker so the
+// final gate can tell a still-open probe round apart from the Ready-triggered
+// review. While that marker is open, no post-Ready completion may satisfy the
+// final policy: a late probe response must never let the gate pass while the
+// Ready-triggered Codex round is still in flight.
+function hasOpenDraftReviewRequest(
+  issueComments,
+  expectedHeadSha,
+  trustedActor = DEFAULT_TRUSTED_ACTOR,
+) {
+  const head = String(expectedHeadSha || "").toLowerCase();
+  const actor = normalizedLogin(trustedActor);
+  if (!SHA_PATTERN.test(head) || !actor) return false;
+  return (issueComments || []).some((comment) => {
+    if (normalizedLogin(actorLogin(comment)) !== actor) return false;
+    const marker = parseDraftReviewRequestMarker(issueCommentBody(comment));
+    return marker !== null && marker.headSha === head;
+  });
 }
 
 function timestamp(value) {
@@ -357,13 +386,17 @@ export function evaluateReviewPolicy({
     ...reviewFindings.filter((finding) => finding.state === "non_blocking" && finding.reason !== "review_not_changes_requested"),
     ...threadFindings.filter((finding) => finding.state === "non_blocking"),
   ].map(findingSummary);
-  const completion = finalCodexCompletion({
-    reviews,
-    issueComments,
-    issueReactions,
-    expectedHeadSha: expectedHead,
-    readyAt: readyAtMs,
-  });
+  const draftRequestOpen = !advisory
+    && hasOpenDraftReviewRequest(issueComments, expectedHead);
+  const completion = draftRequestOpen
+    ? null
+    : finalCodexCompletion({
+      reviews,
+      issueComments,
+      issueReactions,
+      expectedHeadSha: expectedHead,
+      readyAt: readyAtMs,
+    });
   const baseFields = {
     readyAt,
     blockingFindings,
@@ -377,7 +410,14 @@ export function evaluateReviewPolicy({
   if (blockingFindings.length > 0) {
     return policyResult(identity, "blocked", "blocking_review_finding", baseFields);
   }
-  if (!completion) return policyResult(identity, "waiting", "final_review_in_progress", baseFields);
+  if (!completion) {
+    return policyResult(
+      identity,
+      "waiting",
+      draftRequestOpen ? "draft_review_request_open" : "final_review_in_progress",
+      baseFields,
+    );
+  }
   const settlesAtMs = completion.at + settleSeconds * 1000;
   if (nowMs < settlesAtMs) {
     return policyResult(identity, "waiting", "settle_window", {

@@ -376,7 +376,7 @@ test("review-policy artifact carries machine-readable completion and findings", 
     await assert.rejects(() => writeReviewPolicyArtifact(result, relative), /inside the repository/u);
     destination = await writeReviewPolicyArtifact(result, "output/review-policy/test-policy.json");
     const artifact = JSON.parse(await readFile(destination, "utf8"));
-    assert.equal(artifact.policyVersion, "2026-08-14.2");
+    assert.equal(artifact.policyVersion, "2026-08-14.3");
     assert.equal(artifact.status, "passed");
     assert.equal(artifact.reviewCompletionKind, "codex_clean_reaction");
     assert.equal(artifact.nonBlockingFindings[0].priority, "P2");
@@ -384,4 +384,51 @@ test("review-policy artifact carries machine-readable completion and findings", 
     if (destination) await rm(destination, { force: true });
     await rm(tempRoot, { recursive: true, force: true });
   }
+});
+
+function draftRequestComment({
+  head = headSha,
+  base = baseSha,
+  actor = "github-actions[bot]",
+} = {}) {
+  return {
+    author: { login: actor },
+    body: `<!-- pageroot-draft-review-request:v1\nhead=${head}\nbase=${base}\nsource_run=123\n-->`,
+  };
+}
+
+test("an open trusted Draft review request marker cannot satisfy the final gate", () => {
+  const reviewCase = evaluate({ issueComments: [draftRequestComment()] });
+  assert.equal(reviewCase.status, "waiting");
+  assert.equal(reviewCase.reason, "draft_review_request_open");
+  assert.equal(reviewCase.reviewCompletedAt, null);
+
+  const reactionCase = evaluate({
+    reviews: [],
+    issueReactions: [codexReaction()],
+    issueComments: [draftRequestComment()],
+  });
+  assert.equal(reactionCase.status, "waiting");
+  assert.equal(reactionCase.reason, "draft_review_request_open");
+
+  const staleBaseCase = evaluate({
+    issueComments: [draftRequestComment({ base: "e".repeat(40) })],
+  });
+  assert.equal(staleBaseCase.status, "waiting");
+  assert.equal(staleBaseCase.reason, "draft_review_request_open");
+});
+
+test("untrusted or non-matching Draft request markers never block the final gate", () => {
+  assert.equal(
+    evaluate({ issueComments: [draftRequestComment({ actor: "Charleyli925" })] }).status,
+    "passed",
+  );
+  assert.equal(
+    evaluate({ issueComments: [draftRequestComment({ head: "d".repeat(40) })] }).status,
+    "passed",
+  );
+  assert.equal(
+    evaluate({ issueComments: [{ author: { login: "github-actions[bot]" }, body: "ordinary comment" }] }).status,
+    "passed",
+  );
 });

@@ -34,6 +34,7 @@ mutation outcomes, reuse the shared drain boundaries and remove any workaround
 the new invariant supersedes. `npm run architecture:check` is mandatory.
 
 Push the branch and open a Draft Pull Request. The PR must explain the problem, the chosen boundary, verification performed and any user-visible impact. Keep changes coherent, but PR size is advisory rather than a hard repository limit: split only when review, rollback or product boundaries are genuinely separate. Batch verified P0/P1 user-impact fixes before marking the final head Ready once; P2/P3 and unclassified review findings are tracked in the weekly debt queue unless a maintainer explicitly escalates them.
+Push the branch and open a Draft Pull Request. The PR must explain the problem, the chosen boundary, verification performed and any user-visible impact. Keep changes coherent, but PR size is advisory rather than a hard repository limit: split only when review, rollback or product boundaries are genuinely separate. A trusted default-branch workflow automatically requests one exact-head Codex review after each successful `PR Feedback` run and records the settled head state in a rolling status comment. Batch verified P0/P1 user-impact fixes before marking the final head Ready once; P2/P3 and unclassified review findings are tracked in the weekly debt queue unless a maintainer explicitly escalates them.
 
 GitHub removes the remote task branch after squash merge. Maintainers use the
 read-only `npm run task:audit` report and an explicit
