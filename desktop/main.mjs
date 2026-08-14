@@ -140,9 +140,9 @@ const applicationName = app.isPackaged
   ? path.basename(process.execPath, path.extname(process.execPath))
   : "源页";
 app.setName(applicationName);
-if (e2eWindowRunsInBackground && process.platform === "darwin") {
-  app.setActivationPolicy("accessory");
-}
+// 后台 E2E 保留常规激活策略：窗口本身仍不显示、不抢焦点，但 macOS Dock
+// 里保留应用图标，开发者可以主动点击图标把窗口调出来查看测试进度，
+// 也可以自行最小化或隐藏。测试代码绝不主动把窗口拉到前台。
 if (e2eUserDataPath) {
   // Background E2E still needs deterministic timers, visibility state and
   // frame commits. Production launch behavior remains unchanged.
@@ -360,9 +360,15 @@ process.on("uncaughtExceptionMonitor", (error) => {
   });
 });
 
-function presentMainWindow() {
+function reportSuppressedNativeDialog(title, message) {
+  console.error(
+    `[PageRoot E2E] 后台测试模式拦截原生弹窗：${title} — ${message}`,
+  );
+}
+
+function presentMainWindow({ userInitiated = false } = {}) {
   if (
-    e2eWindowRunsInBackground
+    (e2eWindowRunsInBackground && !userInitiated)
     || !mainWindow
     || mainWindow.isDestroyed()
   ) return false;
@@ -719,10 +725,13 @@ async function readHtmlProject(filePath) {
 
 function showExternalOpenError(error) {
   const presentation = externalOpenFailurePresentation(error);
-  dialog.showErrorBox(
-    "无法打开这个 HTML",
-    `${presentation.message}\n\n错误代码：${presentation.code}`,
-  );
+  const title = "无法打开这个 HTML";
+  const message = `${presentation.message}\n\n错误代码：${presentation.code}`;
+  if (e2eWindowRunsInBackground) {
+    reportSuppressedNativeDialog(title, message);
+    return;
+  }
+  dialog.showErrorBox(title, message);
 }
 
 function focusMainWindow() {
@@ -2236,10 +2245,17 @@ async function coordinateApplicationExit(reason, intent = "quit") {
     coordinatedExit = null;
     isQuitting = false;
     resumeDeferredExternalFileOpenAfterExitAbort();
-    dialog.showErrorBox(
-      exitIntent.errorTitle,
-      error instanceof Error ? error.message : String(error),
-    );
+    if (e2eWindowRunsInBackground) {
+      reportSuppressedNativeDialog(
+        exitIntent.errorTitle,
+        error instanceof Error ? error.message : String(error),
+      );
+    } else {
+      dialog.showErrorBox(
+        exitIntent.errorTitle,
+        error instanceof Error ? error.message : String(error),
+      );
+    }
     return false;
   });
   return coordinatedExit;
@@ -2273,6 +2289,13 @@ async function showWorkspaceUnavailableRecovery() {
       delivery.issue,
     );
     return;
+  }
+  if (e2eWindowRunsInBackground) {
+    reportSuppressedNativeDialog(
+      delivery.issue.title,
+      "源页的本地项目服务已停止。当前窗口中的内容仍保留。",
+    );
+    return null;
   }
   if (workspaceFailurePrompt) return workspaceFailurePrompt;
   captureUsage("interruption_changed", {
@@ -2650,7 +2673,6 @@ if (!hasSingleInstanceLock) {
       process.platform === "darwin"
       && app.dock
       && !app.isPackaged
-      && !e2eWindowRunsInBackground
     ) {
       app.dock.setIcon(path.join(directory, "resources", "icon.png"));
     }
@@ -2666,13 +2688,27 @@ if (!hasSingleInstanceLock) {
       fingerprint: telemetryFingerprint(error),
     });
     await usageTelemetry?.shutdown({ reason: "quit" }).catch(() => {});
-    dialog.showErrorBox(
-      "源页启动失败",
-      error instanceof Error ? error.message : String(error),
-    );
+    if (e2eWindowRunsInBackground) {
+      reportSuppressedNativeDialog(
+        "源页启动失败",
+        error instanceof Error ? error.message : String(error),
+      );
+    } else {
+      dialog.showErrorBox(
+        "源页启动失败",
+        error instanceof Error ? error.message : String(error),
+      );
+    }
     app.quit();
   });
 }
+
+app.on("activate", () => {
+  // 用户主动点击 Dock 图标或通过应用切换器选中源页：后台 E2E 模式下
+  // 也允许把窗口调到前台查看，之后仍可自行最小化或隐藏；自动化路径
+  // 仍然不会主动抢占前台。
+  presentMainWindow({ userInitiated: true });
+});
 
 app.on("window-all-closed", () => {
   if (finalExitStarted) app.quit();

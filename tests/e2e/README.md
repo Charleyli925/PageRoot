@@ -66,8 +66,10 @@ only when `PAGEROOT_E2E=1` and the path is an isolated
 run the native window hidden by default, keep its renderer unthrottled, place
 the bridge workspace inside that directory, remove only validated test
 directories, and never change `HOME` or open the user's real HTML project. Set
-`PAGEROOT_E2E_FOREGROUND=1` only for deliberate visual debugging. The
-real-file case checkpoints and autosaves a temporary disk HTML, proves that
+`PAGEROOT_E2E_FOREGROUND=1` only for deliberate visual debugging. Background
+mode keeps the macOS Dock icon (click it to inspect or minimize the window)
+and suppresses automatically triggered native dialogs, logging them instead.
+The real-file case checkpoints and autosaves a temporary disk HTML, proves that
 only the authorized bytes changed, and then closes and reopens the app against
 the same forward result.
 
