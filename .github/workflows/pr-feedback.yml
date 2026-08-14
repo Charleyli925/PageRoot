@@ -61,39 +61,3 @@ jobs:
             output/test-runs
           if-no-files-found: warn
           retention-days: 14
-
-  # Non-blocking advisory snapshot of the final review policy. It evaluates
-  # the live head/base once with the same evidence contract as `review-policy`,
-  # including Draft Pull Requests, and reports the current active P0/P1
-  # findings and completion state. Codex only reviews Ready transitions, so a
-  # Draft-phase poll could never observe a fresh review; the snapshot is the
-  # warning mechanism, and `review-policy` remains the authoritative wait.
-  review-advisory:
-    name: review-advisory
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 22.13.0
-      - name: Surface current review-policy state before promotion
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: >-
-          node scripts/check-pr-review-policy.mjs
-          --repository "$GITHUB_REPOSITORY"
-          --pull-request "${{ github.event.pull_request.number }}"
-          --expected-head "${{ github.event.pull_request.head.sha }}"
-          --expected-base "${{ github.event.pull_request.base.sha }}"
-          --settle-seconds 0
-          --mode advisory
-          --output output/review-policy/review-advisory.json
-      - name: Upload review advisory
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: PageRoot-review-advisory-${{ github.run_id }}-${{ github.run_attempt }}
-          path: output/review-policy/review-advisory.json
-          if-no-files-found: warn
-          retention-days: 14

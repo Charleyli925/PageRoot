@@ -7,6 +7,7 @@ PageRoot keeps the release standard high while avoiding repeated proof of the sa
 | Boundary | Trigger | Evidence | What it must not do |
 | --- | --- | --- | --- |
 | PR feedback | Pull Request opens, updates or reopens | Impact-selected Node/compiler feedback for the current head | Report `release-gate` or run the complete Browser/Electron matrix |
+| Draft Codex review | Successful `PR Feedback` run on a Draft Pull Request, or a maintainer `pageroot-draft-review-command:v1` comment | Exact head/base request marker, one `@codex review` per head, thread-level P0/P1 classification, marker closure and rolling `pageroot-draft-review-status:v1` comment | Satisfy the final gate, review a Ready head, duplicate an in-flight request, or close an unsettled marker while the head can still be promoted |
 | Review policy | A frozen Pull Request transitions to Ready once | Live head/base equality, post-Ready exact-commit Codex completion, 30-second settle window, active P0/P1 and P0/P1 `CHANGES_REQUESTED` blocking, P2/P3/unclassified debt artifact | Reuse an old review, make review priority weaken deterministic safety checks or block a candidate solely for P2/P3 debt |
 | Dependency baseline | Branch policy pass | Unchanged advisory threshold plus exact packaged-runtime closure | Start a complete source lane or macOS runner while the global baseline is red |
 | Source candidate | Dependency baseline pass for one promoted head; final review runs in parallel | Full Node, three Browser shards, real HTML, native Electron and deterministic AI; exact-tree attestation | Automatically rerun on later commits, package or publish an installer |
@@ -48,7 +49,9 @@ review and rollback boundary is clear.
 ## CI ownership and isolation
 
 - `review-policy` is a final-candidate barrier that runs in parallel with deterministic work. It revalidates live head/base and the latest Ready event, accepts only a post-Ready exact-commit Codex review with `Reviewed commit` evidence or an unedited exact-commit clean Codex comment, then waits 30 seconds. It blocks active non-outdated P0/P1 threads and P0/P1 `CHANGES_REQUESTED` reviews; GitHub review history is reduced to each reviewer's latest explicit decision on the final head, so only a later approval or dismissal retracts an earlier request. P2/P3/unclassified findings are written to non-blocking debt regardless of reviewer. `release-gate` repeats the evidence check in immediate revalidation mode after all source lanes and before exact-tree attestation. `PR Feedback` mirrors this contract as a non-blocking single-snapshot advisory; Codex reviews only Ready transitions, so the snapshot never polls and cannot invent completion.
+- `review-policy` is a final-candidate barrier that runs in parallel with deterministic work. It revalidates live head/base and the latest Ready event, accepts only a post-Ready exact-commit Codex review with `Reviewed commit` evidence or an unedited exact-commit clean Codex comment, then waits 30 seconds. It blocks active non-outdated P0/P1 threads and P0/P1 `CHANGES_REQUESTED` reviews; GitHub review history is reduced to each reviewer's latest explicit decision on the final head, so only a later approval or dismissal retracts an earlier request. P2/P3/unclassified findings are written to non-blocking debt regardless of reviewer. `release-gate` repeats the evidence check in immediate revalidation mode after all source lanes and before exact-tree attestation. The trusted `Draft Codex Review` workflows request one exact-head Codex review after each successful `PR Feedback` run or a maintainer command, classify thread-level P0/P1, close the request marker once the round settles while Draft, and record the settled head state in a rolling status comment; an open exact-head marker keeps `review-policy` in `draft_review_request_open`, so a Draft probe can never complete the final gate.
 - `review-gate-recovery.yml` owns one narrow `actions: write` exception from trusted default-branch code. A late Codex event can request GitHub's failed-job rerun only when the live final-review policy now passes, the PR remains Ready on the exact head/base, the original attempt artifact says `review_wait_timed_out`, all required source jobs succeeded and no job other than `review-policy` plus `release-gate` failed. It never checks out PR bytes, grants the rerun new permissions, changes code or merges; every other failure shape is recorded as ignored.
+- The two `Draft Codex Review` workflows own one narrow `pull-requests: write` exception, each from trusted default-branch bytes: `draft-review.yml` runs on `issue_comment` (default-branch file only, command-marker gated, command and noise comments in separate concurrency groups) and `draft-review-auto.yml` runs on `workflow_run` after `PR Feedback`. Neither checks out Pull Request bytes, downloads artifacts, uses secrets or merges; the auto path re-derives and revalidates the live head/base before requesting, and command and auto runs are idempotent per exact head.
 - The promotion workflow remains a read-only `pull_request` workflow. It grants no write permission, never uses `pull_request_target` to execute checked-out PR code and never merges a Pull Request.
 - `branch-policy`, `review-policy` and `candidate-context` have no dependency on one another. `baseline-policy` waits only for branch policy and runs `audit:dependencies`, whose single command owns both advisory policy and packaged-runtime closure. `source-build`, Native Electron and AI Electron depend on this job, so a red global baseline consumes no macOS runner while a review wait no longer serializes the test matrix.
 - Linux builds and shares only the Web renderer used by Node and Browser lanes.
@@ -124,10 +127,15 @@ Review these metrics per release and as a rolling 30-day view:
 | Ready to final review completion | P50 under `15 min` |
 | Ready candidate test completion | P50 under `20 min` |
 | Required gate to merge wait | P50 under `10 min` |
+| Draft review requests per Pull Request | Average at most `1.25` |
+| Draft review auto-trigger failure rate | Under `5%` of terminal runs |
+| Draft request to settlement | P50 under `6 min`, P95 under `10 min` |
+| Draft rounds settled with `action_required` | Reported; no fixed target |
 | Ready transitions per Pull Request | Average at most `1.25` |
 | CI-environment false-failure rate | Under `2%` of critical jobs |
 | Repeated green runner share | Under `20%` of runner minutes |
 | Later candidate-SHA churn | Under `20%` of all PR runner minutes |
+| Candidate App rebuilds after signed checkpoint | `0` |
 | Candidate App rebuilds after signed checkpoint | `0` |
 | Time to assign a failure category | Under `10 min` |
 | Publication rebuilds after candidate approval | `0` |
