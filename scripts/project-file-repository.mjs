@@ -39,7 +39,7 @@ const SAFE_REQUEST_ID = /^[A-Za-z0-9_-]{1,160}$/u;
 const SAVE_RECOVERY_ID = /^save_work_ver_\d{4,}_(?:current|\d+)_[a-f0-9]{32}$/u;
 const MAX_HTML_BYTES = 20 * 1024 * 1024;
 const MAX_PATH_COMPONENT_BYTES = 255;
-const WORKING_COPY_SAVE_STATES = new Set(["saved", "queued", "writing", "failed"]);
+const WORKING_COPY_SAVE_STATES = new Set(["saved", "saving", "failed"]);
 const IMPORT_STAGING_WRAPPER_BYTES = Buffer.byteLength(
   "..pageroot-import-00000000-0000-0000-0000-000000000000",
   "utf8",
@@ -1410,6 +1410,18 @@ export class ProjectFileRepository {
     }));
   }
 
+  async rollbackVersionWorkingCopyActivation({
+    target,
+    previousWorkingCopyId,
+    activatedWorkingCopyId,
+  } = {}) {
+    return this.#serial(() => this.#rollbackVersionWorkingCopyActivation({
+      target,
+      previousWorkingCopyId,
+      activatedWorkingCopyId,
+    }));
+  }
+
   async prepareRequest({
     target,
     requestId,
@@ -2596,6 +2608,7 @@ export class ProjectFileRepository {
       );
     }
     const workingCopy = matches[0];
+    const previousWorkingCopyId = loaded.runtime.activeWorkingCopyId;
     const state = await readJsonFile(
       workingCopyStatePath(loaded.paths, workingCopy),
       "Working Copy state",
@@ -2645,6 +2658,72 @@ export class ProjectFileRepository {
       }),
       workingCopyState: structuredClone(reconciled.state),
       activated: changed,
+      previousWorkingCopyId,
+    };
+  }
+
+  async #rollbackVersionWorkingCopyActivation({
+    target,
+    previousWorkingCopyId: requestedPreviousWorkingCopyId,
+    activatedWorkingCopyId: requestedActivatedWorkingCopyId,
+  }) {
+    const loaded = await this.#resolveMutationTarget(target);
+    const previousWorkingCopyId = requestedPreviousWorkingCopyId === null
+      ? null
+      : assertId(requestedPreviousWorkingCopyId, WORKING_COPY_ID, "previousWorkingCopyId");
+    const activatedWorkingCopyId = assertId(
+      requestedActivatedWorkingCopyId,
+      WORKING_COPY_ID,
+      "activatedWorkingCopyId",
+    );
+    if (loaded.workingCopy.workingCopyId !== activatedWorkingCopyId) {
+      throw new ProjectFileRepositoryError(
+        "HISTORY_ACTIVATION_ROLLBACK_TARGET_MISMATCH",
+        "The history activation rollback target does not match the activated Working Copy.",
+      );
+    }
+    if (
+      previousWorkingCopyId !== null
+      && !loaded.manifest.workingCopies.some(
+        (workingCopy) => workingCopy.workingCopyId === previousWorkingCopyId,
+      )
+    ) {
+      throw new ProjectFileRepositoryError(
+        "HISTORY_ACTIVATION_ROLLBACK_PREVIOUS_NOT_FOUND",
+        "The previous Working Copy for history activation rollback no longer exists.",
+        { workingCopyId: previousWorkingCopyId },
+      );
+    }
+    const currentWorkingCopyId = loaded.runtime.activeWorkingCopyId;
+    if (currentWorkingCopyId === previousWorkingCopyId) {
+      return {
+        rolledBack: false,
+        previousWorkingCopyId,
+        activatedWorkingCopyId,
+      };
+    }
+    if (currentWorkingCopyId !== activatedWorkingCopyId) {
+      throw new ProjectFileRepositoryError(
+        "HISTORY_ACTIVATION_ROLLBACK_CONFLICT",
+        "The active Working Copy changed before history activation rollback.",
+        {
+          currentWorkingCopyId,
+          previousWorkingCopyId,
+          activatedWorkingCopyId,
+        },
+      );
+    }
+    loaded.runtime.activeWorkingCopyId = previousWorkingCopyId;
+    await atomicWriteProjectJson(
+      loaded.paths.projectRootPath,
+      loaded.paths.runtimePath,
+      loaded.runtime,
+      "runtime-state.json",
+    );
+    return {
+      rolledBack: true,
+      previousWorkingCopyId,
+      activatedWorkingCopyId,
     };
   }
 

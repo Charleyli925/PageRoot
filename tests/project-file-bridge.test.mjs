@@ -130,6 +130,31 @@ test("history continuation activates the original Version Working Copy through t
   assert.equal(continued.body.currentBasedOnVersionId, "ver_0002");
   assert.equal(continued.body.latestVersionId, "ver_0006");
   assert.equal(continued.body.content, v2Html);
+  assert.equal(continued.body.historyActivation.previousWorkingCopyId, "work_ver_0006");
+  assert.equal(continued.body.historyActivation.activatedWorkingCopyId, "work_ver_0002");
+
+  const rollback = await postJson(bridge, "/history-version/rollback", {
+    sourcePath: active.exactSourcePath,
+    projectId: ensured.body.projectId,
+    documentId: ensured.body.documentId,
+    previousWorkingCopyId: continued.body.historyActivation.previousWorkingCopyId,
+    activatedWorkingCopyId: continued.body.historyActivation.activatedWorkingCopyId,
+    operationId: "history_continue_v2_0001",
+  });
+  assert.equal(rollback.response.status, 200, JSON.stringify(rollback.body));
+  assert.equal(rollback.body.status, "history-working-copy-rolled-back");
+  assert.equal(rollback.body.rolledBack, true);
+
+  const rollbackRetry = await postJson(bridge, "/history-version/rollback", {
+    sourcePath: active.exactSourcePath,
+    projectId: ensured.body.projectId,
+    documentId: ensured.body.documentId,
+    previousWorkingCopyId: continued.body.historyActivation.previousWorkingCopyId,
+    activatedWorkingCopyId: continued.body.historyActivation.activatedWorkingCopyId,
+    operationId: "history_continue_v2_0001",
+  });
+  assert.equal(rollbackRetry.response.status, 200, JSON.stringify(rollbackRetry.body));
+  assert.equal(rollbackRetry.body.rolledBack, false);
 
   const retried = await postJson(bridge, "/history-version/continue", continuation);
   assert.equal(retried.response.status, 200, JSON.stringify(retried.body));

@@ -86,7 +86,11 @@ export type VersionWorkflowCanvasPort = Readonly<{
 export type VersionWorkflowConstruction = Readonly<{
   bridgeClient: Pick<
     BridgeClient,
-    "versionFile" | "source" | "activateReadyVersion" | "continueEditingHistoryVersion"
+    "versionFile"
+      | "source"
+      | "activateReadyVersion"
+      | "continueEditingHistoryVersion"
+      | "rollbackEditingHistoryVersion"
   >;
   projectSession: ProjectSession;
   documentSession: DocumentSession;

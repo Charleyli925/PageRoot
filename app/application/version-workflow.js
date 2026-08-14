@@ -181,6 +181,7 @@ export class VersionWorkflow {
       || typeof bridgeClient.source !== "function"
       || typeof bridgeClient.activateReadyVersion !== "function"
       || typeof bridgeClient.continueEditingHistoryVersion !== "function"
+      || typeof bridgeClient.rollbackEditingHistoryVersion !== "function"
     ) {
       throw new TypeError("VersionWorkflow requires its Version Bridge methods.");
     }
@@ -757,6 +758,7 @@ export class VersionWorkflow {
       return blocked("VERSION_NAVIGATION_BUSY", "当前 HTML 视图正在切换，请稍后重试。");
     }
     const previous = this.#projectWorkflow.captureManagedSourceTransitionAuthority();
+    let historyActivation = null;
     try {
       const frozen = this.#freezeCurrentCanvas(
         "当前历史视图尚未完成安全收口，无法切换到历史工作文件。",
@@ -774,6 +776,7 @@ export class VersionWorkflow {
       });
       if (!this.#isNavigationCurrent(operation)) return stale(current);
       const resumed = this.#historyContinuationPayload(payload, current, requestedVersionId);
+      historyActivation = resumed.historyActivation;
       if (await this.#hashPort.sha256(resumed.content) !== resumed.sha256) {
         throw new Error("历史工作文件内容与声明 Hash 不一致，不能继续编辑。");
       }
@@ -841,12 +844,31 @@ export class VersionWorkflow {
       this.#emitEvent({ type: "version-history-editing-continued", ...value });
       return succeeded(value);
     } catch (cause) {
+      let durableRollback = true;
+      if (historyActivation && this.#isNavigationActive(operation)) {
+        try {
+          await this.#bridgeClient.rollbackEditingHistoryVersion({
+            sourcePath: current.sourcePath,
+            projectId: current.projectId,
+            documentId: current.documentId,
+            previousWorkingCopyId: historyActivation.previousWorkingCopyId,
+            activatedWorkingCopyId: historyActivation.activatedWorkingCopyId,
+            operationId: operation.operationId,
+          });
+        } catch (rollbackCause) {
+          durableRollback = false;
+          cause = new Error(
+            "历史工作文件切换失败，且持久化激活状态尚未恢复。",
+            { cause: rollbackCause },
+          );
+        }
+      }
       const rollback = await this.#rollbackManagedSourceTransition(operation, previous);
       return rejected(
         errorCode(cause, "VERSION_HISTORY_CONTINUE_REJECTED"),
         this.#codecs.errorMessage(
           cause,
-          rollback
+          durableRollback && rollback
             ? "没有切换到历史工作文件；原来的历史视图仍保持不变。"
             : "没有切换到历史工作文件。",
         ),
@@ -1134,6 +1156,11 @@ export class VersionWorkflow {
     const content = String(payload?.content || "");
     const latestVersionId = String(payload?.latestVersionId || "");
     const versions = Array.isArray(payload?.versions) ? payload.versions : null;
+    const historyActivation = isRecord(payload?.historyActivation)
+      ? payload.historyActivation
+      : null;
+    const previousWorkingCopyId = historyActivation?.previousWorkingCopyId;
+    const activatedWorkingCopyId = String(historyActivation?.activatedWorkingCopyId || "");
     if (
       payload?.ok !== true
       || payload?.status !== "history-working-copy-activated"
@@ -1155,6 +1182,13 @@ export class VersionWorkflow {
       || !/^ver_\d{4,}$/.test(latestVersionId)
       || !versions
       || !versions.some((version) => String(version?.versionId || version?.id || "") === versionId)
+      || !historyActivation
+      || (
+        previousWorkingCopyId !== null
+        && !/^work_ver_\d{4,}$/.test(String(previousWorkingCopyId || ""))
+      )
+      || !/^work_ver_\d{4,}$/.test(activatedWorkingCopyId)
+      || activatedWorkingCopyId !== String(openTarget.workingCopyId)
       || !validTimestamp(payload?.lastModifiedAt)
     ) {
       throw new Error("历史继续编辑响应缺少完整、同一项目的工作文件身份。");
@@ -1162,6 +1196,10 @@ export class VersionWorkflow {
     const draft = draftAuthorityFromWorkspacePayload(payload);
     return Object.freeze({
       openTarget,
+      historyActivation: Object.freeze({
+        previousWorkingCopyId,
+        activatedWorkingCopyId,
+      }),
       content,
       sha256,
       latestVersionId,

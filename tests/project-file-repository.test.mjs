@@ -203,6 +203,7 @@ test("a historical Version reactivates its original Working Copy without changin
     versionId: "ver_0002",
   });
   assert.equal(activated.activated, true);
+  assert.equal(activated.previousWorkingCopyId, "work_ver_0006");
   assert.equal(activated.target.versionId, "ver_0002");
   assert.equal(activated.target.workingCopyId, "work_ver_0002");
   const retried = await value.repository.activateVersionWorkingCopy({
@@ -210,7 +211,27 @@ test("a historical Version reactivates its original Working Copy without changin
     versionId: "ver_0002",
   });
   assert.equal(retried.activated, false);
+  assert.equal(retried.previousWorkingCopyId, "work_ver_0002");
   assert.equal(retried.target.workingCopyId, activated.target.workingCopyId);
+
+  const rolledBack = await value.repository.rollbackVersionWorkingCopyActivation({
+    target: activated.target,
+    previousWorkingCopyId: "work_ver_0006",
+    activatedWorkingCopyId: "work_ver_0002",
+  });
+  assert.equal(rolledBack.rolledBack, true);
+  const rollbackRetry = await value.repository.rollbackVersionWorkingCopyActivation({
+    target: activated.target,
+    previousWorkingCopyId: "work_ver_0006",
+    activatedWorkingCopyId: "work_ver_0002",
+  });
+  assert.equal(rollbackRetry.rolledBack, false);
+  const runtimeAfterRollback = await json(path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "runtime-state.json",
+  ));
+  assert.equal(runtimeAfterRollback.activeWorkingCopyId, "work_ver_0006");
 
   const v2Edited = html("editable V2 after history continuation");
   const saved = await value.repository.saveWorkingCopy({
@@ -1801,6 +1822,31 @@ test("workspace validates Working Copy state before following its declared Draft
     draftRelativePath: "drafts/untrusted.json",
   }), "utf8");
 
+  await assert.rejects(
+    value.repository.workspace({ sourcePath: imported.target.exactSourcePath }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "WORKING_COPY_STATE_INVALID",
+  );
+});
+
+test("workspace follows only the v4 Working Copy saveState vocabulary", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "save-state-vocabulary.html");
+  const statePath = path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "working-copies",
+    "work_ver_0001.json",
+  );
+  const state = await json(statePath);
+
+  await writeFile(statePath, JSON.stringify({ ...state, saveState: "saving" }), "utf8");
+  const savingWorkspace = await value.repository.workspace({
+    sourcePath: imported.target.exactSourcePath,
+  });
+  assert.equal(savingWorkspace.workingCopyState.saveState, "saving");
+
+  await writeFile(statePath, JSON.stringify({ ...state, saveState: "queued" }), "utf8");
   await assert.rejects(
     value.repository.workspace({ sourcePath: imported.target.exactSourcePath }),
     (error) => error instanceof ProjectFileRepositoryError
