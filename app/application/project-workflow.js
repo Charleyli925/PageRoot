@@ -2437,6 +2437,7 @@ export class ProjectWorkflow {
     nextDocumentId,
     versionId,
     openTarget = null,
+    operationId = null,
   }) {
     const updatesCurrentProject = Boolean(
       (
@@ -2477,6 +2478,7 @@ export class ProjectWorkflow {
           workingCopyId: String(openTarget.workingCopyId),
           versionId,
           projectRootPath: String(openTarget.projectRootPath),
+          ...(operationId ? { operationId: String(operationId) } : {}),
         })
       : await this.#activateGeneratedVersion({
           previousSourcePath,

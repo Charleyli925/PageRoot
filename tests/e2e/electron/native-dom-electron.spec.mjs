@@ -499,6 +499,7 @@ test("Electron retries a managed Working Copy activation after the first respons
       workingCopyId: promoted.target.workingCopyId,
       versionId: promoted.target.versionId,
       projectRootPath: promoted.target.projectRootPath,
+      operationId: "e2e_managed_activation_retry_0001",
     };
 
     // The first call commits the main-process project state. Treat the return
@@ -514,6 +515,34 @@ test("Electron retries a managed Working Copy activation after the first respons
     expect(replayed.sha256).toBe(promoted.target.sourceSha256);
     const active = await launched.page.evaluate(() => window.htmlAIProjects.getActiveProject());
     expect(active?.sourcePath).toBe(expectedManagedPath);
+    const state = JSON.parse(readFileSync(
+      path.join(launched.isolatedUserData, "html-projects.json"),
+      "utf8",
+    ));
+    expect(state.lastManagedActivation?.operationId).toBe(payload.operationId);
+    const staleOperation = await launched.page.evaluate(async (input) => {
+      try {
+        const result = await window.htmlAIProjects.activateManagedWorkingCopy(input);
+        return { inputOperationId: input.operationId, result };
+      } catch (error) {
+        return {
+          inputOperationId: input.operationId,
+          message: error?.message || null,
+        };
+      }
+    }, {
+      ...payload,
+      operationId: "e2e_managed_activation_stale_0001",
+    });
+    const stateAfterStaleAttempt = JSON.parse(readFileSync(
+      path.join(launched.isolatedUserData, "html-projects.json"),
+      "utf8",
+    ));
+    expect(staleOperation).toMatchObject({
+      inputOperationId: "e2e_managed_activation_stale_0001",
+      message: "当前桌面文件已变化，不能提交过期的托管工作文件切换。",
+    });
+    expect(stateAfterStaleAttempt.lastManagedActivation?.operationId).toBe(payload.operationId);
   } finally {
     await stopPageRoot(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(source.sourceDirectory);

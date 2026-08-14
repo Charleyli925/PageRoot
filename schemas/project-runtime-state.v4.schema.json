@@ -9,7 +9,8 @@
     "documentId",
     "activeWorkingCopyId",
     "activeRequest",
-    "activeCandidateId"
+    "activeCandidateId",
+    "historyActivation"
   ],
   "properties": {
     "schemaVersion": { "const": "4.0.0" },
@@ -78,7 +79,31 @@
         }
       ]
     },
-    "activeCandidateId": { "type": ["string", "null"], "pattern": "^candidate_[A-Za-z0-9_-]{8,160}$" }
+    "activeCandidateId": { "type": ["string", "null"], "pattern": "^candidate_[A-Za-z0-9_-]{8,160}$" },
+    "historyActivation": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": [
+        "operationId",
+        "projectId",
+        "documentId",
+        "previousWorkingCopyId",
+        "activatedWorkingCopyId",
+        "versionId",
+        "state",
+        "createdAt"
+      ],
+      "properties": {
+        "operationId": { "type": "string", "pattern": "^[A-Za-z0-9_-]{8,160}$" },
+        "projectId": { "type": "string", "pattern": "^project_[a-f0-9]{16,64}$" },
+        "documentId": { "type": "string", "pattern": "^doc_[a-f0-9]{16,64}$" },
+        "previousWorkingCopyId": { "type": ["string", "null"], "pattern": "^work_ver_\\d{4,}$" },
+        "activatedWorkingCopyId": { "type": "string", "pattern": "^work_ver_\\d{4,}$" },
+        "versionId": { "type": "string", "pattern": "^ver_\\d{4,}$" },
+        "state": { "enum": ["desktop-pending", "desktop-confirmed"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      }
+    }
   },
   "allOf": [
     {

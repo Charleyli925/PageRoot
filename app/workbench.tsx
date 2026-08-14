@@ -753,6 +753,7 @@ export default function Workbench() {
             workingCopyId: string;
             versionId: string;
             projectRootPath: string;
+            operationId?: string;
           }) => {
             const activate = window.htmlAIProjects?.activateManagedWorkingCopy;
             if (!activate) {
@@ -951,6 +952,7 @@ export default function Workbench() {
               workingCopyId: string;
               versionId: string;
               projectRootPath: string;
+              operationId?: string;
             }) => {
               const activate = window.htmlAIProjects?.activateManagedWorkingCopy;
               if (!activate) {

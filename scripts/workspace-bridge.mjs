@@ -986,6 +986,8 @@ function projectFileHttpError(cause) {
       "IMPORT_INTENT_NOT_FOUND",
       "REGISTERED_PROJECT_RACE",
       "WORKING_COPY_VERSION_MISMATCH",
+      "HISTORY_ACTIVATION_PREDECESSOR_CONFLICT",
+      "HISTORY_ACTIVATION_RECEIPT_MISMATCH",
       "REQUEST_RUNTIME_ANCHOR_MISMATCH",
       "CANCELLATION_AUTHORITY_MISMATCH",
     ]).has(code)
@@ -1005,6 +1007,7 @@ function projectFileHttpError(cause) {
         "CANDIDATE_UNUSABLE",
         "CANDIDATE_VALIDATION_INVALID",
         "INVALID_REQUEST_ID",
+        "INVALID_HISTORY_ACTIVATION_OPERATION",
         "INVALID_ATTEMPT_ID",
         "INVALID_REGISTRY",
         "UNSUPPORTED_REGISTRY_SCHEMA",
@@ -1707,41 +1710,6 @@ async function projectFileVersionFile(sourcePath, versionId) {
   }
 }
 
-function projectFileActiveWorkingCopyTarget(workspace) {
-  const workingCopy = workspace?.manifest?.workingCopies?.find(
-    (entry) => entry.workingCopyId === workspace.runtime?.activeWorkingCopyId,
-  );
-  if (!workingCopy) {
-    throw new HttpError(
-      409,
-      "WORKING_COPY_REQUIRED",
-      "The project has no active editable Working Copy for this history operation.",
-    );
-  }
-  return {
-    projectId: workspace.project.projectId,
-    documentId: workspace.project.documentId,
-    projectRootPath: workspace.target.projectRootPath,
-    workingCopyId: workingCopy.workingCopyId,
-  };
-}
-
-function projectFileHistoryRollbackTarget(workspace, workingCopyId) {
-  if (!/^work_ver_\d{4,}$/.test(String(workingCopyId || ""))) {
-    throw new HttpError(
-      400,
-      "INVALID_WORKING_COPY_ID",
-      "workingCopyId is invalid.",
-    );
-  }
-  return {
-    projectId: workspace.project.projectId,
-    documentId: workspace.project.documentId,
-    projectRootPath: workspace.target.projectRootPath,
-    workingCopyId: String(workingCopyId),
-  };
-}
-
 async function continueProjectFileHistoryVersion(body) {
   if (!body || typeof body !== "object" || Array.isArray(body)) {
     throw new HttpError(400, "INVALID_HISTORY_CONTINUE", "The history continuation payload is invalid.");
@@ -1759,10 +1727,7 @@ async function continueProjectFileHistoryVersion(body) {
   if (!/^ver_\d{4,}$/.test(String(body.versionId || ""))) {
     throw new HttpError(400, "INVALID_VERSION_ID", "versionId is invalid.");
   }
-  if (
-    body.operationId !== undefined
-    && !/^[A-Za-z0-9_-]{1,160}$/.test(String(body.operationId))
-  ) {
+  if (!/^[A-Za-z0-9_-]{8,160}$/.test(String(body.operationId || ""))) {
     throw new HttpError(400, "INVALID_OPERATION_ID", "operationId is invalid.");
   }
   const workspace = await projectFileWorkspaceForSource(body.sourcePath);
@@ -1775,28 +1740,29 @@ async function continueProjectFileHistoryVersion(body) {
     );
   }
   try {
+    const sourceTarget = projectFileTargetFromWorkspace(workspace);
     const activated = await projectFileRepository.activateVersionWorkingCopy({
-      target: projectFileActiveWorkingCopyTarget(workspace),
+      target: sourceTarget,
       versionId: String(body.versionId),
+      operationId: String(body.operationId),
+      expectedActiveWorkingCopyId: sourceTarget.workingCopyId,
     });
     const next = await projectFileWorkspaceForSource(activated.target.exactSourcePath);
     return {
       ...projectFileBaseWorkspaceState(next),
       status: "history-working-copy-activated",
-      historyActivation: {
-        previousWorkingCopyId: activated.previousWorkingCopyId,
-        activatedWorkingCopyId: activated.target.workingCopyId,
-      },
-      ...(body.operationId ? { operationId: String(body.operationId) } : {}),
+      historyActivation: activated.historyActivation,
+      operationId: activated.historyActivation.operationId,
+      replayed: activated.replayed === true,
     };
   } catch (cause) {
     throw projectFileHttpError(cause);
   }
 }
 
-async function rollbackProjectFileHistoryVersion(body) {
+async function confirmProjectFileHistoryVersion(body) {
   if (!body || typeof body !== "object" || Array.isArray(body)) {
-    throw new HttpError(400, "INVALID_HISTORY_ROLLBACK", "The history rollback payload is invalid.");
+    throw new HttpError(400, "INVALID_HISTORY_CONFIRM", "The history activation confirmation payload is invalid.");
   }
   const allowedKeys = new Set([
     "sourcePath",
@@ -1804,10 +1770,11 @@ async function rollbackProjectFileHistoryVersion(body) {
     "documentId",
     "previousWorkingCopyId",
     "activatedWorkingCopyId",
+    "versionId",
     "operationId",
   ]);
   if (Object.keys(body).some((key) => !allowedKeys.has(key))) {
-    throw new HttpError(400, "INVALID_HISTORY_ROLLBACK", "The history rollback payload has unsupported fields.");
+    throw new HttpError(400, "INVALID_HISTORY_CONFIRM", "The history activation confirmation payload has unsupported fields.");
   }
   const workspace = await projectFileWorkspaceForSource(body.sourcePath);
   if (!workspace) return null;
@@ -1815,7 +1782,7 @@ async function rollbackProjectFileHistoryVersion(body) {
     throw new HttpError(
       409,
       "PROJECT_CONTEXT_IDENTITY_MISMATCH",
-      "The history rollback identity does not match the selected project.",
+      "The history activation confirmation identity does not match the selected project.",
     );
   }
   if (
@@ -1824,21 +1791,29 @@ async function rollbackProjectFileHistoryVersion(body) {
   ) {
     throw new HttpError(400, "INVALID_WORKING_COPY_ID", "previousWorkingCopyId is invalid.");
   }
+  if (
+    !/^[A-Za-z0-9_-]{8,160}$/.test(String(body.operationId || ""))
+    || !/^work_ver_\d{4,}$/.test(String(body.activatedWorkingCopyId || ""))
+    || !/^ver_\d{4,}$/.test(String(body.versionId || ""))
+  ) {
+    throw new HttpError(400, "INVALID_HISTORY_CONFIRM", "The history activation confirmation is invalid.");
+  }
   try {
-    const rolledBack = await projectFileRepository.rollbackVersionWorkingCopyActivation({
-      target: projectFileHistoryRollbackTarget(workspace, body.activatedWorkingCopyId),
+    const confirmed = await projectFileRepository.confirmVersionWorkingCopyActivation({
+      target: projectFileTargetFromWorkspace(workspace),
+      operationId: String(body.operationId),
       previousWorkingCopyId: body.previousWorkingCopyId,
       activatedWorkingCopyId: String(body.activatedWorkingCopyId),
+      versionId: String(body.versionId),
     });
     return {
       ok: true,
       projectId: workspace.project.projectId,
       documentId: workspace.project.documentId,
-      status: "history-working-copy-rolled-back",
-      rolledBack: rolledBack.rolledBack,
-      previousWorkingCopyId: rolledBack.previousWorkingCopyId,
-      activatedWorkingCopyId: rolledBack.activatedWorkingCopyId,
-      ...(body.operationId ? { operationId: String(body.operationId) } : {}),
+      status: "history-working-copy-desktop-confirmed",
+      historyActivation: confirmed.historyActivation,
+      confirmed: confirmed.confirmed,
+      operationId: confirmed.historyActivation.operationId,
     };
   } catch (cause) {
     throw projectFileHttpError(cause);
@@ -9743,10 +9718,10 @@ async function route(request, response) {
   }
   if (
     request.method === "POST"
-    && url.pathname === "/history-version/rollback"
+    && url.pathname === "/history-version/desktop-confirmed"
   ) {
     const body = await readBody(request);
-    sendJson(response, 200, await rollbackProjectFileHistoryVersion(body));
+    sendJson(response, 200, await confirmProjectFileHistoryVersion(body));
     return;
   }
   if (

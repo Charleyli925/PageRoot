@@ -24,7 +24,7 @@
 | AI Request freeze, persisted-boundary verification, unknown-POST authority reconciliation, polling lifecycle, cancellation and conflict command sequence | Renderer `RunWorkflow`, composed by `WorkspaceController` | none; it publishes only through `RunSession` and reads Bridge runtime/immutable Request records | Workbench intent/Drawer/Toast adapter and Bridge run lifecycle |
 | AI Request/Attempt lifecycle transition | Bridge run lifecycle | runtime state and immutable Request/Attempt records | `RunWorkflow`, RunSession and finalizer |
 | Immutable Version list and based-on/exact/restored/current-history projection facts | Renderer `VersionSession` | immutable Version records and current runtime pointers | `VersionWorkflow`, Workbench history and Canvas projection |
-| Version activation, review-candidate preparation, current/history navigation and historical Working Copy continuation operation identity, Bridge I/O, full OpenTarget/Hash/time validation, synchronous cross-Session publication and navigation rollback | Renderer `VersionWorkflow`, composed by `WorkspaceController` | none; it publishes only through Project, Document, Version, Draft and Comment owners | Workbench review/history commands, presentation-event adapter and Bridge version lifecycle |
+| Version activation, review-candidate preparation, current/history navigation and historical Working Copy continuation operation identity, Bridge I/O, full OpenTarget/Hash/time validation, receipt-forward recovery and synchronous cross-Session publication | Renderer `VersionWorkflow`, composed by `WorkspaceController` | Repository owns the durable history activation receipt; the workflow publishes only through Project, Document, Version, Draft and Comment owners | Workbench review/history commands, presentation-event adapter and Bridge version lifecycle |
 | `PROJECT.md` content, editor generation, composition fence and save projection | Renderer `ProjectRulesSession` | managed `PROJECT.md` | `ProjectRulesWorkflow` and project panel |
 | `PROJECT.md` Bridge reads/writes, 700ms autosave timer, unknown-write authority reconciliation, close/switch drain and restore-port invocation | Renderer `ProjectRulesWorkflow`, composed by `WorkspaceController` | none; it publishes only through `ProjectRulesSession` and the managed `PROJECT.md` remains authoritative | `ProjectWorkflow` drain, project panel and Request freeze |
 | Close/switch/submit/history readiness and desktop close lifecycle | The unique `DrainCoordinator` owned by `WorkspaceController`; `ProjectWorkflow` owns the request-scoped close operation | composed owner snapshots, request identity and bounded presentation class; no copied dirty booleans | Electron close handshake, browser fallback and navigation |
@@ -140,10 +140,11 @@ Rules:
   path-only publication is invalid.
 - Historical continue-edit owns no mutable Version snapshot. `VersionWorkflow`
   may call the narrow Bridge activation route only from the exact read-only
-  history view; `ProjectWorkflow` then uses the same managed-source primitive
-  as Candidate promotion. A lost Bridge or desktop response may be retried only
-  against the same complete Version/Working Copy identity and must not borrow
-  the current screen's OpenTarget from another project.
+  history view; Repository atomically owns the `desktop-pending`/`desktop-confirmed`
+  receipt, and `ProjectWorkflow` passes its operation ID to the same managed-source
+  primitive as Candidate promotion. A lost Bridge, Desktop or confirmation response
+  may be retried only against that complete receipt identity; it must not borrow
+  another project's OpenTarget or roll durable V2 back to V6.
 - Edit and preview acknowledge rendering with the exact Document Canvas
   generation and source Hash. A late acknowledgement from an older generation
   is discarded and cannot make persistence appear safe.

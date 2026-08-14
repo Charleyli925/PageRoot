@@ -265,10 +265,10 @@ export function createBridgeClient({
       "暂时无法基于这份历史版本继续编辑。",
       DEFAULT_REQUEST_TIMEOUT_MS,
     ),
-    rollbackEditingHistoryVersion: (body) => command(
-      "/history-version/rollback",
+    confirmEditingHistoryVersion: (body) => command(
+      "/history-version/desktop-confirmed",
       body,
-      "历史工作文件切换失败后的恢复暂时没有响应。",
+      "历史工作文件桌面激活确认暂时没有响应。",
       DEFAULT_REQUEST_TIMEOUT_MS,
     ),
     cancelActiveRun: (body) => command(

@@ -205,6 +205,111 @@ test("a v4 client treats a pre-v4 project as a fresh V1 import", async (t) => {
   assert.equal(reopened.body.projectId, imported.body.projectId);
 });
 
+test("Bridge continues a historical Version through one durable Working Copy receipt", async (t) => {
+  const environment = await createBridgeTestEnvironment(t, {
+    prefix: "pageroot-project-file-history-bridge-",
+  });
+  const projectsRoot = join(environment.root, "project-files");
+  const sourcePath = await environment.createSource("history-bridge.html", html("external V1"));
+  const bridge = await environment.start({ HTML_AI_PROJECT_FILES_ROOT: projectsRoot });
+  const preview = await bridge.requestJson(
+    `/workspace?sourcePath=${encodeURIComponent(sourcePath)}`,
+  );
+  const ensured = await postJson(bridge, "/project/ensure", {
+    sourcePath,
+    expectedSourceSha256: preview.body.currentHtmlSha256,
+    projectStorageVersion: "4.0.0",
+  });
+  assert.equal(ensured.response.status, 200, JSON.stringify(ensured.body));
+
+  const repository = new ProjectFileRepository({ projectsRoot });
+  let active = (await repository.workspace({ sourcePath: ensured.body.sourcePath })).target;
+  const v2Html = html("immutable V2");
+  for (let ordinal = 2; ordinal <= 6; ordinal += 1) {
+    const candidate = await repository.createCandidate({
+      target: active,
+      requestId: `req_bridge_history_${ordinal}`,
+      candidateId: `candidate_bridge_history_${ordinal}_0001`,
+      html: ordinal === 2 ? v2Html : html(`V${ordinal}`),
+      expectedSourceSha256: active.sourceSha256,
+    });
+    active = (await repository.promoteCandidate({
+      target: active,
+      candidateId: candidate.candidate.candidateId,
+    })).target;
+  }
+  assert.equal(active.versionId, "ver_0006");
+
+  const viewed = await bridge.requestJson(
+    `/version-file?sourcePath=${encodeURIComponent(active.exactSourcePath)}&versionId=ver_0002`,
+  );
+  assert.equal(viewed.response.status, 200, JSON.stringify(viewed.body));
+  assert.equal(viewed.body.readOnly, true);
+  assert.equal(viewed.body.content, v2Html);
+  const beforeContinue = await bridge.requestJson(
+    `/workspace?sourcePath=${encodeURIComponent(active.exactSourcePath)}`,
+  );
+  assert.equal(beforeContinue.body.sourcePath, active.exactSourcePath);
+  assert.equal(beforeContinue.body.latestVersionId, "ver_0006");
+
+  const request = {
+    sourcePath: active.exactSourcePath,
+    projectId: active.projectId,
+    documentId: active.documentId,
+    versionId: "ver_0002",
+    operationId: "bridge_history_continue_v2_0001",
+  };
+  const continued = await postJson(bridge, "/history-version/continue", request);
+  assert.equal(continued.response.status, 200, JSON.stringify(continued.body));
+  assert.equal(continued.body.openTarget.workingCopyId, "work_ver_0002");
+  assert.equal(continued.body.historyActivation.state, "desktop-pending");
+  assert.equal(continued.body.operationId, request.operationId);
+
+  const replayedAfterLostResponse = await postJson(bridge, "/history-version/continue", {
+    ...request,
+    operationId: "bridge_history_retry_after_loss_0001",
+  });
+  assert.equal(replayedAfterLostResponse.response.status, 200, JSON.stringify(replayedAfterLostResponse.body));
+  assert.equal(replayedAfterLostResponse.body.replayed, true);
+  assert.equal(replayedAfterLostResponse.body.operationId, request.operationId);
+
+  const confirmation = {
+    sourcePath: active.exactSourcePath,
+    projectId: active.projectId,
+    documentId: active.documentId,
+    previousWorkingCopyId: "work_ver_0006",
+    activatedWorkingCopyId: "work_ver_0002",
+    versionId: "ver_0002",
+    operationId: request.operationId,
+  };
+  const confirmed = await postJson(bridge, "/history-version/desktop-confirmed", confirmation);
+  assert.equal(confirmed.response.status, 200, JSON.stringify(confirmed.body));
+  assert.equal(confirmed.body.confirmed, true);
+  assert.equal(confirmed.body.historyActivation.state, "desktop-confirmed");
+  const confirmedReplay = await postJson(
+    bridge,
+    "/history-version/desktop-confirmed",
+    confirmation,
+  );
+  assert.equal(confirmedReplay.response.status, 200, JSON.stringify(confirmedReplay.body));
+  assert.equal(confirmedReplay.body.confirmed, false);
+
+  const replayedAfterConfirmationLoss = await postJson(bridge, "/history-version/continue", {
+    ...request,
+    operationId: "bridge_history_retry_after_confirm_0001",
+  });
+  assert.equal(replayedAfterConfirmationLoss.response.status, 200, JSON.stringify(replayedAfterConfirmationLoss.body));
+  assert.equal(replayedAfterConfirmationLoss.body.operationId, request.operationId);
+
+  const stale = await postJson(bridge, "/history-version/continue", {
+    ...request,
+    versionId: "ver_0003",
+    operationId: "bridge_history_stale_v3_0001",
+  });
+  assert.equal(stale.response.status, 409, JSON.stringify(stale.body));
+  assert.equal(stale.body.error.code, "HISTORY_ACTIVATION_PREDECESSOR_CONFLICT");
+});
+
 test("project-file PROJECT.md remains available through the shared project-file inspector", async (t) => {
   const environment = await createBridgeTestEnvironment(t, {
     prefix: "pageroot-project-file-rules-",

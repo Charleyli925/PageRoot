@@ -155,6 +155,21 @@ test("v4 schemas accept repository-produced identity, Working Copy, Candidate an
   ]);
   assert.equal(promoted.version.versionId, "ver_0002");
 
+  await repository.activateVersionWorkingCopy({
+    target: promoted.target,
+    versionId: "ver_0001",
+    operationId: "schema_history_continue_v1_0001",
+    expectedActiveWorkingCopyId: "work_ver_0002",
+  });
+  const historyRuntime = await json(path.join(controlRoot, "runtime-state.json"));
+  await validate("project-runtime-state.v4.schema.json", historyRuntime);
+  const malformedHistoryActivation = structuredClone(historyRuntime);
+  malformedHistoryActivation.historyActivation = {
+    ...malformedHistoryActivation.historyActivation,
+    operationId: "bad",
+  };
+  await validateRejects("project-runtime-state.v4.schema.json", malformedHistoryActivation);
+
   const invalidManifest = { ...initialManifest, fileNaming: { stem: "legacy" } };
   const schema = JSON.parse(await readFile(
     new URL("../schemas/project-manifest.v4.schema.json", import.meta.url),

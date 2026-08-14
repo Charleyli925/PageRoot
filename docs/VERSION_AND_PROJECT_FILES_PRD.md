@@ -337,7 +337,7 @@ V2 工作文件第一次建立时与 V2 正式快照字节一致。此后用户�
    - 在切换前完整校验该 Working Copy state、可见工作文件、不可变 V2 快照、Registry 根目录和完整 OpenTarget 身份；成功后打开原有工作文件，并显示其本地修改状态。
 3. 后续编辑全部保存到 V2 工作文件，不覆盖正式 V2，也不创建新项目。
 
-该动作是窄的、可重试的“激活指定 Version 的 Working Copy”操作。Bridge 响应或桌面激活响应在提交后丢失时，重放同一 `operationId` 与 Version 必须仍指向同一 `workingCopyId`；不得因为当前 Registry runtime 已经指向 V2 而拒绝重试。切换准备阶段先完成桌面 Working Copy 激活和字节 Hash 校验，随后在一个无 `await` 的发布边界同步更新 `ProjectSession`、`DocumentSession`、`VersionSession`、`DraftSession` 与 `CommentSession`，再允许新 Canvas generation 接受回报。
+该动作是窄的、可重试的“激活指定 Version 的 Working Copy”操作。Repository 先原子写入 V2 指针和 `desktop-pending` 回执；Bridge、桌面激活或确认响应在提交后丢失时，重放该回执的 `operationId` 与 Version 必须仍指向同一 `workingCopyId`，不得因为当前 Registry runtime 已经指向 V2 而拒绝重试，也不得伪造回滚到 V6。Desktop 对新操作只接受仍以原 `previousSourcePath` 为活动文件的前序，完成字节 Hash 校验后 Bridge 确认同一回执；随后才在一个无 `await` 的发布边界同步更新 `ProjectSession`、`DocumentSession`、`VersionSession`、`DraftSession` 与 `CommentSession`，再允许新 Canvas generation 接受回报。
 
 若项目最新正式版本已经是版本 6，界面必须同时显示：
 

@@ -95,7 +95,9 @@ The renderer's main workspace facts are partitioned as follows:
   reads and activation mutation, review-candidate preparation, historical
   Working Copy continuation, complete project/document/version/OpenTarget
   identity and Hash validation, synchronous cross-Session publication, and
-  current/history navigation rollback. It publishes through `ProjectSession`,
+  read-only current/history navigation rollback. A committed historical
+  activation recovers forward through its receipt; it never restores V6 over
+  durable V2 state. It publishes through `ProjectSession`,
   `DocumentSession`, `VersionSession`, `DraftSession` and `CommentSession`; it
   never owns a second mutable Version store;
 - `SourceHistorySession`: pending exact Patch operations and history action.
@@ -210,9 +212,11 @@ only the path, only the Hash or any other partial combination is forbidden.
 The history “continue editing” command is not a Version restore or snapshot
 write. It accepts only the current project identity, one `versionId` and an
 operation ID; Repository chooses the one matching existing Working Copy after
-validating its state and immutable snapshot. If a Bridge or desktop response is
-lost after activation commits, repeating that exact operation is safe and must
-resolve to the same `workingCopyId`. A background Candidate carries its own
+validating its state and immutable snapshot, atomically records V2 as active
+with a `desktop-pending` receipt, and confirms that receipt only after Desktop
+activation. If a Bridge, Desktop or confirmation response is lost, the same
+receipt operation is safe to replay and must resolve to the same `workingCopyId`;
+it must not roll durable V2 back to V6. A background Candidate carries its own
 complete OpenTarget and may never use whichever target happens to be mounted in
 the foreground.
 

@@ -90,7 +90,7 @@ export type VersionWorkflowConstruction = Readonly<{
       | "source"
       | "activateReadyVersion"
       | "continueEditingHistoryVersion"
-      | "rollbackEditingHistoryVersion"
+      | "confirmEditingHistoryVersion"
   >;
   projectSession: ProjectSession;
   documentSession: DocumentSession;

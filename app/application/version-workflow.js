@@ -181,7 +181,7 @@ export class VersionWorkflow {
       || typeof bridgeClient.source !== "function"
       || typeof bridgeClient.activateReadyVersion !== "function"
       || typeof bridgeClient.continueEditingHistoryVersion !== "function"
-      || typeof bridgeClient.rollbackEditingHistoryVersion !== "function"
+      || typeof bridgeClient.confirmEditingHistoryVersion !== "function"
     ) {
       throw new TypeError("VersionWorkflow requires its Version Bridge methods.");
     }
@@ -209,8 +209,6 @@ export class VersionWorkflow {
       !projectWorkflow
       || typeof projectWorkflow.prepareManagedSourceTransition !== "function"
       || typeof projectWorkflow.commitManagedSourceTransition !== "function"
-      || typeof projectWorkflow.captureManagedSourceTransitionAuthority !== "function"
-      || typeof projectWorkflow.restoreManagedSourceTransitionAuthority !== "function"
       || typeof projectWorkflow.drain !== "function"
       || typeof projectWorkflow.refreshWorkspace !== "function"
     ) {
@@ -757,8 +755,8 @@ export class VersionWorkflow {
     if (!operation) {
       return blocked("VERSION_NAVIGATION_BUSY", "当前 HTML 视图正在切换，请稍后重试。");
     }
-    const previous = this.#projectWorkflow.captureManagedSourceTransitionAuthority();
     let historyActivation = null;
+    let activationMayHaveCommitted = false;
     try {
       const frozen = this.#freezeCurrentCanvas(
         "当前历史视图尚未完成安全收口，无法切换到历史工作文件。",
@@ -767,16 +765,32 @@ export class VersionWorkflow {
       if (!frozen.ok) {
         return blocked("VERSION_HISTORY_CONTINUE_CANVAS_FENCE", frozen.reason);
       }
-      const payload = await this.#bridgeClient.continueEditingHistoryVersion({
+      const continueHistory = () => this.#bridgeClient.continueEditingHistoryVersion({
         sourcePath: current.sourcePath,
         projectId: current.projectId,
         documentId: current.documentId,
         versionId: requestedVersionId,
         operationId: operation.operationId,
       });
-      if (!this.#isNavigationCurrent(operation)) return stale(current);
+      let payload;
+      try {
+        payload = await continueHistory();
+      } catch (cause) {
+        if (!isBridgeRequestError(cause) || cause.outcome !== "unknown") throw cause;
+        // The Repository receipt is keyed by this operation, so a single
+        // bounded retry can recover a lost response without another switch.
+        activationMayHaveCommitted = true;
+        payload = await continueHistory();
+      }
+      activationMayHaveCommitted = true;
       const resumed = this.#historyContinuationPayload(payload, current, requestedVersionId);
       historyActivation = resumed.historyActivation;
+      if (!this.#isNavigationCurrent(operation)) {
+        return unknown(
+          historyActivation.operationId,
+          "历史工作文件已提交；请重试以完成桌面切换。",
+        );
+      }
       if (await this.#hashPort.sha256(resumed.content) !== resumed.sha256) {
         throw new Error("历史工作文件内容与声明 Hash 不一致，不能继续编辑。");
       }
@@ -788,8 +802,24 @@ export class VersionWorkflow {
         nextDocumentId: current.documentId,
         versionId: requestedVersionId,
         openTarget: resumed.openTarget,
+        operationId: historyActivation.operationId,
       });
-      if (!this.#isNavigationCurrent(operation)) return stale(current);
+      const confirmation = await this.#bridgeClient.confirmEditingHistoryVersion({
+        sourcePath: current.sourcePath,
+        projectId: current.projectId,
+        documentId: current.documentId,
+        previousWorkingCopyId: historyActivation.previousWorkingCopyId,
+        activatedWorkingCopyId: historyActivation.activatedWorkingCopyId,
+        versionId: historyActivation.versionId,
+        operationId: historyActivation.operationId,
+      });
+      this.#historyConfirmationPayload(confirmation, current, historyActivation);
+      if (!this.#isNavigationCurrent(operation)) {
+        return unknown(
+          historyActivation.operationId,
+          "历史工作文件已完成桌面激活；请重试以恢复编辑会话。",
+        );
+      }
       const nextContext = this.#projectWorkflow.commitManagedSourceTransition({
         prepared,
         html: resumed.content,
@@ -844,33 +874,24 @@ export class VersionWorkflow {
       this.#emitEvent({ type: "version-history-editing-continued", ...value });
       return succeeded(value);
     } catch (cause) {
-      let durableRollback = true;
-      if (historyActivation && this.#isNavigationActive(operation)) {
-        try {
-          await this.#bridgeClient.rollbackEditingHistoryVersion({
-            sourcePath: current.sourcePath,
-            projectId: current.projectId,
-            documentId: current.documentId,
-            previousWorkingCopyId: historyActivation.previousWorkingCopyId,
-            activatedWorkingCopyId: historyActivation.activatedWorkingCopyId,
-            operationId: operation.operationId,
-          });
-        } catch (rollbackCause) {
-          durableRollback = false;
-          cause = new Error(
-            "历史工作文件切换失败，且持久化激活状态尚未恢复。",
-            { cause: rollbackCause },
-          );
-        }
+      if (
+        historyActivation
+        || activationMayHaveCommitted
+        || (isBridgeRequestError(cause) && cause.outcome === "unknown")
+      ) {
+        return unknown(
+          historyActivation?.operationId || operation.operationId,
+          this.#codecs.errorMessage(
+            cause,
+            "历史工作文件可能已经激活；请重试以安全恢复编辑会话。",
+          ),
+        );
       }
-      const rollback = await this.#rollbackManagedSourceTransition(operation, previous);
       return rejected(
         errorCode(cause, "VERSION_HISTORY_CONTINUE_REJECTED"),
         this.#codecs.errorMessage(
           cause,
-          durableRollback && rollback
-            ? "没有切换到历史工作文件；原来的历史视图仍保持不变。"
-            : "没有切换到历史工作文件。",
+          "没有切换到历史工作文件；原来的历史视图仍保持不变。",
         ),
       );
     } finally {
@@ -1159,6 +1180,7 @@ export class VersionWorkflow {
     const historyActivation = isRecord(payload?.historyActivation)
       ? payload.historyActivation
       : null;
+    const operationId = String(historyActivation?.operationId || "");
     const previousWorkingCopyId = historyActivation?.previousWorkingCopyId;
     const activatedWorkingCopyId = String(historyActivation?.activatedWorkingCopyId || "");
     if (
@@ -1183,6 +1205,13 @@ export class VersionWorkflow {
       || !versions
       || !versions.some((version) => String(version?.versionId || version?.id || "") === versionId)
       || !historyActivation
+      || String(historyActivation.projectId || "") !== context.projectId
+      || String(historyActivation.documentId || "") !== context.documentId
+      || String(historyActivation.versionId || "") !== versionId
+      || !/^[A-Za-z0-9_-]{8,160}$/.test(operationId)
+      || !["desktop-pending", "desktop-confirmed"].includes(historyActivation.state)
+      || !validTimestamp(historyActivation.createdAt)
+      || String(payload?.operationId || "") !== operationId
       || (
         previousWorkingCopyId !== null
         && !/^work_ver_\d{4,}$/.test(String(previousWorkingCopyId || ""))
@@ -1197,8 +1226,14 @@ export class VersionWorkflow {
     return Object.freeze({
       openTarget,
       historyActivation: Object.freeze({
+        operationId,
+        projectId: context.projectId,
+        documentId: context.documentId,
         previousWorkingCopyId,
         activatedWorkingCopyId,
+        versionId,
+        state: String(historyActivation.state),
+        createdAt: String(historyActivation.createdAt),
       }),
       content,
       sha256,
@@ -1213,6 +1248,28 @@ export class VersionWorkflow {
       lastModifiedAt: String(payload.lastModifiedAt),
       draft,
     });
+  }
+
+  #historyConfirmationPayload(payload, context, activation) {
+    const confirmed = isRecord(payload?.historyActivation) ? payload.historyActivation : null;
+    if (
+      payload?.ok !== true
+      || payload?.status !== "history-working-copy-desktop-confirmed"
+      || String(payload?.projectId || "") !== context.projectId
+      || String(payload?.documentId || "") !== context.documentId
+      || String(payload?.operationId || "") !== activation.operationId
+      || !confirmed
+      || String(confirmed.operationId || "") !== activation.operationId
+      || String(confirmed.projectId || "") !== context.projectId
+      || String(confirmed.documentId || "") !== context.documentId
+      || confirmed.previousWorkingCopyId !== activation.previousWorkingCopyId
+      || String(confirmed.activatedWorkingCopyId || "") !== activation.activatedWorkingCopyId
+      || String(confirmed.versionId || "") !== activation.versionId
+      || confirmed.state !== "desktop-confirmed"
+    ) {
+      throw new Error("历史工作文件桌面确认响应缺少完整的一致回执。");
+    }
+    return confirmed;
   }
 
   #settleActivatedRun(run, value) {
@@ -1240,24 +1297,6 @@ export class VersionWorkflow {
       pendingWrite: this.#documentSession.pendingWrite,
       version: this.#versionSession.captureSnapshot(),
     });
-  }
-
-  async #rollbackManagedSourceTransition(operation, previous) {
-    if (!this.#isNavigationActive(operation)) return false;
-    const restored = this.#projectWorkflow.restoreManagedSourceTransitionAuthority(previous);
-    if (!restored || !this.#projectSession.context) return false;
-    this.#canvasPort.invalidateRenderAcks();
-    try {
-      const sha256 = await this.#hashPort.sha256(this.#documentSession.html);
-      await this.#canvasPort.verifyRendered(
-        this.#documentSession.html,
-        sha256,
-        this.#projectSession.context,
-      );
-      return this.#isNavigationActive(operation);
-    } catch {
-      return false;
-    }
   }
 
   async #rollbackNavigation(operation, previous) {

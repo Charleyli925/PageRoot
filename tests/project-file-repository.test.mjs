@@ -278,37 +278,84 @@ test("a historical Version reactivates its original Working Copy without changin
   const activated = await value.repository.activateVersionWorkingCopy({
     target: active,
     versionId: "ver_0002",
+    operationId: "history_continue_v2_0001",
+    expectedActiveWorkingCopyId: "work_ver_0006",
   });
   assert.equal(activated.activated, true);
   assert.equal(activated.previousWorkingCopyId, "work_ver_0006");
   assert.equal(activated.target.versionId, "ver_0002");
   assert.equal(activated.target.workingCopyId, "work_ver_0002");
+  assert.equal(activated.historyActivation.state, "desktop-pending");
   const retried = await value.repository.activateVersionWorkingCopy({
     target: active,
     versionId: "ver_0002",
+    operationId: "history_continue_v2_0001",
+    expectedActiveWorkingCopyId: "work_ver_0006",
   });
   assert.equal(retried.activated, false);
-  assert.equal(retried.previousWorkingCopyId, "work_ver_0002");
+  assert.equal(retried.replayed, true);
+  assert.equal(retried.previousWorkingCopyId, "work_ver_0006");
   assert.equal(retried.target.workingCopyId, activated.target.workingCopyId);
 
-  const rolledBack = await value.repository.rollbackVersionWorkingCopyActivation({
-    target: activated.target,
+  const resumedAfterLostResponse = await value.repository.activateVersionWorkingCopy({
+    target: active,
+    versionId: "ver_0002",
+    operationId: "history_retry_after_lost_response_0001",
+    expectedActiveWorkingCopyId: "work_ver_0006",
+  });
+  assert.equal(resumedAfterLostResponse.replayed, true);
+  assert.equal(
+    resumedAfterLostResponse.historyActivation.operationId,
+    "history_continue_v2_0001",
+  );
+
+  const confirmed = await value.repository.confirmVersionWorkingCopyActivation({
+    target: active,
+    operationId: "history_continue_v2_0001",
     previousWorkingCopyId: "work_ver_0006",
     activatedWorkingCopyId: "work_ver_0002",
+    versionId: "ver_0002",
   });
-  assert.equal(rolledBack.rolledBack, true);
-  const rollbackRetry = await value.repository.rollbackVersionWorkingCopyActivation({
-    target: activated.target,
+  assert.equal(confirmed.confirmed, true);
+  assert.equal(confirmed.historyActivation.state, "desktop-confirmed");
+  const confirmRetry = await value.repository.confirmVersionWorkingCopyActivation({
+    target: active,
+    operationId: "history_continue_v2_0001",
     previousWorkingCopyId: "work_ver_0006",
     activatedWorkingCopyId: "work_ver_0002",
+    versionId: "ver_0002",
   });
-  assert.equal(rollbackRetry.rolledBack, false);
-  const runtimeAfterRollback = await json(path.join(
+  assert.equal(confirmRetry.confirmed, false);
+  const runtimeAfterActivation = await json(path.join(
     imported.target.projectRootPath,
     ".pageroot",
     "runtime-state.json",
   ));
-  assert.equal(runtimeAfterRollback.activeWorkingCopyId, "work_ver_0006");
+  assert.equal(runtimeAfterActivation.activeWorkingCopyId, "work_ver_0002");
+  assert.equal(runtimeAfterActivation.historyActivation.state, "desktop-confirmed");
+
+  const resumedAfterConfirmationLoss = await value.repository.activateVersionWorkingCopy({
+    target: active,
+    versionId: "ver_0002",
+    operationId: "history_retry_after_confirmation_loss_0001",
+    expectedActiveWorkingCopyId: "work_ver_0006",
+  });
+  assert.equal(resumedAfterConfirmationLoss.replayed, true);
+  assert.equal(
+    resumedAfterConfirmationLoss.historyActivation.operationId,
+    "history_continue_v2_0001",
+  );
+
+  await assert.rejects(
+    value.repository.activateVersionWorkingCopy({
+      target: active,
+      versionId: "ver_0003",
+      operationId: "history_stale_v3_0001",
+      expectedActiveWorkingCopyId: "work_ver_0006",
+    }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "HISTORY_ACTIVATION_PREDECESSOR_CONFLICT",
+  );
 
   const v2Edited = html("editable V2 after history continuation");
   const saved = await value.repository.saveWorkingCopy({
@@ -342,6 +389,12 @@ test("a historical Version reactivates its original Working Copy without changin
   assert.equal(promoted.version.versionId, "ver_0007");
   assert.equal(promoted.version.basedOnVersionId, "ver_0002");
   assert.equal(promoted.version.previousVersionId, "ver_0006");
+  const runtimeAfterPromotion = await json(path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "runtime-state.json",
+  ));
+  assert.equal(runtimeAfterPromotion.historyActivation, null);
 });
 
 test("blocked Candidate validation never reserves a Version", async (t) => {
