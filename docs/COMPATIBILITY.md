@@ -57,6 +57,42 @@ collected. A guessed date is not a support-window policy.
   workspace census proves no supported registry or project file lacks the
   metadata. Expected removal time: not scheduled pending that evidence.
 
+## Exact legacy V4 Registry metadata completion
+
+- Historical producer and version: the short-lived pre-hardening V4 desktop
+  Registry producer wrote `schemaVersion: "4.0.0"` with top-level
+  `schemaVersion`, `updatedAt` and `projects`, but no `pendingImports`; each
+  project record contained exactly `projectRootPath` and `updatedAt`.
+- Current consumer: `ProjectFileRepository.#readRegistry` before Bridge
+  workspace and project-ensure operations.
+- Migration and canonical output: current Registry validation runs first and
+  never rewrites a valid current record. Only the exact historical shape may
+  migrate. Every project key, direct-child non-symlink real root and matching
+  `.pageroot/project.json` must validate before the repository constructs
+  `registeredProjectRootPath`, a live-directory-stat `rootFileIdentity`, and
+  `pendingImports: {}` in memory. A short-lived exclusive migration lock
+  serializes the one replacement across Bridge processes; dead-owner recovery
+  claims the exact sealed token marker before moving its lock, and a waiter re-reads
+  under that lock and returns a current Registry without rewriting it. It then
+  writes a Hash-named byte-for-byte backup of the old Registry and atomically
+  publishes the current Registry. The backup is not read as runtime authority.
+  Mixed shapes, extra fields, path escape, symlink, missing root, identity
+  mismatch, source change or publication failure fail closed without changing
+  the old Registry, importing a project, reassociating a root or touching HTML.
+- Historical proof: `tests/project-file-repository.test.mjs` covers valid
+  one/multiple/empty migration, current no-op, rejection, atomic recovery and
+  concurrent migration/import serialization;
+  `tests/project-file-bridge.test.mjs` covers `/workspace` and first
+  `/project/ensure`; `tests/e2e/electron/native-dom-electron.spec.mjs` covers
+  a seeded Registry through desktop edit, comment and reopen.
+- Disk persistence read/write: yes, bounded mutable Registry metadata only;
+  existing Project, Working Copy, Version, Draft, comment, attachment and HTML
+  files remain outside the migration write set.
+- Support window and deletion evidence: retain until a read-only Registry
+  census proves no supported install has the exact historical V4 shape and the
+  producing Developer Preview is outside the supported upgrade window. Expected
+  removal time: not scheduled pending that evidence.
+
 ## ID-less mutation context
 
 - Historical producer and version: older local clients and compatibility tests
