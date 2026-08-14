@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   cpSync,
   existsSync,
@@ -47,6 +48,10 @@ import {
 } from "./helpers/pageroot-app-fixture.mjs";
 
 const ORIGINAL_LIST_TEXT = "列表项中的文字保持项目符号和缩进。";
+
+function sha256(value) {
+  return `sha256:${createHash("sha256").update(value).digest("hex")}`;
+}
 
 function removeIsolatedUserData(isolatedUserData) {
   removeValidatedTemporaryDirectory(isolatedUserData, "pageroot-native-e2e-");
@@ -1041,6 +1046,7 @@ test("Electron Edit preserves imported source-relative ECharts assets and native
   </script>
 </body>
 </html>`;
+  const sourceSha256 = sha256(source);
   writeFileSync(runtimeScriptPath, `window.echarts = {
   init(host) {
     host.style.userSelect = "none";
@@ -1109,7 +1115,16 @@ test("Electron Edit preserves imported source-relative ECharts assets and native
         /(?=.*user-select: none)(?=.*transform: scale\(0\.75\))/u,
       ),
     });
-    expect(readFileSync(sourcePath, "utf8")).toBe(source);
+    await expect(launched.page.locator(".save-status")).toHaveText("已安全保存");
+    const renderState = await launched.page.locator(".save-status").evaluate((element) => ({
+      canvasGeneration: element.getAttribute("data-canvas-generation"),
+      renderGeneration: element.getAttribute("data-render-generation"),
+      renderedSha256: element.getAttribute("data-rendered-sha256"),
+    }));
+    expect(renderState.canvasGeneration).toEqual(expect.any(String));
+    expect(renderState.renderGeneration).toBe(renderState.canvasGeneration);
+    expect(renderState.renderedSha256).toBe(sourceSha256);
+    expect(sha256(readFileSync(sourcePath, "utf8"))).toBe(sourceSha256);
     const runtimeDocument = await documentToken(frame);
     const runtimeCanvasState = await launched.page.locator("[data-persist-state]").first().evaluate(
       (element) => ({
@@ -1142,6 +1157,7 @@ test("Electron Edit preserves imported source-relative ECharts assets and native
     await launched.page.keyboard.insertText("原位");
     await expect.poll(() => readFileSync(managedSourcePath, "utf8"))
       .toContain("原位静态来源文字保持可编辑。");
+    expect(sha256(readFileSync(sourcePath, "utf8"))).toBe(sourceSha256);
     expect(readFileSync(sourcePath, "utf8")).toBe(source);
     expect(await documentToken(launched.page)).toBe(runtimeDocument);
     expect(frame.isDetached()).toBe(false);
@@ -1185,6 +1201,7 @@ test("Electron Edit rejects unsafe ECharts host styling without persisting it", 
   </script>
 </body>
 </html>`;
+  const sourceSha256 = sha256(source);
   writeFileSync(runtimeScriptPath, `window.echarts = {
   init(host) {
     host.style.position = "fixed";
@@ -1215,15 +1232,25 @@ test("Electron Edit rejects unsafe ECharts host styling without persisting it", 
       frozen: document.documentElement.getAttribute("data-pageroot-edit-runtime-frozen"),
       result: document.documentElement.getAttribute("data-pageroot-edit-runtime-result"),
       bootstrapCount: document.querySelectorAll("[data-pageroot-edit-runtime-bootstrap]").length,
+      runtimeMarkerCount: [...document.querySelectorAll("*")].filter((element) => (
+        [...element.attributes].some((attribute) => (
+          attribute.name.startsWith("data-pageroot-edit-runtime")
+        ))
+      )).length,
       canvasCount: document.querySelectorAll("#chart-host canvas").length,
+      runtimeCanvasCount: document.querySelectorAll("canvas[data-echarts-runtime]").length,
       hostStyle: document.querySelector("#chart-host").getAttribute("style"),
     })), { timeout: 2_000 }).toMatchObject({
       frozen: null,
       result: null,
       bootstrapCount: 0,
+      runtimeMarkerCount: 0,
       canvasCount: 0,
+      runtimeCanvasCount: 0,
       hostStyle: expect.stringMatching(/width:\s*640px.*height:\s*360px/u),
     });
+    await expect(launched.page.locator(".save-status")).toHaveText("已安全保存");
+    expect(sha256(readFileSync(sourcePath, "utf8"))).toBe(sourceSha256);
     expect(readFileSync(sourcePath, "utf8")).toBe(source);
   } finally {
     if (electronApp && isolatedUserData) {

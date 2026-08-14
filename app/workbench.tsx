@@ -694,9 +694,14 @@ export default function Workbench() {
   const viewMode = versionSnapshot.viewMode;
   const [canvasMode, setCanvasMode] = useState<CanvasMode>("edit");
   const editRuntimeSnapshot = workspaceControllerSnapshot?.editRuntime ?? null;
+  const editRuntimePhase = editRuntimeSnapshot?.phase || "static";
   const editRuntimePreparing = (
     canvasMode === "edit"
     && editRuntimeSnapshot?.phase === "preparing"
+  );
+  const editRuntimeRenderPending = (
+    canvasMode === "edit"
+    && ["preparing", "ready", "running"].includes(editRuntimePhase)
   );
   const editRuntimeGrant = (
     canvasMode === "edit"
@@ -2772,7 +2777,7 @@ export default function Workbench() {
 
   useEffect(() => {
     if (canvasMode !== "edit") return undefined;
-    if (editRuntimePreparing) return undefined;
+    if (editRuntimeRenderPending) return undefined;
     let cancelled = false;
     const expectedHtml = html;
     const expectedGeneration = canvasGeneration;
@@ -2801,7 +2806,8 @@ export default function Workbench() {
     canvasGeneration,
     canvasMode,
     currentDocumentSessionSnapshot,
-    editRuntimePreparing,
+    editRuntimePhase,
+    editRuntimeRenderPending,
     html,
   ]);
 
