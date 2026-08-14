@@ -15,7 +15,7 @@ permissions:
   pull-requests: write
 
 concurrency:
-  group: pageroot-draft-review-${{ github.event.issue.number }}
+  group: pageroot-draft-review-${{ contains(github.event.comment.body, 'pageroot-draft-review-command:v1') && format('cmd-{0}', github.event.issue.number) || format('noise-{0}', github.event.comment.id) }}
   cancel-in-progress: false
 
 jobs:

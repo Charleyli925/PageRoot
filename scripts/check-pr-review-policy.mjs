@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import {
   DEFAULT_TRUSTED_ACTOR,
   parseDraftReviewRequestMarker,
-} from "./draft-review-request.mjs";
+} from "./draft-review-marker.mjs";
 
 const scriptPath = fileURLToPath(import.meta.url);
 const productRoot = path.resolve(path.dirname(scriptPath), "..");

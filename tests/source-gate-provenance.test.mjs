@@ -307,9 +307,31 @@ test("the Draft Codex review probe stays a trusted default-branch issue-comment 
   assert.match(workflow, /--pull-request "\$ISSUE_NUMBER"/u);
   assert.match(workflow, /--comment-id "\$COMMENT_ID"/u);
   assert.doesNotMatch(workflow, /--(?:pull-request|comment-id) "\$\{\{/u);
-  assert.match(workflow, /group: pageroot-draft-review-\$\{\{\s*github\.event\.issue\.number\s*\}\}/u);
-  assert.doesNotMatch(workflow, /group: pageroot-draft-review-[^\n]*github\.event\.comment\.id/u);
+  assert.match(workflow, /group: pageroot-draft-review-\$\{\{\s*contains\(github\.event\.comment\.body, 'pageroot-draft-review-command:v1'\)/u);
+  assert.match(workflow, /format\('cmd-\{0\}', github\.event\.issue\.number\)/u);
+  assert.match(workflow, /format\('noise-\{0\}', github\.event\.comment\.id\)/u);
   assert.doesNotMatch(workflow, /cancel-in-progress: true/u);
+  assert.match(workflow, /runs-on: ubuntu-24\.04/u);
+  assert.doesNotMatch(workflow, /runs-on: macos-/u);
+});
+test("the automatic Draft Codex review workflow stays a trusted default-branch workflow_run follower", async () => {
+  const workflow = await readFile(
+    path.join(productRoot, ".github/workflows/draft-review-auto.yml"),
+    "utf8",
+  );
+  assert.match(workflow, /on:\s*\n\s+workflow_run:\s*\n\s+workflows: \[PR Feedback\]\s*\n\s+types: \[completed\]/u);
+  assert.doesNotMatch(workflow, /workflow_dispatch:|issue_comment:|^\s+pull_request(?:_target)?:/mu);
+  assert.doesNotMatch(workflow, /ref:\s*\$\{\{\s*github\.event\.pull_request\.head\.sha/u);
+  assert.doesNotMatch(workflow, /refs\/pull\//u);
+  assert.doesNotMatch(workflow, /actions\/download-artifact/u);
+  assert.doesNotMatch(workflow, /secrets\./u);
+  assert.match(workflow, /permissions:\s*\n\s+contents: read\s*\n\s+pull-requests: write/u);
+  assert.doesNotMatch(workflow, /contents: write|issues: write|actions: write|checks: write/u);
+  assert.doesNotMatch(workflow, /gh pr merge|mergePullRequest|git push|git tag|gh release/u);
+  assert.match(workflow, /if: github\.event\.workflow_run\.conclusion == 'success'/u);
+  assert.match(workflow, /draft-review-request\.mjs/u);
+  assert.match(workflow, /--workflow-run-id "\$WORKFLOW_RUN_ID"/u);
+  assert.match(workflow, /persist-credentials: false/u);
   assert.match(workflow, /runs-on: ubuntu-24\.04/u);
   assert.doesNotMatch(workflow, /runs-on: macos-/u);
 });
