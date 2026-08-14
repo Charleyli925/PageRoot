@@ -4855,10 +4855,38 @@ export class ProjectFileRepository {
       );
     }
     if (source?.sha256 === target) {
+      // `committed` means PageRoot published its new source and metadata, not
+      // that the parked old inode has become irrelevant. An external editor
+      // can retain an FD to previous.html across a crash at this point, so
+      // preserve and surface its late write before treating the save as done.
+      if (previous && previous.sha256 !== expected) {
+        await atomicWriteProjectJson(loaded.paths.projectRootPath, transactionPath, {
+          ...transaction,
+          state: "conflict",
+          recovery: "parked-source-changed-after-publish",
+          parkedSourceSha256: previous.sha256,
+          retainedAt: nowIso(this.#clock),
+        }, "save transaction");
+        throw new ProjectFileRepositoryError(
+          "SAVE_RECOVERY_CONFLICT",
+          "The Working Copy changed through an already-open external file after PageRoot saved it; the external bytes were retained for recovery.",
+          {
+            workingCopyId: workingCopy.workingCopyId,
+            expectedSourceSha256: expected,
+            targetSourceSha256: target,
+            parkedSourceSha256: previous.sha256,
+          },
+        );
+      }
       const saved = await readHtmlFile(sourcePath, "Working Copy", {
         projectRootPath: loaded.paths.projectRootPath,
       });
-      return commitSavedSource(saved);
+      const committed = await commitSavedSource(saved);
+      // This is the same best-effort cleanup boundary as a non-interrupted
+      // save. It happens only after the parked bytes have been rechecked.
+      await rm(recoveryPaths.operationRoot, { recursive: true, force: true }).catch(() => {});
+      await syncDirectory(loaded.paths.recoveryRoot).catch(() => {});
+      return committed;
     }
     if (!source && previous) {
       if (previous.sha256 === expected && next?.sha256 === target) {
@@ -5037,7 +5065,25 @@ export class ProjectFileRepository {
         const transaction = await readJsonFile(transactionPath, "save transaction", {
           projectRootPath: loaded.paths.projectRootPath,
         });
-        if (transaction?.state !== "committed") {
+        let committedRecoveryDirectory = false;
+        if (
+          transaction?.state === "committed"
+          && isObject(transaction)
+          && Object.hasOwn(transaction, "recoveryId")
+        ) {
+          const recoveryPaths = saveRecoveryPaths(
+            loaded.paths,
+            transaction.workingCopyId,
+            transaction.editRevision,
+            transaction.recoveryId,
+          );
+          committedRecoveryDirectory = Boolean(await directoryInformation(
+            recoveryPaths.operationRoot,
+            "save recovery directory",
+            { projectRootPath: loaded.paths.projectRootPath },
+          ));
+        }
+        if (transaction?.state !== "committed" || committedRecoveryDirectory) {
           recovered.push(await this.#recoverSaveTransaction(
             loaded,
             transactionPath,
