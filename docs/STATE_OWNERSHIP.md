@@ -8,7 +8,7 @@
 | Accepted local/external project results, their FIFO renderer publication and deferred final-fence blocker-transition/manual retry policy | Renderer `ProjectApplicationSession` | none; bounded in-memory state only | `ProjectWorkflow` composition and Workbench presentation |
 | Registered mutation context resolution and atomic-replacement source observation | Bridge project-context service | project/document registry graph plus the owning runtime `pendingWrite` target Hash | Bridge mutation routes and `/project/ensure` |
 | Runtime Bridge/Session/workflow composition, aggregate-observer lifecycle, registration operation identity, single-flight, stale-result fence and cross-Session publication sequence | `createRuntimeWorkspaceController()` and `WorkspaceController` | none; the factory creates the one fact-owner set and the Controller publishes only frozen aggregate projections through existing Project, Document, Comment, Draft, Version and SourceHistory owners | Workbench aggregate-snapshot subscription, Controller commands and presentation-event adapter |
-| Project hydration generation and load outcome, switch/open operation, accepted-result execution, close request identity, project-switch publication, and the narrow generated-source prepare/commit handoff | Renderer `ProjectWorkflow`, composed by `WorkspaceController` | none; it publishes through existing Session owners and trusted ProjectOpen/Canvas ports | Workbench commands and presentation-event adapter |
+| Project hydration generation and load outcome, switch/open operation, accepted-result execution, close request identity, project-switch publication, and the unified managed-source prepare/commit handoff for Candidate promotion, historical Working Copy continuation and future Registry opens | Renderer `ProjectWorkflow`, composed by `WorkspaceController` | none; it publishes through existing Session owners and trusted ProjectOpen/Canvas ports | Workbench commands and presentation-event adapter |
 | Durable source filename transaction, pending operation and active/recent path rebase | Desktop source-rename transaction | active-file `pendingRename` / `lastRename`, then filesystem path | trusted desktop rename port and Bridge relink |
 | Renderer source-rename operation, expected Hash/context fence, lost-response reconciliation and synchronous Project/Document/Run publication | `ProjectWorkflow`, composed by `WorkspaceController` | none; it publishes through the existing Session owners after the desktop transaction validates | Workbench filename intent and presentation-event adapter |
 | Current source bytes, Hash, edit revision, persistence projection, pending write, single-flight source flush, Canvas authority generation and exact-byte boundary reconciliation | Renderer `DocumentSession` | source HTML, runtime autosave record and recovery log; the generation itself is disposable | Canvas, preview readiness, source-history session and drain coordinator |
@@ -24,7 +24,7 @@
 | AI Request freeze, persisted-boundary verification, unknown-POST authority reconciliation, polling lifecycle, cancellation and conflict command sequence | Renderer `RunWorkflow`, composed by `WorkspaceController` | none; it publishes only through `RunSession` and reads Bridge runtime/immutable Request records | Workbench intent/Drawer/Toast adapter and Bridge run lifecycle |
 | AI Request/Attempt lifecycle transition | Bridge run lifecycle | runtime state and immutable Request/Attempt records | `RunWorkflow`, RunSession and finalizer |
 | Immutable Version list and based-on/exact/restored/current-history projection facts | Renderer `VersionSession` | immutable Version records and current runtime pointers | `VersionWorkflow`, Workbench history and Canvas projection |
-| Version activation, review-candidate preparation, current/history navigation operation identity, Bridge I/O, identity/Hash/time validation, synchronous cross-Session publication and navigation rollback | Renderer `VersionWorkflow`, composed by `WorkspaceController` | none; it publishes only through Project, Document and Version owners | Workbench review/history commands, presentation-event adapter and Bridge version lifecycle |
+| Version activation, review-candidate preparation, current/history navigation and historical Working Copy continuation operation identity, Bridge I/O, full OpenTarget/Hash/time validation, receipt-forward recovery and synchronous cross-Session publication | Renderer `VersionWorkflow`, composed by `WorkspaceController` | Repository owns the durable history activation receipt; the workflow publishes only through Project, Document, Version, Draft and Comment owners | Workbench review/history commands, presentation-event adapter and Bridge version lifecycle |
 | `PROJECT.md` content, editor generation, composition fence and save projection | Renderer `ProjectRulesSession` | managed `PROJECT.md` | `ProjectRulesWorkflow` and project panel |
 | `PROJECT.md` Bridge reads/writes, 700ms autosave timer, unknown-write authority reconciliation, close/switch drain and restore-port invocation | Renderer `ProjectRulesWorkflow`, composed by `WorkspaceController` | none; it publishes only through `ProjectRulesSession` and the managed `PROJECT.md` remains authoritative | `ProjectWorkflow` drain, project panel and Request freeze |
 | Close/switch/submit/history readiness and desktop close lifecycle | The unique `DrainCoordinator` owned by `WorkspaceController`; `ProjectWorkflow` owns the request-scoped close operation | composed owner snapshots, request identity and bounded presentation class; no copied dirty booleans | Electron close handshake, browser fallback and navigation |
@@ -134,10 +134,18 @@ Rules:
 - Cross-owner operations are coordinated explicitly; they do not synchronize
   through incidental React effects.
 - A current-source transition first stages one complete candidate containing
-  project identity, source path, Version authority, HTML bytes and verified
-  Hash. Only after every field is valid may the coordinator synchronously
-  publish Project, Document and Version state and advance the Canvas authority
-  generation. A Hash-only or path-only publication is invalid.
+  project identity, full OpenTarget identity, source path, Version authority,
+  HTML bytes and verified Hash. Only after every field is valid may the
+  coordinator synchronously publish Project, Document, Version, Draft and
+  Comment state and advance the Canvas authority generation. A Hash-only or
+  path-only publication is invalid.
+- Historical continue-edit owns no mutable Version snapshot. `VersionWorkflow`
+  may call the narrow Bridge activation route only from the exact read-only
+  history view; Repository atomically owns the `desktop-pending`/`desktop-confirmed`
+  receipt, and `ProjectWorkflow` passes its operation ID to the same managed-source
+  primitive as Candidate promotion. A lost Bridge, Desktop or confirmation response
+  may be retried only against that complete receipt identity; it must not borrow
+  another project's OpenTarget or roll durable V2 back to V6.
 - Edit and preview acknowledge rendering with the exact Document Canvas
   generation and source Hash. A late acknowledgement from an older generation
   is discarded and cannot make persistence appear safe.

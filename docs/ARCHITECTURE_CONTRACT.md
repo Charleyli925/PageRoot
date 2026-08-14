@@ -92,11 +92,14 @@ The renderer's main workspace facts are partitioned as follows:
 - `VersionSession`: immutable Version records plus the current/history
   projection facts;
 - `VersionWorkflow`: Version operation identity/generation, Bridge version
-  reads and activation mutation, review-candidate preparation, complete
-  project/document/version identity and Hash validation, synchronous
-  cross-Session publication, and current/history navigation rollback. It
-  publishes through `ProjectSession`, `DocumentSession` and `VersionSession`;
-  it never owns a second mutable Version store;
+  reads and activation mutation, review-candidate preparation, historical
+  Working Copy continuation, complete project/document/version/OpenTarget
+  identity and Hash validation, synchronous cross-Session publication, and
+  read-only current/history navigation rollback. A committed historical
+  activation recovers forward through its receipt; it never restores V6 over
+  durable V2 state. It publishes through `ProjectSession`,
+  `DocumentSession`, `VersionSession`, `DraftSession` and `CommentSession`; it
+  never owns a second mutable Version store;
 - `SourceHistorySession`: pending exact Patch operations and history action.
 - `ExternalFileOpenSession`: opaque external-open delivery IDs, one active
   switch, newest queued request, deferred safe-switch retry and stale-result
@@ -105,12 +108,13 @@ The renderer's main workspace facts are partitioned as follows:
   switch fence, deferred application retry and successor preservation.
 - `ProjectWorkflow`: hydration generation/load outcome, picker/external/switch
   operation identity, accepted-result execution, close request lifecycle,
-  project-switch publication, typed source-rename transition and the narrow
-  generated-source prepare/commit handoff used by `VersionWorkflow`. The rename
-  command fences/drains existing owners, validates the expected source Hash and
-  trusted desktop result (including lost-response reconciliation), then
-  synchronously publishes through existing Run/Project/Document Sessions. It
-  is an operation owner, not a second owner of any Session fact.
+  project-switch publication, typed source-rename transition and the unified
+  managed-source prepare/commit handoff used by Candidate promotion, historical
+  Working Copy continuation and future Registry opens. The command fences/drains
+  existing owners, validates the expected source Hash and trusted desktop result
+  (including lost-response reconciliation), then synchronously publishes through
+  existing Session owners. It is an operation owner, not a second owner of any
+  Session fact.
 
 `CommentSession` does not replace the Draft aggregate or Bridge CAS authority,
 and `VersionSession` does not make mutable copies of immutable Version files.
@@ -198,11 +202,23 @@ retry state may not carry either external delivery or accepted-result protocol.
 
 A transition that changes the current source or Version has two phases. The
 asynchronous phase prepares and validates one complete candidate: project and
-document identity, canonical path, Version authority, HTML bytes and Hash. The
-publication phase contains no `await`: it synchronously advances
-`ProjectSession`, publishes the complete `DocumentSession` tuple, updates
-`VersionSession` and invalidates prior Canvas acknowledgements. Publishing only
-the path, only the Hash or any other partial combination is forbidden.
+document identity, canonical path, full OpenTarget/Working Copy identity,
+Version authority, HTML bytes and Hash. The publication phase contains no
+`await`: it synchronously advances `ProjectSession`, publishes the complete
+`DocumentSession` tuple, updates `VersionSession`, `DraftSession` and
+`CommentSession`, then invalidates prior Canvas acknowledgements. Publishing
+only the path, only the Hash or any other partial combination is forbidden.
+
+The history “continue editing” command is not a Version restore or snapshot
+write. It accepts only the current project identity, one `versionId` and an
+operation ID; Repository chooses the one matching existing Working Copy after
+validating its state and immutable snapshot, atomically records V2 as active
+with a `desktop-pending` receipt, and confirms that receipt only after Desktop
+activation. If a Bridge, Desktop or confirmation response is lost, the same
+receipt operation is safe to replay and must resolve to the same `workingCopyId`;
+it must not roll durable V2 back to V6. A background Candidate carries its own
+complete OpenTarget and may never use whichever target happens to be mounted in
+the foreground.
 
 Edit and preview surfaces acknowledge the exact Canvas authority generation and
 rendered source Hash. Acknowledgements are disposable and generation-fenced;
@@ -532,6 +548,24 @@ Inline aliases and permanent “just in case” branches are not allowed.
 
 The supported compatibility adapters are:
 
+- An exact pre-hardening V4 `.pageroot-registry.json` may complete its missing
+  Registry-only root identity metadata through `ProjectFileRepository`. The
+  current shape is validated and read without a write. The historical shape
+  must have exactly `schemaVersion: "4.0.0"`, no `pendingImports`, and only
+  `{ projectRootPath, updatedAt }` project records. Every record must prove its
+  ID, direct-child non-symlink root, real-path containment and matching
+  `.pageroot/project.json`; current `rootFileIdentity` comes from that live
+root stat, never a filename or HTML Hash. A short-lived exclusive migration
+lock serializes this replacement across Bridge processes; sealed dead-owner
+reclamation first atomically claims the exact token-named marker, while an
+unsealed or malformed lock fails busy. After acquiring it,
+the repository re-reads the Registry and returns a current record without a
+write when another process already completed it. All entries validate before
+the old raw bytes are backed up by Hash and the full current Registry is
+atomically published. A failure preserves the old Registry, cannot reset or
+reassociate a project, and grants no write authority. Remove this migration
+  only after a read-only Registry census proves the exact historical shape is
+  outside the supported upgrade window.
 - Complete PageRoot 0.9.0 v3 project records whose registry, `project.json`,
   initial Version and existing `projects/<projectId>` directory prove one
   identity may gain `displayName`, `createdAt` and

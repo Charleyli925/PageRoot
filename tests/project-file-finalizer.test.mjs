@@ -119,6 +119,81 @@ test("project-file finalizer freezes a Candidate output without publishing a Ver
   );
 });
 
+test("project-file finalizer refreshes Registry identity only after every Candidate check succeeds", async (t) => {
+  const { imported, request } = await preparedRequest(t, "req_registry_refresh_order");
+  const projectsRoot = path.dirname(imported.target.projectRootPath);
+  const registryPath = path.join(projectsRoot, ".pageroot-registry.json");
+  const registry = JSON.parse(await readFile(registryPath, "utf8"));
+  const originalIdentity = registry.projects[imported.target.projectId].rootFileIdentity;
+  const staleIdentity = {
+    ...originalIdentity,
+    inode: `${originalIdentity.inode}-stale`,
+  };
+  registry.projects[imported.target.projectId].rootFileIdentity = staleIdentity;
+  await writeFile(registryPath, JSON.stringify(registry), "utf8");
+  const outputPath = path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    ...request.outputRelativePath.split("/"),
+  );
+  await writeFile(outputPath, "not a complete html document", "utf8");
+
+  await assert.rejects(
+    finalizeProjectFileAttempt({
+      projectRoot: imported.target.projectRootPath,
+      requestId: request.requestId,
+      attemptId: request.attemptId,
+    }),
+    (error) => error?.code === "INCOMPLETE_HTML",
+  );
+  const afterRejected = JSON.parse(await readFile(registryPath, "utf8"));
+  assert.deepEqual(
+    afterRejected.projects[imported.target.projectId].rootFileIdentity,
+    staleIdentity,
+  );
+
+  await writeFile(outputPath, html("Candidate after full validation"), "utf8");
+  const finalized = await finalizeProjectFileAttempt({
+    projectRoot: imported.target.projectRootPath,
+    requestId: request.requestId,
+    attemptId: request.attemptId,
+  });
+  assert.equal(finalized.status, "completed");
+  const afterCompleted = JSON.parse(await readFile(registryPath, "utf8"));
+  assert.deepEqual(
+    afterCompleted.projects[imported.target.projectId].rootFileIdentity,
+    originalIdentity,
+  );
+});
+
+test("project-file finalizer rechecks Candidate bytes after the size stat", async (t) => {
+  const { imported, request, requestRoot } = await preparedRequest(
+    t,
+    "req_candidate_post_read_limit",
+  );
+  const outputPath = path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    ...request.outputRelativePath.split("/"),
+  );
+  await assert.rejects(
+    finalizeProjectFileAttempt({
+      projectRoot: imported.target.projectRootPath,
+      requestId: request.requestId,
+      attemptId: request.attemptId,
+      testHooks: {
+        afterCandidateOutputStat: async () => {
+          await writeFile(outputPath, Buffer.alloc((20 * 1024 * 1024) + 1, 0x61));
+        },
+      },
+    }),
+    (error) => error?.code === "OUTPUT_TOO_LARGE",
+  );
+  await assert.rejects(readFile(
+    path.join(requestRoot, "attempts", request.attemptId, "completion.json"),
+  ));
+});
+
 test("project-file finalizer seals the complete frozen Request bundle", async (t) => {
   await t.test("acknowledges a cancelled Request without creating completion evidence", async (subtest) => {
     const { repository, imported, request, requestRoot } = await preparedRequest(
@@ -130,6 +205,16 @@ test("project-file finalizer seals the complete frozen Request bundle", async (t
       requestId: request.requestId,
       attemptId: request.attemptId,
     });
+    const cancellationAuthority = JSON.parse(await readFile(path.join(
+      imported.target.projectRootPath,
+      ".pageroot",
+      "recovery",
+      "cancellations",
+      `${request.requestId}.${request.attemptId}.json`,
+    ), "utf8"));
+    assert.equal(cancellationAuthority.kind, "request-cancellation");
+    assert.equal(cancellationAuthority.requestId, request.requestId);
+    assert.equal(cancellationAuthority.attemptId, request.attemptId);
 
     const finalized = await finalizeProjectFileAttempt({
       projectRoot: imported.target.projectRootPath,
@@ -146,6 +231,32 @@ test("project-file finalizer seals the complete frozen Request bundle", async (t
     await assert.rejects(readFile(
       path.join(requestRoot, "attempts", request.attemptId, "completion.json"),
     ));
+  });
+
+  await t.test("rejects a cancelled Request without external cancellation authority", async (subtest) => {
+    const { imported, request, requestRoot } = await preparedRequest(
+      subtest,
+      "req_cancelled_without_authority",
+    );
+    const requestPath = path.join(requestRoot, "request.json");
+    const runtimePath = path.join(imported.target.projectRootPath, ".pageroot", "runtime-state.json");
+    const requestRecord = JSON.parse(await readFile(requestPath, "utf8"));
+    const runtime = JSON.parse(await readFile(runtimePath, "utf8"));
+    requestRecord.status = "cancelled";
+    requestRecord.cancelledAt = "2026-08-14T00:00:00.000Z";
+    runtime.activeRequest = null;
+    runtime.activeCandidateId = null;
+    await writeFile(requestPath, JSON.stringify(requestRecord), "utf8");
+    await writeFile(runtimePath, JSON.stringify(runtime), "utf8");
+
+    await assert.rejects(
+      finalizeProjectFileAttempt({
+        projectRoot: imported.target.projectRootPath,
+        requestId: request.requestId,
+        attemptId: request.attemptId,
+      }),
+      (error) => error?.code === "CANCELLATION_AUTHORITY_MISMATCH",
+    );
   });
 
   await t.test("rejects a changed frozen input even when the base HTML is intact", async (subtest) => {

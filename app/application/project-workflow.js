@@ -2416,10 +2416,20 @@ export class ProjectWorkflow {
     });
   }
 
-  // VersionWorkflow shares this narrow transition primitive with hydration.
-  // The caller prepares async host work first; this method never publishes a
-  // partial Project/Document/Version tuple.
-  async prepareGeneratedSourceTransition({
+  captureManagedSourceTransitionAuthority() {
+    return this.#captureHydrationAuthority();
+  }
+
+  restoreManagedSourceTransitionAuthority(authority) {
+    if (!authority || typeof authority !== "object") return null;
+    return this.#rollbackHydrationAuthority(authority);
+  }
+
+  // VersionWorkflow shares this narrow transition primitive with Candidate
+  // promotion, historical Working Copy continuation and future Registry
+  // project activation. The caller prepares async host work first; this method
+  // never publishes a partial Project/Document/Version tuple.
+  async prepareManagedSourceTransition({
     previousSourcePath,
     nextSourcePath,
     expectedSha256,
@@ -2427,6 +2437,7 @@ export class ProjectWorkflow {
     nextDocumentId,
     versionId,
     openTarget = null,
+    operationId = null,
   }) {
     const updatesCurrentProject = Boolean(
       (
@@ -2467,6 +2478,7 @@ export class ProjectWorkflow {
           workingCopyId: String(openTarget.workingCopyId),
           versionId,
           projectRootPath: String(openTarget.projectRootPath),
+          ...(operationId ? { operationId: String(operationId) } : {}),
         })
       : await this.#activateGeneratedVersion({
           previousSourcePath,
@@ -2506,7 +2518,13 @@ export class ProjectWorkflow {
     return this.#projectOpenPort.activateManagedWorkingCopy(input);
   }
 
-  commitGeneratedSourceTransition({ prepared, html, sourceSha256, publishVersion }) {
+  commitManagedSourceTransition({
+    prepared,
+    html,
+    sourceSha256,
+    publishVersion = () => {},
+    publishSessions = null,
+  }) {
     if (!prepared.updatesCurrentProject) return null;
     const changesSourcePath = !this.#codecs.sameSourcePath(
       this.#projectSession.sourcePath,
@@ -2537,22 +2555,36 @@ export class ProjectWorkflow {
     if (!transition || !this.#projectSession.context) return null;
 
     // Publication is deliberately synchronous: no consumer can observe a new
-    // Project without the complete Document tuple, Version authority and new
-    // Canvas generation.
+    // Project without the complete Document tuple, Version/Draft/Comment
+    // authority and new Canvas generation.
+    if (changesSourcePath) {
+      this.#documentWorkflow.resetForProjectTransition();
+      this.#commentWorkflow.resetForProjectTransition();
+      this.#projectRulesWorkflow.resetForProjectTransition();
+    }
     this.#documentSession.publishAuthority({
       html,
       sourceSha256,
       pendingWrite: null,
     });
-    publishVersion();
-    this.#canvasPort.invalidateRenderAcks?.();
-    if (changesSourcePath) {
-      this.#documentWorkflow.resetForProjectTransition();
-      this.#commentWorkflow.resetForProjectTransition();
-      this.#projectRulesWorkflow.resetForProjectTransition();
-      this.#draftSession.deactivate();
+    if (typeof publishSessions === "function") {
+      publishSessions(this.#projectSession.context);
+    } else {
+      publishVersion();
+      if (changesSourcePath) this.#draftSession.deactivate();
     }
+    this.#canvasPort.invalidateRenderAcks?.();
     return this.#projectSession.context;
+  }
+
+  // Kept as a compatibility seam for the already-published Candidate route.
+  // New managed source callers use the generic names above.
+  async prepareGeneratedSourceTransition(input) {
+    return this.prepareManagedSourceTransition(input);
+  }
+
+  commitGeneratedSourceTransition(input) {
+    return this.commitManagedSourceTransition(input);
   }
 
   #deferCanvasCommand(kind, run, options = {}) {

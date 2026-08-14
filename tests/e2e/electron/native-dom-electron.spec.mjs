@@ -16,6 +16,7 @@ import path from "node:path";
 
 import { expect, test } from "@playwright/test";
 
+import { sha256 } from "../../../scripts/lifecycle-core.mjs";
 import { ProjectFileRepository } from "../../../scripts/project-file-repository.mjs";
 
 import {
@@ -469,6 +470,87 @@ test("Electron first launch imports the welcome HTML as V1 and sends its comment
       launched.electronApp,
       launched.isolatedUserData,
     );
+  }
+});
+
+test("Electron retries a managed Working Copy activation after the first response is lost", async () => {
+  test.setTimeout(120_000);
+  const source = createSourceFixture("managed-activation-retry.html");
+  const launched = await launchPageRoot({ activeSourcePath: source.sourcePath });
+  try {
+    await waitForProjectReady(launched.page);
+    const v1Path = await managedWorkingCopyPath(launched.page, source.sourcePath);
+    const projectsRoot = path.dirname(path.dirname(v1Path));
+    const repository = new ProjectFileRepository({ projectsRoot });
+    const workspace = await repository.workspace({ sourcePath: v1Path });
+    const candidate = await repository.createCandidate({
+      target: workspace.target,
+      requestId: "req_e2e_managed_activation_retry",
+      candidateId: "candidate_e2e_managed_activation_retry_0001",
+      html: "<!doctype html><html><head><title>V2 retry</title></head><body><p>V2 retry</p></body></html>",
+      expectedSourceSha256: workspace.sourceSha256,
+    });
+    const promoted = await repository.promoteCandidate({
+      target: workspace.target,
+      candidateId: candidate.candidate.candidateId,
+    });
+    const expectedManagedPath = realpathSync(promoted.target.exactSourcePath);
+    const payload = {
+      previousSourcePath: v1Path,
+      nextSourcePath: promoted.target.exactSourcePath,
+      expectedSha256: promoted.target.sourceSha256,
+      projectId: promoted.target.projectId,
+      documentId: promoted.target.documentId,
+      workingCopyId: promoted.target.workingCopyId,
+      versionId: promoted.target.versionId,
+      projectRootPath: promoted.target.projectRootPath,
+      operationId: "e2e_managed_activation_retry_0001",
+    };
+
+    // The first call commits the main-process project state. Treat the return
+    // value as lost, then replay exactly the same operation as the renderer
+    // would after a Bridge response interruption.
+    await launched.page.evaluate((input) => (
+      window.htmlAIProjects.activateManagedWorkingCopy(input)
+    ), payload);
+    const replayed = await launched.page.evaluate((input) => (
+      window.htmlAIProjects.activateManagedWorkingCopy(input)
+    ), payload);
+    expect(replayed.sourcePath).toBe(expectedManagedPath);
+    expect(replayed.sha256).toBe(promoted.target.sourceSha256);
+    const active = await launched.page.evaluate(() => window.htmlAIProjects.getActiveProject());
+    expect(active?.sourcePath).toBe(expectedManagedPath);
+    const state = JSON.parse(readFileSync(
+      path.join(launched.isolatedUserData, "html-projects.json"),
+      "utf8",
+    ));
+    expect(state.lastManagedActivation?.operationId).toBe(payload.operationId);
+    const staleOperation = await launched.page.evaluate(async (input) => {
+      try {
+        const result = await window.htmlAIProjects.activateManagedWorkingCopy(input);
+        return { inputOperationId: input.operationId, result };
+      } catch (error) {
+        return {
+          inputOperationId: input.operationId,
+          message: error?.message || null,
+        };
+      }
+    }, {
+      ...payload,
+      operationId: "e2e_managed_activation_stale_0001",
+    });
+    const stateAfterStaleAttempt = JSON.parse(readFileSync(
+      path.join(launched.isolatedUserData, "html-projects.json"),
+      "utf8",
+    ));
+    expect(staleOperation).toMatchObject({
+      inputOperationId: "e2e_managed_activation_stale_0001",
+      message: "当前桌面文件已变化，不能提交过期的托管工作文件切换。",
+    });
+    expect(stateAfterStaleAttempt.lastManagedActivation?.operationId).toBe(payload.operationId);
+  } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeSourceFixture(source.sourceDirectory);
   }
 });
 
@@ -1915,6 +1997,124 @@ test("workspace failure keeps the current page visible with export and relaunch 
     if (electronApp) {
       await stopPageRoot(electronApp, isolatedUserData, { cleanup: false });
     }
+    removeIsolatedUserData(isolatedUserData);
+    removeValidatedTemporaryDirectory(
+      sourceDirectory,
+      "pageroot-native-source-e2e-",
+    );
+  }
+});
+
+test("Electron migrates an exact legacy V4 Registry before opening an editable, commentable external V1", async () => {
+  test.setTimeout(120_000);
+  const sourceDirectory = mkdtempSync(path.join(tmpdir(), "pageroot-native-source-e2e-"));
+  const isolatedUserData = mkdtempSync(path.join(tmpdir(), "pageroot-native-e2e-"));
+  const originalToken = "SOURCE_FIDELITY_TOKEN_001";
+  const replacement = "旧Registry迁移后的编辑";
+  const original = withBomAndCrLf(fixtureBuffer("source-fidelity.html"));
+  const sourcePath = path.join(sourceDirectory, "legacy-registry-opening.html");
+  const seedSourcePath = path.join(sourceDirectory, "legacy-registry-seed.html");
+  writeFileSync(sourcePath, original);
+  writeFileSync(seedSourcePath, original);
+
+  const projectsRoot = path.join(isolatedUserData, "project-files");
+  const seedRepository = new ProjectFileRepository({ projectsRoot });
+  await seedRepository.importExternal({
+    sourcePath: seedSourcePath,
+    expectedSourceSha256: sha256(original),
+  });
+  const registryPath = path.join(projectsRoot, ".pageroot-registry.json");
+  const currentRegistry = JSON.parse(readFileSync(registryPath, "utf8"));
+  const legacyRegistry = {
+    schemaVersion: "4.0.0",
+    updatedAt: currentRegistry.updatedAt,
+    projects: Object.fromEntries(Object.entries(currentRegistry.projects).map(([projectId, record]) => [
+      projectId,
+      {
+        projectRootPath: record.registeredProjectRootPath,
+        updatedAt: record.updatedAt,
+      },
+    ])),
+  };
+  const legacyRegistryBytes = Buffer.from(
+    `${JSON.stringify(legacyRegistry, null, 2)}\n`,
+    "utf8",
+  );
+  const legacyRegistrySha256 = sha256(legacyRegistryBytes);
+  writeFileSync(registryPath, legacyRegistryBytes);
+
+  let firstApp = null;
+  let reopenedApp = null;
+  try {
+    const firstLaunch = await launchPageRoot({
+      isolatedUserData,
+      activeSourcePath: sourcePath,
+    });
+    firstApp = firstLaunch.electronApp;
+    const managedSourcePath = await managedWorkingCopyPath(firstLaunch.page, sourcePath);
+    let { frame } = await loadedDiskFrame(
+      firstLaunch.page,
+      managedSourcePath,
+      "source-fidelity",
+    );
+    await expect(firstLaunch.page.locator("main.workbench"))
+      .toHaveAttribute("data-project-state", "ready");
+    await expect(firstLaunch.page.locator(".save-status"))
+      .toContainText("已安全保存");
+    await expect(firstLaunch.page.getByRole("button", { name: "全局评论", exact: true }))
+      .toBeEnabled();
+    const migratedRegistry = JSON.parse(readFileSync(registryPath, "utf8"));
+    expect(migratedRegistry.pendingImports).toEqual({});
+    const backupPath = path.join(
+      projectsRoot,
+      ".pageroot-registry-backups",
+      `${legacyRegistrySha256.slice("sha256:".length)}.json`,
+    );
+    expect(readFileSync(backupPath)).toEqual(legacyRegistryBytes);
+    expect(readFileSync(sourcePath)).toEqual(original);
+
+    const firstComment = "旧 Registry 已迁移，评论定位正常。";
+    await addCanvasComment(firstLaunch.page, frame, "source-fidelity", firstComment);
+    await activateNativeEdit(frame, "source-fidelity");
+    await setTextSelection(frame, "source-fidelity", 0, originalToken.length);
+    await firstLaunch.page.keyboard.insertText(replacement);
+    await firstLaunch.page.keyboard.press(keyShortcut("S"));
+    await expectCheckpointPersisted(firstLaunch.page, 0);
+    await expect(firstLaunch.page.locator(".save-status"))
+      .toContainText("已安全保存");
+    expect(readFileSync(sourcePath)).toEqual(original);
+    expect(managedSourcePath).not.toBe(realpathSync(sourcePath));
+    expect(readFileSync(managedSourcePath, "utf8")).toContain(replacement);
+
+    await closePageRootGracefully(firstApp, firstLaunch.page);
+    firstApp = null;
+
+    const reopened = await launchPageRoot({ isolatedUserData });
+    reopenedApp = reopened.electronApp;
+    const { frame: reopenedFrame } = await loadedDiskFrame(
+      reopened.page,
+      managedSourcePath,
+      "source-fidelity",
+    );
+    await expect(reopened.page.locator("main.workbench"))
+      .toHaveAttribute("data-project-state", "ready");
+    await expect(reopened.page.locator(".save-status"))
+      .toContainText("已安全保存");
+    await activateNativeEdit(reopenedFrame, "source-fidelity");
+    await addCanvasComment(
+      reopened.page,
+      reopenedFrame,
+      "source-fidelity",
+      "重开后仍可定位并评论。",
+    );
+    expect(readFileSync(sourcePath)).toEqual(original);
+    expect(readFileSync(managedSourcePath, "utf8")).toContain(replacement);
+
+    await closePageRootGracefully(reopenedApp, reopened.page);
+    reopenedApp = null;
+  } finally {
+    if (firstApp) await stopPageRoot(firstApp, isolatedUserData, { cleanup: false });
+    if (reopenedApp) await stopPageRoot(reopenedApp, isolatedUserData, { cleanup: false });
     removeIsolatedUserData(isolatedUserData);
     removeValidatedTemporaryDirectory(
       sourceDirectory,
