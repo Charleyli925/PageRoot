@@ -118,6 +118,7 @@ const REQUIRED_APP_SOURCE_FILES = [
   "desktop/preview-protocol.mjs",
   "desktop/edit-runtime-bootstrap.mjs",
   "desktop/edit-runtime-protocol.mjs",
+  "desktop/edit-runtime-capture-owner.mjs",
   "desktop/runtime-visual-capture-owner.mjs",
   "app/domain/edit-runtime-contract.js",
   "app/domain/runtime-visual-contract.js",

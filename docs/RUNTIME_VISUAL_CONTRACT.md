@@ -27,11 +27,11 @@ screenshot never enters authored Edit or Review documents.
 
 ## Edit one-shot ECharts behavior
 
-Edit never consumes a Review snapshot, PNG, bitmap projection or Blob URL. It
-normally renders only what source can statically present. Desktop has one narrow
-exception: before the initial editable frame is mounted, an exact persisted
-source with classic-script ECharts evidence may receive one direct resource
-session for its `(sourcePath, canvasGeneration)`.
+Edit never consumes a Review snapshot or its Blob URL. It normally renders only
+what source can statically present. Desktop has one narrow exception: before
+the initial editable frame is mounted, an exact persisted source with
+classic-script ECharts evidence may receive one isolated resource session for
+its `(sourcePath, canvasGeneration)`.
 
 The Session first publishes a non-interactive `preparing` state and the
 Workbench commits that loading surface before acknowledging the one port call.
@@ -41,15 +41,23 @@ rather than becoming a forbidden late promotion of static Edit.
 The session accepts no arbitrary source path or later source revision. Main
 rechecks active HTML/SHA, freezes declared local or allowlisted ECharts-CDN
 script bytes, and serves only that resource closure under
-`pageroot-edit-runtime:` without CSP bypass. The final frame runs those bytes in
-order once, waits 1.2 seconds, stops tracked runtime activity and audits that
-source nodes/text/attributes and the approved unique empty-host bindings stayed
-intact. A host may add only absent ECharts layout declarations (`position:
-relative`, `user-select: none`, transparent `-webkit-tap-highlight-color`, or a
-positive `scale()` no greater than `1`); it cannot overwrite authored
-style or mutate another source attribute. At most 32 non-dangerous empty hosts
-are eligible; generated descendants
-remain display-only and select/comment through their original source host.
+`pageroot-edit-runtime:` without CSP bypass. A disposable hidden sandboxed
+BrowserWindow with a separate non-persistent session, no preload, Node or
+Bridge runs the closure once, waits 1.2 seconds, stops tracked runtime activity
+and audits that source nodes/text/attributes and the approved unique empty-host
+bindings stayed intact. It returns only bounded PNG pixels plus dimensions,
+hashes and the allowed host declarations (`position: relative`,
+`user-select: none`, transparent `-webkit-tap-highlight-color`, or a positive
+`scale()` no greater than `1`); it cannot overwrite authored style or mutate
+another source attribute. At most 32 non-dangerous empty hosts are eligible.
+
+The visible Edit iframe remains source-static and script-disabled. Trusted
+renderer memory validates the bounded snapshot envelope, Base64/PNG header,
+byte and dimension budgets, while retaining Main's capture digest as
+attestation, and injects it only as a non-interactive transient image below the
+same approved source host. The image, runtime marker and allowed derived style
+never enter source patches, saves, Versions, exports or Requests;
+selection/comment resolution remains on the original source host.
 
 When importing an external HTML into an HTML-only V1 Working Copy, Main may
 retain the selected external HTML directory as a session-only asset root for
@@ -57,13 +65,12 @@ that same verified Working Copy. It is set only by the Main-process activation
 handoff, never sent by the renderer or written into project authority, and a
 missing or unsafe asset still fails closed to static Edit.
 
-Preparation, execution, audit or deadline failure silently mounts ordinary
-static Edit before interaction. Comments, autosave, IME and source echoes do
-not prepare, execute or replace the frame. A later necessary full rebuild is
-static for that generation. There is no status UI, retry, probe window,
-compatibility cache or background promotion. Authored inline SVG remains native
-and source-backed; unsupported runtime-only Canvas/SVG remains available in
-Preview.
+Preparation, capture, audit or deadline failure silently mounts ordinary static
+Edit before interaction. Comments, autosave, IME and source echoes do not
+prepare, execute or replace the frame. A later necessary full rebuild is static
+for that generation. There is no status UI, retry, compatibility cache or
+background promotion. Authored inline SVG remains native and source-backed;
+unsupported runtime-only Canvas/SVG remains available in Preview.
 
 ## One Review snapshot owner
 

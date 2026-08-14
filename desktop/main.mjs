@@ -113,6 +113,9 @@ import {
 import {
   createRuntimeSnapshotCaptureController,
 } from "./runtime-visual-capture-owner.mjs";
+import {
+  createEditRuntimeCaptureController,
+} from "./edit-runtime-capture-owner.mjs";
 
 // electron-updater is CommonJS; the default import is the supported ESM bridge.
 const { autoUpdater } = electronUpdater;
@@ -251,6 +254,7 @@ let managedWelcomeRegistration = null;
 let previewProtocolController = null;
 let reviewRuntimeSnapshotCaptureController = null;
 let editRuntimeProtocolController = null;
+let editRuntimeCaptureController = null;
 // An imported V1 may be an HTML-only managed Working Copy while its selected
 // external source directory still owns declared relative assets. This is
 // session-only provenance established by Main during the verified hand-off;
@@ -284,6 +288,30 @@ function ensureEditRuntimeProtocolController() {
     editRuntimeProtocolController.install();
   }
   return editRuntimeProtocolController;
+}
+
+function ensureEditRuntimeCaptureController() {
+  if (!editRuntimeCaptureController) {
+    editRuntimeCaptureController = createEditRuntimeCaptureController({
+      BrowserWindowClass: BrowserWindow,
+      createIsolatedSession: (partition) => electronSession.fromPartition(partition),
+      installProtocol: (targetProtocol) => {
+        ensureEditRuntimeProtocolController().installFor(targetProtocol);
+      },
+      resolveRuntimeUrl: (sessionId) => (
+        ensureEditRuntimeProtocolController().runtimeDocumentUrl(sessionId)
+      ),
+      async releaseIsolatedSession(isolatedSession) {
+        await Promise.all([
+          Promise.resolve(isolatedSession.clearStorageData?.()).catch(() => undefined),
+          Promise.resolve(
+            isolatedSession.protocol?.unhandle?.("pageroot-edit-runtime"),
+          ).catch(() => undefined),
+        ]);
+      },
+    });
+  }
+  return editRuntimeCaptureController;
 }
 
 function ensureReviewRuntimeSnapshotCaptureController() {
@@ -1119,17 +1147,38 @@ async function prepareEditAuthorRuntime(payload) {
     sourcePath: assetSourcePath,
     bindings: payload.hosts,
   });
-  return Object.freeze({
-    contractVersion: session.contractVersion,
-    sessionId: session.sessionId,
-    executionId: session.executionId,
-    sourceSha256: activeSource.sha256,
-    resourceSha256: session.resourceSha256,
-    scriptCount: session.scriptCount,
-    byteLength: session.byteLength,
-    canvasGeneration: payload.canvasGeneration,
-    hosts: session.bindings,
-  });
+  try {
+    const capture = await ensureEditRuntimeCaptureController().capture({
+      sessionId: session.sessionId,
+      executionId: session.executionId,
+      bindings: session.bindings,
+    });
+    if (
+      capture.outcome !== "captured"
+      || capture.bootstrapCount !== 1
+      || !Array.isArray(capture.snapshots)
+    ) {
+      throw new Error(
+        "Edit runtime isolated capture did not produce a frozen display"
+        + ` (${String(capture.outcome || "unknown")}:${String(capture.reason || "unknown")}).`,
+      );
+    }
+    return Object.freeze({
+      contractVersion: session.contractVersion,
+      sessionId: session.sessionId,
+      executionId: session.executionId,
+      sourceSha256: activeSource.sha256,
+      resourceSha256: session.resourceSha256,
+      scriptCount: session.scriptCount,
+      byteLength: session.byteLength,
+      bootstrapCount: 1,
+      canvasGeneration: payload.canvasGeneration,
+      hosts: session.bindings,
+      snapshots: capture.snapshots,
+    });
+  } finally {
+    ensureEditRuntimeProtocolController().revokeSession(session.sessionId);
+  }
 }
 
 const revokeEditAuthorRuntime = (sessionId) => (
@@ -2813,6 +2862,8 @@ async function createWindow() {
     applicationUpdate?.stopAutomaticChecks();
     reviewRuntimeSnapshotCaptureController?.dispose();
     reviewRuntimeSnapshotCaptureController = null;
+    editRuntimeCaptureController?.dispose();
+    editRuntimeCaptureController = null;
     editRuntimeProtocolController?.dispose();
     editRuntimeProtocolController = null;
     previewProtocolController?.dispose();

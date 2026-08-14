@@ -57,16 +57,16 @@ Comments + frozen input
   active/inactive class transitions and `hidden`, `open`, `aria-selected` or
   `aria-expanded` state. It never carries runtime DOM, pixels or table markup.
 - Edit is source-static by default. On desktop only, a clean persisted document
-  with an explicit ECharts signal may receive one direct, immutable author-
-  runtime resource session before the first editable frame is mounted. The
+  with an explicit ECharts signal may receive one isolated immutable author-
+  runtime capture session before the first editable frame is mounted. The
   `WorkspaceController` keys that disposable attempt by `(sourcePath,
-  canvasGeneration)`; its final frame executes ordered classic scripts once,
-  waits 1.2 seconds, freezes and audits before normal Canvas interaction is
-  installed. A missing grant, failed audit or later full-frame rebuild uses the
-  ordinary script-disabled static Edit for that generation. Edit still has no
-  Review snapshot, bitmap, Blob projection, runtime cache or persistence
-  authority; authored inline SVG remains source-backed while unapproved
-  runtime-only Canvas/SVG stays in Preview.
+  canvasGeneration)`; a Main-owned sandboxed hidden BrowserWindow executes
+  ordered classic scripts once, waits 1.2 seconds, freezes and audits. Only a
+  verified bounded PNG display result is mounted into the script-disabled
+  source-static Edit iframe. A missing grant, failed audit or later full-frame
+  rebuild uses ordinary static Edit for that generation. The image has no
+  runtime cache or persistence authority; authored inline SVG remains
+  source-backed while unapproved runtime-only Canvas/SVG stays in Preview.
 - Review alone has a disposable runtime-snapshot supplement. Its
   `SourceHostResolver` admits only direct source Canvas/SVG roots and stable,
   source-empty hosts; it never uses script causality, computed selectors,
@@ -261,8 +261,8 @@ services.
 | Pseudonymous identity, strict event schemas, local queue and PostHog delivery | `desktop/usage-telemetry.mjs` |
 | Preview sanitization and verified frame injection | `app/components/html-preview-sandbox.js` |
 | Volatile desktop preview sessions and contained local-asset serving | `desktop/preview-protocol.mjs` |
-| Edit one-shot candidate limits, source-host contract and frozen direct grant | `app/domain/edit-runtime-contract.js`, `app/application/edit-author-runtime-session.js` |
-| Direct Edit author-resource closure, contained static-asset/script serving and one-use bootstrap | `desktop/edit-runtime-protocol.mjs`, `desktop/edit-runtime-bootstrap.mjs` |
+| Edit one-shot candidate limits, source-host contract and frozen display grant | `app/domain/edit-runtime-contract.js`, `app/application/edit-author-runtime-session.js` |
+| Isolated Edit author-resource closure, contained static-asset/script serving, one-use bootstrap and PNG capture | `desktop/edit-runtime-protocol.mjs`, `desktop/edit-runtime-bootstrap.mjs`, `desktop/edit-runtime-capture-owner.mjs` |
 | Source-backed preview/edit display-state filtering, rebinding and safe action resolution | `app/lib/page-view-context.js` |
 | Review source-host discovery and Review-only capture request shape | `app/domain/runtime-snapshot-hosts.js`, `app/components/desktop-runtime-snapshot-api.ts` |
 | Review runtime-snapshot limits, source/session envelope, PNG and visible-text-hash validation | `app/domain/runtime-visual-contract.js`, `app/lib/runtime-visual-snapshots.js` |

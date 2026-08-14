@@ -15,6 +15,14 @@ export const EDIT_AUTHOR_RUNTIME_BUDGET = Object.freeze({
   sourceNodeCount: 4_096,
   runtimeSettleMs: 1_200,
   runtimeDeadlineMs: 4_000,
+  // A frozen isolated render may return only bounded host pixels to static
+  // Edit. These values intentionally mirror the established presentation
+  // budget rather than granting the renderer a general capture channel.
+  snapshotBytes: 2_000_000,
+  snapshotAggregateBytes: 16_000_000,
+  snapshotPixels: 4_194_304,
+  snapshotAggregatePixels: 4_194_304,
+  snapshotDimension: 4_096,
   orphanSessionTtlMs: 60_000,
 });
 

@@ -14,12 +14,10 @@ export function prepareVerifiedFrameDocument(
     editorStyles?: string;
   },
 ): string;
-export function prepareOneShotRuntimeFrameDocument(
+export function prepareStaticRuntimeSnapshotFrameDocument(
   source: string,
   verificationToken: string,
   options: {
-    sessionId: string;
-    executionId: string;
     hosts: readonly {
       key: string;
       path: readonly number[];
@@ -38,9 +36,7 @@ export function prepareCanvasFrameDocument(
     baseUrl?: string;
     editorStyles?: string;
   } | {
-    mode: "one-shot-runtime";
-    sessionId: string;
-    executionId: string;
+    mode: "static-runtime-snapshot";
     hosts: readonly {
       key: string;
       path: readonly number[];

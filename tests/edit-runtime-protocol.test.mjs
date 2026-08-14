@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
   mkdtemp,
   mkdir,
+  readFile,
   rm,
   writeFile,
 } from "node:fs/promises";
@@ -161,4 +162,47 @@ test("direct protocol keeps CSP instead of keyword-rejecting fetch and workers",
     () => validateEditRuntimeHostBindings([{ ...BINDINGS[0], path: [-1] }]),
     /invalid/u,
   );
+});
+
+test("runtime document exposes only fixed bootstrap and inert source-script stubs", async (t) => {
+  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "pageroot-edit-runtime-document-"));
+  t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
+  const sourcePath = path.join(temporaryRoot, "report.html");
+  await mkdir(path.join(temporaryRoot, "vendor"));
+  await Promise.all([
+    writeFile(sourcePath, HTML),
+    writeFile(path.join(temporaryRoot, "vendor", "echarts.js"), "window.echarts={init(){}};"),
+  ]);
+
+  let handler = null;
+  const controller = createEditRuntimeProtocolController({
+    protocolApi: {
+      handle(_scheme, nextHandler) {
+        handler = nextHandler;
+      },
+    },
+    netFetch: async () => new Response("unexpected"),
+    randomSessionId: () => "3".repeat(32),
+    randomExecutionId: () => "4".repeat(24),
+  });
+  controller.install();
+  const session = await controller.createSession({ html: HTML, sourcePath, bindings: BINDINGS });
+  const runtimeUrl = controller.runtimeDocumentUrl(session.sessionId);
+  assert.equal(runtimeUrl, `pageroot-edit-runtime://${session.sessionId}/index.html`);
+
+  const runtimeDocument = await handler(new Request(runtimeUrl));
+  assert.equal(runtimeDocument.status, 200);
+  assert.match(runtimeDocument.headers.get("content-security-policy") || "", /default-src 'none'/u);
+  const body = await runtimeDocument.text();
+  assert.match(body, /data-pageroot-edit-runtime-source="root"/u);
+  assert.match(body, /data-pageroot-edit-runtime-host="edit-runtime-1"/u);
+  assert.match(body, /data-pageroot-edit-runtime-bootstrap="true"/u);
+  assert.match(body, /application\/x-pageroot-edit-runtime-source/u);
+  assert.doesNotMatch(body, /<script[^>]+src="vendor\/echarts\.js"/u);
+  assert.doesNotMatch(body, /echarts\.init\(document\.querySelector/u);
+  assert.equal(await readFile(sourcePath, "utf8"), HTML);
+
+  const bootstrapUrl = `pageroot-edit-runtime://${session.sessionId}/.pageroot/bootstrap/${session.executionId}.js`;
+  assert.equal((await handler(new Request(bootstrapUrl))).status, 200);
+  assert.equal((await handler(new Request(bootstrapUrl))).status, 404);
 });

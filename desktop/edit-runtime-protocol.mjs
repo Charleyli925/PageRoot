@@ -1,12 +1,19 @@
 import { createHash, randomBytes } from "node:crypto";
 import { readFile, realpath, stat } from "node:fs/promises";
 import path from "node:path";
-import { parse } from "parse5";
+import { parse, parseFragment, serialize } from "parse5";
 
 import {
   EDIT_AUTHOR_RUNTIME_BUDGET,
   EDIT_AUTHOR_RUNTIME_CONTRACT_VERSION,
+  EDIT_RUNTIME_BOOTSTRAP_ATTRIBUTE,
+  EDIT_RUNTIME_FROZEN_ATTRIBUTE,
+  EDIT_RUNTIME_HOST_ATTRIBUTE,
+  EDIT_RUNTIME_OWNED_ATTRIBUTE,
   EDIT_RUNTIME_PROTOCOL_SCHEME,
+  EDIT_RUNTIME_RESULT_ATTRIBUTE,
+  EDIT_RUNTIME_SCRIPT_STUB_ATTRIBUTE,
+  EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE,
   collectEditRuntimeScripts,
   editRuntimeProtocolUrl,
   hasEditRuntimeEchartsSignal,
@@ -24,6 +31,7 @@ import {
 
 const AUTHOR_SCRIPT_PATH = /^\/.pageroot\/author\/(\d+)\.js$/u;
 const BOOTSTRAP_PATH = /^\/.pageroot\/bootstrap\/([a-f0-9]{24})\.js$/u;
+const RUNTIME_DOCUMENT_PATH = "/index.html";
 const RESERVED_ATTRIBUTE_PREFIX = "data-pageroot-edit-runtime-";
 const SCRIPT_EXTENSIONS = new Set([".js", ".mjs"]);
 const ALLOWED_CDN_HOSTS = new Set([
@@ -31,6 +39,20 @@ const ALLOWED_CDN_HOSTS = new Set([
   "unpkg.com",
   "cdnjs.cloudflare.com",
 ]);
+const RUNTIME_DOCUMENT_CSP = [
+  "default-src 'none'",
+  "script-src pageroot-edit-runtime:",
+  "style-src 'unsafe-inline' data: pageroot-edit-runtime:",
+  "img-src data: blob: pageroot-edit-runtime:",
+  "font-src data: pageroot-edit-runtime:",
+  "media-src data: blob: pageroot-edit-runtime:",
+  "connect-src 'none'",
+  "worker-src 'none'",
+  "frame-src 'none'",
+  "object-src 'none'",
+  "form-action 'none'",
+  "base-uri pageroot-edit-runtime:",
+].join("; ");
 
 let schemePrivilegesRegistered = false;
 
@@ -38,13 +60,14 @@ function utf8Bytes(value) {
   return Buffer.byteLength(String(value), "utf8");
 }
 
-function response(body, status, contentType) {
+function response(body, status, contentType, extraHeaders = {}) {
   return new Response(body, {
     status,
     headers: {
       "cache-control": "no-store",
       "content-type": contentType,
       "x-content-type-options": "nosniff",
+      ...extraHeaders,
     },
   });
 }
@@ -119,6 +142,144 @@ function attributesFor(node) {
     String(attribute.name || "").toLowerCase(),
     String(attribute.value || ""),
   ]));
+}
+
+function attributeValue(node, name) {
+  return attributesFor(node).get(String(name).toLowerCase()) ?? null;
+}
+
+function setAttribute(node, name, value) {
+  const normalized = String(name).toLowerCase();
+  const attributes = Array.isArray(node?.attrs) ? node.attrs : [];
+  const existing = attributes.find((attribute) => (
+    String(attribute.name || "").toLowerCase() === normalized
+  ));
+  if (existing) {
+    existing.name = normalized;
+    existing.value = String(value);
+    return;
+  }
+  attributes.push({ name: normalized, value: String(value) });
+  node.attrs = attributes;
+}
+
+function removeAttribute(node, name) {
+  const normalized = String(name).toLowerCase();
+  node.attrs = (node?.attrs || []).filter((attribute) => (
+    String(attribute.name || "").toLowerCase() !== normalized
+  ));
+}
+
+function nodesByTag(root, tagName) {
+  const matches = [];
+  const expected = String(tagName).toLowerCase();
+  const visit = (node) => {
+    if (!node || typeof node !== "object") return;
+    if (String(node.tagName || "").toLowerCase() === expected) matches.push(node);
+    (node.childNodes || []).forEach(visit);
+    if (node.content) visit(node.content);
+  };
+  visit(root);
+  return matches;
+}
+
+function setParent(node, parent) {
+  if (node && typeof node === "object") node.parentNode = parent;
+  return node;
+}
+
+function prependFragment(parent, markup) {
+  const fragment = parseFragment(markup);
+  const inserted = (fragment.childNodes || []).map((node) => setParent(node, parent));
+  parent.childNodes = [...inserted, ...(parent.childNodes || [])];
+}
+
+function escapeHtmlAttribute(value) {
+  return String(value)
+    .replace(/&/gu, "&amp;")
+    .replace(/"/gu, "&quot;")
+    .replace(/</gu, "&lt;")
+    .replace(/>/gu, "&gt;");
+}
+
+function markRuntimeSource(root, pathValue = []) {
+  if (!root || typeof root.tagName !== "string") return;
+  setAttribute(
+    root,
+    EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE,
+    pathValue.length ? pathValue.join(".") : "root",
+  );
+  elementChildren(root).forEach((child, index) => {
+    markRuntimeSource(child, [...pathValue, index]);
+  });
+}
+
+function disableRuntimeScripts(documentNode, source) {
+  const scriptContract = collectEditRuntimeScripts(source);
+  if (
+    scriptContract.unsupportedReason
+    || scriptContract.executableScripts.length < 1
+  ) throw new TypeError("Edit runtime source scripts are invalid.");
+  const scriptNodes = nodesByTag(documentNode, "script");
+  if (scriptNodes.length !== scriptContract.scripts.length) {
+    throw new TypeError("Edit runtime source scripts are inconsistent.");
+  }
+  for (let ordinal = 0; ordinal < scriptNodes.length; ordinal += 1) {
+    const node = scriptNodes[ordinal];
+    const descriptor = scriptContract.scripts[ordinal];
+    const originalType = attributeValue(node, "type") ?? "__pageroot_missing__";
+    setAttribute(node, "type", "application/x-html-canvas-disabled");
+    setAttribute(node, "data-html-canvas-disabled-script", "true");
+    setAttribute(node, "data-html-canvas-original-script-type", originalType);
+    if (!descriptor?.executable) continue;
+    removeAttribute(node, "src");
+    removeAttribute(node, "async");
+    removeAttribute(node, "defer");
+    removeAttribute(node, "nomodule");
+    setAttribute(node, "type", "application/x-pageroot-edit-runtime-source");
+    setAttribute(node, EDIT_RUNTIME_SCRIPT_STUB_ATTRIBUTE, String(descriptor.index));
+    node.childNodes = [];
+  }
+}
+
+function buildRuntimeDocument({ source, sessionId, executionId, bindings }) {
+  const documentNode = parse(source);
+  validateBoundHosts(documentNode, bindings);
+  const root = documentElement(documentNode);
+  if (!root) throw new TypeError("Edit runtime source has no document root.");
+  markRuntimeSource(root);
+  for (const binding of bindings) {
+    const host = childAtPath(root, binding.path);
+    if (!host) throw new TypeError("Edit runtime host binding is unavailable.");
+    setAttribute(host, EDIT_RUNTIME_HOST_ATTRIBUTE, binding.key);
+  }
+  for (const base of nodesByTag(root, "base")) {
+    const parent = base.parentNode;
+    if (parent?.childNodes) parent.childNodes = parent.childNodes.filter((node) => node !== base);
+  }
+  for (const meta of nodesByTag(root, "meta")) {
+    if (attributeValue(meta, "http-equiv")?.trim().toLowerCase() === "content-security-policy") {
+      const parent = meta.parentNode;
+      if (parent?.childNodes) parent.childNodes = parent.childNodes.filter((node) => node !== meta);
+    }
+  }
+  disableRuntimeScripts(documentNode, source);
+  const head = elementChildren(root).find((node) => (
+    String(node.tagName || "").toLowerCase() === "head"
+  ));
+  if (!head) throw new TypeError("Edit runtime source has no document head.");
+  const baseUrl = editRuntimeProtocolUrl(sessionId, "/");
+  const bootstrapUrl = editRuntimeProtocolUrl(
+    sessionId,
+    `/.pageroot/bootstrap/${executionId}.js`,
+  );
+  if (!baseUrl || !bootstrapUrl) throw new TypeError("Edit runtime resource identity is invalid.");
+  prependFragment(head, [
+    `<meta http-equiv="Content-Security-Policy" content="${escapeHtmlAttribute(RUNTIME_DOCUMENT_CSP)}" ${EDIT_RUNTIME_OWNED_ATTRIBUTE}="csp">`,
+    `<base href="${escapeHtmlAttribute(baseUrl)}" ${EDIT_RUNTIME_OWNED_ATTRIBUTE}="resource-base">`,
+    `<script src="${escapeHtmlAttribute(bootstrapUrl)}" ${EDIT_RUNTIME_BOOTSTRAP_ATTRIBUTE}="true" ${EDIT_RUNTIME_OWNED_ATTRIBUTE}="bootstrap"></script>`,
+  ].join(""));
+  return serialize(documentNode);
 }
 
 function containsReservedRuntimeAttribute(node) {
@@ -448,9 +609,16 @@ export function createEditRuntimeProtocolController({
     ));
     const executionId = allocate(randomExecutionId, isEditRuntimeExecutionId);
     const createdAt = now();
+    const runtimeHtml = buildRuntimeDocument({
+      source,
+      sessionId,
+      executionId,
+      bindings: normalizedBindings,
+    });
     sessions.set(sessionId, {
       sessionId,
       executionId,
+      runtimeHtml,
       sourceRoot,
       declaredAssets,
       scripts: frozenScripts.scripts.map((script) => ({ ...script })),
@@ -474,6 +642,12 @@ export function createEditRuntimeProtocolController({
     const sessionId = sessionIdFrom(value);
     return Object.freeze({ revoked: sessionId ? sessions.delete(sessionId) : false });
   };
+  const runtimeDocumentUrl = (value) => {
+    const sessionId = sessionIdFrom(value);
+    return sessionId && sessions.has(sessionId)
+      ? editRuntimeProtocolUrl(sessionId, RUNTIME_DOCUMENT_PATH)
+      : null;
+  };
   const handleRequest = async (request) => {
     if (!request || (request.method !== "GET" && request.method !== "HEAD")) return invalidRequest();
     let requestUrl;
@@ -486,6 +660,14 @@ export function createEditRuntimeProtocolController({
     const sessionId = sessionIdFrom(requestUrl.hostname);
     const session = sessionId ? sessions.get(sessionId) : null;
     if (!session) return notFound();
+    if (requestUrl.pathname === RUNTIME_DOCUMENT_PATH || requestUrl.pathname === "/") {
+      return response(
+        request.method === "HEAD" ? null : session.runtimeHtml,
+        200,
+        "text/html; charset=utf-8",
+        { "content-security-policy": RUNTIME_DOCUMENT_CSP },
+      );
+    }
     const bootstrap = requestUrl.pathname.match(BOOTSTRAP_PATH);
     if (bootstrap) {
       if (
@@ -555,6 +737,7 @@ export function createEditRuntimeProtocolController({
     installFor,
     createSession,
     revokeSession,
+    runtimeDocumentUrl,
     dispose: () => sessions.clear(),
     sessionCount: () => sessions.size,
     handleRequest,
