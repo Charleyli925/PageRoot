@@ -307,6 +307,9 @@ test("the Draft Codex review probe stays a trusted default-branch issue-comment 
   assert.match(workflow, /--pull-request "\$ISSUE_NUMBER"/u);
   assert.match(workflow, /--comment-id "\$COMMENT_ID"/u);
   assert.doesNotMatch(workflow, /--(?:pull-request|comment-id) "\$\{\{/u);
+  assert.match(workflow, /group: pageroot-draft-review-\$\{\{\s*github\.event\.issue\.number\s*\}\}/u);
+  assert.doesNotMatch(workflow, /group: pageroot-draft-review-[^\n]*github\.event\.comment\.id/u);
+  assert.doesNotMatch(workflow, /cancel-in-progress: true/u);
   assert.match(workflow, /runs-on: ubuntu-24\.04/u);
   assert.doesNotMatch(workflow, /runs-on: macos-/u);
 });

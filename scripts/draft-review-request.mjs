@@ -337,6 +337,33 @@ export function probeCompletion({
   return results[0] || null;
 }
 
+export function classifyFreshSettlement(pullRequest, command) {
+  const live = pullRequestFields(pullRequest);
+  if (live.headSha !== command?.headSha || live.baseSha !== command?.baseSha) {
+    return Object.freeze({
+      status: "stale",
+      reason: "pair_changed_before_settlement",
+      liveHeadSha: live.headSha || null,
+      liveBaseSha: live.baseSha || null,
+    });
+  }
+  if (live.state !== "open" || live.merged) {
+    return Object.freeze({
+      status: "stale",
+      reason: "pull_request_closed_before_settlement",
+      isClosed: true,
+    });
+  }
+  if (!live.draft) {
+    return Object.freeze({
+      status: "promotion_overlap",
+      reason: "promoted_before_settlement",
+      isDraft: false,
+    });
+  }
+  return Object.freeze({ status: "draft", reason: "still_draft", isDraft: true });
+}
+
 function resolveOutputPath(output) {
   const destination = path.resolve(productRoot, output);
   if (!destination.startsWith(productRoot + path.sep)) {
@@ -457,6 +484,13 @@ async function collectIssueComment(options, token, commentId) {
   const [owner, name] = options.repository.split("/");
   const repositoryPath = [owner, name].map(encodeURIComponent).join("/");
   return githubJson(apiBase + "/repos/" + repositoryPath + "/issues/comments/" + commentId, token);
+}
+
+async function collectPullRequestOnly(options, token) {
+  const apiBase = (process.env.GITHUB_API_URL || "https://api.github.com").replace(/\/$/u, "");
+  const [owner, name] = options.repository.split("/");
+  const repositoryPath = [owner, name].map(encodeURIComponent).join("/");
+  return githubJson(apiBase + "/repos/" + repositoryPath + "/pulls/" + options.pullRequest, token);
 }
 
 async function postDraftReviewCommand(options, token, body) {
@@ -632,6 +666,19 @@ async function waitForProbeSettlement(options, token, posted, command) {
       afterMs: requestAt,
     });
     if (completion) {
+      const recheck = classifyFreshSettlement(
+        await collectPullRequestOnly(options, token),
+        command,
+      );
+      if (recheck.status !== "draft") {
+        return commandResult(options, {
+          ...recheck,
+          commentCreated: true,
+          commentId: posted.id,
+          commentUrl: posted.url,
+          requestedAt: new Date(requestAt).toISOString(),
+        });
+      }
       await deleteIssueComment(options, token, posted.id);
       return commandResult(options, {
         status: completion.priority === "P0" || completion.priority === "P1"

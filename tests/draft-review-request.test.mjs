@@ -5,6 +5,7 @@ import {
   buildDraftReviewCommand,
   buildDraftReviewCommandMarker,
   buildDraftReviewRequestMarker,
+  classifyFreshSettlement,
   evaluateDraftReviewEligibility,
   findExistingDraftRequest,
   parseDraftReviewArguments,
@@ -291,6 +292,30 @@ test("probe completion only accepts post-request Codex evidence bound to the exa
       afterMs: after,
     }),
     null,
+  );
+});
+
+test("fresh settlement revalidation refuses to close the marker after promotion", () => {
+  const command = { mode: "request", headSha, baseSha };
+  assert.equal(classifyFreshSettlement(pullRequest(), command).status, "draft");
+  assert.equal(
+    classifyFreshSettlement(pullRequest({ draft: false }), command).status,
+    "promotion_overlap",
+  );
+  assert.equal(
+    classifyFreshSettlement(pullRequest({ state: "closed" }), command).reason,
+    "pull_request_closed_before_settlement",
+  );
+  assert.equal(
+    classifyFreshSettlement(
+      pullRequest({ head: { sha: secondSha, repo: { full_name: "Charleyli925/PageRoot" } } }),
+      command,
+    ).reason,
+    "pair_changed_before_settlement",
+  );
+  assert.equal(
+    classifyFreshSettlement(pullRequest({ base: { sha: secondSha } }), command).reason,
+    "pair_changed_before_settlement",
   );
 });
 
