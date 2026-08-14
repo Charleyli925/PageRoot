@@ -124,6 +124,58 @@ test("the final Ready review on the exact head passes after a 30-second settle w
   assert.deepEqual(result.blockingFindings, []);
 });
 
+test("pre-Ready Codex evidence never completes the policy because it cannot bind the frozen base", () => {
+  const result = evaluate({
+    reviews: [codexReview({ submittedAt: "2026-08-09T03:30:00.000Z" })],
+  });
+  assert.equal(result.status, "waiting");
+  assert.equal(result.reason, "final_review_in_progress");
+});
+
+test("root +1 reactions still require the latest Ready transition because they carry no commit identity", () => {
+  const result = evaluate({
+    reviews: [],
+    issueReactions: [codexReaction({ createdAt: "2026-08-09T03:59:59.000Z" })],
+  });
+  assert.equal(result.status, "waiting");
+  assert.equal(result.reason, "final_review_in_progress");
+});
+
+test("advisory evaluation reports a Draft Pull Request without blocking and without inventing completion", () => {
+  const result = evaluate({
+    advisory: true,
+    pullRequest: pullRequest({ draft: true }),
+    timelineEvents: [],
+    reviews: [codexReview({ submittedAt: "2026-08-09T03:30:00.000Z" })],
+    now: new Date("2026-08-09T04:00:31.000Z"),
+  });
+  assert.equal(result.status, "waiting");
+  assert.equal(result.reason, "final_review_in_progress");
+  assert.equal(result.readyAt, null);
+});
+
+test("advisory evaluation surfaces active P0/P1 findings on a Draft Pull Request", () => {
+  const result = evaluate({
+    advisory: true,
+    pullRequest: pullRequest({ draft: true }),
+    timelineEvents: [],
+    reviews: [],
+    reviewThreads: [thread({ priority: "P1" })],
+  });
+  assert.equal(result.status, "blocked");
+  assert.equal(result.reason, "blocking_review_finding");
+  assert.equal(result.blockingFindings[0].priority, "P1");
+});
+
+test("advisory evaluation uses the same post-Ready completion contract after promotion", () => {
+  const result = evaluate({
+    advisory: true,
+    reviews: [codexReview()],
+  });
+  assert.equal(result.status, "passed");
+  assert.equal(result.reason, "final_review_policy_passed");
+});
+
 test("a post-Ready Codex thumbs-up reaction is an accepted clean completion", () => {
   const result = evaluate({
     reviews: [],
@@ -166,6 +218,7 @@ test("no Draft marker or Draft review is required", () => {
 test("policy rejects stale heads, missing Ready evidence, unfinished final review, and active P0/P1", () => {
   assert.equal(evaluate({ pullRequest: pullRequest({ sha: oldSha }) }).reason, "head_sha_changed");
   assert.equal(evaluate({ timelineEvents: [] }).reason, "ready_transition_missing");
+  assert.equal(evaluate({ pullRequest: pullRequest({ draft: true }) }).reason, "pull_request_is_draft");
   assert.equal(evaluate({ reviews: [] }).reason, "final_review_in_progress");
   const p0 = evaluate({ reviewThreads: [thread({ priority: "P0" })] });
   assert.equal(p0.status, "blocked");
@@ -296,6 +349,8 @@ test("review-policy snapshot reads root Pull Request reactions from GitHub", asy
     const snapshot = await collectReviewPolicySnapshot({
       repository: "Charleyli925/PageRoot",
       pullRequest: 158,
+      expectedHeadSha: headSha,
+      expectedBaseSha: baseSha,
     }, "test-token");
     assert.equal(snapshot.issueReactions.length, 1);
     assert.equal(snapshot.issueReactions[0].content, "+1");
@@ -321,7 +376,7 @@ test("review-policy artifact carries machine-readable completion and findings", 
     await assert.rejects(() => writeReviewPolicyArtifact(result, relative), /inside the repository/u);
     destination = await writeReviewPolicyArtifact(result, "output/review-policy/test-policy.json");
     const artifact = JSON.parse(await readFile(destination, "utf8"));
-    assert.equal(artifact.policyVersion, "2026-08-12.1");
+    assert.equal(artifact.policyVersion, "2026-08-14.2");
     assert.equal(artifact.status, "passed");
     assert.equal(artifact.reviewCompletionKind, "codex_clean_reaction");
     assert.equal(artifact.nonBlockingFindings[0].priority, "P2");
