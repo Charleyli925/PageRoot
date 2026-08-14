@@ -269,7 +269,7 @@ v3 TargetRef 保存 label、层级、selector/结构锚点、源码位置、源 
 - 项目规则修改。
 - 再次提交。
 
-历史版本在所有状态下都只读查看，不提供替换当前 HTML 的能力。
+历史版本始终先以只读快照查看，不提供替换当前 HTML 的能力；仅当项目空闲并已精确进入该历史视图时，用户可选择“基于此版本继续编辑”来激活该 Version 原有的受管 Working Copy。该操作不是恢复、替换或改写历史快照。
 
 提交准备流程：
 
@@ -471,6 +471,7 @@ editing
 1. “查看此版本”：进入 `viewMode=history`，从精确不可变路径打开，只读。
 2. “在 Finder 中显示”：定位 `versions/<version-id>/files/index.html`，不打开其他版本或当前工作文件。
 3. “返回当前 HTML”：回到项目当前指向的工作文件。
+4. “基于此版本继续编辑”：只在精确历史视图且项目空闲时可用。Bridge 只接收当前完整项目身份、目标 Version ID 和 operation ID；Repository 必须找到该 Version 唯一原有的 `workingCopyId`，完整验证 Working Copy state、不可变快照和当前工作文件 Hash 后才激活它。缺失、重复或验证失败保持历史只读，不从快照猜测或创建替代文件。
 
 历史模式必须显示：
 
@@ -480,7 +481,7 @@ editing
 [返回当前 HTML]
 ```
 
-历史模式不提供覆盖、替换或恢复当前 HTML 的按钮；Bridge 同样不暴露历史回写路由。
+历史模式不提供覆盖、替换或恢复当前 HTML 的按钮；Bridge 同样不暴露历史 HTML 回写路由。唯一的继续编辑路由只能激活已有受管 Working Copy，且桌面/Bridge 响应丢失后的同一操作重试必须返回同一 `workingCopyId`。切换成功时在一个同步发布边界更新 Project、Document、Version、Draft 和 Comment Session，随后才接受新 Canvas 的渲染确认。
 
 ### 5.13 时间语义
 

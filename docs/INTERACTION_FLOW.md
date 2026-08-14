@@ -845,7 +845,15 @@ Attempt。旧记录中的脚本结论不再改变状态或产生提示；归档�
 
 ### 11.4 历史版本保持只读
 
-历史卡片不提供“用此版本替换当前 HTML”“设为当前 HTML”或同义入口；Bridge 也不暴露历史回写路由。用户可以只读查看、返回当前 HTML，或在 Finder 中定位不可变版本文件。若确实要以旧 HTML 开始新的工作，应把该快照作为普通文件重新打开，建立清晰的新 Document 与 V1，避免在现有版本链中隐式改写谱系。
+历史卡片不提供“用此版本替换当前 HTML”“设为当前 HTML”或同义入口，也不写入不可变 Version 快照。进入精确历史视图后，横幅额外提供唯一的二级动作“基于此版本继续编辑”：
+
+1. 它只在项目空闲、当前 `viewMode=history` 且 `viewingVersionId` 与按钮 Version 完全相同的情况下可用；处理、保存、项目读取或历史切换期间禁用。
+2. Renderer 以当前项目完整身份和精确 Version ID 调用窄的 `/history-version/continue`；该路由不接受 HTML、Draft、Candidate 或任意路径覆盖字段。
+3. Repository 只激活 manifest 中该 Version 的唯一原有 Working Copy，先验证其完整 state、不可变 Version 快照、当前工作文件 Hash 与 Registry 登记根目录。缺失、重复、Hash 不符或状态不完整时原历史画布保持只读并显示可重试错误，不得从快照静默新建文件。
+4. Desktop 以 `previousSourcePath + nextSourcePath + projectId + documentId + workingCopyId + versionId + Hash` 激活该 Working Copy。若首个响应已丢失但主进程已提交新活动路径，重放同一操作仍成功并返回同一 `workingCopyId`。
+5. 只有桌面和 Bridge 均确认后，统一托管源切换在一个无异步间隙的发布边界同步更新 Project、Document、Version、Draft、Comment Session，并让 Canvas 按新的 source Hash 重新确认；任一失败恢复先前的只读历史视图。
+
+例如最新正式版本为 V6 时，只读查看 V2 必须仍展示 V2 快照、不能跳到 V6。点击“基于此版本继续编辑”后打开原有 V2 Working Copy；之后从该工作文件采纳 Candidate 创建 V7 时，谱系为 `basedOnVersionId=V2`，而时间线前序仍为 `previousVersionId=V6`。
 ## 12. 项目切换
 
 点击文件名旁的“+”或选择最近项目时，系统先完成当前编辑 drain，再核对当前
