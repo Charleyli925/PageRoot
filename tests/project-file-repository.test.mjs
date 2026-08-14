@@ -331,6 +331,127 @@ test("Promotion recovery does not bypass the runtime-sealed Candidate record", a
   assert.equal(await readFile(imported.target.exactSourcePath, "utf8"), html("V1"));
 });
 
+test("Promotion recovery re-derives every Candidate-backed transaction field", async (t) => {
+  const mutations = [
+    ["transaction ID", (transaction) => { transaction.transactionId = "promote_candidate_other_0001"; }],
+    ["request ID", (transaction) => { transaction.requestId = "req_other"; }],
+    ["Version ID", (transaction) => { transaction.versionId = "ver_0999"; }],
+    ["Version ordinal", (transaction) => { transaction.versionOrdinal = 999; }],
+    ["base lineage", (transaction) => { transaction.basedOnVersionId = "ver_0999"; }],
+    ["previous lineage", (transaction) => { transaction.previousVersionId = "ver_0999"; }],
+    ["Candidate output hash", (transaction) => { transaction.candidateOutputSha256 = "sha256:" + "0".repeat(64); }],
+    ["preferred stem", (transaction) => { transaction.preferredFileStem = "unrelated"; }],
+    ["preferred extension", (transaction) => { transaction.preferredExtension = ".htm"; }],
+    ["visible Working Copy path", (transaction) => { transaction.finalWorkingCopyRelativePath = "unrelated-V2.html"; }],
+    ["prepared Working Copy path", (transaction) => {
+      transaction.preparedWorkingCopyRelativePath = "transactions/"
+        + transaction.transactionId + "/prepared-working-copy.htm";
+    }],
+  ];
+  for (const [index, [label, mutate]] of mutations.entries()) {
+    const value = await fixture(t);
+    const imported = await importSource(value, `transaction-authority-${index}.html`);
+    const candidate = await value.repository.createCandidate({
+      target: imported.target,
+      requestId: `req_transaction_authority_${index}`,
+      candidateId: `candidate_transaction_authority_${index.toString().padStart(4, "0")}`,
+      html: html(`sealed Candidate ${label}`),
+      expectedSourceSha256: imported.target.sourceSha256,
+    });
+    const interrupted = new ProjectFileRepository({
+      projectsRoot: value.projects,
+      failpoint: async (name) => name === "promotion-working-copy-prepared",
+    });
+    await assert.rejects(
+      interrupted.promoteCandidate({
+        target: imported.target,
+        candidateId: candidate.candidate.candidateId,
+      }),
+      (error) => error instanceof ProjectFileRepositoryError
+        && error.code === "INJECTED_FAILPOINT",
+      label,
+    );
+    const transactionPath = path.join(
+      imported.target.projectRootPath,
+      ".pageroot",
+      "transactions",
+      `promote_${candidate.candidate.candidateId}`,
+      "transaction.json",
+    );
+    const transaction = await json(transactionPath);
+    mutate(transaction);
+    await writeFile(transactionPath, JSON.stringify(transaction), "utf8");
+
+    await assert.rejects(
+      new ProjectFileRepository({ projectsRoot: value.projects }).workspace({
+        sourcePath: imported.target.exactSourcePath,
+      }),
+      (error) => error instanceof ProjectFileRepositoryError
+        && error.code === "PROMOTION_TRANSACTION_MISMATCH",
+      label,
+    );
+    const manifest = await json(path.join(
+      imported.target.projectRootPath,
+      ".pageroot",
+      "manifest.json",
+    ));
+    assert.deepEqual(manifest.versions.map((version) => version.versionId), ["ver_0001"], label);
+  }
+});
+
+test("Promotion recovery validates the recorded Working Copy against sealed authority", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "promotion-working-copy-authority.html");
+  const candidate = await value.repository.createCandidate({
+    target: imported.target,
+    requestId: "req_promotion_working_copy_authority",
+    candidateId: "candidate_promotion_working_copy_authority_0001",
+    html: html("sealed Candidate Working Copy"),
+    expectedSourceSha256: imported.target.sourceSha256,
+  });
+  const interrupted = new ProjectFileRepository({
+    projectsRoot: value.projects,
+    failpoint: async (name) => name === "promotion-working-copy-created",
+  });
+  await assert.rejects(
+    interrupted.promoteCandidate({
+      target: imported.target,
+      candidateId: candidate.candidate.candidateId,
+    }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "INJECTED_FAILPOINT",
+  );
+  const transactionPath = path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "transactions",
+    `promote_${candidate.candidate.candidateId}`,
+    "transaction.json",
+  );
+  const transaction = await json(transactionPath);
+  transaction.workingCopy = {
+    ...transaction.workingCopy,
+    basedOnVersionId: "ver_0001",
+    sourceRelativePath: "unrelated-V2.html",
+    stateRelativePath: "working-copies/work_ver_0999.json",
+  };
+  await writeFile(transactionPath, JSON.stringify(transaction), "utf8");
+
+  await assert.rejects(
+    new ProjectFileRepository({ projectsRoot: value.projects }).workspace({
+      sourcePath: imported.target.exactSourcePath,
+    }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "PROMOTION_TRANSACTION_MISMATCH",
+  );
+  const manifest = await json(path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "manifest.json",
+  ));
+  assert.deepEqual(manifest.versions.map((version) => version.versionId), ["ver_0001"]);
+});
+
 test("a Candidate cannot be adopted after its frozen Working Copy changes", async (t) => {
   const value = await fixture(t);
   const imported = await importSource(value);

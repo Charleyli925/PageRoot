@@ -4247,6 +4247,173 @@ export class ProjectFileRepository {
     return source;
   }
 
+  #assertPromotionTransactionAuthority(loaded, candidateState, transaction) {
+    const candidate = candidateState.candidate;
+    const candidateOrdinal = candidate.proposedVersionOrdinal;
+    const sourceWorkingCopy = loaded.manifest.workingCopies.find(
+      (workingCopy) => workingCopy.workingCopyId === candidate.sourceWorkingCopyId,
+    );
+    if (!sourceWorkingCopy) {
+      throw new ProjectFileRepositoryError(
+        "CANDIDATE_WORKING_COPY_MISSING",
+        "The Candidate source Working Copy is no longer available.",
+        { candidateId: candidate.candidateId, sourceWorkingCopyId: candidate.sourceWorkingCopyId },
+      );
+    }
+    const preferredFileStem = assertPreferredFileStem(sourceWorkingCopy.preferredFileStem);
+    const preferredExtension = htmlExtension(
+      "x" + String(sourceWorkingCopy.preferredExtension || ""),
+    );
+    const transactionId = "promote_" + candidate.candidateId;
+    const hasValidOrdinal = Number.isSafeInteger(candidateOrdinal) && candidateOrdinal >= 2;
+    const hasValidAllocation = (
+      Number.isSafeInteger(transaction.pathAllocationOrdinal)
+      && transaction.pathAllocationOrdinal >= 0
+    );
+    const expectedVersionId = hasValidOrdinal ? versionId(candidateOrdinal) : null;
+    const expectedFinalWorkingCopyRelativePath = (
+      hasValidOrdinal && hasValidAllocation
+        ? visibleFileName(
+          preferredFileStem,
+          candidateOrdinal,
+          preferredExtension,
+          transaction.pathAllocationOrdinal,
+        )
+        : null
+    );
+    const expectedPreparedWorkingCopyRelativePath = "transactions/" + transactionId
+      + "/prepared-working-copy" + preferredExtension;
+    const mismatch = () => {
+      throw new ProjectFileRepositoryError(
+        "PROMOTION_TRANSACTION_MISMATCH",
+        "The Promotion transaction does not match the runtime-sealed Candidate authority.",
+      );
+    };
+
+    if (
+      !hasValidOrdinal
+      || candidate.proposedVersionId !== expectedVersionId
+      || transaction.transactionId !== transactionId
+      || transaction.projectId !== loaded.project.projectId
+      || transaction.documentId !== loaded.project.documentId
+      || transaction.candidateId !== candidate.candidateId
+      || transaction.requestId !== candidate.requestId
+      || transaction.versionId !== expectedVersionId
+      || transaction.versionOrdinal !== candidateOrdinal
+      || transaction.candidateOutputSha256 !== candidate.outputSha256
+      || transaction.basedOnVersionId !== candidate.basedOnVersionId
+      || transaction.previousVersionId !== candidate.previousVersionId
+      || transaction.preferredFileStem !== preferredFileStem
+      || transaction.preferredExtension !== preferredExtension
+      || !hasValidAllocation
+      || transaction.finalWorkingCopyRelativePath !== expectedFinalWorkingCopyRelativePath
+      || transaction.preparedWorkingCopyRelativePath !== expectedPreparedWorkingCopyRelativePath
+    ) {
+      mismatch();
+    }
+
+    const hasPreparedWorkingCopy = [
+      "working-copy-prepared",
+      "working-copy-created",
+      "manifest-committed",
+      "completed",
+    ].includes(transaction.state);
+    let preparedWorkingCopyFileIdentity = null;
+    if (hasPreparedWorkingCopy) {
+      try {
+        preparedWorkingCopyFileIdentity = assertFileIdentity(
+          transaction.preparedWorkingCopyFileIdentity,
+          "Promotion prepared Working Copy fileIdentity",
+        );
+      } catch {
+        mismatch();
+      }
+    } else if (transaction.preparedWorkingCopyFileIdentity !== null) {
+      mismatch();
+    }
+
+    const hasCreatedWorkingCopy = [
+      "working-copy-created",
+      "manifest-committed",
+      "completed",
+    ].includes(transaction.state);
+    if (!hasCreatedWorkingCopy) {
+      if (transaction.workingCopy !== null) mismatch();
+      return;
+    }
+
+    const expectedWorkingCopyId = workingCopyId(candidateOrdinal);
+    const workingCopy = transaction.workingCopy;
+    let workingCopyFileIdentity;
+    try {
+      workingCopyFileIdentity = assertFileIdentity(
+        workingCopy?.fileIdentity,
+        "Promotion Working Copy fileIdentity",
+      );
+    } catch {
+      mismatch();
+    }
+    if (
+      !isObject(workingCopy)
+      || workingCopy.workingCopyId !== expectedWorkingCopyId
+      || workingCopy.versionId !== expectedVersionId
+      || workingCopy.basedOnVersionId !== expectedVersionId
+      || workingCopy.sourceRelativePath !== expectedFinalWorkingCopyRelativePath
+      || workingCopy.preferredFileStem !== preferredFileStem
+      || workingCopy.preferredExtension !== preferredExtension
+      || workingCopy.stateRelativePath !== "working-copies/" + expectedWorkingCopyId + ".json"
+      || !sameFileIdentity(workingCopyFileIdentity, preparedWorkingCopyFileIdentity)
+    ) {
+      mismatch();
+    }
+  }
+
+  async #readCommittedPromotion(loaded, transaction) {
+    const committedVersion = loaded.manifest.versions.find(
+      (version) => version.versionId === transaction.versionId,
+    );
+    const committedWorkingCopy = loaded.manifest.workingCopies.find(
+      (workingCopy) => workingCopy.workingCopyId === transaction.workingCopy?.workingCopyId,
+    );
+    if (
+      !committedVersion
+      || !committedWorkingCopy
+      || loaded.manifest.latestOfficialVersionId !== transaction.versionId
+      || committedVersion.ordinal !== transaction.versionOrdinal
+      || committedVersion.basedOnVersionId !== transaction.basedOnVersionId
+      || committedVersion.previousVersionId !== transaction.previousVersionId
+      || committedVersion.contentSha256 !== transaction.candidateOutputSha256
+      || committedVersion.snapshotRelativePath !== "versions/" + transaction.versionId + "/index.html"
+      || committedVersion.sourceRequestId !== transaction.requestId
+      || committedVersion.sourceCandidateId !== transaction.candidateId
+      || committedWorkingCopy.workingCopyId !== transaction.workingCopy.workingCopyId
+      || committedWorkingCopy.versionId !== transaction.workingCopy.versionId
+      || committedWorkingCopy.basedOnVersionId !== transaction.workingCopy.basedOnVersionId
+      || committedWorkingCopy.sourceRelativePath !== transaction.workingCopy.sourceRelativePath
+      || committedWorkingCopy.preferredFileStem !== transaction.workingCopy.preferredFileStem
+      || committedWorkingCopy.preferredExtension !== transaction.workingCopy.preferredExtension
+      || committedWorkingCopy.stateRelativePath !== transaction.workingCopy.stateRelativePath
+      || !sameFileIdentity(committedWorkingCopy.fileIdentity, transaction.workingCopy.fileIdentity)
+    ) {
+      throw new ProjectFileRepositoryError(
+        "PROMOTION_COMMIT_MISMATCH",
+        "The committed Promotion facts do not match the sealed transaction authority.",
+      );
+    }
+    const snapshot = await readHtmlFile(
+      versionSnapshotPath(loaded.paths, committedVersion),
+      "Version snapshot",
+      { projectRootPath: loaded.paths.projectRootPath },
+    );
+    if (snapshot.sha256 !== transaction.candidateOutputSha256) {
+      throw new ProjectFileRepositoryError(
+        "PROMOTION_COMMIT_MISMATCH",
+        "The committed Promotion snapshot no longer matches the sealed Candidate bytes.",
+      );
+    }
+    return { committedVersion, committedWorkingCopy };
+  }
+
   async #continuePromotion(loaded, candidateState, transactionRoot, transaction) {
     if (
       !isObject(transaction)
@@ -4286,6 +4453,7 @@ export class ProjectFileRepository {
         "The Promotion Candidate no longer matches its sealed transaction authority.",
       );
     }
+    this.#assertPromotionTransactionAuthority(loaded, candidateState, transaction);
     topLevelHtmlRelativePath(transaction.finalWorkingCopyRelativePath);
     assertPreferredFileStem(transaction.preferredFileStem);
     if (!HTML_EXTENSIONS.has(String(transaction.preferredExtension || "").toLowerCase())) {
@@ -4598,24 +4766,10 @@ export class ProjectFileRepository {
   }
 
   async #finishPromotedCandidate(loaded, candidateState, transactionRoot, transaction) {
-    const committedVersion = loaded.manifest.versions.find(
-      (version) => version.versionId === transaction.versionId,
+    const { committedVersion, committedWorkingCopy } = await this.#readCommittedPromotion(
+      loaded,
+      transaction,
     );
-    if (!committedVersion) {
-      throw new ProjectFileRepositoryError(
-        "PROMOTION_VERSION_MISSING",
-        "The Promotion did not publish its Version manifest.",
-      );
-    }
-    const committedWorkingCopy = loaded.manifest.workingCopies.find(
-      (workingCopy) => workingCopy.versionId === committedVersion.versionId,
-    );
-    if (!committedWorkingCopy) {
-      throw new ProjectFileRepositoryError(
-        "PROMOTION_WORKING_COPY_MISSING",
-        "The Promotion did not publish its Working Copy mapping.",
-      );
-    }
     if (transaction.state !== "completed") {
       candidateState.candidate.status = "promoted";
       candidateState.candidate.promotedAt = nowIso(this.#clock);

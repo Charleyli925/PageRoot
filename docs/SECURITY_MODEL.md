@@ -110,8 +110,12 @@ be repaired only by one unique direct-child file-identity continuity clue; Hash
 may validate bytes afterwards but never grants identity. An ambiguity is a
 content-preserving error. Promotion may prepare a provisional relative path in
 a durable transaction, but freezes the final visible path only after its
-no-replace publication succeeds. A replaced preparation file or an untrusted
-collision fails closed rather than deleting user data.
+no-replace publication succeeds. Recovery re-derives every identity-bearing
+transaction field and any created Working Copy from the runtime-sealed
+Candidate and its managed source Working Copy; a transaction is never an
+independent authority for version ordinal, lineage or path identity. A replaced
+preparation file or an untrusted collision fails closed rather than deleting
+user data.
 
 The external AI Agent can write within the Request / Attempt workspace, so
 those files are evidence to validate rather than runtime authority. Reopen and

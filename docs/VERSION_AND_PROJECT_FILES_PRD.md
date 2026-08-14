@@ -445,7 +445,7 @@ AI 只能写入固定 Attempt 输出 `.pageroot/requests/<requestId>/attempts/<a
 用户点击“采纳并成为版本 7”后，系统必须原子完成：
 
 1. 验证候选 Hash 仍与审阅内容一致。
-2. 验证 `basedOnVersionId`、`previousVersionId` 和当前项目身份。
+2. 验证运行时封存 Candidate 的 `requestId`、`proposedVersionId` / ordinal、`basedOnVersionId`、`previousVersionId`、输出 Hash 和当前项目身份。崩溃恢复时，事务只记录进度：必须由该 Candidate 与其 `sourceWorkingCopyId` 当前受管命名重新推导版本、谱系、准备路径、可见路径和已创建 Working Copy；任一不一致都失败关闭，不得发布或补全 Version。
 3. 根据当前 Working Copy 最新确认的首选主干与扩展名分配 V7 候选可见路径；若占用则连续追加 `-V7`。先在事务中准备私有字节，再以操作系统级 no-replace `link()` 发布。只有 `EEXIST` 可以持久分配下一个同 ordinal 路径并重试；其他发布错误失败关闭。成功 `link()` 后才冻结最终相对路径。
 4. 把候选精确字节写入 `.pageroot/versions/ver_0007/index.html`。
 5. 在根目录按事务冻结路径建立工作文件，初始字节与正式快照一致；不得覆盖任何用户已有文件。
