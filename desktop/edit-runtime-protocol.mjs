@@ -416,34 +416,98 @@ function permittedEchartsUrl(value) {
   }
 }
 
-async function fetchFixedEchartsBytes(initialUrl, netFetch) {
+function remoteScriptTimeoutError() {
+  return new TypeError("Edit runtime CDN script timed out.");
+}
+
+async function settleRemoteScriptStep(operation, controller, deadlineAt) {
+  const remainingMs = Math.ceil(deadlineAt - Date.now());
+  if (remainingMs <= 0) {
+    controller.abort();
+    throw remoteScriptTimeoutError();
+  }
+  let timeout = null;
+  const expiry = new Promise((_, reject) => {
+    timeout = setTimeout(() => {
+      controller.abort();
+      reject(remoteScriptTimeoutError());
+    }, remainingMs);
+  });
+  try {
+    return await Promise.race([
+      Promise.resolve().then(operation),
+      expiry,
+    ]);
+  } finally {
+    if (timeout !== null) clearTimeout(timeout);
+  }
+}
+
+async function readFixedEchartsBytes(responseValue, controller, deadlineAt) {
+  const reader = responseValue?.body?.getReader?.();
+  if (!reader) throw new TypeError("Edit runtime CDN script body is unavailable.");
+  const chunks = [];
+  let byteLength = 0;
+  let complete = false;
+  try {
+    while (true) {
+      const next = await settleRemoteScriptStep(
+        () => reader.read(),
+        controller,
+        deadlineAt,
+      );
+      if (next.done) {
+        complete = true;
+        break;
+      }
+      const chunk = Buffer.from(next.value);
+      byteLength += chunk.byteLength;
+      if (byteLength > EDIT_AUTHOR_RUNTIME_BUDGET.scriptBytes) {
+        controller.abort();
+        throw new TypeError("Edit runtime CDN script is too large.");
+      }
+      chunks.push(chunk);
+    }
+  } finally {
+    if (!complete) void reader.cancel().catch(() => undefined);
+    reader.releaseLock();
+  }
+  if (byteLength < 1) throw new TypeError("Edit runtime CDN script is too large or empty.");
+  return Buffer.concat(chunks, byteLength);
+}
+
+async function fetchFixedEchartsBytes(initialUrl, netFetch, deadlineAt) {
   let url = String(initialUrl);
   for (let attempt = 0; attempt < 4; attempt += 1) {
     if (!permittedEchartsUrl(url)) {
       throw new TypeError("Edit runtime remote script is not an allowed ECharts CDN URL.");
     }
-    const responseValue = await netFetch(url, {
-      method: "GET",
-      redirect: "manual",
-      cache: "no-store",
-    });
+    const controller = new AbortController();
+    const responseValue = await settleRemoteScriptStep(
+      () => netFetch(url, {
+        method: "GET",
+        redirect: "manual",
+        cache: "no-store",
+        signal: controller.signal,
+      }),
+      controller,
+      deadlineAt,
+    );
     const status = Number(responseValue?.status || 0);
     if (status >= 300 && status < 400) {
       const next = responseValue.headers?.get?.("location");
       if (!next) throw new TypeError("Edit runtime CDN redirect is invalid.");
+      controller.abort();
       url = new URL(next, url).href;
       continue;
     }
     if (!responseValue?.ok) throw new TypeError("Edit runtime CDN script could not be loaded.");
     const declaredLength = Number(responseValue.headers?.get?.("content-length") || 0);
     if (declaredLength > EDIT_AUTHOR_RUNTIME_BUDGET.scriptBytes) {
+      controller.abort();
       throw new TypeError("Edit runtime CDN script is too large.");
     }
-    const bytes = Buffer.from(await responseValue.arrayBuffer());
-    if (bytes.byteLength < 1 || bytes.byteLength > EDIT_AUTHOR_RUNTIME_BUDGET.scriptBytes) {
-      throw new TypeError("Edit runtime CDN script is too large or empty.");
-    }
-    return bytes;
+    return readFixedEchartsBytes(responseValue, controller, deadlineAt);
   }
   throw new TypeError("Edit runtime CDN redirect limit exceeded.");
 }
@@ -455,6 +519,7 @@ async function fixedAuthorScripts({
   readFileImpl,
   realpathImpl,
   statImpl,
+  remoteScriptDeadlineMs,
 }) {
   const contract = collectEditRuntimeScripts(html);
   if (contract.unsupportedReason) {
@@ -467,10 +532,11 @@ async function fixedAuthorScripts({
   const scripts = [];
   let totalBytes = 0;
   let containsEchartsSignal = isEditRuntimeEchartsCandidate(html);
+  const remoteDeadlineAt = Date.now() + remoteScriptDeadlineMs;
   for (const descriptor of contract.executableScripts) {
     const bytes = descriptor.src
       ? (permittedEchartsUrl(descriptor.src)
-        ? await fetchFixedEchartsBytes(descriptor.src, netFetch)
+        ? await fetchFixedEchartsBytes(descriptor.src, netFetch, remoteDeadlineAt)
         : await resolveLocalScript(sourceRoot, descriptor.src, {
             readFileImpl,
             realpathImpl,
@@ -557,6 +623,7 @@ export function createEditRuntimeProtocolController({
   realpathImpl = realpath,
   statImpl = stat,
   orphanSessionTtlMs = EDIT_AUTHOR_RUNTIME_BUDGET.orphanSessionTtlMs,
+  remoteScriptDeadlineMs = EDIT_AUTHOR_RUNTIME_BUDGET.runtimeDeadlineMs,
 } = {}) {
   if (!protocolApi || typeof protocolApi.handle !== "function") {
     throw new TypeError("Edit runtime protocol requires protocol.handle.");
@@ -564,6 +631,10 @@ export function createEditRuntimeProtocolController({
   if (typeof netFetch !== "function") {
     throw new TypeError("Edit runtime protocol requires Electron net.fetch.");
   }
+  const boundedRemoteScriptDeadlineMs = Math.max(1, Math.min(
+    EDIT_AUTHOR_RUNTIME_BUDGET.runtimeDeadlineMs,
+    Math.round(Number(remoteScriptDeadlineMs)) || EDIT_AUTHOR_RUNTIME_BUDGET.runtimeDeadlineMs,
+  ));
   const sessions = new Map();
   const installedProtocols = new WeakSet();
   const allocate = (create, predicate) => {
@@ -596,6 +667,7 @@ export function createEditRuntimeProtocolController({
       readFileImpl,
       realpathImpl,
       statImpl,
+      remoteScriptDeadlineMs: boundedRemoteScriptDeadlineMs,
     });
     const declaredAssets = await collectDeclaredPreviewAssets({
       html: source,

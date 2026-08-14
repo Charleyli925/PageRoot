@@ -11,6 +11,7 @@ import path from "node:path";
 import test from "node:test";
 
 import {
+  EDIT_AUTHOR_RUNTIME_BUDGET,
   EDIT_RUNTIME_PROTOCOL_SCHEME,
 } from "../app/domain/edit-runtime-contract.js";
 import {
@@ -34,6 +35,10 @@ const HTML = [
   '<script>echarts.init(document.querySelector("#chart-host"))</script>',
   "</body></html>",
 ].join("");
+const REMOTE_ECHARTS_HTML = HTML.replace(
+  'src="vendor/echarts.js"',
+  'src="https://cdnjs.cloudflare.com/ajax/libs/echarts/5.5.0/echarts.min.js"',
+);
 
 test("direct protocol serves one immutable resource session and consumes execution bytes once", async (t) => {
   const temporaryRoot = await mkdtemp(path.join(tmpdir(), "pageroot-edit-runtime-"));
@@ -205,4 +210,98 @@ test("runtime document exposes only fixed bootstrap and inert source-script stub
   const bootstrapUrl = `pageroot-edit-runtime://${session.sessionId}/.pageroot/bootstrap/${session.executionId}.js`;
   assert.equal((await handler(new Request(bootstrapUrl))).status, 200);
   assert.equal((await handler(new Request(bootstrapUrl))).status, 404);
+});
+
+test("direct protocol streams a headerless allowlisted ECharts response within the fixed byte cap", async (t) => {
+  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "pageroot-edit-runtime-remote-stream-"));
+  t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
+  const sourcePath = path.join(temporaryRoot, "report.html");
+  await writeFile(sourcePath, REMOTE_ECHARTS_HTML);
+
+  let observedSignal = null;
+  const controller = createEditRuntimeProtocolController({
+    protocolApi: { handle() {} },
+    netFetch: async (_url, options) => {
+      observedSignal = options.signal;
+      return new Response(new ReadableStream({
+        start(stream) {
+          stream.enqueue(Buffer.from("window.echarts={init(){}};"));
+          stream.close();
+        },
+      }), { status: 200 });
+    },
+    randomSessionId: () => "4".repeat(32),
+    randomExecutionId: () => "5".repeat(24),
+  });
+
+  const session = await controller.createSession({
+    html: REMOTE_ECHARTS_HTML,
+    sourcePath,
+    bindings: BINDINGS,
+  });
+  assert.equal(session.scriptCount, 2);
+  assert.ok(observedSignal instanceof AbortSignal);
+  assert.equal(observedSignal.aborted, false);
+});
+
+test("direct protocol cancels a headerless ECharts stream as soon as it exceeds the fixed byte cap", async (t) => {
+  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "pageroot-edit-runtime-remote-cap-"));
+  t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
+  const sourcePath = path.join(temporaryRoot, "report.html");
+  await writeFile(sourcePath, REMOTE_ECHARTS_HTML);
+
+  let canceled = false;
+  let observedSignal = null;
+  const controller = createEditRuntimeProtocolController({
+    protocolApi: { handle() {} },
+    netFetch: async (_url, options) => {
+      observedSignal = options.signal;
+      return new Response(new ReadableStream({
+        pull(stream) {
+          stream.enqueue(new Uint8Array(EDIT_AUTHOR_RUNTIME_BUDGET.scriptBytes + 1));
+        },
+        cancel() {
+          canceled = true;
+        },
+      }), { status: 200 });
+    },
+    randomSessionId: () => "6".repeat(32),
+    randomExecutionId: () => "7".repeat(24),
+  });
+
+  await assert.rejects(
+    controller.createSession({ html: REMOTE_ECHARTS_HTML, sourcePath, bindings: BINDINGS }),
+    /CDN script is too large/u,
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(canceled, true);
+  assert.equal(observedSignal.aborted, true);
+});
+
+test("direct protocol aborts a stalled headerless ECharts stream by the existing runtime deadline", async (t) => {
+  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "pageroot-edit-runtime-remote-timeout-"));
+  t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
+  const sourcePath = path.join(temporaryRoot, "report.html");
+  await writeFile(sourcePath, REMOTE_ECHARTS_HTML);
+
+  let observedSignal = null;
+  const controller = createEditRuntimeProtocolController({
+    protocolApi: { handle() {} },
+    netFetch: async (_url, options) => {
+      observedSignal = options.signal;
+      return new Response(new ReadableStream({
+        pull() {},
+      }), { status: 200 });
+    },
+    remoteScriptDeadlineMs: 20,
+    randomSessionId: () => "8".repeat(32),
+    randomExecutionId: () => "9".repeat(24),
+  });
+
+  await assert.rejects(
+    controller.createSession({ html: REMOTE_ECHARTS_HTML, sourcePath, bindings: BINDINGS }),
+    /CDN script timed out/u,
+  );
+  assert.ok(observedSignal instanceof AbortSignal);
+  assert.equal(observedSignal.aborted, true);
 });

@@ -686,7 +686,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const [frameRender, setFrameRender] = useState(() => ({
     html: disableExecutableMarkup(html),
     elementGeneration: 0,
-    runtime: false,
   }));
   const [selection, setSelection] = useState<HtmlCanvasSelection | null>(null);
   const [overlayPosition, setOverlayPosition] = useState<OverlayPosition | null>(null);
@@ -888,7 +887,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       setFrameRender({
         html: prepared,
         elementGeneration: nextFrameGeneration,
-        runtime: false,
       });
     };
     if (options.immediate) {
@@ -4846,7 +4844,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         return;
       }
       attempts += 1;
-      const retryLimit = frameRender.runtime
+      const retryLimit = runtimeFrame?.elementGeneration === connectedFrameGeneration
+        && !runtimeFrame.settled
         ? Math.ceil(EDIT_AUTHOR_RUNTIME_BUDGET.runtimeDeadlineMs / 16) + 30
         : 120;
       if (attempts < retryLimit) {
@@ -4860,7 +4859,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     fallBackToStaticRuntimeFrame,
     frameRender.elementGeneration,
     frameRender.html,
-    frameRender.runtime,
   ]);
 
   const applyInlineStyle = useCallback(
