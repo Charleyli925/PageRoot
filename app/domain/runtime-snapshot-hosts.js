@@ -1,4 +1,5 @@
 import { RUNTIME_VISUAL_CONTRACT } from "./runtime-visual-contract.js";
+import { EDIT_AUTHOR_RUNTIME_BUDGET } from "./edit-runtime-contract.js";
 import { buildSourceIndex } from "../lib/source-index.js";
 import {
   createTargetRef,
@@ -7,6 +8,7 @@ import {
 
 export const RUNTIME_SNAPSHOT_HOST_LIMIT =
   RUNTIME_VISUAL_CONTRACT.pageBudget.visualLimit;
+export const EDIT_RUNTIME_HOST_LIMIT = EDIT_AUTHOR_RUNTIME_BUDGET.hostCount;
 
 const DIRECT_HOST_KINDS = new Map([
   ["canvas", "canvas"],
@@ -21,6 +23,32 @@ const STABLE_HOST_TAGS = new Set([
   "main",
   "section",
   "span",
+]);
+const EDIT_RUNTIME_DANGEROUS_HOST_TAGS = new Set([
+  "audio",
+  "base",
+  "body",
+  "button",
+  "dialog",
+  "embed",
+  "form",
+  "frame",
+  "frameset",
+  "head",
+  "html",
+  "iframe",
+  "input",
+  "link",
+  "meta",
+  "object",
+  "option",
+  "script",
+  "select",
+  "source",
+  "style",
+  "textarea",
+  "track",
+  "video",
 ]);
 const EXCLUDED_STABLE_ATTRIBUTES = new Set([
   "class",
@@ -176,6 +204,42 @@ function hostDescriptor(index, element) {
   });
 }
 
+/**
+ * Edit uses a separate source-empty-host rule. Review stays on its strict
+ * historical allowlist; this path rejects global/executable host surfaces
+ * while still requiring one unique source binding before runtime descendants
+ * may be created inside the host.
+ */
+function editRuntimeHostDescriptor(index, element) {
+  if (
+    !element
+    || element.type !== "element"
+    || EDIT_RUNTIME_DANGEROUS_HOST_TAGS.has(element.tagName)
+    || !sourceContentIsEmpty(index, element)
+  ) return null;
+  const binding = stableBinding(index, element);
+  if (!binding.length) return null;
+  const path = elementPath(index, element);
+  if (!path) return null;
+  let hostTargetRef;
+  try {
+    hostTargetRef = createTargetRef(index, element, { level: "subregion" });
+  } catch {
+    return null;
+  }
+  return Object.freeze({
+    sourceNodeId: element.nodeId,
+    kind: "host",
+    hostTargetRef: Object.freeze({ ...hostTargetRef }),
+    binding: Object.freeze({
+      path,
+      tagName: element.tagName,
+      kind: "host",
+      identityAttributes: binding,
+    }),
+  });
+}
+
 function compatibleHost(beforeHost, afterHost) {
   return Boolean(afterHost)
     && beforeHost.kind === afterHost.kind
@@ -277,6 +341,38 @@ export function resolveRuntimeSnapshotHosts({
   return Object.freeze({
     beforeIndex,
     afterIndex,
+    hosts: Object.freeze(hosts),
+  });
+}
+
+/**
+ * Edit-only discovery has one source, because a one-shot frame never attempts
+ * to rebind after a save, comment change, or later static reload. Its runtime
+ * descendants stay display-only and map back to these source hosts.
+ */
+export function resolveEditRuntimeHosts({
+  html,
+  sourceIndex: suppliedSourceIndex = null,
+  maximum = EDIT_RUNTIME_HOST_LIMIT,
+} = {}) {
+  if (typeof html !== "string") return null;
+  let sourceIndex;
+  try {
+    sourceIndex = sourceIndexFor(html, suppliedSourceIndex);
+  } catch {
+    return null;
+  }
+  const limit = Number.isSafeInteger(maximum)
+    ? Math.max(0, Math.min(EDIT_RUNTIME_HOST_LIMIT, maximum))
+    : EDIT_RUNTIME_HOST_LIMIT;
+  const hosts = [];
+  for (const element of sourceIndex.elements) {
+    if (hosts.length >= limit) break;
+    const host = editRuntimeHostDescriptor(sourceIndex, element);
+    if (host) hosts.push(host);
+  }
+  return Object.freeze({
+    sourceIndex,
     hosts: Object.freeze(hosts),
   });
 }

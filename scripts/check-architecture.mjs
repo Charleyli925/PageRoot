@@ -33,6 +33,7 @@ const RUNTIME_SESSION_CONSTRUCTORS = [
   "ProjectRulesSession",
   "ExternalFileOpenSession",
   "ProjectApplicationSession",
+  "EditAuthorRuntimeSession",
 ];
 
 async function sourceFiles(directory) {
@@ -413,6 +414,19 @@ export async function architectureViolations() {
   );
   const canvasEditor = await readFile(
     path.join(PRODUCT_ROOT, "app", "components", "HtmlCanvasEditor.tsx"),
+    "utf8",
+  );
+  const editRuntimeSession = await readFile(
+    path.join(
+      PRODUCT_ROOT,
+      "app",
+      "application",
+      "edit-author-runtime-session.js",
+    ),
+    "utf8",
+  );
+  const editRuntimeProtocol = await readFile(
+    path.join(PRODUCT_ROOT, "desktop", "edit-runtime-protocol.mjs"),
     "utf8",
   );
   const projectSession = await readFile(
@@ -892,6 +906,55 @@ export async function architectureViolations() {
   ) {
     violations.push(
       "app/workbench.tsx: PR-6 Version IO and navigation ownership must delegate to WorkspaceController; Workbench keeps only review presentation and outcome mapping",
+    );
+  }
+
+  if (
+    !workspaceController.includes("import { EditAuthorRuntimeSession }")
+    || !workspaceController.includes("new EditAuthorRuntimeSession({")
+    || !workspaceController.includes("#refreshEditAuthorRuntime()")
+    || !workspaceController.includes("beginEditAuthorRuntime(input)")
+    || !workspaceController.includes("settleEditAuthorRuntime(input)")
+    || !workspaceController.includes("editRuntime: this.#editRuntimeSnapshot")
+  ) {
+    violations.push(
+      "app/application/workspace-controller.js: one-shot Edit runtime state must remain a Controller-owned Session projection",
+    );
+  }
+  if (
+    /\bhtmlAIEditRuntime\??\.(?:prepare|revoke)\s*\(/u.test(workbench)
+    || !workbench.includes("workspaceControllerRef.current?.beginEditAuthorRuntime({")
+    || !workbench.includes("workspaceControllerRef.current?.settleEditAuthorRuntime({")
+  ) {
+    violations.push(
+      "app/workbench.tsx: the view may pass the narrow runtime port at composition time but cannot manage its lifecycle",
+    );
+  }
+  if (
+    !editRuntimeSession.includes("sameKey(this.#identity, identity)")
+    || !editRuntimeSession.includes("sourcePath === right.sourcePath")
+    || !editRuntimeSession.includes("canvasGeneration === right.canvasGeneration")
+    || !editRuntimeSession.includes("phase: \"settled\"")
+    || /\b(?:EditRuntimeProbe|probe[A-Z_]|promoteRuntimeFrame|compatibilityCache|cacheTtl)\b/u.test(editRuntimeSession)
+    || /\b(?:EditRuntimeProbe|probe[A-Z_]|promoteRuntimeFrame|compatibilityCache|cacheTtl)\b/u.test(editRuntimeProtocol)
+  ) {
+    violations.push(
+      "Edit runtime must use one direct sourcePath/canvasGeneration session without probe, promotion, or compatibility cache state",
+    );
+  }
+  if (
+    !canvasEditor.includes("runtimeAttemptedRef")
+    || !canvasEditor.includes("forceStatic: true")
+    || !canvasEditor.includes("data-pageroot-edit-runtime-host")
+  ) {
+    violations.push(
+      "app/components/HtmlCanvasEditor.tsx: one-shot runtime frames must be consumed once and fall back to static source editing",
+    );
+  }
+  const desktopFiles = await sourceFiles(path.join(PRODUCT_ROOT, "desktop"));
+  if (desktopFiles.some((filePath) => relative(filePath).includes("edit-runtime-probe"))) {
+    violations.push(
+      "desktop: retired Edit runtime probe owners cannot return to production",
     );
   }
 
