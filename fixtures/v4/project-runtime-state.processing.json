@@ -10,7 +10,8 @@
     "status": "processing",
     "inputManifestSha256": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     "candidateOutputSha256": null,
-    "candidateRecordSha256": null
+    "candidateRecordSha256": null,
+    "preparedCandidateJson": null
   },
   "activeCandidateId": null
 }

@@ -355,6 +355,97 @@ test("request recovery promotes a prepared Candidate only when its runtime seal 
   assert.equal(recovered.activeCandidate.candidateId, request.candidateId);
 });
 
+test("Candidate recovery seals the record before it is published into the Request tree", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value);
+  const request = await value.repository.prepareRequest({
+    target: imported.target,
+    requestId: "req_candidate_record_recovery",
+    attemptId: "attempt_001",
+    expectedSourceSha256: imported.target.sourceSha256,
+    request: { summary: "recover candidate record write" },
+    prompt: "# recover candidate record write\n",
+  });
+  const interrupted = new ProjectFileRepository({
+    projectsRoot: value.projects,
+    failpoint: async (name) => name === "candidate-record-written",
+  });
+  const candidateHtml = html("candidate sealed before record publication");
+  await assert.rejects(
+    interrupted.completeRequest({
+      target: imported.target,
+      requestId: request.requestId,
+      attemptId: request.attemptId,
+      html: candidateHtml,
+    }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "INJECTED_FAILPOINT",
+  );
+
+  const runtimePath = path.join(imported.target.projectRootPath, ".pageroot", "runtime-state.json");
+  const interruptedRuntime = await json(runtimePath);
+  assert.equal(interruptedRuntime.activeRequest.status, "candidate-preparing");
+  assert.equal(interruptedRuntime.activeRequest.candidateId, request.candidateId);
+  assert.equal(typeof interruptedRuntime.activeRequest.preparedCandidateJson, "string");
+  assert.equal(interruptedRuntime.activeCandidateId, null);
+
+  const recovered = await new ProjectFileRepository({ projectsRoot: value.projects }).workspace({
+    sourcePath: imported.target.exactSourcePath,
+  });
+  assert.equal(recovered.activeRequest.status, "candidate-ready");
+  assert.equal(recovered.activeCandidate.candidateId, request.candidateId);
+  assert.equal(recovered.activeCandidate.outputSha256, sha256(Buffer.from(candidateHtml, "utf8")));
+  const recoveredRuntime = await json(runtimePath);
+  assert.equal(recoveredRuntime.activeRequest.status, "pending-review");
+  assert.equal(recoveredRuntime.activeRequest.preparedCandidateJson, null);
+  assert.equal(recoveredRuntime.activeCandidateId, request.candidateId);
+});
+
+test("prepared Candidate recovery preserves mismatched Request-tree output", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value);
+  const request = await value.repository.prepareRequest({
+    target: imported.target,
+    requestId: "req_candidate_record_tamper",
+    attemptId: "attempt_001",
+    expectedSourceSha256: imported.target.sourceSha256,
+    request: { summary: "reject altered candidate output" },
+    prompt: "# reject altered candidate output\n",
+  });
+  const interrupted = new ProjectFileRepository({
+    projectsRoot: value.projects,
+    failpoint: async (name) => name === "candidate-record-written",
+  });
+  await assert.rejects(
+    interrupted.completeRequest({
+      target: imported.target,
+      requestId: request.requestId,
+      attemptId: request.attemptId,
+      html: html("sealed output"),
+    }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "INJECTED_FAILPOINT",
+  );
+  const outputPath = path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "requests",
+    request.requestId,
+    "candidate.html",
+  );
+  const tampered = html("tampered output must survive recovery");
+  await writeFile(outputPath, tampered, "utf8");
+
+  await assert.rejects(
+    new ProjectFileRepository({ projectsRoot: value.projects }).workspace({
+      sourcePath: imported.target.exactSourcePath,
+    }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "CANDIDATE_PREPARATION_MISMATCH",
+  );
+  assert.equal(await readFile(outputPath, "utf8"), tampered);
+});
+
 test("a Candidate cannot be adopted after its frozen Working Copy changes", async (t) => {
   const value = await fixture(t);
   const imported = await importSource(value);
@@ -1285,6 +1376,59 @@ test("Candidate completion seals every immutable Request identity against its fr
   }
 });
 
+test("Candidate completion verifies every frozen Request input against its manifest", async (t) => {
+  const frozenInputs = [
+    ["prompt", "PROMPT.md"],
+    ["policy", "input/AI_RULES.md"],
+    ["change-request", "change-request.json"],
+    ["project-rules", "input/PROJECT.md"],
+    ["base-html", "input/base/index.html"],
+    ["annotations", "input/annotations/records.json"],
+  ];
+  for (const [label, relativePath] of frozenInputs) {
+    const value = await fixture(t);
+    const imported = await importSource(value, `request-input-${label}.html`);
+    const prepared = await value.repository.prepareRequest({
+      target: imported.target,
+      requestId: "req_input_integrity",
+      attemptId: "attempt_001",
+      expectedSourceSha256: imported.target.sourceSha256,
+      request: { summary: `seal ${label}` },
+      prompt: "# frozen input integrity\n",
+    });
+    const inputPath = path.join(
+      imported.target.projectRootPath,
+      ".pageroot",
+      "requests",
+      prepared.requestId,
+      relativePath,
+    );
+    const original = await readFile(inputPath);
+    await writeFile(inputPath, Buffer.concat([
+      original,
+      Buffer.from(`\nmutated-${label}`, "utf8"),
+    ]));
+
+    await assert.rejects(
+      value.repository.completeRequest({
+        target: imported.target,
+        requestId: prepared.requestId,
+        attemptId: prepared.attemptId,
+        html: html(`must reject altered ${label}`),
+      }),
+      (error) => error instanceof ProjectFileRepositoryError
+        && error.code === "FROZEN_REQUEST_BUNDLE_MISMATCH",
+      label,
+    );
+    const manifest = await json(path.join(
+      imported.target.projectRootPath,
+      ".pageroot",
+      "manifest.json",
+    ));
+    assert.deepEqual(manifest.versions.map((version) => version.versionId), ["ver_0001"], label);
+  }
+});
+
 test("a Request freezes comments, targets and project rules alongside its exact HTML", async (t) => {
   const value = await fixture(t);
   const imported = await importSource(value, "frozen-request.html");
@@ -1547,6 +1691,28 @@ test("external import creates a byte-preserving V1 for every relative resource f
   });
   assert.equal(imported.imported, true);
   assert.deepEqual(await readFile(imported.target.exactSourcePath), safeBuffer);
+});
+
+test("external import skips occupied file and symlink project-root names", async (t) => {
+  const value = await fixture(t);
+  const sourcePath = path.join(value.sources, "occupied.html");
+  const source = html("import around occupied project roots");
+  await writeFile(sourcePath, source, "utf8");
+  await mkdir(value.projects, { recursive: true });
+  const occupiedFile = path.join(value.projects, "occupied");
+  const occupiedSymlink = path.join(value.projects, "occupied (2)");
+  const outside = path.join(value.root, "outside-project-root");
+  await writeFile(occupiedFile, "user file", "utf8");
+  await writeFile(outside, "user symlink target", "utf8");
+  await symlink(outside, occupiedSymlink, "file");
+
+  const imported = await value.repository.importExternal({
+    sourcePath,
+    expectedSourceSha256: sha256(Buffer.from(source, "utf8")),
+  });
+  assert.equal(path.basename(imported.target.projectRootPath), "occupied (3)");
+  assert.equal(await readFile(occupiedFile, "utf8"), "user file");
+  assert.equal((await lstat(occupiedSymlink)).isSymbolicLink(), true);
 });
 
 test("import fails before publication without registration debris, and rejects symbolic links", async (t) => {

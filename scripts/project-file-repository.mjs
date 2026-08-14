@@ -542,21 +542,30 @@ async function readHtmlFile(filePath, label, options = {}) {
   };
 }
 
-async function readJsonFileWithSha256(filePath, label, options = {}) {
+async function readRegularFileWithSha256(filePath, label, options = {}) {
   const information = await regularInformation(filePath, label, options);
   if (!information) return null;
-  let buffer;
+  const buffer = await readFile(filePath);
+  return {
+    buffer,
+    sha256: sha256(buffer),
+    information,
+  };
+}
+
+async function readJsonFileWithSha256(filePath, label, options = {}) {
+  const record = await readRegularFileWithSha256(filePath, label, options);
+  if (!record) return null;
   let value;
   try {
-    buffer = await readFile(filePath);
-    value = JSON.parse(buffer.toString("utf8"));
+    value = JSON.parse(record.buffer.toString("utf8"));
   } catch {
     throw new ProjectFileRepositoryError("INVALID_JSON", `${label} is not valid JSON.`);
   }
   if (!isObject(value)) {
     throw new ProjectFileRepositoryError("INVALID_JSON", `${label} must be an object.`);
   }
-  return { value, sha256: sha256(buffer), information };
+  return { value, ...record };
 }
 
 async function readJsonFile(filePath, label, options = {}) {
@@ -1056,6 +1065,7 @@ function assertRuntime(runtime, project, manifest) {
         "inputManifestSha256",
         "candidateOutputSha256",
         "candidateRecordSha256",
+        "preparedCandidateJson",
       ].includes(key))
       || ![
         "requestId",
@@ -1065,10 +1075,11 @@ function assertRuntime(runtime, project, manifest) {
         "inputManifestSha256",
         "candidateOutputSha256",
         "candidateRecordSha256",
+        "preparedCandidateJson",
       ].every((key) => Object.hasOwn(active, key))
       || !SAFE_REQUEST_ID.test(active.requestId)
       || !SAFE_REQUEST_ID.test(active.attemptId)
-      || !["processing", "pending-review"].includes(active.status)
+      || !["processing", "candidate-preparing", "pending-review"].includes(active.status)
       || (active.candidateId !== null && !/^candidate_[A-Za-z0-9_-]{8,160}$/u.test(active.candidateId))
       || (
         active.inputManifestSha256 !== null
@@ -1082,13 +1093,29 @@ function assertRuntime(runtime, project, manifest) {
         active.candidateRecordSha256 !== null
         && !SHA256.test(String(active.candidateRecordSha256 || ""))
       )
-      || (active.status === "processing" && !SHA256.test(String(active.inputManifestSha256 || "")))
+      || (
+        active.preparedCandidateJson !== null
+        && (typeof active.preparedCandidateJson !== "string" || !active.preparedCandidateJson)
+      )
+      || !SHA256.test(String(active.inputManifestSha256 || ""))
       || (
         active.status === "processing"
         && (
           active.candidateId !== null
           || active.candidateOutputSha256 !== null
           || active.candidateRecordSha256 !== null
+          || active.preparedCandidateJson !== null
+        )
+      )
+      || (
+        active.status === "candidate-preparing"
+        && (
+          active.candidateId === null
+          || runtime.activeCandidateId !== null
+          || !SHA256.test(String(active.candidateOutputSha256 || ""))
+          || !SHA256.test(String(active.candidateRecordSha256 || ""))
+          || typeof active.preparedCandidateJson !== "string"
+          || !active.preparedCandidateJson
         )
       )
       || (
@@ -1097,10 +1124,22 @@ function assertRuntime(runtime, project, manifest) {
           active.candidateId !== runtime.activeCandidateId
           || !SHA256.test(String(active.candidateOutputSha256 || ""))
           || !SHA256.test(String(active.candidateRecordSha256 || ""))
+          || active.preparedCandidateJson !== null
         )
       )
     ) {
       throw new ProjectFileRepositoryError("INVALID_RUNTIME", "active Request is inconsistent.");
+    }
+    if (active.status === "candidate-preparing") {
+      const prepared = preparedCandidateFromRuntime(active, project);
+      if (!manifest.workingCopies.some((workingCopy) => (
+        workingCopy.workingCopyId === prepared.candidate.sourceWorkingCopyId
+      ))) {
+        throw new ProjectFileRepositoryError(
+          "INVALID_RUNTIME",
+          "The prepared Candidate belongs to an unknown Working Copy.",
+        );
+      }
     }
   }
   return runtime;
@@ -1209,6 +1248,17 @@ function frozenRequestRelativePaths(requestId, attemptId) {
     inputManifestRelativePath: `${root}/input-manifest.json`,
     outputRelativePath: `${root}/attempts/${attempt}/output/candidate.html`,
   };
+}
+
+function frozenRequestInputFiles() {
+  return [
+    { path: "PROMPT.md", role: "prompt", mediaType: "text/markdown" },
+    { path: "input/AI_RULES.md", role: "policy", mediaType: "text/markdown" },
+    { path: "change-request.json", role: "change-request", mediaType: "application/json" },
+    { path: "input/PROJECT.md", role: "project-rules", mediaType: "text/markdown" },
+    { path: "input/base/index.html", role: "base-html", mediaType: "text/html" },
+    { path: "input/annotations/records.json", role: "annotations", mediaType: "application/json" },
+  ];
 }
 
 function assertCandidateId(value) {
@@ -1441,6 +1491,61 @@ function assertCandidateRecord(candidate, loaded) {
     throw new ProjectFileRepositoryError("INVALID_CANDIDATE", "Promoted Candidate lacks its Version identity.");
   }
   return candidate;
+}
+
+function preparedCandidateFromRuntime(active, project) {
+  let candidate;
+  try {
+    candidate = JSON.parse(active.preparedCandidateJson);
+  } catch {
+    throw new ProjectFileRepositoryError(
+      "INVALID_RUNTIME",
+      "The prepared Candidate runtime seal is not valid JSON.",
+    );
+  }
+  const buffer = Buffer.from(active.preparedCandidateJson, "utf8");
+  if (sha256(buffer) !== active.candidateRecordSha256) {
+    throw new ProjectFileRepositoryError(
+      "INVALID_RUNTIME",
+      "The prepared Candidate runtime seal has an invalid record hash.",
+    );
+  }
+  assertCandidateRecord(candidate, { project });
+  if (
+    candidate.candidateId !== active.candidateId
+    || candidate.requestId !== active.requestId
+    || candidate.attemptId !== active.attemptId
+    || candidate.outputSha256 !== active.candidateOutputSha256
+    || candidate.status !== "pending-review"
+  ) {
+    throw new ProjectFileRepositoryError(
+      "INVALID_RUNTIME",
+      "The prepared Candidate runtime seal is internally inconsistent.",
+    );
+  }
+  return { candidate, buffer };
+}
+
+function assertCandidateMatchesRequest(candidate, record) {
+  if (
+    candidate.projectId !== record.projectId
+    || candidate.documentId !== record.documentId
+    || candidate.candidateId !== record.candidateId
+    || candidate.requestId !== record.requestId
+    || candidate.attemptId !== record.attemptId
+    || candidate.proposedVersionId !== record.proposedVersionId
+    || candidate.proposedVersionOrdinal !== record.proposedVersionOrdinal
+    || candidate.basedOnVersionId !== record.basedOnVersionId
+    || candidate.previousVersionId !== record.previousVersionId
+    || candidate.sourceWorkingCopyId !== record.sourceWorkingCopyId
+    || candidate.expectedSourceSha256 !== record.expectedSourceSha256
+    || candidate.status !== "pending-review"
+  ) {
+    throw new ProjectFileRepositoryError(
+      "CANDIDATE_PREPARATION_MISMATCH",
+      "The prepared Candidate does not match its frozen Request identity.",
+    );
+  }
 }
 
 function assertPromotionTransaction(transaction) {
@@ -2293,7 +2398,11 @@ export class ProjectFileRepository {
         );
       }
       await this.#restoreRequestRuntime(loaded, existing);
-      return this.#publicRequest(existing, loaded.paths.projectRootPath);
+      const refreshed = await readJsonFile(requestPath, "request.json", {
+        projectRootPath: loaded.paths.projectRootPath,
+      });
+      this.#assertRequestRecord(refreshed, loaded, { requestId: id, attemptId: attempt });
+      return this.#publicRequest(refreshed, loaded.paths.projectRootPath);
     }
     const latest = loaded.manifest.versions.find(
       (version) => version.versionId === loaded.manifest.latestOfficialVersionId,
@@ -2528,6 +2637,7 @@ export class ProjectFileRepository {
       inputManifestSha256: record.inputManifestSha256,
       candidateOutputSha256: null,
       candidateRecordSha256: null,
+      preparedCandidateJson: null,
     };
     loaded.runtime.activeCandidateId = null;
     await atomicWriteProjectJson(
@@ -2649,6 +2759,7 @@ export class ProjectFileRepository {
       || manifestValue.requestId !== record.requestId
       || manifestValue.attemptId !== record.attemptId
       || manifestValue.frozen !== true
+      || !Array.isArray(manifestValue.readOrder)
       || !Array.isArray(manifestValue.files)
     ) {
       throw new ProjectFileRepositoryError(
@@ -2656,32 +2767,65 @@ export class ProjectFileRepository {
         "The frozen input manifest belongs to another Request identity.",
       );
     }
-    const changeRecords = manifestValue.files.filter((entry) => (
-      isObject(entry)
-      && entry.path === "change-request.json"
-      && entry.role === "change-request"
-      && entry.mediaType === "application/json"
-    ));
+    const expectedInputs = frozenRequestInputFiles();
     if (
-      changeRecords.length !== 1
-      || !SHA256.test(String(changeRecords[0].sha256 || ""))
-      || !Number.isSafeInteger(changeRecords[0].byteLength)
-      || changeRecords[0].byteLength < 0
+      manifestValue.readOrder.length !== expectedInputs.length
+      || manifestValue.files.length !== expectedInputs.length
+      || manifestValue.readOrder.some((entry, index) => entry !== expectedInputs[index].path)
     ) {
       throw new ProjectFileRepositoryError(
         "FROZEN_REQUEST_BUNDLE_MISMATCH",
-        "The frozen Request has no authoritative change record.",
+        "The frozen Request input manifest has an incomplete or reordered input set.",
       );
+    }
+    const sealedInputs = new Map();
+    for (const expectedInput of expectedInputs) {
+      const matches = manifestValue.files.filter((entry) => (
+        isObject(entry)
+        && entry.path === expectedInput.path
+        && entry.role === expectedInput.role
+        && entry.mediaType === expectedInput.mediaType
+      ));
+      const entry = matches[0];
+      if (
+        matches.length !== 1
+        || !SHA256.test(String(entry?.sha256 || ""))
+        || !Number.isSafeInteger(entry?.byteLength)
+        || entry.byteLength < 0
+      ) {
+        throw new ProjectFileRepositoryError(
+          "FROZEN_REQUEST_BUNDLE_MISMATCH",
+          "The frozen Request input manifest has an invalid input record.",
+        );
+      }
+      const frozen = await readRegularFileWithSha256(
+        resolveRelative(requestRoot, expectedInput.path, "frozen Request input path"),
+        `frozen Request ${expectedInput.role}`,
+        { projectRootPath: loaded.paths.projectRootPath },
+      );
+      if (
+        !frozen
+        || frozen.sha256 !== entry.sha256
+        || frozen.buffer.byteLength !== entry.byteLength
+      ) {
+        throw new ProjectFileRepositoryError(
+          "FROZEN_REQUEST_BUNDLE_MISMATCH",
+          "A frozen Request input changed after submission.",
+          { path: expectedInput.path },
+        );
+      }
+      sealedInputs.set(expectedInput.path, entry);
     }
     const changeRecord = await readJsonFileWithSha256(
       path.join(requestRoot, "change-request.json"),
       "frozen Request change record",
       { projectRootPath: loaded.paths.projectRootPath },
     );
+    const changeRecordEntry = sealedInputs.get("change-request.json");
     if (
       !changeRecord
-      || changeRecord.sha256 !== changeRecords[0].sha256
-      || changeRecord.information.size !== changeRecords[0].byteLength
+      || changeRecord.sha256 !== changeRecordEntry.sha256
+      || changeRecord.buffer.byteLength !== changeRecordEntry.byteLength
     ) {
       throw new ProjectFileRepositoryError(
         "FROZEN_REQUEST_BUNDLE_MISMATCH",
@@ -2780,6 +2924,83 @@ export class ProjectFileRepository {
     };
   }
 
+  async #recoverPreparedCandidateRuntime(loaded, record, active) {
+    const { candidate, buffer } = preparedCandidateFromRuntime(active, loaded.project);
+    assertCandidateMatchesRequest(candidate, record);
+    const requestRoot = requestRootPath(loaded.paths, record.requestId);
+    const outputPath = resolveRelative(
+      loaded.paths.controlRoot,
+      candidate.outputRelativePath,
+      "prepared Candidate output path",
+    );
+    const candidatePath = path.join(requestRoot, "candidate.json");
+    const outputInformation = await regularInformation(outputPath, "prepared Candidate HTML", {
+      projectRootPath: loaded.paths.projectRootPath,
+    });
+    const candidateRecord = await readJsonFileWithSha256(candidatePath, "candidate.json", {
+      projectRootPath: loaded.paths.projectRootPath,
+    });
+    if (!outputInformation && !candidateRecord) return false;
+    if (!outputInformation) {
+      throw new ProjectFileRepositoryError(
+        "CANDIDATE_PREPARATION_MISMATCH",
+        "Candidate publication was interrupted with an incomplete prepared payload.",
+      );
+    }
+    const output = await readHtmlFile(outputPath, "prepared Candidate HTML", {
+      projectRootPath: loaded.paths.projectRootPath,
+    });
+    if (output.sha256 !== candidate.outputSha256) {
+      throw new ProjectFileRepositoryError(
+        "CANDIDATE_PREPARATION_MISMATCH",
+        "The prepared Candidate output no longer matches its runtime seal.",
+      );
+    }
+    if (candidateRecord) {
+      if (candidateRecord.sha256 !== active.candidateRecordSha256) {
+        throw new ProjectFileRepositoryError(
+          "CANDIDATE_PREPARATION_MISMATCH",
+          "The persisted Candidate record no longer matches its runtime seal.",
+        );
+      }
+      assertCandidateRecord(candidateRecord.value, loaded);
+      assertCandidateMatchesRequest(candidateRecord.value, record);
+    } else {
+      await atomicWriteProjectFile(
+        loaded.paths.projectRootPath,
+        candidatePath,
+        buffer,
+        "candidate.json",
+      );
+    }
+    record.status = "candidate-ready";
+    record.completedAt = record.completedAt || nowIso(this.#clock);
+    await atomicWriteProjectJson(
+      loaded.paths.projectRootPath,
+      path.join(requestRoot, "request.json"),
+      record,
+      "request.json",
+    );
+    loaded.runtime.activeRequest = {
+      requestId: record.requestId,
+      candidateId: candidate.candidateId,
+      attemptId: record.attemptId,
+      status: "pending-review",
+      inputManifestSha256: record.inputManifestSha256,
+      candidateOutputSha256: candidate.outputSha256,
+      candidateRecordSha256: active.candidateRecordSha256,
+      preparedCandidateJson: null,
+    };
+    loaded.runtime.activeCandidateId = candidate.candidateId;
+    await atomicWriteProjectJson(
+      loaded.paths.projectRootPath,
+      loaded.paths.runtimePath,
+      loaded.runtime,
+      "runtime-state.json",
+    );
+    return true;
+  }
+
   async #restoreRequestRuntime(loaded, record) {
     this.#assertRequestRecord(record, loaded, {
       requestId: record.requestId,
@@ -2798,6 +3019,18 @@ export class ProjectFileRepository {
     }
     let status = record.status;
     let candidateId = null;
+    if (
+      status === "processing"
+      && existingActiveRequest?.requestId === record.requestId
+      && existingActiveRequest.status === "candidate-preparing"
+    ) {
+      const recovered = await this.#recoverPreparedCandidateRuntime(
+        loaded,
+        record,
+        existingActiveRequest,
+      );
+      if (recovered) return true;
+    }
     if (status === "processing") {
       const candidatePath = path.join(
         requestRootPath(loaded.paths, record.requestId),
@@ -2883,6 +3116,7 @@ export class ProjectFileRepository {
       inputManifestSha256: record.inputManifestSha256,
       candidateOutputSha256,
       candidateRecordSha256,
+      preparedCandidateJson: null,
     };
     const active = loaded.runtime.activeRequest;
     if (
@@ -2893,6 +3127,7 @@ export class ProjectFileRepository {
       || active?.inputManifestSha256 !== nextActiveRequest.inputManifestSha256
       || active?.candidateOutputSha256 !== nextActiveRequest.candidateOutputSha256
       || active?.candidateRecordSha256 !== nextActiveRequest.candidateRecordSha256
+      || active?.preparedCandidateJson !== nextActiveRequest.preparedCandidateJson
       || loaded.runtime.activeCandidateId !== candidateId
     ) {
       loaded.runtime.activeRequest = nextActiveRequest;
@@ -2908,16 +3143,36 @@ export class ProjectFileRepository {
     return false;
   }
 
+  async #recoverPreparedRequestIfNeeded(loaded, requestPath, record) {
+    if (
+      record.status !== "processing"
+      || loaded.runtime.activeRequest?.requestId !== record.requestId
+      || loaded.runtime.activeRequest.status !== "candidate-preparing"
+    ) return record;
+    await this.#restoreRequestRuntime(loaded, record);
+    const refreshed = await readJsonFile(requestPath, "request.json", {
+      projectRootPath: loaded.paths.projectRootPath,
+    });
+    this.#assertRequestRecord(refreshed, loaded, {
+      requestId: record.requestId,
+      attemptId: record.attemptId,
+    });
+    await this.#assertSealedRequestIdentity(loaded, refreshed);
+    return refreshed;
+  }
+
   async #requestStatus({ target, requestId, attemptId }) {
     const loaded = await this.#resolveMutationTarget(target);
     const requestRoot = requestRootPath(loaded.paths, requestId);
-    const record = await readJsonFile(path.join(requestRoot, "request.json"), "request.json", {
+    const requestPath = path.join(requestRoot, "request.json");
+    let record = await readJsonFile(requestPath, "request.json", {
       projectRootPath: loaded.paths.projectRootPath,
     });
     this.#assertRequestRecord(record, loaded, { requestId, attemptId });
     if (["processing", "candidate-ready"].includes(record.status)) {
       await this.#assertSealedRequestIdentity(loaded, record);
     }
+    record = await this.#recoverPreparedRequestIfNeeded(loaded, requestPath, record);
     if (record.status === "candidate-ready" || record.status === "promoted") {
       const candidate = await this.#readCandidateForLoaded(loaded, record.candidateId);
       return {
@@ -2975,13 +3230,14 @@ export class ProjectFileRepository {
     const loaded = await this.#resolveMutationTarget(target);
     const requestRoot = requestRootPath(loaded.paths, requestId);
     const requestPath = path.join(requestRoot, "request.json");
-    const record = await readJsonFile(requestPath, "request.json", {
+    let record = await readJsonFile(requestPath, "request.json", {
       projectRootPath: loaded.paths.projectRootPath,
     });
     this.#assertRequestRecord(record, loaded, { requestId, attemptId });
     if (["processing", "candidate-ready"].includes(record.status)) {
       await this.#assertSealedRequestIdentity(loaded, record);
     }
+    record = await this.#recoverPreparedRequestIfNeeded(loaded, requestPath, record);
     if (record.status === "candidate-ready") {
       const rejected = await this.#rejectCandidate({ target, candidateId: record.candidateId });
       return {
@@ -3183,11 +3439,12 @@ export class ProjectFileRepository {
     const loaded = await this.#resolveMutationTarget(target);
     const requestRoot = requestRootPath(loaded.paths, requestId);
     const requestPath = path.join(requestRoot, "request.json");
-    const record = await readJsonFile(requestPath, "request.json", {
+    let record = await readJsonFile(requestPath, "request.json", {
       projectRootPath: loaded.paths.projectRootPath,
     });
     this.#assertRequestRecord(record, loaded, { requestId, attemptId });
     await this.#assertSealedRequestIdentity(loaded, record);
+    record = await this.#recoverPreparedRequestIfNeeded(loaded, requestPath, record);
     if (record.status === "processing") {
       const active = loaded.runtime.activeRequest;
       if (
@@ -3198,6 +3455,7 @@ export class ProjectFileRepository {
         || active.inputManifestSha256 !== record.inputManifestSha256
         || active.candidateOutputSha256 !== null
         || active.candidateRecordSha256 !== null
+        || active.preparedCandidateJson !== null
         || loaded.runtime.activeCandidateId !== null
       ) {
         throw new ProjectFileRepositoryError(
@@ -3764,7 +4022,14 @@ export class ProjectFileRepository {
     for (let ordinal = 1; ordinal < 10000; ordinal += 1) {
       const directoryName = ordinal === 1 ? stem : `${stem} (${ordinal})`;
       const candidate = path.join(this.#projectsRoot, directoryName);
-      if (!(await directoryInformation(candidate, "project directory"))) {
+      // Do not follow or diagnose an occupied name. A regular file, symlink,
+      // directory or any other filesystem object belongs to the user and must
+      // simply consume this allocation ordinal.
+      const occupied = await lstat(candidate).catch((cause) => {
+        if (cause?.code === "ENOENT") return null;
+        throw cause;
+      });
+      if (!occupied) {
         return { directoryName, projectRootPath: candidate };
       }
     }
@@ -4544,6 +4809,7 @@ export class ProjectFileRepository {
       || activeRequest.inputManifestSha256 !== requestRecord.inputManifestSha256
       || activeRequest.candidateOutputSha256 !== null
       || activeRequest.candidateRecordSha256 !== null
+      || activeRequest.preparedCandidateJson !== null
       || loaded.runtime.activeCandidateId !== null
     ) {
       throw new ProjectFileRepositoryError(
@@ -4640,6 +4906,7 @@ export class ProjectFileRepository {
         || active.inputManifestSha256 !== manifestAnchor
         || active.candidateOutputSha256 !== existingOutput.sha256
         || active.candidateRecordSha256 !== existingCandidateRecord.sha256
+        || active.preparedCandidateJson !== null
       ) {
         throw new ProjectFileRepositoryError(
           "CANDIDATE_AUTHORITY_MISMATCH",
@@ -4655,9 +4922,6 @@ export class ProjectFileRepository {
         candidateHtml,
         this.#clock,
       );
-      await writeFileNoReplace(outputPath, outputBuffer, outputSha256, "Candidate HTML", {
-        projectRootPath: loaded.paths.projectRootPath,
-      });
       const candidateRecord = {
         schemaVersion: PROJECT_FILE_SCHEMA_VERSION,
         candidateId: id,
@@ -4680,12 +4944,38 @@ export class ProjectFileRepository {
       assertCandidateRecord(candidateRecord, loaded);
       const candidateRecordBuffer = Buffer.from(jsonText(candidateRecord), "utf8");
       candidateRecordSha256 = sha256(candidateRecordBuffer);
+      // Seal the complete Candidate record outside the Request tree before
+      // publishing either Request-owned artifact. A restart can now recover
+      // only the exact candidate whose bytes were durably authorized here.
+      loaded.runtime.activeRequest = {
+        requestId: request,
+        candidateId: id,
+        attemptId: attempt,
+        status: "candidate-preparing",
+        inputManifestSha256: manifestAnchor,
+        candidateOutputSha256: outputSha256,
+        candidateRecordSha256,
+        preparedCandidateJson: candidateRecordBuffer.toString("utf8"),
+      };
+      loaded.runtime.activeCandidateId = null;
+      await atomicWriteProjectJson(
+        loaded.paths.projectRootPath,
+        loaded.paths.runtimePath,
+        loaded.runtime,
+        "runtime-state.json",
+      );
+      await this.#hit("candidate-runtime-prepared", { requestId: request, candidateId: id });
+      await writeFileNoReplace(outputPath, outputBuffer, outputSha256, "Candidate HTML", {
+        projectRootPath: loaded.paths.projectRootPath,
+      });
+      await this.#hit("candidate-output-written", { requestId: request, candidateId: id });
       await atomicWriteProjectFile(
         loaded.paths.projectRootPath,
         candidatePath,
         candidateRecordBuffer,
         "candidate.json",
       );
+      await this.#hit("candidate-record-written", { requestId: request, candidateId: id });
     }
     loaded.runtime.activeRequest = {
       requestId: request,
@@ -4695,6 +4985,7 @@ export class ProjectFileRepository {
       inputManifestSha256: manifestAnchor,
       candidateOutputSha256: outputSha256,
       candidateRecordSha256,
+      preparedCandidateJson: null,
     };
     loaded.runtime.activeCandidateId = id;
     await atomicWriteProjectJson(
