@@ -79,11 +79,12 @@ test("v4 schemas accept repository-produced identity, Working Copy, Candidate an
   });
   const controlRoot = path.join(imported.target.projectRootPath, ".pageroot");
   const initialManifest = await json(path.join(controlRoot, "manifest.json"));
+  const registry = await json(path.join(
+    projectsRoot,
+    ".pageroot-registry.json",
+  ));
   await Promise.all([
-    validate("project-registry.v4.schema.json", await json(path.join(
-      projectsRoot,
-      ".pageroot-registry.json",
-    ))),
+    validate("project-registry.v4.schema.json", registry),
     validate("project-identity.v4.schema.json", await json(path.join(controlRoot, "project.json"))),
     validate("project-manifest.v4.schema.json", initialManifest),
     validate("project-runtime-state.v4.schema.json", await json(path.join(controlRoot, "runtime-state.json"))),
@@ -92,6 +93,9 @@ test("v4 schemas accept repository-produced identity, Working Copy, Candidate an
       await json(path.join(controlRoot, "working-copies", "work_ver_0001.json")),
     ),
   ]);
+  const missingImportSourceHash = structuredClone(registry);
+  delete missingImportSourceHash.projects[imported.target.projectId].importSourceSha256;
+  await validateRejects("project-registry.v4.schema.json", missingImportSourceHash);
 
   const candidate = await repository.createCandidate({
     target: imported.target,

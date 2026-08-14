@@ -174,6 +174,78 @@ test("a Candidate is not a Version until adoption, rejection consumes no ordinal
   assert.equal(manifest.latestOfficialVersionId, "ver_0002");
 });
 
+test("a historical Version reactivates its original Working Copy without changing its immutable snapshot", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "history-lineage.html");
+  let active = imported.target;
+  let v2Target = null;
+  const v2Snapshot = html("immutable V2");
+  for (let ordinal = 2; ordinal <= 6; ordinal += 1) {
+    const candidate = await value.repository.createCandidate({
+      target: active,
+      requestId: `req_history_${ordinal}`,
+      candidateId: `candidate_history_${ordinal}_0001`,
+      html: ordinal === 2 ? v2Snapshot : html(`V${ordinal}`),
+      expectedSourceSha256: active.sourceSha256,
+    });
+    const promoted = await value.repository.promoteCandidate({
+      target: active,
+      candidateId: candidate.candidate.candidateId,
+    });
+    active = promoted.target;
+    if (ordinal === 2) v2Target = active;
+  }
+  assert.equal(active.versionId, "ver_0006");
+  assert.equal(v2Target?.workingCopyId, "work_ver_0002");
+
+  const activated = await value.repository.activateVersionWorkingCopy({
+    target: active,
+    versionId: "ver_0002",
+  });
+  assert.equal(activated.activated, true);
+  assert.equal(activated.target.versionId, "ver_0002");
+  assert.equal(activated.target.workingCopyId, "work_ver_0002");
+  const retried = await value.repository.activateVersionWorkingCopy({
+    target: active,
+    versionId: "ver_0002",
+  });
+  assert.equal(retried.activated, false);
+  assert.equal(retried.target.workingCopyId, activated.target.workingCopyId);
+
+  const v2Edited = html("editable V2 after history continuation");
+  const saved = await value.repository.saveWorkingCopy({
+    target: activated.target,
+    html: v2Edited,
+    expectedSourceSha256: activated.target.sourceSha256,
+    editRevision: 1,
+  });
+  assert.equal(await readFile(
+    path.join(saved.target.projectRootPath, ".pageroot", "versions", "ver_0002", "index.html"),
+    "utf8",
+  ), v2Snapshot);
+
+  const restarted = new ProjectFileRepository({ projectsRoot: value.projects });
+  const reopened = await restarted.workspace({ sourcePath: saved.target.exactSourcePath });
+  assert.equal(reopened.target.versionId, "ver_0002");
+  assert.equal(reopened.target.workingCopyId, "work_ver_0002");
+  assert.equal(reopened.content, v2Edited);
+
+  const candidate = await restarted.createCandidate({
+    target: reopened.target,
+    requestId: "req_history_v7",
+    candidateId: "candidate_history_v7_0001",
+    html: html("V7 based on V2"),
+    expectedSourceSha256: reopened.target.sourceSha256,
+  });
+  const promoted = await restarted.promoteCandidate({
+    target: reopened.target,
+    candidateId: candidate.candidate.candidateId,
+  });
+  assert.equal(promoted.version.versionId, "ver_0007");
+  assert.equal(promoted.version.basedOnVersionId, "ver_0002");
+  assert.equal(promoted.version.previousVersionId, "ver_0006");
+});
+
 test("blocked Candidate validation never reserves a Version", async (t) => {
   const value = await fixture(t);
   const imported = await importSource(value);
@@ -1690,6 +1762,86 @@ test("import fails before publication without registration debris, and rejects s
   );
 });
 
+test("import rechecks the bytes read after stat before publishing a project", async (t) => {
+  const value = await fixture(t);
+  const sourcePath = path.join(value.sources, "stat-race.html");
+  const source = html("small before stat race");
+  await writeFile(sourcePath, source, "utf8");
+  const oversized = Buffer.alloc((20 * 1024 * 1024) + 1, 0x61);
+  const repository = new ProjectFileRepository({
+    projectsRoot: value.projects,
+    failpoint: async (name) => {
+      if (name === "html-read-after-stat") await writeFile(sourcePath, oversized);
+      return false;
+    },
+  });
+  await assert.rejects(
+    repository.importExternal({
+      sourcePath,
+      expectedSourceSha256: sha256(Buffer.from(source, "utf8")),
+    }),
+    (error) => error instanceof ProjectFileRepositoryError && error.code === "SOURCE_TOO_LARGE",
+  );
+  assert.deepEqual(
+    (await readdir(value.projects)).filter((entry) => entry !== ".pageroot-registry.json"),
+    [],
+  );
+});
+
+test("workspace validates Working Copy state before following its declared Draft path", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "state-before-draft.html");
+  const controlRoot = path.join(imported.target.projectRootPath, ".pageroot");
+  const statePath = path.join(controlRoot, "working-copies", "work_ver_0001.json");
+  const state = await json(statePath);
+  const untrustedDraftPath = path.join(controlRoot, "drafts", "untrusted.json");
+  await writeFile(untrustedDraftPath, "not JSON", "utf8");
+  await writeFile(statePath, JSON.stringify({
+    ...state,
+    draftRelativePath: "drafts/untrusted.json",
+  }), "utf8");
+
+  await assert.rejects(
+    value.repository.workspace({ sourcePath: imported.target.exactSourcePath }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "WORKING_COPY_STATE_INVALID",
+  );
+});
+
+test("import reserves UTF-8 component space and skips every occupied project-root placeholder", async (t) => {
+  const utf8 = await fixture(t);
+  const longName = `${"中".repeat(80)}.html`;
+  const imported = await importSource(utf8, longName);
+  assert.ok(Buffer.byteLength(path.basename(imported.target.exactSourcePath), "utf8") <= 255);
+  assert.ok(Buffer.byteLength(path.basename(imported.target.projectRootPath), "utf8") <= 255);
+  assert.match(path.basename(imported.target.exactSourcePath), /-V1\.html$/u);
+
+  for (const kind of ["file", "directory", "symlink"]) {
+    const value = await fixture(t);
+    const blocker = path.join(value.projects, "occupied");
+    await mkdir(value.projects, { recursive: true });
+    if (kind === "file") {
+      await writeFile(blocker, "placeholder", "utf8");
+    } else if (kind === "directory") {
+      await mkdir(blocker);
+    } else {
+      const outside = path.join(value.root, "occupied-target");
+      await writeFile(outside, "placeholder", "utf8");
+      await symlink(outside, blocker, "file");
+    }
+    const occupied = await importSource(value, "occupied.html");
+    assert.notEqual(path.basename(occupied.target.projectRootPath), "occupied", kind);
+    const information = await lstat(blocker);
+    assert.equal(
+      kind === "file" ? information.isFile() : (kind === "directory"
+        ? information.isDirectory()
+        : information.isSymbolicLink()),
+      true,
+      kind,
+    );
+  }
+});
+
 test("only a Registry pending-import intent can recover a published import", async (t) => {
   for (const failpoint of [
     "import-directories-created",
@@ -1787,6 +1939,21 @@ test("only a Registry pending-import intent can recover a published import", asy
     sourcePath: path.join(committed.projects, committedRoots[0].name, "committed-V1.html"),
   });
   assert.equal(reopened.targetKind, "working-copy");
+  const retriedImport = await new ProjectFileRepository({
+    projectsRoot: committed.projects,
+  }).importExternal({
+    sourcePath: committedSourcePath,
+    expectedSourceSha256: sha256(Buffer.from(committedSource, "utf8")),
+  });
+  assert.equal(retriedImport.imported, false);
+  assert.equal(retriedImport.target.projectId, reopened.projectId);
+  assert.equal(retriedImport.target.versionId, "ver_0001");
+  assert.equal(retriedImport.target.workingCopyId, "work_ver_0001");
+  const committedRegistry = await json(path.join(
+    committed.projects,
+    ".pageroot-registry.json",
+  ));
+  assert.equal(Object.keys(committedRegistry.projects).length, 1);
 
   const recovered = await fixture(t);
   const imported = await importSource(recovered, "recovery.html");
