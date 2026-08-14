@@ -97,6 +97,11 @@ import {
   registeredCommandIdentity,
   registeredProjectRecord,
 } from "./project-context-service.mjs";
+import {
+  ProjectFileRepository,
+  ProjectFileRepositoryError,
+} from "./project-file-repository.mjs";
+import { createEmptySourceHistory } from "../shared/source-history.mjs";
 
 const HOST = "127.0.0.1";
 const DEFAULT_PORT = 4317;
@@ -112,6 +117,18 @@ const WORKSPACE_ROOT = path.resolve(
 );
 const PROJECTS_ROOT = path.join(WORKSPACE_ROOT, "projects");
 const REGISTRY_PATH = path.join(WORKSPACE_ROOT, "project-registry.json");
+const DEFAULT_PROJECT_FILE_ROOT = path.join(
+  os.homedir(),
+  "Documents",
+  "PageRoot",
+  "项目",
+);
+const PROJECT_FILE_ROOT = path.resolve(
+  process.env.HTML_AI_PROJECT_FILES_ROOT || DEFAULT_PROJECT_FILE_ROOT,
+);
+const projectFileRepository = new ProjectFileRepository({
+  projectsRoot: PROJECT_FILE_ROOT,
+});
 const FINALIZER_PATH = fileURLToPath(
   new URL("./finalize-attempt.mjs", import.meta.url),
 );
@@ -917,6 +934,764 @@ async function readSourceFile(sourcePath) {
     information,
     lastModifiedAt: information.mtime.toISOString(),
   };
+}
+
+function projectFileHttpError(cause) {
+  if (!(cause instanceof ProjectFileRepositoryError)) return cause;
+  const code = String(cause.code || "PROJECT_FILE_ERROR");
+  const status = new Set([
+    "SOURCE_NOT_FOUND",
+    "PROJECT_ROOT_NOT_FOUND",
+    "PROJECT_CONTROL_NOT_FOUND",
+    "PROJECT_FILE_NOT_FOUND",
+    "PROJECTS_ROOT_NOT_FOUND",
+    "CANDIDATE_NOT_FOUND",
+    "WORKING_COPY_NOT_FOUND",
+    "REGISTERED_PROJECT_UNAVAILABLE",
+    "WORKING_COPY_UNAVAILABLE",
+  ]).has(code)
+    ? 404
+    : new Set([
+      "SOURCE_HASH_CONFLICT",
+      "PROJECT_IDENTITY_CHANGED",
+      "REGISTERED_PROJECT_PATH_MISMATCH",
+      "REGISTERED_PROJECT_IDENTITY_CHANGED",
+      "MANAGED_PATH_AMBIGUOUS",
+      "WORKING_COPY_CONFLICT",
+      "AMBIGUOUS_SOURCE_FILE_IDENTITY",
+      "ACTIVE_REQUEST_EXISTS",
+      "STALE_CANDIDATE",
+      "CANDIDATE_SOURCE_CHANGED",
+      "CANDIDATE_NOT_PENDING_REVIEW",
+      "CANDIDATE_AUTHORITY_MISMATCH",
+      "CANDIDATE_HASH_MISMATCH",
+      "REQUEST_OUTPUT_CHANGED",
+      "FROZEN_INPUT_HASH_MISMATCH",
+      "REQUEST_COLLISION",
+      "FILE_COLLISION",
+      "PROMOTION_PATH_REPLACED",
+      "PROMOTION_PREPARED_PATH_CONFLICT",
+      "PROMOTION_PREPARED_FILE_CHANGED",
+      "PROMOTION_TRANSACTION_MISMATCH",
+      "PROMOTION_TRANSACTION_INVALID",
+      "PROMOTION_WORKING_COPY_MISSING",
+      "PROMOTION_VERSION_MISSING",
+      "IMPORT_REGISTRY_CONFLICT",
+      "IMPORT_IDENTITY_MISMATCH",
+      "IMPORT_RECOVERY_INVALID",
+      "IMPORT_INTENT_NOT_FOUND",
+      "REGISTERED_PROJECT_RACE",
+    ]).has(code)
+      ? 409
+      : new Set([
+        "UNSAFE_FILE",
+        "UNSAFE_DIRECTORY",
+        "UNSUPPORTED_HTML_EXTENSION",
+        "UNSUPPORTED_HTML_ENCODING",
+        "INCOMPLETE_HTML",
+        "PATH_ESCAPES_PROJECT",
+        "INVALID_RELATIVE_PATH",
+        "INVALID_ID",
+        "INVALID_FILE_STEM",
+        "INVALID_CANDIDATE_ID",
+        "CANDIDATE_UNUSABLE",
+        "CANDIDATE_VALIDATION_INVALID",
+        "INVALID_REQUEST_ID",
+        "INVALID_ATTEMPT_ID",
+        "INVALID_REGISTRY",
+        "UNSUPPORTED_REGISTRY_SCHEMA",
+        "UNREGISTERED_PROJECT_ROOT",
+      ]).has(code)
+        ? 422
+        : 500;
+  return new HttpError(status, code, cause.message, cause.details);
+}
+
+async function projectFileWorkspaceForSource(sourcePath) {
+  try {
+    return await projectFileRepository.workspace({ sourcePath });
+  } catch (cause) {
+    throw projectFileHttpError(cause);
+  }
+}
+
+function projectFileTargetFromWorkspace(workspace) {
+  if (!workspace?.target || workspace.target.targetKind !== "working-copy") {
+    throw new HttpError(
+      409,
+      "WORKING_COPY_REQUIRED",
+      "This operation requires an editable Working Copy, not an immutable Version snapshot.",
+    );
+  }
+  return workspace.target;
+}
+
+function projectFileTargetFromBody(body = {}) {
+  if (
+    !body
+    || typeof body !== "object"
+    || !body.projectRootPath
+    || !body.projectId
+    || !body.documentId
+    || !body.workingCopyId
+  ) return null;
+  return {
+    projectId: String(body.projectId),
+    documentId: String(body.documentId),
+    projectRootPath: String(body.projectRootPath),
+    targetKind: String(body.targetKind || "working-copy"),
+    workingCopyId: String(body.workingCopyId),
+    versionId: body.versionId ? String(body.versionId) : null,
+    exactSourcePath: String(body.exactSourcePath || body.sourcePath || ""),
+    sourceSha256: String(
+      body.sourceSha256
+      || body.expectedSourceSha256
+      || "",
+    ),
+    sessionEpoch: Number(body.sessionEpoch || body.epoch || 0),
+  };
+}
+
+function projectFileVersionRows(workspace) {
+  return workspace.manifest.versions.map((version) => ({
+    schemaVersion: "4.0.0",
+    ...version,
+    sourceType: version.sourceCandidateId ? "internal-ai" : "initial",
+    versionLabel: `V${version.ordinal}`,
+    generatedAt: version.createdAt,
+    requestId: version.sourceRequestId,
+    attemptId: null,
+    committed: true,
+  }));
+}
+
+function projectFileDraftState(workspace) {
+  const state = workspace.draft || workspace.workingCopyState || {};
+  return {
+    draftRevision: Number(state.draftRevision || 0),
+    comments: Array.isArray(state.comments) ? state.comments : [],
+    changeEvents: Array.isArray(state.changeEvents) ? state.changeEvents : [],
+    deletedCommentIds: Array.isArray(state.deletedCommentIds)
+      ? state.deletedCommentIds
+      : [],
+    appliedOperationIds: Array.isArray(state.appliedOperationIds)
+      ? state.appliedOperationIds
+      : [],
+  };
+}
+
+function projectFileActiveRun(workspace, target) {
+  const request = workspace.activeRequest;
+  if (!request || typeof request !== "object") return null;
+  const candidate = workspace.activeCandidate;
+  const candidateReady = request.status === "candidate-ready" && candidate;
+  const sourcePath = target.exactSourcePath;
+  const requestPath = path.join(
+    target.projectRootPath,
+    ".pageroot",
+    "requests",
+    request.requestId,
+  );
+  const attemptPath = path.join(requestPath, "attempts", request.attemptId);
+  const outputPath = path.join(
+    target.projectRootPath,
+    ".pageroot",
+    ...String(request.outputRelativePath || "").split("/"),
+  );
+  const completion = candidateReady
+    ? {
+      completedAt: candidate.createdAt,
+      projectId: request.projectId,
+      documentId: request.documentId,
+      requestId: request.requestId,
+      attemptId: request.attemptId,
+      versionId: candidate.proposedVersionId,
+      contentSha256: candidate.outputSha256,
+    }
+    : null;
+  const readyPayload = candidateReady
+    ? {
+      status: "ready-to-open",
+      readyToOpen: true,
+      projectId: request.projectId,
+      documentId: request.documentId,
+      requestId: request.requestId,
+      attemptId: request.attemptId,
+      versionId: candidate.proposedVersionId,
+      candidateVersionId: candidate.proposedVersionId,
+      candidateDisplayVersionLabel: `版本 ${candidate.proposedVersionOrdinal}`,
+      contentSha256: candidate.outputSha256,
+      sourceSha256: request.expectedSourceSha256,
+      version: {
+        versionId: candidate.proposedVersionId,
+        generatedAt: candidate.createdAt,
+        contentSha256: candidate.outputSha256,
+        projectId: request.projectId,
+        documentId: request.documentId,
+      },
+      outcome: completion,
+      completion,
+    }
+    : null;
+  return {
+    projectId: request.projectId,
+    documentId: request.documentId,
+    requestId: request.requestId,
+    attemptId: request.attemptId,
+    status: candidateReady ? "ready-to-open" : "processing",
+    sourcePath,
+    requestPath,
+    attemptPath,
+    promptPath: path.join(requestPath, "PROMPT.md"),
+    outputPath,
+    completionPath: path.join(attemptPath, "completion.json"),
+    handoffMessage: String(
+      request.request?.handoffMessage
+      || `请执行 ${path.join(requestPath, "PROMPT.md")} 中的单轮任务，完成后运行其中的最终化（finalizer）命令。`,
+    ),
+    baseSnapshotSha256: request.expectedSourceSha256,
+    previousVersionId: request.previousVersionId,
+    basedOnVersionId: request.basedOnVersionId,
+    freezeCutoffRevision: Number(request.request?.freezeCutoffRevision || 0),
+    candidateVersionId: request.proposedVersionId,
+    candidateVersionOrdinal: request.proposedVersionOrdinal,
+    candidateVersionLabel: `版本 ${request.proposedVersionOrdinal}`,
+    submittedAt: request.createdAt,
+    summary: String(request.request?.summary || ""),
+    commentCount: Array.isArray(request.request?.comments)
+      ? request.request.comments.length
+      : 0,
+    changeEventCount: Array.isArray(request.request?.changeEvents)
+      ? request.request.changeEvents.length
+      : 0,
+    ...(candidateReady ? {
+      completionObserved: true,
+      candidateOutputSha256: candidate.outputSha256,
+      candidateAssessment: candidate.assessment,
+      readyPayload,
+    } : {}),
+  };
+}
+
+function projectFileBaseWorkspaceState(workspace) {
+  const target = workspace.target;
+  const currentVersion = workspace.manifest.versions.find(
+    (version) => version.versionId === target.versionId,
+  ) || null;
+  const currentExactVersionId = (
+    target.targetKind === "working-copy"
+    && currentVersion
+    && workspace.sourceSha256 === currentVersion.contentSha256
+  ) ? currentVersion.versionId : null;
+  const activeDraft = projectFileDraftState(workspace);
+  const activeRun = projectFileActiveRun(workspace, target);
+  const runtime = {
+    lifecycleState: activeRun?.status || "ready",
+    activeRun,
+    conflict: null,
+    editRevision: Number(workspace.workingCopyState?.lastPersistedRevision || 0),
+    lastPersistedRevision: Number(workspace.workingCopyState?.lastPersistedRevision || 0),
+    draft: activeDraft,
+  };
+  return {
+    ok: true,
+    registered: true,
+    projectFileSchemaVersion: "4.0.0",
+    workspace: PROJECT_FILE_ROOT,
+    projectRoot: target.projectRootPath,
+    paths: {
+      currentHtml: target.exactSourcePath,
+      projectRecords: target.projectRootPath,
+    },
+    projectId: workspace.project.projectId,
+    documentId: workspace.project.documentId,
+    sourcePath: target.exactSourcePath,
+    openTarget: target,
+    currentHtmlSha256: workspace.sourceSha256,
+    sourceSha256: workspace.sourceSha256,
+    lastModifiedAt: workspace.lastModifiedAt,
+    latestVersionId: workspace.manifest.latestOfficialVersionId,
+    currentBasedOnVersionId: target.versionId || null,
+    currentExactVersionId,
+    restoredFromVersionId: null,
+    project: {
+      schemaVersion: "4.0.0",
+      projectId: workspace.project.projectId,
+      documentId: workspace.project.documentId,
+      displayName: path.basename(target.projectRootPath),
+      createdAt: workspace.project.createdAt,
+      sourcePath: target.exactSourcePath,
+      latestVersionId: workspace.manifest.latestOfficialVersionId,
+      currentBasedOnVersionId: target.versionId || null,
+      currentExactVersionId,
+      currentHtmlSha256: workspace.sourceSha256,
+    },
+    runtimeState: runtime,
+    activeRun,
+    recentRunOutcome: null,
+    activeDraft,
+    workingCopyRecovered: workspace.workingCopyRecovered === true,
+    recoveryIdentity: null,
+    sourceHistory: createEmptySourceHistory({
+      projectId: workspace.project.projectId,
+      documentId: workspace.project.documentId,
+      sourceSha256: workspace.sourceSha256,
+    }),
+    versions: projectFileVersionRows(workspace),
+    current: {
+      path: target.exactSourcePath,
+      entryPath: target.exactSourcePath,
+      sha256: workspace.sourceSha256,
+    },
+    content: workspace.content,
+  };
+}
+
+async function projectFileWorkspaceState(sourcePath, options = {}) {
+  const workspace = await projectFileWorkspaceForSource(sourcePath, options);
+  return workspace ? projectFileBaseWorkspaceState(workspace) : null;
+}
+
+function projectFileBodyIdentityMatches(workspace, body) {
+  if (
+    body.projectId
+    && String(body.projectId) !== workspace.project.projectId
+  ) return false;
+  if (
+    body.documentId
+    && String(body.documentId) !== workspace.project.documentId
+  ) return false;
+  return true;
+}
+
+async function ensureProjectFile(body) {
+  const expectedSourceSha256 = requireSha256(
+    body.expectedSourceSha256,
+    "expectedSourceSha256",
+  );
+  let imported;
+  try {
+    imported = await projectFileRepository.importExternal({
+      sourcePath: normalizeSourcePath(body.sourcePath),
+      expectedSourceSha256,
+    });
+  } catch (cause) {
+    throw projectFileHttpError(cause);
+  }
+  const workspace = await projectFileWorkspaceForSource(imported.target.exactSourcePath);
+  return {
+    ...projectFileBaseWorkspaceState(workspace),
+    imported: imported.imported,
+  };
+}
+
+async function saveProjectFileAutosave(body) {
+  const bodyTarget = projectFileTargetFromBody(body);
+  if (bodyTarget && bodyTarget.targetKind !== "working-copy") {
+    throw new HttpError(
+      409,
+      "WORKING_COPY_REQUIRED",
+      "This operation requires an editable Working Copy.",
+    );
+  }
+  const workspace = bodyTarget
+    ? null
+    : await projectFileWorkspaceForSource(body.sourcePath);
+  if (!bodyTarget && !workspace) return null;
+  if (workspace && !projectFileBodyIdentityMatches(workspace, body)) {
+    throw new HttpError(
+      409,
+      "PROJECT_CONTEXT_IDENTITY_MISMATCH",
+      "The autosave identity does not match the selected project file.",
+    );
+  }
+  const target = bodyTarget || projectFileTargetFromWorkspace(workspace);
+  const editRevision = Number(body.editRevision);
+  if (!Number.isSafeInteger(editRevision) || editRevision < 1) {
+    throw new HttpError(400, "INVALID_EDIT_REVISION", "editRevision must be a positive integer.");
+  }
+  let saved;
+  try {
+    saved = await projectFileRepository.saveWorkingCopy({
+      target,
+      html: body.html ?? body.baseHtml,
+      expectedSourceSha256: requireSha256(
+        body.expectedSourceSha256 ?? body.sourceSha256,
+        "expectedSourceSha256",
+      ),
+      editRevision,
+    });
+  } catch (cause) {
+    throw projectFileHttpError(cause);
+  }
+  const next = await projectFileWorkspaceForSource(saved.target.exactSourcePath);
+  const state = projectFileBaseWorkspaceState(next);
+  return {
+    ok: true,
+    status: "saved",
+    projectId: next.project.projectId,
+    documentId: next.project.documentId,
+    sourcePath: saved.target.exactSourcePath,
+    openTarget: saved.target,
+    content: next.content,
+    sha256: saved.currentSha256,
+    sourceSha256: saved.currentSha256,
+    currentHtmlSha256: saved.currentSha256,
+    lastModifiedAt: next.lastModifiedAt,
+    persistedRevision: saved.lastPersistedRevision,
+    lastPersistedRevision: saved.lastPersistedRevision,
+    versionCreated: false,
+    currentExactVersionId: state.currentExactVersionId,
+    sourceHistory: state.sourceHistory,
+    activeDraft: state.activeDraft,
+    recoveryIdentity: null,
+  };
+}
+
+async function sourceProjectFile(sourcePath) {
+  const workspace = await projectFileWorkspaceForSource(sourcePath);
+  if (!workspace) return null;
+  const state = projectFileBaseWorkspaceState(workspace);
+  return {
+    ok: true,
+    registered: true,
+    projectFileSchemaVersion: "4.0.0",
+    projectId: workspace.project.projectId,
+    documentId: workspace.project.documentId,
+    sourcePath: workspace.target.exactSourcePath,
+    openTarget: workspace.target,
+    content: workspace.content,
+    sha256: workspace.sourceSha256,
+    sourceSha256: workspace.sourceSha256,
+    currentBasedOnVersionId: state.currentBasedOnVersionId,
+    currentExactVersionId: state.currentExactVersionId,
+    restoredFromVersionId: null,
+    lastModifiedAt: workspace.lastModifiedAt,
+  };
+}
+
+async function projectFileTargetForBody(body = {}) {
+  const direct = projectFileTargetFromBody(body);
+  if (direct) return direct;
+  const workspace = await projectFileWorkspaceForSource(body.sourcePath);
+  return workspace?.target || null;
+}
+
+function projectFileFinalizerCommand(target, request) {
+  const nodeRuntime = process.versions.electron
+    ? `ELECTRON_RUN_AS_NODE=1 ${shellQuoted(process.execPath)}`
+    : shellQuoted(process.execPath);
+  return [
+    nodeRuntime,
+    shellQuoted(FINALIZER_PATH),
+    "--project-root",
+    shellQuoted(target.projectRootPath),
+    "--request-id",
+    shellQuoted(request.requestId),
+    "--attempt-id",
+    shellQuoted(request.attemptId),
+  ].join(" ");
+}
+
+function projectFilePromptForRequest(target, request, body) {
+  const requestRoot = path.join(
+    target.projectRootPath,
+    ".pageroot",
+    "requests",
+    request.requestId,
+  );
+  const inputPath = path.join(requestRoot, "input", "base", "index.html");
+  const inputManifestPath = path.join(requestRoot, "input-manifest.json");
+  const changeRequestPath = path.join(requestRoot, "change-request.json");
+  const projectRulesPath = path.join(requestRoot, "input", "PROJECT.md");
+  const annotationsPath = path.join(requestRoot, "input", "annotations", "records.json");
+  const outputPath = path.join(
+    target.projectRootPath,
+    ".pageroot",
+    ...String(request.outputRelativePath || "").split("/"),
+  );
+  const summary = String(body.summary || "根据本轮评论和要求生成新的完整 HTML。").trim();
+  return `# PageRoot AI Candidate\n\n## 任务\n\n${summary}\n\n## 冻结输入\n\n严格按 \`${inputManifestPath}\` 的 \`readOrder\` 读取。该清单包含：\n\n- 本轮要求：\`${changeRequestPath}\`\n- 项目长期规则：\`${projectRulesPath}\`\n- 冻结 HTML：\`${inputPath}\`\n- 冻结评论、目标与编辑记录：\`${annotationsPath}\`\n\n这些文件及可见 Working Copy、任何 Version、PROJECT.md 都是只读的。只将一个完整 HTML 写入：\`${outputPath}\`。\n\nPageRoot 会校验输出的完整文档和页面连续性；校验通过后它仍只是待审阅 Candidate。只有用户明确采纳后才会成为正式 Version。\n\n## 完成\n\n输出写完后，执行唯一最终化命令：\n\n\`\`\`sh\n${projectFileFinalizerCommand(target, request)}\n\`\`\`\n`;
+}
+
+function projectFileReadyPayload({ request, candidate, target }) {
+  const completedAt = String(candidate.createdAt || request.createdAt || nowIso());
+  const version = {
+    versionId: candidate.proposedVersionId,
+    generatedAt: completedAt,
+    contentSha256: candidate.outputSha256,
+    projectId: candidate.projectId,
+    documentId: candidate.documentId,
+  };
+  const completion = {
+    completedAt,
+    projectId: candidate.projectId,
+    documentId: candidate.documentId,
+    requestId: candidate.requestId,
+    attemptId: candidate.attemptId,
+    versionId: candidate.proposedVersionId,
+    contentSha256: candidate.outputSha256,
+  };
+  return {
+    ok: true,
+    status: "ready-to-open",
+    readyToOpen: true,
+    projectId: candidate.projectId,
+    documentId: candidate.documentId,
+    sourcePath: target.exactSourcePath,
+    openTarget: target,
+    requestId: candidate.requestId,
+    attemptId: candidate.attemptId,
+    versionId: candidate.proposedVersionId,
+    candidateVersionId: candidate.proposedVersionId,
+    candidateVersionLabel: `V${candidate.proposedVersionOrdinal}`,
+    candidateDisplayVersionLabel: `版本 ${candidate.proposedVersionOrdinal}`,
+    contentSha256: candidate.outputSha256,
+    sourceSha256: candidate.expectedSourceSha256,
+    currentHtmlSha256: candidate.expectedSourceSha256,
+    version,
+    completion,
+    outcome: completion,
+    candidate,
+    candidateAssessment: candidate.assessment,
+    activeRun: {
+      projectId: candidate.projectId,
+      documentId: candidate.documentId,
+      requestId: candidate.requestId,
+      attemptId: candidate.attemptId,
+      status: "ready-to-open",
+      sourcePath: target.exactSourcePath,
+      requestPath: path.join(target.projectRootPath, ".pageroot", "requests", candidate.requestId),
+      attemptPath: path.join(target.projectRootPath, ".pageroot", "requests", candidate.requestId, "attempts", candidate.attemptId),
+      handoffMessage: String(request.request?.handoffMessage || ""),
+      baseSnapshotSha256: candidate.expectedSourceSha256,
+      previousVersionId: candidate.previousVersionId,
+      basedOnVersionId: candidate.basedOnVersionId,
+      freezeCutoffRevision: Number(request.request?.freezeCutoffRevision || 0),
+      candidateVersionId: candidate.proposedVersionId,
+      candidateVersionOrdinal: candidate.proposedVersionOrdinal,
+      candidateVersionLabel: `版本 ${candidate.proposedVersionOrdinal}`,
+      submittedAt: request.createdAt,
+      summary: String(request.request?.summary || ""),
+      commentCount: Array.isArray(request.request?.comments)
+        ? request.request.comments.length
+        : 0,
+      changeEventCount: Array.isArray(request.request?.changeEvents)
+        ? request.request.changeEvents.length
+        : 0,
+      completionObserved: true,
+      candidateOutputSha256: candidate.outputSha256,
+      candidateAssessment: candidate.assessment,
+    },
+  };
+}
+
+async function saveProjectFileDraft(body) {
+  const target = await projectFileTargetForBody(body);
+  if (!target) return null;
+  if (target.targetKind !== "working-copy") {
+    throw new HttpError(409, "WORKING_COPY_REQUIRED", "Drafts belong to an editable Working Copy.");
+  }
+  try {
+    const saved = await projectFileRepository.saveDraft({
+      target,
+      operationId: body.operationId,
+      expectedDraftRevision: body.expectedDraftRevision,
+      basedOnVersionId: body.basedOnVersionId,
+      comments: body.comments,
+      changeEvents: body.changeEvents,
+      deletedCommentIds: body.deletedCommentIds,
+    });
+    return {
+      ok: true,
+      projectId: target.projectId,
+      documentId: target.documentId,
+      ...saved,
+    };
+  } catch (cause) {
+    throw projectFileHttpError(cause);
+  }
+}
+
+async function createProjectFileRequest(body) {
+  const target = await projectFileTargetForBody(body);
+  if (!target) return null;
+  if (target.targetKind !== "working-copy") {
+    throw new HttpError(409, "WORKING_COPY_REQUIRED", "AI Requests require an editable Working Copy.");
+  }
+  const requestId = `req_${randomUUID().replaceAll("-", "")}`;
+  const attemptId = "attempt_001";
+  const request = {
+    freezeCutoffRevision: Number(body.freezeCutoffRevision || 0),
+    summary: String(body.summary || ""),
+    comments: Array.isArray(body.comments) ? body.comments : [],
+    changeEvents: Array.isArray(body.changeEvents) ? body.changeEvents : [],
+    instructions: Array.isArray(body.instructions) ? body.instructions : [],
+    targets: Array.isArray(body.targets) ? body.targets : [],
+    preserveOutsideTargets: true,
+  };
+  const promptDescriptor = {
+    requestId,
+    attemptId,
+    outputRelativePath: `requests/${requestId}/attempts/${attemptId}/output/candidate.html`,
+  };
+  const handoffMessage = `请执行 ${path.join(
+    target.projectRootPath,
+    ".pageroot",
+    "requests",
+    requestId,
+    "PROMPT.md",
+  )} 中的单轮任务，完成后运行其中的最终化（finalizer）命令。`;
+  const prompt = projectFilePromptForRequest(target, promptDescriptor, body);
+  try {
+    const durable = await projectFileRepository.prepareRequest({
+      target,
+      requestId,
+      attemptId,
+      expectedSourceSha256: requireSha256(
+        body.expectedSourceSha256 ?? body.sourceSha256,
+        "expectedSourceSha256",
+      ),
+      request: { ...request, handoffMessage },
+      prompt,
+    });
+    const run = projectFileActiveRun({
+      activeRequest: durable,
+      activeCandidate: null,
+    }, target);
+    return {
+      ok: true,
+      ...durable,
+      activeRun: run,
+      candidateDisplayVersionLabel: `版本 ${durable.proposedVersionOrdinal}`,
+    };
+  } catch (cause) {
+    throw projectFileHttpError(cause);
+  }
+}
+
+async function projectFileRequestStatus(sourcePath, requestId, attemptId) {
+  const workspace = await projectFileWorkspaceForSource(sourcePath);
+  if (!workspace) return null;
+  try {
+    const status = await projectFileRepository.requestStatus({
+      target: projectFileTargetFromWorkspace(workspace),
+      requestId,
+      attemptId,
+    });
+    if (status.status === "candidate-ready") {
+      const refreshed = await projectFileWorkspaceForSource(workspace.target.exactSourcePath);
+      return projectFileReadyPayload({
+        request: status.request,
+        candidate: status.candidate,
+        target: refreshed.target,
+      });
+    }
+    return {
+      ok: true,
+      status: status.status,
+      projectId: workspace.project.projectId,
+      documentId: workspace.project.documentId,
+      sourcePath: workspace.target.exactSourcePath,
+      openTarget: workspace.target,
+      requestId,
+      attemptId,
+      activeRun: projectFileActiveRun(workspace, workspace.target),
+      ...(status.request ? { request: status.request } : {}),
+      ...(status.request?.error ? { error: status.request.error } : {}),
+    };
+  } catch (cause) {
+    throw projectFileHttpError(cause);
+  }
+}
+
+async function activateProjectFileCandidate(body) {
+  const target = await projectFileTargetForBody(body);
+  if (!target) return null;
+  try {
+    const promoted = await projectFileRepository.promoteCandidate({
+      target,
+      // `versionId` is a proposed Version label in the renderer protocol, not
+      // the opaque Candidate id owned by the v4 repository.  Do not let that
+      // label select a different Candidate (or turn a valid adoption into an
+      // invalid-id error).
+      candidateId: body.candidateId || null,
+    });
+    const workspace = await projectFileWorkspaceForSource(promoted.target.exactSourcePath);
+    const source = workspace.content;
+    return {
+      ok: true,
+      status: "version-activated",
+      projectId: workspace.project.projectId,
+      documentId: workspace.project.documentId,
+      versionId: promoted.version.versionId,
+      sourcePath: promoted.target.exactSourcePath,
+      currentPath: promoted.target.exactSourcePath,
+      workingCopyPath: promoted.target.exactSourcePath,
+      openTarget: promoted.target,
+      contentSha256: promoted.version.contentSha256,
+      sourceSha256: promoted.version.contentSha256,
+      currentHtmlSha256: promoted.version.contentSha256,
+      lastModifiedAt: workspace.lastModifiedAt,
+      version: {
+        ...promoted.version,
+        generatedAt: promoted.version.createdAt,
+        projectId: workspace.project.projectId,
+        documentId: workspace.project.documentId,
+      },
+      content: source,
+    };
+  } catch (cause) {
+    throw projectFileHttpError(cause);
+  }
+}
+
+async function cancelProjectFileRequest(body) {
+  const target = await projectFileTargetForBody(body);
+  if (!target) return null;
+  try {
+    const cancelled = await projectFileRepository.cancelRequest({
+      target,
+      requestId: body.requestId,
+      attemptId: body.attemptId || "attempt_001",
+    });
+    return {
+      ok: true,
+      projectId: target.projectId,
+      documentId: target.documentId,
+      ...cancelled,
+    };
+  } catch (cause) {
+    throw projectFileHttpError(cause);
+  }
+}
+
+async function projectFileVersionFile(sourcePath, versionId) {
+  const workspace = await projectFileWorkspaceForSource(sourcePath);
+  if (!workspace) return null;
+  try {
+    const file = await projectFileRepository.readVersionFile({
+      target: projectFileTargetFromWorkspace(workspace),
+      versionId,
+    });
+    return {
+      ok: true,
+      projectId: workspace.project.projectId,
+      documentId: workspace.project.documentId,
+      versionId: file.version.versionId,
+      content: file.content,
+      sha256: file.sha256,
+      contentSha256: file.sha256,
+      path: file.path,
+      relativePath: file.kind === "candidate"
+        ? file.candidate.outputRelativePath
+        : file.version.snapshotRelativePath,
+      readOnly: true,
+      ...(file.kind === "candidate" ? { candidate: file.candidate } : {}),
+    };
+  } catch (cause) {
+    throw projectFileHttpError(cause);
+  }
 }
 
 function workingCopyIdentity(context, transaction) {
@@ -2406,21 +3181,37 @@ async function loadMutationContext(body) {
             identity.projectId,
             selected.project,
           );
-          const transaction = await readAuxiliaryJson(
-            path.join(
-              projectRoot,
-              "transactions",
-              readyTransactionId,
-              "transaction.json",
-            ),
+          const transactionPath = path.join(
+            projectRoot,
+            "transactions",
+            readyTransactionId,
             "transaction.json",
           );
-          readyTransactionOwnsSource = Boolean(
-            transaction.state === "ready-to-open"
-            && transaction.projectId === identity.projectId
-            && transaction.documentId === identity.documentId
-            && transaction.expectedSourceSha256 === source.sha256,
-          );
+          if (await exists(transactionPath)) {
+            const transaction = await readAuxiliaryJson(
+              transactionPath,
+              "transaction.json",
+            );
+            readyTransactionOwnsSource = Boolean(
+              transaction.state === "ready-to-open"
+              && transaction.projectId === identity.projectId
+              && transaction.documentId === identity.documentId
+              && transaction.expectedSourceSha256 === source.sha256,
+            );
+          } else {
+            // A PR-1 pending Candidate deliberately has no transaction or
+            // Version yet. Its sealed request is still sufficient durable
+            // authority to surface the external-source conflict only when the
+            // user tries to adopt it.
+            readyTransactionOwnsSource = await exists(path.join(
+              projectRoot,
+              "requests",
+              runtime.activeRun.requestId,
+              "attempts",
+              runtime.activeRun.attemptId,
+              "candidate.json",
+            ));
+          }
         }
         const durableExternalObservation =
           activeConflictOwnsSource || readyTransactionOwnsSource;
@@ -3633,55 +4424,67 @@ function recoveryIdentityFor(context, project, runtime, sourceSha256) {
   };
 }
 
-async function workspaceState(sourcePath) {
+async function unmanagedWorkspaceState(sourcePath) {
+  const normalizedSourcePath = normalizeSourcePath(sourcePath);
+  const source = await readSourceFile(normalizedSourcePath);
+  return {
+    ok: true,
+    registered: false,
+    workspace: WORKSPACE_ROOT,
+    projectRoot: null,
+    paths: {
+      currentHtml: normalizedSourcePath,
+      projectRecords: null,
+    },
+    projectId: null,
+    documentId: null,
+    sourcePath: normalizedSourcePath,
+    currentHtmlSha256: source.sha256,
+    sourceSha256: source.sha256,
+    lastModifiedAt: source.lastModifiedAt,
+    latestVersionId: null,
+    currentBasedOnVersionId: null,
+    currentExactVersionId: null,
+    restoredFromVersionId: null,
+    project: {
+      displayName: projectDisplayName(normalizedSourcePath),
+      sourcePath: normalizedSourcePath,
+    },
+    runtimeState: {
+      lifecycleState: "preview",
+      editRevision: 0,
+      lastPersistedRevision: 0,
+      activeRun: null,
+      conflict: null,
+    },
+    activeRun: null,
+    recentRunOutcome: null,
+    activeDraft: null,
+    recoveryIdentity: null,
+    versions: [],
+    current: {
+      path: normalizedSourcePath,
+      entryPath: normalizedSourcePath,
+      sha256: source.sha256,
+    },
+  };
+}
+
+async function workspaceState(sourcePath, { projectStorageVersion = "" } = {}) {
+  const projectFileState = await projectFileWorkspaceState(sourcePath);
+  if (projectFileState) return projectFileState;
+  // A v4 client never opens or migrates an older workspace. Its only
+  // admissible existing state is a valid Project File; every other HTML is
+  // deliberately presented as an external source for a fresh V1 import.
+  if (projectStorageVersion === "4.0.0") {
+    return unmanagedWorkspaceState(sourcePath);
+  }
   let context;
   try {
     context = await loadContextBySource(sourcePath, false);
   } catch (error) {
     if (error?.code !== "PROJECT_NOT_FOUND") throw error;
-    const normalizedSourcePath = normalizeSourcePath(sourcePath);
-    const source = await readSourceFile(normalizedSourcePath);
-    return {
-      ok: true,
-      registered: false,
-      workspace: WORKSPACE_ROOT,
-      projectRoot: null,
-      paths: {
-        currentHtml: normalizedSourcePath,
-        projectRecords: null,
-      },
-      projectId: null,
-      documentId: null,
-      sourcePath: normalizedSourcePath,
-      currentHtmlSha256: source.sha256,
-      sourceSha256: source.sha256,
-      lastModifiedAt: source.lastModifiedAt,
-      latestVersionId: null,
-      currentBasedOnVersionId: null,
-      currentExactVersionId: null,
-      restoredFromVersionId: null,
-      project: {
-        displayName: projectDisplayName(normalizedSourcePath),
-        sourcePath: normalizedSourcePath,
-      },
-      runtimeState: {
-        lifecycleState: "preview",
-        editRevision: 0,
-        lastPersistedRevision: 0,
-        activeRun: null,
-        conflict: null,
-      },
-      activeRun: null,
-      recentRunOutcome: null,
-      activeDraft: null,
-      recoveryIdentity: null,
-      versions: [],
-      current: {
-        path: normalizedSourcePath,
-        entryPath: normalizedSourcePath,
-        sha256: source.sha256,
-      },
-    };
+    return unmanagedWorkspaceState(sourcePath);
   }
   return withProjectMutation(context, async () => {
     await recoverPendingWriteRaw(context);
@@ -3752,6 +4555,11 @@ async function workspaceState(sourcePath) {
 }
 
 async function ensureProject(body) {
+  if (body.projectStorageVersion === "4.0.0") {
+    return ensureProjectFile(body);
+  }
+  const existingProjectFile = await projectFileWorkspaceForSource(body.sourcePath);
+  if (existingProjectFile) return ensureProjectFile(body);
   const expectedSourceSha256 = requireSha256(
     body.expectedSourceSha256,
     "expectedSourceSha256",
@@ -3770,6 +4578,8 @@ async function ensureProject(body) {
 }
 
 async function saveAutosave(body) {
+  const projectFileSave = await saveProjectFileAutosave(body);
+  if (projectFileSave) return projectFileSave;
   const context = await loadMutationContext(body);
   assertBodyContext(context, body);
   const rawHtml = body.html ?? body.baseHtml;
@@ -4487,6 +5297,8 @@ function normalizeFrozenEditEvents(events, frozenAt, revision, basedOnVersionId)
 }
 
 async function saveDraft(body) {
+  const projectFileDraft = await saveProjectFileDraft(body);
+  if (projectFileDraft) return projectFileDraft;
   const context = await loadMutationContext(body);
   assertBodyContext(context, body);
   return withProjectMutation(context, async () => {
@@ -4838,6 +5650,8 @@ async function requestFileRecord(root, relativePath, role, mediaType) {
 }
 
 async function createRequest(body) {
+  const projectFileRequest = await createProjectFileRequest(body);
+  if (projectFileRequest) return projectFileRequest;
   const context = await loadMutationContext(body);
   assertBodyContext(context, body);
   return withProjectMutation(context, async () => {
@@ -5449,6 +6263,7 @@ async function validateCompletionRaw(context, runtime) {
     completionPath,
     "completion.json",
   );
+  const completionBuffer = await readFile(completionPath);
   validateCompletionSchema(completion);
   const constants = {
     schemaVersion: COMPLETION_SCHEMA_VERSION,
@@ -5538,6 +6353,7 @@ async function validateCompletionRaw(context, runtime) {
   return {
     waiting: false,
     completion,
+    completionBuffer,
     completionPath,
     requestRoot,
     attemptRoot,
@@ -5680,6 +6496,211 @@ async function writeCandidateAssessmentRaw(context, runtime, validated) {
   });
   await atomicWriteJson(assessmentPath, assessment);
   return { assessment, assessmentPath };
+}
+
+function pendingCandidatePath(context, activeRun) {
+  return path.join(
+    context.projectRoot,
+    "requests",
+    activeRun.requestId,
+    "attempts",
+    activeRun.attemptId,
+    "candidate.json",
+  );
+}
+
+function pendingCandidateIdentity(context, activeRun, validated) {
+  return {
+    projectId: context.projectId,
+    documentId: context.documentId,
+    requestId: activeRun.requestId,
+    attemptId: activeRun.attemptId,
+    candidateVersionId: activeRun.candidateVersionId,
+    candidateVersionOrdinal: activeRun.candidateVersionOrdinal,
+    candidateVersionLabel: activeRun.candidateVersionLabel,
+    expectedSourceSha256: activeRun.baseSnapshotSha256,
+    outputRelativePath: activeRun.outputRelativePath,
+    completionRelativePath: activeRun.completionRelativePath,
+    outputSha256: validated.completion.outputSha256,
+    completionSha256: sha256(validated.completionBuffer),
+  };
+}
+
+function assertPendingCandidateRecord(record, context, activeRun, validated) {
+  assertAuxiliarySchemaVersion(record, "candidate.json");
+  if (
+    record.status !== "pending-review"
+    || !record.createdAt
+    || Number.isNaN(Date.parse(record.createdAt))
+  ) {
+    throw new HttpError(
+      409,
+      "CANDIDATE_RECORD_INVALID",
+      "The pending Candidate record is invalid.",
+    );
+  }
+  const expected = pendingCandidateIdentity(context, activeRun, validated);
+  for (const [key, value] of Object.entries(expected)) {
+    if (record[key] !== value) {
+      throw new HttpError(
+        409,
+        "CANDIDATE_IDENTITY_MISMATCH",
+        `candidate.json ${key} does not match the finalized Request.`,
+        { key, expected: value, actual: record[key] },
+      );
+    }
+  }
+  return record;
+}
+
+async function writePendingCandidateRaw(context, runtime, validated) {
+  const activeRun = runtime.activeRun;
+  const candidatePath = pendingCandidatePath(context, activeRun);
+  const identity = pendingCandidateIdentity(context, activeRun, validated);
+  const record = {
+    schemaVersion: AUXILIARY_SCHEMA_VERSION,
+    status: "pending-review",
+    ...identity,
+    createdAt: validated.completion.completedAt,
+  };
+  if (await exists(candidatePath)) {
+    const existing = await readAuxiliaryJson(candidatePath, "candidate.json");
+    return {
+      candidate: assertPendingCandidateRecord(existing, context, activeRun, validated),
+      candidatePath,
+      validated,
+    };
+  }
+  await atomicWriteJson(candidatePath, record);
+  await maybeFailpoint("after-candidate-prepared", path.dirname(candidatePath));
+  return { candidate: record, candidatePath, validated };
+}
+
+async function readPendingCandidateRaw(
+  context,
+  runtime,
+  { validated = null } = {},
+) {
+  const activeRun = runtime?.activeRun;
+  if (!activeRun) return null;
+  const candidatePath = pendingCandidatePath(context, activeRun);
+  if (!(await exists(candidatePath))) return null;
+  const proof = validated ?? await validateCompletionRaw(context, runtime);
+  if (proof.waiting) {
+    throw new HttpError(
+      409,
+      "CANDIDATE_COMPLETION_MISSING",
+      "The pending Candidate no longer has finalization evidence.",
+    );
+  }
+  const candidate = assertPendingCandidateRecord(
+    await readAuxiliaryJson(candidatePath, "candidate.json"),
+    context,
+    activeRun,
+    proof,
+  );
+  const validationReviewPath = path.join(
+    proof.attemptRoot,
+    "validation-review.json",
+  );
+  const assessmentPath = path.join(
+    proof.attemptRoot,
+    "candidate-assessment.json",
+  );
+  const validationReview = await exists(validationReviewPath)
+    ? await readAuxiliaryJson(validationReviewPath, "validation-review.json")
+    : null;
+  const candidateAssessment = await exists(assessmentPath)
+    ? await readCandidateAssessment(
+      assessmentPath,
+      candidateAssessmentIdentity(context, activeRun, proof),
+    )
+    : null;
+  return {
+    candidate,
+    candidatePath,
+    validated: proof,
+    validationReview,
+    candidateAssessment,
+  };
+}
+
+async function pendingCandidateReadyPayload(context, runtime, state) {
+  const activeRun = runtime.activeRun;
+  const { candidate, validated } = state;
+  const currentSource = await readSourceFile(context.sourcePath);
+  const version = {
+    schemaVersion: LIFECYCLE_SCHEMA_VERSION,
+    projectId: context.projectId,
+    documentId: context.documentId,
+    versionId: candidate.candidateVersionId,
+    versionOrdinal: candidate.candidateVersionOrdinal,
+    versionLabel: candidate.candidateVersionLabel,
+    sourceType: "internal-ai-candidate",
+    previousVersionId: activeRun.previousVersionId,
+    basedOnVersionId: activeRun.basedOnVersionId,
+    requestId: activeRun.requestId,
+    attemptId: activeRun.attemptId,
+    contentSha256: candidate.outputSha256,
+    generatedAt: candidate.createdAt,
+  };
+  const completion = {
+    completedAt: validated.completion.completedAt,
+    projectId: context.projectId,
+    documentId: context.documentId,
+    requestId: activeRun.requestId,
+    attemptId: activeRun.attemptId,
+    versionId: candidate.candidateVersionId,
+  };
+  const outcome = {
+    schemaVersion: AUXILIARY_SCHEMA_VERSION,
+    status: "candidate-ready",
+    projectId: context.projectId,
+    documentId: context.documentId,
+    requestId: activeRun.requestId,
+    attemptId: activeRun.attemptId,
+    versionId: candidate.candidateVersionId,
+    contentSha256: candidate.outputSha256,
+    completedAt: validated.completion.completedAt,
+    generatedAt: candidate.createdAt,
+  };
+  return {
+    ok: true,
+    status: "ready-to-open",
+    readyToOpen: true,
+    projectId: context.projectId,
+    documentId: context.documentId,
+    sourcePath: context.sourcePath,
+    requestId: activeRun.requestId,
+    attemptId: activeRun.attemptId,
+    versionId: candidate.candidateVersionId,
+    candidateVersionId: candidate.candidateVersionId,
+    candidateVersionLabel: candidate.candidateVersionLabel,
+    candidateDisplayVersionLabel: userVersionLabel(candidate.candidateVersionOrdinal),
+    version,
+    completion,
+    outcome,
+    contentSha256: candidate.outputSha256,
+    sourceSha256: currentSource.sha256,
+    currentHtmlSha256: currentSource.sha256,
+    lastModifiedAt: currentSource.lastModifiedAt,
+    activeRun: {
+      ...activeRun,
+      sourcePath: context.sourcePath,
+      status: "ready-to-open",
+    },
+    currentPath: context.sourcePath,
+    workingCopyPath: context.sourcePath,
+    candidatePath: candidatePathForResponse(context, activeRun),
+    candidateOutputPath: validated.outputPath,
+    supplement: validated.supplement,
+    ...(state.validationReview ? { validationReview: state.validationReview } : {}),
+    ...(state.candidateAssessment ? { candidateAssessment: state.candidateAssessment } : {}),
+  };
+}
+
+function candidatePathForResponse(context, activeRun) {
+  return pendingCandidatePath(context, activeRun);
 }
 
 function transactionDirectory(context, transactionId) {
@@ -6021,8 +7042,17 @@ async function prepareTransactionRaw(
     recoverySourceSha256: source.sha256,
     createdAt,
     preparedAt: createdAt,
+    ...(options.adoptionRequestedAt
+      ? {
+          adoptionRequestedAt: options.adoptionRequestedAt,
+          activationState: "requested",
+        }
+      : {}),
   };
   await writeTransaction(transactionRoot, transaction);
+  if (options.adoptionRequestedAt) {
+    await maybeFailpoint("after-adoption-intent", transactionRoot);
+  }
   runtime.lifecycleState = "committing";
   runtime.transactionId = transactionId;
   runtime.activeRun.status = "committing";
@@ -6046,7 +7076,7 @@ async function markAiConflictRaw(
     transactionId:
       transaction?.transactionId
       ?? runtime.transactionId
-      ?? `txn_${activeRun.requestId}_${activeRun.attemptId}`,
+      ?? null,
     requestId: activeRun.requestId,
     attemptId: activeRun.attemptId,
     candidateVersionId: activeRun.candidateVersionId,
@@ -6304,8 +7334,10 @@ async function finalizeCommittedTransactionRaw(
       "Project metadata does not match the committed transaction.",
     );
   }
-  project.latestVersionId = transaction.candidateVersionId;
-  await writeProject(context, project);
+  // The Version bytes are now committed, but its official position remains
+  // unchanged until the caller completes the explicit adoption transition.
+  // `activateReadyVersion` advances latestVersionId together with switching
+  // the current Working Copy.
   const completedRun =
     (await readRuntime(context)).activeRun
     ?? activeRunFromTransaction(context, transaction);
@@ -6433,13 +7465,188 @@ async function finalizeCommittedTransactionRaw(
   };
 }
 
+async function markTransactionAdoptionRequestedRaw(transactionRoot, transaction) {
+  if (transaction.adoptionRequestedAt) return transaction;
+  transaction.adoptionRequestedAt = nowIso();
+  transaction.activationState = "requested";
+  await writeTransaction(transactionRoot, transaction);
+  await maybeFailpoint("after-adoption-intent", transactionRoot);
+  return transaction;
+}
+
+async function completeTransactionActivationRaw(
+  context,
+  transactionRoot,
+  transaction,
+) {
+  if (
+    transaction.state !== "ready-to-open"
+    || !transaction.adoptionRequestedAt
+    || transaction.projectId !== context.projectId
+    || transaction.documentId !== context.documentId
+  ) {
+    throw new HttpError(
+      409,
+      "READY_TRANSACTION_MISMATCH",
+      "The transaction is not a complete explicit-adoption boundary.",
+    );
+  }
+  const requestedVersionId = transaction.candidateVersionId;
+  const runtime = await readRuntime(context);
+  const activeRun = runtime.activeRun
+    ?? activeRunFromTransaction(context, transaction);
+  const validatedVersion = await validateCommittedVersionRaw(
+    context,
+    requestedVersionId,
+  );
+  if (validatedVersion.contentSha256 !== transaction.candidateContentSha256) {
+    throw new HttpError(
+      409,
+      "READY_VERSION_HASH_MISMATCH",
+      "The ready Version no longer matches its committed transaction.",
+    );
+  }
+  const workingCopy = await ensureWorkingCopyRaw(
+    context,
+    transaction,
+    validatedVersion.entryBuffer,
+  );
+  const project = await readProject(context);
+  // Reaching ready-to-open with adoptionRequestedAt means a complete,
+  // immutable Version already exists.  Do not strand it behind a later change
+  // to the old Working Copy: activation only rebinds project authority to the
+  // newly created Working Copy and never overwrites those old bytes.  The
+  // source precondition remains enforced before Promotion is prepared.
+
+  if (
+    !Number.isSafeInteger(transaction.activationDraftRevision)
+    || transaction.activationDraftRevision < 0
+    || !transaction.activationDraftUpdatedAt
+  ) {
+    transaction.activationDraftRevision =
+      (Number.isSafeInteger(runtime.draft?.draftRevision)
+        ? runtime.draft.draftRevision
+        : 0) + 1;
+    transaction.activationDraftUpdatedAt = nowIso();
+    transaction.activationState = "requested";
+    await writeTransaction(transactionRoot, transaction);
+  }
+  const emptyDraftText = jsonText(draftArtifactRecord({
+    draftRevision: transaction.activationDraftRevision,
+    updatedAt: transaction.activationDraftUpdatedAt,
+  }));
+
+  project.latestVersionId = requestedVersionId;
+  project.currentBasedOnVersionId = requestedVersionId;
+  project.currentExactVersionId = requestedVersionId;
+  project.currentHtmlSha256 = workingCopy.source.sha256;
+  project.lastModifiedAt = workingCopy.source.lastModifiedAt;
+  delete project.restoredFromVersionId;
+  await activateProjectSourceRaw(
+    context,
+    project,
+    workingCopy.absolutePath,
+  );
+  transaction.activationState = "source-activated";
+  transaction.sourceActivatedAt ??= nowIso();
+  await writeTransaction(transactionRoot, transaction);
+  await maybeFailpoint("after-activation-source-committed", transactionRoot);
+
+  await atomicWriteFile(
+    path.join(context.projectRoot, "draft", "annotations.json"),
+    emptyDraftText,
+  );
+  await rm(
+    path.join(context.projectRoot, "draft", "attachments"),
+    { recursive: true, force: true },
+  );
+  await maybeFailpoint("after-activation-draft-written", transactionRoot);
+
+  runtime.lifecycleState = "ready";
+  runtime.activeRun = null;
+  runtime.conflict = null;
+  runtime.transactionId = null;
+  runtime.view = {
+    viewMode: "current",
+    latestVersionId: requestedVersionId,
+    currentBasedOnVersionId: requestedVersionId,
+    currentExactVersionId: requestedVersionId,
+    viewingVersionId: null,
+    renderedContentSha256: workingCopy.source.sha256,
+  };
+  runtime.autosave = {
+    status: "updated",
+    expectedSourceSha256: workingCopy.source.sha256,
+    lastPersistedAt: nowIso(),
+    recoveryLogRelativePath: "recovery/autosave-log.json",
+  };
+  runtime.draft = {
+    annotationsRelativePath: "draft/annotations.json",
+    annotationsSha256: sha256(emptyDraftText),
+    commentIds: [],
+    editEventIds: [],
+    draftRevision: transaction.activationDraftRevision,
+    updatedAt: transaction.activationDraftUpdatedAt,
+    comments: [],
+    changeEvents: [],
+    deletedCommentIds: [],
+    appliedOperationIds: [],
+  };
+  await writeRuntime(context.projectRoot, runtime);
+  transaction.activationState = "runtime-activated";
+  await writeTransaction(transactionRoot, transaction);
+  await maybeFailpoint("after-activation-runtime-written", transactionRoot);
+
+  transaction.state = "cache-rebuilt";
+  transaction.cacheRebuiltAt = nowIso();
+  await writeTransaction(transactionRoot, transaction);
+  await rm(
+    path.join(transactionRoot, "recovery", "source.html"),
+    { force: true },
+  );
+  await maybeFailpoint("after-activation-completed", transactionRoot);
+  return {
+    ok: true,
+    status: "version-activated",
+    projectId: context.projectId,
+    documentId: context.documentId,
+    requestId: activeRun.requestId,
+    attemptId: activeRun.attemptId,
+    versionId: requestedVersionId,
+    candidateVersionId: requestedVersionId,
+    candidateVersionLabel: activeRun.candidateVersionLabel,
+    candidateDisplayVersionLabel:
+      userVersionLabel(activeRun.candidateVersionOrdinal),
+    version: validatedVersion.manifest,
+    contentSha256: validatedVersion.contentSha256,
+    sourceSha256: workingCopy.source.sha256,
+    currentHtmlSha256: workingCopy.source.sha256,
+    lastModifiedAt: workingCopy.source.lastModifiedAt,
+    committedAt: validatedVersion.committed.committedAt,
+    sourcePath: context.sourcePath,
+    currentPath: context.sourcePath,
+    workingCopyPath: context.sourcePath,
+    workingCopyRelativePath: workingCopy.relativePath,
+    versionEntryRelativePath:
+      `projects/${context.storageDirectoryName}/versions/${requestedVersionId}/files/index.html`,
+    versionEntryPath: validatedVersion.entryPath,
+  };
+}
+
 async function activateReadyVersion(body) {
+  const projectFileActivation = await activateProjectFileCandidate(body);
+  if (projectFileActivation) return projectFileActivation;
   const context = await loadMutationContext(body);
   assertBodyContext(context, body);
   return withProjectMutation(context, async () => {
     await recoverPendingWriteRaw(context);
-    const runtime = await readRuntime(context);
-    const project = await readProject(context);
+    // A prior explicit adoption can have completed Promotion before the
+    // process stopped.  Recover it before evaluating the caller's request so
+    // retrying the action is idempotent and never exposes a hidden Version as
+    // an unadopted Candidate.
+    await recoverTransactionsRaw(context);
+    let runtime = await readRuntime(context);
+    let project = await readProject(context);
     const requestedVersionId = cleanText(body.versionId, 100);
     if (!/^ver_\d{4,}$/.test(requestedVersionId)) {
       throw new HttpError(400, "INVALID_VERSION_ID", "versionId is invalid.");
@@ -6465,7 +7672,7 @@ async function activateReadyVersion(body) {
         lastModifiedAt: source.lastModifiedAt,
       };
     }
-    const activeRun = runtime.activeRun;
+    let activeRun = runtime.activeRun;
     if (
       runtime.lifecycleState !== "ready-to-open"
       || !activeRun
@@ -6481,13 +7688,55 @@ async function activateReadyVersion(body) {
     }
     const transactionId = `txn_${activeRun.requestId}_${activeRun.attemptId}`;
     const transactionRoot = transactionDirectory(context, transactionId);
-    const transaction = await readAuxiliaryJson(
-      path.join(transactionRoot, "transaction.json"),
-      "transaction.json",
-    );
+    const transactionPath = path.join(transactionRoot, "transaction.json");
+    let transaction;
+    if (!(await exists(transactionPath))) {
+      // A v3 Candidate remains only a sealed Request output until the user
+      // explicitly adopts it.  Starting this transaction is the Promotion
+      // boundary; before this point no Version directory or committed marker
+      // exists and latestVersionId remains unchanged.
+      const pending = await readPendingCandidateRaw(context, runtime);
+      if (!pending) {
+        throw new HttpError(
+          409,
+          "READY_CANDIDATE_MISSING",
+          "The ready Candidate no longer has durable review evidence.",
+        );
+      }
+      const currentSource = await readSourceFile(context.sourcePath);
+      if (currentSource.sha256 !== activeRun.baseSnapshotSha256) {
+        await markAiConflictRaw(
+          context,
+          runtime,
+          pending.validated,
+          currentSource.sha256,
+        );
+        throw new HttpError(
+          409,
+          "CURRENT_SOURCE_CHANGED_AFTER_VALIDATION",
+          "The current HTML changed after Candidate validation. The Candidate remains available but cannot be adopted until the change is resolved.",
+          {
+            expectedSha256: activeRun.baseSnapshotSha256,
+            actualSha256: currentSource.sha256,
+          },
+        );
+      }
+      const prepared = await prepareTransactionRaw(
+        context,
+        runtime,
+        pending.validated,
+        activeRun.baseSnapshotSha256,
+        { adoptionRequestedAt: nowIso() },
+      );
+      transaction = prepared.transaction;
+    } else {
+      transaction = await readAuxiliaryJson(
+        transactionPath,
+        "transaction.json",
+      );
+    }
     if (
-      transaction.state !== "ready-to-open"
-      || transaction.projectId !== context.projectId
+      transaction.projectId !== context.projectId
       || transaction.documentId !== context.documentId
       || transaction.candidateVersionId !== requestedVersionId
     ) {
@@ -6497,128 +7746,34 @@ async function activateReadyVersion(body) {
         "The ready Version does not match its committed transaction.",
       );
     }
-    const validatedVersion = await validateCommittedVersionRaw(
-      context,
-      requestedVersionId,
-    );
-    if (validatedVersion.contentSha256 !== transaction.candidateContentSha256) {
-      throw new HttpError(
-        409,
-        "READY_VERSION_HASH_MISMATCH",
-        "The ready Version no longer matches its validated result.",
-      );
-    }
-    const currentSource = await readSourceFile(context.sourcePath);
-    if (currentSource.sha256 !== transaction.expectedSourceSha256) {
-      throw new HttpError(
-        409,
-        "CURRENT_SOURCE_CHANGED_AFTER_VALIDATION",
-        "The current HTML changed after validation. The new Version was kept but was not opened.",
-        {
-          expectedSha256: transaction.expectedSourceSha256,
-          actualSha256: currentSource.sha256,
-        },
-      );
-    }
-    const workingCopy = await ensureWorkingCopyRaw(
-      context,
+    transaction = await markTransactionAdoptionRequestedRaw(
+      transactionRoot,
       transaction,
-      validatedVersion.entryBuffer,
     );
-    project.latestVersionId = requestedVersionId;
-    project.currentBasedOnVersionId = requestedVersionId;
-    project.currentExactVersionId = requestedVersionId;
-    project.currentHtmlSha256 = workingCopy.source.sha256;
-    project.lastModifiedAt = workingCopy.source.lastModifiedAt;
-    delete project.restoredFromVersionId;
-    await activateProjectSourceRaw(
+    if (transaction.state !== "ready-to-open") {
+      const promoted = await continueTransactionRaw(
+        context,
+        transactionRoot,
+        transaction,
+      );
+      if (promoted.status !== "ready-to-open") {
+        throw new HttpError(
+          409,
+          "CANDIDATE_PROMOTION_NOT_READY",
+          "The Candidate Promotion did not reach a ready state.",
+          { status: promoted.status },
+        );
+      }
+      transaction = await readAuxiliaryJson(
+        transactionPath,
+        "transaction.json",
+      );
+    }
+    return completeTransactionActivationRaw(
       context,
-      project,
-      workingCopy.absolutePath,
+      transactionRoot,
+      transaction,
     );
-
-    const nextDraftRevision =
-      (Number.isSafeInteger(runtime.draft?.draftRevision)
-        ? runtime.draft.draftRevision
-        : 0) + 1;
-    const nextDraftUpdatedAt = nowIso();
-    const emptyDraftText = jsonText(draftArtifactRecord({
-      draftRevision: nextDraftRevision,
-      updatedAt: nextDraftUpdatedAt,
-    }));
-    await atomicWriteFile(
-      path.join(context.projectRoot, "draft", "annotations.json"),
-      emptyDraftText,
-    );
-    await rm(
-      path.join(context.projectRoot, "draft", "attachments"),
-      { recursive: true, force: true },
-    );
-    runtime.lifecycleState = "ready";
-    runtime.activeRun = null;
-    runtime.conflict = null;
-    runtime.transactionId = null;
-    runtime.view = {
-      viewMode: "current",
-      latestVersionId: requestedVersionId,
-      currentBasedOnVersionId: requestedVersionId,
-      currentExactVersionId: requestedVersionId,
-      viewingVersionId: null,
-      renderedContentSha256: workingCopy.source.sha256,
-    };
-    runtime.autosave = {
-      status: "updated",
-      expectedSourceSha256: workingCopy.source.sha256,
-      lastPersistedAt: nowIso(),
-      recoveryLogRelativePath: "recovery/autosave-log.json",
-    };
-    runtime.draft = {
-      annotationsRelativePath: "draft/annotations.json",
-      annotationsSha256: sha256(emptyDraftText),
-      commentIds: [],
-      editEventIds: [],
-      draftRevision: nextDraftRevision,
-      updatedAt: nextDraftUpdatedAt,
-      comments: [],
-      changeEvents: [],
-      deletedCommentIds: [],
-      appliedOperationIds: [],
-    };
-    await writeRuntime(context.projectRoot, runtime);
-    transaction.state = "cache-rebuilt";
-    transaction.sourceActivatedAt = nowIso();
-    transaction.cacheRebuiltAt = nowIso();
-    await writeTransaction(transactionRoot, transaction);
-    await rm(
-      path.join(transactionRoot, "recovery", "source.html"),
-      { force: true },
-    );
-    return {
-      ok: true,
-      status: "version-activated",
-      projectId: context.projectId,
-      documentId: context.documentId,
-      requestId: activeRun.requestId,
-      attemptId: activeRun.attemptId,
-      versionId: requestedVersionId,
-      candidateVersionId: requestedVersionId,
-      candidateVersionLabel: activeRun.candidateVersionLabel,
-      candidateDisplayVersionLabel:
-        userVersionLabel(activeRun.candidateVersionOrdinal),
-      version: validatedVersion.manifest,
-      contentSha256: validatedVersion.contentSha256,
-      sourceSha256: workingCopy.source.sha256,
-      currentHtmlSha256: workingCopy.source.sha256,
-      lastModifiedAt: workingCopy.source.lastModifiedAt,
-      committedAt: validatedVersion.committed.committedAt,
-      sourcePath: context.sourcePath,
-      currentPath: context.sourcePath,
-      workingCopyPath: context.sourcePath,
-      workingCopyRelativePath: workingCopy.relativePath,
-      versionEntryRelativePath:
-        `projects/${context.storageDirectoryName}/versions/${requestedVersionId}/files/index.html`,
-      versionEntryPath: validatedVersion.entryPath,
-    };
   });
 }
 
@@ -6893,19 +8048,58 @@ async function recoverTransactionsRaw(context) {
       transactionPath,
       "transaction.json",
     );
-    if (["ready-to-open", "cache-rebuilt", "aborted"].includes(transaction.state)) {
+    if (["cache-rebuilt", "aborted"].includes(transaction.state)) {
       continue;
     }
     if (transaction.state === "awaiting-conflict-resolution") continue;
+    // Transactions created before the explicit-adoption marker are retained as
+    // reviewable Candidates.  They must not become Versions merely because the
+    // application restarted.
+    if (
+      transaction.state === "ready-to-open"
+      && !transaction.adoptionRequestedAt
+    ) {
+      continue;
+    }
     const runtime = await readRuntime(context);
     runtime.lifecycleState = "recovering-transaction";
     runtime.activeRun ??= activeRunFromTransaction(context, transaction);
     runtime.transactionId = transaction.transactionId;
     await writeRuntime(context.projectRoot, runtime);
     try {
-      recovered.push(
-        await continueTransactionRaw(context, transactionRoot, transaction),
+      if (transaction.state === "ready-to-open") {
+        recovered.push(
+          await completeTransactionActivationRaw(
+            context,
+            transactionRoot,
+            transaction,
+          ),
+        );
+        continue;
+      }
+      const promoted = await continueTransactionRaw(
+        context,
+        transactionRoot,
+        transaction,
       );
+      const refreshed = await readAuxiliaryJson(
+        transactionPath,
+        "transaction.json",
+      );
+      if (
+        refreshed.state === "ready-to-open"
+        && refreshed.adoptionRequestedAt
+      ) {
+        recovered.push(
+          await completeTransactionActivationRaw(
+            context,
+            transactionRoot,
+            refreshed,
+          ),
+        );
+      } else {
+        recovered.push(promoted);
+      }
     } catch (error) {
       const latestRuntime = await readRuntime(context);
       latestRuntime.lifecycleState = "recovering-transaction";
@@ -6918,6 +8112,12 @@ async function recoverTransactionsRaw(context) {
 }
 
 async function statusFor(sourcePath, requestId, attemptId = "attempt_001") {
+  const projectFileStatus = await projectFileRequestStatus(
+    sourcePath,
+    requestId,
+    attemptId,
+  );
+  if (projectFileStatus) return projectFileStatus;
   const context = await loadContextBySource(sourcePath, false);
   return withProjectMutation(context, async () => {
     const recovered = await recoverTransactionsRaw(context);
@@ -6925,7 +8125,12 @@ async function statusFor(sourcePath, requestId, attemptId = "attempt_001") {
       (item) =>
         item?.requestId === requestId && item?.attemptId === attemptId,
     );
-    if (recoveredMatch?.status === "version-created") return recoveredMatch;
+    if (
+      recoveredMatch?.status === "version-created"
+      || recoveredMatch?.status === "version-activated"
+    ) {
+      return recoveredMatch;
+    }
     const requestRoot = path.join(context.projectRoot, "requests", requestId);
     const attemptRoot = path.join(requestRoot, "attempts", attemptId);
     if (!(await exists(attemptRoot))) {
@@ -6953,8 +8158,16 @@ async function statusFor(sourcePath, requestId, attemptId = "attempt_001") {
           );
         }
         const outcomeRuntime = await readRuntime(context);
+        const outcomeProject = await readProject(context);
+        const activeSource = await readSourceFile(context.sourcePath);
+        const outcomeAlreadyActivated = (
+          !outcomeRuntime.activeRun
+          && outcomeProject.currentExactVersionId === outcome.versionId
+          && outcomeProject.currentHtmlSha256 === activeSource.sha256
+        );
         if (
-          outcomeRuntime.lifecycleState === "ready-to-open"
+          !outcomeAlreadyActivated
+          && outcomeRuntime.lifecycleState === "ready-to-open"
           && outcomeRuntime.activeRun?.requestId === requestId
           && outcomeRuntime.activeRun?.attemptId === attemptId
           && outcomeRuntime.activeRun?.candidateVersionId === outcome.versionId
@@ -6979,7 +8192,6 @@ async function statusFor(sourcePath, requestId, attemptId = "attempt_001") {
             transaction,
             validatedVersion.entryBuffer,
           );
-          const source = await readSourceFile(context.sourcePath);
           const completion = await readAuxiliaryJson(
             path.join(attemptRoot, "completion.json"),
             "completion.json",
@@ -7029,9 +8241,9 @@ async function statusFor(sourcePath, requestId, attemptId = "attempt_001") {
             completion: { completedAt: completion.completedAt },
             outcome,
             contentSha256: outcome.contentSha256,
-            sourceSha256: source.sha256,
-            currentHtmlSha256: source.sha256,
-            lastModifiedAt: source.lastModifiedAt,
+            sourceSha256: activeSource.sha256,
+            currentHtmlSha256: activeSource.sha256,
+            lastModifiedAt: activeSource.lastModifiedAt,
             committedAt: committed.committedAt,
             activeRun: {
               ...outcomeRuntime.activeRun,
@@ -7049,7 +8261,7 @@ async function statusFor(sourcePath, requestId, attemptId = "attempt_001") {
             ...(candidateAssessment ? { candidateAssessment } : {}),
           };
         }
-        const source = await readSourceFile(context.sourcePath);
+        const source = activeSource;
         let protocolViolation = null;
         let completion = null;
         if (await exists(completionPath)) {
@@ -7111,13 +8323,18 @@ async function statusFor(sourcePath, requestId, attemptId = "attempt_001") {
         }
         return {
           ok: true,
-          status: "version-created",
+          status: outcomeAlreadyActivated
+            ? "version-activated"
+            : "version-created",
+          ...(outcomeAlreadyActivated ? { alreadyActivated: true } : {}),
           projectId: context.projectId,
           documentId: context.documentId,
           sourcePath: context.sourcePath,
           requestId,
           attemptId,
           versionId: outcome.versionId,
+          candidateVersionId: outcome.versionId,
+          candidateVersionLabel: version.versionLabel,
           candidateDisplayVersionLabel:
             userVersionLabel(version.versionOrdinal),
           version,
@@ -7161,6 +8378,14 @@ async function statusFor(sourcePath, requestId, attemptId = "attempt_001") {
     // Status polling needs lifecycle identity first. Frozen display artifacts
     // are validated only when they are actually consumed for completion.
     let runtime = await readRuntime(context, { hydrateArtifacts: false });
+    if (
+      runtime.lifecycleState === "ready-to-open"
+      && runtime.activeRun?.requestId === requestId
+      && runtime.activeRun?.attemptId === attemptId
+    ) {
+      const pending = await readPendingCandidateRaw(context, runtime);
+      if (pending) return pendingCandidateReadyPayload(context, runtime, pending);
+    }
     if (
       !runtime.activeRun
       || runtime.activeRun.requestId !== requestId
@@ -7368,22 +8593,44 @@ async function statusFor(sourcePath, requestId, attemptId = "attempt_001") {
         candidateAssessment: assessed.assessment,
       };
     }
-    const prepared = await prepareTransactionRaw(
-      context,
-      runtime,
-      validated,
-      runtime.activeRun.baseSnapshotSha256,
-      { allowSourceMismatch: true },
-    );
-    return continueTransactionRaw(
-      context,
-      prepared.transactionRoot,
-      prepared.transaction,
-    );
+    const pending = await writePendingCandidateRaw(context, runtime, validated);
+    runtime.lifecycleState = "ready-to-open";
+    runtime.activeRun.status = "ready-to-open";
+    runtime.activeRun.updatedAt = nowIso();
+    runtime.transactionId = null;
+    runtime.conflict = null;
+    runtime.lastCompleted = {
+      schemaVersion: LIFECYCLE_SCHEMA_VERSION,
+      status: "candidate-ready",
+      projectId: context.projectId,
+      documentId: context.documentId,
+      requestId,
+      attemptId,
+      candidateVersionId: runtime.activeRun.candidateVersionId,
+      contentSha256: pending.candidate.outputSha256,
+      completedAt: validated.completion.completedAt,
+      generatedAt: pending.candidate.createdAt,
+    };
+    await writeRuntime(context.projectRoot, runtime);
+    return pendingCandidateReadyPayload(context, runtime, {
+      ...pending,
+      validationReview: await exists(path.join(
+        validated.attemptRoot,
+        "validation-review.json",
+      ))
+        ? await readAuxiliaryJson(
+          path.join(validated.attemptRoot, "validation-review.json"),
+          "validation-review.json",
+        )
+        : null,
+      candidateAssessment: assessed.assessment,
+    });
   });
 }
 
 async function cancelActiveRun(body) {
+  const projectFileCancellation = await cancelProjectFileRequest(body);
+  if (projectFileCancellation) return projectFileCancellation;
   const context = await loadMutationContext(body);
   assertBodyContext(context, body);
   return withProjectMutation(context, async () => {
@@ -7673,11 +8920,41 @@ async function resolveConflict(body) {
   });
 }
 
+async function pendingCandidateVersionFile(context, requestedVersionId) {
+  const runtime = await readRuntime(context);
+  if (
+    runtime.lifecycleState !== "ready-to-open"
+    || !runtime.activeRun
+    || runtime.activeRun.candidateVersionId !== requestedVersionId
+  ) return null;
+  const pending = await readPendingCandidateRaw(context, runtime);
+  if (!pending) return null;
+  const buffer = pending.validated.outputBuffer;
+  return {
+    ok: true,
+    projectId: context.projectId,
+    documentId: context.documentId,
+    storageDirectoryName: context.storageDirectoryName,
+    versionId: requestedVersionId,
+    content: buffer.toString("utf8"),
+    sha256: pending.candidate.outputSha256,
+    contentSha256: pending.candidate.outputSha256,
+    path: pending.validated.outputPath,
+    relativePath: pending.candidate.outputRelativePath,
+    readOnly: true,
+    candidate: true,
+  };
+}
+
 async function versionFile(sourcePath, versionId) {
+  const projectFileVersion = await projectFileVersionFile(sourcePath, versionId);
+  if (projectFileVersion) return projectFileVersion;
   const context = await loadContextBySource(sourcePath, false);
   if (!/^ver_\d{4,}$/.test(versionId ?? "")) {
     throw new HttpError(400, "INVALID_VERSION_ID", "versionId is invalid.");
   }
+  const pendingCandidate = await pendingCandidateVersionFile(context, versionId);
+  if (pendingCandidate) return pendingCandidate;
   const versionRoot = path.join(context.projectRoot, "versions", versionId);
   if (!(await exists(path.join(versionRoot, "committed.json")))) {
     throw new HttpError(
@@ -7707,28 +8984,37 @@ async function versionFile(sourcePath, versionId) {
   };
 }
 
-async function sourceFile(sourcePath) {
+async function unmanagedSourceFile(sourcePath) {
+  const normalizedSourcePath = normalizeSourcePath(sourcePath);
+  const source = await readSourceFile(normalizedSourcePath);
+  return {
+    ok: true,
+    registered: false,
+    projectId: null,
+    documentId: null,
+    sourcePath: normalizedSourcePath,
+    content: source.html,
+    sha256: source.sha256,
+    sourceSha256: source.sha256,
+    currentBasedOnVersionId: null,
+    currentExactVersionId: null,
+    restoredFromVersionId: null,
+    lastModifiedAt: source.lastModifiedAt,
+  };
+}
+
+async function sourceFile(sourcePath, { projectStorageVersion = "" } = {}) {
+  const projectFileSource = await sourceProjectFile(sourcePath);
+  if (projectFileSource) return projectFileSource;
+  if (projectStorageVersion === "4.0.0") {
+    return unmanagedSourceFile(sourcePath);
+  }
   let context;
   try {
     context = await loadContextBySource(sourcePath, false);
   } catch (error) {
     if (error?.code !== "PROJECT_NOT_FOUND") throw error;
-    const normalizedSourcePath = normalizeSourcePath(sourcePath);
-    const source = await readSourceFile(normalizedSourcePath);
-    return {
-      ok: true,
-      registered: false,
-      projectId: null,
-      documentId: null,
-      sourcePath: normalizedSourcePath,
-      content: source.html,
-      sha256: source.sha256,
-      sourceSha256: source.sha256,
-      currentBasedOnVersionId: null,
-      currentExactVersionId: null,
-      restoredFromVersionId: null,
-      lastModifiedAt: source.lastModifiedAt,
-    };
+    return unmanagedSourceFile(sourcePath);
   }
   const source = await readSourceFile(context.sourcePath);
   const project = await readProject(context);
@@ -7776,6 +9062,21 @@ function safeInspectableProjectPath(context, relativePath) {
 }
 
 async function inspectProjectFile(sourcePath, relativePath) {
+  const projectFileWorkspace = await projectFileWorkspaceForSource(sourcePath);
+  if (projectFileWorkspace) {
+    const normalized = cleanText(relativePath, 500).replaceAll("\\", "/");
+    if (normalized !== "PROJECT.md") {
+      throw new HttpError(
+        403,
+        "PROJECT_FILE_NOT_INSPECTABLE",
+        "The requested project file is not available in the read-only inspector.",
+      );
+    }
+    return {
+      ...await projectFileGet(sourcePath),
+      readOnly: false,
+    };
+  }
   const context = await loadContextBySource(sourcePath, false);
   const inspected = safeInspectableProjectPath(context, relativePath);
   let information;
@@ -7913,6 +9214,27 @@ async function autosaveConflictCandidate(sourcePath) {
 }
 
 async function projectFileGet(sourcePath) {
+  const projectFileWorkspace = await projectFileWorkspaceForSource(sourcePath);
+  if (projectFileWorkspace) {
+    try {
+      const notes = await projectFileRepository.readProjectNotes({
+        target: projectFileTargetFromWorkspace(projectFileWorkspace),
+      });
+      return {
+        ok: true,
+        projectId: notes.projectId,
+        documentId: notes.documentId,
+        sourcePath: projectFileWorkspace.target.exactSourcePath,
+        content: notes.content,
+        sha256: notes.sha256,
+        updatedAt: notes.updatedAt,
+        path: notes.path,
+        relativePath: "PROJECT.md",
+      };
+    } catch (cause) {
+      throw projectFileHttpError(cause);
+    }
+  }
   const context = await loadContextBySource(sourcePath, false);
   const filePath = path.join(context.projectRoot, "PROJECT.md");
   const buffer = await readFile(filePath);
@@ -7931,13 +9253,41 @@ async function projectFileGet(sourcePath) {
 }
 
 async function projectFileUpdate(body) {
+  const projectFileWorkspace = await projectFileWorkspaceForSource(body.sourcePath);
+  if (projectFileWorkspace) {
+    if (!projectFileBodyIdentityMatches(projectFileWorkspace, body)) {
+      throw new HttpError(
+        409,
+        "PROJECT_CONTEXT_IDENTITY_MISMATCH",
+        "The project file identity does not match the selected project.",
+      );
+    }
+    try {
+      const notes = await projectFileRepository.updateProjectNotes({
+        target: projectFileTargetFromWorkspace(projectFileWorkspace),
+        content: body.content,
+      });
+      return {
+        ok: true,
+        updated: notes.updated,
+        projectId: notes.projectId,
+        documentId: notes.documentId,
+        content: notes.content,
+        sha256: notes.sha256,
+        path: notes.path,
+        relativePath: "PROJECT.md",
+      };
+    } catch (cause) {
+      throw projectFileHttpError(cause);
+    }
+  }
   const context = await loadMutationContext(body);
   assertBodyContext(context, body);
-  if (typeof body.content !== "string" || !body.content.trim()) {
+  if (typeof body.content !== "string") {
     throw new HttpError(
       400,
       "INVALID_PROJECT_FILE",
-      "content must be non-empty Markdown.",
+      "content must be Markdown text.",
     );
   }
   return withProjectMutation(context, async () => {
@@ -8127,6 +9477,7 @@ async function route(request, response) {
       200,
       await workspaceState(
         requiredSourcePath(url.searchParams.get("sourcePath")),
+        { projectStorageVersion: url.searchParams.get("projectStorageVersion") },
       ),
     );
     return;
@@ -8135,7 +9486,10 @@ async function route(request, response) {
     sendJson(
       response,
       200,
-      await sourceFile(requiredSourcePath(url.searchParams.get("sourcePath"))),
+      await sourceFile(
+        requiredSourcePath(url.searchParams.get("sourcePath")),
+        { projectStorageVersion: url.searchParams.get("projectStorageVersion") },
+      ),
     );
     return;
   }
@@ -8280,7 +9634,10 @@ async function route(request, response) {
   }
   if (request.method === "POST" && url.pathname === "/open-folder") {
     const body = await readBody(request);
-    const context = await loadContextBySource(body.sourcePath, false);
+    const projectFileWorkspace = await projectFileWorkspaceForSource(body.sourcePath);
+    const projectRoot = projectFileWorkspace
+      ? projectFileWorkspace.target.projectRootPath
+      : (await loadContextBySource(body.sourcePath, false)).projectRoot;
     if (process.platform !== "darwin") {
       throw new HttpError(
         501,
@@ -8288,8 +9645,8 @@ async function route(request, response) {
         "Opening Finder is only supported on macOS.",
       );
     }
-    await execFileAsync("open", [context.projectRoot]);
-    sendJson(response, 200, { ok: true, path: context.projectRoot });
+    await execFileAsync("open", [projectRoot]);
+    sendJson(response, 200, { ok: true, path: projectRoot });
     return;
   }
   throw new HttpError(404, "NOT_FOUND", "Endpoint was not found.");

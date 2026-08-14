@@ -48,11 +48,23 @@ function copyContext(context) {
     || !String(context.documentId || "")
     || !String(context.sourcePath || "")
   ) return null;
+  const target = context.projectRootPath && context.targetKind
+    ? {
+      projectRootPath: String(context.projectRootPath),
+      targetKind: String(context.targetKind),
+      workingCopyId: context.workingCopyId ? String(context.workingCopyId) : null,
+      versionId: context.versionId ? String(context.versionId) : null,
+      exactSourcePath: String(context.exactSourcePath || context.sourcePath),
+      sourceSha256: String(context.sourceSha256 || ""),
+      sessionEpoch: Number(context.sessionEpoch ?? context.epoch),
+    }
+    : {};
   return Object.freeze({
     epoch: Number(context.epoch),
     projectId: String(context.projectId),
     documentId: String(context.documentId),
     sourcePath: String(context.sourcePath),
+    ...target,
   });
 }
 
@@ -403,6 +415,7 @@ export class VersionWorkflow {
     this.#runSession.setActiveRun({ ...ready, error: undefined });
     try {
       const activatedPayload = await this.#bridgeClient.activateReadyVersion({
+        ...this.#projectSession.context,
         sourcePath: ready.sourcePath,
         projectId: ready.projectId,
         documentId: ready.documentId,
@@ -666,9 +679,15 @@ export class VersionWorkflow {
 
   async #openCommittedVersion({ run, payload, reviewLease, operation }) {
     const completion = this.#committedPayload(run, payload);
+    const committedSourcePath = String(
+      payload.sourcePath
+      || payload.currentPath
+      || payload.workingCopyPath
+      || run.sourcePath,
+    );
     const [versionPayload, sourcePayload] = await Promise.all([
-      this.#bridgeClient.versionFile(run.sourcePath, completion.versionId),
-      this.#bridgeClient.source(run.sourcePath),
+      this.#bridgeClient.versionFile(committedSourcePath, completion.versionId),
+      this.#bridgeClient.source(committedSourcePath),
     ]);
     if (!this.#isNavigationCurrent(operation)) return stale(this.#runIdentity(run));
     this.#assertVersionFileIdentity(versionPayload, run, completion.versionId);
@@ -677,12 +696,9 @@ export class VersionWorkflow {
     const sourceSha256 = String(sourcePayload.sha256 || sourcePayload.sourceSha256 || "");
     const content = String(versionPayload.content || "");
     const sourceContent = String(sourcePayload.content || "");
-    const committedSourcePath = String(
+    const resolvedCommittedSourcePath = String(
       sourcePayload.sourcePath
-      || payload.currentPath
-      || payload.workingCopyPath
-      || payload.sourcePath
-      || run.sourcePath,
+      || committedSourcePath,
     );
     const lastModifiedAt = String(sourcePayload.lastModifiedAt || "");
     if (
@@ -705,7 +721,7 @@ export class VersionWorkflow {
       && activeContext.projectId === run.projectId
       && (
         this.#codecs.sameSourcePath(activeContext.sourcePath, run.sourcePath)
-        || this.#codecs.sameSourcePath(activeContext.sourcePath, committedSourcePath)
+        || this.#codecs.sameSourcePath(activeContext.sourcePath, resolvedCommittedSourcePath)
       ),
     );
     if (affectsCurrentCanvas) {
@@ -729,11 +745,12 @@ export class VersionWorkflow {
 
     const prepared = await this.#projectWorkflow.prepareGeneratedSourceTransition({
       previousSourcePath: run.sourcePath,
-      nextSourcePath: committedSourcePath,
+      nextSourcePath: resolvedCommittedSourcePath,
       expectedSha256: sourceSha256,
       nextProjectId: run.projectId,
       nextDocumentId: run.documentId,
       versionId: completion.versionId,
+      openTarget: payload.openTarget || null,
     });
     if (!this.#isNavigationCurrent(operation)) return stale(this.#runIdentity(run));
     if (!prepared.updatesCurrentProject) {
@@ -744,7 +761,7 @@ export class VersionWorkflow {
         candidateLabel: completion.candidateLabel,
         protocolViolation: completion.protocolViolation,
         aiCompletedAt: completion.aiCompletedAt,
-        committedSourcePath,
+        committedSourcePath: resolvedCommittedSourcePath,
         lastModifiedAt,
       });
     }
@@ -771,7 +788,7 @@ export class VersionWorkflow {
     let refreshWarning = "";
     try {
       const refreshed = await this.#projectWorkflow.refreshWorkspace({
-        sourcePath: committedSourcePath,
+        sourcePath: resolvedCommittedSourcePath,
         epoch: context.epoch,
       });
       if (refreshed.status !== "succeeded" && refreshed.status !== "stale") {
@@ -791,7 +808,7 @@ export class VersionWorkflow {
       candidateLabel: completion.candidateLabel,
       protocolViolation: completion.protocolViolation,
       aiCompletedAt: completion.aiCompletedAt,
-      committedSourcePath,
+      committedSourcePath: resolvedCommittedSourcePath,
       lastModifiedAt,
       refreshWarning,
     });

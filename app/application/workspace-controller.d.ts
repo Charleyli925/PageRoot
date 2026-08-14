@@ -104,6 +104,7 @@ export type WorkspaceEvent =
       context: ProjectContext;
       projectRecordsPath: string | null;
       projectName: string | null;
+      imported?: boolean;
       canonicalSourceAdopted: boolean;
     }>
   | Readonly<{
@@ -115,6 +116,7 @@ export type WorkspaceEvent =
         | "document-direct-edit-recorded"
         | "document-edit-queued"
         | "document-persisted"
+        | "document-open-target-rebound"
         | "document-persistence-failed"
         | "document-authority-reloaded"
         | "document-authority-reload-failed"
@@ -155,6 +157,23 @@ export type RecoveryPort = Readonly<{
 
 export type CanvasAuthorityPort = Readonly<{
   invalidateRenderAcks(): void;
+}>;
+
+export type ProjectSourceActivationPort = Readonly<{
+  activateManagedWorkingCopy(input: Readonly<{
+    previousSourcePath: string;
+    nextSourcePath: string;
+    expectedSha256: string;
+    projectId: string;
+    documentId: string;
+    workingCopyId: string;
+    versionId: string;
+    projectRootPath: string;
+  }>): Promise<Readonly<{
+    sourcePath: string;
+    sha256: string;
+    html: string;
+  }>>;
 }>;
 
 export type ClockPort = Readonly<{
@@ -209,6 +228,7 @@ export type WorkspaceControllerConstruction = Readonly<{
     hash: HashPort;
     recovery?: RecoveryPort;
     canvas?: CanvasAuthorityPort;
+    projectSource?: ProjectSourceActivationPort;
   }>;
   documentWorkflow?: Readonly<{
     codecs: DocumentWorkflowCodecs;

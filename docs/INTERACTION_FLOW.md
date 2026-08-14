@@ -1,6 +1,6 @@
 # PageRoot 交互流程
 
-- 状态：v3 源码级定点修改目标交互合同
+- 状态：v3 源码级定点修改合同；桌面打开边界为 v4-only
 - 上位文档：[架构说明](ARCHITECTURE.md)
 - 安全边界：[安全模型](SECURITY_MODEL.md)
 - 产品范围：[MVP 产品需求](MVP_PRD.md)
@@ -220,10 +220,10 @@ SourcePatch、不写磁盘、不运行作者脚本，也不引入右键菜单、
 当前文件名右侧始终保留独立的“+”按钮，点击后与文件菜单“打开本地 HTML”共用同一文件选择与项目切换流程。标题的小铅笔仍只在鼠标悬停或键盘聚焦时出现；两个入口的点击热区互不嵌套。若当前编辑、评论、附件或项目规则还没有安全收口，系统先沿用项目切换边界完成保存或阻止切换，用户取消文件选择时继续停留在当前 HTML。
 
 1. 用户选择本地 HTML。
-2. 系统优先按持久 `documentId` 重新绑定；无法识别时创建新 Document。
-3. 若是新 Document，仅以未登记只读状态打开；第一次真实编辑、添加附件、发送给 QoderWork，或用户明确展开“项目资料”时才登记项目与初始 V1。
-4. 通过 registry 中的 `storageDirectoryName` 定位项目文件夹，再读取该项目自己的 `project.json` 与 `runtime-state.json`。
-5. 对照项目当前 `sourcePath` 指向的 HTML、latest committed Version 和运行时 Hash。旧原始路径或旧工作路径打开时，通过 registry 别名回到同一项目的最新 canonical path。
+2. 系统只检查该路径是否属于有效 v4 Project：Registry 登记根目录、根目录内 `projectId` / `documentId` 与 manifest 精确文件映射必须同时成立。
+3. 有效 v4 Project 按现有项目重新绑定和恢复；任何不满足该条件的 HTML（包括 v3 及更早项目状态、损坏的 v4 记录和全新 HTML）都立即作为新外部来源导入，建立新的 v4 Project 与初始 V1。
+4. 导入从不移动、覆盖或改写用户选择的原始 HTML 字节；v4 打开路径不迁移、不恢复、也不读取 v4 以前的项目状态。
+5. 对有效 v4 Project，通过 Registry 的登记根目录读取该项目自己的 `project.json`、`manifest.json` 与 `runtime-state.json`，再对照当前精确 HTML、latest committed Version 和运行时 Hash。
 6. 按项目状态恢复：editing 时可恢复 current 或精确历史查看；存在 active run 时强制显示该轮冻结 current 页面，并默认展开“本轮处理”面板说明正在等待 AI 返回；冲突时显示该候选对比，事务恢复时显示恢复进度。用户主动收起处理面板后可以只读浏览冻结页面，直到再次打开或切回该项目前都不自动弹回。
 
 不得通过扫描所有 `requests/`、取最新修改时间或猜测“哪个目录像处理中”来恢复状态。

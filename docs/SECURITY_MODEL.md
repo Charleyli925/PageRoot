@@ -88,6 +88,42 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
   identifier, content, path, filename, raw exception or stack is accepted
 - No silent application update or binary replacement
 
+## V4 Registry and managed-root authority
+
+The v4 Registry is the canonical write allowlist, not a cache for locating
+projects. A privileged project-file write requires one Registry record whose
+`projectId`, registered root path, recovered root identity, `project.json`, and
+manifest mappings agree. The root must be a direct child of the configured
+projects directory, and every managed control path is real-path checked with no
+symlink traversal.
+
+A same-parent Finder rename can update that Registry record only through a
+compare-and-swap after the stable project identity and root filesystem identity
+match. Moving a root elsewhere, crossing a volume, or copying it never grants
+write authority: the in-memory session remains readable but writes fail closed
+until the exact registered location is available and revalidated. Import
+recovery is likewise limited to Registry-owned pending intents; a discovered
+`.pageroot/import.json` is never proof that an arbitrary copied root is managed.
+
+Working-copy filename changes retain their immutable IDs. A missing mapping may
+be repaired only by one unique direct-child file-identity continuity clue; Hash
+may validate bytes afterwards but never grants identity. An ambiguity is a
+content-preserving error. Promotion may prepare a provisional relative path in
+a durable transaction, but freezes the final visible path only after its
+no-replace publication succeeds. Recovery re-derives every identity-bearing
+transaction field and any created Working Copy from the runtime-sealed
+Candidate and its managed source Working Copy; a transaction is never an
+independent authority for version ordinal, lineage or path identity. A replaced
+preparation file or an untrusted collision fails closed rather than deleting
+user data.
+
+The external AI Agent can write within the Request / Attempt workspace, so
+those files are evidence to validate rather than runtime authority. Reopen and
+crash recovery may follow only an already-sealed `runtime-state.json` Request /
+Attempt / Working Copy anchor, or a registered Promotion transaction. A cleared
+or missing runtime state never scans Request directories to revive an active
+Request or to adopt a replacement input-manifest digest.
+
 ## V2 editable-island trust boundary
 
 The rendered preview DOM is disposable and never becomes a whole-document

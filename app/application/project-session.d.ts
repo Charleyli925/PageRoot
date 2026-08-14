@@ -1,9 +1,21 @@
+export type OpenTarget = Readonly<{
+  projectId: string;
+  documentId: string;
+  projectRootPath: string;
+  targetKind: "working-copy" | "version";
+  workingCopyId: string | null;
+  versionId: string | null;
+  exactSourcePath: string;
+  sourceSha256: string;
+  sessionEpoch: number;
+}>;
+
 export type ProjectContext = {
   epoch: number;
   projectId: string;
   documentId: string;
   sourcePath: string;
-};
+} & Partial<OpenTarget>;
 
 export type ProjectLocator = {
   epoch: number;
@@ -14,6 +26,7 @@ export type ProjectSessionSnapshot = ProjectLocator & {
   projectId: string;
   documentId: string;
   registered: boolean;
+  openTarget?: OpenTarget;
 };
 
 export class ProjectSession {
@@ -27,7 +40,15 @@ export class ProjectSession {
     sourcePath: string;
     projectId?: string;
     documentId?: string;
+    openTarget?: Omit<OpenTarget, "sessionEpoch"> | null;
   }): ProjectContext | ProjectLocator | null;
+  adoptOpenTarget(value: {
+    previousSourcePath?: string | null;
+    target: Omit<OpenTarget, "sessionEpoch">;
+  }): ProjectContext | ProjectLocator | null;
+  refreshOpenTarget(
+    target: Omit<OpenTarget, "sessionEpoch">,
+  ): ProjectContext | null;
   matches(context: ProjectContext): boolean;
   matchesLocator(locator: ProjectLocator): boolean;
   beginQuery(
@@ -42,4 +63,5 @@ export class ProjectSession {
   readonly sourcePath: string | null;
   readonly projectId: string;
   readonly documentId: string;
+  readonly openTarget: OpenTarget | null;
 }

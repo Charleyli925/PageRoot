@@ -3,7 +3,7 @@ import type { CommentWorkflow } from "./comment-workflow.js";
 import type { CommentSession } from "./comment-session.js";
 import type { DocumentSession } from "./document-session.js";
 import type { DraftSession } from "./draft-session.js";
-import type { ProjectContext, ProjectSession } from "./project-session.js";
+import type { OpenTarget, ProjectContext, ProjectSession } from "./project-session.js";
 import type { ProjectRulesWorkflow } from "./project-rules-workflow.js";
 import type { RunSession } from "./run-session.js";
 import type { VersionSession } from "./version-session.js";
@@ -67,6 +67,7 @@ export type PreparedGeneratedSourceTransition = Readonly<{
   nextSourcePath: string;
   projectId: string;
   documentId: string;
+  openTarget: Omit<OpenTarget, "sessionEpoch"> | null;
   updatesCurrentProject: boolean;
   activatedProject: ProjectWorkflowProject | null;
 }>;
@@ -180,6 +181,7 @@ export class ProjectWorkflow {
     nextProjectId: string;
     nextDocumentId: string;
     versionId: string;
+    openTarget?: Omit<OpenTarget, "sessionEpoch"> | null;
   }): Promise<PreparedGeneratedSourceTransition>;
   commitGeneratedSourceTransition(input: {
     prepared: PreparedGeneratedSourceTransition;

@@ -114,6 +114,7 @@ const TASK_OWNER_CASES = [
       "tests/lifecycle-core.test.mjs",
       "tests/product-contract.test.mjs",
       "tests/project-context-service.test.mjs",
+      "tests/project-file-bridge.test.mjs",
       "tests/scope-validator.test.mjs",
       "tests/targeted-change-schema.test.mjs",
       "tests/user-supplement.test.mjs",
@@ -121,6 +122,18 @@ const TASK_OWNER_CASES = [
     ],
     suites: ["typecheck", "lint", "node-targeted", "build-desktop", "ai-smoke"],
     directOwners: ["tests/workspace-bridge.test.mjs"],
+    unrelatedOwners: ["tests/desktop-package.test.mjs", "tests/review-runtime-capture-owner.test.mjs"],
+  },
+  {
+    file: "scripts/project-file-repository.mjs",
+    nodeTests: [
+      "tests/project-file-bridge.test.mjs",
+      "tests/project-file-finalizer.test.mjs",
+      "tests/project-file-repository.test.mjs",
+      "tests/project-file-schema.test.mjs",
+    ],
+    suites: ["typecheck", "lint", "node-targeted", "build-desktop", "ai-smoke"],
+    directOwners: ["tests/project-file-repository.test.mjs"],
     unrelatedOwners: ["tests/desktop-package.test.mjs", "tests/review-runtime-capture-owner.test.mjs"],
   },
   {
@@ -195,6 +208,34 @@ test("owner rules select only the direct regression coverage for representative 
     totalNodeTests += plan.selectedNodeTests.length;
   }
   assert.ok(totalNodeTests <= 56, `representative ownership selected ${totalNodeTests} Node tests`);
+});
+
+test("Candidate runtime seals map schema changes to every producer and boundary consumer", () => {
+  const plan = selectGatePlan({
+    map,
+    lane: "task",
+    changedFiles: ["schemas/project-runtime-state.v4.schema.json"],
+  });
+  for (const owner of [
+    "tests/project-file-repository.test.mjs",
+    "tests/project-file-finalizer.test.mjs",
+    "tests/project-file-bridge.test.mjs",
+    "tests/project-file-schema.test.mjs",
+    "tests/bridge-test-environment.test.mjs",
+    "tests/electron-app-fixture.test.mjs",
+    "tests/desktop-preload-ipc.test.mjs",
+    "tests/desktop-package.test.mjs",
+  ]) {
+    assert.ok(plan.selectedNodeTests.includes(owner), owner);
+  }
+  assert.deepEqual(suiteIds(plan), [
+    "typecheck",
+    "lint",
+    "node-targeted",
+    "build-desktop",
+    "electron-smoke",
+    "ai-smoke",
+  ]);
 });
 
 test("Bridge fixture changes select the helper and its schema, scope, and workspace owners", () => {

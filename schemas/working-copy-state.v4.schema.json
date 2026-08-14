@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pageroot.local/schemas/working-copy-state.v4.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "projectId",
+    "documentId",
+    "workingCopyId",
+    "basedOnVersionId",
+    "baseSha256",
+    "currentSha256",
+    "differsFromBase",
+    "draftId",
+    "draftRelativePath",
+    "draftSha256",
+    "draftRevision",
+    "saveState",
+    "lastPersistedRevision",
+    "lastSavedAt",
+    "lastOpenedAt"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "4.0.0" },
+    "projectId": { "type": "string", "pattern": "^project_[a-f0-9]{16,64}$" },
+    "documentId": { "type": "string", "pattern": "^doc_[a-f0-9]{16,64}$" },
+    "workingCopyId": { "type": "string", "pattern": "^work_ver_\\d{4,}$" },
+    "basedOnVersionId": { "type": "string", "pattern": "^ver_\\d{4,}$" },
+    "baseSha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "currentSha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "differsFromBase": { "type": "boolean" },
+    "draftId": { "type": "string", "minLength": 1 },
+    "draftRelativePath": { "type": "string", "pattern": "^drafts/work_ver_\\d{4,}\\.json$" },
+    "draftSha256": { "type": ["string", "null"], "pattern": "^sha256:[a-f0-9]{64}$" },
+    "draftRevision": { "type": "integer", "minimum": 0 },
+    "saveState": { "enum": ["saved", "saving", "failed"] },
+    "lastPersistedRevision": { "type": "integer", "minimum": 0 },
+    "lastSavedAt": { "type": "string", "format": "date-time" },
+    "lastOpenedAt": { "type": "string", "format": "date-time" }
+  }
+}

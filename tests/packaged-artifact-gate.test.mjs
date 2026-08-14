@@ -100,6 +100,8 @@ test("release commands use one automated artifact lane with full tests and packa
   assert.match(verifier, /app\.asar/);
   assert.match(verifier, /finalize-attempt\.mjs/);
   assert.match(verifier, /lifecycle-core\.mjs/);
+  assert.match(verifier, /project-file-repository\.mjs/);
+  assert.match(verifier, /project-file-finalizer\.mjs/);
   assert.match(verifier, /html-source-parser\.mjs/);
   assert.match(verifier, /scope-validator\.mjs/);
   assert.match(verifier, /packaged Bridge dependency smoke/);

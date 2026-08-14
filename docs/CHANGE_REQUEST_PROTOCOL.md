@@ -1,7 +1,7 @@
 # PageRoot Change Request 协议
 
 - 协议主版本：3
-- 状态：目标写入合同
+- 状态：v3 历史执行合同；不是 v4 Project 打开或迁移合同
 - 上位文档：[架构说明](ARCHITECTURE.md)
 - 安全边界：[安全模型](SECURITY_MODEL.md)
 - Schema 入口：[schemas](../schemas)
@@ -9,7 +9,13 @@
 
 本协议规定 PageRoot 与内部 AI 通过本地可见文件夹交接时的身份、目录、冻结、完成、校验、事务和恢复规则。
 
-v3 是干净切换后的唯一运行时协议。v1/v2 记录在切换前整体备份并转为只读归档；新程序不包含兼容 Reader 或自动迁移器。新写入不得沿用以下旧路径：
+本文件保留 v3 历史 Request 的执行合同。桌面打开路径以
+[版本与项目文件产品需求](VERSION_AND_PROJECT_FILES_PRD.md) 和 v4 Schema 为准：
+只有有效 v4 Project 可以作为既有项目打开；所有 v4 以前的项目状态都不迁移、
+不恢复、也不作为读取回退，所选 HTML 会作为新外部来源建立 v4 V1。本文件的
+v3 目录、字段和样本不构成 v4 兼容 Reader 或迁移要求。
+
+v3 在其历史切换边界内不兼容 v1/v2；新写入不得沿用以下旧路径：
 
 - 通过本地编辑创建 `local-editor` Version。
 - 通过历史恢复创建 `restore` Version。
@@ -85,10 +91,11 @@ v3 是干净切换后的唯一运行时协议。v1/v2 记录在切换前整体�
 约束：
 
 - 每个项目拥有独立目录、runtime state、事务、Version 和 Request。
-- 完整 `projectId` 只作为协议身份；registry 通过不可变
-  `storageDirectoryName` 定位可读项目目录。仅完整且身份可验证的 PageRoot
-  0.9.0 v3 项目允许由单一兼容适配器在原目录补写
-  `storageDirectoryName=projectId`；v1/v2、记录不完整或身份不一致的旧目录不迁移。
+- 完整 `projectId` 只作为历史 v3 协议身份；registry 通过不可变
+  `storageDirectoryName` 定位其历史可读目录。仅完整且身份可验证的 PageRoot
+  0.9.0 v3 记录可由历史适配器在原目录补写
+  `storageDirectoryName=projectId`；该适配器不是 v4 Project 打开路径的一部分，
+  v1/v2、记录不完整或身份不一致的旧目录不迁移。
 - `PROJECT.md` 是整个项目长期使用的 AI 修改规则，不只属于某一次 Request；新项目默认创建空文件，由用户按需填写。项目空闲时允许用户修改并由工作台自动保存，处理期间只读。Request 会把当时已持久化规则冻结到 `input/PROJECT.md`；PageRoot 通用边界只写在 `AI_RULES.md`，不预填到项目规则中。
 - `runtime-state.json` 与 `edit-audit.jsonl` 是系统运行和本地直接编辑的审计文件，只建议查看，不提供普通用户编辑入口。
 - `working/<原用户文件名>-V1.x.html` 是有效 AI 结果通过校验后创建的完整 HTML。它先进入“可审阅/打开”状态；审阅只读不会切换项目当前源，只有用户点击“直接打开”或在审阅页确认“打开 AI 修改后”才成为项目当前源。旧工作文件永不原地改写。

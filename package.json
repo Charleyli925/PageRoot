@@ -217,6 +217,14 @@
         "to": "bridge/lifecycle-core.mjs"
       },
       {
+        "from": "scripts/project-file-repository.mjs",
+        "to": "bridge/project-file-repository.mjs"
+      },
+      {
+        "from": "scripts/project-file-finalizer.mjs",
+        "to": "bridge/project-file-finalizer.mjs"
+      },
+      {
         "from": "scripts/user-supplement-core.mjs",
         "to": "bridge/user-supplement-core.mjs"
       },
@@ -421,17 +429,24 @@
           "annotation-records.v3.schema.json",
           "attempt-outcome.v1.schema.json",
           "candidate-assessment.v1.schema.json",
+          "candidate.v4.schema.json",
           "change-request.v3.schema.json",
           "committed-marker.v1.schema.json",
           "completion.v1.schema.json",
           "input-manifest.v1.schema.json",
           "project-state.v3.schema.json",
+          "project-identity.v4.schema.json",
+          "project-registry.v4.schema.json",
+          "project-manifest.v4.schema.json",
+          "project-runtime-state.v4.schema.json",
+          "promotion-transaction.v4.schema.json",
           "runtime-state.v3.schema.json",
           "scope-report.v1.schema.json",
           "source-history.v1.schema.json",
           "user-supplement.v1.schema.json",
           "version-manifest.v3.schema.json",
-          "version-transaction.v1.schema.json"
+          "version-transaction.v1.schema.json",
+          "working-copy-state.v4.schema.json"
         ]
       },
       {

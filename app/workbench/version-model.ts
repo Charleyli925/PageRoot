@@ -108,6 +108,34 @@ export function versionsFromWorkspace(
   if (!Array.isArray(payload.versions)) return [];
   return payload.versions.flatMap((raw) => {
     if (!isRecord(raw)) return [];
+    if (raw.schemaVersion === "4.0.0") {
+      const id = String(raw.versionId || "");
+      const ordinal = Number(raw.ordinal);
+      if (!id || !Number.isSafeInteger(ordinal) || ordinal < 1) return [];
+      const sourceType = String(raw.sourceType || "");
+      if (sourceType !== "initial" && sourceType !== "internal-ai") return [];
+      return [{
+        id,
+        ordinal,
+        label: displayVersionLabel(ordinal),
+        summary: String(raw.summary || (sourceType === "initial" ? "初始登记基线" : "已采纳的 AI Candidate")),
+        generatedAt: String(raw.generatedAt || raw.createdAt || ""),
+        source: (
+          sourceType === "internal-ai" ? "内部 AI" : "初始页面"
+        ) as Version["source"],
+        contentSha256: String(raw.contentSha256 || ""),
+        previousVersionId: raw.previousVersionId ? String(raw.previousVersionId) : null,
+        basedOnVersionId: raw.basedOnVersionId ? String(raw.basedOnVersionId) : null,
+        requestId: raw.requestId ? String(raw.requestId) : null,
+        attemptId: raw.attemptId ? String(raw.attemptId) : null,
+        committed: true,
+        comments: [],
+        directEdits: [],
+        supplements: [],
+        validationReview: null,
+        candidateAssessment: null,
+      }];
+    }
     if (!isRecord(raw.manifest) || raw.manifest.schemaVersion !== "3.0.0") {
       return [];
     }

@@ -85,7 +85,7 @@ async function closePackagedGracefully(electronApp, page) {
   await closed;
 }
 
-test("packaged app preserves identity and opens external HTML across startup states", async () => {
+test("packaged app preserves identity and imports external HTML as V1 across startup states", async () => {
   test.setTimeout(60_000);
   const isolatedUserData = mkdtempSync(
     path.join(tmpdir(), "pageroot-native-e2e-packaged-startup-"),
@@ -104,6 +104,8 @@ test("packaged app preserves identity and opens external HTML across startup sta
   );
   const startupSourcePath = realpathSync(startupAlias);
   const liveSourcePath = realpathSync(liveAlias);
+  const startupOriginal = readFileSync(startupSourcePath);
+  const liveOriginal = readFileSync(liveSourcePath);
   const packagedApp = packagedApplication();
   let electronApp = null;
   try {
@@ -116,6 +118,7 @@ test("packaged app preserves identity and opens external HTML across startup sta
         PAGEROOT_E2E: "1",
         PAGEROOT_E2E_USER_DATA_DIR: isolatedUserData,
         HTML_AI_WORKSPACE: path.join(isolatedUserData, "workspace"),
+        HTML_AI_PROJECT_FILES_ROOT: path.join(isolatedUserData, "project-files"),
       },
     });
     const page = await electronApp.firstWindow();
@@ -156,7 +159,13 @@ test("packaged app preserves identity and opens external HTML across startup sta
         () => window.htmlAIProjects?.getActiveProject(),
       ))?.sourcePath,
       { timeout: 30_000 },
-    ).toBe(startupSourcePath);
+    ).toMatch(/\/qoder-startup-V1\.html$/u);
+    const startupManagedSourcePath = await page.evaluate(async () => (
+      await window.htmlAIProjects?.getActiveProject()
+    )?.sourcePath || "");
+    expect(startupManagedSourcePath).not.toBe(startupSourcePath);
+    expect(readFileSync(startupSourcePath)).toEqual(startupOriginal);
+    expect(readFileSync(startupManagedSourcePath)).toEqual(startupOriginal);
 
     await electronApp.evaluate(({ app }, sourcePath) => {
       app.emit("open-file", { preventDefault() {} }, sourcePath);
@@ -166,7 +175,13 @@ test("packaged app preserves identity and opens external HTML across startup sta
         () => window.htmlAIProjects?.getActiveProject(),
       ))?.sourcePath,
       { timeout: 30_000 },
-    ).toBe(liveSourcePath);
+    ).toMatch(/\/qoder-live-V1\.htm$/u);
+    const liveManagedSourcePath = await page.evaluate(async () => (
+      await window.htmlAIProjects?.getActiveProject()
+    )?.sourcePath || "");
+    expect(liveManagedSourcePath).not.toBe(liveSourcePath);
+    expect(readFileSync(liveSourcePath)).toEqual(liveOriginal);
+    expect(readFileSync(liveManagedSourcePath)).toEqual(liveOriginal);
     await expect.poll(
       () => page.locator("main.workbench").getAttribute("data-project-state"),
       { timeout: 30_000 },

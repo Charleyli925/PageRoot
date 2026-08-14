@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import {
+  access,
   readFile,
 } from "node:fs/promises";
 import { join } from "node:path";
@@ -1126,14 +1127,46 @@ test(
     assert.equal(completed.response.status, 200);
     assert.equal(completed.body.status, "ready-to-open");
     assert.equal(completed.body.currentPath, sourcePath);
-    assert.notEqual(completed.body.workingCopyPath, sourcePath);
+    assert.equal(completed.body.workingCopyPath, sourcePath);
 
     const requestRoot = join(projectRoot, "requests", run.requestId);
     const attemptRoot = join(requestRoot, "attempts", run.attemptId);
-    const versionRoot = join(
+    const candidatePath = join(attemptRoot, "candidate.json");
+    const candidate = await json(new URL(`file://${candidatePath}`));
+    assert.equal(candidate.status, "pending-review");
+    assert.equal(candidate.candidateVersionId, completed.body.versionId);
+    assert.equal(candidate.outputSha256, completed.body.contentSha256);
+    await assert.rejects(access(join(
       projectRoot,
       "versions",
       completed.body.versionId,
+    )));
+    await assert.rejects(access(join(
+      projectRoot,
+      "transactions",
+      `txn_${run.requestId}_${run.attemptId}`,
+      "transaction.json",
+    )));
+    await assert.rejects(access(join(attemptRoot, "outcome.json")));
+
+    const activated = await bridge.postJson(
+      "/ready-version/activate",
+      {
+        sourcePath,
+        projectId: completed.body.projectId,
+        documentId: completed.body.documentId,
+        requestId: completed.body.requestId,
+        attemptId: completed.body.attemptId,
+        versionId: completed.body.versionId,
+      },
+    );
+    assert.equal(activated.response.status, 200, JSON.stringify(activated.body));
+    assert.equal(activated.body.status, "version-activated");
+
+    const versionRoot = join(
+      projectRoot,
+      "versions",
+      activated.body.versionId,
     );
     const artifacts = {
       request: await json(
@@ -1192,19 +1225,19 @@ test(
     validateLifecycleBundle(artifacts);
     validateRuntimeSemantics(artifacts.runtime);
 
-    const sourceBuffer = await readFile(artifacts.project.sourcePath);
-    const workingBuffer = await readFile(completed.body.workingCopyPath);
+    const sourceBuffer = await readFile(sourcePath);
+    const workingBuffer = await readFile(activated.body.currentPath);
     const versionBuffer = await readFile(
       join(versionRoot, "files", "index.html"),
     );
     assert.deepEqual(versionBuffer, workingBuffer);
     assert.notDeepEqual(versionBuffer, sourceBuffer);
     assert.equal(sha256(workingBuffer), artifacts.manifest.contentSha256);
-    assert.equal(artifacts.project.sourcePath, sourcePath);
-    assert.equal(artifacts.project.latestVersionId, completed.body.versionId);
-    assert.equal(artifacts.project.currentExactVersionId, "ver_0001");
-    assert.equal(artifacts.runtime.lifecycleState, "ready-to-open");
-    assert.equal(artifacts.transaction.state, "ready-to-open");
+    assert.equal(artifacts.project.sourcePath, activated.body.currentPath);
+    assert.equal(artifacts.project.latestVersionId, activated.body.versionId);
+    assert.equal(artifacts.project.currentExactVersionId, activated.body.versionId);
+    assert.equal(artifacts.runtime.lifecycleState, "ready");
+    assert.equal(artifacts.transaction.state, "cache-rebuilt");
     assert.deepEqual(await readFile(sourcePath), sourceBeforeAi);
     assert.equal(
       sha256(await readFile(join(versionRoot, "version.json"))),
@@ -1230,19 +1263,6 @@ test(
       artifacts.manifest.annotationArchive.sha256,
     );
 
-    const activated = await bridge.postJson(
-      "/ready-version/activate",
-      {
-        sourcePath,
-        projectId: completed.body.projectId,
-        documentId: completed.body.documentId,
-        requestId: completed.body.requestId,
-        attemptId: completed.body.attemptId,
-        versionId: completed.body.versionId,
-      },
-    );
-    assert.equal(activated.response.status, 200, JSON.stringify(activated.body));
-    assert.equal(activated.body.status, "version-activated");
     assert.deepEqual(
       await readFile(activated.body.currentPath),
       versionBuffer,

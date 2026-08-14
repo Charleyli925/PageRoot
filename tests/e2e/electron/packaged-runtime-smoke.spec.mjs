@@ -64,6 +64,7 @@ async function launchPackaged(isolatedUserData) {
       PAGEROOT_E2E: "1",
       PAGEROOT_E2E_USER_DATA_DIR: isolatedUserData,
       HTML_AI_WORKSPACE: path.join(isolatedUserData, "workspace"),
+      HTML_AI_PROJECT_FILES_ROOT: path.join(isolatedUserData, "project-files"),
     },
   });
   const page = await electronApp.firstWindow();
@@ -132,7 +133,7 @@ function removeIsolatedDirectory(directory) {
   });
 }
 
-test("packaged PageRoot preserves outside-island bytes and reconciles draft revision before close", async () => {
+test("packaged PageRoot imports pre-v4 shell state as V1 and reconciles draft revision before close", async () => {
   test.setTimeout(120_000);
   const isolatedUserData = mkdtempSync(path.join(tmpdir(), "pageroot-native-e2e-packaged-"));
   const sourcePathAlias = path.join(isolatedUserData, "packaged-source.html");
@@ -146,8 +147,9 @@ test("packaged PageRoot preserves outside-island bytes and reconciles draft revi
     `<span title='single-quoted' data-order-b="2" data-order-a='1'>${replacement}</span>`,
   );
   writeFileSync(sourcePathAlias, original);
-  const sourcePath = realpathSync(sourcePathAlias);
-  seedActiveDiskProject(isolatedUserData, sourcePath);
+  const externalSourcePath = realpathSync(sourcePathAlias);
+  seedActiveDiskProject(isolatedUserData, externalSourcePath);
+  let sourcePath = "";
   let electronApp = null;
   try {
     let launched = await launchPackaged(isolatedUserData);
@@ -167,7 +169,13 @@ test("packaged PageRoot preserves outside-island bytes and reconciles draft revi
         () => window.htmlAIProjects?.getActiveProject(),
       ))?.sourcePath,
       { timeout: 30_000 },
-    ).toBe(sourcePath);
+    ).toMatch(/\/packaged-source-V1\.html$/u);
+    sourcePath = await page.evaluate(async () => (
+      await window.htmlAIProjects?.getActiveProject()
+    )?.sourcePath || "");
+    expect(sourcePath).not.toBe(externalSourcePath);
+    expect(readFileSync(externalSourcePath)).toEqual(original);
+    expect(readFileSync(sourcePath)).toEqual(original);
     await expect(page.locator("main.workbench"))
       .toHaveAttribute("data-project-state", "ready", { timeout: 30_000 });
     let frame = await currentEditorFrame(page);
@@ -183,6 +191,7 @@ test("packaged PageRoot preserves outside-island bytes and reconciles draft revi
       () => readFileSync(sourcePath).equals(expected),
       { timeout: 30_000 },
     ).toBe(true);
+    expect(readFileSync(externalSourcePath)).toEqual(original);
     await requestExportCurrentHtml(page);
     await expect.poll(() => existsSync(exportedPath), { timeout: 15_000 }).toBe(true);
     const exported = readFileSync(exportedPath);

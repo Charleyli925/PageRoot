@@ -198,6 +198,27 @@
       "$ref": "#/$defs/timestamp",
       "description": "Time the committed Version became available for explicit user activation."
     },
+    "adoptionRequestedAt": {
+      "$ref": "#/$defs/timestamp",
+      "description": "Durable user-adoption intent. A transaction with this field must recover through the complete source and runtime activation, never remain a half-published Version."
+    },
+    "activationState": {
+      "enum": [
+        "requested",
+        "source-activated",
+        "runtime-activated"
+      ],
+      "description": "Crash-recovery progress for the explicit adoption transition."
+    },
+    "activationDraftRevision": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Deterministic empty-draft revision used while completing adoption after a crash."
+    },
+    "activationDraftUpdatedAt": {
+      "$ref": "#/$defs/timestamp",
+      "description": "Deterministic empty-draft timestamp paired with activationDraftRevision."
+    },
     "cacheRebuiltAt": {
       "$ref": "#/$defs/timestamp"
     },

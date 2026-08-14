@@ -59,6 +59,25 @@ function sameContext(left, right, sameSourcePath) {
   );
 }
 
+function sameOpenTarget(left, right, sameSourcePath) {
+  return Boolean(
+    sameOpenRoute(left, right, sameSourcePath)
+    && String(left.sourceSha256 || "") === String(right.sourceSha256 || "")
+  );
+}
+
+function sameOpenRoute(left, right, sameSourcePath) {
+  return Boolean(
+    sameContext(left, right, sameSourcePath)
+    && String(left.projectRootPath || "") === String(right.projectRootPath || "")
+    && String(left.targetKind || "") === String(right.targetKind || "")
+    && String(left.workingCopyId || "") === String(right.workingCopyId || "")
+    && String(left.versionId || "") === String(right.versionId || "")
+    && sameSourcePath(left.exactSourcePath || left.sourcePath, right.exactSourcePath || right.sourcePath)
+    && Number(left.sessionEpoch ?? left.epoch) === Number(right.sessionEpoch ?? right.epoch)
+  );
+}
+
 function copyContext(context) {
   if (!context) return null;
   const epoch = Number(context.epoch);
@@ -66,7 +85,18 @@ function copyContext(context) {
   const documentId = String(context.documentId || "");
   const sourcePath = String(context.sourcePath || "");
   if (!Number.isSafeInteger(epoch) || !sourcePath) return null;
-  return Object.freeze({ epoch, projectId, documentId, sourcePath });
+  const target = context.projectRootPath && context.targetKind
+    ? {
+      projectRootPath: String(context.projectRootPath),
+      targetKind: String(context.targetKind),
+      workingCopyId: context.workingCopyId ? String(context.workingCopyId) : null,
+      versionId: context.versionId ? String(context.versionId) : null,
+      exactSourcePath: String(context.exactSourcePath || sourcePath),
+      sourceSha256: String(context.sourceSha256 || ""),
+      sessionEpoch: Number(context.sessionEpoch ?? epoch),
+    }
+    : {};
+  return Object.freeze({ epoch, projectId, documentId, sourcePath, ...target });
 }
 
 function invalidAcknowledgement(message, code) {
@@ -852,6 +882,8 @@ export class DocumentWorkflow {
   #writeContext(context) {
     const explicit = copyContext(context);
     if (explicit) return explicit;
+    const active = copyContext(this.#projectSession.context);
+    if (active) return active;
     return Object.freeze({
       epoch: this.#projectSession.epoch,
       projectId: this.#projectSession.projectId,
@@ -995,8 +1027,7 @@ export class DocumentWorkflow {
           }
           write = {
             ...write,
-            projectId: registration.value.projectId,
-            documentId: registration.value.documentId,
+            ...registration.value,
             expectedSourceSha256: this.#documentSession.sourceSha256,
           };
           writeContext = registration.value;
@@ -1019,6 +1050,13 @@ export class DocumentWorkflow {
           editRevision: write.revision,
           changeEvents: write.events.map(this.#codecs.persistedChangeEvent),
           sourceHistoryOperations: write.historyOperations,
+          projectRootPath: write.projectRootPath,
+          targetKind: write.targetKind,
+          workingCopyId: write.workingCopyId,
+          versionId: write.versionId,
+          exactSourcePath: write.exactSourcePath,
+          sourceSha256: write.sourceSha256,
+          sessionEpoch: write.sessionEpoch,
         });
         await this.#validateAutosaveAck(payload, write);
         const sourceSha256 = String(payload.sha256 || payload.currentHtmlSha256 || "");
@@ -1035,8 +1073,14 @@ export class DocumentWorkflow {
             payload.sourceHistory,
           );
         }
-        this.#acknowledgeWrite({ write, writeContext, payload, sourceSha256, persistedRevision });
-        if (!this.#isCurrent(writeContext)) return stale(writeContext);
+        const acknowledgedContext = this.#acknowledgeWrite({
+          write,
+          writeContext,
+          payload,
+          sourceSha256,
+          persistedRevision,
+        });
+        if (!this.#isCurrent(acknowledgedContext)) return stale(acknowledgedContext);
       } catch (cause) {
         return await this.#handleFlushFailure({
           cause,
@@ -1090,8 +1134,9 @@ export class DocumentWorkflow {
 
   #acknowledgeWrite({ write, writeContext, payload, sourceSha256, persistedRevision }) {
     const queued = this.#documentSession.pendingWrite;
+    let nextWrite = null;
     if (queued && sameContext(queued, write, this.#codecs.sameSourcePath)) {
-      const nextWrite = {
+      nextWrite = {
         ...queued,
         expectedSourceSha256: sourceSha256,
         recoveryIdentity: this.#codecs.recoveryIdentityFromRecord(payload.recoveryIdentity)
@@ -1099,12 +1144,16 @@ export class DocumentWorkflow {
         events: this.#codecs.removeAcknowledgedAuditEvents(queued.events, write.events),
         historyOperations: this.#sourceHistorySession.pendingOperations,
       };
-      this.#documentSession.setPendingWrite(nextWrite);
-      this.#persistRecovery(nextWrite, writeContext);
-    } else {
-      this.#persistRecovery(null, writeContext);
     }
-    if (!this.#isCurrent(writeContext)) return;
+    if (!this.#isCurrent(writeContext)) {
+      if (nextWrite) {
+        this.#documentSession.setPendingWrite(nextWrite);
+        this.#persistRecovery(nextWrite, writeContext);
+      } else {
+        this.#persistRecovery(null, writeContext);
+      }
+      return writeContext;
+    }
     this.#recoveryIdentity = this.#codecs.recoveryIdentityFromRecord(payload.recoveryIdentity)
       || this.#recoveryIdentity;
     const writeCompletesCurrentDocument = Boolean(
@@ -1134,6 +1183,58 @@ export class DocumentWorkflow {
         currentExactVersionId: payload.currentExactVersionId,
       });
     }
+    const rebound = this.#reconcileOpenTargetAfterAutosave({
+      writeContext,
+      payload,
+      sourceSha256,
+    });
+    const acknowledgedContext = rebound.context;
+    if (rebound.routingChanged) {
+      const pendingHistory = this.#sourceHistorySession.pendingOperations;
+      this.#sourceHistorySession.activate(
+        acknowledgedContext,
+        sourceSha256,
+        payload.sourceHistory,
+      );
+      this.#sourceHistorySession.restorePending(
+        acknowledgedContext,
+        pendingHistory,
+      );
+    }
+    if (nextWrite && rebound.targetRefreshed) {
+      nextWrite = {
+        ...nextWrite,
+        epoch: acknowledgedContext.epoch,
+        projectId: acknowledgedContext.projectId,
+        documentId: acknowledgedContext.documentId,
+        sourcePath: acknowledgedContext.sourcePath,
+        projectRootPath: acknowledgedContext.projectRootPath,
+        targetKind: acknowledgedContext.targetKind,
+        workingCopyId: acknowledgedContext.workingCopyId,
+        versionId: acknowledgedContext.versionId,
+        exactSourcePath: acknowledgedContext.exactSourcePath,
+        sourceSha256: acknowledgedContext.sourceSha256,
+        sessionEpoch: acknowledgedContext.sessionEpoch,
+        expectedSourceSha256: sourceSha256,
+        historyOperations: this.#sourceHistorySession.pendingOperations,
+      };
+    }
+    if (nextWrite) {
+      this.#documentSession.setPendingWrite(nextWrite);
+      this.#persistRecovery(nextWrite, acknowledgedContext);
+      if (
+        rebound.routingChanged
+        && !this.#codecs.sameSourcePath(
+          writeContext.sourcePath,
+          acknowledgedContext.sourcePath,
+        )
+      ) {
+        this.#recoveryStore.remove(`html-ai-recovery:${writeContext.sourcePath}`);
+      }
+    } else {
+      this.#persistRecovery(null, writeContext);
+      if (rebound.routingChanged) this.#persistRecovery(null, acknowledgedContext);
+    }
     this.#auditPending = this.#codecs.removeAcknowledgedAuditEvents(
       this.#auditPending,
       write.events,
@@ -1141,13 +1242,95 @@ export class DocumentWorkflow {
     if (!this.#documentSession.pendingWrite) {
       this.#documentSession.setPersistence({ state: "idle", error: "" });
     }
+    if (rebound.routingChanged) {
+      this.#emit({
+        type: "document-open-target-rebound",
+        context: acknowledgedContext,
+        previousContext: writeContext,
+        activeDraft: this.#codecs.isRecord(payload.activeDraft)
+          ? payload.activeDraft
+          : null,
+      });
+    }
     this.#emit({
       type: "document-persisted",
-      context: writeContext,
+      context: acknowledgedContext,
       revision: persistedRevision,
       sourceSha256,
       lastModifiedAt: String(payload.lastModifiedAt || ""),
     });
+    return acknowledgedContext;
+  }
+
+  #reconcileOpenTargetAfterAutosave({ writeContext, payload, sourceSha256 }) {
+    const rawTarget = this.#codecs.isRecord(payload?.openTarget)
+      ? payload.openTarget
+      : null;
+    if (!rawTarget) {
+      return {
+        context: writeContext,
+        routingChanged: false,
+        targetRefreshed: false,
+      };
+    }
+    if (
+      String(rawTarget.projectId || "") !== writeContext.projectId
+      || String(rawTarget.documentId || "") !== writeContext.documentId
+      || !String(rawTarget.projectRootPath || "")
+      || !String(rawTarget.targetKind || "")
+    ) {
+      return {
+        context: writeContext,
+        routingChanged: false,
+        targetRefreshed: false,
+      };
+    }
+    const target = {
+      ...rawTarget,
+      projectId: writeContext.projectId,
+      documentId: writeContext.documentId,
+      exactSourcePath: String(
+        rawTarget.exactSourcePath || payload.sourcePath || "",
+      ),
+      sourceSha256,
+    };
+    if (!target.exactSourcePath) {
+      return {
+        context: writeContext,
+        routingChanged: false,
+        targetRefreshed: false,
+      };
+    }
+    const next = this.#codecs.sameSourcePath(
+      target.exactSourcePath,
+      writeContext.sourcePath,
+    )
+      ? this.#projectSession.refreshOpenTarget?.(target)
+      : this.#projectSession.adoptOpenTarget({
+          previousSourcePath: writeContext.sourcePath,
+          target,
+        });
+    const context = copyContext(next);
+    if (!context || !this.#isCurrent(context)) {
+      return {
+        context: writeContext,
+        routingChanged: false,
+        targetRefreshed: false,
+      };
+    }
+    return {
+      context,
+      routingChanged: !sameOpenRoute(
+        writeContext,
+        context,
+        this.#codecs.sameSourcePath,
+      ),
+      targetRefreshed: !sameOpenTarget(
+        writeContext,
+        context,
+        this.#codecs.sameSourcePath,
+      ),
+    };
   }
 
   #updateQueuedWriteAfterRegistration(write) {
@@ -1157,6 +1340,13 @@ export class DocumentWorkflow {
       ...queued,
       projectId: write.projectId,
       documentId: write.documentId,
+      projectRootPath: write.projectRootPath,
+      targetKind: write.targetKind,
+      workingCopyId: write.workingCopyId,
+      versionId: write.versionId,
+      exactSourcePath: write.exactSourcePath,
+      sourceSha256: write.sourceSha256,
+      sessionEpoch: write.sessionEpoch,
       expectedSourceSha256: write.expectedSourceSha256,
     });
   }

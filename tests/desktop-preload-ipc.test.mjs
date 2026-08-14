@@ -513,6 +513,43 @@ test("preload exposes the narrow generated-version activation operation", async 
   ]);
 });
 
+test("preload exposes the exact managed Working Copy activation operation", async () => {
+  const calls = [];
+  const api = await loadPreload(async (...args) => {
+    calls.push(args);
+    return success({
+      sourcePath: "/Users/demo/Documents/PageRoot/项目/report/report-V1.html",
+      sha256: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      html: "<!doctype html><html><body>V1</body></html>",
+      previousSourcePath: "/Users/demo/report.html",
+    });
+  });
+  const payload = {
+    previousSourcePath: "/Users/demo/report.html",
+    nextSourcePath: "/Users/demo/Documents/PageRoot/项目/report/report-V1.html",
+    expectedSha256: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    projectId: "project_demo",
+    documentId: "doc_demo",
+    workingCopyId: "work_ver_0001",
+    versionId: "ver_0001",
+    projectRootPath: "/Users/demo/Documents/PageRoot/项目/report",
+  };
+
+  assert.deepEqual(
+    await api.activateManagedWorkingCopy(payload),
+    {
+      sourcePath: "/Users/demo/Documents/PageRoot/项目/report/report-V1.html",
+      sha256: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      html: "<!doctype html><html><body>V1</body></html>",
+      previousSourcePath: "/Users/demo/report.html",
+    },
+  );
+  assert.deepEqual(calls[0], [
+    "html-projects:activate-managed-working-copy",
+    payload,
+  ]);
+});
+
 test("preload exposes the narrow history-version Finder operation", async () => {
   const calls = [];
   const api = await loadPreload(async (...args) => {

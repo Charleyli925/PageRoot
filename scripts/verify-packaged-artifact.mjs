@@ -44,6 +44,8 @@ const REQUIRED_BRIDGE_FILES = [
   "workspace-bridge.mjs",
   "finalize-attempt.mjs",
   "lifecycle-core.mjs",
+  "project-file-repository.mjs",
+  "project-file-finalizer.mjs",
   "user-supplement-core.mjs",
   "record-user-supplement.mjs",
   "html-source-parser.mjs",
