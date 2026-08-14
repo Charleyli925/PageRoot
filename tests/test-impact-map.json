@@ -303,7 +303,7 @@
       "patterns": [
         "^scripts/ci-health-report\\.mjs$",
         "^tests/ci-health-report\\.test\\.mjs$",
-        "^\\.github/workflows/(?:ci|ci-health|pr-feedback|release|release-candidate|release-dry-run)\\.yml$"
+        "^\\.github/workflows/(?:ci|ci-health|pr-feedback|draft-review|draft-review-auto|release|release-candidate|release-dry-run)\\.yml$"
       ],
       "suites": [],
       "nodeTests": [

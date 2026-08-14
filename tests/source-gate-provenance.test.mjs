@@ -235,10 +235,6 @@ test("GitHub workflows run tests in parallel with one final-review policy and ke
   assert.match(feedback, /group: pageroot-pr-/u);
   assert.match(ci, /group: pageroot-pr-/u);
   assert.doesNotMatch(feedback, /name: release-gate|test:browser:full|test:electron:full/u);
-  assert.match(feedback, /name: review-advisory/u);
-  assert.match(feedback, /check-pr-review-policy\.mjs/u);
-  assert.match(feedback, /--mode advisory/u);
-  assert.match(feedback, /output\/review-policy\/review-advisory\.json/u);
   assert.match(feedback, /pull-requests: read/u);
   assert.doesNotMatch(feedback, /contents: write|issues: write|pull-requests: write/u);
   assert.equal(

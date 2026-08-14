@@ -9,6 +9,7 @@
 | `npm run gate:edit` | 一次局部修改后 | 只运行影响映射命中的 Node 文件；必要时 typecheck | 快速发现局部逻辑错误，不启动浏览器或 Electron |
 | `npm run gate:task` | 一个开发任务完成时 | 静态检查、受影响 Node 文件，以及相关 Browser/Electron/AI 冒烟 | 在较短时间内证明生产链路已经接通 |
 | PR `pr-feedback` | `opened/synchronize/reopened` | 按影响映射选择 Node/编译检查；并行跑非阻断 `review-advisory`，用与 `review-policy` 相同的证据合同对 live pair 做一次快照评估 | 普通推送无论 Draft/Ready 都不重复消费完整矩阵；当前活动的 Codex P0/P1 在晋升前就可见；仅切回 Draft 不产生 Feedback |
+| PR `pr-feedback` | `opened/synchronize/reopened` | 按影响映射选择 Node/编译检查；成功后由可信 `draft-review-auto` 为 exact head 自动请求一次 Codex 评审并写入滚动 status 评论 | 普通推送无论 Draft/Ready 都不重复消费完整矩阵；当前活动的 Codex P0/P1 在晋升前就可见；仅切回 Draft 不产生 Feedback |
 | `review-policy` | 最终 Tree 从 Draft 转为 Ready，由 Ready 唯一触发最终审阅 | 实时 head/base、Ready 后提交的 exact-commit Codex review、不可变 clean comment、Ready 后的 Codex Bot root `+1`、30 秒 settle window、活动非 outdated P0/P1 线程和 P0/P1 `CHANGES_REQUESTED` | 旧 head/base、Ready 前信号、旧轮次/真人/非 `+1` reaction、未结束 review、P0/P1 阻断时不能通过；P2/P3/unclassified 写为债务而不阻断 |
 | `Review Gate Recovery` | Codex 精确提交的 review/clean comment 在 `review-policy` 超时后到达 | trusted default-branch code 重验 live Ready head/base、当前 review policy、原 run timeout artifact、所有非 review job 结果 | 仅对原 run 调用 failed-job rerun；测试失败、P0/P1、Draft/closed、SHA/base 改变或 artifact 不符全部 fail closed |
 | `baseline-policy` | 分支策略通过，与 review-policy 并行 | 全局依赖 advisory policy 与 packaged-runtime closure | 基线红时不启动 Linux build、Browser 或 macOS Electron runner |
@@ -40,6 +41,7 @@ PR 必须从 Draft 开始。普通推送由独立的 `PR Feedback` workflow 处�
 成功后，可信的 `Draft Codex Review Auto` workflow 会为 exact head 自动请求
 一次 Codex 评审并把结轮状态写进滚动 status 评论；维护者也可用
 `pageroot-draft-review-command:v1` 评论手动请求或关闭一轮。Codex 只在 Ready
+转换后或受信 exact-head 请求后评审，Draft 期轮询不可能观察到新评审，因此 status 评论是快照语义，
 转换后或受信 exact-head 请求后评审，Draft 期轮询不可能观察到新评审，因此 advisory 是快照语义，
 `review-policy` 才是权威等待。只切回 Draft 不触发
 head/base SHA marker 在 Draft 请求第二轮审阅。
