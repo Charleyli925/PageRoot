@@ -144,6 +144,55 @@ test("Candidate creation cannot bypass a frozen Request", async (t) => {
   assert.deepEqual(manifest.versions.map((version) => version.versionId), ["ver_0001"]);
 });
 
+test("cancelling a ready Candidate durably cancels its Request", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "cancel-ready-candidate.html");
+  const candidate = await completeFrozenCandidate(value, {
+    target: imported.target,
+    requestId: "req_cancel_ready",
+    html: html("candidate to cancel"),
+    expectedSourceSha256: imported.target.sourceSha256,
+  });
+
+  const cancelled = await value.repository.cancelRequest({
+    target: imported.target,
+    requestId: "req_cancel_ready",
+    attemptId: "attempt_001",
+  });
+  assert.equal(cancelled.status, "cancelled");
+  const requestPath = path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "requests",
+    "req_cancel_ready",
+    "request.json",
+  );
+  const request = await json(requestPath);
+  assert.equal(request.status, "cancelled");
+  assert.equal(typeof request.completedAt, "string");
+  assert.equal(typeof request.cancelledAt, "string");
+  assert.equal("rejectedAt" in request, false);
+  const candidatePath = path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "requests",
+    "req_cancel_ready",
+    "candidate.json",
+  );
+  const persistedCandidate = await json(candidatePath);
+  assert.equal(persistedCandidate.status, "rejected");
+  assert.equal(typeof persistedCandidate.rejectedAt, "string");
+  assert.equal(
+    (await value.repository.requestStatus({
+      target: imported.target,
+      requestId: "req_cancel_ready",
+      attemptId: "attempt_001",
+    })).status,
+    "cancelled",
+  );
+  assert.equal(candidate.candidate.candidateId, request.candidateId);
+});
+
 test("shared repository lock preserves concurrent Registry updates across instances", async (t) => {
   const value = await fixture(t);
   const firstPath = path.join(value.sources, "first.html");
@@ -685,6 +734,47 @@ test("promotion rechecks the Candidate base before manifest publication and reco
     "candidate.json",
   ));
   assert.equal(persistedCandidate.status, "pending-review");
+});
+
+test("promotion verifies linked Version Working Copy bytes before manifest publication", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "linked-version.html");
+  const candidate = await completeFrozenCandidate(value, {
+    target: imported.target,
+    requestId: "req_linked_version_bytes",
+    html: html("candidate V2 bytes"),
+    expectedSourceSha256: imported.target.sourceSha256,
+  });
+  const versionWorkingCopyPath = path.join(
+    imported.target.projectRootPath,
+    "linked-version-V2.html",
+  );
+  const externalHtml = html("external in-place edit of linked Version Working Copy");
+  const repository = new ProjectFileRepository({
+    projectsRoot: value.projects,
+    failpoint: async (name) => {
+      if (name === "promotion-working-copy-created") {
+        await writeFile(versionWorkingCopyPath, externalHtml, "utf8");
+      }
+      return false;
+    },
+  });
+
+  await assert.rejects(
+    repository.promoteCandidate({
+      target: imported.target,
+      candidateId: candidate.candidate.candidateId,
+    }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "PROMOTION_WORKING_COPY_HASH_MISMATCH",
+  );
+  assert.equal(await readFile(versionWorkingCopyPath, "utf8"), externalHtml);
+  const manifest = await json(path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "manifest.json",
+  ));
+  assert.deepEqual(manifest.versions.map((version) => version.versionId), ["ver_0001"]);
 });
 
 test("exact path, rather than equal bytes, determines the opened document", async (t) => {
@@ -1563,6 +1653,161 @@ test("PROJECT.md rechecks its hash at the publication boundary", async (t) => {
       && error.code === "PROJECT_FILE_CONFLICT",
   );
   assert.equal(await readFile(projectNotesPath, "utf8"), externalContent);
+});
+
+test("PROJECT.md CAS preserves an external write created after source staging", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "project-notes-cas.html");
+  const before = await value.repository.readProjectNotes({ target: imported.target });
+  const projectNotesPath = path.join(imported.target.projectRootPath, "PROJECT.md");
+  const externalContent = "# 外部 CAS 写入\n\n不能被 PageRoot 覆盖。\n";
+  const repository = new ProjectFileRepository({
+    projectsRoot: value.projects,
+    failpoint: async (name) => {
+      if (name === "project-notes-source-staged") {
+        await writeFile(projectNotesPath, externalContent, "utf8");
+      }
+      return false;
+    },
+  });
+
+  await assert.rejects(
+    repository.updateProjectNotes({
+      target: imported.target,
+      content: "# PageRoot 竞争写入\n",
+      expectedSha256: before.sha256,
+    }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "PROJECT_FILE_CONFLICT",
+  );
+  assert.equal(await readFile(projectNotesPath, "utf8"), externalContent);
+  const transactions = (await readdir(path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "transactions",
+  ))).filter((name) => name.startsWith("project-notes_") && name.endsWith(".json"));
+  assert.equal(transactions.length, 1);
+  assert.equal(
+    (await json(path.join(
+      imported.target.projectRootPath,
+      ".pageroot",
+      "transactions",
+      transactions[0],
+    ))).state,
+    "conflicted",
+  );
+});
+
+test("PROJECT.md CAS restores an external write between its compare and rename", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "project-notes-compare-rename.html");
+  const before = await value.repository.readProjectNotes({ target: imported.target });
+  const projectNotesPath = path.join(imported.target.projectRootPath, "PROJECT.md");
+  const externalContent = "# 比较和改名之间的外部写入\n";
+  const repository = new ProjectFileRepository({
+    projectsRoot: value.projects,
+    failpoint: async (name) => {
+      if (name === "project-notes-before-source-stage") {
+        await writeFile(projectNotesPath, externalContent, "utf8");
+      }
+      return false;
+    },
+  });
+
+  await assert.rejects(
+    repository.updateProjectNotes({
+      target: imported.target,
+      content: "# PageRoot 不可覆盖的竞争写入\n",
+      expectedSha256: before.sha256,
+    }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "PROJECT_FILE_CONFLICT",
+  );
+  assert.equal(await readFile(projectNotesPath, "utf8"), externalContent);
+});
+
+test("PROJECT.md CAS restores a write through an already-open external handle", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "project-notes-open-handle.html");
+  const before = await value.repository.readProjectNotes({ target: imported.target });
+  const projectNotesPath = path.join(imported.target.projectRootPath, "PROJECT.md");
+  const externalContent = "# 保留文件句柄的外部写入\n";
+  const externalHandle = await open(projectNotesPath, "r+");
+  t.after(() => externalHandle.close());
+  const repository = new ProjectFileRepository({
+    projectsRoot: value.projects,
+    failpoint: async (name) => {
+      if (name === "project-notes-source-published") {
+        const buffer = Buffer.from(externalContent, "utf8");
+        await externalHandle.truncate(0);
+        await externalHandle.write(buffer, 0, buffer.byteLength, 0);
+      }
+      return false;
+    },
+  });
+
+  await assert.rejects(
+    repository.updateProjectNotes({
+      target: imported.target,
+      content: "# PageRoot 不能覆盖保留句柄\n",
+      expectedSha256: before.sha256,
+    }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "PROJECT_FILE_CONFLICT",
+  );
+  assert.equal(await readFile(projectNotesPath, "utf8"), externalContent);
+});
+
+test("interrupted PROJECT.md staging recovers a durable no-replace publication", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "project-notes-recovery.html");
+  const before = await value.repository.readProjectNotes({ target: imported.target });
+  const projectNotesPath = path.join(imported.target.projectRootPath, "PROJECT.md");
+  const nextContent = "# 恢复后的项目规则\n";
+  const interrupted = new ProjectFileRepository({
+    projectsRoot: value.projects,
+    failpoint: async (name) => name === "project-notes-source-staged",
+  });
+
+  await assert.rejects(
+    interrupted.updateProjectNotes({
+      target: imported.target,
+      content: nextContent,
+      expectedSha256: before.sha256,
+    }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "INJECTED_FAILPOINT",
+  );
+  await assert.rejects(readFile(projectNotesPath), (error) => error?.code === "ENOENT");
+
+  const recovered = await new ProjectFileRepository({
+    projectsRoot: value.projects,
+  }).recoverProject({ projectRootPath: imported.target.projectRootPath });
+  assert.equal(recovered.some((entry) => entry?.kind === "project-notes"), true);
+  assert.equal(await readFile(projectNotesPath, "utf8"), nextContent);
+});
+
+test("a manifest cannot map more than one Working Copy to the same Version", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "duplicate-version-mapping.html");
+  const manifestPath = path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "manifest.json",
+  );
+  const manifest = await json(manifestPath);
+  manifest.workingCopies.push({
+    ...structuredClone(manifest.workingCopies[0]),
+    workingCopyId: "work_ver_0002",
+    sourceRelativePath: "duplicate-version-mapping-V2.html",
+    stateRelativePath: "working-copies/work_ver_0002.json",
+  });
+  await writeFile(manifestPath, JSON.stringify(manifest), "utf8");
+
+  assert.equal(
+    await value.repository.workspace({ sourcePath: imported.target.exactSourcePath }),
+    null,
+  );
 });
 
 test("a copied project remains external and its first import creates an independent V1", async (t) => {

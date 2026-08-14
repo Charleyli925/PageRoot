@@ -55,6 +55,8 @@ test("committed v4 fixtures independently validate each persisted-record contrac
     ["project-manifest.v4.schema.json", "project-manifest.valid.json"],
     ["project-runtime-state.v4.schema.json", "project-runtime-state.processing.json"],
     ["working-copy-state.v4.schema.json", "working-copy-state.valid.json"],
+    ["request.v4.schema.json", "request.processing.json"],
+    ["request.v4.schema.json", "request.candidate-ready.json"],
     ["candidate.v4.schema.json", "candidate.pending-review.json"],
     ["promotion-transaction.v4.schema.json", "promotion-transaction.prepared.json"],
   ];
@@ -114,6 +116,8 @@ test("v4 schemas accept repository-produced lifecycle facts", async (t) => {
     request: { summary: "schema candidate" },
     prompt: "# schema candidate\n",
   });
+  const requestPath = path.join(controlRoot, "requests", "req_schema", "request.json");
+  await validate("request.v4.schema.json", await json(requestPath));
   const candidate = await repository.createCandidate({
     target: imported.target,
     requestId: "req_schema",
@@ -123,6 +127,7 @@ test("v4 schemas accept repository-produced lifecycle facts", async (t) => {
   });
   const candidatePath = path.join(controlRoot, "requests", "req_schema", "candidate.json");
   await Promise.all([
+    validate("request.v4.schema.json", await json(requestPath)),
     validate("candidate.v4.schema.json", await json(candidatePath)),
     validate(
       "project-runtime-state.v4.schema.json",
@@ -141,6 +146,7 @@ test("v4 schemas accept repository-produced lifecycle facts", async (t) => {
     "transaction.json",
   ));
   await Promise.all([
+    validate("request.v4.schema.json", await json(requestPath)),
     validate("candidate.v4.schema.json", await json(candidatePath)),
     validate("promotion-transaction.v4.schema.json", transaction),
     validate("project-manifest.v4.schema.json", await json(path.join(controlRoot, "manifest.json"))),
@@ -167,4 +173,17 @@ test("v4 schemas accept repository-produced lifecycle facts", async (t) => {
   const nestedWorkingCopy = structuredClone(initialManifest);
   nestedWorkingCopy.workingCopies[0].sourceRelativePath = "nested/schema-V1.htm";
   assert.equal(check(nestedWorkingCopy), false);
+  const requestSchema = JSON.parse(await readFile(
+    new URL("../schemas/request.v4.schema.json", import.meta.url),
+    "utf8",
+  ));
+  const requestAjv = new Ajv2020({ strict: true, strictRequired: false });
+  requestAjv.addFormat(
+    "date-time",
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/u,
+  );
+  const checkRequest = requestAjv.compile(requestSchema);
+  const invalidRequest = await v4Fixture("request.processing.json");
+  invalidRequest.untrusted = true;
+  assert.equal(checkRequest(invalidRequest), false);
 });

@@ -1,0 +1,29 @@
+{
+  "schemaVersion": "4.0.0",
+  "requestId": "req_fixture",
+  "attemptId": "attempt_001",
+  "candidateId": "candidate_req_fixture",
+  "projectId": "project_0123456789abcdef",
+  "documentId": "doc_fedcba9876543210",
+  "sourceWorkingCopyId": "work_ver_0001",
+  "expectedSourceSha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "proposedVersionId": "ver_0002",
+  "proposedVersionOrdinal": 2,
+  "basedOnVersionId": "ver_0001",
+  "previousVersionId": "ver_0001",
+  "inputRelativePath": "requests/req_fixture/input/base/index.html",
+  "promptRelativePath": "requests/req_fixture/PROMPT.md",
+  "projectRulesRelativePath": "requests/req_fixture/input/PROJECT.md",
+  "annotationsRelativePath": "requests/req_fixture/input/annotations/records.json",
+  "changeRequestRelativePath": "requests/req_fixture/change-request.json",
+  "inputManifestRelativePath": "requests/req_fixture/input-manifest.json",
+  "inputManifestSha256": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "outputRelativePath": "requests/req_fixture/attempts/attempt_001/output/candidate.html",
+  "status": "candidate-ready",
+  "createdAt": "2026-08-14T00:00:00.000Z",
+  "completedAt": "2026-08-14T00:01:00.000Z",
+  "request": {
+    "preserveOutsideTargets": true,
+    "summary": "Fixture Request"
+  }
+}

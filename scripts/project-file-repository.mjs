@@ -726,6 +726,105 @@ function saveTransactionArtifactPaths(paths, transactionPath, transaction) {
   };
 }
 
+function projectNotesTransactionArtifactPaths(paths, transactionPath, transaction) {
+  const stem = path.basename(transactionPath, ".json");
+  if (!/^project-notes_[a-f0-9-]{36}$/u.test(stem)) {
+    throw new ProjectFileRepositoryError(
+      "PROJECT_NOTES_TRANSACTION_INVALID",
+      "The PROJECT.md transaction path is invalid.",
+    );
+  }
+  const sourceGuardRelativePath = `transactions/${stem}.source-before.md`;
+  const sourceReplacementRelativePath = `transactions/${stem}.replacement.md`;
+  if (
+    transaction.transactionId !== stem
+    || transaction.sourceGuardRelativePath !== sourceGuardRelativePath
+    || transaction.sourceReplacementRelativePath !== sourceReplacementRelativePath
+  ) {
+    throw new ProjectFileRepositoryError(
+      "PROJECT_NOTES_TRANSACTION_INVALID",
+      "The PROJECT.md transaction artifacts are invalid.",
+    );
+  }
+  const sourceGuardPath = resolveRelative(
+    paths.controlRoot,
+    sourceGuardRelativePath,
+    "PROJECT.md source guard path",
+  );
+  const sourceReplacementPath = resolveRelative(
+    paths.controlRoot,
+    sourceReplacementRelativePath,
+    "PROJECT.md source replacement path",
+  );
+  if (
+    !pathInside(paths.transactionsRoot, sourceGuardPath)
+    || !pathInside(paths.transactionsRoot, sourceReplacementPath)
+  ) {
+    throw new ProjectFileRepositoryError(
+      "PATH_ESCAPES_PROJECT",
+      "PROJECT.md transaction artifacts must stay inside transactions/.",
+    );
+  }
+  return {
+    sourceGuardRelativePath,
+    sourceGuardPath,
+    sourceReplacementRelativePath,
+    sourceReplacementPath,
+  };
+}
+
+function assertProjectNotesTransaction(transaction) {
+  assertObjectKeysWithOptional(transaction, [
+    "schemaVersion",
+    "kind",
+    "state",
+    "transactionId",
+    "projectId",
+    "documentId",
+    "sourceRelativePath",
+    "expectedSha256",
+    "targetSha256",
+    "sourceGuardRelativePath",
+    "sourceReplacementRelativePath",
+    "preparedAt",
+  ], [
+    "sourceStagedAt",
+    "sourcePublishedAt",
+    "completedAt",
+    "conflictedAt",
+    "recovery",
+  ], "PROJECT.md transaction", "PROJECT_NOTES_TRANSACTION_INVALID");
+  if (
+    transaction.schemaVersion !== PROJECT_FILE_SCHEMA_VERSION
+    || transaction.kind !== "project-notes"
+    || !["prepared", "source-staged", "source-published", "completed", "conflicted"].includes(transaction.state)
+    || !/^project-notes_[a-f0-9-]{36}$/u.test(String(transaction.transactionId || ""))
+    || transaction.sourceRelativePath !== "PROJECT.md"
+    || !SHA256.test(String(transaction.expectedSha256 || ""))
+    || !SHA256.test(String(transaction.targetSha256 || ""))
+    || (Object.hasOwn(transaction, "recovery") && typeof transaction.recovery !== "string")
+  ) {
+    throw new ProjectFileRepositoryError(
+      "PROJECT_NOTES_TRANSACTION_INVALID",
+      "The PROJECT.md transaction does not match its v4 contract.",
+    );
+  }
+  assertId(transaction.projectId, PROJECT_ID, "PROJECT.md transaction projectId");
+  assertId(transaction.documentId, DOCUMENT_ID, "PROJECT.md transaction documentId");
+  for (const key of [
+    "preparedAt",
+    "sourceStagedAt",
+    "sourcePublishedAt",
+    "completedAt",
+    "conflictedAt",
+  ]) {
+    if (Object.hasOwn(transaction, key)) {
+      assertTimestamp(transaction[key], `PROJECT.md transaction ${key}`, "PROJECT_NOTES_TRANSACTION_INVALID");
+    }
+  }
+  return transaction;
+}
+
 async function unlinkIfPresent(filePath) {
   try {
     await unlink(filePath);
@@ -988,12 +1087,14 @@ function assertManifest(manifest, project) {
   }
   const workingCopyIds = new Set();
   const workingCopyPaths = new Set();
+  const workingCopyVersionIds = new Set();
   for (const workingCopy of manifest.workingCopies) {
     const { sourceRelativePath } = assertManifestWorkingCopyEntry(workingCopy);
     if (
       workingCopyIds.has(workingCopy.workingCopyId)
       || !versionIds.has(workingCopy.basedOnVersionId)
       || !versionIds.has(workingCopy.versionId)
+      || workingCopyVersionIds.has(workingCopy.versionId)
     ) {
       throw new ProjectFileRepositoryError("INVALID_MANIFEST", "A Working Copy entry is inconsistent.");
     }
@@ -1005,6 +1106,7 @@ function assertManifest(manifest, project) {
     }
     workingCopyPaths.add(sourceRelativePath);
     workingCopyIds.add(workingCopy.workingCopyId);
+    workingCopyVersionIds.add(workingCopy.versionId);
   }
   return manifest;
 }
@@ -1963,7 +2065,12 @@ export class ProjectFileRepository {
 
   async updateProjectNotes({ target, content, expectedSha256 } = {}) {
     return this.#serial(async () => {
-      const loaded = await this.#resolveMutationTarget(target);
+      let loaded = await this.#resolveMutationTarget(target);
+      // A prior interrupted PROJECT.md publication may have moved its visible
+      // file into a private guard. Recover that transaction before accepting a
+      // new editor snapshot as the compare-and-swap baseline.
+      await this.#recoverProject(loaded.paths.projectRootPath);
+      loaded = await this.#resolveMutationTarget(target);
       if (typeof content !== "string" || !content.trim()) {
         throw new ProjectFileRepositoryError(
           "INVALID_PROJECT_FILE",
@@ -1994,24 +2101,65 @@ export class ProjectFileRepository {
       const updated = !previous.equals(next);
       if (updated) {
         await this.#hit("project-notes-before-write", { filePath });
-        const immediatelyBeforeWrite = await readFile(filePath);
-        const immediatelyBeforeWriteSha256 = sha256(immediatelyBeforeWrite);
-        if (immediatelyBeforeWriteSha256 !== expected) {
+        const immediatelyBeforePublication = await readRegularFileWithSha256(
+          filePath,
+          "PROJECT.md",
+          { projectRootPath: loaded.paths.projectRootPath },
+        );
+        if (!immediatelyBeforePublication || immediatelyBeforePublication.sha256 !== expected) {
           throw new ProjectFileRepositoryError(
             "PROJECT_FILE_CONFLICT",
             "PROJECT.md changed outside PageRoot before publication.",
             {
               expectedSha256: expected,
-              actualSha256: immediatelyBeforeWriteSha256,
+              actualSha256: immediatelyBeforePublication?.sha256 || null,
             },
           );
         }
-        await atomicWriteProjectFile(
-          loaded.paths.projectRootPath,
-          filePath,
-          next,
-          "PROJECT.md",
+        const transactionId = `project-notes_${randomUUID()}`;
+        const transactionPath = path.join(
+          loaded.paths.transactionsRoot,
+          `${transactionId}.json`,
         );
+        let transaction = {
+          schemaVersion: PROJECT_FILE_SCHEMA_VERSION,
+          kind: "project-notes",
+          state: "prepared",
+          transactionId,
+          projectId: loaded.project.projectId,
+          documentId: loaded.project.documentId,
+          sourceRelativePath: "PROJECT.md",
+          expectedSha256: expected,
+          targetSha256: sha256(next),
+          sourceGuardRelativePath: `transactions/${transactionId}.source-before.md`,
+          sourceReplacementRelativePath: `transactions/${transactionId}.replacement.md`,
+          preparedAt: nowIso(this.#clock),
+        };
+        const artifacts = projectNotesTransactionArtifactPaths(
+          loaded.paths,
+          transactionPath,
+          transaction,
+        );
+        await this.#writeProjectNotesTransaction(loaded, transactionPath, transaction);
+        await writeFileNoReplace(
+          artifacts.sourceReplacementPath,
+          next,
+          transaction.targetSha256,
+          "PROJECT.md source replacement",
+          { projectRootPath: loaded.paths.projectRootPath },
+        );
+        await this.#hit("project-notes-replacement-written", { transactionPath });
+        transaction = await this.#continueProjectNotesTransaction(
+          loaded,
+          transactionPath,
+          transaction,
+        );
+        if (transaction.state !== "completed") {
+          throw new ProjectFileRepositoryError(
+            "PROJECT_FILE_CONFLICT",
+            "PROJECT.md could not be published without replacing an external edit.",
+          );
+        }
       }
       return {
         projectId: loaded.project.projectId,
@@ -2022,6 +2170,264 @@ export class ProjectFileRepository {
         updated,
       };
     });
+  }
+
+  async #writeProjectNotesTransaction(loaded, transactionPath, transaction) {
+    assertProjectNotesTransaction(transaction);
+    projectNotesTransactionArtifactPaths(loaded.paths, transactionPath, transaction);
+    await atomicWriteProjectJson(
+      loaded.paths.projectRootPath,
+      transactionPath,
+      transaction,
+      "PROJECT.md transaction",
+    );
+    return transaction;
+  }
+
+  async #completeProjectNotesTransaction(
+    loaded,
+    transactionPath,
+    transaction,
+    { recovery = null } = {},
+  ) {
+    const artifacts = projectNotesTransactionArtifactPaths(
+      loaded.paths,
+      transactionPath,
+      transaction,
+    );
+    await Promise.all([
+      unlinkIfPresent(artifacts.sourceGuardPath),
+      unlinkIfPresent(artifacts.sourceReplacementPath),
+    ]);
+    await syncDirectory(loaded.paths.transactionsRoot);
+    const completed = {
+      ...transaction,
+      state: "completed",
+      completedAt: transaction.completedAt || nowIso(this.#clock),
+      ...(recovery ? { recovery } : {}),
+    };
+    await this.#writeProjectNotesTransaction(loaded, transactionPath, completed);
+    return completed;
+  }
+
+  async #markProjectNotesConflict(loaded, transactionPath, transaction) {
+    if (transaction.state === "conflicted") return transaction;
+    const conflicted = {
+      ...transaction,
+      state: "conflicted",
+      conflictedAt: nowIso(this.#clock),
+    };
+    await this.#writeProjectNotesTransaction(loaded, transactionPath, conflicted);
+    return conflicted;
+  }
+
+  async #continueProjectNotesTransaction(loaded, transactionPath, initialTransaction) {
+    let transaction = assertProjectNotesTransaction(initialTransaction);
+    const artifacts = projectNotesTransactionArtifactPaths(
+      loaded.paths,
+      transactionPath,
+      transaction,
+    );
+    const sourcePath = path.join(loaded.paths.projectRootPath, transaction.sourceRelativePath);
+    const expected = transaction.expectedSha256;
+    const target = transaction.targetSha256;
+    const readNotesFile = (filePath, label) => readRegularFileWithSha256(filePath, label, {
+      projectRootPath: loaded.paths.projectRootPath,
+    });
+    const conflict = async (message, details = {}) => {
+      transaction = await this.#markProjectNotesConflict(loaded, transactionPath, transaction);
+      throw new ProjectFileRepositoryError(
+        "PROJECT_FILE_CONFLICT",
+        message,
+        { expectedSha256: expected, ...details },
+      );
+    };
+
+    if (["completed", "conflicted"].includes(transaction.state)) return transaction;
+
+    let source = await readNotesFile(sourcePath, "PROJECT.md");
+    let guard = await readNotesFile(artifacts.sourceGuardPath, "PROJECT.md source guard");
+    let replacement = await readNotesFile(
+      artifacts.sourceReplacementPath,
+      "PROJECT.md source replacement",
+    );
+    if (!replacement) {
+      if (transaction.state === "source-published" && source?.sha256 === target) {
+        return this.#completeProjectNotesTransaction(
+          loaded,
+          transactionPath,
+          transaction,
+          { recovery: "source-published" },
+        );
+      }
+      if (transaction.state === "prepared" && !guard && source?.sha256 === expected) {
+        return this.#completeProjectNotesTransaction(
+          loaded,
+          transactionPath,
+          transaction,
+          { recovery: "replacement-unpublished" },
+        );
+      }
+      if (!source && guard) {
+        try {
+          await link(artifacts.sourceGuardPath, sourcePath);
+        } catch (cause) {
+          if (cause?.code !== "EEXIST") throw cause;
+        }
+      }
+      throw new ProjectFileRepositoryError(
+        "PROJECT_NOTES_TRANSACTION_INVALID",
+        "The PROJECT.md transaction lost its replacement bytes before publication.",
+      );
+    }
+    if (replacement.sha256 !== target) {
+      throw new ProjectFileRepositoryError(
+        "PROJECT_NOTES_TRANSACTION_INVALID",
+        "The PROJECT.md transaction replacement bytes do not match its recorded digest.",
+      );
+    }
+
+    if (transaction.state === "prepared") {
+      if (guard) {
+        if (guard.sha256 !== expected) {
+          if (!source) {
+            try {
+              await link(artifacts.sourceGuardPath, sourcePath);
+            } catch (cause) {
+              if (cause?.code !== "EEXIST") throw cause;
+            }
+          }
+          await conflict(
+            "PROJECT.md changed while PageRoot was staging its compare-and-swap write.",
+            { actualSha256: guard.sha256 },
+          );
+        }
+        if (!source) {
+          transaction = {
+            ...transaction,
+            state: "source-staged",
+            sourceStagedAt: transaction.sourceStagedAt || nowIso(this.#clock),
+          };
+          await this.#writeProjectNotesTransaction(loaded, transactionPath, transaction);
+        } else if (source.sha256 === target) {
+          transaction = {
+            ...transaction,
+            state: "source-published",
+            sourcePublishedAt: transaction.sourcePublishedAt || nowIso(this.#clock),
+          };
+          await this.#writeProjectNotesTransaction(loaded, transactionPath, transaction);
+        } else {
+          await conflict(
+            "PROJECT.md changed while PageRoot was staging its compare-and-swap write.",
+            { actualSha256: source.sha256 },
+          );
+        }
+      } else {
+        if (!source || source.sha256 !== expected) {
+          await conflict(
+            "PROJECT.md changed outside PageRoot before publication.",
+            { actualSha256: source?.sha256 || null },
+          );
+        }
+        await this.#hit("project-notes-before-source-stage", { transactionPath, sourcePath });
+        await rename(sourcePath, artifacts.sourceGuardPath);
+        await assertRealPathInsideProject(
+          loaded.paths.projectRootPath,
+          artifacts.sourceGuardPath,
+          "PROJECT.md source guard",
+          { expectedKind: "file" },
+        );
+        transaction = {
+          ...transaction,
+          state: "source-staged",
+          sourceStagedAt: nowIso(this.#clock),
+        };
+        await this.#writeProjectNotesTransaction(loaded, transactionPath, transaction);
+        await this.#hit("project-notes-source-staged", { transactionPath, sourcePath });
+      }
+    }
+
+    if (transaction.state === "source-staged") {
+      source = await readNotesFile(sourcePath, "PROJECT.md");
+      guard = await readNotesFile(artifacts.sourceGuardPath, "PROJECT.md source guard");
+      if (!guard || guard.sha256 !== expected) {
+        if (!source && guard) {
+          try {
+            await link(artifacts.sourceGuardPath, sourcePath);
+          } catch (cause) {
+            if (cause?.code !== "EEXIST") throw cause;
+          }
+        }
+        await conflict(
+          "PROJECT.md changed while PageRoot was preparing its no-replace publication.",
+          { actualSha256: guard?.sha256 || null },
+        );
+      }
+      if (source) {
+        if (source.sha256 !== target) {
+          await conflict(
+            "PROJECT.md changed while PageRoot was preparing its no-replace publication.",
+            { actualSha256: source.sha256 },
+          );
+        }
+      } else {
+        try {
+          await writeFileNoReplace(
+            sourcePath,
+            replacement.buffer,
+            target,
+            "PROJECT.md",
+            { projectRootPath: loaded.paths.projectRootPath },
+          );
+        } catch (cause) {
+          if (cause?.code !== "FILE_COLLISION") throw cause;
+          source = await readNotesFile(sourcePath, "PROJECT.md");
+          await conflict(
+            "PROJECT.md changed outside PageRoot while this edit was being published.",
+            { actualSha256: source?.sha256 || null },
+          );
+        }
+      }
+      transaction = {
+        ...transaction,
+        state: "source-published",
+        sourcePublishedAt: nowIso(this.#clock),
+      };
+      await this.#writeProjectNotesTransaction(loaded, transactionPath, transaction);
+      await this.#hit("project-notes-source-published", { transactionPath, sourcePath });
+    }
+
+    if (transaction.state === "source-published") {
+      source = await readNotesFile(sourcePath, "PROJECT.md");
+      guard = await readNotesFile(artifacts.sourceGuardPath, "PROJECT.md source guard");
+      if (!source || source.sha256 !== target) {
+        await conflict(
+          "PROJECT.md changed outside PageRoot after its no-replace publication.",
+          { actualSha256: source?.sha256 || null },
+        );
+      }
+      if (guard && guard.sha256 !== expected) {
+        // An editor that retained the old descriptor writes through the private
+        // guard. Restore those bytes visibly without replacing any newly
+        // created path, preserving PageRoot's proposed bytes in the transaction.
+        await unlinkIfPresent(artifacts.sourceReplacementPath);
+        await rename(sourcePath, artifacts.sourceReplacementPath);
+        try {
+          await link(artifacts.sourceGuardPath, sourcePath);
+        } catch (cause) {
+          if (cause?.code !== "EEXIST") throw cause;
+        }
+        await syncDirectory(loaded.paths.transactionsRoot);
+        await syncDirectory(loaded.paths.projectRootPath);
+        await conflict(
+          "PROJECT.md changed through an already-open external file handle.",
+          { actualSha256: guard.sha256 },
+        );
+      }
+      return this.#completeProjectNotesTransaction(loaded, transactionPath, transaction);
+    }
+
+    return transaction;
   }
 
   async #serial(operation) {
@@ -2652,6 +3058,38 @@ export class ProjectFileRepository {
   }
 
   #assertRequestRecord(record, loaded, { requestId, attemptId }) {
+    assertObjectKeysWithOptional(record, [
+      "schemaVersion",
+      "requestId",
+      "attemptId",
+      "candidateId",
+      "projectId",
+      "documentId",
+      "sourceWorkingCopyId",
+      "expectedSourceSha256",
+      "proposedVersionId",
+      "proposedVersionOrdinal",
+      "basedOnVersionId",
+      "previousVersionId",
+      "inputRelativePath",
+      "promptRelativePath",
+      "projectRulesRelativePath",
+      "annotationsRelativePath",
+      "changeRequestRelativePath",
+      "inputManifestRelativePath",
+      "inputManifestSha256",
+      "outputRelativePath",
+      "status",
+      "createdAt",
+      "request",
+    ], [
+      "completedAt",
+      "cancelledAt",
+      "rejectedAt",
+      "promotedAt",
+      "promotedVersionId",
+      "error",
+    ], "Request", "INVALID_REQUEST");
     if (
       !isObject(record)
       || record.schemaVersion !== PROJECT_FILE_SCHEMA_VERSION
@@ -2691,6 +3129,7 @@ export class ProjectFileRepository {
     }
     assertId(record.basedOnVersionId, VERSION_ID, "basedOnVersionId");
     assertId(record.previousVersionId, VERSION_ID, "previousVersionId");
+    assertId(record.sourceWorkingCopyId, WORKING_COPY_ID, "sourceWorkingCopyId");
     ensureRelativePath(record.inputRelativePath, "request input path");
     ensureRelativePath(record.outputRelativePath, "request output path");
     for (const [value, label] of [
@@ -2704,10 +3143,72 @@ export class ProjectFileRepository {
     }
     assertSha256(record.inputManifestSha256, "request input manifest hash");
     assertTimestamp(record.createdAt, "Request createdAt", "INVALID_REQUEST");
-    for (const key of ["completedAt", "cancelledAt", "promotedAt"]) {
+    for (const key of ["completedAt", "cancelledAt", "rejectedAt", "promotedAt"]) {
       if (Object.hasOwn(record, key)) {
         assertTimestamp(record[key], `Request ${key}`, "INVALID_REQUEST");
       }
+    }
+    if (Object.hasOwn(record, "promotedVersionId")) {
+      assertId(record.promotedVersionId, VERSION_ID, "Request promotedVersionId");
+    }
+    if (Object.hasOwn(record, "error")) {
+      assertObjectKeysWithOptional(record.error, ["code", "message", "issueCodes"], [], "Request error", "INVALID_REQUEST");
+      if (
+        typeof record.error.code !== "string"
+        || !record.error.code
+        || typeof record.error.message !== "string"
+        || !Array.isArray(record.error.issueCodes)
+        || record.error.issueCodes.some((issueCode) => (
+          typeof issueCode !== "string" || !issueCode
+        ))
+        || new Set(record.error.issueCodes).size !== record.error.issueCodes.length
+      ) {
+        throw new ProjectFileRepositoryError(
+          "INVALID_REQUEST",
+          "The Request error record is invalid.",
+        );
+      }
+    }
+    const has = (key) => Object.hasOwn(record, key);
+    const lacks = (...keys) => keys.every((key) => !has(key));
+    const requires = (condition, message) => {
+      if (!condition) {
+        throw new ProjectFileRepositoryError("INVALID_REQUEST", message);
+      }
+    };
+    if (record.status === "processing") {
+      requires(
+        lacks("completedAt", "cancelledAt", "rejectedAt", "promotedAt", "promotedVersionId", "error"),
+        "A processing Request cannot have terminal lifecycle fields.",
+      );
+    } else if (["candidate-ready", "no-change"].includes(record.status)) {
+      requires(
+        has("completedAt") && lacks("cancelledAt", "rejectedAt", "promotedAt", "promotedVersionId", "error"),
+        "A completed Request has inconsistent terminal lifecycle fields.",
+      );
+    } else if (record.status === "error") {
+      requires(
+        has("completedAt") && has("error") && lacks("cancelledAt", "rejectedAt", "promotedAt", "promotedVersionId"),
+        "An errored Request has inconsistent terminal lifecycle fields.",
+      );
+    } else if (record.status === "cancelled") {
+      requires(
+        has("cancelledAt") && lacks("rejectedAt", "promotedAt", "promotedVersionId", "error"),
+        "A cancelled Request has inconsistent terminal lifecycle fields.",
+      );
+    } else if (record.status === "rejected") {
+      requires(
+        has("rejectedAt") && lacks("cancelledAt", "promotedAt", "promotedVersionId", "error"),
+        "A rejected Request has inconsistent terminal lifecycle fields.",
+      );
+    } else if (record.status === "promoted") {
+      requires(
+        has("completedAt")
+          && has("promotedAt")
+          && record.promotedVersionId === record.proposedVersionId
+          && lacks("cancelledAt", "rejectedAt", "error"),
+        "A promoted Request has inconsistent terminal lifecycle fields.",
+      );
     }
   }
 
@@ -3239,12 +3740,15 @@ export class ProjectFileRepository {
     }
     record = await this.#recoverPreparedRequestIfNeeded(loaded, requestPath, record);
     if (record.status === "candidate-ready") {
-      const rejected = await this.#rejectCandidate({ target, candidateId: record.candidateId });
+      const cancelled = await this.#rejectCandidate({
+        target,
+        candidateId: record.candidateId,
+        requestStatus: "cancelled",
+      });
       return {
-        ...rejected,
+        ...cancelled,
         requestId,
         attemptId,
-        status: "cancelled",
       };
     }
     if (["cancelled", "rejected", "no-change", "promoted", "error"].includes(record.status)) {
@@ -5101,7 +5605,13 @@ export class ProjectFileRepository {
     return matches[0];
   }
 
-  async #rejectCandidate({ target, candidateId }) {
+  async #rejectCandidate({ target, candidateId, requestStatus = "rejected" }) {
+    if (!["rejected", "cancelled"].includes(requestStatus)) {
+      throw new ProjectFileRepositoryError(
+        "INVALID_REQUEST_STATUS",
+        "A Candidate can only reject or cancel its Request.",
+      );
+    }
     const loaded = await this.#resolveMutationTarget(target);
     const current = await this.#readCandidateForLoaded(loaded, candidateId);
     if (current.candidate.status === "promoted") {
@@ -5115,8 +5625,15 @@ export class ProjectFileRepository {
       projectRootPath: loaded.paths.projectRootPath,
     });
     if (request?.candidateId === current.candidate.candidateId) {
-      request.status = "rejected";
-      request.rejectedAt = nowIso(this.#clock);
+      const terminalAt = nowIso(this.#clock);
+      request.status = requestStatus;
+      if (requestStatus === "cancelled") {
+        delete request.rejectedAt;
+        request.cancelledAt = terminalAt;
+      } else {
+        delete request.cancelledAt;
+        request.rejectedAt = terminalAt;
+      }
       await atomicWriteProjectJson(
         loaded.paths.projectRootPath,
         requestPath,
@@ -5146,7 +5663,7 @@ export class ProjectFileRepository {
     );
     return {
       candidateId: current.candidate.candidateId,
-      status: "rejected",
+      status: requestStatus,
       latestOfficialVersionId: loaded.manifest.latestOfficialVersionId,
     };
   }
@@ -5580,21 +6097,31 @@ export class ProjectFileRepository {
         loaded.paths.projectRootPath,
         topLevelHtmlRelativePath(committedWorkingCopy.sourceRelativePath),
       );
-      const information = await regularInformation(visiblePath, "Version Working Copy", {
+      // This is the final promotion boundary.  The hard-linked Version Working
+      // Copy can retain its identity while an external writer changes its
+      // bytes, so identity alone is not sufficient publication authority.
+      await this.#assertCandidateSourceCurrent(loaded, candidateState.candidate);
+      const visible = await readHtmlFile(visiblePath, "Version Working Copy", {
         projectRootPath: loaded.paths.projectRootPath,
       });
       if (
-        !information
-        || !sameFileIdentity(committedWorkingCopy.fileIdentity, copyFileIdentity(information))
+        !sameFileIdentity(committedWorkingCopy.fileIdentity, copyFileIdentity(visible.information))
       ) {
         throw new ProjectFileRepositoryError(
           "PROMOTION_PATH_REPLACED",
           "The allocated Version Working Copy was replaced before manifest publication.",
         );
       }
-      // Recovery enters #continuePromotion directly, so this must be the
-      // shared commit boundary rather than a check only at adoption start.
-      await this.#assertCandidateSourceCurrent(loaded, candidateState.candidate);
+      if (visible.sha256 !== transaction.candidateOutputSha256) {
+        throw new ProjectFileRepositoryError(
+          "PROMOTION_WORKING_COPY_HASH_MISMATCH",
+          "The Version Working Copy changed before manifest publication.",
+          {
+            expectedSourceSha256: transaction.candidateOutputSha256,
+            actualSourceSha256: visible.sha256,
+          },
+        );
+      }
       loaded.manifest.versions.push(version);
       loaded.manifest.workingCopies.push(committedWorkingCopy);
       loaded.manifest.latestOfficialVersionId = version.versionId;
@@ -5991,6 +6518,35 @@ export class ProjectFileRepository {
     );
     for (const entry of entries) {
       if (entry.isSymbolicLink()) continue;
+      if (
+        entry.isFile()
+        && entry.name.startsWith("project-notes_")
+        && entry.name.endsWith(".json")
+      ) {
+        const transactionPath = path.join(loaded.paths.transactionsRoot, entry.name);
+        const transaction = await readJsonFile(transactionPath, "PROJECT.md transaction", {
+          projectRootPath: loaded.paths.projectRootPath,
+        });
+        if (!transaction) continue;
+        assertProjectNotesTransaction(transaction);
+        if (!["completed", "conflicted"].includes(transaction.state)) {
+          try {
+            recovered.push(await this.#continueProjectNotesTransaction(
+              loaded,
+              transactionPath,
+              transaction,
+            ));
+          } catch (cause) {
+            if (cause?.code !== "PROJECT_FILE_CONFLICT") throw cause;
+            recovered.push({
+              kind: "project-notes",
+              transactionId: transaction.transactionId,
+              state: "conflicted",
+            });
+          }
+        }
+        continue;
+      }
       if (entry.isFile() && entry.name.startsWith("save_") && entry.name.endsWith(".json")) {
         const transactionPath = path.join(loaded.paths.transactionsRoot, entry.name);
         const transaction = await readJsonFile(transactionPath, "save transaction", {

@@ -32,6 +32,7 @@ records.
 - `project-manifest.v4.schema.json`
 - `project-runtime-state.v4.schema.json`
 - `working-copy-state.v4.schema.json`
+- `request.v4.schema.json`
 - `candidate.v4.schema.json`
 - `promotion-transaction.v4.schema.json`
 
@@ -40,6 +41,10 @@ children of the configured project root, the registered root path, a root
 filesystem identity used only for same-parent rename recovery, and durable
 pending-import intent. A copied `.pageroot` directory is never registry
 authority.
+
+`request.v4.schema.json` is the only durable v4 `request.json` contract. Its
+processing, Candidate-ready and terminal lifecycle fields are mutually
+exclusive by status; it does not read, infer or migrate a pre-v4 Request.
 
 The v1 suffix here is local to each auxiliary artifact and remains its current
 strict contract. These files are not compatibility readers for old main

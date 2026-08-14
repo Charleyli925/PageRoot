@@ -1,0 +1,222 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pageroot.local/schemas/request.v4.schema.json",
+  "$defs": {
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message", "issueCodes"],
+      "properties": {
+        "code": { "type": "string", "minLength": 1 },
+        "message": { "type": "string" },
+        "issueCodes": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        }
+      }
+    },
+    "hasCompletedAt": { "type": "object", "required": ["completedAt"] },
+    "hasCancelledAt": { "type": "object", "required": ["cancelledAt"] },
+    "hasRejectedAt": { "type": "object", "required": ["rejectedAt"] },
+    "hasPromotedAt": { "type": "object", "required": ["promotedAt"] },
+    "hasPromotedVersionId": { "type": "object", "required": ["promotedVersionId"] },
+    "hasError": { "type": "object", "required": ["error"] },
+    "without": {
+      "type": "object",
+      "not": {
+        "anyOf": [
+          { "$ref": "#/$defs/hasCompletedAt" },
+          { "$ref": "#/$defs/hasCancelledAt" },
+          { "$ref": "#/$defs/hasRejectedAt" },
+          { "$ref": "#/$defs/hasPromotedAt" },
+          { "$ref": "#/$defs/hasPromotedVersionId" },
+          { "$ref": "#/$defs/hasError" }
+        ]
+      }
+    }
+  },
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "requestId",
+    "attemptId",
+    "candidateId",
+    "projectId",
+    "documentId",
+    "sourceWorkingCopyId",
+    "expectedSourceSha256",
+    "proposedVersionId",
+    "proposedVersionOrdinal",
+    "basedOnVersionId",
+    "previousVersionId",
+    "inputRelativePath",
+    "promptRelativePath",
+    "projectRulesRelativePath",
+    "annotationsRelativePath",
+    "changeRequestRelativePath",
+    "inputManifestRelativePath",
+    "inputManifestSha256",
+    "outputRelativePath",
+    "status",
+    "createdAt",
+    "request"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "4.0.0" },
+    "requestId": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,160}$" },
+    "attemptId": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,160}$" },
+    "candidateId": { "type": "string", "pattern": "^candidate_[A-Za-z0-9_-]{8,160}$" },
+    "projectId": { "type": "string", "pattern": "^project_[a-f0-9]{16,64}$" },
+    "documentId": { "type": "string", "pattern": "^doc_[a-f0-9]{16,64}$" },
+    "sourceWorkingCopyId": { "type": "string", "pattern": "^work_ver_\\d{4,}$" },
+    "expectedSourceSha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "proposedVersionId": { "type": "string", "pattern": "^ver_\\d{4,}$" },
+    "proposedVersionOrdinal": { "type": "integer", "minimum": 2 },
+    "basedOnVersionId": { "type": "string", "pattern": "^ver_\\d{4,}$" },
+    "previousVersionId": { "type": "string", "pattern": "^ver_\\d{4,}$" },
+    "inputRelativePath": {
+      "type": "string",
+      "pattern": "^requests/[A-Za-z0-9_-]{1,160}/input/base/index\\.html$"
+    },
+    "promptRelativePath": {
+      "type": "string",
+      "pattern": "^requests/[A-Za-z0-9_-]{1,160}/PROMPT\\.md$"
+    },
+    "projectRulesRelativePath": {
+      "type": "string",
+      "pattern": "^requests/[A-Za-z0-9_-]{1,160}/input/PROJECT\\.md$"
+    },
+    "annotationsRelativePath": {
+      "type": "string",
+      "pattern": "^requests/[A-Za-z0-9_-]{1,160}/input/annotations/records\\.json$"
+    },
+    "changeRequestRelativePath": {
+      "type": "string",
+      "pattern": "^requests/[A-Za-z0-9_-]{1,160}/change-request\\.json$"
+    },
+    "inputManifestRelativePath": {
+      "type": "string",
+      "pattern": "^requests/[A-Za-z0-9_-]{1,160}/input-manifest\\.json$"
+    },
+    "inputManifestSha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "outputRelativePath": {
+      "type": "string",
+      "pattern": "^requests/[A-Za-z0-9_-]{1,160}/attempts/[A-Za-z0-9_-]{1,160}/output/candidate\\.html$"
+    },
+    "status": {
+      "enum": [
+        "processing",
+        "candidate-ready",
+        "no-change",
+        "error",
+        "promoted",
+        "cancelled",
+        "rejected"
+      ]
+    },
+    "createdAt": { "$ref": "#/$defs/timestamp" },
+    "request": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "completedAt": { "$ref": "#/$defs/timestamp" },
+    "cancelledAt": { "$ref": "#/$defs/timestamp" },
+    "rejectedAt": { "$ref": "#/$defs/timestamp" },
+    "promotedAt": { "$ref": "#/$defs/timestamp" },
+    "promotedVersionId": { "type": "string", "pattern": "^ver_\\d{4,}$" },
+    "error": { "$ref": "#/$defs/error" }
+  },
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": { "status": { "const": "processing" } },
+      "required": ["status"],
+      "$ref": "#/$defs/without"
+    },
+    {
+      "type": "object",
+      "properties": { "status": { "const": "candidate-ready" } },
+      "required": ["status", "completedAt"],
+      "not": {
+        "anyOf": [
+          { "$ref": "#/$defs/hasCancelledAt" },
+          { "$ref": "#/$defs/hasRejectedAt" },
+          { "$ref": "#/$defs/hasPromotedAt" },
+          { "$ref": "#/$defs/hasPromotedVersionId" },
+          { "$ref": "#/$defs/hasError" }
+        ]
+      }
+    },
+    {
+      "type": "object",
+      "properties": { "status": { "const": "no-change" } },
+      "required": ["status", "completedAt"],
+      "not": {
+        "anyOf": [
+          { "$ref": "#/$defs/hasCancelledAt" },
+          { "$ref": "#/$defs/hasRejectedAt" },
+          { "$ref": "#/$defs/hasPromotedAt" },
+          { "$ref": "#/$defs/hasPromotedVersionId" },
+          { "$ref": "#/$defs/hasError" }
+        ]
+      }
+    },
+    {
+      "type": "object",
+      "properties": { "status": { "const": "error" } },
+      "required": ["status", "completedAt", "error"],
+      "not": {
+        "anyOf": [
+          { "$ref": "#/$defs/hasCancelledAt" },
+          { "$ref": "#/$defs/hasRejectedAt" },
+          { "$ref": "#/$defs/hasPromotedAt" },
+          { "$ref": "#/$defs/hasPromotedVersionId" }
+        ]
+      }
+    },
+    {
+      "type": "object",
+      "properties": { "status": { "const": "cancelled" } },
+      "required": ["status", "cancelledAt"],
+      "not": {
+        "anyOf": [
+          { "$ref": "#/$defs/hasRejectedAt" },
+          { "$ref": "#/$defs/hasPromotedAt" },
+          { "$ref": "#/$defs/hasPromotedVersionId" },
+          { "$ref": "#/$defs/hasError" }
+        ]
+      }
+    },
+    {
+      "type": "object",
+      "properties": { "status": { "const": "rejected" } },
+      "required": ["status", "rejectedAt"],
+      "not": {
+        "anyOf": [
+          { "$ref": "#/$defs/hasCancelledAt" },
+          { "$ref": "#/$defs/hasPromotedAt" },
+          { "$ref": "#/$defs/hasPromotedVersionId" },
+          { "$ref": "#/$defs/hasError" }
+        ]
+      }
+    },
+    {
+      "type": "object",
+      "properties": { "status": { "const": "promoted" } },
+      "required": ["status", "completedAt", "promotedAt", "promotedVersionId"],
+      "not": {
+        "anyOf": [
+          { "$ref": "#/$defs/hasCancelledAt" },
+          { "$ref": "#/$defs/hasRejectedAt" },
+          { "$ref": "#/$defs/hasError" }
+        ]
+      }
+    }
+  ]
+}
