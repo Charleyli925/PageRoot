@@ -512,12 +512,14 @@ PR 1 不引入并行的全局 Store。下表是每类状态的唯一权威位置
 | `projectId` / `documentId` | Registry 登记根目录内的 `.pageroot/project.json` |
 | 正式 Version、Working Copy 与相对路径映射 | `.pageroot/manifest.json` |
 | 每个 Working Copy 的 Hash、draft、保存状态 | 对应 `.pageroot/working-copies/<workingCopyId>.json` |
-| `activeWorkingCopyId` / 活跃 Request | 项目 runtime state |
+| `activeWorkingCopyId` / 活跃 Request | 项目 runtime state；Request / Attempt 记录只能被它校验，不能反向重建它 |
 | `viewingVersionId` | 现有 renderer `VersionSession` |
 | `registeredProjectRootPath` | Registry 的 `projectId → registeredProjectRootPath` 唯一登记与写入白名单 |
 | 当前有效 `projectRootPath` | 当前 `ProjectSession`，必须是上述登记路径的本次验证投影 |
 
 项目的显示名不是一个另行的权威字段：它始终是登记项目文件夹名的显示投影。配置项目目录内完成可信文件夹改名后，Registry 原子更新登记路径，再从新目录名投影显示值。
+
+外部 AI Agent 可写的 Request / Attempt 目录是待验证的执行证据，不是运行态权威。重开或崩溃恢复只能沿着已经存在的 runtime 封存 Request / Attempt / Working Copy 锚点（或已登记的 Promotion 事务）验证和继续；若 runtime 已清空或缺失，系统不得扫描 Request 目录来猜测、复活或授予新的活动 Request 权限。
 
 ### 12.2 项目身份
 

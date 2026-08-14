@@ -918,6 +918,15 @@ function assertRuntime(runtime, project, manifest) {
   ) {
     throw new ProjectFileRepositoryError("INVALID_RUNTIME", "activeWorkingCopyId is unknown.");
   }
+  if (
+    (runtime.activeRequest !== null && runtime.activeWorkingCopyId === null)
+    || (runtime.activeRequest === null && runtime.activeCandidateId !== null)
+  ) {
+    throw new ProjectFileRepositoryError(
+      "INVALID_RUNTIME",
+      "active Request runtime anchors are inconsistent.",
+    );
+  }
   if (runtime.activeRequest !== null) {
     const active = runtime.activeRequest;
     if (
@@ -1941,7 +1950,19 @@ export class ProjectFileRepository {
     });
     const existingActiveRequest = loaded.runtime.activeRequest;
     if (
-      existingActiveRequest?.requestId === record.requestId
+      existingActiveRequest
+      && (
+        existingActiveRequest.requestId !== record.requestId
+        || existingActiveRequest.attemptId !== record.attemptId
+      )
+    ) {
+      throw new ProjectFileRepositoryError(
+        "REQUEST_RUNTIME_ANCHOR_MISMATCH",
+        "The frozen Request identity no longer matches runtime authority.",
+      );
+    }
+    if (
+      existingActiveRequest
       && existingActiveRequest.inputManifestSha256 !== record.inputManifestSha256
     ) {
       throw new ProjectFileRepositoryError(
@@ -4937,65 +4958,45 @@ export class ProjectFileRepository {
   }
 
   async #recoverRequestRuntime(loaded) {
-    let entries;
-    try {
-      entries = await listProjectDirectory(
-        loaded.paths.projectRootPath,
-        loaded.paths.requestsRoot,
-        "requests",
-      );
-    } catch (cause) {
-      if (cause?.code === "ENOENT") return null;
-      throw cause;
-    }
-    const activeRecords = [];
-    for (const entry of entries) {
-      if (!entry.isDirectory() || entry.isSymbolicLink() || !SAFE_REQUEST_ID.test(entry.name)) {
-        continue;
-      }
-      const requestPath = path.join(loaded.paths.requestsRoot, entry.name, "request.json");
-      const record = await readJsonFile(requestPath, "request.json", {
-        projectRootPath: loaded.paths.projectRootPath,
-      });
-      if (!record) continue;
-      const workingCopy = loaded.manifest.workingCopies.find(
-        (candidate) => candidate.workingCopyId === record.sourceWorkingCopyId,
-      );
-      if (!workingCopy) continue;
-      try {
-        this.#assertRequestRecord(record, { ...loaded, workingCopy }, {
-          requestId: entry.name,
-          attemptId: record.attemptId,
-        });
-      } catch {
-        // A user-altered inactive Request is not repaired or used to infer
-        // runtime state. Its explicit operation remains unavailable.
-        continue;
-      }
-      if (["processing", "candidate-ready"].includes(record.status)) {
-        activeRecords.push({ record, workingCopy });
-      }
-    }
-    if (activeRecords.length > 1) {
+    const runtimeAnchor = loaded.runtime.activeRequest;
+    // Request / Attempt files are writable by the external Agent. They are
+    // evidence to validate against PageRoot-owned runtime state, never a
+    // source from which reopening may infer new active-work authority.
+    if (!runtimeAnchor) return null;
+    const workingCopy = loaded.manifest.workingCopies.find(
+      (candidate) => candidate.workingCopyId === loaded.runtime.activeWorkingCopyId,
+    );
+    if (!workingCopy) {
       throw new ProjectFileRepositoryError(
-        "REQUEST_RECOVERY_AMBIGUOUS",
-        "More than one unfinished AI Request exists; PageRoot will not guess which one is active.",
-        { requestIds: activeRecords.map(({ record }) => record.requestId) },
+        "REQUEST_RUNTIME_ANCHOR_MISMATCH",
+        "The active Request has no registered Working Copy runtime anchor.",
+        {
+          requestId: runtimeAnchor.requestId,
+          attemptId: runtimeAnchor.attemptId,
+        },
       );
     }
-    if (activeRecords.length === 0) {
-      if (!loaded.runtime.activeRequest && !loaded.runtime.activeCandidateId) return null;
-      loaded.runtime.activeRequest = null;
-      loaded.runtime.activeCandidateId = null;
-      await atomicWriteProjectJson(
-        loaded.paths.projectRootPath,
-        loaded.paths.runtimePath,
-        loaded.runtime,
-        "runtime-state.json",
+    const requestPath = path.join(
+      requestRootPath(loaded.paths, runtimeAnchor.requestId),
+      "request.json",
+    );
+    const record = await readJsonFile(requestPath, "request.json", {
+      projectRootPath: loaded.paths.projectRootPath,
+    });
+    if (!record) {
+      throw new ProjectFileRepositoryError(
+        "REQUEST_RUNTIME_ANCHOR_MISSING",
+        "The active Request record is unavailable; PageRoot will not infer replacement Request authority.",
+        {
+          requestId: runtimeAnchor.requestId,
+          attemptId: runtimeAnchor.attemptId,
+        },
       );
-      return { kind: "request-runtime", state: "cleared" };
     }
-    const { record, workingCopy } = activeRecords[0];
+    this.#assertRequestRecord(record, { ...loaded, workingCopy }, {
+      requestId: runtimeAnchor.requestId,
+      attemptId: runtimeAnchor.attemptId,
+    });
     const restored = await this.#restoreRequestRuntime(
       { ...loaded, workingCopy },
       record,

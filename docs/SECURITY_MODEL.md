@@ -113,6 +113,13 @@ a durable transaction, but freezes the final visible path only after its
 no-replace publication succeeds. A replaced preparation file or an untrusted
 collision fails closed rather than deleting user data.
 
+The external AI Agent can write within the Request / Attempt workspace, so
+those files are evidence to validate rather than runtime authority. Reopen and
+crash recovery may follow only an already-sealed `runtime-state.json` Request /
+Attempt / Working Copy anchor, or a registered Promotion transaction. A cleared
+or missing runtime state never scans Request directories to revive an active
+Request or to adopt a replacement input-manifest digest.
+
 ## V2 editable-island trust boundary
 
 The rendered preview DOM is disposable and never becomes a whole-document

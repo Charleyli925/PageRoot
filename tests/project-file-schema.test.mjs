@@ -116,11 +116,17 @@ test("v4 schemas accept repository-produced identity, Working Copy, Candidate an
   malformedCandidateSeal.activeRequest.candidateOutputSha256 = "sha256:not-a-digest";
   const missingPendingReviewSeal = structuredClone(candidateRuntime);
   missingPendingReviewSeal.activeRequest.candidateOutputSha256 = null;
+  const missingWorkingCopyAnchor = structuredClone(candidateRuntime);
+  missingWorkingCopyAnchor.activeWorkingCopyId = null;
+  const staleCandidateWithoutRequest = structuredClone(candidateRuntime);
+  staleCandidateWithoutRequest.activeRequest = null;
   await Promise.all([
     validateRejects("project-runtime-state.v4.schema.json", missingCandidateSeal),
     validateRejects("project-runtime-state.v4.schema.json", wrongCandidateSealType),
     validateRejects("project-runtime-state.v4.schema.json", malformedCandidateSeal),
     validateRejects("project-runtime-state.v4.schema.json", missingPendingReviewSeal),
+    validateRejects("project-runtime-state.v4.schema.json", missingWorkingCopyAnchor),
+    validateRejects("project-runtime-state.v4.schema.json", staleCandidateWithoutRequest),
   ]);
 
   const promoted = await repository.promoteCandidate({

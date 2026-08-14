@@ -1222,6 +1222,76 @@ test("request recovery keeps the original runtime input-manifest anchor", async 
   );
 });
 
+test("request recovery binds Request identity to its sealed runtime anchor", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "runtime-identity-anchor.html");
+  const prepared = await value.repository.prepareRequest({
+    target: imported.target,
+    requestId: "req_runtime_identity_anchor",
+    attemptId: "attempt_001",
+    expectedSourceSha256: imported.target.sourceSha256,
+    request: { summary: "runtime identity anchor" },
+    prompt: "# Runtime identity anchor\n",
+  });
+  const controlRoot = path.join(imported.target.projectRootPath, ".pageroot");
+  const runtimePath = path.join(controlRoot, "runtime-state.json");
+  const requestPath = path.join(controlRoot, "requests", prepared.requestId, "request.json");
+  const runtimeBefore = await json(runtimePath);
+  const record = await json(requestPath);
+  record.attemptId = "attempt_002";
+  await writeFile(requestPath, JSON.stringify(record), "utf8");
+
+  await assert.rejects(
+    new ProjectFileRepository({ projectsRoot: value.projects }).workspace({
+      sourcePath: imported.target.exactSourcePath,
+    }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "REQUEST_IDENTITY_MISMATCH",
+  );
+  const runtimeAfter = await json(runtimePath);
+  assert.equal(runtimeAfter.activeRequest?.requestId, runtimeBefore.activeRequest?.requestId);
+  assert.equal(runtimeAfter.activeRequest?.attemptId, runtimeBefore.activeRequest?.attemptId);
+});
+
+test("request recovery never recreates runtime authority from Agent-owned Request files", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "agent-owned-request.html");
+  const prepared = await value.repository.prepareRequest({
+    target: imported.target,
+    requestId: "req_agent_owned_recovery",
+    attemptId: "attempt_001",
+    expectedSourceSha256: imported.target.sourceSha256,
+    request: { summary: "must retain the runtime seal" },
+    prompt: "# Runtime seal\n",
+  });
+  const controlRoot = path.join(imported.target.projectRootPath, ".pageroot");
+  const runtimePath = path.join(controlRoot, "runtime-state.json");
+  const requestPath = path.join(controlRoot, "requests", prepared.requestId, "request.json");
+  const inputManifestPath = path.join(controlRoot, "requests", prepared.requestId, "input-manifest.json");
+  const runtime = await json(runtimePath);
+  runtime.activeRequest = null;
+  runtime.activeCandidateId = null;
+  await writeFile(runtimePath, JSON.stringify(runtime), "utf8");
+
+  // An external Agent may alter every file it can see in its Request tree.
+  // Its new digest must not become runtime authority when PageRoot reopens.
+  const launderedManifest = Buffer.from('{"agent":"replacement bundle"}\n', "utf8");
+  await writeFile(inputManifestPath, launderedManifest);
+  const record = await json(requestPath);
+  record.status = "processing";
+  record.inputManifestSha256 = sha256(launderedManifest);
+  await writeFile(requestPath, JSON.stringify(record), "utf8");
+
+  const reopened = await new ProjectFileRepository({ projectsRoot: value.projects }).workspace({
+    sourcePath: imported.target.exactSourcePath,
+  });
+  assert.equal(reopened.activeRequest, null);
+  assert.equal(reopened.activeCandidate, null);
+  const runtimeAfter = await json(runtimePath);
+  assert.equal(runtimeAfter.activeRequest, null);
+  assert.equal(runtimeAfter.activeCandidateId, null);
+});
+
 test("a Request freezes comments, targets and project rules alongside its exact HTML", async (t) => {
   const value = await fixture(t);
   const imported = await importSource(value, "frozen-request.html");

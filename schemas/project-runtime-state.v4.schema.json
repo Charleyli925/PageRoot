@@ -79,5 +79,31 @@
       ]
     },
     "activeCandidateId": { "type": ["string", "null"], "pattern": "^candidate_[A-Za-z0-9_-]{8,160}$" }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "activeRequest": { "type": "null" }
+        }
+      },
+      "then": {
+        "properties": {
+          "activeCandidateId": { "const": null }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "activeRequest": { "type": "object" }
+        }
+      },
+      "then": {
+        "properties": {
+          "activeWorkingCopyId": { "type": "string" }
+        }
+      }
+    }
+  ]
 }
