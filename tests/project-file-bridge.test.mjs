@@ -293,6 +293,11 @@ test("Bridge continues a historical Version through one durable Working Copy rec
   assert.equal(viewed.response.status, 200, JSON.stringify(viewed.body));
   assert.equal(viewed.body.readOnly, true);
   assert.equal(viewed.body.content, v2Html);
+  assert.equal(viewed.body.projectFileSchemaVersion, "4.0.0");
+  assert.equal(viewed.body.workingCopyId, "work_ver_0002");
+  assert.match(viewed.body.visibleWorkingCopyPath, /history-bridge-V2\.html$/u);
+  assert.equal(viewed.body.visibleWorkingCopyPath.includes("/.pageroot/"), false);
+  assert.match(viewed.body.workingCopySha256, /^sha256:[a-f0-9]{64}$/u);
   const beforeContinue = await bridge.requestJson(
     `/workspace?sourcePath=${encodeURIComponent(active.exactSourcePath)}`,
   );
@@ -435,6 +440,15 @@ test("project-file Request becomes a Candidate on finalization and a Version onl
   });
   assert.equal(request.response.status, 201, JSON.stringify(request.body));
   assert.equal(request.body.activeRun.status, "processing");
+  const processingAiTask = await bridge.requestJson(
+    `/ai-task?sourcePath=${encodeURIComponent(ensured.body.sourcePath)}`,
+  );
+  assert.equal(processingAiTask.response.status, 200, JSON.stringify(processingAiTask.body));
+  assert.equal(processingAiTask.body.projectFileSchemaVersion, "4.0.0");
+  assert.equal(processingAiTask.body.requestId, request.body.requestId);
+  assert.equal(processingAiTask.body.candidatePath, null);
+  assert.match(processingAiTask.body.aiTaskRelativePath, /^AI任务\//u);
+  assert.equal(processingAiTask.body.aiTaskPath.includes("/.pageroot/"), false);
   const prompt = await readFile(
     join(ensured.body.projectRoot, ".pageroot", "requests", request.body.requestId, "PROMPT.md"),
     "utf8",
@@ -462,6 +476,12 @@ test("project-file Request becomes a Candidate on finalization and a Version onl
   assert.equal(ready.body.status, "ready-to-open");
   assert.equal(ready.body.versionId, "ver_0002");
   assert.ok(["ready", "attention"].includes(ready.body.candidateAssessment.status));
+  const readyAiTask = await bridge.requestJson(
+    `/ai-task?sourcePath=${encodeURIComponent(ensured.body.sourcePath)}`,
+  );
+  assert.equal(readyAiTask.response.status, 200, JSON.stringify(readyAiTask.body));
+  assert.match(readyAiTask.body.candidatePath, /-V2-待审阅\.html$/u);
+  assert.equal(await readFile(readyAiTask.body.candidatePath, "utf8"), candidateHtml);
   const controlRoot = join(ensured.body.projectRoot, ".pageroot");
   const candidateRecordPath = join(
     controlRoot,

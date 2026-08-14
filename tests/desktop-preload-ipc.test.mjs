@@ -615,23 +615,32 @@ test("preload exposes the narrow history-version Finder operation", async () => 
   ]);
 });
 
-test("preload exposes the narrow request-folder Finder operation", async () => {
+test("preload exposes the narrow AI task Finder operation", async () => {
   const calls = [];
   const api = await loadPreload(async (...args) => {
     calls.push(args);
-    return success({ requestPath: "/Users/demo/PageRoot/项目记录/requests/req_0001" });
+    return success({
+      sourcePath: "/Users/demo/report.html",
+      aiTaskPath: "/Users/demo/PageRoot/项目/报告/AI任务/2026-08-15-候选版本2",
+      requestId: "req_0001",
+      candidateId: "candidate_00000000000000000000000000000000",
+    });
   });
   const payload = {
     sourcePath: "/Users/demo/report.html",
-    requestPath: "/Users/demo/PageRoot/项目记录/requests/req_0001",
   };
 
   assert.deepEqual(
-    await api.revealRequestFolder(payload),
-    { requestPath: "/Users/demo/PageRoot/项目记录/requests/req_0001" },
+    await api.revealAiTask(payload),
+    {
+      sourcePath: "/Users/demo/report.html",
+      aiTaskPath: "/Users/demo/PageRoot/项目/报告/AI任务/2026-08-15-候选版本2",
+      requestId: "req_0001",
+      candidateId: "candidate_00000000000000000000000000000000",
+    },
   );
   assert.deepEqual(calls[0], [
-    "html-projects:reveal-request-folder",
+    "html-projects:reveal-ai-task",
     payload,
   ]);
 });
@@ -645,9 +654,8 @@ test("preload never replays a failed local side-effect request", async () => {
   const actions = [
     ["showInFolder", "/Users/demo/report.html"],
     ["openInDefaultBrowser", "/Users/demo/report.html"],
-    ["revealRequestFolder", {
+    ["revealAiTask", {
       sourcePath: "/Users/demo/report.html",
-      requestPath: "/Users/demo/PageRoot/项目记录/requests/req_0001",
     }],
     ["revealVersionFile", {
       sourcePath: "/Users/demo/report.html",
