@@ -1018,6 +1018,50 @@ test("save recovery refuses an externally changed Working Copy instead of overwr
   assert.equal(await readFile(imported.target.exactSourcePath, "utf8"), externallyChanged);
 });
 
+test("an interrupted draft record write never returns a stale state pointer as replayed", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "draft-pointer.html");
+  const command = {
+    target: imported.target,
+    operationId: "draftop_pointer_recovery_0001",
+    expectedDraftRevision: 0,
+    comments: [{ commentId: "comment_draft_pointer_0001", text: "persist once" }],
+    changeEvents: [],
+    deletedCommentIds: [],
+  };
+  const interrupted = new ProjectFileRepository({
+    projectsRoot: value.projects,
+    failpoint: async (name) => name === "draft-record-written",
+  });
+  await assert.rejects(
+    interrupted.saveDraft(command),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "INJECTED_FAILPOINT",
+  );
+
+  const controlRoot = path.join(imported.target.projectRootPath, ".pageroot");
+  const statePath = path.join(controlRoot, "working-copies", "work_ver_0001.json");
+  const draftPath = path.join(controlRoot, "drafts", "work_ver_0001.json");
+  const state = await json(statePath);
+  const draft = await json(draftPath);
+  assert.equal(state.draftSha256, null);
+  assert.equal(state.draftRevision, 0);
+  assert.equal(draft.draftRevision, 1);
+
+  const restarted = new ProjectFileRepository({ projectsRoot: value.projects });
+  await assert.rejects(
+    restarted.workspace({ sourcePath: imported.target.exactSourcePath }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "DRAFT_POINTER_MISMATCH",
+  );
+  await assert.rejects(
+    restarted.saveDraft(command),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "DRAFT_POINTER_MISMATCH",
+  );
+  assert.deepEqual(await json(statePath), state);
+});
+
 test("request preparation fault injection restores one immutable active Request", async (t) => {
   for (const failpoint of [
     "request-input-written",
@@ -1183,6 +1227,62 @@ test("Candidate completion rejects a changed frozen input manifest", async (t) =
     (error) => error instanceof ProjectFileRepositoryError
       && error.code === "FROZEN_REQUEST_BUNDLE_MISMATCH",
   );
+});
+
+test("Candidate completion seals every immutable Request identity against its frozen change record", async (t) => {
+  const mutations = [
+    ["candidate", (record) => { record.candidateId = "candidate_rebound_0001"; }],
+    ["version", (record) => {
+      record.proposedVersionId = "ver_0003";
+      record.proposedVersionOrdinal = 3;
+    }],
+    ["based-on", (record) => { record.basedOnVersionId = "ver_9999"; }],
+    ["previous", (record) => { record.previousVersionId = "ver_9999"; }],
+    ["request", (record) => { record.request = { preserveOutsideTargets: true, summary: "altered" }; }],
+    ["output-path", (record) => {
+      record.outputRelativePath = "requests/req_other/attempts/attempt_001/output/candidate.html";
+    }],
+  ];
+  for (const [label, mutate] of mutations) {
+    const value = await fixture(t);
+    const imported = await importSource(value, `request-seal-${label}.html`);
+    const prepared = await value.repository.prepareRequest({
+      target: imported.target,
+      requestId: "req_identity_seal",
+      attemptId: "attempt_001",
+      expectedSourceSha256: imported.target.sourceSha256,
+      request: { preserveOutsideTargets: true, summary: "sealed" },
+      prompt: "# Sealed identity\n",
+    });
+    const requestPath = path.join(
+      imported.target.projectRootPath,
+      ".pageroot",
+      "requests",
+      prepared.requestId,
+      "request.json",
+    );
+    const record = await json(requestPath);
+    mutate(record);
+    await writeFile(requestPath, JSON.stringify(record), "utf8");
+
+    await assert.rejects(
+      value.repository.completeRequest({
+        target: imported.target,
+        requestId: prepared.requestId,
+        attemptId: prepared.attemptId,
+        html: html(`must reject ${label}`),
+      }),
+      (error) => error instanceof ProjectFileRepositoryError
+        && error.code === "FROZEN_REQUEST_IDENTITY_MISMATCH",
+      label,
+    );
+    const manifest = await json(path.join(
+      imported.target.projectRootPath,
+      ".pageroot",
+      "manifest.json",
+    ));
+    assert.deepEqual(manifest.versions.map((version) => version.versionId), ["ver_0001"], label);
+  }
 });
 
 test("a Request freezes comments, targets and project rules alongside its exact HTML", async (t) => {
@@ -1680,6 +1780,66 @@ test("a replaced private promotion file fails recovery without deleting user byt
       && error.code === "PROMOTION_PREPARED_FILE_CHANGED",
   );
   assert.equal(await readFile(preparedPath, "utf8"), replacement);
+});
+
+test("promotion recovery binds every immutable transaction identity and lineage field to its Candidate", async (t) => {
+  const mutations = [
+    ["request", (transaction) => { transaction.requestId = "req_other"; }],
+    ["version", (transaction) => {
+      transaction.versionId = "ver_0003";
+      transaction.versionOrdinal = 3;
+    }],
+    ["based-on", (transaction) => { transaction.basedOnVersionId = "ver_9999"; }],
+    ["previous", (transaction) => { transaction.previousVersionId = "ver_9999"; }],
+  ];
+  for (const [label, mutate] of mutations) {
+    const value = await fixture(t);
+    const imported = await importSource(value, `promotion-binding-${label}.html`);
+    const candidate = await completeFrozenCandidate(value, {
+      target: imported.target,
+      requestId: "req_promotion_binding",
+      html: html(`promotion binding ${label}`),
+      expectedSourceSha256: imported.target.sourceSha256,
+    });
+    const interrupted = new ProjectFileRepository({
+      projectsRoot: value.projects,
+      failpoint: async (name) => name === "promotion-prepared",
+    });
+    await assert.rejects(
+      interrupted.promoteCandidate({
+        target: imported.target,
+        candidateId: candidate.candidate.candidateId,
+      }),
+      (error) => error instanceof ProjectFileRepositoryError
+        && error.code === "INJECTED_FAILPOINT",
+      label,
+    );
+    const transactionPath = path.join(
+      imported.target.projectRootPath,
+      ".pageroot",
+      "transactions",
+      `promote_${candidate.candidate.candidateId}`,
+      "transaction.json",
+    );
+    const transaction = await json(transactionPath);
+    mutate(transaction);
+    await writeFile(transactionPath, JSON.stringify(transaction), "utf8");
+
+    await assert.rejects(
+      new ProjectFileRepository({ projectsRoot: value.projects }).workspace({
+        sourcePath: imported.target.exactSourcePath,
+      }),
+      (error) => error instanceof ProjectFileRepositoryError
+        && error.code === "PROMOTION_TRANSACTION_MISMATCH",
+      label,
+    );
+    const manifest = await json(path.join(
+      imported.target.projectRootPath,
+      ".pageroot",
+      "manifest.json",
+    ));
+    assert.deepEqual(manifest.versions.map((version) => version.versionId), ["ver_0001"], label);
+  }
 });
 
 test("promotion fault recovery leaves exactly one formal Version and regular files at every commit point", async (t) => {

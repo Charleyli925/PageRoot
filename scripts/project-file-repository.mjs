@@ -1190,6 +1190,27 @@ function requestRootPath(paths, requestId) {
   return path.join(paths.requestsRoot, id);
 }
 
+function frozenRequestRelativePaths(requestId, attemptId) {
+  const id = String(requestId || "");
+  const attempt = String(attemptId || "");
+  if (!SAFE_REQUEST_ID.test(id) || !SAFE_REQUEST_ID.test(attempt)) {
+    throw new ProjectFileRepositoryError(
+      "INVALID_REQUEST_ID",
+      "A frozen Request path has an invalid identity.",
+    );
+  }
+  const root = `requests/${id}`;
+  return {
+    inputRelativePath: `${root}/input/base/index.html`,
+    promptRelativePath: `${root}/PROMPT.md`,
+    projectRulesRelativePath: `${root}/input/PROJECT.md`,
+    annotationsRelativePath: `${root}/input/annotations/records.json`,
+    changeRequestRelativePath: `${root}/change-request.json`,
+    inputManifestRelativePath: `${root}/input-manifest.json`,
+    outputRelativePath: `${root}/attempts/${attempt}/output/candidate.html`,
+  };
+}
+
 function assertCandidateId(value) {
   const id = String(value || "");
   if (!/^candidate_[A-Za-z0-9_-]{8,160}$/u.test(id)) {
@@ -1524,6 +1545,25 @@ function assertPromotionTransaction(transaction) {
     }
   }
   return transaction;
+}
+
+function assertPromotionCandidateBinding(transaction, candidate) {
+  if (
+    transaction.projectId !== candidate.projectId
+    || transaction.documentId !== candidate.documentId
+    || transaction.candidateId !== candidate.candidateId
+    || transaction.requestId !== candidate.requestId
+    || transaction.versionId !== candidate.proposedVersionId
+    || transaction.versionOrdinal !== candidate.proposedVersionOrdinal
+    || transaction.candidateOutputSha256 !== candidate.outputSha256
+    || transaction.basedOnVersionId !== candidate.basedOnVersionId
+    || transaction.previousVersionId !== candidate.previousVersionId
+  ) {
+    throw new ProjectFileRepositoryError(
+      "PROMOTION_TRANSACTION_MISMATCH",
+      "The Promotion transaction no longer matches its sealed Candidate identity.",
+    );
+  }
 }
 
 export class ProjectFileRepositoryError extends Error {
@@ -2062,11 +2102,7 @@ export class ProjectFileRepository {
     }
     if (workingCopy && state) assertWorkingCopyState(state, loaded.project, workingCopy);
     let draft = workingCopy && state
-      ? await readJsonFile(
-        draftPathForState(loaded.paths, workingCopy, state),
-        "Working Copy draft",
-        { projectRootPath: loaded.paths.projectRootPath },
-      )
+      ? await this.#readTrackedDraft({ ...loaded, workingCopy, state })
       : null;
     const activeRequest = loaded.runtime.activeRequest
       ? await readJsonFile(
@@ -2083,6 +2119,7 @@ export class ProjectFileRepository {
         requestId: loaded.runtime.activeRequest.requestId,
         attemptId: loaded.runtime.activeRequest.attemptId,
       });
+      await this.#assertSealedRequestIdentity({ ...loaded, workingCopy }, activeRequest);
     }
     const activeCandidate = (
       activeRequest?.status === "candidate-ready"
@@ -2107,11 +2144,7 @@ export class ProjectFileRepository {
       state = reconciliation.state;
       workingCopyRecovered = reconciliation.recovered;
       if (workingCopyRecovered) {
-        draft = await readJsonFile(
-          draftPathForState(loaded.paths, workingCopy, state),
-          "Working Copy draft",
-          { projectRootPath: loaded.paths.projectRootPath },
-        );
+        draft = await this.#readTrackedDraft({ ...loaded, workingCopy, state });
       }
     }
     return {
@@ -2168,6 +2201,50 @@ export class ProjectFileRepository {
     return { state: nextState, recovered: true };
   }
 
+  async #readTrackedDraft({ paths, project, workingCopy, state }) {
+    const draftRecord = await readJsonFileWithSha256(
+      draftPathForState(paths, workingCopy, state),
+      "Working Copy draft",
+      { projectRootPath: paths.projectRootPath },
+    );
+    if (state.draftSha256 === null) {
+      if (draftRecord || state.draftRevision !== 0) {
+        throw new ProjectFileRepositoryError(
+          "DRAFT_POINTER_MISMATCH",
+          "The Working Copy draft exists without the state pointer that owns it.",
+        );
+      }
+      return null;
+    }
+    const draft = draftRecord?.value || null;
+    if (
+      !draftRecord
+      || draftRecord.sha256 !== state.draftSha256
+      || !isObject(draft)
+      || draft.schemaVersion !== PROJECT_FILE_SCHEMA_VERSION
+      || draft.projectId !== project.projectId
+      || draft.documentId !== project.documentId
+      || draft.workingCopyId !== workingCopy.workingCopyId
+      || draft.basedOnVersionId !== workingCopy.basedOnVersionId
+      || !Number.isSafeInteger(draft.draftRevision)
+      || draft.draftRevision !== state.draftRevision
+      || !Array.isArray(draft.comments)
+      || !Array.isArray(draft.changeEvents)
+      || !Array.isArray(draft.deletedCommentIds)
+      || !Array.isArray(draft.appliedOperationIds)
+      || draft.appliedOperationIds.some((operationId) => (
+        typeof operationId !== "string" || !operationId
+      ))
+    ) {
+      throw new ProjectFileRepositoryError(
+        "DRAFT_POINTER_MISMATCH",
+        "The Working Copy draft does not match the durable state pointer.",
+      );
+    }
+    assertTimestamp(draft.updatedAt, "Working Copy draft updatedAt", "DRAFT_POINTER_MISMATCH");
+    return draft;
+  }
+
   async #prepareRequest({
     target,
     requestId,
@@ -2208,6 +2285,7 @@ export class ProjectFileRepository {
     });
     if (existing) {
       this.#assertRequestRecord(existing, loaded, { requestId: id, attemptId: attempt });
+      await this.#assertSealedRequestIdentity(loaded, existing);
       if (existing.expectedSourceSha256 !== expected) {
         throw new ProjectFileRepositoryError(
           "REQUEST_COLLISION",
@@ -2478,6 +2556,23 @@ export class ProjectFileRepository {
         "The frozen Request does not belong to this active Working Copy.",
       );
     }
+    if (
+      !isObject(record.request)
+      || ![
+        "processing",
+        "candidate-ready",
+        "no-change",
+        "error",
+        "promoted",
+        "cancelled",
+        "rejected",
+      ].includes(record.status)
+    ) {
+      throw new ProjectFileRepositoryError(
+        "INVALID_REQUEST",
+        "The frozen Request has an unsupported lifecycle record.",
+      );
+    }
     assertCandidateId(record.candidateId);
     assertSha256(record.expectedSourceSha256, "request expectedSourceSha256");
     assertId(record.proposedVersionId, VERSION_ID, "proposedVersionId");
@@ -2498,6 +2593,123 @@ export class ProjectFileRepository {
       if (value !== undefined) ensureRelativePath(value, label);
     }
     assertSha256(record.inputManifestSha256, "request input manifest hash");
+    assertTimestamp(record.createdAt, "Request createdAt", "INVALID_REQUEST");
+    for (const key of ["completedAt", "cancelledAt", "promotedAt"]) {
+      if (Object.hasOwn(record, key)) {
+        assertTimestamp(record[key], `Request ${key}`, "INVALID_REQUEST");
+      }
+    }
+  }
+
+  async #assertSealedRequestIdentity(loaded, record) {
+    const expectedPaths = frozenRequestRelativePaths(record.requestId, record.attemptId);
+    if (
+      record.candidateId !== candidateIdForRequest(record.projectId, record.requestId)
+      || record.proposedVersionId !== versionId(record.proposedVersionOrdinal)
+      || Object.entries(expectedPaths).some(([key, value]) => record[key] !== value)
+    ) {
+      throw new ProjectFileRepositoryError(
+        "FROZEN_REQUEST_IDENTITY_MISMATCH",
+        "The Request identity no longer matches its immutable path allocation.",
+      );
+    }
+    const active = loaded.runtime.activeRequest;
+    if (
+      active?.requestId === record.requestId
+      && (
+        active.attemptId !== record.attemptId
+        || active.inputManifestSha256 !== record.inputManifestSha256
+      )
+    ) {
+      throw new ProjectFileRepositoryError(
+        "FROZEN_REQUEST_BUNDLE_MISMATCH",
+        "The frozen Request no longer matches its runtime manifest anchor.",
+      );
+    }
+    const requestRoot = requestRootPath(loaded.paths, record.requestId);
+    const manifest = await readJsonFileWithSha256(
+      path.join(requestRoot, "input-manifest.json"),
+      "request input manifest",
+      { projectRootPath: loaded.paths.projectRootPath },
+    );
+    const anchor = active?.requestId === record.requestId
+      ? active.inputManifestSha256
+      : record.inputManifestSha256;
+    if (!manifest || manifest.sha256 !== anchor) {
+      throw new ProjectFileRepositoryError(
+        "FROZEN_REQUEST_BUNDLE_MISMATCH",
+        "The frozen Request input manifest changed after submission.",
+      );
+    }
+    const manifestValue = manifest.value;
+    if (
+      manifestValue.schemaVersion !== PROJECT_FILE_SCHEMA_VERSION
+      || manifestValue.projectId !== record.projectId
+      || manifestValue.documentId !== record.documentId
+      || manifestValue.requestId !== record.requestId
+      || manifestValue.attemptId !== record.attemptId
+      || manifestValue.frozen !== true
+      || !Array.isArray(manifestValue.files)
+    ) {
+      throw new ProjectFileRepositoryError(
+        "FROZEN_REQUEST_IDENTITY_MISMATCH",
+        "The frozen input manifest belongs to another Request identity.",
+      );
+    }
+    const changeRecords = manifestValue.files.filter((entry) => (
+      isObject(entry)
+      && entry.path === "change-request.json"
+      && entry.role === "change-request"
+      && entry.mediaType === "application/json"
+    ));
+    if (
+      changeRecords.length !== 1
+      || !SHA256.test(String(changeRecords[0].sha256 || ""))
+      || !Number.isSafeInteger(changeRecords[0].byteLength)
+      || changeRecords[0].byteLength < 0
+    ) {
+      throw new ProjectFileRepositoryError(
+        "FROZEN_REQUEST_BUNDLE_MISMATCH",
+        "The frozen Request has no authoritative change record.",
+      );
+    }
+    const changeRecord = await readJsonFileWithSha256(
+      path.join(requestRoot, "change-request.json"),
+      "frozen Request change record",
+      { projectRootPath: loaded.paths.projectRootPath },
+    );
+    if (
+      !changeRecord
+      || changeRecord.sha256 !== changeRecords[0].sha256
+      || changeRecord.information.size !== changeRecords[0].byteLength
+    ) {
+      throw new ProjectFileRepositoryError(
+        "FROZEN_REQUEST_BUNDLE_MISMATCH",
+        "The frozen Request change record changed after submission.",
+      );
+    }
+    const change = changeRecord.value;
+    if (
+      !isObject(change)
+      || change.schemaVersion !== PROJECT_FILE_SCHEMA_VERSION
+      || change.projectId !== record.projectId
+      || change.documentId !== record.documentId
+      || change.requestId !== record.requestId
+      || change.attemptId !== record.attemptId
+      || change.sourceWorkingCopyId !== record.sourceWorkingCopyId
+      || change.expectedSourceSha256 !== record.expectedSourceSha256
+      || change.proposedVersionId !== record.proposedVersionId
+      || Number(change.proposedVersionOrdinal) !== Number(record.proposedVersionOrdinal)
+      || change.basedOnVersionId !== record.basedOnVersionId
+      || change.previousVersionId !== record.previousVersionId
+      || !isObject(change.requirements)
+      || jsonText(change.requirements) !== jsonText(record.request)
+    ) {
+      throw new ProjectFileRepositoryError(
+        "FROZEN_REQUEST_IDENTITY_MISMATCH",
+        "The Request no longer matches its immutable change record.",
+      );
+    }
   }
 
   #assertCompletionRecord(completion, request) {
@@ -2573,6 +2785,7 @@ export class ProjectFileRepository {
       requestId: record.requestId,
       attemptId: record.attemptId,
     });
+    await this.#assertSealedRequestIdentity(loaded, record);
     const existingActiveRequest = loaded.runtime.activeRequest;
     if (
       existingActiveRequest?.requestId === record.requestId
@@ -2702,6 +2915,9 @@ export class ProjectFileRepository {
       projectRootPath: loaded.paths.projectRootPath,
     });
     this.#assertRequestRecord(record, loaded, { requestId, attemptId });
+    if (["processing", "candidate-ready"].includes(record.status)) {
+      await this.#assertSealedRequestIdentity(loaded, record);
+    }
     if (record.status === "candidate-ready" || record.status === "promoted") {
       const candidate = await this.#readCandidateForLoaded(loaded, record.candidateId);
       return {
@@ -2763,6 +2979,9 @@ export class ProjectFileRepository {
       projectRootPath: loaded.paths.projectRootPath,
     });
     this.#assertRequestRecord(record, loaded, { requestId, attemptId });
+    if (["processing", "candidate-ready"].includes(record.status)) {
+      await this.#assertSealedRequestIdentity(loaded, record);
+    }
     if (record.status === "candidate-ready") {
       const rejected = await this.#rejectCandidate({ target, candidateId: record.candidateId });
       return {
@@ -2838,8 +3057,10 @@ export class ProjectFileRepository {
     }
     assertWorkingCopyState(state, loaded.project, loaded.workingCopy);
     const draftPath = draftPathForState(loaded.paths, loaded.workingCopy, state);
-    const persisted = await readJsonFile(draftPath, "Working Copy draft", {
-      projectRootPath: loaded.paths.projectRootPath,
+    const persisted = await this.#readTrackedDraft({
+      ...loaded,
+      workingCopy: loaded.workingCopy,
+      state,
     });
     let command;
     try {
@@ -2883,6 +3104,10 @@ export class ProjectFileRepository {
         stored,
         "Working Copy draft",
       );
+      await this.#hit("draft-record-written", {
+        workingCopyId: loaded.workingCopy.workingCopyId,
+        operationId: command.operationId,
+      });
       const draftText = jsonText(stored);
       await atomicWriteProjectJson(loaded.paths.projectRootPath, statePath, {
         ...state,
@@ -2962,6 +3187,7 @@ export class ProjectFileRepository {
       projectRootPath: loaded.paths.projectRootPath,
     });
     this.#assertRequestRecord(record, loaded, { requestId, attemptId });
+    await this.#assertSealedRequestIdentity(loaded, record);
     if (record.status === "processing") {
       const active = loaded.runtime.activeRequest;
       if (
@@ -4302,6 +4528,7 @@ export class ProjectFileRepository {
       );
     }
     this.#assertRequestRecord(requestRecord, loaded, { requestId: request, attemptId: attempt });
+    await this.#assertSealedRequestIdentity(loaded, requestRecord);
     if (requestRecord.status !== "processing") {
       throw new ProjectFileRepositoryError(
         "REQUEST_NOT_PROCESSING",
@@ -4827,6 +5054,7 @@ export class ProjectFileRepository {
 
   async #continuePromotion(loaded, candidateState, transactionRoot, transaction) {
     assertPromotionTransaction(transaction);
+    assertPromotionCandidateBinding(transaction, candidateState.candidate);
     if (
       !isObject(transaction)
       || transaction.schemaVersion !== PROJECT_FILE_SCHEMA_VERSION
@@ -5407,6 +5635,7 @@ export class ProjectFileRepository {
           requestId: entry.name,
           attemptId: record.attemptId,
         });
+        await this.#assertSealedRequestIdentity({ ...loaded, workingCopy }, record);
       } catch {
         // A user-altered inactive Request is not repaired or used to infer
         // runtime state. Its explicit operation remains unavailable.
@@ -5495,27 +5724,17 @@ export class ProjectFileRepository {
       if (!transaction) continue;
       assertPromotionTransaction(transaction);
       if (transaction.state === "completed") continue;
-      const candidatePath = path.join(
-        loaded.paths.requestsRoot,
-        transaction.requestId,
-        "candidate.json",
+      // transaction.json is recovery input, not authority. Resolve the
+      // Candidate by its transaction-bound id rather than trusting its
+      // requestId to construct a path; #continuePromotion then compares every
+      // immutable linkage field before it can publish a Version.
+      const candidateState = await this.#readCandidateForLoaded(
+        loaded,
+        transaction.candidateId,
       );
-      const candidate = await readJsonFile(candidatePath, "candidate.json", {
-        projectRootPath: loaded.paths.projectRootPath,
-      });
-      if (!candidate) continue;
-      assertCandidateRecord(candidate, loaded);
-      const outputPath = resolveRelative(
-        loaded.paths.controlRoot,
-        candidate.outputRelativePath,
-        "candidate output path",
-      );
-      const output = await readHtmlFile(outputPath, "Candidate HTML", {
-        projectRootPath: loaded.paths.projectRootPath,
-      });
       recovered.push(await this.#continuePromotion(
         loaded,
-        { candidate, candidatePath, outputPath, output },
+        candidateState,
         transactionRoot,
         transaction,
       ));
