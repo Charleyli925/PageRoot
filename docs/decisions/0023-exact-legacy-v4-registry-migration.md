@@ -35,13 +35,19 @@ path containment, non-symlink directory and matching valid
 directory stat. It never derives identity from a path name, source HTML, equal
 bytes or an HTML Hash.
 
-Only after every record validates does the repository construct the entire
-current Registry in memory with `registeredProjectRootPath`,
-`rootFileIdentity`, original record timestamps and `pendingImports: {}`. It
-validates that current object, rechecks the original Registry SHA, writes a
-byte-for-byte Hash-named backup under the configured projects root, rechecks
-the source SHA again, then atomically publishes the complete current Registry.
-The backup is evidence only and is never read as a Registry authority.
+The repository first takes a short-lived exclusive migration lock under the
+configured projects root. A waiter re-reads the Registry only after owning that
+lock: if another Bridge process already published a valid current Registry, it
+returns that record read-only. Otherwise, only after every legacy record
+validates does it construct the entire current Registry in memory with
+`registeredProjectRootPath`, `rootFileIdentity`, original record timestamps and
+`pendingImports: {}`. It validates that current object, rechecks the original
+Registry SHA, writes a byte-for-byte Hash-named backup under the configured
+projects root, rechecks the source SHA again, then atomically publishes the
+complete current Registry. The lock is transient coordination rather than
+Registry authority; a proved-dead owner is reclaimed only by moving its exact
+lock directory aside before cleanup. The backup is evidence only and is never
+read as a Registry authority.
 
 Any invalid, mixed or changing Registry; escaping, missing or symlinked root;
 or project-ID mismatch fails closed. The original Registry remains unchanged on
@@ -57,12 +63,13 @@ HTML content. A second read of the published current shape is read-only.
   hydrate through the ordinary Registry authority path.
 - The same authority rules as ADR 0022 continue to apply after migration;
   copies, moved roots and unrelated HTML remain external.
-- The migration has a small, auditable write set: one backup and one atomic
-  Registry replacement, only after complete validation.
+- The migration has a small, auditable write set: one transient exclusive lock,
+  one backup and one atomic Registry replacement, only after complete
+  validation.
 - Tests must prove current no-op, valid single/multiple/empty migration,
-  rejection without Registry SHA change, atomic old-or-complete recovery,
-  Bridge first-open, and desktop edit/comment/reopen behavior with external
-  HTML bytes unchanged.
+  rejection without Registry SHA change, concurrent import serialization,
+  atomic old-or-complete recovery, Bridge first-open, and desktop
+  edit/comment/reopen behavior with external HTML bytes unchanged.
 
 ## Rejected alternatives
 

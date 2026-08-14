@@ -1083,6 +1083,60 @@ test("legacy V4 Registry migration fault recovery leaves either old bytes or one
   assert.deepEqual(await readFile(seededAfterPublish.filePath), publishedBytes);
 });
 
+test("legacy V4 migration serializes a concurrent import without dropping its Registry entry", async (t) => {
+  const value = await fixture(t);
+  const first = await importSource(value, "legacy-concurrent-first.html");
+  const seeded = await seedExactLegacyV4Registry(value);
+  const secondHtml = html("legacy concurrent second");
+  const secondSourcePath = path.join(value.sources, "legacy-concurrent-second.html");
+  const secondBytes = Buffer.from(secondHtml, "utf8");
+  await writeFile(secondSourcePath, secondBytes);
+
+  let releasePublish = () => {};
+  const publishPaused = new Promise((resolve) => {
+    releasePublish = resolve;
+  });
+  let reachedPublish;
+  const publishReached = new Promise((resolve) => {
+    reachedPublish = resolve;
+  });
+  t.after(() => releasePublish());
+  const firstRepository = new ProjectFileRepository({
+    projectsRoot: value.projects,
+    failpoint: async (name) => {
+      if (name === "legacy-v4-registry-migration-before-publish") {
+        reachedPublish();
+        await publishPaused;
+      }
+      return false;
+    },
+  });
+  const firstMigration = firstRepository.initialize();
+  await publishReached;
+
+  const secondRepository = new ProjectFileRepository({ projectsRoot: value.projects });
+  const secondImport = secondRepository.importExternal({
+    sourcePath: secondSourcePath,
+    expectedSourceSha256: sha256(secondBytes),
+  });
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  assert.deepEqual(
+    await readFile(seeded.filePath),
+    seeded.bytes,
+    "a concurrent writer must wait before the legacy Registry is published",
+  );
+
+  releasePublish();
+  const [, importedSecond] = await Promise.all([firstMigration, secondImport]);
+  const registry = await json(seeded.filePath);
+  assert.deepEqual(
+    Object.keys(registry.projects).sort(),
+    [first.target.projectId, importedSecond.target.projectId].sort(),
+  );
+  assert.deepEqual(registry.pendingImports, {});
+  assert.deepEqual(await readFile(seeded.backupPath), seeded.bytes);
+});
+
 test("exact path, rather than equal bytes, determines the opened document", async (t) => {
   const value = await fixture(t);
   const sameBytes = html("same bytes");

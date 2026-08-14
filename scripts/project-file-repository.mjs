@@ -2,11 +2,13 @@ import { randomUUID } from "node:crypto";
 import {
   link,
   lstat,
+  mkdir,
   realpath,
   readFile,
   readdir,
   rename,
   rm,
+  rmdir,
   unlink,
 } from "node:fs/promises";
 import os from "node:os";
@@ -31,6 +33,10 @@ export const PROJECT_FILE_SCHEMA_VERSION = "4.0.0";
 
 const HTML_EXTENSIONS = new Set([".html", ".htm"]);
 const LEGACY_V4_REGISTRY_BACKUP_DIRECTORY = ".pageroot-registry-backups";
+const LEGACY_V4_REGISTRY_MIGRATION_LOCK_DIRECTORY = ".pageroot-registry-migration-lock";
+const LEGACY_V4_REGISTRY_MIGRATION_LOCK_WAIT_MS = 20;
+const LEGACY_V4_REGISTRY_MIGRATION_LOCK_TIMEOUT_MS = 30_000;
+const LEGACY_V4_REGISTRY_MIGRATION_LOCK_STALE_MS = 5 * 60_000;
 const PROJECT_ID = /^project_[a-f0-9]{16,64}$/u;
 const DOCUMENT_ID = /^doc_[a-f0-9]{16,64}$/u;
 const VERSION_ID = /^ver_\d{4,}$/u;
@@ -519,6 +525,121 @@ async function readJsonFile(filePath, label, options = {}) {
   return result?.value || null;
 }
 
+async function releaseLegacyV4RegistryMigrationLock({
+  projectsRoot,
+  lockPath,
+  ownerPath,
+  token,
+}) {
+  try {
+    const owner = legacyV4RegistryMigrationLockOwner(await readJsonFile(
+      ownerPath,
+      "legacy V4 Registry migration lock",
+      { projectRootPath: projectsRoot },
+    ));
+    if (!owner || owner.token !== token) return;
+    await unlink(ownerPath).catch((cause) => {
+      if (cause?.code !== "ENOENT") throw cause;
+    });
+    await rmdir(lockPath).catch((cause) => {
+      if (!["ENOENT", "ENOTEMPTY"].includes(cause?.code)) throw cause;
+    });
+    await syncDirectory(projectsRoot);
+  } catch {
+    // The published current Registry remains authoritative even when an
+    // interrupted process leaves only an inert coordination directory.  A
+    // later legacy reader can reclaim a proved-dead owner; current readers do
+    // not depend on this transient lock.
+  }
+}
+
+async function retireLegacyV4RegistryMigrationLock({ projectsRoot, lockPath }) {
+  const abandonedPath = path.join(
+    projectsRoot,
+    `.pageroot-registry-migration-stale-${randomUUID()}`,
+  );
+  try {
+    await rename(lockPath, abandonedPath);
+  } catch (cause) {
+    if (cause?.code === "ENOENT") return false;
+    throw cause;
+  }
+  // The lock owner was proved dead, or no owner was ever sealed before the
+  // bounded stale deadline.  Moving the exact lock directory out of the lock
+  // name first prevents another contender from ever deleting a newly acquired
+  // lock; this private coordination directory has no user authority.
+  await rm(abandonedPath, { recursive: true, force: true });
+  await syncDirectory(projectsRoot);
+  return true;
+}
+
+async function acquireLegacyV4RegistryMigrationLock({ projectsRoot }) {
+  const lockPath = legacyV4RegistryMigrationLockPath(projectsRoot);
+  const ownerPath = path.join(lockPath, "owner.json");
+  const deadlineAt = Date.now() + LEGACY_V4_REGISTRY_MIGRATION_LOCK_TIMEOUT_MS;
+
+  await assertRealPathInsideProject(projectsRoot, lockPath, "legacy V4 Registry migration lock");
+  while (true) {
+    try {
+      await mkdir(lockPath, { mode: 0o700 });
+      await assertRealPathInsideProject(
+        projectsRoot,
+        lockPath,
+        "legacy V4 Registry migration lock",
+        { expectedKind: "directory" },
+      );
+      const token = randomUUID();
+      await atomicWriteFile(ownerPath, Buffer.from(jsonText({
+        pid: process.pid,
+        token,
+        createdAt: new Date().toISOString(),
+      }), "utf8"), { mode: 0o600 });
+      await Promise.all([
+        syncDirectory(lockPath),
+        syncDirectory(projectsRoot),
+      ]);
+      return () => releaseLegacyV4RegistryMigrationLock({
+        projectsRoot,
+        lockPath,
+        ownerPath,
+        token,
+      });
+    } catch (cause) {
+      if (cause?.code !== "EEXIST") throw cause;
+    }
+
+    const lockInformation = await directoryInformation(
+      lockPath,
+      "legacy V4 Registry migration lock",
+      { projectRootPath: projectsRoot },
+    );
+    const owner = legacyV4RegistryMigrationLockOwner(await readJsonFile(
+      ownerPath,
+      "legacy V4 Registry migration lock",
+      { projectRootPath: projectsRoot },
+    ));
+    if (owner && !localProcessIsAlive(owner.pid)) {
+      await retireLegacyV4RegistryMigrationLock({ projectsRoot, lockPath });
+      continue;
+    }
+    if (
+      !owner
+      && lockInformation
+      && Date.now() - lockInformation.mtimeMs >= LEGACY_V4_REGISTRY_MIGRATION_LOCK_STALE_MS
+    ) {
+      await retireLegacyV4RegistryMigrationLock({ projectsRoot, lockPath });
+      continue;
+    }
+    if (Date.now() >= deadlineAt) {
+      throw new ProjectFileRepositoryError(
+        "LEGACY_V4_REGISTRY_MIGRATION_BUSY",
+        "Another PageRoot process is safely completing this legacy V4 Registry migration.",
+      );
+    }
+    await waitForLegacyV4RegistryMigrationLock();
+  }
+}
+
 async function writeFileNoReplace(filePath, buffer, expectedSha256, label, {
   projectRootPath = null,
 } = {}) {
@@ -756,6 +877,40 @@ function legacyV4RegistryBackupPath(projectsRoot, registrySha256) {
     LEGACY_V4_REGISTRY_BACKUP_DIRECTORY,
     `${digest}.json`,
   );
+}
+
+function legacyV4RegistryMigrationLockPath(projectsRoot) {
+  return path.join(projectsRoot, LEGACY_V4_REGISTRY_MIGRATION_LOCK_DIRECTORY);
+}
+
+function legacyV4RegistryMigrationLockOwner(value) {
+  if (
+    !hasExactKeys(value, ["createdAt", "pid", "token"])
+    || !Number.isSafeInteger(value.pid)
+    || value.pid < 1
+    || typeof value.token !== "string"
+    || !/^[a-f0-9-]{36}$/u.test(value.token)
+    || !value.createdAt
+    || Number.isNaN(Date.parse(value.createdAt))
+  ) return null;
+  return value;
+}
+
+function localProcessIsAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (cause) {
+    // EPERM still proves that a local process owns this PID.  Only ESRCH is
+    // safe evidence that a crashed migration owner can no longer publish.
+    return cause?.code !== "ESRCH";
+  }
+}
+
+function waitForLegacyV4RegistryMigrationLock() {
+  return new Promise((resolve) => {
+    setTimeout(resolve, LEGACY_V4_REGISTRY_MIGRATION_LOCK_WAIT_MS);
+  });
 }
 
 function assertRegistryTimestamp(value, label) {
@@ -1447,11 +1602,39 @@ export class ProjectFileRepository {
       return assertRegistry(record.value);
     } catch (cause) {
       if (!isExactLegacyV4Registry(record.value)) throw cause;
-      return this.#migrateExactLegacyV4Registry(record);
+      return this.#migrateExactLegacyV4Registry();
     }
   }
 
-  async #migrateExactLegacyV4Registry({ value: legacyRegistry, sha256: legacySha256 }) {
+  async #migrateExactLegacyV4Registry() {
+    const release = await acquireLegacyV4RegistryMigrationLock({
+      projectsRoot: this.#projectsRoot,
+    });
+    try {
+      // A second process may have completed the migration while this caller
+      // waited.  Re-read under the exclusive migration lock; never publish a
+      // stale conversion over a newer Registry or a newly recorded import.
+      const current = await readJsonFileWithSha256(this.#registryPath, "project registry", {
+        projectRootPath: this.#projectsRoot,
+      });
+      if (!current) {
+        throw new ProjectFileRepositoryError(
+          "LEGACY_V4_REGISTRY_MIGRATION_SOURCE_CHANGED",
+          "The legacy V4 project Registry disappeared while migration was waiting.",
+        );
+      }
+      try {
+        return assertRegistry(current.value);
+      } catch (cause) {
+        if (!isExactLegacyV4Registry(current.value)) throw cause;
+      }
+      return await this.#migrateExactLegacyV4RegistryLocked(current);
+    } finally {
+      await release();
+    }
+  }
+
+  async #migrateExactLegacyV4RegistryLocked({ value: legacyRegistry, sha256: legacySha256 }) {
     let migrated;
     try {
       assertRegistryTimestamp(legacyRegistry.updatedAt, "legacy Registry updatedAt");

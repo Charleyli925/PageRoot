@@ -510,10 +510,13 @@ The supported compatibility adapters are:
   `{ projectRootPath, updatedAt }` project records. Every record must prove its
   ID, direct-child non-symlink root, real-path containment and matching
   `.pageroot/project.json`; current `rootFileIdentity` comes from that live
-  root stat, never a filename or HTML Hash. All entries validate before the
-  old raw bytes are backed up by Hash and the full current Registry is
-  atomically published. A failure preserves the old Registry, cannot reset or
-  reassociate a project, and grants no write authority. Remove this migration
+root stat, never a filename or HTML Hash. A short-lived exclusive migration
+lock serializes this replacement across Bridge processes; after acquiring it,
+the repository re-reads the Registry and returns a current record without a
+write when another process already completed it. All entries validate before
+the old raw bytes are backed up by Hash and the full current Registry is
+atomically published. A failure preserves the old Registry, cannot reset or
+reassociate a project, and grants no write authority. Remove this migration
   only after a read-only Registry census proves the exact historical shape is
   outside the supported upgrade window.
 - Complete PageRoot 0.9.0 v3 project records whose registry, `project.json`,

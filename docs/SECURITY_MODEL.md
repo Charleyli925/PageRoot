@@ -103,9 +103,11 @@ fields beyond `projectRootPath` and `updatedAt`. The migration reader validates
 a current Registry read-only. Before completing that legacy shape, every record must
 prove its valid key, direct-child real non-symlink root and matching
 `.pageroot/project.json`; the new root identity comes only from the live
-directory stat. Validation finishes before the old Registry bytes are copied to
-a Hash-named backup and one atomic current Registry is published. The backup is
-not runtime authority. Any validation or publication failure leaves the old
+directory stat. A short-lived exclusive migration lock serializes the one
+replacement across Bridge processes, and every waiter re-reads under that lock
+before it may publish. Validation finishes before the old Registry bytes are
+copied to a Hash-named backup and one atomic current Registry is published. The
+backup is not runtime authority. Any validation or publication failure leaves the old
 Registry bytes in place and never resets, drops, scans, imports or reassociates
 a Project. HTML Hashes and equal bytes never participate in this migration.
 

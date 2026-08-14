@@ -70,14 +70,17 @@ collected. A guessed date is not a support-window policy.
   migrate. Every project key, direct-child non-symlink real root and matching
   `.pageroot/project.json` must validate before the repository constructs
   `registeredProjectRootPath`, a live-directory-stat `rootFileIdentity`, and
-  `pendingImports: {}` in memory. It validates that complete current object,
-  writes a Hash-named byte-for-byte backup of the old Registry, then atomically
+  `pendingImports: {}` in memory. A short-lived exclusive migration lock
+  serializes the one replacement across Bridge processes; a waiter re-reads
+  under that lock and returns a current Registry without rewriting it. It then
+  writes a Hash-named byte-for-byte backup of the old Registry and atomically
   publishes the current Registry. The backup is not read as runtime authority.
   Mixed shapes, extra fields, path escape, symlink, missing root, identity
   mismatch, source change or publication failure fail closed without changing
   the old Registry, importing a project, reassociating a root or touching HTML.
 - Historical proof: `tests/project-file-repository.test.mjs` covers valid
-  one/multiple/empty migration, current no-op, rejection and atomic recovery;
+  one/multiple/empty migration, current no-op, rejection, atomic recovery and
+  concurrent migration/import serialization;
   `tests/project-file-bridge.test.mjs` covers `/workspace` and first
   `/project/ensure`; `tests/e2e/electron/native-dom-electron.spec.mjs` covers
   a seeded Registry through desktop edit, comment and reopen.

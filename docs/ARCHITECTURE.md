@@ -394,9 +394,11 @@ fresh v4 V1 on open; the source HTML bytes remain untouched. The sole bounded
 metadata exception is an exact pre-hardening V4 Registry shape: after current
 validation fails, the repository may complete its missing root stat identity
 and empty pending-import map only after every already-listed root, project
-identity and real path validates. It backs up the original Registry bytes by
-Hash before one atomic publication; the backup is never opening or write
-authority. It neither imports, reassociates nor changes a Project, Working
+identity and real path validates. A short-lived exclusive migration lock
+serializes that one Registry replacement across Bridge processes; a waiter
+re-reads the Registry after acquiring it. It backs up the original Registry
+bytes by Hash before one atomic publication; the backup is never opening or
+write authority. It neither imports, reassociates nor changes a Project, Working
 Copy, Version, Draft, comment, attachment or HTML. There is no v3 compatibility
 ingress, broader physical migration, or dual write. The decisions are recorded
 in `docs/decisions/0022-user-owned-project-root-identity.md` and
