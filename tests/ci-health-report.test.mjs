@@ -865,6 +865,8 @@ test("CI health workflow stays read-only and retains a machine-readable report",
   assert.deepEqual(CI_HEALTH_WORKFLOW_INPUTS, {
     ci: "ci.yml",
     feedback: "pr-feedback.yml",
+    draftReviewCommand: "draft-review.yml",
+    draftReviewAuto: "draft-review-auto.yml",
     releaseDryRun: "release-dry-run.yml",
     releaseCandidate: "release-candidate.yml",
     release: "release.yml",
@@ -875,8 +877,49 @@ test("CI health workflow stays read-only and retains a machine-readable report",
   assert.match(reportScript, /workflow: CI_HEALTH_WORKFLOW_INPUTS\.releaseCandidate/u);
   assert.match(reportScript, /workflow: CI_HEALTH_WORKFLOW_INPUTS\.release/u);
   assert.match(reportScript, /pullRequestMetrics\(\{ repositoryPath, token, since \}\)/u);
+  assert.match(reportScript, /workflow: CI_HEALTH_WORKFLOW_INPUTS\.draftReviewCommand/u);
+  assert.match(reportScript, /workflow: CI_HEALTH_WORKFLOW_INPUTS\.draftReviewAuto/u);
   assert.match(reportScript, /issues\/\$\{number\}\/comments/u);
   assert.match(reportScript, /Candidate-to-merge P50/u);
   assert.match(reportScript, /\| Metric \| Actual \| Target \| Status \|/u);
   assert.match(reportScript, /Cancelled completed promoted candidates/u);
+});
+test("CI health reports Draft review auto runs, failure share, latency and settled rounds", () => {
+  const statusBody = "<!-- pageroot-draft-review-status:v1\npr=25\nhead=" + "a".repeat(40) + " state=clean\nhead=" + "b".repeat(40) + " state=action_required\nhead=" + "c".repeat(40) + " state=timed_out\n-->";
+  const report = summarizeCiHealth({
+    periodDays: 30,
+    generatedAt: "2026-07-24T12:00:00.000Z",
+    ciRuns: [],
+    feedbackRuns: [],
+    draftReviewAutoRuns: [
+      completedRun({ id: 700, event: "workflow_run", head_branch: "feature/a", head_sha: "a".repeat(40), created_at: "2026-07-24T10:00:00.000Z", updated_at: "2026-07-24T10:04:00.000Z" }),
+      completedRun({ id: 701, event: "workflow_run", conclusion: "failure", head_branch: "feature/b", head_sha: "b".repeat(40), created_at: "2026-07-24T10:05:00.000Z", updated_at: "2026-07-24T10:06:00.000Z" }),
+    ],
+    jobsByRunId: {
+      700: [job({ name: "draft-review-auto-probe", attempt: 1, conclusion: "success", startedAt: "2026-07-24T10:00:00.000Z", completedAt: "2026-07-24T10:03:00.000Z" })],
+      701: [job({ name: "draft-review-auto-probe", attempt: 1, conclusion: "failure", startedAt: "2026-07-24T10:05:00.000Z", completedAt: "2026-07-24T10:06:00.000Z" })],
+    },
+    candidateRuns: [],
+    releaseRuns: [],
+    pullRequests: [{
+      number: 25,
+      merged_at: null,
+      created_at: "2026-07-24T09:00:00.000Z",
+      updated_at: "2026-07-24T11:00:00.000Z",
+      timelineEvents: [],
+      reviews: [],
+      reviewComments: [],
+      issueReactions: [],
+      issueComments: [{ body: statusBody, user: { login: "github-actions[bot]" } }],
+    }],
+  });
+  assert.equal(report.draftReview.terminalRuns, 2);
+  assert.equal(report.draftReview.failedRuns, 1);
+  assert.equal(report.draftReview.failureRate, 0.5);
+  assert.equal(report.draftReview.roundMinutesP50, 1);
+  assert.equal(report.draftReview.settledRounds, 3);
+  assert.equal(report.draftReview.actionRequiredRounds, 1);
+  assert.equal(report.draftReview.timedOutRounds, 1);
+  assert.equal(report.targetAssessment.metrics.draftAutoFailureRate.status, "missed");
+  assert.match(renderCiHealthMarkdown(report), /Draft review auto-trigger failure rate/u);
 });

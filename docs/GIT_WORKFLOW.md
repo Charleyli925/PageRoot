@@ -87,9 +87,8 @@ git push -u origin feature/short-name
 Open a Pull Request, wait for required CI, review the final diff, then squash-merge. Delete the merged branch. Never use a DMG, `.app`, copied folder or local backup as the basis for a new edit.
 
 Every Pull Request starts as Draft. `opened`, `synchronize` and `reopened`
-events run only the impact-selected `PR Feedback` workflow plus its
-non-blocking review-advisory snapshot; returning to Draft
-alone starts nothing. After each successful `PR Feedback` run, the trusted `Draft Codex Review Auto` workflow requests one exact-head Codex review and updates a rolling status comment with the settled head state; a maintainer can also post a `pageroot-draft-review-command:v1` comment to request or close a round manually. Batch implementation and accepted P0/P1 corrections while
+events run only the impact-selected `PR Feedback` workflow;
+returning to Draft
 Draft. When the intended head is frozen, update it onto current `origin/main`
 and mark it Ready once. That single `ready_for_review` transition starts
 `review-policy` and the final Codex pass; do not post a Draft marker or another
