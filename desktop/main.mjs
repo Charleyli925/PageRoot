@@ -1592,13 +1592,76 @@ async function revealVersionFile(payload) {
     || versionRecord.ok !== true
     || versionRecord.versionId !== payload.versionId
     || typeof versionRecord.projectId !== "string"
-    || typeof versionRecord.storageDirectoryName !== "string"
     || typeof versionRecord.path !== "string"
   ) {
     throw new ProjectFileError(
       "VERSION_FILE_UNAVAILABLE",
       "这个历史版本文件暂时无法显示，请重新打开版本历史后再试。",
     );
+  }
+
+  if (versionRecord.projectFileSchemaVersion === "4.0.0") {
+    if (
+      typeof versionRecord.projectRootPath !== "string"
+      || typeof versionRecord.workingCopyId !== "string"
+      || !/^work_ver_\d{4,}$/.test(versionRecord.workingCopyId)
+      || typeof versionRecord.visibleWorkingCopyPath !== "string"
+      || typeof versionRecord.workingCopySha256 !== "string"
+    ) {
+      throw new ProjectFileError(
+        "VERSION_WORKING_COPY_UNAVAILABLE",
+        "这个版本没有可验证的可见 Working Copy。",
+      );
+    }
+    const [resolvedProjectRoot, resolvedWorkingCopyPath] = await Promise.all([
+      realpath(path.resolve(versionRecord.projectRootPath)),
+      realpath(path.resolve(versionRecord.visibleWorkingCopyPath)),
+    ]);
+    const rootStats = await lstat(resolvedProjectRoot);
+    const relativeWorkingCopyPath = path.relative(
+      resolvedProjectRoot,
+      resolvedWorkingCopyPath,
+    );
+    if (
+      !rootStats.isDirectory()
+      || rootStats.isSymbolicLink()
+      || !relativeWorkingCopyPath
+      || relativeWorkingCopyPath.startsWith(`..${path.sep}`)
+      || relativeWorkingCopyPath === ".."
+      || path.isAbsolute(relativeWorkingCopyPath)
+      || relativeWorkingCopyPath.split(path.sep).includes(".pageroot")
+      || !HTML_EXTENSIONS.has(path.extname(resolvedWorkingCopyPath).toLowerCase())
+    ) {
+      throw new ProjectFileError(
+        "UNSAFE_VERSION_WORKING_COPY_PATH",
+        "只能显示该项目已验证的可见 Version Working Copy。",
+        { versionPath: resolvedWorkingCopyPath },
+      );
+    }
+    const workingCopyStats = await lstat(resolvedWorkingCopyPath);
+    if (!workingCopyStats.isFile() || workingCopyStats.isSymbolicLink()) {
+      throw new ProjectFileError(
+        "VERSION_WORKING_COPY_NOT_REGULAR",
+        "这个 Version Working Copy 不是可显示的普通 HTML 文件。",
+      );
+    }
+    const workingCopy = await readHtmlProject(resolvedWorkingCopyPath);
+    if (workingCopy.sha256 !== versionRecord.workingCopySha256) {
+      throw new ProjectFileError(
+        "VERSION_WORKING_COPY_HASH_MISMATCH",
+        "Version Working Copy 在验证后已改变，尚未在 Finder 中显示。",
+        {
+          expectedSha256: versionRecord.workingCopySha256,
+          actualSha256: workingCopy.sha256,
+        },
+      );
+    }
+    shell.showItemInFolder(resolvedWorkingCopyPath);
+    return {
+      sourcePath,
+      versionId: payload.versionId,
+      versionPath: resolvedWorkingCopyPath,
+    };
   }
 
   const [workspaceRoot, resolvedVersionPath] = await Promise.all([
@@ -1610,6 +1673,8 @@ async function revealVersionFile(payload) {
     resolvedVersionPath,
   );
   if (
+    typeof versionRecord.storageDirectoryName !== "string"
+    ||
     !relativeVersionPath
     || relativeVersionPath.startsWith(`..${path.sep}`)
     || relativeVersionPath === ".."

@@ -1892,6 +1892,13 @@ export class ProjectFileRepository {
     return this.#serial(() => this.#readVersionFile({ target, requestedVersionId }));
   }
 
+  async resolveVersionWorkingCopy({ target, versionId: requestedVersionId } = {}) {
+    return this.#serial(() => this.#resolveVersionWorkingCopy({
+      target,
+      requestedVersionId,
+    }));
+  }
+
   async readCandidate({ target, candidateId: requestedCandidateId } = {}) {
     return this.#serial(async () => {
       const loaded = await this.#resolveMutationTarget(target);
@@ -2271,6 +2278,24 @@ export class ProjectFileRepository {
         );
       }
     }
+    const workingCopies = [];
+    for (const entry of loaded.manifest.workingCopies) {
+      const workingCopyState = entry.workingCopyId === workingCopy?.workingCopyId
+        ? state
+        : await readJsonFile(
+          workingCopyStatePath(loaded.paths, entry),
+          "Working Copy state",
+          { projectRootPath: loaded.paths.projectRootPath },
+        );
+      assertWorkingCopyState(workingCopyState, loaded, entry);
+      workingCopies.push({
+        workingCopyId: entry.workingCopyId,
+        versionId: entry.versionId,
+        basedOnVersionId: entry.basedOnVersionId,
+        differsFromBase: workingCopyState.differsFromBase === true,
+        saveState: workingCopyState.saveState,
+      });
+    }
     const activeRequest = loaded.runtime.activeRequest
       ? await readJsonFile(
         path.join(
@@ -2324,6 +2349,7 @@ export class ProjectFileRepository {
       runtime: structuredClone(loaded.runtime),
       workingCopy: workingCopy ? structuredClone(workingCopy) : null,
       workingCopyState: state ? structuredClone(state) : null,
+      workingCopies: structuredClone(workingCopies),
       draft: draft ? structuredClone(draft) : null,
       activeRequest: activeRequest ? structuredClone(activeRequest) : null,
       activeCandidate: activeCandidate
@@ -3194,6 +3220,56 @@ export class ProjectFileRepository {
       content: candidate.output.html,
       sha256: candidate.output.sha256,
       path: candidate.outputPath,
+    };
+  }
+
+  async #resolveVersionWorkingCopy({ target, requestedVersionId }) {
+    const loaded = await this.#resolveMutationTarget(target);
+    const id = assertId(requestedVersionId, VERSION_ID, "versionId");
+    const version = loaded.manifest.versions.find((entry) => entry.versionId === id);
+    if (!version) {
+      throw new ProjectFileRepositoryError(
+        "VERSION_NOT_FOUND",
+        "The requested Version was not found.",
+      );
+    }
+    const matches = loaded.manifest.workingCopies.filter((workingCopy) => (
+      workingCopy.versionId === id
+      && workingCopy.basedOnVersionId === id
+    ));
+    if (matches.length !== 1) {
+      throw new ProjectFileRepositoryError(
+        "VERSION_WORKING_COPY_UNAVAILABLE",
+        "The Version has no unambiguous visible Working Copy.",
+        { versionId: id, workingCopyIds: matches.map((entry) => entry.workingCopyId) },
+      );
+    }
+    const workingCopy = matches[0];
+    const state = await readJsonFile(
+      workingCopyStatePath(loaded.paths, workingCopy),
+      "Version Working Copy state",
+      { projectRootPath: loaded.paths.projectRootPath },
+    );
+    assertWorkingCopyState(state, loaded, workingCopy);
+    const workingCopyPath = workingCopySourcePath(loaded.paths, workingCopy);
+    const source = await readHtmlFile(workingCopyPath, "Version Working Copy", {
+      projectRootPath: loaded.paths.projectRootPath,
+    });
+    const reconciled = await this.#reconcileExternalWorkingCopyState({
+      loaded,
+      workingCopy,
+      state,
+      source,
+    });
+    return {
+      projectId: loaded.project.projectId,
+      documentId: loaded.project.documentId,
+      projectRootPath: loaded.paths.projectRootPath,
+      versionId: version.versionId,
+      workingCopyId: workingCopy.workingCopyId,
+      workingCopyPath,
+      sourceSha256: source.sha256,
+      workingCopyState: structuredClone(reconciled.state),
     };
   }
 

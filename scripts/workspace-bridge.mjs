@@ -1102,16 +1102,24 @@ function projectFileTargetFromBody(body = {}) {
 }
 
 function projectFileVersionRows(workspace) {
-  return workspace.manifest.versions.map((version) => ({
-    schemaVersion: "4.0.0",
-    ...version,
-    sourceType: version.sourceCandidateId ? "internal-ai" : "initial",
-    versionLabel: `V${version.ordinal}`,
-    generatedAt: version.createdAt,
-    requestId: version.sourceRequestId,
-    attemptId: null,
-    committed: true,
-  }));
+  return workspace.manifest.versions.map((version) => {
+    const workingCopy = Array.isArray(workspace.workingCopies)
+      ? workspace.workingCopies.find((entry) => entry.versionId === version.versionId)
+      : null;
+    return {
+      schemaVersion: "4.0.0",
+      ...version,
+      sourceType: version.sourceCandidateId ? "internal-ai" : "initial",
+      versionLabel: `V${version.ordinal}`,
+      generatedAt: version.createdAt,
+      requestId: version.sourceRequestId,
+      attemptId: null,
+      committed: true,
+      workingCopyId: workingCopy?.workingCopyId || null,
+      differsFromBase: workingCopy?.differsFromBase === true,
+      saveState: workingCopy?.saveState || null,
+    };
+  });
 }
 
 function projectFileDraftState(workspace) {
@@ -1727,10 +1735,18 @@ async function projectFileVersionFile(sourcePath, versionId) {
       target: projectFileTargetFromWorkspace(workspace),
       versionId,
     });
+    const visibleWorkingCopy = file.kind === "version"
+      ? await projectFileRepository.resolveVersionWorkingCopy({
+        target: projectFileTargetFromWorkspace(workspace),
+        versionId,
+      })
+      : null;
     return {
       ok: true,
+      projectFileSchemaVersion: "4.0.0",
       projectId: workspace.project.projectId,
       documentId: workspace.project.documentId,
+      projectRootPath: workspace.target.projectRootPath,
       versionId: file.version.versionId,
       content: file.content,
       sha256: file.sha256,
@@ -1740,6 +1756,11 @@ async function projectFileVersionFile(sourcePath, versionId) {
         ? file.candidate.outputRelativePath
         : file.version.snapshotRelativePath,
       readOnly: true,
+      ...(visibleWorkingCopy ? {
+        workingCopyId: visibleWorkingCopy.workingCopyId,
+        visibleWorkingCopyPath: visibleWorkingCopy.workingCopyPath,
+        workingCopySha256: visibleWorkingCopy.sourceSha256,
+      } : {}),
       ...(file.kind === "candidate" ? { candidate: file.candidate } : {}),
     };
   } catch (cause) {

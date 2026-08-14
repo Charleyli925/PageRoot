@@ -187,6 +187,7 @@ import {
   formatTime,
   localFileNameFromSourcePath,
   projectMarkdown,
+  projectStatusProjection,
   safeVersionLabel,
   sameLocalSourcePath,
   workspaceFileLabel,
@@ -690,6 +691,7 @@ export default function Workbench() {
   const latestVersionId = versionSnapshot.latestVersionId;
   const currentBasedOnVersionId =
     versionSnapshot.currentBasedOnVersionId;
+  const currentExactVersionId = versionSnapshot.currentExactVersionId;
   const viewMode = versionSnapshot.viewMode;
   const [canvasMode, setCanvasMode] = useState<CanvasMode>("edit");
   const [pageViewContext, setPageViewContext] =
@@ -5774,10 +5776,38 @@ export default function Workbench() {
           : sourcePath
             ? safeSaveLabel
             : persistLabel;
+  const currentWorkingCopy = versions.find(
+    (version) => version.id === currentBasedOnVersionId,
+  ) || null;
+  const projectStatus = projectStatusProjection({
+    currentBasedOnVersionId,
+    currentExactVersionId,
+    latestVersionId,
+    viewMode,
+    viewingVersionId,
+    persistState,
+    hasLocalModifications: currentWorkingCopy?.differsFromBase === true,
+    candidate: activeRun
+      ? {
+        versionId: activeRun.candidateVersionId || null,
+        status: activeRun.status,
+      }
+      : null,
+  });
+  const headerStatusFacts = browserPreviewOnly
+    ? ["浏览器预览 · 只读"]
+    : projectStatus.facts.length
+      ? projectStatus.facts
+      : [latestVersion?.label || "尚未创建正式版本"];
   const canShowCurrentFileInFolder = Boolean(
     sourcePath
     && typeof window !== "undefined"
     && window.htmlAIProjects?.showInFolder,
+  );
+  const canOpenProjectRootInFolder = Boolean(
+    projectRecordsPath
+    && workspaceController
+    && typeof window !== "undefined",
   );
   const canOpenCurrentHtmlInDefaultBrowser = Boolean(
     sourcePath
@@ -6514,18 +6544,22 @@ export default function Workbench() {
               ) : null}
             </div>
             <span className="file-meta">
-              <span className="file-version-label">
-                {browserPreviewOnly
-                  ? "浏览器预览 · 只读"
-                  : viewMode === "history"
-                  ? `${viewingVersion?.label || "历史版本"} · 只读`
-                  : activeRun?.candidateVersionLabel && runInProgress
-                    ? `${activeRun.candidateVersionLabel} · 本轮处理中`
-                    : currentBasedOnVersionId
-                      ? safeVersionLabel(currentBasedOnVersionId)
-                      : latestVersion?.label || "版本 1"}
+              <span className="file-version-label project-status-facts">
+                {headerStatusFacts.map((fact) => (
+                  <span key={fact}>{fact}</span>
+                ))}
               </span>
-              {canShowCurrentFileInFolder ? (
+              {canOpenProjectRootInFolder ? (
+                <button
+                  className="window-file-folder-action"
+                  type="button"
+                  aria-label="在 Finder 中打开当前项目文件夹"
+                  title="在 Finder 中打开经验证的项目文件夹"
+                  onClick={() => void showProjectRecordsInFolder()}
+                >
+                  在文件夹中打开
+                </button>
+              ) : canShowCurrentFileInFolder ? (
                 <button
                   className="window-file-folder-action"
                   type="button"
@@ -7761,6 +7795,7 @@ export default function Workbench() {
                       version={version}
                       expanded={expandedVersionId === version.id}
                       current={version.id === latestVersionId}
+                      editingBase={version.id === currentBasedOnVersionId}
                       viewing={viewingVersionId === version.id}
                       viewDisabled={
                         runInProgress
@@ -7957,7 +7992,9 @@ export default function Workbench() {
                     </em>
                   </span>
                   <div className="current-project-actions">
-                    {sourcePath && typeof window !== "undefined" && window.htmlAIProjects?.showInFolder ? (
+                    {canOpenProjectRootInFolder ? (
+                      <button type="button" onClick={() => void showProjectRecordsInFolder()}>Finder</button>
+                    ) : sourcePath && typeof window !== "undefined" && window.htmlAIProjects?.showInFolder ? (
                       <button type="button" onClick={() => void showProjectInFolder()}>Finder</button>
                     ) : null}
                     <button type="button" onClick={() => void exportCurrentHtml()}>

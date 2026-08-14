@@ -265,6 +265,9 @@ export type Version = {
   supplements: UserSupplementRecord[];
   validationReview: ValidationReview | null;
   candidateAssessment: CandidateAssessment | null;
+  workingCopyId?: string | null;
+  differsFromBase?: boolean;
+  saveState?: "saved" | "saving" | "failed" | null;
 };
 
 export type UserSupplementAttachment = {

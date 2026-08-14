@@ -15,7 +15,7 @@ import {
   insertionLabel,
   targetResolutionLabel,
 } from "./comment-model";
-import { formatTime } from "./project-model";
+import { formatTime, safeVersionLabel } from "./project-model";
 import {
   changeKindLabel,
   historyRecordValue,
@@ -237,6 +237,7 @@ export function HistoryVersionItem({
   version,
   expanded,
   current,
+  editingBase,
   viewing,
   viewDisabled,
   attachmentObjectUrls,
@@ -250,6 +251,7 @@ export function HistoryVersionItem({
   version: Version;
   expanded: boolean;
   current: boolean;
+  editingBase: boolean;
   viewing: boolean;
   viewDisabled: boolean;
   attachmentObjectUrls: Record<string, string>;
@@ -267,6 +269,23 @@ export function HistoryVersionItem({
     0,
   );
   const summarizedEdits = summarizeChangeEvents(version.directEdits);
+  const lineageFacts = [
+    version.basedOnVersionId && version.basedOnVersionId !== version.id
+      ? `基于 ${safeVersionLabel(version.basedOnVersionId)}`
+      : null,
+    version.previousVersionId
+      ? `前一正式版本 ${safeVersionLabel(version.previousVersionId)}`
+      : null,
+    current ? "最新正式版本" : null,
+    editingBase ? "当前编辑基础" : null,
+    version.differsFromBase ? "有本地修改" : null,
+    viewing ? "当前只读浏览" : null,
+    version.saveState === "saving"
+      ? "本地保存中"
+      : version.saveState === "failed"
+        ? "本地保存失败"
+        : null,
+  ].filter((value): value is string => Boolean(value));
 
   return (
     <article
@@ -287,6 +306,11 @@ export function HistoryVersionItem({
               ? "原始导入"
               : `${version.comments.length} 条评论 · 已安全保留`}
           </small>
+          {lineageFacts.length > 0 ? (
+            <span className="version-lineage-facts">
+              {lineageFacts.map((fact) => <em key={fact}>{fact}</em>)}
+            </span>
+          ) : null}
         </span>
         <time dateTime={version.generatedAt}>
           {formatTime(version.generatedAt)}
@@ -307,6 +331,11 @@ export function HistoryVersionItem({
             <div><strong>{attachmentCount}</strong><span>个附件</span></div>
             <div><strong>网页</strong><span>画布类型</span></div>
           </div>
+          {lineageFacts.length > 0 ? (
+            <div className="version-lineage-detail" aria-label="版本关系与状态">
+              {lineageFacts.map((fact) => <span key={fact}>{fact}</span>)}
+            </div>
+          ) : null}
           <div className="version-change-summary">
             <strong>这个版本包含</strong>
             <ul>
