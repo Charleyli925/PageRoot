@@ -20,6 +20,8 @@ export const EDIT_AUTHOR_RUNTIME_BUDGET: Readonly<{
   orphanSessionTtlMs: number;
 }>;
 
+export const EDIT_AUTHOR_RUNTIME_VERIFICATION_DEADLINE_MS: number;
+
 export const EDIT_RUNTIME_PROTOCOL_SCHEME: "pageroot-edit-runtime";
 export const EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE: string;
 export const EDIT_RUNTIME_HOST_ATTRIBUTE: string;

@@ -38,6 +38,12 @@ Workbench commits that loading surface before acknowledging the one port call.
 This makes even an immediately resolved grant choose the initial runtime frame,
 rather than becoming a forbidden late promotion of static Edit.
 
+Main separately bounds resource preparation and isolated capture. Because those
+are serial, the Workbench permits their two fixed deadlines plus one bounded
+acknowledgement margin before it declares the source unacknowledged. This is a
+verification allowance, not a second execution or retry: expiry still selects
+the existing one-time static Canvas rebuild.
+
 The session accepts no arbitrary source path or later source revision. Main
 rechecks active HTML/SHA, freezes declared local or allowlisted ECharts-CDN
 script bytes, and serves only that resource closure under

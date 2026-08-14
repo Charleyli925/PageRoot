@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   EDIT_AUTHOR_RUNTIME_BUDGET,
+  EDIT_AUTHOR_RUNTIME_VERIFICATION_DEADLINE_MS,
   EDIT_RUNTIME_PROTOCOL_SCHEME,
   collectEditRuntimeScripts,
   editRuntimeProtocolUrl,
@@ -90,6 +91,11 @@ test("direct Edit runtime grants use one session and one execution identity", ()
   assert.equal(EDIT_AUTHOR_RUNTIME_BUDGET.declaredAssetReferenceCount, 128);
   assert.equal(EDIT_AUTHOR_RUNTIME_BUDGET.declaredAssetBytes, 2 * 1024 * 1024);
   assert.equal(EDIT_AUTHOR_RUNTIME_BUDGET.runtimeSettleMs, 1_200);
+  assert.equal(
+    EDIT_AUTHOR_RUNTIME_VERIFICATION_DEADLINE_MS,
+    (EDIT_AUTHOR_RUNTIME_BUDGET.runtimeDeadlineMs * 2) + 1_000,
+    "canvas acknowledgement permits one bounded preparation and one bounded capture",
+  );
   assert.equal(EDIT_AUTHOR_RUNTIME_BUDGET.orphanSessionTtlMs, 60_000);
   assert.equal("cacheEntries" in EDIT_AUTHOR_RUNTIME_BUDGET, false);
   assert.equal("cacheTtlMs" in EDIT_AUTHOR_RUNTIME_BUDGET, false);

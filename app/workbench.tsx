@@ -112,7 +112,9 @@ import type { ProjectSessionSnapshot } from "./application/project-session.js";
 import type { RunOperationKind, RunSessionSnapshot } from "./application/run-session.js";
 import type { VersionSessionSnapshot } from "./application/version-session.js";
 import type { SourceHistoryDirection } from "./domain/source-history.js";
-import { EDIT_AUTHOR_RUNTIME_BUDGET } from "./domain/edit-runtime-contract.js";
+import {
+  EDIT_AUTHOR_RUNTIME_VERIFICATION_DEADLINE_MS,
+} from "./domain/edit-runtime-contract.js";
 import {
   BROWSER_RUNTIME_CAPABILITIES,
   resolveRuntimeCapabilities,
@@ -2724,15 +2726,16 @@ export default function Workbench() {
     const waitForCurrentGeneration = async (): Promise<boolean> => {
       let attemptLimit = 40;
       const runtimeAttemptLimit = Math.ceil(
-        (EDIT_AUTHOR_RUNTIME_BUDGET.runtimeDeadlineMs + 1_000) / 25,
+        EDIT_AUTHOR_RUNTIME_VERIFICATION_DEADLINE_MS / 25,
       );
       for (let attempt = 0; attempt < attemptLimit; attempt += 1) {
         await new Promise<void>((resolve) => window.setTimeout(resolve, 25));
         if (EDIT_RUNTIME_PENDING_PHASES.has(
           currentControllerSnapshot()?.editRuntime?.phase || "static",
         )) {
-          // A final one-shot author frame cannot acknowledge its source until
-          // after its bounded runtime/audit cycle. Treating that interval as a
+          // Main bounds preparation and isolated capture independently. A
+          // final one-shot author frame cannot acknowledge its source until
+          // both serial phases settle; treating that permitted interval as a
           // failed static render would replace the iframe and execute again.
           attemptLimit = Math.max(attemptLimit, runtimeAttemptLimit);
         }

@@ -29,6 +29,14 @@ export const EDIT_AUTHOR_RUNTIME_BUDGET = Object.freeze({
   orphanSessionTtlMs: 60_000,
 });
 
+// Main first bounds resource preparation, then separately bounds the isolated
+// capture owner. The Workbench may acknowledge an Edit canvas only after both
+// serial phases have had their one permitted deadline, plus one bounded
+// scheduling/acknowledgement margin. This is not a retry budget.
+export const EDIT_AUTHOR_RUNTIME_VERIFICATION_DEADLINE_MS = (
+  EDIT_AUTHOR_RUNTIME_BUDGET.runtimeDeadlineMs * 2
+) + 1_000;
+
 export const EDIT_RUNTIME_PROTOCOL_SCHEME = "pageroot-edit-runtime";
 export const EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE =
   "data-pageroot-edit-runtime-source";
