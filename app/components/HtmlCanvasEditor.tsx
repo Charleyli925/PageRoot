@@ -828,7 +828,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     const sourceIndex = sourceIndexRef.current;
     const runtimeGrant = options.forceStatic ? null : editRuntimeGrant;
     let runtimeFrame: RuntimeFrameContext | null = null;
-    let verificationToken = token;
+    const verificationToken = token;
     let prepared: string | null = null;
     if (runtimeGrant && !runtimeAttemptedRef.current) {
       // One component lifetime corresponds to one canvas generation. Once a

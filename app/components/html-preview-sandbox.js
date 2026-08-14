@@ -12,7 +12,6 @@ const DISABLED_SCRIPT_ATTRIBUTE = "data-html-canvas-disabled-script";
 const ORIGINAL_SCRIPT_TYPE_ATTRIBUTE = "data-html-canvas-original-script-type";
 const DISABLED_REFRESH_ATTRIBUTE = "data-html-canvas-disabled-refresh";
 const MISSING_ATTRIBUTE_VALUE = "__html_canvas_missing__";
-const SOURCE_NODE_ATTRIBUTE = "data-html-ai-source-node-id";
 function escapeAttribute(value) {
   return value
     .replace(/&/g, "&amp;")
