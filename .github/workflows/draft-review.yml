@@ -1,0 +1,68 @@
+name: Draft Codex Review
+
+# Phase 1 is a trusted manual probe. It runs only from the default branch via
+# workflow_dispatch, never checks out or executes Pull Request bytes, and posts
+# at most one @codex review comment per exact head/base pair. It proves whether
+# the Codex GitHub app responds to a github-actions[bot] review command before
+# any automatic Draft-phase trigger is enabled.
+on:
+  workflow_dispatch:
+    inputs:
+      pull_request_number:
+        description: "Draft Pull Request number to probe"
+        required: true
+        type: string
+      expected_head_sha:
+        description: "Exact expected head SHA (40 hex characters)"
+        required: true
+        type: string
+      expected_base_sha:
+        description: "Exact expected base SHA (40 hex characters)"
+        required: true
+        type: string
+      mode:
+        description: "plan evaluates read-only; request posts one review command"
+        required: true
+        type: choice
+        default: plan
+        options:
+          - plan
+          - request
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: pageroot-draft-review-${{ github.event.inputs.pull_request_number }}-${{ github.event.inputs.expected_head_sha }}
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    name: draft-review-probe
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.13.0
+      - name: Plan or request one exact-pair Draft Codex review
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          node scripts/draft-review-request.mjs
+          --repository "$GITHUB_REPOSITORY"
+          --pull-request "${{ github.event.inputs.pull_request_number }}"
+          --expected-head "${{ github.event.inputs.expected_head_sha }}"
+          --expected-base "${{ github.event.inputs.expected_base_sha }}"
+          --source-run-id "${{ github.run_id }}"
+          --mode "${{ github.event.inputs.mode }}"
+      - name: Upload draft review evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: PageRoot-draft-review-${{ github.run_id }}-${{ github.run_attempt }}
+          path: output/draft-review/draft-review.json
+          if-no-files-found: warn
+          retention-days: 14

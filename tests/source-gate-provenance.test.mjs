@@ -282,3 +282,24 @@ test("GitHub workflows run tests in parallel with one final-review policy and ke
   assert.doesNotMatch(release, /source-gate-provenance\.mjs verify/u);
   assert.doesNotMatch(release, /gate:artifact-only:auto/u);
 });
+
+test("the Draft Codex review probe stays a trusted manual default-branch workflow", async () => {
+  const workflow = await readFile(
+    path.join(productRoot, ".github/workflows/draft-review.yml"),
+    "utf8",
+  );
+  assert.match(workflow, /on:\s*\n\s+workflow_dispatch:/u);
+  assert.doesNotMatch(workflow, /^\s+pull_request(?:_target)?:/mu);
+  assert.doesNotMatch(workflow, /^\s+workflow_run:/mu);
+  assert.doesNotMatch(workflow, /ref:\s*\$\{\{\s*github\.event\.pull_request\.head\.sha/u);
+  assert.doesNotMatch(workflow, /refs\/pull\//u);
+  assert.doesNotMatch(workflow, /actions\/download-artifact/u);
+  assert.doesNotMatch(workflow, /secrets\./u);
+  assert.match(workflow, /permissions:\s*\n\s+contents: read\s*\n\s+pull-requests: write/u);
+  assert.doesNotMatch(workflow, /contents: write|issues: write|actions: write|checks: write/u);
+  assert.doesNotMatch(workflow, /gh pr merge|mergePullRequest|git push|git tag|gh release/u);
+  assert.match(workflow, /draft-review-request\.mjs/u);
+  assert.match(workflow, /--mode "\$\{\{\s*github\.event\.inputs\.mode\s*\}\}"/u);
+  assert.match(workflow, /runs-on: ubuntu-24\.04/u);
+  assert.doesNotMatch(workflow, /runs-on: macos-/u);
+});
