@@ -43,21 +43,33 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
+      - name: Refuse non-default-branch dispatch
+        if: github.ref != format('refs/heads/{0}', github.event.repository.default_branch)
+        run: |
+          echo "Draft Codex Review must run from the default branch, not $GITHUB_REF." >&2
+          exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22.13.0
       - name: Plan or request one exact-pair Draft Codex review
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.inputs.pull_request_number }}
+          EXPECTED_HEAD_SHA: ${{ github.event.inputs.expected_head_sha }}
+          EXPECTED_BASE_SHA: ${{ github.event.inputs.expected_base_sha }}
+          PR_MODE: ${{ github.event.inputs.mode }}
+          SOURCE_RUN_ID: ${{ github.run_id }}
         run: >-
           node scripts/draft-review-request.mjs
           --repository "$GITHUB_REPOSITORY"
-          --pull-request "${{ github.event.inputs.pull_request_number }}"
-          --expected-head "${{ github.event.inputs.expected_head_sha }}"
-          --expected-base "${{ github.event.inputs.expected_base_sha }}"
-          --source-run-id "${{ github.run_id }}"
-          --mode "${{ github.event.inputs.mode }}"
+          --pull-request "$PR_NUMBER"
+          --expected-head "$EXPECTED_HEAD_SHA"
+          --expected-base "$EXPECTED_BASE_SHA"
+          --source-run-id "$SOURCE_RUN_ID"
+          --mode "$PR_MODE"
       - name: Upload draft review evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

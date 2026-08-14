@@ -299,7 +299,13 @@ test("the Draft Codex review probe stays a trusted manual default-branch workflo
   assert.doesNotMatch(workflow, /contents: write|issues: write|actions: write|checks: write/u);
   assert.doesNotMatch(workflow, /gh pr merge|mergePullRequest|git push|git tag|gh release/u);
   assert.match(workflow, /draft-review-request\.mjs/u);
-  assert.match(workflow, /--mode "\$\{\{\s*github\.event\.inputs\.mode\s*\}\}"/u);
   assert.match(workflow, /runs-on: ubuntu-24\.04/u);
   assert.doesNotMatch(workflow, /runs-on: macos-/u);
+  assert.match(workflow, /name: Refuse non-default-branch dispatch/u);
+  assert.match(workflow, /persist-credentials: false/u);
+  assert.match(workflow, /PR_NUMBER: \$\{\{\s*github\.event\.inputs\.pull_request_number/u);
+  assert.match(workflow, /--pull-request "\$PR_NUMBER"/u);
+  assert.match(workflow, /--expected-head "\$EXPECTED_HEAD_SHA"/u);
+  assert.match(workflow, /--mode "\$PR_MODE"/u);
+  assert.doesNotMatch(workflow, /--(?:pull-request|expected-head|expected-base|mode) "\$\{\{/u);
 });

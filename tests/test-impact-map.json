@@ -237,6 +237,7 @@
       "id": "pr-review-policy",
       "patterns": [
         "^scripts/check-pr-review-policy\\.mjs$",
+        "^scripts/draft-review-request\\.mjs$",
         "^tests/pr-review-policy\\.test\\.mjs$",
         "^\\.github/workflows/(?:ci|pr-feedback)\\.yml$"
       ],
