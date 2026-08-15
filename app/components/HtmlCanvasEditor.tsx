@@ -119,7 +119,9 @@ import {
   activeTextRangeFromDocument,
   boundedHistorySelection,
   caretPointFromMouseEvent,
+  findCanvasHitSourceElement,
   findCanvasSelectionElement,
+  findDedicatedSourceSurfaceAtPoint,
   findNativeActionTarget,
   historySelectionFromMutationValue,
   identifyingTextRangeAtPoint,
@@ -4404,7 +4406,14 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
 
     const handleDoubleClick = (event: MouseEvent) => {
       if (findNativeActionTarget(event.target)) event.preventDefault();
-      const target = findCanvasSelectionElement(event.target);
+      const caretPoint = caretPointFromMouseEvent(event);
+      const dedicatedSurface = findDedicatedSourceSurfaceAtPoint(
+        documentNode,
+        caretPoint,
+      );
+      const target = dedicatedSurface
+        ?? findCanvasHitSourceElement(event.target)
+        ?? findCanvasSelectionElement(event.target);
       if (!target) return;
       if (target.hasAttribute(EDIT_RUNTIME_HOST_ATTRIBUTE)) {
         event.preventDefault();
@@ -4433,15 +4442,15 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       setSpacingMenuOpen(false);
       event.preventDefault();
       event.stopPropagation();
-      const caretPoint = caretPointFromMouseEvent(event);
+      const editTarget = dedicatedSurface ?? target;
       const sourceIndex = sourceIndexRef.current;
       const islandHostElement = sourceIndex
-        ? nativeEditHostForElement(target, sourceIndex)
+        ? nativeEditHostForElement(editTarget, sourceIndex)
         : null;
-      if (!islandHostElement) {
+      if (!islandHostElement && !dedicatedSurface) {
         const identifyingRange = identifyingTextRangeAtPoint(
           documentNode,
-          target,
+          editTarget,
           caretPoint,
         );
         if (
@@ -4460,11 +4469,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           );
         }
       }
-      selectElement(target, undefined, {
+      selectElement(editTarget, undefined, {
         preserveTextSelection: Boolean(activeTextRangeRef.current),
       });
       const editingStarted = startEditing(caretPoint);
-      if (!editingStarted) selectElement(target);
+      if (!editingStarted) selectElement(editTarget);
     };
 
     let disabledButtonPointer:

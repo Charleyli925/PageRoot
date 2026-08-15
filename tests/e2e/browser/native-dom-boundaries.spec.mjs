@@ -202,6 +202,16 @@ async function glyphPointForText(locator, snippet) {
   }, snippet);
 }
 
+test("double-clicking a canvas reports the dedicated root and stays comment-only", async ({ page }) => {
+  const { editor, frame } = await loadFixture(page, "complex-layout.html");
+  const canvas = frame.locator(caseSelector("canvas-surface"));
+  await canvas.scrollIntoViewIfNeeded();
+  await canvas.dblclick({ force: true, position: { x: 4, y: 4 } });
+  expect(await frame.locator('[contenteditable="true"]').count()).toBe(0);
+  await expect.poll(() => editor.getAttribute("data-native-capability-detail") || "")
+    .toContain("EDITABLE_ISLAND_ROOT_UNSUPPORTED");
+});
+
 test("first double-click places a caret; a second double-click selects the word", async ({ page }) => {
   const { frame } = await loadFixture(page, "complex-layout.html");
   const target = frame.locator(caseSelector("heading-inline"));
