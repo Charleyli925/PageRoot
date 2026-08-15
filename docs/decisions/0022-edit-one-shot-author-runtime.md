@@ -1,8 +1,15 @@
 # ADR 0022: Edit uses one bounded ECharts isolated-capture handoff
 
-- Status: Accepted
+- Status: Superseded by [ADR 0025](0025-edit-direct-one-shot-runtime.md)
 - Date: 2026-08-14
 - Amends: the Edit-only restriction in ADR 0017; Review snapshot behavior is unchanged
+
+This document is retained as history. It records the isolated-capture / PNG
+handoff that shipped, including the hidden BrowserWindow and script-disabled
+visible iframe. ADR 0025 restores the original product form: the author
+program runs once in the final visible Edit iframe and freeze keeps the real
+Canvas/SVG. Do not rewrite this decision as if the screenshot path never
+existed.
 
 ## Context
 
