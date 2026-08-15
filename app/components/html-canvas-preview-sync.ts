@@ -225,11 +225,12 @@ export function nativeTextFragmentForElement(
   if (hinted) {
     return nativeTextFragmentForDirectText(parentElement, hinted, sourceIndex);
   }
-  const directTextNodes = Array.from(parentElement.childNodes).filter((node): node is Text => (
-    node.nodeType === 3
-    && Boolean(node.data.trim())
-    && Boolean(sourceTextNodeForDomText(node, sourceIndex))
-  ));
+  const directTextNodes = Array.from(parentElement.childNodes).filter((node): node is Text => {
+    if (node.nodeType !== 3) return false;
+    const textNode = node as Text;
+    return Boolean(textNode.data.trim())
+      && Boolean(sourceTextNodeForDomText(textNode, sourceIndex));
+  });
   if (directTextNodes.length !== 1) return null;
   return nativeTextFragmentForDirectText(
     parentElement,
