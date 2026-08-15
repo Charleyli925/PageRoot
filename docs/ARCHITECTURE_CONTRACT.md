@@ -268,11 +268,38 @@ history navigation, a newer preview generation or a failed capture discard it.
 It never registers a drain obligation and never changes source, Draft or
 Version authority.
 
-Edit has no runtime snapshot authority. It remains script-disabled and renders
-only source-static content: authored inline SVG stays source-backed and
-non-editable, while runtime-only Canvas/SVG remains in Preview. No Edit cache,
-IPC request, bitmap projection, Blob URL or temporary projection attribute is
-allowed.
+Edit has no runtime-snapshot authority. It normally remains script-disabled and
+renders source-static content, but desktop may choose one bounded direct author
+runtime before the initial editable frame becomes interactive. The sole
+`EditAuthorRuntimeSession`, composed by `WorkspaceController`, keys the attempt
+to `(sourcePath, canvasGeneration)` rather than an autosave revision, source
+echo or comment state. It accepts one exact persisted-source prepare result
+only for the same source SHA and generation; a late old result is revoked and a
+settled session cannot prepare again. Its `preparing` snapshot first commits
+the non-interactive loading surface; only that presentation acknowledgement
+starts the narrow prepare port, so a fast grant cannot promote a static iframe
+that has already mounted.
+
+The direct path permits only a bounded classic-script ECharts candidate, frozen
+local/allowlisted-CDN bytes and at most 32 uniquely bound, source-empty hosts.
+For an HTML-only imported V1, Main may use the original selected HTML directory
+as the local asset root only when it captured that path during the verified
+external-to-Working-Copy hand-off in the same app session; the renderer neither
+supplies nor persists that provenance, while the Working Copy remains source
+authority.
+The final frame executes once, waits the fixed settle interval, then stops
+tracked runtime activity and audits source-node identity/text/attributes plus
+host containment before installing Canvas interaction. An approved empty host
+may add only absent ECharts layout declarations (`position: relative`,
+`user-select: none`, transparent `-webkit-tap-highlight-color`, or a positive
+`scale()` no greater than `1`);
+its authored declarations and every other
+attribute remain exact. Runtime descendants are
+display-only and map to their approved source host. They never become a
+`SourcePatch`, Source HTML, save, Version, export, Request or AI input. Any
+prepare, load, audit or deadline failure selects the ordinary static frame;
+there is no Edit cache, bitmap/Blob projection, hidden probe, background
+promotion or post-interaction iframe replacement.
 
 Review alone uses one `SourceHostResolver`, one narrow owner request schema,
 one `RuntimeSnapshotOwner` and one trusted PNG parser. The resolver admits only
@@ -346,7 +373,9 @@ fingerprint drift removes that runtime fact without outline fallback. A missing
 desktop API, unmapped host, malformed envelope, timeout, cancellation or late
 result is a silent static-only outcome. There is no second fresh pair,
 confirmation coordinator, runtime UI or Review cache. Edit does
-not invoke the resolver or owner and has no snapshot state.
+not invoke the resolver or owner and has no snapshot state; its separate
+one-shot author-runtime session is governed by ADR 0022 and cannot consume
+Review bindings, PNGs or facts.
 
 For each Review side and active filter, overlay frames and context masking
 consume the same final canonical projection records. The mask is a session-,

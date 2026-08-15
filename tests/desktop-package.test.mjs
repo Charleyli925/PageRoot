@@ -24,7 +24,12 @@ const APP_FILE_ALLOWLIST = [
   "desktop/application-update.mjs",
   "desktop/usage-telemetry.mjs",
   "desktop/preview-protocol.mjs",
+  "desktop/edit-runtime-bootstrap.mjs",
+  "desktop/edit-runtime-protocol.mjs",
+  "desktop/edit-runtime-capture-owner.mjs",
+  "desktop/edit-runtime-preparation-fence.mjs",
   "desktop/runtime-visual-capture-owner.mjs",
+  "app/domain/edit-runtime-contract.js",
   "app/domain/runtime-visual-contract.js",
   "public/brand-logo.png",
   "dist-desktop/renderer/**/*",
@@ -166,6 +171,7 @@ test("desktop package manifest owns the exact application and Bridge resource cl
   for (const retiredFile of [
     "desktop/manual-update.mjs",
     "desktop/legacy-editor.mjs",
+    "desktop/edit-runtime-probe-owner.mjs",
   ]) {
     assert.equal(
       packageJson.build.files.includes(retiredFile),
@@ -233,10 +239,14 @@ test("package security boundaries retain CSP, entitlements and final plist clean
   assert.match(rendererHtml, /Content-Security-Policy/u);
   assert.match(rendererHtml, /default-src 'none'/u);
   assert.match(rendererHtml, /script-src 'self'/u);
+  assert.match(rendererHtml, /style-src 'self' 'unsafe-inline' file: http: https: pageroot-edit-runtime:/u);
+  assert.match(rendererHtml, /img-src 'self' file: data: blob: http: https: pageroot-edit-runtime:/u);
+  assert.match(rendererHtml, /font-src 'self' file: data: http: https: pageroot-edit-runtime:/u);
+  assert.match(rendererHtml, /media-src 'self' file: data: blob: http: https: pageroot-edit-runtime:/u);
   assert.match(rendererHtml, /connect-src http:\/\/127\.0\.0\.1:\*/u);
-  assert.match(rendererHtml, /frame-src 'self' data: blob: pageroot-preview:/u);
+  assert.match(rendererHtml, /frame-src 'self' data: blob: pageroot-preview: pageroot-edit-runtime:/u);
   assert.match(rendererHtml, /object-src 'none'/u);
-  assert.match(rendererHtml, /base-uri 'self' file:/u);
+  assert.match(rendererHtml, /base-uri 'self' file: pageroot-edit-runtime:/u);
   assert.doesNotMatch(rendererHtml, /frame-ancestors/u);
   assert.match(entitlements, /com\.apple\.security\.cs\.allow-jit/u);
   assert.doesNotMatch(entitlements, /disable-library-validation/u);

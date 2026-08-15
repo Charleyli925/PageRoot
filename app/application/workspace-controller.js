@@ -3,6 +3,7 @@ import { CommentSession } from "./comment-session.js";
 import { CommentWorkflow } from "./comment-workflow.js";
 import { DocumentSession } from "./document-session.js";
 import { DocumentWorkflow } from "./document-workflow.js";
+import { EditAuthorRuntimeSession } from "./edit-author-runtime-session.js";
 import { DraftSession } from "./draft-session.js";
 import { DrainCoordinator } from "./drain-coordinator.js";
 import { ExternalFileOpenSession } from "./external-file-open-session.js";
@@ -201,6 +202,8 @@ export class WorkspaceController {
   #commentSession;
   #draftSession;
   #versionSession;
+  #editRuntimeSession = null;
+  #editRuntimeUnsubscribe = null;
   #sourceHistorySession;
   #runSession = null;
   #codecs;
@@ -230,6 +233,7 @@ export class WorkspaceController {
   #commentSessionSnapshot = null;
   #runSessionSnapshot = null;
   #versionSessionSnapshot = null;
+  #editRuntimeSnapshot = null;
   #projectSnapshot = null;
   #projectRulesSnapshot = null;
   #runSnapshot = null;
@@ -241,6 +245,7 @@ export class WorkspaceController {
     commentSession: null,
     runSession: null,
     versionSession: null,
+    editRuntime: null,
     comment: null,
     projectRules: null,
     project: null,
@@ -317,6 +322,9 @@ export class WorkspaceController {
     this.#commentSession = commentSession;
     this.#draftSession = draftSession;
     this.#versionSession = versionSession;
+    this.#editRuntimeSession = new EditAuthorRuntimeSession({
+      port: ports.editRuntime || null,
+    });
     this.#sourceHistorySession = sourceHistorySession;
     this.#runSession = runSessions[0] || null;
     this.#projectSessionSnapshot = projectSession.snapshot;
@@ -324,6 +332,7 @@ export class WorkspaceController {
     this.#commentSessionSnapshot = commentSession.snapshot;
     this.#runSessionSnapshot = this.#runSession?.snapshot || null;
     this.#versionSessionSnapshot = versionSession.snapshot;
+    this.#editRuntimeSnapshot = this.#editRuntimeSession.snapshot;
     this.#codecs = createWorkspaceControllerCodecs(codecs);
     this.#hashPort = ports.hash;
     this.#recoveryPort = ports.recovery || { replace: () => {} };
@@ -578,6 +587,12 @@ export class WorkspaceController {
       this.#versionWorkflow.subscribeEvents((event) => this.#emitEvent(event));
     }
     this.#observeSessionSnapshots();
+    this.#editRuntimeUnsubscribe = this.#editRuntimeSession.subscribe((snapshot) => {
+      if (this.#disposed) return;
+      this.#editRuntimeSnapshot = snapshot;
+      this.#publishAggregateSnapshot();
+    });
+    this.#refreshEditAuthorRuntime();
     this.#publishAggregateSnapshot();
   }
 
@@ -613,6 +628,10 @@ export class WorkspaceController {
     this.#commentSession.setObserver(null);
     this.#runSession?.setObserver(null);
     this.#versionSession.setObserver(null);
+    this.#editRuntimeUnsubscribe?.();
+    this.#editRuntimeUnsubscribe = null;
+    this.#editRuntimeSession?.dispose();
+    this.#editRuntimeSession = null;
     this.#versionWorkflowUnsubscribe?.();
     this.#versionWorkflowUnsubscribe = null;
     this.#versionWorkflow?.dispose();
@@ -655,6 +674,18 @@ export class WorkspaceController {
 
   get projectLoadError() {
     return this.#projectWorkflow?.projectLoadError || null;
+  }
+
+  startEditAuthorRuntimePreparation(input) {
+    return this.#editRuntimeSession?.startPreparation(input) || false;
+  }
+
+  beginEditAuthorRuntime(input) {
+    return this.#editRuntimeSession?.beginRuntime(input) || false;
+  }
+
+  settleEditAuthorRuntime(input) {
+    return this.#editRuntimeSession?.settleRuntime(input) || false;
   }
 
   getCurrentProjectContext() {
@@ -1133,6 +1164,7 @@ export class WorkspaceController {
       commentSession: this.#commentSessionSnapshot,
       runSession: this.#runSessionSnapshot,
       versionSession: this.#versionSessionSnapshot,
+      editRuntime: this.#editRuntimeSnapshot,
       comment: this.#commentWorkflow?.getSnapshot() || null,
       projectRules: this.#projectRulesSnapshot,
       project: this.#projectSnapshot,
@@ -1164,11 +1196,13 @@ export class WorkspaceController {
     this.#projectSession.setObserver((snapshot) => {
       if (this.#disposed) return;
       this.#projectSessionSnapshot = snapshot;
+      this.#refreshEditAuthorRuntime();
       this.#publishAggregateSnapshot();
     });
     this.#documentSession.setObserver((snapshot) => {
       if (this.#disposed) return;
       this.#documentSessionSnapshot = snapshot;
+      this.#refreshEditAuthorRuntime();
       this.#publishAggregateSnapshot();
     });
     this.#commentSession.setObserver((snapshot) => {
@@ -1185,6 +1219,23 @@ export class WorkspaceController {
       if (this.#disposed) return;
       this.#versionSessionSnapshot = snapshot;
       this.#publishAggregateSnapshot();
+    });
+  }
+
+  #refreshEditAuthorRuntime() {
+    if (!this.#editRuntimeSession) return;
+    const document = this.#documentSession.snapshot;
+    const sourcePath = this.#projectSession.sourcePath;
+    this.#editRuntimeSession.refresh({
+      html: document.html,
+      sourceSha256: document.sourceSha256,
+      canvasGeneration: document.canvasGeneration,
+      sourcePath,
+      sourceIsAuthoritative: Boolean(
+        sourcePath
+        && document.editRevision === document.lastPersistedRevision
+        && document.persistState === "idle"
+      ),
     });
   }
 
@@ -1410,13 +1461,24 @@ export class WorkspaceController {
       );
       this.#recoveryPort.replace(recoveryIdentity);
       this.#documentWorkflow?.replaceRecoveryIdentity(recoveryIdentity);
-      if (shouldAdoptCanonicalSource) {
-        this.#documentSession.publishAuthority({
-          html: nextDocumentHtml,
-          sourceSha256: nextSourceSha256,
-        });
-        this.#canvasPort.invalidateRenderAcks();
-      } else {
+      const documentAlreadyMatchesCanonical = Boolean(
+        currentDocument.html === nextDocumentHtml
+        && currentDocument.sourceSha256 === nextSourceSha256,
+      );
+      if (shouldAdoptCanonicalSource && !documentAlreadyMatchesCanonical) {
+        if (currentDocument.html !== nextDocumentHtml) {
+          this.#documentSession.publishAuthority({
+            html: nextDocumentHtml,
+            sourceSha256: nextSourceSha256,
+          });
+          this.#canvasPort.invalidateRenderAcks();
+        } else {
+          // The renderer already holds the exact canonical bytes. Repair only
+          // its source identity; recreating the disposable canvas would abort
+          // an otherwise valid one-shot runtime for no source-level reason.
+          this.#documentSession.update({ sourceSha256: nextSourceSha256 });
+        }
+      } else if (!documentAlreadyMatchesCanonical) {
         this.#documentSession.update({
           html: nextDocumentHtml,
           sourceSha256: nextSourceSha256,

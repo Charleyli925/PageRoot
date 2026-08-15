@@ -13,10 +13,33 @@ import test from "node:test";
 import {
   PREVIEW_BOOTSTRAP_PATH,
   PREVIEW_PROTOCOL_SCHEME,
+  collectDeclaredPreviewAssets,
   createPreviewProtocolController,
   createPreviewSessionOperation,
   registerPreviewProtocolScheme,
 } from "../desktop/preview-protocol.mjs";
+
+test("declared asset discovery caps missing-reference probes before they can delay a preview session", async (t) => {
+  const temporaryRoot = await mkdtemp(
+    path.join(tmpdir(), "pageroot-preview-declared-asset-cap-"),
+  );
+  t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
+  await writeFile(path.join(temporaryRoot, "later.png"), "later asset");
+
+  const assets = await collectDeclaredPreviewAssets({
+    html: [
+      '<img src="missing-one.png">',
+      '<img src="missing-two.png">',
+      '<img src="later.png">',
+    ].join(""),
+    sourceRoot: temporaryRoot,
+    maxAssets: 8,
+    maxReferences: 2,
+  });
+
+  assert.equal(assets.size, 0);
+  assert.equal(assets.has("later.png"), false);
+});
 
 test("preview protocol installs one handler for each isolated Electron session", () => {
   let defaultHandlers = 0;

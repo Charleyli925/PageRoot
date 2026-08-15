@@ -119,8 +119,12 @@ step summary 里。
   Workbench 只保留 review filters/layout/lease、动画和 Outcome/Toast 映射；architecture
   gate 将其直接 Bridge 调用锁定为 0。
 - `WorkspaceController`：runtime factory 是生产组合的唯一入口；它构造唯一的 Bridge
-  client、共享 RunSession 与各业务 Session，并作为唯一 application aggregate observer
-  生成冻结的 Project/Document/Comment/Run/Version snapshot。Node 测试证明晚到 observer
+  client、共享 RunSession、`EditAuthorRuntimeSession` 与各业务 Session，并作为唯一
+  application aggregate observer 生成冻结的 Project/Document/Comment/Run/Version/Edit
+runtime snapshot。Edit runtime 的纯 Session 测试证明键仅为
+`(sourcePath, canvasGeneration)`、非权威源码随后变为权威时仍可开始一次、准备
+loading surface 确认前不调用窄 port、同代不因 autosave/评论重试、旧结果只撤销；
+Workbench 只确认已提交 loading surface、传入窄 port 并消费快照。Node 测试证明晚到 observer
   在 `dispose()` 后不再发布；Document snapshot 只投影 `hasPendingWrite`/`isFlushing`，
   不泄露写入内容或 Promise。Workbench 只能订阅该 aggregate snapshot 与 event stream。
 - Bridge 集成环境：每个真实 Bridge 测试各自创建临时 root、workspace、sources、端口、子进程与 stdout/stderr；同一测试可为重启恢复顺序启动新进程，但不同测试绝不共享 workspace 或长寿命 Bridge。环境默认携带配置的 Bridge auth token，测试缺失/错误 token 时必须显式关闭或覆盖它；HTTP/连接失败保留 response text 与 Bridge 日志，不重试 mutation。
@@ -133,15 +137,23 @@ step summary 里。
 - Browser 冒烟：固定覆盖脚本隔离、源码字节、可编辑岛、源码权威围栏和能力降级五类关键风险；完整 Browser 包含全部活动 V2 回归。V1 的 per-keystroke tracker、FormatSkeleton 和 IME tail 状态机实现及测试已从仓库删除；V2 岛内字节 oracle、输入矩阵和 composition 快照用例是唯一产品合同。
 - Electron 冒烟：固定覆盖真实 authored DOM 输入和一次带磁盘持久化的 composition；完整 Electron 保留保存、关闭重开和逐字节 forward 结果等全部路径。
 - Electron 产品套件默认使用隐藏、禁止后台节流的 BrowserWindow，不激活应用、不抢键盘焦点；只有显式设置 `PAGEROOT_E2E_FOREGROUND=1` 才显示测试窗口。CI 环境预检保留可见但不聚焦的 accessory 窗口，用于证明 WindowServer 绘制能力。
-- 交互预览与 Review Runtime Snapshot：Node 证明单一 source-host resolver 只接受
+- 交互预览、Edit one-shot ECharts 与 Review Runtime Snapshot：Node 证明 Review 的
+  source-host resolver 只接受
   direct Canvas/SVG 与唯一稳定的 source-empty 宿主，删除/歧义/类型冲突、任意
   HTML/`tbody`、computed selector 和脚本依赖猜测都 fail-closed。owner 测试拥有
   Review-only 窄请求、source SHA/绑定、isolated world、一次 rect/PNG、PNG
   SHA/像素/字节预算、可见 DOM/SVG 文字哈希、deadline 和 cleanup。Node 还直接
   覆盖文字/数字哈希严格变化，以及同文字单次 PNG 的 RGB 误差预算不会把微小
-  栅格噪声判作变化。Electron 用一份合成报告证明 Edit
+  栅格噪声判作变化。Electron 用一份合成报告证明普通 Edit
   不执行作者脚本、不请求或挂载运行态位图，Preview 中同一 Canvas/SVG 正常运行，
-  authored inline SVG 仍在 Edit 原生可见且源文件字节不变。
+  authored inline SVG 仍在 Edit 原生可见且源文件字节不变；另一个本地 ECharts
+  用例证明导入后的 V1 仍从 Main 绑定的原始同目录资源根冻结直接资源闭包、一次
+  execution、固定冻结审计、ECharts 仅新增受限宿主布局样式/缩放且不覆盖源码样式、
+  运行时后代回到源码宿主、评论/原生编辑后 iframe 与 execution count 不变且写盘字节不含 runtime
+  marker。协议/bootstrap 单测拥有资源闭包、一次消费、revoke、CSP 和冻结边界。
+  Session 单测还覆盖外部来源切换至托管 V1 时，即使 SHA/Canvas generation
+  未变也会发布新的准备路径；而 macOS `/var` 与 `/private/var` 同一文件别名
+  不会消耗额外尝试。
   桌面编辑画布还必须
   证明同目录图片通过同一条受控资源根加载成功，而 `script-src` 没有因此
   获得自定义协议权限。Browser 的确定性

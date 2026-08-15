@@ -14,6 +14,12 @@ import {
 import { flushSync } from "react-dom";
 
 import {
+  EDIT_AUTHOR_RUNTIME_BUDGET,
+  EDIT_RUNTIME_HOST_ATTRIBUTE,
+  EDIT_RUNTIME_OWNED_ATTRIBUTE,
+  type EditRuntimeGrant,
+} from "../domain/edit-runtime-contract.js";
+import {
   createPagePresentationAction,
   type PagePresentationAction,
   type PageViewContext,
@@ -126,6 +132,7 @@ import NoticeBar from "./NoticeBar";
 import type {
   HtmlCanvasCommentedTarget,
   HtmlCanvasCommitResult,
+  HtmlCanvasEditRuntimeLoadOutcome,
   HtmlCanvasEditorHandle,
   HtmlCanvasEditorProps,
   HtmlCanvasFreezeSnapshot,
@@ -143,6 +150,7 @@ export type {
   HtmlCanvasCommentedTarget,
   HtmlCanvasCommentLayoutState,
   HtmlCanvasCommitResult,
+  HtmlCanvasEditRuntimeLoadOutcome,
   HtmlCanvasEditorHandle,
   HtmlCanvasEditorProps,
   HtmlCanvasFingerprint,
@@ -161,6 +169,7 @@ import {
   FRAME_VERIFICATION_ATTRIBUTE,
   baseHrefFromSourcePath,
   disableExecutableMarkup,
+  prepareCanvasFrameDocument,
   prepareVerifiedFrameDocument,
 } from "./html-preview-sandbox.js";
 import styles from "./HtmlCanvasEditor.module.css";
@@ -312,6 +321,16 @@ const EDITOR_DOCUMENT_STYLES = `
     user-select: text !important;
   }
 
+  [data-pageroot-edit-runtime-host] {
+    cursor: default !important;
+  }
+
+  [data-pageroot-edit-runtime-host] * {
+    pointer-events: none !important;
+    -webkit-user-select: none !important;
+    user-select: none !important;
+  }
+
 `;
 
 const EMPTY_COMMENTED_TARGETS: readonly HtmlCanvasCommentedTarget[] = [];
@@ -428,12 +447,74 @@ type EditFeedback = {
 type SourcePatchCommand = Parameters<typeof planSourcePatch>[0];
 type SourcePatchPlan = NonNullable<ReturnType<typeof planSourcePatch>>;
 
+type RuntimeFrameContext = {
+  verificationToken: string;
+  grant: EditRuntimeGrant;
+  elementGeneration: number;
+  settled: boolean;
+  snapshotsMounted: boolean;
+};
+
+function sameRuntimeGrant(
+  left: EditRuntimeGrant | null | undefined,
+  right: EditRuntimeGrant | null | undefined,
+): boolean {
+  return Boolean(
+    left
+    && right
+    && left.sessionId === right.sessionId
+    && left.executionId === right.executionId
+    && left.sourceSha256 === right.sourceSha256
+    && left.canvasGeneration === right.canvasGeneration,
+  );
+}
+
+function mountFrozenRuntimeSnapshots(
+  documentNode: Document,
+  frame: RuntimeFrameContext,
+): boolean {
+  if (frame.snapshotsMounted) return true;
+  for (const snapshot of frame.grant.snapshots) {
+    const host = documentNode.querySelector<HTMLElement>(
+      `[${EDIT_RUNTIME_HOST_ATTRIBUTE}="${snapshot.key}"]`,
+    );
+    if (
+      !host
+      || host.getAttribute(EDIT_RUNTIME_HOST_ATTRIBUTE) !== snapshot.key
+      || host.querySelector(`[data-pageroot-edit-runtime-snapshot="${snapshot.key}"]`)
+    ) return false;
+    for (const [property, value] of snapshot.styles) {
+      if (!host.style.getPropertyValue(property)) host.style.setProperty(property, value);
+    }
+    const image = documentNode.createElement("img");
+    image.setAttribute(EDIT_RUNTIME_OWNED_ATTRIBUTE, "snapshot");
+    image.setAttribute("data-pageroot-edit-runtime-snapshot", snapshot.key);
+    image.setAttribute("alt", "");
+    image.setAttribute("aria-hidden", "true");
+    image.setAttribute("draggable", "false");
+    image.tabIndex = -1;
+    image.src = `data:image/png;base64,${snapshot.pngBase64}`;
+    image.style.setProperty("display", "block");
+    image.style.setProperty("width", "100%");
+    image.style.setProperty("height", "100%");
+    image.style.setProperty("object-fit", "fill");
+    image.style.setProperty("pointer-events", "none");
+    image.style.setProperty("user-select", "none");
+    host.appendChild(image);
+  }
+  frame.snapshotsMounted = true;
+  return true;
+}
+
 const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProps>(function HtmlCanvasEditor(
   {
     html,
     onChange,
     onSelect,
     onInteraction,
+    editRuntimeGrant = null,
+    onEditRuntimeLoadStart,
+    onEditRuntimeLoadOutcome,
     onCommentLayout,
     onRequestComment,
     onReady,
@@ -542,11 +623,15 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const expectedFrameHtmlRef = useRef<string | null>(null);
   const expectedFrameTokenRef = useRef<string | null>(null);
   const frameLoadGenerationRef = useRef(0);
+  const runtimeFrameRef = useRef<RuntimeFrameContext | null>(null);
+  const runtimeAttemptedRef = useRef(false);
   const imperativeLockRef = useRef(false);
   const lastPropRef = useRef({ html, baseHref: resolvedBaseHref });
   const onChangeRef = useRef(onChange);
   const onSelectRef = useRef(onSelect);
   const onInteractionRef = useRef(onInteraction);
+  const onEditRuntimeLoadStartRef = useRef(onEditRuntimeLoadStart);
+  const onEditRuntimeLoadOutcomeRef = useRef(onEditRuntimeLoadOutcome);
   const onCommentLayoutRef = useRef(onCommentLayout);
   const onRequestCommentRef = useRef(onRequestComment);
   const onRequestFlushRef = useRef(onRequestFlush);
@@ -577,6 +662,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   onChangeRef.current = onChange;
   onSelectRef.current = onSelect;
   onInteractionRef.current = onInteraction;
+  onEditRuntimeLoadStartRef.current = onEditRuntimeLoadStart;
+  onEditRuntimeLoadOutcomeRef.current = onEditRuntimeLoadOutcome;
   onCommentLayoutRef.current = onCommentLayout;
   onRequestCommentRef.current = onRequestComment;
   onRequestFlushRef.current = onRequestFlush;
@@ -684,7 +771,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
 
   const loadFrameSource = useCallback((
     source: string,
-    options: { preserveViewport?: boolean; immediate?: boolean } = {},
+    options: {
+      preserveViewport?: boolean;
+      immediate?: boolean;
+      forceStatic?: boolean;
+    } = {},
   ) => {
     const frameView = iframeRef.current?.contentWindow;
     pendingFrameViewportRef.current = options.preserveViewport && frameView
@@ -696,6 +787,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     // briefly dispatch against the next source map (or keep listeners forever
     // if the replacement document never reaches load).
     cleanupFrameRef.current();
+    const retiringRuntimeFrame = runtimeFrameRef.current;
+    runtimeFrameRef.current = null;
+    if (retiringRuntimeFrame && !retiringRuntimeFrame.settled) {
+      onEditRuntimeLoadOutcomeRef.current?.(retiringRuntimeFrame.grant, "failed");
+    }
     pendingFrameRestoreEpochRef.current += 1;
     frameLoadGenerationRef.current += 1;
     const nextFrameGeneration = frameLoadGenerationRef.current;
@@ -728,15 +824,65 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       });
       onEditBlockedRef.current?.(message);
     }
-    const prepared = prepareVerifiedFrameDocument(instrumentedSource, token, {
-      baseUrl: resolvedBaseHref,
-      editorStyles: EDITOR_DOCUMENT_STYLES,
-    });
+    const sourceIndex = sourceIndexRef.current;
+    const runtimeGrant = options.forceStatic ? null : editRuntimeGrant;
+    let runtimeFrame: RuntimeFrameContext | null = null;
+    const verificationToken = token;
+    let prepared: string | null = null;
+    if (runtimeGrant && !runtimeAttemptedRef.current) {
+      // One component lifetime corresponds to one canvas generation. Once a
+      // final frame has been considered, autosave/comment/source echoes can
+      // only rebuild the normal static canvas; they never execute again.
+      runtimeAttemptedRef.current = true;
+      if (
+        sourceIndex?.source === source
+        && sourceIndex.sourceSha256 === runtimeGrant.sourceSha256
+      ) {
+        const runtimeDocument = prepareCanvasFrameDocument(
+          instrumentedSource,
+          token,
+          {
+            mode: "static-runtime-snapshot",
+            hosts: runtimeGrant.hosts,
+            baseUrl: resolvedBaseHref,
+            editorStyles: EDITOR_DOCUMENT_STYLES,
+          },
+        );
+        if (runtimeDocument) {
+          prepared = runtimeDocument;
+          runtimeFrame = {
+            grant: runtimeGrant,
+            verificationToken: token,
+            elementGeneration: nextFrameGeneration,
+            settled: false,
+            snapshotsMounted: false,
+          };
+        }
+      }
+      if (!runtimeFrame) {
+        onEditRuntimeLoadOutcomeRef.current?.(runtimeGrant, "rejected");
+      }
+    }
+    if (!prepared) {
+      prepared = prepareCanvasFrameDocument(instrumentedSource, token, {
+        mode: "static",
+        baseUrl: resolvedBaseHref,
+        editorStyles: EDITOR_DOCUMENT_STYLES,
+      }) || prepareVerifiedFrameDocument(instrumentedSource, token, {
+        baseUrl: resolvedBaseHref,
+        editorStyles: EDITOR_DOCUMENT_STYLES,
+      });
+    }
     frameSourceHtmlRef.current = source;
-    expectedFrameTokenRef.current = token;
+    expectedFrameTokenRef.current = verificationToken;
     expectedFrameHtmlRef.current = prepared;
     renderedSourceHtmlRef.current = null;
     containerRef.current?.setAttribute("data-render-verified", "false");
+    containerRef.current?.removeAttribute("data-runtime-bootstrap-count");
+    runtimeFrameRef.current = runtimeFrame;
+    if (runtimeFrame) {
+      onEditRuntimeLoadStartRef.current?.(runtimeFrame.grant);
+    }
     const replaceFrameElement = () => {
       setFrameRender({
         html: prepared,
@@ -753,7 +899,44 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     } else {
       replaceFrameElement();
     }
-  }, [resolvedBaseHref]);
+  }, [editRuntimeGrant, resolvedBaseHref]);
+
+  const fallBackToStaticRuntimeFrame = useCallback((
+    frame: RuntimeFrameContext,
+    outcome: Exclude<HtmlCanvasEditRuntimeLoadOutcome, "ready">,
+  ): boolean => {
+    const current = runtimeFrameRef.current;
+    if (
+      !current
+      || current.settled
+      || current.elementGeneration !== frame.elementGeneration
+      || !sameRuntimeGrant(current.grant, frame.grant)
+    ) return false;
+    current.settled = true;
+    runtimeFrameRef.current = null;
+    // A rejected or timed-out program never replaces this iframe with another
+    // executable document. The same authoritative source resumes as static.
+    loadFrameSource(frameSourceHtmlRef.current, {
+      preserveViewport: true,
+      immediate: true,
+      forceStatic: true,
+    });
+    onEditRuntimeLoadOutcomeRef.current?.(frame.grant, outcome);
+    return true;
+  }, [loadFrameSource]);
+
+  useEffect(() => {
+    if (
+      !frameInitializedRef.current
+      || !editRuntimeGrant
+      || runtimeAttemptedRef.current
+    ) return;
+    // A grant that arrives after the static frame has mounted is intentionally
+    // not promoted. Settling it here closes the protocol session without a
+    // hidden probe, background preparation, or iframe replacement.
+    runtimeAttemptedRef.current = true;
+    onEditRuntimeLoadOutcomeRef.current?.(editRuntimeGrant, "rejected");
+  }, [editRuntimeGrant]);
 
   const updateSelectedStyle = useCallback(() => {
     const element = selectedElementRef.current;
@@ -2666,6 +2849,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       );
       return false;
     }
+    if (selectedElement.closest(`[${EDIT_RUNTIME_HOST_ATTRIBUTE}]`)) {
+      containerRef.current?.setAttribute("data-native-start-status", "runtime-display-only");
+      return false;
+    }
     const priorRange = activeTextRangeRef.current;
     const islandHostElement = nativeEditHostForElement(selectedElement, sourceIndex);
     const fragmentCandidate = islandHostElement
@@ -3530,6 +3717,35 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       };
     }
 
+    const runtimeFrame = runtimeFrameRef.current;
+    const retainsSettledRuntimeFrame = Boolean(
+      resumeEditing
+      && !preserveForHistory
+      && activeNativeEditRef.current
+      && runtimeFrame?.settled
+      && runtimeFrame.elementGeneration === frameLoadGenerationRef.current
+      && !nativeEditNeedsReloadRef.current
+      && renderedSourceHtmlRef.current === frameSourceHtmlRef.current,
+    );
+    if (retainsSettledRuntimeFrame && runtimeFrame) {
+      // A checkpoint has already rebased this active island against the exact
+      // new source. Keep its frozen snapshots mounted while editing resumes;
+      // replacing this settled one-shot frame would discard them and cannot
+      // execute the author program a second time.
+      pendingHistoryBookmarkRef.current = null;
+      pendingHistoryCanonicalFenceRef.current = false;
+      containerRef.current?.setAttribute(
+        "data-native-fence-resume",
+        `retained-runtime:${runtimeFrame.elementGeneration}`,
+      );
+      return {
+        ok: true,
+        html: frameSourceHtmlRef.current,
+        sourceSha256: sourceIndexRef.current?.sourceSha256 || "",
+        pendingMutation: committed.mutation,
+      };
+    }
+
     const bookmark = detachNativeEditForFence();
     const needsCanonicalFence = Boolean(bookmark)
       || nativeSessionNeedsCanonicalFenceRef.current;
@@ -4023,6 +4239,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       pendingNativeEditResumeRef.current = null;
       pendingHistoryBookmarkRef.current = null;
       pendingHistoryCanonicalFenceRef.current = false;
+      const runtimeFrame = runtimeFrameRef.current;
+      runtimeFrameRef.current = null;
+      if (runtimeFrame && !runtimeFrame.settled) {
+        onEditRuntimeLoadOutcomeRef.current?.(runtimeFrame.grant, "failed");
+      }
       fencedDocumentCleanupRef.current();
       cleanupFrameRef.current();
       resizeObserverRef.current?.disconnect();
@@ -4032,11 +4253,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const connectFrame = useCallback((
     iframe: HTMLIFrameElement,
     connectedFrameGeneration: number,
-  ) => {
+  ): boolean => {
     if (
       iframe !== iframeRef.current
       || connectedFrameGeneration !== frameLoadGenerationRef.current
-    ) return;
+    ) return false;
     cleanupFrameRef.current();
     const documentNode = iframe.contentDocument;
     const expectedFrameHtml = expectedFrameHtmlRef.current;
@@ -4044,7 +4265,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     if (!documentNode?.documentElement || !expectedFrameHtml || !expectedToken) {
       renderedSourceHtmlRef.current = null;
       containerRef.current?.setAttribute("data-render-verified", "false");
-      return;
+      return false;
     }
     const marker = documentNode.head.querySelector<HTMLMetaElement>(
       `meta[${FRAME_VERIFICATION_ATTRIBUTE}]`,
@@ -4056,7 +4277,26 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     ) {
       renderedSourceHtmlRef.current = null;
       containerRef.current?.setAttribute("data-render-verified", "false");
-      return;
+      return false;
+    }
+    const runtimeFrame = runtimeFrameRef.current;
+    if (runtimeFrame?.elementGeneration === connectedFrameGeneration) {
+      if (runtimeFrame.verificationToken !== expectedToken) {
+        fallBackToStaticRuntimeFrame(runtimeFrame, "rejected");
+        return false;
+      }
+      if (!mountFrozenRuntimeSnapshots(documentNode, runtimeFrame)) {
+        fallBackToStaticRuntimeFrame(runtimeFrame, "rejected");
+        return false;
+      }
+      if (!runtimeFrame.settled) {
+        runtimeFrame.settled = true;
+        containerRef.current?.setAttribute(
+          "data-runtime-bootstrap-count",
+          String(runtimeFrame.grant.bootstrapCount),
+        );
+        onEditRuntimeLoadOutcomeRef.current?.(runtimeFrame.grant, "ready");
+      }
     }
     renderedSourceHtmlRef.current = frameSourceHtmlRef.current;
     containerRef.current?.setAttribute("data-render-verified", "true");
@@ -4156,6 +4396,12 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       if (findNativeActionTarget(event.target)) event.preventDefault();
       const target = findCanvasSelectionElement(event.target);
       if (!target) return;
+      if (target.hasAttribute(EDIT_RUNTIME_HOST_ATTRIBUTE)) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!lockedRef.current) selectElement(target);
+        return;
+      }
       if (
         event.altKey
         && resolvePagePresentationAction(selectionForElement(
@@ -4368,7 +4614,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         clearSelection();
         return;
       }
-      if (event.key === "Enter" && selectedElementRef.current) {
+      if (
+        event.key === "Enter"
+        && selectedElementRef.current
+        && !selectedElementRef.current.hasAttribute(EDIT_RUNTIME_HOST_ATTRIBUTE)
+      ) {
         event.preventDefault();
         startEditing();
         return;
@@ -4567,6 +4817,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         updateOverlayPosition();
       }
     });
+    return true;
   }, [
     captureTextRange,
     clearSelection,
@@ -4579,6 +4830,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     selectTarget,
     startEditing,
     updateOverlayPosition,
+    fallBackToStaticRuntimeFrame,
   ]);
 
   useEffect(() => {
@@ -4587,6 +4839,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     const connectedFrameGeneration = frameRender.elementGeneration;
     let animationFrame = 0;
     let attempts = 0;
+    const startedAt = performance.now();
     const connectParsedFrame = () => {
       if (
         iframe !== iframeRef.current
@@ -4606,14 +4859,25 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         && marker?.getAttribute(FRAME_VERIFICATION_ATTRIBUTE) === expectedToken
         && marker.getAttribute("content") === expectedToken
       ) {
-        // DOM parsing is sufficient to validate and connect the inert preview.
-        // Slow images, fonts, or stylesheets may delay the iframe load event;
-        // the body ResizeObserver keeps layout chrome current as they settle.
-        connectFrame(iframe, connectedFrameGeneration);
+        // Static documents connect after parsing; a direct runtime connects
+        // only after the bootstrap has reported a valid frozen audit result.
+        if (connectFrame(iframe, connectedFrameGeneration)) return;
+      }
+      const runtimeFrame = runtimeFrameRef.current;
+      if (
+        runtimeFrame?.elementGeneration === connectedFrameGeneration
+        && !runtimeFrame.settled
+        && performance.now() - startedAt >= EDIT_AUTHOR_RUNTIME_BUDGET.runtimeDeadlineMs
+      ) {
+        fallBackToStaticRuntimeFrame(runtimeFrame, "failed");
         return;
       }
       attempts += 1;
-      if (attempts < 120) {
+      const retryLimit = runtimeFrame?.elementGeneration === connectedFrameGeneration
+        && !runtimeFrame.settled
+        ? Math.ceil(EDIT_AUTHOR_RUNTIME_BUDGET.runtimeDeadlineMs / 16) + 30
+        : 120;
+      if (attempts < retryLimit) {
         animationFrame = requestAnimationFrame(connectParsedFrame);
       }
     };
@@ -4621,6 +4885,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     return () => cancelAnimationFrame(animationFrame);
   }, [
     connectFrame,
+    fallBackToStaticRuntimeFrame,
     frameRender.elementGeneration,
     frameRender.html,
   ]);
