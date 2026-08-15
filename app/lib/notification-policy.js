@@ -110,9 +110,9 @@ export function noticeAutoDismissMs(notice) {
     || disposition === "direct-action"
     || disposition === "user-choice"
   ) return null;
-  if (disposition === "background-result") return 7_000;
-  if (tone === "warning") return 5_000;
-  return 2_500;
+  if (disposition === "background-result") return 8_000;
+  if (tone === "warning") return 6_000;
+  return 3_500;
 }
 
 /**
@@ -140,6 +140,9 @@ export function noticeDisposition(notice) {
  */
 export function shouldPresentNotice(notice) {
   if (!notice) return true;
+  if (notice.sticky && /conflict/i.test(String(notice.dedupeKey || ""))) {
+    return true;
+  }
   const disposition = noticeDisposition(notice);
   return disposition === "direct-action"
     || disposition === "user-choice"

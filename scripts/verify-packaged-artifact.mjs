@@ -101,6 +101,7 @@ const REQUIRED_APP_SOURCE_FILES = [
   "desktop/external-file-open.mjs",
   "desktop/project-open-queue.mjs",
   "desktop/project-files.mjs",
+  "desktop/source-file-watch.mjs",
   "desktop/source-rename.mjs",
   "desktop/project-path-policy.mjs",
   "desktop/welcome-project-content.mjs",

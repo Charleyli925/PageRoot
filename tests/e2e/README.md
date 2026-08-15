@@ -92,6 +92,9 @@ same final commit and content hash recorded by the automated gate report.
 - `native-dom-electron.spec.mjs`: the same real native editing path in the
   shipped Chromium environment, plus temporary-disk checkpoint/autosave,
   exact forward bytes, graceful close, and cold reopen consistency.
+- `conflict-force-unlock.spec.mjs`: external Working Copy change surfaces the
+  conflict banner, and confirmed force-unlock restores an editable idle project
+  without rewriting the on-disk HTML.
 - `ai-handoff-closed-loop.spec.mjs`: real comment UI, frozen Request, clipboard
   handoff, generated-AI/finalizer result, status polling, non-overwriting Version
   creation, automatic working-HTML activation, and fail-closed recovery paths.

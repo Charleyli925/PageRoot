@@ -190,6 +190,16 @@ export function createBridgeClient({
       "无法读取当前源 HTML。",
       timeoutMs,
     ),
+    sourcePreview: (sourcePath) => query(
+      "/source-preview",
+      { sourcePath },
+      "无法预览磁盘上的源 HTML。",
+    ),
+    sourceStat: (sourcePath) => query(
+      "/source-stat",
+      { sourcePath },
+      "无法检查磁盘上的源 HTML。",
+    ),
     conflictCandidate: (sourcePath) => query(
       "/conflict-candidate",
       { sourcePath },

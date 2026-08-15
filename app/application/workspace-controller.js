@@ -930,6 +930,18 @@ export class WorkspaceController {
     return this.#requireDocumentWorkflow().reloadAuthority(input);
   }
 
+  previewExternalDocumentSource(input) {
+    return this.#requireDocumentWorkflow().previewExternalSource(input);
+  }
+
+  observeExternalSourceChange(input) {
+    return this.#requireDocumentWorkflow().observeExternalSourceChange(input);
+  }
+
+  forceUnlockDocumentConflict(input) {
+    return this.#requireDocumentWorkflow().forceUnlockConflict(input);
+  }
+
   ensureDocumentCanvas(input) {
     return this.#requireDocumentWorkflow().ensureCurrentCanvas(input);
   }

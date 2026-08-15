@@ -27,6 +27,9 @@ export type NoticeBarProps = {
   onAction?: () => void;
   onDismiss: () => void;
   onPauseChange?: (paused: boolean) => void;
+  dismissMs?: number | null;
+  paused?: boolean;
+  repeatCount?: number;
   usageCode?: string;
   usageDisposition?: string;
   usageSurface?: "canvas" | "global" | "native" | "panel";
@@ -58,6 +61,9 @@ export default function NoticeBar({
   onAction,
   onDismiss,
   onPauseChange,
+  dismissMs = null,
+  paused = false,
+  repeatCount = 1,
   usageCode,
   usageDisposition = "inform-in-place",
   usageSurface,
@@ -107,6 +113,9 @@ export default function NoticeBar({
     <section
       className={classes}
       data-tone={tone}
+      data-paused={paused ? "true" : undefined}
+      data-dismissible={dismissMs ? "true" : undefined}
+      style={dismissMs ? { ["--notice-dismiss-ms" as string]: `${dismissMs}ms` } : undefined}
       role="status"
       aria-live="polite"
       aria-atomic="true"
@@ -122,6 +131,9 @@ export default function NoticeBar({
     >
       <span className={styles.icon} aria-hidden="true">
         <NoticeToneIcon tone={tone} />
+        {repeatCount > 1 ? (
+          <span className={styles.repeat}>{repeatCount}</span>
+        ) : null}
       </span>
       <span className={styles.copy}>
         <strong>{title}</strong>
@@ -152,6 +164,7 @@ export default function NoticeBar({
           <XIcon aria-hidden="true" size={15} weight="bold" />
         </button>
       </span>
+      {dismissMs ? <span className={styles.progress} aria-hidden="true" /> : null}
     </section>
   );
 }

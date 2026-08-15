@@ -233,7 +233,7 @@ function requireSha256(value, label = "sha256") {
   return value;
 }
 
-async function readSourceFile(sourcePath) {
+async function inspectSourceFile(sourcePath, { requireComplete = true } = {}) {
   let information;
   try {
     information = await lstat(sourcePath);
@@ -268,7 +268,7 @@ async function readSourceFile(sourcePath) {
       "The source HTML is not valid UTF-8 and was left unchanged.",
     );
   }
-  requireCompleteHtml(html, "source HTML");
+  if (requireComplete) requireCompleteHtml(html, "source HTML");
   return {
     buffer,
     html,
@@ -276,6 +276,10 @@ async function readSourceFile(sourcePath) {
     information,
     lastModifiedAt: information.mtime.toISOString(),
   };
+}
+
+async function readSourceFile(sourcePath) {
+  return inspectSourceFile(sourcePath, { requireComplete: true });
 }
 
 function projectFileHttpError(cause) {
@@ -1560,6 +1564,17 @@ async function autosaveConflictCandidate(sourcePath) {
 }
 
 async function resolveConflict(body) {
+  const action = String(body.action || body.resolution || "");
+  if (action === "force-unlock") {
+    try {
+      const unlocked = await projectFileRepository.forceUnlockWorkingCopy({
+        sourcePath: requiredSourcePath(body.sourcePath),
+      });
+      return { ok: true, ...unlocked };
+    } catch (cause) {
+      throw projectFileHttpError(cause);
+    }
+  }
   const workspace = await projectFileWorkspaceForSource(body.sourcePath);
   if (!workspace) throw projectNotFoundError();
   throw new HttpError(
@@ -1567,6 +1582,27 @@ async function resolveConflict(body) {
     "CONFLICT_NOT_FOUND",
     "No conflict exists for this v4 project.",
   );
+}
+
+async function sourcePreview(sourcePath) {
+  const source = await inspectSourceFile(sourcePath, { requireComplete: true });
+  return {
+    ok: true,
+    content: source.html,
+    sha256: source.sha256,
+    lastModifiedAt: source.lastModifiedAt,
+    size: source.information.size,
+  };
+}
+
+async function sourceStat(sourcePath) {
+  const source = await inspectSourceFile(sourcePath, { requireComplete: false });
+  return {
+    ok: true,
+    sha256: source.sha256,
+    lastModifiedAt: source.lastModifiedAt,
+    size: source.information.size,
+  };
 }
 
 async function inspectProjectFile(sourcePath, relativePath) {
@@ -1827,6 +1863,26 @@ async function route(request, response) {
       response,
       200,
       await sourceFile(
+        requiredSourcePath(url.searchParams.get("sourcePath")),
+      ),
+    );
+    return;
+  }
+  if (request.method === "GET" && url.pathname === "/source-preview") {
+    sendJson(
+      response,
+      200,
+      await sourcePreview(
+        requiredSourcePath(url.searchParams.get("sourcePath")),
+      ),
+    );
+    return;
+  }
+  if (request.method === "GET" && url.pathname === "/source-stat") {
+    sendJson(
+      response,
+      200,
+      await sourceStat(
         requiredSourcePath(url.searchParams.get("sourcePath")),
       ),
     );

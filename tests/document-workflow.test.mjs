@@ -1023,3 +1023,87 @@ test("DocumentWorkflow reconciles an unknown history action before replaying its
   assert.equal(harness.documentSession.sourceSha256, sha256(before));
   assert.equal(harness.canvas.history.length, 1);
 });
+
+test("DocumentWorkflow force-unlock adopts disk HTML and clears persistence conflict", async () => {
+  const before = "<!doctype html><html><body><p>one</p></body></html>";
+  const external = before.replace("one", "external");
+  const harness = createHarness({
+    html: before,
+    bridge: {
+      async resolveConflict(body) {
+        assert.equal(body.action, "force-unlock");
+        return { ok: true, status: "force-unlocked" };
+      },
+      async source() {
+        return {
+          projectId: PROJECT_ID,
+          documentId: DOCUMENT_ID,
+          sourcePath: SOURCE_PATH,
+          content: external,
+          sha256: sha256(external),
+          lastModifiedAt: "2026-08-11T00:00:02.000Z",
+        };
+      },
+    },
+  });
+  harness.documentSession.setPersistence({
+    state: "conflict",
+    error: "源文件在磁盘上被其他程序修改了。",
+  });
+  harness.documentSession.setEditRevision(3);
+
+  const outcome = await harness.workflow.forceUnlockConflict({
+    context: harness.context,
+  });
+
+  assert.equal(outcome.status, "succeeded");
+  assert.equal(harness.documentSession.html, external);
+  assert.equal(harness.documentSession.sourceSha256, sha256(external));
+  assert.equal(harness.documentSession.persistState, "idle");
+  assert.equal(harness.documentSession.pendingWrite, null);
+  assert.equal(harness.documentSession.lastPersistedRevision, 3);
+});
+
+test("DocumentWorkflow treats matching source-stat hashes as a save echo", async () => {
+  const html = "<!doctype html><html><body><p>one</p></body></html>";
+  const harness = createHarness({
+    html,
+    bridge: {
+      async sourceStat() {
+        return { sha256: sha256(html), lastModifiedAt: "2026-08-11T00:00:02.000Z", size: 40 };
+      },
+    },
+  });
+
+  const outcome = await harness.workflow.observeExternalSourceChange({
+    sourcePath: SOURCE_PATH,
+  });
+
+  assert.equal(outcome.status, "succeeded");
+  assert.equal(outcome.value.changed, false);
+  assert.equal(harness.documentSession.persistState, "idle");
+});
+
+test("DocumentWorkflow projects a conflict when source-stat hash diverges", async () => {
+  const html = "<!doctype html><html><body><p>one</p></body></html>";
+  const harness = createHarness({
+    html,
+    bridge: {
+      async sourceStat() {
+        return {
+          sha256: sha256(html.replace("one", "two")),
+          lastModifiedAt: "2026-08-11T00:00:02.000Z",
+          size: 40,
+        };
+      },
+    },
+  });
+
+  const outcome = await harness.workflow.observeExternalSourceChange({
+    sourcePath: SOURCE_PATH,
+  });
+
+  assert.equal(outcome.status, "succeeded");
+  assert.equal(outcome.value.changed, true);
+  assert.equal(harness.documentSession.persistState, "conflict");
+});

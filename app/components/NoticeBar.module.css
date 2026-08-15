@@ -5,6 +5,7 @@
 
   z-index: 100;
   display: grid;
+  position: relative;
   grid-template-columns: 32px minmax(0, 1fr) auto;
   align-items: center;
   gap: 11px;
@@ -51,12 +52,13 @@
 
 .viewport {
   position: fixed;
-  top: calc(var(--notice-header-height, 88px) + 12px);
+  top: calc(var(--notice-header-height, 88px) + 16px);
   left: calc((100vw - var(--notice-rail-width, 376px)) / 2);
   width: min(
     520px,
     calc(100vw - var(--notice-rail-width, 376px) - 28px)
   );
+  pointer-events: auto;
 }
 
 .canvas {
@@ -78,6 +80,7 @@
   place-items: center;
   align-self: start;
   margin-top: 1px;
+  position: relative;
   border-radius: 10px;
   color: var(--notice-color);
   background: var(--notice-soft);
@@ -144,6 +147,49 @@
 .actions button:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--notice-color) 54%, #fff);
   outline-offset: 2px;
+}
+
+.repeat {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 7px;
+  color: #fff;
+  background: var(--notice-color);
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 14px;
+  text-align: center;
+}
+
+.progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: var(--notice-color);
+  transform-origin: left center;
+  animation: notice-progress var(--notice-dismiss-ms, 3500ms) linear forwards;
+}
+
+.notice[data-paused="true"] .progress {
+  animation-play-state: paused;
+}
+
+@keyframes notice-progress {
+  from { transform: scaleX(1); }
+  to { transform: scaleX(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .progress {
+    animation: none;
+    opacity: 0.35;
+  }
 }
 
 @media (max-width: 720px) {

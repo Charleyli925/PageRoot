@@ -22,6 +22,7 @@ const channels = Object.freeze({
   openRecent: "html-projects:open-recent",
   forgetRecent: "html-projects:forget-recent",
   acceptExternalOpen: "html-projects:accept-external-open",
+  sourceFileMayHaveChanged: "html-projects:source-file-may-have-changed",
 });
 const appChannels = Object.freeze({
   prepareClose: "html-app:prepare-close",
@@ -146,6 +147,22 @@ const projectsApi = Object.freeze({
     channels.acceptExternalOpen,
     { requestId },
   ),
+  onSourceFileChanged: (listener) => {
+    if (typeof listener !== "function") {
+      throw new TypeError("onSourceFileChanged listener must be a function.");
+    }
+    const wrapped = (_event, payload) => {
+      const sourcePath = typeof payload?.sourcePath === "string"
+        ? payload.sourcePath.trim()
+        : "";
+      if (!sourcePath) return;
+      listener({ sourcePath });
+    };
+    ipcRenderer.on(channels.sourceFileMayHaveChanged, wrapped);
+    return () => {
+      ipcRenderer.removeListener(channels.sourceFileMayHaveChanged, wrapped);
+    };
+  },
 });
 const integrationsApi = Object.freeze({
   handoffToQoderWork: (payload) => invokeProject(

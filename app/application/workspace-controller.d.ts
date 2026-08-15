@@ -210,6 +210,8 @@ export type WorkspaceControllerConstruction = Readonly<{
     | "sourceHistoryAction"
     | "resolveConflict"
     | "conflictCandidate"
+    | "sourcePreview"
+    | "sourceStat"
     | "projectFile"
     | "openFolder"
     | "attachment"
@@ -540,6 +542,15 @@ export class WorkspaceController {
     context?: ProjectContext;
     acceptExternalConflict?: boolean;
     externalAuthorityAccepted?: boolean;
+  }): Promise<DocumentWorkflowOutcome<Record<string, unknown>>>;
+  previewExternalDocumentSource(input?: {
+    context?: ProjectContext;
+  }): Promise<DocumentWorkflowOutcome<Record<string, unknown>>>;
+  observeExternalSourceChange(input?: {
+    sourcePath?: string;
+  }): Promise<DocumentWorkflowOutcome<Record<string, unknown>>>;
+  forceUnlockDocumentConflict(input?: {
+    context?: ProjectContext;
   }): Promise<DocumentWorkflowOutcome<Record<string, unknown>>>;
   ensureDocumentCanvas(input?: {
     context?: ProjectContext;

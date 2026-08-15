@@ -611,6 +611,201 @@ export class DocumentWorkflow {
     }
   }
 
+  async previewExternalSource({ context } = {}) {
+    const activeContext = copyContext(context) || this.#projectSession.context;
+    if (!activeContext) {
+      return blocked("DOCUMENT_CONTEXT_REQUIRED", "当前页面尚未完成项目身份初始化。");
+    }
+    if (!this.#isCurrent(activeContext)) return stale(activeContext);
+    if (typeof this.#bridgeClient.sourcePreview !== "function") {
+      return blocked("SOURCE_PREVIEW_UNAVAILABLE", "当前运行时无法预览磁盘源文件。");
+    }
+    try {
+      const payload = await this.#bridgeClient.sourcePreview(activeContext.sourcePath);
+      if (!this.#isCurrent(activeContext)) return stale(activeContext);
+      const html = String(payload.content || "");
+      const sourceSha256 = String(payload.sha256 || "");
+      if (!SHA256.test(sourceSha256) || await this.#hashPort.sha256(html) !== sourceSha256) {
+        throw invalidAcknowledgement(
+          "磁盘预览 HTML 与声明 Hash 不一致。",
+          "INVALID_SOURCE_ACK",
+        );
+      }
+      return succeeded({
+        html,
+        sourceSha256,
+        lastModifiedAt: String(payload.lastModifiedAt || ""),
+        size: Number(payload.size || 0),
+      });
+    } catch (cause) {
+      if (!this.#isCurrent(activeContext)) return stale(activeContext);
+      const message = this.#codecs.errorMessage(cause, "暂时无法预览磁盘上的源文件。");
+      this.#emit({
+        type: "document-external-source-preview-failed",
+        context: activeContext,
+        code: sourceErrorCode(cause, "SOURCE_PREVIEW_REJECTED"),
+        message,
+      });
+      return this.#outcomeFromCause(
+        this.#nextOperationId("preview"),
+        cause,
+        "SOURCE_PREVIEW_REJECTED",
+        message,
+      );
+    }
+  }
+
+  async observeExternalSourceChange({ sourcePath } = {}) {
+    const activeContext = this.#projectSession.context;
+    if (!activeContext) {
+      return blocked("DOCUMENT_CONTEXT_REQUIRED", "当前页面尚未完成项目身份初始化。");
+    }
+    if (
+      sourcePath
+      && !this.#codecs.sameSourcePath(sourcePath, activeContext.sourcePath)
+    ) {
+      return succeeded({ ignored: true, reason: "stale-path" });
+    }
+    const persistState = this.#documentSession.persistState;
+    if (
+      persistState === "writing"
+      || persistState === "queued"
+      || persistState === "conflict"
+    ) {
+      return succeeded({ ignored: true, reason: persistState });
+    }
+    if (typeof this.#bridgeClient.sourceStat !== "function") {
+      return blocked("SOURCE_STAT_UNAVAILABLE", "当前运行时无法检查磁盘源文件。");
+    }
+    try {
+      const stat = await this.#bridgeClient.sourceStat(activeContext.sourcePath);
+      if (!this.#isCurrent(activeContext)) return stale(activeContext);
+      const diskSha256 = String(stat.sha256 || "");
+      const expected = String(this.#documentSession.sourceSha256 || "");
+      if (!SHA256.test(diskSha256) || diskSha256 === expected) {
+        return succeeded({ changed: false, sha256: diskSha256 });
+      }
+      const message = "源文件在磁盘上被其他程序修改了。您的编辑内容仍在，可先预览外部版本再决定。";
+      this.#documentSession.setPersistence({
+        state: "conflict",
+        error: message,
+      });
+      this.#emit({
+        type: "document-external-source-changed",
+        context: activeContext,
+        sha256: diskSha256,
+        lastModifiedAt: String(stat.lastModifiedAt || ""),
+        size: Number(stat.size || 0),
+      });
+      return succeeded({
+        changed: true,
+        sha256: diskSha256,
+        lastModifiedAt: String(stat.lastModifiedAt || ""),
+      });
+    } catch (cause) {
+      if (!this.#isCurrent(activeContext)) return stale(activeContext);
+      const message = this.#codecs.errorMessage(cause, "暂时无法核对外磁盘上的源文件。");
+      this.#emit({
+        type: "document-external-source-stat-failed",
+        context: activeContext,
+        code: sourceErrorCode(cause, "SOURCE_STAT_REJECTED"),
+        message,
+      });
+      return this.#outcomeFromCause(
+        this.#nextOperationId("stat"),
+        cause,
+        "SOURCE_STAT_REJECTED",
+        message,
+      );
+    }
+  }
+
+  async forceUnlockConflict({ context } = {}) {
+    const activeContext = copyContext(context) || this.#projectSession.context;
+    if (!activeContext) {
+      return blocked("DOCUMENT_CONTEXT_REQUIRED", "当前页面尚未完成项目身份初始化。");
+    }
+    if (!this.#isCurrent(activeContext)) return stale(activeContext);
+    const previousDocument = this.#documentSession.snapshot;
+    const previousPendingWrite = this.#documentSession.pendingWrite;
+    const previousVersionView = this.#versionSession.captureView();
+    try {
+      await this.#bridgeClient.resolveConflict({
+        ...activeContext,
+        action: "force-unlock",
+      });
+      if (!this.#isCurrent(activeContext)) return stale(activeContext);
+      const payload = await this.#bridgeClient.source(activeContext.sourcePath);
+      if (!this.#isCurrent(activeContext)) return stale(activeContext);
+      this.#assertSourcePayload(payload, activeContext, "强制解锁后文件身份发生变化，已拒绝覆盖当前项目。");
+      const html = String(payload.content || "");
+      const sourceSha256 = String(payload.sha256 || "");
+      if (!SHA256.test(sourceSha256) || await this.#hashPort.sha256(html) !== sourceSha256) {
+        throw invalidAcknowledgement(
+          "强制解锁后读取的源 HTML 与声明 Hash 不一致。",
+          "INVALID_SOURCE_ACK",
+        );
+      }
+      const editRevision = this.#documentSession.editRevision;
+      this.#documentSession.publishAuthority({
+        html,
+        sourceSha256,
+        pendingWrite: null,
+        persistState: "idle",
+        persistError: "",
+        lastPersistedRevision: editRevision,
+      });
+      this.#versionSession.returnCurrent({
+        currentExactVersionId: payload.currentExactVersionId || null,
+        currentBasedOnVersionId: payload.currentBasedOnVersionId || undefined,
+        restoredFromVersionId: payload.restoredFromVersionId || null,
+      });
+      this.#canvasPort.invalidateRenderAcks();
+      await this.#verifyRendered(html, sourceSha256, activeContext);
+      if (!this.#isCurrent(activeContext)) return stale(activeContext);
+      this.#auditPending = [];
+      this.#auditInFlight.clear();
+      this.#commentSession.setChangeEvents([]);
+      this.#persistRecovery(null, activeContext);
+      this.#emit({
+        type: "document-conflict-force-unlocked",
+        context: activeContext,
+        lastModifiedAt: String(payload.lastModifiedAt || ""),
+      });
+      return succeeded({
+        html,
+        sourceSha256,
+        lastModifiedAt: String(payload.lastModifiedAt || ""),
+      });
+    } catch (cause) {
+      if (this.#isCurrent(activeContext)) {
+        this.#documentSession.publishAuthority({
+          html: previousDocument.html,
+          sourceSha256: previousDocument.sourceSha256,
+          pendingWrite: previousPendingWrite,
+          persistState: previousDocument.persistState,
+          persistError: previousDocument.persistError,
+        });
+        this.#versionSession.restoreView(previousVersionView);
+        this.#canvasPort.invalidateRenderAcks();
+      }
+      if (!this.#isCurrent(activeContext)) return stale(activeContext);
+      const message = this.#codecs.errorMessage(cause, "强制解锁没有完成，项目仍保持冲突状态。");
+      this.#emit({
+        type: "document-conflict-force-unlock-failed",
+        context: activeContext,
+        code: sourceErrorCode(cause, "DOCUMENT_FORCE_UNLOCK_REJECTED"),
+        message,
+      });
+      return this.#outcomeFromCause(
+        this.#nextOperationId("unlock"),
+        cause,
+        "DOCUMENT_FORCE_UNLOCK_REJECTED",
+        message,
+      );
+    }
+  }
+
   async ensureCurrentCanvas({ context } = {}) {
     const activeContext = copyContext(context) || this.#projectSession.context;
     let expectedHtml = this.#documentSession.html;

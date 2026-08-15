@@ -25,6 +25,7 @@ export type CanvasSourceTransaction = {
 };
 
 export class SourceHistorySession {
+  constructor(options?: { clock?: { now(): number } });
   activate(
     context: SourceHistoryContext,
     sourceSha256: string,

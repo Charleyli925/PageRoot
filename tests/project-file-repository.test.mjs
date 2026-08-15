@@ -2126,6 +2126,43 @@ test("a clean Working Copy adopts external disk bytes; pending PageRoot edits re
   assert.equal(await readFile(imported.target.exactSourcePath, "utf8"), conflictingDiskHtml);
 });
 
+test("forceUnlockWorkingCopy adopts disk hash without rewriting HTML", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "force-unlock.html");
+  const statePath = path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "working-copies",
+    `${imported.target.workingCopyId}.json`,
+  );
+  const state = await json(statePath);
+  await writeFile(statePath, JSON.stringify({ ...state, saveState: "failed" }), "utf8");
+  const conflictingDiskHtml = html("external while PageRoot pending");
+  await writeFile(imported.target.exactSourcePath, conflictingDiskHtml, "utf8");
+
+  await assert.rejects(
+    value.repository.workspace({ sourcePath: imported.target.exactSourcePath }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "WORKING_COPY_CONFLICT",
+  );
+
+  const unlocked = await value.repository.forceUnlockWorkingCopy({
+    sourcePath: imported.target.exactSourcePath,
+  });
+  assert.equal(unlocked.status, "force-unlocked");
+  assert.equal(unlocked.content, conflictingDiskHtml);
+  assert.equal(await readFile(imported.target.exactSourcePath, "utf8"), conflictingDiskHtml);
+
+  const nextState = await json(statePath);
+  assert.equal(nextState.saveState, "saved");
+  assert.equal(nextState.currentSha256, sha256(Buffer.from(conflictingDiskHtml, "utf8")));
+
+  const workspace = await value.repository.workspace({
+    sourcePath: imported.target.exactSourcePath,
+  });
+  assert.equal(workspace.content, conflictingDiskHtml);
+});
+
 test("Registry and managed control paths reject symlinks", async (t) => {
   const rootLink = await fixture(t);
   const imported = await importSource(rootLink, "root-link.html");

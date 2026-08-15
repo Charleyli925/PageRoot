@@ -10,6 +10,7 @@ const APP_FILE_ALLOWLIST = [
   "desktop/project-open-queue.mjs",
   "desktop/project-files.mjs",
   "desktop/source-rename.mjs",
+  "desktop/source-file-watch.mjs",
   "desktop/project-path-policy.mjs",
   "desktop/welcome-project-content.mjs",
   "desktop/export-copy.mjs",

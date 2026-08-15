@@ -399,9 +399,32 @@ const WELCOME_PROJECT = {
   sourcePath: null as string | null,
 };
 
+const recentNoticeDismissals = new Map<string, {
+  dismissedAt: number;
+  repeatCount: number;
+}>();
+
 function noticeReducer(current: Toast, next: Toast): Toast {
+  const now = Date.now();
+  if (next === null) {
+    if (current?.dedupeKey) {
+      recentNoticeDismissals.set(current.dedupeKey, {
+        dismissedAt: now,
+        repeatCount: Number(current.repeatCount || 1),
+      });
+    }
+    return null;
+  }
   if (!shouldPresentNotice(next)) return current;
-  return shouldReplaceNotice(current, next) ? next : current;
+  let incoming = next;
+  if (incoming.dedupeKey) {
+    const previous = recentNoticeDismissals.get(incoming.dedupeKey);
+    if (previous && now - previous.dismissedAt < 1_000) {
+      recentNoticeDismissals.delete(incoming.dedupeKey);
+      incoming = { ...incoming, repeatCount: previous.repeatCount + 1 };
+    }
+  }
+  return shouldReplaceNotice(current, incoming) ? incoming : current;
 }
 
 function requiredWorkspaceController(
@@ -1223,6 +1246,18 @@ export default function Workbench() {
   const [toast, setToast] = useReducer(noticeReducer, null);
   const [pausedNoticeIdentity, setPausedNoticeIdentity] =
     useState<string | null>(null);
+  const noticeDeadlineRef = useRef<{
+    identity: string;
+    deadlineAt: number;
+    remainingMs: number;
+    paused: boolean;
+  } | null>(null);
+  const lastHistoryDirectionRef = useRef<"undo" | "redo">("undo");
+  const [externalSourcePreview, setExternalSourcePreview] = useState<{
+    html: string;
+    sourceSha256: string;
+    lastModifiedAt: string;
+  } | null>(null);
   const noticeIdentity = toast
     ? `${toast.dedupeKey || ""}\n${toast.title}\n${toast.message}`
     : "";
@@ -1346,6 +1381,17 @@ export default function Workbench() {
             setDrawer("handoff");
             if (state === "ready-to-open" && toastRef.current?.dedupeKey === "ai-submit") {
               setToast(null);
+            }
+            if (state === "error" && run) {
+              setToast({
+                title: "AI 输出未通过安全校验",
+                message: run.error || "提交的 HTML 不完整或格式错误。",
+                tone: "error",
+                sticky: true,
+                disposition: "user-choice",
+                dedupeKey: `ai-validation-error:${run.requestId}`,
+                action: { id: "open-handoff", label: "查看详情" },
+              });
             }
           }
         } else if (
@@ -2131,6 +2177,7 @@ export default function Workbench() {
   );
   const pendingSendItemCount = activeCommentCount;
   const interactionPreviewHtml = useMemo(() => {
+    if (externalSourcePreview?.html) return externalSourcePreview.html;
     if (!browserPreviewOnly || projectName !== WELCOME_PROJECT_NAME) return html;
     return html.replace(
       /(["'])(?:\.\/)?brand-logo\.png\1/iu,
@@ -2138,6 +2185,7 @@ export default function Workbench() {
     );
   }, [
     browserPreviewOnly,
+    externalSourcePreview,
     html,
     projectName,
   ]);
@@ -2937,12 +2985,48 @@ export default function Workbench() {
     if (!workspaceController || !window.htmlAIProjects) return;
     void workspaceController.openProject({ kind: "startup" });
   }, [workspaceController]);
+  useEffect(() => {
+    const subscribe = window.htmlAIProjects?.onSourceFileChanged;
+    if (!workspaceController || typeof subscribe !== "function") return undefined;
+    return subscribe((info) => {
+      void workspaceController.observeExternalSourceChange({
+        sourcePath: info.sourcePath,
+      });
+    });
+  }, [workspaceController]);
 
   useEffect(() => {
-    if (!toast) return;
-    if (noticeTimerPaused) return;
+    if (!toast) {
+      noticeDeadlineRef.current = null;
+      return;
+    }
     const dismissAfter = noticeAutoDismissMs(toast);
-    if (dismissAfter === null) return;
+    if (dismissAfter === null) {
+      noticeDeadlineRef.current = null;
+      return;
+    }
+    const now = Date.now();
+    const existing = noticeDeadlineRef.current;
+    const remaining = existing?.identity === noticeIdentity
+      ? existing.paused
+        ? existing.remainingMs
+        : Math.max(0, existing.deadlineAt - now)
+      : dismissAfter;
+    if (noticeTimerPaused) {
+      noticeDeadlineRef.current = {
+        identity: noticeIdentity,
+        deadlineAt: now + remaining,
+        remainingMs: remaining,
+        paused: true,
+      };
+      return;
+    }
+    noticeDeadlineRef.current = {
+      identity: noticeIdentity,
+      deadlineAt: now + remaining,
+      remainingMs: remaining,
+      paused: false,
+    };
     const timeout = window.setTimeout(() => {
       captureUsageEvent("notification_interacted", {
         notice_code: noticeUsageCode(toast.dedupeKey),
@@ -2950,9 +3034,9 @@ export default function Workbench() {
         surface: "global",
       }, currentProjectSessionSnapshot().projectId || undefined);
       setToast(null);
-    }, dismissAfter);
+    }, remaining);
     return () => window.clearTimeout(timeout);
-  }, [currentProjectSessionSnapshot, noticeTimerPaused, toast]);
+  }, [currentProjectSessionSnapshot, noticeIdentity, noticeTimerPaused, toast]);
 
   useEffect(() => {
     if (!previewAttachment) return;
@@ -3923,6 +4007,11 @@ export default function Workbench() {
     );
     if (
       !skipConfirmation
+      && persistState === "conflict"
+      && !window.confirm("确定要用外部版本覆盖当前编辑吗？此操作不可撤销。")
+    ) return;
+    if (
+      !skipConfirmation
       && persistState !== "conflict"
       && hasUnwrittenLocalChanges
       && !window.confirm("重新载入会舍弃尚未写回的当前编辑内容。建议先导出副本，仍要继续吗？")
@@ -3986,6 +4075,108 @@ export default function Workbench() {
       void reloadCurrentSource({ fromDeferred: true });
     };
   }, [reloadCurrentSource]);
+
+  const previewExternalSource = useCallback(async () => {
+    const context = captureProjectContext();
+    if (!context || !workspaceController) return;
+    const outcome = await requiredWorkspaceController(workspaceController)
+      .previewExternalDocumentSource({ context });
+    if (outcome.status !== "succeeded") {
+      setToast({
+        title: "无法预览外部版本",
+        message: outcome.status === "stale"
+          ? "当前项目已经切换。"
+          : outcome.reason,
+        tone: "error",
+        sticky: true,
+        disposition: "background-result",
+        dedupeKey: "external-source-preview-failed",
+      });
+      return;
+    }
+    setExternalSourcePreview({
+      html: String(outcome.value.html || ""),
+      sourceSha256: String(outcome.value.sourceSha256 || ""),
+      lastModifiedAt: String(outcome.value.lastModifiedAt || ""),
+    });
+    setHandoffPreviewOpen(false);
+    setCanvasMode("preview");
+  }, [captureProjectContext, workspaceController]);
+
+  const returnToEditingFromExternalPreview = useCallback(() => {
+    setExternalSourcePreview(null);
+    setCanvasMode("edit");
+  }, []);
+
+  const forceUnlockCurrentSource = useCallback(async ({
+    skipConfirmation = false,
+  }: {
+    skipConfirmation?: boolean;
+  } = {}) => {
+    const context = captureProjectContext();
+    if (!context || !workspaceController) return;
+    if (
+      !skipConfirmation
+      && !window.confirm("强制解锁将丢弃本次 AI 结果和未写入的编辑。如果在意当前内容，请先导出。")
+    ) {
+      return;
+    }
+    const operationId = beginSourceTransition();
+    if (operationId === null) return;
+    try {
+      const outcome = await requiredWorkspaceController(workspaceController)
+        .forceUnlockDocumentConflict({ context });
+      if (
+        outcome.status === "stale"
+        || sourceTransitionOperationRef.current !== operationId
+        || !isCurrentProjectContext(context)
+      ) return;
+      if (outcome.status !== "succeeded") {
+        throw new Error(outcome.reason);
+      }
+      setExternalSourcePreview(null);
+      const lastModified = String(outcome.value.lastModifiedAt || "");
+      if (lastModified) setLastModifiedAt(lastModified);
+      await refreshWorkspace(context.sourcePath, context.epoch);
+      setCanvasMode("edit");
+      setToast({
+        title: "项目已解锁",
+        message: "可以继续编辑，之后的修改会写回磁盘。",
+        tone: "success",
+        disposition: "background-result",
+        dedupeKey: "source-force-unlock",
+      });
+    } catch (cause) {
+      if (!isCurrentProjectContext(context)) return;
+      setToast({
+        title: "强制解锁失败",
+        message: productErrorMessage(cause, "项目仍保持冲突状态，请先导出当前编辑后再试。"),
+        tone: "error",
+        sticky: true,
+        disposition: "user-choice",
+        dedupeKey: "source-force-unlock-failed",
+        action: { id: "relaunch-app", label: "重新打开源页" },
+      });
+    } finally {
+      finishSourceTransition(operationId);
+    }
+  }, [
+    beginSourceTransition,
+    captureProjectContext,
+    finishSourceTransition,
+    isCurrentProjectContext,
+    refreshWorkspace,
+    workspaceController,
+  ]);
+
+  const acceptExternalSourceFromPreview = useCallback(async () => {
+    setExternalSourcePreview(null);
+    if (persistState === "conflict") {
+      await forceUnlockCurrentSource({ skipConfirmation: true });
+      return;
+    }
+    await reloadCurrentSource({ skipConfirmation: true });
+  }, [forceUnlockCurrentSource, persistState, reloadCurrentSource]);
 
   const requestUserFlush = useCallback((fromDeferred = false) => {
     if (interactionLocked) {
@@ -4065,8 +4256,12 @@ export default function Workbench() {
       editorRef.current?.cancelHistoryAction();
       return false;
     }
-    const outcome = await requiredWorkspaceController(workspaceController)
-      .performDocumentHistoryAction({ direction, context });
+    lastHistoryDirectionRef.current = direction;
+    const controller = requiredWorkspaceController(workspaceController);
+    let outcome = await controller.performDocumentHistoryAction({ direction, context });
+    if (outcome.status !== "succeeded" && outcome.status !== "stale") {
+      outcome = await controller.performDocumentHistoryAction({ direction, context });
+    }
     if (outcome.status === "succeeded") return true;
     editorRef.current?.cancelHistoryAction({
       restore: outcome.status !== "stale",
@@ -4076,8 +4271,9 @@ export default function Workbench() {
         title: direction === "undo" ? "撤销未完成" : "重做未完成",
         message: outcome.reason,
         tone: "warning",
-        disposition: "background-result",
+        disposition: "user-choice",
         dedupeKey: `source-history-${direction}-failed`,
+        action: { id: "retry-history", label: "再试一次", direction },
       });
     }
     return false;
@@ -5793,7 +5989,9 @@ export default function Workbench() {
     workspaceController,
   ]);
 
-  const persistLabel = persistState === "writing"
+  const persistLabel = workspaceController?.hasDocumentHistoryAction
+    ? "正在撤销或重做…"
+    : persistState === "writing"
     ? "正在更新文件…"
     : persistState === "queued"
       ? "正在更新文件…"
@@ -6337,6 +6535,11 @@ export default function Workbench() {
         return;
       case "open-handoff":
         setDrawer("handoff");
+        return;
+      case "retry-history":
+        void requestSourceHistoryAction(
+          action.direction || lastHistoryDirectionRef.current,
+        );
         return;
       case "open-project":
       case "retry-project-open":
@@ -6897,13 +7100,22 @@ export default function Workbench() {
         </section>
       ) : null}
 
-      {!workspaceIssue && (persistState === "conflict" || persistState === "failed") ? (
+      {!workspaceIssue
+      && !externalSourcePreview
+      && (persistState === "conflict" || persistState === "failed") ? (
         <section className="source-conflict-banner" role="alert">
           <div>
-            <strong>{persistState === "conflict" ? "源 HTML 已被外部修改" : "当前修改还没有写入文件"}</strong>
-            <span>{persistError || "工作台保留了当前编辑内容，不会假装已经更新。"}</span>
+            <strong>{persistState === "conflict" ? "源文件在磁盘上被其他程序修改了" : "当前修改还没有写入文件"}</strong>
+            <span>{persistState === "conflict"
+              ? (persistError || "您的编辑内容仍在，可先预览外部版本再决定。")
+              : (persistError || "工作台保留了当前编辑内容，不会假装已经更新。")}</span>
           </div>
           <button type="button" onClick={() => void exportCurrentHtml()}>导出当前编辑</button>
+          {persistState === "conflict" ? (
+            <button type="button" onClick={() => void previewExternalSource()}>
+              预览外部版本
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={() => {
@@ -6911,6 +7123,17 @@ export default function Workbench() {
               else requestUserFlush();
             }}
           >{persistState === "conflict" ? "重新载入外部文件" : "重试更新文件"}</button>
+          {persistState === "conflict" ? (
+            <button
+              type="button"
+              className="destructive-action"
+              onClick={() => {
+                void forceUnlockCurrentSource();
+              }}
+            >
+              强制解锁项目
+            </button>
+          ) : null}
         </section>
       ) : null}
 
@@ -6932,7 +7155,20 @@ export default function Workbench() {
         </section>
       ) : null}
 
-      {runInProgress && handoffPreviewOpen ? (
+      {externalSourcePreview ? (
+        <PreviewNavigationBanner
+          key={`external-${externalSourcePreview.sourceSha256}`}
+          icon={<EyeIcon aria-hidden="true" size={18} weight="duotone" />}
+          title="正在预览外部版本"
+          detail="这是磁盘上被其他程序改过的源 HTML，尚未替换您的编辑。"
+          secondaryActionLabel="接受此版本（丢弃我的编辑）"
+          onSecondaryAction={() => {
+            void acceptExternalSourceFromPreview();
+          }}
+          actionLabel="返回我的编辑"
+          onAction={returnToEditingFromExternalPreview}
+        />
+      ) : runInProgress && handoffPreviewOpen ? (
         <PreviewNavigationBanner
           key={`handoff-${activeRun?.requestId || "pending"}-${activeRun?.attemptId || "pending"}`}
           className="sent-preview-banner"
@@ -8349,6 +8585,11 @@ export default function Workbench() {
               pendingRunOutcome={pendingRunOutcome}
               canRevealAiTask={canRevealAiTask}
               onRevealAiTask={() => void revealAiTaskInFinder()}
+              onRetrySubmission={() => {
+                workspaceControllerRef.current?.dismissActiveRun();
+                void generateRequest();
+              }}
+              onCancelRun={requestActiveRunEnd}
             />
           ) : null}
         </div>
@@ -8440,6 +8681,9 @@ export default function Workbench() {
           message={toast.message}
           tone={toast.tone}
           actionLabel={toast.action?.label}
+          dismissMs={noticeAutoDismissMs(toast)}
+          paused={noticeTimerPaused}
+          repeatCount={toast.repeatCount || 1}
           onAction={toast.action ? (() => {
             const action = toast.action;
             if (action) handleToastAction(action);

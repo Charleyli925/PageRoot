@@ -76,6 +76,7 @@ import {
   PRODUCT_MAX_HTML_BYTES,
   isGeneratedWorkingCopyFileName,
 } from "./product-contract.mjs";
+import { createSourceFileWatcher } from "./source-file-watch.mjs";
 import {
   isActiveProjectIdentity,
   isManagedVersionRelativePath,
@@ -195,6 +196,7 @@ const PROJECT_CHANNELS = Object.freeze({
   openRecent: "html-projects:open-recent",
   forgetRecent: "html-projects:forget-recent",
   acceptExternalOpen: "html-projects:accept-external-open",
+  sourceFileMayHaveChanged: "html-projects:source-file-may-have-changed",
 });
 const APP_CHANNELS = Object.freeze({
   prepareClose: "html-app:prepare-close",
@@ -262,6 +264,21 @@ let previewProtocolController = null;
 let reviewRuntimeSnapshotCaptureController = null;
 let editRuntimeProtocolController = null;
 const editRuntimePreparationFence = createEditRuntimePreparationFence();
+const sourceFileWatcher = createSourceFileWatcher({
+  debounceMs: 200,
+  onChange(info) {
+    publishSourceFileMayHaveChanged(info);
+  },
+});
+
+function publishSourceFileMayHaveChanged(info) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  const sourcePath = String(info?.sourcePath || "");
+  if (!sourcePath) return;
+  mainWindow.webContents.send(PROJECT_CHANNELS.sourceFileMayHaveChanged, {
+    sourcePath,
+  });
+}
 // An imported V1 may be an HTML-only managed Working Copy while its selected
 // external source directory still owns declared relative assets. This is
 // session-only provenance established by Main during the verified hand-off;
@@ -778,6 +795,7 @@ async function activateProject(filePath) {
   ].slice(0, MAX_RECENT_PROJECTS);
   await persistProjectState();
   activeImportedAssetSourcePath = null;
+  sourceFileWatcher.watch(normalizedPath);
 }
 
 async function forgetProject(filePath) {
@@ -792,7 +810,10 @@ async function forgetProject(filePath) {
   if (
     state.activePath
     && await existingPathIdentity(state.activePath) === forgottenIdentity
-  ) state.activePath = null;
+  ) {
+    state.activePath = null;
+    sourceFileWatcher.close();
+  }
   await persistProjectState();
 }
 
@@ -1410,6 +1431,7 @@ async function commitActivatedProjectPath({
   if (activatesCurrentProject) {
     state.activePath = nextSourcePath;
     state.recent = [replacement, ...retained].slice(0, MAX_RECENT_PROJECTS);
+    sourceFileWatcher.watch(nextSourcePath);
   } else {
     retained.splice(
       Math.min(
@@ -2815,6 +2837,7 @@ async function coordinateApplicationExit(reason, intent = "quit") {
     }
 
     isQuitting = true;
+    sourceFileWatcher.close();
     await stateWriteQueue.catch(() => {});
     if (intent === "relaunch") {
       if (bridgeProcess) await stopBridgeGracefully().catch(() => {});

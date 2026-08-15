@@ -814,7 +814,8 @@
     {
       "id": "desktop-main-preload",
       "patterns": [
-        "^desktop/(?:main|preload|product-contract|product-links)\\.mjs$",
+        "^desktop/(?:main|preload|product-contract|product-links|source-file-watch)\\.mjs$",
+        "^tests/source-file-watch\\.test\\.mjs$",
         "^desktop/renderer/(?:index\\.html|main\\.tsx)$",
         "^desktop/vite\\.config\\.ts$"
       ],
@@ -825,7 +826,8 @@
         "tests/desktop-close-recovery.test.mjs",
         "tests/desktop-preload-ipc.test.mjs",
         "tests/electron-window-policy.test.mjs",
-        "tests/product-contract.test.mjs"
+        "tests/product-contract.test.mjs",
+        "tests/source-file-watch.test.mjs"
       ]
     },
     {

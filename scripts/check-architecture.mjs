@@ -619,6 +619,8 @@ export async function architectureViolations() {
     || !workbench.includes(".flushDocument({ throughRevision })")
     || !workbench.includes(".performDocumentHistoryAction({ direction, context })")
     || !workbench.includes(".reloadDocumentAuthority({")
+    || !workbench.includes(".forceUnlockDocumentConflict({")
+    || !workbench.includes(".observeExternalSourceChange({")
     || !projectWorkflow.includes("this.#documentWorkflow.reconcileBoundary({")
     || /\b(?:autosaveTimerRef|auditPendingRef|auditInFlightKeysRef|historyActionPromiseRef|recoveryIdentityRef)\b/.test(workbench)
   ) {

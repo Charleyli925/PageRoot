@@ -895,5 +895,28 @@ test("v4 attachments, empty source history and absent conflicts stay bound to th
   });
   assert.equal(resolve.response.status, 404);
   assert.equal(resolve.body.error.code, "CONFLICT_NOT_FOUND");
+
+  const unlocked = await postJson(bridge, "/conflict/resolve", {
+    sourcePath: workingPath,
+    projectId: ensured.body.projectId,
+    documentId: ensured.body.documentId,
+    action: "force-unlock",
+  });
+  assert.equal(unlocked.response.status, 200, JSON.stringify(unlocked.body));
+  assert.equal(unlocked.body.status, "force-unlocked");
+  assert.equal(unlocked.body.content, html("attach"));
+
+  const sourcePreview = await bridge.requestJson(
+    `/source-preview?sourcePath=${encodeURIComponent(workingPath)}`,
+  );
+  assert.equal(sourcePreview.response.status, 200, JSON.stringify(sourcePreview.body));
+  assert.equal(sourcePreview.body.content, html("attach"));
+  assert.equal(typeof sourcePreview.body.sha256, "string");
+
+  const sourceStat = await bridge.requestJson(
+    `/source-stat?sourcePath=${encodeURIComponent(workingPath)}`,
+  );
+  assert.equal(sourceStat.response.status, 200, JSON.stringify(sourceStat.body));
+  assert.equal(sourceStat.body.sha256, sourcePreview.body.sha256);
 });
 
