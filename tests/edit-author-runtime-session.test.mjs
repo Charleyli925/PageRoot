@@ -15,11 +15,6 @@ const HTML = [
   "</body></html>",
 ].join("");
 const SOURCE_SHA = "sha256:" + "a".repeat(64);
-const SNAPSHOT_BYTES = Buffer.from([
-  137, 80, 78, 71, 13, 10, 26, 10,
-  0, 0, 0, 13, 73, 72, 68, 82,
-  0, 0, 0, 1, 0, 0, 0, 1,
-]);
 
 function deferred() {
   let resolve;
@@ -45,20 +40,8 @@ function success(request, overrides = {}) {
     resourceSha256: "sha256:" + "b".repeat(64),
     scriptCount: 1,
     byteLength: 96,
-    bootstrapCount: 1,
     canvasGeneration: request.canvasGeneration,
     hosts: request.hosts,
-    snapshots: [{
-      key: request.hosts[0].key,
-      pngSha256: "sha256:" + "c".repeat(64),
-      width: 1,
-      height: 1,
-      byteLength: SNAPSHOT_BYTES.byteLength,
-      pngBase64: SNAPSHOT_BYTES.toString("base64"),
-      layoutWidth: 1,
-      layoutHeight: 1,
-      styles: [],
-    }],
     ...overrides,
   };
 }

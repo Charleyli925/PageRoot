@@ -374,8 +374,9 @@ desktop API, unmapped host, malformed envelope, timeout, cancellation or late
 result is a silent static-only outcome. There is no second fresh pair,
 confirmation coordinator, runtime UI or Review cache. Edit does
 not invoke the resolver or owner and has no snapshot state; its separate
-one-shot author-runtime session is governed by ADR 0022 and cannot consume
-Review bindings, PNGs or facts.
+one-shot author-runtime session is governed by ADR 0025 and cannot consume
+Review bindings, PNGs or facts. Edit screenshot/capture/projection count must
+be 0.
 
 For each Review side and active filter, overlay frames and context masking
 consume the same final canonical projection records. The mask is a session-,

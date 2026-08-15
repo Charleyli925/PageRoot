@@ -57,16 +57,24 @@ Comments + frozen input
   active/inactive class transitions and `hidden`, `open`, `aria-selected` or
   `aria-expanded` state. It never carries runtime DOM, pixels or table markup.
 - Edit is source-static by default. On desktop only, a clean persisted document
-  with an explicit ECharts signal may receive one isolated immutable author-
-  runtime capture session before the first editable frame is mounted. The
+  with an explicit ECharts signal may receive one immutable author-runtime
+  resource session before the first editable frame is mounted. The
   `WorkspaceController` keys that disposable attempt by `(sourcePath,
-  canvasGeneration)`; a Main-owned sandboxed hidden BrowserWindow executes
-  ordered classic scripts once, waits 1.2 seconds, freezes and audits. Only a
-  verified bounded PNG display result is mounted into the script-disabled
-  source-static Edit iframe. A missing grant, failed audit or later full-frame
-  rebuild uses ordinary static Edit for that generation. The image has no
-  runtime cache or persistence authority; authored inline SVG remains
-  source-backed while unapproved runtime-only Canvas/SVG stays in Preview.
+  canvasGeneration)`; Main prepares the resource closure only. The first
+  visible Edit iframe is the final iframe: it executes ordered classic scripts
+  once at the real Edit size, waits 1.2 seconds, performs one layout/`resize`
+  settle, freezes timers/listeners/observers/animations/MessageChannel ports
+  and audits. Success keeps the real Canvas/SVG in that same
+  iframe. Same-origin `window.parent` access, including renderer-exposed
+  preload APIs, is an accepted in-place-editing cost. A missing grant or failed
+  audit before interaction uses ordinary
+  static Edit for that generation. After interaction starts, comments, IME,
+  save, native-edit fences, hard breaks and sibling reorder must not replace
+  that iframe. A same-generation static remount after interaction is not an
+  accepted fallback. Runtime descendants have no persistence authority;
+  authored inline SVG remains source-backed while
+  unapproved runtime-only Canvas/SVG stays in Preview. Edit screenshot,
+  capture and projection count must be 0.
 - Review alone has a disposable runtime-snapshot supplement. Its
   `SourceHostResolver` admits only direct source Canvas/SVG roots and stable,
   source-empty hosts; it never uses script causality, computed selectors,
@@ -267,8 +275,8 @@ services.
 | Pseudonymous identity, strict event schemas, local queue and PostHog delivery | `desktop/usage-telemetry.mjs` |
 | Preview sanitization and verified frame injection | `app/components/html-preview-sandbox.js` |
 | Volatile desktop preview sessions and contained local-asset serving | `desktop/preview-protocol.mjs` |
-| Edit one-shot candidate limits, source-host contract and frozen display grant | `app/domain/edit-runtime-contract.js`, `app/application/edit-author-runtime-session.js` |
-| Isolated Edit author-resource closure, contained static-asset/script serving, one-use bootstrap and PNG capture | `desktop/edit-runtime-protocol.mjs`, `desktop/edit-runtime-bootstrap.mjs`, `desktop/edit-runtime-capture-owner.mjs` |
+| Edit one-shot candidate limits, source-host contract and direct-frame grant | `app/domain/edit-runtime-contract.js`, `app/application/edit-author-runtime-session.js` |
+| Isolated Edit author-resource closure, contained static-asset/script serving and one-use bootstrap | `desktop/edit-runtime-protocol.mjs`, `desktop/edit-runtime-bootstrap.mjs` |
 | Source-backed preview/edit display-state filtering, rebinding and safe action resolution | `app/lib/page-view-context.js` |
 | Review source-host discovery and Review-only capture request shape | `app/domain/runtime-snapshot-hosts.js`, `app/components/desktop-runtime-snapshot-api.ts` |
 | Review runtime-snapshot limits, source/session envelope, PNG and visible-text-hash validation | `app/domain/runtime-visual-contract.js`, `app/lib/runtime-visual-snapshots.js` |
