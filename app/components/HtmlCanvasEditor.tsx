@@ -380,6 +380,8 @@ type ActiveNativeEdit = {
   rootTargetRef: SourceTargetRef;
   sourceInnerHtml: string;
   fragmentTargetRef: SourceTargetRef | null;
+  fragmentTextNodeId: string | null;
+  liveNodeId: string | null;
   releaseHost: (() => void) | null;
   session: IslandEditingController;
   selection: NativeEditSelection;
@@ -1990,6 +1992,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         frameSourceHtmlRef.current = result.html;
         activeNativeEdit.rootTargetRef = refreshedRootRef;
         activeNativeEdit.fragmentTargetRef = refreshedFragmentRef;
+        activeNativeEdit.liveNodeId = refreshedIsland?.element.nodeId
+          ?? refreshedFragmentNode?.parentId
+          ?? activeNativeEdit.liveNodeId;
+        activeNativeEdit.fragmentTextNodeId = refreshedFragmentNode?.nodeId
+          ?? (nextFragmentHtml === "" ? null : activeNativeEdit.fragmentTextNodeId);
         activeNativeEdit.target = appliedMutation.target;
         selectedSourceSelectionRef.current = appliedMutation.target;
         setSelection(appliedMutation.target);
@@ -2402,6 +2409,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
             type: "update-direct-text-node" as const,
             targetRef: active.rootTargetRef,
             textTargetRef: active.fragmentTargetRef!,
+            nodeId: active.liveNodeId ?? undefined,
+            textNodeId: active.fragmentTextNodeId ?? undefined,
             beforeFragmentHtml: previousInnerHtml,
             nextFragmentHtml: nextInnerHtml,
             expectedSourceSha256: active.projection.sourceSha256,
@@ -2409,6 +2418,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         : {
             type: "replace-editable-island" as const,
             targetRef: active.rootTargetRef,
+            nodeId: active.liveNodeId ?? undefined,
             beforeInnerHtml: previousInnerHtml,
             nextInnerHtml,
             expectedSourceSha256: active.projection.sourceSha256,
@@ -3112,6 +3122,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         rootTargetRef,
         sourceInnerHtml,
         fragmentTargetRef,
+        fragmentTextNodeId: fragmentCandidate?.textNodeId ?? null,
+        liveNodeId: (
+          fragmentCandidate?.parentElement ?? islandHostElement
+        )?.getAttribute(SOURCE_NODE_ATTRIBUTE) ?? target.nodeId ?? null,
         releaseHost: mountedFragment?.release ?? null,
         session,
         lease,

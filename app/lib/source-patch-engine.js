@@ -83,6 +83,8 @@ function expectedHash(command, index) {
 }
 
 function commandTargetRef(index, command, key = "targetRef") {
+  const liveTargetRef = liveExactCommandTarget(index, command, key);
+  if (liveTargetRef) return liveTargetRef;
   const targetRef = command[key];
   if (targetRef) return cleanTargetRef(targetRef);
   const nodeId = key === "targetRef" ? command.nodeId : command.beforeNodeId;
@@ -91,6 +93,54 @@ function commandTargetRef(index, command, key = "targetRef") {
   }
   return createTargetRef(index, nodeId, {
     level: key === "targetRef" ? command.level : "subregion",
+  });
+}
+
+function liveNodeIdFromCommand(command, key) {
+  if (key === "textTargetRef") {
+    return typeof command.textNodeId === "string" && command.textNodeId
+      ? command.textNodeId
+      : null;
+  }
+  if (key === "targetRef") {
+    return typeof command.nodeId === "string" && command.nodeId
+      ? command.nodeId
+      : null;
+  }
+  return null;
+}
+
+function liveExactCommandTarget(index, command, key = "targetRef") {
+  // Live locate: the preview already stamped data-html-ai-source-node-id.
+  // Matching sourceSha256 makes that nodeId the exact anchor; fingerprint
+  // scoring is only for rebound after the source itself has changed.
+  const nodeId = liveNodeIdFromCommand(command, key);
+  if (!nodeId) return null;
+  const expected = command.expectedSourceSha256 ?? index.sourceSha256;
+  if (expected !== index.sourceSha256) return null;
+  const node = index.byNodeId.get(nodeId);
+  if (!node) {
+    fail(
+      "TARGET_ORPHANED",
+      "The live source node id is no longer in this source.",
+      { nodeId, key },
+    );
+  }
+  const original = command[key];
+  const expectedType = key === "textTargetRef" ? "text" : "element";
+  if (node.type !== expectedType) {
+    fail(
+      "UNSUPPORTED_TARGET_TYPE",
+      `This edit requires a ${expectedType} target.`,
+      { actualType: node.type, nodeId, key },
+    );
+  }
+  return createTargetRef(index, node, {
+    targetId: original?.targetId,
+    label: original?.label,
+    level: key === "textTargetRef"
+      ? "text"
+      : (original?.level ?? command.level ?? "subregion"),
   });
 }
 
@@ -436,9 +486,8 @@ export function planDirectTextNodePatch(indexOrHtml, command) {
   const parentTargetRef = commandTargetRef(index, command);
   const parentResolution = resolvedTarget(index, parentTargetRef, "element");
   const parent = parentResolution.target;
-  const textTargetRef = command.textTargetRef
-    ? cleanTargetRef(command.textTargetRef)
-    : null;
+  const textTargetRef = liveExactCommandTarget(index, command, "textTargetRef")
+    ?? (command.textTargetRef ? cleanTargetRef(command.textTargetRef) : null);
   if (!textTargetRef) {
     fail(
       "TEXT_FRAGMENT_TARGET_REQUIRED",

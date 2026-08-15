@@ -109,6 +109,7 @@ export function nativeEditHostForElement(
 export type NativeTextFragmentCandidate = {
   parentElement: HTMLElement;
   textNode: Text;
+  textNodeId: string;
   textTargetRef: SourceTargetRef;
   sourceInnerHtml: string;
 };
@@ -172,6 +173,8 @@ export function nativeTextFragmentForRange(
       type: "update-direct-text-node",
       targetRef: parentTargetRef,
       textTargetRef,
+      nodeId: sourceParent.nodeId,
+      textNodeId: sourceText.nodeId,
       beforeFragmentHtml: sourceInnerHtml,
       nextFragmentHtml: sourceInnerHtml,
       expectedSourceSha256: sourceIndex.sourceSha256,
@@ -179,6 +182,7 @@ export function nativeTextFragmentForRange(
     return {
       parentElement,
       textNode,
+      textNodeId: sourceText.nodeId,
       textTargetRef,
       sourceInnerHtml,
     };
