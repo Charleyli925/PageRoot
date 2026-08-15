@@ -116,6 +116,7 @@ import {
   refreshMountedPreviewSourceNodeIds,
   sourceTextNodeForDomText,
   sourceBackedPreviewElements,
+  alignPreviewSourceSurface,
   sourceTextParentsForSegments,
 } from "./html-canvas-preview-sync";
 import {
@@ -1493,24 +1494,16 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       const detachedNodes = sourceBackedPreviewElements(detachedDocument);
       const previousElements = previousIndex.elements as SourceElementValue[];
       const nextElements = result.sourceIndex.elements as SourceElementValue[];
+      const previousSurface = alignPreviewSourceSurface(previousIndex, liveNodes);
+      if (!previousSurface) return false;
+      if (previousSurface.some((entry, index) => (
+        liveNodes[index].getAttribute(SOURCE_NODE_ATTRIBUTE) !== entry.nodeId
+      ))) return false;
+      const detachedSurface = alignPreviewSourceSurface(result.sourceIndex, detachedNodes);
       if (
-        liveNodes.length !== previousElements.length
-        || detachedNodes.length !== nextElements.length
-        || (!isTextRangeStyle && previousElements.length !== nextElements.length)
+        !detachedSurface
+        || detachedSurface.length !== nextElements.length
       ) return false;
-
-      for (let index = 0; index < liveNodes.length; index += 1) {
-        if (
-          liveNodes[index].getAttribute(SOURCE_NODE_ATTRIBUTE) !== previousElements[index].nodeId
-          || liveNodes[index].tagName.toLowerCase() !== previousElements[index].tagName
-        ) return false;
-      }
-      for (let index = 0; index < detachedNodes.length; index += 1) {
-        if (
-          detachedNodes[index].getAttribute(SOURCE_NODE_ATTRIBUTE) !== nextElements[index].nodeId
-          || detachedNodes[index].tagName.toLowerCase() !== nextElements[index].tagName
-        ) return false;
-      }
 
       const previousTargetRef = plan.targetRefs.find(
         (target: SourceTargetRef) => target.targetId === originalMutation.target.id,
@@ -1525,31 +1518,12 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         previousTarget?.type !== "element"
         || nextTarget?.type !== "element"
       ) return false;
-      const previousTargetIndex = previousElements.findIndex(
-        (element) => element.nodeId === previousTarget.nodeId,
-      );
-      const nextTargetIndex = nextElements.findIndex(
-        (element) => element.nodeId === nextTarget.nodeId,
-      );
-      if (
-        previousTargetIndex < 0
-        || nextTargetIndex < 0
-        || (
-          originalMutation.kind !== "reorder"
-          && previousTargetIndex !== nextTargetIndex
-        )
-      ) return false;
-
-      const liveTarget = isTextRangeStyle
-        ? liveNodes.find((node) => (
-            node.getAttribute(SOURCE_NODE_ATTRIBUTE) === previousTarget.nodeId
-          ))
-        : liveNodes[previousTargetIndex];
-      const detachedTarget = isTextRangeStyle
-        ? detachedNodes.find((node) => (
-            node.getAttribute(SOURCE_NODE_ATTRIBUTE) === nextTarget.nodeId
-          ))
-        : detachedNodes[nextTargetIndex];
+      const liveTarget = liveNodes.find((node) => (
+        node.getAttribute(SOURCE_NODE_ATTRIBUTE) === previousTarget.nodeId
+      ));
+      const detachedTarget = detachedNodes.find((node) => (
+        node.getAttribute(SOURCE_NODE_ATTRIBUTE) === nextTarget.nodeId
+      ));
       if (!(liveTarget instanceof LiveHTMLElement)) return false;
       if (!detachedTarget) return false;
 
@@ -1666,18 +1640,14 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       }
 
       const stableNodes = sourceBackedPreviewElements(documentNode);
-      if (
-        stableNodes.length !== nextElements.length
-        || stableNodes.some(
-          (node, index) => node.tagName.toLowerCase() !== nextElements[index].tagName,
-        )
-      ) return false;
+      const stableSurface = alignPreviewSourceSurface(result.sourceIndex, stableNodes);
+      if (!stableSurface) return false;
 
       // Direct patches refresh the mounted preview and every ephemeral source
       // identity in place. The DOM remains a preview only; it is never
       // serialized back into the user's source.
-      stableNodes.forEach((node, index) => {
-        node.setAttribute(SOURCE_NODE_ATTRIBUTE, nextElements[index].nodeId);
+      stableSurface.forEach(({ node, nodeId }) => {
+        node.setAttribute(SOURCE_NODE_ATTRIBUTE, nodeId);
       });
       sourceIndexRef.current = result.sourceIndex;
       frameSourceHtmlRef.current = result.html;
@@ -2664,7 +2634,13 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         fencedDocumentCleanupRef.current();
         renderedSourceHtmlRef.current = source;
       }
-      if (!rootElement.isConnected || !selectionElement.isConnected) {
+      // releaseHost() removes the transient pageroot-text-fragment wrapper.
+      // The source parent remains the rebind target for the following style
+      // patch; treating that wrapper as a lost host blocks toolbar formatting.
+      const previewHostStillMounted = active.mode === "text-fragment"
+        ? selectionElement.isConnected
+        : rootElement.isConnected && selectionElement.isConnected;
+      if (!previewHostStillMounted) {
         pendingNativeEditResumeRef.current = null;
         selectedElementRef.current = null;
         pendingSelectionRef.current = target;

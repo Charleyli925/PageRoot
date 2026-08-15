@@ -158,8 +158,16 @@ Window-size rules:
 - Runtime descendants are not editable, not focusable and never SourcePatch
   targets. Selection and comments map back to the unique empty source host.
 - Preparation, execution, audit or deadline failure silently mounts ordinary
-  static Edit before interaction. A later full-frame rebuild in the same
-  generation is static.
+  static Edit **before interaction**. That is the only silent static fallback.
+- After interaction starts, replacing the iframe in the same
+  `canvasGeneration` forbids Ready. Text, style, comments, IME, autosave, ⌘S
+  and in-place-reconcileable structure (hard break and sibling reorder) must
+  keep the frozen iframe.
+- A structural change that cannot be reconciled in place is not an accepted
+  static-Edit compromise. It must either keep the current iframe, or
+  explicitly start a new `canvasGeneration` and execute the author program
+  once. Silent same-generation static remount after interaction is forbidden
+  unless the product owner authorizes that contract change.
 
 ## Stop conditions
 

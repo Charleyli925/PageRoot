@@ -66,8 +66,10 @@ Comments + frozen input
   settle, freezes and audits. Success keeps the real Canvas/SVG in that same
   iframe. A missing grant or failed audit before interaction uses ordinary
   static Edit for that generation. After interaction starts, comments, IME,
-  save and native-edit fences must not replace that iframe. Runtime descendants have no
-  persistence authority; authored inline SVG remains source-backed while
+  save, native-edit fences, hard breaks and sibling reorder must not replace
+  that iframe. A same-generation static remount after interaction is not an
+  accepted fallback. Runtime descendants have no persistence authority;
+  authored inline SVG remains source-backed while
   unapproved runtime-only Canvas/SVG stays in Preview. Edit screenshot,
   capture and projection count must be 0.
 - Review alone has a disposable runtime-snapshot supplement. Its

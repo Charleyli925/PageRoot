@@ -74,9 +74,12 @@ The visible Edit iframe executes author scripts once, then freezes. Trusted
 renderer memory never mounts PNG, JPEG, ChartSpec or other visual substitutes.
 Selection/comment resolution remains on the original source host. Runtime
 markers and descendants never enter source patches, saves, Versions, exports
-or Requests. After freeze, ending native edit, comments, IME, autosave and
-⌘S must keep that same iframe; a later remount in the same generation is
-static Edit and is forbidden once interaction has started.
+or Requests. After freeze, ending native edit, comments, IME, autosave,
+⌘S, hard breaks and sibling reorder must keep that same iframe. A later
+same-generation remount is static Edit and therefore forbids Ready once
+interaction has started. A structural change that cannot be reconciled in
+place must keep the current iframe or explicitly start a new
+`canvasGeneration`; it is not an accepted silent static fallback.
 
 When importing an external HTML into an HTML-only V1 Working Copy, Main may
 retain the selected external HTML directory as a session-only asset root for
@@ -85,10 +88,9 @@ handoff, never sent by the renderer or written into project authority, and a
 missing or unsafe asset still fails closed to static Edit.
 
 Preparation, execution, audit or deadline failure silently mounts ordinary static
-Edit before interaction. Comments, autosave, IME and source echoes do not
-prepare, execute or replace the frame. A later necessary full rebuild is static
-for that generation. There is no status UI, retry, compatibility cache,
-background promotion or hidden capture window. Authored inline SVG remains
+Edit before interaction. Comments, autosave, IME, source echoes, hard breaks and
+sibling reorder do not prepare, execute or replace the frame. There is no status
+UI, retry, compatibility cache, background promotion or hidden capture window. Authored inline SVG remains
 native and source-backed; unsupported runtime-only Canvas/SVG remains available
 in Preview. Review isolated PNG capture is unchanged.
 

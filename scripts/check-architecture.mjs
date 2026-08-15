@@ -416,6 +416,14 @@ export async function architectureViolations() {
     path.join(PRODUCT_ROOT, "app", "components", "HtmlCanvasEditor.tsx"),
     "utf8",
   );
+  const previewSourceSync = await readFile(
+    path.join(PRODUCT_ROOT, "app", "components", "html-canvas-preview-sync.ts"),
+    "utf8",
+  );
+  const previewSourceSurface = await readFile(
+    path.join(PRODUCT_ROOT, "app", "lib", "align-preview-source-surface.js"),
+    "utf8",
+  );
   const editRuntimeSession = await readFile(
     path.join(
       PRODUCT_ROOT,
@@ -953,6 +961,11 @@ export async function architectureViolations() {
     || !canvasEditor.includes("hostHasAuthorPaint")
     || !canvasEditor.includes("frame.grant.hosts.some")
     || canvasEditor.includes("frame.grant.hosts.every")
+    || !canvasEditor.includes("alignPreviewSourceSurface")
+    || !canvasEditor.includes("previewHostStillMounted")
+    || !canvasEditor.includes('active.mode === "text-fragment"')
+    || !previewSourceSync.includes("../lib/align-preview-source-surface.js")
+    || !previewSourceSurface.includes("skipDescendantsOf")
     || !canvasEditor.includes("settledRuntimeFrameIsCurrent")
     || !canvasEditor.includes("detachedRuntimeFrame && !preserveForHistory")
     || !canvasEditor.includes("frameReloadRequired && !settledRuntimeFrame")
@@ -960,6 +973,26 @@ export async function architectureViolations() {
   ) {
     violations.push(
       "app/components/HtmlCanvasEditor.tsx: one-shot runtime frames must execute once in the final iframe, keep real canvas/svg, and never mount PNG substitutes",
+    );
+  }
+  const adr0025 = await readFile(
+    path.join(PRODUCT_ROOT, "docs", "decisions", "0025-edit-direct-one-shot-runtime.md"),
+    "utf8",
+  );
+  const interactionFlow = await readFile(
+    path.join(PRODUCT_ROOT, "docs", "INTERACTION_FLOW.md"),
+    "utf8",
+  );
+  if (
+    /A later full-frame rebuild in the same generation is static/u.test(adr0025)
+    || /必要的完整帧重建在本代只加载静态/u.test(interactionFlow)
+    || !adr0025.includes("forbids Ready")
+    || !adr0025.includes("explicitly start a new `canvasGeneration`")
+    || !adr0025.includes("static-Edit compromise")
+    || !interactionFlow.includes("静默静态重建不是已接受的产品合同")
+  ) {
+    violations.push(
+      "ADR 0025 / INTERACTION_FLOW: after interaction, same-generation static remount is a Ready stop, not an accepted structural fallback",
     );
   }
   const previewSandbox = await readFile(

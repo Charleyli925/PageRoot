@@ -255,6 +255,48 @@ async function addCanvasComment(page, frame, caseId, text) {
   return card;
 }
 
+const ECHARTS_STUB = `window.echarts = {
+  init(host) {
+    host.style.userSelect = "none";
+    host.style.webkitTapHighlightColor = "rgba(0, 0, 0, 0)";
+    host.style.position = "relative";
+    const canvas = document.createElement("canvas");
+    canvas.width = 640;
+    canvas.height = 360;
+    canvas.dataset.echartsRuntime = "true";
+    const context = canvas.getContext("2d");
+    context.fillStyle = "rgb(1, 2, 3)";
+    context.fillRect(0, 0, 640, 360);
+    host.append(canvas);
+    return { setOption() { window.__PAGEROOT_ECHARTS_AUTHOR_SETTLED__ = true; } };
+  }
+};`;
+
+async function assertFrozenRuntimeRetained(page, frame, baseline) {
+  expect(frame.isDetached()).toBe(false);
+  expect(await documentToken(page)).toBe(baseline.document);
+  await expect(page.locator("[data-runtime-bootstrap-count=\"1\"]")).toHaveCount(1);
+  const canvas = await page.locator("[data-persist-state]").first().evaluate((element) => ({
+    canvasGeneration: element.getAttribute("data-canvas-generation"),
+  }));
+  expect(canvas.canvasGeneration).toBe(baseline.canvasGeneration);
+  expect(await frame.evaluate(() => ({
+    rendererAuthorExecutions: window.__PAGEROOT_ECHARTS_AUTHOR_EXECUTIONS__,
+    chartCount: document.querySelectorAll("#chart-host canvas[data-echarts-runtime=true]").length,
+    frozenSnapshotCount: document.querySelectorAll(
+      "#chart-host img[data-pageroot-edit-runtime-snapshot]",
+    ).length,
+    dataImagePngCount: document.querySelectorAll('img[src^="data:image/png"]').length,
+    frozen: document.documentElement.getAttribute("data-pageroot-edit-runtime-frozen"),
+  }))).toEqual({
+    rendererAuthorExecutions: 1,
+    chartCount: 1,
+    frozenSnapshotCount: 0,
+    dataImagePngCount: 0,
+    frozen: "true",
+  });
+}
+
 function requestDirectoryCount(workspace) {
   const projectsRoot = path.join(workspace, "projects");
   const legacyCount = !existsSync(projectsRoot) ? 0 : readdirSync(projectsRoot).reduce((total, projectDirectoryName) => {
@@ -1693,6 +1735,106 @@ test("Electron Edit preserves imported source-relative ECharts assets and native
     removeValidatedTemporaryDirectory(
       sourceDirectory,
       "pageroot-edit-runtime-source-e2e-",
+    );
+  }
+});
+
+test("Electron Edit keeps frozen one-shot iframe through structural line-break and sibling reorder", async () => {
+  const sourceDirectory = mkdtempSync(
+    path.join(tmpdir(), "pageroot-edit-runtime-structure-e2e-"),
+  );
+  const sourcePath = path.join(sourceDirectory, "echarts-structure.html");
+  const editableText = "静态来源文字保持可编辑。";
+  const siblingText = "第二段可移动。";
+  const source = `<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>One-shot structural Edit runtime</title></head>
+<body>
+  <p data-native-case="runtime-editable">${editableText}</p>
+  <p data-native-case="runtime-sibling">${siblingText}</p>
+  <main id="chart-host" data-native-case="runtime-chart" style="width: 640px; height: 360px"></main>
+  <script src="echarts.js"></script>
+  <script>
+    window.__PAGEROOT_ECHARTS_AUTHOR_EXECUTIONS__ = (window.__PAGEROOT_ECHARTS_AUTHOR_EXECUTIONS__ || 0) + 1;
+    const chart = window.echarts.init(document.querySelector("#chart-host"));
+    chart.setOption({ series: [] });
+  </script>
+</body>
+</html>`;
+  writeFileSync(path.join(sourceDirectory, "echarts.js"), ECHARTS_STUB, "utf8");
+  writeFileSync(sourcePath, source, "utf8");
+
+  let electronApp = null;
+  let isolatedUserData = null;
+  try {
+    const launched = await launchPageRoot({ activeSourcePath: sourcePath });
+    electronApp = launched.electronApp;
+    isolatedUserData = launched.isolatedUserData;
+    const { frame } = await loadedDiskFrame(
+      launched.page,
+      sourcePath,
+      "runtime-editable",
+    );
+    const activeProject = await launched.page.evaluate(() => (
+      window.htmlAIProjects?.getActiveProject()
+    ));
+    if (typeof activeProject?.sourcePath !== "string") {
+      throw new Error("The imported managed Working Copy did not become active.");
+    }
+    const managedSourcePath = activeProject.sourcePath;
+    await expect.poll(() => frame.evaluate(() => ({
+      rendererAuthorExecutions: window.__PAGEROOT_ECHARTS_AUTHOR_EXECUTIONS__ || 0,
+      chartCount: document.querySelectorAll("#chart-host canvas[data-echarts-runtime=true]").length,
+      frozen: document.documentElement.getAttribute("data-pageroot-edit-runtime-frozen"),
+      bootstrapCount: document.querySelectorAll("[data-pageroot-edit-runtime-bootstrap]").length,
+    })), { timeout: 6_000 }).toMatchObject({
+      rendererAuthorExecutions: 1,
+      chartCount: 1,
+      frozen: "true",
+      bootstrapCount: 1,
+    });
+    await expect(launched.page.locator(".save-status")).toHaveText("已安全保存");
+    const baseline = {
+      document: await documentToken(launched.page),
+      canvasGeneration: await launched.page.locator("[data-persist-state]").first()
+        .evaluate((element) => element.getAttribute("data-canvas-generation")),
+    };
+
+    const editable = await activateNativeEdit(frame, "runtime-editable");
+    await expect(editable).toHaveAttribute("contenteditable", "true");
+    await setTextSelection(frame, "runtime-editable", editableText.length);
+    await launched.page.keyboard.press("Enter");
+    await expect.poll(() => editable.evaluate((element) => element.innerHTML))
+      .toContain("<br>");
+    await launched.page.keyboard.press("Escape");
+    await expect.poll(async () => (
+      frame.isDetached()
+        ? "detached"
+        : await frame.locator(caseSelector("runtime-editable")).getAttribute("contenteditable")
+    )).not.toBe("true");
+    await expect(launched.page.locator(".save-status")).toHaveText("已安全保存");
+    await assertFrozenRuntimeRetained(launched.page, frame, baseline);
+    expect(readFileSync(managedSourcePath, "utf8")).toMatch(/<br\s*\/?>/u);
+
+    await frame.locator(caseSelector("runtime-editable")).click();
+    const moveDown = launched.page.getByRole("button", { name: "下移" });
+    await expect(moveDown).toBeEnabled();
+    await moveDown.click();
+    await expect.poll(() => readFileSync(managedSourcePath, "utf8")).toMatch(
+      new RegExp(`${siblingText}[\\s\\S]*${editableText}`, "u"),
+    );
+    await expect(launched.page.locator(".save-status")).toHaveText("已安全保存");
+    await assertFrozenRuntimeRetained(launched.page, frame, baseline);
+    expect(readFileSync(managedSourcePath, "utf8")).not.toMatch(
+      /data-pageroot-edit-runtime|data-echarts-runtime/u,
+    );
+  } finally {
+    if (electronApp && isolatedUserData) {
+      await stopPageRoot(electronApp, isolatedUserData);
+    }
+    removeValidatedTemporaryDirectory(
+      sourceDirectory,
+      "pageroot-edit-runtime-structure-e2e-",
     );
   }
 });
