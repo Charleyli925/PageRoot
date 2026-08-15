@@ -533,8 +533,80 @@ test("a startup catalog read cannot delay or supersede a newer local open", asyn
       && !harness.workflow.projectHydrating,
     "newer local open did not remain current after startup settled",
   );
-  assert.equal(catalogRequested, true);
+  await waitFor(() => catalogRequested === true, "catalog refresh did not run after the project settled");
   assert.equal(harness.documentSession.html, B_HTML);
+});
+
+test("the read-only catalog refresh waits until project hydration settles", async (t) => {
+  let resolveWorkspace;
+  let catalogCalls = 0;
+  const harness = createHarness({
+    initialProject: false,
+    bridge: {
+      workspace: () => new Promise((resolve) => {
+        resolveWorkspace = resolve;
+      }),
+    },
+    projectOpen: {
+      async getActive() {
+        return {
+          name: "A",
+          sourcePath: A_PATH,
+          html: A_HTML,
+          sha256: sha256(A_HTML),
+        };
+      },
+      listRegistered: () => {
+        catalogCalls += 1;
+        return Promise.resolve([{ projectId: "project_catalog_a", availability: "ready" }]);
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+
+  const startup = await harness.workflow.openProject({ kind: "startup" });
+  assert.equal(startup.status, "succeeded");
+  await waitFor(() => Boolean(resolveWorkspace), "hydration did not begin");
+  assert.equal(catalogCalls, 0);
+
+  resolveWorkspace(workspacePayload(A_PATH, A_HTML));
+  await waitFor(
+    () => harness.projectSession.context?.sourcePath === A_PATH
+      && !harness.workflow.projectHydrating,
+    "project did not settle hydration",
+  );
+  await waitFor(() => catalogCalls === 1, "deferred catalog refresh did not run");
+
+  const stageNames = harness.events
+    .filter((event) => event.type === "project-hydration-stage")
+    .map((event) => event.stage);
+  assert.ok(stageNames.includes("apply-authority:sessions-reset"));
+});
+
+test("concurrent catalog refreshes coalesce into one in-flight read", async (t) => {
+  let resolveCatalog;
+  let catalogCalls = 0;
+  const harness = createHarness({
+    projectOpen: {
+      listRegistered: () => {
+        catalogCalls += 1;
+        return new Promise((resolve) => {
+          resolveCatalog = resolve;
+        });
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+
+  const first = harness.workflow.refreshRegisteredProjects();
+  const second = harness.workflow.refreshRegisteredProjects();
+
+  resolveCatalog([{ projectId: "project_catalog_a", availability: "ready" }]);
+  const [firstOutcome, secondOutcome] = await Promise.all([first, second]);
+  assert.equal(firstOutcome.status, "succeeded");
+  assert.equal(secondOutcome.status, "succeeded");
+  assert.equal(firstOutcome, secondOutcome);
+  assert.equal(catalogCalls, 1);
 });
 
 test("a Registry project open routes only its projectId through the desktop authority", async (t) => {

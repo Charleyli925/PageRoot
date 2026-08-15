@@ -160,6 +160,7 @@ export class ProjectWorkflow {
   #pendingOpen = null;
   #browserOpenOperationId = null;
   #renamePromise = null;
+  #registeredProjectsRefresh = null;
   #reconcileScheduled = false;
   #disposed = false;
   #closeLifecycle = {
@@ -1083,6 +1084,12 @@ export class ProjectWorkflow {
     if (typeof this.#projectOpenPort.listRegistered !== "function") {
       return succeeded({ projects: [] });
     }
+    if (this.#registeredProjectsRefresh) return this.#registeredProjectsRefresh;
+    this.#registeredProjectsRefresh = this.#refreshRegisteredProjects();
+    return this.#registeredProjectsRefresh;
+  }
+
+  async #refreshRegisteredProjects() {
     try {
       const projects = await this.#projectOpenPort.listRegistered();
       this.#emit({ type: "project-catalog-loaded", projects });
@@ -1095,6 +1102,8 @@ export class ProjectWorkflow {
       );
       this.#emit({ type: "project-catalog-failed", reason });
       return rejected("PROJECT_CATALOG_REJECTED", reason);
+    } finally {
+      this.#registeredProjectsRefresh = null;
     }
   }
 
@@ -1583,10 +1592,6 @@ export class ProjectWorkflow {
           ),
         });
       }
-      // Catalog membership is a read-only projection. It must not delay the
-      // startup OpenTarget or leave a late startup result able to replace a
-      // user-selected local file.
-      void this.refreshRegisteredProjects();
       const active = activeResult.status === "fulfilled" ? activeResult.value : null;
       if (activeResult.status === "rejected") {
         this.#emit({
@@ -1698,15 +1703,23 @@ export class ProjectWorkflow {
       // Accepted-result FIFO owns synchronous publication order, not remote
       // hydration latency. A successor may retire this query only after the
       // workflow proves that the just-published project has no mutable work.
-      void Promise.all([
-        this.refreshRecents(),
-        this.refreshRegisteredProjects(),
-        this.refreshWorkspace({
-          sourcePath: project.sourcePath,
-          epoch,
-          sourceTransitionToken: epoch,
-        }),
-      ]).catch((cause) => {
+      void (async () => {
+        const [, hydrated] = await Promise.all([
+          this.refreshRecents(),
+          this.refreshWorkspace({
+            sourcePath: project.sourcePath,
+            epoch,
+            sourceTransitionToken: epoch,
+          }),
+        ]);
+        if (hydrated.status === "succeeded") {
+          // Defer the read-only catalog projection until hydration and any lazy
+          // registration/Working-Copy adoption have settled. Running catalog in
+          // parallel with hydration lets its Repository scan reorder the shared
+          // queue and can leave a just-imported project stuck in "hydrating".
+          await this.refreshRegisteredProjects();
+        }
+      })().catch((cause) => {
         this.#emit({
           type: "project-hydration-failed",
           reason: projectErrorMessage(
@@ -1867,18 +1880,22 @@ export class ProjectWorkflow {
     this.#projectRulesWorkflow.resetForProjectTransition();
     this.#commentSession.reset();
     this.#versionSession.reset();
+    this.#markHydrationStage("apply-authority:sessions-reset");
     this.#canvasPort.invalidateRenderAcks?.();
     if (project.sourcePath) this.#runSession.clearResult(project.sourcePath);
     this.#pendingOpen = null;
+    this.#markHydrationStage("apply-authority:canvas-reset");
     this.#emit({
       type: "project-applied",
       project,
       epoch: locator.epoch,
       activeLocked: this.#runSession.activeLocked,
     });
+    this.#markHydrationStage("apply-authority:published");
     this.#canvasPort.applyPageViewContext?.(null);
     this.#canvasPort.clearSelection?.();
     if (!this.#runSession.activeLocked) this.#canvasPort.unlock?.();
+    this.#markHydrationStage("apply-authority:unlocked");
     this.#markHydrationStage("apply-complete");
   }
 
@@ -1998,6 +2015,7 @@ export class ProjectWorkflow {
         mustAdoptSource = true;
         this.#markHydrationStage("source-request");
         sourcePayload = await this.#bridgeClient.source(canonicalSourcePath);
+        this.#markHydrationStage("source-response");
         if (!queryIsCurrent()) return stale({ operationId, epoch: activeEpoch, sourcePath: activeSource });
         if (
           String(sourcePayload.projectId || "") !== nextProjectId
@@ -2042,6 +2060,7 @@ export class ProjectWorkflow {
           || projectRecord.restoredFromVersionId,
       });
       let context = null;
+      this.#markHydrationStage("publication-start");
       publicationStarted = true;
       if (preparedTransition) {
         context = this.commitGeneratedSourceTransition({
@@ -2073,6 +2092,7 @@ export class ProjectWorkflow {
         }
         publishVersion();
       }
+      this.#markHydrationStage("publication-committed");
       if (!context) return stale({ operationId, epoch: activeEpoch, sourcePath: activeSource });
       activeSource = context.sourcePath;
       activeEpoch = context.epoch;
@@ -2266,6 +2286,7 @@ export class ProjectWorkflow {
       if (mustAdoptSource) {
         const expectedHtml = this.#documentSession.html;
         const expectedHash = await this.#hashPort.sha256(expectedHtml);
+        this.#markHydrationStage("verify-rendered");
         await this.#canvasPort.verifyRendered?.(expectedHtml, expectedHash, context);
         if (!this.#projectSession.matches(context)) return stale(context);
       }
