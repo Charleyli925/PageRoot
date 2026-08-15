@@ -153,6 +153,7 @@ function createHarness({
   projectOpen = {},
   policies = {},
   initialProject = true,
+  openTarget = null,
 } = {}) {
   const projectSession = new ProjectSession();
   const locator = initialProject ? projectSession.openLocator(OLD_PATH) : null;
@@ -161,6 +162,7 @@ function createHarness({
         ...locator,
         projectId: "project_old",
         documentId: "document_old",
+        ...(openTarget ? { openTarget } : {}),
       })
     : null;
   const documentSession = new DocumentSession({
@@ -271,6 +273,12 @@ function createHarness({
     },
     adoptConflictCandidate() {
       return succeeded({ adopted: true });
+    },
+    observeCount: 0,
+    observeResult: { unchanged: true },
+    async observeExternalSourceChange() {
+      this.observeCount += 1;
+      return succeeded(this.observeResult);
     },
   };
   let unlockCount = 0;
@@ -1292,3 +1300,234 @@ test("a pending source rename blocks another project transition at the workflow 
   resolveRename();
   assert.equal((await rename).status, "succeeded");
 });
+
+function managedOpenTarget(sourcePath = OLD_PATH) {
+  return {
+    projectId: "project_old",
+    documentId: "document_old",
+    projectRootPath: "/tmp/project-root",
+    targetKind: "working-copy",
+    workingCopyId: "work_ver_0001",
+    versionId: "ver_0001",
+    exactSourcePath: sourcePath,
+    sourceSha256: sha256(OLD_HTML),
+  };
+}
+
+function locatorResult(payload, {
+  sourcePath = RENAMED_PATH,
+  status = "relocated",
+  watcherGeneration = 4,
+  sha = sha256(OLD_HTML),
+} = {}) {
+  return {
+    operationId: payload.operationId,
+    status,
+    previousSourcePath: payload.previousSourcePath,
+    sourcePath,
+    sourceSha256: sha,
+    watcherGeneration,
+    openTarget: {
+      ...managedOpenTarget(sourcePath),
+      sourceSha256: sha,
+    },
+  };
+}
+
+test("Finder locator rebase keeps IDs, publishes the new path, and does not load disk HTML", async (t) => {
+  const reconcileCalls = [];
+  const harness = createHarness({
+    openTarget: managedOpenTarget(),
+    projectOpen: {
+      async reconcileActiveManagedSource(payload) {
+        reconcileCalls.push(payload);
+        return locatorResult(payload);
+      },
+      async listRecent() {
+        return [];
+      },
+      async listRegistered() {
+        return [];
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+
+  const outcome = await harness.workflow.reconcileExternalSourceLocator({
+    reason: "watch",
+    watcherGeneration: 3,
+    previousSourcePath: OLD_PATH,
+  });
+
+  assert.equal(outcome.status, "succeeded");
+  assert.equal(outcome.value.relocated, true);
+  assert.equal(outcome.value.sourcePath, RENAMED_PATH);
+  assert.equal(harness.projectSession.context?.sourcePath, RENAMED_PATH);
+  assert.equal(harness.projectSession.context?.projectId, "project_old");
+  assert.equal(harness.projectSession.context?.documentId, "document_old");
+  assert.equal(harness.projectSession.openTarget?.workingCopyId, "work_ver_0001");
+  assert.equal(harness.projectSession.openTarget?.versionId, "ver_0001");
+  assert.equal(harness.documentSession.html, OLD_HTML);
+  assert.equal(harness.documentSession.sourceSha256, sha256(OLD_HTML));
+  assert.equal(harness.runSession.snapshot.activeSourcePath, RENAMED_PATH);
+  assert.equal(harness.documentWorkflow.observeCount, 1);
+  assert.equal(reconcileCalls.length, 1);
+  assert.equal(reconcileCalls[0].previousSourcePath, OLD_PATH);
+  assert.equal(reconcileCalls[0].reason, "watch");
+  assert.ok(!("nextSourcePath" in reconcileCalls[0]));
+  assert.ok(harness.events.some((event) => event.type === "project-source-relocated"));
+});
+
+test("Finder directory events coalesce to one rebase and late old-path events are ignored", async (t) => {
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  const reconcileCalls = [];
+  const harness = createHarness({
+    openTarget: managedOpenTarget(),
+    projectOpen: {
+      async reconcileActiveManagedSource(payload) {
+        reconcileCalls.push(payload);
+        await gate;
+        return locatorResult(payload, { watcherGeneration: 5 });
+      },
+      async listRecent() {
+        return [];
+      },
+      async listRegistered() {
+        return [];
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+
+  const first = harness.workflow.reconcileExternalSourceLocator({
+    reason: "watch",
+    watcherGeneration: 1,
+    previousSourcePath: OLD_PATH,
+  });
+  await waitFor(() => reconcileCalls.length === 1, "first locator reconcile did not start");
+  const second = harness.workflow.reconcileExternalSourceLocator({
+    reason: "watch",
+    watcherGeneration: 2,
+    previousSourcePath: OLD_PATH,
+  });
+  const third = harness.workflow.reconcileExternalSourceLocator({
+    reason: "watch",
+    watcherGeneration: 3,
+    previousSourcePath: OLD_PATH,
+  });
+  assert.equal(reconcileCalls.length, 1);
+  release();
+  assert.equal((await first).status, "succeeded");
+  assert.equal((await second).value.ignored, true);
+  assert.equal((await third).value.ignored, true);
+  assert.equal(reconcileCalls.length, 1);
+  assert.equal(harness.projectSession.context?.sourcePath, RENAMED_PATH);
+
+  const stale = await harness.workflow.reconcileExternalSourceLocator({
+    reason: "watch",
+    watcherGeneration: 1,
+    previousSourcePath: RENAMED_PATH,
+  });
+  assert.equal(stale.value.ignored, true);
+  assert.equal(stale.value.reason, "stale-generation");
+  assert.equal(reconcileCalls.length, 1);
+});
+
+test("Finder content-changed rebase keeps editor HTML and asks DocumentWorkflow to compare hashes", async (t) => {
+  const harness = createHarness({
+    openTarget: managedOpenTarget(),
+    projectOpen: {
+      async reconcileActiveManagedSource(payload) {
+        return locatorResult(payload, {
+          status: "content-changed",
+          sha: sha256(A_HTML),
+        });
+      },
+      async listRecent() {
+        return [];
+      },
+      async listRegistered() {
+        return [];
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+  harness.documentWorkflow.observeResult = { conflict: true };
+
+  const outcome = await harness.workflow.reconcileExternalSourceLocator({
+    reason: "watch",
+    previousSourcePath: OLD_PATH,
+  });
+
+  assert.equal(outcome.status, "succeeded");
+  assert.equal(outcome.value.relocated, true);
+  assert.equal(outcome.value.contentChanged, true);
+  assert.equal(harness.documentSession.html, OLD_HTML);
+  assert.equal(harness.documentSession.sourceSha256, sha256(OLD_HTML));
+  assert.equal(harness.documentWorkflow.observeCount, 1);
+});
+
+test("PageRoot rename after Finder rebase uses the recovered path", async (t) => {
+  let renamePayload = null;
+  const harness = createHarness({
+    openTarget: managedOpenTarget(),
+    bridge: {
+      async workspace(sourcePath) {
+        return {
+          ...workspacePayload(sourcePath, OLD_HTML),
+          projectId: "project_old",
+          documentId: "document_old",
+          sourcePath,
+          project: { displayName: "pageroot-new" },
+        };
+      },
+    },
+    projectOpen: {
+      async reconcileActiveManagedSource(payload) {
+        if (payload.previousSourcePath === OLD_PATH) {
+          return locatorResult(payload);
+        }
+        return locatorResult(payload, {
+          status: "unchanged",
+          sourcePath: RENAMED_PATH,
+        });
+      },
+      async renameSource(payload) {
+        renamePayload = payload;
+        return {
+          operationId: payload.operationId,
+          previousSourcePath: RENAMED_PATH,
+          sourcePath: "/tmp/project-workflow-pageroot-new.html",
+          sha256: sha256(OLD_HTML),
+          stem: "pageroot-new",
+          lastModifiedAt: "2026-08-12T00:00:00.000Z",
+        };
+      },
+      async listRecent() {
+        return [];
+      },
+      async listRegistered() {
+        return [];
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+
+  await harness.workflow.reconcileExternalSourceLocator({
+    reason: "watch",
+    previousSourcePath: OLD_PATH,
+  });
+  const outcome = await harness.workflow.renameSource({ stem: "pageroot-new" });
+
+  assert.equal(outcome.status, "succeeded");
+  assert.equal(renamePayload.sourcePath, RENAMED_PATH);
+  assert.equal(renamePayload.stem, "pageroot-new");
+  assert.equal(
+    harness.projectSession.context?.sourcePath,
+    "/tmp/project-workflow-pageroot-new.html",
+  );
+});
+

@@ -10,6 +10,7 @@ import {
   rename,
   rm,
   symlink,
+  unlink,
   writeFile,
 } from "node:fs/promises";
 import os from "node:os";
@@ -3243,3 +3244,164 @@ test("promotion fault recovery leaves exactly one formal Version and regular fil
     );
   }
 });
+
+function reconcileInput(target, extra = {}) {
+  return {
+    operationId: extra.operationId || "reconcile_test_operation_01",
+    previousSourcePath: extra.previousSourcePath || target.exactSourcePath,
+    projectId: extra.projectId || target.projectId,
+    documentId: extra.documentId || target.documentId,
+    workingCopyId: extra.workingCopyId || target.workingCopyId,
+    versionId: extra.versionId || target.versionId,
+    expectedSourceSha256: extra.expectedSourceSha256 || target.sourceSha256,
+    reason: extra.reason || "watch",
+  };
+}
+
+test("reconcileWorkingCopyLocator rebinds a same-directory Finder rename without creating IDs", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "活动页.html");
+  const renamedPath = path.join(imported.target.projectRootPath, "Finder 新名字.html");
+  await rename(imported.target.exactSourcePath, renamedPath);
+
+  const reconciled = await value.repository.reconcileWorkingCopyLocator(
+    reconcileInput(imported.target),
+  );
+  assert.equal(reconciled.status, "relocated");
+  assert.equal(reconciled.openTarget.projectId, imported.target.projectId);
+  assert.equal(reconciled.openTarget.documentId, imported.target.documentId);
+  assert.equal(reconciled.openTarget.workingCopyId, imported.target.workingCopyId);
+  assert.equal(reconciled.openTarget.versionId, imported.target.versionId);
+  assert.equal(reconciled.sourcePath, renamedPath);
+  assert.equal(reconciled.sourceSha256, imported.target.sourceSha256);
+  assert.equal(reconciled.openTarget.exactSourcePath, renamedPath);
+
+  const manifest = await json(path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "manifest.json",
+  ));
+  const workingCopy = manifest.workingCopies.find(
+    (entry) => entry.workingCopyId === imported.target.workingCopyId,
+  );
+  assert.equal(workingCopy.sourceRelativePath, "Finder 新名字.html");
+  assert.equal(workingCopy.preferredFileStem, "Finder 新名字");
+  assert.equal(workingCopy.preferredExtension, ".html");
+
+  const again = await value.repository.reconcileWorkingCopyLocator(
+    reconcileInput(imported.target, { previousSourcePath: renamedPath }),
+  );
+  assert.equal(again.status, "unchanged");
+  assert.equal(again.sourcePath, renamedPath);
+});
+
+test("reconcileWorkingCopyLocator follows a same-parent project folder rename", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "文件夹页.html");
+  const renamedRoot = path.join(value.projects, "改名后的项目");
+  await rename(imported.target.projectRootPath, renamedRoot);
+  const previousSourcePath = path.join(renamedRoot, path.basename(imported.target.exactSourcePath));
+  const renamedHtml = path.join(renamedRoot, "文件夹页 Finder.html");
+  await rename(previousSourcePath, renamedHtml);
+
+  const reconciled = await value.repository.reconcileWorkingCopyLocator(
+    reconcileInput(imported.target, {
+      previousSourcePath: imported.target.exactSourcePath,
+    }),
+  );
+  assert.equal(reconciled.status, "relocated");
+  assert.equal(reconciled.openTarget.projectId, imported.target.projectId);
+  assert.equal(reconciled.openTarget.projectRootPath, renamedRoot);
+  assert.equal(reconciled.sourcePath, renamedHtml);
+});
+
+test("reconcileWorkingCopyLocator reports content-changed after a Finder rename plus edit", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "内容变化.html");
+  const renamedPath = path.join(imported.target.projectRootPath, "内容变化 Finder.html");
+  await rename(imported.target.exactSourcePath, renamedPath);
+  const edited = html("Finder also edited the bytes");
+  await writeFile(renamedPath, edited, "utf8");
+
+  const reconciled = await value.repository.reconcileWorkingCopyLocator(
+    reconcileInput(imported.target),
+  );
+  assert.equal(reconciled.status, "content-changed");
+  assert.equal(reconciled.sourcePath, renamedPath);
+  assert.equal(reconciled.openTarget.workingCopyId, imported.target.workingCopyId);
+  assert.notEqual(reconciled.sourceSha256, imported.target.sourceSha256);
+  assert.equal(await readFile(renamedPath, "utf8"), edited);
+});
+
+test("reconcileWorkingCopyLocator does not claim copies, hard links, symlinks or escaped roots", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "唯一身份.html");
+  const renamedPath = path.join(imported.target.projectRootPath, "唯一身份 Finder.html");
+  await rename(imported.target.exactSourcePath, renamedPath);
+
+  const hardLinkPath = path.join(imported.target.projectRootPath, "hard-link.html");
+  await link(renamedPath, hardLinkPath);
+  await assert.rejects(
+    value.repository.reconcileWorkingCopyLocator(reconcileInput(imported.target)),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "MANAGED_PATH_AMBIGUOUS",
+  );
+  await unlink(hardLinkPath);
+
+  const copiedRoot = path.join(value.root, "copied-project");
+  await cp(imported.target.projectRootPath, copiedRoot, { recursive: true });
+  const copiedHtml = path.join(copiedRoot, "唯一身份 Finder.html");
+  const originalReconcile = await value.repository.reconcileWorkingCopyLocator(
+    reconcileInput(imported.target, { previousSourcePath: renamedPath }),
+  );
+  assert.equal(originalReconcile.sourcePath, renamedPath);
+  assert.notEqual(originalReconcile.sourcePath, copiedHtml);
+
+  const symlinkPath = path.join(imported.target.projectRootPath, "alias.html");
+  await symlink(renamedPath, symlinkPath);
+  const afterSymlink = await value.repository.reconcileWorkingCopyLocator(
+    reconcileInput(imported.target, { previousSourcePath: renamedPath }),
+  );
+  assert.equal(afterSymlink.sourcePath, renamedPath);
+
+  const movedRoot = path.join(value.root, "escaped-project");
+  await rename(imported.target.projectRootPath, movedRoot);
+  await assert.rejects(
+    value.repository.reconcileWorkingCopyLocator(
+      reconcileInput(imported.target, { previousSourcePath: renamedPath }),
+    ),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "REGISTERED_PROJECT_UNAVAILABLE",
+  );
+});
+
+test("reconcileWorkingCopyLocator refuses a version mismatch and does not guess by hash", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "不猜测.html");
+  const decoy = path.join(imported.target.projectRootPath, "decoy.html");
+  await writeFile(decoy, html("V1"), "utf8");
+  await rename(
+    imported.target.exactSourcePath,
+    path.join(imported.target.projectRootPath, "不猜测 Finder.html"),
+  );
+
+  await assert.rejects(
+    value.repository.reconcileWorkingCopyLocator(
+      reconcileInput(imported.target, { versionId: "ver_0002" }),
+    ),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "MANAGED_SOURCE_IDENTITY_MISMATCH",
+  );
+
+  const equalBytes = await importSource(value, "另一份同字节.html", html("V1"));
+  await rename(
+    equalBytes.target.exactSourcePath,
+    path.join(equalBytes.target.projectRootPath, "另一份同字节 Finder.html"),
+  );
+  const recovered = await value.repository.reconcileWorkingCopyLocator(
+    reconcileInput(imported.target),
+  );
+  assert.equal(recovered.openTarget.projectId, imported.target.projectId);
+  assert.notEqual(recovered.openTarget.projectId, equalBytes.target.projectId);
+});
+

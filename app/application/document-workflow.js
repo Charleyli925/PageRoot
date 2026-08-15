@@ -678,6 +678,128 @@ export class DocumentWorkflow {
     }
   }
 
+  async observeExternalSourceChange({ sourcePath } = {}) {
+    if (this.#disposed) {
+      return blocked("DOCUMENT_WORKFLOW_DISPOSED", "文档持久化工作流已经停止。");
+    }
+    const liveContext = copyContext(this.#projectSession.context);
+    if (!liveContext?.sourcePath) {
+      return blocked("DOCUMENT_CONTEXT_REQUIRED", "当前页面尚未完成项目身份初始化。");
+    }
+    if (
+      sourcePath
+      && !this.#codecs.sameSourcePath(sourcePath, liveContext.sourcePath)
+    ) {
+      return succeeded({ ignored: true, reason: "stale-path" });
+    }
+    if (this.#documentSession.persistState === "conflict") {
+      return succeeded({ alreadyConflict: true });
+    }
+    if (
+      this.#documentSession.persistState === "writing"
+      || this.#documentSession.persistState === "queued"
+      || this.#documentSession.pendingWrite
+      || this.#documentSession.flushPromise
+      || this.hasHistoryAction
+    ) {
+      return succeeded({ deferred: true });
+    }
+    try {
+      const payload = await this.#bridgeClient.source(liveContext.sourcePath);
+      const current = copyContext(this.#projectSession.context);
+      if (
+        !current
+        || !this.#codecs.sameSourcePath(current.sourcePath, liveContext.sourcePath)
+      ) {
+        return stale(liveContext);
+      }
+      this.#assertSourcePayload(
+        payload,
+        current,
+        "核对外部源文件时文件身份发生变化，已拒绝覆盖当前项目。",
+      );
+      const diskSha256 = String(payload.sha256 || "");
+      if (!SHA256.test(diskSha256) || await this.#hashPort.sha256(String(payload.content || "")) !== diskSha256) {
+        throw invalidAcknowledgement(
+          "外部源 HTML 与声明 Hash 不一致。",
+          "INVALID_SOURCE_ACK",
+        );
+      }
+      if (diskSha256 === this.#documentSession.sourceSha256) {
+        if (payload.lastModifiedAt) {
+          this.#emit({
+            type: "document-boundary-reconciled",
+            sourcePath: current.sourcePath,
+            lastModifiedAt: String(payload.lastModifiedAt),
+          });
+        }
+        return succeeded({
+          unchanged: true,
+          sourceSha256: diskSha256,
+          lastModifiedAt: String(payload.lastModifiedAt || ""),
+        });
+      }
+      this.#clearAutosaveTimer();
+      const frozen = await this.#freezeAuthority(
+        "源 HTML 已在其他位置发生变化；PageRoot 没有覆盖它。",
+      );
+      const message = frozen.ok
+        ? "磁盘文件与当前未保存修改都已保留；请先核对内容后再决定如何继续。"
+        : `${"磁盘文件与当前未保存修改都已保留；请先核对内容后再决定如何继续。"} ${frozen.reason}`;
+      this.#documentSession.setPersistence({
+        state: "conflict",
+        error: message,
+      });
+      this.#emit({
+        type: "document-persistence-failed",
+        context: current,
+        code: "WORKING_COPY_CONFLICT",
+        message,
+        conflict: true,
+        protocolError: false,
+        recoveryWrite: this.#documentSession.pendingWrite,
+        fatal: Boolean(!frozen.ok),
+      });
+      return succeeded({
+        conflict: true,
+        sourceSha256: diskSha256,
+        lastModifiedAt: String(payload.lastModifiedAt || ""),
+      });
+    } catch (cause) {
+      const current = copyContext(this.#projectSession.context);
+      if (
+        current
+        && sourcePath
+        && !this.#codecs.sameSourcePath(sourcePath, current.sourcePath)
+      ) {
+        return stale(liveContext);
+      }
+      const code = sourceErrorCode(cause, "WORKING_COPY_UNAVAILABLE");
+      const message = this.#codecs.errorMessage(
+        cause,
+        "当前工作文件暂时不可用，修改仍保留。",
+      );
+      if (current && this.#isCurrent(current)) {
+        this.#emit({
+          type: "document-persistence-failed",
+          context: current,
+          code,
+          message,
+          conflict: false,
+          protocolError: false,
+          recoveryWrite: this.#documentSession.pendingWrite,
+          fatal: false,
+        });
+      }
+      return this.#outcomeFromCause(
+        this.#nextOperationId("source-observe"),
+        cause,
+        code,
+        message,
+      );
+    }
+  }
+
   async reconcileBoundary({
     frozenHtml,
     reportedSourceSha256 = null,

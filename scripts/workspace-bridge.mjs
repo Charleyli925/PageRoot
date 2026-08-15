@@ -302,6 +302,7 @@ function projectFileHttpError(cause) {
       "REGISTERED_PROJECT_PATH_MISMATCH",
       "REGISTERED_PROJECT_IDENTITY_CHANGED",
       "MANAGED_PATH_AMBIGUOUS",
+      "MANAGED_SOURCE_IDENTITY_MISMATCH",
       "WORKING_COPY_CONFLICT",
       "AMBIGUOUS_SOURCE_FILE_IDENTITY",
       "ACTIVE_REQUEST_EXISTS",
@@ -345,6 +346,8 @@ function projectFileHttpError(cause) {
         "PATH_ESCAPES_PROJECT",
         "INVALID_RELATIVE_PATH",
         "INVALID_ID",
+        "INVALID_OPERATION_ID",
+        "INVALID_RECONCILE_REASON",
         "INVALID_FILE_STEM",
         "PATH_COMPONENT_TOO_LONG",
         "INVALID_CANDIDATE_ID",
@@ -394,6 +397,32 @@ async function registeredProjectOpen(projectId) {
       sourcePath: resolved.target.exactSourcePath,
       sourceSha256: resolved.sourceSha256,
       openTarget: resolved.target,
+    };
+  } catch (cause) {
+    throw projectFileHttpError(cause);
+  }
+}
+
+async function reconcileManagedWorkingCopy(body = {}) {
+  try {
+    const reconciled = await projectFileRepository.reconcileWorkingCopyLocator({
+      operationId: body.operationId,
+      previousSourcePath: body.previousSourcePath,
+      projectId: body.projectId,
+      documentId: body.documentId,
+      workingCopyId: body.workingCopyId,
+      versionId: body.versionId,
+      expectedSourceSha256: body.expectedSourceSha256,
+      reason: body.reason,
+    });
+    return {
+      ok: true,
+      operationId: reconciled.operationId,
+      status: reconciled.status,
+      previousSourcePath: reconciled.previousSourcePath,
+      sourcePath: reconciled.sourcePath,
+      sourceSha256: reconciled.sourceSha256,
+      openTarget: reconciled.openTarget,
     };
   } catch (cause) {
     throw projectFileHttpError(cause);
@@ -1842,6 +1871,11 @@ async function route(request, response) {
       200,
       await registeredProjectOpen(url.searchParams.get("projectId")),
     );
+    return;
+  }
+  if (request.method === "POST" && url.pathname === "/managed-working-copy/reconcile") {
+    const body = await readBody(request);
+    sendJson(response, 200, await reconcileManagedWorkingCopy(body));
     return;
   }
   if (request.method === "POST" && url.pathname === "/project/ensure") {

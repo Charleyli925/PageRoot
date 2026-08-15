@@ -45,6 +45,10 @@ const PRODUCT_ERROR_MESSAGES = Object.freeze({
     "磁盘文件与当前未保存修改都已保留；请先核对内容后再决定如何继续。",
   MANAGED_PATH_AMBIGUOUS:
     "当前文件无法唯一对应到工作文件。PageRoot 没有写入，请先恢复唯一位置。",
+  MANAGED_SOURCE_IDENTITY_MISMATCH:
+    "当前工作文件身份无法核对，PageRoot 没有切换路径。",
+  INVALID_RENAME_STEM:
+    "请输入不含路径、后缀和特殊符号的文件名。",
   REGISTERED_PROJECT_PATH_MISMATCH:
     "当前文件夹不是项目的登记位置。PageRoot 没有写入。",
   REGISTERED_PROJECT_IDENTITY_CHANGED:

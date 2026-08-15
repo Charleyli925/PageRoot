@@ -25,6 +25,7 @@ export type BridgeClient = {
   versionFile(sourcePath: string, versionId: string): Promise<BridgeJson>;
   projectFile(sourcePath: string, path: string): Promise<BridgeJson>;
   ensureProject(body: BridgeJson): Promise<BridgeJson>;
+  reconcileManagedWorkingCopy(body: BridgeJson): Promise<BridgeJson>;
   autosave(body: BridgeJson): Promise<BridgeJson>;
   sourceHistoryAction(body: BridgeJson): Promise<BridgeJson>;
   saveDraft(body: BridgeJson): Promise<BridgeJson>;

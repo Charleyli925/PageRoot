@@ -39,6 +39,7 @@ function projectState(sourcePath) {
     }],
     pendingRename: null,
     lastRename: null,
+    activeManagedLocator: null,
   };
 }
 
@@ -434,3 +435,34 @@ test("rename payload keeps the HTML extension outside the editable stem", () => 
     (error) => error.code === "INVALID_RENAME_STEM",
   );
 });
+
+test("source rename rebases activeManagedLocator with active and recent in one write", async (t) => {
+  const fixture = await createFixture(t);
+  const state = projectState(fixture.sourcePath);
+  state.activeManagedLocator = {
+    projectId: "project_rename_sync",
+    documentId: "doc_0123456789abcdef",
+    workingCopyId: "work_ver_0001",
+    versionId: "ver_0001",
+    sourcePath: fixture.sourcePath,
+    sourceSha256: SOURCE_SHA256,
+    projectRootPath: fixture.directory,
+  };
+  const writes = [];
+  const rebinds = [];
+  const result = await renameHtmlSource(serviceOptions(
+    renamePayload(fixture.sourcePath),
+    state,
+    writes,
+    rebinds,
+  ));
+
+  assert.equal(state.activePath, result.sourcePath);
+  assert.equal(state.activeManagedLocator.sourcePath, result.sourcePath);
+  assert.equal(state.activeManagedLocator.projectId, "project_rename_sync");
+  assert.equal(state.activeManagedLocator.workingCopyId, "work_ver_0001");
+  assert.equal(writes.at(-1).activePath, result.sourcePath);
+  assert.equal(writes.at(-1).activeManagedLocator.sourcePath, result.sourcePath);
+  assert.equal(writes.at(-1).recent[0].path, result.sourcePath);
+});
+

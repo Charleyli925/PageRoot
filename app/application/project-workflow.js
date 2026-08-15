@@ -101,6 +101,12 @@ function normalizedRenameStem(value, sourcePath) {
   return stem;
 }
 
+function sourceStem(sourcePath) {
+  const name = sourceFileName(sourcePath);
+  const extension = sourceExtension(sourcePath);
+  return name.slice(0, Math.max(0, name.length - extension.length)).normalize("NFC");
+}
+
 function documentIsStable(session) {
   return Boolean(
     session
@@ -160,6 +166,10 @@ export class ProjectWorkflow {
   #pendingOpen = null;
   #browserOpenOperationId = null;
   #renamePromise = null;
+  #sourceLocatorPromise = null;
+  #pendingLocatorReconcile = null;
+  #appliedWatcherGeneration = 0;
+  #locatorRetryHandle = null;
   #registeredProjectsRefresh = null;
   #reconcileScheduled = false;
   #disposed = false;
@@ -372,6 +382,11 @@ export class ProjectWorkflow {
 
   dispose() {
     this.#disposed = true;
+    if (this.#locatorRetryHandle && typeof this.#scheduler.clearTimeout === "function") {
+      this.#scheduler.clearTimeout(this.#locatorRetryHandle);
+    }
+    this.#locatorRetryHandle = null;
+    this.#pendingLocatorReconcile = null;
     this.#externalFileOpenSession.setObserver(null);
     this.#projectApplicationSession.setObserver(null);
     this.#externalFileOpenSession.dispose();
@@ -1115,20 +1130,69 @@ export class ProjectWorkflow {
       ));
     }
     if (this.#renamePromise) return this.#renamePromise;
+    if (this.#sourceLocatorPromise) {
+      return this.#sourceLocatorPromise.then(() => this.renameSource({ stem, deadlineAt }));
+    }
     const operation = this.#runSourceRename({ stem, deadlineAt });
     this.#renamePromise = operation;
+    this.#sourceLocatorPromise = operation;
     operation.finally(() => {
       if (this.#renamePromise === operation) this.#renamePromise = null;
+      if (this.#sourceLocatorPromise === operation) this.#sourceLocatorPromise = null;
     }).catch(() => {
       // #runSourceRename always converts failures to typed outcomes.
     });
     return operation;
   }
 
+  reconcileExternalSourceLocator(input = {}) {
+    if (this.#disposed) {
+      return Promise.resolve(blocked(
+        "PROJECT_WORKFLOW_DISPOSED",
+        "项目工作流已经停止。",
+      ));
+    }
+    const request = {
+      reason: String(input.reason || "watch"),
+      watcherGeneration: Number(input.watcherGeneration || 0),
+      previousSourcePath: input.previousSourcePath
+        ? String(input.previousSourcePath)
+        : null,
+    };
+    if (
+      !this.#pendingLocatorReconcile
+      || request.watcherGeneration >= Number(this.#pendingLocatorReconcile.watcherGeneration || 0)
+    ) {
+      this.#pendingLocatorReconcile = request;
+    }
+    if (this.#sourceLocatorPromise) {
+      return this.#sourceLocatorPromise.then((result) => {
+        if (this.#disposed) {
+          return blocked("PROJECT_WORKFLOW_DISPOSED", "项目工作流已经停止。");
+        }
+        if (this.#sourceLocatorPromise) return this.#sourceLocatorPromise;
+        if (this.#pendingLocatorReconcile) {
+          return this.reconcileExternalSourceLocator(this.#pendingLocatorReconcile);
+        }
+        return result;
+      });
+    }
+    const requested = this.#pendingLocatorReconcile;
+    this.#pendingLocatorReconcile = null;
+    const operation = this.#runLocatorReconcile(requested);
+    this.#sourceLocatorPromise = operation;
+    operation.finally(() => {
+      if (this.#sourceLocatorPromise === operation) this.#sourceLocatorPromise = null;
+    }).catch(() => {
+      // #runLocatorReconcile always converts failures to typed outcomes.
+    });
+    return operation;
+  }
+
   async #runSourceRename({ stem, deadlineAt } = {}) {
-    const context = this.#projectSession.context;
-    const previousSourcePath = context?.sourcePath || "";
-    const expectedSha256 = this.#documentSession.sourceSha256;
+    let context = this.#projectSession.context;
+    let previousSourcePath = context?.sourcePath || "";
+    let expectedSha256 = this.#documentSession.sourceSha256;
     const requestedStem = normalizedRenameStem(stem, previousSourcePath);
     const operationId = this.#nextOperationId("source-rename");
     const renameDeadline = Number(deadlineAt) || Date.now() + SWITCH_DEADLINE_MS;
@@ -1137,6 +1201,27 @@ export class ProjectWorkflow {
     try {
       if (!context || !this.#projectSession.matches(context)) {
         return blocked("SOURCE_RENAME_CONTEXT_REQUIRED", "当前项目身份尚未完成初始化。");
+      }
+      if (this.#managedOpenTarget()) {
+        const reconciled = await this.#runLocatorReconcile({
+          reason: "rename",
+          previousSourcePath,
+        });
+        if (reconciled.status === "rejected" || reconciled.status === "unknown") {
+          return reconciled;
+        }
+        context = this.#projectSession.context;
+        previousSourcePath = context?.sourcePath || previousSourcePath;
+        expectedSha256 = this.#documentSession.sourceSha256;
+        if (!context || !this.#projectSession.matches(context)) {
+          return stale(context || { sourcePath: previousSourcePath });
+        }
+        if (this.#documentSession.persistState === "conflict") {
+          return blocked(
+            "SOURCE_RENAME_CONFLICT",
+            "当前 HTML 与外部文件存在冲突，请先选择要保留的版本。",
+          );
+        }
       }
       if (!previousSourcePath || !expectedSha256 || !SHA256.test(expectedSha256)) {
         return blocked("SOURCE_RENAME_SOURCE_REQUIRED", "当前源 HTML 尚未形成可验证的文件身份。");
@@ -1154,9 +1239,7 @@ export class ProjectWorkflow {
         return blocked("SOURCE_RENAME_UNAVAILABLE", "当前运行环境不能安全修改 HTML 文件名。");
       }
 
-      const currentStem = sourceFileName(previousSourcePath)
-        .slice(0, Math.max(0, sourceFileName(previousSourcePath).length - sourceExtension(previousSourcePath).length))
-        .normalize("NFC");
+      const currentStem = sourceStem(previousSourcePath);
       if (requestedStem === currentStem) {
         return succeeded({ context, unchanged: true, sourcePath: previousSourcePath });
       }
@@ -1292,32 +1375,16 @@ export class ProjectWorkflow {
       ) return stale(context);
 
       const nextSourcePath = String(result.sourcePath);
-      this.#runSession.rebaseSource({
+      const transitioned = this.#publishSourceLocatorChange({
         previousSourcePath,
-        sourcePath: nextSourcePath,
-        projectId: context.projectId,
-      });
-      const transitioned = this.#projectSession.transitionSource({
-        previousSourcePath,
-        sourcePath: nextSourcePath,
-        projectId: context.projectId,
-        documentId: context.documentId,
+        nextSourcePath,
+        context,
+        expectedSha256,
+        openTarget: this.#projectSession.openTarget,
       });
       if (!transitioned || !this.#projectSession.context) {
         throw new Error("文件已重命名，但当前项目身份已经变化。");
       }
-      this.#documentSession.publishAuthority({
-        html: this.#documentSession.html,
-        sourceSha256: expectedSha256,
-        pendingWrite: null,
-      });
-      this.#documentWorkflow.clearRecovery({
-        documentId: context.documentId,
-        sourcePath: previousSourcePath,
-      });
-      this.#documentWorkflow.resetForProjectTransition();
-      this.#commentWorkflow.resetForProjectTransition();
-      this.#projectRulesWorkflow.resetForProjectTransition();
 
       const [recents, catalog, hydrated] = await Promise.all([
         this.refreshRecents(),
@@ -1392,6 +1459,315 @@ export class ProjectWorkflow {
           unlock();
         }
       }
+    }
+  }
+
+  #managedOpenTarget() {
+    const openTarget = this.#projectSession.openTarget;
+    const context = this.#projectSession.context;
+    if (
+      !openTarget
+      || !context
+      || openTarget.targetKind !== "working-copy"
+      || !String(openTarget.workingCopyId || "")
+      || !String(openTarget.versionId || "")
+      || String(openTarget.projectId || "") !== String(context.projectId || "")
+      || String(openTarget.documentId || "") !== String(context.documentId || "")
+    ) return null;
+    return openTarget;
+  }
+
+  #now() {
+    return Number(this.#clock?.now?.() || Date.now());
+  }
+
+  #scheduleLocatorRetry(input) {
+    if (this.#disposed) return;
+    if (this.#locatorRetryHandle && typeof this.#scheduler.clearTimeout === "function") {
+      this.#scheduler.clearTimeout(this.#locatorRetryHandle);
+    }
+    if (typeof this.#scheduler.setTimeout !== "function") return;
+    this.#locatorRetryHandle = this.#scheduler.setTimeout(() => {
+      this.#locatorRetryHandle = null;
+      if (!this.#disposed) void this.reconcileExternalSourceLocator(input);
+    }, 200);
+  }
+
+  #publishSourceLocatorChange({
+    previousSourcePath,
+    nextSourcePath,
+    context,
+    expectedSha256,
+    openTarget = null,
+  }) {
+    this.#runSession.rebaseSource({
+      previousSourcePath,
+      sourcePath: nextSourcePath,
+      projectId: context.projectId,
+    });
+    const transitioned = this.#projectSession.transitionSource({
+      previousSourcePath,
+      sourcePath: nextSourcePath,
+      projectId: context.projectId,
+      documentId: context.documentId,
+      ...(openTarget ? { openTarget } : {}),
+    });
+    this.#documentSession.publishAuthority({
+      html: this.#documentSession.html,
+      sourceSha256: expectedSha256,
+      pendingWrite: null,
+    });
+    this.#documentWorkflow.clearRecovery({
+      documentId: context.documentId,
+      sourcePath: previousSourcePath,
+    });
+    this.#documentWorkflow.resetForProjectTransition();
+    this.#commentWorkflow.resetForProjectTransition();
+    this.#projectRulesWorkflow.resetForProjectTransition();
+    return transitioned;
+  }
+
+  async #runLocatorReconcile({
+    reason = "watch",
+    watcherGeneration = 0,
+    previousSourcePath = null,
+  } = {}) {
+    const requestedReason = String(reason || "watch");
+    const userRename = requestedReason === "rename";
+    const context = this.#projectSession.context;
+    if (!context) {
+      return blocked("SOURCE_LOCATOR_CONTEXT_REQUIRED", "当前项目身份尚未完成初始化。");
+    }
+    const currentPath = context.sourcePath;
+    if (
+      previousSourcePath
+      && !this.#codecs.sameSourcePath(previousSourcePath, currentPath)
+    ) {
+      return succeeded({ ignored: true, reason: "stale-path", sourcePath: currentPath });
+    }
+    if (
+      watcherGeneration > 0
+      && watcherGeneration < this.#appliedWatcherGeneration
+    ) {
+      return succeeded({ ignored: true, reason: "stale-generation", sourcePath: currentPath });
+    }
+
+    const defer = (code, message) => {
+      if (!userRename) {
+        this.#scheduleLocatorRetry({
+          reason: requestedReason,
+          watcherGeneration,
+          previousSourcePath: currentPath,
+        });
+      }
+      return blocked(code, message);
+    };
+
+    if (this.projectHydrating || this.projectLoadError || this.#isHistoryView()) {
+      return defer(
+        "SOURCE_LOCATOR_VIEW_UNAVAILABLE",
+        "当前视图尚未形成可安全核对的源页面。",
+      );
+    }
+    if (this.#runSession.activeLocked) {
+      return defer(
+        "SOURCE_LOCATOR_RUN_LOCKED",
+        "当前 AI 任务仍在处理，稍后会再核对文件位置。",
+      );
+    }
+
+    const committed = this.#canvasPort.fencePendingEdit?.({
+      resumeEditing: true,
+      trigger: "source-locator-reconcile",
+    });
+    if (committed && !committed.ok) {
+      return defer(
+        "SOURCE_LOCATOR_NATIVE_EDIT_PENDING",
+        String(committed.reason || "请先完成当前文字输入，再继续。"),
+      );
+    }
+    if (
+      committed
+      && (
+        committed.html !== this.#documentSession.html
+        || committed.pendingMutation
+      )
+    ) {
+      const enqueued = this.#documentWorkflow.enqueueEdit({
+        html: committed.html,
+        mutation: committed.pendingMutation || undefined,
+        context,
+      });
+      if (enqueued.status !== "succeeded") {
+        return this.#dependencyOutcome(
+          enqueued,
+          context,
+          "SOURCE_LOCATOR_DOCUMENT_EDIT_REJECTED",
+          "当前文字尚未安全进入源 HTML 写回队列。",
+        );
+      }
+      return defer(
+        "SOURCE_LOCATOR_DOCUMENT_EDIT_QUEUED",
+        "刚刚还有文字输入，源页正在安全保存，稍后会再核对文件位置。",
+      );
+    }
+
+    const drained = await this.#drainCoordinator.drain("switch", {
+      deadlineAt: this.#now() + SWITCH_DEADLINE_MS,
+    });
+    if (!drained.ok) {
+      return defer(
+        "SOURCE_LOCATOR_DRAIN_INCOMPLETE",
+        String(drained.reason || "当前项目尚未完成安全保存。"),
+      );
+    }
+    if (this.#disposed) {
+      return blocked("PROJECT_WORKFLOW_DISPOSED", "项目工作流已经停止。");
+    }
+
+    const liveContext = this.#projectSession.context;
+    if (
+      !liveContext
+      || !this.#projectSession.matches(liveContext)
+      || (
+        previousSourcePath
+        && !this.#codecs.sameSourcePath(previousSourcePath, liveContext.sourcePath)
+        && !this.#codecs.sameSourcePath(liveContext.sourcePath, currentPath)
+      )
+    ) {
+      return succeeded({ ignored: true, reason: "stale-session" });
+    }
+    if (
+      this.#documentSession.persistState === "conflict"
+      && typeof this.#documentWorkflow.observeExternalSourceChange === "function"
+    ) {
+      return this.#documentWorkflow.observeExternalSourceChange({
+        sourcePath: liveContext.sourcePath,
+      });
+    }
+
+    const openTarget = this.#managedOpenTarget();
+    const canReconcileManaged = Boolean(
+      openTarget
+      && typeof this.#projectOpenPort.reconcileActiveManagedSource === "function"
+      && SHA256.test(this.#documentSession.sourceSha256 || "")
+    );
+    const operationId = this.#nextOperationId("source-locator");
+    try {
+      let result = null;
+      if (canReconcileManaged) {
+        result = await this.#projectOpenPort.reconcileActiveManagedSource({
+          operationId,
+          previousSourcePath: liveContext.sourcePath,
+          projectId: liveContext.projectId,
+          documentId: liveContext.documentId,
+          workingCopyId: String(openTarget.workingCopyId),
+          versionId: String(openTarget.versionId),
+          expectedSourceSha256: this.#documentSession.sourceSha256,
+          reason: requestedReason,
+          ...(watcherGeneration > 0 ? { watcherGeneration } : {}),
+        });
+        if (
+          !result
+          || String(result.operationId || "") !== operationId
+          || !result.openTarget
+          || result.openTarget.targetKind !== "working-copy"
+          || String(result.openTarget.projectId || "") !== liveContext.projectId
+          || String(result.openTarget.documentId || "") !== liveContext.documentId
+          || String(result.openTarget.workingCopyId || "") !== String(openTarget.workingCopyId)
+          || String(result.openTarget.versionId || "") !== String(openTarget.versionId)
+          || !String(result.sourcePath || "")
+        ) {
+          throw new Error("当前工作文件身份无法核对，PageRoot 没有切换路径。");
+        }
+        const nextGeneration = Number(result.watcherGeneration || 0);
+        if (nextGeneration > 0) {
+          this.#appliedWatcherGeneration = Math.max(
+            this.#appliedWatcherGeneration,
+            nextGeneration,
+          );
+        }
+        const nextSourcePath = String(result.sourcePath);
+        const pathChanged = !this.#codecs.sameSourcePath(
+          nextSourcePath,
+          liveContext.sourcePath,
+        );
+        if (pathChanged) {
+          const expectedSha256 = this.#documentSession.sourceSha256;
+          const transitioned = this.#publishSourceLocatorChange({
+            previousSourcePath: liveContext.sourcePath,
+            nextSourcePath,
+            context: liveContext,
+            expectedSha256,
+            openTarget: result.openTarget,
+          });
+          if (!transitioned || !this.#projectSession.context) {
+            throw new Error("文件位置已恢复，但当前项目身份已经变化。");
+          }
+          const [recents, catalog] = await Promise.all([
+            this.refreshRecents(),
+            this.refreshRegisteredProjects(),
+          ]);
+          if (recents.status !== "succeeded" || catalog.status !== "succeeded") {
+            return unknown(operationId, "文件位置已经恢复，但项目状态还没有完成刷新。");
+          }
+          const nextContext = this.#projectSession.context;
+          this.#emit({
+            type: "project-source-relocated",
+            context: nextContext,
+            operationId,
+            previousSourcePath: liveContext.sourcePath,
+            sourcePath: nextSourcePath,
+            projectName: sourceStem(nextSourcePath),
+            status: String(result.status || "relocated"),
+            contentChanged: result.status === "content-changed",
+          });
+        }
+      }
+
+      const observedPath = this.#projectSession.sourcePath || liveContext.sourcePath;
+      let observed = succeeded({ unchanged: true });
+      if (typeof this.#documentWorkflow.observeExternalSourceChange === "function") {
+        observed = await this.#documentWorkflow.observeExternalSourceChange({
+          sourcePath: observedPath,
+        });
+      }
+      const nextContext = this.#projectSession.context;
+      return succeeded({
+        context: nextContext,
+        sourcePath: observedPath,
+        previousSourcePath: liveContext.sourcePath,
+        status: result?.status || (observed.value?.conflict ? "content-changed" : "unchanged"),
+        relocated: Boolean(
+          result
+          && !this.#codecs.sameSourcePath(result.sourcePath, liveContext.sourcePath),
+        ),
+        contentChanged: Boolean(
+          result?.status === "content-changed" || observed.value?.conflict,
+        ),
+        projectName: sourceStem(observedPath),
+        ignored: false,
+        observed: observed.value || null,
+      });
+    } catch (cause) {
+      const reason = projectErrorMessage(
+        this.#codecs,
+        cause,
+        "当前工作文件暂时无法核对位置，PageRoot 没有切换路径。",
+      );
+      this.#emit({
+        type: "project-source-locator-failed",
+        context: this.#projectSession.context || liveContext,
+        operationId,
+        code: projectErrorCode(cause, "SOURCE_LOCATOR_REJECTED"),
+        reason,
+      });
+      return this.#outcomeFromCause(
+        operationId,
+        cause,
+        "SOURCE_LOCATOR_REJECTED",
+        reason,
+      );
     }
   }
 

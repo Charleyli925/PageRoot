@@ -535,6 +535,7 @@ export default function Workbench() {
   const fileRenameInputRef = useRef<HTMLInputElement | null>(null);
   const fileRenameEditingRef = useRef(false);
   const fileRenameBusyRef = useRef(false);
+  const fileRenameErrorRef = useRef("");
   const automaticProjectRegistrationRef = useRef("");
   const projectRecordsPreparationRef = useRef("");
 
@@ -1031,6 +1032,23 @@ export default function Workbench() {
               if (!rename) throw new Error("当前运行环境不能安全修改 HTML 文件名。");
               return rename(input);
             },
+            reconcileActiveManagedSource: async (input: {
+              operationId?: string;
+              previousSourcePath: string;
+              expectedSourceSha256: string;
+              projectId: string;
+              documentId: string;
+              workingCopyId: string;
+              versionId: string;
+              reason: "watch" | "rename" | "startup" | "safe-action";
+              watcherGeneration?: number;
+            }) => {
+              const reconcile = window.htmlAIProjects?.reconcileActiveManagedSource;
+              if (!reconcile) {
+                throw new Error("当前运行环境不能安全核对工作文件位置。");
+              }
+              return reconcile(input);
+            },
           },
           viewState: {
             isTransitioning: () => isViewTransitioning(),
@@ -1403,6 +1421,7 @@ export default function Workbench() {
         projectRecordsPath?: unknown;
         lastModifiedAt?: unknown;
         showHandoff?: unknown;
+        contentChanged?: unknown;
       }>;
       if (projectEvent.type === "project-hydration-stage") {
         markProjectHydrationStage(String(projectEvent.stage || ""));
@@ -1637,6 +1656,71 @@ export default function Workbench() {
             tone: "info",
             disposition: "background-result",
             dedupeKey: "close-source-reconciliation",
+          });
+        }
+        return;
+      }
+      if (projectEvent.type === "project-source-locator-failed") {
+        const locatorCode = String(projectEvent.code || "");
+        if (locatorCode === "MANAGED_PATH_AMBIGUOUS") {
+          setToast({
+            title: "无法确定工作文件",
+            message: "检测到多个同等候选文件；修改仍保留，请先恢复唯一文件位置。",
+            tone: "warning",
+            sticky: true,
+            disposition: "user-choice",
+            dedupeKey: "managed-working-copy-ambiguous",
+            action: { id: "retry-project-open", label: "重新选择文件" },
+          });
+          return;
+        }
+        if (
+          locatorCode === "WORKING_COPY_UNAVAILABLE"
+          || locatorCode === "REGISTERED_PROJECT_UNAVAILABLE"
+        ) {
+          setToast({
+            title: "文件暂不可用",
+            message: "当前工作文件暂时不可用，修改仍保留。",
+            tone: "warning",
+            sticky: true,
+            disposition: "inform-in-place",
+            dedupeKey: "working-copy-unavailable",
+          });
+          return;
+        }
+        if (locatorCode === "MANAGED_SOURCE_IDENTITY_MISMATCH") {
+          setToast({
+            title: "无法核对工作文件",
+            message: "当前工作文件身份无法核对，PageRoot 没有切换路径。",
+            tone: "warning",
+            sticky: true,
+            disposition: "inform-in-place",
+            dedupeKey: "managed-source-identity-mismatch",
+          });
+          return;
+        }
+        return;
+      }
+      if (
+        projectEvent.type === "project-source-renamed"
+        || projectEvent.type === "project-source-relocated"
+      ) {
+        if (typeof projectEvent.projectName === "string" && projectEvent.projectName) {
+          setProjectName(projectEvent.projectName);
+        }
+        if (typeof projectEvent.lastModifiedAt === "string") {
+          setLastModifiedAt(projectEvent.lastModifiedAt);
+        }
+        if (
+          projectEvent.type === "project-source-relocated"
+          && projectEvent.contentChanged !== true
+        ) {
+          setToast({
+            title: "文件名已与 Finder 同步",
+            message: "已继续使用同一工作文件。",
+            tone: "success",
+            disposition: "background-result",
+            dedupeKey: "finder-filename-synced",
           });
         }
         return;
@@ -3286,6 +3370,19 @@ export default function Workbench() {
 
   useEffect(() => {
     if (!workspaceController) return undefined;
+    const subscribe = window.htmlAIProjects?.onSourceFileChanged;
+    if (typeof subscribe !== "function") return undefined;
+    return subscribe((payload) => {
+      void workspaceController.observeExternalSourceChange({
+        reason: "watch",
+        previousSourcePath: payload.sourcePath,
+        watcherGeneration: payload.watcherGeneration,
+      });
+    });
+  }, [workspaceController]);
+
+  useEffect(() => {
+    if (!workspaceController) return undefined;
     const handlePrepareClose = (event: Event) => {
       const detail = (event as CustomEvent<PrepareCloseDetail>).detail;
       if (!detail || typeof detail.waitUntil !== "function") return;
@@ -3501,6 +3598,7 @@ export default function Workbench() {
   const cancelFileRename = useCallback(() => {
     if (fileRenameBusyRef.current) return;
     fileRenameEditingRef.current = false;
+    fileRenameErrorRef.current = "";
     setFileRenameEditing(false);
     setFileRenameError("");
     setFileRenameDraft("");
@@ -3519,6 +3617,7 @@ export default function Workbench() {
         !== currentDocumentSessionSnapshot().lastPersistedRevision
     ) return;
     fileRenameEditingRef.current = true;
+    fileRenameErrorRef.current = "";
     setFileRenameEditing(true);
     setFileRenameDraft(currentSourceFileStem);
     setFileRenameError("");
@@ -3539,39 +3638,64 @@ export default function Workbench() {
       !workspaceController
       || !canOfferFileRename
     ) {
-      setFileRenameError("当前状态还不能重命名，请等待文件安全保存。");
+      fileRenameErrorRef.current = "当前状态还不能重命名，请等待文件安全保存。";
+      setFileRenameError(fileRenameErrorRef.current);
       return;
     }
 
     fileRenameBusyRef.current = true;
     setFileRenameBusy(true);
+    fileRenameErrorRef.current = "";
     setFileRenameError("");
     try {
-      const outcome = await requiredWorkspaceController(workspaceController)
-        .renameProjectSource({ stem: fileRenameDraft });
-      if (outcome.status !== "succeeded") {
+      const controller = requiredWorkspaceController(workspaceController);
+      const reconciled = await controller.observeExternalSourceChange({
+        reason: "rename",
+      });
+      if (reconciled.status === "rejected" || reconciled.status === "unknown") {
+        throw Object.assign(
+          new Error(
+            ("reason" in reconciled && reconciled.reason)
+              || "当前工作文件暂时无法核对位置，PageRoot 没有切换路径。",
+          ),
+          { code: "code" in reconciled ? reconciled.code : undefined },
+        );
+      }
+      if (reconciled.status === "blocked") {
         throw new Error(
-          outcome.status === "unknown"
-            ? "文件名已经修改，但项目状态还没有完成刷新。"
-            : ("reason" in outcome && outcome.reason)
-              || "文件名没有修改，请检查名称后重试。",
+          ("reason" in reconciled && reconciled.reason)
+            || "当前状态还不能重命名，请等待文件安全保存。",
+        );
+      }
+      if (reconciled.status === "succeeded" && typeof reconciled.value?.projectName === "string") {
+        setProjectName(reconciled.value.projectName);
+      }
+      const outcome = await controller.renameProjectSource({ stem: fileRenameDraft });
+      if (outcome.status !== "succeeded") {
+        throw Object.assign(
+          new Error(
+            outcome.status === "unknown"
+              ? "文件名已经修改，但项目状态还没有完成刷新。"
+              : ("reason" in outcome && outcome.reason)
+                || "文件名没有修改，请检查名称后重试。",
+          ),
+          { code: "code" in outcome ? outcome.code : undefined },
         );
       }
       if (outcome.value.projectName) setProjectName(outcome.value.projectName);
       setLastModifiedAt(outcome.value.lastModifiedAt || null);
       fileRenameEditingRef.current = false;
+      fileRenameErrorRef.current = "";
       setFileRenameEditing(false);
       setFileRenameDraft("");
       setFileRenameError("");
     } catch (cause) {
-      setFileRenameError(productErrorMessage(
+      const message = productErrorMessage(
         cause,
         "文件名没有修改，请检查名称后重试。",
-      ));
-      window.requestAnimationFrame(() => {
-        fileRenameInputRef.current?.focus();
-        fileRenameInputRef.current?.select();
-      });
+      );
+      fileRenameErrorRef.current = message;
+      setFileRenameError(message);
     } finally {
       fileRenameBusyRef.current = false;
       setFileRenameBusy(false);
@@ -3594,6 +3718,18 @@ export default function Workbench() {
     fileRenameBusy,
     fileRenameEditing,
   ]);
+
+  useEffect(() => {
+    if (!fileRenameEditing || fileRenameBusy) return undefined;
+    const onPointerDown = (event: PointerEvent) => {
+      if (!fileRenameErrorRef.current) return;
+      const field = fileRenameInputRef.current?.closest(".window-file-rename-field");
+      if (field instanceof Element && field.contains(event.target as Node)) return;
+      cancelFileRename();
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    return () => document.removeEventListener("pointerdown", onPointerDown, true);
+  }, [cancelFileRename, fileRenameBusy, fileRenameEditing]);
 
   const showProjectRecordsInFolder = useCallback(async () => {
     const context = workspaceControllerRef.current?.getCurrentProjectContext();
@@ -6534,10 +6670,19 @@ export default function Workbench() {
                     maxLength={180}
                     spellCheck={false}
                     value={fileRenameDraft}
-                    onBlur={() => void commitFileRename()}
+                    onBlur={() => {
+                      if (fileRenameErrorRef.current) {
+                        cancelFileRename();
+                        return;
+                      }
+                      void commitFileRename();
+                    }}
                     onChange={(event) => {
                       setFileRenameDraft(event.target.value);
-                      if (fileRenameError) setFileRenameError("");
+                      if (fileRenameError) {
+                        fileRenameErrorRef.current = "";
+                        setFileRenameError("");
+                      }
                     }}
                     onKeyDown={(event) => {
                       if (event.key === "Enter") {

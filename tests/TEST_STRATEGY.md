@@ -70,7 +70,9 @@ step summary 里。
   close-awaiting external cancellation、committed close/abort freeze 身份、stuck hydration
   快速关闭、load/source stale fence，以及 Canvas acknowledgement 失败时旧页面权威回滚。
   同一集还验证安全文件重命名的完整 Hash/context fence、丢失桌面响应的 active-file
-  对账、单飞与迟到结果不能 rebase 新项目。
+  对账、单飞与迟到结果不能 rebase 新项目，以及 Finder 同目录改名后的
+  `reconcileExternalSourceLocator` 单飞行：身份四元组不变、新路径与
+  `activeManagedLocator` 原子更新、内容 Hash 不同则进入既有冲突且不覆盖任一侧。
   `WorkspaceController` 负责把 `RecentRunsPort` 和 ProjectWorkflow event channel 接回
   aggregate snapshot/event stream。Workbench 只保留 file input、host adapter 和
   Outcome/Event 的展示映射；专项 Node 集与完整 Electron 套件共同证明真实
