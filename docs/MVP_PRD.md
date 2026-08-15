@@ -474,7 +474,7 @@ editing
 用户动作分开：
 
 1. “查看此版本”：进入 `viewMode=history`，从精确不可变路径打开，只读。
-2. “在 Finder 中显示”：定位该 Version 对应的可见 Working Copy；Repository/Bridge 必须验证 Version、唯一 `workingCopyId`、根内普通非软链接文件与 Hash，不把隐藏不可变快照作为产品 Finder 文件。
+2. “在文件夹中打开”：定位该 Version 对应的可见 Working Copy；Repository/Bridge 必须验证 Version、唯一 `workingCopyId`、根内普通非软链接文件与 Hash，不把隐藏不可变快照作为产品 Finder 文件。
 3. “返回当前 HTML”：回到项目当前指向的工作文件。
 4. “基于此版本继续编辑”：只在精确历史视图且项目空闲时可用。Bridge 只接收当前完整项目身份、目标 Version ID 和 operation ID；Repository 必须找到该 Version 唯一原有的 `workingCopyId`，完整验证 Working Copy state、不可变快照和当前工作文件 Hash 后，原子写入 `desktop-pending` 激活回执。缺失、重复或验证失败保持历史只读，不从快照猜测或创建替代文件。
 
@@ -648,7 +648,7 @@ Prompt、AI 返回、附件、剪贴板、文件名/路径、账号、电脑序�
 - no-change、失败、取消和冲突未采用也不创建下一份可见 Version Working Copy。
 - 新版提示只在新工作文件、不可变快照、画布 Hash 一致且 canonical path 已切换后显示。
 - 历史查看永远只读且只打开精确 Version 路径。
-- 每个历史版本可一键在 Finder 中显示精确、经过验证的可见 Working Copy；隐藏快照不作为产品 Finder 入口。
+- 每个历史版本可一键在文件夹中打开精确、经过验证的可见 Working Copy；隐藏快照不作为产品 Finder 入口。
 - “基于此版本继续编辑”只重用该 Version 原有工作文件；已写入历史激活回执后，失败只能同一操作向前恢复，不得把该工作文件回滚为较新的活动 Version。
 - 连续两次 AI 成功后，原始 HTML 与第一份工作文件逐字节不变，项目当前路径指向第二份工作文件。
 - 历史页不提供恢复或覆盖当前 HTML；需要以旧快照开始时，将其作为普通文件登记为新的 Document 与 V1。

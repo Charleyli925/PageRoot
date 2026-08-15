@@ -131,11 +131,11 @@ test("current Working Copy presentation follows the live autosave authority", ()
 
 test("folder labels show only the containing folder name", () => {
   assert.equal(
-    folderFromSourcePath("/Users/lizexuan/Documents/PageRoot/项目/26Q2/page-V1.html"),
+    folderFromSourcePath("/Users/example/Documents/PageRoot/项目/26Q2/page-V1.html"),
     "26Q2",
   );
   assert.equal(
-    folderFromSourcePath("/Users/lizexuan/Documents/PageRoot/项目/26Q2"),
+    folderFromSourcePath("/Users/example/Documents/PageRoot/项目/26Q2"),
     "26Q2",
   );
   assert.equal(folderFromSourcePath("C:\\Users\\me\\Reports\\a.html"), "Reports");

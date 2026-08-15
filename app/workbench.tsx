@@ -2902,10 +2902,6 @@ export default function Workbench() {
     await workspaceController.refreshRegisteredProjects();
   }, [workspaceController]);
 
-  useEffect(() => {
-    void refreshRegisteredProjects();
-  }, [refreshRegisteredProjects]);
-
   const forgetRecentProject = useCallback(async (recentSourcePath: string) => {
     const api = window.htmlAIProjects;
     if (!api?.forgetRecent) return;

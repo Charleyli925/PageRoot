@@ -830,7 +830,7 @@ V8 · 生成于 16:41
 基于 V4 · 前一正式版本 V7
 优化指标卡片层级与标题间距
 最新正式版本 · 当前编辑基础 · 有本地修改
-[只读查看] [在 Finder 中显示]
+[只读查看] [在文件夹中打开]
 ```
 
 活动历史只读取严格 v3 的 `initial` 与 `internal-ai` Version。旧 `local-editor`、`restore` 或 v1/v2 manifest 只存在于切换前只读归档，新程序不读取、展示或混入当前历史；其中的 HTML 快照只能作为普通文件重新登记为新 Document 和 V1。
@@ -863,7 +863,7 @@ Attempt。旧记录中的脚本结论不再改变状态或产生提示；归档�
 
 路径缺失或 Hash 不符时显示错误，不能回退显示当前源 HTML、其他版本或渲染缓存。
 
-点击“在 Finder 中显示”时，桌面端只允许定位该卡片对应的可见 Version Working Copy。Repository 先验证 Version、唯一 `workingCopyId`、可见相对路径、文件 Hash 和 Registry 根；Desktop 只接受该完整 v4 返回值并要求普通、非软链接、根内文件。隐藏 `versions/<versionId>/...` 快照只供只读历史画布，不伪装为 Finder 用户文件。
+点击“在文件夹中打开”时，桌面端只允许定位该卡片对应的可见 Version Working Copy。Repository 先验证 Version、唯一 `workingCopyId`、可见相对路径、文件 Hash 和 Registry 根；Desktop 只接受该完整 v4 返回值并要求普通、非软链接、根内文件。隐藏 `versions/<versionId>/...` 快照只供只读历史画布，不伪装为 Finder 用户文件。
 
 ### 11.3 返回当前 HTML
 
@@ -1009,7 +1009,7 @@ A 项目 processing 时切换 B 项目：
 12. 每个事务边界崩溃后，不出现半提交状态。
 13. 连续两次 AI 成功后，原始 HTML 和第一份工作文件逐字节不变，项目当前路径指向第二份工作文件。
 14. no-change、失败和取消均不创建下一个可见 Version Working Copy。
-15. 历史抽屉无横向滚动，且“在 Finder 中显示”只定位对应的可见 Version Working Copy；隐藏快照继续只读用于历史画布。
+15. 历史抽屉无横向滚动，且“在文件夹中打开”只定位对应的可见 Version Working Copy；隐藏快照继续只读用于历史画布。
 16. 处理中查看 Request/Attempt/output 并产生普通 `.DS_Store`，仍保持 processing 且 finalizer 可正常完成；同名软链接和其他额外文件继续失败关闭。
 17. completion 出现前的失败不点亮“AI 已返回”；completion 出现后的校验失败保留已返回事实。
 18. 剪贴板已交接，或重启后恢复且无法重新证明交接状态时，点击“结束本轮并继续编辑”先显示精简的 AI Agent 风险确认；“继续等待”不改变 Request。
