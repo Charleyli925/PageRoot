@@ -48,22 +48,57 @@ export function naturalDocumentContentHeight(
   clientHeight: number,
 ): number {
   const scrollingElement = documentNode.scrollingElement || documentNode.documentElement;
+  const documentElement = documentNode.documentElement;
+  const body = documentNode.body;
+  const renderedHeight = layoutHeightExcludingRootTransforms(
+    documentElement,
+    body,
+  );
   const offsetHeight = Math.max(
-    documentNode.documentElement.offsetHeight,
-    documentNode.body.offsetHeight,
+    documentElement.offsetHeight,
+    body.offsetHeight,
   );
   const scrollHeight = Math.max(
     scrollingElement.scrollHeight,
-    documentNode.documentElement.scrollHeight,
-    documentNode.body.scrollHeight,
+    documentElement.scrollHeight,
+    body.scrollHeight,
   );
   return Math.max(
     0,
     Math.ceil(
       scrollHeight > clientHeight + 1
-        ? Math.max(offsetHeight, scrollHeight)
-        : offsetHeight,
+        ? Math.max(renderedHeight, offsetHeight, scrollHeight)
+        : Math.max(renderedHeight, offsetHeight),
     ),
+  );
+}
+
+function layoutHeightExcludingRootTransforms(
+  documentElement: HTMLElement,
+  body: HTMLElement,
+): number {
+  const transformOf = (element: HTMLElement) => {
+    const transform = getComputedStyle(element).transform;
+    return Boolean(transform && transform !== "none");
+  };
+  const zoomOf = (element: HTMLElement) => {
+    const style = getComputedStyle(element) as CSSStyleDeclaration & { zoom?: string };
+    const zoom = Number.parseFloat(style.zoom || "1");
+    return Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
+  };
+  const documentZoom = zoomOf(documentElement);
+  const bodyZoom = zoomOf(body);
+  if (transformOf(documentElement) || transformOf(body) || documentZoom !== 1 || bodyZoom !== 1) {
+    // getBoundingClientRect includes visual transforms, so a transformed root
+    // would feed its scaled height back into the iframe and loop. offsetHeight
+    // is a zoom-stable layout measurement and ignores transforms; never divide
+    // it by zoom, or a shrinking zoom would inflate the measured height and
+    // restart the ResizeObserver cycle.
+    return Math.max(documentElement.offsetHeight, body.offsetHeight);
+  }
+  return Math.max(
+    documentElement.getBoundingClientRect().height,
+    body.getBoundingClientRect().height,
   );
 }
 
