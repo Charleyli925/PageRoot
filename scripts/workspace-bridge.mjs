@@ -55,6 +55,9 @@ const PROJECT_FILE_ROOT = path.resolve(
 );
 const projectFileRepository = new ProjectFileRepository({
   projectsRoot: PROJECT_FILE_ROOT,
+  failpoint: process.env.HTML_AI_FAILPOINT
+    ? async (name) => name === process.env.HTML_AI_FAILPOINT
+    : null,
 });
 const FINALIZER_PATH = fileURLToPath(
   new URL("./finalize-attempt.mjs", import.meta.url),

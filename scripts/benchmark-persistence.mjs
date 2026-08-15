@@ -130,15 +130,23 @@ function parseOptions() {
     samples: defaultSamples,
     warmups: defaultWarmups,
     report: null,
+    sizesMiB: [...fixtureSizesMiB],
   };
   for (let index = 2; index < process.argv.length; index += 1) {
     const argument = process.argv[index];
-    if (argument === "--samples" || argument === "--warmups" || argument === "--report") {
+    if (argument === "--samples" || argument === "--warmups" || argument === "--report" || argument === "--sizes") {
       const value = process.argv[index + 1];
       assert(value, `${argument} needs a value.`);
       index += 1;
       if (argument === "--report") {
         options.report = value;
+      } else if (argument === "--sizes") {
+        const sizes = value.split(",").map((entry) => Number(entry));
+        assert(
+          sizes.length > 0 && sizes.every((size) => fixtureSizesMiB.includes(size)),
+          "--sizes must be a comma-separated subset of 0.5,1.25,2.5.",
+        );
+        options.sizesMiB = sizes;
       } else {
         const key = argument.slice(2);
         const number = Number(value);
@@ -148,7 +156,7 @@ function parseOptions() {
       continue;
     }
     if (argument === "--help") {
-      process.stdout.write("Usage: npm run benchmark:persistence -- [--samples 7] [--warmups 1] [--report path]\n");
+      process.stdout.write("Usage: npm run benchmark:persistence -- [--samples 7] [--warmups 1] [--sizes 0.5,1.25,2.5] [--report path]\n");
       process.exit(0);
     }
     throw new Error(`Unknown benchmark option: ${argument}`);
@@ -278,6 +286,7 @@ async function startBridge(workspace, extraEnvironment = {}) {
     env: {
       ...process.env,
       HTML_AI_WORKSPACE: workspace,
+      HTML_AI_PROJECT_FILES_ROOT: path.join(workspace, "project-files"),
       HTML_AI_BRIDGE_PORT: String(port),
       ...extraEnvironment,
     },
@@ -445,7 +454,8 @@ async function runBridgeSamples(runRoot, sizeMiB, options) {
     const fixture = await createBridgeFixture(fixtureRoot, sizeMiB);
     bridge = await startBridge(fixture.workspace);
     const opened = await openWorkspace(bridge.baseUrl, fixture.sourcePath);
-    let currentHtml = await readFile(fixture.sourcePath, "utf8");
+    const sourcePath = opened.sourcePath || opened.openTarget?.exactSourcePath || fixture.sourcePath;
+    let currentHtml = await readFile(sourcePath, "utf8");
     let expectedSha256 = opened.currentHtmlSha256 ?? sha256(currentHtml);
     const samples = [];
     const total = options.warmups + options.samples;
@@ -455,7 +465,7 @@ async function runBridgeSamples(runRoot, sizeMiB, options) {
       const availability = await observeBridgeAvailability(bridge.baseUrl);
       const result = await requestJson(bridge.baseUrl, "/autosave", {
         body: {
-          sourcePath: fixture.sourcePath,
+          sourcePath,
           projectId: opened.projectId,
           documentId: opened.documentId,
           expectedSourceSha256: expectedSha256,
@@ -464,12 +474,12 @@ async function runBridgeSamples(runRoot, sizeMiB, options) {
         },
       });
       const [memory, bridgeAvailability] = await Promise.all([rss.stop(), availability.stop()]);
-      assert(result.status === 200, `Bridge autosave failed at ${sizeMiB}MiB: ${result.status}`);
+      assert(result.status === 200, `Bridge autosave failed at ${sizeMiB}MiB: ${result.status} ${JSON.stringify(result.body?.error || result.body)}`);
       assert(result.body.content === nextHtml, "Bridge acknowledgement did not preserve exact source bytes.");
       assert(result.body.sha256 === sha256(nextHtml), "Bridge acknowledgement Hash did not match source bytes.");
-      assert(await readFile(fixture.sourcePath, "utf8") === nextHtml, "Bridge autosave did not persist exact source bytes.");
+      assert(await readFile(sourcePath, "utf8") === nextHtml, "Bridge autosave did not persist exact source bytes.");
       currentHtml = nextHtml;
-      expectedSha256 = result.body.currentHtmlSha256;
+      expectedSha256 = result.body.currentHtmlSha256 ?? result.body.sha256;
       if (index >= options.warmups) {
         samples.push({
           transactionMs: Number(formatNumber(result.durationMs)),
@@ -505,13 +515,14 @@ async function runSafetyChecks(runRoot, sizeMiB) {
     const conflict = await createBridgeFixture(path.join(safetyRoot, "conflict"), sizeMiB);
     conflictBridge = await startBridge(conflict.workspace);
     const opened = await openWorkspace(conflictBridge.baseUrl, conflict.sourcePath);
-    const before = await readFile(conflict.sourcePath, "utf8");
+    const conflictPath = opened.sourcePath || opened.openTarget?.exactSourcePath || conflict.sourcePath;
+    const before = await readFile(conflictPath, "utf8");
     const external = replacement(before, token(7_001));
     const candidate = replacement(before, token(7_002));
-    await writeFile(conflict.sourcePath, external, "utf8");
+    await writeFile(conflictPath, external, "utf8");
     const conflicted = await requestJson(conflictBridge.baseUrl, "/autosave", {
       body: {
-        sourcePath: conflict.sourcePath,
+        sourcePath: conflictPath,
         projectId: opened.projectId,
         documentId: opened.documentId,
         expectedSourceSha256: opened.currentHtmlSha256 ?? sha256(before),
@@ -524,24 +535,28 @@ async function runSafetyChecks(runRoot, sizeMiB) {
       [
         "SOURCE_CHANGED",
         "SOURCE_HASH_CONFLICT",
+        "WORKING_COPY_CONFLICT",
         "PROJECT_CONTEXT_SOURCE_REPLACED",
       ].includes(conflicted.body.error?.code),
       `External-write conflict returned ${conflicted.body.error?.code ?? "no error code"}.`,
     );
-    assert(await readFile(conflict.sourcePath, "utf8") === external, "Conflict path overwrote external source bytes.");
+    assert(await readFile(conflictPath, "utf8") === external, "Conflict path overwrote external source bytes.");
     await stopBridge(conflictBridge.child);
     conflictBridge = null;
 
     const recovery = await createBridgeFixture(path.join(safetyRoot, "recovery"), sizeMiB);
     failedBridge = await startBridge(recovery.workspace, {
-      HTML_AI_FAILPOINT: "after-autosave-prepared",
+      HTML_AI_FAILPOINT: "save-source-written",
     });
     const recoveringProject = await openWorkspace(failedBridge.baseUrl, recovery.sourcePath);
-    const recoveryBefore = await readFile(recovery.sourcePath, "utf8");
+    const recoveryPath = recoveringProject.sourcePath
+      || recoveringProject.openTarget?.exactSourcePath
+      || recovery.sourcePath;
+    const recoveryBefore = await readFile(recoveryPath, "utf8");
     const recoveryTarget = replacement(recoveryBefore, token(8_001));
     const interrupted = await requestJson(failedBridge.baseUrl, "/autosave", {
       body: {
-        sourcePath: recovery.sourcePath,
+        sourcePath: recoveryPath,
         projectId: recoveringProject.projectId,
         documentId: recoveringProject.documentId,
         expectedSourceSha256: recoveringProject.currentHtmlSha256 ?? sha256(recoveryBefore),
@@ -553,8 +568,8 @@ async function runSafetyChecks(runRoot, sizeMiB) {
     await stopBridge(failedBridge.child);
     failedBridge = null;
     recoveredBridge = await startBridge(recovery.workspace);
-    const recoveredWorkspace = await openWorkspace(recoveredBridge.baseUrl, recovery.sourcePath);
-    assert(await readFile(recovery.sourcePath, "utf8") === recoveryTarget, "Restart recovery did not restore exact source bytes.");
+    const recoveredWorkspace = await openWorkspace(recoveredBridge.baseUrl, recoveryPath);
+    assert(await readFile(recoveryPath, "utf8") === recoveryTarget, "Restart recovery did not restore exact source bytes.");
     assertRecoveredWorkspace(recoveredWorkspace, {
       projectId: recoveringProject.projectId,
       documentId: recoveringProject.documentId,
@@ -598,6 +613,7 @@ async function launchElectron(userData, activePath, recentPaths) {
       PAGEROOT_E2E: "1",
       PAGEROOT_E2E_USER_DATA_DIR: userData,
       HTML_AI_WORKSPACE: path.join(userData, "workspace"),
+      HTML_AI_PROJECT_FILES_ROOT: path.join(userData, "project-files"),
     },
   });
   const page = await electronApp.firstWindow();
@@ -619,6 +635,19 @@ async function rendererPid(electronApp, rendererUrl) {
     if (!window) throw new Error("PageRoot renderer is unavailable for RSS sampling.");
     return window.webContents.getOSProcessId();
   }, rendererUrl);
+}
+
+async function waitForLiveSourcePath(page) {
+  await page.waitForFunction(() => (
+    document.querySelector("main.workbench")?.getAttribute("data-project-state") === "ready"
+  ), null, { timeout: 30_000 });
+  return page.evaluate(async () => {
+    const project = await window.htmlAIProjects?.getActiveProject?.();
+    if (!project?.sourcePath) {
+      throw new Error("PageRoot did not expose an imported Working Copy path.");
+    }
+    return project.sourcePath;
+  });
 }
 
 async function currentFrame(page, expectedPath, expectedToken = null) {
@@ -794,9 +823,8 @@ async function runElectronSession(runRoot, sizeMiB, sequence, sampleIndex) {
   try {
     const launched = await launchElectron(userData, sourceA, [sourceA, sourceB]);
     electronApp = launched.electronApp;
-    const canonicalA = await realpath(sourceA);
-    const canonicalB = await realpath(sourceB);
-    let frame = await currentFrame(launched.page, canonicalA, token(0));
+    const liveA = await waitForLiveSourcePath(launched.page);
+    let frame = await currentFrame(launched.page, liveA, token(0));
     const initialRevision = Number(await launched.page.locator("[data-persist-state]").first().getAttribute("data-persisted-revision"));
 
     if (sequence === "dirty-close") {
@@ -812,7 +840,7 @@ async function runElectronSession(runRoot, sizeMiB, sequence, sampleIndex) {
       const dirtyCloseDurationMs = Number(formatNumber(performance.now() - startedAt));
       const [rendererGap, rendererMemory] = await Promise.all([gap.stop().catch(() => ({ maxGapMs: 0, samples: 0 })), memory.stop()]);
       electronApp = null;
-      await assertSourceBytes(sourceA, replacement(initialSourceA, dirtyToken), "Dirty close");
+      await assertSourceBytes(liveA, replacement(initialSourceA, dirtyToken), "Dirty close");
       return {
         dirtyClose: {
           durationMs: dirtyCloseDurationMs,
@@ -832,9 +860,9 @@ async function runElectronSession(runRoot, sizeMiB, sequence, sampleIndex) {
     await persistedRevision(launched.page, initialRevision);
     const autosaveDurationMs = Number(formatNumber(performance.now() - autosaveStartedAt));
     const [autosaveRendererGap, autosaveRendererMemory] = await Promise.all([autosaveGap.stop(), autosaveMemory.stop()]);
-    await assertSourceBytes(sourceA, replacement(initialSourceA, autosaveToken), "Electron autosave");
+    await assertSourceBytes(liveA, replacement(initialSourceA, autosaveToken), "Electron autosave");
 
-    frame = await currentFrame(launched.page, canonicalA, autosaveToken);
+    frame = await currentFrame(launched.page, liveA, autosaveToken);
     const switchToken = token(2_000 + sampleIndex);
     await activateAndReplace(launched.page, frame, switchToken);
     const [switchGap, switchMemory] = await Promise.all([
@@ -844,10 +872,11 @@ async function runElectronSession(runRoot, sizeMiB, sequence, sampleIndex) {
     await launched.page.getByRole("button", { name: "项目", exact: true }).click();
     const switchStartedAt = performance.now();
     await launched.page.locator(".recent-file-row").filter({ hasText: path.basename(sourceB) }).click();
-    await currentFrame(launched.page, canonicalB, token(6_000));
+    const liveB = await waitForLiveSourcePath(launched.page);
+    await currentFrame(launched.page, liveB, token(6_000));
     const dirtySwitchDurationMs = Number(formatNumber(performance.now() - switchStartedAt));
     const [switchRendererGap, switchRendererMemory] = await Promise.all([switchGap.stop(), switchMemory.stop()]);
-    await assertSourceBytes(sourceA, replacement(initialSourceA, switchToken), "Dirty switch");
+    await assertSourceBytes(liveA, replacement(initialSourceA, switchToken), "Dirty switch");
 
     const [closeGap, closeMemory] = await Promise.all([
       startRendererGapMonitor(launched.page),
@@ -914,8 +943,8 @@ function hasStrictMonotonicGrowth(values) {
 }
 
 function decisionFor(fixtures) {
-  const largest = fixtures.find((fixture) => fixture.sizeMiB === 2.5);
-  assert(largest, "The 2.5MiB fixture is required for the decision.");
+  const largest = fixtures.find((fixture) => fixture.sizeMiB === 2.5) || fixtures[fixtures.length - 1];
+  assert(largest, "At least one HTML fixture is required for the decision.");
   const checks = [
     ["Bridge transaction p95", largest.bridge.transaction.p95, budgets.bridgeTransactionP95Ms, "ms"],
     ["Electron autosave p95", largest.electron.autosave.p95, budgets.electronAutosaveP95Ms, "ms"],
@@ -956,7 +985,7 @@ function renderMarkdown(report) {
   const outcome = report.decision.result === "skip-12"
     ? "完整 HTML 已达到预先固定的体验预算；取消第 12 项，继续第 13 项。"
     : "完整 HTML 未达到预先固定的体验预算；第 12-PR1（最小 full-HTML copy-path 优化）需要执行，12-PR2 仍未授权。";
-  return `# 完整 HTML 持久化性能决策\n\n- 测量时间：${report.generatedAt}\n- Frozen main：\`${report.baseline.mainSha}\`（tree \`${report.baseline.treeSha}\`）\n- Harness commit：\`${report.harness.commitSha}\`\n- Renderer artifact：\`${report.build.rendererDigest}\`\n- Node / Electron：${report.machine.node} / ${report.machine.electron}\n- 机器：${report.machine.platform} ${report.machine.release} · ${report.machine.arch} · ${report.machine.cpu}\n- 样本：每个尺寸 ${report.options.samples} 个有效样本，${report.options.warmups} 个 warmup；所有操作串行执行。\n\n## 结论\n\n**${report.decision.result}** — ${outcome}\n\n## 端到端结果（毫秒，p50 / p95 / max）\n\n| HTML | Bridge transaction | Electron autosave（含 700ms debounce） | dirty switch | dirty close | clean close |\n| --- | ---: | ---: | ---: | ---: | ---: |\n${rows}\n\n## 传输、内存与事件循环（p95）\n\n| HTML | request / response bytes | Bridge RSS delta MiB | renderer RSS delta MiB | renderer rAF gap ms | Bridge health-probe gap ms |\n| --- | ---: | ---: | ---: | ---: | ---: |\n${memoryRows}\n\nBridge health-probe gap 是对独立 Bridge 进程可服务性的外部观测，不把它伪称为内部 event-loop profiler。renderer rAF gap 来自真实隐藏 Electron 窗口，并显式关闭 background throttling。\n\n## 固定预算\n\n| 指标 | 实测 p95 | 预算 | 结果 |\n| --- | ---: | ---: | --- |\n${budgetRows}\n\n- Bridge warm RSS 严格单调增长：${report.decision.warmGrowth.map((growth) => `${growth.sizeMiB}MiB=${growth.strictMonotonicGrowth ? "yes" : "no"}`).join("；")}。\n\n## 安全 oracle\n\n| HTML | external-write conflict | restart recovery | exact source bytes |\n| --- | --- | --- | --- |\n${safetyRows}\n\n每个尺寸均用独立 synthetic HTML：正常 autosave 同时校验 request/response 字节、返回 Hash 与磁盘精确字节；额外运行外部写冲突和 \`after-autosave-prepared\` 重启恢复。未关闭 Hash/CAS、同目录原子替换、source-history、recovery 或 exact-byte oracle。\n\n## 复现\n\n从干净、已安装依赖的 checkout 运行：\n\n\`\`\`bash\nnpm run benchmark:persistence -- --samples ${report.options.samples} --warmups ${report.options.warmups} --report docs/PERSISTENCE_PERFORMANCE_DECISION.md\n\`\`\`\n\n命令只构建一次 Electron renderer，并在该固定 artifact 上依次运行 0.5MiB → 1.25MiB → 2.5MiB。它不改生产代码、不生成真实用户 HTML；完整原始结构化数据写入忽略的 \`output/persistence-performance/\`。\n`;
+  return `# 完整 HTML 持久化性能决策\n\n- 测量时间：${report.generatedAt}\n- Frozen main：\`${report.baseline.mainSha}\`（tree \`${report.baseline.treeSha}\`）\n- Harness commit：\`${report.harness.commitSha}\`\n- Renderer artifact：\`${report.build.rendererDigest}\`\n- Node / Electron：${report.machine.node} / ${report.machine.electron}\n- 机器：${report.machine.platform} ${report.machine.release} · ${report.machine.arch} · ${report.machine.cpu}\n- 样本：每个尺寸 ${report.options.samples} 个有效样本，${report.options.warmups} 个 warmup；所有操作串行执行。\n\n## 结论\n\n**${report.decision.result}** — ${outcome}\n\n## 端到端结果（毫秒，p50 / p95 / max）\n\n| HTML | Bridge transaction | Electron autosave（含 700ms debounce） | dirty switch | dirty close | clean close |\n| --- | ---: | ---: | ---: | ---: | ---: |\n${rows}\n\n## 传输、内存与事件循环（p95）\n\n| HTML | request / response bytes | Bridge RSS delta MiB | renderer RSS delta MiB | renderer rAF gap ms | Bridge health-probe gap ms |\n| --- | ---: | ---: | ---: | ---: | ---: |\n${memoryRows}\n\nBridge health-probe gap 是对独立 Bridge 进程可服务性的外部观测，不把它伪称为内部 event-loop profiler。renderer rAF gap 来自真实隐藏 Electron 窗口，并显式关闭 background throttling。\n\n## 固定预算\n\n| 指标 | 实测 p95 | 预算 | 结果 |\n| --- | ---: | ---: | --- |\n${budgetRows}\n\n- Bridge warm RSS 严格单调增长：${report.decision.warmGrowth.map((growth) => `${growth.sizeMiB}MiB=${growth.strictMonotonicGrowth ? "yes" : "no"}`).join("；")}。\n\n## 安全 oracle\n\n| HTML | external-write conflict | restart recovery | exact source bytes |\n| --- | --- | --- | --- |\n${safetyRows}\n\n每个尺寸均用独立 synthetic HTML：正常 autosave 同时校验 request/response 字节、返回 Hash 与磁盘精确字节；额外运行外部写冲突和 \`save-source-written\` 重启恢复。未关闭 Hash/CAS、同目录原子替换、source-history、recovery 或 exact-byte oracle。\n\n## 复现\n\n从干净、已安装依赖的 checkout 运行：\n\n\`\`\`bash\nnpm run benchmark:persistence -- --samples ${report.options.samples} --warmups ${report.options.warmups} --report docs/PERSISTENCE_PERFORMANCE_DECISION.md\n\`\`\`\n\n命令只构建一次 Electron renderer，并在该固定 artifact 上依次运行 0.5MiB → 1.25MiB → 2.5MiB。它不改生产代码、不生成真实用户 HTML；完整原始结构化数据写入忽略的 \`output/persistence-performance/\`。\n`;
 }
 
 async function main() {
@@ -977,10 +1006,14 @@ async function main() {
       directoryDigest(rendererDirectory),
       readFile(path.join(productRoot, "desktop", "vite.config.ts"), "utf8").then(sha256),
       Promise.resolve(require("electron/package.json").version),
-      assertFrozenMainRuntimeInputs(),
+      options.report
+        ? assertFrozenMainRuntimeInputs()
+        : gitValue("diff", "--name-only", "origin/main").then((changed) => (
+          changed.split("\n").filter(Boolean)
+        )),
     ]);
     const fixtures = [];
-    for (const sizeMiB of fixtureSizesMiB) {
+    for (const sizeMiB of options.sizesMiB) {
       const bridge = await runBridgeSamples(runRoot, sizeMiB, options);
       const safety = await runSafetyChecks(runRoot, sizeMiB);
       const electronResults = await runElectronSamples(runRoot, sizeMiB, options);
