@@ -1507,24 +1507,26 @@ test("Electron Edit preserves imported source-relative ECharts assets and native
       frozenSnapshotCount: document.querySelectorAll(
         "#chart-host img[data-pageroot-edit-runtime-snapshot]",
       ).length,
-      frozenSnapshotVisible: (() => {
-        const snapshot = document.querySelector("#chart-host img[data-pageroot-edit-runtime-snapshot]");
-        const rect = snapshot?.getBoundingClientRect();
-        return Boolean(rect && rect.width >= 1 && rect.height >= 1);
-      })(),
+      dataImagePngCount: document.querySelectorAll('img[src^="data:image/png"]').length,
       bootstrapCount: document.querySelectorAll("[data-pageroot-edit-runtime-bootstrap]").length,
       staticScripts: document.querySelectorAll('script[type="application/x-html-canvas-disabled"]').length,
+      stubScripts: document.querySelectorAll(
+        'script[type="application/x-pageroot-edit-runtime-source"]',
+      ).length,
+      frozen: document.documentElement.getAttribute("data-pageroot-edit-runtime-frozen"),
       base: document.baseURI,
       stylesheetColor: getComputedStyle(document.querySelector(".runtime-resource-probe")).color,
       hostInlineStyle: document.querySelector("#chart-host").getAttribute("style"),
     })), { timeout: 6_000 }).toMatchObject({
-      rendererAuthorExecutions: 0,
-      chartCount: 0,
-      frozenSnapshotCount: 1,
-      frozenSnapshotVisible: true,
-      bootstrapCount: 0,
-      staticScripts: 2,
-      base: expect.stringMatching(/^file:/u),
+      rendererAuthorExecutions: 1,
+      chartCount: 1,
+      frozenSnapshotCount: 0,
+      dataImagePngCount: 0,
+      bootstrapCount: 1,
+      staticScripts: 0,
+      stubScripts: 2,
+      frozen: "true",
+      base: expect.stringMatching(/^pageroot-edit-runtime:/u),
       stylesheetColor: "rgb(1, 2, 3)",
       hostInlineStyle: expect.stringMatching(
         /(?=.*user-select: none)(?=.*transform: scale\(0\.75\))/u,
@@ -1635,10 +1637,12 @@ test("Electron Edit preserves imported source-relative ECharts assets and native
       frozenSnapshotCount: document.querySelectorAll(
         "#chart-host img[data-pageroot-edit-runtime-snapshot]",
       ).length,
+      dataImagePngCount: document.querySelectorAll('img[src^="data:image/png"]').length,
     }))).toEqual({
-      rendererAuthorExecutions: undefined,
-      chartCount: 0,
-      frozenSnapshotCount: 1,
+      rendererAuthorExecutions: 1,
+      chartCount: 1,
+      frozenSnapshotCount: 0,
+      dataImagePngCount: 0,
     });
     expect(readFileSync(managedSourcePath, "utf8")).not.toMatch(
       /data-pageroot-edit-runtime|data-echarts-runtime/u,
@@ -1735,7 +1739,7 @@ test("Electron Edit rejects unsafe ECharts host styling without persisting it", 
   }
 });
 
-test("Electron Edit isolates a malicious ECharts parent escape before static fallback", async () => {
+test("Electron Edit records same-origin parent access as an accepted direct-runtime risk", async () => {
   const sourceDirectory = mkdtempSync(
     path.join(tmpdir(), "pageroot-edit-runtime-parent-escape-e2e-"),
   );
@@ -1779,30 +1783,24 @@ test("Electron Edit isolates a malicious ECharts parent escape before static fal
       sourcePath,
       "runtime-isolated-editable",
     );
-    // The author can mutate only the disposable top-level capture document.
-    // Its source audit rejects that write, and the visible Edit iframe returns
-    // to a scriptless source-backed static frame.
+    // Direct one-shot Edit runs in the final visible iframe. Same-origin
+    // window.parent access is a known, accepted product risk (ADR 0025) and
+    // is not a screenshot-fallback gate. The source file still must not
+    // persist runtime descendants or PNG substitutes.
     await launched.page.waitForTimeout(4_500);
     const frame = await currentEditorFrame(launched.page);
-    expect(await launched.page.evaluate(() => (
-      document.documentElement.getAttribute("data-pageroot-author-escape")
-    ))).toBeNull();
     await expect.poll(() => frame.evaluate(() => ({
-      escaped: document.documentElement.getAttribute("data-pageroot-author-escape"),
       runtimeCanvasCount: document.querySelectorAll("canvas[data-echarts-runtime]").length,
       snapshotCount: document.querySelectorAll(
         "img[data-pageroot-edit-runtime-snapshot]",
       ).length,
-      runtimeMarkerCount: [...document.querySelectorAll("*")].filter((element) => (
-        [...element.attributes].some((attribute) => (
-          attribute.name.startsWith("data-pageroot-edit-runtime")
-        ))
-      )).length,
-    })), { timeout: 2_000 }).toEqual({
-      escaped: null,
-      runtimeCanvasCount: 0,
+      dataImagePngCount: document.querySelectorAll('img[src^="data:image/png"]').length,
+      frozen: document.documentElement.getAttribute("data-pageroot-edit-runtime-frozen"),
+    })), { timeout: 2_000 }).toMatchObject({
+      runtimeCanvasCount: 1,
       snapshotCount: 0,
-      runtimeMarkerCount: 0,
+      dataImagePngCount: 0,
+      frozen: "true",
     });
     await expect(launched.page.locator(".save-status")).toHaveText("已安全保存");
     const editable = await activateNativeEdit(frame, "runtime-isolated-editable");
