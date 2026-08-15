@@ -70,12 +70,13 @@ Read only the documents needed for the task:
 | Development environment and test lanes | `docs/DEVELOPMENT.md`, then `tests/TEST_STRATEGY.md` when test ownership changes |
 | Architecture, state, source patches, persistence, IPC | `docs/ARCHITECTURE.md`, `docs/ARCHITECTURE_CONTRACT.md`, `docs/STATE_OWNERSHIP.md`, `docs/ENGINEERING_STANDARDS.md`, `docs/SECURITY_MODEL.md` |
 | User flows, state or UI behavior | `docs/INTERACTION_FLOW.md`, plus the relevant focused policy document |
+| First-open import confirmation | `docs/IMPORT_CONFIRMATION_PRD.md`, then `docs/IMPORT_CONFIRMATION_PLAN.md` when implementing |
 | Change Request, schemas, AI completion or versions | `docs/CHANGE_REQUEST_PROTOCOL.md`, relevant files in `schemas/` and `fixtures/` |
 | Internal AI supplements or candidate validation | `docs/AI_SUPPLEMENT_AND_VALIDATION.md` |
 | Dependencies or advisories | `docs/DEPENDENCY_SECURITY.md` |
 | Public-source privacy and contribution boundary | `docs/OPEN_SOURCE_BOUNDARY.md`, `CONTRIBUTING.md`, `SECURITY.md` |
 | Versioning, packaging, signing or GitHub Release | `docs/RELEASING.md` |
-| Product scope or acceptance criteria | `docs/MVP_PRD.md` |
+| Product scope or acceptance criteria | `docs/MVP_PRD.md`, then `docs/VERSION_AND_PROJECT_FILES_PRD.md` for versions and project files |
 | Post-MVP cleanup sequence | `docs/POST_MVP_CLEANUP_PROGRAM.md` |
 
 When code makes a routed document inaccurate, update that document in the same PR. Do not duplicate a complex contract in this file.
