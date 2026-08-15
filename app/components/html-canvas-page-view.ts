@@ -90,13 +90,11 @@ function layoutHeightExcludingRootTransforms(
   const bodyZoom = zoomOf(body);
   if (transformOf(documentElement) || transformOf(body) || documentZoom !== 1 || bodyZoom !== 1) {
     // getBoundingClientRect includes visual transforms, so a transformed root
-    // would feed its scaled height back into the iframe and loop. Layout
-    // height ignores transforms, and dividing by zoom removes its layout
-    // scaling, leaving a stable natural height for the feedback cycle.
-    return Math.max(
-      documentElement.offsetHeight / documentZoom,
-      body.offsetHeight / bodyZoom,
-    );
+    // would feed its scaled height back into the iframe and loop. offsetHeight
+    // is a zoom-stable layout measurement and ignores transforms; never divide
+    // it by zoom, or a shrinking zoom would inflate the measured height and
+    // restart the ResizeObserver cycle.
+    return Math.max(documentElement.offsetHeight, body.offsetHeight);
   }
   return Math.max(
     documentElement.getBoundingClientRect().height,
