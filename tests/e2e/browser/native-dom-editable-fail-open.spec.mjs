@@ -3,7 +3,6 @@ import { expect, test } from "@playwright/test";
 import {
   activateNativeEdit,
   caseSelector,
-  doubleClickRenderedText,
   exportCurrentHtml,
   loadFixture,
   replaceEditableIslandBytes,
