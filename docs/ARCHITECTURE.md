@@ -94,6 +94,12 @@ Comments + frozen input
   edit/delete/relink controls and target recovery). A DOM or size change
   invalidates the old measurement before layout; absolute `top` is applied
   without interpolation so two cards never animate through one another.
+- In edit mode, the iframe root (`html` and `body`) never owns vertical page
+  scrolling. The shared `.review-scroll-stage` is the sole page-level vertical
+  scroll owner, so a root scrollbar cannot change the authored viewport width
+  and feed a Canvas measurement back into layout. This is an injected editor
+  policy only; authored nested `overflow: auto` containers retain their own
+  scrolling behavior.
 - Edit-mode presentation actions reuse that same context. A pure allowlist
   resolver recognizes strict source-backed Tabs, bounded explicit-ID and
   constant-index legacy Tabs, native details and local disclosures; one Canvas
