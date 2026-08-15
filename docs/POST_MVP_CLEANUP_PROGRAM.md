@@ -23,10 +23,10 @@ is not a product invariant.
 | ID | Purpose | This PR |
 | --- | --- | --- |
 | **P1-C** CI consolidation | One `ci.yml` for Draft feedback and Ready full-gate; Codex review is shown, never a merge hard gate; arm64-only packaging scripts; delete review-debt and retired review workflows | Done on `main` (#188) |
-| **P0-A** Remove retired validators | Delete dead packaged `scope-validator` wiring and extract the live native-layout fingerprint helpers so later refactors do not keep carrying unused contracts | Base (#189) |
+| **P0-A** Remove retired validators | Delete dead packaged `scope-validator` wiring and extract the live native-layout fingerprint helpers so later refactors do not keep carrying unused contracts | Done on `main` (#189) |
+| **P0-B** Remove legacy Bridge stack | Split the remaining v3 Bridge so persistence and IPC have one current owner | Done on `main` (#190) |
+| **P1-B** Save-pipeline CAS | Content-addressed save pipeline; depends on P0-B | Done on `main` (#192) |
 | **P1-A** Editable fail-open | The only user-visible relaxation: enter native editing and validate after, not before. Layout fingerprints, style-boundary carets and source-projection drift no longer refuse entry. Checkpoint scope, stale hashes and MutationObserver rollback still fail closed. | Yes |
-| **P0-B** Remove legacy Bridge stack | Split the remaining v3 Bridge so persistence and IPC have one current owner | Follow-up |
-| **P1-B** Save-pipeline CAS | Content-addressed save pipeline; depends on P0-B | Follow-up |
 
 ## Governance decisions locked by P1-C
 
@@ -93,3 +93,60 @@ files from the executable plan so deleting a retired test is a valid cleanup.
 
 `--mode advisory` for review policy is already gone after P1-C. CI
 `advisory_scope` / `advisory_size` are PR-size hints and are not this item.
+
+## What P0-B removes, and why
+
+P0-B is the desktop open-boundary cutover to v4-only. It does not migrate,
+recover, or delete user disk data. `.pageroot` and `.pageroot-registry.json`
+keep their current format.
+
+**Why the Bridge no longer reads `project-registry.json`.** Opening an HTML
+file that is not a registered v4 Project File must import as a new v4 V1.
+Keeping a v3 registry read fallback would reopen old projects as live state.
+GET `/workspace` and GET `/source` therefore return unmanaged state on a miss.
+Mutation routes fail closed with `PROJECT_NOT_FOUND` instead of falling into
+v3 `loadContextBySource`.
+
+**Why historical Documents workspace probes leave `workspacePath()`.** Desktop
+startup no longer searches `HTML AI 工作台/项目记录`, `YuanYe/项目记录`, or
+`PageRootV2/项目记录`. `HTML_AI_WORKSPACE` remains the test override;
+otherwise the leftover default is `Documents/PageRoot/项目记录`. v4 projects
+still live under `HTML_AI_PROJECT_FILES_ROOT` / `Documents/PageRoot/项目`.
+
+**What stays.** Attachment, conflict, and source-history HTTP routes remain.
+They now resolve a v4 project root (or 404). Attachments still use
+`draft/attachments/...` under that root. A v4 project has no v3 conflict or
+source-history store, so conflict reads return an empty payload and history
+actions return current source bytes plus empty history. The v3 Attempt
+finalizer CLI `--workspace` / `--project-id` is gone; `--project-root` remains.
+
+## What P1-B changes, and why
+
+P1-B sits on P0-B. It does not change the four save-status strings, island
+undo granularity, or the conflict-panel copy.
+
+**Why the second 700ms wait is gone.** Native-edit checkpoints already wait
+`NATIVE_EDIT_CHECKPOINT_DELAY_MS = 700` before producing a source patch.
+`DocumentWorkflow` then waited another 700ms before flush, so keypress-to-disk
+p50 sat near 1.4s. Checkpoint writes now flush immediately, matching Cmd+S.
+Non-checkpoint writes keep a short ~100ms debounce. `PROJECT.md` still uses
+700ms.
+
+**Why the save journal is two-state CAS.** The eight-state park journal
+re-checked the expected hash five times and realpath'd three times per atomic
+write. New saves write recovery bytes (`prepared`), then one same-directory
+tmp + expected-hash CAS rename, one post-write hash reread, and `committed`.
+Crash recovery still reads legacy park journals and finishes complete old or
+complete new bytes, never a mix. A clean Working Copy silently adopts an
+external disk change; dirty editor bytes plus an external change stay
+`WORKING_COPY_CONFLICT`.
+
+## What P1-A changes, and why
+
+P1-A is the only user-visible relaxation. Native editing enters first and
+validates after. Layout fingerprints, style-boundary carets, source-projection
+remounts and complex-parent text fragments no longer refuse entry.
+Checkpoint scope, stale hashes and MutationObserver rollback still fail
+closed. `isNativeDirectEditRoot` is unchanged: script, style, form roots and
+immutable atoms stay out of native text islands.
+

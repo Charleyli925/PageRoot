@@ -32,40 +32,48 @@ export function submitRequest(bridge, request, requestOptions) {
  */
 export async function writeAttemptOutput(run, html) {
   assertRunIdentity(run);
-  if (typeof run.attemptPath !== "string" || typeof run.outputPath !== "string") {
+  const outputPath = run.outputPath || run.activeRun?.outputPath;
+  const attemptPath = run.attemptPath || run.activeRun?.attemptPath;
+  if (typeof attemptPath !== "string" || typeof outputPath !== "string") {
     throw new TypeError("Attempt fixture requires attemptPath and outputPath");
   }
-  const outputRelativePath = relative(run.attemptPath, run.outputPath);
+  const outputRelativePath = relative(attemptPath, outputPath);
   if (
     outputRelativePath !== join("output", "index.html")
+    && outputRelativePath !== join("output", "candidate.html")
     && !attemptOutputPathPattern.test(outputRelativePath)
   ) {
     throw new Error(
       `Attempt fixture may only write the product-selected output HTML, received ${outputRelativePath}`,
     );
   }
-  await writeFile(run.outputPath, html, "utf8");
-  return run.outputPath;
+  await writeFile(outputPath, html, "utf8");
+  return outputPath;
 }
 
 /**
- * Invokes the product's official finalizer. It never creates or edits a
+ * Invokes the product's official v4 finalizer. It never creates or edits a
  * completion record itself, so malformed/missing-finalizer tests stay real.
  */
 export function runOfficialFinalizer(workspace, run, overrides = {}) {
   assertRunIdentity(run);
+  const projectRoot = overrides.projectRoot
+    || run.projectRootPath
+    || run.projectRoot
+    || run.activeRun?.openTarget?.projectRootPath;
+  if (typeof projectRoot !== "string" || projectRoot.length === 0) {
+    throw new TypeError("Attempt fixture requires a v4 projectRootPath");
+  }
   return execFileAsync(
     process.execPath,
     [
       finalizerScript,
-      "--workspace",
-      workspace,
-      "--project-id",
-      overrides.projectId ?? run.projectId,
+      "--project-root",
+      projectRoot,
       "--request-id",
       overrides.requestId ?? run.requestId,
       "--attempt-id",
-      overrides.attemptId ?? run.attemptId,
+      overrides.attemptId ?? run.attemptId ?? "attempt_001",
     ],
     {
       env: {

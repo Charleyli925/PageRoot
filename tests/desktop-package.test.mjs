@@ -26,7 +26,6 @@ const APP_FILE_ALLOWLIST = [
   "desktop/preview-protocol.mjs",
   "desktop/edit-runtime-bootstrap.mjs",
   "desktop/edit-runtime-protocol.mjs",
-  "desktop/edit-runtime-capture-owner.mjs",
   "desktop/edit-runtime-preparation-fence.mjs",
   "desktop/runtime-visual-capture-owner.mjs",
   "app/domain/edit-runtime-contract.js",

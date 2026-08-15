@@ -5,7 +5,6 @@ import {
   lstat,
   mkdir,
   mkdtemp,
-  open,
   readFile,
   readdir,
   rename,
@@ -1231,7 +1230,7 @@ test("Request publication rechecks source bytes after freezing its input bundle"
   );
 });
 
-test("save rechecks source bytes immediately before its replacing write", async (t) => {
+test("save conflicts when both PageRoot and disk changed", async (t) => {
   const value = await fixture(t);
   const imported = await importSource(value, "save-boundary.html");
   const externalHtml = html("external edit before save write");
@@ -1253,93 +1252,132 @@ test("save rechecks source bytes immediately before its replacing write", async 
       editRevision: 1,
     }),
     (error) => error instanceof ProjectFileRepositoryError
-      && error.code === "SOURCE_HASH_CONFLICT",
+      && error.code === "WORKING_COPY_CONFLICT",
   );
 
   assert.equal(await readFile(imported.target.exactSourcePath, "utf8"), externalHtml);
 });
 
-test("save preserves an external replacement that races after the final source check", async (t) => {
+test("save silently adopts external disk bytes when PageRoot has no dirty buffer", async (t) => {
   const value = await fixture(t);
-  const imported = await importSource(value, "save-atomic-boundary.html");
-  const externalHtml = html("external edit in the replacement window");
-  const repository = new ProjectFileRepository({
-    projectsRoot: value.projects,
-    failpoint: async (name) => {
-      if (name === "save-source-parking") {
-        await writeFile(imported.target.exactSourcePath, externalHtml, "utf8");
-      }
-      return false;
-    },
+  const imported = await importSource(value, "save-clean-adopt.html");
+  const adoptedHtml = html("external clean change");
+  await writeFile(imported.target.exactSourcePath, adoptedHtml, "utf8");
+
+  const saved = await value.repository.saveWorkingCopy({
+    target: imported.target,
+    html: html("V1"),
+    expectedSourceSha256: imported.target.sourceSha256,
+    editRevision: 0,
   });
 
-  await assert.rejects(
-    repository.saveWorkingCopy({
-      target: imported.target,
-      html: html("PageRoot bytes must not win this race"),
-      expectedSourceSha256: imported.target.sourceSha256,
-      editRevision: 1,
-    }),
-    (error) => error instanceof ProjectFileRepositoryError
-      && error.code === "SOURCE_HASH_CONFLICT",
-  );
-
-  assert.equal(await readFile(imported.target.exactSourcePath, "utf8"), externalHtml);
+  assert.equal(await readFile(imported.target.exactSourcePath, "utf8"), adoptedHtml);
+  assert.equal(saved.currentSha256, sha256(Buffer.from(adoptedHtml, "utf8")));
+  const state = await json(path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "working-copies",
+    `${imported.target.workingCopyId}.json`,
+  ));
+  assert.equal(state.saveState, "saved");
+  assert.equal(state.currentSha256, saved.currentSha256);
 });
 
-test("save retains an external descriptor write to the parked source inode", async (t) => {
+test("workspace recovers a legacy parked save journal to complete new bytes", async (t) => {
   const value = await fixture(t);
-  const imported = await importSource(value, "save-parked-descriptor.html");
-  const externalHtml = html("external descriptor write after publication");
-  const pageRootHtml = html("PageRoot save survives beside external write");
-  const externalHandle = await open(imported.target.exactSourcePath, "r+");
-  t.after(() => externalHandle.close().catch(() => {}));
-  let wroteThroughParkedDescriptor = false;
-  const repository = new ProjectFileRepository({
-    projectsRoot: value.projects,
-    failpoint: async (name) => {
-      if (name === "save-before-recovery-cleanup") {
-        await externalHandle.truncate(0);
-        await externalHandle.writeFile(externalHtml, "utf8");
-        await externalHandle.sync();
-        wroteThroughParkedDescriptor = true;
-      }
-      return false;
-    },
-  });
-
-  await assert.rejects(
-    repository.saveWorkingCopy({
-      target: imported.target,
-      html: pageRootHtml,
-      expectedSourceSha256: imported.target.sourceSha256,
-      editRevision: 1,
-    }),
-    (error) => error instanceof ProjectFileRepositoryError
-      && error.code === "SOURCE_HASH_CONFLICT",
+  const imported = await importSource(value, "save-legacy-parked.html");
+  const previousHtml = html("V1");
+  const nextHtml = html("recovered from legacy parked journal");
+  const recoveryId = `save_${imported.target.workingCopyId}_1_${"a".repeat(32)}`;
+  const recoveryRoot = path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "recovery",
+    recoveryId,
   );
-  assert.equal(wroteThroughParkedDescriptor, true);
-  await externalHandle.close();
-
-  assert.equal(await readFile(imported.target.exactSourcePath, "utf8"), pageRootHtml);
-  const recoveryRoot = path.join(imported.target.projectRootPath, ".pageroot", "recovery");
-  const recoveryDirectories = (await readdir(recoveryRoot, { withFileTypes: true }))
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => entry.name);
-  assert.equal(recoveryDirectories.length, 1);
-  assert.equal(
-    await readFile(path.join(recoveryRoot, recoveryDirectories[0], "previous.html"), "utf8"),
-    externalHtml,
+  const manifest = await json(path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "manifest.json",
+  ));
+  const workingCopy = manifest.workingCopies.find(
+    (entry) => entry.workingCopyId === imported.target.workingCopyId,
   );
-  const transaction = await json(path.join(
+  await mkdir(recoveryRoot, { recursive: true });
+  await writeFile(path.join(recoveryRoot, "previous.html"), previousHtml, "utf8");
+  await writeFile(path.join(recoveryRoot, "next.html"), nextHtml, "utf8");
+  await rm(imported.target.exactSourcePath);
+  await writeFile(path.join(
     imported.target.projectRootPath,
     ".pageroot",
     "transactions",
-    `${recoveryDirectories[0]}.json`,
+    `${recoveryId}.json`,
+  ), JSON.stringify({
+    schemaVersion: "4.0.0",
+    kind: "save",
+    state: "source-parked",
+    projectId: imported.target.projectId,
+    documentId: imported.target.documentId,
+    workingCopyId: imported.target.workingCopyId,
+    sourceRelativePath: workingCopy.sourceRelativePath,
+    expectedSourceSha256: imported.target.sourceSha256,
+    targetSourceSha256: sha256(Buffer.from(nextHtml, "utf8")),
+    editRevision: 1,
+    recoveryId,
+    preparedAt: "2026-08-15T00:00:00.000Z",
+  }), "utf8");
+
+  const reopened = await new ProjectFileRepository({ projectsRoot: value.projects }).workspace({
+    sourcePath: imported.target.exactSourcePath,
+  });
+  assert.equal(reopened.content, nextHtml);
+  assert.equal(await readFile(imported.target.exactSourcePath, "utf8"), nextHtml);
+});
+
+test("workspace recovers a legacy parked journal whose previous inode changed", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "save-legacy-parked-conflict.html");
+  const previousHtml = html("external descriptor write after publication");
+  const nextHtml = html("PageRoot save survives beside external write");
+  const recoveryId = `save_${imported.target.workingCopyId}_1_${"b".repeat(32)}`;
+  const recoveryRoot = path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "recovery",
+    recoveryId,
+  );
+  const manifest = await json(path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "manifest.json",
   ));
-  assert.equal(transaction.state, "conflict");
-  assert.equal(transaction.recovery, "parked-source-changed-after-publish");
-  assert.equal(transaction.parkedSourceSha256, sha256(Buffer.from(externalHtml)));
+  const workingCopy = manifest.workingCopies.find(
+    (entry) => entry.workingCopyId === imported.target.workingCopyId,
+  );
+  await mkdir(recoveryRoot, { recursive: true });
+  await writeFile(path.join(recoveryRoot, "previous.html"), previousHtml, "utf8");
+  await writeFile(path.join(recoveryRoot, "next.html"), nextHtml, "utf8");
+  await writeFile(imported.target.exactSourcePath, nextHtml, "utf8");
+  await writeFile(path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "transactions",
+    `${recoveryId}.json`,
+  ), JSON.stringify({
+    schemaVersion: "4.0.0",
+    kind: "save",
+    state: "committed",
+    projectId: imported.target.projectId,
+    documentId: imported.target.documentId,
+    workingCopyId: imported.target.workingCopyId,
+    sourceRelativePath: workingCopy.sourceRelativePath,
+    expectedSourceSha256: imported.target.sourceSha256,
+    targetSourceSha256: sha256(Buffer.from(nextHtml, "utf8")),
+    editRevision: 1,
+    recoveryId,
+    preparedAt: "2026-08-15T00:00:00.000Z",
+    committedAt: "2026-08-15T00:00:01.000Z",
+  }), "utf8");
 
   await assert.rejects(
     new ProjectFileRepository({ projectsRoot: value.projects }).workspace({
@@ -1348,65 +1386,8 @@ test("save retains an external descriptor write to the parked source inode", asy
     (error) => error instanceof ProjectFileRepositoryError
       && error.code === "SAVE_RECOVERY_CONFLICT",
   );
-  assert.equal(
-    await readFile(path.join(recoveryRoot, recoveryDirectories[0], "previous.html"), "utf8"),
-    externalHtml,
-  );
-});
-
-test("save recovery rechecks a committed parked source inode", async (t) => {
-  const value = await fixture(t);
-  const imported = await importSource(value, "save-committed-parked-descriptor.html");
-  const externalHtml = html("external descriptor write after committed save");
-  const pageRootHtml = html("PageRoot save survives restart recovery");
-  const externalHandle = await open(imported.target.exactSourcePath, "r+");
-  t.after(() => externalHandle.close().catch(() => {}));
-  const interrupted = new ProjectFileRepository({
-    projectsRoot: value.projects,
-    failpoint: async (name) => name === "save-committed",
-  });
-
-  await assert.rejects(
-    interrupted.saveWorkingCopy({
-      target: imported.target,
-      html: pageRootHtml,
-      expectedSourceSha256: imported.target.sourceSha256,
-      editRevision: 1,
-    }),
-    (error) => error instanceof ProjectFileRepositoryError
-      && error.code === "INJECTED_FAILPOINT",
-  );
-  await externalHandle.truncate(0);
-  await externalHandle.writeFile(externalHtml, "utf8");
-  await externalHandle.sync();
-  await externalHandle.close();
-
-  await assert.rejects(
-    new ProjectFileRepository({ projectsRoot: value.projects }).workspace({
-      sourcePath: imported.target.exactSourcePath,
-    }),
-    (error) => error instanceof ProjectFileRepositoryError
-      && error.code === "SAVE_RECOVERY_CONFLICT",
-  );
-  assert.equal(await readFile(imported.target.exactSourcePath, "utf8"), pageRootHtml);
-  const recoveryRoot = path.join(imported.target.projectRootPath, ".pageroot", "recovery");
-  const recoveryDirectories = (await readdir(recoveryRoot, { withFileTypes: true }))
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => entry.name);
-  assert.equal(recoveryDirectories.length, 1);
-  assert.equal(
-    await readFile(path.join(recoveryRoot, recoveryDirectories[0], "previous.html"), "utf8"),
-    externalHtml,
-  );
-  const transaction = await json(path.join(
-    imported.target.projectRootPath,
-    ".pageroot",
-    "transactions",
-    `${recoveryDirectories[0]}.json`,
-  ));
-  assert.equal(transaction.state, "conflict");
-  assert.equal(transaction.recovery, "parked-source-changed-after-publish");
-  assert.equal(transaction.parkedSourceSha256, sha256(Buffer.from(externalHtml)));
+  assert.equal(await readFile(imported.target.exactSourcePath, "utf8"), nextHtml);
+  assert.equal(await readFile(path.join(recoveryRoot, "previous.html"), "utf8"), previousHtml);
 });
 
 test("save refuses a missing Working Copy state before replacing HTML", async (t) => {
@@ -1434,13 +1415,13 @@ test("save refuses a missing Working Copy state before replacing HTML", async (t
   assert.equal(await readFile(imported.target.exactSourcePath, "utf8"), html("V1"));
 });
 
-test("workspace recovers a source safely parked before publication", async (t) => {
+test("workspace recovers a source after a post-rename save crash", async (t) => {
   const value = await fixture(t);
   const imported = await importSource(value, "save-parked-recovery.html");
   const nextHtml = html("recovered after safe parking");
   const failing = new ProjectFileRepository({
     projectsRoot: value.projects,
-    failpoint: async (name) => name === "save-source-parked",
+    failpoint: async (name) => name === "save-source-written",
   });
 
   await assert.rejects(
@@ -2264,9 +2245,6 @@ test("save fault injection recovers a complete durable state or a retained old s
   for (const failpoint of [
     "save-prepared",
     "save-source-written",
-    "save-state-written",
-    "save-manifest-written",
-    "save-committed",
   ]) {
     const value = await fixture(t);
     const imported = await importSource(value, "save-fault.html");

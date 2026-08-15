@@ -1,8 +1,19 @@
 import { isBridgeRequestError } from "./bridge-client.js";
 import { createDocumentWorkflowCodecs } from "./document-workflow-codecs.js";
 
-const AUTOSAVE_DELAY_MS = 700;
+const AUTOSAVE_DELAY_MS = 100;
 const SHA256 = /^sha256:[a-f0-9]{64}$/u;
+
+function isNativeEditCheckpoint(mutation) {
+  return Boolean(
+    mutation
+    && mutation.kind === "text"
+    && (
+      mutation.property === "editableIslandHtml"
+      || mutation.property === "textFragmentHtml"
+    ),
+  );
+}
 
 function succeeded(value) {
   return Object.freeze({ status: "succeeded", value });
@@ -408,7 +419,7 @@ export class DocumentWorkflow {
     this.#documentSession.setPendingWrite(write);
     this.#persistRecovery(write, writeContext);
     this.#documentSession.setPersistence({ state: "queued", error: "" });
-    this.#scheduleAutosave();
+    this.#scheduleAutosave({ immediate: isNativeEditCheckpoint(mutation) });
     this.#emit({
       type: "document-edit-queued",
       context: writeContext,
@@ -932,8 +943,12 @@ export class DocumentWorkflow {
     }
   }
 
-  #scheduleAutosave() {
+  #scheduleAutosave({ immediate = false } = {}) {
     this.#clearAutosaveTimer();
+    if (immediate) {
+      void this.flush();
+      return;
+    }
     this.#autosaveTimer = this.#scheduler.setTimeout(() => {
       this.#autosaveTimer = null;
       void this.flush();
@@ -1409,7 +1424,12 @@ export class DocumentWorkflow {
       "当前修改还没有写入源 HTML，请重试或导出当前编辑。",
     );
     const code = sourceErrorCode(cause, "DOCUMENT_AUTOSAVE_REJECTED");
-    const conflict = code === "SOURCE_CHANGED" || String(cause?.message || "").includes("SOURCE_CHANGED");
+    const conflict = (
+      code === "SOURCE_CHANGED"
+      || code === "SOURCE_HASH_CONFLICT"
+      || code === "WORKING_COPY_CONFLICT"
+      || String(cause?.message || "").includes("SOURCE_CHANGED")
+    );
     const protocolError = code === "INVALID_AUTOSAVE_ACK" || cause?.code === "INVALID_AUTOSAVE_ACK";
     const recoveryWrite = this.#restoreWriteAfterFailure(write, writeContext);
     if (this.#isCurrent(writeContext)) {

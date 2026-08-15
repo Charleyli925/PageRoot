@@ -294,6 +294,8 @@ export function sourceTextParentsForSegments(
   )];
 }
 
+export { alignPreviewSourceSurface } from "../lib/align-preview-source-surface.js";
+
 export function sourceBackedPreviewElements(documentNode: Document): Element[] {
   const elements: Element[] = [];
   const visit = (element: Element) => {

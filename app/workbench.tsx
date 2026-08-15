@@ -2756,8 +2756,8 @@ export default function Workbench() {
         if (EDIT_RUNTIME_PENDING_PHASES.has(
           currentControllerSnapshot()?.editRuntime?.phase || "static",
         )) {
-          // Main bounds preparation and isolated capture independently. A
-          // final one-shot author frame cannot acknowledge its source until
+          // Main bounds preparation and the visible iframe settle independently.
+          // A final one-shot author frame cannot acknowledge its source until
           // both serial phases settle; treating that permitted interval as a
           // failed static render would replace the iframe and execute again.
           attemptLimit = Math.max(attemptLimit, runtimeAttemptLimit);

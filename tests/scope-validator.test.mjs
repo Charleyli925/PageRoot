@@ -2,8 +2,6 @@ import assert from "node:assert/strict";
 import {
   access,
   readFile,
-  readdir,
-  writeFile,
 } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
@@ -31,7 +29,7 @@ import {
 import {
   normalizeCandidateAssessmentPolicy,
 } from "../scripts/candidate-assessment-decoder.mjs";
-import { injectManagedMeta, sha256 } from "../scripts/lifecycle-core.mjs";
+import { sha256 } from "../scripts/lifecycle-core.mjs";
 import { validateScope } from "../scripts/scope-validator.mjs";
 
 const productRoot = fileURLToPath(new URL("../", import.meta.url));
@@ -752,8 +750,12 @@ test("only the five exact finalizer meta names and semantic normalizations are n
     "html-ai-based-on-version-id": managedIdentity.basedOnVersionId,
     "html-ai-request-id": managedIdentity.requestId,
   };
-  const stamped = injectManagedMeta(documentHtml(), managedIdentity)
-    .replace('id="outside"', "id='outside'");
+  const stamped = documentHtml().replace(
+    "</head>",
+    Object.entries(expectedManagedMetadata)
+      .map(([name, value]) => `<meta name="${name}" content="${value}">`)
+      .join("") + "</head>",
+  ).replace('id="outside"', "id='outside'");
   const report = reportFor(stamped);
   assert.equal(report.verdict, "pass");
   assert.ok(
@@ -953,6 +955,7 @@ test("workspace lifecycle treats comment targets as guidance for every HTML chan
     })
   ).body;
   assert.equal(opened.registered, true);
+  const workingPath = opened.sourcePath;
   const frozenSource = await readFile(sourcePath, "utf8");
   const target = textTarget(frozenSource);
   const candidateCases = [
@@ -980,7 +983,7 @@ test("workspace lifecycle treats comment targets as guidance for every HTML chan
   for (const [expectedKind, mutate] of candidateCases) {
     const run = (
       await submitRequest(bridge, {
-        sourcePath,
+        sourcePath: workingPath,
         projectId: opened.projectId,
         documentId: opened.documentId,
         expectedSourceSha256: opened.currentHtmlSha256,
@@ -1003,10 +1006,8 @@ test("workspace lifecycle treats comment targets as guidance for every HTML chan
     const base = await readFile(run.inputPath, "utf8");
     await writeAttemptOutput(run, mutate(base));
     await runOfficialFinalizer(environment.workspace, run);
-    const status = await readStatus(bridge, { sourcePath, ...run });
-    const candidateAssessment = status.body.candidateAssessment || JSON.parse(
-      await readFile(join(run.attemptPath, "candidate-assessment.json"), "utf8"),
-    );
+    const status = await readStatus(bridge, { sourcePath: workingPath, ...run });
+    const candidateAssessment = status.body.candidateAssessment;
     readyCaseCount += 1;
     assert.equal(status.body.status, "ready-to-open");
     assert.equal(candidateAssessment.status, "ready");
@@ -1014,18 +1015,21 @@ test("workspace lifecycle treats comment targets as guidance for every HTML chan
     const cancelled = await bridge.postJson(
       "/active-run/cancel",
       {
-        sourcePath,
+        sourcePath: workingPath,
         requestId: run.requestId,
         attemptId: run.attemptId,
       },
     );
     assert.equal(cancelled.response.status, 200);
     assert.equal(cancelled.body.status, "cancelled");
-    await assert.rejects(access(join(
-      opened.projectRoot,
-      "versions",
-      run.candidateVersionId,
-    )));
+    const manifest = JSON.parse(await readFile(
+      join(opened.projectRoot, ".pageroot", "manifest.json"),
+      "utf8",
+    ));
+    assert.equal(
+      manifest.versions.some((version) => version.versionId === run.candidateVersionId),
+      false,
+    );
     await assert.rejects(access(join(run.attemptPath, "scope-report.json")));
     await assert.rejects(access(join(run.attemptPath, "validation-review.json")));
     assert.equal(await readFile(sourcePath, "utf8"), frozenSource);
@@ -1034,7 +1038,7 @@ test("workspace lifecycle treats comment targets as guidance for every HTML chan
 
   const acceptedRun = (
     await submitRequest(bridge, {
-      sourcePath,
+      sourcePath: workingPath,
       projectId: opened.projectId,
       documentId: opened.documentId,
       expectedSourceSha256: opened.currentHtmlSha256,
@@ -1057,13 +1061,13 @@ test("workspace lifecycle treats comment targets as guidance for every HTML chan
     acceptedBase.replace("目标正文", "目标正文已更新"),
   );
   await runOfficialFinalizer(environment.workspace, acceptedRun);
-  const accepted = await readStatus(bridge, { sourcePath, ...acceptedRun });
+  const accepted = await readStatus(bridge, { sourcePath: workingPath, ...acceptedRun });
   assert.equal(accepted.body.status, "ready-to-open");
   assert.equal(accepted.body.versionId, acceptedRun.candidateVersionId);
   assert.equal(accepted.body.candidateAssessment.status, "ready");
   assert.equal(acceptedRun.candidateVersionId, "ver_0002");
   const adopted = await bridge.postJson("/ready-version/activate", {
-    sourcePath,
+    sourcePath: workingPath,
     projectId: accepted.body.projectId,
     documentId: accepted.body.documentId,
     requestId: accepted.body.requestId,
@@ -1072,10 +1076,12 @@ test("workspace lifecycle treats comment targets as guidance for every HTML chan
   });
   assert.equal(adopted.response.status, 200, JSON.stringify(adopted.body));
   assert.equal(adopted.body.status, "version-activated");
+  const adoptedManifest = JSON.parse(await readFile(
+    join(opened.projectRoot, ".pageroot", "manifest.json"),
+    "utf8",
+  ));
   assert.deepEqual(
-    (await readdir(join(opened.projectRoot, "versions")))
-      .filter((name) => /^ver_\d+$/u.test(name))
-      .sort(),
+    adoptedManifest.versions.map((version) => version.versionId).sort(),
     ["ver_0001", "ver_0002"],
   );
 });
@@ -1099,10 +1105,11 @@ test("an unrelated but usable HTML candidate is preserved with mandatory-review 
       expectedSourceSha256: preview.currentHtmlSha256,
     })
   ).body;
+  const workingPath = opened.sourcePath;
   const target = regularTarget();
   const run = (
     await submitRequest(bridge, {
-      sourcePath,
+      sourcePath: workingPath,
       projectId: opened.projectId,
       documentId: opened.documentId,
       expectedSourceSha256: opened.currentHtmlSha256,
@@ -1135,7 +1142,7 @@ test("an unrelated but usable HTML candidate is preserved with mandatory-review 
   );
   await runOfficialFinalizer(environment.workspace, run);
 
-  const ready = await readStatus(bridge, { sourcePath, ...run });
+  const ready = await readStatus(bridge, { sourcePath: workingPath, ...run });
   assert.equal(ready.response.status, 200, JSON.stringify(ready.body));
   assert.equal(ready.body.status, "ready-to-open");
   assert.equal(ready.body.candidateAssessment.status, "attention");
@@ -1144,30 +1151,10 @@ test("an unrelated but usable HTML candidate is preserved with mandatory-review 
     ["PAGE_CONTINUITY_UNCERTAIN"],
   );
   assert.equal(ready.body.versionId, "ver_0002");
-  assert.equal(ready.body.currentPath, sourcePath);
-  assert.equal(ready.body.workingCopyPath, sourcePath);
+  assert.equal(ready.body.currentPath, workingPath);
+  assert.equal(ready.body.workingCopyPath, workingPath);
   assert.equal(await readFile(sourcePath, "utf8"), originalHtml);
-
-  const persistedAssessment = JSON.parse(
-    await readFile(join(run.attemptPath, "candidate-assessment.json"), "utf8"),
-  );
-  assert.equal(persistedAssessment.status, "attention");
-  await assert.rejects(access(join(run.attemptPath, "scope-report.json")));
-  await assert.rejects(access(join(run.attemptPath, "validation-review.json")));
   assert.notEqual(frozenHtml, await readFile(run.outputPath, "utf8"));
-
-  persistedAssessment.requestId = "req_tampered";
-  await writeFile(
-    join(run.attemptPath, "candidate-assessment.json"),
-    `${JSON.stringify(persistedAssessment, null, 2)}\n`,
-    "utf8",
-  );
-  const tampered = await readStatus(bridge, { sourcePath, ...run });
-  assert.equal(tampered.response.status, 409);
-  assert.equal(
-    tampered.body.error.code,
-    "CANDIDATE_ASSESSMENT_IDENTITY_MISMATCH",
-  );
 });
 
 test("workspace lifecycle accepts broad page and script edits without content-based blocking", async (t) => {
@@ -1190,6 +1177,7 @@ test("workspace lifecycle accepts broad page and script edits without content-ba
     })
   ).body;
   assert.equal(opened.registered, true);
+  const workingPath = opened.sourcePath;
   const target = regularTarget();
   const candidateCases = [
     ["text", (html) => html.replace("目标外正文", "越界正文")],
@@ -1222,7 +1210,7 @@ test("workspace lifecycle accepts broad page and script edits without content-ba
   for (const [expectedKind, mutate] of candidateCases) {
     const run = (
       await submitRequest(bridge, {
-        sourcePath,
+        sourcePath: workingPath,
         projectId: opened.projectId,
         documentId: opened.documentId,
         expectedSourceSha256,
@@ -1243,63 +1231,44 @@ test("workspace lifecycle accepts broad page and script edits without content-ba
     const frozenHtml = await readFile(run.inputPath, "utf8");
     await writeAttemptOutput(run, mutate(frozenHtml));
     await runOfficialFinalizer(environment.workspace, run);
-    const status = await readStatus(bridge, { sourcePath, ...run });
+    const status = await readStatus(bridge, { sourcePath: workingPath, ...run });
     assert.equal(status.response.status, 200, expectedKind);
     assert.equal(status.body.status, "ready-to-open", expectedKind);
     assert.equal(status.body.candidateAssessment.status, "ready", expectedKind);
-    const assessmentPath = join(run.attemptPath, "candidate-assessment.json");
-    const outcomePath = join(run.attemptPath, "outcome.json");
-    await Promise.all([
-      access(run.outputPath),
-      access(run.completionPath),
-      access(assessmentPath),
-    ]);
-    const persistedAssessment = JSON.parse(
-      await readFile(assessmentPath, "utf8"),
-    );
-    assert.equal(persistedAssessment.status, "ready", expectedKind);
-    assert.equal("executable" in persistedAssessment, false, expectedKind);
-    await assert.rejects(access(join(run.attemptPath, "scope-report.json")));
-    await assert.rejects(access(join(run.attemptPath, "validation-review.json")));
+    await access(run.outputPath);
+    await access(run.completionPath);
+    assert.equal("executable" in status.body.candidateAssessment, false, expectedKind);
     const cancelled = await bridge.postJson(
       "/active-run/cancel",
       {
-        sourcePath,
+        sourcePath: workingPath,
         requestId: run.requestId,
         attemptId: run.attemptId,
       },
     );
     assert.equal(cancelled.response.status, 200, expectedKind);
     assert.equal(cancelled.body.status, "cancelled", expectedKind);
-    await access(outcomePath);
-    const persistedOutcome = JSON.parse(
-      await readFile(outcomePath, "utf8"),
-    );
-    assert.equal(persistedOutcome.status, "cancelled", expectedKind);
     const projectRoot = opened.projectRoot;
-    const versionIds = (await readdir(join(projectRoot, "versions")))
-      .filter((name) => /^ver_\d+$/.test(name));
-    assert.deepEqual(versionIds, expectedVersionIds, expectedKind);
-    const transactionEntries = await readdir(
-      join(projectRoot, "transactions"),
-    );
-    assert.equal(
-      transactionEntries.length,
-      expectedVersionIds.length - 1,
+    const manifest = JSON.parse(await readFile(
+      join(projectRoot, ".pageroot", "manifest.json"),
+      "utf8",
+    ));
+    assert.deepEqual(
+      manifest.versions.map((version) => version.versionId),
+      expectedVersionIds,
       expectedKind,
     );
     const runtime = JSON.parse(
-      await readFile(join(projectRoot, "runtime-state.json"), "utf8"),
+      await readFile(join(projectRoot, ".pageroot", "runtime-state.json"), "utf8"),
     );
-    assert.equal(runtime.lifecycleState, "editing", expectedKind);
-    assert.equal(runtime.activeRun, null, expectedKind);
+    assert.equal(runtime.activeRequest, null, expectedKind);
     assert.equal(await readFile(sourcePath, "utf8"), frozenHtml, expectedKind);
-    expectedSourceSha256 = sha256(await readFile(sourcePath));
+    expectedSourceSha256 = sha256(await readFile(workingPath));
   }
 
   const acceptedRun = (
     await submitRequest(bridge, {
-      sourcePath,
+      sourcePath: workingPath,
       projectId: opened.projectId,
       documentId: opened.documentId,
       expectedSourceSha256,
@@ -1323,25 +1292,21 @@ test("workspace lifecycle accepts broad page and script edits without content-ba
     acceptedBase.replace("目标正文", "目标正文已更新"),
   );
   await runOfficialFinalizer(environment.workspace, acceptedRun);
-  const accepted = await readStatus(bridge, { sourcePath, ...acceptedRun });
+  const accepted = await readStatus(bridge, { sourcePath: workingPath, ...acceptedRun });
   assert.equal(accepted.response.status, 200);
   assert.equal(accepted.body.status, "ready-to-open");
   assert.equal(accepted.body.versionId, acceptedVersionId);
-  const acceptedAssessment = JSON.parse(
-    await readFile(
-      join(acceptedRun.attemptPath, "candidate-assessment.json"),
-      "utf8",
-    ),
-  );
-  assert.equal(acceptedAssessment.status, "ready");
-  assert.equal(
-    (await readdir(
-      join(opened.projectRoot, "versions"),
-    )).filter((name) => /^ver_\d+$/.test(name)).length,
-    expectedVersionIds.length,
+  assert.equal(accepted.body.candidateAssessment.status, "ready");
+  const beforeAdopt = JSON.parse(await readFile(
+    join(opened.projectRoot, ".pageroot", "manifest.json"),
+    "utf8",
+  ));
+  assert.deepEqual(
+    beforeAdopt.versions.map((version) => version.versionId),
+    expectedVersionIds,
   );
   const adopted = await bridge.postJson("/ready-version/activate", {
-    sourcePath,
+    sourcePath: workingPath,
     projectId: accepted.body.projectId,
     documentId: accepted.body.documentId,
     requestId: accepted.body.requestId,
@@ -1350,10 +1315,12 @@ test("workspace lifecycle accepts broad page and script edits without content-ba
   });
   assert.equal(adopted.response.status, 200, JSON.stringify(adopted.body));
   assert.equal(adopted.body.status, "version-activated");
+  const afterAdopt = JSON.parse(await readFile(
+    join(opened.projectRoot, ".pageroot", "manifest.json"),
+    "utf8",
+  ));
   assert.deepEqual(
-    (await readdir(join(opened.projectRoot, "versions")))
-      .filter((name) => /^ver_\d+$/.test(name))
-      .sort(),
+    afterAdopt.versions.map((version) => version.versionId).sort(),
     ["ver_0001", "ver_0002"],
   );
 });

@@ -379,12 +379,23 @@ export async function architectureViolations() {
     "utf8",
   );
   if (
-    !workspaceBridge.includes('from "./source-transaction-service.mjs"')
-    || !workspaceBridge.includes("commitSourceTransaction(")
-    || !workspaceBridge.includes("recoverPendingSourceTransaction(")
+    workspaceBridge.includes('from "./source-transaction-service.mjs"')
+    || workspaceBridge.includes('from "./project-context-service.mjs"')
+    || workspaceBridge.includes('from "./source-history-service.mjs"')
+    || workspaceBridge.includes("commitSourceTransaction(")
+    || workspaceBridge.includes("loadContextBySource(")
+    || workspaceBridge.includes("loadMutationContext(")
   ) {
     violations.push(
-      "scripts/workspace-bridge.mjs: autosave and source-history routes must delegate to SourceTransaction",
+      "scripts/workspace-bridge.mjs: must not import or call the retired v3 registry, SourceTransaction, or source-history journal",
+    );
+  }
+  if (
+    !workspaceBridge.includes('from "./project-file-repository.mjs"')
+    || !workspaceBridge.includes("saveProjectFileAutosave(")
+  ) {
+    violations.push(
+      "scripts/workspace-bridge.mjs: /autosave must delegate to ProjectFileRepository",
     );
   }
   if (
@@ -392,7 +403,7 @@ export async function architectureViolations() {
     || /\bwriteSourceHistory\s*\(/.test(workspaceBridge)
   ) {
     violations.push(
-      "scripts/workspace-bridge.mjs: current-source writer belongs to source-transaction-service",
+      "scripts/workspace-bridge.mjs: current-source writer belongs to ProjectFileRepository",
     );
   }
   if (
@@ -416,6 +427,14 @@ export async function architectureViolations() {
     path.join(PRODUCT_ROOT, "app", "components", "HtmlCanvasEditor.tsx"),
     "utf8",
   );
+  const previewSourceSync = await readFile(
+    path.join(PRODUCT_ROOT, "app", "components", "html-canvas-preview-sync.ts"),
+    "utf8",
+  );
+  const previewSourceSurface = await readFile(
+    path.join(PRODUCT_ROOT, "app", "lib", "align-preview-source-surface.js"),
+    "utf8",
+  );
   const editRuntimeSession = await readFile(
     path.join(
       PRODUCT_ROOT,
@@ -427,6 +446,10 @@ export async function architectureViolations() {
   );
   const editRuntimeProtocol = await readFile(
     path.join(PRODUCT_ROOT, "desktop", "edit-runtime-protocol.mjs"),
+    "utf8",
+  );
+  const editRuntimeBootstrap = await readFile(
+    path.join(PRODUCT_ROOT, "desktop", "edit-runtime-bootstrap.mjs"),
     "utf8",
   );
   const projectSession = await readFile(
@@ -946,15 +969,105 @@ export async function architectureViolations() {
     !canvasEditor.includes("runtimeAttemptedRef")
     || !canvasEditor.includes("forceStatic: true")
     || !canvasEditor.includes("data-pageroot-edit-runtime-host")
+    || !canvasEditor.includes('mode: "one-shot-runtime"')
+    || !canvasEditor.includes("allow-scripts")
+    || !canvasEditor.includes("EDIT_RUNTIME_FROZEN_ATTRIBUTE")
+    || !canvasEditor.includes("runtimeFrameKeepsAuthorPaint")
+    || !canvasEditor.includes("hostHasAuthorPaint")
+    || !canvasEditor.includes("frame.grant.hosts.some")
+    || canvasEditor.includes("frame.grant.hosts.every")
+    || !canvasEditor.includes("alignPreviewSourceSurface")
+    || !canvasEditor.includes("previewHostStillMounted")
+    || !canvasEditor.includes('active.mode === "text-fragment"')
+    || !previewSourceSync.includes("../lib/align-preview-source-surface.js")
+    || !previewSourceSurface.includes("skipDescendantsOf")
+    || !canvasEditor.includes("settledRuntimeFrameIsCurrent")
+    || !canvasEditor.includes("detachedRuntimeFrame && !preserveForHistory")
+    || !canvasEditor.includes("frameReloadRequired && !settledRuntimeFrame")
+    || canvasEditor.includes('img[src^="data:image/png"]')
+    || /pngBase64|static-runtime-snapshot|mountFrozenRuntimeSnapshots|object-fit:\s*fill/u.test(canvasEditor)
   ) {
     violations.push(
-      "app/components/HtmlCanvasEditor.tsx: one-shot runtime frames must be consumed once and fall back to static source editing",
+      "app/components/HtmlCanvasEditor.tsx: one-shot runtime frames must execute once in the final iframe, keep real canvas/svg, and never mount PNG substitutes",
+    );
+  }
+  if (
+    !editRuntimeBootstrap.includes("closeTrackedPorts")
+    || !editRuntimeBootstrap.includes("MessageChannel")
+    || !editRuntimeBootstrap.includes("messagePortClose")
+  ) {
+    violations.push(
+      "desktop/edit-runtime-bootstrap.mjs: freeze must drain MessageChannel/MessagePort callbacks before accepting the retained iframe",
+    );
+  }
+  const adr0025 = await readFile(
+    path.join(PRODUCT_ROOT, "docs", "decisions", "0025-edit-direct-one-shot-runtime.md"),
+    "utf8",
+  );
+  const interactionFlow = await readFile(
+    path.join(PRODUCT_ROOT, "docs", "INTERACTION_FLOW.md"),
+    "utf8",
+  );
+  if (
+    /A later full-frame rebuild in the same generation is static/u.test(adr0025)
+    || /必要的完整帧重建在本代只加载静态/u.test(interactionFlow)
+    || !adr0025.includes("forbids Ready")
+    || !adr0025.includes("explicitly start a new `canvasGeneration`")
+    || !adr0025.includes("static-Edit compromise")
+    || !adr0025.includes("htmlAIProjects")
+    || !adr0025.includes("MessageChannel")
+    || !adr0025.includes("Source-authored inline PNG")
+    || /Low-cost boundaries remain: no Node, no preload, no direct IPC/u.test(adr0025)
+    || !interactionFlow.includes("静默静态重建不是已接受的产品合同")
+  ) {
+    violations.push(
+      "ADR 0025 / INTERACTION_FLOW: after interaction, same-generation static remount is a Ready stop, not an accepted structural fallback",
+    );
+  }
+  const previewSandbox = await readFile(
+    path.join(PRODUCT_ROOT, "app", "components", "html-preview-sandbox.js"),
+    "utf8",
+  );
+  if (
+    !previewSandbox.includes("prepareOneShotRuntimeFrameDocument")
+    || !previewSandbox.includes('mode === "one-shot-runtime"')
+    || previewSandbox.includes("static-runtime-snapshot")
+    || previewSandbox.includes("prepareStaticRuntimeSnapshotFrameDocument")
+  ) {
+    violations.push(
+      "app/components/html-preview-sandbox.js: Edit runtime documents must be one-shot-runtime, not static PNG hosts",
+    );
+  }
+  const desktopMain = await readFile(
+    path.join(PRODUCT_ROOT, "desktop", "main.mjs"),
+    "utf8",
+  );
+  if (
+    /edit-runtime-capture-owner|createEditRuntimeCaptureController|ensureEditRuntimeCaptureController/u.test(desktopMain)
+    || /capturePage\s*\(/u.test(editRuntimeProtocol)
+    || /runtimeHtml|buildRuntimeDocument/u.test(editRuntimeProtocol)
+  ) {
+    violations.push(
+      "desktop Edit runtime must prepare a direct resource session only; capture windows and PNG handoff cannot return",
     );
   }
   const desktopFiles = await sourceFiles(path.join(PRODUCT_ROOT, "desktop"));
   if (desktopFiles.some((filePath) => relative(filePath).includes("edit-runtime-probe"))) {
     violations.push(
       "desktop: retired Edit runtime probe owners cannot return to production",
+    );
+  }
+  if (desktopFiles.some((filePath) => relative(filePath).includes("edit-runtime-capture-owner"))) {
+    violations.push(
+      "desktop: Edit runtime capture owner cannot return to production",
+    );
+  }
+  const reviewCaptureOwner = desktopFiles.find((filePath) => (
+    relative(filePath).includes("runtime-visual-capture-owner")
+  ));
+  if (!reviewCaptureOwner) {
+    violations.push(
+      "desktop/runtime-visual-capture-owner.mjs must remain the Review-only capture owner",
     );
   }
 
