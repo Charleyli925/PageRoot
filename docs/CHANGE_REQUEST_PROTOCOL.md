@@ -583,7 +583,9 @@ Version。旧 Attempt 的 `scope-report.json` 与 `validation-review.json` 仍�
 Attempt 不生成它们。`scope-validator.mjs` 已从源码删除：它不再服务直接 source patch
 合同，也不得重新接入 AI Version 的接受门禁。直接编辑的岛外字节校验由
 `source-patch-engine` 在提交点执行。Bridge 身份检查从 `html-source-parser.mjs`
-读取 `rawStartTagAttributes`。
+读取 `rawStartTagAttributes`。现行候选政策（脚本改动不阻断、弱连续性只进审阅、
+空 body 才阻断）由 `tests/candidate-assessment.test.mjs` 锁住；`createCandidate`
+在 `tests/project-file-repository.test.mjs` 证明同一政策进入持久化边界。
 
 ## 13. 校验矩阵
 

@@ -110,6 +110,7 @@ const TASK_OWNER_CASES = [
     file: "scripts/workspace-bridge.mjs",
     nodeTests: [
       "tests/attachment-storage.test.mjs",
+      "tests/candidate-assessment.test.mjs",
       "tests/compatibility-decoders.test.mjs",
       "tests/html-source-parser.test.mjs",
       "tests/lifecycle-core.test.mjs",

@@ -169,7 +169,7 @@ retired scope validator can no longer be imported by mistake.
 
 | Leftover | Why | What this PR does |
 | --- | --- | --- |
-| `scope-validator.mjs` source | P0-A left it for direct-patch contract tests. Those tests now belong to `source-patch-engine`. Keeping a 2,500-line unused module invites re-wiring it as an AI gate. | Delete the module and `tests/scope-validator.test.mjs`. Keep island-outside checks on the live patch engine. |
+| `scope-validator.mjs` source | P0-A left it for direct-patch contract tests. Those tests now belong to `source-patch-engine`. Keeping a 2,500-line unused module invites re-wiring it as an AI gate. | Delete the module and `tests/scope-validator.test.mjs`. Keep island-outside checks on the live patch engine. Restore current AI-candidate policy tests in `tests/candidate-assessment.test.mjs` and `createCandidate` persistence. |
 | `lifecycle-core` `project-registry.json` | P0-B stopped the Bridge from reading the v3 registry. `recordUserSupplement` still resolved projects through it. | CLI and helper take `--project-root` / `projectRoot`. Identity is `project.json` vs the directory name. No registry read. |
 | `html-projects.json` appData probes | P0-B dropped Documents workspace roots. Recent-file UI still opened `PageRootV2` / `YuanYe` / `HTML AI 工作台` state files. | Read only current `userData/html-projects.json`. Do not delete user directories. |
 | `#serial()` verified-root cache | P1-B already cached `realpath()` per serial turn. The project-root lstat + non-symlink check still ran on every nested write. | Cache one verified root per `#serial()` turn. Re-check on the next turn so a symlink swap still fails. |

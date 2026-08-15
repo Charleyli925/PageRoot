@@ -890,6 +890,7 @@
         "tests/lifecycle-core.test.mjs",
         "tests/html-source-parser.test.mjs",
         "tests/attachment-storage.test.mjs",
+        "tests/candidate-assessment.test.mjs",
         "tests/compatibility-decoders.test.mjs",
         "tests/product-contract.test.mjs",
         "tests/project-context-service.test.mjs",
