@@ -122,9 +122,8 @@ import {
   findCanvasSelectionElement,
   findNativeActionTarget,
   historySelectionFromMutationValue,
+  identifyingTextRangeAtPoint,
   isCanvasRootElement,
-  nativeTextRangeMatchesActivation,
-  selectWordAtPoint,
   sourceHistoryDirectionForShortcut,
   type TextCaretPoint,
 } from "./html-canvas-interaction";
@@ -2983,7 +2982,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         restoredSelection,
         projection.text,
       );
-      if (!initialSelection && priorRange && activationLogicalRange) {
+      if (!initialSelection && priorRange && activationLogicalRange && !caretPoint) {
         initialSelection = {
           anchor: priorRange.direction === "backward"
             ? activationLogicalRange.endOffset
@@ -3148,8 +3147,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       // this to the next animation frame lets a fast mouse drag, keyboard
       // command, or test-set Selection win briefly and then get overwritten by
       // the stale activation point. Only overlay measurement needs a frame.
-      if (initialSelection) session.focusSelection();
-      else if (caretPoint) session.focusAtPoint(caretPoint);
+      // A caretPoint from the entering double-click wins over any identifying
+      // 1-character range used only to mount a text fragment.
+      if (caretPoint && !restoredSelection) session.focusAtPoint(caretPoint);
       else session.focusSelection();
       requestAnimationFrame(() => {
         if (
@@ -4429,81 +4429,42 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         const committed = finishNativeEditing(true, "manual");
         if (!committed.ok || committed.frameReloading) return;
       }
+      if (lockedRef.current) return;
+      setSpacingMenuOpen(false);
+      event.preventDefault();
+      event.stopPropagation();
       const caretPoint = caretPointFromMouseEvent(event);
-      const nativeSelection = documentNode.getSelection();
-      let nativeRange = nativeSelection
-        && nativeSelection.rangeCount === 1
-        && !nativeSelection.isCollapsed
-        && Boolean(nativeSelection.toString().trim())
-        ? nativeSelection.getRangeAt(0).cloneRange()
+      const sourceIndex = sourceIndexRef.current;
+      const islandHostElement = sourceIndex
+        ? nativeEditHostForElement(target, sourceIndex)
         : null;
-      if (
-        nativeRange
-        && !nativeTextRangeMatchesActivation(nativeRange, target, caretPoint)
-      ) {
-        nativeRange = null;
-        nativeSelection?.removeAllRanges();
-      }
-      if (!nativeRange) {
-        nativeRange = selectWordAtPoint(
+      if (!islandHostElement) {
+        const identifyingRange = identifyingTextRangeAtPoint(
           documentNode,
           target,
           caretPoint,
         );
+        if (
+          identifyingRange
+          && identifyingRange.startContainer.isConnected
+          && identifyingRange.endContainer.isConnected
+        ) {
+          const selection = documentNode.getSelection();
+          selection?.removeAllRanges();
+          selection?.addRange(identifyingRange);
+          captureTextRange();
+        } else {
+          containerRef.current?.setAttribute(
+            "data-native-start-status",
+            "direct-text-hit-required",
+          );
+        }
       }
-      setSpacingMenuOpen(false);
-      if (lockedRef.current) return;
-      if (
-        nativeRange
-        && nativeRange.startContainer.isConnected
-        && nativeRange.endContainer.isConnected
-      ) {
-        // Preserve Chromium's real double-click word range before changing
-        // selection chrome or enabling contenteditable. Source mapping then
-        // converts the exact forward/backward browser range to logical offsets.
-        const selection = documentNode.getSelection();
-        selection?.removeAllRanges();
-        selection?.addRange(nativeRange);
-      }
-      const capturedRange = nativeRange ? captureTextRange() : null;
-      if (!capturedRange) {
-        containerRef.current?.setAttribute(
-          "data-native-start-status",
-          "direct-text-hit-required",
-        );
-        selectElement(target, undefined, {
-          preserveTextSelection: Boolean(nativeRange),
-        });
-      }
-      const editingStarted = capturedRange
-        ? startEditing()
-        : nativeRange
-          ? startEditing(caretPoint)
-          : false;
-      if (editingStarted) {
-        // Cancel the remaining dblclick default only after the native range has
-        // been captured and the authored host owns focus. This avoids erasing
-        // the browser's word Selection before the edit session exists.
-        event.preventDefault();
-        event.stopPropagation();
-      }
-      if (
-        !editingStarted
-        && nativeRange
-        && nativeRange.startContainer.isConnected
-        && nativeRange.endContainer.isConnected
-      ) {
-        const restoredSelection = documentNode.getSelection();
-        restoredSelection?.removeAllRanges();
-        restoredSelection?.addRange(nativeRange);
-        captureTextRange();
-        // The browser's post-dblclick default can collapse the range again on
-        // dedicated/fallback surfaces (notably <pre><code>). Once PageRoot has
-        // restored the exact authored word range, keep it as the stable
-        // selection/comment target.
-        event.preventDefault();
-        event.stopPropagation();
-      }
+      selectElement(target, undefined, {
+        preserveTextSelection: Boolean(activeTextRangeRef.current),
+      });
+      const editingStarted = startEditing(caretPoint);
+      if (!editingStarted) selectElement(target);
     };
 
     let disabledButtonPointer:
@@ -4664,6 +4625,19 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       setSpacingMenuOpen(false);
       if (activeNativeEditRef.current?.rootElement.contains(event.target as Node)) {
         return;
+      }
+      if (
+        event.detail >= 2
+        && !lockedRef.current
+        && findCanvasSelectionElement(event.target)
+      ) {
+        const nativeActionTarget = findNativeActionTarget(event.target);
+        if (
+          !nativeActionTarget
+          || !["INPUT", "SELECT", "TEXTAREA"].includes(nativeActionTarget.tagName)
+        ) {
+          event.preventDefault();
+        }
       }
       activeTextRangeRef.current = null;
       setHasTextRange(false);

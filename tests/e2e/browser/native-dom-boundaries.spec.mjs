@@ -10,6 +10,7 @@ import {
   installLongTaskRecorder,
   keyShortcut,
   loadFixture,
+  nativeEditingState,
   recordedInputEvents,
   recordedLongTasks,
   selectionSnapshot,
@@ -173,6 +174,56 @@ test("beforeinput target ranges and Selection remain inside the authored case", 
   });
   expect(beforeInput.targetRangeCount).toBeGreaterThanOrEqual(0);
   expect((await selectionSnapshot(frame, "heading-inline")).activeCase).toBe("heading-inline");
+});
+
+async function glyphPointForText(locator, snippet) {
+  return locator.evaluate((element, needle) => {
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+    let node = walker.nextNode();
+    while (node) {
+      const text = node.textContent ?? "";
+      const index = text.indexOf(needle);
+      if (index >= 0) {
+        const range = document.createRange();
+        range.setStart(node, index);
+        range.setEnd(node, index + needle.length);
+        const glyph = range.getBoundingClientRect();
+        const box = element.getBoundingClientRect();
+        if (glyph.width > 0 && glyph.height > 0) {
+          return {
+            x: glyph.left - box.left + Math.min(Math.max(glyph.width / 2, 1), 6),
+            y: glyph.top - box.top + Math.max(glyph.height / 2, 1),
+          };
+        }
+      }
+      node = walker.nextNode();
+    }
+    throw new Error(`No rendered glyph for ${JSON.stringify(needle)}`);
+  }, snippet);
+}
+
+test("first double-click places a caret; a second double-click selects the word", async ({ page }) => {
+  const { frame } = await loadFixture(page, "complex-layout.html");
+  const target = frame.locator(caseSelector("heading-inline"));
+  const wordPoint = await glyphPointForText(target, "Word");
+  await activateNativeEdit(frame, "heading-inline", wordPoint);
+  expect(await nativeEditingState(frame, "heading-inline")).toMatchObject({
+    targetIsActive: true,
+    contenteditable: "true",
+    selectionInside: true,
+  });
+  const first = await selectionSnapshot(frame, "heading-inline");
+  expect(first.collapsed).toBe(true);
+  expect(first.text).toBe("");
+  expect(first.rangeCount).toBe(1);
+
+  await target.dblclick({ position: wordPoint, force: true });
+  await expect.poll(async () => (
+    await selectionSnapshot(frame, "heading-inline")
+  ).text).toBe("Word");
+  const second = await selectionSnapshot(frame, "heading-inline");
+  expect(second.collapsed).toBe(false);
+  expect(second.activeCase).toBe("heading-inline");
 });
 
 test("an out-of-band authored DOM mutation fails closed and never reaches source", async ({ page }) => {

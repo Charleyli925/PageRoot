@@ -101,6 +101,41 @@ export function caretPointFromMouseEvent(event: MouseEvent): TextCaretPoint {
   };
 }
 
+function textHitAtPoint(
+  documentNode: Document,
+  target: HTMLElement,
+  point: TextCaretPoint,
+): { textNode: Text; offset: number } | null {
+  const caretPosition = documentNode.caretPositionFromPoint?.(point.clientX, point.clientY);
+  const caretRange = !caretPosition
+    ? documentNode.caretRangeFromPoint?.(point.clientX, point.clientY)
+    : null;
+  const pointNode = caretPosition?.offsetNode || caretRange?.startContainer;
+  const pointOffset = caretPosition?.offset ?? caretRange?.startOffset;
+  const textNode = pointNode?.nodeType === 3 ? pointNode as Text : null;
+  if (!textNode || !target.contains(textNode) || !textNode.data.length) return null;
+  const offset = typeof pointOffset === "number"
+    ? Math.max(0, Math.min(textNode.data.length, pointOffset))
+    : 0;
+  return { textNode, offset };
+}
+
+export function identifyingTextRangeAtPoint(
+  documentNode: Document,
+  target: HTMLElement,
+  point: TextCaretPoint,
+): Range | null {
+  const hit = textHitAtPoint(documentNode, target, point);
+  if (!hit) return null;
+  const start = hit.offset >= hit.textNode.data.length
+    ? hit.textNode.data.length - 1
+    : hit.offset;
+  const range = documentNode.createRange();
+  range.setStart(hit.textNode, start);
+  range.setEnd(hit.textNode, start + 1);
+  return range;
+}
+
 function wordBoundsAtOffset(text: string, requestedOffset: number): {
   startOffset: number;
   endOffset: number;
