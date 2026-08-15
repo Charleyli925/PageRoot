@@ -145,12 +145,13 @@ Workbench 只确认已提交 loading surface、传入窄 port 并消费快照。
   SHA/像素/字节预算、可见 DOM/SVG 文字哈希、deadline 和 cleanup。Node 还直接
   覆盖文字/数字哈希严格变化，以及同文字单次 PNG 的 RGB 误差预算不会把微小
   栅格噪声判作变化。Electron 用一份合成报告证明普通 Edit
-  不执行作者脚本、不请求或挂载运行态位图，Preview 中同一 Canvas/SVG 正常运行，
+  不请求或挂载运行态位图，Preview 中同一 Canvas/SVG 正常运行，
   authored inline SVG 仍在 Edit 原生可见且源文件字节不变；另一个本地 ECharts
   用例证明导入后的 V1 仍从 Main 绑定的原始同目录资源根冻结直接资源闭包、一次
-  execution、固定冻结审计、ECharts 仅新增受限宿主布局样式/缩放且不覆盖源码样式、
+  execution、固定冻结审计、最终可见 iframe 保留真实 Canvas/SVG、
   运行时后代回到源码宿主、评论/原生编辑后 iframe 与 execution count 不变且写盘字节不含 runtime
-  marker。协议/bootstrap 单测拥有资源闭包、一次消费、revoke、CSP 和冻结边界。
+  marker。Edit 成功帧必须同时满足 bootstrap=1、execution=1、交互后 iframe 不替换、
+  真实 canvas/svg>0、Edit 截图/PNG=0。协议/bootstrap 单测拥有资源闭包、一次消费、revoke、CSP 和冻结边界。
   Session 单测还覆盖外部来源切换至托管 V1 时，即使 SHA/Canvas generation
   未变也会发布新的准备路径；而 macOS `/var` 与 `/private/var` 同一文件别名
   不会消耗额外尝试。

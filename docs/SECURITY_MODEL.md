@@ -54,22 +54,23 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
   revokes the previous session. The separate one-shot ECharts path never reuses
   that preview session.
 - Desktop one-shot Edit author runtime is a deliberately narrow ECharts
-  capture capability, not a renderer page-script sandbox. Main first re-reads
-  the active source and requires exact HTML/SHA, bounded classic scripts, an
-  ECharts signal and uniquely bound empty hosts; it freezes local or
-  allowlisted-CDN script bytes into a one-use `pageroot-edit-runtime:`
-  session. A hidden sandboxed BrowserWindow in a disposable non-persistent
-  partition, with no preload, Node, Bridge, permissions, navigation, popup,
-  download or webview authority, runs the closure. Relative visual assets
-  resolve only through the declared, contained asset map; direct `file:`
-  assets and authored base URLs are blocked. The protocol has no `bypassCSP`,
-  exposes no directory listing or project path, blocks `connect-src` and
-  workers in the runtime document. A fixed bootstrap freezes
-  timers/listeners/observers/animations and audits source fidelity; only
-  budgeted PNG pixels, dimensions, hashes and the exact host-style allowlist
-  return to trusted renderer memory. The visible Edit iframe is always
-  script-disabled, so malicious author code cannot reach the renderer parent;
-  capture failure revokes the session and renders static Edit.
+  capability for trusted, user-opened local generative HTML, not a hostile-page
+  sandbox. Main first re-reads the active source and requires exact HTML/SHA,
+  bounded classic scripts, an ECharts signal and uniquely bound empty hosts; it
+  freezes local or allowlisted-CDN script bytes into a one-use
+  `pageroot-edit-runtime:` session. The final visible Edit iframe runs that
+  closure once at real Edit size with the sandbox tokens required for in-place
+  editing. Relative visual assets resolve only through the declared, contained
+  asset map; direct `file:` assets and authored base URLs are blocked. The
+  protocol has no `bypassCSP`, exposes no directory listing or project path,
+  and the runtime document keeps `connect-src`, workers, popups and top-level
+  navigation closed. A fixed bootstrap freezes timers/listeners/observers/
+  animations and audits source fidelity; the real Canvas/SVG stays in that
+  iframe. Same-origin `window.parent` access is a known, explicitly accepted
+  product risk (ADR 0025). Low-cost boundaries remain: no Node, no preload, no
+  direct IPC, no arbitrary directory read, no arbitrary network. Capture
+  failure or audit rejection revokes the session and renders static Edit before
+  interaction. Edit must not answer a security concern by converting to PNG.
 - Desktop Review runtime snapshot capture is one narrow IPC capability. The
   main process revalidates exact source HTML/SHA and a bounded
   source-host binding, owns one hidden sandboxed BrowserWindow with Node
@@ -205,10 +206,10 @@ When the user returns to ordinary editing, PageRoot accepts only an allowlisted
 source-backed presentation diff. It rejects unknown or duplicated source nodes,
 stale Hashes, arbitrary one-sided runtime classes, text/HTML, inline style,
 form state and runtime children. The desktop one-shot ECharts exception may
-show only a validated bounded PNG and exact ephemeral host marker/style inside
-an approved empty source host. It has no source or persistence authority and is
-never serialized. Save, review comparison and Request creation continue from
-authoritative source bytes (the Bridge copies those exact bytes to
+keep real author Canvas/SVG inside an approved empty source host after one
+visible-iframe execution and freeze. It has no source or persistence authority
+and is never serialized. Save, review comparison and Request creation continue
+from authoritative source bytes (the Bridge copies those exact bytes to
 `input/base/index.html`), and the SourcePatch checks remain unchanged.
 
 The AI review workspace is an isolated interactive review preview with no

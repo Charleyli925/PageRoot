@@ -30,7 +30,7 @@ screenshot never enters authored Edit or Review documents.
 Edit never consumes a Review snapshot or its Blob URL. It normally renders only
 what source can statically present. Desktop has one narrow exception: before
 the initial editable frame is mounted, an exact persisted source with
-classic-script ECharts evidence may receive one isolated resource session for
+classic-script ECharts evidence may receive one immutable resource session for
 its `(sourcePath, canvasGeneration)`.
 
 The Session first publishes a non-interactive `preparing` state and the
@@ -38,39 +38,39 @@ Workbench commits that loading surface before acknowledging the one port call.
 This makes even an immediately resolved grant choose the initial runtime frame,
 rather than becoming a forbidden late promotion of static Edit.
 
-Main separately bounds resource preparation and isolated capture. Because those
+Main bounds resource preparation only. The visible Edit iframe then has one
+bounded deadline to execute, settle and freeze at its real size. Because those
 are serial, the Workbench permits their two fixed deadlines plus one bounded
 acknowledgement margin before it declares the source unacknowledged. This is a
-verification allowance, not a second execution or retry: expiry still selects
-the existing one-time static Canvas rebuild.
+verification allowance, not a second execution, retry or capture: expiry still
+selects the existing one-time static Canvas rebuild.
 
 The session accepts no arbitrary source path or later source revision. Main
 rechecks active HTML/SHA, freezes declared local or allowlisted ECharts-CDN
 script bytes, and serves only that resource closure under
-`pageroot-edit-runtime:` without CSP bypass. A disposable hidden sandboxed
-BrowserWindow with a separate non-persistent session, no preload, Node or
-Bridge runs the closure once, waits 1.2 seconds, stops tracked runtime activity
-and audits that source nodes/text/attributes and the approved unique empty-host
-bindings stayed intact. It returns only bounded PNG pixels plus dimensions,
-hashes and the allowed host declarations (`position: relative`,
-`user-select: none`, transparent `-webkit-tap-highlight-color`, or a positive
-`scale()` no greater than `1`); it cannot overwrite authored style or mutate
-another source attribute. At most 32 non-dangerous empty hosts are eligible.
+`pageroot-edit-runtime:` without CSP bypass. The first mounted Edit iframe is
+the final iframe. A fixed bootstrap runs the closure once at the real Edit
+size, waits 1.2 seconds, dispatches one controlled `resize`, stops tracked
+runtime activity and audits that source nodes/text/attributes and the approved
+unique empty-host bindings stayed intact. Success keeps the real Canvas/SVG.
+Failure before interaction mounts ordinary static Edit. Runtime descendants
+cannot overwrite authored style beyond the existing host-style audit allowlist
+(`position: relative`, `user-select: none`, transparent
+`-webkit-tap-highlight-color`, or a positive `scale()` no greater than `1`).
+At most 32 non-dangerous empty hosts are eligible.
 
-Main owns a bounded replay/admission fence before creating a resource session
-or hidden window: a request ID and Main-read `(sourcePath, source SHA, canvas
-generation)` can each consume one preparation. At most two captures may overlap
-in an app process, accommodating the external-source to Managed V1 hand-off;
-a duplicate, exhausted replay history or saturated request fails closed to
-ordinary static Edit.
+Main owns a bounded replay/admission fence before creating a resource session:
+a request ID and Main-read `(sourcePath, source SHA, canvas generation)` can
+each consume one preparation. At most two preparations may overlap in an app
+process, accommodating the external-source to Managed V1 hand-off; a duplicate,
+exhausted replay history or saturated request fails closed to ordinary static
+Edit.
 
-The visible Edit iframe remains source-static and script-disabled. Trusted
-renderer memory validates the bounded snapshot envelope, Base64/PNG header,
-byte and dimension budgets, while retaining Main's capture digest as
-attestation, and injects it only as a non-interactive transient image below the
-same approved source host. The image, runtime marker and allowed derived style
-never enter source patches, saves, Versions, exports or Requests;
-selection/comment resolution remains on the original source host.
+The visible Edit iframe executes author scripts once, then freezes. Trusted
+renderer memory never mounts PNG, JPEG, ChartSpec or other visual substitutes.
+Selection/comment resolution remains on the original source host. Runtime
+markers and descendants never enter source patches, saves, Versions, exports
+or Requests.
 
 When importing an external HTML into an HTML-only V1 Working Copy, Main may
 retain the selected external HTML directory as a session-only asset root for
@@ -78,12 +78,13 @@ that same verified Working Copy. It is set only by the Main-process activation
 handoff, never sent by the renderer or written into project authority, and a
 missing or unsafe asset still fails closed to static Edit.
 
-Preparation, capture, audit or deadline failure silently mounts ordinary static
+Preparation, execution, audit or deadline failure silently mounts ordinary static
 Edit before interaction. Comments, autosave, IME and source echoes do not
 prepare, execute or replace the frame. A later necessary full rebuild is static
-for that generation. There is no status UI, retry, compatibility cache or
-background promotion. Authored inline SVG remains native and source-backed;
-unsupported runtime-only Canvas/SVG remains available in Preview.
+for that generation. There is no status UI, retry, compatibility cache,
+background promotion or hidden capture window. Authored inline SVG remains
+native and source-backed; unsupported runtime-only Canvas/SVG remains available
+in Preview. Review isolated PNG capture is unchanged.
 
 ## One Review snapshot owner
 
