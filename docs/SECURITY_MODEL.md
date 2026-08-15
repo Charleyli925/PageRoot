@@ -7,14 +7,13 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
 - Electron renderer sandbox, context isolation, disabled Node integration and explicit Content Security Policy
 - Narrow preload APIs with payload validation instead of direct IPC exposure
 - Project-path allowlisting and real-path checks for privileged file operations
-- Registry-bound readable project-directory validation; names are one safe path
-  segment and must carry the short token of their internal `projectId`
-- One hash-checked Bridge SourceTransaction kernel for autosave and source
-  history, with same-directory atomic replacement, durable recovery bytes,
-  pending-write/audit replay and fail-closed external-modification checks
-- Bounded source-history writes that accept only the actual forward and inverse
-  SourcePatch ranges, verify the complete before/after Hash chain, and reject a
-  stale cursor, reused action identity or inconsistent replay ledger
+- v4 Registry-bound write allowlisting: a privileged project-file write
+  requires one Registry record whose `projectId`, registered root path,
+  recovered root identity, `project.json`, and manifest mappings agree
+- Hash-checked v4 Working Copy saves with same-directory atomic replacement
+  and fail-closed external-modification checks; `/source-history/action` on a
+  v4 project returns the current bytes and empty history rather than a v3
+  journal
 - Same-directory filename changes with a fixed HTML extension, source Hash
   precondition, no-overwrite destination check and a crash-recoverable
   operation journal

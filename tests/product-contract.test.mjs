@@ -101,49 +101,57 @@ test("generated working-copy names retain the stable user name safely", () => {
 });
 
 test("Prompt, protocol, helper, and finalizer agree on frozen input plus controlled supplements", async () => {
-  const [bridge, lifecycle, protocol, interactionFlow, productRequirements] =
-    await Promise.all([
-      readFile(new URL("../scripts/workspace-bridge.mjs", import.meta.url), "utf8"),
-      readFile(new URL("../scripts/lifecycle-core.mjs", import.meta.url), "utf8"),
-      readFile(new URL("../docs/CHANGE_REQUEST_PROTOCOL.md", import.meta.url), "utf8"),
-      readFile(new URL("../docs/INTERACTION_FLOW.md", import.meta.url), "utf8"),
-      readFile(new URL("../docs/MVP_PRD.md", import.meta.url), "utf8"),
-    ]);
-  assert.match(bridge, /# PageRoot 通用执行规则/);
-  assert.match(bridge, /严格按其 readOrder 读取本轮输入/);
-  assert.match(
+  const [
     bridge,
-    /USER_SUPPLEMENT\.json 中尚未撤销的受控补充为本轮有效要求/,
+    repository,
+    lifecycle,
+    protocol,
+    interactionFlow,
+    productRequirements,
+  ] = await Promise.all([
+    readFile(new URL("../scripts/workspace-bridge.mjs", import.meta.url), "utf8"),
+    readFile(new URL("../scripts/project-file-repository.mjs", import.meta.url), "utf8"),
+    readFile(new URL("../scripts/lifecycle-core.mjs", import.meta.url), "utf8"),
+    readFile(new URL("../docs/CHANGE_REQUEST_PROTOCOL.md", import.meta.url), "utf8"),
+    readFile(new URL("../docs/INTERACTION_FLOW.md", import.meta.url), "utf8"),
+    readFile(new URL("../docs/MVP_PRD.md", import.meta.url), "utf8"),
+  ]);
+  assert.match(repository, /# PageRoot AI Request Rules/);
+  assert.match(
+    repository,
+    /Read the frozen files in input-manifest.json readOrder before editing/,
   );
   assert.match(
-    bridge,
-    /当前 Attempt 的受控 USER_SUPPLEMENT\.json，以及其中尚未撤销的受控补充所引用的 supplement-attachments\/ 附件，是 readOrder 之外唯一可读取的内容/,
+    repository,
+    /Treat the frozen HTML, project rules, annotations and change request as read-only/,
   );
-  assert.match(bridge, /命令返回 .*ok=true.* 后，重新读取 USER_SUPPLEMENT\.json/);
   assert.match(
-    bridge,
-    /不得修改 PROJECT\.md、USER_SUPPLEMENT\.json、冻结输入或协议文件/,
+    repository,
+    /Write exactly one complete HTML document to the output path stated in PROMPT.md/,
   );
+  assert.doesNotMatch(bridge, /# PageRoot 通用执行规则/);
   assert.equal(
-    (bridge.match(/只修改用户明确要求的区域/g) ?? []).length,
-    1,
-    "stable scope wording must live only in AI_RULES.md",
+    (repository.match(/只修改用户明确要求的区域/g) ?? []).length,
+    0,
+    "v4 frozen AI_RULES.md must not reintroduce the retired v3 scope slogan",
   );
   assert.equal(
     (bridge.match(/completion\.json 才表示完成/g) ?? []).length,
-    1,
-    "completion semantics must live only in AI_RULES.md",
+    0,
+    "v3 completion slogan must not return to the live Bridge",
   );
   assert.match(lifecycle, /expectedFileName = "index\.html"/);
   assert.match(lifecycle, /user-name-plus-version filename/);
-  assert.match(bridge, /输入文件 \/ 输出文件/);
-  assert.match(bridge, /input\/base\/index\.html、output\/index\.html 等其他路径/);
+  assert.match(repository, /input\/base\/index\.html/);
+  assert.match(repository, /output\/candidate\.html/);
   assert.match(protocol, /output 只有一个完整 HTML，不得创建 `PROJECT\.md`/);
   assert.match(protocol, /AI 输出文件命名/);
   assert.match(protocol, /`USER_SUPPLEMENT\.json` 只能由受控 helper 追加/);
   assert.match(protocol, /Prompt 引用这份通用规则，不再逐条复制/);
   assert.match(protocol, /新项目默认创建空文件/);
   assert.match(protocol, /^# PageRoot Change Request 协议$/m);
+  assert.match(protocol, /v3 Attempt \/ finalizer CLI `--workspace` \/ `--project-id` 是历史归档/);
+  assert.match(protocol, /finalize-attempt\.mjs --project-root/);
   assert.match(interactionFlow, /^# PageRoot 交互流程$/m);
   assert.match(productRequirements, /^# PageRoot MVP 产品需求$/m);
   assert.doesNotMatch(protocol, /output\/PROJECT\.md/);

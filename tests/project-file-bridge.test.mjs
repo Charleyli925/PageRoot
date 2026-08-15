@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { access, readFile, rename, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
@@ -216,46 +216,67 @@ test("a v4 client treats a pre-v4 project as a fresh V1 import", async (t) => {
   });
   const original = html("pre-v4 external source");
   const sourcePath = await environment.createSource("pre-v4.html", original);
+  const legacyProjectId = "project_aaaaaaaaaaaaaaaa";
+  const legacyStorageDirectoryName = "pre-v4-legacy__20260101T000000__aaaaaaaa";
+  const legacyProjectRoot = join(environment.workspace, "projects", legacyStorageDirectoryName);
+  await mkdir(join(legacyProjectRoot, "versions"), { recursive: true });
+  await writeFile(
+    join(environment.workspace, "project-registry.json"),
+    `${JSON.stringify({
+      schemaVersion: "3.0.0",
+      projects: {
+        [legacyProjectId]: {
+          displayName: "pre-v4",
+          sourcePath,
+          createdAt: "2026-01-01T00:00:00.000Z",
+          storageDirectoryName: legacyStorageDirectoryName,
+        },
+      },
+    }, null, 2)}\n`,
+  );
+  await writeFile(
+    join(legacyProjectRoot, "project.json"),
+    `${JSON.stringify({
+      schemaVersion: "3.0.0",
+      projectId: legacyProjectId,
+      documentId: "doc_aaaaaaaaaaaaaaaa",
+      sourcePath,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      storageDirectoryName: legacyStorageDirectoryName,
+    }, null, 2)}\n`,
+  );
   const bridge = await environment.start({
     HTML_AI_PROJECT_FILES_ROOT: join(environment.root, "project-files"),
   });
-  const legacyPreview = await bridge.requestJson(
+
+  const preview = await bridge.requestJson(
     `/workspace?sourcePath=${encodeURIComponent(sourcePath)}`,
   );
-  assert.equal(legacyPreview.response.status, 200);
-  assert.equal(legacyPreview.body.registered, false);
-  const legacy = await postJson(bridge, "/project/ensure", {
-    sourcePath,
-    expectedSourceSha256: legacyPreview.body.currentHtmlSha256,
-  });
-  assert.equal(legacy.response.status, 200, JSON.stringify(legacy.body));
-  assert.equal(legacy.body.registered, true);
-  assert.notEqual(legacy.body.projectFileSchemaVersion, "4.0.0");
-
-  const v4Preview = await bridge.requestJson(
-    `/workspace?sourcePath=${encodeURIComponent(sourcePath)}&projectStorageVersion=4.0.0`,
+  assert.equal(preview.response.status, 200, JSON.stringify(preview.body));
+  assert.equal(preview.body.registered, false);
+  assert.equal(preview.body.projectId, null);
+  const source = await bridge.requestJson(
+    `/source?sourcePath=${encodeURIComponent(sourcePath)}`,
   );
-  assert.equal(v4Preview.response.status, 200, JSON.stringify(v4Preview.body));
-  assert.equal(v4Preview.body.registered, false);
-  assert.equal(v4Preview.body.projectId, null);
-  const v4Source = await bridge.requestJson(
-    `/source?sourcePath=${encodeURIComponent(sourcePath)}&projectStorageVersion=4.0.0`,
-  );
-  assert.equal(v4Source.response.status, 200, JSON.stringify(v4Source.body));
-  assert.equal(v4Source.body.registered, false);
-  assert.equal(v4Source.body.content, original);
+  assert.equal(source.response.status, 200, JSON.stringify(source.body));
+  assert.equal(source.body.registered, false);
+  assert.equal(source.body.content, original);
 
   const imported = await postJson(bridge, "/project/ensure", {
     sourcePath,
-    expectedSourceSha256: v4Preview.body.currentHtmlSha256,
-    projectStorageVersion: "4.0.0",
+    expectedSourceSha256: preview.body.currentHtmlSha256,
   });
   assert.equal(imported.response.status, 200, JSON.stringify(imported.body));
   assert.equal(imported.body.projectFileSchemaVersion, "4.0.0");
   assert.equal(imported.body.imported, true);
-  assert.notEqual(imported.body.projectId, legacy.body.projectId);
+  assert.notEqual(imported.body.projectId, legacyProjectId);
   assert.match(imported.body.sourcePath, /pre-v4-V1\.html$/u);
   assert.equal(await readFile(sourcePath, "utf8"), original);
+  assert.equal(
+    JSON.parse(await readFile(join(environment.workspace, "project-registry.json"), "utf8"))
+      .projects[legacyProjectId].storageDirectoryName,
+    legacyStorageDirectoryName,
+  );
   const manifest = JSON.parse(await readFile(
     join(imported.body.projectRoot, ".pageroot", "manifest.json"),
     "utf8",
@@ -263,7 +284,7 @@ test("a v4 client treats a pre-v4 project as a fresh V1 import", async (t) => {
   assert.deepEqual(manifest.versions.map((version) => version.versionId), ["ver_0001"]);
 
   const reopened = await bridge.requestJson(
-    `/workspace?sourcePath=${encodeURIComponent(imported.body.sourcePath)}&projectStorageVersion=4.0.0`,
+    `/workspace?sourcePath=${encodeURIComponent(imported.body.sourcePath)}`,
   );
   assert.equal(reopened.response.status, 200, JSON.stringify(reopened.body));
   assert.equal(reopened.body.registered, true);
@@ -738,3 +759,141 @@ test("a finalized but unusable Candidate remains an error and never creates a Ve
     "candidate.json",
   )));
 });
+
+test("unmanaged HTML stays an import source and mutations fail closed without a v4 project", async (t) => {
+  const environment = await createBridgeTestEnvironment(t, {
+    prefix: "pageroot-unmanaged-open-",
+  });
+  const original = html("unmanaged");
+  const sourcePath = await environment.createSource("open.html", original);
+  const bridge = await environment.start();
+
+  const preview = await bridge.requestJson(
+    `/workspace?sourcePath=${encodeURIComponent(sourcePath)}`,
+  );
+  assert.equal(preview.response.status, 200, JSON.stringify(preview.body));
+  assert.equal(preview.body.registered, false);
+  const source = await bridge.requestJson(
+    `/source?sourcePath=${encodeURIComponent(sourcePath)}`,
+  );
+  assert.equal(source.response.status, 200, JSON.stringify(source.body));
+  assert.equal(source.body.registered, false);
+  assert.equal(source.body.content, original);
+
+  const autosave = await postJson(bridge, "/autosave", {
+    sourcePath,
+    expectedSourceSha256: preview.body.currentHtmlSha256,
+    editRevision: 1,
+    html: html("should not write"),
+  });
+  assert.equal(autosave.response.status, 404);
+  assert.equal(autosave.body.error.code, "PROJECT_NOT_FOUND");
+
+  const draft = await postJson(bridge, "/draft", {
+    sourcePath,
+    operationId: "draftop_unmanaged_1",
+    expectedDraftRevision: 0,
+    comments: [],
+    changeEvents: [],
+  });
+  assert.equal(draft.response.status, 404);
+  assert.equal(draft.body.error.code, "PROJECT_NOT_FOUND");
+
+  const conflict = await bridge.requestJson(
+    `/conflict-candidate?sourcePath=${encodeURIComponent(sourcePath)}`,
+  );
+  assert.equal(conflict.response.status, 404);
+  assert.equal(conflict.body.error.code, "PROJECT_NOT_FOUND");
+  assert.equal(await readFile(sourcePath, "utf8"), original);
+});
+
+test("v4 attachments, empty source history and absent conflicts stay bound to the project root", async (t) => {
+  const environment = await createBridgeTestEnvironment(t, {
+    prefix: "pageroot-v4-attachments-",
+  });
+  const sourcePath = await environment.createSource("attach.html", html("attach"));
+  const bridge = await environment.start();
+  const preview = await bridge.requestJson(
+    `/workspace?sourcePath=${encodeURIComponent(sourcePath)}`,
+  );
+  const ensured = await postJson(bridge, "/project/ensure", {
+    sourcePath,
+    expectedSourceSha256: preview.body.currentHtmlSha256,
+  });
+  assert.equal(ensured.response.status, 200, JSON.stringify(ensured.body));
+  const workingPath = ensured.body.sourcePath;
+  const commentId = "comment_attach";
+  const attachmentId = "attachment_one";
+  const fileName = "note.txt";
+  const payload = Buffer.from("pageroot-v4-attachment", "utf8");
+  const saved = await postJson(bridge, "/attachment", {
+    sourcePath: workingPath,
+    projectId: ensured.body.projectId,
+    documentId: ensured.body.documentId,
+    commentId,
+    attachmentId,
+    fileName,
+    mediaType: "text/plain",
+    dataBase64: payload.toString("base64"),
+    byteLength: payload.byteLength,
+  });
+  assert.equal(saved.response.status, 201, JSON.stringify(saved.body));
+  assert.equal(saved.body.attachment.sha256, sha256(payload));
+  assert.equal(
+    saved.body.attachment.relativePath,
+    `draft/attachments/${commentId}/${attachmentId}-${fileName}`,
+  );
+  const onDisk = await readFile(join(
+    ensured.body.projectRoot,
+    saved.body.attachment.relativePath,
+  ));
+  assert.deepEqual(onDisk, payload);
+
+  const downloaded = await fetch(
+    `${bridge.baseUrl}/attachment?sourcePath=${encodeURIComponent(workingPath)}&relativePath=${encodeURIComponent(saved.body.attachment.relativePath)}`,
+  );
+  assert.equal(downloaded.status, 200);
+  assert.deepEqual(Buffer.from(await downloaded.arrayBuffer()), payload);
+
+  const removed = await postJson(bridge, "/attachment/delete", {
+    sourcePath: workingPath,
+    projectId: ensured.body.projectId,
+    documentId: ensured.body.documentId,
+    relativePath: saved.body.attachment.relativePath,
+  });
+  assert.equal(removed.response.status, 200, JSON.stringify(removed.body));
+  assert.equal(removed.body.removed, true);
+  await assert.rejects(access(join(
+    ensured.body.projectRoot,
+    saved.body.attachment.relativePath,
+  )));
+
+  const history = await postJson(bridge, "/source-history/action", {
+    sourcePath: workingPath,
+    projectId: ensured.body.projectId,
+    documentId: ensured.body.documentId,
+    actionId: "sourceaction_noop_undo",
+    direction: "undo",
+    expectedSourceSha256: ensured.body.sourceSha256,
+  });
+  assert.equal(history.response.status, 200, JSON.stringify(history.body));
+  assert.equal(history.body.status, "history-no-op");
+  assert.equal(history.body.content, html("attach"));
+  assert.equal(history.body.sourceHistory.cursor, 0);
+
+  const emptyConflict = await bridge.requestJson(
+    `/conflict-candidate?sourcePath=${encodeURIComponent(workingPath)}`,
+  );
+  assert.equal(emptyConflict.response.status, 200, JSON.stringify(emptyConflict.body));
+  assert.equal(emptyConflict.body.content, undefined);
+
+  const resolve = await postJson(bridge, "/conflict/resolve", {
+    sourcePath: workingPath,
+    projectId: ensured.body.projectId,
+    documentId: ensured.body.documentId,
+    resolution: "keep-external",
+  });
+  assert.equal(resolve.response.status, 404);
+  assert.equal(resolve.body.error.code, "CONFLICT_NOT_FOUND");
+});
+

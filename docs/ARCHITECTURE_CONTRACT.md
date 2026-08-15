@@ -40,10 +40,12 @@ Bridge route adapters
   narrow `scripts/` re-export adapters may consume them. They cannot import
   Workbench, React components or application sessions.
 - Bridge routes decode transport input and delegate. Durable state changes run
-  under the project mutation lock and repository boundary. `/autosave` and
-  `/source-history/action` retain only route-specific validation and response
-  encoding; one `SourceTransaction` service owns their shared current-source
-  commit/recovery state machine.
+  under the Project File repository boundary. `/autosave` retains only
+  route-specific validation and response encoding; `ProjectFileRepository`
+  owns the current-source write. `/source-history/action` does not persist a
+  Bridge journal: a registered v4 project returns current source bytes and
+  empty history. The retired v3 `SourceTransaction` service is not a live
+  Bridge owner.
 - `scripts/check-architecture.mjs` enforces the dependency direction. Do not
   weaken the gate to land a feature.
 - Runtime capability decoding has one ingress:
@@ -465,11 +467,11 @@ reconciled by querying workspace authority; the same action ID may be replayed
 once only when authority proves it was already applied or its original
 preconditions still hold.
 
-Both commands then enter the same `SourceTransaction` kernel. It is the only
-Bridge-side owner of recovery bytes, pending-write transitions, source/history
-application, project/runtime settlement and audit outbox cleanup; an AI Version
-publication remains a separate immutable transaction and never joins this
-kernel.
+Autosave then enters `ProjectFileRepository`. It is the only live Bridge-side
+owner of the current-source write for a registered v4 Project File. The retired
+v3 `SourceTransaction` kernel is not on this path. An AI Version publication
+remains a separate immutable transaction. `/source-history/action` does not
+apply a persisted journal; it returns current source bytes and empty history.
 
 A Bridge-acknowledged history result may advance the mounted editable-island
 projection without replacing its iframe only after exact old/new target
