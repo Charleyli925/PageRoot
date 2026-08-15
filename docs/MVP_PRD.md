@@ -668,7 +668,7 @@ Prompt、AI 返回、附件、剪贴板、文件名/路径、账号、电脑序�
 ### 10.6 PR 2B 项目、版本与 Finder
 
 - Registry 有 A/B 且 Recent 仅有 A 时，目录仍显示 A/B；Recent 只影响排序，未登记 Recent 文件不能成为项目。
-- 顶部纯投影可同时显示 `基于 V2 · 项目最新 V6 · 本地修改已保存 · 候选 V7 待审阅`，历史浏览、保存失败和 Candidate/Promotion 不丢失各自事实。
+- 顶部状态徽章默认沉默；只在正在保存、保存失败、正在等 AI、有 AI 修改待查看或正在看历史（只读）时出字。基于 Vn / 项目最新 Vm / 本地修改 / 候选身份留在版本列表、历史与处理面板，不要求顶栏同时常显。保存失败、历史浏览和 Candidate/Promotion 仍各自保留可发现的事实。
 - Version Finder 命令定位该 Version 的可见 Working Copy，项目入口打开经验证项目根，隐藏不可变快照和 `.pageroot/requests/...` 不作为产品入口。
 - `AI任务/` 只由验证后的冻结 Prompt/Candidate 生成；删除、篡改、软链接或用户占位不能改变隐藏 Candidate，也不能阻止按隐藏 Hash 审阅和 Promotion。重试只能重建安全投影或选择新展示目录。
 - P2 不创建 `附件与图片/`、附件快照说明、附件 Finder 定位或回收区；这些可见附件体验属于 P3，现有附件冻结正确性保持。
