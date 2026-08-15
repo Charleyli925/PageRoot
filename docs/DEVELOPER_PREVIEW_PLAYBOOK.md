@@ -42,7 +42,7 @@ Tree 时，必须停止并报告，不能静默漏包。`npm run package:develop
 
 1. 打开 `Developer Preview` 工作流。
 2. 选择需要验证的提交所在分支。
-3. 选择 `arm64` 或 `x64`。
+3. 架构固定为 `arm64`。
 4. 手动点击运行。
 5. 下载名为 `PageRoot-developer-preview-…` 的 Actions artifact。
 
@@ -54,8 +54,6 @@ Tree 时，必须停止并报告，不能静默漏包。`npm run package:develop
 
 ```bash
 npm run package:developer
-# Intel Mac:
-npm run package:developer:x64
 ```
 
 产物位于 `output/developer-preview/`。GitHub artifact 保留 7 天。

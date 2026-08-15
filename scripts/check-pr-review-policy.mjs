@@ -1,131 +1,31 @@
 #!/usr/bin/env node
 
-import { appendFile, mkdir, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-
-import {
-  DEFAULT_TRUSTED_ACTOR,
-  parseDraftReviewRequestMarker,
-} from "./draft-review-marker.mjs";
 
 const scriptPath = fileURLToPath(import.meta.url);
 const productRoot = path.resolve(path.dirname(scriptPath), "..");
 const SHA_PATTERN = /^[0-9a-f]{40}$/u;
 const REPOSITORY_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u;
-const CODEX_LOGIN = "chatgpt-codex-connector";
-const DEFAULT_SETTLE_SECONDS = 30;
-const DEFAULT_TIMEOUT_SECONDS = 15 * 60;
-const DEFAULT_POLL_SECONDS = 15;
-const MAX_REST_PAGES = 20;
-const POLICY_VERSION = "2026-08-14.3";
+const POLICY_VERSION = "2026-08-15.1";
 const PRIORITY_BADGE_PATTERN = /\bP([0-3])\s+Badge\b/giu;
 const PRIORITY_LINE_PATTERN = /(?:^|\r?\n)\s*(?:[-*]\s*)?(?:\*\*)?\[?P([0-3])\]?(?:\*\*)?\s*[:：-]/gimu;
-const REVIEWED_COMMIT_PATTERN = /\*\*Reviewed commit:\*\*\s*`([0-9a-f]{10,40})`/iu;
-const CLEAN_COMPLETION_PATTERN = /^Codex Review:\s*Didn't find any major issues\.[^\r\n]*\r?\n\r?\n/iu;
-const EFFECTIVE_REVIEW_STATES = new Set(["CHANGES_REQUESTED", "APPROVED", "DISMISSED"]);
+const GITHUB_API_VERSION = "2022-11-28";
+const MAX_REST_PAGES = 20;
 
 function normalizedLogin(value) {
   return String(value || "").toLowerCase().replace(/\[bot\]$/u, "");
-}
-
-function isCodexActor(value) {
-  return normalizedLogin(value) === CODEX_LOGIN;
 }
 
 function actorLogin(value) {
   return value?.user?.login || value?.author?.login || value?.author || "";
 }
 
-function issueCommentBody(value) {
-  return String(value?.body ?? "");
-}
-
-// A trusted Draft-phase probe request carries an exact-head marker so the
-// final gate can tell a still-open probe round apart from the Ready-triggered
-// review. While that marker is open, no post-Ready completion may satisfy the
-// final policy: a late probe response must never let the gate pass while the
-// Ready-triggered Codex round is still in flight.
-function hasOpenDraftReviewRequest(
-  issueComments,
-  expectedHeadSha,
-  trustedActor = DEFAULT_TRUSTED_ACTOR,
-) {
-  const head = String(expectedHeadSha || "").toLowerCase();
-  const actor = normalizedLogin(trustedActor);
-  if (!SHA_PATTERN.test(head) || !actor) return false;
-  return (issueComments || []).some((comment) => {
-    if (normalizedLogin(actorLogin(comment)) !== actor) return false;
-    const marker = parseDraftReviewRequestMarker(issueCommentBody(comment));
-    return marker !== null && marker.headSha === head;
-  });
-}
-
-function timestamp(value) {
-  const milliseconds = Date.parse(value || "");
-  return Number.isFinite(milliseconds) ? milliseconds : null;
-}
-
 function assertSha(value, label) {
   const normalized = String(value || "").toLowerCase();
-  if (!SHA_PATTERN.test(normalized)) {
-    throw new Error(`${label} must be a 40-character lowercase Git SHA.`);
-  }
+  if (!SHA_PATTERN.test(normalized)) throw new Error(`${label} must be a 40-character Git SHA.`);
   return normalized;
-}
-
-function inOpenInterval(value, after, before = Number.POSITIVE_INFINITY) {
-  return Number.isFinite(value) && value > after && value < before;
-}
-
-function reviewSubmittedAt(review) {
-  return timestamp(review?.submitted_at || review?.submittedAt);
-}
-
-function reviewCommitSha(review) {
-  return String(
-    review?.commit_id || review?.commit?.oid || review?.commitSha || "",
-  ).toLowerCase();
-}
-
-function reviewActorKey(review, index) {
-  const actor = normalizedLogin(actorLogin(review));
-  if (actor) return actor;
-  const id = review?.id || review?.databaseId || review?.node_id || index;
-  return `unknown:${String(id)}`;
-}
-
-function compareReviewRecency(left, right) {
-  const leftAt = reviewSubmittedAt(left.review);
-  const rightAt = reviewSubmittedAt(right.review);
-  if (Number.isFinite(leftAt) && Number.isFinite(rightAt) && leftAt !== rightAt) {
-    return leftAt - rightAt;
-  }
-  if (Number.isFinite(leftAt)) return 1;
-  if (Number.isFinite(rightAt)) return -1;
-  const leftId = Number(left.review?.id || left.review?.databaseId || 0);
-  const rightId = Number(right.review?.id || right.review?.databaseId || 0);
-  if (Number.isFinite(leftId) && Number.isFinite(rightId) && leftId !== rightId) {
-    return leftId - rightId;
-  }
-  return left.index - right.index;
-}
-
-function threadComments(thread) {
-  if (Array.isArray(thread?.comments)) return thread.comments;
-  return thread?.comments?.nodes || [];
-}
-
-function pullRequestHeadSha(pullRequest) {
-  return String(
-    pullRequest?.head?.sha || pullRequest?.headRefOid || pullRequest?.headSha || "",
-  ).toLowerCase();
-}
-
-function pullRequestBaseSha(pullRequest) {
-  return String(
-    pullRequest?.base?.sha || pullRequest?.baseRefOid || pullRequest?.baseSha || "",
-  ).toLowerCase();
 }
 
 export function classifyReviewPriority(body) {
@@ -139,14 +39,20 @@ export function classifyReviewPriority(body) {
   return Number.isFinite(highestRank) ? `P${highestRank}` : "unclassified";
 }
 
-export function reviewedCommitPrefix(body) {
-  return String(body || "").match(REVIEWED_COMMIT_PATTERN)?.[1]?.toLowerCase() || null;
+function threadComments(thread) {
+  if (Array.isArray(thread?.comments)) return thread.comments;
+  return thread?.comments?.nodes || [];
 }
 
 export function classifyReviewThread(thread) {
   const original = threadComments(thread)[0];
   if (!original) {
-    return Object.freeze({ kind: "review_thread", priority: "unclassified", state: "ignored", reason: "thread_without_comment" });
+    return Object.freeze({
+      kind: "review_thread",
+      priority: "unclassified",
+      state: "ignored",
+      reason: "thread_without_comment",
+    });
   }
   const priority = classifyReviewPriority(original.body);
   const active = !(thread?.isResolved === true || thread?.is_resolved === true)
@@ -159,325 +65,34 @@ export function classifyReviewThread(thread) {
     path: original.path || null,
     commentId: original.databaseId || original.id || null,
   });
-  if (!active) return Object.freeze({ ...finding, state: "ignored", reason: "resolved_or_outdated" });
-  if (priority === "P0" || priority === "P1") {
-    return Object.freeze({ ...finding, state: "blocking", reason: "active_user_impact_finding" });
-  }
-  return Object.freeze({ ...finding, state: "non_blocking", reason: "deferred_review_debt" });
-}
-
-export function classifyReviewState(review) {
-  const state = String(review?.state || "").toUpperCase();
-  const priority = classifyReviewPriority(review?.body);
-  const actor = normalizedLogin(actorLogin(review)) || "unknown";
-  const finding = Object.freeze({
-    kind: "pull_request_review",
-    reviewId: review?.id || review?.databaseId || null,
-    actor,
-    reviewState: state || "UNKNOWN",
-    priority,
-    commitSha: reviewCommitSha(review) || null,
-  });
-  if (state !== "CHANGES_REQUESTED") {
-    return Object.freeze({ ...finding, state: "non_blocking", reason: "review_not_changes_requested" });
+  if (!active) {
+    return Object.freeze({ ...finding, state: "ignored", reason: "resolved_or_outdated" });
   }
   if (priority === "P0" || priority === "P1") {
-    return Object.freeze({ ...finding, state: "blocking", reason: "user_impact_changes_requested" });
+    return Object.freeze({ ...finding, state: "informational", reason: "active_user_impact_finding" });
   }
-  return Object.freeze({ ...finding, state: "non_blocking", reason: "deferred_changes_requested" });
+  return Object.freeze({ ...finding, state: "informational", reason: "non_blocking_finding" });
 }
 
-// GitHub preserves every submitted review. For the current candidate, a
-// reviewer’s latest decision is the effective state; a later approval or
-// dismissal retracts an earlier same-head change request. A plain comment is
-// not an explicit withdrawal and therefore cannot let a P0/P1 concern pass.
-export function latestEffectiveReviews(reviews = [], { expectedHeadSha = null } = {}) {
-  const expectedHead = String(expectedHeadSha || "").toLowerCase();
-  const latestByActor = new Map();
-  (reviews || []).forEach((review, index) => {
-    const state = String(review?.state || "").toUpperCase();
-    if (!EFFECTIVE_REVIEW_STATES.has(state)) return;
-    if (expectedHead && reviewCommitSha(review) !== expectedHead) return;
-    const candidate = { review, index };
-    const key = reviewActorKey(review, index);
-    const previous = latestByActor.get(key);
-    if (!previous || compareReviewRecency(candidate, previous) > 0) {
-      latestByActor.set(key, candidate);
-    }
-  });
-  return Object.freeze([...latestByActor.values()]
-    .sort((left, right) => left.index - right.index)
-    .map((entry) => entry.review));
-}
-
-function latestReadyForReviewEvent(timelineEvents) {
-  return (timelineEvents || [])
-    .filter((event) => (
-      event?.event === "ready_for_review"
-      && Number.isFinite(timestamp(event?.created_at || event?.createdAt))
-    ))
-    .sort((left, right) => (
-      timestamp(right?.created_at || right?.createdAt)
-      - timestamp(left?.created_at || left?.createdAt)
-    ))[0] || null;
-}
-
-function completionSignal(review, expectedHeadSha, readyAt) {
-  const submittedAt = reviewSubmittedAt(review);
-  const state = String(review?.state || "").toUpperCase();
-  const commitSha = reviewCommitSha(review);
-  const prefix = reviewedCommitPrefix(review?.body);
-  if (
-    !isCodexActor(actorLogin(review))
-    || !["APPROVED", "COMMENTED", "CHANGES_REQUESTED"].includes(state)
-    || commitSha !== expectedHeadSha
-    || !prefix
-    || !expectedHeadSha.startsWith(prefix)
-    || !inOpenInterval(submittedAt, readyAt)
-  ) return null;
+export function summarizeReviewSnapshot(result) {
   return Object.freeze({
-    kind: "codex_review",
-    id: review?.id || review?.databaseId || null,
-    at: submittedAt,
-    reviewState: state,
-  });
-}
-
-function completionCommentSignal(comment, expectedHeadSha, readyAt) {
-  const createdAt = timestamp(comment?.created_at || comment?.createdAt);
-  const updatedAt = timestamp(comment?.updated_at || comment?.updatedAt || comment?.created_at || comment?.createdAt);
-  const lastEditedAt = comment?.last_edited_at || comment?.lastEditedAt || null;
-  const prefix = reviewedCommitPrefix(comment?.body);
-  if (
-    !isCodexActor(actorLogin(comment))
-    || Boolean(lastEditedAt)
-    || createdAt !== updatedAt
-    || !CLEAN_COMPLETION_PATTERN.test(String(comment?.body || ""))
-    || !prefix
-    || !expectedHeadSha.startsWith(prefix)
-    || !inOpenInterval(createdAt, readyAt)
-  ) return null;
-  return Object.freeze({
-    kind: "codex_clean_comment",
-    id: comment?.id || comment?.databaseId || null,
-    at: createdAt,
-    reviewState: "COMMENTED",
-  });
-}
-
-function completionReactionSignal(reaction, readyAt) {
-  const createdAt = timestamp(reaction?.created_at || reaction?.createdAt);
-  if (
-    !isCodexActor(actorLogin(reaction))
-    || reaction?.content !== "+1"
-    || !Number.isFinite(readyAt)
-    || !inOpenInterval(createdAt, readyAt)
-  ) return null;
-  return Object.freeze({
-    kind: "codex_clean_reaction",
-    id: reaction?.id || reaction?.databaseId || null,
-    at: createdAt,
-    reviewState: "COMMENTED",
-  });
-}
-
-// This is intentionally shared with CI Health so that the reported review
-// latency uses the exact same evidence contract that controls release-gate.
-export function finalCodexCompletion({
-  reviews = [],
-  issueComments = [],
-  issueReactions = [],
-  expectedHeadSha,
-  readyAt,
-} = {}) {
-  const expectedHead = String(expectedHeadSha || "").toLowerCase();
-  const readyAtMs = readyAt == null
-    ? null
-    : (typeof readyAt === "number" ? readyAt : timestamp(readyAt));
-  if (!SHA_PATTERN.test(expectedHead) || !Number.isFinite(readyAtMs)) return null;
-  const completions = [
-    ...(reviews || []).map((review) => completionSignal(review, expectedHead, readyAtMs)).filter(Boolean),
-    ...(issueComments || []).map((comment) => completionCommentSignal(comment, expectedHead, readyAtMs)).filter(Boolean),
-    ...(issueReactions || []).map((reaction) => completionReactionSignal(reaction, readyAtMs)).filter(Boolean),
-  ].sort((left, right) => right.at - left.at);
-  return completions[0] || null;
-}
-
-function findingSummary(finding) {
-  const at = finding?.at;
-  return Object.freeze({
-    ...finding,
-    ...(Number.isFinite(at) ? { at: new Date(at).toISOString() } : {}),
-  });
-}
-
-function policyResult(identity, status, reason, fields = {}) {
-  return Object.freeze({
-    schemaVersion: 1,
-    policyVersion: POLICY_VERSION,
-    ...identity,
-    status,
-    reason,
-    reviewCompletedAt: null,
-    reviewCompletionKind: null,
-    reviewLatencySeconds: null,
-    readyAt: null,
-    blockingFindings: [],
-    nonBlockingFindings: [],
-    ...fields,
-  });
-}
-
-export function evaluateReviewPolicy({
-  expectedHeadSha,
-  expectedBaseSha,
-  pullRequest,
-  issueComments = [],
-  issueReactions = [],
-  timelineEvents = [],
-  reviews = [],
-  reviewThreads = [],
-  now = new Date(),
-  settleSeconds = DEFAULT_SETTLE_SECONDS,
-  advisory = false,
-}) {
-  const expectedHead = assertSha(expectedHeadSha, "expectedHeadSha");
-  const expectedBase = assertSha(expectedBaseSha, "expectedBaseSha");
-  if (!Number.isFinite(settleSeconds) || settleSeconds < 0) {
-    throw new Error("settleSeconds must be a non-negative number.");
-  }
-  const nowMs = now instanceof Date ? now.getTime() : timestamp(now);
-  if (!Number.isFinite(nowMs)) throw new Error("now must be a valid date.");
-  const currentHeadSha = pullRequestHeadSha(pullRequest);
-  const currentBaseSha = pullRequestBaseSha(pullRequest);
-  const identity = Object.freeze({
-    expectedHeadSha: expectedHead,
-    currentHeadSha: currentHeadSha || null,
-    expectedBaseSha: expectedBase,
-    currentBaseSha: currentBaseSha || null,
-  });
-  if (currentHeadSha !== expectedHead) return policyResult(identity, "blocked", "head_sha_changed");
-  if (currentBaseSha !== expectedBase) return policyResult(identity, "blocked", "base_sha_changed");
-  if (String(pullRequest?.state || "").toLowerCase() !== "open") {
-    return policyResult(identity, "blocked", "pull_request_not_open");
-  }
-  if (pullRequest?.draft === true || pullRequest?.isDraft === true) {
-    if (!advisory) return policyResult(identity, "blocked", "pull_request_is_draft");
-  }
-
-  const readyEvent = latestReadyForReviewEvent(timelineEvents);
-  let readyAtMs = null;
-  if (readyEvent) {
-    readyAtMs = timestamp(readyEvent?.created_at || readyEvent?.createdAt);
-    if (!Number.isFinite(readyAtMs)) return policyResult(identity, "blocked", "ready_transition_invalid");
-  } else if (!advisory) {
-    return policyResult(identity, "waiting", "ready_transition_missing");
-  }
-  const readyAt = readyAtMs == null ? null : new Date(readyAtMs).toISOString();
-
-  const reviewFindings = latestEffectiveReviews(reviews, { expectedHeadSha: expectedHead })
-    .map(classifyReviewState);
-  const threadFindings = (reviewThreads || []).map(classifyReviewThread);
-  const blockingFindings = [
-    ...reviewFindings.filter((finding) => finding.state === "blocking"),
-    ...threadFindings.filter((finding) => finding.state === "blocking"),
-  ].map(findingSummary);
-  const nonBlockingFindings = [
-    ...reviewFindings.filter((finding) => finding.state === "non_blocking" && finding.reason !== "review_not_changes_requested"),
-    ...threadFindings.filter((finding) => finding.state === "non_blocking"),
-  ].map(findingSummary);
-  const draftRequestOpen = !advisory
-    && hasOpenDraftReviewRequest(issueComments, expectedHead);
-  const completion = draftRequestOpen
-    ? null
-    : finalCodexCompletion({
-      reviews,
-      issueComments,
-      issueReactions,
-      expectedHeadSha: expectedHead,
-      readyAt: readyAtMs,
-    });
-  const baseFields = {
-    readyAt,
-    blockingFindings,
-    nonBlockingFindings,
-    reviewCompletedAt: completion ? new Date(completion.at).toISOString() : null,
-    reviewCompletionKind: completion?.kind || null,
-    reviewLatencySeconds: completion && Number.isFinite(readyAtMs)
-      ? Math.max(0, Math.round((completion.at - readyAtMs) / 1000))
-      : null,
-  };
-  if (blockingFindings.length > 0) {
-    return policyResult(identity, "blocked", "blocking_review_finding", baseFields);
-  }
-  if (!completion) {
-    return policyResult(
-      identity,
-      "waiting",
-      draftRequestOpen ? "draft_review_request_open" : "final_review_in_progress",
-      baseFields,
-    );
-  }
-  const settlesAtMs = completion.at + settleSeconds * 1000;
-  if (nowMs < settlesAtMs) {
-    return policyResult(identity, "waiting", "settle_window", {
-      ...baseFields,
-      settlesAt: new Date(settlesAtMs).toISOString(),
-    });
-  }
-  return policyResult(identity, "passed", "final_review_policy_passed", {
-    ...baseFields,
-    settlesAt: new Date(settlesAtMs).toISOString(),
-  });
-}
-
-export function summarizeReviewPolicy(result) {
-  return Object.freeze({
-    schemaVersion: result.schemaVersion,
-    policyVersion: result.policyVersion,
     status: result.status,
     reason: result.reason,
     expectedHeadSha: result.expectedHeadSha,
     currentHeadSha: result.currentHeadSha,
-    expectedBaseSha: result.expectedBaseSha,
-    currentBaseSha: result.currentBaseSha,
-    readyAt: result.readyAt,
-    reviewCompletedAt: result.reviewCompletedAt,
-    reviewCompletionKind: result.reviewCompletionKind,
-    reviewLatencySeconds: result.reviewLatencySeconds,
-    blockingFindings: result.blockingFindings,
-    nonBlockingFindings: result.nonBlockingFindings,
+    p0p1Count: result.p0p1Findings.length,
+    otherCount: result.otherFindings.length,
   });
-}
-
-function resolveOutputPath(output) {
-  const destination = path.resolve(productRoot, output);
-  if (destination !== productRoot && !destination.startsWith(`${productRoot}${path.sep}`)) {
-    throw new Error("--output must remain inside the repository.");
-  }
-  return destination;
-}
-
-export async function writeReviewPolicyArtifact(result, output = "output/review-policy/review-policy.json") {
-  const destination = resolveOutputPath(output);
-  await mkdir(path.dirname(destination), { recursive: true });
-  await writeFile(destination, `${JSON.stringify(summarizeReviewPolicy(result), null, 2)}\n`, "utf8");
-  return destination;
 }
 
 function parseOptions(argv) {
   const options = {
-    repository: process.env.GITHUB_REPOSITORY || "",
-    pullRequest: Number(process.env.PR_NUMBER || 0),
-    expectedHeadSha: process.env.PR_HEAD_SHA || "",
-    expectedBaseSha: process.env.PR_BASE_SHA || "",
+    repository: "",
+    pullRequest: 0,
+    expectedHeadSha: "",
+    expectedBaseSha: "",
     tokenEnv: "GITHUB_TOKEN",
-    settleSeconds: DEFAULT_SETTLE_SECONDS,
-    timeoutSeconds: DEFAULT_TIMEOUT_SECONDS,
-    pollSeconds: DEFAULT_POLL_SECONDS,
-    mode: "wait",
     output: "output/review-policy/review-policy.json",
-    githubOutput: process.env.GITHUB_OUTPUT || "",
   };
   while (argv.length > 0) {
     const argument = argv.shift();
@@ -488,29 +103,17 @@ function parseOptions(argv) {
     else if (argument === "--expected-head") options.expectedHeadSha = value;
     else if (argument === "--expected-base") options.expectedBaseSha = value;
     else if (argument === "--token-env") options.tokenEnv = value;
-    else if (argument === "--settle-seconds") options.settleSeconds = Number(value);
-    else if (argument === "--timeout-seconds") options.timeoutSeconds = Number(value);
-    else if (argument === "--poll-seconds") options.pollSeconds = Number(value);
-    else if (argument === "--mode") options.mode = value;
     else if (argument === "--output") options.output = value;
-    else if (argument === "--github-output") options.githubOutput = value;
-    else throw new Error(`Unknown argument: ${argument}`);
+    else if (argument === "--mode" || argument === "--settle-seconds" || argument === "--timeout-seconds" || argument === "--poll-seconds" || argument === "--github-output") {
+      continue;
+    } else throw new Error(`Unknown argument: ${argument}`);
   }
   if (!REPOSITORY_PATTERN.test(options.repository)) throw new Error("--repository must use owner/name.");
-  if (!Number.isInteger(options.pullRequest) || options.pullRequest <= 0) throw new Error("--pull-request must be a positive integer.");
+  if (!Number.isInteger(options.pullRequest) || options.pullRequest <= 0) {
+    throw new Error("--pull-request must be a positive integer.");
+  }
   options.expectedHeadSha = assertSha(options.expectedHeadSha, "--expected-head");
   options.expectedBaseSha = assertSha(options.expectedBaseSha, "--expected-base");
-  if (!Number.isInteger(options.settleSeconds) || options.settleSeconds < 0 || options.settleSeconds > 600) {
-    throw new Error("--settle-seconds must be an integer from 0 to 600.");
-  }
-  if (!Number.isInteger(options.timeoutSeconds) || options.timeoutSeconds < 1 || options.timeoutSeconds > 3600) {
-    throw new Error("--timeout-seconds must be an integer from 1 to 3600.");
-  }
-  if (!Number.isInteger(options.pollSeconds) || options.pollSeconds < 1 || options.pollSeconds > 60) {
-    throw new Error("--poll-seconds must be an integer from 1 to 60.");
-  }
-  if (!new Set(["wait", "revalidate", "advisory"]).has(options.mode)) throw new Error("--mode must be wait, revalidate or advisory.");
-  resolveOutputPath(options.output);
   return options;
 }
 
@@ -520,8 +123,7 @@ async function githubJson(url, token, init = {}) {
     headers: {
       Accept: "application/vnd.github+json",
       Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-      "X-GitHub-Api-Version": "2022-11-28",
+      "X-GitHub-Api-Version": GITHUB_API_VERSION,
       ...(init.headers || {}),
     },
   });
@@ -547,218 +149,92 @@ async function restPages(apiBase, apiPath, token) {
   throw new Error(`GitHub API pagination exceeded ${MAX_REST_PAGES} pages for ${apiPath}.`);
 }
 
-async function graphqlConnection({ graphqlUrl, query, variables, pathSelector, token }) {
-  const entries = [];
-  let after = null;
-  for (;;) {
-    const response = await githubJson(graphqlUrl, token, {
-      method: "POST",
-      body: JSON.stringify({ query, variables: { ...variables, after } }),
-    });
-    if (response.errors?.length) {
-      throw new Error(`GitHub GraphQL: ${response.errors.map((error) => error.message).join("; ")}`);
-    }
-    const connection = pathSelector(response?.data);
-    if (!connection) throw new Error("Pull Request review evidence was unavailable.");
-    entries.push(...(connection.nodes || []));
-    if (!connection.pageInfo?.hasNextPage) return entries;
-    after = connection.pageInfo.endCursor;
-    if (!after) throw new Error("GitHub GraphQL pagination omitted endCursor.");
+export function evaluateReviewSnapshot({
+  expectedHeadSha,
+  expectedBaseSha,
+  pullRequest,
+  reviewThreads = [],
+} = {}) {
+  const expectedHead = assertSha(expectedHeadSha, "expectedHeadSha");
+  const expectedBase = assertSha(expectedBaseSha, "expectedBaseSha");
+  const currentHeadSha = String(pullRequest?.head?.sha || "").toLowerCase() || null;
+  const currentBaseSha = String(pullRequest?.base?.sha || "").toLowerCase() || null;
+  const findings = (reviewThreads || []).map(classifyReviewThread);
+  const p0p1Findings = findings.filter((finding) => finding.priority === "P0" || finding.priority === "P1");
+  const otherFindings = findings.filter((finding) => finding.priority !== "P0" && finding.priority !== "P1" && finding.state !== "ignored");
+  return Object.freeze({
+    schemaVersion: 1,
+    policyVersion: POLICY_VERSION,
+    status: "reported",
+    reason: "informational_review_snapshot",
+    blocking: false,
+    expectedHeadSha: expectedHead,
+    currentHeadSha,
+    expectedBaseSha: expectedBase,
+    currentBaseSha,
+    p0p1Findings,
+    otherFindings,
+  });
+}
+
+export async function writeReviewPolicyArtifact(result, output = "output/review-policy/review-policy.json") {
+  const destination = path.resolve(productRoot, output);
+  if (destination !== productRoot && !destination.startsWith(`${productRoot}${path.sep}`)) {
+    throw new Error("--output must remain inside the repository.");
   }
-}
-
-async function collectIssueComments({ graphqlUrl, owner, name, pullRequest, token }) {
-  return graphqlConnection({
-    graphqlUrl,
-    token,
-    variables: { owner, name, number: pullRequest },
-    pathSelector: (data) => data?.repository?.pullRequest?.comments,
-    query: `
-      query($owner: String!, $name: String!, $number: Int!, $after: String) {
-        repository(owner: $owner, name: $name) {
-          pullRequest(number: $number) {
-            comments(first: 100, after: $after) {
-              nodes { databaseId body createdAt updatedAt lastEditedAt author { login } }
-              pageInfo { hasNextPage endCursor }
-            }
-          }
-        }
-      }
-    `,
-  });
-}
-
-async function collectReviewThreads({ graphqlUrl, owner, name, pullRequest, token }) {
-  return graphqlConnection({
-    graphqlUrl,
-    token,
-    variables: { owner, name, number: pullRequest },
-    pathSelector: (data) => data?.repository?.pullRequest?.reviewThreads,
-    query: `
-      query($owner: String!, $name: String!, $number: Int!, $after: String) {
-        repository(owner: $owner, name: $name) {
-          pullRequest(number: $number) {
-            reviewThreads(first: 100, after: $after) {
-              nodes {
-                isResolved isOutdated
-                comments(first: 20) { nodes { databaseId path body author { login } } }
-              }
-              pageInfo { hasNextPage endCursor }
-            }
-          }
-        }
-      }
-    `,
-  });
-}
-
-export async function collectReviewPolicySnapshot(options, token) {
-  const apiBase = (process.env.GITHUB_API_URL || "https://api.github.com").replace(/\/$/u, "");
-  const graphqlUrl = process.env.GITHUB_GRAPHQL_URL || `${apiBase.replace(/\/api\/v3$/u, "/api")}/graphql`;
-  const [owner, name] = options.repository.split("/");
-  const repositoryPath = [owner, name].map(encodeURIComponent).join("/");
-  const basePath = `/repos/${repositoryPath}`;
-  const [pullRequest, timelineEvents, reviews, issueComments, issueReactions, reviewThreads] = await Promise.all([
-    githubJson(`${apiBase}${basePath}/pulls/${options.pullRequest}`, token),
-    restPages(apiBase, `${basePath}/issues/${options.pullRequest}/events`, token),
-    restPages(apiBase, `${basePath}/pulls/${options.pullRequest}/reviews`, token),
-    collectIssueComments({ graphqlUrl, owner, name, pullRequest: options.pullRequest, token }),
-    restPages(apiBase, `${basePath}/issues/${options.pullRequest}/reactions`, token),
-    collectReviewThreads({ graphqlUrl, owner, name, pullRequest: options.pullRequest, token }),
-  ]);
-  return { pullRequest, timelineEvents, reviews, issueComments, issueReactions, reviewThreads };
-}
-
-function delay(milliseconds) {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
-}
-
-async function writeGithubOutput(destination, values) {
-  if (!destination) return;
-  const lines = Object.entries(values).map(([key, value]) => {
-    const normalized = String(value ?? "").replaceAll("\r", "").replaceAll("\n", "");
-    return `${key}=${normalized}`;
-  });
-  await appendFile(destination, `${lines.join("\n")}\n`, "utf8");
-}
-
-async function appendSummary(result) {
-  if (!process.env.GITHUB_STEP_SUMMARY) return;
-  const passed = result.status === "passed";
-  const lines = [
-    "### Review policy",
-    "",
-    `- Result: **${passed ? "PASS" : result.status.toUpperCase()}** (${result.reason})`,
-    `- Expected/current head: \`${result.expectedHeadSha}\` / \`${result.currentHeadSha || "unavailable"}\``,
-    `- Expected/current base: \`${result.expectedBaseSha}\` / \`${result.currentBaseSha || "unavailable"}\``,
-    `- Ready transition: ${result.readyAt || "missing"}`,
-    `- Final Codex completion: ${result.reviewCompletedAt || "not observed"} (${result.reviewCompletionKind || "none"})`,
-    `- Review latency: ${result.reviewLatencySeconds ?? "n/a"} seconds`,
-    `- Blocking P0/P1 or human findings: ${result.blockingFindings.length}`,
-    `- Deferred P2/P3/unclassified findings: ${result.nonBlockingFindings.length}`,
-    "",
-  ];
-  await appendFile(process.env.GITHUB_STEP_SUMMARY, `${lines.join("\n")}\n`, "utf8");
-}
-
-async function persistResult(result, options) {
-  const destination = await writeReviewPolicyArtifact(result, options.output);
-  await writeGithubOutput(options.githubOutput, {
-    status: result.status,
-    reason: result.reason,
-    artifact_path: destination,
-    review_completed_at: result.reviewCompletedAt || "",
-    review_completion_kind: result.reviewCompletionKind || "",
-    review_latency_seconds: result.reviewLatencySeconds ?? "",
-    blocking_findings: result.blockingFindings.length,
-    non_blocking_findings: result.nonBlockingFindings.length,
-  });
-  await appendSummary(result);
+  await mkdir(path.dirname(destination), { recursive: true });
+  await writeFile(destination, `${JSON.stringify(result, null, 2)}\n`, "utf8");
   return destination;
 }
 
-async function runAdvisory(options) {
-  const token = process.env[options.tokenEnv] || "";
-  if (!token) throw new Error(`Environment variable ${options.tokenEnv} is required.`);
-  let snapshot;
-  try {
-    snapshot = await collectReviewPolicySnapshot(options, token);
-  } catch (error) {
-    console.warn(`Review advisory evidence is temporarily unavailable: ${error instanceof Error ? error.message : String(error)}`);
-    const unavailable = policyResult({
-      expectedHeadSha: options.expectedHeadSha,
-      currentHeadSha: null,
-      expectedBaseSha: options.expectedBaseSha,
-      currentBaseSha: null,
-    }, "unavailable", "github_evidence_unavailable");
-    await persistResult(unavailable, options);
-    return unavailable;
-  }
-  // Advisory feedback always evaluates the live pair, so a Draft or
-  // non-promoted Pull Request still reports exactly what would happen on
-  // promotion. It never blocks the PR Feedback workflow.
-  const liveHead = pullRequestHeadSha(snapshot.pullRequest) || options.expectedHeadSha;
-  const liveBase = pullRequestBaseSha(snapshot.pullRequest) || options.expectedBaseSha;
-  const result = evaluateReviewPolicy({
-    expectedHeadSha: liveHead,
-    expectedBaseSha: liveBase,
-    ...snapshot,
-    advisory: true,
-    settleSeconds: 0,
-  });
-  await persistResult(result, options);
-  return result;
+async function collectSnapshot(options, token) {
+  const apiBase = `https://api.github.com/repos/${options.repository}`;
+  const pullRequest = await githubJson(`${apiBase}/pulls/${options.pullRequest}`, token);
+  const comments = await restPages(apiBase, `/pulls/${options.pullRequest}/comments`, token);
+  const reviewThreads = comments.map((comment) => ({
+    isResolved: false,
+    isOutdated: Boolean(comment?.position == null && comment?.original_position != null),
+    comments: [comment],
+  }));
+  return { pullRequest, reviewThreads };
 }
 
 async function run(options) {
-  if (options.mode === "advisory") return runAdvisory(options);
   const token = process.env[options.tokenEnv] || "";
   if (!token) throw new Error(`Environment variable ${options.tokenEnv} is required.`);
-  const deadline = Date.now() + (options.mode === "revalidate" ? 0 : options.timeoutSeconds * 1000);
-  let lastReason = "";
-  for (;;) {
-    let snapshot;
-    try {
-      snapshot = await collectReviewPolicySnapshot(options, token);
-    } catch (error) {
-      if (options.mode === "revalidate" || Date.now() >= deadline) throw error;
-      if (lastReason !== "github_evidence_unavailable") {
-        console.warn(`GitHub review evidence is temporarily unavailable: ${error instanceof Error ? error.message : String(error)}`);
-        lastReason = "github_evidence_unavailable";
-      }
-      await delay(Math.min(options.pollSeconds * 1000, Math.max(1, deadline - Date.now())));
-      continue;
-    }
-    const result = evaluateReviewPolicy({
+  let result;
+  try {
+    const snapshot = await collectSnapshot(options, token);
+    result = evaluateReviewSnapshot({
       expectedHeadSha: options.expectedHeadSha,
       expectedBaseSha: options.expectedBaseSha,
       ...snapshot,
-      settleSeconds: options.mode === "revalidate" ? 0 : options.settleSeconds,
     });
-    if (result.reason !== lastReason || result.status !== "waiting") {
-      console.log(JSON.stringify(summarizeReviewPolicy(result), null, 2));
-      lastReason = result.reason;
-    }
-    if (result.status === "passed") {
-      await persistResult(result, options);
-      return result;
-    }
-    if (result.status === "blocked" || options.mode === "revalidate") {
-      await persistResult(result, options);
-      throw new Error(`Review policy blocked: ${result.reason}.`);
-    }
-    if (Date.now() >= deadline) {
-      const timedOut = Object.freeze({ ...result, status: "blocked", reason: "review_wait_timed_out" });
-      await persistResult(timedOut, options);
-      throw new Error("Final review did not settle before the review wait timeout.");
-    }
-    await delay(Math.min(options.pollSeconds * 1000, Math.max(1, deadline - Date.now())));
+  } catch (error) {
+    console.warn(`Review snapshot is temporarily unavailable: ${error instanceof Error ? error.message : String(error)}`);
+    result = evaluateReviewSnapshot({
+      expectedHeadSha: options.expectedHeadSha,
+      expectedBaseSha: options.expectedBaseSha,
+      pullRequest: {
+        head: { sha: options.expectedHeadSha },
+        base: { sha: options.expectedBaseSha },
+      },
+      reviewThreads: [],
+    });
+    result = Object.freeze({
+      ...result,
+      reason: "github_evidence_unavailable",
+    });
   }
+  const destination = await writeReviewPolicyArtifact(result, options.output);
+  console.log(JSON.stringify(summarizeReviewSnapshot(result), null, 2));
+  console.log(`Review snapshot: ${destination}`);
+  return result;
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === scriptPath) {
   run(parseOptions(process.argv.slice(2))).catch((error) => {
-    console.error(error instanceof Error ? error.stack : String(error));
+    console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;
   });
 }

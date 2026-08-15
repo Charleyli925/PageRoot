@@ -122,11 +122,10 @@ succeeded technically but installer handoff is incomplete.
 
 1. Update `package.json` and the package-lock root to the same semantic version.
 2. Move relevant `CHANGELOG.md` entries from Unreleased into that version.
-3. Open a draft Pull Request while iterating. Every ordinary update runs impact-selected `PR Feedback` only. Batch accepted P0/P1 corrections before promotion; P2/P3/unclassified findings remain debt unless deliberately escalated.
-4. Update the final head onto current `main`, freeze it and mark it Ready once. Ready starts the one final `review-policy` check; do not post a separate Draft marker or another review command while it runs.
-5. `review-policy` continuously revalidates both SHAs, requires a Ready-triggered substantive exact-commit Codex review or immutable exact-commit clean comment, then waits 30 seconds. It blocks active P0/P1 findings and P0/P1 `CHANGES_REQUESTED` reviews; only each reviewer's later same-head approval or dismissal supersedes their earlier request. P2/P3/unclassified findings are captured as non-blocking debt regardless of reviewer and retained in the rolling debt record if they age out of the short activity scan. `branch-policy` and deterministic `baseline-policy` run independently, so source tests can execute while final review is still settling.
-6. Wait for the complete source lanes, any relevant candidate-only dry run and required `release-gate`. The final gate immediately revalidates review policy and refreshes the same dependency/runtime-closure audit before attestation, including on delayed failed-job retries whose original `baseline-policy` job remains green. If any commit or base update follows promotion, return the PR to Draft, update the branch onto the new base so it has a new head, batch required P0/P1 work and Ready the new final pair; an old `release-gate` and attestation cannot satisfy the new head/base pair.
-7. Merge only with authorization, then confirm `main-integrity` accepts the exact merge Tree/version/PR attestation without rerunning source tests.
+3. Open a draft Pull Request while iterating. Every ordinary Draft update runs impact-selected `pr-feedback` only. Batch accepted P0/P1 product corrections before promotion; Codex comments are informational and do not block merge.
+4. Update the final head onto current `main` and mark it Ready once, or add the `full-gate` label. That starts the complete source matrix. A PR opened already Ready also takes this path. Codex review is requested automatically for the current head and never blocks `release-gate`.
+5. Wait for the complete source lanes, any relevant candidate-only dry run and required `release-gate`. The final gate refreshes the same dependency/runtime-closure audit before attestation. A later commit on a Ready PR reruns the complete matrix for the new head.
+6. Merge only with authorization, then confirm `main-integrity` accepts the exact merge Tree/version/PR attestation without rerunning source tests.
 
 Local `npm run release:mac` remains available when a complete local source-and-installer proof is useful. It is not publication and does not replace the reviewed GitHub flow.
 

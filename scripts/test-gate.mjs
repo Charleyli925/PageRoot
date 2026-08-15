@@ -41,12 +41,12 @@ function parseArguments(argv) {
     else if (argument === "--real-html") options.realHtmlPath = argv.shift() || null;
     else throw new Error(`Unknown argument: ${argument}`);
   }
-  if (!/^(?:edit|task|main|release|developer-package|candidate-app|artifact-only|artifact)$/u.test(options.lane)) {
+  if (!/^(?:edit|task|main|release|developer-package|candidate-app|artifact)$/u.test(options.lane)) {
     throw new Error(
-      "Lane must be edit, task, main, release, developer-package, candidate-app, artifact-only or artifact.",
+      "Lane must be edit, task, main, release, developer-package, candidate-app or artifact.",
     );
   }
-  if (!/^(?:arm64|x64)$/u.test(options.arch)) throw new Error("--arch must be arm64 or x64.");
+  if (options.arch !== "arm64") throw new Error("--arch must be arm64.");
   if (options.realHtmlPath) {
     const resolved = path.resolve(options.realHtmlPath);
     if (!path.isAbsolute(options.realHtmlPath) || path.extname(resolved).toLowerCase() !== ".html") {
@@ -134,19 +134,40 @@ function commandForSuite(suiteId, context) {
     typecheck: packageCommand("typecheck"),
     lint: packageCommand("lint"),
     "dependency-audit": packageCommand("audit:dependencies"),
-    "node-core": packageCommand("test:node:core:prepared"),
-    "node-contract": packageCommand("test:contract:prepared"),
-    "node-integration": packageCommand("test:node:integration:prepared"),
+    "node-core": { command: process.execPath, args: [path.join(productRoot, "scripts/test-node-group.mjs"), "core"] },
+    "node-contract": { command: process.execPath, args: [path.join(productRoot, "scripts/test-node-group.mjs"), "contract"] },
+    "node-integration": { command: process.execPath, args: [path.join(productRoot, "scripts/test-node-group.mjs"), "integration"] },
     "node-package": packageCommand("test:package"),
-    "node-smoke": packageCommand("test:node:smoke:prepared"),
-    "node-full": packageCommand("test:node:full:prepared"),
-    "browser-smoke": packageCommand("test:browser:smoke:prepared"),
-    "browser-full": packageCommand("test:browser:full:prepared"),
-    "real-html": packageCommand("test:real-html:prepared"),
-    "electron-smoke": packageCommand("test:electron:smoke:prepared"),
-    "electron-full": packageCommand("test:electron:full:prepared"),
-    "ai-smoke": packageCommand("test:ai-closed-loop:smoke:prepared"),
-    "ai-closed-loop": packageCommand("test:ai-closed-loop:prepared"),
+    "node-smoke": { command: process.execPath, args: [path.join(productRoot, "scripts/test-node-group.mjs"), "smoke"] },
+    "node-full": { command: process.execPath, args: [path.join(productRoot, "scripts/test-node-group.mjs"), "full"] },
+    "browser-smoke": {
+      command: "npx",
+      args: ["playwright", "test", "--config", "tests/e2e/browser/playwright.smoke.config.mjs"],
+    },
+    "browser-full": {
+      command: "npx",
+      args: ["playwright", "test", "--config", "tests/e2e/browser/playwright.config.mjs"],
+    },
+    "real-html": {
+      command: "npx",
+      args: ["playwright", "test", "--config", "tests/e2e/browser/playwright.real-html.config.mjs"],
+    },
+    "electron-smoke": {
+      command: "npx",
+      args: ["playwright", "test", "--config", "tests/e2e/electron/playwright.smoke.config.mjs"],
+    },
+    "electron-full": {
+      command: "npx",
+      args: ["playwright", "test", "--config", "tests/e2e/electron/playwright.config.mjs"],
+    },
+    "ai-smoke": {
+      command: "npx",
+      args: ["playwright", "test", "--config", "tests/e2e/electron/playwright.ai-smoke.config.mjs"],
+    },
+    "ai-closed-loop": {
+      command: "npx",
+      args: ["playwright", "test", "--config", "tests/e2e/electron/playwright.ai-closed-loop.config.mjs"],
+    },
   };
   if (simple[suiteId]) return simple[suiteId];
   if (suiteId === "node-targeted") {
@@ -183,10 +204,10 @@ function commandForSuite(suiteId, context) {
     };
   }
   if (suiteId === "packaged-runtime") {
-    return packageCommand("test:packaged-runtime:prepared");
+    return packageCommand("test:packaged-runtime");
   }
   if (suiteId === "developer-packaged-startup") {
-    return packageCommand("test:packaged-startup:prepared");
+    return packageCommand("test:packaged-startup");
   }
   if (suiteId === "developer-package-report") {
     return {
@@ -209,7 +230,7 @@ function commandForSuite(suiteId, context) {
     };
   }
   if (suiteId === "candidate-app-runtime") {
-    return packageCommand("test:packaged-runtime:prepared");
+    return packageCommand("test:packaged-runtime");
   }
   if (suiteId === "packaged-verify") {
     return {
@@ -306,7 +327,6 @@ async function main() {
     "release",
     "developer-package",
     "candidate-app",
-    "artifact-only",
     "artifact",
   ].includes(options.lane);
   if (cleanSourceLane && files.length > 0) {
@@ -323,7 +343,7 @@ async function main() {
   const packagedPackageJson = developerPreviewIdentity
     ? developerPreviewPackageJson(packageJson, developerPreviewIdentity)
     : packageJson;
-  if (options.lane === "artifact-only" || options.lane === "candidate-app") {
+  if (options.lane === "candidate-app") {
     if (process.env.PAGEROOT_SOURCE_GATE_TRUSTED !== "true") {
       throw new Error(`${options.lane} requires a trusted source-gate decision from CI.`);
     }
@@ -476,7 +496,7 @@ async function main() {
       ? "output/developer-preview/package-delivery-report.md"
       : !options.dryRun
         && !failed
-        && ["artifact", "artifact-only"].includes(options.lane)
+        && options.lane === "artifact"
         ? "output/package-delivery/package-delivery-report.md"
         : null,
     results,
