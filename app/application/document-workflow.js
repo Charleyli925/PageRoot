@@ -510,17 +510,11 @@ export class DocumentWorkflow {
     let externalAccepted = Boolean(externalAuthorityAccepted);
     try {
       if (acceptExternalConflict && !externalAccepted) {
-        try {
-          await this.#bridgeClient.resolveConflict({
-            ...activeContext,
-            action: "keep-external",
-          });
-          externalAccepted = true;
-        } catch (cause) {
-          if (!isBridgeRequestError(cause) || cause.code !== "CONFLICT_NOT_FOUND") {
-            throw cause;
-          }
-        }
+        await this.#bridgeClient.resolveConflict({
+          ...activeContext,
+          action: "force-unlock",
+        });
+        externalAccepted = true;
         if (!this.#isCurrent(activeContext)) return stale(activeContext);
       }
       const payload = await this.#bridgeClient.source(activeContext.sourcePath);

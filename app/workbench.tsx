@@ -7,7 +7,6 @@ import {
   useEffect,
   useLayoutEffect,
   useMemo,
-  useReducer,
   useRef,
   useState,
   type ChangeEvent,
@@ -76,8 +75,8 @@ import { appendDirectEditEvent } from "./lib/direct-edit-events.js";
 import {
   noticeAutoDismissMs,
   productErrorMessage,
-  shouldPresentNotice,
-  shouldReplaceNotice,
+  createNoticeDismissalMemory,
+  nextPresentedNotice,
 } from "./lib/notification-policy";
 import {
   DEFAULT_PROJECT_HTML,
@@ -399,34 +398,6 @@ const WELCOME_PROJECT = {
   sourcePath: null as string | null,
 };
 
-const recentNoticeDismissals = new Map<string, {
-  dismissedAt: number;
-  repeatCount: number;
-}>();
-
-function noticeReducer(current: Toast, next: Toast): Toast {
-  const now = Date.now();
-  if (next === null) {
-    if (current?.dedupeKey) {
-      recentNoticeDismissals.set(current.dedupeKey, {
-        dismissedAt: now,
-        repeatCount: Number(current.repeatCount || 1),
-      });
-    }
-    return null;
-  }
-  if (!shouldPresentNotice(next)) return current;
-  let incoming = next;
-  if (incoming.dedupeKey) {
-    const previous = recentNoticeDismissals.get(incoming.dedupeKey);
-    if (previous && now - previous.dismissedAt < 1_000) {
-      recentNoticeDismissals.delete(incoming.dedupeKey);
-      incoming = { ...incoming, repeatCount: previous.repeatCount + 1 };
-    }
-  }
-  return shouldReplaceNotice(current, incoming) ? incoming : current;
-}
-
 function requiredWorkspaceController(
   controller: WorkspaceController | null,
 ): WorkspaceController {
@@ -545,6 +516,7 @@ export default function Workbench() {
   const versionTransitioningRef = useRef(false);
   const attachmentObjectUrlsRef = useRef<Map<string, string>>(new Map());
   const toastRef = useRef<Toast>(null);
+  const noticeDismissalMemoryRef = useRef(createNoticeDismissalMemory());
   const previousPersistStateRef = useRef(new Map<string, PersistState>());
   const previousRunStateRef = useRef(
     new Map<string, LifecycleState | "none">(),
@@ -1243,7 +1215,17 @@ export default function Workbench() {
   const [repositoryOpenFailed, setRepositoryOpenFailed] = useState(false);
   const [userNoticeOpenFailed, setUserNoticeOpenFailed] = useState(false);
   const promptedUpdateVersionRef = useRef<string | null>(null);
-  const [toast, setToast] = useReducer(noticeReducer, null);
+  const [toast, setToastState] = useState<Toast>(null);
+  const setToast = useCallback((next: Toast) => {
+    const memory = noticeDismissalMemoryRef.current;
+    if (next === null) {
+      memory.rememberDismissal(toastRef.current);
+      setToastState(null);
+      return;
+    }
+    const incoming = memory.withRepeatCount(next);
+    setToastState((current) => nextPresentedNotice(current, incoming) as Toast);
+  }, []);
   const [pausedNoticeIdentity, setPausedNoticeIdentity] =
     useState<string | null>(null);
   const noticeDeadlineRef = useRef<{
@@ -4108,6 +4090,22 @@ export default function Workbench() {
     setCanvasMode("edit");
   }, []);
 
+  const externalPreviewIdentityRef = useRef("");
+  useEffect(() => {
+    const identity = `${projectId || ""}\0${documentId || ""}\0${sourcePath || ""}`;
+    const previous = externalPreviewIdentityRef.current;
+    externalPreviewIdentityRef.current = identity;
+    if (!previous || previous === identity) return;
+    const [previousProjectId, previousDocumentId, previousSourcePath] = previous.split("\0");
+    if (
+      (previousProjectId && projectId && previousProjectId !== projectId)
+      || (previousDocumentId && documentId && previousDocumentId !== documentId)
+      || (previousSourcePath && sourcePath && previousSourcePath !== sourcePath)
+    ) {
+      setExternalSourcePreview(null);
+    }
+  }, [documentId, projectId, sourcePath]);
+
   const forceUnlockCurrentSource = useCallback(async ({
     skipConfirmation = false,
   }: {
@@ -4117,7 +4115,7 @@ export default function Workbench() {
     if (!context || !workspaceController) return;
     if (
       !skipConfirmation
-      && !window.confirm("强制解锁将丢弃本次 AI 结果和未写入的编辑。如果在意当前内容，请先导出。")
+      && !window.confirm("确定要用磁盘上的版本继续吗？未写入的编辑和未完成的 AI 结果都会丢弃，此操作不可撤销。")
     ) {
       return;
     }
@@ -4258,10 +4256,7 @@ export default function Workbench() {
     }
     lastHistoryDirectionRef.current = direction;
     const controller = requiredWorkspaceController(workspaceController);
-    let outcome = await controller.performDocumentHistoryAction({ direction, context });
-    if (outcome.status !== "succeeded" && outcome.status !== "stale") {
-      outcome = await controller.performDocumentHistoryAction({ direction, context });
-    }
+    const outcome = await controller.performDocumentHistoryAction({ direction, context });
     if (outcome.status === "succeeded") return true;
     editorRef.current?.cancelHistoryAction({
       restore: outcome.status !== "stale",
@@ -6879,6 +6874,10 @@ export default function Workbench() {
               disabled={browserPreviewOnly || runInProgress || viewMode === "history"}
               title={browserPreviewOnly ? "浏览器预览为只读模式" : undefined}
               onClick={() => {
+                if (externalSourcePreview) {
+                  returnToEditingFromExternalPreview();
+                  return;
+                }
                 if (canvasMode !== "preview") {
                   setCanvasMode("edit");
                   return;
@@ -7116,13 +7115,6 @@ export default function Workbench() {
               预览外部版本
             </button>
           ) : null}
-          <button
-            type="button"
-            onClick={() => {
-              if (persistState === "conflict") void reloadCurrentSource();
-              else requestUserFlush();
-            }}
-          >{persistState === "conflict" ? "重新载入外部文件" : "重试更新文件"}</button>
           {persistState === "conflict" ? (
             <button
               type="button"
@@ -7131,9 +7123,16 @@ export default function Workbench() {
                 void forceUnlockCurrentSource();
               }}
             >
-              强制解锁项目
+              采用磁盘版本
             </button>
-          ) : null}
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                requestUserFlush();
+              }}
+            >重试更新文件</button>
+          )}
         </section>
       ) : null}
 

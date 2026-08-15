@@ -269,7 +269,7 @@ services.
 | Crash-only browser recovery | `app/application/recovery-store.js` |
 | Renderer, project-picker, attachment, interactive-preview and close capabilities | `app/application/runtime-capabilities.js` |
 | Same-directory source rename, operation journal and durable active/recent path rebase | `desktop/source-rename.mjs` |
-| Live source-file change early warning (`fs.watch` debounce and IPC) | `desktop/source-file-watch.mjs` |
+| Live source-file change early warning (`fs.watch` debounce and IPC; armed after every successful active-project read) | `desktop/source-file-watch.mjs` |
 | Renderer source-rename operation, Hash/identity fence, lost-response reconciliation and synchronous Project/Document/Run publication | `app/application/project-workflow.js` through its narrow `ProjectOpenPort.renameSource` |
 | Known-source Finder reveal | narrow project IPC in `desktop/main.mjs` |
 | Validated default-browser HTML launch | `desktop/open-in-default-browser.mjs`, behind `desktop/project-ipc-security.mjs` sender authority |

@@ -2603,8 +2603,10 @@ export class ProjectFileRepository {
       workingCopyState: state ? structuredClone(state) : null,
       workingCopies: structuredClone(workingCopies),
       draft: draft ? structuredClone(draft) : null,
-      activeRequest: activeRequest ? structuredClone(activeRequest) : null,
-      activeCandidate: activeCandidate
+      activeRequest: loaded.runtime.activeRequest && activeRequest
+        ? structuredClone(activeRequest)
+        : null,
+      activeCandidate: loaded.runtime.activeRequest && activeCandidate
         ? structuredClone(activeCandidate.candidate)
         : null,
       terminalRequest: terminalAiTask
@@ -2671,6 +2673,11 @@ export class ProjectFileRepository {
       differsFromBase: source.sha256 !== state.baseSha256,
       saveState: "saved",
       lastOpenedAt: nowIso(this.#clock),
+      // lastPersistedRevision stays at the last successful PageRoot write.
+      // Adopting disk bytes does not invent a new persisted edit. The
+      // renderer then uses Math.max against its session revision so the
+      // current window looks saved; a cold start hydrates from this disk
+      // revision together with the adopted HTML.
     };
     await atomicWriteProjectJson(
       loaded.paths.projectRootPath,
@@ -2678,6 +2685,11 @@ export class ProjectFileRepository {
       nextState,
       "Working Copy state",
     );
+    if (loaded.runtime.activeRequest) {
+      loaded.runtime.activeRequest = null;
+      loaded.runtime.activeCandidateId = null;
+      await this.#writeRuntime(loaded);
+    }
     return { state: nextState, recovered: true };
   }
 
@@ -3402,7 +3414,6 @@ export class ProjectFileRepository {
       errorCode: mapped.errorCode,
       errorDetail: mapped.errorDetail,
       recoveryHint: mapped.recoveryHint,
-      errorPreview: previewSnippet(previewHtml),
       issueCodes: Array.isArray(cause?.details?.issueCodes)
         ? cause.details.issueCodes
         : [],
@@ -3417,9 +3428,17 @@ export class ProjectFileRepository {
     loaded.runtime.activeCandidateId = null;
     loaded.runtime.lastAiTask = lastAiTaskAnchorFor(record);
     await this.#writeRuntime(loaded);
+    const publicRequest = this.#publicRequest(record, loaded.paths.projectRootPath);
+    const preview = previewSnippet(previewHtml);
+    if (preview && isObject(publicRequest.error)) {
+      publicRequest.error = {
+        ...publicRequest.error,
+        errorPreview: preview,
+      };
+    }
     return {
       status: "error",
-      request: this.#publicRequest(record, loaded.paths.projectRootPath),
+      request: publicRequest,
     };
   }
 

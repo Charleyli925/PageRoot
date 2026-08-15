@@ -60,7 +60,7 @@ export function createSourceFileWatcher({
       close();
       return;
     }
-    if (watchedPath === nextPath && watcher) return;
+    if (watchedPath === nextPath && watcher) return; // same path: keep the live watcher
     close();
     watchedPath = nextPath;
     watcher = watch(path.dirname(nextPath), { persistent: true }, (_eventType, filename) => {

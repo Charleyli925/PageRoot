@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  createNoticeDismissalMemory,
+  nextPresentedNotice,
   noticeAutoDismissMs,
   noticeDisposition,
   productErrorMessage,
@@ -329,4 +331,50 @@ test("unknown internal fields and local paths never reach product copy", () => {
     ),
     "项目操作没有完成。",
   );
+});
+
+test("notice dismissal memory merges repeats inside one second and prunes stale keys", () => {
+  let now = 1_000;
+  const memory = createNoticeDismissalMemory({ now: () => now });
+  const first = {
+    title: "保存失败",
+    message: "请重试",
+    tone: "error",
+    disposition: "background-result",
+    dedupeKey: "source-reload",
+  };
+  memory.rememberDismissal(first);
+  now = 1_400;
+  const repeated = memory.withRepeatCount(first);
+  assert.equal(repeated.repeatCount, 2);
+  now = 8_000;
+  memory.rememberDismissal({ ...first, dedupeKey: "unique-old" });
+  now = 14_000;
+  assert.equal(memory.withRepeatCount(first).repeatCount, undefined);
+});
+
+test("nextPresentedNotice stays a pure replacement choice", () => {
+  const current = {
+    title: "旧提示",
+    message: "仍在",
+    tone: "error",
+    sticky: true,
+    disposition: "user-choice",
+    dedupeKey: "keep",
+  };
+  const ignored = {
+    title: "已保存",
+    message: "完成",
+    tone: "success",
+    dedupeKey: "saved",
+  };
+  assert.equal(nextPresentedNotice(current, ignored), current);
+  const next = {
+    title: "项目已解锁",
+    message: "可以继续编辑",
+    tone: "success",
+    disposition: "background-result",
+    dedupeKey: "source-force-unlock",
+  };
+  assert.equal(nextPresentedNotice(null, next), next);
 });

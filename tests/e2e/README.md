@@ -93,8 +93,15 @@ same final commit and content hash recorded by the automated gate report.
   shipped Chromium environment, plus temporary-disk checkpoint/autosave,
   exact forward bytes, graceful close, and cold reopen consistency.
 - `conflict-force-unlock.spec.mjs`: external Working Copy change surfaces the
-  conflict banner, and confirmed force-unlock restores an editable idle project
-  without rewriting the on-disk HTML.
+  conflict banner (including after reopening an already imported project), and
+  confirmed “采用磁盘版本” restores an editable idle project without rewriting
+  the on-disk HTML. This spec is in the full Electron lane, not the smoke grep.
+  Run it locally after `npm run desktop:renderer`:
+
+  ```sh
+  npx playwright test --config tests/e2e/electron/playwright.config.mjs \
+    tests/e2e/electron/conflict-force-unlock.spec.mjs
+  ```
 - `ai-handoff-closed-loop.spec.mjs`: real comment UI, frozen Request, clipboard
   handoff, generated-AI/finalizer result, status polling, non-overwriting Version
   creation, automatic working-HTML activation, and fail-closed recovery paths.

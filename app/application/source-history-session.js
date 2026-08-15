@@ -6,8 +6,6 @@ import {
   sourceHistoryCapabilities,
 } from "../domain/source-history.js";
 
-const PENDING_STALE_MS = 3_000;
-
 function sameContext(left, right) {
   return Boolean(
     left
@@ -23,13 +21,6 @@ export class SourceHistorySession {
   #context = null;
   #history = null;
   #pending = [];
-  #clock;
-
-  constructor({ clock } = {}) {
-    this.#clock = clock && typeof clock.now === "function"
-      ? clock
-      : { now: () => Date.now() };
-  }
 
   activate(context, sourceSha256, historyValue, { preservePending = false } = {}) {
     const retainedPending = preservePending
@@ -76,7 +67,6 @@ export class SourceHistorySession {
       ...(transaction.property ? { property: transaction.property } : {}),
       editRevision,
       createdAt,
-      pendingSince: this.#clock.now(),
       beforeSourceSha256: transaction.beforeSourceSha256,
       afterSourceSha256: transaction.afterSourceSha256,
       forwardPatches: transaction.forwardPatches,
@@ -103,11 +93,7 @@ export class SourceHistorySession {
 
   restorePending(context, operations) {
     if (!this.isActive(context) || !Array.isArray(operations)) return false;
-    const now = this.#clock.now();
-    this.#pending = operations.map((operation) => ({
-      ...operation,
-      pendingSince: now,
-    }));
+    this.#pending = operations.map((operation) => ({ ...operation }));
     return true;
   }
 
@@ -140,7 +126,6 @@ export class SourceHistorySession {
   }
 
   createAction(context, direction) {
-    this.#discardStalePending();
     if (!this.isActive(context) || !this.#history) return null;
     const capabilities = sourceHistoryCapabilities(this.#history);
     if (
@@ -157,12 +142,7 @@ export class SourceHistorySession {
   }
 
   get pendingOperations() {
-    this.#discardStalePending();
-    return this.#pending.map((operation) => {
-      const publicOperation = { ...operation };
-      delete publicOperation.pendingSince;
-      return publicOperation;
-    });
+    return this.#pending.map((operation) => ({ ...operation }));
   }
 
   get snapshot() {
@@ -170,7 +150,6 @@ export class SourceHistorySession {
   }
 
   get capabilities() {
-    this.#discardStalePending();
     if (!this.#history) {
       return {
         canUndo: this.#pending.length > 0,
@@ -187,15 +166,5 @@ export class SourceHistorySession {
       canUndo: this.#pending.length > 0 || capabilities.canUndo,
       canRedo: this.#pending.length === 0 && capabilities.canRedo,
     };
-  }
-
-  #discardStalePending() {
-    if (this.#pending.length === 0) return;
-    const oldest = Math.min(
-      ...this.#pending.map((operation) => Number(operation.pendingSince) || 0),
-    );
-    if (!Number.isFinite(oldest) || oldest <= 0) return;
-    if (this.#clock.now() - oldest <= PENDING_STALE_MS) return;
-    this.#pending = [];
   }
 }

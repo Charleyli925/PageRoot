@@ -93,17 +93,3 @@ test("SourceHistorySession acknowledges only sent operations and then enables ac
   assert.equal(action.expectedHistoryRevision, 1);
   assert.equal(action.expectedSourceSha256, afterSha);
 });
-
-test("SourceHistorySession discards pending operations older than three seconds", () => {
-  let now = 1_000;
-  const session = new SourceHistorySession({ clock: { now: () => now } });
-  session.activate(context, beforeSha, empty);
-  session.record(context, transaction, 1, "2026-07-31T00:00:00.000Z");
-  assert.equal(session.capabilities.canRedo, false);
-  assert.equal(session.createAction(context, "undo"), null);
-
-  now = 4_001;
-  assert.equal(session.pendingOperations.length, 0);
-  assert.equal(session.capabilities.canRedo, false);
-  assert.equal(session.createAction(context, "undo"), null);
-});

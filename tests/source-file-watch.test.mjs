@@ -52,3 +52,26 @@ test("source file watcher close stops further events", async () => {
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("watching the same path twice keeps the live watcher", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "pageroot-source-watch-idempotent-"));
+  const sourcePath = path.join(root, "page.html");
+  await writeFile(sourcePath, "<!doctype html><html><body>one</body></html>\n", "utf8");
+  const events = [];
+  const watcher = createSourceFileWatcher({
+    debounceMs: 40,
+    onChange: (info) => events.push(info.sourcePath),
+  });
+  try {
+    watcher.watch(sourcePath);
+    const firstPath = watcher.watchedPath;
+    watcher.watch(sourcePath);
+    assert.equal(watcher.watchedPath, firstPath);
+    await writeFile(sourcePath, "<!doctype html><html><body>two</body></html>\n", "utf8");
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    assert.ok(events.length >= 1, "rewatching the same path must keep delivering events");
+  } finally {
+    watcher.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});

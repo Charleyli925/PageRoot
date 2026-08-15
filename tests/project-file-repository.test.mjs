@@ -2156,11 +2156,74 @@ test("forceUnlockWorkingCopy adopts disk hash without rewriting HTML", async (t)
   const nextState = await json(statePath);
   assert.equal(nextState.saveState, "saved");
   assert.equal(nextState.currentSha256, sha256(Buffer.from(conflictingDiskHtml, "utf8")));
+  assert.equal(nextState.lastPersistedRevision, state.lastPersistedRevision);
 
   const workspace = await value.repository.workspace({
     sourcePath: imported.target.exactSourcePath,
   });
   assert.equal(workspace.content, conflictingDiskHtml);
+});
+
+test("forceUnlockWorkingCopy clears a stuck activeRequest without rewriting HTML", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "force-unlock-active-run.html");
+  await prepareAiTaskRequest(value.repository, imported.target, "req_force_unlock_active");
+  const runtimePath = path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "runtime-state.json",
+  );
+  assert.ok((await json(runtimePath)).activeRequest);
+
+  const statePath = path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "working-copies",
+    `${imported.target.workingCopyId}.json`,
+  );
+  const state = await json(statePath);
+  await writeFile(statePath, JSON.stringify({ ...state, saveState: "failed" }), "utf8");
+  const conflictingDiskHtml = html("external while request active");
+  await writeFile(imported.target.exactSourcePath, conflictingDiskHtml, "utf8");
+
+  const unlocked = await value.repository.forceUnlockWorkingCopy({
+    sourcePath: imported.target.exactSourcePath,
+  });
+  assert.equal(unlocked.status, "force-unlocked");
+  assert.equal(await readFile(imported.target.exactSourcePath, "utf8"), conflictingDiskHtml);
+
+  const runtime = await json(runtimePath);
+  assert.equal(runtime.activeRequest, null);
+  const workspace = await value.repository.workspace({
+    sourcePath: imported.target.exactSourcePath,
+  });
+  assert.equal(workspace.activeRequest, null);
+  assert.equal(workspace.content, conflictingDiskHtml);
+});
+
+test("validation errors return an in-memory errorPreview without persisting it", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "invalid-preview.html");
+  await prepareAiTaskRequest(value.repository, imported.target, "req_invalid_preview");
+  const incomplete = "<html><body>truncated";
+  const completed = await value.repository.completeRequest({
+    target: imported.target,
+    requestId: "req_invalid_preview",
+    attemptId: "attempt_001",
+    html: incomplete,
+  });
+  assert.equal(completed.status, "error");
+  assert.equal(completed.request.error.errorCode, "INCOMPLETE_HTML");
+  assert.match(String(completed.request.error.errorPreview || ""), /truncated/);
+  const record = await json(path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "requests",
+    "req_invalid_preview",
+    "request.json",
+  ));
+  assert.equal(record.error.errorPreview, undefined);
+  assert.equal(record.error.errorCode, "INCOMPLETE_HTML");
 });
 
 test("Registry and managed control paths reject symlinks", async (t) => {

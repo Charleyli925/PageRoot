@@ -1106,6 +1106,9 @@ async function getActiveProjectOperation() {
       project = await ensureBridgeProjectRegistered(project);
     }
   }
+  // Reopening a remembered project never calls activateProject(), so the
+  // watcher must be armed here. watch() is a no-op when the path is unchanged.
+  sourceFileWatcher.watch(project.sourcePath);
   return project;
 }
 
