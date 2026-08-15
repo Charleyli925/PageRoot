@@ -2623,6 +2623,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       const target = active.target;
       const rootElement = active.rootElement;
       const selectionElement = active.selectionElement;
+      const settledRuntimeFrame = (
+        runtimeFrameRef.current?.settled
+        && runtimeFrameRef.current.elementGeneration === frameLoadGenerationRef.current
+      ) ? runtimeFrameRef.current : null;
       const frameReloadRequired = (
         nativeEditNeedsReloadRef.current
         || !rootElement.isConnected
@@ -2640,7 +2644,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       setIsEditing(false);
       setHasTextRange(false);
       rootElement.ownerDocument.getSelection()?.removeAllRanges();
-      if (frameReloadRequired) {
+      if (frameReloadRequired && !settledRuntimeFrame) {
         // An explicit finish never resumes native editing after the new frame
         // is connected. This is essential when a direct-text fragment was
         // deleted: its source target no longer exists to restore.
@@ -2652,6 +2656,21 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         loadFrameSource(source, { preserveViewport: true });
         replayCompletedUserCommand();
         return { ...committed, frameReloading: true };
+      }
+      if (settledRuntimeFrame) {
+        // The Chromium mutation-owner fence would remount this generation as
+        // static Edit. Keep the frozen one-shot iframe and drop the guard.
+        nativeSessionNeedsCanonicalFenceRef.current = false;
+        fencedDocumentCleanupRef.current();
+        renderedSourceHtmlRef.current = source;
+      }
+      if (!rootElement.isConnected || !selectionElement.isConnected) {
+        pendingNativeEditResumeRef.current = null;
+        selectedElementRef.current = null;
+        pendingSelectionRef.current = target;
+        pendingToolbarVisibleRef.current = true;
+        replayCompletedUserCommand();
+        return { ...committed, frameReloading: false };
       }
 
       pendingSelectionRef.current = null;
@@ -3750,26 +3769,31 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       };
     }
 
-    const runtimeFrame = runtimeFrameRef.current;
-    const retainsSettledRuntimeFrame = Boolean(
+    const settledRuntimeFrameIsCurrent = (): RuntimeFrameContext | null => {
+      const current = runtimeFrameRef.current;
+      if (
+        !current?.settled
+        || current.elementGeneration !== frameLoadGenerationRef.current
+        || nativeEditNeedsReloadRef.current
+        || renderedSourceHtmlRef.current !== frameSourceHtmlRef.current
+      ) return null;
+      return current;
+    };
+
+    const activeRuntimeFrame = settledRuntimeFrameIsCurrent();
+    if (
       resumeEditing
       && !preserveForHistory
       && activeNativeEditRef.current
-      && runtimeFrame?.settled
-      && runtimeFrame.elementGeneration === frameLoadGenerationRef.current
-      && !nativeEditNeedsReloadRef.current
-      && renderedSourceHtmlRef.current === frameSourceHtmlRef.current,
-    );
-    if (retainsSettledRuntimeFrame && runtimeFrame) {
+      && activeRuntimeFrame
+    ) {
       // A checkpoint has already rebased this active island against the exact
-      // new source. Keep the frozen runtime DOM while editing resumes;
-      // replacing this settled one-shot frame would discard the real Canvas/SVG
-      // and cannot execute the author program a second time.
+      // new source. Keep the frozen runtime DOM while editing resumes.
       pendingHistoryBookmarkRef.current = null;
       pendingHistoryCanonicalFenceRef.current = false;
       containerRef.current?.setAttribute(
         "data-native-fence-resume",
-        `retained-runtime:${runtimeFrame.elementGeneration}`,
+        `retained-runtime:${activeRuntimeFrame.elementGeneration}`,
       );
       return {
         ok: true,
@@ -3788,7 +3812,26 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     pendingHistoryCanonicalFenceRef.current = preserveForHistory
       ? needsCanonicalFence
       : false;
-    if (needsCanonicalFence && !preserveForHistory) {
+    const detachedRuntimeFrame = settledRuntimeFrameIsCurrent();
+    if (detachedRuntimeFrame && !preserveForHistory) {
+      // After the session ends, a canonical fence would remount this generation
+      // as static Edit and drop author Canvas/SVG. Dispose the mutation-owner
+      // guard in-place instead of replacing the frozen iframe.
+      pendingHistoryBookmarkRef.current = null;
+      pendingHistoryCanonicalFenceRef.current = false;
+      nativeSessionNeedsCanonicalFenceRef.current = false;
+      fencedDocumentCleanupRef.current();
+      if (!resumeEditing) {
+        pendingFrameRestoreEpochRef.current += 1;
+        pendingNativeEditResumeRef.current = null;
+        pendingSelectionRef.current = null;
+        pendingToolbarVisibleRef.current = false;
+      }
+      containerRef.current?.setAttribute(
+        "data-native-fence-resume",
+        `retained-runtime:${detachedRuntimeFrame.elementGeneration}`,
+      );
+    } else if (needsCanonicalFence && !preserveForHistory) {
       const target = resumeEditing
         ? bookmark?.target ?? selectedSourceSelectionRef.current
         : null;

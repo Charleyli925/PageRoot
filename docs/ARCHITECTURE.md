@@ -64,8 +64,9 @@ Comments + frozen input
   visible Edit iframe is the final iframe: it executes ordered classic scripts
   once at the real Edit size, waits 1.2 seconds, performs one layout/`resize`
   settle, freezes and audits. Success keeps the real Canvas/SVG in that same
-  iframe. A missing grant, failed audit or later full-frame rebuild uses
-  ordinary static Edit for that generation. Runtime descendants have no
+  iframe. A missing grant or failed audit before interaction uses ordinary
+  static Edit for that generation. After interaction starts, comments, IME,
+  save and native-edit fences must not replace that iframe. Runtime descendants have no
   persistence authority; authored inline SVG remains source-backed while
   unapproved runtime-only Canvas/SVG stays in Preview. Edit screenshot,
   capture and projection count must be 0.

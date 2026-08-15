@@ -74,7 +74,9 @@ The visible Edit iframe executes author scripts once, then freezes. Trusted
 renderer memory never mounts PNG, JPEG, ChartSpec or other visual substitutes.
 Selection/comment resolution remains on the original source host. Runtime
 markers and descendants never enter source patches, saves, Versions, exports
-or Requests.
+or Requests. After freeze, ending native edit, comments, IME, autosave and
+⌘S must keep that same iframe; a later remount in the same generation is
+static Edit and is forbidden once interaction has started.
 
 When importing an external HTML into an HTML-only V1 Working Copy, Main may
 retain the selected external HTML directory as a session-only asset root for

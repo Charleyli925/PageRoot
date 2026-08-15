@@ -1647,6 +1647,45 @@ test("Electron Edit preserves imported source-relative ECharts assets and native
     expect(readFileSync(managedSourcePath, "utf8")).not.toMatch(
       /data-pageroot-edit-runtime|data-echarts-runtime/u,
     );
+
+    await launched.page.keyboard.press("Escape");
+    await expect.poll(async () => (
+      await frame.locator(caseSelector("runtime-editable")).getAttribute("contenteditable")
+    )).not.toBe("true");
+    await launched.page.keyboard.press(process.platform === "darwin" ? "Meta+S" : "Control+S");
+    await expect(launched.page.locator(".save-status")).toHaveText("已安全保存");
+    await expect(launched.page.locator("[data-runtime-bootstrap-count=\"1\"]")).toHaveCount(1);
+    expect(await documentToken(launched.page)).toBe(runtimeDocument);
+    expect(frame.isDetached()).toBe(false);
+
+    await addCanvasComment(
+      launched.page,
+      frame,
+      "runtime-editable",
+      "结束编辑后的精确定位评论。",
+    );
+    await launched.page.keyboard.press(process.platform === "darwin" ? "Meta+S" : "Control+S");
+    await expect(launched.page.locator(".save-status")).toHaveText("已安全保存");
+    await expect(launched.page.locator("[data-runtime-bootstrap-count=\"1\"]")).toHaveCount(1);
+    expect(await documentToken(launched.page)).toBe(runtimeDocument);
+    expect(frame.isDetached()).toBe(false);
+    expect(await frame.evaluate(() => ({
+      rendererAuthorExecutions: window.__PAGEROOT_ECHARTS_AUTHOR_EXECUTIONS__,
+      chartCount: document.querySelectorAll("#chart-host canvas[data-echarts-runtime=true]").length,
+      frozenSnapshotCount: document.querySelectorAll(
+        "#chart-host img[data-pageroot-edit-runtime-snapshot]",
+      ).length,
+      dataImagePngCount: document.querySelectorAll('img[src^="data:image/png"]').length,
+    }))).toEqual({
+      rendererAuthorExecutions: 1,
+      chartCount: 1,
+      frozenSnapshotCount: 0,
+      dataImagePngCount: 0,
+    });
+    expect(workspaceContainsDraftComment(
+      launched.workspace,
+      "结束编辑后的精确定位评论。",
+    )).toBe(true);
   } finally {
     if (electronApp && isolatedUserData) {
       await stopPageRoot(electronApp, isolatedUserData);

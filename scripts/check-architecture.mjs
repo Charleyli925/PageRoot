@@ -953,6 +953,9 @@ export async function architectureViolations() {
     || !canvasEditor.includes("hostHasAuthorPaint")
     || !canvasEditor.includes("frame.grant.hosts.some")
     || canvasEditor.includes("frame.grant.hosts.every")
+    || !canvasEditor.includes("settledRuntimeFrameIsCurrent")
+    || !canvasEditor.includes("detachedRuntimeFrame && !preserveForHistory")
+    || !canvasEditor.includes("frameReloadRequired && !settledRuntimeFrame")
     || /pngBase64|static-runtime-snapshot|mountFrozenRuntimeSnapshots|object-fit:\s*fill/u.test(canvasEditor)
   ) {
     violations.push(

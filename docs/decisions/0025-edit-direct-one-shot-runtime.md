@@ -110,6 +110,12 @@ edit / comment / IME / autosave / ⌘S
          do not mount images
 ```
 
+The static-Edit Chromium mutation-owner fence may still remount a **static**
+iframe after contenteditable ends. It must not remount a settled one-shot
+runtime iframe: that rebuild cannot execute again in the same generation and
+would drop the author Canvas/SVG. Ending native edit, adding a comment, then
+⌘S must keep the same frozen document.
+
 Window-size rules:
 
 - Author scripts initialize at the current real Edit iframe size. A hidden

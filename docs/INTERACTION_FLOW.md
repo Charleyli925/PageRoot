@@ -1017,7 +1017,7 @@ A 项目 processing 时切换 B 项目：
 22. Registry 有 A/B 且 Recent 只有 A 时，项目列表同时显示 A/B，A 仅因 Recent 排序优先；Recent 外的项目可安全打开，未登记 Recent 文件不能成为项目。
 23. V6 的历史 V2 继续编辑后，顶部和 Version 行同时保留“基于 V2”“项目最新 V6”“当前编辑基础/有本地修改”事实；历史只读不改变当前编辑目标。
 24. Version Finder 定位可见 Working Copy，Candidate Finder 只打开 `AI任务/`；删除或篡改 AI任务 后，隐藏 Candidate 仍可审阅和 Promotion，P2 不创建 `附件与图片/`。
-25. 符合条件的 ECharts 页在一个 `canvasGeneration` 最多在主进程隔离窗口执行
-    一次作者脚本；1.2 秒冻结审计完成后编辑、评论、IME、自动保存和目标切换不
-    替换静态 iframe，显示图的评论仍落到唯一源码宿主，所有保存/Version/AI 输入
-    字节不含运行时节点或显示图。
+25. 符合条件的 ECharts 页在一个 `canvasGeneration` 最多在最终可见 Edit iframe
+    执行一次作者脚本；1.2 秒冻结审计完成后编辑、评论、IME、自动保存、结束编辑
+    后的 ⌘S 和目标切换都不替换该 iframe，显示图的评论仍落到唯一源码宿主，所有
+    保存/Version/AI 输入字节不含运行时节点或显示图。
