@@ -65,7 +65,7 @@ import {
   nativeLayoutFingerprint,
   sameNativeLayout,
   sameNativeTextStyle,
-} from "./native-edit-runtime-preflight";
+} from "./native-layout-fingerprint";
 import { selectorForElement } from "./html-canvas-dom";
 import {
   STYLE_PROPERTY_CONFIGS,

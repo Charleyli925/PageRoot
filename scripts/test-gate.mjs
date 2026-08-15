@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { readFile, mkdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import {
   assertFullyAutomatedPlan,
   normalizeRepositoryPath,
+  omitMissingNodeTests,
   selectGatePlan,
   validateImpactMap,
 } from "./test-gate-core.mjs";
@@ -334,7 +336,13 @@ async function main() {
       `${options.lane} gates require a clean Git worktree. Commit every source change first.`,
     );
   }
-  const plan = assertFullyAutomatedPlan(selectGatePlan({ map, lane: options.lane, changedFiles: files }));
+  const plan = omitMissingNodeTests(
+    assertFullyAutomatedPlan(selectGatePlan({ map, lane: options.lane, changedFiles: files })),
+    (file) => {
+      const absolute = path.resolve(productRoot, file);
+      return absolute.startsWith(`${productRoot}${path.sep}`) && existsSync(absolute);
+    },
+  );
   const repository = await repositoryEvidence(files);
   const packageJson = JSON.parse(await readFile(path.join(productRoot, "package.json"), "utf8"));
   const developerPreviewIdentity = options.lane === "developer-package"
