@@ -213,7 +213,7 @@ async function clickEditHistoryMenu(electronApp, page, direction) {
   await electronApp.evaluate(
     ({ BrowserWindow, Menu }, { requestedDirection, rendererUrl }) => {
       const menu = Menu.getApplicationMenu();
-      const expectedLabel = requestedDirection === "undo" ? "Undo" : "Redo";
+      const expectedLabel = requestedDirection === "undo" ? "撤销" : "重做";
       const editMenu = menu?.items.find((item) => (
         item.submenu?.items.some(
           (candidate) => candidate.label === expectedLabel,
@@ -441,9 +441,9 @@ test("Electron first launch imports the welcome HTML as V1 and sends its comment
     await launched.page.getByRole("textbox", { name: "评论内容" })
       .fill("把欢迎页主标题改得更简洁。");
     await launched.page.getByRole("button", { name: "评论", exact: true }).click();
-    await launched.page.getByRole("button", { name: /复制AI任务Prompt/u }).click();
+    await launched.page.getByRole("button", { name: /发给 AI/u }).click();
     await expect(
-      launched.page.getByText("等待 QoderWork 返回修改结果", { exact: true }),
+      launched.page.getByText("等待 AI 返回结果", { exact: true }),
     ).toBeVisible();
 
     let promptPath = "";
@@ -887,7 +887,7 @@ test("Electron safely renames the managed V1 without starting a new project", as
       exact: true,
     });
     await expect(title).toBeVisible();
-    await title.dblclick();
+    await title.click();
     const input = launched.page.getByRole("textbox", {
       name: "文件名（不含后缀）",
       exact: true,
@@ -2092,7 +2092,7 @@ test("project resources drain edited rules before leaving", async () => {
     });
     await expect(rulesButton).toBeVisible();
     await expect(launched.page.getByRole("button", {
-      name: /项目记录文件夹.*查看每轮要求、AI 返回与历史文件.*Finder/u,
+      name: /项目记录文件夹.*查看每轮要求、AI 返回与历史文件.*在文件夹中打开/u,
     })).toBeVisible();
     await rulesButton.click();
     await expect(launched.page.getByText("管理 AI 修改规则", { exact: true }))
@@ -2206,7 +2206,7 @@ test("multiple orphaned comments relink in sequence and resume the original send
     await expect(recoveredComments.filter({ hasText: secondComment }))
       .toHaveAttribute("data-resolution", "orphaned");
 
-    await activeLaunch.page.getByRole("button", { name: /复制AI任务Prompt/u }).click();
+    await activeLaunch.page.getByRole("button", { name: /发给 AI/u }).click();
     await expect(activeLaunch.page.getByText("2 条评论需要重新定位", { exact: true }))
       .toBeVisible();
     await activeLaunch.page.getByRole("button", { name: "开始重新定位" }).click();
@@ -2221,7 +2221,7 @@ test("multiple orphaned comments relink in sequence and resume the original send
 
     await recoveredFrame.locator(caseSelector("grid-card")).click();
     await expect(activeLaunch.page.getByText(
-      "等待 QoderWork 返回修改结果",
+      "等待 AI 返回结果",
       { exact: true },
     )).toBeVisible({ timeout: 30_000 });
     await expect.poll(

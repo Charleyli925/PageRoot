@@ -28,7 +28,7 @@ test("pure browser use stays in a formal read-only preview", async ({ page }) =>
   await expect(page.getByRole("button", { name: "预览", exact: true }))
     .toHaveAttribute("aria-pressed", "true");
   await expect(page.getByRole("button", { name: "全局评论", exact: true })).toBeDisabled();
-  await expect(page.getByRole("button", { name: /复制AI任务Prompt/u })).toBeDisabled();
+  await expect(page.getByRole("button", { name: /写评论后再发送/u })).toBeDisabled();
   await expect(page.getByTestId("html-canvas-editor")).toHaveCount(0);
 
   const preview = page.locator('iframe[title="HTML 交互预览"]');

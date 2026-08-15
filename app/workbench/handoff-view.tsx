@@ -89,7 +89,7 @@ export function HandoffDrawerHeader({
       <div className="processing-title">
         <span className="processing-brand">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="./qoder-logo.png" alt="" />
+          <img src="./brand-logo.png" alt="" />
         </span>
         <span>
           <small>本轮处理</small>
@@ -266,7 +266,7 @@ export function HandoffPanel({
                     size={18}
                     weight="duotone"
                   />
-                  <span>在 Finder 中查看 AI任务</span>
+                  <span>在文件夹中打开 AI任务</span>
                   <CaretRightIcon aria-hidden="true" size={14} weight="bold" />
                 </button>
               ) : null}

@@ -750,12 +750,12 @@ export class RunWorkflow {
         cause,
         message: this.#codecs.errorMessage(
           cause,
-          "本轮 Request 已保留；请打开处理详情后重试复制。",
+          "这次任务还在，打开本轮后可以重新复制",
         ),
       });
       return rejected(errorCode(cause, "RUN_HANDOFF_COPY_FAILED"), this.#codecs.errorMessage(
         cause,
-        "本轮 Request 已保留；请打开处理详情后重试复制。",
+        "这次任务还在，打开本轮后可以重新复制",
       ));
     }
   }

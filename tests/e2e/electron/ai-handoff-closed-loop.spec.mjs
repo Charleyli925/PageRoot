@@ -275,8 +275,8 @@ async function addCommentAndSubmit(
       comment.targetSelector,
     );
   }
-  await page.getByRole("button", { name: /复制AI任务Prompt/u }).click();
-  await expect(page.getByText("等待 QoderWork 返回修改结果", { exact: true }))
+  await page.getByRole("button", { name: /发给 AI/u }).click();
+  await expect(page.getByText("等待 AI 返回结果", { exact: true }))
     .toBeVisible();
   let promptPath = "";
   await expect.poll(async () => {
@@ -286,7 +286,7 @@ async function addCommentAndSubmit(
     return Boolean(promptPath && existsSync(promptPath));
   }, { timeout: 20_000 }).toBe(true);
   await expect(page.getByRole("button", {
-    name: "已复制，可粘贴到 AI Agent对话框",
+    name: "查看本轮",
     exact: true,
   })).toBeVisible();
   const requestRoot = path.dirname(promptPath);
@@ -3721,7 +3721,7 @@ test("a no-change result returns to editing and remains reopenable", async () =>
     });
     await expect(launched.page.getByRole("button", { name: "上轮处理" }))
       .toBeVisible({ timeout: 30_000 });
-    await expect(launched.page.getByRole("button", { name: /复制AI任务Prompt/u }))
+    await expect(launched.page.getByRole("button", { name: /发给 AI/u }))
       .toBeEnabled();
     await launched.page.getByRole("button", { name: "上轮处理" }).click();
     await expect(launched.page.getByText(
@@ -3795,7 +3795,7 @@ test("returning from review restores the editable pre-AI version and preserves t
     const aiTasksRoot = path.join(projectRoot, "AI任务");
     rmSync(aiTasksRoot, { recursive: true, force: true });
     const revealCandidateTask = dialog.getByRole("button", {
-      name: "AI 返回的 HTML 已自动保留，点击在 Finder 中查看 AI任务。",
+      name: "AI 返回的 HTML 已自动保留，点击在文件夹中打开。",
     });
     await expect(revealCandidateTask).toBeVisible();
     await revealCandidateTask.click();
@@ -3869,14 +3869,14 @@ test("a clipboard handoff failure keeps the frozen Request recoverable", async (
     await launched.page.getByRole("textbox", { name: "评论内容" })
       .fill(`改为 ${UPDATED_TEXT}`);
     await launched.page.getByRole("button", { name: "评论", exact: true }).click();
-    const sendToQoder = launched.page.getByRole("button", { name: /复制AI任务Prompt/u });
+    const sendToQoder = launched.page.getByRole("button", { name: /发给 AI/u });
     await expect(sendToQoder).toBeEnabled();
     await sendToQoder.click();
-    await expect(launched.page.getByText("等待 QoderWork 返回修改结果", { exact: true }))
+    await expect(launched.page.getByText("等待 AI 返回结果", { exact: true }))
       .toBeVisible();
     expect(await launched.electronApp.evaluate(({ clipboard }) => clipboard.readText()))
       .toBe(clipboardSentinel);
-    await expect(launched.page.getByRole("button", { name: "复制失败 · 查看" }))
+    await expect(launched.page.getByRole("button", { name: "复制失败，再试一次" }))
       .toBeVisible();
     const processingDialog = launched.page.getByRole("dialog", { name: "本轮处理" });
     const handoffError = processingDialog.getByText(
@@ -3888,7 +3888,7 @@ test("a clipboard handoff failure keeps the frozen Request recoverable", async (
       .filter({ hasText: "交接内容还没有复制" })).toHaveCount(0);
     await launched.page.keyboard.press("Escape");
     await expect(processingDialog).toBeHidden();
-    await launched.page.getByRole("button", { name: "复制失败 · 查看" }).click();
+    await launched.page.getByRole("button", { name: "复制失败，再试一次" }).click();
     await expect(processingDialog).toBeVisible();
     const retryCopy = launched.page.getByRole("button", { name: "重新复制" });
     await expect(retryCopy).toBeVisible();
@@ -3920,7 +3920,7 @@ test("a failed handoff in project A does not block project B or replace its stat
       projectA.sourcePath,
     );
     expect(projectAWorkingCopyPath).not.toBe(realpathSync(projectA.sourcePath));
-    await launched.page.getByRole("button", { name: /复制AI任务Prompt/u }).click();
+    await launched.page.getByRole("button", { name: /发给 AI/u }).click();
     const processingDialog = launched.page.getByRole("dialog", { name: "本轮处理" });
     await expect(processingDialog.getByText(
       "交接内容尚未复制",
@@ -3935,24 +3935,24 @@ test("a failed handoff in project A does not block project B or replace its stat
     await expect(processingDialog).toBeVisible();
     await launched.page.keyboard.press("Escape");
     await expect(processingDialog).toBeHidden();
-    await launched.page.getByRole("button", { name: "复制失败 · 查看" }).click();
+    await launched.page.getByRole("button", { name: "复制失败，再试一次" }).click();
     await expect(processingDialog).toBeVisible();
     await openRecentProject(launched.page, projectB.sourcePath);
-    await expect(launched.page.getByRole("button", { name: "复制AI任务Prompt" }))
+    await expect(launched.page.getByRole("button", { name: "写评论后再发送" }))
       .toBeDisabled();
     const projectBWorkingCopyPath = await addComment(
       launched.page,
       projectB.sourcePath,
     );
     expect(projectBWorkingCopyPath).not.toBe(realpathSync(projectB.sourcePath));
-    await expect(launched.page.getByRole("button", { name: /复制AI任务Prompt/u }))
+    await expect(launched.page.getByRole("button", { name: /发给 AI/u }))
       .toBeEnabled();
-    await launched.page.getByRole("button", { name: /复制AI任务Prompt/u }).click();
+    await launched.page.getByRole("button", { name: /发给 AI/u }).click();
     await expect(launched.page.getByText(
-      "等待 QoderWork 返回修改结果",
+      "等待 AI 返回结果",
       { exact: true },
     )).toBeVisible();
-    await expect(launched.page.getByRole("button", { name: "复制失败 · 查看" }))
+    await expect(launched.page.getByRole("button", { name: "复制失败，再试一次" }))
       .toBeVisible({ timeout: 30_000 });
     await expect.poll(
       () => requestDirectoryCount(launched.workspace),
@@ -3965,15 +3965,15 @@ test("a failed handoff in project A does not block project B or replace its stat
       .toBeVisible();
     await launched.page.keyboard.press("Escape");
     await expect(processingDialog).toBeHidden();
-    await expect(launched.page.getByRole("button", { name: "复制失败 · 查看" }))
+    await expect(launched.page.getByRole("button", { name: "复制失败，再试一次" }))
       .toBeVisible();
-    await launched.page.getByRole("button", { name: "复制失败 · 查看" }).click();
+    await launched.page.getByRole("button", { name: "复制失败，再试一次" }).click();
     await expect(launched.page.getByText("交接内容尚未复制", { exact: true }))
       .toBeVisible();
 
     await openRecentProject(launched.page, projectB.sourcePath, { editable: false });
     await expect(processingDialog).toBeVisible();
-    await expect(launched.page.getByRole("button", { name: "复制失败 · 查看" }))
+    await expect(launched.page.getByRole("button", { name: "复制失败，再试一次" }))
       .toBeVisible();
     expect(readFileSync(projectA.sourcePath).equals(projectA.original)).toBe(true);
     expect(readFileSync(projectB.sourcePath).equals(projectB.original)).toBe(true);
@@ -3991,11 +3991,11 @@ test("a rapid double click creates exactly one durable Request", async () => {
   try {
     await launched.electronApp.evaluate(({ clipboard }) => clipboard.clear());
     await addComment(launched.page, fixture.sourcePath);
-    await launched.page.getByRole("button", { name: /复制AI任务Prompt/u }).dblclick({
+    await launched.page.getByRole("button", { name: /发给 AI/u }).dblclick({
       delay: 0,
     });
     await expect(launched.page.getByText(
-      "等待 QoderWork 返回修改结果",
+      "等待 AI 返回结果",
       { exact: true },
     )).toBeVisible();
     await expect.poll(
@@ -4030,7 +4030,7 @@ test("ending a copied run still warns after restart and blocks late finalization
       isolatedUserData: launched.isolatedUserData,
     });
     await expect(launched.page.getByText(
-      "等待 QoderWork 返回修改结果",
+      "等待 AI 返回结果",
       { exact: true },
     )).toBeVisible();
     const endRound = launched.page.getByRole("button", {
@@ -4139,7 +4139,7 @@ test("an unknown Request outcome stays fail-closed and reconciles automatically"
     };
     await launched.page.route(bridgeRoute, injectUnknownRequestOutcome);
 
-    await launched.page.getByRole("button", { name: /复制AI任务Prompt/u }).click();
+    await launched.page.getByRole("button", { name: /发给 AI/u }).click();
     await expect(launched.page.getByText(
       "正在确认这次发送是否成功",
       { exact: true },
@@ -4155,7 +4155,7 @@ test("an unknown Request outcome stays fail-closed and reconciles automatically"
 
     allowUnknownRequestReconcile = true;
     await expect(launched.page.getByText(
-      "等待 QoderWork 返回修改结果",
+      "等待 AI 返回结果",
       { exact: true },
     )).toBeVisible({ timeout: 20_000 });
     await launched.page.unroute(bridgeRoute, injectUnknownRequestOutcome);
@@ -4237,9 +4237,9 @@ test("a persisted global comment stays exact after restart and sends directly", 
     await expect(recoveredComment).toHaveAttribute("data-resolution", "exact");
     await expect(recoveredComment.getByText("原位置已变化")).toHaveCount(0);
 
-    await activeLaunch.page.getByRole("button", { name: /复制AI任务Prompt/u }).click();
+    await activeLaunch.page.getByRole("button", { name: /发给 AI/u }).click();
     await expect(activeLaunch.page.getByText(
-      "等待 QoderWork 返回修改结果",
+      "等待 AI 返回结果",
       { exact: true },
     )).toBeVisible({ timeout: 30_000 });
     await expect(activeLaunch.page.getByText(/评论需要重新定位/u)).toHaveCount(0);
@@ -4261,7 +4261,7 @@ test("output without the mandatory finalizer never creates or opens a version", 
     );
     writeAiOutput(request.requestRoot, (base) => base.replace(ORIGINAL_TEXT, UPDATED_TEXT));
     await launched.page.waitForTimeout(3_500);
-    await expect(launched.page.getByText("等待 QoderWork 返回修改结果", { exact: true }))
+    await expect(launched.page.getByText("等待 AI 返回结果", { exact: true }))
       .toBeVisible();
     expect(workingHtmlFiles(launched.workspace, request.changeRequest.projectId)).toHaveLength(1);
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
@@ -4293,7 +4293,7 @@ test("a malformed AI HTML return is rejected before completion or opening", asyn
     );
     expect(existsSync(path.join(attemptRoot, "completion.json"))).toBe(false);
     await launched.page.waitForTimeout(3_500);
-    await expect(launched.page.getByText("等待 QoderWork 返回修改结果", { exact: true }))
+    await expect(launched.page.getByText("等待 AI 返回结果", { exact: true }))
       .toBeVisible();
     expect(workingHtmlFiles(launched.workspace, request.changeRequest.projectId)).toHaveLength(1);
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);

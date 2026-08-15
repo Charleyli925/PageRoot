@@ -115,7 +115,7 @@ PageRoot 让用户在真实本地 HTML 上完成两类工作：
 
 项目目录成员资格与写入授权只来自 Registry。已登记但从未出现在 Recent 的项目必须显示；Recent 内未登记的外部 HTML 不得显示为项目，清除 Recent 不得把项目移出目录。点击目录行时 Renderer 只提交 `projectId`，Bridge/Repository 重验 Project、Document、Working Copy、OpenTarget、HTML 与 Hash，成功后才一次性发布现有 Session。
 
-桌面版在当前 HTML 已安全保存、项目空闲且没有冲突时，允许用户双击顶部文件名原位重命名。输入只包含主文件名，现有 `.html/.htm` 后缀和所在目录保持不变；`Enter` 或失焦提交，`Escape` 取消。同名文件不得覆盖。成功重命名只改变当前真实文件路径、桌面活动/最近记录和项目显示名，不改变 HTML 字节、`projectId`、`documentId`、Version 或历史。事务必须有稳定 operation ID、预期源 Hash 和崩溃恢复记录。
+桌面版在当前 HTML 已安全保存、项目空闲且没有冲突时，允许用户单击顶部文件名或铅笔图标原位重命名。输入只包含主文件名，现有 `.html/.htm` 后缀和所在目录保持不变；`Enter` 或失焦提交，`Escape` 取消。同名文件不得覆盖。成功重命名只改变当前真实文件路径、桌面活动/最近记录和项目显示名，不改变 HTML 字节、`projectId`、`documentId`、Version 或历史。事务必须有稳定 operation ID、预期源 Hash 和崩溃恢复记录。
 
 初始 Version 的内部 ID 为 `ver_0001`，界面显示 `V1`，可见工作文件为 `<原用户文件名>-V1.html`。用户采纳第一份有效 AI Candidate 后创建 `ver_0002`、显示 `V2`，并生成 `<原用户文件名>-V2.html`；之后按同一 ordinal 递增。`input/base/index.html` 是冻结输入的机器名，不是用户文件名；AI 只能写入 Prompt 给出的固定 Attempt 输出 `requests/<requestId>/attempts/<attemptId>/output/candidate.html`。Candidate 在用户采纳前不是正式 Version，该文件路径和标签不得被用作用户界面的版本身份，也不得回写并破坏严格 v4 Project Schema。
 
@@ -145,7 +145,7 @@ PageRoot 让用户在真实本地 HTML 上完成两类工作：
 - 背景、填充、边框和常用间距。
 - 同级模块顺序。
 - 画布文字、样式、安全结构变化和同级模块顺序共享一条可持久化的撤销/重做历史；关闭并重开项目后仍可继续。
-- 不在画布工具栏增加撤销入口。沿用系统 `Edit > Undo/Redo`，并支持 `Cmd/Ctrl+Z` 撤销、`Cmd/Ctrl+Shift+Z` 与 `Ctrl+Y` 重做。
+- 不在画布工具栏增加撤销入口。沿用系统 `Edit > 撤销/重做`，并支持 `Cmd/Ctrl+Z` 撤销、`Cmd/Ctrl+Shift+Z` 与 `Ctrl+Y` 重做。
 - 焦点位于评论正文、项目长期规则或其他真实文字输入框时，撤销/重做只使用该输入框的原生局部输入历史，不触碰画布源码历史。评论卡片、评论/附件的新增删除和其他项目操作不纳入本轮撤销范围。
 
 每次本地修改：
@@ -212,7 +212,7 @@ Selection 重放 IME 最终文本。
 - 主编辑流程不显示“保存”或“另存为”按钮。
 - “导出 HTML 副本”放在次级文件菜单，只复制内容，不改变项目绑定，不创建 Version。
 - `Cmd+S` 只立即刷新当前自动写入队列，并反馈“内容已更新到文件”或真实错误。
-- 系统 `Edit` 菜单中的既有 Undo/Redo 是唯一菜单入口，不在画布编辑栏重复增加按钮。画布撤销前必须先完成当前 IME/文字 checkpoint 并刷盘；结果通过同一 Hash 校验与原子写入链路落盘，不创建 Version。
+- 系统 `Edit` 菜单中的既有「撤销 / 重做」是唯一菜单入口，不在画布编辑栏重复增加按钮。画布撤销前必须先完成当前 IME/文字 checkpoint 并刷盘；结果通过同一 Hash 校验与原子写入链路落盘，不创建 Version。
 - 新的画布修改会截断当前位置之后的 redo。外部源码变化、AI 工作文件切换或无法证明连续 Hash 时建立新的历史边界，绝不把旧 Patch 套到未知字节上。
 - 原生菜单和右键菜单不得存在另一条会创建 Version 的保存链路。
 

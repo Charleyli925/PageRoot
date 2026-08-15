@@ -505,7 +505,7 @@ export function HistoryVersionItem({
             </button>
             {onReveal ? (
               <button type="button" onClick={onReveal}>
-                Finder
+                在文件夹中打开
               </button>
             ) : null}
           </div>
