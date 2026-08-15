@@ -140,9 +140,11 @@ Window-size rules:
 - Bootstrap waits 1.2 seconds, performs one final layout/`resize` settle, then
   stops tracked timers, rAF, listeners, observers and animations, seals runtime
   descendants and audits source nodes plus approved empty hosts. Success keeps
-  the real Canvas/SVG in that same iframe and only then installs selection,
-  editing, comments and IME. Failure before interaction mounts ordinary static
-  Edit once.
+  the real Canvas/SVG in that same iframe when at least one approved host
+  contains author Canvas/SVG and no PNG/snapshot substitute exists. Unused
+  empty approved hosts without paint do not by themselves cause static
+  fallback. Only then does Edit install selection, editing, comments and IME.
+  Failure before interaction mounts ordinary static Edit once.
 - Edit screenshot/capture/projection count must be 0. There is no Edit-only
   hidden `BrowserWindow`, no `desktop/edit-runtime-capture-owner.mjs`, and no
   `capturePage()` on the Edit path. Review keeps its isolated capture owner.

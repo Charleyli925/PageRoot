@@ -52,9 +52,13 @@ script bytes, and serves only that resource closure under
 the final iframe. A fixed bootstrap runs the closure once at the real Edit
 size, waits 1.2 seconds, dispatches one controlled `resize`, stops tracked
 runtime activity and audits that source nodes/text/attributes and the approved
-unique empty-host bindings stayed intact. Success keeps the real Canvas/SVG.
-Failure before interaction mounts ordinary static Edit. Runtime descendants
-cannot overwrite authored style beyond the existing host-style audit allowlist
+unique empty-host bindings stayed intact. Success keeps the real Canvas/SVG
+when at least one approved host contains author Canvas/SVG and the frame has
+no PNG/snapshot substitute. Unused empty approved hosts, including tables or
+other unique empty bindings that never receive a chart, do not by themselves
+cause static fallback. Failure before interaction mounts ordinary static Edit.
+Runtime descendants cannot overwrite authored style beyond the existing
+host-style audit allowlist
 (`position: relative`, `user-select: none`, transparent
 `-webkit-tap-highlight-color`, or a positive `scale()` no greater than `1`).
 At most 32 non-dangerous empty hosts are eligible.

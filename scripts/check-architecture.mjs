@@ -950,6 +950,9 @@ export async function architectureViolations() {
     || !canvasEditor.includes("allow-scripts")
     || !canvasEditor.includes("EDIT_RUNTIME_FROZEN_ATTRIBUTE")
     || !canvasEditor.includes("runtimeFrameKeepsAuthorPaint")
+    || !canvasEditor.includes("hostHasAuthorPaint")
+    || !canvasEditor.includes("frame.grant.hosts.some")
+    || canvasEditor.includes("frame.grant.hosts.every")
     || /pngBase64|static-runtime-snapshot|mountFrozenRuntimeSnapshots|object-fit:\s*fill/u.test(canvasEditor)
   ) {
     violations.push(

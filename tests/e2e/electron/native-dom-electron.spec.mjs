@@ -1658,6 +1658,92 @@ test("Electron Edit preserves imported source-relative ECharts assets and native
   }
 });
 
+test("Electron Edit keeps frozen author canvas when unused empty hosts have no paint", async () => {
+  const sourceDirectory = mkdtempSync(
+    path.join(tmpdir(), "pageroot-edit-runtime-unused-host-e2e-"),
+  );
+  const sourcePath = path.join(sourceDirectory, "echarts-unused-host.html");
+  const runtimeScriptPath = path.join(sourceDirectory, "echarts.js");
+  const source = `<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Unused empty host Edit runtime</title></head>
+<body>
+  <main id="chart-host" data-native-case="runtime-chart" style="width: 640px; height: 360px"></main>
+  <div id="data-table"></div>
+  <p class="runtime-resource-probe" data-native-case="runtime-unused-host">静态来源文字保持可编辑。</p>
+  <script src="echarts.js"></script>
+  <script>
+    window.__PAGEROOT_ECHARTS_AUTHOR_EXECUTIONS__ = (window.__PAGEROOT_ECHARTS_AUTHOR_EXECUTIONS__ || 0) + 1;
+    const chart = window.echarts.init(document.querySelector("#chart-host"));
+    chart.setOption({ series: [] });
+  </script>
+</body>
+</html>`;
+  writeFileSync(runtimeScriptPath, `window.echarts = {
+  init(host) {
+    host.style.userSelect = "none";
+    host.style.webkitTapHighlightColor = "rgba(0, 0, 0, 0)";
+    host.style.position = "relative";
+    const canvas = document.createElement("canvas");
+    canvas.width = 640;
+    canvas.height = 360;
+    canvas.dataset.echartsRuntime = "true";
+    host.append(canvas);
+    return { setOption() { window.__PAGEROOT_ECHARTS_AUTHOR_SETTLED__ = true; } };
+  }
+};`, "utf8");
+  writeFileSync(sourcePath, source, "utf8");
+
+  let electronApp = null;
+  let isolatedUserData = null;
+  try {
+    const launched = await launchPageRoot({ activeSourcePath: sourcePath });
+    electronApp = launched.electronApp;
+    isolatedUserData = launched.isolatedUserData;
+    const { frame } = await loadedDiskFrame(
+      launched.page,
+      sourcePath,
+      "runtime-unused-host",
+    );
+    await expect.poll(() => frame.evaluate(() => ({
+      rendererAuthorExecutions: window.__PAGEROOT_ECHARTS_AUTHOR_EXECUTIONS__ || 0,
+      chartCount: document.querySelectorAll("#chart-host canvas[data-echarts-runtime=true]").length,
+      unusedHostPaint: document.querySelectorAll("#data-table canvas, #data-table svg").length,
+      frozenSnapshotCount: document.querySelectorAll(
+        "img[data-pageroot-edit-runtime-snapshot]",
+      ).length,
+      dataImagePngCount: document.querySelectorAll('img[src^="data:image/png"]').length,
+      bootstrapCount: document.querySelectorAll("[data-pageroot-edit-runtime-bootstrap]").length,
+      hostCount: document.querySelectorAll("[data-pageroot-edit-runtime-host]").length,
+      frozen: document.documentElement.getAttribute("data-pageroot-edit-runtime-frozen"),
+      resultState: JSON.parse(
+        document.documentElement.getAttribute("data-pageroot-edit-runtime-result") || "null",
+      )?.state || null,
+      base: document.baseURI,
+    })), { timeout: 6_000 }).toMatchObject({
+      rendererAuthorExecutions: 1,
+      chartCount: 1,
+      unusedHostPaint: 0,
+      frozenSnapshotCount: 0,
+      dataImagePngCount: 0,
+      bootstrapCount: 1,
+      hostCount: 2,
+      frozen: "true",
+      resultState: "frozen",
+      base: expect.stringMatching(/^pageroot-edit-runtime:/u),
+    });
+    await expect(launched.page.locator("[data-runtime-bootstrap-count=\"1\"]")).toHaveCount(1);
+  } finally {
+    if (electronApp && isolatedUserData) {
+      await stopPageRoot(electronApp, isolatedUserData);
+    }
+    removeValidatedTemporaryDirectory(
+      sourceDirectory,
+      "pageroot-edit-runtime-unused-host-e2e-",
+    );
+  }
+});
+
 test("Electron Edit rejects unsafe ECharts host styling without persisting it", async () => {
   const sourceDirectory = mkdtempSync(
     path.join(tmpdir(), "pageroot-edit-runtime-rejection-source-e2e-"),

@@ -505,6 +505,13 @@ function isRuntimeFrameFrozenResult(
   return received.size === expected.size;
 }
 
+function hostHasAuthorPaint(element: Element | null): boolean {
+  if (!element || element.nodeType !== 1) return false;
+  const tag = element.tagName.toLowerCase();
+  if (tag === "canvas" || tag === "svg") return true;
+  return Boolean(element.querySelector("canvas, svg"));
+}
+
 function runtimeFrameKeepsAuthorPaint(
   documentNode: Document,
   frame: RuntimeFrameContext,
@@ -515,11 +522,13 @@ function runtimeFrameKeepsAuthorPaint(
   ) {
     return false;
   }
-  return frame.grant.hosts.every((host) => {
+  // Host discovery includes every source-empty unique binding, not only
+  // charts. Unused empty hosts must not discard a frozen author canvas.
+  return frame.grant.hosts.some((host) => {
     const element = documentNode.querySelector(
       `[${EDIT_RUNTIME_HOST_ATTRIBUTE}="${host.key}"]`,
     );
-    return Boolean(element?.querySelector("canvas, svg"));
+    return hostHasAuthorPaint(element);
   });
 }
 
