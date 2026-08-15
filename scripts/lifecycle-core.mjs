@@ -442,80 +442,6 @@ export function projectDirectory(
   );
 }
 
-async function readProjectDirectoryAuthority(workspaceRoot, projectId) {
-  assertProjectId(projectId);
-  const resolvedWorkspace = path.resolve(workspaceRoot);
-  const registry = await readVersionedJson(
-    path.join(resolvedWorkspace, "project-registry.json"),
-    "project-registry.json",
-    LIFECYCLE_SCHEMA_VERSION,
-  );
-  const record = registry?.projects?.[projectId];
-  if (!record) {
-    throw new LifecycleError(
-      "PROJECT_NOT_FOUND",
-      `${projectId} was not found.`,
-      undefined,
-      404,
-    );
-  }
-  if (
-    typeof record !== "object"
-    || Array.isArray(record)
-    || typeof record.displayName !== "string"
-    || record.displayName.trim().length === 0
-    || typeof record.createdAt !== "string"
-    || Number.isNaN(Date.parse(record.createdAt))
-  ) {
-    throw new LifecycleError(
-      "PROJECT_REGISTRY_INVALID",
-      `${projectId} does not have valid readable storage metadata.`,
-      undefined,
-      409,
-    );
-  }
-  return {
-    record,
-    projectRoot: projectDirectory(
-      resolvedWorkspace,
-      record.storageDirectoryName,
-      projectId,
-    ),
-  };
-}
-
-export async function resolveProjectDirectory(workspaceRoot, projectId) {
-  const authority = await readProjectDirectoryAuthority(
-    workspaceRoot,
-    projectId,
-  );
-  return authority.projectRoot;
-}
-
-function assertProjectDirectoryAuthority({
-  project,
-  projectId,
-  projectRoot,
-  authority,
-}) {
-  if (
-    authority.projectRoot !== projectRoot
-    || project?.projectId !== projectId
-    || project.displayName !== authority.record.displayName
-    || project.createdAt !== authority.record.createdAt
-    || project.storageDirectoryName !== authority.record.storageDirectoryName
-    || path.basename(projectRoot) !== project.storageDirectoryName
-  ) {
-    throw new LifecycleError(
-      "PROJECT_STORAGE_METADATA_MISMATCH",
-      "Project registry and project.json storage metadata do not match.",
-      undefined,
-      409,
-    );
-  }
-  return project;
-}
-
 export async function withProjectFileLock(projectRoot, task, options = {}) {
   const lockDirectory = path.join(projectRoot, ".lifecycle.lock");
   const timeoutMs = options.timeoutMs ?? 15_000;
@@ -1071,21 +997,17 @@ export async function sealUserSupplementForAttempt({
 }
 
 export async function recordUserSupplement({
-  workspaceRoot,
+  projectRoot,
   projectId,
   requestId,
   attemptId = "attempt_001",
   payload,
 }) {
-  const resolvedWorkspace = path.resolve(workspaceRoot);
   assertProjectId(projectId);
   assertRequestId(requestId);
   assertAttemptId(attemptId);
-  const projectRoot = await resolveProjectDirectory(
-    resolvedWorkspace,
-    projectId,
-  );
-  if (!(await exists(projectRoot))) {
+  const resolvedProjectRoot = path.resolve(projectRoot);
+  if (!(await exists(resolvedProjectRoot))) {
     throw new LifecycleError(
       "PROJECT_NOT_FOUND",
       `${projectId} was not found.`,
@@ -1105,24 +1027,25 @@ export async function recordUserSupplement({
     "attachments",
   ]), "supplement payload");
 
-  return withProjectFileLock(projectRoot, async () => {
-    const authority = await readProjectDirectoryAuthority(
-      resolvedWorkspace,
-      projectId,
-    );
+  return withProjectFileLock(resolvedProjectRoot, async () => {
     const project = await readVersionedJson(
-      path.join(projectRoot, "project.json"),
+      path.join(resolvedProjectRoot, "project.json"),
       "project.json",
       LIFECYCLE_SCHEMA_VERSION,
     );
-    assertProjectDirectoryAuthority({
-      project,
-      projectId,
-      projectRoot,
-      authority,
-    });
+    if (
+      project?.projectId !== projectId
+      || project.storageDirectoryName !== path.basename(resolvedProjectRoot)
+    ) {
+      throw new LifecycleError(
+        "PROJECT_STORAGE_METADATA_MISMATCH",
+        "project.json identity does not match the requested project directory.",
+        undefined,
+        409,
+      );
+    }
     const runtime = await readVersionedJson(
-      path.join(projectRoot, "runtime-state.json"),
+      path.join(resolvedProjectRoot, "runtime-state.json"),
       "runtime-state.json",
       LIFECYCLE_SCHEMA_VERSION,
     );
@@ -1140,7 +1063,7 @@ export async function recordUserSupplement({
         409,
       );
     }
-    const requestRoot = path.join(projectRoot, "requests", requestId);
+    const requestRoot = path.join(resolvedProjectRoot, "requests", requestId);
     const attemptRoot = path.join(requestRoot, "attempts", attemptId);
     for (const terminalName of ["completion.json", "cancelled.json", "outcome.json"]) {
       if (await exists(path.join(attemptRoot, terminalName))) {

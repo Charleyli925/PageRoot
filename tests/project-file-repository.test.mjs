@@ -2156,6 +2156,32 @@ test("Registry and managed control paths reject symlinks", async (t) => {
   );
 });
 
+test("verified project roots are not reused across serial turns after a symlink swap", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "serial-root-cache.html");
+  const first = await value.repository.saveWorkingCopy({
+    target: imported.target,
+    html: html("after first save"),
+    expectedSourceSha256: imported.target.sourceSha256,
+    editRevision: 1,
+  });
+  assert.equal(first.versionCreated, false);
+
+  const relocated = path.join(value.root, "relocated-serial-root");
+  await rename(imported.target.projectRootPath, relocated);
+  await symlink(relocated, imported.target.projectRootPath, "dir");
+  await assert.rejects(
+    value.repository.saveWorkingCopy({
+      target: first.target,
+      html: html("after symlink swap"),
+      expectedSourceSha256: first.target.sourceSha256,
+      editRevision: 2,
+    }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && (error.code === "PATH_ESCAPES_PROJECT" || error.code === "UNSAFE_DIRECTORY"),
+  );
+});
+
 test("promotion uses the latest Working Copy name and allocates around file, directory and symlink collisions", async (t) => {
   const value = await fixture(t);
   const imported = await importSource(value, "A.html");

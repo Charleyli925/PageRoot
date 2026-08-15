@@ -193,22 +193,21 @@ collected. A guessed date is not a support-window policy.
 - Historical producer and version: earlier desktop installs stored recent
   project state under `PageRootV2`, `YuanYe`, or `HTML AI 工作台`, and
   used the corresponding Documents workspace directories.
-- Current consumer: desktop startup in `desktop/main.mjs` still reads a legacy
-  `html-projects.json` only when the current state file is absent. It does
-  **not** probe historical Documents workspace roots.
-- Decoder and canonical output: `projectStatePathForRead` may open
-  `html-projects.json` from those older appData directories. `workspacePath()`
-  uses `HTML_AI_WORKSPACE` when set, otherwise only
-  `Documents/PageRoot/项目记录`. It never selects `PageRootV2`, `YuanYe`, or
-  `HTML AI 工作台` project-record directories. Those directories are not
-  deleted.
-- Historical proof: `tests/desktop-package.test.mjs` and
+- Current consumer: none. Desktop startup reads only the current
+  `userData/html-projects.json`. `workspacePath()` uses `HTML_AI_WORKSPACE`
+  when set, otherwise only `Documents/PageRoot/项目记录`.
+- Decoder and canonical output: removed 2026-08-15. The desktop no longer
+  opens `html-projects.json` from older appData directory names. Those
+  directories are not deleted.
+- Historical proof: `tests/product-contract.test.mjs` (main process must not
+  mention the old appData names) and
   `docs/NOTIFICATION_AND_STARTUP_POLICY.md`.
-- Disk persistence read: yes for recent-file UI state; not a project-content
-  migration. Bridge open authority is the v4 Project File Registry only.
-- Support window and deletion evidence: retain the `html-projects.json` reader
-  until supported desktop builds and an opted-in installation census show no
-  legacy state file remains. Workspace-root probes were removed in P0-B.
+- Disk persistence read: no. Recent-file UI state is only the current
+  `userData` file. Bridge open authority remains the v4 Project File Registry.
+- Support window and deletion evidence: appData probes were removed after
+  P0-B already dropped Documents workspace-root probes. Users who never
+  launched a PageRoot-named install still re-open HTML files to rebuild
+  Recent; project content is not migrated or deleted.
 
 ## Developer Preview candidate assessments
 

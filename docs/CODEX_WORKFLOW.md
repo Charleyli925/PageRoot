@@ -128,22 +128,10 @@ Ready or `full-gate` posts at most one `@codex review` comment per exact head vi
 
 Keep PR batching a judgement call rather than a repository rule. A coherent change may be large; split only when separate review, rollback or user-impact boundaries would be clearer. Local `npm run ci:health` can summarize recent `ci.yml` conclusions; it is not a merge gate.
 
-After merge, CI authenticates the successful PR result against the exact `main` Tree Hash, package/lockfile version and merged PR. Equality failure blocks immediately; equality success does not repeat Node, Browser or Electron source tests. The source-gate attestation is valid for seven days and only for the exact tree.
-
-Before a tag exists, the manual `Release Candidate` workflow uses that source
-attestation to assemble one pre-sign App on macOS. It checks package contents
-and full packaged runtime before signing, checks signed startup before Apple,
-then notarizes and freezes that exact App as an internal checkpoint. A second
-job validates the checkpoint, passes it to electron-builder as `--prepackaged`,
-notarizes the final DMG and freezes the verified DMG plus update
-ZIP/blockmap/metadata, checksums, legacy update manifest, build provenance and
-candidate attestation. If only the second job has an environment or Apple
-failure, rerun failed jobs so the signed-App checkpoint is reused. The manual
-`Release` workflow accepts only a matching candidate no older than 72 hours,
-verifies every downloaded byte, creates the annotated tag and publishes those
-same files without rebuilding. See
-`docs/RELEASE_PIPELINE_GOVERNANCE.md` for failure classification, rerun policy
-and metrics.
+After merge, CI authenticates the successful PR result against the exact `main`
+Tree Hash. Candidate assembly, notarization, publication, failure
+classification and rerun policy live in
+`docs/RELEASE_PIPELINE_GOVERNANCE.md`; this file does not duplicate them.
 
 ## Latest installer source rule
 

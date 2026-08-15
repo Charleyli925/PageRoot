@@ -18,6 +18,8 @@ v3 目录、字段和样本不构成 v4 兼容 Reader 或迁移要求。
 v3 Attempt / finalizer CLI `--workspace` / `--project-id` 是历史归档。当前
 受支持的官方 finalizer 入口是 `scripts/finalize-attempt.mjs --project-root`
 → `finalizeProjectFileAttempt`。Bridge 不再创建或完成 v3 Attempt。
+v3 supplement CLI `--workspace` 同样归档；`scripts/record-user-supplement.mjs --project-root`
+只对给定项目目录写入，不再读取 `project-registry.json`。
 
 v3 在其历史切换边界内不兼容 v1/v2；新写入不得沿用以下旧路径：
 
@@ -578,9 +580,10 @@ Attempt，不把归档 outcome 变成可打开候选。相关 Developer Preview 
 
 v3 TargetRef、评论和 supplement 继续作为生成指令与历史证据，但不再逐节点限制候选
 Version。旧 Attempt 的 `scope-report.json` 与 `validation-review.json` 仍可只读展示；新
-Attempt 不生成它们。`scope-validator.mjs` 仍保留源码与独立合同测试，供直接 source
-patch 和兼容性校验使用，不得重新接入 AI Version 的接受门禁，也不再打进安装包。
-Bridge 身份检查改从 `html-source-parser.mjs` 读取 `rawStartTagAttributes`。
+Attempt 不生成它们。`scope-validator.mjs` 已从源码删除：它不再服务直接 source patch
+合同，也不得重新接入 AI Version 的接受门禁。直接编辑的岛外字节校验由
+`source-patch-engine` 在提交点执行。Bridge 身份检查从 `html-source-parser.mjs`
+读取 `rawStartTagAttributes`。
 
 ## 13. 校验矩阵
 
