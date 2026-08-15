@@ -108,6 +108,7 @@ import {
   adoptCanonicalHistoryIslandInPlace,
   canonicalNativeHostPreview,
   mountNativeTextFragmentHost,
+  remountNativeHostFromSource,
   nativeEditHostForElement,
   nativeTextFragmentForRange,
   refreshMountedPreviewSourceNodeIds,
@@ -2966,15 +2967,43 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         }
         sourceInnerHtml = islandCapability.island.innerHtml;
       }
-      const liveText = fragmentCandidate
+      let liveText = fragmentCandidate
         ? fragmentCandidate.textNode.data
         : nativeLogicalText(islandHostElement!);
       if (liveText !== projection.text) {
-        containerRef.current?.setAttribute("data-native-start-status", "text-mismatch");
-        reportBlockedEdit(new Error(
-          "画布文字与源码节点已经漂移，已阻止直接编辑。",
-        ));
-        return false;
+        containerRef.current?.setAttribute(
+          "data-native-start-status",
+          "text-mismatch-remount",
+        );
+        if (fragmentCandidate) {
+          fragmentCandidate.textNode.data = projection.text;
+        } else {
+          const hostNodeId = islandHostElement!.getAttribute(SOURCE_NODE_ATTRIBUTE);
+          if (
+            !hostNodeId
+            || !remountNativeHostFromSource(
+              islandHostElement!,
+              hostNodeId,
+              sourceIndex,
+            )
+          ) {
+            containerRef.current?.setAttribute("data-native-start-status", "text-mismatch");
+            reportBlockedEdit(new Error(
+              "画布文字与源码节点已经漂移，已阻止直接编辑。",
+            ));
+            return false;
+          }
+        }
+        liveText = fragmentCandidate
+          ? fragmentCandidate.textNode.data
+          : nativeLogicalText(islandHostElement!);
+        if (liveText !== projection.text) {
+          containerRef.current?.setAttribute("data-native-start-status", "text-mismatch");
+          reportBlockedEdit(new Error(
+            "画布文字与源码节点已经漂移，已阻止直接编辑。",
+          ));
+          return false;
+        }
       }
       const layoutElement = fragmentCandidate?.parentElement
         ?? islandHostElement!;

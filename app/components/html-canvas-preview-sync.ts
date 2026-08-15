@@ -279,6 +279,20 @@ export function canonicalNativeHostPreview(
   return detachedTarget?.tagName === rootElement.tagName ? detachedTarget : null;
 }
 
+export function remountNativeHostFromSource(
+  hostElement: HTMLElement,
+  nodeId: string,
+  sourceIndex: SourceIndexValue,
+): boolean {
+  const canonical = canonicalNativeHostPreview(hostElement, nodeId, sourceIndex);
+  if (!canonical) return false;
+  const documentNode = hostElement.ownerDocument;
+  hostElement.replaceChildren(
+    ...Array.from(canonical.childNodes).map((node) => documentNode.importNode(node, true)),
+  );
+  return true;
+}
+
 type PreviewSourceNodeIdPlan = {
   apply: () => void;
   rollback: () => void;
