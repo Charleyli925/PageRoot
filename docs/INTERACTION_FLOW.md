@@ -277,9 +277,12 @@ SourcePatch、不写磁盘、不运行作者脚本，也不引入右键菜单、
 页立即挂载静态 iframe；候选页只可准备一次 ECharts 直连运行时。主进程只建立
 不可变资源闭包，不执行作者脚本、不截图。最终可见 iframe 按顺序执行已冻结的
 classic 脚本一次，固定等待 1.2 秒，做一次布局/`resize` 收敛，停止作者
-timer/rAF、listener、Observer 和动画并完成源码/宿主审计。只有审计成功，才在
-**同一 iframe** 上安装普通选择、原生编辑、评论和 IME 交互。运行时后代不可编辑、
+timer/rAF、listener、Observer、动画和 MessageChannel/MessagePort，并完成源码/
+宿主审计。只有审计成功，才在 **同一 iframe** 上安装普通选择、原生编辑、评论和
+IME 交互。该 iframe 与应用 renderer 同源，因此作者脚本可以到达 parent 上已暴露的
+preload API；这是原位编辑的已接受代价，不通过换 origin 关闭。运行时后代不可编辑、
 不可聚焦；单击它时目标回到唯一批准的空源码宿主。Edit 截图/捕获/投影数量必须为 0。
+作者源码内联 PNG 按原样显示，不得被当成 PageRoot 截图替身。
 
 交互开始后，文本编辑、IME、评论、700ms 自动保存、结束编辑后的 ⌘S、插入换行、
 同级上移/下移和相同源码的回显均不得准备新运行时、再次执行作者脚本或替换
@@ -1025,8 +1028,9 @@ A 项目 processing 时切换 B 项目：
 23. V6 的历史 V2 继续编辑后，版本列表与历史仍保留“基于 V2”“项目最新 V6”“当前编辑基础/有本地修改”事实；顶栏状态徽章默认沉默，只在保存、AI 或历史只读时出字。历史只读不改变当前编辑目标。
 24. Version Finder 定位可见 Working Copy，Candidate Finder 只打开 `AI任务/`；删除或篡改 AI任务 后，隐藏 Candidate 仍可审阅和 Promotion，P2 不创建 `附件与图片/`。
 25. 符合条件的 ECharts 页在一个 `canvasGeneration` 最多在最终可见 Edit iframe
-    执行一次作者脚本；1.2 秒冻结审计完成后编辑、评论、IME、自动保存、结束编辑
-    后的 ⌘S、插入换行、同级上移/下移和目标切换都不替换该 iframe。显示图的评论
-    仍落到唯一源码宿主；所有保存/Version/AI 输入字节不含运行时节点或显示图。
-    无法原位同步的结构变化必须保留当前 iframe 或显式进入新 generation，不得把
-    本代静默静态重建写成已接受限制。
+    执行一次作者脚本；1.2 秒冻结审计（含 MessageChannel/MessagePort）完成后编辑、
+    评论、IME、自动保存、结束编辑后的 ⌘S、插入换行、同级上移/下移和目标切换都不
+    替换该 iframe。作者源码里的内联 PNG 按原样显示，不得被当成 PageRoot 截图替身。
+    显示图的评论仍落到唯一源码宿主；所有保存/Version/AI 输入字节不含运行时节点或
+    显示图。无法原位同步的结构变化必须保留当前 iframe 或显式进入新 generation，
+    不得把本代静默静态重建写成已接受限制。

@@ -49,12 +49,16 @@ The session accepts no arbitrary source path or later source revision. Main
 rechecks active HTML/SHA, freezes declared local or allowlisted ECharts-CDN
 script bytes, and serves only that resource closure under
 `pageroot-edit-runtime:` without CSP bypass. The first mounted Edit iframe is
-the final iframe. A fixed bootstrap runs the closure once at the real Edit
+the final iframe. It is same-origin with the application renderer so in-place
+editing can reach parent DOM; author scripts can therefore call renderer-exposed
+preload APIs on `window.parent`. That is an accepted product risk, not a reason
+to restore screenshots. A fixed bootstrap runs the closure once at the real Edit
 size, waits 1.2 seconds, dispatches one controlled `resize`, stops tracked
-runtime activity and audits that source nodes/text/attributes and the approved
+timers, listeners, observers, animations and MessageChannel ports, and audits that source nodes/text/attributes and the approved
 unique empty-host bindings stayed intact. Success keeps the real Canvas/SVG
 when at least one approved host contains author Canvas/SVG and the frame has
-no PNG/snapshot substitute. Unused empty approved hosts, including tables or
+no PageRoot PNG/snapshot substitute. Source-authored inline images remain.
+Unused empty approved hosts, including tables or
 other unique empty bindings that never receive a chart, do not by themselves
 cause static fallback. Failure before interaction mounts ordinary static Edit.
 Runtime descendants cannot overwrite authored style beyond the existing

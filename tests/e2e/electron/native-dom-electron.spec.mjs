@@ -1925,6 +1925,157 @@ test("Electron Edit keeps frozen author canvas when unused empty hosts have no p
   }
 });
 
+test("Electron Edit drains MessageChannel callbacks before accepting the frozen iframe", async () => {
+  const sourceDirectory = mkdtempSync(
+    path.join(tmpdir(), "pageroot-edit-runtime-message-channel-e2e-"),
+  );
+  const sourcePath = path.join(sourceDirectory, "echarts-message-channel.html");
+  const probeText = "冻结后源码文字不得被端口改写。";
+  const source = `<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>One-shot MessageChannel freeze</title></head>
+<body>
+  <p data-native-case="runtime-message-probe">${probeText}</p>
+  <main id="chart-host" data-native-case="runtime-chart" style="width: 640px; height: 360px"></main>
+  <script src="echarts.js"></script>
+  <script>
+    window.__PAGEROOT_ECHARTS_AUTHOR_EXECUTIONS__ = (window.__PAGEROOT_ECHARTS_AUTHOR_EXECUTIONS__ || 0) + 1;
+    const chart = window.echarts.init(document.querySelector("#chart-host"));
+    chart.setOption({ series: [] });
+    const probe = document.querySelector("[data-native-case=runtime-message-probe]");
+    const channel = new MessageChannel();
+    channel.port2.onmessage = () => {
+      if (document.documentElement.getAttribute("data-pageroot-edit-runtime-frozen") === "true") {
+        probe.textContent = "端口在冻结后改写了源码文字";
+        return;
+      }
+      channel.port1.postMessage("ping");
+    };
+    channel.port1.postMessage("start");
+  </script>
+</body>
+</html>`;
+  writeFileSync(path.join(sourceDirectory, "echarts.js"), ECHARTS_STUB, "utf8");
+  writeFileSync(sourcePath, source, "utf8");
+
+  let electronApp = null;
+  let isolatedUserData = null;
+  try {
+    const launched = await launchPageRoot({ activeSourcePath: sourcePath });
+    electronApp = launched.electronApp;
+    isolatedUserData = launched.isolatedUserData;
+    const { frame } = await loadedDiskFrame(
+      launched.page,
+      sourcePath,
+      "runtime-message-probe",
+    );
+    const activeProject = await launched.page.evaluate(() => (
+      window.htmlAIProjects?.getActiveProject()
+    ));
+    if (typeof activeProject?.sourcePath !== "string") {
+      throw new Error("The imported managed Working Copy did not become active.");
+    }
+    await expect.poll(() => frame.evaluate(() => ({
+      rendererAuthorExecutions: window.__PAGEROOT_ECHARTS_AUTHOR_EXECUTIONS__ || 0,
+      chartCount: document.querySelectorAll("#chart-host canvas[data-echarts-runtime=true]").length,
+      frozen: document.documentElement.getAttribute("data-pageroot-edit-runtime-frozen"),
+      probe: document.querySelector("[data-native-case=runtime-message-probe]")?.textContent || "",
+    })), { timeout: 6_000 }).toMatchObject({
+      rendererAuthorExecutions: 1,
+      chartCount: 1,
+      frozen: "true",
+      probe: probeText,
+    });
+    await launched.page.waitForTimeout(800);
+    expect(await frame.evaluate(() => (
+      document.querySelector("[data-native-case=runtime-message-probe]")?.textContent || ""
+    ))).toBe(probeText);
+    expect(readFileSync(activeProject.sourcePath, "utf8")).toContain(probeText);
+    expect(readFileSync(activeProject.sourcePath, "utf8")).not.toContain("端口在冻结后改写了源码文字");
+    expect(frame.isDetached()).toBe(false);
+    await expect(launched.page.locator("[data-runtime-bootstrap-count=\"1\"]")).toHaveCount(1);
+  } finally {
+    if (electronApp && isolatedUserData) {
+      await stopPageRoot(electronApp, isolatedUserData);
+    }
+    removeValidatedTemporaryDirectory(
+      sourceDirectory,
+      "pageroot-edit-runtime-message-channel-e2e-",
+    );
+  }
+});
+
+test("Electron Edit keeps frozen author canvas beside an authored inline PNG", async () => {
+  const sourceDirectory = mkdtempSync(
+    path.join(tmpdir(), "pageroot-edit-runtime-authored-png-e2e-"),
+  );
+  const sourcePath = path.join(sourceDirectory, "echarts-authored-png.html");
+  const authoredPng = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+  const source = `<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>One-shot authored PNG Edit runtime</title></head>
+<body>
+  <img data-native-case="runtime-authored-png" alt="logo" src="${authoredPng}">
+  <main id="chart-host" data-native-case="runtime-chart" style="width: 640px; height: 360px"></main>
+  <p data-native-case="runtime-png-editable">静态来源文字保持可编辑。</p>
+  <script src="echarts.js"></script>
+  <script>
+    window.__PAGEROOT_ECHARTS_AUTHOR_EXECUTIONS__ = (window.__PAGEROOT_ECHARTS_AUTHOR_EXECUTIONS__ || 0) + 1;
+    const chart = window.echarts.init(document.querySelector("#chart-host"));
+    chart.setOption({ series: [] });
+  </script>
+</body>
+</html>`;
+  writeFileSync(path.join(sourceDirectory, "echarts.js"), ECHARTS_STUB, "utf8");
+  writeFileSync(sourcePath, source, "utf8");
+
+  let electronApp = null;
+  let isolatedUserData = null;
+  try {
+    const launched = await launchPageRoot({ activeSourcePath: sourcePath });
+    electronApp = launched.electronApp;
+    isolatedUserData = launched.isolatedUserData;
+    const { frame } = await loadedDiskFrame(
+      launched.page,
+      sourcePath,
+      "runtime-png-editable",
+    );
+    await expect.poll(() => frame.evaluate(() => ({
+      rendererAuthorExecutions: window.__PAGEROOT_ECHARTS_AUTHOR_EXECUTIONS__ || 0,
+      chartCount: document.querySelectorAll("#chart-host canvas[data-echarts-runtime=true]").length,
+      frozenSnapshotCount: document.querySelectorAll(
+        "img[data-pageroot-edit-runtime-snapshot]",
+      ).length,
+      authoredPngCount: document.querySelectorAll(
+        "img[data-native-case=runtime-authored-png]",
+      ).length,
+      dataImagePngCount: document.querySelectorAll('img[src^="data:image/png"]').length,
+      frozen: document.documentElement.getAttribute("data-pageroot-edit-runtime-frozen"),
+      resultState: JSON.parse(
+        document.documentElement.getAttribute("data-pageroot-edit-runtime-result") || "null",
+      )?.state || null,
+    })), { timeout: 6_000 }).toMatchObject({
+      rendererAuthorExecutions: 1,
+      chartCount: 1,
+      frozenSnapshotCount: 0,
+      authoredPngCount: 1,
+      dataImagePngCount: 1,
+      frozen: "true",
+      resultState: "frozen",
+    });
+    await expect(launched.page.locator("[data-runtime-bootstrap-count=\"1\"]")).toHaveCount(1);
+    expect(frame.isDetached()).toBe(false);
+  } finally {
+    if (electronApp && isolatedUserData) {
+      await stopPageRoot(electronApp, isolatedUserData);
+    }
+    removeValidatedTemporaryDirectory(
+      sourceDirectory,
+      "pageroot-edit-runtime-authored-png-e2e-",
+    );
+  }
+});
+
 test("Electron Edit rejects unsafe ECharts host styling without persisting it", async () => {
   const sourceDirectory = mkdtempSync(
     path.join(tmpdir(), "pageroot-edit-runtime-rejection-source-e2e-"),

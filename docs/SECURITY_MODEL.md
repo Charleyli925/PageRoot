@@ -64,13 +64,17 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
   asset map; direct `file:` assets and authored base URLs are blocked. The
   protocol has no `bypassCSP`, exposes no directory listing or project path,
   and the runtime document keeps `connect-src`, workers, popups and top-level
-  navigation closed. A fixed bootstrap freezes timers/listeners/observers/
-  animations and audits source fidelity; the real Canvas/SVG stays in that
+  navigation closed. A fixed bootstrap freezes timers, listeners, observers,
+  animations and MessageChannel ports, then audits source fidelity; the real
+  Canvas/SVG stays in that
   iframe. Same-origin `window.parent` access is a known, explicitly accepted
-  product risk (ADR 0025). Low-cost boundaries remain: no Node, no preload, no
-  direct IPC, no arbitrary directory read, no arbitrary network. Capture
+  product risk (ADR 0025): author scripts in that iframe can reach
+  renderer-exposed contextBridge APIs on the parent. The iframe itself still
+  has no Node integration and no preload or IPC sender of its own. Capture
   failure or audit rejection revokes the session and renders static Edit before
   interaction. Edit must not answer a security concern by converting to PNG.
+  Remaining low-cost boundaries: no directory listing or project path on the
+  edit-runtime protocol, no popup, no worker, no top-level navigation.
 - Desktop Review runtime snapshot capture is one narrow IPC capability. The
   main process revalidates exact source HTML/SHA and a bounded
   source-host binding, owns one hidden sandboxed BrowserWindow with Node

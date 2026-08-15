@@ -437,6 +437,10 @@ export async function architectureViolations() {
     path.join(PRODUCT_ROOT, "desktop", "edit-runtime-protocol.mjs"),
     "utf8",
   );
+  const editRuntimeBootstrap = await readFile(
+    path.join(PRODUCT_ROOT, "desktop", "edit-runtime-bootstrap.mjs"),
+    "utf8",
+  );
   const projectSession = await readFile(
     path.join(
       PRODUCT_ROOT,
@@ -969,10 +973,20 @@ export async function architectureViolations() {
     || !canvasEditor.includes("settledRuntimeFrameIsCurrent")
     || !canvasEditor.includes("detachedRuntimeFrame && !preserveForHistory")
     || !canvasEditor.includes("frameReloadRequired && !settledRuntimeFrame")
+    || canvasEditor.includes('img[src^="data:image/png"]')
     || /pngBase64|static-runtime-snapshot|mountFrozenRuntimeSnapshots|object-fit:\s*fill/u.test(canvasEditor)
   ) {
     violations.push(
       "app/components/HtmlCanvasEditor.tsx: one-shot runtime frames must execute once in the final iframe, keep real canvas/svg, and never mount PNG substitutes",
+    );
+  }
+  if (
+    !editRuntimeBootstrap.includes("closeTrackedPorts")
+    || !editRuntimeBootstrap.includes("MessageChannel")
+    || !editRuntimeBootstrap.includes("messagePortClose")
+  ) {
+    violations.push(
+      "desktop/edit-runtime-bootstrap.mjs: freeze must drain MessageChannel/MessagePort callbacks before accepting the retained iframe",
     );
   }
   const adr0025 = await readFile(
@@ -989,6 +1003,10 @@ export async function architectureViolations() {
     || !adr0025.includes("forbids Ready")
     || !adr0025.includes("explicitly start a new `canvasGeneration`")
     || !adr0025.includes("static-Edit compromise")
+    || !adr0025.includes("htmlAIProjects")
+    || !adr0025.includes("MessageChannel")
+    || !adr0025.includes("Source-authored inline PNG")
+    || /Low-cost boundaries remain: no Node, no preload, no direct IPC/u.test(adr0025)
     || !interactionFlow.includes("静默静态重建不是已接受的产品合同")
   ) {
     violations.push(

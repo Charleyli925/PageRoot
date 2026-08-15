@@ -45,6 +45,16 @@ function oneShotRuntimeBootstrap(config) {
     createElement: Document.prototype.createElement,
     documentOpen: Document.prototype.open,
     documentWrite: Document.prototype.write,
+    messageChannel: window.MessageChannel,
+    messagePortClose: MessagePort.prototype.close,
+    messagePortOnMessage: Object.getOwnPropertyDescriptor(
+      MessagePort.prototype,
+      "onmessage",
+    ),
+    messagePortOnMessageError: Object.getOwnPropertyDescriptor(
+      MessagePort.prototype,
+      "onmessageerror",
+    ),
   };
   const state = {
     phase: "booting",
@@ -55,6 +65,7 @@ function oneShotRuntimeBootstrap(config) {
     animationFrames: new Set(),
     listeners: [],
     observers: [],
+    ports: new Set(),
     baseline: null,
     preflightStyle: null,
     result: null,
@@ -342,6 +353,14 @@ function oneShotRuntimeBootstrap(config) {
       }
     }
   };
+  const closeTrackedPorts = () => {
+    for (const port of state.ports) {
+      try { port.onmessage = null; } catch {}
+      try { port.onmessageerror = null; } catch {}
+      try { native.messagePortClose.call(port); } catch {}
+    }
+    state.ports.clear();
+  };
   const restorePrimitives = () => {
     try { EventTarget.prototype.addEventListener = native.addEventListener; } catch {}
     try { EventTarget.prototype.removeEventListener = native.removeEventListener; } catch {}
@@ -356,6 +375,25 @@ function oneShotRuntimeBootstrap(config) {
     try { window.IntersectionObserver = native.intersectionObserver; } catch {}
     try { Document.prototype.open = native.documentOpen; } catch {}
     try { Document.prototype.write = native.documentWrite; } catch {}
+    try { window.MessageChannel = native.messageChannel; } catch {}
+    if (native.messagePortOnMessage) {
+      try {
+        Object.defineProperty(
+          MessagePort.prototype,
+          "onmessage",
+          native.messagePortOnMessage,
+        );
+      } catch {}
+    }
+    if (native.messagePortOnMessageError) {
+      try {
+        Object.defineProperty(
+          MessagePort.prototype,
+          "onmessageerror",
+          native.messagePortOnMessageError,
+        );
+      } catch {}
+    }
   };
   const freeze = () => {
     if (state.frozen) return state.result;
@@ -365,6 +403,7 @@ function oneShotRuntimeBootstrap(config) {
     removeTrackedListeners();
     disconnectTrackedObservers();
     clearPropertyHandlers();
+    closeTrackedPorts();
     try {
       document.getAnimations?.().forEach((animation) => animation.cancel());
     } catch {
@@ -441,6 +480,36 @@ function oneShotRuntimeBootstrap(config) {
     };
     try { Document.prototype.open = denyDocumentReplacement; } catch {}
     try { Document.prototype.write = denyDocumentReplacement; } catch {}
+    if (typeof native.messageChannel === "function") {
+      const WrappedChannel = function MessageChannel() {
+        const channel = new native.messageChannel();
+        state.ports.add(channel.port1);
+        state.ports.add(channel.port2);
+        return channel;
+      };
+      Object.setPrototypeOf(WrappedChannel, native.messageChannel);
+      WrappedChannel.prototype = native.messageChannel.prototype;
+      try { Object.defineProperty(WrappedChannel, "name", { value: "MessageChannel" }); } catch {}
+      window.MessageChannel = WrappedChannel;
+    }
+    const wrapPortHandler = (descriptor, property) => {
+      if (!descriptor || typeof descriptor.set !== "function") return;
+      try {
+        Object.defineProperty(MessagePort.prototype, property, {
+          configurable: true,
+          enumerable: descriptor.enumerable,
+          get: descriptor.get,
+          set(handler) {
+            state.ports.add(this);
+            return descriptor.set.call(this, handler);
+          },
+        });
+      } catch {
+        // Some environments freeze MessagePort accessors.
+      }
+    };
+    wrapPortHandler(native.messagePortOnMessage, "onmessage");
+    wrapPortHandler(native.messagePortOnMessageError, "onmessageerror");
   };
   const prepareHiddenHostGeometry = () => {
     const hiddenAncestors = new Set();

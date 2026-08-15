@@ -129,8 +129,9 @@ Workbench 只确认已提交 loading surface、传入窄 port 并消费快照。
   用例证明导入后的 V1 仍从 Main 绑定的原始同目录资源根冻结直接资源闭包、一次
   execution、固定冻结审计、最终可见 iframe 保留真实 Canvas/SVG、
   运行时后代回到源码宿主、评论/原生编辑后 iframe 与 execution count 不变且写盘字节不含 runtime
-  marker。冻结后插入换行和同级下移同样必须保留同一 iframe；同代静默改挂静态页
-  仍是停止条件，不能写成已知限制。Edit 成功帧必须同时满足 bootstrap=1、execution=1、交互后 iframe 不替换、
+  marker。  冻结后插入换行和同级下移同样必须保留同一 iframe；同代静默改挂静态页
+  仍是停止条件，不能写成已知限制。冻结还必须排空 MessageChannel/MessagePort，
+  作者源码内联 PNG 不得被当成 PageRoot 截图替身而改挂静态页。Edit 成功帧必须同时满足 bootstrap=1、execution=1、交互后 iframe 不替换、
   真实 canvas/svg>0、Edit 截图/PNG=0。协议/bootstrap 单测拥有资源闭包、一次消费、revoke、CSP 和冻结边界。
   Session 单测还覆盖外部来源切换至托管 V1 时，即使 SHA/Canvas generation
   未变也会发布新的准备路径；而 macOS `/var` 与 `/private/var` 同一文件别名

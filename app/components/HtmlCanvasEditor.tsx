@@ -518,10 +518,7 @@ function runtimeFrameKeepsAuthorPaint(
   documentNode: Document,
   frame: RuntimeFrameContext,
 ): boolean {
-  if (
-    documentNode.querySelectorAll("img[data-pageroot-edit-runtime-snapshot]").length > 0
-    || documentNode.querySelectorAll('img[src^="data:image/png"]').length > 0
-  ) {
+  if (documentNode.querySelectorAll("img[data-pageroot-edit-runtime-snapshot]").length > 0) {
     return false;
   }
   // Host discovery includes every source-empty unique binding, not only

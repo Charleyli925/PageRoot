@@ -16,8 +16,9 @@ once in the final visible, editable iframe, and must keep the script-generated
 real DOM, Canvas and SVG.
 
 “Freeze” only means stopping timers, `requestAnimationFrame`, Observers, author
-event listeners and animations. It does not mean screenshot, rasterization,
-serialization or replacement of the runtime result.
+event listeners, `MessageChannel` / `MessagePort` callbacks and animations. It
+does not mean screenshot, rasterization, serialization or replacement of the
+runtime result.
 
 Edit must not use PNG, JPEG, screenshots, bitmap projection, ChartSpec,
 PageRoot-redrawn SVG, hidden-window capture or any other visual stand-in to
@@ -55,11 +56,19 @@ stop and return to product decision; do not silently convert to screenshots.
   so in-place editing can work.
 - Same-origin `window.parent` access is a **known, explicitly accepted product
   risk**. This requirement must not claim that hostile HTML is isolated.
-- Low-cost boundaries remain: no Node, no preload, no direct IPC, no arbitrary
-  directory read, no arbitrary network, no popup, no worker, no top-level
-  navigation.
-- Supporting hostile HTML is a separate security project. It must not reuse
-  this requirement to restore PNG.
+- Because that iframe is same-origin with the application renderer, author
+  scripts can read `window.parent` and therefore call the renderer-exposed
+  contextBridge APIs (`htmlAIProjects`, `htmlAIIntegrations`, `htmlAIUpdates`
+  and other preload-backed objects). The iframe document itself still has no
+  Node integration and no preload or IPC sender of its own; reaching the parent’s
+  already-exposed APIs is the accepted same-origin cost of in-place editing.
+- Do not add an origin or interposition boundary that would break parent-side
+  editing. Supporting hostile HTML is a separate security project and must not
+  reuse this requirement to restore PNG.
+- Remaining low-cost boundaries: no Node in the iframe, no directory listing
+  or project path on `pageroot-edit-runtime:`, no popup, no worker, no
+  top-level navigation. Arbitrary network stays a deferred security item and
+  must not override P0 representation.
 
 ## Runtime flow
 
@@ -144,13 +153,16 @@ Window-size rules:
   order from `pageroot-edit-runtime:`. Relative CSS, images, fonts and media
   resolve only through that closure.
 - Bootstrap waits 1.2 seconds, performs one final layout/`resize` settle, then
-  stops tracked timers, rAF, listeners, observers and animations, seals runtime
-  descendants and audits source nodes plus approved empty hosts. Success keeps
-  the real Canvas/SVG in that same iframe when at least one approved host
-  contains author Canvas/SVG and no PNG/snapshot substitute exists. Unused
-  empty approved hosts without paint do not by themselves cause static
-  fallback. Only then does Edit install selection, editing, comments and IME.
-  Failure before interaction mounts ordinary static Edit once.
+  stops tracked timers, rAF, listeners, observers, animations and
+  `MessageChannel` / `MessagePort` callbacks, seals runtime descendants and
+  audits source nodes plus approved empty hosts. Success keeps the real
+  Canvas/SVG in that same iframe when at least one approved host contains
+  author Canvas/SVG and no PageRoot PNG/snapshot substitute exists.
+  Source-authored inline PNG/JPEG remain displayed as-is and must not by
+  themselves force static Edit. Unused empty approved hosts without paint do
+  not by themselves cause static fallback. Only then does Edit install
+  selection, editing, comments and IME. Failure before interaction mounts
+  ordinary static Edit once.
 - Edit screenshot/capture/projection count must be 0. There is no Edit-only
   hidden `BrowserWindow`, no `desktop/edit-runtime-capture-owner.mjs`, and no
   `capturePage()` on the Edit path. Review keeps its isolated capture owner.
@@ -194,5 +206,6 @@ back to screenshots.**
 Qualifying ECharts reports paint as live author Canvas/SVG in Edit, at the
 real iframe size, then freeze before editing starts. Charts are no longer a
 second-stretched PNG from a hidden 1440×2400 window. The accepted cost is
-same-origin `window.parent` access from the final Edit iframe. Hostile HTML
+same-origin `window.parent` access from the final Edit iframe, including the
+ability to reach renderer-exposed preload APIs on that parent. Hostile HTML
 is out of scope.

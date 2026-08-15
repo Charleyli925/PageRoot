@@ -63,8 +63,11 @@ Comments + frozen input
   canvasGeneration)`; Main prepares the resource closure only. The first
   visible Edit iframe is the final iframe: it executes ordered classic scripts
   once at the real Edit size, waits 1.2 seconds, performs one layout/`resize`
-  settle, freezes and audits. Success keeps the real Canvas/SVG in that same
-  iframe. A missing grant or failed audit before interaction uses ordinary
+  settle, freezes timers/listeners/observers/animations/MessageChannel ports
+  and audits. Success keeps the real Canvas/SVG in that same
+  iframe. Same-origin `window.parent` access, including renderer-exposed
+  preload APIs, is an accepted in-place-editing cost. A missing grant or failed
+  audit before interaction uses ordinary
   static Edit for that generation. After interaction starts, comments, IME,
   save, native-edit fences, hard breaks and sibling reorder must not replace
   that iframe. A same-generation static remount after interaction is not an
