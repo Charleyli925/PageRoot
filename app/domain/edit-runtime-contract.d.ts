@@ -12,11 +12,6 @@ export const EDIT_AUTHOR_RUNTIME_BUDGET: Readonly<{
   sourceNodeCount: number;
   runtimeSettleMs: number;
   runtimeDeadlineMs: number;
-  snapshotBytes: number;
-  snapshotAggregateBytes: number;
-  snapshotPixels: number;
-  snapshotAggregatePixels: number;
-  snapshotDimension: number;
   orphanSessionTtlMs: number;
 }>;
 
@@ -38,18 +33,6 @@ export type EditRuntimeHostBinding = Readonly<{
   identityAttributes: readonly (readonly [string, string])[];
 }>;
 
-export type EditRuntimeFrozenSnapshot = Readonly<{
-  key: string;
-  pngSha256: string;
-  width: number;
-  height: number;
-  byteLength: number;
-  pngBase64: string;
-  layoutWidth: number;
-  layoutHeight: number;
-  styles: readonly (readonly [string, string])[];
-}>;
-
 export type EditRuntimeGrant = Readonly<{
   contractVersion: number;
   sessionId: string;
@@ -58,10 +41,8 @@ export type EditRuntimeGrant = Readonly<{
   resourceSha256: string;
   scriptCount: number;
   byteLength: number;
-  bootstrapCount: 1;
   canvasGeneration: number;
   hosts: readonly EditRuntimeHostBinding[];
-  snapshots: readonly EditRuntimeFrozenSnapshot[];
 }>;
 
 export type EditRuntimePrepareRequest = Readonly<{

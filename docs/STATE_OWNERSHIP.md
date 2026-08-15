@@ -179,8 +179,8 @@ Rules:
   author-runtime session and Review runtime snapshots are disposable. They do
   not participate in save, switch, submit or close drains, and cannot become a
   second copy of the source HTML. The Edit session has no bitmap/cache/
-  projection state: it selects one initial frozen frame or the static frame and
-  never persists runtime descendants.
+  projection state: it selects one initial frozen runtime frame or the static
+  frame and never persists runtime descendants. Edit screenshot count must be 0.
 - AI review state fields are orthogonal. Page, filter, visibility, navigation,
   page presentation, scroll and zoom actions may update only their own reducer field. Review
   navigation can reveal a hidden panel in both frames but cannot become a

@@ -20,6 +20,9 @@ test("one-shot bootstrap freezes author async work and performs one final source
   assert.match(source, /removeTrackedListeners\(\)/u);
   assert.match(source, /disconnectTrackedObservers\(\)/u);
   assert.match(source, /document\.getAnimations/u);
+  assert.match(source, /closeTrackedPorts\(\)/u);
+  assert.match(source, /MessageChannel/u);
+  assert.match(source, /messagePortClose/u);
   assert.match(source, /document-replacement/u);
   assert.match(source, /runtime-node-outside-host/u);
   assert.match(source, /pointer-events/u);

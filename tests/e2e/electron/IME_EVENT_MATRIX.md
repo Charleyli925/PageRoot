@@ -39,7 +39,7 @@
   迟到空 delivery。
 - 临时结构一经确认，立即走一次且仅一次：
 
-  `logical replacement → SourceTextMap → SourcePatch → 新 SourceIndex → canonical authored DOM → RuntimeDomSourceMap → baseline rebase`
+  `logical replacement → SourceTextMap → SourcePatch → 新 SourceIndex → canonical authored DOM → baseline rebase`
 
 - SourcePatch 前失败：恢复快照，源码和审计记录为零变化。SourcePatch 后 reconcile
   失败：从已提交源码重载，绝不保留临时 DOM。
