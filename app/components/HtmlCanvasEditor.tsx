@@ -1731,15 +1731,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     let title = "这处内容暂时不能直接编辑";
     let message = "页面内容没有改变。你仍可以选择文字，或添加评论说明要怎么改。";
     let code = "canvas_c02_edit_blocked";
-    if (/两种样式的边界|文字属于哪一侧|样式内一个字的位置/iu.test(rawDetail)) {
-      code = "canvas_c03_style_boundary";
-      title = "请把光标移入文字内部";
-      message = "这里正好是两种文字样式的边界，直接输入可能跑到错误一侧。请把光标移到样式内一个字的位置后输入，或添加评论。";
-    } else if (/空的排版元素|输入可能跑到错误位置/iu.test(rawDetail)) {
-      code = "canvas_c04_empty_formatting";
-      title = "这里暂时不能直接改字";
-      message = "这段文字旁有一个空的排版元素，直接输入可能跑到错误位置。你仍可以选中文字，或添加评论交给 AI 处理。";
-    } else if (
+    if (
       /复杂网页结构|暂不支持直接改字|source structure|structural command/iu.test(rawDetail)
     ) {
       code = "canvas_c05_complex_structure";

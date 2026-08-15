@@ -1103,6 +1103,7 @@ export class IslandEditingController {
     if (!this.hasCurrentLease()) return;
     this.hostElement.focus({ preventScroll: true });
     setSelectionValue(this.hostElement, this.baseline.selection ?? this.baselineSelection);
+    this.normalizeCollapsedInsertionAffinity();
     this.emitState();
   }
 
@@ -1122,6 +1123,7 @@ export class IslandEditingController {
     } else {
       setSelectionValue(this.hostElement, priorSelection);
     }
+    this.normalizeCollapsedInsertionAffinity();
     this.emitState();
   }
 
