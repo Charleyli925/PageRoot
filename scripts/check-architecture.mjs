@@ -946,15 +946,60 @@ export async function architectureViolations() {
     !canvasEditor.includes("runtimeAttemptedRef")
     || !canvasEditor.includes("forceStatic: true")
     || !canvasEditor.includes("data-pageroot-edit-runtime-host")
+    || !canvasEditor.includes('mode: "one-shot-runtime"')
+    || !canvasEditor.includes("allow-scripts")
+    || !canvasEditor.includes("EDIT_RUNTIME_FROZEN_ATTRIBUTE")
+    || !canvasEditor.includes("runtimeFrameKeepsAuthorPaint")
+    || /pngBase64|static-runtime-snapshot|mountFrozenRuntimeSnapshots|object-fit:\s*fill/u.test(canvasEditor)
   ) {
     violations.push(
-      "app/components/HtmlCanvasEditor.tsx: one-shot runtime frames must be consumed once and fall back to static source editing",
+      "app/components/HtmlCanvasEditor.tsx: one-shot runtime frames must execute once in the final iframe, keep real canvas/svg, and never mount PNG substitutes",
+    );
+  }
+  const previewSandbox = await readFile(
+    path.join(PRODUCT_ROOT, "app", "components", "html-preview-sandbox.js"),
+    "utf8",
+  );
+  if (
+    !previewSandbox.includes("prepareOneShotRuntimeFrameDocument")
+    || !previewSandbox.includes('mode === "one-shot-runtime"')
+    || previewSandbox.includes("static-runtime-snapshot")
+    || previewSandbox.includes("prepareStaticRuntimeSnapshotFrameDocument")
+  ) {
+    violations.push(
+      "app/components/html-preview-sandbox.js: Edit runtime documents must be one-shot-runtime, not static PNG hosts",
+    );
+  }
+  const desktopMain = await readFile(
+    path.join(PRODUCT_ROOT, "desktop", "main.mjs"),
+    "utf8",
+  );
+  if (
+    /edit-runtime-capture-owner|createEditRuntimeCaptureController|ensureEditRuntimeCaptureController/u.test(desktopMain)
+    || /capturePage\s*\(/u.test(editRuntimeProtocol)
+    || /runtimeHtml|buildRuntimeDocument/u.test(editRuntimeProtocol)
+  ) {
+    violations.push(
+      "desktop Edit runtime must prepare a direct resource session only; capture windows and PNG handoff cannot return",
     );
   }
   const desktopFiles = await sourceFiles(path.join(PRODUCT_ROOT, "desktop"));
   if (desktopFiles.some((filePath) => relative(filePath).includes("edit-runtime-probe"))) {
     violations.push(
       "desktop: retired Edit runtime probe owners cannot return to production",
+    );
+  }
+  if (desktopFiles.some((filePath) => relative(filePath).includes("edit-runtime-capture-owner"))) {
+    violations.push(
+      "desktop: Edit runtime capture owner cannot return to production",
+    );
+  }
+  const reviewCaptureOwner = desktopFiles.find((filePath) => (
+    relative(filePath).includes("runtime-visual-capture-owner")
+  ));
+  if (!reviewCaptureOwner) {
+    violations.push(
+      "desktop/runtime-visual-capture-owner.mjs must remain the Review-only capture owner",
     );
   }
 

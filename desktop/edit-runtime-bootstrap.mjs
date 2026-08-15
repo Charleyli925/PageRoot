@@ -522,6 +522,10 @@ function oneShotRuntimeBootstrap(config) {
       await nextFrame();
       await settle();
       await nextFrame();
+      try {
+        window.dispatchEvent(new Event("resize"));
+      } catch {}
+      await nextFrame();
       await Promise.resolve();
     } catch {
       violation("author-script-failed");

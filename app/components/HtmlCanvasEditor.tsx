@@ -15,8 +15,11 @@ import { flushSync } from "react-dom";
 
 import {
   EDIT_AUTHOR_RUNTIME_BUDGET,
+  EDIT_AUTHOR_RUNTIME_CONTRACT_VERSION,
+  EDIT_RUNTIME_FROZEN_ATTRIBUTE,
   EDIT_RUNTIME_HOST_ATTRIBUTE,
-  EDIT_RUNTIME_OWNED_ATTRIBUTE,
+  EDIT_RUNTIME_RESULT_ATTRIBUTE,
+  isEditRuntimeFrameToken,
   type EditRuntimeGrant,
 } from "../domain/edit-runtime-contract.js";
 import {
@@ -462,7 +465,6 @@ type RuntimeFrameContext = {
   grant: EditRuntimeGrant;
   elementGeneration: number;
   settled: boolean;
-  snapshotsMounted: boolean;
 };
 
 function sameRuntimeGrant(
@@ -479,41 +481,46 @@ function sameRuntimeGrant(
   );
 }
 
-function mountFrozenRuntimeSnapshots(
+function isRuntimeFrameFrozenResult(
+  value: unknown,
+  frame: RuntimeFrameContext,
+): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const result = value as Record<string, unknown>;
+  if (
+    result.state !== "frozen"
+    || result.reason !== null
+    || result.contractVersion !== EDIT_AUTHOR_RUNTIME_CONTRACT_VERSION
+    || result.executionId !== frame.grant.executionId
+    || result.sessionId !== frame.grant.sessionId
+    || !Array.isArray(result.hostKeys)
+    || result.hostKeys.length !== frame.grant.hosts.length
+  ) return false;
+  const expected = new Set(frame.grant.hosts.map((host) => host.key));
+  const received = new Set<string>();
+  for (const key of result.hostKeys) {
+    if (typeof key !== "string" || !expected.has(key) || received.has(key)) return false;
+    received.add(key);
+  }
+  return received.size === expected.size;
+}
+
+function runtimeFrameKeepsAuthorPaint(
   documentNode: Document,
   frame: RuntimeFrameContext,
 ): boolean {
-  if (frame.snapshotsMounted) return true;
-  for (const snapshot of frame.grant.snapshots) {
-    const host = documentNode.querySelector<HTMLElement>(
-      `[${EDIT_RUNTIME_HOST_ATTRIBUTE}="${snapshot.key}"]`,
-    );
-    if (
-      !host
-      || host.getAttribute(EDIT_RUNTIME_HOST_ATTRIBUTE) !== snapshot.key
-      || host.querySelector(`[data-pageroot-edit-runtime-snapshot="${snapshot.key}"]`)
-    ) return false;
-    for (const [property, value] of snapshot.styles) {
-      if (!host.style.getPropertyValue(property)) host.style.setProperty(property, value);
-    }
-    const image = documentNode.createElement("img");
-    image.setAttribute(EDIT_RUNTIME_OWNED_ATTRIBUTE, "snapshot");
-    image.setAttribute("data-pageroot-edit-runtime-snapshot", snapshot.key);
-    image.setAttribute("alt", "");
-    image.setAttribute("aria-hidden", "true");
-    image.setAttribute("draggable", "false");
-    image.tabIndex = -1;
-    image.src = `data:image/png;base64,${snapshot.pngBase64}`;
-    image.style.setProperty("display", "block");
-    image.style.setProperty("width", "100%");
-    image.style.setProperty("height", "100%");
-    image.style.setProperty("object-fit", "fill");
-    image.style.setProperty("pointer-events", "none");
-    image.style.setProperty("user-select", "none");
-    host.appendChild(image);
+  if (
+    documentNode.querySelectorAll("img[data-pageroot-edit-runtime-snapshot]").length > 0
+    || documentNode.querySelectorAll('img[src^="data:image/png"]').length > 0
+  ) {
+    return false;
   }
-  frame.snapshotsMounted = true;
-  return true;
+  return frame.grant.hosts.every((host) => {
+    const element = documentNode.querySelector(
+      `[${EDIT_RUNTIME_HOST_ATTRIBUTE}="${host.key}"]`,
+    );
+    return Boolean(element?.querySelector("canvas, svg"));
+  });
 }
 
 const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProps>(function HtmlCanvasEditor(
@@ -696,6 +703,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const [frameRender, setFrameRender] = useState(() => ({
     html: disableExecutableMarkup(html),
     elementGeneration: 0,
+    runtime: false,
   }));
   const [selection, setSelection] = useState<HtmlCanvasSelection | null>(null);
   const [overlayPosition, setOverlayPosition] = useState<OverlayPosition | null>(null);
@@ -837,7 +845,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     const sourceIndex = sourceIndexRef.current;
     const runtimeGrant = options.forceStatic ? null : editRuntimeGrant;
     let runtimeFrame: RuntimeFrameContext | null = null;
-    const verificationToken = token;
+    let verificationToken = token;
     let prepared: string | null = null;
     if (runtimeGrant && !runtimeAttemptedRef.current) {
       // One component lifetime corresponds to one canvas generation. Once a
@@ -848,25 +856,30 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         sourceIndex?.source === source
         && sourceIndex.sourceSha256 === runtimeGrant.sourceSha256
       ) {
-        const runtimeDocument = prepareCanvasFrameDocument(
-          instrumentedSource,
-          token,
-          {
-            mode: "static-runtime-snapshot",
-            hosts: runtimeGrant.hosts,
-            baseUrl: resolvedBaseHref,
-            editorStyles: EDITOR_DOCUMENT_STYLES,
-          },
-        );
-        if (runtimeDocument) {
-          prepared = runtimeDocument;
-          runtimeFrame = {
-            grant: runtimeGrant,
-            verificationToken: token,
-            elementGeneration: nextFrameGeneration,
-            settled: false,
-            snapshotsMounted: false,
-          };
+        const runtimeToken = `edit-runtime-frame-${runtimeGrant.executionId}`;
+        if (isEditRuntimeFrameToken(runtimeToken)) {
+          const runtimeDocument = prepareCanvasFrameDocument(
+            instrumentedSource,
+            runtimeToken,
+            {
+              mode: "one-shot-runtime",
+              sessionId: runtimeGrant.sessionId,
+              executionId: runtimeGrant.executionId,
+              hosts: runtimeGrant.hosts,
+              baseUrl: resolvedBaseHref,
+              editorStyles: EDITOR_DOCUMENT_STYLES,
+            },
+          );
+          if (runtimeDocument) {
+            prepared = runtimeDocument;
+            verificationToken = runtimeToken;
+            runtimeFrame = {
+              grant: runtimeGrant,
+              verificationToken: runtimeToken,
+              elementGeneration: nextFrameGeneration,
+              settled: false,
+            };
+          }
         }
       }
       if (!runtimeFrame) {
@@ -897,6 +910,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       setFrameRender({
         html: prepared,
         elementGeneration: nextFrameGeneration,
+        runtime: Boolean(runtimeFrame),
       });
     };
     if (options.immediate) {
@@ -3739,9 +3753,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     );
     if (retainsSettledRuntimeFrame && runtimeFrame) {
       // A checkpoint has already rebased this active island against the exact
-      // new source. Keep its frozen snapshots mounted while editing resumes;
-      // replacing this settled one-shot frame would discard them and cannot
-      // execute the author program a second time.
+      // new source. Keep the frozen runtime DOM while editing resumes;
+      // replacing this settled one-shot frame would discard the real Canvas/SVG
+      // and cannot execute the author program a second time.
       pendingHistoryBookmarkRef.current = null;
       pendingHistoryCanonicalFenceRef.current = false;
       containerRef.current?.setAttribute(
@@ -4295,7 +4309,40 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         fallBackToStaticRuntimeFrame(runtimeFrame, "rejected");
         return false;
       }
-      if (!mountFrozenRuntimeSnapshots(documentNode, runtimeFrame)) {
+      const root = documentNode.documentElement;
+      const rawResult = root.getAttribute(EDIT_RUNTIME_RESULT_ATTRIBUTE);
+      const frozen = root.getAttribute(EDIT_RUNTIME_FROZEN_ATTRIBUTE) === "true";
+      if (!frozen) {
+        if (rawResult) {
+          try {
+            const result = JSON.parse(rawResult) as { state?: unknown };
+            if (result.state === "rejected") {
+              fallBackToStaticRuntimeFrame(runtimeFrame, "rejected");
+              return false;
+            }
+            if (result.state === "failed") {
+              fallBackToStaticRuntimeFrame(runtimeFrame, "failed");
+              return false;
+            }
+          } catch {
+            fallBackToStaticRuntimeFrame(runtimeFrame, "rejected");
+            return false;
+          }
+        }
+        return false;
+      }
+      let result: unknown = null;
+      try {
+        result = rawResult ? JSON.parse(rawResult) : null;
+      } catch {
+        fallBackToStaticRuntimeFrame(runtimeFrame, "rejected");
+        return false;
+      }
+      if (!isRuntimeFrameFrozenResult(result, runtimeFrame)) {
+        fallBackToStaticRuntimeFrame(runtimeFrame, "rejected");
+        return false;
+      }
+      if (!runtimeFrameKeepsAuthorPaint(documentNode, runtimeFrame)) {
         fallBackToStaticRuntimeFrame(runtimeFrame, "rejected");
         return false;
       }
@@ -4303,7 +4350,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         runtimeFrame.settled = true;
         containerRef.current?.setAttribute(
           "data-runtime-bootstrap-count",
-          String(runtimeFrame.grant.bootstrapCount),
+          String(documentNode.querySelectorAll("[data-pageroot-edit-runtime-bootstrap]").length),
         );
         onEditRuntimeLoadOutcomeRef.current?.(runtimeFrame.grant, "ready");
       }
@@ -5279,7 +5326,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
               : iframeTitle
         }
         srcDoc={frameRender.html}
-        sandbox="allow-same-origin"
+        sandbox={frameRender.runtime
+          ? "allow-same-origin allow-scripts"
+          : "allow-same-origin"}
         onLoad={(event) => connectFrame(
           event.currentTarget,
           frameRender.elementGeneration,
