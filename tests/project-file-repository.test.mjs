@@ -889,6 +889,66 @@ test("blocked Candidate validation never reserves a Version", async (t) => {
   assert.deepEqual(manifest.versions.map((version) => version.versionId), ["ver_0001"]);
 });
 
+test("createCandidate ignores authored script changes and keeps weak continuity as review", async (t) => {
+  const value = await fixture(t);
+  const base = `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>Scope fixture</title>
+  <script id="shared-script">window.scopeFixture = 1;</script>
+</head>
+<body>
+  <main id="target"><p id="inside">目标正文</p></main>
+  <aside id="outside">目标外正文</aside>
+</body>
+</html>`;
+  const imported = await importSource(value, "scope.html", base);
+
+  const scriptOnly = await value.repository.createCandidate({
+    target: imported.target,
+    requestId: "req_script_only",
+    candidateId: "candidate_script_only_0001",
+    html: base.replace("window.scopeFixture = 1", "window.scopeFixture = 2"),
+    expectedSourceSha256: imported.target.sourceSha256,
+  });
+  assert.equal(scriptOnly.candidate.status, "pending-review");
+  assert.equal(scriptOnly.candidate.assessment.status, "ready");
+  assert.deepEqual(scriptOnly.candidate.assessment.issueCodes, []);
+  assert.equal("executable" in scriptOnly.candidate.assessment, false);
+  assert.equal(
+    "executableSurfaceUnchanged" in scriptOnly.candidate.assessment.health,
+    false,
+  );
+  assert.equal(scriptOnly.candidate.proposedVersionId, "ver_0002");
+
+  await value.repository.rejectCandidate({
+    target: imported.target,
+    candidateId: scriptOnly.candidate.candidateId,
+  });
+
+  const unrelated = await value.repository.createCandidate({
+    target: imported.target,
+    requestId: "req_unrelated_page",
+    candidateId: "candidate_unrelated_0001",
+    html: `<!doctype html><html><head><title>另一页</title><script id="shared-script">window.scopeFixture = 1;</script></head><body><article>全新的内容与结构</article></body></html>`,
+    expectedSourceSha256: imported.target.sourceSha256,
+  });
+  assert.equal(unrelated.candidate.status, "pending-review");
+  assert.equal(unrelated.candidate.assessment.status, "attention");
+  assert.deepEqual(
+    unrelated.candidate.assessment.issueCodes,
+    ["PAGE_CONTINUITY_UNCERTAIN"],
+  );
+  assert.equal(unrelated.candidate.proposedVersionId, "ver_0002");
+  const manifest = await json(path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "manifest.json",
+  ));
+  assert.deepEqual(manifest.versions.map((version) => version.versionId), ["ver_0001"]);
+});
+
 test("runtime authority seals Candidate record and output after review begins", async (t) => {
   const value = await fixture(t);
   const imported = await importSource(value);
@@ -2151,6 +2211,32 @@ test("Registry and managed control paths reject symlinks", async (t) => {
   await symlink(relocatedControlRoot, controlRoot, "dir");
   await assert.rejects(
     controlLink.repository.resolveOpenTarget({ sourcePath: controlImported.target.exactSourcePath }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && (error.code === "PATH_ESCAPES_PROJECT" || error.code === "UNSAFE_DIRECTORY"),
+  );
+});
+
+test("verified project roots are not reused across serial turns after a symlink swap", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "serial-root-cache.html");
+  const first = await value.repository.saveWorkingCopy({
+    target: imported.target,
+    html: html("after first save"),
+    expectedSourceSha256: imported.target.sourceSha256,
+    editRevision: 1,
+  });
+  assert.equal(first.versionCreated, false);
+
+  const relocated = path.join(value.root, "relocated-serial-root");
+  await rename(imported.target.projectRootPath, relocated);
+  await symlink(relocated, imported.target.projectRootPath, "dir");
+  await assert.rejects(
+    value.repository.saveWorkingCopy({
+      target: first.target,
+      html: html("after symlink swap"),
+      expectedSourceSha256: first.target.sourceSha256,
+      editRevision: 2,
+    }),
     (error) => error instanceof ProjectFileRepositoryError
       && (error.code === "PATH_ESCAPES_PROJECT" || error.code === "UNSAFE_DIRECTORY"),
   );

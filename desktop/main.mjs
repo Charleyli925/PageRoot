@@ -505,23 +505,6 @@ function projectStatePath() {
   return path.join(app.getPath("userData"), "html-projects.json");
 }
 
-async function projectStatePathForRead() {
-  const currentPath = projectStatePath();
-  if (e2eUserDataPath) return currentPath;
-  const compatibilityPaths = ["PageRootV2", "YuanYe", "HTML AI 工作台"].map(
-    (directoryName) => (
-      path.join(app.getPath("appData"), directoryName, "html-projects.json")
-    ),
-  );
-  for (const candidate of [currentPath, ...compatibilityPaths]) {
-    const isFile = await stat(candidate)
-      .then((entry) => entry.isFile())
-      .catch(() => false);
-    if (isFile) return candidate;
-  }
-  return currentPath;
-}
-
 function assertHtmlPath(value, label = "HTML 文件路径") {
   if (
     typeof value !== "string"
@@ -686,7 +669,7 @@ function sameManagedWorkingCopyActivation(left, right) {
 async function loadProjectState() {
   if (projectState) return projectState;
 
-  const statePath = await projectStatePathForRead();
+  const statePath = projectStatePath();
   try {
     const stateStats = await stat(statePath);
     if (!stateStats.isFile() || stateStats.size > MAX_STATE_BYTES) {

@@ -9,7 +9,6 @@ const testsRoot = path.join(productRoot, "tests");
 
 const SMOKE_TESTS = new Set([
   "product-contract.test.mjs",
-  "scope-validator.test.mjs",
   "source-patch-engine.test.mjs",
 ]);
 
@@ -46,7 +45,6 @@ const INTEGRATION_TESTS = new Set([
   "qoder-handoff.test.mjs",
   "rendered-html.test.mjs",
   "schema-contract.test.mjs",
-  "scope-validator.test.mjs",
   "targeted-change-schema.test.mjs",
   "user-supplement.test.mjs",
   "version-history-records.test.mjs",

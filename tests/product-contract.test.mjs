@@ -30,6 +30,9 @@ test("desktop and Bridge share one HTML budget with an explicit JSON envelope bu
   for (const source of [main, projectFiles, bridge]) {
     assert.match(source, /product-contract\.mjs/u);
   }
+  assert.doesNotMatch(main, /PageRootV2/);
+  assert.doesNotMatch(main, /YuanYe/);
+  assert.doesNotMatch(main, /HTML AI 工作台/);
   const packageJson = JSON.parse(packageText);
   assert.ok(packageJson.build.files.includes("desktop/product-contract.mjs"));
   assert.ok(
@@ -41,11 +44,11 @@ test("desktop and Bridge share one HTML budget with an explicit JSON envelope bu
   assert.match(afterPack, /bridgeDirectory,\s*["']product-contract\.mjs/u);
 });
 
-test("frontend and ScopeValidator consume the same positional identity primitives", async () => {
-  const [resolver, validator] = await Promise.all([
-    readFile(new URL("../app/lib/target-resolver.js", import.meta.url), "utf8"),
-    readFile(new URL("../scripts/scope-validator.mjs", import.meta.url), "utf8"),
-  ]);
+test("frontend consumes the shared positional identity primitives", async () => {
+  const resolver = await readFile(
+    new URL("../app/lib/target-resolver.js", import.meta.url),
+    "utf8",
+  );
   assert.equal(isPositionalSelector("section:nth-of-type(2)"), true);
   assert.equal(isPositionalSelector("#stable"), false);
   assert.equal(
@@ -63,7 +66,6 @@ test("frontend and ScopeValidator consume the same positional identity primitive
     1,
   );
   assert.match(resolver, /target-identity\.mjs/u);
-  assert.match(validator, /target-identity\.mjs/u);
 });
 
 test("generated working-copy names retain the stable user name safely", () => {
@@ -152,6 +154,7 @@ test("Prompt, protocol, helper, and finalizer agree on frozen input plus control
   assert.match(protocol, /^# PageRoot Change Request 协议$/m);
   assert.match(protocol, /v3 Attempt \/ finalizer CLI `--workspace` \/ `--project-id` 是历史归档/);
   assert.match(protocol, /finalize-attempt\.mjs --project-root/);
+  assert.match(protocol, /record-user-supplement\.mjs --project-root/);
   assert.match(interactionFlow, /^# PageRoot 交互流程$/m);
   assert.match(productRequirements, /^# PageRoot MVP 产品需求$/m);
   assert.doesNotMatch(protocol, /output\/PROJECT\.md/);

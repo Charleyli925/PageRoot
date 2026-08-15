@@ -26,7 +26,7 @@ is not a product invariant.
 | **P0-A** Remove retired validators | Delete dead packaged `scope-validator` wiring and extract the live native-layout fingerprint helpers so later refactors do not keep carrying unused contracts | Done on `main` (#189) |
 | **P0-B** Remove legacy Bridge stack | Split the remaining v3 Bridge so persistence and IPC have one current owner | Done on `main` (#190) |
 | **P1-B** Save-pipeline CAS | Content-addressed save pipeline; depends on P0-B | Done on `main` (#192) |
-| **P1-A** Editable fail-open | The only user-visible relaxation: enter native editing and validate after, not before. Layout fingerprints, style-boundary carets and source-projection drift no longer refuse entry. Checkpoint scope, stale hashes and MutationObserver rollback still fail closed. | Yes |
+| **P1-A** Editable fail-open | The only user-visible relaxation: enter native editing and validate after, not before. Layout fingerprints, style-boundary carets and source-projection drift no longer refuse entry. Checkpoint scope, stale hashes and MutationObserver rollback still fail closed. | Done on `main` (#191) |
 
 ## Governance decisions locked by P1-C
 
@@ -64,12 +64,12 @@ surface without weakening source, dependency, packaging or publication gates.
 P0-A is dead-code removal. It does not change edit entry, patch scope, or
 packaging-closure mechanics.
 
-**Why `scope-validator.mjs` leaves the installer.** The packaged Bridge no
-longer calls it. The only live helper it still needed is
-`rawStartTagAttributes`, which now lives in `html-source-parser.mjs` so
-identity checks keep authored duplicate attributes. The module itself stays in
-source for direct source-patch contract tests; putting it in
-`resources/bridge/` only forced every installer to carry an unused file.
+**Why `scope-validator.mjs` left the installer, then left the tree.** The
+packaged Bridge no longer called it. P0-A moved `rawStartTagAttributes` to
+`html-source-parser.mjs` and kept the module in source for direct-patch
+contract tests. The follow-through PR deletes the source module: live island
+bytes are still checked by `source-patch-engine` at commit time, and the
+retired AI-version scope report is not an acceptance gate.
 
 **Why the preflight file is split, not deleted wholesale.**
 `HtmlCanvasEditor` still uses `nativeLayoutFingerprint`, `sameNativeLayout`,
@@ -149,4 +149,39 @@ remounts and complex-parent text fragments no longer refuse entry.
 Checkpoint scope, stale hashes and MutationObserver rollback still fail
 closed. `isNativeDirectEditRoot` is unchanged: script, style, form roots and
 immutable atoms stay out of native text islands.
+
+The installed-app editability census
+(`scripts/run-installed-text-editability-census.mjs`) still needs a packed
+`.app` of the exact tree. This follow-through does not invent before/after
+percentages. C03 and C04 no longer refuse entry; C05 and C06 still fail closed
+when a unique text node or a reliable caret map cannot be proved.
+
+## Follow-through after #188–#192
+
+These leftovers were not merge blockers. They exist so the five P0/P1 PRs stay
+honest against the original plan.
+
+**Why this follow-through is one PR.** Each leftover is a small deletion or
+cache, not a new product decision. Splitting them would repeat the same
+packaging-closure and impact-map edits. Behavior that users can see is only
+narrower: old appData Recent files are no longer auto-imported, and the
+retired scope validator can no longer be imported by mistake.
+
+| Leftover | Why | What this PR does |
+| --- | --- | --- |
+| `scope-validator.mjs` source | P0-A left it for direct-patch contract tests. Those tests now belong to `source-patch-engine`. Keeping a 2,500-line unused module invites re-wiring it as an AI gate. | Delete the module and `tests/scope-validator.test.mjs`. Keep island-outside checks on the live patch engine. Restore current AI-candidate policy tests in `tests/candidate-assessment.test.mjs` and `createCandidate` persistence. |
+| `lifecycle-core` `project-registry.json` | P0-B stopped the Bridge from reading the v3 registry. `recordUserSupplement` still resolved projects through it. | CLI and helper take `--project-root` / `projectRoot`. Identity is `project.json` vs the directory name. No registry read. |
+| `html-projects.json` appData probes | P0-B dropped Documents workspace roots. Recent-file UI still opened `PageRootV2` / `YuanYe` / `HTML AI 工作台` state files. | Read only current `userData/html-projects.json`. Do not delete user directories. |
+| `#serial()` verified-root cache | P1-B already cached `realpath()` per serial turn. The project-root lstat + non-symlink check still ran on every nested write. | Cache one verified root per `#serial()` turn. Re-check on the next turn so a symlink swap still fails. |
+| P1-A table still said `Yes` | #191 had already merged. | Mark Done on `main` (#191). |
+| npm scripts 54 vs ~45 | Public aliases (`test`, `gate:*`, `task:*`, `package:developer`, `release:mac`) are the supported CLI in `AGENTS.md`. Collapsing them would break the documented workflow. | Keep 54. Document this as the accepted remainder. |
+| Two governance docs | `CODEX_WORKFLOW.md` is task/authorization; `RELEASE_PIPELINE_GOVERNANCE.md` is CI/release evidence. Concatenating them would mix audiences. | Delete the duplicated Candidate/Release paragraphs from `CODEX_WORKFLOW.md` and point at the governance doc. |
+| Editability census numbers | The script requires `--app` pointing at a packed `.app` of this tree. | Do not invent percentages. Run the census against a Developer Preview of this exact tree when packing. |
+
+The 22 uncommitted files in the primary `product` checkout were discarded, not
+ported. Diffing them against `origin/main` showed they would revert #186 copy,
+#187 dedicated-surface hits, and #191 fail-open tests, and one test used a
+personal `/Users/lizexuan/` path. Unique work from that tree was already on
+`main` (#186, #193). A recoverable patch is local only
+(`/tmp/pageroot-product-22-dirty-20260815.patch`) and is not committed.
 

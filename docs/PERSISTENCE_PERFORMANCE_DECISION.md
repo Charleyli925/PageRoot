@@ -71,7 +71,7 @@ P1-B 不改写上方冻结的 `main` 表。它合并 native-edit checkpoint 之�
 
 **为什么合并第二段 700ms。** 岛内编辑已经按 `NATIVE_EDIT_CHECKPOINT_DELAY_MS = 700` 合并成一次 source patch。`DocumentWorkflow` 再等 700ms 才 flush，keypress → disk 就会叠到约 1.4s。Checkpoint 写入现在立即 flush（与 Cmd+S 相同）；非 checkpoint 只保留约 100ms debounce。`PROJECT.md` 仍是 700ms。岛 undo 粒度仍由 checkpoint 定时器决定。
 
-**为什么 8 态收成 2 态。** 旧 park journal 在一次 atomic write 上重复 expected-hash 与 realpath。新保存只在边界与 kernel 各核一次：写 recovery 字节（`prepared`），同目录 tmp + 单次 expected-hash CAS rename，post-write hash 重读，然后 `committed`。Crash recovery 仍能读旧 journal，完成完整旧字节或完整新字节，绝不混写。干净 Working Copy 静默采纳磁盘外部修改；编辑器脏字节与磁盘同时变化则 `WORKING_COPY_CONFLICT`。
+**为什么 8 态收成 2 态。** 旧 park journal 在一次 atomic write 上重复 expected-hash 与 realpath。新保存只在边界与 kernel 各核一次：写 recovery 字节（`prepared`），同目录 tmp + 单次 expected-hash CAS rename，post-write hash 重读，然后 `committed`。Crash recovery 仍能读旧 journal，完成完整旧字节或完整新字节，绝不混写。干净 Working Copy 静默采纳磁盘外部修改；编辑器脏字节与磁盘同时变化则 `WORKING_COPY_CONFLICT`。每个 `#serial()` 回合缓存已验根（lstat、非 symlink、realpath），同一次保存不再对同一根重复走目录；缓存不跨回合，根被换成 symlink 后下一次保存仍失败。
 
 ### 2026-08-15 本分支测量
 

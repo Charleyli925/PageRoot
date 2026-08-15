@@ -110,13 +110,13 @@ const TASK_OWNER_CASES = [
     file: "scripts/workspace-bridge.mjs",
     nodeTests: [
       "tests/attachment-storage.test.mjs",
+      "tests/candidate-assessment.test.mjs",
       "tests/compatibility-decoders.test.mjs",
       "tests/html-source-parser.test.mjs",
       "tests/lifecycle-core.test.mjs",
       "tests/product-contract.test.mjs",
       "tests/project-context-service.test.mjs",
       "tests/project-file-bridge.test.mjs",
-      "tests/scope-validator.test.mjs",
       "tests/targeted-change-schema.test.mjs",
       "tests/user-supplement.test.mjs",
       "tests/workspace-bridge.test.mjs",
@@ -142,7 +142,6 @@ const TASK_OWNER_CASES = [
     nodeTests: [
       "tests/bridge-test-environment.test.mjs",
       "tests/schema-contract.test.mjs",
-      "tests/scope-validator.test.mjs",
       "tests/workspace-bridge.test.mjs",
     ],
     suites: ["typecheck", "lint", "node-targeted"],
@@ -265,7 +264,6 @@ test("Bridge fixture changes select the helper and its schema, scope, and worksp
   const expected = [
     "tests/bridge-test-environment.test.mjs",
     "tests/schema-contract.test.mjs",
-    "tests/scope-validator.test.mjs",
     "tests/workspace-bridge.test.mjs",
   ];
   for (const file of [
@@ -694,7 +692,6 @@ test("Node groups partition every top-level test exactly once outside full", asy
     groups.smoke.map(relative).sort(),
     [
       "product-contract.test.mjs",
-      "scope-validator.test.mjs",
       "source-patch-engine.test.mjs",
     ],
   );
