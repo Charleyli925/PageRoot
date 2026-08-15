@@ -17,9 +17,28 @@ import { createEmptySourceHistory } from "../app/domain/source-history.js";
 
 const SOURCE_PATH = "/tmp/workspace-controller.html";
 const NEXT_SOURCE_PATH = "/tmp/workspace-controller-next.html";
+const EDIT_RUNTIME_SNAPSHOT_BYTES = Buffer.from([
+  137, 80, 78, 71, 13, 10, 26, 10,
+  0, 0, 0, 13, 73, 72, 68, 82,
+  0, 0, 0, 1, 0, 0, 0, 1,
+]);
 
 function sha256(html) {
   return `sha256:${createHash("sha256").update(html).digest("hex")}`;
+}
+
+function editRuntimeSnapshots(request) {
+  return [{
+    key: request.hosts[0].key,
+    pngSha256: sha256("edit-runtime-snapshot"),
+    width: 1,
+    height: 1,
+    byteLength: EDIT_RUNTIME_SNAPSHOT_BYTES.byteLength,
+    pngBase64: EDIT_RUNTIME_SNAPSHOT_BYTES.toString("base64"),
+    layoutWidth: 1,
+    layoutHeight: 1,
+    styles: [],
+  }];
 }
 
 function isRecord(value) {
@@ -61,6 +80,8 @@ function registrationPayload({
   documentId = "document_registration",
   html = "<main>canonical source</main>",
   draft = authoritativeDraft(4),
+  openTarget = null,
+  workingCopyRecovered = false,
 } = {}) {
   const sourceSha256 = sha256(html);
   return {
@@ -80,12 +101,17 @@ function registrationPayload({
       sourceSha256,
     }),
     recoveryIdentity: { token: "recovery_identity" },
+    ...(openTarget ? { openTarget } : {}),
+    ...(workingCopyRecovered ? { workingCopyRecovered: true } : {}),
   };
 }
 
 function createHarness({
   html = "<main>local source</main>",
   bridgeClient = null,
+  projectSource = null,
+  editRuntimePort = null,
+  initialDocument = null,
 } = {}) {
   const projectSession = new ProjectSession();
   projectSession.openLocator(SOURCE_PATH);
@@ -93,6 +119,7 @@ function createHarness({
     html,
     sourceSha256: sha256(html),
   });
+  if (initialDocument) documentSession.update(initialDocument);
   const client = bridgeClient || {
     async ensureProject() {
       return registrationPayload();
@@ -124,6 +151,8 @@ function createHarness({
       hash: { sha256: async (value) => sha256(value) },
       recovery: { replace: (identity) => recovery.push(identity) },
       canvas: { invalidateRenderAcks: () => { canvasInvalidations += 1; } },
+      ...(projectSource ? { projectSource } : {}),
+      ...(editRuntimePort ? { editRuntime: editRuntimePort } : {}),
     },
     clock: { now: () => 1_726_000_000_000 },
   });
@@ -143,6 +172,11 @@ function createHarness({
       return canvasInvalidations;
     },
   };
+}
+
+async function settleAsyncRuntime() {
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
 }
 
 function createProjectRulesHarness() {
@@ -252,6 +286,153 @@ test("workspace controller accepts its injected test Session set and publishes c
   }]);
 });
 
+test("workspace controller publishes one recovered Working Copy signal from Bridge authority", async () => {
+  const harness = createHarness({
+    bridgeClient: {
+      async ensureProject() {
+        return registrationPayload({ workingCopyRecovered: true });
+      },
+      async workspace() {
+        return registrationPayload({ workingCopyRecovered: true });
+      },
+      async saveDraft() {
+        return {};
+      },
+    },
+  });
+
+  const outcome = await harness.controller.ensureRegistered();
+
+  assert.equal(outcome.status, "succeeded");
+  assert.equal(harness.events.length, 1);
+  assert.equal(harness.events[0].type, "registration-published");
+  assert.equal(harness.events[0].workingCopyRecovered, true);
+});
+
+test("managed registration activates the exact V1 Working Copy before publishing Sessions", async () => {
+  const workingCopyPath = "/tmp/PageRoot/项目/managed/managed-V1.html";
+  const managedHtml = "<main>managed V1 source</main>";
+  const target = {
+    projectId: "project_managed",
+    documentId: "document_managed",
+    projectRootPath: "/tmp/PageRoot/项目/managed",
+    targetKind: "working-copy",
+    workingCopyId: "work_ver_0001",
+    versionId: "ver_0001",
+    exactSourcePath: workingCopyPath,
+    sourceSha256: sha256(managedHtml),
+  };
+  const calls = [];
+  const harness = createHarness({
+    html: managedHtml,
+    bridgeClient: {
+      async ensureProject() {
+        return registrationPayload({
+          sourcePath: workingCopyPath,
+          projectId: target.projectId,
+          documentId: target.documentId,
+          html: managedHtml,
+          openTarget: target,
+        });
+      },
+      async workspace() {
+        return registrationPayload({
+          sourcePath: workingCopyPath,
+          projectId: target.projectId,
+          documentId: target.documentId,
+          html: managedHtml,
+          openTarget: target,
+        });
+      },
+      async saveDraft() {
+        return {};
+      },
+    },
+    projectSource: {
+      async activateManagedWorkingCopy(input) {
+        calls.push(input);
+        return {
+          sourcePath: workingCopyPath,
+          sha256: sha256(managedHtml),
+          html: managedHtml,
+        };
+      },
+    },
+  });
+
+  const outcome = await harness.controller.ensureRegistered();
+
+  assert.equal(outcome.status, "succeeded");
+  assert.equal(harness.projectSession.context?.sourcePath, workingCopyPath);
+  assert.equal(harness.projectSession.context?.workingCopyId, "work_ver_0001");
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0], {
+    previousSourcePath: SOURCE_PATH,
+    nextSourcePath: workingCopyPath,
+    expectedSha256: sha256(managedHtml),
+    projectId: "project_managed",
+    documentId: "document_managed",
+    workingCopyId: "work_ver_0001",
+    versionId: "ver_0001",
+    projectRootPath: "/tmp/PageRoot/项目/managed",
+  });
+});
+
+test("managed registration fails closed when its desktop Working Copy activation is unavailable", async () => {
+  const workingCopyPath = "/tmp/PageRoot/项目/unavailable/unavailable-V1.html";
+  const managedHtml = "<main>managed V1 source</main>";
+  const target = {
+    projectId: "project_unavailable",
+    documentId: "document_unavailable",
+    projectRootPath: "/tmp/PageRoot/项目/unavailable",
+    targetKind: "working-copy",
+    workingCopyId: "work_ver_0001",
+    versionId: "ver_0001",
+    exactSourcePath: workingCopyPath,
+    sourceSha256: sha256(managedHtml),
+  };
+  const harness = createHarness({
+    html: managedHtml,
+    bridgeClient: {
+      async ensureProject() {
+        return registrationPayload({
+          sourcePath: workingCopyPath,
+          projectId: target.projectId,
+          documentId: target.documentId,
+          html: managedHtml,
+          openTarget: target,
+        });
+      },
+      async workspace() {
+        return registrationPayload();
+      },
+      async saveDraft() {
+        return {};
+      },
+    },
+  });
+
+  const outcome = await harness.controller.ensureRegistered();
+
+  assert.equal(outcome.status, "rejected");
+  assert.equal(outcome.code, "PROJECT_WORKING_COPY_ACTIVATION_UNAVAILABLE");
+  assert.equal(harness.projectSession.context, null);
+  assert.equal(harness.projectSession.sourcePath, SOURCE_PATH);
+});
+
+test("workspace registration confirms matching canonical bytes without rebuilding the canvas", async () => {
+  const html = "<main>canonical source</main>";
+  const harness = createHarness({ html });
+  const beforeGeneration = harness.documentSession.canvasGeneration;
+
+  const outcome = await harness.controller.ensureRegistered();
+
+  assert.equal(outcome.status, "succeeded");
+  assert.equal(harness.documentSession.canvasGeneration, beforeGeneration);
+  assert.equal(harness.canvasInvalidations, 0);
+  harness.controller.dispose();
+});
+
 test("workspace controller is the sole aggregate Session observer and disconnects on dispose", () => {
   const harness = createHarness();
   const snapshots = [];
@@ -278,6 +459,165 @@ test("workspace controller is the sole aggregate Session observer and disconnect
   harness.documentSession.setPersistence({ state: "idle" });
   assert.equal(harness.controller.getSnapshot(), finalSnapshot);
   unsubscribe();
+});
+
+test("workspace controller owns one Edit runtime attempt per source path and canvas generation", async () => {
+  const html = [
+    "<!doctype html><html><body>",
+    '<main id="chart-host"></main>',
+    '<script>echarts.init(document.querySelector("#chart-host"))</script>',
+    "</body></html>",
+  ].join("");
+  const prepares = [];
+  const revocations = [];
+  const harness = createHarness({
+    html,
+    editRuntimePort: {
+      async prepare(request) {
+        prepares.push(request);
+        const ordinal = prepares.length.toString(16);
+        return {
+          contractVersion: 1,
+          sessionId: ordinal.padStart(32, "0"),
+          executionId: ordinal.padStart(24, "0"),
+          sourceSha256: request.sourceSha256,
+          resourceSha256: sha256(`resource:${ordinal}`),
+          scriptCount: 1,
+          byteLength: 1,
+          bootstrapCount: 1,
+          canvasGeneration: request.canvasGeneration,
+          hosts: request.hosts,
+          snapshots: editRuntimeSnapshots(request),
+        };
+      },
+      async revoke(sessionId) {
+        revocations.push(sessionId);
+        return { revoked: true };
+      },
+    },
+  });
+
+  await settleAsyncRuntime();
+  const preparing = harness.controller.getSnapshot().editRuntime;
+  assert.equal(preparing?.phase, "preparing");
+  assert.equal(prepares.length, 0);
+  assert.equal(harness.controller.startEditAuthorRuntimePreparation({
+    sourceSha256: preparing?.sourceSha256,
+    canvasGeneration: preparing?.canvasGeneration,
+  }), true);
+  await settleAsyncRuntime();
+  const ready = harness.controller.getSnapshot().editRuntime;
+  assert.equal(ready?.phase, "ready");
+  assert.equal(prepares.length, 1);
+  assert.equal(
+    harness.controller.beginEditAuthorRuntime({
+      sessionId: ready?.grant?.sessionId,
+      sourceSha256: ready?.grant?.sourceSha256,
+      canvasGeneration: ready?.grant?.canvasGeneration,
+    }),
+    true,
+  );
+  assert.equal(
+    harness.controller.settleEditAuthorRuntime({
+      sessionId: ready?.grant?.sessionId,
+      sourceSha256: ready?.grant?.sourceSha256,
+      canvasGeneration: ready?.grant?.canvasGeneration,
+      outcome: "ready",
+    }),
+    true,
+  );
+  assert.equal(harness.controller.getSnapshot().editRuntime?.phase, "settled");
+
+  harness.commentSession.setComments([{
+    commentId: "runtime_comment",
+    target: { id: "chart", selector: "#chart-host" },
+  }]);
+  await settleAsyncRuntime();
+  assert.equal(prepares.length, 1, "comments never refresh the runtime key");
+
+  harness.documentSession.reloadCanvas();
+  await settleAsyncRuntime();
+  const nextPreparing = harness.controller.getSnapshot().editRuntime;
+  assert.equal(nextPreparing?.phase, "preparing");
+  assert.equal(harness.controller.startEditAuthorRuntimePreparation({
+    sourceSha256: nextPreparing?.sourceSha256,
+    canvasGeneration: nextPreparing?.canvasGeneration,
+  }), true);
+  await settleAsyncRuntime();
+  assert.equal(prepares.length, 2);
+  assert.equal(revocations.length >= 1, true);
+  harness.controller.dispose();
+});
+
+test("workspace controller starts the one-shot runtime when its initial source becomes authoritative", async () => {
+  const html = [
+    "<!doctype html><html><body>",
+    '<main id="chart-host"></main>',
+    '<script>echarts.init(document.querySelector("#chart-host"))</script>',
+    "</body></html>",
+  ].join("");
+  const prepares = [];
+  const harness = createHarness({
+    html,
+    initialDocument: {
+      editRevision: 1,
+      lastPersistedRevision: 0,
+      persistState: "writing",
+    },
+    editRuntimePort: {
+      async prepare(request) {
+        prepares.push(request);
+        return {
+          contractVersion: 1,
+          sessionId: "1".padStart(32, "0"),
+          executionId: "1".padStart(24, "0"),
+          sourceSha256: request.sourceSha256,
+          resourceSha256: sha256("authoritative-resource"),
+          scriptCount: 1,
+          byteLength: 1,
+          bootstrapCount: 1,
+          canvasGeneration: request.canvasGeneration,
+          hosts: request.hosts,
+          snapshots: editRuntimeSnapshots(request),
+        };
+      },
+      async revoke() {
+        return { revoked: true };
+      },
+    },
+  });
+
+  await settleAsyncRuntime();
+  const beforeAuthority = harness.controller.getSnapshot().editRuntime;
+  assert.equal(beforeAuthority?.phase, "static");
+  assert.equal(beforeAuthority?.lastOutcome, "source-not-authoritative");
+  assert.equal(prepares.length, 0);
+  const canvasGeneration = beforeAuthority?.canvasGeneration;
+
+  harness.documentSession.update({
+    editRevision: 1,
+    lastPersistedRevision: 1,
+    persistState: "idle",
+  });
+  await settleAsyncRuntime();
+
+  const preparing = harness.controller.getSnapshot().editRuntime;
+  assert.equal(preparing?.phase, "preparing");
+  assert.equal(prepares.length, 0);
+  assert.equal(harness.controller.startEditAuthorRuntimePreparation({
+    sourceSha256: preparing?.sourceSha256,
+    canvasGeneration: preparing?.canvasGeneration,
+  }), true);
+  await settleAsyncRuntime();
+  const ready = harness.controller.getSnapshot().editRuntime;
+  assert.equal(prepares.length, 1);
+  assert.equal(ready?.phase, "ready");
+  assert.equal(ready?.canvasGeneration, canvasGeneration);
+
+  harness.documentSession.setSourceSha256(sha256(html + "<!-- source echo -->"));
+  await settleAsyncRuntime();
+  assert.equal(prepares.length, 1);
+  harness.controller.dispose();
 });
 
 test("workspace controller aggregates and dispatches the typed PROJECT.md workflow", async () => {

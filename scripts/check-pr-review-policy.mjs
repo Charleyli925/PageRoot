@@ -4,6 +4,11 @@ import { appendFile, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import {
+  DEFAULT_TRUSTED_ACTOR,
+  parseDraftReviewRequestMarker,
+} from "./draft-review-marker.mjs";
+
 const scriptPath = fileURLToPath(import.meta.url);
 const productRoot = path.resolve(path.dirname(scriptPath), "..");
 const SHA_PATTERN = /^[0-9a-f]{40}$/u;
@@ -13,7 +18,7 @@ const DEFAULT_SETTLE_SECONDS = 30;
 const DEFAULT_TIMEOUT_SECONDS = 15 * 60;
 const DEFAULT_POLL_SECONDS = 15;
 const MAX_REST_PAGES = 20;
-const POLICY_VERSION = "2026-08-12.1";
+const POLICY_VERSION = "2026-08-14.3";
 const PRIORITY_BADGE_PATTERN = /\bP([0-3])\s+Badge\b/giu;
 const PRIORITY_LINE_PATTERN = /(?:^|\r?\n)\s*(?:[-*]\s*)?(?:\*\*)?\[?P([0-3])\]?(?:\*\*)?\s*[:：-]/gimu;
 const REVIEWED_COMMIT_PATTERN = /\*\*Reviewed commit:\*\*\s*`([0-9a-f]{10,40})`/iu;
@@ -30,6 +35,30 @@ function isCodexActor(value) {
 
 function actorLogin(value) {
   return value?.user?.login || value?.author?.login || value?.author || "";
+}
+
+function issueCommentBody(value) {
+  return String(value?.body ?? "");
+}
+
+// A trusted Draft-phase probe request carries an exact-head marker so the
+// final gate can tell a still-open probe round apart from the Ready-triggered
+// review. While that marker is open, no post-Ready completion may satisfy the
+// final policy: a late probe response must never let the gate pass while the
+// Ready-triggered Codex round is still in flight.
+function hasOpenDraftReviewRequest(
+  issueComments,
+  expectedHeadSha,
+  trustedActor = DEFAULT_TRUSTED_ACTOR,
+) {
+  const head = String(expectedHeadSha || "").toLowerCase();
+  const actor = normalizedLogin(trustedActor);
+  if (!SHA_PATTERN.test(head) || !actor) return false;
+  return (issueComments || []).some((comment) => {
+    if (normalizedLogin(actorLogin(comment)) !== actor) return false;
+    const marker = parseDraftReviewRequestMarker(issueCommentBody(comment));
+    return marker !== null && marker.headSha === head;
+  });
 }
 
 function timestamp(value) {
@@ -241,6 +270,7 @@ function completionReactionSignal(reaction, readyAt) {
   if (
     !isCodexActor(actorLogin(reaction))
     || reaction?.content !== "+1"
+    || !Number.isFinite(readyAt)
     || !inOpenInterval(createdAt, readyAt)
   ) return null;
   return Object.freeze({
@@ -261,7 +291,9 @@ export function finalCodexCompletion({
   readyAt,
 } = {}) {
   const expectedHead = String(expectedHeadSha || "").toLowerCase();
-  const readyAtMs = typeof readyAt === "number" ? readyAt : timestamp(readyAt);
+  const readyAtMs = readyAt == null
+    ? null
+    : (typeof readyAt === "number" ? readyAt : timestamp(readyAt));
   if (!SHA_PATTERN.test(expectedHead) || !Number.isFinite(readyAtMs)) return null;
   const completions = [
     ...(reviews || []).map((review) => completionSignal(review, expectedHead, readyAtMs)).filter(Boolean),
@@ -307,6 +339,7 @@ export function evaluateReviewPolicy({
   reviewThreads = [],
   now = new Date(),
   settleSeconds = DEFAULT_SETTLE_SECONDS,
+  advisory = false,
 }) {
   const expectedHead = assertSha(expectedHeadSha, "expectedHeadSha");
   const expectedBase = assertSha(expectedBaseSha, "expectedBaseSha");
@@ -329,14 +362,18 @@ export function evaluateReviewPolicy({
     return policyResult(identity, "blocked", "pull_request_not_open");
   }
   if (pullRequest?.draft === true || pullRequest?.isDraft === true) {
-    return policyResult(identity, "blocked", "pull_request_is_draft");
+    if (!advisory) return policyResult(identity, "blocked", "pull_request_is_draft");
   }
 
   const readyEvent = latestReadyForReviewEvent(timelineEvents);
-  if (!readyEvent) return policyResult(identity, "waiting", "ready_transition_missing");
-  const readyAtMs = timestamp(readyEvent?.created_at || readyEvent?.createdAt);
-  if (!Number.isFinite(readyAtMs)) return policyResult(identity, "blocked", "ready_transition_invalid");
-  const readyAt = new Date(readyAtMs).toISOString();
+  let readyAtMs = null;
+  if (readyEvent) {
+    readyAtMs = timestamp(readyEvent?.created_at || readyEvent?.createdAt);
+    if (!Number.isFinite(readyAtMs)) return policyResult(identity, "blocked", "ready_transition_invalid");
+  } else if (!advisory) {
+    return policyResult(identity, "waiting", "ready_transition_missing");
+  }
+  const readyAt = readyAtMs == null ? null : new Date(readyAtMs).toISOString();
 
   const reviewFindings = latestEffectiveReviews(reviews, { expectedHeadSha: expectedHead })
     .map(classifyReviewState);
@@ -349,25 +386,38 @@ export function evaluateReviewPolicy({
     ...reviewFindings.filter((finding) => finding.state === "non_blocking" && finding.reason !== "review_not_changes_requested"),
     ...threadFindings.filter((finding) => finding.state === "non_blocking"),
   ].map(findingSummary);
-  const completion = finalCodexCompletion({
-    reviews,
-    issueComments,
-    issueReactions,
-    expectedHeadSha: expectedHead,
-    readyAt: readyAtMs,
-  });
+  const draftRequestOpen = !advisory
+    && hasOpenDraftReviewRequest(issueComments, expectedHead);
+  const completion = draftRequestOpen
+    ? null
+    : finalCodexCompletion({
+      reviews,
+      issueComments,
+      issueReactions,
+      expectedHeadSha: expectedHead,
+      readyAt: readyAtMs,
+    });
   const baseFields = {
     readyAt,
     blockingFindings,
     nonBlockingFindings,
     reviewCompletedAt: completion ? new Date(completion.at).toISOString() : null,
     reviewCompletionKind: completion?.kind || null,
-    reviewLatencySeconds: completion ? Math.max(0, Math.round((completion.at - readyAtMs) / 1000)) : null,
+    reviewLatencySeconds: completion && Number.isFinite(readyAtMs)
+      ? Math.max(0, Math.round((completion.at - readyAtMs) / 1000))
+      : null,
   };
   if (blockingFindings.length > 0) {
     return policyResult(identity, "blocked", "blocking_review_finding", baseFields);
   }
-  if (!completion) return policyResult(identity, "waiting", "final_review_in_progress", baseFields);
+  if (!completion) {
+    return policyResult(
+      identity,
+      "waiting",
+      draftRequestOpen ? "draft_review_request_open" : "final_review_in_progress",
+      baseFields,
+    );
+  }
   const settlesAtMs = completion.at + settleSeconds * 1000;
   if (nowMs < settlesAtMs) {
     return policyResult(identity, "waiting", "settle_window", {
@@ -459,7 +509,7 @@ function parseOptions(argv) {
   if (!Number.isInteger(options.pollSeconds) || options.pollSeconds < 1 || options.pollSeconds > 60) {
     throw new Error("--poll-seconds must be an integer from 1 to 60.");
   }
-  if (!new Set(["wait", "revalidate"]).has(options.mode)) throw new Error("--mode must be wait or revalidate.");
+  if (!new Set(["wait", "revalidate", "advisory"]).has(options.mode)) throw new Error("--mode must be wait, revalidate or advisory.");
   resolveOutputPath(options.output);
   return options;
 }
@@ -627,7 +677,41 @@ async function persistResult(result, options) {
   return destination;
 }
 
+async function runAdvisory(options) {
+  const token = process.env[options.tokenEnv] || "";
+  if (!token) throw new Error(`Environment variable ${options.tokenEnv} is required.`);
+  let snapshot;
+  try {
+    snapshot = await collectReviewPolicySnapshot(options, token);
+  } catch (error) {
+    console.warn(`Review advisory evidence is temporarily unavailable: ${error instanceof Error ? error.message : String(error)}`);
+    const unavailable = policyResult({
+      expectedHeadSha: options.expectedHeadSha,
+      currentHeadSha: null,
+      expectedBaseSha: options.expectedBaseSha,
+      currentBaseSha: null,
+    }, "unavailable", "github_evidence_unavailable");
+    await persistResult(unavailable, options);
+    return unavailable;
+  }
+  // Advisory feedback always evaluates the live pair, so a Draft or
+  // non-promoted Pull Request still reports exactly what would happen on
+  // promotion. It never blocks the PR Feedback workflow.
+  const liveHead = pullRequestHeadSha(snapshot.pullRequest) || options.expectedHeadSha;
+  const liveBase = pullRequestBaseSha(snapshot.pullRequest) || options.expectedBaseSha;
+  const result = evaluateReviewPolicy({
+    expectedHeadSha: liveHead,
+    expectedBaseSha: liveBase,
+    ...snapshot,
+    advisory: true,
+    settleSeconds: 0,
+  });
+  await persistResult(result, options);
+  return result;
+}
+
 async function run(options) {
+  if (options.mode === "advisory") return runAdvisory(options);
   const token = process.env[options.tokenEnv] || "";
   if (!token) throw new Error(`Environment variable ${options.tokenEnv} is required.`);
   const deadline = Date.now() + (options.mode === "revalidate" ? 0 : options.timeoutSeconds * 1000);

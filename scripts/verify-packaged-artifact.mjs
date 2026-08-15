@@ -44,6 +44,8 @@ const REQUIRED_BRIDGE_FILES = [
   "workspace-bridge.mjs",
   "finalize-attempt.mjs",
   "lifecycle-core.mjs",
+  "project-file-repository.mjs",
+  "project-file-finalizer.mjs",
   "user-supplement-core.mjs",
   "record-user-supplement.mjs",
   "html-source-parser.mjs",
@@ -114,11 +116,17 @@ const REQUIRED_APP_SOURCE_FILES = [
   "desktop/application-update.mjs",
   "desktop/usage-telemetry.mjs",
   "desktop/preview-protocol.mjs",
+  "desktop/edit-runtime-bootstrap.mjs",
+  "desktop/edit-runtime-protocol.mjs",
+  "desktop/edit-runtime-capture-owner.mjs",
+  "desktop/edit-runtime-preparation-fence.mjs",
   "desktop/runtime-visual-capture-owner.mjs",
+  "app/domain/edit-runtime-contract.js",
   "app/domain/runtime-visual-contract.js",
   "public/brand-logo.png",
 ];
 const RETIRED_EDITOR_ARTIFACTS = [
+  { name: "Edit runtime probe owner", pattern: /edit-runtime-probe-owner/iu },
   { name: "Lexical", pattern: /(?:@lexical\/|\blexical\b)/iu },
   {
     name: "TextFlow",

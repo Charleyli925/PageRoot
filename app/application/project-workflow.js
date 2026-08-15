@@ -1871,6 +1871,9 @@ export class ProjectWorkflow {
       if (workspaceHash && !SHA256.test(workspaceHash)) {
         throw new Error("项目状态返回的源 HTML Hash 无效。");
       }
+      const openTarget = this.#codecs.isRecord(payload.openTarget)
+        ? payload.openTarget
+        : null;
       let preparedTransition = null;
       if (!this.#codecs.sameSourcePath(canonicalSourcePath, activeSource)) {
         if (!mustAdoptSource) {
@@ -1895,6 +1898,7 @@ export class ProjectWorkflow {
           nextProjectId,
           nextDocumentId,
           versionId,
+          openTarget,
         });
         if (!preparedTransition.updatesCurrentProject) return stale({
           operationId,
@@ -1993,6 +1997,7 @@ export class ProjectWorkflow {
           projectId: nextProjectId,
           documentId: nextDocumentId,
           sourcePath: activeSource,
+          ...(openTarget ? { openTarget } : {}),
         });
         if (!context) return stale({ operationId, epoch: activeEpoch, sourcePath: activeSource });
         if (mustAdoptSource || authoritativeHtml !== currentDocument.html) {
@@ -2340,6 +2345,7 @@ export class ProjectWorkflow {
         sourcePath: priorProject.sourcePath,
         projectId: priorProject.projectId,
         documentId: priorProject.documentId,
+        ...(priorProject.openTarget ? { openTarget: priorProject.openTarget } : {}),
       });
     } else if (this.#projectSession.context) {
       locator = this.#projectSession.openLocator(priorProject.sourcePath || null);
@@ -2410,16 +2416,28 @@ export class ProjectWorkflow {
     });
   }
 
-  // VersionWorkflow shares this narrow transition primitive with hydration.
-  // The caller prepares async host work first; this method never publishes a
-  // partial Project/Document/Version tuple.
-  async prepareGeneratedSourceTransition({
+  captureManagedSourceTransitionAuthority() {
+    return this.#captureHydrationAuthority();
+  }
+
+  restoreManagedSourceTransitionAuthority(authority) {
+    if (!authority || typeof authority !== "object") return null;
+    return this.#rollbackHydrationAuthority(authority);
+  }
+
+  // VersionWorkflow shares this narrow transition primitive with Candidate
+  // promotion, historical Working Copy continuation and future Registry
+  // project activation. The caller prepares async host work first; this method
+  // never publishes a partial Project/Document/Version tuple.
+  async prepareManagedSourceTransition({
     previousSourcePath,
     nextSourcePath,
     expectedSha256,
     nextProjectId,
     nextDocumentId,
     versionId,
+    openTarget = null,
+    operationId = null,
   }) {
     const updatesCurrentProject = Boolean(
       (
@@ -2436,20 +2454,39 @@ export class ProjectWorkflow {
         nextSourcePath,
         projectId: nextProjectId,
         documentId: nextDocumentId,
+        openTarget,
         updatesCurrentProject,
         activatedProject: null,
       });
     }
-    if (typeof this.#projectOpenPort.activateGeneratedVersion !== "function") {
-      throw new Error("当前运行环境不能安全切换到生成的新版本文件。");
-    }
-    const activatedProject = await this.#projectOpenPort.activateGeneratedVersion({
-      previousSourcePath,
-      nextSourcePath,
-      expectedSha256,
-      projectId: nextProjectId,
-      versionId,
-    });
+    const isManagedWorkingCopy = Boolean(
+      openTarget
+      && openTarget.targetKind === "working-copy"
+      && String(openTarget.projectId || "") === String(nextProjectId || "")
+      && String(openTarget.documentId || "") === String(nextDocumentId || "")
+      && String(openTarget.workingCopyId || "")
+      && String(openTarget.versionId || "") === String(versionId || "")
+      && String(openTarget.projectRootPath || "")
+    );
+    const activatedProject = isManagedWorkingCopy
+      ? await this.#activateManagedWorkingCopy({
+          previousSourcePath,
+          nextSourcePath,
+          expectedSha256,
+          projectId: nextProjectId,
+          documentId: nextDocumentId,
+          workingCopyId: String(openTarget.workingCopyId),
+          versionId,
+          projectRootPath: String(openTarget.projectRootPath),
+          ...(operationId ? { operationId: String(operationId) } : {}),
+        })
+      : await this.#activateGeneratedVersion({
+          previousSourcePath,
+          nextSourcePath,
+          expectedSha256,
+          projectId: nextProjectId,
+          versionId,
+        });
     if (
       !this.#codecs.sameSourcePath(activatedProject.sourcePath, nextSourcePath)
       || activatedProject.sha256 !== expectedSha256
@@ -2461,12 +2498,33 @@ export class ProjectWorkflow {
       nextSourcePath,
       projectId: nextProjectId,
       documentId: nextDocumentId,
+      openTarget,
       updatesCurrentProject,
       activatedProject,
     });
   }
 
-  commitGeneratedSourceTransition({ prepared, html, sourceSha256, publishVersion }) {
+  async #activateGeneratedVersion(input) {
+    if (typeof this.#projectOpenPort.activateGeneratedVersion !== "function") {
+      throw new Error("当前运行环境不能安全切换到生成的新版本文件。");
+    }
+    return this.#projectOpenPort.activateGeneratedVersion(input);
+  }
+
+  async #activateManagedWorkingCopy(input) {
+    if (typeof this.#projectOpenPort.activateManagedWorkingCopy !== "function") {
+      throw new Error("当前运行环境不能安全切换到托管工作文件。");
+    }
+    return this.#projectOpenPort.activateManagedWorkingCopy(input);
+  }
+
+  commitManagedSourceTransition({
+    prepared,
+    html,
+    sourceSha256,
+    publishVersion = () => {},
+    publishSessions = null,
+  }) {
     if (!prepared.updatesCurrentProject) return null;
     const changesSourcePath = !this.#codecs.sameSourcePath(
       this.#projectSession.sourcePath,
@@ -2485,32 +2543,48 @@ export class ProjectWorkflow {
           sourcePath: prepared.nextSourcePath,
           projectId: prepared.projectId,
           documentId: prepared.documentId,
+          openTarget: prepared.openTarget,
         })
       : this.#projectSession.context || this.#projectSession.register({
           epoch: this.#projectSession.epoch,
           projectId: prepared.projectId,
           documentId: prepared.documentId,
           sourcePath: prepared.nextSourcePath,
+          ...(prepared.openTarget ? { openTarget: prepared.openTarget } : {}),
         });
     if (!transition || !this.#projectSession.context) return null;
 
     // Publication is deliberately synchronous: no consumer can observe a new
-    // Project without the complete Document tuple, Version authority and new
-    // Canvas generation.
+    // Project without the complete Document tuple, Version/Draft/Comment
+    // authority and new Canvas generation.
+    if (changesSourcePath) {
+      this.#documentWorkflow.resetForProjectTransition();
+      this.#commentWorkflow.resetForProjectTransition();
+      this.#projectRulesWorkflow.resetForProjectTransition();
+    }
     this.#documentSession.publishAuthority({
       html,
       sourceSha256,
       pendingWrite: null,
     });
-    publishVersion();
-    this.#canvasPort.invalidateRenderAcks?.();
-    if (changesSourcePath) {
-      this.#documentWorkflow.resetForProjectTransition();
-      this.#commentWorkflow.resetForProjectTransition();
-      this.#projectRulesWorkflow.resetForProjectTransition();
-      this.#draftSession.deactivate();
+    if (typeof publishSessions === "function") {
+      publishSessions(this.#projectSession.context);
+    } else {
+      publishVersion();
+      if (changesSourcePath) this.#draftSession.deactivate();
     }
+    this.#canvasPort.invalidateRenderAcks?.();
     return this.#projectSession.context;
+  }
+
+  // Kept as a compatibility seam for the already-published Candidate route.
+  // New managed source callers use the generic names above.
+  async prepareGeneratedSourceTransition(input) {
+    return this.prepareManagedSourceTransition(input);
+  }
+
+  commitGeneratedSourceTransition(input) {
+    return this.commitManagedSourceTransition(input);
   }
 
   #deferCanvasCommand(kind, run, options = {}) {

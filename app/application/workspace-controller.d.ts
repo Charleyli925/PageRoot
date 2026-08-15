@@ -19,6 +19,10 @@ import type {
 } from "./document-session.js";
 import type { DraftSession } from "./draft-session.js";
 import type {
+  EditAuthorRuntimePort,
+  EditAuthorRuntimeSnapshot,
+} from "./edit-author-runtime-session.js";
+import type {
   ProjectContext,
   ProjectSession,
   ProjectSessionSnapshot,
@@ -91,6 +95,7 @@ export type WorkspaceControllerSnapshot = Readonly<{
   commentSession: CommentSessionSnapshot | null;
   runSession: RunSessionSnapshot | null;
   versionSession: VersionSessionSnapshot | null;
+  editRuntime: EditAuthorRuntimeSnapshot | null;
   comment: CommentWorkflowSnapshot | null;
   projectRules: ProjectRulesSnapshot | null;
   project: ProjectWorkflowSnapshot | null;
@@ -104,6 +109,7 @@ export type WorkspaceEvent =
       context: ProjectContext;
       projectRecordsPath: string | null;
       projectName: string | null;
+      imported?: boolean;
       canonicalSourceAdopted: boolean;
     }>
   | Readonly<{
@@ -115,6 +121,7 @@ export type WorkspaceEvent =
         | "document-direct-edit-recorded"
         | "document-edit-queued"
         | "document-persisted"
+        | "document-open-target-rebound"
         | "document-persistence-failed"
         | "document-authority-reloaded"
         | "document-authority-reload-failed"
@@ -155,6 +162,23 @@ export type RecoveryPort = Readonly<{
 
 export type CanvasAuthorityPort = Readonly<{
   invalidateRenderAcks(): void;
+}>;
+
+export type ProjectSourceActivationPort = Readonly<{
+  activateManagedWorkingCopy(input: Readonly<{
+    previousSourcePath: string;
+    nextSourcePath: string;
+    expectedSha256: string;
+    projectId: string;
+    documentId: string;
+    workingCopyId: string;
+    versionId: string;
+    projectRootPath: string;
+  }>): Promise<Readonly<{
+    sourcePath: string;
+    sha256: string;
+    html: string;
+  }>>;
 }>;
 
 export type ClockPort = Readonly<{
@@ -209,6 +233,8 @@ export type WorkspaceControllerConstruction = Readonly<{
     hash: HashPort;
     recovery?: RecoveryPort;
     canvas?: CanvasAuthorityPort;
+    projectSource?: ProjectSourceActivationPort;
+    editRuntime?: EditAuthorRuntimePort;
   }>;
   documentWorkflow?: Readonly<{
     codecs: DocumentWorkflowCodecs;
@@ -341,6 +367,21 @@ export class WorkspaceController {
   subscribeEvents(listener: (event: WorkspaceEvent) => void): () => void;
   readonly projectHydrating: boolean;
   readonly projectLoadError: string | null;
+  startEditAuthorRuntimePreparation(input: {
+    sourceSha256: string;
+    canvasGeneration: number;
+  }): boolean;
+  beginEditAuthorRuntime(input: {
+    sessionId: string;
+    sourceSha256: string;
+    canvasGeneration: number;
+  }): boolean;
+  settleEditAuthorRuntime(input: {
+    sessionId: string;
+    sourceSha256: string;
+    canvasGeneration: number;
+    outcome: "ready" | "rejected" | "failed";
+  }): boolean;
   getCurrentProjectContext(): ProjectContext | null;
   matchesCurrentProjectContext(context: ProjectContext): boolean;
   reloadDocumentCanvas(): DocumentSessionSnapshot;
@@ -476,6 +517,7 @@ export class WorkspaceController {
   openCommittedVersion(input: Record<string, unknown>): Promise<VersionWorkflowOutcome>;
   viewHistory(input: Record<string, unknown>): Promise<VersionWorkflowOutcome>;
   returnToCurrent(input?: Record<string, unknown>): Promise<VersionWorkflowOutcome>;
+  continueEditingHistoryVersion(input?: Record<string, unknown>): Promise<VersionWorkflowOutcome>;
   ensureRegistered(
     input?: RegistrationInput,
   ): Promise<CommandOutcome<ProjectContext>>;

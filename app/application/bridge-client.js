@@ -3,6 +3,7 @@ const DEFAULT_WRITE_TIMEOUT_MS = 15_000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 60_000;
 const DEFAULT_ATTACHMENT_TIMEOUT_MS = 30_000;
 const DEFAULT_RETRY_DELAY_MS = 180;
+const PROJECT_FILE_STORAGE_VERSION = "4.0.0";
 
 function isRecord(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -180,12 +181,12 @@ export function createBridgeClient({
   return Object.freeze({
     workspace: (sourcePath) => query(
       "/workspace",
-      { sourcePath },
+      { sourcePath, projectStorageVersion: PROJECT_FILE_STORAGE_VERSION },
       "本地项目记录不可用。",
     ),
     source: (sourcePath, { timeoutMs = DEFAULT_READ_TIMEOUT_MS } = {}) => query(
       "/source",
-      { sourcePath },
+      { sourcePath, projectStorageVersion: PROJECT_FILE_STORAGE_VERSION },
       "无法读取当前源 HTML。",
       timeoutMs,
     ),
@@ -256,6 +257,18 @@ export function createBridgeClient({
       "/ready-version/activate",
       body,
       "最新版暂时无法打开。",
+      DEFAULT_REQUEST_TIMEOUT_MS,
+    ),
+    continueEditingHistoryVersion: (body) => command(
+      "/history-version/continue",
+      body,
+      "暂时无法基于这份历史版本继续编辑。",
+      DEFAULT_REQUEST_TIMEOUT_MS,
+    ),
+    confirmEditingHistoryVersion: (body) => command(
+      "/history-version/desktop-confirmed",
+      body,
+      "历史工作文件桌面激活确认暂时没有响应。",
       DEFAULT_REQUEST_TIMEOUT_MS,
     ),
     cancelActiveRun: (body) => command(

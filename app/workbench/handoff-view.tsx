@@ -400,7 +400,7 @@ export function HandoffFooter({
               onClick={onActivateReadyResult}
             >
               <FileHtmlIcon aria-hidden="true" size={18} weight="duotone" />
-              {openingReadyVersion ? "正在打开并核对…" : "直接打开"}
+              {openingReadyVersion ? "正在采纳并核对…" : "采纳并打开"}
             </button>
           ) : null}
         </>

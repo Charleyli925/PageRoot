@@ -1564,7 +1564,7 @@ export default function AiReviewWorkspace({
             onClick={(event) => openConfirmation("accept", event.currentTarget)}
           >
             <CheckCircleIcon aria-hidden="true" size={18} weight="fill" />
-            {accepting ? "正在核对并打开…" : "打开 AI 修改后"}
+            {accepting ? "正在采纳并核对…" : "采纳 AI 修改"}
           </button>
         </WorkbenchHeaderActions>
       </WorkbenchHeaderShell>
@@ -1899,7 +1899,7 @@ export default function AiReviewWorkspace({
             <h2 id="review-confirm-title">
               {confirmationAction === "return"
                 ? `返回 AI 修改前（${beforeLabel}）？`
-                : `打开 AI 修改后（${afterLabel}）？`}
+                : `采纳 AI 修改后（${afterLabel}）？`}
             </h2>
             <div className={styles.confirmDescription} id="review-confirm-description">
               {confirmationAction === "return"
@@ -1909,7 +1909,7 @@ export default function AiReviewWorkspace({
                     <button type="button" onClick={onRevealCandidateHtml}>AI 返回的 HTML 已自动保留，点击在 Finder 中显示。</button>
                   </>
                 : <>
-                    <span>确认后将切换到 AI 修改后的{afterLabel}。</span>
+                    <span>确认后将采纳 AI 修改后的{afterLabel}为正式版本。</span>
                     <span>修改前的 {beforeLabel} 与本轮记录仍会保留，可在历史记录中查看。</span>
                   </>}
             </div>
@@ -1919,7 +1919,7 @@ export default function AiReviewWorkspace({
                 <button ref={continueReviewButtonRef} className={styles.dialogPrimary} type="button" onClick={closeConfirmation}>继续审阅</button>
               </> : <>
                 <button ref={continueReviewButtonRef} className={styles.dialogSecondary} type="button" onClick={closeConfirmation}>继续审阅</button>
-                <button className={styles.dialogPrimary} type="button" onClick={confirmAndContinue}>确认并打开</button>
+                <button className={styles.dialogPrimary} type="button" onClick={confirmAndContinue}>确认并采纳</button>
               </>}
             </div>
           </section>

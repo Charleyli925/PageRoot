@@ -37,6 +37,7 @@ export type RuntimeSnapshotCaptureCandidate = Readonly<{
 }>;
 
 export const RUNTIME_SNAPSHOT_HOST_LIMIT: 32;
+export const EDIT_RUNTIME_HOST_LIMIT: 32;
 
 export function resolveRuntimeSnapshotHosts(options?: {
   beforeHtml?: string;
@@ -48,6 +49,15 @@ export function resolveRuntimeSnapshotHosts(options?: {
   beforeIndex: unknown;
   afterIndex: unknown;
   hosts: readonly RuntimeSnapshotHostPair[];
+}> | null;
+
+export function resolveEditRuntimeHosts(options?: {
+  html?: string;
+  sourceIndex?: unknown;
+  maximum?: number;
+}): Readonly<{
+  sourceIndex: unknown;
+  hosts: readonly RuntimeSnapshotHost[];
 }> | null;
 
 export function runtimeSnapshotCaptureCandidate(

@@ -31,16 +31,22 @@ export function PreviewNavigationBanner({
   detail,
   actionLabel,
   actionDisabled = false,
+  secondaryActionLabel,
+  secondaryActionDisabled = false,
   className,
   onAction,
+  onSecondaryAction,
 }: {
   icon: ReactNode;
   title: ReactNode;
   detail: ReactNode;
   actionLabel: string;
   actionDisabled?: boolean;
+  secondaryActionLabel?: string;
+  secondaryActionDisabled?: boolean;
   className?: string;
   onAction: () => void;
+  onSecondaryAction?: () => void;
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const [focusWithin, setFocusWithin] = useState(false);
@@ -84,6 +90,15 @@ export function PreviewNavigationBanner({
           <small>{detail}</small>
         </span>
       </div>
+      {secondaryActionLabel && onSecondaryAction ? (
+        <button
+          type="button"
+          disabled={secondaryActionDisabled}
+          onClick={onSecondaryAction}
+        >
+          {secondaryActionLabel}
+        </button>
+      ) : null}
       <button
         type="button"
         disabled={actionDisabled}

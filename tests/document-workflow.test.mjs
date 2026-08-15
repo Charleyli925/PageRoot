@@ -308,6 +308,82 @@ test("DocumentWorkflow coalesces a 700ms source write and only accepts exact HTM
   assert.equal(harness.recoveryStore.values.size, 0);
 });
 
+test("DocumentWorkflow rebinds a moved Working Copy before the next autosave", async () => {
+  const before = "<!doctype html><html><body><p>one</p></body></html>";
+  const after = before.replace("one", "two");
+  const final = after.replace("two", "three");
+  const movedPath = "/tmp/project-renamed/document-V1.html";
+  const initialTarget = {
+    projectId: PROJECT_ID,
+    documentId: DOCUMENT_ID,
+    projectRootPath: "/tmp/project-original",
+    targetKind: "working-copy",
+    workingCopyId: "work_ver_0001",
+    versionId: "ver_0001",
+    exactSourcePath: SOURCE_PATH,
+    sourceSha256: sha256(before),
+  };
+  const calls = [];
+  const harness = createHarness({
+    html: before,
+    bridge: {
+      async autosave(body) {
+        calls.push(body);
+        const currentTarget = {
+          ...initialTarget,
+          projectRootPath: "/tmp/project-renamed",
+          exactSourcePath: movedPath,
+          sourceSha256: sha256(body.html),
+        };
+        return {
+          ok: true,
+          content: body.html,
+          sha256: sha256(body.html),
+          persistedRevision: body.editRevision,
+          lastModifiedAt: "2026-08-11T00:00:01.000Z",
+          sourceHistory: sourceHistory({ sourceSha256: sha256(body.html) }),
+          openTarget: currentTarget,
+          activeDraft: {
+            draftRevision: 0,
+            comments: [],
+            changeEvents: [],
+            deletedCommentIds: [],
+          },
+        };
+      },
+    },
+  });
+  const registered = harness.projectSession.register({
+    ...harness.context,
+    openTarget: initialTarget,
+  });
+  assert.equal(registered?.exactSourcePath, SOURCE_PATH);
+  const events = [];
+  harness.workflow.subscribeEvents((event) => events.push(event));
+
+  harness.workflow.enqueueEdit({ html: after });
+  assert.equal((await harness.workflow.flush()).status, "succeeded");
+  assert.equal(harness.projectSession.context?.sourcePath, movedPath);
+  assert.equal(harness.projectSession.context?.projectRootPath, "/tmp/project-renamed");
+  assert.equal(
+    events.find((event) => event.type === "document-open-target-rebound")?.context?.sourcePath,
+    movedPath,
+  );
+
+  harness.workflow.enqueueEdit({ html: final });
+  assert.equal((await harness.workflow.flush()).status, "succeeded");
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1].sourcePath, movedPath);
+  assert.equal(calls[1].exactSourcePath, movedPath);
+  assert.equal(calls[1].projectRootPath, "/tmp/project-renamed");
+  assert.equal(calls[1].expectedSourceSha256, sha256(after));
+});
+
+test("DocumentWorkflow exposes no user-selected moved-project rebinding API", () => {
+  const harness = createHarness();
+  assert.equal("rebindRelocatedOpenTarget" in harness.workflow, false);
+});
+
 test("DocumentWorkflow rejects an unchainable source transaction without publishing the canvas edit", () => {
   const before = "<!doctype html><html><body><p>one</p></body></html>";
   const after = before.replace("one", "two");

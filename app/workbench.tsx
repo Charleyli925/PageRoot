@@ -34,6 +34,7 @@ import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 
 import type {
   HtmlCanvasCommentLayoutState,
+  HtmlCanvasEditRuntimeLoadOutcome,
   HtmlCanvasEditorHandle,
   HtmlCanvasMutation,
   HtmlCanvasSelection,
@@ -41,6 +42,7 @@ import type {
   NativeDeferredCommandAuthority,
   NativeDeferredCommandDiscardReason,
 } from "./components/HtmlCanvasEditor";
+import type { DesktopEditRuntimeApi } from "./components/desktop-edit-runtime-api";
 import AboutPageRootDialog from "./components/AboutPageRootDialog";
 import CancelAiRunDialog from "./components/CancelAiRunDialog";
 import HtmlInteractionPreview, {
@@ -110,6 +112,9 @@ import type { ProjectSessionSnapshot } from "./application/project-session.js";
 import type { RunOperationKind, RunSessionSnapshot } from "./application/run-session.js";
 import type { VersionSessionSnapshot } from "./application/version-session.js";
 import type { SourceHistoryDirection } from "./domain/source-history.js";
+import {
+  EDIT_AUTHOR_RUNTIME_VERIFICATION_DEADLINE_MS,
+} from "./domain/edit-runtime-contract.js";
 import {
   BROWSER_RUNTIME_CAPABILITIES,
   resolveRuntimeCapabilities,
@@ -316,6 +321,7 @@ const INITIAL_DOCUMENT_SNAPSHOT: DocumentSessionSnapshot = {
   hasPendingWrite: false,
   isFlushing: false,
 };
+const EDIT_RUNTIME_PENDING_PHASES = new Set(["preparing", "ready", "running"]);
 const INITIAL_COMMENT_SNAPSHOT: CommentSessionSnapshot<
   CommentItem,
   DirectEditEvent,
@@ -526,11 +532,17 @@ export default function Workbench() {
   const fileRenameInputRef = useRef<HTMLInputElement | null>(null);
   const fileRenameEditingRef = useRef(false);
   const fileRenameBusyRef = useRef(false);
+  const automaticProjectRegistrationRef = useRef("");
+  const projectRecordsPreparationRef = useRef("");
 
   const [workspaceControllerSnapshot, setWorkspaceControllerSnapshot] =
     useState<WorkspaceControllerSnapshot | null>(null);
   const [workspaceController, setWorkspaceController] =
     useState<WorkspaceController | null>(null);
+  const [importedCanvasBase, setImportedCanvasBase] = useState<{
+    managedSourcePath: string;
+    externalSourcePath: string;
+  } | null>(null);
   const currentControllerSnapshot = useCallback(
     () => workspaceControllerRef.current?.getSnapshot() ?? null,
     [],
@@ -579,6 +591,18 @@ export default function Workbench() {
   const projectSnapshot = workspaceControllerSnapshot?.projectSession
     ?? INITIAL_PROJECT_SESSION_SNAPSHOT;
   const { sourcePath, projectId, documentId } = projectSnapshot;
+  // The first durable import changes the ProjectSession source from the
+  // caller-owned HTML to V1's managed Working Copy without replacing the live
+  // DocumentSession canvas. Keep the selected external HTML as the preview
+  // base for that imported Working Copy during this session, so authored
+  // relative resources remain preview-only rather than being copied into or
+  // managed by the v4 Project. A subsequent navigation uses its own source.
+  const canvasSourcePath = (
+    importedCanvasBase
+    && sameLocalSourcePath(sourcePath, importedCanvasBase.managedSourcePath)
+  )
+    ? importedCanvasBase.externalSourcePath
+    : sourcePath || undefined;
   const [projectRecordsPath, setProjectRecordsPath] =
     useState<string | null>(null);
   const [lastModifiedAt, setLastModifiedAt] = useState<string | null>(null);
@@ -671,6 +695,42 @@ export default function Workbench() {
     versionSnapshot.currentBasedOnVersionId;
   const viewMode = versionSnapshot.viewMode;
   const [canvasMode, setCanvasMode] = useState<CanvasMode>("edit");
+  const editRuntimeSnapshot = workspaceControllerSnapshot?.editRuntime ?? null;
+  const editRuntimePhase = editRuntimeSnapshot?.phase || "static";
+  const editRuntimePreparing = (
+    canvasMode === "edit"
+    && editRuntimeSnapshot?.phase === "preparing"
+  );
+  const editRuntimeRenderPending = (
+    canvasMode === "edit"
+    && ["preparing", "ready", "running"].includes(editRuntimePhase)
+  );
+  const editRuntimeGrant = (
+    canvasMode === "edit"
+    && ["ready", "running", "settled"].includes(editRuntimeSnapshot?.phase || "")
+  ) ? editRuntimeSnapshot?.grant ?? null : null;
+  useLayoutEffect(() => {
+    const sourceSha256 = editRuntimeSnapshot?.sourceSha256;
+    const runtimeCanvasGeneration = editRuntimeSnapshot?.canvasGeneration;
+    if (
+      !editRuntimePreparing
+      || !sourceSha256
+      || typeof runtimeCanvasGeneration !== "number"
+      || !Number.isSafeInteger(runtimeCanvasGeneration)
+    ) return;
+    // This runs after the preparing snapshot has committed the loading surface
+    // and retired any static editor. The Session alone still owns the one
+    // attempt; Workbench only acknowledges that it is safe to start it.
+    workspaceControllerRef.current?.startEditAuthorRuntimePreparation({
+      sourceSha256,
+      canvasGeneration: runtimeCanvasGeneration,
+    });
+  }, [
+    editRuntimePreparing,
+    editRuntimeSnapshot?.canvasGeneration,
+    editRuntimeSnapshot?.sourcePath,
+    editRuntimeSnapshot?.sourceSha256,
+  ]);
   const [pageViewContext, setPageViewContext] =
     useState<PageViewContext | null>(null);
   const [interactivePreviewTransport, setInteractivePreviewTransport] =
@@ -704,6 +764,7 @@ export default function Workbench() {
     setCanvasRenderAcks({ edit: null, preview: null });
   }, []);
   useLayoutEffect(() => {
+    const editRuntimeApi: DesktopEditRuntimeApi | undefined = window.htmlAIEditRuntime;
     const controller = createRuntimeWorkspaceController({
       initial: {
         documentHtml: DEFAULT_PROJECT_HTML,
@@ -725,6 +786,31 @@ export default function Workbench() {
       ports: {
         hash: { sha256: browserSha256 },
         canvas: { invalidateRenderAcks: invalidateCanvasRenderAcks },
+        projectSource: {
+          activateManagedWorkingCopy: async (input: {
+            previousSourcePath: string;
+            nextSourcePath: string;
+            expectedSha256: string;
+            projectId: string;
+            documentId: string;
+            workingCopyId: string;
+            versionId: string;
+            projectRootPath: string;
+            operationId?: string;
+          }) => {
+            const activate = window.htmlAIProjects?.activateManagedWorkingCopy;
+            if (!activate) {
+              throw new Error("当前运行环境不能安全切换到托管工作文件。");
+            }
+            return activate(input);
+          },
+        },
+        ...(editRuntimeApi ? {
+          editRuntime: {
+            prepare: (request) => editRuntimeApi.prepare(request),
+            revoke: (sessionId) => editRuntimeApi.revoke(sessionId),
+          },
+        } : {}),
       },
       documentWorkflow: {
         codecs: createDocumentWorkflowCodecs({
@@ -906,6 +992,23 @@ export default function Workbench() {
               if (!activate) throw new Error("当前运行环境不能安全切换生成版本。");
               return activate(input);
             },
+            activateManagedWorkingCopy: async (input: {
+              previousSourcePath: string;
+              nextSourcePath: string;
+              expectedSha256: string;
+              projectId: string;
+              documentId: string;
+              workingCopyId: string;
+              versionId: string;
+              projectRootPath: string;
+              operationId?: string;
+            }) => {
+              const activate = window.htmlAIProjects?.activateManagedWorkingCopy;
+              if (!activate) {
+                throw new Error("当前运行环境不能安全切换到托管工作文件。");
+              }
+              return activate(input);
+            },
             renameSource: async (input: {
               operationId: string;
               sourcePath: string;
@@ -1065,12 +1168,23 @@ export default function Workbench() {
     activeRun?.requestId === "pending"
     && isActiveRunOperationBusy("poll"),
   );
+  // Opening is not complete until the source has either proved its existing
+  // v4 binding or been imported as a new V1. Keeping this in the same
+  // hydration fence prevents comments, edits, renames, and native commands
+  // from racing an automatic V4 registration on a just-opened HTML.
+  const projectRegistrationPending = Boolean(
+    workspaceController
+    && sourcePath
+    && (!projectId || !documentId)
+    && !projectRecordsError,
+  );
   const projectHydrating =
-    workspaceControllerSnapshot?.project?.hydration.phase === "hydrating";
+    workspaceControllerSnapshot?.project?.hydration.phase === "hydrating"
+    || projectRegistrationPending;
   const projectLoadError =
     workspaceControllerSnapshot?.project?.hydration.phase === "failed"
       ? workspaceControllerSnapshot.project.hydration.error
-      : null;
+      : projectRecordsError || null;
   const [startupIssue, setStartupIssue] = useState<StartupIssue | null>(null);
   const [workspaceIssue, setWorkspaceIssue] = useState<WorkspaceIssue | null>(null);
   const [cancelRunConfirmationKey, setCancelRunConfirmationKey] =
@@ -1114,10 +1228,32 @@ export default function Workbench() {
           context: ProjectContext;
           projectRecordsPath: string | null;
           projectName: string | null;
+          imported?: boolean;
+          workingCopyRecovered?: boolean;
         }>;
         if (!workspaceController.matchesCurrentProjectContext(registrationEvent.context)) return;
         setProjectRecordsPath(registrationEvent.projectRecordsPath);
+        setProjectRecordsPreparing(false);
+        setProjectRecordsError("");
         if (registrationEvent.projectName) setProjectName(registrationEvent.projectName);
+        if (registrationEvent.imported) {
+          setToast({
+            title: "已建立托管项目",
+            message: "已创建 V1 工作文件；原始 HTML 保持不变。",
+            tone: "success",
+            disposition: "background-result",
+            dedupeKey: "project-file-imported",
+          });
+        }
+        if (registrationEvent.workingCopyRecovered) {
+          setToast({
+            title: "文件已自动恢复",
+            message: "已采用磁盘中的最新内容。",
+            tone: "success",
+            disposition: "background-result",
+            dedupeKey: "working-copy-recovered",
+          });
+        }
         return;
       }
       if (event.type === "attachment-cleanup-failed") {
@@ -1484,6 +1620,7 @@ export default function Workbench() {
         lastModifiedAt?: unknown;
         events?: unknown;
         mutation?: HtmlCanvasMutation;
+        code?: unknown;
         message?: unknown;
         fatal?: unknown;
       }>;
@@ -1500,6 +1637,63 @@ export default function Workbench() {
               : editPropertyGroup(documentEvent.mutation.property),
           }, documentEvent.context?.projectId || undefined);
         }
+      }
+      if (documentEvent.type === "document-persistence-failed") {
+        const persistenceCode = String(documentEvent.code || "");
+        if (persistenceCode === "REGISTERED_PROJECT_UNAVAILABLE") {
+          setToast({
+            title: "项目暂不可用",
+            message: "修改仍保留；放回原登记位置后自动恢复",
+            tone: "warning",
+            sticky: true,
+            disposition: "inform-in-place",
+            dedupeKey: "registered-project-unavailable",
+          });
+          return;
+        }
+        if (persistenceCode === "WORKING_COPY_UNAVAILABLE") {
+          setToast({
+            title: "文件暂不可用",
+            message: "当前工作文件暂时不可用，修改仍保留。",
+            tone: "warning",
+            sticky: true,
+            disposition: "inform-in-place",
+            dedupeKey: "working-copy-unavailable",
+          });
+          return;
+        }
+        if (persistenceCode === "WORKING_COPY_CONFLICT") {
+          setToast({
+            title: "文件出现内容冲突",
+            message: "磁盘文件与未保存修改都已保留；请先核对内容后再决定如何继续。",
+            tone: "warning",
+            sticky: true,
+            disposition: "user-choice",
+            dedupeKey: "working-copy-content-conflict",
+            action: { id: "retry-project-open", label: "重新选择文件" },
+          });
+          return;
+        }
+        if (persistenceCode === "MANAGED_PATH_AMBIGUOUS") {
+          setToast({
+            title: "无法确定工作文件",
+            message: "检测到多个同等候选文件；修改仍保留，请先恢复唯一文件位置。",
+            tone: "warning",
+            sticky: true,
+            disposition: "user-choice",
+            dedupeKey: "managed-working-copy-ambiguous",
+            action: { id: "retry-project-open", label: "重新选择文件" },
+          });
+        }
+      }
+      if (documentEvent.type === "document-open-target-rebound") {
+        setToast({
+          title: "项目位置已自动恢复",
+          message: "已核对项目身份并继续使用登记项目。",
+          tone: "success",
+          disposition: "background-result",
+          dedupeKey: "registered-project-recovered",
+        });
       }
       if (
         [
@@ -2440,19 +2634,34 @@ export default function Workbench() {
       || !activeSource
       || (currentProject.projectId && currentProject.documentId)
     ) return;
+    const preparationKey = `${epoch}\0${activeSource}`;
+    projectRecordsPreparationRef.current = preparationKey;
+    let registrationPublished = false;
     setProjectRecordsPreparing(true);
     setProjectRecordsError("");
     try {
       const registered = registrationContextFromOutcome(
         await requiredWorkspaceController(workspaceController).ensureRegistered(),
       );
+      registrationPublished = Boolean(registered);
+      if (
+        registered
+        && !sameLocalSourcePath(registered.sourcePath, activeSource)
+      ) {
+        setImportedCanvasBase({
+          managedSourcePath: registered.sourcePath,
+          externalSourcePath: activeSource,
+        });
+      }
+      const settledProject = currentProjectSessionSnapshot();
+      const hydrationPublishedBinding = Boolean(
+        settledProject.projectId && settledProject.documentId,
+      );
       if (
         !registered
-        && currentProjectSessionSnapshot().epoch === epoch
-        && sameLocalSourcePath(
-          currentProjectSessionSnapshot().sourcePath,
-          activeSource,
-        )
+        && !hydrationPublishedBinding
+        && settledProject.epoch === epoch
+        && sameLocalSourcePath(settledProject.sourcePath, activeSource)
       ) {
         throw new Error("项目资料没有完成初始化。");
       }
@@ -2469,17 +2678,44 @@ export default function Workbench() {
         "项目资料暂时无法建立；当前 HTML 和评论仍保留，可在这里重试。",
       ));
     } finally {
+      const settledProject = currentProjectSessionSnapshot();
+      const hasSettledProjectBinding = Boolean(
+        settledProject.projectId && settledProject.documentId,
+      );
       if (
-        currentProjectSessionSnapshot().epoch === epoch
-        && sameLocalSourcePath(
-          currentProjectSessionSnapshot().sourcePath,
-          activeSource,
+        projectRecordsPreparationRef.current === preparationKey
+        && (
+          registrationPublished
+          || hasSettledProjectBinding
+          || (
+            settledProject.epoch === epoch
+            && sameLocalSourcePath(settledProject.sourcePath, activeSource)
+          )
         )
       ) {
         setProjectRecordsPreparing(false);
       }
     }
   }, [currentProjectSessionSnapshot, workspaceController]);
+
+  useEffect(() => {
+    if (
+      !workspaceController
+      || !sourcePath
+      || (projectId && documentId)
+    ) return;
+    const registrationKey = `${projectSnapshot.epoch}\0${sourcePath}`;
+    if (automaticProjectRegistrationRef.current === registrationKey) return;
+    automaticProjectRegistrationRef.current = registrationKey;
+    void prepareProjectRecords();
+  }, [
+    documentId,
+    prepareProjectRecords,
+    projectId,
+    projectSnapshot.epoch,
+    sourcePath,
+    workspaceController,
+  ]);
 
   const verifyCanvasRendered = useCallback(async (
     expectedHtml: string,
@@ -2488,8 +2724,21 @@ export default function Workbench() {
   ): Promise<void> => {
     let expectedGeneration = currentDocumentSessionSnapshot().canvasGeneration;
     const waitForCurrentGeneration = async (): Promise<boolean> => {
-      for (let attempt = 0; attempt < 40; attempt += 1) {
+      let attemptLimit = 40;
+      const runtimeAttemptLimit = Math.ceil(
+        EDIT_AUTHOR_RUNTIME_VERIFICATION_DEADLINE_MS / 25,
+      );
+      for (let attempt = 0; attempt < attemptLimit; attempt += 1) {
         await new Promise<void>((resolve) => window.setTimeout(resolve, 25));
+        if (EDIT_RUNTIME_PENDING_PHASES.has(
+          currentControllerSnapshot()?.editRuntime?.phase || "static",
+        )) {
+          // Main bounds preparation and isolated capture independently. A
+          // final one-shot author frame cannot acknowledge its source until
+          // both serial phases settle; treating that permitted interval as a
+          // failed static render would replace the iframe and execute again.
+          attemptLimit = Math.max(attemptLimit, runtimeAttemptLimit);
+        }
         if (context && !isCurrentProjectContext(context)) {
           throw new Error("项目已切换，停止核对旧项目画布。");
         }
@@ -2522,6 +2771,7 @@ export default function Workbench() {
     throw new Error("画布没有在时限内确认载入目标 HTML。");
   }, [
     acknowledgeCanvasRender,
+    currentControllerSnapshot,
     currentDocumentSessionSnapshot,
     invalidateCanvasRenderAcks,
     isCurrentProjectContext,
@@ -2532,6 +2782,7 @@ export default function Workbench() {
 
   useEffect(() => {
     if (canvasMode !== "edit") return undefined;
+    if (editRuntimeRenderPending) return undefined;
     let cancelled = false;
     const expectedHtml = html;
     const expectedGeneration = canvasGeneration;
@@ -2555,7 +2806,15 @@ export default function Workbench() {
     return () => {
       cancelled = true;
     };
-  }, [acknowledgeCanvasRender, canvasGeneration, canvasMode, currentDocumentSessionSnapshot, html]);
+  }, [
+    acknowledgeCanvasRender,
+    canvasGeneration,
+    canvasMode,
+    currentDocumentSessionSnapshot,
+    editRuntimePhase,
+    editRuntimeRenderPending,
+    html,
+  ]);
 
   const clearAutosaveTimer = useCallback(() => {
     workspaceController?.clearDocumentAutosaveTimer();
@@ -4149,9 +4408,8 @@ export default function Workbench() {
       commentEditResumePendingRef.current = null;
       setEditingCommentId(null);
     }
-    // Opening a composer is the first durable project action for a lazily
-    // registered HTML. Start identity creation before accepting text so crash
-    // recovery and the Bridge draft share one authority.
+    // Project identity starts at file open. Recheck here to serialize a
+    // just-opened composer with any still-pending registration.
     void prepareProjectRecords();
     const recoveredDraftTarget = currentComments.composerTarget;
     if (
@@ -5460,6 +5718,49 @@ export default function Workbench() {
     workspaceController,
   ]);
 
+  const continueEditingHistoryVersion = useCallback(async () => {
+    if (
+      viewMode !== "history"
+      || !viewingVersionId
+      || isViewTransitioning()
+      || runInProgress
+      || projectHydrating
+      || projectLoadError
+      || !workspaceController
+    ) return;
+    const context = captureProjectContext();
+    if (!context) return;
+    const outcome = await requiredWorkspaceController(workspaceController)
+      .continueEditingHistoryVersion({
+        versionId: viewingVersionId,
+        context,
+      });
+    if (outcome.status === "succeeded") {
+      const lastModifiedAt = String(outcome.value.lastModifiedAt || "");
+      if (lastModifiedAt) setLastModifiedAt(lastModifiedAt);
+      setDrawer(null);
+      editorRef.current?.clearSelection();
+      return;
+    }
+    if (outcome.status === "stale") return;
+    setToast({
+      title: "无法基于此版本继续编辑",
+      message: outcome.reason,
+      tone: "error",
+      disposition: "background-result",
+      dedupeKey: "history-continue-editing",
+    });
+  }, [
+    captureProjectContext,
+    isViewTransitioning,
+    projectHydrating,
+    projectLoadError,
+    runInProgress,
+    viewMode,
+    viewingVersionId,
+    workspaceController,
+  ]);
+
   const persistLabel = persistState === "writing"
     ? "正在更新文件…"
     : persistState === "queued"
@@ -6566,6 +6867,14 @@ export default function Workbench() {
           detail={viewingVersion
             ? `只读 HTML 与 ${viewingVersion.comments.length} 条历史评论已在画布中展开`
             : "画布来自精确不可变版本文件"}
+          secondaryActionLabel="基于此版本继续编辑"
+          secondaryActionDisabled={
+            viewTransitioning
+            || runInProgress
+            || projectHydrating
+            || Boolean(projectLoadError)
+          }
+          onSecondaryAction={() => void continueEditingHistoryVersion()}
           actionLabel="回到当前版本"
           actionDisabled={viewTransitioning}
           onAction={() => void returnToCurrent()}
@@ -6582,6 +6891,9 @@ export default function Workbench() {
             {!runtimeCapabilitiesReady ? (
               <div className="canvas-loading" role="status">正在识别运行环境…</div>
             ) : !browserPreviewOnly ? (
+              editRuntimePreparing ? (
+                <div className="canvas-loading" role="status">正在载入源码画布…</div>
+              ) : (
               <Suspense fallback={(
                 <div className="canvas-loading" role="status">正在载入源码画布…</div>
               )}>
@@ -6589,13 +6901,29 @@ export default function Workbench() {
                   key={`editor-authority-${canvasGeneration}`}
                   ref={editorRef}
                   html={html}
-                  sourcePath={sourcePath || undefined}
+                  sourcePath={canvasSourcePath}
                   height={`${canvasDocumentHeight}px`}
                   onChange={handleCanvasChange}
                   onInteraction={() => {
                     if (relinkingTargetRef.current) {
                       relinkSelectionArmedRef.current = true;
                     }
+                  }}
+                  editRuntimeGrant={editRuntimeGrant}
+                  onEditRuntimeLoadStart={(grant) => {
+                    workspaceControllerRef.current?.beginEditAuthorRuntime({
+                      sessionId: grant.sessionId,
+                      sourceSha256: grant.sourceSha256,
+                      canvasGeneration: grant.canvasGeneration,
+                    });
+                  }}
+                  onEditRuntimeLoadOutcome={(grant, outcome: HtmlCanvasEditRuntimeLoadOutcome) => {
+                    workspaceControllerRef.current?.settleEditAuthorRuntime({
+                      sessionId: grant.sessionId,
+                      sourceSha256: grant.sourceSha256,
+                      canvasGeneration: grant.canvasGeneration,
+                      outcome,
+                    });
                   }}
                   onCommentLayout={handleCommentLayout}
                   onSelect={handleCanvasSelection}
@@ -6638,6 +6966,7 @@ export default function Workbench() {
                   enableReorder={!interactionLocked}
                 />
               </Suspense>
+              )
             ) : null}
           </div>
           {canvasMode === "preview" ? (

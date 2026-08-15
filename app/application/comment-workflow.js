@@ -14,11 +14,23 @@ function copyContext(context) {
     || !String(context.documentId || "")
     || !String(context.sourcePath || "")
   ) return null;
+  const target = context.projectRootPath && context.targetKind
+    ? {
+      projectRootPath: String(context.projectRootPath),
+      targetKind: String(context.targetKind),
+      workingCopyId: context.workingCopyId ? String(context.workingCopyId) : null,
+      versionId: context.versionId ? String(context.versionId) : null,
+      exactSourcePath: String(context.exactSourcePath || context.sourcePath),
+      sourceSha256: String(context.sourceSha256 || ""),
+      sessionEpoch: Number(context.sessionEpoch ?? context.epoch),
+    }
+    : {};
   return Object.freeze({
     epoch: Number(context.epoch),
     projectId: String(context.projectId),
     documentId: String(context.documentId),
     sourcePath: String(context.sourcePath),
+    ...target,
   });
 }
 

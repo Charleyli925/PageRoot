@@ -25,6 +25,22 @@ records.
 - `committed-marker.v1.schema.json`
 - `source-history.v1.schema.json`
 
+## v4 project-file records
+
+- `project-identity.v4.schema.json`
+- `project-registry.v4.schema.json`
+- `project-manifest.v4.schema.json`
+- `project-runtime-state.v4.schema.json`
+- `working-copy-state.v4.schema.json`
+- `candidate.v4.schema.json`
+- `promotion-transaction.v4.schema.json`
+
+The Registry is the canonical write whitelist for v4. It records only direct
+children of the configured project root, the registered root path, a root
+filesystem identity used only for same-parent rename recovery, and durable
+pending-import intent. A copied `.pageroot` directory is never registry
+authority.
+
 The v1 suffix here is local to each auxiliary artifact and remains its current
 strict contract. These files are not compatibility readers for old main
 records.

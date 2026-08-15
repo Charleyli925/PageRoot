@@ -1,14 +1,17 @@
 # PageRoot MVP 产品需求
 
-- 状态：v3 单引擎与候选评估合同
+- 状态：v3 引擎合同；桌面打开边界为 v4-only
 - 适用范围：本地 HTML 源码局部编辑、内部 AI 交接、候选健康/连续性检查与版本历史
 - 上位文档：[架构说明](ARCHITECTURE.md)
 - 安全边界：[安全模型](SECURITY_MODEL.md)
 - 验证策略：[测试策略](../tests/TEST_STRATEGY.md)
 - 协议文档：[Change Request 协议](CHANGE_REQUEST_PROTOCOL.md)
 - 交互文档：[交互流程](INTERACTION_FLOW.md)
+- 下一阶段专项 PRD：[版本与项目文件产品需求](VERSION_AND_PROJECT_FILES_PRD.md)
 
 本文描述目标产品，不描述 0.5.x 旧实现。若旧数据、旧说明或旧测试与本文冲突，以目标计划为准。
+
+> 版本、工作文件、AI 候选、项目可见目录和评论附件的下一阶段目标规则，以专项 PRD 为准。桌面打开路径只接受有效 v4 Project；v4 以前的项目状态不迁移、不恢复，也不作为读取回退，所选 HTML 会作为新外部来源建立新的 v4 V1。
 
 ## 1. 产品结论
 
@@ -84,8 +87,8 @@ PageRoot 让用户在真实本地 HTML 上完成两类工作：
 | `documentId` | 源 HTML 身份 |
 | `versionId` | 机器版本 ID，例如 `ver_0009` |
 | `versionOrdinal` | 连续序号，例如 `9` |
-| `versionLabel` | 内部兼容标签，例如 `V9`；界面和工作文件按同一 ordinal 显示为 `V1.8` |
-| `outputRelativePath` | 冻结的 AI 唯一输出路径，例如 `output/仪表盘-V1.8.html`；不由 AI 推导或改名 |
+| `versionLabel` | 用户可读标签，例如 `V9`；界面、正式 Version 与工作文件使用同一 ordinal |
+| `outputRelativePath` | 冻结的 AI 唯一输出路径，例如 `requests/<requestId>/attempts/<attemptId>/output/candidate.html`；不由 AI 推导或改名 |
 | `basedOnVersionId` | 当前提交内容的谱系基础 |
 | `previousVersionId` | 时间线上前一个正式 Version |
 | `requestId` | 本轮用户意图 |
@@ -105,13 +108,13 @@ PageRoot 让用户在真实本地 HTML 上完成两类工作：
 - 从最近项目切换。
 - 在一个项目处理时打开或切换另一个项目。
 
-工作台不负责新建 HTML。首次打开和预览尚未登记的既有 HTML 不创建项目记录或 Version；第一次真实编辑、添加附件、发送给 QoderWork，或用户明确展开“项目资料”查看长期规则与记录文件夹时，才创建 `sourceType=initial` 的 V1。V1 是初始只读基线，不是一次手动保存。
+工作台不负责新建 HTML。每次打开本地 HTML 时，系统先验证它是否属于有效 v4 Project；有效项目按既有身份打开，其他任何状态（包括 v3 及更早状态、损坏 v4 记录和全新 HTML）立即以该 HTML 为外部来源建立新的 v4 Project 与初始 V1。导入不移动、覆盖或改写原始 HTML；v4 以前的项目状态不迁移、不恢复，也不作为读取回退。V1 是初始只读基线，不是一次手动保存。
 
 每个项目拥有稳定 `projectId`，每个源 HTML 拥有稳定 `documentId`。新建项目时，系统以 HTML 文件名（不含扩展名）建立 `displayName`，并生成固定的 `<displayName>__<YYYYMMDD-HHmmss>__<短 projectId>` 目录名。改文件名或移动路径时，产品应通过持久身份和受控重新绑定保持 Document 连续性，不能只依赖文件名匹配，也不重命名已经建立的项目记录目录。
 
 桌面版在当前 HTML 已安全保存、项目空闲且没有冲突时，允许用户双击顶部文件名原位重命名。输入只包含主文件名，现有 `.html/.htm` 后缀和所在目录保持不变；`Enter` 或失焦提交，`Escape` 取消。同名文件不得覆盖。成功重命名只改变当前真实文件路径、桌面活动/最近记录和项目显示名，不改变 HTML 字节、`projectId`、`documentId`、Version 或历史。事务必须有稳定 operation ID、预期源 Hash 和崩溃恢复记录。
 
-初始 Version 的内部标签为 `V1 / ver_0001`，界面显示“版本 1”。第一次有效 AI 成功使用内部 `V2 / ver_0002`，界面显示“版本 2”；之后依次递增。PageRoot 固定把候选 ordinal 映射为文件版本号 `V1.<ordinal - 1>`，并生成 `working/<原用户文件名>-V1.1.html`、`working/<原用户文件名>-V1.2.html` 等工作文件。`input/base/index.html` 是冻结输入的机器名，不是用户文件名；AI 只能写入 Prompt 给出的 `output/<原用户文件名>-V1.x.html`。该文件标签不得当作用户界面的版本身份，也不得回写并破坏严格 v3 Schema。
+初始 Version 的内部 ID 为 `ver_0001`，界面显示“版本 1”，可见工作文件为 `<原用户文件名>-V1.html`。用户采纳第一份有效 AI Candidate 后创建 `ver_0002`、显示“版本 2”，并生成 `<原用户文件名>-V2.html`；之后按同一 ordinal 递增。`input/base/index.html` 是冻结输入的机器名，不是用户文件名；AI 只能写入 Prompt 给出的固定 Attempt 输出 `requests/<requestId>/attempts/<attemptId>/output/candidate.html`。Candidate 在用户采纳前不是正式 Version，该文件路径和标签不得被用作用户界面的版本身份，也不得回写并破坏严格 v4 Project Schema。
 
 ### 5.2 直接编辑与自动写回
 
@@ -266,7 +269,7 @@ v3 TargetRef 保存 label、层级、selector/结构锚点、源码位置、源 
 - 项目规则修改。
 - 再次提交。
 
-历史版本在所有状态下都只读查看，不提供替换当前 HTML 的能力。
+历史版本始终先以只读快照查看，不提供替换当前 HTML 的能力；仅当项目空闲并已精确进入该历史视图时，用户可选择“基于此版本继续编辑”来激活该 Version 原有的受管 Working Copy。该操作不是恢复、替换或改写历史快照。
 
 提交准备流程：
 
@@ -468,6 +471,7 @@ editing
 1. “查看此版本”：进入 `viewMode=history`，从精确不可变路径打开，只读。
 2. “在 Finder 中显示”：定位 `versions/<version-id>/files/index.html`，不打开其他版本或当前工作文件。
 3. “返回当前 HTML”：回到项目当前指向的工作文件。
+4. “基于此版本继续编辑”：只在精确历史视图且项目空闲时可用。Bridge 只接收当前完整项目身份、目标 Version ID 和 operation ID；Repository 必须找到该 Version 唯一原有的 `workingCopyId`，完整验证 Working Copy state、不可变快照和当前工作文件 Hash 后，原子写入 `desktop-pending` 激活回执。缺失、重复或验证失败保持历史只读，不从快照猜测或创建替代文件。
 
 历史模式必须显示：
 
@@ -477,7 +481,7 @@ editing
 [返回当前 HTML]
 ```
 
-历史模式不提供覆盖、替换或恢复当前 HTML 的按钮；Bridge 同样不暴露历史回写路由。
+历史模式不提供覆盖、替换或恢复当前 HTML 的按钮；Bridge 同样不暴露历史 HTML 回写路由。唯一的继续编辑路由只能激活已有受管 Working Copy，且桌面/Bridge/确认响应丢失后的同一回执操作重试必须返回同一 `workingCopyId`。回执提交后不得回滚较新的历史路径；Desktop 与 Bridge 确认成功时才在一个同步发布边界更新 Project、Document、Version、Draft 和 Comment Session，随后才接受新 Canvas 的渲染确认。
 
 ### 5.13 时间语义
 
@@ -641,6 +645,7 @@ Prompt、AI 返回、附件、剪贴板、文件名/路径、账号、电脑序�
 - 新版提示只在新工作文件、不可变快照、画布 Hash 一致且 canonical path 已切换后显示。
 - 历史查看永远只读且只打开精确 Version 路径。
 - 每个历史版本可一键在 Finder 中显示精确 `files/index.html`。
+- “基于此版本继续编辑”只重用该 Version 原有工作文件；已写入历史激活回执后，失败只能同一操作向前恢复，不得把该工作文件回滚为较新的活动 Version。
 - 连续两次 AI 成功后，原始 HTML 与第一份工作文件逐字节不变，项目当前路径指向第二份工作文件。
 - 历史页不提供恢复或覆盖当前 HTML；需要以旧快照开始时，将其作为普通文件登记为新的 Document 与 V1。
 

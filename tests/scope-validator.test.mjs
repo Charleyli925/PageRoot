@@ -977,7 +977,6 @@ test("workspace lifecycle treats comment targets as guidance for every HTML chan
   ];
 
   let readyCaseCount = 0;
-  let nextVersionOrdinal = 2;
   for (const [expectedKind, mutate] of candidateCases) {
     const run = (
       await submitRequest(bridge, {
@@ -999,7 +998,7 @@ test("workspace lifecycle treats comment targets as guidance for every HTML chan
     ).body;
     assert.equal(
       run.candidateVersionId,
-      `ver_${String(nextVersionOrdinal).padStart(4, "0")}`,
+      "ver_0002",
     );
     const base = await readFile(run.inputPath, "utf8");
     await writeAttemptOutput(run, mutate(base));
@@ -1022,7 +1021,11 @@ test("workspace lifecycle treats comment targets as guidance for every HTML chan
     );
     assert.equal(cancelled.response.status, 200);
     assert.equal(cancelled.body.status, "cancelled");
-    nextVersionOrdinal += 1;
+    await assert.rejects(access(join(
+      opened.projectRoot,
+      "versions",
+      run.candidateVersionId,
+    )));
     await assert.rejects(access(join(run.attemptPath, "scope-report.json")));
     await assert.rejects(access(join(run.attemptPath, "validation-review.json")));
     assert.equal(await readFile(sourcePath, "utf8"), frozenSource);
@@ -1058,6 +1061,23 @@ test("workspace lifecycle treats comment targets as guidance for every HTML chan
   assert.equal(accepted.body.status, "ready-to-open");
   assert.equal(accepted.body.versionId, acceptedRun.candidateVersionId);
   assert.equal(accepted.body.candidateAssessment.status, "ready");
+  assert.equal(acceptedRun.candidateVersionId, "ver_0002");
+  const adopted = await bridge.postJson("/ready-version/activate", {
+    sourcePath,
+    projectId: accepted.body.projectId,
+    documentId: accepted.body.documentId,
+    requestId: accepted.body.requestId,
+    attemptId: accepted.body.attemptId,
+    versionId: accepted.body.versionId,
+  });
+  assert.equal(adopted.response.status, 200, JSON.stringify(adopted.body));
+  assert.equal(adopted.body.status, "version-activated");
+  assert.deepEqual(
+    (await readdir(join(opened.projectRoot, "versions")))
+      .filter((name) => /^ver_\d+$/u.test(name))
+      .sort(),
+    ["ver_0001", "ver_0002"],
+  );
 });
 
 test("an unrelated but usable HTML candidate is preserved with mandatory-review attention", async (t) => {
@@ -1125,7 +1145,7 @@ test("an unrelated but usable HTML candidate is preserved with mandatory-review 
   );
   assert.equal(ready.body.versionId, "ver_0002");
   assert.equal(ready.body.currentPath, sourcePath);
-  assert.notEqual(ready.body.workingCopyPath, sourcePath);
+  assert.equal(ready.body.workingCopyPath, sourcePath);
   assert.equal(await readFile(sourcePath, "utf8"), originalHtml);
 
   const persistedAssessment = JSON.parse(
@@ -1198,7 +1218,6 @@ test("workspace lifecycle accepts broad page and script edits without content-ba
   ];
 
   let expectedSourceSha256 = opened.currentHtmlSha256;
-  let nextVersionOrdinal = 2;
   const expectedVersionIds = ["ver_0001"];
   for (const [expectedKind, mutate] of candidateCases) {
     const run = (
@@ -1219,8 +1238,7 @@ test("workspace lifecycle accepts broad page and script edits without content-ba
         ],
       })
     ).body;
-    const expectedCandidateVersionId =
-      `ver_${String(nextVersionOrdinal).padStart(4, "0")}`;
+    const expectedCandidateVersionId = "ver_0002";
     assert.equal(run.candidateVersionId, expectedCandidateVersionId, expectedKind);
     const frozenHtml = await readFile(run.inputPath, "utf8");
     await writeAttemptOutput(run, mutate(frozenHtml));
@@ -1235,7 +1253,6 @@ test("workspace lifecycle accepts broad page and script edits without content-ba
       access(run.outputPath),
       access(run.completionPath),
       access(assessmentPath),
-      access(outcomePath),
     ]);
     const persistedAssessment = JSON.parse(
       await readFile(assessmentPath, "utf8"),
@@ -1254,8 +1271,7 @@ test("workspace lifecycle accepts broad page and script edits without content-ba
     );
     assert.equal(cancelled.response.status, 200, expectedKind);
     assert.equal(cancelled.body.status, "cancelled", expectedKind);
-    expectedVersionIds.push(run.candidateVersionId);
-    nextVersionOrdinal += 1;
+    await access(outcomePath);
     const persistedOutcome = JSON.parse(
       await readFile(outcomePath, "utf8"),
     );
@@ -1299,7 +1315,7 @@ test("workspace lifecycle accepts broad page and script edits without content-ba
       ],
     })
   ).body;
-  const acceptedVersionId = `ver_${String(nextVersionOrdinal).padStart(4, "0")}`;
+  const acceptedVersionId = "ver_0002";
   assert.equal(acceptedRun.candidateVersionId, acceptedVersionId);
   const acceptedBase = await readFile(acceptedRun.inputPath, "utf8");
   await writeAttemptOutput(
@@ -1322,6 +1338,22 @@ test("workspace lifecycle accepts broad page and script edits without content-ba
     (await readdir(
       join(opened.projectRoot, "versions"),
     )).filter((name) => /^ver_\d+$/.test(name)).length,
-    expectedVersionIds.length + 1,
+    expectedVersionIds.length,
+  );
+  const adopted = await bridge.postJson("/ready-version/activate", {
+    sourcePath,
+    projectId: accepted.body.projectId,
+    documentId: accepted.body.documentId,
+    requestId: accepted.body.requestId,
+    attemptId: accepted.body.attemptId,
+    versionId: accepted.body.versionId,
+  });
+  assert.equal(adopted.response.status, 200, JSON.stringify(adopted.body));
+  assert.equal(adopted.body.status, "version-activated");
+  assert.deepEqual(
+    (await readdir(join(opened.projectRoot, "versions")))
+      .filter((name) => /^ver_\d+$/.test(name))
+      .sort(),
+    ["ver_0001", "ver_0002"],
   );
 });

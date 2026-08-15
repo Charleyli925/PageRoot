@@ -100,6 +100,8 @@ test("release commands use one automated artifact lane with full tests and packa
   assert.match(verifier, /app\.asar/);
   assert.match(verifier, /finalize-attempt\.mjs/);
   assert.match(verifier, /lifecycle-core\.mjs/);
+  assert.match(verifier, /project-file-repository\.mjs/);
+  assert.match(verifier, /project-file-finalizer\.mjs/);
   assert.match(verifier, /html-source-parser\.mjs/);
   assert.match(verifier, /scope-validator\.mjs/);
   assert.match(verifier, /packaged Bridge dependency smoke/);
@@ -273,7 +275,7 @@ test("the app-bundle gate validates app.asar, Bridge scripts, schemas and plist 
   });
   const result = await verifySyntheticAppBundle(fixture);
   assert.equal(result.version, "0.7.0");
-  assert.equal(result.asarFileCount, 25);
+  assert.equal(result.asarFileCount, 30);
   assert.equal(result.schemaFileCount, 5);
   assert.equal(result.legalResourceCount, 5);
   assert.deepEqual(result.applicationUpdate, {

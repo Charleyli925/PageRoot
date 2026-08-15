@@ -3,6 +3,7 @@ import { CommentSession } from "./comment-session.js";
 import { CommentWorkflow } from "./comment-workflow.js";
 import { DocumentSession } from "./document-session.js";
 import { DocumentWorkflow } from "./document-workflow.js";
+import { EditAuthorRuntimeSession } from "./edit-author-runtime-session.js";
 import { DraftSession } from "./draft-session.js";
 import { DrainCoordinator } from "./drain-coordinator.js";
 import { ExternalFileOpenSession } from "./external-file-open-session.js";
@@ -201,12 +202,15 @@ export class WorkspaceController {
   #commentSession;
   #draftSession;
   #versionSession;
+  #editRuntimeSession = null;
+  #editRuntimeUnsubscribe = null;
   #sourceHistorySession;
   #runSession = null;
   #codecs;
   #hashPort;
   #recoveryPort;
   #canvasPort;
+  #projectSourcePort;
   #clock;
   #drainCoordinator = new DrainCoordinator();
   #documentWorkflow = null;
@@ -229,6 +233,7 @@ export class WorkspaceController {
   #commentSessionSnapshot = null;
   #runSessionSnapshot = null;
   #versionSessionSnapshot = null;
+  #editRuntimeSnapshot = null;
   #projectSnapshot = null;
   #projectRulesSnapshot = null;
   #runSnapshot = null;
@@ -240,6 +245,7 @@ export class WorkspaceController {
     commentSession: null,
     runSession: null,
     versionSession: null,
+    editRuntime: null,
     comment: null,
     projectRules: null,
     project: null,
@@ -316,6 +322,9 @@ export class WorkspaceController {
     this.#commentSession = commentSession;
     this.#draftSession = draftSession;
     this.#versionSession = versionSession;
+    this.#editRuntimeSession = new EditAuthorRuntimeSession({
+      port: ports.editRuntime || null,
+    });
     this.#sourceHistorySession = sourceHistorySession;
     this.#runSession = runSessions[0] || null;
     this.#projectSessionSnapshot = projectSession.snapshot;
@@ -323,16 +332,26 @@ export class WorkspaceController {
     this.#commentSessionSnapshot = commentSession.snapshot;
     this.#runSessionSnapshot = this.#runSession?.snapshot || null;
     this.#versionSessionSnapshot = versionSession.snapshot;
+    this.#editRuntimeSnapshot = this.#editRuntimeSession.snapshot;
     this.#codecs = createWorkspaceControllerCodecs(codecs);
     this.#hashPort = ports.hash;
     this.#recoveryPort = ports.recovery || { replace: () => {} };
     this.#canvasPort = ports.canvas || { invalidateRenderAcks: () => {} };
+    this.#projectSourcePort = ports.projectSource || null;
     if (typeof this.#recoveryPort.replace !== "function") {
       throw new TypeError("WorkspaceController RecoveryPort must provide replace.");
     }
     if (typeof this.#canvasPort.invalidateRenderAcks !== "function") {
       throw new TypeError(
         "WorkspaceController CanvasAuthorityPort must provide invalidateRenderAcks.",
+      );
+    }
+    if (
+      this.#projectSourcePort
+      && typeof this.#projectSourcePort.activateManagedWorkingCopy !== "function"
+    ) {
+      throw new TypeError(
+        "WorkspaceController ProjectSourcePort must provide activateManagedWorkingCopy.",
       );
     }
     this.#clock = clock;
@@ -361,6 +380,36 @@ export class WorkspaceController {
       });
       this.#documentWorkflowUnsubscribe = this.#documentWorkflow.subscribeEvents(
         (event) => {
+          if (
+            event?.type === "document-open-target-rebound"
+            && event.context
+            && this.#projectSession.matches(event.context)
+          ) {
+            const authoritativeDraft = this.#codecs.isRecord(event.activeDraft)
+              ? event.activeDraft
+              : {};
+            const revision = this.#codecs.authoritativeDraftRevision(
+              authoritativeDraft,
+            );
+            if (typeof this.#draftSession.activate === "function") {
+              this.#draftSession.activate(
+                event.context,
+                revision,
+                authoritativeDraft,
+              );
+            } else {
+              this.#draftSession.replaceAuthority(
+                event.context,
+                revision,
+                authoritativeDraft,
+              );
+            }
+            this.#commentWorkflow?.reconcileAuthority();
+            this.#emitEvent({
+              type: "draft-authority-rebound",
+              context: event.context,
+            });
+          }
           if (
             event?.fatal
             && [
@@ -538,6 +587,12 @@ export class WorkspaceController {
       this.#versionWorkflow.subscribeEvents((event) => this.#emitEvent(event));
     }
     this.#observeSessionSnapshots();
+    this.#editRuntimeUnsubscribe = this.#editRuntimeSession.subscribe((snapshot) => {
+      if (this.#disposed) return;
+      this.#editRuntimeSnapshot = snapshot;
+      this.#publishAggregateSnapshot();
+    });
+    this.#refreshEditAuthorRuntime();
     this.#publishAggregateSnapshot();
   }
 
@@ -573,6 +628,10 @@ export class WorkspaceController {
     this.#commentSession.setObserver(null);
     this.#runSession?.setObserver(null);
     this.#versionSession.setObserver(null);
+    this.#editRuntimeUnsubscribe?.();
+    this.#editRuntimeUnsubscribe = null;
+    this.#editRuntimeSession?.dispose();
+    this.#editRuntimeSession = null;
     this.#versionWorkflowUnsubscribe?.();
     this.#versionWorkflowUnsubscribe = null;
     this.#versionWorkflow?.dispose();
@@ -615,6 +674,18 @@ export class WorkspaceController {
 
   get projectLoadError() {
     return this.#projectWorkflow?.projectLoadError || null;
+  }
+
+  startEditAuthorRuntimePreparation(input) {
+    return this.#editRuntimeSession?.startPreparation(input) || false;
+  }
+
+  beginEditAuthorRuntime(input) {
+    return this.#editRuntimeSession?.beginRuntime(input) || false;
+  }
+
+  settleEditAuthorRuntime(input) {
+    return this.#editRuntimeSession?.settleRuntime(input) || false;
   }
 
   getCurrentProjectContext() {
@@ -835,6 +906,10 @@ export class WorkspaceController {
     return this.#requireVersionWorkflow().returnToCurrent(input);
   }
 
+  continueEditingHistoryVersion(input) {
+    return this.#requireVersionWorkflow().continueEditingHistoryVersion(input);
+  }
+
   enqueueDocumentEdit(input) {
     return this.#requireDocumentWorkflow().enqueueEdit(input);
   }
@@ -1041,7 +1116,7 @@ export class WorkspaceController {
     });
     const registration = existingContext
       ? this.#restoreDraftAuthority({ existingContext, activeSource, identity })
-      : this.#createRegistration({
+        : this.#createRegistration({
           activeSource,
           expectedHash,
           adoptCanonicalSource,
@@ -1085,6 +1160,7 @@ export class WorkspaceController {
       commentSession: this.#commentSessionSnapshot,
       runSession: this.#runSessionSnapshot,
       versionSession: this.#versionSessionSnapshot,
+      editRuntime: this.#editRuntimeSnapshot,
       comment: this.#commentWorkflow?.getSnapshot() || null,
       projectRules: this.#projectRulesSnapshot,
       project: this.#projectSnapshot,
@@ -1116,11 +1192,13 @@ export class WorkspaceController {
     this.#projectSession.setObserver((snapshot) => {
       if (this.#disposed) return;
       this.#projectSessionSnapshot = snapshot;
+      this.#refreshEditAuthorRuntime();
       this.#publishAggregateSnapshot();
     });
     this.#documentSession.setObserver((snapshot) => {
       if (this.#disposed) return;
       this.#documentSessionSnapshot = snapshot;
+      this.#refreshEditAuthorRuntime();
       this.#publishAggregateSnapshot();
     });
     this.#commentSession.setObserver((snapshot) => {
@@ -1137,6 +1215,23 @@ export class WorkspaceController {
       if (this.#disposed) return;
       this.#versionSessionSnapshot = snapshot;
       this.#publishAggregateSnapshot();
+    });
+  }
+
+  #refreshEditAuthorRuntime() {
+    if (!this.#editRuntimeSession) return;
+    const document = this.#documentSession.snapshot;
+    const sourcePath = this.#projectSession.sourcePath;
+    this.#editRuntimeSession.refresh({
+      html: document.html,
+      sourceSha256: document.sourceSha256,
+      canvasGeneration: document.canvasGeneration,
+      sourcePath,
+      sourceIsAuthoritative: Boolean(
+        sourcePath
+        && document.editRevision === document.lastPersistedRevision
+        && document.persistState === "idle"
+      ),
     });
   }
 
@@ -1209,6 +1304,7 @@ export class WorkspaceController {
       const payload = await this.#bridgeClient.ensureProject({
         sourcePath: activeSource,
         expectedSourceSha256: expectedHash,
+        projectStorageVersion: "4.0.0",
       });
       if (payload.ok === false) {
         return rejected(
@@ -1270,27 +1366,115 @@ export class WorkspaceController {
         ? payload.project
         : {};
       const paths = this.#codecs.isRecord(payload.paths) ? payload.paths : {};
+      const openTarget = this.#codecs.isRecord(payload.openTarget)
+        ? payload.openTarget
+        : null;
+      const registeredSourcePath = String(
+        openTarget?.exactSourcePath || payload.sourcePath || activeSource,
+      );
+      const requiresManagedWorkingCopyActivation = Boolean(
+        openTarget
+        && !this.#codecs.sameSourcePath(registeredSourcePath, activeSource),
+      );
+      if (requiresManagedWorkingCopyActivation) {
+        if (
+          openTarget.targetKind !== "working-copy"
+          || String(openTarget.projectId || "") !== nextProjectId
+          || String(openTarget.documentId || "") !== nextDocumentId
+          || !String(openTarget.workingCopyId || "")
+          || !String(openTarget.versionId || "")
+          || !String(openTarget.projectRootPath || "")
+        ) {
+          return rejected(
+            "PROJECT_REGISTRATION_OPEN_TARGET_INVALID",
+            "新项目缺少可验证的工作文件身份，未保存修改仍保留在当前页面。",
+          );
+        }
+        if (!this.#projectSourcePort) {
+          return rejected(
+            "PROJECT_WORKING_COPY_ACTIVATION_UNAVAILABLE",
+            "当前运行环境不能切换到新建立的工作文件；未保存修改仍保留在当前页面。",
+          );
+        }
+        const activated = await this.#projectSourcePort.activateManagedWorkingCopy({
+          previousSourcePath: activeSource,
+          nextSourcePath: registeredSourcePath,
+          expectedSha256: nextSourceSha256,
+          projectId: nextProjectId,
+          documentId: nextDocumentId,
+          workingCopyId: String(openTarget.workingCopyId),
+          versionId: String(openTarget.versionId),
+          projectRootPath: String(openTarget.projectRootPath),
+        });
+        if (!this.#isCurrentLocator(identity)) return stale(identity);
+        if (
+          !this.#codecs.isRecord(activated)
+          || !this.#codecs.sameSourcePath(
+            String(activated.sourcePath || ""),
+            registeredSourcePath,
+          )
+          || String(activated.sha256 || "") !== nextSourceSha256
+          || typeof activated.html !== "string"
+          || await this.#hashPort.sha256(activated.html) !== nextSourceSha256
+        ) {
+          return rejected(
+            "PROJECT_WORKING_COPY_ACTIVATION_INVALID",
+            "托管工作文件未通过路径和内容校验；未保存修改仍保留在当前页面。",
+          );
+        }
+      }
       if (this.#projectSession.context) return stale(identity);
-      const registeredContext = this.#projectSession.register({
-        epoch: identity.epoch,
-        projectId: nextProjectId,
-        documentId: nextDocumentId,
-        sourcePath: activeSource,
-      });
+      const registeredContext = (
+        openTarget
+        && !this.#codecs.sameSourcePath(registeredSourcePath, activeSource)
+      )
+        ? this.#projectSession.adoptOpenTarget({
+            previousSourcePath: activeSource,
+            target: openTarget,
+          })
+        : this.#projectSession.register({
+            epoch: identity.epoch,
+            projectId: nextProjectId,
+            documentId: nextDocumentId,
+            sourcePath: registeredSourcePath,
+            ...(openTarget ? { openTarget } : {}),
+          });
       if (!registeredContext) return stale(identity);
+      if (
+        requiresManagedWorkingCopyActivation
+        && this.#runSession
+        && typeof this.#runSession.rebaseSource === "function"
+      ) {
+        this.#runSession.rebaseSource({
+          previousSourcePath: activeSource,
+          sourcePath: registeredContext.sourcePath,
+          projectId: registeredContext.projectId,
+        });
+      }
 
       const recoveryIdentity = this.#codecs.recoveryIdentityFromRecord(
         payload.recoveryIdentity,
       );
       this.#recoveryPort.replace(recoveryIdentity);
       this.#documentWorkflow?.replaceRecoveryIdentity(recoveryIdentity);
-      if (shouldAdoptCanonicalSource) {
-        this.#documentSession.publishAuthority({
-          html: nextDocumentHtml,
-          sourceSha256: nextSourceSha256,
-        });
-        this.#canvasPort.invalidateRenderAcks();
-      } else {
+      const documentAlreadyMatchesCanonical = Boolean(
+        currentDocument.html === nextDocumentHtml
+        && currentDocument.sourceSha256 === nextSourceSha256,
+      );
+      if (shouldAdoptCanonicalSource && !documentAlreadyMatchesCanonical) {
+        if (currentDocument.html !== nextDocumentHtml) {
+          this.#documentSession.publishAuthority({
+            html: nextDocumentHtml,
+            sourceSha256: nextSourceSha256,
+          });
+          this.#canvasPort.invalidateRenderAcks();
+        } else {
+          // The renderer already holds the exact canonical bytes. Repair only
+          // its source identity; recreating the disposable canvas would abort
+          // an otherwise valid one-shot runtime for no source-level reason.
+          this.#documentSession.update({ sourceSha256: nextSourceSha256 });
+        }
+      } else if (!documentAlreadyMatchesCanonical) {
         this.#documentSession.update({
           html: nextDocumentHtml,
           sourceSha256: nextSourceSha256,
@@ -1354,6 +1538,8 @@ export class WorkspaceController {
         projectName: projectRecord.displayName
           ? String(projectRecord.displayName)
           : null,
+        ...(payload.imported === true ? { imported: true } : {}),
+        ...(payload.workingCopyRecovered === true ? { workingCopyRecovered: true } : {}),
         canonicalSourceAdopted: shouldAdoptCanonicalSource,
       });
       return succeeded(registeredContext);

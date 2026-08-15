@@ -1,6 +1,6 @@
 # PageRoot 交互流程
 
-- 状态：v3 源码级定点修改目标交互合同
+- 状态：v3 源码级定点修改合同；桌面打开边界为 v4-only
 - 上位文档：[架构说明](ARCHITECTURE.md)
 - 安全边界：[安全模型](SECURITY_MODEL.md)
 - 产品范围：[MVP 产品需求](MVP_PRD.md)
@@ -122,9 +122,14 @@ stateDiagram-v2
 
 桌面版仍只有“编辑 / 预览”两种模式，不增加分屏或第三种模式：
 
-1. “编辑”只从当前权威源码构建禁用作者脚本的静态画布。源码内联 SVG、
-   静态 HTML 和 PNG 按原样显示；脚本生成的 Canvas/SVG、动态表格、表单值、
-   Tooltip 和滚动状态均不进入编辑画布，也不冒充可编辑源码。
+1. “编辑”默认只从当前权威源码构建禁用作者脚本的静态画布。桌面端遇到已
+   持久化、符合 ECharts 一次性运行条件的页面时，先复用既有画布加载态在主进程
+   隔离窗口运行一次、等待 1.2 秒并冻结审计；成功后只把受限 PNG 显示结果注入
+   最终脚本禁用的静态画布，再允许编辑和评论。失败或非候选页直接进入静态画布，
+   不显示新提示或控件。
+   源码内联 SVG、静态 HTML 和 PNG 按原样显示；未获批准的脚本生成
+   Canvas/SVG、动态表格、表单值、Tooltip 和滚动状态均不进入编辑画布，也不
+   冒充可编辑源码。
 2. 点击“预览”后，当前 HTML 在独立隔离文档中像普通页面一样运行。
    页面脚本、相对资源、Tab、表单、SVG、Canvas 和动态表格可以工作；
    页面不能导航宿主窗口或获得 PageRoot 的文件、编辑、评论和 AI 权限。
@@ -220,10 +225,10 @@ SourcePatch、不写磁盘、不运行作者脚本，也不引入右键菜单、
 当前文件名右侧始终保留独立的“+”按钮，点击后与文件菜单“打开本地 HTML”共用同一文件选择与项目切换流程。标题的小铅笔仍只在鼠标悬停或键盘聚焦时出现；两个入口的点击热区互不嵌套。若当前编辑、评论、附件或项目规则还没有安全收口，系统先沿用项目切换边界完成保存或阻止切换，用户取消文件选择时继续停留在当前 HTML。
 
 1. 用户选择本地 HTML。
-2. 系统优先按持久 `documentId` 重新绑定；无法识别时创建新 Document。
-3. 若是新 Document，仅以未登记只读状态打开；第一次真实编辑、添加附件、发送给 QoderWork，或用户明确展开“项目资料”时才登记项目与初始 V1。
-4. 通过 registry 中的 `storageDirectoryName` 定位项目文件夹，再读取该项目自己的 `project.json` 与 `runtime-state.json`。
-5. 对照项目当前 `sourcePath` 指向的 HTML、latest committed Version 和运行时 Hash。旧原始路径或旧工作路径打开时，通过 registry 别名回到同一项目的最新 canonical path。
+2. 系统只检查该路径是否属于有效 v4 Project：Registry 登记根目录、根目录内 `projectId` / `documentId` 与 manifest 精确文件映射必须同时成立。
+3. 有效 v4 Project 按现有项目重新绑定和恢复；任何不满足该条件的 HTML（包括 v3 及更早项目状态、损坏的 v4 记录和全新 HTML）都立即作为新外部来源导入，建立新的 v4 Project 与初始 V1。
+4. 导入从不移动、覆盖或改写用户选择的原始 HTML 字节；v4 打开路径不迁移、不恢复、也不读取 v4 以前的项目状态。
+5. 对有效 v4 Project，通过 Registry 的登记根目录读取该项目自己的 `project.json`、`manifest.json` 与 `runtime-state.json`，再对照当前精确 HTML、latest committed Version 和运行时 Hash。
 6. 按项目状态恢复：editing 时可恢复 current 或精确历史查看；存在 active run 时强制显示该轮冻结 current 页面，并默认展开“本轮处理”面板说明正在等待 AI 返回；冲突时显示该候选对比，事务恢复时显示恢复进度。用户主动收起处理面板后可以只读浏览冻结页面，直到再次打开或切回该项目前都不自动弹回。
 
 不得通过扫描所有 `requests/`、取最新修改时间或猜测“哪个目录像处理中”来恢复状态。
@@ -260,6 +265,19 @@ SourcePatch、不写磁盘、不运行作者脚本，也不引入右键菜单、
 ## 5. 直接编辑与自动写回
 
 ### 5.1 普通编辑
+
+进入一个新的 `canvasGeneration` 时，页面先确定本代编辑画布的形态：非候选
+页立即挂载静态 iframe；候选页只可准备一次 ECharts 隔离运行时。主进程的
+沙箱隐藏窗口按顺序执行已冻结的 classic 脚本一次，固定等待 1.2 秒，停止作者
+timer/rAF、listener、Observer 和动画并完成源码/宿主审计。只有审计成功且受限
+PNG 信封、字节和尺寸复核通过，脚本禁用的静态 iframe 才注入显示图并安装普通选择、
+原生编辑、评论和 IME 交互。显示图不可编辑、不可聚焦；单击它时目标回到唯一
+批准的空源码宿主。
+
+交互开始后，文本编辑、IME、评论、700ms 自动保存和相同源码的回显均不得准备
+新运行时、再次执行作者脚本或替换 iframe。必要的完整帧重建在本代只加载静态
+源码；下一个真正的 `canvasGeneration` 才可能尝试一次。保存、Version、导出和
+AI 输入始终使用原始源码字节，不读取运行时 DOM。
 
 画布编辑区上方固定显示：
 
@@ -847,7 +865,15 @@ Attempt。旧记录中的脚本结论不再改变状态或产生提示；归档�
 
 ### 11.4 历史版本保持只读
 
-历史卡片不提供“用此版本替换当前 HTML”“设为当前 HTML”或同义入口；Bridge 也不暴露历史回写路由。用户可以只读查看、返回当前 HTML，或在 Finder 中定位不可变版本文件。若确实要以旧 HTML 开始新的工作，应把该快照作为普通文件重新打开，建立清晰的新 Document 与 V1，避免在现有版本链中隐式改写谱系。
+历史卡片不提供“用此版本替换当前 HTML”“设为当前 HTML”或同义入口，也不写入不可变 Version 快照。进入精确历史视图后，横幅额外提供唯一的二级动作“基于此版本继续编辑”：
+
+1. 它只在项目空闲、当前 `viewMode=history` 且 `viewingVersionId` 与按钮 Version 完全相同的情况下可用；处理、保存、项目读取或历史切换期间禁用。
+2. Renderer 以当前项目完整身份和精确 Version ID 调用窄的 `/history-version/continue`；该路由不接受 HTML、Draft、Candidate 或任意路径覆盖字段。
+3. Repository 只激活 manifest 中该 Version 的唯一原有 Working Copy，先验证其完整 state、不可变 Version 快照、当前工作文件 Hash 与 Registry 登记根目录。缺失、重复、Hash 不符或状态不完整时原历史画布保持只读并显示可重试错误，不得从快照静默新建文件。
+4. Repository 原子写入 `desktop-pending` 回执；Desktop 以 `operationId + previousSourcePath + nextSourcePath + projectId + documentId + workingCopyId + versionId + Hash` 激活该 Working Copy，并只接受当前活动路径仍等于 `previousSourcePath` 的新操作。若首个响应已丢失但主进程已提交新活动路径，重放同一回执仍成功并返回同一 `workingCopyId`。
+5. Desktop 成功后 Bridge 确认同一回执，统一托管源切换才在一个无异步间隙的发布边界同步更新 Project、Document、Version、Draft、Comment Session，并让 Canvas 按新的 source Hash 重新确认。回执已提交后的 Bridge、Desktop、确认或 Canvas 故障进入“可安全重试”的未知态，绝不把已激活的 V2 伪造回 V6。
+
+例如最新正式版本为 V6 时，只读查看 V2 必须仍展示 V2 快照、不能跳到 V6。点击“基于此版本继续编辑”后打开原有 V2 Working Copy；之后从该工作文件采纳 Candidate 创建 V7 时，谱系为 `basedOnVersionId=V2`，而时间线前序仍为 `previousVersionId=V6`。
 ## 12. 项目切换
 
 点击文件名旁的“+”或选择最近项目时，系统先完成当前编辑 drain，再核对当前
@@ -976,3 +1002,7 @@ A 项目 processing 时切换 B 项目：
 19. 确认结束后立即恢复编辑并显示手动停止 AI Agent 的提醒；迟到 finalizer 可重复返回同一不可重试取消终态，且不写 completion、不建版、不改变源 HTML。
 20. 文字、样式、插入换行和同级下移落盘后，系统 Edit 菜单可逐项按原始字节撤销，并在重启后继续；重做恢复完全相同的 forward 字节。
 21. 评论正文和 `PROJECT.md` 获得焦点时，Edit > Undo 只恢复该输入框文字；评论/附件卡片状态与源 HTML 均不变化。
+22. 符合条件的 ECharts 页在一个 `canvasGeneration` 最多在主进程隔离窗口执行
+    一次作者脚本；1.2 秒冻结审计完成后编辑、评论、IME、自动保存和目标切换不
+    替换静态 iframe，显示图的评论仍落到唯一源码宿主，所有保存/Version/AI 输入
+    字节不含运行时节点或显示图。

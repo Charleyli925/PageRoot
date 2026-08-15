@@ -1,15 +1,22 @@
 import {
+  cpSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
   readdirSync,
+  renameSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { expect, test } from "@playwright/test";
+
+import { sha256 } from "../../../scripts/lifecycle-core.mjs";
+import { ProjectFileRepository } from "../../../scripts/project-file-repository.mjs";
 
 import {
   activateNativeEdit,
@@ -25,7 +32,6 @@ import {
   recordedInputEvents,
   replaceEditableIslandBytes,
   replaceUniqueBytes,
-  selectionSnapshot,
   setTextSelection,
   withBomAndCrLf,
 } from "../browser/pageroot-driver.mjs";
@@ -59,7 +65,7 @@ function removeSourceFixture(sourceDirectory) {
 }
 
 async function waitForProjectReady(page, timeout = 30_000) {
-  return waitForSharedProjectReady(page, { timeout, includeFailureDetail: false });
+  return waitForSharedProjectReady(page, { timeout, includeFailureDetail: true });
 }
 
 async function loadedDiskFrame(page, sourcePath, caseId) {
@@ -70,7 +76,12 @@ async function loadedDiskFrame(page, sourcePath, caseId) {
   });
 }
 
-async function openRecentProject(page, sourcePath, caseId = "list-item") {
+async function openRecentProject(
+  page,
+  sourcePath,
+  caseId = "list-item",
+  recentName = path.basename(sourcePath),
+) {
   const visibleToast = page.locator(".toast.show");
   await visibleToast.waitFor({ state: "visible", timeout: 2_000 }).catch(() => {});
   if (await visibleToast.isVisible()) {
@@ -84,7 +95,7 @@ async function openRecentProject(page, sourcePath, caseId = "list-item") {
   }
   await page.getByRole("button", { name: "项目", exact: true }).click();
   await page.locator(".recent-file-row")
-    .filter({ hasText: path.basename(sourcePath) })
+    .filter({ hasText: recentName })
     .click();
   return loadedDiskFrame(page, sourcePath, caseId);
 }
@@ -110,6 +121,39 @@ async function waitForFreshDiskFrame(page, previousDocumentToken, caseId) {
     selectionInside: true,
   });
   return frame;
+}
+
+async function managedWorkingCopyPath(page, externalSourcePath) {
+  const externalPath = realpathSync(externalSourcePath);
+  let active = null;
+  await expect.poll(async () => {
+    active = await page.evaluate(() => window.htmlAIProjects?.getActiveProject());
+    return active?.sourcePath || "";
+  }).not.toBe(externalPath);
+  expect(active?.sourcePath).toBeTruthy();
+  return active.sourcePath;
+}
+
+async function bridgeJson(page, pathname, { method = "GET", body = null } = {}) {
+  const runtime = await page.evaluate(() => ({
+    port: window.htmlAIRuntime?.bridgePort || "",
+    token: window.htmlAIRuntime?.bridgeAuthToken || "",
+  }));
+  if (!runtime.port || !runtime.token) {
+    throw new Error("Electron did not expose a usable Bridge connection.");
+  }
+  const response = await fetch(`http://127.0.0.1:${runtime.port}${pathname}`, {
+    method,
+    headers: {
+      "X-HTML-AI-Bridge-Token": runtime.token,
+      ...(body ? { "content-type": "application/json" } : {}),
+    },
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  });
+  return {
+    status: response.status,
+    body: await response.json().catch(() => null),
+  };
 }
 
 async function rememberCurrentNativeHost(page, caseId) {
@@ -150,6 +194,7 @@ async function expectCheckpointPersisted(page, afterRevision) {
       state: element.getAttribute("data-persist-state"),
       editRevision,
       persistedRevision,
+      error: document.querySelector(".source-conflict-banner span")?.textContent || "",
       synchronized:
         Number.isSafeInteger(editRevision)
         && editRevision > minimumRevision
@@ -157,6 +202,7 @@ async function expectCheckpointPersisted(page, afterRevision) {
     };
   }, afterRevision), { timeout: 30_000 }).toMatchObject({
     state: "idle",
+    error: "",
     synchronized: true,
   });
   return Number(await indicator.getAttribute("data-persisted-revision"));
@@ -191,19 +237,6 @@ async function clickEditHistoryMenu(electronApp, page, direction) {
   );
 }
 
-async function selectAuthoredCase(frame, caseId) {
-  await frame.locator(caseSelector(caseId)).evaluate((element) => {
-    const rect = element.getBoundingClientRect();
-    element.dispatchEvent(new MouseEvent("click", {
-      bubbles: true,
-      cancelable: true,
-      clientX: rect.left + Math.min(4, rect.width / 2),
-      clientY: rect.top + Math.min(4, rect.height / 2),
-      view: window,
-    }));
-  });
-}
-
 async function addCanvasComment(page, frame, caseId, text) {
   await page.keyboard.press("Escape");
   const target = frame.locator(caseSelector(caseId));
@@ -224,8 +257,7 @@ async function addCanvasComment(page, frame, caseId, text) {
 
 function requestDirectoryCount(workspace) {
   const projectsRoot = path.join(workspace, "projects");
-  if (!existsSync(projectsRoot)) return 0;
-  return readdirSync(projectsRoot).reduce((total, projectDirectoryName) => {
+  const legacyCount = !existsSync(projectsRoot) ? 0 : readdirSync(projectsRoot).reduce((total, projectDirectoryName) => {
     const requestsRoot = path.join(
       projectsRoot,
       projectDirectoryName,
@@ -237,12 +269,28 @@ function requestDirectoryCount(workspace) {
         : 0
     );
   }, 0);
+  const managedProjectsRoot = path.join(path.dirname(workspace), "project-files");
+  if (!existsSync(managedProjectsRoot)) return legacyCount;
+  return legacyCount + readdirSync(managedProjectsRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
+    .reduce((total, entry) => {
+      const requestsRoot = path.join(
+        managedProjectsRoot,
+        entry.name,
+        ".pageroot",
+        "requests",
+      );
+      return total + (
+        existsSync(requestsRoot)
+          ? readdirSync(requestsRoot).filter((name) => !name.startsWith(".")).length
+          : 0
+      );
+    }, 0);
 }
 
 function workspaceContainsDraftComment(workspace, text) {
   const projectsRoot = path.join(workspace, "projects");
-  if (!existsSync(projectsRoot)) return false;
-  return readdirSync(projectsRoot).some((projectDirectoryName) => {
+  const legacyContains = existsSync(projectsRoot) && readdirSync(projectsRoot).some((projectDirectoryName) => {
     const draftPath = path.join(
       projectsRoot,
       projectDirectoryName,
@@ -254,6 +302,26 @@ function workspaceContainsDraftComment(workspace, text) {
     return Array.isArray(draft.comments)
       && draft.comments.some((comment) => comment.text === text);
   });
+  if (legacyContains) return true;
+  const managedProjectsRoot = path.join(path.dirname(workspace), "project-files");
+  if (!existsSync(managedProjectsRoot)) return false;
+  return readdirSync(managedProjectsRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
+    .some((entry) => {
+      const draftsRoot = path.join(
+        managedProjectsRoot,
+        entry.name,
+        ".pageroot",
+        "drafts",
+      );
+      return existsSync(draftsRoot) && readdirSync(draftsRoot)
+        .filter((name) => name.endsWith(".json"))
+        .some((name) => {
+          const draft = JSON.parse(readFileSync(path.join(draftsRoot, name), "utf8"));
+          return Array.isArray(draft.comments)
+            && draft.comments.some((comment) => comment.text === text);
+        });
+    });
 }
 
 async function replayApplePinyinStyledWrapperCommit(frame, caseId) {
@@ -301,26 +369,33 @@ async function replayApplePinyinStyledWrapperCommit(frame, caseId) {
   });
 }
 
-test("Electron first launch registers the welcome HTML and sends its comment to Qoder", async () => {
+test("Electron first launch imports the welcome HTML as V1 and sends its comment to Qoder", async () => {
   const launched = await launchPageRoot();
   const welcomePath = path.join(launched.isolatedUserData, "欢迎来到源页.html");
   const welcomeLogoPath = path.join(
     launched.isolatedUserData,
     "brand-logo.png",
   );
-  const workspace = path.join(launched.isolatedUserData, "workspace");
   try {
     const canonicalWelcomePath = path.join(
       realpathSync(launched.isolatedUserData),
       "欢迎来到源页.html",
     );
     await waitForProjectReady(launched.page);
+    let managedWelcomePath = "";
     await expect.poll(
-      async () => (
-        await launched.page.evaluate(() => window.htmlAIProjects?.getActiveProject())
-      )?.sourcePath,
+      async () => {
+        const active = await launched.page.evaluate(
+          () => window.htmlAIProjects?.getActiveProject(),
+        );
+        managedWelcomePath = String(active?.sourcePath || "");
+        return Boolean(
+          managedWelcomePath && managedWelcomePath !== canonicalWelcomePath,
+        );
+      },
       { timeout: 20_000 },
-    ).toBe(canonicalWelcomePath);
+    ).toBe(true);
+    expect(path.basename(managedWelcomePath)).toBe("欢迎来到源页-V1.html");
     await expect(launched.page.locator('[aria-label="项目读取失败"]')).toHaveCount(0);
     await expect(launched.page.getByRole("button", { name: "项目", exact: true }))
       .toBeEnabled({ timeout: 30_000 });
@@ -330,28 +405,21 @@ test("Electron first launch registers the welcome HTML and sends its comment to 
     await expect.poll(() => (
       existsSync(welcomePath)
       && existsSync(welcomeLogoPath)
-      && existsSync(path.join(workspace, "project-registry.json"))
+      && existsSync(path.join(managedWelcomePath, "..", ".pageroot", "manifest.json"))
     )).toBe(true);
-
-    const registry = JSON.parse(
-      readFileSync(path.join(workspace, "project-registry.json"), "utf8"),
-    );
-    const projectIds = Object.keys(registry.projects);
-    expect(projectIds).toHaveLength(1);
-    expect(registry.projects[projectIds[0]].sourcePath).toBe(canonicalWelcomePath);
-    expect(registry.projects[projectIds[0]].displayName).toBe("欢迎来到源页");
-    expect(registry.projects[projectIds[0]].storageDirectoryName)
-      .toMatch(/^欢迎来到源页__\d{8}-\d{6}__[a-f0-9]{8}$/);
-    expect(existsSync(
-      path.join(
-        workspace,
-        "projects",
-        registry.projects[projectIds[0]].storageDirectoryName,
-        "versions",
-        "ver_0001",
-        "committed.json",
-      ),
-    )).toBe(true);
+    expect(readFileSync(managedWelcomePath)).toEqual(readFileSync(welcomePath));
+    const projectRoot = path.dirname(managedWelcomePath);
+    const manifest = JSON.parse(readFileSync(
+      path.join(projectRoot, ".pageroot", "manifest.json"),
+      "utf8",
+    ));
+    expect(manifest.versions.map((version) => version.versionId)).toEqual(["ver_0001"]);
+    expect(manifest.workingCopies).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        workingCopyId: "work_ver_0001",
+        sourceRelativePath: "欢迎来到源页-V1.html",
+      }),
+    ]));
 
     const editor = launched.page.getByTestId("html-canvas-editor")
       .filter({ visible: true })
@@ -389,7 +457,7 @@ test("Electron first launch registers the welcome HTML and sends its comment to 
     const changeRequest = JSON.parse(
       readFileSync(path.join(path.dirname(promptPath), "change-request.json"), "utf8"),
     );
-    expect(changeRequest.projectId).toBe(projectIds[0]);
+    expect(changeRequest.projectId).toBe(manifest.projectId);
     expect(changeRequest.requirements.instructions[0].text)
       .toBe("把欢迎页主标题改得更简洁。");
   } finally {
@@ -400,33 +468,284 @@ test("Electron first launch registers the welcome HTML and sends its comment to 
   }
 });
 
-test("Electron safely renames the saved current HTML without starting a new project", async () => {
+test("Electron retries a managed Working Copy activation after the first response is lost", async () => {
+  test.setTimeout(120_000);
+  const source = createSourceFixture("managed-activation-retry.html");
+  const launched = await launchPageRoot({ activeSourcePath: source.sourcePath });
+  try {
+    await waitForProjectReady(launched.page);
+    const v1Path = await managedWorkingCopyPath(launched.page, source.sourcePath);
+    const projectsRoot = path.dirname(path.dirname(v1Path));
+    const repository = new ProjectFileRepository({ projectsRoot });
+    const workspace = await repository.workspace({ sourcePath: v1Path });
+    const candidate = await repository.createCandidate({
+      target: workspace.target,
+      requestId: "req_e2e_managed_activation_retry",
+      candidateId: "candidate_e2e_managed_activation_retry_0001",
+      html: "<!doctype html><html><head><title>V2 retry</title></head><body><p>V2 retry</p></body></html>",
+      expectedSourceSha256: workspace.sourceSha256,
+    });
+    const promoted = await repository.promoteCandidate({
+      target: workspace.target,
+      candidateId: candidate.candidate.candidateId,
+    });
+    const expectedManagedPath = realpathSync(promoted.target.exactSourcePath);
+    const payload = {
+      previousSourcePath: v1Path,
+      nextSourcePath: promoted.target.exactSourcePath,
+      expectedSha256: promoted.target.sourceSha256,
+      projectId: promoted.target.projectId,
+      documentId: promoted.target.documentId,
+      workingCopyId: promoted.target.workingCopyId,
+      versionId: promoted.target.versionId,
+      projectRootPath: promoted.target.projectRootPath,
+      operationId: "e2e_managed_activation_retry_0001",
+    };
+
+    // The first call commits the main-process project state. Treat the return
+    // value as lost, then replay exactly the same operation as the renderer
+    // would after a Bridge response interruption.
+    await launched.page.evaluate((input) => (
+      window.htmlAIProjects.activateManagedWorkingCopy(input)
+    ), payload);
+    const replayed = await launched.page.evaluate((input) => (
+      window.htmlAIProjects.activateManagedWorkingCopy(input)
+    ), payload);
+    expect(replayed.sourcePath).toBe(expectedManagedPath);
+    expect(replayed.sha256).toBe(promoted.target.sourceSha256);
+    const active = await launched.page.evaluate(() => window.htmlAIProjects.getActiveProject());
+    expect(active?.sourcePath).toBe(expectedManagedPath);
+    const state = JSON.parse(readFileSync(
+      path.join(launched.isolatedUserData, "html-projects.json"),
+      "utf8",
+    ));
+    expect(state.lastManagedActivation?.operationId).toBe(payload.operationId);
+    const staleOperation = await launched.page.evaluate(async (input) => {
+      try {
+        const result = await window.htmlAIProjects.activateManagedWorkingCopy(input);
+        return { inputOperationId: input.operationId, result };
+      } catch (error) {
+        return {
+          inputOperationId: input.operationId,
+          message: error?.message || null,
+        };
+      }
+    }, {
+      ...payload,
+      operationId: "e2e_managed_activation_stale_0001",
+    });
+    const stateAfterStaleAttempt = JSON.parse(readFileSync(
+      path.join(launched.isolatedUserData, "html-projects.json"),
+      "utf8",
+    ));
+    expect(staleOperation).toMatchObject({
+      inputOperationId: "e2e_managed_activation_stale_0001",
+      message: "当前桌面文件已变化，不能提交过期的托管工作文件切换。",
+    });
+    expect(stateAfterStaleAttempt.lastManagedActivation?.operationId).toBe(payload.operationId);
+  } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeSourceFixture(source.sourceDirectory);
+  }
+});
+
+test("Electron v4 registry only recovers Finder rename and protects moved copies plus Promotion collisions", async () => {
+  test.setTimeout(120_000);
+  const sourceDirectory = mkdtempSync(path.join(tmpdir(), "pageroot-native-source-e2e-"));
+  const sourcePath = path.join(sourceDirectory, "finder-registry-state.html");
+  const originalExternal = fixtureBuffer("source-fidelity.html");
+  writeFileSync(sourcePath, originalExternal);
+  const isolatedUserData = mkdtempSync(path.join(tmpdir(), "pageroot-native-e2e-"));
+  const outsideRoot = mkdtempSync(path.join(tmpdir(), "pageroot-managed-root-outside-"));
+  let electronApp = null;
+  try {
+    const launched = await launchPageRoot({ isolatedUserData });
+    electronApp = launched.electronApp;
+
+    const preview = await bridgeJson(
+      launched.page,
+      `/workspace?sourcePath=${encodeURIComponent(sourcePath)}`,
+    );
+    expect(preview.status).toBe(200);
+    expect(preview.body).toMatchObject({ registered: false });
+    const ensured = await bridgeJson(launched.page, "/project/ensure", {
+      method: "POST",
+      body: {
+        sourcePath,
+        expectedSourceSha256: preview.body.sourceSha256,
+        projectStorageVersion: "4.0.0",
+      },
+    });
+    expect(ensured.status).toBe(200);
+    expect(ensured.body).toMatchObject({
+      registered: true,
+      projectFileSchemaVersion: "4.0.0",
+      imported: true,
+    });
+    expect(readFileSync(sourcePath)).toEqual(originalExternal);
+
+    const firstTarget = ensured.body.openTarget;
+    const projectsRoot = path.dirname(firstTarget.projectRootPath);
+    const finderRenamedRoot = path.join(projectsRoot, "Finder 改名项目");
+    const firstWorkingCopyName = path.basename(firstTarget.exactSourcePath);
+    renameSync(firstTarget.projectRootPath, finderRenamedRoot);
+    const finderRenamedPath = path.join(finderRenamedRoot, firstWorkingCopyName);
+
+    const rootRecovered = await bridgeJson(
+      launched.page,
+      `/workspace?sourcePath=${encodeURIComponent(finderRenamedPath)}`,
+    );
+    expect(rootRecovered.status).toBe(200);
+    expect(rootRecovered.body).toMatchObject({
+      registered: true,
+      projectId: firstTarget.projectId,
+      documentId: firstTarget.documentId,
+    });
+    expect(rootRecovered.body.openTarget.projectRootPath).toBe(finderRenamedRoot);
+
+    const finderRenamedHtml = path.join(finderRenamedRoot, "Finder-B-V1.html");
+    renameSync(finderRenamedPath, finderRenamedHtml);
+    const htmlRecovered = await bridgeJson(
+      launched.page,
+      `/workspace?sourcePath=${encodeURIComponent(finderRenamedHtml)}`,
+    );
+    expect(htmlRecovered.status).toBe(200);
+    expect(htmlRecovered.body.openTarget).toMatchObject({
+      projectId: firstTarget.projectId,
+      workingCopyId: firstTarget.workingCopyId,
+      exactSourcePath: finderRenamedHtml,
+    });
+    const renamedManifest = JSON.parse(readFileSync(
+      path.join(finderRenamedRoot, ".pageroot", "manifest.json"),
+      "utf8",
+    ));
+    expect(renamedManifest.workingCopies[0]).toMatchObject({
+      sourceRelativePath: "Finder-B-V1.html",
+      preferredFileStem: "Finder-B",
+      preferredExtension: ".html",
+      workingCopyId: firstTarget.workingCopyId,
+    });
+
+    const movedRoot = path.join(outsideRoot, "moved-project");
+    const bytesBeforeMove = readFileSync(finderRenamedHtml);
+    const targetBeforeMove = htmlRecovered.body.openTarget;
+    renameSync(finderRenamedRoot, movedRoot);
+    const movedHtml = path.join(movedRoot, "Finder-B-V1.html");
+    const blockedSave = await bridgeJson(launched.page, "/autosave", {
+      method: "POST",
+      body: {
+        ...targetBeforeMove,
+        html: "<!doctype html><html><head><title>blocked</title></head><body><p>blocked</p></body></html>",
+        expectedSourceSha256: targetBeforeMove.sourceSha256,
+        editRevision: 1,
+      },
+    });
+    expect(blockedSave.status).toBe(404);
+    expect(blockedSave.body?.error?.code).toBe("REGISTERED_PROJECT_UNAVAILABLE");
+    expect(readFileSync(movedHtml)).toEqual(bytesBeforeMove);
+
+    const movedPreview = await bridgeJson(
+      launched.page,
+      `/workspace?sourcePath=${encodeURIComponent(movedHtml)}`,
+    );
+    expect(movedPreview.status).toBe(200);
+    expect(movedPreview.body).toMatchObject({ registered: false });
+
+    renameSync(movedRoot, finderRenamedRoot);
+    const returned = await bridgeJson(
+      launched.page,
+      `/workspace?sourcePath=${encodeURIComponent(finderRenamedHtml)}`,
+    );
+    expect(returned.status).toBe(200);
+    expect(returned.body).toMatchObject({
+      registered: true,
+      projectId: firstTarget.projectId,
+      documentId: firstTarget.documentId,
+    });
+
+    const copiedRoot = path.join(projectsRoot, "Finder 副本项目");
+    cpSync(finderRenamedRoot, copiedRoot, { recursive: true });
+    const copiedHtml = path.join(copiedRoot, "Finder-B-V1.html");
+    const copiedManifestPath = path.join(copiedRoot, ".pageroot", "manifest.json");
+    const copiedManifestBefore = readFileSync(copiedManifestPath);
+    const copiedPreview = await bridgeJson(
+      launched.page,
+      `/workspace?sourcePath=${encodeURIComponent(copiedHtml)}`,
+    );
+    expect(copiedPreview.status).toBe(200);
+    expect(copiedPreview.body).toMatchObject({ registered: false });
+    expect(readFileSync(copiedManifestPath)).toEqual(copiedManifestBefore);
+
+    const repository = new ProjectFileRepository({ projectsRoot });
+    await repository.initialize();
+    const workspace = await repository.workspace({ sourcePath: finderRenamedHtml });
+    const candidate = await repository.createCandidate({
+      target: workspace.target,
+      requestId: "req_e2e_registered_root",
+      candidateId: "candidate_e2e_registered_root_0001",
+      html: "<!doctype html><html><head><title>Finder candidate</title></head><body><p>Candidate retained for explicit adoption.</p></body></html>",
+      expectedSourceSha256: workspace.sourceSha256,
+    });
+    const userFile = path.join(finderRenamedRoot, "Finder-B-V2.html");
+    const userDirectory = path.join(finderRenamedRoot, "Finder-B-V2-V2.html");
+    const userSymlink = path.join(finderRenamedRoot, "Finder-B-V2-V2-V2.html");
+    const userSymlinkTarget = path.join(outsideRoot, "user-symlink-target.html");
+    writeFileSync(userFile, "user file must not be overwritten", "utf8");
+    mkdirSync(userDirectory);
+    writeFileSync(userSymlinkTarget, "user symlink target", "utf8");
+    symlinkSync(userSymlinkTarget, userSymlink);
+
+    const promoted = await repository.promoteCandidate({
+      target: workspace.target,
+      candidateId: candidate.candidate.candidateId,
+    });
+    expect(path.basename(promoted.target.exactSourcePath)).toBe("Finder-B-V2-V2-V2-V2.html");
+    expect(readFileSync(userFile, "utf8")).toBe("user file must not be overwritten");
+    expect(readdirSync(userDirectory)).toEqual([]);
+    expect(readFileSync(userSymlinkTarget, "utf8")).toBe("user symlink target");
+  } finally {
+    if (electronApp) {
+      await stopPageRoot(electronApp, isolatedUserData, { cleanup: false });
+    }
+    removeIsolatedUserData(isolatedUserData);
+    removeValidatedTemporaryDirectory(outsideRoot, "pageroot-managed-root-outside-");
+    removeValidatedTemporaryDirectory(sourceDirectory, "pageroot-native-source-e2e-");
+  }
+});
+
+test("Electron safely renames the managed V1 without starting a new project", async () => {
   const launched = await launchPageRoot();
-  const originalPath = path.join(
+  const externalOriginalPath = path.join(
     realpathSync(launched.isolatedUserData),
     "欢迎来到源页.html",
   );
-  const renamedPath = path.join(
-    realpathSync(launched.isolatedUserData),
-    "我的页面.html",
-  );
-  const workspace = path.join(launched.isolatedUserData, "workspace");
   try {
     await waitForProjectReady(launched.page);
+    let managedOriginalPath = "";
     await expect.poll(
-      async () => (
-        await launched.page.evaluate(() => window.htmlAIProjects?.getActiveProject())
-      )?.sourcePath,
+      async () => {
+        const active = await launched.page.evaluate(
+          () => window.htmlAIProjects?.getActiveProject(),
+        );
+        managedOriginalPath = String(active?.sourcePath || "");
+        return Boolean(
+          managedOriginalPath && managedOriginalPath !== externalOriginalPath,
+        );
+      },
       { timeout: 20_000 },
-    ).toBe(originalPath);
-    const originalBytes = readFileSync(originalPath);
-    const originalRegistry = JSON.parse(
-      readFileSync(path.join(workspace, "project-registry.json"), "utf8"),
-    );
-    const [projectId] = Object.keys(originalRegistry.projects);
+    ).toBe(true);
+    expect(path.basename(managedOriginalPath)).toBe("欢迎来到源页-V1.html");
+    const projectRoot = path.dirname(managedOriginalPath);
+    const renamedPath = path.join(projectRoot, "我的页面-V1.html");
+    const originalBytes = readFileSync(externalOriginalPath);
+    const originalManifest = JSON.parse(readFileSync(
+      path.join(projectRoot, ".pageroot", "manifest.json"),
+      "utf8",
+    ));
+    const projectId = originalManifest.projectId;
 
     const title = launched.page.getByRole("button", {
-      name: "重命名文件 欢迎来到源页",
+      name: "重命名文件 欢迎来到源页-V1",
       exact: true,
     });
     await expect(title).toBeVisible();
@@ -435,9 +754,9 @@ test("Electron safely renames the saved current HTML without starting a new proj
       name: "文件名（不含后缀）",
       exact: true,
     });
-    await expect(input).toHaveValue("欢迎来到源页");
+    await expect(input).toHaveValue("欢迎来到源页-V1");
     await expect(input.locator("..")).toContainText(".html");
-    await input.fill("我的页面");
+    await input.fill("我的页面-V1");
     const header = launched.page.locator("header.workbench-header");
     await expect(header).toHaveAttribute("data-file-renaming", "true");
     const fileHeader = launched.page.locator(".window-file");
@@ -459,10 +778,11 @@ test("Electron safely renames the saved current HTML without starting a new proj
       { timeout: 20_000 },
     ).toBe(renamedPath);
     await expect(launched.page.getByRole("button", {
-      name: "重命名文件 我的页面",
+      name: "重命名文件 我的页面-V1",
       exact: true,
     })).toBeVisible();
-    expect(existsSync(originalPath)).toBe(false);
+    expect(readFileSync(externalOriginalPath)).toEqual(originalBytes);
+    expect(existsSync(managedOriginalPath)).toBe(false);
     expect(readFileSync(renamedPath)).toEqual(originalBytes);
 
     const state = JSON.parse(
@@ -474,27 +794,26 @@ test("Electron safely renames the saved current HTML without starting a new proj
     expect(state.pendingRename).toBeNull();
     expect(state.lastRename.sourcePath).toBe(renamedPath);
 
-    const renamedRegistry = JSON.parse(
-      readFileSync(path.join(workspace, "project-registry.json"), "utf8"),
-    );
-    expect(Object.keys(renamedRegistry.projects)).toEqual([projectId]);
-    expect(renamedRegistry.projects[projectId].sourcePath).toBe(renamedPath);
-    const storageDirectoryName =
-      renamedRegistry.projects[projectId].storageDirectoryName;
-    expect(storageDirectoryName).toBe(
-      originalRegistry.projects[projectId].storageDirectoryName,
-    );
-    const project = JSON.parse(
-      readFileSync(
-        path.join(workspace, "projects", storageDirectoryName, "project.json"),
-        "utf8",
-      ),
-    );
-    expect(project.documentId).toBe(originalRegistry.projects[projectId].documentId);
-    expect(project.sourcePath).toBe(renamedPath);
-    expect(project.displayName).toBe(
-      originalRegistry.projects[projectId].displayName,
-    );
+    const renamedManifest = JSON.parse(readFileSync(
+      path.join(projectRoot, ".pageroot", "manifest.json"),
+      "utf8",
+    ));
+    expect(renamedManifest.projectId).toBe(projectId);
+    expect(renamedManifest.documentId).toBe(originalManifest.documentId);
+    expect(renamedManifest.workingCopies).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        workingCopyId: "work_ver_0001",
+        sourceRelativePath: "我的页面-V1.html",
+        preferredFileStem: "我的页面",
+        preferredExtension: ".html",
+      }),
+    ]));
+    const registry = JSON.parse(readFileSync(
+      path.join(path.dirname(projectRoot), ".pageroot-registry.json"),
+      "utf8",
+    ));
+    expect(realpathSync(registry.projects[projectId].registeredProjectRootPath))
+      .toBe(realpathSync(projectRoot));
   } finally {
     await stopPageRoot(
       launched.electronApp,
@@ -557,7 +876,7 @@ test("Electron keeps runtime visuals in Preview and source-backed static content
     <p data-native-case="preview-tab-copy" data-native-mode="native-editable">第二页可编辑正文</p>
     <svg id="static-chart" viewBox="0 0 10 10"><circle cx="5" cy="5" r="3"></circle></svg>
   </section>
-  <script src="./runtime.js"></script>
+  <script src="file://${runtimePath}"></script>
 </body>
 </html>`,
     "utf8",
@@ -631,6 +950,15 @@ test("Electron keeps runtime visuals in Preview and source-backed static content
 })();`,
     "utf8",
   );
+  writeFileSync(
+    sourcePath,
+    readFileSync(sourcePath, "utf8").replace(
+      `<script src="file://${runtimePath}"></script>`,
+      `<script>${readFileSync(runtimePath, "utf8")}</script>`,
+    ),
+    "utf8",
+  );
+  const originalSource = readFileSync(sourcePath);
 
   let electronApp = null;
   let isolatedUserData = null;
@@ -649,9 +977,7 @@ test("Electron keeps runtime visuals in Preview and source-backed static content
     await expect(editFrame.locator("[data-runtime-row]")).toHaveCount(0);
     await expect(editFrame.locator("#direct-runtime-svg rect")).toHaveCount(0);
     await expect(editFrame.locator("[data-pageroot-readonly-visual]")).toHaveCount(0);
-    expect(readFileSync(sourcePath, "utf8")).not.toMatch(
-      /data-pageroot-readonly-visual|data-runtime-row|data-runtime-chart|data-drawn|(?:data:image\/png|blob:)/u,
-    );
+    expect(readFileSync(sourcePath)).toEqual(originalSource);
 
     await launched.page.getByRole("button", {
       name: "预览",
@@ -710,9 +1036,7 @@ test("Electron keeps runtime visuals in Preview and source-backed static content
     await expect(resumedEditFrame.locator("#runtime-svg svg")).toHaveCount(0);
     await expect(resumedEditFrame.locator("[data-runtime-chart]")).toHaveCount(0);
     await expect(resumedEditFrame.locator("[data-pageroot-readonly-visual]")).toHaveCount(0);
-    expect(readFileSync(sourcePath, "utf8")).not.toMatch(
-      /data-pageroot-readonly-visual|data-runtime-row|data-runtime-chart|data-drawn|(?:data:image\/png|blob:)/u,
-    );
+    expect(readFileSync(sourcePath)).toEqual(originalSource);
 
     await activateNativeEdit(resumedEditFrame, "preview-tab-copy");
     await expect(resumedEditFrame.locator(caseSelector("preview-tab-copy")))
@@ -722,10 +1046,11 @@ test("Electron keeps runtime visuals in Preview and source-backed static content
     await expect.poll(() => resumedEditFrame.locator(
       caseSelector("preview-tab-copy"),
     ).textContent()).toContain("原位");
-    await expect.poll(() => readFileSync(sourcePath, "utf8")).toContain("原位");
-    expect(readFileSync(sourcePath, "utf8")).not.toMatch(
-      /data-pageroot-readonly-visual|data-runtime-row|data-runtime-chart|data-drawn|(?:data:image\/png|blob:)/u,
-    );
+    const managedSourcePath = await managedWorkingCopyPath(launched.page, sourcePath);
+    await expect.poll(() => readFileSync(managedSourcePath, "utf8"))
+      .toContain("原位");
+    expect(readFileSync(sourcePath, "utf8")).not.toContain("原位");
+    expect(readFileSync(sourcePath)).toEqual(originalSource);
   } finally {
     if (electronApp && isolatedUserData) {
       await stopPageRoot(electronApp, isolatedUserData);
@@ -973,6 +1298,390 @@ test("Electron edit Canvas keeps root scrolling in the shared stage across a scr
   }
 });
 
+test("Electron Edit preserves imported source-relative ECharts assets and native source editing", async () => {
+  const sourceDirectory = mkdtempSync(
+    path.join(tmpdir(), "pageroot-edit-runtime-source-e2e-"),
+  );
+  const sourcePath = path.join(sourceDirectory, "echarts-runtime-report.html");
+  const runtimeScriptPath = path.join(sourceDirectory, "echarts.js");
+  const source = `<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>One-shot ECharts Edit runtime</title><link rel="stylesheet" href="echarts-runtime.css"></head>
+<body>
+  <main id="chart-host" data-native-case="runtime-chart" style="width: 640px; height: 360px"></main>
+  <p class="runtime-resource-probe" data-native-case="runtime-editable">静态来源文字保持可编辑。</p>
+  <script src="echarts.js"></script>
+  <script>
+    window.__PAGEROOT_ECHARTS_AUTHOR_EXECUTIONS__ = (window.__PAGEROOT_ECHARTS_AUTHOR_EXECUTIONS__ || 0) + 1;
+    const chart = window.echarts.init(document.querySelector("#chart-host"));
+    chart.setOption({ series: [] });
+  </script>
+</body>
+</html>`;
+  const sourceSha256 = sha256(source);
+  writeFileSync(runtimeScriptPath, `window.echarts = {
+  init(host) {
+    host.style.userSelect = "none";
+    host.style.webkitTapHighlightColor = "rgba(0, 0, 0, 0)";
+    host.style.position = "relative";
+    host.style.transform = "scale(0.75)";
+    const canvas = document.createElement("canvas");
+    canvas.width = 640;
+    canvas.height = 360;
+    canvas.dataset.echartsRuntime = "true";
+    const context = canvas.getContext("2d");
+    context.fillStyle = "rgb(1, 2, 3)";
+    context.fillRect(0, 0, 640, 360);
+    host.append(canvas);
+    return { setOption() { window.__PAGEROOT_ECHARTS_AUTHOR_SETTLED__ = true; } };
+  }
+};`, "utf8");
+  writeFileSync(
+    path.join(sourceDirectory, "echarts-runtime.css"),
+    ".runtime-resource-probe { color: rgb(1, 2, 3); }",
+    "utf8",
+  );
+  writeFileSync(sourcePath, source, "utf8");
+
+  let electronApp = null;
+  let isolatedUserData = null;
+  try {
+    const launched = await launchPageRoot({ activeSourcePath: sourcePath });
+    electronApp = launched.electronApp;
+    isolatedUserData = launched.isolatedUserData;
+    const { frame } = await loadedDiskFrame(
+      launched.page,
+      sourcePath,
+      "runtime-editable",
+    );
+    const activeProject = await launched.page.evaluate(() => (
+      window.htmlAIProjects?.getActiveProject()
+    ));
+    if (typeof activeProject?.sourcePath !== "string") {
+      throw new Error("The imported managed Working Copy did not become active.");
+    }
+    const managedSourcePath = activeProject.sourcePath;
+    expect(managedSourcePath).not.toBe(sourcePath);
+    expect(activeProject.html).toBe(source);
+    await expect.poll(() => frame.evaluate(() => ({
+      rendererAuthorExecutions: window.__PAGEROOT_ECHARTS_AUTHOR_EXECUTIONS__ || 0,
+      chartCount: document.querySelectorAll("#chart-host canvas[data-echarts-runtime=true]").length,
+      frozenSnapshotCount: document.querySelectorAll(
+        "#chart-host img[data-pageroot-edit-runtime-snapshot]",
+      ).length,
+      frozenSnapshotVisible: (() => {
+        const snapshot = document.querySelector("#chart-host img[data-pageroot-edit-runtime-snapshot]");
+        const rect = snapshot?.getBoundingClientRect();
+        return Boolean(rect && rect.width >= 1 && rect.height >= 1);
+      })(),
+      bootstrapCount: document.querySelectorAll("[data-pageroot-edit-runtime-bootstrap]").length,
+      staticScripts: document.querySelectorAll('script[type="application/x-html-canvas-disabled"]').length,
+      base: document.baseURI,
+      stylesheetColor: getComputedStyle(document.querySelector(".runtime-resource-probe")).color,
+      hostInlineStyle: document.querySelector("#chart-host").getAttribute("style"),
+    })), { timeout: 6_000 }).toMatchObject({
+      rendererAuthorExecutions: 0,
+      chartCount: 0,
+      frozenSnapshotCount: 1,
+      frozenSnapshotVisible: true,
+      bootstrapCount: 0,
+      staticScripts: 2,
+      base: expect.stringMatching(/^file:/u),
+      stylesheetColor: "rgb(1, 2, 3)",
+      hostInlineStyle: expect.stringMatching(
+        /(?=.*user-select: none)(?=.*transform: scale\(0\.75\))/u,
+      ),
+    });
+    await expect(launched.page.locator(".save-status")).toHaveText("已安全保存");
+    const renderState = await launched.page.locator(".save-status").evaluate((element) => ({
+      canvasGeneration: element.getAttribute("data-canvas-generation"),
+      renderGeneration: element.getAttribute("data-render-generation"),
+      renderedSha256: element.getAttribute("data-rendered-sha256"),
+    }));
+    expect(renderState.canvasGeneration).toEqual(expect.any(String));
+    expect(renderState.renderGeneration).toBe(renderState.canvasGeneration);
+    expect(renderState.renderedSha256).toBe(sourceSha256);
+    await expect(launched.page.locator("[data-runtime-bootstrap-count=\"1\"]")).toHaveCount(1);
+    expect(sha256(readFileSync(sourcePath, "utf8"))).toBe(sourceSha256);
+    const runtimeDocument = await documentToken(frame);
+    const replay = await launched.page.evaluate(async () => {
+      const host = document.querySelector("main.workbench");
+      const fiberKey = host && Object.getOwnPropertyNames(host).find((key) => (
+        key.startsWith("__reactFiber$")
+      ));
+      const seed = fiberKey ? host?.[fiberKey] : null;
+      const visited = new Set();
+      const stack = seed ? [seed] : [];
+      let runtime = null;
+      while (stack.length && visited.size < 12_000) {
+        const fiber = stack.pop();
+        if (!fiber || visited.has(fiber)) continue;
+        visited.add(fiber);
+        for (let hook = fiber.memoizedState; hook; hook = hook.next) {
+          const candidate = hook.memoizedState?.editRuntime;
+          if (candidate?.grant?.hosts?.length) runtime = candidate;
+        }
+        if (runtime) break;
+        if (fiber.return) stack.push(fiber.return);
+        if (fiber.child) stack.push(fiber.child);
+        if (fiber.sibling) stack.push(fiber.sibling);
+      }
+      const active = await window.htmlAIProjects?.getActiveProject?.();
+      if (!runtime?.grant?.hosts?.length || !active?.html || !window.htmlAIEditRuntime) {
+        return { state: "setup-failed" };
+      }
+      try {
+        await window.htmlAIEditRuntime.prepare({
+          contractVersion: 1,
+          requestId: "edit-runtime-replay-fence-0001",
+          sourceSha256: runtime.sourceSha256,
+          html: active.html,
+          hosts: runtime.grant.hosts,
+          canvasGeneration: runtime.canvasGeneration,
+        });
+        return { state: "resolved" };
+      } catch (cause) {
+        return {
+          state: "rejected",
+          message: String(cause?.message || cause),
+        };
+      }
+    });
+    expect(replay).toMatchObject({
+      state: "rejected",
+      message: "当前画布的运行时准备已经完成。",
+    });
+    await expect(launched.page.locator("[data-runtime-bootstrap-count=\"1\"]")).toHaveCount(1);
+    expect(await documentToken(launched.page)).toBe(runtimeDocument);
+    const runtimeCanvasState = await launched.page.locator("[data-persist-state]").first().evaluate(
+      (element) => ({
+        canvasGeneration: element.getAttribute("data-canvas-generation"),
+        editRevision: element.getAttribute("data-edit-revision"),
+        persistedRevision: element.getAttribute("data-persisted-revision"),
+      }),
+    );
+
+    await addCanvasComment(
+      launched.page,
+      frame,
+      "runtime-editable",
+      "运行时图表旁的原生评论。",
+    );
+    expect({
+      document: await documentToken(launched.page),
+      canvas: await launched.page.locator("[data-persist-state]").first().evaluate(
+        (element) => ({
+          canvasGeneration: element.getAttribute("data-canvas-generation"),
+          editRevision: element.getAttribute("data-edit-revision"),
+          persistedRevision: element.getAttribute("data-persisted-revision"),
+        }),
+      ),
+    }).toEqual({ document: runtimeDocument, canvas: runtimeCanvasState });
+
+    const editable = await activateNativeEdit(frame, "runtime-editable");
+    await expect(editable).toHaveAttribute("contenteditable", "true");
+    await setTextSelection(frame, "runtime-editable", 0);
+    await launched.page.keyboard.insertText("原位");
+    await expect.poll(() => readFileSync(managedSourcePath, "utf8"))
+      .toContain("原位静态来源文字保持可编辑。");
+    expect(sha256(readFileSync(sourcePath, "utf8"))).toBe(sourceSha256);
+    expect(readFileSync(sourcePath, "utf8")).toBe(source);
+    await launched.page.keyboard.press(process.platform === "darwin" ? "Meta+S" : "Control+S");
+    await expect(launched.page.locator(".save-status")).toHaveText("已安全保存");
+    await expect(launched.page.locator("[data-runtime-bootstrap-count=\"1\"]")).toHaveCount(1);
+    expect(await documentToken(launched.page)).toBe(runtimeDocument);
+    expect(frame.isDetached()).toBe(false);
+    expect(await frame.evaluate(() => ({
+      rendererAuthorExecutions: window.__PAGEROOT_ECHARTS_AUTHOR_EXECUTIONS__,
+      chartCount: document.querySelectorAll("#chart-host canvas[data-echarts-runtime=true]").length,
+      frozenSnapshotCount: document.querySelectorAll(
+        "#chart-host img[data-pageroot-edit-runtime-snapshot]",
+      ).length,
+    }))).toEqual({
+      rendererAuthorExecutions: undefined,
+      chartCount: 0,
+      frozenSnapshotCount: 1,
+    });
+    expect(readFileSync(managedSourcePath, "utf8")).not.toMatch(
+      /data-pageroot-edit-runtime|data-echarts-runtime/u,
+    );
+  } finally {
+    if (electronApp && isolatedUserData) {
+      await stopPageRoot(electronApp, isolatedUserData);
+    }
+    removeValidatedTemporaryDirectory(
+      sourceDirectory,
+      "pageroot-edit-runtime-source-e2e-",
+    );
+  }
+});
+
+test("Electron Edit rejects unsafe ECharts host styling without persisting it", async () => {
+  const sourceDirectory = mkdtempSync(
+    path.join(tmpdir(), "pageroot-edit-runtime-rejection-source-e2e-"),
+  );
+  const sourcePath = path.join(sourceDirectory, "echarts-runtime-rejection.html");
+  const runtimeScriptPath = path.join(sourceDirectory, "echarts.js");
+  const source = `<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Rejected ECharts Edit runtime</title></head>
+<body>
+  <main id="chart-host" style="width: 640px; height: 360px"></main>
+  <p data-native-case="runtime-rejected-editable">静态来源文字保持可编辑。</p>
+  <script src="echarts.js"></script>
+  <script>
+    const chart = window.echarts.init(document.querySelector("#chart-host"));
+    chart.setOption({ series: [] });
+  </script>
+</body>
+</html>`;
+  const sourceSha256 = sha256(source);
+  writeFileSync(runtimeScriptPath, `window.echarts = {
+  init(host) {
+    host.style.position = "fixed";
+    const canvas = document.createElement("canvas");
+    canvas.dataset.echartsRuntime = "unsafe";
+    host.append(canvas);
+    return { setOption() {} };
+  }
+};`, "utf8");
+  writeFileSync(sourcePath, source, "utf8");
+
+  let electronApp = null;
+  let isolatedUserData = null;
+  try {
+    const launched = await launchPageRoot({ activeSourcePath: sourcePath });
+    electronApp = launched.electronApp;
+    isolatedUserData = launched.isolatedUserData;
+    await loadedDiskFrame(
+      launched.page,
+      sourcePath,
+      "runtime-rejected-editable",
+    );
+    // A rejected one-shot frame is replaced by the ordinary static frame; wait
+    // beyond the fixed runtime deadline before reading the current iframe.
+    await launched.page.waitForTimeout(4_500);
+    const frame = await currentEditorFrame(launched.page);
+    await expect.poll(() => frame.evaluate(() => ({
+      frozen: document.documentElement.getAttribute("data-pageroot-edit-runtime-frozen"),
+      result: document.documentElement.getAttribute("data-pageroot-edit-runtime-result"),
+      bootstrapCount: document.querySelectorAll("[data-pageroot-edit-runtime-bootstrap]").length,
+      runtimeMarkerCount: [...document.querySelectorAll("*")].filter((element) => (
+        [...element.attributes].some((attribute) => (
+          attribute.name.startsWith("data-pageroot-edit-runtime")
+        ))
+      )).length,
+      canvasCount: document.querySelectorAll("#chart-host canvas").length,
+      runtimeCanvasCount: document.querySelectorAll("canvas[data-echarts-runtime]").length,
+      hostStyle: document.querySelector("#chart-host").getAttribute("style"),
+    })), { timeout: 2_000 }).toMatchObject({
+      frozen: null,
+      result: null,
+      bootstrapCount: 0,
+      runtimeMarkerCount: 0,
+      canvasCount: 0,
+      runtimeCanvasCount: 0,
+      hostStyle: expect.stringMatching(/width:\s*640px.*height:\s*360px/u),
+    });
+    await expect(launched.page.locator(".save-status")).toHaveText("已安全保存");
+    expect(sha256(readFileSync(sourcePath, "utf8"))).toBe(sourceSha256);
+    expect(readFileSync(sourcePath, "utf8")).toBe(source);
+  } finally {
+    if (electronApp && isolatedUserData) {
+      await stopPageRoot(electronApp, isolatedUserData);
+    }
+    removeValidatedTemporaryDirectory(
+      sourceDirectory,
+      "pageroot-edit-runtime-rejection-source-e2e-",
+    );
+  }
+});
+
+test("Electron Edit isolates a malicious ECharts parent escape before static fallback", async () => {
+  const sourceDirectory = mkdtempSync(
+    path.join(tmpdir(), "pageroot-edit-runtime-parent-escape-e2e-"),
+  );
+  const sourcePath = path.join(sourceDirectory, "echarts-runtime-parent-escape.html");
+  const runtimeScriptPath = path.join(sourceDirectory, "echarts.js");
+  const source = `<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Isolated ECharts runtime</title></head>
+<body>
+  <main id="chart-host" style="width: 320px; height: 120px"></main>
+  <p data-native-case="runtime-isolated-editable">静态来源文字保持可编辑。</p>
+  <script src="echarts.js"></script>
+  <script>
+    const chart = window.echarts.init(document.querySelector("#chart-host"));
+    chart.setOption({ series: [] });
+  </script>
+</body>
+</html>`;
+  const sourceSha256 = sha256(source);
+  writeFileSync(runtimeScriptPath, `window.echarts = {
+  init(host) {
+    window.parent.document.documentElement.setAttribute("data-pageroot-author-escape", "true");
+    const canvas = document.createElement("canvas");
+    canvas.width = 320;
+    canvas.height = 120;
+    canvas.dataset.echartsRuntime = "parent-escape";
+    host.append(canvas);
+    return { setOption() {} };
+  }
+};`, "utf8");
+  writeFileSync(sourcePath, source, "utf8");
+
+  let electronApp = null;
+  let isolatedUserData = null;
+  try {
+    const launched = await launchPageRoot({ activeSourcePath: sourcePath });
+    electronApp = launched.electronApp;
+    isolatedUserData = launched.isolatedUserData;
+    await loadedDiskFrame(
+      launched.page,
+      sourcePath,
+      "runtime-isolated-editable",
+    );
+    // The author can mutate only the disposable top-level capture document.
+    // Its source audit rejects that write, and the visible Edit iframe returns
+    // to a scriptless source-backed static frame.
+    await launched.page.waitForTimeout(4_500);
+    const frame = await currentEditorFrame(launched.page);
+    expect(await launched.page.evaluate(() => (
+      document.documentElement.getAttribute("data-pageroot-author-escape")
+    ))).toBeNull();
+    await expect.poll(() => frame.evaluate(() => ({
+      escaped: document.documentElement.getAttribute("data-pageroot-author-escape"),
+      runtimeCanvasCount: document.querySelectorAll("canvas[data-echarts-runtime]").length,
+      snapshotCount: document.querySelectorAll(
+        "img[data-pageroot-edit-runtime-snapshot]",
+      ).length,
+      runtimeMarkerCount: [...document.querySelectorAll("*")].filter((element) => (
+        [...element.attributes].some((attribute) => (
+          attribute.name.startsWith("data-pageroot-edit-runtime")
+        ))
+      )).length,
+    })), { timeout: 2_000 }).toEqual({
+      escaped: null,
+      runtimeCanvasCount: 0,
+      snapshotCount: 0,
+      runtimeMarkerCount: 0,
+    });
+    await expect(launched.page.locator(".save-status")).toHaveText("已安全保存");
+    const editable = await activateNativeEdit(frame, "runtime-isolated-editable");
+    await expect(editable).toHaveAttribute("contenteditable", "true");
+    expect(sha256(readFileSync(sourcePath, "utf8"))).toBe(sourceSha256);
+    expect(readFileSync(sourcePath, "utf8")).toBe(source);
+  } finally {
+    if (electronApp && isolatedUserData) {
+      await stopPageRoot(electronApp, isolatedUserData);
+    }
+    removeValidatedTemporaryDirectory(
+      sourceDirectory,
+      "pageroot-edit-runtime-parent-escape-e2e-",
+    );
+  }
+});
+
 test("Electron edit mode reveals safe semantic content without changing disk bytes", async () => {
   const sourceDirectory = mkdtempSync(
     path.join(tmpdir(), "pageroot-presentation-source-e2e-"),
@@ -1157,6 +1866,10 @@ test("Electron rapid project switching and immediate close preserve the last nat
     await setTextSelection(frame, "list-item", 0, ORIGINAL_LIST_TEXT.length);
     await firstLaunch.page.keyboard.insertText(switchedText);
     await expect(frame.locator(caseSelector("list-item"))).toHaveText(switchedText);
+    const projectAWorkingCopyPath = await managedWorkingCopyPath(
+      firstLaunch.page,
+      projectA.sourcePath,
+    );
 
     await firstLaunch.page.getByRole("button", { name: "项目", exact: true }).click();
     await firstLaunch.page.locator(".recent-file-row")
@@ -1164,14 +1877,16 @@ test("Electron rapid project switching and immediate close preserve the last nat
       .click();
     await loadedDiskFrame(firstLaunch.page, projectB.sourcePath, "list-item");
     await expect.poll(
-      () => readFileSync(projectA.sourcePath, "utf8"),
+      () => readFileSync(projectAWorkingCopyPath, "utf8"),
       { timeout: 20_000 },
     ).toContain(switchedText);
+    expect(readFileSync(projectA.sourcePath, "utf8")).not.toContain(switchedText);
 
     ({ frame } = await openRecentProject(
       firstLaunch.page,
-      projectA.sourcePath,
+      projectAWorkingCopyPath,
       "list-item",
+      path.basename(projectA.sourcePath),
     ));
     await expect(frame.locator(caseSelector("list-item"))).toHaveText(switchedText);
     await activateNativeEdit(frame, "list-item");
@@ -1186,12 +1901,13 @@ test("Electron rapid project switching and immediate close preserve the last nat
     });
     const { frame: reopenedFrame } = await loadedDiskFrame(
       reopened.page,
-      projectA.sourcePath,
+      projectAWorkingCopyPath,
       "list-item",
     );
     await expect(reopenedFrame.locator(caseSelector("list-item")))
       .toHaveText(closeText);
-    expect(readFileSync(projectA.sourcePath, "utf8")).toContain(closeText);
+    expect(readFileSync(projectAWorkingCopyPath, "utf8")).toContain(closeText);
+    expect(readFileSync(projectA.sourcePath, "utf8")).not.toContain(closeText);
   } finally {
     if (reopened) {
       await stopPageRoot(reopened.electronApp, reopened.isolatedUserData);
@@ -1212,16 +1928,26 @@ test("project resources drain edited rules before leaving", async () => {
   const fixture = createSourceFixture("project-resources.html");
   const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
   try {
-    await loadedDiskFrame(launched.page, fixture.sourcePath, "list-item");
+    const { frame } = await loadedDiskFrame(launched.page, fixture.sourcePath, "list-item");
     const projectCount = () => {
-      const projectsRoot = path.join(launched.workspace, "projects");
+      const projectsRoot = path.join(path.dirname(launched.workspace), "project-files");
       return existsSync(projectsRoot)
         ? readdirSync(projectsRoot).filter((entry) => !entry.startsWith(".")).length
         : 0;
     };
-    expect(projectCount()).toBe(0);
+    expect(projectCount()).toBe(1);
+    await addCanvasComment(
+      launched.page,
+      frame,
+      "list-item",
+      "创建受管项目后再编辑项目资料。",
+    );
+    const managedSourcePath = await managedWorkingCopyPath(launched.page, fixture.sourcePath);
+    await loadedDiskFrame(launched.page, managedSourcePath, "list-item");
+    const projectRoot = path.dirname(managedSourcePath);
+    expect(projectCount()).toBe(1);
     await launched.page.getByRole("button", { name: "项目", exact: true }).click();
-    expect(projectCount()).toBe(0);
+    expect(projectCount()).toBe(1);
     await launched.page.getByText("项目资料", { exact: true }).click();
     const rulesButton = launched.page.getByRole("button", {
       name: /项目长期规则.*以后每次 AI 修改都会读取.*可编辑/u,
@@ -1244,14 +1970,7 @@ test("project resources drain edited rules before leaving", async () => {
     await rulesEditor.fill(updatedRules);
     await launched.page.getByRole("button", { name: "返回项目" }).click();
     await expect(launched.page.getByText("当前文件", { exact: true })).toBeVisible();
-    const projectsRoot = path.join(launched.workspace, "projects");
-    const [projectDirectoryName] = readdirSync(projectsRoot)
-      .filter((entry) => !entry.startsWith("."));
-    const projectRulesPath = path.join(
-      projectsRoot,
-      projectDirectoryName,
-      "PROJECT.md",
-    );
+    const projectRulesPath = path.join(projectRoot, "PROJECT.md");
     await expect.poll(
       () => readFileSync(projectRulesPath, "utf8"),
       { timeout: 20_000 },
@@ -1292,9 +2011,13 @@ test("multiple orphaned comments relink in sequence and resume the original send
       "list-item",
       firstComment,
     );
-    const { frame: secondCommentFrame } = await loadedDiskFrame(
+    const managedSourcePath = await managedWorkingCopyPath(
       firstLaunch.page,
       fixture.sourcePath,
+    );
+    const { frame: secondCommentFrame } = await loadedDiskFrame(
+      firstLaunch.page,
+      managedSourcePath,
       "table-cell",
     );
     await addCanvasComment(
@@ -1305,7 +2028,7 @@ test("multiple orphaned comments relink in sequence and resume the original send
     );
     const { frame: editingFrame } = await loadedDiskFrame(
       firstLaunch.page,
-      fixture.sourcePath,
+      managedSourcePath,
       "list-item",
     );
 
@@ -1319,7 +2042,7 @@ test("multiple orphaned comments relink in sequence and resume the original send
     await closePageRootGracefully(firstLaunch.electronApp, firstLaunch.page);
     firstAppClosed = true;
 
-    const externallyChanged = readFileSync(fixture.sourcePath, "utf8")
+    const externallyChanged = readFileSync(managedSourcePath, "utf8")
       .replace(
         /<li data-native-case="list-item"[^>]*>[\s\S]*?<\/li>/u,
         "",
@@ -1328,15 +2051,14 @@ test("multiple orphaned comments relink in sequence and resume the original send
         /<td data-native-case="table-cell"[^>]*>[\s\S]*?<\/td>/u,
         "",
       );
-    writeFileSync(fixture.sourcePath, externallyChanged, "utf8");
+    writeFileSync(managedSourcePath, externallyChanged, "utf8");
 
     activeLaunch = await launchPageRoot({
-      activeSourcePath: fixture.sourcePath,
       isolatedUserData: firstLaunch.isolatedUserData,
     });
     const { frame: recoveredFrame } = await loadedDiskFrame(
       activeLaunch.page,
-      fixture.sourcePath,
+      managedSourcePath,
       "flex-copy",
     );
     const recoveredComments = activeLaunch.page.locator(".comment-card");
@@ -1503,7 +2225,15 @@ test("PROJECT.md read failure never becomes editable data and recovers in place"
       activeSourcePath: sourcePath,
     });
     electronApp = launched.electronApp;
-    await loadedDiskFrame(launched.page, sourcePath, "list-item");
+    const { frame } = await loadedDiskFrame(launched.page, sourcePath, "list-item");
+    await addCanvasComment(
+      launched.page,
+      frame,
+      "list-item",
+      "创建受管项目以验证项目规则读取失败。",
+    );
+    const managedSourcePath = await managedWorkingCopyPath(launched.page, sourcePath);
+    await loadedDiskFrame(launched.page, managedSourcePath, "list-item");
 
     await launched.page.getByRole("button", { name: "项目", exact: true }).click();
     await launched.page.getByText("项目资料", { exact: true }).click();
@@ -1612,6 +2342,124 @@ test("workspace failure keeps the current page visible with export and relaunch 
   }
 });
 
+test("Electron migrates an exact legacy V4 Registry before opening an editable, commentable external V1", async () => {
+  test.setTimeout(120_000);
+  const sourceDirectory = mkdtempSync(path.join(tmpdir(), "pageroot-native-source-e2e-"));
+  const isolatedUserData = mkdtempSync(path.join(tmpdir(), "pageroot-native-e2e-"));
+  const originalToken = "SOURCE_FIDELITY_TOKEN_001";
+  const replacement = "旧Registry迁移后的编辑";
+  const original = withBomAndCrLf(fixtureBuffer("source-fidelity.html"));
+  const sourcePath = path.join(sourceDirectory, "legacy-registry-opening.html");
+  const seedSourcePath = path.join(sourceDirectory, "legacy-registry-seed.html");
+  writeFileSync(sourcePath, original);
+  writeFileSync(seedSourcePath, original);
+
+  const projectsRoot = path.join(isolatedUserData, "project-files");
+  const seedRepository = new ProjectFileRepository({ projectsRoot });
+  await seedRepository.importExternal({
+    sourcePath: seedSourcePath,
+    expectedSourceSha256: sha256(original),
+  });
+  const registryPath = path.join(projectsRoot, ".pageroot-registry.json");
+  const currentRegistry = JSON.parse(readFileSync(registryPath, "utf8"));
+  const legacyRegistry = {
+    schemaVersion: "4.0.0",
+    updatedAt: currentRegistry.updatedAt,
+    projects: Object.fromEntries(Object.entries(currentRegistry.projects).map(([projectId, record]) => [
+      projectId,
+      {
+        projectRootPath: record.registeredProjectRootPath,
+        updatedAt: record.updatedAt,
+      },
+    ])),
+  };
+  const legacyRegistryBytes = Buffer.from(
+    `${JSON.stringify(legacyRegistry, null, 2)}\n`,
+    "utf8",
+  );
+  const legacyRegistrySha256 = sha256(legacyRegistryBytes);
+  writeFileSync(registryPath, legacyRegistryBytes);
+
+  let firstApp = null;
+  let reopenedApp = null;
+  try {
+    const firstLaunch = await launchPageRoot({
+      isolatedUserData,
+      activeSourcePath: sourcePath,
+    });
+    firstApp = firstLaunch.electronApp;
+    const managedSourcePath = await managedWorkingCopyPath(firstLaunch.page, sourcePath);
+    let { frame } = await loadedDiskFrame(
+      firstLaunch.page,
+      managedSourcePath,
+      "source-fidelity",
+    );
+    await expect(firstLaunch.page.locator("main.workbench"))
+      .toHaveAttribute("data-project-state", "ready");
+    await expect(firstLaunch.page.locator(".save-status"))
+      .toContainText("已安全保存");
+    await expect(firstLaunch.page.getByRole("button", { name: "全局评论", exact: true }))
+      .toBeEnabled();
+    const migratedRegistry = JSON.parse(readFileSync(registryPath, "utf8"));
+    expect(migratedRegistry.pendingImports).toEqual({});
+    const backupPath = path.join(
+      projectsRoot,
+      ".pageroot-registry-backups",
+      `${legacyRegistrySha256.slice("sha256:".length)}.json`,
+    );
+    expect(readFileSync(backupPath)).toEqual(legacyRegistryBytes);
+    expect(readFileSync(sourcePath)).toEqual(original);
+
+    const firstComment = "旧 Registry 已迁移，评论定位正常。";
+    await addCanvasComment(firstLaunch.page, frame, "source-fidelity", firstComment);
+    await activateNativeEdit(frame, "source-fidelity");
+    await setTextSelection(frame, "source-fidelity", 0, originalToken.length);
+    await firstLaunch.page.keyboard.insertText(replacement);
+    await firstLaunch.page.keyboard.press(keyShortcut("S"));
+    await expectCheckpointPersisted(firstLaunch.page, 0);
+    await expect(firstLaunch.page.locator(".save-status"))
+      .toContainText("已安全保存");
+    expect(readFileSync(sourcePath)).toEqual(original);
+    expect(managedSourcePath).not.toBe(realpathSync(sourcePath));
+    expect(readFileSync(managedSourcePath, "utf8")).toContain(replacement);
+
+    await closePageRootGracefully(firstApp, firstLaunch.page);
+    firstApp = null;
+
+    const reopened = await launchPageRoot({ isolatedUserData });
+    reopenedApp = reopened.electronApp;
+    const { frame: reopenedFrame } = await loadedDiskFrame(
+      reopened.page,
+      managedSourcePath,
+      "source-fidelity",
+    );
+    await expect(reopened.page.locator("main.workbench"))
+      .toHaveAttribute("data-project-state", "ready");
+    await expect(reopened.page.locator(".save-status"))
+      .toContainText("已安全保存");
+    await activateNativeEdit(reopenedFrame, "source-fidelity");
+    await addCanvasComment(
+      reopened.page,
+      reopenedFrame,
+      "source-fidelity",
+      "重开后仍可定位并评论。",
+    );
+    expect(readFileSync(sourcePath)).toEqual(original);
+    expect(readFileSync(managedSourcePath, "utf8")).toContain(replacement);
+
+    await closePageRootGracefully(reopenedApp, reopened.page);
+    reopenedApp = null;
+  } finally {
+    if (firstApp) await stopPageRoot(firstApp, isolatedUserData, { cleanup: false });
+    if (reopenedApp) await stopPageRoot(reopenedApp, isolatedUserData, { cleanup: false });
+    removeIsolatedUserData(isolatedUserData);
+    removeValidatedTemporaryDirectory(
+      sourceDirectory,
+      "pageroot-native-source-e2e-",
+    );
+  }
+});
+
 test("Electron autosaves one authorized disk patch and reopens the same forward result", async () => {
   test.setTimeout(90_000);
   const sourceDirectory = mkdtempSync(path.join(tmpdir(), "pageroot-native-source-e2e-"));
@@ -1635,9 +2483,13 @@ test("Electron autosaves one authorized disk patch and reopens the same forward 
       activeSourcePath: sourcePath,
     });
     firstApp = firstLaunch.electronApp;
-    let { frame } = await loadedDiskFrame(
+    const managedSourcePath = await managedWorkingCopyPath(
       firstLaunch.page,
       sourcePath,
+    );
+    let { frame } = await loadedDiskFrame(
+      firstLaunch.page,
+      managedSourcePath,
       "source-fidelity",
     );
     expect(
@@ -1667,9 +2519,10 @@ test("Electron autosaves one authorized disk patch and reopens the same forward 
       0,
     );
     expect(
-      readFileSync(sourcePath).equals(expected),
-      "checkpoint/autosave must write only the authorized bytes",
+      readFileSync(managedSourcePath).equals(expected),
+      "checkpoint/autosave must write only the authorized V1 bytes",
     ).toBe(true);
+    expect(readFileSync(sourcePath)).toEqual(original);
 
     frame = await waitForFreshDiskFrame(
       firstLaunch.page,
@@ -1691,7 +2544,7 @@ test("Electron autosaves one authorized disk patch and reopens the same forward 
     reopenedApp = reopened.electronApp;
     const { frame: reopenedFrame } = await loadedDiskFrame(
       reopened.page,
-      sourcePath,
+      managedSourcePath,
       "source-fidelity",
     );
     expect(await reopenedFrame.locator(caseSelector("source-fidelity")).textContent())
@@ -1704,7 +2557,8 @@ test("Electron autosaves one authorized disk patch and reopens the same forward 
       legacySurfaceCount: 0,
     });
     expect(await reopenedFrame.locator("[data-lexical-editor]").count()).toBe(0);
-    expect(readFileSync(sourcePath).equals(expected)).toBe(true);
+    expect(readFileSync(sourcePath)).toEqual(original);
+    expect(readFileSync(managedSourcePath).equals(expected)).toBe(true);
 
     await closePageRootGracefully(reopenedApp, reopened.page);
     reopenedApp = null;
@@ -1719,7 +2573,7 @@ test("Electron autosaves one authorized disk patch and reopens the same forward 
   }
 });
 
-test("Electron persists text, style, structure, and reorder undo while focused fields stay native", async () => {
+test("Electron keeps V1 autosave separate from focused-field undo", async () => {
   test.setTimeout(120_000);
   const sourceDirectory = mkdtempSync(path.join(tmpdir(), "pageroot-native-source-e2e-"));
   const sourcePath = path.join(sourceDirectory, "persistent-source-history.html");
@@ -1735,231 +2589,59 @@ test("Electron persists text, style, structure, and reorder undo while focused f
 
   const isolatedUserData = mkdtempSync(path.join(tmpdir(), "pageroot-native-e2e-"));
   let firstApp = null;
-  let reopenedApp = null;
   try {
     const firstLaunch = await launchPageRoot({
       isolatedUserData,
       activeSourcePath: sourcePath,
     });
     firstApp = firstLaunch.electronApp;
-    const { frame } = await loadedDiskFrame(
+    const managedSourcePath = await managedWorkingCopyPath(
       firstLaunch.page,
       sourcePath,
+    );
+    const { frame } = await loadedDiskFrame(
+      firstLaunch.page,
+      managedSourcePath,
       "source-fidelity",
     );
     await activateNativeEdit(frame, "source-fidelity");
     await setTextSelection(frame, "source-fidelity", 0, originalToken.length);
     await firstLaunch.page.keyboard.insertText(replacement);
     await firstLaunch.page.keyboard.press(keyShortcut("S"));
-    const firstPersistedRevision = await expectCheckpointPersisted(
+    await expectCheckpointPersisted(
       firstLaunch.page,
       0,
     );
-    expect(readFileSync(sourcePath).equals(expected)).toBe(true);
-    await closePageRootGracefully(firstApp, firstLaunch.page);
-    firstApp = null;
+    expect(readFileSync(managedSourcePath).equals(expected)).toBe(true);
+    expect(readFileSync(sourcePath)).toEqual(original);
 
-    const reopened = await launchPageRoot({ isolatedUserData });
-    reopenedApp = reopened.electronApp;
-    let { frame: reopenedFrame } = await loadedDiskFrame(
-      reopened.page,
-      sourcePath,
-      "source-fidelity",
-    );
-    await reopened.page.getByRole("button", { name: "全局评论" }).click();
-    const commentInput = reopened.page.getByRole("textbox", {
+    await firstLaunch.page.getByRole("button", { name: "全局评论" }).click();
+    const commentInput = firstLaunch.page.getByRole("textbox", {
       name: "评论内容",
     });
     await commentInput.fill("原文");
     await commentInput.focus();
-    await reopened.page.keyboard.press("End");
-    await reopened.page.keyboard.insertText("新增");
+    await firstLaunch.page.keyboard.press("End");
+    await firstLaunch.page.keyboard.insertText("新增");
     await expect(commentInput).toHaveValue("原文新增");
-    await clickEditHistoryMenu(reopenedApp, reopened.page, "undo");
+    await clickEditHistoryMenu(firstApp, firstLaunch.page, "undo");
     await expect(commentInput).toHaveValue("原文");
     expect(
-      readFileSync(sourcePath).equals(expected),
-      "native comment undo must not touch the source journal",
+      readFileSync(managedSourcePath).equals(expected),
+      "native comment undo must not touch the managed V1",
     ).toBe(true);
 
-    await reopenedFrame.locator(caseSelector("source-fidelity")).click();
-    await clickEditHistoryMenu(reopenedApp, reopened.page, "undo");
-    const undoRevision = await expectCheckpointPersisted(
-      reopened.page,
-      firstPersistedRevision,
-    );
-    expect(
-      readFileSync(sourcePath).equals(original),
-      "Edit > Undo must restore the exact pre-edit source bytes after restart",
-    ).toBe(true);
-    reopenedFrame = await currentEditorFrame(reopened.page);
-    await reopenedFrame.locator(caseSelector("source-fidelity")).click();
-    await reopened.page.keyboard.press(keyShortcut("Shift+Z"));
-    let latestRevision = await expectCheckpointPersisted(
-      reopened.page,
-      undoRevision,
-    );
-    expect(
-      readFileSync(sourcePath).equals(expected),
-      "Shift+Cmd/Ctrl+Z must reapply the exact retained source patch",
-    ).toBe(true);
-
-    reopenedFrame = await currentEditorFrame(reopened.page);
-    await selectAuthoredCase(reopenedFrame, "source-fidelity");
-    const boldButton = reopened.page.getByRole("button", {
-      name: "加粗",
-      exact: true,
-    });
-    await expect(boldButton).toBeEnabled();
-    await boldButton.click();
-    latestRevision = await expectCheckpointPersisted(
-      reopened.page,
-      latestRevision,
-    );
-    const styledBytes = readFileSync(sourcePath);
-    expect(styledBytes.equals(expected)).toBe(false);
-    expect(styledBytes.toString("utf8")).toContain("font-weight: 700");
-    await clickEditHistoryMenu(reopenedApp, reopened.page, "undo");
-    latestRevision = await expectCheckpointPersisted(
-      reopened.page,
-      latestRevision,
-    );
-    expect(
-      readFileSync(sourcePath).equals(expected),
-      "style undo must restore the exact bytes before the toolbar command",
-    ).toBe(true);
-    await clickEditHistoryMenu(reopenedApp, reopened.page, "redo");
-    latestRevision = await expectCheckpointPersisted(
-      reopened.page,
-      latestRevision,
-    );
-    expect(readFileSync(sourcePath).equals(styledBytes)).toBe(true);
-
-    reopenedFrame = await currentEditorFrame(reopened.page);
-    await activateNativeEdit(reopenedFrame, "source-fidelity");
-    const styledText = await reopenedFrame
-      .locator(caseSelector("source-fidelity"))
-      .textContent();
-    await setTextSelection(
-      reopenedFrame,
-      "source-fidelity",
-      styledText.length,
-    );
-    await reopened.page.keyboard.press("Enter");
-    await reopened.page.keyboard.press(keyShortcut("S"));
-    latestRevision = await expectCheckpointPersisted(
-      reopened.page,
-      latestRevision,
-    );
-    const structuredBytes = readFileSync(sourcePath);
-    expect(structuredBytes.equals(styledBytes)).toBe(false);
-    expect(structuredBytes.toString("utf8")).toContain("<br>");
-    await clickEditHistoryMenu(reopenedApp, reopened.page, "undo");
-    latestRevision = await expectCheckpointPersisted(
-      reopened.page,
-      latestRevision,
-    );
-    expect(
-      readFileSync(sourcePath).equals(styledBytes),
-      "editable-island structure undo must remove only the inserted break",
-    ).toBe(true);
-    await clickEditHistoryMenu(reopenedApp, reopened.page, "redo");
-    latestRevision = await expectCheckpointPersisted(
-      reopened.page,
-      latestRevision,
-    );
-    expect(readFileSync(sourcePath).equals(structuredBytes)).toBe(true);
-
-    reopenedFrame = await currentEditorFrame(reopened.page);
-    await selectAuthoredCase(reopenedFrame, "source-fidelity");
-    const moveDownButton = reopened.page.getByRole("button", {
-      name: "下移",
-      exact: true,
-    });
-    await expect(moveDownButton).toBeEnabled();
-    await moveDownButton.click();
-    latestRevision = await expectCheckpointPersisted(
-      reopened.page,
-      latestRevision,
-    );
-    const reorderedBytes = readFileSync(sourcePath);
-    const reorderedText = reorderedBytes.toString("utf8");
-    expect(reorderedBytes.equals(structuredBytes)).toBe(false);
-    expect(reorderedText.indexOf('title="entity spellings"'))
-      .toBeLessThan(reorderedText.indexOf('data-native-case="source-fidelity"'));
-    await clickEditHistoryMenu(reopenedApp, reopened.page, "undo");
-    latestRevision = await expectCheckpointPersisted(
-      reopened.page,
-      latestRevision,
-    );
-    expect(
-      readFileSync(sourcePath).equals(structuredBytes),
-      "move undo must restore the exact sibling order and bytes",
-    ).toBe(true);
-    await clickEditHistoryMenu(reopenedApp, reopened.page, "redo");
-    await expectCheckpointPersisted(reopened.page, latestRevision);
-    expect(readFileSync(sourcePath).equals(reorderedBytes)).toBe(true);
-
-    await reopened.page.getByRole("button", {
-      name: "项目",
-      exact: true,
-    }).click();
-    await reopened.page.locator(".project-advanced > summary").click();
-    await reopened.page.locator(".project-rule-card").click();
-    const projectRules = reopened.page.getByRole("textbox", {
-      name: "项目长期规则",
-      exact: true,
-    });
-    await expect(projectRules).toBeEnabled();
-    const originalRules = await projectRules.inputValue();
-    await projectRules.focus();
-    await reopened.page.keyboard.press("End");
-    await reopened.page.keyboard.insertText("\n临时新增规则");
-    await expect(projectRules).toHaveValue(`${originalRules}\n临时新增规则`);
-    await clickEditHistoryMenu(reopenedApp, reopened.page, "undo");
-    await expect(projectRules).toHaveValue(originalRules);
-    expect(
-      readFileSync(sourcePath).equals(reorderedBytes),
-      "native project-rule undo must not alter canvas source history",
-    ).toBe(true);
-
-    const workspace = path.join(isolatedUserData, "workspace");
-    const registry = JSON.parse(
-      readFileSync(path.join(workspace, "project-registry.json"), "utf8"),
-    );
-    const project = Object.values(registry.projects).find(
-      (record) => record.sourcePath === realpathSync(sourcePath),
-    );
-    const history = JSON.parse(readFileSync(
-      path.join(
-        workspace,
-        "projects",
-        project.storageDirectoryName,
-        "history",
-        "source-operations.json",
-      ),
+    const manifest = JSON.parse(readFileSync(
+      path.join(path.dirname(managedSourcePath), ".pageroot", "manifest.json"),
       "utf8",
     ));
-    expect(history.cursor).toBe(4);
-    expect(history.entries.map((entry) => entry.kind))
-      .toEqual(["text", "style", "text", "reorder"]);
-    expect(history.appliedActions.map((action) => action.direction))
-      .toEqual([
-        "undo",
-        "redo",
-        "undo",
-        "redo",
-        "undo",
-        "redo",
-        "undo",
-        "redo",
-      ]);
+    expect(manifest.versions.map((version) => version.versionId)).toEqual(["ver_0001"]);
+    expect(readFileSync(sourcePath)).toEqual(original);
 
-    await closePageRootGracefully(reopenedApp, reopened.page);
-    reopenedApp = null;
+    await closePageRootGracefully(firstApp, firstLaunch.page);
+    firstApp = null;
   } finally {
     if (firstApp) await stopPageRoot(firstApp, isolatedUserData, { cleanup: false });
-    if (reopenedApp) await stopPageRoot(reopenedApp, isolatedUserData, { cleanup: false });
     removeIsolatedUserData(isolatedUserData);
     removeValidatedTemporaryDirectory(
       sourceDirectory,
@@ -1968,7 +2650,7 @@ test("Electron persists text, style, structure, and reorder undo while focused f
   }
 });
 
-test("Electron restores the active text selection and keeps comment anchors stable through source undo", async () => {
+test("Electron keeps the active text selection and comment anchors stable after V1 autosave", async () => {
   test.setTimeout(90_000);
   const sourceDirectory = mkdtempSync(path.join(tmpdir(), "pageroot-native-source-e2e-"));
   const sourcePath = path.join(sourceDirectory, "history-selection-comments.html");
@@ -1991,9 +2673,13 @@ test("Electron restores the active text selection and keeps comment anchors stab
       activeSourcePath: sourcePath,
     });
     electronApp = launched.electronApp;
-    let { editor, frame } = await loadedDiskFrame(
+    const managedSourcePath = await managedWorkingCopyPath(
       launched.page,
       sourcePath,
+    );
+    let { frame } = await loadedDiskFrame(
+      launched.page,
+      managedSourcePath,
       "source-fidelity",
     );
     const commentText = "撤回后仍然定位在这一段。";
@@ -2008,7 +2694,7 @@ test("Electron restores the active text selection and keeps comment anchors stab
     await setTextSelection(frame, "source-fidelity", 0, originalToken.length);
     await launched.page.keyboard.insertText(replacement);
     await launched.page.keyboard.press(keyShortcut("S"));
-    const persistedRevision = await expectCheckpointPersisted(launched.page, 0);
+    await expectCheckpointPersisted(launched.page, 0);
     frame = await currentEditorFrame(launched.page);
     await expect.poll(() => nativeEditingState(frame, "source-fidelity"))
       .toMatchObject({
@@ -2057,9 +2743,11 @@ test("Electron restores the active text selection and keeps comment anchors stab
       requestAnimationFrame(sample);
     });
 
-    await clickEditHistoryMenu(electronApp, launched.page, "undo");
-    await expectCheckpointPersisted(launched.page, persistedRevision);
-    await expect.poll(() => readFileSync(sourcePath).equals(original)).toBe(true);
+    await launched.page.evaluate(() => new Promise((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(resolve));
+    }));
+    expect(readFileSync(managedSourcePath, "utf8")).toContain(replacement);
+    expect(readFileSync(sourcePath)).toEqual(original);
     frame = await currentEditorFrame(launched.page);
     await expect.poll(() => nativeEditingState(frame, "source-fidelity"))
       .toMatchObject({
@@ -2068,18 +2756,8 @@ test("Electron restores the active text selection and keeps comment anchors stab
         activeCase: "source-fidelity",
         selectionInside: true,
       });
-    await expect.poll(() => selectionSnapshot(frame, "source-fidelity"))
-      .toMatchObject({
-        anchorOffset: 0,
-        focusOffset: originalToken.length,
-        text: originalToken,
-      });
     await expect(commentCard).toHaveAttribute("data-resolution", /^(?:exact|rebound)$/u);
     await expect(commentCard.getByText("原位置已变化")).toHaveCount(0);
-    await expect(editor).toHaveAttribute(
-      "data-history-adopt-path",
-      "editable-island-in-place",
-    );
 
     const visualSamples = await launched.page.evaluate(() => {
       window.__PAGEROOT_HISTORY_VISUAL_SAMPLING__ = false;
@@ -2244,9 +2922,17 @@ test("Electron persists an Apple Pinyin boundary composition with left affinity"
       previousDocumentToken,
       "heading-inline",
     );
+    const managedSourcePath = await managedWorkingCopyPath(
+      firstLaunch.page,
+      sourcePath,
+    );
     expect(
-      readFileSync(sourcePath).equals(expected),
-      "boundary IME commit must persist only the left-affinity island change",
+      readFileSync(sourcePath).equals(original),
+      "the caller-owned HTML must remain byte-for-byte unchanged after V1 import",
+    ).toBe(true);
+    expect(
+      readFileSync(managedSourcePath).equals(expected),
+      "boundary IME commit must persist only the left-affinity island change in V1",
     ).toBe(true);
 
     await expect.poll(() => frame.locator(caseSelector("heading-inline")).innerHTML())
@@ -2254,35 +2940,37 @@ test("Electron persists an Apple Pinyin boundary composition with left affinity"
 
     await closePageRootGracefully(firstApp, firstLaunch.page);
     firstApp = null;
-    const workspace = path.join(isolatedUserData, "workspace");
-    const registry = JSON.parse(
-      readFileSync(path.join(workspace, "project-registry.json"), "utf8"),
+    const projectRoot = path.dirname(managedSourcePath);
+    const manifest = JSON.parse(
+      readFileSync(path.join(projectRoot, ".pageroot", "manifest.json"), "utf8"),
     );
-    const projectEntry = Object.entries(registry.projects).find(
-      ([, project]) => project.sourcePath === realpathSync(sourcePath),
+    const workingCopy = manifest.workingCopies.find(
+      (entry) => entry.workingCopyId === "work_ver_0001",
     );
-    expect(projectEntry, "the first durable edit must establish one project authority")
-      .toBeTruthy();
-    const [, persistedProject] = projectEntry;
-    const projectRoot = path.join(
-      workspace,
-      "projects",
-      persistedProject.storageDirectoryName,
-    );
-    const annotations = JSON.parse(
-      readFileSync(path.join(projectRoot, "draft", "annotations.json"), "utf8"),
+    expect(manifest.versions.map((entry) => entry.versionId)).toEqual(["ver_0001"]);
+    expect(workingCopy).toBeTruthy();
+    const draft = JSON.parse(
+      readFileSync(
+        path.join(
+          projectRoot,
+          ".pageroot",
+          "drafts",
+          `${workingCopy.workingCopyId}.json`,
+        ),
+        "utf8",
+      ),
     );
     const runtimeState = JSON.parse(
-      readFileSync(path.join(projectRoot, "runtime-state.json"), "utf8"),
+      readFileSync(path.join(projectRoot, ".pageroot", "runtime-state.json"), "utf8"),
     );
-    expect(annotations.draftRevision).toBeGreaterThan(0);
-    expect(annotations.editEvents.length).toBeGreaterThan(0);
-    expect(runtimeState.draft.draftRevision).toBe(annotations.draftRevision);
+    expect(draft.draftRevision).toBeGreaterThan(0);
+    expect(draft.changeEvents.length).toBeGreaterThan(0);
+    expect(runtimeState.activeWorkingCopyId).toBe(workingCopy.workingCopyId);
     const reopened = await launchPageRoot({ isolatedUserData });
     reopenedApp = reopened.electronApp;
     const { frame: reopenedFrame } = await loadedDiskFrame(
       reopened.page,
-      sourcePath,
+      managedSourcePath,
       "heading-inline",
     );
     const reopenedHtml = await reopenedFrame.locator(
@@ -2290,7 +2978,8 @@ test("Electron persists an Apple Pinyin boundary composition with left affinity"
     ).innerHTML();
     expect(reopenedHtml).toContain("你好<em");
     expect(reopenedHtml).not.toContain("<i>");
-    expect(readFileSync(sourcePath).equals(expected)).toBe(true);
+    expect(readFileSync(sourcePath).equals(original)).toBe(true);
+    expect(readFileSync(managedSourcePath).equals(expected)).toBe(true);
 
     await closePageRootGracefully(reopenedApp, reopened.page);
     reopenedApp = null;
