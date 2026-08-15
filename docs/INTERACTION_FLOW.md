@@ -961,7 +961,7 @@ A 项目 processing 时切换 B 项目：
 |---|---|
 | autosave 正在处理 | `正在更新…` |
 | 源 HTML 写入成功 | `已更新到文件 · 16:32` |
-| Request 已冻结 | `16:34 已复制，可粘贴到 AI Agent对话框` |
+| Request 已冻结 | 顶部主按钮变为 `查看本轮` |
 | completion 已生成 | `内部 AI 于 16:40 完成` |
 | commit marker 已写入、canonical path 已切换并三 Hash 一致 | `V1.8 已生成并打开 · 16:41` |
 | history 模式 | `正在看历史（只读）` |
