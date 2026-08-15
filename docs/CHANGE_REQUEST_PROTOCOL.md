@@ -578,8 +578,9 @@ Attempt，不把归档 outcome 变成可打开候选。相关 Developer Preview 
 
 v3 TargetRef、评论和 supplement 继续作为生成指令与历史证据，但不再逐节点限制候选
 Version。旧 Attempt 的 `scope-report.json` 与 `validation-review.json` 仍可只读展示；新
-Attempt 不生成它们。`scope-validator.mjs` 继续服务直接 source patch、兼容性和独立合同测试，
-不得重新接入 AI Version 的接受门禁。
+Attempt 不生成它们。`scope-validator.mjs` 仍保留源码与独立合同测试，供直接 source
+patch 和兼容性校验使用，不得重新接入 AI Version 的接受门禁，也不再打进安装包。
+Bridge 身份检查改从 `html-source-parser.mjs` 读取 `rawStartTagAttributes`。
 
 ## 13. 校验矩阵
 

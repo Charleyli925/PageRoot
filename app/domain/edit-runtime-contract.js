@@ -1,7 +1,8 @@
 /**
  * Pure syntax and identity rules for the bounded Edit author-runtime path.
- * This contract describes a disposable final-frame grant only: source HTML
- * remains the persistence authority at every point.
+ * This contract describes a disposable direct-frame grant only: source HTML
+ * remains the persistence authority at every point. The grant never carries
+ * screenshots, PNG bytes or a second visual representation.
  */
 
 export const EDIT_AUTHOR_RUNTIME_CONTRACT_VERSION = 1;
@@ -18,21 +19,14 @@ export const EDIT_AUTHOR_RUNTIME_BUDGET = Object.freeze({
   sourceNodeCount: 4_096,
   runtimeSettleMs: 1_200,
   runtimeDeadlineMs: 4_000,
-  // A frozen isolated render may return only bounded host pixels to static
-  // Edit. These values intentionally mirror the established presentation
-  // budget rather than granting the renderer a general capture channel.
-  snapshotBytes: 2_000_000,
-  snapshotAggregateBytes: 16_000_000,
-  snapshotPixels: 4_194_304,
-  snapshotAggregatePixels: 4_194_304,
-  snapshotDimension: 4_096,
   orphanSessionTtlMs: 60_000,
 });
 
-// Main first bounds resource preparation, then separately bounds the isolated
-// capture owner. The Workbench may acknowledge an Edit canvas only after both
-// serial phases have had their one permitted deadline, plus one bounded
-// scheduling/acknowledgement margin. This is not a retry budget.
+// Main first bounds immutable resource preparation. The visible Edit iframe
+// then has one bounded deadline to execute, settle and freeze. The Workbench
+// may acknowledge an Edit canvas only after both serial phases have had their
+// one permitted deadline, plus one bounded scheduling/acknowledgement margin.
+// This is not a retry budget and is not a capture budget.
 export const EDIT_AUTHOR_RUNTIME_VERIFICATION_DEADLINE_MS = (
   EDIT_AUTHOR_RUNTIME_BUDGET.runtimeDeadlineMs * 2
 ) + 1_000;

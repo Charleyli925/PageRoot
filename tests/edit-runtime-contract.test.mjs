@@ -94,7 +94,7 @@ test("direct Edit runtime grants use one session and one execution identity", ()
   assert.equal(
     EDIT_AUTHOR_RUNTIME_VERIFICATION_DEADLINE_MS,
     (EDIT_AUTHOR_RUNTIME_BUDGET.runtimeDeadlineMs * 2) + 1_000,
-    "canvas acknowledgement permits one bounded preparation and one bounded capture",
+    "canvas acknowledgement permits one bounded preparation and one bounded visible-iframe settle",
   );
   assert.equal(EDIT_AUTHOR_RUNTIME_BUDGET.orphanSessionTtlMs, 60_000);
   assert.equal("cacheEntries" in EDIT_AUTHOR_RUNTIME_BUDGET, false);

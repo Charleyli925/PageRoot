@@ -17,28 +17,9 @@ import { createEmptySourceHistory } from "../app/domain/source-history.js";
 
 const SOURCE_PATH = "/tmp/workspace-controller.html";
 const NEXT_SOURCE_PATH = "/tmp/workspace-controller-next.html";
-const EDIT_RUNTIME_SNAPSHOT_BYTES = Buffer.from([
-  137, 80, 78, 71, 13, 10, 26, 10,
-  0, 0, 0, 13, 73, 72, 68, 82,
-  0, 0, 0, 1, 0, 0, 0, 1,
-]);
 
 function sha256(html) {
   return `sha256:${createHash("sha256").update(html).digest("hex")}`;
-}
-
-function editRuntimeSnapshots(request) {
-  return [{
-    key: request.hosts[0].key,
-    pngSha256: sha256("edit-runtime-snapshot"),
-    width: 1,
-    height: 1,
-    byteLength: EDIT_RUNTIME_SNAPSHOT_BYTES.byteLength,
-    pngBase64: EDIT_RUNTIME_SNAPSHOT_BYTES.toString("base64"),
-    layoutWidth: 1,
-    layoutHeight: 1,
-    styles: [],
-  }];
 }
 
 function isRecord(value) {
@@ -484,10 +465,8 @@ test("workspace controller owns one Edit runtime attempt per source path and can
           resourceSha256: sha256(`resource:${ordinal}`),
           scriptCount: 1,
           byteLength: 1,
-          bootstrapCount: 1,
           canvasGeneration: request.canvasGeneration,
           hosts: request.hosts,
-          snapshots: editRuntimeSnapshots(request),
         };
       },
       async revoke(sessionId) {
@@ -575,10 +554,8 @@ test("workspace controller starts the one-shot runtime when its initial source b
           resourceSha256: sha256("authoritative-resource"),
           scriptCount: 1,
           byteLength: 1,
-          bootstrapCount: 1,
           canvasGeneration: request.canvasGeneration,
           hosts: request.hosts,
-          snapshots: editRuntimeSnapshots(request),
         };
       },
       async revoke() {

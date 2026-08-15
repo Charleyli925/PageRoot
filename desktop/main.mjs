@@ -116,9 +116,6 @@ import {
   createRuntimeSnapshotCaptureController,
 } from "./runtime-visual-capture-owner.mjs";
 import {
-  createEditRuntimeCaptureController,
-} from "./edit-runtime-capture-owner.mjs";
-import {
   createEditRuntimePreparationFence,
 } from "./edit-runtime-preparation-fence.mjs";
 
@@ -264,7 +261,6 @@ let managedWelcomeRegistration = null;
 let previewProtocolController = null;
 let reviewRuntimeSnapshotCaptureController = null;
 let editRuntimeProtocolController = null;
-let editRuntimeCaptureController = null;
 const editRuntimePreparationFence = createEditRuntimePreparationFence();
 // An imported V1 may be an HTML-only managed Working Copy while its selected
 // external source directory still owns declared relative assets. This is
@@ -299,30 +295,6 @@ function ensureEditRuntimeProtocolController() {
     editRuntimeProtocolController.install();
   }
   return editRuntimeProtocolController;
-}
-
-function ensureEditRuntimeCaptureController() {
-  if (!editRuntimeCaptureController) {
-    editRuntimeCaptureController = createEditRuntimeCaptureController({
-      BrowserWindowClass: BrowserWindow,
-      createIsolatedSession: (partition) => electronSession.fromPartition(partition),
-      installProtocol: (targetProtocol) => {
-        ensureEditRuntimeProtocolController().installFor(targetProtocol);
-      },
-      resolveRuntimeUrl: (sessionId) => (
-        ensureEditRuntimeProtocolController().runtimeDocumentUrl(sessionId)
-      ),
-      async releaseIsolatedSession(isolatedSession) {
-        await Promise.all([
-          Promise.resolve(isolatedSession.clearStorageData?.()).catch(() => undefined),
-          Promise.resolve(
-            isolatedSession.protocol?.unhandle?.("pageroot-edit-runtime"),
-          ).catch(() => undefined),
-        ]);
-      },
-    });
-  }
-  return editRuntimeCaptureController;
 }
 
 function ensureReviewRuntimeSnapshotCaptureController() {
@@ -1241,21 +1213,6 @@ async function prepareEditAuthorRuntime(payload) {
       sourcePath: assetSourcePath,
       bindings: payload.hosts,
     });
-    const capture = await ensureEditRuntimeCaptureController().capture({
-      sessionId: session.sessionId,
-      executionId: session.executionId,
-      bindings: session.bindings,
-    });
-    if (
-      capture.outcome !== "captured"
-      || capture.bootstrapCount !== 1
-      || !Array.isArray(capture.snapshots)
-    ) {
-      throw new Error(
-        "Edit runtime isolated capture did not produce a frozen display"
-        + ` (${String(capture.outcome || "unknown")}:${String(capture.reason || "unknown")}).`,
-      );
-    }
     return Object.freeze({
       contractVersion: session.contractVersion,
       sessionId: session.sessionId,
@@ -1264,17 +1221,20 @@ async function prepareEditAuthorRuntime(payload) {
       resourceSha256: session.resourceSha256,
       scriptCount: session.scriptCount,
       byteLength: session.byteLength,
-      bootstrapCount: 1,
       canvasGeneration: payload.canvasGeneration,
       hosts: session.bindings,
-      snapshots: capture.snapshots,
     });
-  } finally {
-    try {
-      if (session) ensureEditRuntimeProtocolController().revokeSession(session.sessionId);
-    } finally {
-      releasePreparation();
+  } catch (cause) {
+    if (session) {
+      try {
+        ensureEditRuntimeProtocolController().revokeSession(session.sessionId);
+      } catch {
+        // A failed preparation must not leave a live resource session.
+      }
     }
+    throw cause;
+  } finally {
+    releasePreparation();
   }
 }
 
@@ -3261,8 +3221,6 @@ async function createWindow() {
     applicationUpdate?.stopAutomaticChecks();
     reviewRuntimeSnapshotCaptureController?.dispose();
     reviewRuntimeSnapshotCaptureController = null;
-    editRuntimeCaptureController?.dispose();
-    editRuntimeCaptureController = null;
     editRuntimeProtocolController?.dispose();
     editRuntimeProtocolController = null;
     previewProtocolController?.dispose();
