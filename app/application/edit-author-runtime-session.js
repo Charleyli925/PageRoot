@@ -53,102 +53,6 @@ function sameKey(left, right) {
     && left.canvasGeneration === right.canvasGeneration;
 }
 
-function base64ByteLength(value) {
-  const text = String(value || "");
-  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(text)) {
-    return null;
-  }
-  const padding = text.endsWith("==") ? 2 : text.endsWith("=") ? 1 : 0;
-  return (text.length / 4) * 3 - padding;
-}
-
-function allowedRuntimeHostStyle(property, value) {
-  const normalized = String(value || "").trim().toLowerCase();
-  if (property === "position") return normalized === "relative";
-  if (property === "user-select") return normalized === "none";
-  if (property === "-webkit-tap-highlight-color") {
-    return /^rgba\(\s*0\s*,\s*0\s*,\s*0\s*,\s*0\s*\)$/u.test(normalized);
-  }
-  if (property !== "transform") return false;
-  const match = /^scale\(\s*([0-9]+(?:\.[0-9]+)?)\s*\)$/u.exec(String(value || ""));
-  if (!match) return false;
-  const scale = Number(match[1]);
-  return Number.isFinite(scale) && scale > 0 && scale <= 1;
-}
-
-function normalizedSnapshots(value, expectedHosts) {
-  if (
-    !Array.isArray(value)
-    || value.length < 1
-    || value.length > expectedHosts.size
-  ) return null;
-  const seen = new Set();
-  const snapshots = [];
-  let aggregateBytes = 0;
-  let aggregatePixels = 0;
-  for (const snapshot of value) {
-    if (
-      !isRecord(snapshot)
-      || typeof snapshot.key !== "string"
-      || !expectedHosts.has(snapshot.key)
-      || seen.has(snapshot.key)
-      || !/^sha256:[a-f0-9]{64}$/u.test(String(snapshot.pngSha256 || "").toLowerCase())
-      || !Number.isSafeInteger(snapshot.width)
-      || !Number.isSafeInteger(snapshot.height)
-      || !Number.isSafeInteger(snapshot.byteLength)
-      || !Number.isSafeInteger(snapshot.layoutWidth)
-      || !Number.isSafeInteger(snapshot.layoutHeight)
-      || typeof snapshot.pngBase64 !== "string"
-      || snapshot.width < 1
-      || snapshot.height < 1
-      || snapshot.layoutWidth < 1
-      || snapshot.layoutHeight < 1
-      || snapshot.width > EDIT_AUTHOR_RUNTIME_BUDGET.snapshotDimension
-      || snapshot.height > EDIT_AUTHOR_RUNTIME_BUDGET.snapshotDimension
-      || snapshot.layoutWidth > EDIT_AUTHOR_RUNTIME_BUDGET.snapshotDimension
-      || snapshot.layoutHeight > EDIT_AUTHOR_RUNTIME_BUDGET.snapshotDimension
-      || snapshot.width * snapshot.height > EDIT_AUTHOR_RUNTIME_BUDGET.snapshotPixels
-      || snapshot.layoutWidth * snapshot.layoutHeight > EDIT_AUTHOR_RUNTIME_BUDGET.snapshotPixels
-      || snapshot.byteLength < 24
-      || snapshot.byteLength > EDIT_AUTHOR_RUNTIME_BUDGET.snapshotBytes
-      || base64ByteLength(snapshot.pngBase64) !== snapshot.byteLength
-      || !Array.isArray(snapshot.styles)
-      || snapshot.styles.length > 4
-    ) return null;
-    const styles = [];
-    const styleNames = new Set();
-    for (const pair of snapshot.styles) {
-      if (
-        !Array.isArray(pair)
-        || pair.length !== 2
-        || typeof pair[0] !== "string"
-        || typeof pair[1] !== "string"
-        || styleNames.has(pair[0])
-        || !allowedRuntimeHostStyle(pair[0], pair[1])
-      ) return null;
-      styleNames.add(pair[0]);
-      styles.push(Object.freeze([pair[0], pair[1]]));
-    }
-    aggregateBytes += snapshot.byteLength;
-    if (aggregateBytes > EDIT_AUTHOR_RUNTIME_BUDGET.snapshotAggregateBytes) return null;
-    aggregatePixels += snapshot.width * snapshot.height;
-    if (aggregatePixels > EDIT_AUTHOR_RUNTIME_BUDGET.snapshotAggregatePixels) return null;
-    seen.add(snapshot.key);
-    snapshots.push(Object.freeze({
-      key: snapshot.key,
-      pngSha256: String(snapshot.pngSha256).toLowerCase(),
-      width: snapshot.width,
-      height: snapshot.height,
-      byteLength: snapshot.byteLength,
-      pngBase64: snapshot.pngBase64,
-      layoutWidth: snapshot.layoutWidth,
-      layoutHeight: snapshot.layoutHeight,
-      styles: Object.freeze(styles),
-    }));
-  }
-  return Object.freeze(snapshots);
-}
-
 function normalizedGrant(value, request) {
   if (
     !isRecord(value)
@@ -163,7 +67,6 @@ function normalizedGrant(value, request) {
     || !Number.isSafeInteger(value.byteLength)
     || value.byteLength < 1
     || value.byteLength > EDIT_AUTHOR_RUNTIME_BUDGET.aggregateScriptBytes
-    || value.bootstrapCount !== 1
     || value.canvasGeneration !== request.canvasGeneration
     || !Array.isArray(value.hosts)
   ) return null;
@@ -182,8 +85,6 @@ function normalizedGrant(value, request) {
     hosts.push(expectedHost);
   }
   if (hosts.length !== request.hosts.length) return null;
-  const snapshots = normalizedSnapshots(value.snapshots, expected);
-  if (!snapshots) return null;
   return Object.freeze({
     contractVersion: EDIT_AUTHOR_RUNTIME_CONTRACT_VERSION,
     sessionId: String(value.sessionId).toLowerCase(),
@@ -192,10 +93,8 @@ function normalizedGrant(value, request) {
     resourceSha256: String(value.resourceSha256).toLowerCase(),
     scriptCount: value.scriptCount,
     byteLength: value.byteLength,
-    bootstrapCount: 1,
     canvasGeneration: request.canvasGeneration,
     hosts: Object.freeze(hosts),
-    snapshots,
   });
 }
 
