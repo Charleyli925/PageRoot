@@ -265,6 +265,16 @@ function activeRangeForTextFragmentTarget(
 }
 
 const EDITOR_DOCUMENT_STYLES = `
+  /*
+   * The shared review stage owns page scrolling. A root-frame scrollbar changes
+   * the authored viewport width and can feed a ResizeObserver back into Canvas
+   * height; nested authored overflow containers remain untouched.
+   */
+  html:root,
+  html:root > body {
+    overflow-y: hidden !important;
+  }
+
   ::selection {
     color: inherit !important;
     background: rgba(91, 75, 223, 0.2) !important;
