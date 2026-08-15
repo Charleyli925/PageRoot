@@ -613,6 +613,7 @@ input:focus-visible,
   display: flex;
   align-items: center;
   gap: 4px;
+  min-width: 0;
 }
 
 .canvas-mode-switch {
@@ -3304,6 +3305,7 @@ body {
 
 .save-status {
   min-width: 0;
+  flex: none;
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -3408,11 +3410,19 @@ body {
 
 .header-actions .header-send-button {
   min-height: 38px;
+  max-width: min(240px, 42vw);
   padding-inline: 15px 12px;
   border-radius: 11px;
   background: var(--indigo);
   color: #fff;
   box-shadow: 0 8px 20px rgb(76 69 211 / 18%);
+}
+
+.header-actions .header-send-button > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .header-actions .header-send-button:hover:not(:disabled) {
@@ -4115,6 +4125,7 @@ body {
 .project-panel-title,
 .processing-title {
   min-width: 0;
+  flex: 1;
   display: flex !important;
   align-items: center;
   gap: 12px;
@@ -4757,7 +4768,8 @@ body {
   flex: none;
   overflow: hidden;
   border-radius: 15px;
-  background: #111216;
+  background: transparent;
+  box-shadow: 0 7px 20px rgb(76 51 219 / 19%);
 }
 
 .processing-brand img {
@@ -4769,17 +4781,23 @@ body {
 
 .processing-title strong {
   max-width: 720px;
+  overflow: hidden;
   font-size: 24px;
+  overflow-wrap: anywhere;
 }
 
 .round-version {
   flex: none;
+  max-width: 7.5em;
+  overflow: hidden;
   padding: 8px 13px;
   border-radius: 999px;
   background: var(--indigo-soft);
   color: var(--indigo-deep) !important;
   font-size: 10px !important;
   font-weight: 720;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .side-drawer[data-drawer="handoff"] > .drawer-body {
@@ -4845,7 +4863,11 @@ body {
 }
 
 .processing-summary-bar strong {
+  min-width: 0;
+  overflow: hidden;
   font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .processing-summary-bar small {
@@ -5494,6 +5516,10 @@ body {
   white-space: nowrap;
 }
 
+.window-file-folder-action {
+  flex: none;
+}
+
 .file-version-label {
   max-width: 220px;
   overflow: hidden;
@@ -5504,7 +5530,9 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  min-width: 0;
   max-width: min(520px, 46vw);
+  flex: 0 1 auto;
   overflow-x: auto;
   text-overflow: clip;
   scrollbar-width: none;
@@ -6291,12 +6319,14 @@ body {
 
 .project-resource-meta {
   flex: none;
+  overflow: hidden;
   padding: 3px 6px;
   border-radius: 999px;
   background: #f2f3f5;
   color: #747680;
   font-size: 7px;
   font-weight: 700;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 

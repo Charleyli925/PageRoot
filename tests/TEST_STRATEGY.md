@@ -8,20 +8,18 @@
 |---|---|---|---|
 | `npm run gate:edit` | 一次局部修改后 | 只运行影响映射命中的 Node 文件；必要时 typecheck | 快速发现局部逻辑错误，不启动浏览器或 Electron |
 | `npm run gate:task` | 一个开发任务完成时 | 静态检查、受影响 Node 文件，以及相关 Browser/Electron/AI 冒烟 | 在较短时间内证明生产链路已经接通 |
-| PR `pr-feedback` | `opened/synchronize/reopened` | 按影响映射选择 Node/编译检查；并行跑非阻断 `review-advisory`，用与 `review-policy` 相同的证据合同对 live pair 做一次快照评估 | 普通推送无论 Draft/Ready 都不重复消费完整矩阵；当前活动的 Codex P0/P1 在晋升前就可见；仅切回 Draft 不产生 Feedback |
-| PR `pr-feedback` | `opened/synchronize/reopened` | 按影响映射选择 Node/编译检查；成功后由可信 `draft-review-auto` 为 exact head 自动请求一次 Codex 评审并写入滚动 status 评论 | 普通推送无论 Draft/Ready 都不重复消费完整矩阵；当前活动的 Codex P0/P1 在晋升前就可见；仅切回 Draft 不产生 Feedback |
-| `review-policy` | 最终 Tree 从 Draft 转为 Ready，由 Ready 唯一触发最终审阅 | 实时 head/base、Ready 后提交的 exact-commit Codex review、不可变 clean comment、Ready 后的 Codex Bot root `+1`、30 秒 settle window、活动非 outdated P0/P1 线程和 P0/P1 `CHANGES_REQUESTED` | 旧 head/base、Ready 前信号、旧轮次/真人/非 `+1` reaction、未结束 review、P0/P1 阻断时不能通过；P2/P3/unclassified 写为债务而不阻断 |
-| `Review Gate Recovery` | Codex 精确提交的 review/clean comment 在 `review-policy` 超时后到达 | trusted default-branch code 重验 live Ready head/base、当前 review policy、原 run timeout artifact、所有非 review job 结果 | 仅对原 run 调用 failed-job rerun；测试失败、P0/P1、Draft/closed、SHA/base 改变或 artifact 不符全部 fail closed |
-| `baseline-policy` | 分支策略通过，与 review-policy 并行 | 全局依赖 advisory policy 与 packaged-runtime closure | 基线红时不启动 Linux build、Browser 或 macOS Electron runner |
-| 一次性晋升 `release-gate` | review、baseline、完整测试和相关 dry run 都完成的最终 PR Tree | 全量 Node、三分片完整 Browser、独立 Native Electron、独立确定性 AI 闭环、真实 HTML 发现式门禁、即时 review revalidation 与 Tree Hash 凭证 | 每个最终候选只跑一次；后续新 SHA 必须重新 Draft 后 Ready |
-| `Release Dry Run` | `candidate-context` 判定 Ready 候选有打包、release metadata、Electron、Bridge、Schema 或资源风险 | clean job 生成 stable `app-update.yml`、组装/静态校验显式未签名（`identity=null`）App → 非发布 checkpoint → 第二 clean job 恢复精确 metadata、重建 renderer oracle、再次校验并启动核对名称/版本/Bundle ID | 不读取签名或 Apple 凭证、不生成 DMG/updater 制品、不成为 Candidate、不创建 tag、不发布；PR 大小只作建议，不作为触发或阻断 |
-| `Review Debt` | 每周 trusted default-branch schedule/manual run | 汇总最近 PR 的行内线程和 review-level P2/P3/unclassified `CHANGES_REQUESTED` finding 到滚动 Issue；超出活动窗口但尚未重新验证的项以 machine-readable state carry forward | 不 checkout PR head、不改代码、不合并、不成为必需检查 |
+| PR `pr-feedback` | Draft PR 的 `opened/synchronize/reopened`，且无 `full-gate` label | 按影响映射选择 Node/编译检查（`gate:edit`） | 普通 Draft 推送不消费完整矩阵 |
+| PR 完整矩阵 + `release-gate` | Ready（含直接以 Ready 开 PR）或 `full-gate` label | 全量 Node、三分片 Browser、独立 Native Electron、独立 AI 闭环、真实 HTML、依赖基线、按需 dry run、exact-tree 凭证 | `release-gate` 是唯一合并硬门；Codex 评审只展示、不阻断 |
+| `codex-review` | 与完整矩阵相同的触发条件 | 为当前 head 至多发一条 `@codex review`，并写 informational 线程快照 | `continue-on-error`；不在 `release-gate.needs` 中 |
+| `baseline-policy` | 完整矩阵路径上，分支策略通过后 | 全局依赖 advisory policy 与 packaged-runtime closure | 基线红时不启动 Linux build、Browser 或 macOS Electron runner |
+| 一次性晋升 `release-gate` | baseline、完整测试和相关 dry run 都完成的最终 PR Tree | 全量源码车道汇合后签发 Tree Hash 凭证 | 每个 Ready/full-gate head 跑一次；后续新 SHA 重新跑完整矩阵 |
+| `Release Dry Run` | `candidate-context` 判定完整矩阵候选有打包、release metadata、Electron、Bridge、Schema 或资源风险 | clean job 生成 stable `app-update.yml`、组装/静态校验显式未签名（`identity=null`）App → 非发布 checkpoint → 第二 clean job 恢复精确 metadata、重建 renderer oracle、再次校验并启动核对名称/版本/Bundle ID | 不读取签名或 Apple 凭证、不生成 DMG/updater 制品、不成为 Candidate、不创建 tag、不发布；PR 大小只作建议，不作为触发或阻断 |
 | `main-integrity` | 合并到 `main` | 校验合并 PR、Tree Hash、package/lockfile 版本和凭证时效 | 相等即复用完整源码证据，不重复 Node、Browser 或 Electron 测试；不相等直接失败 |
 | 按需 `Developer Preview` | 仅在开发者明确要求时 | 干净 Tree、最新 renderer、ad-hoc DMG、包内容完整性、一次隔离启动和精确 PR/内容交付报告 | 在消耗签名/公证时间前发现“漏打包或根本跑不起来”；不成为正式门禁 |
 | `Release Candidate` | 打标签之前，凭证新鲜且 Tree/版本完全一致 | 预签名 App 内容/完整运行校验 → Developer ID 签名后启动 → App 公证 checkpoint → 从同一 App 生成并公证 DMG → 最终字节校验 | 内容错误不消耗 Apple 队列；后段失败只重跑后段 |
 | `Release` | 候选包通过且不超过 72 小时 | 重新校验候选凭证和每个文件 Hash，创建 tag 并发布原字节 | 发布阶段不重新构建、不悄悄替换文件 |
 
-本地 `release` 和完整 `artifact` 不根据改动缩减范围。`Developer Preview` 是独立的可选入口，正式 `release`、`artifact` 和 `artifact-only` 都不会自动调用它；自动部分不等待人工安装结果，开发者的短验证仅是反馈，不签发正式凭证。`artifact-only` 不是开发者手工跳过源码测试的捷径：执行器会拒绝缺少 CI 信任决定、Tree Hash 或版本不一致的调用，只允许 `Release Candidate` 在七天内成功 PR 凭证与当前 Tree Hash、版本完全一致时进入。发布工作流只接受同一 Tree/版本、已验证且 72 小时内的候选包。`edit` 和 `task` 的选择由 `tests/test-impact-map.json` 决定，模型或开发者只选择门禁层级，不临时拼接测试命令。
+本地 `release` 和完整 `artifact` 不根据改动缩减范围。`Developer Preview` 是独立的可选入口，正式 `release` 和 `artifact` 都不会自动调用它；自动部分不等待人工安装结果，开发者的短验证仅是反馈，不签发正式凭证。`Release Candidate` 使用 `gate:candidate-app:auto`：执行器会拒绝缺少 CI 信任决定、Tree Hash 或版本不一致的调用，只允许在七天内成功 PR 凭证与当前 Tree Hash、版本完全一致时进入。发布工作流只接受同一 Tree/版本、已验证且 72 小时内的候选包。`edit` 和 `task` 的选择由 `tests/test-impact-map.json` 决定，模型或开发者只选择门禁层级，不临时拼接测试命令。
 
 ## 影响映射所有权
 
@@ -35,37 +33,18 @@ Tree，不在测试执行期间自动合并分支。组合 Tree 含任何未合�
 
 `npm run task:finish` 是 `gate:task -- --base origin/main` 的安全任务包装，不引入新的门禁层。`tests/task-workflow.test.mjs` 在独立临时 Git 仓库中验证分支名、干净 primary `main`、远端同步、隔离 worktree 创建、现有分支 attach、脏工作区拒绝、GitHub PR/本地独有提交分类、retire 默认 dry-run、显式放弃围栏和最终差异报告，不会操作开发者的真实分支。
 
-PR 必须从 Draft 开始。普通推送由独立的 `PR Feedback` workflow 处理，
-不会创建名为 `release-gate` 的跳过 job；因此分支保护不会把轻量反馈误当
-做一次非阻断快照，把当前活动的 P0/P1 暴露在晋升之前。每次 `PR Feedback`
-成功后，可信的 `Draft Codex Review Auto` workflow 会为 exact head 自动请求
-一次 Codex 评审并把结轮状态写进滚动 status 评论；维护者也可用
-`pageroot-draft-review-command:v1` 评论手动请求或关闭一轮。Codex 只在 Ready
-转换后或受信 exact-head 请求后评审，Draft 期轮询不可能观察到新评审，因此 status 评论是快照语义，
-转换后或受信 exact-head 请求后评审，Draft 期轮询不可能观察到新评审，因此 advisory 是快照语义，
-`review-policy` 才是权威等待。只切回 Draft 不触发
-head/base SHA marker 在 Draft 请求第二轮审阅。
-`review-policy` 只接受 Ready 后携带当前完整 `commit_id` 和匹配
-`Reviewed commit` marker 的 Codex review、不可编辑的 exact-commit clean
-Codex comment，或最新 Ready 后由 `chatgpt-codex-connector[bot]` 加在 PR 根节点的
-`+1`。reaction 没有 SHA 字段，因此只通过最新 Ready 与持续重验的冻结 head/base
-绑定候选；旧轮次、真人和其他 reaction 都忽略。它在每轮轮询中重验 live head/base，完成后等待 30 秒，再检查
-未解决且未 outdated 的 P0/P1 线程。只有明确标为 P0/P1 的 `CHANGES_REQUESTED` 必须阻断；
-P2/P3/unclassified finding 则写入 review debt，不应为了清理它们额外生成
-候选 SHA。空 review、错误 commit、普通讨论文本和早于 Ready 的信号不参与判定。
-若唯一失败是 `review_wait_timed_out` 与其下游 `release-gate`，晚到的 Codex
-事件会触发恢复工作流；恢复器必须读取原 attempt 的 review-policy artifact，
-确认当前 pair/Ready 未变、live policy 已通过、11 个必需 non-review job 全绿且
-没有第三个失败 job，才允许 GitHub 只重跑该 run 的失败任务。
+PR 必须从 Draft 开始。普通 Draft 推送由 `ci.yml` 的 `pr-feedback` job
+处理，不会创建名为 `release-gate` 的跳过 job。Ready、直接以 Ready 开
+PR，或加上 `full-gate` label 后才跑完整矩阵；`release-gate` 是唯一合
+并硬门。同一路径会为当前 head 至多请求一次 Codex 评审并写 informational
+快照，P0/P1 只展示、不阻断。没有 probe marker、没有 30 秒 settle、没
+有 review-gate recovery，也没有 weekly review-debt Issue。
 
-`branch-policy`、`baseline-policy`、`review-policy` 与 `candidate-context` 按依赖
-并行：baseline 不等待 review，完整 Linux/Browser/Electron job 只等待基线，
-从而把审阅等待与耗时测试重叠。`release-gate` 汇合它们，针对打包风险要求
-dry run 成功、针对 source-only 允许 dry run 跳过，随后即时重验 review policy 并
-刷新基线后签发凭证。若晋升后又有提交，新 SHA 只获得反馈且缺少必需检查，必须
-重新转 Draft、批量修复必要 P0/P1 后再 Ready；base 更新同样使已审组合失效。
-PR 批量是建议而非固定限制：用 CI Health 的 Ready 次数、candidate churn 和
-30–40 分钟候选时长判断是否需要协调，而非机械限制并行 PR 数量。
+`branch-policy`、`baseline-policy` 与 `candidate-context` 按依赖并行：
+完整 Linux/Browser/Electron job 只等待基线。`release-gate` 汇合它们，
+针对打包风险要求 dry run 成功、针对 source-only 允许 dry run 跳过，
+刷新基线后签发凭证。Ready PR 上的新提交会取消旧 run 并为新 head 重跑
+完整矩阵。PR 批量是建议而非固定限制。
 
 每个 macOS Electron lane 仍然本地构建 renderer（通常亚秒级，且排除
 Linux→macOS 构建产物变量），并各自跑 hosted-window preflight，保证各自
@@ -303,23 +282,8 @@ Browser 验证真实 DOM 中保存卡片、草稿卡片和输入框在当前/其
 每个 evidence stage；任何未同步到允许列表的名称必须在源码门禁中失败，不能等到
 正式候选打包才暴露。
 
-CI Health 每日先跑依赖健康基线，并同时读取 `ci.yml`、`pr-feedback.yml`、
-`release-dry-run.yml`、`release-candidate.yml` 与 `release.yml`，以及 Pull
-Request 的 Ready event、review、review comment 和 issue comment。除了同一 run
-的绿色 job 重跑，它还按 PR number（旧数据缺失时按 head branch）聚合不同 SHA 的
-完整门禁，记录 Ready 次数、P0/P1/P2/P3/unclassified finding、Ready-to-review、
-Ready-to-gate、gate-to-merge 和 candidate-to-merge。review 延迟只接受与
-`review-policy` 相同的最终 head、Ready 后 Codex completion；测试完成取该 final
-SHA 上最后一个成功 source/dry-run lane，而不是等待 review 的 `release-gate`。
-流量指标只采纳窗口内的 Ready/merge 区间，超过分页上限会显式失败。目标是正常候选
-P50 在 40 分钟内完成，其中 review 小于 15 分钟、测试小于 20 分钟、
-gate-to-merge 小于 10 分钟。PR 大小只以 advisory scope 观察，不加入目标或阻断。
-报告同时保留总量、完整门禁、Feedback、候选 churn runner minutes 及 PR/候选取消率。
-只有 `status=completed` 且存在 conclusion 的 workflow run 可进入完整门禁次数、
-延迟、尝试、churn 和取消率分母；活动 run 的数量与已结束 job 所消耗的 runner
-minutes 另行展示，不使用可变的 `updated_at` 伪造已完成延迟。Actions Summary
-对每个可机器计算的报告目标明确显示 `MET`、`MISSED` 或 `NO DATA`，而
-review/baseline 阻断和正在执行的候选不会被误计成完整门禁。
+`npm run ci:health` 可本地或手动汇总最近 `ci.yml` 的结论与重试恢复 job。
+它不是定时 workflow，也不是合并门禁。报告写在 `output/ci-health/`。
 
 ## 判断标准优先级
 

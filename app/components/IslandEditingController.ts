@@ -1114,6 +1114,18 @@ export class IslandEditingController {
       this.focusSelection();
       return;
     }
+    const range = this.collapsedRangeAtPoint(point);
+    if (range) {
+      const selection = this.hostElement.ownerDocument.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+    } else {
+      setSelectionValue(this.hostElement, priorSelection);
+    }
+    this.emitState();
+  }
+
+  private collapsedRangeAtPoint(point: { clientX: number; clientY: number }): Range | null {
     const documentNode = this.hostElement.ownerDocument;
     const caretPosition = documentNode.caretPositionFromPoint?.(
       point.clientX,
@@ -1131,16 +1143,62 @@ export class IslandEditingController {
       offsetNode
       && (offsetNode === this.hostElement || this.hostElement.contains(offsetNode))
     ) {
-      const selection = documentNode.getSelection();
-      const range = documentNode.createRange();
-      range.setStart(offsetNode, offset);
-      range.collapse(true);
-      selection?.removeAllRanges();
-      selection?.addRange(range);
-    } else {
-      setSelectionValue(this.hostElement, priorSelection);
+      try {
+        const range = documentNode.createRange();
+        range.setStart(offsetNode, offset);
+        range.collapse(true);
+        return range;
+      } catch {
+        // Fall through to the nearest insertion point inside the island.
+      }
     }
-    this.emitState();
+    return this.nearestCollapsedRangeInHost(point);
+  }
+
+  private nearestCollapsedRangeInHost(
+    point: { clientX: number; clientY: number },
+  ): Range | null {
+    const documentNode = this.hostElement.ownerDocument;
+    const showText = documentNode.defaultView?.NodeFilter.SHOW_TEXT ?? 4;
+    const walker = documentNode.createTreeWalker(this.hostElement, showText);
+    let bestRange: Range | null = null;
+    let bestDistance = Number.POSITIVE_INFINITY;
+    let current = walker.nextNode();
+    const consider = (textNode: Text, offset: number) => {
+      const range = documentNode.createRange();
+      range.setStart(textNode, offset);
+      range.collapse(true);
+      const rect = range.getClientRects()[0] ?? range.getBoundingClientRect();
+      if (!rect || (rect.width === 0 && rect.height === 0 && rect.x === 0 && rect.y === 0)) {
+        return;
+      }
+      const dx = point.clientX < rect.left
+        ? rect.left - point.clientX
+        : point.clientX > rect.right
+          ? point.clientX - rect.right
+          : 0;
+      const dy = point.clientY < rect.top
+        ? rect.top - point.clientY
+        : point.clientY > rect.bottom
+          ? point.clientY - rect.bottom
+          : 0;
+      const distance = dx * dx + dy * dy;
+      if (distance < bestDistance) {
+        bestRange = range;
+        bestDistance = distance;
+      }
+    };
+    while (current) {
+      const textNode = current as Text;
+      const length = textNode.data.length;
+      if (length > 0) {
+        const step = length <= 48 ? 1 : Math.max(1, Math.floor(length / 24));
+        for (let offset = 0; offset < length; offset += step) consider(textNode, offset);
+        consider(textNode, length);
+      }
+      current = walker.nextNode();
+    }
+    return bestRange;
   }
 
   getSelection(): NativeEditSelection {

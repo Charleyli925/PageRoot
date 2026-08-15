@@ -129,17 +129,17 @@ test("failed runs, expired artifacts and non-PR commits are never trusted", () =
   })).reason, "no_merged_pull_request");
 });
 
-test("GitHub workflows run tests in parallel with one final-review policy and keep exact-tree release provenance", async () => {
-  const [ci, feedback, dryRun, candidate, release, packageText] = await Promise.all([
+test("GitHub workflows keep one CI file, informational Codex review, and exact-tree release provenance", async () => {
+  const [ci, dryRun, candidate, release, packageText] = await Promise.all([
     readFile(path.join(productRoot, ".github/workflows/ci.yml"), "utf8"),
-    readFile(path.join(productRoot, ".github/workflows/pr-feedback.yml"), "utf8"),
     readFile(path.join(productRoot, ".github/workflows/release-dry-run.yml"), "utf8"),
     readFile(path.join(productRoot, ".github/workflows/release-candidate.yml"), "utf8"),
     readFile(path.join(productRoot, ".github/workflows/release.yml"), "utf8"),
     readFile(path.join(productRoot, "package.json"), "utf8"),
   ]);
   const packageJson = JSON.parse(packageText);
-  const reviewPolicy = workflowJob(ci, "review-policy");
+  const prFeedback = workflowJob(ci, "pr-feedback");
+  const codexReview = workflowJob(ci, "codex-review");
   const candidateContext = workflowJob(ci, "candidate-context");
   const baselinePolicy = workflowJob(ci, "baseline-policy");
   const sourceBuild = workflowJob(ci, "source-build");
@@ -150,55 +150,42 @@ test("GitHub workflows run tests in parallel with one final-review policy and ke
   const releaseDryRun = workflowJob(ci, "release-dry-run");
   const releaseGate = workflowJob(ci, "release-gate");
 
-  assert.match(ci, /types: \[ready_for_review\]/u);
+  assert.match(ci, /types: \[opened, synchronize, reopened, ready_for_review\]/u);
   assert.doesNotMatch(ci, /workflow_dispatch/u);
-  assert.doesNotMatch(ci, /types: \[[^\]]*synchronize/u);
   assert.doesNotMatch(ci, /pull_request_target/u);
-  assert.doesNotMatch(ci, /contents: write|issues: write|pull-requests: write/u);
+  assert.doesNotMatch(ci, /contents: write|issues: write/u);
+  assert.match(ci, /pull-requests: write/u);
   assert.doesNotMatch(ci, /gh pr merge|mergePullRequest/u);
-  assert.doesNotMatch(ci, /name: (?:draft|pr)-feedback/u);
-  assert.match(ci, /issues: read/u);
-  assert.match(reviewPolicy, /name: review-policy/u);
-  assert.match(reviewPolicy, /check-pr-review-policy\.mjs/u);
-  assert.match(reviewPolicy, /--expected-head "\$\{\{ github\.event\.pull_request\.head\.sha \}\}"/u);
-  assert.match(reviewPolicy, /--expected-base "\$\{\{ github\.event\.pull_request\.base\.sha \}\}"/u);
-  assert.match(reviewPolicy, /--settle-seconds 30/u);
-  assert.match(reviewPolicy, /--timeout-seconds 900/u);
-  assert.match(reviewPolicy, /--poll-seconds 15/u);
-  assert.match(reviewPolicy, /--mode wait/u);
-  assert.match(reviewPolicy, /PageRoot-review-policy-\$\{\{ github\.run_id \}\}/u);
-  assert.match(reviewPolicy, /output\/review-policy\/review-policy\.json/u);
-  assert.doesNotMatch(reviewPolicy, /Draft|exact_sha_review/u);
+  assert.match(ci, /name: pr-feedback/u);
+  assert.match(prFeedback, /github\.event\.pull_request\.draft == true/u);
+  assert.match(prFeedback, /npm run gate:edit -- --base "\$PR_BASE_SHA"/u);
+  assert.match(prFeedback, /--stage pr-feedback/u);
+  assert.match(codexReview, /continue-on-error: true/u);
+  assert.match(codexReview, /request-codex-review\.mjs/u);
+  assert.match(codexReview, /check-pr-review-policy\.mjs/u);
+  assert.doesNotMatch(codexReview, /--settle-seconds|--timeout-seconds 900|--mode wait/u);
   assert.match(candidateContext, /classify-pr-candidate\.mjs/u);
   assert.match(candidateContext, /advisory_only|PR-size limit/u);
   assert.match(baselinePolicy, /name: baseline-policy/u);
   assert.match(baselinePolicy, /needs:[\s\S]*- branch-policy/u);
-  assert.doesNotMatch(baselinePolicy, /review-policy/u);
+  assert.doesNotMatch(baselinePolicy, /review-policy|codex-review/u);
   assert.match(baselinePolicy, /npm run audit:dependencies/u);
   assert.match(sourceBuild, /needs:[\s\S]*- baseline-policy/u);
-  assert.doesNotMatch(sourceBuild, /review-policy/u);
-  assert.match(sourceBuild, /npm run ci:source-build:prepared/u);
+  assert.match(sourceBuild, /npm run ci:source-build/u);
+  assert.doesNotMatch(sourceBuild, /ci:source-build:prepared/u);
   assert.match(sourceBuild, /name: PageRoot-web-build-\$\{\{ github\.run_id \}\}/u);
   assert.match(sourceBuild, /retention-days: 30/u);
   assert.match(sourceBuild, /overwrite: true/u);
   assert.doesNotMatch(sourceBuild, /PageRoot-web-build-[^\n]*run_attempt/u);
   assert.match(sourceNode, /name: PageRoot-web-build-\$\{\{ github\.run_id \}\}/u);
   assert.match(sourceBrowser, /name: PageRoot-web-build-\$\{\{ github\.run_id \}\}/u);
-  assert.doesNotMatch(sourceNode, /PageRoot-web-build-[^\n]*run_attempt/u);
-  assert.doesNotMatch(sourceBrowser, /PageRoot-web-build-[^\n]*run_attempt/u);
   assert.match(electronNative, /needs:[\s\S]*- baseline-policy/u);
   assert.match(electronAi, /needs:[\s\S]*- baseline-policy/u);
-  assert.doesNotMatch(electronNative, /review-policy/u);
-  assert.doesNotMatch(electronAi, /review-policy/u);
   assert.match(ci, /name: release-gate/u);
-  assert.match(releaseGate, /needs:[\s\S]*- review-policy[\s\S]*- baseline-policy/u);
+  assert.doesNotMatch(releaseGate, /review-policy|codex-review/u);
   assert.match(releaseGate, /needs:[\s\S]*- candidate-context[\s\S]*- release-dry-run/u);
-  assert.match(releaseGate, /REVIEW_RESULT: \$\{\{ needs\.review-policy\.result \}\}/u);
   assert.match(releaseGate, /BASELINE_RESULT: \$\{\{ needs\.baseline-policy\.result \}\}/u);
-  assert.match(releaseGate, /Revalidate frozen head\/base final-review policy immediately/u);
-  assert.match(releaseGate, /--mode revalidate/u);
-  assert.match(releaseGate, /--expected-head "\$\{\{ github\.event\.pull_request\.head\.sha \}\}"/u);
-  assert.match(releaseGate, /--expected-base "\$\{\{ github\.event\.pull_request\.base\.sha \}\}"/u);
+  assert.doesNotMatch(releaseGate, /Revalidate frozen head\/base|--mode revalidate/u);
   assert.match(releaseGate, /Refresh dependency and packaged-runtime baseline before attestation/u);
   assert.match(releaseGate, /npm run audit:dependencies/u);
   assert.match(ci, /source-gate-provenance\.mjs create/u);
@@ -212,7 +199,8 @@ test("GitHub workflows run tests in parallel with one final-review policy and ke
   assert.match(ci, /name: electron-native/u);
   assert.match(ci, /name: electron-ai/u);
   assert.doesNotMatch(ci, /name: electron-renderer/u);
-  assert.match(ci, /test:electron:ci-preflight:prepared/u);
+  assert.match(ci, /test:electron:ci-preflight/u);
+  assert.doesNotMatch(ci, /test:electron:ci-preflight:prepared/u);
   assert.match(ci, /--stage environment-preflight/u);
   assert.match(ci, /npm run desktop:renderer/u);
   assert.doesNotMatch(ci, /dist-desktop/u);
@@ -226,25 +214,14 @@ test("GitHub workflows run tests in parallel with one final-review policy and ke
   assert.match(ci, /Verify PR result, exact tree, version and freshness/u);
   assert.doesNotMatch(ci, /name: main-smoke|gate:main:auto/u);
   assert.doesNotMatch(ci, /push:[\s\S]{0,300}gate:release:auto/u);
-
-  assert.match(feedback, /types: \[opened, synchronize, reopened\]/u);
-  assert.doesNotMatch(feedback, /converted_to_draft/u);
-  assert.match(feedback, /name: pr-feedback/u);
-  assert.match(feedback, /--stage pr-feedback/u);
-  assert.match(feedback, /npm run gate:edit -- --base "\$PR_BASE_SHA"/u);
-  assert.match(feedback, /group: pageroot-pr-/u);
   assert.match(ci, /group: pageroot-pr-/u);
-  assert.doesNotMatch(feedback, /name: release-gate|test:browser:full|test:electron:full/u);
-  assert.match(feedback, /pull-requests: read/u);
-  assert.doesNotMatch(feedback, /contents: write|issues: write|pull-requests: write/u);
   assert.equal(
     packageJson.scripts["ci:source-build"],
-    "npm run audit:dependencies && npm run ci:source-build:prepared",
-  );
-  assert.equal(
-    packageJson.scripts["ci:source-build:prepared"],
     "npm run typecheck && npm run lint && npm run build",
   );
+  assert.equal(packageJson.scripts["ci:source-build:prepared"], undefined);
+  assert.equal(packageJson.scripts["gate:artifact-only:auto"], undefined);
+  assert.equal(packageJson.scripts["release:mac:x64"], undefined);
 
   assert.match(ci, /uses: \.\/\.github\/workflows\/release-dry-run\.yml/u);
   assert.match(releaseDryRun, /uses: \.\/\.github\/workflows\/release-dry-run\.yml/u);
@@ -265,7 +242,8 @@ test("GitHub workflows run tests in parallel with one final-review policy and ke
   assert.match(candidate, /release-app-checkpoint\.mjs restore/u);
   assert.match(candidate, /--profile candidate-artifacts/u);
   assert.match(candidate, /release-candidate-provenance\.mjs create/u);
-  assert.match(candidate, /test:electron:ci-preflight:prepared/u);
+  assert.match(candidate, /test:electron:ci-preflight/u);
+  assert.doesNotMatch(candidate, /test:electron:ci-preflight:prepared/u);
   assert.doesNotMatch(candidate, /npm run release:mac/u);
   assert.doesNotMatch(candidate, /gate:artifact-only:auto/u);
   assert.doesNotMatch(candidate, /gh release create/u);
@@ -279,55 +257,14 @@ test("GitHub workflows run tests in parallel with one final-review policy and ke
   assert.doesNotMatch(release, /gate:artifact-only:auto/u);
 });
 
-test("the Draft Codex review probe stays a trusted default-branch issue-comment workflow", async () => {
-  const workflow = await readFile(
-    path.join(productRoot, ".github/workflows/draft-review.yml"),
-    "utf8",
-  );
-  assert.match(workflow, /on:\s*\n\s+issue_comment:\s*\n\s+types: \[created\]/u);
-  assert.doesNotMatch(workflow, /workflow_dispatch:/u);
-  assert.doesNotMatch(workflow, /workflow_run:/u);
-  assert.doesNotMatch(workflow, /^\s+pull_request(?:_target)?:/mu);
-  assert.doesNotMatch(workflow, /ref:\s*\$\{\{\s*github\.event\.pull_request\.head\.sha/u);
-  assert.doesNotMatch(workflow, /refs\/pull\//u);
-  assert.doesNotMatch(workflow, /actions\/download-artifact/u);
-  assert.doesNotMatch(workflow, /secrets\./u);
-  assert.match(workflow, /permissions:\s*\n\s+contents: read\s*\n\s+pull-requests: write/u);
-  assert.doesNotMatch(workflow, /contents: write|issues: write|actions: write|checks: write/u);
-  assert.doesNotMatch(workflow, /gh pr merge|mergePullRequest|git push|git tag|gh release/u);
-  assert.match(workflow, /if: >-\s*\n\s+github\.event\.issue\.pull_request\s*\n\s+&& contains\(github\.event\.comment\.body, 'pageroot-draft-review-command:v1'\)/u);
-  assert.match(workflow, /draft-review-request\.mjs/u);
-  assert.match(workflow, /persist-credentials: false/u);
-  assert.match(workflow, /ISSUE_NUMBER: \$\{\{\s*github\.event\.issue\.number\s*\}\}/u);
-  assert.match(workflow, /COMMENT_ID: \$\{\{\s*github\.event\.comment\.id\s*\}\}/u);
-  assert.match(workflow, /--pull-request "\$ISSUE_NUMBER"/u);
-  assert.match(workflow, /--comment-id "\$COMMENT_ID"/u);
-  assert.doesNotMatch(workflow, /--(?:pull-request|comment-id) "\$\{\{/u);
-  assert.match(workflow, /group: pageroot-draft-review-\$\{\{\s*contains\(github\.event\.comment\.body, 'pageroot-draft-review-command:v1'\)/u);
-  assert.match(workflow, /format\('cmd-\{0\}', github\.event\.issue\.number\)/u);
-  assert.match(workflow, /format\('noise-\{0\}', github\.event\.comment\.id\)/u);
-  assert.doesNotMatch(workflow, /cancel-in-progress: true/u);
-  assert.match(workflow, /runs-on: ubuntu-24\.04/u);
-  assert.doesNotMatch(workflow, /runs-on: macos-/u);
-});
-test("the automatic Draft Codex review workflow stays a trusted default-branch workflow_run follower", async () => {
-  const workflow = await readFile(
-    path.join(productRoot, ".github/workflows/draft-review-auto.yml"),
-    "utf8",
-  );
-  assert.match(workflow, /on:\s*\n\s+workflow_run:\s*\n\s+workflows: \[PR Feedback\]\s*\n\s+types: \[completed\]/u);
-  assert.doesNotMatch(workflow, /workflow_dispatch:|issue_comment:|^\s+pull_request(?:_target)?:/mu);
-  assert.doesNotMatch(workflow, /ref:\s*\$\{\{\s*github\.event\.pull_request\.head\.sha/u);
-  assert.doesNotMatch(workflow, /refs\/pull\//u);
-  assert.doesNotMatch(workflow, /actions\/download-artifact/u);
-  assert.doesNotMatch(workflow, /secrets\./u);
-  assert.match(workflow, /permissions:\s*\n\s+contents: read\s*\n\s+pull-requests: write/u);
-  assert.doesNotMatch(workflow, /contents: write|issues: write|actions: write|checks: write/u);
-  assert.doesNotMatch(workflow, /gh pr merge|mergePullRequest|git push|git tag|gh release/u);
-  assert.match(workflow, /if: github\.event\.workflow_run\.conclusion == 'success'/u);
-  assert.match(workflow, /draft-review-request\.mjs/u);
-  assert.match(workflow, /--workflow-run-id "\$WORKFLOW_RUN_ID"/u);
-  assert.match(workflow, /persist-credentials: false/u);
-  assert.match(workflow, /runs-on: ubuntu-24\.04/u);
-  assert.doesNotMatch(workflow, /runs-on: macos-/u);
+test("retired review-governance workflows are gone", async () => {
+  const { readdir } = await import("node:fs/promises");
+  const workflows = await readdir(path.join(productRoot, ".github/workflows"));
+  assert.deepEqual(workflows.sort(), [
+    "ci.yml",
+    "developer-preview.yml",
+    "release-candidate.yml",
+    "release-dry-run.yml",
+    "release.yml",
+  ]);
 });

@@ -462,12 +462,12 @@ function installApplicationMenu() {
       role: "editMenu",
       submenu: [
         {
-          label: "Undo",
+          label: "撤销",
           accelerator: "CommandOrControl+Z",
           click: () => requestRendererHistory("undo"),
         },
         {
-          label: "Redo",
+          label: "重做",
           accelerator: "CommandOrControl+Shift+Z",
           click: () => requestRendererHistory("redo"),
         },
@@ -1785,7 +1785,7 @@ async function revealVersionFile(payload) {
     if (workingCopy.sha256 !== versionRecord.workingCopySha256) {
       throw new ProjectFileError(
         "VERSION_WORKING_COPY_HASH_MISMATCH",
-        "Version Working Copy 在验证后已改变，尚未在 Finder 中显示。",
+        "Version Working Copy 在验证后已改变，尚未在文件夹中打开。",
         {
           expectedSha256: versionRecord.workingCopySha256,
           actualSha256: workingCopy.sha256,
@@ -1883,7 +1883,7 @@ async function revealAiTask(payload) {
   ) {
     throw new ProjectFileError(
       "AI_TASK_UNAVAILABLE",
-      "这个 AI 任务暂时无法在 Finder 中显示，请稍后重试。",
+      "这个 AI 任务暂时无法在文件夹中打开，请稍后重试。",
     );
   }
   const [resolvedSourcePath, returnedSourcePath, resolvedProjectRoot, resolvedTaskPath] = await Promise.all([
