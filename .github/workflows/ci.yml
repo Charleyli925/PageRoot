@@ -4,35 +4,93 @@ on:
   push:
     branches: [main]
   pull_request:
-    # A Ready transition is the one explicit promotion of a frozen candidate.
-    # Ordinary updates receive fast impact feedback only; a later code change
-    # returns the PR to Draft and requires one new final candidate promotion.
-    types: [ready_for_review]
+    # Draft opens/pushes run impact-selected feedback only. A non-draft PR
+    # (Ready transition, opened already Ready, or `full-gate` label) runs the
+    # complete source matrix. Returning to Draft starts no full gate.
+    types: [opened, synchronize, reopened, ready_for_review]
 
 permissions:
   actions: read
   contents: read
   issues: read
-  pull-requests: read
+  pull-requests: write
 
 concurrency:
-  # Shared with pr-feedback.yml so a new commit cancels an in-flight complete
-  # gate for the stale Pull Request head.
   group: pageroot-pr-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
-  review-policy:
-    name: review-policy
-    if: github.event_name == 'pull_request'
+  pr-feedback:
+    name: pr-feedback
+    if: >-
+      github.event_name == 'pull_request'
+      && github.event.pull_request.draft == true
+      && !contains(github.event.pull_request.labels.*.name, 'full-gate')
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.13.0
+          cache: npm
+      - name: Restore Electron download cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/electron
+          key: ${{ runner.os }}-electron-${{ hashFiles('package-lock.json') }}
+      - run: npm ci
+      - name: Enforce PageRoot branch naming
+        env:
+          BRANCH_NAME: ${{ github.head_ref }}
+        run: npm run task:policy -- "$BRANCH_NAME"
+      - name: Run impact-selected Pull Request feedback
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: >-
+          node scripts/ci-evidence.mjs run
+          --suite pr-feedback
+          --stage pr-feedback
+          --
+          npm run gate:edit -- --base "$PR_BASE_SHA"
+      - name: Upload feedback evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: PageRoot-pr-feedback-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            output/ci-evidence
+            output/test-runs
+          if-no-files-found: warn
+          retention-days: 14
+
+  codex-review:
+    name: codex-review
+    if: >-
+      github.event_name == 'pull_request'
+      && (
+        github.event.pull_request.draft == false
+        || contains(github.event.pull_request.labels.*.name, 'full-gate')
+      )
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    continue-on-error: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22.13.0
-      - name: Wait for one final Ready-triggered review on the frozen head
+      - name: Request one informational Codex review for the current head
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          node scripts/request-codex-review.mjs
+          --repository "$GITHUB_REPOSITORY"
+          --pull-request "${{ github.event.pull_request.number }}"
+          --head "${{ github.event.pull_request.head.sha }}"
+      - name: Snapshot current review threads without blocking merge
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: >-
@@ -41,22 +99,23 @@ jobs:
           --pull-request "${{ github.event.pull_request.number }}"
           --expected-head "${{ github.event.pull_request.head.sha }}"
           --expected-base "${{ github.event.pull_request.base.sha }}"
-          --settle-seconds 30
-          --timeout-seconds 900
-          --poll-seconds 15
-          --mode wait
-      - name: Upload final-review policy snapshot
+      - name: Upload review snapshot
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: PageRoot-review-policy-${{ github.run_id }}-${{ github.run_attempt }}
+          name: PageRoot-review-snapshot-${{ github.run_id }}-${{ github.run_attempt }}
           path: output/review-policy/review-policy.json
           if-no-files-found: warn
           retention-days: 30
 
   branch-policy:
     name: branch-policy
-    if: github.event_name == 'pull_request'
+    if: >-
+      github.event_name == 'pull_request'
+      && (
+        github.event.pull_request.draft == false
+        || contains(github.event.pull_request.labels.*.name, 'full-gate')
+      )
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -71,7 +130,12 @@ jobs:
 
   candidate-context:
     name: candidate-context
-    if: github.event_name == 'pull_request'
+    if: >-
+      github.event_name == 'pull_request'
+      && (
+        github.event.pull_request.draft == false
+        || contains(github.event.pull_request.labels.*.name, 'full-gate')
+      )
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
@@ -101,6 +165,10 @@ jobs:
     needs: candidate-context
     if: >-
       github.event_name == 'pull_request'
+      && (
+        github.event.pull_request.draft == false
+        || contains(github.event.pull_request.labels.*.name, 'full-gate')
+      )
       && needs.candidate-context.outputs.packaging_required == 'true'
     uses: ./.github/workflows/release-dry-run.yml
     with:
@@ -109,7 +177,12 @@ jobs:
 
   baseline-policy:
     name: baseline-policy
-    if: github.event_name == 'pull_request'
+    if: >-
+      github.event_name == 'pull_request'
+      && (
+        github.event.pull_request.draft == false
+        || contains(github.event.pull_request.labels.*.name, 'full-gate')
+      )
     needs:
       - branch-policy
     runs-on: ubuntu-24.04
@@ -124,7 +197,12 @@ jobs:
 
   source-build:
     name: source-build
-    if: github.event_name == 'pull_request'
+    if: >-
+      github.event_name == 'pull_request'
+      && (
+        github.event.pull_request.draft == false
+        || contains(github.event.pull_request.labels.*.name, 'full-gate')
+      )
     needs:
       - baseline-policy
     runs-on: ubuntu-24.04
@@ -149,7 +227,7 @@ jobs:
           --suite source-build
           --stage source-build
           --
-          npm run ci:source-build:prepared
+          npm run ci:source-build
       - name: Upload shared web build
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -171,7 +249,12 @@ jobs:
 
   source-node:
     name: source-node
-    if: github.event_name == 'pull_request'
+    if: >-
+      github.event_name == 'pull_request'
+      && (
+        github.event.pull_request.draft == false
+        || contains(github.event.pull_request.labels.*.name, 'full-gate')
+      )
     needs: source-build
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -200,7 +283,7 @@ jobs:
           --suite source-node
           --stage source-test
           --
-          npm run test:node:full:prepared
+          node scripts/test-node-group.mjs full
       - name: Upload Node evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -212,7 +295,12 @@ jobs:
 
   source-browser:
     name: browser-${{ matrix.label }}
-    if: github.event_name == 'pull_request'
+    if: >-
+      github.event_name == 'pull_request'
+      && (
+        github.event.pull_request.draft == false
+        || contains(github.event.pull_request.labels.*.name, 'full-gate')
+      )
     needs: source-build
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -221,13 +309,13 @@ jobs:
       matrix:
         include:
           - label: shard-1-of-3
-            command: npm run test:browser:full:prepared -- --fully-parallel --workers=1 --shard=1/3
+            command: npx playwright test --config tests/e2e/browser/playwright.config.mjs --fully-parallel --workers=1 --shard=1/3
           - label: shard-2-of-3
-            command: npm run test:browser:full:prepared -- --fully-parallel --workers=1 --shard=2/3
+            command: npx playwright test --config tests/e2e/browser/playwright.config.mjs --fully-parallel --workers=1 --shard=2/3
           - label: shard-3-of-3
-            command: npm run test:browser:full:prepared -- --fully-parallel --workers=1 --shard=3/3
+            command: npx playwright test --config tests/e2e/browser/playwright.config.mjs --fully-parallel --workers=1 --shard=3/3
           - label: real-html
-            command: npm run test:real-html:prepared
+            command: npx playwright test --config tests/e2e/browser/playwright.real-html.config.mjs
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -284,7 +372,12 @@ jobs:
 
   source-electron-native:
     name: electron-native
-    if: github.event_name == 'pull_request'
+    if: >-
+      github.event_name == 'pull_request'
+      && (
+        github.event.pull_request.draft == false
+        || contains(github.event.pull_request.labels.*.name, 'full-gate')
+      )
     needs:
       - baseline-policy
     runs-on: macos-14
@@ -311,7 +404,7 @@ jobs:
           --suite electron-native-preflight
           --stage environment-preflight
           --
-          npm run test:electron:ci-preflight:prepared
+          npm run test:electron:ci-preflight
       - name: Build Electron renderer on the target OS
         run: >-
           node scripts/ci-evidence.mjs run
@@ -325,7 +418,7 @@ jobs:
           --suite electron-native
           --stage source-test
           --
-          npm run test:electron:full:prepared
+          npx playwright test --config tests/e2e/electron/playwright.config.mjs
       - name: Record Playwright retry evidence
         # Runs even after a failed suite so the flaky/retry counts and the
         # first attempt's artifacts are never lost with the runner.
@@ -356,7 +449,12 @@ jobs:
 
   source-electron-ai:
     name: electron-ai
-    if: github.event_name == 'pull_request'
+    if: >-
+      github.event_name == 'pull_request'
+      && (
+        github.event.pull_request.draft == false
+        || contains(github.event.pull_request.labels.*.name, 'full-gate')
+      )
     needs:
       - baseline-policy
     runs-on: macos-14
@@ -383,7 +481,7 @@ jobs:
           --suite electron-ai-preflight
           --stage environment-preflight
           --
-          npm run test:electron:ci-preflight:prepared
+          npm run test:electron:ci-preflight
       - name: Build Electron renderer on the target OS
         run: >-
           node scripts/ci-evidence.mjs run
@@ -397,7 +495,7 @@ jobs:
           --suite electron-ai
           --stage source-test
           --
-          npm run test:ai-closed-loop:prepared
+          npx playwright test --config tests/e2e/electron/playwright.ai-closed-loop.config.mjs
       - name: Upload AI Electron failure diagnostics
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -417,9 +515,14 @@ jobs:
 
   release-gate:
     name: release-gate
-    if: ${{ always() && github.event_name == 'pull_request' }}
+    if: >-
+      ${{ always()
+      && github.event_name == 'pull_request'
+      && (
+        github.event.pull_request.draft == false
+        || contains(github.event.pull_request.labels.*.name, 'full-gate')
+      ) }}
     needs:
-      - review-policy
       - baseline-policy
       - branch-policy
       - candidate-context
@@ -434,7 +537,6 @@ jobs:
     steps:
       - name: Require every source lane
         env:
-          REVIEW_RESULT: ${{ needs.review-policy.result }}
           BASELINE_RESULT: ${{ needs.baseline-policy.result }}
           POLICY_RESULT: ${{ needs.branch-policy.result }}
           CANDIDATE_CONTEXT_RESULT: ${{ needs.candidate-context.result }}
@@ -446,7 +548,6 @@ jobs:
           ELECTRON_NATIVE_RESULT: ${{ needs.source-electron-native.result }}
           ELECTRON_AI_RESULT: ${{ needs.source-electron-ai.result }}
         run: |
-          test "$REVIEW_RESULT" = "success"
           test "$BASELINE_RESULT" = "success"
           test "$POLICY_RESULT" = "success"
           test "$CANDIDATE_CONTEXT_RESULT" = "success"
@@ -466,24 +567,10 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22.13.0
-      - name: Revalidate frozen head/base final-review policy immediately
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: >-
-          node scripts/check-pr-review-policy.mjs
-          --repository "$GITHUB_REPOSITORY"
-          --pull-request "${{ github.event.pull_request.number }}"
-          --expected-head "${{ github.event.pull_request.head.sha }}"
-          --expected-base "${{ github.event.pull_request.base.sha }}"
-          --settle-seconds 0
-          --timeout-seconds 1
-          --poll-seconds 1
-          --mode revalidate
       - name: Refresh dependency and packaged-runtime baseline before attestation
         run: npm run audit:dependencies
       - name: Create exact-tree source gate attestation
         id: provenance
-        if: github.event_name == 'pull_request'
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -498,7 +585,6 @@ jobs:
             --run-attempt "$GITHUB_RUN_ATTEMPT" \
             --github-output "$GITHUB_OUTPUT"
       - name: Upload exact-tree source gate attestation
-        if: github.event_name == 'pull_request'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ steps.provenance.outputs.artifact_name }}

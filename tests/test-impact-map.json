@@ -201,15 +201,6 @@
         "packaged-verify",
         "package-delivery-report"
       ]
-    },
-    "artifact-only": {
-      "description": "Build and verify the installer only after CI has authenticated a fresh source gate for the exact tree.",
-      "fullSuites": [
-        "package-build",
-        "packaged-runtime",
-        "packaged-verify",
-        "package-delivery-report"
-      ]
     }
   },
   "rules": [
@@ -228,7 +219,7 @@
       "patterns": [
         "^scripts/source-gate-provenance\\.mjs$",
         "^tests/source-gate-provenance\\.test\\.mjs$",
-        "^\\.github/workflows/(?:ci|pr-feedback|draft-review|draft-review-auto|developer-preview|release|release-candidate|release-dry-run)\\.yml$"
+        "^\\.github/workflows/(?:ci|developer-preview|release|release-candidate|release-dry-run)\\.yml$"
       ],
       "suites": [],
       "nodeTests": ["tests/source-gate-provenance.test.mjs"]
@@ -237,34 +228,12 @@
       "id": "pr-review-policy",
       "patterns": [
         "^scripts/check-pr-review-policy\\.mjs$",
-        "^scripts/draft-review-request\\.mjs$",
-        "^scripts/draft-review-marker\\.mjs$",
+        "^scripts/request-codex-review\\.mjs$",
         "^tests/pr-review-policy\\.test\\.mjs$",
-        "^\\.github/workflows/(?:ci|pr-feedback)\\.yml$"
+        "^\\.github/workflows/ci\\.yml$"
       ],
       "suites": [],
       "nodeTests": ["tests/pr-review-policy.test.mjs"]
-    },
-    {
-      "id": "draft-review-request",
-      "patterns": [
-        "^scripts/draft-review-request\\.mjs$",
-        "^scripts/draft-review-marker\\.mjs$",
-        "^tests/draft-review-request\\.test\\.mjs$",
-        "^\\.github/workflows/draft-review(?:-auto)?\\.yml$"
-      ],
-      "suites": [],
-      "nodeTests": ["tests/draft-review-request.test.mjs"]
-    },
-    {
-      "id": "review-gate-recovery",
-      "patterns": [
-        "^scripts/(?:check-pr-review-policy|recover-pr-review-gate)\\.mjs$",
-        "^tests/review-gate-recovery\\.test\\.mjs$",
-        "^\\.github/workflows/(?:ci|review-gate-recovery)\\.yml$"
-      ],
-      "suites": [],
-      "nodeTests": ["tests/review-gate-recovery.test.mjs"]
     },
     {
       "id": "pr-candidate-classification",
@@ -277,23 +246,13 @@
       "nodeTests": ["tests/classify-pr-candidate.test.mjs"]
     },
     {
-      "id": "review-debt",
-      "patterns": [
-        "^scripts/review-debt\\.mjs$",
-        "^tests/review-debt\\.test\\.mjs$",
-        "^\\.github/workflows/review-debt\\.yml$"
-      ],
-      "suites": [],
-      "nodeTests": ["tests/review-debt.test.mjs"]
-    },
-    {
       "id": "ci-evidence",
       "patterns": [
         "^scripts/ci-evidence\\.mjs$",
         "^scripts/playwright-flaky-summary\\.mjs$",
         "^tests/ci-evidence\\.test\\.mjs$",
         "^tests/playwright-flaky-summary\\.test\\.mjs$",
-        "^\\.github/workflows/(?:ci|pr-feedback|developer-preview|release|release-candidate|release-dry-run)\\.yml$"
+        "^\\.github/workflows/(?:ci|developer-preview|release|release-candidate|release-dry-run)\\.yml$"
       ],
       "suites": [],
       "nodeTests": ["tests/ci-evidence.test.mjs", "tests/playwright-flaky-summary.test.mjs"]
@@ -303,7 +262,7 @@
       "patterns": [
         "^scripts/ci-health-report\\.mjs$",
         "^tests/ci-health-report\\.test\\.mjs$",
-        "^\\.github/workflows/(?:ci|ci-health|pr-feedback|draft-review|draft-review-auto|release|release-candidate|release-dry-run)\\.yml$"
+        "^\\.github/workflows/(?:ci|developer-preview|release|release-candidate|release-dry-run)\\.yml$"
       ],
       "suites": [],
       "nodeTests": [

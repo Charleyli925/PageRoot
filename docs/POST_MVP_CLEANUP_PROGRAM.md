@@ -1,0 +1,60 @@
+# Post-MVP cleanup program
+
+This program removes leftover complexity that no longer earns its keep after
+MVP. It does not change PageRoot's product invariants: current HTML bytes stay
+authoritative, preview DOM is never the persistence source, visual edits remain
+minimal source patches, AI output stays untrusted until protocol checks pass,
+and release evidence still binds an exact Git Tree.
+
+## Why this order
+
+The original exploration order was P0-A → P0-B → P1-B → P1-A → P1-C. The
+chosen order is **P1-C first**, then the remaining items from a clean
+`origin/main` that already contains the new CI.
+
+P1-C is first because later cleanup PRs would otherwise pay the old CI cost:
+separate Feedback and Ready workflows, a blocking `review-policy` wait, Draft
+probe markers, review-gate recovery, and a weekly debt issue. Collapsing that
+surface now makes every following PR cheaper and removes a merge-blocker that
+is not a product invariant.
+
+## Items
+
+| ID | Purpose | This PR |
+| --- | --- | --- |
+| **P1-C** CI consolidation | One `ci.yml` for Draft feedback and Ready full-gate; Codex review is shown, never a merge hard gate; arm64-only packaging scripts; delete review-debt and retired review workflows | Yes |
+| **P0-A** Remove retired validators | Delete dead packaged `scope-validator` wiring and extract the live native-layout fingerprint helpers so later refactors do not keep carrying unused contracts | Follow-up |
+| **P0-B** Remove legacy Bridge stack | Split the remaining v3 Bridge so persistence and IPC have one current owner | Follow-up |
+| **P1-B** Save-pipeline CAS | Content-addressed save pipeline; depends on P0-B | Follow-up |
+| **P1-A** Editable fail-open | The only user-visible relaxation; keep it in its own PR so it cannot hide inside governance or dead-code cleanup | Follow-up |
+
+## Governance decisions locked by P1-C
+
+1. **Codex review is informational.** Ready (or the `full-gate` label) requests
+   one `@codex review` for the current head. Findings appear on the PR. They
+   never fail `release-gate`. Merge protection should require `release-gate`
+   only.
+2. **Packaging is arm64-only.** npm scripts, Developer Preview workflow
+   choices, and gate `--arch` no longer expose x64. The low-level packer may
+   still parse `--arch x64` for fixture tests; product entry points do not.
+3. **Review debt is deleted.** There is no weekly rolling issue, no
+   `review-debt.yml`, and no carry-forward machine state. P2/P3 comments remain
+   ordinary review text.
+
+## What P1-C changed in CI
+
+`ci.yml` is the only Pull Request workflow.
+
+- Draft without `full-gate` runs only `pr-feedback` (`gate:edit`).
+- Ready, or a PR opened already Ready, or the `full-gate` label, runs the
+  complete source matrix and `release-gate`.
+- `codex-review` uses `continue-on-error` and is not listed in
+  `release-gate.needs`.
+- `release-dry-run.yml` stays as a reusable helper called from `ci.yml`; it is
+  not a sixth product workflow.
+- Deleted: `pr-feedback.yml`, `draft-review.yml`, `draft-review-auto.yml`,
+  `review-gate-recovery.yml`, `review-debt.yml`, `ci-health.yml`.
+- Local `npm run ci:health` still exists as a manual summary script.
+
+These changes exist so later cleanup PRs iterate on a smaller, cheaper CI
+surface without weakening source, dependency, packaging or publication gates.

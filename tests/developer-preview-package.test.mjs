@@ -369,6 +369,8 @@ test("developer preview stays optional, manual-only and independent from release
   const packageJson = JSON.parse(packageText);
   const impactMap = validateImpactMap(JSON.parse(impactMapText));
   assert.equal(packageJson.scripts["package:developer"], "npm run gate:developer-package");
+  assert.equal(packageJson.scripts["package:developer:x64"], undefined);
+  assert.doesNotMatch(workflow, /-\s+x64/u);
   assert.equal(
     packageJson.scripts["gate:developer-package"],
     "node scripts/test-gate.mjs developer-package --arch arm64",
@@ -383,7 +385,7 @@ test("developer preview stays optional, manual-only and independent from release
       "developer-package-report",
     ],
   );
-  for (const lane of ["release", "artifact", "artifact-only"]) {
+  for (const lane of ["release", "artifact"]) {
     assert.equal(
       impactMap.lanes[lane].fullSuites.some((suite) => suite.startsWith("developer-")),
       false,
