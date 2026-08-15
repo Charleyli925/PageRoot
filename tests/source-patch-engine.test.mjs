@@ -1095,3 +1095,117 @@ test("direct text fragments do not bypass safe islands or dedicated editor roots
     }, index));
   }
 });
+
+test("live nodeId plus matching source hash skips fingerprint scoring for island patches", () => {
+  const html = `<p>相同</p><p>相同</p>`;
+  const index = buildSourceIndex(html);
+  const paragraphs = index.elements.filter((element) => element.tagName === "p");
+  assert.equal(paragraphs.length, 2);
+  const firstRef = createTargetRef(index, paragraphs[0].nodeId, {
+    level: "subregion",
+    targetId: "first-lookalike",
+  });
+  const result = applyPatchPlan(planSourcePatch({
+    type: "replace-editable-island",
+    targetRef: firstRef,
+    nodeId: paragraphs[1].nodeId,
+    beforeInnerHtml: "相同",
+    nextInnerHtml: "第二段",
+    expectedSourceSha256: index.sourceSha256,
+  }, index), html);
+
+  assert.equal(result.html, `<p>相同</p><p>第二段</p>`);
+  assert.equal(result.patches.length, 1);
+  assert.equal(result.patches[0].startOffset, paragraphs[1].contentRange.startOffset);
+  assert.equal(applyPatchPlan(result.inversePlan, result.html).html, html);
+});
+
+test("live text nodeId plus matching source hash patches only that text fragment", () => {
+  const html = `<div id="mixed"><section>KEEP</section>相同<span>尾</span>相同</div>`;
+  const index = buildSourceIndex(html);
+  const parent = elementBy(index, (element) => element.stableAttributes.id === "mixed");
+  const textNodes = index.textNodes.filter((node) => node.value === "相同");
+  assert.equal(textNodes.length, 2);
+  const result = applyPatchPlan(planSourcePatch({
+    type: "update-direct-text-node",
+    targetRef: createTargetRef(index, parent.nodeId, { level: "subregion" }),
+    textTargetRef: createTargetRef(index, textNodes[0].nodeId, { level: "text" }),
+    nodeId: parent.nodeId,
+    textNodeId: textNodes[1].nodeId,
+    beforeFragmentHtml: "相同",
+    nextFragmentHtml: "第二段",
+    expectedSourceSha256: index.sourceSha256,
+  }, index), html);
+
+  assert.equal(
+    result.html,
+    `<div id="mixed"><section>KEEP</section>相同<span>尾</span>第二段</div>`,
+  );
+  assert.equal(result.patches[0].startOffset, textNodes[1].range.startOffset);
+});
+
+test("live nodeId never bypasses a stale source hash", () => {
+  const html = `<p>相同</p><p>相同</p>`;
+  const index = buildSourceIndex(html);
+  const paragraphs = index.elements.filter((element) => element.tagName === "p");
+  assertPatchError("STALE_SOURCE_HASH", () => planSourcePatch({
+    type: "replace-editable-island",
+    targetRef: createTargetRef(index, paragraphs[0].nodeId, { level: "subregion" }),
+    nodeId: paragraphs[1].nodeId,
+    beforeInnerHtml: "相同",
+    nextInnerHtml: "第二段",
+    expectedSourceSha256: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  }, index));
+});
+
+test("live nodeId that left the current source fails closed without fingerprint fallback", () => {
+  const html = `<p>唯一</p>`;
+  const index = buildSourceIndex(html);
+  const paragraph = elementBy(index, (element) => element.tagName === "p");
+  assertPatchError("TARGET_ORPHANED", () => planSourcePatch({
+    type: "replace-editable-island",
+    targetRef: createTargetRef(index, paragraph.nodeId, { level: "subregion" }),
+    nodeId: "missing-live-node",
+    beforeInnerHtml: "唯一",
+    nextInnerHtml: "新版",
+    expectedSourceSha256: index.sourceSha256,
+  }, index));
+});
+
+test("editable island checkpoint rejects STALE_SOURCE_HASH and keeps original bytes", () => {
+  const html = `<p>岛内</p><p>岛外保持</p>`;
+  const index = buildSourceIndex(html);
+  const inside = elementBy(index, (element) => element.textContent === "岛内");
+  const original = html;
+  assertPatchError("STALE_SOURCE_HASH", () => planSourcePatch({
+    type: "replace-editable-island",
+    targetRef: createTargetRef(index, inside.nodeId, { level: "subregion" }),
+    nodeId: inside.nodeId,
+    beforeInnerHtml: "岛内",
+    nextInnerHtml: "已改",
+    expectedSourceSha256: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  }, index));
+  assert.equal(html, original);
+});
+
+test("editable island patches cannot change bytes outside the selected island", () => {
+  const html = `<p>岛内</p><p>岛外保持</p>`;
+  const index = buildSourceIndex(html);
+  const inside = elementBy(index, (element) => element.textContent === "岛内");
+  const result = applyPatchPlan(planSourcePatch({
+    type: "replace-editable-island",
+    targetRef: createTargetRef(index, inside.nodeId, { level: "subregion" }),
+    nodeId: inside.nodeId,
+    beforeInnerHtml: "岛内",
+    nextInnerHtml: "已改",
+    expectedSourceSha256: index.sourceSha256,
+  }, index), html);
+  assert.equal(result.html, `<p>已改</p><p>岛外保持</p>`);
+  assert.equal(result.scopeReport.outsideUnchanged, true);
+  assert.equal(
+    html.slice(inside.contentRange.endOffset),
+    result.html.slice(
+      result.patches[0].startOffset + result.patches[0].after.length,
+    ),
+  );
+});

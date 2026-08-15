@@ -111,8 +111,10 @@ import {
   adoptCanonicalHistoryIslandInPlace,
   canonicalNativeHostPreview,
   mountNativeTextFragmentHost,
+  remountNativeHostFromSource,
   nativeEditHostForElement,
   nativeTextFragmentForRange,
+  nativeTextFragmentForElement,
   refreshMountedPreviewSourceNodeIds,
   sourceTextNodeForDomText,
   sourceBackedPreviewElements,
@@ -129,6 +131,7 @@ import {
   findNativeActionTarget,
   historySelectionFromMutationValue,
   identifyingTextRangeAtPoint,
+  directTextNodeAtPoint,
   isCanvasRootElement,
   sourceHistoryDirectionForShortcut,
   type TextCaretPoint,
@@ -384,6 +387,8 @@ type ActiveNativeEdit = {
   rootTargetRef: SourceTargetRef;
   sourceInnerHtml: string;
   fragmentTargetRef: SourceTargetRef | null;
+  fragmentTextNodeId: string | null;
+  liveNodeId: string | null;
   releaseHost: (() => void) | null;
   session: IslandEditingController;
   selection: NativeEditSelection;
@@ -1719,15 +1724,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     let title = "这处内容暂时不能直接编辑";
     let message = "页面内容没有改变。你仍可以选择文字，或添加评论说明要怎么改。";
     let code = "canvas_c02_edit_blocked";
-    if (/两种样式的边界|文字属于哪一侧|样式内一个字的位置/iu.test(rawDetail)) {
-      code = "canvas_c03_style_boundary";
-      title = "请把光标移入文字内部";
-      message = "这里正好是两种文字样式的边界，直接输入可能跑到错误一侧。请把光标移到样式内一个字的位置后输入，或添加评论。";
-    } else if (/空的排版元素|输入可能跑到错误位置/iu.test(rawDetail)) {
-      code = "canvas_c04_empty_formatting";
-      title = "这里暂时不能直接改字";
-      message = "这段文字旁有一个空的排版元素，直接输入可能跑到错误位置。你仍可以选中文字，或添加评论交给 AI 处理。";
-    } else if (
+    if (
       /复杂网页结构|暂不支持直接改字|source structure|structural command/iu.test(rawDetail)
     ) {
       code = "canvas_c05_complex_structure";
@@ -1980,6 +1977,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         frameSourceHtmlRef.current = result.html;
         activeNativeEdit.rootTargetRef = refreshedRootRef;
         activeNativeEdit.fragmentTargetRef = refreshedFragmentRef;
+        activeNativeEdit.liveNodeId = refreshedIsland?.element.nodeId
+          ?? refreshedFragmentNode?.parentId
+          ?? activeNativeEdit.liveNodeId;
+        activeNativeEdit.fragmentTextNodeId = refreshedFragmentNode?.nodeId
+          ?? (nextFragmentHtml === "" ? null : activeNativeEdit.fragmentTextNodeId);
         activeNativeEdit.target = appliedMutation.target;
         selectedSourceSelectionRef.current = appliedMutation.target;
         setSelection(appliedMutation.target);
@@ -2392,6 +2394,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
             type: "update-direct-text-node" as const,
             targetRef: active.rootTargetRef,
             textTargetRef: active.fragmentTargetRef!,
+            nodeId: active.liveNodeId ?? undefined,
+            textNodeId: active.fragmentTextNodeId ?? undefined,
             beforeFragmentHtml: previousInnerHtml,
             nextFragmentHtml: nextInnerHtml,
             expectedSourceSha256: active.projection.sourceSha256,
@@ -2399,6 +2403,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         : {
             type: "replace-editable-island" as const,
             targetRef: active.rootTargetRef,
+            nodeId: active.liveNodeId ?? undefined,
             beforeInnerHtml: previousInnerHtml,
             nextInnerHtml,
             expectedSourceSha256: active.projection.sourceSha256,
@@ -2881,9 +2886,21 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     }
     const priorRange = activeTextRangeRef.current;
     const islandHostElement = nativeEditHostForElement(selectedElement, sourceIndex);
+    const hintedTextNode = !islandHostElement && caretPoint
+      ? directTextNodeAtPoint(
+          selectedElement.ownerDocument,
+          selectedElement,
+          caretPoint,
+        )
+      : null;
     const fragmentCandidate = islandHostElement
       ? null
-      : nativeTextFragmentForRange(priorRange, sourceIndex);
+      : nativeTextFragmentForRange(priorRange, sourceIndex)
+        ?? nativeTextFragmentForElement(
+          selectedElement,
+          sourceIndex,
+          hintedTextNode,
+        );
     if (!islandHostElement && !fragmentCandidate) {
       let blockedCause: Error = new Error(
         "这段可见内容不是当前源码中的唯一静态文字，无法安全进入原位编辑。",
@@ -2979,15 +2996,43 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         }
         sourceInnerHtml = islandCapability.island.innerHtml;
       }
-      const liveText = fragmentCandidate
+      let liveText = fragmentCandidate
         ? fragmentCandidate.textNode.data
         : nativeLogicalText(islandHostElement!);
       if (liveText !== projection.text) {
-        containerRef.current?.setAttribute("data-native-start-status", "text-mismatch");
-        reportBlockedEdit(new Error(
-          "画布文字与源码节点已经漂移，已阻止直接编辑。",
-        ));
-        return false;
+        containerRef.current?.setAttribute(
+          "data-native-start-status",
+          "text-mismatch-remount",
+        );
+        if (fragmentCandidate) {
+          fragmentCandidate.textNode.data = projection.text;
+        } else {
+          const hostNodeId = islandHostElement!.getAttribute(SOURCE_NODE_ATTRIBUTE);
+          if (
+            !hostNodeId
+            || !remountNativeHostFromSource(
+              islandHostElement!,
+              hostNodeId,
+              sourceIndex,
+            )
+          ) {
+            containerRef.current?.setAttribute("data-native-start-status", "text-mismatch");
+            reportBlockedEdit(new Error(
+              "画布文字与源码节点已经漂移，已阻止直接编辑。",
+            ));
+            return false;
+          }
+        }
+        liveText = fragmentCandidate
+          ? fragmentCandidate.textNode.data
+          : nativeLogicalText(islandHostElement!);
+        if (liveText !== projection.text) {
+          containerRef.current?.setAttribute("data-native-start-status", "text-mismatch");
+          reportBlockedEdit(new Error(
+            "画布文字与源码节点已经漂移，已阻止直接编辑。",
+          ));
+          return false;
+        }
       }
       const layoutElement = fragmentCandidate?.parentElement
         ?? islandHostElement!;
@@ -3101,22 +3146,18 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         nativeTextFragmentStyleSignature(hostElement) === fragmentStyleBefore
         && !hasNativeTextFragmentPseudoContent(hostElement)
       );
-      if (
-        !sameNativeLayout(layoutBeforeEditing, layoutAfterEditing)
+      const layoutDrifted = !sameNativeLayout(layoutBeforeEditing, layoutAfterEditing)
         || !sameNativeTextStyle(layoutBeforeEditing, layoutAfterEditing)
-        || !fragmentStyleStable
-      ) {
-        session.dispose();
-        mountedFragment?.release();
-        currentNativeEditLeaseRef.current = null;
-        containerRef.current?.setAttribute(
-          "data-native-start-status",
-          "island:layout-changed",
-        );
-        reportBlockedEdit(new Error(
-          "这个页面为可编辑状态设置了会改变排版的 CSS，已阻止直接编辑以免画面跳动。",
-        ));
-        return false;
+        || !fragmentStyleStable;
+      // Layout/style fingerprints observe post-entry drift only. They must
+      // not refuse to enter; MutationObserver rollback and checkpoint scope
+      // remain the fail-closed safety net.
+      if (layoutDrifted) {
+        containerRef.current?.setAttribute("data-native-layout-drift", "true");
+        hostElement.setAttribute("data-native-layout-drift", "true");
+      } else {
+        containerRef.current?.removeAttribute("data-native-layout-drift");
+        hostElement.removeAttribute("data-native-layout-drift");
       }
       const active: ActiveNativeEdit = {
         mode,
@@ -3127,6 +3168,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         rootTargetRef,
         sourceInnerHtml,
         fragmentTargetRef,
+        fragmentTextNodeId: fragmentCandidate?.textNodeId ?? null,
+        liveNodeId: (
+          fragmentCandidate?.parentElement ?? islandHostElement
+        )?.getAttribute(SOURCE_NODE_ATTRIBUTE) ?? target.nodeId ?? null,
         releaseHost: mountedFragment?.release ?? null,
         session,
         lease,
@@ -5259,8 +5304,16 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const selectedNativeEditHost = selectedElementRef.current && sourceIndexRef.current
     ? nativeEditHostForElement(selectedElementRef.current, sourceIndexRef.current)
     : null;
-  const selectedNativeTextFragment = !selectedNativeEditHost && sourceIndexRef.current
+  const selectedNativeTextFragment = (
+    !selectedNativeEditHost
+    && selectedElementRef.current
+    && sourceIndexRef.current
+  )
     ? nativeTextFragmentForRange(activeTextRangeRef.current, sourceIndexRef.current)
+      ?? nativeTextFragmentForElement(
+        selectedElementRef.current,
+        sourceIndexRef.current,
+      )
     : null;
   const selectedNativeEditAvailable = Boolean(
     activeNativeEditRef.current

@@ -137,6 +137,15 @@ export function identifyingTextRangeAtPoint(
   return range;
 }
 
+export function directTextNodeAtPoint(
+  documentNode: Document,
+  target: HTMLElement,
+  point: TextCaretPoint,
+): Text | null {
+  const hit = textHitAtPoint(documentNode, target, point);
+  return hit?.textNode ?? null;
+}
+
 function wordBoundsAtOffset(text: string, requestedOffset: number): {
   startOffset: number;
   endOffset: number;
