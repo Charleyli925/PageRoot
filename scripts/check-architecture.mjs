@@ -379,12 +379,23 @@ export async function architectureViolations() {
     "utf8",
   );
   if (
-    !workspaceBridge.includes('from "./source-transaction-service.mjs"')
-    || !workspaceBridge.includes("commitSourceTransaction(")
-    || !workspaceBridge.includes("recoverPendingSourceTransaction(")
+    workspaceBridge.includes('from "./source-transaction-service.mjs"')
+    || workspaceBridge.includes('from "./project-context-service.mjs"')
+    || workspaceBridge.includes('from "./source-history-service.mjs"')
+    || workspaceBridge.includes("commitSourceTransaction(")
+    || workspaceBridge.includes("loadContextBySource(")
+    || workspaceBridge.includes("loadMutationContext(")
   ) {
     violations.push(
-      "scripts/workspace-bridge.mjs: autosave and source-history routes must delegate to SourceTransaction",
+      "scripts/workspace-bridge.mjs: must not import or call the retired v3 registry, SourceTransaction, or source-history journal",
+    );
+  }
+  if (
+    !workspaceBridge.includes('from "./project-file-repository.mjs"')
+    || !workspaceBridge.includes("saveProjectFileAutosave(")
+  ) {
+    violations.push(
+      "scripts/workspace-bridge.mjs: /autosave must delegate to ProjectFileRepository",
     );
   }
   if (
@@ -392,7 +403,7 @@ export async function architectureViolations() {
     || /\bwriteSourceHistory\s*\(/.test(workspaceBridge)
   ) {
     violations.push(
-      "scripts/workspace-bridge.mjs: current-source writer belongs to source-transaction-service",
+      "scripts/workspace-bridge.mjs: current-source writer belongs to ProjectFileRepository",
     );
   }
   if (

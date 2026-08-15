@@ -307,12 +307,12 @@ the only production text and source-mutation route.
 
 Direct edits form ordered revisions and are written through a single queue. Every write checks the expected source Hash, uses a same-directory temporary file and atomic replacement, then rereads the result. External modification causes a fail-closed conflict.
 
-`/autosave` and `/source-history/action` retain their own transport decoding,
-revision/action checks and response shapes, but both enter the one Bridge
-`SourceTransaction` kernel. That kernel owns recovery-byte preparation, the
-durable `pendingWrite` WAL, source/history application, project/runtime
-settlement, exactly-once audit replay and cleanup. There is no second inline
-current-source writer or recovery state machine.
+`/autosave` retains its own transport decoding and revision checks, then
+delegates the current-source write to `ProjectFileRepository`. The v3 Bridge
+`SourceTransaction` kernel and `history/source-operations.json` journal are
+not on the live open path. `/source-history/action` returns the current source
+bytes and empty history so the renderer empty-history path still works. There
+is no second inline current-source writer in `workspace-bridge.mjs`.
 
 At close, `DocumentSession` independently hashes the frozen renderer HTML and
 accepts any acknowledged persisted revision at or beyond the close cutoff. A
@@ -323,27 +323,27 @@ divergence enters the source-conflict owner, and an invalid content/Hash pair
 enters the persistent workspace recovery surface without overwriting either
 copy.
 
-A durable command for an already registered project carries one captured
-`projectId + documentId + sourcePath` context. The Bridge resolves the registry
-graph by both opaque IDs first and treats the path only as a scope assertion;
-it never creates a project while serving a registered mutation. Only
-`/project/ensure` may establish a new identity. During PageRoot's own atomic
-source replacement, the durable `pendingWrite.targetHtmlSha256` proves the
-narrow interval in which the inode has changed but registry sidecars have not;
-the Bridge reconciles that interval to the existing identity. Any other inode
-replacement remains an external replacement and fails closed. This decision is
-recorded in `docs/decisions/0012-id-first-project-context.md`.
+A durable command for an already registered v4 Project File carries one captured
+`projectId + documentId + sourcePath` context plus the OpenTarget. The Bridge
+resolves only the v4 Project File Registry (`.pageroot-registry.json`); it does
+not read `project-registry.json` or historical Documents workspace roots. It
+never creates a project while serving a registered mutation. Only
+`/project/ensure` may import unregistered HTML as a new v4 V1. An HTML file
+that is not a registered v4 Project File is unmanaged: GET `/workspace` and
+GET `/source` return that state, and mutation routes fail closed with
+`PROJECT_NOT_FOUND`. This decision is recorded in
+`docs/decisions/0012-id-first-project-context.md` for the historical v3
+identity rule and superseded at the desktop open boundary by v4-only Project
+Files.
 
 Every accepted Canvas SourcePatch also emits one operation containing the
 actual forward patches, the exact inverse patches returned by the engine, the
 before/after source Hashes and the logical before/after target. The renderer
-`SourceHistorySession` owns unsaved operations and the current action intent;
-the Bridge owns the authoritative bounded journal at
-`history/source-operations.json`. Autosave prepares the next journal against
-the same source Hash chain and places both HTML and journal candidates in one
-`pendingWrite` recovery boundary. The source HTML remains the content
-authority; the journal is never a second HTML snapshot or a source for preview
-serialization.
+`SourceHistorySession` owns unsaved operations and the current action intent.
+A v4 Project File does not persist a Bridge source-history journal;
+`/source-history/action` returns the current source bytes and empty history so
+the renderer empty-history path still works. There is no v3
+`history/source-operations.json` store.
 
 Undo and redo first checkpoint any active editable island and drain the source
 queue. The Bridge then validates project/document identity, source Hash,

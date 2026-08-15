@@ -21,6 +21,7 @@ import {
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import {
+  copyFile,
   lstat,
   mkdir,
   readFile,
@@ -39,6 +40,7 @@ import {
   readHtmlFile,
   writeHtmlCopy,
 } from "./project-files.mjs";
+import { WELCOME_LOGO_RELATIVE_PATH } from "./welcome-project-content.mjs";
 import {
   createSafeExportDefaultPath,
   isProtectedExportDestination,
@@ -990,12 +992,20 @@ async function ensureBridgeProjectRegistered(project) {
     }),
   });
   const workspace = await response.json().catch(() => null);
+  const registeredSourcePath = typeof workspace?.sourcePath === "string"
+    ? workspace.sourcePath
+    : "";
   const [workspaceSourceIdentity, projectSourceIdentity] = await Promise.all([
-    typeof workspace?.sourcePath === "string"
-      ? existingPathIdentity(workspace.sourcePath)
+    registeredSourcePath
+      ? existingPathIdentity(registeredSourcePath)
       : Promise.resolve(null),
     existingPathIdentity(project.sourcePath),
   ]);
+  const importedWorkingCopy = (
+    workspace?.imported === true
+    && Boolean(workspaceSourceIdentity)
+    && workspaceSourceIdentity !== projectSourceIdentity
+  );
   if (
     !response.ok
     || !workspace
@@ -1005,8 +1015,9 @@ async function ensureBridgeProjectRegistered(project) {
     || !/^project_[A-Za-z0-9_-]+$/.test(workspace.projectId)
     || typeof workspace.documentId !== "string"
     || !/^doc_[A-Za-z0-9_-]+$/.test(workspace.documentId)
-    || workspaceSourceIdentity !== projectSourceIdentity
     || workspace.currentHtmlSha256 !== project.sha256
+    || !workspaceSourceIdentity
+    || (!importedWorkingCopy && workspaceSourceIdentity !== projectSourceIdentity)
   ) {
     throw new ProjectFileError(
       "WELCOME_WORKSPACE_REGISTRATION_FAILED",
@@ -1014,7 +1025,47 @@ async function ensureBridgeProjectRegistered(project) {
       { sourcePath: project.sourcePath },
     );
   }
+  if (importedWorkingCopy) {
+    const importedProject = await readHtmlProject(registeredSourcePath);
+    if (importedProject.sha256 !== project.sha256) {
+      throw new ProjectFileError(
+        "WELCOME_WORKSPACE_REGISTRATION_FAILED",
+        "欢迎页已经建立，但对应的项目工作区没有通过完整性校验。",
+        { sourcePath: project.sourcePath },
+      );
+    }
+    const originalLogoPath = path.join(
+      path.dirname(project.sourcePath),
+      WELCOME_LOGO_RELATIVE_PATH,
+    );
+    const importedLogoPath = path.join(
+      path.dirname(registeredSourcePath),
+      WELCOME_LOGO_RELATIVE_PATH,
+    );
+    try {
+      await copyFile(originalLogoPath, importedLogoPath);
+    } catch (error) {
+      if (error?.code !== "ENOENT") {
+        throw new ProjectFileError(
+          "WELCOME_WORKSPACE_REGISTRATION_FAILED",
+          "欢迎页已经建立，但对应的项目工作区没有通过完整性校验。",
+          { sourcePath: project.sourcePath },
+        );
+      }
+    }
+    const state = await loadProjectState();
+    await commitActivatedProjectPath({
+      state,
+      previousSourcePath: projectSourceIdentity,
+      nextSourcePath: workspaceSourceIdentity,
+      project: importedProject,
+      importedAssetSourcePath: projectSourceIdentity,
+    });
+    managedWelcomeRegistration = `${workspaceSourceIdentity}\0${importedProject.sha256}`;
+    return importedProject;
+  }
   managedWelcomeRegistration = `${projectSourceIdentity}\0${project.sha256}`;
+  return project;
 }
 
 async function getActiveProject() {
@@ -1059,7 +1110,7 @@ async function getActiveProjectOperation() {
   if (activePathIdentity === welcomePathIdentity) {
     const registrationKey = `${projectSourceIdentity}\0${project.sha256}`;
     if (managedWelcomeRegistration !== registrationKey) {
-      await ensureBridgeProjectRegistered(project);
+      project = await ensureBridgeProjectRegistered(project);
     }
   }
   return project;
@@ -2961,34 +3012,7 @@ async function workspacePath() {
     return path.resolve(explicitWorkspace);
   }
 
-  const documents = app.getPath("documents");
-  const legacyWorkspace = path.join(
-    documents,
-    "HTML AI 工作台",
-    "项目记录",
-  );
-  const yuanyeWorkspace = path.join(documents, "YuanYe", "项目记录");
-  const pageRootV2Workspace = path.join(
-    documents,
-    "PageRootV2",
-    "项目记录",
-  );
-  const pageRootWorkspace = path.join(documents, "PageRoot", "项目记录");
-  const existingWorkspace = await Promise.all(
-    [
-      pageRootWorkspace,
-      pageRootV2Workspace,
-      yuanyeWorkspace,
-      legacyWorkspace,
-    ].map(async (candidate) => (
-      await stat(candidate)
-        .then((entry) => entry.isDirectory())
-        .catch(() => false)
-        ? candidate
-        : null
-    )),
-  ).then((candidates) => candidates.find(Boolean));
-  return existingWorkspace ?? pageRootWorkspace;
+  return path.join(app.getPath("documents"), "PageRoot", "项目记录");
 }
 
 async function launchBridge() {

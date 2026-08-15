@@ -22,9 +22,9 @@ is not a product invariant.
 
 | ID | Purpose | This PR |
 | --- | --- | --- |
-| **P1-C** CI consolidation | One `ci.yml` for Draft feedback and Ready full-gate; Codex review is shown, never a merge hard gate; arm64-only packaging scripts; delete review-debt and retired review workflows | Yes |
+| **P1-C** CI consolidation | One `ci.yml` for Draft feedback and Ready full-gate; Codex review is shown, never a merge hard gate; arm64-only packaging scripts; delete review-debt and retired review workflows | Done on `main` (#188) |
 | **P0-A** Remove retired validators | Delete dead packaged `scope-validator` wiring and extract the live native-layout fingerprint helpers so later refactors do not keep carrying unused contracts | Follow-up |
-| **P0-B** Remove legacy Bridge stack | Split the remaining v3 Bridge so persistence and IPC have one current owner | Follow-up |
+| **P0-B** Remove legacy Bridge stack | Split the remaining v3 Bridge so persistence and IPC have one current owner | Yes |
 | **P1-B** Save-pipeline CAS | Content-addressed save pipeline; depends on P0-B | Follow-up |
 | **P1-A** Editable fail-open | The only user-visible relaxation; keep it in its own PR so it cannot hide inside governance or dead-code cleanup | Follow-up |
 
@@ -58,3 +58,29 @@ is not a product invariant.
 
 These changes exist so later cleanup PRs iterate on a smaller, cheaper CI
 surface without weakening source, dependency, packaging or publication gates.
+
+## What P0-B removes, and why
+
+P0-B is the desktop open-boundary cutover to v4-only. It does not migrate,
+recover, or delete user disk data. `.pageroot` and `.pageroot-registry.json`
+keep their current format.
+
+**Why the Bridge no longer reads `project-registry.json`.** Opening an HTML
+file that is not a registered v4 Project File must import as a new v4 V1.
+Keeping a v3 registry read fallback would reopen old projects as live state.
+GET `/workspace` and GET `/source` therefore return unmanaged state on a miss.
+Mutation routes fail closed with `PROJECT_NOT_FOUND` instead of falling into
+v3 `loadContextBySource`.
+
+**Why historical Documents workspace probes leave `workspacePath()`.** Desktop
+startup no longer searches `HTML AI 工作台/项目记录`, `YuanYe/项目记录`, or
+`PageRootV2/项目记录`. `HTML_AI_WORKSPACE` remains the test override;
+otherwise the leftover default is `Documents/PageRoot/项目记录`. v4 projects
+still live under `HTML_AI_PROJECT_FILES_ROOT` / `Documents/PageRoot/项目`.
+
+**What stays.** Attachment, conflict, and source-history HTTP routes remain.
+They now resolve a v4 project root (or 404). Attachments still use
+`draft/attachments/...` under that root. A v4 project has no v3 conflict or
+source-history store, so conflict reads return an empty payload and history
+actions return current source bytes plus empty history. The v3 Attempt
+finalizer CLI `--workspace` / `--project-id` is gone; `--project-root` remains.

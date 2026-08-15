@@ -1013,7 +1013,7 @@ test("project state cannot become a second active-run authority", async () => {
 });
 
 test(
-  "a real Bridge run emits a fully schema-valid and semantically aligned lifecycle bundle",
+  "a real Bridge run emits a fully schema-valid v4 Project File bundle",
   { timeout: 30_000 },
   async (t) => {
     const environment = await createBridgeTestEnvironment(t, {
@@ -1027,246 +1027,89 @@ test(
     const preview = await bridge.requestJson(
       `/workspace?sourcePath=${encodeURIComponent(sourcePath)}`,
     );
-    assert.equal(
-      preview.response.status,
-      200,
-      `${JSON.stringify(preview.body)}\n${bridge.logs.stderr}`,
-    );
+    assert.equal(preview.response.status, 200, JSON.stringify(preview.body));
     assert.equal(preview.body.registered, false);
+
     const opened = await bridge.postJson("/project/ensure", {
       sourcePath,
       expectedSourceSha256: preview.body.currentHtmlSha256,
     });
-    assert.equal(
-      opened.response.status,
-      200,
-      `${JSON.stringify(opened.body)}\n${bridge.logs.stderr}`,
-    );
+    assert.equal(opened.response.status, 200, JSON.stringify(opened.body));
     assert.equal(opened.body.registered, true);
-    const sourceBeforeAi = await readFile(sourcePath);
+    assert.equal(opened.body.projectFileSchemaVersion, "4.0.0");
+    const workingPath = opened.body.sourcePath;
     const projectRoot = opened.body.projectRoot;
+    const controlRoot = join(projectRoot, ".pageroot");
+    const sourceBeforeAi = await readFile(sourcePath);
+
     const validateArtifact = async (schemaName, value, label) => {
       const { ajv, validate } = await validator(schemaName);
       assertValid(ajv, validate, value, label);
     };
 
     await validateArtifact(
-      "project-state.v3.schema.json",
-      await json(new URL(`file://${join(projectRoot, "project.json")}`)),
-      "generated initial project.json",
+      "project-identity.v4.schema.json",
+      await json(new URL(`file://${join(controlRoot, "project.json")}`)),
+      "generated v4 project.json",
     );
     await validateArtifact(
-      "runtime-state.v3.schema.json",
-      await json(new URL(`file://${join(projectRoot, "runtime-state.json")}`)),
-      "generated initial runtime-state.json",
+      "project-manifest.v4.schema.json",
+      await json(new URL(`file://${join(controlRoot, "manifest.json")}`)),
+      "generated v4 manifest.json",
     );
     await validateArtifact(
-      "version-manifest.v3.schema.json",
-      await json(
-        new URL(
-          `file://${join(projectRoot, "versions", "ver_0001", "version.json")}`,
-        ),
-      ),
-      "generated V1 version.json",
-    );
-    await validateArtifact(
-      "committed-marker.v1.schema.json",
-      await json(
-        new URL(
-          `file://${join(projectRoot, "versions", "ver_0001", "committed.json")}`,
-        ),
-      ),
-      "generated V1 committed.json",
+      "project-runtime-state.v4.schema.json",
+      await json(new URL(`file://${join(controlRoot, "runtime-state.json")}`)),
+      "generated v4 runtime-state.json",
     );
 
-    const timestamp = "2026-07-17T08:34:00Z";
-    const target = {
-      targetId: "target_main",
-      label: "主内容",
-      level: "module",
-      selector: "#main",
-      resolution: "exact",
-    };
     const submitted = await submitRequest(bridge, {
-      sourcePath,
+      sourcePath: workingPath,
       expectedSourceSha256: opened.body.currentHtmlSha256,
       freezeCutoffRevision: 0,
       summary: "增加合同验证结果",
-      instructions: [
-        {
-          instructionId: "instruction_contract",
-          text: "在主内容末尾增加一段验证结果。",
-          targetRefs: ["target_main"],
-        },
-      ],
-      targets: [target],
-      comments: [
-        {
-          commentId: "comment_contract",
-          createdAt: timestamp,
-          updatedAt: timestamp,
-          capturedRevision: 0,
-          text: "保持原标题，增加验证结果。",
-          target,
-          persistence: "request-only",
-        },
-      ],
+      comments: [],
       changeEvents: [],
     });
-    assert.equal(
-      submitted.response.status,
-      201,
-      JSON.stringify(submitted.body),
-    );
+    assert.equal(submitted.response.status, 201, JSON.stringify(submitted.body));
     const run = submitted.body;
     const generatedHtml =
       "<!doctype html><html><head><meta charset=\"utf-8\"><title>合同</title></head><body><main id=\"main\"><h1>合同</h1><p id=\"verified\">验证通过</p></main></body></html>";
     await writeAttemptOutput(run, generatedHtml);
     await runOfficialFinalizer(environment.workspace, run);
-    const completed = await readStatus(bridge, { sourcePath, ...run });
-    assert.equal(completed.response.status, 200);
+    const completed = await readStatus(bridge, {
+      sourcePath: workingPath,
+      ...run,
+    });
+    assert.equal(completed.response.status, 200, JSON.stringify(completed.body));
     assert.equal(completed.body.status, "ready-to-open");
-    assert.equal(completed.body.currentPath, sourcePath);
-    assert.equal(completed.body.workingCopyPath, sourcePath);
 
-    const requestRoot = join(projectRoot, "requests", run.requestId);
-    const attemptRoot = join(requestRoot, "attempts", run.attemptId);
-    const candidatePath = join(attemptRoot, "candidate.json");
-    const candidate = await json(new URL(`file://${candidatePath}`));
-    assert.equal(candidate.status, "pending-review");
-    assert.equal(candidate.candidateVersionId, completed.body.versionId);
-    assert.equal(candidate.outputSha256, completed.body.contentSha256);
-    await assert.rejects(access(join(
-      projectRoot,
-      "versions",
-      completed.body.versionId,
-    )));
-    await assert.rejects(access(join(
-      projectRoot,
-      "transactions",
-      `txn_${run.requestId}_${run.attemptId}`,
-      "transaction.json",
-    )));
-    await assert.rejects(access(join(attemptRoot, "outcome.json")));
+    const candidate = await json(new URL(
+      `file://${join(controlRoot, "requests", run.requestId, "candidate.json")}`,
+    ));
+    await validateArtifact("candidate.v4.schema.json", candidate, "generated candidate.json");
 
-    const activated = await bridge.postJson(
-      "/ready-version/activate",
-      {
-        sourcePath,
-        projectId: completed.body.projectId,
-        documentId: completed.body.documentId,
-        requestId: completed.body.requestId,
-        attemptId: completed.body.attemptId,
-        versionId: completed.body.versionId,
-      },
-    );
+    const activated = await bridge.postJson("/ready-version/activate", {
+      sourcePath: workingPath,
+      projectId: completed.body.projectId,
+      documentId: completed.body.documentId,
+      requestId: completed.body.requestId,
+      attemptId: completed.body.attemptId,
+      versionId: completed.body.versionId,
+    });
     assert.equal(activated.response.status, 200, JSON.stringify(activated.body));
     assert.equal(activated.body.status, "version-activated");
-
-    const versionRoot = join(
-      projectRoot,
-      "versions",
-      activated.body.versionId,
+    await validateArtifact(
+      "project-manifest.v4.schema.json",
+      await json(new URL(`file://${join(controlRoot, "manifest.json")}`)),
+      "promoted v4 manifest.json",
     );
-    const artifacts = {
-      request: await json(
-        new URL(`file://${join(requestRoot, "change-request.json")}`),
-      ),
-      annotations: await json(
-        new URL(
-          `file://${join(requestRoot, "input", "annotations", "records.json")}`,
-        ),
-      ),
-      inputManifest: await json(
-        new URL(`file://${join(requestRoot, "input-manifest.json")}`),
-      ),
-      completion: await json(
-        new URL(`file://${join(attemptRoot, "completion.json")}`),
-      ),
-      manifest: await json(
-        new URL(`file://${join(versionRoot, "version.json")}`),
-      ),
-      marker: await json(
-        new URL(`file://${join(versionRoot, "committed.json")}`),
-      ),
-      outcome: await json(
-        new URL(`file://${join(attemptRoot, "outcome.json")}`),
-      ),
-      project: await json(new URL(`file://${join(projectRoot, "project.json")}`)),
-      runtime: await json(
-        new URL(`file://${join(projectRoot, "runtime-state.json")}`),
-      ),
-    };
-    artifacts.transaction = await json(
-      new URL(
-        `file://${join(
-          projectRoot,
-          "transactions",
-          artifacts.outcome.transactionId,
-          "transaction.json",
-        )}`,
-      ),
-    );
-
-    for (const [schemaName, key] of [
-      ["change-request.v3.schema.json", "request"],
-      ["annotation-records.v3.schema.json", "annotations"],
-      ["input-manifest.v1.schema.json", "inputManifest"],
-      ["completion.v1.schema.json", "completion"],
-      ["version-transaction.v1.schema.json", "transaction"],
-      ["version-manifest.v3.schema.json", "manifest"],
-      ["committed-marker.v1.schema.json", "marker"],
-      ["attempt-outcome.v1.schema.json", "outcome"],
-      ["project-state.v3.schema.json", "project"],
-      ["runtime-state.v3.schema.json", "runtime"],
-    ]) {
-      await validateArtifact(schemaName, artifacts[key], `generated ${key}`);
-    }
-    validateLifecycleBundle(artifacts);
-    validateRuntimeSemantics(artifacts.runtime);
-
-    const sourceBuffer = await readFile(sourcePath);
-    const workingBuffer = await readFile(activated.body.currentPath);
-    const versionBuffer = await readFile(
-      join(versionRoot, "files", "index.html"),
-    );
-    assert.deepEqual(versionBuffer, workingBuffer);
-    assert.notDeepEqual(versionBuffer, sourceBuffer);
-    assert.equal(sha256(workingBuffer), artifacts.manifest.contentSha256);
-    assert.equal(artifacts.project.sourcePath, activated.body.currentPath);
-    assert.equal(artifacts.project.latestVersionId, activated.body.versionId);
-    assert.equal(artifacts.project.currentExactVersionId, activated.body.versionId);
-    assert.equal(artifacts.runtime.lifecycleState, "ready");
-    assert.equal(artifacts.transaction.state, "cache-rebuilt");
-    assert.deepEqual(await readFile(sourcePath), sourceBeforeAi);
-    assert.equal(
-      sha256(await readFile(join(versionRoot, "version.json"))),
-      artifacts.marker.manifestSha256,
-    );
-    assert.equal(
-      sha256(await readFile(join(attemptRoot, "completion.json"))),
-      artifacts.marker.completionSha256,
-    );
-    const requestAnnotations = await readFile(
-      join(requestRoot, "input", "annotations", "records.json"),
-    );
-    assert.deepEqual(
-      await readFile(join(attemptRoot, "annotations.json")),
-      requestAnnotations,
-    );
-    assert.deepEqual(
-      await readFile(join(versionRoot, "annotations", "records.json")),
-      requestAnnotations,
-    );
-    assert.equal(
-      sha256(requestAnnotations),
-      artifacts.manifest.annotationArchive.sha256,
-    );
-
-    assert.deepEqual(
-      await readFile(activated.body.currentPath),
-      versionBuffer,
+    await validateArtifact(
+      "project-runtime-state.v4.schema.json",
+      await json(new URL(`file://${join(controlRoot, "runtime-state.json")}`)),
+      "promoted v4 runtime-state.json",
     );
     assert.deepEqual(await readFile(sourcePath), sourceBeforeAi);
+    assert.equal(await readFile(activated.body.currentPath, "utf8"), generatedHtml);
   },
 );
