@@ -9,6 +9,7 @@
 | `npm run gate:edit` | 一次局部修改后 | 只运行影响映射命中的 Node 文件；必要时 typecheck | 快速发现局部逻辑错误，不启动浏览器或 Electron |
 | `npm run gate:task` | 一个开发任务完成时 | 静态检查、受影响 Node 文件，以及相关 Browser/Electron/AI 冒烟 | 在较短时间内证明生产链路已经接通 |
 | PR `pr-feedback` | `opened/synchronize/reopened` | 按影响映射选择 Node/编译检查；并行跑非阻断 `review-advisory`，用与 `review-policy` 相同的证据合同对 live pair 做一次快照评估 | 普通推送无论 Draft/Ready 都不重复消费完整矩阵；当前活动的 Codex P0/P1 在晋升前就可见；仅切回 Draft 不产生 Feedback |
+| PR `pr-feedback` | `opened/synchronize/reopened` | 按影响映射选择 Node/编译检查；成功后由可信 `draft-review-auto` 为 exact head 自动请求一次 Codex 评审并写入滚动 status 评论 | 普通推送无论 Draft/Ready 都不重复消费完整矩阵；当前活动的 Codex P0/P1 在晋升前就可见；仅切回 Draft 不产生 Feedback |
 | `review-policy` | 最终 Tree 从 Draft 转为 Ready，由 Ready 唯一触发最终审阅 | 实时 head/base、Ready 后提交的 exact-commit Codex review、不可变 clean comment、Ready 后的 Codex Bot root `+1`、30 秒 settle window、活动非 outdated P0/P1 线程和 P0/P1 `CHANGES_REQUESTED` | 旧 head/base、Ready 前信号、旧轮次/真人/非 `+1` reaction、未结束 review、P0/P1 阻断时不能通过；P2/P3/unclassified 写为债务而不阻断 |
 | `Review Gate Recovery` | Codex 精确提交的 review/clean comment 在 `review-policy` 超时后到达 | trusted default-branch code 重验 live Ready head/base、当前 review policy、原 run timeout artifact、所有非 review job 结果 | 仅对原 run 调用 failed-job rerun；测试失败、P0/P1、Draft/closed、SHA/base 改变或 artifact 不符全部 fail closed |
 | `baseline-policy` | 分支策略通过，与 review-policy 并行 | 全局依赖 advisory policy 与 packaged-runtime closure | 基线红时不启动 Linux build、Browser 或 macOS Electron runner |
@@ -36,11 +37,13 @@ Tree，不在测试执行期间自动合并分支。组合 Tree 含任何未合�
 
 PR 必须从 Draft 开始。普通推送由独立的 `PR Feedback` workflow 处理，
 不会创建名为 `release-gate` 的跳过 job；因此分支保护不会把轻量反馈误当
-完整通过。同一 workflow 的 `review-advisory` job 以相同证据合同对 live pair
-做一次非阻断快照，把当前活动的 P0/P1 暴露在晋升之前；Codex 只在 Ready
-转换后才评审，Draft 期轮询不可能观察到新评审，因此 advisory 是快照语义，
+做一次非阻断快照，把当前活动的 P0/P1 暴露在晋升之前。每次 `PR Feedback`
+成功后，可信的 `Draft Codex Review Auto` workflow 会为 exact head 自动请求
+一次 Codex 评审并把结轮状态写进滚动 status 评论；维护者也可用
+`pageroot-draft-review-command:v1` 评论手动请求或关闭一轮。Codex 只在 Ready
+转换后或受信 exact-head 请求后评审，Draft 期轮询不可能观察到新评审，因此 status 评论是快照语义，
+转换后或受信 exact-head 请求后评审，Draft 期轮询不可能观察到新评审，因此 advisory 是快照语义，
 `review-policy` 才是权威等待。只切回 Draft 不触发
-Feedback。冻结 head 并更新到当前 base 后，直接 Ready 一次；无需再用完整
 head/base SHA marker 在 Draft 请求第二轮审阅。
 `review-policy` 只接受 Ready 后携带当前完整 `commit_id` 和匹配
 `Reviewed commit` marker 的 Codex review、不可编辑的 exact-commit clean
@@ -116,8 +119,12 @@ step summary 里。
   Workbench 只保留 review filters/layout/lease、动画和 Outcome/Toast 映射；architecture
   gate 将其直接 Bridge 调用锁定为 0。
 - `WorkspaceController`：runtime factory 是生产组合的唯一入口；它构造唯一的 Bridge
-  client、共享 RunSession 与各业务 Session，并作为唯一 application aggregate observer
-  生成冻结的 Project/Document/Comment/Run/Version snapshot。Node 测试证明晚到 observer
+  client、共享 RunSession、`EditAuthorRuntimeSession` 与各业务 Session，并作为唯一
+  application aggregate observer 生成冻结的 Project/Document/Comment/Run/Version/Edit
+runtime snapshot。Edit runtime 的纯 Session 测试证明键仅为
+`(sourcePath, canvasGeneration)`、非权威源码随后变为权威时仍可开始一次、准备
+loading surface 确认前不调用窄 port、同代不因 autosave/评论重试、旧结果只撤销；
+Workbench 只确认已提交 loading surface、传入窄 port 并消费快照。Node 测试证明晚到 observer
   在 `dispose()` 后不再发布；Document snapshot 只投影 `hasPendingWrite`/`isFlushing`，
   不泄露写入内容或 Promise。Workbench 只能订阅该 aggregate snapshot 与 event stream。
 - Bridge 集成环境：每个真实 Bridge 测试各自创建临时 root、workspace、sources、端口、子进程与 stdout/stderr；同一测试可为重启恢复顺序启动新进程，但不同测试绝不共享 workspace 或长寿命 Bridge。环境默认携带配置的 Bridge auth token，测试缺失/错误 token 时必须显式关闭或覆盖它；HTTP/连接失败保留 response text 与 Bridge 日志，不重试 mutation。
@@ -130,15 +137,23 @@ step summary 里。
 - Browser 冒烟：固定覆盖脚本隔离、源码字节、可编辑岛、源码权威围栏和能力降级五类关键风险；完整 Browser 包含全部活动 V2 回归。V1 的 per-keystroke tracker、FormatSkeleton 和 IME tail 状态机实现及测试已从仓库删除；V2 岛内字节 oracle、输入矩阵和 composition 快照用例是唯一产品合同。
 - Electron 冒烟：固定覆盖真实 authored DOM 输入和一次带磁盘持久化的 composition；完整 Electron 保留保存、关闭重开和逐字节 forward 结果等全部路径。
 - Electron 产品套件默认使用隐藏、禁止后台节流的 BrowserWindow，不抢键盘焦点；后台模式保留 macOS Dock 图标，点击图标可手动调出窗口查看或再次最小化；自动触发的原生弹窗在所有 E2E 模式下一律拦截并写入测试日志，即使显式设置 `PAGEROOT_E2E_FOREGROUND=1` 观察窗口也不会出现系统弹窗。CI 环境预检保留可见但不聚焦的 accessory 窗口，用于证明 WindowServer 绘制能力。
-- 交互预览与 Review Runtime Snapshot：Node 证明单一 source-host resolver 只接受
+- 交互预览、Edit one-shot ECharts 与 Review Runtime Snapshot：Node 证明 Review 的
+  source-host resolver 只接受
   direct Canvas/SVG 与唯一稳定的 source-empty 宿主，删除/歧义/类型冲突、任意
   HTML/`tbody`、computed selector 和脚本依赖猜测都 fail-closed。owner 测试拥有
   Review-only 窄请求、source SHA/绑定、isolated world、一次 rect/PNG、PNG
   SHA/像素/字节预算、可见 DOM/SVG 文字哈希、deadline 和 cleanup。Node 还直接
   覆盖文字/数字哈希严格变化，以及同文字单次 PNG 的 RGB 误差预算不会把微小
-  栅格噪声判作变化。Electron 用一份合成报告证明 Edit
+  栅格噪声判作变化。Electron 用一份合成报告证明普通 Edit
   不执行作者脚本、不请求或挂载运行态位图，Preview 中同一 Canvas/SVG 正常运行，
-  authored inline SVG 仍在 Edit 原生可见且源文件字节不变。
+  authored inline SVG 仍在 Edit 原生可见且源文件字节不变；另一个本地 ECharts
+  用例证明导入后的 V1 仍从 Main 绑定的原始同目录资源根冻结直接资源闭包、一次
+  execution、固定冻结审计、ECharts 仅新增受限宿主布局样式/缩放且不覆盖源码样式、
+  运行时后代回到源码宿主、评论/原生编辑后 iframe 与 execution count 不变且写盘字节不含 runtime
+  marker。协议/bootstrap 单测拥有资源闭包、一次消费、revoke、CSP 和冻结边界。
+  Session 单测还覆盖外部来源切换至托管 V1 时，即使 SHA/Canvas generation
+  未变也会发布新的准备路径；而 macOS `/var` 与 `/private/var` 同一文件别名
+  不会消耗额外尝试。
   桌面编辑画布还必须
   证明同目录图片通过同一条受控资源根加载成功，而 `script-src` 没有因此
   获得自定义协议权限。Browser 的确定性

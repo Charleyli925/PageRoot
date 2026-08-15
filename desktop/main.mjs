@@ -103,13 +103,28 @@ import {
   registerPreviewProtocolScheme,
 } from "./preview-protocol.mjs";
 import {
+  createEditRuntimeProtocolController,
+  registerEditRuntimeProtocolScheme,
+} from "./edit-runtime-protocol.mjs";
+import {
+  EDIT_AUTHOR_RUNTIME_CONTRACT_VERSION,
+  isEditRuntimeRequestId,
+} from "../app/domain/edit-runtime-contract.js";
+import {
   createRuntimeSnapshotCaptureController,
 } from "./runtime-visual-capture-owner.mjs";
+import {
+  createEditRuntimeCaptureController,
+} from "./edit-runtime-capture-owner.mjs";
+import {
+  createEditRuntimePreparationFence,
+} from "./edit-runtime-preparation-fence.mjs";
 
 // electron-updater is CommonJS; the default import is the supported ESM bridge.
 const { autoUpdater } = electronUpdater;
 
 registerPreviewProtocolScheme(protocol);
+registerEditRuntimeProtocolScheme(protocol);
 
 const directory = path.dirname(fileURLToPath(import.meta.url));
 const USER_NOTICE_FILE_NAME = "PageRoot 用户声明与免责声明.txt";
@@ -214,6 +229,10 @@ const PREVIEW_CHANNELS = Object.freeze({
 const REVIEW_RUNTIME_SNAPSHOT_CHANNELS = Object.freeze({
   capture: "html-review-runtime-snapshots:capture",
 });
+const EDIT_RUNTIME_CHANNELS = Object.freeze({
+  prepare: "html-edit-runtime:prepare",
+  revoke: "html-edit-runtime:revoke",
+});
 const EDIT_CHANNELS = Object.freeze({
   historyRequested: "html-edit:history-requested",
   nativeHistory: "html-edit:native-history",
@@ -240,6 +259,14 @@ let workspaceFailurePrompt = null;
 let managedWelcomeRegistration = null;
 let previewProtocolController = null;
 let reviewRuntimeSnapshotCaptureController = null;
+let editRuntimeProtocolController = null;
+let editRuntimeCaptureController = null;
+const editRuntimePreparationFence = createEditRuntimePreparationFence();
+// An imported V1 may be an HTML-only managed Working Copy while its selected
+// external source directory still owns declared relative assets. This is
+// session-only provenance established by Main during the verified hand-off;
+// it is never accepted from the renderer or persisted as project authority.
+let activeImportedAssetSourcePath = null;
 const workspaceRecoveryMailbox = createWorkspaceRecoveryMailbox();
 const externalFileOpenMailbox = createExternalFileOpenMailbox();
 const externalFileOpenExitHandoff = createExternalFileOpenExitHandoff({
@@ -257,6 +284,41 @@ function ensurePreviewProtocolController() {
     previewProtocolController.install();
   }
   return previewProtocolController;
+}
+
+function ensureEditRuntimeProtocolController() {
+  if (!editRuntimeProtocolController) {
+    editRuntimeProtocolController = createEditRuntimeProtocolController({
+      protocolApi: protocol,
+      netFetch: (url, options) => net.fetch(url, options),
+    });
+    editRuntimeProtocolController.install();
+  }
+  return editRuntimeProtocolController;
+}
+
+function ensureEditRuntimeCaptureController() {
+  if (!editRuntimeCaptureController) {
+    editRuntimeCaptureController = createEditRuntimeCaptureController({
+      BrowserWindowClass: BrowserWindow,
+      createIsolatedSession: (partition) => electronSession.fromPartition(partition),
+      installProtocol: (targetProtocol) => {
+        ensureEditRuntimeProtocolController().installFor(targetProtocol);
+      },
+      resolveRuntimeUrl: (sessionId) => (
+        ensureEditRuntimeProtocolController().runtimeDocumentUrl(sessionId)
+      ),
+      async releaseIsolatedSession(isolatedSession) {
+        await Promise.all([
+          Promise.resolve(isolatedSession.clearStorageData?.()).catch(() => undefined),
+          Promise.resolve(
+            isolatedSession.protocol?.unhandle?.("pageroot-edit-runtime"),
+          ).catch(() => undefined),
+        ]);
+      },
+    });
+  }
+  return editRuntimeCaptureController;
 }
 
 function ensureReviewRuntimeSnapshotCaptureController() {
@@ -459,6 +521,7 @@ function emptyProjectState() {
     recent: [],
     pendingRename: null,
     lastRename: null,
+    lastManagedActivation: null,
   };
 }
 
@@ -589,6 +652,61 @@ function isValidRecentEntry(entry) {
   return Number.isFinite(entry.lastOpenedAt);
 }
 
+function normalizeManagedWorkingCopyActivation(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  try {
+    const operationId = String(value.operationId || "");
+    const projectId = String(value.projectId || "");
+    const documentId = String(value.documentId || "");
+    const workingCopyId = String(value.workingCopyId || "");
+    const versionId = String(value.versionId || "");
+    const expectedSha256 = String(value.expectedSha256 || "").trim().toLowerCase();
+    const projectRootPath = String(value.projectRootPath || "");
+    if (
+      !/^[A-Za-z0-9_-]{8,160}$/.test(operationId)
+      || !/^project_[A-Za-z0-9_-]+$/.test(projectId)
+      || !/^doc_[A-Za-z0-9_-]+$/.test(documentId)
+      || !/^work_ver_\d{4,}$/.test(workingCopyId)
+      || !/^ver_\d{4,}$/.test(versionId)
+      || !/^sha256:[a-f0-9]{64}$/.test(expectedSha256)
+      || !projectRootPath
+      || projectRootPath.length > MAX_PATH_LENGTH
+      || projectRootPath.includes("\0")
+      || !Number.isFinite(Number(value.completedAt))
+    ) return null;
+    return {
+      operationId,
+      projectId,
+      documentId,
+      workingCopyId,
+      versionId,
+      expectedSha256,
+      previousSourcePath: assertHtmlPath(value.previousSourcePath, "previousSourcePath"),
+      nextSourcePath: assertHtmlPath(value.nextSourcePath, "nextSourcePath"),
+      projectRootPath: path.resolve(projectRootPath),
+      completedAt: Number(value.completedAt),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function sameManagedWorkingCopyActivation(left, right) {
+  return Boolean(
+    left
+    && right
+    && left.operationId === right.operationId
+    && left.projectId === right.projectId
+    && left.documentId === right.documentId
+    && left.workingCopyId === right.workingCopyId
+    && left.versionId === right.versionId
+    && left.expectedSha256 === right.expectedSha256
+    && left.previousSourcePath === right.previousSourcePath
+    && left.nextSourcePath === right.nextSourcePath
+    && left.projectRootPath === right.projectRootPath,
+  );
+}
+
 async function loadProjectState() {
   if (projectState) return projectState;
 
@@ -622,6 +740,7 @@ async function loadProjectState() {
       recent,
       pendingRename: normalizePendingSourceRename(parsed.pendingRename),
       lastRename: normalizeCompletedSourceRename(parsed.lastRename),
+      lastManagedActivation: normalizeManagedWorkingCopyActivation(parsed.lastManagedActivation),
     };
     if (projectState.pendingRename) {
       await recoverPendingSourceRename({
@@ -670,6 +789,7 @@ async function activateProject(filePath) {
   );
   const now = Date.now();
   state.activePath = normalizedPath;
+  state.lastManagedActivation = null;
   state.recent = [
     {
       path: normalizedPath,
@@ -681,6 +801,7 @@ async function activateProject(filePath) {
     ),
   ].slice(0, MAX_RECENT_PROJECTS);
   await persistProjectState();
+  activeImportedAssetSourcePath = null;
 }
 
 async function forgetProject(filePath) {
@@ -1015,6 +1136,99 @@ const captureReviewRuntimeSnapshot = (payload) => (
   ensureReviewRuntimeSnapshotCaptureController().capture(payload)
 );
 
+async function prepareEditAuthorRuntime(payload) {
+  const activeSourcePath = await currentActivePath();
+  if (!activeSourcePath) throw new Error("Edit runtime requires an active source path.");
+  const activeSource = await readHtmlFile({
+    sourcePath: activeSourcePath,
+    maxHtmlBytes: MAX_HTML_BYTES,
+  });
+  if (
+    !payload
+    || typeof payload !== "object"
+    || payload.contractVersion !== EDIT_AUTHOR_RUNTIME_CONTRACT_VERSION
+    || !isEditRuntimeRequestId(payload.requestId)
+    || typeof payload.html !== "string"
+    || payload.html !== activeSource.html
+    || String(payload.sourceSha256 || "").toLowerCase() !== activeSource.sha256
+    || !Number.isSafeInteger(payload.canvasGeneration)
+    || payload.canvasGeneration < 0
+    || !Array.isArray(payload.hosts)
+  ) {
+    throw new Error("Edit runtime source is no longer the active persisted document.");
+  }
+  let releasePreparation;
+  try {
+    releasePreparation = editRuntimePreparationFence.claim({
+      requestId: payload.requestId,
+      sourcePath: activeSource.sourcePath,
+      sourceSha256: activeSource.sha256,
+      canvasGeneration: payload.canvasGeneration,
+    });
+  } catch (cause) {
+    if (cause instanceof Error && /already consumed/u.test(cause.message)) {
+      throw new ProjectFileError(
+        "EDIT_RUNTIME_PREPARATION_REPLAYED",
+        "当前画布的运行时准备已经完成。",
+      );
+    }
+    if (cause instanceof Error && /in progress|at capacity/u.test(cause.message)) {
+      throw new ProjectFileError(
+        "EDIT_RUNTIME_PREPARATION_LIMITED",
+        "当前画布正在安全准备，请稍后重试。",
+      );
+    }
+    throw cause;
+  }
+  const assetSourcePath = activeImportedAssetSourcePath || activeSource.sourcePath;
+  let session = null;
+  try {
+    session = await ensureEditRuntimeProtocolController().createSession({
+      html: activeSource.html,
+      sourcePath: assetSourcePath,
+      bindings: payload.hosts,
+    });
+    const capture = await ensureEditRuntimeCaptureController().capture({
+      sessionId: session.sessionId,
+      executionId: session.executionId,
+      bindings: session.bindings,
+    });
+    if (
+      capture.outcome !== "captured"
+      || capture.bootstrapCount !== 1
+      || !Array.isArray(capture.snapshots)
+    ) {
+      throw new Error(
+        "Edit runtime isolated capture did not produce a frozen display"
+        + ` (${String(capture.outcome || "unknown")}:${String(capture.reason || "unknown")}).`,
+      );
+    }
+    return Object.freeze({
+      contractVersion: session.contractVersion,
+      sessionId: session.sessionId,
+      executionId: session.executionId,
+      sourceSha256: activeSource.sha256,
+      resourceSha256: session.resourceSha256,
+      scriptCount: session.scriptCount,
+      byteLength: session.byteLength,
+      bootstrapCount: 1,
+      canvasGeneration: payload.canvasGeneration,
+      hosts: session.bindings,
+      snapshots: capture.snapshots,
+    });
+  } finally {
+    try {
+      if (session) ensureEditRuntimeProtocolController().revokeSession(session.sessionId);
+    } finally {
+      releasePreparation();
+    }
+  }
+}
+
+const revokeEditAuthorRuntime = (sessionId) => (
+  ensureEditRuntimeProtocolController().revokeSession(sessionId)
+);
+
 async function resolveKnownRenameSource(sourcePathInput) {
   const sourcePath = assertReadPayload(sourcePathInput);
   const state = await loadProjectState();
@@ -1093,6 +1307,7 @@ function assertManagedWorkingCopyActivationPayload(payload) {
     "workingCopyId",
     "versionId",
     "projectRootPath",
+    "operationId",
   ]);
   if (Object.keys(payload).some((key) => !allowedKeys.has(key))) {
     throw new TypeError("托管工作文件参数包含未支持的字段。");
@@ -1114,6 +1329,9 @@ function assertManagedWorkingCopyActivationPayload(payload) {
   const workingCopyId = String(payload.workingCopyId || "");
   const versionId = String(payload.versionId || "");
   const projectRootPath = String(payload.projectRootPath || "");
+  const operationId = payload.operationId === undefined || payload.operationId === null
+    ? null
+    : String(payload.operationId);
   if (
     !/^project_[A-Za-z0-9_-]+$/.test(projectId)
     || !/^doc_[A-Za-z0-9_-]+$/.test(documentId)
@@ -1122,6 +1340,7 @@ function assertManagedWorkingCopyActivationPayload(payload) {
     || !projectRootPath
     || projectRootPath.length > MAX_PATH_LENGTH
     || projectRootPath.includes("\0")
+    || (operationId !== null && !/^[A-Za-z0-9_-]{8,160}$/.test(operationId))
   ) {
     throw new TypeError("托管工作文件身份无效。");
   }
@@ -1134,6 +1353,7 @@ function assertManagedWorkingCopyActivationPayload(payload) {
     workingCopyId,
     versionId,
     projectRootPath: path.resolve(projectRootPath),
+    operationId,
   };
 }
 
@@ -1142,6 +1362,8 @@ async function commitActivatedProjectPath({
   previousSourcePath,
   nextSourcePath,
   project,
+  importedAssetSourcePath = null,
+  managedActivation = null,
 }) {
   const now = Date.now();
   const activePathIdentity = state.activePath
@@ -1186,7 +1408,14 @@ async function commitActivatedProjectPath({
     );
     state.recent = retained.slice(0, MAX_RECENT_PROJECTS);
   }
+  state.lastManagedActivation = managedActivation;
   await persistProjectState();
+  if (activatesCurrentProject) {
+    activeImportedAssetSourcePath = (
+      importedAssetSourcePath
+      && importedAssetSourcePath !== nextSourcePath
+    ) ? importedAssetSourcePath : null;
+  }
   return {
     ...project,
     previousSourcePath,
@@ -1214,16 +1443,70 @@ async function activateManagedWorkingCopyOperation(payload) {
     existingPathIdentity(requested.previousSourcePath),
     existingPathIdentity(requested.nextSourcePath),
   ]);
-  const knownPathIdentities = new Set(await Promise.all([
-    state.activePath,
-    ...state.recent.map((entry) => entry.path),
-  ].filter(Boolean).map(existingPathIdentity)));
-  if (!knownPathIdentities.has(previousSourcePath)) {
-    throw new ProjectFileError(
-      "UNKNOWN_SOURCE",
-      "只能从当前已经打开的 HTML 切换到托管工作文件。",
-      { previousSourcePath: requested.previousSourcePath },
-    );
+  const activePathIdentity = state.activePath
+    ? await existingPathIdentity(state.activePath)
+    : null;
+  const requestedActivation = requested.operationId
+    ? {
+      operationId: requested.operationId,
+      projectId: requested.projectId,
+      documentId: requested.documentId,
+      workingCopyId: requested.workingCopyId,
+      versionId: requested.versionId,
+      expectedSha256: requested.expectedSha256,
+      previousSourcePath,
+      nextSourcePath,
+      projectRootPath: requested.projectRootPath,
+      completedAt: Date.now(),
+    }
+    : null;
+  let managedActivation = null;
+  if (requestedActivation) {
+    const completed = state.lastManagedActivation;
+    if (completed?.operationId === requestedActivation.operationId) {
+      if (!sameManagedWorkingCopyActivation(completed, requestedActivation)) {
+        throw new ProjectFileError(
+          "MANAGED_WORKING_COPY_OPERATION_MISMATCH",
+          "同一托管工作文件操作不能改变目标或前序文件。",
+          { operationId: requestedActivation.operationId },
+        );
+      }
+      if (activePathIdentity !== nextSourcePath) {
+        throw new ProjectFileError(
+          "MANAGED_WORKING_COPY_OPERATION_NOT_COMMITTED",
+          "这次托管工作文件操作的桌面状态不完整，不能伪造重放结果。",
+          { operationId: requestedActivation.operationId },
+        );
+      }
+      managedActivation = completed;
+    } else {
+      if (activePathIdentity !== previousSourcePath) {
+        throw new ProjectFileError(
+          "MANAGED_WORKING_COPY_PREDECESSOR_CONFLICT",
+          "当前桌面文件已变化，不能提交过期的托管工作文件切换。",
+          {
+            previousSourcePath: requested.previousSourcePath,
+            activePath: state.activePath,
+          },
+        );
+      }
+      managedActivation = requestedActivation;
+    }
+  } else {
+    const knownPathIdentities = new Set(await Promise.all([
+      state.activePath,
+      ...state.recent.map((entry) => entry.path),
+    ].filter(Boolean).map(existingPathIdentity)));
+    if (
+      !knownPathIdentities.has(previousSourcePath)
+      && !knownPathIdentities.has(nextSourcePath)
+    ) {
+      throw new ProjectFileError(
+        "UNKNOWN_SOURCE",
+        "只能从当前已经打开的 HTML 切换到托管工作文件。",
+        { previousSourcePath: requested.previousSourcePath },
+      );
+    }
   }
   if (!bridgePort) {
     throw new ProjectFileError(
@@ -1286,6 +1569,8 @@ async function activateManagedWorkingCopyOperation(payload) {
     previousSourcePath,
     nextSourcePath,
     project,
+    importedAssetSourcePath: previousSourcePath,
+    managedActivation,
   });
 }
 
@@ -1918,6 +2203,14 @@ function registerProjectIpc() {
       "review_runtime_snapshot_capture",
     ),
   );
+  ipcMain.handle(
+    EDIT_RUNTIME_CHANNELS.prepare,
+    trustedProject(prepareEditAuthorRuntime, "edit_runtime_prepare"),
+  );
+  ipcMain.handle(
+    EDIT_RUNTIME_CHANNELS.revoke,
+    trustedProject(revokeEditAuthorRuntime, "edit_runtime_revoke"),
+  );
   ipcMain.handle(APP_CHANNELS.closeResult, trusted(reportCloseResult));
   ipcMain.handle(
     APP_CHANNELS.workspaceRecoveryReady,
@@ -2095,6 +2388,7 @@ function unregisterIpc() {
     ...Object.values(INTEGRATION_CHANNELS),
     ...Object.values(UPDATE_CHANNELS),
     ...Object.values(REVIEW_RUNTIME_SNAPSHOT_CHANNELS),
+    ...Object.values(EDIT_RUNTIME_CHANNELS),
     APP_CHANNELS.closeResult,
     APP_CHANNELS.workspaceRecoveryReady,
     APP_CHANNELS.externalOpenReady,
@@ -2626,6 +2920,10 @@ async function createWindow() {
     applicationUpdate?.stopAutomaticChecks();
     reviewRuntimeSnapshotCaptureController?.dispose();
     reviewRuntimeSnapshotCaptureController = null;
+    editRuntimeCaptureController?.dispose();
+    editRuntimeCaptureController = null;
+    editRuntimeProtocolController?.dispose();
+    editRuntimeProtocolController = null;
     previewProtocolController?.dispose();
     rendererHasLoaded = false;
     workspaceRecoveryMailbox.beginRendererLoad();

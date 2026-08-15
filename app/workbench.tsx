@@ -34,6 +34,7 @@ import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 
 import type {
   HtmlCanvasCommentLayoutState,
+  HtmlCanvasEditRuntimeLoadOutcome,
   HtmlCanvasEditorHandle,
   HtmlCanvasMutation,
   HtmlCanvasSelection,
@@ -41,6 +42,7 @@ import type {
   NativeDeferredCommandAuthority,
   NativeDeferredCommandDiscardReason,
 } from "./components/HtmlCanvasEditor";
+import type { DesktopEditRuntimeApi } from "./components/desktop-edit-runtime-api";
 import AboutPageRootDialog from "./components/AboutPageRootDialog";
 import CancelAiRunDialog from "./components/CancelAiRunDialog";
 import HtmlInteractionPreview, {
@@ -110,6 +112,9 @@ import type { ProjectSessionSnapshot } from "./application/project-session.js";
 import type { RunOperationKind, RunSessionSnapshot } from "./application/run-session.js";
 import type { VersionSessionSnapshot } from "./application/version-session.js";
 import type { SourceHistoryDirection } from "./domain/source-history.js";
+import {
+  EDIT_AUTHOR_RUNTIME_VERIFICATION_DEADLINE_MS,
+} from "./domain/edit-runtime-contract.js";
 import {
   BROWSER_RUNTIME_CAPABILITIES,
   resolveRuntimeCapabilities,
@@ -316,6 +321,7 @@ const INITIAL_DOCUMENT_SNAPSHOT: DocumentSessionSnapshot = {
   hasPendingWrite: false,
   isFlushing: false,
 };
+const EDIT_RUNTIME_PENDING_PHASES = new Set(["preparing", "ready", "running"]);
 const INITIAL_COMMENT_SNAPSHOT: CommentSessionSnapshot<
   CommentItem,
   DirectEditEvent,
@@ -689,6 +695,42 @@ export default function Workbench() {
     versionSnapshot.currentBasedOnVersionId;
   const viewMode = versionSnapshot.viewMode;
   const [canvasMode, setCanvasMode] = useState<CanvasMode>("edit");
+  const editRuntimeSnapshot = workspaceControllerSnapshot?.editRuntime ?? null;
+  const editRuntimePhase = editRuntimeSnapshot?.phase || "static";
+  const editRuntimePreparing = (
+    canvasMode === "edit"
+    && editRuntimeSnapshot?.phase === "preparing"
+  );
+  const editRuntimeRenderPending = (
+    canvasMode === "edit"
+    && ["preparing", "ready", "running"].includes(editRuntimePhase)
+  );
+  const editRuntimeGrant = (
+    canvasMode === "edit"
+    && ["ready", "running", "settled"].includes(editRuntimeSnapshot?.phase || "")
+  ) ? editRuntimeSnapshot?.grant ?? null : null;
+  useLayoutEffect(() => {
+    const sourceSha256 = editRuntimeSnapshot?.sourceSha256;
+    const runtimeCanvasGeneration = editRuntimeSnapshot?.canvasGeneration;
+    if (
+      !editRuntimePreparing
+      || !sourceSha256
+      || typeof runtimeCanvasGeneration !== "number"
+      || !Number.isSafeInteger(runtimeCanvasGeneration)
+    ) return;
+    // This runs after the preparing snapshot has committed the loading surface
+    // and retired any static editor. The Session alone still owns the one
+    // attempt; Workbench only acknowledges that it is safe to start it.
+    workspaceControllerRef.current?.startEditAuthorRuntimePreparation({
+      sourceSha256,
+      canvasGeneration: runtimeCanvasGeneration,
+    });
+  }, [
+    editRuntimePreparing,
+    editRuntimeSnapshot?.canvasGeneration,
+    editRuntimeSnapshot?.sourcePath,
+    editRuntimeSnapshot?.sourceSha256,
+  ]);
   const [pageViewContext, setPageViewContext] =
     useState<PageViewContext | null>(null);
   const [interactivePreviewTransport, setInteractivePreviewTransport] =
@@ -722,6 +764,7 @@ export default function Workbench() {
     setCanvasRenderAcks({ edit: null, preview: null });
   }, []);
   useLayoutEffect(() => {
+    const editRuntimeApi: DesktopEditRuntimeApi | undefined = window.htmlAIEditRuntime;
     const controller = createRuntimeWorkspaceController({
       initial: {
         documentHtml: DEFAULT_PROJECT_HTML,
@@ -753,6 +796,7 @@ export default function Workbench() {
             workingCopyId: string;
             versionId: string;
             projectRootPath: string;
+            operationId?: string;
           }) => {
             const activate = window.htmlAIProjects?.activateManagedWorkingCopy;
             if (!activate) {
@@ -761,6 +805,12 @@ export default function Workbench() {
             return activate(input);
           },
         },
+        ...(editRuntimeApi ? {
+          editRuntime: {
+            prepare: (request) => editRuntimeApi.prepare(request),
+            revoke: (sessionId) => editRuntimeApi.revoke(sessionId),
+          },
+        } : {}),
       },
       documentWorkflow: {
         codecs: createDocumentWorkflowCodecs({
@@ -951,6 +1001,7 @@ export default function Workbench() {
               workingCopyId: string;
               versionId: string;
               projectRootPath: string;
+              operationId?: string;
             }) => {
               const activate = window.htmlAIProjects?.activateManagedWorkingCopy;
               if (!activate) {
@@ -2673,8 +2724,21 @@ export default function Workbench() {
   ): Promise<void> => {
     let expectedGeneration = currentDocumentSessionSnapshot().canvasGeneration;
     const waitForCurrentGeneration = async (): Promise<boolean> => {
-      for (let attempt = 0; attempt < 40; attempt += 1) {
+      let attemptLimit = 40;
+      const runtimeAttemptLimit = Math.ceil(
+        EDIT_AUTHOR_RUNTIME_VERIFICATION_DEADLINE_MS / 25,
+      );
+      for (let attempt = 0; attempt < attemptLimit; attempt += 1) {
         await new Promise<void>((resolve) => window.setTimeout(resolve, 25));
+        if (EDIT_RUNTIME_PENDING_PHASES.has(
+          currentControllerSnapshot()?.editRuntime?.phase || "static",
+        )) {
+          // Main bounds preparation and isolated capture independently. A
+          // final one-shot author frame cannot acknowledge its source until
+          // both serial phases settle; treating that permitted interval as a
+          // failed static render would replace the iframe and execute again.
+          attemptLimit = Math.max(attemptLimit, runtimeAttemptLimit);
+        }
         if (context && !isCurrentProjectContext(context)) {
           throw new Error("项目已切换，停止核对旧项目画布。");
         }
@@ -2707,6 +2771,7 @@ export default function Workbench() {
     throw new Error("画布没有在时限内确认载入目标 HTML。");
   }, [
     acknowledgeCanvasRender,
+    currentControllerSnapshot,
     currentDocumentSessionSnapshot,
     invalidateCanvasRenderAcks,
     isCurrentProjectContext,
@@ -2717,6 +2782,7 @@ export default function Workbench() {
 
   useEffect(() => {
     if (canvasMode !== "edit") return undefined;
+    if (editRuntimeRenderPending) return undefined;
     let cancelled = false;
     const expectedHtml = html;
     const expectedGeneration = canvasGeneration;
@@ -2740,7 +2806,15 @@ export default function Workbench() {
     return () => {
       cancelled = true;
     };
-  }, [acknowledgeCanvasRender, canvasGeneration, canvasMode, currentDocumentSessionSnapshot, html]);
+  }, [
+    acknowledgeCanvasRender,
+    canvasGeneration,
+    canvasMode,
+    currentDocumentSessionSnapshot,
+    editRuntimePhase,
+    editRuntimeRenderPending,
+    html,
+  ]);
 
   const clearAutosaveTimer = useCallback(() => {
     workspaceController?.clearDocumentAutosaveTimer();
@@ -5644,6 +5718,49 @@ export default function Workbench() {
     workspaceController,
   ]);
 
+  const continueEditingHistoryVersion = useCallback(async () => {
+    if (
+      viewMode !== "history"
+      || !viewingVersionId
+      || isViewTransitioning()
+      || runInProgress
+      || projectHydrating
+      || projectLoadError
+      || !workspaceController
+    ) return;
+    const context = captureProjectContext();
+    if (!context) return;
+    const outcome = await requiredWorkspaceController(workspaceController)
+      .continueEditingHistoryVersion({
+        versionId: viewingVersionId,
+        context,
+      });
+    if (outcome.status === "succeeded") {
+      const lastModifiedAt = String(outcome.value.lastModifiedAt || "");
+      if (lastModifiedAt) setLastModifiedAt(lastModifiedAt);
+      setDrawer(null);
+      editorRef.current?.clearSelection();
+      return;
+    }
+    if (outcome.status === "stale") return;
+    setToast({
+      title: "无法基于此版本继续编辑",
+      message: outcome.reason,
+      tone: "error",
+      disposition: "background-result",
+      dedupeKey: "history-continue-editing",
+    });
+  }, [
+    captureProjectContext,
+    isViewTransitioning,
+    projectHydrating,
+    projectLoadError,
+    runInProgress,
+    viewMode,
+    viewingVersionId,
+    workspaceController,
+  ]);
+
   const persistLabel = persistState === "writing"
     ? "正在更新文件…"
     : persistState === "queued"
@@ -6750,6 +6867,14 @@ export default function Workbench() {
           detail={viewingVersion
             ? `只读 HTML 与 ${viewingVersion.comments.length} 条历史评论已在画布中展开`
             : "画布来自精确不可变版本文件"}
+          secondaryActionLabel="基于此版本继续编辑"
+          secondaryActionDisabled={
+            viewTransitioning
+            || runInProgress
+            || projectHydrating
+            || Boolean(projectLoadError)
+          }
+          onSecondaryAction={() => void continueEditingHistoryVersion()}
           actionLabel="回到当前版本"
           actionDisabled={viewTransitioning}
           onAction={() => void returnToCurrent()}
@@ -6766,6 +6891,9 @@ export default function Workbench() {
             {!runtimeCapabilitiesReady ? (
               <div className="canvas-loading" role="status">正在识别运行环境…</div>
             ) : !browserPreviewOnly ? (
+              editRuntimePreparing ? (
+                <div className="canvas-loading" role="status">正在载入源码画布…</div>
+              ) : (
               <Suspense fallback={(
                 <div className="canvas-loading" role="status">正在载入源码画布…</div>
               )}>
@@ -6780,6 +6908,22 @@ export default function Workbench() {
                     if (relinkingTargetRef.current) {
                       relinkSelectionArmedRef.current = true;
                     }
+                  }}
+                  editRuntimeGrant={editRuntimeGrant}
+                  onEditRuntimeLoadStart={(grant) => {
+                    workspaceControllerRef.current?.beginEditAuthorRuntime({
+                      sessionId: grant.sessionId,
+                      sourceSha256: grant.sourceSha256,
+                      canvasGeneration: grant.canvasGeneration,
+                    });
+                  }}
+                  onEditRuntimeLoadOutcome={(grant, outcome: HtmlCanvasEditRuntimeLoadOutcome) => {
+                    workspaceControllerRef.current?.settleEditAuthorRuntime({
+                      sessionId: grant.sessionId,
+                      sourceSha256: grant.sourceSha256,
+                      canvasGeneration: grant.canvasGeneration,
+                      outcome,
+                    });
                   }}
                   onCommentLayout={handleCommentLayout}
                   onSelect={handleCanvasSelection}
@@ -6822,6 +6966,7 @@ export default function Workbench() {
                   enableReorder={!interactionLocked}
                 />
               </Suspense>
+              )
             ) : null}
           </div>
           {canvasMode === "preview" ? (

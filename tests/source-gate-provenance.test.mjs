@@ -235,10 +235,6 @@ test("GitHub workflows run tests in parallel with one final-review policy and ke
   assert.match(feedback, /group: pageroot-pr-/u);
   assert.match(ci, /group: pageroot-pr-/u);
   assert.doesNotMatch(feedback, /name: release-gate|test:browser:full|test:electron:full/u);
-  assert.match(feedback, /name: review-advisory/u);
-  assert.match(feedback, /check-pr-review-policy\.mjs/u);
-  assert.match(feedback, /--mode advisory/u);
-  assert.match(feedback, /output\/review-policy\/review-advisory\.json/u);
   assert.match(feedback, /pull-requests: read/u);
   assert.doesNotMatch(feedback, /contents: write|issues: write|pull-requests: write/u);
   assert.equal(
@@ -281,4 +277,57 @@ test("GitHub workflows run tests in parallel with one final-review policy and ke
   assert.doesNotMatch(release, /tags:/u);
   assert.doesNotMatch(release, /source-gate-provenance\.mjs verify/u);
   assert.doesNotMatch(release, /gate:artifact-only:auto/u);
+});
+
+test("the Draft Codex review probe stays a trusted default-branch issue-comment workflow", async () => {
+  const workflow = await readFile(
+    path.join(productRoot, ".github/workflows/draft-review.yml"),
+    "utf8",
+  );
+  assert.match(workflow, /on:\s*\n\s+issue_comment:\s*\n\s+types: \[created\]/u);
+  assert.doesNotMatch(workflow, /workflow_dispatch:/u);
+  assert.doesNotMatch(workflow, /workflow_run:/u);
+  assert.doesNotMatch(workflow, /^\s+pull_request(?:_target)?:/mu);
+  assert.doesNotMatch(workflow, /ref:\s*\$\{\{\s*github\.event\.pull_request\.head\.sha/u);
+  assert.doesNotMatch(workflow, /refs\/pull\//u);
+  assert.doesNotMatch(workflow, /actions\/download-artifact/u);
+  assert.doesNotMatch(workflow, /secrets\./u);
+  assert.match(workflow, /permissions:\s*\n\s+contents: read\s*\n\s+pull-requests: write/u);
+  assert.doesNotMatch(workflow, /contents: write|issues: write|actions: write|checks: write/u);
+  assert.doesNotMatch(workflow, /gh pr merge|mergePullRequest|git push|git tag|gh release/u);
+  assert.match(workflow, /if: >-\s*\n\s+github\.event\.issue\.pull_request\s*\n\s+&& contains\(github\.event\.comment\.body, 'pageroot-draft-review-command:v1'\)/u);
+  assert.match(workflow, /draft-review-request\.mjs/u);
+  assert.match(workflow, /persist-credentials: false/u);
+  assert.match(workflow, /ISSUE_NUMBER: \$\{\{\s*github\.event\.issue\.number\s*\}\}/u);
+  assert.match(workflow, /COMMENT_ID: \$\{\{\s*github\.event\.comment\.id\s*\}\}/u);
+  assert.match(workflow, /--pull-request "\$ISSUE_NUMBER"/u);
+  assert.match(workflow, /--comment-id "\$COMMENT_ID"/u);
+  assert.doesNotMatch(workflow, /--(?:pull-request|comment-id) "\$\{\{/u);
+  assert.match(workflow, /group: pageroot-draft-review-\$\{\{\s*contains\(github\.event\.comment\.body, 'pageroot-draft-review-command:v1'\)/u);
+  assert.match(workflow, /format\('cmd-\{0\}', github\.event\.issue\.number\)/u);
+  assert.match(workflow, /format\('noise-\{0\}', github\.event\.comment\.id\)/u);
+  assert.doesNotMatch(workflow, /cancel-in-progress: true/u);
+  assert.match(workflow, /runs-on: ubuntu-24\.04/u);
+  assert.doesNotMatch(workflow, /runs-on: macos-/u);
+});
+test("the automatic Draft Codex review workflow stays a trusted default-branch workflow_run follower", async () => {
+  const workflow = await readFile(
+    path.join(productRoot, ".github/workflows/draft-review-auto.yml"),
+    "utf8",
+  );
+  assert.match(workflow, /on:\s*\n\s+workflow_run:\s*\n\s+workflows: \[PR Feedback\]\s*\n\s+types: \[completed\]/u);
+  assert.doesNotMatch(workflow, /workflow_dispatch:|issue_comment:|^\s+pull_request(?:_target)?:/mu);
+  assert.doesNotMatch(workflow, /ref:\s*\$\{\{\s*github\.event\.pull_request\.head\.sha/u);
+  assert.doesNotMatch(workflow, /refs\/pull\//u);
+  assert.doesNotMatch(workflow, /actions\/download-artifact/u);
+  assert.doesNotMatch(workflow, /secrets\./u);
+  assert.match(workflow, /permissions:\s*\n\s+contents: read\s*\n\s+pull-requests: write/u);
+  assert.doesNotMatch(workflow, /contents: write|issues: write|actions: write|checks: write/u);
+  assert.doesNotMatch(workflow, /gh pr merge|mergePullRequest|git push|git tag|gh release/u);
+  assert.match(workflow, /if: github\.event\.workflow_run\.conclusion == 'success'/u);
+  assert.match(workflow, /draft-review-request\.mjs/u);
+  assert.match(workflow, /--workflow-run-id "\$WORKFLOW_RUN_ID"/u);
+  assert.match(workflow, /persist-credentials: false/u);
+  assert.match(workflow, /runs-on: ubuntu-24\.04/u);
+  assert.doesNotMatch(workflow, /runs-on: macos-/u);
 });

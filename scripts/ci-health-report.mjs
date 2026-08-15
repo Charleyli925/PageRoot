@@ -12,6 +12,7 @@ import {
   classifyReviewPriority,
   finalCodexCompletion,
 } from "./check-pr-review-policy.mjs";
+import { parseDraftReviewStatusMarker } from "./draft-review-marker.mjs";
 
 const scriptPath = fileURLToPath(import.meta.url);
 const productRoot = path.resolve(path.dirname(scriptPath), "..");
@@ -24,6 +25,8 @@ const PUBLICATION_STEP_NAME = "Publish immutable GitHub Release";
 export const CI_HEALTH_WORKFLOW_INPUTS = Object.freeze({
   ci: "ci.yml",
   feedback: "pr-feedback.yml",
+  draftReviewCommand: "draft-review.yml",
+  draftReviewAuto: "draft-review-auto.yml",
   releaseDryRun: "release-dry-run.yml",
   releaseCandidate: "release-candidate.yml",
   release: "release.yml",
@@ -42,6 +45,7 @@ const TARGETS = Object.freeze({
   testMinutesP50: Object.freeze({ operator: "under", value: 20 }),
   mergeWaitMinutesP50: Object.freeze({ operator: "under", value: 10 }),
   readyTransitionsPerPullRequestAverage: Object.freeze({ operator: "at_most", value: 1.25 }),
+  draftAutoFailureRate: Object.freeze({ operator: "under", value: 0.05 }),
 });
 
 function finiteDurationMinutes(startedAt, completedAt) {
@@ -434,6 +438,8 @@ export function summarizeCiHealth({
   ciRuns,
   feedbackRuns = [],
   dryRunRuns = [],
+  draftReviewCommandRuns = [],
+  draftReviewAutoRuns = [],
   jobsByRunId,
   candidateRuns,
   releaseRuns,
@@ -546,6 +552,42 @@ export function summarizeCiHealth({
     jobsByRunId,
     since: flowSince,
   });
+  const draftAutoTerminal = (draftReviewAutoRuns || []).filter(isCompletedWorkflowRun);
+  const draftAutoFailed = draftAutoTerminal.filter((run) => run?.conclusion === "failure");
+  const draftAutoCancelled = draftAutoTerminal.filter((run) => run?.conclusion === "cancelled");
+  const draftCommandTerminal = (draftReviewCommandRuns || []).filter(isCompletedWorkflowRun);
+  const draftCommandFailed = draftCommandTerminal.filter((run) => run?.conclusion === "failure");
+  const draftAutoFailureRate = draftAutoTerminal.length > 0
+    ? draftAutoFailed.length / draftAutoTerminal.length
+    : null;
+  const draftRoundMinutes = draftAutoTerminal
+    .flatMap((run) => jobsForRun(jobsByRunId, run.id))
+    .filter((job) => job?.name === "draft-review-auto-probe")
+    .map((job) => finiteDurationMinutes(job.started_at, job.completed_at))
+    .filter((minutes) => minutes > 0);
+  const draftBranchCounts = {};
+  for (const run of draftAutoTerminal) {
+    const branch = run?.head_branch || "unknown";
+    draftBranchCounts[branch] = (draftBranchCounts[branch] || 0) + 1;
+  }
+  const draftRequestCounts = Object.values(draftBranchCounts);
+  const draftRequestsPerPullRequestAverage = draftRequestCounts.length > 0
+    ? draftRequestCounts.reduce((total, count) => total + count, 0) / draftRequestCounts.length
+    : null;
+  let draftSettledRounds = 0;
+  let draftActionRequiredRounds = 0;
+  let draftTimedOutRounds = 0;
+  for (const pullRequest of pullRequests) {
+    for (const comment of pullRequest?.issueComments || []) {
+      const status = parseDraftReviewStatusMarker(String(comment?.body || ""));
+      if (!status) continue;
+      for (const entry of status.entries) {
+        draftSettledRounds += 1;
+        if (entry.state === "action_required") draftActionRequiredRounds += 1;
+        if (entry.state === "timed_out") draftTimedOutRounds += 1;
+      }
+    }
+  }
   const targetMetrics = Object.freeze({
     attemptsPerTreeAverage: numericTarget(
       averageAttempts,
@@ -592,6 +634,10 @@ export function summarizeCiHealth({
     readyTransitionsPerPullRequestAverage: numericTarget(
       candidateFlow.readyTransitionsPerPullRequestAverage,
       TARGETS.readyTransitionsPerPullRequestAverage,
+    ),
+    draftAutoFailureRate: numericTarget(
+      draftAutoFailureRate,
+      TARGETS.draftAutoFailureRate,
     ),
     dependencyHealth: dependencyTarget(dependencyHealth),
   });
@@ -663,6 +709,21 @@ export function summarizeCiHealth({
         mergeWaitMinutesP50Under: 10,
         readyTransitionsPerPullRequestAverageAtMost: 1.25,
       },
+    },
+    draftReview: {
+      terminalRuns: draftAutoTerminal.length,
+      failedRuns: draftAutoFailed.length,
+      cancelledRuns: draftAutoCancelled.length,
+      manualRuns: draftCommandTerminal.length,
+      manualFailedRuns: draftCommandFailed.length,
+      failureRate: round(draftAutoFailureRate),
+      requestsPerPullRequestAverage: round(draftRequestsPerPullRequestAverage),
+      roundMinutesP50: percentile(draftRoundMinutes, 50),
+      roundMinutesP95: percentile(draftRoundMinutes, 95),
+      settledRounds: draftSettledRounds,
+      actionRequiredRounds: draftActionRequiredRounds,
+      timedOutRounds: draftTimedOutRounds,
+      targetFailureRateUnder: 0.05,
     },
     publication: {
       runs: (releaseRuns || []).length,
@@ -886,6 +947,7 @@ export function renderCiHealthMarkdown(report) {
     `| Test completion P50 | ${report.candidateFlow.testMinutesP50 ?? "n/a"} min | < 20 min | ${metricStatus("testMinutesP50")} |`,
     `| Gate-to-merge wait P50 | ${report.candidateFlow.mergeWaitMinutesP50 ?? "n/a"} min | < 10 min | ${metricStatus("mergeWaitMinutesP50")} |`,
     `| Ready transitions per Pull Request | ${report.candidateFlow.readyTransitionsPerPullRequestAverage ?? "n/a"} | <= 1.25 | ${metricStatus("readyTransitionsPerPullRequestAverage")} |`,
+    `| Draft review auto-trigger failure rate | ${percent(report.draftReview.failureRate)} | < 5% | ${metricStatus("draftAutoFailureRate")} |`,
     "",
     "### Recorded workload",
     "",
@@ -903,6 +965,11 @@ export function renderCiHealthMarkdown(report) {
     `| Release-dry-run runner minutes | ${report.runnerUse.releaseDryRunMinutes} |`,
     `| Candidate-churn runner minutes | ${report.runnerUse.candidateChurnMinutes} |`,
     `| Ready transitions | ${report.candidateFlow.readyTransitions} |`,
+    `| Draft review auto runs | ${report.draftReview.terminalRuns} |`,
+    `| Draft request-to-settlement P50 | ${report.draftReview.roundMinutesP50 ?? "n/a"} min |`,
+    `| Draft settled rounds | ${report.draftReview.settledRounds} |`,
+    `| Draft action-required rounds | ${report.draftReview.actionRequiredRounds} |`,
+    `| Draft timed-out rounds | ${report.draftReview.timedOutRounds} |`,
     `| Review findings P0/P1/P2/P3 | ${report.candidateFlow.priorityCounts.P0}/${report.candidateFlow.priorityCounts.P1}/${report.candidateFlow.priorityCounts.P2}/${report.candidateFlow.priorityCounts.P3} |`,
     `| Unclassified review comments | ${report.candidateFlow.priorityCounts.unclassified} |`,
     `| Active PR workflow runs | ${report.workflowCancellation.activePullRequestRuns} |`,
@@ -928,9 +995,20 @@ async function main() {
     generatedAt.getTime() - options.days * 24 * 60 * 60 * 1000,
   ).toISOString();
   const repositoryPath = options.repository.split("/").map(encodeURIComponent).join("/");
-  const [ciRuns, feedbackRuns, dryRunRuns, candidateRuns, releaseRuns, pullRequests] = await Promise.all([
+  const [
+    ciRuns,
+    feedbackRuns,
+    draftReviewCommandRuns,
+    draftReviewAutoRuns,
+    dryRunRuns,
+    candidateRuns,
+    releaseRuns,
+    pullRequests,
+  ] = await Promise.all([
     workflowRuns({ repositoryPath, workflow: CI_HEALTH_WORKFLOW_INPUTS.ci, token, since }),
     workflowRuns({ repositoryPath, workflow: CI_HEALTH_WORKFLOW_INPUTS.feedback, token, since }),
+    workflowRuns({ repositoryPath, workflow: CI_HEALTH_WORKFLOW_INPUTS.draftReviewCommand, token, since }),
+    workflowRuns({ repositoryPath, workflow: CI_HEALTH_WORKFLOW_INPUTS.draftReviewAuto, token, since }),
     workflowRuns({ repositoryPath, workflow: CI_HEALTH_WORKFLOW_INPUTS.releaseDryRun, token, since }),
     workflowRuns({ repositoryPath, workflow: CI_HEALTH_WORKFLOW_INPUTS.releaseCandidate, token, since }),
     workflowRuns({ repositoryPath, workflow: CI_HEALTH_WORKFLOW_INPUTS.release, token, since }),
@@ -940,7 +1018,7 @@ async function main() {
     .filter((run) => run.event === "pull_request");
   const jobsByRunId = await collectJobs(
     repositoryPath,
-    [...pullRequestRuns, ...releaseRuns],
+    [...pullRequestRuns, ...releaseRuns, ...draftReviewCommandRuns, ...draftReviewAutoRuns],
     token,
   );
   const report = summarizeCiHealth({
@@ -948,6 +1026,8 @@ async function main() {
     generatedAt: generatedAt.toISOString(),
     ciRuns,
     feedbackRuns,
+    draftReviewCommandRuns,
+    draftReviewAutoRuns,
     dryRunRuns,
     jobsByRunId,
     candidateRuns,

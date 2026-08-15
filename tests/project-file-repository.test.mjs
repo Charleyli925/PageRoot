@@ -61,6 +61,83 @@ async function importSource(fixtureValue, name = "原文件.html", content = htm
   return { sourcePath, buffer, target: imported.target };
 }
 
+function registryPath(fixtureValue) {
+  return path.join(fixtureValue.projects, ".pageroot-registry.json");
+}
+
+function legacyV4RegistryFromCurrent(current) {
+  return {
+    schemaVersion: "4.0.0",
+    updatedAt: current.updatedAt,
+    projects: Object.fromEntries(Object.entries(current.projects).map(([projectId, record]) => [
+      projectId,
+      {
+        projectRootPath: record.registeredProjectRootPath,
+        updatedAt: record.updatedAt,
+      },
+    ])),
+  };
+}
+
+function legacyV4RegistryBackupPath(fixtureValue, legacySha256) {
+  return path.join(
+    fixtureValue.projects,
+    ".pageroot-registry-backups",
+    `${legacySha256.slice("sha256:".length)}.json`,
+  );
+}
+
+function legacyV4RegistryMigrationLockPath(fixtureValue) {
+  return path.join(fixtureValue.projects, ".pageroot-registry-migration-lock");
+}
+
+function legacyV4RegistryMigrationLockOwnerPath(fixtureValue, token) {
+  return path.join(
+    legacyV4RegistryMigrationLockPath(fixtureValue),
+    `.owner-${token}.json`,
+  );
+}
+
+async function seedDeadLegacyV4RegistryMigrationLock(fixtureValue) {
+  const token = "00000000-0000-4000-8000-000000000001";
+  await mkdir(legacyV4RegistryMigrationLockPath(fixtureValue));
+  await writeFile(
+    legacyV4RegistryMigrationLockOwnerPath(fixtureValue, token),
+    `${JSON.stringify({
+      pid: 2_147_483_647,
+      token,
+      createdAt: "2026-08-14T00:00:00.000Z",
+    })}\n`,
+    "utf8",
+  );
+  return { token };
+}
+
+async function seedExactLegacyV4Registry(fixtureValue, transform = (value) => value) {
+  const filePath = registryPath(fixtureValue);
+  const current = await json(filePath);
+  const legacy = transform(legacyV4RegistryFromCurrent(current));
+  const bytes = Buffer.from(`${JSON.stringify(legacy, null, 2)}\n`, "utf8");
+  const legacySha256 = sha256(bytes);
+  await writeFile(filePath, bytes);
+  return {
+    filePath,
+    legacy,
+    bytes,
+    legacySha256,
+    backupPath: legacyV4RegistryBackupPath(fixtureValue, legacySha256),
+  };
+}
+
+async function initializeMigratedRepository(fixtureValue, options = {}) {
+  const repository = new ProjectFileRepository({
+    projectsRoot: fixtureValue.projects,
+    ...options,
+  });
+  await repository.initialize();
+  return repository;
+}
+
 test("atomic import creates V1 facts once and ordinary saves never create a Version", async (t) => {
   const value = await fixture(t);
   const imported = await importSource(value, "原文件.htm");
@@ -172,6 +249,152 @@ test("a Candidate is not a Version until adoption, rejection consumes no ordinal
   manifest = await json(path.join(imported.target.projectRootPath, ".pageroot", "manifest.json"));
   assert.deepEqual(manifest.versions.map((version) => version.versionId), ["ver_0001", "ver_0002"]);
   assert.equal(manifest.latestOfficialVersionId, "ver_0002");
+});
+
+test("a historical Version reactivates its original Working Copy without changing its immutable snapshot", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "history-lineage.html");
+  let active = imported.target;
+  let v2Target = null;
+  const v2Snapshot = html("immutable V2");
+  for (let ordinal = 2; ordinal <= 6; ordinal += 1) {
+    const candidate = await value.repository.createCandidate({
+      target: active,
+      requestId: `req_history_${ordinal}`,
+      candidateId: `candidate_history_${ordinal}_0001`,
+      html: ordinal === 2 ? v2Snapshot : html(`V${ordinal}`),
+      expectedSourceSha256: active.sourceSha256,
+    });
+    const promoted = await value.repository.promoteCandidate({
+      target: active,
+      candidateId: candidate.candidate.candidateId,
+    });
+    active = promoted.target;
+    if (ordinal === 2) v2Target = active;
+  }
+  assert.equal(active.versionId, "ver_0006");
+  assert.equal(v2Target?.workingCopyId, "work_ver_0002");
+
+  const activated = await value.repository.activateVersionWorkingCopy({
+    target: active,
+    versionId: "ver_0002",
+    operationId: "history_continue_v2_0001",
+    expectedActiveWorkingCopyId: "work_ver_0006",
+  });
+  assert.equal(activated.activated, true);
+  assert.equal(activated.previousWorkingCopyId, "work_ver_0006");
+  assert.equal(activated.target.versionId, "ver_0002");
+  assert.equal(activated.target.workingCopyId, "work_ver_0002");
+  assert.equal(activated.historyActivation.state, "desktop-pending");
+  const retried = await value.repository.activateVersionWorkingCopy({
+    target: active,
+    versionId: "ver_0002",
+    operationId: "history_continue_v2_0001",
+    expectedActiveWorkingCopyId: "work_ver_0006",
+  });
+  assert.equal(retried.activated, false);
+  assert.equal(retried.replayed, true);
+  assert.equal(retried.previousWorkingCopyId, "work_ver_0006");
+  assert.equal(retried.target.workingCopyId, activated.target.workingCopyId);
+
+  const resumedAfterLostResponse = await value.repository.activateVersionWorkingCopy({
+    target: active,
+    versionId: "ver_0002",
+    operationId: "history_retry_after_lost_response_0001",
+    expectedActiveWorkingCopyId: "work_ver_0006",
+  });
+  assert.equal(resumedAfterLostResponse.replayed, true);
+  assert.equal(
+    resumedAfterLostResponse.historyActivation.operationId,
+    "history_continue_v2_0001",
+  );
+
+  const confirmed = await value.repository.confirmVersionWorkingCopyActivation({
+    target: active,
+    operationId: "history_continue_v2_0001",
+    previousWorkingCopyId: "work_ver_0006",
+    activatedWorkingCopyId: "work_ver_0002",
+    versionId: "ver_0002",
+  });
+  assert.equal(confirmed.confirmed, true);
+  assert.equal(confirmed.historyActivation.state, "desktop-confirmed");
+  const confirmRetry = await value.repository.confirmVersionWorkingCopyActivation({
+    target: active,
+    operationId: "history_continue_v2_0001",
+    previousWorkingCopyId: "work_ver_0006",
+    activatedWorkingCopyId: "work_ver_0002",
+    versionId: "ver_0002",
+  });
+  assert.equal(confirmRetry.confirmed, false);
+  const runtimeAfterActivation = await json(path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "runtime-state.json",
+  ));
+  assert.equal(runtimeAfterActivation.activeWorkingCopyId, "work_ver_0002");
+  assert.equal(runtimeAfterActivation.historyActivation.state, "desktop-confirmed");
+
+  const resumedAfterConfirmationLoss = await value.repository.activateVersionWorkingCopy({
+    target: active,
+    versionId: "ver_0002",
+    operationId: "history_retry_after_confirmation_loss_0001",
+    expectedActiveWorkingCopyId: "work_ver_0006",
+  });
+  assert.equal(resumedAfterConfirmationLoss.replayed, true);
+  assert.equal(
+    resumedAfterConfirmationLoss.historyActivation.operationId,
+    "history_continue_v2_0001",
+  );
+
+  await assert.rejects(
+    value.repository.activateVersionWorkingCopy({
+      target: active,
+      versionId: "ver_0003",
+      operationId: "history_stale_v3_0001",
+      expectedActiveWorkingCopyId: "work_ver_0006",
+    }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "HISTORY_ACTIVATION_PREDECESSOR_CONFLICT",
+  );
+
+  const v2Edited = html("editable V2 after history continuation");
+  const saved = await value.repository.saveWorkingCopy({
+    target: activated.target,
+    html: v2Edited,
+    expectedSourceSha256: activated.target.sourceSha256,
+    editRevision: 1,
+  });
+  assert.equal(await readFile(
+    path.join(saved.target.projectRootPath, ".pageroot", "versions", "ver_0002", "index.html"),
+    "utf8",
+  ), v2Snapshot);
+
+  const restarted = new ProjectFileRepository({ projectsRoot: value.projects });
+  const reopened = await restarted.workspace({ sourcePath: saved.target.exactSourcePath });
+  assert.equal(reopened.target.versionId, "ver_0002");
+  assert.equal(reopened.target.workingCopyId, "work_ver_0002");
+  assert.equal(reopened.content, v2Edited);
+
+  const candidate = await restarted.createCandidate({
+    target: reopened.target,
+    requestId: "req_history_v7",
+    candidateId: "candidate_history_v7_0001",
+    html: html("V7 based on V2"),
+    expectedSourceSha256: reopened.target.sourceSha256,
+  });
+  const promoted = await restarted.promoteCandidate({
+    target: reopened.target,
+    candidateId: candidate.candidate.candidateId,
+  });
+  assert.equal(promoted.version.versionId, "ver_0007");
+  assert.equal(promoted.version.basedOnVersionId, "ver_0002");
+  assert.equal(promoted.version.previousVersionId, "ver_0006");
+  const runtimeAfterPromotion = await json(path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "runtime-state.json",
+  ));
+  assert.equal(runtimeAfterPromotion.historyActivation, null);
 });
 
 test("blocked Candidate validation never reserves a Version", async (t) => {
@@ -819,6 +1042,345 @@ test("promotion rechecks the Candidate base before manifest publication and reco
     "candidate.json",
   ));
   assert.equal(persistedCandidate.status, "pending-review");
+});
+
+test("an exact legacy V4 Registry migrates one registered project from its live root stat", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "legacy-single.html");
+  const seeded = await seedExactLegacyV4Registry(value);
+  const originalExternalBytes = await readFile(imported.sourcePath);
+
+  const migratedRepository = await initializeMigratedRepository(value);
+  const migrated = await json(seeded.filePath);
+  const record = migrated.projects[imported.target.projectId];
+  const rootInformation = await lstat(imported.target.projectRootPath);
+
+  assert.equal(migrated.schemaVersion, "4.0.0");
+  assert.deepEqual(migrated.pendingImports, {});
+  assert.deepEqual(record, {
+    registeredProjectRootPath: imported.target.projectRootPath,
+    rootFileIdentity: {
+      device: String(rootInformation.dev),
+      inode: String(rootInformation.ino),
+      birthtimeMs: Number(rootInformation.birthtimeMs || 0),
+    },
+    updatedAt: seeded.legacy.projects[imported.target.projectId].updatedAt,
+  });
+  assert.notEqual(sha256(await readFile(seeded.filePath)), seeded.legacySha256);
+  assert.deepEqual(await readFile(seeded.backupPath), seeded.bytes);
+  assert.equal(sha256(await readFile(seeded.backupPath)), seeded.legacySha256);
+  assert.deepEqual(await readFile(imported.sourcePath), originalExternalBytes);
+
+  const reopened = await migratedRepository.workspace({
+    sourcePath: imported.target.exactSourcePath,
+  });
+  assert.equal(reopened.target.projectId, imported.target.projectId);
+  assert.equal(reopened.target.workingCopyId, imported.target.workingCopyId);
+});
+
+test("an exact legacy V4 Registry migrates multiple projects once and then stays byte-stable", async (t) => {
+  const value = await fixture(t);
+  const first = await importSource(value, "legacy-first.html", html("legacy first"));
+  const second = await importSource(value, "legacy-second.html", html("legacy second"));
+  const seeded = await seedExactLegacyV4Registry(value);
+
+  await initializeMigratedRepository(value);
+  const afterFirstMigration = await readFile(seeded.filePath);
+  const migrated = JSON.parse(afterFirstMigration.toString("utf8"));
+  assert.deepEqual(Object.keys(migrated.projects).sort(), [
+    first.target.projectId,
+    second.target.projectId,
+  ].sort());
+  for (const imported of [first, second]) {
+    const record = migrated.projects[imported.target.projectId];
+    assert.equal(record.registeredProjectRootPath, imported.target.projectRootPath);
+    assert.equal(typeof record.rootFileIdentity.device, "string");
+    assert.equal(typeof record.rootFileIdentity.inode, "string");
+  }
+  assert.deepEqual(await readFile(seeded.backupPath), seeded.bytes);
+
+  await initializeMigratedRepository(value);
+  assert.deepEqual(
+    await readFile(seeded.filePath),
+    afterFirstMigration,
+    "a current migrated Registry must not be rewritten on the second read",
+  );
+});
+
+test("an empty exact legacy V4 Registry migrates to the current empty Registry", async (t) => {
+  const value = await fixture(t);
+  await value.repository.initialize();
+  const seeded = await seedExactLegacyV4Registry(value);
+
+  await initializeMigratedRepository(value);
+  const migrated = await json(seeded.filePath);
+  assert.deepEqual(migrated.projects, {});
+  assert.deepEqual(migrated.pendingImports, {});
+  assert.deepEqual(await readFile(seeded.backupPath), seeded.bytes);
+});
+
+test("a current V4 Registry is read without a migration rewrite", async (t) => {
+  const value = await fixture(t);
+  await importSource(value, "current-registry.html");
+  const before = await readFile(registryPath(value));
+
+  await initializeMigratedRepository(value);
+
+  assert.deepEqual(await readFile(registryPath(value)), before);
+});
+
+test("legacy V4 Registry rejects mixed, escaping, symlinked, missing and mismatched records without changing its bytes", async (t) => {
+  const cases = [
+    {
+      name: "mixed current-and-legacy fields",
+      transform(legacy) {
+        legacy.pendingImports = {};
+        return legacy;
+      },
+      expectsLegacyMigrationError: false,
+    },
+    {
+      name: "path outside the configured project root",
+      transform(legacy, value) {
+        const [projectId] = Object.keys(legacy.projects);
+        legacy.projects[projectId].projectRootPath = value.root;
+        return legacy;
+      },
+      expectsLegacyMigrationError: true,
+    },
+    {
+      name: "symbolic-link project root",
+      async prepare(value, imported) {
+        const linkPath = path.join(value.projects, "legacy-symlink-root");
+        await symlink(imported.target.projectRootPath, linkPath, "dir");
+        return linkPath;
+      },
+      transform(legacy, _value, linkPath) {
+        const [projectId] = Object.keys(legacy.projects);
+        legacy.projects[projectId].projectRootPath = linkPath;
+        return legacy;
+      },
+      expectsLegacyMigrationError: true,
+    },
+    {
+      name: "missing project root",
+      transform(legacy, value) {
+        const [projectId] = Object.keys(legacy.projects);
+        legacy.projects[projectId].projectRootPath = path.join(value.projects, "missing-root");
+        return legacy;
+      },
+      expectsLegacyMigrationError: true,
+    },
+    {
+      name: "projectId mismatch",
+      transform(legacy) {
+        const [[, record]] = Object.entries(legacy.projects);
+        legacy.projects = {
+          [`project_${"a".repeat(32)}`]: record,
+        };
+        return legacy;
+      },
+      expectsLegacyMigrationError: true,
+    },
+  ];
+
+  for (const scenario of cases) {
+    const value = await fixture(t);
+    const imported = await importSource(value, "legacy-invalid.html");
+    const prepared = scenario.prepare
+      ? await scenario.prepare(value, imported)
+      : undefined;
+    const seeded = await seedExactLegacyV4Registry(
+      value,
+      (legacy) => scenario.transform(legacy, value, prepared),
+    );
+
+    await assert.rejects(
+      initializeMigratedRepository(value),
+      (error) => error instanceof ProjectFileRepositoryError
+        && (
+          scenario.expectsLegacyMigrationError
+            ? error.code.startsWith("LEGACY_V4_REGISTRY_")
+            : !error.code.startsWith("LEGACY_V4_REGISTRY_")
+        ),
+      scenario.name,
+    );
+    const after = await readFile(seeded.filePath);
+    assert.deepEqual(after, seeded.bytes, `${scenario.name} must retain the original Registry bytes`);
+    assert.equal(sha256(after), seeded.legacySha256);
+  }
+});
+
+test("legacy V4 Registry migration fault recovery leaves either old bytes or one complete Registry", async (t) => {
+  const beforePublish = await fixture(t);
+  const importedBeforePublish = await importSource(beforePublish, "legacy-before-publish.html");
+  const seededBeforePublish = await seedExactLegacyV4Registry(beforePublish);
+  const interruptedBeforePublish = new ProjectFileRepository({
+    projectsRoot: beforePublish.projects,
+    failpoint: (name) => name === "legacy-v4-registry-migration-before-publish",
+  });
+
+  await assert.rejects(
+    interruptedBeforePublish.initialize(),
+    (error) => error instanceof ProjectFileRepositoryError && error.code === "INJECTED_FAILPOINT",
+  );
+  assert.deepEqual(await readFile(seededBeforePublish.filePath), seededBeforePublish.bytes);
+  assert.deepEqual(await readFile(seededBeforePublish.backupPath), seededBeforePublish.bytes);
+
+  const recoveredBeforePublish = await initializeMigratedRepository(beforePublish);
+  const recoveredWorkspace = await recoveredBeforePublish.workspace({
+    sourcePath: importedBeforePublish.target.exactSourcePath,
+  });
+  assert.equal(recoveredWorkspace.target.projectId, importedBeforePublish.target.projectId);
+
+  const afterPublish = await fixture(t);
+  await importSource(afterPublish, "legacy-after-publish.html");
+  const seededAfterPublish = await seedExactLegacyV4Registry(afterPublish);
+  const interruptedAfterPublish = new ProjectFileRepository({
+    projectsRoot: afterPublish.projects,
+    failpoint: (name) => name === "legacy-v4-registry-migration-published",
+  });
+
+  await assert.rejects(
+    interruptedAfterPublish.initialize(),
+    (error) => error instanceof ProjectFileRepositoryError && error.code === "INJECTED_FAILPOINT",
+  );
+  const publishedBytes = await readFile(seededAfterPublish.filePath);
+  const published = JSON.parse(publishedBytes.toString("utf8"));
+  assert.deepEqual(published.pendingImports, {});
+  assert.notEqual(sha256(publishedBytes), seededAfterPublish.legacySha256);
+  assert.deepEqual(await readFile(seededAfterPublish.backupPath), seededAfterPublish.bytes);
+
+  await initializeMigratedRepository(afterPublish);
+  assert.deepEqual(await readFile(seededAfterPublish.filePath), publishedBytes);
+});
+
+test("legacy V4 migration serializes a concurrent import without dropping its Registry entry", async (t) => {
+  const value = await fixture(t);
+  const first = await importSource(value, "legacy-concurrent-first.html");
+  const seeded = await seedExactLegacyV4Registry(value);
+  const secondHtml = html("legacy concurrent second");
+  const secondSourcePath = path.join(value.sources, "legacy-concurrent-second.html");
+  const secondBytes = Buffer.from(secondHtml, "utf8");
+  await writeFile(secondSourcePath, secondBytes);
+
+  let releasePublish = () => {};
+  const publishPaused = new Promise((resolve) => {
+    releasePublish = resolve;
+  });
+  let reachedPublish;
+  const publishReached = new Promise((resolve) => {
+    reachedPublish = resolve;
+  });
+  t.after(() => releasePublish());
+  const firstRepository = new ProjectFileRepository({
+    projectsRoot: value.projects,
+    failpoint: async (name) => {
+      if (name === "legacy-v4-registry-migration-before-publish") {
+        reachedPublish();
+        await publishPaused;
+      }
+      return false;
+    },
+  });
+  const firstMigration = firstRepository.initialize();
+  await publishReached;
+
+  const secondRepository = new ProjectFileRepository({ projectsRoot: value.projects });
+  const secondImport = secondRepository.importExternal({
+    sourcePath: secondSourcePath,
+    expectedSourceSha256: sha256(secondBytes),
+  });
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  assert.deepEqual(
+    await readFile(seeded.filePath),
+    seeded.bytes,
+    "a concurrent writer must wait before the legacy Registry is published",
+  );
+
+  releasePublish();
+  const [, importedSecond] = await Promise.all([firstMigration, secondImport]);
+  const registry = await json(seeded.filePath);
+  assert.deepEqual(
+    Object.keys(registry.projects).sort(),
+    [first.target.projectId, importedSecond.target.projectId].sort(),
+  );
+  assert.deepEqual(registry.pendingImports, {});
+  assert.deepEqual(await readFile(seeded.backupPath), seeded.bytes);
+});
+
+test("legacy V4 stale-lock retirement cannot move a replacement sealed lock", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "legacy-stale-lock.html");
+  const seeded = await seedExactLegacyV4Registry(value);
+  await seedDeadLegacyV4RegistryMigrationLock(value);
+
+  let releaseFirstRetirement = () => {};
+  const firstRetirementPaused = new Promise((resolve) => {
+    releaseFirstRetirement = resolve;
+  });
+  let firstRetirementReached;
+  const firstRetirementReady = new Promise((resolve) => {
+    firstRetirementReached = resolve;
+  });
+  let releaseSecondPublish = () => {};
+  const secondPublishPaused = new Promise((resolve) => {
+    releaseSecondPublish = resolve;
+  });
+  let secondPublishReached;
+  const secondPublishReady = new Promise((resolve) => {
+    secondPublishReached = resolve;
+  });
+  t.after(() => {
+    releaseFirstRetirement();
+    releaseSecondPublish();
+  });
+
+  const firstRepository = new ProjectFileRepository({
+    projectsRoot: value.projects,
+    failpoint: async (name) => {
+      if (name === "legacy-v4-registry-migration-lock-before-retire") {
+        firstRetirementReached();
+        await firstRetirementPaused;
+      }
+      return false;
+    },
+  });
+  const firstMigration = firstRepository.initialize();
+  await firstRetirementReady;
+
+  const secondRepository = new ProjectFileRepository({
+    projectsRoot: value.projects,
+    failpoint: async (name) => {
+      if (name === "legacy-v4-registry-migration-before-publish") {
+        secondPublishReached();
+        await secondPublishPaused;
+      }
+      return false;
+    },
+  });
+  const secondMigration = secondRepository.initialize();
+  await secondPublishReady;
+
+  const lockPath = legacyV4RegistryMigrationLockPath(value);
+  const replacementOwner = (await readdir(lockPath)).filter((name) => (
+    /^\.owner-[a-f0-9-]{36}\.json$/u.test(name)
+  ));
+  assert.equal(replacementOwner.length, 1);
+
+  releaseFirstRetirement();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.deepEqual(
+    (await readdir(lockPath)).filter((name) => /^\.owner-[a-f0-9-]{36}\.json$/u.test(name)),
+    replacementOwner,
+    "a delayed stale reclaimer must not move a newly sealed replacement lock",
+  );
+
+  releaseSecondPublish();
+  await Promise.all([firstMigration, secondMigration]);
+  const registry = await json(seeded.filePath);
+  assert.deepEqual(Object.keys(registry.projects), [imported.target.projectId]);
+  assert.deepEqual(await readFile(seeded.backupPath), seeded.bytes);
 });
 
 test("exact path, rather than equal bytes, determines the opened document", async (t) => {
@@ -1690,6 +2252,129 @@ test("import fails before publication without registration debris, and rejects s
   );
 });
 
+test("import rechecks the bytes read after stat before publishing a project", async (t) => {
+  const value = await fixture(t);
+  const sourcePath = path.join(value.sources, "stat-race.html");
+  const source = html("small before stat race");
+  await writeFile(sourcePath, source, "utf8");
+  const oversized = Buffer.alloc((20 * 1024 * 1024) + 1, 0x61);
+  const repository = new ProjectFileRepository({
+    projectsRoot: value.projects,
+    failpoint: async (name) => {
+      if (name === "html-read-after-stat") await writeFile(sourcePath, oversized);
+      return false;
+    },
+  });
+  await assert.rejects(
+    repository.importExternal({
+      sourcePath,
+      expectedSourceSha256: sha256(Buffer.from(source, "utf8")),
+    }),
+    (error) => error instanceof ProjectFileRepositoryError && error.code === "SOURCE_TOO_LARGE",
+  );
+  assert.deepEqual(
+    (await readdir(value.projects)).filter((entry) => entry !== ".pageroot-registry.json"),
+    [],
+  );
+});
+
+test("workspace validates Working Copy state before following its declared Draft path", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "state-before-draft.html");
+  const controlRoot = path.join(imported.target.projectRootPath, ".pageroot");
+  const statePath = path.join(controlRoot, "working-copies", "work_ver_0001.json");
+  const state = await json(statePath);
+  const untrustedDraftPath = path.join(controlRoot, "drafts", "untrusted.json");
+  await writeFile(untrustedDraftPath, "not JSON", "utf8");
+  await writeFile(statePath, JSON.stringify({
+    ...state,
+    draftRelativePath: "drafts/untrusted.json",
+  }), "utf8");
+
+  await assert.rejects(
+    value.repository.workspace({ sourcePath: imported.target.exactSourcePath }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "WORKING_COPY_STATE_INVALID",
+  );
+});
+
+test("workspace follows only the v4 Working Copy saveState vocabulary", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "save-state-vocabulary.html");
+  const statePath = path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "working-copies",
+    "work_ver_0001.json",
+  );
+  const state = await json(statePath);
+
+  await writeFile(statePath, JSON.stringify({ ...state, saveState: "saving" }), "utf8");
+  const savingWorkspace = await value.repository.workspace({
+    sourcePath: imported.target.exactSourcePath,
+  });
+  assert.equal(savingWorkspace.workingCopyState.saveState, "saving");
+
+  await writeFile(statePath, JSON.stringify({ ...state, saveState: "queued" }), "utf8");
+  await assert.rejects(
+    value.repository.workspace({ sourcePath: imported.target.exactSourcePath }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "WORKING_COPY_STATE_INVALID",
+  );
+});
+
+test("workspace rejects a malformed Working Copy Draft instead of publishing an empty authority", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "malformed-draft.html");
+  const draftPath = path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "drafts",
+    "work_ver_0001.json",
+  );
+  await writeFile(draftPath, JSON.stringify({ draftRevision: 0, comments: [] }), "utf8");
+
+  await assert.rejects(
+    value.repository.workspace({ sourcePath: imported.target.exactSourcePath }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "WORKING_COPY_DRAFT_INVALID",
+  );
+});
+
+test("import reserves UTF-8 component space and skips every occupied project-root placeholder", async (t) => {
+  const utf8 = await fixture(t);
+  const longName = `${"中".repeat(80)}.html`;
+  const imported = await importSource(utf8, longName);
+  assert.ok(Buffer.byteLength(path.basename(imported.target.exactSourcePath), "utf8") <= 255);
+  assert.ok(Buffer.byteLength(path.basename(imported.target.projectRootPath), "utf8") <= 255);
+  assert.match(path.basename(imported.target.exactSourcePath), /-V1\.html$/u);
+
+  for (const kind of ["file", "directory", "symlink"]) {
+    const value = await fixture(t);
+    const blocker = path.join(value.projects, "occupied");
+    await mkdir(value.projects, { recursive: true });
+    if (kind === "file") {
+      await writeFile(blocker, "placeholder", "utf8");
+    } else if (kind === "directory") {
+      await mkdir(blocker);
+    } else {
+      const outside = path.join(value.root, "occupied-target");
+      await writeFile(outside, "placeholder", "utf8");
+      await symlink(outside, blocker, "file");
+    }
+    const occupied = await importSource(value, "occupied.html");
+    assert.notEqual(path.basename(occupied.target.projectRootPath), "occupied", kind);
+    const information = await lstat(blocker);
+    assert.equal(
+      kind === "file" ? information.isFile() : (kind === "directory"
+        ? information.isDirectory()
+        : information.isSymbolicLink()),
+      true,
+      kind,
+    );
+  }
+});
+
 test("only a Registry pending-import intent can recover a published import", async (t) => {
   for (const failpoint of [
     "import-directories-created",
@@ -1787,6 +2472,21 @@ test("only a Registry pending-import intent can recover a published import", asy
     sourcePath: path.join(committed.projects, committedRoots[0].name, "committed-V1.html"),
   });
   assert.equal(reopened.targetKind, "working-copy");
+  const retriedImport = await new ProjectFileRepository({
+    projectsRoot: committed.projects,
+  }).importExternal({
+    sourcePath: committedSourcePath,
+    expectedSourceSha256: sha256(Buffer.from(committedSource, "utf8")),
+  });
+  assert.equal(retriedImport.imported, false);
+  assert.equal(retriedImport.target.projectId, reopened.projectId);
+  assert.equal(retriedImport.target.versionId, "ver_0001");
+  assert.equal(retriedImport.target.workingCopyId, "work_ver_0001");
+  const committedRegistry = await json(path.join(
+    committed.projects,
+    ".pageroot-registry.json",
+  ));
+  assert.equal(Object.keys(committedRegistry.projects).length, 1);
 
   const recovered = await fixture(t);
   const imported = await importSource(recovered, "recovery.html");

@@ -4,6 +4,7 @@ import type {
   NativeEditSelection,
 } from "./native-edit-types";
 import type { NoticeUsageCapture } from "./NoticeBar";
+import type { EditRuntimeGrant } from "../domain/edit-runtime-contract.js";
 
 export type HtmlCanvasSelectionLevel = "module" | "part" | "insertion";
 export type HtmlCanvasTargetResolution =
@@ -83,6 +84,11 @@ export type HtmlCanvasSourceTransaction = {
 };
 
 export type HtmlCanvasInteractionMode = "editing" | "processing" | "history";
+
+export type HtmlCanvasEditRuntimeLoadOutcome =
+  | "ready"
+  | "rejected"
+  | "failed";
 
 export type HtmlCanvasFreezeSnapshot = {
   ok: boolean;
@@ -212,6 +218,15 @@ export type HtmlCanvasEditorProps = {
   onSelect?: (selection: HtmlCanvasSelection | null) => void;
   /** Notifies the host about any pointer interaction inside the isolated iframe. */
   onInteraction?: () => void;
+  /** A main-process-authorized, source-bound one-shot runtime grant. */
+  editRuntimeGrant?: EditRuntimeGrant | null;
+  /** State-owner transition when the one visible one-shot document begins loading. */
+  onEditRuntimeLoadStart?: (grant: EditRuntimeGrant) => void;
+  /** State-owner transition after the direct one-shot document settles. */
+  onEditRuntimeLoadOutcome?: (
+    grant: EditRuntimeGrant,
+    outcome: HtmlCanvasEditRuntimeLoadOutcome,
+  ) => void;
   /** Mirrors the authored page scroll coordinate into the host comment rail. */
   onCommentLayout?: (state: HtmlCanvasCommentLayoutState) => void;
   /** Opens the host product's comment composer for the current selection. */

@@ -113,7 +113,7 @@ function isContainedPath(rootPath, candidatePath) {
     || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
-async function resolveSourceRoot(sourcePath) {
+export async function resolvePreviewSourceRoot(sourcePath) {
   if (sourcePath === undefined || sourcePath === null || sourcePath === "") {
     return null;
   }
@@ -132,7 +132,7 @@ async function resolveSourceRoot(sourcePath) {
   return realpath(path.dirname(sourceRealPath));
 }
 
-function normalizeRelativeAssetPath(value, basePath = "") {
+export function normalizeRelativeAssetPath(value, basePath = "") {
   if (typeof value !== "string") return null;
   const reference = value.trim();
   if (!reference || reference.length > 4096 || reference.startsWith("#")) {
@@ -343,7 +343,15 @@ function javaScriptImports(source) {
   return references;
 }
 
-async function resolveDeclaredAsset(sourceRoot, relativePath) {
+function throwIfAssetDiscoveryAborted(signal) {
+  if (!signal?.aborted) return;
+  throw signal.reason instanceof Error
+    ? signal.reason
+    : new Error("Preview asset discovery was aborted.");
+}
+
+async function resolveDeclaredAsset(sourceRoot, relativePath, signal) {
+  throwIfAssetDiscoveryAborted(signal);
   const candidatePath = path.resolve(
     sourceRoot,
     ...relativePath.split("/"),
@@ -351,34 +359,44 @@ async function resolveDeclaredAsset(sourceRoot, relativePath) {
   if (!isContainedPath(sourceRoot, candidatePath)) return null;
   try {
     const resolvedPath = await realpath(candidatePath);
+    throwIfAssetDiscoveryAborted(signal);
     if (!isContainedPath(sourceRoot, resolvedPath)) return null;
     const fileInfo = await stat(resolvedPath);
+    throwIfAssetDiscoveryAborted(signal);
     return fileInfo.isFile() ? resolvedPath : null;
-  } catch {
+  } catch (cause) {
+    if (signal?.aborted) throw cause;
     return null;
   }
 }
 
-async function collectDeclaredAssets({
+export async function collectDeclaredPreviewAssets({
   html,
   sourceRoot,
   maxAssets = DEFAULT_MAX_DECLARED_ASSETS,
+  maxReferences = DEFAULT_MAX_DECLARED_ASSETS,
   maxDependencyScanBytes = DEFAULT_MAX_DEPENDENCY_SCAN_BYTES,
+  signal,
 }) {
   const assets = new Map();
   const cssQueue = [];
   const scriptQueue = [];
   const pendingReferences = collectHtmlAssetReferences(html);
+  const referenceLimit = Math.max(0, Math.floor(Number(maxReferences)) || 0);
+  let referenceCount = 0;
 
   const add = async ({ value, extensions, basePath = "" }) => {
+    throwIfAssetDiscoveryAborted(signal);
     const relativePath = normalizeRelativeAssetPath(value, basePath);
     if (
       !relativePath
       || !isAllowedAssetType(relativePath, extensions)
       || assets.has(relativePath)
       || assets.size >= maxAssets
+      || referenceCount >= referenceLimit
     ) return;
-    const resolvedPath = await resolveDeclaredAsset(sourceRoot, relativePath);
+    referenceCount += 1;
+    const resolvedPath = await resolveDeclaredAsset(sourceRoot, relativePath, signal);
     if (!resolvedPath) return;
     const asset = Object.freeze({ relativePath, resolvedPath });
     assets.set(relativePath, asset);
@@ -388,15 +406,22 @@ async function collectDeclaredAssets({
   };
 
   while (pendingReferences.length > 0) {
+    throwIfAssetDiscoveryAborted(signal);
     await add(pendingReferences.shift());
   }
 
   for (let index = 0; index < cssQueue.length; index += 1) {
+    throwIfAssetDiscoveryAborted(signal);
     const stylesheet = cssQueue[index];
     try {
       const info = await stat(stylesheet.resolvedPath);
+      throwIfAssetDiscoveryAborted(signal);
       if (info.size > maxDependencyScanBytes) continue;
-      const source = await readFile(stylesheet.resolvedPath, "utf8");
+      const source = await readFile(stylesheet.resolvedPath, {
+        encoding: "utf8",
+        ...(signal ? { signal } : {}),
+      });
+      throwIfAssetDiscoveryAborted(signal);
       const basePath = path.posix.dirname(stylesheet.relativePath);
       const references = cssReferences(source);
       for (const value of references.imports) {
@@ -405,23 +430,31 @@ async function collectDeclaredAssets({
       for (const value of references.urls) {
         await add({ value, extensions: CSS_URL_EXTENSIONS, basePath });
       }
-    } catch {
+    } catch (cause) {
+      if (signal?.aborted) throw cause;
       // A missing or unreadable declared stylesheet simply cannot extend the
       // preview session's capability set.
     }
   }
 
   for (let index = 0; index < scriptQueue.length; index += 1) {
+    throwIfAssetDiscoveryAborted(signal);
     const script = scriptQueue[index];
     try {
       const info = await stat(script.resolvedPath);
+      throwIfAssetDiscoveryAborted(signal);
       if (info.size > maxDependencyScanBytes) continue;
-      const source = await readFile(script.resolvedPath, "utf8");
+      const source = await readFile(script.resolvedPath, {
+        encoding: "utf8",
+        ...(signal ? { signal } : {}),
+      });
+      throwIfAssetDiscoveryAborted(signal);
       const basePath = path.posix.dirname(script.relativePath);
       for (const value of javaScriptImports(source)) {
         await add({ value, extensions: SCRIPT_EXTENSIONS, basePath });
       }
-    } catch {
+    } catch (cause) {
+      if (signal?.aborted) throw cause;
       // A missing or unreadable declared script cannot authorize additional
       // local files for the preview.
     }
@@ -530,9 +563,9 @@ export function createPreviewProtocolController({
     ) {
       throw new TypeError("Interactive preview payload is invalid or too large.");
     }
-    const sourceRoot = await resolveSourceRoot(payload?.sourcePath);
+    const sourceRoot = await resolvePreviewSourceRoot(payload?.sourcePath);
     const declaredAssets = sourceRoot
-      ? await collectDeclaredAssets({ html, sourceRoot })
+      ? await collectDeclaredPreviewAssets({ html, sourceRoot })
       : new Map();
     removeExpiredSessions();
     while (sessions.size >= maxSessions) {

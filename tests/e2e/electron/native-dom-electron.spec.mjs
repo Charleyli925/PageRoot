@@ -15,6 +15,7 @@ import path from "node:path";
 
 import { expect, test } from "@playwright/test";
 
+import { sha256 } from "../../../scripts/lifecycle-core.mjs";
 import { ProjectFileRepository } from "../../../scripts/project-file-repository.mjs";
 
 import {
@@ -464,6 +465,87 @@ test("Electron first launch imports the welcome HTML as V1 and sends its comment
       launched.electronApp,
       launched.isolatedUserData,
     );
+  }
+});
+
+test("Electron retries a managed Working Copy activation after the first response is lost", async () => {
+  test.setTimeout(120_000);
+  const source = createSourceFixture("managed-activation-retry.html");
+  const launched = await launchPageRoot({ activeSourcePath: source.sourcePath });
+  try {
+    await waitForProjectReady(launched.page);
+    const v1Path = await managedWorkingCopyPath(launched.page, source.sourcePath);
+    const projectsRoot = path.dirname(path.dirname(v1Path));
+    const repository = new ProjectFileRepository({ projectsRoot });
+    const workspace = await repository.workspace({ sourcePath: v1Path });
+    const candidate = await repository.createCandidate({
+      target: workspace.target,
+      requestId: "req_e2e_managed_activation_retry",
+      candidateId: "candidate_e2e_managed_activation_retry_0001",
+      html: "<!doctype html><html><head><title>V2 retry</title></head><body><p>V2 retry</p></body></html>",
+      expectedSourceSha256: workspace.sourceSha256,
+    });
+    const promoted = await repository.promoteCandidate({
+      target: workspace.target,
+      candidateId: candidate.candidate.candidateId,
+    });
+    const expectedManagedPath = realpathSync(promoted.target.exactSourcePath);
+    const payload = {
+      previousSourcePath: v1Path,
+      nextSourcePath: promoted.target.exactSourcePath,
+      expectedSha256: promoted.target.sourceSha256,
+      projectId: promoted.target.projectId,
+      documentId: promoted.target.documentId,
+      workingCopyId: promoted.target.workingCopyId,
+      versionId: promoted.target.versionId,
+      projectRootPath: promoted.target.projectRootPath,
+      operationId: "e2e_managed_activation_retry_0001",
+    };
+
+    // The first call commits the main-process project state. Treat the return
+    // value as lost, then replay exactly the same operation as the renderer
+    // would after a Bridge response interruption.
+    await launched.page.evaluate((input) => (
+      window.htmlAIProjects.activateManagedWorkingCopy(input)
+    ), payload);
+    const replayed = await launched.page.evaluate((input) => (
+      window.htmlAIProjects.activateManagedWorkingCopy(input)
+    ), payload);
+    expect(replayed.sourcePath).toBe(expectedManagedPath);
+    expect(replayed.sha256).toBe(promoted.target.sourceSha256);
+    const active = await launched.page.evaluate(() => window.htmlAIProjects.getActiveProject());
+    expect(active?.sourcePath).toBe(expectedManagedPath);
+    const state = JSON.parse(readFileSync(
+      path.join(launched.isolatedUserData, "html-projects.json"),
+      "utf8",
+    ));
+    expect(state.lastManagedActivation?.operationId).toBe(payload.operationId);
+    const staleOperation = await launched.page.evaluate(async (input) => {
+      try {
+        const result = await window.htmlAIProjects.activateManagedWorkingCopy(input);
+        return { inputOperationId: input.operationId, result };
+      } catch (error) {
+        return {
+          inputOperationId: input.operationId,
+          message: error?.message || null,
+        };
+      }
+    }, {
+      ...payload,
+      operationId: "e2e_managed_activation_stale_0001",
+    });
+    const stateAfterStaleAttempt = JSON.parse(readFileSync(
+      path.join(launched.isolatedUserData, "html-projects.json"),
+      "utf8",
+    ));
+    expect(staleOperation).toMatchObject({
+      inputOperationId: "e2e_managed_activation_stale_0001",
+      message: "当前桌面文件已变化，不能提交过期的托管工作文件切换。",
+    });
+    expect(stateAfterStaleAttempt.lastManagedActivation?.operationId).toBe(payload.operationId);
+  } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeSourceFixture(source.sourceDirectory);
   }
 });
 
@@ -1017,6 +1099,390 @@ test("Electron Edit does not execute an inline authored runtime script", async (
     removeValidatedTemporaryDirectory(
       sourceDirectory,
       "pageroot-inline-handler-source-e2e-",
+    );
+  }
+});
+
+test("Electron Edit preserves imported source-relative ECharts assets and native source editing", async () => {
+  const sourceDirectory = mkdtempSync(
+    path.join(tmpdir(), "pageroot-edit-runtime-source-e2e-"),
+  );
+  const sourcePath = path.join(sourceDirectory, "echarts-runtime-report.html");
+  const runtimeScriptPath = path.join(sourceDirectory, "echarts.js");
+  const source = `<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>One-shot ECharts Edit runtime</title><link rel="stylesheet" href="echarts-runtime.css"></head>
+<body>
+  <main id="chart-host" data-native-case="runtime-chart" style="width: 640px; height: 360px"></main>
+  <p class="runtime-resource-probe" data-native-case="runtime-editable">静态来源文字保持可编辑。</p>
+  <script src="echarts.js"></script>
+  <script>
+    window.__PAGEROOT_ECHARTS_AUTHOR_EXECUTIONS__ = (window.__PAGEROOT_ECHARTS_AUTHOR_EXECUTIONS__ || 0) + 1;
+    const chart = window.echarts.init(document.querySelector("#chart-host"));
+    chart.setOption({ series: [] });
+  </script>
+</body>
+</html>`;
+  const sourceSha256 = sha256(source);
+  writeFileSync(runtimeScriptPath, `window.echarts = {
+  init(host) {
+    host.style.userSelect = "none";
+    host.style.webkitTapHighlightColor = "rgba(0, 0, 0, 0)";
+    host.style.position = "relative";
+    host.style.transform = "scale(0.75)";
+    const canvas = document.createElement("canvas");
+    canvas.width = 640;
+    canvas.height = 360;
+    canvas.dataset.echartsRuntime = "true";
+    const context = canvas.getContext("2d");
+    context.fillStyle = "rgb(1, 2, 3)";
+    context.fillRect(0, 0, 640, 360);
+    host.append(canvas);
+    return { setOption() { window.__PAGEROOT_ECHARTS_AUTHOR_SETTLED__ = true; } };
+  }
+};`, "utf8");
+  writeFileSync(
+    path.join(sourceDirectory, "echarts-runtime.css"),
+    ".runtime-resource-probe { color: rgb(1, 2, 3); }",
+    "utf8",
+  );
+  writeFileSync(sourcePath, source, "utf8");
+
+  let electronApp = null;
+  let isolatedUserData = null;
+  try {
+    const launched = await launchPageRoot({ activeSourcePath: sourcePath });
+    electronApp = launched.electronApp;
+    isolatedUserData = launched.isolatedUserData;
+    const { frame } = await loadedDiskFrame(
+      launched.page,
+      sourcePath,
+      "runtime-editable",
+    );
+    const activeProject = await launched.page.evaluate(() => (
+      window.htmlAIProjects?.getActiveProject()
+    ));
+    if (typeof activeProject?.sourcePath !== "string") {
+      throw new Error("The imported managed Working Copy did not become active.");
+    }
+    const managedSourcePath = activeProject.sourcePath;
+    expect(managedSourcePath).not.toBe(sourcePath);
+    expect(activeProject.html).toBe(source);
+    await expect.poll(() => frame.evaluate(() => ({
+      rendererAuthorExecutions: window.__PAGEROOT_ECHARTS_AUTHOR_EXECUTIONS__ || 0,
+      chartCount: document.querySelectorAll("#chart-host canvas[data-echarts-runtime=true]").length,
+      frozenSnapshotCount: document.querySelectorAll(
+        "#chart-host img[data-pageroot-edit-runtime-snapshot]",
+      ).length,
+      frozenSnapshotVisible: (() => {
+        const snapshot = document.querySelector("#chart-host img[data-pageroot-edit-runtime-snapshot]");
+        const rect = snapshot?.getBoundingClientRect();
+        return Boolean(rect && rect.width >= 1 && rect.height >= 1);
+      })(),
+      bootstrapCount: document.querySelectorAll("[data-pageroot-edit-runtime-bootstrap]").length,
+      staticScripts: document.querySelectorAll('script[type="application/x-html-canvas-disabled"]').length,
+      base: document.baseURI,
+      stylesheetColor: getComputedStyle(document.querySelector(".runtime-resource-probe")).color,
+      hostInlineStyle: document.querySelector("#chart-host").getAttribute("style"),
+    })), { timeout: 6_000 }).toMatchObject({
+      rendererAuthorExecutions: 0,
+      chartCount: 0,
+      frozenSnapshotCount: 1,
+      frozenSnapshotVisible: true,
+      bootstrapCount: 0,
+      staticScripts: 2,
+      base: expect.stringMatching(/^file:/u),
+      stylesheetColor: "rgb(1, 2, 3)",
+      hostInlineStyle: expect.stringMatching(
+        /(?=.*user-select: none)(?=.*transform: scale\(0\.75\))/u,
+      ),
+    });
+    await expect(launched.page.locator(".save-status")).toHaveText("已安全保存");
+    const renderState = await launched.page.locator(".save-status").evaluate((element) => ({
+      canvasGeneration: element.getAttribute("data-canvas-generation"),
+      renderGeneration: element.getAttribute("data-render-generation"),
+      renderedSha256: element.getAttribute("data-rendered-sha256"),
+    }));
+    expect(renderState.canvasGeneration).toEqual(expect.any(String));
+    expect(renderState.renderGeneration).toBe(renderState.canvasGeneration);
+    expect(renderState.renderedSha256).toBe(sourceSha256);
+    await expect(launched.page.locator("[data-runtime-bootstrap-count=\"1\"]")).toHaveCount(1);
+    expect(sha256(readFileSync(sourcePath, "utf8"))).toBe(sourceSha256);
+    const runtimeDocument = await documentToken(frame);
+    const replay = await launched.page.evaluate(async () => {
+      const host = document.querySelector("main.workbench");
+      const fiberKey = host && Object.getOwnPropertyNames(host).find((key) => (
+        key.startsWith("__reactFiber$")
+      ));
+      const seed = fiberKey ? host?.[fiberKey] : null;
+      const visited = new Set();
+      const stack = seed ? [seed] : [];
+      let runtime = null;
+      while (stack.length && visited.size < 12_000) {
+        const fiber = stack.pop();
+        if (!fiber || visited.has(fiber)) continue;
+        visited.add(fiber);
+        for (let hook = fiber.memoizedState; hook; hook = hook.next) {
+          const candidate = hook.memoizedState?.editRuntime;
+          if (candidate?.grant?.hosts?.length) runtime = candidate;
+        }
+        if (runtime) break;
+        if (fiber.return) stack.push(fiber.return);
+        if (fiber.child) stack.push(fiber.child);
+        if (fiber.sibling) stack.push(fiber.sibling);
+      }
+      const active = await window.htmlAIProjects?.getActiveProject?.();
+      if (!runtime?.grant?.hosts?.length || !active?.html || !window.htmlAIEditRuntime) {
+        return { state: "setup-failed" };
+      }
+      try {
+        await window.htmlAIEditRuntime.prepare({
+          contractVersion: 1,
+          requestId: "edit-runtime-replay-fence-0001",
+          sourceSha256: runtime.sourceSha256,
+          html: active.html,
+          hosts: runtime.grant.hosts,
+          canvasGeneration: runtime.canvasGeneration,
+        });
+        return { state: "resolved" };
+      } catch (cause) {
+        return {
+          state: "rejected",
+          message: String(cause?.message || cause),
+        };
+      }
+    });
+    expect(replay).toMatchObject({
+      state: "rejected",
+      message: "当前画布的运行时准备已经完成。",
+    });
+    await expect(launched.page.locator("[data-runtime-bootstrap-count=\"1\"]")).toHaveCount(1);
+    expect(await documentToken(launched.page)).toBe(runtimeDocument);
+    const runtimeCanvasState = await launched.page.locator("[data-persist-state]").first().evaluate(
+      (element) => ({
+        canvasGeneration: element.getAttribute("data-canvas-generation"),
+        editRevision: element.getAttribute("data-edit-revision"),
+        persistedRevision: element.getAttribute("data-persisted-revision"),
+      }),
+    );
+
+    await addCanvasComment(
+      launched.page,
+      frame,
+      "runtime-editable",
+      "运行时图表旁的原生评论。",
+    );
+    expect({
+      document: await documentToken(launched.page),
+      canvas: await launched.page.locator("[data-persist-state]").first().evaluate(
+        (element) => ({
+          canvasGeneration: element.getAttribute("data-canvas-generation"),
+          editRevision: element.getAttribute("data-edit-revision"),
+          persistedRevision: element.getAttribute("data-persisted-revision"),
+        }),
+      ),
+    }).toEqual({ document: runtimeDocument, canvas: runtimeCanvasState });
+
+    const editable = await activateNativeEdit(frame, "runtime-editable");
+    await expect(editable).toHaveAttribute("contenteditable", "true");
+    await setTextSelection(frame, "runtime-editable", 0);
+    await launched.page.keyboard.insertText("原位");
+    await expect.poll(() => readFileSync(managedSourcePath, "utf8"))
+      .toContain("原位静态来源文字保持可编辑。");
+    expect(sha256(readFileSync(sourcePath, "utf8"))).toBe(sourceSha256);
+    expect(readFileSync(sourcePath, "utf8")).toBe(source);
+    await launched.page.keyboard.press(process.platform === "darwin" ? "Meta+S" : "Control+S");
+    await expect(launched.page.locator(".save-status")).toHaveText("已安全保存");
+    await expect(launched.page.locator("[data-runtime-bootstrap-count=\"1\"]")).toHaveCount(1);
+    expect(await documentToken(launched.page)).toBe(runtimeDocument);
+    expect(frame.isDetached()).toBe(false);
+    expect(await frame.evaluate(() => ({
+      rendererAuthorExecutions: window.__PAGEROOT_ECHARTS_AUTHOR_EXECUTIONS__,
+      chartCount: document.querySelectorAll("#chart-host canvas[data-echarts-runtime=true]").length,
+      frozenSnapshotCount: document.querySelectorAll(
+        "#chart-host img[data-pageroot-edit-runtime-snapshot]",
+      ).length,
+    }))).toEqual({
+      rendererAuthorExecutions: undefined,
+      chartCount: 0,
+      frozenSnapshotCount: 1,
+    });
+    expect(readFileSync(managedSourcePath, "utf8")).not.toMatch(
+      /data-pageroot-edit-runtime|data-echarts-runtime/u,
+    );
+  } finally {
+    if (electronApp && isolatedUserData) {
+      await stopPageRoot(electronApp, isolatedUserData);
+    }
+    removeValidatedTemporaryDirectory(
+      sourceDirectory,
+      "pageroot-edit-runtime-source-e2e-",
+    );
+  }
+});
+
+test("Electron Edit rejects unsafe ECharts host styling without persisting it", async () => {
+  const sourceDirectory = mkdtempSync(
+    path.join(tmpdir(), "pageroot-edit-runtime-rejection-source-e2e-"),
+  );
+  const sourcePath = path.join(sourceDirectory, "echarts-runtime-rejection.html");
+  const runtimeScriptPath = path.join(sourceDirectory, "echarts.js");
+  const source = `<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Rejected ECharts Edit runtime</title></head>
+<body>
+  <main id="chart-host" style="width: 640px; height: 360px"></main>
+  <p data-native-case="runtime-rejected-editable">静态来源文字保持可编辑。</p>
+  <script src="echarts.js"></script>
+  <script>
+    const chart = window.echarts.init(document.querySelector("#chart-host"));
+    chart.setOption({ series: [] });
+  </script>
+</body>
+</html>`;
+  const sourceSha256 = sha256(source);
+  writeFileSync(runtimeScriptPath, `window.echarts = {
+  init(host) {
+    host.style.position = "fixed";
+    const canvas = document.createElement("canvas");
+    canvas.dataset.echartsRuntime = "unsafe";
+    host.append(canvas);
+    return { setOption() {} };
+  }
+};`, "utf8");
+  writeFileSync(sourcePath, source, "utf8");
+
+  let electronApp = null;
+  let isolatedUserData = null;
+  try {
+    const launched = await launchPageRoot({ activeSourcePath: sourcePath });
+    electronApp = launched.electronApp;
+    isolatedUserData = launched.isolatedUserData;
+    await loadedDiskFrame(
+      launched.page,
+      sourcePath,
+      "runtime-rejected-editable",
+    );
+    // A rejected one-shot frame is replaced by the ordinary static frame; wait
+    // beyond the fixed runtime deadline before reading the current iframe.
+    await launched.page.waitForTimeout(4_500);
+    const frame = await currentEditorFrame(launched.page);
+    await expect.poll(() => frame.evaluate(() => ({
+      frozen: document.documentElement.getAttribute("data-pageroot-edit-runtime-frozen"),
+      result: document.documentElement.getAttribute("data-pageroot-edit-runtime-result"),
+      bootstrapCount: document.querySelectorAll("[data-pageroot-edit-runtime-bootstrap]").length,
+      runtimeMarkerCount: [...document.querySelectorAll("*")].filter((element) => (
+        [...element.attributes].some((attribute) => (
+          attribute.name.startsWith("data-pageroot-edit-runtime")
+        ))
+      )).length,
+      canvasCount: document.querySelectorAll("#chart-host canvas").length,
+      runtimeCanvasCount: document.querySelectorAll("canvas[data-echarts-runtime]").length,
+      hostStyle: document.querySelector("#chart-host").getAttribute("style"),
+    })), { timeout: 2_000 }).toMatchObject({
+      frozen: null,
+      result: null,
+      bootstrapCount: 0,
+      runtimeMarkerCount: 0,
+      canvasCount: 0,
+      runtimeCanvasCount: 0,
+      hostStyle: expect.stringMatching(/width:\s*640px.*height:\s*360px/u),
+    });
+    await expect(launched.page.locator(".save-status")).toHaveText("已安全保存");
+    expect(sha256(readFileSync(sourcePath, "utf8"))).toBe(sourceSha256);
+    expect(readFileSync(sourcePath, "utf8")).toBe(source);
+  } finally {
+    if (electronApp && isolatedUserData) {
+      await stopPageRoot(electronApp, isolatedUserData);
+    }
+    removeValidatedTemporaryDirectory(
+      sourceDirectory,
+      "pageroot-edit-runtime-rejection-source-e2e-",
+    );
+  }
+});
+
+test("Electron Edit isolates a malicious ECharts parent escape before static fallback", async () => {
+  const sourceDirectory = mkdtempSync(
+    path.join(tmpdir(), "pageroot-edit-runtime-parent-escape-e2e-"),
+  );
+  const sourcePath = path.join(sourceDirectory, "echarts-runtime-parent-escape.html");
+  const runtimeScriptPath = path.join(sourceDirectory, "echarts.js");
+  const source = `<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Isolated ECharts runtime</title></head>
+<body>
+  <main id="chart-host" style="width: 320px; height: 120px"></main>
+  <p data-native-case="runtime-isolated-editable">静态来源文字保持可编辑。</p>
+  <script src="echarts.js"></script>
+  <script>
+    const chart = window.echarts.init(document.querySelector("#chart-host"));
+    chart.setOption({ series: [] });
+  </script>
+</body>
+</html>`;
+  const sourceSha256 = sha256(source);
+  writeFileSync(runtimeScriptPath, `window.echarts = {
+  init(host) {
+    window.parent.document.documentElement.setAttribute("data-pageroot-author-escape", "true");
+    const canvas = document.createElement("canvas");
+    canvas.width = 320;
+    canvas.height = 120;
+    canvas.dataset.echartsRuntime = "parent-escape";
+    host.append(canvas);
+    return { setOption() {} };
+  }
+};`, "utf8");
+  writeFileSync(sourcePath, source, "utf8");
+
+  let electronApp = null;
+  let isolatedUserData = null;
+  try {
+    const launched = await launchPageRoot({ activeSourcePath: sourcePath });
+    electronApp = launched.electronApp;
+    isolatedUserData = launched.isolatedUserData;
+    await loadedDiskFrame(
+      launched.page,
+      sourcePath,
+      "runtime-isolated-editable",
+    );
+    // The author can mutate only the disposable top-level capture document.
+    // Its source audit rejects that write, and the visible Edit iframe returns
+    // to a scriptless source-backed static frame.
+    await launched.page.waitForTimeout(4_500);
+    const frame = await currentEditorFrame(launched.page);
+    expect(await launched.page.evaluate(() => (
+      document.documentElement.getAttribute("data-pageroot-author-escape")
+    ))).toBeNull();
+    await expect.poll(() => frame.evaluate(() => ({
+      escaped: document.documentElement.getAttribute("data-pageroot-author-escape"),
+      runtimeCanvasCount: document.querySelectorAll("canvas[data-echarts-runtime]").length,
+      snapshotCount: document.querySelectorAll(
+        "img[data-pageroot-edit-runtime-snapshot]",
+      ).length,
+      runtimeMarkerCount: [...document.querySelectorAll("*")].filter((element) => (
+        [...element.attributes].some((attribute) => (
+          attribute.name.startsWith("data-pageroot-edit-runtime")
+        ))
+      )).length,
+    })), { timeout: 2_000 }).toEqual({
+      escaped: null,
+      runtimeCanvasCount: 0,
+      snapshotCount: 0,
+      runtimeMarkerCount: 0,
+    });
+    await expect(launched.page.locator(".save-status")).toHaveText("已安全保存");
+    const editable = await activateNativeEdit(frame, "runtime-isolated-editable");
+    await expect(editable).toHaveAttribute("contenteditable", "true");
+    expect(sha256(readFileSync(sourcePath, "utf8"))).toBe(sourceSha256);
+    expect(readFileSync(sourcePath, "utf8")).toBe(source);
+  } finally {
+    if (electronApp && isolatedUserData) {
+      await stopPageRoot(electronApp, isolatedUserData);
+    }
+    removeValidatedTemporaryDirectory(
+      sourceDirectory,
+      "pageroot-edit-runtime-parent-escape-e2e-",
     );
   }
 });
@@ -1673,6 +2139,124 @@ test("workspace failure keeps the current page visible with export and relaunch 
     if (electronApp) {
       await stopPageRoot(electronApp, isolatedUserData, { cleanup: false });
     }
+    removeIsolatedUserData(isolatedUserData);
+    removeValidatedTemporaryDirectory(
+      sourceDirectory,
+      "pageroot-native-source-e2e-",
+    );
+  }
+});
+
+test("Electron migrates an exact legacy V4 Registry before opening an editable, commentable external V1", async () => {
+  test.setTimeout(120_000);
+  const sourceDirectory = mkdtempSync(path.join(tmpdir(), "pageroot-native-source-e2e-"));
+  const isolatedUserData = mkdtempSync(path.join(tmpdir(), "pageroot-native-e2e-"));
+  const originalToken = "SOURCE_FIDELITY_TOKEN_001";
+  const replacement = "旧Registry迁移后的编辑";
+  const original = withBomAndCrLf(fixtureBuffer("source-fidelity.html"));
+  const sourcePath = path.join(sourceDirectory, "legacy-registry-opening.html");
+  const seedSourcePath = path.join(sourceDirectory, "legacy-registry-seed.html");
+  writeFileSync(sourcePath, original);
+  writeFileSync(seedSourcePath, original);
+
+  const projectsRoot = path.join(isolatedUserData, "project-files");
+  const seedRepository = new ProjectFileRepository({ projectsRoot });
+  await seedRepository.importExternal({
+    sourcePath: seedSourcePath,
+    expectedSourceSha256: sha256(original),
+  });
+  const registryPath = path.join(projectsRoot, ".pageroot-registry.json");
+  const currentRegistry = JSON.parse(readFileSync(registryPath, "utf8"));
+  const legacyRegistry = {
+    schemaVersion: "4.0.0",
+    updatedAt: currentRegistry.updatedAt,
+    projects: Object.fromEntries(Object.entries(currentRegistry.projects).map(([projectId, record]) => [
+      projectId,
+      {
+        projectRootPath: record.registeredProjectRootPath,
+        updatedAt: record.updatedAt,
+      },
+    ])),
+  };
+  const legacyRegistryBytes = Buffer.from(
+    `${JSON.stringify(legacyRegistry, null, 2)}\n`,
+    "utf8",
+  );
+  const legacyRegistrySha256 = sha256(legacyRegistryBytes);
+  writeFileSync(registryPath, legacyRegistryBytes);
+
+  let firstApp = null;
+  let reopenedApp = null;
+  try {
+    const firstLaunch = await launchPageRoot({
+      isolatedUserData,
+      activeSourcePath: sourcePath,
+    });
+    firstApp = firstLaunch.electronApp;
+    const managedSourcePath = await managedWorkingCopyPath(firstLaunch.page, sourcePath);
+    let { frame } = await loadedDiskFrame(
+      firstLaunch.page,
+      managedSourcePath,
+      "source-fidelity",
+    );
+    await expect(firstLaunch.page.locator("main.workbench"))
+      .toHaveAttribute("data-project-state", "ready");
+    await expect(firstLaunch.page.locator(".save-status"))
+      .toContainText("已安全保存");
+    await expect(firstLaunch.page.getByRole("button", { name: "全局评论", exact: true }))
+      .toBeEnabled();
+    const migratedRegistry = JSON.parse(readFileSync(registryPath, "utf8"));
+    expect(migratedRegistry.pendingImports).toEqual({});
+    const backupPath = path.join(
+      projectsRoot,
+      ".pageroot-registry-backups",
+      `${legacyRegistrySha256.slice("sha256:".length)}.json`,
+    );
+    expect(readFileSync(backupPath)).toEqual(legacyRegistryBytes);
+    expect(readFileSync(sourcePath)).toEqual(original);
+
+    const firstComment = "旧 Registry 已迁移，评论定位正常。";
+    await addCanvasComment(firstLaunch.page, frame, "source-fidelity", firstComment);
+    await activateNativeEdit(frame, "source-fidelity");
+    await setTextSelection(frame, "source-fidelity", 0, originalToken.length);
+    await firstLaunch.page.keyboard.insertText(replacement);
+    await firstLaunch.page.keyboard.press(keyShortcut("S"));
+    await expectCheckpointPersisted(firstLaunch.page, 0);
+    await expect(firstLaunch.page.locator(".save-status"))
+      .toContainText("已安全保存");
+    expect(readFileSync(sourcePath)).toEqual(original);
+    expect(managedSourcePath).not.toBe(realpathSync(sourcePath));
+    expect(readFileSync(managedSourcePath, "utf8")).toContain(replacement);
+
+    await closePageRootGracefully(firstApp, firstLaunch.page);
+    firstApp = null;
+
+    const reopened = await launchPageRoot({ isolatedUserData });
+    reopenedApp = reopened.electronApp;
+    const { frame: reopenedFrame } = await loadedDiskFrame(
+      reopened.page,
+      managedSourcePath,
+      "source-fidelity",
+    );
+    await expect(reopened.page.locator("main.workbench"))
+      .toHaveAttribute("data-project-state", "ready");
+    await expect(reopened.page.locator(".save-status"))
+      .toContainText("已安全保存");
+    await activateNativeEdit(reopenedFrame, "source-fidelity");
+    await addCanvasComment(
+      reopened.page,
+      reopenedFrame,
+      "source-fidelity",
+      "重开后仍可定位并评论。",
+    );
+    expect(readFileSync(sourcePath)).toEqual(original);
+    expect(readFileSync(managedSourcePath, "utf8")).toContain(replacement);
+
+    await closePageRootGracefully(reopenedApp, reopened.page);
+    reopenedApp = null;
+  } finally {
+    if (firstApp) await stopPageRoot(firstApp, isolatedUserData, { cleanup: false });
+    if (reopenedApp) await stopPageRoot(reopenedApp, isolatedUserData, { cleanup: false });
     removeIsolatedUserData(isolatedUserData);
     removeValidatedTemporaryDirectory(
       sourceDirectory,
