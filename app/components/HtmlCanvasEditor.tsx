@@ -4626,19 +4626,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       if (activeNativeEditRef.current?.rootElement.contains(event.target as Node)) {
         return;
       }
-      if (
-        event.detail >= 2
-        && !lockedRef.current
-        && findCanvasSelectionElement(event.target)
-      ) {
-        const nativeActionTarget = findNativeActionTarget(event.target);
-        if (
-          !nativeActionTarget
-          || !["INPUT", "SELECT", "TEXTAREA"].includes(nativeActionTarget.tagName)
-        ) {
-          event.preventDefault();
-        }
-      }
       activeTextRangeRef.current = null;
       setHasTextRange(false);
       const nativeActionTarget = findNativeActionTarget(event.target);

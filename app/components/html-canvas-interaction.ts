@@ -133,6 +133,7 @@ export function identifyingTextRangeAtPoint(
   const range = documentNode.createRange();
   range.setStart(hit.textNode, start);
   range.setEnd(hit.textNode, start + 1);
+  if (!nativeTextRangeContainsPoint(range, point)) return null;
   return range;
 }
 
