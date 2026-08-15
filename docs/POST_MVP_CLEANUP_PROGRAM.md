@@ -23,10 +23,10 @@ is not a product invariant.
 | ID | Purpose | This PR |
 | --- | --- | --- |
 | **P1-C** CI consolidation | One `ci.yml` for Draft feedback and Ready full-gate; Codex review is shown, never a merge hard gate; arm64-only packaging scripts; delete review-debt and retired review workflows | Done on `main` (#188) |
-| **P0-A** Remove retired validators | Delete dead packaged `scope-validator` wiring and extract the live native-layout fingerprint helpers so later refactors do not keep carrying unused contracts | Yes |
+| **P0-A** Remove retired validators | Delete dead packaged `scope-validator` wiring and extract the live native-layout fingerprint helpers so later refactors do not keep carrying unused contracts | Base (#189) |
+| **P1-A** Editable fail-open | The only user-visible relaxation: enter native editing and validate after, not before. Layout fingerprints, style-boundary carets and source-projection drift no longer refuse entry. Checkpoint scope, stale hashes and MutationObserver rollback still fail closed. | Yes |
 | **P0-B** Remove legacy Bridge stack | Split the remaining v3 Bridge so persistence and IPC have one current owner | Follow-up |
 | **P1-B** Save-pipeline CAS | Content-addressed save pipeline; depends on P0-B | Follow-up |
-| **P1-A** Editable fail-open | The only user-visible relaxation; keep it in its own PR so it cannot hide inside governance or dead-code cleanup | Follow-up |
 
 ## Governance decisions locked by P1-C
 
@@ -73,15 +73,18 @@ source for direct source-patch contract tests; putting it in
 
 **Why the preflight file is split, not deleted wholesale.**
 `HtmlCanvasEditor` still uses `nativeLayoutFingerprint`, `sameNativeLayout`,
-and `sameNativeTextStyle` to refuse an island that would change geometry or
-text style. Those three helpers move to `native-layout-fingerprint.ts` with
-byte-stable behavior. `nativeRuntimePreflight`, `buildRuntimeDomMap`, and
+and `sameNativeTextStyle` to observe post-entry geometry or text-style drift.
+P0-A moved those three helpers to `native-layout-fingerprint.ts` with
+byte-stable behavior. P1-A stopped using them as an entry gate.
+`nativeRuntimePreflight`, `buildRuntimeDomMap`, and
 `RuntimeDomSourceMap` had no production callers, so they are deleted instead
 of remaining as a fake safety net.
 
 **Why `isNativeDirectEditRoot` stays.** `source-patch-engine` still uses it to
-decide whether a tag can host a native text island. Widening that predicate
-is a user-visible fail-open change and belongs in P1-A, not here.
+decide whether a tag can host a native text island. P1-A relaxes entry for
+layout fingerprints, style-boundary carets, source-projection remounts and
+complex-parent text fragments; it does not widen this predicate to script,
+style, form roots or immutable atoms.
 The unused `classifyNativeEditCapability` classifier is deleted.
 
 The impact-selected gate used to pass deleted `tests/*.test.mjs` paths to

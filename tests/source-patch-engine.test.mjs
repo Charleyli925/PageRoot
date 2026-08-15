@@ -1171,3 +1171,41 @@ test("live nodeId that left the current source fails closed without fingerprint 
     expectedSourceSha256: index.sourceSha256,
   }, index));
 });
+
+test("editable island checkpoint rejects STALE_SOURCE_HASH and keeps original bytes", () => {
+  const html = `<p>岛内</p><p>岛外保持</p>`;
+  const index = buildSourceIndex(html);
+  const inside = elementBy(index, (element) => element.textContent === "岛内");
+  const original = html;
+  assertPatchError("STALE_SOURCE_HASH", () => planSourcePatch({
+    type: "replace-editable-island",
+    targetRef: createTargetRef(index, inside.nodeId, { level: "subregion" }),
+    nodeId: inside.nodeId,
+    beforeInnerHtml: "岛内",
+    nextInnerHtml: "已改",
+    expectedSourceSha256: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  }, index));
+  assert.equal(html, original);
+});
+
+test("editable island patches cannot change bytes outside the selected island", () => {
+  const html = `<p>岛内</p><p>岛外保持</p>`;
+  const index = buildSourceIndex(html);
+  const inside = elementBy(index, (element) => element.textContent === "岛内");
+  const result = applyPatchPlan(planSourcePatch({
+    type: "replace-editable-island",
+    targetRef: createTargetRef(index, inside.nodeId, { level: "subregion" }),
+    nodeId: inside.nodeId,
+    beforeInnerHtml: "岛内",
+    nextInnerHtml: "已改",
+    expectedSourceSha256: index.sourceSha256,
+  }, index), html);
+  assert.equal(result.html, `<p>已改</p><p>岛外保持</p>`);
+  assert.equal(result.scopeReport.outsideUnchanged, true);
+  assert.equal(
+    html.slice(inside.contentRange.endOffset),
+    result.html.slice(
+      result.patches[0].startOffset + result.patches[0].after.length,
+    ),
+  );
+});

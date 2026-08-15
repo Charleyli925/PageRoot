@@ -114,47 +114,36 @@ export type NativeTextFragmentCandidate = {
   sourceInnerHtml: string;
 };
 
-export function nativeTextFragmentForRange(
-  range: ActiveTextRange | null,
+function nativeTextFragmentForDirectText(
+  parentElement: HTMLElement,
+  textNode: Text,
   sourceIndex: SourceIndexValue,
 ): NativeTextFragmentCandidate | null {
-  if (!range || range.segments.length !== 1 || !range.target.nodeId) return null;
-  const segment = range.segments[0];
-  const sourceText = sourceIndex.byNodeId.get(segment.textNodeId);
   if (
-    sourceText?.type !== "text"
-    || !sourceText.parentId
-    || sourceText.parentId !== range.target.nodeId
-    || segment.startOffset < 0
-    || segment.endOffset > sourceText.value.length
-    || segment.endOffset <= segment.startOffset
-  ) return null;
-  const sourceParent = sourceIndex.byNodeId.get(sourceText.parentId);
-  if (sourceParent?.type !== "element") return null;
-  const documentNode = range.styleElements[0]?.ownerDocument;
-  const parentElement = documentNode?.querySelector<HTMLElement>(
-    `[${SOURCE_NODE_ATTRIBUTE}="${escapedSourceNodeId(sourceParent.nodeId)}"]`,
-  ) ?? null;
-  if (
-    !parentElement
-    || !isCanonicalSourceElement(parentElement, sourceIndex)
+    !isCanonicalSourceElement(parentElement, sourceIndex)
     || nativeEditHostForElement(parentElement, sourceIndex)
+    || textNode.parentElement !== parentElement
   ) return null;
   const parentDisplay = parentElement.ownerDocument.defaultView
     ?.getComputedStyle(parentElement).display ?? "";
   if (["flex", "inline-flex", "grid", "inline-grid"].includes(parentDisplay)) {
     return null;
   }
-  const textNode = Array.from(parentElement.childNodes).find((node): node is Text => (
-    node.nodeType === 3
-    && sourceTextNodeForDomText(node as Text, sourceIndex)?.nodeId === sourceText.nodeId
-  )) ?? null;
-  if (!textNode) return null;
+  const sourceText = sourceTextNodeForDomText(textNode, sourceIndex);
+  const parentNodeId = parentElement.getAttribute(SOURCE_NODE_ATTRIBUTE);
+  const sourceParent = parentNodeId ? sourceIndex.byNodeId.get(parentNodeId) : null;
+  const sourceNode = sourceText ? sourceIndex.byNodeId.get(sourceText.nodeId) : null;
+  if (
+    !sourceText
+    || sourceParent?.type !== "element"
+    || sourceNode?.type !== "text"
+    || sourceNode.parentId !== sourceParent.nodeId
+  ) return null;
   try {
     const parentTargetRef = createTargetRef(sourceIndex, sourceParent, {
       level: "subregion",
     }) as SourceTargetRef;
-    const textTargetRef = createTargetRef(sourceIndex, sourceText, {
+    const textTargetRef = createTargetRef(sourceIndex, sourceNode, {
       level: "text",
     }) as SourceTargetRef;
     const parentIslandCapability = isEditableIslandTarget(
@@ -166,8 +155,8 @@ export function nativeTextFragmentForRange(
       || parentIslandCapability.code !== "EDITABLE_ISLAND_STRUCTURE_UNSUPPORTED"
     ) return null;
     const sourceInnerHtml = sourceIndex.source.slice(
-      sourceText.range.startOffset,
-      sourceText.range.endOffset,
+      sourceNode.range.startOffset,
+      sourceNode.range.endOffset,
     );
     planSourcePatch({
       type: "update-direct-text-node",
@@ -189,6 +178,64 @@ export function nativeTextFragmentForRange(
   } catch {
     return null;
   }
+}
+
+export function nativeTextFragmentForRange(
+  range: ActiveTextRange | null,
+  sourceIndex: SourceIndexValue,
+): NativeTextFragmentCandidate | null {
+  if (!range || range.segments.length !== 1 || !range.target.nodeId) return null;
+  const segment = range.segments[0];
+  const sourceText = sourceIndex.byNodeId.get(segment.textNodeId);
+  if (
+    sourceText?.type !== "text"
+    || !sourceText.parentId
+    || sourceText.parentId !== range.target.nodeId
+    || segment.startOffset < 0
+    || segment.endOffset > sourceText.value.length
+    || segment.endOffset <= segment.startOffset
+  ) return null;
+  const sourceParent = sourceIndex.byNodeId.get(sourceText.parentId);
+  if (sourceParent?.type !== "element") return null;
+  const documentNode = range.styleElements[0]?.ownerDocument;
+  const parentElement = documentNode?.querySelector<HTMLElement>(
+    `[${SOURCE_NODE_ATTRIBUTE}="${escapedSourceNodeId(sourceParent.nodeId)}"]`,
+  ) ?? null;
+  if (!parentElement) return null;
+  const textNode = Array.from(parentElement.childNodes).find((node): node is Text => (
+    node.nodeType === 3
+    && sourceTextNodeForDomText(node as Text, sourceIndex)?.nodeId === sourceText.nodeId
+  )) ?? null;
+  if (!textNode) return null;
+  return nativeTextFragmentForDirectText(parentElement, textNode, sourceIndex);
+}
+
+export function nativeTextFragmentForElement(
+  element: HTMLElement,
+  sourceIndex: SourceIndexValue,
+  textNodeHint?: Text | null,
+): NativeTextFragmentCandidate | null {
+  const parentElement = element.closest<HTMLElement>(`[${SOURCE_NODE_ATTRIBUTE}]`);
+  if (!parentElement) return null;
+  const hinted = textNodeHint
+    && parentElement.contains(textNodeHint)
+    && textNodeHint.parentElement === parentElement
+    ? textNodeHint
+    : null;
+  if (hinted) {
+    return nativeTextFragmentForDirectText(parentElement, hinted, sourceIndex);
+  }
+  const directTextNodes = Array.from(parentElement.childNodes).filter((node): node is Text => (
+    node.nodeType === 3
+    && Boolean(node.data.trim())
+    && Boolean(sourceTextNodeForDomText(node, sourceIndex))
+  ));
+  if (directTextNodes.length !== 1) return null;
+  return nativeTextFragmentForDirectText(
+    parentElement,
+    directTextNodes[0],
+    sourceIndex,
+  );
 }
 
 export const TEXT_FRAGMENT_HOST_ATTRIBUTE = "data-pageroot-text-fragment-host";

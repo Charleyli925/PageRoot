@@ -111,6 +111,7 @@ import {
   remountNativeHostFromSource,
   nativeEditHostForElement,
   nativeTextFragmentForRange,
+  nativeTextFragmentForElement,
   refreshMountedPreviewSourceNodeIds,
   sourceTextNodeForDomText,
   sourceBackedPreviewElements,
@@ -126,6 +127,7 @@ import {
   findNativeActionTarget,
   historySelectionFromMutationValue,
   identifyingTextRangeAtPoint,
+  directTextNodeAtPoint,
   isCanvasRootElement,
   sourceHistoryDirectionForShortcut,
   type TextCaretPoint,
@@ -2869,9 +2871,21 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     }
     const priorRange = activeTextRangeRef.current;
     const islandHostElement = nativeEditHostForElement(selectedElement, sourceIndex);
+    const hintedTextNode = !islandHostElement && caretPoint
+      ? directTextNodeAtPoint(
+          selectedElement.ownerDocument,
+          selectedElement,
+          caretPoint,
+        )
+      : null;
     const fragmentCandidate = islandHostElement
       ? null
-      : nativeTextFragmentForRange(priorRange, sourceIndex);
+      : nativeTextFragmentForRange(priorRange, sourceIndex)
+        ?? nativeTextFragmentForElement(
+          selectedElement,
+          sourceIndex,
+          hintedTextNode,
+        );
     if (!islandHostElement && !fragmentCandidate) {
       let blockedCause: Error = new Error(
         "这段可见内容不是当前源码中的唯一静态文字，无法安全进入原位编辑。",
@@ -5218,8 +5232,16 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const selectedNativeEditHost = selectedElementRef.current && sourceIndexRef.current
     ? nativeEditHostForElement(selectedElementRef.current, sourceIndexRef.current)
     : null;
-  const selectedNativeTextFragment = !selectedNativeEditHost && sourceIndexRef.current
+  const selectedNativeTextFragment = (
+    !selectedNativeEditHost
+    && selectedElementRef.current
+    && sourceIndexRef.current
+  )
     ? nativeTextFragmentForRange(activeTextRangeRef.current, sourceIndexRef.current)
+      ?? nativeTextFragmentForElement(
+        selectedElementRef.current,
+        sourceIndexRef.current,
+      )
     : null;
   const selectedNativeEditAvailable = Boolean(
     activeNativeEditRef.current
