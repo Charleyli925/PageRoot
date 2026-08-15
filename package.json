@@ -227,10 +227,6 @@
         "to": "bridge/candidate-assessment-decoder.mjs"
       },
       {
-        "from": "scripts/scope-validator.mjs",
-        "to": "bridge/scope-validator.mjs"
-      },
-      {
         "from": "scripts/target-identity.mjs",
         "to": "bridge/target-identity.mjs"
       },

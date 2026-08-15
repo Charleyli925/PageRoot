@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   assertFullyAutomatedPlan,
+  omitMissingNodeTests,
   selectGatePlan,
   validateImpactMap,
 } from "../scripts/test-gate-core.mjs";
@@ -177,6 +178,28 @@ test("a changed Node test runs itself without expanding to the full Node suite",
   });
   assert.deepEqual(suiteIds(plan), ["node-targeted"]);
   assert.deepEqual(plan.selectedNodeTests, ["tests/source-text-map.test.mjs"]);
+});
+
+test("deleted Node tests are omitted from the executable plan", () => {
+  const plan = selectGatePlan({
+    map,
+    lane: "edit",
+    changedFiles: [
+      "tests/source-text-map.test.mjs",
+      "tests/runtime-dom-source-map.test.mjs",
+    ],
+  });
+  assert.ok(plan.selectedNodeTests.includes("tests/runtime-dom-source-map.test.mjs"));
+  const executable = omitMissingNodeTests(
+    plan,
+    (file) => file !== "tests/runtime-dom-source-map.test.mjs",
+  );
+  assert.equal(
+    executable.selectedNodeTests.includes("tests/runtime-dom-source-map.test.mjs"),
+    false,
+  );
+  assert.ok(executable.selectedNodeTests.includes("tests/source-text-map.test.mjs"));
+  assert.deepEqual(suiteIds(executable), ["node-targeted"]);
 });
 
 test("a changed owned Node test still runs only itself", () => {

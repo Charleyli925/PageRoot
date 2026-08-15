@@ -543,7 +543,7 @@
     {
       "id": "source-editing-core",
       "patterns": [
-        "^app/lib/(?:canvas-target-rebind|editable-island|native-dom-logical-index|page-(?:presentation-dom|view-context)|source-(?:index|patch-core|patch-engine|text-map)|target-resolver|runtime-dom-source-map|native-(?:edit-capability|edit-policy))\\.(?:js|ts|d\\.ts)$",
+        "^app/lib/(?:canvas-target-rebind|editable-island|native-dom-logical-index|page-(?:presentation-dom|view-context)|source-(?:index|patch-core|patch-engine|text-map)|target-resolver|native-(?:edit-capability|edit-policy))\\.(?:js|ts|d\\.ts)$",
         "^scripts/(?:source-index|target-resolver)\\.mjs$"
       ],
       "suites": ["typecheck", "browser-smoke", "electron-smoke"],
@@ -554,7 +554,6 @@
         "tests/source-patch-engine.test.mjs",
         "tests/editable-island.test.mjs",
         "tests/source-text-map.test.mjs",
-        "tests/runtime-dom-source-map.test.mjs",
         "tests/native-edit-capability.test.mjs",
         "tests/native-edit-policy.test.mjs",
         "tests/generated-source-invariants.test.mjs"
@@ -563,13 +562,12 @@
     {
       "id": "v2-island-controller",
       "patterns": [
-        "^app/components/(?:HtmlCanvasEditor(?:\\.types)?|HtmlInteractionPreview|desktop-(?:runtime-snapshot|preview)-api|html-canvas-(?:dom|interaction|internal-types|page-view|preview-sync|selection|style-inspector)|IslandEditingController|native-edit-types|native-edit-runtime-preflight|html-preview-sandbox)\\.(?:tsx|ts|js|d\\.ts)$"
+        "^app/components/(?:HtmlCanvasEditor(?:\\.types)?|HtmlInteractionPreview|desktop-(?:runtime-snapshot|preview)-api|html-canvas-(?:dom|interaction|internal-types|page-view|preview-sync|selection|style-inspector)|IslandEditingController|native-edit-types|native-layout-fingerprint|html-preview-sandbox)\\.(?:tsx|ts|js|d\\.ts)$"
       ],
       "suites": ["typecheck", "browser-smoke", "electron-smoke"],
       "nodeTests": [
         "tests/architecture-boundaries.test.mjs",
         "tests/editable-island.test.mjs",
-        "tests/runtime-dom-source-map.test.mjs",
         "tests/source-text-map.test.mjs",
         "tests/native-layout-guard.test.mjs",
         "tests/html-preview-sandbox.test.mjs"

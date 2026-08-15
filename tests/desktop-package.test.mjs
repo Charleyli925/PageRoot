@@ -49,7 +49,6 @@ const BRIDGE_FILES = [
   "html-source-parser.mjs",
   "candidate-assessment.mjs",
   "candidate-assessment-decoder.mjs",
-  "scope-validator.mjs",
   "target-identity.mjs",
   "product-contract.mjs",
   "attachment-storage.mjs",

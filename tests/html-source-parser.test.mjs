@@ -6,6 +6,7 @@ import {
   hasCompleteDocumentStructure,
   metaContentByName,
   parseHtmlSource,
+  rawStartTagAttributes,
 } from "../scripts/html-source-parser.mjs";
 
 test("document identity comes only from a real explicit head meta", () => {
@@ -57,4 +58,22 @@ test("parse5 fostered metadata outside the explicit head cannot become identity"
 </html>`;
   assert.equal(hasCompleteDocumentStructure(afterHead), true);
   assert.equal(metaContentByName(afterHead, "html-ai-document-id"), null);
+});
+
+test("raw start-tag attributes keep authored duplicates instead of parse5 last-wins", () => {
+  const html = `<div class="a" id="x" class="b">text</div>`;
+  const parsed = parseHtmlSource(html);
+  const div = parsed.elements.find((token) => token.name === "div");
+  const raw = rawStartTagAttributes(
+    parsed.source,
+    div.node.sourceCodeLocation.startTag,
+  );
+  assert.deepEqual(
+    raw.map((attribute) => [attribute.name, attribute.value]),
+    [
+      ["class", "a"],
+      ["id", "x"],
+      ["class", "b"],
+    ],
+  );
 });

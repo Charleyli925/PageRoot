@@ -52,10 +52,8 @@ import {
 import {
   metaContentByName,
   parseHtmlSource,
-} from "./html-source-parser.mjs";
-import {
   rawStartTagAttributes,
-} from "./scope-validator.mjs";
+} from "./html-source-parser.mjs";
 import {
   assessHtmlCandidate,
 } from "./candidate-assessment.mjs";

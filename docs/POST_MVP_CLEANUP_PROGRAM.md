@@ -22,8 +22,8 @@ is not a product invariant.
 
 | ID | Purpose | This PR |
 | --- | --- | --- |
-| **P1-C** CI consolidation | One `ci.yml` for Draft feedback and Ready full-gate; Codex review is shown, never a merge hard gate; arm64-only packaging scripts; delete review-debt and retired review workflows | Yes |
-| **P0-A** Remove retired validators | Delete dead packaged `scope-validator` wiring and extract the live native-layout fingerprint helpers so later refactors do not keep carrying unused contracts | Follow-up |
+| **P1-C** CI consolidation | One `ci.yml` for Draft feedback and Ready full-gate; Codex review is shown, never a merge hard gate; arm64-only packaging scripts; delete review-debt and retired review workflows | Done on `main` (#188) |
+| **P0-A** Remove retired validators | Delete dead packaged `scope-validator` wiring and extract the live native-layout fingerprint helpers so later refactors do not keep carrying unused contracts | Yes |
 | **P0-B** Remove legacy Bridge stack | Split the remaining v3 Bridge so persistence and IPC have one current owner | Follow-up |
 | **P1-B** Save-pipeline CAS | Content-addressed save pipeline; depends on P0-B | Follow-up |
 | **P1-A** Editable fail-open | The only user-visible relaxation; keep it in its own PR so it cannot hide inside governance or dead-code cleanup | Follow-up |
@@ -58,3 +58,35 @@ is not a product invariant.
 
 These changes exist so later cleanup PRs iterate on a smaller, cheaper CI
 surface without weakening source, dependency, packaging or publication gates.
+
+## What P0-A removes, and why
+
+P0-A is dead-code removal. It does not change edit entry, patch scope, or
+packaging-closure mechanics.
+
+**Why `scope-validator.mjs` leaves the installer.** The packaged Bridge no
+longer calls it. The only live helper it still needed is
+`rawStartTagAttributes`, which now lives in `html-source-parser.mjs` so
+identity checks keep authored duplicate attributes. The module itself stays in
+source for direct source-patch contract tests; putting it in
+`resources/bridge/` only forced every installer to carry an unused file.
+
+**Why the preflight file is split, not deleted wholesale.**
+`HtmlCanvasEditor` still uses `nativeLayoutFingerprint`, `sameNativeLayout`,
+and `sameNativeTextStyle` to refuse an island that would change geometry or
+text style. Those three helpers move to `native-layout-fingerprint.ts` with
+byte-stable behavior. `nativeRuntimePreflight`, `buildRuntimeDomMap`, and
+`RuntimeDomSourceMap` had no production callers, so they are deleted instead
+of remaining as a fake safety net.
+
+**Why `isNativeDirectEditRoot` stays.** `source-patch-engine` still uses it to
+decide whether a tag can host a native text island. Widening that predicate
+is a user-visible fail-open change and belongs in P1-A, not here.
+The unused `classifyNativeEditCapability` classifier is deleted.
+
+The impact-selected gate used to pass deleted `tests/*.test.mjs` paths to
+`node --test`, which fails closed. `omitMissingNodeTests` drops those missing
+files from the executable plan so deleting a retired test is a valid cleanup.
+
+`--mode advisory` for review policy is already gone after P1-C. CI
+`advisory_scope` / `advisory_size` are PR-size hints and are not this item.
