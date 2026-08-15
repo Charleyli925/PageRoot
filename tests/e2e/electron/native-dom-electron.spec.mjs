@@ -1946,7 +1946,7 @@ test("Electron Edit drains MessageChannel callbacks before accepting the frozen 
     const channel = new MessageChannel();
     channel.port2.onmessage = () => {
       if (document.documentElement.getAttribute("data-pageroot-edit-runtime-frozen") === "true") {
-        probe.textContent = "端口在冻结后改写了源码文字";
+        probe.textContent = ["端口在冻结后", "改写了源码文字"].join("");
         return;
       }
       channel.port1.postMessage("ping");
@@ -1990,8 +1990,9 @@ test("Electron Edit drains MessageChannel callbacks before accepting the frozen 
     expect(await frame.evaluate(() => (
       document.querySelector("[data-native-case=runtime-message-probe]")?.textContent || ""
     ))).toBe(probeText);
-    expect(readFileSync(activeProject.sourcePath, "utf8")).toContain(probeText);
-    expect(readFileSync(activeProject.sourcePath, "utf8")).not.toContain("端口在冻结后改写了源码文字");
+    const savedSource = readFileSync(activeProject.sourcePath, "utf8");
+    expect(savedSource).toContain(`data-native-case="runtime-message-probe">${probeText}</p>`);
+    expect(savedSource).not.toContain("端口在冻结后改写了源码文字");
     expect(frame.isDetached()).toBe(false);
     await expect(launched.page.locator("[data-runtime-bootstrap-count=\"1\"]")).toHaveCount(1);
   } finally {
