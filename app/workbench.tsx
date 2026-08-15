@@ -6811,7 +6811,7 @@ export default function Workbench() {
               ))
             }
             onClick={() => {
-              if (runInProgress) {
+              if (runInProgress || currentQoderHandoffStatus === "copied") {
                 setHandoffPreviewOpen(false);
                 setCanvasMode("edit");
                 setDrawer("handoff");
