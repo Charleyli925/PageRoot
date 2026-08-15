@@ -3096,22 +3096,18 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         nativeTextFragmentStyleSignature(hostElement) === fragmentStyleBefore
         && !hasNativeTextFragmentPseudoContent(hostElement)
       );
-      if (
-        !sameNativeLayout(layoutBeforeEditing, layoutAfterEditing)
+      const layoutDrifted = !sameNativeLayout(layoutBeforeEditing, layoutAfterEditing)
         || !sameNativeTextStyle(layoutBeforeEditing, layoutAfterEditing)
-        || !fragmentStyleStable
-      ) {
-        session.dispose();
-        mountedFragment?.release();
-        currentNativeEditLeaseRef.current = null;
-        containerRef.current?.setAttribute(
-          "data-native-start-status",
-          "island:layout-changed",
-        );
-        reportBlockedEdit(new Error(
-          "这个页面为可编辑状态设置了会改变排版的 CSS，已阻止直接编辑以免画面跳动。",
-        ));
-        return false;
+        || !fragmentStyleStable;
+      // Layout/style fingerprints observe post-entry drift only. They must
+      // not refuse to enter; MutationObserver rollback and checkpoint scope
+      // remain the fail-closed safety net.
+      if (layoutDrifted) {
+        containerRef.current?.setAttribute("data-native-layout-drift", "true");
+        hostElement.setAttribute("data-native-layout-drift", "true");
+      } else {
+        containerRef.current?.removeAttribute("data-native-layout-drift");
+        hostElement.removeAttribute("data-native-layout-drift");
       }
       const active: ActiveNativeEdit = {
         mode,
