@@ -60,7 +60,7 @@ step summary 里。
 
 - 核心 Node：算法、状态机、序列化、事务、错误关闭和 forward/inverse 不变量。
 - `DocumentWorkflow`：fake Scheduler、Hash、RecoveryStore、Canvas Port 和 Bridge
-  验证 700ms 合并写入、单飞 flush、未登记首次登记、精确 HTML/Hash/revision/history
+  验证 100ms 非 checkpoint 合并写入、native-edit checkpoint 立即 flush、单飞 flush、未登记首次登记、精确 HTML/Hash/revision/history
   回执、未知 history action 的权威核对与同一 actionId 重放、恢复记录与 stale context。
   Workbench 只把 Canvas 输入及结构化 Outcome/Event 映射为界面，不再持有 timer、
   audit in-flight、recovery identity 或 history Promise。

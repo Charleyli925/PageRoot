@@ -270,7 +270,7 @@ test("DocumentWorkflow restores source-history and recovery authority after a pr
   assert.deepEqual(harness.sourceHistorySession.pendingOperations, [pending]);
 });
 
-test("DocumentWorkflow coalesces a 700ms source write and only accepts exact HTML/Hash acknowledgement", async () => {
+test("DocumentWorkflow coalesces a 100ms source write and only accepts exact HTML/Hash acknowledgement", async () => {
   const before = "<!doctype html><html><body><p>one</p></body></html>";
   const after = before.replace("one", "two");
   const history = sourceHistory({ sourceSha256: sha256(before) });
@@ -295,7 +295,7 @@ test("DocumentWorkflow coalesces a 700ms source write and only accepts exact HTM
   const queued = harness.workflow.enqueueEdit({ html: after });
   assert.equal(queued.status, "succeeded");
   assert.equal(queued.value.revision, 1);
-  assert.deepEqual(harness.scheduler.pending.map((task) => task.delay), [700]);
+  assert.deepEqual(harness.scheduler.pending.map((task) => task.delay), [100]);
   assert.equal(harness.documentSession.persistState, "queued");
   assert.equal(harness.recoveryStore.values.size, 2);
 
@@ -306,6 +306,44 @@ test("DocumentWorkflow coalesces a 700ms source write and only accepts exact HTM
   assert.equal(harness.documentSession.sourceSha256, sha256(after));
   assert.equal(harness.documentSession.persistState, "idle");
   assert.equal(harness.recoveryStore.values.size, 0);
+});
+
+test("DocumentWorkflow flushes a native-edit checkpoint immediately", async () => {
+  const before = "<!doctype html><html><body><p>one</p></body></html>";
+  const after = before.replace("one", "two");
+  const history = sourceHistory({ sourceSha256: sha256(before) });
+  const calls = [];
+  const harness = createHarness({
+    html: before,
+    bridge: {
+      async autosave(body) {
+        calls.push(body);
+        return {
+          ok: true,
+          content: body.html,
+          sha256: sha256(body.html),
+          persistedRevision: body.editRevision,
+          lastModifiedAt: "2026-08-11T00:00:01.000Z",
+          sourceHistory: history,
+        };
+      },
+    },
+  });
+
+  const queued = harness.workflow.enqueueEdit({
+    html: after,
+    mutation: {
+      kind: "text",
+      property: "editableIslandHtml",
+      target: { id: "island" },
+    },
+  });
+  assert.equal(queued.status, "succeeded");
+  assert.deepEqual(harness.scheduler.pending.map((task) => task.delay), []);
+  const outcome = await harness.workflow.flush();
+  assert.equal(outcome.status, "succeeded");
+  assert.equal(calls.length, 1);
+  assert.equal(harness.documentSession.persistState, "idle");
 });
 
 test("DocumentWorkflow rebinds a moved Working Copy before the next autosave", async () => {

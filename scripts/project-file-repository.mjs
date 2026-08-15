@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 import {
   link,
@@ -34,6 +35,16 @@ import {
 } from "./ai-task-projection.mjs";
 
 export const PROJECT_FILE_SCHEMA_VERSION = "4.0.0";
+
+const serialPathCache = new AsyncLocalStorage();
+
+async function cachedRealPath(target) {
+  const store = serialPathCache.getStore();
+  if (store?.realPaths.has(target)) return store.realPaths.get(target);
+  const resolved = await realpath(target);
+  store?.realPaths.set(target, resolved);
+  return resolved;
+}
 
 const HTML_EXTENSIONS = new Set([".html", ".htm"]);
 const LEGACY_V4_REGISTRY_BACKUP_DIRECTORY = ".pageroot-registry-backups";
@@ -151,7 +162,7 @@ async function assertRealPathInsideProject(root, candidate, label, {
       "The project root must be a real directory.",
     );
   }
-  const realRoot = await realpath(projectRoot);
+  const realRoot = await cachedRealPath(projectRoot);
   const relative = path.relative(projectRoot, target);
   const parts = relative === "" ? [] : relative.split(path.sep);
   if (parts.some((part) => !part || part === "." || part === "..")) {
@@ -170,7 +181,7 @@ async function assertRealPathInsideProject(root, candidate, label, {
     } catch (cause) {
       if (cause?.code !== "ENOENT") throw cause;
       if (!allowMissing) return null;
-      const parentRealPath = await realpath(path.dirname(current));
+      const parentRealPath = await cachedRealPath(path.dirname(current));
       if (!pathInside(realRoot, parentRealPath, { allowRoot: true })) {
         throw new ProjectFileRepositoryError(
           "PATH_ESCAPES_PROJECT",
@@ -191,7 +202,7 @@ async function assertRealPathInsideProject(root, candidate, label, {
         `${label} has a non-directory parent.`,
       );
     }
-    const realCurrent = await realpath(current);
+    const realCurrent = await cachedRealPath(current);
     if (!pathInside(realRoot, realCurrent, { allowRoot: true })) {
       throw new ProjectFileRepositoryError(
         "PATH_ESCAPES_PROJECT",
@@ -895,17 +906,81 @@ function saveRecoveryPaths(paths, workingCopyIdValue, revision, recoveryId) {
   };
 }
 
+async function compareAndSwapWorkingCopyFile({
+  sourcePath,
+  nextBuffer,
+  expectedSha256,
+  nextSha256,
+  projectRootPath,
+}) {
+  const parent = path.dirname(sourcePath);
+  await assertRealPathInsideProject(projectRootPath, parent, "Working Copy parent", {
+    expectedKind: "directory",
+  });
+  const temporary = path.join(
+    parent,
+    `.pageroot-save-${process.pid}-${randomUUID()}.tmp`,
+  );
+  await atomicWriteFile(temporary, nextBuffer);
+  let swapped = false;
+  try {
+    let currentBuffer;
+    try {
+      const information = await lstat(sourcePath);
+      if (information.isSymbolicLink() || !information.isFile()) {
+        throw new ProjectFileRepositoryError(
+          "UNSAFE_FILE",
+          "Working Copy must be a regular file, not a symbolic link.",
+        );
+      }
+      currentBuffer = await readFile(sourcePath);
+    } catch (cause) {
+      if (cause?.code === "ENOENT") {
+        return { swapped: false, actualSha256: null, written: null };
+      }
+      throw cause;
+    }
+    const actualSha256 = sha256(currentBuffer);
+    if (actualSha256 !== expectedSha256) {
+      return { swapped: false, actualSha256, written: null };
+    }
+    await rename(temporary, sourcePath);
+    swapped = true;
+    await syncDirectory(parent);
+  } finally {
+    if (!swapped) await rm(temporary, { force: true }).catch(() => {});
+  }
+
+  const writtenBuffer = await readFile(sourcePath);
+  const writtenSha256 = sha256(writtenBuffer);
+  if (writtenSha256 !== nextSha256) {
+    throw new ProjectFileRepositoryError(
+      "SOURCE_HASH_CONFLICT",
+      "The Working Copy changed while PageRoot was verifying its save.",
+      { expectedSourceSha256: nextSha256, actualSourceSha256: writtenSha256 },
+    );
+  }
+  const information = await lstat(sourcePath);
+  return {
+    swapped: true,
+    actualSha256: writtenSha256,
+    written: {
+      buffer: writtenBuffer,
+      html: decodeHtml(writtenBuffer, "Working Copy"),
+      sha256: writtenSha256,
+      information,
+    },
+  };
+}
+
 async function atomicWriteProjectFile(projectRootPath, filePath, content, label) {
-  await assertRealPathInsideProject(projectRootPath, filePath, label);
   await assertRealPathInsideProject(
     projectRootPath,
     path.dirname(filePath),
     `${label} parent`,
+    { expectedKind: "directory" },
   );
   await atomicWriteFile(filePath, content);
-  await assertRealPathInsideProject(projectRootPath, filePath, label, {
-    expectedKind: "file",
-  });
 }
 
 async function atomicWriteProjectJson(projectRootPath, filePath, value, label) {
@@ -2088,7 +2163,8 @@ export class ProjectFileRepository {
   }
 
   async #serial(operation) {
-    const current = this.#tail.then(operation, operation);
+    const run = () => serialPathCache.run({ realPaths: new Map() }, operation);
+    const current = this.#tail.then(run, run);
     this.#tail = current.catch(() => {});
     return current;
   }
@@ -5133,13 +5209,6 @@ export class ProjectFileRepository {
   async #saveWorkingCopy({ target, html, expectedSourceSha256, editRevision }) {
     const loaded = await this.#resolveMutationTarget(target);
     const expected = assertSha256(expectedSourceSha256, "expectedSourceSha256");
-    if (loaded.source.sha256 !== expected) {
-      throw new ProjectFileRepositoryError(
-        "SOURCE_HASH_CONFLICT",
-        "The Working Copy changed outside PageRoot and was not overwritten.",
-        { expectedSourceSha256: expected, actualSourceSha256: loaded.source.sha256 },
-      );
-    }
     const nextHtml = String(html || "");
     requireCompleteHtml(nextHtml, "Working Copy HTML");
     const nextBuffer = Buffer.from(nextHtml, "utf8");
@@ -5147,9 +5216,6 @@ export class ProjectFileRepository {
     const revision = Number.isSafeInteger(Number(editRevision)) && Number(editRevision) >= 0
       ? Number(editRevision)
       : 0;
-    // Validate the durable state before touching the visible source. A missing
-    // or malformed state must leave both source bytes and in-memory edits
-    // untouched instead of discovering the problem after replacement.
     const statePath = workingCopyStatePath(loaded.paths, loaded.workingCopy);
     const currentState = await readJsonFile(statePath, "Working Copy state", {
       projectRootPath: loaded.paths.projectRootPath,
@@ -5197,200 +5263,75 @@ export class ProjectFileRepository {
       transaction,
       "save transaction",
     );
-    await this.#hit("save-prepared", { transactionPath });
-
-    await writeFileNoReplace(
+    await atomicWriteProjectFile(
+      loaded.paths.projectRootPath,
       recoveryPaths.nextPath,
       nextBuffer,
-      nextSha256,
       "save replacement bytes",
-      { projectRootPath: loaded.paths.projectRootPath },
     );
-    transaction = {
-      ...transaction,
-      state: "next-staged",
-      nextStagedAt: nowIso(this.#clock),
-    };
-    await atomicWriteProjectJson(
-      loaded.paths.projectRootPath,
-      transactionPath,
-      transaction,
-      "save transaction",
-    );
+    await this.#hit("save-prepared", { transactionPath });
 
-    // A regular rename would unconditionally replace the source. Instead,
-    // atomically park whichever bytes currently occupy the visible name in a
-    // private transaction directory. A late external replacement is thereby
-    // preserved as the parked file, never silently discarded.
-    const sourceBeforePark = await readHtmlFile(loaded.exactSourcePath, "Working Copy", {
+    let cas = await compareAndSwapWorkingCopyFile({
+      sourcePath: loaded.exactSourcePath,
+      nextBuffer,
+      expectedSha256: expected,
+      nextSha256,
       projectRootPath: loaded.paths.projectRootPath,
     });
-    if (sourceBeforePark.sha256 !== expected) {
-      transaction = {
-        ...transaction,
-        state: "committed",
-        committedAt: nowIso(this.#clock),
-        recovery: "source-changed-before-park",
+    if (!cas.swapped && cas.actualSha256 === nextSha256) {
+      const disk = await readHtmlFile(loaded.exactSourcePath, "Working Copy", {
+        projectRootPath: loaded.paths.projectRootPath,
+      });
+      cas = {
+        swapped: true,
+        actualSha256: disk.sha256,
+        written: disk,
       };
-      await atomicWriteProjectJson(
+    }
+    if (!cas.swapped) {
+      await this.#finalizeSaveTransaction(
         loaded.paths.projectRootPath,
         transactionPath,
         transaction,
-        "save transaction",
+        {
+          state: "committed",
+          recovery: nextSha256 === expected
+            ? "adopted-external"
+            : "source-changed-before-cas",
+        },
       );
-      throw new ProjectFileRepositoryError(
-        "SOURCE_HASH_CONFLICT",
-        "The Working Copy changed before PageRoot could save it.",
-        { expectedSourceSha256: expected, actualSourceSha256: sourceBeforePark.sha256 },
-      );
-    }
-
-    transaction = {
-      ...transaction,
-      state: "parking",
-      parkingAt: nowIso(this.#clock),
-    };
-    await atomicWriteProjectJson(
-      loaded.paths.projectRootPath,
-      transactionPath,
-      transaction,
-      "save transaction",
-    );
-    await this.#hit("save-source-parking", { transactionPath });
-    await rename(loaded.exactSourcePath, recoveryPaths.previousPath);
-    await Promise.all([
-      syncDirectory(path.dirname(loaded.exactSourcePath)),
-      syncDirectory(recoveryPaths.operationRoot),
-    ]);
-    const parked = await readHtmlFile(recoveryPaths.previousPath, "saved Working Copy", {
-      projectRootPath: loaded.paths.projectRootPath,
-    });
-    if (parked.sha256 !== expected) {
-      let restored = false;
-      try {
-        await linkFileNoReplace(
-          recoveryPaths.previousPath,
-          loaded.exactSourcePath,
-          parked.sha256,
-          "Working Copy recovery",
-          { projectRootPath: loaded.paths.projectRootPath },
-        );
-        await unlink(recoveryPaths.previousPath);
-        await syncDirectory(recoveryPaths.operationRoot);
-        restored = true;
-      } catch {
-        // If another writer recreated the visible name, retain both byte
-        // sequences for explicit recovery rather than overwrite either one.
+      await rm(recoveryPaths.operationRoot, { recursive: true, force: true }).catch(() => {});
+      if (nextSha256 === expected && cas.actualSha256) {
+        const disk = await readHtmlFile(loaded.exactSourcePath, "Working Copy", {
+          projectRootPath: loaded.paths.projectRootPath,
+        });
+        const adopted = await this.#reconcileExternalWorkingCopyState({
+          loaded,
+          workingCopy: loaded.workingCopy,
+          state: currentState,
+          source: disk,
+        });
+        return this.#savedWorkingCopyResult({
+          loaded,
+          sourcePath: loaded.exactSourcePath,
+          sourceSha256: disk.sha256,
+          lastPersistedRevision: Number(adopted.state.lastPersistedRevision || 0),
+        });
       }
-      transaction = {
-        ...transaction,
-        state: restored ? "committed" : "conflict",
-        committedAt: restored ? nowIso(this.#clock) : undefined,
-        recovery: restored
-          ? "source-changed-before-park"
-          : "source-changed-during-park",
-      };
-      await atomicWriteProjectJson(
-        loaded.paths.projectRootPath,
-        transactionPath,
-        transaction,
-        "save transaction",
-      );
       throw new ProjectFileRepositoryError(
-        "SOURCE_HASH_CONFLICT",
-        "The Working Copy changed while PageRoot was preparing a safe save.",
-        { expectedSourceSha256: expected, actualSourceSha256: parked.sha256 },
-      );
-    }
-
-    transaction = {
-      ...transaction,
-      state: "source-parked",
-      sourceParkedAt: nowIso(this.#clock),
-    };
-    await atomicWriteProjectJson(
-      loaded.paths.projectRootPath,
-      transactionPath,
-      transaction,
-      "save transaction",
-    );
-    await this.#hit("save-source-parked", { transactionPath });
-
-    transaction = {
-      ...transaction,
-      state: "source-publishing",
-      sourcePublishingAt: nowIso(this.#clock),
-    };
-    await atomicWriteProjectJson(
-      loaded.paths.projectRootPath,
-      transactionPath,
-      transaction,
-      "save transaction",
-    );
-    try {
-      await linkFileNoReplace(
-        recoveryPaths.nextPath,
-        loaded.exactSourcePath,
-        nextSha256,
-        "Working Copy",
-        { projectRootPath: loaded.paths.projectRootPath },
-      );
-    } catch (cause) {
-      transaction = {
-        ...transaction,
-        state: "conflict",
-        recovery: "source-created-during-publish",
-      };
-      await atomicWriteProjectJson(
-        loaded.paths.projectRootPath,
-        transactionPath,
-        transaction,
-        "save transaction",
-      );
-      throw new ProjectFileRepositoryError(
-        "SOURCE_HASH_CONFLICT",
-        "The Working Copy changed while PageRoot was publishing a safe save.",
+        "WORKING_COPY_CONFLICT",
+        "The Working Copy changed on disk while PageRoot still retains unsaved edits.",
         {
           expectedSourceSha256: expected,
+          actualSourceSha256: cas.actualSha256,
           targetSourceSha256: nextSha256,
-          cause: cause instanceof Error ? cause.message : String(cause),
+          saveState: currentState.saveState || null,
         },
       );
     }
-    const written = await readHtmlFile(loaded.exactSourcePath, "Working Copy", {
-      projectRootPath: loaded.paths.projectRootPath,
-    });
-    if (written.sha256 !== nextSha256) {
-      transaction = {
-        ...transaction,
-        state: "conflict",
-        recovery: "source-changed-after-publish",
-      };
-      await atomicWriteProjectJson(
-        loaded.paths.projectRootPath,
-        transactionPath,
-        transaction,
-        "save transaction",
-      );
-      throw new ProjectFileRepositoryError(
-        "SOURCE_HASH_CONFLICT",
-        "The Working Copy changed while PageRoot was verifying its save.",
-        { expectedSourceSha256: nextSha256, actualSourceSha256: written.sha256 },
-      );
-    }
-    transaction = {
-      ...transaction,
-      state: "source-published",
-      sourcePublishedAt: nowIso(this.#clock),
-    };
-    await atomicWriteProjectJson(
-      loaded.paths.projectRootPath,
-      transactionPath,
-      transaction,
-      "save transaction",
-    );
+
     await this.#hit("save-source-written", { transactionPath });
-    loaded.workingCopy.fileIdentity = copyFileIdentity(written.information);
+    loaded.workingCopy.fileIdentity = copyFileIdentity(cas.written.information);
     const nextState = {
       ...currentState,
       schemaVersion: PROJECT_FILE_SCHEMA_VERSION,
@@ -5412,7 +5353,6 @@ export class ProjectFileRepository {
       nextState,
       "Working Copy state",
     );
-    await this.#hit("save-state-written", { transactionPath });
     await atomicWriteProjectJson(
       loaded.paths.projectRootPath,
       loaded.paths.manifestPath,
@@ -5420,66 +5360,39 @@ export class ProjectFileRepository {
       "manifest.json",
     );
     await this.#writeRuntime(loaded);
-    await this.#hit("save-manifest-written", { transactionPath });
-    transaction = {
-      ...(await readJsonFile(transactionPath, "save transaction", {
-        projectRootPath: loaded.paths.projectRootPath,
-      })),
-      state: "committed",
-      committedAt: nowIso(this.#clock),
-    };
-    await atomicWriteProjectJson(
+    await this.#finalizeSaveTransaction(
       loaded.paths.projectRootPath,
       transactionPath,
       transaction,
-      "save transaction",
+      { state: "committed" },
     );
-    await this.#hit("save-committed", { transactionPath });
-    await this.#hit("save-before-recovery-cleanup", {
-      transactionPath,
-      previousPath: recoveryPaths.previousPath,
-    });
-
-    // Renaming the source preserves an external editor's already-open file
-    // descriptor at previousPath. Once PageRoot has published its new inode,
-    // that editor can still write to the parked inode. Check it immediately
-    // before cleanup; a changed parked file is an unresolved external write,
-    // not disposable transaction debris.
-    const parkedAfterPublish = await readRegularFileWithSha256(
-      recoveryPaths.previousPath,
-      "parked Working Copy",
-      { projectRootPath: loaded.paths.projectRootPath },
-    );
-    if (parkedAfterPublish && parkedAfterPublish.sha256 !== expected) {
-      transaction = {
-        ...transaction,
-        state: "conflict",
-        recovery: "parked-source-changed-after-publish",
-        parkedSourceSha256: parkedAfterPublish.sha256,
-        retainedAt: nowIso(this.#clock),
-      };
-      await atomicWriteProjectJson(
-        loaded.paths.projectRootPath,
-        transactionPath,
-        transaction,
-        "save transaction",
-      );
-      throw new ProjectFileRepositoryError(
-        "SOURCE_HASH_CONFLICT",
-        "The Working Copy changed through an already-open external file after PageRoot saved it; the external bytes were retained for recovery.",
-        {
-          expectedSourceSha256: expected,
-          targetSourceSha256: nextSha256,
-          parkedSourceSha256: parkedAfterPublish.sha256,
-        },
-      );
-    }
-
-    // The visible Working Copy is now the sole required link to the new
-    // bytes, and metadata is durable. Best-effort cleanup must not convert a
-    // completed save into a user-visible failure.
     await rm(recoveryPaths.operationRoot, { recursive: true, force: true }).catch(() => {});
     await syncDirectory(loaded.paths.recoveryRoot).catch(() => {});
+    return this.#savedWorkingCopyResult({
+      loaded,
+      sourcePath: loaded.exactSourcePath,
+      sourceSha256: nextSha256,
+      lastPersistedRevision: nextState.lastPersistedRevision,
+    });
+  }
+
+  async #finalizeSaveTransaction(projectRootPath, transactionPath, transaction, extra) {
+    const current = await readJsonFile(transactionPath, "save transaction", {
+      projectRootPath,
+    });
+    await atomicWriteProjectJson(
+      projectRootPath,
+      transactionPath,
+      {
+        ...(current || transaction),
+        ...extra,
+        committedAt: nowIso(this.#clock),
+      },
+      "save transaction",
+    );
+  }
+
+  #savedWorkingCopyResult({ loaded, sourcePath, sourceSha256, lastPersistedRevision }) {
     return {
       target: publicOpenTarget({
         project: loaded.project,
@@ -5489,11 +5402,11 @@ export class ProjectFileRepository {
         version: loaded.manifest.versions.find(
           (version) => version.versionId === loaded.workingCopy.versionId,
         ),
-        exactSourcePath: loaded.exactSourcePath,
-        sourceSha256: nextSha256,
+        exactSourcePath: sourcePath,
+        sourceSha256,
       }),
-      lastPersistedRevision: nextState.lastPersistedRevision,
-      currentSha256: nextSha256,
+      lastPersistedRevision,
+      currentSha256: sourceSha256,
       versionCreated: false,
     };
   }
@@ -6612,12 +6525,14 @@ export class ProjectFileRepository {
     const allowedStates = usesRecoveryDirectory
       ? new Set([
         "prepared",
+        "committed",
+        // Legacy eight-state park journals remain readable so a crash in an
+        // older PageRoot can still recover complete old or complete new bytes.
         "next-staged",
         "parking",
         "source-parked",
         "source-publishing",
         "source-published",
-        "committed",
         "conflict",
       ])
       : new Set(["prepared", "committed"]);
@@ -6882,10 +6797,19 @@ export class ProjectFileRepository {
       && !previous
       && ["prepared", "next-staged", "parking"].includes(transaction.state)
     ) {
-      // The visible source was never parked, so PageRoot never owned the
-      // external replacement. Mark this attempt terminal and let ordinary
-      // workspace reconciliation adopt the user's on-disk bytes.
-      return commitRolledBack("source-changed-before-park");
+      // Visible bytes are neither the expected old source nor the prepared
+      // replacement. PageRoot never mixes those histories: keep both complete
+      // sequences and fail closed.
+      throw new ProjectFileRepositoryError(
+        "SAVE_RECOVERY_CONFLICT",
+        "The Working Copy changed during an interrupted save and was not overwritten.",
+        {
+          workingCopyId: workingCopy.workingCopyId,
+          expectedSourceSha256: expected,
+          targetSourceSha256: target,
+          actualSourceSha256: source.sha256,
+        },
+      );
     }
     if (!source && next && next.sha256 !== target) {
       throw new ProjectFileRepositoryError(

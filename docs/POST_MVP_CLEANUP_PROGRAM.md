@@ -23,9 +23,9 @@ is not a product invariant.
 | ID | Purpose | This PR |
 | --- | --- | --- |
 | **P1-C** CI consolidation | One `ci.yml` for Draft feedback and Ready full-gate; Codex review is shown, never a merge hard gate; arm64-only packaging scripts; delete review-debt and retired review workflows | Done on `main` (#188) |
-| **P0-A** Remove retired validators | Delete dead packaged `scope-validator` wiring and extract the live native-layout fingerprint helpers so later refactors do not keep carrying unused contracts | Follow-up |
-| **P0-B** Remove legacy Bridge stack | Split the remaining v3 Bridge so persistence and IPC have one current owner | Yes |
-| **P1-B** Save-pipeline CAS | Content-addressed save pipeline; depends on P0-B | Follow-up |
+| **P0-A** Remove retired validators | Delete dead packaged `scope-validator` wiring and extract the live native-layout fingerprint helpers so later refactors do not keep carrying unused contracts | Follow-up (#189) |
+| **P0-B** Remove legacy Bridge stack | Split the remaining v3 Bridge so persistence and IPC have one current owner | Done in #190 / this branch |
+| **P1-B** Save-pipeline CAS | Content-addressed save pipeline; depends on P0-B | Yes |
 | **P1-A** Editable fail-open | The only user-visible relaxation; keep it in its own PR so it cannot hide inside governance or dead-code cleanup | Follow-up |
 
 ## Governance decisions locked by P1-C
@@ -84,3 +84,24 @@ They now resolve a v4 project root (or 404). Attachments still use
 source-history store, so conflict reads return an empty payload and history
 actions return current source bytes plus empty history. The v3 Attempt
 finalizer CLI `--workspace` / `--project-id` is gone; `--project-root` remains.
+
+## What P1-B changes, and why
+
+P1-B sits on P0-B. It does not change the four save-status strings, island
+undo granularity, or the conflict-panel copy.
+
+**Why the second 700ms wait is gone.** Native-edit checkpoints already wait
+`NATIVE_EDIT_CHECKPOINT_DELAY_MS = 700` before producing a source patch.
+`DocumentWorkflow` then waited another 700ms before flush, so keypress-to-disk
+p50 sat near 1.4s. Checkpoint writes now flush immediately, matching Cmd+S.
+Non-checkpoint writes keep a short ~100ms debounce. `PROJECT.md` still uses
+700ms.
+
+**Why the save journal is two-state CAS.** The eight-state park journal
+re-checked the expected hash five times and realpath'd three times per atomic
+write. New saves write recovery bytes (`prepared`), then one same-directory
+tmp + expected-hash CAS rename, one post-write hash reread, and `committed`.
+Crash recovery still reads legacy park journals and finishes complete old or
+complete new bytes, never a mix. A clean Working Copy silently adopts an
+external disk change; dirty editor bytes plus an external change stay
+`WORKING_COPY_CONFLICT`.
