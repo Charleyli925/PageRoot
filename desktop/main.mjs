@@ -189,8 +189,10 @@ const PROJECT_CHANNELS = Object.freeze({
   activateGeneratedVersion: "html-projects:activate-generated-version",
   activateManagedWorkingCopy: "html-projects:activate-managed-working-copy",
   revealVersionFile: "html-projects:reveal-version-file",
-  revealRequestFolder: "html-projects:reveal-request-folder",
+  revealAiTask: "html-projects:reveal-ai-task",
   listRecentProjects: "html-projects:list-recent",
+  listRegisteredProjects: "html-projects:list-registered",
+  openRegisteredProject: "html-projects:open-registered",
   openRecent: "html-projects:open-recent",
   forgetRecent: "html-projects:forget-recent",
   acceptExternalOpen: "html-projects:accept-external-open",
@@ -1766,13 +1768,76 @@ async function revealVersionFile(payload) {
     || versionRecord.ok !== true
     || versionRecord.versionId !== payload.versionId
     || typeof versionRecord.projectId !== "string"
-    || typeof versionRecord.storageDirectoryName !== "string"
     || typeof versionRecord.path !== "string"
   ) {
     throw new ProjectFileError(
       "VERSION_FILE_UNAVAILABLE",
       "这个历史版本文件暂时无法显示，请重新打开版本历史后再试。",
     );
+  }
+
+  if (versionRecord.projectFileSchemaVersion === "4.0.0") {
+    if (
+      typeof versionRecord.projectRootPath !== "string"
+      || typeof versionRecord.workingCopyId !== "string"
+      || !/^work_ver_\d{4,}$/.test(versionRecord.workingCopyId)
+      || typeof versionRecord.visibleWorkingCopyPath !== "string"
+      || typeof versionRecord.workingCopySha256 !== "string"
+    ) {
+      throw new ProjectFileError(
+        "VERSION_WORKING_COPY_UNAVAILABLE",
+        "这个版本没有可验证的可见 Working Copy。",
+      );
+    }
+    const [resolvedProjectRoot, resolvedWorkingCopyPath] = await Promise.all([
+      realpath(path.resolve(versionRecord.projectRootPath)),
+      realpath(path.resolve(versionRecord.visibleWorkingCopyPath)),
+    ]);
+    const rootStats = await lstat(resolvedProjectRoot);
+    const relativeWorkingCopyPath = path.relative(
+      resolvedProjectRoot,
+      resolvedWorkingCopyPath,
+    );
+    if (
+      !rootStats.isDirectory()
+      || rootStats.isSymbolicLink()
+      || !relativeWorkingCopyPath
+      || relativeWorkingCopyPath.startsWith(`..${path.sep}`)
+      || relativeWorkingCopyPath === ".."
+      || path.isAbsolute(relativeWorkingCopyPath)
+      || relativeWorkingCopyPath.split(path.sep).includes(".pageroot")
+      || !HTML_EXTENSIONS.has(path.extname(resolvedWorkingCopyPath).toLowerCase())
+    ) {
+      throw new ProjectFileError(
+        "UNSAFE_VERSION_WORKING_COPY_PATH",
+        "只能显示该项目已验证的可见 Version Working Copy。",
+        { versionPath: resolvedWorkingCopyPath },
+      );
+    }
+    const workingCopyStats = await lstat(resolvedWorkingCopyPath);
+    if (!workingCopyStats.isFile() || workingCopyStats.isSymbolicLink()) {
+      throw new ProjectFileError(
+        "VERSION_WORKING_COPY_NOT_REGULAR",
+        "这个 Version Working Copy 不是可显示的普通 HTML 文件。",
+      );
+    }
+    const workingCopy = await readHtmlProject(resolvedWorkingCopyPath);
+    if (workingCopy.sha256 !== versionRecord.workingCopySha256) {
+      throw new ProjectFileError(
+        "VERSION_WORKING_COPY_HASH_MISMATCH",
+        "Version Working Copy 在验证后已改变，尚未在 Finder 中显示。",
+        {
+          expectedSha256: versionRecord.workingCopySha256,
+          actualSha256: workingCopy.sha256,
+        },
+      );
+    }
+    shell.showItemInFolder(resolvedWorkingCopyPath);
+    return {
+      sourcePath,
+      versionId: payload.versionId,
+      versionPath: resolvedWorkingCopyPath,
+    };
   }
 
   const [workspaceRoot, resolvedVersionPath] = await Promise.all([
@@ -1784,6 +1849,8 @@ async function revealVersionFile(payload) {
     resolvedVersionPath,
   );
   if (
+    typeof versionRecord.storageDirectoryName !== "string"
+    ||
     !relativeVersionPath
     || relativeVersionPath.startsWith(`..${path.sep}`)
     || relativeVersionPath === ".."
@@ -1815,55 +1882,93 @@ async function revealVersionFile(payload) {
   };
 }
 
-async function revealRequestFolder(payload) {
+async function revealAiTask(payload) {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-    throw new TypeError("本轮目录参数无效。");
+    throw new TypeError("AI 任务参数无效。");
   }
-  const allowedKeys = new Set(["sourcePath", "requestPath"]);
+  const allowedKeys = new Set(["sourcePath"]);
   if (Object.keys(payload).some((key) => !allowedKeys.has(key))) {
-    throw new TypeError("本轮目录参数包含未支持的字段。");
+    throw new TypeError("AI 任务参数包含未支持的字段。");
   }
   const sourcePath = assertReadPayload(payload.sourcePath);
   await assertKnownProjectPath(sourcePath);
   await inspectHtmlFile(sourcePath);
-  if (
-    typeof payload.requestPath !== "string"
-    || !payload.requestPath
-    || payload.requestPath.length > MAX_PATH_LENGTH
-    || payload.requestPath.includes("\0")
-  ) {
-    throw new TypeError("本轮目录路径无效。");
+  if (!bridgePort) {
+    throw new ProjectFileError(
+      "BRIDGE_NOT_READY",
+      "项目记录服务尚未就绪，请稍后重试。",
+    );
   }
 
-  const [workspaceRoot, resolvedRequestPath] = await Promise.all([
-    workspacePath().then((value) => realpath(value)),
-    realpath(path.resolve(payload.requestPath)),
-  ]);
-  const relativeRequestPath = path.relative(workspaceRoot, resolvedRequestPath);
+  const endpoint = new URL(`http://127.0.0.1:${bridgePort}/ai-task`);
+  endpoint.searchParams.set("sourcePath", sourcePath);
+  const response = await net.fetch(endpoint, {
+    cache: "no-store",
+    headers: {
+      "X-HTML-AI-Bridge-Token": bridgeAuthToken,
+    },
+  });
+  const taskRecord = await response.json().catch(() => null);
   if (
-    !relativeRequestPath
-    || relativeRequestPath.startsWith(`..${path.sep}`)
-    || relativeRequestPath === ".."
-    || path.isAbsolute(relativeRequestPath)
-    || !/^req_[a-z\d_-]+$/i.test(path.basename(resolvedRequestPath))
+    !response.ok
+    || !taskRecord
+    || taskRecord.ok !== true
+    || taskRecord.projectFileSchemaVersion !== "4.0.0"
+    || typeof taskRecord.projectId !== "string"
+    || typeof taskRecord.documentId !== "string"
+    || typeof taskRecord.sourcePath !== "string"
+    || typeof taskRecord.projectRootPath !== "string"
+    || typeof taskRecord.aiTaskPath !== "string"
+    || typeof taskRecord.aiTaskRelativePath !== "string"
   ) {
     throw new ProjectFileError(
-      "UNSAFE_REQUEST_PATH",
-      "只能打开当前项目记录中的本轮目录。",
-      { requestPath: resolvedRequestPath },
+      "AI_TASK_UNAVAILABLE",
+      "这个 AI 任务暂时无法在 Finder 中显示，请稍后重试。",
     );
   }
-  const requestStats = await stat(resolvedRequestPath);
-  if (!requestStats.isDirectory()) {
+  const [resolvedSourcePath, returnedSourcePath, resolvedProjectRoot, resolvedTaskPath] = await Promise.all([
+    realpath(path.resolve(sourcePath)),
+    realpath(path.resolve(taskRecord.sourcePath)),
+    realpath(path.resolve(taskRecord.projectRootPath)),
+    realpath(path.resolve(taskRecord.aiTaskPath)),
+  ]);
+  const rootStats = await lstat(resolvedProjectRoot);
+  const relativeTaskPath = path.relative(resolvedProjectRoot, resolvedTaskPath);
+  const expectedRelativePath = taskRecord.aiTaskRelativePath.replaceAll("/", path.sep);
+  if (
+    returnedSourcePath !== resolvedSourcePath
+    || !rootStats.isDirectory()
+    || rootStats.isSymbolicLink()
+    || !relativeTaskPath
+    || relativeTaskPath.startsWith(`..${path.sep}`)
+    || relativeTaskPath === ".."
+    || path.isAbsolute(relativeTaskPath)
+    || relativeTaskPath !== expectedRelativePath
+    || !taskRecord.aiTaskRelativePath.startsWith("AI任务/")
+    || taskRecord.aiTaskRelativePath.split("/").length !== 2
+    || taskRecord.aiTaskRelativePath.includes("/.pageroot/")
+  ) {
     throw new ProjectFileError(
-      "REQUEST_PATH_NOT_DIRECTORY",
-      "本轮目录不存在。",
-      { requestPath: resolvedRequestPath },
+      "UNSAFE_AI_TASK_PATH",
+      "只能打开当前项目已经验证的 AI任务 文件夹。",
+      { aiTaskPath: resolvedTaskPath },
     );
   }
-  const openError = await shell.openPath(resolvedRequestPath);
+  const taskStats = await lstat(resolvedTaskPath);
+  if (!taskStats.isDirectory() || taskStats.isSymbolicLink()) {
+    throw new ProjectFileError(
+      "AI_TASK_NOT_DIRECTORY",
+      "这个 AI任务 不是可打开的普通文件夹。",
+    );
+  }
+  const openError = await shell.openPath(resolvedTaskPath);
   if (openError) throw new Error(openError);
-  return { requestPath: resolvedRequestPath };
+  return {
+    sourcePath,
+    aiTaskPath: resolvedTaskPath,
+    requestId: taskRecord.requestId,
+    candidateId: taskRecord.candidateId,
+  };
 }
 
 async function exportHtmlCopy(payload) {
@@ -1946,6 +2051,210 @@ async function listRecentProjects() {
       lastOpenedAt: entry.lastOpenedAt,
     };
   }));
+}
+
+function assertRegisteredProjectId(value) {
+  const projectId = String(value || "");
+  if (!/^project_[a-f0-9]{16,64}$/u.test(projectId)) {
+    throw new TypeError("项目身份无效。");
+  }
+  return projectId;
+}
+
+function assertRegisteredProjectCatalogRow(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new ProjectFileError(
+      "REGISTERED_PROJECT_CATALOG_INVALID",
+      "项目目录返回了无效记录。",
+    );
+  }
+  const availability = String(value.availability || "");
+  const projectId = assertRegisteredProjectId(value.projectId);
+  if (
+    !["ready", "unavailable", "invalid"].includes(availability)
+    || typeof value.projectName !== "string"
+    || !value.projectName
+    || typeof value.registeredProjectRootPath !== "string"
+    || !value.registeredProjectRootPath
+  ) {
+    throw new ProjectFileError(
+      "REGISTERED_PROJECT_CATALOG_INVALID",
+      "项目目录包含无效记录。",
+    );
+  }
+  const ready = availability === "ready";
+  if (
+    ready
+    && (
+      !/^doc_[a-f0-9]{16,64}$/u.test(String(value.documentId || ""))
+      || !/^work_ver_\d{4,}$/u.test(String(value.activeWorkingCopyId || ""))
+      || !/^ver_\d{4,}$/u.test(String(value.currentBasedOnVersionId || ""))
+      || !/^ver_\d{4,}$/u.test(String(value.latestOfficialVersionId || ""))
+      || !value.activeSourcePath
+    )
+  ) {
+    throw new ProjectFileError(
+      "REGISTERED_PROJECT_CATALOG_INVALID",
+      "可打开项目缺少经过验证的目标。",
+    );
+  }
+  return Object.freeze({
+    projectId,
+    documentId: ready ? String(value.documentId) : null,
+    projectName: value.projectName,
+    registeredProjectRootPath: path.resolve(value.registeredProjectRootPath),
+    activeWorkingCopyId: ready ? String(value.activeWorkingCopyId) : null,
+    activeSourcePath: ready ? assertHtmlPath(value.activeSourcePath, "activeSourcePath") : null,
+    currentBasedOnVersionId: ready ? String(value.currentBasedOnVersionId) : null,
+    latestOfficialVersionId: ready ? String(value.latestOfficialVersionId) : null,
+    hasPendingCandidate: value.hasPendingCandidate === true,
+    availability,
+  });
+}
+
+async function fetchBridgeJson(pathname) {
+  if (!bridgePort) {
+    throw new ProjectFileError(
+      "BRIDGE_NOT_READY",
+      "项目记录服务尚未就绪，请稍后重试。",
+    );
+  }
+  const response = await net.fetch(`http://127.0.0.1:${bridgePort}${pathname}`, {
+    cache: "no-store",
+    headers: { "X-HTML-AI-Bridge-Token": bridgeAuthToken },
+  });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok || !payload || payload.ok !== true) {
+    throw new ProjectFileError(
+      "REGISTERED_PROJECT_BRIDGE_REJECTED",
+      "项目目录暂时无法完成安全核对。",
+    );
+  }
+  return payload;
+}
+
+async function listRegisteredProjects() {
+  const payload = await fetchBridgeJson("/registered-projects");
+  if (!Array.isArray(payload.projects)) {
+    throw new ProjectFileError(
+      "REGISTERED_PROJECT_CATALOG_INVALID",
+      "项目目录返回了无效列表。",
+    );
+  }
+  const state = await loadProjectState();
+  const recentTimes = new Map(state.recent.map((entry) => [
+    path.resolve(entry.path),
+    Number(entry.lastOpenedAt) || 0,
+  ]));
+  return payload.projects
+    .map(assertRegisteredProjectCatalogRow)
+    .map((project) => Object.freeze({
+      ...project,
+      lastOpenedAt: project.activeSourcePath
+        ? recentTimes.get(path.resolve(project.activeSourcePath)) || null
+        : null,
+    }))
+    .sort((left, right) => (
+      Number(right.lastOpenedAt || 0) - Number(left.lastOpenedAt || 0)
+      || left.projectName.localeCompare(right.projectName, "zh-CN")
+      || left.projectId.localeCompare(right.projectId)
+    ));
+}
+
+async function openRegisteredProject(projectIdInput) {
+  return projectOpenQueue.run(async () => {
+    const projectId = assertRegisteredProjectId(projectIdInput);
+    const payload = await fetchBridgeJson(
+      `/registered-project/open?projectId=${encodeURIComponent(projectId)}`,
+    );
+    const target = payload.openTarget;
+    if (
+      !target
+      || typeof target !== "object"
+      || target.targetKind !== "working-copy"
+      || target.projectId !== projectId
+      || payload.projectId !== projectId
+      || !/^doc_[a-f0-9]{16,64}$/u.test(String(target.documentId || ""))
+      || !/^work_ver_\d{4,}$/u.test(String(target.workingCopyId || ""))
+      || !/^ver_\d{4,}$/u.test(String(target.versionId || ""))
+      || typeof target.projectRootPath !== "string"
+      || !target.projectRootPath
+      || !/^sha256:[a-f0-9]{64}$/u.test(String(payload.sourceSha256 || ""))
+      || target.sourceSha256 !== payload.sourceSha256
+    ) {
+      throw new ProjectFileError(
+        "REGISTERED_PROJECT_TARGET_INVALID",
+        "项目目录未返回可安全打开的工作文件。",
+      );
+    }
+    const requestedSourcePath = assertHtmlPath(payload.sourcePath, "sourcePath");
+    const targetSourcePath = assertHtmlPath(target.exactSourcePath, "openTarget.exactSourcePath");
+    const [sourcePath, exactTargetPath] = await Promise.all([
+      existingPathIdentity(requestedSourcePath),
+      existingPathIdentity(targetSourcePath),
+    ]);
+    if (sourcePath !== exactTargetPath) {
+      throw new ProjectFileError(
+        "REGISTERED_PROJECT_PATH_MISMATCH",
+        "项目目录目标路径与经过验证的工作文件不一致。",
+      );
+    }
+
+    // The Renderer supplied only projectId.  Re-read the exact source through
+    // the Bridge immediately before Desktop reads bytes, then bind all five
+    // members of the Project/Document/OpenTarget/HTML/Hash tuple before any
+    // Project-state or Session publication can occur.
+    const workspace = await fetchBridgeJson(
+      `/workspace?sourcePath=${encodeURIComponent(sourcePath)}&projectStorageVersion=4.0.0`,
+    );
+    const verifiedTarget = workspace.openTarget;
+    if (
+      workspace.projectId !== projectId
+      || workspace.documentId !== target.documentId
+      || workspace.currentHtmlSha256 !== payload.sourceSha256
+      || !verifiedTarget
+      || verifiedTarget.targetKind !== "working-copy"
+      || verifiedTarget.projectId !== projectId
+      || verifiedTarget.documentId !== target.documentId
+      || verifiedTarget.workingCopyId !== target.workingCopyId
+      || verifiedTarget.versionId !== target.versionId
+      || verifiedTarget.sourceSha256 !== payload.sourceSha256
+      || typeof verifiedTarget.projectRootPath !== "string"
+      || path.resolve(verifiedTarget.projectRootPath) !== path.resolve(target.projectRootPath)
+      || await existingPathIdentity(verifiedTarget.exactSourcePath) !== sourcePath
+    ) {
+      throw new ProjectFileError(
+        "REGISTERED_PROJECT_IDENTITY_MISMATCH",
+        "项目目录在打开前发生变化，当前项目没有切换。",
+      );
+    }
+    const project = await readHtmlProject(sourcePath);
+    if (project.sha256 !== payload.sourceSha256) {
+      throw new ProjectFileError(
+        "REGISTERED_PROJECT_HASH_MISMATCH",
+        "项目 HTML 在读取期间发生变化，当前项目没有切换。",
+      );
+    }
+    const state = await loadProjectState();
+    const recentIdentities = await Promise.all(state.recent.map(async (entry) => ({
+      entry,
+      identity: await existingPathIdentity(entry.path).catch(() => null),
+    })));
+    state.activePath = sourcePath;
+    state.lastManagedActivation = null;
+    state.recent = [
+      {
+        path: sourcePath,
+        name: path.basename(sourcePath),
+        lastOpenedAt: Date.now(),
+      },
+      ...recentIdentities
+        .filter((entry) => entry.identity !== sourcePath)
+        .map((entry) => entry.entry),
+    ].slice(0, MAX_RECENT_PROJECTS);
+    await persistProjectState();
+    return project;
+  });
 }
 
 async function openRecent(filePath) {
@@ -2114,8 +2423,16 @@ function registerProjectIpc() {
     trustedProject(activateManagedWorkingCopy),
   );
   ipcMain.handle(PROJECT_CHANNELS.revealVersionFile, trustedProject(revealVersionFile));
-  ipcMain.handle(PROJECT_CHANNELS.revealRequestFolder, trustedProject(revealRequestFolder));
+  ipcMain.handle(PROJECT_CHANNELS.revealAiTask, trustedProject(revealAiTask));
   ipcMain.handle(PROJECT_CHANNELS.listRecentProjects, trustedProject(listRecentProjects));
+  ipcMain.handle(
+    PROJECT_CHANNELS.listRegisteredProjects,
+    trustedProject(listRegisteredProjects),
+  );
+  ipcMain.handle(
+    PROJECT_CHANNELS.openRegisteredProject,
+    trustedProject(openRegisteredProject),
+  );
   ipcMain.handle(PROJECT_CHANNELS.openRecent, trustedProject(openRecent));
   ipcMain.handle(PROJECT_CHANNELS.forgetRecent, trustedProject(forgetRecentProject));
   ipcMain.handle(

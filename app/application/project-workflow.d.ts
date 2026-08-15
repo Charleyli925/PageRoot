@@ -118,8 +118,9 @@ export class ProjectWorkflow {
   retryHydration(): Promise<ProjectWorkflowOutcome>;
   prepareSwitch(input?: { fromDeferred?: boolean }): Promise<ProjectWorkflowOutcome>;
   openProject(input?: {
-    kind?: "local" | "recent" | "startup";
+    kind?: "local" | "recent" | "registered" | "startup";
     sourcePath?: string | null;
+    projectId?: string | null;
     fromDeferred?: boolean;
   }): Promise<ProjectWorkflowOutcome>;
   acceptProject(
@@ -166,6 +167,7 @@ export class ProjectWorkflow {
     context?: ProjectContext;
   }): Promise<ProjectWorkflowOutcome<{ opened: boolean }>>;
   refreshRecents(): Promise<ProjectWorkflowOutcome<{ projects: unknown[] }>>;
+  refreshRegisteredProjects(): Promise<ProjectWorkflowOutcome<{ projects: unknown[] }>>;
   captureManagedSourceTransitionAuthority(): unknown;
   restoreManagedSourceTransitionAuthority(authority: unknown): Readonly<{
     epoch: number;

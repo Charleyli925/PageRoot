@@ -93,6 +93,36 @@ test("v4 schemas accept repository-produced identity, Working Copy, Candidate an
       await json(path.join(controlRoot, "working-copies", "work_ver_0001.json")),
     ),
   ]);
+  const legacyRuntimeWithoutDisplayAnchors = await json(path.join(
+    controlRoot,
+    "runtime-state.json",
+  ));
+  delete legacyRuntimeWithoutDisplayAnchors.historyActivation;
+  delete legacyRuntimeWithoutDisplayAnchors.lastAiTask;
+  await validate(
+    "project-runtime-state.v4.schema.json",
+    legacyRuntimeWithoutDisplayAnchors,
+  );
+  const terminalDisplayRuntime = await json(path.join(
+    controlRoot,
+    "runtime-state.json",
+  ));
+  terminalDisplayRuntime.lastAiTask = {
+    requestId: "req_schema_terminal",
+    attemptId: "attempt_001",
+    candidateId: "candidate_schema_terminal_0001",
+    projectId: imported.target.projectId,
+    documentId: imported.target.documentId,
+    sourceWorkingCopyId: imported.target.workingCopyId,
+    expectedSourceSha256: imported.target.sourceSha256,
+    inputManifestSha256: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    status: "no-change",
+    completedAt: "2026-08-15T00:00:00.000Z",
+  };
+  await validate("project-runtime-state.v4.schema.json", terminalDisplayRuntime);
+  const malformedTerminalDisplay = structuredClone(terminalDisplayRuntime);
+  malformedTerminalDisplay.lastAiTask.status = "processing";
+  await validateRejects("project-runtime-state.v4.schema.json", malformedTerminalDisplay);
   const missingImportSourceHash = structuredClone(registry);
   delete missingImportSourceHash.projects[imported.target.projectId].importSourceSha256;
   await validateRejects("project-registry.v4.schema.json", missingImportSourceHash);
@@ -124,6 +154,8 @@ test("v4 schemas accept repository-produced identity, Working Copy, Candidate an
   missingWorkingCopyAnchor.activeWorkingCopyId = null;
   const staleCandidateWithoutRequest = structuredClone(candidateRuntime);
   staleCandidateWithoutRequest.activeRequest = null;
+  const activeRequestWithTerminalDisplay = structuredClone(candidateRuntime);
+  activeRequestWithTerminalDisplay.lastAiTask = terminalDisplayRuntime.lastAiTask;
   await Promise.all([
     validateRejects("project-runtime-state.v4.schema.json", missingCandidateSeal),
     validateRejects("project-runtime-state.v4.schema.json", wrongCandidateSealType),
@@ -131,6 +163,7 @@ test("v4 schemas accept repository-produced identity, Working Copy, Candidate an
     validateRejects("project-runtime-state.v4.schema.json", missingPendingReviewSeal),
     validateRejects("project-runtime-state.v4.schema.json", missingWorkingCopyAnchor),
     validateRejects("project-runtime-state.v4.schema.json", staleCandidateWithoutRequest),
+    validateRejects("project-runtime-state.v4.schema.json", activeRequestWithTerminalDisplay),
   ]);
 
   const promoted = await repository.promoteCandidate({

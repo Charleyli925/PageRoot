@@ -28,6 +28,10 @@ import {
   applyDraftCommand,
 } from "./draft-service.mjs";
 import { assessHtmlCandidate } from "./candidate-assessment.mjs";
+import {
+  AiTaskProjectionError,
+  materializeAiTaskProjection,
+} from "./ai-task-projection.mjs";
 
 export const PROJECT_FILE_SCHEMA_VERSION = "4.0.0";
 
@@ -356,6 +360,30 @@ function visibleFileName(stem, ordinal, extension, allocationOrdinal = 0) {
     ("-V" + ordinal).repeat(allocationOrdinal + 1),
     safeExtension,
     "Working Copy filename",
+  );
+}
+
+function aiTaskCandidateFileName(stem, ordinal, extension) {
+  const safeExtension = HTML_EXTENSIONS.has(String(extension || "").toLowerCase())
+    ? String(extension).toLowerCase()
+    : null;
+  if (!safeExtension) {
+    throw new ProjectFileRepositoryError(
+      "UNSUPPORTED_HTML_EXTENSION",
+      "Only .html and .htm files can be used for an AI task Candidate.",
+    );
+  }
+  if (!Number.isSafeInteger(Number(ordinal)) || Number(ordinal) < 2) {
+    throw new ProjectFileRepositoryError(
+      "INVALID_CANDIDATE",
+      "The AI task Candidate Version ordinal is invalid.",
+    );
+  }
+  return filenameWithReservedSuffix(
+    stem,
+    `-V${Number(ordinal)}-待审阅`,
+    safeExtension,
+    "AI task Candidate filename",
   );
 }
 
@@ -996,11 +1024,30 @@ async function legacyV4RegistryMigrationLockLease({ projectsRoot, lockPath }) {
   if (markers.length !== 1) return null;
   const marker = markers[0];
   const ownerPath = path.join(lockPath, marker.name);
-  const owner = legacyV4RegistryMigrationLockOwner(await readJsonFile(
-    ownerPath,
-    "legacy V4 Registry migration lock",
-    { projectRootPath: projectsRoot },
-  ));
+  let ownerRecord;
+  try {
+    ownerRecord = await readJsonFile(
+      ownerPath,
+      "legacy V4 Registry migration lock",
+      { projectRootPath: projectsRoot },
+    );
+  } catch (cause) {
+    // readdir() only gives a point-in-time name. A concurrently releasing or
+    // retiring owner may rename that exact marker before its containment
+    // check/read pair completes. readJsonFile intentionally reports that
+    // post-stat ENOENT as INVALID_JSON; both forms are transient here. Do not
+    // reclaim or trust the lock from this stale observation—wait and inspect
+    // the stable directory again instead.
+    if (
+      cause?.code === "ENOENT"
+      || (
+        cause instanceof ProjectFileRepositoryError
+        && cause.code === "INVALID_JSON"
+      )
+    ) return null;
+    throw cause;
+  }
+  const owner = legacyV4RegistryMigrationLockOwner(ownerRecord);
   if (!owner || owner.token !== marker.marker.ownerToken) return null;
   return { owner, ownerPath };
 }
@@ -1300,6 +1347,87 @@ function assertHistoryActivation(runtime, project, manifest) {
   return activation;
 }
 
+function assertLastAiTask(runtime, project, manifest) {
+  const task = runtime.lastAiTask;
+  if (task === undefined || task === null) return null;
+  if (
+    !hasExactKeys(task, [
+      "attemptId",
+      "candidateId",
+      "completedAt",
+      "documentId",
+      "expectedSourceSha256",
+      "inputManifestSha256",
+      "projectId",
+      "requestId",
+      "sourceWorkingCopyId",
+      "status",
+    ])
+    || task.projectId !== project.projectId
+    || task.documentId !== project.documentId
+    || !SAFE_REQUEST_ID.test(String(task.requestId || ""))
+    || !SAFE_REQUEST_ID.test(String(task.attemptId || ""))
+    || !/^candidate_[A-Za-z0-9_-]{8,160}$/u.test(String(task.candidateId || ""))
+    || !WORKING_COPY_ID.test(String(task.sourceWorkingCopyId || ""))
+    || !SHA256.test(String(task.expectedSourceSha256 || ""))
+    || !SHA256.test(String(task.inputManifestSha256 || ""))
+    || !["no-change", "error"].includes(task.status)
+    || !validStateTimestamp(task.completedAt)
+    || !manifest.workingCopies.some(
+      (workingCopy) => workingCopy.workingCopyId === task.sourceWorkingCopyId,
+    )
+  ) {
+    throw new ProjectFileRepositoryError(
+      "INVALID_RUNTIME",
+      "lastAiTask is inconsistent.",
+    );
+  }
+  return task;
+}
+
+function lastAiTaskAnchorFor(record) {
+  return {
+    requestId: record.requestId,
+    attemptId: record.attemptId,
+    candidateId: record.candidateId,
+    projectId: record.projectId,
+    documentId: record.documentId,
+    sourceWorkingCopyId: record.sourceWorkingCopyId,
+    expectedSourceSha256: record.expectedSourceSha256,
+    inputManifestSha256: record.inputManifestSha256,
+    status: record.status,
+    completedAt: record.completedAt,
+  };
+}
+
+// historyActivation and lastAiTask were added after the first published v4
+// Runtime files. Treat either absence as its explicit null state while
+// preserving every other Runtime validation. Writes converge old valid files
+// without a schema-version bump or a standalone migration pass.
+function normalizeRuntimeDisplayAnchors(runtime) {
+  if (!isObject(runtime)) return runtime;
+  if (
+    Object.hasOwn(runtime, "historyActivation")
+    && Object.hasOwn(runtime, "lastAiTask")
+  ) return runtime;
+  return {
+    ...runtime,
+    ...(!Object.hasOwn(runtime, "historyActivation") ? { historyActivation: null } : {}),
+    ...(!Object.hasOwn(runtime, "lastAiTask") ? { lastAiTask: null } : {}),
+  };
+}
+
+async function writeRuntimeState(projectRootPath, runtimePath, runtime) {
+  const normalized = normalizeRuntimeDisplayAnchors(runtime);
+  await atomicWriteProjectJson(
+    projectRootPath,
+    runtimePath,
+    normalized,
+    "runtime-state.json",
+  );
+  return normalized;
+}
+
 function assertRuntime(runtime, project, manifest) {
   if (!isObject(runtime) || runtime.schemaVersion !== PROJECT_FILE_SCHEMA_VERSION) {
     throw new ProjectFileRepositoryError(
@@ -1370,6 +1498,13 @@ function assertRuntime(runtime, project, manifest) {
     ) {
       throw new ProjectFileRepositoryError("INVALID_RUNTIME", "active Request is inconsistent.");
     }
+  }
+  const lastAiTask = assertLastAiTask(runtime, project, manifest);
+  if (runtime.activeRequest !== null && lastAiTask !== null) {
+    throw new ProjectFileRepositoryError(
+      "INVALID_RUNTIME",
+      "An active Request cannot retain a terminal AI task anchor.",
+    );
   }
   assertHistoryActivation(runtime, project, manifest);
   return runtime;
@@ -1622,6 +1757,22 @@ function invalidRegisteredProjectError(cause) {
     ]).has(cause.code);
 }
 
+function registeredProjectCatalogAvailability(cause) {
+  if (!(cause instanceof ProjectFileRepositoryError)) return "invalid";
+  return new Set([
+    "REGISTERED_PROJECT_UNAVAILABLE",
+    "PROJECT_ROOT_NOT_FOUND",
+    "PROJECT_CONTROL_NOT_FOUND",
+    "WORKING_COPY_UNAVAILABLE",
+    "SOURCE_NOT_FOUND",
+    "UNREGISTERED_PROJECT_ROOT",
+    "PATH_ESCAPES_PROJECT",
+    "UNSAFE_DIRECTORY",
+  ]).has(cause.code)
+    ? "unavailable"
+    : "invalid";
+}
+
 // This is a persistence repository, not a runtime Store. Sessions keep the
 // mutable UI facts; the repository only resolves and atomically records the
 // on-disk facts specified by VERSION_AND_PROJECT_FILES_PRD.md.
@@ -1666,6 +1817,14 @@ export class ProjectFileRepository {
       }
       await this.#recoverPublishedImports();
     });
+  }
+
+  async listRegisteredProjects() {
+    return this.#serial(() => this.#listRegisteredProjects());
+  }
+
+  async resolveRegisteredProjectOpenTarget({ projectId } = {}) {
+    return this.#serial(() => this.#resolveRegisteredProjectOpenTarget({ projectId }));
   }
 
   async importExternal({
@@ -1825,6 +1984,31 @@ export class ProjectFileRepository {
     return this.#serial(() => this.#readVersionFile({ target, requestedVersionId }));
   }
 
+  async resolveVersionWorkingCopy({ target, versionId: requestedVersionId } = {}) {
+    return this.#serial(() => this.#resolveVersionWorkingCopy({
+      target,
+      requestedVersionId,
+    }));
+  }
+
+  async materializeAiTaskProjection({
+    target,
+    requestId,
+    attemptId = "attempt_001",
+    candidateId = null,
+  } = {}) {
+    return this.#serial(() => this.#materializeAiTaskProjection({
+      target,
+      requestId,
+      attemptId,
+      candidateId,
+    }));
+  }
+
+  async materializeCurrentAiTaskProjection({ target } = {}) {
+    return this.#serial(() => this.#materializeCurrentAiTaskProjection({ target }));
+  }
+
   async readCandidate({ target, candidateId: requestedCandidateId } = {}) {
     return this.#serial(async () => {
       const loaded = await this.#resolveMutationTarget(target);
@@ -1935,6 +2119,14 @@ export class ProjectFileRepository {
       if (!isExactLegacyV4Registry(record.value)) throw cause;
       return this.#migrateExactLegacyV4Registry();
     }
+  }
+
+  async #writeRuntime(loaded) {
+    loaded.runtime = await writeRuntimeState(
+      loaded.paths.projectRootPath,
+      loaded.paths.runtimePath,
+      loaded.runtime,
+    );
   }
 
   async #migrateExactLegacyV4Registry() {
@@ -2221,6 +2413,13 @@ export class ProjectFileRepository {
         activeRequest.candidateId,
       )
       : null;
+    // A terminal no-change/error Request is not active runtime authority, but
+    // its sealed runtime anchor is enough to reconstruct the immutable
+    // display outcome after a relaunch. Do not scan Request directories: the
+    // anchor and its verified Request record remain the only admission path.
+    const terminalAiTask = !activeRequest && loaded.runtime.lastAiTask
+      ? await this.#terminalAiTaskForLoaded(loaded)
+      : null;
     const source = await readHtmlFile(target.exactSourcePath, "managed HTML", {
       projectRootPath: loaded.paths.projectRootPath,
     });
@@ -2242,6 +2441,27 @@ export class ProjectFileRepository {
         );
       }
     }
+    // The active Working Copy can be reconciled from a clean external edit
+    // immediately above. Build this public list only after that mutation so
+    // the first hydration never returns a stale differsFromBase projection.
+    const workingCopies = [];
+    for (const entry of loaded.manifest.workingCopies) {
+      const workingCopyState = entry.workingCopyId === workingCopy?.workingCopyId
+        ? state
+        : await readJsonFile(
+          workingCopyStatePath(loaded.paths, entry),
+          "Working Copy state",
+          { projectRootPath: loaded.paths.projectRootPath },
+        );
+      assertWorkingCopyState(workingCopyState, loaded, entry);
+      workingCopies.push({
+        workingCopyId: entry.workingCopyId,
+        versionId: entry.versionId,
+        basedOnVersionId: entry.basedOnVersionId,
+        differsFromBase: workingCopyState.differsFromBase === true,
+        saveState: workingCopyState.saveState,
+      });
+    }
     return {
       target,
       project: structuredClone(loaded.project),
@@ -2249,10 +2469,14 @@ export class ProjectFileRepository {
       runtime: structuredClone(loaded.runtime),
       workingCopy: workingCopy ? structuredClone(workingCopy) : null,
       workingCopyState: state ? structuredClone(state) : null,
+      workingCopies: structuredClone(workingCopies),
       draft: draft ? structuredClone(draft) : null,
       activeRequest: activeRequest ? structuredClone(activeRequest) : null,
       activeCandidate: activeCandidate
         ? structuredClone(activeCandidate.candidate)
+        : null,
+      terminalRequest: terminalAiTask
+        ? this.#publicRequest(terminalAiTask.record, loaded.paths.projectRootPath)
         : null,
       workingCopyRecovered,
       content: source.html,
@@ -2344,6 +2568,12 @@ export class ProjectFileRepository {
         );
       }
       await this.#restoreRequestRuntime(loaded, existing);
+      await this.#publishAiTaskProjectionIfPossible({
+        target,
+        requestId: id,
+        attemptId: attempt,
+        candidateId: existing.candidateId,
+      });
       return this.#publicRequest(existing, loaded.paths.projectRootPath);
     }
     const latest = loaded.manifest.versions.find(
@@ -2575,13 +2805,15 @@ export class ProjectFileRepository {
       candidateRecordSha256: null,
     };
     loaded.runtime.activeCandidateId = null;
-    await atomicWriteProjectJson(
-      loaded.paths.projectRootPath,
-      loaded.paths.runtimePath,
-      loaded.runtime,
-      "runtime-state.json",
-    );
+    loaded.runtime.lastAiTask = null;
+    await this.#writeRuntime(loaded);
     await this.#hit("request-runtime-written", { requestId: id, requestRoot });
+    await this.#publishAiTaskProjectionIfPossible({
+      target,
+      requestId: id,
+      attemptId: attempt,
+      candidateId: idForCandidate,
+    });
     await this.#hit("request-prepared", { requestId: id, requestRoot });
     return this.#publicRequest(record, loaded.paths.projectRootPath);
   }
@@ -2621,6 +2853,282 @@ export class ProjectFileRepository {
       if (value !== undefined) ensureRelativePath(value, label);
     }
     assertSha256(record.inputManifestSha256, "request input manifest hash");
+  }
+
+  async #frozenPromptForAiTaskProjection(loaded, record) {
+    const inputManifestPath = resolveRelative(
+      loaded.paths.controlRoot,
+      record.inputManifestRelativePath,
+      "request input manifest path",
+    );
+    const inputManifestRecord = await readJsonFileWithSha256(
+      inputManifestPath,
+      "request input manifest",
+      { projectRootPath: loaded.paths.projectRootPath },
+    );
+    const inputManifest = inputManifestRecord?.value || null;
+    if (
+      !inputManifestRecord
+      || inputManifestRecord.sha256 !== record.inputManifestSha256
+      || !isObject(inputManifest)
+      || inputManifest.schemaVersion !== PROJECT_FILE_SCHEMA_VERSION
+      || inputManifest.projectId !== loaded.project.projectId
+      || inputManifest.documentId !== loaded.project.documentId
+      || inputManifest.requestId !== record.requestId
+      || inputManifest.attemptId !== record.attemptId
+      || inputManifest.frozen !== true
+      || !Array.isArray(inputManifest.files)
+    ) {
+      throw new ProjectFileRepositoryError(
+        "FROZEN_REQUEST_BUNDLE_MISMATCH",
+        "The frozen Request bundle cannot safely provide an AI task Prompt.",
+      );
+    }
+    const promptEntry = inputManifest.files.find((entry) => (
+      isObject(entry)
+      && entry.path === "PROMPT.md"
+      && entry.role === "prompt"
+      && entry.mediaType === "text/markdown"
+    ));
+    if (
+      !promptEntry
+      || !SHA256.test(String(promptEntry.sha256 || ""))
+      || !Number.isSafeInteger(Number(promptEntry.byteLength))
+      || Number(promptEntry.byteLength) < 0
+    ) {
+      throw new ProjectFileRepositoryError(
+        "FROZEN_REQUEST_BUNDLE_MISMATCH",
+        "The frozen Request bundle has no valid Prompt record.",
+      );
+    }
+    const promptPath = resolveRelative(
+      loaded.paths.controlRoot,
+      record.promptRelativePath,
+      "request prompt path",
+    );
+    const prompt = await readRegularFileWithSha256(
+      promptPath,
+      "Request prompt",
+      { projectRootPath: loaded.paths.projectRootPath },
+    );
+    if (
+      !prompt
+      || prompt.sha256 !== promptEntry.sha256
+      || prompt.buffer.byteLength !== Number(promptEntry.byteLength)
+    ) {
+      throw new ProjectFileRepositoryError(
+        "FROZEN_REQUEST_BUNDLE_MISMATCH",
+        "The frozen Request Prompt no longer matches its manifest.",
+      );
+    }
+    return {
+      path: promptPath,
+      buffer: prompt.buffer,
+      sha256: prompt.sha256,
+    };
+  }
+
+  // AI任务/ is a derived Finder display. Once a Request or Candidate has
+  // crossed its durable authority boundary, a publication failure must not
+  // retract that hidden fact. Explicit Finder requests remain strict through
+  // #materializeAiTaskProjection and can be retried independently.
+  async #publishAiTaskProjectionIfPossible(args) {
+    try {
+      return await this.#materializeAiTaskProjection(args);
+    } catch {
+      return null;
+    }
+  }
+
+  async #terminalAiTaskForLoaded(loaded) {
+    const terminal = loaded.runtime.lastAiTask;
+    if (!terminal) return null;
+    const workingCopy = loaded.manifest.workingCopies.find(
+      (entry) => entry.workingCopyId === terminal.sourceWorkingCopyId,
+    );
+    if (!workingCopy) {
+      throw new ProjectFileRepositoryError(
+        "REQUEST_RUNTIME_ANCHOR_MISMATCH",
+        "The terminal AI task no longer names a managed Working Copy.",
+      );
+    }
+    const requestPath = path.join(
+      requestRootPath(loaded.paths, terminal.requestId),
+      "request.json",
+    );
+    const record = await readJsonFile(requestPath, "request.json", {
+      projectRootPath: loaded.paths.projectRootPath,
+    });
+    this.#assertRequestRecord(record, { ...loaded, workingCopy }, {
+      requestId: terminal.requestId,
+      attemptId: terminal.attemptId,
+    });
+    if (
+      terminal.projectId !== record.projectId
+      || terminal.documentId !== record.documentId
+      || terminal.candidateId !== record.candidateId
+      || terminal.sourceWorkingCopyId !== record.sourceWorkingCopyId
+      || terminal.expectedSourceSha256 !== record.expectedSourceSha256
+      || terminal.inputManifestSha256 !== record.inputManifestSha256
+      || terminal.status !== record.status
+      || terminal.completedAt !== record.completedAt
+    ) {
+      throw new ProjectFileRepositoryError(
+        "REQUEST_RUNTIME_ANCHOR_MISMATCH",
+        "The terminal AI task no longer matches its sealed runtime anchor.",
+      );
+    }
+    return { record, workingCopy };
+  }
+
+  async #materializeCurrentAiTaskProjection({ target }) {
+    const loaded = await this.#resolveMutationTarget(target);
+    const active = loaded.runtime.activeRequest;
+    if (!active && !loaded.runtime.lastAiTask) {
+      throw new ProjectFileRepositoryError(
+        "AI_TASK_NOT_ACTIVE",
+        "The current project has no active or terminal AI task to reveal.",
+      );
+    }
+    let record;
+    let materializationTarget = target;
+    if (active) {
+      const requestPath = path.join(
+        requestRootPath(loaded.paths, active.requestId),
+        "request.json",
+      );
+      record = await readJsonFile(requestPath, "request.json", {
+        projectRootPath: loaded.paths.projectRootPath,
+      });
+      this.#assertRequestRecord(record, loaded, {
+        requestId: active.requestId,
+        attemptId: active.attemptId,
+      });
+      if (
+        active.inputManifestSha256 !== record.inputManifestSha256
+        || (
+          active.status === "pending-review"
+          && active.candidateId !== record.candidateId
+        )
+      ) {
+        throw new ProjectFileRepositoryError(
+          "REQUEST_RUNTIME_ANCHOR_MISMATCH",
+          "The active Request no longer matches its runtime authority.",
+        );
+      }
+    } else {
+      const terminal = await this.#terminalAiTaskForLoaded(loaded);
+      record = terminal.record;
+      materializationTarget = {
+        projectId: loaded.project.projectId,
+        documentId: loaded.project.documentId,
+        projectRootPath: loaded.paths.projectRootPath,
+        workingCopyId: terminal.workingCopy.workingCopyId,
+      };
+    }
+    return this.#materializeAiTaskProjection({
+      target: materializationTarget,
+      requestId: record.requestId,
+      attemptId: record.attemptId,
+      candidateId: record.candidateId,
+    });
+  }
+
+  async #materializeAiTaskProjection({
+    target,
+    requestId,
+    attemptId,
+    candidateId,
+  }) {
+    const loaded = await this.#resolveMutationTarget(target);
+    const request = String(requestId || "");
+    const attempt = String(attemptId || "attempt_001");
+    if (!SAFE_REQUEST_ID.test(request) || !SAFE_REQUEST_ID.test(attempt)) {
+      throw new ProjectFileRepositoryError(
+        "INVALID_REQUEST_ID",
+        "The AI task projection Request identity is invalid.",
+      );
+    }
+    const requestPath = path.join(requestRootPath(loaded.paths, request), "request.json");
+    const record = await readJsonFile(requestPath, "request.json", {
+      projectRootPath: loaded.paths.projectRootPath,
+    });
+    this.#assertRequestRecord(record, loaded, { requestId: request, attemptId: attempt });
+    const expectedCandidateId = assertCandidateId(record.candidateId);
+    if (candidateId !== null && candidateId !== undefined) {
+      const requestedCandidateId = assertCandidateId(candidateId);
+      if (requestedCandidateId !== expectedCandidateId) {
+        throw new ProjectFileRepositoryError(
+          "CANDIDATE_IDENTITY_MISMATCH",
+          "The requested AI task Candidate does not belong to this Request.",
+        );
+      }
+    }
+    const frozenPrompt = await this.#frozenPromptForAiTaskProjection(loaded, record);
+    let candidateState = null;
+    if (["candidate-ready", "promoted", "rejected"].includes(record.status)) {
+      candidateState = await this.#readCandidateForLoaded(loaded, expectedCandidateId);
+      const candidate = candidateState.candidate;
+      if (
+        candidate.candidateId !== expectedCandidateId
+        || candidate.projectId !== loaded.project.projectId
+        || candidate.documentId !== loaded.project.documentId
+        || candidate.requestId !== record.requestId
+        || candidate.attemptId !== record.attemptId
+        || candidate.proposedVersionId !== record.proposedVersionId
+        || Number(candidate.proposedVersionOrdinal) !== Number(record.proposedVersionOrdinal)
+        || candidate.basedOnVersionId !== record.basedOnVersionId
+        || candidate.previousVersionId !== record.previousVersionId
+      ) {
+        throw new ProjectFileRepositoryError(
+          "CANDIDATE_AUTHORITY_MISMATCH",
+          "The Candidate does not match the frozen AI task identity.",
+        );
+      }
+    }
+    const candidateFileName = aiTaskCandidateFileName(
+      loaded.workingCopy.preferredFileStem,
+      record.proposedVersionOrdinal,
+      loaded.workingCopy.preferredExtension,
+    );
+    try {
+      const projection = await materializeAiTaskProjection({
+        projectRootPath: loaded.paths.projectRootPath,
+        recoveryRootPath: path.join(
+          loaded.paths.recoveryRoot,
+          "ai-task-projections",
+        ),
+        projectId: loaded.project.projectId,
+        documentId: loaded.project.documentId,
+        requestId: record.requestId,
+        attemptId: record.attemptId,
+        candidateId: expectedCandidateId,
+        proposedVersionId: record.proposedVersionId,
+        proposedVersionOrdinal: record.proposedVersionOrdinal,
+        createdAt: record.createdAt,
+        promptBuffer: frozenPrompt.buffer,
+        promptSha256: frozenPrompt.sha256,
+        candidateBuffer: candidateState?.output.buffer || null,
+        candidateSha256: candidateState?.output.sha256 || null,
+        candidateFileName,
+        onStage: (name, details) => this.#hit(name, {
+          requestId: record.requestId,
+          attemptId: record.attemptId,
+          candidateId: expectedCandidateId,
+          ...details,
+        }),
+      });
+      return {
+        ...projection,
+        status: record.status,
+        hasCandidate: candidateState !== null,
+      };
+    } catch (cause) {
+      if (cause instanceof AiTaskProjectionError) {
+        throw new ProjectFileRepositoryError(cause.code, cause.message, cause.details);
+      }
+      throw cause;
+    }
   }
 
   #assertCompletionRecord(completion, request) {
@@ -2788,12 +3296,13 @@ export class ProjectFileRepository {
       if (loaded.runtime.activeRequest?.requestId === record.requestId) {
         loaded.runtime.activeRequest = null;
         loaded.runtime.activeCandidateId = null;
-        await atomicWriteProjectJson(
-          loaded.paths.projectRootPath,
-          loaded.paths.runtimePath,
-          loaded.runtime,
-          "runtime-state.json",
-        );
+        if (
+          ["no-change", "error"].includes(status)
+          && validStateTimestamp(record.completedAt)
+        ) {
+          loaded.runtime.lastAiTask = lastAiTaskAnchorFor(record);
+        }
+        await this.#writeRuntime(loaded);
       }
       return false;
     }
@@ -2819,12 +3328,8 @@ export class ProjectFileRepository {
     ) {
       loaded.runtime.activeRequest = nextActiveRequest;
       loaded.runtime.activeCandidateId = candidateId;
-      await atomicWriteProjectJson(
-        loaded.paths.projectRootPath,
-        loaded.paths.runtimePath,
-        loaded.runtime,
-        "runtime-state.json",
-      );
+      loaded.runtime.lastAiTask = null;
+      await this.#writeRuntime(loaded);
       return true;
     }
     return false;
@@ -2991,12 +3496,7 @@ export class ProjectFileRepository {
     if (activeMatches) {
       loaded.runtime.activeRequest = null;
       loaded.runtime.activeCandidateId = null;
-      await atomicWriteProjectJson(
-        loaded.paths.projectRootPath,
-        loaded.paths.runtimePath,
-        loaded.runtime,
-        "runtime-state.json",
-      );
+      await this.#writeRuntime(loaded);
     }
     return { requestId, attemptId, status: "cancelled" };
   }
@@ -3142,6 +3642,60 @@ export class ProjectFileRepository {
     };
   }
 
+  async #resolveVersionWorkingCopy({ target, requestedVersionId }) {
+    const loaded = await this.#resolveMutationTarget(target);
+    const id = assertId(requestedVersionId, VERSION_ID, "versionId");
+    const version = loaded.manifest.versions.find((entry) => entry.versionId === id);
+    if (!version) {
+      throw new ProjectFileRepositoryError(
+        "VERSION_NOT_FOUND",
+        "The requested Version was not found.",
+      );
+    }
+    const matches = loaded.manifest.workingCopies.filter((workingCopy) => (
+      workingCopy.versionId === id
+      && workingCopy.basedOnVersionId === id
+    ));
+    if (matches.length !== 1) {
+      throw new ProjectFileRepositoryError(
+        "VERSION_WORKING_COPY_UNAVAILABLE",
+        "The Version has no unambiguous visible Working Copy.",
+        { versionId: id, workingCopyIds: matches.map((entry) => entry.workingCopyId) },
+      );
+    }
+    const workingCopy = matches[0];
+    // A historical Working Copy has the same controlled rename semantics as
+    // the active one. Resolve it by stable file identity before reading the
+    // visible path, so Finder renames do not make a valid Version reveal fail.
+    const resolvedSource = await this.#resolveWorkingCopySource(
+      loaded,
+      workingCopy,
+      "Version Working Copy",
+    );
+    const state = await readJsonFile(
+      workingCopyStatePath(loaded.paths, workingCopy),
+      "Version Working Copy state",
+      { projectRootPath: loaded.paths.projectRootPath },
+    );
+    assertWorkingCopyState(state, loaded, workingCopy);
+    const reconciled = await this.#reconcileExternalWorkingCopyState({
+      loaded,
+      workingCopy,
+      state,
+      source: resolvedSource.source,
+    });
+    return {
+      projectId: loaded.project.projectId,
+      documentId: loaded.project.documentId,
+      projectRootPath: loaded.paths.projectRootPath,
+      versionId: version.versionId,
+      workingCopyId: workingCopy.workingCopyId,
+      workingCopyPath: resolvedSource.exactSourcePath,
+      sourceSha256: resolvedSource.source.sha256,
+      workingCopyState: structuredClone(reconciled.state),
+    };
+  }
+
   async #activateVersionWorkingCopy({
     target,
     requestedVersionId,
@@ -3275,12 +3829,7 @@ export class ProjectFileRepository {
     };
     loaded.runtime.activeWorkingCopyId = workingCopy.workingCopyId;
     loaded.runtime.historyActivation = historyActivation;
-    await atomicWriteProjectJson(
-      loaded.paths.projectRootPath,
-      loaded.paths.runtimePath,
-      loaded.runtime,
-      "runtime-state.json",
-    );
+    await this.#writeRuntime(loaded);
     return activationResult(historyActivation, { activated: true, replayed: false });
   }
 
@@ -3329,12 +3878,7 @@ export class ProjectFileRepository {
     }
     historyActivation.state = "desktop-confirmed";
     loaded.runtime.historyActivation = historyActivation;
-    await atomicWriteProjectJson(
-      loaded.paths.projectRootPath,
-      loaded.paths.runtimePath,
-      loaded.runtime,
-      "runtime-state.json",
-    );
+    await this.#writeRuntime(loaded);
     return {
       historyActivation: structuredClone(historyActivation),
       confirmed: true,
@@ -3360,6 +3904,12 @@ export class ProjectFileRepository {
           "The finalized Candidate output changed after review began.",
         );
       }
+      await this.#publishAiTaskProjectionIfPossible({
+        target,
+        requestId: record.requestId,
+        attemptId: record.attemptId,
+        candidateId: record.candidateId,
+      });
       return {
         status: record.status === "promoted" ? "promoted" : "candidate-ready",
         request: this.#publicRequest(record, loaded.paths.projectRootPath),
@@ -3383,12 +3933,8 @@ export class ProjectFileRepository {
       );
       loaded.runtime.activeRequest = null;
       loaded.runtime.activeCandidateId = null;
-      await atomicWriteProjectJson(
-        loaded.paths.projectRootPath,
-        loaded.paths.runtimePath,
-        loaded.runtime,
-        "runtime-state.json",
-      );
+      loaded.runtime.lastAiTask = lastAiTaskAnchorFor(record);
+      await this.#writeRuntime(loaded);
       return {
         status: "no-change",
         request: this.#publicRequest(record, loaded.paths.projectRootPath),
@@ -3447,12 +3993,8 @@ export class ProjectFileRepository {
       );
       loaded.runtime.activeRequest = null;
       loaded.runtime.activeCandidateId = null;
-      await atomicWriteProjectJson(
-        loaded.paths.projectRootPath,
-        loaded.paths.runtimePath,
-        loaded.runtime,
-        "runtime-state.json",
-      );
+      loaded.runtime.lastAiTask = lastAiTaskAnchorFor(record);
+      await this.#writeRuntime(loaded);
       return {
         status: "error",
         request: this.#publicRequest(record, loaded.paths.projectRootPath),
@@ -3466,6 +4008,12 @@ export class ProjectFileRepository {
       record,
       "request.json",
     );
+    await this.#publishAiTaskProjectionIfPossible({
+      target,
+      requestId: record.requestId,
+      attemptId: record.attemptId,
+      candidateId: record.candidateId,
+    });
     return {
       status: "candidate-ready",
       request: this.#publicRequest(record, loaded.paths.projectRootPath),
@@ -3891,6 +4439,7 @@ export class ProjectFileRepository {
         activeRequest: null,
         activeCandidateId: null,
         historyActivation: null,
+        lastAiTask: null,
       };
       await atomicWriteProjectJson(stagingRoot, paths.projectPath, project, "project.json");
       await atomicWriteProjectJson(stagingRoot, paths.manifestPath, manifest, "manifest.json");
@@ -3900,7 +4449,7 @@ export class ProjectFileRepository {
         workingState,
         "initial Working Copy state",
       );
-      await atomicWriteProjectJson(stagingRoot, paths.runtimePath, runtime, "runtime-state.json");
+      await writeRuntimeState(stagingRoot, paths.runtimePath, runtime);
       await atomicWriteProjectJson(stagingRoot, path.join(paths.recoveryRoot, "import.json"), {
         schemaVersion: PROJECT_FILE_SCHEMA_VERSION,
         kind: "import",
@@ -4033,9 +4582,9 @@ export class ProjectFileRepository {
       project,
     );
     const runtime = assertRuntime(
-      await readJsonFile(paths.runtimePath, "runtime-state.json", {
+      normalizeRuntimeDisplayAnchors(await readJsonFile(paths.runtimePath, "runtime-state.json", {
         projectRootPath: root,
-      }),
+      })),
       project,
       manifest,
     );
@@ -4243,6 +4792,132 @@ export class ProjectFileRepository {
     }
   }
 
+  #registeredProjectCatalogFallback(projectId, record, availability) {
+    return {
+      projectId,
+      documentId: null,
+      projectName: path.basename(record.registeredProjectRootPath),
+      registeredProjectRootPath: record.registeredProjectRootPath,
+      activeWorkingCopyId: null,
+      activeSourcePath: null,
+      currentBasedOnVersionId: null,
+      latestOfficialVersionId: null,
+      hasPendingCandidate: false,
+      availability,
+    };
+  }
+
+  async #activeRegisteredWorkingCopy(loaded) {
+    const workingCopyIdValue = loaded.runtime.activeWorkingCopyId;
+    if (!workingCopyIdValue) {
+      throw new ProjectFileRepositoryError(
+        "ACTIVE_WORKING_COPY_REQUIRED",
+        "The registered project has no active Working Copy to open.",
+      );
+    }
+    const workingCopy = loaded.manifest.workingCopies.find(
+      (entry) => entry.workingCopyId === workingCopyIdValue,
+    );
+    if (!workingCopy) {
+      throw new ProjectFileRepositoryError(
+        "ACTIVE_WORKING_COPY_UNKNOWN",
+        "The registered project active Working Copy is unknown.",
+      );
+    }
+    return workingCopy;
+  }
+
+  async #listRegisteredProjects() {
+    const registry = await this.#readRegistry();
+    const rows = [];
+    for (const [projectId, record] of Object.entries(registry.projects)) {
+      try {
+        // Catalog availability must use the same controlled Working Copy
+        // recovery as an actual open. Reading the old manifest path first
+        // would mark a safely Finder-renamed HTML unavailable before its
+        // stable file identity can rebind the manifest.
+        const opened = await this.#resolveRegisteredProjectOpenTarget({ projectId });
+        const loaded = await this.#loadRegisteredProject({ projectId });
+        const workingCopy = loaded.manifest.workingCopies.find(
+          (entry) => entry.workingCopyId === opened.target.workingCopyId,
+        );
+        if (!workingCopy) {
+          throw new ProjectFileRepositoryError(
+            "ACTIVE_WORKING_COPY_UNKNOWN",
+            "The registered project active Working Copy is unknown.",
+          );
+        }
+        const state = await readJsonFile(
+          workingCopyStatePath(loaded.paths, workingCopy),
+          "active Working Copy state",
+          { projectRootPath: loaded.paths.projectRootPath },
+        );
+        assertWorkingCopyState(state, loaded, workingCopy);
+        rows.push({
+          projectId: loaded.project.projectId,
+          documentId: loaded.project.documentId,
+          projectName: path.basename(loaded.paths.projectRootPath),
+          registeredProjectRootPath: loaded.paths.projectRootPath,
+          activeWorkingCopyId: workingCopy.workingCopyId,
+          activeSourcePath: opened.target.exactSourcePath,
+          currentBasedOnVersionId: workingCopy.basedOnVersionId,
+          latestOfficialVersionId: loaded.manifest.latestOfficialVersionId,
+          hasPendingCandidate: loaded.runtime.activeCandidateId !== null,
+          availability: "ready",
+        });
+      } catch (cause) {
+        rows.push(this.#registeredProjectCatalogFallback(
+          projectId,
+          record,
+          registeredProjectCatalogAvailability(cause),
+        ));
+      }
+    }
+    return rows.sort((left, right) => (
+      left.projectName.localeCompare(right.projectName, "zh-CN")
+      || left.projectId.localeCompare(right.projectId)
+    ));
+  }
+
+  async #resolveRegisteredProjectOpenTarget({ projectId }) {
+    const id = assertId(projectId, PROJECT_ID, "projectId");
+    const loaded = await this.#loadRegisteredProject({ projectId: id });
+    const workingCopy = await this.#activeRegisteredWorkingCopy(loaded);
+    // This bootstrap identity intentionally contains no source bytes. The
+    // shared mutation resolver reads them only after it has recovered a
+    // supported same-root Finder rename by the Working Copy file identity.
+    const resolved = await this.#resolveMutationTarget({
+      projectId: loaded.project.projectId,
+      documentId: loaded.project.documentId,
+      projectRootPath: loaded.paths.projectRootPath,
+      workingCopyId: workingCopy.workingCopyId,
+    });
+    // The returned source bytes and digest form the Repository side of the
+    // exact Project/Document/OpenTarget/HTML/Hash tuple; Desktop repeats it
+    // before publishing a new Session.
+    const version = resolved.manifest.versions.find(
+      (entry) => entry.versionId === resolved.workingCopy.versionId,
+    );
+    if (!version) {
+      throw new ProjectFileRepositoryError(
+        "WORKING_COPY_VERSION_UNKNOWN",
+        "The active Working Copy references an unknown Version.",
+      );
+    }
+    return {
+      target: publicOpenTarget({
+        project: resolved.project,
+        projectRootPath: resolved.paths.projectRootPath,
+        targetKind: "working-copy",
+        workingCopy: resolved.workingCopy,
+        version,
+        exactSourcePath: resolved.exactSourcePath,
+        sourceSha256: resolved.source.sha256,
+      }),
+      sourceSha256: resolved.source.sha256,
+    };
+  }
+
   async #resolveOpenTarget({ sourcePath }) {
     const exactSourcePath = normalizedPath(sourcePath);
     htmlExtension(exactSourcePath);
@@ -4284,6 +4959,47 @@ export class ProjectFileRepository {
       "manifest.json",
     );
     return true;
+  }
+
+  async #resolveWorkingCopySource(loaded, workingCopy, label = "Working Copy") {
+    let exactSourcePath = workingCopySourcePath(loaded.paths, workingCopy);
+    let sourceInformation = await regularInformation(exactSourcePath, label, {
+      projectRootPath: loaded.paths.projectRootPath,
+    });
+    if (!sourceInformation) {
+      const recoveredPath = await this.#findWorkingCopyByFileIdentity(
+        loaded.paths.projectRootPath,
+        workingCopy.fileIdentity,
+      );
+      if (!recoveredPath) {
+        throw new ProjectFileRepositoryError(
+          "WORKING_COPY_UNAVAILABLE",
+          "The Working Copy HTML is temporarily unavailable; PageRoot did not write outside its registered path.",
+          { workingCopyId: workingCopy.workingCopyId },
+        );
+      }
+      exactSourcePath = recoveredPath;
+      sourceInformation = await regularInformation(exactSourcePath, label, {
+        projectRootPath: loaded.paths.projectRootPath,
+      });
+      if (!sourceInformation) {
+        throw new ProjectFileRepositoryError(
+          "WORKING_COPY_UNAVAILABLE",
+          "The Working Copy HTML disappeared while PageRoot was recovering its registered path.",
+          { workingCopyId: workingCopy.workingCopyId },
+        );
+      }
+    }
+    await this.#rebindWorkingCopyPath(
+      loaded,
+      workingCopy,
+      exactSourcePath,
+      sourceInformation,
+    );
+    const source = await readHtmlFile(exactSourcePath, label, {
+      projectRootPath: loaded.paths.projectRootPath,
+    });
+    return { exactSourcePath, source };
   }
 
   async #targetForExactPath(loaded, exactSourcePath, source) {
@@ -4383,44 +5099,8 @@ export class ProjectFileRepository {
     if (!workingCopy) {
       throw new ProjectFileRepositoryError("WORKING_COPY_NOT_FOUND", "The active Working Copy no longer exists.");
     }
-    let exactSourcePath = workingCopySourcePath(loaded.paths, workingCopy);
-    let sourceInformation = await regularInformation(exactSourcePath, "Working Copy", {
-      projectRootPath: loaded.paths.projectRootPath,
-    });
-    if (!sourceInformation) {
-      const recoveredPath = await this.#findWorkingCopyByFileIdentity(
-        loaded.paths.projectRootPath,
-        workingCopy.fileIdentity,
-      );
-      if (!recoveredPath) {
-        throw new ProjectFileRepositoryError(
-          "WORKING_COPY_UNAVAILABLE",
-          "The active HTML is temporarily unavailable; PageRoot did not write outside its registered path.",
-          { workingCopyId: workingCopy.workingCopyId },
-        );
-      }
-      exactSourcePath = recoveredPath;
-      sourceInformation = await regularInformation(exactSourcePath, "Working Copy", {
-        projectRootPath: loaded.paths.projectRootPath,
-      });
-      await this.#rebindWorkingCopyPath(
-        loaded,
-        workingCopy,
-        exactSourcePath,
-        sourceInformation,
-      );
-    } else {
-      await this.#rebindWorkingCopyPath(
-        loaded,
-        workingCopy,
-        exactSourcePath,
-        sourceInformation,
-      );
-    }
-    const source = await readHtmlFile(exactSourcePath, "Working Copy", {
-      projectRootPath: loaded.paths.projectRootPath,
-    });
-    return { ...loaded, workingCopy, exactSourcePath, source };
+    const source = await this.#resolveWorkingCopySource(loaded, workingCopy);
+    return { ...loaded, workingCopy, ...source };
   }
 
   async #findWorkingCopyByFileIdentity(projectRootPath, identity) {
@@ -4739,6 +5419,7 @@ export class ProjectFileRepository {
       loaded.manifest,
       "manifest.json",
     );
+    await this.#writeRuntime(loaded);
     await this.#hit("save-manifest-written", { transactionPath });
     transaction = {
       ...(await readJsonFile(transactionPath, "save transaction", {
@@ -4976,12 +5657,8 @@ export class ProjectFileRepository {
       candidateRecordSha256,
     };
     loaded.runtime.activeCandidateId = id;
-    await atomicWriteProjectJson(
-      loaded.paths.projectRootPath,
-      loaded.paths.runtimePath,
-      loaded.runtime,
-      "runtime-state.json",
-    );
+    loaded.runtime.lastAiTask = null;
+    await this.#writeRuntime(loaded);
     await this.#hit("candidate-prepared", { requestId: request, candidateId: id });
     return await this.#readCandidateForLoaded(loaded, id);
   }
@@ -5118,12 +5795,7 @@ export class ProjectFileRepository {
     // the old sealed digest.
     loaded.runtime.activeRequest = null;
     loaded.runtime.activeCandidateId = null;
-    await atomicWriteProjectJson(
-      loaded.paths.projectRootPath,
-      loaded.paths.runtimePath,
-      loaded.runtime,
-      "runtime-state.json",
-    );
+    await this.#writeRuntime(loaded);
     current.candidate.status = "rejected";
     current.candidate.rejectedAt = nowIso(this.#clock);
     await atomicWriteProjectJson(
@@ -5904,12 +6576,7 @@ export class ProjectFileRepository {
       loaded.runtime.activeRequest = null;
       loaded.runtime.activeCandidateId = null;
       loaded.runtime.historyActivation = null;
-      await atomicWriteProjectJson(
-        loaded.paths.projectRootPath,
-        loaded.paths.runtimePath,
-        loaded.runtime,
-        "runtime-state.json",
-      );
+      await this.#writeRuntime(loaded);
       transaction.state = "completed";
       transaction.completedAt = nowIso(this.#clock);
       await atomicWriteProjectJson(

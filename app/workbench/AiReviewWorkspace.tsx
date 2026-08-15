@@ -439,7 +439,7 @@ export default function AiReviewWorkspace({
   onExit,
   onReturnBefore,
   onAccept,
-  onRevealCandidateHtml,
+  onRevealAiTask,
 }: {
   fileName: string;
   beforeLabel: string;
@@ -453,7 +453,7 @@ export default function AiReviewWorkspace({
   onExit: () => void;
   onReturnBefore: () => void;
   onAccept: () => void;
-  onRevealCandidateHtml: () => void;
+  onRevealAiTask: () => void;
 }) {
   const fileTitle = fileName.replace(/\.(?:html?|xhtml)$/iu, "") || fileName;
   const hydrated = useSyncExternalStore(subscribeHydration, () => true, () => false);
@@ -1906,7 +1906,7 @@ export default function AiReviewWorkspace({
                 ? <>
                     <span>确认后不会采用这次 AI 返回的 {afterLabel}。</span>
                     <span>将继续使用 {beforeLabel}（AI 修改前）为基线重新修改。</span>
-                    <button type="button" onClick={onRevealCandidateHtml}>AI 返回的 HTML 已自动保留，点击在 Finder 中显示。</button>
+                    <button type="button" onClick={onRevealAiTask}>AI 返回的 HTML 已自动保留，点击在 Finder 中查看 AI任务。</button>
                   </>
                 : <>
                     <span>确认后将采纳 AI 修改后的{afterLabel}为正式版本。</span>

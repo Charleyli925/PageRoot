@@ -480,6 +480,101 @@ test("startup publishes the initial active project without fencing a nonexistent
   assert.equal(harness.projectSession.context.projectId, `project_${slug(A_PATH)}`);
 });
 
+test("a startup catalog read cannot delay or supersede a newer local open", async (t) => {
+  let resolveActive;
+  let catalogRequested = false;
+  const harness = createHarness({
+    initialProject: false,
+    projectOpen: {
+      getActive: () => new Promise((resolve) => {
+        resolveActive = resolve;
+      }),
+      listRegistered: () => {
+        catalogRequested = true;
+        return new Promise(() => {});
+      },
+      async openLocal() {
+        return {
+          name: "B",
+          sourcePath: B_PATH,
+          html: B_HTML,
+          sha256: sha256(B_HTML),
+        };
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+
+  const startup = harness.workflow.openProject({ kind: "startup" });
+  await waitFor(() => Boolean(resolveActive), "startup active read did not begin");
+  const local = await harness.workflow.openProject({ kind: "local" });
+  assert.equal(local.status, "succeeded");
+
+  resolveActive({
+    name: "A",
+    sourcePath: A_PATH,
+    html: A_HTML,
+    sha256: sha256(A_HTML),
+  });
+  let startupDeadline;
+  const startupOutcome = await Promise.race([
+    startup,
+    new Promise((_, reject) => {
+      startupDeadline = setTimeout(
+        () => reject(new Error("startup waited for the read-only project catalog")),
+        500,
+      );
+    }),
+  ]).finally(() => clearTimeout(startupDeadline));
+  assert.equal(startupOutcome.status, "succeeded");
+  assert.equal(startupOutcome.value.opened, false);
+  await waitFor(
+    () => harness.projectSession.context?.sourcePath === B_PATH
+      && !harness.workflow.projectHydrating,
+    "newer local open did not remain current after startup settled",
+  );
+  assert.equal(catalogRequested, true);
+  assert.equal(harness.documentSession.html, B_HTML);
+});
+
+test("a Registry project open routes only its projectId through the desktop authority", async (t) => {
+  const openedProjectIds = [];
+  const harness = createHarness({
+    projectOpen: {
+      async openRegistered(projectId) {
+        openedProjectIds.push(projectId);
+        return {
+          name: "B",
+          sourcePath: B_PATH,
+          html: B_HTML,
+          sha256: sha256(B_HTML),
+        };
+      },
+      async listRegistered() {
+        return [{ projectId: "project_catalog_b", availability: "ready" }];
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+
+  const catalog = await harness.workflow.refreshRegisteredProjects();
+  assert.equal(catalog.status, "succeeded");
+  assert.deepEqual(openedProjectIds, []);
+
+  const opening = await harness.workflow.openProject({
+    kind: "registered",
+    projectId: "project_catalog_b",
+  });
+  assert.equal(opening.status, "succeeded");
+  await waitFor(
+    () => harness.projectSession.context?.sourcePath === B_PATH
+      && !harness.workflow.projectHydrating,
+    "registered project did not finish its safe transition",
+  );
+  assert.deepEqual(openedProjectIds, ["project_catalog_b"]);
+  assert.equal(harness.documentSession.html, B_HTML);
+});
+
 test("a v4 Working Copy transition uses the exact managed desktop activation", async (t) => {
   const calls = [];
   const managedTarget = {
