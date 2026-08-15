@@ -134,6 +134,11 @@ export function versionsFromWorkspace(
         supplements: [],
         validationReview: null,
         candidateAssessment: null,
+        workingCopyId: raw.workingCopyId ? String(raw.workingCopyId) : null,
+        differsFromBase: raw.differsFromBase === true,
+        saveState: ["saved", "saving", "failed"].includes(String(raw.saveState || ""))
+          ? String(raw.saveState) as Version["saveState"]
+          : null,
       }];
     }
     if (!isRecord(raw.manifest) || raw.manifest.schemaVersion !== "3.0.0") {
@@ -180,6 +185,11 @@ export function versionsFromWorkspace(
       candidateAssessment: candidateAssessmentFromRecord(
         raw.candidateAssessment,
       ),
+      workingCopyId: raw.workingCopyId ? String(raw.workingCopyId) : null,
+      differsFromBase: raw.differsFromBase === true,
+      saveState: ["saved", "saving", "failed"].includes(String(raw.saveState || ""))
+        ? String(raw.saveState) as Version["saveState"]
+        : null,
     }];
   }).sort((a, b) => b.ordinal - a.ordinal);
 }

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { access, readFile, writeFile } from "node:fs/promises";
+import { access, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
@@ -80,6 +80,71 @@ test("project-file PR1 import switches to V1 before the queued save and leaves e
     "utf8",
   ));
   assert.deepEqual(manifest.versions.map((version) => version.versionId), ["ver_0001"]);
+});
+
+test("the Bridge exposes every Registry member and opens one only by projectId", async (t) => {
+  const environment = await createBridgeTestEnvironment(t, {
+    prefix: "pageroot-project-file-catalog-",
+  });
+  const aPath = await environment.createSource("A.html", html("A"));
+  const bPath = await environment.createSource("B.html", html("B"));
+  const bridge = await environment.start({
+    HTML_AI_PROJECT_FILES_ROOT: join(environment.root, "project-files"),
+  });
+
+  const ensure = async (sourcePath) => {
+    const preview = await bridge.requestJson(
+      `/workspace?sourcePath=${encodeURIComponent(sourcePath)}&projectStorageVersion=4.0.0`,
+    );
+    return postJson(bridge, "/project/ensure", {
+      sourcePath,
+      expectedSourceSha256: preview.body.currentHtmlSha256,
+      projectStorageVersion: "4.0.0",
+    });
+  };
+  const [a, b] = await Promise.all([ensure(aPath), ensure(bPath)]);
+  assert.equal(a.response.status, 200, JSON.stringify(a.body));
+  assert.equal(b.response.status, 200, JSON.stringify(b.body));
+
+  const catalog = await bridge.requestJson("/registered-projects");
+  assert.equal(catalog.response.status, 200, JSON.stringify(catalog.body));
+  assert.equal(catalog.body.ok, true);
+  assert.deepEqual(
+    new Set(catalog.body.projects.map((project) => project.projectId)),
+    new Set([a.body.projectId, b.body.projectId]),
+  );
+  assert.equal(catalog.body.projects.every((project) => project.availability === "ready"), true);
+
+  const opened = await bridge.requestJson(
+    `/registered-project/open?projectId=${encodeURIComponent(b.body.projectId)}`,
+  );
+  assert.equal(opened.response.status, 200, JSON.stringify(opened.body));
+  assert.equal(opened.body.projectId, b.body.projectId);
+  assert.equal(opened.body.documentId, b.body.documentId);
+  assert.equal(opened.body.openTarget.workingCopyId, "work_ver_0001");
+  assert.equal(opened.body.sourcePath, b.body.sourcePath);
+  assert.equal(opened.body.sourceSha256, opened.body.openTarget.sourceSha256);
+
+  const finderRenamedWorkingCopy = join(
+    b.body.projectRoot,
+    "B Finder renamed.html",
+  );
+  await rename(b.body.sourcePath, finderRenamedWorkingCopy);
+  const reboundCatalog = await bridge.requestJson("/registered-projects");
+  assert.equal(reboundCatalog.response.status, 200, JSON.stringify(reboundCatalog.body));
+  const reboundRow = reboundCatalog.body.projects.find(
+    (project) => project.projectId === b.body.projectId,
+  );
+  assert.equal(reboundRow?.availability, "ready");
+  assert.equal(reboundRow?.activeSourcePath, finderRenamedWorkingCopy);
+  const reboundOpen = await bridge.requestJson(
+    `/registered-project/open?projectId=${encodeURIComponent(b.body.projectId)}`,
+  );
+  assert.equal(reboundOpen.response.status, 200, JSON.stringify(reboundOpen.body));
+  assert.equal(reboundOpen.body.sourcePath, finderRenamedWorkingCopy);
+
+  const invalid = await bridge.requestJson("/registered-project/open?projectId=project_not_valid");
+  assert.equal(invalid.response.status, 400);
 });
 
 test("Bridge migrates an exact legacy V4 Registry before workspace GET and first ensureProject", async (t) => {
@@ -224,6 +289,7 @@ test("Bridge continues a historical Version through one durable Working Copy rec
 
   const repository = new ProjectFileRepository({ projectsRoot });
   let active = (await repository.workspace({ sourcePath: ensured.body.sourcePath })).target;
+  let v2WorkingCopyPath = null;
   const v2Html = html("immutable V2");
   for (let ordinal = 2; ordinal <= 6; ordinal += 1) {
     const candidate = await repository.createCandidate({
@@ -237,8 +303,15 @@ test("Bridge continues a historical Version through one durable Working Copy rec
       target: active,
       candidateId: candidate.candidate.candidateId,
     })).target;
+    if (ordinal === 2) v2WorkingCopyPath = active.exactSourcePath;
   }
   assert.equal(active.versionId, "ver_0006");
+
+  const finderRenamedV2 = join(
+    ensured.body.projectRoot,
+    "history-bridge-V2 Finder renamed.html",
+  );
+  await rename(v2WorkingCopyPath, finderRenamedV2);
 
   const viewed = await bridge.requestJson(
     `/version-file?sourcePath=${encodeURIComponent(active.exactSourcePath)}&versionId=ver_0002`,
@@ -246,6 +319,21 @@ test("Bridge continues a historical Version through one durable Working Copy rec
   assert.equal(viewed.response.status, 200, JSON.stringify(viewed.body));
   assert.equal(viewed.body.readOnly, true);
   assert.equal(viewed.body.content, v2Html);
+  assert.equal(viewed.body.projectFileSchemaVersion, "4.0.0");
+  assert.equal(viewed.body.workingCopyId, "work_ver_0002");
+  assert.equal(viewed.body.visibleWorkingCopyPath, finderRenamedV2);
+  assert.equal(viewed.body.visibleWorkingCopyPath.includes("/.pageroot/"), false);
+  assert.match(viewed.body.workingCopySha256, /^sha256:[a-f0-9]{64}$/u);
+  const reboundManifest = JSON.parse(await readFile(
+    join(ensured.body.projectRoot, ".pageroot", "manifest.json"),
+    "utf8",
+  ));
+  assert.equal(
+    reboundManifest.workingCopies.find(
+      (entry) => entry.workingCopyId === "work_ver_0002",
+    )?.sourceRelativePath,
+    "history-bridge-V2 Finder renamed.html",
+  );
   const beforeContinue = await bridge.requestJson(
     `/workspace?sourcePath=${encodeURIComponent(active.exactSourcePath)}`,
   );
@@ -388,6 +476,15 @@ test("project-file Request becomes a Candidate on finalization and a Version onl
   });
   assert.equal(request.response.status, 201, JSON.stringify(request.body));
   assert.equal(request.body.activeRun.status, "processing");
+  const processingAiTask = await bridge.requestJson(
+    `/ai-task?sourcePath=${encodeURIComponent(ensured.body.sourcePath)}`,
+  );
+  assert.equal(processingAiTask.response.status, 200, JSON.stringify(processingAiTask.body));
+  assert.equal(processingAiTask.body.projectFileSchemaVersion, "4.0.0");
+  assert.equal(processingAiTask.body.requestId, request.body.requestId);
+  assert.equal(processingAiTask.body.candidatePath, null);
+  assert.match(processingAiTask.body.aiTaskRelativePath, /^AI任务\//u);
+  assert.equal(processingAiTask.body.aiTaskPath.includes("/.pageroot/"), false);
   const prompt = await readFile(
     join(ensured.body.projectRoot, ".pageroot", "requests", request.body.requestId, "PROMPT.md"),
     "utf8",
@@ -415,6 +512,12 @@ test("project-file Request becomes a Candidate on finalization and a Version onl
   assert.equal(ready.body.status, "ready-to-open");
   assert.equal(ready.body.versionId, "ver_0002");
   assert.ok(["ready", "attention"].includes(ready.body.candidateAssessment.status));
+  const readyAiTask = await bridge.requestJson(
+    `/ai-task?sourcePath=${encodeURIComponent(ensured.body.sourcePath)}`,
+  );
+  assert.equal(readyAiTask.response.status, 200, JSON.stringify(readyAiTask.body));
+  assert.match(readyAiTask.body.candidatePath, /-V2-待审阅\.html$/u);
+  assert.equal(await readFile(readyAiTask.body.candidatePath, "utf8"), candidateHtml);
   const controlRoot = join(ensured.body.projectRoot, ".pageroot");
   const candidateRecordPath = join(
     controlRoot,
@@ -472,6 +575,99 @@ test("project-file Request becomes a Candidate on finalization and a Version onl
   assert.deepEqual(afterAdoption.versions.map((version) => version.versionId), ["ver_0001", "ver_0002"]);
 });
 
+test("Bridge reveals a sealed terminal AI task after no-change", async (t) => {
+  const environment = await createBridgeTestEnvironment(t, {
+    prefix: "pageroot-project-file-no-change-ai-task-",
+  });
+  const original = html("no-change source");
+  const sourcePath = await environment.createSource("no-change.html", original);
+  let bridge = await environment.start({
+    HTML_AI_PROJECT_FILES_ROOT: join(environment.root, "project-files"),
+  });
+  const preview = await bridge.requestJson(
+    `/workspace?sourcePath=${encodeURIComponent(sourcePath)}`,
+  );
+  const ensured = await postJson(bridge, "/project/ensure", {
+    sourcePath,
+    expectedSourceSha256: preview.body.currentHtmlSha256,
+    projectStorageVersion: "4.0.0",
+  });
+  const request = await postJson(bridge, "/request", {
+    projectId: ensured.body.projectId,
+    documentId: ensured.body.documentId,
+    sourcePath: ensured.body.sourcePath,
+    expectedSourceSha256: ensured.body.sourceSha256,
+    freezeCutoffRevision: 0,
+    summary: "不修改当前 HTML",
+    comments: [],
+    changeEvents: [],
+  });
+  assert.equal(request.response.status, 201, JSON.stringify(request.body));
+  await writeFile(
+    join(
+      ensured.body.projectRoot,
+      ".pageroot",
+      ...request.body.outputRelativePath.split("/"),
+    ),
+    original,
+    "utf8",
+  );
+  await finalizeProjectFileAttempt({
+    projectRoot: ensured.body.projectRoot,
+    requestId: request.body.requestId,
+    attemptId: request.body.attemptId,
+  });
+
+  const status = await bridge.requestJson(
+    `/status?sourcePath=${encodeURIComponent(ensured.body.sourcePath)}&requestId=${encodeURIComponent(request.body.requestId)}&attemptId=${encodeURIComponent(request.body.attemptId)}`,
+  );
+  assert.equal(status.response.status, 200, JSON.stringify(status.body));
+  assert.equal(status.body.status, "no-change");
+  await bridge.stop();
+  bridge = await environment.start({
+    HTML_AI_PROJECT_FILES_ROOT: join(environment.root, "project-files"),
+  });
+  const reopened = await bridge.requestJson(
+    `/workspace?sourcePath=${encodeURIComponent(ensured.body.sourcePath)}`,
+  );
+  assert.equal(reopened.response.status, 200, JSON.stringify(reopened.body));
+  assert.equal(reopened.body.activeRun, null);
+  assert.equal(reopened.body.runtimeState.activeRun, null);
+  assert.equal(reopened.body.recentRunOutcome?.status, "no-change");
+  assert.equal(reopened.body.recentRunOutcome?.requestId, request.body.requestId);
+  assert.equal(reopened.body.recentRunOutcome?.attemptId, request.body.attemptId);
+  assert.equal(reopened.body.recentRunOutcome?.completionObserved, true);
+  const terminalAiTask = await bridge.requestJson(
+    `/ai-task?sourcePath=${encodeURIComponent(ensured.body.sourcePath)}`,
+  );
+  assert.equal(terminalAiTask.response.status, 200, JSON.stringify(terminalAiTask.body));
+  assert.equal(terminalAiTask.body.status, "no-change");
+  assert.equal(terminalAiTask.body.requestId, request.body.requestId);
+  assert.equal(terminalAiTask.body.candidatePath, null);
+  assert.equal(
+    await readFile(join(terminalAiTask.body.aiTaskPath, "PROMPT.md"), "utf8"),
+    await readFile(
+      join(ensured.body.projectRoot, ".pageroot", "requests", request.body.requestId, "PROMPT.md"),
+      "utf8",
+    ),
+  );
+  const requestPath = join(
+    ensured.body.projectRoot,
+    ".pageroot",
+    "requests",
+    request.body.requestId,
+    "request.json",
+  );
+  const tamperedRequest = JSON.parse(await readFile(requestPath, "utf8"));
+  tamperedRequest.completedAt = "2000-01-01T00:00:00.000Z";
+  await writeFile(requestPath, JSON.stringify(tamperedRequest), "utf8");
+  const tamperRejected = await bridge.requestJson(
+    `/ai-task?sourcePath=${encodeURIComponent(ensured.body.sourcePath)}`,
+  );
+  assert.equal(tamperRejected.response.status, 409, JSON.stringify(tamperRejected.body));
+  assert.equal(tamperRejected.body.error.code, "REQUEST_RUNTIME_ANCHOR_MISMATCH");
+});
+
 test("a finalized but unusable Candidate remains an error and never creates a Version", async (t) => {
   const environment = await createBridgeTestEnvironment(t, {
     prefix: "pageroot-project-file-validation-",
@@ -521,6 +717,14 @@ test("a finalized but unusable Candidate remains an error and never creates a Ve
   assert.equal(status.response.status, 200, JSON.stringify(status.body));
   assert.equal(status.body.status, "error");
   assert.equal(status.body.request.error.code, "CANDIDATE_UNUSABLE");
+  const terminalAiTask = await bridge.requestJson(
+    `/ai-task?sourcePath=${encodeURIComponent(ensured.body.sourcePath)}`,
+  );
+  assert.equal(terminalAiTask.response.status, 200, JSON.stringify(terminalAiTask.body));
+  assert.equal(terminalAiTask.body.status, "error");
+  assert.equal(terminalAiTask.body.requestId, request.body.requestId);
+  assert.equal(terminalAiTask.body.candidatePath, null);
+  assert.equal(terminalAiTask.body.aiTaskPath.includes("/.pageroot/"), false);
   const manifest = JSON.parse(await readFile(
     join(ensured.body.projectRoot, ".pageroot", "manifest.json"),
     "utf8",

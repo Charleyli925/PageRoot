@@ -826,6 +826,10 @@ export class WorkspaceController {
     return this.#requireProjectWorkflow().refreshRecents();
   }
 
+  refreshRegisteredProjects() {
+    return this.#requireProjectWorkflow().refreshRegisteredProjects();
+  }
+
   openProjectRules(input) {
     return this.#requireProjectRulesWorkflow().open(input);
   }

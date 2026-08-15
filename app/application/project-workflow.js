@@ -575,7 +575,12 @@ export class ProjectWorkflow {
     }
   }
 
-  async openProject({ kind = "local", sourcePath, fromDeferred = false } = {}) {
+  async openProject({
+    kind = "local",
+    sourcePath,
+    projectId,
+    fromDeferred = false,
+  } = {}) {
     if (this.#snapshot.close.phase === "ready") {
       return blocked(
         "PROJECT_OPEN_CLOSE_COMMITTED",
@@ -594,7 +599,11 @@ export class ProjectWorkflow {
         );
       }
       if (switchOutcome.status !== "succeeded") {
-        this.#pendingOpen = Object.freeze({ kind, sourcePath: sourcePath || null });
+        this.#pendingOpen = Object.freeze({
+          kind,
+          sourcePath: sourcePath || null,
+          projectId: projectId || null,
+        });
         this.#setOpen("deferred", null, kind);
         return switchOutcome;
       }
@@ -609,7 +618,9 @@ export class ProjectWorkflow {
       }
       const project = kind === "recent"
         ? await this.#projectOpenPort.openRecent(String(sourcePath || ""))
-        : await this.#projectOpenPort.openLocal();
+        : kind === "registered"
+          ? await this.#openRegisteredProject(String(projectId || ""))
+          : await this.#projectOpenPort.openLocal();
       if (!project) return succeeded({ operationId, opened: false });
       if (this.#snapshot.close.phase === "ready") {
         return blocked(
@@ -635,6 +646,8 @@ export class ProjectWorkflow {
         cause,
         kind === "recent"
           ? "文件可能已移动；可重新选择当前位置，或移除旧记录。"
+          : kind === "registered"
+            ? "项目目录或工作文件在打开前发生变化；当前项目仍保持不变。"
           : "文件可能已移动或暂时不可读；可重新选择。",
       );
       this.#emit({
@@ -1066,6 +1079,25 @@ export class ProjectWorkflow {
     }
   }
 
+  async refreshRegisteredProjects() {
+    if (typeof this.#projectOpenPort.listRegistered !== "function") {
+      return succeeded({ projects: [] });
+    }
+    try {
+      const projects = await this.#projectOpenPort.listRegistered();
+      this.#emit({ type: "project-catalog-loaded", projects });
+      return succeeded({ projects });
+    } catch (cause) {
+      const reason = projectErrorMessage(
+        this.#codecs,
+        cause,
+        "项目目录暂时无法读取。",
+      );
+      this.#emit({ type: "project-catalog-failed", reason });
+      return rejected("PROJECT_CATALOG_REJECTED", reason);
+    }
+  }
+
   renameSource({ stem, deadlineAt } = {}) {
     if (this.#disposed) {
       return Promise.resolve(blocked(
@@ -1278,15 +1310,20 @@ export class ProjectWorkflow {
       this.#commentWorkflow.resetForProjectTransition();
       this.#projectRulesWorkflow.resetForProjectTransition();
 
-      const [recents, hydrated] = await Promise.all([
+      const [recents, catalog, hydrated] = await Promise.all([
         this.refreshRecents(),
+        this.refreshRegisteredProjects(),
         this.refreshWorkspace({
           sourcePath: nextSourcePath,
           epoch: transitioned.epoch,
           fromDeferred: true,
         }),
       ]);
-      if (recents.status !== "succeeded" || hydrated.status !== "succeeded") {
+      if (
+        recents.status !== "succeeded"
+        || catalog.status !== "succeeded"
+        || hydrated.status !== "succeeded"
+      ) {
         return unknown(
           operationId,
           "文件名已经修改，但项目状态还没有完成刷新。",
@@ -1347,6 +1384,13 @@ export class ProjectWorkflow {
         }
       }
     }
+  }
+
+  async #openRegisteredProject(projectId) {
+    if (typeof this.#projectOpenPort.openRegistered !== "function") {
+      throw new Error("当前运行环境不能安全打开项目目录中的 HTML。");
+    }
+    return this.#projectOpenPort.openRegistered(projectId);
   }
 
   #registerDrainObligations() {
@@ -1517,6 +1561,7 @@ export class ProjectWorkflow {
 
   async #openStartup() {
     const operationId = this.#nextOpenOperation();
+    const startupOpenSequence = this.#openSequence;
     this.#setOpen("opening", operationId, null);
     try {
       const [activeResult, recentResult] = await Promise.allSettled([
@@ -1538,6 +1583,10 @@ export class ProjectWorkflow {
           ),
         });
       }
+      // Catalog membership is a read-only projection. It must not delay the
+      // startup OpenTarget or leave a late startup result able to replace a
+      // user-selected local file.
+      void this.refreshRegisteredProjects();
       const active = activeResult.status === "fulfilled" ? activeResult.value : null;
       if (activeResult.status === "rejected") {
         this.#emit({
@@ -1551,7 +1600,14 @@ export class ProjectWorkflow {
       } else {
         this.#emit({ type: "project-startup-ready" });
       }
-      void this.#recentRunsPort.hydrate(recent, active?.sourcePath || null);
+      const startupIsCurrent = this.#openSequence === startupOpenSequence;
+      void this.#recentRunsPort.hydrate(
+        recent,
+        startupIsCurrent ? active?.sourcePath || null : null,
+      );
+      if (!startupIsCurrent) {
+        return succeeded({ operationId, opened: false });
+      }
       if (active) {
         if (this.#snapshot.close.phase === "ready") {
           return blocked(
@@ -1577,7 +1633,9 @@ export class ProjectWorkflow {
         projectErrorMessage(this.#codecs, cause, "上次打开的 HTML 无法恢复。"),
       );
     } finally {
-      this.#setOpen("idle", null, null);
+      if (this.#snapshot.open.operationId === operationId) {
+        this.#setOpen("idle", null, null);
+      }
     }
   }
 
@@ -1642,6 +1700,7 @@ export class ProjectWorkflow {
       // workflow proves that the just-published project has no mutable work.
       void Promise.all([
         this.refreshRecents(),
+        this.refreshRegisteredProjects(),
         this.refreshWorkspace({
           sourcePath: project.sourcePath,
           epoch,
@@ -2493,6 +2552,7 @@ export class ProjectWorkflow {
       || await this.#hashPort.sha256(activatedProject.html) !== expectedSha256
     ) throw new Error("生成版本的路径、HTML 与 Hash 没有形成完整一致的候选。");
     void this.refreshRecents();
+    void this.refreshRegisteredProjects();
     return Object.freeze({
       previousSourcePath,
       nextSourcePath,

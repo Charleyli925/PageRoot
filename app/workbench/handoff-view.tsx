@@ -117,8 +117,8 @@ export function HandoffPanel({
   runBasisLabel,
   runSubmittedLabel,
   pendingRunOutcome,
-  canRevealRequestFolder,
-  onRevealRequestFolder,
+  canRevealAiTask,
+  onRevealAiTask,
 }: {
   activeRun: ActiveRun | null;
   terminalRun: boolean;
@@ -131,8 +131,8 @@ export function HandoffPanel({
   runBasisLabel: string;
   runSubmittedLabel: string;
   pendingRunOutcome: boolean;
-  canRevealRequestFolder: boolean;
-  onRevealRequestFolder: () => void;
+  canRevealAiTask: boolean;
+  onRevealAiTask: () => void;
 }) {
   const continuityNeedsReview =
     activeRun?.candidateAssessment?.status === "attention";
@@ -255,18 +255,18 @@ export function HandoffPanel({
                   </article>
                 ))}
               </div>
-              {activeRun.requestPath && canRevealRequestFolder ? (
+              {canRevealAiTask ? (
                 <button
                   className="handoff-folder-link finder-link"
                   type="button"
-                  onClick={onRevealRequestFolder}
+                  onClick={onRevealAiTask}
                 >
                   <FolderOpenIcon
                     aria-hidden="true"
                     size={18}
                     weight="duotone"
                   />
-                  <span>在 Finder 中查看本轮文件</span>
+                  <span>在 Finder 中查看 AI任务</span>
                   <CaretRightIcon aria-hidden="true" size={14} weight="bold" />
                 </button>
               ) : null}
@@ -346,13 +346,13 @@ export function HandoffFooter({
   resolvingConflict,
   checkingRun,
   terminalRun,
-  canRevealRequestFolder,
+  canRevealAiTask,
   onReviewReadyResult,
   onActivateReadyResult,
   onSend,
   onCancel,
   onResolveConflict,
-  onRevealRequestFolder,
+  onRevealAiTask,
   onReturnToEditing,
   onRequestEnd,
   onPreviewSentHtml,
@@ -368,13 +368,13 @@ export function HandoffFooter({
   resolvingConflict: boolean;
   checkingRun: boolean;
   terminalRun: boolean;
-  canRevealRequestFolder: boolean;
+  canRevealAiTask: boolean;
   onReviewReadyResult: () => void;
   onActivateReadyResult: () => void;
   onSend: () => void;
   onCancel: () => void;
   onResolveConflict: (choice: "adopt-ai" | "keep-external") => void;
-  onRevealRequestFolder: () => void;
+  onRevealAiTask: () => void;
   onReturnToEditing: () => void;
   onRequestEnd: () => void;
   onPreviewSentHtml: () => void;
@@ -463,11 +463,11 @@ export function HandoffFooter({
         <button
           className="secondary-action"
           type="button"
-          disabled={!activeRun.requestPath || !canRevealRequestFolder}
-          onClick={onRevealRequestFolder}
+          disabled={!canRevealAiTask}
+          onClick={onRevealAiTask}
         >
           <FolderOpenIcon aria-hidden="true" size={18} weight="duotone" />
-          查看本轮文件
+          查看 AI任务
         </button>
       ) : terminalRun ? (
         <button

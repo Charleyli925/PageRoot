@@ -990,6 +990,7 @@ function projectFileHttpError(cause) {
       "HISTORY_ACTIVATION_RECEIPT_MISMATCH",
       "REQUEST_RUNTIME_ANCHOR_MISMATCH",
       "CANCELLATION_AUTHORITY_MISMATCH",
+      "AI_TASK_NOT_ACTIVE",
     ]).has(code)
       ? 409
       : new Set([
@@ -1017,6 +1018,43 @@ function projectFileHttpError(cause) {
         ? 422
         : 500;
   return new HttpError(status, code, cause.message, cause.details);
+}
+
+function registeredProjectId(value) {
+  const projectId = String(value || "");
+  if (!/^project_[a-f0-9]{16,64}$/u.test(projectId)) {
+    throw new HttpError(400, "INVALID_PROJECT_ID", "projectId is invalid.");
+  }
+  return projectId;
+}
+
+async function registeredProjectCatalog() {
+  try {
+    return {
+      ok: true,
+      projects: await projectFileRepository.listRegisteredProjects(),
+    };
+  } catch (cause) {
+    throw projectFileHttpError(cause);
+  }
+}
+
+async function registeredProjectOpen(projectId) {
+  try {
+    const resolved = await projectFileRepository.resolveRegisteredProjectOpenTarget({
+      projectId: registeredProjectId(projectId),
+    });
+    return {
+      ok: true,
+      projectId: resolved.target.projectId,
+      documentId: resolved.target.documentId,
+      sourcePath: resolved.target.exactSourcePath,
+      sourceSha256: resolved.sourceSha256,
+      openTarget: resolved.target,
+    };
+  } catch (cause) {
+    throw projectFileHttpError(cause);
+  }
 }
 
 async function projectFileWorkspaceForSource(sourcePath) {
@@ -1065,16 +1103,24 @@ function projectFileTargetFromBody(body = {}) {
 }
 
 function projectFileVersionRows(workspace) {
-  return workspace.manifest.versions.map((version) => ({
-    schemaVersion: "4.0.0",
-    ...version,
-    sourceType: version.sourceCandidateId ? "internal-ai" : "initial",
-    versionLabel: `V${version.ordinal}`,
-    generatedAt: version.createdAt,
-    requestId: version.sourceRequestId,
-    attemptId: null,
-    committed: true,
-  }));
+  return workspace.manifest.versions.map((version) => {
+    const workingCopy = Array.isArray(workspace.workingCopies)
+      ? workspace.workingCopies.find((entry) => entry.versionId === version.versionId)
+      : null;
+    return {
+      schemaVersion: "4.0.0",
+      ...version,
+      sourceType: version.sourceCandidateId ? "internal-ai" : "initial",
+      versionLabel: `V${version.ordinal}`,
+      generatedAt: version.createdAt,
+      requestId: version.sourceRequestId,
+      attemptId: null,
+      committed: true,
+      workingCopyId: workingCopy?.workingCopyId || null,
+      differsFromBase: workingCopy?.differsFromBase === true,
+      saveState: workingCopy?.saveState || null,
+    };
+  });
 }
 
 function projectFileDraftState(workspace) {
@@ -1093,10 +1139,20 @@ function projectFileDraftState(workspace) {
 }
 
 function projectFileActiveRun(workspace, target) {
-  const request = workspace.activeRequest;
+  return projectFileRunForRequest({
+    request: workspace.activeRequest,
+    candidate: workspace.activeCandidate,
+    target,
+  });
+}
+
+function projectFileRunForRequest({ request, candidate = null, target }) {
   if (!request || typeof request !== "object") return null;
-  const candidate = workspace.activeCandidate;
   const candidateReady = request.status === "candidate-ready" && candidate;
+  const terminalStatus = ["no-change", "error"].includes(request.status)
+    ? request.status
+    : null;
+  const status = candidateReady ? "ready-to-open" : terminalStatus || "processing";
   const sourcePath = target.exactSourcePath;
   const requestPath = path.join(
     target.projectRootPath,
@@ -1154,7 +1210,7 @@ function projectFileActiveRun(workspace, target) {
     documentId: request.documentId,
     requestId: request.requestId,
     attemptId: request.attemptId,
-    status: candidateReady ? "ready-to-open" : "processing",
+    status,
     sourcePath,
     requestPath,
     attemptPath,
@@ -1185,8 +1241,18 @@ function projectFileActiveRun(workspace, target) {
       candidateOutputSha256: candidate.outputSha256,
       candidateAssessment: candidate.assessment,
       readyPayload,
+    } : terminalStatus ? {
+      completionObserved: true,
+      ...(request.error ? { error: request.error } : {}),
     } : {}),
   };
+}
+
+function projectFileTerminalRunOutcome(workspace, target) {
+  return projectFileRunForRequest({
+    request: workspace.terminalRequest,
+    target,
+  });
 }
 
 function projectFileBaseWorkspaceState(workspace) {
@@ -1201,6 +1267,7 @@ function projectFileBaseWorkspaceState(workspace) {
   ) ? currentVersion.versionId : null;
   const activeDraft = projectFileDraftState(workspace);
   const activeRun = projectFileActiveRun(workspace, target);
+  const recentRunOutcome = projectFileTerminalRunOutcome(workspace, target);
   const runtime = {
     lifecycleState: activeRun?.status || "ready",
     activeRun,
@@ -1244,7 +1311,7 @@ function projectFileBaseWorkspaceState(workspace) {
     },
     runtimeState: runtime,
     activeRun,
-    recentRunOutcome: null,
+    recentRunOutcome,
     activeDraft,
     workingCopyRecovered: workspace.workingCopyRecovered === true,
     recoveryIdentity: null,
@@ -1690,10 +1757,18 @@ async function projectFileVersionFile(sourcePath, versionId) {
       target: projectFileTargetFromWorkspace(workspace),
       versionId,
     });
+    const visibleWorkingCopy = file.kind === "version"
+      ? await projectFileRepository.resolveVersionWorkingCopy({
+        target: projectFileTargetFromWorkspace(workspace),
+        versionId,
+      })
+      : null;
     return {
       ok: true,
+      projectFileSchemaVersion: "4.0.0",
       projectId: workspace.project.projectId,
       documentId: workspace.project.documentId,
+      projectRootPath: workspace.target.projectRootPath,
       versionId: file.version.versionId,
       content: file.content,
       sha256: file.sha256,
@@ -1703,7 +1778,40 @@ async function projectFileVersionFile(sourcePath, versionId) {
         ? file.candidate.outputRelativePath
         : file.version.snapshotRelativePath,
       readOnly: true,
+      ...(visibleWorkingCopy ? {
+        workingCopyId: visibleWorkingCopy.workingCopyId,
+        visibleWorkingCopyPath: visibleWorkingCopy.workingCopyPath,
+        workingCopySha256: visibleWorkingCopy.sourceSha256,
+      } : {}),
       ...(file.kind === "candidate" ? { candidate: file.candidate } : {}),
+    };
+  } catch (cause) {
+    throw projectFileHttpError(cause);
+  }
+}
+
+async function projectFileAiTask(sourcePath) {
+  const workspace = await projectFileWorkspaceForSource(sourcePath);
+  if (!workspace) return null;
+  try {
+    const projection = await projectFileRepository.materializeCurrentAiTaskProjection({
+      target: projectFileTargetFromWorkspace(workspace),
+    });
+    return {
+      ok: true,
+      projectFileSchemaVersion: "4.0.0",
+      projectId: projection.projectId,
+      documentId: projection.documentId,
+      sourcePath: workspace.target.exactSourcePath,
+      projectRootPath: projection.projectRootPath,
+      requestId: projection.requestId,
+      attemptId: projection.attemptId,
+      candidateId: projection.candidateId,
+      status: projection.status,
+      aiTaskPath: projection.taskPath,
+      aiTaskRelativePath: projection.taskRelativePath,
+      candidatePath: projection.candidatePath,
+      candidateSha256: projection.candidateSha256,
     };
   } catch (cause) {
     throw projectFileHttpError(cause);
@@ -9619,6 +9727,18 @@ async function route(request, response) {
     );
     return;
   }
+  if (request.method === "GET" && url.pathname === "/registered-projects") {
+    sendJson(response, 200, await registeredProjectCatalog());
+    return;
+  }
+  if (request.method === "GET" && url.pathname === "/registered-project/open") {
+    sendJson(
+      response,
+      200,
+      await registeredProjectOpen(url.searchParams.get("projectId")),
+    );
+    return;
+  }
   if (request.method === "POST" && url.pathname === "/project/ensure") {
     const body = await readBody(request);
     sendJson(response, 200, await ensureProject(body));
@@ -9744,6 +9864,16 @@ async function route(request, response) {
       await versionFile(
         requiredSourcePath(url.searchParams.get("sourcePath")),
         url.searchParams.get("versionId"),
+      ),
+    );
+    return;
+  }
+  if (request.method === "GET" && url.pathname === "/ai-task") {
+    sendJson(
+      response,
+      200,
+      await projectFileAiTask(
+        requiredSourcePath(url.searchParams.get("sourcePath")),
       ),
     );
     return;

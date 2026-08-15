@@ -6,6 +6,7 @@ import {
   readFileSync,
   realpathSync,
   readdirSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -3689,7 +3690,7 @@ test("opening a pre-v4 project imports its HTML as a new v4 V1", async () => {
 test("a no-change result returns to editing and remains reopenable", async () => {
   test.setTimeout(120_000);
   const fixture = createSourceFixture("no-change-recovery.html");
-  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  let launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
   try {
     const request = await addCommentAndSubmit(
       launched.page,
@@ -3713,9 +3714,13 @@ test("a no-change result returns to editing and remains reopenable", async () =>
       .toHaveCount(0);
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
 
-    await launched.page.getByRole("button", { name: "返回编辑" }).click();
+    await closePageRootGracefully(launched.electronApp, launched.page);
+    launched = await launchPageRoot({
+      activeSourcePath: request.sourcePath,
+      isolatedUserData: launched.isolatedUserData,
+    });
     await expect(launched.page.getByRole("button", { name: "上轮处理" }))
-      .toBeVisible();
+      .toBeVisible({ timeout: 30_000 });
     await expect(launched.page.getByRole("button", { name: /复制AI任务Prompt/u }))
       .toBeEnabled();
     await launched.page.getByRole("button", { name: "上轮处理" }).click();
@@ -3723,6 +3728,12 @@ test("a no-change result returns to editing and remains reopenable", async () =>
       "这次没有产生有效变化",
       { exact: true },
     ).filter({ visible: true }).first()).toBeVisible();
+    const aiTask = await launched.page.evaluate((sourcePath) => (
+      window.htmlAIProjects?.revealAiTask({ sourcePath })
+    ), request.sourcePath);
+    expect(aiTask?.aiTaskPath).toMatch(/\/AI任务\//u);
+    expect(readFileSync(path.join(aiTask.aiTaskPath, "PROMPT.md"), "utf8"))
+      .toContain("只把这个列表项改为");
   } finally {
     await stopPageRoot(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);
@@ -3776,9 +3787,19 @@ test("returning from review restores the editable pre-AI version and preserves t
       .toBeVisible();
     await expect(dialog.getByText(/将继续使用 版本 \d+（AI 修改前）为基线重新修改。/u))
       .toBeVisible();
-    await expect(dialog.getByRole("button", {
-      name: "AI 返回的 HTML 已自动保留，点击在 Finder 中显示。",
-    })).toBeVisible();
+    const projectRoot = managedProjectRootForId(
+      launched.workspace,
+      request.changeRequest.projectId,
+    );
+    expect(projectRoot).toBeTruthy();
+    const aiTasksRoot = path.join(projectRoot, "AI任务");
+    rmSync(aiTasksRoot, { recursive: true, force: true });
+    const revealCandidateTask = dialog.getByRole("button", {
+      name: "AI 返回的 HTML 已自动保留，点击在 Finder 中查看 AI任务。",
+    });
+    await expect(revealCandidateTask).toBeVisible();
+    await revealCandidateTask.click();
+    await expect.poll(() => existsSync(aiTasksRoot), { timeout: 30_000 }).toBe(true);
     const [returnBackground, continueBackground] = await Promise.all([
       dialog.getByRole("button", { name: "返回修改前版本" })
         .evaluate((element) => getComputedStyle(element).backgroundColor),
@@ -3800,11 +3821,6 @@ test("returning from review restores the editable pre-AI version and preserves t
       () => window.htmlAIProjects?.getActiveProject(),
     );
     expect(restored.sourcePath).toBe(realpathSync(workingCopyPath));
-    const projectRoot = managedProjectRootForId(
-      launched.workspace,
-      request.changeRequest.projectId,
-    );
-    expect(projectRoot).toBeTruthy();
     const runtime = JSON.parse(readFileSync(path.join(
       projectRoot,
       ".pageroot",

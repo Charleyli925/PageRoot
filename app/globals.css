@@ -4550,6 +4550,28 @@ body {
   font-size: 8px;
 }
 
+.version-lineage-facts,
+.version-lineage-detail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.version-lineage-facts em,
+.version-lineage-detail span {
+  padding: 2px 5px;
+  border-radius: 999px;
+  background: #efeff9;
+  color: #56507f;
+  font-size: 8px;
+  font-style: normal;
+  line-height: 1.2;
+}
+
+.version-lineage-detail {
+  margin-top: -4px;
+}
+
 .version-row time {
   white-space: nowrap;
 }
@@ -5476,6 +5498,26 @@ body {
   max-width: 220px;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.file-version-label.project-status-facts {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: min(520px, 46vw);
+  overflow-x: auto;
+  text-overflow: clip;
+  scrollbar-width: none;
+}
+
+.file-version-label.project-status-facts::-webkit-scrollbar {
+  display: none;
+}
+
+.file-version-label.project-status-facts > span + span::before {
+  margin-right: 4px;
+  color: #a1a3ac;
+  content: "·";
 }
 
 .save-status {

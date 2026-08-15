@@ -145,3 +145,107 @@ export function formatProjectTimestamp(value: unknown): string {
 export function projectMarkdown(name: string): string {
   return `# ${fileStem(name)}\n\n- 入口文件：${name}\n- 默认延续当前页面的视觉语言、组件样式和响应式行为。\n- 在这里补充页面用途、长期风格和需要跨轮次持续遵循的约束。\n`;
 }
+
+export type ProjectStatusProjectionInput = Readonly<{
+  currentBasedOnVersionId: string | null;
+  currentExactVersionId: string | null;
+  latestVersionId: string | null;
+  viewMode: "current" | "history";
+  viewingVersionId: string | null;
+  persistState: "idle" | "preview-dirty" | "queued" | "writing" | "failed" | "conflict";
+  hasLocalModifications: boolean;
+  candidate: Readonly<{
+    versionId: string | null;
+    status: string | null;
+  }> | null;
+}>;
+
+export type ProjectStatusProjection = Readonly<{
+  facts: ReadonlyArray<string>;
+  label: string;
+}>;
+
+export type CurrentWorkingCopyPresentation = Readonly<{
+  differsFromBase: boolean;
+  saveState: "saved" | "saving" | "failed" | null;
+}>;
+
+/**
+ * Version rows are hydrated snapshots, but the current Working Copy's exact
+ * Version identity is live authority owned by DocumentWorkflow. Keep the row
+ * in step with a completed autosave instead of waiting for the next workspace
+ * hydration to report that its bytes diverge from the base Version.
+ */
+export function currentWorkingCopyPresentation({
+  currentBasedOnVersionId,
+  currentExactVersionId,
+  persistState,
+  persistedDiffersFromBase,
+  persistedSaveState,
+}: {
+  currentBasedOnVersionId: string | null;
+  currentExactVersionId: string | null;
+  persistState: ProjectStatusProjectionInput["persistState"];
+  persistedDiffersFromBase: boolean;
+  persistedSaveState: "saved" | "saving" | "failed" | null | undefined;
+}): CurrentWorkingCopyPresentation {
+  const saveState = persistState === "writing" || persistState === "queued"
+    ? "saving"
+    : persistState === "failed" || persistState === "conflict"
+      ? "failed"
+      : persistedSaveState || null;
+  const differsFromBase = currentExactVersionId
+    ? false
+    : persistState === "idle" && currentBasedOnVersionId
+      ? true
+      : persistedDiffersFromBase;
+  return Object.freeze({
+    differsFromBase,
+    saveState,
+  });
+}
+
+function compactStatusVersionLabel(versionId: string): string {
+  const match = versionId.match(/(\d+)$/);
+  return match ? `V${Number(match[1])}` : versionId;
+}
+
+export function projectStatusProjection(
+  input: ProjectStatusProjectionInput,
+): ProjectStatusProjection {
+  const facts: string[] = [];
+  if (input.viewMode === "history") {
+    facts.push(`正在查看 ${compactStatusVersionLabel(input.viewingVersionId || "历史版本")}`);
+    facts.push("只读浏览");
+  } else {
+    if (input.currentBasedOnVersionId) {
+      facts.push(`基于 ${compactStatusVersionLabel(input.currentBasedOnVersionId)}`);
+    }
+    if (input.latestVersionId) {
+      facts.push(`项目最新 ${compactStatusVersionLabel(input.latestVersionId)}`);
+    }
+    if (input.persistState === "writing" || input.persistState === "queued") {
+      facts.push("本地修改正在保存");
+    } else if (input.persistState === "failed" || input.persistState === "conflict") {
+      facts.push("本地修改保存失败");
+    } else if (input.hasLocalModifications) {
+      facts.push("本地修改已保存");
+    } else if (input.currentExactVersionId) {
+      facts.push(`当前与 ${compactStatusVersionLabel(input.currentExactVersionId)} 一致`);
+    }
+  }
+  const candidateVersion = input.candidate?.versionId
+    ? `候选 ${compactStatusVersionLabel(input.candidate.versionId)}`
+    : "候选版本";
+  if (input.candidate?.status === "ready-to-open") {
+    facts.push(`${candidateVersion} 待审阅`);
+  } else if (input.candidate?.status === "processing") {
+    facts.push(`${candidateVersion} 生成中`);
+  } else if (input.candidate?.status === "rejected") {
+    facts.push(`${candidateVersion} 已拒绝`);
+  }
+  return Object.freeze({
+    facts: Object.freeze(facts),
+    label: facts.join(" · "),
+  });
+}

@@ -23,6 +23,20 @@ export type RecentProject = {
   lastOpenedAt: number;
 };
 
+export type RegisteredProject = {
+  projectId: string;
+  documentId: string | null;
+  projectName: string;
+  registeredProjectRootPath: string;
+  activeWorkingCopyId: string | null;
+  activeSourcePath: string | null;
+  currentBasedOnVersionId: string | null;
+  latestOfficialVersionId: string | null;
+  hasPendingCandidate: boolean;
+  availability: "ready" | "unavailable" | "invalid";
+  lastOpenedAt: number | null;
+};
+
 export type DesktopProjectsApi = {
   getActiveProject: () => Promise<HtmlProject | null>;
   openHtml: () => Promise<HtmlProject | null>;
@@ -45,10 +59,14 @@ export type DesktopProjectsApi = {
     replayed: boolean;
     workspaceRelinked: boolean;
   }>;
-  revealRequestFolder?: (payload: {
+  revealAiTask?: (payload: {
     sourcePath: string;
-    requestPath: string;
-  }) => Promise<{ requestPath: string }>;
+  }) => Promise<{
+    sourcePath: string;
+    aiTaskPath: string;
+    requestId: string;
+    candidateId: string;
+  }>;
   revealVersionFile?: (payload: {
     sourcePath: string;
     versionId: string;
@@ -83,6 +101,8 @@ export type DesktopProjectsApi = {
   }) => Promise<{ path: string; name: string } | null>;
   readHtml?: (sourcePath: string) => Promise<HtmlProject>;
   listRecentProjects: () => Promise<RecentProject[]>;
+  listRegisteredProjects?: () => Promise<RegisteredProject[]>;
+  openRegisteredProject?: (projectId: string) => Promise<HtmlProject>;
   openRecent: (sourcePath: string) => Promise<HtmlProject>;
   forgetRecent?: (sourcePath: string) => Promise<{ sourcePath: string }>;
   acceptExternalOpen?: (requestId: string) => Promise<HtmlProject>;
@@ -249,6 +269,9 @@ export type Version = {
   supplements: UserSupplementRecord[];
   validationReview: ValidationReview | null;
   candidateAssessment: CandidateAssessment | null;
+  workingCopyId?: string | null;
+  differsFromBase?: boolean;
+  saveState?: "saved" | "saving" | "failed" | null;
 };
 
 export type UserSupplementAttachment = {

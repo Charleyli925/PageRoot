@@ -185,6 +185,7 @@ import {
 } from "./workbench/workbench-header-shell";
 import {
   activeRunOperationKey,
+  currentWorkingCopyPresentation,
   fileExtension,
   fileStem,
   folderFromSourcePath,
@@ -192,6 +193,7 @@ import {
   formatTime,
   localFileNameFromSourcePath,
   projectMarkdown,
+  projectStatusProjection,
   safeVersionLabel,
   sameLocalSourcePath,
   workspaceFileLabel,
@@ -225,6 +227,7 @@ import type {
   PersistState,
   PrepareCloseDetail,
   ProjectContext,
+  RegisteredProject,
   RecentProject,
   StartupIssue,
   Toast,
@@ -612,6 +615,8 @@ export default function Workbench() {
   const [fileRenameError, setFileRenameError] = useState("");
   const [recentProjects, setRecentProjects] = useState<RecentProject[]>([]);
   const [recentProjectsError, setRecentProjectsError] = useState("");
+  const [registeredProjects, setRegisteredProjects] = useState<RegisteredProject[]>([]);
+  const [registeredProjectsError, setRegisteredProjectsError] = useState("");
   const [selection, setSelection] = useState<HtmlCanvasSelection | null>(null);
   const commentSnapshot = (
     workspaceControllerSnapshot?.commentSession as CommentSessionSnapshot<
@@ -693,6 +698,7 @@ export default function Workbench() {
   const latestVersionId = versionSnapshot.latestVersionId;
   const currentBasedOnVersionId =
     versionSnapshot.currentBasedOnVersionId;
+  const currentExactVersionId = versionSnapshot.currentExactVersionId;
   const viewMode = versionSnapshot.viewMode;
   const [canvasMode, setCanvasMode] = useState<CanvasMode>("edit");
   const editRuntimeSnapshot = workspaceControllerSnapshot?.editRuntime ?? null;
@@ -976,6 +982,12 @@ export default function Workbench() {
             },
             getActive: async () => window.htmlAIProjects?.getActiveProject() ?? null,
             listRecent: async () => window.htmlAIProjects?.listRecentProjects() ?? [],
+            listRegistered: async () => window.htmlAIProjects?.listRegisteredProjects?.() ?? [],
+            openRegistered: async (registeredProjectId: string) => {
+              const open = window.htmlAIProjects?.openRegisteredProject;
+              if (!open) throw new Error("当前 PageRoot 版本缺少项目目录打开通道。");
+              return open(registeredProjectId);
+            },
             acceptExternal: async (requestId: string) => {
               const accept = window.htmlAIProjects?.acceptExternalOpen;
               if (!accept) throw new Error("当前 PageRoot 版本缺少外部文件打开通道。");
@@ -1521,6 +1533,21 @@ export default function Workbench() {
       if (projectEvent.type === "project-recents-failed") {
         setRecentProjectsError(String(
           projectEvent.reason || "最近打开记录暂时无法读取。",
+        ));
+        return;
+      }
+      if (projectEvent.type === "project-catalog-loaded") {
+        setRegisteredProjects(
+          Array.isArray(projectEvent.projects)
+            ? projectEvent.projects as RegisteredProject[]
+            : [],
+        );
+        setRegisteredProjectsError("");
+        return;
+      }
+      if (projectEvent.type === "project-catalog-failed") {
+        setRegisteredProjectsError(String(
+          projectEvent.reason || "项目目录暂时无法读取。",
         ));
         return;
       }
@@ -2874,6 +2901,15 @@ export default function Workbench() {
     await workspaceController.refreshRecentProjects();
   }, [workspaceController]);
 
+  const refreshRegisteredProjects = useCallback(async () => {
+    if (!workspaceController) return;
+    await workspaceController.refreshRegisteredProjects();
+  }, [workspaceController]);
+
+  useEffect(() => {
+    void refreshRegisteredProjects();
+  }, [refreshRegisteredProjects]);
+
   const forgetRecentProject = useCallback(async (recentSourcePath: string) => {
     const api = window.htmlAIProjects;
     if (!api?.forgetRecent) return;
@@ -3310,6 +3346,14 @@ export default function Workbench() {
     await workspaceController.openProject({
       kind: recentPath ? "recent" : "local",
       sourcePath: recentPath || null,
+    });
+  }, [workspaceController]);
+
+  const openRegisteredProject = useCallback(async (registeredProjectId: string) => {
+    if (!workspaceController) return;
+    await workspaceController.openProject({
+      kind: "registered",
+      projectId: registeredProjectId,
     });
   }, [workspaceController]);
 
@@ -5082,29 +5126,25 @@ export default function Workbench() {
     return true;
   }, [projectRulesSnapshot.open, workspaceController]);
 
-  const revealActiveRunInFinder = useCallback(async () => {
+  const revealAiTaskInFinder = useCallback(async () => {
     const activeSourcePath = currentProjectSessionSnapshot().sourcePath;
-    const requestPath = activeRun?.requestPath;
-    const revealRequestFolder = window.htmlAIProjects?.revealRequestFolder;
-    if (!activeSourcePath || !requestPath || !revealRequestFolder) return;
+    const revealAiTask = window.htmlAIProjects?.revealAiTask;
+    if (!activeSourcePath || !revealAiTask) return;
     await runLocalUserAction({
-      kind: "reveal-request-folder",
-      invoke: () => revealRequestFolder({
-        sourcePath: activeSourcePath,
-        requestPath,
-      }),
+      kind: "reveal-ai-task",
+      invoke: () => revealAiTask({ sourcePath: activeSourcePath }),
       onFailure: (cause: unknown) => setToast({
-        title: "本轮文件暂时无法打开",
+        title: "AI任务暂时无法打开",
         message: productErrorMessage(
           cause,
           "本轮任务仍在处理面板中，可以重新尝试。",
         ),
         tone: "warning",
         disposition: "background-result",
-        dedupeKey: "reveal-request-folder",
+        dedupeKey: "reveal-ai-task",
       }),
     });
-  }, [activeRun?.requestPath, currentProjectSessionSnapshot]);
+  }, [currentProjectSessionSnapshot]);
 
   const revealVersionInFinder = useCallback(async (version: Pick<Version, "id">) => {
     const activeSourcePath = currentProjectSessionSnapshot().sourcePath;
@@ -5805,10 +5845,61 @@ export default function Workbench() {
           : sourcePath
             ? safeSaveLabel
             : persistLabel;
+  const currentWorkingCopy = versions.find(
+    (version) => version.id === currentBasedOnVersionId,
+  ) || null;
+  const currentWorkingCopyStatus = currentWorkingCopy
+    ? currentWorkingCopyPresentation({
+      currentBasedOnVersionId,
+      currentExactVersionId,
+      persistState,
+      persistedDiffersFromBase: currentWorkingCopy.differsFromBase === true,
+      persistedSaveState: currentWorkingCopy.saveState,
+    })
+    : null;
+  const displayedVersions = currentWorkingCopy && currentWorkingCopyStatus
+    ? versions.map((version) => (
+      version.id === currentWorkingCopy.id
+        ? { ...version, ...currentWorkingCopyStatus }
+        : version
+    ))
+    : versions;
+  const projectStatus = projectStatusProjection({
+    currentBasedOnVersionId,
+    currentExactVersionId,
+    latestVersionId,
+    viewMode,
+    viewingVersionId,
+    persistState,
+    hasLocalModifications: currentWorkingCopyStatus?.differsFromBase === true,
+    candidate: activeRun
+      ? {
+        versionId: activeRun.candidateVersionId || null,
+        status: activeRun.status,
+      }
+      : null,
+  });
+  const headerStatusFacts = browserPreviewOnly
+    ? ["浏览器预览 · 只读"]
+    : projectStatus.facts.length
+      ? projectStatus.facts
+      : [latestVersion?.label || "尚未创建正式版本"];
   const canShowCurrentFileInFolder = Boolean(
     sourcePath
     && typeof window !== "undefined"
     && window.htmlAIProjects?.showInFolder,
+  );
+  const canRevealAiTask = Boolean(
+    activeRun
+    && activeRun.requestId !== "pending"
+    && activeRun.requestPath
+    && typeof window !== "undefined"
+    && window.htmlAIProjects?.revealAiTask,
+  );
+  const canOpenProjectRootInFolder = Boolean(
+    projectRecordsPath
+    && workspaceController
+    && typeof window !== "undefined",
   );
   const canOpenCurrentHtmlInDefaultBrowser = Boolean(
     sourcePath
@@ -6361,12 +6452,7 @@ export default function Workbench() {
           reviewed: true,
         });
       }}
-      onRevealCandidateHtml={() => {
-        const candidateVersionId = activeRun?.candidateVersionId;
-        if (candidateVersionId) {
-          void revealVersionInFinder({ id: candidateVersionId });
-        }
-      }}
+      onRevealAiTask={() => void revealAiTaskInFinder()}
     />
   ) : null;
 
@@ -6545,18 +6631,22 @@ export default function Workbench() {
               ) : null}
             </div>
             <span className="file-meta">
-              <span className="file-version-label">
-                {browserPreviewOnly
-                  ? "浏览器预览 · 只读"
-                  : viewMode === "history"
-                  ? `${viewingVersion?.label || "历史版本"} · 只读`
-                  : activeRun?.candidateVersionLabel && runInProgress
-                    ? `${activeRun.candidateVersionLabel} · 本轮处理中`
-                    : currentBasedOnVersionId
-                      ? safeVersionLabel(currentBasedOnVersionId)
-                      : latestVersion?.label || "版本 1"}
+              <span className="file-version-label project-status-facts">
+                {headerStatusFacts.map((fact) => (
+                  <span key={fact}>{fact}</span>
+                ))}
               </span>
-              {canShowCurrentFileInFolder ? (
+              {canOpenProjectRootInFolder ? (
+                <button
+                  className="window-file-folder-action"
+                  type="button"
+                  aria-label="在 Finder 中打开当前项目文件夹"
+                  title="在 Finder 中打开经验证的项目文件夹"
+                  onClick={() => void showProjectRecordsInFolder()}
+                >
+                  在文件夹中打开
+                </button>
+              ) : canShowCurrentFileInFolder ? (
                 <button
                   className="window-file-folder-action"
                   type="button"
@@ -7806,12 +7896,13 @@ export default function Workbench() {
                 <div className="drawer-empty">首次编辑或发送给 AI 后，会建立版本 1。</div>
               ) : (
                 <div className="version-list">
-                  {versions.map((version) => (
+                  {displayedVersions.map((version) => (
                     <HistoryVersionItem
                       key={version.id}
                       version={version}
                       expanded={expandedVersionId === version.id}
                       current={version.id === latestVersionId}
+                      editingBase={version.id === currentBasedOnVersionId}
                       viewing={viewingVersionId === version.id}
                       viewDisabled={
                         runInProgress
@@ -8008,12 +8099,76 @@ export default function Workbench() {
                     </em>
                   </span>
                   <div className="current-project-actions">
-                    {sourcePath && typeof window !== "undefined" && window.htmlAIProjects?.showInFolder ? (
+                    {canOpenProjectRootInFolder ? (
+                      <button type="button" onClick={() => void showProjectRecordsInFolder()}>Finder</button>
+                    ) : sourcePath && typeof window !== "undefined" && window.htmlAIProjects?.showInFolder ? (
                       <button type="button" onClick={() => void showProjectInFolder()}>Finder</button>
                     ) : null}
                     <button type="button" onClick={() => void exportCurrentHtml()}>
                       导出 HTML 副本
                     </button>
+                  </div>
+                </section>
+
+                <section className="recent-files registered-projects">
+                  <header>
+                    <strong>所有项目</strong>
+                    <small>{registeredProjects.length} 个已登记项目</small>
+                  </header>
+                  <div>
+                    {registeredProjectsError ? (
+                      <section className="recent-projects-error" role="status">
+                        <span>{registeredProjectsError}</span>
+                        <button type="button" onClick={() => void refreshRegisteredProjects()}>
+                          重试读取
+                        </button>
+                      </section>
+                    ) : null}
+                    {registeredProjects.length ? registeredProjects.map((project) => (
+                      <div
+                        className="recent-file-item"
+                        data-project-id={project.projectId}
+                        key={project.projectId}
+                      >
+                        <button
+                          className="recent-file-row"
+                          type="button"
+                          disabled={
+                            attachmentUploadCount > 0
+                            || project.availability !== "ready"
+                          }
+                          onClick={() => void openRegisteredProject(project.projectId)}
+                        >
+                          <FileHtmlIcon aria-hidden="true" size={19} weight="duotone" />
+                          <span>
+                            <strong>{project.projectName}</strong>
+                            <small>{project.registeredProjectRootPath}</small>
+                          </span>
+                          {project.lastOpenedAt ? (
+                            <time dateTime={new Date(project.lastOpenedAt).toISOString()}>
+                              {formatProjectTimestamp(project.lastOpenedAt)}
+                            </time>
+                          ) : null}
+                          <em
+                            className="recent-project-status"
+                            data-state={project.availability}
+                          >{
+                            project.projectId === projectId
+                              ? "当前"
+                              : project.availability === "ready"
+                                ? project.hasPendingCandidate
+                                  ? "候选待审阅"
+                                  : "可打开"
+                                : project.availability === "unavailable"
+                                  ? "暂不可用"
+                                  : "需要修复"
+                          }</em>
+                          <CaretRightIcon aria-hidden="true" size={14} weight="bold" />
+                        </button>
+                      </div>
+                    )) : !registeredProjectsError ? (
+                      <span className="recent-projects-empty">还没有已登记项目</span>
+                    ) : null}
                   </div>
                 </section>
 
@@ -8196,11 +8351,8 @@ export default function Workbench() {
               runBasisLabel={runBasisLabel}
               runSubmittedLabel={runSubmittedLabel}
               pendingRunOutcome={pendingRunOutcome}
-              canRevealRequestFolder={Boolean(
-                typeof window !== "undefined"
-                && window.htmlAIProjects?.revealRequestFolder,
-              )}
-              onRevealRequestFolder={() => void revealActiveRunInFinder()}
+              canRevealAiTask={canRevealAiTask}
+              onRevealAiTask={() => void revealAiTaskInFinder()}
             />
           ) : null}
         </div>
@@ -8217,10 +8369,7 @@ export default function Workbench() {
             resolvingConflict={resolvingConflict}
             checkingRun={checkingRun}
             terminalRun={terminalRun}
-            canRevealRequestFolder={Boolean(
-              typeof window !== "undefined"
-              && window.htmlAIProjects?.revealRequestFolder,
-            )}
+            canRevealAiTask={canRevealAiTask}
             onReviewReadyResult={() => void reviewReadyResult()}
             onActivateReadyResult={() => void activateReadyResult()}
             onSend={() => {
@@ -8229,7 +8378,7 @@ export default function Workbench() {
             }}
             onCancel={requestActiveRunEnd}
             onResolveConflict={(choice) => void resolveAiConflict(choice)}
-            onRevealRequestFolder={() => void revealActiveRunInFinder()}
+            onRevealAiTask={() => void revealAiTaskInFinder()}
             onReturnToEditing={returnToEditingFromTerminalRun}
             onRequestEnd={requestActiveRunEnd}
             onPreviewSentHtml={() => {

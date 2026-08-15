@@ -11,7 +11,7 @@
 
 本文描述目标产品，不描述 0.5.x 旧实现。若旧数据、旧说明或旧测试与本文冲突，以目标计划为准。
 
-> 版本、工作文件、AI 候选、项目可见目录和评论附件的下一阶段目标规则，以专项 PRD 为准。桌面打开路径只接受有效 v4 Project；v4 以前的项目状态不迁移、不恢复，也不作为读取回退，所选 HTML 会作为新外部来源建立新的 v4 V1。
+> 版本、工作文件、AI 候选、项目可见目录和评论附件的下一阶段目标规则，以专项 PRD 为准。桌面打开路径只接受有效 v4 Project；v4 以前的项目状态不迁移、不恢复，也不作为读取回退，所选 HTML 会作为新外部来源建立新的 v4 V1。PR 2B 已交付 Registry 全量项目目录、状态/Version 投影、历史 Working Copy Finder 定位与可删除的 `AI任务/` 派生展示；可见附件、附件 Finder 定位与回收区是 P3。
 
 ## 1. 产品结论
 
@@ -50,7 +50,7 @@ PageRoot 让用户在真实本地 HTML 上完成两类工作：
 - 不把临时文件、自动写回、事务恢复快照或恢复日志显示为 Version。
 - 不把文件名、页面标题或文件系统修改时间当作版本身份。
 - 不依赖固定时间窗口推断内部 AI 已完成。
-- 不维护一个会被反复覆盖、可能与项目当前路径分叉的含糊 `current/index.html`。有效 AI 成功创建按原用户文件名与版本命名的 `working/<原用户文件名>-V1.x.html` 并自动切换项目路径，不要求用户手动管理副本。
+- 不维护一个会被反复覆盖、可能与项目当前路径分叉的含糊 `current/index.html`。有效 Candidate 经用户采纳后才创建按当前受管文件主干与连续 `Vn` 命名的可见 Version Working Copy 并切换项目路径，不要求用户手动管理副本。
 - 不让预览 DOM 序列化结果成为保存事实源。
 - 不把运行时生成的节点、文字、Canvas 像素、表单值或滚动位置伪装成
   可编辑源码；编辑态完整视觉内容由源码内联 SVG、静态 HTML 或 PNG
@@ -64,7 +64,7 @@ PageRoot 让用户在真实本地 HTML 上完成两类工作：
 |---|---|
 | Project | 工作台中的独立项目，拥有自己的状态、锁、版本与 Request |
 | Document | 项目绑定的源 HTML 稳定身份，由 `documentId` 表示 |
-| Current HTML | `project.json.sourcePath` 当前指向、用户正在编辑的真实 HTML；AI 成功后可以切换到新的 `working/<原用户文件名>-V1.x.html` |
+| Current HTML | 当前受管、经完整 OpenTarget/Hash 验证的可见 Version Working Copy；采纳 Candidate 后才切换到下一份 |
 | Version | 初始 V1 或一次有效内部 AI 返回形成的不可变里程碑 |
 | Request | 一次冻结的用户意图和精确输入 |
 | Attempt | 内部 AI 对某个 Request 的一次执行 |
@@ -106,15 +106,18 @@ PageRoot 让用户在真实本地 HTML 上完成两类工作：
 
 - 打开本地 HTML。
 - 从最近项目切换。
+- 从 Registry 全量项目目录切换；Recent 只影响排序、最后打开时间和启动优先。
 - 在一个项目处理时打开或切换另一个项目。
 
 工作台不负责新建 HTML。每次打开本地 HTML 时，系统先验证它是否属于有效 v4 Project；有效项目按既有身份打开，其他任何状态（包括 v3 及更早状态、损坏 v4 记录和全新 HTML）立即以该 HTML 为外部来源建立新的 v4 Project 与初始 V1。导入不移动、覆盖或改写原始 HTML；v4 以前的项目状态不迁移、不恢复，也不作为读取回退。V1 是初始只读基线，不是一次手动保存。
 
-每个项目拥有稳定 `projectId`，每个源 HTML 拥有稳定 `documentId`。新建项目时，系统以 HTML 文件名（不含扩展名）建立 `displayName`，并生成固定的 `<displayName>__<YYYYMMDD-HHmmss>__<短 projectId>` 目录名。改文件名或移动路径时，产品应通过持久身份和受控重新绑定保持 Document 连续性，不能只依赖文件名匹配，也不重命名已经建立的项目记录目录。
+每个项目拥有稳定 `projectId`，每个源 HTML 拥有稳定 `documentId`。新建项目时，系统以 HTML 文件名（不含扩展名）建立 `displayName`，在配置项目目录下分配用户可读的 `<displayName>`（同名时 `<displayName> (2)`）根目录并由 Registry 登记。项目根同父目录改名可受控更新 Registry 路径与显示名；改受管 HTML 文件名只更新其 Working Copy 映射，不能只依赖文件名匹配，也不改变项目身份。
+
+项目目录成员资格与写入授权只来自 Registry。已登记但从未出现在 Recent 的项目必须显示；Recent 内未登记的外部 HTML 不得显示为项目，清除 Recent 不得把项目移出目录。点击目录行时 Renderer 只提交 `projectId`，Bridge/Repository 重验 Project、Document、Working Copy、OpenTarget、HTML 与 Hash，成功后才一次性发布现有 Session。
 
 桌面版在当前 HTML 已安全保存、项目空闲且没有冲突时，允许用户双击顶部文件名原位重命名。输入只包含主文件名，现有 `.html/.htm` 后缀和所在目录保持不变；`Enter` 或失焦提交，`Escape` 取消。同名文件不得覆盖。成功重命名只改变当前真实文件路径、桌面活动/最近记录和项目显示名，不改变 HTML 字节、`projectId`、`documentId`、Version 或历史。事务必须有稳定 operation ID、预期源 Hash 和崩溃恢复记录。
 
-初始 Version 的内部 ID 为 `ver_0001`，界面显示“版本 1”，可见工作文件为 `<原用户文件名>-V1.html`。用户采纳第一份有效 AI Candidate 后创建 `ver_0002`、显示“版本 2”，并生成 `<原用户文件名>-V2.html`；之后按同一 ordinal 递增。`input/base/index.html` 是冻结输入的机器名，不是用户文件名；AI 只能写入 Prompt 给出的固定 Attempt 输出 `requests/<requestId>/attempts/<attemptId>/output/candidate.html`。Candidate 在用户采纳前不是正式 Version，该文件路径和标签不得被用作用户界面的版本身份，也不得回写并破坏严格 v4 Project Schema。
+初始 Version 的内部 ID 为 `ver_0001`，界面显示 `V1`，可见工作文件为 `<原用户文件名>-V1.html`。用户采纳第一份有效 AI Candidate 后创建 `ver_0002`、显示 `V2`，并生成 `<原用户文件名>-V2.html`；之后按同一 ordinal 递增。`input/base/index.html` 是冻结输入的机器名，不是用户文件名；AI 只能写入 Prompt 给出的固定 Attempt 输出 `requests/<requestId>/attempts/<attemptId>/output/candidate.html`。Candidate 在用户采纳前不是正式 Version，该文件路径和标签不得被用作用户界面的版本身份，也不得回写并破坏严格 v4 Project Schema。
 
 ### 5.2 直接编辑与自动写回
 
@@ -170,7 +173,7 @@ Selection 重放 IME 最终文本。
 进入文字编辑；其安全行内子节点或唯一直属裸文字可按精确边界编辑。最终只能提交完整岛或纯文本片段，经受保护属性、原子、注释、
 重解析、范围和源码 Hash 校验；预览 DOM 永远不能整页序列化回源码。
 
-编辑画布必须明确提示“本地文本编辑会直接修改源文件并保存”。这里的“源文件”指项目当前指向的 HTML：首次打开时是用户原文件；AI 成功后是新的 `working/V1.x.html`。
+编辑画布必须明确提示“本地文本编辑会直接修改源文件并保存”。这里的“源文件”指项目当前指向的 HTML：首次打开后是当前受管 Version Working Copy；Candidate 被采纳后才切换到下一份可见 Working Copy。
 
 自动写回必须：
 
@@ -283,6 +286,8 @@ v3 TargetRef 保存 label、层级、selector/结构锚点、源码位置、源 
 
 任何准备步骤失败都必须安全回到 `editing`，保留原评论和本地内容。
 
+PR 2B 在 Request 已持久化后，才从冻结 Prompt 建立 `AI任务/<日期>-候选版本N/` 的派生展示：处理中只含 `PROMPT.md`，Candidate 通过 finalizer 后才加入 `*-Vn-待审阅.html`。它由收据驱动、排他/no-replace 写入，可删除、可重建，且从不参与 Candidate、审阅、Promotion 或版本身份判断。P2 不创建 `附件快照说明.md`、`附件与图片/`、`AI_RULES.md` 或 `PROJECT.md` 副本；可见附件体验是 P3。
+
 桌面端只把交接消息写入系统剪贴板；写入后必须逐字 readback 一致才报告“已复制”。产品不自动打开、控制或粘贴到 QoderWork。
 
 剪贴板状态必须按项目和本轮 Request/Attempt 隔离。“已复制”只表示剪贴板 readback 一致，不表示 Qoder 已收到。A 项目复制失败时，A 的 Request 保持冻结且可重试；B 项目的发送按钮、复制状态和后续 Request 不得被 A 的失败占用。
@@ -329,7 +334,7 @@ editing
 
 ### 5.8 内部 AI 输出与 finalizer
 
-每个新 Attempt 的唯一 HTML 输出是 PageRoot 冻结的 `output/<原用户文件名>-V1.x.html`。原用户文件名主干取冻结时的 `displayName`，去掉扩展名和已有 `-V1.x` 后缀后按安全文件名规范化；版本号取 `V1.<candidateVersionOrdinal - 1>`。Prompt 必须同时给出原用户文件名、版本号、精确文件名和绝对输出路径，AI 不得自行命名。已冻结的历史 Attempt 仍可使用 `output/index.html`，以便完成而不被升级中断。
+每个新 Attempt 的唯一 HTML 输出是 PageRoot 冻结的 `requests/<requestId>/attempts/<attemptId>/output/candidate.html`。Prompt 给出固定绝对输出路径，AI 不得自行命名。通过 finalizer 后，Repository 才能按已验证 Candidate 字节生成可见 `AI任务/` 派生 HTML；该名称不反向决定 Version 身份或正式工作文件命名。
 
 内部 AI 完成全部修改后必须执行 Prompt 中的完整 finalizer 命令。finalizer：
 
@@ -412,7 +417,7 @@ editing
 应用阶段：
 
 1. 再次核对源 Hash。
-2. 以 create-new/no-clobber 语义创建候选 `working/<原用户文件名>-V1.x.html`；同名不同内容时失败关闭，不覆盖。
+2. 以 create-new/no-clobber 语义创建候选的下一份可见 Version Working Copy；同名不同内容时失败关闭，不覆盖。
 3. 重读新工作文件并校验候选 Hash，标记 `source-applied`；提交前当前 HTML 保持不变。
 4. 原子发布到 `versions/<version-id>/`。
 5. 原子写入 `committed.json`，这是唯一提交点。
@@ -440,7 +445,7 @@ editing
 2. 将外部内容保存为恢复文件。
 3. 将事务 `expectedSourceHash` 更新为经确认的外部 Hash。
 4. 再次确认外部内容未继续变化。
-5. 创建新的 `working/<原用户文件名>-V1.x.html` 并继续两阶段事务；外部修改后的旧文件仍完整保留。
+5. 创建新的可见 Version Working Copy 并继续两阶段事务；外部修改后的旧文件仍完整保留。
 
 用户选择保留外部内容或取消：
 
@@ -469,7 +474,7 @@ editing
 用户动作分开：
 
 1. “查看此版本”：进入 `viewMode=history`，从精确不可变路径打开，只读。
-2. “在 Finder 中显示”：定位 `versions/<version-id>/files/index.html`，不打开其他版本或当前工作文件。
+2. “在 Finder 中显示”：定位该 Version 对应的可见 Working Copy；Repository/Bridge 必须验证 Version、唯一 `workingCopyId`、根内普通非软链接文件与 Hash，不把隐藏不可变快照作为产品 Finder 文件。
 3. “返回当前 HTML”：回到项目当前指向的工作文件。
 4. “基于此版本继续编辑”：只在精确历史视图且项目空闲时可用。Bridge 只接收当前完整项目身份、目标 Version ID 和 operation ID；Repository 必须找到该 Version 唯一原有的 `workingCopyId`，完整验证 Working Copy state、不可变快照和当前工作文件 Hash 后，原子写入 `desktop-pending` 激活回执。缺失、重复或验证失败保持历史只读，不从快照猜测或创建替代文件。
 
@@ -499,30 +504,28 @@ editing
 ## 6. 数据与目录
 
 ```text
-项目记录/
-└── projects/
-    └── <displayName>__<YYYYMMDD-HHmmss>__<shortProjectId>/
-        ├── project.json
-        ├── PROJECT.md
-        ├── runtime-state.json
-        ├── edit-audit.jsonl
-        ├── history/
-        │   └── source-operations.json
-        ├── working/
-        │   ├── <原用户文件名>-V1.1.html
-        │   └── <原用户文件名>-V1.2.html
-        ├── recovery/
-        ├── transactions/
-        ├── versions/
-        └── requests/
+~/Documents/PageRoot/项目/<project-name>/
+├── <stem>-V1.html                 # 可见 Version Working Copy
+├── PROJECT.md
+├── AI任务/                         # PR 2B 可删除、可重建派生展示
+│   └── <YYYY-MM-DD>-候选版本N/
+│       ├── PROMPT.md
+│       └── <stem>-Vn-待审阅.html  # Candidate ready 后才存在
+└── .pageroot/                      # 唯一权威与技术记录
+    ├── project.json
+    ├── manifest.json
+    ├── working-copies/
+    ├── requests/
+    ├── runtime-state.json
+    └── recovery/ai-task-projections/
 ```
 
 事实源：
 
 | 事实 | 权威位置 |
 |---|---|
-| 当前可编辑 HTML | `project.json.sourcePath` 当前指向的原始 HTML 或 `working/<原用户文件名>-V1.x.html` |
-| 项目/文档身份、显示名、创建时间、目录名与可重建缓存 | `project.json` 与 `project-registry.json` |
+| 当前可编辑 HTML | 当前受管 Version Working Copy；完整 source/OpenTarget/Hash 在项目运行态与 manifest 映射中验证 |
+| 项目/文档身份、显示名、登记根 | `.pageroot/project.json` 与 Registry；Registry 同时决定项目目录成员与写入授权 |
 | 整个项目长期使用的 AI 规则 | `PROJECT.md` |
 | active run、项目锁、冲突与恢复事务 | `runtime-state.json` |
 | 当前评论、edit event、删除 tombstone、草稿 revision 与已处理 operation ID | `draft/annotations.json`；`runtime-state.json` 只保存其指针与 revision |
@@ -531,10 +534,11 @@ editing
 | 冻结输入 | Request 的 `input/` |
 | AI 完成 | Attempt 的 `completion.json` |
 | 正式 Version | 带有效 `committed.json` 的 Version 目录 |
+| `AI任务/` 展示路径与进度 | 仅 `.pageroot/recovery/ai-task-projections/` 收据；不可作为 Request/Candidate/Promotion 权威 |
 
 任何渲染缓存都可丢弃，不能参与判断当前事实或最新 Version。
 
-“项目资料”必须把权限和用途说清楚：主入口为“项目长期规则”和“项目记录文件夹”。新项目的 `PROJECT.md` 默认是空文件，不预填通用规则；它适用于整个项目、空闲时可修改，读取完成前与 AI 处理期间只读，停止输入约 700ms 后自动保存，保存只影响后续任务。切换项目、关闭规则页和关闭应用前必须完成保存或原位说明失败。记录文件夹通过 Finder 查看每轮要求、AI 返回与历史文件；文件夹名必须可读且能区分同名 HTML，不得向用户暴露完整 UUID 作为主名称。不得只写“Request 与审计记录”这类需要用户理解内部术语的概括，也不得在规则仍在读取时接受输入或静默丢弃未保存修改。
+“项目资料”必须把权限和用途说清楚：主入口为“项目长期规则”和“在文件夹中打开”。新项目的 `PROJECT.md` 默认是空文件，不预填通用规则；它适用于整个项目、空闲时可修改，读取完成前与 AI 处理期间只读，停止输入约 700ms 后自动保存，保存只影响后续任务。Finder 打开已验证项目根，可查看 Version Working Copy、`PROJECT.md` 和 AI任务；产品 UI 不打开隐藏 Request 目录。不得只写“Request 与审计记录”这类需要用户理解内部术语的概括，也不得在规则仍在读取时接受输入或静默丢弃未保存修改。
 
 正式签名的 macOS App 在启动约 5 秒后检查 stable 更新，并在应用持续打开期间每 4 小时再次检查；macOS 应用菜单中的“关于源页”同时提供用户主动触发的“检查更新”、固定 GitHub 仓库入口，以及安装包内固定“用户声明与免责声明”文本文件的本地打开入口。页面不能为该入口提供任意文件路径。自动与手动检查必须合并到同一个主进程更新控制器，不得并发建立两套下载或安装状态。检测到 stable 新版本时，顶部发送按钮上方显示右对齐的红色斜体 `New!`；当前版本或自动检查失败时不占位，手动检查的结果和失败原因则在“关于源页”原位显示。只有用户点击 `New!` 或“关于源页”中的“下载更新”后才开始下载，优先使用差分传输，失败时允许回退完整 ZIP；下载期间顶部文案保持不变，不显示百分比、进度条或动画。下载完成后弹出“现在重启 / 稍后”确认；选择稍后时顶部变为 `New! 重启更新`，再次点击打开同一确认，Canvas 不显示下载完成横幅。只有编辑器写入、草稿和 Bridge 关闭排空全部成功后才重启安装。普通退出不得暗中安装，GitHub 仓库只作为项目与人工后备入口。
 
@@ -641,10 +645,10 @@ Prompt、AI 返回、附件、剪贴板、文件名/路径、账号、电脑序�
 
 - 新写入只有 `initial` 和 `internal-ai` 两类。
 - 本地编辑、自动写回、评论、导出、历史恢复、失败、取消和冲突未采用都不建版。
-- no-change、失败、取消和冲突未采用也不创建 `working/<原用户文件名>-V1.x.html`。
+- no-change、失败、取消和冲突未采用也不创建下一份可见 Version Working Copy。
 - 新版提示只在新工作文件、不可变快照、画布 Hash 一致且 canonical path 已切换后显示。
 - 历史查看永远只读且只打开精确 Version 路径。
-- 每个历史版本可一键在 Finder 中显示精确 `files/index.html`。
+- 每个历史版本可一键在 Finder 中显示精确、经过验证的可见 Working Copy；隐藏快照不作为产品 Finder 入口。
 - “基于此版本继续编辑”只重用该 Version 原有工作文件；已写入历史激活回执后，失败只能同一操作向前恢复，不得把该工作文件回滚为较新的活动 Version。
 - 连续两次 AI 成功后，原始 HTML 与第一份工作文件逐字节不变，项目当前路径指向第二份工作文件。
 - 历史页不提供恢复或覆盖当前 HTML；需要以旧快照开始时，将其作为普通文件登记为新的 Document 与 V1。
@@ -660,3 +664,11 @@ Prompt、AI 返回、附件、剪贴板、文件名/路径、账号、电脑序�
 - 失败与 no-change 返回编辑后仍可从“上轮处理”恢复，重启后行为一致；界面不显示内部英文异常或校验代码串。
 - v3 运行时、前端历史和发布包不包含旧 Schema Reader、migration report 或 legacy marker 分支。
 - 0.6.1 与切换前数据已有独立只读归档，可用于整体回退。
+
+### 10.6 PR 2B 项目、版本与 Finder
+
+- Registry 有 A/B 且 Recent 仅有 A 时，目录仍显示 A/B；Recent 只影响排序，未登记 Recent 文件不能成为项目。
+- 顶部纯投影可同时显示 `基于 V2 · 项目最新 V6 · 本地修改已保存 · 候选 V7 待审阅`，历史浏览、保存失败和 Candidate/Promotion 不丢失各自事实。
+- Version Finder 命令定位该 Version 的可见 Working Copy，项目入口打开经验证项目根，隐藏不可变快照和 `.pageroot/requests/...` 不作为产品入口。
+- `AI任务/` 只由验证后的冻结 Prompt/Candidate 生成；删除、篡改、软链接或用户占位不能改变隐藏 Candidate，也不能阻止按隐藏 Hash 审阅和 Promotion。重试只能重建安全投影或选择新展示目录。
+- P2 不创建 `附件与图片/`、附件快照说明、附件 Finder 定位或回收区；这些可见附件体验属于 P3，现有附件冻结正确性保持。

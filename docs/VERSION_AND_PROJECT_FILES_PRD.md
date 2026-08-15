@@ -1,10 +1,10 @@
 # PageRoot 版本与项目文件产品需求
 
-- 文档版本：PRD v1.3
-- 最近更新：2026-08-14（Asia/Shanghai，UTC+8）
+- 文档版本：PRD v1.4
+- 最近更新：2026-08-15（Asia/Shanghai，UTC+8）
 - 状态：产品规则已确认，按两期串行实施
-- 适用范围：桌面版本地 HTML 导入、持续编辑、评论与附件、AI 候选审阅、正式版本历史、Finder 项目目录
-- 关联文档：[MVP 产品需求](MVP_PRD.md)、[交互流程](INTERACTION_FLOW.md)、[Change Request 协议](CHANGE_REQUEST_PROTOCOL.md)、[ADR 0022](decisions/0022-user-owned-project-root-identity.md)
+- 适用范围：桌面版本地 HTML 导入、持续编辑、评论与附件、AI 候选审阅、正式版本历史、Registry 项目目录与 Finder 体验
+- 关联文档：[MVP 产品需求](MVP_PRD.md)、[交互流程](INTERACTION_FLOW.md)、[Change Request 协议](CHANGE_REQUEST_PROTOCOL.md)、[ADR 0022](decisions/0022-user-owned-project-root-identity.md)、[ADR 0024](decisions/0024-registry-catalog-and-ai-task-projections.md)
 
 本文定义下一阶段目标规则。桌面打开路径只承认有效 v4 Project；所有 v4 以前的项目状态均不兼容，不迁移、不恢复、也不作为读取回退。任何不属于有效 v4 Project 的 HTML 都从新 v4 Project 的 V1 开始；实施本 PRD 时必须同步更新关联协议、Schema、测试和 ADR，不能只修改界面文案。
 
@@ -68,7 +68,7 @@ Hash 相同只能说明内容相同，不能让系统把用户选择的文件“
 - 用户可从任意历史版本继续工作，并始终看见“当前基于版本几”。
 - 用户打开某一份 HTML 时，画布必须显示这份文件的精确内容，不自动切换到最新文件或同 Hash 文件。
 - 界面、Finder 文件名和内部 ordinal 只使用一套连续整数版本号。
-- 用户能在默认的 PageRoot 项目目录中找到 HTML、AI 待审阅文件、项目 Markdown、评论附件和图片。
+- 用户能在默认的 PageRoot 项目目录中找到版本工作 HTML、项目 Markdown 和 AI 待审阅文件；可见评论附件与图片属于 P3。
 - 用户可以在配置项目目录内重命名项目文件夹，也可以对项目内的受管 HTML 改名、移出后放回；在可安全唯一识别时，系统低打扰地恢复原项目和 Working Copy 关系。
 - 首次导入成功后，界面明确告知文件已经进入 PageRoot，并提供“在文件夹中打开”。
 - 导入、保存、冻结 Request 和采纳候选均具备原子性、冲突检测和崩溃恢复。
@@ -94,10 +94,10 @@ Hash 相同只能说明内容相同，不能让系统把用户选择的文件“
 | 阶段 | PR 范围 | 不在本阶段扩张的内容 |
 |---|---|---|
 | 第一阶段（PR 1） | 稳定项目/文档身份、原子导入、持续保存、Candidate 与用户采纳晋升、配置目录内项目文件夹改名、受管 HTML 改名/移出/放回恢复、精确打开状态机 | 整个项目文件夹跨目录或跨磁盘移动后的继续管理、历史继续编辑、完整项目列表、多文件可见性 UI |
-| 第二阶段（PR 2） | 历史继续编辑、正式版本独立工作文件、可见 AI 任务与附件、完整顶部状态和项目体验 | v4 以前项目状态的处理、完整项目克隆、多文件网站 |
+| 第二阶段（PR 2） | 历史继续编辑、正式版本独立工作文件、Registry 全量项目目录、可见 AI任务、完整顶部状态和项目体验 | 可见附件与图片、附件 Finder 定位与回收区（P3），v4 以前项目状态的处理、完整项目克隆、多文件网站 |
 | 后续 | 完整项目克隆、资源包/多文件网站 | v4 以前项目状态继续保持不兼容，不在 PR 1 或 PR 2 中隐式实现 |
 
-第一期的 Candidate 权威数据始终位于 Request / Attempt 与 `.pageroot/`；它不以 Finder 可见的 AI 任务文件夹作为写入或身份事实。可见 `AI任务/`、附件目录和完整项目界面是第二期的派生展示，不得反向成为 Request、Candidate、Version 或 Promotion 的权威来源。
+第一期的 Candidate 权威数据始终位于 Request / Attempt 与 `.pageroot/`；它不以 Finder 可见的 AI 任务文件夹作为写入或身份事实。PR 2B 的 `AI任务/` 与完整项目界面是第二期的派生展示；可见附件目录、附件 Finder 定位与回收区明确留到 P3。它们都不得反向成为 Request、Candidate、Version 或 Promotion 的权威来源。
 
 PR 1 内部按“文档与 Schema → Repository → Workflow → 最低限度 UI → 故障注入”形成可回退的清晰提交；该顺序不是新的运行时全局 Store。状态仍由现有 `ProjectSession`、`DocumentSession` 与 `VersionSession` 各自拥有并扩展。
 
@@ -184,26 +184,19 @@ PR 1 内部按“文档与 Schema → Repository → Workflow → 最低限度 U
 - Registry 因而不是普通“上次位置缓存”，而是 `projectId → registeredProjectRootPath` 的位置与写入白名单；当前 `ProjectSession` 只投影本次打开的有效绑定。
 - 重命名项目内的受管 HTML 不自动重命名项目文件夹，也不创建 Version；HTML 所属 Version / Working Copy 由 manifest 的稳定 ID 确定，文件名只影响后续可见文件命名。
 
-### 6.2 第二期：Finder 默认可见内容
+### 6.2 PR 2B：Finder 默认可见内容
 
-本节是第二期的用户可见投影，不是第一期的目录承诺。第一期只以根目录工作 HTML、`PROJECT.md` 和隐藏 `.pageroot/` 中的受管记录完成身份、Request、Candidate 与 Promotion；AI 不直接创建 Finder 可见的正式版本或候选权威文件。
+本节是 PR 2B 的用户可见投影，不是第一期的目录承诺。第一期只以根目录工作 HTML、`PROJECT.md` 和隐藏 `.pageroot/` 中的受管记录完成身份、Request、Candidate 与 Promotion；AI 不直接创建 Finder 可见的正式版本或候选权威文件。可见附件与图片、附件 Finder 定位和回收区属于 P3。
 
 ```text
 ~/Documents/PageRoot/项目/复杂HTML综合测试页/
 ├── 复杂HTML综合测试页-V1.html
 ├── 复杂HTML综合测试页-V2.html
 ├── PROJECT.md
-├── AI任务/                         # 第二期只读派生展示
-│   └── 2026-08-12-153012-候选版本3/
+├── AI任务/                         # PR 2B 只读派生展示
+│   └── 2026-08-15-候选版本3/
 │       ├── PROMPT.md
-│       ├── 复杂HTML综合测试页-V3-待审阅.html
-│       └── 附件快照说明.md
-├── 附件与图片/                     # 第二期用户可见附件
-│   ├── 版本2-本轮评论/
-│   │   ├── 首页参考.png
-│   │   └── 产品说明.pdf
-│   └── 版本1-本轮评论/
-│       └── 标注图.jpg
+│       └── 复杂HTML综合测试页-V3-待审阅.html
 └── .pageroot/
     ├── project.json
     ├── manifest.json
@@ -221,8 +214,8 @@ PR 1 内部按“文档与 Schema → Repository → Workflow → 最低限度 U
 
 - 所有版本工作 HTML。
 - 当前项目的关键 Markdown。
-- AI 返回、尚待审阅的完整 HTML 和该轮可读 Prompt。`[第二期]`
-- 用户评论中上传、拖入或粘贴的附件与图片。`[第二期]`
+- AI 返回、尚待审阅的完整 HTML 和该轮可读 Prompt。`[PR 2B]`
+- 用户评论中上传、拖入或粘贴的附件与图片。`[P3]`
 
 用户默认不需要看见：
 
@@ -244,7 +237,7 @@ PR 1 内部按“文档与 Schema → Repository → Workflow → 最低限度 U
 - `PROJECT.md`：唯一由用户长期维护的项目规则、背景和约束；新项目只预填一行项目标题，用户可随时清空为零字节。它不预填系统规则，也不承担身份或事务职责。
 - `AI_RULES.md`：PageRoot 维护的稳定 AI 行为边界，例如冻结输入、唯一输出、附件、完成与取消规则。它是 Request 输入，不复制到 `PROJECT.md` 或每轮 Prompt。
 - `PROMPT.md`：当前 Request / Attempt 的精简入口，只包含本轮身份、读取顺序、当前附件/补充、唯一输出路径和 finalizer 命令；它引用 `AI_RULES.md`，不得重复稳定规则或要求 AI 推导文件名、版本号。
-- `.pageroot/requests/<requestId>/PROMPT.md`、冻结的 `input/PROJECT.md` 与 `input/AI_RULES.md` 是机器执行记录；第二期的 `AI任务/<轮次>/PROMPT.md` 若展示，只能是只读派生副本，不改变任何权威路径。
+- `.pageroot/requests/<requestId>/PROMPT.md`、冻结的 `input/PROJECT.md` 与 `input/AI_RULES.md` 是机器执行记录；PR 2B 的 `AI任务/<轮次>/PROMPT.md` 只复制已经冻结的精简 Prompt，不重新拼接稳定规则，且不改变任何权威路径。
 
 ## 7. 首次打开与导入
 
@@ -335,6 +328,7 @@ V2 工作文件第一次建立时与 V2 正式快照字节一致。此后用户�
 2. 用户点击“基于版本 2 继续编辑”后：
    - 系统只接受 manifest 中 `versionId=V2` 且 `basedOnVersionId=V2` 的唯一原有 Working Copy；缺失、重复、状态/快照 Hash 不完整时失败关闭，不从快照临时重建或猜测另一份文件。
    - 在切换前完整校验该 Working Copy state、可见工作文件、不可变 V2 快照、Registry 根目录和完整 OpenTarget 身份；成功后打开原有工作文件，并显示其本地修改状态。
+   - Finder 定位该历史 Version 的可见工作文件时也执行同一受控重命名恢复：只在旧映射缺失、`workingCopyId` 不变且同根文件标识唯一时更新 manifest，不能因非活动文件路径陈旧而改为定位隐藏快照或猜测另一份 HTML。
 3. 后续编辑全部保存到 V2 工作文件，不覆盖正式 V2，也不创建新项目。
 
 该动作是窄的、可重试的“激活指定 Version 的 Working Copy”操作。Repository 先原子写入 V2 指针和 `desktop-pending` 回执；Bridge、桌面激活或确认响应在提交后丢失时，重放该回执的 `operationId` 与 Version 必须仍指向同一 `workingCopyId`，不得因为当前 Registry runtime 已经指向 V2 而拒绝重试，也不得伪造回滚到 V6。Desktop 对新操作只接受仍以原 `previousSourcePath` 为活动文件的前序，完成字节 Hash 校验后 Bridge 确认同一回执；随后才在一个无 `await` 的发布边界同步更新 `ProjectSession`、`DocumentSession`、`VersionSession`、`DraftSession` 与 `CommentSession`，再允许新 Canvas generation 接受回报。
@@ -360,16 +354,16 @@ V2 工作文件第一次建立时与 V2 正式快照字节一致。此后用户�
 - PR 1 的受管工作 HTML 只位于登记项目根目录的可见顶层；不借本规则扩展任意嵌套 HTML 或多文件网站管理。
 - Hash 只校验内容和冲突，不能在多个路径间决定身份；无法唯一确认时保持未受管，直到用户明确操作需要一次选择。
 
-## 9. 第二期：评论、附件与图片
+## 9. P3：评论附件、图片与可见文件体验
 
-本节定义第二期的可见附件目录、归档和 Finder 体验。第一期可以保存其已存在的内部草稿状态，但不以此宣称已经交付本节的用户可见目录合同。
+本节定义 P3 的可见附件目录、归档和 Finder 体验。PR 2B 继续保存当前评论附件、大小/数量限制与隐藏 Request 冻结快照，但不以此宣称已经交付可见附件目录、附件 Finder 定位或回收区。
 
 ### 9.1 保存与可见性
 
 评论、附件和图片是本地工作的一部分：
 
 - 新建或修改评论后立即保存到当前工作文件对应的草稿。
-- 添加附件或图片时立即复制到项目根目录的 `附件与图片/`，不能只留在系统临时目录。
+- 添加附件或图片时的 P3 可见副本复制到项目根目录的 `附件与图片/`，不能只留在系统临时目录。
 - 保留用户原始文件名；重名使用 `文件名 (2).ext`，不静默覆盖。
 - 每个可见文件都有内部稳定 `attachmentId`、内容 Hash、原始文件名、相对路径、所属评论和所属基础版本。
 - 粘贴图片使用可读默认名，例如 `粘贴图片-20260812-153012.png`。
@@ -386,11 +380,11 @@ V2 工作文件第一次建立时与 V2 正式快照字节一致。此后用户�
     └── 产品说明.pdf
 ```
 
-当用户发送 AI 时：
+P3 中当用户发送 AI 时：
 
 - 当前评论及附件身份被冻结进 Request。
 - `.pageroot/requests/<requestId>/` 保存不可变附件快照和 Hash。
-- `AI任务/<轮次>/附件快照说明.md` 提供用户可读清单，但机器校验以隐藏快照为准。
+- `AI任务/<轮次>/附件快照说明.md` 提供用户可读清单，但机器校验以隐藏快照为准；PR 2B 不创建此文件。
 - 发送后用户删除或替换可见附件，不得改变已经冻结的 Request。
 
 ### 9.3 删除和归档
@@ -429,7 +423,15 @@ AI 只能写入固定 Attempt 输出 `.pageroot/requests/<requestId>/attempts/<a
 
 > 候选版本 7 · 基于版本 2 · 待审阅
 
-第一期的候选 HTML 与记录保存在 Request / Attempt 的隐藏路径中。第二期如在 `AI任务/<轮次>/` 展示待审阅 HTML、Prompt 或附件说明，它们必须是经校验后的只读派生副本，不能替代 Attempt 输出、Candidate 记录或 Promotion 输入。
+第一期的候选 HTML 与记录保存在 Request / Attempt 的隐藏路径中。PR 2B 的 `AI任务/<轮次>/` 只展示经校验后的派生副本，不能替代 Attempt 输出、Candidate 记录或 Promotion 输入：
+
+1. Repository 先重新验证 Registry 绑定、Project/Document、Request/Attempt、Candidate 身份与 Hash、`proposedVersionId`、`basedOnVersionId`、`previousVersionId` 和项目根真实路径，才把已验证字节交给派生写入器。
+2. 写入器先在 `.pageroot/recovery/ai-task-projections/` 持久记录投影收据，再排他创建 `AI任务/<日期>-候选版本N[/冲突后缀]/`；目录预检后出现的 `EEXIST` 同样视为用户/并发占用，必须保留该目录并分配新后缀。随后才以 no-replace 写入冻结 `PROMPT.md`；Candidate 通过 finalizer 后才以 no-replace 写入 `<主干>-Vn-待审阅.html`。
+3. P2 不创建 `附件快照说明.md`、`附件与图片/`、`AI_RULES.md` 或 `PROJECT.md` 副本，也不创建正式 Version。`PROMPT.md` 只复制本轮已冻结的精简 Prompt。
+4. 删除、篡改或用用户文件/目录/软链接占用派生位置时绝不覆盖；同一连续收据的完整投影可重建，冲突或篡改则分配新的安全展示目录。隐藏 Candidate、审阅和 Promotion 不读取此副本。
+5. 产品 UI 的 Finder 命令只提交当前 `sourcePath`；Bridge 重新解析并验证后才返回位于已登记根的 `AI任务/<单一子目录>`。它不接受 Renderer 提供的 Request 路径，也不打开 `.pageroot/requests/...`。
+6. `<主干>-Vn-待审阅.html` 是当前已验证 Working Copy 命名的展示结果，不是 Candidate 身份。若 Finder 在 `PROMPT.md` 发布后把同根 Working Copy 重命名，下一次投影会更新这一展示名，并仅在安全目录可复用时复用；已有不同展示文件时分配新的安全目录，绝不因此拒绝隐藏 Candidate、审阅或 Promotion。
+7. `no-change` 或不可用输出的 `error` 只保留运行时封存的 `lastAiTask` 展示锚点，不恢复活动 Request。应用重启后必须先用该锚点校验精确 Request 记录，再把它投影为“上轮处理”，从而仍可定位该轮 `AI任务/`；锚点缺失或校验失败时不得扫描 Request 目录猜测终态。
 
 ### 10.3 用户审阅
 
@@ -463,11 +465,11 @@ AI 只能写入固定 Attempt 输出 `.pageroot/requests/<requestId>/attempts/<a
 
 ## 11. 第二期：完整界面要求
 
-第一期只承诺导入成功提示、项目目录入口、Candidate 审阅和不把 Candidate 显示为正式 Version 所需的最低界面；本节的常驻顶部状态、完整项目/版本列表与 Finder 定位体验属于第二期。
+第一期只承诺导入成功提示、项目目录入口、Candidate 审阅和不把 Candidate 显示为正式 Version 所需的最低界面；本节的常驻顶部状态、Registry 项目目录、完整版本列表与 Finder 定位体验由 PR 2B 交付。可见附件体验不在本节交付，属于 P3。
 
 ### 11.1 顶部版本区
 
-顶部必须能同时表达：
+顶部必须由纯投影同时表达下列现有权威事实；不得以多层互斥三元表达式隐藏其中任一项：
 
 - 当前打开的是哪个版本工作文件或历史快照。
 - 是否存在本地修改，是否已经保存。
@@ -479,18 +481,19 @@ AI 只能写入固定 Attempt 输出 `.pageroot/requests/<requestId>/attempts/<a
 
 | 场景 | 主状态 | 辅助状态/操作 |
 |---|---|---|
-| 首次导入 | `版本 1 · 已导入 PageRoot` | `在文件夹中打开` |
-| V1 本地修改 | `基于版本 1 的本地编辑 · 已保存` | `项目最新正式版本：版本 1` |
-| 打开历史快照 | `版本 2 · 历史只读` | `基于此版本继续编辑` |
-| 编辑历史 V2 | `基于版本 2 的本地编辑 · 已保存` | `项目最新正式版本：版本 6` |
-| AI 已返回 | `候选版本 7 · 基于版本 2 · 待审阅` | `审阅候选` |
-| 候选已采纳 | `版本 7 · 基于版本 2` | `在文件夹中打开` |
-| 保存失败 | `基于版本 2 的本地编辑 · 保存失败` | `重试`、`查看详情` |
+| 首次导入 | `V1 · 已导入 PageRoot` | `在文件夹中打开` |
+| V1 本地修改 | `基于 V1 · 本地修改已保存` | `项目最新 V1` |
+| 打开历史快照 | `正在查看 V2 · 只读浏览` | `基于此版本继续编辑` |
+| 编辑历史 V2 | `基于 V2 · 项目最新 V6 · 本地修改已保存` | `当前编辑基础 V2` |
+| AI 已返回 | `基于 V2 · 项目最新 V6 · 候选 V7 待审阅` | `审阅候选` |
+| 候选已采纳 | `基于 V2 · 项目最新 V7` | `在文件夹中打开` |
+| 保存失败 | `基于 V2 · 保存失败` | `重试`、`查看详情` |
 
 ### 11.2 项目和版本列表
 
-- 项目列表以 Registry 登记项目文件夹名为用户项目名，不显示内部 `projectId`；用户在配置项目目录内改名后，重新识别时同步更新列表名称，不联动 HTML 名称。
-- 版本列表按正式 ordinal 排列，但每个版本可显示 `基于版本 N`。
+- Registry 决定项目列表成员资格；项目列表以 Registry 登记项目文件夹名为用户项目名，不显示内部 `projectId`。用户在配置项目目录内改名后，重新识别时同步更新列表名称，不联动 HTML 名称。
+- Desktop Recent 只提供 `lastOpenedAt`、启动优先和排序；已登记但未进入 Recent 的项目仍显示，Recent 中未登记的外部 HTML 不显示成项目，清除 Recent 不移除项目。
+- 版本列表按正式 ordinal 排列，每行展示 `基于 Vn`、`前一正式版本 Vn`、`最新正式版本`、`当前编辑基础`、`有本地修改` 或 `当前只读浏览` 等适用的谱系/投影事实。
 - 当前存在本地编辑的历史版本显示圆点或“有本地修改”，不能伪装成新正式版本。
 - AI 候选与正式版本视觉上明确区分。
 - 不提供“恢复并覆盖最新版本”的动作。
@@ -500,8 +503,9 @@ AI 只能写入固定 Attempt 输出 `.pageroot/requests/<requestId>/attempts/<a
 
 - 项目顶部常驻“在文件夹中打开”。
 - 首次导入提示中的同名操作指向项目根目录，而不是 `.pageroot/` 或原下载目录。
-- 对附件提供“在 Finder 中显示”，定位到对应可见文件。`[第二期]`
-- 对 AI 候选提供“在 Finder 中显示”，定位到该轮 `AI任务/` 的派生展示。`[第二期]`
+- 对历史 Version 提供“在 Finder 中显示”，定位它对应的可见 Version Working Copy，不伪装隐藏不可变快照为用户文件。`[PR 2B]`
+- 对 AI 候选提供“查看 AI任务”，定位到该轮经验证的 `AI任务/` 派生展示，不暴露隐藏 Request 目录。`[PR 2B]`
+- 对附件提供“在 Finder 中显示”并定位可见文件。`[P3]`
 
 ## 12. 数据与状态合同
 
@@ -517,7 +521,9 @@ PR 1 不引入并行的全局 Store。下表是每类状态的唯一权威位置
 | `activeWorkingCopyId` / 活跃 Request | 项目 runtime state；Request / Attempt 记录只能被它校验，不能反向重建它 |
 | `viewingVersionId` | 现有 renderer `VersionSession` |
 | `registeredProjectRootPath` | Registry 的 `projectId → registeredProjectRootPath` 唯一登记与写入白名单 |
+| 项目目录成员资格 | Registry；Recent 只能投影排序/最后打开时间，不能授权或移除成员 |
 | 当前有效 `projectRootPath` | 当前 `ProjectSession`，必须是上述登记路径的本次验证投影 |
+| `AI任务/` 派生路径与发布进度 | `.pageroot/recovery/ai-task-projections/` 中的投影收据；它只允许恢复展示，不能重建 Request、Candidate、Version 或运行态 |
 
 项目的显示名不是一个另行的权威字段：它始终是登记项目文件夹名的显示投影。配置项目目录内完成可信文件夹改名后，Registry 原子更新登记路径，再从新目录名投影显示值。
 
@@ -673,9 +679,11 @@ manifest 可记录平台文件标识（例如 device、inode、birthtime）作�
 - AI 失败、取消、超时、返回无效 HTML、no-change 或用户拒绝，都不增加正式版本序号。
 - 采纳时发现候选 Hash 改变，停止提交并要求重新审阅。
 - 采纳事务崩溃后，要么恢复为完整正式版本，要么回滚为仍待审阅候选，不能出现界面有 V7、快照却不存在。
+- 删除或篡改 `AI任务/` 中的派生 Prompt/Candidate，或用用户文件、目录、软链接占用其路径，不改变隐藏 Candidate、审阅或 Promotion；Finder 入口只会由收据安全重建原投影或分配新的展示目录。
 
-### 14.4 附件异常
+### 14.4 P3 附件异常
 
+- 以下可见附件体验在 P3 实现；PR 2B 仍保留当前附件记录与隐藏 Request 冻结快照的正确性。
 - 复制失败时不创建空附件记录。
 - 可见附件被 Finder 删除时，评论显示缺失状态；若已有冻结 Request，则仍可使用隐藏快照完成审阅。
 - 相同 Hash 不代表同一用户附件；身份仍由 `attachmentId` 决定。
@@ -722,7 +730,10 @@ manifest 可记录平台文件标识（例如 device、inode、birthtime）作�
 - [ ] 版本 1 顶部显示“已导入 PageRoot”和“在文件夹中打开”。`[第二期]`
 - [ ] 关闭并重开仍显示该状态，直到第一次晋升版本 2。`[第二期]`
 - [ ] 晋升版本 2 后导入状态消失，常驻文件夹入口仍存在。`[第二期]`
-- [ ] Finder 项目根目录能直接找到版本 HTML、`PROJECT.md`、每轮 AI 任务的 `PROMPT.md`、AI 待审阅文件、评论附件和图片。`[第二期]`
+- [ ] Registry 中 A/B 两个项目且 Recent 只有 A 时，A/B 都显示且 A 仅因 Recent 排在前；未登记 Recent 项不显示，清除 Recent 不移除项目。`[PR 2B]`
+- [ ] Finder 项目根目录能直接找到版本 HTML、`PROJECT.md`、每轮 AI任务的 `PROMPT.md` 和 AI 待审阅文件；不新建 `附件与图片/`。`[PR 2B]`
+- [ ] 历史 Version 的 Finder 命令定位该 Version 的可见 Working Copy，项目 Finder 命令打开经验证项目根，Candidate 命令只打开派生 `AI任务/`。`[PR 2B]`
+- [ ] 可见评论附件和图片、附件 Finder 定位及回收区。`[P3]`
 - [ ] `.pageroot/` 保存不可变快照、Request、事务和恢复记录，正常 Finder 浏览时不干扰用户。`[第一期]`
 - [ ] 同名项目建立为 `<名称> (2)`，内部仍使用不同稳定 `projectId`。`[第一期]`
 - [ ] 在配置项目目录内重命名项目文件夹后，恢复同一 `projectId`、版本和草稿，更新项目显示名，但所有受管 HTML 名称保持不变。`[第一期]`
@@ -741,6 +752,8 @@ manifest 可记录平台文件标识（例如 device、inode、birthtime）作�
 - [ ] 文件切换压力测试中，迟到异步回调不能改变新 Session 的路径、Hash 或画布。`[第一期]`
 - [ ] 保存失败时禁止用旧磁盘内容发送 AI，并提供恢复操作。`[第一期]`
 - [ ] Request 冻结后删除可见附件，不影响该 Request 的附件 Hash 和审阅。`[第二期]`
+- [ ] 在投影收据、目录分配、Prompt 写入、Candidate 写入、完成标记或 Finder 返回前注入失败并重试，不覆盖用户文件、不产生第二个 Candidate、不推进正式 Version。`[PR 2B]`
+- [ ] 删除或篡改 `AI任务/` 派生 HTML 后，隐藏 Candidate 仍可审阅并按其 Hash Promotion；投影只能安全重建或另分配展示目录。`[PR 2B]`
 
 ### 16.5 源码与安全
 
@@ -757,6 +770,7 @@ manifest 可记录平台文件标识（例如 device、inode、birthtime）作�
 - [ ] 旧 `项目记录/projects` 的迁移或兼容层。`[不在范围]`
 - [ ] 为复制项目重签全部内部 ID 的“完整克隆项目”能力。`[后续]`
 - [ ] 多文件网站、资源包、外部资源自动重写或管理。`[后续]`
+- [ ] 可见 `附件与图片/`、附件 Finder 定位与项目内回收区。`[P3]`
 
 ## 17. 实施范围与文档联动
 
@@ -767,13 +781,13 @@ manifest 可记录平台文件标识（例如 device、inode、birthtime）作�
 - Version、Working Copy、Draft、Request、Candidate 的 Schema 和状态机。
 - Source transaction 的保存目标与 `currentExactVersionId` 权限边界。
 - AI 输出命名、候选提交点和三方 Hash 校验。
-- 评论附件导入、可见副本、Request 快照和删除恢复。
+- 评论附件的现有记录、Hash 与 Request 隐藏快照；可见副本、附件 Finder 定位和删除回收属于 P3。
 - 配置项目目录内文件夹改名、受管 HTML 的改名/移出/放回、外部修改与低打扰重绑定。
 - 登记根目录写入白名单、项目副本不接管，以及跨卷路径的拒绝写入测试。
 - 任何旧 `V1.x` 项目迁移或兼容层。
-- [MVP 产品需求](MVP_PRD.md)、[交互流程](INTERACTION_FLOW.md)、[Change Request 协议](CHANGE_REQUEST_PROTOCOL.md)、Schema fixtures、测试策略和 ADR 0022；其中 v4 AI 交接必须保持 `PROJECT.md`、`AI_RULES.md`、`PROMPT.md` 职责不重叠，ADR 0022 必须同步登记根目录、Hash 与 Promotion 发布边界。
+- [MVP 产品需求](MVP_PRD.md)、[交互流程](INTERACTION_FLOW.md)、[Change Request 协议](CHANGE_REQUEST_PROTOCOL.md)、Schema fixtures、测试策略和 ADR 0022/0024；其中 v4 AI 交接必须保持 `PROJECT.md`、`AI_RULES.md`、`PROMPT.md` 职责不重叠，ADR 0022/0024 必须同步登记根目录、Hash、Promotion 与 AI任务派生发布边界。
 
-现有实现若包含以下行为，均与 PRD v1.3 冲突，进入 PR 审查前必须删除、禁用或改写干净，不能作为无提示兼容分支继续保留：
+现有实现若包含以下行为，均与 PRD v1.4 冲突，进入 PR 审查前必须删除、禁用或改写干净，不能作为无提示兼容分支继续保留：
 
 - 整个项目文件夹移出或跨卷后自动定位、重新关联并继续写入。
 - 对复制项目弹出“重新关联到此位置 / 作为新项目”选择，并允许 Registry 跟随副本更新。
@@ -785,7 +799,7 @@ manifest 可记录平台文件标识（例如 device、inode、birthtime）作�
 
 1. PR 1：先修正文件打开 Session 与“Hash 不得改变导航”的边界，再建立登记根目录写入范围、稳定身份、原子导入、文件夹改名、受管 HTML 恢复、命名继承，以及 Candidate 与 Promotion 分离。
 2. PR 1 内部依次交付文档与 Schema、Repository、Workflow、最低限度 UI 与故障注入；每个边界都需要可回退的提交。
-3. PR 2：仅在 PR 1 合并且验证通过后，实现历史继续编辑、完整的可见 AI 任务/附件与项目体验。
+3. PR 2：仅在 PR 1 合并且验证通过后，实现历史继续编辑、Registry 项目目录、完整版本状态和可见 AI任务；可见附件/回收体验单列为 P3。
 4. 旧项目状态保持完全不兼容；只在未来另有明确产品决策时再讨论迁移。完整克隆和多文件网站也须另行设计。
 
 ## 18. 最终产品口径
@@ -799,6 +813,18 @@ manifest 可记录平台文件标识（例如 device、inode、birthtime）作�
 5. **PageRoot 只管理“PageRoot/项目”里已登记的文件；整个项目文件夹搬走或复制出去后不会被两边同时写。**
 
 ## 19. 更新记录
+
+### 2026-08-15（Asia/Shanghai，UTC+8）— PRD v1.4 / PR 2B
+
+本次更新把第二期的已交付边界收敛为一个可验证的 PR 2B：
+
+| 议题 | 确认后的判断 | 对实施与验收的影响 |
+|---|---|---|
+| 项目目录成员资格 | Registry 是唯一成员与写入授权；Desktop Recent 只排序、显示最后打开时间和启动优先。 | 已登记但未 Recent 的项目仍显示；未登记 Recent 项不成为项目。 |
+| 顶部与版本列表 | 只投影既有 Version/Document/Draft/Run 事实，同时展示基础版本、项目最新版本、保存/本地修改、Candidate 和历史只读状态。 | 不新增全局 Store，也不把 Working Copy 修改写进不可变 Version。 |
+| Finder | 项目入口打开已验证项目根；历史 Version 定位可见 Working Copy；Candidate 只打开经验证 `AI任务/`。 | 产品 UI 不再打开 `.pageroot/requests/...`，隐藏快照不伪装为用户文件。 |
+| `AI任务/` | `PROMPT.md` 与通过 finalizer 的待审阅 HTML 是可删除、可重建、no-replace 发布的派生展示；收据只服务恢复展示。 | 删除/篡改不影响隐藏 Candidate、审阅或 Promotion，AI 也不能写此目录。 |
+| 可见附件 | `附件与图片/`、附件 Finder 定位和回收区移到 P3；现有附件记录、限制与冻结隐藏快照不后退。 | P2 不创建附件可见目录或附件快照说明。 |
 
 ### 2026-08-14（Asia/Shanghai，UTC+8）— PRD v1.3
 
