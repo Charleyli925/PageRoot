@@ -1250,8 +1250,8 @@ export default function Workbench() {
         if (registrationEvent.projectName) setProjectName(registrationEvent.projectName);
         if (registrationEvent.imported) {
           setToast({
-            title: "已建立托管项目",
-            message: "已创建 V1 工作文件；原始 HTML 保持不变。",
+            title: "已打开",
+            message: "原来的文件没有改动。",
             tone: "success",
             disposition: "background-result",
             dedupeKey: "project-file-imported",
@@ -1319,7 +1319,7 @@ export default function Workbench() {
         if (runEvent.current && runEvent.run) {
           setToast({
             title: "交接内容还没有复制",
-            message: runEvent.message || "本轮 Request 已保留；请打开处理详情后重试复制。",
+            message: runEvent.message || "这次任务还在，打开本轮后可以重新复制",
             tone: "error",
             sticky: true,
             dedupeKey: `qoder-handoff:${runEvent.run.sourcePath}`,
@@ -2045,10 +2045,6 @@ export default function Workbench() {
     setRestartUpdateOpen(true);
   }, [updateResult]);
 
-  const latestVersion = useMemo(
-    () => versions.find((version) => version.id === latestVersionId) || null,
-    [latestVersionId, versions],
-  );
   const viewingVersion = useMemo(
     () => versions.find((version) => version.id === viewingVersionId) || null,
     [versions, viewingVersionId],
@@ -3415,7 +3411,7 @@ export default function Workbench() {
       kind: "show-source-in-folder",
       invoke: () => showInFolder(activeSourcePath),
       onFailure: (cause: unknown) => setToast({
-        title: "无法在 Finder 中显示",
+        title: "无法在文件夹中打开",
         message: productErrorMessage(
           cause,
           "源 HTML 可能已移动；当前项目仍保持打开，可以重试。",
@@ -5153,7 +5149,7 @@ export default function Workbench() {
         versionId: version.id,
       }),
       onFailure: (cause: unknown) => setToast({
-        title: "历史版本暂时无法在 Finder 中显示",
+        title: "历史版本暂时无法在文件夹中打开",
         message: productErrorMessage(cause, "请确认项目记录仍然完整后重试。"),
         tone: "warning",
         disposition: "background-result",
@@ -5877,9 +5873,7 @@ export default function Workbench() {
   });
   const headerStatusFacts = browserPreviewOnly
     ? ["浏览器预览 · 只读"]
-    : projectStatus.facts.length
-      ? projectStatus.facts
-      : [latestVersion?.label || "尚未创建正式版本"];
+    : [...projectStatus.facts];
   const canShowCurrentFileInFolder = Boolean(
     sourcePath
     && typeof window !== "undefined"
@@ -5946,27 +5940,27 @@ export default function Workbench() {
         ? "这次没有产生有效变化"
         : activeRun?.status === "error"
           ? "返回的 HTML 无法使用"
-          : "等待 QoderWork 返回修改结果";
+          : "等待 AI 返回结果";
   const processSummaryTitle = pendingRunOutcome
     ? "为避免重复任务，画布暂时保持只读"
     : activeRun?.status === "ready-to-open"
-      ? candidateNeedsReview
-        ? "候选版本已保留，等待你对比确认"
-        : "新版本已保留，等待你确认打开"
+      ? "AI 改好了，先对照再决定用哪一版"
       : activeRun?.status === "no-change"
         ? "页面与评论可以继续编辑"
         : activeRun?.status === "error"
           ? "源 HTML 没有被覆盖"
-          : "画布已锁定，仅可浏览";
+          : "页面暂时只能看";
   const processSummaryDetail = pendingRunOutcome
     ? "源页会在后台继续核对，不会重复发送同一轮要求"
     : activeRun?.status === "no-change"
       ? "原评论和附件都已保留，调整要求后可以重新发送"
       : activeRun?.status === "error"
         ? "当前 HTML 没有被覆盖；返回编辑后仍可查看上轮处理"
-        : candidateNeedsReview
+        : activeRun?.status === "ready-to-open" && candidateNeedsReview
           ? "HTML 可以打开，但与上一版的共同特征较少，不会直接替换当前页面"
-        : "原始评论和本地内容均已冻结，返回结果不会覆盖它们";
+          : activeRun?.status === "ready-to-open"
+            ? "不会直接替换当前页面。"
+            : "你的评论还在，AI 改完也不会直接覆盖。";
   const processStatusLabel = pendingRunOutcome
     ? "正在等待修改结果"
     : activeRun?.status === "ready-to-open"
@@ -6562,8 +6556,8 @@ export default function Workbench() {
                   className="window-file-title-action"
                   type="button"
                   aria-label={`重命名文件 ${currentSourceFileStem}`}
-                  title="双击重命名文件"
-                  onDoubleClick={beginFileRename}
+                  title="重命名文件"
+                  onClick={beginFileRename}
                   onKeyDown={(event) => {
                     if (event.key === "Enter" || event.key === "F2") {
                       event.preventDefault();
@@ -6627,17 +6621,19 @@ export default function Workbench() {
               ) : null}
             </div>
             <span className="file-meta">
-              <span className="file-version-label project-status-facts">
-                {headerStatusFacts.map((fact) => (
-                  <span key={fact}>{fact}</span>
-                ))}
-              </span>
+              {headerStatusFacts.length ? (
+                <span className="file-version-label project-status-facts">
+                  {headerStatusFacts.map((fact) => (
+                    <span key={fact}>{fact}</span>
+                  ))}
+                </span>
+              ) : null}
               {canOpenProjectRootInFolder ? (
                 <button
                   className="window-file-folder-action"
                   type="button"
-                  aria-label="在 Finder 中打开当前项目文件夹"
-                  title="在 Finder 中打开经验证的项目文件夹"
+                  aria-label="在文件夹中打开当前项目文件夹"
+                  title="在文件夹中打开当前项目文件夹"
                   onClick={() => void showProjectRecordsInFolder()}
                 >
                   在文件夹中打开
@@ -6647,7 +6643,7 @@ export default function Workbench() {
                   className="window-file-folder-action"
                   type="button"
                   aria-label={`在文件夹中打开 ${currentSourceFileName}`}
-                  title="在 Finder 中显示当前文件"
+                  title="在文件夹中打开当前文件"
                   onClick={() => void showProjectInFolder()}
                 >
                   在文件夹中打开
@@ -6815,7 +6811,7 @@ export default function Workbench() {
               ))
             }
             onClick={() => {
-              if (runInProgress) {
+              if (runInProgress || currentQoderHandoffStatus === "copied") {
                 setHandoffPreviewOpen(false);
                 setCanvasMode("edit");
                 setDrawer("handoff");
@@ -6833,14 +6829,19 @@ export default function Workbench() {
               {generating
                 ? "正在准备…"
                 : currentQoderHandoffStatus === "copying"
-                  ? "正在复制交接内容…"
-                  : currentQoderHandoffStatus === "copied"
-                    ? "已复制，可粘贴到 AI Agent对话框"
-                    : currentQoderHandoffStatus === "failed"
-                      ? "复制失败 · 查看"
-                      : "复制AI任务Prompt"}
+                  ? "正在复制…"
+                  : currentQoderHandoffStatus === "failed"
+                    ? "复制失败，再试一次"
+                    : currentQoderHandoffStatus === "copied" || runInProgress
+                      ? "查看本轮"
+                      : pendingSendItemCount === 0
+                        ? "写评论后再发送"
+                        : "发给 AI"}
             </span>
-            {!runInProgress && currentQoderHandoffStatus !== "copied"
+            {pendingSendItemCount > 0
+              && !runInProgress
+              && currentQoderHandoffStatus !== "copied"
+              && currentQoderHandoffStatus !== "failed"
               ? <small>{pendingSendItemCount}</small>
               : null}
           </button>
@@ -7835,7 +7836,6 @@ export default function Workbench() {
         {drawer === "handoff" ? (
           <HandoffDrawerHeader
             panelTitle={processPanelTitle}
-            candidateVersionLabel={activeRun?.candidateVersionLabel}
           />
         ) : drawer ? (
           <>
@@ -8096,9 +8096,9 @@ export default function Workbench() {
                   </span>
                   <div className="current-project-actions">
                     {canOpenProjectRootInFolder ? (
-                      <button type="button" onClick={() => void showProjectRecordsInFolder()}>Finder</button>
+                      <button type="button" onClick={() => void showProjectRecordsInFolder()}>在文件夹中打开</button>
                     ) : sourcePath && typeof window !== "undefined" && window.htmlAIProjects?.showInFolder ? (
-                      <button type="button" onClick={() => void showProjectInFolder()}>Finder</button>
+                      <button type="button" onClick={() => void showProjectInFolder()}>在文件夹中打开</button>
                     ) : null}
                     <button type="button" onClick={() => void exportCurrentHtml()}>
                       导出 HTML 副本
@@ -8138,7 +8138,7 @@ export default function Workbench() {
                           <FileHtmlIcon aria-hidden="true" size={19} weight="duotone" />
                           <span>
                             <strong>{project.projectName}</strong>
-                            <small>{project.registeredProjectRootPath}</small>
+                            <small>{folderFromSourcePath(project.registeredProjectRootPath)}</small>
                           </span>
                           {project.lastOpenedAt ? (
                             <time dateTime={new Date(project.lastOpenedAt).toISOString()}>
@@ -8321,7 +8321,7 @@ export default function Workbench() {
                       </span>
                       <span className="project-resource-meta">
                         {projectRecordsPath
-                          ? "Finder"
+                          ? "在文件夹中打开"
                           : projectRecordsPreparing
                             ? "准备中"
                             : "待建立"}

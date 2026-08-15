@@ -174,6 +174,7 @@ test("mixed block parents fall back to safe inline hosts and exact bare-text fra
   await mixedInline.dblclick({ force: true });
   await expect(mixedInline).toHaveAttribute("contenteditable", "true");
   await expect(mixedParent).not.toHaveAttribute("contenteditable", "true");
+  expect(await mixedInline.evaluate(() => document.getSelection()?.isCollapsed)).toBe(true);
   await selectElementText(mixedInline);
   await page.keyboard.type("强化文字");
   await page.keyboard.press("Escape");
@@ -191,6 +192,7 @@ test("mixed block parents fall back to safe inline hosts and exact bare-text fra
   );
   await expect(fragmentHost).toHaveAttribute("contenteditable", "true");
   await expect(mixedParent).not.toHaveAttribute("contenteditable", "true");
+  expect(await fragmentHost.evaluate(() => document.getSelection()?.isCollapsed)).toBe(true);
   await selectElementText(fragmentHost);
   await page.keyboard.type("，新版裸文本");
   await expect(fragmentHost).toHaveText("，新版裸文本");

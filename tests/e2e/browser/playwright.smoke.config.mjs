@@ -17,6 +17,8 @@ const smokeTitles = [
   "mixed block parents fall back to safe inline hosts and exact bare-text fragments",
   "bare-text fragments persist toolbar and shortcut formatting through guarded source patches",
   "deleting a bare-text fragment ends its session without a blocked resume",
+  "double-clicking a canvas reports the dedicated root and stays comment-only",
+  "first double-click places a caret; a second double-click selects the word",
   "IME confirmation replays at the frozen left-style caret",
   "a repeated header command waits for composition and replays only once",
   "out-of-band mutation restores the last safe draft and reports in the viewport",
