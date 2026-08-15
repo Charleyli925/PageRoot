@@ -122,8 +122,11 @@ use a personal or project secret API key.
 
 Electron product suites run their BrowserWindow hidden by default and keep
 background timers and frame commits enabled, so local automation does not
-activate PageRoot or cover other applications. Set `PAGEROOT_E2E_FOREGROUND=1`
-only when explicitly debugging the native window. The hosted-macOS environment
+activate PageRoot or cover other applications. Background mode still keeps the
+macOS Dock icon: click it to bring the window forward, inspect the run, and
+minimize it again. Every E2E mode suppresses automatically triggered native
+dialogs and logs them instead of popping up, including
+`PAGEROOT_E2E_FOREGROUND=1` visual debugging. The hosted-macOS environment
 preflight uses a visible inactive accessory window because that suite must
 prove WindowServer painting without stealing keyboard focus.
 

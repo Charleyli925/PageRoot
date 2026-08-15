@@ -22,11 +22,29 @@ test("Electron automation stays backgrounded unless foreground debugging is expl
   ]);
 
   assert.match(mainProcess, /PAGEROOT_E2E_FOREGROUND === "1"/u);
-  assert.match(mainProcess, /app\.setActivationPolicy\("accessory"\)/u);
+  // 后台 E2E 不再使用 accessory 激活策略彻底隐藏应用：Dock 图标保留，
+  // 窗口仍默认不显示，只有用户主动点击 Dock 图标才调到前台。
+  assert.doesNotMatch(mainProcess, /setActivationPolicy\("accessory"\)/u);
+  assert.match(mainProcess, /app\.on\("activate"/u);
+  assert.match(mainProcess, /presentMainWindow\(\{ userInitiated: true \}\)/u);
   assert.match(mainProcess, /show:\s*e2eWindowForeground/u);
   assert.match(
     mainProcess,
-    /function presentMainWindow\(\)[\s\S]*?e2eWindowRunsInBackground[\s\S]*?return false;/u,
+    /const e2eNativeDialogsSuppressed = Boolean\(e2eUserDataPath\);/u,
+  );
+  assert.match(
+    mainProcess,
+    /function presentMainWindow\(\{ userInitiated = false \} = \{\}\)[\s\S]*?e2eWindowRunsInBackground[\s\S]*?return false;/u,
+  );
+  // 即使显式前台观察 E2E，自动触发的原生弹窗也必须走日志拦截，
+  // 不能弹在屏幕中央。
+  assert.match(
+    mainProcess,
+    /if \(e2eNativeDialogsSuppressed\) \{[\s\S]*?reportSuppressedNativeDialog\([\s\S]*?\} else \{[\s\S]*?dialog\.showErrorBox\(/u,
+  );
+  assert.match(
+    mainProcess,
+    /const nativeBlock = \(\s*!e2eNativeDialogsSuppressed\s*&& shouldPresentNativeCloseBlock\(result\)/u,
   );
 
   assert.match(appFixture, /window\.isVisible\(\)/u);
