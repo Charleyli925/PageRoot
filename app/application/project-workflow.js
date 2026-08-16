@@ -2241,7 +2241,6 @@ export class ProjectWorkflow {
     if (this.#projectSession.epoch > 0) {
       const switchOutcome = await this.prepareSwitch();
       if (switchOutcome.status !== "succeeded") {
-        console.warn("APPLY_SWITCH_FAILED", JSON.stringify(switchOutcome));
         return "deferred";
       }
     }
