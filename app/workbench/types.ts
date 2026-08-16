@@ -132,9 +132,6 @@ export type DesktopProjectsApi = {
   openRecent: (sourcePath: string) => Promise<HtmlProject>;
   forgetRecent?: (sourcePath: string) => Promise<{ sourcePath: string }>;
   acceptExternalOpen?: (requestId: string) => Promise<HtmlProject>;
-  onSourceFileChanged?: (
-    callback: (info: { sourcePath: string }) => void,
-  ) => () => void;
 };
 
 export type QoderHandoffResult = {
