@@ -1,8 +1,8 @@
 # 外部 HTML 打开、导入确认与项目归属 · 详细实施计划
 
-- 计划版本：v2.0
+- 计划版本：v2.1
 - 状态：施工合同；本文不授权合并、打 tag、发布或制作安装包
-- 产品规范：[IMPORT_CONFIRMATION_PRD.md](IMPORT_CONFIRMATION_PRD.md) v1.1
+- 产品规范：[IMPORT_CONFIRMATION_PRD.md](IMPORT_CONFIRMATION_PRD.md) v1.2
 - 审计基线：`origin/main@e7fcc65529dd46bff45db4ef3237d58ce9a713fc`
 - 实施基线：每个实施 PR 开始时重新同步最新 `origin/main`，旧 SHA 只用于解释本文审计结论
 - 推荐拆分：2 个完整 PR；只有发现本文列出的硬阻塞才停下重新评审，不能自行扩成平行版本系统
@@ -16,7 +16,7 @@
 
 1. **长期外部源归属**：Registry 已有 `importSourceKey + importSourceSha256`，但当前代码只把它当成一次导入崩溃重试证据；项目离开干净 V1 后，再次打开原稿仍可能建新项目。它必须升级为长期、唯一、与当前活动 Working Copy 无关的外部源关联。
 2. **打开分流**：本地选择器和 OS `open-file` 现在会先 `readHtmlProject + activateProject(原稿)`，Renderer 随后才通过 `/project/ensure` 导入。新流程必须先只读分类，再等待用户；确认前不得修改 active/recent、不得把原稿发布到 `DocumentSession`。
-3. **版本选择**：再次打开原稿时，“继续当前项目”要打开项目当前可编辑 Working Copy；“查看初始版本 V1”要先安全打开该项目，再复用既有 `VersionWorkflow.viewHistory()` 进入不可变 V1，不能把最新正式 Version、当前本地编辑和 V1 混成同一个目标。
+3. **再次打开只继续当前项目**：再次打开原稿时，“继续当前项目”要打开项目当前可编辑 Working Copy。本需求不提供“查看初始版本 V1”；不可变 V1 只走既有版本历史。实施不得把最新正式 Version、当前本地编辑和 V1 混成同一个目标，也不得为这条打开链路组合 `viewHistory()`。
 4. **Canvas 终态与删除时机**：当前顶部“正在确认当前画布…”只是由缺少 render ACK 推导，初始 ACK 尝试失败后可能没有显式失败状态。删除原稿必须等新项目、Session 和新 Canvas generation/Hash 全部确认；Canvas 失败不得删原稿，也不得无限 pending。
 
 推荐两 PR：
@@ -24,7 +24,7 @@
 | PR | 完整结果 | 合并后是否改善生产行为 |
 |---|---|---|
 | PR-1：外部源唯一关联与只读分类 | Repository 能把同一路径原稿稳定解析回唯一项目；`importExternal` 即使在 V1 已修改、已晋升 V2+、活动 Working Copy 已切换后也不能建第二项目；提供只读 A/B/C 分类 | 是。即使 UI 尚未改造，Repository 底线也会阻止同源重复项目 |
-| PR-2：确认 UI、Prepared Intent、V1 查看、删除与 Canvas 终态 | 所有桌面入口先分类后确认；再次打开显示项目事实；选择动作安全切换；删除严格后置；画布 ACK 成功/失败可恢复 | 是。完成 PRD 全部用户体验 |
+| PR-2：确认 UI、Prepared Intent、删除与 Canvas 终态 | 所有桌面入口先分类后确认；再次打开显示项目事实并只提供“继续当前项目”；选择动作安全切换；删除严格后置；画布 ACK 成功/失败可恢复 | 是。完成 PRD 全部用户体验 |
 
 如果选择单 PR，仍按本文 PR-1 → PR-2 的提交顺序施工，直到所有条款完成前保持 Draft，不得把半成品确认框或可勾选但不工作的删除选项标成 Ready。
 
@@ -166,7 +166,7 @@ Prepared Intent 不持久化。崩溃后：
 - `ExternalFileOpenSession` 扩展为拥有 `classifying / awaiting-confirmation / queued / applying / deferred / attention / idle` 状态和当前 public descriptor。
 - `ProjectApplicationSession` 继续拥有已接受结果 FIFO；扩展一个按 `applicationId` 收口的完成 receipt，使 `WorkspaceController` 能等待“项目已发布并完成 Canvas 验证”，而不是由 Workbench 猜测事件顺序。
 - `ProjectWorkflow` 负责 classify 后的 prompt state、项目 switch/drain/freeze、Prepared Intent commit、同步 Session 发布、失败回滚。
-- `WorkspaceController` 只做跨 `ProjectWorkflow → VersionWorkflow` 的组合：用户选“查看 V1”时，先等待绑定项目安全打开和 hydrate，再调用既有 `VersionWorkflow.viewHistory()`。
+- `WorkspaceController` 暴露确认/取消/重试命令；再次打开的唯一正向 action 是 `continue-current`。不在这条链路组合 `VersionWorkflow.viewHistory()`。
 - Workbench 只订阅 aggregate snapshot、渲染确认框、发 `confirm/cancel/retry` 命令；直接 Bridge 调用继续为 0。
 
 ### 2.6 Edit Canvas ACK 进入 Document 权威状态
@@ -444,14 +444,14 @@ npm run task:finish
 
 进入 Ready 前必须用 exact head 重跑要求门禁；失败不得用跳过测试、放宽 validator 或删除旧 fixture 解决。
 
-## 5. PR-2：统一打开意图、两种确认、V1 查看、删除与 Canvas 终态
+## 5. PR-2：统一打开意图、两种确认、删除与 Canvas 终态
 
 ### 5.1 PR-2 的完成定义
 
 - 文件菜单、标题“+”、Finder/Open With、Dock/argv、冷启动 handoff 使用同一个 A/B/C classifier；
 - A 直接打开；B 显示“已经导入”；C 显示首次导入确认；
 - 确认前 active/recent、项目目录、Registry、DocumentSession、Canvas 均不变；
-- B 的“继续当前项目”打开当前活动 Working Copy；“查看 V1”进入不可变 V1 只读视图；
+- B 的“继续当前项目”打开当前活动 Working Copy；确认框不提供“查看 V1”；
 - C 的确认才创建 V1；取消零副作用；
 - 删除只在新 Canvas verified 后发生；
 - 所有请求、dialog、switch、Canvas 和删除步骤都有成功/取消/失败/被替换/超时/销毁终态。
@@ -465,8 +465,8 @@ npm run task:finish
 - `tests/project-application-session.test.mjs`：完成 receipt、deferred 已提交结果不丢、dispose resolve stale；
 - `tests/document-session.test.mjs`：Canvas pending/verified/failed、旧 ACK忽略、reload 新 generation；
 - `tests/document-workflow.test.mjs`：Canvas verify single-flight、一次自动重建、失败投影、显式 retry；
-- `tests/project-workflow.test.mjs`：confirm 前零 switch、commit 前 final fence、commit 后同步 publish、Canvas fail rollback、V1 post-open outcome；
-- `tests/workspace-controller.test.mjs`：Controller 是“先项目后 V1”的唯一跨 workflow 编排 owner。
+- `tests/project-workflow.test.mjs`：confirm 前零 switch、commit 前 final fence、commit 后同步 publish、Canvas fail rollback；
+- `tests/workspace-controller.test.mjs`：确认命令只接受 `continue-current` / `import-new`；拒绝 `view-initial`。
 
 ### 5.3 `desktop/external-file-open.mjs`：Prepared Intent owner
 
@@ -536,7 +536,7 @@ finalizePreparedHtmlOpen({ requestId })
 `commit` 在 `projectOpenQueue` 内重新分类并重读 Hash：
 
 - A + `open-managed`：重验完整 OpenTarget/HTML/Hash，之后 activate；
-- B + `continue-current` 或 `view-initial`：重验 source key仍唯一、项目当前 active OpenTarget，之后 activate managed working file；
+- B + `continue-current`：重验 source key仍唯一、项目当前 active OpenTarget，之后 activate managed working file；
 - C + `import-new`：重验仍为 C且 Hash 未变，调用 Bridge `/project/ensure`，之后 activate V1；
 - C 在确认期间变为 B：返回 `OPEN_INTENT_RECLASSIFIED` 及新 B descriptor，不导入；
 - 文件 Hash、realpath、项目 target 或 classification 与准备时变化：失败并要求重新确认，不沿用旧文案事实；
@@ -586,8 +586,6 @@ known-external:
   latestOfficialVersionId,
   latestOfficialOrdinal,
   currentDiffersFromBase,
-  initialVersionId,
-  initialVersionOrdinal,
   sourceRelation: "unchanged" | "changed"
 }
 
@@ -663,7 +661,6 @@ prepareSwitch()
   → Desktop commitPreparedHtmlOpen
   → validate returned project HTML/Hash/OpenTarget/receipt
   → synchronous #applyProject
-  → await required hydration if postAction=view-initial
   → ensureCurrentCanvas(new context)
   → success receipt
 ```
@@ -679,7 +676,7 @@ prepareSwitch()
 - rollback未知/失败：进入 attention，展示当前可验证项目状态，不无限 pending；原稿不删；
 - 任意分支 `finally` 释放 freeze/busy，旧 operation的迟到 ACK不得改变新状态。
 
-### 5.10 `app/application/workspace-controller.js`：V1 组合动作
+### 5.10 `app/application/workspace-controller.js`：确认命令
 
 新增唯一公开命令，建议：
 
@@ -690,15 +687,9 @@ retryExternalOpen({ requestId })
 retryCanvasVerification()
 ```
 
-`action=view-initial`：
+`action` 只允许 `import-new` 与 `continue-current`。`view-initial` 必须在 codec 层拒绝，不得组合 `VersionWorkflow.viewHistory()`。
 
-1. 等 ProjectWorkflow完成绑定项目当前 Working Copy打开、hydrate 和 Canvas verify；
-2. 从 `VersionSession.versions` 找 `ordinal === 1`，同时要求 ID等于 classifier初始 ID；
-3. 调用既有 `VersionWorkflow.viewHistory({version: v1, context})`；
-4. 成功显示 V1只读横幅；
-5. V1读取/Hash/Canvas失败时保留已经安全打开的当前项目，返回部分失败“项目已打开，但 V1 暂时无法查看”，不伪装回旧项目。
-
-“基于此版本继续编辑”继续调用现有 `continueEditingHistoryVersion()`，Repository只复用唯一已有 V1 Working Copy。若 `workingCopies` 事实显示它 `differsFromBase=true`，确认/横幅必须先展示“将继续之前基于 V1 的本地编辑”；本需求不创建第二份干净 Working Copy。
+既有版本历史的“基于此版本继续编辑”不在本打开确认中出现；Repository 继续每个 Version 最多一份 Working Copy，本需求不创建第二份干净 V1 工作稿。
 
 ### 5.11 `app/application/document-session.*` 与 `document-workflow.js`
 
@@ -741,12 +732,11 @@ retryCanvasVerification()
 已导入框严格按 PRD §6：
 
 - 分开显示当前基于版本、最新正式版本、是否有已保存修改；
-- 永远显示“V1与首次导入时文件一致”；
 - 只有 `sourceRelation=unchanged` 才说当前原稿与 V1完全一致；
 - changed时显示不会自动导入/覆盖；
-- `取消 / 查看初始版本 V1 / 继续当前项目`；
+- `取消 / 继续当前项目`，没有第三按钮；
 - 不显示删除 checkbox；
-- 主按钮是“继续当前项目”，不是“打开最新版本”。
+- 主按钮是“继续当前项目”，不是“打开最新版本”，也不是“查看初始版本 V1”。
 
 确认框使用 `role=dialog`、`aria-modal`、唯一 title/description ID、Tab循环、Shift+Tab、Escape、backdrop、屏幕阅读器可读状态；自动化按 role/name定位，禁止依赖 CSS selector 文案扫描。
 
@@ -806,9 +796,7 @@ Node测试通过依赖注入的 fake `trashItem` 验证真实调用次数和路�
 
 - 新导入 kept / trashed / trash-failed：PRD §10；
 - known continue：不显示“再次导入成功”，只显示项目状态；
-- known view V1：历史横幅“初始版本 V1 · 只读”；
 - Canvas failed：sticky recoverable action“重试画布确认”；
-- commit succeeded但 V1 view failed：说明项目已打开，V1未打开；
 - source changed during confirmation：要求重新确认，不自动继续。
 
 通知类型和 action必须符合现有 notification policy，不在 Workbench新增独立 toast状态机。
@@ -845,10 +833,10 @@ Node测试通过依赖注入的 fake `trashItem` 验证真实调用次数和路�
 | `tests/external-file-open-session.test.mjs` | B/C dialog、替换、checkbox reset、stale action、close cancel、attention |
 | `tests/project-application-session.test.mjs` | completion receipt、deferred重试、dispose收口 |
 | `tests/project-workflow.test.mjs` | 确认前零 switch；三 action；final fence；rollback；Canvas failed；delete finalize时序 |
-| `tests/workspace-controller.test.mjs` | view V1严格在项目 hydrate后；V1失败部分成功；retry命令 |
+| `tests/workspace-controller.test.mjs` | 只接受 `continue-current` / `import-new`；拒绝 `view-initial`；retry命令 |
 | `tests/document-session.test.mjs` | Canvas状态机与迟到 ACK |
 | `tests/document-workflow.test.mjs` | single-flight、一次重建、terminal failure、retry |
-| `tests/version-workflow.test.mjs` | V1只读；继续编辑复用原 Working Copy；已有修改不建新 copy |
+| `tests/version-workflow.test.mjs` | 既有历史查看/继续编辑不受本打开确认影响；不新增第二条 Working Copy |
 
 ### 6.2 Node：删除安全负向矩阵
 
@@ -904,13 +892,12 @@ Node测试通过依赖注入的 fake `trashItem` 验证真实调用次数和路�
 3. 冷启动 argv/open-file：先显示确认，不静默导入；取消回欢迎项目；
 4. 保留原稿再次 `open-file`：显示 B dialog，项目目录数/版本数不变；
 5. B“继续当前项目”：打开已保存本地编辑，不跳只读 latest；
-6. B“查看 V1”：项目先安全打开，再进入 `初始版本 V1 · 只读`；
-7. 从 V1继续编辑：复用同一 `workingCopyId`；若 fixture已有 V1本地修改，出现说明；
-8. 外部原稿被改：B dialog显示 changed，不覆盖、不导入；
-9. 较新 OS request在旧 dialog可见时替换，旧 request不能迟到导入；
-10. 合成复杂/动态 HTML：打开后 Canvas最终 verified，或明确 failed+retry，绝不长期 pending；
-11. Canvas验证注入失败：原稿不删，旧项目成功 rollback或进入明确 attention；
-12. close在 dialog可见时等价取消，不把同意/checkbox写入 handoff。
+6. 外部原稿被改：B dialog显示 changed，不覆盖、不导入；
+7. 较新 OS request在旧 dialog可见时替换，旧 request不能迟到导入；
+8. 合成复杂/动态 HTML：打开后 Canvas最终 verified，或明确 failed+retry，绝不长期 pending；
+9. Canvas验证注入失败：原稿不删，旧项目成功 rollback或进入明确 attention；
+10. close在 dialog可见时等价取消，不把同意/checkbox写入 handoff。
+11. B dialog 没有“查看初始版本 V1”按钮。
 
 `packaged-startup-smoke.spec.mjs` 现有“启动即导入”用例必须改为驱动确认框，再验证 managed V1。真实 `shell.trashItem` 的调用正确性由注入 Node controller拥有；Electron不得污染用户废纸篓。
 
@@ -961,8 +948,7 @@ Ready/full-gate：完整 source matrix；Desktop/IPC/Bridge/Schema/Electron 风�
 | import staging失败 | pending按事务清理 | 旧项目可操作 | 原稿不删 |
 | 项目根发布后 Registry响应丢失 | 完整项目可能已发布 | 重放同 request恢复同项目 | 不创建第二个 |
 | Main commit后 Renderer发布失败 | active可能已切、项目可能已导入 | rollback旧项目或 attention | 原稿不删 |
-| 新 Canvas verify失败 | 完整项目已存在 | rollback/明确失败+重试 | 原稿不删，不无限 pending |
-| V1只读读取失败 | 绑定项目已安全打开 | 当前项目可编辑，提示 V1未打开 | 不回滚项目 |
+| Canvas验证失败 | 完整项目可能已存在 | rollback/明确失败+重试 | 原稿不删，不无限 pending |
 | trash失败 | 项目和Canvas成功 | 项目已导入，原稿仍在 | 不回滚、不自动重试 |
 | trash响应丢失 | 可能已进废纸篓 | 同 request返回receipt | 不二次 trash |
 | dialog中退出 | 无 | 下次恢复旧项目/欢迎项目 | 未确认 intent丢弃 |
@@ -1058,7 +1044,7 @@ Ready/full-gate：完整 source matrix；Desktop/IPC/Bridge/Schema/Electron 风�
 8. Main commit响应丢失如何回到同一 receipt？
 9. 新 Canvas不 ACK时哪个 owner把状态设为 failed？用户如何重试？
 10. 删除调用发生在什么 exact event之后？Renderer能否改变路径？
-11. view V1失败时当前项目是什么？是否存在半切状态？
+11. 再次打开确认框是否仍出现“查看初始版本 V1”？答案必须是否。
 12. close/dialog替换/dispose是否都有 terminal transition？
 13. 是否新增了第二个 Version Working Copy或“干净V1分支”？答案必须是否。
 14. 是否改写外部原稿或V1 snapshot？除明确 trash外答案必须是否。
@@ -1078,7 +1064,7 @@ Ready/full-gate：完整 source matrix；Desktop/IPC/Bridge/Schema/Electron 风�
 PR-2 额外附 PRD §16逐条验收表，并报告：
 
 - 新外部源、已绑定源、受管项目三个真实入口；
-- 当前本地编辑/最新正式/V1三者的实际展示例；
+- 当前本地编辑与最新正式版本分开展示；原稿与 V1 的 relation 只用于说明会不会自动导入；
 - 同源重开前后 projectId、项目目录数、Version数；
 - Canvas generation/Hash从 pending到verified或failed的证据；
 - 删除 IPC精确参数面和负向测试矩阵；
