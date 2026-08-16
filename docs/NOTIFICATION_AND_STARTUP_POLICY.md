@@ -73,9 +73,11 @@ Toast 只保留三类：用户必须改变条件才能继续的动作、存在�
 
 `~/Documents/PageRoot/项目记录`
 
-桌面不再探测 `PageRootV2`、`YuanYe` 或 `HTML AI 工作台` 的项目记录目录。
-`HTML_AI_WORKSPACE` 仍可作为测试覆盖；否则只使用上述 PageRoot 路径。旧目录
-不会被删除。v4 项目文件在 `~/Documents/PageRoot/项目`。
+桌面不再探测 `PageRootV2`、`YuanYe` 或 `HTML AI 工作台` 的项目记录目录，
+也不再打开这些旧 appData 名下的 `html-projects.json`。Recent 只读当前
+`userData` 状态文件。`HTML_AI_WORKSPACE` 仍可作为测试覆盖；否则只使用
+上述 PageRoot 路径。旧目录不会被删除。v4 项目文件在
+`~/Documents/PageRoot/项目`。
 
 macOS 首次授予 `Documents` 访问权限时，Bridge 子进程可能在系统权限面板
 处暂停。12 秒只作为“启动较慢”的内部观察点，不是失败截止时间；只要进程

@@ -14,6 +14,8 @@ const channels = Object.freeze({
   renameHtml: "html-projects:rename",
   activateGeneratedVersion: "html-projects:activate-generated-version",
   activateManagedWorkingCopy: "html-projects:activate-managed-working-copy",
+  reconcileActiveManagedSource: "html-projects:reconcile-active-managed-source",
+  sourceFileMayHaveChanged: "html-projects:source-file-may-have-changed",
   revealVersionFile: "html-projects:reveal-version-file",
   revealAiTask: "html-projects:reveal-ai-task",
   listRecentProjects: "html-projects:list-recent",
@@ -133,6 +135,10 @@ const projectsApi = Object.freeze({
     channels.activateManagedWorkingCopy,
     payload,
   ),
+  reconcileActiveManagedSource: (payload) => invokeProject(
+    channels.reconcileActiveManagedSource,
+    payload,
+  ),
   revealVersionFile: (payload) => invokeProject(channels.revealVersionFile, payload),
   revealAiTask: (payload) => invokeProject(channels.revealAiTask, payload),
   listRecentProjects: () => invokeProject(channels.listRecentProjects),
@@ -156,7 +162,14 @@ const projectsApi = Object.freeze({
         ? payload.sourcePath.trim()
         : "";
       if (!sourcePath) return;
-      listener({ sourcePath });
+      const next = {
+        sourcePath,
+        watcherGeneration: Number(payload?.watcherGeneration || 0),
+      };
+      if (payload?.sourceMissing === true || payload?.sourceMissing === false) {
+        next.sourceMissing = payload.sourceMissing;
+      }
+      listener(next);
     };
     ipcRenderer.on(channels.sourceFileMayHaveChanged, wrapped);
     return () => {

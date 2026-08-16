@@ -46,6 +46,37 @@ async function cachedRealPath(target) {
   return resolved;
 }
 
+async function verifiedProjectRoot(projectRoot, { allowMissing = true } = {}) {
+  const store = serialPathCache.getStore();
+  const cached = store?.verifiedRoots.get(projectRoot);
+  if (cached) return cached;
+
+  const rootInformation = await lstat(projectRoot).catch((cause) => {
+    if (cause?.code === "ENOENT") return null;
+    throw cause;
+  });
+  if (!rootInformation) {
+    if (allowMissing) return { exists: false };
+    throw new ProjectFileRepositoryError(
+      "PROJECT_ROOT_NOT_FOUND",
+      "The path has no project root.",
+    );
+  }
+  if (rootInformation.isSymbolicLink() || !rootInformation.isDirectory()) {
+    throw new ProjectFileRepositoryError(
+      "UNSAFE_DIRECTORY",
+      "The project root must be a real directory.",
+    );
+  }
+  const verified = {
+    exists: true,
+    information: rootInformation,
+    realRoot: await cachedRealPath(projectRoot),
+  };
+  store?.verifiedRoots.set(projectRoot, verified);
+  return verified;
+}
+
 const HTML_EXTENSIONS = new Set([".html", ".htm"]);
 const LEGACY_V4_REGISTRY_BACKUP_DIRECTORY = ".pageroot-registry-backups";
 const LEGACY_V4_REGISTRY_MIGRATION_LOCK_DIRECTORY = ".pageroot-registry-migration-lock";
@@ -61,6 +92,12 @@ const WORKING_COPY_ID = /^work_ver_\d{4,}$/u;
 const SHA256 = /^sha256:[a-f0-9]{64}$/u;
 const SAFE_REQUEST_ID = /^[A-Za-z0-9_-]{1,160}$/u;
 const SAFE_OPERATION_ID = /^[A-Za-z0-9_-]{8,160}$/u;
+const RECONCILE_LOCATOR_REASONS = new Set([
+  "watch",
+  "rename",
+  "startup",
+  "safe-action",
+]);
 const SAVE_RECOVERY_ID = /^save_work_ver_\d{4,}_(?:current|\d+)_[a-f0-9]{32}$/u;
 const MAX_HTML_BYTES = 20 * 1024 * 1024;
 const MAX_PATH_COMPONENT_BYTES = 255;
@@ -184,24 +221,9 @@ async function assertRealPathInsideProject(root, candidate, label, {
       `${label} escapes its project.`,
     );
   }
-  const rootInformation = await lstat(projectRoot).catch((cause) => {
-    if (cause?.code === "ENOENT") return null;
-    throw cause;
-  });
-  if (!rootInformation) {
-    if (allowMissing) return { exists: false, path: target };
-    throw new ProjectFileRepositoryError(
-      "PROJECT_ROOT_NOT_FOUND",
-      `${label} has no project root.`,
-    );
-  }
-  if (rootInformation.isSymbolicLink() || !rootInformation.isDirectory()) {
-    throw new ProjectFileRepositoryError(
-      "UNSAFE_DIRECTORY",
-      "The project root must be a real directory.",
-    );
-  }
-  const realRoot = await cachedRealPath(projectRoot);
+  const verified = await verifiedProjectRoot(projectRoot, { allowMissing });
+  if (!verified.exists) return { exists: false, path: target };
+  const { information: rootInformation, realRoot } = verified;
   const relative = path.relative(projectRoot, target);
   const parts = relative === "" ? [] : relative.split(path.sep);
   if (parts.some((part) => !part || part === "." || part === "..")) {
@@ -1955,6 +1977,28 @@ export class ProjectFileRepository {
     return this.#serial(() => this.#resolveOpenTarget({ sourcePath }));
   }
 
+  async reconcileWorkingCopyLocator({
+    operationId,
+    previousSourcePath,
+    projectId,
+    documentId,
+    workingCopyId,
+    versionId,
+    expectedSourceSha256,
+    reason,
+  } = {}) {
+    return this.#serial(() => this.#reconcileWorkingCopyLocator({
+      operationId,
+      previousSourcePath,
+      projectId,
+      documentId,
+      workingCopyId,
+      versionId,
+      expectedSourceSha256,
+      reason,
+    }));
+  }
+
   async saveWorkingCopy({
     target,
     html,
@@ -2206,7 +2250,10 @@ export class ProjectFileRepository {
   }
 
   async #serial(operation) {
-    const run = () => serialPathCache.run({ realPaths: new Map() }, operation);
+    const run = () => serialPathCache.run({
+      realPaths: new Map(),
+      verifiedRoots: new Map(),
+    }, operation);
     const current = this.#tail.then(run, run);
     this.#tail = current.catch(() => {});
     return current;
@@ -5172,6 +5219,148 @@ export class ProjectFileRepository {
     };
   }
 
+  async #reconcileWorkingCopyLocator({
+    operationId,
+    previousSourcePath,
+    projectId,
+    documentId,
+    workingCopyId,
+    versionId,
+    expectedSourceSha256,
+    reason,
+  }) {
+    const requestedOperationId = String(operationId || "");
+    if (!SAFE_OPERATION_ID.test(requestedOperationId)) {
+      throw new ProjectFileRepositoryError(
+        "INVALID_OPERATION_ID",
+        "operationId is invalid.",
+      );
+    }
+    const requestedReason = String(reason || "");
+    if (!RECONCILE_LOCATOR_REASONS.has(requestedReason)) {
+      throw new ProjectFileRepositoryError(
+        "INVALID_RECONCILE_REASON",
+        "The locator reconcile reason is not allowed.",
+      );
+    }
+    const previousPath = normalizedPath(previousSourcePath);
+    htmlExtension(previousPath);
+    const expectedHash = assertSha256(expectedSourceSha256, "expectedSourceSha256");
+    const requestedWorkingCopyId = assertId(
+      workingCopyId,
+      WORKING_COPY_ID,
+      "workingCopyId",
+    );
+    const requestedVersionId = assertId(versionId, VERSION_ID, "versionId");
+    const loaded = await this.#loadRegisteredProject({
+      projectId,
+      documentId,
+    });
+    const workingCopy = loaded.manifest.workingCopies.find(
+      (entry) => entry.workingCopyId === requestedWorkingCopyId,
+    );
+    if (!workingCopy) {
+      throw new ProjectFileRepositoryError(
+        "WORKING_COPY_UNAVAILABLE",
+        "The Working Copy HTML is temporarily unavailable; PageRoot did not write outside its registered path.",
+        { workingCopyId: requestedWorkingCopyId },
+      );
+    }
+    if (workingCopy.versionId !== requestedVersionId) {
+      throw new ProjectFileRepositoryError(
+        "MANAGED_SOURCE_IDENTITY_MISMATCH",
+        "The supplied Working Copy identity does not match the registered source.",
+        { workingCopyId: requestedWorkingCopyId },
+      );
+    }
+
+    const mappedPath = workingCopySourcePath(loaded.paths, workingCopy);
+    let exactSourcePath = mappedPath;
+    let sourceInformation = await regularInformation(mappedPath, "Working Copy", {
+      projectRootPath: loaded.paths.projectRootPath,
+    });
+    if (!sourceInformation) {
+      const recoveredPath = await this.#findWorkingCopyByFileIdentity(
+        loaded.paths.projectRootPath,
+        workingCopy.fileIdentity,
+      );
+      if (!recoveredPath) {
+        throw new ProjectFileRepositoryError(
+          "WORKING_COPY_UNAVAILABLE",
+          "The Working Copy HTML is temporarily unavailable; PageRoot did not write outside its registered path.",
+          { workingCopyId: workingCopy.workingCopyId },
+        );
+      }
+      exactSourcePath = recoveredPath;
+      sourceInformation = await regularInformation(exactSourcePath, "Working Copy", {
+        projectRootPath: loaded.paths.projectRootPath,
+      });
+      if (!sourceInformation) {
+        throw new ProjectFileRepositoryError(
+          "WORKING_COPY_UNAVAILABLE",
+          "The Working Copy HTML disappeared while PageRoot was recovering its registered path.",
+          { workingCopyId: workingCopy.workingCopyId },
+        );
+      }
+      if (
+        !sameFileIdentity(
+          workingCopy.fileIdentity,
+          copyFileIdentity(sourceInformation),
+        )
+      ) {
+        throw new ProjectFileRepositoryError(
+          "MANAGED_SOURCE_IDENTITY_MISMATCH",
+          "The recovered HTML does not match the registered Working Copy identity.",
+          { workingCopyId: workingCopy.workingCopyId },
+        );
+      }
+      await this.#rebindWorkingCopyPath(
+        loaded,
+        workingCopy,
+        exactSourcePath,
+        sourceInformation,
+      );
+    } else {
+      await this.#rebindWorkingCopyPath(
+        loaded,
+        workingCopy,
+        exactSourcePath,
+        sourceInformation,
+      );
+    }
+
+    const source = await readHtmlFile(exactSourcePath, "Working Copy", {
+      projectRootPath: loaded.paths.projectRootPath,
+    });
+    const pathChanged = !samePath(exactSourcePath, previousPath);
+    const contentChanged = source.sha256 !== expectedHash;
+    const status = contentChanged
+      ? "content-changed"
+      : pathChanged
+        ? "relocated"
+        : "unchanged";
+    const version = loaded.manifest.versions.find(
+      (entry) => entry.versionId === workingCopy.versionId,
+    );
+    return {
+      operationId: requestedOperationId,
+      status,
+      reason: requestedReason,
+      previousSourcePath: previousPath,
+      sourcePath: exactSourcePath,
+      sourceSha256: source.sha256,
+      openTarget: publicOpenTarget({
+        project: loaded.project,
+        projectRootPath: loaded.paths.projectRootPath,
+        targetKind: "working-copy",
+        workingCopy,
+        version,
+        exactSourcePath,
+        sourceSha256: source.sha256,
+      }),
+    };
+  }
+
   async #resolveOpenTarget({ sourcePath }) {
     const exactSourcePath = normalizedPath(sourcePath);
     htmlExtension(exactSourcePath);
@@ -5381,7 +5570,14 @@ export class ProjectFileRepository {
         matches.push(candidate);
       }
     }
-    return matches.length === 1 ? matches[0] : null;
+    if (matches.length > 1) {
+      throw new ProjectFileRepositoryError(
+        "MANAGED_PATH_AMBIGUOUS",
+        "More than one Working Copy has the same filesystem identity.",
+        { candidateCount: matches.length },
+      );
+    }
+    return matches[0] || null;
   }
 
   async #saveWorkingCopy({ target, html, expectedSourceSha256, editRevision }) {

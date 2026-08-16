@@ -103,6 +103,8 @@ const REQUIRED_APP_SOURCE_FILES = [
   "desktop/project-files.mjs",
   "desktop/source-file-watch.mjs",
   "desktop/source-rename.mjs",
+  "desktop/source-file-watch.mjs",
+  "desktop/active-managed-locator.mjs",
   "desktop/project-path-policy.mjs",
   "desktop/welcome-project-content.mjs",
   "desktop/export-copy.mjs",

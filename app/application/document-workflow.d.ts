@@ -110,7 +110,7 @@ export class DocumentWorkflow {
     context?: ProjectContext;
   }): Promise<DocumentWorkflowOutcome<Record<string, unknown>>>;
   observeExternalSourceChange(input?: {
-    sourcePath?: string;
+    sourcePath?: string | null;
   }): Promise<DocumentWorkflowOutcome<Record<string, unknown>>>;
   forceUnlockConflict(input?: {
     context?: ProjectContext;

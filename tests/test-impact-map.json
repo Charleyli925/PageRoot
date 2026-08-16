@@ -440,6 +440,8 @@
         "tests/external-file-open.test.mjs",
         "tests/project-rules-workflow.test.mjs",
         "tests/source-rename.test.mjs",
+        "tests/source-file-watch.test.mjs",
+        "tests/active-managed-locator.test.mjs",
         "tests/version-workflow.test.mjs"
       ]
     },
@@ -754,9 +756,15 @@
     },
     {
       "id": "desktop-source-rename",
-      "patterns": ["^desktop/source-rename\\.mjs$"],
+      "patterns": [
+        "^desktop/(?:source-rename|source-file-watch|active-managed-locator)\\.mjs$"
+      ],
       "suites": ["electron-smoke"],
-      "nodeTests": ["tests/source-rename.test.mjs"]
+      "nodeTests": [
+        "tests/source-rename.test.mjs",
+        "tests/source-file-watch.test.mjs",
+        "tests/active-managed-locator.test.mjs"
+      ]
     },
     {
       "id": "desktop-export-copy",
@@ -827,7 +835,9 @@
         "tests/desktop-preload-ipc.test.mjs",
         "tests/electron-window-policy.test.mjs",
         "tests/product-contract.test.mjs",
-        "tests/source-file-watch.test.mjs"
+        "tests/source-file-watch.test.mjs",
+        "tests/active-managed-locator.test.mjs",
+        "tests/source-rename.test.mjs"
       ]
     },
     {
@@ -884,15 +894,15 @@
     {
       "id": "bridge-lifecycle",
       "patterns": [
-        "^scripts/(?:workspace-bridge|lifecycle-core|finalize-attempt|record-user-supplement|user-supplement-core|candidate-assessment(?:-decoder)?|scope-validator|html-source-parser|attachment-storage|product-contract|target-identity)\\.mjs$"
+        "^scripts/(?:workspace-bridge|lifecycle-core|finalize-attempt|record-user-supplement|user-supplement-core|candidate-assessment(?:-decoder)?|html-source-parser|attachment-storage|product-contract|target-identity)\\.mjs$"
       ],
       "suites": ["ai-smoke"],
       "nodeTests": [
         "tests/workspace-bridge.test.mjs",
         "tests/lifecycle-core.test.mjs",
-        "tests/scope-validator.test.mjs",
         "tests/html-source-parser.test.mjs",
         "tests/attachment-storage.test.mjs",
+        "tests/candidate-assessment.test.mjs",
         "tests/compatibility-decoders.test.mjs",
         "tests/product-contract.test.mjs",
         "tests/project-context-service.test.mjs",
@@ -910,7 +920,6 @@
       "nodeTests": [
         "tests/bridge-test-environment.test.mjs",
         "tests/schema-contract.test.mjs",
-        "tests/scope-validator.test.mjs",
         "tests/workspace-bridge.test.mjs"
       ]
     },
@@ -926,7 +935,6 @@
         "tests/schema-contract.test.mjs",
         "tests/compatibility-decoders.test.mjs",
         "tests/targeted-change-schema.test.mjs",
-        "tests/scope-validator.test.mjs",
         "tests/workspace-bridge.test.mjs",
         "tests/project-file-schema.test.mjs",
         "tests/project-file-repository.test.mjs"

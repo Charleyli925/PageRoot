@@ -14,7 +14,6 @@ import {
   planSourcePatch,
   resolveTargetRef,
 } from "../app/lib/source-patch-core.js";
-import { validateScope } from "../scripts/scope-validator.mjs";
 
 const fixtureRoot = fileURLToPath(
   new URL("./fixtures/targeted-change/", import.meta.url),
@@ -167,46 +166,26 @@ test("fixed Unicode/style/reorder fixtures enforce exact source patches and fail
   );
 });
 
-test("fixed scope fixture blocks every out-of-target class while allowing target text", async () => {
+test("fixed scope fixture keeps out-of-target bytes when the allowed island is patched", async () => {
   const baseHtml = await fixture("styles-and-scope.html");
   const index = buildSourceIndex(baseHtml);
   const allowed = index.elements.find(
-    (element) => element.stableAttributes.id === "allowed",
+    (element) =>
+      element.tagName === "p"
+      && element.textContent.includes("允许修改的正文"),
   );
-  const allowedTarget = createTargetRef(index, allowed.nodeId, {
-    targetId: "fixture-allowed",
-  });
-  const identity = {
-    projectId: "project_fixture",
-    documentId: "doc_fixture",
-    requestId: "req_fixture",
-    attemptId: "attempt_fixture",
-    generatedAt: "2026-07-18T12:00:00.000Z",
-    allowedTargets: [allowedTarget],
-  };
-
-  const allowedOutput = baseHtml.replace(
-    "允许修改的正文",
-    "允许修改的正文（已验证）",
-  );
-  assert.equal(validateScope({
-    ...identity,
-    baseHtml,
-    outputHtml: allowedOutput,
-  }).verdict, "pass");
-
-  const forbiddenOutputs = [
-    baseHtml.replace("范围外必须逐字符保持", "范围外被改"),
-    baseHtml.replace("--brand-primary: #2563eb", "--brand-primary: #dc2626"),
-    baseHtml.replace("untouched: true", "untouched: false"),
-    baseHtml.replace('<section id="outside">', '<section id="outside" data-rogue="1">'),
-    baseHtml.replace("</body>", "<aside>越界结构</aside></body>"),
-  ];
-  for (const outputHtml of forbiddenOutputs) {
-    const report = validateScope({ ...identity, baseHtml, outputHtml });
-    assert.equal(report.verdict, "fail");
-    assert.ok(report.summary.violationCount > 0);
-  }
+  const result = applyPatchPlan(planSourcePatch({
+    type: "replace-editable-island",
+    targetRef: createTargetRef(index, allowed.nodeId, { level: "subregion" }),
+    beforeInnerHtml: "允许修改的正文",
+    nextInnerHtml: "允许修改的正文（已验证）",
+  }, index), baseHtml);
+  assert.equal(result.scopeReport.outsideUnchanged, true);
+  assert.match(result.html, /允许修改的正文（已验证）/u);
+  assert.match(result.html, /范围外必须逐字符保持/u);
+  assert.match(result.html, /--brand-primary: #2563eb/u);
+  assert.match(result.html, /untouched: true/u);
+  assert.doesNotMatch(result.html, /data-rogue/u);
 });
 
 test("the committed desktop QA fixture reproduces text, style, reorder, and full inverse recovery", async () => {

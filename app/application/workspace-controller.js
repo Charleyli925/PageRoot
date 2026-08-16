@@ -866,6 +866,10 @@ export class WorkspaceController {
     return this.#requireProjectWorkflow().renameSource(input);
   }
 
+  observeExternalSourceChange(input) {
+    return this.#requireProjectWorkflow().reconcileExternalSourceLocator(input);
+  }
+
   submitRequest(input) {
     return this.#requireRunWorkflow().submit(input);
   }
@@ -932,10 +936,6 @@ export class WorkspaceController {
 
   previewExternalDocumentSource(input) {
     return this.#requireDocumentWorkflow().previewExternalSource(input);
-  }
-
-  observeExternalSourceChange(input) {
-    return this.#requireDocumentWorkflow().observeExternalSourceChange(input);
   }
 
   forceUnlockDocumentConflict(input) {

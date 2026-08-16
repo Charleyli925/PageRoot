@@ -35,19 +35,6 @@ async function fixture() {
   const requestRoot = path.join(projectRoot, "requests", REQUEST_ID);
   const attemptRoot = path.join(requestRoot, "attempts", ATTEMPT_ID);
   await mkdir(attemptRoot, { recursive: true });
-  await writeFile(
-    path.join(workspaceRoot, "project-registry.json"),
-    JSON.stringify({
-      schemaVersion: LIFECYCLE_SCHEMA_VERSION,
-      projects: {
-        [PROJECT_ID]: {
-          displayName: "补充记录项目",
-          createdAt,
-          storageDirectoryName,
-        },
-      },
-    }),
-  );
   await writeFile(path.join(projectRoot, "project.json"), JSON.stringify({
     schemaVersion: LIFECYCLE_SCHEMA_VERSION,
     projectId: PROJECT_ID,
@@ -77,7 +64,7 @@ test("internal AI conversation supplements are append-only, hashed and sealed", 
   await writeFile(referencePath, Buffer.from("managed-reference-image"));
 
   const added = await recordUserSupplement({
-    workspaceRoot: current.workspaceRoot,
+    projectRoot: current.projectRoot,
     projectId: PROJECT_ID,
     requestId: REQUEST_ID,
     attemptId: ATTEMPT_ID,
@@ -93,7 +80,7 @@ test("internal AI conversation supplements are append-only, hashed and sealed", 
   assert.equal(added.recordId, "supplement_0001");
 
   const idempotent = await recordUserSupplement({
-    workspaceRoot: current.workspaceRoot,
+    projectRoot: current.projectRoot,
     projectId: PROJECT_ID,
     requestId: REQUEST_ID,
     attemptId: ATTEMPT_ID,
@@ -109,7 +96,7 @@ test("internal AI conversation supplements are append-only, hashed and sealed", 
   assert.equal(idempotent.idempotent, true);
 
   await recordUserSupplement({
-    workspaceRoot: current.workspaceRoot,
+    projectRoot: current.projectRoot,
     projectId: PROJECT_ID,
     requestId: REQUEST_ID,
     attemptId: ATTEMPT_ID,
@@ -166,7 +153,7 @@ test("internal AI conversation supplements are append-only, hashed and sealed", 
 
   await assert.rejects(
     recordUserSupplement({
-      workspaceRoot: current.workspaceRoot,
+      projectRoot: current.projectRoot,
       projectId: PROJECT_ID,
       requestId: REQUEST_ID,
       attemptId: ATTEMPT_ID,
@@ -186,7 +173,7 @@ test("description-only evidence is explicit when the original file cannot be arc
   const current = await fixture();
   context.after(() => rm(current.workspaceRoot, { recursive: true, force: true }));
   await recordUserSupplement({
-    workspaceRoot: current.workspaceRoot,
+    projectRoot: current.projectRoot,
     projectId: PROJECT_ID,
     requestId: REQUEST_ID,
     attemptId: ATTEMPT_ID,
@@ -214,17 +201,17 @@ test("description-only evidence is explicit when the original file cannot be arc
   assert.equal(archive.records[0].attachments.length, 0);
 });
 
-test("supplement mutation rejects a registry remap to mismatched project metadata", async (context) => {
+test("supplement mutation rejects a project.json identity that does not match the directory", async (context) => {
   const current = await fixture();
   context.after(() => rm(current.workspaceRoot, { recursive: true, force: true }));
-  const registryPath = path.join(current.workspaceRoot, "project-registry.json");
-  const registry = JSON.parse(await readFile(registryPath, "utf8"));
-  registry.projects[PROJECT_ID].displayName = "被篡改的目录映射";
-  await writeFile(registryPath, JSON.stringify(registry));
+  const projectPath = path.join(current.projectRoot, "project.json");
+  const project = JSON.parse(await readFile(projectPath, "utf8"));
+  project.storageDirectoryName = "tampered-storage-name";
+  await writeFile(projectPath, JSON.stringify(project));
 
   await assert.rejects(
     recordUserSupplement({
-      workspaceRoot: current.workspaceRoot,
+      projectRoot: current.projectRoot,
       projectId: PROJECT_ID,
       requestId: REQUEST_ID,
       attemptId: ATTEMPT_ID,

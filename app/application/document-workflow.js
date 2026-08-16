@@ -649,71 +649,6 @@ export class DocumentWorkflow {
     }
   }
 
-  async observeExternalSourceChange({ sourcePath } = {}) {
-    const activeContext = this.#projectSession.context;
-    if (!activeContext) {
-      return blocked("DOCUMENT_CONTEXT_REQUIRED", "当前页面尚未完成项目身份初始化。");
-    }
-    if (
-      sourcePath
-      && !this.#codecs.sameSourcePath(sourcePath, activeContext.sourcePath)
-    ) {
-      return succeeded({ ignored: true, reason: "stale-path" });
-    }
-    const persistState = this.#documentSession.persistState;
-    if (
-      persistState === "writing"
-      || persistState === "queued"
-      || persistState === "conflict"
-    ) {
-      return succeeded({ ignored: true, reason: persistState });
-    }
-    if (typeof this.#bridgeClient.sourceStat !== "function") {
-      return blocked("SOURCE_STAT_UNAVAILABLE", "当前运行时无法检查磁盘源文件。");
-    }
-    try {
-      const stat = await this.#bridgeClient.sourceStat(activeContext.sourcePath);
-      if (!this.#isCurrent(activeContext)) return stale(activeContext);
-      const diskSha256 = String(stat.sha256 || "");
-      const expected = String(this.#documentSession.sourceSha256 || "");
-      if (!SHA256.test(diskSha256) || diskSha256 === expected) {
-        return succeeded({ changed: false, sha256: diskSha256 });
-      }
-      const message = "源文件在磁盘上被其他程序修改了。您的编辑内容仍在，可先预览外部版本再决定。";
-      this.#documentSession.setPersistence({
-        state: "conflict",
-        error: message,
-      });
-      this.#emit({
-        type: "document-external-source-changed",
-        context: activeContext,
-        sha256: diskSha256,
-        lastModifiedAt: String(stat.lastModifiedAt || ""),
-        size: Number(stat.size || 0),
-      });
-      return succeeded({
-        changed: true,
-        sha256: diskSha256,
-        lastModifiedAt: String(stat.lastModifiedAt || ""),
-      });
-    } catch (cause) {
-      if (!this.#isCurrent(activeContext)) return stale(activeContext);
-      const message = this.#codecs.errorMessage(cause, "暂时无法核对外磁盘上的源文件。");
-      this.#emit({
-        type: "document-external-source-stat-failed",
-        context: activeContext,
-        code: sourceErrorCode(cause, "SOURCE_STAT_REJECTED"),
-        message,
-      });
-      return this.#outcomeFromCause(
-        this.#nextOperationId("stat"),
-        cause,
-        "SOURCE_STAT_REJECTED",
-        message,
-      );
-    }
-  }
-
   async forceUnlockConflict({ context } = {}) {
     const activeContext = copyContext(context) || this.#projectSession.context;
     if (!activeContext) {
@@ -863,6 +798,143 @@ export class DocumentWorkflow {
         cause,
         "DOCUMENT_CANVAS_AUTHORITY_REJECTED",
         this.#codecs.errorMessage(cause, "当前画布尚未完成自动恢复。"),
+      );
+    }
+  }
+
+  async observeExternalSourceChange({ sourcePath } = {}) {
+    if (this.#disposed) {
+      return blocked("DOCUMENT_WORKFLOW_DISPOSED", "文档持久化工作流已经停止。");
+    }
+    const liveContext = copyContext(this.#projectSession.context);
+    if (!liveContext?.sourcePath) {
+      return blocked("DOCUMENT_CONTEXT_REQUIRED", "当前页面尚未完成项目身份初始化。");
+    }
+    if (
+      sourcePath
+      && !this.#codecs.sameSourcePath(sourcePath, liveContext.sourcePath)
+    ) {
+      return succeeded({ ignored: true, reason: "stale-path" });
+    }
+    if (this.#documentSession.persistState === "conflict") {
+      return succeeded({ alreadyConflict: true });
+    }
+    if (
+      this.#documentSession.persistState === "writing"
+      || this.#documentSession.persistState === "queued"
+      || this.#documentSession.pendingWrite
+      || this.#documentSession.flushPromise
+      || this.hasHistoryAction
+    ) {
+      return succeeded({ deferred: true });
+    }
+    try {
+      let diskSha256 = "";
+      let lastModifiedAt = "";
+      let size = 0;
+      if (typeof this.#bridgeClient.sourceStat === "function") {
+        const stat = await this.#bridgeClient.sourceStat(liveContext.sourcePath);
+        diskSha256 = String(stat.sha256 || "");
+        lastModifiedAt = String(stat.lastModifiedAt || "");
+        size = Number(stat.size || 0);
+        if (!SHA256.test(diskSha256)) {
+          throw invalidAcknowledgement(
+            "外部源 HTML 与声明 Hash 不一致。",
+            "INVALID_SOURCE_ACK",
+          );
+        }
+      } else {
+        const payload = await this.#bridgeClient.source(liveContext.sourcePath);
+        this.#assertSourcePayload(
+          payload,
+          liveContext,
+          "核对外部源文件时文件身份发生变化，已拒绝覆盖当前项目。",
+        );
+        diskSha256 = String(payload.sha256 || "");
+        lastModifiedAt = String(payload.lastModifiedAt || "");
+        if (
+          !SHA256.test(diskSha256)
+          || await this.#hashPort.sha256(String(payload.content || "")) !== diskSha256
+        ) {
+          throw invalidAcknowledgement(
+            "外部源 HTML 与声明 Hash 不一致。",
+            "INVALID_SOURCE_ACK",
+          );
+        }
+      }
+      const current = copyContext(this.#projectSession.context);
+      if (
+        !current
+        || !this.#codecs.sameSourcePath(current.sourcePath, liveContext.sourcePath)
+      ) {
+        return stale(liveContext);
+      }
+      if (diskSha256 === this.#documentSession.sourceSha256) {
+        if (lastModifiedAt) {
+          this.#emit({
+            type: "document-boundary-reconciled",
+            sourcePath: current.sourcePath,
+            lastModifiedAt,
+          });
+        }
+        return succeeded({
+          unchanged: true,
+          changed: false,
+          sourceSha256: diskSha256,
+          sha256: diskSha256,
+          lastModifiedAt,
+        });
+      }
+      const message = "源文件在磁盘上被其他程序修改了。您的编辑内容仍在，可先预览外部版本再决定。";
+      this.#documentSession.setPersistence({
+        state: "conflict",
+        error: message,
+      });
+      this.#emit({
+        type: "document-external-source-changed",
+        context: current,
+        sha256: diskSha256,
+        lastModifiedAt,
+        size,
+      });
+      return succeeded({
+        conflict: true,
+        changed: true,
+        sourceSha256: diskSha256,
+        sha256: diskSha256,
+        lastModifiedAt,
+      });
+    } catch (cause) {
+      const current = copyContext(this.#projectSession.context);
+      if (
+        current
+        && sourcePath
+        && !this.#codecs.sameSourcePath(sourcePath, current.sourcePath)
+      ) {
+        return stale(liveContext);
+      }
+      const code = sourceErrorCode(cause, "WORKING_COPY_UNAVAILABLE");
+      const message = this.#codecs.errorMessage(
+        cause,
+        "当前工作文件暂时不可用，修改仍保留。",
+      );
+      if (current && this.#isCurrent(current)) {
+        this.#emit({
+          type: "document-persistence-failed",
+          context: current,
+          code,
+          message,
+          conflict: false,
+          protocolError: false,
+          recoveryWrite: this.#documentSession.pendingWrite,
+          fatal: false,
+        });
+      }
+      return this.#outcomeFromCause(
+        this.#nextOperationId("source-observe"),
+        cause,
+        code,
+        message,
       );
     }
   }
