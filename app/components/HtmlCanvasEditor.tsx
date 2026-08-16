@@ -121,6 +121,7 @@ import {
   alignPreviewSourceSurface,
   sourceTextParentsForSegments,
 } from "./html-canvas-preview-sync";
+import { usePreviewResourceBase } from "./use-preview-resource-base";
 import {
   activeTextRangeFromDocument,
   boundedHistorySelection,
@@ -542,66 +543,6 @@ function runtimeFrameKeepsAuthorPaint(
     );
     return hostHasAuthorPaint(element);
   });
-}
-
-function usePreviewResourceBase(
-  html: string,
-  sourcePath: string | undefined,
-  disabled: boolean,
-) {
-  const [resourceBase, setResourceBase] = useState<string | undefined>(undefined);
-  const sessionIdRef = useRef<string | null>(null);
-  useEffect(() => {
-    const previewApi = window.htmlAIPreview;
-    if (disabled || !sourcePath || typeof html !== "string") {
-      if (sessionIdRef.current && previewApi?.revokeSession) {
-        void previewApi.revokeSession(sessionIdRef.current);
-      }
-      sessionIdRef.current = null;
-      setResourceBase(undefined);
-      return undefined;
-    }
-    if (!previewApi?.createSession || !previewApi?.revokeSession) {
-      setResourceBase(undefined);
-      return undefined;
-    }
-    let cancelled = false;
-    void previewApi.createSession({
-      html,
-      bootstrapJavaScript: "void 0;",
-      sourcePath,
-    }).then((session) => {
-      if (cancelled) {
-        void previewApi.revokeSession(session.sessionId);
-        return;
-      }
-      const previousId = sessionIdRef.current;
-      sessionIdRef.current = session.sessionId;
-      try {
-        const url = new URL(session.url);
-        url.pathname = "/";
-        url.search = "";
-        url.hash = "";
-        setResourceBase(url.href);
-      } catch {
-        setResourceBase(undefined);
-      }
-      if (previousId && previousId !== session.sessionId) {
-        void previewApi.revokeSession(previousId);
-      }
-    }).catch(() => {
-      if (!cancelled && !sessionIdRef.current) setResourceBase(undefined);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [disabled, html, sourcePath]);
-  useEffect(() => () => {
-    const sessionId = sessionIdRef.current;
-    sessionIdRef.current = null;
-    if (sessionId) void window.htmlAIPreview?.revokeSession?.(sessionId);
-  }, []);
-  return resourceBase;
 }
 
 const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProps>(function HtmlCanvasEditor(
