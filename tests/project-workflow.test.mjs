@@ -852,6 +852,41 @@ test("a trusted direct browser file submission still enters the accepted FIFO", 
   );
   assert.equal(harness.projectSession.sourcePath, null);
   assert.equal(harness.documentSession.html, A_HTML);
+  assert.equal(harness.documentSession.sourceSha256, sha256(A_HTML));
+});
+
+test("a second in-memory browser file can switch after the first HTML is applied", async (t) => {
+  const harness = createHarness();
+  t.after(() => harness.workflow.dispose());
+
+  assert.equal(harness.workflow.acceptBrowserProject({
+    project: {
+      name: "browser-first.html",
+      sourcePath: null,
+      html: A_HTML,
+    },
+  }).status, "succeeded");
+  await waitFor(
+    () => harness.documentSession.html === A_HTML
+      && harness.documentSession.sourceSha256 === sha256(A_HTML)
+      && harness.workflow.getSnapshot().projectApplication.status === "idle",
+    "first in-memory HTML did not publish its Hash",
+  );
+
+  assert.equal(harness.workflow.acceptBrowserProject({
+    project: {
+      name: "browser-second.html",
+      sourcePath: null,
+      html: B_HTML,
+    },
+  }).status, "succeeded");
+  await waitFor(
+    () => harness.documentSession.html === B_HTML
+      && harness.workflow.getSnapshot().projectApplication.status === "idle",
+    "second in-memory HTML did not complete the switch fence",
+  );
+  assert.equal(harness.documentSession.sourceSha256, sha256(B_HTML));
+  assert.equal(harness.projectSession.sourcePath, null);
 });
 
 test("a stale hydration result cannot publish into a newer project locator", async (t) => {

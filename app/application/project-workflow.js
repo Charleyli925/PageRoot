@@ -2231,7 +2231,8 @@ export class ProjectWorkflow {
 
   async #applyAcceptedProject(application) {
     if (this.#snapshot.close.phase === "ready") return "complete";
-    const { project, metadata } = application.value;
+    const { metadata } = application.value;
+    let { project } = application.value;
     if (this.projectHydrating && !this.#retireHydrationForAcceptedSuccessor()) {
       return "deferred";
     }
@@ -2245,6 +2246,14 @@ export class ProjectWorkflow {
       }
     }
     if (this.#snapshot.close.phase === "ready") return "complete";
+    // In-memory browser HTML has no disk Hash. Confirming the next switch
+    // fence requires DocumentSession.sourceSha256, so fill it before publish.
+    if (!project.sha256) {
+      project = Object.freeze({
+        ...project,
+        sha256: await this.#hashPort.sha256(project.html),
+      });
+    }
     let canvasFrozen = false;
     let applied = false;
     if (

@@ -3915,7 +3915,12 @@ export default function Workbench() {
       }).decode(await file.arrayBuffer());
       workspaceController.acceptBrowserProject({
         operationId,
-        project: { name: file.name, sourcePath: null, html: fileHtml },
+        project: {
+          name: file.name,
+          sourcePath: null,
+          html: fileHtml,
+          sha256: await browserSha256(fileHtml),
+        },
       });
     } catch (cause) {
       const encodingUnsupported = cause instanceof TypeError;
