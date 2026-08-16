@@ -12,9 +12,7 @@ import {
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import {
-  firstEndTag,
   hasCompleteDocumentStructure,
-  removeElementTokens,
   serializeHtmlWithoutElementTokens,
 } from "./html-source-parser.mjs";
 import {
@@ -281,72 +279,6 @@ export function requireCompleteHtml(html, label = "HTML") {
   }
 }
 
-/**
- * Remove only the five lifecycle-owned meta tags while preserving every other
- * source byte. The source parser recognizes actual HTML elements and ignores
- * tag-shaped strings inside scripts, styles, comments and raw-text elements.
- * This deliberately avoids broad html-ai-* stripping and avoids a serializer
- * that could erase ordinary whitespace or attribute changes.
- */
-export function stripManagedMeta(html) {
-  return removeElementTokens(html, (token) =>
-    token.name === "meta"
-    && MANAGED_META_NAME_SET.has(
-      token.attributes.get("name")?.toLowerCase() ?? "",
-    )
-  );
-}
-
-function escapeHtmlAttribute(value) {
-  return String(value)
-    .replaceAll("&", "&amp;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;");
-}
-
-export function injectManagedMeta(
-  html,
-  identity,
-  outputLabel = "output/index.html",
-) {
-  requireCompleteHtml(html, outputLabel);
-  const withoutManagedMeta = stripManagedMeta(html);
-  const required = {
-    "html-ai-document-id": identity.documentId,
-    "html-ai-version-id": identity.versionId,
-    "html-ai-version-label": identity.versionLabel,
-    "html-ai-based-on-version-id": identity.basedOnVersionId,
-    "html-ai-request-id": identity.requestId,
-  };
-  for (const [name, value] of Object.entries(required)) {
-    if (!value) {
-      throw new LifecycleError(
-        "MISSING_VERSION_IDENTITY",
-        `${name} is required to finalize output.`,
-      );
-    }
-  }
-  const tags = Object.entries(required)
-    .map(
-      ([name, value]) =>
-        `<meta name="${name}" content="${escapeHtmlAttribute(value)}">`,
-    )
-    .join("");
-  const closingHead = firstEndTag(withoutManagedMeta, "head");
-  if (!closingHead) {
-    throw new LifecycleError(
-      "INCOMPLETE_HTML",
-      `${outputLabel} does not contain a closing head element.`,
-    );
-  }
-  return (
-    withoutManagedMeta.slice(0, closingHead.start)
-    + tags
-    + withoutManagedMeta.slice(closingHead.start)
-  );
-}
-
 export function comparisonSha256(html) {
   const serialized = serializeHtmlWithoutElementTokens(
     html,
@@ -508,80 +440,6 @@ export function projectDirectory(
     "projects",
     safeDirectoryName,
   );
-}
-
-async function readProjectDirectoryAuthority(workspaceRoot, projectId) {
-  assertProjectId(projectId);
-  const resolvedWorkspace = path.resolve(workspaceRoot);
-  const registry = await readVersionedJson(
-    path.join(resolvedWorkspace, "project-registry.json"),
-    "project-registry.json",
-    LIFECYCLE_SCHEMA_VERSION,
-  );
-  const record = registry?.projects?.[projectId];
-  if (!record) {
-    throw new LifecycleError(
-      "PROJECT_NOT_FOUND",
-      `${projectId} was not found.`,
-      undefined,
-      404,
-    );
-  }
-  if (
-    typeof record !== "object"
-    || Array.isArray(record)
-    || typeof record.displayName !== "string"
-    || record.displayName.trim().length === 0
-    || typeof record.createdAt !== "string"
-    || Number.isNaN(Date.parse(record.createdAt))
-  ) {
-    throw new LifecycleError(
-      "PROJECT_REGISTRY_INVALID",
-      `${projectId} does not have valid readable storage metadata.`,
-      undefined,
-      409,
-    );
-  }
-  return {
-    record,
-    projectRoot: projectDirectory(
-      resolvedWorkspace,
-      record.storageDirectoryName,
-      projectId,
-    ),
-  };
-}
-
-export async function resolveProjectDirectory(workspaceRoot, projectId) {
-  const authority = await readProjectDirectoryAuthority(
-    workspaceRoot,
-    projectId,
-  );
-  return authority.projectRoot;
-}
-
-function assertProjectDirectoryAuthority({
-  project,
-  projectId,
-  projectRoot,
-  authority,
-}) {
-  if (
-    authority.projectRoot !== projectRoot
-    || project?.projectId !== projectId
-    || project.displayName !== authority.record.displayName
-    || project.createdAt !== authority.record.createdAt
-    || project.storageDirectoryName !== authority.record.storageDirectoryName
-    || path.basename(projectRoot) !== project.storageDirectoryName
-  ) {
-    throw new LifecycleError(
-      "PROJECT_STORAGE_METADATA_MISMATCH",
-      "Project registry and project.json storage metadata do not match.",
-      undefined,
-      409,
-    );
-  }
-  return project;
 }
 
 export async function withProjectFileLock(projectRoot, task, options = {}) {
@@ -1139,21 +997,17 @@ export async function sealUserSupplementForAttempt({
 }
 
 export async function recordUserSupplement({
-  workspaceRoot,
+  projectRoot,
   projectId,
   requestId,
   attemptId = "attempt_001",
   payload,
 }) {
-  const resolvedWorkspace = path.resolve(workspaceRoot);
   assertProjectId(projectId);
   assertRequestId(requestId);
   assertAttemptId(attemptId);
-  const projectRoot = await resolveProjectDirectory(
-    resolvedWorkspace,
-    projectId,
-  );
-  if (!(await exists(projectRoot))) {
+  const resolvedProjectRoot = path.resolve(projectRoot);
+  if (!(await exists(resolvedProjectRoot))) {
     throw new LifecycleError(
       "PROJECT_NOT_FOUND",
       `${projectId} was not found.`,
@@ -1173,24 +1027,25 @@ export async function recordUserSupplement({
     "attachments",
   ]), "supplement payload");
 
-  return withProjectFileLock(projectRoot, async () => {
-    const authority = await readProjectDirectoryAuthority(
-      resolvedWorkspace,
-      projectId,
-    );
+  return withProjectFileLock(resolvedProjectRoot, async () => {
     const project = await readVersionedJson(
-      path.join(projectRoot, "project.json"),
+      path.join(resolvedProjectRoot, "project.json"),
       "project.json",
       LIFECYCLE_SCHEMA_VERSION,
     );
-    assertProjectDirectoryAuthority({
-      project,
-      projectId,
-      projectRoot,
-      authority,
-    });
+    if (
+      project?.projectId !== projectId
+      || project.storageDirectoryName !== path.basename(resolvedProjectRoot)
+    ) {
+      throw new LifecycleError(
+        "PROJECT_STORAGE_METADATA_MISMATCH",
+        "project.json identity does not match the requested project directory.",
+        undefined,
+        409,
+      );
+    }
     const runtime = await readVersionedJson(
-      path.join(projectRoot, "runtime-state.json"),
+      path.join(resolvedProjectRoot, "runtime-state.json"),
       "runtime-state.json",
       LIFECYCLE_SCHEMA_VERSION,
     );
@@ -1208,7 +1063,7 @@ export async function recordUserSupplement({
         409,
       );
     }
-    const requestRoot = path.join(projectRoot, "requests", requestId);
+    const requestRoot = path.join(resolvedProjectRoot, "requests", requestId);
     const attemptRoot = path.join(requestRoot, "attempts", attemptId);
     for (const terminalName of ["completion.json", "cancelled.json", "outcome.json"]) {
       if (await exists(path.join(attemptRoot, terminalName))) {
@@ -1773,396 +1628,4 @@ async function verifyFrozenInputManifest(requestRoot, activeRun) {
     }
   }
   return { manifest, manifestSha256: sha256(manifestBuffer) };
-}
-
-async function maybeFinalizerFailpoint(name, attemptRoot) {
-  if (process.env.HTML_AI_FAILPOINT !== name) return;
-  const marker = path.join(attemptRoot, `.failpoint-${name}`);
-  if (await exists(marker)) return;
-  await atomicWriteFile(marker, name);
-  const error = new LifecycleError(
-    "INJECTED_FAILPOINT",
-    `Injected lifecycle failpoint: ${name}`,
-    undefined,
-    500,
-  );
-  throw error;
-}
-
-function completionMatches(left, right) {
-  const keys = [
-    "schemaVersion",
-    "finalizerVersion",
-    "status",
-    "projectId",
-    "documentId",
-    "requestId",
-    "attemptId",
-    "basedOnVersionId",
-    "candidateVersionId",
-    "candidateVersionOrdinal",
-    "candidateVersionLabel",
-    "baseSnapshotSha256",
-    "outputRelativePath",
-    "outputSha256",
-    "baseComparisonSha256",
-    "outputComparisonSha256",
-    "canonicalizationVersion",
-    "inputManifestSha256",
-  ];
-  return keys.every((key) => left?.[key] === right?.[key]);
-}
-
-export async function finalizeAttempt({
-  workspaceRoot,
-  projectId,
-  requestId,
-  attemptId = "attempt_001",
-}) {
-  const resolvedWorkspace = path.resolve(workspaceRoot);
-  assertProjectId(projectId);
-  assertRequestId(requestId);
-  assertAttemptId(attemptId);
-  const projectRoot = await resolveProjectDirectory(
-    resolvedWorkspace,
-    projectId,
-  );
-  if (!(await exists(projectRoot))) {
-    throw new LifecycleError(
-      "PROJECT_NOT_FOUND",
-      `${projectId} was not found.`,
-      undefined,
-      404,
-    );
-  }
-
-  return withProjectFileLock(projectRoot, async () => {
-    const authority = await readProjectDirectoryAuthority(
-      resolvedWorkspace,
-      projectId,
-    );
-    const project = await readVersionedJson(
-      path.join(projectRoot, "project.json"),
-      "project.json",
-      LIFECYCLE_SCHEMA_VERSION,
-    );
-    assertProjectDirectoryAuthority({
-      project,
-      projectId,
-      projectRoot,
-      authority,
-    });
-    const runtime = await readVersionedJson(
-      path.join(projectRoot, "runtime-state.json"),
-      "runtime-state.json",
-      LIFECYCLE_SCHEMA_VERSION,
-    );
-    const requestRoot = path.join(projectRoot, "requests", requestId);
-    const attemptRoot = path.join(
-      requestRoot,
-      "attempts",
-      attemptId,
-    );
-    const cancellationPath = path.join(attemptRoot, "cancelled.json");
-    const cancellationInformation = await lstat(cancellationPath).catch(
-      (error) => {
-        if (error?.code === "ENOENT") return null;
-        throw error;
-      },
-    );
-    if (cancellationInformation) {
-      if (
-        cancellationInformation.isSymbolicLink()
-        || !cancellationInformation.isFile()
-      ) {
-        throw new LifecycleError(
-          "UNSAFE_CANCELLATION_MARKER",
-          "cancelled.json must be a regular file.",
-          undefined,
-          409,
-        );
-      }
-      const cancellation = await readVersionedJson(
-        cancellationPath,
-        "cancelled.json",
-        LIFECYCLE_SCHEMA_VERSION,
-      );
-      const identityPairs = [
-        ["projectId", project.projectId],
-        ["documentId", project.documentId],
-        ["requestId", requestId],
-        ["attemptId", attemptId],
-      ];
-      const mismatch = identityPairs.find(
-        ([key, expected]) => cancellation[key] !== expected,
-      );
-      if (mismatch) {
-        throw new LifecycleError(
-          "CANCELLATION_IDENTITY_MISMATCH",
-          `cancelled.json ${mismatch[0]} does not match this Attempt.`,
-          undefined,
-          409,
-        );
-      }
-      if (
-        cancellation.status !== "cancelled"
-        || typeof cancellation.cancelledAt !== "string"
-        || !cancellation.cancelledAt.trim()
-      ) {
-        throw new LifecycleError(
-          "CANCELLATION_MARKER_INVALID",
-          "cancelled.json is not a valid cancellation marker.",
-          undefined,
-          409,
-        );
-      }
-      return {
-        ok: true,
-        status: "cancelled",
-        accepted: false,
-        retryable: false,
-        projectId: project.projectId,
-        documentId: project.documentId,
-        requestId,
-        attemptId,
-        cancelledAt: cancellation.cancelledAt,
-        message: "本轮已在源页结束。请停止 AI Agent，不要重试。",
-      };
-    }
-    const activeRun = runtime.activeRun
-      ? {
-          ...runtime.activeRun,
-          projectId: runtime.projectId,
-          documentId: runtime.documentId,
-          status: runtime.lifecycleState,
-        }
-      : null;
-    if (
-      !activeRun
-      || activeRun.requestId !== requestId
-      || activeRun.attemptId !== attemptId
-      || !["processing", "validating"].includes(runtime.lifecycleState)
-    ) {
-      throw new LifecycleError(
-        "ATTEMPT_NOT_ACTIVE",
-        "This Request and Attempt is not the active project run.",
-        undefined,
-        409,
-      );
-    }
-    if (
-      activeRun.projectId !== project.projectId
-      || activeRun.documentId !== project.documentId
-    ) {
-      throw new LifecycleError(
-        "ACTIVE_RUN_IDENTITY_MISMATCH",
-        "The active run does not match project identity.",
-      );
-    }
-
-    if (!(await exists(attemptRoot))) {
-      throw new LifecycleError(
-        "ATTEMPT_NOT_FOUND",
-        "The Attempt directory was not found.",
-        undefined,
-        404,
-      );
-    }
-    const changeRequest = await readVersionedJson(
-      path.join(requestRoot, "change-request.json"),
-      "change-request.json",
-      LIFECYCLE_SCHEMA_VERSION,
-    );
-    await readVersionedJson(
-      path.join(requestRoot, "input", "annotations", "records.json"),
-      "input/annotations/records.json",
-      LIFECYCLE_SCHEMA_VERSION,
-    );
-    const completionPath = path.join(attemptRoot, "completion.json");
-    const existingCompletion = await exists(completionPath)
-      ? await readVersionedJson(
-          completionPath,
-          "completion.json",
-          COMPLETION_SCHEMA_VERSION,
-        )
-      : null;
-    const outputRelativePath = outputRelativePathForAttempt(
-      project,
-      activeRun,
-      changeRequest,
-    );
-    await assertAttemptWriteSurface(attemptRoot, outputRelativePath);
-    const frozenInput = await verifyFrozenInputManifest(
-      requestRoot,
-      activeRun,
-    );
-    const supplementIdentity = {
-      projectId: activeRun.projectId,
-      documentId: activeRun.documentId,
-      requestId: activeRun.requestId,
-      attemptId: activeRun.attemptId,
-      instructionIds: (changeRequest.requirements?.instructions ?? [])
-        .map((instruction) => instruction.instructionId)
-        .filter((value) => typeof value === "string"),
-    };
-    const supplement = await sealUserSupplementForAttempt({
-      attemptRoot,
-      expectedIdentity: supplementIdentity,
-    });
-    const identityPairs = [
-      ["projectId", activeRun.projectId],
-      ["documentId", activeRun.documentId],
-      ["requestId", activeRun.requestId],
-      ["attemptId", activeRun.attemptId],
-    ];
-    for (const [key, expected] of identityPairs) {
-      if (changeRequest[key] !== expected) {
-        throw new LifecycleError(
-          "REQUEST_IDENTITY_MISMATCH",
-          `change-request.json ${key} does not match the active run.`,
-        );
-      }
-    }
-    const nestedIdentityPairs = [
-      [
-        "versionIdentity.basedOnVersionId",
-        changeRequest.versionIdentity?.basedOnVersionId,
-        activeRun.basedOnVersionId,
-      ],
-      [
-        "versionIdentity.previousVersionId",
-        changeRequest.versionIdentity?.previousVersionId,
-        activeRun.previousVersionId,
-      ],
-      [
-        "versionIdentity.candidateVersionId",
-        changeRequest.versionIdentity?.candidateVersionId,
-        activeRun.candidateVersionId,
-      ],
-      [
-        "versionIdentity.candidateVersionOrdinal",
-        changeRequest.versionIdentity?.candidateVersionOrdinal,
-        activeRun.candidateVersionOrdinal,
-      ],
-      [
-        "versionIdentity.candidateVersionLabel",
-        changeRequest.versionIdentity?.candidateVersionLabel,
-        activeRun.candidateVersionLabel,
-      ],
-      [
-        "baseSnapshot.sha256",
-        changeRequest.baseSnapshot?.sha256,
-        activeRun.baseSnapshotSha256,
-      ],
-    ];
-    for (const [label, actual, expected] of nestedIdentityPairs) {
-      if (actual !== expected) {
-        throw new LifecycleError(
-          "REQUEST_IDENTITY_MISMATCH",
-          `change-request.json ${label} does not match the active run.`,
-        );
-      }
-    }
-
-    const basePath = path.join(requestRoot, "input", "base", "index.html");
-    const baseBuffer = await readFile(basePath);
-    if (sha256(baseBuffer) !== activeRun.baseSnapshotSha256) {
-      throw new LifecycleError(
-        "BASE_SNAPSHOT_HASH_MISMATCH",
-        "The frozen base snapshot has changed.",
-      );
-    }
-    const outputPath = path.join(
-      attemptRoot,
-      ...outputRelativePath.split("/"),
-    );
-    const outputInformation = await lstat(outputPath).catch((error) => {
-      if (error?.code === "ENOENT") {
-        throw new LifecycleError(
-          "OUTPUT_NOT_FOUND",
-          `${outputRelativePath} was not found.`,
-          undefined,
-          404,
-        );
-      }
-      throw error;
-    });
-    if (outputInformation.isSymbolicLink() || !outputInformation.isFile()) {
-      throw new LifecycleError(
-        "UNSAFE_OUTPUT_ENTRY",
-        `${outputRelativePath} must be a regular file.`,
-      );
-    }
-    const rawOutput = await readFile(outputPath, "utf8");
-    requireCompleteHtml(rawOutput, outputRelativePath);
-    const finalizedHtml = injectManagedMeta(rawOutput, {
-      documentId: activeRun.documentId,
-      versionId: activeRun.candidateVersionId,
-      versionLabel: activeRun.candidateVersionLabel,
-      basedOnVersionId: activeRun.basedOnVersionId,
-      requestId: activeRun.requestId,
-    }, outputRelativePath);
-    await atomicWriteFile(outputPath, finalizedHtml);
-    const finalizedBuffer = await readFile(outputPath);
-    await maybeFinalizerFailpoint("after-finalization-output", attemptRoot);
-    const completedAt = nowIso();
-    const completion = {
-      schemaVersion: COMPLETION_SCHEMA_VERSION,
-      finalizerVersion: FINALIZER_VERSION,
-      status: "completed",
-      projectId: activeRun.projectId,
-      documentId: activeRun.documentId,
-      requestId: activeRun.requestId,
-      attemptId: activeRun.attemptId,
-      basedOnVersionId: activeRun.basedOnVersionId,
-      previousVersionId: activeRun.previousVersionId,
-      candidateVersionId: activeRun.candidateVersionId,
-      candidateVersionOrdinal: activeRun.candidateVersionOrdinal,
-      candidateVersionLabel: activeRun.candidateVersionLabel,
-      baseSnapshotSha256: activeRun.baseSnapshotSha256,
-      outputRelativePath,
-      outputSha256: sha256(finalizedBuffer),
-      baseComparisonSha256: comparisonSha256(baseBuffer.toString("utf8")),
-      outputComparisonSha256: comparisonSha256(
-        finalizedBuffer.toString("utf8"),
-      ),
-      canonicalizationVersion: CANONICALIZATION_VERSION,
-      inputManifestSha256: frozenInput.manifestSha256,
-      completedAt,
-    };
-    if (existingCompletion) {
-      if (!completionMatches(existingCompletion, completion)) {
-        throw new LifecycleError(
-          "COMPLETION_ALREADY_EXISTS",
-          "completion.json already exists with different content.",
-          undefined,
-          409,
-        );
-      }
-      return {
-        ok: true,
-        idempotent: true,
-        completionPath,
-        completion: existingCompletion,
-        supplement: {
-          recordCount: supplement.recordCount,
-          activeRequirementCount: supplement.activeRequirementCount,
-          sealedAt: supplement.sealedAt,
-        },
-      };
-    }
-    await atomicWriteJson(completionPath, completion);
-    await maybeFinalizerFailpoint("after-finalization", attemptRoot);
-    return {
-      ok: true,
-      idempotent: false,
-      completionPath,
-      completion,
-      supplement: {
-        recordCount: supplement.recordCount,
-        activeRequirementCount: supplement.activeRequirementCount,
-        sealedAt: supplement.sealedAt,
-      },
-    };
-  });
 }

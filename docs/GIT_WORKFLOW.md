@@ -87,39 +87,23 @@ git push -u origin feature/short-name
 Open a Pull Request, wait for required CI, review the final diff, then squash-merge. Delete the merged branch. Never use a DMG, `.app`, copied folder or local backup as the basis for a new edit.
 
 Every Pull Request starts as Draft. `opened`, `synchronize` and `reopened`
-events run only the impact-selected `PR Feedback` workflow;
-returning to Draft
-Draft. When the intended head is frozen, update it onto current `origin/main`
-and mark it Ready once. That single `ready_for_review` transition starts
-`review-policy` and the final Codex pass; do not post a Draft marker or another
-review command while it runs. A substantive exact-commit Codex review, an
-immutable clean exact-commit comment or a Codex Bot `+1` after Ready, a
-30-second settle window and continuous live head/base validation are required.
-The reaction is accepted only from Codex on the latest frozen Ready pair; older
-or human reactions are ignored. Active P0/P1 findings and P0/P1
-`CHANGES_REQUESTED` reviews block regardless of reviewer; P2/P3/unclassified findings become review debt and
-are triaged in regular maintenance work. Deterministic dependency, source,
-security and release checks remain hard gates regardless of review priority.
+on a Draft PR without `full-gate` run only impact-selected `pr-feedback`
+inside `ci.yml`. Mark the frozen head Ready once, or add `full-gate`, to
+start the complete source matrix. A PR opened already Ready also takes that
+path. Codex review is requested automatically, shown on the PR, and never
+blocks merge. `release-gate` is the required check. Active P0/P1 comments
+are informational; deterministic dependency, source, security and release
+checks remain hard gates.
 
-`branch-policy` and `baseline-policy` run independently of review, and the
-complete source matrix starts after the deterministic baseline so review and
-tests overlap. `release-gate` joins every lane, relevant candidate-only dry run
-and review result, then revalidates the exact pair before attesting the tree.
-The candidate classifier records PR scope and size only as advisory information;
-it never rejects a PR for being large.
+`branch-policy` and `baseline-policy` run on the full-gate path, and the
+complete source matrix starts after the deterministic baseline.
+`release-gate` joins every lane and any relevant candidate-only dry run,
+then attests the tree. The candidate classifier records PR scope and size
+only as advisory information; it never rejects a PR for being large.
 
-If `review-policy` alone times out before the exact-commit Codex result arrives,
-`Review Gate Recovery` handles the late result from trusted default-branch code.
-It revalidates the current Ready head/base and timeout artifact, requires every
-source job to be green, and reruns only the failed jobs of that same CI run.
-Never use this path for a product-test failure, active P0/P1, Draft PR, changed
-head/base or a new commit; those require the normal fix-and-promote flow.
-
-A Ready event freezes the expected head/base and must not be followed by a
-commit. A new commit cancels any in-flight stale candidate and receives only PR
-feedback. The new head cannot merge because it has no `release-gate`; convert it
-to Draft, batch required P0/P1 work and mark it Ready again only after the new
-pair is final. `main` accepts the resulting tree only when provenance
+A later commit on a Ready PR cancels the in-flight stale candidate and
+reruns the complete matrix for the new head. Returning to Draft skips the
+full matrix. `main` accepts the resulting tree only when provenance
 verification finds the fresh matching attestation; it does not repeat Node or
 Browser smoke after that equality proof.
 

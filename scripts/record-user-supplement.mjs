@@ -31,7 +31,7 @@ async function readStandardInput() {
 const options = parseArguments(process.argv.slice(2));
 
 try {
-  for (const required of ["workspace", "project-id", "request-id"]) {
+  for (const required of ["project-root", "project-id", "request-id"]) {
     if (!options[required]) {
       throw Object.assign(
         new Error(`--${required} is required.`),
@@ -64,7 +64,7 @@ try {
     );
   }
   const result = await recordUserSupplement({
-    workspaceRoot: options.workspace,
+    projectRoot: options["project-root"],
     projectId: options["project-id"],
     requestId: options["request-id"],
     attemptId: options["attempt-id"] ?? "attempt_001",

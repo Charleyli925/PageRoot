@@ -109,9 +109,76 @@ export function nativeEditHostForElement(
 export type NativeTextFragmentCandidate = {
   parentElement: HTMLElement;
   textNode: Text;
+  textNodeId: string;
   textTargetRef: SourceTargetRef;
   sourceInnerHtml: string;
 };
+
+function nativeTextFragmentForDirectText(
+  parentElement: HTMLElement,
+  textNode: Text,
+  sourceIndex: SourceIndexValue,
+): NativeTextFragmentCandidate | null {
+  if (
+    !isCanonicalSourceElement(parentElement, sourceIndex)
+    || nativeEditHostForElement(parentElement, sourceIndex)
+    || textNode.parentElement !== parentElement
+  ) return null;
+  const parentDisplay = parentElement.ownerDocument.defaultView
+    ?.getComputedStyle(parentElement).display ?? "";
+  if (["flex", "inline-flex", "grid", "inline-grid"].includes(parentDisplay)) {
+    return null;
+  }
+  const sourceText = sourceTextNodeForDomText(textNode, sourceIndex);
+  const parentNodeId = parentElement.getAttribute(SOURCE_NODE_ATTRIBUTE);
+  const sourceParent = parentNodeId ? sourceIndex.byNodeId.get(parentNodeId) : null;
+  const sourceNode = sourceText ? sourceIndex.byNodeId.get(sourceText.nodeId) : null;
+  if (
+    !sourceText
+    || sourceParent?.type !== "element"
+    || sourceNode?.type !== "text"
+    || sourceNode.parentId !== sourceParent.nodeId
+  ) return null;
+  try {
+    const parentTargetRef = createTargetRef(sourceIndex, sourceParent, {
+      level: "subregion",
+    }) as SourceTargetRef;
+    const textTargetRef = createTargetRef(sourceIndex, sourceNode, {
+      level: "text",
+    }) as SourceTargetRef;
+    const parentIslandCapability = isEditableIslandTarget(
+      sourceIndex,
+      parentTargetRef,
+    );
+    if (
+      parentIslandCapability.editable
+      || parentIslandCapability.code !== "EDITABLE_ISLAND_STRUCTURE_UNSUPPORTED"
+    ) return null;
+    const sourceInnerHtml = sourceIndex.source.slice(
+      sourceNode.range.startOffset,
+      sourceNode.range.endOffset,
+    );
+    planSourcePatch({
+      type: "update-direct-text-node",
+      targetRef: parentTargetRef,
+      textTargetRef,
+      nodeId: sourceParent.nodeId,
+      textNodeId: sourceText.nodeId,
+      beforeFragmentHtml: sourceInnerHtml,
+      nextFragmentHtml: sourceInnerHtml,
+      expectedSourceSha256: sourceIndex.sourceSha256,
+    }, sourceIndex);
+    return {
+      parentElement,
+      textNode,
+      textNodeId: sourceText.nodeId,
+      textTargetRef,
+      sourceInnerHtml,
+    };
+  } catch {
+    return null;
+  }
+}
 
 export function nativeTextFragmentForRange(
   range: ActiveTextRange | null,
@@ -134,57 +201,42 @@ export function nativeTextFragmentForRange(
   const parentElement = documentNode?.querySelector<HTMLElement>(
     `[${SOURCE_NODE_ATTRIBUTE}="${escapedSourceNodeId(sourceParent.nodeId)}"]`,
   ) ?? null;
-  if (
-    !parentElement
-    || !isCanonicalSourceElement(parentElement, sourceIndex)
-    || nativeEditHostForElement(parentElement, sourceIndex)
-  ) return null;
-  const parentDisplay = parentElement.ownerDocument.defaultView
-    ?.getComputedStyle(parentElement).display ?? "";
-  if (["flex", "inline-flex", "grid", "inline-grid"].includes(parentDisplay)) {
-    return null;
-  }
+  if (!parentElement) return null;
   const textNode = Array.from(parentElement.childNodes).find((node): node is Text => (
     node.nodeType === 3
     && sourceTextNodeForDomText(node as Text, sourceIndex)?.nodeId === sourceText.nodeId
   )) ?? null;
   if (!textNode) return null;
-  try {
-    const parentTargetRef = createTargetRef(sourceIndex, sourceParent, {
-      level: "subregion",
-    }) as SourceTargetRef;
-    const textTargetRef = createTargetRef(sourceIndex, sourceText, {
-      level: "text",
-    }) as SourceTargetRef;
-    const parentIslandCapability = isEditableIslandTarget(
-      sourceIndex,
-      parentTargetRef,
-    );
-    if (
-      parentIslandCapability.editable
-      || parentIslandCapability.code !== "EDITABLE_ISLAND_STRUCTURE_UNSUPPORTED"
-    ) return null;
-    const sourceInnerHtml = sourceIndex.source.slice(
-      sourceText.range.startOffset,
-      sourceText.range.endOffset,
-    );
-    planSourcePatch({
-      type: "update-direct-text-node",
-      targetRef: parentTargetRef,
-      textTargetRef,
-      beforeFragmentHtml: sourceInnerHtml,
-      nextFragmentHtml: sourceInnerHtml,
-      expectedSourceSha256: sourceIndex.sourceSha256,
-    }, sourceIndex);
-    return {
-      parentElement,
-      textNode,
-      textTargetRef,
-      sourceInnerHtml,
-    };
-  } catch {
-    return null;
+  return nativeTextFragmentForDirectText(parentElement, textNode, sourceIndex);
+}
+
+export function nativeTextFragmentForElement(
+  element: HTMLElement,
+  sourceIndex: SourceIndexValue,
+  textNodeHint?: Text | null,
+): NativeTextFragmentCandidate | null {
+  const parentElement = element.closest<HTMLElement>(`[${SOURCE_NODE_ATTRIBUTE}]`);
+  if (!parentElement) return null;
+  const hinted = textNodeHint
+    && parentElement.contains(textNodeHint)
+    && textNodeHint.parentElement === parentElement
+    ? textNodeHint
+    : null;
+  if (hinted) {
+    return nativeTextFragmentForDirectText(parentElement, hinted, sourceIndex);
   }
+  const directTextNodes = Array.from(parentElement.childNodes).filter((node): node is Text => {
+    if (node.nodeType !== 3) return false;
+    const textNode = node as Text;
+    return Boolean(textNode.data.trim())
+      && Boolean(sourceTextNodeForDomText(textNode, sourceIndex));
+  });
+  if (directTextNodes.length !== 1) return null;
+  return nativeTextFragmentForDirectText(
+    parentElement,
+    directTextNodes[0],
+    sourceIndex,
+  );
 }
 
 export const TEXT_FRAGMENT_HOST_ATTRIBUTE = "data-pageroot-text-fragment-host";
@@ -242,6 +294,8 @@ export function sourceTextParentsForSegments(
   )];
 }
 
+export { alignPreviewSourceSurface } from "../lib/align-preview-source-surface.js";
+
 export function sourceBackedPreviewElements(documentNode: Document): Element[] {
   const elements: Element[] = [];
   const visit = (element: Element) => {
@@ -273,6 +327,20 @@ export function canonicalNativeHostPreview(
     `[${SOURCE_NODE_ATTRIBUTE}="${escapedSourceNodeId(nextNodeId)}"]`,
   );
   return detachedTarget?.tagName === rootElement.tagName ? detachedTarget : null;
+}
+
+export function remountNativeHostFromSource(
+  hostElement: HTMLElement,
+  nodeId: string,
+  sourceIndex: SourceIndexValue,
+): boolean {
+  const canonical = canonicalNativeHostPreview(hostElement, nodeId, sourceIndex);
+  if (!canonical) return false;
+  const documentNode = hostElement.ownerDocument;
+  hostElement.replaceChildren(
+    ...Array.from(canonical.childNodes).map((node) => documentNode.importNode(node, true)),
+  );
+  return true;
 }
 
 type PreviewSourceNodeIdPlan = {

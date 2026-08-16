@@ -38,24 +38,19 @@ collected. A guessed date is not a support-window policy.
 
 ## Project storage metadata migration
 
-- Historical producer and version: pre-metadata project registries and
+- Historical producer and version: pre-metadata v3 project registries and
   `project.json` files contained a valid project/document/source identity but
   omitted `displayName`, `createdAt`, and `storageDirectoryName`.
-- Current consumer: registry startup in `scripts/workspace-bridge.mjs`.
-- Migration and canonical output:
-  `migrateLegacyProjectStorageMetadata` validates the registry, matching
-  `project.json`, and initial `ver_0001` identity before completing the
-  metadata. It writes only the missing metadata to the registry and, when
-  necessary, `project.json`; the existing `projectId` directory remains the
-  storage identity. Partial metadata or mismatched identity fails closed.
-- Historical proof: `tests/workspace-bridge.test.mjs` covers successful
-  migration, invalid records, and preservation of the original project
-  directory.
-- Disk persistence read/write: yes. This is an idempotent, bounded migration
-  of mutable registry metadata rather than a decoder for immutable evidence.
-- Support window and deletion evidence: retain until a read-only managed
-  workspace census proves no supported registry or project file lacks the
-  metadata. Expected removal time: not scheduled pending that evidence.
+- Current consumer: none. Desktop open and Bridge mutation are v4-only.
+  `scripts/workspace-bridge.mjs` no longer reads `project-registry.json` or
+  runs `migrateLegacyProjectStorageMetadata`.
+- Migration and canonical output: removed from the live Bridge. Unregistered
+  HTML is an unmanaged import source for a new v4 V1. On-disk v3 project
+  directories are not migrated, recovered, or deleted.
+- Historical proof: retired with the v3 Bridge stack in P0-B.
+- Disk persistence read/write: no current runtime read.
+- Support window and deletion evidence: the live consumer is gone. Remaining
+  on-disk v3 registries are user data and are left in place.
 
 ## Exact legacy V4 Registry metadata completion
 
@@ -97,41 +92,28 @@ collected. A guessed date is not a support-window policy.
 
 - Historical producer and version: older local clients and compatibility tests
   could send a mutation with neither `projectId` nor `documentId`.
-- Current consumer: `registeredCommandIdentity` in
-  `scripts/project-context-service.mjs` and `loadMutationContext` in
-  `scripts/workspace-bridge.mjs`.
-- Decoder and canonical output: the pair is either complete or absent. A
-  complete pair resolves the registered project; an absent pair may resolve an
-  existing project only by canonical source path and never gains
-  project-creation authority. A partial pair is rejected.
-- Historical proof: `tests/project-context-service.test.mjs` and
-  `tests/workspace-bridge.test.mjs`.
-- Disk persistence read: yes, only to resolve an existing registration; the
-  fallback does not create one.
-- Support window and deletion evidence: retain until supported local-client
-  builds and a Bridge request census show both IDs are always present. Expected
-  removal time: not scheduled pending that evidence.
+- Current consumer: none in the live Bridge. `loadMutationContext` was removed
+  with the v3 stack. v4 mutations resolve a Project File from the request
+  OpenTarget or source path and fail closed with `PROJECT_NOT_FOUND` when no
+  v4 project is registered.
+- Decoder and canonical output: historical. `project-context-service.mjs`
+  remains as an archived helper, not a Bridge open or mutation path.
+- Historical proof: `tests/project-context-service.test.mjs`.
+- Disk persistence read: no current Bridge read of `project-registry.json`.
+- Support window and deletion evidence: live consumer removed in P0-B.
 
 ## Legacy stamped-document repair
 
 - Historical producer and version: an older PageRoot source file could retain
   its embedded document stamp while its file identity sidecar lagged after an
   owned atomic replacement.
-- Current consumer: source observation reconciliation in
-  `scripts/workspace-bridge.mjs`.
-- Decoder and canonical output:
-  `classifySourceObservation` recognizes a matching legacy embedded document
-  ID as `legacy-stamped-document`. Bridge repairs only the registry/project
-  sidecar identity in the narrow compatibility window; it never rewrites the
-  source HTML bytes. Non-matching observations remain external replacements.
-- Historical proof: `tests/project-context-service.test.mjs` and
-  `tests/workspace-bridge.test.mjs`.
-- Disk persistence read/write: yes for sidecars only; authored source remains
-  immutable under this repair.
-- Support window and deletion evidence: retain until a read-only managed
-  project census shows no lagging stamped source/sidecar pairs and no supported
-  build can create them. Expected removal time: not scheduled pending that
-  evidence.
+- Current consumer: none. v3 source-observation relink was removed from
+  `scripts/workspace-bridge.mjs` with the v3 Bridge stack.
+- Decoder and canonical output: historical. Unregistered HTML, including HTML
+  beside old v3 directories, is an unmanaged import source for a new v4 V1.
+- Historical proof: retired with the v3 Bridge stack in P0-B.
+- Disk persistence read/write: no current sidecar repair.
+- Support window and deletion evidence: live consumer removed in P0-B.
 
 ## Direct-edit identity names
 
@@ -211,19 +193,21 @@ collected. A guessed date is not a support-window policy.
 - Historical producer and version: earlier desktop installs stored recent
   project state under `PageRootV2`, `YuanYe`, or `HTML AI 工作台`, and
   used the corresponding Documents workspace directories.
-- Current consumer: desktop startup in `desktop/main.mjs`.
-- Decoder and canonical output: the desktop process reads a legacy
-  `html-projects.json` only when the current state file is absent, and selects
-  the first existing workspace in the order PageRoot, PageRootV2, YuanYe, then
-  HTML AI 工作台. It continues using the selected existing directory and does
-  not delete or overwrite an older location.
-- Historical proof: `tests/desktop-package.test.mjs` and
+- Current consumer: none. Desktop startup reads only the current
+  `userData/html-projects.json`. `workspacePath()` uses `HTML_AI_WORKSPACE`
+  when set, otherwise only `Documents/PageRoot/项目记录`.
+- Decoder and canonical output: removed 2026-08-15. The desktop no longer
+  opens `html-projects.json` from older appData directory names. Those
+  directories are not deleted.
+- Historical proof: `tests/product-contract.test.mjs` (main process must not
+  mention the old appData names) and
   `docs/NOTIFICATION_AND_STARTUP_POLICY.md`.
-- Disk persistence read: yes; startup location selection is compatibility
-  input, not a migration of project content.
-- Support window and deletion evidence: retain until supported desktop builds
-  and an opted-in installation census show no legacy state or workspace path
-  remains. Expected removal time: not scheduled pending that evidence.
+- Disk persistence read: no. Recent-file UI state is only the current
+  `userData` file. Bridge open authority remains the v4 Project File Registry.
+- Support window and deletion evidence: appData probes were removed after
+  P0-B already dropped Documents workspace-root probes. Users who never
+  launched a PageRoot-named install still re-open HTML files to rebuild
+  Recent; project content is not migrated or deleted.
 
 ## Developer Preview candidate assessments
 

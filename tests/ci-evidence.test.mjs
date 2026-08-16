@@ -58,7 +58,6 @@ test("CI stages produce explicit triage categories without calling source failur
 test("formal release workflows use supported packaged-artifact evidence stages", async () => {
   const workflows = await Promise.all([
     readFile(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8"),
-    readFile(new URL("../.github/workflows/pr-feedback.yml", import.meta.url), "utf8"),
     readFile(new URL("../.github/workflows/developer-preview.yml", import.meta.url), "utf8"),
     readFile(new URL("../.github/workflows/release-candidate.yml", import.meta.url), "utf8"),
     readFile(new URL("../.github/workflows/release.yml", import.meta.url), "utf8"),

@@ -486,6 +486,12 @@ export class WorkspaceController {
     lastModifiedAt?: string | null;
     unchanged?: boolean;
   }>>;
+  observeExternalSourceChange(input?: {
+    reason?: "watch" | "rename" | "startup" | "safe-action";
+    watcherGeneration?: number;
+    previousSourcePath?: string | null;
+    sourceMissing?: boolean;
+  }): Promise<ProjectWorkflowOutcome>;
   submitRequest(input?: {
     projectName?: string;
     previousVersionId?: string | null;

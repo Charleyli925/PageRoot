@@ -215,6 +215,11 @@ export function createBridgeClient({
       body,
       "无法建立项目记录。",
     ),
+    reconcileManagedWorkingCopy: (body) => command(
+      "/managed-working-copy/reconcile",
+      body,
+      "无法核对当前工作文件的位置。",
+    ),
     autosave: (body) => command(
       "/autosave",
       body,

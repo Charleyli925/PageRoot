@@ -115,7 +115,7 @@ PageRoot 让用户在真实本地 HTML 上完成两类工作：
 
 项目目录成员资格与写入授权只来自 Registry。已登记但从未出现在 Recent 的项目必须显示；Recent 内未登记的外部 HTML 不得显示为项目，清除 Recent 不得把项目移出目录。点击目录行时 Renderer 只提交 `projectId`，Bridge/Repository 重验 Project、Document、Working Copy、OpenTarget、HTML 与 Hash，成功后才一次性发布现有 Session。
 
-桌面版在当前 HTML 已安全保存、项目空闲且没有冲突时，允许用户双击顶部文件名原位重命名。输入只包含主文件名，现有 `.html/.htm` 后缀和所在目录保持不变；`Enter` 或失焦提交，`Escape` 取消。同名文件不得覆盖。成功重命名只改变当前真实文件路径、桌面活动/最近记录和项目显示名，不改变 HTML 字节、`projectId`、`documentId`、Version 或历史。事务必须有稳定 operation ID、预期源 Hash 和崩溃恢复记录。
+桌面版在当前 HTML 已安全保存、项目空闲且没有冲突时，允许用户单击顶部文件名或铅笔图标原位重命名。输入只包含主文件名，现有 `.html/.htm` 后缀和所在目录保持不变；`Enter` 或失焦提交，`Escape` 取消。同名文件不得覆盖。成功重命名只改变当前真实文件路径、桌面活动/最近记录和项目显示名，不改变 HTML 字节、`projectId`、`documentId`、Version 或历史。事务必须有稳定 operation ID、预期源 Hash 和崩溃恢复记录。
 
 初始 Version 的内部 ID 为 `ver_0001`，界面显示 `V1`，可见工作文件为 `<原用户文件名>-V1.html`。用户采纳第一份有效 AI Candidate 后创建 `ver_0002`、显示 `V2`，并生成 `<原用户文件名>-V2.html`；之后按同一 ordinal 递增。`input/base/index.html` 是冻结输入的机器名，不是用户文件名；AI 只能写入 Prompt 给出的固定 Attempt 输出 `requests/<requestId>/attempts/<attemptId>/output/candidate.html`。Candidate 在用户采纳前不是正式 Version，该文件路径和标签不得被用作用户界面的版本身份，也不得回写并破坏严格 v4 Project Schema。
 
@@ -137,7 +137,7 @@ PageRoot 让用户在真实本地 HTML 上完成两类工作：
 - AI 返回后的 Review 可以在静态 before/after 对比完成后，由唯一 owner
   对同一批受限候选补充一组 before/after runtime capture；这是失败关闭的
   辅助证据，不阻塞审阅、不创建编辑状态，也绝不进入编辑画布或持久化源码。
-- 双击 source-backed 静态文字后，光标直接出现在点击位置；普通文字和安全的混合行内文字都可输入、删除和选择。
+- 双击 source-backed 静态文字后，光标直接出现在点击位置，不先选中整词；已在编辑中再双击才按浏览器习惯选词。普通文字和安全的混合行内文字都可输入、删除和选择。
 - 行内节点向上寻找宿主遇到不安全复杂父容器时，保留最近的安全节点；复杂父容器下能唯一映射的直属裸文字可以纯文本方式精确编辑。
 - 可编辑宿主的可视段首、段尾和非空样式交界均可输入：可视段首继承右侧首字符，其他交界继承左侧字符，工具栏显示与下一次输入一致的样式。
 - 文字 checkpoint 可以跨多个源码 text node，但不得拍平或序列化既有行内标签。
@@ -145,7 +145,7 @@ PageRoot 让用户在真实本地 HTML 上完成两类工作：
 - 背景、填充、边框和常用间距。
 - 同级模块顺序。
 - 画布文字、样式、安全结构变化和同级模块顺序共享一条可持久化的撤销/重做历史；关闭并重开项目后仍可继续。
-- 不在画布工具栏增加撤销入口。沿用系统 `Edit > Undo/Redo`，并支持 `Cmd/Ctrl+Z` 撤销、`Cmd/Ctrl+Shift+Z` 与 `Ctrl+Y` 重做。
+- 不在画布工具栏增加撤销入口。沿用系统 `Edit > 撤销/重做`，并支持 `Cmd/Ctrl+Z` 撤销、`Cmd/Ctrl+Shift+Z` 与 `Ctrl+Y` 重做。
 - 焦点位于评论正文、项目长期规则或其他真实文字输入框时，撤销/重做只使用该输入框的原生局部输入历史，不触碰画布源码历史。评论卡片、评论/附件的新增删除和其他项目操作不纳入本轮撤销范围。
 
 每次本地修改：
@@ -212,7 +212,7 @@ Selection 重放 IME 最终文本。
 - 主编辑流程不显示“保存”或“另存为”按钮。
 - “导出 HTML 副本”放在次级文件菜单，只复制内容，不改变项目绑定，不创建 Version。
 - `Cmd+S` 只立即刷新当前自动写入队列，并反馈“内容已更新到文件”或真实错误。
-- 系统 `Edit` 菜单中的既有 Undo/Redo 是唯一菜单入口，不在画布编辑栏重复增加按钮。画布撤销前必须先完成当前 IME/文字 checkpoint 并刷盘；结果通过同一 Hash 校验与原子写入链路落盘，不创建 Version。
+- 系统 `Edit` 菜单中的既有「撤销 / 重做」是唯一菜单入口，不在画布编辑栏重复增加按钮。画布撤销前必须先完成当前 IME/文字 checkpoint 并刷盘；结果通过同一 Hash 校验与原子写入链路落盘，不创建 Version。
 - 新的画布修改会截断当前位置之后的 redo。外部源码变化、AI 工作文件切换或无法证明连续 Hash 时建立新的历史边界，绝不把旧 Patch 套到未知字节上。
 - 原生菜单和右键菜单不得存在另一条会创建 Version 的保存链路。
 
@@ -241,9 +241,9 @@ v3 TargetRef 保存 label、层级、selector/结构锚点、源码位置、源 
 
 本地直接编辑写入 `edit-audit.jsonl` 或等价追加记录，至少包含稳定事件 ID、revision、时间、类型、目标、before 和 after。
 
-### 5.5 复制 AI 任务 Prompt
+### 5.5 发给 AI
 
-提交入口为主按钮“复制AI任务Prompt”。
+提交入口为顶部主按钮。无评论时显示“写评论后再发送”且不可用；有评论后显示“发给 AI”。复制进行中为“正在复制…”；已复制或本轮处理中为“查看本轮”；失败为“复制失败，再试一次”。按钮仍执行同一冻结并复制 AI 任务 Prompt 的提交链路。
 
 用户触发提交后必须按唯一顺序执行：
 
@@ -474,7 +474,7 @@ editing
 用户动作分开：
 
 1. “查看此版本”：进入 `viewMode=history`，从精确不可变路径打开，只读。
-2. “在 Finder 中显示”：定位该 Version 对应的可见 Working Copy；Repository/Bridge 必须验证 Version、唯一 `workingCopyId`、根内普通非软链接文件与 Hash，不把隐藏不可变快照作为产品 Finder 文件。
+2. “在文件夹中打开”：定位该 Version 对应的可见 Working Copy；Repository/Bridge 必须验证 Version、唯一 `workingCopyId`、根内普通非软链接文件与 Hash，不把隐藏不可变快照作为产品 Finder 文件。
 3. “返回当前 HTML”：回到项目当前指向的工作文件。
 4. “基于此版本继续编辑”：只在精确历史视图且项目空闲时可用。Bridge 只接收当前完整项目身份、目标 Version ID 和 operation ID；Repository 必须找到该 Version 唯一原有的 `workingCopyId`，完整验证 Working Copy state、不可变快照和当前工作文件 Hash 后，原子写入 `desktop-pending` 激活回执。缺失、重复或验证失败保持历史只读，不从快照猜测或创建替代文件。
 
@@ -648,7 +648,7 @@ Prompt、AI 返回、附件、剪贴板、文件名/路径、账号、电脑序�
 - no-change、失败、取消和冲突未采用也不创建下一份可见 Version Working Copy。
 - 新版提示只在新工作文件、不可变快照、画布 Hash 一致且 canonical path 已切换后显示。
 - 历史查看永远只读且只打开精确 Version 路径。
-- 每个历史版本可一键在 Finder 中显示精确、经过验证的可见 Working Copy；隐藏快照不作为产品 Finder 入口。
+- 每个历史版本可一键在文件夹中打开精确、经过验证的可见 Working Copy；隐藏快照不作为产品 Finder 入口。
 - “基于此版本继续编辑”只重用该 Version 原有工作文件；已写入历史激活回执后，失败只能同一操作向前恢复，不得把该工作文件回滚为较新的活动 Version。
 - 连续两次 AI 成功后，原始 HTML 与第一份工作文件逐字节不变，项目当前路径指向第二份工作文件。
 - 历史页不提供恢复或覆盖当前 HTML；需要以旧快照开始时，将其作为普通文件登记为新的 Document 与 V1。
@@ -668,7 +668,7 @@ Prompt、AI 返回、附件、剪贴板、文件名/路径、账号、电脑序�
 ### 10.6 PR 2B 项目、版本与 Finder
 
 - Registry 有 A/B 且 Recent 仅有 A 时，目录仍显示 A/B；Recent 只影响排序，未登记 Recent 文件不能成为项目。
-- 顶部纯投影可同时显示 `基于 V2 · 项目最新 V6 · 本地修改已保存 · 候选 V7 待审阅`，历史浏览、保存失败和 Candidate/Promotion 不丢失各自事实。
+- 顶部状态徽章默认沉默；只在正在保存、保存失败、正在等 AI、有 AI 修改待查看或正在看历史（只读）时出字。基于 Vn / 项目最新 Vm / 本地修改 / 候选身份留在版本列表、历史与处理面板，不要求顶栏同时常显。保存失败、历史浏览和 Candidate/Promotion 仍各自保留可发现的事实。
 - Version Finder 命令定位该 Version 的可见 Working Copy，项目入口打开经验证项目根，隐藏不可变快照和 `.pageroot/requests/...` 不作为产品入口。
 - `AI任务/` 只由验证后的冻结 Prompt/Candidate 生成；删除、篡改、软链接或用户占位不能改变隐藏 Candidate，也不能阻止按隐藏 Hash 审阅和 Promotion。重试只能重建安全投影或选择新展示目录。
 - P2 不创建 `附件与图片/`、附件快照说明、附件 Finder 定位或回收区；这些可见附件体验属于 P3，现有附件冻结正确性保持。

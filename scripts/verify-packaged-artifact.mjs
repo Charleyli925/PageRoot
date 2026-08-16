@@ -52,7 +52,6 @@ const REQUIRED_BRIDGE_FILES = [
   "html-source-parser.mjs",
   "candidate-assessment.mjs",
   "candidate-assessment-decoder.mjs",
-  "scope-validator.mjs",
   "target-identity.mjs",
   "product-contract.mjs",
   "attachment-storage.mjs",
@@ -103,6 +102,8 @@ const REQUIRED_APP_SOURCE_FILES = [
   "desktop/project-open-queue.mjs",
   "desktop/project-files.mjs",
   "desktop/source-rename.mjs",
+  "desktop/source-file-watch.mjs",
+  "desktop/active-managed-locator.mjs",
   "desktop/project-path-policy.mjs",
   "desktop/welcome-project-content.mjs",
   "desktop/export-copy.mjs",
@@ -119,7 +120,6 @@ const REQUIRED_APP_SOURCE_FILES = [
   "desktop/preview-protocol.mjs",
   "desktop/edit-runtime-bootstrap.mjs",
   "desktop/edit-runtime-protocol.mjs",
-  "desktop/edit-runtime-capture-owner.mjs",
   "desktop/edit-runtime-preparation-fence.mjs",
   "desktop/runtime-visual-capture-owner.mjs",
   "app/domain/edit-runtime-contract.js",
@@ -128,6 +128,7 @@ const REQUIRED_APP_SOURCE_FILES = [
 ];
 const RETIRED_EDITOR_ARTIFACTS = [
   { name: "Edit runtime probe owner", pattern: /edit-runtime-probe-owner/iu },
+  { name: "Edit runtime capture owner", pattern: /edit-runtime-capture-owner/iu },
   { name: "Lexical", pattern: /(?:@lexical\/|\blexical\b)/iu },
   {
     name: "TextFlow",
@@ -581,9 +582,6 @@ export async function verifyAppBundle({
     const lifecycleCoreUrl = pathToFileURL(
       path.join(resourcesPath, "bridge", "lifecycle-core.mjs"),
     ).href;
-    const scopeValidatorUrl = pathToFileURL(
-      path.join(resourcesPath, "bridge", "scope-validator.mjs"),
-    ).href;
     const candidateAssessmentUrl = pathToFileURL(
       path.join(resourcesPath, "bridge", "candidate-assessment.mjs"),
     ).href;
@@ -601,7 +599,7 @@ export async function verifyAppBundle({
       [
         "--input-type=module",
         "--eval",
-        `await import(${JSON.stringify(lifecycleCoreUrl)}); await import(${JSON.stringify(candidateAssessmentUrl)}); await import(${JSON.stringify(candidateAssessmentDecoderUrl)}); await import(${JSON.stringify(scopeValidatorUrl)}); await import(${JSON.stringify(draftServiceUrl)}); await import(${JSON.stringify(draftCommandDecoderUrl)})`,
+        `await import(${JSON.stringify(lifecycleCoreUrl)}); await import(${JSON.stringify(candidateAssessmentUrl)}); await import(${JSON.stringify(candidateAssessmentDecoderUrl)}); await import(${JSON.stringify(draftServiceUrl)}); await import(${JSON.stringify(draftCommandDecoderUrl)})`,
       ],
       "packaged Bridge dependency smoke",
       {

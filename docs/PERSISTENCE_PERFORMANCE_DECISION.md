@@ -64,3 +64,26 @@ npm run benchmark:persistence -- --samples 7 --warmups 1 --report docs/PERSISTEN
 ```
 
 命令只构建一次 Electron renderer，并在该固定 artifact 上依次运行 0.5MiB → 1.25MiB → 2.5MiB。它不改生产代码、不生成真实用户 HTML；完整原始结构化数据写入忽略的 `output/persistence-performance/`。
+
+## P1-B save-pipeline CAS（本分支）
+
+P1-B 不改写上方冻结的 `main` 表。它合并 native-edit checkpoint 之后的第二段 700ms autosave 等待，并把 Working Copy 保存从八态 park journal 收成同目录两态 CAS（`prepared` → 原子 rename → `committed`），目标是把 keypress → disk 的 0.5MiB p50 从约 1.4s 降到 ≤0.9s。
+
+**为什么合并第二段 700ms。** 岛内编辑已经按 `NATIVE_EDIT_CHECKPOINT_DELAY_MS = 700` 合并成一次 source patch。`DocumentWorkflow` 再等 700ms 才 flush，keypress → disk 就会叠到约 1.4s。Checkpoint 写入现在立即 flush（与 Cmd+S 相同）；非 checkpoint 只保留约 100ms debounce。`PROJECT.md` 仍是 700ms。岛 undo 粒度仍由 checkpoint 定时器决定。
+
+**为什么 8 态收成 2 态。** 旧 park journal 在一次 atomic write 上重复 expected-hash 与 realpath。新保存只在边界与 kernel 各核一次：写 recovery 字节（`prepared`），同目录 tmp + 单次 expected-hash CAS rename，post-write hash 重读，然后 `committed`。Crash recovery 仍能读旧 journal，完成完整旧字节或完整新字节，绝不混写。干净 Working Copy 静默采纳磁盘外部修改；编辑器脏字节与磁盘同时变化则 `WORKING_COPY_CONFLICT`。每个 `#serial()` 回合缓存已验根（lstat、非 symlink、realpath），同一次保存不再对同一根重复走目录；缓存不跨回合，根被换成 symlink 后下一次保存仍失败。
+
+### 2026-08-15 本分支测量
+
+- 测量时间：`2026-08-15T10:28:37.544Z`
+- 基线 HEAD：`4650cc6f4b657c2c2de1f687eaae6baf2c348af5`（P0-B / `origin/refactor/remove-legacy-bridge-stack`），加上本 P1-B 工作区改动
+- Renderer artifact：`sha256:c59706ee4dbb18e2e0a82620cfcec82acd4acebda0553c6b4f9696e733438fac`
+- Node / Electron：v25.7.0 / 43.2.0
+- 机器：darwin 25.5.0 · arm64 · Apple M5 Pro
+- 命令：`npm run benchmark:persistence -- --samples 3 --warmups 1 --sizes 0.5`（未跑 7 样本 × 三尺寸，也未 `--report` 覆盖冻结表）
+- 0.5MiB Bridge transaction p50 / p95 / max：174.6 / 184.6 / 184.6 ms
+- 0.5MiB Electron autosave（harness 的 keypress → `persistedRevision`）p50 / p95 / max：**442.7 / 462.2 / 462.2 ms**
+- 目标 keypress → disk ≤0.9s：**达到**（冻结表同尺寸 Electron autosave p50 为 1367.7 ms）
+- 安全 oracle：external-write conflict、`save-source-written` 重启恢复、exact source bytes 均为 passed
+- 同一次 0.5MiB 跑次里 dirty switch p50 为 626.1 ms、dirty close p50 为 204.6 ms；clean close p50 为 2054.7 ms（冻结表为 40.3 ms）。clean close 不是 P1-B 接受指标，此处只记录，不编造解释。
+

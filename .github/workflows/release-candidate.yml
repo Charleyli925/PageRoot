@@ -82,7 +82,7 @@ jobs:
           --suite release-candidate-preflight
           --stage environment-preflight
           --
-          npm run test:electron:ci-preflight:prepared
+          npm run test:electron:ci-preflight
       - name: Assemble and verify the app before release credentials are used
         timeout-minutes: 20
         env:
@@ -119,7 +119,7 @@ jobs:
           --suite release-candidate-signed-startup
           --stage artifact-sign
           --
-          npm run test:packaged-startup:prepared
+          npm run test:packaged-startup
       - name: Notarize and staple the verified signed app
         timeout-minutes: 45
         env:

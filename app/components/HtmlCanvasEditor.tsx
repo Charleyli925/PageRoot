@@ -15,8 +15,11 @@ import { flushSync } from "react-dom";
 
 import {
   EDIT_AUTHOR_RUNTIME_BUDGET,
+  EDIT_AUTHOR_RUNTIME_CONTRACT_VERSION,
+  EDIT_RUNTIME_FROZEN_ATTRIBUTE,
   EDIT_RUNTIME_HOST_ATTRIBUTE,
-  EDIT_RUNTIME_OWNED_ATTRIBUTE,
+  EDIT_RUNTIME_RESULT_ATTRIBUTE,
+  isEditRuntimeFrameToken,
   type EditRuntimeGrant,
 } from "../domain/edit-runtime-contract.js";
 import {
@@ -62,7 +65,7 @@ import {
   nativeLayoutFingerprint,
   sameNativeLayout,
   sameNativeTextStyle,
-} from "./native-edit-runtime-preflight";
+} from "./native-layout-fingerprint";
 import { selectorForElement } from "./html-canvas-dom";
 import {
   STYLE_PROPERTY_CONFIGS,
@@ -108,23 +111,28 @@ import {
   adoptCanonicalHistoryIslandInPlace,
   canonicalNativeHostPreview,
   mountNativeTextFragmentHost,
+  remountNativeHostFromSource,
   nativeEditHostForElement,
   nativeTextFragmentForRange,
+  nativeTextFragmentForElement,
   refreshMountedPreviewSourceNodeIds,
   sourceTextNodeForDomText,
   sourceBackedPreviewElements,
+  alignPreviewSourceSurface,
   sourceTextParentsForSegments,
 } from "./html-canvas-preview-sync";
 import {
   activeTextRangeFromDocument,
   boundedHistorySelection,
   caretPointFromMouseEvent,
+  findCanvasHitSourceElement,
   findCanvasSelectionElement,
+  findDedicatedSourceSurfaceAtPoint,
   findNativeActionTarget,
   historySelectionFromMutationValue,
+  identifyingTextRangeAtPoint,
+  directTextNodeAtPoint,
   isCanvasRootElement,
-  nativeTextRangeMatchesActivation,
-  selectWordAtPoint,
   sourceHistoryDirectionForShortcut,
   type TextCaretPoint,
 } from "./html-canvas-interaction";
@@ -379,6 +387,8 @@ type ActiveNativeEdit = {
   rootTargetRef: SourceTargetRef;
   sourceInnerHtml: string;
   fragmentTargetRef: SourceTargetRef | null;
+  fragmentTextNodeId: string | null;
+  liveNodeId: string | null;
   releaseHost: (() => void) | null;
   session: IslandEditingController;
   selection: NativeEditSelection;
@@ -462,7 +472,6 @@ type RuntimeFrameContext = {
   grant: EditRuntimeGrant;
   elementGeneration: number;
   settled: boolean;
-  snapshotsMounted: boolean;
 };
 
 function sameRuntimeGrant(
@@ -479,41 +488,52 @@ function sameRuntimeGrant(
   );
 }
 
-function mountFrozenRuntimeSnapshots(
+function isRuntimeFrameFrozenResult(
+  value: unknown,
+  frame: RuntimeFrameContext,
+): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const result = value as Record<string, unknown>;
+  if (
+    result.state !== "frozen"
+    || result.reason !== null
+    || result.contractVersion !== EDIT_AUTHOR_RUNTIME_CONTRACT_VERSION
+    || result.executionId !== frame.grant.executionId
+    || result.sessionId !== frame.grant.sessionId
+    || !Array.isArray(result.hostKeys)
+    || result.hostKeys.length !== frame.grant.hosts.length
+  ) return false;
+  const expected = new Set(frame.grant.hosts.map((host) => host.key));
+  const received = new Set<string>();
+  for (const key of result.hostKeys) {
+    if (typeof key !== "string" || !expected.has(key) || received.has(key)) return false;
+    received.add(key);
+  }
+  return received.size === expected.size;
+}
+
+function hostHasAuthorPaint(element: Element | null): boolean {
+  if (!element || element.nodeType !== 1) return false;
+  const tag = element.tagName.toLowerCase();
+  if (tag === "canvas" || tag === "svg") return true;
+  return Boolean(element.querySelector("canvas, svg"));
+}
+
+function runtimeFrameKeepsAuthorPaint(
   documentNode: Document,
   frame: RuntimeFrameContext,
 ): boolean {
-  if (frame.snapshotsMounted) return true;
-  for (const snapshot of frame.grant.snapshots) {
-    const host = documentNode.querySelector<HTMLElement>(
-      `[${EDIT_RUNTIME_HOST_ATTRIBUTE}="${snapshot.key}"]`,
-    );
-    if (
-      !host
-      || host.getAttribute(EDIT_RUNTIME_HOST_ATTRIBUTE) !== snapshot.key
-      || host.querySelector(`[data-pageroot-edit-runtime-snapshot="${snapshot.key}"]`)
-    ) return false;
-    for (const [property, value] of snapshot.styles) {
-      if (!host.style.getPropertyValue(property)) host.style.setProperty(property, value);
-    }
-    const image = documentNode.createElement("img");
-    image.setAttribute(EDIT_RUNTIME_OWNED_ATTRIBUTE, "snapshot");
-    image.setAttribute("data-pageroot-edit-runtime-snapshot", snapshot.key);
-    image.setAttribute("alt", "");
-    image.setAttribute("aria-hidden", "true");
-    image.setAttribute("draggable", "false");
-    image.tabIndex = -1;
-    image.src = `data:image/png;base64,${snapshot.pngBase64}`;
-    image.style.setProperty("display", "block");
-    image.style.setProperty("width", "100%");
-    image.style.setProperty("height", "100%");
-    image.style.setProperty("object-fit", "fill");
-    image.style.setProperty("pointer-events", "none");
-    image.style.setProperty("user-select", "none");
-    host.appendChild(image);
+  if (documentNode.querySelectorAll("img[data-pageroot-edit-runtime-snapshot]").length > 0) {
+    return false;
   }
-  frame.snapshotsMounted = true;
-  return true;
+  // Host discovery includes every source-empty unique binding, not only
+  // charts. Unused empty hosts must not discard a frozen author canvas.
+  return frame.grant.hosts.some((host) => {
+    const element = documentNode.querySelector(
+      `[${EDIT_RUNTIME_HOST_ATTRIBUTE}="${host.key}"]`,
+    );
+    return hostHasAuthorPaint(element);
+  });
 }
 
 const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProps>(function HtmlCanvasEditor(
@@ -696,6 +716,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const [frameRender, setFrameRender] = useState(() => ({
     html: disableExecutableMarkup(html),
     elementGeneration: 0,
+    runtime: false,
   }));
   const [selection, setSelection] = useState<HtmlCanvasSelection | null>(null);
   const [overlayPosition, setOverlayPosition] = useState<OverlayPosition | null>(null);
@@ -837,7 +858,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     const sourceIndex = sourceIndexRef.current;
     const runtimeGrant = options.forceStatic ? null : editRuntimeGrant;
     let runtimeFrame: RuntimeFrameContext | null = null;
-    const verificationToken = token;
+    let verificationToken = token;
     let prepared: string | null = null;
     if (runtimeGrant && !runtimeAttemptedRef.current) {
       // One component lifetime corresponds to one canvas generation. Once a
@@ -848,25 +869,30 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         sourceIndex?.source === source
         && sourceIndex.sourceSha256 === runtimeGrant.sourceSha256
       ) {
-        const runtimeDocument = prepareCanvasFrameDocument(
-          instrumentedSource,
-          token,
-          {
-            mode: "static-runtime-snapshot",
-            hosts: runtimeGrant.hosts,
-            baseUrl: resolvedBaseHref,
-            editorStyles: EDITOR_DOCUMENT_STYLES,
-          },
-        );
-        if (runtimeDocument) {
-          prepared = runtimeDocument;
-          runtimeFrame = {
-            grant: runtimeGrant,
-            verificationToken: token,
-            elementGeneration: nextFrameGeneration,
-            settled: false,
-            snapshotsMounted: false,
-          };
+        const runtimeToken = `edit-runtime-frame-${runtimeGrant.executionId}`;
+        if (isEditRuntimeFrameToken(runtimeToken)) {
+          const runtimeDocument = prepareCanvasFrameDocument(
+            instrumentedSource,
+            runtimeToken,
+            {
+              mode: "one-shot-runtime",
+              sessionId: runtimeGrant.sessionId,
+              executionId: runtimeGrant.executionId,
+              hosts: runtimeGrant.hosts,
+              baseUrl: resolvedBaseHref,
+              editorStyles: EDITOR_DOCUMENT_STYLES,
+            },
+          );
+          if (runtimeDocument) {
+            prepared = runtimeDocument;
+            verificationToken = runtimeToken;
+            runtimeFrame = {
+              grant: runtimeGrant,
+              verificationToken: runtimeToken,
+              elementGeneration: nextFrameGeneration,
+              settled: false,
+            };
+          }
         }
       }
       if (!runtimeFrame) {
@@ -897,6 +923,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       setFrameRender({
         html: prepared,
         elementGeneration: nextFrameGeneration,
+        runtime: Boolean(runtimeFrame),
       });
     };
     if (options.immediate) {
@@ -1470,24 +1497,16 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       const detachedNodes = sourceBackedPreviewElements(detachedDocument);
       const previousElements = previousIndex.elements as SourceElementValue[];
       const nextElements = result.sourceIndex.elements as SourceElementValue[];
+      const previousSurface = alignPreviewSourceSurface(previousIndex, liveNodes);
+      if (!previousSurface) return false;
+      if (previousSurface.some((entry, index) => (
+        liveNodes[index].getAttribute(SOURCE_NODE_ATTRIBUTE) !== entry.nodeId
+      ))) return false;
+      const detachedSurface = alignPreviewSourceSurface(result.sourceIndex, detachedNodes);
       if (
-        liveNodes.length !== previousElements.length
-        || detachedNodes.length !== nextElements.length
-        || (!isTextRangeStyle && previousElements.length !== nextElements.length)
+        !detachedSurface
+        || detachedSurface.length !== nextElements.length
       ) return false;
-
-      for (let index = 0; index < liveNodes.length; index += 1) {
-        if (
-          liveNodes[index].getAttribute(SOURCE_NODE_ATTRIBUTE) !== previousElements[index].nodeId
-          || liveNodes[index].tagName.toLowerCase() !== previousElements[index].tagName
-        ) return false;
-      }
-      for (let index = 0; index < detachedNodes.length; index += 1) {
-        if (
-          detachedNodes[index].getAttribute(SOURCE_NODE_ATTRIBUTE) !== nextElements[index].nodeId
-          || detachedNodes[index].tagName.toLowerCase() !== nextElements[index].tagName
-        ) return false;
-      }
 
       const previousTargetRef = plan.targetRefs.find(
         (target: SourceTargetRef) => target.targetId === originalMutation.target.id,
@@ -1502,31 +1521,12 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         previousTarget?.type !== "element"
         || nextTarget?.type !== "element"
       ) return false;
-      const previousTargetIndex = previousElements.findIndex(
-        (element) => element.nodeId === previousTarget.nodeId,
-      );
-      const nextTargetIndex = nextElements.findIndex(
-        (element) => element.nodeId === nextTarget.nodeId,
-      );
-      if (
-        previousTargetIndex < 0
-        || nextTargetIndex < 0
-        || (
-          originalMutation.kind !== "reorder"
-          && previousTargetIndex !== nextTargetIndex
-        )
-      ) return false;
-
-      const liveTarget = isTextRangeStyle
-        ? liveNodes.find((node) => (
-            node.getAttribute(SOURCE_NODE_ATTRIBUTE) === previousTarget.nodeId
-          ))
-        : liveNodes[previousTargetIndex];
-      const detachedTarget = isTextRangeStyle
-        ? detachedNodes.find((node) => (
-            node.getAttribute(SOURCE_NODE_ATTRIBUTE) === nextTarget.nodeId
-          ))
-        : detachedNodes[nextTargetIndex];
+      const liveTarget = liveNodes.find((node) => (
+        node.getAttribute(SOURCE_NODE_ATTRIBUTE) === previousTarget.nodeId
+      ));
+      const detachedTarget = detachedNodes.find((node) => (
+        node.getAttribute(SOURCE_NODE_ATTRIBUTE) === nextTarget.nodeId
+      ));
       if (!(liveTarget instanceof LiveHTMLElement)) return false;
       if (!detachedTarget) return false;
 
@@ -1643,18 +1643,14 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       }
 
       const stableNodes = sourceBackedPreviewElements(documentNode);
-      if (
-        stableNodes.length !== nextElements.length
-        || stableNodes.some(
-          (node, index) => node.tagName.toLowerCase() !== nextElements[index].tagName,
-        )
-      ) return false;
+      const stableSurface = alignPreviewSourceSurface(result.sourceIndex, stableNodes);
+      if (!stableSurface) return false;
 
       // Direct patches refresh the mounted preview and every ephemeral source
       // identity in place. The DOM remains a preview only; it is never
       // serialized back into the user's source.
-      stableNodes.forEach((node, index) => {
-        node.setAttribute(SOURCE_NODE_ATTRIBUTE, nextElements[index].nodeId);
+      stableSurface.forEach(({ node, nodeId }) => {
+        node.setAttribute(SOURCE_NODE_ATTRIBUTE, nodeId);
       });
       sourceIndexRef.current = result.sourceIndex;
       frameSourceHtmlRef.current = result.html;
@@ -1728,15 +1724,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     let title = "这处内容暂时不能直接编辑";
     let message = "页面内容没有改变。你仍可以选择文字，或添加评论说明要怎么改。";
     let code = "canvas_c02_edit_blocked";
-    if (/两种样式的边界|文字属于哪一侧|样式内一个字的位置/iu.test(rawDetail)) {
-      code = "canvas_c03_style_boundary";
-      title = "请把光标移入文字内部";
-      message = "这里正好是两种文字样式的边界，直接输入可能跑到错误一侧。请把光标移到样式内一个字的位置后输入，或添加评论。";
-    } else if (/空的排版元素|输入可能跑到错误位置/iu.test(rawDetail)) {
-      code = "canvas_c04_empty_formatting";
-      title = "这里暂时不能直接改字";
-      message = "这段文字旁有一个空的排版元素，直接输入可能跑到错误位置。你仍可以选中文字，或添加评论交给 AI 处理。";
-    } else if (
+    if (
       /复杂网页结构|暂不支持直接改字|source structure|structural command/iu.test(rawDetail)
     ) {
       code = "canvas_c05_complex_structure";
@@ -1989,6 +1977,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         frameSourceHtmlRef.current = result.html;
         activeNativeEdit.rootTargetRef = refreshedRootRef;
         activeNativeEdit.fragmentTargetRef = refreshedFragmentRef;
+        activeNativeEdit.liveNodeId = refreshedIsland?.element.nodeId
+          ?? refreshedFragmentNode?.parentId
+          ?? activeNativeEdit.liveNodeId;
+        activeNativeEdit.fragmentTextNodeId = refreshedFragmentNode?.nodeId
+          ?? (nextFragmentHtml === "" ? null : activeNativeEdit.fragmentTextNodeId);
         activeNativeEdit.target = appliedMutation.target;
         selectedSourceSelectionRef.current = appliedMutation.target;
         setSelection(appliedMutation.target);
@@ -2401,6 +2394,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
             type: "update-direct-text-node" as const,
             targetRef: active.rootTargetRef,
             textTargetRef: active.fragmentTargetRef!,
+            nodeId: active.liveNodeId ?? undefined,
+            textNodeId: active.fragmentTextNodeId ?? undefined,
             beforeFragmentHtml: previousInnerHtml,
             nextFragmentHtml: nextInnerHtml,
             expectedSourceSha256: active.projection.sourceSha256,
@@ -2408,6 +2403,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         : {
             type: "replace-editable-island" as const,
             targetRef: active.rootTargetRef,
+            nodeId: active.liveNodeId ?? undefined,
             beforeInnerHtml: previousInnerHtml,
             nextInnerHtml,
             expectedSourceSha256: active.projection.sourceSha256,
@@ -2600,6 +2596,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       const target = active.target;
       const rootElement = active.rootElement;
       const selectionElement = active.selectionElement;
+      const settledRuntimeFrame = (
+        runtimeFrameRef.current?.settled
+        && runtimeFrameRef.current.elementGeneration === frameLoadGenerationRef.current
+      ) ? runtimeFrameRef.current : null;
       const frameReloadRequired = (
         nativeEditNeedsReloadRef.current
         || !rootElement.isConnected
@@ -2617,7 +2617,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       setIsEditing(false);
       setHasTextRange(false);
       rootElement.ownerDocument.getSelection()?.removeAllRanges();
-      if (frameReloadRequired) {
+      if (frameReloadRequired && !settledRuntimeFrame) {
         // An explicit finish never resumes native editing after the new frame
         // is connected. This is essential when a direct-text fragment was
         // deleted: its source target no longer exists to restore.
@@ -2629,6 +2629,27 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         loadFrameSource(source, { preserveViewport: true });
         replayCompletedUserCommand();
         return { ...committed, frameReloading: true };
+      }
+      if (settledRuntimeFrame) {
+        // The Chromium mutation-owner fence would remount this generation as
+        // static Edit. Keep the frozen one-shot iframe and drop the guard.
+        nativeSessionNeedsCanonicalFenceRef.current = false;
+        fencedDocumentCleanupRef.current();
+        renderedSourceHtmlRef.current = source;
+      }
+      // releaseHost() removes the transient pageroot-text-fragment wrapper.
+      // The source parent remains the rebind target for the following style
+      // patch; treating that wrapper as a lost host blocks toolbar formatting.
+      const previewHostStillMounted = active.mode === "text-fragment"
+        ? selectionElement.isConnected
+        : rootElement.isConnected && selectionElement.isConnected;
+      if (!previewHostStillMounted) {
+        pendingNativeEditResumeRef.current = null;
+        selectedElementRef.current = null;
+        pendingSelectionRef.current = target;
+        pendingToolbarVisibleRef.current = true;
+        replayCompletedUserCommand();
+        return { ...committed, frameReloading: false };
       }
 
       pendingSelectionRef.current = null;
@@ -2865,9 +2886,21 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     }
     const priorRange = activeTextRangeRef.current;
     const islandHostElement = nativeEditHostForElement(selectedElement, sourceIndex);
+    const hintedTextNode = !islandHostElement && caretPoint
+      ? directTextNodeAtPoint(
+          selectedElement.ownerDocument,
+          selectedElement,
+          caretPoint,
+        )
+      : null;
     const fragmentCandidate = islandHostElement
       ? null
-      : nativeTextFragmentForRange(priorRange, sourceIndex);
+      : nativeTextFragmentForRange(priorRange, sourceIndex)
+        ?? nativeTextFragmentForElement(
+          selectedElement,
+          sourceIndex,
+          hintedTextNode,
+        );
     if (!islandHostElement && !fragmentCandidate) {
       let blockedCause: Error = new Error(
         "这段可见内容不是当前源码中的唯一静态文字，无法安全进入原位编辑。",
@@ -2963,15 +2996,43 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         }
         sourceInnerHtml = islandCapability.island.innerHtml;
       }
-      const liveText = fragmentCandidate
+      let liveText = fragmentCandidate
         ? fragmentCandidate.textNode.data
         : nativeLogicalText(islandHostElement!);
       if (liveText !== projection.text) {
-        containerRef.current?.setAttribute("data-native-start-status", "text-mismatch");
-        reportBlockedEdit(new Error(
-          "画布文字与源码节点已经漂移，已阻止直接编辑。",
-        ));
-        return false;
+        containerRef.current?.setAttribute(
+          "data-native-start-status",
+          "text-mismatch-remount",
+        );
+        if (fragmentCandidate) {
+          fragmentCandidate.textNode.data = projection.text;
+        } else {
+          const hostNodeId = islandHostElement!.getAttribute(SOURCE_NODE_ATTRIBUTE);
+          if (
+            !hostNodeId
+            || !remountNativeHostFromSource(
+              islandHostElement!,
+              hostNodeId,
+              sourceIndex,
+            )
+          ) {
+            containerRef.current?.setAttribute("data-native-start-status", "text-mismatch");
+            reportBlockedEdit(new Error(
+              "画布文字与源码节点已经漂移，已阻止直接编辑。",
+            ));
+            return false;
+          }
+        }
+        liveText = fragmentCandidate
+          ? fragmentCandidate.textNode.data
+          : nativeLogicalText(islandHostElement!);
+        if (liveText !== projection.text) {
+          containerRef.current?.setAttribute("data-native-start-status", "text-mismatch");
+          reportBlockedEdit(new Error(
+            "画布文字与源码节点已经漂移，已阻止直接编辑。",
+          ));
+          return false;
+        }
       }
       const layoutElement = fragmentCandidate?.parentElement
         ?? islandHostElement!;
@@ -2983,7 +3044,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         restoredSelection,
         projection.text,
       );
-      if (!initialSelection && priorRange && activationLogicalRange) {
+      if (!initialSelection && priorRange && activationLogicalRange && !caretPoint) {
         initialSelection = {
           anchor: priorRange.direction === "backward"
             ? activationLogicalRange.endOffset
@@ -3085,22 +3146,18 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         nativeTextFragmentStyleSignature(hostElement) === fragmentStyleBefore
         && !hasNativeTextFragmentPseudoContent(hostElement)
       );
-      if (
-        !sameNativeLayout(layoutBeforeEditing, layoutAfterEditing)
+      const layoutDrifted = !sameNativeLayout(layoutBeforeEditing, layoutAfterEditing)
         || !sameNativeTextStyle(layoutBeforeEditing, layoutAfterEditing)
-        || !fragmentStyleStable
-      ) {
-        session.dispose();
-        mountedFragment?.release();
-        currentNativeEditLeaseRef.current = null;
-        containerRef.current?.setAttribute(
-          "data-native-start-status",
-          "island:layout-changed",
-        );
-        reportBlockedEdit(new Error(
-          "这个页面为可编辑状态设置了会改变排版的 CSS，已阻止直接编辑以免画面跳动。",
-        ));
-        return false;
+        || !fragmentStyleStable;
+      // Layout/style fingerprints observe post-entry drift only. They must
+      // not refuse to enter; MutationObserver rollback and checkpoint scope
+      // remain the fail-closed safety net.
+      if (layoutDrifted) {
+        containerRef.current?.setAttribute("data-native-layout-drift", "true");
+        hostElement.setAttribute("data-native-layout-drift", "true");
+      } else {
+        containerRef.current?.removeAttribute("data-native-layout-drift");
+        hostElement.removeAttribute("data-native-layout-drift");
       }
       const active: ActiveNativeEdit = {
         mode,
@@ -3111,6 +3168,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         rootTargetRef,
         sourceInnerHtml,
         fragmentTargetRef,
+        fragmentTextNodeId: fragmentCandidate?.textNodeId ?? null,
+        liveNodeId: (
+          fragmentCandidate?.parentElement ?? islandHostElement
+        )?.getAttribute(SOURCE_NODE_ATTRIBUTE) ?? target.nodeId ?? null,
         releaseHost: mountedFragment?.release ?? null,
         session,
         lease,
@@ -3148,8 +3209,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       // this to the next animation frame lets a fast mouse drag, keyboard
       // command, or test-set Selection win briefly and then get overwritten by
       // the stale activation point. Only overlay measurement needs a frame.
-      if (initialSelection) session.focusSelection();
-      else if (caretPoint) session.focusAtPoint(caretPoint);
+      // A caretPoint from the entering double-click wins over any identifying
+      // 1-character range used only to mount a text fragment.
+      if (caretPoint && !restoredSelection) session.focusAtPoint(caretPoint);
       else session.focusSelection();
       requestAnimationFrame(() => {
         if (
@@ -3727,26 +3789,31 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       };
     }
 
-    const runtimeFrame = runtimeFrameRef.current;
-    const retainsSettledRuntimeFrame = Boolean(
+    const settledRuntimeFrameIsCurrent = (): RuntimeFrameContext | null => {
+      const current = runtimeFrameRef.current;
+      if (
+        !current?.settled
+        || current.elementGeneration !== frameLoadGenerationRef.current
+        || nativeEditNeedsReloadRef.current
+        || renderedSourceHtmlRef.current !== frameSourceHtmlRef.current
+      ) return null;
+      return current;
+    };
+
+    const activeRuntimeFrame = settledRuntimeFrameIsCurrent();
+    if (
       resumeEditing
       && !preserveForHistory
       && activeNativeEditRef.current
-      && runtimeFrame?.settled
-      && runtimeFrame.elementGeneration === frameLoadGenerationRef.current
-      && !nativeEditNeedsReloadRef.current
-      && renderedSourceHtmlRef.current === frameSourceHtmlRef.current,
-    );
-    if (retainsSettledRuntimeFrame && runtimeFrame) {
+      && activeRuntimeFrame
+    ) {
       // A checkpoint has already rebased this active island against the exact
-      // new source. Keep its frozen snapshots mounted while editing resumes;
-      // replacing this settled one-shot frame would discard them and cannot
-      // execute the author program a second time.
+      // new source. Keep the frozen runtime DOM while editing resumes.
       pendingHistoryBookmarkRef.current = null;
       pendingHistoryCanonicalFenceRef.current = false;
       containerRef.current?.setAttribute(
         "data-native-fence-resume",
-        `retained-runtime:${runtimeFrame.elementGeneration}`,
+        `retained-runtime:${activeRuntimeFrame.elementGeneration}`,
       );
       return {
         ok: true,
@@ -3765,7 +3832,26 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     pendingHistoryCanonicalFenceRef.current = preserveForHistory
       ? needsCanonicalFence
       : false;
-    if (needsCanonicalFence && !preserveForHistory) {
+    const detachedRuntimeFrame = settledRuntimeFrameIsCurrent();
+    if (detachedRuntimeFrame && !preserveForHistory) {
+      // After the session ends, a canonical fence would remount this generation
+      // as static Edit and drop author Canvas/SVG. Dispose the mutation-owner
+      // guard in-place instead of replacing the frozen iframe.
+      pendingHistoryBookmarkRef.current = null;
+      pendingHistoryCanonicalFenceRef.current = false;
+      nativeSessionNeedsCanonicalFenceRef.current = false;
+      fencedDocumentCleanupRef.current();
+      if (!resumeEditing) {
+        pendingFrameRestoreEpochRef.current += 1;
+        pendingNativeEditResumeRef.current = null;
+        pendingSelectionRef.current = null;
+        pendingToolbarVisibleRef.current = false;
+      }
+      containerRef.current?.setAttribute(
+        "data-native-fence-resume",
+        `retained-runtime:${detachedRuntimeFrame.elementGeneration}`,
+      );
+    } else if (needsCanonicalFence && !preserveForHistory) {
       const target = resumeEditing
         ? bookmark?.target ?? selectedSourceSelectionRef.current
         : null;
@@ -4295,7 +4381,40 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         fallBackToStaticRuntimeFrame(runtimeFrame, "rejected");
         return false;
       }
-      if (!mountFrozenRuntimeSnapshots(documentNode, runtimeFrame)) {
+      const root = documentNode.documentElement;
+      const rawResult = root.getAttribute(EDIT_RUNTIME_RESULT_ATTRIBUTE);
+      const frozen = root.getAttribute(EDIT_RUNTIME_FROZEN_ATTRIBUTE) === "true";
+      if (!frozen) {
+        if (rawResult) {
+          try {
+            const result = JSON.parse(rawResult) as { state?: unknown };
+            if (result.state === "rejected") {
+              fallBackToStaticRuntimeFrame(runtimeFrame, "rejected");
+              return false;
+            }
+            if (result.state === "failed") {
+              fallBackToStaticRuntimeFrame(runtimeFrame, "failed");
+              return false;
+            }
+          } catch {
+            fallBackToStaticRuntimeFrame(runtimeFrame, "rejected");
+            return false;
+          }
+        }
+        return false;
+      }
+      let result: unknown = null;
+      try {
+        result = rawResult ? JSON.parse(rawResult) : null;
+      } catch {
+        fallBackToStaticRuntimeFrame(runtimeFrame, "rejected");
+        return false;
+      }
+      if (!isRuntimeFrameFrozenResult(result, runtimeFrame)) {
+        fallBackToStaticRuntimeFrame(runtimeFrame, "rejected");
+        return false;
+      }
+      if (!runtimeFrameKeepsAuthorPaint(documentNode, runtimeFrame)) {
         fallBackToStaticRuntimeFrame(runtimeFrame, "rejected");
         return false;
       }
@@ -4303,7 +4422,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         runtimeFrame.settled = true;
         containerRef.current?.setAttribute(
           "data-runtime-bootstrap-count",
-          String(runtimeFrame.grant.bootstrapCount),
+          String(documentNode.querySelectorAll("[data-pageroot-edit-runtime-bootstrap]").length),
         );
         onEditRuntimeLoadOutcomeRef.current?.(runtimeFrame.grant, "ready");
       }
@@ -4404,7 +4523,14 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
 
     const handleDoubleClick = (event: MouseEvent) => {
       if (findNativeActionTarget(event.target)) event.preventDefault();
-      const target = findCanvasSelectionElement(event.target);
+      const caretPoint = caretPointFromMouseEvent(event);
+      const dedicatedSurface = findDedicatedSourceSurfaceAtPoint(
+        documentNode,
+        caretPoint,
+      );
+      const target = dedicatedSurface
+        ?? findCanvasHitSourceElement(event.target)
+        ?? findCanvasSelectionElement(event.target);
       if (!target) return;
       if (target.hasAttribute(EDIT_RUNTIME_HOST_ATTRIBUTE)) {
         event.preventDefault();
@@ -4429,81 +4555,42 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         const committed = finishNativeEditing(true, "manual");
         if (!committed.ok || committed.frameReloading) return;
       }
-      const caretPoint = caretPointFromMouseEvent(event);
-      const nativeSelection = documentNode.getSelection();
-      let nativeRange = nativeSelection
-        && nativeSelection.rangeCount === 1
-        && !nativeSelection.isCollapsed
-        && Boolean(nativeSelection.toString().trim())
-        ? nativeSelection.getRangeAt(0).cloneRange()
+      if (lockedRef.current) return;
+      setSpacingMenuOpen(false);
+      event.preventDefault();
+      event.stopPropagation();
+      const editTarget = dedicatedSurface ?? target;
+      const sourceIndex = sourceIndexRef.current;
+      const islandHostElement = sourceIndex
+        ? nativeEditHostForElement(editTarget, sourceIndex)
         : null;
-      if (
-        nativeRange
-        && !nativeTextRangeMatchesActivation(nativeRange, target, caretPoint)
-      ) {
-        nativeRange = null;
-        nativeSelection?.removeAllRanges();
-      }
-      if (!nativeRange) {
-        nativeRange = selectWordAtPoint(
+      if (!islandHostElement && !dedicatedSurface) {
+        const identifyingRange = identifyingTextRangeAtPoint(
           documentNode,
-          target,
+          editTarget,
           caretPoint,
         );
+        if (
+          identifyingRange
+          && identifyingRange.startContainer.isConnected
+          && identifyingRange.endContainer.isConnected
+        ) {
+          const selection = documentNode.getSelection();
+          selection?.removeAllRanges();
+          selection?.addRange(identifyingRange);
+          captureTextRange();
+        } else {
+          containerRef.current?.setAttribute(
+            "data-native-start-status",
+            "direct-text-hit-required",
+          );
+        }
       }
-      setSpacingMenuOpen(false);
-      if (lockedRef.current) return;
-      if (
-        nativeRange
-        && nativeRange.startContainer.isConnected
-        && nativeRange.endContainer.isConnected
-      ) {
-        // Preserve Chromium's real double-click word range before changing
-        // selection chrome or enabling contenteditable. Source mapping then
-        // converts the exact forward/backward browser range to logical offsets.
-        const selection = documentNode.getSelection();
-        selection?.removeAllRanges();
-        selection?.addRange(nativeRange);
-      }
-      const capturedRange = nativeRange ? captureTextRange() : null;
-      if (!capturedRange) {
-        containerRef.current?.setAttribute(
-          "data-native-start-status",
-          "direct-text-hit-required",
-        );
-        selectElement(target, undefined, {
-          preserveTextSelection: Boolean(nativeRange),
-        });
-      }
-      const editingStarted = capturedRange
-        ? startEditing()
-        : nativeRange
-          ? startEditing(caretPoint)
-          : false;
-      if (editingStarted) {
-        // Cancel the remaining dblclick default only after the native range has
-        // been captured and the authored host owns focus. This avoids erasing
-        // the browser's word Selection before the edit session exists.
-        event.preventDefault();
-        event.stopPropagation();
-      }
-      if (
-        !editingStarted
-        && nativeRange
-        && nativeRange.startContainer.isConnected
-        && nativeRange.endContainer.isConnected
-      ) {
-        const restoredSelection = documentNode.getSelection();
-        restoredSelection?.removeAllRanges();
-        restoredSelection?.addRange(nativeRange);
-        captureTextRange();
-        // The browser's post-dblclick default can collapse the range again on
-        // dedicated/fallback surfaces (notably <pre><code>). Once PageRoot has
-        // restored the exact authored word range, keep it as the stable
-        // selection/comment target.
-        event.preventDefault();
-        event.stopPropagation();
-      }
+      selectElement(editTarget, undefined, {
+        preserveTextSelection: Boolean(activeTextRangeRef.current),
+      });
+      const editingStarted = startEditing(caretPoint);
+      if (!editingStarted) selectElement(editTarget);
     };
 
     let disabledButtonPointer:
@@ -5217,8 +5304,16 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const selectedNativeEditHost = selectedElementRef.current && sourceIndexRef.current
     ? nativeEditHostForElement(selectedElementRef.current, sourceIndexRef.current)
     : null;
-  const selectedNativeTextFragment = !selectedNativeEditHost && sourceIndexRef.current
+  const selectedNativeTextFragment = (
+    !selectedNativeEditHost
+    && selectedElementRef.current
+    && sourceIndexRef.current
+  )
     ? nativeTextFragmentForRange(activeTextRangeRef.current, sourceIndexRef.current)
+      ?? nativeTextFragmentForElement(
+        selectedElementRef.current,
+        sourceIndexRef.current,
+      )
     : null;
   const selectedNativeEditAvailable = Boolean(
     activeNativeEditRef.current
@@ -5279,7 +5374,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
               : iframeTitle
         }
         srcDoc={frameRender.html}
-        sandbox="allow-same-origin"
+        sandbox={frameRender.runtime
+          ? "allow-same-origin allow-scripts"
+          : "allow-same-origin"}
         onLoad={(event) => connectFrame(
           event.currentTarget,
           frameRender.elementGeneration,

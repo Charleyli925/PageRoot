@@ -8,6 +8,7 @@ import {
 import path from "node:path";
 
 import { ProjectFileError } from "./project-files.mjs";
+import { rebaseActiveManagedLocator } from "./active-managed-locator.mjs";
 
 const HTML_EXTENSIONS = new Set([".html", ".htm"]);
 const SHA256_PATTERN = /^sha256:[a-f0-9]{64}$/;
@@ -348,6 +349,10 @@ function applySourcePathTransition(state, record, now) {
     retained.splice(Math.min(replacementIndex, retained.length), 0, nextEntry);
     state.recent = retained;
   }
+  state.activeManagedLocator = rebaseActiveManagedLocator(state.activeManagedLocator, {
+    previousSourcePath: record.previousPath,
+    nextSourcePath: record.sourcePath,
+  });
 }
 
 async function verifiedProject(sourcePath, expectedSha256, readProject) {

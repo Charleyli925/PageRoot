@@ -270,7 +270,7 @@ test("DocumentWorkflow restores source-history and recovery authority after a pr
   assert.deepEqual(harness.sourceHistorySession.pendingOperations, [pending]);
 });
 
-test("DocumentWorkflow coalesces a 700ms source write and only accepts exact HTML/Hash acknowledgement", async () => {
+test("DocumentWorkflow coalesces a 100ms source write and only accepts exact HTML/Hash acknowledgement", async () => {
   const before = "<!doctype html><html><body><p>one</p></body></html>";
   const after = before.replace("one", "two");
   const history = sourceHistory({ sourceSha256: sha256(before) });
@@ -295,7 +295,7 @@ test("DocumentWorkflow coalesces a 700ms source write and only accepts exact HTM
   const queued = harness.workflow.enqueueEdit({ html: after });
   assert.equal(queued.status, "succeeded");
   assert.equal(queued.value.revision, 1);
-  assert.deepEqual(harness.scheduler.pending.map((task) => task.delay), [700]);
+  assert.deepEqual(harness.scheduler.pending.map((task) => task.delay), [100]);
   assert.equal(harness.documentSession.persistState, "queued");
   assert.equal(harness.recoveryStore.values.size, 2);
 
@@ -306,6 +306,44 @@ test("DocumentWorkflow coalesces a 700ms source write and only accepts exact HTM
   assert.equal(harness.documentSession.sourceSha256, sha256(after));
   assert.equal(harness.documentSession.persistState, "idle");
   assert.equal(harness.recoveryStore.values.size, 0);
+});
+
+test("DocumentWorkflow flushes a native-edit checkpoint immediately", async () => {
+  const before = "<!doctype html><html><body><p>one</p></body></html>";
+  const after = before.replace("one", "two");
+  const history = sourceHistory({ sourceSha256: sha256(before) });
+  const calls = [];
+  const harness = createHarness({
+    html: before,
+    bridge: {
+      async autosave(body) {
+        calls.push(body);
+        return {
+          ok: true,
+          content: body.html,
+          sha256: sha256(body.html),
+          persistedRevision: body.editRevision,
+          lastModifiedAt: "2026-08-11T00:00:01.000Z",
+          sourceHistory: history,
+        };
+      },
+    },
+  });
+
+  const queued = harness.workflow.enqueueEdit({
+    html: after,
+    mutation: {
+      kind: "text",
+      property: "editableIslandHtml",
+      target: { id: "island" },
+    },
+  });
+  assert.equal(queued.status, "succeeded");
+  assert.deepEqual(harness.scheduler.pending.map((task) => task.delay), []);
+  const outcome = await harness.workflow.flush();
+  assert.equal(outcome.status, "succeeded");
+  assert.equal(calls.length, 1);
+  assert.equal(harness.documentSession.persistState, "idle");
 });
 
 test("DocumentWorkflow rebinds a moved Working Copy before the next autosave", async () => {
@@ -985,3 +1023,94 @@ test("DocumentWorkflow reconciles an unknown history action before replaying its
   assert.equal(harness.documentSession.sourceSha256, sha256(before));
   assert.equal(harness.canvas.history.length, 1);
 });
+
+test("observeExternalSourceChange keeps the editor when disk hash matches", async () => {
+  const html = "<!doctype html><html><body><p>one</p></body></html>";
+  const harness = createHarness({
+    html,
+    bridge: {
+      async source(sourcePath) {
+        return {
+          projectId: PROJECT_ID,
+          documentId: DOCUMENT_ID,
+          sourcePath,
+          content: html,
+          sha256: sha256(html),
+          lastModifiedAt: "2026-08-15T00:00:00.000Z",
+        };
+      },
+    },
+  });
+
+  const outcome = await harness.workflow.observeExternalSourceChange({
+    sourcePath: SOURCE_PATH,
+  });
+
+  assert.equal(outcome.status, "succeeded");
+  assert.equal(outcome.value.unchanged, true);
+  assert.equal(harness.documentSession.persistState, "idle");
+  assert.equal(harness.documentSession.html, html);
+});
+
+test("observeExternalSourceChange enters conflict without adopting disk bytes", async () => {
+  const html = "<!doctype html><html><body><p>one</p></body></html>";
+  const disk = html.replace("one", "external");
+  const harness = createHarness({
+    html,
+    canvasOverrides: {
+      freeze() {
+        return { ok: true };
+      },
+    },
+    bridge: {
+      async source(sourcePath) {
+        return {
+          projectId: PROJECT_ID,
+          documentId: DOCUMENT_ID,
+          sourcePath,
+          content: disk,
+          sha256: sha256(disk),
+        };
+      },
+    },
+  });
+
+  const outcome = await harness.workflow.observeExternalSourceChange({
+    sourcePath: SOURCE_PATH,
+  });
+
+  assert.equal(outcome.status, "succeeded");
+  assert.equal(outcome.value.conflict, true);
+  assert.equal(harness.documentSession.persistState, "conflict");
+  assert.equal(harness.documentSession.html, html);
+  assert.equal(harness.documentSession.sourceSha256, sha256(html));
+});
+
+test("observeExternalSourceChange ignores stale paths and in-flight writes", async () => {
+  const html = "<!doctype html><html><body><p>one</p></body></html>";
+  let sourceCalls = 0;
+  const harness = createHarness({
+    html,
+    bridge: {
+      async source() {
+        sourceCalls += 1;
+        throw new Error("should not read while writing");
+      },
+    },
+  });
+
+  const stale = await harness.workflow.observeExternalSourceChange({
+    sourcePath: "/tmp/other-document.html",
+  });
+  assert.equal(stale.status, "succeeded");
+  assert.equal(stale.value.ignored, true);
+
+  harness.documentSession.setPersistence({ state: "writing" });
+  const deferred = await harness.workflow.observeExternalSourceChange({
+    sourcePath: SOURCE_PATH,
+  });
+  assert.equal(deferred.status, "succeeded");
+  assert.equal(deferred.value.deferred, true);
+  assert.equal(sourceCalls, 0);
+});
+

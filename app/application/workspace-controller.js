@@ -866,6 +866,10 @@ export class WorkspaceController {
     return this.#requireProjectWorkflow().renameSource(input);
   }
 
+  observeExternalSourceChange(input) {
+    return this.#requireProjectWorkflow().reconcileExternalSourceLocator(input);
+  }
+
   submitRequest(input) {
     return this.#requireRunWorkflow().submit(input);
   }

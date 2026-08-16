@@ -106,6 +106,9 @@ export class DocumentWorkflow {
     acceptExternalConflict?: boolean;
     externalAuthorityAccepted?: boolean;
   }): Promise<DocumentWorkflowOutcome<Record<string, unknown>>>;
+  observeExternalSourceChange(input?: {
+    sourcePath?: string | null;
+  }): Promise<DocumentWorkflowOutcome<Record<string, unknown>>>;
   ensureCurrentCanvas(input?: {
     context?: ProjectContext;
   }): Promise<DocumentWorkflowOutcome<Record<string, unknown>>>;

@@ -57,16 +57,24 @@ Comments + frozen input
   active/inactive class transitions and `hidden`, `open`, `aria-selected` or
   `aria-expanded` state. It never carries runtime DOM, pixels or table markup.
 - Edit is source-static by default. On desktop only, a clean persisted document
-  with an explicit ECharts signal may receive one isolated immutable author-
-  runtime capture session before the first editable frame is mounted. The
+  with an explicit ECharts signal may receive one immutable author-runtime
+  resource session before the first editable frame is mounted. The
   `WorkspaceController` keys that disposable attempt by `(sourcePath,
-  canvasGeneration)`; a Main-owned sandboxed hidden BrowserWindow executes
-  ordered classic scripts once, waits 1.2 seconds, freezes and audits. Only a
-  verified bounded PNG display result is mounted into the script-disabled
-  source-static Edit iframe. A missing grant, failed audit or later full-frame
-  rebuild uses ordinary static Edit for that generation. The image has no
-  runtime cache or persistence authority; authored inline SVG remains
-  source-backed while unapproved runtime-only Canvas/SVG stays in Preview.
+  canvasGeneration)`; Main prepares the resource closure only. The first
+  visible Edit iframe is the final iframe: it executes ordered classic scripts
+  once at the real Edit size, waits 1.2 seconds, performs one layout/`resize`
+  settle, freezes timers/listeners/observers/animations/MessageChannel ports
+  and audits. Success keeps the real Canvas/SVG in that same
+  iframe. Same-origin `window.parent` access, including renderer-exposed
+  preload APIs, is an accepted in-place-editing cost. A missing grant or failed
+  audit before interaction uses ordinary
+  static Edit for that generation. After interaction starts, comments, IME,
+  save, native-edit fences, hard breaks and sibling reorder must not replace
+  that iframe. A same-generation static remount after interaction is not an
+  accepted fallback. Runtime descendants have no persistence authority;
+  authored inline SVG remains source-backed while
+  unapproved runtime-only Canvas/SVG stays in Preview. Edit screenshot,
+  capture and projection count must be 0.
 - Review alone has a disposable runtime-snapshot supplement. Its
   `SourceHostResolver` admits only direct source Canvas/SVG roots and stable,
   source-empty hosts; it never uses script causality, computed selectors,
@@ -219,7 +227,7 @@ Comments + frozen input
 - `editable-island` owns the V2 capability and normalization contract. An accepted edit replaces only the selected element's parsed `contentRange`; bytes outside that range remain exact. Inside the range, parse5 may perform the smallest safe normalization needed to preserve inline semantics, comments and immutable authored atoms.
 - Transparent inline host discovery records the nearest safe editable island while climbing. If the next parent is structurally unsafe, editing stays on that safe descendant instead of promoting to the unsafe parent.
 - A direct source text node under a structurally unsafe parent may use the same controller through a disposable, layout-checked inline host. Its `update-direct-text-node` transaction is authorized by the surviving parent TargetRef but patches only the exact text-node source range. The disposable host and its attributes never enter source.
-- `native-edit-policy` owns shared session attributes and checkpoint timing. `native-edit-runtime-preflight` still proves that enabling the island does not change geometry or text style; `HtmlCanvasEditor` only coordinates selection, the island session and SourcePatch.
+-- `native-edit-policy` owns shared session attributes and checkpoint timing. `native-layout-fingerprint` records geometry and text style so `HtmlCanvasEditor` can observe post-entry drift; it does not refuse to enter an island. MutationObserver rollback and checkpoint scope remain the fail-closed safety net. The retired `nativeRuntimePreflight` / `RuntimeDomSourceMap` stack is not on the production path; `HtmlCanvasEditor` only coordinates selection, the island session and SourcePatch.
 
 ## Module map
 
@@ -261,14 +269,15 @@ services.
 | Crash-only browser recovery | `app/application/recovery-store.js` |
 | Renderer, project-picker, attachment, interactive-preview and close capabilities | `app/application/runtime-capabilities.js` |
 | Same-directory source rename, operation journal and durable active/recent path rebase | `desktop/source-rename.mjs` |
-| Renderer source-rename operation, Hash/identity fence, lost-response reconciliation and synchronous Project/Document/Run publication | `app/application/project-workflow.js` through its narrow `ProjectOpenPort.renameSource` |
+| Directory-change hint and non-authoritative active managed locator cache | `desktop/source-file-watch.mjs`, `desktop/active-managed-locator.mjs` |
+| Renderer source-rename and Finder locator rebase, Hash/identity fence, lost-response reconciliation and synchronous Project/Document/Run publication | `app/application/project-workflow.js` through its narrow `ProjectOpenPort.renameSource` / `reconcileActiveManagedSource` |
 | Known-source Finder reveal | narrow project IPC in `desktop/main.mjs` |
 | Validated default-browser HTML launch | `desktop/open-in-default-browser.mjs`, behind `desktop/project-ipc-security.mjs` sender authority |
 | Pseudonymous identity, strict event schemas, local queue and PostHog delivery | `desktop/usage-telemetry.mjs` |
 | Preview sanitization and verified frame injection | `app/components/html-preview-sandbox.js` |
 | Volatile desktop preview sessions and contained local-asset serving | `desktop/preview-protocol.mjs` |
-| Edit one-shot candidate limits, source-host contract and frozen display grant | `app/domain/edit-runtime-contract.js`, `app/application/edit-author-runtime-session.js` |
-| Isolated Edit author-resource closure, contained static-asset/script serving, one-use bootstrap and PNG capture | `desktop/edit-runtime-protocol.mjs`, `desktop/edit-runtime-bootstrap.mjs`, `desktop/edit-runtime-capture-owner.mjs` |
+| Edit one-shot candidate limits, source-host contract and direct-frame grant | `app/domain/edit-runtime-contract.js`, `app/application/edit-author-runtime-session.js` |
+| Isolated Edit author-resource closure, contained static-asset/script serving and one-use bootstrap | `desktop/edit-runtime-protocol.mjs`, `desktop/edit-runtime-bootstrap.mjs` |
 | Source-backed preview/edit display-state filtering, rebinding and safe action resolution | `app/lib/page-view-context.js` |
 | Review source-host discovery and Review-only capture request shape | `app/domain/runtime-snapshot-hosts.js`, `app/components/desktop-runtime-snapshot-api.ts` |
 | Review runtime-snapshot limits, source/session envelope, PNG and visible-text-hash validation | `app/domain/runtime-visual-contract.js`, `app/lib/runtime-visual-snapshots.js` |
@@ -307,12 +316,12 @@ the only production text and source-mutation route.
 
 Direct edits form ordered revisions and are written through a single queue. Every write checks the expected source Hash, uses a same-directory temporary file and atomic replacement, then rereads the result. External modification causes a fail-closed conflict.
 
-`/autosave` and `/source-history/action` retain their own transport decoding,
-revision/action checks and response shapes, but both enter the one Bridge
-`SourceTransaction` kernel. That kernel owns recovery-byte preparation, the
-durable `pendingWrite` WAL, source/history application, project/runtime
-settlement, exactly-once audit replay and cleanup. There is no second inline
-current-source writer or recovery state machine.
+`/autosave` retains its own transport decoding and revision checks, then
+delegates the current-source write to `ProjectFileRepository`. The v3 Bridge
+`SourceTransaction` kernel and `history/source-operations.json` journal are
+not on the live open path. `/source-history/action` returns the current source
+bytes and empty history so the renderer empty-history path still works. There
+is no second inline current-source writer in `workspace-bridge.mjs`.
 
 At close, `DocumentSession` independently hashes the frozen renderer HTML and
 accepts any acknowledged persisted revision at or beyond the close cutoff. A
@@ -323,27 +332,27 @@ divergence enters the source-conflict owner, and an invalid content/Hash pair
 enters the persistent workspace recovery surface without overwriting either
 copy.
 
-A durable command for an already registered project carries one captured
-`projectId + documentId + sourcePath` context. The Bridge resolves the registry
-graph by both opaque IDs first and treats the path only as a scope assertion;
-it never creates a project while serving a registered mutation. Only
-`/project/ensure` may establish a new identity. During PageRoot's own atomic
-source replacement, the durable `pendingWrite.targetHtmlSha256` proves the
-narrow interval in which the inode has changed but registry sidecars have not;
-the Bridge reconciles that interval to the existing identity. Any other inode
-replacement remains an external replacement and fails closed. This decision is
-recorded in `docs/decisions/0012-id-first-project-context.md`.
+A durable command for an already registered v4 Project File carries one captured
+`projectId + documentId + sourcePath` context plus the OpenTarget. The Bridge
+resolves only the v4 Project File Registry (`.pageroot-registry.json`); it does
+not read `project-registry.json` or historical Documents workspace roots. It
+never creates a project while serving a registered mutation. Only
+`/project/ensure` may import unregistered HTML as a new v4 V1. An HTML file
+that is not a registered v4 Project File is unmanaged: GET `/workspace` and
+GET `/source` return that state, and mutation routes fail closed with
+`PROJECT_NOT_FOUND`. This decision is recorded in
+`docs/decisions/0012-id-first-project-context.md` for the historical v3
+identity rule and superseded at the desktop open boundary by v4-only Project
+Files.
 
 Every accepted Canvas SourcePatch also emits one operation containing the
 actual forward patches, the exact inverse patches returned by the engine, the
 before/after source Hashes and the logical before/after target. The renderer
-`SourceHistorySession` owns unsaved operations and the current action intent;
-the Bridge owns the authoritative bounded journal at
-`history/source-operations.json`. Autosave prepares the next journal against
-the same source Hash chain and places both HTML and journal candidates in one
-`pendingWrite` recovery boundary. The source HTML remains the content
-authority; the journal is never a second HTML snapshot or a source for preview
-serialization.
+`SourceHistorySession` owns unsaved operations and the current action intent.
+A v4 Project File does not persist a Bridge source-history journal;
+`/source-history/action` returns the current source bytes and empty history so
+the renderer empty-history path still works. There is no v3
+`history/source-operations.json` store.
 
 Undo and redo first checkpoint any active editable island and drain the source
 queue. The Bridge then validates project/document identity, source Hash,
@@ -390,6 +399,25 @@ and Hash both match. It then synchronously rebases `RunSession`, advances
 `ProjectSession`, publishes `DocumentSession`, clears stale recovery state and
 refreshes canonical workspace authority. A late result never mutates a newer
 Project context; no generic desktop executor or duplicate Session fact is used.
+
+Finder same-root renames share that source-locator transition. The desktop
+watcher reports that the current source directory or its parent changed; it
+does not claim a new path. When the watched HTML is still a regular file, Main
+forwards `sourceMissing: false` and `ProjectWorkflow` only hash-observes the
+current source. It does not drain switch or ask Bridge to rebind, so sibling
+writes such as `PROJECT.md` cannot flush unsaved project rules. `ProjectWorkflow.reconcileExternalSourceLocator()` and
+`renameSource()` share one locator lock. Locator rebase and switch drain run
+when Main reports the path missing, at startup, or when the title bar starts a
+rename. Main asks Bridge
+`POST /managed-working-copy/reconcile` for the unique Working Copy that still
+matches the verified identity tuple. If the watched file itself disappears
+(including a same-parent project folder rename that Electron's directory
+watch may miss), Main uses the same locator cache as startup, then forwards
+the original path hint so the renderer can rebase. Hash mismatch can report `content-changed`
+after the path is rebound, but never adopts external bytes; `DocumentWorkflow`
+then compares hashes and enters the existing conflict state. The local
+`activeManagedLocator` cache is only a restart hint for Main and is not a
+second write authority.
 
 When no desktop project can be restored, the main process provisions the built-in welcome content once as a regular HTML source beside the selected workspace and immediately registers its initial V1 through the authenticated Bridge. Existing welcome bytes are never replaced on startup. From that point onward it uses the same source, comment, Request, handoff and Version boundaries as any user-opened HTML.
 

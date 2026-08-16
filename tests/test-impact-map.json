@@ -201,15 +201,6 @@
         "packaged-verify",
         "package-delivery-report"
       ]
-    },
-    "artifact-only": {
-      "description": "Build and verify the installer only after CI has authenticated a fresh source gate for the exact tree.",
-      "fullSuites": [
-        "package-build",
-        "packaged-runtime",
-        "packaged-verify",
-        "package-delivery-report"
-      ]
     }
   },
   "rules": [
@@ -228,7 +219,7 @@
       "patterns": [
         "^scripts/source-gate-provenance\\.mjs$",
         "^tests/source-gate-provenance\\.test\\.mjs$",
-        "^\\.github/workflows/(?:ci|pr-feedback|draft-review|draft-review-auto|developer-preview|release|release-candidate|release-dry-run)\\.yml$"
+        "^\\.github/workflows/(?:ci|developer-preview|release|release-candidate|release-dry-run)\\.yml$"
       ],
       "suites": [],
       "nodeTests": ["tests/source-gate-provenance.test.mjs"]
@@ -237,34 +228,12 @@
       "id": "pr-review-policy",
       "patterns": [
         "^scripts/check-pr-review-policy\\.mjs$",
-        "^scripts/draft-review-request\\.mjs$",
-        "^scripts/draft-review-marker\\.mjs$",
+        "^scripts/request-codex-review\\.mjs$",
         "^tests/pr-review-policy\\.test\\.mjs$",
-        "^\\.github/workflows/(?:ci|pr-feedback)\\.yml$"
+        "^\\.github/workflows/ci\\.yml$"
       ],
       "suites": [],
       "nodeTests": ["tests/pr-review-policy.test.mjs"]
-    },
-    {
-      "id": "draft-review-request",
-      "patterns": [
-        "^scripts/draft-review-request\\.mjs$",
-        "^scripts/draft-review-marker\\.mjs$",
-        "^tests/draft-review-request\\.test\\.mjs$",
-        "^\\.github/workflows/draft-review(?:-auto)?\\.yml$"
-      ],
-      "suites": [],
-      "nodeTests": ["tests/draft-review-request.test.mjs"]
-    },
-    {
-      "id": "review-gate-recovery",
-      "patterns": [
-        "^scripts/(?:check-pr-review-policy|recover-pr-review-gate)\\.mjs$",
-        "^tests/review-gate-recovery\\.test\\.mjs$",
-        "^\\.github/workflows/(?:ci|review-gate-recovery)\\.yml$"
-      ],
-      "suites": [],
-      "nodeTests": ["tests/review-gate-recovery.test.mjs"]
     },
     {
       "id": "pr-candidate-classification",
@@ -277,23 +246,13 @@
       "nodeTests": ["tests/classify-pr-candidate.test.mjs"]
     },
     {
-      "id": "review-debt",
-      "patterns": [
-        "^scripts/review-debt\\.mjs$",
-        "^tests/review-debt\\.test\\.mjs$",
-        "^\\.github/workflows/review-debt\\.yml$"
-      ],
-      "suites": [],
-      "nodeTests": ["tests/review-debt.test.mjs"]
-    },
-    {
       "id": "ci-evidence",
       "patterns": [
         "^scripts/ci-evidence\\.mjs$",
         "^scripts/playwright-flaky-summary\\.mjs$",
         "^tests/ci-evidence\\.test\\.mjs$",
         "^tests/playwright-flaky-summary\\.test\\.mjs$",
-        "^\\.github/workflows/(?:ci|pr-feedback|developer-preview|release|release-candidate|release-dry-run)\\.yml$"
+        "^\\.github/workflows/(?:ci|developer-preview|release|release-candidate|release-dry-run)\\.yml$"
       ],
       "suites": [],
       "nodeTests": ["tests/ci-evidence.test.mjs", "tests/playwright-flaky-summary.test.mjs"]
@@ -303,7 +262,7 @@
       "patterns": [
         "^scripts/ci-health-report\\.mjs$",
         "^tests/ci-health-report\\.test\\.mjs$",
-        "^\\.github/workflows/(?:ci|ci-health|pr-feedback|draft-review|draft-review-auto|release|release-candidate|release-dry-run)\\.yml$"
+        "^\\.github/workflows/(?:ci|developer-preview|release|release-candidate|release-dry-run)\\.yml$"
       ],
       "suites": [],
       "nodeTests": [
@@ -481,6 +440,8 @@
         "tests/external-file-open.test.mjs",
         "tests/project-rules-workflow.test.mjs",
         "tests/source-rename.test.mjs",
+        "tests/source-file-watch.test.mjs",
+        "tests/active-managed-locator.test.mjs",
         "tests/version-workflow.test.mjs"
       ]
     },
@@ -571,8 +532,8 @@
       "patterns": [
         "^scripts/check-architecture\\.mjs$",
         "^tests/fixtures/architecture-boundaries/",
-        "^(?:CONTRIBUTING|docs/(?:ARCHITECTURE|ARCHITECTURE_CONTRACT|COMPATIBILITY|STATE_OWNERSHIP|ENGINEERING_STANDARDS|SECURITY_MODEL|RUNTIME_VISUAL_CONTRACT|WORKBENCH_ORCHESTRATION_REFACTOR_PLAN))\\.md$",
-        "^docs/decisions/(?:0003-session-ownership-and-mutation-outcomes|0004-v2-editable-islands|0007-independent-interactive-preview|0008-safe-presentation-actions-in-edit-mode|0009-persistent-source-patch-history|0011-workbench-session-decomposition|0012-id-first-project-context|0013-edit-runtime-visual-projection|0015-safe-host-fallback-and-direct-text-nodes|0016-owner-controlled-review-runtime-capture|0017-shared-runtime-snapshot-owner|0018-source-transaction-kernel|0019-workspace-controller-orchestration|0021-review-runtime-visual-comparison-noise-tolerance|0022-edit-one-shot-author-runtime)\\.md$"
+        "^(?:CONTRIBUTING|docs/(?:ARCHITECTURE|ARCHITECTURE_CONTRACT|COMPATIBILITY|INTERACTION_FLOW|STATE_OWNERSHIP|ENGINEERING_STANDARDS|SECURITY_MODEL|RUNTIME_VISUAL_CONTRACT|WORKBENCH_ORCHESTRATION_REFACTOR_PLAN))\\.md$",
+        "^docs/decisions/(?:0003-session-ownership-and-mutation-outcomes|0004-v2-editable-islands|0007-independent-interactive-preview|0008-safe-presentation-actions-in-edit-mode|0009-persistent-source-patch-history|0011-workbench-session-decomposition|0012-id-first-project-context|0013-edit-runtime-visual-projection|0015-safe-host-fallback-and-direct-text-nodes|0016-owner-controlled-review-runtime-capture|0017-shared-runtime-snapshot-owner|0018-source-transaction-kernel|0019-workspace-controller-orchestration|0021-review-runtime-visual-comparison-noise-tolerance|0022-edit-one-shot-author-runtime|0025-edit-direct-one-shot-runtime)\\.md$"
       ],
       "suites": ["typecheck"],
       "nodeTests": [
@@ -584,18 +545,18 @@
     {
       "id": "source-editing-core",
       "patterns": [
-        "^app/lib/(?:canvas-target-rebind|editable-island|native-dom-logical-index|page-(?:presentation-dom|view-context)|source-(?:index|patch-core|patch-engine|text-map)|target-resolver|runtime-dom-source-map|native-(?:edit-capability|edit-policy))\\.(?:js|ts|d\\.ts)$",
+        "^app/lib/(?:align-preview-source-surface|canvas-target-rebind|editable-island|native-dom-logical-index|page-(?:presentation-dom|view-context)|source-(?:index|patch-core|patch-engine|text-map)|target-resolver|native-(?:edit-capability|edit-policy))\\.(?:js|ts|d\\.ts)$",
         "^scripts/(?:source-index|target-resolver)\\.mjs$"
       ],
       "suites": ["typecheck", "browser-smoke", "electron-smoke"],
       "nodeTests": [
+        "tests/align-preview-source-surface.test.mjs",
         "tests/canvas-target-rebind.test.mjs",
         "tests/source-index-target-resolver.test.mjs",
         "tests/page-view-context.test.mjs",
         "tests/source-patch-engine.test.mjs",
         "tests/editable-island.test.mjs",
         "tests/source-text-map.test.mjs",
-        "tests/runtime-dom-source-map.test.mjs",
         "tests/native-edit-capability.test.mjs",
         "tests/native-edit-policy.test.mjs",
         "tests/generated-source-invariants.test.mjs"
@@ -604,13 +565,13 @@
     {
       "id": "v2-island-controller",
       "patterns": [
-        "^app/components/(?:HtmlCanvasEditor(?:\\.types)?|HtmlInteractionPreview|desktop-(?:runtime-snapshot|preview)-api|html-canvas-(?:dom|interaction|internal-types|page-view|preview-sync|selection|style-inspector)|IslandEditingController|native-edit-types|native-edit-runtime-preflight|html-preview-sandbox)\\.(?:tsx|ts|js|d\\.ts)$"
+        "^app/components/(?:HtmlCanvasEditor(?:\\.types)?|HtmlInteractionPreview|desktop-(?:runtime-snapshot|preview)-api|html-canvas-(?:dom|interaction|internal-types|page-view|preview-sync|selection|style-inspector)|IslandEditingController|native-edit-types|native-layout-fingerprint|html-preview-sandbox)\\.(?:tsx|ts|js|d\\.ts)$"
       ],
       "suites": ["typecheck", "browser-smoke", "electron-smoke"],
       "nodeTests": [
+        "tests/align-preview-source-surface.test.mjs",
         "tests/architecture-boundaries.test.mjs",
         "tests/editable-island.test.mjs",
-        "tests/runtime-dom-source-map.test.mjs",
         "tests/source-text-map.test.mjs",
         "tests/native-layout-guard.test.mjs",
         "tests/html-preview-sandbox.test.mjs"
@@ -624,15 +585,15 @@
         "^app/domain/runtime-snapshot-hosts\\.(?:js|d\\.ts)$",
         "^app/components/(?:HtmlCanvasEditor(?:\\.types)?|desktop-edit-runtime-api|html-canvas-interaction|html-preview-sandbox)\\.(?:tsx|ts|js|d\\.ts)$",
         "^app/workbench\\.tsx$",
-        "^desktop/(?:edit-runtime-bootstrap|edit-runtime-protocol|edit-runtime-capture-owner|edit-runtime-preparation-fence)\\.mjs$",
+        "^desktop/(?:edit-runtime-bootstrap|edit-runtime-protocol|edit-runtime-preparation-fence)\\.mjs$",
         "^desktop/main\\.mjs$",
-        "^tests/(?:edit-author-runtime-session|edit-runtime-bootstrap|edit-runtime-capture-owner|edit-runtime-preparation-fence|edit-runtime-contract|edit-runtime-protocol)\\.test\\.mjs$"
+        "^docs/decisions/0025-edit-direct-one-shot-runtime\\.md$",
+        "^tests/(?:edit-author-runtime-session|edit-runtime-bootstrap|edit-runtime-preparation-fence|edit-runtime-contract|edit-runtime-protocol)\\.test\\.mjs$"
       ],
       "suites": ["typecheck", "electron-smoke"],
       "nodeTests": [
         "tests/edit-author-runtime-session.test.mjs",
         "tests/edit-runtime-bootstrap.test.mjs",
-        "tests/edit-runtime-capture-owner.test.mjs",
         "tests/edit-runtime-preparation-fence.test.mjs",
         "tests/edit-runtime-contract.test.mjs",
         "tests/edit-runtime-protocol.test.mjs",
@@ -795,9 +756,15 @@
     },
     {
       "id": "desktop-source-rename",
-      "patterns": ["^desktop/source-rename\\.mjs$"],
+      "patterns": [
+        "^desktop/(?:source-rename|source-file-watch|active-managed-locator)\\.mjs$"
+      ],
       "suites": ["electron-smoke"],
-      "nodeTests": ["tests/source-rename.test.mjs"]
+      "nodeTests": [
+        "tests/source-rename.test.mjs",
+        "tests/source-file-watch.test.mjs",
+        "tests/active-managed-locator.test.mjs"
+      ]
     },
     {
       "id": "desktop-export-copy",
@@ -866,7 +833,10 @@
         "tests/desktop-close-recovery.test.mjs",
         "tests/desktop-preload-ipc.test.mjs",
         "tests/electron-window-policy.test.mjs",
-        "tests/product-contract.test.mjs"
+        "tests/product-contract.test.mjs",
+        "tests/source-file-watch.test.mjs",
+        "tests/active-managed-locator.test.mjs",
+        "tests/source-rename.test.mjs"
       ]
     },
     {
@@ -923,15 +893,15 @@
     {
       "id": "bridge-lifecycle",
       "patterns": [
-        "^scripts/(?:workspace-bridge|lifecycle-core|finalize-attempt|record-user-supplement|user-supplement-core|candidate-assessment(?:-decoder)?|scope-validator|html-source-parser|attachment-storage|product-contract|target-identity)\\.mjs$"
+        "^scripts/(?:workspace-bridge|lifecycle-core|finalize-attempt|record-user-supplement|user-supplement-core|candidate-assessment(?:-decoder)?|html-source-parser|attachment-storage|product-contract|target-identity)\\.mjs$"
       ],
       "suites": ["ai-smoke"],
       "nodeTests": [
         "tests/workspace-bridge.test.mjs",
         "tests/lifecycle-core.test.mjs",
-        "tests/scope-validator.test.mjs",
         "tests/html-source-parser.test.mjs",
         "tests/attachment-storage.test.mjs",
+        "tests/candidate-assessment.test.mjs",
         "tests/compatibility-decoders.test.mjs",
         "tests/product-contract.test.mjs",
         "tests/project-context-service.test.mjs",
@@ -949,7 +919,6 @@
       "nodeTests": [
         "tests/bridge-test-environment.test.mjs",
         "tests/schema-contract.test.mjs",
-        "tests/scope-validator.test.mjs",
         "tests/workspace-bridge.test.mjs"
       ]
     },
@@ -965,7 +934,6 @@
         "tests/schema-contract.test.mjs",
         "tests/compatibility-decoders.test.mjs",
         "tests/targeted-change-schema.test.mjs",
-        "tests/scope-validator.test.mjs",
         "tests/workspace-bridge.test.mjs",
         "tests/project-file-schema.test.mjs",
         "tests/project-file-repository.test.mjs"

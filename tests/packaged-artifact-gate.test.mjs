@@ -49,11 +49,8 @@ test("release commands use one automated artifact lane with full tests and packa
   );
   assert.equal(packageJson.scripts.verify, "npm run gate:task");
   assert.equal(packageJson.scripts["release:mac"], "npm run gate:artifact:auto");
-  assert.equal(packageJson.scripts["release:mac:x64"], "npm run gate:artifact:auto:x64");
-  assert.equal(
-    packageJson.scripts["gate:artifact-only:auto"],
-    "node scripts/test-gate.mjs artifact-only --arch arm64",
-  );
+  assert.equal(packageJson.scripts["release:mac:x64"], undefined);
+  assert.equal(packageJson.scripts["gate:artifact-only:auto"], undefined);
   assert.deepEqual(impactMap.lanes.artifact.fullSuites, [
     "typecheck",
     "lint",
@@ -68,12 +65,7 @@ test("release commands use one automated artifact lane with full tests and packa
     "packaged-verify",
     "package-delivery-report",
   ]);
-  assert.deepEqual(impactMap.lanes["artifact-only"].fullSuites, [
-    "package-build",
-    "packaged-runtime",
-    "packaged-verify",
-    "package-delivery-report",
-  ]);
+  assert.equal(impactMap.lanes["artifact-only"], undefined);
   assert.match(gateRunner, /output\/test-runs/);
   assert.match(gateRunner, /changeSetSha256/);
   assert.match(packageJson.scripts["audit:dependencies"], /check-dependency-audit\.mjs/);
@@ -81,7 +73,7 @@ test("release commands use one automated artifact lane with full tests and packa
   assert.match(gateRunner, /Clean source changed while the gate was running/);
   assert.match(gateRunner, /requires a trusted source-gate decision from CI/);
   assert.match(gateRunner, /PAGEROOT_SOURCE_GATE_TREE/);
-  assert.match(packageJson.scripts["desktop:pack:prepared"], /build-package\.mjs --arch arm64/);
+  assert.match(packageJson.scripts["desktop:pack"], /build-package\.mjs --arch arm64/);
   assert.match(
     packageBuilder,
     /--\$\{architecture\}/u,
@@ -103,7 +95,7 @@ test("release commands use one automated artifact lane with full tests and packa
   assert.match(verifier, /project-file-repository\.mjs/);
   assert.match(verifier, /project-file-finalizer\.mjs/);
   assert.match(verifier, /html-source-parser\.mjs/);
-  assert.match(verifier, /scope-validator\.mjs/);
+  assert.doesNotMatch(verifier, /scope-validator\.mjs/);
   assert.match(verifier, /packaged Bridge dependency smoke/);
 
   const layout = expectedArtifactLayout({ productRoot, packageJson, arch: "arm64" });
@@ -275,7 +267,7 @@ test("the app-bundle gate validates app.asar, Bridge scripts, schemas and plist 
   });
   const result = await verifySyntheticAppBundle(fixture);
   assert.equal(result.version, "0.7.0");
-  assert.equal(result.asarFileCount, 30);
+  assert.equal(result.asarFileCount, 31);
   assert.equal(result.schemaFileCount, 5);
   assert.equal(result.legalResourceCount, 5);
   assert.deepEqual(result.applicationUpdate, {

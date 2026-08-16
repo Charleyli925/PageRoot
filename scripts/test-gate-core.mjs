@@ -191,6 +191,15 @@ export function selectGatePlan({ map, lane, changedFiles = [] }) {
   };
 }
 
+export function omitMissingNodeTests(plan, exists) {
+  const selectedNodeTests = plan.selectedNodeTests.filter((file) => exists(file));
+  if (selectedNodeTests.length === plan.selectedNodeTests.length) return plan;
+  const suites = selectedNodeTests.length === 0
+    ? plan.suites.filter((suite) => suite.id !== "node-targeted")
+    : plan.suites;
+  return { ...plan, selectedNodeTests, suites };
+}
+
 export function assertFullyAutomatedPlan(plan) {
   const prohibited = /(?:manual|human|人工|真人|手工|checklist)/iu;
   for (const suite of plan.suites) {

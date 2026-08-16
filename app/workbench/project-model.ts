@@ -52,14 +52,14 @@ export function sameLocalSourcePath(
 
 export function folderFromSourcePath(sourcePath: string | null): string {
   if (!sourcePath) return "尚未打开本地文件";
-  const separatorIndex = Math.max(
-    sourcePath.lastIndexOf("/"),
-    sourcePath.lastIndexOf("\\"),
-  );
-  if (separatorIndex < 0) return sourcePath;
-  return separatorIndex === 0
-    ? sourcePath.slice(0, 1)
-    : sourcePath.slice(0, separatorIndex);
+  const normalized = sourcePath.replace(/[\\/]+$/u, "");
+  const parts = normalized.split(/[\\/]/u).filter(Boolean);
+  if (parts.length === 0) return sourcePath;
+  const last = parts.at(-1) || normalized;
+  if (/\.html?$/iu.test(last)) {
+    return parts.at(-2) || last;
+  }
+  return last;
 }
 
 export function safeVersionLabel(versionId: string): string {
@@ -205,44 +205,32 @@ export function currentWorkingCopyPresentation({
   });
 }
 
-function compactStatusVersionLabel(versionId: string): string {
-  const match = versionId.match(/(\d+)$/);
-  return match ? `V${Number(match[1])}` : versionId;
-}
+const WAITING_AI_STATUSES = new Set([
+  "submitting",
+  "processing",
+  "validating",
+  "committing",
+  "recovering-transaction",
+]);
 
 export function projectStatusProjection(
   input: ProjectStatusProjectionInput,
 ): ProjectStatusProjection {
   const facts: string[] = [];
   if (input.viewMode === "history") {
-    facts.push(`正在查看 ${compactStatusVersionLabel(input.viewingVersionId || "历史版本")}`);
-    facts.push("只读浏览");
+    facts.push("正在看历史（只读）");
   } else {
-    if (input.currentBasedOnVersionId) {
-      facts.push(`基于 ${compactStatusVersionLabel(input.currentBasedOnVersionId)}`);
-    }
-    if (input.latestVersionId) {
-      facts.push(`项目最新 ${compactStatusVersionLabel(input.latestVersionId)}`);
-    }
     if (input.persistState === "writing" || input.persistState === "queued") {
-      facts.push("本地修改正在保存");
+      facts.push("正在保存");
     } else if (input.persistState === "failed" || input.persistState === "conflict") {
-      facts.push("本地修改保存失败");
-    } else if (input.hasLocalModifications) {
-      facts.push("本地修改已保存");
-    } else if (input.currentExactVersionId) {
-      facts.push(`当前与 ${compactStatusVersionLabel(input.currentExactVersionId)} 一致`);
+      facts.push("保存失败");
     }
-  }
-  const candidateVersion = input.candidate?.versionId
-    ? `候选 ${compactStatusVersionLabel(input.candidate.versionId)}`
-    : "候选版本";
-  if (input.candidate?.status === "ready-to-open") {
-    facts.push(`${candidateVersion} 待审阅`);
-  } else if (input.candidate?.status === "processing") {
-    facts.push(`${candidateVersion} 生成中`);
-  } else if (input.candidate?.status === "rejected") {
-    facts.push(`${candidateVersion} 已拒绝`);
+    const candidateStatus = input.candidate?.status;
+    if (candidateStatus === "ready-to-open") {
+      facts.push("有 AI 修改待查看");
+    } else if (candidateStatus && WAITING_AI_STATUSES.has(candidateStatus)) {
+      facts.push("正在等 AI");
+    }
   }
   return Object.freeze({
     facts: Object.freeze(facts),

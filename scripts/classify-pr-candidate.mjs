@@ -16,7 +16,7 @@ const PACKAGING_PATTERNS = [
   /^public\/brand-logo\.png$/u,
   // Preserve the complete pre-existing dry-run surface. The classifier changes
   // when that work is scheduled, never which package-affecting paths receive it.
-  /^scripts\/(?:application-update-config|attachment-storage|build-package|candidate-assessment|ci-evidence|create-release-assets|developer-preview|draft-aggregate|draft-service|finalize-attempt|html-source-parser|lifecycle-core|package-delivery-report|packaged-app-identity|product-contract|project-context-service|record-user-supplement|release-app-checkpoint|release-app-stage|release-candidate-provenance|release-provenance|scope-validator|source-gate-provenance|source-history-service|target-identity|user-supplement-core|verify-packaged-artifact|workspace-bridge)\.mjs$/u,
+  /^scripts\/(?:application-update-config|attachment-storage|build-package|candidate-assessment|ci-evidence|create-release-assets|developer-preview|draft-aggregate|draft-service|finalize-attempt|html-source-parser|lifecycle-core|package-delivery-report|packaged-app-identity|product-contract|project-context-service|record-user-supplement|release-app-checkpoint|release-app-stage|release-candidate-provenance|release-provenance|source-gate-provenance|source-history-service|target-identity|user-supplement-core|verify-packaged-artifact|workspace-bridge)\.mjs$/u,
   /^tests\/(?:application-update-config|desktop-package|developer-preview-package|packaged-artifact-gate|release-app-stage|test-impact-map)\.test\.mjs$/u,
   /^tests\/test-impact-map\.json$/u,
   /^tests\/e2e\/electron\/playwright\.packaged(?:-startup)?\.config\.mjs$/u,

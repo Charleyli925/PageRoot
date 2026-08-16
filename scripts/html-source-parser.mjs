@@ -1,4 +1,83 @@
+import { decodeHTMLAttribute } from "entities";
 import { parse, serialize } from "parse5";
+
+function sourceSlice(source, location) {
+  if (
+    !Number.isInteger(location?.startOffset)
+    || !Number.isInteger(location?.endOffset)
+  ) {
+    return "";
+  }
+  return source.slice(location.startOffset, location.endOffset);
+}
+
+/**
+ * Parse the raw authored start-tag attribute sequence, including duplicate
+ * names, rather than parse5's normalized attribute map. Bridge identity checks
+ * and scope evidence both need the bytes as written.
+ */
+export function rawStartTagAttributes(source, location) {
+  const raw = sourceSlice(source, location);
+  if (!raw.startsWith("<")) return [];
+  const attributes = [];
+  let cursor = 1;
+  while (cursor < raw.length && /\s/u.test(raw[cursor])) cursor += 1;
+  while (
+    cursor < raw.length
+    && !/[\s/>]/u.test(raw[cursor])
+  ) {
+    cursor += 1;
+  }
+  while (cursor < raw.length) {
+    while (cursor < raw.length && /\s/u.test(raw[cursor])) cursor += 1;
+    if (
+      cursor >= raw.length
+      || raw[cursor] === ">"
+      || (raw[cursor] === "/" && raw[cursor + 1] === ">")
+    ) {
+      break;
+    }
+    const nameStart = cursor;
+    while (
+      cursor < raw.length
+      && !/[\s=/>]/u.test(raw[cursor])
+    ) {
+      cursor += 1;
+    }
+    if (cursor === nameStart) {
+      cursor += 1;
+      continue;
+    }
+    const name = raw.slice(nameStart, cursor).toLowerCase();
+    while (cursor < raw.length && /\s/u.test(raw[cursor])) cursor += 1;
+    let value = "";
+    if (raw[cursor] === "=") {
+      cursor += 1;
+      while (cursor < raw.length && /\s/u.test(raw[cursor])) cursor += 1;
+      const quote = raw[cursor] === '"' || raw[cursor] === "'"
+        ? raw[cursor]
+        : null;
+      if (quote) {
+        cursor += 1;
+        const valueStart = cursor;
+        while (cursor < raw.length && raw[cursor] !== quote) cursor += 1;
+        value = raw.slice(valueStart, cursor);
+        if (raw[cursor] === quote) cursor += 1;
+      } else {
+        const valueStart = cursor;
+        while (
+          cursor < raw.length
+          && !/[\s>]/u.test(raw[cursor])
+        ) {
+          cursor += 1;
+        }
+        value = raw.slice(valueStart, cursor);
+      }
+    }
+    attributes.push({ name, value: decodeHTMLAttribute(value) });
+  }
+  return attributes;
+}
 
 export function attributesFor(node) {
   return new Map(

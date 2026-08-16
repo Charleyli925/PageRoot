@@ -5,12 +5,12 @@ import {
   lstat,
   mkdir,
   mkdtemp,
-  open,
   readFile,
   readdir,
   rename,
   rm,
   symlink,
+  unlink,
   writeFile,
 } from "node:fs/promises";
 import os from "node:os";
@@ -890,6 +890,66 @@ test("blocked Candidate validation never reserves a Version", async (t) => {
   assert.deepEqual(manifest.versions.map((version) => version.versionId), ["ver_0001"]);
 });
 
+test("createCandidate ignores authored script changes and keeps weak continuity as review", async (t) => {
+  const value = await fixture(t);
+  const base = `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>Scope fixture</title>
+  <script id="shared-script">window.scopeFixture = 1;</script>
+</head>
+<body>
+  <main id="target"><p id="inside">目标正文</p></main>
+  <aside id="outside">目标外正文</aside>
+</body>
+</html>`;
+  const imported = await importSource(value, "scope.html", base);
+
+  const scriptOnly = await value.repository.createCandidate({
+    target: imported.target,
+    requestId: "req_script_only",
+    candidateId: "candidate_script_only_0001",
+    html: base.replace("window.scopeFixture = 1", "window.scopeFixture = 2"),
+    expectedSourceSha256: imported.target.sourceSha256,
+  });
+  assert.equal(scriptOnly.candidate.status, "pending-review");
+  assert.equal(scriptOnly.candidate.assessment.status, "ready");
+  assert.deepEqual(scriptOnly.candidate.assessment.issueCodes, []);
+  assert.equal("executable" in scriptOnly.candidate.assessment, false);
+  assert.equal(
+    "executableSurfaceUnchanged" in scriptOnly.candidate.assessment.health,
+    false,
+  );
+  assert.equal(scriptOnly.candidate.proposedVersionId, "ver_0002");
+
+  await value.repository.rejectCandidate({
+    target: imported.target,
+    candidateId: scriptOnly.candidate.candidateId,
+  });
+
+  const unrelated = await value.repository.createCandidate({
+    target: imported.target,
+    requestId: "req_unrelated_page",
+    candidateId: "candidate_unrelated_0001",
+    html: `<!doctype html><html><head><title>另一页</title><script id="shared-script">window.scopeFixture = 1;</script></head><body><article>全新的内容与结构</article></body></html>`,
+    expectedSourceSha256: imported.target.sourceSha256,
+  });
+  assert.equal(unrelated.candidate.status, "pending-review");
+  assert.equal(unrelated.candidate.assessment.status, "attention");
+  assert.deepEqual(
+    unrelated.candidate.assessment.issueCodes,
+    ["PAGE_CONTINUITY_UNCERTAIN"],
+  );
+  assert.equal(unrelated.candidate.proposedVersionId, "ver_0002");
+  const manifest = await json(path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "manifest.json",
+  ));
+  assert.deepEqual(manifest.versions.map((version) => version.versionId), ["ver_0001"]);
+});
+
 test("runtime authority seals Candidate record and output after review begins", async (t) => {
   const value = await fixture(t);
   const imported = await importSource(value);
@@ -1231,7 +1291,7 @@ test("Request publication rechecks source bytes after freezing its input bundle"
   );
 });
 
-test("save rechecks source bytes immediately before its replacing write", async (t) => {
+test("save conflicts when both PageRoot and disk changed", async (t) => {
   const value = await fixture(t);
   const imported = await importSource(value, "save-boundary.html");
   const externalHtml = html("external edit before save write");
@@ -1253,93 +1313,132 @@ test("save rechecks source bytes immediately before its replacing write", async 
       editRevision: 1,
     }),
     (error) => error instanceof ProjectFileRepositoryError
-      && error.code === "SOURCE_HASH_CONFLICT",
+      && error.code === "WORKING_COPY_CONFLICT",
   );
 
   assert.equal(await readFile(imported.target.exactSourcePath, "utf8"), externalHtml);
 });
 
-test("save preserves an external replacement that races after the final source check", async (t) => {
+test("save silently adopts external disk bytes when PageRoot has no dirty buffer", async (t) => {
   const value = await fixture(t);
-  const imported = await importSource(value, "save-atomic-boundary.html");
-  const externalHtml = html("external edit in the replacement window");
-  const repository = new ProjectFileRepository({
-    projectsRoot: value.projects,
-    failpoint: async (name) => {
-      if (name === "save-source-parking") {
-        await writeFile(imported.target.exactSourcePath, externalHtml, "utf8");
-      }
-      return false;
-    },
+  const imported = await importSource(value, "save-clean-adopt.html");
+  const adoptedHtml = html("external clean change");
+  await writeFile(imported.target.exactSourcePath, adoptedHtml, "utf8");
+
+  const saved = await value.repository.saveWorkingCopy({
+    target: imported.target,
+    html: html("V1"),
+    expectedSourceSha256: imported.target.sourceSha256,
+    editRevision: 0,
   });
 
-  await assert.rejects(
-    repository.saveWorkingCopy({
-      target: imported.target,
-      html: html("PageRoot bytes must not win this race"),
-      expectedSourceSha256: imported.target.sourceSha256,
-      editRevision: 1,
-    }),
-    (error) => error instanceof ProjectFileRepositoryError
-      && error.code === "SOURCE_HASH_CONFLICT",
-  );
-
-  assert.equal(await readFile(imported.target.exactSourcePath, "utf8"), externalHtml);
+  assert.equal(await readFile(imported.target.exactSourcePath, "utf8"), adoptedHtml);
+  assert.equal(saved.currentSha256, sha256(Buffer.from(adoptedHtml, "utf8")));
+  const state = await json(path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "working-copies",
+    `${imported.target.workingCopyId}.json`,
+  ));
+  assert.equal(state.saveState, "saved");
+  assert.equal(state.currentSha256, saved.currentSha256);
 });
 
-test("save retains an external descriptor write to the parked source inode", async (t) => {
+test("workspace recovers a legacy parked save journal to complete new bytes", async (t) => {
   const value = await fixture(t);
-  const imported = await importSource(value, "save-parked-descriptor.html");
-  const externalHtml = html("external descriptor write after publication");
-  const pageRootHtml = html("PageRoot save survives beside external write");
-  const externalHandle = await open(imported.target.exactSourcePath, "r+");
-  t.after(() => externalHandle.close().catch(() => {}));
-  let wroteThroughParkedDescriptor = false;
-  const repository = new ProjectFileRepository({
-    projectsRoot: value.projects,
-    failpoint: async (name) => {
-      if (name === "save-before-recovery-cleanup") {
-        await externalHandle.truncate(0);
-        await externalHandle.writeFile(externalHtml, "utf8");
-        await externalHandle.sync();
-        wroteThroughParkedDescriptor = true;
-      }
-      return false;
-    },
-  });
-
-  await assert.rejects(
-    repository.saveWorkingCopy({
-      target: imported.target,
-      html: pageRootHtml,
-      expectedSourceSha256: imported.target.sourceSha256,
-      editRevision: 1,
-    }),
-    (error) => error instanceof ProjectFileRepositoryError
-      && error.code === "SOURCE_HASH_CONFLICT",
+  const imported = await importSource(value, "save-legacy-parked.html");
+  const previousHtml = html("V1");
+  const nextHtml = html("recovered from legacy parked journal");
+  const recoveryId = `save_${imported.target.workingCopyId}_1_${"a".repeat(32)}`;
+  const recoveryRoot = path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "recovery",
+    recoveryId,
   );
-  assert.equal(wroteThroughParkedDescriptor, true);
-  await externalHandle.close();
-
-  assert.equal(await readFile(imported.target.exactSourcePath, "utf8"), pageRootHtml);
-  const recoveryRoot = path.join(imported.target.projectRootPath, ".pageroot", "recovery");
-  const recoveryDirectories = (await readdir(recoveryRoot, { withFileTypes: true }))
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => entry.name);
-  assert.equal(recoveryDirectories.length, 1);
-  assert.equal(
-    await readFile(path.join(recoveryRoot, recoveryDirectories[0], "previous.html"), "utf8"),
-    externalHtml,
+  const manifest = await json(path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "manifest.json",
+  ));
+  const workingCopy = manifest.workingCopies.find(
+    (entry) => entry.workingCopyId === imported.target.workingCopyId,
   );
-  const transaction = await json(path.join(
+  await mkdir(recoveryRoot, { recursive: true });
+  await writeFile(path.join(recoveryRoot, "previous.html"), previousHtml, "utf8");
+  await writeFile(path.join(recoveryRoot, "next.html"), nextHtml, "utf8");
+  await rm(imported.target.exactSourcePath);
+  await writeFile(path.join(
     imported.target.projectRootPath,
     ".pageroot",
     "transactions",
-    `${recoveryDirectories[0]}.json`,
+    `${recoveryId}.json`,
+  ), JSON.stringify({
+    schemaVersion: "4.0.0",
+    kind: "save",
+    state: "source-parked",
+    projectId: imported.target.projectId,
+    documentId: imported.target.documentId,
+    workingCopyId: imported.target.workingCopyId,
+    sourceRelativePath: workingCopy.sourceRelativePath,
+    expectedSourceSha256: imported.target.sourceSha256,
+    targetSourceSha256: sha256(Buffer.from(nextHtml, "utf8")),
+    editRevision: 1,
+    recoveryId,
+    preparedAt: "2026-08-15T00:00:00.000Z",
+  }), "utf8");
+
+  const reopened = await new ProjectFileRepository({ projectsRoot: value.projects }).workspace({
+    sourcePath: imported.target.exactSourcePath,
+  });
+  assert.equal(reopened.content, nextHtml);
+  assert.equal(await readFile(imported.target.exactSourcePath, "utf8"), nextHtml);
+});
+
+test("workspace recovers a legacy parked journal whose previous inode changed", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "save-legacy-parked-conflict.html");
+  const previousHtml = html("external descriptor write after publication");
+  const nextHtml = html("PageRoot save survives beside external write");
+  const recoveryId = `save_${imported.target.workingCopyId}_1_${"b".repeat(32)}`;
+  const recoveryRoot = path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "recovery",
+    recoveryId,
+  );
+  const manifest = await json(path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "manifest.json",
   ));
-  assert.equal(transaction.state, "conflict");
-  assert.equal(transaction.recovery, "parked-source-changed-after-publish");
-  assert.equal(transaction.parkedSourceSha256, sha256(Buffer.from(externalHtml)));
+  const workingCopy = manifest.workingCopies.find(
+    (entry) => entry.workingCopyId === imported.target.workingCopyId,
+  );
+  await mkdir(recoveryRoot, { recursive: true });
+  await writeFile(path.join(recoveryRoot, "previous.html"), previousHtml, "utf8");
+  await writeFile(path.join(recoveryRoot, "next.html"), nextHtml, "utf8");
+  await writeFile(imported.target.exactSourcePath, nextHtml, "utf8");
+  await writeFile(path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "transactions",
+    `${recoveryId}.json`,
+  ), JSON.stringify({
+    schemaVersion: "4.0.0",
+    kind: "save",
+    state: "committed",
+    projectId: imported.target.projectId,
+    documentId: imported.target.documentId,
+    workingCopyId: imported.target.workingCopyId,
+    sourceRelativePath: workingCopy.sourceRelativePath,
+    expectedSourceSha256: imported.target.sourceSha256,
+    targetSourceSha256: sha256(Buffer.from(nextHtml, "utf8")),
+    editRevision: 1,
+    recoveryId,
+    preparedAt: "2026-08-15T00:00:00.000Z",
+    committedAt: "2026-08-15T00:00:01.000Z",
+  }), "utf8");
 
   await assert.rejects(
     new ProjectFileRepository({ projectsRoot: value.projects }).workspace({
@@ -1348,65 +1447,8 @@ test("save retains an external descriptor write to the parked source inode", asy
     (error) => error instanceof ProjectFileRepositoryError
       && error.code === "SAVE_RECOVERY_CONFLICT",
   );
-  assert.equal(
-    await readFile(path.join(recoveryRoot, recoveryDirectories[0], "previous.html"), "utf8"),
-    externalHtml,
-  );
-});
-
-test("save recovery rechecks a committed parked source inode", async (t) => {
-  const value = await fixture(t);
-  const imported = await importSource(value, "save-committed-parked-descriptor.html");
-  const externalHtml = html("external descriptor write after committed save");
-  const pageRootHtml = html("PageRoot save survives restart recovery");
-  const externalHandle = await open(imported.target.exactSourcePath, "r+");
-  t.after(() => externalHandle.close().catch(() => {}));
-  const interrupted = new ProjectFileRepository({
-    projectsRoot: value.projects,
-    failpoint: async (name) => name === "save-committed",
-  });
-
-  await assert.rejects(
-    interrupted.saveWorkingCopy({
-      target: imported.target,
-      html: pageRootHtml,
-      expectedSourceSha256: imported.target.sourceSha256,
-      editRevision: 1,
-    }),
-    (error) => error instanceof ProjectFileRepositoryError
-      && error.code === "INJECTED_FAILPOINT",
-  );
-  await externalHandle.truncate(0);
-  await externalHandle.writeFile(externalHtml, "utf8");
-  await externalHandle.sync();
-  await externalHandle.close();
-
-  await assert.rejects(
-    new ProjectFileRepository({ projectsRoot: value.projects }).workspace({
-      sourcePath: imported.target.exactSourcePath,
-    }),
-    (error) => error instanceof ProjectFileRepositoryError
-      && error.code === "SAVE_RECOVERY_CONFLICT",
-  );
-  assert.equal(await readFile(imported.target.exactSourcePath, "utf8"), pageRootHtml);
-  const recoveryRoot = path.join(imported.target.projectRootPath, ".pageroot", "recovery");
-  const recoveryDirectories = (await readdir(recoveryRoot, { withFileTypes: true }))
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => entry.name);
-  assert.equal(recoveryDirectories.length, 1);
-  assert.equal(
-    await readFile(path.join(recoveryRoot, recoveryDirectories[0], "previous.html"), "utf8"),
-    externalHtml,
-  );
-  const transaction = await json(path.join(
-    imported.target.projectRootPath,
-    ".pageroot",
-    "transactions",
-    `${recoveryDirectories[0]}.json`,
-  ));
-  assert.equal(transaction.state, "conflict");
-  assert.equal(transaction.recovery, "parked-source-changed-after-publish");
-  assert.equal(transaction.parkedSourceSha256, sha256(Buffer.from(externalHtml)));
+  assert.equal(await readFile(imported.target.exactSourcePath, "utf8"), nextHtml);
+  assert.equal(await readFile(path.join(recoveryRoot, "previous.html"), "utf8"), previousHtml);
 });
 
 test("save refuses a missing Working Copy state before replacing HTML", async (t) => {
@@ -1434,13 +1476,13 @@ test("save refuses a missing Working Copy state before replacing HTML", async (t
   assert.equal(await readFile(imported.target.exactSourcePath, "utf8"), html("V1"));
 });
 
-test("workspace recovers a source safely parked before publication", async (t) => {
+test("workspace recovers a source after a post-rename save crash", async (t) => {
   const value = await fixture(t);
   const imported = await importSource(value, "save-parked-recovery.html");
   const nextHtml = html("recovered after safe parking");
   const failing = new ProjectFileRepository({
     projectsRoot: value.projects,
-    failpoint: async (name) => name === "save-source-parked",
+    failpoint: async (name) => name === "save-source-written",
   });
 
   await assert.rejects(
@@ -2175,6 +2217,32 @@ test("Registry and managed control paths reject symlinks", async (t) => {
   );
 });
 
+test("verified project roots are not reused across serial turns after a symlink swap", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "serial-root-cache.html");
+  const first = await value.repository.saveWorkingCopy({
+    target: imported.target,
+    html: html("after first save"),
+    expectedSourceSha256: imported.target.sourceSha256,
+    editRevision: 1,
+  });
+  assert.equal(first.versionCreated, false);
+
+  const relocated = path.join(value.root, "relocated-serial-root");
+  await rename(imported.target.projectRootPath, relocated);
+  await symlink(relocated, imported.target.projectRootPath, "dir");
+  await assert.rejects(
+    value.repository.saveWorkingCopy({
+      target: first.target,
+      html: html("after symlink swap"),
+      expectedSourceSha256: first.target.sourceSha256,
+      editRevision: 2,
+    }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && (error.code === "PATH_ESCAPES_PROJECT" || error.code === "UNSAFE_DIRECTORY"),
+  );
+});
+
 test("promotion uses the latest Working Copy name and allocates around file, directory and symlink collisions", async (t) => {
   const value = await fixture(t);
   const imported = await importSource(value, "A.html");
@@ -2264,9 +2332,6 @@ test("save fault injection recovers a complete durable state or a retained old s
   for (const failpoint of [
     "save-prepared",
     "save-source-written",
-    "save-state-written",
-    "save-manifest-written",
-    "save-committed",
   ]) {
     const value = await fixture(t);
     const imported = await importSource(value, "save-fault.html");
@@ -3179,3 +3244,164 @@ test("promotion fault recovery leaves exactly one formal Version and regular fil
     );
   }
 });
+
+function reconcileInput(target, extra = {}) {
+  return {
+    operationId: extra.operationId || "reconcile_test_operation_01",
+    previousSourcePath: extra.previousSourcePath || target.exactSourcePath,
+    projectId: extra.projectId || target.projectId,
+    documentId: extra.documentId || target.documentId,
+    workingCopyId: extra.workingCopyId || target.workingCopyId,
+    versionId: extra.versionId || target.versionId,
+    expectedSourceSha256: extra.expectedSourceSha256 || target.sourceSha256,
+    reason: extra.reason || "watch",
+  };
+}
+
+test("reconcileWorkingCopyLocator rebinds a same-directory Finder rename without creating IDs", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "活动页.html");
+  const renamedPath = path.join(imported.target.projectRootPath, "Finder 新名字.html");
+  await rename(imported.target.exactSourcePath, renamedPath);
+
+  const reconciled = await value.repository.reconcileWorkingCopyLocator(
+    reconcileInput(imported.target),
+  );
+  assert.equal(reconciled.status, "relocated");
+  assert.equal(reconciled.openTarget.projectId, imported.target.projectId);
+  assert.equal(reconciled.openTarget.documentId, imported.target.documentId);
+  assert.equal(reconciled.openTarget.workingCopyId, imported.target.workingCopyId);
+  assert.equal(reconciled.openTarget.versionId, imported.target.versionId);
+  assert.equal(reconciled.sourcePath, renamedPath);
+  assert.equal(reconciled.sourceSha256, imported.target.sourceSha256);
+  assert.equal(reconciled.openTarget.exactSourcePath, renamedPath);
+
+  const manifest = await json(path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "manifest.json",
+  ));
+  const workingCopy = manifest.workingCopies.find(
+    (entry) => entry.workingCopyId === imported.target.workingCopyId,
+  );
+  assert.equal(workingCopy.sourceRelativePath, "Finder 新名字.html");
+  assert.equal(workingCopy.preferredFileStem, "Finder 新名字");
+  assert.equal(workingCopy.preferredExtension, ".html");
+
+  const again = await value.repository.reconcileWorkingCopyLocator(
+    reconcileInput(imported.target, { previousSourcePath: renamedPath }),
+  );
+  assert.equal(again.status, "unchanged");
+  assert.equal(again.sourcePath, renamedPath);
+});
+
+test("reconcileWorkingCopyLocator follows a same-parent project folder rename", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "文件夹页.html");
+  const renamedRoot = path.join(value.projects, "改名后的项目");
+  await rename(imported.target.projectRootPath, renamedRoot);
+  const previousSourcePath = path.join(renamedRoot, path.basename(imported.target.exactSourcePath));
+  const renamedHtml = path.join(renamedRoot, "文件夹页 Finder.html");
+  await rename(previousSourcePath, renamedHtml);
+
+  const reconciled = await value.repository.reconcileWorkingCopyLocator(
+    reconcileInput(imported.target, {
+      previousSourcePath: imported.target.exactSourcePath,
+    }),
+  );
+  assert.equal(reconciled.status, "relocated");
+  assert.equal(reconciled.openTarget.projectId, imported.target.projectId);
+  assert.equal(reconciled.openTarget.projectRootPath, renamedRoot);
+  assert.equal(reconciled.sourcePath, renamedHtml);
+});
+
+test("reconcileWorkingCopyLocator reports content-changed after a Finder rename plus edit", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "内容变化.html");
+  const renamedPath = path.join(imported.target.projectRootPath, "内容变化 Finder.html");
+  await rename(imported.target.exactSourcePath, renamedPath);
+  const edited = html("Finder also edited the bytes");
+  await writeFile(renamedPath, edited, "utf8");
+
+  const reconciled = await value.repository.reconcileWorkingCopyLocator(
+    reconcileInput(imported.target),
+  );
+  assert.equal(reconciled.status, "content-changed");
+  assert.equal(reconciled.sourcePath, renamedPath);
+  assert.equal(reconciled.openTarget.workingCopyId, imported.target.workingCopyId);
+  assert.notEqual(reconciled.sourceSha256, imported.target.sourceSha256);
+  assert.equal(await readFile(renamedPath, "utf8"), edited);
+});
+
+test("reconcileWorkingCopyLocator does not claim copies, hard links, symlinks or escaped roots", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "唯一身份.html");
+  const renamedPath = path.join(imported.target.projectRootPath, "唯一身份 Finder.html");
+  await rename(imported.target.exactSourcePath, renamedPath);
+
+  const hardLinkPath = path.join(imported.target.projectRootPath, "hard-link.html");
+  await link(renamedPath, hardLinkPath);
+  await assert.rejects(
+    value.repository.reconcileWorkingCopyLocator(reconcileInput(imported.target)),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "MANAGED_PATH_AMBIGUOUS",
+  );
+  await unlink(hardLinkPath);
+
+  const copiedRoot = path.join(value.root, "copied-project");
+  await cp(imported.target.projectRootPath, copiedRoot, { recursive: true });
+  const copiedHtml = path.join(copiedRoot, "唯一身份 Finder.html");
+  const originalReconcile = await value.repository.reconcileWorkingCopyLocator(
+    reconcileInput(imported.target, { previousSourcePath: renamedPath }),
+  );
+  assert.equal(originalReconcile.sourcePath, renamedPath);
+  assert.notEqual(originalReconcile.sourcePath, copiedHtml);
+
+  const symlinkPath = path.join(imported.target.projectRootPath, "alias.html");
+  await symlink(renamedPath, symlinkPath);
+  const afterSymlink = await value.repository.reconcileWorkingCopyLocator(
+    reconcileInput(imported.target, { previousSourcePath: renamedPath }),
+  );
+  assert.equal(afterSymlink.sourcePath, renamedPath);
+
+  const movedRoot = path.join(value.root, "escaped-project");
+  await rename(imported.target.projectRootPath, movedRoot);
+  await assert.rejects(
+    value.repository.reconcileWorkingCopyLocator(
+      reconcileInput(imported.target, { previousSourcePath: renamedPath }),
+    ),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "REGISTERED_PROJECT_UNAVAILABLE",
+  );
+});
+
+test("reconcileWorkingCopyLocator refuses a version mismatch and does not guess by hash", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "不猜测.html");
+  const decoy = path.join(imported.target.projectRootPath, "decoy.html");
+  await writeFile(decoy, html("V1"), "utf8");
+  await rename(
+    imported.target.exactSourcePath,
+    path.join(imported.target.projectRootPath, "不猜测 Finder.html"),
+  );
+
+  await assert.rejects(
+    value.repository.reconcileWorkingCopyLocator(
+      reconcileInput(imported.target, { versionId: "ver_0002" }),
+    ),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "MANAGED_SOURCE_IDENTITY_MISMATCH",
+  );
+
+  const equalBytes = await importSource(value, "另一份同字节.html", html("V1"));
+  await rename(
+    equalBytes.target.exactSourcePath,
+    path.join(equalBytes.target.projectRootPath, "另一份同字节 Finder.html"),
+  );
+  const recovered = await value.repository.reconcileWorkingCopyLocator(
+    reconcileInput(imported.target),
+  );
+  assert.equal(recovered.openTarget.projectId, imported.target.projectId);
+  assert.notEqual(recovered.openTarget.projectId, equalBytes.target.projectId);
+});
+

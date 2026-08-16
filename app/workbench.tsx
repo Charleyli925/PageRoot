@@ -535,6 +535,7 @@ export default function Workbench() {
   const fileRenameInputRef = useRef<HTMLInputElement | null>(null);
   const fileRenameEditingRef = useRef(false);
   const fileRenameBusyRef = useRef(false);
+  const fileRenameErrorRef = useRef("");
   const automaticProjectRegistrationRef = useRef("");
   const projectRecordsPreparationRef = useRef("");
 
@@ -1031,6 +1032,23 @@ export default function Workbench() {
               if (!rename) throw new Error("当前运行环境不能安全修改 HTML 文件名。");
               return rename(input);
             },
+            reconcileActiveManagedSource: async (input: {
+              operationId?: string;
+              previousSourcePath: string;
+              expectedSourceSha256: string;
+              projectId: string;
+              documentId: string;
+              workingCopyId: string;
+              versionId: string;
+              reason: "watch" | "rename" | "startup" | "safe-action";
+              watcherGeneration?: number;
+            }) => {
+              const reconcile = window.htmlAIProjects?.reconcileActiveManagedSource;
+              if (!reconcile) {
+                throw new Error("当前运行环境不能安全核对工作文件位置。");
+              }
+              return reconcile(input);
+            },
           },
           viewState: {
             isTransitioning: () => isViewTransitioning(),
@@ -1250,8 +1268,8 @@ export default function Workbench() {
         if (registrationEvent.projectName) setProjectName(registrationEvent.projectName);
         if (registrationEvent.imported) {
           setToast({
-            title: "已建立托管项目",
-            message: "已创建 V1 工作文件；原始 HTML 保持不变。",
+            title: "已打开",
+            message: "原来的文件没有改动。",
             tone: "success",
             disposition: "background-result",
             dedupeKey: "project-file-imported",
@@ -1319,7 +1337,7 @@ export default function Workbench() {
         if (runEvent.current && runEvent.run) {
           setToast({
             title: "交接内容还没有复制",
-            message: runEvent.message || "本轮 Request 已保留；请打开处理详情后重试复制。",
+            message: runEvent.message || "这次任务还在，打开本轮后可以重新复制",
             tone: "error",
             sticky: true,
             dedupeKey: `qoder-handoff:${runEvent.run.sourcePath}`,
@@ -1403,6 +1421,7 @@ export default function Workbench() {
         projectRecordsPath?: unknown;
         lastModifiedAt?: unknown;
         showHandoff?: unknown;
+        contentChanged?: unknown;
       }>;
       if (projectEvent.type === "project-hydration-stage") {
         markProjectHydrationStage(String(projectEvent.stage || ""));
@@ -1637,6 +1656,71 @@ export default function Workbench() {
             tone: "info",
             disposition: "background-result",
             dedupeKey: "close-source-reconciliation",
+          });
+        }
+        return;
+      }
+      if (projectEvent.type === "project-source-locator-failed") {
+        const locatorCode = String(projectEvent.code || "");
+        if (locatorCode === "MANAGED_PATH_AMBIGUOUS") {
+          setToast({
+            title: "无法确定工作文件",
+            message: "检测到多个同等候选文件；修改仍保留，请先恢复唯一文件位置。",
+            tone: "warning",
+            sticky: true,
+            disposition: "user-choice",
+            dedupeKey: "managed-working-copy-ambiguous",
+            action: { id: "retry-project-open", label: "重新选择文件" },
+          });
+          return;
+        }
+        if (
+          locatorCode === "WORKING_COPY_UNAVAILABLE"
+          || locatorCode === "REGISTERED_PROJECT_UNAVAILABLE"
+        ) {
+          setToast({
+            title: "文件暂不可用",
+            message: "当前工作文件暂时不可用，修改仍保留。",
+            tone: "warning",
+            sticky: true,
+            disposition: "inform-in-place",
+            dedupeKey: "working-copy-unavailable",
+          });
+          return;
+        }
+        if (locatorCode === "MANAGED_SOURCE_IDENTITY_MISMATCH") {
+          setToast({
+            title: "无法核对工作文件",
+            message: "当前工作文件身份无法核对，PageRoot 没有切换路径。",
+            tone: "warning",
+            sticky: true,
+            disposition: "inform-in-place",
+            dedupeKey: "managed-source-identity-mismatch",
+          });
+          return;
+        }
+        return;
+      }
+      if (
+        projectEvent.type === "project-source-renamed"
+        || projectEvent.type === "project-source-relocated"
+      ) {
+        if (typeof projectEvent.projectName === "string" && projectEvent.projectName) {
+          setProjectName(projectEvent.projectName);
+        }
+        if (typeof projectEvent.lastModifiedAt === "string") {
+          setLastModifiedAt(projectEvent.lastModifiedAt);
+        }
+        if (
+          projectEvent.type === "project-source-relocated"
+          && projectEvent.contentChanged !== true
+        ) {
+          setToast({
+            title: "文件名已与 Finder 同步",
+            message: "已继续使用同一工作文件。",
+            tone: "success",
+            disposition: "background-result",
+            dedupeKey: "finder-filename-synced",
           });
         }
         return;
@@ -2045,10 +2129,6 @@ export default function Workbench() {
     setRestartUpdateOpen(true);
   }, [updateResult]);
 
-  const latestVersion = useMemo(
-    () => versions.find((version) => version.id === latestVersionId) || null,
-    [latestVersionId, versions],
-  );
   const viewingVersion = useMemo(
     () => versions.find((version) => version.id === viewingVersionId) || null,
     [versions, viewingVersionId],
@@ -2760,8 +2840,8 @@ export default function Workbench() {
         if (EDIT_RUNTIME_PENDING_PHASES.has(
           currentControllerSnapshot()?.editRuntime?.phase || "static",
         )) {
-          // Main bounds preparation and isolated capture independently. A
-          // final one-shot author frame cannot acknowledge its source until
+          // Main bounds preparation and the visible iframe settle independently.
+          // A final one-shot author frame cannot acknowledge its source until
           // both serial phases settle; treating that permitted interval as a
           // failed static render would replace the iframe and execute again.
           attemptLimit = Math.max(attemptLimit, runtimeAttemptLimit);
@@ -3290,6 +3370,20 @@ export default function Workbench() {
 
   useEffect(() => {
     if (!workspaceController) return undefined;
+    const subscribe = window.htmlAIProjects?.onSourceFileChanged;
+    if (typeof subscribe !== "function") return undefined;
+    return subscribe((payload) => {
+      void workspaceController.observeExternalSourceChange({
+        reason: "watch",
+        previousSourcePath: payload.sourcePath,
+        watcherGeneration: payload.watcherGeneration,
+        sourceMissing: payload.sourceMissing,
+      });
+    });
+  }, [workspaceController]);
+
+  useEffect(() => {
+    if (!workspaceController) return undefined;
     const handlePrepareClose = (event: Event) => {
       const detail = (event as CustomEvent<PrepareCloseDetail>).detail;
       if (!detail || typeof detail.waitUntil !== "function") return;
@@ -3415,7 +3509,7 @@ export default function Workbench() {
       kind: "show-source-in-folder",
       invoke: () => showInFolder(activeSourcePath),
       onFailure: (cause: unknown) => setToast({
-        title: "无法在 Finder 中显示",
+        title: "无法在文件夹中打开",
         message: productErrorMessage(
           cause,
           "源 HTML 可能已移动；当前项目仍保持打开，可以重试。",
@@ -3505,6 +3599,7 @@ export default function Workbench() {
   const cancelFileRename = useCallback(() => {
     if (fileRenameBusyRef.current) return;
     fileRenameEditingRef.current = false;
+    fileRenameErrorRef.current = "";
     setFileRenameEditing(false);
     setFileRenameError("");
     setFileRenameDraft("");
@@ -3523,6 +3618,7 @@ export default function Workbench() {
         !== currentDocumentSessionSnapshot().lastPersistedRevision
     ) return;
     fileRenameEditingRef.current = true;
+    fileRenameErrorRef.current = "";
     setFileRenameEditing(true);
     setFileRenameDraft(currentSourceFileStem);
     setFileRenameError("");
@@ -3543,39 +3639,64 @@ export default function Workbench() {
       !workspaceController
       || !canOfferFileRename
     ) {
-      setFileRenameError("当前状态还不能重命名，请等待文件安全保存。");
+      fileRenameErrorRef.current = "当前状态还不能重命名，请等待文件安全保存。";
+      setFileRenameError(fileRenameErrorRef.current);
       return;
     }
 
     fileRenameBusyRef.current = true;
     setFileRenameBusy(true);
+    fileRenameErrorRef.current = "";
     setFileRenameError("");
     try {
-      const outcome = await requiredWorkspaceController(workspaceController)
-        .renameProjectSource({ stem: fileRenameDraft });
-      if (outcome.status !== "succeeded") {
+      const controller = requiredWorkspaceController(workspaceController);
+      const reconciled = await controller.observeExternalSourceChange({
+        reason: "rename",
+      });
+      if (reconciled.status === "rejected" || reconciled.status === "unknown") {
+        throw Object.assign(
+          new Error(
+            ("reason" in reconciled && reconciled.reason)
+              || "当前工作文件暂时无法核对位置，PageRoot 没有切换路径。",
+          ),
+          { code: "code" in reconciled ? reconciled.code : undefined },
+        );
+      }
+      if (reconciled.status === "blocked") {
         throw new Error(
-          outcome.status === "unknown"
-            ? "文件名已经修改，但项目状态还没有完成刷新。"
-            : ("reason" in outcome && outcome.reason)
-              || "文件名没有修改，请检查名称后重试。",
+          ("reason" in reconciled && reconciled.reason)
+            || "当前状态还不能重命名，请等待文件安全保存。",
+        );
+      }
+      if (reconciled.status === "succeeded" && typeof reconciled.value?.projectName === "string") {
+        setProjectName(reconciled.value.projectName);
+      }
+      const outcome = await controller.renameProjectSource({ stem: fileRenameDraft });
+      if (outcome.status !== "succeeded") {
+        throw Object.assign(
+          new Error(
+            outcome.status === "unknown"
+              ? "文件名已经修改，但项目状态还没有完成刷新。"
+              : ("reason" in outcome && outcome.reason)
+                || "文件名没有修改，请检查名称后重试。",
+          ),
+          { code: "code" in outcome ? outcome.code : undefined },
         );
       }
       if (outcome.value.projectName) setProjectName(outcome.value.projectName);
       setLastModifiedAt(outcome.value.lastModifiedAt || null);
       fileRenameEditingRef.current = false;
+      fileRenameErrorRef.current = "";
       setFileRenameEditing(false);
       setFileRenameDraft("");
       setFileRenameError("");
     } catch (cause) {
-      setFileRenameError(productErrorMessage(
+      const message = productErrorMessage(
         cause,
         "文件名没有修改，请检查名称后重试。",
-      ));
-      window.requestAnimationFrame(() => {
-        fileRenameInputRef.current?.focus();
-        fileRenameInputRef.current?.select();
-      });
+      );
+      fileRenameErrorRef.current = message;
+      setFileRenameError(message);
     } finally {
       fileRenameBusyRef.current = false;
       setFileRenameBusy(false);
@@ -3598,6 +3719,18 @@ export default function Workbench() {
     fileRenameBusy,
     fileRenameEditing,
   ]);
+
+  useEffect(() => {
+    if (!fileRenameEditing || fileRenameBusy) return undefined;
+    const onPointerDown = (event: PointerEvent) => {
+      if (!fileRenameErrorRef.current) return;
+      const field = fileRenameInputRef.current?.closest(".window-file-rename-field");
+      if (field instanceof Element && field.contains(event.target as Node)) return;
+      cancelFileRename();
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    return () => document.removeEventListener("pointerdown", onPointerDown, true);
+  }, [cancelFileRename, fileRenameBusy, fileRenameEditing]);
 
   const showProjectRecordsInFolder = useCallback(async () => {
     const context = workspaceControllerRef.current?.getCurrentProjectContext();
@@ -5153,7 +5286,7 @@ export default function Workbench() {
         versionId: version.id,
       }),
       onFailure: (cause: unknown) => setToast({
-        title: "历史版本暂时无法在 Finder 中显示",
+        title: "历史版本暂时无法在文件夹中打开",
         message: productErrorMessage(cause, "请确认项目记录仍然完整后重试。"),
         tone: "warning",
         disposition: "background-result",
@@ -5877,9 +6010,7 @@ export default function Workbench() {
   });
   const headerStatusFacts = browserPreviewOnly
     ? ["浏览器预览 · 只读"]
-    : projectStatus.facts.length
-      ? projectStatus.facts
-      : [latestVersion?.label || "尚未创建正式版本"];
+    : [...projectStatus.facts];
   const canShowCurrentFileInFolder = Boolean(
     sourcePath
     && typeof window !== "undefined"
@@ -5946,27 +6077,27 @@ export default function Workbench() {
         ? "这次没有产生有效变化"
         : activeRun?.status === "error"
           ? "返回的 HTML 无法使用"
-          : "等待 QoderWork 返回修改结果";
+          : "等待 AI 返回结果";
   const processSummaryTitle = pendingRunOutcome
     ? "为避免重复任务，画布暂时保持只读"
     : activeRun?.status === "ready-to-open"
-      ? candidateNeedsReview
-        ? "候选版本已保留，等待你对比确认"
-        : "新版本已保留，等待你确认打开"
+      ? "AI 改好了，先对照再决定用哪一版"
       : activeRun?.status === "no-change"
         ? "页面与评论可以继续编辑"
         : activeRun?.status === "error"
           ? "源 HTML 没有被覆盖"
-          : "画布已锁定，仅可浏览";
+          : "页面暂时只能看";
   const processSummaryDetail = pendingRunOutcome
     ? "源页会在后台继续核对，不会重复发送同一轮要求"
     : activeRun?.status === "no-change"
       ? "原评论和附件都已保留，调整要求后可以重新发送"
       : activeRun?.status === "error"
         ? "当前 HTML 没有被覆盖；返回编辑后仍可查看上轮处理"
-        : candidateNeedsReview
+        : activeRun?.status === "ready-to-open" && candidateNeedsReview
           ? "HTML 可以打开，但与上一版的共同特征较少，不会直接替换当前页面"
-        : "原始评论和本地内容均已冻结，返回结果不会覆盖它们";
+          : activeRun?.status === "ready-to-open"
+            ? "不会直接替换当前页面。"
+            : "你的评论还在，AI 改完也不会直接覆盖。";
   const processStatusLabel = pendingRunOutcome
     ? "正在等待修改结果"
     : activeRun?.status === "ready-to-open"
@@ -6540,10 +6671,19 @@ export default function Workbench() {
                     maxLength={180}
                     spellCheck={false}
                     value={fileRenameDraft}
-                    onBlur={() => void commitFileRename()}
+                    onBlur={() => {
+                      if (fileRenameErrorRef.current) {
+                        cancelFileRename();
+                        return;
+                      }
+                      void commitFileRename();
+                    }}
                     onChange={(event) => {
                       setFileRenameDraft(event.target.value);
-                      if (fileRenameError) setFileRenameError("");
+                      if (fileRenameError) {
+                        fileRenameErrorRef.current = "";
+                        setFileRenameError("");
+                      }
                     }}
                     onKeyDown={(event) => {
                       if (event.key === "Enter") {
@@ -6562,8 +6702,8 @@ export default function Workbench() {
                   className="window-file-title-action"
                   type="button"
                   aria-label={`重命名文件 ${currentSourceFileStem}`}
-                  title="双击重命名文件"
-                  onDoubleClick={beginFileRename}
+                  title="重命名文件"
+                  onClick={beginFileRename}
                   onKeyDown={(event) => {
                     if (event.key === "Enter" || event.key === "F2") {
                       event.preventDefault();
@@ -6627,17 +6767,19 @@ export default function Workbench() {
               ) : null}
             </div>
             <span className="file-meta">
-              <span className="file-version-label project-status-facts">
-                {headerStatusFacts.map((fact) => (
-                  <span key={fact}>{fact}</span>
-                ))}
-              </span>
+              {headerStatusFacts.length ? (
+                <span className="file-version-label project-status-facts">
+                  {headerStatusFacts.map((fact) => (
+                    <span key={fact}>{fact}</span>
+                  ))}
+                </span>
+              ) : null}
               {canOpenProjectRootInFolder ? (
                 <button
                   className="window-file-folder-action"
                   type="button"
-                  aria-label="在 Finder 中打开当前项目文件夹"
-                  title="在 Finder 中打开经验证的项目文件夹"
+                  aria-label="在文件夹中打开当前项目文件夹"
+                  title="在文件夹中打开当前项目文件夹"
                   onClick={() => void showProjectRecordsInFolder()}
                 >
                   在文件夹中打开
@@ -6647,7 +6789,7 @@ export default function Workbench() {
                   className="window-file-folder-action"
                   type="button"
                   aria-label={`在文件夹中打开 ${currentSourceFileName}`}
-                  title="在 Finder 中显示当前文件"
+                  title="在文件夹中打开当前文件"
                   onClick={() => void showProjectInFolder()}
                 >
                   在文件夹中打开
@@ -6815,7 +6957,7 @@ export default function Workbench() {
               ))
             }
             onClick={() => {
-              if (runInProgress) {
+              if (runInProgress || currentQoderHandoffStatus === "copied") {
                 setHandoffPreviewOpen(false);
                 setCanvasMode("edit");
                 setDrawer("handoff");
@@ -6833,14 +6975,19 @@ export default function Workbench() {
               {generating
                 ? "正在准备…"
                 : currentQoderHandoffStatus === "copying"
-                  ? "正在复制交接内容…"
-                  : currentQoderHandoffStatus === "copied"
-                    ? "已复制，可粘贴到 AI Agent对话框"
-                    : currentQoderHandoffStatus === "failed"
-                      ? "复制失败 · 查看"
-                      : "复制AI任务Prompt"}
+                  ? "正在复制…"
+                  : currentQoderHandoffStatus === "failed"
+                    ? "复制失败，再试一次"
+                    : currentQoderHandoffStatus === "copied" || runInProgress
+                      ? "查看本轮"
+                      : pendingSendItemCount === 0
+                        ? "写评论后再发送"
+                        : "发给 AI"}
             </span>
-            {!runInProgress && currentQoderHandoffStatus !== "copied"
+            {pendingSendItemCount > 0
+              && !runInProgress
+              && currentQoderHandoffStatus !== "copied"
+              && currentQoderHandoffStatus !== "failed"
               ? <small>{pendingSendItemCount}</small>
               : null}
           </button>
@@ -7835,7 +7982,6 @@ export default function Workbench() {
         {drawer === "handoff" ? (
           <HandoffDrawerHeader
             panelTitle={processPanelTitle}
-            candidateVersionLabel={activeRun?.candidateVersionLabel}
           />
         ) : drawer ? (
           <>
@@ -8096,9 +8242,9 @@ export default function Workbench() {
                   </span>
                   <div className="current-project-actions">
                     {canOpenProjectRootInFolder ? (
-                      <button type="button" onClick={() => void showProjectRecordsInFolder()}>Finder</button>
+                      <button type="button" onClick={() => void showProjectRecordsInFolder()}>在文件夹中打开</button>
                     ) : sourcePath && typeof window !== "undefined" && window.htmlAIProjects?.showInFolder ? (
-                      <button type="button" onClick={() => void showProjectInFolder()}>Finder</button>
+                      <button type="button" onClick={() => void showProjectInFolder()}>在文件夹中打开</button>
                     ) : null}
                     <button type="button" onClick={() => void exportCurrentHtml()}>
                       导出 HTML 副本
@@ -8138,7 +8284,7 @@ export default function Workbench() {
                           <FileHtmlIcon aria-hidden="true" size={19} weight="duotone" />
                           <span>
                             <strong>{project.projectName}</strong>
-                            <small>{project.registeredProjectRootPath}</small>
+                            <small>{folderFromSourcePath(project.registeredProjectRootPath)}</small>
                           </span>
                           {project.lastOpenedAt ? (
                             <time dateTime={new Date(project.lastOpenedAt).toISOString()}>
@@ -8321,7 +8467,7 @@ export default function Workbench() {
                       </span>
                       <span className="project-resource-meta">
                         {projectRecordsPath
-                          ? "Finder"
+                          ? "在文件夹中打开"
                           : projectRecordsPreparing
                             ? "准备中"
                             : "待建立"}

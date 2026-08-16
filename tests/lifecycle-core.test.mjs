@@ -11,9 +11,7 @@ import {
   comparisonSha256,
   findUnexpectedAttemptEntry,
   findUnexpectedAttemptOutputEntry,
-  injectManagedMeta,
   sha256,
-  stripManagedMeta,
 } from "../scripts/lifecycle-core.mjs";
 
 test("atomic writes support a 255-byte output filename", async (t) => {
@@ -97,8 +95,19 @@ const base = `<!doctype html>
 <body><main><h1>指标</h1></main></body>
 </html>`;
 
-test("canonical comparison removes only the five exact lifecycle meta tags", () => {
-  const stamped = injectManagedMeta(base, {
+function withManagedMeta(html, identity) {
+  const tags = [
+    ["html-ai-document-id", identity.documentId],
+    ["html-ai-version-id", identity.versionId],
+    ["html-ai-version-label", identity.versionLabel],
+    ["html-ai-based-on-version-id", identity.basedOnVersionId],
+    ["html-ai-request-id", identity.requestId],
+  ].map(([name, value]) => `<meta name="${name}" content="${value}">`).join("");
+  return html.replace(/<\/head>/i, `${tags}</head>`);
+}
+
+test("canonical comparison ignores only the five exact lifecycle meta tags", () => {
+  const stamped = withManagedMeta(base, {
     documentId: "doc_0123456789abcdef",
     versionId: "ver_0009",
     versionLabel: "V9",
@@ -112,8 +121,6 @@ test("canonical comparison removes only the five exact lifecycle meta tags", () 
   }
   assert.match(stamped, /html-ai-custom-note/);
   assert.equal(comparisonSha256(stamped), comparisonSha256(base));
-  assert.equal(stripManagedMeta(stamped).includes("html-ai-version-id"), false);
-  assert.equal(stripManagedMeta(stamped).includes("html-ai-custom-note"), true);
 });
 
 test("ordinary whitespace, CSS and body changes remain meaningful", () => {
@@ -128,29 +135,7 @@ test("ordinary whitespace, CSS and body changes remain meaningful", () => {
   );
 });
 
-test("authoritative stamping replaces stale identity without broad metadata deletion", () => {
-  const stale = injectManagedMeta(base, {
-    documentId: "doc_0123456789abcdef",
-    versionId: "ver_0008",
-    versionLabel: "V8",
-    basedOnVersionId: "ver_0007",
-    requestId: "req_0008",
-  });
-  const final = injectManagedMeta(stale, {
-    documentId: "doc_0123456789abcdef",
-    versionId: "ver_0009",
-    versionLabel: "V9",
-    basedOnVersionId: "ver_0008",
-    requestId: "req_0009",
-  });
-  assert.doesNotMatch(final, /content="ver_0007"|content="req_0008"|content="V8"/);
-  assert.match(final, /content="ver_0009"/);
-  assert.match(final, /content="req_0009"/);
-  assert.match(final, /html-ai-custom-note/);
-  assert.match(sha256(final), /^sha256:[a-f0-9]{64}$/);
-});
-
-test("canonical parsing ignores tag-shaped strings in scripts and comments", () => {
+test("canonical comparison ignores tag-shaped strings in scripts and comments", () => {
   const tricky = base.replace(
     "<title>指标</title>",
     `<script>
@@ -158,32 +143,19 @@ const fakeMeta = '<meta name="html-ai-version-id" content="ver_9999">';
 const fakeHead = "</head>";
 </script>
 <!-- <meta name="html-ai-request-id" content="req_9999"> -->
-<meta content="ver_0008>quoted" name="html-ai-version-id">
 <title>指标</title>`,
   );
-  const stripped = stripManagedMeta(tricky);
-  assert.match(stripped, /fakeMeta = '<meta name="html-ai-version-id"/);
-  assert.match(stripped, /<!-- <meta name="html-ai-request-id"/);
-  assert.doesNotMatch(stripped, /content="ver_0008>quoted"/);
-
-  const stamped = injectManagedMeta(tricky, {
-    documentId: "doc_0123456789abcdef",
-    versionId: "ver_0009",
-    versionLabel: "V9",
-    basedOnVersionId: "ver_0008",
-    requestId: "req_0009",
-  });
-  assert.ok(
-    stamped.indexOf('name="html-ai-document-id"')
-      > stamped.indexOf("</script>"),
+  const stamped = tricky.replace(
+    "<title>指标</title>",
+    '<title>指标</title><meta name="html-ai-version-id" content="ver_0008">',
   );
-  assert.ok(
-    stamped.indexOf('name="html-ai-request-id" content="req_0009"')
-      < stamped.lastIndexOf("</head>"),
-  );
+  assert.equal(comparisonSha256(stamped), comparisonSha256(tricky));
+  assert.match(tricky, /fakeMeta = '<meta name="html-ai-version-id"/);
+  assert.match(tricky, /<!-- <meta name="html-ai-request-id"/);
+  assert.match(sha256(tricky), /^sha256:[a-f0-9]{64}$/);
 });
 
-test("template metadata is canonicalized without matching script templates", () => {
+test("template and script metadata do not collapse canonical comparison", () => {
   const withTemplates = base.replace(
     "</body>",
     `<template id="identity-fragment">
@@ -192,11 +164,7 @@ test("template metadata is canonicalized without matching script templates", () 
 <script>const template = \`<meta name="html-ai-version-label" content="V7">\`;</script>
 </body>`,
   );
-  const first = stripManagedMeta(withTemplates);
-  const second = stripManagedMeta(first);
-  assert.equal(first, second);
-  assert.match(first, /<template id="identity-fragment">/);
-  assert.doesNotMatch(first, /content="V8"/);
-  assert.match(first, /content="V7"/);
+  assert.match(withTemplates, /<template id="identity-fragment">/);
+  assert.match(withTemplates, /content="V7"/);
   assert.notEqual(comparisonSha256(withTemplates), comparisonSha256(base));
 });

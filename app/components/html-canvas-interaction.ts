@@ -101,6 +101,51 @@ export function caretPointFromMouseEvent(event: MouseEvent): TextCaretPoint {
   };
 }
 
+function textHitAtPoint(
+  documentNode: Document,
+  target: HTMLElement,
+  point: TextCaretPoint,
+): { textNode: Text; offset: number } | null {
+  const caretPosition = documentNode.caretPositionFromPoint?.(point.clientX, point.clientY);
+  const caretRange = !caretPosition
+    ? documentNode.caretRangeFromPoint?.(point.clientX, point.clientY)
+    : null;
+  const pointNode = caretPosition?.offsetNode || caretRange?.startContainer;
+  const pointOffset = caretPosition?.offset ?? caretRange?.startOffset;
+  const textNode = pointNode?.nodeType === 3 ? pointNode as Text : null;
+  if (!textNode || !target.contains(textNode) || !textNode.data.length) return null;
+  const offset = typeof pointOffset === "number"
+    ? Math.max(0, Math.min(textNode.data.length, pointOffset))
+    : 0;
+  return { textNode, offset };
+}
+
+export function identifyingTextRangeAtPoint(
+  documentNode: Document,
+  target: HTMLElement,
+  point: TextCaretPoint,
+): Range | null {
+  const hit = textHitAtPoint(documentNode, target, point);
+  if (!hit) return null;
+  const start = hit.offset >= hit.textNode.data.length
+    ? hit.textNode.data.length - 1
+    : hit.offset;
+  const range = documentNode.createRange();
+  range.setStart(hit.textNode, start);
+  range.setEnd(hit.textNode, start + 1);
+  if (!nativeTextRangeContainsPoint(range, point)) return null;
+  return range;
+}
+
+export function directTextNodeAtPoint(
+  documentNode: Document,
+  target: HTMLElement,
+  point: TextCaretPoint,
+): Text | null {
+  const hit = textHitAtPoint(documentNode, target, point);
+  return hit?.textNode ?? null;
+}
+
 function wordBoundsAtOffset(text: string, requestedOffset: number): {
   startOffset: number;
   endOffset: number;
@@ -210,7 +255,50 @@ function findSelectableElement(target: EventTarget | null): HTMLElement | null {
 }
 
 const MEDIA_SURFACE_SELECTOR = "iframe, audio, video, canvas, object, embed";
+const DEDICATED_SOURCE_SURFACE_SELECTOR = `${MEDIA_SURFACE_SELECTOR}, svg, math, input, textarea, select`;
 const COMPOUND_VALUE_AFFIX_TAGS = new Set(["SMALL", "SUP", "SUB"]);
+
+function pointHitsElementBox(element: HTMLElement, point: TextCaretPoint): boolean {
+  const rect = element.getBoundingClientRect();
+  const tolerance = 2;
+  return rect.width > 0
+    && rect.height > 0
+    && point.clientX >= rect.left - tolerance
+    && point.clientX <= rect.right + tolerance
+    && point.clientY >= rect.top - tolerance
+    && point.clientY <= rect.bottom + tolerance;
+}
+
+export function findDedicatedSourceSurfaceAtPoint(
+  documentNode: Document,
+  point: TextCaretPoint,
+): HTMLElement | null {
+  const hits = typeof documentNode.elementsFromPoint === "function"
+    ? documentNode.elementsFromPoint(point.clientX, point.clientY)
+    : [];
+  const seen = new Set<HTMLElement>();
+  const consider = (element: HTMLElement | null) => {
+    if (!element || seen.has(element) || !element.hasAttribute(SOURCE_NODE_ATTRIBUTE)) {
+      return null;
+    }
+    seen.add(element);
+    return element.matches(DEDICATED_SOURCE_SURFACE_SELECTOR)
+      && pointHitsElementBox(element, point)
+      ? element
+      : null;
+  };
+  for (const hit of hits) {
+    if (!hit || hit.nodeType !== 1) continue;
+    const element = hit as HTMLElement;
+    const dedicated = consider(element.closest<HTMLElement>(DEDICATED_SOURCE_SURFACE_SELECTOR))
+      ?? Array.from(
+        element.querySelectorAll<HTMLElement>(DEDICATED_SOURCE_SURFACE_SELECTOR),
+      ).map((candidate) => consider(candidate)).find(Boolean)
+      ?? null;
+    if (dedicated) return dedicated;
+  }
+  return null;
+}
 
 function compoundValueSelectionRoot(element: HTMLElement): HTMLElement {
   if (!COMPOUND_VALUE_AFFIX_TAGS.has(element.tagName)) return element;
@@ -229,6 +317,21 @@ function compoundValueSelectionRoot(element: HTMLElement): HTMLElement {
     || parent.querySelector("div, section, article, header, footer, main, aside, table, ul, ol")
   ) return element;
   return parent;
+}
+
+function elementFromEventTarget(target: EventTarget | null): HTMLElement | null {
+  if (!target || typeof target !== "object" || !("nodeType" in target)) return null;
+  if (target.nodeType === 3) return (target as Text).parentElement;
+  return findSelectableElement(target);
+}
+
+export function findCanvasHitSourceElement(target: EventTarget | null): HTMLElement | null {
+  const selected = elementFromEventTarget(target);
+  if (!selected) return null;
+  const runtimeHost = selected.closest<HTMLElement>(`[${EDIT_RUNTIME_HOST_ATTRIBUTE}]`);
+  if (runtimeHost) return runtimeHost;
+  const element = compoundValueSelectionRoot(selected);
+  return element.closest<HTMLElement>(`[${SOURCE_NODE_ATTRIBUTE}]`) ?? element;
 }
 
 export function findCanvasSelectionElement(target: EventTarget | null): HTMLElement | null {

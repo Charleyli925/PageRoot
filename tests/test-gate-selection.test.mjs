@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   assertFullyAutomatedPlan,
+  omitMissingNodeTests,
   selectGatePlan,
   validateImpactMap,
 } from "../scripts/test-gate-core.mjs";
@@ -109,13 +110,13 @@ const TASK_OWNER_CASES = [
     file: "scripts/workspace-bridge.mjs",
     nodeTests: [
       "tests/attachment-storage.test.mjs",
+      "tests/candidate-assessment.test.mjs",
       "tests/compatibility-decoders.test.mjs",
       "tests/html-source-parser.test.mjs",
       "tests/lifecycle-core.test.mjs",
       "tests/product-contract.test.mjs",
       "tests/project-context-service.test.mjs",
       "tests/project-file-bridge.test.mjs",
-      "tests/scope-validator.test.mjs",
       "tests/targeted-change-schema.test.mjs",
       "tests/user-supplement.test.mjs",
       "tests/workspace-bridge.test.mjs",
@@ -141,7 +142,6 @@ const TASK_OWNER_CASES = [
     nodeTests: [
       "tests/bridge-test-environment.test.mjs",
       "tests/schema-contract.test.mjs",
-      "tests/scope-validator.test.mjs",
       "tests/workspace-bridge.test.mjs",
     ],
     suites: ["typecheck", "lint", "node-targeted"],
@@ -177,6 +177,28 @@ test("a changed Node test runs itself without expanding to the full Node suite",
   });
   assert.deepEqual(suiteIds(plan), ["node-targeted"]);
   assert.deepEqual(plan.selectedNodeTests, ["tests/source-text-map.test.mjs"]);
+});
+
+test("deleted Node tests are omitted from the executable plan", () => {
+  const plan = selectGatePlan({
+    map,
+    lane: "edit",
+    changedFiles: [
+      "tests/source-text-map.test.mjs",
+      "tests/runtime-dom-source-map.test.mjs",
+    ],
+  });
+  assert.ok(plan.selectedNodeTests.includes("tests/runtime-dom-source-map.test.mjs"));
+  const executable = omitMissingNodeTests(
+    plan,
+    (file) => file !== "tests/runtime-dom-source-map.test.mjs",
+  );
+  assert.equal(
+    executable.selectedNodeTests.includes("tests/runtime-dom-source-map.test.mjs"),
+    false,
+  );
+  assert.ok(executable.selectedNodeTests.includes("tests/source-text-map.test.mjs"));
+  assert.deepEqual(suiteIds(executable), ["node-targeted"]);
 });
 
 test("a changed owned Node test still runs only itself", () => {
@@ -242,7 +264,6 @@ test("Bridge fixture changes select the helper and its schema, scope, and worksp
   const expected = [
     "tests/bridge-test-environment.test.mjs",
     "tests/schema-contract.test.mjs",
-    "tests/scope-validator.test.mjs",
     "tests/workspace-bridge.test.mjs",
   ];
   for (const file of [
@@ -396,7 +417,6 @@ test("Workbench and review surfaces route to architecture or observable runtime 
     "tests/desktop-preload-ipc.test.mjs",
     "tests/edit-author-runtime-session.test.mjs",
     "tests/edit-runtime-bootstrap.test.mjs",
-    "tests/edit-runtime-capture-owner.test.mjs",
     "tests/edit-runtime-contract.test.mjs",
     "tests/edit-runtime-preparation-fence.test.mjs",
     "tests/edit-runtime-protocol.test.mjs",
@@ -615,14 +635,6 @@ test("release and artifact lanes use complete automated coverage and never smoke
     "browser-smoke",
   ]);
 
-  const artifactOnly = assertFullyAutomatedPlan(selectGatePlan({ map, lane: "artifact-only" }));
-  assert.deepEqual(suiteIds(artifactOnly), [
-    "build-desktop",
-    "package-build",
-    "packaged-runtime",
-    "packaged-verify",
-    "package-delivery-report",
-  ]);
 });
 
 test("developer package is opt-in, lightweight and verifies contents before startup", () => {
@@ -636,7 +648,7 @@ test("developer package is opt-in, lightweight and verifies contents before star
     "developer-packaged-startup",
     "developer-package-report",
   ]);
-  for (const formalLane of ["release", "artifact", "artifact-only"]) {
+  for (const formalLane of ["release", "artifact"]) {
     const formal = selectGatePlan({ map, lane: formalLane });
     assert.equal(
       suiteIds(formal).some((id) => id.startsWith("developer-")),
@@ -680,7 +692,6 @@ test("Node groups partition every top-level test exactly once outside full", asy
     groups.smoke.map(relative).sort(),
     [
       "product-contract.test.mjs",
-      "scope-validator.test.mjs",
       "source-patch-engine.test.mjs",
     ],
   );
