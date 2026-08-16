@@ -64,6 +64,13 @@ Rules:
   Renderer catalog commands carry only `projectId`, and every open revalidates
   the Registry/Project/Document/Working Copy/OpenTarget/HTML/Hash tuple before
   any Session publication.
+- Recent and Registry-catalog lists are deferrable projections. Automatic
+  refreshes run only after the authoritative transition has settled
+  (hydration, Working Copy confirmation or synchronous cross-Session
+  publication), are fenced by the current Project context, and never
+  participate in or block a rename, history continuation, Candidate adoption
+  or hydration. A catalog failure can only surface a projection event; it
+  cannot downgrade a completed transition to unknown.
 - `AI任务/` is a display projection, not a second Candidate store. The
   materializer first validates the complete frozen identity and hashes, writes
   a recovery receipt before no-replace output, and never reads a visible copy

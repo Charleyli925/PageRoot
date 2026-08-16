@@ -168,6 +168,7 @@ export class ProjectWorkflow {
   }): Promise<ProjectWorkflowOutcome<{ opened: boolean }>>;
   refreshRecents(): Promise<ProjectWorkflowOutcome<{ projects: unknown[] }>>;
   refreshRegisteredProjects(): Promise<ProjectWorkflowOutcome<{ projects: unknown[] }>>;
+  scheduleProjectListRefreshAfterSettlement(context: ProjectContext): void;
   captureManagedSourceTransitionAuthority(): unknown;
   restoreManagedSourceTransitionAuthority(authority: unknown): Readonly<{
     epoch: number;

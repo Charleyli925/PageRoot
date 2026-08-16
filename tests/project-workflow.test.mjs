@@ -628,6 +628,113 @@ test("concurrent catalog refreshes coalesce into one in-flight read", async (t) 
   assert.equal(catalogCalls, 1);
 });
 
+test("two post-settlement refreshes coalesce into one catalog read", async (t) => {
+  let resolveCatalog;
+  let catalogCalls = 0;
+  const harness = createHarness({
+    projectOpen: {
+      listRegistered: () => {
+        catalogCalls += 1;
+        return new Promise((resolve) => {
+          resolveCatalog = resolve;
+        });
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+
+  const context = harness.projectSession.context;
+  harness.workflow.scheduleProjectListRefreshAfterSettlement(context);
+  harness.workflow.scheduleProjectListRefreshAfterSettlement(context);
+  await waitFor(() => catalogCalls === 1, "scheduled refreshes did not coalesce");
+  resolveCatalog([{ projectId: "project_catalog_a", availability: "ready" }]);
+  await waitFor(
+    () => harness.events.some((event) => event.type === "project-catalog-loaded"),
+    "catalog projection did not load",
+  );
+  assert.equal(catalogCalls, 1);
+});
+
+test("a post-settlement refresh is fenced by the current Project context", async (t) => {
+  let catalogCalls = 0;
+  const harness = createHarness({
+    projectOpen: {
+      listRegistered: () => {
+        catalogCalls += 1;
+        return Promise.resolve([]);
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+
+  const staleContext = harness.projectSession.context;
+  harness.projectSession.openLocator(B_PATH);
+  const currentContext = harness.projectSession.register({
+    ...harness.projectSession.locator,
+    projectId: "project_b",
+    documentId: "document_b",
+  });
+
+  harness.workflow.scheduleProjectListRefreshAfterSettlement(staleContext);
+  assert.equal(catalogCalls, 0);
+
+  harness.workflow.scheduleProjectListRefreshAfterSettlement(currentContext);
+  await waitFor(() => catalogCalls === 1, "current project refresh did not start");
+  assert.equal(catalogCalls, 1);
+});
+
+test("source rename settles before the catalog refresh and never downgrades on catalog failure", async (t) => {
+  let settleCatalog;
+  let catalogCalls = 0;
+  const harness = createHarness({
+    bridge: {
+      async workspace(sourcePath) {
+        if (sourcePath !== RENAMED_PATH) return workspacePayload(sourcePath, OLD_HTML);
+        return {
+          ...workspacePayload(RENAMED_PATH, OLD_HTML),
+          projectId: "project_old",
+          documentId: "document_old",
+          sourcePath: RENAMED_PATH,
+          project: { displayName: "renamed" },
+        };
+      },
+    },
+    projectOpen: {
+      async renameSource(payload) {
+        return {
+          operationId: payload.operationId,
+          previousSourcePath: OLD_PATH,
+          sourcePath: RENAMED_PATH,
+          sha256: sha256(OLD_HTML),
+          stem: "renamed",
+          lastModifiedAt: "2026-08-12T00:00:00.000Z",
+        };
+      },
+      listRegistered: () => {
+        catalogCalls += 1;
+        return new Promise((resolve, reject) => {
+          settleCatalog = { resolve, reject };
+        });
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+
+  const pending = harness.workflow.renameSource({ stem: "renamed" });
+  await waitFor(() => catalogCalls === 1, "catalog refresh did not follow rename settlement");
+  const outcome = await pending;
+  assert.equal(outcome.status, "succeeded");
+  assert.equal(harness.projectSession.context?.sourcePath, RENAMED_PATH);
+  assert.equal(harness.documentSession.sourceSha256, sha256(OLD_HTML));
+
+  settleCatalog.reject(new Error("catalog unavailable"));
+  await waitFor(
+    () => harness.events.some((event) => event.type === "project-catalog-failed"),
+    "catalog failure did not surface a projection event",
+  );
+  assert.equal(outcome.status, "succeeded");
+});
+
 test("a Registry project open routes only its projectId through the desktop authority", async (t) => {
   const openedProjectIds = [];
   const harness = createHarness({
@@ -1646,4 +1753,3 @@ test("PageRoot rename after Finder rebase uses the recovered path", async (t) =>
     "/tmp/project-workflow-pageroot-new.html",
   );
 });
-

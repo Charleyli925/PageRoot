@@ -1122,6 +1122,18 @@ export class ProjectWorkflow {
     }
   }
 
+  scheduleProjectListRefreshAfterSettlement(context) {
+    if (this.#disposed || !context || !this.#projectSession.matches(context)) return;
+    // Project/Document/Version/Draft/Comment publication and Working Copy
+    // confirmation are the authoritative path. Recent and catalog are
+    // deferrable projections that refresh only after that settlement and
+    // must never block or downgrade it.
+    void Promise.all([
+      this.refreshRecents(),
+      this.refreshRegisteredProjects(),
+    ]);
+  }
+
   renameSource({ stem, deadlineAt } = {}) {
     if (this.#disposed) {
       return Promise.resolve(blocked(
@@ -1398,9 +1410,8 @@ export class ProjectWorkflow {
         throw new Error("文件已重命名，但当前项目身份已经变化。");
       }
 
-      const [recents, catalog, hydrated] = await Promise.all([
+      const [recents, hydrated] = await Promise.all([
         this.refreshRecents(),
-        this.refreshRegisteredProjects(),
         this.refreshWorkspace({
           sourcePath: nextSourcePath,
           epoch: transitioned.epoch,
@@ -1409,7 +1420,6 @@ export class ProjectWorkflow {
       ]);
       if (
         recents.status !== "succeeded"
-        || catalog.status !== "succeeded"
         || hydrated.status !== "succeeded"
       ) {
         return unknown(
@@ -1421,6 +1431,7 @@ export class ProjectWorkflow {
       if (!nextContext || !this.#codecs.sameSourcePath(nextContext.sourcePath, nextSourcePath)) {
         return stale(transitioned);
       }
+      this.scheduleProjectListRefreshAfterSettlement(nextContext);
       this.#emit({
         type: "project-source-renamed",
         context: nextContext,
@@ -1738,14 +1749,15 @@ export class ProjectWorkflow {
           if (!transitioned || !this.#projectSession.context) {
             throw new Error("文件位置已恢复，但当前项目身份已经变化。");
           }
-          const [recents, catalog] = await Promise.all([
-            this.refreshRecents(),
-            this.refreshRegisteredProjects(),
-          ]);
-          if (recents.status !== "succeeded" || catalog.status !== "succeeded") {
+          const recents = await this.refreshRecents();
+          if (recents.status !== "succeeded") {
             return unknown(operationId, "文件位置已经恢复，但项目状态还没有完成刷新。");
           }
           const nextContext = this.#projectSession.context;
+          if (!nextContext) {
+            throw new Error("文件位置已恢复，但当前项目身份已经变化。");
+          }
+          this.scheduleProjectListRefreshAfterSettlement(nextContext);
           this.#emit({
             type: "project-source-relocated",
             context: nextContext,
@@ -2127,7 +2139,7 @@ export class ProjectWorkflow {
           // registration/Working-Copy adoption have settled. Running catalog in
           // parallel with hydration lets its Repository scan reorder the shared
           // queue and can leave a just-imported project stuck in "hydrating".
-          await this.refreshRegisteredProjects();
+          this.scheduleProjectListRefreshAfterSettlement(this.#projectSession.context);
         }
       })().catch((cause) => {
         this.#emit({
@@ -2982,8 +2994,6 @@ export class ProjectWorkflow {
       || activatedProject.sha256 !== expectedSha256
       || await this.#hashPort.sha256(activatedProject.html) !== expectedSha256
     ) throw new Error("生成版本的路径、HTML 与 Hash 没有形成完整一致的候选。");
-    void this.refreshRecents();
-    void this.refreshRegisteredProjects();
     return Object.freeze({
       previousSourcePath,
       nextSourcePath,
