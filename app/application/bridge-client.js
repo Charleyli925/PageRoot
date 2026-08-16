@@ -190,6 +190,16 @@ export function createBridgeClient({
       "无法读取当前源 HTML。",
       timeoutMs,
     ),
+    sourcePreview: (sourcePath) => query(
+      "/source-preview",
+      { sourcePath },
+      "无法预览磁盘上的源 HTML。",
+    ),
+    sourceStat: (sourcePath) => query(
+      "/source-stat",
+      { sourcePath },
+      "无法检查磁盘上的源 HTML。",
+    ),
     conflictCandidate: (sourcePath) => query(
       "/conflict-candidate",
       { sourcePath },
@@ -214,6 +224,11 @@ export function createBridgeClient({
       "/project/ensure",
       body,
       "无法建立项目记录。",
+    ),
+    reconcileManagedWorkingCopy: (body) => command(
+      "/managed-working-copy/reconcile",
+      body,
+      "无法核对当前工作文件的位置。",
     ),
     autosave: (body) => command(
       "/autosave",

@@ -119,6 +119,8 @@ export function HandoffPanel({
   pendingRunOutcome,
   canRevealAiTask,
   onRevealAiTask,
+  onRetrySubmission,
+  onCancelRun,
 }: {
   activeRun: ActiveRun | null;
   terminalRun: boolean;
@@ -133,6 +135,8 @@ export function HandoffPanel({
   pendingRunOutcome: boolean;
   canRevealAiTask: boolean;
   onRevealAiTask: () => void;
+  onRetrySubmission?: () => void;
+  onCancelRun?: () => void;
 }) {
   const continuityNeedsReview =
     activeRun?.candidateAssessment?.status === "attention";
@@ -320,7 +324,26 @@ export function HandoffPanel({
             {!pendingRunOutcome && activeRun.status === "error" ? (
               <section className="validation-decision" data-tone="error" role="alert">
                 <strong>本轮没有改动当前 HTML</strong>
-                <p>{activeRun.error || "结果没有通过安全检查。"}</p>
+                <p>{activeRun.errorDetail || activeRun.error || "结果没有通过安全检查。"}</p>
+                {activeRun.recoveryHint ? <small>{activeRun.recoveryHint}</small> : null}
+                <div className="validation-decision-actions">
+                  {onRetrySubmission ? (
+                    <button type="button" className="primary-action" onClick={onRetrySubmission}>
+                      重新发送
+                    </button>
+                  ) : null}
+                  {onCancelRun ? (
+                    <button type="button" className="cancel-action" onClick={onCancelRun}>
+                      取消本轮
+                    </button>
+                  ) : null}
+                </div>
+                {activeRun.errorPreview ? (
+                  <details className="ai-output-preview">
+                    <summary>查看 AI 原始输出</summary>
+                    <pre>{activeRun.errorPreview}</pre>
+                  </details>
+                ) : null}
               </section>
             ) : null}
           </div>

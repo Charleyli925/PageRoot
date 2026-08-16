@@ -84,6 +84,7 @@ import {
   PRODUCT_MAX_HTML_BYTES,
   isGeneratedWorkingCopyFileName,
 } from "./product-contract.mjs";
+import { createSourceFileWatcher } from "./source-file-watch.mjs";
 import {
   isActiveProjectIdentity,
   isManagedVersionRelativePath,
@@ -100,6 +101,11 @@ import {
   recoverPendingSourceRename,
   renameHtmlSource,
 } from "./source-rename.mjs";
+import {
+  activeManagedLocatorForActivatedPath,
+  normalizeActiveManagedLocator,
+  rebaseActiveManagedLocator,
+} from "./active-managed-locator.mjs";
 import {
   createTelemetryBuildConfig,
   createUsageTelemetry,
@@ -204,6 +210,8 @@ const PROJECT_CHANNELS = Object.freeze({
   renameHtml: "html-projects:rename",
   activateGeneratedVersion: "html-projects:activate-generated-version",
   activateManagedWorkingCopy: "html-projects:activate-managed-working-copy",
+  reconcileActiveManagedSource: "html-projects:reconcile-active-managed-source",
+  sourceFileMayHaveChanged: "html-projects:source-file-may-have-changed",
   revealVersionFile: "html-projects:reveal-version-file",
   revealAiTask: "html-projects:reveal-ai-task",
   listRecentProjects: "html-projects:list-recent",
@@ -216,6 +224,7 @@ const PROJECT_CHANNELS = Object.freeze({
   cancelPreparedHtmlOpen: "html-projects:cancel-prepared-open",
   finalizePreparedHtmlOpen: "html-projects:finalize-prepared-open",
   rollbackPreparedHtmlOpen: "html-projects:rollback-prepared-open",
+  sourceFileMayHaveChanged: "html-projects:source-file-may-have-changed",
 });
 const APP_CHANNELS = Object.freeze({
   prepareClose: "html-app:prepare-close",
@@ -283,6 +292,75 @@ let previewProtocolController = null;
 let reviewRuntimeSnapshotCaptureController = null;
 let editRuntimeProtocolController = null;
 const editRuntimePreparationFence = createEditRuntimePreparationFence();
+const sourceFileWatcher = createSourceFileWatcher({
+  debounceMs: 200,
+  onChange(info) {
+    void recoverWatchedManagedSource(info);
+  },
+});
+
+function publishSourceFileMayHaveChanged(info) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  const sourcePath = String(info?.sourcePath || "");
+  if (!sourcePath) return;
+  const payload = {
+    sourcePath,
+    watcherGeneration: Number(info?.watcherGeneration || 0),
+  };
+  if (info?.sourceMissing === true || info?.sourceMissing === false) {
+    payload.sourceMissing = info.sourceMissing;
+  }
+  mainWindow.webContents.send(PROJECT_CHANNELS.sourceFileMayHaveChanged, payload);
+}
+
+async function recoverWatchedManagedSource(info) {
+  const hint = info && typeof info === "object" ? info : {};
+  try {
+    await projectOpenQueue.run(async () => {
+      const state = await loadProjectState();
+      const activePath = state.activePath;
+      const locator = state.activeManagedLocator;
+      if (!activePath) {
+        publishSourceFileMayHaveChanged(hint);
+        return;
+      }
+      const missing = await lstat(activePath).then(
+        (information) => !information.isFile() || information.isSymbolicLink(),
+        (error) => error?.code === "ENOENT",
+      );
+      if (!missing) {
+        publishSourceFileMayHaveChanged({ ...hint, sourceMissing: false });
+        return;
+      }
+      if (!locator) {
+        publishSourceFileMayHaveChanged({ ...hint, sourceMissing: true });
+        return;
+      }
+      try {
+        await reconcileActiveManagedSourceOperation({
+          previousSourcePath: activePath,
+          expectedSourceSha256: locator.sourceSha256,
+          projectId: locator.projectId,
+          documentId: locator.documentId,
+          workingCopyId: locator.workingCopyId,
+          versionId: locator.versionId,
+          reason: "watch",
+        });
+      } catch {
+        // Renderer still receives the original hint and uses the existing
+        // fail-closed conflict / reselect path.
+      }
+      publishSourceFileMayHaveChanged({
+        sourcePath: activePath,
+        watcherGeneration: Number(hint.watcherGeneration || sourceFileWatcher.watcherGeneration),
+        sourceMissing: true,
+      });
+    });
+  } catch {
+    publishSourceFileMayHaveChanged(hint);
+  }
+}
+
 // An imported V1 may be an HTML-only managed Working Copy while its selected
 // external source directory still owns declared relative assets. This is
 // session-only provenance established by Main during the verified hand-off;
@@ -521,6 +599,7 @@ function emptyProjectState() {
     lastRename: null,
     lastManagedActivation: null,
     importedAssetRoots: [],
+    activeManagedLocator: null,
   };
 }
 
@@ -724,6 +803,7 @@ async function loadProjectState() {
       lastRename: normalizeCompletedSourceRename(parsed.lastRename),
       lastManagedActivation: normalizeManagedWorkingCopyActivation(parsed.lastManagedActivation),
       importedAssetRoots: normalizeImportedAssetRoots(parsed.importedAssetRoots),
+      activeManagedLocator: normalizeActiveManagedLocator(parsed.activeManagedLocator),
     };
     if (projectState.pendingRename) {
       await recoverPendingSourceRename({
@@ -816,6 +896,7 @@ async function activateProject(filePath) {
   const now = Date.now();
   state.activePath = normalizedPath;
   state.lastManagedActivation = null;
+  state.activeManagedLocator = null;
   state.recent = [
     {
       path: normalizedPath,
@@ -828,6 +909,7 @@ async function activateProject(filePath) {
   ].slice(0, MAX_RECENT_PROJECTS);
   await persistProjectState();
   await restoreActiveImportedAssetSource(normalizedPath);
+  sourceFileWatcher.watch(normalizedPath);
 }
 
 async function forgetProject(filePath) {
@@ -842,7 +924,11 @@ async function forgetProject(filePath) {
   if (
     state.activePath
     && await existingPathIdentity(state.activePath) === forgottenIdentity
-  ) state.activePath = null;
+  ) {
+    state.activePath = null;
+    state.activeManagedLocator = null;
+    sourceFileWatcher.close();
+  }
   state.importedAssetRoots = await forgetImportedAssetRootsForPath(
     state.importedAssetRoots,
     filePath,
@@ -1223,8 +1309,46 @@ async function getActiveProject() {
 async function getActiveProjectOperation() {
   const workspaceRoot = await workspacePath();
   const welcomeSourcePath = managedWelcomeSourcePath(workspaceRoot);
-  let activePath = await currentActivePath();
+  const state = await loadProjectState();
+  let activePath = state.activePath;
   let project;
+  if (activePath) {
+    const missing = await lstat(activePath).then(
+      (info) => !info.isFile() || info.isSymbolicLink(),
+      (error) => error?.code === "ENOENT",
+    );
+    if (missing && state.activeManagedLocator) {
+      try {
+        const reconciled = await reconcileActiveManagedSourceOperation({
+          previousSourcePath: activePath,
+          expectedSourceSha256: state.activeManagedLocator.sourceSha256,
+          projectId: state.activeManagedLocator.projectId,
+          documentId: state.activeManagedLocator.documentId,
+          workingCopyId: state.activeManagedLocator.workingCopyId,
+          versionId: state.activeManagedLocator.versionId,
+          reason: "startup",
+        });
+        activePath = reconciled.sourcePath;
+      } catch {
+        // Fall through to the existing missing-file recovery path.
+      }
+    }
+  } else if (state.activeManagedLocator) {
+    try {
+      const reconciled = await reconcileActiveManagedSourceOperation({
+        previousSourcePath: state.activeManagedLocator.sourcePath,
+        expectedSourceSha256: state.activeManagedLocator.sourceSha256,
+        projectId: state.activeManagedLocator.projectId,
+        documentId: state.activeManagedLocator.documentId,
+        workingCopyId: state.activeManagedLocator.workingCopyId,
+        versionId: state.activeManagedLocator.versionId,
+        reason: "startup",
+      });
+      activePath = reconciled.sourcePath;
+    } catch {
+      // Fall through to welcome provisioning.
+    }
+  }
   if (!activePath) {
     project = await ensureManagedWelcomeHtml({
       workspaceRoot,
@@ -1232,9 +1356,6 @@ async function getActiveProjectOperation() {
     });
     activePath = project.sourcePath;
     await activateProject(activePath);
-    // activateProject persists the canonical filesystem identity. Re-read the
-    // welcome project through that identity so the renderer and bridge start
-    // from the same source path on systems where /var maps to /private/var.
     project = null;
   }
   try {
@@ -1773,7 +1894,7 @@ async function renameHtml(payload) {
 
 async function renameHtmlOperation(payload) {
   const state = await loadProjectState();
-  return renameHtmlSource({
+  const result = await renameHtmlSource({
     payload,
     state,
     persistState: persistProjectState,
@@ -1781,6 +1902,8 @@ async function renameHtmlOperation(payload) {
     readProject: readHtmlProject,
     rebindWorkspace: rebindRenamedWorkspace,
   });
+  if (result?.sourcePath) sourceFileWatcher.watch(result.sourcePath);
+  return result;
 }
 
 async function activateGeneratedVersion(payload) {
@@ -1857,6 +1980,7 @@ async function commitActivatedProjectPath({
   project,
   importedAssetSourcePath = null,
   managedActivation = null,
+  managedLocator = undefined,
 }) {
   const now = Date.now();
   const activePathIdentity = state.activePath
@@ -1890,6 +2014,7 @@ async function commitActivatedProjectPath({
   if (activatesCurrentProject) {
     state.activePath = nextSourcePath;
     state.recent = [replacement, ...retained].slice(0, MAX_RECENT_PROJECTS);
+    sourceFileWatcher.watch(nextSourcePath);
   } else {
     retained.splice(
       Math.min(
@@ -1914,6 +2039,28 @@ async function commitActivatedProjectPath({
       originalSourcePath: importedAssetSourcePath,
     });
   }
+  if (managedLocator !== undefined) {
+    state.activeManagedLocator = normalizeActiveManagedLocator(managedLocator);
+  } else if (managedActivation) {
+    state.activeManagedLocator = normalizeActiveManagedLocator({
+      projectId: managedActivation.projectId,
+      documentId: managedActivation.documentId,
+      workingCopyId: managedActivation.workingCopyId,
+      versionId: managedActivation.versionId,
+      sourcePath: nextSourcePath,
+      sourceSha256: managedActivation.expectedSha256,
+      projectRootPath: managedActivation.projectRootPath,
+    });
+  } else if (activatesCurrentProject) {
+    state.activeManagedLocator = rebaseActiveManagedLocator(
+      state.activeManagedLocator,
+      {
+        previousSourcePath,
+        nextSourcePath,
+        sourceSha256: project?.sha256,
+      },
+    );
+  }
   await persistProjectState();
   if (activatesCurrentProject) {
     await restoreActiveImportedAssetSource(nextSourcePath);
@@ -1921,6 +2068,128 @@ async function commitActivatedProjectPath({
   return {
     ...project,
     previousSourcePath,
+  };
+}
+
+function assertActiveManagedReconcilePayload(payload) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    throw new TypeError("活动工作文件定位参数无效。");
+  }
+  const allowedKeys = new Set([
+    "previousSourcePath",
+    "expectedSourceSha256",
+    "projectId",
+    "documentId",
+    "workingCopyId",
+    "versionId",
+    "reason",
+    "operationId",
+    "watcherGeneration",
+  ]);
+  if (Object.keys(payload).some((key) => !allowedKeys.has(key))) {
+    throw new TypeError("活动工作文件定位参数包含未支持的字段。");
+  }
+  const previousSourcePath = assertHtmlPath(
+    payload.previousSourcePath,
+    "previousSourcePath",
+  );
+  const expectedSourceSha256 = String(payload.expectedSourceSha256 || "").trim().toLowerCase();
+  if (!/^sha256:[a-f0-9]{64}$/.test(expectedSourceSha256)) {
+    throw new TypeError("expectedSourceSha256 必须使用 sha256:<64 位十六进制> 格式。");
+  }
+  const projectId = String(payload.projectId || "");
+  const documentId = String(payload.documentId || "");
+  const workingCopyId = String(payload.workingCopyId || "");
+  const versionId = String(payload.versionId || "");
+  const reason = String(payload.reason || "");
+  const operationId = payload.operationId === undefined || payload.operationId === null
+    ? `reconcile_${randomUUID().replaceAll("-", "")}`
+    : String(payload.operationId);
+  if (
+    !/^project_[A-Za-z0-9_-]+$/.test(projectId)
+    || !/^doc_[A-Za-z0-9_-]+$/.test(documentId)
+    || !/^work_ver_\d{4,}$/.test(workingCopyId)
+    || !/^ver_\d{4,}$/.test(versionId)
+    || !["watch", "rename", "startup", "safe-action"].includes(reason)
+    || !/^[A-Za-z0-9_-]{8,160}$/.test(operationId)
+  ) {
+    throw new TypeError("活动工作文件身份无效。");
+  }
+  return {
+    previousSourcePath,
+    expectedSourceSha256,
+    projectId,
+    documentId,
+    workingCopyId,
+    versionId,
+    reason,
+    operationId,
+    watcherGeneration: Number.isSafeInteger(Number(payload.watcherGeneration))
+      ? Number(payload.watcherGeneration)
+      : null,
+  };
+}
+
+async function reconcileActiveManagedSource(payload) {
+  return projectOpenQueue.run(() => reconcileActiveManagedSourceOperation(payload));
+}
+
+async function reconcileActiveManagedSourceOperation(payload) {
+  const requested = assertActiveManagedReconcilePayload(payload);
+  const reconciled = await fetchBridgeCommand("/managed-working-copy/reconcile", {
+    operationId: requested.operationId,
+    previousSourcePath: requested.previousSourcePath,
+    projectId: requested.projectId,
+    documentId: requested.documentId,
+    workingCopyId: requested.workingCopyId,
+    versionId: requested.versionId,
+    expectedSourceSha256: requested.expectedSourceSha256,
+    reason: requested.reason,
+  });
+  const openTarget = reconciled.openTarget;
+  if (
+    !openTarget
+    || typeof openTarget !== "object"
+    || openTarget.targetKind !== "working-copy"
+    || openTarget.projectId !== requested.projectId
+    || openTarget.documentId !== requested.documentId
+    || openTarget.workingCopyId !== requested.workingCopyId
+    || openTarget.versionId !== requested.versionId
+    || reconciled.operationId !== requested.operationId
+    || typeof openTarget.exactSourcePath !== "string"
+    || typeof openTarget.projectRootPath !== "string"
+    || typeof reconciled.sourceSha256 !== "string"
+  ) {
+    throw new ProjectFileError(
+      "MANAGED_SOURCE_IDENTITY_MISMATCH",
+      "当前工作文件身份无法核对，PageRoot 没有切换路径。",
+    );
+  }
+  const [previousSourcePath, nextSourcePath] = await Promise.all([
+    existingPathIdentity(requested.previousSourcePath),
+    existingPathIdentity(openTarget.exactSourcePath),
+  ]);
+  const project = await readHtmlProject(nextSourcePath);
+  const state = await loadProjectState();
+  await commitActivatedProjectPath({
+    state,
+    previousSourcePath,
+    nextSourcePath,
+    project,
+    managedLocator: activeManagedLocatorForActivatedPath(
+      openTarget,
+      nextSourcePath,
+      reconciled.sourceSha256,
+    ),
+  });
+  return {
+    operationId: requested.operationId,
+    status: reconciled.status,
+    previousSourcePath,
+    sourcePath: nextSourcePath,
+    sourceSha256: reconciled.sourceSha256,
+    openTarget,
+    watcherGeneration: sourceFileWatcher.watcherGeneration,
   };
 }
 
@@ -2633,6 +2902,36 @@ async function fetchBridgeJson(pathname) {
   return payload;
 }
 
+async function fetchBridgeCommand(pathname, body) {
+  if (!bridgePort) {
+    throw new ProjectFileError(
+      "BRIDGE_NOT_READY",
+      "项目记录服务尚未就绪，请稍后重试。",
+    );
+  }
+  const response = await net.fetch(`http://127.0.0.1:${bridgePort}${pathname}`, {
+    method: "POST",
+    cache: "no-store",
+    headers: {
+      "Content-Type": "application/json",
+      "X-HTML-AI-Bridge-Token": bridgeAuthToken,
+    },
+    body: JSON.stringify(body),
+  });
+  const payload = await response.json().catch(() => null);
+  const error = payload?.error && typeof payload.error === "object"
+    ? payload.error
+    : {};
+  if (!response.ok || !payload || payload.ok !== true) {
+    throw new ProjectFileError(
+      String(error.code || "REGISTERED_PROJECT_BRIDGE_REJECTED"),
+      String(error.message || "项目目录暂时无法完成安全核对。"),
+      error.details && typeof error.details === "object" ? error.details : {},
+    );
+  }
+  return payload;
+}
+
 async function listRegisteredProjects() {
   const payload = await fetchBridgeJson("/registered-projects");
   if (!Array.isArray(payload.projects)) {
@@ -2742,6 +3041,11 @@ async function openRegisteredProject(projectIdInput) {
     })));
     state.activePath = sourcePath;
     state.lastManagedActivation = null;
+    state.activeManagedLocator = activeManagedLocatorForActivatedPath(
+      verifiedTarget,
+      sourcePath,
+      payload.sourceSha256,
+    );
     state.recent = [
       {
         path: sourcePath,
@@ -2754,6 +3058,7 @@ async function openRegisteredProject(projectIdInput) {
     ].slice(0, MAX_RECENT_PROJECTS);
     await persistProjectState();
     await restoreActiveImportedAssetSource(sourcePath);
+    sourceFileWatcher.watch(sourcePath);
     return project;
   });
 }
@@ -2920,6 +3225,10 @@ function registerProjectIpc() {
   ipcMain.handle(
     PROJECT_CHANNELS.activateManagedWorkingCopy,
     trustedProject(activateManagedWorkingCopy),
+  );
+  ipcMain.handle(
+    PROJECT_CHANNELS.reconcileActiveManagedSource,
+    trustedProject(reconcileActiveManagedSource),
   );
   ipcMain.handle(PROJECT_CHANNELS.revealVersionFile, trustedProject(revealVersionFile));
   ipcMain.handle(PROJECT_CHANNELS.revealAiTask, trustedProject(revealAiTask));
@@ -3319,6 +3628,7 @@ async function coordinateApplicationExit(reason, intent = "quit") {
     }
 
     isQuitting = true;
+    sourceFileWatcher.close();
     await stateWriteQueue.catch(() => {});
     if (intent === "relaunch") {
       if (bridgeProcess) await stopBridgeGracefully().catch(() => {});

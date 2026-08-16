@@ -568,6 +568,8 @@ export async function architectureViolations() {
     || !workspaceController.includes("prepareClose(input)")
     || !workspaceController.includes("readProjectFile(input)")
     || !workspaceController.includes("openProjectRecords(input)")
+    || !workspaceController.includes("observeExternalSourceChange(input)")
+    || !workspaceController.includes("reconcileExternalSourceLocator(input)")
   ) {
     violations.push(
       "app/application/workspace-controller.js: PR-3 must own one DrainCoordinator and compose the project transition workflow",
@@ -588,6 +590,11 @@ export async function architectureViolations() {
     || !projectWorkflow.includes("this.#canvasPort.invalidateRenderAcks?.()")
     || !projectWorkflow.includes("this.#bridgeClient.projectFile(")
     || !projectWorkflow.includes("this.#bridgeClient.openFolder(")
+    || !projectWorkflow.includes("reconcileExternalSourceLocator(")
+    || !projectWorkflow.includes("#sourceLocatorPromise")
+    || !projectWorkflow.includes("this.#projectOpenPort.reconcileActiveManagedSource")
+    || !projectWorkflow.includes("#publishSourceLocatorChange(")
+    || !projectWorkflow.includes("sourceMissing === false")
   ) {
     violations.push(
       "app/application/project-workflow.js: hydration, accepted FIFO, switch, close and project resources must share one typed workflow boundary",
@@ -601,6 +608,10 @@ export async function architectureViolations() {
     || !workbench.includes("workspaceController.acceptBrowserProject({")
     || !workbench.includes(".readProjectFile({ context, relativePath })")
     || !workbench.includes(".openProjectRecords({ context })")
+    || !workbench.includes("onSourceFileChanged")
+    || !workbench.includes(".observeExternalSourceChange({")
+    || !workbench.includes("sourceMissing: payload.sourceMissing")
+    || workbench.includes("reconcileManagedWorkingCopy")
   ) {
     violations.push(
       "app/workbench.tsx: PR-3 project hydration, open, switch and close must be Controller commands with presentation-only host adapters",
@@ -620,7 +631,10 @@ export async function architectureViolations() {
     || !workbench.includes(".flushDocument({ throughRevision })")
     || !workbench.includes(".performDocumentHistoryAction({ direction, context })")
     || !workbench.includes(".reloadDocumentAuthority({")
+    || !workbench.includes(".forceUnlockDocumentConflict({")
+    || !workbench.includes(".observeExternalSourceChange({")
     || !projectWorkflow.includes("this.#documentWorkflow.reconcileBoundary({")
+    || !projectWorkflow.includes("this.#documentWorkflow.observeExternalSourceChange")
     || /\b(?:autosaveTimerRef|auditPendingRef|auditInFlightKeysRef|historyActionPromiseRef|recoveryIdentityRef)\b/.test(workbench)
   ) {
     violations.push(

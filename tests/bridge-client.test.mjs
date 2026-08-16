@@ -119,6 +119,40 @@ test("opening project records is a one-shot command, not a read retry", async ()
   assert.equal(requests, 2, "a later user action may issue a new command");
 });
 
+test("managed Working Copy reconcile is a one-shot command", async () => {
+  let requests = 0;
+  const client = createBridgeClient({
+    baseUrl: "http://127.0.0.1:4317",
+    retryDelayMs: 0,
+    fetchImpl: async (input, init) => {
+      requests += 1;
+      assert.equal(String(init?.method || "GET").toUpperCase(), "POST");
+      assert.match(String(input), /\/managed-working-copy\/reconcile$/u);
+      throw new Error("connection reset after reconcile");
+    },
+  });
+
+  await assert.rejects(
+    () => client.reconcileManagedWorkingCopy({
+      operationId: "reconcile_client_operation_01",
+      previousSourcePath: "/tmp/page.html",
+      projectId: "project_aaaaaaaaaaaaaaaa",
+      documentId: "doc_aaaaaaaaaaaaaaaa",
+      workingCopyId: "work_ver_0001",
+      versionId: "ver_0001",
+      expectedSourceSha256: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      reason: "watch",
+    }),
+    (error) => {
+      assert.equal(isBridgeRequestError(error), true);
+      assert.equal(error.outcome, "unknown");
+      return true;
+    },
+  );
+  assert.equal(requests, 1);
+});
+
+
 test("Bridge client retries a transient read and attaches authorization", async () => {
   const requests = [];
   const client = createBridgeClient({

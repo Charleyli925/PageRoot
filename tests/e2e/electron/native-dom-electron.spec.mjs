@@ -3586,3 +3586,404 @@ test("Electron Chromium commits a composition without leaving interim pinyin", a
     await stopPageRoot(electronApp, isolatedUserData);
   }
 });
+
+function comparableDesktopPath(value) {
+  const resolved = path.resolve(String(value || "")).normalize("NFC");
+  if (resolved === "/private/var" || resolved.startsWith("/private/var/")) {
+    return resolved.slice("/private".length);
+  }
+  if (resolved === "/private/tmp" || resolved.startsWith("/private/tmp/")) {
+    return resolved.slice("/private".length);
+  }
+  return resolved;
+}
+
+function sameDesktopSourcePath(left, right) {
+  return comparableDesktopPath(left) === comparableDesktopPath(right);
+}
+
+function titleStemLocator(page) {
+  return page.locator(".window-file-title-row strong").first();
+}
+
+async function waitForTitleStem(page, stem) {
+  await expect(titleStemLocator(page)).toHaveText(stem, { timeout: 30_000 });
+}
+
+async function waitForActiveSourcePath(page, expectedPath) {
+  await expect.poll(async () => {
+    try {
+      const active = await page.evaluate(() => (
+        window.htmlAIProjects?.getActiveProject()
+      ));
+      return sameDesktopSourcePath(active?.sourcePath, expectedPath);
+    } catch {
+      return false;
+    }
+  }).toBe(true);
+}
+
+async function waitForDesktopActivePath(isolatedUserData, expectedPath) {
+  await expect.poll(async () => {
+    try {
+      const state = await readDesktopProjectState(isolatedUserData);
+      return sameDesktopSourcePath(state.activePath, expectedPath);
+    } catch {
+      return false;
+    }
+  }, { timeout: 30_000 }).toBe(true);
+}
+
+async function readDesktopProjectState(isolatedUserData) {
+  return JSON.parse(readFileSync(
+    path.join(isolatedUserData, "html-projects.json"),
+    "utf8",
+  ));
+}
+
+async function readManagedManifest(sourcePath) {
+  return JSON.parse(readFileSync(
+    path.join(path.dirname(sourcePath), ".pageroot", "manifest.json"),
+    "utf8",
+  ));
+}
+
+test("Electron follows a same-directory Finder rename then a title-bar rename", async () => {
+  const fixture = createSourceFixture("finder-rename-sync.html");
+  let electronApp = null;
+  let isolatedUserData = null;
+  try {
+    const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+    electronApp = launched.electronApp;
+    isolatedUserData = launched.isolatedUserData;
+    await loadedDiskFrame(
+      launched.page,
+      fixture.sourcePath,
+      "list-item",
+    );
+    const managedSourcePath = await managedWorkingCopyPath(
+      launched.page,
+      fixture.sourcePath,
+    );
+    const beforeWorkspace = await bridgeJson(
+      launched.page,
+      `/workspace?sourcePath=${encodeURIComponent(managedSourcePath)}`,
+    );
+    const beforeTarget = beforeWorkspace.body?.openTarget || beforeWorkspace.body;
+    const beforeIds = {
+      projectId: beforeTarget.projectId,
+      documentId: beforeTarget.documentId,
+      workingCopyId: beforeTarget.workingCopyId || beforeTarget.activeWorkingCopyId,
+      versionId: beforeTarget.versionId
+        || beforeTarget.currentExactVersionId
+        || beforeTarget.currentBasedOnVersionId,
+    };
+    const beforeManifest = await readManagedManifest(managedSourcePath);
+    const beforeVersionCount = beforeManifest.versions.length;
+    const finderName = "Finder 新名字-V1.html";
+    const finderPath = path.join(path.dirname(managedSourcePath), finderName);
+    renameSync(managedSourcePath, finderPath);
+
+    await waitForTitleStem(launched.page, path.basename(finderName, ".html"));
+    await waitForActiveSourcePath(launched.page, finderPath);
+    const { frame } = await loadedDiskFrame(
+      launched.page,
+      finderPath,
+      "list-item",
+    );
+
+    const afterWorkspace = await bridgeJson(
+      launched.page,
+      `/workspace?sourcePath=${encodeURIComponent(finderPath)}`,
+    );
+    const afterTarget = afterWorkspace.body?.openTarget || afterWorkspace.body;
+    expect(afterTarget.projectId).toBe(beforeIds.projectId);
+    expect(afterTarget.documentId).toBe(beforeIds.documentId);
+    expect(afterTarget.workingCopyId || afterTarget.activeWorkingCopyId)
+      .toBe(beforeIds.workingCopyId);
+    expect(
+      afterTarget.versionId
+      || afterTarget.currentExactVersionId
+      || afterTarget.currentBasedOnVersionId,
+    ).toBe(beforeIds.versionId);
+    const desktopState = await readDesktopProjectState(isolatedUserData);
+    expect(sameDesktopSourcePath(desktopState.activePath, finderPath)).toBe(true);
+    expect(sameDesktopSourcePath(desktopState.recent[0].path, finderPath)).toBe(true);
+    expect(sameDesktopSourcePath(
+      desktopState.activeManagedLocator.sourcePath,
+      finderPath,
+    )).toBe(true);
+    const afterManifest = await readManagedManifest(finderPath);
+    expect(afterManifest.versions.length).toBe(beforeVersionCount);
+    expect(afterManifest.workingCopies[0].sourceRelativePath).toBe(finderName);
+
+    const beforeRevision = Number(
+      await launched.page.locator("[data-persist-state]").first()
+        .getAttribute("data-persisted-revision"),
+    );
+    await activateNativeEdit(frame, "list-item");
+    await setTextSelection(frame, "list-item", 0, 0);
+    await launched.page.keyboard.insertText("定位后仍可编辑。");
+    await launched.page.keyboard.press("Escape");
+    await expectCheckpointPersisted(launched.page, beforeRevision);
+    expect(readFileSync(finderPath, "utf8")).toContain("定位后仍可编辑。");
+    expect(readFileSync(finderPath, "utf8")).toContain(ORIGINAL_LIST_TEXT);
+    await addCanvasComment(
+      launched.page,
+      await currentEditorFrame(launched.page),
+      "list-item",
+      "Finder 改名后评论仍保留。",
+    );
+
+    await launched.page.getByRole("button", { name: /重命名文件/u }).click();
+    const renameInput = launched.page.getByRole("textbox", { name: "文件名（不含后缀）" });
+    await expect(renameInput).toBeFocused();
+    await renameInput.fill("pageroot-renamed-V1");
+    await renameInput.press("Enter");
+    const pagerootPath = path.join(
+      path.dirname(finderPath),
+      "pageroot-renamed-V1.html",
+    );
+    await waitForTitleStem(launched.page, "pageroot-renamed-V1");
+    await expect.poll(() => existsSync(pagerootPath)).toBe(true);
+    const finalManifest = await readManagedManifest(pagerootPath);
+    expect(finalManifest.versions.length).toBe(beforeVersionCount);
+    expect(readFileSync(pagerootPath, "utf8")).toContain("定位后仍可编辑。");
+    await expect(launched.page.locator(".comment-card").filter({
+      hasText: "Finder 改名后评论仍保留。",
+    })).toHaveCount(1);
+  } finally {
+    if (electronApp && isolatedUserData) {
+      await stopPageRoot(electronApp, isolatedUserData);
+    }
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
+
+test("Electron keeps PageRoot bytes when Finder renames and edits the same file", async () => {
+  const fixture = createSourceFixture("finder-rename-conflict.html");
+  let electronApp = null;
+  let isolatedUserData = null;
+  try {
+    const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+    electronApp = launched.electronApp;
+    isolatedUserData = launched.isolatedUserData;
+    await loadedDiskFrame(launched.page, fixture.sourcePath, "list-item");
+    const managedSourcePath = await managedWorkingCopyPath(
+      launched.page,
+      fixture.sourcePath,
+    );
+    const finderPath = path.join(
+      path.dirname(managedSourcePath),
+      "finder-conflict-V1.html",
+    );
+    const original = readFileSync(managedSourcePath);
+    renameSync(managedSourcePath, finderPath);
+    writeFileSync(finderPath, `${original.toString("utf8")}\n<!-- finder-external -->\n`, "utf8");
+
+    await waitForTitleStem(launched.page, "finder-conflict-V1");
+    await waitForActiveSourcePath(launched.page, finderPath);
+    await expect.poll(async () => (
+      launched.page.locator("[data-persist-state]").first().getAttribute("data-persist-state")
+    )).toBe("conflict");
+    expect(readFileSync(finderPath, "utf8")).toContain("finder-external");
+    const editorFrame = await currentEditorFrame(launched.page);
+    await expect(editorFrame.locator(caseSelector("list-item")))
+      .toContainText(ORIGINAL_LIST_TEXT);
+    expect(await editorFrame.locator("body").innerHTML()).not.toContain("finder-external");
+  } finally {
+    if (electronApp && isolatedUserData) {
+      await stopPageRoot(electronApp, isolatedUserData);
+    }
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
+
+test("Electron does not follow a copied Working Copy or leave the title stuck after a real rename error", async () => {
+  const fixture = createSourceFixture("finder-rename-copy.html");
+  let electronApp = null;
+  let isolatedUserData = null;
+  try {
+    const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+    electronApp = launched.electronApp;
+    isolatedUserData = launched.isolatedUserData;
+    await loadedDiskFrame(launched.page, fixture.sourcePath, "list-item");
+    const managedSourcePath = await managedWorkingCopyPath(
+      launched.page,
+      fixture.sourcePath,
+    );
+    const originalStem = path.basename(managedSourcePath, path.extname(managedSourcePath));
+    const copiedPath = path.join(
+      path.dirname(managedSourcePath),
+      "copied-working-copy.html",
+    );
+    cpSync(managedSourcePath, copiedPath);
+    const copyDeadline = Date.now() + 800;
+    await expect.poll(async () => {
+      const current = await launched.page.evaluate(() => (
+        window.htmlAIProjects?.getActiveProject()
+      ));
+      if (current?.sourcePath !== managedSourcePath) return current?.sourcePath || "";
+      return Date.now() >= copyDeadline ? managedSourcePath : "";
+    }).toBe(managedSourcePath);
+    await expect(titleStemLocator(launched.page)).toHaveText(originalStem);
+
+    await launched.page.getByRole("button", { name: /重命名文件/u }).click();
+    const renameInput = launched.page.getByRole("textbox", { name: "文件名（不含后缀）" });
+    await renameInput.fill("bad/name");
+    await launched.page.locator("[data-persist-state]").first().click({ force: true });
+    await expect(launched.page.locator("#window-file-rename-error")).toBeVisible();
+    await launched.page.locator("body").click({ position: { x: 12, y: 12 }, force: true });
+    await expect(launched.page.getByRole("button", { name: /重命名文件/u })).toBeVisible();
+    await expect(titleStemLocator(launched.page)).toHaveText(originalStem);
+    expect(existsSync(managedSourcePath)).toBe(true);
+  } finally {
+    if (electronApp && isolatedUserData) {
+      await stopPageRoot(electronApp, isolatedUserData);
+    }
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
+
+test("Electron restores a Finder rename after the process is killed", async () => {
+  const fixture = createSourceFixture("finder-rename-restart.html");
+  let electronApp = null;
+  let isolatedUserData = null;
+  try {
+    const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+    electronApp = launched.electronApp;
+    isolatedUserData = launched.isolatedUserData;
+    await loadedDiskFrame(launched.page, fixture.sourcePath, "list-item");
+    const managedSourcePath = await managedWorkingCopyPath(
+      launched.page,
+      fixture.sourcePath,
+    );
+    const beforeWorkspace = await bridgeJson(
+      launched.page,
+      `/workspace?sourcePath=${encodeURIComponent(managedSourcePath)}`,
+    );
+    const beforeTarget = beforeWorkspace.body?.openTarget || beforeWorkspace.body;
+    const finderName = "重启后仍是同一文件-V1.html";
+    const finderPath = path.join(path.dirname(managedSourcePath), finderName);
+    renameSync(managedSourcePath, finderPath);
+    await waitForTitleStem(launched.page, path.basename(finderName, ".html"));
+    await waitForActiveSourcePath(launched.page, finderPath);
+
+    await stopPageRoot(electronApp, isolatedUserData, { cleanup: false });
+    electronApp = null;
+    const relaunched = await launchPageRoot({ isolatedUserData });
+    electronApp = relaunched.electronApp;
+    await waitForTitleStem(relaunched.page, path.basename(finderName, ".html"));
+    await waitForActiveSourcePath(relaunched.page, finderPath);
+    const afterWorkspace = await bridgeJson(
+      relaunched.page,
+      `/workspace?sourcePath=${encodeURIComponent(finderPath)}`,
+    );
+    const afterTarget = afterWorkspace.body?.openTarget || afterWorkspace.body;
+    expect(afterTarget.projectId).toBe(beforeTarget.projectId);
+    expect(afterTarget.documentId).toBe(beforeTarget.documentId);
+    expect(afterTarget.workingCopyId).toBe(beforeTarget.workingCopyId);
+    expect(readFileSync(finderPath, "utf8")).toContain(ORIGINAL_LIST_TEXT);
+  } finally {
+    if (electronApp && isolatedUserData) {
+      await stopPageRoot(electronApp, isolatedUserData, { cleanup: false });
+    }
+    if (isolatedUserData) removeIsolatedUserData(isolatedUserData);
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
+
+test("Electron follows a same-parent project folder rename then a title-bar rename", async () => {
+  const fixture = createSourceFixture("finder-folder-rename.html");
+  let electronApp = null;
+  let isolatedUserData = null;
+  try {
+    const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+    electronApp = launched.electronApp;
+    isolatedUserData = launched.isolatedUserData;
+    await loadedDiskFrame(launched.page, fixture.sourcePath, "list-item");
+    const managedSourcePath = await managedWorkingCopyPath(
+      launched.page,
+      fixture.sourcePath,
+    );
+    const beforeWorkspace = await bridgeJson(
+      launched.page,
+      `/workspace?sourcePath=${encodeURIComponent(managedSourcePath)}`,
+    );
+    const beforeTarget = beforeWorkspace.body?.openTarget || beforeWorkspace.body;
+    const projectRoot = path.dirname(managedSourcePath);
+    const renamedRoot = path.join(path.dirname(projectRoot), "Finder 项目文件夹");
+    const relocatedPath = path.join(renamedRoot, path.basename(managedSourcePath));
+    renameSync(projectRoot, renamedRoot);
+    await waitForDesktopActivePath(isolatedUserData, relocatedPath);
+    await waitForActiveSourcePath(launched.page, relocatedPath);
+    await waitForTitleStem(
+      launched.page,
+      path.basename(managedSourcePath, path.extname(managedSourcePath)),
+    );
+
+    await launched.page.getByRole("button", { name: /重命名文件/u }).click();
+    const renameInput = launched.page.getByRole("textbox", { name: "文件名（不含后缀）" });
+    await expect(renameInput).toBeFocused();
+    await renameInput.fill("folder-renamed-V1");
+    await renameInput.press("Enter");
+    const pagerootPath = path.join(renamedRoot, "folder-renamed-V1.html");
+    await waitForTitleStem(launched.page, "folder-renamed-V1");
+    await expect.poll(() => existsSync(pagerootPath)).toBe(true);
+    const afterWorkspace = await bridgeJson(
+      launched.page,
+      `/workspace?sourcePath=${encodeURIComponent(pagerootPath)}`,
+    );
+    const afterTarget = afterWorkspace.body?.openTarget || afterWorkspace.body;
+    expect(afterTarget.projectId).toBe(beforeTarget.projectId);
+    expect(afterTarget.workingCopyId).toBe(beforeTarget.workingCopyId);
+  } finally {
+    if (electronApp && isolatedUserData) {
+      await stopPageRoot(electronApp, isolatedUserData);
+    }
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
+
+test("Electron does not follow a Working Copy moved out of the registered project root", async () => {
+  const fixture = createSourceFixture("finder-rename-escaped.html");
+  let electronApp = null;
+  let isolatedUserData = null;
+  let outsideDirectory = null;
+  try {
+    const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+    electronApp = launched.electronApp;
+    isolatedUserData = launched.isolatedUserData;
+    await loadedDiskFrame(launched.page, fixture.sourcePath, "list-item");
+    const managedSourcePath = await managedWorkingCopyPath(
+      launched.page,
+      fixture.sourcePath,
+    );
+    const originalStem = path.basename(managedSourcePath, path.extname(managedSourcePath));
+    outsideDirectory = mkdtempSync(path.join(tmpdir(), "pageroot-native-escaped-"));
+    const escapedPath = path.join(outsideDirectory, path.basename(managedSourcePath));
+    renameSync(managedSourcePath, escapedPath);
+    const moveDeadline = Date.now() + 1_200;
+    await expect.poll(async () => {
+      try {
+        const state = await readDesktopProjectState(isolatedUserData);
+        if (sameDesktopSourcePath(state.activePath, escapedPath)) return "followed";
+      } catch {
+        return "";
+      }
+      return Date.now() >= moveDeadline ? "stayed" : "";
+    }).toBe("stayed");
+    await expect(titleStemLocator(launched.page)).toHaveText(originalStem);
+    expect(existsSync(escapedPath)).toBe(true);
+    expect(existsSync(managedSourcePath)).toBe(false);
+  } finally {
+    if (electronApp && isolatedUserData) {
+      await stopPageRoot(electronApp, isolatedUserData);
+    }
+    if (outsideDirectory) {
+      removeValidatedTemporaryDirectory(outsideDirectory, "pageroot-native-escaped-");
+    }
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
+

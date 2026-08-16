@@ -488,6 +488,14 @@ function sameRuntimeGrant(
   );
 }
 
+function frameDocumentMatchesExpected(
+  iframe: HTMLIFrameElement,
+  expectedFrameHtml: string,
+  writtenHtml: string | null,
+): boolean {
+  return iframe.srcdoc === expectedFrameHtml || writtenHtml === expectedFrameHtml;
+}
+
 function isRuntimeFrameFrozenResult(
   value: unknown,
   frame: RuntimeFrameContext,
@@ -643,6 +651,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     || baseHrefFromSourcePath(sourcePath);
   const containerRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const frameWrittenHtmlRef = useRef<string | null>(null);
+  const connectFrameRef = useRef<(
+    iframe: HTMLIFrameElement,
+    connectedFrameGeneration: number,
+  ) => boolean>(() => false);
   const toolbarRef = useRef<HTMLDivElement>(null);
   const spacingMenuRef = useRef<HTMLDetailsElement>(null);
   const selectedElementRef = useRef<HTMLElement | null>(null);
@@ -785,6 +798,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     elementGeneration: 0,
     runtime: false,
   }));
+  const [canvasTransitionActive, setCanvasTransitionActive] = useState(false);
   const [selection, setSelection] = useState<HtmlCanvasSelection | null>(null);
   const [overlayPosition, setOverlayPosition] = useState<OverlayPosition | null>(null);
   const [toolbarVisible, setToolbarVisible] = useState(false);
@@ -873,12 +887,17 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       preserveViewport?: boolean;
       immediate?: boolean;
       forceStatic?: boolean;
+      reuseDocument?: boolean;
     } = {},
   ) => {
     const frameView = iframeRef.current?.contentWindow;
     pendingFrameViewportRef.current = options.preserveViewport && frameView
       ? { left: frameView.scrollX, top: frameView.scrollY }
       : null;
+    const reuseCandidate = Boolean(options.reuseDocument)
+      && !options.immediate
+      && !options.forceStatic
+      && Boolean(iframeRef.current?.contentDocument?.documentElement);
     // Retire the old document's canvas handlers before advancing any source,
     // token, or generation authority. A non-immediate React remount may not
     // commit until the current task ends; without this cut the old DOM could
@@ -891,7 +910,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       onEditRuntimeLoadOutcomeRef.current?.(retiringRuntimeFrame.grant, "failed");
     }
     pendingFrameRestoreEpochRef.current += 1;
-    frameLoadGenerationRef.current += 1;
+    if (!reuseCandidate) {
+      frameLoadGenerationRef.current += 1;
+    }
     const nextFrameGeneration = frameLoadGenerationRef.current;
     nativeDomGenerationRef.current += 1;
     nativeSessionNeedsCanonicalFenceRef.current = false;
@@ -923,7 +944,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       onEditBlockedRef.current?.(message);
     }
     const sourceIndex = sourceIndexRef.current;
-    const runtimeGrant = options.forceStatic ? null : editRuntimeGrant;
+    const runtimeGrant = options.forceStatic || reuseCandidate ? null : editRuntimeGrant;
     let runtimeFrame: RuntimeFrameContext | null = null;
     let verificationToken = token;
     let prepared: string | null = null;
@@ -980,16 +1001,42 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     expectedFrameTokenRef.current = verificationToken;
     expectedFrameHtmlRef.current = prepared;
     renderedSourceHtmlRef.current = null;
-    containerRef.current?.setAttribute("data-render-verified", "false");
     containerRef.current?.removeAttribute("data-runtime-bootstrap-count");
     runtimeFrameRef.current = runtimeFrame;
     if (runtimeFrame) {
       onEditRuntimeLoadStartRef.current?.(runtimeFrame.grant);
     }
+    const iframe = iframeRef.current;
+    if (reuseCandidate && iframe && prepared && !runtimeFrame) {
+      try {
+        containerRef.current?.setAttribute("data-canvas-transition", "true");
+        setCanvasTransitionActive(true);
+        const documentNode = iframe.contentDocument;
+        if (!documentNode) throw new Error("missing content document");
+        documentNode.open();
+        documentNode.write(prepared);
+        documentNode.close();
+        frameWrittenHtmlRef.current = prepared;
+        connectFrameRef.current(iframe, nextFrameGeneration);
+        window.requestAnimationFrame(() => {
+          containerRef.current?.removeAttribute("data-canvas-transition");
+          setCanvasTransitionActive(false);
+        });
+        return;
+      } catch {
+        containerRef.current?.removeAttribute("data-canvas-transition");
+        setCanvasTransitionActive(false);
+        frameWrittenHtmlRef.current = null;
+        frameLoadGenerationRef.current += 1;
+      }
+    }
+    frameWrittenHtmlRef.current = null;
+    containerRef.current?.setAttribute("data-render-verified", "false");
+    const remountGeneration = frameLoadGenerationRef.current;
     const replaceFrameElement = () => {
       setFrameRender({
         html: prepared,
-        elementGeneration: nextFrameGeneration,
+        elementGeneration: remountGeneration,
         runtime: Boolean(runtimeFrame),
       });
     };
@@ -3775,10 +3822,14 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     bookmark: NativeEditFenceBookmark | null,
     target: HtmlCanvasSelection | null,
     selection?: NativeEditSelection,
+    options: { reuseDocument?: boolean } = {},
   ) => {
     nativeEditFenceSequenceRef.current += 1;
     const fenceId = nativeEditFenceSequenceRef.current;
-    const expectedFrameGeneration = frameLoadGenerationRef.current + 1;
+    const reuseDocument = options.reuseDocument === true;
+    const expectedFrameGeneration = reuseDocument
+      ? frameLoadGenerationRef.current
+      : frameLoadGenerationRef.current + 1;
     const sourceRevision = (() => {
       try {
         return buildSourceIndex(source).sourceSha256;
@@ -3810,11 +3861,18 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     selectedElementRef.current = null;
     resizeObserverRef.current?.disconnect();
     renderedSourceHtmlRef.current = null;
-    loadFrameSource(source, { preserveViewport: true, immediate: true });
+    loadFrameSource(source, {
+      preserveViewport: true,
+      immediate: !reuseDocument,
+      reuseDocument,
+    });
     containerRef.current?.setAttribute(
       "data-native-fence-resume",
       `loaded:${frameLoadGenerationRef.current}:${expectedFrameTokenRef.current
-        && iframeRef.current?.srcdoc.includes(expectedFrameTokenRef.current)
+        && (
+          iframeRef.current?.srcdoc.includes(expectedFrameTokenRef.current)
+          || frameWrittenHtmlRef.current?.includes(expectedFrameTokenRef.current)
+        )
         ? "current"
         : "stale"}`,
     );
@@ -4072,6 +4130,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       bookmark,
       resumeTarget,
       selection ?? bookmark?.selection,
+      { reuseDocument: true },
     );
     return true;
   }, [
@@ -4434,7 +4493,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       `meta[${FRAME_VERIFICATION_ATTRIBUTE}]`,
     );
     if (
-      iframe.srcdoc !== expectedFrameHtml
+      !frameDocumentMatchesExpected(
+        iframe,
+        expectedFrameHtml,
+        frameWrittenHtmlRef.current,
+      )
       || marker?.getAttribute(FRAME_VERIFICATION_ATTRIBUTE) !== expectedToken
       || marker.getAttribute("content") !== expectedToken
     ) {
@@ -4996,6 +5059,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     updateOverlayPosition,
     fallBackToStaticRuntimeFrame,
   ]);
+  connectFrameRef.current = connectFrame;
 
   useEffect(() => {
     const iframe = iframeRef.current;
@@ -5019,7 +5083,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         documentNode?.documentElement
         && expectedFrameHtml
         && expectedToken
-        && iframe.srcdoc === expectedFrameHtml
+        && frameDocumentMatchesExpected(
+          iframe,
+          expectedFrameHtml,
+          frameWrittenHtmlRef.current,
+        )
         && marker?.getAttribute(FRAME_VERIFICATION_ATTRIBUTE) === expectedToken
         && marker.getAttribute("content") === expectedToken
       ) {
@@ -5448,6 +5516,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           event.currentTarget,
           frameRender.elementGeneration,
         )}
+      />
+      <div
+        className="canvas-transition-overlay"
+        data-active={canvasTransitionActive ? "true" : undefined}
+        aria-hidden="true"
       />
 
       {editFeedback && !interactionLocked ? (

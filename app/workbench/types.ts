@@ -113,6 +113,32 @@ export type DesktopProjectsApi = {
   }) => Promise<HtmlProject & {
     previousSourcePath: string;
   }>;
+  reconcileActiveManagedSource?: (payload: {
+    operationId?: string;
+    previousSourcePath: string;
+    expectedSourceSha256: string;
+    projectId: string;
+    documentId: string;
+    workingCopyId: string;
+    versionId: string;
+    reason: "watch" | "rename" | "startup" | "safe-action";
+    watcherGeneration?: number;
+  }) => Promise<{
+    operationId: string;
+    status: "unchanged" | "relocated" | "content-changed";
+    previousSourcePath: string;
+    sourcePath: string;
+    sourceSha256: string;
+    openTarget: Record<string, unknown>;
+    watcherGeneration?: number;
+  }>;
+  onSourceFileChanged?: (
+    listener: (payload: {
+      sourcePath: string;
+      watcherGeneration: number;
+      sourceMissing?: boolean;
+    }) => void,
+  ) => () => void;
   exportHtmlCopy?: (payload: {
     html: string;
     sourcePath?: string | null;
@@ -340,6 +366,7 @@ export type ToastDisposition =
 export type ToastAction =
   | { id: "retry-export"; label: string }
   | { id: "open-handoff"; label: string }
+  | { id: "retry-history"; label: string; direction?: "undo" | "redo" }
   | { id: "open-project"; label: string; sourcePath: string }
   | { id: "retry-project-open"; label: string; sourcePath?: string }
   | { id: "retry-external-project-open"; label: string }
@@ -376,6 +403,7 @@ type ToastBase = {
   tone: ToastTone;
   sticky?: boolean;
   dedupeKey?: string;
+  repeatCount?: number;
 };
 
 /**

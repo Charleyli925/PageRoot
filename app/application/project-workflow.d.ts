@@ -193,6 +193,7 @@ export class ProjectWorkflow {
   }): Promise<ProjectWorkflowOutcome<{ opened: boolean }>>;
   refreshRecents(): Promise<ProjectWorkflowOutcome<{ projects: unknown[] }>>;
   refreshRegisteredProjects(): Promise<ProjectWorkflowOutcome<{ projects: unknown[] }>>;
+  scheduleProjectListRefreshAfterSettlement(context: ProjectContext): void;
   captureManagedSourceTransitionAuthority(): unknown;
   restoreManagedSourceTransitionAuthority(authority: unknown): Readonly<{
     epoch: number;
@@ -207,6 +208,22 @@ export class ProjectWorkflow {
     projectName?: string;
     lastModifiedAt?: string | null;
     unchanged?: boolean;
+  }>>;
+  reconcileExternalSourceLocator(input?: {
+    reason?: "watch" | "rename" | "startup" | "safe-action";
+    watcherGeneration?: number;
+    previousSourcePath?: string | null;
+    sourceMissing?: boolean;
+  }): Promise<ProjectWorkflowOutcome<{
+    context?: ProjectContext;
+    sourcePath?: string;
+    previousSourcePath?: string;
+    status?: string;
+    relocated?: boolean;
+    contentChanged?: boolean;
+    projectName?: string;
+    ignored?: boolean;
+    observed?: unknown;
   }>>;
   prepareManagedSourceTransition(input: {
     previousSourcePath: string;

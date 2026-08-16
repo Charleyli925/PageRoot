@@ -145,13 +145,14 @@ export function deriveRunProgressSteps(run, handoffStatus = "idle") {
     resultStep.detail = "两份内容均未被覆盖";
     resultStep.state = "current";
   } else if (status === "error") {
+    const validationDetail = run.errorDetail || run.error || "返回的 HTML 无法使用";
     validationStep.detail = completionObserved
-      ? run.error || "返回的 HTML 无法使用"
+      ? validationDetail
       : "尚未开始";
     validationStep.state = completionObserved ? "error" : "pending";
     resultStep.label = "本轮未生成新版本";
-    resultStep.detail = "当前 HTML 保持不变";
-    resultStep.state = "neutral";
+    resultStep.detail = run.recoveryHint || "当前 HTML 保持不变";
+    resultStep.state = "error";
   } else if (status === "no-change") {
     validationStep.detail = "校验完成，未发现有效差异";
     validationStep.state = "done";
@@ -251,7 +252,7 @@ function safeVersionLabel(versionId) {
 }
 
 const ERROR_COPY_BY_CODE = new Map([
-  ["INCOMPLETE_HTML", "返回的 HTML 不完整，无法打开。"],
+  ["INCOMPLETE_HTML", "返回的 HTML 不完整，当前页面没有被覆盖。"],
   ["HTML_DOCUMENT_INCOMPLETE", "返回的 HTML 不完整，无法打开。"],
   ["HTML_BODY_EMPTY", "返回的 HTML 没有可显示的页面内容。"],
   ["OUTPUT_HASH_MISMATCH", "返回文件在完成后发生了变化，当前 HTML 没有被覆盖。"],
@@ -262,24 +263,56 @@ const ERROR_COPY_BY_CODE = new Map([
   ["OUTPUT_PROTOCOL_VIOLATION", "返回文件不符合本轮约定，当前 HTML 没有被覆盖。"],
   ["UNEXPECTED_ATTEMPT_OUTPUT", "本轮返回了约定之外的文件，当前 HTML 没有被覆盖。"],
   ["UNEXPECTED_OUTPUT_FILE", "本轮返回了约定之外的文件，当前 HTML 没有被覆盖。"],
+  ["HASH_MISMATCH", "返回内容与校验记录不一致，当前页面没有被覆盖。"],
+  ["PROTOCOL_FIELD_MISSING", "返回结果缺少必要字段，当前页面没有被覆盖。"],
+  ["CANDIDATE_UNUSABLE", "返回的 HTML 无法作为完整页面使用，当前页面没有被覆盖。"],
+  ["CANDIDATE_HASH_MISMATCH", "返回内容与校验记录不一致，当前页面没有被覆盖。"],
+]);
+
+const ERROR_CODE_ALIAS = new Map([
+  ["CANDIDATE_UNUSABLE", "PROTOCOL_FIELD_MISSING"],
+  ["CANDIDATE_HASH_MISMATCH", "HASH_MISMATCH"],
+  ["FROZEN_INPUT_HASH_MISMATCH", "HASH_MISMATCH"],
+  ["REQUEST_OUTPUT_CHANGED", "HASH_MISMATCH"],
 ]);
 
 function localizedRunError(rawError, completionObserved) {
   const error = isRecord(rawError) ? rawError : {};
-  const code = isRecord(rawError) ? String(error.code || "") : "";
+  const rawCode = isRecord(rawError) ? String(error.code || error.errorCode || "") : "";
+  const code = ERROR_CODE_ALIAS.get(rawCode) || rawCode;
   const rawMessage = isRecord(rawError)
     ? String(error.message || "")
     : String(rawError || "");
-  const mapped = ERROR_COPY_BY_CODE.get(code);
-  if (mapped) return { message: mapped, code };
+  const mapped = ERROR_COPY_BY_CODE.get(code) || ERROR_COPY_BY_CODE.get(rawCode);
+  const detail = String(error.errorDetail || error.detail || "");
+  const recoveryHint = String(error.recoveryHint || "");
+  const errorPreview = String(error.errorPreview || "").slice(0, 500);
+  if (mapped) {
+    return {
+      message: mapped,
+      code,
+      ...(detail ? { errorDetail: detail } : {}),
+      ...(recoveryHint ? { recoveryHint } : {}),
+      ...(errorPreview ? { errorPreview } : {}),
+    };
+  }
   if (/^[\s\S]*[\u3400-\u9fff][\s\S]*$/u.test(rawMessage)) {
-    return { message: rawMessage, code };
+    return {
+      message: rawMessage,
+      code,
+      ...(detail ? { errorDetail: detail } : {}),
+      ...(recoveryHint ? { recoveryHint } : {}),
+      ...(errorPreview ? { errorPreview } : {}),
+    };
   }
   return {
     message: completionObserved
       ? "返回的 HTML 无法安全采用，当前页面没有被覆盖。"
       : "本轮没有收到可用的完成结果，页面和评论仍然保留。",
     code,
+    ...(detail ? { errorDetail: detail } : {}),
+    ...(recoveryHint ? { recoveryHint } : {}),
+    ...(errorPreview ? { errorPreview } : {}),
   };
 }
 
@@ -341,6 +374,9 @@ export function activeRunFromRecord(raw) {
       : {}),
     ...(localizedError?.message ? { error: localizedError.message } : {}),
     ...(localizedError?.code ? { errorCode: localizedError.code } : {}),
+    ...(localizedError?.errorDetail ? { errorDetail: localizedError.errorDetail } : {}),
+    ...(localizedError?.recoveryHint ? { recoveryHint: localizedError.recoveryHint } : {}),
+    ...(localizedError?.errorPreview ? { errorPreview: localizedError.errorPreview } : {}),
     ...(completionObserved ? { completionObserved: true } : {}),
     ...(raw.conflictId || conflict.conflictId
       ? { conflictId: String(raw.conflictId || conflict.conflictId) }

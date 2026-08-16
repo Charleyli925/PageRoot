@@ -41,7 +41,7 @@ export type DocumentWorkflowConstruction = Readonly<{
   bridgeClient: Pick<
     BridgeClient,
     "autosave" | "source" | "workspace" | "sourceHistoryAction" | "resolveConflict"
-  >;
+  > & Partial<Pick<BridgeClient, "sourcePreview" | "sourceStat">>;
   ensureRegistered(input: {
     sourcePath?: string;
     expectedSourceSha256?: string | null;
@@ -105,6 +105,15 @@ export class DocumentWorkflow {
     context?: ProjectContext;
     acceptExternalConflict?: boolean;
     externalAuthorityAccepted?: boolean;
+  }): Promise<DocumentWorkflowOutcome<Record<string, unknown>>>;
+  previewExternalSource(input?: {
+    context?: ProjectContext;
+  }): Promise<DocumentWorkflowOutcome<Record<string, unknown>>>;
+  observeExternalSourceChange(input?: {
+    sourcePath?: string | null;
+  }): Promise<DocumentWorkflowOutcome<Record<string, unknown>>>;
+  forceUnlockConflict(input?: {
+    context?: ProjectContext;
   }): Promise<DocumentWorkflowOutcome<Record<string, unknown>>>;
   ensureCurrentCanvas(input?: {
     context?: ProjectContext;

@@ -233,7 +233,7 @@ function requireSha256(value, label = "sha256") {
   return value;
 }
 
-async function readSourceFile(sourcePath) {
+async function inspectSourceFile(sourcePath, { requireComplete = true } = {}) {
   let information;
   try {
     information = await lstat(sourcePath);
@@ -268,7 +268,7 @@ async function readSourceFile(sourcePath) {
       "The source HTML is not valid UTF-8 and was left unchanged.",
     );
   }
-  requireCompleteHtml(html, "source HTML");
+  if (requireComplete) requireCompleteHtml(html, "source HTML");
   return {
     buffer,
     html,
@@ -276,6 +276,10 @@ async function readSourceFile(sourcePath) {
     information,
     lastModifiedAt: information.mtime.toISOString(),
   };
+}
+
+async function readSourceFile(sourcePath) {
+  return inspectSourceFile(sourcePath, { requireComplete: true });
 }
 
 function projectFileHttpError(cause) {
@@ -302,6 +306,7 @@ function projectFileHttpError(cause) {
       "REGISTERED_PROJECT_PATH_MISMATCH",
       "REGISTERED_PROJECT_IDENTITY_CHANGED",
       "MANAGED_PATH_AMBIGUOUS",
+      "MANAGED_SOURCE_IDENTITY_MISMATCH",
       "WORKING_COPY_CONFLICT",
       "AMBIGUOUS_SOURCE_FILE_IDENTITY",
       "ACTIVE_REQUEST_EXISTS",
@@ -349,6 +354,8 @@ function projectFileHttpError(cause) {
         "PATH_ESCAPES_PROJECT",
         "INVALID_RELATIVE_PATH",
         "INVALID_ID",
+        "INVALID_OPERATION_ID",
+        "INVALID_RECONCILE_REASON",
         "INVALID_FILE_STEM",
         "PATH_COMPONENT_TOO_LONG",
         "INVALID_CANDIDATE_ID",
@@ -398,6 +405,32 @@ async function registeredProjectOpen(projectId) {
       sourcePath: resolved.target.exactSourcePath,
       sourceSha256: resolved.sourceSha256,
       openTarget: resolved.target,
+    };
+  } catch (cause) {
+    throw projectFileHttpError(cause);
+  }
+}
+
+async function reconcileManagedWorkingCopy(body = {}) {
+  try {
+    const reconciled = await projectFileRepository.reconcileWorkingCopyLocator({
+      operationId: body.operationId,
+      previousSourcePath: body.previousSourcePath,
+      projectId: body.projectId,
+      documentId: body.documentId,
+      workingCopyId: body.workingCopyId,
+      versionId: body.versionId,
+      expectedSourceSha256: body.expectedSourceSha256,
+      reason: body.reason,
+    });
+    return {
+      ok: true,
+      operationId: reconciled.operationId,
+      status: reconciled.status,
+      previousSourcePath: reconciled.previousSourcePath,
+      sourcePath: reconciled.sourcePath,
+      sourceSha256: reconciled.sourceSha256,
+      openTarget: reconciled.openTarget,
     };
   } catch (cause) {
     throw projectFileHttpError(cause);
@@ -1610,6 +1643,17 @@ async function autosaveConflictCandidate(sourcePath) {
 }
 
 async function resolveConflict(body) {
+  const action = String(body.action || body.resolution || "");
+  if (action === "force-unlock") {
+    try {
+      const unlocked = await projectFileRepository.forceUnlockWorkingCopy({
+        sourcePath: requiredSourcePath(body.sourcePath),
+      });
+      return { ok: true, ...unlocked };
+    } catch (cause) {
+      throw projectFileHttpError(cause);
+    }
+  }
   const workspace = await projectFileWorkspaceForSource(body.sourcePath);
   if (!workspace) throw projectNotFoundError();
   throw new HttpError(
@@ -1617,6 +1661,27 @@ async function resolveConflict(body) {
     "CONFLICT_NOT_FOUND",
     "No conflict exists for this v4 project.",
   );
+}
+
+async function sourcePreview(sourcePath) {
+  const source = await inspectSourceFile(sourcePath, { requireComplete: true });
+  return {
+    ok: true,
+    content: source.html,
+    sha256: source.sha256,
+    lastModifiedAt: source.lastModifiedAt,
+    size: source.information.size,
+  };
+}
+
+async function sourceStat(sourcePath) {
+  const source = await inspectSourceFile(sourcePath, { requireComplete: false });
+  return {
+    ok: true,
+    sha256: source.sha256,
+    lastModifiedAt: source.lastModifiedAt,
+    size: source.information.size,
+  };
 }
 
 async function inspectProjectFile(sourcePath, relativePath) {
@@ -1882,6 +1947,26 @@ async function route(request, response) {
     );
     return;
   }
+  if (request.method === "GET" && url.pathname === "/source-preview") {
+    sendJson(
+      response,
+      200,
+      await sourcePreview(
+        requiredSourcePath(url.searchParams.get("sourcePath")),
+      ),
+    );
+    return;
+  }
+  if (request.method === "GET" && url.pathname === "/source-stat") {
+    sendJson(
+      response,
+      200,
+      await sourceStat(
+        requiredSourcePath(url.searchParams.get("sourcePath")),
+      ),
+    );
+    return;
+  }
   if (request.method === "GET" && url.pathname === "/registered-projects") {
     sendJson(response, 200, await registeredProjectCatalog());
     return;
@@ -1892,6 +1977,11 @@ async function route(request, response) {
       200,
       await registeredProjectOpen(url.searchParams.get("projectId")),
     );
+    return;
+  }
+  if (request.method === "POST" && url.pathname === "/managed-working-copy/reconcile") {
+    const body = await readBody(request);
+    sendJson(response, 200, await reconcileManagedWorkingCopy(body));
     return;
   }
   if (request.method === "POST" && url.pathname === "/project/ensure") {

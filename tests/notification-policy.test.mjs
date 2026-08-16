@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  createNoticeDismissalMemory,
+  nextPresentedNotice,
   noticeAutoDismissMs,
   noticeDisposition,
   productErrorMessage,
@@ -32,7 +34,7 @@ test("only explicit decisions persist while background results expire", () => {
       tone: "info",
       action: { id: "retry", label: "重试" },
     }),
-    2_500,
+    3_500,
   );
   assert.equal(
     noticeAutoDismissMs({
@@ -47,11 +49,22 @@ test("only explicit decisions persist while background results expire", () => {
       disposition: "background-result",
       tone: "warning",
     }),
-    7_000,
+    8_000,
   );
-  assert.equal(noticeAutoDismissMs({ tone: "warning" }), 5_000);
-  assert.equal(noticeAutoDismissMs({ tone: "success" }), 2_500);
-  assert.equal(noticeAutoDismissMs({ tone: "info" }), 2_500);
+  assert.equal(noticeAutoDismissMs({ tone: "warning" }), 6_000);
+  assert.equal(noticeAutoDismissMs({ tone: "success" }), 3_500);
+  assert.equal(noticeAutoDismissMs({ tone: "info" }), 3_500);
+});
+
+test("sticky conflict notices remain present even without an explicit disposition", () => {
+  assert.equal(
+    shouldPresentNotice({
+      sticky: true,
+      tone: "warning",
+      dedupeKey: "source-conflict",
+    }),
+    true,
+  );
 });
 
 test("ordinary visible state does not create another toast", () => {
@@ -142,13 +155,13 @@ test("disposition matrix keeps timeout and user-action ownership explicit", () =
       name: "silent recovery stays in its owning surface",
       notice: { disposition: "silent-recover", tone: "warning" },
       present: false,
-      timeout: 5_000,
+      timeout: 6_000,
     },
     {
       name: "deferred recovery stays in its owning surface",
       notice: { disposition: "defer-and-resume", tone: "info" },
       present: false,
-      timeout: 2_500,
+      timeout: 3_500,
     },
     {
       name: "direct action waits for the user",
@@ -174,7 +187,7 @@ test("disposition matrix keeps timeout and user-action ownership explicit", () =
       name: "background results are transient",
       notice: { disposition: "background-result", tone: "success" },
       present: true,
-      timeout: 7_000,
+      timeout: 8_000,
     },
     {
       name: "in-place feedback remains with its caller",
@@ -184,7 +197,7 @@ test("disposition matrix keeps timeout and user-action ownership explicit", () =
         action: { id: "ignored", label: "不应显示" },
       },
       present: false,
-      timeout: 5_000,
+      timeout: 6_000,
     },
   ];
 
@@ -290,6 +303,27 @@ test("structured project identity errors use one safe product message", () => {
   );
 });
 
+test("managed locator failures stay user-facing and do not leak paths", () => {
+  const mismatch = new Error("inode 12345 at /Users/secret/report.html");
+  mismatch.code = "MANAGED_SOURCE_IDENTITY_MISMATCH";
+  assert.equal(
+    productErrorMessage(mismatch, "项目操作没有完成。"),
+    "当前工作文件身份无法核对，PageRoot 没有切换路径。",
+  );
+  const ambiguous = new Error("device 1 inode 2");
+  ambiguous.code = "MANAGED_PATH_AMBIGUOUS";
+  assert.equal(
+    productErrorMessage(ambiguous, "项目操作没有完成。"),
+    "当前文件无法唯一对应到工作文件。PageRoot 没有写入，请先恢复唯一位置。",
+  );
+  const missing = new Error("ENOENT /Users/secret/report.html");
+  missing.code = "WORKING_COPY_UNAVAILABLE";
+  assert.equal(
+    productErrorMessage(missing, "项目操作没有完成。"),
+    "文件暂不可用，修改仍保留。",
+  );
+});
+
 test("candidate assessment failures use accurate localized project copy", () => {
   const error = new Error(
     "candidate-assessment.json is structurally invalid.",
@@ -318,4 +352,50 @@ test("unknown internal fields and local paths never reach product copy", () => {
     ),
     "项目操作没有完成。",
   );
+});
+
+test("notice dismissal memory merges repeats inside one second and prunes stale keys", () => {
+  let now = 1_000;
+  const memory = createNoticeDismissalMemory({ now: () => now });
+  const first = {
+    title: "保存失败",
+    message: "请重试",
+    tone: "error",
+    disposition: "background-result",
+    dedupeKey: "source-reload",
+  };
+  memory.rememberDismissal(first);
+  now = 1_400;
+  const repeated = memory.withRepeatCount(first);
+  assert.equal(repeated.repeatCount, 2);
+  now = 8_000;
+  memory.rememberDismissal({ ...first, dedupeKey: "unique-old" });
+  now = 14_000;
+  assert.equal(memory.withRepeatCount(first).repeatCount, undefined);
+});
+
+test("nextPresentedNotice stays a pure replacement choice", () => {
+  const current = {
+    title: "旧提示",
+    message: "仍在",
+    tone: "error",
+    sticky: true,
+    disposition: "user-choice",
+    dedupeKey: "keep",
+  };
+  const ignored = {
+    title: "已保存",
+    message: "完成",
+    tone: "success",
+    dedupeKey: "saved",
+  };
+  assert.equal(nextPresentedNotice(current, ignored), current);
+  const next = {
+    title: "项目已解锁",
+    message: "可以继续编辑",
+    tone: "success",
+    disposition: "background-result",
+    dedupeKey: "source-force-unlock",
+  };
+  assert.equal(nextPresentedNotice(null, next), next);
 });

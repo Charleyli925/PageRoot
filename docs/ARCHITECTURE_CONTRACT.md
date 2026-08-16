@@ -239,7 +239,12 @@ only sorting, `lastOpenedAt` and startup preference; they cannot add a member,
 remove a member or authorize an open. A Workbench catalog intent carries only
 `projectId`; the Bridge re-resolves and validates the complete Project,
 Document, Working Copy, OpenTarget, bytes and Hash tuple before the normal
-source-transition publication boundary.
+source-transition publication boundary. Automatic Recent/catalog refreshes are
+deferrable projections: the renderer publishes Project/Document/Version/Draft/
+Comment authority and confirms Working Copy activation first, then schedules
+the list refresh behind the current context fence. A slow or failed catalog
+scan therefore cannot reorder the Repository mutation queue ahead of a
+confirmation or downgrade a completed rename/continuation to unknown.
 
 `AI任务/` is intentionally outside every authority chain. Once a durable
 Request or verified Candidate already exists, the Repository validates the

@@ -45,6 +45,10 @@ const PRODUCT_ERROR_MESSAGES = Object.freeze({
     "磁盘文件与当前未保存修改都已保留；请先核对内容后再决定如何继续。",
   MANAGED_PATH_AMBIGUOUS:
     "当前文件无法唯一对应到工作文件。PageRoot 没有写入，请先恢复唯一位置。",
+  MANAGED_SOURCE_IDENTITY_MISMATCH:
+    "当前工作文件身份无法核对，PageRoot 没有切换路径。",
+  INVALID_RENAME_STEM:
+    "请输入不含路径、后缀和特殊符号的文件名。",
   REGISTERED_PROJECT_PATH_MISMATCH:
     "当前文件夹不是项目的登记位置。PageRoot 没有写入。",
   REGISTERED_PROJECT_IDENTITY_CHANGED:
@@ -110,9 +114,9 @@ export function noticeAutoDismissMs(notice) {
     || disposition === "direct-action"
     || disposition === "user-choice"
   ) return null;
-  if (disposition === "background-result") return 7_000;
-  if (tone === "warning") return 5_000;
-  return 2_500;
+  if (disposition === "background-result") return 8_000;
+  if (tone === "warning") return 6_000;
+  return 3_500;
 }
 
 /**
@@ -140,6 +144,9 @@ export function noticeDisposition(notice) {
  */
 export function shouldPresentNotice(notice) {
   if (!notice) return true;
+  if (notice.sticky && /conflict/i.test(String(notice.dedupeKey || ""))) {
+    return true;
+  }
   const disposition = noticeDisposition(notice);
   return disposition === "direct-action"
     || disposition === "user-choice"
@@ -234,4 +241,63 @@ export function productErrorMessage(cause, fallback) {
     message = `${message.slice(0, 277).trimEnd()}…`;
   }
   return message || fallback;
+}
+
+export const NOTICE_REPEAT_WINDOW_MS = 1_000;
+export const NOTICE_DISMISSAL_TTL_MS = 5_000;
+
+/**
+ * Bounded memory for toast repeat counts. Workbench owns one instance per
+ * window; entries expire so unique requestIds cannot grow without bound.
+ *
+ * @param {{ now?: () => number }} [options]
+ */
+export function createNoticeDismissalMemory({ now = () => Date.now() } = {}) {
+  /** @type {Map<string, { dismissedAt: number, repeatCount: number }>} */
+  const dismissals = new Map();
+
+  function prune(timestamp) {
+    for (const [key, entry] of dismissals) {
+      if (timestamp - entry.dismissedAt >= NOTICE_DISMISSAL_TTL_MS) {
+        dismissals.delete(key);
+      }
+    }
+  }
+
+  return {
+    rememberDismissal(notice) {
+      const key = String(notice?.dedupeKey || "");
+      if (!key) return;
+      const timestamp = now();
+      prune(timestamp);
+      dismissals.set(key, {
+        dismissedAt: timestamp,
+        repeatCount: Number(notice.repeatCount || 1),
+      });
+    },
+    withRepeatCount(notice) {
+      const key = String(notice?.dedupeKey || "");
+      if (!key || !notice) return notice;
+      const timestamp = now();
+      prune(timestamp);
+      const previous = dismissals.get(key);
+      if (!previous || timestamp - previous.dismissedAt >= NOTICE_REPEAT_WINDOW_MS) {
+        return notice;
+      }
+      dismissals.delete(key);
+      return { ...notice, repeatCount: previous.repeatCount + 1 };
+    },
+  };
+}
+
+/**
+ * Pure presentation choice after repeat-count has already been applied.
+ *
+ * @param {unknown} current
+ * @param {unknown} incoming
+ */
+export function nextPresentedNotice(current, incoming) {
+  if (!incoming) return null;
+  if (!shouldPresentNotice(incoming)) return current;
+  return shouldReplaceNotice(current, incoming) ? incoming : current;
 }

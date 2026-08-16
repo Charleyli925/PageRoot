@@ -18,10 +18,32 @@ function reporterSuite() {
           {
             title: "native-dom-electron.spec.mjs",
             tests: [
-              { title: "green test", outcome: "expected", retries: 0 },
-              { title: "flaky test", outcome: "flaky", retries: 1 },
-              { title: "failed test", outcome: "unexpected", retries: 1 },
-              { title: "skipped test", outcome: "skipped", retries: 0 },
+              {
+                title: "green test",
+                status: "expected",
+                results: [{ retry: 0, status: "passed" }],
+              },
+              {
+                title: "flaky test",
+                status: "flaky",
+                results: [
+                  { retry: 0, status: "failed" },
+                  { retry: 1, status: "passed" },
+                ],
+              },
+              {
+                title: "failed test",
+                status: "unexpected",
+                results: [
+                  { retry: 0, status: "failed" },
+                  { retry: 1, status: "failed" },
+                ],
+              },
+              {
+                title: "skipped test",
+                status: "skipped",
+                results: [{ retry: 0, status: "skipped" }],
+              },
             ],
           },
         ],
@@ -51,8 +73,18 @@ test("flaky summary tolerates nested suites and missing optional fields", () => 
             specs: [
               {
                 tests: [
-                  { outcome: "expected" },
-                  { outcome: "flaky", retries: 3 },
+                  {
+                    status: "expected",
+                    results: [{ retry: 0, status: "passed" }],
+                  },
+                  {
+                    status: "flaky",
+                    results: [
+                      { retry: 0, status: "failed" },
+                      { retry: 1, status: "passed" },
+                      { retry: 2, status: "passed" },
+                    ],
+                  },
                 ],
               },
             ],
@@ -63,7 +95,51 @@ test("flaky summary tolerates nested suites and missing optional fields", () => 
   });
   assert.equal(summary.total, 2);
   assert.equal(summary.flaky, 1);
-  assert.equal(summary.retries, 3);
+  assert.equal(summary.retries, 2);
+});
+
+test("legacy outcome/retries pseudoschema fails closed instead of fabricating zero counts", () => {
+  assert.throws(
+    () => summarizeFlakyRuns({
+      suites: [
+        {
+          specs: [
+            {
+              tests: [
+                { title: "legacy flaky", outcome: "flaky", retries: 1 },
+              ],
+            },
+          ],
+        },
+      ],
+    }),
+    /unsupported status/u,
+  );
+});
+
+test("an invalid result retry count fails closed instead of being dropped", () => {
+  assert.throws(
+    () => summarizeFlakyRuns({
+      suites: [
+        {
+          specs: [
+            {
+              tests: [
+                {
+                  status: "flaky",
+                  results: [
+                    { retry: 0, status: "failed" },
+                    { retry: "one", status: "passed" },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    }),
+    /invalid retry count/u,
+  );
 });
 
 test("flaky evidence is written machine-readably inside the repository", async () => {

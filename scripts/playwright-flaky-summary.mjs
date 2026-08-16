@@ -35,21 +35,48 @@ export function summarizeFlakyRuns(report) {
     retries: 0,
     skipped: 0,
   };
+  const supportedStatuses = new Set(["expected", "unexpected", "flaky", "skipped"]);
   const walk = (suite) => {
     for (const spec of suite?.specs || []) {
       for (const test of spec?.tests || []) {
-        const outcome = String(test?.outcome || "unknown");
+        const status = String(test?.status || "");
+        if (!supportedStatuses.has(status)) {
+          throw new Error(
+            `Playwright JSON reporter test has an unsupported status `
+            + `${JSON.stringify(status)}; refusing to fabricate flaky/retry evidence.`,
+          );
+        }
         summary.total += 1;
-        summary.retries += Number.isFinite(test?.retries) ? test.retries : 0;
-        if (outcome === "expected") summary.passed += 1;
-        else if (outcome === "unexpected") summary.failed += 1;
-        else if (outcome === "flaky") summary.flaky += 1;
-        else if (outcome === "skipped") summary.skipped += 1;
+        if (status === "expected") summary.passed += 1;
+        else if (status === "unexpected") summary.failed += 1;
+        else if (status === "flaky") summary.flaky += 1;
+        else if (status === "skipped") summary.skipped += 1;
+        const results = Array.isArray(test?.results) ? test.results : [];
+        let testRetries = 0;
+        for (const result of results) {
+          const retry = Number(result?.retry);
+          if (!Number.isInteger(retry) || retry < 0) {
+            throw new Error(
+              `Playwright JSON reporter result has an invalid retry count `
+              + `${JSON.stringify(result?.retry)}; refusing to fabricate flaky/retry evidence.`,
+            );
+          }
+          if (retry > 0) testRetries += 1;
+        }
+        summary.retries += testRetries;
       }
     }
     for (const child of suite?.suites || []) walk(child);
   };
   for (const suite of report?.suites || []) walk(suite);
+  if (
+    summary.total
+    !== summary.passed + summary.failed + summary.flaky + summary.skipped
+  ) {
+    throw new Error(
+      "Playwright flaky summary counts do not reconcile; refusing to write evidence.",
+    );
+  }
   return Object.freeze(summary);
 }
 

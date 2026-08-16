@@ -7,7 +7,6 @@ import {
   useEffect,
   useLayoutEffect,
   useMemo,
-  useReducer,
   useRef,
   useState,
   type ChangeEvent,
@@ -77,8 +76,8 @@ import { appendDirectEditEvent } from "./lib/direct-edit-events.js";
 import {
   noticeAutoDismissMs,
   productErrorMessage,
-  shouldPresentNotice,
-  shouldReplaceNotice,
+  createNoticeDismissalMemory,
+  nextPresentedNotice,
 } from "./lib/notification-policy";
 import {
   DEFAULT_PROJECT_HTML,
@@ -408,11 +407,6 @@ const WELCOME_PROJECT = {
   sourcePath: null as string | null,
 };
 
-function noticeReducer(current: Toast, next: Toast): Toast {
-  if (!shouldPresentNotice(next)) return current;
-  return shouldReplaceNotice(current, next) ? next : current;
-}
-
 function requiredWorkspaceController(
   controller: WorkspaceController | null,
 ): WorkspaceController {
@@ -531,6 +525,7 @@ export default function Workbench() {
   const versionTransitioningRef = useRef(false);
   const attachmentObjectUrlsRef = useRef<Map<string, string>>(new Map());
   const toastRef = useRef<Toast>(null);
+  const noticeDismissalMemoryRef = useRef(createNoticeDismissalMemory());
   const previousPersistStateRef = useRef(new Map<string, PersistState>());
   const previousRunStateRef = useRef(
     new Map<string, LifecycleState | "none">(),
@@ -545,6 +540,7 @@ export default function Workbench() {
   const openHtmlButtonRef = useRef<HTMLButtonElement | null>(null);
   const fileRenameEditingRef = useRef(false);
   const fileRenameBusyRef = useRef(false);
+  const fileRenameErrorRef = useRef("");
   const automaticProjectRegistrationRef = useRef("");
   const projectRecordsPreparationRef = useRef("");
 
@@ -1067,6 +1063,23 @@ export default function Workbench() {
               if (!rename) throw new Error("当前运行环境不能安全修改 HTML 文件名。");
               return rename(input);
             },
+            reconcileActiveManagedSource: async (input: {
+              operationId?: string;
+              previousSourcePath: string;
+              expectedSourceSha256: string;
+              projectId: string;
+              documentId: string;
+              workingCopyId: string;
+              versionId: string;
+              reason: "watch" | "rename" | "startup" | "safe-action";
+              watcherGeneration?: number;
+            }) => {
+              const reconcile = window.htmlAIProjects?.reconcileActiveManagedSource;
+              if (!reconcile) {
+                throw new Error("当前运行环境不能安全核对工作文件位置。");
+              }
+              return reconcile(input);
+            },
           },
           viewState: {
             isTransitioning: () => isViewTransitioning(),
@@ -1263,9 +1276,31 @@ export default function Workbench() {
   const [repositoryOpenFailed, setRepositoryOpenFailed] = useState(false);
   const [userNoticeOpenFailed, setUserNoticeOpenFailed] = useState(false);
   const promptedUpdateVersionRef = useRef<string | null>(null);
-  const [toast, setToast] = useReducer(noticeReducer, null);
+  const [toast, setToastState] = useState<Toast>(null);
+  const setToast = useCallback((next: Toast) => {
+    const memory = noticeDismissalMemoryRef.current;
+    if (next === null) {
+      memory.rememberDismissal(toastRef.current);
+      setToastState(null);
+      return;
+    }
+    const incoming = memory.withRepeatCount(next);
+    setToastState((current) => nextPresentedNotice(current, incoming) as Toast);
+  }, []);
   const [pausedNoticeIdentity, setPausedNoticeIdentity] =
     useState<string | null>(null);
+  const noticeDeadlineRef = useRef<{
+    identity: string;
+    deadlineAt: number;
+    remainingMs: number;
+    paused: boolean;
+  } | null>(null);
+  const lastHistoryDirectionRef = useRef<"undo" | "redo">("undo");
+  const [externalSourcePreview, setExternalSourcePreview] = useState<{
+    html: string;
+    sourceSha256: string;
+    lastModifiedAt: string;
+  } | null>(null);
   const noticeIdentity = toast
     ? `${toast.dedupeKey || ""}\n${toast.title}\n${toast.message}`
     : "";
@@ -1428,6 +1463,17 @@ export default function Workbench() {
             if (state === "ready-to-open" && toastRef.current?.dedupeKey === "ai-submit") {
               setToast(null);
             }
+            if (state === "error" && run) {
+              setToast({
+                title: "AI 输出未通过安全校验",
+                message: run.error || "提交的 HTML 不完整或格式错误。",
+                tone: "error",
+                sticky: true,
+                disposition: "user-choice",
+                dedupeKey: `ai-validation-error:${run.requestId}`,
+                action: { id: "open-handoff", label: "查看详情" },
+              });
+            }
           }
         } else if (
           run
@@ -1484,6 +1530,7 @@ export default function Workbench() {
         projectRecordsPath?: unknown;
         lastModifiedAt?: unknown;
         showHandoff?: unknown;
+        contentChanged?: unknown;
       }>;
       if (projectEvent.type === "project-hydration-stage") {
         markProjectHydrationStage(String(projectEvent.stage || ""));
@@ -1718,6 +1765,71 @@ export default function Workbench() {
             tone: "info",
             disposition: "background-result",
             dedupeKey: "close-source-reconciliation",
+          });
+        }
+        return;
+      }
+      if (projectEvent.type === "project-source-locator-failed") {
+        const locatorCode = String(projectEvent.code || "");
+        if (locatorCode === "MANAGED_PATH_AMBIGUOUS") {
+          setToast({
+            title: "无法确定工作文件",
+            message: "检测到多个同等候选文件；修改仍保留，请先恢复唯一文件位置。",
+            tone: "warning",
+            sticky: true,
+            disposition: "user-choice",
+            dedupeKey: "managed-working-copy-ambiguous",
+            action: { id: "retry-project-open", label: "重新选择文件" },
+          });
+          return;
+        }
+        if (
+          locatorCode === "WORKING_COPY_UNAVAILABLE"
+          || locatorCode === "REGISTERED_PROJECT_UNAVAILABLE"
+        ) {
+          setToast({
+            title: "文件暂不可用",
+            message: "当前工作文件暂时不可用，修改仍保留。",
+            tone: "warning",
+            sticky: true,
+            disposition: "inform-in-place",
+            dedupeKey: "working-copy-unavailable",
+          });
+          return;
+        }
+        if (locatorCode === "MANAGED_SOURCE_IDENTITY_MISMATCH") {
+          setToast({
+            title: "无法核对工作文件",
+            message: "当前工作文件身份无法核对，PageRoot 没有切换路径。",
+            tone: "warning",
+            sticky: true,
+            disposition: "inform-in-place",
+            dedupeKey: "managed-source-identity-mismatch",
+          });
+          return;
+        }
+        return;
+      }
+      if (
+        projectEvent.type === "project-source-renamed"
+        || projectEvent.type === "project-source-relocated"
+      ) {
+        if (typeof projectEvent.projectName === "string" && projectEvent.projectName) {
+          setProjectName(projectEvent.projectName);
+        }
+        if (typeof projectEvent.lastModifiedAt === "string") {
+          setLastModifiedAt(projectEvent.lastModifiedAt);
+        }
+        if (
+          projectEvent.type === "project-source-relocated"
+          && projectEvent.contentChanged !== true
+        ) {
+          setToast({
+            title: "文件名已与 Finder 同步",
+            message: "已继续使用同一工作文件。",
+            tone: "success",
+            disposition: "background-result",
+            dedupeKey: "finder-filename-synced",
           });
         }
         return;
@@ -2212,6 +2324,7 @@ export default function Workbench() {
   );
   const pendingSendItemCount = activeCommentCount;
   const interactionPreviewHtml = useMemo(() => {
+    if (externalSourcePreview?.html) return externalSourcePreview.html;
     if (!browserPreviewOnly || projectName !== WELCOME_PROJECT_NAME) return html;
     return html.replace(
       /(["'])(?:\.\/)?brand-logo\.png\1/iu,
@@ -2219,6 +2332,7 @@ export default function Workbench() {
     );
   }, [
     browserPreviewOnly,
+    externalSourcePreview,
     html,
     projectName,
   ]);
@@ -3022,10 +3136,37 @@ export default function Workbench() {
   }, [workspaceController]);
 
   useEffect(() => {
-    if (!toast) return;
-    if (noticeTimerPaused) return;
+    if (!toast) {
+      noticeDeadlineRef.current = null;
+      return;
+    }
     const dismissAfter = noticeAutoDismissMs(toast);
-    if (dismissAfter === null) return;
+    if (dismissAfter === null) {
+      noticeDeadlineRef.current = null;
+      return;
+    }
+    const now = Date.now();
+    const existing = noticeDeadlineRef.current;
+    const remaining = existing?.identity === noticeIdentity
+      ? existing.paused
+        ? existing.remainingMs
+        : Math.max(0, existing.deadlineAt - now)
+      : dismissAfter;
+    if (noticeTimerPaused) {
+      noticeDeadlineRef.current = {
+        identity: noticeIdentity,
+        deadlineAt: now + remaining,
+        remainingMs: remaining,
+        paused: true,
+      };
+      return;
+    }
+    noticeDeadlineRef.current = {
+      identity: noticeIdentity,
+      deadlineAt: now + remaining,
+      remainingMs: remaining,
+      paused: false,
+    };
     const timeout = window.setTimeout(() => {
       captureUsageEvent("notification_interacted", {
         notice_code: noticeUsageCode(toast.dedupeKey),
@@ -3033,9 +3174,9 @@ export default function Workbench() {
         surface: "global",
       }, currentProjectSessionSnapshot().projectId || undefined);
       setToast(null);
-    }, dismissAfter);
+    }, remaining);
     return () => window.clearTimeout(timeout);
-  }, [currentProjectSessionSnapshot, noticeTimerPaused, toast]);
+  }, [currentProjectSessionSnapshot, noticeIdentity, noticeTimerPaused, toast]);
 
   useEffect(() => {
     if (!previewAttachment) return;
@@ -3369,6 +3510,20 @@ export default function Workbench() {
 
   useEffect(() => {
     if (!workspaceController) return undefined;
+    const subscribe = window.htmlAIProjects?.onSourceFileChanged;
+    if (typeof subscribe !== "function") return undefined;
+    return subscribe((payload) => {
+      void workspaceController.observeExternalSourceChange({
+        reason: "watch",
+        previousSourcePath: payload.sourcePath,
+        watcherGeneration: payload.watcherGeneration,
+        sourceMissing: payload.sourceMissing,
+      });
+    });
+  }, [workspaceController]);
+
+  useEffect(() => {
+    if (!workspaceController) return undefined;
     const handlePrepareClose = (event: Event) => {
       const detail = (event as CustomEvent<PrepareCloseDetail>).detail;
       if (!detail || typeof detail.waitUntil !== "function") return;
@@ -3584,6 +3739,7 @@ export default function Workbench() {
   const cancelFileRename = useCallback(() => {
     if (fileRenameBusyRef.current) return;
     fileRenameEditingRef.current = false;
+    fileRenameErrorRef.current = "";
     setFileRenameEditing(false);
     setFileRenameError("");
     setFileRenameDraft("");
@@ -3602,6 +3758,7 @@ export default function Workbench() {
         !== currentDocumentSessionSnapshot().lastPersistedRevision
     ) return;
     fileRenameEditingRef.current = true;
+    fileRenameErrorRef.current = "";
     setFileRenameEditing(true);
     setFileRenameDraft(currentSourceFileStem);
     setFileRenameError("");
@@ -3622,39 +3779,64 @@ export default function Workbench() {
       !workspaceController
       || !canOfferFileRename
     ) {
-      setFileRenameError("当前状态还不能重命名，请等待文件安全保存。");
+      fileRenameErrorRef.current = "当前状态还不能重命名，请等待文件安全保存。";
+      setFileRenameError(fileRenameErrorRef.current);
       return;
     }
 
     fileRenameBusyRef.current = true;
     setFileRenameBusy(true);
+    fileRenameErrorRef.current = "";
     setFileRenameError("");
     try {
-      const outcome = await requiredWorkspaceController(workspaceController)
-        .renameProjectSource({ stem: fileRenameDraft });
-      if (outcome.status !== "succeeded") {
+      const controller = requiredWorkspaceController(workspaceController);
+      const reconciled = await controller.observeExternalSourceChange({
+        reason: "rename",
+      });
+      if (reconciled.status === "rejected" || reconciled.status === "unknown") {
+        throw Object.assign(
+          new Error(
+            ("reason" in reconciled && reconciled.reason)
+              || "当前工作文件暂时无法核对位置，PageRoot 没有切换路径。",
+          ),
+          { code: "code" in reconciled ? reconciled.code : undefined },
+        );
+      }
+      if (reconciled.status === "blocked") {
         throw new Error(
-          outcome.status === "unknown"
-            ? "文件名已经修改，但项目状态还没有完成刷新。"
-            : ("reason" in outcome && outcome.reason)
-              || "文件名没有修改，请检查名称后重试。",
+          ("reason" in reconciled && reconciled.reason)
+            || "当前状态还不能重命名，请等待文件安全保存。",
+        );
+      }
+      if (reconciled.status === "succeeded" && typeof reconciled.value?.projectName === "string") {
+        setProjectName(reconciled.value.projectName);
+      }
+      const outcome = await controller.renameProjectSource({ stem: fileRenameDraft });
+      if (outcome.status !== "succeeded") {
+        throw Object.assign(
+          new Error(
+            outcome.status === "unknown"
+              ? "文件名已经修改，但项目状态还没有完成刷新。"
+              : ("reason" in outcome && outcome.reason)
+                || "文件名没有修改，请检查名称后重试。",
+          ),
+          { code: "code" in outcome ? outcome.code : undefined },
         );
       }
       if (outcome.value.projectName) setProjectName(outcome.value.projectName);
       setLastModifiedAt(outcome.value.lastModifiedAt || null);
       fileRenameEditingRef.current = false;
+      fileRenameErrorRef.current = "";
       setFileRenameEditing(false);
       setFileRenameDraft("");
       setFileRenameError("");
     } catch (cause) {
-      setFileRenameError(productErrorMessage(
+      const message = productErrorMessage(
         cause,
         "文件名没有修改，请检查名称后重试。",
-      ));
-      window.requestAnimationFrame(() => {
-        fileRenameInputRef.current?.focus();
-        fileRenameInputRef.current?.select();
-      });
+      );
+      fileRenameErrorRef.current = message;
+      setFileRenameError(message);
     } finally {
       fileRenameBusyRef.current = false;
       setFileRenameBusy(false);
@@ -3677,6 +3859,18 @@ export default function Workbench() {
     fileRenameBusy,
     fileRenameEditing,
   ]);
+
+  useEffect(() => {
+    if (!fileRenameEditing || fileRenameBusy) return undefined;
+    const onPointerDown = (event: PointerEvent) => {
+      if (!fileRenameErrorRef.current) return;
+      const field = fileRenameInputRef.current?.closest(".window-file-rename-field");
+      if (field instanceof Element && field.contains(event.target as Node)) return;
+      cancelFileRename();
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    return () => document.removeEventListener("pointerdown", onPointerDown, true);
+  }, [cancelFileRename, fileRenameBusy, fileRenameEditing]);
 
   const showProjectRecordsInFolder = useCallback(async () => {
     const context = workspaceControllerRef.current?.getCurrentProjectContext();
@@ -4006,6 +4200,11 @@ export default function Workbench() {
     );
     if (
       !skipConfirmation
+      && persistState === "conflict"
+      && !window.confirm("确定要用外部版本覆盖当前编辑吗？此操作不可撤销。")
+    ) return;
+    if (
+      !skipConfirmation
       && persistState !== "conflict"
       && hasUnwrittenLocalChanges
       && !window.confirm("重新载入会舍弃尚未写回的当前编辑内容。建议先导出副本，仍要继续吗？")
@@ -4069,6 +4268,124 @@ export default function Workbench() {
       void reloadCurrentSource({ fromDeferred: true });
     };
   }, [reloadCurrentSource]);
+
+  const previewExternalSource = useCallback(async () => {
+    const context = captureProjectContext();
+    if (!context || !workspaceController) return;
+    const outcome = await requiredWorkspaceController(workspaceController)
+      .previewExternalDocumentSource({ context });
+    if (outcome.status !== "succeeded") {
+      setToast({
+        title: "无法预览外部版本",
+        message: outcome.status === "stale"
+          ? "当前项目已经切换。"
+          : outcome.reason,
+        tone: "error",
+        sticky: true,
+        disposition: "background-result",
+        dedupeKey: "external-source-preview-failed",
+      });
+      return;
+    }
+    setExternalSourcePreview({
+      html: String(outcome.value.html || ""),
+      sourceSha256: String(outcome.value.sourceSha256 || ""),
+      lastModifiedAt: String(outcome.value.lastModifiedAt || ""),
+    });
+    setHandoffPreviewOpen(false);
+    setCanvasMode("preview");
+  }, [captureProjectContext, workspaceController]);
+
+  const returnToEditingFromExternalPreview = useCallback(() => {
+    setExternalSourcePreview(null);
+    setCanvasMode("edit");
+  }, []);
+
+  const externalPreviewIdentityRef = useRef("");
+  useEffect(() => {
+    const identity = `${projectId || ""}\0${documentId || ""}\0${sourcePath || ""}`;
+    const previous = externalPreviewIdentityRef.current;
+    externalPreviewIdentityRef.current = identity;
+    if (!previous || previous === identity) return;
+    const [previousProjectId, previousDocumentId, previousSourcePath] = previous.split("\0");
+    if (
+      (previousProjectId && projectId && previousProjectId !== projectId)
+      || (previousDocumentId && documentId && previousDocumentId !== documentId)
+      || (previousSourcePath && sourcePath && previousSourcePath !== sourcePath)
+    ) {
+      setExternalSourcePreview(null);
+    }
+  }, [documentId, projectId, sourcePath]);
+
+  const forceUnlockCurrentSource = useCallback(async ({
+    skipConfirmation = false,
+  }: {
+    skipConfirmation?: boolean;
+  } = {}) => {
+    const context = captureProjectContext();
+    if (!context || !workspaceController) return;
+    if (
+      !skipConfirmation
+      && !window.confirm("确定要用磁盘上的版本继续吗？未写入的编辑和未完成的 AI 结果都会丢弃，此操作不可撤销。")
+    ) {
+      return;
+    }
+    const operationId = beginSourceTransition();
+    if (operationId === null) return;
+    try {
+      const outcome = await requiredWorkspaceController(workspaceController)
+        .forceUnlockDocumentConflict({ context });
+      if (
+        outcome.status === "stale"
+        || sourceTransitionOperationRef.current !== operationId
+        || !isCurrentProjectContext(context)
+      ) return;
+      if (outcome.status !== "succeeded") {
+        throw new Error(outcome.reason);
+      }
+      setExternalSourcePreview(null);
+      const lastModified = String(outcome.value.lastModifiedAt || "");
+      if (lastModified) setLastModifiedAt(lastModified);
+      await refreshWorkspace(context.sourcePath, context.epoch);
+      setCanvasMode("edit");
+      setToast({
+        title: "项目已解锁",
+        message: "可以继续编辑，之后的修改会写回磁盘。",
+        tone: "success",
+        disposition: "background-result",
+        dedupeKey: "source-force-unlock",
+      });
+    } catch (cause) {
+      if (!isCurrentProjectContext(context)) return;
+      setToast({
+        title: "强制解锁失败",
+        message: productErrorMessage(cause, "项目仍保持冲突状态，请先导出当前编辑后再试。"),
+        tone: "error",
+        sticky: true,
+        disposition: "user-choice",
+        dedupeKey: "source-force-unlock-failed",
+        action: { id: "relaunch-app", label: "重新打开源页" },
+      });
+    } finally {
+      finishSourceTransition(operationId);
+    }
+  }, [
+    beginSourceTransition,
+    captureProjectContext,
+    finishSourceTransition,
+    isCurrentProjectContext,
+    refreshWorkspace,
+    workspaceController,
+  ]);
+
+  const acceptExternalSourceFromPreview = useCallback(async () => {
+    setExternalSourcePreview(null);
+    if (persistState === "conflict") {
+      await forceUnlockCurrentSource({ skipConfirmation: true });
+      return;
+    }
+    await reloadCurrentSource({ skipConfirmation: true });
+  }, [forceUnlockCurrentSource, persistState, reloadCurrentSource]);
 
   const requestUserFlush = useCallback((fromDeferred = false) => {
     if (interactionLocked) {
@@ -4148,8 +4465,9 @@ export default function Workbench() {
       editorRef.current?.cancelHistoryAction();
       return false;
     }
-    const outcome = await requiredWorkspaceController(workspaceController)
-      .performDocumentHistoryAction({ direction, context });
+    lastHistoryDirectionRef.current = direction;
+    const controller = requiredWorkspaceController(workspaceController);
+    const outcome = await controller.performDocumentHistoryAction({ direction, context });
     if (outcome.status === "succeeded") return true;
     editorRef.current?.cancelHistoryAction({
       restore: outcome.status !== "stale",
@@ -4159,8 +4477,9 @@ export default function Workbench() {
         title: direction === "undo" ? "撤销未完成" : "重做未完成",
         message: outcome.reason,
         tone: "warning",
-        disposition: "background-result",
+        disposition: "user-choice",
         dedupeKey: `source-history-${direction}-failed`,
+        action: { id: "retry-history", label: "再试一次", direction },
       });
     }
     return false;
@@ -5876,7 +6195,9 @@ export default function Workbench() {
     workspaceController,
   ]);
 
-  const persistLabel = persistState === "writing"
+  const persistLabel = workspaceController?.hasDocumentHistoryAction
+    ? "正在撤销或重做…"
+    : persistState === "writing"
     ? "正在更新文件…"
     : persistState === "queued"
       ? "正在更新文件…"
@@ -6440,6 +6761,11 @@ export default function Workbench() {
       case "open-handoff":
         setDrawer("handoff");
         return;
+      case "retry-history":
+        void requestSourceHistoryAction(
+          action.direction || lastHistoryDirectionRef.current,
+        );
+        return;
       case "open-project":
       case "retry-project-open":
         void openProject(action.sourcePath);
@@ -6636,10 +6962,19 @@ export default function Workbench() {
                     maxLength={180}
                     spellCheck={false}
                     value={fileRenameDraft}
-                    onBlur={() => void commitFileRename()}
+                    onBlur={() => {
+                      if (fileRenameErrorRef.current) {
+                        cancelFileRename();
+                        return;
+                      }
+                      void commitFileRename();
+                    }}
                     onChange={(event) => {
                       setFileRenameDraft(event.target.value);
-                      if (fileRenameError) setFileRenameError("");
+                      if (fileRenameError) {
+                        fileRenameErrorRef.current = "";
+                        setFileRenameError("");
+                      }
                     }}
                     onKeyDown={(event) => {
                       if (event.key === "Enter") {
@@ -6794,6 +7129,10 @@ export default function Workbench() {
               disabled={browserPreviewOnly || runInProgress || viewMode === "history"}
               title={browserPreviewOnly ? "浏览器预览为只读模式" : undefined}
               onClick={() => {
+                if (externalSourcePreview) {
+                  returnToEditingFromExternalPreview();
+                  return;
+                }
                 if (canvasMode !== "preview") {
                   setCanvasMode("edit");
                   return;
@@ -7015,20 +7354,40 @@ export default function Workbench() {
         </section>
       ) : null}
 
-      {!workspaceIssue && (persistState === "conflict" || persistState === "failed") ? (
+      {!workspaceIssue
+      && !externalSourcePreview
+      && (persistState === "conflict" || persistState === "failed") ? (
         <section className="source-conflict-banner" role="alert">
           <div>
-            <strong>{persistState === "conflict" ? "源 HTML 已被外部修改" : "当前修改还没有写入文件"}</strong>
-            <span>{persistError || "工作台保留了当前编辑内容，不会假装已经更新。"}</span>
+            <strong>{persistState === "conflict" ? "源文件在磁盘上被其他程序修改了" : "当前修改还没有写入文件"}</strong>
+            <span>{persistState === "conflict"
+              ? (persistError || "您的编辑内容仍在，可先预览外部版本再决定。")
+              : (persistError || "工作台保留了当前编辑内容，不会假装已经更新。")}</span>
           </div>
           <button type="button" onClick={() => void exportCurrentHtml()}>导出当前编辑</button>
-          <button
-            type="button"
-            onClick={() => {
-              if (persistState === "conflict") void reloadCurrentSource();
-              else requestUserFlush();
-            }}
-          >{persistState === "conflict" ? "重新载入外部文件" : "重试更新文件"}</button>
+          {persistState === "conflict" ? (
+            <button type="button" onClick={() => void previewExternalSource()}>
+              预览外部版本
+            </button>
+          ) : null}
+          {persistState === "conflict" ? (
+            <button
+              type="button"
+              className="destructive-action"
+              onClick={() => {
+                void forceUnlockCurrentSource();
+              }}
+            >
+              采用磁盘版本
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                requestUserFlush();
+              }}
+            >重试更新文件</button>
+          )}
         </section>
       ) : null}
 
@@ -7050,7 +7409,20 @@ export default function Workbench() {
         </section>
       ) : null}
 
-      {runInProgress && handoffPreviewOpen ? (
+      {externalSourcePreview ? (
+        <PreviewNavigationBanner
+          key={`external-${externalSourcePreview.sourceSha256}`}
+          icon={<EyeIcon aria-hidden="true" size={18} weight="duotone" />}
+          title="正在预览外部版本"
+          detail="这是磁盘上被其他程序改过的源 HTML，尚未替换您的编辑。"
+          secondaryActionLabel="接受此版本（丢弃我的编辑）"
+          onSecondaryAction={() => {
+            void acceptExternalSourceFromPreview();
+          }}
+          actionLabel="返回我的编辑"
+          onAction={returnToEditingFromExternalPreview}
+        />
+      ) : runInProgress && handoffPreviewOpen ? (
         <PreviewNavigationBanner
           key={`handoff-${activeRun?.requestId || "pending"}-${activeRun?.attemptId || "pending"}`}
           className="sent-preview-banner"
@@ -8467,6 +8839,11 @@ export default function Workbench() {
               pendingRunOutcome={pendingRunOutcome}
               canRevealAiTask={canRevealAiTask}
               onRevealAiTask={() => void revealAiTaskInFinder()}
+              onRetrySubmission={() => {
+                workspaceControllerRef.current?.dismissActiveRun();
+                void generateRequest();
+              }}
+              onCancelRun={requestActiveRunEnd}
             />
           ) : null}
         </div>
@@ -8587,6 +8964,9 @@ export default function Workbench() {
           message={toast.message}
           tone={toast.tone}
           actionLabel={toast.action?.label}
+          dismissMs={noticeAutoDismissMs(toast)}
+          paused={noticeTimerPaused}
+          repeatCount={toast.repeatCount || 1}
           onAction={toast.action ? (() => {
             const action = toast.action;
             if (action) handleToastAction(action);
