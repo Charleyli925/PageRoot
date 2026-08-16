@@ -4,6 +4,11 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
+- Preview sessions now refresh in place for the same Edit sibling-asset
+  source path, and a full session map evicts the least-recently-accessed idle
+  session instead of the oldest insert. Repeated saves and Preview toggles
+  keep the live Edit/Preview resource base instead of dropping it after eight
+  sessions.
 - Browser encoding-error “重新选择” now reopens the HTML picker in the same
   click, then switches to the next UTF-8 HTML. The current page is not drained
   before the chooser appears, so the hidden file input keeps the user gesture

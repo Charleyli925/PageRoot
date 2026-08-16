@@ -49,6 +49,7 @@ type DesktopPreviewApi = {
     bootstrapJavaScript: string;
     bootstrapFallbackJavaScript?: string;
     sourcePath?: string;
+    sessionId?: string;
   }) => Promise<DesktopPreviewSession>;
   revokeSession: (sessionId: string) => Promise<{ revoked: boolean }>;
 };

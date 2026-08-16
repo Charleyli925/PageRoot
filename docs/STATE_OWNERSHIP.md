@@ -204,7 +204,10 @@ Rules:
 - Interactive-preview sessions, page-view context, the direct one-shot Edit
   author-runtime session and Review runtime snapshots are disposable. They do
   not participate in save, switch, submit or close drains, and cannot become a
-  second copy of the source HTML. The Edit session has no bitmap/cache/
+  second copy of the source HTML. Desktop `pageroot-preview` sessions are owned
+  by the preview protocol controller: Edit static sibling-asset sessions
+  refresh in place for the same source path, and a full map evicts the
+  least-recently-accessed idle session rather than the oldest insert. The Edit session has no bitmap/cache/
   projection state: it selects one initial frozen runtime frame or the static
   frame and never persists runtime descendants. Edit screenshot count must be 0.
 - AI review state fields are orthogonal. Page, filter, visibility, navigation,
