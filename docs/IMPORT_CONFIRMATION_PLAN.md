@@ -8,7 +8,7 @@
 - 推荐拆分：2 个完整 PR；只有发现本文列出的硬阻塞才停下重新评审，不能自行扩成平行版本系统
 - 目标：新外部 HTML 先确认再导入；同一外部原文件永久回到唯一项目；V1/当前本地编辑语义准确；可选删除严格后置；任何 Canvas 确认都有终态
 
-> PR-1 正在本分支实施：长期外部源绑定、只读 A/B/C 分类与跨实例 Registry 写锁。确认 UI、Prepared Intent、删除原稿和 Canvas 终态仍属 PR-2，不得提前标成 Ready。
+> 本分支已实施 PR-1 与 PR-2：长期外部源绑定、只读 A/B/C 分类、确认 UI、Prepared Intent、Canvas 终态与可选废纸篓删除。保持 Draft，直到全部条款验收完成后再标 Ready。
 
 ## 0. 执行摘要
 
@@ -655,17 +655,18 @@ applying + newer request → complete/rollback old first → then new
 #### 5.9.3 用户确认后的共同切换
 
 ```text
-prepareSwitch()
-  → final fence/freeze current Canvas
-  → capture previous aggregate authority
-  → Desktop commitPreparedHtmlOpen
+epoch > 0：prepareSwitch() → final fence/freeze current Canvas → capture previous aggregate authority
+epoch = 0（冷启动尚未绑定项目，例如上次打开的是待确认外部 HTML）：跳过 Canvas fence，与 #applyAcceptedProject 相同
+  → Desktop commitPreparedHtmlOpen（首次导入把原稿目录留作本进程 Edit 资源根）
   → validate returned project HTML/Hash/OpenTarget/receipt
   → synchronous #applyProject
+  → refreshWorkspace（结束 hydrating；先水合再确认画布，避免二次重建打断 one-shot runtime）
   → ensureCurrentCanvas(new context)
+  → finalizePrepared
   → success receipt
 ```
 
-必须删除“先 accept/activate，再由第二个 application重复 prepareSwitch”的双重围栏；一个 `applicationId` 只执行一次最终 switch fence和一次 commit。若为兼容保留 helper，测试要证明没有重复作者 runtime或重复 activate。
+必须删除“先 accept/activate，再由第二个 application重复 prepareSwitch”的双重围栏；一个 `applicationId` 只执行一次最终 switch fence和一次 commit。若为兼容保留 helper，测试要证明没有重复作者 runtime或重复 activate。冷启动确认不得因 `fencePendingEdit` 返回空而挡住导入。
 
 #### 5.9.4 Canvas 失败
 

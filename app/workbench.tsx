@@ -50,6 +50,7 @@ import HtmlInteractionPreview, {
 } from "./components/HtmlInteractionPreview";
 import NoticeBar from "./components/NoticeBar";
 import RestartUpdateDialog from "./components/RestartUpdateDialog";
+import ExternalHtmlOpenDialog from "./workbench/ExternalHtmlOpenDialog";
 import {
   MAX_ATTACHMENT_BYTES,
   MAX_COMMENT_ATTACHMENTS,
@@ -284,11 +285,13 @@ const INITIAL_RUN_SNAPSHOT: RunSessionSnapshot = {
   backgroundResults: [],
 };
 const INITIAL_EXTERNAL_FILE_OPEN_SNAPSHOT = {
-  status: "idle",
+  status: "idle" as const,
   activeRequestId: null,
   queuedRequestId: null,
   deferredRequestId: null,
   deferredSequence: 0,
+  confirmation: null,
+  attention: null,
 };
 const INITIAL_PROJECT_APPLICATION_SNAPSHOT = {
   status: "idle",
@@ -317,6 +320,12 @@ const INITIAL_DOCUMENT_SNAPSHOT: DocumentSessionSnapshot = {
   html: DEFAULT_PROJECT_HTML,
   sourceSha256: null,
   canvasGeneration: 0,
+  canvasAuthority: {
+    status: "idle",
+    generation: 0,
+    renderedSha256: null,
+    error: null,
+  },
   editRevision: 0,
   lastPersistedRevision: 0,
   persistState: "idle",
@@ -533,6 +542,7 @@ export default function Workbench() {
   const normalizeCurrentGlobalCommentsRef = useRef<() => CommentItem[]>(() => []);
   const projectRulesEditorRef = useRef<HTMLTextAreaElement | null>(null);
   const fileRenameInputRef = useRef<HTMLInputElement | null>(null);
+  const openHtmlButtonRef = useRef<HTMLButtonElement | null>(null);
   const fileRenameEditingRef = useRef(false);
   const fileRenameBusyRef = useRef(false);
   const automaticProjectRegistrationRef = useRef("");
@@ -580,6 +590,8 @@ export default function Workbench() {
   const externalFileOpenSnapshot =
     workspaceControllerSnapshot?.project?.externalOpen
     ?? INITIAL_EXTERNAL_FILE_OPEN_SNAPSHOT;
+  const openConfirmation =
+    workspaceControllerSnapshot?.project?.openConfirmation || null;
   const projectApplicationSnapshot =
     workspaceControllerSnapshot?.project?.projectApplication
     ?? INITIAL_PROJECT_APPLICATION_SNAPSHOT;
@@ -993,6 +1005,30 @@ export default function Workbench() {
               if (!accept) throw new Error("当前 PageRoot 版本缺少外部文件打开通道。");
               return accept(requestId);
             },
+            commitPrepared: async (payload: {
+              requestId: string;
+              action: "import-new" | "continue-current" | "open-managed";
+              deleteOriginal?: boolean;
+            }) => {
+              const commit = window.htmlAIProjects?.commitPreparedHtmlOpen;
+              if (!commit) throw new Error("当前 PageRoot 版本缺少导入确认通道。");
+              return commit(payload);
+            },
+            cancelPrepared: async (requestId: string) => {
+              const cancel = window.htmlAIProjects?.cancelPreparedHtmlOpen;
+              if (!cancel) return { canceled: false };
+              return cancel(requestId);
+            },
+            finalizePrepared: async (requestId: string) => {
+              const finalize = window.htmlAIProjects?.finalizePreparedHtmlOpen;
+              if (!finalize) return { disposition: "kept" as const };
+              return finalize(requestId);
+            },
+            rollbackPrepared: async (requestId: string) => {
+              const rollback = window.htmlAIProjects?.rollbackPreparedHtmlOpen;
+              if (!rollback) return { rolledBack: false, project: null };
+              return rollback(requestId);
+            },
             activateGeneratedVersion: async (input: {
               previousSourcePath: string;
               nextSourcePath: string;
@@ -1151,9 +1187,16 @@ export default function Workbench() {
     sha256: string | null,
   ): boolean => {
     if (generation !== currentDocumentSessionSnapshot().canvasGeneration) return false;
+    if (surface === "edit") {
+      if (!sha256) return false;
+      return workspaceControllerRef.current?.acknowledgeEditCanvas({
+        generation,
+        renderedSha256: sha256,
+      }) === true;
+    }
     setCanvasRenderAcks((current) => ({
       ...current,
-      [surface]: sha256 ? { generation, sha256 } : null,
+      preview: sha256 ? { generation, sha256 } : null,
     }));
     return true;
   }, [currentDocumentSessionSnapshot]);
@@ -1248,15 +1291,6 @@ export default function Workbench() {
         setProjectRecordsPreparing(false);
         setProjectRecordsError("");
         if (registrationEvent.projectName) setProjectName(registrationEvent.projectName);
-        if (registrationEvent.imported) {
-          setToast({
-            title: "已打开",
-            message: "原来的文件没有改动。",
-            tone: "success",
-            disposition: "background-result",
-            dedupeKey: "project-file-imported",
-          });
-        }
         if (registrationEvent.workingCopyRecovered) {
           setToast({
             title: "文件已自动恢复",
@@ -1266,6 +1300,53 @@ export default function Workbench() {
             dedupeKey: "working-copy-recovered",
           });
         }
+        return;
+      }
+      if (event.type === "external-open-completed") {
+        const openEvent = event as Readonly<{
+          imported?: boolean;
+          disposition?: string;
+          visibleV1FileName?: string;
+          sourcePath?: string | null;
+        }>;
+        if (!openEvent.imported) return;
+        const fileName = openEvent.visibleV1FileName || "项目内的 V1 文件";
+        const disposition = openEvent.disposition || "kept";
+        const message = disposition === "trashed"
+          ? `初始版本 V1 已保存为 ${fileName}。原文件已移入废纸篓。`
+          : disposition === "trash-failed"
+            ? "项目已导入。原文件未能删除，仍留在原来的位置。"
+            : `初始版本 V1 已保存为 ${fileName}，与刚才选择的文件一致。原文件没有改动。`;
+        setToast({
+          title: "已导入 PageRoot",
+          message,
+          tone: disposition === "trash-failed" ? "warning" : "success",
+          disposition: "background-result",
+          dedupeKey: "external-html-imported",
+          ...(openEvent.sourcePath ? {
+            action: {
+              id: "reveal-imported-project" as const,
+              label: "在文件夹中打开",
+              sourcePath: openEvent.sourcePath,
+            },
+          } : {}),
+        });
+        return;
+      }
+      if (event.type === "external-open-canvas-failed") {
+        const canvasEvent = event as Readonly<{ reason?: string }>;
+        setToast({
+          title: "画布确认失败",
+          message: canvasEvent.reason || "当前画布尚未完成自动恢复。",
+          tone: "error",
+          sticky: true,
+          disposition: "direct-action",
+          dedupeKey: "canvas-verification-failed",
+          action: {
+            id: "retry-canvas-verification",
+            label: "重试",
+          },
+        });
         return;
       }
       if (event.type === "attachment-cleanup-failed") {
@@ -2819,6 +2900,7 @@ export default function Workbench() {
           !cancelled
           && currentDocumentSessionSnapshot().html === expectedHtml
           && currentDocumentSessionSnapshot().canvasGeneration === expectedGeneration
+          && currentDocumentSessionSnapshot().sourceSha256 === renderedSha256
         ) {
           acknowledgeCanvasRender("edit", expectedGeneration, renderedSha256);
         }
@@ -2837,6 +2919,7 @@ export default function Workbench() {
     editRuntimePhase,
     editRuntimeRenderPending,
     html,
+    sourceSha256,
   ]);
 
   const clearAutosaveTimer = useCallback(() => {
@@ -5808,9 +5891,17 @@ export default function Workbench() {
             : browserPreviewOnly
               ? "浏览器预览 · 只读"
               : "内置介绍页 · 打开本地 HTML 后开始编辑";
+  const canvasAuthority = documentSnapshot.canvasAuthority;
   const visibleCanvasAck = canvasMode === "preview"
     ? canvasRenderAcks.preview
-    : canvasRenderAcks.edit;
+    : (
+      canvasAuthority?.status === "verified"
+        ? {
+          generation: canvasAuthority.generation,
+          sha256: canvasAuthority.renderedSha256,
+        }
+        : null
+    );
   const isSafelySaved = Boolean(
     sourcePath
     && sourceSha256
@@ -5820,12 +5911,15 @@ export default function Workbench() {
     && !projectHydrating
     && !projectLoadError
     && !viewTransitioning
-    && visibleCanvasAck?.generation === canvasGeneration
-    && visibleCanvasAck.sha256 === sourceSha256
+    && canvasAuthority?.status === "verified"
+    && canvasAuthority.generation === canvasGeneration
+    && canvasAuthority.renderedSha256 === sourceSha256
   );
-  const safeSaveLabel = isSafelySaved
-    ? "已安全保存"
-    : "正在确认当前画布…";
+  const safeSaveLabel = canvasAuthority?.status === "failed"
+    ? "画布确认失败 · 重试"
+    : isSafelySaved
+      ? "已安全保存"
+      : "正在确认当前画布…";
   const saveStatusLabel = browserPreviewOnly
     ? "操作不会保存"
     : fileRenameBusy
@@ -6332,6 +6426,14 @@ export default function Workbench() {
   const handleToastAction = (action: ToastAction) => {
     setToast(null);
     switch (action.id) {
+      case "retry-canvas-verification":
+        void workspaceControllerRef.current?.retryCanvasVerification({
+          context: captureProjectContext() || undefined,
+        });
+        return;
+      case "reveal-imported-project":
+        void showProjectInFolder(action.sourcePath);
+        return;
       case "retry-export":
         void exportCurrentHtml();
         return;
@@ -6579,7 +6681,8 @@ export default function Workbench() {
                 </strong>
               )}
               <span className="window-file-quick-actions">
-                <button
+                  <button
+                  ref={openHtmlButtonRef}
                   className="window-file-quick-action"
                   type="button"
                   data-tooltip="打开本地HTML"
@@ -6656,10 +6759,25 @@ export default function Workbench() {
                 data-edit-revision={editRevision}
                 data-persisted-revision={lastPersistedRevision}
                 data-canvas-generation={canvasGeneration}
+                data-canvas-authority={canvasAuthority?.status}
                 data-render-generation={visibleCanvasAck?.generation}
                 data-rendered-sha256={visibleCanvasAck?.sha256 || undefined}
-                role="status"
+                role={canvasAuthority?.status === "failed" ? "button" : "status"}
                 aria-live="polite"
+                tabIndex={canvasAuthority?.status === "failed" ? 0 : undefined}
+                onClick={canvasAuthority?.status === "failed" ? () => {
+                  void workspaceController?.retryCanvasVerification({
+                    context: captureProjectContext() || undefined,
+                  });
+                } : undefined}
+                onKeyDown={canvasAuthority?.status === "failed" ? (event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    void workspaceController?.retryCanvasVerification({
+                      context: captureProjectContext() || undefined,
+                    });
+                  }
+                } : undefined}
               >
                 <span aria-hidden="true" />
                 {saveStatusLabel}
@@ -8385,6 +8503,35 @@ export default function Workbench() {
           />
         ) : null}
       </aside>
+
+      {openConfirmation ? (
+        <ExternalHtmlOpenDialog
+          confirmation={openConfirmation}
+          deleteOriginal={openConfirmation.deleteOriginal === true}
+          busy={openConfirmation.busy === true}
+          onDeleteOriginalChange={(next) => {
+            workspaceController?.setExternalOpenDeleteOriginal({
+              requestId: openConfirmation.requestId,
+              deleteOriginal: next,
+            });
+          }}
+          onCancel={() => {
+            workspaceController?.cancelExternalOpen({
+              requestId: openConfirmation.requestId,
+            });
+            openHtmlButtonRef.current?.focus();
+          }}
+          onConfirm={(action) => {
+            void workspaceController?.confirmExternalOpen({
+              requestId: openConfirmation.requestId,
+              action,
+              deleteOriginal: openConfirmation.deleteOriginal === true,
+            }).finally(() => {
+              openHtmlButtonRef.current?.focus();
+            });
+          }}
+        />
+      ) : null}
 
       <CancelAiRunDialog
         open={cancelRunConfirmationOpen}

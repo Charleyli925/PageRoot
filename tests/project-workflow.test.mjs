@@ -921,12 +921,30 @@ test("close drains an in-flight local picker before it commits", async (t) => {
 });
 
 test("close drains project switch preparation before it commits", async (t) => {
-  let resolveCanvas;
-  const harness = createHarness();
-  t.after(() => harness.workflow.dispose());
-  harness.documentWorkflow.ensureCurrentCanvas = () => new Promise((resolve) => {
-    resolveCanvas = () => resolve(succeeded({ ready: true }));
+  const harness = createHarness({
+    projectOpen: {
+      async openLocal() {
+        return {
+          name: "A",
+          sourcePath: A_PATH,
+          html: A_HTML,
+          sha256: sha256(A_HTML),
+        };
+      },
+    },
   });
+  t.after(() => harness.workflow.dispose());
+  let canvasReleased = false;
+  let resolveCanvas;
+  harness.documentWorkflow.ensureCurrentCanvas = () => {
+    if (canvasReleased) return Promise.resolve(succeeded({ ready: true }));
+    return new Promise((resolve) => {
+      resolveCanvas = () => {
+        canvasReleased = true;
+        resolve(succeeded({ ready: true }));
+      };
+    });
+  };
 
   const opening = harness.workflow.openProject({ kind: "local" });
   await waitFor(
@@ -949,7 +967,7 @@ test("close drains project switch preparation before it commits", async (t) => {
   resolveCanvas();
   const [opened, readiness] = await Promise.all([opening, closing]);
   assert.equal(opened.status, "succeeded");
-  assert.equal(opened.value.opened, false);
+  assert.equal(opened.value.opened, true);
   assert.deepEqual(readiness, { ready: true });
   assert.equal(harness.workflow.getSnapshot().close.phase, "ready");
 });
@@ -1291,4 +1309,285 @@ test("a pending source rename blocks another project transition at the workflow 
   });
   resolveRename();
   assert.equal((await rename).status, "succeeded");
+});
+
+test("cancelling the local picker does not drain the current project", async (t) => {
+  let fenced = 0;
+  const harness = createHarness({
+    canvas: {
+      fencePendingEdit: () => {
+        fenced += 1;
+        return {
+          ok: true,
+          html: OLD_HTML,
+          sourceSha256: sha256(OLD_HTML),
+        };
+      },
+    },
+    projectOpen: {
+      async openLocal() {
+        return null;
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+  const outcome = await harness.workflow.openProject({ kind: "local" });
+  assert.equal(outcome.status, "succeeded");
+  assert.equal(outcome.value.opened, false);
+  assert.equal(fenced, 0);
+  assert.equal(harness.projectSession.sourcePath, OLD_PATH);
+});
+
+test("startup confirmation commits without fencing a nonexistent Canvas", async (t) => {
+  let fenced = 0;
+  const harness = createHarness({
+    initialProject: false,
+    canvas: {
+      fencePendingEdit: () => {
+        fenced += 1;
+        return null;
+      },
+    },
+    projectOpen: {
+      async getActive() {
+        return {
+          openKind: "confirmation",
+          requestId: "req_startup_new",
+          classification: "new-external",
+          sourceFileName: "page.html",
+          visibleV1FileName: "page-V1.html",
+          projectsRootLabel: "文稿 › PageRoot › 项目",
+        };
+      },
+      async commitPrepared() {
+        return {
+          name: "page-V1.html",
+          sourcePath: A_PATH,
+          html: A_HTML,
+          sha256: sha256(A_HTML),
+        };
+      },
+      async finalizePrepared() {
+        return { disposition: "kept" };
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+
+  const started = await harness.workflow.openProject({ kind: "startup" });
+  assert.equal(started.status, "succeeded");
+  assert.equal(started.value.awaitingConfirmation, true);
+  assert.equal(harness.projectSession.epoch, 0);
+  assert.equal(fenced, 0);
+
+  const confirmed = await harness.workflow.confirmExternalOpen({
+    requestId: "req_startup_new",
+    action: "import-new",
+  });
+  assert.equal(confirmed.status, "succeeded");
+  assert.equal(fenced, 0);
+  await waitFor(
+    () => harness.projectSession.sourcePath === A_PATH
+      && !harness.workflow.projectHydrating
+      && harness.workflow.getSnapshot().openConfirmation === null,
+    "startup confirmation did not finish hydration",
+  );
+  assert.equal(harness.documentSession.html, A_HTML);
+});
+
+test("a new-external picker result shows confirmation without switching", async (t) => {
+  let fenced = 0;
+  let committed = null;
+  const harness = createHarness({
+    canvas: {
+      fencePendingEdit: () => {
+        fenced += 1;
+        return {
+          ok: true,
+          html: OLD_HTML,
+          sourceSha256: sha256(OLD_HTML),
+        };
+      },
+    },
+    projectOpen: {
+      async openLocal() {
+        return {
+          openKind: "confirmation",
+          requestId: "req_new",
+          classification: "new-external",
+          sourceFileName: "page.html",
+          visibleV1FileName: "page-V1.html",
+          projectsRootLabel: "文稿 › PageRoot › 项目",
+        };
+      },
+      async commitPrepared(payload) {
+        committed = payload;
+        return {
+          name: "page-V1.html",
+          sourcePath: A_PATH,
+          html: A_HTML,
+          sha256: sha256(A_HTML),
+        };
+      },
+      async finalizePrepared() {
+        return { disposition: "kept" };
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+
+  const opened = await harness.workflow.openProject({ kind: "local" });
+  assert.equal(opened.status, "succeeded");
+  assert.equal(opened.value.awaitingConfirmation, true);
+  assert.equal(fenced, 0);
+  assert.equal(
+    harness.workflow.getSnapshot().openConfirmation?.classification,
+    "new-external",
+  );
+  assert.equal(harness.projectSession.sourcePath, OLD_PATH);
+
+  assert.equal(
+    (await harness.workflow.confirmExternalOpen({
+      requestId: "req_new",
+      action: "view-initial",
+    })).status,
+    "rejected",
+  );
+
+  const confirmed = await harness.workflow.confirmExternalOpen({
+    requestId: "req_new",
+    action: "import-new",
+  });
+  assert.equal(confirmed.status, "succeeded");
+  assert.deepEqual(committed, {
+    requestId: "req_new",
+    action: "import-new",
+  });
+  assert.equal(harness.projectSession.sourcePath, A_PATH);
+  assert.equal(harness.workflow.getSnapshot().openConfirmation, null);
+});
+
+test("canvas failure after import rolls back and never finalizes a trash request", async (t) => {
+  let finalized = 0;
+  let rolledBack = 0;
+  const harness = createHarness({
+    projectOpen: {
+      async openLocal() {
+        return {
+          openKind: "confirmation",
+          requestId: "req_canvas_fail",
+          classification: "new-external",
+          sourceFileName: "page.html",
+          visibleV1FileName: "page-V1.html",
+          projectsRootLabel: "文稿 › PageRoot › 项目",
+        };
+      },
+      async commitPrepared() {
+        return {
+          name: "page-V1.html",
+          sourcePath: A_PATH,
+          html: A_HTML,
+          sha256: sha256(A_HTML),
+        };
+      },
+      async rollbackPrepared() {
+        rolledBack += 1;
+        return { rolledBack: true };
+      },
+      async finalizePrepared() {
+        finalized += 1;
+        return { disposition: "trashed" };
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+  let canvasCalls = 0;
+  harness.documentWorkflow.ensureCurrentCanvas = async () => {
+    canvasCalls += 1;
+    if (canvasCalls === 1) return succeeded({ ready: true });
+    return {
+      status: "rejected",
+      code: "DOCUMENT_CANVAS_AUTHORITY_REJECTED",
+      reason: "当前画布尚未完成自动恢复。",
+    };
+  };
+
+  await harness.workflow.openProject({ kind: "local" });
+  harness.workflow.setExternalOpenDeleteOriginal({
+    requestId: "req_canvas_fail",
+    deleteOriginal: true,
+  });
+  const confirmed = await harness.workflow.confirmExternalOpen({
+    requestId: "req_canvas_fail",
+    action: "import-new",
+    deleteOriginal: true,
+  });
+  assert.equal(confirmed.status, "rejected");
+  assert.equal(canvasCalls, 2);
+  assert.equal(finalized, 0);
+  assert.equal(rolledBack, 1);
+  assert.equal(
+    harness.workflow.getSnapshot().openConfirmation?.requestId,
+    "req_canvas_fail",
+  );
+  assert.equal(
+    harness.events.some((event) => event.type === "external-open-canvas-failed"),
+    true,
+  );
+});
+
+test("continue-current opens the bound project without importing again", async (t) => {
+  let committed = null;
+  let finalized = 0;
+  const harness = createHarness({
+    projectOpen: {
+      async openLocal() {
+        return {
+          openKind: "confirmation",
+          requestId: "req_known",
+          classification: "known-external",
+          sourceFileName: "page.html",
+          projectName: "page",
+          currentBasedOnOrdinal: 6,
+          latestOfficialOrdinal: 6,
+          currentDiffersFromBase: true,
+          sourceRelation: "unchanged",
+        };
+      },
+      async commitPrepared(payload) {
+        committed = payload;
+        return {
+          name: "page-V1.html",
+          sourcePath: A_PATH,
+          html: A_HTML,
+          sha256: sha256(A_HTML),
+        };
+      },
+      async finalizePrepared() {
+        finalized += 1;
+        return { disposition: "kept" };
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+
+  await harness.workflow.openProject({ kind: "local" });
+  assert.equal(
+    harness.workflow.setExternalOpenDeleteOriginal({
+      requestId: "req_known",
+      deleteOriginal: true,
+    }).status,
+    "rejected",
+  );
+  const confirmed = await harness.workflow.confirmExternalOpen({
+    requestId: "req_known",
+    action: "continue-current",
+  });
+  assert.equal(confirmed.status, "succeeded");
+  assert.deepEqual(committed, {
+    requestId: "req_known",
+    action: "continue-current",
+  });
+  assert.equal(finalized, 1);
+  assert.equal(harness.projectSession.sourcePath, A_PATH);
 });

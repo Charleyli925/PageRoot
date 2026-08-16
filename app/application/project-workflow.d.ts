@@ -53,6 +53,20 @@ export type ProjectWorkflowSnapshot = Readonly<{
     phase: "idle" | "preparing" | "ready";
     requestId: string | null;
   }>;
+  openConfirmation: Readonly<{
+    requestId: string;
+    classification: "new-external" | "known-external" | string;
+    sourceFileName?: string;
+    visibleV1FileName?: string;
+    projectsRootLabel?: string;
+    projectName?: string;
+    currentBasedOnOrdinal?: number;
+    latestOfficialOrdinal?: number;
+    currentDiffersFromBase?: boolean;
+    sourceRelation?: "unchanged" | "changed";
+    deleteOriginal?: boolean;
+    busy?: boolean;
+  }> | null;
   externalOpen: ExternalFileOpenSnapshot;
   projectApplication: ProjectApplicationSnapshot;
 }>;
@@ -133,8 +147,19 @@ export class ProjectWorkflow {
   }): ProjectWorkflowOutcome;
   acceptExternalProject(input: {
     requestId: string;
-    sourcePath: string;
+    sourcePath?: string;
   }): ProjectWorkflowOutcome;
+  confirmExternalOpen(input?: {
+    requestId?: string;
+    action?: string;
+    deleteOriginal?: boolean;
+  }): Promise<ProjectWorkflowOutcome>;
+  cancelExternalOpen(input?: { requestId?: string }): ProjectWorkflowOutcome;
+  setExternalOpenDeleteOriginal(input?: {
+    requestId?: string;
+    deleteOriginal?: boolean;
+  }): ProjectWorkflowOutcome;
+  retryExternalOpen(input?: { requestId?: string }): Promise<ProjectWorkflowOutcome>;
   resumeDeferredExternalProject(): ProjectWorkflowOutcome;
   resumeDeferredProjectApplication(): ProjectWorkflowOutcome;
   reconcileDeferred(): void;

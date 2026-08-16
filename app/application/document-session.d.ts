@@ -6,10 +6,24 @@ export type DocumentPersistState =
   | "failed"
   | "conflict";
 
+export type DocumentCanvasAuthorityStatus =
+  | "idle"
+  | "pending"
+  | "verified"
+  | "failed";
+
+export type DocumentCanvasAuthority = {
+  status: DocumentCanvasAuthorityStatus;
+  generation: number;
+  renderedSha256: string | null;
+  error: string | null;
+};
+
 export type DocumentSessionSnapshot = {
   html: string;
   sourceSha256: string | null;
   canvasGeneration: number;
+  canvasAuthority: DocumentCanvasAuthority;
   editRevision: number;
   lastPersistedRevision: number;
   persistState: DocumentPersistState;
@@ -71,6 +85,14 @@ export class DocumentSession<TWrite = unknown> {
     pendingWrite?: TWrite | null;
   }): DocumentSessionSnapshot;
   reloadCanvas(): DocumentSessionSnapshot;
+  confirmCanvas(value: {
+    generation: number;
+    renderedSha256: string;
+  }): boolean;
+  failCanvas(value: {
+    generation: number;
+    error?: string;
+  }): boolean;
   beginEdit(html: string): number;
   setHtml(html: string): void;
   setSourceSha256(sourceSha256: string | null): void;
@@ -100,6 +122,7 @@ export class DocumentSession<TWrite = unknown> {
   readonly html: string;
   readonly sourceSha256: string | null;
   readonly canvasGeneration: number;
+  readonly canvasAuthority: DocumentCanvasAuthority;
   readonly editRevision: number;
   readonly lastPersistedRevision: number;
   readonly persistState: DocumentPersistState;

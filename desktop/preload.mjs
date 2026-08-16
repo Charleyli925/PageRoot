@@ -22,6 +22,10 @@ const channels = Object.freeze({
   openRecent: "html-projects:open-recent",
   forgetRecent: "html-projects:forget-recent",
   acceptExternalOpen: "html-projects:accept-external-open",
+  commitPreparedHtmlOpen: "html-projects:commit-prepared-open",
+  cancelPreparedHtmlOpen: "html-projects:cancel-prepared-open",
+  finalizePreparedHtmlOpen: "html-projects:finalize-prepared-open",
+  rollbackPreparedHtmlOpen: "html-projects:rollback-prepared-open",
 });
 const appChannels = Object.freeze({
   prepareClose: "html-app:prepare-close",
@@ -146,6 +150,26 @@ const projectsApi = Object.freeze({
     channels.acceptExternalOpen,
     { requestId },
   ),
+  commitPreparedHtmlOpen: (payload) => invokeProject(
+    channels.commitPreparedHtmlOpen,
+    {
+      requestId: payload?.requestId,
+      action: payload?.action,
+      ...(payload?.deleteOriginal === true ? { deleteOriginal: true } : {}),
+    },
+  ),
+  cancelPreparedHtmlOpen: (requestId) => invokeProject(
+    channels.cancelPreparedHtmlOpen,
+    { requestId },
+  ),
+  finalizePreparedHtmlOpen: (requestId) => invokeProject(
+    channels.finalizePreparedHtmlOpen,
+    { requestId },
+  ),
+  rollbackPreparedHtmlOpen: (requestId) => invokeProject(
+    channels.rollbackPreparedHtmlOpen,
+    { requestId },
+  ),
 });
 const integrationsApi = Object.freeze({
   handoffToQoderWork: (payload) => invokeProject(
@@ -239,12 +263,9 @@ function normalizedExternalOpenRequest(payload) {
     !payload
     || typeof payload.requestId !== "string"
     || !payload.requestId
-    || typeof payload.sourcePath !== "string"
-    || !payload.sourcePath
   ) return null;
   return Object.freeze({
     requestId: payload.requestId,
-    sourcePath: payload.sourcePath,
   });
 }
 const appLifecycleApi = Object.freeze({

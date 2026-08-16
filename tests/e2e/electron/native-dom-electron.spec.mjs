@@ -124,12 +124,24 @@ async function waitForFreshDiskFrame(page, previousDocumentToken, caseId) {
 }
 
 async function managedWorkingCopyPath(page, externalSourcePath) {
+  await waitForProjectReady(page);
   const externalPath = realpathSync(externalSourcePath);
+  const extension = path.extname(externalPath);
+  const expectedWorkingCopyName = `${path.basename(externalPath, extension)}-V1${extension}`;
   let active = null;
   await expect.poll(async () => {
     active = await page.evaluate(() => window.htmlAIProjects?.getActiveProject());
-    return active?.sourcePath || "";
-  }).not.toBe(externalPath);
+    const sourcePath = active?.sourcePath || "";
+    if (!sourcePath) return "";
+    try {
+      const canonical = realpathSync(sourcePath);
+      return path.basename(canonical) === expectedWorkingCopyName
+        ? canonical
+        : "";
+    } catch {
+      return "";
+    }
+  }).not.toBe("");
   expect(active?.sourcePath).toBeTruthy();
   return active.sourcePath;
 }

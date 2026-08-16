@@ -4,6 +4,13 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
+- Opening an unbound local HTML now asks before importing. A registered v4
+  project still opens directly. Re-opening the same retained original returns
+  to that project's current local edit with a short “already imported”
+  confirmation, never a second project. First import copies into PageRoot,
+  keeps the original by default, and only moves it to Trash after the new
+  Canvas is verified. The previous silent import toast is gone.
+
 - Fixed the edit Canvas shaking continuously at window widths where the source
   iframe would gain or lose a vertical scrollbar. The shared page scroll stage
   now owns page-level vertical scrolling, while Canvas measures fractional

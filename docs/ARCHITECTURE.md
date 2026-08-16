@@ -249,7 +249,8 @@ services.
 | Bridge routes, timeouts and structured outcomes | `app/application/bridge-client.js` |
 | Runtime Bridge/Session/workflow composition, aggregate frozen snapshot and application event stream | `createRuntimeWorkspaceController()` and `WorkspaceController` in `app/application/workspace-controller.js` |
 | Open/registered project identity, session generation and late-query fencing | `app/application/project-session.js` |
-| External OS/QoderWork HTML-open delivery, opaque request deduplication, committed-exit one-shot handoff, cold-start native failure presentation from stable product codes, whole project-open transition ordering, monotonic deferred-transition notification, blocker-gated/manual safe-switch retry, accepted-result FIFO and final renderer fence | `desktop/external-file-open.mjs`, `desktop/project-open-queue.mjs`, `app/application/external-file-open-session.js`, `app/application/project-application-session.js` |
+| External OS/QoderWork HTML-open delivery, opaque request deduplication, read-only A/B/C classification, Prepared Intent, committed-exit one-shot handoff, cold-start native failure presentation from stable product codes, whole project-open transition ordering, monotonic deferred-transition notification, blocker-gated/manual safe-switch retry, accepted-result FIFO and final renderer fence | `desktop/external-file-open.mjs`, `desktop/prepared-html-open.mjs`, `desktop/project-open-queue.mjs`, `app/application/external-file-open-session.js`, `app/application/project-application-session.js` |
+| First-open and already-imported confirmation prompt | `app/workbench/ExternalHtmlOpenDialog.tsx`, projected from `ProjectWorkflow` |
 | Current source bytes, Hash, revisions, persistence projection, source-write single flight and Canvas authority generation | `app/application/document-session.js` |
 | Renderer draft revision, pending operations and reconciliation | `app/application/draft-session.js` |
 | Renderer comment working copy, composer and saved-comment edit projection | `app/application/comment-session.js` |
@@ -417,8 +418,9 @@ directory is not followed or re-associated: writes pause until it returns to
 its exact registered path. Copies, damaged registrations, and every pre-v4
 project state are external HTML at the v4 boundary; a path that already has a
 unique external-source binding returns that project's current Working Copy
-instead of creating a second V1. Unbound HTML still imports as a fresh v4 V1
-on persist, and the source HTML bytes remain untouched. A current Registry
+instead of creating a second V1. Unbound HTML is classified first and imported
+as a fresh v4 V1 only after the user confirms; the original HTML bytes remain
+untouched unless the user later opts into Trash after Canvas verification. A current Registry
 write lock serializes ordinary Registry mutations across Bridge processes and
 is distinct from the exact-legacy-V4 migration lock. The sole bounded
 metadata exception is an exact pre-hardening V4 Registry shape: after current
@@ -433,8 +435,9 @@ write authority. It neither imports, reassociates nor changes a Project, Working
 Copy, Version, Draft, comment, attachment or HTML. There is no v3 compatibility
 ingress, broader physical migration, or dual write. The decisions are recorded
 in `docs/decisions/0022-user-owned-project-root-identity.md`,
-`docs/decisions/0023-exact-legacy-v4-registry-migration.md` and
-`docs/decisions/0026-external-source-project-binding.md`.
+`docs/decisions/0023-exact-legacy-v4-registry-migration.md`,
+`docs/decisions/0026-external-source-project-binding.md` and
+`docs/decisions/0027-prepared-open-intent.md`.
 
 Initial and accepted AI results are immutable versions. Routine local edits do not create versions. A validated AI result is not activated until the user explicitly chooses it. Promotion may stage a provisional output path, but its final visible path is frozen only after the no-replace publication succeeds; a pre-publication collision reallocates and retries without overwriting user bytes.
 

@@ -16,6 +16,34 @@ function persistState(value) {
   return PERSIST_STATES.has(value) ? value : "idle";
 }
 
+const CANVAS_AUTHORITY_STATES = new Set([
+  "idle",
+  "pending",
+  "verified",
+  "failed",
+]);
+
+function canvasAuthority({
+  status = "idle",
+  generation = 0,
+  renderedSha256 = null,
+  error = null,
+} = {}) {
+  return Object.freeze({
+    status: CANVAS_AUTHORITY_STATES.has(status) ? status : "idle",
+    generation: revision(generation),
+    renderedSha256: renderedSha256 ? String(renderedSha256) : null,
+    error: error ? String(error) : null,
+  });
+}
+
+function pendingCanvasAuthority(generation) {
+  return canvasAuthority({
+    status: "pending",
+    generation,
+  });
+}
+
 function boundaryBlock(code, reason, confirmed = false) {
   return Object.freeze({
     ready: false,
@@ -39,6 +67,7 @@ function initialSnapshot({
     persistError: "",
     hasPendingWrite: false,
     isFlushing: false,
+    canvasAuthority: canvasAuthority({ generation: 0 }),
   });
 }
 
@@ -112,14 +141,16 @@ export class DocumentSession {
     lastPersistedRevision = 0,
   }) {
     this.#pendingWrite = null;
+    const canvasGeneration = this.#snapshot.canvasGeneration + 1;
     this.#emit({
       html: String(html || ""),
       sourceSha256: sourceSha256 ? String(sourceSha256) : null,
-      canvasGeneration: this.#snapshot.canvasGeneration + 1,
+      canvasGeneration,
       editRevision: revision(editRevision),
       lastPersistedRevision: revision(lastPersistedRevision),
       persistState: "idle",
       persistError: "",
+      canvasAuthority: pendingCanvasAuthority(canvasGeneration),
     });
     return this.#snapshot;
   }
@@ -133,11 +164,13 @@ export class DocumentSession {
     persistError,
     pendingWrite,
   }) {
+    const canvasGeneration = this.#snapshot.canvasGeneration + 1;
     const next = {
       ...this.#snapshot,
       html: String(html),
       sourceSha256: sourceSha256 ? String(sourceSha256) : null,
-      canvasGeneration: this.#snapshot.canvasGeneration + 1,
+      canvasGeneration,
+      canvasAuthority: pendingCanvasAuthority(canvasGeneration),
     };
     if (editRevision !== undefined) {
       next.editRevision = revision(editRevision);
@@ -159,11 +192,48 @@ export class DocumentSession {
   }
 
   reloadCanvas() {
+    const canvasGeneration = this.#snapshot.canvasGeneration + 1;
     this.#emit({
       ...this.#snapshot,
-      canvasGeneration: this.#snapshot.canvasGeneration + 1,
+      canvasGeneration,
+      canvasAuthority: pendingCanvasAuthority(canvasGeneration),
     });
     return this.#snapshot;
+  }
+
+  confirmCanvas({ generation, renderedSha256 } = {}) {
+    const expectedGeneration = revision(generation);
+    const expectedHash = renderedSha256 ? String(renderedSha256) : "";
+    if (
+      expectedGeneration !== this.#snapshot.canvasGeneration
+      || !expectedHash
+      || expectedHash !== this.#snapshot.sourceSha256
+    ) {
+      return false;
+    }
+    this.#emit({
+      ...this.#snapshot,
+      canvasAuthority: canvasAuthority({
+        status: "verified",
+        generation: expectedGeneration,
+        renderedSha256: expectedHash,
+      }),
+    });
+    return true;
+  }
+
+  failCanvas({ generation, error } = {}) {
+    const expectedGeneration = revision(generation);
+    if (expectedGeneration !== this.#snapshot.canvasGeneration) return false;
+    this.#emit({
+      ...this.#snapshot,
+      canvasAuthority: canvasAuthority({
+        status: "failed",
+        generation: expectedGeneration,
+        error: error || "画布没有在时限内确认载入目标 HTML。",
+      }),
+    });
+    return true;
   }
 
   beginEdit(html) {
@@ -176,6 +246,7 @@ export class DocumentSession {
       html: String(html),
       editRevision: nextRevision,
       persistError: "",
+      canvasAuthority: pendingCanvasAuthority(this.#snapshot.canvasGeneration),
     });
     return nextRevision;
   }
@@ -402,6 +473,10 @@ export class DocumentSession {
 
   get canvasGeneration() {
     return this.#snapshot.canvasGeneration;
+  }
+
+  get canvasAuthority() {
+    return this.#snapshot.canvasAuthority;
   }
 
   get editRevision() {

@@ -333,6 +333,7 @@ export async function architectureViolations() {
     }
     if (
       file === "app/workbench/presentation.tsx"
+      || file === "app/workbench/ExternalHtmlOpenDialog.tsx"
       || /^app\/workbench\/.*-view\.tsx$/.test(file)
     ) {
       for (const specifier of imports) {

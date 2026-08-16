@@ -676,6 +676,8 @@
       "id": "workbench-orchestration",
       "patterns": [
         "^app/workbench\\.tsx$",
+        "^app/workbench/ExternalHtmlOpenDialog\\.tsx$",
+        "^app/workbench/external-html-open-dialog\\.module\\.css$",
         "^app/workbench/(?:browser-io|comment-model|project-model|record-model|types)\\.ts$"
       ],
       "suites": ["typecheck", "browser-smoke", "electron-smoke", "ai-smoke"],
@@ -766,9 +768,15 @@
     },
     {
       "id": "desktop-external-file-open",
-      "patterns": ["^desktop/external-file-open\\.mjs$"],
+      "patterns": [
+        "^desktop/external-file-open\\.mjs$",
+        "^desktop/prepared-html-open\\.mjs$"
+      ],
       "suites": ["electron-smoke"],
-      "nodeTests": ["tests/external-file-open.test.mjs"]
+      "nodeTests": [
+        "tests/external-file-open.test.mjs",
+        "tests/prepared-html-open.test.mjs"
+      ]
     },
     {
       "id": "desktop-open-in-default-browser",

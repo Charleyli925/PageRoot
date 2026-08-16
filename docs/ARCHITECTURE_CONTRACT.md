@@ -26,7 +26,8 @@ Bridge route adapters
   application-session snapshots to view props and callbacks, but it may not
   recreate a session-owned fact as an independently writable ref or state
   variable.
-- Workbench presentation files (`presentation.tsx` and `*-view.tsx`) are
+- Workbench presentation files (`presentation.tsx`, `ExternalHtmlOpenDialog.tsx`
+  and `*-view.tsx`) are
   snapshot-and-callback views. They may import domain types and pure Workbench
   models, but not `app/application` sessions or services.
 - Application modules own session identity, request generations, mutation
@@ -161,10 +162,13 @@ replace an acknowledged state, even if the project identity is unchanged.
 External HTML delivery is separately authorized but not separately ordered.
 The main-process mailbox accepts only a validated, opaque `.html`/`.htm`
 request ID and replaces an older unaccepted OS request with the newer one.
-`ProjectOpenQueue` then assigns the whole picker/read/Bridge-check and
+`ProjectOpenQueue` then assigns the whole classify/prepare/commit/finalize,
+picker/read/Bridge-check and
 active-project transition its FIFO position at entry, shared by local picker,
 recent-project, external, startup, generated-version, rename and forget
-routes. The renderer's `ExternalFileOpenSession` owns delivery de-duplication,
+routes. Class A activates the managed project. Classes B and C store a
+Prepared Intent and return only a public `requestId` descriptor; they do not
+activate the original file. The renderer's `ExternalFileOpenSession` owns delivery de-duplication,
 one active request, one newest queued request and a deferred retry when the
 normal project-switch boundary cannot yet close safely. Preload subscribes
 before requesting its readiness catch-up, and drops that catch-up if a live
@@ -430,7 +434,8 @@ an existing registration but may not create one; `/project/ensure` is the sole
 creation boundary. `/project/open-classification` is an authenticated read-only
 classifier: it must not write Registry bytes, create a project, or return raw
 source keys, external absolute paths, hidden snapshot paths or HTML bodies.
-Attachments and their compensating cleanup use the same
+Desktop Prepared Intent commit is the only path that may later call
+`/project/ensure` for a class-C confirmation. Attachments and their compensating cleanup use the same
 captured context, plus their composer/edit identity, for their complete
 asynchronous lifetime. `CommentWorkflow` is the only renderer application
 owner that may stage an attachment, call its Bridge repository, or compensate a

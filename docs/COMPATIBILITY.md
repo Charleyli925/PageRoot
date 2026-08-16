@@ -103,6 +103,8 @@ collected. A guessed date is not a support-window policy.
   `tests/project-file-bridge.test.mjs`.
 - Disk persistence read/write: read-only for classification; writes occur only
   on a successful new import under the current Registry write lock.
+- Prepared Open Intent and optional Trash are not a compatibility adapter:
+  they are process-memory only and never rewrite historical Registry bytes.
 - Support window and deletion evidence: retain while current Registry records
   may carry this optional pair. Not scheduled for removal.
 

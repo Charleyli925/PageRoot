@@ -49,8 +49,9 @@ source key are an integrity fault, not a user-facing chooser.
 - Renderer and Bridge classification responses must not include the raw source
   key, Registry record, external absolute path, hidden snapshot path, or HTML
   body.
-- Confirmation dialogs, Prepared Intent, trash-after-import, and Canvas
-  terminal ACK remain a later PR.
+- Confirmation dialogs, Prepared Intent, optional trash-after-import, and
+  Canvas-verified finalization are specified in
+  [ADR 0027](0027-prepared-open-intent.md).
 
 ## Rejected alternatives
 

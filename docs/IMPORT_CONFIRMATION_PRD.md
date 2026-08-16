@@ -2,7 +2,7 @@
 
 - 文档版本：PRD v1.2
 - 最近更新：2026-08-16（Asia/Shanghai，UTC+8）
-- 状态：产品规则已确认；v1.2 去掉再次打开时的“查看初始版本 V1”入口，实施计划必须与本文一致
+- 状态：已实施（v1.2 产品规则；确认 UI、Prepared Intent、Canvas 终态与可选废纸篓删除已在本分支落地）
 - 适用范围：桌面版打开本地 `.html` / `.htm`，包括首次打开外部文件、再次打开已导入原文件、直接打开已登记 PageRoot 项目文件
 - 关联文档：[版本与项目文件产品需求](VERSION_AND_PROJECT_FILES_PRD.md)、[MVP 产品需求](MVP_PRD.md)、[交互流程](INTERACTION_FLOW.md)、[状态所有权](STATE_OWNERSHIP.md)、[安全模型](SECURITY_MODEL.md)、[ADR 0022](decisions/0022-user-owned-project-root-identity.md)
 
