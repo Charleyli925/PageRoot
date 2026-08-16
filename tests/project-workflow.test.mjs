@@ -1880,6 +1880,45 @@ test("PageRoot rename after Finder rebase uses the recovered path", async (t) =>
   );
 });
 
+test("browser local open requests the hidden picker without draining first", async (t) => {
+  let canvasWaiters = 0;
+  const harness = createHarness({
+    projectOpen: {
+      mode: () => "browser-file",
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+  harness.documentWorkflow.ensureCurrentCanvas = () => {
+    canvasWaiters += 1;
+    return new Promise(() => {});
+  };
+
+  const pending = harness.workflow.openProject({ kind: "local" });
+  const requested = harness.events.filter(
+    (event) => event.type === "project-browser-file-requested",
+  );
+  assert.equal(requested.length, 1);
+  assert.equal(typeof requested[0].operationId, "string");
+  assert.notEqual(requested[0].operationId, "");
+  assert.equal(canvasWaiters, 0);
+  assert.equal(harness.fenceCount, 0);
+
+  const outcome = await Promise.race([
+    pending,
+    new Promise((_, reject) => {
+      setTimeout(() => {
+        reject(new Error("browser open awaited switch before requesting the picker"));
+      }, 50);
+    }),
+  ]);
+  assert.equal(outcome.status, "succeeded");
+  assert.equal(outcome.value.awaitingFile, true);
+  assert.equal(outcome.value.operationId, requested[0].operationId);
+  assert.equal(canvasWaiters, 0);
+  assert.equal(harness.fenceCount, 0);
+  assert.equal(harness.projectSession.sourcePath, OLD_PATH);
+});
+
 test("cancelling the local picker does not drain the current project", async (t) => {
   let fenced = 0;
   const harness = createHarness({

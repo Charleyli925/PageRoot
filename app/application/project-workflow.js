@@ -669,22 +669,10 @@ export class ProjectWorkflow {
         kind === "local"
         && this.#projectOpenPort.mode() === "browser-file"
       ) {
-        const switchOutcome = await this.prepareSwitch({ fromDeferred });
-        if (this.#snapshot.close.phase === "ready") {
-          return blocked(
-            "PROJECT_OPEN_CLOSE_COMMITTED",
-            "当前窗口正在关闭，没有接收新的 HTML。",
-          );
-        }
-        if (switchOutcome.status !== "succeeded") {
-          this.#pendingOpen = Object.freeze({
-            kind,
-            sourcePath: sourcePath || null,
-            projectId: projectId || null,
-          });
-          this.#setOpen("deferred", null, kind);
-          return switchOutcome;
-        }
+        // Request the hidden file input in this same user-activation turn.
+        // Awaiting prepareSwitch() first yields past the click, so Chromium
+        // silently ignores input.click() and encoding-error "重新选择" cannot
+        // reopen the picker. The accepted-project FIFO still fences on apply.
         this.#pendingOpen = null;
         this.#browserOpenOperationId = operationId;
         this.#emit({ type: "project-browser-file-requested", operationId });
@@ -2252,7 +2240,10 @@ export class ProjectWorkflow {
     // must not depend on an edit Canvas that only mounts for an opened locator.
     if (this.#projectSession.epoch > 0) {
       const switchOutcome = await this.prepareSwitch();
-      if (switchOutcome.status !== "succeeded") return "deferred";
+      if (switchOutcome.status !== "succeeded") {
+        console.warn("APPLY_SWITCH_FAILED", JSON.stringify(switchOutcome));
+        return "deferred";
+      }
     }
     if (this.#snapshot.close.phase === "ready") return "complete";
     let canvasFrozen = false;

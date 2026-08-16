@@ -644,7 +644,7 @@ applying + newer request → complete/rollback old first → then new
 
 #### 5.9.1 本地选择器顺序
 
-`openProject({kind:"local"})` 特判：先调用 Desktop picker/classify。用户在 picker取消，直接结束；不提前 `prepareSwitch()`。Recent/registered项目继续沿用其已验证直接打开流程。
+`openProject({kind:"local"})` 特判：先调用 Desktop picker/classify。用户在 picker取消，直接结束；不提前 `prepareSwitch()`。浏览器预览路径同样必须在同一次用户激活里发出 `project-browser-file-requested`（隐藏 `input.click()`），不得先 `await prepareSwitch()`，否则 Chromium 会丢掉手势，「重新选择」打不开文件选择器。接受文件后仍由 accepted-project FIFO 做最终围栏。Recent/registered项目继续沿用其已验证直接打开流程。
 
 #### 5.9.2 分类处理
 
