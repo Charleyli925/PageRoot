@@ -2142,6 +2142,15 @@ async function reconcileActiveManagedSource(payload) {
   return projectOpenQueue.run(() => reconcileActiveManagedSourceOperation(payload));
 }
 
+const E2E_RECONCILE_HASH_RACE_OPERATION_ID = "reconcile_e2e_hash_race_0001";
+const E2E_RECONCILE_HASH_RACE_REPLACEMENT_HTML = [
+  "<!doctype html>",
+  "<html lang=\"zh-CN\">",
+  "<head><meta charset=\"utf-8\"><title>竞态替换</title></head>",
+  "<body><h1 data-e2e-reconcile-hash-race=\"1\">Bridge 核对完成后被外部替换的字节。</h1></body>",
+  "</html>",
+].join("\n");
+
 async function reconcileActiveManagedSourceOperation(payload) {
   const requested = assertActiveManagedReconcilePayload(payload);
   const reconciled = await fetchBridgeCommand("/managed-working-copy/reconcile", {
@@ -2164,6 +2173,7 @@ async function reconcileActiveManagedSourceOperation(payload) {
     || openTarget.workingCopyId !== requested.workingCopyId
     || openTarget.versionId !== requested.versionId
     || reconciled.operationId !== requested.operationId
+    || openTarget.sourceSha256 !== reconciled.sourceSha256
     || typeof openTarget.exactSourcePath !== "string"
     || typeof openTarget.projectRootPath !== "string"
     || typeof reconciled.sourceSha256 !== "string"
@@ -2177,7 +2187,31 @@ async function reconcileActiveManagedSourceOperation(payload) {
     existingPathIdentity(requested.previousSourcePath),
     existingPathIdentity(openTarget.exactSourcePath),
   ]);
+  if (
+    process.env.PAGEROOT_E2E === "1"
+    && process.env.PAGEROOT_E2E_RECONCILE_REPLACE_BEFORE_READ === "1"
+    && requested.operationId === E2E_RECONCILE_HASH_RACE_OPERATION_ID
+  ) {
+    // E2E-only injection: model an external editor replacing the Working Copy
+    // after the Bridge reconcile finished but before Desktop reads the bytes.
+    // The final hash comparison below must fail closed on this exact window.
+    await writeFile(
+      nextSourcePath,
+      E2E_RECONCILE_HASH_RACE_REPLACEMENT_HTML,
+      "utf8",
+    );
+  }
   const project = await readHtmlProject(nextSourcePath);
+  if (project.sha256 !== reconciled.sourceSha256) {
+    throw new ProjectFileError(
+      "MANAGED_WORKING_COPY_HASH_MISMATCH",
+      "托管工作文件与已确认的项目内容不一致，当前文件没有切换。",
+      {
+        expectedSha256: reconciled.sourceSha256,
+        actualSha256: project.sha256,
+      },
+    );
+  }
   const state = await loadProjectState();
   await commitActivatedProjectPath({
     state,
