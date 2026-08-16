@@ -126,8 +126,13 @@ export async function resolvePreviewSourceRoot(sourcePath) {
   }
   const sourceRealPath = await realpath(sourcePath);
   const sourceInfo = await stat(sourceRealPath);
+  if (sourceInfo.isDirectory()) {
+    return sourceRealPath;
+  }
   if (!sourceInfo.isFile()) {
-    throw new TypeError("Preview sourcePath must resolve to a regular file.");
+    throw new TypeError(
+      "Preview sourcePath must resolve to a regular file or directory.",
+    );
   }
   return realpath(path.dirname(sourceRealPath));
 }

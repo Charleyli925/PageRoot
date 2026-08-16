@@ -7,6 +7,7 @@ const APP_FILE_ALLOWLIST = [
   "desktop/main.mjs",
   "desktop/preload.mjs",
   "desktop/external-file-open.mjs",
+  "desktop/prepared-html-open.mjs",
   "desktop/project-open-queue.mjs",
   "desktop/project-files.mjs",
   "desktop/source-rename.mjs",
@@ -26,6 +27,7 @@ const APP_FILE_ALLOWLIST = [
   "desktop/application-update.mjs",
   "desktop/usage-telemetry.mjs",
   "desktop/preview-protocol.mjs",
+  "desktop/imported-asset-root.mjs",
   "desktop/edit-runtime-bootstrap.mjs",
   "desktop/edit-runtime-protocol.mjs",
   "desktop/edit-runtime-preparation-fence.mjs",
@@ -239,14 +241,17 @@ test("package security boundaries retain CSP, entitlements and final plist clean
   assert.match(rendererHtml, /Content-Security-Policy/u);
   assert.match(rendererHtml, /default-src 'none'/u);
   assert.match(rendererHtml, /script-src 'self'/u);
-  assert.match(rendererHtml, /style-src 'self' 'unsafe-inline' file: http: https: pageroot-edit-runtime:/u);
-  assert.match(rendererHtml, /img-src 'self' file: data: blob: http: https: pageroot-edit-runtime:/u);
-  assert.match(rendererHtml, /font-src 'self' file: data: http: https: pageroot-edit-runtime:/u);
-  assert.match(rendererHtml, /media-src 'self' file: data: blob: http: https: pageroot-edit-runtime:/u);
+  const scriptSrc = rendererHtml.match(/script-src [^;]+/u)?.[0] || "";
+  assert.equal(scriptSrc, "script-src 'self' pageroot-edit-runtime:");
+  assert.doesNotMatch(scriptSrc, /pageroot-preview:/u);
+  assert.match(rendererHtml, /style-src 'self' 'unsafe-inline' file: http: https: pageroot-edit-runtime: pageroot-preview:/u);
+  assert.match(rendererHtml, /img-src 'self' file: data: blob: http: https: pageroot-edit-runtime: pageroot-preview:/u);
+  assert.match(rendererHtml, /font-src 'self' file: data: http: https: pageroot-edit-runtime: pageroot-preview:/u);
+  assert.match(rendererHtml, /media-src 'self' file: data: blob: http: https: pageroot-edit-runtime: pageroot-preview:/u);
   assert.match(rendererHtml, /connect-src http:\/\/127\.0\.0\.1:\*/u);
   assert.match(rendererHtml, /frame-src 'self' data: blob: pageroot-preview: pageroot-edit-runtime:/u);
   assert.match(rendererHtml, /object-src 'none'/u);
-  assert.match(rendererHtml, /base-uri 'self' file: pageroot-edit-runtime:/u);
+  assert.match(rendererHtml, /base-uri 'self' file: pageroot-edit-runtime: pageroot-preview:/u);
   assert.doesNotMatch(rendererHtml, /frame-ancestors/u);
   assert.match(entitlements, /com\.apple\.security\.cs\.allow-jit/u);
   assert.doesNotMatch(entitlements, /disable-library-validation/u);

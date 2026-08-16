@@ -1238,3 +1238,37 @@ test("observeExternalSourceChange ignores stale paths and in-flight writes", asy
   assert.equal(deferred.value.deferred, true);
   assert.equal(sourceCalls, 0);
 });
+
+test("ensureCurrentCanvas records verified authority after a successful render", async () => {
+  const html = "<!doctype html><html><body><p>one</p></body></html>";
+  const harness = createHarness({ html });
+  const outcome = await harness.workflow.ensureCurrentCanvas({
+    context: harness.context,
+  });
+  assert.equal(outcome.status, "succeeded");
+  assert.deepEqual(harness.documentSession.canvasAuthority, {
+    status: "verified",
+    generation: 0,
+    renderedSha256: sha256(html),
+    error: null,
+  });
+});
+
+test("ensureCurrentCanvas fails closed when the canvas cannot render", async () => {
+  const html = "<!doctype html><html><body><p>one</p></body></html>";
+  const harness = createHarness({
+    html,
+    canvasOverrides: {
+      async verifyRendered() {
+        throw new Error("canvas did not render");
+      },
+    },
+  });
+  const outcome = await harness.workflow.ensureCurrentCanvas({
+    context: harness.context,
+  });
+  assert.equal(outcome.status, "rejected");
+  assert.equal(harness.documentSession.canvasAuthority.status, "failed");
+  assert.equal(harness.documentSession.canvasAuthority.generation, 0);
+});
+

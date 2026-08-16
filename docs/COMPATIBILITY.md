@@ -88,6 +88,26 @@ collected. A guessed date is not a support-window policy.
   producing Developer Preview is outside the supported upgrade window. Expected
   removal time: not scheduled pending that evidence.
 
+## External-source provenance pair
+
+- Historical producer and version: current V4 Registry records may omit or
+  include the optional `importSourceKey` / `importSourceSha256` pair. The
+  previous reader used that pair only as a clean-V1 import retry.
+- Current consumer: `ProjectFileRepository.classifyOpenPath` /
+  `importExternal` treat a unique pair as a long-lived path→project binding.
+  Schema shape is unchanged; a valid current Registry is still read without
+  rewriting timestamps or bytes merely because it was classified.
+- Decoder and canonical output: none. Missing pairs stay unbound and are not
+  guessed from filename or Hash. Duplicate keys fail closed.
+- Historical proof: `tests/project-file-repository.test.mjs` and
+  `tests/project-file-bridge.test.mjs`.
+- Disk persistence read/write: read-only for classification; writes occur only
+  on a successful new import under the current Registry write lock.
+- Prepared Open Intent and optional Trash are not a compatibility adapter:
+  they are process-memory only and never rewrite historical Registry bytes.
+- Support window and deletion evidence: retain while current Registry records
+  may carry this optional pair. Not scheduled for removal.
+
 ## ID-less mutation context
 
 - Historical producer and version: older local clients and compatibility tests

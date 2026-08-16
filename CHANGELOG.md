@@ -4,6 +4,20 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
+- Browser encoding-error “重新选择” now reopens the HTML picker in the same
+  click, then switches to the next UTF-8 HTML. The current page is not drained
+  before the chooser appears, so the hidden file input keeps the user gesture
+  Chromium requires. In-memory HTML now records its Hash so the next file can
+  pass the canvas switch fence.
+- Opening an unbound local HTML now asks before importing. A registered v4
+  project still opens directly. Re-opening the same retained original returns
+  to that project's current local edit with a short “already imported”
+  confirmation, never a second project. First import copies into PageRoot,
+  keeps the original by default, and only moves it to Trash after the new
+  Canvas is verified. Sibling images, CSS and scripts stay beside the original
+  and continue to load in Preview and Edit from that directory. The previous
+  silent import toast is gone. If the file changes while the confirmation is
+  open, import is refused with “文件在确认期间被修改，没有导入.”
 - Finder 在同一受管项目目录内改名当前打开的 Working Copy 或同父目录的项目文件夹后，PageRoot 会按稳定身份自动同步新路径，并允许立刻在顶栏继续改名。重命名不创建 Project、Document、Working Copy 或 Version；跨磁盘、副本和多候选仍失败关闭。顶栏真实失败后不再强制聚焦，避免无法退出编辑。macOS 上 `/var` 与 `/private/var` 视为同一活动路径；进程被杀掉后仍可从已同步路径恢复。项目目录里 `PROJECT.md` 等旁路写入只核对当前 HTML，不会把未还原的规则修改提前保存。
 - Fixed the edit Canvas shaking continuously at window widths where the source
   iframe would gain or lose a vertical scrollbar. The shared page scroll stage

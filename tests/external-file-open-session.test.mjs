@@ -10,6 +10,19 @@ function request(id) {
   };
 }
 
+function snapshot(overrides = {}) {
+  return {
+    status: "idle",
+    activeRequestId: null,
+    queuedRequestId: null,
+    deferredRequestId: null,
+    deferredSequence: 0,
+    confirmation: null,
+    attention: null,
+    ...overrides,
+  };
+}
+
 test("external file session serializes delivery and lets the newest queued request win", async () => {
   const session = new ExternalFileOpenSession();
   let releaseFirst;
@@ -41,13 +54,11 @@ test("external file session serializes delivery and lets the newest queued reque
   await firstStarted;
   assert.equal(session.enqueue(request("second"), execute), true);
   assert.equal(session.enqueue(request("latest"), execute), true);
-  assert.deepEqual(session.snapshot, {
+  assert.deepEqual(session.snapshot, snapshot({
     status: "opening",
     activeRequestId: "external_first",
     queuedRequestId: "external_latest",
-    deferredRequestId: null,
-    deferredSequence: 0,
-  });
+  }));
 
   releaseFirst();
   await latestFinished;
@@ -58,13 +69,7 @@ test("external file session serializes delivery and lets the newest queued reque
     "start:external_latest",
     "finish:external_latest",
   ]);
-  assert.deepEqual(session.snapshot, {
-    status: "idle",
-    activeRequestId: null,
-    queuedRequestId: null,
-    deferredRequestId: null,
-    deferredSequence: 0,
-  });
+  assert.deepEqual(session.snapshot, snapshot());
 });
 
 test("external file session deduplicates opaque deliveries and retains one deferred request", async () => {
@@ -83,13 +88,11 @@ test("external file session deduplicates opaque deliveries and retains one defer
 
   assert.equal(session.enqueue(request("deferred"), execute), true);
   await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual(session.snapshot, {
+  assert.deepEqual(session.snapshot, snapshot({
     status: "deferred",
-    activeRequestId: null,
-    queuedRequestId: null,
     deferredRequestId: "external_deferred",
     deferredSequence: 1,
-  });
+  }));
   assert.equal(session.enqueue(request("deferred"), execute), false);
   assert.equal(session.resume(execute), true);
   await retryFinished;
@@ -106,13 +109,11 @@ test("external file session notifies the renderer when a request becomes deferre
   assert.equal(session.enqueue(request("retry"), async () => "deferred"), true);
   await new Promise((resolve) => setImmediate(resolve));
 
-  assert.deepEqual(snapshots.at(-1), {
+  assert.deepEqual(snapshots.at(-1), snapshot({
     status: "deferred",
-    activeRequestId: null,
-    queuedRequestId: null,
     deferredRequestId: "external_retry",
     deferredSequence: 1,
-  });
+  }));
 });
 
 test("external file session gives every deferred transition a new sequence", async () => {
@@ -225,5 +226,45 @@ test("a successful active request remains publishable when its queued successor 
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.deepEqual(visibleProjects, ["/Users/demo/first.html"]);
+  assert.equal(session.snapshot.status, "idle");
+});
+
+test("a newer OS request replaces an unanswered confirmation and resets its facts", async () => {
+  const session = new ExternalFileOpenSession();
+  const first = {
+    requestId: "external_first",
+    classification: "new-external",
+    sourceFileName: "first.html",
+    visibleV1FileName: "first-V1.html",
+    projectsRootLabel: "文稿 › PageRoot › 项目",
+  };
+  const second = {
+    requestId: "external_second",
+    classification: "known-external",
+    sourceFileName: "second.html",
+    projectName: "second",
+    currentBasedOnOrdinal: 2,
+    latestOfficialOrdinal: 6,
+    currentDiffersFromBase: true,
+    sourceRelation: "changed",
+  };
+  const execute = async (value) => {
+    session.presentConfirmation(value.requestId, value.confirmation);
+    return "awaiting-confirmation";
+  };
+
+  assert.equal(session.enqueue(first, execute), true);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(session.snapshot.status, "awaiting-confirmation");
+  assert.equal(session.snapshot.confirmation.sourceFileName, "first.html");
+
+  assert.equal(session.enqueue(second, execute), true);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(session.snapshot.status, "awaiting-confirmation");
+  assert.equal(session.snapshot.activeRequestId, "external_second");
+  assert.equal(session.snapshot.confirmation.classification, "known-external");
+  assert.equal(session.snapshot.confirmation.sourceFileName, "second.html");
+  assert.equal(session.cancelConfirmation("external_first"), false);
+  assert.equal(session.cancelConfirmation("external_second"), true);
   assert.equal(session.snapshot.status, "idle");
 });

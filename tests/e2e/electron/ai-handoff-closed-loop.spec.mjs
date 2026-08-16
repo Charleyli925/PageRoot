@@ -32,6 +32,7 @@ import {
   removeSourceFixture as removeSharedSourceFixture,
   seedLegacyV3Project,
   stopPageRoot,
+  waitForProjectReady,
 } from "./helpers/pageroot-app-fixture.mjs";
 
 async function launchPageRoot(options = {}) {
@@ -359,6 +360,7 @@ async function openRecentProject(page, sourcePath, options) {
   await page.locator(".recent-file-row")
     .filter({ hasText: path.basename(sourcePath) })
     .click();
+  await waitForProjectReady(page);
   await expect.poll(async () => {
     const active = await page.evaluate(
       async () => (await window.htmlAIProjects?.getActiveProject())?.sourcePath || "",
@@ -3648,6 +3650,7 @@ test("opening a pre-v4 project imports its HTML as a new v4 V1", async () => {
     isolatedUserData,
   });
   try {
+    await waitForProjectReady(launched.page);
     const externalSourcePath = realpathSync(fixture.sourcePath);
     await expect.poll(async () => {
       const active = await launched.page.evaluate(

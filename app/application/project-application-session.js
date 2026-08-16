@@ -49,6 +49,10 @@ export class ProjectApplicationSession {
 
   #generation = 0;
 
+  #receipts = new Map();
+
+  #waiters = new Map();
+
   setObserver(observer) {
     this.#observer = typeof observer === "function" ? observer : null;
   }
@@ -103,6 +107,9 @@ export class ProjectApplicationSession {
           this.#emit();
           break;
         }
+        this.#settle(application.applicationId, result === "complete" || !result
+          ? "succeeded"
+          : String(result));
         this.#emit();
       }
     };
@@ -159,6 +166,34 @@ export class ProjectApplicationSession {
     return this.resume(execute) ? "resumed" : "idle";
   }
 
+  waitFor(applicationId) {
+    const id = String(applicationId || "");
+    if (!id) {
+      return Promise.resolve(Object.freeze({
+        applicationId: "",
+        result: "stale",
+      }));
+    }
+    const existing = this.#receipts.get(id);
+    if (existing) return Promise.resolve(existing);
+    return new Promise((resolve) => {
+      const waiters = this.#waiters.get(id) || [];
+      waiters.push(resolve);
+      this.#waiters.set(id, waiters);
+    });
+  }
+
+  #settle(applicationId, result) {
+    const receipt = Object.freeze({
+      applicationId: String(applicationId),
+      result: String(result || "succeeded"),
+    });
+    this.#receipts.set(receipt.applicationId, receipt);
+    const waiters = this.#waiters.get(receipt.applicationId) || [];
+    this.#waiters.delete(receipt.applicationId);
+    for (const resolve of waiters) resolve(receipt);
+  }
+
   dispose() {
     this.#generation += 1;
     this.#observer = null;
@@ -168,6 +203,15 @@ export class ProjectApplicationSession {
     this.#observedDeferredSequence = 0;
     this.#sawSwitchBlocker = false;
     this.#execute = null;
+    for (const [applicationId, waiters] of this.#waiters) {
+      const receipt = Object.freeze({
+        applicationId,
+        result: "stale",
+      });
+      this.#receipts.set(applicationId, receipt);
+      for (const resolve of waiters) resolve(receipt);
+    }
+    this.#waiters.clear();
     this.#emit();
   }
 

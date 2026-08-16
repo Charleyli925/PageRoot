@@ -8,10 +8,11 @@
 - 协议文档：[Change Request 协议](CHANGE_REQUEST_PROTOCOL.md)
 - 交互文档：[交互流程](INTERACTION_FLOW.md)
 - 下一阶段专项 PRD：[版本与项目文件产品需求](VERSION_AND_PROJECT_FILES_PRD.md)
+- 首次打开导入确认：[首次打开导入确认](IMPORT_CONFIRMATION_PRD.md)
 
 本文描述目标产品，不描述 0.5.x 旧实现。若旧数据、旧说明或旧测试与本文冲突，以目标计划为准。
 
-> 版本、工作文件、AI 候选、项目可见目录和评论附件的下一阶段目标规则，以专项 PRD 为准。桌面打开路径只接受有效 v4 Project；v4 以前的项目状态不迁移、不恢复，也不作为读取回退，所选 HTML 会作为新外部来源建立新的 v4 V1。PR 2B 已交付 Registry 全量项目目录、状态/Version 投影、历史 Working Copy Finder 定位与可删除的 `AI任务/` 派生展示；可见附件、附件 Finder 定位与回收区是 P3。
+> 版本、工作文件、AI 候选、项目可见目录和评论附件的下一阶段目标规则，以专项 PRD 为准。桌面打开路径只接受有效 v4 Project；v4 以前的项目状态不迁移、不恢复，也不作为读取回退。未登记且未绑定的 HTML 先确认再导入为新的 v4 V1，默认保留原稿，见 [首次打开导入确认](IMPORT_CONFIRMATION_PRD.md)。PR 2B 已交付 Registry 全量项目目录、状态/Version 投影、历史 Working Copy Finder 定位与可删除的 `AI任务/` 派生展示；可见附件、附件 Finder 定位与回收区是 P3。
 
 ## 1. 产品结论
 
@@ -109,7 +110,7 @@ PageRoot 让用户在真实本地 HTML 上完成两类工作：
 - 从 Registry 全量项目目录切换；Recent 只影响排序、最后打开时间和启动优先。
 - 在一个项目处理时打开或切换另一个项目。
 
-工作台不负责新建 HTML。每次打开本地 HTML 时，系统先验证它是否属于有效 v4 Project；有效项目按既有身份打开，其他任何状态（包括 v3 及更早状态、损坏 v4 记录和全新 HTML）立即以该 HTML 为外部来源建立新的 v4 Project 与初始 V1。导入不移动、覆盖或改写原始 HTML；v4 以前的项目状态不迁移、不恢复，也不作为读取回退。V1 是初始只读基线，不是一次手动保存。
+工作台不负责新建 HTML。每次打开本地 HTML 时，系统先只读分类：有效 v4 项目文件直接打开；已绑定的外部原文件显示“已经导入”确认，主操作继续当前项目；真正全新的外部 HTML 显示首次导入确认，用户确认后才建立新的 v4 Project 与初始 V1。导入不覆盖或改写原始 HTML；只有用户勾选「成功导入后删除原文件」且新画布已确认后，才把该原稿移入废纸篓。v4 以前的项目状态不迁移、不恢复，也不作为读取回退。V1 是初始只读基线，不是一次手动保存。详见 [首次打开导入确认](IMPORT_CONFIRMATION_PRD.md)。
 
 每个项目拥有稳定 `projectId`，每个源 HTML 拥有稳定 `documentId`。新建项目时，系统以 HTML 文件名（不含扩展名）建立 `displayName`，在配置项目目录下分配用户可读的 `<displayName>`（同名时 `<displayName> (2)`）根目录并由 Registry 登记。项目根同父目录改名可受控更新 Registry 路径与显示名；改受管 HTML 文件名只更新其 Working Copy 映射，不能只依赖文件名匹配，也不改变项目身份。
 

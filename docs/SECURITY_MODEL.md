@@ -36,7 +36,13 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
   delivery interrupts an uncommitted close; after close commits it is stored
   only as the latest validated path in a private one-shot handoff, then passes
   the same mailbox validation again only after the next launch owns the
-  single-instance lock. It never grants a renderer path or a late
+  single-instance lock. Classification of that path is read-only until the user
+  confirms. The renderer receives only `requestId` and display facts; it cannot
+  submit a filesystem path, source key or trash target. Optional deletion of a
+  newly imported original is a one-shot Main `shell.trashItem` after Canvas
+  verification, and only when the file still hashes the same, is a regular
+  non-symlink file, and lies outside the projects root. It never grants a
+  renderer path or a late
   active-project mutation.
 - Desktop interactive preview runs under a dedicated `pageroot-preview:`
   origin. Its main-process session is size/count/time bounded, exposes no
@@ -50,8 +56,10 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
 - Ordinary static Edit may use the same contained resource root for images,
   fonts, styles and media, but not for renderer or authored scripts:
   `pageroot-preview:` is absent from `script-src` and every source transition
-  revokes the previous session. The separate one-shot ECharts path never reuses
-  that preview session.
+  revokes the previous session. After an external HTML import, Main substitutes
+  the original sibling directory as that preview/edit resource root without
+  exposing the original path to the renderer. The separate one-shot ECharts
+  path never reuses that preview session.
 - Desktop one-shot Edit author runtime is a deliberately narrow ECharts
   capability for trusted, user-opened local generative HTML, not a hostile-page
   sandbox. Main first re-reads the active source and requires exact HTML/SHA,
@@ -141,6 +149,11 @@ write authority: the in-memory session remains readable but writes fail closed
 until the exact registered location is available and revalidated. Import
 recovery is likewise limited to Registry-owned pending intents; a discovered
 `.pageroot/import.json` is never proof that an arbitrary copied root is managed.
+The same canonical external path binds to at most one `projectId`. Content Hash
+never matches a file at another path into that project. Duplicate source-key
+claims fail closed without deleting or merging projects. Ordinary Registry
+mutations take a current write lock under `.pageroot-registry-write-lock/`;
+that lock is not the exact-legacy-V4 migration lock.
 
 Working-copy filename changes retain their immutable IDs. A missing mapping may
 be repaired only by one unique direct-child file-identity continuity clue; Hash

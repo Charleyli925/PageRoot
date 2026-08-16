@@ -790,9 +790,22 @@ export class DocumentWorkflow {
         });
       }
       await this.#verifyRendered(expectedHtml, expectedSha256, activeContext || undefined);
+      const confirmed = this.#documentSession.confirmCanvas({
+        generation: this.#documentSession.canvasGeneration,
+        renderedSha256: expectedSha256,
+      });
+      if (!confirmed) {
+        throw Object.assign(new Error("当前画布尚未完成自动恢复。"), {
+          code: "DOCUMENT_CANVAS_AUTHORITY_REJECTED",
+        });
+      }
       return succeeded({ html: expectedHtml, sourceSha256: expectedSha256 });
     } catch (cause) {
       if (activeContext && !this.#isCurrent(activeContext)) return stale(activeContext);
+      this.#documentSession.failCanvas({
+        generation: this.#documentSession.canvasGeneration,
+        error: this.#codecs.errorMessage(cause, "当前画布尚未完成自动恢复。"),
+      });
       return this.#outcomeFromCause(
         this.#nextOperationId("canvas"),
         cause,

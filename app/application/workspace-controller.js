@@ -778,6 +778,38 @@ export class WorkspaceController {
     return this.#requireProjectWorkflow().acceptExternalProject(input);
   }
 
+  confirmExternalOpen(input = {}) {
+    if (input?.action === "view-initial") {
+      return Promise.resolve(Object.freeze({
+        status: "rejected",
+        code: "EXTERNAL_OPEN_ACTION_UNSUPPORTED",
+        reason: "这条打开确认不提供查看初始版本。",
+      }));
+    }
+    return this.#requireProjectWorkflow().confirmExternalOpen(input);
+  }
+
+  cancelExternalOpen(input) {
+    return this.#requireProjectWorkflow().cancelExternalOpen(input);
+  }
+
+  setExternalOpenDeleteOriginal(input) {
+    return this.#requireProjectWorkflow().setExternalOpenDeleteOriginal(input);
+  }
+
+  retryExternalOpen(input) {
+    return this.#requireProjectWorkflow().retryExternalOpen(input);
+  }
+
+  acknowledgeEditCanvas(input) {
+    return this.#documentSession.confirmCanvas(input);
+  }
+
+  retryCanvasVerification(input) {
+    this.#documentSession.reloadCanvas();
+    return this.#requireDocumentWorkflow().ensureCurrentCanvas(input);
+  }
+
   resumeDeferredExternalProject() {
     return this.#requireProjectWorkflow().resumeDeferredExternalProject();
   }

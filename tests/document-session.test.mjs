@@ -23,6 +23,8 @@ test("document session owns source bytes, revisions and pending write", () => {
   assert.equal(session.pendingWrite, write);
   assert.equal(session.snapshot.persistState, "queued");
   assert.equal(session.canvasGeneration, 0);
+  assert.equal(session.canvasAuthority.status, "pending");
+  assert.equal(session.canvasAuthority.generation, 0);
 });
 
 test("authoritative source publication replaces bytes and Hash in one generation", () => {
@@ -252,4 +254,86 @@ test("invalid authoritative content integrity is confirmed before recovery is es
   assert.equal(result.code, "source-integrity-failed");
   assert.equal(result.confirmed, true);
   assert.equal(session.persistState, "idle");
+});
+
+test("source publication puts the new canvas generation into pending until an exact ACK", () => {
+  const html = "<main>canvas</main>";
+  const digest = sha256(html);
+  const session = new DocumentSession({ html, sourceSha256: digest });
+  assert.equal(session.canvasAuthority.status, "idle");
+
+  session.publishAuthority({ html, sourceSha256: digest });
+  assert.equal(session.canvasAuthority.status, "pending");
+  assert.equal(session.canvasAuthority.generation, 1);
+
+  assert.equal(session.confirmCanvas({
+    generation: 0,
+    renderedSha256: digest,
+  }), false);
+  assert.equal(session.confirmCanvas({
+    generation: 1,
+    renderedSha256: sha256("<main>stale</main>"),
+  }), false);
+  assert.equal(session.canvasAuthority.status, "pending");
+  assert.equal(session.confirmCanvas({
+    generation: 1,
+    renderedSha256: digest,
+  }), true);
+  assert.deepEqual(session.canvasAuthority, {
+    status: "verified",
+    generation: 1,
+    renderedSha256: digest,
+    error: null,
+  });
+});
+
+test("beginEdit pending the current canvas generation without rebuilding it", () => {
+  const html = "<main>one</main>";
+  const digest = sha256(html);
+  const session = new DocumentSession({ html, sourceSha256: digest });
+  session.reloadCanvas();
+  assert.equal(session.confirmCanvas({
+    generation: 1,
+    renderedSha256: digest,
+  }), true);
+
+  const edited = "<main>two</main>";
+  session.beginEdit(edited);
+  assert.equal(session.canvasGeneration, 1);
+  assert.equal(session.canvasAuthority.status, "pending");
+  assert.equal(session.canvasAuthority.generation, 1);
+  assert.equal(session.confirmCanvas({
+    generation: 1,
+    renderedSha256: sha256(edited),
+  }), false);
+  session.setSourceSha256(sha256(edited));
+  assert.equal(session.confirmCanvas({
+    generation: 1,
+    renderedSha256: sha256(edited),
+  }), true);
+});
+
+test("a late canvas ACK cannot change a newer generation or a failed verification", () => {
+  const html = "<main>one</main>";
+  const session = new DocumentSession({
+    html,
+    sourceSha256: sha256(html),
+  });
+  session.reloadCanvas();
+  assert.equal(session.failCanvas({
+    generation: 1,
+    error: "画布没有在时限内确认载入目标 HTML。",
+  }), true);
+  assert.equal(session.canvasAuthority.status, "failed");
+
+  session.publishAuthority({
+    html: "<main>two</main>",
+    sourceSha256: sha256("<main>two</main>"),
+  });
+  assert.equal(session.confirmCanvas({
+    generation: 1,
+    renderedSha256: sha256(html),
+  }), false);
+  assert.equal(session.canvasAuthority.status, "pending");
+  assert.equal(session.canvasAuthority.generation, 2);
 });

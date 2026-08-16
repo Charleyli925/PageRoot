@@ -121,6 +121,7 @@ import {
   alignPreviewSourceSurface,
   sourceTextParentsForSegments,
 } from "./html-canvas-preview-sync";
+import { usePreviewResourceBase } from "./use-preview-resource-base";
 import {
   activeTextRangeFromDocument,
   boundedHistorySelection,
@@ -581,7 +582,13 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   },
   forwardedRef,
 ) {
-  const resolvedBaseHref = baseHref || baseHrefFromSourcePath(sourcePath);
+  const documentBaseHref = baseHref || baseHrefFromSourcePath(sourcePath);
+  const { resourceBase: previewResourceBase, ready: previewAssetsReady } = usePreviewResourceBase(
+    html,
+    sourcePath,
+    Boolean(baseHref),
+  );
+  const staticAssetBaseHref = previewResourceBase || documentBaseHref;
   const containerRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const frameWrittenHtmlRef = useRef<string | null>(null);
@@ -669,7 +676,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const runtimeFrameRef = useRef<RuntimeFrameContext | null>(null);
   const runtimeAttemptedRef = useRef(false);
   const imperativeLockRef = useRef(false);
-  const lastPropRef = useRef({ html, baseHref: resolvedBaseHref });
+  const lastPropRef = useRef({ html, baseHref: documentBaseHref });
   const onChangeRef = useRef(onChange);
   const onSelectRef = useRef(onSelect);
   const onInteractionRef = useRef(onInteraction);
@@ -900,7 +907,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
               sessionId: runtimeGrant.sessionId,
               executionId: runtimeGrant.executionId,
               hosts: runtimeGrant.hosts,
-              baseUrl: resolvedBaseHref,
+              baseUrl: documentBaseHref,
               editorStyles: EDITOR_DOCUMENT_STYLES,
             },
           );
@@ -923,10 +930,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     if (!prepared) {
       prepared = prepareCanvasFrameDocument(instrumentedSource, token, {
         mode: "static",
-        baseUrl: resolvedBaseHref,
+        baseUrl: staticAssetBaseHref,
         editorStyles: EDITOR_DOCUMENT_STYLES,
       }) || prepareVerifiedFrameDocument(instrumentedSource, token, {
-        baseUrl: resolvedBaseHref,
+        baseUrl: staticAssetBaseHref,
         editorStyles: EDITOR_DOCUMENT_STYLES,
       });
     }
@@ -983,7 +990,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     } else {
       replaceFrameElement();
     }
-  }, [editRuntimeGrant, resolvedBaseHref]);
+  }, [documentBaseHref, editRuntimeGrant, staticAssetBaseHref]);
 
   const fallBackToStaticRuntimeFrame = useCallback((
     frame: RuntimeFrameContext,
@@ -4304,24 +4311,25 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   }, [api, onReady]);
 
   useEffect(() => {
+    if (!previewAssetsReady) return;
     if (!frameInitializedRef.current) {
       frameInitializedRef.current = true;
       loadFrameSource(html);
-      lastPropRef.current = { html, baseHref: resolvedBaseHref };
+      lastPropRef.current = { html, baseHref: documentBaseHref };
       return;
     }
 
     const previous = lastPropRef.current;
-    if (previous.html === html && previous.baseHref === resolvedBaseHref) return;
-    lastPropRef.current = { html, baseHref: resolvedBaseHref };
+    if (previous.html === html && previous.baseHref === documentBaseHref) return;
+    lastPropRef.current = { html, baseHref: documentBaseHref };
 
     const echoIndex = pendingHtmlEchoesRef.current.indexOf(html);
-    if (echoIndex >= 0 && previous.baseHref === resolvedBaseHref) {
+    if (echoIndex >= 0 && previous.baseHref === documentBaseHref) {
       pendingHtmlEchoesRef.current.splice(0, echoIndex + 1);
       lastEmittedHtmlRef.current = html;
       return;
     }
-    if (html === lastEmittedHtmlRef.current && previous.baseHref === resolvedBaseHref) return;
+    if (html === lastEmittedHtmlRef.current && previous.baseHref === documentBaseHref) return;
     if (activeNativeEditRef.current) detachNativeEditForFence();
     pendingNativeEditResumeRef.current = null;
     pendingHistoryBookmarkRef.current = null;
@@ -4332,10 +4340,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     loadFrameSource(html);
   }, [
     detachNativeEditForFence,
+    documentBaseHref,
     html,
     loadFrameSource,
+    previewAssetsReady,
     resetSelection,
-    resolvedBaseHref,
   ]);
 
   useEffect(() => {

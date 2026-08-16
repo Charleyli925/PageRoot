@@ -419,8 +419,26 @@ export class WorkspaceController {
   }): ProjectWorkflowOutcome;
   acceptExternalProject(input: {
     requestId: string;
-    sourcePath: string;
+    sourcePath?: string;
   }): ProjectWorkflowOutcome;
+  confirmExternalOpen(input?: {
+    requestId?: string;
+    action?: string;
+    deleteOriginal?: boolean;
+  }): Promise<ProjectWorkflowOutcome>;
+  cancelExternalOpen(input?: { requestId?: string }): ProjectWorkflowOutcome;
+  setExternalOpenDeleteOriginal(input?: {
+    requestId?: string;
+    deleteOriginal?: boolean;
+  }): ProjectWorkflowOutcome;
+  retryExternalOpen(input?: { requestId?: string }): Promise<ProjectWorkflowOutcome>;
+  acknowledgeEditCanvas(input?: {
+    generation?: number;
+    renderedSha256?: string | null;
+  }): boolean;
+  retryCanvasVerification(input?: {
+    context?: ProjectContext;
+  }): Promise<DocumentWorkflowOutcome>;
   resumeDeferredExternalProject(): ProjectWorkflowOutcome;
   resumeDeferredProjectApplication(): ProjectWorkflowOutcome;
   reconcileProjectTransitions(): void;

@@ -85,6 +85,12 @@ const LEGACY_V4_REGISTRY_MIGRATION_LOCK_TIMEOUT_MS = 30_000;
 const LEGACY_V4_REGISTRY_MIGRATION_LOCK_OWNER_FILE = /^\.owner-([a-f0-9-]{36})\.json$/u;
 const LEGACY_V4_REGISTRY_MIGRATION_LOCK_RETIRING_FILE =
   /^\.retiring-([a-f0-9-]{36})-([a-f0-9-]{36})\.json$/u;
+const CURRENT_REGISTRY_WRITE_LOCK_DIRECTORY = ".pageroot-registry-write-lock";
+const CURRENT_REGISTRY_WRITE_LOCK_WAIT_MS = 20;
+const CURRENT_REGISTRY_WRITE_LOCK_TIMEOUT_MS = 30_000;
+const CURRENT_REGISTRY_WRITE_LOCK_OWNER_FILE = /^\.owner-([a-f0-9-]{36})\.json$/u;
+const CURRENT_REGISTRY_WRITE_LOCK_RETIRING_FILE =
+  /^\.retiring-([a-f0-9-]{36})-([a-f0-9-]{36})\.json$/u;
 const PROJECT_ID = /^project_[a-f0-9]{16,64}$/u;
 const DOCUMENT_ID = /^doc_[a-f0-9]{16,64}$/u;
 const VERSION_ID = /^ver_\d{4,}$/u;
@@ -1218,6 +1224,204 @@ function waitForLegacyV4RegistryMigrationLock() {
   });
 }
 
+function currentRegistryWriteLockPath(projectsRoot) {
+  return path.join(projectsRoot, CURRENT_REGISTRY_WRITE_LOCK_DIRECTORY);
+}
+
+function currentRegistryWriteLockOwnerPath(lockPath, token) {
+  return path.join(lockPath, `.owner-${token}.json`);
+}
+
+function currentRegistryWriteLockRetiringPath(lockPath, ownerToken) {
+  return path.join(lockPath, `.retiring-${ownerToken}-${randomUUID()}.json`);
+}
+
+function currentRegistryWriteLockMarker(name) {
+  const owner = String(name || "").match(CURRENT_REGISTRY_WRITE_LOCK_OWNER_FILE);
+  if (owner) return { ownerToken: owner[1] };
+  const retiring = String(name || "").match(CURRENT_REGISTRY_WRITE_LOCK_RETIRING_FILE);
+  if (retiring) return { ownerToken: retiring[1] };
+  return null;
+}
+
+function currentRegistryWriteLockOwner(value) {
+  if (
+    !hasExactKeys(value, ["createdAt", "pid", "token"])
+    || !Number.isSafeInteger(value.pid)
+    || value.pid < 1
+    || typeof value.token !== "string"
+    || !/^[a-f0-9-]{36}$/u.test(value.token)
+    || !value.createdAt
+    || Number.isNaN(Date.parse(value.createdAt))
+  ) return null;
+  return value;
+}
+
+async function currentRegistryWriteLockLease({ projectsRoot, lockPath }) {
+  let entries;
+  try {
+    entries = await readdir(lockPath, { withFileTypes: true });
+  } catch (cause) {
+    if (cause?.code === "ENOENT") return null;
+    throw cause;
+  }
+  const markers = entries
+    .filter((entry) => entry.isFile())
+    .map((entry) => ({ name: entry.name, marker: currentRegistryWriteLockMarker(entry.name) }))
+    .filter((entry) => entry.marker);
+  if (markers.length !== 1) return null;
+  const marker = markers[0];
+  const ownerPath = path.join(lockPath, marker.name);
+  let ownerRecord;
+  try {
+    ownerRecord = await readJsonFile(
+      ownerPath,
+      "current Registry write lock",
+      { projectRootPath: projectsRoot },
+    );
+  } catch (cause) {
+    if (
+      cause?.code === "ENOENT"
+      || (
+        cause instanceof ProjectFileRepositoryError
+        && cause.code === "INVALID_JSON"
+      )
+    ) return null;
+    throw cause;
+  }
+  const owner = currentRegistryWriteLockOwner(ownerRecord);
+  if (!owner || owner.token !== marker.marker.ownerToken) return null;
+  return { owner, ownerPath };
+}
+
+async function releaseCurrentRegistryWriteLock({
+  projectsRoot,
+  lockPath,
+  token,
+}) {
+  try {
+    const ownerPath = currentRegistryWriteLockOwnerPath(lockPath, token);
+    const owner = currentRegistryWriteLockOwner(await readJsonFile(
+      ownerPath,
+      "current Registry write lock",
+      { projectRootPath: projectsRoot },
+    ));
+    if (!owner || owner.token !== token) return;
+    await unlink(ownerPath).catch((cause) => {
+      if (cause?.code !== "ENOENT") throw cause;
+    });
+    await rmdir(lockPath).catch((cause) => {
+      if (cause?.code !== "ENOENT" && cause?.code !== "ENOTEMPTY") throw cause;
+    });
+  } catch (cause) {
+    if (cause?.code === "ENOENT") return;
+    throw cause;
+  }
+}
+
+async function retireCurrentRegistryWriteLock({
+  projectsRoot,
+  lockPath,
+  ownerPath,
+  ownerToken,
+}) {
+  const retiringPath = currentRegistryWriteLockRetiringPath(lockPath, ownerToken);
+  try {
+    await rename(ownerPath, retiringPath);
+  } catch (cause) {
+    if (cause?.code === "ENOENT") return false;
+    throw cause;
+  }
+  const abandonedPath = path.join(
+    projectsRoot,
+    `.pageroot-registry-write-stale-${randomUUID()}`,
+  );
+  try {
+    await rename(lockPath, abandonedPath);
+  } catch (cause) {
+    if (cause?.code === "ENOENT") return false;
+    throw cause;
+  }
+  await rm(abandonedPath, { recursive: true, force: true });
+  await syncDirectory(projectsRoot);
+  return true;
+}
+
+function waitForCurrentRegistryWriteLock() {
+  return new Promise((resolve) => {
+    setTimeout(resolve, CURRENT_REGISTRY_WRITE_LOCK_WAIT_MS);
+  });
+}
+
+async function acquireCurrentRegistryWriteLock({
+  projectsRoot,
+  timeoutMs = CURRENT_REGISTRY_WRITE_LOCK_TIMEOUT_MS,
+  onBeforeRetire = null,
+}) {
+  const lockPath = currentRegistryWriteLockPath(projectsRoot);
+  const deadlineAt = Date.now() + timeoutMs;
+
+  await assertRealPathInsideProject(projectsRoot, lockPath, "current Registry write lock");
+  while (true) {
+    try {
+      await mkdir(lockPath, { mode: 0o700 });
+      await assertRealPathInsideProject(
+        projectsRoot,
+        lockPath,
+        "current Registry write lock",
+        { expectedKind: "directory" },
+      );
+      const token = randomUUID();
+      const ownerPath = currentRegistryWriteLockOwnerPath(lockPath, token);
+      await atomicWriteFile(ownerPath, Buffer.from(jsonText({
+        pid: process.pid,
+        token,
+        createdAt: new Date().toISOString(),
+      }), "utf8"), { mode: 0o600 });
+      await Promise.all([
+        syncDirectory(lockPath),
+        syncDirectory(projectsRoot),
+      ]);
+      return () => releaseCurrentRegistryWriteLock({
+        projectsRoot,
+        lockPath,
+        token,
+      });
+    } catch (cause) {
+      if (cause?.code !== "EEXIST") throw cause;
+    }
+
+    const lockInformation = await directoryInformation(
+      lockPath,
+      "current Registry write lock",
+      { projectRootPath: projectsRoot },
+    );
+    if (!lockInformation) continue;
+    const lease = await currentRegistryWriteLockLease({ projectsRoot, lockPath });
+    if (lease && !localProcessIsAlive(lease.owner.pid)) {
+      await onBeforeRetire?.({
+        lockPath,
+        ownerPath: lease.ownerPath,
+        owner: lease.owner,
+      });
+      await retireCurrentRegistryWriteLock({
+        projectsRoot,
+        lockPath,
+        ownerPath: lease.ownerPath,
+        ownerToken: lease.owner.token,
+      });
+      continue;
+    }
+    if (Date.now() >= deadlineAt) {
+      throw new ProjectFileRepositoryError(
+        "REGISTRY_BUSY",
+        "Another PageRoot process is updating the project Registry.",
+      );
+    }
+    await waitForCurrentRegistryWriteLock();
+  }
+}
+
 function assertRegistryTimestamp(value, label) {
   if (!value || Number.isNaN(Date.parse(value))) {
     throw new ProjectFileRepositoryError(
@@ -1921,6 +2125,10 @@ export class ProjectFileRepository {
 
   #failpoint;
 
+  #registryWriteLockTimeoutMs;
+
+  #registryWriteLockDepth = 0;
+
   #tail = Promise.resolve();
 
   constructor({
@@ -1928,11 +2136,16 @@ export class ProjectFileRepository {
     registryPath = path.join(projectsRoot, ".pageroot-registry.json"),
     clock = Date.now,
     failpoint = null,
+    registryWriteLockTimeoutMs = CURRENT_REGISTRY_WRITE_LOCK_TIMEOUT_MS,
   } = {}) {
     this.#projectsRoot = normalizedPath(projectsRoot);
     this.#registryPath = normalizedPath(registryPath);
     this.#clock = typeof clock === "function" ? clock : Date.now;
     this.#failpoint = typeof failpoint === "function" ? failpoint : null;
+    this.#registryWriteLockTimeoutMs = Number.isSafeInteger(registryWriteLockTimeoutMs)
+      && registryWriteLockTimeoutMs >= 1
+      ? registryWriteLockTimeoutMs
+      : CURRENT_REGISTRY_WRITE_LOCK_TIMEOUT_MS;
   }
 
   get projectsRoot() {
@@ -1943,15 +2156,18 @@ export class ProjectFileRepository {
     return this.#serial(async () => {
       await ensureDirectory(this.#projectsRoot);
       await this.#assertProjectsRoot();
-      if (!(await exists(this.#registryPath))) {
-        await atomicWriteProjectJson(
-          this.#projectsRoot,
-          this.#registryPath,
-          emptyRegistry(this.#clock),
-          "project registry",
-        );
-      }
-      await this.#recoverPublishedImports();
+      await this.#readRegistry();
+      await this.#withRegistryWriteLock(async () => {
+        if (!(await exists(this.#registryPath))) {
+          await atomicWriteProjectJson(
+            this.#projectsRoot,
+            this.#registryPath,
+            emptyRegistry(this.#clock),
+            "project registry",
+          );
+        }
+        await this.#recoverPublishedImports();
+      });
     });
   }
 
@@ -1975,6 +2191,10 @@ export class ProjectFileRepository {
 
   async resolveOpenTarget({ sourcePath } = {}) {
     return this.#serial(() => this.#resolveOpenTarget({ sourcePath }));
+  }
+
+  async classifyOpenPath({ sourcePath } = {}) {
+    return this.#serial(() => this.#classifyOpenPath({ sourcePath }));
   }
 
   async reconcileWorkingCopyLocator({
@@ -2257,6 +2477,32 @@ export class ProjectFileRepository {
     const current = this.#tail.then(run, run);
     this.#tail = current.catch(() => {});
     return current;
+  }
+
+  async #withRegistryWriteLock(operation) {
+    if (this.#registryWriteLockDepth > 0) {
+      this.#registryWriteLockDepth += 1;
+      try {
+        return await operation();
+      } finally {
+        this.#registryWriteLockDepth -= 1;
+      }
+    }
+    const release = await acquireCurrentRegistryWriteLock({
+      projectsRoot: this.#projectsRoot,
+      timeoutMs: this.#registryWriteLockTimeoutMs,
+      onBeforeRetire: (details) => this.#hit(
+        "registry-write-lock-before-retire",
+        details,
+      ),
+    });
+    this.#registryWriteLockDepth = 1;
+    try {
+      return await operation();
+    } finally {
+      this.#registryWriteLockDepth = 0;
+      await release();
+    }
   }
 
   async #hit(name, details = {}) {
@@ -4395,6 +4641,13 @@ export class ProjectFileRepository {
         "The new project identity is already registered.",
       );
     }
+    const sourceClaims = this.#externalSourceClaims(registry, importSourceKey);
+    if (sourceClaims.committed.length > 0 || sourceClaims.pending.length > 0) {
+      throw new ProjectFileRepositoryError(
+        "EXTERNAL_SOURCE_BINDING_CONFLICT",
+        "This external source is already claimed by a registered or pending project.",
+      );
+    }
     registry.pendingImports[projectId] = {
       projectId,
       documentId,
@@ -4534,57 +4787,208 @@ export class ProjectFileRepository {
     return recovered;
   }
 
-  async #recoveredImportTarget({ importSourceKey, importSourceSha256 }) {
-    const registry = await this.#readRegistry();
-    const matches = Object.entries(registry.projects).filter(([, record]) => (
-      record.importSourceKey === importSourceKey
-      && record.importSourceSha256 === importSourceSha256
-    ));
-    if (matches.length > 1) {
+  async #readExternalSourceDescriptor(sourcePath, { beforeRead = null } = {}) {
+    const requestedPath = normalizedPath(sourcePath);
+    htmlExtension(requestedPath);
+    const information = await regularInformation(requestedPath, "external HTML");
+    if (!information) {
       throw new ProjectFileRepositoryError(
-        "IMPORT_RECOVERY_AMBIGUOUS",
-        "More than one registered project claims this external import retry.",
+        "SOURCE_NOT_FOUND",
+        "external HTML was not found.",
       );
     }
-    if (matches.length === 0) return null;
-    const [projectId, record] = matches[0];
-    const loaded = await this.#loadRegisteredProject({
-      projectId,
-      declaredProjectRootPath: record.registeredProjectRootPath,
+    const canonicalSourcePath = normalizedPath(await cachedRealPath(requestedPath));
+    htmlExtension(canonicalSourcePath);
+    const source = await readHtmlFile(canonicalSourcePath, "external HTML", {
+      beforeRead,
     });
-    const firstVersion = loaded.manifest.versions.find(
-      (version) => version.versionId === versionId(1),
-    );
-    const firstWorkingCopy = loaded.manifest.workingCopies.find(
-      (workingCopy) => (
-        workingCopy.workingCopyId === workingCopyId(1)
-        && workingCopy.versionId === firstVersion?.versionId
-        && workingCopy.basedOnVersionId === firstVersion?.versionId
-      ),
-    );
-    if (
-      !firstVersion
-      || !firstWorkingCopy
-      || loaded.manifest.latestOfficialVersionId !== firstVersion.versionId
-      || loaded.runtime.activeWorkingCopyId !== firstWorkingCopy.workingCopyId
-    ) return null;
-    const sourcePath = workingCopySourcePath(loaded.paths, firstWorkingCopy);
-    const source = await readHtmlFile(sourcePath, "recovered import Working Copy", {
-      projectRootPath: loaded.paths.projectRootPath,
-    });
-    if (
-      source.sha256 !== importSourceSha256
-      || firstVersion.contentSha256 !== importSourceSha256
-    ) return null;
-    return publicOpenTarget({
-      project: loaded.project,
-      projectRootPath: loaded.paths.projectRootPath,
-      targetKind: "working-copy",
-      workingCopy: firstWorkingCopy,
-      version: firstVersion,
-      exactSourcePath: sourcePath,
+    return {
+      canonicalSourcePath,
+      sourceKey: sha256(Buffer.from(canonicalSourcePath, "utf8")),
       sourceSha256: source.sha256,
+      buffer: source.buffer,
+      html: source.html,
+      information: source.information,
+    };
+  }
+
+  #externalSourceClaims(registry, sourceKey) {
+    const committed = [];
+    const pending = [];
+    for (const [projectId, record] of Object.entries(registry.projects)) {
+      if (record.importSourceKey === sourceKey) {
+        committed.push({ projectId, record });
+      }
+    }
+    for (const [projectId, record] of Object.entries(registry.pendingImports)) {
+      if (record.importSourceKey === sourceKey) {
+        pending.push({ projectId, record });
+      }
+    }
+    return { committed, pending };
+  }
+
+  async #externalSourceProjectFacts({ projectId, record, currentSourceSha256 }) {
+    const opened = await this.#resolveRegisteredProjectOpenTarget({ projectId });
+    const loaded = await this.#loadRegisteredProject({ projectId });
+    const workingCopy = await this.#activeRegisteredWorkingCopy(loaded);
+    const state = assertWorkingCopyState(
+      await readJsonFile(
+        workingCopyStatePath(loaded.paths, workingCopy),
+        "active Working Copy state",
+        { projectRootPath: loaded.paths.projectRootPath },
+      ),
+      loaded,
+      workingCopy,
+    );
+    const basedOnVersion = loaded.manifest.versions.find(
+      (version) => version.versionId === workingCopy.basedOnVersionId,
+    );
+    const latestVersion = loaded.manifest.versions.find(
+      (version) => version.versionId === loaded.manifest.latestOfficialVersionId,
+    );
+    const initialVersion = loaded.manifest.versions.find((version) => version.ordinal === 1);
+    if (
+      !basedOnVersion
+      || !latestVersion
+      || !initialVersion
+      || initialVersion.ordinal !== 1
+      || initialVersion.contentSha256 !== record.importSourceSha256
+    ) {
+      throw new ProjectFileRepositoryError(
+        "EXTERNAL_SOURCE_BINDING_INVALID",
+        "The bound project no longer has a valid initial Version for this external source.",
+        { projectId },
+      );
+    }
+    const snapshot = await readHtmlFile(
+      versionSnapshotPath(loaded.paths, initialVersion),
+      "initial Version snapshot",
+      { projectRootPath: loaded.paths.projectRootPath },
+    );
+    if (snapshot.sha256 !== record.importSourceSha256) {
+      throw new ProjectFileRepositoryError(
+        "EXTERNAL_SOURCE_BINDING_INVALID",
+        "The bound project's initial Version snapshot does not match the recorded import.",
+        { projectId },
+      );
+    }
+    return {
+      projectId: loaded.project.projectId,
+      documentId: loaded.project.documentId,
+      projectName: path.basename(loaded.paths.projectRootPath),
+      openTarget: opened.target,
+      currentBasedOnVersionId: basedOnVersion.versionId,
+      currentBasedOnOrdinal: basedOnVersion.ordinal,
+      latestOfficialVersionId: latestVersion.versionId,
+      latestOfficialOrdinal: latestVersion.ordinal,
+      currentDiffersFromBase: state.differsFromBase === true,
+      initialVersionId: initialVersion.versionId,
+      initialVersionOrdinal: initialVersion.ordinal,
+      sourceRelation: currentSourceSha256 === record.importSourceSha256
+        ? "unchanged"
+        : "changed",
+    };
+  }
+
+  async #resolveExternalSourceBinding({ sourceKey, currentSourceSha256 }) {
+    const registry = await this.#readRegistry();
+    const claims = this.#externalSourceClaims(registry, sourceKey);
+    if (claims.committed.length > 1) {
+      throw new ProjectFileRepositoryError(
+        "EXTERNAL_SOURCE_BINDING_CONFLICT",
+        "More than one registered project claims this external source.",
+      );
+    }
+    if (
+      claims.committed.length === 1
+      && claims.pending.some((item) => item.projectId !== claims.committed[0].projectId)
+    ) {
+      throw new ProjectFileRepositoryError(
+        "EXTERNAL_SOURCE_BINDING_CONFLICT",
+        "A pending import conflicts with the registered external source binding.",
+      );
+    }
+    if (claims.committed.length === 1) {
+      return this.#externalSourceProjectFacts({
+        projectId: claims.committed[0].projectId,
+        record: claims.committed[0].record,
+        currentSourceSha256,
+      });
+    }
+    if (claims.pending.length > 1) {
+      throw new ProjectFileRepositoryError(
+        "EXTERNAL_SOURCE_BINDING_CONFLICT",
+        "More than one pending import claims this external source.",
+      );
+    }
+    return null;
+  }
+
+  async #recoverOrClearPendingExternalSource(sourceKey, currentSourceSha256) {
+    const registry = await this.#readRegistry();
+    const claims = this.#externalSourceClaims(registry, sourceKey);
+    if (claims.pending.length !== 1 || claims.committed.length > 0) return null;
+    const pending = claims.pending[0];
+    try {
+      await this.#publishPendingImport(pending.projectId);
+    } catch (cause) {
+      const pendingRoot = await directoryInformation(
+        pending.record.registeredProjectRootPath,
+        "pending import root",
+        { projectRootPath: this.#projectsRoot },
+      );
+      if (!pendingRoot) {
+        await this.#clearPendingImportIfMatches(
+          pending.projectId,
+          pending.record.registeredProjectRootPath,
+        );
+        return null;
+      }
+      throw new ProjectFileRepositoryError(
+        "SOURCE_IMPORT_PENDING",
+        "A previous import of this external source is still pending recovery.",
+        { projectId: pending.projectId, cause: cause?.code || null },
+      );
+    }
+    return this.#resolveExternalSourceBinding({
+      sourceKey,
+      currentSourceSha256,
     });
+  }
+
+  async #classifyOpenPath({ sourcePath }) {
+    const requestedPath = normalizedPath(sourcePath);
+    htmlExtension(requestedPath);
+    const managedTarget = await this.#resolveOpenTarget({ sourcePath: requestedPath });
+    if (managedTarget) {
+      return {
+        kind: "managed-project",
+        target: managedTarget,
+        sourceSha256: managedTarget.sourceSha256,
+      };
+    }
+    const descriptor = await this.#readExternalSourceDescriptor(requestedPath);
+    const binding = await this.#resolveExternalSourceBinding({
+      sourceKey: descriptor.sourceKey,
+      currentSourceSha256: descriptor.sourceSha256,
+    });
+    if (binding) {
+      return {
+        kind: "known-external",
+        sourceSha256: descriptor.sourceSha256,
+        sourceRelation: binding.sourceRelation,
+        projectFacts: binding,
+      };
+    }
+    const stem = safeProjectName(descriptor.canonicalSourcePath);
+    const extension = htmlExtension(descriptor.canonicalSourcePath);
+    return {
+      kind: "new-external",
+      sourceSha256: descriptor.sourceSha256,
+      sourceFileName: path.basename(descriptor.canonicalSourcePath),
+      visibleV1FileName: visibleFileName(stem, 1, extension),
+    };
   }
 
   async #importExternal({
@@ -4593,32 +4997,51 @@ export class ProjectFileRepository {
   }) {
     await ensureDirectory(this.#projectsRoot);
     await this.#assertProjectsRoot();
-    await this.#recoverPublishedImports();
-    const requestedPath = normalizedPath(sourcePath);
-    htmlExtension(requestedPath);
-    const existingTarget = await this.#resolveOpenTarget({ sourcePath: requestedPath });
-    if (existingTarget) return { imported: false, target: existingTarget };
-    const source = await readHtmlFile(requestedPath, "external HTML", {
-      beforeRead: ({ filePath, information }) => this.#hit("html-read-after-stat", {
-        filePath,
-        size: information.size,
-      }),
-    });
-    if (expectedSourceSha256 && source.sha256 !== assertSha256(expectedSourceSha256, "expectedSourceSha256")) {
-      throw new ProjectFileRepositoryError(
-        "SOURCE_HASH_CONFLICT",
-        "The external HTML changed before import.",
-        { expectedSourceSha256, actualSourceSha256: source.sha256 },
+    await this.#readRegistry();
+    return this.#withRegistryWriteLock(async () => {
+      await this.#recoverPublishedImports();
+      const requestedPath = normalizedPath(sourcePath);
+      htmlExtension(requestedPath);
+      const existingTarget = await this.#resolveOpenTarget({ sourcePath: requestedPath });
+      if (existingTarget) return { imported: false, target: existingTarget };
+      const descriptor = await this.#readExternalSourceDescriptor(requestedPath, {
+        beforeRead: ({ filePath, information }) => this.#hit("html-read-after-stat", {
+          filePath,
+          size: information.size,
+        }),
+      });
+      if (
+        expectedSourceSha256
+        && descriptor.sourceSha256 !== assertSha256(expectedSourceSha256, "expectedSourceSha256")
+      ) {
+        throw new ProjectFileRepositoryError(
+          "SOURCE_HASH_CONFLICT",
+          "The external HTML changed before import.",
+          {
+            expectedSourceSha256,
+            actualSourceSha256: descriptor.sourceSha256,
+          },
+        );
+      }
+      const bound = await this.#resolveExternalSourceBinding({
+        sourceKey: descriptor.sourceKey,
+        currentSourceSha256: descriptor.sourceSha256,
+      });
+      if (bound) return { imported: false, target: bound.openTarget };
+      const recoveredPending = await this.#recoverOrClearPendingExternalSource(
+        descriptor.sourceKey,
+        descriptor.sourceSha256,
       );
-    }
-    const importSourceKey = sha256(Buffer.from(requestedPath, "utf8"));
-    const recoveredTarget = await this.#recoveredImportTarget({
-      importSourceKey,
-      importSourceSha256: source.sha256,
+      if (recoveredPending) {
+        return { imported: false, target: recoveredPending.openTarget };
+      }
+      return this.#publishNewExternalImport(descriptor);
     });
-    if (recoveredTarget) return { imported: false, target: recoveredTarget };
-    const stem = safeProjectName(requestedPath);
-    const extension = htmlExtension(requestedPath);
+  }
+
+  async #publishNewExternalImport(descriptor) {
+    const stem = safeProjectName(descriptor.canonicalSourcePath);
+    const extension = htmlExtension(descriptor.canonicalSourcePath);
     const projectId = randomId("project");
     const documentId = randomId("doc");
     const createdAt = nowIso(this.#clock);
@@ -4636,8 +5059,8 @@ export class ProjectFileRepository {
         documentId,
         projectRootPath: allocated.projectRootPath,
         createdAt,
-        importSourceKey,
-        importSourceSha256: source.sha256,
+        importSourceKey: descriptor.sourceKey,
+        importSourceSha256: descriptor.sourceSha256,
       });
       pendingPrepared = true;
       await this.#hit("import-intent-recorded", {
@@ -4671,9 +5094,9 @@ export class ProjectFileRepository {
         path.dirname(snapshotPath),
         "initial Version directory",
       );
-      await atomicWriteProjectFile(stagingRoot, snapshotPath, source.buffer, "initial Version snapshot");
+      await atomicWriteProjectFile(stagingRoot, snapshotPath, descriptor.buffer, "initial Version snapshot");
       await this.#hit("import-snapshot-written", { stagingRoot });
-      await atomicWriteProjectFile(stagingRoot, visiblePath, source.buffer, "initial Working Copy");
+      await atomicWriteProjectFile(stagingRoot, visiblePath, descriptor.buffer, "initial Working Copy");
       const visibleInformation = await regularInformation(visiblePath, "initial Working Copy", {
         projectRootPath: stagingRoot,
       });
@@ -4690,7 +5113,7 @@ export class ProjectFileRepository {
         ordinal: 1,
         basedOnVersionId: null,
         previousVersionId: null,
-        contentSha256: source.sha256,
+        contentSha256: descriptor.sourceSha256,
         snapshotRelativePath,
         sourceRequestId: null,
         sourceCandidateId: null,
@@ -4720,8 +5143,8 @@ export class ProjectFileRepository {
         documentId,
         workingCopyId: firstWorkingCopyId,
         basedOnVersionId: firstVersionId,
-        baseSha256: source.sha256,
-        currentSha256: source.sha256,
+        baseSha256: descriptor.sourceSha256,
+        currentSha256: descriptor.sourceSha256,
         differsFromBase: false,
         draftId: `draft_${firstWorkingCopyId}`,
         draftRelativePath: draftRelativePathFor(firstWorkingCopy),
@@ -4757,7 +5180,7 @@ export class ProjectFileRepository {
         state: "prepared",
         projectId,
         documentId,
-        externalSourceSha256: source.sha256,
+        externalSourceSha256: descriptor.sourceSha256,
         createdAt,
       }, "import recovery record");
       await atomicWriteProjectFile(
@@ -4768,12 +5191,17 @@ export class ProjectFileRepository {
       );
       await this.#hit("import-metadata-written", { stagingRoot });
 
-      const sourceBeforePublish = await readHtmlFile(requestedPath, "external HTML");
-      if (sourceBeforePublish.sha256 !== source.sha256) {
+      const sourceBeforePublish = await this.#readExternalSourceDescriptor(
+        descriptor.canonicalSourcePath,
+      );
+      if (sourceBeforePublish.sourceSha256 !== descriptor.sourceSha256) {
         throw new ProjectFileRepositoryError(
           "SOURCE_HASH_CONFLICT",
           "The external HTML changed during import.",
-          { expectedSourceSha256: source.sha256, actualSourceSha256: sourceBeforePublish.sha256 },
+          {
+            expectedSourceSha256: descriptor.sourceSha256,
+            actualSourceSha256: sourceBeforePublish.sourceSha256,
+          },
         );
       }
       await rename(stagingRoot, allocated.projectRootPath);
@@ -4797,7 +5225,7 @@ export class ProjectFileRepository {
           workingCopy: firstWorkingCopy,
           version: firstVersion,
           exactSourcePath: path.join(allocated.projectRootPath, visibleName),
-          sourceSha256: source.sha256,
+          sourceSha256: descriptor.sourceSha256,
         }),
       };
     } catch (cause) {

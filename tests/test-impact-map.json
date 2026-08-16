@@ -565,7 +565,7 @@
     {
       "id": "v2-island-controller",
       "patterns": [
-        "^app/components/(?:HtmlCanvasEditor(?:\\.types)?|HtmlInteractionPreview|desktop-(?:runtime-snapshot|preview)-api|html-canvas-(?:dom|interaction|internal-types|page-view|preview-sync|selection|style-inspector)|IslandEditingController|native-edit-types|native-layout-fingerprint|html-preview-sandbox)\\.(?:tsx|ts|js|d\\.ts)$"
+        "^app/components/(?:HtmlCanvasEditor(?:\\.types)?|HtmlInteractionPreview|desktop-(?:runtime-snapshot|preview)-api|html-canvas-(?:dom|interaction|internal-types|page-view|preview-sync|selection|style-inspector)|IslandEditingController|native-edit-types|native-layout-fingerprint|html-preview-sandbox|use-preview-resource-base)\\.(?:tsx|ts|js|d\\.ts)$"
       ],
       "suites": ["typecheck", "browser-smoke", "electron-smoke"],
       "nodeTests": [
@@ -678,6 +678,8 @@
       "id": "workbench-orchestration",
       "patterns": [
         "^app/workbench\\.tsx$",
+        "^app/workbench/ExternalHtmlOpenDialog\\.tsx$",
+        "^app/workbench/external-html-open-dialog\\.module\\.css$",
         "^app/workbench/(?:browser-io|comment-model|project-model|record-model|types)\\.ts$"
       ],
       "suites": ["typecheck", "browser-smoke", "electron-smoke", "ai-smoke"],
@@ -774,9 +776,15 @@
     },
     {
       "id": "desktop-external-file-open",
-      "patterns": ["^desktop/external-file-open\\.mjs$"],
+      "patterns": [
+        "^desktop/external-file-open\\.mjs$",
+        "^desktop/prepared-html-open\\.mjs$"
+      ],
       "suites": ["electron-smoke"],
-      "nodeTests": ["tests/external-file-open.test.mjs"]
+      "nodeTests": [
+        "tests/external-file-open.test.mjs",
+        "tests/prepared-html-open.test.mjs"
+      ]
     },
     {
       "id": "desktop-open-in-default-browser",
@@ -803,9 +811,15 @@
     },
     {
       "id": "desktop-preview",
-      "patterns": ["^desktop/preview-protocol\\.mjs$"],
+      "patterns": [
+        "^desktop/preview-protocol\\.mjs$",
+        "^desktop/imported-asset-root\\.mjs$"
+      ],
       "suites": ["electron-smoke"],
-      "nodeTests": ["tests/preview-protocol.test.mjs"]
+      "nodeTests": [
+        "tests/preview-protocol.test.mjs",
+        "tests/imported-asset-root.test.mjs"
+      ]
     },
     {
       "id": "desktop-lifecycle",
