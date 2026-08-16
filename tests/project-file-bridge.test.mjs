@@ -897,3 +897,59 @@ test("v4 attachments, empty source history and absent conflicts stay bound to th
   assert.equal(resolve.body.error.code, "CONFLICT_NOT_FOUND");
 });
 
+test("Bridge POST /managed-working-copy/reconcile rebinds a Finder rename by stable IDs", async (t) => {
+  const environment = await createBridgeTestEnvironment(t, {
+    prefix: "pageroot-managed-reconcile-",
+  });
+  const sourcePath = await environment.createSource("bridge-rename.html", html("bridge V1"));
+  const bridge = await environment.start({
+    HTML_AI_PROJECT_FILES_ROOT: join(environment.root, "project-files"),
+  });
+  const preview = await bridge.requestJson(
+    `/workspace?sourcePath=${encodeURIComponent(sourcePath)}&projectStorageVersion=4.0.0`,
+  );
+  const ensured = await postJson(bridge, "/project/ensure", {
+    sourcePath,
+    expectedSourceSha256: preview.body.currentHtmlSha256,
+    projectStorageVersion: "4.0.0",
+  });
+  assert.equal(ensured.response.status, 200, JSON.stringify(ensured.body));
+  const renamedPath = join(ensured.body.projectRoot, "bridge Finder renamed.html");
+  await rename(ensured.body.sourcePath, renamedPath);
+
+  const getAttempt = await bridge.requestJson("/managed-working-copy/reconcile");
+  assert.equal(getAttempt.response.status, 404);
+
+  const reconciled = await postJson(bridge, "/managed-working-copy/reconcile", {
+    operationId: "reconcile_bridge_operation_01",
+    previousSourcePath: ensured.body.sourcePath,
+    projectId: ensured.body.projectId,
+    documentId: ensured.body.documentId,
+    workingCopyId: ensured.body.openTarget.workingCopyId,
+    versionId: ensured.body.openTarget.versionId,
+    expectedSourceSha256: ensured.body.sourceSha256,
+    reason: "watch",
+  });
+  assert.equal(reconciled.response.status, 200, JSON.stringify(reconciled.body));
+  assert.equal(reconciled.body.status, "relocated");
+  assert.equal(reconciled.body.sourcePath, renamedPath);
+  assert.equal(reconciled.body.openTarget.projectId, ensured.body.projectId);
+  assert.equal(reconciled.body.openTarget.workingCopyId, ensured.body.openTarget.workingCopyId);
+  assert.equal(reconciled.body.openTarget.versionId, ensured.body.openTarget.versionId);
+  assert.equal(reconciled.body.sourceSha256, ensured.body.sourceSha256);
+
+  const missing = await postJson(bridge, "/managed-working-copy/reconcile", {
+    operationId: "reconcile_bridge_operation_02",
+    previousSourcePath: renamedPath,
+    projectId: ensured.body.projectId,
+    documentId: ensured.body.documentId,
+    workingCopyId: "work_ver_9999",
+    versionId: ensured.body.openTarget.versionId,
+    expectedSourceSha256: ensured.body.sourceSha256,
+    reason: "watch",
+  });
+  assert.equal(missing.response.status, 404);
+  assert.equal(missing.body.error.code, "WORKING_COPY_UNAVAILABLE");
+});
+
+

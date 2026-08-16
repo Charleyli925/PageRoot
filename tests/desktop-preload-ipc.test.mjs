@@ -380,6 +380,97 @@ test("preload exposes the narrow source rename operation", async () => {
   ]);
 });
 
+test("preload exposes the narrow active managed source reconcile operation", async () => {
+  const calls = [];
+  const api = await loadPreload(async (...args) => {
+    calls.push(args);
+    return success({
+      operationId: "reconcile_demo_operation",
+      status: "relocated",
+      previousSourcePath: "/Users/demo/Documents/PageRoot/项目/report/report-V1.html",
+      sourcePath: "/Users/demo/Documents/PageRoot/项目/report/Finder 新名字-V1.html",
+      sourceSha256: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      openTarget: {
+        projectId: "project_demo",
+        documentId: "doc_demo0123456789",
+        workingCopyId: "work_ver_0001",
+        versionId: "ver_0001",
+      },
+      watcherGeneration: 2,
+    });
+  });
+  const payload = {
+    previousSourcePath: "/Users/demo/Documents/PageRoot/项目/report/report-V1.html",
+    expectedSourceSha256:
+      "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    projectId: "project_demo",
+    documentId: "doc_demo0123456789",
+    workingCopyId: "work_ver_0001",
+    versionId: "ver_0001",
+    reason: "watch",
+    watcherGeneration: 1,
+  };
+
+  assert.deepEqual(
+    await api.reconcileActiveManagedSource(payload),
+    {
+      operationId: "reconcile_demo_operation",
+      status: "relocated",
+      previousSourcePath: "/Users/demo/Documents/PageRoot/项目/report/report-V1.html",
+      sourcePath: "/Users/demo/Documents/PageRoot/项目/report/Finder 新名字-V1.html",
+      sourceSha256: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      openTarget: {
+        projectId: "project_demo",
+        documentId: "doc_demo0123456789",
+        workingCopyId: "work_ver_0001",
+        versionId: "ver_0001",
+      },
+      watcherGeneration: 2,
+    },
+  );
+  assert.deepEqual(calls[0], [
+    "html-projects:reconcile-active-managed-source",
+    payload,
+  ]);
+});
+
+test("preload delivers directory-change hints without claiming a new path", async () => {
+  const seen = [];
+  const loaded = await loadPreloadApis(async () => success(null));
+  const unsubscribe = loaded.projects.onSourceFileChanged((payload) => {
+    seen.push(payload);
+  });
+  loaded.emit("html-projects:source-file-may-have-changed", {
+    sourcePath: "/Users/demo/Documents/PageRoot/项目/report/report-V1.html",
+    watcherGeneration: 3,
+  });
+  loaded.emit("html-projects:source-file-may-have-changed", {
+    sourcePath: "",
+    watcherGeneration: 4,
+  });
+  assert.equal(seen.length, 1);
+  assert.equal(
+    seen[0].sourcePath,
+    "/Users/demo/Documents/PageRoot/项目/report/report-V1.html",
+  );
+  assert.equal(seen[0].watcherGeneration, 3);
+  assert.equal("nextSourcePath" in seen[0], false);
+  assert.equal("sourceMissing" in seen[0], false);
+  loaded.emit("html-projects:source-file-may-have-changed", {
+    sourcePath: "/Users/demo/Documents/PageRoot/项目/report/report-V1.html",
+    watcherGeneration: 5,
+    sourceMissing: false,
+  });
+  loaded.emit("html-projects:source-file-may-have-changed", {
+    sourcePath: "/Users/demo/Documents/PageRoot/项目/report/report-V1.html",
+    watcherGeneration: 6,
+    sourceMissing: true,
+  });
+  assert.equal(seen[1].sourceMissing, false);
+  assert.equal(seen[2].sourceMissing, true);
+  unsubscribe();
+});
+
 test("preload exposes explicit recent-record removal", async () => {
   const calls = [];
   const api = await loadPreload(async (...args) => {

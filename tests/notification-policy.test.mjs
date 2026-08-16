@@ -290,6 +290,27 @@ test("structured project identity errors use one safe product message", () => {
   );
 });
 
+test("managed locator failures stay user-facing and do not leak paths", () => {
+  const mismatch = new Error("inode 12345 at /Users/secret/report.html");
+  mismatch.code = "MANAGED_SOURCE_IDENTITY_MISMATCH";
+  assert.equal(
+    productErrorMessage(mismatch, "项目操作没有完成。"),
+    "当前工作文件身份无法核对，PageRoot 没有切换路径。",
+  );
+  const ambiguous = new Error("device 1 inode 2");
+  ambiguous.code = "MANAGED_PATH_AMBIGUOUS";
+  assert.equal(
+    productErrorMessage(ambiguous, "项目操作没有完成。"),
+    "当前文件无法唯一对应到工作文件。PageRoot 没有写入，请先恢复唯一位置。",
+  );
+  const missing = new Error("ENOENT /Users/secret/report.html");
+  missing.code = "WORKING_COPY_UNAVAILABLE";
+  assert.equal(
+    productErrorMessage(missing, "项目操作没有完成。"),
+    "文件暂不可用，修改仍保留。",
+  );
+});
+
 test("candidate assessment failures use accurate localized project copy", () => {
   const error = new Error(
     "candidate-assessment.json is structurally invalid.",

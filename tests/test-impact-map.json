@@ -440,6 +440,8 @@
         "tests/external-file-open.test.mjs",
         "tests/project-rules-workflow.test.mjs",
         "tests/source-rename.test.mjs",
+        "tests/source-file-watch.test.mjs",
+        "tests/active-managed-locator.test.mjs",
         "tests/version-workflow.test.mjs"
       ]
     },
@@ -754,9 +756,15 @@
     },
     {
       "id": "desktop-source-rename",
-      "patterns": ["^desktop/source-rename\\.mjs$"],
+      "patterns": [
+        "^desktop/(?:source-rename|source-file-watch|active-managed-locator)\\.mjs$"
+      ],
       "suites": ["electron-smoke"],
-      "nodeTests": ["tests/source-rename.test.mjs"]
+      "nodeTests": [
+        "tests/source-rename.test.mjs",
+        "tests/source-file-watch.test.mjs",
+        "tests/active-managed-locator.test.mjs"
+      ]
     },
     {
       "id": "desktop-export-copy",
@@ -825,7 +833,10 @@
         "tests/desktop-close-recovery.test.mjs",
         "tests/desktop-preload-ipc.test.mjs",
         "tests/electron-window-policy.test.mjs",
-        "tests/product-contract.test.mjs"
+        "tests/product-contract.test.mjs",
+        "tests/source-file-watch.test.mjs",
+        "tests/active-managed-locator.test.mjs",
+        "tests/source-rename.test.mjs"
       ]
     },
     {

@@ -269,7 +269,8 @@ services.
 | Crash-only browser recovery | `app/application/recovery-store.js` |
 | Renderer, project-picker, attachment, interactive-preview and close capabilities | `app/application/runtime-capabilities.js` |
 | Same-directory source rename, operation journal and durable active/recent path rebase | `desktop/source-rename.mjs` |
-| Renderer source-rename operation, Hash/identity fence, lost-response reconciliation and synchronous Project/Document/Run publication | `app/application/project-workflow.js` through its narrow `ProjectOpenPort.renameSource` |
+| Directory-change hint and non-authoritative active managed locator cache | `desktop/source-file-watch.mjs`, `desktop/active-managed-locator.mjs` |
+| Renderer source-rename and Finder locator rebase, Hash/identity fence, lost-response reconciliation and synchronous Project/Document/Run publication | `app/application/project-workflow.js` through its narrow `ProjectOpenPort.renameSource` / `reconcileActiveManagedSource` |
 | Known-source Finder reveal | narrow project IPC in `desktop/main.mjs` |
 | Validated default-browser HTML launch | `desktop/open-in-default-browser.mjs`, behind `desktop/project-ipc-security.mjs` sender authority |
 | Pseudonymous identity, strict event schemas, local queue and PostHog delivery | `desktop/usage-telemetry.mjs` |
@@ -398,6 +399,25 @@ and Hash both match. It then synchronously rebases `RunSession`, advances
 `ProjectSession`, publishes `DocumentSession`, clears stale recovery state and
 refreshes canonical workspace authority. A late result never mutates a newer
 Project context; no generic desktop executor or duplicate Session fact is used.
+
+Finder same-root renames share that source-locator transition. The desktop
+watcher reports that the current source directory or its parent changed; it
+does not claim a new path. When the watched HTML is still a regular file, Main
+forwards `sourceMissing: false` and `ProjectWorkflow` only hash-observes the
+current source. It does not drain switch or ask Bridge to rebind, so sibling
+writes such as `PROJECT.md` cannot flush unsaved project rules. `ProjectWorkflow.reconcileExternalSourceLocator()` and
+`renameSource()` share one locator lock. Locator rebase and switch drain run
+when Main reports the path missing, at startup, or when the title bar starts a
+rename. Main asks Bridge
+`POST /managed-working-copy/reconcile` for the unique Working Copy that still
+matches the verified identity tuple. If the watched file itself disappears
+(including a same-parent project folder rename that Electron's directory
+watch may miss), Main uses the same locator cache as startup, then forwards
+the original path hint so the renderer can rebase. Hash mismatch can report `content-changed`
+after the path is rebound, but never adopts external bytes; `DocumentWorkflow`
+then compares hashes and enters the existing conflict state. The local
+`activeManagedLocator` cache is only a restart hint for Main and is not a
+second write authority.
 
 When no desktop project can be restored, the main process provisions the built-in welcome content once as a regular HTML source beside the selected workspace and immediately registers its initial V1 through the authenticated Bridge. Existing welcome bytes are never replaced on startup. From that point onward it uses the same source, comment, Request, handoff and Version boundaries as any user-opened HTML.
 
