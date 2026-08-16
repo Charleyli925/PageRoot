@@ -890,6 +890,14 @@ async function rememberAndBindImportedAssetSource({
 async function activateProject(filePath) {
   const normalizedPath = await existingPathIdentity(assertHtmlPath(filePath));
   const state = await loadProjectState();
+  const currentIdentity = state.activePath
+    ? await existingPathIdentity(state.activePath).catch(() => null)
+    : null;
+  if (currentIdentity === normalizedPath) {
+    await restoreActiveImportedAssetSource(normalizedPath);
+    sourceFileWatcher.watch(normalizedPath);
+    return;
+  }
   const recentPathIdentities = await Promise.all(
     state.recent.map((entry) => existingPathIdentity(entry.path)),
   );
