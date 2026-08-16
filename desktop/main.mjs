@@ -98,7 +98,6 @@ import {
   normalizeActiveManagedLocator,
   rebaseActiveManagedLocator,
 } from "./active-managed-locator.mjs";
-import { createSourceFileWatcher } from "./source-file-watch.mjs";
 import {
   createTelemetryBuildConfig,
   createUsageTelemetry,
