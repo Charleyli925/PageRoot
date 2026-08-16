@@ -803,9 +803,15 @@
     },
     {
       "id": "desktop-preview",
-      "patterns": ["^desktop/preview-protocol\\.mjs$"],
+      "patterns": [
+        "^desktop/preview-protocol\\.mjs$",
+        "^desktop/imported-asset-root\\.mjs$"
+      ],
       "suites": ["electron-smoke"],
-      "nodeTests": ["tests/preview-protocol.test.mjs"]
+      "nodeTests": [
+        "tests/preview-protocol.test.mjs",
+        "tests/imported-asset-root.test.mjs"
+      ]
     },
     {
       "id": "desktop-lifecycle",

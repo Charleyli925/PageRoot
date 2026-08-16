@@ -126,6 +126,15 @@ import {
 import {
   createEditRuntimePreparationFence,
 } from "./edit-runtime-preparation-fence.mjs";
+import {
+  forgetImportedAssetRootsForPath,
+  importedAssetRootForProjectPath,
+  isExternalOriginalPath,
+  normalizeImportedAssetRoots,
+  previewAssetSourcePath,
+  rememberImportedAssetRoot,
+  resolveLiveImportedAssetSource,
+} from "./imported-asset-root.mjs";
 
 // electron-updater is CommonJS; the default import is the supported ESM bridge.
 const { autoUpdater } = electronUpdater;
@@ -511,6 +520,7 @@ function emptyProjectState() {
     pendingRename: null,
     lastRename: null,
     lastManagedActivation: null,
+    importedAssetRoots: [],
   };
 }
 
@@ -713,6 +723,7 @@ async function loadProjectState() {
       pendingRename: normalizePendingSourceRename(parsed.pendingRename),
       lastRename: normalizeCompletedSourceRename(parsed.lastRename),
       lastManagedActivation: normalizeManagedWorkingCopyActivation(parsed.lastManagedActivation),
+      importedAssetRoots: normalizeImportedAssetRoots(parsed.importedAssetRoots),
     };
     if (projectState.pendingRename) {
       await recoverPendingSourceRename({
@@ -753,6 +764,49 @@ function persistProjectState() {
   return stateWriteQueue;
 }
 
+async function restoreActiveImportedAssetSource(projectSourcePath) {
+  const state = await loadProjectState();
+  const record = await importedAssetRootForProjectPath(
+    state.importedAssetRoots,
+    projectSourcePath,
+  );
+  if (!record) {
+    activeImportedAssetSourcePath = null;
+    return;
+  }
+  const [live, projectIdentity] = await Promise.all([
+    resolveLiveImportedAssetSource(record.originalSourcePath),
+    existingPathIdentity(projectSourcePath),
+  ]);
+  activeImportedAssetSourcePath = live && live !== projectIdentity
+    ? live
+    : null;
+}
+
+async function rememberAndBindImportedAssetSource({
+  originalPath,
+  projectSourcePath,
+}) {
+  if (
+    typeof originalPath !== "string"
+    || typeof projectSourcePath !== "string"
+    || !isExternalOriginalPath(originalPath, projectSourcePath)
+  ) {
+    return;
+  }
+  const state = await loadProjectState();
+  const projectRootPath = await realpath(path.dirname(projectSourcePath)).catch(
+    () => path.resolve(path.dirname(projectSourcePath)),
+  );
+  const originalIdentity = await existingPathIdentity(originalPath);
+  state.importedAssetRoots = rememberImportedAssetRoot(state.importedAssetRoots, {
+    projectRootPath,
+    originalSourcePath: originalIdentity,
+  });
+  await persistProjectState();
+  await restoreActiveImportedAssetSource(projectSourcePath);
+}
+
 async function activateProject(filePath) {
   const normalizedPath = await existingPathIdentity(assertHtmlPath(filePath));
   const state = await loadProjectState();
@@ -773,7 +827,7 @@ async function activateProject(filePath) {
     ),
   ].slice(0, MAX_RECENT_PROJECTS);
   await persistProjectState();
-  activeImportedAssetSourcePath = null;
+  await restoreActiveImportedAssetSource(normalizedPath);
 }
 
 async function forgetProject(filePath) {
@@ -789,7 +843,16 @@ async function forgetProject(filePath) {
     state.activePath
     && await existingPathIdentity(state.activePath) === forgottenIdentity
   ) state.activePath = null;
+  state.importedAssetRoots = await forgetImportedAssetRootsForPath(
+    state.importedAssetRoots,
+    filePath,
+  );
   await persistProjectState();
+  if (state.activePath) {
+    await restoreActiveImportedAssetSource(state.activePath);
+  } else {
+    activeImportedAssetSourcePath = null;
+  }
 }
 
 async function inspectHtmlFile(filePath) {
@@ -1254,12 +1317,11 @@ async function importExternalViaBridge(sourcePath, expectedSourceSha256) {
     existingPathIdentity(sourcePath),
     existingPathIdentity(importedProject.sourcePath),
   ]);
+  await rememberAndBindImportedAssetSource({
+    originalPath: originalIdentity,
+    projectSourcePath: importedIdentity,
+  });
   await activateProject(importedProject.sourcePath);
-  // Keep the original directory as this process's Edit resource root. Import
-  // copies HTML bytes only; sibling scripts/images stay beside the original.
-  if (originalIdentity !== importedIdentity) {
-    activeImportedAssetSourcePath = originalIdentity;
-  }
   return {
     project: importedProject,
     imported: workspace.imported === true,
@@ -1300,7 +1362,7 @@ async function commitPreparedHtmlOpenOperation(payload) {
     if (current.sha256 !== intent.classifiedAtSha256) {
       throw new ProjectFileError(
         "OPEN_INTENT_SOURCE_CHANGED",
-        "确认期间这个文件已变化，请重新打开。",
+        "文件在确认期间被修改，没有导入。",
       );
     }
     const classified = await classifyViaBridge(intent.sourcePath);
@@ -1342,6 +1404,10 @@ async function commitPreparedHtmlOpenOperation(payload) {
         );
       }
       project = await readHtmlProject(targetPath);
+      await rememberAndBindImportedAssetSource({
+        originalPath: intent.sourcePath,
+        projectSourcePath: project.sourcePath,
+      });
       await activateProject(project.sourcePath);
     } else if (action === "import-new") {
       const importedResult = await importExternalViaBridge(
@@ -1560,7 +1626,14 @@ const createPreviewSession = createPreviewSessionOperation({
   authorizeSourcePath: async (sourcePathInput) => {
     const sourcePath = assertReadPayload(sourcePathInput);
     await assertKnownProjectPath(sourcePath);
-    return inspectHtmlFile(sourcePath);
+    const inspected = await inspectHtmlFile(sourcePath);
+    const liveImportedAssetSourcePath = activeImportedAssetSourcePath
+      ? await resolveLiveImportedAssetSource(activeImportedAssetSourcePath)
+      : null;
+    return previewAssetSourcePath({
+      authorizedProjectSourcePath: inspected,
+      liveImportedAssetSourcePath,
+    });
   },
 });
 
@@ -1829,12 +1902,21 @@ async function commitActivatedProjectPath({
     state.recent = retained.slice(0, MAX_RECENT_PROJECTS);
   }
   state.lastManagedActivation = managedActivation;
+  if (
+    importedAssetSourcePath
+    && isExternalOriginalPath(importedAssetSourcePath, nextSourcePath)
+  ) {
+    const projectRootPath = await realpath(path.dirname(nextSourcePath)).catch(
+      () => path.resolve(path.dirname(nextSourcePath)),
+    );
+    state.importedAssetRoots = rememberImportedAssetRoot(state.importedAssetRoots, {
+      projectRootPath,
+      originalSourcePath: importedAssetSourcePath,
+    });
+  }
   await persistProjectState();
   if (activatesCurrentProject) {
-    activeImportedAssetSourcePath = (
-      importedAssetSourcePath
-      && importedAssetSourcePath !== nextSourcePath
-    ) ? importedAssetSourcePath : null;
+    await restoreActiveImportedAssetSource(nextSourcePath);
   }
   return {
     ...project,
@@ -2671,6 +2753,7 @@ async function openRegisteredProject(projectIdInput) {
         .map((entry) => entry.entry),
     ].slice(0, MAX_RECENT_PROJECTS);
     await persistProjectState();
+    await restoreActiveImportedAssetSource(sourcePath);
     return project;
   });
 }

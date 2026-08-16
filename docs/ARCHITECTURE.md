@@ -276,6 +276,7 @@ services.
 | Pseudonymous identity, strict event schemas, local queue and PostHog delivery | `desktop/usage-telemetry.mjs` |
 | Preview sanitization and verified frame injection | `app/components/html-preview-sandbox.js` |
 | Volatile desktop preview sessions and contained local-asset serving | `desktop/preview-protocol.mjs` |
+| Imported project's original sibling-asset directory | `desktop/imported-asset-root.mjs` plus Main `html-projects.json` |
 | Edit one-shot candidate limits, source-host contract and direct-frame grant | `app/domain/edit-runtime-contract.js`, `app/application/edit-author-runtime-session.js` |
 | Isolated Edit author-resource closure, contained static-asset/script serving and one-use bootstrap | `desktop/edit-runtime-protocol.mjs`, `desktop/edit-runtime-bootstrap.mjs` |
 | Source-backed preview/edit display-state filtering, rebinding and safe action resolution | `app/lib/page-view-context.js` |

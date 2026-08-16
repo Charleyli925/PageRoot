@@ -45,8 +45,10 @@ outside the configured projects root.
    `DocumentSession.canvasAuthority` on that generation and source Hash, then
    hydrates so the workbench can leave the `hydrating` phase that `#applyProject`
    starts, then waits for `DocumentSession.canvasAuthority`. First import keeps
-   the original directory as this process's Edit resource root; HTML bytes are
-   copied, sibling assets are not. `shell.trashItem` runs only from
+   the original directory as this project's Preview and Edit resource root
+   across continue-current, restart, working-copy switches and optional
+   original-HTML trash; HTML bytes are copied, sibling assets are not. The
+   renderer never receives that original path. `shell.trashItem` runs only from
    `finalizePreparedHtmlOpen` after a real C-class import, a checked delete
    intent, a verified Canvas, and Main revalidation that the original still
    hashes the same, is a regular non-symlink file, and lies outside the

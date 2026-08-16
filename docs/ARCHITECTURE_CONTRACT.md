@@ -291,11 +291,12 @@ that has already mounted.
 
 The direct path permits only a bounded classic-script ECharts candidate, frozen
 local/allowlisted-CDN bytes and at most 32 uniquely bound, source-empty hosts.
-For an HTML-only imported V1, Main may use the original selected HTML directory
-as the local asset root only when it captured that path during the verified
-external-to-Working-Copy hand-off in the same app session; the renderer neither
-supplies nor persists that provenance, while the Working Copy remains source
-authority.
+For an HTML-only imported V1, Main records the original selected HTML directory
+in desktop `html-projects.json` and uses it as the local asset root for Preview,
+static Edit and the one-shot ECharts path. The renderer neither supplies nor
+learns that original path; the Working Copy remains source authority. The
+binding survives continue-current, restart, working-copy switches and optional
+original-HTML trash while sibling files remain in that directory.
 The final frame executes once, waits the fixed settle interval, then stops
 tracked runtime activity and audits source-node identity/text/attributes plus
 host containment before installing Canvas interaction. An approved empty host

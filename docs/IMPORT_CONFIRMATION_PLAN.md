@@ -657,7 +657,7 @@ applying + newer request → complete/rollback old first → then new
 ```text
 epoch > 0：prepareSwitch() → final fence/freeze current Canvas → capture previous aggregate authority
 epoch = 0（冷启动尚未绑定项目，例如上次打开的是待确认外部 HTML）：跳过 Canvas fence，与 #applyAcceptedProject 相同
-  → Desktop commitPreparedHtmlOpen（首次导入把原稿目录留作本进程 Edit 资源根）
+  → Desktop commitPreparedHtmlOpen（首次导入把原稿目录记为该项目的 Preview/Edit 资源根，并写入 desktop project state）
   → validate returned project HTML/Hash/OpenTarget/receipt
   → synchronous #applyProject
   → refreshWorkspace（结束 hydrating；先水合再确认画布，避免二次重建打断 one-shot runtime）

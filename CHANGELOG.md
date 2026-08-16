@@ -9,7 +9,10 @@ Notable user-visible changes are documented here. This project follows Semantic 
   to that project's current local edit with a short “already imported”
   confirmation, never a second project. First import copies into PageRoot,
   keeps the original by default, and only moves it to Trash after the new
-  Canvas is verified. The previous silent import toast is gone.
+  Canvas is verified. Sibling images, CSS and scripts stay beside the original
+  and continue to load in Preview and Edit from that directory. The previous
+  silent import toast is gone. If the file changes while the confirmation is
+  open, import is refused with “文件在确认期间被修改，没有导入.”
 
 - Fixed the edit Canvas shaking continuously at window widths where the source
   iframe would gain or lose a vertical scrollbar. The shared page scroll stage

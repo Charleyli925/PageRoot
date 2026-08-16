@@ -56,8 +56,10 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
 - Ordinary static Edit may use the same contained resource root for images,
   fonts, styles and media, but not for renderer or authored scripts:
   `pageroot-preview:` is absent from `script-src` and every source transition
-  revokes the previous session. The separate one-shot ECharts path never reuses
-  that preview session.
+  revokes the previous session. After an external HTML import, Main substitutes
+  the original sibling directory as that preview/edit resource root without
+  exposing the original path to the renderer. The separate one-shot ECharts
+  path never reuses that preview session.
 - Desktop one-shot Edit author runtime is a deliberately narrow ECharts
   capability for trusted, user-opened local generative HTML, not a hostile-page
   sandbox. Main first re-reads the active source and requires exact HTML/SHA,

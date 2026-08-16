@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
   mkdtemp,
   mkdir,
+  realpath,
   rm,
   symlink,
   writeFile,
@@ -17,6 +18,7 @@ import {
   createPreviewProtocolController,
   createPreviewSessionOperation,
   registerPreviewProtocolScheme,
+  resolvePreviewSourceRoot,
 } from "../desktop/preview-protocol.mjs";
 
 test("declared asset discovery caps missing-reference probes before they can delay a preview session", async (t) => {
@@ -434,3 +436,57 @@ test("a preview navigation attempt activates one scriptless bootstrap fallback",
   ));
   assert.match(await bootstrapResponse.text(), /ownedBootstrapRan/u);
 });
+
+test("preview keeps sibling assets beside the original after HTML is copied into a project", async (t) => {
+  const temporaryRoot = await mkdtemp(
+    path.join(tmpdir(), "pageroot-preview-imported-siblings-"),
+  );
+  t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
+  const originalDirectory = path.join(temporaryRoot, "原稿");
+  const projectDirectory = path.join(temporaryRoot, "项目");
+  await mkdir(originalDirectory, { recursive: true });
+  await mkdir(projectDirectory, { recursive: true });
+  const originalPath = path.join(originalDirectory, "图表报告.html");
+  const projectPath = path.join(projectDirectory, "图表报告-V1.html");
+  const html = `<!doctype html>
+<html>
+<head><link rel="stylesheet" href="style.css"></head>
+<body>
+  <img src="pixel.png" alt="">
+  <script src="chart.js"></script>
+</body>
+</html>`;
+  await writeFile(originalPath, html, "utf8");
+  await writeFile(projectPath, html, "utf8");
+  await writeFile(path.join(originalDirectory, "style.css"), "body{background:#111}", "utf8");
+  await writeFile(path.join(originalDirectory, "pixel.png"), "png", "utf8");
+  await writeFile(path.join(originalDirectory, "chart.js"), "window.chartReady=true;", "utf8");
+
+  const originalRoot = await resolvePreviewSourceRoot(originalPath);
+  assert.equal(originalRoot, await realpath(originalDirectory));
+  const fromOriginal = await collectDeclaredPreviewAssets({
+    html,
+    sourceRoot: originalRoot,
+  });
+  assert.equal(fromOriginal.has("style.css"), true);
+  assert.equal(fromOriginal.has("pixel.png"), true);
+  assert.equal(fromOriginal.has("chart.js"), true);
+
+  const fromProject = await collectDeclaredPreviewAssets({
+    html,
+    sourceRoot: await resolvePreviewSourceRoot(projectPath),
+  });
+  assert.equal(fromProject.has("pixel.png"), false);
+  assert.equal(fromProject.has("style.css"), false);
+  assert.equal(fromProject.has("chart.js"), false);
+
+  await rm(originalPath);
+  const afterTrash = await resolvePreviewSourceRoot(originalDirectory);
+  assert.equal(afterTrash, await realpath(originalDirectory));
+  const fromDirectory = await collectDeclaredPreviewAssets({
+    html,
+    sourceRoot: afterTrash,
+  });
+  assert.equal(fromDirectory.has("pixel.png"), true);
+});
+
