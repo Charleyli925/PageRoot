@@ -326,6 +326,10 @@ function projectFileHttpError(cause) {
       "IMPORT_RECOVERY_INVALID",
       "IMPORT_RECOVERY_AMBIGUOUS",
       "IMPORT_INTENT_NOT_FOUND",
+      "EXTERNAL_SOURCE_BINDING_CONFLICT",
+      "EXTERNAL_SOURCE_BINDING_INVALID",
+      "SOURCE_IMPORT_PENDING",
+      "REGISTRY_BUSY",
       "REGISTERED_PROJECT_RACE",
       "WORKING_COPY_VERSION_MISMATCH",
       "HISTORY_ACTIVATION_PREDECESSOR_CONFLICT",
@@ -709,6 +713,52 @@ async function ensureProjectFile(body) {
     ...projectFileBaseWorkspaceState(workspace),
     imported: imported.imported,
   };
+}
+
+function publicOpenClassification(classified) {
+  if (classified.kind === "managed-project") {
+    return {
+      kind: "managed-project",
+      sourceSha256: classified.sourceSha256,
+      openTarget: classified.target,
+    };
+  }
+  if (classified.kind === "known-external") {
+    const facts = classified.projectFacts;
+    return {
+      kind: "known-external",
+      sourceSha256: classified.sourceSha256,
+      sourceRelation: facts.sourceRelation,
+      projectId: facts.projectId,
+      documentId: facts.documentId,
+      projectName: facts.projectName,
+      currentBasedOnVersionId: facts.currentBasedOnVersionId,
+      currentBasedOnOrdinal: facts.currentBasedOnOrdinal,
+      latestOfficialVersionId: facts.latestOfficialVersionId,
+      latestOfficialOrdinal: facts.latestOfficialOrdinal,
+      currentDiffersFromBase: facts.currentDiffersFromBase,
+      initialVersionId: facts.initialVersionId,
+      initialVersionOrdinal: facts.initialVersionOrdinal,
+      openTarget: facts.openTarget,
+    };
+  }
+  return {
+    kind: "new-external",
+    sourceSha256: classified.sourceSha256,
+    sourceFileName: classified.sourceFileName,
+    visibleV1FileName: classified.visibleV1FileName,
+  };
+}
+
+async function classifyOpenPath(body) {
+  const sourcePath = normalizeSourcePath(body.sourcePath);
+  let classified;
+  try {
+    classified = await projectFileRepository.classifyOpenPath({ sourcePath });
+  } catch (cause) {
+    throw projectFileHttpError(cause);
+  }
+  return publicOpenClassification(classified);
 }
 
 async function saveProjectFileAutosave(body) {
@@ -1847,6 +1897,11 @@ async function route(request, response) {
   if (request.method === "POST" && url.pathname === "/project/ensure") {
     const body = await readBody(request);
     sendJson(response, 200, await ensureProject(body));
+    return;
+  }
+  if (request.method === "POST" && url.pathname === "/project/open-classification") {
+    const body = await readBody(request);
+    sendJson(response, 200, await classifyOpenPath(body));
     return;
   }
   if (request.method === "GET" && url.pathname === "/conflict-candidate") {

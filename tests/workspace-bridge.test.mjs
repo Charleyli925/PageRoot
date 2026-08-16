@@ -82,6 +82,14 @@ test("configured bridge authentication protects every route and leaves CORS pref
   );
   assert.equal(unauthorizedUnknownRoute.response.status, 401);
 
+  const unauthorizedClassification = await bridge.postJson(
+    "/project/open-classification",
+    { sourcePath: join(environment.sources, "missing.html") },
+    undefined,
+    { auth: false },
+  );
+  assert.equal(unauthorizedClassification.response.status, 401);
+
   const preflight = await fetch(`${bridge.baseUrl}/workspace`, {
     method: "OPTIONS",
     headers: {

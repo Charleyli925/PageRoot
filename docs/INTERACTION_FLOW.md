@@ -208,7 +208,7 @@ SourcePatch、不写磁盘、不运行作者脚本，也不引入右键菜单、
 
 ## 4. 打开已有 HTML
 
-除首次启动时建立受管欢迎项目外，工作台不负责创建业务 HTML；用户打开已经由其他工具生成的本地 `.html` 文件。未登记 HTML 的导入确认（待实施）见 [首次打开导入确认](IMPORT_CONFIRMATION_PRD.md)；实施前仍立即导入且不删除原稿。
+除首次启动时建立受管欢迎项目外，工作台不负责创建业务 HTML；用户打开已经由其他工具生成的本地 `.html` 文件。未登记 HTML 的导入确认 UI 仍待后续 PR，见 [首次打开导入确认](IMPORT_CONFIRMATION_PRD.md)。Repository 已把同一 canonical 外部路径绑定到唯一项目：即使 UI 仍走静默 `/project/ensure`，再次打开已导入原稿也不会创建第二个项目。
 
 在 macOS 或 QoderWork 的“打开方式”中选择 PageRoot 时，系统只接受绝对
 路径的 `.html` / `.htm` 文件，并在应用未启动或已运行时打开同一份当前源文件。
@@ -233,7 +233,7 @@ SourcePatch、不写磁盘、不运行作者脚本，也不引入右键菜单、
 
 1. 用户选择本地 HTML。
 2. 系统只检查该路径是否属于有效 v4 Project：Registry 登记根目录、根目录内 `projectId` / `documentId` 与 manifest 精确文件映射必须同时成立。
-3. 有效 v4 Project 按现有项目重新绑定和恢复；任何不满足该条件的 HTML（包括 v3 及更早项目状态、损坏的 v4 记录和全新 HTML）在**当前实现**中会立即作为新外部来源导入，建立新的 v4 Project 与初始 V1。产品已确认改为先出现导入确认框，默认复制，可选在成功后删除原稿，见 [首次打开导入确认](IMPORT_CONFIRMATION_PRD.md)。
+3. 有效 v4 Project 按现有项目重新绑定和恢复；已绑定的外部原路径回到该项目当前活动 Working Copy。任何尚未绑定的 HTML（包括 v3 及更早项目状态、损坏的 v4 记录、同内容的另一路径和全新 HTML）在**当前实现**中会立即作为新外部来源导入，建立新的 v4 Project 与初始 V1。产品已确认改为先出现导入确认框，默认复制，可选在成功后删除原稿，见 [首次打开导入确认](IMPORT_CONFIRMATION_PRD.md)；确认框仍待后续 PR。
 4. 当前实现的导入从不移动、覆盖或改写用户选择的原始 HTML 字节；v4 打开路径不迁移、不恢复、也不读取 v4 以前的项目状态。实施导入确认后，默认仍不改原稿；只有用户勾选「成功导入后删除原文件」且导入已成功，才把该 HTML 移入废纸篓。
 5. 对有效 v4 Project，通过 Registry 的登记根目录读取该项目自己的 `project.json`、`manifest.json` 与 `runtime-state.json`，再对照当前精确 HTML、latest committed Version 和运行时 Hash。
 6. 按项目状态恢复：editing 时可恢复 current 或精确历史查看；存在 active run 时强制显示该轮冻结 current 页面，并默认展开“本轮处理”面板说明正在等待 AI 返回；冲突时显示该候选对比，事务恢复时显示恢复进度。用户主动收起处理面板后可以只读浏览冻结页面，直到再次打开或切回该项目前都不自动弹回。

@@ -141,6 +141,11 @@ write authority: the in-memory session remains readable but writes fail closed
 until the exact registered location is available and revalidated. Import
 recovery is likewise limited to Registry-owned pending intents; a discovered
 `.pageroot/import.json` is never proof that an arbitrary copied root is managed.
+The same canonical external path binds to at most one `projectId`. Content Hash
+never matches a file at another path into that project. Duplicate source-key
+claims fail closed without deleting or merging projects. Ordinary Registry
+mutations take a current write lock under `.pageroot-registry-write-lock/`;
+that lock is not the exact-legacy-V4 migration lock.
 
 Working-copy filename changes retain their immutable IDs. A missing mapping may
 be repaired only by one unique direct-child file-identity continuity clue; Hash

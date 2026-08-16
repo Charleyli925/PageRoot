@@ -227,7 +227,10 @@ the foreground.
 The Registry is the sole project-catalog membership and write-authority source.
 `ProjectFileRepository` may enumerate only its registered records, recover a
 verified same-parent root rename through the existing Registry path, and return
-ready/unavailable/invalid rows independently. Desktop Recent records contribute
+ready/unavailable/invalid rows independently. Optional `importSourceKey` values
+are a long-lived lookup to at most one `projectId`; they do not grant writes
+and do not deduplicate by Hash. Current Registry mutations serialize through a
+dedicated write lock, distinct from exact-legacy-V4 migration. Desktop Recent records contribute
 only sorting, `lastOpenedAt` and startup preference; they cannot add a member,
 remove a member or authorize an open. A Workbench catalog intent carries only
 `projectId`; the Bridge re-resolves and validates the complete Project,
@@ -424,7 +427,10 @@ the mutable path and uses `sourcePath` only to prove that the command remains
 inside the registered source or an explicit alias. Supplying exactly one ID is
 invalid. Omitting both IDs is a temporary compatibility route that may address
 an existing registration but may not create one; `/project/ensure` is the sole
-creation boundary. Attachments and their compensating cleanup use the same
+creation boundary. `/project/open-classification` is an authenticated read-only
+classifier: it must not write Registry bytes, create a project, or return raw
+source keys, external absolute paths, hidden snapshot paths or HTML bodies.
+Attachments and their compensating cleanup use the same
 captured context, plus their composer/edit identity, for their complete
 asynchronous lifetime. `CommentWorkflow` is the only renderer application
 owner that may stage an attachment, call its Bridge repository, or compensate a

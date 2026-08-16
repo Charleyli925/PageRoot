@@ -241,14 +241,15 @@ PR 1 内部按“文档与 Schema → Repository → Workflow → 最低限度 U
 
 ## 7. 首次打开与导入
 
-> 现行生产实现仍为：未登记 HTML 立即自动导入，且不删除原稿。产品已确认改为先确认再导入，默认复制，可选在成功后将原稿移入废纸篓。规范与验收见 [首次打开导入确认](IMPORT_CONFIRMATION_PRD.md)，施工顺序见 [修改计划](IMPORT_CONFIRMATION_PLAN.md)。实施完成前，本节描述当前代码；实施同一 PR 必须改写本节冲突条款。
+> 现行生产实现：未登记且未绑定的 HTML 仍会立即自动导入，且不删除原稿。同一 canonical 外部路径若已有唯一项目绑定，再次 `importExternal` / `/project/ensure` 会回到该项目当前活动 Working Copy，不再建第二个项目。产品已确认改为先确认再导入，默认复制，可选在成功后将原稿移入废纸篓。规范与验收见 [首次打开导入确认](IMPORT_CONFIRMATION_PRD.md)，施工顺序见 [修改计划](IMPORT_CONFIRMATION_PLAN.md)。确认 UI 仍待后续 PR；本节已反映 PR-1 的 Repository 绑定行为。
 
 ### 7.1 打开时验证并自动导入
 
 用户从 Finder 或“打开文件”选择 HTML 时，PageRoot 只检查它是否属于有效 v4 Project：Registry 登记根目录、根目录内 `projectId` / `documentId` 与 manifest 的精确文件映射必须同时成立。
 
 - 有效 v4 Project 按当前项目打开和恢复。
-- 其他任何状态（包括 v3 及更早项目状态、损坏的 v4 记录和从未管理过的 HTML）都立即作为新外部来源导入，建立新的 v4 Project 与初始 V1。
+- 已绑定的外部原路径再次打开时回到该唯一项目的当前活动 Working Copy，不分配新 `projectId`，也不因 V1 已编辑、已晋升或活动 Working Copy 已切换而失败。
+- 其他任何未绑定状态（包括 v3 及更早项目状态、损坏的 v4 记录、同内容的另一路径，以及从未管理过的 HTML）都立即作为新外部来源导入，建立新的 v4 Project 与初始 V1。
 - 导入不移动、不覆盖、不改名或改写用户选择的原始 HTML 字节；v4 打开路径不迁移、不恢复、也不读取 v4 以前的项目状态。
 
 ### 7.2 自动导入事务
@@ -728,7 +729,7 @@ manifest 可记录平台文件标识（例如 device、inode、birthtime）作�
 
 ### 16.3 导入提示与目录
 
-- [ ] 打开未登记 HTML 时先确认再导入；默认复制，可选在成功后将原稿移入废纸篓。验收以 [首次打开导入确认](IMPORT_CONFIRMATION_PRD.md) §14 为准。`[待实施]`
+- [ ] 打开未登记 HTML 时先确认再导入；默认复制，可选在成功后将原稿移入废纸篓。验收以 [首次打开导入确认](IMPORT_CONFIRMATION_PRD.md) §16 为准。Repository 同源绑定已实施；确认 UI `[待实施]`。
 - [ ] 导入完成后显示一次成功状态，并提供项目目录入口。`[第一期]`
 - [ ] 版本 1 顶部显示“已导入 PageRoot”和“在文件夹中打开”。`[第二期]`
 - [ ] 关闭并重开仍显示该状态，直到第一次晋升版本 2。`[第二期]`
