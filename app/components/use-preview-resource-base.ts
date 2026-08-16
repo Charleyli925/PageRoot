@@ -20,6 +20,8 @@ export function usePreviewResourceBase(
   const [seenKey, setSeenKey] = useState(activeKey);
   const [ready, setReady] = useState(!activeKey);
   const sessionIdRef = useRef<string | null>(null);
+  const sessionKeyRef = useRef("");
+  const createChainRef = useRef(Promise.resolve());
 
   const previewApi = typeof window === "undefined" ? undefined : window.htmlAIPreview;
   const canCreatePreviewSession = Boolean(
@@ -45,38 +47,48 @@ export function usePreviewResourceBase(
     if (!activeKey || !sourcePath || !livePreviewApi?.createSession || !livePreviewApi.revokeSession) {
       revoke(sessionIdRef.current);
       sessionIdRef.current = null;
+      sessionKeyRef.current = "";
       return undefined;
     }
 
     let cancelled = false;
-    void livePreviewApi.createSession({
-      html,
-      bootstrapJavaScript: "void 0;",
-      sourcePath,
-    }).then((session) => {
-      if (cancelled) {
-        void livePreviewApi.revokeSession(session.sessionId);
-        return;
-      }
-      const previousId = sessionIdRef.current;
-      sessionIdRef.current = session.sessionId;
+    createChainRef.current = createChainRef.current.then(async () => {
+      if (cancelled) return;
+      const reuseId = sessionKeyRef.current === activeKey ? sessionIdRef.current : null;
       try {
-        const url = new URL(session.url);
-        url.pathname = "/";
-        url.search = "";
-        url.hash = "";
-        setResourceBase(url.href);
-      } catch {
-        setResourceBase(undefined);
-      }
-      setReady(true);
-      if (previousId && previousId !== session.sessionId) {
-        void livePreviewApi.revokeSession(previousId);
-      }
-    }).catch(() => {
-      if (!cancelled) {
-        if (!sessionIdRef.current) setResourceBase(undefined);
+        const session = await livePreviewApi.createSession({
+          html,
+          bootstrapJavaScript: "void 0;",
+          sourcePath,
+          ...(reuseId ? { sessionId: reuseId } : {}),
+        });
+        if (cancelled) {
+          if (session.sessionId !== sessionIdRef.current) {
+            void livePreviewApi.revokeSession(session.sessionId);
+          }
+          return;
+        }
+        const previousId = sessionIdRef.current;
+        sessionIdRef.current = session.sessionId;
+        sessionKeyRef.current = activeKey;
+        try {
+          const url = new URL(session.url);
+          url.pathname = "/";
+          url.search = "";
+          url.hash = "";
+          setResourceBase(url.href);
+        } catch {
+          setResourceBase(undefined);
+        }
         setReady(true);
+        if (previousId && previousId !== session.sessionId) {
+          void livePreviewApi.revokeSession(previousId);
+        }
+      } catch {
+        if (!cancelled && !sessionIdRef.current) {
+          setResourceBase(undefined);
+          setReady(true);
+        }
       }
     });
 
@@ -88,6 +100,7 @@ export function usePreviewResourceBase(
   useEffect(() => () => {
     const sessionId = sessionIdRef.current;
     sessionIdRef.current = null;
+    sessionKeyRef.current = "";
     if (sessionId) void window.htmlAIPreview?.revokeSession?.(sessionId);
   }, []);
 
