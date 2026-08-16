@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rename, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -42,6 +42,29 @@ test("source file watcher coalesces directory events without requiring the old b
   } finally {
     watcher.close();
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("source file watcher sees a same-parent project folder rename", async () => {
+  const parent = await mkdtemp(path.join(os.tmpdir(), "pageroot-source-watch-parent-"));
+  const projectRoot = path.join(parent, "demo");
+  const renamedRoot = path.join(parent, "Finder 项目");
+  const sourcePath = path.join(projectRoot, "page.html");
+  await mkdir(projectRoot);
+  await writeFile(sourcePath, "<!doctype html><html><body>one</body></html>\n", "utf8");
+  const events = [];
+  const watcher = createSourceFileWatcher({
+    debounceMs: 60,
+    onChange: (info) => events.push(info),
+  });
+  try {
+    watcher.watch(sourcePath);
+    await rename(projectRoot, renamedRoot);
+    await waitFor(() => events.length >= 1, "parent directory rename should emit a hint");
+    assert.equal(events.at(-1).sourcePath, path.resolve(sourcePath));
+  } finally {
+    watcher.close();
+    await rm(parent, { recursive: true, force: true });
   }
 });
 

@@ -93,7 +93,7 @@ import {
   renameHtmlSource,
 } from "./source-rename.mjs";
 import {
-  activeManagedLocatorFromOpenTarget,
+  activeManagedLocatorForActivatedPath,
   normalizeActiveManagedLocator,
   rebaseActiveManagedLocator,
 } from "./active-managed-locator.mjs";
@@ -273,7 +273,7 @@ const editRuntimePreparationFence = createEditRuntimePreparationFence();
 const sourceFileWatcher = createSourceFileWatcher({
   debounceMs: 200,
   onChange(info) {
-    publishSourceFileMayHaveChanged(info);
+    void recoverWatchedManagedSource(info);
   },
 });
 
@@ -285,6 +285,49 @@ function publishSourceFileMayHaveChanged(info) {
     sourcePath,
     watcherGeneration: Number(info?.watcherGeneration || 0),
   });
+}
+
+async function recoverWatchedManagedSource(info) {
+  const hint = info && typeof info === "object" ? info : {};
+  try {
+    await projectOpenQueue.run(async () => {
+      const state = await loadProjectState();
+      const activePath = state.activePath;
+      const locator = state.activeManagedLocator;
+      if (!activePath || !locator) {
+        publishSourceFileMayHaveChanged(hint);
+        return;
+      }
+      const missing = await lstat(activePath).then(
+        (information) => !information.isFile() || information.isSymbolicLink(),
+        (error) => error?.code === "ENOENT",
+      );
+      if (!missing) {
+        publishSourceFileMayHaveChanged(hint);
+        return;
+      }
+      try {
+        await reconcileActiveManagedSourceOperation({
+          previousSourcePath: activePath,
+          expectedSourceSha256: locator.sourceSha256,
+          projectId: locator.projectId,
+          documentId: locator.documentId,
+          workingCopyId: locator.workingCopyId,
+          versionId: locator.versionId,
+          reason: "watch",
+        });
+      } catch {
+        // Renderer still receives the original hint and uses the existing
+        // fail-closed conflict / reselect path.
+      }
+      publishSourceFileMayHaveChanged({
+        sourcePath: activePath,
+        watcherGeneration: Number(hint.watcherGeneration || sourceFileWatcher.watcherGeneration),
+      });
+    });
+  } catch {
+    publishSourceFileMayHaveChanged(hint);
+  }
 }
 
 // An imported V1 may be an HTML-only managed Working Copy while its selected
@@ -1618,8 +1661,9 @@ async function reconcileActiveManagedSourceOperation(payload) {
     previousSourcePath,
     nextSourcePath,
     project,
-    managedLocator: activeManagedLocatorFromOpenTarget(
+    managedLocator: activeManagedLocatorForActivatedPath(
       openTarget,
+      nextSourcePath,
       reconciled.sourceSha256,
     ),
   });
@@ -2482,8 +2526,9 @@ async function openRegisteredProject(projectIdInput) {
     })));
     state.activePath = sourcePath;
     state.lastManagedActivation = null;
-    state.activeManagedLocator = activeManagedLocatorFromOpenTarget(
+    state.activeManagedLocator = activeManagedLocatorForActivatedPath(
       verifiedTarget,
+      sourcePath,
       payload.sourceSha256,
     );
     state.recent = [

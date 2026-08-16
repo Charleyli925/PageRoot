@@ -24,6 +24,23 @@ function assertHtmlPath(value, label) {
   return resolved;
 }
 
+function comparableManagedPath(value) {
+  let resolved = path.resolve(String(value || "")).normalize("NFC");
+  if (resolved === "/private/var" || resolved.startsWith("/private/var/")) {
+    resolved = resolved.slice("/private".length);
+  } else if (resolved === "/private/tmp" || resolved.startsWith("/private/tmp/")) {
+    resolved = resolved.slice("/private".length);
+  }
+  if (process.platform === "darwin" || process.platform === "win32") {
+    resolved = resolved.toLocaleLowerCase("en-US");
+  }
+  return resolved;
+}
+
+function sameManagedPath(left, right) {
+  return Boolean(left && right && comparableManagedPath(left) === comparableManagedPath(right));
+}
+
 export function normalizeActiveManagedLocator(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   try {
@@ -70,6 +87,19 @@ export function activeManagedLocatorFromOpenTarget(target, sourceSha256 = null) 
   });
 }
 
+export function activeManagedLocatorForActivatedPath(
+  target,
+  activatedSourcePath,
+  sourceSha256 = null,
+) {
+  if (!target || typeof target !== "object" || Array.isArray(target)) return null;
+  return activeManagedLocatorFromOpenTarget({
+    ...target,
+    exactSourcePath: activatedSourcePath,
+    sourcePath: activatedSourcePath,
+  }, sourceSha256);
+}
+
 export function rebaseActiveManagedLocator(locator, {
   previousSourcePath,
   nextSourcePath,
@@ -87,8 +117,8 @@ export function rebaseActiveManagedLocator(locator, {
     return current;
   }
   if (
-    current.sourcePath !== previousKey
-    && current.sourcePath !== nextKey
+    !sameManagedPath(current.sourcePath, previousKey)
+    && !sameManagedPath(current.sourcePath, nextKey)
   ) return current;
   return normalizeActiveManagedLocator({
     ...current,

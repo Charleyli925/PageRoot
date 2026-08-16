@@ -1,7 +1,8 @@
-import { watch } from "node:fs";
+import { lstat, watch } from "node:fs";
 import path from "node:path";
 
 const DEFAULT_DEBOUNCE_MS = 200;
+const MISSING_PATH_PROBE_MS = 400;
 
 function resolvedPath(value) {
   const nextPath = String(value || "").trim();
@@ -17,7 +18,9 @@ export function createSourceFileWatcher({
   }
   const delay = Number(debounceMs);
   const waitMs = Number.isFinite(delay) && delay >= 0 ? delay : DEFAULT_DEBOUNCE_MS;
-  let watcher = null;
+  let directoryWatcher = null;
+  let parentWatcher = null;
+  let missingProbe = null;
   let watchedPath = "";
   let watcherGeneration = 0;
   let timer = null;
@@ -29,13 +32,28 @@ export function createSourceFileWatcher({
     timer = null;
   }
 
+  function stopMissingProbe() {
+    if (!missingProbe) return;
+    clearInterval(missingProbe);
+    missingProbe = null;
+  }
+
+  function closeWatchers() {
+    if (directoryWatcher) {
+      directoryWatcher.close();
+      directoryWatcher = null;
+    }
+    if (parentWatcher) {
+      parentWatcher.close();
+      parentWatcher = null;
+    }
+  }
+
   function close() {
     clearTimer();
     pending = false;
-    if (watcher) {
-      watcher.close();
-      watcher = null;
-    }
+    stopMissingProbe();
+    closeWatchers();
     watchedPath = "";
   }
 
@@ -64,19 +82,43 @@ export function createSourceFileWatcher({
       close();
       return;
     }
-    if (watchedPath === nextPath && watcher) return;
+    if (watchedPath === nextPath && directoryWatcher) return;
     close();
     watchedPath = nextPath;
     watcherGeneration += 1;
     const generation = watcherGeneration;
-    watcher = watch(path.dirname(nextPath), { persistent: true }, () => {
+    const attachWatcher = (targetPath) => {
+      const nextWatcher = watch(targetPath, { persistent: true }, () => {
+        if (generation !== watcherGeneration) return;
+        schedule();
+      });
+      nextWatcher.on("error", () => {
+        if (generation !== watcherGeneration) return;
+        schedule();
+      });
+      return nextWatcher;
+    };
+    const directoryPath = path.dirname(nextPath);
+    directoryWatcher = attachWatcher(directoryPath);
+    const parentPath = path.dirname(directoryPath);
+    if (parentPath && parentPath !== directoryPath) {
+      try {
+        parentWatcher = attachWatcher(parentPath);
+      } catch {
+        parentWatcher = null;
+      }
+    }
+    missingProbe = setInterval(() => {
       if (generation !== watcherGeneration) return;
-      schedule();
-    });
-    watcher.on("error", () => {
-      if (generation !== watcherGeneration) return;
-      schedule();
-    });
+      lstat(nextPath, (error, information) => {
+        if (generation !== watcherGeneration) return;
+        if (error?.code === "ENOENT" || (information && !information.isFile())) {
+          stopMissingProbe();
+          schedule();
+        }
+      });
+    }, MISSING_PATH_PROBE_MS);
+    missingProbe.unref?.();
   }
 
   return {

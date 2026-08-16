@@ -401,11 +401,14 @@ refreshes canonical workspace authority. A late result never mutates a newer
 Project context; no generic desktop executor or duplicate Session fact is used.
 
 Finder same-root renames share that source-locator transition. The desktop
-watcher only reports that the current source directory changed; it does not
-claim a new path. `ProjectWorkflow.reconcileExternalSourceLocator()` and
+watcher reports that the current source directory or its parent changed; it
+does not claim a new path. `ProjectWorkflow.reconcileExternalSourceLocator()` and
 `renameSource()` share one locator lock. Main asks Bridge
 `POST /managed-working-copy/reconcile` for the unique Working Copy that still
-matches the verified identity tuple. Hash mismatch can report `content-changed`
+matches the verified identity tuple. If the watched file itself disappears
+(including a same-parent project folder rename that Electron's directory
+watch may miss), Main uses the same locator cache as startup, then forwards
+the original path hint so the renderer can rebase. Hash mismatch can report `content-changed`
 after the path is rebound, but never adopts external bytes; `DocumentWorkflow`
 then compares hashes and enters the existing conflict state. The local
 `activeManagedLocator` cache is only a restart hint for Main and is not a

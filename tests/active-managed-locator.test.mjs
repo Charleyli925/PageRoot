@@ -3,6 +3,7 @@ import path from "node:path";
 import test from "node:test";
 
 import {
+  activeManagedLocatorForActivatedPath,
   activeManagedLocatorFromOpenTarget,
   normalizeActiveManagedLocator,
   rebaseActiveManagedLocator,
@@ -65,4 +66,29 @@ test("an OpenTarget can seed the restart locator cache", () => {
     targetKind: "working-copy",
   });
   assert.deepEqual(locator, normalizeActiveManagedLocator(LOCATOR));
+});
+
+test("activated path spelling wins over OpenTarget aliases and rebases across /var", () => {
+  const aliasedRoot = "/var/folders/jx/example/T/pageroot/demo";
+  const aliasedPath = `${aliasedRoot}/page-V1.html`;
+  const activatedPath = `/private${aliasedPath}`;
+  const locator = activeManagedLocatorForActivatedPath({
+    projectId: LOCATOR.projectId,
+    documentId: LOCATOR.documentId,
+    workingCopyId: LOCATOR.workingCopyId,
+    versionId: LOCATOR.versionId,
+    exactSourcePath: aliasedPath,
+    sourceSha256: LOCATOR.sourceSha256,
+    projectRootPath: aliasedRoot,
+    targetKind: "working-copy",
+  }, activatedPath, LOCATOR.sourceSha256);
+  assert.equal(locator.sourcePath, path.resolve(activatedPath));
+
+  const finderPath = `/private${aliasedRoot}/Finder renamed.html`;
+  const rebased = rebaseActiveManagedLocator(locator, {
+    previousSourcePath: aliasedPath,
+    nextSourcePath: finderPath,
+  });
+  assert.equal(rebased.sourcePath, path.resolve(finderPath));
+  assert.equal(rebased.workingCopyId, "work_ver_0001");
 });
