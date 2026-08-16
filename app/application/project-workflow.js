@@ -107,6 +107,19 @@ function sourceStem(sourcePath) {
   return name.slice(0, Math.max(0, name.length - extension.length)).normalize("NFC");
 }
 
+function rebasedManagedOpenTarget(openTarget, nextSourcePath, sourceSha256) {
+  if (!openTarget || typeof openTarget !== "object" || Array.isArray(openTarget)) {
+    return null;
+  }
+  const exactSourcePath = String(nextSourcePath || "");
+  if (!exactSourcePath) return null;
+  return {
+    ...openTarget,
+    exactSourcePath,
+    ...(sourceSha256 ? { sourceSha256: String(sourceSha256) } : {}),
+  };
+}
+
 function documentIsStable(session) {
   return Boolean(
     session
@@ -1512,17 +1525,23 @@ export class ProjectWorkflow {
     expectedSha256,
     openTarget = null,
   }) {
+    const canonicalSourcePath = String(nextSourcePath || "");
+    const nextOpenTarget = rebasedManagedOpenTarget(
+      openTarget,
+      canonicalSourcePath,
+      expectedSha256,
+    );
     this.#runSession.rebaseSource({
       previousSourcePath,
-      sourcePath: nextSourcePath,
+      sourcePath: canonicalSourcePath,
       projectId: context.projectId,
     });
     const transitioned = this.#projectSession.transitionSource({
       previousSourcePath,
-      sourcePath: nextSourcePath,
+      sourcePath: canonicalSourcePath,
       projectId: context.projectId,
       documentId: context.documentId,
-      ...(openTarget ? { openTarget } : {}),
+      ...(nextOpenTarget ? { openTarget: nextOpenTarget } : {}),
     });
     this.#documentSession.publishAuthority({
       html: this.#documentSession.html,
@@ -1721,7 +1740,9 @@ export class ProjectWorkflow {
             nextGeneration,
           );
         }
-        const nextSourcePath = String(result.sourcePath);
+        const nextSourcePath = String(
+          result.openTarget?.exactSourcePath || result.sourcePath || "",
+        );
         const pathChanged = !this.#codecs.sameSourcePath(
           nextSourcePath,
           liveContext.sourcePath,
@@ -1774,7 +1795,7 @@ export class ProjectWorkflow {
         status: result?.status || (observed.value?.conflict ? "content-changed" : "unchanged"),
         relocated: Boolean(
           result
-          && !this.#codecs.sameSourcePath(result.sourcePath, liveContext.sourcePath),
+          && !this.#codecs.sameSourcePath(observedPath, liveContext.sourcePath),
         ),
         contentChanged: Boolean(
           result?.status === "content-changed" || observed.value?.conflict,
@@ -2480,12 +2501,19 @@ export class ProjectWorkflow {
           publishVersion,
         });
       } else {
+        const hydrationOpenTarget = rebasedManagedOpenTarget(
+          this.#codecs.isRecord(payload.openTarget)
+            ? payload.openTarget
+            : this.#projectSession.openTarget,
+          activeSource,
+          authoritativeHash,
+        );
         context = this.#projectSession.register({
           epoch: activeEpoch,
           projectId: nextProjectId,
           documentId: nextDocumentId,
           sourcePath: activeSource,
-          ...(openTarget ? { openTarget } : {}),
+          ...(hydrationOpenTarget ? { openTarget: hydrationOpenTarget } : {}),
         });
         if (!context) return stale({ operationId, epoch: activeEpoch, sourcePath: activeSource });
         if (mustAdoptSource || authoritativeHtml !== currentDocument.html) {

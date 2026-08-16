@@ -1207,6 +1207,110 @@ test("source rename is a typed ProjectWorkflow transition with one synchronous S
   assert.ok(harness.unlockCount >= 1);
 });
 
+test("title-bar rename keeps the managed OpenTarget so a later Finder rename can rebind", async (t) => {
+  const finderPath = "/tmp/project-workflow-finder.html";
+  const reconcileCalls = [];
+  const harness = createHarness({
+    openTarget: managedOpenTarget(OLD_PATH),
+    bridge: {
+      async workspace(sourcePath) {
+        const nextPath = sourcePath === finderPath
+          ? finderPath
+          : sourcePath === RENAMED_PATH
+            ? RENAMED_PATH
+            : OLD_PATH;
+        return {
+          ...workspacePayload(nextPath, OLD_HTML),
+          projectId: "project_old",
+          documentId: "document_old",
+          sourcePath: nextPath,
+          project: { displayName: nextPath.split("/").at(-1).replace(/\.html$/u, "") },
+        };
+      },
+    },
+    projectOpen: {
+      async renameSource(payload) {
+        return {
+          operationId: payload.operationId,
+          previousSourcePath: payload.sourcePath,
+          sourcePath: RENAMED_PATH,
+          sha256: sha256(OLD_HTML),
+          stem: "project-workflow-renamed",
+          lastModifiedAt: "2026-08-12T00:00:00.000Z",
+        };
+      },
+      async reconcileActiveManagedSource(payload) {
+        reconcileCalls.push(payload);
+        if (payload.previousSourcePath === RENAMED_PATH) {
+          return locatorResult(payload, { sourcePath: finderPath });
+        }
+        return locatorResult(payload, {
+          sourcePath: OLD_PATH,
+          status: "unchanged",
+        });
+      },
+      async listRecent() {
+        return [];
+      },
+      async listRegistered() {
+        return [];
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+
+  const renamed = await harness.workflow.renameSource({ stem: "project-workflow-renamed" });
+  assert.equal(renamed.status, "succeeded");
+  assert.equal(harness.projectSession.context?.sourcePath, RENAMED_PATH);
+  assert.equal(harness.projectSession.openTarget?.exactSourcePath, RENAMED_PATH);
+  assert.equal(harness.projectSession.openTarget?.workingCopyId, "work_ver_0001");
+
+  const relocated = await harness.workflow.reconcileExternalSourceLocator({
+    reason: "watch",
+    previousSourcePath: RENAMED_PATH,
+    sourceMissing: true,
+  });
+  assert.equal(relocated.status, "succeeded");
+  assert.equal(relocated.value.relocated, true);
+  assert.equal(harness.projectSession.openTarget?.exactSourcePath, finderPath);
+  assert.equal(harness.projectSession.openTarget?.workingCopyId, "work_ver_0001");
+  assert.equal(reconcileCalls.at(-1)?.previousSourcePath, RENAMED_PATH);
+});
+
+test("Finder relocate prefers Bridge exactSourcePath over a private-prefixed desktop path", async (t) => {
+  const privateRenamed = "/private/tmp/project-workflow-renamed.html";
+  const harness = createHarness({
+    openTarget: managedOpenTarget(),
+    projectOpen: {
+      async reconcileActiveManagedSource(payload) {
+        return {
+          ...locatorResult(payload, { sourcePath: RENAMED_PATH }),
+          sourcePath: privateRenamed,
+        };
+      },
+      async listRecent() {
+        return [];
+      },
+      async listRegistered() {
+        return [];
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+
+  const outcome = await harness.workflow.reconcileExternalSourceLocator({
+    reason: "watch",
+    previousSourcePath: OLD_PATH,
+    sourceMissing: true,
+  });
+
+  assert.equal(outcome.status, "succeeded");
+  assert.equal(outcome.value.relocated, true);
+  assert.equal(outcome.value.sourcePath, RENAMED_PATH);
+  assert.equal(harness.projectSession.context?.sourcePath, RENAMED_PATH);
+  assert.equal(harness.projectSession.openTarget?.exactSourcePath, RENAMED_PATH);
+});
+
 test("source rename reconciles a lost desktop response only against the expected new file identity", async (t) => {
   let renameCount = 0;
   const harness = createHarness({
