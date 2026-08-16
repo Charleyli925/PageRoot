@@ -101,6 +101,9 @@ export type ActiveRun = {
   changeEventCount?: number;
   error?: string;
   errorCode?: string;
+  errorDetail?: string;
+  recoveryHint?: string;
+  errorPreview?: string;
   completionObserved?: boolean;
   conflictId?: string;
   externalSourceSha256?: string;

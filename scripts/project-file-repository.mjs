@@ -123,6 +123,45 @@ function nowIso(clock) {
   return new Date(clock()).toISOString();
 }
 
+function previewSnippet(value, maxLength = 500) {
+  return String(value || "").replaceAll("\0", "").slice(0, maxLength);
+}
+
+function mapCandidateValidationError(cause) {
+  const code = String(cause?.code || "");
+  const message = String(cause?.message || "");
+  if (code === "INCOMPLETE_HTML") {
+    return {
+      errorCode: "INCOMPLETE_HTML",
+      message: message || "The Candidate HTML is incomplete.",
+      errorDetail: "输出缺少完整 HTML 文档结构",
+      recoveryHint: "请检查 AI Agent 的输出是否被截断，然后重新提交。",
+    };
+  }
+  if (
+    code === "CANDIDATE_HASH_MISMATCH"
+    || code === "FROZEN_INPUT_HASH_MISMATCH"
+    || code === "REQUEST_OUTPUT_CHANGED"
+    || code === "HASH_MISMATCH"
+  ) {
+    return {
+      errorCode: "HASH_MISMATCH",
+      message: message || "The Candidate HTML hash did not match the sealed record.",
+      errorDetail: "输出内容与声明的 Hash 不一致",
+      recoveryHint: "请重新提交完整输出，不要改动校验字段。",
+    };
+  }
+  if (code === "CANDIDATE_UNUSABLE" || code === "PROTOCOL_FIELD_MISSING") {
+    return {
+      errorCode: "PROTOCOL_FIELD_MISSING",
+      message: message || "The Candidate HTML is unusable.",
+      errorDetail: "输出缺少必要的协议字段或无法作为完整页面使用",
+      recoveryHint: "请检查 AI Agent 的输出是否完整，然后重新提交。",
+    };
+  }
+  return null;
+}
+
 function normalizedPath(value) {
   const resolved = path.resolve(String(value || "")).normalize("NFC");
   // macOS exposes the same temporary volume through both /var and
@@ -2009,6 +2048,10 @@ export class ProjectFileRepository {
     return this.#serial(() => this.#workspace({ sourcePath }));
   }
 
+  async forceUnlockWorkingCopy({ sourcePath } = {}) {
+    return this.#serial(() => this.#forceUnlockWorkingCopy({ sourcePath }));
+  }
+
   async activateVersionWorkingCopy({
     target,
     versionId: requestedVersionId,
@@ -2450,7 +2493,7 @@ export class ProjectFileRepository {
     }
   }
 
-  async #workspace({ sourcePath }) {
+  async #workspace({ sourcePath, adoptExternalConflict = false }) {
     // A save can park the visible source in its private recovery directory
     // between two no-replace publishes. Recover the registered project before
     // resolving the requested HTML so a crash in that narrow interval does
@@ -2548,12 +2591,25 @@ export class ProjectFileRepository {
     });
     let workingCopyRecovered = false;
     if (workingCopy && state && target.targetKind === "working-copy") {
-      const reconciliation = await this.#reconcileExternalWorkingCopyState({
-        loaded,
-        workingCopy,
-        state,
-        source,
-      });
+      let reconciliation;
+      try {
+        reconciliation = await this.#reconcileExternalWorkingCopyState({
+          loaded,
+          workingCopy,
+          state,
+          source,
+        });
+      } catch (cause) {
+        if (!adoptExternalConflict || cause?.code !== "WORKING_COPY_CONFLICT") {
+          throw cause;
+        }
+        reconciliation = await this.#adoptExternalWorkingCopyState({
+          loaded,
+          workingCopy,
+          state,
+          source,
+        });
+      }
       state = reconciliation.state;
       workingCopyRecovered = reconciliation.recovered;
       if (workingCopyRecovered) {
@@ -2594,8 +2650,10 @@ export class ProjectFileRepository {
       workingCopyState: state ? structuredClone(state) : null,
       workingCopies: structuredClone(workingCopies),
       draft: draft ? structuredClone(draft) : null,
-      activeRequest: activeRequest ? structuredClone(activeRequest) : null,
-      activeCandidate: activeCandidate
+      activeRequest: loaded.runtime.activeRequest && activeRequest
+        ? structuredClone(activeRequest)
+        : null,
+      activeCandidate: loaded.runtime.activeRequest && activeCandidate
         ? structuredClone(activeCandidate.candidate)
         : null,
       terminalRequest: terminalAiTask
@@ -2642,6 +2700,68 @@ export class ProjectFileRepository {
       "Working Copy state",
     );
     return { state: nextState, recovered: true };
+  }
+
+  async #adoptExternalWorkingCopyState({ loaded, workingCopy, state, source }) {
+    assertWorkingCopyState(state, loaded, workingCopy);
+    if (
+      String(state.currentSha256 || "") === source.sha256
+      && state.saveState === "saved"
+    ) {
+      return { state, recovered: false };
+    }
+    const nextState = {
+      ...state,
+      schemaVersion: PROJECT_FILE_SCHEMA_VERSION,
+      projectId: loaded.project.projectId,
+      documentId: loaded.project.documentId,
+      workingCopyId: workingCopy.workingCopyId,
+      currentSha256: source.sha256,
+      differsFromBase: source.sha256 !== state.baseSha256,
+      saveState: "saved",
+      lastOpenedAt: nowIso(this.#clock),
+      // lastPersistedRevision stays at the last successful PageRoot write.
+      // Adopting disk bytes does not invent a new persisted edit. The
+      // renderer then uses Math.max against its session revision so the
+      // current window looks saved; a cold start hydrates from this disk
+      // revision together with the adopted HTML.
+    };
+    await atomicWriteProjectJson(
+      loaded.paths.projectRootPath,
+      workingCopyStatePath(loaded.paths, workingCopy),
+      nextState,
+      "Working Copy state",
+    );
+    if (loaded.runtime.activeRequest) {
+      loaded.runtime.activeRequest = null;
+      loaded.runtime.activeCandidateId = null;
+      await this.#writeRuntime(loaded);
+    }
+    return { state: nextState, recovered: true };
+  }
+
+  async #forceUnlockWorkingCopy({ sourcePath }) {
+    const workspace = await this.#workspace({
+      sourcePath,
+      adoptExternalConflict: true,
+    });
+    if (!workspace) {
+      throw new ProjectFileRepositoryError(
+        "PROJECT_NOT_FOUND",
+        "No PageRoot project is registered for this HTML.",
+      );
+    }
+    return {
+      status: "force-unlocked",
+      projectId: workspace.project.projectId,
+      documentId: workspace.project.documentId,
+      sourcePath: workspace.target.exactSourcePath,
+      sourceSha256: workspace.sourceSha256,
+      sha256: workspace.sourceSha256,
+      content: workspace.content,
+      lastModifiedAt: workspace.lastModifiedAt,
+      workingCopyState: workspace.workingCopyState,
+    };
   }
 
   async #prepareRequest({
@@ -3322,6 +3442,53 @@ export class ProjectFileRepository {
     };
   }
 
+  async #recordRequestValidationError({ loaded, record, cause, previewHtml = "" }) {
+    const mapped = mapCandidateValidationError(cause) || {
+      errorCode: String(cause?.code || "CANDIDATE_UNUSABLE"),
+      message: String(cause?.message || "The Candidate HTML is unusable."),
+      errorDetail: "输出未通过安全校验",
+      recoveryHint: "请检查 AI Agent 的输出后重新提交。",
+    };
+    const requestPath = path.join(
+      requestRootPath(loaded.paths, record.requestId),
+      "request.json",
+    );
+    record.status = "error";
+    record.completedAt = nowIso(this.#clock);
+    record.error = {
+      code: String(cause?.code || mapped.errorCode),
+      message: mapped.message,
+      errorCode: mapped.errorCode,
+      errorDetail: mapped.errorDetail,
+      recoveryHint: mapped.recoveryHint,
+      issueCodes: Array.isArray(cause?.details?.issueCodes)
+        ? cause.details.issueCodes
+        : [],
+    };
+    await atomicWriteProjectJson(
+      loaded.paths.projectRootPath,
+      requestPath,
+      record,
+      "request.json",
+    );
+    loaded.runtime.activeRequest = null;
+    loaded.runtime.activeCandidateId = null;
+    loaded.runtime.lastAiTask = lastAiTaskAnchorFor(record);
+    await this.#writeRuntime(loaded);
+    const publicRequest = this.#publicRequest(record, loaded.paths.projectRootPath);
+    const preview = previewSnippet(previewHtml);
+    if (preview && isObject(publicRequest.error)) {
+      publicRequest.error = {
+        ...publicRequest.error,
+        errorPreview: preview,
+      };
+    }
+    return {
+      status: "error",
+      request: publicRequest,
+    };
+  }
+
   async #restoreRequestRuntime(loaded, record) {
     this.#assertRequestRecord(record, loaded, {
       requestId: record.requestId,
@@ -3503,7 +3670,24 @@ export class ProjectFileRepository {
     );
     const output = await readHtmlFile(outputPath, "finalized Candidate output", {
       projectRootPath: loaded.paths.projectRootPath,
+    }).catch(async (cause) => {
+      if (String(cause?.code || "") !== "INCOMPLETE_HTML") throw cause;
+      let previewHtml = "";
+      try {
+        previewHtml = await readFile(outputPath, "utf8");
+      } catch {
+        previewHtml = "";
+      }
+      return { incomplete: true, cause, previewHtml };
     });
+    if (output?.incomplete) {
+      return this.#recordRequestValidationError({
+        loaded,
+        record,
+        cause: output.cause,
+        previewHtml: output.previewHtml,
+      });
+    }
     if (output.sha256 !== completion.outputSha256) {
       throw new ProjectFileRepositoryError(
         "REQUEST_OUTPUT_CHANGED",
@@ -4017,7 +4201,16 @@ export class ProjectFileRepository {
     });
     this.#assertRequestRecord(record, loaded, { requestId, attemptId });
     const outputHtml = String(html || "");
-    requireCompleteHtml(outputHtml, "Candidate HTML");
+    try {
+      requireCompleteHtml(outputHtml, "Candidate HTML");
+    } catch (cause) {
+      return this.#recordRequestValidationError({
+        loaded,
+        record,
+        cause,
+        previewHtml: outputHtml,
+      });
+    }
     const outputSha256 = sha256(Buffer.from(outputHtml, "utf8"));
     if (record.status === "candidate-ready" || record.status === "promoted") {
       const candidate = await this.#readCandidateForLoaded(loaded, record.candidateId);
@@ -4098,30 +4291,15 @@ export class ProjectFileRepository {
         inputManifestSha256: record.inputManifestSha256,
       });
     } catch (cause) {
-      if (cause?.code !== "CANDIDATE_UNUSABLE") throw cause;
-      record.status = "error";
-      record.completedAt = nowIso(this.#clock);
-      record.error = {
-        code: cause.code,
-        message: cause.message,
-        issueCodes: Array.isArray(cause.details?.issueCodes)
-          ? cause.details.issueCodes
-          : [],
-      };
-      await atomicWriteProjectJson(
-        loaded.paths.projectRootPath,
-        requestPath,
+      if (!mapCandidateValidationError(cause) && cause?.code !== "CANDIDATE_UNUSABLE") {
+        throw cause;
+      }
+      return this.#recordRequestValidationError({
+        loaded,
         record,
-        "request.json",
-      );
-      loaded.runtime.activeRequest = null;
-      loaded.runtime.activeCandidateId = null;
-      loaded.runtime.lastAiTask = lastAiTaskAnchorFor(record);
-      await this.#writeRuntime(loaded);
-      return {
-        status: "error",
-        request: this.#publicRequest(record, loaded.paths.projectRootPath),
-      };
+        cause,
+        previewHtml: outputHtml,
+      });
     }
     record.status = "candidate-ready";
     record.completedAt = nowIso(this.#clock);

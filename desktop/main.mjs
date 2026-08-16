@@ -76,6 +76,7 @@ import {
   PRODUCT_MAX_HTML_BYTES,
   isGeneratedWorkingCopyFileName,
 } from "./product-contract.mjs";
+import { createSourceFileWatcher } from "./source-file-watch.mjs";
 import {
   isActiveProjectIdentity,
   isManagedVersionRelativePath,
@@ -97,7 +98,6 @@ import {
   normalizeActiveManagedLocator,
   rebaseActiveManagedLocator,
 } from "./active-managed-locator.mjs";
-import { createSourceFileWatcher } from "./source-file-watch.mjs";
 import {
   createTelemetryBuildConfig,
   createUsageTelemetry,
@@ -203,6 +203,7 @@ const PROJECT_CHANNELS = Object.freeze({
   openRecent: "html-projects:open-recent",
   forgetRecent: "html-projects:forget-recent",
   acceptExternalOpen: "html-projects:accept-external-open",
+  sourceFileMayHaveChanged: "html-projects:source-file-may-have-changed",
 });
 const APP_CHANNELS = Object.freeze({
   prepareClose: "html-app:prepare-close",
@@ -1176,7 +1177,6 @@ async function getActiveProjectOperation() {
     }
     throw error;
   }
-  sourceFileWatcher.watch(project.sourcePath);
   const [activePathIdentity, welcomePathIdentity, projectSourceIdentity] =
     await Promise.all([
       existingPathIdentity(activePath),
@@ -1189,6 +1189,9 @@ async function getActiveProjectOperation() {
       project = await ensureBridgeProjectRegistered(project);
     }
   }
+  // Reopening a remembered project never calls activateProject(), so the
+  // watcher must be armed here. watch() is a no-op when the path is unchanged.
+  sourceFileWatcher.watch(project.sourcePath);
   return project;
 }
 

@@ -24,6 +24,7 @@ const channels = Object.freeze({
   openRecent: "html-projects:open-recent",
   forgetRecent: "html-projects:forget-recent",
   acceptExternalOpen: "html-projects:accept-external-open",
+  sourceFileMayHaveChanged: "html-projects:source-file-may-have-changed",
 });
 const appChannels = Object.freeze({
   prepareClose: "html-app:prepare-close",

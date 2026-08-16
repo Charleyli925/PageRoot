@@ -269,7 +269,7 @@ services.
 | Crash-only browser recovery | `app/application/recovery-store.js` |
 | Renderer, project-picker, attachment, interactive-preview and close capabilities | `app/application/runtime-capabilities.js` |
 | Same-directory source rename, operation journal and durable active/recent path rebase | `desktop/source-rename.mjs` |
-| Directory-change hint and non-authoritative active managed locator cache | `desktop/source-file-watch.mjs`, `desktop/active-managed-locator.mjs` |
+| Directory-change hint, live source-file early warning and non-authoritative active managed locator cache | `desktop/source-file-watch.mjs`, `desktop/active-managed-locator.mjs` |
 | Renderer source-rename and Finder locator rebase, Hash/identity fence, lost-response reconciliation and synchronous Project/Document/Run publication | `app/application/project-workflow.js` through its narrow `ProjectOpenPort.renameSource` / `reconcileActiveManagedSource` |
 | Known-source Finder reveal | narrow project IPC in `desktop/main.mjs` |
 | Validated default-browser HTML launch | `desktop/open-in-default-browser.mjs`, behind `desktop/project-ipc-security.mjs` sender authority |
@@ -340,7 +340,9 @@ never creates a project while serving a registered mutation. Only
 `/project/ensure` may import unregistered HTML as a new v4 V1. An HTML file
 that is not a registered v4 Project File is unmanaged: GET `/workspace` and
 GET `/source` return that state, and mutation routes fail closed with
-`PROJECT_NOT_FOUND`. This decision is recorded in
+`PROJECT_NOT_FOUND`. GET `/source-preview` and GET `/source-stat` are
+read-only disk inspections: they never hydrate runtime or mutate Working Copy
+state. This decision is recorded in
 `docs/decisions/0012-id-first-project-context.md` for the historical v3
 identity rule and superseded at the desktop open boundary by v4-only Project
 Files.

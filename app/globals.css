@@ -750,6 +750,7 @@ input:focus-visible,
   right: 380px;
   min-height: 58px;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 9px;
   padding: 10px 12px 10px 14px;
@@ -812,6 +813,13 @@ input:focus-visible,
   font-weight: 670;
 }
 
+.source-conflict-banner button.destructive-action {
+  padding: 8px 10px;
+  border-color: #c45b52;
+  color: #9a2f28;
+  background: rgb(255 255 255 / 82%);
+}
+
 .canvas-guide {
   height: 34px;
   display: flex;
@@ -826,6 +834,19 @@ input:focus-visible,
 .canvas-guide strong {
   color: var(--ink);
   font-weight: 680;
+}
+
+.canvas-transition-overlay {
+  position: absolute;
+  inset: 0;
+  background: var(--paper);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 40ms ease;
+}
+
+.canvas-transition-overlay[data-active="true"] {
+  opacity: 0.04;
 }
 
 .comments-panel {
@@ -3126,6 +3147,39 @@ input:focus-visible,
   color: #fff;
   font-size: 11px;
   font-weight: 700;
+}
+
+.validation-decision-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.validation-decision-actions .cancel-action {
+  background: transparent;
+  color: inherit;
+  border: 1px solid currentColor;
+}
+
+.ai-output-preview {
+  margin-top: 8px;
+}
+
+.ai-output-preview summary {
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.ai-output-preview pre {
+  margin: 8px 0 0;
+  max-height: 180px;
+  overflow: auto;
+  padding: 8px;
+  border-radius: 8px;
+  background: rgb(0 0 0 / 6%);
+  font-size: 10px;
+  white-space: pre-wrap;
 }
 
 .processing-auto-status {

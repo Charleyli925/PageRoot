@@ -822,7 +822,8 @@
     {
       "id": "desktop-main-preload",
       "patterns": [
-        "^desktop/(?:main|preload|product-contract|product-links)\\.mjs$",
+        "^desktop/(?:main|preload|product-contract|product-links|source-file-watch)\\.mjs$",
+        "^tests/source-file-watch\\.test\\.mjs$",
         "^desktop/renderer/(?:index\\.html|main\\.tsx)$",
         "^desktop/vite\\.config\\.ts$"
       ],

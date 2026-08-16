@@ -16,6 +16,8 @@ export type BridgeClient = {
     sourcePath: string,
     options?: { timeoutMs?: number },
   ): Promise<BridgeJson>;
+  sourcePreview(sourcePath: string): Promise<BridgeJson>;
+  sourceStat(sourcePath: string): Promise<BridgeJson>;
   conflictCandidate(sourcePath: string): Promise<BridgeJson>;
   status(
     sourcePath: string,

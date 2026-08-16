@@ -334,6 +334,7 @@ export type ToastDisposition =
 export type ToastAction =
   | { id: "retry-export"; label: string }
   | { id: "open-handoff"; label: string }
+  | { id: "retry-history"; label: string; direction?: "undo" | "redo" }
   | { id: "open-project"; label: string; sourcePath: string }
   | { id: "retry-project-open"; label: string; sourcePath?: string }
   | { id: "retry-external-project-open"; label: string }
@@ -368,6 +369,7 @@ type ToastBase = {
   tone: ToastTone;
   sticky?: boolean;
   dedupeKey?: string;
+  repeatCount?: number;
 };
 
 /**

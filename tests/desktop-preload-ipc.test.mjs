@@ -262,6 +262,24 @@ test("preload exposes one narrow native/source history router", async () => {
   assert.deepEqual(requested, ["undo"]);
 });
 
+test("preload exposes a source-file change listener", async () => {
+  const preload = await loadPreloadApis(async () => success(null));
+  const received = [];
+  const unsubscribe = preload.projects.onSourceFileChanged((info) => {
+    received.push(info.sourcePath);
+  });
+  preload.emit("html-projects:source-file-may-have-changed", {
+    sourcePath: "/tmp/page.html",
+  });
+  preload.emit("html-projects:source-file-may-have-changed", { sourcePath: " " });
+  assert.deepEqual(received, ["/tmp/page.html"]);
+  unsubscribe();
+  preload.emit("html-projects:source-file-may-have-changed", {
+    sourcePath: "/tmp/page.html",
+  });
+  assert.deepEqual(received, ["/tmp/page.html"]);
+});
+
 test("preload unwraps structured project IPC success results", async () => {
   const calls = [];
   const api = await loadPreload(async (...args) => {

@@ -28,6 +28,10 @@
   visibility: hidden;
 }
 
+.editor .canvas-transition-overlay {
+  z-index: 8;
+}
+
 .lockNotice {
   position: absolute;
   top: 3px;
