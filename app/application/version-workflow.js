@@ -863,6 +863,7 @@ export class VersionWorkflow {
       this.#documentWorkflow.clearAudit();
       this.#documentSession.setPersistence({ state: "idle", error: "" });
       this.#documentWorkflow.clearRecovery(nextContext);
+      this.#projectWorkflow.scheduleProjectListRefreshAfterSettlement(nextContext);
       const value = {
         context: nextContext,
         versionId: requestedVersionId,
@@ -976,6 +977,9 @@ export class VersionWorkflow {
     });
     if (!this.#isNavigationCurrent(operation)) return stale(this.#runIdentity(run));
     if (!prepared.updatesCurrentProject) {
+      this.#projectWorkflow.scheduleProjectListRefreshAfterSettlement(
+        this.#projectSession.context,
+      );
       return succeeded({
         current: false,
         context: null,
@@ -1023,6 +1027,8 @@ export class VersionWorkflow {
         "新版本已打开，但项目资料尚未完成复核。",
       );
     }
+
+    this.#projectWorkflow.scheduleProjectListRefreshAfterSettlement(context);
 
     return succeeded({
       current: true,
