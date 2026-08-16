@@ -117,6 +117,7 @@ export type DesktopProjectsApi = {
     listener: (payload: {
       sourcePath: string;
       watcherGeneration: number;
+      sourceMissing?: boolean;
     }) => void,
   ) => () => void;
   exportHtmlCopy?: (payload: {

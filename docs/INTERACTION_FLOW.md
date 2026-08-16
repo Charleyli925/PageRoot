@@ -269,7 +269,7 @@ SourcePatch、不写磁盘、不运行作者脚本，也不引入右键菜单、
 
 若应用在 `pendingRename` 写入后意外退出，下次启动根据旧、新路径和预期 Hash 完成或确认同一操作，再更新活动/最近记录。Bridge 通过文件物理身份重绑并同步 `project.json.name`；不得因为文件名变化创建新 Project、Document 或 Version。
 
-用户在 Finder 中于同一登记项目根内改名当前打开的受管 Working Copy 或同父目录的项目文件夹时，工作台不猜测新路径。目录变化只作为提示：Main 用已验证的 `projectId` / `documentId` / `workingCopyId` / `versionId` 向 Bridge 询问该身份当前唯一的 Working Copy。只有 `device + inode + birthtimeMs` 连续且候选唯一时才原子更新 `sourcePath`、显示名、活动文件、最近记录与监听目标；HTML 字节、评论、草稿和 Version 身份保持不变。跨磁盘、移出配置项目目录、副本、软链接、多候选或非普通 HTML 一律失败关闭，并沿用既有冲突或“重新选择”路径。定位恢复与 PageRoot 内重命名共用同一 source-locator 转换锁。顶栏在可恢复的 Finder 改名后继续使用用户刚输入的新名字；只有真实错误才显示在输入框下方，且失败后不强制重新聚焦。
+用户在 Finder 中于同一登记项目根内改名当前打开的受管 Working Copy 或同父目录的项目文件夹时，工作台不猜测新路径。目录变化只作为提示：Main 先判断当前 HTML 是否仍在原处。文件仍在时只按 Hash 核对内容，不 drain 切换边界、不向 Bridge 重绑路径，因此同目录里保存 `PROJECT.md` 不会把未还原的规则修改提前写盘。只有当前路径缺失时，Main 才用已验证的 `projectId` / `documentId` / `workingCopyId` / `versionId` 向 Bridge 询问该身份当前唯一的 Working Copy。只有 `device + inode + birthtimeMs` 连续且候选唯一时才原子更新 `sourcePath`、显示名、活动文件、最近记录与监听目标；HTML 字节、评论、草稿和 Version 身份保持不变。跨磁盘、移出配置项目目录、副本、软链接、多候选或非普通 HTML 一律失败关闭，并沿用既有冲突或“重新选择”路径。定位恢复与 PageRoot 内重命名共用同一 source-locator 转换锁。顶栏在可恢复的 Finder 改名后继续使用用户刚输入的新名字；只有真实错误才显示在输入框下方，且失败后不强制重新聚焦。
 
 ## 5. 直接编辑与自动写回
 

@@ -3377,6 +3377,7 @@ export default function Workbench() {
         reason: "watch",
         previousSourcePath: payload.sourcePath,
         watcherGeneration: payload.watcherGeneration,
+        sourceMissing: payload.sourceMissing,
       });
     });
   }, [workspaceController]);

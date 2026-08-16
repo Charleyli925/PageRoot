@@ -281,10 +281,14 @@ function publishSourceFileMayHaveChanged(info) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   const sourcePath = String(info?.sourcePath || "");
   if (!sourcePath) return;
-  mainWindow.webContents.send(PROJECT_CHANNELS.sourceFileMayHaveChanged, {
+  const payload = {
     sourcePath,
     watcherGeneration: Number(info?.watcherGeneration || 0),
-  });
+  };
+  if (info?.sourceMissing === true || info?.sourceMissing === false) {
+    payload.sourceMissing = info.sourceMissing;
+  }
+  mainWindow.webContents.send(PROJECT_CHANNELS.sourceFileMayHaveChanged, payload);
 }
 
 async function recoverWatchedManagedSource(info) {
@@ -294,7 +298,7 @@ async function recoverWatchedManagedSource(info) {
       const state = await loadProjectState();
       const activePath = state.activePath;
       const locator = state.activeManagedLocator;
-      if (!activePath || !locator) {
+      if (!activePath) {
         publishSourceFileMayHaveChanged(hint);
         return;
       }
@@ -303,7 +307,11 @@ async function recoverWatchedManagedSource(info) {
         (error) => error?.code === "ENOENT",
       );
       if (!missing) {
-        publishSourceFileMayHaveChanged(hint);
+        publishSourceFileMayHaveChanged({ ...hint, sourceMissing: false });
+        return;
+      }
+      if (!locator) {
+        publishSourceFileMayHaveChanged({ ...hint, sourceMissing: true });
         return;
       }
       try {
@@ -323,6 +331,7 @@ async function recoverWatchedManagedSource(info) {
       publishSourceFileMayHaveChanged({
         sourcePath: activePath,
         watcherGeneration: Number(hint.watcherGeneration || sourceFileWatcher.watcherGeneration),
+        sourceMissing: true,
       });
     });
   } catch {

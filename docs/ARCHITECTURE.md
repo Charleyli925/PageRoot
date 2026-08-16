@@ -402,8 +402,13 @@ Project context; no generic desktop executor or duplicate Session fact is used.
 
 Finder same-root renames share that source-locator transition. The desktop
 watcher reports that the current source directory or its parent changed; it
-does not claim a new path. `ProjectWorkflow.reconcileExternalSourceLocator()` and
-`renameSource()` share one locator lock. Main asks Bridge
+does not claim a new path. When the watched HTML is still a regular file, Main
+forwards `sourceMissing: false` and `ProjectWorkflow` only hash-observes the
+current source. It does not drain switch or ask Bridge to rebind, so sibling
+writes such as `PROJECT.md` cannot flush unsaved project rules. `ProjectWorkflow.reconcileExternalSourceLocator()` and
+`renameSource()` share one locator lock. Locator rebase and switch drain run
+when Main reports the path missing, at startup, or when the title bar starts a
+rename. Main asks Bridge
 `POST /managed-working-copy/reconcile` for the unique Working Copy that still
 matches the verified identity tuple. If the watched file itself disappears
 (including a same-parent project folder rename that Electron's directory

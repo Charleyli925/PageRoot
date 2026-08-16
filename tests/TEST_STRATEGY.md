@@ -73,7 +73,8 @@ step summary 里。
   对账、单飞与迟到结果不能 rebase 新项目，以及 Finder 同目录改名后的
   `reconcileExternalSourceLocator` 单飞行：身份四元组不变、新路径与
   `activeManagedLocator` 原子更新（含 macOS `/var` 与 `/private/var` 同一路径）、
-  同父目录项目文件夹改名靠父目录监听提示、内容 Hash 不同则进入既有冲突且不覆盖任一侧。
+  同父目录项目文件夹改名靠父目录监听提示、当前 HTML 仍在时只 hash-observe 且不
+  drain 切换边界，内容 Hash 不同则进入既有冲突且不覆盖任一侧。
   `WorkspaceController` 负责把 `RecentRunsPort` 和 ProjectWorkflow event channel 接回
   aggregate snapshot/event stream。Workbench 只保留 file input、host adapter 和
   Outcome/Event 的展示映射；专项 Node 集与完整 Electron 套件共同证明真实

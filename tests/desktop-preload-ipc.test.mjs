@@ -455,6 +455,19 @@ test("preload delivers directory-change hints without claiming a new path", asyn
   );
   assert.equal(seen[0].watcherGeneration, 3);
   assert.equal("nextSourcePath" in seen[0], false);
+  assert.equal("sourceMissing" in seen[0], false);
+  loaded.emit("html-projects:source-file-may-have-changed", {
+    sourcePath: "/Users/demo/Documents/PageRoot/项目/report/report-V1.html",
+    watcherGeneration: 5,
+    sourceMissing: false,
+  });
+  loaded.emit("html-projects:source-file-may-have-changed", {
+    sourcePath: "/Users/demo/Documents/PageRoot/项目/report/report-V1.html",
+    watcherGeneration: 6,
+    sourceMissing: true,
+  });
+  assert.equal(seen[1].sourceMissing, false);
+  assert.equal(seen[2].sourceMissing, true);
   unsubscribe();
 });
 

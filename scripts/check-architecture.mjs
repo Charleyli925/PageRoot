@@ -593,6 +593,7 @@ export async function architectureViolations() {
     || !projectWorkflow.includes("#sourceLocatorPromise")
     || !projectWorkflow.includes("this.#projectOpenPort.reconcileActiveManagedSource")
     || !projectWorkflow.includes("#publishSourceLocatorChange(")
+    || !projectWorkflow.includes("sourceMissing === false")
   ) {
     violations.push(
       "app/application/project-workflow.js: hydration, accepted FIFO, switch, close and project resources must share one typed workflow boundary",
@@ -608,6 +609,7 @@ export async function architectureViolations() {
     || !workbench.includes(".openProjectRecords({ context })")
     || !workbench.includes("onSourceFileChanged")
     || !workbench.includes(".observeExternalSourceChange({")
+    || !workbench.includes("sourceMissing: payload.sourceMissing")
     || workbench.includes("reconcileManagedWorkingCopy")
   ) {
     violations.push(

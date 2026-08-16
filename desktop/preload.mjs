@@ -161,10 +161,14 @@ const projectsApi = Object.freeze({
         ? payload.sourcePath.trim()
         : "";
       if (!sourcePath) return;
-      listener({
+      const next = {
         sourcePath,
         watcherGeneration: Number(payload?.watcherGeneration || 0),
-      });
+      };
+      if (payload?.sourceMissing === true || payload?.sourceMissing === false) {
+        next.sourceMissing = payload.sourceMissing;
+      }
+      listener(next);
     };
     ipcRenderer.on(channels.sourceFileMayHaveChanged, wrapped);
     return () => {

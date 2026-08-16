@@ -490,6 +490,7 @@ export class WorkspaceController {
     reason?: "watch" | "rename" | "startup" | "safe-action";
     watcherGeneration?: number;
     previousSourcePath?: string | null;
+    sourceMissing?: boolean;
   }): Promise<ProjectWorkflowOutcome>;
   submitRequest(input?: {
     projectName?: string;

@@ -187,6 +187,7 @@ export class ProjectWorkflow {
     reason?: "watch" | "rename" | "startup" | "safe-action";
     watcherGeneration?: number;
     previousSourcePath?: string | null;
+    sourceMissing?: boolean;
   }): Promise<ProjectWorkflowOutcome<{
     context?: ProjectContext;
     sourcePath?: string;

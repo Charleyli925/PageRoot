@@ -152,6 +152,7 @@ function createHarness({
   canvas = {},
   projectOpen = {},
   policies = {},
+  projectRulesWorkflow: rulesWorkflow = {},
   initialProject = true,
   openTarget = null,
 } = {}) {
@@ -282,13 +283,17 @@ function createHarness({
     },
   };
   let unlockCount = 0;
+  let fenceCount = 0;
   const canvasPort = {
     deferCommand: () => false,
-    fencePendingEdit: () => ({
-      ok: true,
-      html: documentSession.html,
-      sourceSha256: documentSession.sourceSha256,
-    }),
+    fencePendingEdit: () => {
+      fenceCount += 1;
+      return {
+        ok: true,
+        html: documentSession.html,
+        sourceSha256: documentSession.sourceSha256,
+      };
+    },
     freeze: () => ({
       ok: true,
       html: documentSession.html,
@@ -368,11 +373,14 @@ function createHarness({
     commentWorkflow,
     runSession,
     projectRulesWorkflow: {
+      drainCount: 0,
       resetForProjectTransition() {},
       inspect: () => ({ state: "resolved" }),
       async drain() {
+        this.drainCount += 1;
         return true;
       },
+      ...rulesWorkflow,
     },
     externalFileOpenSession: new ExternalFileOpenSession(),
     projectApplicationSession: new ProjectApplicationSession(),
@@ -454,6 +462,9 @@ function createHarness({
     oldContext,
     get unlockCount() {
       return unlockCount;
+    },
+    get fenceCount() {
+      return fenceCount;
     },
   };
 }
@@ -1376,6 +1387,111 @@ test("Finder locator rebase keeps IDs, publishes the new path, and does not load
   assert.equal(reconcileCalls[0].reason, "watch");
   assert.ok(!("nextSourcePath" in reconcileCalls[0]));
   assert.ok(harness.events.some((event) => event.type === "project-source-relocated"));
+});
+
+test("present-file watch hints only hash-observe and do not drain switch", async (t) => {
+  const reconcileCalls = [];
+  const rulesWorkflow = {
+    drainCount: 0,
+    inspect: () => ({ state: "pending", reason: "unsaved project rules" }),
+    async drain() {
+      this.drainCount += 1;
+      return true;
+    },
+  };
+  const harness = createHarness({
+    openTarget: managedOpenTarget(),
+    projectRulesWorkflow: rulesWorkflow,
+    projectOpen: {
+      async reconcileActiveManagedSource(payload) {
+        reconcileCalls.push(payload);
+        return locatorResult(payload);
+      },
+      async listRecent() {
+        return [];
+      },
+      async listRegistered() {
+        return [];
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+
+  const outcome = await harness.workflow.reconcileExternalSourceLocator({
+    reason: "watch",
+    watcherGeneration: 3,
+    previousSourcePath: OLD_PATH,
+    sourceMissing: false,
+  });
+
+  assert.equal(outcome.status, "succeeded");
+  assert.equal(outcome.value.relocated, false);
+  assert.equal(outcome.value.sourcePath, OLD_PATH);
+  assert.equal(harness.projectSession.context?.sourcePath, OLD_PATH);
+  assert.equal(harness.documentWorkflow.observeCount, 1);
+  assert.equal(reconcileCalls.length, 0);
+  assert.equal(rulesWorkflow.drainCount, 0);
+  assert.equal(harness.fenceCount, 0);
+  assert.ok(!harness.events.some((event) => event.type === "project-source-relocated"));
+});
+
+test("a later present-file hint does not drop a pending missing-path rebase", async (t) => {
+  let releaseObserve;
+  const observeGate = new Promise((resolve) => {
+    releaseObserve = resolve;
+  });
+  const reconcileCalls = [];
+  const harness = createHarness({
+    openTarget: managedOpenTarget(),
+    projectOpen: {
+      async reconcileActiveManagedSource(payload) {
+        reconcileCalls.push(payload);
+        return locatorResult(payload);
+      },
+      async listRecent() {
+        return [];
+      },
+      async listRegistered() {
+        return [];
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+  harness.documentWorkflow.observeExternalSourceChange = async function observeExternalSourceChange() {
+    this.observeCount += 1;
+    await observeGate;
+    return succeeded(this.observeResult);
+  };
+
+  const first = harness.workflow.reconcileExternalSourceLocator({
+    reason: "watch",
+    watcherGeneration: 1,
+    previousSourcePath: OLD_PATH,
+    sourceMissing: false,
+  });
+  await waitFor(
+    () => harness.documentWorkflow.observeCount === 1,
+    "present-file observe did not start",
+  );
+  const missing = harness.workflow.reconcileExternalSourceLocator({
+    reason: "watch",
+    watcherGeneration: 2,
+    previousSourcePath: OLD_PATH,
+    sourceMissing: true,
+  });
+  const present = harness.workflow.reconcileExternalSourceLocator({
+    reason: "watch",
+    watcherGeneration: 3,
+    previousSourcePath: OLD_PATH,
+    sourceMissing: false,
+  });
+  assert.equal(reconcileCalls.length, 0);
+  releaseObserve();
+  assert.equal((await first).status, "succeeded");
+  assert.equal((await missing).status, "succeeded");
+  assert.equal((await present).status, "succeeded");
+  assert.equal(reconcileCalls.length, 1);
+  assert.equal(harness.projectSession.context?.sourcePath, RENAMED_PATH);
 });
 
 test("Finder directory events coalesce to one rebase and late old-path events are ignored", async (t) => {

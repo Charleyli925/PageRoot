@@ -1158,12 +1158,24 @@ export class ProjectWorkflow {
       previousSourcePath: input.previousSourcePath
         ? String(input.previousSourcePath)
         : null,
+      sourceMissing: input.sourceMissing === true
+        ? true
+        : input.sourceMissing === false ? false : null,
     };
-    if (
-      !this.#pendingLocatorReconcile
-      || request.watcherGeneration >= Number(this.#pendingLocatorReconcile.watcherGeneration || 0)
-    ) {
+    if (!this.#pendingLocatorReconcile) {
       this.#pendingLocatorReconcile = request;
+    } else if (
+      request.watcherGeneration >= Number(this.#pendingLocatorReconcile.watcherGeneration || 0)
+    ) {
+      const pending = this.#pendingLocatorReconcile;
+      this.#pendingLocatorReconcile = {
+        ...request,
+        sourceMissing: pending.sourceMissing === true || request.sourceMissing === true
+          ? true
+          : pending.sourceMissing === false && request.sourceMissing === false
+            ? false
+            : null,
+      };
     }
     if (this.#sourceLocatorPromise) {
       return this.#sourceLocatorPromise.then((result) => {
@@ -1531,6 +1543,7 @@ export class ProjectWorkflow {
     reason = "watch",
     watcherGeneration = 0,
     previousSourcePath = null,
+    sourceMissing = null,
   } = {}) {
     const requestedReason = String(reason || "watch");
     const userRename = requestedReason === "rename";
@@ -1552,12 +1565,33 @@ export class ProjectWorkflow {
       return succeeded({ ignored: true, reason: "stale-generation", sourcePath: currentPath });
     }
 
+    if (requestedReason === "watch" && sourceMissing === false) {
+      let observed = succeeded({ unchanged: true });
+      if (typeof this.#documentWorkflow.observeExternalSourceChange === "function") {
+        observed = await this.#documentWorkflow.observeExternalSourceChange({
+          sourcePath: currentPath,
+        });
+      }
+      return succeeded({
+        context: this.#projectSession.context,
+        sourcePath: currentPath,
+        previousSourcePath: currentPath,
+        status: observed.value?.conflict ? "content-changed" : "unchanged",
+        relocated: false,
+        contentChanged: Boolean(observed.value?.conflict),
+        projectName: sourceStem(currentPath),
+        ignored: false,
+        observed: observed.value || null,
+      });
+    }
+
     const defer = (code, message) => {
       if (!userRename) {
         this.#scheduleLocatorRetry({
           reason: requestedReason,
           watcherGeneration,
           previousSourcePath: currentPath,
+          sourceMissing,
         });
       }
       return blocked(code, message);
