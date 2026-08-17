@@ -4,6 +4,7 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
+- AI 审阅里，删除文字恢复为穿过原字的红色横虚线，新增文字在每个字下叠一层小绿点；两者都不再改作者颜色、字号或行距。绿点不再使用会撑开行高的 CSS 着重号。
 - The first time a real local HTML opens in the verified edit canvas, a
   non-modal frosted-glass “快速开始” card at the app window’s bottom-right
   explains the edit → comment → send-to-AI loop. It is a `position: fixed`
