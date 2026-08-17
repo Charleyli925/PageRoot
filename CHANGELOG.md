@@ -15,6 +15,14 @@ Notable user-visible changes are documented here. This project follows Semantic 
   unchanged, and there is no Preview-mode hover state. The card is
   remembered per install, not per project, and never appears on the
   built-in welcome page.
+
+- The exact-legacy-V4 project Registry migration and its dedicated lock are
+  removed. The shape it migrated existed only on the development branch for
+  about six hours and was never part of a released PageRoot, so no installed
+  version can produce it. An unrecognized Registry now fails closed and keeps
+  its exact bytes, which is the path every other unknown shape already took;
+  managed HTML, Versions, Drafts, comments and attachments are untouched.
+
 - A project Registry lock left behind by an interrupted PageRoot process no
   longer blocks importing HTML forever. Previously only one residue shape (a
   single intact owner marker naming a dead process) could be reclaimed, so a

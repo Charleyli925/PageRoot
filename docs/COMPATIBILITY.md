@@ -52,41 +52,34 @@ collected. A guessed date is not a support-window policy.
 - Support window and deletion evidence: the live consumer is gone. Remaining
   on-disk v3 registries are user data and are left in place.
 
-## Exact legacy V4 Registry metadata completion
+## Exact legacy V4 Registry metadata completion (removed)
 
 - Historical producer and version: the short-lived pre-hardening V4 desktop
   Registry producer wrote `schemaVersion: "4.0.0"` with top-level
   `schemaVersion`, `updatedAt` and `projects`, but no `pendingImports`; each
   project record contained exactly `projectRootPath` and `updatedAt`.
-- Current consumer: `ProjectFileRepository.#readRegistry` before Bridge
-  workspace and project-ensure operations.
-- Migration and canonical output: current Registry validation runs first and
-  never rewrites a valid current record. Only the exact historical shape may
-  migrate. Every project key, direct-child non-symlink real root and matching
-  `.pageroot/project.json` must validate before the repository constructs
-  `registeredProjectRootPath`, a live-directory-stat `rootFileIdentity`, and
-  `pendingImports: {}` in memory. A short-lived exclusive migration lock
-  serializes the one replacement across Bridge processes; dead-owner recovery
-  claims the exact sealed token marker before moving its lock, and a waiter re-reads
-  under that lock and returns a current Registry without rewriting it. It then
-  writes a Hash-named byte-for-byte backup of the old Registry and atomically
-  publishes the current Registry. The backup is not read as runtime authority.
-  Mixed shapes, extra fields, path escape, symlink, missing root, identity
-  mismatch, source change or publication failure fail closed without changing
-  the old Registry, importing a project, reassociating a root or touching HTML.
-- Historical proof: `tests/project-file-repository.test.mjs` covers valid
-  one/multiple/empty migration, current no-op, rejection, atomic recovery and
-  concurrent migration/import serialization;
-  `tests/project-file-bridge.test.mjs` covers `/workspace` and first
-  `/project/ensure`; `tests/e2e/electron/native-dom-electron.spec.mjs` covers
-  a seeded Registry through desktop edit, comment and reopen.
-- Disk persistence read/write: yes, bounded mutable Registry metadata only;
-  existing Project, Working Copy, Version, Draft, comment, attachment and HTML
-  files remain outside the migration write set.
-- Support window and deletion evidence: retain until a read-only Registry
-  census proves no supported install has the exact historical V4 shape and the
-  producing Developer Preview is outside the supported upgrade window. Expected
-  removal time: not scheduled pending that evidence.
+- Support window and deletion evidence: removed. That shape existed on `main`
+  from `4fe5eb7` (2026-08-14 15:04) to `379523b` (2026-08-14 21:17) and was never
+  part of a tagged release — `scripts/project-file-repository.mjs` is absent from
+  `v0.9.8`, the newest tag. No shipped PageRoot can produce it, so no user disk
+  can hold it.
+- Current consumer: none. `ProjectFileRepository.#readRegistry` performs one
+  validation, and any Registry that is not a valid current Registry fails closed
+  with `UNSUPPORTED_REGISTRY_SCHEMA` (HTTP 422) — the same path every other
+  unknown, mixed or extended shape already took.
+- Why not a fallback: returning an empty Registry would validate, and the next
+  import would then atomically replace the real file, destroying every recorded
+  external-source binding and root filesystem identity while orphaning the
+  project directories on disk. Refusing to read is recoverable; overwriting is
+  not.
+- Disk persistence read/write: none. A refused Registry keeps its exact bytes,
+  and Project, Working Copy, Version, Draft, comment, attachment and HTML are
+  untouched, so re-importing rebuilds the Registry.
+- Historical proof: `tests/project-file-repository.test.mjs` asserts that an
+  unrecognized shape fails closed across read, classify and import without
+  changing the Registry bytes, the managed HTML, or creating a backup directory.
+- Decision: `docs/decisions/0028-unrecognized-registry-fails-closed.md`
+  supersedes `docs/decisions/0023-exact-legacy-v4-registry-migration.md`.
 
 ## External-source provenance pair
 
