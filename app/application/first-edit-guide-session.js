@@ -159,6 +159,12 @@ export class FirstEditGuideSession {
   evaluate(input) {
     if (this.#disposed) return this.#snapshot;
     this.#latestInput = isRecord(input) ? Object.freeze({ ...input }) : null;
+    if (this.#loadPromise) {
+      void this.#loadPromise.then(() => {
+        if (this.#latestInput) this.evaluate(this.#latestInput);
+      });
+      return this.#snapshot;
+    }
     if (!this.#snapshot.loaded) {
       void this.load().then(() => {
         if (this.#latestInput) this.evaluate(this.#latestInput);
@@ -169,6 +175,8 @@ export class FirstEditGuideSession {
       this.#port
       && !this.#welcomeIdentityResolved
       && !this.#snapshot.builtInWelcomeProjectId
+      && typeof this.#latestInput?.projectId === "string"
+      && this.#latestInput.projectId
     ) {
       // Welcome registration writes the install identity after the first
       // preferences read. Refresh once before showing so the welcome page

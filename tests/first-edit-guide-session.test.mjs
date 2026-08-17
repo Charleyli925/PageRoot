@@ -183,6 +183,73 @@ test("welcome identity written after first load is refreshed before showing", as
   assert.equal(port.records.length, 0);
 });
 
+test("welcome identity is refreshed only after a projectId exists", async () => {
+  let builtInWelcomeProjectId = null;
+  const port = {
+    records: [],
+    async get() {
+      return pendingPreferences({ builtInWelcomeProjectId });
+    },
+    async record(input) {
+      this.records.push(input);
+      return pendingPreferences({ builtInWelcomeProjectId });
+    },
+  };
+  const session = new FirstEditGuideSession({
+    port,
+    scheduler: createScheduler(),
+  });
+  await session.load();
+  session.evaluate(eligibleInput({ projectId: "" }));
+  await flushAsync();
+  builtInWelcomeProjectId = "project_welcome";
+  session.evaluate(eligibleInput({ projectId: "project_welcome" }));
+  await session.load();
+  assert.equal(session.snapshot.visible, false);
+  assert.equal(session.snapshot.builtInWelcomeProjectId, "project_welcome");
+  assert.equal(port.records.length, 0);
+});
+
+test("concurrent evaluate during welcome-identity refresh does not flash the card", async () => {
+  let builtInWelcomeProjectId = null;
+  let releaseSecondGet = null;
+  let getCount = 0;
+  const port = {
+    records: [],
+    async get() {
+      getCount += 1;
+      if (getCount === 2) {
+        await new Promise((resolve) => {
+          releaseSecondGet = resolve;
+        });
+      }
+      return pendingPreferences({ builtInWelcomeProjectId });
+    },
+    async record(input) {
+      this.records.push(input);
+      return pendingPreferences({ builtInWelcomeProjectId });
+    },
+  };
+  const session = new FirstEditGuideSession({
+    port,
+    scheduler: createScheduler(),
+  });
+  await session.load();
+  builtInWelcomeProjectId = "project_welcome";
+  session.evaluate(eligibleInput({ projectId: "project_welcome" }));
+  await flushAsync();
+  session.evaluate(eligibleInput({ projectId: "project_welcome" }));
+  assert.equal(session.snapshot.visible, false);
+  assert.equal(typeof releaseSecondGet, "function");
+  releaseSecondGet();
+  await flushAsync();
+  await flushAsync();
+  await flushAsync();
+  assert.equal(session.snapshot.visible, false);
+  assert.equal(session.snapshot.builtInWelcomeProjectId, "project_welcome");
+  assert.equal(port.records.length, 0);
+});
+
 test("real HTML still appears after the welcome-identity refresh", async () => {
   let builtInWelcomeProjectId = null;
   const port = {
