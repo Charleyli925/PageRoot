@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   FIRST_EDIT_GUIDE_PRESENT_DWELL_MS,
+  FIRST_REAL_HTML_EDIT_GUIDE_GENERATION,
   FirstEditGuideSession,
   isFirstEditGuideEligible,
 } from "../app/application/first-edit-guide-session.js";
@@ -11,7 +12,7 @@ function pendingPreferences(overrides = {}) {
   return {
     firstRealHtmlEditGuide: {
       status: "pending",
-      generation: 1,
+      generation: FIRST_REAL_HTML_EDIT_GUIDE_GENERATION,
     },
     builtInWelcomeProjectId: "project_welcome",
     ...overrides,
@@ -95,7 +96,7 @@ test("welcome HTML is never eligible for the first-edit guide", () => {
         loaded: true,
         available: true,
         status: "pending",
-        generation: 1,
+        generation: FIRST_REAL_HTML_EDIT_GUIDE_GENERATION,
         builtInWelcomeProjectId: "project_welcome",
         visible: false,
       },
@@ -264,7 +265,7 @@ test("real HTML still appears after the welcome-identity refresh", async () => {
         builtInWelcomeProjectId,
         firstRealHtmlEditGuide: {
           status: input.action,
-          generation: 1,
+          generation: FIRST_REAL_HTML_EDIT_GUIDE_GENERATION,
         },
       });
     },
@@ -282,7 +283,10 @@ test("real HTML still appears after the welcome-identity refresh", async () => {
 test("a previously presented install does not show the card again", async () => {
   const session = new FirstEditGuideSession({
     port: createPort(pendingPreferences({
-      firstRealHtmlEditGuide: { status: "presented", generation: 1 },
+      firstRealHtmlEditGuide: {
+        status: "presented",
+        generation: FIRST_REAL_HTML_EDIT_GUIDE_GENERATION,
+      },
     })),
     scheduler: createScheduler(),
   });
@@ -290,4 +294,34 @@ test("a previously presented install does not show the card again", async () => 
   session.evaluate(eligibleInput());
   assert.equal(session.snapshot.visible, false);
   assert.equal(session.snapshot.status, "presented");
+});
+
+test("an older presented generation becomes pending and can appear again", async () => {
+  const scheduler = createScheduler();
+  const session = new FirstEditGuideSession({
+    port: createPort(pendingPreferences({
+      firstRealHtmlEditGuide: { status: "presented", generation: 1 },
+    })),
+    scheduler,
+  });
+  await session.load();
+  session.evaluate(eligibleInput());
+  assert.equal(session.snapshot.status, "pending");
+  assert.equal(session.snapshot.generation, FIRST_REAL_HTML_EDIT_GUIDE_GENERATION);
+  assert.equal(session.snapshot.visible, true);
+});
+
+test("run in progress hides the card without dismissing it", async () => {
+  const scheduler = createScheduler();
+  const port = createPort();
+  const session = new FirstEditGuideSession({ port, scheduler });
+  await session.load();
+  session.evaluate(eligibleInput());
+  assert.equal(session.snapshot.visible, true);
+  session.evaluate(eligibleInput({ runInProgress: true }));
+  assert.equal(session.snapshot.visible, false);
+  assert.equal(session.snapshot.status, "pending");
+  assert.equal(port.records.length, 0);
+  session.evaluate(eligibleInput());
+  assert.equal(session.snapshot.visible, true);
 });

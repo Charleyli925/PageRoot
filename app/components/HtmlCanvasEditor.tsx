@@ -145,7 +145,6 @@ import {
   createCanvasCapabilityHoverController,
   type CanvasCapabilityHoverSnapshot,
 } from "./html-canvas-capability-hover";
-import FirstEditGuideCard from "./FirstEditGuideCard";
 import NoticeBar from "./NoticeBar";
 import type {
   HtmlCanvasCommentedTarget,
@@ -606,8 +605,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     pageViewContext = null,
     pageViewDocumentKey = "",
     onPageViewContextChange,
-    firstEditGuideVisible = false,
-    onDismissFirstEditGuide,
     pointerCapabilityHoverEnabled = true,
   },
   forwardedRef,
@@ -699,8 +696,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const pendingToolbarVisibleRef = useRef(false);
   const pendingFrameRestoreEpochRef = useRef(0);
   const toolbarVisibleRef = useRef(false);
-  const firstEditGuideVisibleRef = useRef(firstEditGuideVisible);
-  const onDismissFirstEditGuideRef = useRef(onDismissFirstEditGuide);
   const pointerCapabilityHoverEnabledRef = useRef(pointerCapabilityHoverEnabled);
   const hoverControllerRef = useRef<ReturnType<typeof createCanvasCapabilityHoverController> | null>(null);
   const pendingFrameViewportRef = useRef<{ left: number; top: number } | null>(null);
@@ -765,8 +760,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   }
   pageViewDocumentKeyRef.current = pageViewDocumentKey;
   onPageViewContextChangeRef.current = onPageViewContextChange;
-  firstEditGuideVisibleRef.current = firstEditGuideVisible;
-  onDismissFirstEditGuideRef.current = onDismissFirstEditGuide;
   pointerCapabilityHoverEnabledRef.current = pointerCapabilityHoverEnabled;
 
   // Keep the server and hydration value deterministic, then normalize through DOMParser after mount.
@@ -4855,11 +4848,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       }
       if (event.key === "Escape") {
         event.preventDefault();
-        if (firstEditGuideVisibleRef.current) {
-          event.stopPropagation();
-          onDismissFirstEditGuideRef.current?.();
-          return;
-        }
         clearSelection();
         return;
       }
@@ -5480,10 +5468,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         finishNativeEditing(true);
         return;
       }
-      if (firstEditGuideVisibleRef.current) {
-        onDismissFirstEditGuideRef.current?.();
-        return;
-      }
       iframeRef.current?.focus();
       clearSelection();
     }
@@ -5656,11 +5640,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           {hoverChrome.capability.hint}
         </div>
       ) : null}
-      <FirstEditGuideCard
-        visible={firstEditGuideVisible && !interactionLocked}
-        onDismiss={() => onDismissFirstEditGuideRef.current?.()}
-      />
-
       {editFeedback && !interactionLocked ? (
         <NoticeBar
           placement="viewport"

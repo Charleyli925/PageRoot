@@ -74,6 +74,11 @@ test("guide and hover copy stay off the selected toolbar", async () => {
   );
   assert.equal(editor.includes("capabilityCaption"), false);
   assert.equal(editor.includes("selectionCapability.hint"), false);
-  assert.equal(card.includes("需要操作页面按钮时切到"), false);
-  assert.equal(card.includes("点击“预览”查看最终效果。"), true);
+  assert.equal(card.includes("知道了"), false);
+  assert.equal(card.includes("单击选择"), false);
+  assert.equal(card.includes("点击“预览”查看最终效果。"), false);
+  assert.equal(card.includes("打开自己的 HTML，添加为项目"), true);
+  assert.equal(card.includes("双击改字，自动保存在当前页"), true);
+  assert.equal(card.includes("单击要改的区域，写下评论，AI 会按这里改"), true);
+  assert.equal(card.includes("点右上角发送，把任务粘贴给 AI Agent"), true);
 });

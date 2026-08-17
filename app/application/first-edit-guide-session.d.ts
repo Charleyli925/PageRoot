@@ -1,4 +1,4 @@
-export const FIRST_REAL_HTML_EDIT_GUIDE_GENERATION: 1;
+export const FIRST_REAL_HTML_EDIT_GUIDE_GENERATION: 2;
 export const FIRST_EDIT_GUIDE_PRESENT_DWELL_MS: 800;
 
 export type FirstEditGuideStatus = "pending" | "presented" | "dismissed";

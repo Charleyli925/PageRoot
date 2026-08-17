@@ -276,10 +276,6 @@ export type HtmlCanvasEditorProps = {
     context: PageViewContext | null,
     documentKey: string,
   ) => boolean;
-  /** Install-level first-real-HTML guide; the host owns persistence. */
-  firstEditGuideVisible?: boolean;
-  /** Dismisses the first-real-HTML guide without stealing canvas focus. */
-  onDismissFirstEditGuide?: () => void;
   /** Continuous pointer-capability hover; off on the built-in welcome page. */
   pointerCapabilityHoverEnabled?: boolean;
 };

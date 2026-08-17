@@ -1,4 +1,4 @@
-export const FIRST_REAL_HTML_EDIT_GUIDE_GENERATION = 1;
+export const FIRST_REAL_HTML_EDIT_GUIDE_GENERATION = 2;
 export const FIRST_EDIT_GUIDE_PRESENT_DWELL_MS = 800;
 
 function isRecord(value) {
@@ -114,18 +114,22 @@ export class FirstEditGuideSession {
 
   #applyPreferences(preferences, { visible = this.#snapshot.visible } = {}) {
     const available = Boolean(this.#port);
-    const status = preferences?.firstRealHtmlEditGuide?.status === "dismissed"
-      || preferences?.firstRealHtmlEditGuide?.status === "presented"
-      ? preferences.firstRealHtmlEditGuide.status
-      : "pending";
-    const generation = Number.isSafeInteger(preferences?.firstRealHtmlEditGuide?.generation)
+    const storedGeneration = Number.isSafeInteger(
+      preferences?.firstRealHtmlEditGuide?.generation,
+    )
       ? preferences.firstRealHtmlEditGuide.generation
       : FIRST_REAL_HTML_EDIT_GUIDE_GENERATION;
+    const storedStatus = preferences?.firstRealHtmlEditGuide?.status;
+    const status = storedGeneration !== FIRST_REAL_HTML_EDIT_GUIDE_GENERATION
+      ? "pending"
+      : storedStatus === "dismissed" || storedStatus === "presented"
+        ? storedStatus
+        : "pending";
     this.#emit({
       loaded: true,
       available,
       status,
-      generation,
+      generation: FIRST_REAL_HTML_EDIT_GUIDE_GENERATION,
       builtInWelcomeProjectId: preferences?.builtInWelcomeProjectId || null,
       visible: available && status !== "dismissed" ? Boolean(visible) : false,
     });

@@ -1010,9 +1010,20 @@ export async function architectureViolations() {
     /\bhtmlAIUiPreferences\??\.(?:get|record)\s*\(/u.test(workbench)
     || !hasCall(workbenchAst, { method: "evaluateFirstEditGuide" })
     || !hasCall(workbenchAst, { method: "dismissFirstEditGuide" })
+    || !workbench.includes("<FirstEditGuideCard")
+    || !/run-submission-started[\s\S]{0,400}dismissFirstEditGuide/u.test(workbench)
+    || /keydown[\s\S]{0,400}dismissFirstEditGuide/u.test(workbench)
   ) {
     violations.push(
-      "app/workbench.tsx: the view may pass the narrow UI-preferences port at composition time but cannot record guide status itself",
+      "app/workbench.tsx: the view may pass the narrow UI-preferences port at composition time but cannot record guide status itself; the card stays a window overlay that dismisses on send-to-waiting, not Escape",
+    );
+  }
+  if (
+    canvasEditor.includes("FirstEditGuideCard")
+    || canvasEditor.includes("dismissFirstEditGuide")
+  ) {
+    violations.push(
+      "app/components/HtmlCanvasEditor.tsx: first-real-HTML guide overlay must stay on the Workbench window layer",
     );
   }
   if (

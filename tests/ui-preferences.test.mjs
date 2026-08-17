@@ -46,7 +46,7 @@ test("missing or damaged UI preferences decode as pending", async (t) => {
 });
 
 test("an older guide generation returns to pending", () => {
-  const decoded = decodeUiPreferences(JSON.stringify({
+  const decodedNewer = decodeUiPreferences(JSON.stringify({
     schemaVersion: 1,
     firstRealHtmlEditGuide: {
       status: "dismissed",
@@ -54,9 +54,19 @@ test("an older guide generation returns to pending", () => {
     },
     builtInWelcomeProjectId: "project_welcome",
   }));
-  assert.equal(decoded.firstRealHtmlEditGuide.status, "pending");
-  assert.equal(decoded.firstRealHtmlEditGuide.generation, FIRST_REAL_HTML_EDIT_GUIDE_GENERATION);
-  assert.equal(decoded.builtInWelcomeProjectId, "project_welcome");
+  assert.equal(decodedNewer.firstRealHtmlEditGuide.status, "pending");
+  assert.equal(decodedNewer.firstRealHtmlEditGuide.generation, FIRST_REAL_HTML_EDIT_GUIDE_GENERATION);
+  assert.equal(decodedNewer.builtInWelcomeProjectId, "project_welcome");
+
+  const decodedPrevious = decodeUiPreferences(JSON.stringify({
+    schemaVersion: 1,
+    firstRealHtmlEditGuide: {
+      status: "presented",
+      generation: 1,
+    },
+  }));
+  assert.equal(decodedPrevious.firstRealHtmlEditGuide.status, "pending");
+  assert.equal(decodedPrevious.firstRealHtmlEditGuide.generation, FIRST_REAL_HTML_EDIT_GUIDE_GENERATION);
 });
 
 test("present and dismiss are install-level and dismissed is terminal", async (t) => {

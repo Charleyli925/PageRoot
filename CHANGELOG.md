@@ -5,13 +5,14 @@ Notable user-visible changes are documented here. This project follows Semantic 
 ## [Unreleased]
 
 - The first time a real local HTML opens in the verified edit canvas, a
-  non-modal frosted-glass “快速开始” card explains click to select,
-  double-click to edit text, and clicking Preview for the final result.
-  Pointer hover uses the same three captions as a compact pill on the
-  outline, not on the selected-element toolbar. Click selection range is
-  unchanged, and there is no Preview-mode hover state. The card is
-  remembered per install, not per project, and never appears on the
-  built-in welcome page.
+  non-modal frosted-glass “快速开始” card at the app window’s bottom-right
+  explains the edit → comment → send-to-AI loop. It stays until Send
+  enters waiting, or until the user skips it with ×. Escape no longer
+  dismisses it. Pointer hover keeps teaching click-to-select and
+  double-click-to-edit as a compact pill on the outline, not on the
+  selected-element toolbar. Click selection range is unchanged, and there
+  is no Preview-mode hover state. The card is remembered per install, not
+  per project, and never appears on the built-in welcome page.
 - Preview sessions now refresh in place for the same Edit sibling-asset
   source path, and a full session map evicts the least-recently-accessed idle
   session instead of the oldest insert. Repeated saves and Preview toggles

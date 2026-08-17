@@ -45,6 +45,7 @@ import type { DesktopEditRuntimeApi } from "./components/desktop-edit-runtime-ap
 import type { DesktopUiPreferencesApi } from "./components/desktop-ui-preferences-api";
 import AboutPageRootDialog from "./components/AboutPageRootDialog";
 import CancelAiRunDialog from "./components/CancelAiRunDialog";
+import FirstEditGuideCard from "./components/FirstEditGuideCard";
 import HtmlInteractionPreview, {
   type HtmlInteractionPreviewHandle,
 } from "./components/HtmlInteractionPreview";
@@ -1428,11 +1429,15 @@ export default function Workbench() {
           setHandoffPreviewOpen(false);
           setCanvasMode("edit");
           setDrawer("handoff");
+          void workspaceControllerRef.current?.dismissFirstEditGuide();
         }
         return;
       }
       if (runEvent.type === "run-submission-uncertain") {
-        if (runEvent.current) setDrawer("handoff");
+        if (runEvent.current) {
+          setDrawer("handoff");
+          void workspaceControllerRef.current?.dismissFirstEditGuide();
+        }
         return;
       }
       if (runEvent.type === "run-submission-failed") {
@@ -2360,27 +2365,6 @@ export default function Workbench() {
     workspaceController,
     workspaceIssue,
   ]);
-  useEffect(() => {
-    if (!firstEditGuideVisible) return undefined;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      const target = event.target;
-      if (target instanceof HTMLElement) {
-        const tag = target.tagName;
-        if (
-          tag === "INPUT"
-          || tag === "TEXTAREA"
-          || tag === "SELECT"
-          || target.isContentEditable
-        ) return;
-      }
-      event.preventDefault();
-      event.stopPropagation();
-      void workspaceControllerRef.current?.dismissFirstEditGuide();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [firstEditGuideVisible]);
 
   const activeCommentItems = useMemo(
     () => comments.filter(commentHasContent),
@@ -5665,6 +5649,7 @@ export default function Workbench() {
     ) return;
     if (currentRun.activeLocked) {
       setDrawer("handoff");
+      void workspaceControllerRef.current?.dismissFirstEditGuide();
       return;
     }
     if (
@@ -5708,6 +5693,7 @@ export default function Workbench() {
     if (outcome.status === "succeeded" || outcome.status === "stale") return;
     if (outcome.status === "unknown") {
       setDrawer("handoff");
+      void workspaceControllerRef.current?.dismissFirstEditGuide();
       return;
     }
     if (outcome.status === "blocked") {
@@ -5736,6 +5722,7 @@ export default function Workbench() {
       }
       if (outcome.code === "RUN_SUBMISSION_LOCKED") {
         setDrawer("handoff");
+        void workspaceControllerRef.current?.dismissFirstEditGuide();
         return;
       }
       if (outcome.code === "RUN_SUBMISSION_DOCUMENT_EDIT") {
@@ -7623,10 +7610,6 @@ export default function Workbench() {
                       ? "processing"
                       : "editing"}
                   enableReorder={!interactionLocked}
-                  firstEditGuideVisible={firstEditGuideVisible}
-                  onDismissFirstEditGuide={() => {
-                    void workspaceControllerRef.current?.dismissFirstEditGuide();
-                  }}
                   pointerCapabilityHoverEnabled={!isBuiltInWelcomePage}
                 />
               </Suspense>
@@ -9069,6 +9052,12 @@ export default function Workbench() {
           }}
         />
       ) : null}
+      <FirstEditGuideCard
+        visible={firstEditGuideVisible}
+        onDismiss={() => {
+          void workspaceControllerRef.current?.dismissFirstEditGuide();
+        }}
+      />
       </main>
       {readyReviewOverlay}
     </>

@@ -10,7 +10,7 @@ import { randomBytes } from "node:crypto";
 export const UI_PREFERENCES_FILE_NAME = "ui-preferences.json";
 export const UI_PREFERENCES_SCHEMA_VERSION = 1;
 export const FIRST_REAL_HTML_EDIT_GUIDE_KEY = "first-real-html-edit-guide";
-export const FIRST_REAL_HTML_EDIT_GUIDE_GENERATION = 1;
+export const FIRST_REAL_HTML_EDIT_GUIDE_GENERATION = 2;
 
 const MAX_STATE_BYTES = 16 * 1024;
 const PROJECT_ID_PATTERN = /^project_[A-Za-z0-9_-]{1,180}$/u;
