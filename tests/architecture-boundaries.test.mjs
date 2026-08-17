@@ -6,6 +6,16 @@ import {
   architectureViolations,
   compositionBoundaryViolations,
 } from "../scripts/check-architecture.mjs";
+import {
+  parseModule,
+  importsModule,
+  exportsSymbol,
+  classHasMember,
+  classMemberConstructs,
+  hasCall,
+  constructsClass,
+  hasObjectProperty,
+} from "../scripts/architecture-ast-query.mjs";
 
 test("renderer, WorkspaceController, domain, and Bridge dependency boundaries stay enforced", async () => {
   assert.deepEqual(await architectureViolations(), []);
@@ -53,4 +63,90 @@ test("final composition gate rejects each retired boundary escape", async () => 
     compositionBoundaryViolations({ projectWorkflow: missingDrain }).join("\n"),
     /switch, close, history, and request boundaries must use typed DrainCoordinator commands/,
   );
+});
+
+// The gate proves runtime coordination through structure, not source strings.
+// A rename, reflow, or comment insertion is a semantically equivalent refactor:
+// the AST queries must keep passing, while a genuine removal must still fail.
+test("AST structural queries survive rename, reflow and comments", () => {
+  const baseline = parseModule(
+    "controller.js",
+    [
+      'import { RunWorkflow } from "./run-workflow.js";',
+      "export class WorkspaceController {",
+      "  #runWorkflow = new RunWorkflow({});",
+      "  #registrationPromise = null;",
+      "  submitRequest(input) {",
+      "    return this.#runWorkflow.submit(input);",
+      "  }",
+      "  getSnapshot() {",
+      "    return { run: this.#runSnapshot };",
+      "  }",
+      "}",
+    ].join("\n"),
+  );
+
+  assert.equal(importsModule(baseline, "./run-workflow.js"), true);
+  assert.equal(exportsSymbol(baseline, "WorkspaceController", { kind: "class" }), true);
+  assert.equal(classHasMember(baseline, "WorkspaceController", "#registrationPromise"), true);
+  assert.equal(classHasMember(baseline, "WorkspaceController", "submitRequest"), true);
+  assert.equal(classMemberConstructs(baseline, "WorkspaceController", "#runWorkflow", "RunWorkflow"), true);
+  assert.equal(constructsClass(baseline, "RunWorkflow"), true);
+  assert.equal(hasCall(baseline, { path: "this.#runWorkflow.submit" }), true);
+  assert.equal(hasObjectProperty(baseline, "run"), true);
+
+  // Same module, refactored: parameter renamed, call reflowed across lines,
+  // a comment inserted, and whitespace changed. A substring/order gate would
+  // break on several of these; the structural gate must not.
+  const refactored = parseModule(
+    "controller.js",
+    [
+      'import { RunWorkflow } from "./run-workflow.js";',
+      "export class WorkspaceController {",
+      "  // registration single-flight guard",
+      "  #registrationPromise = null;",
+      "  #runWorkflow = new RunWorkflow(",
+      "    {},",
+      "  );",
+      "  submitRequest(payload) {",
+      "    return this.#runWorkflow",
+      "      .submit(payload);",
+      "  }",
+      "  getSnapshot() {",
+      "    return {",
+      "      run: this.#runSnapshot,",
+      "    };",
+      "  }",
+      "}",
+    ].join("\n"),
+  );
+
+  assert.equal(importsModule(refactored, "./run-workflow.js"), true);
+  assert.equal(exportsSymbol(refactored, "WorkspaceController", { kind: "class" }), true);
+  assert.equal(classHasMember(refactored, "WorkspaceController", "#registrationPromise"), true);
+  assert.equal(classHasMember(refactored, "WorkspaceController", "submitRequest"), true);
+  assert.equal(classMemberConstructs(refactored, "WorkspaceController", "#runWorkflow", "RunWorkflow"), true);
+  assert.equal(constructsClass(refactored, "RunWorkflow"), true);
+  assert.equal(hasCall(refactored, { path: "this.#runWorkflow.submit" }), true);
+  assert.equal(hasObjectProperty(refactored, "run"), true);
+});
+
+test("AST structural queries still fail on genuine removals", () => {
+  const removed = parseModule(
+    "controller.js",
+    [
+      "export class WorkspaceController {",
+      "  getSnapshot() {",
+      "    return {};",
+      "  }",
+      "}",
+    ].join("\n"),
+  );
+
+  assert.equal(importsModule(removed, "./run-workflow.js"), false);
+  assert.equal(classHasMember(removed, "WorkspaceController", "submitRequest"), false);
+  assert.equal(classMemberConstructs(removed, "WorkspaceController", "#runWorkflow", "RunWorkflow"), false);
+  assert.equal(constructsClass(removed, "RunWorkflow"), false);
+  assert.equal(hasCall(removed, { path: "this.#runWorkflow.submit" }), false);
+  assert.equal(hasObjectProperty(removed, "run"), false);
 });
