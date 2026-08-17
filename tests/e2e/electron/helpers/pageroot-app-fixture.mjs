@@ -443,7 +443,6 @@ export async function waitForProjectReady(page, {
   timeout = 60_000,
   includeFailureDetail = true,
 } = {}) {
-  const workbench = page.locator("main.workbench");
   const importButton = page.getByRole("button", { name: "导入并打开" });
   const continueButton = page.getByRole("button", { name: "继续当前项目" });
   const confirmationKind = async () => {
@@ -452,15 +451,15 @@ export async function waitForProjectReady(page, {
     return "";
   };
   const projectState = async () => {
-    const state = await workbench.getAttribute("data-project-state", { timeout: 400 })
-      .catch(() => null);
-    if (state === "ready") return "ready";
-    const stage = await page.evaluate(() => window.__PAGEROOT_HYDRATION_STAGE__)
-      .catch(() => null);
-    const visibleFailure = includeFailureDetail && state === "failed"
+    const snapshot = await page.evaluate(() => ({
+      state: document.querySelector("main.workbench")?.getAttribute("data-project-state") || null,
+      stage: window.__PAGEROOT_HYDRATION_STAGE__ || null,
+    })).catch(() => ({ state: null, stage: null }));
+    if (snapshot.state === "ready") return "ready";
+    const visibleFailure = includeFailureDetail && snapshot.state === "failed"
       ? await page.locator('[aria-label="项目读取失败"]').textContent().catch(() => "")
       : "";
-    return `${state || "missing"}:${stage || "unmarked"}:${visibleFailure || "no-detail"}`;
+    return `${snapshot.state || "missing"}:${snapshot.stage || "unmarked"}:${visibleFailure || "no-detail"}`;
   };
 
   let pendingConfirmation = "";
