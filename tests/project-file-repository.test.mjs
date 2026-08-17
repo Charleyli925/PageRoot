@@ -3558,6 +3558,66 @@ test("macOS /var and /private/var aliases share one external source binding", as
   assert.equal(Object.keys((await json(registryPath(value))).projects).length, 1);
 });
 
+// Releasing the lock is cleanup, never authority. A release that cannot complete
+// must not become the outcome of an operation that already committed, and must not
+// replace the original error whose code drives recovery in the renderer.
+test("a failed lock release never replaces a committed import result", async (t) => {
+  const value = await fixture(t);
+  const sourcePath = path.join(value.sources, "提交后释放失败.html");
+  const buffer = Buffer.from(html("committed"), "utf8");
+  await writeFile(sourcePath, buffer);
+
+  let damaged = false;
+  const repository = new ProjectFileRepository({
+    projectsRoot: value.projects,
+    failpoint: async (name) => {
+      // By this failpoint the project directory is renamed into place and the
+      // Registry is published, so the import is fully committed.
+      if (name === "import-registry-written" && !damaged) {
+        const lockPath = currentRegistryWriteLockPath(value);
+        const owner = (await readdir(lockPath)).find((entry) => entry.startsWith(".owner-"));
+        if (owner) {
+          await writeFile(path.join(lockPath, owner), "{ truncated", "utf8");
+          damaged = true;
+        }
+      }
+      return false;
+    },
+  });
+
+  const imported = await repository.importExternal({
+    sourcePath,
+    expectedSourceSha256: sha256(buffer),
+  });
+
+  assert.equal(damaged, true);
+  assert.equal(imported.imported, true);
+  assert.equal(
+    Object.keys((await json(registryPath(value))).projects).length,
+    1,
+  );
+
+  // The undamaged half of the contract: an unreleasable lock is inert, not
+  // terminal, so the next import reclaims it on age instead of failing busy.
+  const nextPath = path.join(value.sources, "后续导入.html");
+  const nextBuffer = Buffer.from(html("next"), "utf8");
+  await writeFile(nextPath, nextBuffer);
+  const next = await new ProjectFileRepository({
+    projectsRoot: value.projects,
+    registryWriteLockTimeoutMs: 400,
+    registryWriteLockGraceMs: 10_000,
+    clock: () => Date.now() + 60_000,
+  }).importExternal({
+    sourcePath: nextPath,
+    expectedSourceSha256: sha256(nextBuffer),
+  });
+  assert.equal(next.imported, true);
+  assert.equal(
+    (await readdir(value.projects)).includes(".pageroot-registry-write-lock"),
+    false,
+  );
+});
+
 test("a live Registry write lock fails busy; a dead lock can be retired by its exact token", async (t) => {
   const value = await fixture(t);
   await importSource(value, "锁基线.html");

@@ -168,7 +168,10 @@ it is older than a grace period, after re-proving both its filesystem identity
 and its still-unresolved lease. Age is measured from creation and content
 timestamps only, never from inode metadata time, so an unrelated metadata touch
 cannot restore a permanently busy Registry. A live resolvable owner is never
-reclaimed on age alone.
+reclaimed on age alone. Releasing that lock is cleanup and never authority: a
+release that cannot complete leaves an inert directory to be reclaimed on age,
+and never becomes the outcome of an operation that already committed nor replaces
+the original error whose code drives recovery.
 
 Working-copy filename changes retain their immutable IDs. A missing mapping may
 be repaired only by one unique direct-child file-identity continuity clue; Hash
