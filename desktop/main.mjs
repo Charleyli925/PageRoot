@@ -63,6 +63,14 @@ import {
   externalOpenFailurePresentation,
   externalHtmlPathsFromArgv,
 } from "./external-file-open.mjs";
+import {
+  assertCommitAction,
+  assertExactPayload,
+  createPreparedHtmlOpenStore,
+  formatProjectsRootLabel,
+  publicExternalOpenRequest,
+  publicFactsFromClassification,
+} from "./prepared-html-open.mjs";
 import { createProjectOpenQueue } from "./project-open-queue.mjs";
 import { assertTrustedRendererEvent } from "./project-ipc-security.mjs";
 import {
@@ -76,6 +84,7 @@ import {
   PRODUCT_MAX_HTML_BYTES,
   isGeneratedWorkingCopyFileName,
 } from "./product-contract.mjs";
+import { createSourceFileWatcher } from "./source-file-watch.mjs";
 import {
   isActiveProjectIdentity,
   isManagedVersionRelativePath,
@@ -97,7 +106,6 @@ import {
   normalizeActiveManagedLocator,
   rebaseActiveManagedLocator,
 } from "./active-managed-locator.mjs";
-import { createSourceFileWatcher } from "./source-file-watch.mjs";
 import {
   createTelemetryBuildConfig,
   createUsageTelemetry,
@@ -124,6 +132,15 @@ import {
 import {
   createEditRuntimePreparationFence,
 } from "./edit-runtime-preparation-fence.mjs";
+import {
+  forgetImportedAssetRootsForPath,
+  importedAssetRootForProjectPath,
+  isExternalOriginalPath,
+  normalizeImportedAssetRoots,
+  previewAssetSourcePath,
+  rememberImportedAssetRoot,
+  resolveLiveImportedAssetSource,
+} from "./imported-asset-root.mjs";
 
 // electron-updater is CommonJS; the default import is the supported ESM bridge.
 const { autoUpdater } = electronUpdater;
@@ -203,6 +220,11 @@ const PROJECT_CHANNELS = Object.freeze({
   openRecent: "html-projects:open-recent",
   forgetRecent: "html-projects:forget-recent",
   acceptExternalOpen: "html-projects:accept-external-open",
+  commitPreparedHtmlOpen: "html-projects:commit-prepared-open",
+  cancelPreparedHtmlOpen: "html-projects:cancel-prepared-open",
+  finalizePreparedHtmlOpen: "html-projects:finalize-prepared-open",
+  rollbackPreparedHtmlOpen: "html-projects:rollback-prepared-open",
+  sourceFileMayHaveChanged: "html-projects:source-file-may-have-changed",
 });
 const APP_CHANNELS = Object.freeze({
   prepareClose: "html-app:prepare-close",
@@ -349,6 +371,7 @@ async function recoverWatchedManagedSource(info) {
 let activeImportedAssetSourcePath = null;
 const workspaceRecoveryMailbox = createWorkspaceRecoveryMailbox();
 const externalFileOpenMailbox = createExternalFileOpenMailbox();
+const preparedHtmlOpenStore = createPreparedHtmlOpenStore();
 const externalFileOpenExitHandoff = createExternalFileOpenExitHandoff({
   handoffPath: path.join(app.getPath("userData"), "external-open-handoff.json"),
 });
@@ -578,6 +601,7 @@ function emptyProjectState() {
     pendingRename: null,
     lastRename: null,
     lastManagedActivation: null,
+    importedAssetRoots: [],
     activeManagedLocator: null,
   };
 }
@@ -781,6 +805,7 @@ async function loadProjectState() {
       pendingRename: normalizePendingSourceRename(parsed.pendingRename),
       lastRename: normalizeCompletedSourceRename(parsed.lastRename),
       lastManagedActivation: normalizeManagedWorkingCopyActivation(parsed.lastManagedActivation),
+      importedAssetRoots: normalizeImportedAssetRoots(parsed.importedAssetRoots),
       activeManagedLocator: normalizeActiveManagedLocator(parsed.activeManagedLocator),
     };
     if (projectState.pendingRename) {
@@ -822,9 +847,60 @@ function persistProjectState() {
   return stateWriteQueue;
 }
 
+async function restoreActiveImportedAssetSource(projectSourcePath) {
+  const state = await loadProjectState();
+  const record = await importedAssetRootForProjectPath(
+    state.importedAssetRoots,
+    projectSourcePath,
+  );
+  if (!record) {
+    activeImportedAssetSourcePath = null;
+    return;
+  }
+  const [live, projectIdentity] = await Promise.all([
+    resolveLiveImportedAssetSource(record.originalSourcePath),
+    existingPathIdentity(projectSourcePath),
+  ]);
+  activeImportedAssetSourcePath = live && live !== projectIdentity
+    ? live
+    : null;
+}
+
+async function rememberAndBindImportedAssetSource({
+  originalPath,
+  projectSourcePath,
+}) {
+  if (
+    typeof originalPath !== "string"
+    || typeof projectSourcePath !== "string"
+    || !isExternalOriginalPath(originalPath, projectSourcePath)
+  ) {
+    return;
+  }
+  const state = await loadProjectState();
+  const projectRootPath = await realpath(path.dirname(projectSourcePath)).catch(
+    () => path.resolve(path.dirname(projectSourcePath)),
+  );
+  const originalIdentity = await existingPathIdentity(originalPath);
+  state.importedAssetRoots = rememberImportedAssetRoot(state.importedAssetRoots, {
+    projectRootPath,
+    originalSourcePath: originalIdentity,
+  });
+  await persistProjectState();
+  await restoreActiveImportedAssetSource(projectSourcePath);
+}
+
 async function activateProject(filePath) {
   const normalizedPath = await existingPathIdentity(assertHtmlPath(filePath));
   const state = await loadProjectState();
+  const currentIdentity = state.activePath
+    ? await existingPathIdentity(state.activePath).catch(() => null)
+    : null;
+  if (currentIdentity === normalizedPath) {
+    await restoreActiveImportedAssetSource(normalizedPath);
+    sourceFileWatcher.watch(normalizedPath);
+    return;
+  }
   const recentPathIdentities = await Promise.all(
     state.recent.map((entry) => existingPathIdentity(entry.path)),
   );
@@ -843,7 +919,7 @@ async function activateProject(filePath) {
     ),
   ].slice(0, MAX_RECENT_PROJECTS);
   await persistProjectState();
-  activeImportedAssetSourcePath = null;
+  await restoreActiveImportedAssetSource(normalizedPath);
   sourceFileWatcher.watch(normalizedPath);
 }
 
@@ -864,7 +940,16 @@ async function forgetProject(filePath) {
     state.activeManagedLocator = null;
     sourceFileWatcher.close();
   }
+  state.importedAssetRoots = await forgetImportedAssetRootsForPath(
+    state.importedAssetRoots,
+    filePath,
+  );
   await persistProjectState();
+  if (state.activePath) {
+    await restoreActiveImportedAssetSource(state.activePath);
+  } else {
+    activeImportedAssetSourcePath = null;
+  }
 }
 
 async function inspectHtmlFile(filePath) {
@@ -892,6 +977,139 @@ async function readHtmlProject(filePath) {
     sourcePath: canonicalPath,
     maxHtmlBytes: MAX_HTML_BYTES,
   });
+}
+
+function taggedProject(project) {
+  if (!project || typeof project.name !== "string" || typeof project.html !== "string") {
+    return null;
+  }
+  return Object.freeze({
+    openKind: "project",
+    name: project.name,
+    html: project.html,
+    sourcePath: project.sourcePath || null,
+    sha256: project.sha256 || null,
+    ...(project.lastModifiedAt ? { lastModifiedAt: String(project.lastModifiedAt) } : {}),
+    ...(project.path ? { path: String(project.path) } : {}),
+  });
+}
+
+function taggedConfirmation(descriptor) {
+  if (!descriptor || typeof descriptor.requestId !== "string") return null;
+  return Object.freeze({
+    openKind: "confirmation",
+    ...descriptor,
+  });
+}
+
+function projectsRootPath() {
+  if (process.env.HTML_AI_PROJECT_FILES_ROOT) {
+    return path.resolve(process.env.HTML_AI_PROJECT_FILES_ROOT);
+  }
+  return path.join(app.getPath("documents"), "PageRoot", "项目");
+}
+
+function isInsideDirectory(filePath, directoryPath) {
+  const resolvedFile = path.resolve(filePath);
+  const resolvedDirectory = path.resolve(directoryPath);
+  return resolvedFile === resolvedDirectory
+    || resolvedFile.startsWith(`${resolvedDirectory}${path.sep}`);
+}
+
+function publicMailboxRequest(request) {
+  return publicExternalOpenRequest(request);
+}
+
+async function fetchBridgePost(pathname, body) {
+  if (!bridgePort) {
+    throw new ProjectFileError(
+      "BRIDGE_NOT_READY",
+      "项目记录服务尚未就绪，请稍后重试。",
+    );
+  }
+  const response = await net.fetch(`http://127.0.0.1:${bridgePort}${pathname}`, {
+    method: "POST",
+    cache: "no-store",
+    headers: {
+      "Content-Type": "application/json",
+      "X-HTML-AI-Bridge-Token": bridgeAuthToken,
+    },
+    body: JSON.stringify(body),
+  });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new ProjectFileError(
+      payload?.error?.code || "BRIDGE_REQUEST_FAILED",
+      payload?.error?.message || "项目记录服务暂时无法完成这次操作。",
+      payload?.error?.details && typeof payload.error.details === "object"
+        ? payload.error.details
+        : {},
+    );
+  }
+  return payload;
+}
+
+async function classifyViaBridge(sourcePath) {
+  const classified = await fetchBridgePost("/project/open-classification", {
+    sourcePath,
+  });
+  if (
+    !classified
+    || (
+      classified.kind !== "managed-project"
+      && classified.kind !== "known-external"
+      && classified.kind !== "new-external"
+    )
+    || typeof classified.sourceSha256 !== "string"
+    || !/^sha256:[a-f0-9]{64}$/u.test(classified.sourceSha256)
+  ) {
+    throw new ProjectFileError(
+      "OPEN_CLASSIFICATION_FAILED",
+      "无法判断这个 HTML 应该如何打开。",
+    );
+  }
+  return classified;
+}
+
+function publicFactsForClassified(classified, sourcePath) {
+  return publicFactsFromClassification({
+    ...classified,
+    classification: classified.kind,
+    sourceFileName: classified.sourceFileName || path.basename(sourcePath),
+    projectsRootLabel: formatProjectsRootLabel(projectsRootPath()),
+  });
+}
+
+async function prepareOrOpenFromPath(sourcePath, { requestId } = {}) {
+  const inspected = await inspectHtmlFile(sourcePath);
+  const canonicalPath = await realpath(inspected);
+  const classified = await classifyViaBridge(canonicalPath);
+  if (classified.kind === "managed-project") {
+    const project = await readHtmlProject(canonicalPath);
+    await activateProject(project.sourcePath);
+    return taggedProject(project);
+  }
+  const nextRequestId = String(requestId || "");
+  const reusable = preparedHtmlOpenStore.findPreparedBySourcePath(canonicalPath);
+  if (
+    reusable
+    && (!nextRequestId || nextRequestId === reusable.requestId)
+  ) {
+    return taggedConfirmation(
+      preparedHtmlOpenStore.publicDescriptor(reusable.requestId),
+    );
+  }
+  preparedHtmlOpenStore.cancelOthers(nextRequestId);
+  const descriptor = preparedHtmlOpenStore.prepare({
+    ...(nextRequestId ? { requestId: nextRequestId } : {}),
+    sourcePath: canonicalPath,
+    classifiedAtSha256: classified.sourceSha256,
+    classification: classified.kind,
+    boundProjectId: classified.projectId || null,
+    openTarget: classified.openTarget || null,
+    publicFacts: publicFactsForClassified(classified, canonicalPath),
+  });
+  return taggedConfirmation(descriptor);
 }
 
 function showExternalOpenError(error) {
@@ -950,7 +1168,10 @@ function publishExternalFileOpen(filePath) {
     const request = externalFileOpenMailbox.publish(filePath);
     focusMainWindow();
     if (rendererHasLoaded && mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send(APP_CHANNELS.externalOpenRequested, request);
+      mainWindow.webContents.send(
+        APP_CHANNELS.externalOpenRequested,
+        publicMailboxRequest(request),
+      );
     }
     return request;
   } catch (error) {
@@ -960,53 +1181,34 @@ function publishExternalFileOpen(filePath) {
 }
 
 async function openExternalFileRequest(request) {
-  return projectOpenQueue.run(async () => {
-    const project = await readHtmlProject(request.sourcePath);
-    await activateProject(project.sourcePath);
-    return project;
+  return prepareOrOpenFromPath(request.sourcePath, {
+    requestId: request.requestId,
   });
 }
 
 async function adoptPendingExternalFileAtStartup() {
-  const pending = externalFileOpenMailbox.peek();
-  if (!pending) return null;
-  const operation = externalFileOpenMailbox.accept(
-    pending.requestId,
-    openExternalFileRequest,
-  );
-  if (!operation) return null;
-  try {
-    return await operation;
-  } catch (error) {
-    showExternalOpenError(error);
-    return null;
-  }
+  return publicMailboxRequest(externalFileOpenMailbox.peek());
 }
 
 async function acceptExternalFileOpen(payload) {
-  if (
-    !payload
-    || typeof payload !== "object"
-    || Array.isArray(payload)
-    || Object.keys(payload).some((key) => key !== "requestId")
-    || typeof payload.requestId !== "string"
-  ) {
+  assertExactPayload(payload, ["requestId"], {
+    code: "INVALID_EXTERNAL_OPEN_REQUEST",
+    message: "外部 HTML 打开请求无效。",
+  });
+  if (typeof payload.requestId !== "string" || !payload.requestId) {
     throw new ProjectFileError(
       "INVALID_EXTERNAL_OPEN_REQUEST",
       "外部 HTML 打开请求无效。",
     );
   }
-  const operation = externalFileOpenMailbox.accept(
-    payload.requestId,
-    openExternalFileRequest,
-  );
-  if (!operation) {
+  const request = externalFileOpenMailbox.consume(payload.requestId);
+  if (!request) {
     throw new ProjectFileError(
       "EXTERNAL_OPEN_REQUEST_EXPIRED",
       "这次外部打开请求已经失效，请从 QoderWork 再点一次 PageRoot。",
     );
   }
-  return operation;
+  return projectOpenQueue.run(() => openExternalFileRequest(request));
 }
 
 async function currentActivePath() {
@@ -1179,7 +1381,6 @@ async function getActiveProjectOperation() {
     }
     throw error;
   }
-  sourceFileWatcher.watch(project.sourcePath);
   const [activePathIdentity, welcomePathIdentity, projectSourceIdentity] =
     await Promise.all([
       existingPathIdentity(activePath),
@@ -1191,8 +1392,9 @@ async function getActiveProjectOperation() {
     if (managedWelcomeRegistration !== registrationKey) {
       project = await ensureBridgeProjectRegistered(project);
     }
+    return taggedProject(project);
   }
-  return project;
+  return prepareOrOpenFromPath(project.sourcePath);
 }
 
 async function openHtml() {
@@ -1206,10 +1408,306 @@ async function openHtml() {
       ],
     });
     if (result.canceled || result.filePaths.length !== 1) return null;
+    return prepareOrOpenFromPath(result.filePaths[0]);
+  });
+}
 
-    const project = await readHtmlProject(result.filePaths[0]);
-    await activateProject(project.sourcePath);
-    return project;
+async function importExternalViaBridge(sourcePath, expectedSourceSha256) {
+  const workspace = await fetchBridgePost("/project/ensure", {
+    sourcePath,
+    expectedSourceSha256,
+  });
+  const registeredSourcePath = typeof workspace?.sourcePath === "string"
+    ? workspace.sourcePath
+    : "";
+  if (
+    !workspace
+    || workspace.ok !== true
+    || workspace.registered !== true
+    || typeof workspace.projectId !== "string"
+    || !/^project_[A-Za-z0-9_-]+$/.test(workspace.projectId)
+    || typeof workspace.documentId !== "string"
+    || !/^doc_[A-Za-z0-9_-]+$/.test(workspace.documentId)
+    || !registeredSourcePath
+  ) {
+    throw new ProjectFileError(
+      "EXTERNAL_IMPORT_FAILED",
+      "这次导入没有通过完整性校验，当前项目没有改变。",
+    );
+  }
+  const importedProject = await readHtmlProject(registeredSourcePath);
+  if (
+    workspace.imported === true
+    && importedProject.sha256 !== expectedSourceSha256
+  ) {
+    throw new ProjectFileError(
+      "EXTERNAL_IMPORT_FAILED",
+      "导入后的项目文件与刚才选择的文件不一致，当前项目没有改变。",
+    );
+  }
+  const [originalIdentity, importedIdentity] = await Promise.all([
+    existingPathIdentity(sourcePath),
+    existingPathIdentity(importedProject.sourcePath),
+  ]);
+  await rememberAndBindImportedAssetSource({
+    originalPath: originalIdentity,
+    projectSourcePath: importedIdentity,
+  });
+  await activateProject(importedProject.sourcePath);
+  return {
+    project: importedProject,
+    imported: workspace.imported === true,
+  };
+}
+
+function replayCommittedProject(intent) {
+  const project = intent?.commitReceipt?.project;
+  return taggedProject(project) || project;
+}
+
+async function commitPreparedHtmlOpen(payload) {
+  assertExactPayload(payload, ["requestId", "action", "deleteOriginal"]);
+  if (typeof payload.requestId !== "string" || !payload.requestId) {
+    throw new ProjectFileError(
+      "INVALID_PREPARED_OPEN_REQUEST",
+      "这次打开请求无效。",
+    );
+  }
+  return projectOpenQueue.run(() => commitPreparedHtmlOpenOperation(payload));
+}
+
+async function commitPreparedHtmlOpenOperation(payload) {
+  const requestId = payload.requestId;
+  const action = payload.action;
+  const deleteOriginal = payload.deleteOriginal === true;
+  const existing = preparedHtmlOpenStore.peek(requestId);
+  if (existing?.state === "committed" || existing?.state === "finalized") {
+    return replayCommittedProject(existing);
+  }
+  const intent = preparedHtmlOpenStore.beginCommit(requestId, {
+    action,
+    deleteOriginal,
+  });
+  try {
+    const previousActivePath = await currentActivePath();
+    const current = await readHtmlProject(intent.sourcePath);
+    if (current.sha256 !== intent.classifiedAtSha256) {
+      throw new ProjectFileError(
+        "OPEN_INTENT_SOURCE_CHANGED",
+        "文件在确认期间被修改，没有导入。",
+      );
+    }
+    const classified = await classifyViaBridge(intent.sourcePath);
+    if (classified.kind !== intent.classification) {
+      preparedHtmlOpenStore.failCommit(requestId);
+      preparedHtmlOpenStore.cancel(requestId);
+      if (
+        intent.classification === "new-external"
+        && classified.kind === "known-external"
+      ) {
+        const descriptor = preparedHtmlOpenStore.prepare({
+          requestId,
+          sourcePath: intent.sourcePath,
+          classifiedAtSha256: classified.sourceSha256,
+          classification: "known-external",
+          boundProjectId: classified.projectId || null,
+          openTarget: classified.openTarget || null,
+          publicFacts: publicFactsForClassified(classified, intent.sourcePath),
+        });
+        throw new ProjectFileError(
+          "OPEN_INTENT_RECLASSIFIED",
+          "这份原文件已经关联到现有项目，请确认后继续当前项目。",
+          { confirmation: taggedConfirmation(descriptor) },
+        );
+      }
+      throw new ProjectFileError(
+        "OPEN_INTENT_SOURCE_CHANGED",
+        "这个文件的打开方式已变化，请重新打开。",
+      );
+    }
+    let project = null;
+    let imported = false;
+    if (action === "continue-current") {
+      const targetPath = classified.openTarget?.exactSourcePath;
+      if (!targetPath) {
+        throw new ProjectFileError(
+          "EXTERNAL_OPEN_TARGET_MISSING",
+          "无法打开已关联项目的当前工作文件。",
+        );
+      }
+      project = await readHtmlProject(targetPath);
+      await rememberAndBindImportedAssetSource({
+        originalPath: intent.sourcePath,
+        projectSourcePath: project.sourcePath,
+      });
+      await activateProject(project.sourcePath);
+    } else if (action === "import-new") {
+      const importedResult = await importExternalViaBridge(
+        intent.sourcePath,
+        intent.classifiedAtSha256,
+      );
+      project = importedResult.project;
+      imported = importedResult.imported;
+    } else if (action === "open-managed") {
+      project = await readHtmlProject(intent.sourcePath);
+      await activateProject(project.sourcePath);
+    } else {
+      assertCommitAction({
+        classification: intent.classification,
+        action,
+        deleteOriginal,
+      });
+    }
+    preparedHtmlOpenStore.completeCommit(requestId, {
+      project,
+      imported,
+      previousActivePath,
+      committedSourcePath: project.sourcePath,
+      classifiedAtSha256: intent.classifiedAtSha256,
+      originalSourcePath: intent.sourcePath,
+    });
+    return taggedProject(project);
+  } catch (error) {
+    preparedHtmlOpenStore.failCommit(requestId);
+    throw error;
+  }
+}
+
+async function cancelPreparedHtmlOpen(payload) {
+  assertExactPayload(payload, ["requestId"]);
+  if (typeof payload.requestId !== "string" || !payload.requestId) {
+    throw new ProjectFileError(
+      "INVALID_PREPARED_OPEN_REQUEST",
+      "这次打开请求无效。",
+    );
+  }
+  return { canceled: preparedHtmlOpenStore.cancel(payload.requestId) };
+}
+
+async function assertTrashableOriginal(intent) {
+  const originalPath = intent.sourcePath;
+  const stats = await lstat(originalPath);
+  if (!stats.isFile() || stats.isSymbolicLink()) {
+    throw new ProjectFileError(
+      "EXTERNAL_OPEN_DELETE_NOT_ALLOWED",
+      "只能把刚才选择的普通 HTML 移入废纸篓。",
+    );
+  }
+  const canonical = await realpath(originalPath);
+  if (isInsideDirectory(canonical, projectsRootPath())) {
+    throw new ProjectFileError(
+      "EXTERNAL_OPEN_DELETE_NOT_ALLOWED",
+      "不能删除项目目录里的文件。",
+    );
+  }
+  const current = await readHtmlProject(canonical);
+  if (current.sha256 !== intent.classifiedAtSha256) {
+    throw new ProjectFileError(
+      "OPEN_INTENT_SOURCE_CHANGED",
+      "原文件在导入后已变化，没有移入废纸篓。",
+    );
+  }
+  const committed = intent.commitReceipt?.committedSourcePath;
+  if (committed) {
+    const [activeIdentity, committedIdentity, originalIdentity] = await Promise.all([
+      currentActivePath().then((active) => (
+        active ? existingPathIdentity(active) : null
+      )),
+      existingPathIdentity(committed),
+      existingPathIdentity(canonical),
+    ]);
+    if (activeIdentity !== committedIdentity) {
+      throw new ProjectFileError(
+        "EXTERNAL_OPEN_DELETE_NOT_ALLOWED",
+        "当前打开的已不是这次导入的项目，没有删除原文件。",
+      );
+    }
+    if (originalIdentity === committedIdentity) {
+      throw new ProjectFileError(
+        "EXTERNAL_OPEN_DELETE_NOT_ALLOWED",
+        "不能删除当前项目文件。",
+      );
+    }
+  }
+  return canonical;
+}
+
+async function finalizePreparedHtmlOpen(payload) {
+  assertExactPayload(payload, ["requestId"]);
+  if (typeof payload.requestId !== "string" || !payload.requestId) {
+    throw new ProjectFileError(
+      "INVALID_PREPARED_OPEN_REQUEST",
+      "这次打开请求无效。",
+    );
+  }
+  return projectOpenQueue.run(async () => {
+    const requestId = payload.requestId;
+    const intent = preparedHtmlOpenStore.peek(requestId);
+    if (intent?.state === "finalized") {
+      return { disposition: intent.originalDisposition };
+    }
+    if (!preparedHtmlOpenStore.shouldTrash(requestId)) {
+      return {
+        disposition: preparedHtmlOpenStore.recordDisposition(requestId, "kept"),
+      };
+    }
+    try {
+      const canonical = await assertTrashableOriginal(intent);
+      await shell.trashItem(canonical);
+      return {
+        disposition: preparedHtmlOpenStore.recordDisposition(requestId, "trashed"),
+      };
+    } catch {
+      return {
+        disposition: preparedHtmlOpenStore.recordDisposition(
+          requestId,
+          "trash-failed",
+        ),
+      };
+    }
+  });
+}
+
+async function rollbackPreparedHtmlOpen(payload) {
+  assertExactPayload(payload, ["requestId"]);
+  if (typeof payload.requestId !== "string" || !payload.requestId) {
+    throw new ProjectFileError(
+      "INVALID_PREPARED_OPEN_REQUEST",
+      "这次打开请求无效。",
+    );
+  }
+  return projectOpenQueue.run(async () => {
+    const intent = preparedHtmlOpenStore.peek(payload.requestId);
+    const receipt = intent?.commitReceipt;
+    if (!receipt?.committedSourcePath) {
+      throw new ProjectFileError(
+        "EXTERNAL_OPEN_REQUEST_EXPIRED",
+        "这次打开请求已经失效，请重新选择文件。",
+      );
+    }
+    const state = await loadProjectState();
+    const currentIdentity = state.activePath
+      ? await existingPathIdentity(state.activePath)
+      : null;
+    const committedIdentity = await existingPathIdentity(receipt.committedSourcePath);
+    if (currentIdentity !== committedIdentity) {
+      return { rolledBack: false, project: null };
+    }
+    const previous = receipt.previousActivePath;
+    if (previous) {
+      try {
+        const project = await readHtmlProject(previous);
+        await activateProject(project.sourcePath);
+        return { rolledBack: true, project: taggedProject(project) };
+      } catch {
+        state.activePath = null;
+        await persistProjectState();
+        return { rolledBack: true, project: null };
+      }
+    }
+    state.activePath = null;
+    await persistProjectState();
+    return { rolledBack: true, project: null };
   });
 }
 
@@ -1260,7 +1758,14 @@ const createPreviewSession = createPreviewSessionOperation({
   authorizeSourcePath: async (sourcePathInput) => {
     const sourcePath = assertReadPayload(sourcePathInput);
     await assertKnownProjectPath(sourcePath);
-    return inspectHtmlFile(sourcePath);
+    const inspected = await inspectHtmlFile(sourcePath);
+    const liveImportedAssetSourcePath = activeImportedAssetSourcePath
+      ? await resolveLiveImportedAssetSource(activeImportedAssetSourcePath)
+      : null;
+    return previewAssetSourcePath({
+      authorizedProjectSourcePath: inspected,
+      liveImportedAssetSourcePath,
+    });
   },
 });
 
@@ -1533,6 +2038,18 @@ async function commitActivatedProjectPath({
     state.recent = retained.slice(0, MAX_RECENT_PROJECTS);
   }
   state.lastManagedActivation = managedActivation;
+  if (
+    importedAssetSourcePath
+    && isExternalOriginalPath(importedAssetSourcePath, nextSourcePath)
+  ) {
+    const projectRootPath = await realpath(path.dirname(nextSourcePath)).catch(
+      () => path.resolve(path.dirname(nextSourcePath)),
+    );
+    state.importedAssetRoots = rememberImportedAssetRoot(state.importedAssetRoots, {
+      projectRootPath,
+      originalSourcePath: importedAssetSourcePath,
+    });
+  }
   if (managedLocator !== undefined) {
     state.activeManagedLocator = normalizeActiveManagedLocator(managedLocator);
   } else if (managedActivation) {
@@ -1557,10 +2074,7 @@ async function commitActivatedProjectPath({
   }
   await persistProjectState();
   if (activatesCurrentProject) {
-    activeImportedAssetSourcePath = (
-      importedAssetSourcePath
-      && importedAssetSourcePath !== nextSourcePath
-    ) ? importedAssetSourcePath : null;
+    await restoreActiveImportedAssetSource(nextSourcePath);
   }
   return {
     ...project,
@@ -1631,6 +2145,15 @@ async function reconcileActiveManagedSource(payload) {
   return projectOpenQueue.run(() => reconcileActiveManagedSourceOperation(payload));
 }
 
+const E2E_RECONCILE_HASH_RACE_OPERATION_ID = "reconcile_e2e_hash_race_0001";
+const E2E_RECONCILE_HASH_RACE_REPLACEMENT_HTML = [
+  "<!doctype html>",
+  "<html lang=\"zh-CN\">",
+  "<head><meta charset=\"utf-8\"><title>竞态替换</title></head>",
+  "<body><h1 data-e2e-reconcile-hash-race=\"1\">Bridge 核对完成后被外部替换的字节。</h1></body>",
+  "</html>",
+].join("\n");
+
 async function reconcileActiveManagedSourceOperation(payload) {
   const requested = assertActiveManagedReconcilePayload(payload);
   const reconciled = await fetchBridgeCommand("/managed-working-copy/reconcile", {
@@ -1653,6 +2176,7 @@ async function reconcileActiveManagedSourceOperation(payload) {
     || openTarget.workingCopyId !== requested.workingCopyId
     || openTarget.versionId !== requested.versionId
     || reconciled.operationId !== requested.operationId
+    || openTarget.sourceSha256 !== reconciled.sourceSha256
     || typeof openTarget.exactSourcePath !== "string"
     || typeof openTarget.projectRootPath !== "string"
     || typeof reconciled.sourceSha256 !== "string"
@@ -1666,7 +2190,31 @@ async function reconcileActiveManagedSourceOperation(payload) {
     existingPathIdentity(requested.previousSourcePath),
     existingPathIdentity(openTarget.exactSourcePath),
   ]);
+  if (
+    process.env.PAGEROOT_E2E === "1"
+    && process.env.PAGEROOT_E2E_RECONCILE_REPLACE_BEFORE_READ === "1"
+    && requested.operationId === E2E_RECONCILE_HASH_RACE_OPERATION_ID
+  ) {
+    // E2E-only injection: model an external editor replacing the Working Copy
+    // after the Bridge reconcile finished but before Desktop reads the bytes.
+    // The final hash comparison below must fail closed on this exact window.
+    await writeFile(
+      nextSourcePath,
+      E2E_RECONCILE_HASH_RACE_REPLACEMENT_HTML,
+      "utf8",
+    );
+  }
   const project = await readHtmlProject(nextSourcePath);
+  if (project.sha256 !== reconciled.sourceSha256) {
+    throw new ProjectFileError(
+      "MANAGED_WORKING_COPY_HASH_MISMATCH",
+      "托管工作文件与已确认的项目内容不一致，当前文件没有切换。",
+      {
+        expectedSha256: reconciled.sourceSha256,
+        actualSha256: project.sha256,
+      },
+    );
+  }
   const state = await loadProjectState();
   await commitActivatedProjectPath({
     state,
@@ -2554,6 +3102,7 @@ async function openRegisteredProject(projectIdInput) {
         .map((entry) => entry.entry),
     ].slice(0, MAX_RECENT_PROJECTS);
     await persistProjectState();
+    await restoreActiveImportedAssetSource(sourcePath);
     sourceFileWatcher.watch(sourcePath);
     return project;
   });
@@ -2575,9 +3124,7 @@ async function openRecent(filePath) {
     }
 
     try {
-      const project = await readHtmlProject(normalizedPath);
-      await activateProject(project.sourcePath);
-      return project;
+      return await prepareOrOpenFromPath(normalizedPath);
     } catch (error) {
       if (error?.code === "ENOENT") await forgetProject(normalizedPath);
       throw error;
@@ -2746,6 +3293,22 @@ function registerProjectIpc() {
     trustedProject(acceptExternalFileOpen, "external_open"),
   );
   ipcMain.handle(
+    PROJECT_CHANNELS.commitPreparedHtmlOpen,
+    trustedProject(commitPreparedHtmlOpen, "prepared_open_commit"),
+  );
+  ipcMain.handle(
+    PROJECT_CHANNELS.cancelPreparedHtmlOpen,
+    trustedProject(cancelPreparedHtmlOpen, "prepared_open_cancel"),
+  );
+  ipcMain.handle(
+    PROJECT_CHANNELS.finalizePreparedHtmlOpen,
+    trustedProject(finalizePreparedHtmlOpen, "prepared_open_finalize"),
+  );
+  ipcMain.handle(
+    PROJECT_CHANNELS.rollbackPreparedHtmlOpen,
+    trustedProject(rollbackPreparedHtmlOpen, "prepared_open_rollback"),
+  );
+  ipcMain.handle(
     INTEGRATION_CHANNELS.qoderHandoff,
     trustedProject((payload) => {
       if (
@@ -2843,7 +3406,7 @@ function registerProjectIpc() {
   );
   ipcMain.handle(
     APP_CHANNELS.externalOpenReady,
-    trusted(() => externalFileOpenMailbox.peek()),
+    trusted(() => publicMailboxRequest(externalFileOpenMailbox.peek())),
   );
   ipcMain.handle(
     APP_CHANNELS.relaunch,
@@ -3479,7 +4042,7 @@ async function createWindow() {
     if (pendingExternalOpen) {
       mainWindow?.webContents.send(
         APP_CHANNELS.externalOpenRequested,
-        pendingExternalOpen,
+        publicMailboxRequest(pendingExternalOpen),
       );
     }
   });

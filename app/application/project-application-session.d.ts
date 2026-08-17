@@ -27,6 +27,10 @@ export class ProjectApplicationSession<T> {
     switchBlocked: boolean;
     execute: ProjectApplicationExecution<T>;
   }): ProjectApplicationDeferredSwitchRetry;
+  waitFor(applicationId: string): Promise<Readonly<{
+    applicationId: string;
+    result: string;
+  }>>;
   dispose(): void;
   readonly snapshot: ProjectApplicationSnapshot;
 }

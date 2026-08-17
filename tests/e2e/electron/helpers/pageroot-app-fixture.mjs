@@ -416,15 +416,50 @@ export async function waitForProjectReady(page, {
   timeout = 60_000,
   includeFailureDetail = true,
 } = {}) {
-  await expect.poll(async () => {
-    const state = await page.locator("main.workbench").getAttribute("data-project-state");
-    if (state === "ready") return state;
+  const workbench = page.locator("main.workbench");
+  const importButton = page.getByRole("button", { name: "导入并打开" });
+  const continueButton = page.getByRole("button", { name: "继续当前项目" });
+  const confirmationKind = async () => {
+    if (await importButton.isVisible().catch(() => false)) return "import";
+    if (await continueButton.isVisible().catch(() => false)) return "continue";
+    return "";
+  };
+  const projectState = async () => {
+    const state = await workbench.getAttribute("data-project-state");
+    if (state === "ready") return "ready";
     const stage = await page.evaluate(() => window.__PAGEROOT_HYDRATION_STAGE__);
     const visibleFailure = includeFailureDetail && state === "failed"
       ? await page.locator('[aria-label="项目读取失败"]').textContent().catch(() => "")
       : "";
-    return `${state}:${stage || "unmarked"}:${visibleFailure || "no-detail"}`;
-  }, { timeout }).toBe("ready");
+    return `${state || "missing"}:${stage || "unmarked"}:${visibleFailure || "no-detail"}`;
+  };
+
+  let pendingConfirmation = "";
+  await expect.poll(async () => {
+    pendingConfirmation = await confirmationKind();
+    if (pendingConfirmation) return "confirm";
+    return projectState();
+  }, { timeout }).toMatch(/^(?:ready|confirm)$/u);
+
+  // Last-active external HTML can overlay confirmation after welcome is already ready.
+  if (!pendingConfirmation) {
+    try {
+      await importButton.or(continueButton).waitFor({ state: "visible", timeout: 1_500 });
+      pendingConfirmation = await confirmationKind();
+    } catch {
+      pendingConfirmation = "";
+    }
+  }
+
+  if (pendingConfirmation === "import" || pendingConfirmation === "continue") {
+    const button = pendingConfirmation === "import" ? importButton : continueButton;
+    await button.focus();
+    await button.click();
+    await expect.poll(async () => {
+      if (await confirmationKind()) return "confirming";
+      return projectState();
+    }, { timeout }).toBe("ready");
+  }
 }
 
 export async function loadedDiskFrame(

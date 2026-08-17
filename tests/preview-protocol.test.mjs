@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
   mkdtemp,
   mkdir,
+  realpath,
   rm,
   symlink,
   writeFile,
@@ -17,6 +18,7 @@ import {
   createPreviewProtocolController,
   createPreviewSessionOperation,
   registerPreviewProtocolScheme,
+  resolvePreviewSourceRoot,
 } from "../desktop/preview-protocol.mjs";
 
 test("declared asset discovery caps missing-reference probes before they can delay a preview session", async (t) => {
@@ -433,4 +435,159 @@ test("a preview navigation attempt activates one scriptless bootstrap fallback",
     `pageroot-preview://${session.sessionId}${PREVIEW_BOOTSTRAP_PATH}`,
   ));
   assert.match(await bootstrapResponse.text(), /ownedBootstrapRan/u);
+});
+
+test("preview keeps sibling assets beside the original after HTML is copied into a project", async (t) => {
+  const temporaryRoot = await mkdtemp(
+    path.join(tmpdir(), "pageroot-preview-imported-siblings-"),
+  );
+  t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
+  const originalDirectory = path.join(temporaryRoot, "原稿");
+  const projectDirectory = path.join(temporaryRoot, "项目");
+  await mkdir(originalDirectory, { recursive: true });
+  await mkdir(projectDirectory, { recursive: true });
+  const originalPath = path.join(originalDirectory, "图表报告.html");
+  const projectPath = path.join(projectDirectory, "图表报告-V1.html");
+  const html = `<!doctype html>
+<html>
+<head><link rel="stylesheet" href="style.css"></head>
+<body>
+  <img src="pixel.png" alt="">
+  <script src="chart.js"></script>
+</body>
+</html>`;
+  await writeFile(originalPath, html, "utf8");
+  await writeFile(projectPath, html, "utf8");
+  await writeFile(path.join(originalDirectory, "style.css"), "body{background:#111}", "utf8");
+  await writeFile(path.join(originalDirectory, "pixel.png"), "png", "utf8");
+  await writeFile(path.join(originalDirectory, "chart.js"), "window.chartReady=true;", "utf8");
+
+  const originalRoot = await resolvePreviewSourceRoot(originalPath);
+  assert.equal(originalRoot, await realpath(originalDirectory));
+  const fromOriginal = await collectDeclaredPreviewAssets({
+    html,
+    sourceRoot: originalRoot,
+  });
+  assert.equal(fromOriginal.has("style.css"), true);
+  assert.equal(fromOriginal.has("pixel.png"), true);
+  assert.equal(fromOriginal.has("chart.js"), true);
+
+  const fromProject = await collectDeclaredPreviewAssets({
+    html,
+    sourceRoot: await resolvePreviewSourceRoot(projectPath),
+  });
+  assert.equal(fromProject.has("pixel.png"), false);
+  assert.equal(fromProject.has("style.css"), false);
+  assert.equal(fromProject.has("chart.js"), false);
+
+  await rm(originalPath);
+  const afterTrash = await resolvePreviewSourceRoot(originalDirectory);
+  assert.equal(afterTrash, await realpath(originalDirectory));
+  const fromDirectory = await collectDeclaredPreviewAssets({
+    html,
+    sourceRoot: afterTrash,
+  });
+  assert.equal(fromDirectory.has("pixel.png"), true);
+});
+
+test("preview session operation forwards a live session id for in-place refresh", async () => {
+  const calls = [];
+  const operation = createPreviewSessionOperation({
+    authorizeSourcePath: async (sourcePath) => sourcePath,
+    createSession: async (payload) => {
+      calls.push(payload);
+      return { sessionId: payload.sessionId };
+    },
+  });
+  await operation({
+    html: "<p>preview</p>",
+    bootstrapJavaScript: "void 0;",
+    sourcePath: "/canonical/report.html",
+    sessionId: "0123456789abcdef0123456789abcdef",
+    ignored: "not forwarded",
+  });
+  assert.deepEqual(calls, [{
+    html: "<p>preview</p>",
+    bootstrapJavaScript: "void 0;",
+    sourcePath: "/canonical/report.html",
+    sessionId: "0123456789abcdef0123456789abcdef",
+  }]);
+});
+
+test("a full preview session map evicts the least-recently-accessed idle session", async () => {
+  let now = 1_000;
+  let nextId = 0;
+  const controller = createPreviewProtocolController({
+    protocolApi: { handle() {} },
+    netFetch: async () => new Response("unreachable"),
+    maxSessions: 2,
+    now: () => now,
+    randomSessionId: () => {
+      nextId += 1;
+      return nextId.toString(16).padStart(32, "0");
+    },
+  });
+  const first = await controller.createSession({
+    html: "<p>first</p>",
+    bootstrapJavaScript: "void 0;",
+  });
+  now = 2_000;
+  const second = await controller.createSession({
+    html: "<p>second</p>",
+    bootstrapJavaScript: "void 0;",
+  });
+  now = 3_000;
+  assert.equal((await controller.handleRequest(new Request(first.url))).status, 200);
+  now = 4_000;
+  const third = await controller.createSession({
+    html: "<p>third</p>",
+    bootstrapJavaScript: "void 0;",
+  });
+  assert.equal(controller.sessionCount(), 2);
+  assert.equal((await controller.handleRequest(new Request(first.url))).status, 200);
+  assert.equal((await controller.handleRequest(new Request(second.url))).status, 404);
+  assert.equal((await controller.handleRequest(new Request(third.url))).status, 200);
+  assert.notEqual(third.sessionId, first.sessionId);
+  assert.notEqual(third.sessionId, second.sessionId);
+});
+
+test("refreshing a preview session keeps its id and replaces declared sibling assets", async (t) => {
+  const temporaryRoot = await mkdtemp(
+    path.join(tmpdir(), "pageroot-preview-session-refresh-"),
+  );
+  t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
+  await writeFile(path.join(temporaryRoot, "first.png"), "first");
+  await writeFile(path.join(temporaryRoot, "second.png"), "second");
+  const sourcePath = path.join(temporaryRoot, "report.html");
+  await writeFile(sourcePath, '<img src="first.png">', "utf8");
+  const fetched = [];
+  const controller = createPreviewProtocolController({
+    protocolApi: { handle() {} },
+    netFetch: async (url) => {
+      fetched.push(url);
+      return new Response("asset", { headers: { "content-type": "image/png" } });
+    },
+    randomSessionId: () => "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  });
+  const first = await controller.createSession({
+    html: '<img src="first.png">',
+    bootstrapJavaScript: "void 0;",
+    sourcePath,
+  });
+  const refreshed = await controller.createSession({
+    html: '<img src="second.png">',
+    bootstrapJavaScript: "void 0;",
+    sourcePath,
+    sessionId: first.sessionId,
+  });
+  assert.equal(refreshed.sessionId, first.sessionId);
+  assert.equal(refreshed.url, first.url);
+  assert.equal(controller.sessionCount(), 1);
+  assert.equal((await controller.handleRequest(new Request(
+    `pageroot-preview://${first.sessionId}/second.png`,
+  ))).status, 200);
+  assert.equal((await controller.handleRequest(new Request(
+    `pageroot-preview://${first.sessionId}/first.png`,
+  ))).status, 404);
+  assert.equal(fetched.length, 1);
 });

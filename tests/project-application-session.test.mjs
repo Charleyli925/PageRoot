@@ -107,3 +107,24 @@ test("project application session resumes its FIFO predecessor only after a swit
   assert.deepEqual(order, ["application_blocker", "application_blocker"]);
   assert.equal(session.snapshot.status, "idle");
 });
+
+test("project application session settles waiters and stale-closes them on dispose", async () => {
+  const session = new ProjectApplicationSession();
+  const waiting = session.waitFor("application_pending");
+  assert.equal(session.enqueue(application("pending"), async () => "complete"), true);
+  assert.deepEqual(await waiting, {
+    applicationId: "application_pending",
+    result: "succeeded",
+  });
+  assert.deepEqual(await session.waitFor("application_pending"), {
+    applicationId: "application_pending",
+    result: "succeeded",
+  });
+
+  const hanging = session.waitFor("application_hanging");
+  session.dispose();
+  assert.deepEqual(await hanging, {
+    applicationId: "application_hanging",
+    result: "stale",
+  });
+});

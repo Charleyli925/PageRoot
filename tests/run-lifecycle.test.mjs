@@ -93,7 +93,7 @@ test("run progress keeps completion, validation, and result facts separate", () 
   }, "copied");
   assert.deepEqual(
     preCompletionError.map(({ state }) => state),
-    ["done", "error", "pending", "neutral"],
+    ["done", "error", "pending", "error"],
   );
 
   const validationError = deriveRunProgressSteps({
@@ -104,7 +104,7 @@ test("run progress keeps completion, validation, and result facts separate", () 
   }, "copied");
   assert.deepEqual(
     validationError.map(({ state }) => state),
-    ["done", "done", "error", "neutral"],
+    ["done", "done", "error", "error"],
   );
   assert.equal(validationError[2].detail, "结果 Hash 不一致");
 

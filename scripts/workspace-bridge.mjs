@@ -233,7 +233,7 @@ function requireSha256(value, label = "sha256") {
   return value;
 }
 
-async function readSourceFile(sourcePath) {
+async function inspectSourceFile(sourcePath, { requireComplete = true } = {}) {
   let information;
   try {
     information = await lstat(sourcePath);
@@ -268,7 +268,7 @@ async function readSourceFile(sourcePath) {
       "The source HTML is not valid UTF-8 and was left unchanged.",
     );
   }
-  requireCompleteHtml(html, "source HTML");
+  if (requireComplete) requireCompleteHtml(html, "source HTML");
   return {
     buffer,
     html,
@@ -276,6 +276,10 @@ async function readSourceFile(sourcePath) {
     information,
     lastModifiedAt: information.mtime.toISOString(),
   };
+}
+
+async function readSourceFile(sourcePath) {
+  return inspectSourceFile(sourcePath, { requireComplete: true });
 }
 
 function projectFileHttpError(cause) {
@@ -327,6 +331,10 @@ function projectFileHttpError(cause) {
       "IMPORT_RECOVERY_INVALID",
       "IMPORT_RECOVERY_AMBIGUOUS",
       "IMPORT_INTENT_NOT_FOUND",
+      "EXTERNAL_SOURCE_BINDING_CONFLICT",
+      "EXTERNAL_SOURCE_BINDING_INVALID",
+      "SOURCE_IMPORT_PENDING",
+      "REGISTRY_BUSY",
       "REGISTERED_PROJECT_RACE",
       "WORKING_COPY_VERSION_MISMATCH",
       "HISTORY_ACTIVATION_PREDECESSOR_CONFLICT",
@@ -738,6 +746,52 @@ async function ensureProjectFile(body) {
     ...projectFileBaseWorkspaceState(workspace),
     imported: imported.imported,
   };
+}
+
+function publicOpenClassification(classified) {
+  if (classified.kind === "managed-project") {
+    return {
+      kind: "managed-project",
+      sourceSha256: classified.sourceSha256,
+      openTarget: classified.target,
+    };
+  }
+  if (classified.kind === "known-external") {
+    const facts = classified.projectFacts;
+    return {
+      kind: "known-external",
+      sourceSha256: classified.sourceSha256,
+      sourceRelation: facts.sourceRelation,
+      projectId: facts.projectId,
+      documentId: facts.documentId,
+      projectName: facts.projectName,
+      currentBasedOnVersionId: facts.currentBasedOnVersionId,
+      currentBasedOnOrdinal: facts.currentBasedOnOrdinal,
+      latestOfficialVersionId: facts.latestOfficialVersionId,
+      latestOfficialOrdinal: facts.latestOfficialOrdinal,
+      currentDiffersFromBase: facts.currentDiffersFromBase,
+      initialVersionId: facts.initialVersionId,
+      initialVersionOrdinal: facts.initialVersionOrdinal,
+      openTarget: facts.openTarget,
+    };
+  }
+  return {
+    kind: "new-external",
+    sourceSha256: classified.sourceSha256,
+    sourceFileName: classified.sourceFileName,
+    visibleV1FileName: classified.visibleV1FileName,
+  };
+}
+
+async function classifyOpenPath(body) {
+  const sourcePath = normalizeSourcePath(body.sourcePath);
+  let classified;
+  try {
+    classified = await projectFileRepository.classifyOpenPath({ sourcePath });
+  } catch (cause) {
+    throw projectFileHttpError(cause);
+  }
+  return publicOpenClassification(classified);
 }
 
 async function saveProjectFileAutosave(body) {
@@ -1589,6 +1643,17 @@ async function autosaveConflictCandidate(sourcePath) {
 }
 
 async function resolveConflict(body) {
+  const action = String(body.action || body.resolution || "");
+  if (action === "force-unlock") {
+    try {
+      const unlocked = await projectFileRepository.forceUnlockWorkingCopy({
+        sourcePath: requiredSourcePath(body.sourcePath),
+      });
+      return { ok: true, ...unlocked };
+    } catch (cause) {
+      throw projectFileHttpError(cause);
+    }
+  }
   const workspace = await projectFileWorkspaceForSource(body.sourcePath);
   if (!workspace) throw projectNotFoundError();
   throw new HttpError(
@@ -1596,6 +1661,27 @@ async function resolveConflict(body) {
     "CONFLICT_NOT_FOUND",
     "No conflict exists for this v4 project.",
   );
+}
+
+async function sourcePreview(sourcePath) {
+  const source = await inspectSourceFile(sourcePath, { requireComplete: true });
+  return {
+    ok: true,
+    content: source.html,
+    sha256: source.sha256,
+    lastModifiedAt: source.lastModifiedAt,
+    size: source.information.size,
+  };
+}
+
+async function sourceStat(sourcePath) {
+  const source = await inspectSourceFile(sourcePath, { requireComplete: false });
+  return {
+    ok: true,
+    sha256: source.sha256,
+    lastModifiedAt: source.lastModifiedAt,
+    size: source.information.size,
+  };
 }
 
 async function inspectProjectFile(sourcePath, relativePath) {
@@ -1861,6 +1947,26 @@ async function route(request, response) {
     );
     return;
   }
+  if (request.method === "GET" && url.pathname === "/source-preview") {
+    sendJson(
+      response,
+      200,
+      await sourcePreview(
+        requiredSourcePath(url.searchParams.get("sourcePath")),
+      ),
+    );
+    return;
+  }
+  if (request.method === "GET" && url.pathname === "/source-stat") {
+    sendJson(
+      response,
+      200,
+      await sourceStat(
+        requiredSourcePath(url.searchParams.get("sourcePath")),
+      ),
+    );
+    return;
+  }
   if (request.method === "GET" && url.pathname === "/registered-projects") {
     sendJson(response, 200, await registeredProjectCatalog());
     return;
@@ -1881,6 +1987,11 @@ async function route(request, response) {
   if (request.method === "POST" && url.pathname === "/project/ensure") {
     const body = await readBody(request);
     sendJson(response, 200, await ensureProject(body));
+    return;
+  }
+  if (request.method === "POST" && url.pathname === "/project/open-classification") {
+    const body = await readBody(request);
+    sendJson(response, 200, await classifyOpenPath(body));
     return;
   }
   if (request.method === "GET" && url.pathname === "/conflict-candidate") {

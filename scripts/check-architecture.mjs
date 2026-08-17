@@ -333,6 +333,7 @@ export async function architectureViolations() {
     }
     if (
       file === "app/workbench/presentation.tsx"
+      || file === "app/workbench/ExternalHtmlOpenDialog.tsx"
       || /^app\/workbench\/.*-view\.tsx$/.test(file)
     ) {
       for (const specifier of imports) {
@@ -630,6 +631,8 @@ export async function architectureViolations() {
     || !workbench.includes(".flushDocument({ throughRevision })")
     || !workbench.includes(".performDocumentHistoryAction({ direction, context })")
     || !workbench.includes(".reloadDocumentAuthority({")
+    || !workbench.includes(".forceUnlockDocumentConflict({")
+    || !workbench.includes(".observeExternalSourceChange({")
     || !projectWorkflow.includes("this.#documentWorkflow.reconcileBoundary({")
     || !projectWorkflow.includes("this.#documentWorkflow.observeExternalSourceChange")
     || /\b(?:autosaveTimerRef|auditPendingRef|auditInFlightKeysRef|historyActionPromiseRef|recoveryIdentityRef)\b/.test(workbench)

@@ -4,16 +4,21 @@
 | --- | --- | --- | --- |
 | Open source locator before first durable action, registered identity, renderer generation and late-query fence | Renderer `ProjectSession` | active-file record before registration; project registry and `project.json` afterwards | Application workflows and the Controller aggregate snapshot |
 | Latest unaccepted OS/QoderWork HTML-open request, committed-exit one-shot handoff, plus FIFO active/recent-project transitions | Main-process external-file-open mailbox and `ProjectOpenQueue` | in-memory for the current process plus one private, validated `userData` handoff record after close commits; no renderer-supplied path authority | preload lifecycle delivery, startup adoption and trusted project IPC |
+| Prepared A/B/C open intent, commit receipt and one-shot original-file trash disposition | Main-process `desktop/prepared-html-open.mjs` store | none; process memory only; delete consent is never persisted | trusted project IPC and `ProjectWorkflow` commit/finalize/rollback |
+| Open-confirmation prompt, C-class delete checkbox and busy/retry projection | Renderer `ProjectWorkflow` | none; reset per request and cancelled on close | Workbench `ExternalHtmlOpenDialog` |
 | External HTML request IDs, active/queued/deferred renderer delivery, blocker-transition/manual retry policy and unaccepted-result fence | Renderer `ExternalFileOpenSession` | none; bounded in-memory state only | `ProjectWorkflow` composition and Workbench presentation |
 | Accepted local/external project results, their FIFO renderer publication and deferred final-fence blocker-transition/manual retry policy | Renderer `ProjectApplicationSession` | none; bounded in-memory state only | `ProjectWorkflow` composition and Workbench presentation |
 | Registered mutation context resolution and atomic-replacement source observation | `ProjectFileRepository` | v4 `.pageroot-registry.json` plus the owning Project File working copy and `.pageroot` metadata | Bridge mutation routes and `/project/ensure` |
+| Canonical external-source path → unique `projectId` lookup, first-import Hash relation, and read-only A/B/C open classification | `ProjectFileRepository` | Registry `importSourceKey` / `importSourceSha256` pair plus the bound project's current active Working Copy | `/project/open-classification`, `/project/ensure` and Desktop Prepared Intent |
 | Registry project-catalog membership, availability and validated registered-project OpenTarget resolution | `ProjectFileRepository` Registry reader | Registry `projectId → registeredProjectRootPath` records plus validated per-project metadata; Desktop Recent may rank but never add/remove/authorize a member | read-only catalog route, `ProjectWorkflow` projectId open command and Workbench project list |
 | Runtime Bridge/Session/workflow composition, aggregate-observer lifecycle, registration operation identity, single-flight, stale-result fence and cross-Session publication sequence | `createRuntimeWorkspaceController()` and `WorkspaceController` | none; the factory creates the one fact-owner set and the Controller publishes only frozen aggregate projections through existing Project, Document, Comment, Draft, Version and SourceHistory owners | Workbench aggregate-snapshot subscription, Controller commands and presentation-event adapter |
-| Project hydration generation and load outcome, switch/open operation, accepted-result execution, close request identity, project-switch publication, and the unified managed-source prepare/commit handoff for Candidate promotion, historical Working Copy continuation and future Registry opens | Renderer `ProjectWorkflow`, composed by `WorkspaceController` | none; it publishes through existing Session owners and trusted ProjectOpen/Canvas ports | Workbench commands and presentation-event adapter |
+| Project hydration generation and load outcome, switch/open operation, accepted-result execution, close request identity, project-switch publication, Prepared Intent commit after confirmation, and the unified managed-source prepare/commit handoff for Candidate promotion, historical Working Copy continuation and Registry opens | Renderer `ProjectWorkflow`, composed by `WorkspaceController` | none; it publishes through existing Session owners and trusted ProjectOpen/Canvas ports | Workbench commands and presentation-event adapter |
 | Durable source filename transaction, pending operation and active/recent path rebase | Desktop source-rename transaction | active-file `pendingRename` / `lastRename`, then filesystem path | trusted desktop rename port and Bridge relink |
 | Current active managed Working Copy restart cache | Main `activeManagedLocator` in the private active-file record | none; non-authoritative, fail-closed cache of the last verified identity tuple and path. Registry plus project metadata remain the only write authority. Missing cache never guesses by name or Hash | startup `getActiveProject`, Finder locator reconcile and trusted `reconcileActiveManagedSource` IPC |
 | Renderer source-rename and Finder locator rebase, expected Hash/context fence, lost-response reconciliation and synchronous Project/Document/Run publication | `ProjectWorkflow`, composed by `WorkspaceController` | none; it publishes through the existing Session owners after desktop/Bridge validate the same identity tuple. Present-file directory hints only hash-observe; missing-path hints, startup and title-bar rename drain switch and rebind | Workbench filename intent, directory-change hints and presentation-event adapter |
 | Current source bytes, Hash, edit revision, persistence projection, pending write, single-flight source flush, Canvas authority generation and exact-byte boundary reconciliation | Renderer `DocumentSession` | source HTML, runtime autosave record and recovery log; the generation itself is disposable | Canvas, preview readiness, source-history session and drain coordinator |
+| Force-unlock of a Working Copy conflict (adopt disk Hash as `saved`, no HTML write; clear `runtime.activeRequest` if present; keep `lastPersistedRevision`) | `ProjectFileRepository.forceUnlockWorkingCopy` via `POST /conflict/resolve` `force-unlock` | Working Copy state record and runtime request pointer | `DocumentWorkflow.forceUnlockConflict` / `reloadAuthority({ acceptExternalConflict: true })` and the conflict banner |
+| Toast dismissal/repeat window (1s merge, 5s TTL) | Renderer `createNoticeDismissalMemory()` owned by Workbench | none; bounded in-memory map only | `NoticeBar` repeat badge |
 | Current-source commit, same-directory two-state CAS replacement (`prepared` → atomic rename → `committed`) and Project File settlement | `ProjectFileRepository` | source HTML working copy and `.pageroot` runtime/autosave records; the save journal is two-state CAS owned by `ProjectFileRepository`; each `#serial()` turn caches one verified project root (realpath, not a symlink) | `/autosave` route adapter and restart recovery |
 | Canvas source-history context, pending Patch operations, cursor and applied action IDs | Renderer `SourceHistorySession` for pending intent | none on the live v4 Bridge; `/source-history/action` returns current source bytes and empty history | Canvas, Document session, desktop Edit intent router |
 | Focused comment/rules/filename text input undo history and active composition | The native text control and Electron/Chromium editing engine; `ProjectRulesSession` records rules-editor composition and the workflow owns its eligibility/explicit restore orchestration | in-memory control-local history only | desktop Edit intent router, `ProjectRulesWorkflow` |
@@ -37,7 +42,8 @@
 | Renderer edit, project-picker, attachment-persistence, close-coordination and interactive-preview capabilities | Runtime capability resolver | immutable preload manifest; fail-closed browser default | Workbench presentation host adapters |
 | Volatile interactive-preview document, bootstrap, allowed source-relative asset root, completed-frame identity set and one-way pre-load scriptless navigation-fallback flag | Main-process preview protocol controller plus the owning window's navigation fence | none; bounded in-memory session/window state only; the fallback cannot be reversed inside a session | isolated preview iframe and the script-disabled edit iframe's resource base |
 | Current preview/edit display context, safe reveal transition and per-surface render acknowledgement | Workbench page-view context state | none; source-bound in-memory projection tagged by `DocumentSession` Canvas generation and rendered source Hash | `HtmlCanvasEditor`, `HtmlInteractionPreview`, save-status projection and toolbar |
-| One-shot Edit author-runtime identity, presentation-gated direct prepare grant, phase and final outcome; imported V1's session-only original asset root | `EditAuthorRuntimeSession`, composed by `WorkspaceController`; Main binds imported asset provenance during verified activation and owns the bounded replay/admission fence | none; one disposable `(sourcePath, canvasGeneration)` attempt, at most two Main-admitted overlap captures to tolerate Managed V1 activation and one revokeable resource session; imported root is memory-only | Workbench loading-surface acknowledgement, initial-frame choice and `HtmlCanvasEditor` load/settle callbacks |
+| One-shot Edit author-runtime identity, presentation-gated direct prepare grant, phase and final outcome | `EditAuthorRuntimeSession`, composed by `WorkspaceController`; Main owns the bounded replay/admission fence | none; one disposable `(sourcePath, canvasGeneration)` attempt, at most two Main-admitted overlap captures to tolerate Managed V1 activation and one revokeable resource session | Workbench loading-surface acknowledgement, initial-frame choice and `HtmlCanvasEditor` load/settle callbacks |
+| Imported project's original sibling-asset directory | Main `importedAssetRoots` in `userData/html-projects.json` plus process `activeImportedAssetSourcePath` | desktop project state keyed by project root; renderer never receives the original path | preview protocol, edit-runtime protocol and the script-disabled Edit iframe resource base |
 | Review runtime-snapshot limits, page budget, owner deadline, envelope and PNG/visible-text-hash parser | `runtime-visual-contract.js` and `runtime-visual-snapshots.js`; consumers may validate but not redeclare either | none; frozen process-local contract only | Review pair, shared owner and hostile-page gates |
 | AI review page view, change filter, context visibility, navigation target, canonical page-presentation path, scroll mode and zoom mode | `AiReviewWorkspace` review reducer | none; disposable state bound to the frozen before/after pair | review toolbar, content map and isolated review frames |
 | AI review semantic sibling pair graph, typed change facts (including multiple independent facts on one prepared element), disposable fact/semantic/geometry owner IDs, prepared immutable review documents and canonical frame/mask geometry | Cancellable `ReviewAnalysisSession` plus `review-document` analyzer, ready-review session and isolated-frame projection runtime | none; byte-bounded multi-entry cache keyed only by exact operation/source/comment identity; fact identities are analysis-only and never persisted | review outline, semantic frames and context mask |
@@ -62,6 +68,16 @@ Rules:
   Renderer catalog commands carry only `projectId`, and every open revalidates
   the Registry/Project/Document/Working Copy/OpenTarget/HTML/Hash tuple before
   any Session publication.
+- External `importSourceKey` is a lookup, not a write credential. Equal HTML
+  bytes at another path remain a new project. Multiple claims for one source
+  key fail closed and do not present a chooser.
+- Recent and Registry-catalog lists are deferrable projections. Automatic
+  refreshes run only after the authoritative transition has settled
+  (hydration, Working Copy confirmation or synchronous cross-Session
+  publication), are fenced by the current Project context, and never
+  participate in or block a rename, history continuation, Candidate adoption
+  or hydration. A catalog failure can only surface a projection event; it
+  cannot downgrade a completed transition to unknown.
 - `AI任务/` is a display projection, not a second Candidate store. The
   materializer first validates the complete frozen identity and hashes, writes
   a recovery receipt before no-replace output, and never reads a visible copy
@@ -70,12 +86,20 @@ Rules:
   directory. The Finder port accepts only the current source locator and opens
   only a Bridge-validated direct child of `AI任务/`; it never accepts a
   renderer-supplied Request path or exposes `.pageroot/requests/...`.
-- External HTML delivery has four explicit owners. The main mailbox accepts
-  only its latest unconsumed opaque request. `ProjectOpenQueue` assigns every
+- External HTML delivery has four explicit owners plus a Prepared Intent
+  store. The main mailbox accepts only its latest unconsumed opaque request.
+  `ProjectOpenQueue` assigns every classify/prepare/commit/finalize and
   active/recent-project transition its order before a picker, source read or
   Bridge check can finish; local picker, recent-project, external, startup,
   generated-version, rename and forget transitions therefore share one durable
-  state boundary. The renderer `ExternalFileOpenSession` deduplicates delivery
+  state boundary.   Class A activates immediately. Classes B and C write a
+  process-memory Prepared Intent and wait for confirmation; they do not
+  activate the original, import, or trash. Re-querying the same canonical
+  last-active path while an intent is still `prepared` or `committing` reuses
+  that `requestId`. Cold-start confirmation at epoch 0 skips the Canvas fence,
+  then hydrates after Canvas verification so the workbench can leave
+  `hydrating`. The renderer
+  `ExternalFileOpenSession` deduplicates delivery
   IDs and owns active, queued and deferred switching. Preload suppresses an
   older readiness catch-up once it has observed a live request, so delivery
   order cannot reverse at the renderer boundary; `ProjectWorkflow` never stores
@@ -101,7 +125,8 @@ Rules:
   successful open to a failed successor. Close treats both a main-process
   external acceptance and an accepted renderer application as drain
   obligations before either the hydration or load-error close fast path; it
-  cannot approve shutdown while either owner is active or deferred. A new
+  cannot approve shutdown while either owner is active or deferred. An unanswered
+  open confirmation is cancelled during close drain. A new
   external delivery during an uncommitted close cancels that exact handshake
   before normal mailbox delivery. After close commits, the mailbox does not
   accept the request in the exiting process; its owner atomically records only
@@ -179,7 +204,10 @@ Rules:
 - Interactive-preview sessions, page-view context, the direct one-shot Edit
   author-runtime session and Review runtime snapshots are disposable. They do
   not participate in save, switch, submit or close drains, and cannot become a
-  second copy of the source HTML. The Edit session has no bitmap/cache/
+  second copy of the source HTML. Desktop `pageroot-preview` sessions are owned
+  by the preview protocol controller: Edit static sibling-asset sessions
+  refresh in place for the same source path, and a full map evicts the
+  least-recently-accessed idle session rather than the oldest insert. The Edit session has no bitmap/cache/
   projection state: it selects one initial frozen runtime frame or the static
   frame and never persists runtime descendants. Edit screenshot count must be 0.
 - AI review state fields are orthogonal. Page, filter, visibility, navigation,

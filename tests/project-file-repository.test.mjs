@@ -61,6 +61,54 @@ async function importSource(fixtureValue, name = "原文件.html", content = htm
   return { sourcePath, buffer, target: imported.target };
 }
 
+async function promoteNextVersion(repository, target, label) {
+  const candidate = await repository.createCandidate({
+    target,
+    requestId: `req_${label}`,
+    candidateId: `candidate_${label}_0001`,
+    html: html(label),
+    expectedSourceSha256: target.sourceSha256,
+  });
+  const promoted = await repository.promoteCandidate({
+    target,
+    candidateId: candidate.candidate.candidateId,
+  });
+  assert.equal(promoted.promoted, true);
+  return promoted.target;
+}
+
+function currentRegistryWriteLockPath(fixtureValue) {
+  return path.join(fixtureValue.projects, ".pageroot-registry-write-lock");
+}
+
+function currentRegistryWriteLockOwnerPath(fixtureValue, token) {
+  return path.join(
+    currentRegistryWriteLockPath(fixtureValue),
+    `.owner-${token}.json`,
+  );
+}
+
+async function seedCurrentRegistryWriteLock(fixtureValue, pid) {
+  const token = "00000000-0000-4000-8000-000000000002";
+  await mkdir(currentRegistryWriteLockPath(fixtureValue));
+  await writeFile(
+    currentRegistryWriteLockOwnerPath(fixtureValue, token),
+    `${JSON.stringify({
+      pid,
+      token,
+      createdAt: "2026-08-16T00:00:00.000Z",
+    })}\n`,
+    "utf8",
+  );
+  return { token };
+}
+
+function wait(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
 async function prepareAiTaskRequest(repository, target, requestId) {
   return repository.prepareRequest({
     target,
@@ -2187,6 +2235,106 @@ test("a clean Working Copy adopts external disk bytes; pending PageRoot edits re
   assert.equal(await readFile(imported.target.exactSourcePath, "utf8"), conflictingDiskHtml);
 });
 
+test("forceUnlockWorkingCopy adopts disk hash without rewriting HTML", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "force-unlock.html");
+  const statePath = path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "working-copies",
+    `${imported.target.workingCopyId}.json`,
+  );
+  const state = await json(statePath);
+  await writeFile(statePath, JSON.stringify({ ...state, saveState: "failed" }), "utf8");
+  const conflictingDiskHtml = html("external while PageRoot pending");
+  await writeFile(imported.target.exactSourcePath, conflictingDiskHtml, "utf8");
+
+  await assert.rejects(
+    value.repository.workspace({ sourcePath: imported.target.exactSourcePath }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "WORKING_COPY_CONFLICT",
+  );
+
+  const unlocked = await value.repository.forceUnlockWorkingCopy({
+    sourcePath: imported.target.exactSourcePath,
+  });
+  assert.equal(unlocked.status, "force-unlocked");
+  assert.equal(unlocked.content, conflictingDiskHtml);
+  assert.equal(await readFile(imported.target.exactSourcePath, "utf8"), conflictingDiskHtml);
+
+  const nextState = await json(statePath);
+  assert.equal(nextState.saveState, "saved");
+  assert.equal(nextState.currentSha256, sha256(Buffer.from(conflictingDiskHtml, "utf8")));
+  assert.equal(nextState.lastPersistedRevision, state.lastPersistedRevision);
+
+  const workspace = await value.repository.workspace({
+    sourcePath: imported.target.exactSourcePath,
+  });
+  assert.equal(workspace.content, conflictingDiskHtml);
+});
+
+test("forceUnlockWorkingCopy clears a stuck activeRequest without rewriting HTML", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "force-unlock-active-run.html");
+  await prepareAiTaskRequest(value.repository, imported.target, "req_force_unlock_active");
+  const runtimePath = path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "runtime-state.json",
+  );
+  assert.ok((await json(runtimePath)).activeRequest);
+
+  const statePath = path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "working-copies",
+    `${imported.target.workingCopyId}.json`,
+  );
+  const state = await json(statePath);
+  await writeFile(statePath, JSON.stringify({ ...state, saveState: "failed" }), "utf8");
+  const conflictingDiskHtml = html("external while request active");
+  await writeFile(imported.target.exactSourcePath, conflictingDiskHtml, "utf8");
+
+  const unlocked = await value.repository.forceUnlockWorkingCopy({
+    sourcePath: imported.target.exactSourcePath,
+  });
+  assert.equal(unlocked.status, "force-unlocked");
+  assert.equal(await readFile(imported.target.exactSourcePath, "utf8"), conflictingDiskHtml);
+
+  const runtime = await json(runtimePath);
+  assert.equal(runtime.activeRequest, null);
+  const workspace = await value.repository.workspace({
+    sourcePath: imported.target.exactSourcePath,
+  });
+  assert.equal(workspace.activeRequest, null);
+  assert.equal(workspace.content, conflictingDiskHtml);
+});
+
+test("validation errors return an in-memory errorPreview without persisting it", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "invalid-preview.html");
+  await prepareAiTaskRequest(value.repository, imported.target, "req_invalid_preview");
+  const incomplete = "<html><body>truncated";
+  const completed = await value.repository.completeRequest({
+    target: imported.target,
+    requestId: "req_invalid_preview",
+    attemptId: "attempt_001",
+    html: incomplete,
+  });
+  assert.equal(completed.status, "error");
+  assert.equal(completed.request.error.errorCode, "INCOMPLETE_HTML");
+  assert.match(String(completed.request.error.errorPreview || ""), /truncated/);
+  const record = await json(path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "requests",
+    "req_invalid_preview",
+    "request.json",
+  ));
+  assert.equal(record.error.errorPreview, undefined);
+  assert.equal(record.error.errorCode, "INCOMPLETE_HTML");
+});
+
 test("Registry and managed control paths reject symlinks", async (t) => {
   const rootLink = await fixture(t);
   const imported = await importSource(rootLink, "root-link.html");
@@ -3258,6 +3406,107 @@ function reconcileInput(target, extra = {}) {
   };
 }
 
+
+test("forceUnlockWorkingCopy adopts disk hash without rewriting HTML", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "force-unlock.html");
+  const statePath = path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "working-copies",
+    `${imported.target.workingCopyId}.json`,
+  );
+  const state = await json(statePath);
+  await writeFile(statePath, JSON.stringify({ ...state, saveState: "failed" }), "utf8");
+  const conflictingDiskHtml = html("external while PageRoot pending");
+  await writeFile(imported.target.exactSourcePath, conflictingDiskHtml, "utf8");
+
+  await assert.rejects(
+    value.repository.workspace({ sourcePath: imported.target.exactSourcePath }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "WORKING_COPY_CONFLICT",
+  );
+
+  const unlocked = await value.repository.forceUnlockWorkingCopy({
+    sourcePath: imported.target.exactSourcePath,
+  });
+  assert.equal(unlocked.status, "force-unlocked");
+  assert.equal(unlocked.content, conflictingDiskHtml);
+  assert.equal(await readFile(imported.target.exactSourcePath, "utf8"), conflictingDiskHtml);
+
+  const nextState = await json(statePath);
+  assert.equal(nextState.saveState, "saved");
+  assert.equal(nextState.currentSha256, sha256(Buffer.from(conflictingDiskHtml, "utf8")));
+  assert.equal(nextState.lastPersistedRevision, state.lastPersistedRevision);
+
+  const workspace = await value.repository.workspace({
+    sourcePath: imported.target.exactSourcePath,
+  });
+  assert.equal(workspace.content, conflictingDiskHtml);
+});
+
+test("forceUnlockWorkingCopy clears a stuck activeRequest without rewriting HTML", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "force-unlock-active-run.html");
+  await prepareAiTaskRequest(value.repository, imported.target, "req_force_unlock_active");
+  const runtimePath = path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "runtime-state.json",
+  );
+  assert.ok((await json(runtimePath)).activeRequest);
+
+  const statePath = path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "working-copies",
+    `${imported.target.workingCopyId}.json`,
+  );
+  const state = await json(statePath);
+  await writeFile(statePath, JSON.stringify({ ...state, saveState: "failed" }), "utf8");
+  const conflictingDiskHtml = html("external while request active");
+  await writeFile(imported.target.exactSourcePath, conflictingDiskHtml, "utf8");
+
+  const unlocked = await value.repository.forceUnlockWorkingCopy({
+    sourcePath: imported.target.exactSourcePath,
+  });
+  assert.equal(unlocked.status, "force-unlocked");
+  assert.equal(await readFile(imported.target.exactSourcePath, "utf8"), conflictingDiskHtml);
+
+  const runtime = await json(runtimePath);
+  assert.equal(runtime.activeRequest, null);
+  const workspace = await value.repository.workspace({
+    sourcePath: imported.target.exactSourcePath,
+  });
+  assert.equal(workspace.activeRequest, null);
+  assert.equal(workspace.content, conflictingDiskHtml);
+});
+
+test("validation errors return an in-memory errorPreview without persisting it", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "invalid-preview.html");
+  await prepareAiTaskRequest(value.repository, imported.target, "req_invalid_preview");
+  const incomplete = "<html><body>truncated";
+  const completed = await value.repository.completeRequest({
+    target: imported.target,
+    requestId: "req_invalid_preview",
+    attemptId: "attempt_001",
+    html: incomplete,
+  });
+  assert.equal(completed.status, "error");
+  assert.equal(completed.request.error.errorCode, "INCOMPLETE_HTML");
+  assert.match(String(completed.request.error.errorPreview || ""), /truncated/);
+  const record = await json(path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "requests",
+    "req_invalid_preview",
+    "request.json",
+  ));
+  assert.equal(record.error.errorPreview, undefined);
+  assert.equal(record.error.errorCode, "INCOMPLETE_HTML");
+});
+
 test("reconcileWorkingCopyLocator rebinds a same-directory Finder rename without creating IDs", async (t) => {
   const value = await fixture(t);
   const imported = await importSource(value, "活动页.html");
@@ -3403,5 +3652,418 @@ test("reconcileWorkingCopyLocator refuses a version mismatch and does not guess 
   );
   assert.equal(recovered.openTarget.projectId, imported.target.projectId);
   assert.notEqual(recovered.openTarget.projectId, equalBytes.target.projectId);
+});
+
+test("editing the V1 working file still binds the original external path to the same project", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "编辑后重开.html");
+  const originalBytes = await readFile(imported.sourcePath);
+  const originalSha256 = sha256(originalBytes);
+  const edited = html("local edit after import");
+  const saved = await value.repository.saveWorkingCopy({
+    target: imported.target,
+    html: edited,
+    expectedSourceSha256: imported.target.sourceSha256,
+    editRevision: 1,
+  });
+  const registryBefore = await readFile(registryPath(value));
+
+  const classified = await value.repository.classifyOpenPath({
+    sourcePath: imported.sourcePath,
+  });
+  assert.equal(classified.kind, "known-external");
+  assert.equal(classified.projectFacts.projectId, imported.target.projectId);
+  assert.equal(classified.projectFacts.openTarget.workingCopyId, "work_ver_0001");
+  assert.equal(classified.projectFacts.currentDiffersFromBase, true);
+  assert.equal(classified.projectFacts.sourceRelation, "unchanged");
+  assert.equal(classified.sourceSha256, originalSha256);
+  assert.equal(await readFile(imported.sourcePath, "utf8"), originalBytes.toString("utf8"));
+  assert.deepEqual(await readFile(registryPath(value)), registryBefore);
+
+  const retried = await value.repository.importExternal({
+    sourcePath: imported.sourcePath,
+    expectedSourceSha256: originalSha256,
+  });
+  assert.equal(retried.imported, false);
+  assert.equal(retried.target.projectId, imported.target.projectId);
+  assert.equal(retried.target.workingCopyId, saved.target.workingCopyId);
+  assert.equal(retried.target.exactSourcePath, saved.target.exactSourcePath);
+  assert.equal(Object.keys((await json(registryPath(value))).projects).length, 1);
+});
+
+test("promoting V2 still returns the current V2 working copy for the original path", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "晋升后重开.html");
+  const active = await promoteNextVersion(value.repository, imported.target, "promoted_reopen");
+  assert.equal(active.workingCopyId, "work_ver_0002");
+  assert.equal(active.versionId, "ver_0002");
+
+  const classified = await value.repository.classifyOpenPath({
+    sourcePath: imported.sourcePath,
+  });
+  assert.equal(classified.kind, "known-external");
+  assert.equal(classified.projectFacts.projectId, imported.target.projectId);
+  assert.equal(classified.projectFacts.openTarget.workingCopyId, "work_ver_0002");
+  assert.equal(classified.projectFacts.latestOfficialVersionId, "ver_0002");
+  assert.equal(classified.projectFacts.currentBasedOnVersionId, "ver_0002");
+  assert.equal(classified.projectFacts.initialVersionId, "ver_0001");
+  assert.equal(classified.projectFacts.currentDiffersFromBase, false);
+
+  const retried = await value.repository.importExternal({
+    sourcePath: imported.sourcePath,
+    expectedSourceSha256: sha256(imported.buffer),
+  });
+  assert.equal(retried.imported, false);
+  assert.equal(retried.target.workingCopyId, "work_ver_0002");
+  assert.equal(retried.target.versionId, "ver_0002");
+  assert.equal(Object.keys((await json(registryPath(value))).projects).length, 1);
+});
+
+test("a historical active Working Copy is returned instead of silently jumping to latest", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "历史工作稿.html");
+  let active = imported.target;
+  for (const label of ["history_v2", "history_v3"]) {
+    active = await promoteNextVersion(value.repository, active, label);
+  }
+  assert.equal(active.workingCopyId, "work_ver_0003");
+  const activated = await value.repository.activateVersionWorkingCopy({
+    target: active,
+    versionId: "ver_0002",
+    operationId: "history_continue_v2_reopen_0001",
+    expectedActiveWorkingCopyId: "work_ver_0003",
+  });
+  assert.equal(activated.target.workingCopyId, "work_ver_0002");
+  const editedHistory = html("continue from V2");
+  const saved = await value.repository.saveWorkingCopy({
+    target: activated.target,
+    html: editedHistory,
+    expectedSourceSha256: activated.target.sourceSha256,
+    editRevision: 1,
+  });
+
+  const classified = await value.repository.classifyOpenPath({
+    sourcePath: imported.sourcePath,
+  });
+  assert.equal(classified.kind, "known-external");
+  assert.equal(classified.projectFacts.openTarget.workingCopyId, "work_ver_0002");
+  assert.equal(classified.projectFacts.currentBasedOnVersionId, "ver_0002");
+  assert.equal(classified.projectFacts.latestOfficialVersionId, "ver_0003");
+  assert.equal(classified.projectFacts.currentDiffersFromBase, true);
+
+  const retried = await value.repository.importExternal({
+    sourcePath: imported.sourcePath,
+    expectedSourceSha256: sha256(imported.buffer),
+  });
+  assert.equal(retried.imported, false);
+  assert.equal(retried.target.workingCopyId, "work_ver_0002");
+  assert.equal(retried.target.exactSourcePath, saved.target.exactSourcePath);
+  assert.notEqual(retried.target.workingCopyId, "work_ver_0003");
+});
+
+test("a later change to the external original stays bound and reports sourceRelation=changed", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "原稿已改.html");
+  const changed = html("external original changed");
+  const changedBytes = Buffer.from(changed, "utf8");
+  const changedSha256 = sha256(changedBytes);
+  await writeFile(imported.sourcePath, changedBytes);
+  const registryBefore = await readFile(registryPath(value));
+
+  const classified = await value.repository.classifyOpenPath({
+    sourcePath: imported.sourcePath,
+  });
+  assert.equal(classified.kind, "known-external");
+  assert.equal(classified.projectFacts.projectId, imported.target.projectId);
+  assert.equal(classified.sourceRelation, "changed");
+  assert.equal(classified.projectFacts.sourceRelation, "changed");
+  assert.equal(classified.sourceSha256, changedSha256);
+  assert.deepEqual(await readFile(registryPath(value)), registryBefore);
+
+  const retried = await value.repository.importExternal({
+    sourcePath: imported.sourcePath,
+    expectedSourceSha256: changedSha256,
+  });
+  assert.equal(retried.imported, false);
+  assert.equal(retried.target.projectId, imported.target.projectId);
+  assert.equal(await readFile(imported.target.exactSourcePath, "utf8"), html("V1"));
+  assert.equal(Object.keys((await json(registryPath(value))).projects).length, 1);
+});
+
+test("equal bytes on another path remain a new external source", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "left/same-bytes.html");
+  const otherPath = path.join(value.sources, "right/same-bytes.html");
+  await mkdir(path.dirname(otherPath), { recursive: true });
+  await writeFile(otherPath, imported.buffer);
+  const registryBefore = await readFile(registryPath(value));
+
+  const classified = await value.repository.classifyOpenPath({ sourcePath: otherPath });
+  assert.equal(classified.kind, "new-external");
+  assert.equal(classified.sourceFileName, "same-bytes.html");
+  assert.equal(classified.visibleV1FileName, "same-bytes-V1.html");
+  assert.equal(classified.sourceSha256, sha256(imported.buffer));
+  assert.deepEqual(await readFile(registryPath(value)), registryBefore);
+
+  const second = await value.repository.importExternal({
+    sourcePath: otherPath,
+    expectedSourceSha256: sha256(imported.buffer),
+  });
+  assert.equal(second.imported, true);
+  assert.notEqual(second.target.projectId, imported.target.projectId);
+});
+
+test("two repository instances importing the same path publish only one project", async (t) => {
+  const value = await fixture(t);
+  const sourcePath = path.join(value.sources, "concurrent-same.html");
+  const buffer = Buffer.from(html("concurrent same"), "utf8");
+  await writeFile(sourcePath, buffer);
+  const expectedSourceSha256 = sha256(buffer);
+
+  let releaseFirst = () => {};
+  const firstPaused = new Promise((resolve) => {
+    releaseFirst = resolve;
+  });
+  let firstReached;
+  const firstReady = new Promise((resolve) => {
+    firstReached = resolve;
+  });
+  t.after(() => releaseFirst());
+  const firstRepository = new ProjectFileRepository({
+    projectsRoot: value.projects,
+    failpoint: async (name) => {
+      if (name === "import-intent-recorded") {
+        firstReached();
+        await firstPaused;
+      }
+      return false;
+    },
+  });
+  const firstImport = firstRepository.importExternal({
+    sourcePath,
+    expectedSourceSha256,
+  });
+  await firstReady;
+
+  const secondRepository = new ProjectFileRepository({ projectsRoot: value.projects });
+  const secondImport = secondRepository.importExternal({
+    sourcePath,
+    expectedSourceSha256,
+  });
+  await wait(40);
+  releaseFirst();
+  const [firstResult, secondResult] = await Promise.all([firstImport, secondImport]);
+  assert.equal(
+    [firstResult, secondResult].filter((result) => result.imported).length,
+    1,
+  );
+  assert.equal(firstResult.target.projectId, secondResult.target.projectId);
+  const registry = await json(registryPath(value));
+  assert.equal(Object.keys(registry.projects).length, 1);
+  assert.deepEqual(registry.pendingImports, {});
+});
+
+test("two repository instances importing different paths keep both Registry entries", async (t) => {
+  const value = await fixture(t);
+  const firstPath = path.join(value.sources, "concurrent-a.html");
+  const secondPath = path.join(value.sources, "concurrent-b.html");
+  const firstBuffer = Buffer.from(html("concurrent a"), "utf8");
+  const secondBuffer = Buffer.from(html("concurrent b"), "utf8");
+  await writeFile(firstPath, firstBuffer);
+  await writeFile(secondPath, secondBuffer);
+
+  let releaseFirst = () => {};
+  const firstPaused = new Promise((resolve) => {
+    releaseFirst = resolve;
+  });
+  let firstReached;
+  const firstReady = new Promise((resolve) => {
+    firstReached = resolve;
+  });
+  t.after(() => releaseFirst());
+  const firstRepository = new ProjectFileRepository({
+    projectsRoot: value.projects,
+    failpoint: async (name) => {
+      if (name === "import-intent-recorded") {
+        firstReached();
+        await firstPaused;
+      }
+      return false;
+    },
+  });
+  const firstImport = firstRepository.importExternal({
+    sourcePath: firstPath,
+    expectedSourceSha256: sha256(firstBuffer),
+  });
+  await firstReady;
+
+  const secondRepository = new ProjectFileRepository({ projectsRoot: value.projects });
+  const secondImport = secondRepository.importExternal({
+    sourcePath: secondPath,
+    expectedSourceSha256: sha256(secondBuffer),
+  });
+  await wait(40);
+  releaseFirst();
+  const [firstResult, secondResult] = await Promise.all([firstImport, secondImport]);
+  assert.equal(firstResult.imported, true);
+  assert.equal(secondResult.imported, true);
+  assert.notEqual(firstResult.target.projectId, secondResult.target.projectId);
+  const registry = await json(registryPath(value));
+  assert.deepEqual(
+    Object.keys(registry.projects).sort(),
+    [firstResult.target.projectId, secondResult.target.projectId].sort(),
+  );
+});
+
+test("duplicate external-source claims fail closed without changing Registry bytes", async (t) => {
+  const value = await fixture(t);
+  const first = await importSource(value, "冲突甲.html");
+  const second = await importSource(value, "冲突乙.html");
+  const filePath = registryPath(value);
+  const registry = await json(filePath);
+  const firstRecord = registry.projects[first.target.projectId];
+  registry.projects[second.target.projectId].importSourceKey = firstRecord.importSourceKey;
+  registry.projects[second.target.projectId].importSourceSha256 = firstRecord.importSourceSha256;
+  const seeded = Buffer.from(`${JSON.stringify(registry, null, 2)}\n`, "utf8");
+  await writeFile(filePath, seeded);
+
+  await assert.rejects(
+    value.repository.classifyOpenPath({ sourcePath: first.sourcePath }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "EXTERNAL_SOURCE_BINDING_CONFLICT",
+  );
+  await assert.rejects(
+    value.repository.importExternal({
+      sourcePath: first.sourcePath,
+      expectedSourceSha256: sha256(first.buffer),
+    }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "EXTERNAL_SOURCE_BINDING_CONFLICT",
+  );
+  assert.deepEqual(await readFile(filePath), seeded);
+  assert.equal(
+    (await readdir(value.projects, { withFileTypes: true }))
+      .filter((entry) => entry.isDirectory() && !entry.name.startsWith(".")).length,
+    2,
+  );
+});
+
+test("a bound project with a missing Working Copy fails closed instead of becoming a new import", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "损坏绑定.html");
+  await rm(imported.target.exactSourcePath);
+  const registryBefore = await readFile(registryPath(value));
+
+  await assert.rejects(
+    value.repository.classifyOpenPath({ sourcePath: imported.sourcePath }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code !== "SOURCE_NOT_FOUND"
+      && !String(error.code).includes("new-external"),
+  );
+  await assert.rejects(
+    value.repository.importExternal({
+      sourcePath: imported.sourcePath,
+      expectedSourceSha256: sha256(imported.buffer),
+    }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code !== "SOURCE_NOT_FOUND",
+  );
+  assert.deepEqual(await readFile(registryPath(value)), registryBefore);
+  assert.equal(Object.keys((await json(registryPath(value))).projects).length, 1);
+});
+
+test("macOS /var and /private/var aliases share one external source binding", async (t) => {
+  if (process.platform !== "darwin") {
+    t.skip("macOS path-alias regression");
+    return;
+  }
+  const value = await fixture(t);
+  const imported = await importSource(value, "外部路径别名.html");
+  const aliasPath = imported.sourcePath === "/var"
+    || imported.sourcePath.startsWith("/var/")
+    ? `/private${imported.sourcePath}`
+    : imported.sourcePath.startsWith("/private/var/")
+      ? imported.sourcePath.slice("/private".length)
+      : null;
+  if (!aliasPath || aliasPath === imported.sourcePath) {
+    t.skip("temporary directory is not exposed through /var");
+    return;
+  }
+
+  const classified = await value.repository.classifyOpenPath({ sourcePath: aliasPath });
+  assert.equal(classified.kind, "known-external");
+  assert.equal(classified.projectFacts.projectId, imported.target.projectId);
+
+  const retried = await value.repository.importExternal({
+    sourcePath: aliasPath,
+    expectedSourceSha256: sha256(imported.buffer),
+  });
+  assert.equal(retried.imported, false);
+  assert.equal(retried.target.projectId, imported.target.projectId);
+  assert.equal(Object.keys((await json(registryPath(value))).projects).length, 1);
+});
+
+test("a live Registry write lock fails busy; a dead lock can be retired by its exact token", async (t) => {
+  const value = await fixture(t);
+  await importSource(value, "锁基线.html");
+  await seedCurrentRegistryWriteLock(value, process.pid);
+  const busy = new ProjectFileRepository({
+    projectsRoot: value.projects,
+    registryWriteLockTimeoutMs: 80,
+  });
+  await assert.rejects(
+    busy.importExternal({
+      sourcePath: path.join(value.sources, "锁活进程.html"),
+      expectedSourceSha256: sha256(Buffer.from(html("V1"), "utf8")),
+    }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "REGISTRY_BUSY",
+  );
+
+  await rm(currentRegistryWriteLockPath(value), { recursive: true, force: true });
+  await seedCurrentRegistryWriteLock(value, 2_147_483_647);
+  const otherPath = path.join(value.sources, "锁死进程.html");
+  const otherBuffer = Buffer.from(html("dead lock import"), "utf8");
+  await writeFile(otherPath, otherBuffer);
+  const imported = await new ProjectFileRepository({
+    projectsRoot: value.projects,
+  }).importExternal({
+    sourcePath: otherPath,
+    expectedSourceSha256: sha256(otherBuffer),
+  });
+  assert.equal(imported.imported, true);
+  assert.equal(
+    (await readdir(value.projects)).includes(".pageroot-registry-write-lock"),
+    false,
+  );
+});
+
+test("classifyOpenPath is read-only for managed, known and new HTML", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "分类只读.html");
+  const freshPath = path.join(value.sources, "尚未导入.html");
+  await writeFile(freshPath, html("fresh"), "utf8");
+  const registryBefore = await readFile(registryPath(value));
+
+  const managed = await value.repository.classifyOpenPath({
+    sourcePath: imported.target.exactSourcePath,
+  });
+  assert.equal(managed.kind, "managed-project");
+  assert.equal(managed.target.projectId, imported.target.projectId);
+
+  const known = await value.repository.classifyOpenPath({
+    sourcePath: imported.sourcePath,
+  });
+  assert.equal(known.kind, "known-external");
+  assert.equal(known.projectFacts.projectId, imported.target.projectId);
+  assert.equal("importSourceKey" in known, false);
+  assert.equal("importSourceKey" in known.projectFacts, false);
+
+  const fresh = await value.repository.classifyOpenPath({ sourcePath: freshPath });
+  assert.equal(fresh.kind, "new-external");
+  assert.equal(fresh.sourceFileName, "尚未导入.html");
+  assert.equal(fresh.visibleV1FileName, "尚未导入-V1.html");
+
+  assert.deepEqual(await readFile(registryPath(value)), registryBefore);
 });
 

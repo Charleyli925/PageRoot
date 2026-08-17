@@ -26,7 +26,8 @@ Bridge route adapters
   application-session snapshots to view props and callbacks, but it may not
   recreate a session-owned fact as an independently writable ref or state
   variable.
-- Workbench presentation files (`presentation.tsx` and `*-view.tsx`) are
+- Workbench presentation files (`presentation.tsx`, `ExternalHtmlOpenDialog.tsx`
+  and `*-view.tsx`) are
   snapshot-and-callback views. They may import domain types and pure Workbench
   models, but not `app/application` sessions or services.
 - Application modules own session identity, request generations, mutation
@@ -161,10 +162,13 @@ replace an acknowledged state, even if the project identity is unchanged.
 External HTML delivery is separately authorized but not separately ordered.
 The main-process mailbox accepts only a validated, opaque `.html`/`.htm`
 request ID and replaces an older unaccepted OS request with the newer one.
-`ProjectOpenQueue` then assigns the whole picker/read/Bridge-check and
+`ProjectOpenQueue` then assigns the whole classify/prepare/commit/finalize,
+picker/read/Bridge-check and
 active-project transition its FIFO position at entry, shared by local picker,
 recent-project, external, startup, generated-version, rename and forget
-routes. The renderer's `ExternalFileOpenSession` owns delivery de-duplication,
+routes. Class A activates the managed project. Classes B and C store a
+Prepared Intent and return only a public `requestId` descriptor; they do not
+activate the original file. The renderer's `ExternalFileOpenSession` owns delivery de-duplication,
 one active request, one newest queued request and a deferred retry when the
 normal project-switch boundary cannot yet close safely. Preload subscribes
 before requesting its readiness catch-up, and drops that catch-up if a live
@@ -227,12 +231,20 @@ the foreground.
 The Registry is the sole project-catalog membership and write-authority source.
 `ProjectFileRepository` may enumerate only its registered records, recover a
 verified same-parent root rename through the existing Registry path, and return
-ready/unavailable/invalid rows independently. Desktop Recent records contribute
+ready/unavailable/invalid rows independently. Optional `importSourceKey` values
+are a long-lived lookup to at most one `projectId`; they do not grant writes
+and do not deduplicate by Hash. Current Registry mutations serialize through a
+dedicated write lock, distinct from exact-legacy-V4 migration. Desktop Recent records contribute
 only sorting, `lastOpenedAt` and startup preference; they cannot add a member,
 remove a member or authorize an open. A Workbench catalog intent carries only
 `projectId`; the Bridge re-resolves and validates the complete Project,
 Document, Working Copy, OpenTarget, bytes and Hash tuple before the normal
-source-transition publication boundary.
+source-transition publication boundary. Automatic Recent/catalog refreshes are
+deferrable projections: the renderer publishes Project/Document/Version/Draft/
+Comment authority and confirms Working Copy activation first, then schedules
+the list refresh behind the current context fence. A slow or failed catalog
+scan therefore cannot reorder the Repository mutation queue ahead of a
+confirmation or downgrade a completed rename/continuation to unknown.
 
 `AI任务/` is intentionally outside every authority chain. Once a durable
 Request or verified Candidate already exists, the Repository validates the
@@ -284,11 +296,12 @@ that has already mounted.
 
 The direct path permits only a bounded classic-script ECharts candidate, frozen
 local/allowlisted-CDN bytes and at most 32 uniquely bound, source-empty hosts.
-For an HTML-only imported V1, Main may use the original selected HTML directory
-as the local asset root only when it captured that path during the verified
-external-to-Working-Copy hand-off in the same app session; the renderer neither
-supplies nor persists that provenance, while the Working Copy remains source
-authority.
+For an HTML-only imported V1, Main records the original selected HTML directory
+in desktop `html-projects.json` and uses it as the local asset root for Preview,
+static Edit and the one-shot ECharts path. The renderer neither supplies nor
+learns that original path; the Working Copy remains source authority. The
+binding survives continue-current, restart, working-copy switches and optional
+original-HTML trash while sibling files remain in that directory.
 The final frame executes once, waits the fixed settle interval, then stops
 tracked runtime activity and audits source-node identity/text/attributes plus
 host containment before installing Canvas interaction. An approved empty host
@@ -424,7 +437,11 @@ the mutable path and uses `sourcePath` only to prove that the command remains
 inside the registered source or an explicit alias. Supplying exactly one ID is
 invalid. Omitting both IDs is a temporary compatibility route that may address
 an existing registration but may not create one; `/project/ensure` is the sole
-creation boundary. Attachments and their compensating cleanup use the same
+creation boundary. `/project/open-classification` is an authenticated read-only
+classifier: it must not write Registry bytes, create a project, or return raw
+source keys, external absolute paths, hidden snapshot paths or HTML bodies.
+Desktop Prepared Intent commit is the only path that may later call
+`/project/ensure` for a class-C confirmation. Attachments and their compensating cleanup use the same
 captured context, plus their composer/edit identity, for their complete
 asynchronous lifetime. `CommentWorkflow` is the only renderer application
 owner that may stage an attachment, call its Bridge repository, or compensate a

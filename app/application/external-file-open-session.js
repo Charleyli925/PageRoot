@@ -1,16 +1,28 @@
 const MAX_REMEMBERED_REQUESTS = 64;
 
+function copyConfirmation(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const requestId = typeof value.requestId === "string" ? value.requestId : "";
+  const classification = typeof value.classification === "string"
+    ? value.classification
+    : "";
+  if (!requestId || !classification) return null;
+  return Object.freeze({ ...value, requestId, classification });
+}
+
 function copyRequest(value) {
-  if (
-    !value
-    || typeof value.requestId !== "string"
-    || !value.requestId
-    || typeof value.sourcePath !== "string"
-    || !value.sourcePath
-  ) return null;
+  if (!value || typeof value.requestId !== "string" || !value.requestId) {
+    return null;
+  }
   return Object.freeze({
     requestId: value.requestId,
-    sourcePath: value.sourcePath,
+    sourcePath: typeof value.sourcePath === "string" ? value.sourcePath : "",
+    classification: typeof value.classification === "string"
+      ? value.classification
+      : null,
+    confirmation: copyConfirmation(value.confirmation || (
+      value.classification ? value : null
+    )),
   });
 }
 
@@ -21,6 +33,8 @@ function initialSnapshot() {
     queuedRequestId: null,
     deferredRequestId: null,
     deferredSequence: 0,
+    confirmation: null,
+    attention: null,
   });
 }
 
@@ -41,6 +55,12 @@ export class ExternalFileOpenSession {
 
   #deferred = null;
 
+  #confirmation = null;
+
+  #attention = null;
+
+  #awaitingConfirmation = false;
+
   #deferredSequence = 0;
 
   #observedDeferredSequence = 0;
@@ -60,19 +80,25 @@ export class ExternalFileOpenSession {
   }
 
   #emit() {
-    const status = this.#active
-      ? "opening"
-      : this.#deferred
-        ? "deferred"
-        : this.#queued
-          ? "queued"
-          : "idle";
+    const status = this.#awaitingConfirmation
+      ? "awaiting-confirmation"
+      : this.#active
+        ? "opening"
+        : this.#deferred
+          ? "deferred"
+          : this.#queued
+            ? "queued"
+            : this.#attention
+              ? "attention"
+              : "idle";
     this.#snapshot = Object.freeze({
       status,
       activeRequestId: this.#active?.requestId || null,
       queuedRequestId: this.#queued?.requestId || null,
       deferredRequestId: this.#deferred?.requestId || null,
       deferredSequence: this.#deferredSequence,
+      confirmation: this.#confirmation,
+      attention: this.#attention,
     });
     try {
       this.#observer?.(this.#snapshot);
@@ -94,9 +120,11 @@ export class ExternalFileOpenSession {
 
   #drain() {
     if (this.#drainPromise) return this.#drainPromise;
+    if (this.#awaitingConfirmation) return Promise.resolve();
     const generation = this.#generation;
     const drain = async () => {
       while (generation === this.#generation) {
+        if (this.#awaitingConfirmation) break;
         const request = this.#queued;
         if (!request) break;
         this.#queued = null;
@@ -116,7 +144,15 @@ export class ExternalFileOpenSession {
         }
 
         if (generation !== this.#generation) break;
+        if (result === "awaiting-confirmation") {
+          this.#awaitingConfirmation = true;
+          this.#confirmation = request.confirmation || this.#confirmation;
+          this.#attention = null;
+          this.#emit();
+          break;
+        }
         this.#active = null;
+        this.#confirmation = null;
         if (result === "deferred" && !this.#queued) {
           this.#deferred = request;
           this.#deferredSequence += 1;
@@ -130,7 +166,7 @@ export class ExternalFileOpenSession {
     const promise = drain().finally(() => {
       if (this.#drainPromise !== promise) return;
       this.#drainPromise = null;
-      if (this.#queued && !this.#deferred) {
+      if (this.#queued && !this.#deferred && !this.#awaitingConfirmation) {
         void this.#drain();
       } else {
         this.#emit();
@@ -147,11 +183,66 @@ export class ExternalFileOpenSession {
     }
     this.#execute = execute;
     // A newly delivered OS intent is newer than an earlier retry waiting for
-    // the editor or persistence drain to become safe.
+    // the editor or persistence drain to become safe. It also replaces a
+    // confirmation the user has not accepted yet.
     this.#deferred = null;
+    this.#attention = null;
+    if (this.#awaitingConfirmation) {
+      this.#awaitingConfirmation = false;
+      this.#confirmation = null;
+      this.#active = null;
+    }
     this.#queued = request;
     this.#emit();
     void this.#drain();
+    return true;
+  }
+
+  presentConfirmation(requestId, descriptor) {
+    if (!this.#active || this.#active.requestId !== String(requestId || "")) {
+      return false;
+    }
+    const confirmation = copyConfirmation(descriptor);
+    if (!confirmation) return false;
+    this.#confirmation = confirmation;
+    this.#awaitingConfirmation = true;
+    this.#attention = null;
+    this.#emit();
+    return true;
+  }
+
+  completeConfirmation(requestId) {
+    if (!this.#awaitingConfirmation || this.#active?.requestId !== String(requestId || "")) {
+      return false;
+    }
+    this.#awaitingConfirmation = false;
+    this.#confirmation = null;
+    this.#attention = null;
+    this.#active = null;
+    this.#emit();
+    void this.#drain();
+    return true;
+  }
+
+  cancelConfirmation(requestId) {
+    if (!this.#awaitingConfirmation || this.#active?.requestId !== String(requestId || "")) {
+      return false;
+    }
+    this.#awaitingConfirmation = false;
+    this.#confirmation = null;
+    this.#attention = null;
+    this.#active = null;
+    this.#emit();
+    void this.#drain();
+    return true;
+  }
+
+  setAttention(requestId, attention) {
+    if (this.#active?.requestId !== String(requestId || "")) return false;
+    this.#attention = attention && typeof attention === "object"
+      ? Object.freeze({ ...attention })
+      : null;
+    this.#emit();
     return true;
   }
 
@@ -191,6 +282,9 @@ export class ExternalFileOpenSession {
     this.#active = null;
     this.#queued = null;
     this.#deferred = null;
+    this.#confirmation = null;
+    this.#attention = null;
+    this.#awaitingConfirmation = false;
     this.#observedDeferredSequence = 0;
     this.#sawSwitchBlocker = false;
     this.#execute = null;

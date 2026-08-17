@@ -628,6 +628,113 @@ test("concurrent catalog refreshes coalesce into one in-flight read", async (t) 
   assert.equal(catalogCalls, 1);
 });
 
+test("two post-settlement refreshes coalesce into one catalog read", async (t) => {
+  let resolveCatalog;
+  let catalogCalls = 0;
+  const harness = createHarness({
+    projectOpen: {
+      listRegistered: () => {
+        catalogCalls += 1;
+        return new Promise((resolve) => {
+          resolveCatalog = resolve;
+        });
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+
+  const context = harness.projectSession.context;
+  harness.workflow.scheduleProjectListRefreshAfterSettlement(context);
+  harness.workflow.scheduleProjectListRefreshAfterSettlement(context);
+  await waitFor(() => catalogCalls === 1, "scheduled refreshes did not coalesce");
+  resolveCatalog([{ projectId: "project_catalog_a", availability: "ready" }]);
+  await waitFor(
+    () => harness.events.some((event) => event.type === "project-catalog-loaded"),
+    "catalog projection did not load",
+  );
+  assert.equal(catalogCalls, 1);
+});
+
+test("a post-settlement refresh is fenced by the current Project context", async (t) => {
+  let catalogCalls = 0;
+  const harness = createHarness({
+    projectOpen: {
+      listRegistered: () => {
+        catalogCalls += 1;
+        return Promise.resolve([]);
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+
+  const staleContext = harness.projectSession.context;
+  harness.projectSession.openLocator(B_PATH);
+  const currentContext = harness.projectSession.register({
+    ...harness.projectSession.locator,
+    projectId: "project_b",
+    documentId: "document_b",
+  });
+
+  harness.workflow.scheduleProjectListRefreshAfterSettlement(staleContext);
+  assert.equal(catalogCalls, 0);
+
+  harness.workflow.scheduleProjectListRefreshAfterSettlement(currentContext);
+  await waitFor(() => catalogCalls === 1, "current project refresh did not start");
+  assert.equal(catalogCalls, 1);
+});
+
+test("source rename settles before the catalog refresh and never downgrades on catalog failure", async (t) => {
+  let settleCatalog;
+  let catalogCalls = 0;
+  const harness = createHarness({
+    bridge: {
+      async workspace(sourcePath) {
+        if (sourcePath !== RENAMED_PATH) return workspacePayload(sourcePath, OLD_HTML);
+        return {
+          ...workspacePayload(RENAMED_PATH, OLD_HTML),
+          projectId: "project_old",
+          documentId: "document_old",
+          sourcePath: RENAMED_PATH,
+          project: { displayName: "renamed" },
+        };
+      },
+    },
+    projectOpen: {
+      async renameSource(payload) {
+        return {
+          operationId: payload.operationId,
+          previousSourcePath: OLD_PATH,
+          sourcePath: RENAMED_PATH,
+          sha256: sha256(OLD_HTML),
+          stem: "renamed",
+          lastModifiedAt: "2026-08-12T00:00:00.000Z",
+        };
+      },
+      listRegistered: () => {
+        catalogCalls += 1;
+        return new Promise((resolve, reject) => {
+          settleCatalog = { resolve, reject };
+        });
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+
+  const pending = harness.workflow.renameSource({ stem: "renamed" });
+  await waitFor(() => catalogCalls === 1, "catalog refresh did not follow rename settlement");
+  const outcome = await pending;
+  assert.equal(outcome.status, "succeeded");
+  assert.equal(harness.projectSession.context?.sourcePath, RENAMED_PATH);
+  assert.equal(harness.documentSession.sourceSha256, sha256(OLD_HTML));
+
+  settleCatalog.reject(new Error("catalog unavailable"));
+  await waitFor(
+    () => harness.events.some((event) => event.type === "project-catalog-failed"),
+    "catalog failure did not surface a projection event",
+  );
+  assert.equal(outcome.status, "succeeded");
+});
+
 test("a Registry project open routes only its projectId through the desktop authority", async (t) => {
   const openedProjectIds = [];
   const harness = createHarness({
@@ -745,6 +852,41 @@ test("a trusted direct browser file submission still enters the accepted FIFO", 
   );
   assert.equal(harness.projectSession.sourcePath, null);
   assert.equal(harness.documentSession.html, A_HTML);
+  assert.equal(harness.documentSession.sourceSha256, sha256(A_HTML));
+});
+
+test("a second in-memory browser file can switch after the first HTML is applied", async (t) => {
+  const harness = createHarness();
+  t.after(() => harness.workflow.dispose());
+
+  assert.equal(harness.workflow.acceptBrowserProject({
+    project: {
+      name: "browser-first.html",
+      sourcePath: null,
+      html: A_HTML,
+    },
+  }).status, "succeeded");
+  await waitFor(
+    () => harness.documentSession.html === A_HTML
+      && harness.documentSession.sourceSha256 === sha256(A_HTML)
+      && harness.workflow.getSnapshot().projectApplication.status === "idle",
+    "first in-memory HTML did not publish its Hash",
+  );
+
+  assert.equal(harness.workflow.acceptBrowserProject({
+    project: {
+      name: "browser-second.html",
+      sourcePath: null,
+      html: B_HTML,
+    },
+  }).status, "succeeded");
+  await waitFor(
+    () => harness.documentSession.html === B_HTML
+      && harness.workflow.getSnapshot().projectApplication.status === "idle",
+    "second in-memory HTML did not complete the switch fence",
+  );
+  assert.equal(harness.documentSession.sourceSha256, sha256(B_HTML));
+  assert.equal(harness.projectSession.sourcePath, null);
 });
 
 test("a stale hydration result cannot publish into a newer project locator", async (t) => {
@@ -940,12 +1082,30 @@ test("close drains an in-flight local picker before it commits", async (t) => {
 });
 
 test("close drains project switch preparation before it commits", async (t) => {
-  let resolveCanvas;
-  const harness = createHarness();
-  t.after(() => harness.workflow.dispose());
-  harness.documentWorkflow.ensureCurrentCanvas = () => new Promise((resolve) => {
-    resolveCanvas = () => resolve(succeeded({ ready: true }));
+  const harness = createHarness({
+    projectOpen: {
+      async openLocal() {
+        return {
+          name: "A",
+          sourcePath: A_PATH,
+          html: A_HTML,
+          sha256: sha256(A_HTML),
+        };
+      },
+    },
   });
+  t.after(() => harness.workflow.dispose());
+  let canvasReleased = false;
+  let resolveCanvas;
+  harness.documentWorkflow.ensureCurrentCanvas = () => {
+    if (canvasReleased) return Promise.resolve(succeeded({ ready: true }));
+    return new Promise((resolve) => {
+      resolveCanvas = () => {
+        canvasReleased = true;
+        resolve(succeeded({ ready: true }));
+      };
+    });
+  };
 
   const opening = harness.workflow.openProject({ kind: "local" });
   await waitFor(
@@ -968,7 +1128,7 @@ test("close drains project switch preparation before it commits", async (t) => {
   resolveCanvas();
   const [opened, readiness] = await Promise.all([opening, closing]);
   assert.equal(opened.status, "succeeded");
-  assert.equal(opened.value.opened, false);
+  assert.equal(opened.value.opened, true);
   assert.deepEqual(readiness, { ready: true });
   assert.equal(harness.workflow.getSnapshot().close.phase, "ready");
 });
@@ -1449,6 +1609,114 @@ function locatorResult(payload, {
   };
 }
 
+
+test("two post-settlement refreshes coalesce into one catalog read", async (t) => {
+  let resolveCatalog;
+  let catalogCalls = 0;
+  const harness = createHarness({
+    projectOpen: {
+      listRegistered: () => {
+        catalogCalls += 1;
+        return new Promise((resolve) => {
+          resolveCatalog = resolve;
+        });
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+
+  const context = harness.projectSession.context;
+  harness.workflow.scheduleProjectListRefreshAfterSettlement(context);
+  harness.workflow.scheduleProjectListRefreshAfterSettlement(context);
+  await waitFor(() => catalogCalls === 1, "scheduled refreshes did not coalesce");
+  resolveCatalog([{ projectId: "project_catalog_a", availability: "ready" }]);
+  await waitFor(
+    () => harness.events.some((event) => event.type === "project-catalog-loaded"),
+    "catalog projection did not load",
+  );
+  assert.equal(catalogCalls, 1);
+});
+
+test("a post-settlement refresh is fenced by the current Project context", async (t) => {
+  let catalogCalls = 0;
+  const harness = createHarness({
+    projectOpen: {
+      listRegistered: () => {
+        catalogCalls += 1;
+        return Promise.resolve([]);
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+
+  const staleContext = harness.projectSession.context;
+  harness.projectSession.openLocator(B_PATH);
+  const currentContext = harness.projectSession.register({
+    ...harness.projectSession.locator,
+    projectId: "project_b",
+    documentId: "document_b",
+  });
+
+  harness.workflow.scheduleProjectListRefreshAfterSettlement(staleContext);
+  assert.equal(catalogCalls, 0);
+
+  harness.workflow.scheduleProjectListRefreshAfterSettlement(currentContext);
+  await waitFor(() => catalogCalls === 1, "current project refresh did not start");
+  assert.equal(catalogCalls, 1);
+});
+
+test("source rename settles before the catalog refresh and never downgrades on catalog failure", async (t) => {
+  let settleCatalog;
+  let catalogCalls = 0;
+  const harness = createHarness({
+    bridge: {
+      async workspace(sourcePath) {
+        if (sourcePath !== RENAMED_PATH) return workspacePayload(sourcePath, OLD_HTML);
+        return {
+          ...workspacePayload(RENAMED_PATH, OLD_HTML),
+          projectId: "project_old",
+          documentId: "document_old",
+          sourcePath: RENAMED_PATH,
+          project: { displayName: "renamed" },
+        };
+      },
+    },
+    projectOpen: {
+      async renameSource(payload) {
+        return {
+          operationId: payload.operationId,
+          previousSourcePath: OLD_PATH,
+          sourcePath: RENAMED_PATH,
+          sha256: sha256(OLD_HTML),
+          stem: "renamed",
+          lastModifiedAt: "2026-08-12T00:00:00.000Z",
+        };
+      },
+      listRegistered: () => {
+        catalogCalls += 1;
+        return new Promise((resolve, reject) => {
+          settleCatalog = { resolve, reject };
+        });
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+
+  const pending = harness.workflow.renameSource({ stem: "renamed" });
+  await waitFor(() => catalogCalls === 1, "catalog refresh did not follow rename settlement");
+  const outcome = await pending;
+  assert.equal(outcome.status, "succeeded");
+  assert.equal(harness.projectSession.context?.sourcePath, RENAMED_PATH);
+  assert.equal(harness.documentSession.sourceSha256, sha256(OLD_HTML));
+
+  settleCatalog.reject(new Error("catalog unavailable"));
+  await waitFor(
+    () => harness.events.some((event) => event.type === "project-catalog-failed"),
+    "catalog failure did not surface a projection event",
+  );
+  assert.equal(outcome.status, "succeeded");
+});
+
 test("Finder locator rebase keeps IDs, publishes the new path, and does not load disk HTML", async (t) => {
   const reconcileCalls = [];
   const harness = createHarness({
@@ -1749,5 +2017,325 @@ test("PageRoot rename after Finder rebase uses the recovered path", async (t) =>
     harness.projectSession.context?.sourcePath,
     "/tmp/project-workflow-pageroot-new.html",
   );
+});
+
+test("browser local open requests the hidden picker without draining first", async (t) => {
+  let canvasWaiters = 0;
+  const harness = createHarness({
+    projectOpen: {
+      mode: () => "browser-file",
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+  harness.documentWorkflow.ensureCurrentCanvas = () => {
+    canvasWaiters += 1;
+    return new Promise(() => {});
+  };
+
+  const pending = harness.workflow.openProject({ kind: "local" });
+  const requested = harness.events.filter(
+    (event) => event.type === "project-browser-file-requested",
+  );
+  assert.equal(requested.length, 1);
+  assert.equal(typeof requested[0].operationId, "string");
+  assert.notEqual(requested[0].operationId, "");
+  assert.equal(canvasWaiters, 0);
+  assert.equal(harness.fenceCount, 0);
+
+  const outcome = await Promise.race([
+    pending,
+    new Promise((_, reject) => {
+      setTimeout(() => {
+        reject(new Error("browser open awaited switch before requesting the picker"));
+      }, 50);
+    }),
+  ]);
+  assert.equal(outcome.status, "succeeded");
+  assert.equal(outcome.value.awaitingFile, true);
+  assert.equal(outcome.value.operationId, requested[0].operationId);
+  assert.equal(canvasWaiters, 0);
+  assert.equal(harness.fenceCount, 0);
+  assert.equal(harness.projectSession.sourcePath, OLD_PATH);
+});
+
+test("cancelling the local picker does not drain the current project", async (t) => {
+  let fenced = 0;
+  const harness = createHarness({
+    canvas: {
+      fencePendingEdit: () => {
+        fenced += 1;
+        return {
+          ok: true,
+          html: OLD_HTML,
+          sourceSha256: sha256(OLD_HTML),
+        };
+      },
+    },
+    projectOpen: {
+      async openLocal() {
+        return null;
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+  const outcome = await harness.workflow.openProject({ kind: "local" });
+  assert.equal(outcome.status, "succeeded");
+  assert.equal(outcome.value.opened, false);
+  assert.equal(fenced, 0);
+  assert.equal(harness.projectSession.sourcePath, OLD_PATH);
+});
+
+test("startup confirmation commits without fencing a nonexistent Canvas", async (t) => {
+  let fenced = 0;
+  const harness = createHarness({
+    initialProject: false,
+    canvas: {
+      fencePendingEdit: () => {
+        fenced += 1;
+        return null;
+      },
+    },
+    projectOpen: {
+      async getActive() {
+        return {
+          openKind: "confirmation",
+          requestId: "req_startup_new",
+          classification: "new-external",
+          sourceFileName: "page.html",
+          visibleV1FileName: "page-V1.html",
+          projectsRootLabel: "文稿 › PageRoot › 项目",
+        };
+      },
+      async commitPrepared() {
+        return {
+          name: "page-V1.html",
+          sourcePath: A_PATH,
+          html: A_HTML,
+          sha256: sha256(A_HTML),
+        };
+      },
+      async finalizePrepared() {
+        return { disposition: "kept" };
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+
+  const started = await harness.workflow.openProject({ kind: "startup" });
+  assert.equal(started.status, "succeeded");
+  assert.equal(started.value.awaitingConfirmation, true);
+  assert.equal(harness.projectSession.epoch, 0);
+  assert.equal(fenced, 0);
+
+  const confirmed = await harness.workflow.confirmExternalOpen({
+    requestId: "req_startup_new",
+    action: "import-new",
+  });
+  assert.equal(confirmed.status, "succeeded");
+  assert.equal(fenced, 0);
+  await waitFor(
+    () => harness.projectSession.sourcePath === A_PATH
+      && !harness.workflow.projectHydrating
+      && harness.workflow.getSnapshot().openConfirmation === null,
+    "startup confirmation did not finish hydration",
+  );
+  assert.equal(harness.documentSession.html, A_HTML);
+});
+
+test("a new-external picker result shows confirmation without switching", async (t) => {
+  let fenced = 0;
+  let committed = null;
+  const harness = createHarness({
+    canvas: {
+      fencePendingEdit: () => {
+        fenced += 1;
+        return {
+          ok: true,
+          html: OLD_HTML,
+          sourceSha256: sha256(OLD_HTML),
+        };
+      },
+    },
+    projectOpen: {
+      async openLocal() {
+        return {
+          openKind: "confirmation",
+          requestId: "req_new",
+          classification: "new-external",
+          sourceFileName: "page.html",
+          visibleV1FileName: "page-V1.html",
+          projectsRootLabel: "文稿 › PageRoot › 项目",
+        };
+      },
+      async commitPrepared(payload) {
+        committed = payload;
+        return {
+          name: "page-V1.html",
+          sourcePath: A_PATH,
+          html: A_HTML,
+          sha256: sha256(A_HTML),
+        };
+      },
+      async finalizePrepared() {
+        return { disposition: "kept" };
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+
+  const opened = await harness.workflow.openProject({ kind: "local" });
+  assert.equal(opened.status, "succeeded");
+  assert.equal(opened.value.awaitingConfirmation, true);
+  assert.equal(fenced, 0);
+  assert.equal(
+    harness.workflow.getSnapshot().openConfirmation?.classification,
+    "new-external",
+  );
+  assert.equal(harness.projectSession.sourcePath, OLD_PATH);
+
+  assert.equal(
+    (await harness.workflow.confirmExternalOpen({
+      requestId: "req_new",
+      action: "view-initial",
+    })).status,
+    "rejected",
+  );
+
+  const confirmed = await harness.workflow.confirmExternalOpen({
+    requestId: "req_new",
+    action: "import-new",
+  });
+  assert.equal(confirmed.status, "succeeded");
+  assert.deepEqual(committed, {
+    requestId: "req_new",
+    action: "import-new",
+  });
+  assert.equal(harness.projectSession.sourcePath, A_PATH);
+  assert.equal(harness.workflow.getSnapshot().openConfirmation, null);
+});
+
+test("canvas failure after import rolls back and never finalizes a trash request", async (t) => {
+  let finalized = 0;
+  let rolledBack = 0;
+  const harness = createHarness({
+    projectOpen: {
+      async openLocal() {
+        return {
+          openKind: "confirmation",
+          requestId: "req_canvas_fail",
+          classification: "new-external",
+          sourceFileName: "page.html",
+          visibleV1FileName: "page-V1.html",
+          projectsRootLabel: "文稿 › PageRoot › 项目",
+        };
+      },
+      async commitPrepared() {
+        return {
+          name: "page-V1.html",
+          sourcePath: A_PATH,
+          html: A_HTML,
+          sha256: sha256(A_HTML),
+        };
+      },
+      async rollbackPrepared() {
+        rolledBack += 1;
+        return { rolledBack: true };
+      },
+      async finalizePrepared() {
+        finalized += 1;
+        return { disposition: "trashed" };
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+  let canvasCalls = 0;
+  harness.documentWorkflow.ensureCurrentCanvas = async () => {
+    canvasCalls += 1;
+    if (canvasCalls === 1) return succeeded({ ready: true });
+    return {
+      status: "rejected",
+      code: "DOCUMENT_CANVAS_AUTHORITY_REJECTED",
+      reason: "当前画布尚未完成自动恢复。",
+    };
+  };
+
+  await harness.workflow.openProject({ kind: "local" });
+  harness.workflow.setExternalOpenDeleteOriginal({
+    requestId: "req_canvas_fail",
+    deleteOriginal: true,
+  });
+  const confirmed = await harness.workflow.confirmExternalOpen({
+    requestId: "req_canvas_fail",
+    action: "import-new",
+    deleteOriginal: true,
+  });
+  assert.equal(confirmed.status, "rejected");
+  assert.equal(canvasCalls, 2);
+  assert.equal(finalized, 0);
+  assert.equal(rolledBack, 1);
+  assert.equal(
+    harness.workflow.getSnapshot().openConfirmation?.requestId,
+    "req_canvas_fail",
+  );
+  assert.equal(
+    harness.events.some((event) => event.type === "external-open-canvas-failed"),
+    true,
+  );
+});
+
+test("continue-current opens the bound project without importing again", async (t) => {
+  let committed = null;
+  let finalized = 0;
+  const harness = createHarness({
+    projectOpen: {
+      async openLocal() {
+        return {
+          openKind: "confirmation",
+          requestId: "req_known",
+          classification: "known-external",
+          sourceFileName: "page.html",
+          projectName: "page",
+          currentBasedOnOrdinal: 6,
+          latestOfficialOrdinal: 6,
+          currentDiffersFromBase: true,
+          sourceRelation: "unchanged",
+        };
+      },
+      async commitPrepared(payload) {
+        committed = payload;
+        return {
+          name: "page-V1.html",
+          sourcePath: A_PATH,
+          html: A_HTML,
+          sha256: sha256(A_HTML),
+        };
+      },
+      async finalizePrepared() {
+        finalized += 1;
+        return { disposition: "kept" };
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+
+  await harness.workflow.openProject({ kind: "local" });
+  assert.equal(
+    harness.workflow.setExternalOpenDeleteOriginal({
+      requestId: "req_known",
+      deleteOriginal: true,
+    }).status,
+    "rejected",
+  );
+  const confirmed = await harness.workflow.confirmExternalOpen({
+    requestId: "req_known",
+    action: "continue-current",
+  });
+  assert.equal(confirmed.status, "succeeded");
+  assert.deepEqual(committed, {
+    requestId: "req_known",
+    action: "continue-current",
+  });
+  assert.equal(finalized, 1);
+  assert.equal(harness.projectSession.sourcePath, A_PATH);
 });
 

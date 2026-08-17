@@ -895,6 +895,29 @@ test("v4 attachments, empty source history and absent conflicts stay bound to th
   });
   assert.equal(resolve.response.status, 404);
   assert.equal(resolve.body.error.code, "CONFLICT_NOT_FOUND");
+
+  const unlocked = await postJson(bridge, "/conflict/resolve", {
+    sourcePath: workingPath,
+    projectId: ensured.body.projectId,
+    documentId: ensured.body.documentId,
+    action: "force-unlock",
+  });
+  assert.equal(unlocked.response.status, 200, JSON.stringify(unlocked.body));
+  assert.equal(unlocked.body.status, "force-unlocked");
+  assert.equal(unlocked.body.content, html("attach"));
+
+  const sourcePreview = await bridge.requestJson(
+    `/source-preview?sourcePath=${encodeURIComponent(workingPath)}`,
+  );
+  assert.equal(sourcePreview.response.status, 200, JSON.stringify(sourcePreview.body));
+  assert.equal(sourcePreview.body.content, html("attach"));
+  assert.equal(typeof sourcePreview.body.sha256, "string");
+
+  const sourceStat = await bridge.requestJson(
+    `/source-stat?sourcePath=${encodeURIComponent(workingPath)}`,
+  );
+  assert.equal(sourceStat.response.status, 200, JSON.stringify(sourceStat.body));
+  assert.equal(sourceStat.body.sha256, sourcePreview.body.sha256);
 });
 
 test("Bridge POST /managed-working-copy/reconcile rebinds a Finder rename by stable IDs", async (t) => {
@@ -952,4 +975,73 @@ test("Bridge POST /managed-working-copy/reconcile rebinds a Finder rename by sta
   assert.equal(missing.body.error.code, "WORKING_COPY_UNAVAILABLE");
 });
 
+test("open-classification is read-only and returns A/B/C without source keys or original paths", async (t) => {
+  const environment = await createBridgeTestEnvironment(t, {
+    prefix: "pageroot-open-classification-",
+  });
+  const original = html("classify original");
+  const sourcePath = await environment.createSource("classify-me.html", original);
+  const projectFilesRoot = join(environment.root, "project-files");
+  const bridge = await environment.start({
+    HTML_AI_PROJECT_FILES_ROOT: projectFilesRoot,
+  });
+  const registryFile = join(projectFilesRoot, ".pageroot-registry.json");
+
+  const beforeImport = await postJson(bridge, "/project/open-classification", { sourcePath });
+  assert.equal(beforeImport.response.status, 200, JSON.stringify(beforeImport.body));
+  assert.equal(beforeImport.body.kind, "new-external");
+  assert.equal(beforeImport.body.sourceFileName, "classify-me.html");
+  assert.equal(beforeImport.body.visibleV1FileName, "classify-me-V1.html");
+  assert.equal(beforeImport.body.sourceSha256, sha256(Buffer.from(original, "utf8")));
+  assert.equal("importSourceKey" in beforeImport.body, false);
+  assert.equal(JSON.stringify(beforeImport.body).includes(sourcePath), false);
+
+  const ensured = await postJson(bridge, "/project/ensure", {
+    sourcePath,
+    expectedSourceSha256: beforeImport.body.sourceSha256,
+  });
+  assert.equal(ensured.response.status, 200, JSON.stringify(ensured.body));
+  const registryBefore = await readFile(registryFile);
+
+  const managed = await postJson(bridge, "/project/open-classification", {
+    sourcePath: ensured.body.sourcePath,
+  });
+  assert.equal(managed.response.status, 200, JSON.stringify(managed.body));
+  assert.equal(managed.body.kind, "managed-project");
+  assert.equal(managed.body.openTarget.projectId, ensured.body.projectId);
+  assert.equal(managed.body.openTarget.workingCopyId, "work_ver_0001");
+
+  const known = await postJson(bridge, "/project/open-classification", { sourcePath });
+  assert.equal(known.response.status, 200, JSON.stringify(known.body));
+  assert.equal(known.body.kind, "known-external");
+  assert.equal(known.body.projectId, ensured.body.projectId);
+  assert.equal(known.body.sourceRelation, "unchanged");
+  assert.equal(known.body.currentBasedOnVersionId, "ver_0001");
+  assert.equal(known.body.latestOfficialVersionId, "ver_0001");
+  assert.equal(known.body.currentDiffersFromBase, false);
+  assert.equal(known.body.openTarget.workingCopyId, "work_ver_0001");
+  assert.equal(known.body.openTarget.exactSourcePath, ensured.body.sourcePath);
+  assert.equal("importSourceKey" in known.body, false);
+  assert.equal(JSON.stringify(known.body).includes(sourcePath), false);
+  assert.deepEqual(await readFile(registryFile), registryBefore);
+
+  const edited = html("classify after edit");
+  const saved = await postJson(bridge, "/autosave", {
+    projectId: ensured.body.projectId,
+    documentId: ensured.body.documentId,
+    sourcePath: ensured.body.sourcePath,
+    expectedSourceSha256: ensured.body.sourceSha256,
+    editRevision: 1,
+    html: edited,
+  });
+  assert.equal(saved.response.status, 200, JSON.stringify(saved.body));
+
+  const knownAfterEdit = await postJson(bridge, "/project/open-classification", { sourcePath });
+  assert.equal(knownAfterEdit.response.status, 200, JSON.stringify(knownAfterEdit.body));
+  assert.equal(knownAfterEdit.body.kind, "known-external");
+  assert.equal(knownAfterEdit.body.projectId, ensured.body.projectId);
+  assert.equal(knownAfterEdit.body.currentDiffersFromBase, true);
+  assert.equal(knownAfterEdit.body.openTarget.workingCopyId, "work_ver_0001");
+  assert.deepEqual(await readFile(registryFile), registryBefore);
+});
 

@@ -118,6 +118,7 @@ function createHarness({
   confirmHistory = null,
   verifyRendered = null,
   onDrain = null,
+  onCatalogAfterSettlement = null,
 } = {}) {
   const projectSession = new ProjectSession();
   const locator = projectSession.openLocator(currentPath);
@@ -161,6 +162,8 @@ function createHarness({
     queueDraft: 0,
     draftAuthorities: [],
     confirmHistory: [],
+    catalogAfterSettlement: [],
+    order: [],
   };
   const bridgeClient = {
     async versionFile(sourcePath, versionId) {
@@ -258,6 +261,7 @@ function createHarness({
     },
     async confirmEditingHistoryVersion(input) {
       calls.confirmHistory.push(input);
+      calls.order.push("confirm");
       if (confirmHistory) return confirmHistory(input);
       return {
         ok: true,
@@ -348,6 +352,11 @@ function createHarness({
     async refreshWorkspace(input) {
       calls.refresh.push(input);
       return { status: "succeeded", value: { hydrated: true } };
+    },
+    scheduleProjectListRefreshAfterSettlement(context) {
+      calls.order.push("catalog");
+      calls.catalogAfterSettlement.push(context);
+      if (onCatalogAfterSettlement) onCatalogAfterSettlement(context);
     },
   };
   const documentWorkflow = {
@@ -485,6 +494,7 @@ test("activation validates all content and synchronously publishes every Session
   assert.equal(harness.calls.draftAuthorities.length, 1);
   assert.equal(harness.calls.draftAuthorities[0].draftRevision, 0);
   assert.deepEqual(harness.commentSession.snapshot.comments, []);
+  assert.equal(harness.calls.catalogAfterSettlement.length, 1);
 });
 
 test("activation keeps the Canvas locked when rendered-byte verification fails", async () => {
@@ -593,6 +603,7 @@ test("background activation never replaces the active Canvas", async () => {
   assert.equal(harness.calls.activateInputs[0].projectRootPath, "/tmp/project-a");
   assert.equal(harness.calls.activateInputs[0].workingCopyId, "work_ver_0001");
   assert.equal(harness.calls.activateInputs[0].sourcePath, SOURCE_A);
+  assert.equal(harness.calls.catalogAfterSettlement.length, 1);
 });
 
 test("history failure restores the complete prior Document and Version snapshot", async () => {
@@ -758,6 +769,7 @@ test("history continuation synchronously publishes the V2 Working Copy authority
     appliedOperationIds: ["operation_v2"],
   };
   const harness = createHarness({
+    onCatalogAfterSettlement: () => new Promise(() => {}),
     versionRead: async (sourcePath, versionId) => ({
       projectId: "project_a",
       documentId: "document_a",
@@ -847,6 +859,9 @@ test("history continuation synchronously publishes the V2 Working Copy authority
   assert.equal(harness.calls.prepare[0].operationId, harness.calls.confirmHistory[0].operationId);
   assert.equal(harness.calls.confirmHistory.length, 1);
   assert.equal(harness.calls.render.at(-1)?.html, HISTORY_HTML);
+  assert.deepEqual(harness.calls.order, ["confirm", "catalog"]);
+  assert.equal(harness.calls.catalogAfterSettlement.length, 1);
+  assert.equal(harness.calls.catalogAfterSettlement[0].sourcePath, HISTORY_WORKING_COPY_PATH);
 });
 
 test("history continuation retries one lost Bridge response with the same receipt operation", async () => {

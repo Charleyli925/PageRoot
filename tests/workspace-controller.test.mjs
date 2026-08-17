@@ -880,3 +880,18 @@ test("a mismatched workspace identity does not rebind a registered Draft", async
   assert.deepEqual(harness.projectSession.context, context);
   assert.equal(harness.draftSession.context, null);
 });
+
+test("confirmExternalOpen rejects view-initial before ProjectWorkflow is required", async () => {
+  const harness = createHarness();
+  assert.deepEqual(
+    await harness.controller.confirmExternalOpen({
+      requestId: "req_view",
+      action: "view-initial",
+    }),
+    {
+      status: "rejected",
+      code: "EXTERNAL_OPEN_ACTION_UNSUPPORTED",
+      reason: "这条打开确认不提供查看初始版本。",
+    },
+  );
+});

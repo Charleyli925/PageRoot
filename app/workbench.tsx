@@ -7,7 +7,6 @@ import {
   useEffect,
   useLayoutEffect,
   useMemo,
-  useReducer,
   useRef,
   useState,
   type ChangeEvent,
@@ -50,6 +49,7 @@ import HtmlInteractionPreview, {
 } from "./components/HtmlInteractionPreview";
 import NoticeBar from "./components/NoticeBar";
 import RestartUpdateDialog from "./components/RestartUpdateDialog";
+import ExternalHtmlOpenDialog from "./workbench/ExternalHtmlOpenDialog";
 import {
   MAX_ATTACHMENT_BYTES,
   MAX_COMMENT_ATTACHMENTS,
@@ -76,8 +76,8 @@ import { appendDirectEditEvent } from "./lib/direct-edit-events.js";
 import {
   noticeAutoDismissMs,
   productErrorMessage,
-  shouldPresentNotice,
-  shouldReplaceNotice,
+  createNoticeDismissalMemory,
+  nextPresentedNotice,
 } from "./lib/notification-policy";
 import {
   DEFAULT_PROJECT_HTML,
@@ -284,11 +284,13 @@ const INITIAL_RUN_SNAPSHOT: RunSessionSnapshot = {
   backgroundResults: [],
 };
 const INITIAL_EXTERNAL_FILE_OPEN_SNAPSHOT = {
-  status: "idle",
+  status: "idle" as const,
   activeRequestId: null,
   queuedRequestId: null,
   deferredRequestId: null,
   deferredSequence: 0,
+  confirmation: null,
+  attention: null,
 };
 const INITIAL_PROJECT_APPLICATION_SNAPSHOT = {
   status: "idle",
@@ -317,6 +319,12 @@ const INITIAL_DOCUMENT_SNAPSHOT: DocumentSessionSnapshot = {
   html: DEFAULT_PROJECT_HTML,
   sourceSha256: null,
   canvasGeneration: 0,
+  canvasAuthority: {
+    status: "idle",
+    generation: 0,
+    renderedSha256: null,
+    error: null,
+  },
   editRevision: 0,
   lastPersistedRevision: 0,
   persistState: "idle",
@@ -398,11 +406,6 @@ const WELCOME_PROJECT = {
   name: WELCOME_PROJECT_NAME,
   sourcePath: null as string | null,
 };
-
-function noticeReducer(current: Toast, next: Toast): Toast {
-  if (!shouldPresentNotice(next)) return current;
-  return shouldReplaceNotice(current, next) ? next : current;
-}
 
 function requiredWorkspaceController(
   controller: WorkspaceController | null,
@@ -522,6 +525,7 @@ export default function Workbench() {
   const versionTransitioningRef = useRef(false);
   const attachmentObjectUrlsRef = useRef<Map<string, string>>(new Map());
   const toastRef = useRef<Toast>(null);
+  const noticeDismissalMemoryRef = useRef(createNoticeDismissalMemory());
   const previousPersistStateRef = useRef(new Map<string, PersistState>());
   const previousRunStateRef = useRef(
     new Map<string, LifecycleState | "none">(),
@@ -533,6 +537,7 @@ export default function Workbench() {
   const normalizeCurrentGlobalCommentsRef = useRef<() => CommentItem[]>(() => []);
   const projectRulesEditorRef = useRef<HTMLTextAreaElement | null>(null);
   const fileRenameInputRef = useRef<HTMLInputElement | null>(null);
+  const openHtmlButtonRef = useRef<HTMLButtonElement | null>(null);
   const fileRenameEditingRef = useRef(false);
   const fileRenameBusyRef = useRef(false);
   const fileRenameErrorRef = useRef("");
@@ -582,6 +587,8 @@ export default function Workbench() {
   const externalFileOpenSnapshot =
     workspaceControllerSnapshot?.project?.externalOpen
     ?? INITIAL_EXTERNAL_FILE_OPEN_SNAPSHOT;
+  const openConfirmation =
+    workspaceControllerSnapshot?.project?.openConfirmation || null;
   const projectApplicationSnapshot =
     workspaceControllerSnapshot?.project?.projectApplication
     ?? INITIAL_PROJECT_APPLICATION_SNAPSHOT;
@@ -995,6 +1002,30 @@ export default function Workbench() {
               if (!accept) throw new Error("当前 PageRoot 版本缺少外部文件打开通道。");
               return accept(requestId);
             },
+            commitPrepared: async (payload: {
+              requestId: string;
+              action: "import-new" | "continue-current" | "open-managed";
+              deleteOriginal?: boolean;
+            }) => {
+              const commit = window.htmlAIProjects?.commitPreparedHtmlOpen;
+              if (!commit) throw new Error("当前 PageRoot 版本缺少导入确认通道。");
+              return commit(payload);
+            },
+            cancelPrepared: async (requestId: string) => {
+              const cancel = window.htmlAIProjects?.cancelPreparedHtmlOpen;
+              if (!cancel) return { canceled: false };
+              return cancel(requestId);
+            },
+            finalizePrepared: async (requestId: string) => {
+              const finalize = window.htmlAIProjects?.finalizePreparedHtmlOpen;
+              if (!finalize) return { disposition: "kept" as const };
+              return finalize(requestId);
+            },
+            rollbackPrepared: async (requestId: string) => {
+              const rollback = window.htmlAIProjects?.rollbackPreparedHtmlOpen;
+              if (!rollback) return { rolledBack: false, project: null };
+              return rollback(requestId);
+            },
             activateGeneratedVersion: async (input: {
               previousSourcePath: string;
               nextSourcePath: string;
@@ -1170,9 +1201,16 @@ export default function Workbench() {
     sha256: string | null,
   ): boolean => {
     if (generation !== currentDocumentSessionSnapshot().canvasGeneration) return false;
+    if (surface === "edit") {
+      if (!sha256) return false;
+      return workspaceControllerRef.current?.acknowledgeEditCanvas({
+        generation,
+        renderedSha256: sha256,
+      }) === true;
+    }
     setCanvasRenderAcks((current) => ({
       ...current,
-      [surface]: sha256 ? { generation, sha256 } : null,
+      preview: sha256 ? { generation, sha256 } : null,
     }));
     return true;
   }, [currentDocumentSessionSnapshot]);
@@ -1239,9 +1277,31 @@ export default function Workbench() {
   const [repositoryOpenFailed, setRepositoryOpenFailed] = useState(false);
   const [userNoticeOpenFailed, setUserNoticeOpenFailed] = useState(false);
   const promptedUpdateVersionRef = useRef<string | null>(null);
-  const [toast, setToast] = useReducer(noticeReducer, null);
+  const [toast, setToastState] = useState<Toast>(null);
+  const setToast = useCallback((next: Toast) => {
+    const memory = noticeDismissalMemoryRef.current;
+    if (next === null) {
+      memory.rememberDismissal(toastRef.current);
+      setToastState(null);
+      return;
+    }
+    const incoming = memory.withRepeatCount(next);
+    setToastState((current) => nextPresentedNotice(current, incoming) as Toast);
+  }, []);
   const [pausedNoticeIdentity, setPausedNoticeIdentity] =
     useState<string | null>(null);
+  const noticeDeadlineRef = useRef<{
+    identity: string;
+    deadlineAt: number;
+    remainingMs: number;
+    paused: boolean;
+  } | null>(null);
+  const lastHistoryDirectionRef = useRef<"undo" | "redo">("undo");
+  const [externalSourcePreview, setExternalSourcePreview] = useState<{
+    html: string;
+    sourceSha256: string;
+    lastModifiedAt: string;
+  } | null>(null);
   const noticeIdentity = toast
     ? `${toast.dedupeKey || ""}\n${toast.title}\n${toast.message}`
     : "";
@@ -1267,15 +1327,6 @@ export default function Workbench() {
         setProjectRecordsPreparing(false);
         setProjectRecordsError("");
         if (registrationEvent.projectName) setProjectName(registrationEvent.projectName);
-        if (registrationEvent.imported) {
-          setToast({
-            title: "已打开",
-            message: "原来的文件没有改动。",
-            tone: "success",
-            disposition: "background-result",
-            dedupeKey: "project-file-imported",
-          });
-        }
         if (registrationEvent.workingCopyRecovered) {
           setToast({
             title: "文件已自动恢复",
@@ -1285,6 +1336,53 @@ export default function Workbench() {
             dedupeKey: "working-copy-recovered",
           });
         }
+        return;
+      }
+      if (event.type === "external-open-completed") {
+        const openEvent = event as Readonly<{
+          imported?: boolean;
+          disposition?: string;
+          visibleV1FileName?: string;
+          sourcePath?: string | null;
+        }>;
+        if (!openEvent.imported) return;
+        const fileName = openEvent.visibleV1FileName || "项目内的 V1 文件";
+        const disposition = openEvent.disposition || "kept";
+        const message = disposition === "trashed"
+          ? `初始版本 V1 已保存为 ${fileName}。原文件已移入废纸篓。`
+          : disposition === "trash-failed"
+            ? "项目已导入。原文件未能删除，仍留在原来的位置。"
+            : `初始版本 V1 已保存为 ${fileName}，与刚才选择的文件一致。原文件没有改动。`;
+        setToast({
+          title: "已导入 PageRoot",
+          message,
+          tone: disposition === "trash-failed" ? "warning" : "success",
+          disposition: "background-result",
+          dedupeKey: "external-html-imported",
+          ...(openEvent.sourcePath ? {
+            action: {
+              id: "reveal-imported-project" as const,
+              label: "在文件夹中打开",
+              sourcePath: openEvent.sourcePath,
+            },
+          } : {}),
+        });
+        return;
+      }
+      if (event.type === "external-open-canvas-failed") {
+        const canvasEvent = event as Readonly<{ reason?: string }>;
+        setToast({
+          title: "画布确认失败",
+          message: canvasEvent.reason || "当前画布尚未完成自动恢复。",
+          tone: "error",
+          sticky: true,
+          disposition: "direct-action",
+          dedupeKey: "canvas-verification-failed",
+          action: {
+            id: "retry-canvas-verification",
+            label: "重试",
+          },
+        });
         return;
       }
       if (event.type === "attachment-cleanup-failed") {
@@ -1365,6 +1463,17 @@ export default function Workbench() {
             setDrawer("handoff");
             if (state === "ready-to-open" && toastRef.current?.dedupeKey === "ai-submit") {
               setToast(null);
+            }
+            if (state === "error" && run) {
+              setToast({
+                title: "AI 输出未通过安全校验",
+                message: run.error || "提交的 HTML 不完整或格式错误。",
+                tone: "error",
+                sticky: true,
+                disposition: "user-choice",
+                dedupeKey: `ai-validation-error:${run.requestId}`,
+                action: { id: "open-handoff", label: "查看详情" },
+              });
             }
           }
         } else if (
@@ -2216,6 +2325,7 @@ export default function Workbench() {
   );
   const pendingSendItemCount = activeCommentCount;
   const interactionPreviewHtml = useMemo(() => {
+    if (externalSourcePreview?.html) return externalSourcePreview.html;
     if (!browserPreviewOnly || projectName !== WELCOME_PROJECT_NAME) return html;
     return html.replace(
       /(["'])(?:\.\/)?brand-logo\.png\1/iu,
@@ -2223,6 +2333,7 @@ export default function Workbench() {
     );
   }, [
     browserPreviewOnly,
+    externalSourcePreview,
     html,
     projectName,
   ]);
@@ -2904,6 +3015,7 @@ export default function Workbench() {
           !cancelled
           && currentDocumentSessionSnapshot().html === expectedHtml
           && currentDocumentSessionSnapshot().canvasGeneration === expectedGeneration
+          && currentDocumentSessionSnapshot().sourceSha256 === renderedSha256
         ) {
           acknowledgeCanvasRender("edit", expectedGeneration, renderedSha256);
         }
@@ -2922,6 +3034,7 @@ export default function Workbench() {
     editRuntimePhase,
     editRuntimeRenderPending,
     html,
+    sourceSha256,
   ]);
 
   const clearAutosaveTimer = useCallback(() => {
@@ -3024,10 +3137,37 @@ export default function Workbench() {
   }, [workspaceController]);
 
   useEffect(() => {
-    if (!toast) return;
-    if (noticeTimerPaused) return;
+    if (!toast) {
+      noticeDeadlineRef.current = null;
+      return;
+    }
     const dismissAfter = noticeAutoDismissMs(toast);
-    if (dismissAfter === null) return;
+    if (dismissAfter === null) {
+      noticeDeadlineRef.current = null;
+      return;
+    }
+    const now = Date.now();
+    const existing = noticeDeadlineRef.current;
+    const remaining = existing?.identity === noticeIdentity
+      ? existing.paused
+        ? existing.remainingMs
+        : Math.max(0, existing.deadlineAt - now)
+      : dismissAfter;
+    if (noticeTimerPaused) {
+      noticeDeadlineRef.current = {
+        identity: noticeIdentity,
+        deadlineAt: now + remaining,
+        remainingMs: remaining,
+        paused: true,
+      };
+      return;
+    }
+    noticeDeadlineRef.current = {
+      identity: noticeIdentity,
+      deadlineAt: now + remaining,
+      remainingMs: remaining,
+      paused: false,
+    };
     const timeout = window.setTimeout(() => {
       captureUsageEvent("notification_interacted", {
         notice_code: noticeUsageCode(toast.dedupeKey),
@@ -3035,9 +3175,9 @@ export default function Workbench() {
         surface: "global",
       }, currentProjectSessionSnapshot().projectId || undefined);
       setToast(null);
-    }, dismissAfter);
+    }, remaining);
     return () => window.clearTimeout(timeout);
-  }, [currentProjectSessionSnapshot, noticeTimerPaused, toast]);
+  }, [currentProjectSessionSnapshot, noticeIdentity, noticeTimerPaused, toast]);
 
   useEffect(() => {
     if (!previewAttachment) return;
@@ -3798,7 +3938,12 @@ export default function Workbench() {
       }).decode(await file.arrayBuffer());
       workspaceController.acceptBrowserProject({
         operationId,
-        project: { name: file.name, sourcePath: null, html: fileHtml },
+        project: {
+          name: file.name,
+          sourcePath: null,
+          html: fileHtml,
+          sha256: await browserSha256(fileHtml),
+        },
       });
     } catch (cause) {
       const encodingUnsupported = cause instanceof TypeError;
@@ -4083,6 +4228,11 @@ export default function Workbench() {
     );
     if (
       !skipConfirmation
+      && persistState === "conflict"
+      && !window.confirm("确定要用外部版本覆盖当前编辑吗？此操作不可撤销。")
+    ) return;
+    if (
+      !skipConfirmation
       && persistState !== "conflict"
       && hasUnwrittenLocalChanges
       && !window.confirm("重新载入会舍弃尚未写回的当前编辑内容。建议先导出副本，仍要继续吗？")
@@ -4146,6 +4296,124 @@ export default function Workbench() {
       void reloadCurrentSource({ fromDeferred: true });
     };
   }, [reloadCurrentSource]);
+
+  const previewExternalSource = useCallback(async () => {
+    const context = captureProjectContext();
+    if (!context || !workspaceController) return;
+    const outcome = await requiredWorkspaceController(workspaceController)
+      .previewExternalDocumentSource({ context });
+    if (outcome.status !== "succeeded") {
+      setToast({
+        title: "无法预览外部版本",
+        message: outcome.status === "stale"
+          ? "当前项目已经切换。"
+          : outcome.reason,
+        tone: "error",
+        sticky: true,
+        disposition: "background-result",
+        dedupeKey: "external-source-preview-failed",
+      });
+      return;
+    }
+    setExternalSourcePreview({
+      html: String(outcome.value.html || ""),
+      sourceSha256: String(outcome.value.sourceSha256 || ""),
+      lastModifiedAt: String(outcome.value.lastModifiedAt || ""),
+    });
+    setHandoffPreviewOpen(false);
+    setCanvasMode("preview");
+  }, [captureProjectContext, workspaceController]);
+
+  const returnToEditingFromExternalPreview = useCallback(() => {
+    setExternalSourcePreview(null);
+    setCanvasMode("edit");
+  }, []);
+
+  const externalPreviewIdentityRef = useRef("");
+  useEffect(() => {
+    const identity = `${projectId || ""}\0${documentId || ""}\0${sourcePath || ""}`;
+    const previous = externalPreviewIdentityRef.current;
+    externalPreviewIdentityRef.current = identity;
+    if (!previous || previous === identity) return;
+    const [previousProjectId, previousDocumentId, previousSourcePath] = previous.split("\0");
+    if (
+      (previousProjectId && projectId && previousProjectId !== projectId)
+      || (previousDocumentId && documentId && previousDocumentId !== documentId)
+      || (previousSourcePath && sourcePath && previousSourcePath !== sourcePath)
+    ) {
+      setExternalSourcePreview(null);
+    }
+  }, [documentId, projectId, sourcePath]);
+
+  const forceUnlockCurrentSource = useCallback(async ({
+    skipConfirmation = false,
+  }: {
+    skipConfirmation?: boolean;
+  } = {}) => {
+    const context = captureProjectContext();
+    if (!context || !workspaceController) return;
+    if (
+      !skipConfirmation
+      && !window.confirm("确定要用磁盘上的版本继续吗？未写入的编辑和未完成的 AI 结果都会丢弃，此操作不可撤销。")
+    ) {
+      return;
+    }
+    const operationId = beginSourceTransition();
+    if (operationId === null) return;
+    try {
+      const outcome = await requiredWorkspaceController(workspaceController)
+        .forceUnlockDocumentConflict({ context });
+      if (
+        outcome.status === "stale"
+        || sourceTransitionOperationRef.current !== operationId
+        || !isCurrentProjectContext(context)
+      ) return;
+      if (outcome.status !== "succeeded") {
+        throw new Error(outcome.reason);
+      }
+      setExternalSourcePreview(null);
+      const lastModified = String(outcome.value.lastModifiedAt || "");
+      if (lastModified) setLastModifiedAt(lastModified);
+      await refreshWorkspace(context.sourcePath, context.epoch);
+      setCanvasMode("edit");
+      setToast({
+        title: "项目已解锁",
+        message: "可以继续编辑，之后的修改会写回磁盘。",
+        tone: "success",
+        disposition: "background-result",
+        dedupeKey: "source-force-unlock",
+      });
+    } catch (cause) {
+      if (!isCurrentProjectContext(context)) return;
+      setToast({
+        title: "强制解锁失败",
+        message: productErrorMessage(cause, "项目仍保持冲突状态，请先导出当前编辑后再试。"),
+        tone: "error",
+        sticky: true,
+        disposition: "user-choice",
+        dedupeKey: "source-force-unlock-failed",
+        action: { id: "relaunch-app", label: "重新打开源页" },
+      });
+    } finally {
+      finishSourceTransition(operationId);
+    }
+  }, [
+    beginSourceTransition,
+    captureProjectContext,
+    finishSourceTransition,
+    isCurrentProjectContext,
+    refreshWorkspace,
+    workspaceController,
+  ]);
+
+  const acceptExternalSourceFromPreview = useCallback(async () => {
+    setExternalSourcePreview(null);
+    if (persistState === "conflict") {
+      await forceUnlockCurrentSource({ skipConfirmation: true });
+      return;
+    }
+    await reloadCurrentSource({ skipConfirmation: true });
+  }, [forceUnlockCurrentSource, persistState, reloadCurrentSource]);
 
   const requestUserFlush = useCallback((fromDeferred = false) => {
     if (interactionLocked) {
@@ -4225,8 +4493,9 @@ export default function Workbench() {
       editorRef.current?.cancelHistoryAction();
       return false;
     }
-    const outcome = await requiredWorkspaceController(workspaceController)
-      .performDocumentHistoryAction({ direction, context });
+    lastHistoryDirectionRef.current = direction;
+    const controller = requiredWorkspaceController(workspaceController);
+    const outcome = await controller.performDocumentHistoryAction({ direction, context });
     if (outcome.status === "succeeded") return true;
     editorRef.current?.cancelHistoryAction({
       restore: outcome.status !== "stale",
@@ -4236,8 +4505,9 @@ export default function Workbench() {
         title: direction === "undo" ? "撤销未完成" : "重做未完成",
         message: outcome.reason,
         tone: "warning",
-        disposition: "background-result",
+        disposition: "user-choice",
         dedupeKey: `source-history-${direction}-failed`,
+        action: { id: "retry-history", label: "再试一次", direction },
       });
     }
     return false;
@@ -5953,7 +6223,9 @@ export default function Workbench() {
     workspaceController,
   ]);
 
-  const persistLabel = persistState === "writing"
+  const persistLabel = workspaceController?.hasDocumentHistoryAction
+    ? "正在撤销或重做…"
+    : persistState === "writing"
     ? "正在更新文件…"
     : persistState === "queued"
       ? "正在更新文件…"
@@ -5968,9 +6240,17 @@ export default function Workbench() {
             : browserPreviewOnly
               ? "浏览器预览 · 只读"
               : "内置介绍页 · 打开本地 HTML 后开始编辑";
+  const canvasAuthority = documentSnapshot.canvasAuthority;
   const visibleCanvasAck = canvasMode === "preview"
     ? canvasRenderAcks.preview
-    : canvasRenderAcks.edit;
+    : (
+      canvasAuthority?.status === "verified"
+        ? {
+          generation: canvasAuthority.generation,
+          sha256: canvasAuthority.renderedSha256,
+        }
+        : null
+    );
   const isSafelySaved = Boolean(
     sourcePath
     && sourceSha256
@@ -5980,12 +6260,15 @@ export default function Workbench() {
     && !projectHydrating
     && !projectLoadError
     && !viewTransitioning
-    && visibleCanvasAck?.generation === canvasGeneration
-    && visibleCanvasAck.sha256 === sourceSha256
+    && canvasAuthority?.status === "verified"
+    && canvasAuthority.generation === canvasGeneration
+    && canvasAuthority.renderedSha256 === sourceSha256
   );
-  const safeSaveLabel = isSafelySaved
-    ? "已安全保存"
-    : "正在确认当前画布…";
+  const safeSaveLabel = canvasAuthority?.status === "failed"
+    ? "画布确认失败 · 重试"
+    : isSafelySaved
+      ? "已安全保存"
+      : "正在确认当前画布…";
   const saveStatusLabel = browserPreviewOnly
     ? "操作不会保存"
     : fileRenameBusy
@@ -6492,11 +6775,24 @@ export default function Workbench() {
   const handleToastAction = (action: ToastAction) => {
     setToast(null);
     switch (action.id) {
+      case "retry-canvas-verification":
+        void workspaceControllerRef.current?.retryCanvasVerification({
+          context: captureProjectContext() || undefined,
+        });
+        return;
+      case "reveal-imported-project":
+        void showProjectInFolder(action.sourcePath);
+        return;
       case "retry-export":
         void exportCurrentHtml();
         return;
       case "open-handoff":
         setDrawer("handoff");
+        return;
+      case "retry-history":
+        void requestSourceHistoryAction(
+          action.direction || lastHistoryDirectionRef.current,
+        );
         return;
       case "open-project":
       case "retry-project-open":
@@ -6748,7 +7044,8 @@ export default function Workbench() {
                 </strong>
               )}
               <span className="window-file-quick-actions">
-                <button
+                  <button
+                  ref={openHtmlButtonRef}
                   className="window-file-quick-action"
                   type="button"
                   data-tooltip="打开本地HTML"
@@ -6825,10 +7122,25 @@ export default function Workbench() {
                 data-edit-revision={editRevision}
                 data-persisted-revision={lastPersistedRevision}
                 data-canvas-generation={canvasGeneration}
+                data-canvas-authority={canvasAuthority?.status}
                 data-render-generation={visibleCanvasAck?.generation}
                 data-rendered-sha256={visibleCanvasAck?.sha256 || undefined}
-                role="status"
+                role={canvasAuthority?.status === "failed" ? "button" : "status"}
                 aria-live="polite"
+                tabIndex={canvasAuthority?.status === "failed" ? 0 : undefined}
+                onClick={canvasAuthority?.status === "failed" ? () => {
+                  void workspaceController?.retryCanvasVerification({
+                    context: captureProjectContext() || undefined,
+                  });
+                } : undefined}
+                onKeyDown={canvasAuthority?.status === "failed" ? (event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    void workspaceController?.retryCanvasVerification({
+                      context: captureProjectContext() || undefined,
+                    });
+                  }
+                } : undefined}
               >
                 <span aria-hidden="true" />
                 {saveStatusLabel}
@@ -6845,6 +7157,10 @@ export default function Workbench() {
               disabled={browserPreviewOnly || runInProgress || viewMode === "history"}
               title={browserPreviewOnly ? "浏览器预览为只读模式" : undefined}
               onClick={() => {
+                if (externalSourcePreview) {
+                  returnToEditingFromExternalPreview();
+                  return;
+                }
                 if (canvasMode !== "preview") {
                   setCanvasMode("edit");
                   return;
@@ -7066,20 +7382,40 @@ export default function Workbench() {
         </section>
       ) : null}
 
-      {!workspaceIssue && (persistState === "conflict" || persistState === "failed") ? (
+      {!workspaceIssue
+      && !externalSourcePreview
+      && (persistState === "conflict" || persistState === "failed") ? (
         <section className="source-conflict-banner" role="alert">
           <div>
-            <strong>{persistState === "conflict" ? "源 HTML 已被外部修改" : "当前修改还没有写入文件"}</strong>
-            <span>{persistError || "工作台保留了当前编辑内容，不会假装已经更新。"}</span>
+            <strong>{persistState === "conflict" ? "源文件在磁盘上被其他程序修改了" : "当前修改还没有写入文件"}</strong>
+            <span>{persistState === "conflict"
+              ? (persistError || "您的编辑内容仍在，可先预览外部版本再决定。")
+              : (persistError || "工作台保留了当前编辑内容，不会假装已经更新。")}</span>
           </div>
           <button type="button" onClick={() => void exportCurrentHtml()}>导出当前编辑</button>
-          <button
-            type="button"
-            onClick={() => {
-              if (persistState === "conflict") void reloadCurrentSource();
-              else requestUserFlush();
-            }}
-          >{persistState === "conflict" ? "重新载入外部文件" : "重试更新文件"}</button>
+          {persistState === "conflict" ? (
+            <button type="button" onClick={() => void previewExternalSource()}>
+              预览外部版本
+            </button>
+          ) : null}
+          {persistState === "conflict" ? (
+            <button
+              type="button"
+              className="destructive-action"
+              onClick={() => {
+                void forceUnlockCurrentSource();
+              }}
+            >
+              采用磁盘版本
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                requestUserFlush();
+              }}
+            >重试更新文件</button>
+          )}
         </section>
       ) : null}
 
@@ -7101,7 +7437,20 @@ export default function Workbench() {
         </section>
       ) : null}
 
-      {runInProgress && handoffPreviewOpen ? (
+      {externalSourcePreview ? (
+        <PreviewNavigationBanner
+          key={`external-${externalSourcePreview.sourceSha256}`}
+          icon={<EyeIcon aria-hidden="true" size={18} weight="duotone" />}
+          title="正在预览外部版本"
+          detail="这是磁盘上被其他程序改过的源 HTML，尚未替换您的编辑。"
+          secondaryActionLabel="接受此版本（丢弃我的编辑）"
+          onSecondaryAction={() => {
+            void acceptExternalSourceFromPreview();
+          }}
+          actionLabel="返回我的编辑"
+          onAction={returnToEditingFromExternalPreview}
+        />
+      ) : runInProgress && handoffPreviewOpen ? (
         <PreviewNavigationBanner
           key={`handoff-${activeRun?.requestId || "pending"}-${activeRun?.attemptId || "pending"}`}
           className="sent-preview-banner"
@@ -8518,6 +8867,11 @@ export default function Workbench() {
               pendingRunOutcome={pendingRunOutcome}
               canRevealAiTask={canRevealAiTask}
               onRevealAiTask={() => void revealAiTaskInFinder()}
+              onRetrySubmission={() => {
+                workspaceControllerRef.current?.dismissActiveRun();
+                void generateRequest();
+              }}
+              onCancelRun={requestActiveRunEnd}
             />
           ) : null}
         </div>
@@ -8554,6 +8908,35 @@ export default function Workbench() {
           />
         ) : null}
       </aside>
+
+      {openConfirmation ? (
+        <ExternalHtmlOpenDialog
+          confirmation={openConfirmation}
+          deleteOriginal={openConfirmation.deleteOriginal === true}
+          busy={openConfirmation.busy === true}
+          onDeleteOriginalChange={(next) => {
+            workspaceController?.setExternalOpenDeleteOriginal({
+              requestId: openConfirmation.requestId,
+              deleteOriginal: next,
+            });
+          }}
+          onCancel={() => {
+            workspaceController?.cancelExternalOpen({
+              requestId: openConfirmation.requestId,
+            });
+            openHtmlButtonRef.current?.focus();
+          }}
+          onConfirm={(action) => {
+            void workspaceController?.confirmExternalOpen({
+              requestId: openConfirmation.requestId,
+              action,
+              deleteOriginal: openConfirmation.deleteOriginal === true,
+            }).finally(() => {
+              openHtmlButtonRef.current?.focus();
+            });
+          }}
+        />
+      ) : null}
 
       <CancelAiRunDialog
         open={cancelRunConfirmationOpen}
@@ -8609,6 +8992,9 @@ export default function Workbench() {
           message={toast.message}
           tone={toast.tone}
           actionLabel={toast.action?.label}
+          dismissMs={noticeAutoDismissMs(toast)}
+          paused={noticeTimerPaused}
+          repeatCount={toast.repeatCount || 1}
           onAction={toast.action ? (() => {
             const action = toast.action;
             if (action) handleToastAction(action);

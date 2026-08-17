@@ -114,9 +114,9 @@ export function noticeAutoDismissMs(notice) {
     || disposition === "direct-action"
     || disposition === "user-choice"
   ) return null;
-  if (disposition === "background-result") return 7_000;
-  if (tone === "warning") return 5_000;
-  return 2_500;
+  if (disposition === "background-result") return 8_000;
+  if (tone === "warning") return 6_000;
+  return 3_500;
 }
 
 /**
@@ -144,6 +144,9 @@ export function noticeDisposition(notice) {
  */
 export function shouldPresentNotice(notice) {
   if (!notice) return true;
+  if (notice.sticky && /conflict/i.test(String(notice.dedupeKey || ""))) {
+    return true;
+  }
   const disposition = noticeDisposition(notice);
   return disposition === "direct-action"
     || disposition === "user-choice"
@@ -238,4 +241,63 @@ export function productErrorMessage(cause, fallback) {
     message = `${message.slice(0, 277).trimEnd()}…`;
   }
   return message || fallback;
+}
+
+export const NOTICE_REPEAT_WINDOW_MS = 1_000;
+export const NOTICE_DISMISSAL_TTL_MS = 5_000;
+
+/**
+ * Bounded memory for toast repeat counts. Workbench owns one instance per
+ * window; entries expire so unique requestIds cannot grow without bound.
+ *
+ * @param {{ now?: () => number }} [options]
+ */
+export function createNoticeDismissalMemory({ now = () => Date.now() } = {}) {
+  /** @type {Map<string, { dismissedAt: number, repeatCount: number }>} */
+  const dismissals = new Map();
+
+  function prune(timestamp) {
+    for (const [key, entry] of dismissals) {
+      if (timestamp - entry.dismissedAt >= NOTICE_DISMISSAL_TTL_MS) {
+        dismissals.delete(key);
+      }
+    }
+  }
+
+  return {
+    rememberDismissal(notice) {
+      const key = String(notice?.dedupeKey || "");
+      if (!key) return;
+      const timestamp = now();
+      prune(timestamp);
+      dismissals.set(key, {
+        dismissedAt: timestamp,
+        repeatCount: Number(notice.repeatCount || 1),
+      });
+    },
+    withRepeatCount(notice) {
+      const key = String(notice?.dedupeKey || "");
+      if (!key || !notice) return notice;
+      const timestamp = now();
+      prune(timestamp);
+      const previous = dismissals.get(key);
+      if (!previous || timestamp - previous.dismissedAt >= NOTICE_REPEAT_WINDOW_MS) {
+        return notice;
+      }
+      dismissals.delete(key);
+      return { ...notice, repeatCount: previous.repeatCount + 1 };
+    },
+  };
+}
+
+/**
+ * Pure presentation choice after repeat-count has already been applied.
+ *
+ * @param {unknown} current
+ * @param {unknown} incoming
+ */
+export function nextPresentedNotice(current, incoming) {
+  if (!incoming) return null;
+  if (!shouldPresentNotice(incoming)) return current;
+  return shouldReplaceNotice(current, incoming) ? incoming : current;
 }

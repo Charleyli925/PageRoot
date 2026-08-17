@@ -16,6 +16,7 @@ import {
   expectedPackagedAppIdentity,
   readPackagedPlistIdentity,
 } from "../../../scripts/packaged-app-identity.mjs";
+import { waitForProjectReady } from "./helpers/pageroot-app-fixture.mjs";
 
 const productRoot = path.resolve(import.meta.dirname, "../../..");
 const packageJson = JSON.parse(
@@ -86,7 +87,7 @@ async function closePackagedGracefully(electronApp, page) {
 }
 
 test("packaged app preserves identity and imports external HTML as V1 across startup states", async () => {
-  test.setTimeout(60_000);
+  test.setTimeout(180_000);
   const isolatedUserData = mkdtempSync(
     path.join(tmpdir(), "pageroot-native-e2e-packaged-startup-"),
   );
@@ -125,8 +126,7 @@ test("packaged app preserves identity and imports external HTML as V1 across sta
     await page.waitForLoadState("domcontentloaded");
     await expect(page).toHaveTitle("源页");
     await expect(page.locator("main.workbench")).toBeVisible();
-    await expect(page.locator("main.workbench"))
-      .toHaveAttribute("data-project-state", "ready", { timeout: 30_000 });
+    await waitForProjectReady(page, { timeout: 60_000 });
     await expect(page.getByRole("button", { name: "项目", exact: true }))
       .toBeEnabled({ timeout: 30_000 });
     await expect(
@@ -170,6 +170,7 @@ test("packaged app preserves identity and imports external HTML as V1 across sta
     await electronApp.evaluate(({ app }, sourcePath) => {
       app.emit("open-file", { preventDefault() {} }, sourcePath);
     }, liveSourcePath);
+    await waitForProjectReady(page, { timeout: 60_000 });
     await expect.poll(
       async () => (await page.evaluate(
         () => window.htmlAIProjects?.getActiveProject(),

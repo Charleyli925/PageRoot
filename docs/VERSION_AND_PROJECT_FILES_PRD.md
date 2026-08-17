@@ -4,7 +4,7 @@
 - 最近更新：2026-08-15（Asia/Shanghai，UTC+8）
 - 状态：产品规则已确认，按两期串行实施
 - 适用范围：桌面版本地 HTML 导入、持续编辑、评论与附件、AI 候选审阅、正式版本历史、Registry 项目目录与 Finder 体验
-- 关联文档：[MVP 产品需求](MVP_PRD.md)、[交互流程](INTERACTION_FLOW.md)、[Change Request 协议](CHANGE_REQUEST_PROTOCOL.md)、[ADR 0022](decisions/0022-user-owned-project-root-identity.md)、[ADR 0024](decisions/0024-registry-catalog-and-ai-task-projections.md)
+- 关联文档：[MVP 产品需求](MVP_PRD.md)、[交互流程](INTERACTION_FLOW.md)、[Change Request 协议](CHANGE_REQUEST_PROTOCOL.md)、[ADR 0022](decisions/0022-user-owned-project-root-identity.md)、[ADR 0024](decisions/0024-registry-catalog-and-ai-task-projections.md)、[首次打开导入确认](IMPORT_CONFIRMATION_PRD.md)
 
 本文定义下一阶段目标规则。桌面打开路径只承认有效 v4 Project；所有 v4 以前的项目状态均不兼容，不迁移、不恢复、也不作为读取回退。任何不属于有效 v4 Project 的 HTML 都从新 v4 Project 的 V1 开始；实施本 PRD 时必须同步更新关联协议、Schema、测试和 ADR，不能只修改界面文案。
 
@@ -241,17 +241,20 @@ PR 1 内部按“文档与 Schema → Repository → Workflow → 最低限度 U
 
 ## 7. 首次打开与导入
 
-### 7.1 打开时验证并自动导入
+> 打开未登记且未绑定的 HTML 时先确认再导入；默认复制，可选在新画布确认后将原稿移入废纸篓。同一 canonical 外部路径若已有唯一项目绑定，再次打开显示“已经导入”并继续当前项目，不再建第二个项目。规范与验收见 [首次打开导入确认](IMPORT_CONFIRMATION_PRD.md)。
 
-用户从 Finder 或“打开文件”选择 HTML 时，PageRoot 只检查它是否属于有效 v4 Project：Registry 登记根目录、根目录内 `projectId` / `documentId` 与 manifest 的精确文件映射必须同时成立。
+### 7.1 打开时分类并确认
 
-- 有效 v4 Project 按当前项目打开和恢复。
-- 其他任何状态（包括 v3 及更早项目状态、损坏的 v4 记录和从未管理过的 HTML）都立即作为新外部来源导入，建立新的 v4 Project 与初始 V1。
-- 导入不移动、不覆盖、不改名或改写用户选择的原始 HTML 字节；v4 打开路径不迁移、不恢复、也不读取 v4 以前的项目状态。
+用户从 Finder 或“打开文件”选择 HTML 时，PageRoot 先只读分类，确认前不写入活动文件或 Registry：
 
-### 7.2 自动导入事务
+- 有效 v4 Project 按当前项目打开和恢复，不出现导入确认。
+- 已绑定的外部原路径再次打开时显示关联确认，主操作打开该唯一项目的当前活动 Working Copy，不分配新 `projectId`，也不因 V1 已编辑、已晋升或活动 Working Copy 已切换而失败。
+- 其他任何未绑定状态（包括 v3 及更早项目状态、损坏的 v4 记录、同内容的另一路径，以及从未管理过的 HTML）显示首次导入确认；用户确认后才建立新的 v4 Project 与初始 V1。
+- 导入不移动、不覆盖、不改名或改写用户选择的原始 HTML 字节；只有用户勾选删除且新画布已确认，才把该原稿移入废纸篓。v4 打开路径不迁移、不恢复、也不读取 v4 以前的项目状态。
 
-对不属于有效 v4 Project 的 HTML，打开流程必须按以下顺序原子完成：
+### 7.2 确认后的导入事务
+
+用户确认导入后，打开流程必须按以下顺序原子完成：
 
 1. 再次读取外部 HTML，并验证它没有在预览后被外部修改。
 2. 分配唯一项目目录和内部 `projectId`，先在 Registry 写入带登记根目录的 `pendingImports` 意图；此时尚未让任意目录取得写入授权。
@@ -726,6 +729,7 @@ manifest 可记录平台文件标识（例如 device、inode、birthtime）作�
 
 ### 16.3 导入提示与目录
 
+- [ ] 打开未登记 HTML 时先确认再导入；默认复制，可选在成功后将原稿移入废纸篓。验收以 [首次打开导入确认](IMPORT_CONFIRMATION_PRD.md) §16 为准。`[已实施]`
 - [ ] 导入完成后显示一次成功状态，并提供项目目录入口。`[第一期]`
 - [ ] 版本 1 顶部显示“已导入 PageRoot”和“在文件夹中打开”。`[第二期]`
 - [ ] 关闭并重开仍显示该状态，直到第一次晋升版本 2。`[第二期]`

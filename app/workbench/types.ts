@@ -8,13 +8,32 @@ import type {
 } from "../domain/run-lifecycle.js";
 
 export type HtmlProject = {
-  path: string;
+  path?: string;
   sourcePath: string;
   name: string;
   html: string;
   sha256: string;
   lastModifiedAt?: string;
+  openKind?: "project";
 };
+
+export type HtmlOpenConfirmation = {
+  openKind: "confirmation";
+  requestId: string;
+  classification: "new-external" | "known-external" | string;
+  sourceFileName?: string;
+  visibleV1FileName?: string;
+  projectsRootLabel?: string;
+  projectName?: string;
+  currentBasedOnVersionId?: string | null;
+  currentBasedOnOrdinal?: number;
+  latestOfficialVersionId?: string | null;
+  latestOfficialOrdinal?: number;
+  currentDiffersFromBase?: boolean;
+  sourceRelation?: "unchanged" | "changed";
+};
+
+export type HtmlOpenResult = HtmlProject | HtmlOpenConfirmation;
 
 export type RecentProject = {
   path: string;
@@ -38,8 +57,8 @@ export type RegisteredProject = {
 };
 
 export type DesktopProjectsApi = {
-  getActiveProject: () => Promise<HtmlProject | null>;
-  openHtml: () => Promise<HtmlProject | null>;
+  getActiveProject: () => Promise<HtmlOpenResult | null>;
+  openHtml: () => Promise<HtmlOpenResult | null>;
   showInFolder?: (sourcePath: string) => Promise<{ sourcePath: string }>;
   openInDefaultBrowser?: (
     sourcePath: string,
@@ -129,9 +148,22 @@ export type DesktopProjectsApi = {
   listRecentProjects: () => Promise<RecentProject[]>;
   listRegisteredProjects?: () => Promise<RegisteredProject[]>;
   openRegisteredProject?: (projectId: string) => Promise<HtmlProject>;
-  openRecent: (sourcePath: string) => Promise<HtmlProject>;
+  openRecent: (sourcePath: string) => Promise<HtmlOpenResult>;
   forgetRecent?: (sourcePath: string) => Promise<{ sourcePath: string }>;
-  acceptExternalOpen?: (requestId: string) => Promise<HtmlProject>;
+  acceptExternalOpen?: (requestId: string) => Promise<HtmlOpenResult>;
+  commitPreparedHtmlOpen?: (payload: {
+    requestId: string;
+    action: "import-new" | "continue-current" | "open-managed";
+    deleteOriginal?: boolean;
+  }) => Promise<HtmlOpenResult>;
+  cancelPreparedHtmlOpen?: (requestId: string) => Promise<{ canceled: boolean }>;
+  finalizePreparedHtmlOpen?: (requestId: string) => Promise<{
+    disposition: "kept" | "trashed" | "trash-failed";
+  }>;
+  rollbackPreparedHtmlOpen?: (requestId: string) => Promise<{
+    rolledBack: boolean;
+    project?: HtmlProject | null;
+  }>;
 };
 
 export type QoderHandoffResult = {
@@ -334,6 +366,7 @@ export type ToastDisposition =
 export type ToastAction =
   | { id: "retry-export"; label: string }
   | { id: "open-handoff"; label: string }
+  | { id: "retry-history"; label: string; direction?: "undo" | "redo" }
   | { id: "open-project"; label: string; sourcePath: string }
   | { id: "retry-project-open"; label: string; sourcePath?: string }
   | { id: "retry-external-project-open"; label: string }
@@ -360,7 +393,9 @@ export type ToastAction =
   | { id: "review-project-rules"; label: string }
   | { id: "retry-submit"; label: string }
   | { id: "resume-draft"; label: string }
-  | { id: "resume-comment-edit"; label: string; commentId: string };
+  | { id: "resume-comment-edit"; label: string; commentId: string }
+  | { id: "retry-canvas-verification"; label: string }
+  | { id: "reveal-imported-project"; label: string; sourcePath: string };
 
 type ToastBase = {
   title: string;
@@ -368,6 +403,7 @@ type ToastBase = {
   tone: ToastTone;
   sticky?: boolean;
   dedupeKey?: string;
+  repeatCount?: number;
 };
 
 /**

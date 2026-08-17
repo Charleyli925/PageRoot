@@ -262,6 +262,24 @@ test("preload exposes one narrow native/source history router", async () => {
   assert.deepEqual(requested, ["undo"]);
 });
 
+test("preload exposes a source-file change listener", async () => {
+  const preload = await loadPreloadApis(async () => success(null));
+  const received = [];
+  const unsubscribe = preload.projects.onSourceFileChanged((info) => {
+    received.push(info.sourcePath);
+  });
+  preload.emit("html-projects:source-file-may-have-changed", {
+    sourcePath: "/tmp/page.html",
+  });
+  preload.emit("html-projects:source-file-may-have-changed", { sourcePath: " " });
+  assert.deepEqual(received, ["/tmp/page.html"]);
+  unsubscribe();
+  preload.emit("html-projects:source-file-may-have-changed", {
+    sourcePath: "/tmp/page.html",
+  });
+  assert.deepEqual(received, ["/tmp/page.html"]);
+});
+
 test("preload unwraps structured project IPC success results", async () => {
   const calls = [];
   const api = await loadPreload(async (...args) => {
@@ -505,6 +523,35 @@ test("preload accepts only an opaque main-process external-open request", async 
   ]);
 });
 
+test("preload prepared-open methods never submit a filesystem path", async () => {
+  const calls = [];
+  const api = await loadPreload(async (...args) => {
+    calls.push(args);
+    return success({ openKind: "project", name: "page", html: "<html></html>" });
+  });
+
+  await api.commitPreparedHtmlOpen({
+    requestId: "req_1",
+    action: "import-new",
+    deleteOriginal: true,
+    sourcePath: "/Users/demo/secret.html",
+  });
+  await api.cancelPreparedHtmlOpen("req_1");
+  await api.finalizePreparedHtmlOpen("req_1");
+  await api.rollbackPreparedHtmlOpen("req_1");
+
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [
+    ["html-projects:commit-prepared-open", {
+      requestId: "req_1",
+      action: "import-new",
+      deleteOriginal: true,
+    }],
+    ["html-projects:cancel-prepared-open", { requestId: "req_1" }],
+    ["html-projects:finalize-prepared-open", { requestId: "req_1" }],
+    ["html-projects:rollback-prepared-open", { requestId: "req_1" }],
+  ]);
+});
+
 test("preload replays a pending external-open request and receives later requests", async () => {
   const calls = [];
   const preload = await loadPreloadApis(async (...args) => {
@@ -530,11 +577,9 @@ test("preload replays a pending external-open request and receives later request
   assert.deepEqual(JSON.parse(JSON.stringify(requests)), [
     {
       requestId: "external_startup",
-      sourcePath: "/Users/demo/startup.html",
     },
     {
       requestId: "external_live",
-      sourcePath: "/Users/demo/live.html",
     },
   ]);
   assert.deepEqual(calls, [["html-app:external-open-ready"]]);
@@ -570,7 +615,6 @@ test("preload ignores a stale external-open catch-up after a newer live delivery
 
   assert.deepEqual(JSON.parse(JSON.stringify(requests)), [{
     requestId: "external_live",
-    sourcePath: "/Users/demo/live.html",
   }]);
   assert.deepEqual(calls, [["html-app:external-open-ready"]]);
   unsubscribe();

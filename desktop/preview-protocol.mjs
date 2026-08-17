@@ -126,8 +126,13 @@ export async function resolvePreviewSourceRoot(sourcePath) {
   }
   const sourceRealPath = await realpath(sourcePath);
   const sourceInfo = await stat(sourceRealPath);
+  if (sourceInfo.isDirectory()) {
+    return sourceRealPath;
+  }
   if (!sourceInfo.isFile()) {
-    throw new TypeError("Preview sourcePath must resolve to a regular file.");
+    throw new TypeError(
+      "Preview sourcePath must resolve to a regular file or directory.",
+    );
   }
   return realpath(path.dirname(sourceRealPath));
 }
@@ -504,6 +509,7 @@ export function createPreviewSessionOperation({
       || payload?.sourcePath === ""
       ? undefined
       : await authorizeSourcePath(payload.sourcePath);
+    const sessionId = normalizeSessionId(payload?.sessionId);
     return createSession({
       html: payload?.html,
       bootstrapJavaScript: payload?.bootstrapJavaScript,
@@ -511,6 +517,7 @@ export function createPreviewSessionOperation({
         ? {}
         : { bootstrapFallbackJavaScript: payload.bootstrapFallbackJavaScript }),
       ...(sourcePath ? { sourcePath } : {}),
+      ...(sessionId ? { sessionId } : {}),
     });
   };
 }
@@ -568,8 +575,39 @@ export function createPreviewProtocolController({
       ? await collectDeclaredPreviewAssets({ html, sourceRoot })
       : new Map();
     removeExpiredSessions();
+    const reuseSessionId = normalizeSessionId(payload?.sessionId);
+    const createdAt = now();
+    const nextRecord = {
+      html,
+      navigationFallbackActive: false,
+      bootstrapJavaScript,
+      bootstrapFallbackJavaScript,
+      bootstrapPrivateAvailable: bootstrapFallbackJavaScript !== null,
+      sourceRoot,
+      declaredAssets,
+      createdAt,
+      lastAccessedAt: createdAt,
+    };
+    if (reuseSessionId && sessions.has(reuseSessionId)) {
+      const existing = sessions.get(reuseSessionId);
+      sessions.set(reuseSessionId, {
+        ...nextRecord,
+        createdAt: existing.createdAt,
+      });
+      return Object.freeze({
+        sessionId: reuseSessionId,
+        url: `${PREVIEW_PROTOCOL_SCHEME}://${reuseSessionId}/index.html`,
+      });
+    }
     while (sessions.size >= maxSessions) {
-      const oldestSessionId = sessions.keys().next().value;
+      let oldestSessionId = null;
+      let oldestAccessedAt = Infinity;
+      for (const [sessionId, session] of sessions) {
+        if (session.lastAccessedAt < oldestAccessedAt) {
+          oldestAccessedAt = session.lastAccessedAt;
+          oldestSessionId = sessionId;
+        }
+      }
       if (!oldestSessionId) break;
       sessions.delete(oldestSessionId);
     }
@@ -583,18 +621,7 @@ export function createPreviewProtocolController({
       }
     }
     if (!sessionId) throw new Error("Unable to allocate a preview session.");
-    const createdAt = now();
-    sessions.set(sessionId, {
-      html,
-      navigationFallbackActive: false,
-      bootstrapJavaScript,
-      bootstrapFallbackJavaScript,
-      bootstrapPrivateAvailable: bootstrapFallbackJavaScript !== null,
-      sourceRoot,
-      declaredAssets,
-      createdAt,
-      lastAccessedAt: createdAt,
-    });
+    sessions.set(sessionId, nextRecord);
     return Object.freeze({
       sessionId,
       url: `${PREVIEW_PROTOCOL_SCHEME}://${sessionId}/index.html`,
