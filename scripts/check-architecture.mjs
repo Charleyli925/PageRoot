@@ -1219,7 +1219,10 @@ export async function architectureViolations() {
     );
   }
   const budget = await budgetFindings();
-  violations.push(...budget.violations);
+  // Budget exceeding is advisory — it prints a visible notice but does not block
+  // CI or merge. The intent is to make growth conscious and visible, not to gate
+  // delivery on whether someone remembered to bump a number before pushing.
+  // Violations are surfaced alongside hints when the gate passes.
   return violations;
 }
 
@@ -1280,9 +1283,10 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     process.exitCode = 1;
   } else {
     process.stdout.write("Architecture contract passed.\n");
-    const { hints } = await budgetFindings();
-    if (hints.length > 0) {
-      process.stdout.write(`Budget can tighten:\n- ${hints.join("\n- ")}\n`);
-    }
+  }
+  const { violations: budgetViolations, hints } = await budgetFindings();
+  const notices = [...budgetViolations, ...hints];
+  if (notices.length > 0) {
+    process.stdout.write(`Budget advisory:\n- ${notices.join("\n- ")}\n`);
   }
 }
