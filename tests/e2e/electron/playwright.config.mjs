@@ -25,7 +25,10 @@ export default defineConfig({
       outputFolder: path.join(productRoot, "output/playwright/native-dom-electron/report"),
     }],
   ],
-  timeout: 75_000,
+  // Native waitForProjectReady/loadedDiskFrame use a 60s hydration budget so
+  // CI import confirmation plus canvas verify can finish; keep the test
+  // budget above that plus iframe/editor assertions.
+  timeout: 120_000,
   expect: { timeout: 10_000 },
   use: {
     acceptDownloads: true,

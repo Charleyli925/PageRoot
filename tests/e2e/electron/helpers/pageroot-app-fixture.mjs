@@ -284,6 +284,7 @@ export async function launchPageRoot({
     env: {
       ...process.env,
           PAGEROOT_E2E: "1",
+          ...(firstEditGuide ? { PAGEROOT_E2E_FIRST_EDIT_GUIDE: "1" } : {}),
           PAGEROOT_E2E_USER_DATA_DIR: isolatedUserData,
           HTML_AI_WORKSPACE: workspace,
           // New project-file imports deliberately live outside the legacy
@@ -451,10 +452,15 @@ export async function waitForProjectReady(page, {
     return "";
   };
   const projectState = async () => {
-    const snapshot = await page.evaluate(() => ({
-      state: document.querySelector("main.workbench")?.getAttribute("data-project-state") || null,
-      stage: window.__PAGEROOT_HYDRATION_STAGE__ || null,
-    })).catch(() => ({ state: null, stage: null }));
+    let snapshot;
+    try {
+      snapshot = await page.evaluate(() => ({
+        state: document.querySelector("main.workbench")?.getAttribute("data-project-state") || null,
+        stage: window.__PAGEROOT_HYDRATION_STAGE__ || null,
+      }));
+    } catch (error) {
+      return `transient:${error instanceof Error ? error.name : "evaluate"}:no-detail`;
+    }
     if (snapshot.state === "ready") return "ready";
     const visibleFailure = includeFailureDetail && snapshot.state === "failed"
       ? await page.locator('[aria-label="项目读取失败"]').textContent().catch(() => "")

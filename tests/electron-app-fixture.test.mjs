@@ -129,6 +129,14 @@ test("Electron app fixture cleans up after confirmed process exit when the close
   assert.deepEqual(events, ["exit-request", "process-exit", "cleanup"]);
 });
 
+test("Electron app fixture can opt an E2E launch back into the first-edit guide port", () => {
+  const fixture = readFileSync(
+    new URL("./e2e/electron/helpers/pageroot-app-fixture.mjs", import.meta.url),
+    "utf8",
+  );
+  assert.match(fixture, /PAGEROOT_E2E_FIRST_EDIT_GUIDE: "1"/u);
+});
+
 test("Electron app fixture seeds a dismissed first-edit guide for isolated profiles", () => {
   const isolatedUserData = mkdtempSync(path.join(tmpdir(), "pageroot-native-e2e-guide-seed-"));
   seedDismissedFirstEditGuide(isolatedUserData);

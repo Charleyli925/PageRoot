@@ -124,7 +124,10 @@ activate PageRoot or cover other applications. Background mode still keeps the
 macOS Dock icon: click it to bring the window forward, inspect the run, and
 minimize it again. Every E2E mode suppresses automatically triggered native
 dialogs and logs them instead of popping up, including
-`PAGEROOT_E2E_FOREGROUND=1` visual debugging. The hosted-macOS environment
+`PAGEROOT_E2E_FOREGROUND=1` visual debugging. Ordinary `PAGEROOT_E2E=1`
+launches also omit the UI-preferences renderer port; set
+`PAGEROOT_E2E_FIRST_EDIT_GUIDE=1` only when a test needs the real first-open
+card. The hosted-macOS environment
 preflight uses a visible inactive accessory window because that suite must
 prove WindowServer painting without stealing keyboard focus.
 

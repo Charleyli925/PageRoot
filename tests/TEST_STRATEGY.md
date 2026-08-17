@@ -174,7 +174,11 @@ Workbench 只确认已提交 loading surface、传入窄 port 并消费快照。
   而不是画布，并以 `createPortal` 挂到 `document.body`；发送进入等待才 dismissed，Esc 不再关卡片；指针能力只按进入
   文字编辑的证明分三档，可编辑优先于「像按钮」；Hover 快划不闪、400ms
   才出文案。Workbench 不得直接调用 UI 偏好 IPC。Electron 隔离 profile 默认写入
-  `dismissed`，避免每个新 userData 都当成第一次打开。
+  `dismissed`，避免每个新 userData 都当成第一次打开。普通 `PAGEROOT_E2E=1`
+  启动不向渲染进程暴露 `htmlAIUiPreferences`，因此 hydration 不会打引导
+  IPC；需要真卡片的测试再设 `PAGEROOT_E2E_FIRST_EDIT_GUIDE=1`。Native 套件
+  的 `waitForProjectReady` / `loadedDiskFrame` 与共享 helper 一样使用 60s
+  hydration 预算，避免 CI 在导入确认后卡在 30s 帽上。
 - AI 闭环：Node 集成必须分别证明普通/跨标签相关改动可建版、不相关但可用
   HTML 进入 `attention` 并强制审阅、脚本/inline handler 等作者内容变化
   照常建版且不生成检测字段或提示，以及身份/Hash/路径/协议失败与
