@@ -113,13 +113,6 @@
   gap: 7px;
 }
 
-.capabilityCaption {
-  margin: 0;
-  padding: 1px 6px 0;
-  color: #74757d;
-  font: 500 11px/1.3 -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
-}
-
 .hoverOutline {
   position: absolute;
   z-index: 6;
@@ -133,15 +126,37 @@
   position: absolute;
   z-index: 7;
   max-width: 220px;
-  padding: 5px 8px;
-  border: 1px solid rgb(32 29 49 / 10%);
-  border-radius: 8px;
-  color: #3f3d45;
-  background: rgb(255 254 250 / 96%);
-  box-shadow: 0 6px 18px rgb(37 34 27 / 10%);
-  font: 500 12px/1.2 -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
+  height: 22px;
+  padding: 0 9px;
+  border: 1px solid rgb(81 71 220 / 18%);
+  border-radius: 999px;
+  color: #fff;
+  background: rgb(81 71 220 / 90%);
+  box-shadow: 0 6px 16px rgb(81 71 220 / 18%);
+  font: 650 11px/22px -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
+  letter-spacing: 0.01em;
   white-space: nowrap;
   pointer-events: none;
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  animation: canvas-capability-hint-in 180ms ease-out;
+}
+
+@keyframes canvas-capability-hint-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hoverHint {
+    animation: none;
+  }
 }
 
 .commentMarker {

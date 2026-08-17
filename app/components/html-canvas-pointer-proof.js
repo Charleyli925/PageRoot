@@ -7,7 +7,7 @@ export const CANVAS_POINTER_CAPABILITY_KINDS = Object.freeze([
 export const CANVAS_POINTER_CAPABILITIES = Object.freeze({
   "edit-text": Object.freeze({
     kind: "edit-text",
-    hint: "双击编辑",
+    hint: "双击文字直接编辑",
     spoken: "可编辑",
     cursor: "text",
   }),

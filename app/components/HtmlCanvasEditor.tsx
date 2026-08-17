@@ -5563,10 +5563,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       width: Math.max(0, elementRect.width),
       height: Math.max(0, elementRect.height),
     };
-    const hintWidth = 168;
+    const hintWidth = 196;
     hoverHintStyle = {
       left: Math.max(8, Math.min(containerRect.width - hintWidth - 8, left)),
-      top: top - 28 >= 8 ? top - 28 : top + elementRect.height + 8,
+      top: top - 26 >= 8 ? top - 26 : top + elementRect.height + 8,
     };
   }
   const selectedPagePresentationAction = (
@@ -5772,9 +5772,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
             }
           }}
         >
-          {selectionCapability ? (
-            <p className={styles.capabilityCaption}>{selectionCapability.hint}</p>
-          ) : null}
           <div className={styles.toolbarRow}>
           {selectedPagePresentationAction ? (
             <button

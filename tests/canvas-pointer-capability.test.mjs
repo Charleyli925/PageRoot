@@ -12,7 +12,7 @@ test("editable proof wins over a selectable or button-like host", () => {
       canStartTextEdit: true,
       sourceResolution: "exact",
     }).hint,
-    "双击编辑",
+    "双击文字直接编辑",
   );
   assert.equal(
     canvasPointerCapabilityFromProof({
@@ -61,4 +61,19 @@ test("classifier does not approximate editability from tag names", async () => {
   assert.equal(source.includes("isNativeDirectEditRoot"), false);
   assert.equal(proof.includes("isNativeDirectEditRoot"), false);
   assert.equal(proof.includes("button"), false);
+});
+
+test("guide and hover copy stay off the selected toolbar", async () => {
+  const editor = await readFile(
+    new URL("../app/components/HtmlCanvasEditor.tsx", import.meta.url),
+    "utf8",
+  );
+  const card = await readFile(
+    new URL("../app/components/FirstEditGuideCard.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.equal(editor.includes("capabilityCaption"), false);
+  assert.equal(editor.includes("selectionCapability.hint"), false);
+  assert.equal(card.includes("需要操作页面按钮时切到"), false);
+  assert.equal(card.includes("点击“预览”查看最终效果。"), true);
 });

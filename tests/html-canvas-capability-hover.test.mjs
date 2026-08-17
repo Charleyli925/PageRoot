@@ -10,7 +10,7 @@ import {
 function capability(kind, targetKey) {
   return {
     kind,
-    hint: kind === "edit-text" ? "双击编辑" : "单击选择并评论",
+    hint: kind === "edit-text" ? "双击文字直接编辑" : "单击选择并评论",
     spoken: "可编辑",
     cursor: kind === "edit-text" ? "text" : "pointer",
     element: {},
@@ -73,7 +73,7 @@ test("caption appears only after the hint delay", () => {
   assert.equal(controller.snapshot.hint, false);
   scheduler.flush(1);
   assert.equal(controller.snapshot.hint, true);
-  assert.equal(controller.snapshot.capability.hint, "双击编辑");
+  assert.equal(controller.snapshot.capability.hint, "双击文字直接编辑");
 });
 
 test("the same target does not restart hover timers", () => {
