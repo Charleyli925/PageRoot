@@ -173,7 +173,11 @@ Workbench 只确认已提交 loading surface、传入窄 port 并消费快照。
   dismissed、dismiss 后不再出现；卡片四步闭环文案挂在 Workbench 窗口层
   而不是画布，发送进入等待才 dismissed，Esc 不再关卡片；指针能力只按进入
   文字编辑的证明分三档，可编辑优先于「像按钮」；Hover 快划不闪、400ms
-  才出文案。Workbench 不得直接调用 UI 偏好 IPC。
+  才出文案，且与单击同一命中。有内容模块的 padding 选中该模块，空模块不选；
+  标签画在命中轮廓内侧。Workbench 不得直接调用 UI 偏好 IPC。
+  Browser 证明点模块留白选中该模块、点子内容选中小框、点空模块不选中，
+  已选 A 时单击 B 一次改选，点 Hover 标签像素选中同一模块，以及单击
+  canvas 选专用根而不是外层模块。
 - AI 闭环：Node 集成必须分别证明普通/跨标签相关改动可建版、不相关但可用
   HTML 进入 `attention` 并强制审阅、脚本/inline handler 等作者内容变化
   照常建版且不生成检测字段或提示，以及身份/Hash/路径/协议失败与

@@ -61,21 +61,44 @@ test("the edit iframe is same-origin but never executes author scripts or refres
   });
 });
 
-test("clicking a module's blank padding clears selection instead of opening its toolbar", async ({
+test("clicking a filled module's padding selects that module", async ({
   page,
 }) => {
   const { editor, frame } = await loadFixture(page, "module-padding-hit.html");
   const copy = frame.locator(caseSelector("module-padding-copy"));
-  const paddedSection = frame.locator("section");
+  const filledModule = frame.locator(caseSelector("filled-module"));
+  const emptyModule = frame.locator(caseSelector("empty-module"));
 
   await copy.click();
   await expect(editor.getByRole("toolbar")).toBeVisible();
-  await expect(frame.locator("[data-html-canvas-selected]")).toHaveCount(1);
+  await expect(copy).toHaveAttribute("data-html-canvas-selected", "part");
 
-  await paddedSection.click({ position: { x: 20, y: 20 } });
+  await filledModule.click({ position: { x: 20, y: 20 } });
+  await expect(editor.getByRole("toolbar")).toBeVisible();
+  await expect(filledModule).toHaveAttribute("data-html-canvas-selected", "module");
+  await expect(copy).not.toHaveAttribute("data-html-canvas-selected", /.+/u);
 
+  await emptyModule.click({ position: { x: 20, y: 20 } });
   await expect(editor.getByRole("toolbar")).toHaveCount(0);
   await expect(frame.locator("[data-html-canvas-selected]")).toHaveCount(0);
+});
+
+test("hovering a filled module's padding advertises the same module click selects", async ({
+  page,
+}) => {
+  const { editor, frame } = await loadFixture(page, "module-padding-hit.html");
+  const filledModule = frame.locator(caseSelector("filled-module"));
+
+  await filledModule.hover({ position: { x: 24, y: 24 } });
+  const hint = editor.getByTestId("canvas-capability-hint");
+  await expect(hint).toBeVisible({ timeout: 1500 });
+  await expect(hint).toHaveText("单击选择并评论");
+
+  const box = await hint.boundingBox();
+  expect(box).toBeTruthy();
+  await page.mouse.click(box.x + Math.min(40, box.width / 2), box.y + box.height / 2);
+  await expect(filledModule).toHaveAttribute("data-html-canvas-selected", "module");
+  await expect(editor.getByRole("toolbar")).toBeVisible();
 });
 
 test("clicking blank header and comment-rail surfaces commits editing and clears selection", async ({
@@ -201,6 +224,17 @@ async function glyphPointForText(locator, snippet) {
     throw new Error(`No rendered glyph for ${JSON.stringify(needle)}`);
   }, snippet);
 }
+
+test("clicking a canvas selects the dedicated surface instead of the wrapping module", async ({ page }) => {
+  const { editor, frame } = await loadFixture(page, "complex-layout.html");
+  const canvas = frame.locator(caseSelector("canvas-surface"));
+  await canvas.scrollIntoViewIfNeeded();
+  await canvas.click({ force: true, position: { x: 8, y: 8 } });
+  await expect(canvas).toHaveAttribute("data-html-canvas-selected", "part");
+  await expect(editor.getByRole("toolbar")).toBeVisible();
+  await expect(canvas.locator("xpath=ancestor::section[1]"))
+    .not.toHaveAttribute("data-html-canvas-selected", /.+/u);
+});
 
 test("double-clicking a canvas reports the dedicated root and stays comment-only", async ({ page }) => {
   const { editor, frame } = await loadFixture(page, "complex-layout.html");

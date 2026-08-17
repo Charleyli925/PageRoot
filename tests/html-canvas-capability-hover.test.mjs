@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   CANVAS_HOVER_HINT_DELAY_MS,
   CANVAS_HOVER_OUTLINE_DELAY_MS,
+  layoutCanvasHoverChrome,
   createCanvasCapabilityHoverController,
 } from "../app/components/html-canvas-capability-hover.js";
 
@@ -85,4 +86,33 @@ test("the same target does not restart hover timers", () => {
   controller.update({ ...first });
   assert.equal(controller.snapshot.outline, true);
   assert.equal(controller.snapshot.hint, true);
+});
+
+test("hover copy stays inside the hit rectangle", () => {
+  const chrome = layoutCanvasHoverChrome({
+    left: 40,
+    top: 80,
+    width: 360,
+    height: 200,
+  });
+  assert.equal(chrome.outline.left, 40);
+  assert.equal(chrome.outline.top, 80);
+  assert.ok(chrome.hint);
+  assert.equal(chrome.hint.left, 44);
+  assert.equal(chrome.hint.top, 84);
+  assert.equal(chrome.hint.maxWidth, 352);
+  assert.ok(chrome.hint.left >= chrome.outline.left);
+  assert.ok(chrome.hint.top >= chrome.outline.top);
+  assert.ok(chrome.hint.left + 8 <= chrome.outline.left + chrome.outline.width);
+});
+
+test("tiny hit rectangles keep the outline and omit the caption", () => {
+  const chrome = layoutCanvasHoverChrome({
+    left: 10,
+    top: 10,
+    width: 24,
+    height: 16,
+  });
+  assert.equal(chrome.outline.width, 24);
+  assert.equal(chrome.hint, null);
 });
