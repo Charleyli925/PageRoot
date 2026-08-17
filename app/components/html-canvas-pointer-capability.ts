@@ -86,9 +86,21 @@ export function resolveCanvasPointerHit({
   const dedicatedSurface = point
     ? findDedicatedSourceSurfaceAtPoint(documentNode, point)
     : null;
-  const hit = dedicatedSurface
+  const directSelection = findCanvasSelectionElement(eventTarget);
+  // A dedicated surface such as <canvas> needs point-based selection so its
+  // wrapping module is never selected. For a concrete child inside an SVG,
+  // however, keep that child as the exact comment target instead of widening
+  // the selection to the SVG root.
+  const directSurfaceChild = dedicatedSurface
+    && directSelection
+    && directSelection !== dedicatedSurface
+    && dedicatedSurface.contains(directSelection)
+    ? directSelection
+    : null;
+  const hit = directSurfaceChild
+    ?? dedicatedSurface
     ?? findCanvasHitSourceElement(eventTarget)
-    ?? findCanvasSelectionElement(eventTarget);
+    ?? directSelection;
   if (
     !hit
     || hit === documentNode.body
