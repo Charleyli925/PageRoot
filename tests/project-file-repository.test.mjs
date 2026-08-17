@@ -3938,6 +3938,143 @@ test("a live Registry write lock fails busy; a dead lock can be retired by its e
   );
 });
 
+// An unresolvable lock directory is crash residue, not a held lock. Every shape
+// below is reachable from a single interrupted process, and none of them can ever
+// become resolvable again, so each must have a bounded automatic exit.
+for (const shape of [
+  {
+    name: "an empty lock directory (crash between mkdir and the owner write)",
+    seed: async () => {},
+  },
+  {
+    name: "a doubled marker (crash between the two retire renames)",
+    seed: async (lockPath) => {
+      await writeFile(
+        path.join(lockPath, ".owner-00000000-0000-4000-8000-00000000000a.json"),
+        `${JSON.stringify({
+          pid: 2_147_483_647,
+          token: "00000000-0000-4000-8000-00000000000a",
+          createdAt: "2026-08-16T00:00:00.000Z",
+        })}\n`,
+        "utf8",
+      );
+      await writeFile(
+        path.join(
+          lockPath,
+          ".retiring-00000000-0000-4000-8000-00000000000b-00000000-0000-4000-8000-00000000000b.json",
+        ),
+        `${JSON.stringify({
+          pid: 2_147_483_647,
+          token: "00000000-0000-4000-8000-00000000000b",
+          createdAt: "2026-08-16T00:00:00.000Z",
+        })}\n`,
+        "utf8",
+      );
+    },
+  },
+  {
+    name: "a damaged owner file",
+    seed: async (lockPath) => {
+      await writeFile(
+        path.join(lockPath, ".owner-00000000-0000-4000-8000-00000000000a.json"),
+        "{ truncated",
+        "utf8",
+      );
+    },
+  },
+]) {
+  test(`an aged Registry write lock with ${shape.name} is reclaimed`, async (t) => {
+    const value = await fixture(t);
+    await importSource(value, "残留基线.html");
+    const lockPath = currentRegistryWriteLockPath(value);
+    await mkdir(lockPath);
+    await shape.seed(lockPath);
+
+    const sourcePath = path.join(value.sources, "残留回收.html");
+    const buffer = Buffer.from(html("reclaimed"), "utf8");
+    await writeFile(sourcePath, buffer);
+    const imported = await new ProjectFileRepository({
+      projectsRoot: value.projects,
+      registryWriteLockTimeoutMs: 200,
+      registryWriteLockGraceMs: 10_000,
+      // The lock is inspected from a clock beyond its grace period, which is how
+      // a user reaching a crashed lock minutes or days later observes it.
+      clock: () => Date.now() + 60_000,
+    }).importExternal({
+      sourcePath,
+      expectedSourceSha256: sha256(buffer),
+    });
+
+    assert.equal(imported.imported, true);
+    assert.equal(
+      (await readdir(value.projects)).includes(".pageroot-registry-write-lock"),
+      false,
+    );
+    assert.equal(
+      (await readdir(value.projects)).some(
+        (entry) => entry.startsWith(".pageroot-lock-unresolvable-"),
+      ),
+      false,
+    );
+  });
+}
+
+test("an unresolvable Registry write lock inside its grace period still fails busy", async (t) => {
+  const value = await fixture(t);
+  await importSource(value, "宽限期基线.html");
+  // A live owner that is mid-release or mid-retire reads back as unresolvable for
+  // a moment. The grace period is what keeps that transient state from being
+  // mistaken for crash residue.
+  await mkdir(currentRegistryWriteLockPath(value));
+
+  const sourcePath = path.join(value.sources, "宽限期内.html");
+  const buffer = Buffer.from(html("within grace"), "utf8");
+  await writeFile(sourcePath, buffer);
+  await assert.rejects(
+    new ProjectFileRepository({
+      projectsRoot: value.projects,
+      registryWriteLockTimeoutMs: 80,
+      registryWriteLockGraceMs: 10_000,
+    }).importExternal({
+      sourcePath,
+      expectedSourceSha256: sha256(buffer),
+    }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "REGISTRY_BUSY",
+  );
+  assert.equal(
+    (await readdir(value.projects)).includes(".pageroot-registry-write-lock"),
+    true,
+  );
+});
+
+test("an aged lock owned by a live process is never reclaimed", async (t) => {
+  const value = await fixture(t);
+  await importSource(value, "活锁基线.html");
+  await seedCurrentRegistryWriteLock(value, process.pid);
+
+  const sourcePath = path.join(value.sources, "活锁不可回收.html");
+  const buffer = Buffer.from(html("live owner"), "utf8");
+  await writeFile(sourcePath, buffer);
+  await assert.rejects(
+    new ProjectFileRepository({
+      projectsRoot: value.projects,
+      registryWriteLockTimeoutMs: 80,
+      registryWriteLockGraceMs: 0,
+      clock: () => Date.now() + 86_400_000,
+    }).importExternal({
+      sourcePath,
+      expectedSourceSha256: sha256(buffer),
+    }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "REGISTRY_BUSY",
+  );
+  assert.equal(
+    (await readdir(value.projects)).includes(".pageroot-registry-write-lock"),
+    true,
+  );
+});
+
 test("classifyOpenPath is read-only for managed, known and new HTML", async (t) => {
   const value = await fixture(t);
   const imported = await importSource(value, "分类只读.html");

@@ -155,6 +155,18 @@ claims fail closed without deleting or merging projects. Ordinary Registry
 mutations take a current write lock under `.pageroot-registry-write-lock/`;
 that lock is not the exact-legacy-V4 migration lock.
 
+Both locks are reclaimable, never terminal. A lock whose owner marker proves a
+dead local process is retired through its exact observed owner token. A lock
+whose ownership cannot be resolved at all — an empty directory left by a crash
+between `mkdir` and its owner write, a doubled marker left between the two
+retire renames, or a damaged owner file — is crash residue rather than a held
+lock, and can never become resolvable again. Such a directory is reclaimed once
+it is older than a grace period, after re-proving both its filesystem identity
+and its still-unresolved lease. Age is measured from creation and content
+timestamps only, never from inode metadata time, so an unrelated metadata touch
+cannot restore a permanently busy Registry. A live resolvable owner is never
+reclaimed on age alone.
+
 Working-copy filename changes retain their immutable IDs. A missing mapping may
 be repaired only by one unique direct-child file-identity continuity clue; Hash
 may validate bytes afterwards but never grants identity. An ambiguity is a

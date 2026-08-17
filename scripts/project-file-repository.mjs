@@ -82,12 +82,14 @@ const LEGACY_V4_REGISTRY_BACKUP_DIRECTORY = ".pageroot-registry-backups";
 const LEGACY_V4_REGISTRY_MIGRATION_LOCK_DIRECTORY = ".pageroot-registry-migration-lock";
 const LEGACY_V4_REGISTRY_MIGRATION_LOCK_WAIT_MS = 20;
 const LEGACY_V4_REGISTRY_MIGRATION_LOCK_TIMEOUT_MS = 30_000;
+const LEGACY_V4_REGISTRY_MIGRATION_LOCK_GRACE_MS = 10_000;
 const LEGACY_V4_REGISTRY_MIGRATION_LOCK_OWNER_FILE = /^\.owner-([a-f0-9-]{36})\.json$/u;
 const LEGACY_V4_REGISTRY_MIGRATION_LOCK_RETIRING_FILE =
   /^\.retiring-([a-f0-9-]{36})-([a-f0-9-]{36})\.json$/u;
 const CURRENT_REGISTRY_WRITE_LOCK_DIRECTORY = ".pageroot-registry-write-lock";
 const CURRENT_REGISTRY_WRITE_LOCK_WAIT_MS = 20;
 const CURRENT_REGISTRY_WRITE_LOCK_TIMEOUT_MS = 30_000;
+const CURRENT_REGISTRY_WRITE_LOCK_GRACE_MS = 10_000;
 const CURRENT_REGISTRY_WRITE_LOCK_OWNER_FILE = /^\.owner-([a-f0-9-]{36})\.json$/u;
 const CURRENT_REGISTRY_WRITE_LOCK_RETIRING_FILE =
   /^\.retiring-([a-f0-9-]{36})-([a-f0-9-]{36})\.json$/u;
@@ -763,7 +765,12 @@ async function retireLegacyV4RegistryMigrationLock({
   return true;
 }
 
-async function acquireLegacyV4RegistryMigrationLock({ projectsRoot, onBeforeRetire = null }) {
+async function acquireLegacyV4RegistryMigrationLock({
+  projectsRoot,
+  onBeforeRetire = null,
+  graceMs = LEGACY_V4_REGISTRY_MIGRATION_LOCK_GRACE_MS,
+  now = Date.now,
+}) {
   const lockPath = legacyV4RegistryMigrationLockPath(projectsRoot);
   const deadlineAt = Date.now() + LEGACY_V4_REGISTRY_MIGRATION_LOCK_TIMEOUT_MS;
 
@@ -818,10 +825,24 @@ async function acquireLegacyV4RegistryMigrationLock({ projectsRoot, onBeforeReti
       });
       continue;
     }
+    if (!lease && await reclaimUnresolvableLockDirectory({
+      projectsRoot,
+      lockPath,
+      label: "legacy V4 Registry migration lock",
+      observed: lockInformation,
+      readLease: () => legacyV4RegistryMigrationLockLease({ projectsRoot, lockPath }),
+      graceMs,
+      now,
+      onBeforeReclaim: (details) => onBeforeRetire?.({
+        ...details,
+        ownerPath: null,
+        owner: null,
+      }),
+    })) continue;
     if (Date.now() >= deadlineAt) {
       throw new ProjectFileRepositoryError(
         "LEGACY_V4_REGISTRY_MIGRATION_BUSY",
-        "Another PageRoot process is safely completing this legacy V4 Registry migration.",
+        "This legacy V4 Registry migration is occupied. A lock left behind by an interrupted PageRoot process is reclaimed automatically after a short grace period.",
       );
     }
     await waitForLegacyV4RegistryMigrationLock();
@@ -1218,6 +1239,70 @@ function localProcessIsAlive(pid) {
   }
 }
 
+// A lock directory whose ownership cannot be resolved is not a held lock.  It is
+// the residue of a process that died between `mkdir` and its owner write, of a
+// retire that died between its two renames, or of an owner file whose bytes were
+// damaged.  None of those shapes can ever become resolvable again, so without a
+// bounded exit every future acquisition would fail busy forever and no restart
+// would help.
+//
+// A lease read can also come back unresolved for a purely transient reason: a
+// live owner may be mid-release or mid-retire while its marker is renamed.  The
+// two cases are separated by age, not by shape — a transient rename completes in
+// microseconds, while crash residue keeps the same unresolvable directory for as
+// long as it exists.  Reclaim therefore requires the directory to be older than
+// the grace period, and re-proves both the directory identity and the still
+// unresolved lease immediately before moving it.
+//
+// Age deliberately ignores `ctimeMs`: inode metadata is bumped by unrelated
+// touches (backup and indexing tools, `chmod`, `utimes`), so including it would
+// let any such touch reset the age and restore the permanent-busy behavior this
+// reclaim exists to remove.  Creation and content timestamps only move when this
+// lock is actually created or written.
+async function reclaimUnresolvableLockDirectory({
+  projectsRoot,
+  lockPath,
+  label,
+  observed,
+  readLease,
+  graceMs,
+  now = Date.now,
+  onBeforeReclaim = null,
+}) {
+  const lastActivityMs = Math.max(
+    Number(observed?.birthtimeMs || 0),
+    Number(observed?.mtimeMs || 0),
+  );
+  if (!lastActivityMs || now() - lastActivityMs <= graceMs) return false;
+
+  const current = await directoryInformation(lockPath, label, {
+    projectRootPath: projectsRoot,
+  });
+  if (!current) return false;
+  // A replacement lock created at the same path is a different directory.
+  if (
+    String(current.dev) !== String(observed.dev)
+    || String(current.ino) !== String(observed.ino)
+  ) return false;
+  // A mid-flight release or retire may have completed since the first read.
+  if (await readLease()) return false;
+
+  await onBeforeReclaim?.({ lockPath, lastActivityMs });
+  const abandonedPath = path.join(
+    projectsRoot,
+    `.pageroot-lock-unresolvable-${randomUUID()}`,
+  );
+  try {
+    await rename(lockPath, abandonedPath);
+  } catch (cause) {
+    if (cause?.code === "ENOENT") return false;
+    throw cause;
+  }
+  await rm(abandonedPath, { recursive: true, force: true });
+  await syncDirectory(projectsRoot);
+  return true;
+}
+
 function waitForLegacyV4RegistryMigrationLock() {
   return new Promise((resolve) => {
     setTimeout(resolve, LEGACY_V4_REGISTRY_MIGRATION_LOCK_WAIT_MS);
@@ -1356,6 +1441,8 @@ function waitForCurrentRegistryWriteLock() {
 async function acquireCurrentRegistryWriteLock({
   projectsRoot,
   timeoutMs = CURRENT_REGISTRY_WRITE_LOCK_TIMEOUT_MS,
+  graceMs = CURRENT_REGISTRY_WRITE_LOCK_GRACE_MS,
+  now = Date.now,
   onBeforeRetire = null,
 }) {
   const lockPath = currentRegistryWriteLockPath(projectsRoot);
@@ -1412,10 +1499,24 @@ async function acquireCurrentRegistryWriteLock({
       });
       continue;
     }
+    if (!lease && await reclaimUnresolvableLockDirectory({
+      projectsRoot,
+      lockPath,
+      label: "current Registry write lock",
+      observed: lockInformation,
+      readLease: () => currentRegistryWriteLockLease({ projectsRoot, lockPath }),
+      graceMs,
+      now,
+      onBeforeReclaim: (details) => onBeforeRetire?.({
+        ...details,
+        ownerPath: null,
+        owner: null,
+      }),
+    })) continue;
     if (Date.now() >= deadlineAt) {
       throw new ProjectFileRepositoryError(
         "REGISTRY_BUSY",
-        "Another PageRoot process is updating the project Registry.",
+        "The project Registry is occupied. A lock left behind by an interrupted PageRoot process is reclaimed automatically after a short grace period.",
       );
     }
     await waitForCurrentRegistryWriteLock();
@@ -2127,6 +2228,8 @@ export class ProjectFileRepository {
 
   #registryWriteLockTimeoutMs;
 
+  #registryWriteLockGraceMs;
+
   #registryWriteLockDepth = 0;
 
   #tail = Promise.resolve();
@@ -2137,6 +2240,7 @@ export class ProjectFileRepository {
     clock = Date.now,
     failpoint = null,
     registryWriteLockTimeoutMs = CURRENT_REGISTRY_WRITE_LOCK_TIMEOUT_MS,
+    registryWriteLockGraceMs = CURRENT_REGISTRY_WRITE_LOCK_GRACE_MS,
   } = {}) {
     this.#projectsRoot = normalizedPath(projectsRoot);
     this.#registryPath = normalizedPath(registryPath);
@@ -2146,6 +2250,10 @@ export class ProjectFileRepository {
       && registryWriteLockTimeoutMs >= 1
       ? registryWriteLockTimeoutMs
       : CURRENT_REGISTRY_WRITE_LOCK_TIMEOUT_MS;
+    this.#registryWriteLockGraceMs = Number.isSafeInteger(registryWriteLockGraceMs)
+      && registryWriteLockGraceMs >= 0
+      ? registryWriteLockGraceMs
+      : CURRENT_REGISTRY_WRITE_LOCK_GRACE_MS;
   }
 
   get projectsRoot() {
@@ -2491,6 +2599,8 @@ export class ProjectFileRepository {
     const release = await acquireCurrentRegistryWriteLock({
       projectsRoot: this.#projectsRoot,
       timeoutMs: this.#registryWriteLockTimeoutMs,
+      graceMs: this.#registryWriteLockGraceMs,
+      now: this.#clock,
       onBeforeRetire: (details) => this.#hit(
         "registry-write-lock-before-retire",
         details,
@@ -2544,6 +2654,8 @@ export class ProjectFileRepository {
   async #migrateExactLegacyV4Registry() {
     const release = await acquireLegacyV4RegistryMigrationLock({
       projectsRoot: this.#projectsRoot,
+      graceMs: this.#registryWriteLockGraceMs,
+      now: this.#clock,
       onBeforeRetire: (details) => this.#hit(
         "legacy-v4-registry-migration-lock-before-retire",
         details,

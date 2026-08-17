@@ -15,6 +15,16 @@ Notable user-visible changes are documented here. This project follows Semantic 
   unchanged, and there is no Preview-mode hover state. The card is
   remembered per install, not per project, and never appears on the
   built-in welcome page.
+- A project Registry lock left behind by an interrupted PageRoot process no
+  longer blocks importing HTML forever. Previously only one residue shape (a
+  single intact owner marker naming a dead process) could be reclaimed, so a
+  crash between creating the lock and writing its owner, a crash between the two
+  retire renames, or a damaged owner file made “打开外部 HTML” fail permanently
+  with no in-app recovery — restarting did not help. Any lock whose ownership
+  cannot be resolved is now reclaimed automatically once it is older than a
+  grace period, while a lock still owned by a live process is never reclaimed.
+  The busy message no longer claims that another PageRoot process is running.
+
 - Preview sessions now refresh in place for the same Edit sibling-asset
   source path, and a full session map evicts the least-recently-accessed idle
   session instead of the oldest insert. Repeated saves and Preview toggles
