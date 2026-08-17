@@ -72,13 +72,141 @@ function progressStep(key, label, detail, state) {
   return { key, label, detail, state };
 }
 
-export function deriveRunProgressSteps(run, handoffStatus = "idle") {
-  if (!run) return [];
-
-  const status = canonicalLifecycleState(run.status);
+function progressContext(run, handoffStatus) {
   const completionObserved = hasObservedCompletion(run);
-  const copyFailed = handoffStatus === "failed" && !completionObserved;
-  const copyConfirmed = handoffStatus === "copied" || completionObserved;
+  return {
+    run,
+    handoffStatus,
+    status: canonicalLifecycleState(run.status),
+    completionObserved,
+    copyFailed: handoffStatus === "failed" && !completionObserved,
+    copyConfirmed: handoffStatus === "copied" || completionObserved,
+  };
+}
+
+function progressPresentationCopy(
+  eyebrow,
+  title,
+  statusLabel,
+  summaryTitle,
+  summaryDetail,
+) {
+  return {
+    header: { eyebrow, title },
+    statusLabel,
+    summaryTitle,
+    summaryDetail,
+  };
+}
+
+function deriveRunProgressCopy({
+  run,
+  handoffStatus,
+  status,
+  copyFailed,
+  copyConfirmed,
+}) {
+  if (run.requestId === "pending") {
+    return progressPresentationCopy(
+      "正在确认发送",
+      "正在确认这次发送是否成功",
+      "正在确认发送结果",
+      "为避免重复任务，画布暂时保持只读",
+      "源页会在后台继续核对，不会重复发送同一轮要求",
+    );
+  }
+  if (copyFailed) {
+    return progressPresentationCopy(
+      "交接失败",
+      "AI任务复制失败，请重新复制",
+      "复制失败",
+      "AI任务尚未复制",
+      "请重新复制本轮要求，当前 HTML 未被修改。",
+    );
+  }
+  if (status === "awaiting-conflict-resolution") {
+    return progressPresentationCopy(
+      "需要处理",
+      "请选择当前 HTML",
+      "需要选择当前 HTML",
+      "外部文件与 AI 结果发生冲突",
+      "请选择采用 AI 版本，或保留外部版本；两边都不会被静默覆盖。",
+    );
+  }
+  if (status === "error") {
+    return progressPresentationCopy(
+      "处理失败",
+      "返回的 HTML 无法使用",
+      "需要处理",
+      "源 HTML 没有被覆盖",
+      "当前 HTML 没有被覆盖；返回编辑后仍可查看上轮处理",
+    );
+  }
+  if (status === "no-change") {
+    return progressPresentationCopy(
+      "处理结果",
+      "这次没有产生有效变化",
+      "没有新版本",
+      "页面与评论可以继续编辑",
+      "原评论和附件都已保留，调整要求后可以重新发送",
+    );
+  }
+  if (status === "ready-to-open") {
+    const continuityNeedsReview = run.candidateAssessment?.status === "attention";
+    return progressPresentationCopy(
+      "AI返回结果",
+      "可在审阅中对比查看修改差异",
+      continuityNeedsReview ? "请先审阅" : "等待确认打开",
+      "AI 改好了，先对照再决定用哪一版",
+      continuityNeedsReview
+        ? "HTML 可以打开，但与上一版的共同特征较少，不会直接替换当前页面"
+        : "不会直接替换当前页面。",
+    );
+  }
+  if (status === "complete") {
+    return progressPresentationCopy(
+      "AI返回结果",
+      "最新版已打开",
+      "已打开新版本",
+      "最新版已经打开",
+      "当前画布已经切换到新版本。",
+    );
+  }
+  if (["validating", "committing", "recovering-transaction"].includes(status)) {
+    return progressPresentationCopy(
+      "AI返回结果",
+      "AI 已返回，正在校验并保存",
+      "正在校验并保存",
+      "正在校验并保存 AI 返回结果",
+      "完成前不会替换当前页面，原评论和当前 HTML 都已保留。",
+    );
+  }
+  if (status === "processing" && copyConfirmed) {
+    return progressPresentationCopy(
+      "等待AI返回结果",
+      "AI任务已经复制，直接粘贴给 AI Agent",
+      "等待 AI 返回",
+      "页面暂时只能看",
+      "你的评论还在，AI 改完也不会直接覆盖。",
+    );
+  }
+  return progressPresentationCopy(
+    "等待AI返回结果",
+    "正在准备并复制 AI 任务",
+    handoffStatus === "copying" ? "正在复制 AI 任务" : "正在准备 AI 任务",
+    "页面暂时只能看",
+    "你的评论还在，AI 改完也不会直接覆盖。",
+  );
+}
+
+function deriveRunProgressStepsFromContext({
+  run,
+  handoffStatus,
+  status,
+  completionObserved,
+  copyFailed,
+  copyConfirmed,
+}) {
   const steps = [
     progressStep(
       "handoff",
@@ -190,6 +318,28 @@ export function deriveRunProgressSteps(run, handoffStatus = "idle") {
   }
 
   return steps;
+}
+
+export function deriveRunProgressPresentation(run, handoffStatus = "idle") {
+  if (!run) {
+    return {
+      header: null,
+      statusLabel: "",
+      summaryTitle: "",
+      summaryDetail: "",
+      steps: [],
+    };
+  }
+
+  const context = progressContext(run, handoffStatus);
+  return {
+    ...deriveRunProgressCopy(context),
+    steps: deriveRunProgressStepsFromContext(context),
+  };
+}
+
+export function deriveRunProgressSteps(run, handoffStatus = "idle") {
+  return deriveRunProgressPresentation(run, handoffStatus).steps;
 }
 
 export function validationReviewFromRecord(value) {
