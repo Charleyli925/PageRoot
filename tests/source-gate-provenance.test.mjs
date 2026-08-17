@@ -209,7 +209,10 @@ test("GitHub workflows keep one CI file, informational Codex review, and exact-t
   assert.match(electronNative, /--suite electron-native/u);
   assert.match(electronNative, /--report output\/playwright\/native-dom-electron\/results\.json/u);
   assert.match(electronNative, /Upload native Electron diagnostics and retry evidence[\s\S]{0,200}if: always\(\)/u);
-  assert.doesNotMatch(electronAi, /playwright-flaky-summary\.mjs/u);
+  assert.match(electronAi, /playwright-flaky-summary\.mjs/u);
+  assert.match(electronAi, /--suite electron-ai/u);
+  assert.match(electronAi, /--report output\/playwright\/ai-closed-loop\/deterministic\/results\.json/u);
+  assert.match(electronAi, /Upload AI Electron diagnostics and retry evidence[\s\S]{0,200}if: always\(\)/u);
   assert.match(ci, /scripts\/ci-evidence\.mjs run/u);
   assert.match(ci, /Verify PR result, exact tree, version and freshness/u);
   assert.doesNotMatch(ci, /name: main-smoke|gate:main:auto/u);

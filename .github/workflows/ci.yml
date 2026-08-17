@@ -496,8 +496,14 @@ jobs:
           --stage source-test
           --
           npx playwright test --config tests/e2e/electron/playwright.ai-closed-loop.config.mjs
-      - name: Upload AI Electron failure diagnostics
-        if: failure()
+      - name: Record Playwright retry evidence
+        if: always()
+        run: >-
+          node scripts/playwright-flaky-summary.mjs
+          --report output/playwright/ai-closed-loop/deterministic/results.json
+          --suite electron-ai
+      - name: Upload AI Electron diagnostics and retry evidence
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: PageRoot-electron-ai-diagnostics-${{ github.run_attempt }}

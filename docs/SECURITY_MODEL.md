@@ -366,7 +366,10 @@ the retired client code to the current application.
 Install-level UI preferences (`ui-preferences.json`) are Main-owned, bounded
 and atomically replaced. The renderer receives only `get`/`record` for the
 first-real-HTML guide through trusted IPC; the payload is `presented` or
-`dismissed`. The file must not contain HTML, paths, comments or credentials.
-A damaged or oversized file is treated as empty pending state. The built-in
-welcome `projectId` is recorded after welcome registration so that page never
-shows the first-real-HTML card.
+`dismissed`. Ordinary `PAGEROOT_E2E=1` launches do not expose that renderer
+port, so automated profiles skip first-install IPC during hydration; tests
+that need the real card set `PAGEROOT_E2E_FIRST_EDIT_GUIDE=1`. The file must
+not contain HTML, paths, comments or credentials. A damaged or oversized file
+is treated as empty pending state. The built-in welcome `projectId` is
+recorded after welcome registration so that page never shows the
+first-real-HTML card.

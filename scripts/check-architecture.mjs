@@ -429,6 +429,10 @@ export async function architectureViolations() {
     path.join(PRODUCT_ROOT, "app", "components", "HtmlCanvasEditor.tsx"),
     "utf8",
   );
+  const firstEditGuideCard = await readFile(
+    path.join(PRODUCT_ROOT, "app", "components", "FirstEditGuideCard.tsx"),
+    "utf8",
+  );
   const previewSourceSync = await readFile(
     path.join(PRODUCT_ROOT, "app", "components", "html-canvas-preview-sync.ts"),
     "utf8",
@@ -1012,11 +1016,14 @@ export async function architectureViolations() {
     || !hasCall(workbenchAst, { method: "evaluateFirstEditGuide" })
     || !hasCall(workbenchAst, { method: "dismissFirstEditGuide" })
     || !workbench.includes("<FirstEditGuideCard")
+    || !workbench.split("</main>").slice(1).join("</main>").includes("<FirstEditGuideCard")
+    || !firstEditGuideCard.includes("createPortal")
+    || !firstEditGuideCard.includes("document.body")
     || !/run-submission-started[\s\S]{0,400}dismissFirstEditGuide/u.test(workbench)
     || /keydown[\s\S]{0,400}dismissFirstEditGuide/u.test(workbench)
   ) {
     violations.push(
-      "app/workbench.tsx: the view may pass the narrow UI-preferences port at composition time but cannot record guide status itself; the card stays a window overlay that dismisses on send-to-waiting, not Escape",
+      "app/workbench.tsx: the view may pass the narrow UI-preferences port at composition time but cannot record guide status itself; the card stays a document.body portal overlay that dismisses on send-to-waiting, not Escape",
     );
   }
   if (

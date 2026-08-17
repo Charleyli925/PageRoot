@@ -66,7 +66,10 @@ only when `PAGEROOT_E2E=1` and the path is an isolated
 run the native window hidden by default, keep its renderer unthrottled, place
 the bridge workspace inside that directory, remove only validated test
 directories, and never change `HOME` or open the user's real HTML project. Set
-`PAGEROOT_E2E_FOREGROUND=1` only for deliberate visual debugging. Background
+`PAGEROOT_E2E_FOREGROUND=1` only for deliberate visual debugging. Ordinary
+`PAGEROOT_E2E=1` launches omit the first-open guide renderer port; set
+`PAGEROOT_E2E_FIRST_EDIT_GUIDE=1` only when a test needs the real card.
+Background
 mode keeps the macOS Dock icon (click it to inspect or minimize the window)
 and all E2E modes suppress automatically triggered native dialogs, logging
 them instead. The real-file case checkpoints and autosaves a temporary disk

@@ -301,10 +301,10 @@ visibility and the 800ms present-dwell timer. Durable `pending` /
 Main `ui-preferences.json`. Workbench may pass a narrow get/record port at
 composition time and dispatch `evaluateFirstEditGuide` / `dismissFirstEditGuide`;
 it must not call UI-preference IPC itself. Workbench mounts `FirstEditGuideCard`
-as a window overlay beside the review scroll stage; `HtmlCanvasEditor` must not
-mount or dismiss the card. Send that enters waiting writes `dismissed`; Escape
-does not. Hover captions are disposable Canvas presentation and must not change
-the click selection path.
+as a `position: fixed` portal on `document.body`, not as a grid child of the
+workbench or canvas; `HtmlCanvasEditor` must not mount or dismiss the card.
+Send that enters waiting writes `dismissed`; Escape does not. Hover captions
+are disposable Canvas presentation and must not change the click selection path.
 
 The direct path permits only a bounded classic-script ECharts candidate, frozen
 local/allowlisted-CDN bytes and at most 32 uniquely bound, source-empty hosts.
