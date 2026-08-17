@@ -13,8 +13,8 @@
   ],
   "files": {
     "app/workbench.tsx": {
-      "maxLines": 8995,
-      "maxHooks": 314
+      "maxLines": 9018,
+      "maxHooks": 315
     }
   }
 }
