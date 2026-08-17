@@ -698,3 +698,27 @@ structurally (call presence), because the repository has no DOM test harness for
   command is pending.
 - Canonical host replacement: the native lease must be disposed before the
   authored DOM host is replaced.
+
+### Complexity budget ratchet
+
+`scripts/architecture-budget.json` records a line count and total React-hook
+count ceiling for files with a demonstrated regrowth risk (currently only
+`app/workbench.tsx`, which the Workbench orchestration refactor is actively
+shrinking). The gate counts hooks structurally, so generic-typed calls such as
+`useState<T>()` are included.
+
+This is a guardrail against silent drift, not a hard cap, and it is deliberately
+not applied to every large file:
+
+- Exceeding a ceiling fails the gate with a message that names the low-friction
+  escape valve: if the growth is intentional, raise the number in the same
+  change. Growth is allowed, but it must be a conscious, reviewed decision
+  rather than silent drift.
+- The intent is downward. When a file shrinks, the gate prints a hint to lower
+  its ceiling to the new value so the ratchet follows the file down.
+- Prefer moving logic out over raising a ceiling. The budget serves the goal of
+  a thinner presentation layer; it must never become a reason to block a
+  legitimate change or to contort code purely to satisfy a number.
+
+The budget is a trend brake, not a design target. There is no enforced descent
+schedule; the numbers track real progress, they do not mandate it.

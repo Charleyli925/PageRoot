@@ -358,3 +358,28 @@ export function countCalls(handle, method) {
   });
   return total;
 }
+
+// The React hooks whose density signals orchestration logic living in a view.
+// Counting them structurally (not by regex) also catches generic-typed calls
+// such as useState<T>() that a substring scan would miss.
+export const REACT_HOOKS = [
+  "useState",
+  "useEffect",
+  "useLayoutEffect",
+  "useRef",
+  "useCallback",
+  "useMemo",
+  "useReducer",
+  "useContext",
+  "useImperativeHandle",
+  "useInsertionEffect",
+  "useSyncExternalStore",
+  "useTransition",
+  "useDeferredValue",
+];
+
+// Total React hook invocations in a module. One coarse, meaningful complexity
+// signal for a component that should stay a thin presentation adapter.
+export function countReactHooks(handle) {
+  return REACT_HOOKS.reduce((total, hook) => total + countCalls(handle, hook), 0);
+}

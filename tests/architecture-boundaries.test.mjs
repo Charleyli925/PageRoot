@@ -5,6 +5,7 @@ import test from "node:test";
 import {
   architectureViolations,
   compositionBoundaryViolations,
+  budgetFindings,
 } from "../scripts/check-architecture.mjs";
 import {
   parseModule,
@@ -15,6 +16,7 @@ import {
   hasCall,
   constructsClass,
   hasObjectProperty,
+  countReactHooks,
 } from "../scripts/architecture-ast-query.mjs";
 
 test("renderer, WorkspaceController, domain, and Bridge dependency boundaries stay enforced", async () => {
@@ -149,4 +151,33 @@ test("AST structural queries still fail on genuine removals", () => {
   assert.equal(constructsClass(removed, "RunWorkflow"), false);
   assert.equal(hasCall(removed, { path: "this.#runWorkflow.submit" }), false);
   assert.equal(hasObjectProperty(removed, "run"), false);
+});
+
+// The complexity budget ratchet measures hooks structurally so that
+// generic-typed calls such as useState<T>() are counted; a regex on "useState("
+// would undercount them and let complexity drift in unseen.
+test("countReactHooks counts generic-typed hook calls a regex would miss", () => {
+  const sample = parseModule(
+    "component.tsx",
+    [
+      "function Component() {",
+      "  const [a, setA] = useState(0);",
+      "  const [b, setB] = useState<string | null>(null);",
+      "  const ref = useRef<HTMLDivElement>(null);",
+      "  useEffect(() => {}, []);",
+      "  const value = useMemo<number>(() => 1, []);",
+      "  return null;",
+      "}",
+    ].join("\n"),
+  );
+  // 2 useState (one plain, one generic) + useRef + useEffect + useMemo = 5.
+  assert.equal(countReactHooks(sample), 5);
+});
+
+// The ratchet is seeded at or above the current measurements, so a clean tree
+// must not report a budget violation. This keeps the guardrail honest: it fires
+// only on real growth, never on the committed baseline.
+test("complexity budget is seeded at or above current metrics", async () => {
+  const { violations } = await budgetFindings();
+  assert.deepEqual(violations, []);
 });
