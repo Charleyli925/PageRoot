@@ -541,6 +541,7 @@ export default function Workbench() {
   const fileRenameEditingRef = useRef(false);
   const fileRenameBusyRef = useRef(false);
   const fileRenameErrorRef = useRef("");
+  const fileRenameOriginalStemRef = useRef("");
   const automaticProjectRegistrationRef = useRef("");
   const projectRecordsPreparationRef = useRef("");
 
@@ -3740,6 +3741,7 @@ export default function Workbench() {
     if (fileRenameBusyRef.current) return;
     fileRenameEditingRef.current = false;
     fileRenameErrorRef.current = "";
+    fileRenameOriginalStemRef.current = "";
     setFileRenameEditing(false);
     setFileRenameError("");
     setFileRenameDraft("");
@@ -3759,6 +3761,7 @@ export default function Workbench() {
     ) return;
     fileRenameEditingRef.current = true;
     fileRenameErrorRef.current = "";
+    fileRenameOriginalStemRef.current = currentSourceFileStem;
     setFileRenameEditing(true);
     setFileRenameDraft(currentSourceFileStem);
     setFileRenameError("");
@@ -3808,8 +3811,27 @@ export default function Workbench() {
             || "当前状态还不能重命名，请等待文件安全保存。",
         );
       }
-      if (reconciled.status === "succeeded" && typeof reconciled.value?.projectName === "string") {
-        setProjectName(reconciled.value.projectName);
+      const recoveredStem = reconciled.status === "succeeded"
+        && typeof reconciled.value?.projectName === "string"
+        ? reconciled.value.projectName
+        : "";
+      if (recoveredStem) setProjectName(recoveredStem);
+      const typedStem = fileRenameDraft.normalize("NFC").trim();
+      const originalStem = fileRenameOriginalStemRef.current.normalize("NFC").trim();
+      if (
+        reconciled.status === "succeeded"
+        && reconciled.value?.relocated
+        && typedStem === originalStem
+        && recoveredStem
+        && recoveredStem !== typedStem
+      ) {
+        fileRenameEditingRef.current = false;
+        fileRenameErrorRef.current = "";
+        fileRenameOriginalStemRef.current = "";
+        setFileRenameEditing(false);
+        setFileRenameDraft("");
+        setFileRenameError("");
+        return;
       }
       const outcome = await controller.renameProjectSource({ stem: fileRenameDraft });
       if (outcome.status !== "succeeded") {
@@ -3827,6 +3849,7 @@ export default function Workbench() {
       setLastModifiedAt(outcome.value.lastModifiedAt || null);
       fileRenameEditingRef.current = false;
       fileRenameErrorRef.current = "";
+      fileRenameOriginalStemRef.current = "";
       setFileRenameEditing(false);
       setFileRenameDraft("");
       setFileRenameError("");

@@ -3760,6 +3760,81 @@ test("Electron follows a same-directory Finder rename then a title-bar rename", 
   }
 });
 
+test("Electron follows a title-bar rename, then Finder, then another title-bar rename", async () => {
+  const fixture = createSourceFixture("title-bar-finder-loop.html");
+  let electronApp = null;
+  let isolatedUserData = null;
+  try {
+    const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+    electronApp = launched.electronApp;
+    isolatedUserData = launched.isolatedUserData;
+    await loadedDiskFrame(launched.page, fixture.sourcePath, "list-item");
+    const managedSourcePath = await managedWorkingCopyPath(
+      launched.page,
+      fixture.sourcePath,
+    );
+    const beforeWorkspace = await bridgeJson(
+      launched.page,
+      `/workspace?sourcePath=${encodeURIComponent(managedSourcePath)}`,
+    );
+    const beforeTarget = beforeWorkspace.body?.openTarget || beforeWorkspace.body;
+    const beforeIds = {
+      projectId: beforeTarget.projectId,
+      documentId: beforeTarget.documentId,
+      workingCopyId: beforeTarget.workingCopyId || beforeTarget.activeWorkingCopyId,
+    };
+    const projectDirectory = path.dirname(managedSourcePath);
+
+    await launched.page.getByRole("button", { name: /重命名文件/u }).click();
+    const firstInput = launched.page.getByRole("textbox", { name: "文件名（不含后缀）" });
+    await expect(firstInput).toBeFocused();
+    await firstInput.fill("title-first-V1");
+    await firstInput.press("Enter");
+    const titleBarPath = path.join(projectDirectory, "title-first-V1.html");
+    await waitForTitleStem(launched.page, "title-first-V1");
+    await expect.poll(() => existsSync(titleBarPath)).toBe(true);
+    await waitForActiveSourcePath(launched.page, titleBarPath);
+    await expect(launched.page.locator("#window-file-rename-error")).toHaveCount(0);
+
+    const finderName = "finder-second-V1.html";
+    const finderPath = path.join(projectDirectory, finderName);
+    renameSync(titleBarPath, finderPath);
+    await waitForTitleStem(launched.page, path.basename(finderName, ".html"));
+    await waitForActiveSourcePath(launched.page, finderPath);
+    await expect(launched.page.locator("#window-file-rename-error")).toHaveCount(0);
+
+    await launched.page.getByRole("button", { name: /重命名文件/u }).click();
+    const secondInput = launched.page.getByRole("textbox", { name: "文件名（不含后缀）" });
+    await expect(secondInput).toBeFocused();
+    await expect(secondInput).toHaveValue("finder-second-V1");
+    await secondInput.fill("title-third-V1");
+    await secondInput.press("Enter");
+    const finalPath = path.join(projectDirectory, "title-third-V1.html");
+    await waitForTitleStem(launched.page, "title-third-V1");
+    await expect.poll(() => existsSync(finalPath)).toBe(true);
+    await waitForActiveSourcePath(launched.page, finalPath);
+    await expect(launched.page.locator("#window-file-rename-error")).toHaveCount(0);
+
+    const afterWorkspace = await bridgeJson(
+      launched.page,
+      `/workspace?sourcePath=${encodeURIComponent(finalPath)}`,
+    );
+    const afterTarget = afterWorkspace.body?.openTarget || afterWorkspace.body;
+    expect(afterTarget.projectId).toBe(beforeIds.projectId);
+    expect(afterTarget.documentId).toBe(beforeIds.documentId);
+    expect(afterTarget.workingCopyId || afterTarget.activeWorkingCopyId)
+      .toBe(beforeIds.workingCopyId);
+    const afterManifest = await readManagedManifest(finalPath);
+    expect(afterManifest.workingCopies[0].sourceRelativePath)
+      .toBe("title-third-V1.html");
+  } finally {
+    if (electronApp && isolatedUserData) {
+      await stopPageRoot(electronApp, isolatedUserData);
+    }
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
+
 test("Electron keeps PageRoot bytes when Finder renames and edits the same file", async () => {
   const fixture = createSourceFixture("finder-rename-conflict.html");
   let electronApp = null;

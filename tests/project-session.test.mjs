@@ -104,3 +104,77 @@ test("a managed OpenTarget preserves exact file identity through a Session epoch
   assert.equal(session.matches({ ...context, exactSourcePath: "/tmp/项目/other.html" }), false);
   assert.equal(session.matches({ ...context, sourceSha256: "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff" }), false);
 });
+
+const MANAGED_SOURCE_SHA256 =
+  "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+function managedTarget(exactSourcePath) {
+  return {
+    projectId: "project",
+    documentId: "document",
+    projectRootPath: "/tmp",
+    targetKind: "working-copy",
+    workingCopyId: "work_ver_0001",
+    versionId: "ver_0001",
+    exactSourcePath,
+    sourceSha256: MANAGED_SOURCE_SHA256,
+  };
+}
+
+test("a managed OpenTarget stays attached across /private aliases and NFC spelling", () => {
+  const session = new ProjectSession();
+  const nfdPath = "/private/tmp/cafe\u0301-V1.html";
+  const nfcPath = "/tmp/caf\u00e9-V1.html";
+  const locator = session.openLocator(nfdPath);
+  const context = session.register({
+    ...locator,
+    projectId: "project",
+    documentId: "document",
+    openTarget: managedTarget(nfcPath),
+  });
+
+  assert.equal(context.sourcePath, nfdPath);
+  assert.equal(context.exactSourcePath, nfcPath);
+  assert.equal(context.workingCopyId, "work_ver_0001");
+  assert.equal(session.openTarget?.workingCopyId, "work_ver_0001");
+});
+
+test("re-registering the same locator keeps a matching managed OpenTarget", () => {
+  const session = new ProjectSession();
+  const locator = session.openLocator("/tmp/page.html");
+  session.register({
+    ...locator,
+    projectId: "project",
+    documentId: "document",
+    openTarget: managedTarget("/tmp/page.html"),
+  });
+
+  const again = session.register({
+    ...locator,
+    projectId: "project",
+    documentId: "document",
+  });
+
+  assert.equal(again.workingCopyId, "work_ver_0001");
+  assert.equal(again.exactSourcePath, "/tmp/page.html");
+  assert.equal(session.openTarget?.workingCopyId, "work_ver_0001");
+});
+
+test("a managed OpenTarget stays attached across case on darwin and win32", {
+  skip: process.platform !== "darwin" && process.platform !== "win32"
+    ? "APFS/NTFS fold file-name case; Linux keeps it distinct"
+    : false,
+}, () => {
+  const session = new ProjectSession();
+  const locator = session.openLocator("/tmp/Page.html");
+  const context = session.register({
+    ...locator,
+    projectId: "project",
+    documentId: "document",
+    openTarget: managedTarget("/tmp/page.html"),
+  });
+
+  assert.equal(context.sourcePath, "/tmp/Page.html");
+  assert.equal(context.exactSourcePath, "/tmp/page.html");
+  assert.equal(session.openTarget?.workingCopyId, "work_ver_0001");
+});
