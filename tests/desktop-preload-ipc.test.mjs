@@ -387,6 +387,19 @@ test("preload exposes the structured Finder reveal operation", async () => {
   ]);
 });
 
+test("preload exposes the narrow configured PageRoot projects-root operation", async () => {
+  const calls = [];
+  const api = await loadPreload(async (...args) => {
+    calls.push(args);
+    return success({ opened: true });
+  });
+
+  assert.deepEqual(await api.openProjectsRoot(), { opened: true });
+  assert.deepEqual(calls[0], [
+    "html-projects:open-projects-root",
+  ]);
+});
+
 test("preload exposes the narrow default-browser HTML operation", async () => {
   const calls = [];
   const api = await loadPreload(async (...args) => {
@@ -867,6 +880,7 @@ test("preload never replays a failed local side-effect request", async () => {
   });
   const actions = [
     ["showInFolder", "/Users/demo/report.html"],
+    ["openProjectsRoot"],
     ["openInDefaultBrowser", "/Users/demo/report.html"],
     ["revealAiTask", {
       sourcePath: "/Users/demo/report.html",

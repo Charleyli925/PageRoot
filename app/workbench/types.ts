@@ -60,6 +60,7 @@ export type DesktopProjectsApi = {
   getActiveProject: () => Promise<HtmlOpenResult | null>;
   openHtml: () => Promise<HtmlOpenResult | null>;
   showInFolder?: (sourcePath: string) => Promise<{ sourcePath: string }>;
+  openProjectsRoot?: () => Promise<{ opened: true }>;
   openInDefaultBrowser?: (
     sourcePath: string,
   ) => Promise<{ sourcePath: string }>;
