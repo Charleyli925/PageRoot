@@ -1012,6 +1012,7 @@ export async function architectureViolations() {
     || !hasCall(workbenchAst, { method: "evaluateFirstEditGuide" })
     || !hasCall(workbenchAst, { method: "dismissFirstEditGuide" })
     || !workbench.includes("<FirstEditGuideCard")
+    || !workbench.split("</main>").slice(1).join("</main>").includes("<FirstEditGuideCard")
     || !/run-submission-started[\s\S]{0,400}dismissFirstEditGuide/u.test(workbench)
     || /keydown[\s\S]{0,400}dismissFirstEditGuide/u.test(workbench)
   ) {
