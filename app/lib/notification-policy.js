@@ -25,6 +25,12 @@ const PRODUCT_ERROR_MESSAGES = Object.freeze({
     "当前操作缺少完整的项目身份。内容仍保留，请重新打开源页后再试。",
   REGISTERED_PROJECT_NOT_FOUND:
     "当前项目记录暂时不可用。内容仍保留，请重新打开源页后再试。",
+  REGISTRY_BUSY:
+    "项目登记表正被占用。如果是上一次异常退出留下的，稍后会自动解除，请重试。",
+  UNSUPPORTED_REGISTRY_SCHEMA:
+    "项目登记表的格式无法识别。PageRoot 没有改动它，也没有改动任何项目文件；可重新打开 HTML 重建登记。",
+  INVALID_REGISTRY:
+    "项目登记表的内容无法校验。PageRoot 没有改动它，也没有改动任何项目文件；可重新打开 HTML 重建登记。",
   PROJECT_IDENTITY_MISMATCH:
     "项目记录暂时无法核对。PageRoot 没有覆盖源文件，请重新打开后再试。",
   SOURCE_REGISTRY_MISMATCH:
