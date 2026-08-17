@@ -260,6 +260,40 @@ export async function waitForMainBrowserWindow(
   return nativeWindow;
 }
 
+const DEFAULT_RENDERER_MOUNT_TIMEOUT = 20_000;
+const RENDERER_MOUNT_POLL_MS = 100;
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export async function pageHasRendererMount(page) {
+  return page.evaluate(() => Boolean(
+    document.querySelector("main.workbench")
+    || window.__PAGEROOT_HYDRATION_STAGE__
+    || document.getElementById("root")?.firstElementChild
+  )).catch(() => false);
+}
+
+export async function ensureRendererMounted(page, {
+  timeout = DEFAULT_RENDERER_MOUNT_TIMEOUT,
+  reload = (target) => target.reload({ waitUntil: "domcontentloaded" }),
+} = {}) {
+  const waitUntilMounted = async () => {
+    const deadline = Date.now() + timeout;
+    while (Date.now() < deadline) {
+      if (await pageHasRendererMount(page)) return true;
+      await sleep(RENDERER_MOUNT_POLL_MS);
+    }
+    return pageHasRendererMount(page);
+  };
+
+  if (await waitUntilMounted()) return { reloaded: false };
+  await reload(page);
+  if (await waitUntilMounted()) return { reloaded: true };
+  throw new Error("PageRoot renderer did not mount after launch reload.");
+}
+
 export async function launchPageRoot({
   activeSourcePath = null,
   recentSourcePaths = activeSourcePath ? [activeSourcePath] : [],
@@ -298,12 +332,13 @@ export async function launchPageRoot({
   const diagnostics = collectProcessDiagnostics(electronApp.process());
   const page = await electronApp.firstWindow();
   await page.waitForLoadState("domcontentloaded");
+  const mainRendererUrl = page.url();
+  const nativeWindow = await waitForMainBrowserWindow(electronApp, mainRendererUrl);
   await page.waitForFunction(() => document.visibilityState === "visible");
   await page.evaluate(() => new Promise((resolve) => {
     requestAnimationFrame(() => requestAnimationFrame(resolve));
   }));
-  const mainRendererUrl = page.url();
-  const nativeWindow = await waitForMainBrowserWindow(electronApp, mainRendererUrl);
+  await ensureRendererMounted(page);
   const foreground = (
     injectedEnv.PAGEROOT_E2E_FOREGROUND
     ?? process.env.PAGEROOT_E2E_FOREGROUND

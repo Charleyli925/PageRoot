@@ -14,9 +14,31 @@ import {
 import {
   closeObservationTimeout,
   createCloseFirstCleanup,
+  ensureRendererMounted,
   seedDismissedFirstEditGuide,
   waitForMainBrowserWindow,
 } from "./e2e/electron/helpers/pageroot-app-fixture.mjs";
+
+test("Electron app fixture reloads once when the renderer root stays empty", async () => {
+  let evaluations = 0;
+  let reloads = 0;
+  const page = {
+    evaluate: async () => {
+      evaluations += 1;
+      return reloads > 0;
+    },
+    reload: async () => {
+      reloads += 1;
+    },
+  };
+  const result = await ensureRendererMounted(page, {
+    timeout: 250,
+    reload: async (target) => target.reload(),
+  });
+  assert.equal(result.reloaded, true);
+  assert.equal(reloads, 1);
+  assert.ok(evaluations >= 2);
+});
 
 test("Electron app fixture waits for the matching native BrowserWindow registration", async () => {
   let evaluations = 0;
