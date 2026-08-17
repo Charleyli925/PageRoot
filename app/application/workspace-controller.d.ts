@@ -23,6 +23,11 @@ import type {
   EditAuthorRuntimeSnapshot,
 } from "./edit-author-runtime-session.js";
 import type {
+  FirstEditGuideEligibilityInput,
+  FirstEditGuidePort,
+  FirstEditGuideSnapshot,
+} from "./first-edit-guide-session.js";
+import type {
   ProjectContext,
   ProjectSession,
   ProjectSessionSnapshot,
@@ -96,6 +101,7 @@ export type WorkspaceControllerSnapshot = Readonly<{
   runSession: RunSessionSnapshot | null;
   versionSession: VersionSessionSnapshot | null;
   editRuntime: EditAuthorRuntimeSnapshot | null;
+  firstEditGuide: FirstEditGuideSnapshot | null;
   comment: CommentWorkflowSnapshot | null;
   projectRules: ProjectRulesSnapshot | null;
   project: ProjectWorkflowSnapshot | null;
@@ -237,6 +243,7 @@ export type WorkspaceControllerConstruction = Readonly<{
     canvas?: CanvasAuthorityPort;
     projectSource?: ProjectSourceActivationPort;
     editRuntime?: EditAuthorRuntimePort;
+    uiPreferences?: FirstEditGuidePort;
   }>;
   documentWorkflow?: Readonly<{
     codecs: DocumentWorkflowCodecs;
@@ -384,6 +391,8 @@ export class WorkspaceController {
     canvasGeneration: number;
     outcome: "ready" | "rejected" | "failed";
   }): boolean;
+  evaluateFirstEditGuide(input: FirstEditGuideEligibilityInput): FirstEditGuideSnapshot | null;
+  dismissFirstEditGuide(): Promise<FirstEditGuideSnapshot | null>;
   getCurrentProjectContext(): ProjectContext | null;
   matchesCurrentProjectContext(context: ProjectContext): boolean;
   reloadDocumentCanvas(): DocumentSessionSnapshot;

@@ -44,6 +44,7 @@ const RUNTIME_SESSION_CONSTRUCTORS = [
   "ExternalFileOpenSession",
   "ProjectApplicationSession",
   "EditAuthorRuntimeSession",
+  "FirstEditGuideSession",
 ];
 
 async function sourceFiles(directory) {
@@ -96,7 +97,7 @@ export function compositionBoundaryViolations({
     );
   }
   if (
-    /\bnew\s+(?:ProjectSession|DocumentSession|CommentSession|DraftSession|VersionSession|SourceHistorySession|RunSession|ProjectRulesSession|ExternalFileOpenSession|ProjectApplicationSession)\b/u.test(workbench)
+    /\bnew\s+(?:ProjectSession|DocumentSession|CommentSession|DraftSession|VersionSession|SourceHistorySession|RunSession|ProjectRulesSession|ExternalFileOpenSession|ProjectApplicationSession|FirstEditGuideSession)\b/u.test(workbench)
     || /\b(?:projectSessionRef|documentSessionRef|commentSessionRef|draftSessionRef|versionSessionRef|sourceHistorySessionRef|runSessionRef|projectRulesSessionRef)\b/u.test(workbench)
   ) {
     violations.push(
@@ -994,6 +995,36 @@ export async function architectureViolations() {
   ) {
     violations.push(
       "app/workbench.tsx: the view may pass the narrow runtime port at composition time but cannot manage its lifecycle",
+    );
+  }
+  if (
+    !constructsClass(workspaceControllerAst, "FirstEditGuideSession")
+    || !classHasMember(workspaceControllerAst, "WorkspaceController", "evaluateFirstEditGuide")
+    || !classHasMember(workspaceControllerAst, "WorkspaceController", "dismissFirstEditGuide")
+    || !hasObjectProperty(workspaceControllerAst, "firstEditGuide")
+  ) {
+    violations.push(
+      "app/application/workspace-controller.js: first-real-HTML guide state must remain a Controller-owned Session projection",
+    );
+  }
+  if (
+    /\bhtmlAIUiPreferences\??\.(?:get|record)\s*\(/u.test(workbench)
+    || !hasCall(workbenchAst, { method: "evaluateFirstEditGuide" })
+    || !hasCall(workbenchAst, { method: "dismissFirstEditGuide" })
+    || !workbench.includes("<FirstEditGuideCard")
+    || !/run-submission-started[\s\S]{0,400}dismissFirstEditGuide/u.test(workbench)
+    || /keydown[\s\S]{0,400}dismissFirstEditGuide/u.test(workbench)
+  ) {
+    violations.push(
+      "app/workbench.tsx: the view may pass the narrow UI-preferences port at composition time but cannot record guide status itself; the card stays a window overlay that dismisses on send-to-waiting, not Escape",
+    );
+  }
+  if (
+    canvasEditor.includes("FirstEditGuideCard")
+    || canvasEditor.includes("dismissFirstEditGuide")
+  ) {
+    violations.push(
+      "app/components/HtmlCanvasEditor.tsx: first-real-HTML guide overlay must stay on the Workbench window layer",
     );
   }
   if (

@@ -88,7 +88,75 @@
 }
 
 .toolbar {
-  z-index: 10;
+  z-index: 12;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  width: max-content;
+  max-width: calc(100% - 16px);
+  min-height: 42px;
+  padding: 6px 7px 5px;
+  border: 1px solid rgb(32 29 49 / 12%);
+  border-radius: 11px;
+  color: #25232a;
+  background: rgb(255 255 255 / 96%);
+  box-shadow: 0 10px 30px rgb(28 25 52 / 18%);
+  font: 500 12px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  backdrop-filter: blur(12px);
+}
+
+.toolbarRow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.hoverOutline {
+  position: absolute;
+  z-index: 6;
+  box-sizing: border-box;
+  border: 1.5px solid rgb(81 71 220 / 28%);
+  border-radius: 4px;
+  pointer-events: none;
+}
+
+.hoverHint {
+  position: absolute;
+  z-index: 7;
+  max-width: 220px;
+  height: 22px;
+  padding: 0 9px;
+  border: 1px solid rgb(81 71 220 / 18%);
+  border-radius: 999px;
+  color: #fff;
+  background: rgb(81 71 220 / 90%);
+  box-shadow: 0 6px 16px rgb(81 71 220 / 18%);
+  font: 650 11px/22px -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  pointer-events: none;
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  animation: canvas-capability-hint-in 180ms ease-out;
+}
+
+@keyframes canvas-capability-hint-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hoverHint {
+    animation: none;
+  }
 }
 
 .commentMarker {
@@ -125,24 +193,6 @@
 .toolbar input:focus-visible {
   outline: 3px solid rgb(91 75 223 / 30%);
   outline-offset: 2px;
-}
-
-.toolbar {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 7px;
-  width: max-content;
-  max-width: calc(100% - 16px);
-  min-height: 42px;
-  padding: 5px 7px;
-  border: 1px solid rgb(32 29 49 / 12%);
-  border-radius: 11px;
-  color: #25232a;
-  background: rgb(255 255 255 / 96%);
-  box-shadow: 0 10px 30px rgb(28 25 52 / 18%);
-  font: 500 12px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  backdrop-filter: blur(12px);
 }
 
 .commentToolButton,

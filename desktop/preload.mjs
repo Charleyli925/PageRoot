@@ -56,6 +56,10 @@ const updateChannels = Object.freeze({
 const usageChannels = Object.freeze({
   capture: "html-usage:capture",
 });
+const uiPreferenceChannels = Object.freeze({
+  get: "html-ui-preferences:get",
+  record: "html-ui-preferences:record",
+});
 const previewChannels = Object.freeze({
   createSession: "html-preview:create-session",
   revokeSession: "html-preview:revoke-session",
@@ -453,6 +457,22 @@ const usageApi = Object.freeze({
     });
   },
 });
+const uiPreferencesApi = Object.freeze({
+  get: () => invokeProject(uiPreferenceChannels.get),
+  record: (payload) => {
+    if (
+      !payload
+      || typeof payload !== "object"
+      || Array.isArray(payload)
+      || (payload.action !== "presented" && payload.action !== "dismissed")
+    ) {
+      return Promise.reject(new TypeError("引导记录无效。"));
+    }
+    return invokeProject(uiPreferenceChannels.record, {
+      action: payload.action,
+    });
+  },
+});
 const historyRequestListeners = new Map();
 const editApi = Object.freeze({
   onHistoryRequested: (listener) => {
@@ -489,4 +509,5 @@ contextBridge.exposeInMainWorld("htmlAIEditRuntime", editRuntimeApi);
 contextBridge.exposeInMainWorld("htmlAIRuntime", runtimeConfig);
 contextBridge.exposeInMainWorld("htmlAIAppLifecycle", appLifecycleApi);
 contextBridge.exposeInMainWorld("htmlAIUsage", usageApi);
+contextBridge.exposeInMainWorld("htmlAIUiPreferences", uiPreferencesApi);
 contextBridge.exposeInMainWorld("htmlAIEdit", editApi);

@@ -42,8 +42,10 @@ import type {
   NativeDeferredCommandDiscardReason,
 } from "./components/HtmlCanvasEditor";
 import type { DesktopEditRuntimeApi } from "./components/desktop-edit-runtime-api";
+import type { DesktopUiPreferencesApi } from "./components/desktop-ui-preferences-api";
 import AboutPageRootDialog from "./components/AboutPageRootDialog";
 import CancelAiRunDialog from "./components/CancelAiRunDialog";
+import FirstEditGuideCard from "./components/FirstEditGuideCard";
 import HtmlInteractionPreview, {
   type HtmlInteractionPreviewHandle,
 } from "./components/HtmlInteractionPreview";
@@ -780,6 +782,7 @@ export default function Workbench() {
   }, []);
   useLayoutEffect(() => {
     const editRuntimeApi: DesktopEditRuntimeApi | undefined = window.htmlAIEditRuntime;
+    const uiPreferencesApi: DesktopUiPreferencesApi | undefined = window.htmlAIUiPreferences;
     const controller = createRuntimeWorkspaceController({
       initial: {
         documentHtml: DEFAULT_PROJECT_HTML,
@@ -824,6 +827,12 @@ export default function Workbench() {
           editRuntime: {
             prepare: (request) => editRuntimeApi.prepare(request),
             revoke: (sessionId) => editRuntimeApi.revoke(sessionId),
+          },
+        } : {}),
+        ...(uiPreferencesApi ? {
+          uiPreferences: {
+            get: () => uiPreferencesApi.get(),
+            record: (input) => uiPreferencesApi.record(input),
           },
         } : {}),
       },
@@ -1421,11 +1430,15 @@ export default function Workbench() {
           setHandoffPreviewOpen(false);
           setCanvasMode("edit");
           setDrawer("handoff");
+          void workspaceControllerRef.current?.dismissFirstEditGuide();
         }
         return;
       }
       if (runEvent.type === "run-submission-uncertain") {
-        if (runEvent.current) setDrawer("handoff");
+        if (runEvent.current) {
+          setDrawer("handoff");
+          void workspaceControllerRef.current?.dismissFirstEditGuide();
+        }
         return;
       }
       if (runEvent.type === "run-submission-failed") {
@@ -2305,6 +2318,54 @@ export default function Workbench() {
     || fileRenameBusy
     || persistState === "conflict"
     || viewMode === "history";
+  const firstEditGuideVisible =
+    workspaceControllerSnapshot?.firstEditGuide?.visible === true;
+  const isBuiltInWelcomePage = Boolean(
+    projectId
+    && workspaceControllerSnapshot?.firstEditGuide?.builtInWelcomeProjectId
+    && projectId === workspaceControllerSnapshot.firstEditGuide.builtInWelcomeProjectId
+  );
+  useEffect(() => {
+    workspaceController?.evaluateFirstEditGuide({
+      desktop: runtimeCapabilitiesReady
+        && runtimeCapabilitiesRef.current.projectOpening === "desktop-dialog",
+      browserPreviewOnly,
+      canvasMode,
+      canvasVerified: Boolean(
+        documentSnapshot.canvasAuthority?.status === "verified"
+        && documentSnapshot.canvasAuthority.generation === canvasGeneration
+        && documentSnapshot.canvasAuthority.renderedSha256 === sourceSha256
+      ),
+      viewMode,
+      blockingOverlay: Boolean(
+        openConfirmation
+        || readyReviewSession
+        || persistState === "conflict"
+        || projectLoadError
+        || workspaceIssue
+      ),
+      interactionLocked,
+      runInProgress,
+      projectId,
+    });
+  }, [
+    browserPreviewOnly,
+    canvasGeneration,
+    canvasMode,
+    documentSnapshot.canvasAuthority,
+    interactionLocked,
+    openConfirmation,
+    persistState,
+    projectId,
+    projectLoadError,
+    readyReviewSession,
+    runInProgress,
+    runtimeCapabilitiesReady,
+    sourceSha256,
+    viewMode,
+    workspaceController,
+    workspaceIssue,
+  ]);
 
   const activeCommentItems = useMemo(
     () => comments.filter(commentHasContent),
@@ -5611,6 +5672,7 @@ export default function Workbench() {
     ) return;
     if (currentRun.activeLocked) {
       setDrawer("handoff");
+      void workspaceControllerRef.current?.dismissFirstEditGuide();
       return;
     }
     if (
@@ -5654,6 +5716,7 @@ export default function Workbench() {
     if (outcome.status === "succeeded" || outcome.status === "stale") return;
     if (outcome.status === "unknown") {
       setDrawer("handoff");
+      void workspaceControllerRef.current?.dismissFirstEditGuide();
       return;
     }
     if (outcome.status === "blocked") {
@@ -5682,6 +5745,7 @@ export default function Workbench() {
       }
       if (outcome.code === "RUN_SUBMISSION_LOCKED") {
         setDrawer("handoff");
+        void workspaceControllerRef.current?.dismissFirstEditGuide();
         return;
       }
       if (outcome.code === "RUN_SUBMISSION_DOCUMENT_EDIT") {
@@ -7569,6 +7633,7 @@ export default function Workbench() {
                       ? "processing"
                       : "editing"}
                   enableReorder={!interactionLocked}
+                  pointerCapabilityHoverEnabled={!isBuiltInWelcomePage}
                 />
               </Suspense>
               )
@@ -9010,6 +9075,12 @@ export default function Workbench() {
           }}
         />
       ) : null}
+      <FirstEditGuideCard
+        visible={firstEditGuideVisible}
+        onDismiss={() => {
+          void workspaceControllerRef.current?.dismissFirstEditGuide();
+        }}
+      />
       </main>
       {readyReviewOverlay}
     </>
