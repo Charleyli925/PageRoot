@@ -268,11 +268,7 @@ function sleep(ms) {
 }
 
 export async function pageHasRendererMount(page) {
-  return page.evaluate(() => Boolean(
-    document.querySelector("main.workbench")
-    || window.__PAGEROOT_HYDRATION_STAGE__
-    || document.getElementById("root")?.firstElementChild
-  )).catch(() => false);
+  return page.evaluate(() => Boolean(document.querySelector("main.workbench"))).catch(() => false);
 }
 
 export async function ensureRendererMounted(page, {

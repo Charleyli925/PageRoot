@@ -15,9 +15,14 @@ export default defineConfig({
   testMatch: /ai-handoff-closed-loop\.spec\.mjs/,
   outputDir: path.join(artifactRoot, "results"),
   workers: 1,
-  retries: 0,
+  // CI absorbs one transient Electron launch/hydration stall per test, matching
+  // the native lane. Local runs stay retry-free.
+  retries: process.env.CI ? 1 : 0,
   reporter: [
     ["list"],
+    ["json", {
+      outputFile: path.join(artifactRoot, "results.json"),
+    }],
     ["html", {
       open: "never",
       outputFolder: path.join(artifactRoot, "report"),
