@@ -301,7 +301,7 @@ visibility and the 800ms present-dwell timer. Durable `pending` /
 Main `ui-preferences.json`. Workbench may pass a narrow get/record port at
 composition time and dispatch `evaluateFirstEditGuide` / `dismissFirstEditGuide`;
 it must not call UI-preference IPC itself. Workbench mounts `FirstEditGuideCard`
-as a `position: fixed` sibling of `main.workbench`, not as a grid child of the
+as a `position: fixed` portal on `document.body`, not as a grid child of the
 workbench or canvas; `HtmlCanvasEditor` must not mount or dismiss the card.
 Send that enters waiting writes `dismissed`; Escape does not. Hover captions
 are disposable Canvas presentation and must not change the click selection path.

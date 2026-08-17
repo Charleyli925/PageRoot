@@ -19,6 +19,12 @@ import {
   fixtureBuffer,
   productRoot,
 } from "../../browser/pageroot-driver.mjs";
+import {
+  FIRST_REAL_HTML_EDIT_GUIDE_GENERATION,
+  FIRST_REAL_HTML_EDIT_GUIDE_KEY,
+  UI_PREFERENCES_FILE_NAME,
+  UI_PREFERENCES_SCHEMA_VERSION,
+} from "../../../../desktop/ui-preferences.mjs";
 
 const require = createRequire(import.meta.url);
 const electronExecutable = require("electron");
@@ -166,6 +172,25 @@ export function createCloseFirstCleanup({
   };
 }
 
+export function seedDismissedFirstEditGuide(isolatedUserData) {
+  mkdirSync(isolatedUserData, { recursive: true });
+  writeFileSync(
+    path.join(isolatedUserData, UI_PREFERENCES_FILE_NAME),
+    `${JSON.stringify({
+      schemaVersion: UI_PREFERENCES_SCHEMA_VERSION,
+      firstRealHtmlEditGuide: {
+        key: FIRST_REAL_HTML_EDIT_GUIDE_KEY,
+        generation: FIRST_REAL_HTML_EDIT_GUIDE_GENERATION,
+        status: "dismissed",
+        presentedAt: null,
+        dismissedAt: "2020-01-01T00:00:00.000Z",
+      },
+      builtInWelcomeProjectId: null,
+    }, null, 2)}\n`,
+    "utf8",
+  );
+}
+
 export function seedActiveDiskProject(
   isolatedUserData,
   sourcePath,
@@ -241,12 +266,14 @@ export async function launchPageRoot({
   isolatedUserData: existingUserData = null,
   injectedEnv = {},
   userDataPrefix = DEFAULT_USER_DATA_PREFIX,
+  firstEditGuide = false,
 } = {}) {
   const isolatedUserData = existingUserData || mkdtempSync(
     path.join(tmpdir(), userDataPrefix),
   );
   mkdirSync(isolatedUserData, { recursive: true });
   const workspace = path.join(isolatedUserData, "workspace");
+  if (!firstEditGuide) seedDismissedFirstEditGuide(isolatedUserData);
   if (activeSourcePath) {
     seedActiveDiskProject(isolatedUserData, activeSourcePath, recentSourcePaths);
   }
@@ -425,9 +452,11 @@ export async function waitForProjectReady(page, {
     return "";
   };
   const projectState = async () => {
-    const state = await workbench.getAttribute("data-project-state");
+    const state = await workbench.getAttribute("data-project-state", { timeout: 400 })
+      .catch(() => null);
     if (state === "ready") return "ready";
-    const stage = await page.evaluate(() => window.__PAGEROOT_HYDRATION_STAGE__);
+    const stage = await page.evaluate(() => window.__PAGEROOT_HYDRATION_STAGE__)
+      .catch(() => null);
     const visibleFailure = includeFailureDetail && state === "failed"
       ? await page.locator('[aria-label="项目读取失败"]').textContent().catch(() => "")
       : "";

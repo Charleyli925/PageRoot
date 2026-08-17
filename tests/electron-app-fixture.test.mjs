@@ -1,9 +1,20 @@
 import assert from "node:assert/strict";
+import {
+  mkdtempSync,
+  readFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import test from "node:test";
 
 import {
+  FIRST_REAL_HTML_EDIT_GUIDE_GENERATION,
+  decodeUiPreferences,
+} from "../desktop/ui-preferences.mjs";
+import {
   closeObservationTimeout,
   createCloseFirstCleanup,
+  seedDismissedFirstEditGuide,
   waitForMainBrowserWindow,
 } from "./e2e/electron/helpers/pageroot-app-fixture.mjs";
 
@@ -116,4 +127,17 @@ test("Electron app fixture cleans up after confirmed process exit when the close
 
   await stop();
   assert.deepEqual(events, ["exit-request", "process-exit", "cleanup"]);
+});
+
+test("Electron app fixture seeds a dismissed first-edit guide for isolated profiles", () => {
+  const isolatedUserData = mkdtempSync(path.join(tmpdir(), "pageroot-native-e2e-guide-seed-"));
+  seedDismissedFirstEditGuide(isolatedUserData);
+  const preferences = decodeUiPreferences(
+    readFileSync(path.join(isolatedUserData, "ui-preferences.json"), "utf8"),
+  );
+  assert.equal(preferences.firstRealHtmlEditGuide.status, "dismissed");
+  assert.equal(
+    preferences.firstRealHtmlEditGuide.generation,
+    FIRST_REAL_HTML_EDIT_GUIDE_GENERATION,
+  );
 });

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 
 import styles from "./FirstEditGuideCard.module.css";
@@ -44,8 +45,8 @@ export default function FirstEditGuideCard({
     return () => window.clearTimeout(timer);
   }, [visible, mounted]);
 
-  if (!mounted) return null;
-  return (
+  if (!mounted || typeof document === "undefined") return null;
+  return createPortal(
     <aside
       className={styles.card}
       data-testid="first-edit-guide"
@@ -75,6 +76,7 @@ export default function FirstEditGuideCard({
           </li>
         ))}
       </ol>
-    </aside>
+    </aside>,
+    document.body,
   );
 }

@@ -6,9 +6,9 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 - The first time a real local HTML opens in the verified edit canvas, a
   non-modal frosted-glass “快速开始” card at the app window’s bottom-right
-  explains the edit → comment → send-to-AI loop. It is `position: fixed`
-  outside the workbench grid so it does not cover the page or follow HTML
-  scroll. It stays until Send enters waiting, or until the user skips it
+  explains the edit → comment → send-to-AI loop. It is a `position: fixed`
+  portal on `document.body`, outside the workbench grid, so it does not cover
+  the page or follow HTML scroll. It stays until Send enters waiting, or until the user skips it
   with ×. Escape no longer dismisses it. Pointer hover keeps teaching
   click-to-select and double-click-to-edit as a compact pill on the
   outline, not on the selected-element toolbar. Click selection range is
