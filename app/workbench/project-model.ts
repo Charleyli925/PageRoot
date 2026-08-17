@@ -30,13 +30,23 @@ function comparableLocalSourcePath(
   sourcePath: string | null | undefined,
 ): string {
   if (!sourcePath) return "";
-  if (sourcePath === "/private/var" || sourcePath.startsWith("/private/var/")) {
-    return sourcePath.slice("/private".length);
+  let normalized = sourcePath.normalize("NFC");
+  if (normalized === "/private/var" || normalized.startsWith("/private/var/")) {
+    normalized = normalized.slice("/private".length);
+  } else if (normalized === "/private/tmp" || normalized.startsWith("/private/tmp/")) {
+    normalized = normalized.slice("/private".length);
   }
-  if (sourcePath === "/private/tmp" || sourcePath.startsWith("/private/tmp/")) {
-    return sourcePath.slice("/private".length);
+  try {
+    if (
+      typeof process !== "undefined"
+      && (process.platform === "darwin" || process.platform === "win32")
+    ) {
+      return normalized.toLocaleLowerCase("en-US");
+    }
+  } catch {
+    // Browser preview has no process; keep the NFC spelling.
   }
-  return sourcePath;
+  return normalized;
 }
 
 export function sameLocalSourcePath(

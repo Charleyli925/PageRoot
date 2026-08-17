@@ -5,13 +5,23 @@ function normalizedPath(value) {
 }
 
 function comparablePath(value) {
-  const sourcePath = normalizedPath(value);
+  let sourcePath = normalizedPath(value);
   if (!sourcePath) return "";
+  sourcePath = sourcePath.normalize("NFC");
   if (sourcePath === "/private/var" || sourcePath.startsWith("/private/var/")) {
-    return sourcePath.slice("/private".length);
+    sourcePath = sourcePath.slice("/private".length);
+  } else if (sourcePath === "/private/tmp" || sourcePath.startsWith("/private/tmp/")) {
+    sourcePath = sourcePath.slice("/private".length);
   }
-  if (sourcePath === "/private/tmp" || sourcePath.startsWith("/private/tmp/")) {
-    return sourcePath.slice("/private".length);
+  try {
+    if (
+      typeof process !== "undefined"
+      && (process.platform === "darwin" || process.platform === "win32")
+    ) {
+      return sourcePath.toLocaleLowerCase("en-US");
+    }
+  } catch {
+    // Browser preview has no process; keep the NFC spelling.
   }
   return sourcePath;
 }
@@ -144,7 +154,7 @@ export class ProjectSession {
     ) return null;
     this.#projectId = String(projectId);
     this.#documentId = String(documentId);
-    this.#openTarget = normalizedOpenTarget(
+    const requested = normalizedOpenTarget(
       openTarget ?? {
         projectId,
         documentId,
@@ -162,6 +172,23 @@ export class ProjectSession {
         sourcePath: this.#sourcePath,
       },
     );
+    if (requested) {
+      this.#openTarget = requested;
+    } else if (
+      this.#openTarget
+      && this.#openTarget.projectId === this.#projectId
+      && this.#openTarget.documentId === this.#documentId
+      && samePath(this.#openTarget.exactSourcePath, this.#sourcePath)
+    ) {
+      this.#openTarget = normalizedOpenTarget(this.#openTarget, {
+        epoch: this.#epoch,
+        projectId: this.#projectId,
+        documentId: this.#documentId,
+        sourcePath: this.#sourcePath,
+      });
+    } else {
+      this.#openTarget = null;
+    }
     this.#emit();
     return this.context;
   }

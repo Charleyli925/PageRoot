@@ -74,7 +74,10 @@ step summary 里。
   `reconcileExternalSourceLocator` 单飞行：身份四元组不变、新路径与
   `activeManagedLocator` 原子更新（含 macOS `/var` 与 `/private/var` 同一路径）、
   同父目录项目文件夹改名靠父目录监听提示、当前 HTML 仍在时只 hash-observe 且不
-  drain 切换边界，内容 Hash 不同则进入既有冲突且不覆盖任一侧。
+  drain 切换边界，内容 Hash 不同则进入既有冲突且不覆盖任一侧。顶栏
+  `renameSource` 必须把 managed OpenTarget 的 `exactSourcePath` rebase 到新路径，
+  hydration 不得因 workspace 省略 OpenTarget 或 `/private`/NFC/大小写拼写差异丢掉该身份，
+  否则随后的 Finder 重绑会跳过 Bridge，顶栏会报“当前工作文件暂时不可用”。
   `WorkspaceController` 负责把 `RecentRunsPort` 和 ProjectWorkflow event channel 接回
   aggregate snapshot/event stream。Workbench 只保留 file input、host adapter 和
   Outcome/Event 的展示映射；专项 Node 集与完整 Electron 套件共同证明真实

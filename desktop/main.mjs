@@ -359,6 +359,9 @@ async function recoverWatchedManagedSource(info) {
         // Renderer still receives the original hint and uses the existing
         // fail-closed conflict / reselect path.
       }
+      // Always send the pre-rename path. The renderer session still holds that
+      // spelling until it completes the same identity relocate; a new-path hint
+      // would look stale and be ignored.
       publishSourceFileMayHaveChanged({
         sourcePath: activePath,
         watcherGeneration: Number(hint.watcherGeneration || sourceFileWatcher.watcherGeneration),
@@ -2245,7 +2248,7 @@ async function reconcileActiveManagedSourceOperation(payload) {
     operationId: requested.operationId,
     status: reconciled.status,
     previousSourcePath,
-    sourcePath: nextSourcePath,
+    sourcePath: openTarget.exactSourcePath,
     sourceSha256: reconciled.sourceSha256,
     openTarget,
     watcherGeneration: sourceFileWatcher.watcherGeneration,
