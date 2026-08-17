@@ -3788,15 +3788,15 @@ test("Electron follows a title-bar rename, then Finder, then another title-bar r
     await launched.page.getByRole("button", { name: /重命名文件/u }).click();
     const firstInput = launched.page.getByRole("textbox", { name: "文件名（不含后缀）" });
     await expect(firstInput).toBeFocused();
-    await firstInput.fill("京东财报速览_v13-电脑版-V1");
+    await firstInput.fill("title-first-V1");
     await firstInput.press("Enter");
-    const titleBarPath = path.join(projectDirectory, "京东财报速览_v13-电脑版-V1.html");
-    await waitForTitleStem(launched.page, "京东财报速览_v13-电脑版-V1");
+    const titleBarPath = path.join(projectDirectory, "title-first-V1.html");
+    await waitForTitleStem(launched.page, "title-first-V1");
     await expect.poll(() => existsSync(titleBarPath)).toBe(true);
     await waitForActiveSourcePath(launched.page, titleBarPath);
     await expect(launched.page.locator("#window-file-rename-error")).toHaveCount(0);
 
-    const finderName = "京东财报速览_26Q2-电脑版-V1.html";
+    const finderName = "finder-second-V1.html";
     const finderPath = path.join(projectDirectory, finderName);
     renameSync(titleBarPath, finderPath);
     await waitForTitleStem(launched.page, path.basename(finderName, ".html"));
@@ -3806,11 +3806,11 @@ test("Electron follows a title-bar rename, then Finder, then another title-bar r
     await launched.page.getByRole("button", { name: /重命名文件/u }).click();
     const secondInput = launched.page.getByRole("textbox", { name: "文件名（不含后缀）" });
     await expect(secondInput).toBeFocused();
-    await expect(secondInput).toHaveValue("京东财报速览_26Q2-电脑版-V1");
-    await secondInput.fill("京东财报速览_26Q2-定稿-V1");
+    await expect(secondInput).toHaveValue("finder-second-V1");
+    await secondInput.fill("title-third-V1");
     await secondInput.press("Enter");
-    const finalPath = path.join(projectDirectory, "京东财报速览_26Q2-定稿-V1.html");
-    await waitForTitleStem(launched.page, "京东财报速览_26Q2-定稿-V1");
+    const finalPath = path.join(projectDirectory, "title-third-V1.html");
+    await waitForTitleStem(launched.page, "title-third-V1");
     await expect.poll(() => existsSync(finalPath)).toBe(true);
     await waitForActiveSourcePath(launched.page, finalPath);
     await expect(launched.page.locator("#window-file-rename-error")).toHaveCount(0);
@@ -3826,7 +3826,7 @@ test("Electron follows a title-bar rename, then Finder, then another title-bar r
       .toBe(beforeIds.workingCopyId);
     const afterManifest = await readManagedManifest(finalPath);
     expect(afterManifest.workingCopies[0].sourceRelativePath)
-      .toBe("京东财报速览_26Q2-定稿-V1.html");
+      .toBe("title-third-V1.html");
   } finally {
     if (electronApp && isolatedUserData) {
       await stopPageRoot(electronApp, isolatedUserData);
