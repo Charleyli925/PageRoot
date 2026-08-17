@@ -1136,9 +1136,15 @@ async function releaseCurrentRegistryWriteLock({
     await rmdir(lockPath).catch((cause) => {
       if (cause?.code !== "ENOENT" && cause?.code !== "ENOTEMPTY") throw cause;
     });
-  } catch (cause) {
-    if (cause?.code === "ENOENT") return;
-    throw cause;
+    await syncDirectory(projectsRoot);
+  } catch {
+    // Releasing is cleanup, never authority. The published Registry is already
+    // the authoritative fact, and this lock grants nothing to a later reader, so
+    // a failed release must not become the outcome of an operation that already
+    // committed. Raising here would replace a successful result, or replace the
+    // original error whose code drives recovery, with a message about a lock
+    // file. An inert directory left behind is reclaimed on age by
+    // acquireCurrentRegistryWriteLock.
   }
 }
 

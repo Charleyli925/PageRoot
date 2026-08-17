@@ -16,6 +16,13 @@ Notable user-visible changes are documented here. This project follows Semantic 
   remembered per install, not per project, and never appears on the
   built-in welcome page.
 
+- Importing HTML no longer reports a failure for work that already succeeded. If
+  the project Registry lock could not be cleaned up afterwards — for example
+  because its coordination file was damaged by an external write — the import was
+  reported as failed even though the project had been fully created, and the
+  error text named the lock file instead of anything the user did. Cleanup
+  failures are now silent and the leftover lock is reclaimed automatically.
+
 - The exact-legacy-V4 project Registry migration and its dedicated lock are
   removed. The shape it migrated existed only on the development branch for
   about six hours and was never part of a released PageRoot, so no installed
