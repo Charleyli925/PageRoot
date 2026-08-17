@@ -13,6 +13,7 @@ import {
   hasCall,
   constructsClass,
   hasObjectProperty,
+  countReactHooks,
 } from "./architecture-ast-query.mjs";
 
 const PRODUCT_ROOT = fileURLToPath(new URL("../", import.meta.url));
@@ -1179,7 +1180,59 @@ export async function architectureViolations() {
       "app/application/run-workflow.js: AI requests must bind the exact frozen persisted source and Edit must not own a runtime projection",
     );
   }
+  const budget = await budgetFindings();
+  violations.push(...budget.violations);
   return violations;
+}
+
+// Complexity budget ratchet. Compares each file in
+// scripts/architecture-budget.json against its recorded ceiling. This is a
+// guardrail against silent drift, not a hard cap: exceeding a ceiling fails with
+// a message that states the low-friction escape valve (raise the number in the
+// same change), while staying under it emits a hint to lower the ceiling so the
+// ratchet follows a shrinking file down.
+export async function budgetFindings() {
+  const measurers = {
+    maxLines: (source) => source.split("\n").length,
+    maxHooks: (source, handle) => countReactHooks(handle),
+  };
+  const budgetPath = path.join(PRODUCT_ROOT, "scripts", "architecture-budget.json");
+  let budget;
+  try {
+    budget = JSON.parse(await readFile(budgetPath, "utf8"));
+  } catch {
+    return {
+      violations: ["scripts/architecture-budget.json: missing or invalid JSON"],
+      hints: [],
+    };
+  }
+  const violations = [];
+  const hints = [];
+  for (const [relPath, limits] of Object.entries(budget.files ?? {})) {
+    const source = await readFile(path.join(PRODUCT_ROOT, relPath), "utf8");
+    const handle = parseModule(path.join(PRODUCT_ROOT, relPath), source);
+    for (const [metric, ceiling] of Object.entries(limits)) {
+      const measure = measurers[metric];
+      if (!measure) {
+        violations.push(`scripts/architecture-budget.json: unknown metric "${metric}" for ${relPath}`);
+        continue;
+      }
+      const actual = measure(source, handle);
+      if (actual > ceiling) {
+        violations.push(
+          `${relPath}: ${metric} ${actual} exceeds budget ${ceiling} (+${actual - ceiling}). `
+          + `This is a ratchet, not a hard cap: if the growth is intentional, raise ${metric} to `
+          + `${actual} in scripts/architecture-budget.json in this change. Prefer moving logic out `
+          + `over raising the ceiling — the intent is to shrink this file.`,
+        );
+      } else if (actual < ceiling) {
+        hints.push(
+          `${relPath}: ${metric} is ${actual}, under budget ${ceiling}; lower it to ${actual} to keep the ratchet tight.`,
+        );
+      }
+    }
+  }
+  return { violations, hints };
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
@@ -1189,5 +1242,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     process.exitCode = 1;
   } else {
     process.stdout.write("Architecture contract passed.\n");
+    const { hints } = await budgetFindings();
+    if (hints.length > 0) {
+      process.stdout.write(`Budget can tighten:\n- ${hints.join("\n- ")}\n`);
+    }
   }
 }
