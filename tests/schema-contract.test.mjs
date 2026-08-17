@@ -7,7 +7,7 @@ import {
 import { join } from "node:path";
 import test from "node:test";
 
-import Ajv2020 from "../node_modules/schema-utils/node_modules/ajv/dist/2020.js";
+import Ajv2020 from "ajv/dist/2020.js";
 import {
   readStatus,
   runOfficialFinalizer,
