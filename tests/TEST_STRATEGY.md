@@ -163,6 +163,11 @@ Workbench 只确认已提交 loading surface、传入窄 port 并消费快照。
   单击选择、双击编辑、工具条和 `Option + 单击` 不冲突，切换前后共享滚动
   位置不变、作者处理器未运行且导出字节不变；Electron
   独立重读真实源文件，证明作者事件未运行且磁盘字节不变。
+- 第一次打开真实 HTML 引导：Node 证明 `ui-preferences.json` 损坏/过大视为
+  pending、欢迎 `projectId` 不显示卡片、pending 且合格时可见、连续 800ms
+  才写入 presented 且卡片仍在、中途打断仍 pending、dismiss 后不再出现；
+  指针能力只按进入文字编辑的证明分三档，可编辑优先于「像按钮」；Hover
+  快划不闪、400ms 才出文案。Workbench 不得直接调用 UI 偏好 IPC。
 - AI 闭环：Node 集成必须分别证明普通/跨标签相关改动可建版、不相关但可用
   HTML 进入 `attention` 并强制审阅、脚本/inline handler 等作者内容变化
   照常建版且不生成检测字段或提示，以及身份/Hash/路径/协议失败与

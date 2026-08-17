@@ -46,6 +46,7 @@ const APP_SOURCE_FILES = [
   "desktop/product-links.mjs",
   "desktop/application-update.mjs",
   "desktop/usage-telemetry.mjs",
+  "desktop/ui-preferences.mjs",
   "desktop/preview-protocol.mjs",
   "desktop/imported-asset-root.mjs",
   "desktop/edit-runtime-bootstrap.mjs",

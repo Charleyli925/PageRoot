@@ -43,6 +43,7 @@ const RUNTIME_SESSION_CONSTRUCTORS = [
   "ExternalFileOpenSession",
   "ProjectApplicationSession",
   "EditAuthorRuntimeSession",
+  "FirstEditGuideSession",
 ];
 
 async function sourceFiles(directory) {
@@ -95,7 +96,7 @@ export function compositionBoundaryViolations({
     );
   }
   if (
-    /\bnew\s+(?:ProjectSession|DocumentSession|CommentSession|DraftSession|VersionSession|SourceHistorySession|RunSession|ProjectRulesSession|ExternalFileOpenSession|ProjectApplicationSession)\b/u.test(workbench)
+    /\bnew\s+(?:ProjectSession|DocumentSession|CommentSession|DraftSession|VersionSession|SourceHistorySession|RunSession|ProjectRulesSession|ExternalFileOpenSession|ProjectApplicationSession|FirstEditGuideSession)\b/u.test(workbench)
     || /\b(?:projectSessionRef|documentSessionRef|commentSessionRef|draftSessionRef|versionSessionRef|sourceHistorySessionRef|runSessionRef|projectRulesSessionRef)\b/u.test(workbench)
   ) {
     violations.push(
@@ -993,6 +994,25 @@ export async function architectureViolations() {
   ) {
     violations.push(
       "app/workbench.tsx: the view may pass the narrow runtime port at composition time but cannot manage its lifecycle",
+    );
+  }
+  if (
+    !constructsClass(workspaceControllerAst, "FirstEditGuideSession")
+    || !classHasMember(workspaceControllerAst, "WorkspaceController", "evaluateFirstEditGuide")
+    || !classHasMember(workspaceControllerAst, "WorkspaceController", "dismissFirstEditGuide")
+    || !hasObjectProperty(workspaceControllerAst, "firstEditGuide")
+  ) {
+    violations.push(
+      "app/application/workspace-controller.js: first-real-HTML guide state must remain a Controller-owned Session projection",
+    );
+  }
+  if (
+    /\bhtmlAIUiPreferences\??\.(?:get|record)\s*\(/u.test(workbench)
+    || !hasCall(workbenchAst, { method: "evaluateFirstEditGuide" })
+    || !hasCall(workbenchAst, { method: "dismissFirstEditGuide" })
+  ) {
+    violations.push(
+      "app/workbench.tsx: the view may pass the narrow UI-preferences port at composition time but cannot record guide status itself",
     );
   }
   if (

@@ -4,6 +4,7 @@ import { CommentWorkflow } from "./comment-workflow.js";
 import { DocumentSession } from "./document-session.js";
 import { DocumentWorkflow } from "./document-workflow.js";
 import { EditAuthorRuntimeSession } from "./edit-author-runtime-session.js";
+import { FirstEditGuideSession } from "./first-edit-guide-session.js";
 import { DraftSession } from "./draft-session.js";
 import { DrainCoordinator } from "./drain-coordinator.js";
 import { ExternalFileOpenSession } from "./external-file-open-session.js";
@@ -204,6 +205,8 @@ export class WorkspaceController {
   #versionSession;
   #editRuntimeSession = null;
   #editRuntimeUnsubscribe = null;
+  #firstEditGuideSession = null;
+  #firstEditGuideUnsubscribe = null;
   #sourceHistorySession;
   #runSession = null;
   #codecs;
@@ -234,6 +237,7 @@ export class WorkspaceController {
   #runSessionSnapshot = null;
   #versionSessionSnapshot = null;
   #editRuntimeSnapshot = null;
+  #firstEditGuideSnapshot = null;
   #projectSnapshot = null;
   #projectRulesSnapshot = null;
   #runSnapshot = null;
@@ -246,6 +250,7 @@ export class WorkspaceController {
     runSession: null,
     versionSession: null,
     editRuntime: null,
+    firstEditGuide: null,
     comment: null,
     projectRules: null,
     project: null,
@@ -325,6 +330,9 @@ export class WorkspaceController {
     this.#editRuntimeSession = new EditAuthorRuntimeSession({
       port: ports.editRuntime || null,
     });
+    this.#firstEditGuideSession = new FirstEditGuideSession({
+      port: ports.uiPreferences || null,
+    });
     this.#sourceHistorySession = sourceHistorySession;
     this.#runSession = runSessions[0] || null;
     this.#projectSessionSnapshot = projectSession.snapshot;
@@ -333,6 +341,7 @@ export class WorkspaceController {
     this.#runSessionSnapshot = this.#runSession?.snapshot || null;
     this.#versionSessionSnapshot = versionSession.snapshot;
     this.#editRuntimeSnapshot = this.#editRuntimeSession.snapshot;
+    this.#firstEditGuideSnapshot = this.#firstEditGuideSession.snapshot;
     this.#codecs = createWorkspaceControllerCodecs(codecs);
     this.#hashPort = ports.hash;
     this.#recoveryPort = ports.recovery || { replace: () => {} };
@@ -592,6 +601,12 @@ export class WorkspaceController {
       this.#editRuntimeSnapshot = snapshot;
       this.#publishAggregateSnapshot();
     });
+    this.#firstEditGuideUnsubscribe = this.#firstEditGuideSession.subscribe((snapshot) => {
+      if (this.#disposed) return;
+      this.#firstEditGuideSnapshot = snapshot;
+      this.#publishAggregateSnapshot();
+    });
+    void this.#firstEditGuideSession.load();
     this.#refreshEditAuthorRuntime();
     this.#publishAggregateSnapshot();
   }
@@ -632,6 +647,10 @@ export class WorkspaceController {
     this.#editRuntimeUnsubscribe = null;
     this.#editRuntimeSession?.dispose();
     this.#editRuntimeSession = null;
+    this.#firstEditGuideUnsubscribe?.();
+    this.#firstEditGuideUnsubscribe = null;
+    this.#firstEditGuideSession?.dispose();
+    this.#firstEditGuideSession = null;
     this.#versionWorkflowUnsubscribe?.();
     this.#versionWorkflowUnsubscribe = null;
     this.#versionWorkflow?.dispose();
@@ -686,6 +705,14 @@ export class WorkspaceController {
 
   settleEditAuthorRuntime(input) {
     return this.#editRuntimeSession?.settleRuntime(input) || false;
+  }
+
+  evaluateFirstEditGuide(input) {
+    return this.#firstEditGuideSession?.evaluate(input) || null;
+  }
+
+  dismissFirstEditGuide() {
+    return this.#firstEditGuideSession?.dismiss() || Promise.resolve(null);
   }
 
   getCurrentProjectContext() {
@@ -1209,6 +1236,7 @@ export class WorkspaceController {
       runSession: this.#runSessionSnapshot,
       versionSession: this.#versionSessionSnapshot,
       editRuntime: this.#editRuntimeSnapshot,
+      firstEditGuide: this.#firstEditGuideSnapshot,
       comment: this.#commentWorkflow?.getSnapshot() || null,
       projectRules: this.#projectRulesSnapshot,
       project: this.#projectSnapshot,

@@ -362,3 +362,11 @@ patched signed release before automatic updates can resume. The legacy
 `update-manifest.json` remains a Release-produced compatibility artifact only,
 so already-published clients can find that migration release without restoring
 the retired client code to the current application.
+
+Install-level UI preferences (`ui-preferences.json`) are Main-owned, bounded
+and atomically replaced. The renderer receives only `get`/`record` for the
+first-real-HTML guide through trusted IPC; the payload is `presented` or
+`dismissed`. The file must not contain HTML, paths, comments or credentials.
+A damaged or oversized file is treated as empty pending state. The built-in
+welcome `projectId` is recorded after welcome registration so that page never
+shows the first-real-HTML card.

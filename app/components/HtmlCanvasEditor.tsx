@@ -137,6 +137,15 @@ import {
   sourceHistoryDirectionForShortcut,
   type TextCaretPoint,
 } from "./html-canvas-interaction";
+import {
+  canvasPointerCapabilityFromProof,
+  resolveCanvasPointerCapability,
+} from "./html-canvas-pointer-capability";
+import {
+  createCanvasCapabilityHoverController,
+  type CanvasCapabilityHoverSnapshot,
+} from "./html-canvas-capability-hover";
+import FirstEditGuideCard from "./FirstEditGuideCard";
 import NoticeBar from "./NoticeBar";
 import type {
   HtmlCanvasCommentedTarget,
@@ -319,6 +328,24 @@ const EDITOR_DOCUMENT_STYLES = `
   html[data-html-canvas-locked] [contenteditable] {
     cursor: default !important;
     caret-color: transparent !important;
+  }
+
+  html[data-html-canvas-pointer="text"],
+  html[data-html-canvas-pointer="text"] body,
+  html[data-html-canvas-pointer="text"] body * {
+    cursor: text !important;
+  }
+
+  html[data-html-canvas-pointer="pointer"],
+  html[data-html-canvas-pointer="pointer"] body,
+  html[data-html-canvas-pointer="pointer"] body * {
+    cursor: pointer !important;
+  }
+
+  html[data-html-canvas-pointer="help"],
+  html[data-html-canvas-pointer="help"] body,
+  html[data-html-canvas-pointer="help"] body * {
+    cursor: help !important;
   }
 
   noscript {
@@ -579,6 +606,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     pageViewContext = null,
     pageViewDocumentKey = "",
     onPageViewContextChange,
+    firstEditGuideVisible = false,
+    onDismissFirstEditGuide,
+    pointerCapabilityHoverEnabled = true,
   },
   forwardedRef,
 ) {
@@ -669,6 +699,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const pendingToolbarVisibleRef = useRef(false);
   const pendingFrameRestoreEpochRef = useRef(0);
   const toolbarVisibleRef = useRef(false);
+  const firstEditGuideVisibleRef = useRef(firstEditGuideVisible);
+  const onDismissFirstEditGuideRef = useRef(onDismissFirstEditGuide);
+  const pointerCapabilityHoverEnabledRef = useRef(pointerCapabilityHoverEnabled);
+  const hoverControllerRef = useRef<ReturnType<typeof createCanvasCapabilityHoverController> | null>(null);
   const pendingFrameViewportRef = useRef<{ left: number; top: number } | null>(null);
   const expectedFrameHtmlRef = useRef<string | null>(null);
   const expectedFrameTokenRef = useRef<string | null>(null);
@@ -731,6 +765,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   }
   pageViewDocumentKeyRef.current = pageViewDocumentKey;
   onPageViewContextChangeRef.current = onPageViewContextChange;
+  firstEditGuideVisibleRef.current = firstEditGuideVisible;
+  onDismissFirstEditGuideRef.current = onDismissFirstEditGuide;
+  pointerCapabilityHoverEnabledRef.current = pointerCapabilityHoverEnabled;
 
   // Keep the server and hydration value deterministic, then normalize through DOMParser after mount.
   const [frameRender, setFrameRender] = useState(() => ({
@@ -742,6 +779,12 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const [selection, setSelection] = useState<HtmlCanvasSelection | null>(null);
   const [overlayPosition, setOverlayPosition] = useState<OverlayPosition | null>(null);
   const [toolbarVisible, setToolbarVisible] = useState(false);
+  const [hoverChrome, setHoverChrome] = useState<CanvasCapabilityHoverSnapshot>({
+    cursor: "default",
+    outline: false,
+    hint: false,
+    capability: null,
+  });
   const [hasTextRange, setHasTextRange] = useState(false);
   const [selectedStyle, setSelectedStyle] = useState<SelectedStyle>({
     fontSize: 16,
@@ -765,6 +808,35 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const [spacingMenuOpen, setSpacingMenuOpen] = useState(false);
 
   toolbarVisibleRef.current = toolbarVisible;
+
+  useEffect(() => {
+    const controller = createCanvasCapabilityHoverController({
+      onChange: setHoverChrome,
+    });
+    hoverControllerRef.current = controller;
+    return () => {
+      controller.dispose();
+      hoverControllerRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (pointerCapabilityHoverEnabled) return;
+    hoverControllerRef.current?.hide();
+  }, [pointerCapabilityHoverEnabled]);
+
+  useEffect(() => {
+    const documentNode = iframeRef.current?.contentDocument;
+    if (!documentNode) return;
+    if (!pointerCapabilityHoverEnabled || hoverChrome.cursor === "default") {
+      documentNode.documentElement.removeAttribute("data-html-canvas-pointer");
+      return;
+    }
+    documentNode.documentElement.setAttribute(
+      "data-html-canvas-pointer",
+      hoverChrome.cursor,
+    );
+  }, [hoverChrome.cursor, pointerCapabilityHoverEnabled]);
 
   useEffect(() => {
     const documentNode = containerRef.current?.ownerDocument;
@@ -2912,6 +2984,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     caretPoint?: TextCaretPoint,
     restoredSelection?: NativeEditSelection,
   ): boolean => {
+    hoverControllerRef.current?.hide();
     containerRef.current?.setAttribute("data-native-start-status", "starting");
     containerRef.current?.removeAttribute("data-native-host-mode");
     containerRef.current?.removeAttribute("data-native-event-delivery-mode");
@@ -4519,6 +4592,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     );
     appliedPageViewContextRef.current = pageViewContextRef.current;
     const handleClick = (event: MouseEvent) => {
+      hoverControllerRef.current?.hide();
       if (isCanvasRootElement(event.target)) {
         if (!lockedRef.current) {
           event.preventDefault();
@@ -4594,6 +4668,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     };
 
     const handleDoubleClick = (event: MouseEvent) => {
+      hoverControllerRef.current?.hide();
       if (findNativeActionTarget(event.target)) event.preventDefault();
       const caretPoint = caretPointFromMouseEvent(event);
       const dedicatedSurface = findDedicatedSourceSurfaceAtPoint(
@@ -4780,6 +4855,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       }
       if (event.key === "Escape") {
         event.preventDefault();
+        if (firstEditGuideVisibleRef.current) {
+          event.stopPropagation();
+          onDismissFirstEditGuideRef.current?.();
+          return;
+        }
         clearSelection();
         return;
       }
@@ -4819,6 +4899,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     };
 
     const handleMouseDown = (event: MouseEvent) => {
+      hoverControllerRef.current?.hide();
       onInteractionRef.current?.();
       setSpacingMenuOpen(false);
       if (activeNativeEditRef.current?.rootElement.contains(event.target as Node)) {
@@ -4845,7 +4926,32 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       if (lockedRef.current) event.preventDefault();
     };
 
-    const handleScroll = () => updateOverlayPosition();
+    const handleScroll = () => {
+      hoverControllerRef.current?.hide();
+      updateOverlayPosition();
+    };
+    const handlePointerMove = (event: PointerEvent) => {
+      if (
+        event.buttons !== 0
+        || lockedRef.current
+        || readOnlyRef.current
+        || !pointerCapabilityHoverEnabledRef.current
+        || activeNativeEditRef.current
+      ) {
+        hoverControllerRef.current?.hide();
+        return;
+      }
+      hoverControllerRef.current?.update(resolveCanvasPointerCapability({
+        documentNode,
+        eventTarget: event.target,
+        point: caretPointFromMouseEvent(event),
+        sourceIndex: sourceIndexRef.current,
+        enabled: true,
+      }));
+    };
+    const handlePointerLeave = () => {
+      hoverControllerRef.current?.hide();
+    };
     const LayoutResizeObserver = documentNode.defaultView?.ResizeObserver;
     const layoutObserver = LayoutResizeObserver
       ? new LayoutResizeObserver(() => updateOverlayPosition())
@@ -4859,6 +4965,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       handleDisabledButtonPointerDown,
       true,
     );
+    documentNode.addEventListener("pointermove", handlePointerMove, true);
+    documentNode.addEventListener("pointerleave", handlePointerLeave, true);
     documentNode.addEventListener("dblclick", handleDoubleClick, true);
     documentNode.addEventListener("beforeinput", handleBeforeInput, true);
     documentNode.addEventListener("paste", handleLockedTransfer, true);
@@ -4866,6 +4974,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     documentNode.addEventListener("submit", handleSubmit, true);
     documentNode.addEventListener("keydown", handleKeyDown, true);
     documentNode.addEventListener("scroll", handleScroll, true);
+    iframe.addEventListener("pointerleave", handlePointerLeave);
 
     cleanupFrameRef.current = () => {
       documentNode.removeEventListener("click", handleClick, true);
@@ -4876,6 +4985,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         handleDisabledButtonPointerDown,
         true,
       );
+      documentNode.removeEventListener("pointermove", handlePointerMove, true);
+      documentNode.removeEventListener("pointerleave", handlePointerLeave, true);
+      iframe.removeEventListener("pointerleave", handlePointerLeave);
       documentNode.removeEventListener("dblclick", handleDoubleClick, true);
       documentNode.removeEventListener("beforeinput", handleBeforeInput, true);
       documentNode.removeEventListener("paste", handleLockedTransfer, true);
@@ -5368,6 +5480,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         finishNativeEditing(true);
         return;
       }
+      if (firstEditGuideVisibleRef.current) {
+        onDismissFirstEditGuideRef.current?.();
+        return;
+      }
       iframeRef.current?.focus();
       clearSelection();
     }
@@ -5397,6 +5513,62 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     || selectedNativeEditHost
     || selectedNativeTextFragment,
   );
+  const selectionCapability = selection && !interactionLocked
+    ? canvasPointerCapabilityFromProof({
+      canStartTextEdit: selectedNativeEditAvailable,
+      sourceResolution: selection.resolution,
+    })
+    : null;
+  const hoverTargetIsSelected = Boolean(
+    hoverChrome.capability
+    && selection
+    && toolbarVisible
+    && (
+      hoverChrome.capability.targetKey === selection.nodeId
+      || hoverChrome.capability.targetKey === selection.id
+    ),
+  );
+  const showHoverOutline = Boolean(
+    pointerCapabilityHoverEnabled
+    && hoverChrome.outline
+    && hoverChrome.capability
+    && !hoverTargetIsSelected
+    && !isEditing
+    && !interactionLocked
+  );
+  const showHoverHint = Boolean(
+    pointerCapabilityHoverEnabled
+    && hoverChrome.hint
+    && hoverChrome.capability
+    && !hoverTargetIsSelected
+    && !isEditing
+    && !interactionLocked
+  );
+  let hoverOutlineStyle: CSSProperties | undefined;
+  let hoverHintStyle: CSSProperties | undefined;
+  if (
+    (showHoverOutline || showHoverHint)
+    && hoverChrome.capability?.element?.isConnected
+    && containerRef.current
+    && iframeRef.current
+  ) {
+    const containerRect = containerRef.current.getBoundingClientRect();
+    const iframeRect = iframeRef.current.getBoundingClientRect();
+    const elementRect = hoverChrome.capability.element.getBoundingClientRect();
+    const left = iframeRect.left - containerRect.left + elementRect.left;
+    const top = iframeRect.top - containerRect.top + elementRect.top;
+    hoverOutlineStyle = {
+      left,
+      top,
+      width: Math.max(0, elementRect.width),
+      height: Math.max(0, elementRect.height),
+    };
+    const hintWidth = 168;
+    hoverHintStyle = {
+      left: Math.max(8, Math.min(containerRect.width - hintWidth - 8, left)),
+      top: top - 28 >= 8 ? top - 28 : top + elementRect.height + 8,
+    };
+  }
   const selectedPagePresentationAction = (
     !readOnly
     && !interactionLocked
@@ -5463,6 +5635,30 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         className="canvas-transition-overlay"
         data-active={canvasTransitionActive ? "true" : undefined}
         aria-hidden="true"
+      />
+      <div className="sr-only" aria-live="polite" aria-atomic="true">
+        {selectionCapability ? selectionCapability.spoken : ""}
+      </div>
+      {showHoverOutline && hoverOutlineStyle ? (
+        <div
+          className={styles.hoverOutline}
+          style={hoverOutlineStyle}
+          aria-hidden="true"
+        />
+      ) : null}
+      {showHoverHint && hoverHintStyle && hoverChrome.capability ? (
+        <div
+          className={styles.hoverHint}
+          data-testid="canvas-capability-hint"
+          style={hoverHintStyle}
+          aria-hidden="true"
+        >
+          {hoverChrome.capability.hint}
+        </div>
+      ) : null}
+      <FirstEditGuideCard
+        visible={firstEditGuideVisible && !interactionLocked}
+        onDismiss={() => onDismissFirstEditGuideRef.current?.()}
       />
 
       {editFeedback && !interactionLocked ? (
@@ -5576,6 +5772,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
             }
           }}
         >
+          {selectionCapability ? (
+            <p className={styles.capabilityCaption}>{selectionCapability.hint}</p>
+          ) : null}
+          <div className={styles.toolbarRow}>
           {selectedPagePresentationAction ? (
             <button
               type="button"
@@ -5807,6 +6007,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
               ) : null}
             </>
           ) : null}
+          </div>
         </div>
       ) : null}
     </div>

@@ -52,6 +52,7 @@ async function loadPreloadApis(invoke) {
     runtime: exposed.get("htmlAIRuntime"),
     lifecycle: exposed.get("htmlAIAppLifecycle"),
     usage: exposed.get("htmlAIUsage"),
+    uiPreferences: exposed.get("htmlAIUiPreferences"),
     preview: exposed.get("htmlAIPreview"),
     reviewRuntimeSnapshots: exposed.get("htmlAIReviewRuntimeSnapshots"),
     runtimeSnapshots: exposed.get("htmlAIRuntimeSnapshots"),
@@ -148,6 +149,45 @@ test("preload exposes one narrow one-shot Edit runtime preparation port", async 
     "0123456789abcdef0123456789abcdef",
   ]);
   assert.deepEqual(Object.keys(editRuntime).sort(), ["prepare", "revoke"]);
+});
+
+test("preload exposes one narrow UI-preferences get/record port", async () => {
+  const calls = [];
+  const { uiPreferences } = await loadPreloadApis(async (...args) => {
+    calls.push(args);
+    if (args[0] === "html-ui-preferences:get") {
+      return success({
+        schemaVersion: 1,
+        firstRealHtmlEditGuide: { status: "pending", generation: 1 },
+        builtInWelcomeProjectId: null,
+      });
+    }
+    return success({
+      schemaVersion: 1,
+      firstRealHtmlEditGuide: { status: "dismissed", generation: 1 },
+      builtInWelcomeProjectId: null,
+    });
+  });
+
+  assert.deepEqual(await uiPreferences.get(), {
+    schemaVersion: 1,
+    firstRealHtmlEditGuide: { status: "pending", generation: 1 },
+    builtInWelcomeProjectId: null,
+  });
+  assert.deepEqual(calls[0], ["html-ui-preferences:get"]);
+  assert.deepEqual(await uiPreferences.record({ action: "dismissed" }), {
+    schemaVersion: 1,
+    firstRealHtmlEditGuide: { status: "dismissed", generation: 1 },
+    builtInWelcomeProjectId: null,
+  });
+  assert.equal(calls[1][0], "html-ui-preferences:record");
+  assert.equal(calls[1][1].action, "dismissed");
+  await assert.rejects(
+    () => uiPreferences.record({ action: "pending" }),
+    /引导记录无效/u,
+  );
+  assert.equal(calls.length, 2);
+  assert.deepEqual(Object.keys(uiPreferences).sort(), ["get", "record"]);
 });
 
 test("preload exposes only preview session creation and revocation", async () => {

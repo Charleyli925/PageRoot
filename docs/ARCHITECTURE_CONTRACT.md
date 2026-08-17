@@ -294,6 +294,16 @@ the non-interactive loading surface; only that presentation acknowledgement
 starts the narrow prepare port, so a fast grant cannot promote a static iframe
 that has already mounted.
 
+The install-level first-real-HTML guide is a separate Session fact.
+`FirstEditGuideSession`, composed only by `WorkspaceController`, owns
+visibility and the 800ms present-dwell timer. Durable `pending` /
+`presented` / `dismissed` status and the built-in welcome `projectId` live in
+Main `ui-preferences.json`. Workbench may pass a narrow get/record port at
+composition time and dispatch `evaluateFirstEditGuide` / `dismissFirstEditGuide`;
+it must not call UI-preference IPC itself or reconstruct the card's lifecycle
+in `HtmlCanvasEditor`. Hover captions are disposable Canvas presentation and
+must not change the click selection path.
+
 The direct path permits only a bounded classic-script ECharts candidate, frozen
 local/allowlisted-CDN bytes and at most 32 uniquely bound, source-empty hosts.
 For an HTML-only imported V1, Main records the original selected HTML directory
