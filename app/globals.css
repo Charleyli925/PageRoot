@@ -6889,7 +6889,7 @@ body {
   position: absolute;
   z-index: 80;
   bottom: calc(100% + 4px);
-  left: calc(100% - 3px);
+  left: 50%;
   width: max-content;
   max-width: 180px;
   padding: 5px 7px;
@@ -6905,7 +6905,7 @@ body {
   white-space: nowrap;
   opacity: 0;
   visibility: hidden;
-  transform: translate(-3px, 3px);
+  transform: translate(-50%, 3px);
   pointer-events: none;
   transition:
     opacity 120ms ease,
@@ -6917,7 +6917,7 @@ body {
 .window-file-quick-action:focus-visible::after {
   opacity: 1;
   visibility: visible;
-  transform: translate(0, 0);
+  transform: translate(-50%, 0);
   transition-delay: 180ms;
 }
 

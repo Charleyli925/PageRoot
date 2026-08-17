@@ -4,6 +4,8 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
+- Filename “打开本地HTML” and “在默认浏览器中打开” hover/focus hints now
+  sit horizontally centered above their icons instead of the top-right.
 - Preview sessions now refresh in place for the same Edit sibling-asset
   source path, and a full session map evicts the least-recently-accessed idle
   session instead of the oldest insert. Repeated saves and Preview toggles
