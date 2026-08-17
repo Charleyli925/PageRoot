@@ -662,3 +662,39 @@ A change affecting state, persistence or lifecycle must include:
 Source-string tests are reserved for packaging, dependency and security
 boundaries. Runtime coordination is proven through public behavior, bytes,
 Hashes, state transitions and fault injection.
+
+### Architecture gate assertion forms
+
+`scripts/check-architecture.mjs` enforces the boundaries above. To honor the
+rule that runtime coordination is not proven by source strings, the gate uses
+only these assertion forms:
+
+- **Structural queries** through `scripts/architecture-ast-query.mjs`
+  (`importsModule`, `exportsSymbol`, `classHasMember`, `classMemberConstructs`,
+  `hasCall`, `constructsClass`, `hasObjectProperty`). These parse the module and
+  match imports, exports, class members, constructions, calls and object
+  properties, so a rename, reflow, comment or format change to compliant code
+  cannot fail the gate, and a dead string cannot pass it.
+- **Negative boundary regexes** that forbid an import, construction, endpoint or
+  retired identifier from appearing (a dependency/security boundary).
+- **Document-content strings** for `docs/**` prose, which is not runtime code.
+
+The gate must not assert that a specific code fragment *exists* by substring or
+by ordered substring (`String.prototype.includes` on code, ordered marker
+lists). A required behavior is proven by a behavior or fault-injection test, not
+by matching its source text.
+
+#### Review behavior test debt
+
+Converting the gate away from ordered source-string matching exposed three
+renderer behaviors whose ordering guarantees are now asserted only
+structurally (call presence), because the repository has no DOM test harness for
+`HtmlCanvasEditor.tsx`. Each needs Electron/Playwright behavior coverage:
+
+- Canvas fail-closed freeze: a source transition must abort when
+  `freezeNow()` fails or returns bytes that differ from the live source.
+- Native command arbitration: a lower-priority `system` command must be
+  rejected before it reaches the controller queue when a `user-explicit`
+  command is pending.
+- Canonical host replacement: the native lease must be disposed before the
+  authored DOM host is replaced.
