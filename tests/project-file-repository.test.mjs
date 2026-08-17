@@ -131,71 +131,7 @@ function registryPath(fixtureValue) {
   return path.join(fixtureValue.projects, ".pageroot-registry.json");
 }
 
-function legacyV4RegistryFromCurrent(current) {
-  return {
-    schemaVersion: "4.0.0",
-    updatedAt: current.updatedAt,
-    projects: Object.fromEntries(Object.entries(current.projects).map(([projectId, record]) => [
-      projectId,
-      {
-        projectRootPath: record.registeredProjectRootPath,
-        updatedAt: record.updatedAt,
-      },
-    ])),
-  };
-}
-
-function legacyV4RegistryBackupPath(fixtureValue, legacySha256) {
-  return path.join(
-    fixtureValue.projects,
-    ".pageroot-registry-backups",
-    `${legacySha256.slice("sha256:".length)}.json`,
-  );
-}
-
-function legacyV4RegistryMigrationLockPath(fixtureValue) {
-  return path.join(fixtureValue.projects, ".pageroot-registry-migration-lock");
-}
-
-function legacyV4RegistryMigrationLockOwnerPath(fixtureValue, token) {
-  return path.join(
-    legacyV4RegistryMigrationLockPath(fixtureValue),
-    `.owner-${token}.json`,
-  );
-}
-
-async function seedDeadLegacyV4RegistryMigrationLock(fixtureValue) {
-  const token = "00000000-0000-4000-8000-000000000001";
-  await mkdir(legacyV4RegistryMigrationLockPath(fixtureValue));
-  await writeFile(
-    legacyV4RegistryMigrationLockOwnerPath(fixtureValue, token),
-    `${JSON.stringify({
-      pid: 2_147_483_647,
-      token,
-      createdAt: "2026-08-14T00:00:00.000Z",
-    })}\n`,
-    "utf8",
-  );
-  return { token };
-}
-
-async function seedExactLegacyV4Registry(fixtureValue, transform = (value) => value) {
-  const filePath = registryPath(fixtureValue);
-  const current = await json(filePath);
-  const legacy = transform(legacyV4RegistryFromCurrent(current));
-  const bytes = Buffer.from(`${JSON.stringify(legacy, null, 2)}\n`, "utf8");
-  const legacySha256 = sha256(bytes);
-  await writeFile(filePath, bytes);
-  return {
-    filePath,
-    legacy,
-    bytes,
-    legacySha256,
-    backupPath: legacyV4RegistryBackupPath(fixtureValue, legacySha256),
-  };
-}
-
-async function initializeMigratedRepository(fixtureValue, options = {}) {
+async function initializedRepository(fixtureValue, options = {}) {
   const repository = new ProjectFileRepository({
     projectsRoot: fixtureValue.projects,
     ...options,
@@ -1605,343 +1541,62 @@ test("promotion rechecks the Candidate base before manifest publication and reco
   assert.equal(persistedCandidate.status, "pending-review");
 });
 
-test("an exact legacy V4 Registry migrates one registered project from its live root stat", async (t) => {
-  const value = await fixture(t);
-  const imported = await importSource(value, "legacy-single.html");
-  const seeded = await seedExactLegacyV4Registry(value);
-  const originalExternalBytes = await readFile(imported.sourcePath);
-
-  const migratedRepository = await initializeMigratedRepository(value);
-  const migrated = await json(seeded.filePath);
-  const record = migrated.projects[imported.target.projectId];
-  const rootInformation = await lstat(imported.target.projectRootPath);
-
-  assert.equal(migrated.schemaVersion, "4.0.0");
-  assert.deepEqual(migrated.pendingImports, {});
-  assert.deepEqual(record, {
-    registeredProjectRootPath: imported.target.projectRootPath,
-    rootFileIdentity: {
-      device: String(rootInformation.dev),
-      inode: String(rootInformation.ino),
-      birthtimeMs: Number(rootInformation.birthtimeMs || 0),
-    },
-    updatedAt: seeded.legacy.projects[imported.target.projectId].updatedAt,
-  });
-  assert.notEqual(sha256(await readFile(seeded.filePath)), seeded.legacySha256);
-  assert.deepEqual(await readFile(seeded.backupPath), seeded.bytes);
-  assert.equal(sha256(await readFile(seeded.backupPath)), seeded.legacySha256);
-  assert.deepEqual(await readFile(imported.sourcePath), originalExternalBytes);
-
-  const reopened = await migratedRepository.workspace({
-    sourcePath: imported.target.exactSourcePath,
-  });
-  assert.equal(reopened.target.projectId, imported.target.projectId);
-  assert.equal(reopened.target.workingCopyId, imported.target.workingCopyId);
-});
-
-test("an exact legacy V4 Registry migrates multiple projects once and then stays byte-stable", async (t) => {
-  const value = await fixture(t);
-  const first = await importSource(value, "legacy-first.html", html("legacy first"));
-  const second = await importSource(value, "legacy-second.html", html("legacy second"));
-  const seeded = await seedExactLegacyV4Registry(value);
-
-  await initializeMigratedRepository(value);
-  const afterFirstMigration = await readFile(seeded.filePath);
-  const migrated = JSON.parse(afterFirstMigration.toString("utf8"));
-  assert.deepEqual(Object.keys(migrated.projects).sort(), [
-    first.target.projectId,
-    second.target.projectId,
-  ].sort());
-  for (const imported of [first, second]) {
-    const record = migrated.projects[imported.target.projectId];
-    assert.equal(record.registeredProjectRootPath, imported.target.projectRootPath);
-    assert.equal(typeof record.rootFileIdentity.device, "string");
-    assert.equal(typeof record.rootFileIdentity.inode, "string");
-  }
-  assert.deepEqual(await readFile(seeded.backupPath), seeded.bytes);
-
-  await initializeMigratedRepository(value);
-  assert.deepEqual(
-    await readFile(seeded.filePath),
-    afterFirstMigration,
-    "a current migrated Registry must not be rewritten on the second read",
-  );
-});
-
-test("an empty exact legacy V4 Registry migrates to the current empty Registry", async (t) => {
-  const value = await fixture(t);
-  await value.repository.initialize();
-  const seeded = await seedExactLegacyV4Registry(value);
-
-  await initializeMigratedRepository(value);
-  const migrated = await json(seeded.filePath);
-  assert.deepEqual(migrated.projects, {});
-  assert.deepEqual(migrated.pendingImports, {});
-  assert.deepEqual(await readFile(seeded.backupPath), seeded.bytes);
-});
-
-test("a current V4 Registry is read without a migration rewrite", async (t) => {
+test("reading a current V4 Registry never rewrites its bytes", async (t) => {
   const value = await fixture(t);
   await importSource(value, "current-registry.html");
   const before = await readFile(registryPath(value));
 
-  await initializeMigratedRepository(value);
+  await initializedRepository(value);
 
   assert.deepEqual(await readFile(registryPath(value)), before);
 });
 
-test("legacy V4 Registry rejects mixed, escaping, symlinked, missing and mismatched records without changing its bytes", async (t) => {
-  const cases = [
-    {
-      name: "mixed current-and-legacy fields",
-      transform(legacy) {
-        legacy.pendingImports = {};
-        return legacy;
-      },
-      expectsLegacyMigrationError: false,
-    },
-    {
-      name: "path outside the configured project root",
-      transform(legacy, value) {
-        const [projectId] = Object.keys(legacy.projects);
-        legacy.projects[projectId].projectRootPath = value.root;
-        return legacy;
-      },
-      expectsLegacyMigrationError: true,
-    },
-    {
-      name: "symbolic-link project root",
-      async prepare(value, imported) {
-        const linkPath = path.join(value.projects, "legacy-symlink-root");
-        await symlink(imported.target.projectRootPath, linkPath, "dir");
-        return linkPath;
-      },
-      transform(legacy, _value, linkPath) {
-        const [projectId] = Object.keys(legacy.projects);
-        legacy.projects[projectId].projectRootPath = linkPath;
-        return legacy;
-      },
-      expectsLegacyMigrationError: true,
-    },
-    {
-      name: "missing project root",
-      transform(legacy, value) {
-        const [projectId] = Object.keys(legacy.projects);
-        legacy.projects[projectId].projectRootPath = path.join(value.projects, "missing-root");
-        return legacy;
-      },
-      expectsLegacyMigrationError: true,
-    },
-    {
-      name: "projectId mismatch",
-      transform(legacy) {
-        const [[, record]] = Object.entries(legacy.projects);
-        legacy.projects = {
-          [`project_${"a".repeat(32)}`]: record,
-        };
-        return legacy;
-      },
-      expectsLegacyMigrationError: true,
-    },
-  ];
+// An unrecognized Registry shape is refused rather than replaced. Returning an
+// empty Registry instead would let the next import overwrite the real file, which
+// would destroy every recorded external-source binding and root identity while
+// leaving the project directories orphaned on disk. The shape seeded here is the
+// pre-hardening V4 one: same schemaVersion, but no pendingImports and records
+// without a durable root identity.
+test("an unrecognized Registry shape fails closed without changing its bytes", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "未知形状.html");
+  const managedBefore = await readFile(imported.target.exactSourcePath);
+  const current = JSON.parse(await readFile(registryPath(value), "utf8"));
+  const unknown = {
+    schemaVersion: current.schemaVersion,
+    updatedAt: current.updatedAt,
+    projects: Object.fromEntries(Object.entries(current.projects).map(([id, record]) => [
+      id,
+      { projectRootPath: record.registeredProjectRootPath, updatedAt: record.updatedAt },
+    ])),
+  };
+  const unknownBytes = Buffer.from(`${JSON.stringify(unknown, null, 2)}\n`, "utf8");
+  await writeFile(registryPath(value), unknownBytes);
 
-  for (const scenario of cases) {
-    const value = await fixture(t);
-    const imported = await importSource(value, "legacy-invalid.html");
-    const prepared = scenario.prepare
-      ? await scenario.prepare(value, imported)
-      : undefined;
-    const seeded = await seedExactLegacyV4Registry(
-      value,
-      (legacy) => scenario.transform(legacy, value, prepared),
-    );
-
+  for (const run of [
+    (repository) => repository.listRegisteredProjects(),
+    (repository) => repository.classifyOpenPath({ sourcePath: imported.sourcePath }),
+    (repository) => repository.importExternal({
+      sourcePath: imported.sourcePath,
+      expectedSourceSha256: sha256(managedBefore),
+    }),
+  ]) {
     await assert.rejects(
-      initializeMigratedRepository(value),
+      run(new ProjectFileRepository({
+        projectsRoot: value.projects,
+        registryWriteLockTimeoutMs: 200,
+      })),
       (error) => error instanceof ProjectFileRepositoryError
-        && (
-          scenario.expectsLegacyMigrationError
-            ? error.code.startsWith("LEGACY_V4_REGISTRY_")
-            : !error.code.startsWith("LEGACY_V4_REGISTRY_")
-        ),
-      scenario.name,
+        && error.code === "UNSUPPORTED_REGISTRY_SCHEMA",
     );
-    const after = await readFile(seeded.filePath);
-    assert.deepEqual(after, seeded.bytes, `${scenario.name} must retain the original Registry bytes`);
-    assert.equal(sha256(after), seeded.legacySha256);
   }
-});
 
-test("legacy V4 Registry migration fault recovery leaves either old bytes or one complete Registry", async (t) => {
-  const beforePublish = await fixture(t);
-  const importedBeforePublish = await importSource(beforePublish, "legacy-before-publish.html");
-  const seededBeforePublish = await seedExactLegacyV4Registry(beforePublish);
-  const interruptedBeforePublish = new ProjectFileRepository({
-    projectsRoot: beforePublish.projects,
-    failpoint: (name) => name === "legacy-v4-registry-migration-before-publish",
-  });
-
-  await assert.rejects(
-    interruptedBeforePublish.initialize(),
-    (error) => error instanceof ProjectFileRepositoryError && error.code === "INJECTED_FAILPOINT",
+  assert.deepEqual(await readFile(registryPath(value)), unknownBytes);
+  assert.deepEqual(await readFile(imported.target.exactSourcePath), managedBefore);
+  assert.equal(
+    (await readdir(value.projects)).some((entry) => entry.startsWith(".pageroot-registry-backups")),
+    false,
   );
-  assert.deepEqual(await readFile(seededBeforePublish.filePath), seededBeforePublish.bytes);
-  assert.deepEqual(await readFile(seededBeforePublish.backupPath), seededBeforePublish.bytes);
-
-  const recoveredBeforePublish = await initializeMigratedRepository(beforePublish);
-  const recoveredWorkspace = await recoveredBeforePublish.workspace({
-    sourcePath: importedBeforePublish.target.exactSourcePath,
-  });
-  assert.equal(recoveredWorkspace.target.projectId, importedBeforePublish.target.projectId);
-
-  const afterPublish = await fixture(t);
-  await importSource(afterPublish, "legacy-after-publish.html");
-  const seededAfterPublish = await seedExactLegacyV4Registry(afterPublish);
-  const interruptedAfterPublish = new ProjectFileRepository({
-    projectsRoot: afterPublish.projects,
-    failpoint: (name) => name === "legacy-v4-registry-migration-published",
-  });
-
-  await assert.rejects(
-    interruptedAfterPublish.initialize(),
-    (error) => error instanceof ProjectFileRepositoryError && error.code === "INJECTED_FAILPOINT",
-  );
-  const publishedBytes = await readFile(seededAfterPublish.filePath);
-  const published = JSON.parse(publishedBytes.toString("utf8"));
-  assert.deepEqual(published.pendingImports, {});
-  assert.notEqual(sha256(publishedBytes), seededAfterPublish.legacySha256);
-  assert.deepEqual(await readFile(seededAfterPublish.backupPath), seededAfterPublish.bytes);
-
-  await initializeMigratedRepository(afterPublish);
-  assert.deepEqual(await readFile(seededAfterPublish.filePath), publishedBytes);
-});
-
-test("legacy V4 migration serializes a concurrent import without dropping its Registry entry", async (t) => {
-  const value = await fixture(t);
-  const first = await importSource(value, "legacy-concurrent-first.html");
-  const seeded = await seedExactLegacyV4Registry(value);
-  const secondHtml = html("legacy concurrent second");
-  const secondSourcePath = path.join(value.sources, "legacy-concurrent-second.html");
-  const secondBytes = Buffer.from(secondHtml, "utf8");
-  await writeFile(secondSourcePath, secondBytes);
-
-  let releasePublish = () => {};
-  const publishPaused = new Promise((resolve) => {
-    releasePublish = resolve;
-  });
-  let reachedPublish;
-  const publishReached = new Promise((resolve) => {
-    reachedPublish = resolve;
-  });
-  t.after(() => releasePublish());
-  const firstRepository = new ProjectFileRepository({
-    projectsRoot: value.projects,
-    failpoint: async (name) => {
-      if (name === "legacy-v4-registry-migration-before-publish") {
-        reachedPublish();
-        await publishPaused;
-      }
-      return false;
-    },
-  });
-  const firstMigration = firstRepository.initialize();
-  await publishReached;
-
-  const secondRepository = new ProjectFileRepository({ projectsRoot: value.projects });
-  const secondImport = secondRepository.importExternal({
-    sourcePath: secondSourcePath,
-    expectedSourceSha256: sha256(secondBytes),
-  });
-  await new Promise((resolve) => setTimeout(resolve, 40));
-  assert.deepEqual(
-    await readFile(seeded.filePath),
-    seeded.bytes,
-    "a concurrent writer must wait before the legacy Registry is published",
-  );
-
-  releasePublish();
-  const [, importedSecond] = await Promise.all([firstMigration, secondImport]);
-  const registry = await json(seeded.filePath);
-  assert.deepEqual(
-    Object.keys(registry.projects).sort(),
-    [first.target.projectId, importedSecond.target.projectId].sort(),
-  );
-  assert.deepEqual(registry.pendingImports, {});
-  assert.deepEqual(await readFile(seeded.backupPath), seeded.bytes);
-});
-
-test("legacy V4 stale-lock retirement cannot move a replacement sealed lock", async (t) => {
-  const value = await fixture(t);
-  const imported = await importSource(value, "legacy-stale-lock.html");
-  const seeded = await seedExactLegacyV4Registry(value);
-  await seedDeadLegacyV4RegistryMigrationLock(value);
-
-  let releaseFirstRetirement = () => {};
-  const firstRetirementPaused = new Promise((resolve) => {
-    releaseFirstRetirement = resolve;
-  });
-  let firstRetirementReached;
-  const firstRetirementReady = new Promise((resolve) => {
-    firstRetirementReached = resolve;
-  });
-  let releaseSecondPublish = () => {};
-  const secondPublishPaused = new Promise((resolve) => {
-    releaseSecondPublish = resolve;
-  });
-  let secondPublishReached;
-  const secondPublishReady = new Promise((resolve) => {
-    secondPublishReached = resolve;
-  });
-  t.after(() => {
-    releaseFirstRetirement();
-    releaseSecondPublish();
-  });
-
-  const firstRepository = new ProjectFileRepository({
-    projectsRoot: value.projects,
-    failpoint: async (name) => {
-      if (name === "legacy-v4-registry-migration-lock-before-retire") {
-        firstRetirementReached();
-        await firstRetirementPaused;
-      }
-      return false;
-    },
-  });
-  const firstMigration = firstRepository.initialize();
-  await firstRetirementReady;
-
-  const secondRepository = new ProjectFileRepository({
-    projectsRoot: value.projects,
-    failpoint: async (name) => {
-      if (name === "legacy-v4-registry-migration-before-publish") {
-        secondPublishReached();
-        await secondPublishPaused;
-      }
-      return false;
-    },
-  });
-  const secondMigration = secondRepository.initialize();
-  await secondPublishReady;
-
-  const lockPath = legacyV4RegistryMigrationLockPath(value);
-  const replacementOwner = (await readdir(lockPath)).filter((name) => (
-    /^\.owner-[a-f0-9-]{36}\.json$/u.test(name)
-  ));
-  assert.equal(replacementOwner.length, 1);
-
-  releaseFirstRetirement();
-  await new Promise((resolve) => setTimeout(resolve, 50));
-  assert.deepEqual(
-    (await readdir(lockPath)).filter((name) => /^\.owner-[a-f0-9-]{36}\.json$/u.test(name)),
-    replacementOwner,
-    "a delayed stale reclaimer must not move a newly sealed replacement lock",
-  );
-
-  releaseSecondPublish();
-  await Promise.all([firstMigration, secondMigration]);
-  const registry = await json(seeded.filePath);
-  assert.deepEqual(Object.keys(registry.projects), [imported.target.projectId]);
-  assert.deepEqual(await readFile(seeded.backupPath), seeded.bytes);
 });
 
 test("exact path, rather than equal bytes, determines the opened document", async (t) => {
@@ -3407,106 +3062,6 @@ function reconcileInput(target, extra = {}) {
 }
 
 
-test("forceUnlockWorkingCopy adopts disk hash without rewriting HTML", async (t) => {
-  const value = await fixture(t);
-  const imported = await importSource(value, "force-unlock.html");
-  const statePath = path.join(
-    imported.target.projectRootPath,
-    ".pageroot",
-    "working-copies",
-    `${imported.target.workingCopyId}.json`,
-  );
-  const state = await json(statePath);
-  await writeFile(statePath, JSON.stringify({ ...state, saveState: "failed" }), "utf8");
-  const conflictingDiskHtml = html("external while PageRoot pending");
-  await writeFile(imported.target.exactSourcePath, conflictingDiskHtml, "utf8");
-
-  await assert.rejects(
-    value.repository.workspace({ sourcePath: imported.target.exactSourcePath }),
-    (error) => error instanceof ProjectFileRepositoryError
-      && error.code === "WORKING_COPY_CONFLICT",
-  );
-
-  const unlocked = await value.repository.forceUnlockWorkingCopy({
-    sourcePath: imported.target.exactSourcePath,
-  });
-  assert.equal(unlocked.status, "force-unlocked");
-  assert.equal(unlocked.content, conflictingDiskHtml);
-  assert.equal(await readFile(imported.target.exactSourcePath, "utf8"), conflictingDiskHtml);
-
-  const nextState = await json(statePath);
-  assert.equal(nextState.saveState, "saved");
-  assert.equal(nextState.currentSha256, sha256(Buffer.from(conflictingDiskHtml, "utf8")));
-  assert.equal(nextState.lastPersistedRevision, state.lastPersistedRevision);
-
-  const workspace = await value.repository.workspace({
-    sourcePath: imported.target.exactSourcePath,
-  });
-  assert.equal(workspace.content, conflictingDiskHtml);
-});
-
-test("forceUnlockWorkingCopy clears a stuck activeRequest without rewriting HTML", async (t) => {
-  const value = await fixture(t);
-  const imported = await importSource(value, "force-unlock-active-run.html");
-  await prepareAiTaskRequest(value.repository, imported.target, "req_force_unlock_active");
-  const runtimePath = path.join(
-    imported.target.projectRootPath,
-    ".pageroot",
-    "runtime-state.json",
-  );
-  assert.ok((await json(runtimePath)).activeRequest);
-
-  const statePath = path.join(
-    imported.target.projectRootPath,
-    ".pageroot",
-    "working-copies",
-    `${imported.target.workingCopyId}.json`,
-  );
-  const state = await json(statePath);
-  await writeFile(statePath, JSON.stringify({ ...state, saveState: "failed" }), "utf8");
-  const conflictingDiskHtml = html("external while request active");
-  await writeFile(imported.target.exactSourcePath, conflictingDiskHtml, "utf8");
-
-  const unlocked = await value.repository.forceUnlockWorkingCopy({
-    sourcePath: imported.target.exactSourcePath,
-  });
-  assert.equal(unlocked.status, "force-unlocked");
-  assert.equal(await readFile(imported.target.exactSourcePath, "utf8"), conflictingDiskHtml);
-
-  const runtime = await json(runtimePath);
-  assert.equal(runtime.activeRequest, null);
-  const workspace = await value.repository.workspace({
-    sourcePath: imported.target.exactSourcePath,
-  });
-  assert.equal(workspace.activeRequest, null);
-  assert.equal(workspace.content, conflictingDiskHtml);
-});
-
-test("validation errors return an in-memory errorPreview without persisting it", async (t) => {
-  const value = await fixture(t);
-  const imported = await importSource(value, "invalid-preview.html");
-  await prepareAiTaskRequest(value.repository, imported.target, "req_invalid_preview");
-  const incomplete = "<html><body>truncated";
-  const completed = await value.repository.completeRequest({
-    target: imported.target,
-    requestId: "req_invalid_preview",
-    attemptId: "attempt_001",
-    html: incomplete,
-  });
-  assert.equal(completed.status, "error");
-  assert.equal(completed.request.error.errorCode, "INCOMPLETE_HTML");
-  assert.match(String(completed.request.error.errorPreview || ""), /truncated/);
-  const record = await json(path.join(
-    imported.target.projectRootPath,
-    ".pageroot",
-    "requests",
-    "req_invalid_preview",
-    "request.json",
-  ));
-  assert.equal(record.error.errorPreview, undefined);
-  assert.equal(record.error.errorCode, "INCOMPLETE_HTML");
-});
-
 test("reconcileWorkingCopyLocator rebinds a same-directory Finder rename without creating IDs", async (t) => {
   const value = await fixture(t);
   const imported = await importSource(value, "活动页.html");
@@ -4003,6 +3558,66 @@ test("macOS /var and /private/var aliases share one external source binding", as
   assert.equal(Object.keys((await json(registryPath(value))).projects).length, 1);
 });
 
+// Releasing the lock is cleanup, never authority. A release that cannot complete
+// must not become the outcome of an operation that already committed, and must not
+// replace the original error whose code drives recovery in the renderer.
+test("a failed lock release never replaces a committed import result", async (t) => {
+  const value = await fixture(t);
+  const sourcePath = path.join(value.sources, "提交后释放失败.html");
+  const buffer = Buffer.from(html("committed"), "utf8");
+  await writeFile(sourcePath, buffer);
+
+  let damaged = false;
+  const repository = new ProjectFileRepository({
+    projectsRoot: value.projects,
+    failpoint: async (name) => {
+      // By this failpoint the project directory is renamed into place and the
+      // Registry is published, so the import is fully committed.
+      if (name === "import-registry-written" && !damaged) {
+        const lockPath = currentRegistryWriteLockPath(value);
+        const owner = (await readdir(lockPath)).find((entry) => entry.startsWith(".owner-"));
+        if (owner) {
+          await writeFile(path.join(lockPath, owner), "{ truncated", "utf8");
+          damaged = true;
+        }
+      }
+      return false;
+    },
+  });
+
+  const imported = await repository.importExternal({
+    sourcePath,
+    expectedSourceSha256: sha256(buffer),
+  });
+
+  assert.equal(damaged, true);
+  assert.equal(imported.imported, true);
+  assert.equal(
+    Object.keys((await json(registryPath(value))).projects).length,
+    1,
+  );
+
+  // The undamaged half of the contract: an unreleasable lock is inert, not
+  // terminal, so the next import reclaims it on age instead of failing busy.
+  const nextPath = path.join(value.sources, "后续导入.html");
+  const nextBuffer = Buffer.from(html("next"), "utf8");
+  await writeFile(nextPath, nextBuffer);
+  const next = await new ProjectFileRepository({
+    projectsRoot: value.projects,
+    registryWriteLockTimeoutMs: 400,
+    registryWriteLockGraceMs: 10_000,
+    clock: () => Date.now() + 60_000,
+  }).importExternal({
+    sourcePath: nextPath,
+    expectedSourceSha256: sha256(nextBuffer),
+  });
+  assert.equal(next.imported, true);
+  assert.equal(
+    (await readdir(value.projects)).includes(".pageroot-registry-write-lock"),
+    false,
+  );
+});
+
 test("a live Registry write lock fails busy; a dead lock can be retired by its exact token", async (t) => {
   const value = await fixture(t);
   await importSource(value, "锁基线.html");
@@ -4035,6 +3650,143 @@ test("a live Registry write lock fails busy; a dead lock can be retired by its e
   assert.equal(
     (await readdir(value.projects)).includes(".pageroot-registry-write-lock"),
     false,
+  );
+});
+
+// An unresolvable lock directory is crash residue, not a held lock. Every shape
+// below is reachable from a single interrupted process, and none of them can ever
+// become resolvable again, so each must have a bounded automatic exit.
+for (const shape of [
+  {
+    name: "an empty lock directory (crash between mkdir and the owner write)",
+    seed: async () => {},
+  },
+  {
+    name: "a doubled marker (crash between the two retire renames)",
+    seed: async (lockPath) => {
+      await writeFile(
+        path.join(lockPath, ".owner-00000000-0000-4000-8000-00000000000a.json"),
+        `${JSON.stringify({
+          pid: 2_147_483_647,
+          token: "00000000-0000-4000-8000-00000000000a",
+          createdAt: "2026-08-16T00:00:00.000Z",
+        })}\n`,
+        "utf8",
+      );
+      await writeFile(
+        path.join(
+          lockPath,
+          ".retiring-00000000-0000-4000-8000-00000000000b-00000000-0000-4000-8000-00000000000b.json",
+        ),
+        `${JSON.stringify({
+          pid: 2_147_483_647,
+          token: "00000000-0000-4000-8000-00000000000b",
+          createdAt: "2026-08-16T00:00:00.000Z",
+        })}\n`,
+        "utf8",
+      );
+    },
+  },
+  {
+    name: "a damaged owner file",
+    seed: async (lockPath) => {
+      await writeFile(
+        path.join(lockPath, ".owner-00000000-0000-4000-8000-00000000000a.json"),
+        "{ truncated",
+        "utf8",
+      );
+    },
+  },
+]) {
+  test(`an aged Registry write lock with ${shape.name} is reclaimed`, async (t) => {
+    const value = await fixture(t);
+    await importSource(value, "残留基线.html");
+    const lockPath = currentRegistryWriteLockPath(value);
+    await mkdir(lockPath);
+    await shape.seed(lockPath);
+
+    const sourcePath = path.join(value.sources, "残留回收.html");
+    const buffer = Buffer.from(html("reclaimed"), "utf8");
+    await writeFile(sourcePath, buffer);
+    const imported = await new ProjectFileRepository({
+      projectsRoot: value.projects,
+      registryWriteLockTimeoutMs: 200,
+      registryWriteLockGraceMs: 10_000,
+      // The lock is inspected from a clock beyond its grace period, which is how
+      // a user reaching a crashed lock minutes or days later observes it.
+      clock: () => Date.now() + 60_000,
+    }).importExternal({
+      sourcePath,
+      expectedSourceSha256: sha256(buffer),
+    });
+
+    assert.equal(imported.imported, true);
+    assert.equal(
+      (await readdir(value.projects)).includes(".pageroot-registry-write-lock"),
+      false,
+    );
+    assert.equal(
+      (await readdir(value.projects)).some(
+        (entry) => entry.startsWith(".pageroot-lock-unresolvable-"),
+      ),
+      false,
+    );
+  });
+}
+
+test("an unresolvable Registry write lock inside its grace period still fails busy", async (t) => {
+  const value = await fixture(t);
+  await importSource(value, "宽限期基线.html");
+  // A live owner that is mid-release or mid-retire reads back as unresolvable for
+  // a moment. The grace period is what keeps that transient state from being
+  // mistaken for crash residue.
+  await mkdir(currentRegistryWriteLockPath(value));
+
+  const sourcePath = path.join(value.sources, "宽限期内.html");
+  const buffer = Buffer.from(html("within grace"), "utf8");
+  await writeFile(sourcePath, buffer);
+  await assert.rejects(
+    new ProjectFileRepository({
+      projectsRoot: value.projects,
+      registryWriteLockTimeoutMs: 80,
+      registryWriteLockGraceMs: 10_000,
+    }).importExternal({
+      sourcePath,
+      expectedSourceSha256: sha256(buffer),
+    }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "REGISTRY_BUSY",
+  );
+  assert.equal(
+    (await readdir(value.projects)).includes(".pageroot-registry-write-lock"),
+    true,
+  );
+});
+
+test("an aged lock owned by a live process is never reclaimed", async (t) => {
+  const value = await fixture(t);
+  await importSource(value, "活锁基线.html");
+  await seedCurrentRegistryWriteLock(value, process.pid);
+
+  const sourcePath = path.join(value.sources, "活锁不可回收.html");
+  const buffer = Buffer.from(html("live owner"), "utf8");
+  await writeFile(sourcePath, buffer);
+  await assert.rejects(
+    new ProjectFileRepository({
+      projectsRoot: value.projects,
+      registryWriteLockTimeoutMs: 80,
+      registryWriteLockGraceMs: 0,
+      clock: () => Date.now() + 86_400_000,
+    }).importExternal({
+      sourcePath,
+      expectedSourceSha256: sha256(buffer),
+    }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "REGISTRY_BUSY",
+  );
+  assert.equal(
+    (await readdir(value.projects)).includes(".pageroot-registry-write-lock"),
+    true,
   );
 });
 
