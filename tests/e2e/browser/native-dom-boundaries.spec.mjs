@@ -225,6 +225,58 @@ async function glyphPointForText(locator, snippet) {
   }, snippet);
 }
 
+async function canvasSelectionChromeBoxes(editor) {
+  const chrome = editor.getByTestId("canvas-selection-chrome");
+  await expect(chrome.first()).toBeVisible();
+  return chrome.evaluateAll((elements) => elements.map((element) => {
+    const box = element.getBoundingClientRect();
+    return {
+      mode: element.getAttribute("data-mode"),
+      kind: element.getAttribute("data-kind"),
+      left: box.left,
+      top: box.top,
+      width: box.width,
+      height: box.height,
+    };
+  }));
+}
+
+function lastVisualLine(boxes) {
+  return boxes.reduce((latest, box) => (
+    box.top > latest.top || (box.top === latest.top && box.left > latest.left)
+      ? box
+      : latest
+  ));
+}
+
+test("text selection and editing chrome stop at the rendered final line", async ({ page }) => {
+  const source = fixtureBuffer("complex-layout.html").toString("utf8").replace(
+    ".lede { max-width: 620px; font-size: 19px; line-height: 1.75; }",
+    ".lede { width: 340px; max-width: 340px; font-size: 19px; line-height: 1.75; }",
+  );
+  const { editor, frame } = await loadFixture(page, "complex-layout.html", {
+    buffer: Buffer.from(source, "utf8"),
+  });
+  const target = frame.locator(caseSelector("paragraph-entities"));
+  const point = await glyphPointForText(target, "浏览器");
+
+  await target.click({ position: point });
+  const selectedBoxes = await canvasSelectionChromeBoxes(editor);
+  const targetBox = await target.boundingBox();
+  const selectedFinalLine = lastVisualLine(selectedBoxes);
+  expect(selectedBoxes.length).toBeGreaterThan(1);
+  expect(selectedBoxes.every((box) => box.mode === "selected" && box.kind === "text")).toBe(true);
+  expect(selectedFinalLine.width).toBeLessThan(targetBox.width - 24);
+
+  await activateNativeEdit(frame, "paragraph-entities", point);
+  await expect(target).toHaveAttribute("contenteditable", "true");
+  const editingBoxes = await canvasSelectionChromeBoxes(editor);
+  const editingFinalLine = lastVisualLine(editingBoxes);
+  expect(editingBoxes).toHaveLength(selectedBoxes.length);
+  expect(editingBoxes.every((box) => box.mode === "editing" && box.kind === "text")).toBe(true);
+  expect(editingFinalLine.width).toBeLessThan(targetBox.width - 24);
+});
+
 test("clicking a canvas selects the dedicated surface instead of the wrapping module", async ({ page }) => {
   const { editor, frame } = await loadFixture(page, "complex-layout.html");
   const canvas = frame.locator(caseSelector("canvas-surface"));

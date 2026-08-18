@@ -144,6 +144,10 @@ import {
   placeCanvasHoverHint,
   type CanvasCapabilityHoverSnapshot,
 } from "./html-canvas-capability-hover";
+import {
+  normalizeCanvasTextChromeRects,
+  type CanvasTextChromeRect,
+} from "./html-canvas-text-chrome.js";
 import NoticeBar from "./NoticeBar";
 import type {
   HtmlCanvasCommentedTarget,
@@ -296,16 +300,6 @@ const EDITOR_DOCUMENT_STYLES = `
     background: rgba(91, 75, 223, 0.2) !important;
   }
 
-  [data-html-canvas-selected="part"] {
-    outline: 3px solid #5b4bdf !important;
-    outline-offset: 0 !important;
-  }
-
-  [data-html-canvas-selected="module"]:not([data-html-canvas-global-selected]) {
-    outline: 3px solid #5b4bdf !important;
-    outline-offset: 0 !important;
-  }
-
   [data-html-canvas-global-selected] {
     min-height: 100vh !important;
     outline: 3px solid #5b4bdf !important;
@@ -314,7 +308,6 @@ const EDITOR_DOCUMENT_STYLES = `
 
   [data-html-canvas-editing] {
     cursor: text !important;
-    box-shadow: 0 0 0 5px rgba(91, 75, 223, 0.14) !important;
   }
 
   [data-html-canvas-native-editing] {
@@ -385,6 +378,12 @@ type OverlayPosition = {
   toolbarTop: number;
 };
 
+type CanvasSelectionChrome = {
+  mode: "selected" | "editing";
+  kind: "text" | "element";
+  rects: CanvasTextChromeRect[];
+};
+
 type InsertionPoint = {
   selection: HtmlCanvasSelection;
   anchorElement: HTMLElement;
@@ -403,6 +402,108 @@ type CommentMarker = {
   left: number;
   top: number;
 };
+
+const CANVAS_ELEMENT_CHROME_OUTSET_PX = 3;
+
+function visibleTextChromeRects(element: HTMLElement): CanvasTextChromeRect[] {
+  const documentNode = element.ownerDocument;
+  const view = documentNode.defaultView;
+  if (!view) return [];
+  try {
+    if (view.getComputedStyle(element).writingMode.startsWith("vertical")) return [];
+    const walker = documentNode.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+    const textRects: CanvasTextChromeRect[] = [];
+    let textNode = walker.nextNode() as Text | null;
+    while (textNode) {
+      if (
+        textNode.data.trim()
+        && !textNode.parentElement?.closest("script, style, template")
+      ) {
+        const range = documentNode.createRange();
+        range.selectNodeContents(textNode);
+        for (const rect of Array.from(range.getClientRects())) {
+          textRects.push({
+            left: rect.left,
+            top: rect.top,
+            width: rect.width,
+            height: rect.height,
+          });
+        }
+      }
+      textNode = walker.nextNode() as Text | null;
+    }
+    return normalizeCanvasTextChromeRects(textRects);
+  } catch {
+    // Frame replacement can detach the source node between a selection and its
+    // scheduled measurement. A missing outline is safer than stale chrome.
+    return [];
+  }
+}
+
+function canvasSelectionChromeForElement(
+  element: HTMLElement,
+  mode: CanvasSelectionChrome["mode"],
+  {
+    frameOffsetLeft,
+    frameOffsetTop,
+    frameWidth,
+    frameHeight,
+  }: {
+    frameOffsetLeft: number;
+    frameOffsetTop: number;
+    frameWidth: number;
+    frameHeight: number;
+  },
+): CanvasSelectionChrome | null {
+  const textRects = visibleTextChromeRects(element);
+  const elementRect = element.getBoundingClientRect();
+  const sourceRects = textRects.length > 0 ? textRects : [{
+    left: elementRect.left - CANVAS_ELEMENT_CHROME_OUTSET_PX,
+    top: elementRect.top - CANVAS_ELEMENT_CHROME_OUTSET_PX,
+    width: elementRect.width + CANVAS_ELEMENT_CHROME_OUTSET_PX * 2,
+    height: elementRect.height + CANVAS_ELEMENT_CHROME_OUTSET_PX * 2,
+  }];
+  const rects = sourceRects.flatMap((rect) => {
+    const right = rect.left + rect.width;
+    const bottom = rect.top + rect.height;
+    if (
+      rect.width <= 0
+      || rect.height <= 0
+      || right < 0
+      || rect.left > frameWidth
+      || bottom < 0
+      || rect.top > frameHeight
+    ) return [];
+    return [{
+      left: frameOffsetLeft + rect.left,
+      top: frameOffsetTop + rect.top,
+      width: rect.width,
+      height: rect.height,
+    }];
+  });
+  if (rects.length === 0) return null;
+  return {
+    mode,
+    kind: textRects.length > 0 ? "text" : "element",
+    rects,
+  };
+}
+
+function sameCanvasSelectionChrome(
+  left: CanvasSelectionChrome | null,
+  right: CanvasSelectionChrome | null,
+): boolean {
+  if (left === right) return true;
+  if (!left || !right || left.mode !== right.mode || left.kind !== right.kind) return false;
+  if (left.rects.length !== right.rects.length) return false;
+  return left.rects.every((rect, index) => {
+    const candidate = right.rects[index];
+    return Math.abs(rect.left - candidate.left) < 0.1
+      && Math.abs(rect.top - candidate.top) < 0.1
+      && Math.abs(rect.width - candidate.width) < 0.1
+      && Math.abs(rect.height - candidate.height) < 0.1;
+  });
+}
 
 type ActiveNativeEdit = {
   mode: "editable-island" | "text-fragment";
@@ -771,6 +872,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const [canvasTransitionActive, setCanvasTransitionActive] = useState(false);
   const [selection, setSelection] = useState<HtmlCanvasSelection | null>(null);
   const [overlayPosition, setOverlayPosition] = useState<OverlayPosition | null>(null);
+  const [canvasSelectionChrome, setCanvasSelectionChrome] = useState<CanvasSelectionChrome | null>(null);
   const [toolbarVisible, setToolbarVisible] = useState(false);
   const [hoverChrome, setHoverChrome] = useState<CanvasCapabilityHoverSnapshot>({
     cursor: "default",
@@ -1189,6 +1291,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         targets: [],
       });
       setOverlayPosition(null);
+      setCanvasSelectionChrome(null);
       setInsertionPoints([]);
       setCommentMarkers([]);
       insertionPointsRef.current = [];
@@ -1228,6 +1331,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         targets: [],
       });
       setOverlayPosition(null);
+      setCanvasSelectionChrome(null);
       setInsertionPoints([]);
       setCommentMarkers([]);
       insertionPointsRef.current = [];
@@ -1322,6 +1426,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
 
     if (lockedRef.current) {
       setOverlayPosition(null);
+      setCanvasSelectionChrome(null);
       setInsertionPoints([]);
       setCommentMarkers([]);
       insertionPointsRef.current = [];
@@ -1352,6 +1457,27 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     } else {
       setOverlayPosition(null);
     }
+
+    const activeSelectionChromeElement = activeNativeEditRef.current?.rootElement
+      ?? element;
+    const nextSelectionChrome = (
+      activeSelectionChromeElement?.isConnected
+      && !isPageRootElement(activeSelectionChromeElement)
+    ) ? canvasSelectionChromeForElement(
+      activeSelectionChromeElement,
+      activeNativeEditRef.current ? "editing" : "selected",
+      {
+        frameOffsetLeft,
+        frameOffsetTop,
+        frameWidth,
+        frameHeight,
+      },
+    ) : null;
+    setCanvasSelectionChrome((current) => (
+      sameCanvasSelectionChrome(current, nextSelectionChrome)
+        ? current
+        : nextSelectionChrome
+    ));
 
     const moduleParents = new Set<HTMLElement>();
     documentNode.body.querySelectorAll<HTMLElement>("*").forEach((candidate) => {
@@ -3209,6 +3335,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           || !nativeEditLeasesMatch(currentNativeEditLeaseRef.current, active.lease)
         ) return;
         refreshNativeEditRangeState(active, state.selection);
+        window.requestAnimationFrame(updateOverlayPosition);
         clearNativeEditCheckpointTimer();
         if (state.dirty && !state.composing) {
           const scheduledLease = { ...active.lease };
@@ -5635,6 +5762,19 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       <div className="sr-only" aria-live="polite" aria-atomic="true">
         {selectionCapability ? selectionCapability.spoken : ""}
       </div>
+      {!interactionLocked && selection && toolbarVisible && canvasSelectionChrome
+        ? canvasSelectionChrome.rects.map((rect, index) => (
+          <div
+            key={`${canvasSelectionChrome.mode}:${index}`}
+            className={styles.selectionChrome}
+            data-testid="canvas-selection-chrome"
+            data-mode={canvasSelectionChrome.mode}
+            data-kind={canvasSelectionChrome.kind}
+            style={rect}
+            aria-hidden="true"
+          />
+        ))
+        : null}
       {showHoverOutline && hoverOutlineStyle ? (
         <div
           className={styles.hoverOutline}

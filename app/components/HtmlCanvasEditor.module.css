@@ -122,6 +122,19 @@
   pointer-events: none;
 }
 
+.selectionChrome {
+  position: absolute;
+  z-index: 5;
+  box-sizing: border-box;
+  border: 3px solid #5b4bdf;
+  border-radius: 4px;
+  pointer-events: none;
+}
+
+.selectionChrome[data-mode="editing"] {
+  box-shadow: 0 0 0 5px rgb(91 75 223 / 14%);
+}
+
 .hoverHint {
   position: absolute;
   z-index: 7;
