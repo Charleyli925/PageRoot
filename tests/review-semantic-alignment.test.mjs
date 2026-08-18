@@ -169,7 +169,7 @@ test("an ordinary insertion without identity is never reported as movement", () 
 test("stable text boundaries keep a long middle insertion paired", () => {
   const pairs = alignReviewSemanticUnits(
     [unit("稳定前缀，稳定后缀。", { kind: "leaf-text-block:P" })],
-    [unit("稳定前缀，新增说明需要跨越多个实际文字行并保持独立框选，稳定后缀。", {
+    [unit("稳定前缀，新增说明需要跨越多个实际文字行并合并为一个框，稳定后缀。", {
       kind: "leaf-text-block:P",
     })],
   );

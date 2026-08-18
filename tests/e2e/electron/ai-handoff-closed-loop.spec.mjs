@@ -1140,7 +1140,7 @@ ${REVIEW_MASK_UNION_BEFORE}
         )
         .replace(
           '<p data-review-cross-line style="width: 150px; line-height: 1.6">稳定前缀，稳定后缀。</p>',
-          '<p data-review-cross-line style="width: 150px; line-height: 1.6">稳定前缀，新增说明需要跨越多个实际文字行并保持独立框选，稳定后缀。</p>',
+          '<p data-review-cross-line style="width: 150px; line-height: 1.6">稳定前缀，新增说明需要跨越多个实际文字行并合并为一个框，稳定后缀。</p>',
         )
         .replace(
           '<p data-review-stable-sentence-rewrite style="width: 150px; line-height: 1.6">稳定前句。旧方案覆盖多个指标、多个渠道、多个阶段，并给出较长说明。稳定后句。</p>',
@@ -2282,7 +2282,13 @@ ${REVIEW_MASK_UNION_BEFORE}
     const crossLineFrames = afterReviewFrame.locator(
       `[data-pageroot-review-overlay-box][data-tone="text-added"][data-text-group="${crossLineGroup}"]`,
     );
-    await expect(crossLineFrames).toHaveCount(crossLineRectCount);
+    // Every rendered line of this owner is touched, so the wrapped insertion
+    // reads as one clean paragraph rectangle instead of a ladder of per-line
+    // boxes. A partly touched owner still keeps one rectangle per line — see the
+    // stable-sentence rewrite below, whose untouched closing line forbids the
+    // paragraph rectangle.
+    await expect(crossLineFrames).toHaveCount(1);
+    await expect(crossLineFrames).toHaveAttribute("data-scope", "text-block");
     await expect.poll(() => crossLineFrames.evaluateAll((frames) => frames.every((frame) => (
       ["text-phrase", "text-line", "text-block"].includes(
         frame.getAttribute("data-scope") || "",
@@ -2290,6 +2296,24 @@ ${REVIEW_MASK_UNION_BEFORE}
       && frame.getAttribute("data-shaped") !== "true"
       && frame.getAttribute("data-pageroot-review-fragment-count") === "1"
     )))).toBe(true);
+    // Collapsing several line rectangles into one is only safe while the single
+    // rectangle still contains every character of the wrapped marker.
+    await expect.poll(() => crossLineMarker.evaluate((element, selector) => {
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      const rects = [...range.getClientRects()]
+        .filter((rect) => rect.width > 1 && rect.height > 1);
+      range.detach();
+      const boxes = [...document.querySelectorAll(selector)]
+        .map((box) => box.getBoundingClientRect());
+      return rects.length > 1 && rects.every((rect) => boxes.some((box) => (
+        rect.left >= box.left - 1
+        && rect.top >= box.top - 1
+        && rect.right <= box.right + 1
+        && rect.bottom <= box.bottom + 1
+      )));
+    }, `[data-pageroot-review-overlay-box][data-tone="text-added"][data-text-group="${crossLineGroup}"]`))
+      .toBe(true);
     await expect(crossLineFrames.locator(
       "[data-pageroot-review-overlay-label]",
     )).toHaveCount(1);
@@ -3137,11 +3161,13 @@ ${REVIEW_MASK_UNION_BEFORE}
             && frame.getAttribute("data-pageroot-review-fragment-count") === "1"
         ));
         return {
-          matches: frames.length === rangeRectCount
+          matches: frames.length === 1
+            && frames[0]?.getAttribute("data-scope") === "text-block"
             && labelCount === 1
             && framesArePlain,
           rangeRectCount,
           frameCount: frames.length,
+          scopes: frames.map((frame) => frame.getAttribute("data-scope")),
           labelCount,
           framesArePlain,
           filter: document.documentElement.dataset.pagerootReviewFilter,

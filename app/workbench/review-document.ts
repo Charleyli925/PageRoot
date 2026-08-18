@@ -5002,11 +5002,20 @@ function reviewBootstrap(
         visualLine: String(line.index + 1),
       }));
     });
-    // The paragraph rectangle still reads only the semantic signal. A collision
-    // is a local layout accident, so it may merge phrase boxes into their line
-    // rectangle but must never grow one rectangle over a whole owner: a wrapped
-    // insertion keeps one clean rectangle per rendered line.
-    if (!unassigned.length && promotedLineCount / ownerLines.length >= .75) {
+    // The semantic signal earns a paragraph rectangle on its own. A collision may
+    // also earn one, but only when every line of the owner carries evidence: that
+    // way the rectangle can never reach over an untouched opening or closing line
+    // and misreport where the change is. A wrapped insertion whose every line is
+    // touched therefore reads as one rectangle instead of a ladder of line boxes.
+    const everyLineHasEvidence = lineDecisions.length === ownerLines.length;
+    const everyLinePromoted = lineDecisions.every((decision) => decision.promote);
+    if (
+      !unassigned.length
+      && (
+        promotedLineCount / ownerLines.length >= .75
+        || (everyLineHasEvidence && everyLinePromoted)
+      )
+    ) {
       const paragraphBounds = readableParagraphBounds(owner, ownerLines);
       const bounds = paragraphBounds ? boundsForRects([
         paragraphBounds,
