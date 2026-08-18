@@ -4,6 +4,8 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
+- Filename “打开本地HTML” and “在默认浏览器中打开” hover/focus hints now
+  sit horizontally centered above their icons instead of the top-right.
 - AI 审阅里，删除文字恢复为穿过原字的红色横虚线，新增文字在每个字下叠一层小绿点；两者都不再改作者颜色、字号或行距。绿点不再使用会撑开行高的 CSS 着重号。
 - Canvas hover and click now share one pointer hit: pointing at child
   content selects that small target, pointing at a filled module's own
