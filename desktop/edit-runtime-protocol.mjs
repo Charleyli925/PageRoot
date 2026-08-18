@@ -491,6 +491,7 @@ export function createEditRuntimeProtocolController({
   readFileImpl = readFile,
   realpathImpl = realpath,
   statImpl = stat,
+  resolveSourceRoot = resolvePreviewSourceRoot,
   collectDeclaredAssets = collectDeclaredPreviewAssets,
   orphanSessionTtlMs = EDIT_AUTHOR_RUNTIME_BUDGET.orphanSessionTtlMs,
   runtimePreparationDeadlineMs = EDIT_AUTHOR_RUNTIME_BUDGET.runtimeDeadlineMs,
@@ -531,7 +532,7 @@ export function createEditRuntimeProtocolController({
     const preparationController = new AbortController();
     const preparationDeadlineAt = Date.now() + boundedRuntimePreparationDeadlineMs;
     const sourceRoot = await settleWithinRuntimeDeadline(
-      () => resolvePreviewSourceRoot(sourcePath),
+      () => resolveSourceRoot(sourcePath),
       preparationController,
       preparationDeadlineAt,
       runtimePreparationTimeoutError,
