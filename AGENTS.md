@@ -70,6 +70,7 @@ Read only the documents needed for the task:
 | Development environment and test lanes | `docs/DEVELOPMENT.md`, then `tests/TEST_STRATEGY.md` when test ownership changes |
 | Architecture, state, source patches, persistence, IPC | `docs/ARCHITECTURE.md`, `docs/ARCHITECTURE_CONTRACT.md`, `docs/STATE_OWNERSHIP.md`, `docs/ENGINEERING_STANDARDS.md`, `docs/SECURITY_MODEL.md` |
 | User flows, state or UI behavior | `docs/INTERACTION_FLOW.md`, plus the relevant focused policy document |
+| UI visual language, styling standards, design QA process | `docs/DESIGN_LANGUAGE.md`, then the root `design-qa.md` log when recording QA evidence |
 | First-open import confirmation | `docs/IMPORT_CONFIRMATION_PRD.md`, then `docs/IMPORT_CONFIRMATION_PLAN.md` when implementing |
 | Change Request, schemas, AI completion or versions | `docs/CHANGE_REQUEST_PROTOCOL.md`, relevant files in `schemas/` and `fixtures/` |
 | Internal AI supplements or candidate validation | `docs/AI_SUPPLEMENT_AND_VALIDATION.md` |
