@@ -650,7 +650,7 @@ Attempt 不生成它们。`scope-validator.mjs` 已从源码删除：它不再�
 
 `ready-to-open` 的正式处理页必须同时提供“审阅对比”和“直接打开”，其中“审阅对比”为默认强调操作。“审阅对比”读取冻结基础 HTML 与不可变候选 Version，不调用激活事务；正式审阅页不得带 Demo 标记，并复用正式工作台顶栏。
 
-审阅状态必须保存为正交字段：`pageView`、`changeFilter`、`contextVisibility`、`navigationTarget`、`pagePresentationState`、`scrollMode` 和 `zoomMode`。默认值为“双页 + 全部变化 + 18% + 同步滚动 + 100%”，可把第一处变化设为导航目标。页面按钮只写 `pageView`；变化按钮只写 `changeFilter`；滑杆只写 `contextVisibility`；内容地图与上一处/下一处只写 `navigationTarget` 并揭示目标 Tab。任何一个入口都不得顺带重置其他字段。无匹配时保留筛选并显示空态。单双页文档均应铺满可用 Canvas，只保留边框、分隔与工具栏避让所需的最小间隙。
+审阅状态必须保存为正交字段：`pageView`、`changeFilter`、`contextVisibility`、`navigationTarget`、`pagePresentationState`、`scrollMode` 和 `zoomMode`。默认值为“双页 + 全部变化 + 18% + 同步滚动 + 适应”，可把第一处变化设为导航目标。页面按钮只写 `pageView`；变化按钮只写 `changeFilter`，仅当当前导航目标在新筛选下不再匹配时一并把 `navigationTarget` 移到该筛选的第一处变化；滑杆只写 `contextVisibility`；内容地图与上一处/下一处只写 `navigationTarget` 并揭示目标 Tab。除上述筛选导航跟随外，任何一个入口都不得顺带重置其他字段。无匹配时保留筛选、不移动导航并显示空态。单双页文档均应铺满可用 Canvas，只保留边框、分隔与工具栏避让所需的最小间隙。
 
 导航区域与可见变化 marker 必须分离。分析器必须先以显式身份、完全相同内容、语义标题、有效类身份或足够文字相似度建立高置信度节点配对；同标签、同位置不能单独授权配对。文案事实来自叶子级精确增删。
 
