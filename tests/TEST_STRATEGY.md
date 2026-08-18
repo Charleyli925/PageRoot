@@ -48,9 +48,9 @@ PR，或加上 `full-gate` label 后才跑完整矩阵；`release-gate` 是唯�
 
 每个 macOS Electron lane 仍然本地构建 renderer（通常亚秒级，且排除
 Linux→macOS 构建产物变量），并各自跑 hosted-window preflight，保证各自
-runner 的环境证据确定可分类为 `ci_environment`。Browser 三分片与
-real HTML 保持 `retries: 0`；native Electron 与 AI 闭环 lane 仅在 CI 里允许一次
-重试以吸收瞬时启动/hydration 抖动，本地保持零重试。重试通过后第一轮失败
+runner 的环境证据确定可分类为 `ci_environment`。real HTML 保持
+`retries: 0`；Browser 三分片、native Electron 与 AI 闭环 lane 仅在 CI 里允许一次
+重试以吸收瞬时环境抖动，本地保持零重试。重试通过后第一轮失败
 证据不丢：lane 的 diagnostics 产物改为 `if: always()` 上传（trace/video/
 截图随失败尝试保留），JSON reporter 喂给 `playwright-flaky-summary.mjs`，
 machine-readable 的 flaky/retry 次数写入 `output/ci-evidence/` 并出现在
