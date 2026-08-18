@@ -78,6 +78,7 @@ Read only the documents needed for the task:
 | Versioning, packaging, signing or GitHub Release | `docs/RELEASING.md` |
 | Product scope or acceptance criteria | `docs/MVP_PRD.md`, then `docs/VERSION_AND_PROJECT_FILES_PRD.md` for versions and project files |
 | Post-MVP cleanup sequence | `docs/POST_MVP_CLEANUP_PROGRAM.md` |
+| Simplification audit or ADR curation | `docs/SIMPLIFICATION_AUDIT.md`, `docs/ADR_CURATION.md` |
 
 When code makes a routed document inaccurate, update that document in the same PR. Do not duplicate a complex contract in this file.
 

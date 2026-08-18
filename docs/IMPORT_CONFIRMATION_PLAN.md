@@ -332,7 +332,7 @@ Canvas failed、应用退出、Renderer 销毁、request 被替换、Hash 漂移
 - 死 owner 只能按精确 token rename 后退休，不能 `rm -rf` 一个后来被替换的锁；
 - 有界等待后报 `REGISTRY_BUSY`；
 - lock release 在 `finally`；
-- lock acquisition 前先允许现有 exact legacy V4 migration完成，避免 current lock 与 legacy lock 反向嵌套；
+- 只有一把 Registry 锁，不存在 current lock 与 legacy migration lock 的反向嵌套问题（exact legacy V4 migration 已随 ADR 0028 移除）；
 - 所有 Registry read-modify-write 路径改走统一 `#mutateRegistry()`，包括 pending import、publish/clear、项目根 rename/rebind；
 - 只读分类读取原子 Registry 文件，不刷新 `updatedAt`、不规范化写回。
 

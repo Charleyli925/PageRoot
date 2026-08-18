@@ -165,6 +165,7 @@ async function readLocalIdentity(root) {
   return Object.freeze({
     commitSha: assertSha(git(root, ["rev-parse", "HEAD"]), "HEAD"),
     treeSha: assertSha(git(root, ["rev-parse", "HEAD^{tree}"]), "HEAD tree"),
+    subject: git(root, ["log", "-1", "--format=%s"]),
     dirtyPaths: git(root, ["status", "--porcelain=v1", "--untracked-files=all"]),
     ...versions,
   });
@@ -183,6 +184,7 @@ function parseOptions(argv) {
     workflow: "ci.yml",
     tokenEnv: "GITHUB_TOKEN",
     mode: "required",
+    missingAssociation: "fail",
     maxAgeHours: DEFAULT_MAX_AGE_HOURS,
     retries: DEFAULT_RETRIES,
     pullRequest: null,
@@ -201,6 +203,7 @@ function parseOptions(argv) {
     else if (argument === "--workflow") options.workflow = value;
     else if (argument === "--token-env") options.tokenEnv = value;
     else if (argument === "--mode") options.mode = value;
+    else if (argument === "--missing-association") options.missingAssociation = value;
     else if (argument === "--max-age-hours") options.maxAgeHours = Number(value);
     else if (argument === "--retries") options.retries = Number(value);
     else if (argument === "--pull-request") options.pullRequest = Number(value);
@@ -213,6 +216,9 @@ function parseOptions(argv) {
   assertRepository(options.repository);
   if (!/^(?:required|advisory)$/u.test(options.mode)) {
     throw new Error("--mode must be required or advisory.");
+  }
+  if (!/^(?:fail|warn)$/u.test(options.missingAssociation)) {
+    throw new Error("--missing-association must be fail or warn.");
   }
   if (!Number.isInteger(options.retries) || options.retries < 1 || options.retries > 5) {
     throw new Error("--retries must be an integer from 1 to 5.");
@@ -275,7 +281,7 @@ async function createAttestation(options) {
   return attestation;
 }
 
-async function githubJson(apiPath, token) {
+async function githubJson(apiPath, token, { allowNotFound = false } = {}) {
   const apiBase = process.env.GITHUB_API_URL || "https://api.github.com";
   const response = await globalThis.fetch(`${apiBase}${apiPath}`, {
     headers: {
@@ -284,6 +290,7 @@ async function githubJson(apiPath, token) {
       "X-GitHub-Api-Version": "2022-11-28",
     },
   });
+  if (response.status === 404 && allowNotFound) return null;
   if (!response.ok) {
     const body = (await response.text()).slice(0, 500);
     throw new Error(`GitHub API ${response.status} for ${apiPath}: ${body}`);
@@ -291,21 +298,60 @@ async function githubJson(apiPath, token) {
   return await response.json();
 }
 
+// A squash-merge subject carries its own pull-request number. That fact
+// travels with the commit itself, so it stays valid when the eventually
+// consistent commit->pulls association index has not caught up yet or has
+// been pruned later.
+export function parsePullRequestNumberFromSubject(subject) {
+  const match = /\(#(\d+)\)$/u.exec(String(subject || "").trim());
+  return match ? Number(match[1]) : null;
+}
+
+export function pullRequestMatchesCommit(pullRequest, commitSha) {
+  return Boolean(
+    pullRequest?.merged_at
+    && pullRequest?.merge_commit_sha === commitSha
+    && pullRequest?.base?.ref === "main",
+  );
+}
+
+// Distinguishes "the platform has no association data at all" (unrecoverable
+// by a rerun, warn-eligible) from "the commit names a pull request that does
+// not match it" (always a hard failure).
+export function classifyMissingAssociation({ parsedNumber, parsedPullRequest }) {
+  return parsedNumber && parsedPullRequest
+    ? "pull_request_mismatch"
+    : "association_unavailable";
+}
+
 async function collectRemoteEvidence(options, identity) {
   const token = process.env[options.tokenEnv] || "";
   if (!token) throw new Error(`Environment variable ${options.tokenEnv} is required.`);
   const repositoryPath = options.repository.split("/").map(encodeURIComponent).join("/");
-  const pullRequests = await githubJson(
-    `/repos/${repositoryPath}/commits/${identity.commitSha}/pulls`,
-    token,
-  );
+  const parsedNumber = parsePullRequestNumberFromSubject(identity.subject);
+  const parsedPullRequest = parsedNumber
+    ? await githubJson(`/repos/${repositoryPath}/pulls/${parsedNumber}`, token, {
+      allowNotFound: true,
+    })
+    : null;
+  let pullRequests;
+  if (pullRequestMatchesCommit(parsedPullRequest, identity.commitSha)) {
+    pullRequests = [parsedPullRequest];
+  } else {
+    const associated = await githubJson(
+      `/repos/${repositoryPath}/commits/${identity.commitSha}/pulls`,
+      token,
+    );
+    pullRequests = [
+      ...(parsedPullRequest ? [parsedPullRequest] : []),
+      ...(associated || []),
+    ];
+  }
   const pullRequest = pullRequests.find((candidate) => (
-    candidate?.merged_at
-    && candidate?.merge_commit_sha === identity.commitSha
-    && candidate?.base?.ref === "main"
+    pullRequestMatchesCommit(candidate, identity.commitSha)
   ));
   if (!pullRequest) {
-    return { pullRequests, workflowRuns: [], artifactsByRunId: {} };
+    return { parsedNumber, parsedPullRequest, pullRequests, workflowRuns: [], artifactsByRunId: {} };
   }
   const workflow = encodeURIComponent(options.workflow);
   const runsResponse = await githubJson(
@@ -322,7 +368,7 @@ async function collectRemoteEvidence(options, identity) {
     );
     artifactsByRunId[String(run.id)] = response.artifacts || [];
   }));
-  return { pullRequests, workflowRuns, artifactsByRunId };
+  return { parsedNumber, parsedPullRequest, pullRequests, workflowRuns, artifactsByRunId };
 }
 
 function delay(milliseconds) {
@@ -337,10 +383,15 @@ async function verifyAttestation(options) {
     throw new Error(`Source gate verification requires a clean checkout:\n${identity.dirtyPaths}`);
   }
   let result = null;
+  let association = null;
   let error = null;
   for (let attempt = 1; attempt <= options.retries; attempt += 1) {
     try {
-      const evidence = await collectRemoteEvidence(options, identity);
+      const { parsedNumber, parsedPullRequest, ...evidence } = await collectRemoteEvidence(
+        options,
+        identity,
+      );
+      association = { parsedNumber, parsedPullRequest };
       result = evaluateSourceGateEvidence({
         currentCommitSha: identity.commitSha,
         currentTreeSha: identity.treeSha,
@@ -364,6 +415,15 @@ async function verifyAttestation(options) {
       runId: null,
     });
   }
+  if (!result.trusted && result.reason === "no_merged_pull_request") {
+    result = Object.freeze({
+      ...result,
+      reason: classifyMissingAssociation({
+        parsedNumber: association?.parsedNumber ?? null,
+        parsedPullRequest: association?.parsedPullRequest ?? null,
+      }),
+    });
+  }
   await writeOutputs(options.githubOutput, {
     trusted: result.trusted,
     reason: result.reason,
@@ -380,7 +440,15 @@ async function verifyAttestation(options) {
     maxAgeHours: options.maxAgeHours,
   }));
   if (!result.trusted && options.mode === "required") {
-    throw new Error(`Current source is not covered by a reusable PR source gate: ${result.reason}.`);
+    if (result.reason === "association_unavailable" && options.missingAssociation === "warn") {
+      console.warn(
+        "WARNING: GitHub has no pull-request association for this commit and the "
+        + "commit subject names no pull request. A rerun cannot recover this, so "
+        + "the check passes with a warning instead of failing.",
+      );
+    } else {
+      throw new Error(`Current source is not covered by a reusable PR source gate: ${result.reason}.`);
+    }
   }
   return result;
 }

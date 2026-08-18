@@ -9,13 +9,17 @@
     "ceiling follows it down. Only files with a demonstrated regrowth risk are",
     "listed; this is deliberately not applied to every large file.",
     "Metrics: maxLines = physical line count; maxHooks = total React hook calls",
-    "(counted structurally by scripts/architecture-ast-query.mjs).",
+    "(counted structurally by scripts/architecture-ast-query.mjs). maxHooks only",
+    "applies to React modules; a non-React file lists maxLines alone.",
     "See docs/ARCHITECTURE_CONTRACT.md > Architecture gate assertion forms."
   ],
   "files": {
     "app/workbench.tsx": {
       "maxLines": 9089,
       "maxHooks": 316
+    },
+    "scripts/project-file-repository.mjs": {
+      "maxLines": 7420
     }
   }
 }

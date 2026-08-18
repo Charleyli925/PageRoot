@@ -1,5 +1,28 @@
 export const CANVAS_HOVER_OUTLINE_DELAY_MS = 80;
 export const CANVAS_HOVER_HINT_DELAY_MS = 400;
+export const CANVAS_HOVER_HINT_INSET_PX = 4;
+export const CANVAS_HOVER_HINT_HEIGHT_PX = 22;
+export const CANVAS_HOVER_HINT_MIN_WIDTH_PX = 96;
+
+export function layoutCanvasHoverChrome(hitRect) {
+  const left = Number(hitRect?.left) || 0;
+  const top = Number(hitRect?.top) || 0;
+  const width = Math.max(0, Number(hitRect?.width) || 0);
+  const height = Math.max(0, Number(hitRect?.height) || 0);
+  const outline = { left, top, width, height };
+  const inset = CANVAS_HOVER_HINT_INSET_PX;
+  const fits = height >= CANVAS_HOVER_HINT_HEIGHT_PX + inset * 2
+    && width >= CANVAS_HOVER_HINT_MIN_WIDTH_PX + inset * 2;
+  if (!fits) return { outline, hint: null };
+  return {
+    outline,
+    hint: {
+      left: left + inset,
+      top: top + inset,
+      maxWidth: Math.max(0, width - inset * 2),
+    },
+  };
+}
 
 function emptySnapshot() {
   return Object.freeze({

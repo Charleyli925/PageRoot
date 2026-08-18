@@ -234,7 +234,8 @@ verified same-parent root rename through the existing Registry path, and return
 ready/unavailable/invalid rows independently. Optional `importSourceKey` values
 are a long-lived lookup to at most one `projectId`; they do not grant writes
 and do not deduplicate by Hash. Current Registry mutations serialize through a
-dedicated write lock, distinct from exact-legacy-V4 migration. Desktop Recent records contribute
+dedicated write lock, the only Registry lock; a Registry that is not a valid
+current Registry fails closed rather than migrating. Desktop Recent records contribute
 only sorting, `lastOpenedAt` and startup preference; they cannot add a member,
 remove a member or authorize an open. A Workbench catalog intent carries only
 `projectId`; the Bridge re-resolves and validates the complete Project,

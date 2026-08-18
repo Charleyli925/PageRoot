@@ -5,7 +5,10 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
+  classifyMissingAssociation,
   evaluateSourceGateEvidence,
+  parsePullRequestNumberFromSubject,
+  pullRequestMatchesCommit,
   readPackageVersions,
   sourceGateArtifactName,
 } from "../scripts/source-gate-provenance.mjs";
@@ -129,6 +132,54 @@ test("failed runs, expired artifacts and non-PR commits are never trusted", () =
   })).reason, "no_merged_pull_request");
 });
 
+test("a squash subject carries its own pull-request number", () => {
+  assert.equal(
+    parsePullRequestNumberFromSubject("chore(gate): ratchet the repository gate (#209)"),
+    209,
+  );
+  assert.equal(parsePullRequestNumberFromSubject("fix: subject without a reference"), null);
+  assert.equal(
+    parsePullRequestNumberFromSubject("(#12) leading reference is not a squash suffix"),
+    null,
+  );
+  assert.equal(parsePullRequestNumberFromSubject(""), null);
+});
+
+test("only a merged same-commit main pull request matches the commit", () => {
+  const commitSha = "a".repeat(40);
+  const merged = {
+    merged_at: "2026-07-23T11:00:00.000Z",
+    merge_commit_sha: commitSha,
+    base: { ref: "main" },
+  };
+  assert.equal(pullRequestMatchesCommit(merged, commitSha), true);
+  assert.equal(pullRequestMatchesCommit({ ...merged, merged_at: null }, commitSha), false);
+  assert.equal(
+    pullRequestMatchesCommit({ ...merged, merge_commit_sha: "b".repeat(40) }, commitSha),
+    false,
+  );
+  assert.equal(
+    pullRequestMatchesCommit({ ...merged, base: { ref: "release" } }, commitSha),
+    false,
+  );
+  assert.equal(pullRequestMatchesCommit(null, commitSha), false);
+});
+
+test("a named pull request that does not match stays a hard mismatch while empty association is warn-eligible", () => {
+  assert.equal(
+    classifyMissingAssociation({ parsedNumber: 204, parsedPullRequest: { merged_at: null } }),
+    "pull_request_mismatch",
+  );
+  assert.equal(
+    classifyMissingAssociation({ parsedNumber: null, parsedPullRequest: null }),
+    "association_unavailable",
+  );
+  assert.equal(
+    classifyMissingAssociation({ parsedNumber: 204, parsedPullRequest: null }),
+    "association_unavailable",
+  );
+});
+
 test("GitHub workflows keep one CI file, informational Codex review, and exact-tree release provenance", async () => {
   const [ci, dryRun, candidate, release, packageText] = await Promise.all([
     readFile(path.join(productRoot, ".github/workflows/ci.yml"), "utf8"),
@@ -206,8 +257,28 @@ test("GitHub workflows keep one CI file, informational Codex review, and exact-t
   assert.doesNotMatch(ci, /dist-desktop/u);
   assert.doesNotMatch(ci, /Download shared source build/u);
   assert.match(electronNative, /playwright-flaky-summary\.mjs/u);
-  assert.match(electronNative, /--suite electron-native/u);
+  assert.match(electronNative, /--suite electron-native-\$\{\{ matrix\.label \}\}/u);
   assert.match(electronNative, /--report output\/playwright\/native-dom-electron\/results\.json/u);
+  // Playwright shards by spec file unless --fully-parallel raises sharding to
+  // test granularity, and this suite has only two spec files. Each runner
+  // keeps one worker so no two Electron apps share a runner, and every shard
+  // needs a collision-free artifact name.
+  assert.match(
+    electronNative,
+    /--fully-parallel --workers=1 --shard=\$\{\{ matrix\.shard \}\}/u,
+  );
+  assert.match(electronNative, /fail-fast: false/u);
+  for (const shard of ["1", "2", "3"]) {
+    assert.match(electronNative, new RegExp(`shard: ${shard}\\/3`, "u"));
+  }
+  assert.match(
+    electronNative,
+    /name: PageRoot-electron-native-\$\{\{ matrix\.label \}\}-diagnostics-/u,
+  );
+  assert.match(
+    electronNative,
+    /name: PageRoot-electron-native-\$\{\{ matrix\.label \}\}-evidence-/u,
+  );
   assert.match(electronNative, /Upload native Electron diagnostics and retry evidence[\s\S]{0,200}if: always\(\)/u);
   assert.match(electronAi, /playwright-flaky-summary\.mjs/u);
   assert.match(electronAi, /--suite electron-ai/u);
@@ -215,9 +286,21 @@ test("GitHub workflows keep one CI file, informational Codex review, and exact-t
   assert.match(electronAi, /Upload AI Electron diagnostics and retry evidence[\s\S]{0,200}if: always\(\)/u);
   assert.match(ci, /scripts\/ci-evidence\.mjs run/u);
   assert.match(ci, /Verify PR result, exact tree, version and freshness/u);
+  assert.match(ci, /--missing-association warn/u);
+  assert.doesNotMatch(candidate, /--missing-association/u);
+  assert.doesNotMatch(dryRun, /--missing-association/u);
   assert.doesNotMatch(ci, /name: main-smoke|gate:main:auto/u);
   assert.doesNotMatch(ci, /push:[\s\S]{0,300}gate:release:auto/u);
-  assert.match(ci, /group: pageroot-pr-/u);
+  // A superseded pull-request head is cancellable because only the newest
+  // head can merge. Separate main commits are not: each needs its own
+  // main-integrity verification, so a later merge must not cancel an earlier
+  // commit's run.
+  assert.match(
+    ci,
+    /format\('pageroot-pr-\{0\}', github\.event\.pull_request\.number \|\| github\.ref\)/u,
+  );
+  assert.match(ci, /format\('pageroot-main-\{0\}', github\.sha\)/u);
+  assert.match(ci, /cancel-in-progress: \$\{\{ github\.event_name != 'push' \}\}/u);
   assert.equal(
     packageJson.scripts["ci:source-build"],
     "npm run typecheck && npm run lint && npm run build",
@@ -264,6 +347,7 @@ test("retired review-governance workflows are gone", async () => {
   const { readdir } = await import("node:fs/promises");
   const workflows = await readdir(path.join(productRoot, ".github/workflows"));
   assert.deepEqual(workflows.sort(), [
+    "ci-health.yml",
     "ci.yml",
     "developer-preview.yml",
     "release-candidate.yml",
