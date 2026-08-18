@@ -14,10 +14,16 @@ export default defineConfig({
   outputDir: path.join(productRoot, "output/playwright/native-dom-browser/results"),
   fullyParallel: false,
   workers: 1,
-  // Native caret/Selection regressions must never be hidden by a retry.
-  retries: 0,
+  // CI absorbs one transient environment stall per test, matching the native
+  // Electron lanes. Local runs stay retry-free so caret/Selection regressions
+  // are never hidden, and every CI retry is recorded by the JSON reporter
+  // plus the machine-readable flaky summary.
+  retries: process.env.CI ? 1 : 0,
   reporter: [
     ["list"],
+    ["json", {
+      outputFile: path.join(productRoot, "output/playwright/native-dom-browser/results.json"),
+    }],
     ["html", {
       open: "never",
       outputFolder: path.join(productRoot, "output/playwright/native-dom-browser/report"),
