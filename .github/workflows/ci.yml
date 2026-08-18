@@ -30,23 +30,29 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        timeout-minutes: 5
         with:
           fetch-depth: 0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        timeout-minutes: 5
         with:
           node-version: 22.13.0
           cache: npm
       - name: Restore Electron download cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        timeout-minutes: 5
         with:
           path: ~/.cache/electron
           key: ${{ runner.os }}-electron-${{ hashFiles('package-lock.json') }}
       - run: npm ci
+        timeout-minutes: 10
       - name: Enforce PageRoot branch naming
+        timeout-minutes: 2
         env:
           BRANCH_NAME: ${{ github.head_ref }}
         run: npm run task:policy -- "$BRANCH_NAME"
       - name: Run impact-selected Pull Request feedback
+        timeout-minutes: 10
         env:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: >-
@@ -58,6 +64,7 @@ jobs:
       - name: Upload feedback evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        timeout-minutes: 10
         with:
           name: PageRoot-pr-feedback-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
@@ -79,10 +86,13 @@ jobs:
     continue-on-error: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        timeout-minutes: 5
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        timeout-minutes: 5
         with:
           node-version: 22.13.0
       - name: Request one informational Codex review for the current head
+        timeout-minutes: 2
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: >-
@@ -91,6 +101,7 @@ jobs:
           --pull-request "${{ github.event.pull_request.number }}"
           --head "${{ github.event.pull_request.head.sha }}"
       - name: Snapshot current review threads without blocking merge
+        timeout-minutes: 2
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: >-
@@ -102,6 +113,7 @@ jobs:
       - name: Upload review snapshot
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        timeout-minutes: 10
         with:
           name: PageRoot-review-snapshot-${{ github.run_id }}-${{ github.run_attempt }}
           path: output/review-policy/review-policy.json
@@ -120,10 +132,13 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        timeout-minutes: 5
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        timeout-minutes: 5
         with:
           node-version: 22.13.0
       - name: Enforce PageRoot branch naming
+        timeout-minutes: 2
         env:
           BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
         run: npm run task:policy -- "$BRANCH_NAME"
@@ -144,12 +159,15 @@ jobs:
       advisory_size: ${{ steps.classify.outputs.advisory_size }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        timeout-minutes: 5
         with:
           fetch-depth: 0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        timeout-minutes: 5
         with:
           node-version: 22.13.0
       - name: Classify candidate packaging risk without imposing a PR-size limit
+        timeout-minutes: 5
         id: classify
         env:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -189,10 +207,13 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        timeout-minutes: 5
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        timeout-minutes: 5
         with:
           node-version: 22.13.0
       - name: Audit dependencies and packaged runtime closure
+        timeout-minutes: 10
         run: npm run audit:dependencies
 
   source-build:
@@ -209,19 +230,24 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        timeout-minutes: 5
         with:
           fetch-depth: 0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        timeout-minutes: 5
         with:
           node-version: 22.13.0
           cache: npm
       - name: Restore Electron download cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        timeout-minutes: 5
         with:
           path: ~/.cache/electron
           key: ${{ runner.os }}-electron-${{ hashFiles('package-lock.json') }}
       - run: npm ci
+        timeout-minutes: 10
       - name: Run static checks and build the shared web renderer
+        timeout-minutes: 15
         run: >-
           node scripts/ci-evidence.mjs run
           --suite source-build
@@ -230,6 +256,7 @@ jobs:
           npm run ci:source-build
       - name: Upload shared web build
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        timeout-minutes: 10
         with:
           name: PageRoot-web-build-${{ github.run_id }}
           path: |
@@ -241,6 +268,7 @@ jobs:
       - name: Upload source-build evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        timeout-minutes: 10
         with:
           name: PageRoot-source-build-evidence-${{ github.run_id }}-${{ github.run_attempt }}
           path: output/ci-evidence
@@ -260,24 +288,30 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        timeout-minutes: 5
         with:
           fetch-depth: 0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        timeout-minutes: 5
         with:
           node-version: 22.13.0
           cache: npm
       - name: Restore Electron download cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        timeout-minutes: 5
         with:
           path: ~/.cache/electron
           key: ${{ runner.os }}-electron-${{ hashFiles('package-lock.json') }}
       - run: npm ci
+        timeout-minutes: 10
       - name: Download shared web build
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        timeout-minutes: 10
         with:
           name: PageRoot-web-build-${{ github.run_id }}
           path: .
       - name: Run full Node suite
+        timeout-minutes: 15
         run: >-
           node scripts/ci-evidence.mjs run
           --suite source-node
@@ -287,6 +321,7 @@ jobs:
       - name: Upload Node evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        timeout-minutes: 10
         with:
           name: PageRoot-source-node-evidence-${{ github.run_id }}-${{ github.run_attempt }}
           path: output/ci-evidence
@@ -318,35 +353,54 @@ jobs:
             command: npx playwright test --config tests/e2e/browser/playwright.real-html.config.mjs
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        timeout-minutes: 5
         with:
           fetch-depth: 0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        timeout-minutes: 5
         with:
           node-version: 22.13.0
           cache: npm
       - name: Restore Electron download cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        timeout-minutes: 5
         with:
           path: ~/.cache/electron
           key: ${{ runner.os }}-electron-${{ hashFiles('package-lock.json') }}
       - run: npm ci
+        timeout-minutes: 10
       - name: Restore Playwright Chromium
         id: playwright-cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        timeout-minutes: 5
         with:
           path: ~/.cache/ms-playwright
           key: ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}
       - name: Install Playwright system dependencies
-        run: npx playwright install-deps chromium
+        timeout-minutes: 10
+        # An apt mirror stall must cost minutes, not the whole job budget:
+        # retry once with a four-minute attempt bound instead of hanging
+        # silently until the job timeout kills the lane.
+        run: |
+          for attempt in 1 2; do
+            if timeout 240 npx playwright install-deps chromium; then
+              exit 0
+            fi
+            echo "playwright install-deps attempt ${attempt} failed"
+          done
+          exit 1
       - name: Install Playwright Chromium
+        timeout-minutes: 5
         if: steps.playwright-cache.outputs.cache-hit != 'true'
         run: npx playwright install chromium
       - name: Download shared web build
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        timeout-minutes: 10
         with:
           name: PageRoot-web-build-${{ github.run_id }}
           path: .
       - name: Run ${{ matrix.label }}
+        timeout-minutes: 15
         run: >-
           node scripts/ci-evidence.mjs run
           --suite browser-${{ matrix.label }}
@@ -356,6 +410,7 @@ jobs:
       - name: Upload browser failure diagnostics
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        timeout-minutes: 10
         with:
           name: PageRoot-browser-${{ matrix.label }}-diagnostics-${{ github.run_attempt }}
           path: output/playwright
@@ -364,6 +419,7 @@ jobs:
       - name: Upload browser evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        timeout-minutes: 10
         with:
           name: PageRoot-browser-${{ matrix.label }}-evidence-${{ github.run_id }}-${{ github.run_attempt }}
           path: output/ci-evidence
@@ -384,21 +440,26 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        timeout-minutes: 5
         with:
           fetch-depth: 0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        timeout-minutes: 5
         with:
           node-version: 22.13.0
           cache: npm
       - name: Restore Electron download cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        timeout-minutes: 5
         with:
           path: |
             ~/Library/Caches/electron
             ~/Library/Caches/electron-builder
           key: ${{ runner.os }}-electron-${{ hashFiles('package-lock.json') }}
       - run: npm ci
+        timeout-minutes: 10
       - name: Prove hosted renderer scheduling before product tests
+        timeout-minutes: 5
         run: >-
           node scripts/ci-evidence.mjs run
           --suite electron-native-preflight
@@ -406,6 +467,7 @@ jobs:
           --
           npm run test:electron:ci-preflight
       - name: Build Electron renderer on the target OS
+        timeout-minutes: 5
         run: >-
           node scripts/ci-evidence.mjs run
           --suite electron-native-renderer
@@ -413,6 +475,7 @@ jobs:
           --
           npm run desktop:renderer
       - name: Run native Electron suite
+        timeout-minutes: 30
         run: >-
           node scripts/ci-evidence.mjs run
           --suite electron-native
@@ -420,6 +483,7 @@ jobs:
           --
           npx playwright test --config tests/e2e/electron/playwright.config.mjs
       - name: Record Playwright retry evidence
+        timeout-minutes: 5
         # Runs even after a failed suite so the flaky/retry counts and the
         # first attempt's artifacts are never lost with the runner.
         if: always()
@@ -433,6 +497,7 @@ jobs:
         # with the runner.
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        timeout-minutes: 10
         with:
           name: PageRoot-electron-native-diagnostics-${{ github.run_attempt }}
           path: output/playwright
@@ -441,6 +506,7 @@ jobs:
       - name: Upload native Electron evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        timeout-minutes: 10
         with:
           name: PageRoot-electron-native-evidence-${{ github.run_id }}-${{ github.run_attempt }}
           path: output/ci-evidence
@@ -461,21 +527,26 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        timeout-minutes: 5
         with:
           fetch-depth: 0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        timeout-minutes: 5
         with:
           node-version: 22.13.0
           cache: npm
       - name: Restore Electron download cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        timeout-minutes: 5
         with:
           path: |
             ~/Library/Caches/electron
             ~/Library/Caches/electron-builder
           key: ${{ runner.os }}-electron-${{ hashFiles('package-lock.json') }}
       - run: npm ci
+        timeout-minutes: 10
       - name: Prove hosted renderer scheduling before AI tests
+        timeout-minutes: 5
         run: >-
           node scripts/ci-evidence.mjs run
           --suite electron-ai-preflight
@@ -483,6 +554,7 @@ jobs:
           --
           npm run test:electron:ci-preflight
       - name: Build Electron renderer on the target OS
+        timeout-minutes: 5
         run: >-
           node scripts/ci-evidence.mjs run
           --suite electron-ai-renderer
@@ -490,6 +562,7 @@ jobs:
           --
           npm run desktop:renderer
       - name: Run deterministic AI closed-loop suite
+        timeout-minutes: 30
         run: >-
           node scripts/ci-evidence.mjs run
           --suite electron-ai
@@ -497,6 +570,7 @@ jobs:
           --
           npx playwright test --config tests/e2e/electron/playwright.ai-closed-loop.config.mjs
       - name: Record Playwright retry evidence
+        timeout-minutes: 5
         if: always()
         run: >-
           node scripts/playwright-flaky-summary.mjs
@@ -505,6 +579,7 @@ jobs:
       - name: Upload AI Electron diagnostics and retry evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        timeout-minutes: 10
         with:
           name: PageRoot-electron-ai-diagnostics-${{ github.run_attempt }}
           path: output/playwright
@@ -513,6 +588,7 @@ jobs:
       - name: Upload AI Electron evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        timeout-minutes: 10
         with:
           name: PageRoot-electron-ai-evidence-${{ github.run_id }}-${{ github.run_attempt }}
           path: output/ci-evidence
@@ -521,8 +597,11 @@ jobs:
 
   release-gate:
     name: release-gate
+    # !cancelled() keeps the gate blocking on any failed source lane while a
+    # cancelled superseded-head run is skipped instead of recorded as an
+    # artificial gate failure.
     if: >-
-      ${{ always()
+      ${{ !cancelled()
       && github.event_name == 'pull_request'
       && (
         github.event.pull_request.draft == false
@@ -542,6 +621,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Require every source lane
+        timeout-minutes: 2
         env:
           BASELINE_RESULT: ${{ needs.baseline-policy.result }}
           POLICY_RESULT: ${{ needs.branch-policy.result }}
@@ -568,14 +648,18 @@ jobs:
             test "$DRY_RUN_RESULT" = "skipped"
           fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        timeout-minutes: 5
         with:
           fetch-depth: 0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        timeout-minutes: 5
         with:
           node-version: 22.13.0
       - name: Refresh dependency and packaged-runtime baseline before attestation
+        timeout-minutes: 10
         run: npm run audit:dependencies
       - name: Create exact-tree source gate attestation
+        timeout-minutes: 5
         id: provenance
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -592,6 +676,7 @@ jobs:
             --github-output "$GITHUB_OUTPUT"
       - name: Upload exact-tree source gate attestation
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        timeout-minutes: 10
         with:
           name: ${{ steps.provenance.outputs.artifact_name }}
           path: output/source-gate/source-gate.json
@@ -605,12 +690,15 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        timeout-minutes: 5
         with:
           fetch-depth: 0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        timeout-minutes: 5
         with:
           node-version: 22.13.0
       - name: Verify PR result, exact tree, version and freshness
+        timeout-minutes: 5
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
