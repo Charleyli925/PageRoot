@@ -638,6 +638,8 @@ async function assertReviewControlDefaults(page, beforeReviewFrame) {
   })).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByRole("button", { name: "查看全部变化" }))
     .toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "适应", exact: true }))
+    .toHaveAttribute("aria-pressed", "true");
 }
 
 async function assertReviewChangeOutline(beforeReviewFrame, afterReviewFrame) {
@@ -1605,6 +1607,31 @@ ${REVIEW_MASK_UNION_BEFORE}
     await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
       "data-pageroot-review-focus",
     )).not.toBe("all");
+    // Switching the filter must land on the first matching change instead of
+    // leaving the navigator on an unmatched target with an empty viewport.
+    const changeNavigator = launched.page.getByRole("button", { name: "下一处变化" })
+      .locator("xpath=..");
+    await expect(changeNavigator.locator("strong")).toHaveText("1");
+    // Toolbar, navigator and content map must count the same regions, so the
+    // filtered toolbar total has to equal the navigator total.
+    const filteredRegionTotal = (await changeNavigator.locator("small").textContent())
+      ?.replace("/", "") || "";
+    expect(Number(filteredRegionTotal)).toBeGreaterThan(0);
+    await expect(launched.page.locator("small").filter({
+      hasText: new RegExp(`^${filteredRegionTotal}/\\d+ 个变化区域$`, "u"),
+    })).toHaveCount(1);
+    const filteredFocusChangeId = await beforeReviewFrame.locator("html")
+      .getAttribute("data-pageroot-review-focus");
+    await expect(beforeReviewFrame.locator(
+      `[data-pageroot-review-overlay-box="${filteredFocusChangeId}"]`,
+    )).not.toHaveCount(0);
+    // A target that still matches the new filter keeps the user's position.
+    await launched.page.getByRole("button", { name: "下一处变化" }).click();
+    await expect(changeNavigator.locator("strong")).toHaveText("2");
+    await launched.page.getByRole("button", { name: "文案变化" }).click();
+    await expect(changeNavigator.locator("strong")).toHaveText("2");
+    await launched.page.getByRole("button", { name: "上一处变化" }).click();
+    await expect(changeNavigator.locator("strong")).toHaveText("1");
     await expect(beforeReviewFrame.locator(
       '[data-pageroot-review-text="removed"]',
     ).filter({ hasText: ORIGINAL_TEXT })).toBeVisible();
@@ -2557,6 +2584,11 @@ ${REVIEW_MASK_UNION_BEFORE}
         pointerEvents: "none",
       },
     });
+    // Pixel sampling maps in-frame CSS coordinates onto an element screenshot,
+    // so it must read the canvas at 1:1 instead of the scaled entry default.
+    await launched.page.getByRole("button", { name: "100%", exact: true }).click();
+    await expect(launched.page.getByRole("button", { name: "100%", exact: true }))
+      .toHaveAttribute("aria-pressed", "true");
     const captureMaskUnionPixels = async () => {
       const screenshot = decodePngPixels(await maskUnionStage.screenshot({
         animations: "disabled",
@@ -2674,6 +2706,11 @@ ${REVIEW_MASK_UNION_BEFORE}
     }).click();
     const outlineItems = launched.page.getByTestId("review-outline-item");
     await expect.poll(() => outlineItems.count()).toBeGreaterThan(5);
+    // Under a type filter a group count must name the type, so a filtered 0
+    // never reads as "this group has no changes at all".
+    await expect(launched.page.locator("h3 small").filter({
+      hasText: /^\d+\/\d+ 个区域含文案变化$/u,
+    }).first()).toBeVisible();
     await expect(launched.page.getByText("审阅标签一", { exact: true })).toBeVisible();
     await expect(launched.page.getByText("审阅标签二", { exact: true })).toBeVisible();
     expect(await launched.page.locator(

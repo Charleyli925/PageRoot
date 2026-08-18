@@ -33,6 +33,8 @@ import { TreeStructureIcon } from "@phosphor-icons/react/dist/csr/TreeStructure"
 import { WarningCircleIcon } from "@phosphor-icons/react/dist/csr/WarningCircle";
 
 import {
+  REVIEW_STRUCTURE_TONE_COLOR,
+  REVIEW_STYLE_TONE_COLOR,
   type ReviewCommentGroup,
   type ReviewDocuments,
   type ReviewSide,
@@ -44,6 +46,10 @@ import {
   acceptRuntimeVisualSnapshots,
   mergeReviewRuntimeVisualChanges,
 } from "../lib/review-runtime-visual.js";
+import {
+  REVIEW_TEXT_EVIDENCE_ADDED_COLOR,
+  REVIEW_TEXT_EVIDENCE_REMOVED_COLOR,
+} from "../lib/review-text-evidence-marks.js";
 import {
   changedReviewRuntimeVisualCandidateKeys,
 } from "./review-runtime-capture-adapter";
@@ -104,6 +110,15 @@ const FILTER_LABELS: Record<ReviewChangeFilter, string> = {
   text: "文案",
   structure: "结构",
   style: "视觉",
+};
+
+// Legend dots reuse the canvas diff tones so the toolbar explains the marks
+// users already see on the pages: removed and added text, structure, visual.
+const FILTER_TONE_COLORS: Record<ReviewChangeFilter, string[]> = {
+  all: [],
+  text: [REVIEW_TEXT_EVIDENCE_REMOVED_COLOR, REVIEW_TEXT_EVIDENCE_ADDED_COLOR],
+  structure: [REVIEW_STRUCTURE_TONE_COLOR],
+  style: [REVIEW_STYLE_TONE_COLOR],
 };
 
 const PAGE_VIEW_LABELS: Record<ReviewPageView, string> = {
@@ -1373,7 +1388,12 @@ export default function AiReviewWorkspace({
 
   const selectReviewMode = useCallback((mode: ReviewChangeFilter) => {
     dispatchReviewState({ type: "set-change-filter", value: mode });
-  }, []);
+    const matching = mode === "all"
+      ? reviewChanges
+      : reviewChanges.filter((change) => change.types.includes(mode));
+    if (!matching.length || matching.some((change) => change.id === focus)) return;
+    selectChange(matching[0].id);
+  }, [focus, reviewChanges, selectChange]);
 
   const selectPreviewMode = useCallback((mode: ReviewPageView) => {
     dispatchReviewState({ type: "set-page-view", value: mode });
@@ -1597,7 +1617,11 @@ export default function AiReviewWorkspace({
                 <span className={styles.canvasReviewIcon}><EyeIcon aria-hidden="true" size={20} weight="duotone" /></span>
                 <span>
                   <strong>审阅模式</strong>
-                  <small>{reviewChanges.length} 处变化</small>
+                  <small>
+                    {filter === "all"
+                      ? `${reviewChanges.length} 个变化区域`
+                      : `${navigableChanges.length}/${reviewChanges.length} 个变化区域`}
+                  </small>
                 </span>
               </div>
 
@@ -1687,6 +1711,13 @@ export default function AiReviewWorkspace({
                       {mode === "structure" ? <TreeStructureIcon aria-hidden="true" size={14} weight="duotone" /> : null}
                       {mode === "style" ? <PaletteIcon aria-hidden="true" size={14} weight="duotone" /> : null}
                       <span>{FILTER_LABELS[mode]}</span>
+                      {FILTER_TONE_COLORS[mode].length ? (
+                        <span className={styles.filterTones} aria-hidden="true">
+                          {FILTER_TONE_COLORS[mode].map((color) => (
+                            <span key={color} style={{ background: color }} />
+                          ))}
+                        </span>
+                      ) : null}
                     </button>
                   ))}
                 </div>
@@ -1826,7 +1857,14 @@ export default function AiReviewWorkspace({
                     )).length;
                     return (
                     <section className={styles.mapGroup} key={group.label}>
-                      <h3><span>{group.label}</span><small>{matchingCount}/{group.items.length} 处匹配</small></h3>
+                      <h3>
+                        <span>{group.label}</span>
+                        <small>
+                          {filter === "all"
+                            ? `${matchingCount}/${group.items.length} 个区域有变化`
+                            : `${matchingCount}/${group.items.length} 个区域含${FILTER_LABELS[filter]}变化`}
+                        </small>
+                      </h3>
                       <ol className={styles.mapList}>
                         {group.items.map((item) => {
                           const itemIndex = reviewOutline.findIndex((candidate) => candidate.id === item.id);
