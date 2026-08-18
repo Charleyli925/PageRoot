@@ -257,8 +257,28 @@ test("GitHub workflows keep one CI file, informational Codex review, and exact-t
   assert.doesNotMatch(ci, /dist-desktop/u);
   assert.doesNotMatch(ci, /Download shared source build/u);
   assert.match(electronNative, /playwright-flaky-summary\.mjs/u);
-  assert.match(electronNative, /--suite electron-native/u);
+  assert.match(electronNative, /--suite electron-native-\$\{\{ matrix\.label \}\}/u);
   assert.match(electronNative, /--report output\/playwright\/native-dom-electron\/results\.json/u);
+  // Playwright shards by spec file unless --fully-parallel raises sharding to
+  // test granularity, and this suite has only two spec files. Each runner
+  // keeps one worker so no two Electron apps share a runner, and every shard
+  // needs a collision-free artifact name.
+  assert.match(
+    electronNative,
+    /--fully-parallel --workers=1 --shard=\$\{\{ matrix\.shard \}\}/u,
+  );
+  assert.match(electronNative, /fail-fast: false/u);
+  for (const shard of ["1", "2", "3"]) {
+    assert.match(electronNative, new RegExp(`shard: ${shard}\\/3`, "u"));
+  }
+  assert.match(
+    electronNative,
+    /name: PageRoot-electron-native-\$\{\{ matrix\.label \}\}-diagnostics-/u,
+  );
+  assert.match(
+    electronNative,
+    /name: PageRoot-electron-native-\$\{\{ matrix\.label \}\}-evidence-/u,
+  );
   assert.match(electronNative, /Upload native Electron diagnostics and retry evidence[\s\S]{0,200}if: always\(\)/u);
   assert.match(electronAi, /playwright-flaky-summary\.mjs/u);
   assert.match(electronAi, /--suite electron-ai/u);
@@ -271,7 +291,16 @@ test("GitHub workflows keep one CI file, informational Codex review, and exact-t
   assert.doesNotMatch(dryRun, /--missing-association/u);
   assert.doesNotMatch(ci, /name: main-smoke|gate:main:auto/u);
   assert.doesNotMatch(ci, /push:[\s\S]{0,300}gate:release:auto/u);
-  assert.match(ci, /group: pageroot-pr-/u);
+  // A superseded pull-request head is cancellable because only the newest
+  // head can merge. Separate main commits are not: each needs its own
+  // main-integrity verification, so a later merge must not cancel an earlier
+  // commit's run.
+  assert.match(
+    ci,
+    /format\('pageroot-pr-\{0\}', github\.event\.pull_request\.number \|\| github\.ref\)/u,
+  );
+  assert.match(ci, /format\('pageroot-main-\{0\}', github\.sha\)/u);
+  assert.match(ci, /cancel-in-progress: \$\{\{ github\.event_name != 'push' \}\}/u);
   assert.equal(
     packageJson.scripts["ci:source-build"],
     "npm run typecheck && npm run lint && npm run build",
