@@ -19,6 +19,12 @@ import {
   fixtureBuffer,
   productRoot,
 } from "../../browser/pageroot-driver.mjs";
+import {
+  FIRST_REAL_HTML_EDIT_GUIDE_GENERATION,
+  FIRST_REAL_HTML_EDIT_GUIDE_KEY,
+  UI_PREFERENCES_FILE_NAME,
+  UI_PREFERENCES_SCHEMA_VERSION,
+} from "../../../../desktop/ui-preferences.mjs";
 
 const require = createRequire(import.meta.url);
 const electronExecutable = require("electron");
@@ -166,6 +172,25 @@ export function createCloseFirstCleanup({
   };
 }
 
+export function seedDismissedFirstEditGuide(isolatedUserData) {
+  mkdirSync(isolatedUserData, { recursive: true });
+  writeFileSync(
+    path.join(isolatedUserData, UI_PREFERENCES_FILE_NAME),
+    `${JSON.stringify({
+      schemaVersion: UI_PREFERENCES_SCHEMA_VERSION,
+      firstRealHtmlEditGuide: {
+        key: FIRST_REAL_HTML_EDIT_GUIDE_KEY,
+        generation: FIRST_REAL_HTML_EDIT_GUIDE_GENERATION,
+        status: "dismissed",
+        presentedAt: null,
+        dismissedAt: "2020-01-01T00:00:00.000Z",
+      },
+      builtInWelcomeProjectId: null,
+    }, null, 2)}\n`,
+    "utf8",
+  );
+}
+
 export function seedActiveDiskProject(
   isolatedUserData,
   sourcePath,
@@ -235,18 +260,50 @@ export async function waitForMainBrowserWindow(
   return nativeWindow;
 }
 
+const DEFAULT_RENDERER_MOUNT_TIMEOUT = 20_000;
+const RENDERER_MOUNT_POLL_MS = 100;
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export async function pageHasRendererMount(page) {
+  return page.evaluate(() => Boolean(document.querySelector("main.workbench"))).catch(() => false);
+}
+
+export async function ensureRendererMounted(page, {
+  timeout = DEFAULT_RENDERER_MOUNT_TIMEOUT,
+  reload = (target) => target.reload({ waitUntil: "domcontentloaded" }),
+} = {}) {
+  const waitUntilMounted = async () => {
+    const deadline = Date.now() + timeout;
+    while (Date.now() < deadline) {
+      if (await pageHasRendererMount(page)) return true;
+      await sleep(RENDERER_MOUNT_POLL_MS);
+    }
+    return pageHasRendererMount(page);
+  };
+
+  if (await waitUntilMounted()) return { reloaded: false };
+  await reload(page);
+  if (await waitUntilMounted()) return { reloaded: true };
+  throw new Error("PageRoot renderer did not mount after launch reload.");
+}
+
 export async function launchPageRoot({
   activeSourcePath = null,
   recentSourcePaths = activeSourcePath ? [activeSourcePath] : [],
   isolatedUserData: existingUserData = null,
   injectedEnv = {},
   userDataPrefix = DEFAULT_USER_DATA_PREFIX,
+  firstEditGuide = false,
 } = {}) {
   const isolatedUserData = existingUserData || mkdtempSync(
     path.join(tmpdir(), userDataPrefix),
   );
   mkdirSync(isolatedUserData, { recursive: true });
   const workspace = path.join(isolatedUserData, "workspace");
+  if (!firstEditGuide) seedDismissedFirstEditGuide(isolatedUserData);
   if (activeSourcePath) {
     seedActiveDiskProject(isolatedUserData, activeSourcePath, recentSourcePaths);
   }
@@ -257,6 +314,7 @@ export async function launchPageRoot({
     env: {
       ...process.env,
           PAGEROOT_E2E: "1",
+          ...(firstEditGuide ? { PAGEROOT_E2E_FIRST_EDIT_GUIDE: "1" } : {}),
           PAGEROOT_E2E_USER_DATA_DIR: isolatedUserData,
           HTML_AI_WORKSPACE: workspace,
           // New project-file imports deliberately live outside the legacy
@@ -270,12 +328,13 @@ export async function launchPageRoot({
   const diagnostics = collectProcessDiagnostics(electronApp.process());
   const page = await electronApp.firstWindow();
   await page.waitForLoadState("domcontentloaded");
+  const mainRendererUrl = page.url();
+  const nativeWindow = await waitForMainBrowserWindow(electronApp, mainRendererUrl);
   await page.waitForFunction(() => document.visibilityState === "visible");
   await page.evaluate(() => new Promise((resolve) => {
     requestAnimationFrame(() => requestAnimationFrame(resolve));
   }));
-  const mainRendererUrl = page.url();
-  const nativeWindow = await waitForMainBrowserWindow(electronApp, mainRendererUrl);
+  await ensureRendererMounted(page);
   const foreground = (
     injectedEnv.PAGEROOT_E2E_FOREGROUND
     ?? process.env.PAGEROOT_E2E_FOREGROUND
@@ -416,7 +475,6 @@ export async function waitForProjectReady(page, {
   timeout = 60_000,
   includeFailureDetail = true,
 } = {}) {
-  const workbench = page.locator("main.workbench");
   const importButton = page.getByRole("button", { name: "导入并打开" });
   const continueButton = page.getByRole("button", { name: "继续当前项目" });
   const confirmationKind = async () => {
@@ -425,13 +483,20 @@ export async function waitForProjectReady(page, {
     return "";
   };
   const projectState = async () => {
-    const state = await workbench.getAttribute("data-project-state");
-    if (state === "ready") return "ready";
-    const stage = await page.evaluate(() => window.__PAGEROOT_HYDRATION_STAGE__);
-    const visibleFailure = includeFailureDetail && state === "failed"
+    let snapshot;
+    try {
+      snapshot = await page.evaluate(() => ({
+        state: document.querySelector("main.workbench")?.getAttribute("data-project-state") || null,
+        stage: window.__PAGEROOT_HYDRATION_STAGE__ || null,
+      }));
+    } catch (error) {
+      return `transient:${error instanceof Error ? error.name : "evaluate"}:no-detail`;
+    }
+    if (snapshot.state === "ready") return "ready";
+    const visibleFailure = includeFailureDetail && snapshot.state === "failed"
       ? await page.locator('[aria-label="项目读取失败"]').textContent().catch(() => "")
       : "";
-    return `${state || "missing"}:${stage || "unmarked"}:${visibleFailure || "no-detail"}`;
+    return `${snapshot.state || "missing"}:${snapshot.stage || "unmarked"}:${visibleFailure || "no-detail"}`;
   };
 
   let pendingConfirmation = "";
@@ -453,6 +518,20 @@ export async function waitForProjectReady(page, {
 
   if (pendingConfirmation === "import" || pendingConfirmation === "continue") {
     const button = pendingConfirmation === "import" ? importButton : continueButton;
+    if (pendingConfirmation === "import") {
+      const importDialog = page.locator(
+        'section[role="dialog"][data-classification="new-external"]',
+      );
+      await expect(importDialog).toBeVisible();
+      await expect(importDialog).toContainText("复制并保存为");
+      await expect(importDialog).toContainText(
+        "成功导入后，同意将原文件移至废纸篓。",
+      );
+      await expect(importDialog.getByRole("checkbox"))
+        .not.toBeChecked();
+      await expect(importDialog.getByRole("button", { name: /^打开 /u }))
+        .toBeVisible();
+    }
     await button.focus();
     await button.click();
     await expect.poll(async () => {

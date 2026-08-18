@@ -1,11 +1,44 @@
 import assert from "node:assert/strict";
+import {
+  mkdtempSync,
+  readFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import test from "node:test";
 
 import {
+  FIRST_REAL_HTML_EDIT_GUIDE_GENERATION,
+  decodeUiPreferences,
+} from "../desktop/ui-preferences.mjs";
+import {
   closeObservationTimeout,
   createCloseFirstCleanup,
+  ensureRendererMounted,
+  seedDismissedFirstEditGuide,
   waitForMainBrowserWindow,
 } from "./e2e/electron/helpers/pageroot-app-fixture.mjs";
+
+test("Electron app fixture reloads once when the renderer root stays empty", async () => {
+  let evaluations = 0;
+  let reloads = 0;
+  const page = {
+    evaluate: async () => {
+      evaluations += 1;
+      return reloads > 0;
+    },
+    reload: async () => {
+      reloads += 1;
+    },
+  };
+  const result = await ensureRendererMounted(page, {
+    timeout: 250,
+    reload: async (target) => target.reload(),
+  });
+  assert.equal(result.reloaded, true);
+  assert.equal(reloads, 1);
+  assert.ok(evaluations >= 2);
+});
 
 test("Electron app fixture waits for the matching native BrowserWindow registration", async () => {
   let evaluations = 0;
@@ -116,4 +149,25 @@ test("Electron app fixture cleans up after confirmed process exit when the close
 
   await stop();
   assert.deepEqual(events, ["exit-request", "process-exit", "cleanup"]);
+});
+
+test("Electron app fixture can opt an E2E launch back into the first-edit guide port", () => {
+  const fixture = readFileSync(
+    new URL("./e2e/electron/helpers/pageroot-app-fixture.mjs", import.meta.url),
+    "utf8",
+  );
+  assert.match(fixture, /PAGEROOT_E2E_FIRST_EDIT_GUIDE: "1"/u);
+});
+
+test("Electron app fixture seeds a dismissed first-edit guide for isolated profiles", () => {
+  const isolatedUserData = mkdtempSync(path.join(tmpdir(), "pageroot-native-e2e-guide-seed-"));
+  seedDismissedFirstEditGuide(isolatedUserData);
+  const preferences = decodeUiPreferences(
+    readFileSync(path.join(isolatedUserData, "ui-preferences.json"), "utf8"),
+  );
+  assert.equal(preferences.firstRealHtmlEditGuide.status, "dismissed");
+  assert.equal(
+    preferences.firstRealHtmlEditGuide.generation,
+    FIRST_REAL_HTML_EDIT_GUIDE_GENERATION,
+  );
 });

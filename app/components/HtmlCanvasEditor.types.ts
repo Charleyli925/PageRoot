@@ -276,4 +276,6 @@ export type HtmlCanvasEditorProps = {
     context: PageViewContext | null,
     documentKey: string,
   ) => boolean;
+  /** Continuous pointer-capability hover; off on the built-in welcome page. */
+  pointerCapabilityHoverEnabled?: boolean;
 };

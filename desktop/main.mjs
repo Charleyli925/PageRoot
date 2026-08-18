@@ -113,6 +113,11 @@ import {
   readTelemetryBuildConfig,
 } from "./usage-telemetry.mjs";
 import {
+  readUiPreferences,
+  recordFirstEditGuide,
+  rememberBuiltInWelcomeProjectId,
+} from "./ui-preferences.mjs";
+import {
   PREVIEW_PROTOCOL_SCHEME,
   createPreviewProtocolController,
   createPreviewSessionOperation,
@@ -206,6 +211,7 @@ const PROJECT_CHANNELS = Object.freeze({
   readHtml: "html-projects:read",
   exportHtmlCopy: "html-projects:export-copy",
   showInFolder: "html-projects:show-in-folder",
+  openProjectsRoot: "html-projects:open-projects-root",
   openInDefaultBrowser: "html-projects:open-in-default-browser",
   renameHtml: "html-projects:rename",
   activateGeneratedVersion: "html-projects:activate-generated-version",
@@ -252,6 +258,10 @@ const UPDATE_CHANNELS = Object.freeze({
 });
 const USAGE_CHANNELS = Object.freeze({
   capture: "html-usage:capture",
+});
+const UI_PREFERENCE_CHANNELS = Object.freeze({
+  get: "html-ui-preferences:get",
+  record: "html-ui-preferences:record",
 });
 const PREVIEW_CHANNELS = Object.freeze({
   createSession: "html-preview:create-session",
@@ -1270,6 +1280,14 @@ async function ensureBridgeProjectRegistered(project) {
       { sourcePath: project.sourcePath },
     );
   }
+  try {
+    await rememberBuiltInWelcomeProjectId({
+      userDataPath: app.getPath("userData"),
+      projectId: workspace.projectId,
+    });
+  } catch {
+    // The guide identity is install-level and must not block welcome open.
+  }
   if (importedWorkingCopy) {
     const importedProject = await readHtmlProject(registeredSourcePath);
     if (importedProject.sha256 !== project.sha256) {
@@ -1743,6 +1761,26 @@ async function showInFolder(sourcePathInput) {
   await inspectHtmlFile(sourcePath);
   shell.showItemInFolder(sourcePath);
   return { sourcePath };
+}
+
+async function openProjectsRoot() {
+  const rootPath = projectsRootPath();
+  const information = await lstat(rootPath).catch(() => null);
+  if (!information?.isDirectory() || information.isSymbolicLink()) {
+    throw new ProjectFileError(
+      "PROJECTS_ROOT_UNAVAILABLE",
+      "PageRoot 项目文件夹暂时无法打开，请稍后重试。",
+    );
+  }
+  const openError = await shell.openPath(rootPath);
+  if (openError) {
+    throw new ProjectFileError(
+      "PROJECTS_ROOT_OPEN_FAILED",
+      "PageRoot 项目文件夹暂时无法打开，请稍后重试。",
+      { reason: openError },
+    );
+  }
+  return { opened: true };
 }
 
 const openInDefaultBrowser = createOpenInDefaultBrowserOperation({
@@ -3258,6 +3296,7 @@ function registerProjectIpc() {
   ipcMain.handle(PROJECT_CHANNELS.readHtml, trustedProject(readHtml));
   ipcMain.handle(PROJECT_CHANNELS.exportHtmlCopy, trustedProject(exportHtmlCopy));
   ipcMain.handle(PROJECT_CHANNELS.showInFolder, trustedProject(showInFolder));
+  ipcMain.handle(PROJECT_CHANNELS.openProjectsRoot, trustedProject(openProjectsRoot));
   ipcMain.handle(
     PROJECT_CHANNELS.openInDefaultBrowser,
     trustedProject(openInDefaultBrowser),
@@ -3428,6 +3467,19 @@ function registerProjectIpc() {
       return { applied: true };
     }),
   );
+  ipcMain.handle(
+    UI_PREFERENCE_CHANNELS.get,
+    trustedProject(async () => readUiPreferences({
+      userDataPath: app.getPath("userData"),
+    }), "ui_preferences_get"),
+  );
+  ipcMain.handle(
+    UI_PREFERENCE_CHANNELS.record,
+    trustedProject(async (payload) => recordFirstEditGuide({
+      userDataPath: app.getPath("userData"),
+      action: payload?.action,
+    }), "ui_preferences_record"),
+  );
   ipcMain.on(USAGE_CHANNELS.capture, (event, payload) => {
     try {
       assertTrustedEvent(event);
@@ -3575,6 +3627,7 @@ function unregisterIpc() {
     ...Object.values(UPDATE_CHANNELS),
     ...Object.values(REVIEW_RUNTIME_SNAPSHOT_CHANNELS),
     ...Object.values(EDIT_RUNTIME_CHANNELS),
+    ...Object.values(UI_PREFERENCE_CHANNELS),
     APP_CHANNELS.closeResult,
     APP_CHANNELS.workspaceRecoveryReady,
     APP_CHANNELS.externalOpenReady,

@@ -6,6 +6,48 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 - Filename “打开本地HTML” and “在默认浏览器中打开” hover/focus hints now
   sit horizontally centered above their icons instead of the top-right.
+- AI 审阅里，删除文字恢复为穿过原字的红色横虚线，新增文字在每个字下叠一层小绿点；两者都不再改作者颜色、字号或行距。绿点不再使用会撑开行高的 CSS 着重号。
+- Canvas hover and click now share one pointer hit: pointing at child
+  content selects that small target, pointing at a filled module's own
+  padding or gap selects the module, and a completely empty module is not
+  selectable. The hover pill sits inside the outlined hit box, so clicking
+  that caption selects the advertised target. Deselect still uses Escape,
+  the header, the comment-rail blank, and the page root. There is no
+  Preview-mode hover state.
+- The first time a real local HTML opens in the verified edit canvas, a
+  non-modal frosted-glass “快速开始” card at the app window’s bottom-right
+  explains the edit → comment → send-to-AI loop. It is a `position: fixed`
+  portal on `document.body`, outside the workbench grid, so it does not cover
+  the page or follow HTML scroll. It stays until Send enters waiting, or until
+  the user skips it with ×. Escape no longer dismisses it. Pointer hover keeps
+  teaching click-to-select and double-click-to-edit as a compact pill on the
+  outline, not on the selected-element toolbar. Click selection range is
+  unchanged, and there is no Preview-mode hover state. The card is remembered
+  per install, not per project, and never appears on the built-in welcome page.
+
+- Importing HTML no longer reports a failure for work that already succeeded. If
+  the project Registry lock could not be cleaned up afterwards — for example
+  because its coordination file was damaged by an external write — the import was
+  reported as failed even though the project had been fully created, and the
+  error text named the lock file instead of anything the user did. Cleanup
+  failures are now silent and the leftover lock is reclaimed automatically.
+
+- The exact-legacy-V4 project Registry migration and its dedicated lock are
+  removed. The shape it migrated existed only on the development branch for
+  about six hours and was never part of a released PageRoot, so no installed
+  version can produce it. An unrecognized Registry now fails closed and keeps
+  its exact bytes, which is the path every other unknown shape already took;
+  managed HTML, Versions, Drafts, comments and attachments are untouched.
+
+- A project Registry lock left behind by an interrupted PageRoot process no
+  longer blocks importing HTML forever. Previously only one residue shape (a
+  single intact owner marker naming a dead process) could be reclaimed, so a
+  crash between creating the lock and writing its owner, a crash between the two
+  retire renames, or a damaged owner file made “打开外部 HTML” fail permanently
+  with no in-app recovery — restarting did not help. Any lock whose ownership
+  cannot be resolved is now reclaimed automatically once it is older than a
+  grace period, while a lock still owned by a live process is never reclaimed.
+  The busy message no longer claims that another PageRoot process is running.
 - Preview sessions now refresh in place for the same Edit sibling-asset
   source path, and a full session map evicts the least-recently-accessed idle
   session instead of the oldest insert. Repeated saves and Preview toggles

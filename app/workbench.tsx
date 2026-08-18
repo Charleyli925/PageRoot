@@ -42,8 +42,10 @@ import type {
   NativeDeferredCommandDiscardReason,
 } from "./components/HtmlCanvasEditor";
 import type { DesktopEditRuntimeApi } from "./components/desktop-edit-runtime-api";
+import type { DesktopUiPreferencesApi } from "./components/desktop-ui-preferences-api";
 import AboutPageRootDialog from "./components/AboutPageRootDialog";
 import CancelAiRunDialog from "./components/CancelAiRunDialog";
+import FirstEditGuideCard from "./components/FirstEditGuideCard";
 import HtmlInteractionPreview, {
   type HtmlInteractionPreviewHandle,
 } from "./components/HtmlInteractionPreview";
@@ -130,7 +132,7 @@ import {
 import {
   activeRunFromRecord,
   canonicalLifecycleState,
-  deriveRunProgressSteps,
+  deriveRunProgressPresentation,
   isLockedLifecycleState,
   type ActiveRun,
   type LifecycleState,
@@ -780,6 +782,7 @@ export default function Workbench() {
   }, []);
   useLayoutEffect(() => {
     const editRuntimeApi: DesktopEditRuntimeApi | undefined = window.htmlAIEditRuntime;
+    const uiPreferencesApi: DesktopUiPreferencesApi | undefined = window.htmlAIUiPreferences;
     const controller = createRuntimeWorkspaceController({
       initial: {
         documentHtml: DEFAULT_PROJECT_HTML,
@@ -824,6 +827,12 @@ export default function Workbench() {
           editRuntime: {
             prepare: (request) => editRuntimeApi.prepare(request),
             revoke: (sessionId) => editRuntimeApi.revoke(sessionId),
+          },
+        } : {}),
+        ...(uiPreferencesApi ? {
+          uiPreferences: {
+            get: () => uiPreferencesApi.get(),
+            record: (input) => uiPreferencesApi.record(input),
           },
         } : {}),
       },
@@ -1349,10 +1358,10 @@ export default function Workbench() {
         const fileName = openEvent.visibleV1FileName || "项目内的 V1 文件";
         const disposition = openEvent.disposition || "kept";
         const message = disposition === "trashed"
-          ? `初始版本 V1 已保存为 ${fileName}。原文件已移入废纸篓。`
+          ? `已保存为${fileName}，原文件已移至废纸篓。`
           : disposition === "trash-failed"
-            ? "项目已导入。原文件未能删除，仍留在原来的位置。"
-            : `初始版本 V1 已保存为 ${fileName}，与刚才选择的文件一致。原文件没有改动。`;
+            ? `已保存为${fileName}，原文件未能移至废纸篓，仍留在原来的位置。`
+            : `已保存为${fileName}，原文件已保留。`;
         setToast({
           title: "已导入 PageRoot",
           message,
@@ -1421,11 +1430,15 @@ export default function Workbench() {
           setHandoffPreviewOpen(false);
           setCanvasMode("edit");
           setDrawer("handoff");
+          void workspaceControllerRef.current?.dismissFirstEditGuide();
         }
         return;
       }
       if (runEvent.type === "run-submission-uncertain") {
-        if (runEvent.current) setDrawer("handoff");
+        if (runEvent.current) {
+          setDrawer("handoff");
+          void workspaceControllerRef.current?.dismissFirstEditGuide();
+        }
         return;
       }
       if (runEvent.type === "run-submission-failed") {
@@ -2305,6 +2318,54 @@ export default function Workbench() {
     || fileRenameBusy
     || persistState === "conflict"
     || viewMode === "history";
+  const firstEditGuideVisible =
+    workspaceControllerSnapshot?.firstEditGuide?.visible === true;
+  const isBuiltInWelcomePage = Boolean(
+    projectId
+    && workspaceControllerSnapshot?.firstEditGuide?.builtInWelcomeProjectId
+    && projectId === workspaceControllerSnapshot.firstEditGuide.builtInWelcomeProjectId
+  );
+  useEffect(() => {
+    workspaceController?.evaluateFirstEditGuide({
+      desktop: runtimeCapabilitiesReady
+        && runtimeCapabilitiesRef.current.projectOpening === "desktop-dialog",
+      browserPreviewOnly,
+      canvasMode,
+      canvasVerified: Boolean(
+        documentSnapshot.canvasAuthority?.status === "verified"
+        && documentSnapshot.canvasAuthority.generation === canvasGeneration
+        && documentSnapshot.canvasAuthority.renderedSha256 === sourceSha256
+      ),
+      viewMode,
+      blockingOverlay: Boolean(
+        openConfirmation
+        || readyReviewSession
+        || persistState === "conflict"
+        || projectLoadError
+        || workspaceIssue
+      ),
+      interactionLocked,
+      runInProgress,
+      projectId,
+    });
+  }, [
+    browserPreviewOnly,
+    canvasGeneration,
+    canvasMode,
+    documentSnapshot.canvasAuthority,
+    interactionLocked,
+    openConfirmation,
+    persistState,
+    projectId,
+    projectLoadError,
+    readyReviewSession,
+    runInProgress,
+    runtimeCapabilitiesReady,
+    sourceSha256,
+    viewMode,
+    workspaceController,
+    workspaceIssue,
+  ]);
 
   const activeCommentItems = useMemo(
     () => comments.filter(commentHasContent),
@@ -5611,6 +5672,7 @@ export default function Workbench() {
     ) return;
     if (currentRun.activeLocked) {
       setDrawer("handoff");
+      void workspaceControllerRef.current?.dismissFirstEditGuide();
       return;
     }
     if (
@@ -5654,6 +5716,7 @@ export default function Workbench() {
     if (outcome.status === "succeeded" || outcome.status === "stale") return;
     if (outcome.status === "unknown") {
       setDrawer("handoff");
+      void workspaceControllerRef.current?.dismissFirstEditGuide();
       return;
     }
     if (outcome.status === "blocked") {
@@ -5682,6 +5745,7 @@ export default function Workbench() {
       }
       if (outcome.code === "RUN_SUBMISSION_LOCKED") {
         setDrawer("handoff");
+        void workspaceControllerRef.current?.dismissFirstEditGuide();
         return;
       }
       if (outcome.code === "RUN_SUBMISSION_DOCUMENT_EDIT") {
@@ -6371,52 +6435,18 @@ export default function Workbench() {
     activeRun
     && ["validating", "committing", "recovering-transaction"].includes(activeRun.status),
   );
-  const candidateNeedsReview =
-    activeRun?.candidateAssessment?.status === "attention";
-  const processPanelTitle = pendingRunOutcome
-    ? "正在确认这次发送是否成功"
-    : activeRun?.status === "ready-to-open"
-      ? candidateNeedsReview
-        ? "页面变化较大，请先审阅"
-        : "修改结果已完成检查"
-      : activeRun?.status === "no-change"
-        ? "这次没有产生有效变化"
-        : activeRun?.status === "error"
-          ? "返回的 HTML 无法使用"
-          : "等待 AI 返回结果";
-  const processSummaryTitle = pendingRunOutcome
-    ? "为避免重复任务，画布暂时保持只读"
-    : activeRun?.status === "ready-to-open"
-      ? "AI 改好了，先对照再决定用哪一版"
-      : activeRun?.status === "no-change"
-        ? "页面与评论可以继续编辑"
-        : activeRun?.status === "error"
-          ? "源 HTML 没有被覆盖"
-          : "页面暂时只能看";
-  const processSummaryDetail = pendingRunOutcome
-    ? "源页会在后台继续核对，不会重复发送同一轮要求"
-    : activeRun?.status === "no-change"
-      ? "原评论和附件都已保留，调整要求后可以重新发送"
-      : activeRun?.status === "error"
-        ? "当前 HTML 没有被覆盖；返回编辑后仍可查看上轮处理"
-        : activeRun?.status === "ready-to-open" && candidateNeedsReview
-          ? "HTML 可以打开，但与上一版的共同特征较少，不会直接替换当前页面"
-          : activeRun?.status === "ready-to-open"
-            ? "不会直接替换当前页面。"
-            : "你的评论还在，AI 改完也不会直接覆盖。";
-  const processStatusLabel = pendingRunOutcome
-    ? "正在等待修改结果"
-    : activeRun?.status === "ready-to-open"
-      ? candidateNeedsReview ? "请先审阅" : "等待确认打开"
-      : activeRun?.status === "no-change"
-        ? "没有新版本"
-        : activeRun?.status === "error"
-          ? "需要处理"
-          : "正在等待修改结果";
-  const processSteps = deriveRunProgressSteps(
+  const processPresentation = deriveRunProgressPresentation(
     activeRun,
     currentQoderHandoffStatus,
   );
+  const processPanelEyebrow = processPresentation.header?.eyebrow
+    || "等待AI返回结果";
+  const processPanelTitle = processPresentation.header?.title
+    || "暂无进行中的 AI 任务";
+  const processSummaryTitle = processPresentation.summaryTitle;
+  const processSummaryDetail = processPresentation.summaryDetail;
+  const processStatusLabel = processPresentation.statusLabel;
+  const processSteps = processPresentation.steps;
   const draftTargetScope = !draftTarget
     ? "尚未选择"
     : draftTarget.tagName === "body"
@@ -7569,6 +7599,7 @@ export default function Workbench() {
                       ? "processing"
                       : "editing"}
                   enableReorder={!interactionLocked}
+                  pointerCapabilityHoverEnabled={!isBuiltInWelcomePage}
                 />
               </Suspense>
               )
@@ -8353,6 +8384,7 @@ export default function Workbench() {
       >
         {drawer === "handoff" ? (
           <HandoffDrawerHeader
+            panelEyebrow={processPanelEyebrow}
             panelTitle={processPanelTitle}
           />
         ) : drawer ? (
@@ -8910,7 +8942,7 @@ export default function Workbench() {
       </aside>
 
       {openConfirmation ? (
-        <ExternalHtmlOpenDialog
+        <ExternalHtmlOpenDialog key={openConfirmation.requestId}
           confirmation={openConfirmation}
           deleteOriginal={openConfirmation.deleteOriginal === true}
           busy={openConfirmation.busy === true}
@@ -9011,6 +9043,12 @@ export default function Workbench() {
         />
       ) : null}
       </main>
+      <FirstEditGuideCard
+        visible={firstEditGuideVisible}
+        onDismiss={() => {
+          void workspaceControllerRef.current?.dismissFirstEditGuide();
+        }}
+      />
       {readyReviewOverlay}
     </>
   );

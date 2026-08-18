@@ -80,7 +80,6 @@ import {
   deterministicOperationTargetUpdate,
   deterministicTargetUpdates,
   inferSelectionLevel,
-  isModulePaddingHit,
   isPageRootElement,
   isPageRootSelection,
   readableLabel,
@@ -126,17 +125,24 @@ import {
   activeTextRangeFromDocument,
   boundedHistorySelection,
   caretPointFromMouseEvent,
-  findCanvasHitSourceElement,
-  findCanvasSelectionElement,
   findDedicatedSourceSurfaceAtPoint,
   findNativeActionTarget,
   historySelectionFromMutationValue,
   identifyingTextRangeAtPoint,
   directTextNodeAtPoint,
-  isCanvasRootElement,
   sourceHistoryDirectionForShortcut,
   type TextCaretPoint,
 } from "./html-canvas-interaction";
+import {
+  canvasPointerCapabilityFromProof,
+  resolveCanvasPointerCapability,
+  resolveCanvasPointerHit,
+} from "./html-canvas-pointer-capability";
+import {
+  createCanvasCapabilityHoverController,
+  layoutCanvasHoverChrome,
+  type CanvasCapabilityHoverSnapshot,
+} from "./html-canvas-capability-hover";
 import NoticeBar from "./NoticeBar";
 import type {
   HtmlCanvasCommentedTarget,
@@ -291,12 +297,12 @@ const EDITOR_DOCUMENT_STYLES = `
 
   [data-html-canvas-selected="part"] {
     outline: 3px solid #5b4bdf !important;
-    outline-offset: 3px !important;
+    outline-offset: 0 !important;
   }
 
   [data-html-canvas-selected="module"]:not([data-html-canvas-global-selected]) {
     outline: 3px solid #5b4bdf !important;
-    outline-offset: 3px !important;
+    outline-offset: 0 !important;
   }
 
   [data-html-canvas-global-selected] {
@@ -319,6 +325,24 @@ const EDITOR_DOCUMENT_STYLES = `
   html[data-html-canvas-locked] [contenteditable] {
     cursor: default !important;
     caret-color: transparent !important;
+  }
+
+  html[data-html-canvas-pointer="text"],
+  html[data-html-canvas-pointer="text"] body,
+  html[data-html-canvas-pointer="text"] body * {
+    cursor: text !important;
+  }
+
+  html[data-html-canvas-pointer="pointer"],
+  html[data-html-canvas-pointer="pointer"] body,
+  html[data-html-canvas-pointer="pointer"] body * {
+    cursor: pointer !important;
+  }
+
+  html[data-html-canvas-pointer="help"],
+  html[data-html-canvas-pointer="help"] body,
+  html[data-html-canvas-pointer="help"] body * {
+    cursor: help !important;
   }
 
   noscript {
@@ -579,6 +603,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     pageViewContext = null,
     pageViewDocumentKey = "",
     onPageViewContextChange,
+    pointerCapabilityHoverEnabled = true,
   },
   forwardedRef,
 ) {
@@ -669,6 +694,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const pendingToolbarVisibleRef = useRef(false);
   const pendingFrameRestoreEpochRef = useRef(0);
   const toolbarVisibleRef = useRef(false);
+  const pointerCapabilityHoverEnabledRef = useRef(pointerCapabilityHoverEnabled);
+  const hoverControllerRef = useRef<ReturnType<typeof createCanvasCapabilityHoverController> | null>(null);
   const pendingFrameViewportRef = useRef<{ left: number; top: number } | null>(null);
   const expectedFrameHtmlRef = useRef<string | null>(null);
   const expectedFrameTokenRef = useRef<string | null>(null);
@@ -731,6 +758,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   }
   pageViewDocumentKeyRef.current = pageViewDocumentKey;
   onPageViewContextChangeRef.current = onPageViewContextChange;
+  pointerCapabilityHoverEnabledRef.current = pointerCapabilityHoverEnabled;
 
   // Keep the server and hydration value deterministic, then normalize through DOMParser after mount.
   const [frameRender, setFrameRender] = useState(() => ({
@@ -742,6 +770,12 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const [selection, setSelection] = useState<HtmlCanvasSelection | null>(null);
   const [overlayPosition, setOverlayPosition] = useState<OverlayPosition | null>(null);
   const [toolbarVisible, setToolbarVisible] = useState(false);
+  const [hoverChrome, setHoverChrome] = useState<CanvasCapabilityHoverSnapshot>({
+    cursor: "default",
+    outline: false,
+    hint: false,
+    capability: null,
+  });
   const [hasTextRange, setHasTextRange] = useState(false);
   const [selectedStyle, setSelectedStyle] = useState<SelectedStyle>({
     fontSize: 16,
@@ -765,6 +799,35 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const [spacingMenuOpen, setSpacingMenuOpen] = useState(false);
 
   toolbarVisibleRef.current = toolbarVisible;
+
+  useEffect(() => {
+    const controller = createCanvasCapabilityHoverController({
+      onChange: setHoverChrome,
+    });
+    hoverControllerRef.current = controller;
+    return () => {
+      controller.dispose();
+      hoverControllerRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (pointerCapabilityHoverEnabled) return;
+    hoverControllerRef.current?.hide();
+  }, [pointerCapabilityHoverEnabled]);
+
+  useEffect(() => {
+    const documentNode = iframeRef.current?.contentDocument;
+    if (!documentNode) return;
+    if (!pointerCapabilityHoverEnabled || hoverChrome.cursor === "default") {
+      documentNode.documentElement.removeAttribute("data-html-canvas-pointer");
+      return;
+    }
+    documentNode.documentElement.setAttribute(
+      "data-html-canvas-pointer",
+      hoverChrome.cursor,
+    );
+  }, [hoverChrome.cursor, pointerCapabilityHoverEnabled]);
 
   useEffect(() => {
     const documentNode = containerRef.current?.ownerDocument;
@@ -2912,6 +2975,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     caretPoint?: TextCaretPoint,
     restoredSelection?: NativeEditSelection,
   ): boolean => {
+    hoverControllerRef.current?.hide();
     containerRef.current?.setAttribute("data-native-start-status", "starting");
     containerRef.current?.removeAttribute("data-native-host-mode");
     containerRef.current?.removeAttribute("data-native-event-delivery-mode");
@@ -4519,7 +4583,21 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     );
     appliedPageViewContextRef.current = pageViewContextRef.current;
     const handleClick = (event: MouseEvent) => {
-      if (isCanvasRootElement(event.target)) {
+      hoverControllerRef.current?.hide();
+      // Authored controls remain selectable/editable content in the Canvas,
+      // never live navigation or form controls. Suppress their browser action
+      // before the active-edit fast path so a second click cannot navigate the
+      // iframe away from the verified source document.
+      const nativeActionTarget = findNativeActionTarget(event.target);
+      if (nativeActionTarget) event.preventDefault();
+      const hit = resolveCanvasPointerHit({
+        documentNode,
+        eventTarget: event.target,
+        point: caretPointFromMouseEvent(event),
+        sourceIndex: sourceIndexRef.current,
+        enabled: true,
+      });
+      if (hit.action === "clear") {
         if (!lockedRef.current) {
           event.preventDefault();
           event.stopPropagation();
@@ -4527,14 +4605,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         }
         return;
       }
-      // Authored controls remain selectable/editable content in the Canvas,
-      // never live navigation or form controls. Suppress their browser action
-      // before the active-edit fast path so a second click cannot navigate the
-      // iframe away from the verified source document.
-      const nativeActionTarget = findNativeActionTarget(event.target);
-      if (nativeActionTarget) event.preventDefault();
-      const target = findCanvasSelectionElement(event.target);
-      if (!target) return;
+      const target = hit.capability.element;
       if (lockedRef.current) {
         if (target.closest(
           "a, button, form, input, select, summary, textarea, [contenteditable], [role=\"tab\"], [aria-expanded][aria-controls]",
@@ -4560,23 +4631,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         }
         return;
       }
-      if (isModulePaddingHit(target, event)) {
-        event.preventDefault();
-        event.stopPropagation();
-        clearSelection();
-        return;
-      }
-      const selectedElement = selectedElementRef.current;
-      if (
-        selectedElement
-        && event.target instanceof Node
-        && !selectedElement.contains(event.target)
-      ) {
-        event.preventDefault();
-        event.stopPropagation();
-        clearSelection();
-        return;
-      }
       if (activeNativeEditRef.current?.rootElement.contains(event.target as Node)) return;
       const activeEdit = activeNativeEditRef.current;
       if (activeEdit?.mode === "text-fragment") {
@@ -4594,16 +4648,22 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     };
 
     const handleDoubleClick = (event: MouseEvent) => {
+      hoverControllerRef.current?.hide();
       if (findNativeActionTarget(event.target)) event.preventDefault();
       const caretPoint = caretPointFromMouseEvent(event);
+      const hit = resolveCanvasPointerHit({
+        documentNode,
+        eventTarget: event.target,
+        point: caretPoint,
+        sourceIndex: sourceIndexRef.current,
+        enabled: true,
+      });
+      if (hit.action === "clear") return;
+      const target = hit.capability.element;
       const dedicatedSurface = findDedicatedSourceSurfaceAtPoint(
         documentNode,
         caretPoint,
       );
-      const target = dedicatedSurface
-        ?? findCanvasHitSourceElement(event.target)
-        ?? findCanvasSelectionElement(event.target);
-      if (!target) return;
       if (target.hasAttribute(EDIT_RUNTIME_HOST_ATTRIBUTE)) {
         event.preventDefault();
         event.stopPropagation();
@@ -4819,6 +4879,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     };
 
     const handleMouseDown = (event: MouseEvent) => {
+      hoverControllerRef.current?.hide();
       onInteractionRef.current?.();
       setSpacingMenuOpen(false);
       if (activeNativeEditRef.current?.rootElement.contains(event.target as Node)) {
@@ -4845,7 +4906,32 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       if (lockedRef.current) event.preventDefault();
     };
 
-    const handleScroll = () => updateOverlayPosition();
+    const handleScroll = () => {
+      hoverControllerRef.current?.hide();
+      updateOverlayPosition();
+    };
+    const handlePointerMove = (event: PointerEvent) => {
+      if (
+        event.buttons !== 0
+        || lockedRef.current
+        || readOnlyRef.current
+        || !pointerCapabilityHoverEnabledRef.current
+        || activeNativeEditRef.current
+      ) {
+        hoverControllerRef.current?.hide();
+        return;
+      }
+      hoverControllerRef.current?.update(resolveCanvasPointerCapability({
+        documentNode,
+        eventTarget: event.target,
+        point: caretPointFromMouseEvent(event),
+        sourceIndex: sourceIndexRef.current,
+        enabled: true,
+      }));
+    };
+    const handlePointerLeave = () => {
+      hoverControllerRef.current?.hide();
+    };
     const LayoutResizeObserver = documentNode.defaultView?.ResizeObserver;
     const layoutObserver = LayoutResizeObserver
       ? new LayoutResizeObserver(() => updateOverlayPosition())
@@ -4859,6 +4945,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       handleDisabledButtonPointerDown,
       true,
     );
+    documentNode.addEventListener("pointermove", handlePointerMove, true);
+    documentNode.addEventListener("pointerleave", handlePointerLeave, true);
     documentNode.addEventListener("dblclick", handleDoubleClick, true);
     documentNode.addEventListener("beforeinput", handleBeforeInput, true);
     documentNode.addEventListener("paste", handleLockedTransfer, true);
@@ -4866,6 +4954,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     documentNode.addEventListener("submit", handleSubmit, true);
     documentNode.addEventListener("keydown", handleKeyDown, true);
     documentNode.addEventListener("scroll", handleScroll, true);
+    iframe.addEventListener("pointerleave", handlePointerLeave);
 
     cleanupFrameRef.current = () => {
       documentNode.removeEventListener("click", handleClick, true);
@@ -4876,6 +4965,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         handleDisabledButtonPointerDown,
         true,
       );
+      documentNode.removeEventListener("pointermove", handlePointerMove, true);
+      documentNode.removeEventListener("pointerleave", handlePointerLeave, true);
+      iframe.removeEventListener("pointerleave", handlePointerLeave);
       documentNode.removeEventListener("dblclick", handleDoubleClick, true);
       documentNode.removeEventListener("beforeinput", handleBeforeInput, true);
       documentNode.removeEventListener("paste", handleLockedTransfer, true);
@@ -5397,6 +5489,63 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     || selectedNativeEditHost
     || selectedNativeTextFragment,
   );
+  const selectionCapability = selection && !interactionLocked
+    ? canvasPointerCapabilityFromProof({
+      canStartTextEdit: selectedNativeEditAvailable,
+      sourceResolution: selection.resolution,
+    })
+    : null;
+  const hoverTargetIsSelected = Boolean(
+    hoverChrome.capability
+    && selection
+    && toolbarVisible
+    && (
+      hoverChrome.capability.targetKey === selection.nodeId
+      || hoverChrome.capability.targetKey === selection.id
+    ),
+  );
+  const showHoverOutline = Boolean(
+    pointerCapabilityHoverEnabled
+    && hoverChrome.outline
+    && hoverChrome.capability
+    && !hoverTargetIsSelected
+    && !isEditing
+    && !interactionLocked
+  );
+  const showHoverHint = Boolean(
+    pointerCapabilityHoverEnabled
+    && hoverChrome.hint
+    && hoverChrome.capability
+    && !hoverTargetIsSelected
+    && !isEditing
+    && !interactionLocked
+  );
+  let hoverOutlineStyle: CSSProperties | undefined;
+  let hoverHintStyle: CSSProperties | undefined;
+  if (
+    (showHoverOutline || showHoverHint)
+    && hoverChrome.capability?.element?.isConnected
+    && containerRef.current
+    && iframeRef.current
+  ) {
+    const containerRect = containerRef.current.getBoundingClientRect();
+    const iframeRect = iframeRef.current.getBoundingClientRect();
+    const elementRect = hoverChrome.capability.element.getBoundingClientRect();
+    const chrome = layoutCanvasHoverChrome({
+      left: iframeRect.left - containerRect.left + elementRect.left,
+      top: iframeRect.top - containerRect.top + elementRect.top,
+      width: Math.max(0, elementRect.width),
+      height: Math.max(0, elementRect.height),
+    });
+    hoverOutlineStyle = chrome.outline;
+    hoverHintStyle = chrome.hint && showHoverHint
+      ? {
+        left: chrome.hint.left,
+        top: chrome.hint.top,
+        maxWidth: chrome.hint.maxWidth,
+      }
+      : undefined;
+  }
   const selectedPagePresentationAction = (
     !readOnly
     && !interactionLocked
@@ -5464,7 +5613,27 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         data-active={canvasTransitionActive ? "true" : undefined}
         aria-hidden="true"
       />
-
+      <div className="sr-only" aria-live="polite" aria-atomic="true">
+        {selectionCapability ? selectionCapability.spoken : ""}
+      </div>
+      {showHoverOutline && hoverOutlineStyle ? (
+        <div
+          className={styles.hoverOutline}
+          data-testid="canvas-capability-outline"
+          style={hoverOutlineStyle}
+          aria-hidden="true"
+        />
+      ) : null}
+      {showHoverHint && hoverHintStyle && hoverChrome.capability ? (
+        <div
+          className={styles.hoverHint}
+          data-testid="canvas-capability-hint"
+          style={hoverHintStyle}
+          aria-hidden="true"
+        >
+          {hoverChrome.capability.hint}
+        </div>
+      ) : null}
       {editFeedback && !interactionLocked ? (
         <NoticeBar
           placement="viewport"
@@ -5576,6 +5745,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
             }
           }}
         >
+          <div className={styles.toolbarRow}>
           {selectedPagePresentationAction ? (
             <button
               type="button"
@@ -5807,6 +5977,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
               ) : null}
             </>
           ) : null}
+          </div>
         </div>
       ) : null}
     </div>

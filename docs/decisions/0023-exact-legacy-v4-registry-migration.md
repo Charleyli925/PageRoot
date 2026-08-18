@@ -1,8 +1,14 @@
 # ADR 0023: Exact legacy V4 Registry metadata completion
 
-- Status: Accepted
+- Status: Superseded by ADR 0028; the migration and its dedicated lock were
+  removed before the V4 project files ever shipped
 - Date: 2026-08-14
 - Extends: ADR 0022
+
+> The shape this ADR migrated existed on `main` for 6h13m on 2026-08-14 and was
+> never part of a tagged release, so no user disk can hold it. Unrecognized
+> Registry shapes now take the same fail-closed validator path as every other
+> unknown shape. Retained as the record of why the migration existed.
 
 ## Context
 

@@ -1,20 +1,25 @@
 {
   "comment": [
-    "Ratchet guardrail against silent complexity drift, not a hard cap.",
-    "Each number is the current measured value. If a change genuinely needs to",
-    "grow a file, raise the number here in the SAME pull request: that keeps",
-    "growth a conscious, visible, reviewed decision instead of silent drift.",
+    "Ratchet guardrail against silent complexity drift — advisory only, never",
+    "blocks CI or merge. Exceeding a ceiling prints a visible notice alongside",
+    "the architecture check output. If a change genuinely needs to grow a file,",
+    "raise the number here in the SAME pull request: that keeps growth a",
+    "conscious, visible, reviewed decision instead of silent drift.",
     "The intent is downward — when a file shrinks, lower its numbers so the",
     "ceiling follows it down. Only files with a demonstrated regrowth risk are",
     "listed; this is deliberately not applied to every large file.",
     "Metrics: maxLines = physical line count; maxHooks = total React hook calls",
-    "(counted structurally by scripts/architecture-ast-query.mjs).",
+    "(counted structurally by scripts/architecture-ast-query.mjs). maxHooks only",
+    "applies to React modules; a non-React file lists maxLines alone.",
     "See docs/ARCHITECTURE_CONTRACT.md > Architecture gate assertion forms."
   ],
   "files": {
     "app/workbench.tsx": {
-      "maxLines": 9018,
-      "maxHooks": 315
+      "maxLines": 9089,
+      "maxHooks": 316
+    },
+    "scripts/project-file-repository.mjs": {
+      "maxLines": 7420
     }
   }
 }

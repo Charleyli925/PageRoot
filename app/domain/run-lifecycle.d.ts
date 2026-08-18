@@ -41,6 +41,31 @@ export type RunProgressStep = {
   state: RunProgressStepState;
 };
 
+export type RunProgressHeader = {
+  eyebrow: string;
+  title: string;
+};
+
+export type RunProgressPresentation = {
+  header: RunProgressHeader | null;
+  statusLabel: string;
+  summaryTitle: string;
+  summaryDetail: string;
+  steps: RunProgressStep[];
+};
+
+export function deriveRunProgressPresentation(
+  run: Pick<
+    ActiveRun,
+    | "requestId"
+    | "status"
+    | "error"
+    | "completionObserved"
+    | "candidateAssessment"
+  > | null | undefined,
+  handoffStatus?: "idle" | "copying" | "copied" | "failed",
+): RunProgressPresentation;
+
 export function deriveRunProgressSteps(
   run: Pick<
     ActiveRun,

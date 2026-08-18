@@ -275,6 +275,7 @@ services.
 | Known-source Finder reveal | narrow project IPC in `desktop/main.mjs` |
 | Validated default-browser HTML launch | `desktop/open-in-default-browser.mjs`, behind `desktop/project-ipc-security.mjs` sender authority |
 | Pseudonymous identity, strict event schemas, local queue and PostHog delivery | `desktop/usage-telemetry.mjs` |
+| Install-level first-real-HTML guide status and built-in welcome identity | `desktop/ui-preferences.mjs`, `app/application/first-edit-guide-session.js` |
 | Preview sanitization and verified frame injection | `app/components/html-preview-sandbox.js` |
 | Volatile desktop preview sessions and contained local-asset serving | `desktop/preview-protocol.mjs` |
 | Imported project's original sibling-asset directory | `desktop/imported-asset-root.mjs` plus Main `html-projects.json` |
@@ -444,23 +445,18 @@ unique external-source binding returns that project's current Working Copy
 instead of creating a second V1. Unbound HTML is classified first and imported
 as a fresh v4 V1 only after the user confirms; the original HTML bytes remain
 untouched unless the user later opts into Trash after Canvas verification. A current Registry
-write lock serializes ordinary Registry mutations across Bridge processes and
-is distinct from the exact-legacy-V4 migration lock. The sole bounded
-metadata exception is an exact pre-hardening V4 Registry shape: after current
-validation fails, the repository may complete its missing root stat identity
-and empty pending-import map only after every already-listed root, project
-identity and real path validates. A short-lived exclusive migration lock
-serializes that one Registry replacement across Bridge processes; dead-owner
-reclamation is bound to its exact sealed token marker, and a waiter
-re-reads the Registry after acquiring it. It backs up the original Registry
-bytes by Hash before one atomic publication; the backup is never opening or
-write authority. It neither imports, reassociates nor changes a Project, Working
+write lock serializes ordinary Registry mutations across Bridge processes and is
+the only Registry lock. A Registry that is not a valid current Registry fails
+closed through that one validator; there is no metadata-completion migration and
+no fallback to an empty Registry, because an empty Registry would let the next
+import atomically replace the real file and destroy its recorded external-source
+bindings and root identities. It neither imports, reassociates nor changes a Project, Working
 Copy, Version, Draft, comment, attachment or HTML. There is no v3 compatibility
 ingress, broader physical migration, or dual write. The decisions are recorded
 in `docs/decisions/0022-user-owned-project-root-identity.md`,
-`docs/decisions/0023-exact-legacy-v4-registry-migration.md`,
-`docs/decisions/0026-external-source-project-binding.md` and
-`docs/decisions/0027-prepared-open-intent.md`.
+`docs/decisions/0026-external-source-project-binding.md`,
+`docs/decisions/0027-prepared-open-intent.md` and
+`docs/decisions/0028-unrecognized-registry-fails-closed.md`.
 
 Initial and accepted AI results are immutable versions. Routine local edits do not create versions. A validated AI result is not activated until the user explicitly chooses it. Promotion may stage a provisional output path, but its final visible path is frozen only after the no-replace publication succeeds; a pre-publication collision reallocates and retries without overwriting user bytes.
 

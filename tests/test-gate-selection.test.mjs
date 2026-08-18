@@ -38,6 +38,7 @@ const TASK_OWNER_CASES = [
       "tests/review-runtime-visual.test.mjs",
       "tests/review-semantic-alignment.test.mjs",
       "tests/review-text-diff.test.mjs",
+      "tests/review-text-evidence-marks.test.mjs",
       "tests/runtime-snapshot-hosts.test.mjs",
       "tests/runtime-visual-contract.test.mjs",
     ],
@@ -229,7 +230,7 @@ test("owner rules select only the direct regression coverage for representative 
     }
     totalNodeTests += plan.selectedNodeTests.length;
   }
-  assert.ok(totalNodeTests <= 56, `representative ownership selected ${totalNodeTests} Node tests`);
+  assert.ok(totalNodeTests <= 57, `representative ownership selected ${totalNodeTests} Node tests`);
 });
 
 test("Candidate runtime seals map schema changes to every producer and boundary consumer", () => {
@@ -414,17 +415,21 @@ test("Workbench and review surfaces route to architecture or observable runtime 
   });
   assert.deepEqual(workbench.selectedNodeTests, [
     "tests/architecture-boundaries.test.mjs",
+    "tests/canvas-pointer-capability.test.mjs",
     "tests/desktop-preload-ipc.test.mjs",
     "tests/edit-author-runtime-session.test.mjs",
     "tests/edit-runtime-bootstrap.test.mjs",
     "tests/edit-runtime-contract.test.mjs",
     "tests/edit-runtime-preparation-fence.test.mjs",
     "tests/edit-runtime-protocol.test.mjs",
+    "tests/first-edit-guide-session.test.mjs",
+    "tests/html-canvas-capability-hover.test.mjs",
     "tests/html-preview-sandbox.test.mjs",
     "tests/project-rules-workflow.test.mjs",
     "tests/project-workflow.test.mjs",
     "tests/runtime-snapshot-hosts.test.mjs",
     "tests/source-rename.test.mjs",
+    "tests/ui-preferences.test.mjs",
     "tests/workspace-controller.test.mjs",
   ]);
   assert.deepEqual(suiteIds(workbench), [
