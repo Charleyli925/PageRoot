@@ -1,8 +1,13 @@
-export const CANVAS_HOVER_OUTLINE_DELAY_MS = 80;
-export const CANVAS_HOVER_HINT_DELAY_MS = 400;
+export const CANVAS_HOVER_DELAY_MS = 80;
+export const CANVAS_HOVER_OUTLINE_DELAY_MS = CANVAS_HOVER_DELAY_MS;
+export const CANVAS_HOVER_HINT_DELAY_MS = CANVAS_HOVER_DELAY_MS;
 export const CANVAS_HOVER_HINT_INSET_PX = 4;
-export const CANVAS_HOVER_HINT_HEIGHT_PX = 22;
+const CANVAS_HOVER_LAYOUT_HINT_HEIGHT_PX = 22;
+export const CANVAS_HOVER_HINT_HEIGHT_PX = 24;
 export const CANVAS_HOVER_HINT_MIN_WIDTH_PX = 96;
+export const CANVAS_HOVER_HINT_GAP_PX = 8;
+export const CANVAS_HOVER_EDGE_INSET_PX = 8;
+export const CANVAS_HOVER_HINT_WIDTH_PX = 196;
 
 export function layoutCanvasHoverChrome(hitRect) {
   const left = Number(hitRect?.left) || 0;
@@ -11,7 +16,7 @@ export function layoutCanvasHoverChrome(hitRect) {
   const height = Math.max(0, Number(hitRect?.height) || 0);
   const outline = { left, top, width, height };
   const inset = CANVAS_HOVER_HINT_INSET_PX;
-  const fits = height >= CANVAS_HOVER_HINT_HEIGHT_PX + inset * 2
+  const fits = height >= CANVAS_HOVER_LAYOUT_HINT_HEIGHT_PX + inset * 2
     && width >= CANVAS_HOVER_HINT_MIN_WIDTH_PX + inset * 2;
   if (!fits) return { outline, hint: null };
   return {
@@ -21,6 +26,53 @@ export function layoutCanvasHoverChrome(hitRect) {
       top: top + inset,
       maxWidth: Math.max(0, width - inset * 2),
     },
+  };
+}
+
+function finiteNonNegative(value, fallback) {
+  return Number.isFinite(value) ? Math.max(0, value) : fallback;
+}
+
+function clamp(value, minimum, maximum) {
+  return Math.min(Math.max(value, minimum), maximum);
+}
+
+/**
+ * Place the fixed-size hover caption outside its target outline.
+ * Coordinates are relative to the editor container.
+ */
+export function placeCanvasHoverHint({
+  containerWidth,
+  targetLeft,
+  targetTop,
+  targetHeight,
+  labelWidth = CANVAS_HOVER_HINT_WIDTH_PX,
+  labelHeight = CANVAS_HOVER_HINT_HEIGHT_PX,
+  gap = CANVAS_HOVER_HINT_GAP_PX,
+  edgeInset = CANVAS_HOVER_EDGE_INSET_PX,
+} = {}) {
+  const width = finiteNonNegative(containerWidth, 0);
+  const requestedLabelWidth = finiteNonNegative(labelWidth, CANVAS_HOVER_HINT_WIDTH_PX);
+  const requestedLabelHeight = finiteNonNegative(labelHeight, CANVAS_HOVER_HINT_HEIGHT_PX);
+  const safeGap = finiteNonNegative(gap, CANVAS_HOVER_HINT_GAP_PX);
+  const requestedEdgeInset = finiteNonNegative(edgeInset, CANVAS_HOVER_EDGE_INSET_PX);
+  const safeEdgeInset = Math.min(requestedEdgeInset, width / 2);
+  const labelOuterWidth = Math.min(
+    requestedLabelWidth,
+    Math.max(0, width - (safeEdgeInset * 2)),
+  );
+  const targetX = finiteNonNegative(targetLeft, 0);
+  const targetY = finiteNonNegative(targetTop, 0);
+  const targetBoxHeight = finiteNonNegative(targetHeight, 0);
+  const maxLeft = Math.max(safeEdgeInset, width - safeEdgeInset - labelOuterWidth);
+  const left = clamp(targetX, safeEdgeInset, maxLeft);
+  const aboveTop = targetY - requestedLabelHeight - safeGap;
+  const hasRoomAbove = aboveTop >= safeEdgeInset;
+  return {
+    left,
+    top: hasRoomAbove ? aboveTop : targetY + targetBoxHeight + safeGap,
+    width: labelOuterWidth,
+    placement: hasRoomAbove ? "above" : "below",
   };
 }
 
@@ -34,16 +86,14 @@ function emptySnapshot() {
 }
 
 export function createCanvasCapabilityHoverController({
-  outlineDelayMs = CANVAS_HOVER_OUTLINE_DELAY_MS,
-  hintDelayMs = CANVAS_HOVER_HINT_DELAY_MS,
+  delayMs = CANVAS_HOVER_DELAY_MS,
   scheduler = {
     setTimeout: (callback, delayMs) => globalThis.setTimeout(callback, delayMs),
     clearTimeout: (handle) => globalThis.clearTimeout(handle),
   },
   onChange,
 } = {}) {
-  let outlineTimer = null;
-  let hintTimer = null;
+  let hoverTimer = null;
   let currentKey = null;
   let snapshot = emptySnapshot();
 
@@ -53,10 +103,8 @@ export function createCanvasCapabilityHoverController({
   };
 
   const clearTimers = () => {
-    if (outlineTimer != null) scheduler.clearTimeout(outlineTimer);
-    if (hintTimer != null) scheduler.clearTimeout(hintTimer);
-    outlineTimer = null;
-    hintTimer = null;
+    if (hoverTimer != null) scheduler.clearTimeout(hoverTimer);
+    hoverTimer = null;
   };
 
   const hide = () => {
@@ -82,18 +130,8 @@ export function createCanvasCapabilityHoverController({
       hint: false,
       capability,
     });
-    outlineTimer = scheduler.setTimeout(() => {
-      outlineTimer = null;
-      if (currentKey !== key) return;
-      emit({
-        cursor: capability.cursor,
-        outline: true,
-        hint: snapshot.hint,
-        capability,
-      });
-    }, outlineDelayMs);
-    hintTimer = scheduler.setTimeout(() => {
-      hintTimer = null;
+    hoverTimer = scheduler.setTimeout(() => {
+      hoverTimer = null;
       if (currentKey !== key) return;
       emit({
         cursor: capability.cursor,
@@ -101,7 +139,7 @@ export function createCanvasCapabilityHoverController({
         hint: true,
         capability,
       });
-    }, hintDelayMs);
+    }, delayMs);
   };
 
   return {

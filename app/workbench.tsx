@@ -1,8 +1,6 @@
 "use client";
 
 import {
-  lazy,
-  Suspense,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -31,6 +29,7 @@ import { TrashIcon } from "@phosphor-icons/react/dist/csr/Trash";
 import { TriangleIcon } from "@phosphor-icons/react/dist/csr/Triangle";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 
+import HtmlCanvasEditor from "./components/HtmlCanvasEditor";
 import type {
   HtmlCanvasCommentLayoutState,
   HtmlCanvasEditRuntimeLoadOutcome,
@@ -239,7 +238,6 @@ import type {
   WorkspaceIssue,
 } from "./workbench/types";
 
-const HtmlCanvasEditor = lazy(() => import("./components/HtmlCanvasEditor"));
 const BROWSER_PREVIEW_LOGO_PLACEHOLDER =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x2='1' y2='1'%3E%3Cstop stop-color='%236550e8'/%3E%3Cstop offset='1' stop-color='%23d45df2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='15' fill='url(%23g)'/%3E%3Cpath d='M23 23 13 32l10 9M41 23l10 9-10 9M36 16 28 48' fill='none' stroke='white' stroke-width='5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E";
 const PROJECT_REPOSITORY_URL = "https://github.com/Charleyli925/PageRoot";
@@ -7529,9 +7527,6 @@ export default function Workbench() {
               editRuntimePreparing ? (
                 <div className="canvas-loading" role="status">正在载入源码画布…</div>
               ) : (
-              <Suspense fallback={(
-                <div className="canvas-loading" role="status">正在载入源码画布…</div>
-              )}>
                 <HtmlCanvasEditor
                   key={`editor-authority-${canvasGeneration}`}
                   ref={editorRef}
@@ -7601,7 +7596,6 @@ export default function Workbench() {
                   enableReorder={!interactionLocked}
                   pointerCapabilityHoverEnabled={!isBuiltInWelcomePage}
                 />
-              </Suspense>
               )
             ) : null}
           </div>

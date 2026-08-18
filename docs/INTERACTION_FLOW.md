@@ -133,7 +133,10 @@ stateDiagram-v2
 大版本可用 `guideGeneration` 重置。欢迎页、纯浏览器预览、预览模式、历史、
 AI 审阅、导入确认、冲突、处理锁定和画布尚未 `verified` 时不显示。
 
-同一编辑画布上，指针立即改光标；约 80ms 出浅轮廓，约 400ms 出一行说明。
+同一编辑画布上，指针立即改光标；在同一逻辑原位编辑宿主上稳定悬停约 80ms 后，
+浅轮廓与一行说明同时出现。说明默认位于目标轮廓左上方并留出明确间距，顶部空间
+不足时移到轮廓下方，且始终限制在画布横向范围内；快速掠过不显示任何 Hover
+装饰。
 文案只有三句，且必须复用真实进入文字编辑的证明
 （`nativeEditHostForElement` / `isEditableIslandTarget` /
 `nativeTextFragmentForElement`），不能按标签名猜测。按钮里可安全改的字
