@@ -87,8 +87,9 @@ same final commit and content hash recorded by the automated gate report.
   activation, layout invariance, mouse/keyboard Selection, clipboard,
   beforeinput, composition, and toolbar focus.
 - `native-dom-boundaries.spec.mjs`: iframe/script boundary, persistent
-  Document identity, scroll stability, rapid typing, target ranges and long
-  tasks.
+  Document identity, scroll stability, rapid typing, target ranges, long
+  tasks, shared hover/click hits, filled-module padding, empty modules, and
+  dedicated canvas roots.
 - `native-dom-source.spec.mjs`: byte-exact UTF-8 replacement, BOM/CRLF,
   entities/quotes/comments/duplicate attributes, exact forward bytes, and
   blocked source-reversal shortcuts.
