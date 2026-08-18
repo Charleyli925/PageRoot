@@ -285,9 +285,7 @@ async function readSourceFile(sourcePath) {
 function projectFileHttpError(cause) {
   if (!(cause instanceof ProjectFileRepositoryError)) return cause;
   const code = String(cause.code || "PROJECT_FILE_ERROR");
-  const status = code.startsWith("LEGACY_V4_REGISTRY_")
-    ? 422
-    : new Set([
+  const status = new Set([
     "SOURCE_NOT_FOUND",
     "PROJECT_ROOT_NOT_FOUND",
     "PROJECT_CONTROL_NOT_FOUND",

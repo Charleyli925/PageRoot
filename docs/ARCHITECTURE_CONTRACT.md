@@ -234,7 +234,8 @@ verified same-parent root rename through the existing Registry path, and return
 ready/unavailable/invalid rows independently. Optional `importSourceKey` values
 are a long-lived lookup to at most one `projectId`; they do not grant writes
 and do not deduplicate by Hash. Current Registry mutations serialize through a
-dedicated write lock, distinct from exact-legacy-V4 migration. Desktop Recent records contribute
+dedicated write lock, the only Registry lock; a Registry that is not a valid
+current Registry fails closed rather than migrating. Desktop Recent records contribute
 only sorting, `lastOpenedAt` and startup preference; they cannot add a member,
 remove a member or authorize an open. A Workbench catalog intent carries only
 `projectId`; the Bridge re-resolves and validates the complete Project,
@@ -301,10 +302,10 @@ visibility and the 800ms present-dwell timer. Durable `pending` /
 Main `ui-preferences.json`. Workbench may pass a narrow get/record port at
 composition time and dispatch `evaluateFirstEditGuide` / `dismissFirstEditGuide`;
 it must not call UI-preference IPC itself. Workbench mounts `FirstEditGuideCard`
-as a window overlay beside the review scroll stage; `HtmlCanvasEditor` must not
-mount or dismiss the card. Send that enters waiting writes `dismissed`; Escape
-does not. Hover captions are disposable Canvas presentation and must not change
-the click selection path.
+as a `position: fixed` portal on `document.body`, not as a grid child of the
+workbench or canvas; `HtmlCanvasEditor` must not mount or dismiss the card.
+Send that enters waiting writes `dismissed`; Escape does not. Hover captions
+are disposable Canvas presentation and must not change the click selection path.
 
 The direct path permits only a bounded classic-script ECharts candidate, frozen
 local/allowlisted-CDN bytes and at most 32 uniquely bound, source-empty hosts.

@@ -40,6 +40,21 @@ function pageForFrame(frameOrPage) {
   throw new TypeError("Expected a Playwright Page or PageRoot edit Frame.");
 }
 
+async function dismissCanvasToolbar(page) {
+  const toolbar = page.getByTestId("html-canvas-editor")
+    .filter({ visible: true })
+    .first()
+    .locator('[role="toolbar"]');
+  // Escape exits native text editing first, then clears the leftover block
+  // selection. One press is not enough when the toolbar flipped below the
+  // previous host and covers the next census target.
+  for (let step = 0; step < 2; step += 1) {
+    if (!await toolbar.isVisible().catch(() => false)) return;
+    await page.keyboard.press("Escape");
+  }
+  await toolbar.waitFor({ state: "hidden", timeout: 2_000 }).catch(() => {});
+}
+
 export function currentEditorIframe(frameOrPage) {
   const page = pageForFrame(frameOrPage);
   return page
@@ -277,6 +292,7 @@ export async function geometrySnapshot(frame, id) {
 }
 
 export async function doubleClickRenderedText(frame, id, position) {
+  await dismissCanvasToolbar(pageForFrame(frame));
   const target = currentNativeTarget(frame, id);
   const textPosition = position || await target.evaluate((element) => {
     const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);

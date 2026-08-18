@@ -511,5 +511,15 @@ contextBridge.exposeInMainWorld("htmlAIEditRuntime", editRuntimeApi);
 contextBridge.exposeInMainWorld("htmlAIRuntime", runtimeConfig);
 contextBridge.exposeInMainWorld("htmlAIAppLifecycle", appLifecycleApi);
 contextBridge.exposeInMainWorld("htmlAIUsage", usageApi);
-contextBridge.exposeInMainWorld("htmlAIUiPreferences", uiPreferencesApi);
+// Isolated E2E profiles are not first-install UX. Skip the get/record port so
+// Workbench never starts a UI-preferences IPC during hydration. Opt back in
+// with PAGEROOT_E2E_FIRST_EDIT_GUIDE=1 when a test needs the real card.
+const exposeUiPreferences = !(
+  typeof process !== "undefined"
+  && process.env?.PAGEROOT_E2E === "1"
+  && process.env?.PAGEROOT_E2E_FIRST_EDIT_GUIDE !== "1"
+);
+if (exposeUiPreferences) {
+  contextBridge.exposeInMainWorld("htmlAIUiPreferences", uiPreferencesApi);
+}
 contextBridge.exposeInMainWorld("htmlAIEdit", editApi);

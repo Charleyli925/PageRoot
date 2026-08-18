@@ -9,7 +9,7 @@ PageRoot keeps the release standard high while avoiding repeated proof of the sa
 | PR feedback | Draft Pull Request opens, updates or reopens without `full-gate` | Impact-selected Node/compiler feedback for the current head | Report `release-gate` or run the complete Browser/Electron matrix |
 | Informational Codex review | Ready, opened already Ready, or `full-gate` | At most one `@codex review` comment per exact head, plus a non-blocking thread snapshot | Fail `release-gate`, merge, or become a required check |
 | Dependency baseline | Branch policy pass on the full-gate path | Unchanged advisory threshold plus exact packaged-runtime closure | Start a complete source lane or macOS runner while the global baseline is red |
-| Source candidate | Ready or `full-gate` after the dependency baseline | Full Node, three Browser shards, real HTML, native Electron and deterministic AI; exact-tree attestation | Package or publish an installer; wait on Codex review |
+| Source candidate | Ready or `full-gate` after the dependency baseline | Full Node, three Browser shards, real HTML, three native Electron shards and deterministic AI; exact-tree attestation | Package or publish an installer; wait on Codex review |
 | Release dry run | `candidate-context` identifies packaging/release metadata/Electron/Bridge/Schema/resource risk on a full-gate candidate | Credential-free unsigned App, non-release checkpoint, clean-job renderer/metadata revalidation and startup identity | Read signing/Apple secrets, create distributables or enter Candidate/publication; reject a PR merely because it is large |
 | Main integrity | Source candidate is merged | Match merged PR, Tree Hash, version and fresh PR attestation | Repeat any Node, Browser or Electron source test |
 | Developer preview | Explicit manual request only | Clean Tree, ad-hoc DMG, packaged-content audit, isolated startup and non-release attestation | Sign/notarize, create updater assets, become a prerequisite, tag or publish |
@@ -36,9 +36,15 @@ feedback, not reusable release evidence.
 
 `PR Feedback` and the source-candidate jobs share a per-PR concurrency key
 inside `ci.yml`. A new commit therefore cancels an in-flight complete run for
-the stale head. Returning to Draft skips the full matrix; a later commit on a
+the stale head; `release-gate` skips that cancelled run instead of recording
+an artificial gate failure. Returning to Draft skips the full matrix; a later commit on a
 Ready PR reruns the complete matrix for the new head. Keep parallel PR scope a
 judgement call, not a fixed capacity rule.
+
+A push to `main` is keyed per commit instead, and is never cancelled.
+Successive merges land separate commits that each need their own
+`main-integrity` verification, so draining a merge backlog must never cancel an
+earlier commit's attestation check.
 
 ## CI ownership and isolation
 
@@ -47,9 +53,10 @@ judgement call, not a fixed capacity rule.
 - `branch-policy` and `candidate-context` have no dependency on one another. `baseline-policy` waits only for branch policy and runs `audit:dependencies`, whose single command owns both advisory policy and packaged-runtime closure. `source-build`, Native Electron and AI Electron depend on this job, so a red global baseline consumes no macOS runner.
 - Linux builds and shares only the Web renderer used by Node and Browser lanes.
 - Each macOS Electron lane builds the Electron renderer locally. The build is normally sub-second and removes Linux-to-macOS build output as a variable.
-- Native Electron and deterministic AI run as separate jobs. A failure can be rerun independently.
+- Native Electron and deterministic AI run as separate jobs. A failure can be rerun independently. Native Electron spreads its self-contained tests across three shards, because a single-worker lane of forty tests otherwise dominated total gate latency. Every shard still runs one worker, so no two Electron apps share a runner. The shards are passed `--fully-parallel` deliberately: Playwright otherwise splits by spec file, and this two-file suite would leave one shard holding every test while the others passed vacuously.
 - Each macOS job first runs a product-independent synthetic Electron environment preflight. It proves that the hosted window is visible and that renderer timers and animation frames advance before PageRoot code or assertions begin, so an environment failure on either runner stays classified as deterministic `ci_environment` rather than degrading to `source-test/needs_triage`.
-- Browser shards and real HTML keep retries at zero. The native Electron lane retries a test once in CI only, to absorb a transient Electron launch/hydration stall; local runs stay retry-free. Retry evidence is never lost with the runner: the lane's diagnostics artifact uploads on `always()`, the config records trace, video and screenshot per failed attempt, and `scripts/playwright-flaky-summary.mjs` writes machine-readable flaky/retry counts from the JSON reporter into `output/ci-evidence/` and the step summary. Reliability remains anchored in deterministic readiness and better evidence, not blanket retrying.
+- Every `ci.yml` step carries an explicit `timeout-minutes` bound, and the Browser lanes retry one stalled `playwright install-deps` attempt under a four-minute budget. An external apt mirror or network hang therefore costs minutes, not a whole job budget of silence.
+- Real HTML keeps retries at zero. The Browser shards, native Electron shards and deterministic AI lanes retry a test once in CI only, to absorb a transient environment stall; local runs stay retry-free. Retry evidence is never lost with the runner: each lane's diagnostics artifact uploads on `always()`, the config records trace, video and screenshot per failed attempt, and `scripts/playwright-flaky-summary.mjs` writes machine-readable flaky/retry counts from the JSON reporter into `output/ci-evidence/` and the step summary. Reliability remains anchored in deterministic readiness and better evidence, not blanket retrying.
 - Release Dry Run has two sequential macOS jobs. The first builds metadata and an explicitly unsigned App, runs the shared packaged verifier with the dry-run signature policy and freezes a non-release checkpoint. The second restores the checkpoint in a fresh checkout, restores its exact metadata, rebuilds `dist-desktop`, reruns the same verifier, then launches the App to compare runtime name/version and Bundle ID with the source package contract. Neither job builds a DMG or sees signing/notarization inputs. Formal Candidate profiles keep their ad-hoc pre-sign and Developer ID signature gates unchanged.
 - Release Candidate has two sequential macOS jobs. `preflight-sign-and-notarize-app` first assembles an ad-hoc App, checks packaged contents, runs the complete packaged-runtime oracle, signs it and proves signed startup before the App is submitted to Apple. Only after App acceptance does it upload an archive/hash/source-bound checkpoint.
 - `package-and-verify-candidate` downloads and revalidates that checkpoint, restores the exact embedded build and telemetry metadata as comparison inputs, rebuilds only the deterministic Electron renderer as a source-comparison oracle, uses electron-builder `--prepackaged` to avoid rebuilding the App, creates updater assets, submits only the final DMG to Apple and performs final mounted/extracted verification. The fresh job never regenerates telemetry configuration or receives its project token. The jobs have 90- and 75-minute guards; App and DMG Apple steps have 45- and 50-minute limits. All non-Apple steps keep explicit 2–10 minute limits.
@@ -125,12 +132,14 @@ Review these metrics per release and as a rolling 30-day view:
 
 Runner minutes and wall time are different signals. Splitting Electron lanes may use similar total macOS minutes while reducing critical-path time and allowing only the failed lane to rerun. The goal is less repeated evidence, not simply fewer tests.
 
-`npm run ci:health` is a local/manual script. It reads recent `ci.yml` Actions
-history and reports conclusion counts plus jobs that failed then succeeded on
-retry. It is not a scheduled workflow, not a merge gate, and not a substitute
-for `release-gate`. The five remaining workflow files live in
-`CI_HEALTH_WORKFLOW_INPUTS`, so adding a workflow without mapping it fails the
-source gate.
+`npm run ci:health` reads recent `ci.yml` Actions history and reports run and
+job outcomes, queue time separated from execution time, full-gate wall time
+separated from Draft feedback, retry-recovered jobs and per-run failure
+causes. The `CI Health` workflow publishes the same report weekly from a
+GitHub-hosted runner into the run summary and a 30-day artifact; it is
+read-only, never a merge gate, and no substitute for `release-gate`. The
+workflow files live in `CI_HEALTH_WORKFLOW_INPUTS`, so adding a workflow
+without mapping it fails the source gate.
 
 ## Change control
 

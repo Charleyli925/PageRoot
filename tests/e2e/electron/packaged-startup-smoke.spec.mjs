@@ -16,7 +16,7 @@ import {
   expectedPackagedAppIdentity,
   readPackagedPlistIdentity,
 } from "../../../scripts/packaged-app-identity.mjs";
-import { waitForProjectReady } from "./helpers/pageroot-app-fixture.mjs";
+import { waitForProjectReady, seedDismissedFirstEditGuide } from "./helpers/pageroot-app-fixture.mjs";
 
 const productRoot = path.resolve(import.meta.dirname, "../../..");
 const packageJson = JSON.parse(
@@ -105,6 +105,7 @@ test("packaged app preserves identity and imports external HTML as V1 across sta
   );
   const startupSourcePath = realpathSync(startupAlias);
   const liveSourcePath = realpathSync(liveAlias);
+  seedDismissedFirstEditGuide(isolatedUserData);
   const startupOriginal = readFileSync(startupSourcePath);
   const liveOriginal = readFileSync(liveSourcePath);
   const packagedApp = packagedApplication();

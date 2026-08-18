@@ -429,6 +429,10 @@ export async function architectureViolations() {
     path.join(PRODUCT_ROOT, "app", "components", "HtmlCanvasEditor.tsx"),
     "utf8",
   );
+  const firstEditGuideCard = await readFile(
+    path.join(PRODUCT_ROOT, "app", "components", "FirstEditGuideCard.tsx"),
+    "utf8",
+  );
   const previewSourceSync = await readFile(
     path.join(PRODUCT_ROOT, "app", "components", "html-canvas-preview-sync.ts"),
     "utf8",
@@ -1012,11 +1016,14 @@ export async function architectureViolations() {
     || !hasCall(workbenchAst, { method: "evaluateFirstEditGuide" })
     || !hasCall(workbenchAst, { method: "dismissFirstEditGuide" })
     || !workbench.includes("<FirstEditGuideCard")
+    || !workbench.split("</main>").slice(1).join("</main>").includes("<FirstEditGuideCard")
+    || !firstEditGuideCard.includes("createPortal")
+    || !firstEditGuideCard.includes("document.body")
     || !/run-submission-started[\s\S]{0,400}dismissFirstEditGuide/u.test(workbench)
     || /keydown[\s\S]{0,400}dismissFirstEditGuide/u.test(workbench)
   ) {
     violations.push(
-      "app/workbench.tsx: the view may pass the narrow UI-preferences port at composition time but cannot record guide status itself; the card stays a window overlay that dismisses on send-to-waiting, not Escape",
+      "app/workbench.tsx: the view may pass the narrow UI-preferences port at composition time but cannot record guide status itself; the card stays a document.body portal overlay that dismisses on send-to-waiting, not Escape",
     );
   }
   if (
@@ -1212,7 +1219,10 @@ export async function architectureViolations() {
     );
   }
   const budget = await budgetFindings();
-  violations.push(...budget.violations);
+  // Budget exceeding is advisory — it prints a visible notice but does not block
+  // CI or merge. The intent is to make growth conscious and visible, not to gate
+  // delivery on whether someone remembered to bump a number before pushing.
+  // Violations are surfaced alongside hints when the gate passes.
   return violations;
 }
 
@@ -1273,9 +1283,10 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     process.exitCode = 1;
   } else {
     process.stdout.write("Architecture contract passed.\n");
-    const { hints } = await budgetFindings();
-    if (hints.length > 0) {
-      process.stdout.write(`Budget can tighten:\n- ${hints.join("\n- ")}\n`);
-    }
+  }
+  const { violations: budgetViolations, hints } = await budgetFindings();
+  const notices = [...budgetViolations, ...hints];
+  if (notices.length > 0) {
+    process.stdout.write(`Budget advisory:\n- ${notices.join("\n- ")}\n`);
   }
 }

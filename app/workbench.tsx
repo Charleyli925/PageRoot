@@ -9075,13 +9075,13 @@ export default function Workbench() {
           }}
         />
       ) : null}
+      </main>
       <FirstEditGuideCard
         visible={firstEditGuideVisible}
         onDismiss={() => {
           void workspaceControllerRef.current?.dismissFirstEditGuide();
         }}
       />
-      </main>
       {readyReviewOverlay}
     </>
   );
