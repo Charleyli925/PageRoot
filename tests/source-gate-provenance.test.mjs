@@ -347,6 +347,7 @@ test("retired review-governance workflows are gone", async () => {
   const { readdir } = await import("node:fs/promises");
   const workflows = await readdir(path.join(productRoot, ".github/workflows"));
   assert.deepEqual(workflows.sort(), [
+    "ci-health.yml",
     "ci.yml",
     "developer-preview.yml",
     "release-candidate.yml",

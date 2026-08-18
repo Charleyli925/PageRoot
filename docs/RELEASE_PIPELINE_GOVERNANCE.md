@@ -132,12 +132,14 @@ Review these metrics per release and as a rolling 30-day view:
 
 Runner minutes and wall time are different signals. Splitting Electron lanes may use similar total macOS minutes while reducing critical-path time and allowing only the failed lane to rerun. The goal is less repeated evidence, not simply fewer tests.
 
-`npm run ci:health` is a local/manual script. It reads recent `ci.yml` Actions
-history and reports conclusion counts plus jobs that failed then succeeded on
-retry. It is not a scheduled workflow, not a merge gate, and not a substitute
-for `release-gate`. The five remaining workflow files live in
-`CI_HEALTH_WORKFLOW_INPUTS`, so adding a workflow without mapping it fails the
-source gate.
+`npm run ci:health` reads recent `ci.yml` Actions history and reports run and
+job outcomes, queue time separated from execution time, full-gate wall time
+separated from Draft feedback, retry-recovered jobs and per-run failure
+causes. The `CI Health` workflow publishes the same report weekly from a
+GitHub-hosted runner into the run summary and a 30-day artifact; it is
+read-only, never a merge gate, and no substitute for `release-gate`. The
+workflow files live in `CI_HEALTH_WORKFLOW_INPUTS`, so adding a workflow
+without mapping it fails the source gate.
 
 ## Change control
 
