@@ -16,8 +16,15 @@ permissions:
   pull-requests: write
 
 concurrency:
-  group: pageroot-pr-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # A superseded pull-request head is safe to cancel because only the newest
+  # head can merge. A push to main is not: successive auto-merges land as
+  # separate commits that each need their own integrity verification, so a
+  # later merge must never cancel an earlier commit's main-integrity run.
+  group: >-
+    ${{ github.event_name == 'push'
+    && format('pageroot-main-{0}', github.sha)
+    || format('pageroot-pr-{0}', github.event.pull_request.number || github.ref) }}
+  cancel-in-progress: ${{ github.event_name != 'push' }}
 
 jobs:
   pr-feedback:
@@ -446,7 +453,7 @@ jobs:
           retention-days: 30
 
   source-electron-native:
-    name: electron-native
+    name: electron-native-${{ matrix.label }}
     if: >-
       github.event_name == 'pull_request'
       && (
@@ -457,6 +464,22 @@ jobs:
       - baseline-policy
     runs-on: macos-14
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      # 40 self-contained tests at workers=1 ran as a single ~12 minute lane
+      # that dominated total gate latency. Sharding spreads them across
+      # runners that still use one worker each, so no two Electron apps ever
+      # share a runner. --fully-parallel is what makes Playwright shard at
+      # test granularity; without it this two-spec suite shards by file and
+      # one shard would keep almost every test.
+      matrix:
+        include:
+          - label: shard-1-of-3
+            shard: 1/3
+          - label: shard-2-of-3
+            shard: 2/3
+          - label: shard-3-of-3
+            shard: 3/3
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         timeout-minutes: 5
@@ -479,7 +502,7 @@ jobs:
         timeout-minutes: 10
         run: >-
           node scripts/ci-evidence.mjs run
-          --suite electron-native-npm-ci
+          --suite electron-native-${{ matrix.label }}-npm-ci
           --stage environment-preflight
           --
           npm ci
@@ -487,7 +510,7 @@ jobs:
         timeout-minutes: 5
         run: >-
           node scripts/ci-evidence.mjs run
-          --suite electron-native-preflight
+          --suite electron-native-${{ matrix.label }}-preflight
           --stage environment-preflight
           --
           npm run test:electron:ci-preflight
@@ -495,7 +518,7 @@ jobs:
         timeout-minutes: 5
         run: >-
           node scripts/ci-evidence.mjs run
-          --suite electron-native-renderer
+          --suite electron-native-${{ matrix.label }}-renderer
           --stage source-build
           --
           npm run desktop:renderer
@@ -503,10 +526,11 @@ jobs:
         timeout-minutes: 30
         run: >-
           node scripts/ci-evidence.mjs run
-          --suite electron-native
+          --suite electron-native-${{ matrix.label }}
           --stage source-test
           --
           npx playwright test --config tests/e2e/electron/playwright.config.mjs
+          --fully-parallel --workers=1 --shard=${{ matrix.shard }}
       - name: Record Playwright retry evidence
         timeout-minutes: 5
         # Runs even after a failed suite so the flaky/retry counts and the
@@ -515,7 +539,7 @@ jobs:
         run: >-
           node scripts/playwright-flaky-summary.mjs
           --report output/playwright/native-dom-electron/results.json
-          --suite electron-native
+          --suite electron-native-${{ matrix.label }}
       - name: Upload native Electron diagnostics and retry evidence
         # Always uploaded so a retry-succeeded run still preserves the first
         # attempt's trace, video and screenshot instead of discarding them
@@ -524,7 +548,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         timeout-minutes: 10
         with:
-          name: PageRoot-electron-native-diagnostics-${{ github.run_attempt }}
+          name: PageRoot-electron-native-${{ matrix.label }}-diagnostics-${{ github.run_attempt }}
           path: output/playwright
           if-no-files-found: warn
           retention-days: 7
@@ -533,7 +557,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         timeout-minutes: 10
         with:
-          name: PageRoot-electron-native-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          name: PageRoot-electron-native-${{ matrix.label }}-evidence-${{ github.run_id }}-${{ github.run_attempt }}
           path: output/ci-evidence
           if-no-files-found: warn
           retention-days: 30
@@ -677,7 +701,7 @@ jobs:
             echo "| source-build | $BUILD_RESULT |"
             echo "| source-node | $NODE_RESULT |"
             echo "| browser lanes | $BROWSER_RESULT |"
-            echo "| electron-native | $ELECTRON_NATIVE_RESULT |"
+            echo "| electron-native shards | $ELECTRON_NATIVE_RESULT |"
             echo "| electron-ai | $ELECTRON_AI_RESULT |"
           } >> "$GITHUB_STEP_SUMMARY"
           test "$BASELINE_RESULT" = "success"
