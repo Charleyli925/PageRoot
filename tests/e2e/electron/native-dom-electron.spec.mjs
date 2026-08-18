@@ -497,7 +497,7 @@ test("Electron first launch imports the welcome HTML as V1 and sends its comment
     await launched.page.getByRole("button", { name: "评论", exact: true }).click();
     await launched.page.getByRole("button", { name: /发给 AI/u }).click();
     await expect(
-      launched.page.getByText("等待 AI 返回结果", { exact: true }),
+      launched.page.getByText("AI任务已经复制，直接粘贴给 AI Agent", { exact: true }),
     ).toBeVisible();
 
     let promptPath = "";
@@ -2650,7 +2650,7 @@ test("multiple orphaned comments relink in sequence and resume the original send
 
     await recoveredFrame.locator(caseSelector("grid-card")).click();
     await expect(activeLaunch.page.getByText(
-      "等待 AI 返回结果",
+      "AI任务已经复制，直接粘贴给 AI Agent",
       { exact: true },
     )).toBeVisible({ timeout: 30_000 });
     await expect.poll(
@@ -4018,4 +4018,3 @@ test("Electron does not follow a Working Copy moved out of the registered projec
     removeSourceFixture(fixture.sourceDirectory);
   }
 });
-

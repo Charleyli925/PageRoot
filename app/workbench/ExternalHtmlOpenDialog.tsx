@@ -5,12 +5,14 @@ import {
   useEffect,
   useId,
   useRef,
+  useState,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
 } from "react";
 import { FileHtmlIcon } from "@phosphor-icons/react/dist/csr/FileHtml";
 import { FolderOpenIcon } from "@phosphor-icons/react/dist/csr/FolderOpen";
 
+import { productErrorMessage } from "../lib/notification-policy.js";
 import styles from "./external-html-open-dialog.module.css";
 
 export type ExternalHtmlOpenConfirmation = {
@@ -58,6 +60,7 @@ export default function ExternalHtmlOpenDialog({
   const descriptionId = useId();
   const dialogRef = useRef<HTMLElement>(null);
   const primaryButtonRef = useRef<HTMLButtonElement>(null);
+  const [folderOpenError, setFolderOpenError] = useState("");
   const isNewExternal = confirmation.classification === "new-external";
   const sourceFileName = confirmation.sourceFileName || "这个 HTML";
   const projectsRootLabel = confirmation.projectsRootLabel || "文稿 › PageRoot › 项目";
@@ -88,6 +91,19 @@ export default function ExternalHtmlOpenDialog({
     if (!requireTrustedEvent(event) || busy) return;
     onConfirm(isNewExternal ? "import-new" : "continue-current");
   }, [busy, isNewExternal, onConfirm]);
+
+  const openProjectsRoot = useCallback((event: ReactMouseEvent<HTMLButtonElement>) => {
+    if (!requireTrustedEvent(event) || busy) return;
+    const open = window.htmlAIProjects?.openProjectsRoot;
+    if (!open) return;
+    void open().then(
+      () => setFolderOpenError(""),
+      (cause: unknown) => setFolderOpenError(productErrorMessage(
+        cause,
+        "PageRoot 项目文件夹暂时无法打开，请稍后重试。",
+      )),
+    );
+  }, [busy]);
 
   const handleKeyDown = useCallback((event: ReactKeyboardEvent<HTMLElement>) => {
     if (event.key === "Escape") {
@@ -172,7 +188,18 @@ export default function ExternalHtmlOpenDialog({
           <>
             <div className={styles.body} id={descriptionId}>
               <p>
-                会在「{projectsRootLabel}」里创建新项目，可见文件保存为
+                会在「
+                <button
+                  className={styles.folderLink}
+                  type="button"
+                  disabled={busy}
+                  aria-label={`打开 ${projectsRootLabel}`}
+                  title={`打开 ${projectsRootLabel}`}
+                  onClick={openProjectsRoot}
+                >
+                  {projectsRootLabel}
+                </button>
+                」里创建新项目，复制并保存为
                 {" "}
                 <span className={styles.fileChip}>{visibleV1FileName}</span>
                 。
@@ -182,6 +209,9 @@ export default function ExternalHtmlOpenDialog({
               </p>
               <p>后续只有在你采纳 AI 修改后，才会创建 -V2、-V3。</p>
               <p className={styles.note}>同目录的图片等资源不会一起导入。</p>
+              {folderOpenError ? (
+                <p className={styles.folderError} role="alert">{folderOpenError}</p>
+              ) : null}
             </div>
             <label className={styles.deleteOption} data-checked={deleteOriginal ? "true" : "false"}>
               <span className={styles.checkbox}>
@@ -195,7 +225,7 @@ export default function ExternalHtmlOpenDialog({
                   }}
                 />
               </span>
-              <span>成功导入后删除原文件</span>
+              <span>成功导入后，同意将原文件移至废纸篓。</span>
             </label>
           </>
         ) : (

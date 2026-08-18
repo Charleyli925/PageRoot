@@ -290,6 +290,7 @@ test("direct protocol aborts a stalled headerless ECharts stream by the existing
   let observedSignal = null;
   const controller = createEditRuntimeProtocolController({
     protocolApi: { handle() {} },
+    resolveSourceRoot: () => temporaryRoot,
     netFetch: async (_url, options) => {
       observedSignal = options.signal;
       return new Response(new ReadableStream({
@@ -371,15 +372,18 @@ test("direct protocol bounds declared-asset discovery by the shared preparation 
   const temporaryRoot = await mkdtemp(path.join(tmpdir(), "pageroot-edit-runtime-assets-timeout-"));
   t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
   const sourcePath = path.join(temporaryRoot, "report.html");
-  await mkdir(path.join(temporaryRoot, "vendor"));
-  await Promise.all([
-    writeFile(sourcePath, HTML),
-    writeFile(path.join(temporaryRoot, "vendor", "echarts.js"), "window.echarts={init(){}};"),
-  ]);
+  const fixedEchartsBytes = Buffer.from("window.echarts={init(){}};");
 
   let observedSignal = null;
   const controller = createEditRuntimeProtocolController({
     protocolApi: { handle() {} },
+    resolveSourceRoot: () => temporaryRoot,
+    realpathImpl: async (value) => value,
+    statImpl: async () => ({
+      isFile: () => true,
+      size: fixedEchartsBytes.byteLength,
+    }),
+    readFileImpl: async () => fixedEchartsBytes,
     netFetch: async () => new Response("unexpected"),
     collectDeclaredAssets: async ({ signal }) => {
       observedSignal = signal;
@@ -396,4 +400,34 @@ test("direct protocol bounds declared-asset discovery by the shared preparation 
   );
   assert.ok(observedSignal instanceof AbortSignal);
   assert.equal(observedSignal.aborted, true);
+});
+
+test("direct protocol keeps an incomplete injected source-root resolver inside the shared preparation deadline", async (t) => {
+  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "pageroot-edit-runtime-source-root-timeout-"));
+  t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
+  const sourcePath = path.join(temporaryRoot, "report.html");
+
+  let resolverCalls = 0;
+  let netFetchCalls = 0;
+  const controller = createEditRuntimeProtocolController({
+    protocolApi: { handle() {} },
+    resolveSourceRoot: async () => {
+      resolverCalls += 1;
+      await new Promise(() => {});
+    },
+    netFetch: async () => {
+      netFetchCalls += 1;
+      return new Response("unexpected");
+    },
+    runtimePreparationDeadlineMs: 20,
+    randomSessionId: () => "e".repeat(32),
+    randomExecutionId: () => "f".repeat(24),
+  });
+
+  await assert.rejects(
+    controller.createSession({ html: REMOTE_ECHARTS_HTML, sourcePath, bindings: BINDINGS }),
+    /preparation timed out/u,
+  );
+  assert.equal(resolverCalls, 1);
+  assert.equal(netFetchCalls, 0);
 });

@@ -93,8 +93,47 @@
   overflow-wrap: anywhere;
 }
 
+.folderLink {
+  display: inline;
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #4f49b6;
+  font: inherit;
+  font-weight: 680;
+  overflow-wrap: anywhere;
+  text-align: left;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.folderLink:hover:not(:disabled) {
+  color: #38319b;
+}
+
+.folderLink:focus-visible {
+  outline: 2px solid #6158d6;
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+.folderLink:disabled {
+  cursor: default;
+  opacity: 0.62;
+}
+
 .note {
   color: #7a7c86;
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.folderError {
+  color: #a4513f;
   font-size: 12.5px;
   line-height: 1.6;
 }

@@ -277,8 +277,10 @@ async function addCommentAndSubmit(
     );
   }
   await page.getByRole("button", { name: /发给 AI/u }).click();
-  await expect(page.getByText("等待 AI 返回结果", { exact: true }))
+  await expect(page.getByText("AI任务已经复制，直接粘贴给 AI Agent", { exact: true }))
     .toBeVisible();
+  await expect(page.getByRole("dialog", { name: "本轮处理" })
+    .locator(".status-chip")).toHaveText("等待 AI 返回");
   let promptPath = "";
   await expect.poll(async () => {
     const copied = await electronApp.evaluate(({ clipboard }) => clipboard.readText());
@@ -1204,9 +1206,14 @@ ${REVIEW_MASK_UNION_BEFORE}
     runOfficialFinalizer(request.requestRoot, request.changeRequest);
 
     await expect(launched.page.getByText(
-      "修改结果已完成检查",
+      "可在审阅中对比查看修改差异",
       { exact: true },
     ).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
+    const processingDialog = launched.page.getByRole("dialog", { name: "本轮处理" });
+    await expect(processingDialog.locator(".processing-title small"))
+      .toHaveText("AI返回结果");
+    await expect(processingDialog.locator(".status-chip"))
+      .toHaveText("等待确认打开");
     await expect(
       aiProgressStep,
     ).toHaveAttribute("data-state", "done");
@@ -1610,10 +1617,20 @@ ${REVIEW_MASK_UNION_BEFORE}
     await expect(deletedPriority).toHaveCount(1);
     await expect.poll(() => deletedPriority.evaluate(
       (element) => getComputedStyle(element).textDecorationLine,
-    )).toContain("line-through");
+    )).toBe("none");
     await expect.poll(() => deletedPriority.evaluate(
-      (element) => getComputedStyle(element).textDecorationStyle,
-    )).toBe("dashed");
+      (element) => getComputedStyle(element).color,
+    )).toBe(await deletedPriority.evaluate(
+      (element) => getComputedStyle(element.parentElement).color,
+    ));
+    await expect.poll(() => deletedPriority.evaluate(
+      (element) => getComputedStyle(element).fontSize,
+    )).toBe(await deletedPriority.evaluate(
+      (element) => getComputedStyle(element.parentElement).fontSize,
+    ));
+    await expect.poll(() => beforeReviewFrame.locator(
+      '[data-pageroot-review-text-mark="removed"]',
+    ).count()).toBeGreaterThan(0);
     const addedText = afterReviewFrame.locator(
       '[data-pageroot-review-text="added"]',
     ).filter({ hasText: UPDATED_TEXT });
@@ -1622,15 +1639,14 @@ ${REVIEW_MASK_UNION_BEFORE}
     )).toBe("none");
     await expect.poll(() => addedText.evaluate(
       (element) => getComputedStyle(element).textEmphasisStyle,
-    )).toContain("dot");
-    await expect.poll(() => addedText.evaluate(
-      (element) => getComputedStyle(element).textEmphasisColor,
-    )).toBe("rgb(35, 155, 86)");
-    await expect.poll(() => addedText.evaluate(
-      (element) => getComputedStyle(element).textEmphasisPosition,
-    )).toContain("under");
+    )).toBe("none");
     expect(await addedText.evaluate((element) => getComputedStyle(element).color))
       .toBe(await addedText.evaluate((element) => getComputedStyle(element.parentElement).color));
+    expect(await addedText.evaluate((element) => getComputedStyle(element).fontSize))
+      .toBe(await addedText.evaluate((element) => getComputedStyle(element.parentElement).fontSize));
+    await expect.poll(() => afterReviewFrame.locator(
+      '[data-pageroot-review-text-mark="added"]',
+    ).count()).toBeGreaterThan(0);
     await expect.poll(async () => Promise.all(
       [beforeReviewFrame, afterReviewFrame].map((frame) => frame.locator(
         "[data-review-injection-stability]",
@@ -1711,10 +1727,6 @@ ${REVIEW_MASK_UNION_BEFORE}
             (box.getAttribute("data-text-groups") || box.getAttribute("data-text-group") || "")
               .split(/\s+/).includes(groupId)
           ));
-          const fontSize = Number.parseFloat(getComputedStyle(marker).fontSize || "0");
-          const dotClearance = tone === "text-added"
-            ? Math.max(4, Number.isFinite(fontSize) ? fontSize * .55 : 8)
-            : 0;
           const range = document.createRange();
           range.selectNodeContents(marker);
           const evidenceRects = [...range.getClientRects()]
@@ -1723,13 +1735,34 @@ ${REVIEW_MASK_UNION_BEFORE}
               left: rect.left,
               top: rect.top,
               right: rect.right,
-              bottom: rect.bottom + dotClearance,
+              bottom: rect.bottom,
             }));
           range.detach();
           if (!evidenceRects.length) return true;
           return frames.length > 0 && evidenceRects.every((evidence) => (
             frames.some((box) => contains(box.getBoundingClientRect(), evidence))
           ));
+        });
+      })),
+    ).then((states) => states.every(Boolean))).toBe(true);
+    await expect.poll(async () => Promise.all(
+      [beforeReviewFrame, afterReviewFrame].map((frame) => frame.locator("html").evaluate(() => {
+        const tolerance = 2;
+        const contains = (outer, inner) => (
+          outer.left <= inner.left + tolerance
+          && outer.top <= inner.top + tolerance
+          && outer.right >= inner.right - tolerance
+          && outer.bottom >= inner.bottom - tolerance
+        );
+        return [...document.querySelectorAll("[data-pageroot-review-text-mark]")].every((mark) => {
+          const tone = mark.getAttribute("data-pageroot-review-text-mark") === "removed"
+            ? "text-removed"
+            : "text-added";
+          const boxes = [...document.querySelectorAll(
+            '[data-pageroot-review-overlay-box][data-tone="' + tone + '"]',
+          )];
+          const rect = mark.getBoundingClientRect();
+          return boxes.some((box) => contains(box.getBoundingClientRect(), rect));
         });
       })),
     ).then((states) => states.every(Boolean))).toBe(true);
@@ -3488,7 +3521,7 @@ test("a pre-load review navigation falls back without trusting the replacement p
       ));
     runOfficialFinalizer(request.requestRoot, request.changeRequest);
     await expect(launched.page.getByText(
-      "修改结果已完成检查",
+      "可在审阅中对比查看修改差异",
       { exact: true },
     ).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
 
@@ -3544,7 +3577,7 @@ test("two AI versions activate in order and survive relaunch without identity dr
     );
     runOfficialFinalizer(firstRequest.requestRoot, firstRequest.changeRequest);
     await expect(launched.page.getByText(
-      "修改结果已完成检查",
+      "可在审阅中对比查看修改差异",
       { exact: true },
     ).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
     await adoptReadyResult(launched.page);
@@ -3573,7 +3606,7 @@ test("two AI versions activate in order and survive relaunch without identity dr
     );
     runOfficialFinalizer(secondRequest.requestRoot, secondRequest.changeRequest);
     await expect(launched.page.getByText(
-      "修改结果已完成检查",
+      "可在审阅中对比查看修改差异",
       { exact: true },
     ).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
     await adoptReadyResult(launched.page);
@@ -3760,7 +3793,7 @@ test("returning from review restores the editable pre-AI version and preserves t
     );
     runOfficialFinalizer(request.requestRoot, request.changeRequest);
     await expect(launched.page.getByText(
-      "修改结果已完成检查",
+      "可在审阅中对比查看修改差异",
       { exact: true },
     ).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
     const candidateFiles = candidateHtmlFiles(
@@ -3875,13 +3908,16 @@ test("a clipboard handoff failure keeps the frozen Request recoverable", async (
     const sendToQoder = launched.page.getByRole("button", { name: /发给 AI/u });
     await expect(sendToQoder).toBeEnabled();
     await sendToQoder.click();
-    await expect(launched.page.getByText("等待 AI 返回结果", { exact: true }))
+    await expect(launched.page.getByText("AI任务复制失败，请重新复制", { exact: true }))
       .toBeVisible();
     expect(await launched.electronApp.evaluate(({ clipboard }) => clipboard.readText()))
       .toBe(clipboardSentinel);
     await expect(launched.page.getByRole("button", { name: "复制失败，再试一次" }))
       .toBeVisible();
     const processingDialog = launched.page.getByRole("dialog", { name: "本轮处理" });
+    await expect(processingDialog.locator(".status-chip")).toHaveText("复制失败");
+    await expect(processingDialog.getByText("AI任务尚未复制", { exact: true }))
+      .toBeVisible();
     const handoffError = processingDialog.getByText(
       "交接内容尚未复制",
       { exact: true },
@@ -3952,7 +3988,7 @@ test("a failed handoff in project A does not block project B or replace its stat
       .toBeEnabled();
     await launched.page.getByRole("button", { name: /发给 AI/u }).click();
     await expect(launched.page.getByText(
-      "等待 AI 返回结果",
+      "AI任务复制失败，请重新复制",
       { exact: true },
     )).toBeVisible();
     await expect(launched.page.getByRole("button", { name: "复制失败，再试一次" }))
@@ -3998,7 +4034,7 @@ test("a rapid double click creates exactly one durable Request", async () => {
       delay: 0,
     });
     await expect(launched.page.getByText(
-      "等待 AI 返回结果",
+      "AI任务已经复制，直接粘贴给 AI Agent",
       { exact: true },
     )).toBeVisible();
     await expect.poll(
@@ -4033,7 +4069,7 @@ test("ending a copied run still warns after restart and blocks late finalization
       isolatedUserData: launched.isolatedUserData,
     });
     await expect(launched.page.getByText(
-      "等待 AI 返回结果",
+      "正在准备并复制 AI 任务",
       { exact: true },
     )).toBeVisible();
     const endRound = launched.page.getByRole("button", {
@@ -4147,6 +4183,11 @@ test("an unknown Request outcome stays fail-closed and reconciles automatically"
       "正在确认这次发送是否成功",
       { exact: true },
     ).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
+    const pendingDialog = launched.page.getByRole("dialog", { name: "本轮处理" });
+    await expect(pendingDialog.locator(".processing-title small"))
+      .toHaveText("正在确认发送");
+    await expect(pendingDialog.locator(".status-chip"))
+      .toHaveText("正在确认发送结果");
     await expect(launched.page.getByRole("button", { name: "立即重新核对" }))
       .toHaveCount(0);
     await expect(launched.page.getByRole("button", { name: "重新打开源页" }).first())
@@ -4158,7 +4199,7 @@ test("an unknown Request outcome stays fail-closed and reconciles automatically"
 
     allowUnknownRequestReconcile = true;
     await expect(launched.page.getByText(
-      "等待 AI 返回结果",
+      "AI任务已经复制，直接粘贴给 AI Agent",
       { exact: true },
     )).toBeVisible({ timeout: 20_000 });
     await launched.page.unroute(bridgeRoute, injectUnknownRequestOutcome);
@@ -4242,7 +4283,7 @@ test("a persisted global comment stays exact after restart and sends directly", 
 
     await activeLaunch.page.getByRole("button", { name: /发给 AI/u }).click();
     await expect(activeLaunch.page.getByText(
-      "等待 AI 返回结果",
+      "AI任务已经复制，直接粘贴给 AI Agent",
       { exact: true },
     )).toBeVisible({ timeout: 30_000 });
     await expect(activeLaunch.page.getByText(/评论需要重新定位/u)).toHaveCount(0);
@@ -4264,7 +4305,7 @@ test("output without the mandatory finalizer never creates or opens a version", 
     );
     writeAiOutput(request.requestRoot, (base) => base.replace(ORIGINAL_TEXT, UPDATED_TEXT));
     await launched.page.waitForTimeout(3_500);
-    await expect(launched.page.getByText("等待 AI 返回结果", { exact: true }))
+    await expect(launched.page.getByText("AI任务已经复制，直接粘贴给 AI Agent", { exact: true }))
       .toBeVisible();
     expect(workingHtmlFiles(launched.workspace, request.changeRequest.projectId)).toHaveLength(1);
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
@@ -4296,7 +4337,7 @@ test("a malformed AI HTML return is rejected before completion or opening", asyn
     );
     expect(existsSync(path.join(attemptRoot, "completion.json"))).toBe(false);
     await launched.page.waitForTimeout(3_500);
-    await expect(launched.page.getByText("等待 AI 返回结果", { exact: true }))
+    await expect(launched.page.getByText("AI任务已经复制，直接粘贴给 AI Agent", { exact: true }))
       .toBeVisible();
     expect(workingHtmlFiles(launched.workspace, request.changeRequest.projectId)).toHaveLength(1);
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
@@ -4323,7 +4364,7 @@ test("a broad but related AI return is accepted without a target-scope error", a
       ));
     runOfficialFinalizer(request.requestRoot, request.changeRequest);
     await expect(launched.page.getByText(
-      "修改结果已完成检查",
+      "可在审阅中对比查看修改差异",
       { exact: true },
     ).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
     await expect(launched.page.getByText("已记录评论范围外的额外变化", { exact: true }))
@@ -4362,7 +4403,7 @@ test("a committed version that the desktop cannot activate stays visibly blocked
     writeAiOutput(request.requestRoot, (base) => base.replace(ORIGINAL_TEXT, UPDATED_TEXT));
     runOfficialFinalizer(request.requestRoot, request.changeRequest);
     await expect(launched.page.getByText(
-      "修改结果已完成检查",
+      "可在审阅中对比查看修改差异",
       { exact: true },
     ).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
     await adoptReadyResult(launched.page);

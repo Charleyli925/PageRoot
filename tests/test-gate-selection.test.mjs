@@ -38,6 +38,7 @@ const TASK_OWNER_CASES = [
       "tests/review-runtime-visual.test.mjs",
       "tests/review-semantic-alignment.test.mjs",
       "tests/review-text-diff.test.mjs",
+      "tests/review-text-evidence-marks.test.mjs",
       "tests/runtime-snapshot-hosts.test.mjs",
       "tests/runtime-visual-contract.test.mjs",
     ],
@@ -229,7 +230,7 @@ test("owner rules select only the direct regression coverage for representative 
     }
     totalNodeTests += plan.selectedNodeTests.length;
   }
-  assert.ok(totalNodeTests <= 56, `representative ownership selected ${totalNodeTests} Node tests`);
+  assert.ok(totalNodeTests <= 57, `representative ownership selected ${totalNodeTests} Node tests`);
 });
 
 test("Candidate runtime seals map schema changes to every producer and boundary consumer", () => {

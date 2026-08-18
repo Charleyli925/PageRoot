@@ -78,9 +78,11 @@ function ProcessStepGlyph({
 }
 
 export function HandoffDrawerHeader({
+  panelEyebrow,
   panelTitle,
   candidateVersionLabel,
 }: {
+  panelEyebrow: string;
   panelTitle: string;
   candidateVersionLabel?: string;
 }) {
@@ -92,7 +94,7 @@ export function HandoffDrawerHeader({
           <img src="./brand-logo.png" alt="" />
         </span>
         <span>
-          <small>本轮处理</small>
+          <small>{panelEyebrow}</small>
           <strong>{panelTitle}</strong>
         </span>
       </div>
