@@ -47,6 +47,13 @@ import {
   prepareReviewCommentSourceProjection,
   resolveReviewCommentSourceElement,
 } from "../lib/review-comment-source-map.js";
+import {
+  REVIEW_TEXT_EVIDENCE_ADDED_COLOR,
+  REVIEW_TEXT_EVIDENCE_MARKER_CSS,
+  REVIEW_TEXT_EVIDENCE_REMOVED_COLOR,
+  reviewTextEvidenceGraphemeEnd,
+  reviewTextEvidenceMarkGeometry,
+} from "../lib/review-text-evidence-marks.js";
 import type { CommentItem } from "./types";
 import {
   createReviewRuntimeVisualCaptureIdentity,
@@ -170,28 +177,7 @@ const REVIEW_DOCUMENT_STYLE = String.raw`
     outline-color: #6d5ce7 !important;
   }
 
-  html[data-pageroot-review-filter="all"] [data-pageroot-review-text="removed"],
-  html[data-pageroot-review-filter="text"] [data-pageroot-review-text="removed"] {
-    background: transparent !important;
-    color: #a13f3b !important;
-    text-decoration-line: line-through !important;
-    text-decoration-style: dashed !important;
-    text-decoration-color: #c74f4a !important;
-    text-decoration-thickness: calc(2px * var(--pageroot-review-ui-scale)) !important;
-  }
-
-  html[data-pageroot-review-filter="all"] [data-pageroot-review-text="added"],
-  html[data-pageroot-review-filter="text"] [data-pageroot-review-text="added"] {
-    background: transparent !important;
-    color: inherit !important;
-    text-decoration: none !important;
-    -webkit-text-emphasis-style: filled dot !important;
-    text-emphasis-style: filled dot !important;
-    -webkit-text-emphasis-color: #239b56 !important;
-    text-emphasis-color: #239b56 !important;
-    -webkit-text-emphasis-position: under !important;
-    text-emphasis-position: under right !important;
-  }
+${REVIEW_TEXT_EVIDENCE_MARKER_CSS}
 
   html[data-pageroot-review-filter="style"] [data-pageroot-review-marker-types~="style"] {
     box-shadow: none !important;
@@ -274,6 +260,36 @@ const REVIEW_DOCUMENT_STYLE = String.raw`
 
   [data-pageroot-review-mask-dim] {
     fill: #ffffff !important;
+    stroke: none !important;
+  }
+
+  [data-pageroot-review-text-marks] {
+    position: absolute !important;
+    z-index: 1 !important;
+    top: 0 !important;
+    left: 0 !important;
+    display: block !important;
+    overflow: visible !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    outline: none !important;
+    background: transparent !important;
+    opacity: 1 !important;
+    filter: none !important;
+    transform: none !important;
+    pointer-events: none !important;
+  }
+
+  [data-pageroot-review-text-mark="removed"] {
+    fill: none !important;
+    stroke: ${REVIEW_TEXT_EVIDENCE_REMOVED_COLOR} !important;
+    stroke-linecap: round !important;
+    vector-effect: non-scaling-stroke !important;
+  }
+
+  [data-pageroot-review-text-mark="added"] {
+    fill: ${REVIEW_TEXT_EVIDENCE_ADDED_COLOR} !important;
     stroke: none !important;
   }
 
@@ -3079,6 +3095,8 @@ function reviewBootstrap(
   const runtimeProjectionInitialBindings = Object.freeze(
     ${serializedBootstrapPayload(runtimeProjectionBindings)},
   );
+  const reviewTextEvidenceGraphemeEnd = ${reviewTextEvidenceGraphemeEnd.toString()};
+  const reviewTextEvidenceMarkGeometry = ${reviewTextEvidenceMarkGeometry.toString()};
   const runtimeVisualBindCall = (method) => Function.prototype.call.bind(method);
   const runtimeVisualFunctionHasInstance = runtimeVisualBindCall(
     Function.prototype[Symbol.hasInstance],
@@ -4810,7 +4828,8 @@ function reviewBootstrap(
   const additionEvidenceClearance = (record) => {
     if (record.tone !== "text-added") return 0;
     const fontSize = Number.parseFloat(getComputedStyle(record.element).fontSize || "0");
-    return Math.max(4, Number.isFinite(fontSize) ? fontSize * .55 : 8);
+    const uiScale = 1 / Math.max(.32, Math.min(1, Number(currentState.scale || 1)));
+    return reviewTextEvidenceMarkGeometry(record, fontSize, uiScale).addedClearance;
   };
   const textEvidenceEnvelope = (record) => ({
     left: record.left,
@@ -5268,6 +5287,88 @@ function reviewBootstrap(
     dim.style.setProperty("fill-opacity", dimOpacity, "important");
     svg.append(dim);
     layer.append(svg);
+    if (filter === "all" || filter === "text") {
+      const uiScale = 1 / Math.max(.32, Math.min(1, Number(currentState.scale || 1)));
+      const marksSvg = document.createElementNS(namespace, "svg");
+      marksSvg.setAttribute("data-pageroot-review-text-marks", "true");
+      marksSvg.setAttribute("width", String(documentWidth));
+      marksSvg.setAttribute("height", String(height));
+      marksSvg.setAttribute("viewBox", "0 0 " + documentWidth + " " + height);
+      marksSvg.style.setProperty("width", documentWidth + "px", "important");
+      marksSvg.style.setProperty("height", height + "px", "important");
+      const strikeRuns = [];
+      document.querySelectorAll("[data-pageroot-review-text]").forEach((marker) => {
+        const tone = marker.getAttribute("data-pageroot-review-text") || "";
+        if (tone !== "added" && tone !== "removed") return;
+        const fontSize = Number.parseFloat(getComputedStyle(marker).fontSize || "0");
+        const walker = document.createTreeWalker(marker, NodeFilter.SHOW_TEXT);
+        let node = walker.nextNode();
+        while (node) {
+          const value = node.textContent || "";
+          let index = 0;
+          while (index < value.length) {
+            const end = reviewTextEvidenceGraphemeEnd(value, index);
+            if (!runtimeVisualWhitespaceCode(value.charCodeAt(index))) {
+              const range = document.createRange();
+              range.setStart(node, index);
+              range.setEnd(node, end);
+              const rect = range.getBoundingClientRect();
+              range.detach();
+              if (rect.width > 0.5 && rect.height > 0.5) {
+                const geometry = reviewTextEvidenceMarkGeometry({
+                  left: rect.left + scrollX,
+                  top: rect.top + scrollY,
+                  right: rect.right + scrollX,
+                  bottom: rect.bottom + scrollY,
+                }, fontSize, uiScale);
+                if (tone === "added") {
+                  const dot = document.createElementNS(namespace, "circle");
+                  dot.setAttribute("data-pageroot-review-text-mark", "added");
+                  dot.setAttribute("cx", String(geometry.dotX));
+                  dot.setAttribute("cy", String(geometry.dotY));
+                  dot.setAttribute("r", String(geometry.dotRadius));
+                  marksSvg.append(dot);
+                } else {
+                  strikeRuns.push(geometry);
+                }
+              }
+            }
+            index = end;
+          }
+          node = walker.nextNode();
+        }
+      });
+      strikeRuns.sort((left, right) => left.strikeY - right.strikeY || left.strikeLeft - right.strikeLeft);
+      const mergedStrikes = [];
+      strikeRuns.forEach((run) => {
+        const previous = mergedStrikes.at(-1);
+        if (
+          previous
+          && Math.abs(previous.strikeY - run.strikeY) <= Math.max(1, run.strikeThickness)
+          && run.strikeLeft - previous.strikeRight <= Math.max(2, run.gap)
+        ) {
+          previous.strikeLeft = Math.min(previous.strikeLeft, run.strikeLeft);
+          previous.strikeRight = Math.max(previous.strikeRight, run.strikeRight);
+          previous.strikeThickness = Math.max(previous.strikeThickness, run.strikeThickness);
+          previous.dash = run.dash;
+          previous.gap = run.gap;
+          return;
+        }
+        mergedStrikes.push({ ...run });
+      });
+      mergedStrikes.forEach((run) => {
+        const line = document.createElementNS(namespace, "line");
+        line.setAttribute("data-pageroot-review-text-mark", "removed");
+        line.setAttribute("x1", String(run.strikeLeft));
+        line.setAttribute("y1", String(run.strikeY));
+        line.setAttribute("x2", String(run.strikeRight));
+        line.setAttribute("y2", String(run.strikeY));
+        line.setAttribute("stroke-width", String(run.strikeThickness));
+        line.setAttribute("stroke-dasharray", run.dash + " " + run.gap);
+        marksSvg.append(line);
+      });
+      layer.append(marksSvg);
+    }
     merged.forEach((record) => {
       const horizontalInset = inset;
       const box = document.createElement("div");

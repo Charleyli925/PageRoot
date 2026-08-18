@@ -4,6 +4,11 @@ import vm from "node:vm";
 
 import ts from "typescript";
 
+import {
+  reviewTextEvidenceGraphemeEnd,
+  reviewTextEvidenceMarkGeometry,
+} from "../../app/lib/review-text-evidence-marks.js";
+
 const reviewDocument = await readFile(
   new URL("../../app/workbench/review-document.ts", import.meta.url),
   "utf8",
@@ -57,6 +62,8 @@ export function generatedReviewBootstrap(
       "style",
       "width",
     ],
+    reviewTextEvidenceGraphemeEnd,
+    reviewTextEvidenceMarkGeometry,
   });
   new vm.Script(transpiled).runInContext(context);
   return context.reviewBootstrap(

@@ -80,7 +80,6 @@ import {
   deterministicOperationTargetUpdate,
   deterministicTargetUpdates,
   inferSelectionLevel,
-  isModulePaddingHit,
   isPageRootElement,
   isPageRootSelection,
   readableLabel,
@@ -126,23 +125,22 @@ import {
   activeTextRangeFromDocument,
   boundedHistorySelection,
   caretPointFromMouseEvent,
-  findCanvasHitSourceElement,
-  findCanvasSelectionElement,
   findDedicatedSourceSurfaceAtPoint,
   findNativeActionTarget,
   historySelectionFromMutationValue,
   identifyingTextRangeAtPoint,
   directTextNodeAtPoint,
-  isCanvasRootElement,
   sourceHistoryDirectionForShortcut,
   type TextCaretPoint,
 } from "./html-canvas-interaction";
 import {
   canvasPointerCapabilityFromProof,
   resolveCanvasPointerCapability,
+  resolveCanvasPointerHit,
 } from "./html-canvas-pointer-capability";
 import {
   createCanvasCapabilityHoverController,
+  layoutCanvasHoverChrome,
   type CanvasCapabilityHoverSnapshot,
 } from "./html-canvas-capability-hover";
 import NoticeBar from "./NoticeBar";
@@ -299,12 +297,12 @@ const EDITOR_DOCUMENT_STYLES = `
 
   [data-html-canvas-selected="part"] {
     outline: 3px solid #5b4bdf !important;
-    outline-offset: 3px !important;
+    outline-offset: 0 !important;
   }
 
   [data-html-canvas-selected="module"]:not([data-html-canvas-global-selected]) {
     outline: 3px solid #5b4bdf !important;
-    outline-offset: 3px !important;
+    outline-offset: 0 !important;
   }
 
   [data-html-canvas-global-selected] {
@@ -4586,7 +4584,20 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     appliedPageViewContextRef.current = pageViewContextRef.current;
     const handleClick = (event: MouseEvent) => {
       hoverControllerRef.current?.hide();
-      if (isCanvasRootElement(event.target)) {
+      // Authored controls remain selectable/editable content in the Canvas,
+      // never live navigation or form controls. Suppress their browser action
+      // before the active-edit fast path so a second click cannot navigate the
+      // iframe away from the verified source document.
+      const nativeActionTarget = findNativeActionTarget(event.target);
+      if (nativeActionTarget) event.preventDefault();
+      const hit = resolveCanvasPointerHit({
+        documentNode,
+        eventTarget: event.target,
+        point: caretPointFromMouseEvent(event),
+        sourceIndex: sourceIndexRef.current,
+        enabled: true,
+      });
+      if (hit.action === "clear") {
         if (!lockedRef.current) {
           event.preventDefault();
           event.stopPropagation();
@@ -4594,14 +4605,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         }
         return;
       }
-      // Authored controls remain selectable/editable content in the Canvas,
-      // never live navigation or form controls. Suppress their browser action
-      // before the active-edit fast path so a second click cannot navigate the
-      // iframe away from the verified source document.
-      const nativeActionTarget = findNativeActionTarget(event.target);
-      if (nativeActionTarget) event.preventDefault();
-      const target = findCanvasSelectionElement(event.target);
-      if (!target) return;
+      const target = hit.capability.element;
       if (lockedRef.current) {
         if (target.closest(
           "a, button, form, input, select, summary, textarea, [contenteditable], [role=\"tab\"], [aria-expanded][aria-controls]",
@@ -4627,23 +4631,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         }
         return;
       }
-      if (isModulePaddingHit(target, event)) {
-        event.preventDefault();
-        event.stopPropagation();
-        clearSelection();
-        return;
-      }
-      const selectedElement = selectedElementRef.current;
-      if (
-        selectedElement
-        && event.target instanceof Node
-        && !selectedElement.contains(event.target)
-      ) {
-        event.preventDefault();
-        event.stopPropagation();
-        clearSelection();
-        return;
-      }
       if (activeNativeEditRef.current?.rootElement.contains(event.target as Node)) return;
       const activeEdit = activeNativeEditRef.current;
       if (activeEdit?.mode === "text-fragment") {
@@ -4664,14 +4651,19 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       hoverControllerRef.current?.hide();
       if (findNativeActionTarget(event.target)) event.preventDefault();
       const caretPoint = caretPointFromMouseEvent(event);
+      const hit = resolveCanvasPointerHit({
+        documentNode,
+        eventTarget: event.target,
+        point: caretPoint,
+        sourceIndex: sourceIndexRef.current,
+        enabled: true,
+      });
+      if (hit.action === "clear") return;
+      const target = hit.capability.element;
       const dedicatedSurface = findDedicatedSourceSurfaceAtPoint(
         documentNode,
         caretPoint,
       );
-      const target = dedicatedSurface
-        ?? findCanvasHitSourceElement(event.target)
-        ?? findCanvasSelectionElement(event.target);
-      if (!target) return;
       if (target.hasAttribute(EDIT_RUNTIME_HOST_ATTRIBUTE)) {
         event.preventDefault();
         event.stopPropagation();
@@ -5539,19 +5531,20 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     const containerRect = containerRef.current.getBoundingClientRect();
     const iframeRect = iframeRef.current.getBoundingClientRect();
     const elementRect = hoverChrome.capability.element.getBoundingClientRect();
-    const left = iframeRect.left - containerRect.left + elementRect.left;
-    const top = iframeRect.top - containerRect.top + elementRect.top;
-    hoverOutlineStyle = {
-      left,
-      top,
+    const chrome = layoutCanvasHoverChrome({
+      left: iframeRect.left - containerRect.left + elementRect.left,
+      top: iframeRect.top - containerRect.top + elementRect.top,
       width: Math.max(0, elementRect.width),
       height: Math.max(0, elementRect.height),
-    };
-    const hintWidth = 196;
-    hoverHintStyle = {
-      left: Math.max(8, Math.min(containerRect.width - hintWidth - 8, left)),
-      top: top - 26 >= 8 ? top - 26 : top + elementRect.height + 8,
-    };
+    });
+    hoverOutlineStyle = chrome.outline;
+    hoverHintStyle = chrome.hint && showHoverHint
+      ? {
+        left: chrome.hint.left,
+        top: chrome.hint.top,
+        maxWidth: chrome.hint.maxWidth,
+      }
+      : undefined;
   }
   const selectedPagePresentationAction = (
     !readOnly
@@ -5626,6 +5619,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       {showHoverOutline && hoverOutlineStyle ? (
         <div
           className={styles.hoverOutline}
+          data-testid="canvas-capability-outline"
           style={hoverOutlineStyle}
           aria-hidden="true"
         />
