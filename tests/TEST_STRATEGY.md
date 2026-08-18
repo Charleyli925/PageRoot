@@ -182,7 +182,13 @@ Workbench 只确认已提交 loading surface、传入窄 port 并消费快照。
   不会打引导 IPC；需要真卡片的测试再设 `PAGEROOT_E2E_FIRST_EDIT_GUIDE=1`。启动先
   关掉后台节流，若 `#root` 仍空则 reload 一次。Native 套件的
   `waitForProjectReady` / `loadedDiskFrame` 与共享 helper 一样使用 60s hydration
-  预算，避免 CI 在导入确认后卡在 30s 帽上。
+  预算，避免 CI 在导入确认后卡在 30s 帽上。`main.workbench` 渲染时
+  `data-project-state` 必定是 failed/hydrating/ready/unbound 之一，因此状态为空只
+  代表元素不存在。等待就绪时按文档标记身份区分三种情况：首次挂载前是
+  pending 继续等；文档被换掉（启动路径已有的 reload 兜底）属正常；同一文档
+  丢掉已挂载的 workbench 则是渲染器故障，立即失败并附上 `#root` 子节点数、
+  hydration stage 与捕获到的 `pageerror` / `console.error`，不靠 60s 超时把 React
+  拆树掩盖成一次可重试的 flaky。
 - AI 闭环：Node 集成必须分别证明普通/跨标签相关改动可建版、不相关但可用
   HTML 进入 `attention` 并强制审阅、脚本/inline handler 等作者内容变化
   照常建版且不生成检测字段或提示，以及身份/Hash/路径/协议失败与
