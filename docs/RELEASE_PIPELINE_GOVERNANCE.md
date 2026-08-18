@@ -36,7 +36,8 @@ feedback, not reusable release evidence.
 
 `PR Feedback` and the source-candidate jobs share a per-PR concurrency key
 inside `ci.yml`. A new commit therefore cancels an in-flight complete run for
-the stale head. Returning to Draft skips the full matrix; a later commit on a
+the stale head; `release-gate` skips that cancelled run instead of recording
+an artificial gate failure. Returning to Draft skips the full matrix; a later commit on a
 Ready PR reruns the complete matrix for the new head. Keep parallel PR scope a
 judgement call, not a fixed capacity rule.
 
@@ -49,6 +50,7 @@ judgement call, not a fixed capacity rule.
 - Each macOS Electron lane builds the Electron renderer locally. The build is normally sub-second and removes Linux-to-macOS build output as a variable.
 - Native Electron and deterministic AI run as separate jobs. A failure can be rerun independently.
 - Each macOS job first runs a product-independent synthetic Electron environment preflight. It proves that the hosted window is visible and that renderer timers and animation frames advance before PageRoot code or assertions begin, so an environment failure on either runner stays classified as deterministic `ci_environment` rather than degrading to `source-test/needs_triage`.
+- Every `ci.yml` step carries an explicit `timeout-minutes` bound, and the Browser lanes retry one stalled `playwright install-deps` attempt under a four-minute budget. An external apt mirror or network hang therefore costs minutes, not a whole job budget of silence.
 - Browser shards and real HTML keep retries at zero. The native Electron and deterministic AI lanes retry a test once in CI only, to absorb a transient Electron launch/hydration stall; local runs stay retry-free. Retry evidence is never lost with the runner: each lane's diagnostics artifact uploads on `always()`, the config records trace, video and screenshot per failed attempt, and `scripts/playwright-flaky-summary.mjs` writes machine-readable flaky/retry counts from the JSON reporter into `output/ci-evidence/` and the step summary. Reliability remains anchored in deterministic readiness and better evidence, not blanket retrying.
 - Release Dry Run has two sequential macOS jobs. The first builds metadata and an explicitly unsigned App, runs the shared packaged verifier with the dry-run signature policy and freezes a non-release checkpoint. The second restores the checkpoint in a fresh checkout, restores its exact metadata, rebuilds `dist-desktop`, reruns the same verifier, then launches the App to compare runtime name/version and Bundle ID with the source package contract. Neither job builds a DMG or sees signing/notarization inputs. Formal Candidate profiles keep their ad-hoc pre-sign and Developer ID signature gates unchanged.
 - Release Candidate has two sequential macOS jobs. `preflight-sign-and-notarize-app` first assembles an ad-hoc App, checks packaged contents, runs the complete packaged-runtime oracle, signs it and proves signed startup before the App is submitted to Apple. Only after App acceptance does it upload an archive/hash/source-bound checkpoint.
