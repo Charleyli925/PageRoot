@@ -706,4 +706,5 @@ jobs:
             --repository "$GITHUB_REPOSITORY" \
             --workflow ci.yml \
             --max-age-hours 168 \
-            --mode required
+            --mode required \
+            --missing-association warn

@@ -5,7 +5,10 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
+  classifyMissingAssociation,
   evaluateSourceGateEvidence,
+  parsePullRequestNumberFromSubject,
+  pullRequestMatchesCommit,
   readPackageVersions,
   sourceGateArtifactName,
 } from "../scripts/source-gate-provenance.mjs";
@@ -129,6 +132,54 @@ test("failed runs, expired artifacts and non-PR commits are never trusted", () =
   })).reason, "no_merged_pull_request");
 });
 
+test("a squash subject carries its own pull-request number", () => {
+  assert.equal(
+    parsePullRequestNumberFromSubject("chore(gate): ratchet the repository gate (#209)"),
+    209,
+  );
+  assert.equal(parsePullRequestNumberFromSubject("fix: subject without a reference"), null);
+  assert.equal(
+    parsePullRequestNumberFromSubject("(#12) leading reference is not a squash suffix"),
+    null,
+  );
+  assert.equal(parsePullRequestNumberFromSubject(""), null);
+});
+
+test("only a merged same-commit main pull request matches the commit", () => {
+  const commitSha = "a".repeat(40);
+  const merged = {
+    merged_at: "2026-07-23T11:00:00.000Z",
+    merge_commit_sha: commitSha,
+    base: { ref: "main" },
+  };
+  assert.equal(pullRequestMatchesCommit(merged, commitSha), true);
+  assert.equal(pullRequestMatchesCommit({ ...merged, merged_at: null }, commitSha), false);
+  assert.equal(
+    pullRequestMatchesCommit({ ...merged, merge_commit_sha: "b".repeat(40) }, commitSha),
+    false,
+  );
+  assert.equal(
+    pullRequestMatchesCommit({ ...merged, base: { ref: "release" } }, commitSha),
+    false,
+  );
+  assert.equal(pullRequestMatchesCommit(null, commitSha), false);
+});
+
+test("a named pull request that does not match stays a hard mismatch while empty association is warn-eligible", () => {
+  assert.equal(
+    classifyMissingAssociation({ parsedNumber: 204, parsedPullRequest: { merged_at: null } }),
+    "pull_request_mismatch",
+  );
+  assert.equal(
+    classifyMissingAssociation({ parsedNumber: null, parsedPullRequest: null }),
+    "association_unavailable",
+  );
+  assert.equal(
+    classifyMissingAssociation({ parsedNumber: 204, parsedPullRequest: null }),
+    "association_unavailable",
+  );
+});
+
 test("GitHub workflows keep one CI file, informational Codex review, and exact-tree release provenance", async () => {
   const [ci, dryRun, candidate, release, packageText] = await Promise.all([
     readFile(path.join(productRoot, ".github/workflows/ci.yml"), "utf8"),
@@ -215,6 +266,9 @@ test("GitHub workflows keep one CI file, informational Codex review, and exact-t
   assert.match(electronAi, /Upload AI Electron diagnostics and retry evidence[\s\S]{0,200}if: always\(\)/u);
   assert.match(ci, /scripts\/ci-evidence\.mjs run/u);
   assert.match(ci, /Verify PR result, exact tree, version and freshness/u);
+  assert.match(ci, /--missing-association warn/u);
+  assert.doesNotMatch(candidate, /--missing-association/u);
+  assert.doesNotMatch(dryRun, /--missing-association/u);
   assert.doesNotMatch(ci, /name: main-smoke|gate:main:auto/u);
   assert.doesNotMatch(ci, /push:[\s\S]{0,300}gate:release:auto/u);
   assert.match(ci, /group: pageroot-pr-/u);
