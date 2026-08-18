@@ -1391,9 +1391,13 @@ Date: 2026-08-18
   `文案`, structure blue for `结构` and visual violet for `视觉`. `全部变化`
   carries no dot. Selection emphasis remains the single violet family, so the
   legend explains the marks without becoming a second accent color.
-- Change counts read as one two-level scale. `N 个变化区域` in the toolbar,
-  `N/M 个区域有变化` per content-map group and `M 个区域` in the drawer title
-  all count regions; canvas badges remain per-fact detail and are excluded.
+- Change counts read as one two-level scale and stay mutually consistent under
+  one filter. The toolbar shows `N 个变化区域` for all changes and
+  `N/M 个变化区域` under a type filter, sharing its `N` with the navigator
+  total. Content-map groups read `N/M 个区域有变化` for all changes and
+  `N/M 个区域含…变化` under a filter, so a filtered `0` never reads as "this
+  group has no changes at all". Canvas badges remain per-fact detail and are
+  excluded from every one of these numbers.
 
 ## Automated evidence
 
@@ -1408,11 +1412,23 @@ Date: 2026-08-18
   projection-geometry section still asserts the same geometry under `适应` and
   `100%`, so both zoom modes stay covered.
 
+## Known consequence
+
+- The entry zoom change makes overlay badge crowding more visible in dense
+  regions. Badge chrome is counter-scaled by `--pageroot-review-ui-scale` to
+  keep a constant on-screen size, so at `适应` it covers proportionally more of
+  the shrunken content than at `100%`; several adjacent `新增内容` labels can
+  overlap each other and the text underneath. Tones, footprints and masks stay
+  correct, and `100%` is one click away. Aggregating adjacent same-type badges
+  into one `… ×N` chip is the proper fix and is deliberately out of this
+  entry-state batch.
+
 ## Checklist
 
 - [x] Dual-page entry is not horizontally cropped.
 - [x] Filter switching never leaves the navigator on an unmatched target.
 - [x] Region counts agree across toolbar, content map and navigator.
+- [x] A filtered count never reads as an absolute "no changes" statement.
 - [x] `AI 修改后` header is identifiable without reading its label.
 - [x] Legend dots use the canvas tone constants, not a new palette.
 - [x] Selection emphasis remains one violet family.

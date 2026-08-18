@@ -1612,6 +1612,14 @@ ${REVIEW_MASK_UNION_BEFORE}
     const changeNavigator = launched.page.getByRole("button", { name: "下一处变化" })
       .locator("xpath=..");
     await expect(changeNavigator.locator("strong")).toHaveText("1");
+    // Toolbar, navigator and content map must count the same regions, so the
+    // filtered toolbar total has to equal the navigator total.
+    const filteredRegionTotal = (await changeNavigator.locator("small").textContent())
+      ?.replace("/", "") || "";
+    expect(Number(filteredRegionTotal)).toBeGreaterThan(0);
+    await expect(launched.page.locator("small").filter({
+      hasText: new RegExp(`^${filteredRegionTotal}/\\d+ 个变化区域$`, "u"),
+    })).toHaveCount(1);
     const filteredFocusChangeId = await beforeReviewFrame.locator("html")
       .getAttribute("data-pageroot-review-focus");
     await expect(beforeReviewFrame.locator(
@@ -2698,6 +2706,11 @@ ${REVIEW_MASK_UNION_BEFORE}
     }).click();
     const outlineItems = launched.page.getByTestId("review-outline-item");
     await expect.poll(() => outlineItems.count()).toBeGreaterThan(5);
+    // Under a type filter a group count must name the type, so a filtered 0
+    // never reads as "this group has no changes at all".
+    await expect(launched.page.locator("h3 small").filter({
+      hasText: /^\d+\/\d+ 个区域含文案变化$/u,
+    }).first()).toBeVisible();
     await expect(launched.page.getByText("审阅标签一", { exact: true })).toBeVisible();
     await expect(launched.page.getByText("审阅标签二", { exact: true })).toBeVisible();
     expect(await launched.page.locator(

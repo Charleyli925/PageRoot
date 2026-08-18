@@ -1617,7 +1617,11 @@ export default function AiReviewWorkspace({
                 <span className={styles.canvasReviewIcon}><EyeIcon aria-hidden="true" size={20} weight="duotone" /></span>
                 <span>
                   <strong>审阅模式</strong>
-                  <small>{reviewChanges.length} 个变化区域</small>
+                  <small>
+                    {filter === "all"
+                      ? `${reviewChanges.length} 个变化区域`
+                      : `${navigableChanges.length}/${reviewChanges.length} 个变化区域`}
+                  </small>
                 </span>
               </div>
 
@@ -1853,7 +1857,14 @@ export default function AiReviewWorkspace({
                     )).length;
                     return (
                     <section className={styles.mapGroup} key={group.label}>
-                      <h3><span>{group.label}</span><small>{matchingCount}/{group.items.length} 个区域有变化</small></h3>
+                      <h3>
+                        <span>{group.label}</span>
+                        <small>
+                          {filter === "all"
+                            ? `${matchingCount}/${group.items.length} 个区域有变化`
+                            : `${matchingCount}/${group.items.length} 个区域含${FILTER_LABELS[filter]}变化`}
+                        </small>
+                      </h3>
                       <ol className={styles.mapList}>
                         {group.items.map((item) => {
                           const itemIndex = reviewOutline.findIndex((candidate) => candidate.id === item.id);
