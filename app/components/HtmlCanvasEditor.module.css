@@ -139,7 +139,8 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  pointer-events: none;
+  pointer-events: auto;
+  cursor: pointer;
   -webkit-backdrop-filter: blur(10px);
   backdrop-filter: blur(10px);
   animation: canvas-capability-hint-in 180ms ease-out;
