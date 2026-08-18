@@ -141,6 +141,7 @@ import {
 import {
   createCanvasCapabilityHoverController,
   layoutCanvasHoverChrome,
+  placeCanvasHoverHint,
   type CanvasCapabilityHoverSnapshot,
 } from "./html-canvas-capability-hover";
 import NoticeBar from "./NoticeBar";
@@ -5502,6 +5503,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     && (
       hoverChrome.capability.targetKey === selection.nodeId
       || hoverChrome.capability.targetKey === selection.id
+      || hoverChrome.capability.element === selectedElementRef.current
+      || hoverChrome.capability.element.contains(selectedElementRef.current)
+      || selectedElementRef.current?.contains(hoverChrome.capability.element)
     ),
   );
   const showHoverOutline = Boolean(
@@ -5514,6 +5518,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   );
   const showHoverHint = Boolean(
     pointerCapabilityHoverEnabled
+    && hoverChrome.outline
     && hoverChrome.hint
     && hoverChrome.capability
     && !hoverTargetIsSelected
@@ -5522,6 +5527,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   );
   let hoverOutlineStyle: CSSProperties | undefined;
   let hoverHintStyle: CSSProperties | undefined;
+  let hoverHintPlacement: ReturnType<typeof placeCanvasHoverHint> | undefined;
   if (
     (showHoverOutline || showHoverHint)
     && hoverChrome.capability?.element?.isConnected
@@ -5538,11 +5544,17 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       height: Math.max(0, elementRect.height),
     });
     hoverOutlineStyle = chrome.outline;
-    hoverHintStyle = chrome.hint && showHoverHint
+    hoverHintPlacement = placeCanvasHoverHint({
+      containerWidth: containerRect.width,
+      targetLeft: chrome.outline.left,
+      targetTop: chrome.outline.top,
+      targetHeight: chrome.outline.height,
+    });
+    hoverHintStyle = showHoverHint
       ? {
-        left: chrome.hint.left,
-        top: chrome.hint.top,
-        maxWidth: chrome.hint.maxWidth,
+        left: hoverHintPlacement.left,
+        top: hoverHintPlacement.top,
+        width: hoverHintPlacement.width,
       }
       : undefined;
   }
@@ -5624,10 +5636,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           aria-hidden="true"
         />
       ) : null}
-      {showHoverHint && hoverHintStyle && hoverChrome.capability ? (
+      {showHoverOutline && showHoverHint && hoverHintStyle && hoverChrome.capability ? (
         <div
           className={styles.hoverHint}
           data-testid="canvas-capability-hint"
+          data-placement={hoverHintPlacement?.placement}
           style={hoverHintStyle}
           aria-hidden="true"
         >
