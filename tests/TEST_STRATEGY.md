@@ -208,6 +208,9 @@ Workbench 只确认已提交 loading surface、传入窄 port 并消费快照。
 - Electron E2E 夹具与场景归属：`tests/e2e/electron/helpers/pageroot-app-fixture.mjs`
   只拥有独立 userData/workspace/source、隐藏窗口启动、Bridge 路径、close-first
   cleanup、诊断输出和已加载 frame；它不包含产品断言、整条用户流程或自动重试。
+  启动或 hydration 未就绪时，fixture 必须记录主 frame、Workbench/
+  `data-project-state`、hydration stage、可见失败状态、主进程输出、活动窗口和隔离
+  Registry 摘要，并直接失败；不得 reload、延长等待或标记 flaky 来掩盖异常。
   fixture 的 Node contract 必须证明 close event 或已确认的 Electron process exit 先于
   cleanup、close listener 覆盖 exit request 与 SIGTERM/SIGKILL 的完整有界 shutdown budget、stop 幂等、
   SIGTERM/SIGKILL 有界 fallback，以及两者均未确认时不删除
