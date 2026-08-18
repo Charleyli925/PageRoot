@@ -1357,3 +1357,64 @@ final result: passed
 - [x] Keyboard focus and accessible names remain available.
 
 final result: passed
+
+---
+
+# AI review entry-state and diff-legend QA
+
+Date: 2026-08-18
+
+## Superseding direction
+
+- This entry supersedes two visual rules recorded in “AI review workspace —
+  final seven-state contract”:
+  1. the entry zoom is now `适应` instead of `100%`, so a dual-page comparison
+     is fully visible on first paint instead of being cropped horizontally;
+  2. before/after identity is no longer carried by the neutral and violet dots
+     alone, and the toolbar is no longer free of red/green surfaces.
+- Everything else in that contract stays in force: one quiet white review
+  surface, neutral gray segmented shells, white selected tiles, the single
+  violet selection family (`#6258d6` / `#4f47b8`) and the frozen persistent
+  copy for the seven review states.
+
+## Findings
+
+- Entry state is `双页 + 全部变化 + 18% + 同步滚动 + 适应`. `100%` remains one
+  click away on the same zoom axis; no state is derived from `pageView`.
+- The `AI 修改后` pane header adds a 2 px violet inset top edge and a
+  `#faf9ff` surface. The `修改前` header stays neutral, so the new version is
+  identifiable after horizontal scrolling. The inset edge is drawn with a
+  box shadow, which keeps the 36 px header row and the pane's 7 px rounded
+  corners unchanged.
+- `文案 / 结构 / 视觉` each carry 5 px legend dots that reuse the canvas diff
+  tones by importing the same constants: removed red and added green for
+  `文案`, structure blue for `结构` and visual violet for `视觉`. `全部变化`
+  carries no dot. Selection emphasis remains the single violet family, so the
+  legend explains the marks without becoming a second accent color.
+- Change counts read as one two-level scale. `N 个变化区域` in the toolbar,
+  `N/M 个区域有变化` per content-map group and `M 个区域` in the drawer title
+  all count regions; canvas badges remain per-fact detail and are excluded.
+
+## Automated evidence
+
+- `assertReviewControlDefaults` in the Electron AI closed-loop spec asserts
+  `适应` is pressed on entry, alongside the existing dual-page, all-changes and
+  18 % default assertions.
+- The same spec asserts that switching to a type filter lands on the first
+  matching change (navigator reads `1` and the focused change has a rendered
+  footprint), and that a target which still matches keeps the user's position.
+- The mask-union pixel section now selects `100%` explicitly, because it maps
+  in-frame CSS coordinates onto an element screenshot and needs 1:1 pixels; the
+  projection-geometry section still asserts the same geometry under `适应` and
+  `100%`, so both zoom modes stay covered.
+
+## Checklist
+
+- [x] Dual-page entry is not horizontally cropped.
+- [x] Filter switching never leaves the navigator on an unmatched target.
+- [x] Region counts agree across toolbar, content map and navigator.
+- [x] `AI 修改后` header is identifiable without reading its label.
+- [x] Legend dots use the canvas tone constants, not a new palette.
+- [x] Selection emphasis remains one violet family.
+
+final result: passed

@@ -66,6 +66,11 @@ export type ReviewFilter = "all" | "text" | "structure" | "style";
 export type ReviewChangeType = Exclude<ReviewFilter, "all">;
 export type ReviewSide = "before" | "after";
 
+// Overlay tones for structure and visual footprints. The review toolbar reads
+// them so its legend dots stay identical to the marks drawn on the pages.
+export const REVIEW_STRUCTURE_TONE_COLOR = "#1677c8";
+export const REVIEW_STYLE_TONE_COLOR = "#6d5ce7";
+
 export type ReviewChange = {
   id: string;
   label: string;
@@ -165,16 +170,16 @@ const REVIEW_DOCUMENT_STYLE = String.raw`
   html[data-pageroot-review-filter="structure"] [data-pageroot-review-marker-types~="structure"],
   html[data-pageroot-review-filter="style"] [data-pageroot-review-marker-types~="style"] {
     position: relative !important;
-    outline: calc(2px * var(--pageroot-review-ui-scale)) dashed #1677c8 !important;
+    outline: calc(2px * var(--pageroot-review-ui-scale)) dashed ${REVIEW_STRUCTURE_TONE_COLOR} !important;
     outline-offset: calc(2px * var(--pageroot-review-ui-scale)) !important;
   }
 
   html[data-pageroot-review-filter="structure"] [data-pageroot-review-marker-types~="structure"] {
-    outline-color: #1677c8 !important;
+    outline-color: ${REVIEW_STRUCTURE_TONE_COLOR} !important;
   }
 
   html[data-pageroot-review-filter="style"] [data-pageroot-review-marker-types~="style"] {
-    outline-color: #6d5ce7 !important;
+    outline-color: ${REVIEW_STYLE_TONE_COLOR} !important;
   }
 
 ${REVIEW_TEXT_EVIDENCE_MARKER_CSS}
@@ -305,7 +310,7 @@ ${REVIEW_TEXT_EVIDENCE_MARKER_CSS}
     max-height: none !important;
     margin: 0 !important;
     padding: 0 !important;
-    border: calc(2px * var(--pageroot-review-ui-scale)) dashed #1677c8 !important;
+    border: calc(2px * var(--pageroot-review-ui-scale)) dashed ${REVIEW_STRUCTURE_TONE_COLOR} !important;
     border-radius: calc(5px * var(--pageroot-review-ui-scale)) !important;
     outline: none !important;
     background: transparent !important;
@@ -318,17 +323,17 @@ ${REVIEW_TEXT_EVIDENCE_MARKER_CSS}
 
   [data-pageroot-review-overlay-box][data-tone="text-removed"],
   [data-pageroot-review-overlay-box][data-tone="text-added"] {
-    border-color: #6d5ce7 !important;
+    border-color: ${REVIEW_STYLE_TONE_COLOR} !important;
     border-style: solid !important;
   }
 
   [data-pageroot-review-overlay-box][data-tone="structure"] {
-    border-color: #1677c8 !important;
+    border-color: ${REVIEW_STRUCTURE_TONE_COLOR} !important;
   }
 
   [data-pageroot-review-overlay-box][data-tone="style"],
   [data-pageroot-review-overlay-box][data-tone="mixed"] {
-    border-color: #6d5ce7 !important;
+    border-color: ${REVIEW_STYLE_TONE_COLOR} !important;
   }
 
   [data-pageroot-review-overlay-box][data-shaped="true"] {
@@ -360,7 +365,7 @@ ${REVIEW_TEXT_EVIDENCE_MARKER_CSS}
   [data-pageroot-review-overlay-shape] {
     display: block !important;
     fill: none !important;
-    stroke: #1677c8 !important;
+    stroke: ${REVIEW_STRUCTURE_TONE_COLOR} !important;
     stroke-width: calc(2px * var(--pageroot-review-ui-scale)) !important;
     stroke-dasharray: calc(6px * var(--pageroot-review-ui-scale)) calc(4px * var(--pageroot-review-ui-scale)) !important;
     stroke-linejoin: round !important;
@@ -370,12 +375,12 @@ ${REVIEW_TEXT_EVIDENCE_MARKER_CSS}
 
   [data-pageroot-review-overlay-box][data-tone="text-removed"] [data-pageroot-review-overlay-shape],
   [data-pageroot-review-overlay-box][data-tone="text-added"] [data-pageroot-review-overlay-shape] {
-    stroke: #6d5ce7 !important;
+    stroke: ${REVIEW_STYLE_TONE_COLOR} !important;
   }
 
   [data-pageroot-review-overlay-box][data-tone="style"] [data-pageroot-review-overlay-shape],
   [data-pageroot-review-overlay-box][data-tone="mixed"] [data-pageroot-review-overlay-shape] {
-    stroke: #6d5ce7 !important;
+    stroke: ${REVIEW_STYLE_TONE_COLOR} !important;
   }
 
   [data-pageroot-review-overlay-label] {
