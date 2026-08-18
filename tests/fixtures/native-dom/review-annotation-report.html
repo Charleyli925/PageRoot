@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>合成搜索大盘季度简报</title>
+    <style>
+      :root { color-scheme: light; }
+      body {
+        margin: 0;
+        padding: 24px;
+        background: #f6f7fb;
+        color: #1f2233;
+        font-family: -apple-system, "PingFang SC", "Segoe UI", sans-serif;
+        font-size: 13px;
+        line-height: 1.7;
+      }
+      h1 { margin: 0 0 4px; font-size: 19px; }
+      .subtitle { margin: 0 0 18px; color: #6b6f85; font-size: 12px; }
+      .tabs { display: flex; gap: 22px; margin: 0 0 16px; padding: 0 0 8px; border-bottom: 1px solid #dfe1ee; }
+      .tab { color: #8b8fa3; font-size: 13px; }
+      .tab[data-active="true"] { color: #4f46c7; font-weight: 600; }
+      .panel { padding: 14px 16px; border-radius: 10px; background: #ffffff; box-shadow: 0 1px 3px rgb(31 34 51 / 8%); }
+      .panel-title { margin: 0 0 10px; font-size: 14px; font-weight: 700; }
+      .metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+      .metric { padding: 10px 12px; border: 1px solid #e6e8f3; border-radius: 8px; }
+      .metric-label { color: #6b6f85; font-size: 12px; }
+      .metric-value { margin: 2px 0 4px; font-size: 24px; font-weight: 700; letter-spacing: -0.4px; }
+      .metric-unit { margin-left: 3px; font-size: 12px; font-weight: 400; color: #6b6f85; }
+      .up { color: #c74f4a; font-size: 13px; font-weight: 700; }
+      .metric-note { color: #555767; font-size: 12px; line-height: 1.8; }
+      .caliber { margin: 10px 0 0; color: #8b8fa3; font-size: 12px; }
+      section { margin: 20px 0 0; }
+      h2 { margin: 0 0 2px; font-size: 14px; }
+      .section-note { margin: 0 0 10px; color: #8b8fa3; font-size: 12px; }
+      p { margin: 0 0 10px; }
+      .trend-copy { margin: 0 0 10px; }
+      ul { margin: 0; padding-left: 20px; }
+      li { margin: 0 0 4px; }
+    </style>
+  </head>
+  <body>
+    <h1>合成搜索大盘季度简报</h1>
+    <p class="subtitle">大盘 &amp; 电商搜索 · 抖音搜盘表现 · 分行业表现</p>
+
+    <nav class="tabs">
+      <span class="tab" data-active="true">① 大盘 &amp; 电商搜索</span>
+      <span class="tab">② 抖音搜盘表现</span>
+      <span class="tab">③ 分行业表现</span>
+    </nav>
+
+    <div class="panel" data-report-panel="conclusion">
+      <p class="panel-title">核心结论</p>
+      <div class="metrics">
+        <div class="metric" data-report-metric="overall">
+          <div class="metric-label">整体搜索大盘</div>
+          <div class="metric-value">96.2<span class="metric-unit">亿次/日</span> <span class="up">+18%</span></div>
+          <div class="metric-note">增速较 1–2 月 +20% 走弱；抖系份额 -0.7pp，微信 +5.4pp、红书 +1.3pp 是唯三正增长入口</div>
+        </div>
+        <div class="metric" data-report-metric="commerce">
+          <div class="metric-label">电商搜索大盘</div>
+          <div class="metric-value">38.1<span class="metric-unit">亿次/日</span> <span class="up">+21%</span></div>
+          <div class="metric-note">跑赢大盘 3pp；内容平台电商搜索请求增速快于平台整体搜索增速，份额转移趋势明确</div>
+        </div>
+        <div class="metric" data-report-metric="share">
+          <div class="metric-label">抖音电商相关搜索份额</div>
+          <div class="metric-note">综搜电商意图 &amp; 商城搜索合计口径，一年内在电商搜索大盘做 ± 5.6pp——内容平台反过来求“吃”货架搜索份额的典型路径</div>
+        </div>
+      </div>
+      <p class="caliber">含内容意图口径</p>
+    </div>
+
+    <section>
+      <h2>【一】国内主流媒体搜索大盘趋势 · 含内容意图图</h2>
+      <p class="section-note">Q2 大盘 96.2 亿次/日 · YoY +18% · 抖音流量增速放缓份额收缩、微信 &amp; 红书接管增量</p>
+      <p class="trend-copy" data-report-paragraph="trend">内容平台搜索挤压传统搜索引擎与传统电商的趋势不变，但大盘增量呈现增速放缓态势——26Q2 国内主流平台日均搜索请求次数 96.2 亿次，YoY +18%；较 26 年 1&amp;2 月双月大盘增速 +20% 回落 2pp；增速放缓的同时结构变化加剧：抖系份额收缩、微信与小红书接棒增长；大盘增长动能加速向内容平台迁移。</p>
+      <ul>
+        <li data-native-case="list-item" data-native-mode="native-editable">列表项中的文字保持项目符号和缩进。</li>
+        <li>抖系（抖音综搜 + 商城搜）日均搜索 46.6 亿次，份额收缩 0.7pp 至 48.4%</li>
+        <li>抖音端流量放缓叠加综搜增长动能不足；仅红书、微信保持搜索份额增长</li>
+      </ul>
+    </section>
+  </body>
+</html>

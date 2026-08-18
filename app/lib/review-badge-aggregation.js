@@ -42,6 +42,17 @@ export function reviewBadgeLabelText(summary, count) {
 }
 
 /**
+ * A box may already stand for several collapsed facts, so a cluster counts the
+ * facts its members represent rather than the number of boxes.
+ * @param {ReviewBadgeRecord} record
+ * @returns {number}
+ */
+export function reviewBadgeFactCount(record) {
+  const count = Number(record?.labelCount);
+  return Number.isFinite(count) && count > 1 ? Math.trunc(count) : 1;
+}
+
+/**
  * Two same-summary boxes crowd when they sit in the same column and either
  * overlap vertically or fall within one badge's vertical reach.
  * @param {ReviewBadgeRecord} left
@@ -132,6 +143,10 @@ export function aggregateReviewBadgeLabels(records, options = {}) {
       }
     }
     if (cluster.length < 2) return;
+    const factCount = cluster.reduce((total, index) => {
+      const count = Number(next[index].labelCount);
+      return total + (Number.isFinite(count) && count > 1 ? Math.trunc(count) : 1);
+    }, 0);
     const focusedIndex = focus
       ? cluster.find((index) => next[index].changeId === focus)
       : undefined;
@@ -142,7 +157,7 @@ export function aggregateReviewBadgeLabels(records, options = {}) {
       ))[0];
     cluster.forEach((index) => {
       if (index === representativeIndex) {
-        next[index].labelCount = cluster.length;
+        next[index].labelCount = factCount;
       } else {
         next[index].labelPrimary = false;
         next[index].labelCount = 1;

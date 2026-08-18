@@ -17,6 +17,8 @@ export function reviewBadgesCrowd(
 
 export function reviewBadgeLabelText(summary?: string, count?: number): string;
 
+export function reviewBadgeFactCount(record?: ReviewBadgeRecord): number;
+
 export function aggregateReviewBadgeLabels<T extends ReviewBadgeRecord>(
   records: T[],
   options?: { focus?: string; labelReach?: number },

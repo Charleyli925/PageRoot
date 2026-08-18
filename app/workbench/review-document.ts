@@ -44,6 +44,7 @@ import { REVIEW_RUNTIME_VISUAL_CANDIDATE_LIMIT } from "../lib/review-runtime-vis
 import { resolveRuntimeSnapshotHosts } from "../domain/runtime-snapshot-hosts.js";
 import {
   aggregateReviewBadgeLabels,
+  reviewBadgeFactCount,
   reviewBadgeLabelText,
 } from "../lib/review-badge-aggregation.js";
 import {
@@ -55,7 +56,9 @@ import {
   REVIEW_TEXT_EVIDENCE_ADDED_COLOR,
   REVIEW_TEXT_EVIDENCE_MARKER_CSS,
   REVIEW_TEXT_EVIDENCE_REMOVED_COLOR,
+  alignReviewTextEvidenceDotRows,
   reviewTextEvidenceGraphemeEnd,
+  reviewTextEvidenceIsPunctuationCode,
   reviewTextEvidenceMarkGeometry,
 } from "../lib/review-text-evidence-marks.js";
 import type { CommentItem } from "./types";
@@ -174,7 +177,7 @@ const REVIEW_DOCUMENT_STYLE = String.raw`
   html[data-pageroot-review-filter="structure"] [data-pageroot-review-marker-types~="structure"],
   html[data-pageroot-review-filter="style"] [data-pageroot-review-marker-types~="style"] {
     position: relative !important;
-    outline: calc(2px * var(--pageroot-review-ui-scale)) dashed ${REVIEW_STRUCTURE_TONE_COLOR} !important;
+    outline: calc(1.5px * var(--pageroot-review-ui-scale)) dashed ${REVIEW_STRUCTURE_TONE_COLOR} !important;
     outline-offset: calc(2px * var(--pageroot-review-ui-scale)) !important;
   }
 
@@ -314,7 +317,7 @@ ${REVIEW_TEXT_EVIDENCE_MARKER_CSS}
     max-height: none !important;
     margin: 0 !important;
     padding: 0 !important;
-    border: calc(2px * var(--pageroot-review-ui-scale)) dashed ${REVIEW_STRUCTURE_TONE_COLOR} !important;
+    border: calc(1.5px * var(--pageroot-review-ui-scale)) dashed ${REVIEW_STRUCTURE_TONE_COLOR} !important;
     border-radius: calc(5px * var(--pageroot-review-ui-scale)) !important;
     outline: none !important;
     background: transparent !important;
@@ -327,6 +330,7 @@ ${REVIEW_TEXT_EVIDENCE_MARKER_CSS}
 
   [data-pageroot-review-overlay-box][data-tone="text-removed"],
   [data-pageroot-review-overlay-box][data-tone="text-added"] {
+    border-width: calc(1px * var(--pageroot-review-ui-scale)) !important;
     border-color: ${REVIEW_STYLE_TONE_COLOR} !important;
     border-style: solid !important;
   }
@@ -370,8 +374,8 @@ ${REVIEW_TEXT_EVIDENCE_MARKER_CSS}
     display: block !important;
     fill: none !important;
     stroke: ${REVIEW_STRUCTURE_TONE_COLOR} !important;
-    stroke-width: calc(2px * var(--pageroot-review-ui-scale)) !important;
-    stroke-dasharray: calc(6px * var(--pageroot-review-ui-scale)) calc(4px * var(--pageroot-review-ui-scale)) !important;
+    stroke-width: calc(1.5px * var(--pageroot-review-ui-scale)) !important;
+    stroke-dasharray: calc(5px * var(--pageroot-review-ui-scale)) calc(4px * var(--pageroot-review-ui-scale)) !important;
     stroke-linejoin: round !important;
     stroke-linecap: round !important;
     vector-effect: non-scaling-stroke !important;
@@ -3105,8 +3109,11 @@ function reviewBootstrap(
     ${serializedBootstrapPayload(runtimeProjectionBindings)},
   );
   const reviewTextEvidenceGraphemeEnd = ${reviewTextEvidenceGraphemeEnd.toString()};
+  const reviewTextEvidenceIsPunctuationCode = ${reviewTextEvidenceIsPunctuationCode.toString()};
   const reviewTextEvidenceMarkGeometry = ${reviewTextEvidenceMarkGeometry.toString()};
+  const alignReviewTextEvidenceDotRows = ${alignReviewTextEvidenceDotRows.toString()};
   const reviewBadgeLabelText = ${reviewBadgeLabelText.toString()};
+  const reviewBadgeFactCount = ${reviewBadgeFactCount.toString()};
   const aggregateReviewBadgeLabels = ${aggregateReviewBadgeLabels.toString()};
   const runtimeVisualBindCall = (method) => Function.prototype.call.bind(method);
   const runtimeVisualFunctionHasInstance = runtimeVisualBindCall(
@@ -4476,12 +4483,33 @@ function reviewBootstrap(
     }
     return facts.map(normalizeProjectionFact).filter(Boolean);
   };
+  // Every rendered box and mask hole is inflated by this much on all sides, so
+  // geometry decisions taken before rendering must use the same number or they
+  // will judge two rectangles apart that end up overlapping on screen.
+  const overlayInset = 3;
   const recordContains = (outer, inner, tolerance = 2) => (
     inner.left >= outer.left - tolerance
     && inner.top >= outer.top - tolerance
     && inner.right <= outer.right + tolerance
     && inner.bottom <= outer.bottom + tolerance
   );
+  const recordNestsWithin = (outer, inner) => {
+    if (
+      outer.element === inner.element
+      || !outer.element.contains(inner.element)
+      || !recordContains(outer, inner)
+    ) return false;
+    // A structure that is wholly new or wholly gone already accounts for every
+    // fact inside it, so an inner outline repeats what the outer one said.
+    if (
+      outer.tone === "structure"
+      && (outer.structureChange === "added" || outer.structureChange === "removed")
+    ) return true;
+    // Two nested structural outlines of one change say the same thing twice.
+    // An independent visual fact keeps its own outline: a box-level owner must
+    // not swallow a descendant's own presentation change.
+    return outer.tone === "structure" && inner.tone === "structure";
+  };
   const recordsAreClose = (left, right, gap = 10) => {
     const horizontalOverlap = Math.max(0, Math.min(left.right, right.right) - Math.max(left.left, right.left));
     const verticalOverlap = Math.max(0, Math.min(left.bottom, right.bottom) - Math.max(left.top, right.top));
@@ -4545,11 +4573,13 @@ function reviewBootstrap(
     const boxOwner = records.find((record) => (
       record.tone === "style" && record.scope === "box" && record.ownerKey
     ));
+    const factCount = new Set(records.map((record) => record.factIdentity)).size;
     return {
       ...records[0],
       ownerKey: boxOwner?.ownerKey || records[0].ownerKey || "",
       scope: boxOwner ? "box" : records[0].scope,
       labelPrimary: records.some((record) => record.labelPrimary !== false),
+      labelCount: Math.max(reviewBadgeFactCount(records[0]), factCount),
       fragments,
       left: Math.min(...fragments.map((record) => record.left)),
       top: Math.min(...fragments.map((record) => record.top)),
@@ -4823,7 +4853,9 @@ function reviewBootstrap(
     .map(textLineModel)
     .filter(Boolean);
   const readableParagraphBounds = (owner, lines) => {
-    if (!textOwnerAllowsParagraph(owner) || lines.length < 3) return null;
+    // Two changed lines of one paragraph deserve one paragraph rectangle: a box
+    // per line stacks parallel outlines around continuous prose.
+    if (!textOwnerAllowsParagraph(owner) || lines.length < 2) return null;
     if (lines.some((line) => !line.continuous)) return null;
     const separatedRows = lines.some((line, index) => {
       const next = lines[index + 1];
@@ -4905,21 +4937,50 @@ function reviewBootstrap(
       recordsByLine.set(line.index, lineRecords);
     });
     const lineResults = [];
-    let promotedLineCount = 0;
-    ownerLines.forEach((line) => {
+    const lineDecisions = ownerLines.map((line) => {
       const lineRecords = recordsByLine.get(line.index) || [];
-      if (!lineRecords.length) return;
+      if (!lineRecords.length) return null;
       const phraseRecords = recordsByTextGroup(lineRecords);
       const evidenceBounds = boundsForRects(lineRecords);
       const lineWidth = Math.max(1, line.bounds.right - line.bounds.left);
       const spanRatio = evidenceBounds
         ? (evidenceBounds.right - evidenceBounds.left) / lineWidth
         : 0;
-      const promoteLine = line.continuous && (
-        phraseRecords.size >= 3 || spanRatio >= .6
-      );
-      if (promoteLine) {
-        promotedLineCount += 1;
+      return {
+        line,
+        lineRecords,
+        phraseRecords,
+        phrases: [...phraseRecords.values()]
+          .map((phrase) => readablePhraseRecord(phrase, line))
+          .filter(Boolean),
+        // Only the semantic signals — several changed phrases, or evidence across
+        // most of the line — say the line itself was rewritten. That is the
+        // signal the paragraph rectangle is allowed to read.
+        semanticPromote: line.continuous && (phraseRecords.size >= 3 || spanRatio >= .6),
+        promote: line.continuous && (phraseRecords.size >= 3 || spanRatio >= .6),
+      };
+    }).filter(Boolean);
+    // Promotion exists to stop boxes stacking, so a collision is itself a
+    // promotion reason. Tight leading makes a narrow phrase rectangle reach into
+    // the line above or below, and two crossing outlines around one sentence read
+    // as noise; the line rectangle both lines share is the clean answer. This is
+    // a local layout accident, so it never feeds the paragraph decision below.
+    lineDecisions.forEach((decision, index) => {
+      const next = lineDecisions[index + 1];
+      if (!next) return;
+      const collides = decision.phrases.some((left) => next.phrases.some((right) => (
+        Math.min(left.right, right.right) - Math.max(left.left, right.left) > -overlayInset * 2
+        && Math.min(left.bottom, right.bottom) - Math.max(left.top, right.top) > -overlayInset * 2
+      )));
+      if (!collides) return;
+      if (decision.line.continuous) decision.promote = true;
+      if (next.line.continuous) next.promote = true;
+    });
+    let promotedLineCount = 0;
+    lineDecisions.forEach((decision) => {
+      const { line, lineRecords, phraseRecords, phrases, promote } = decision;
+      if (decision.semanticPromote) promotedLineCount += 1;
+      if (promote) {
         const textGroups = [...phraseRecords.keys()];
         const bounds = boundsForRects([
           line.bounds,
@@ -4936,14 +4997,15 @@ function reviewBootstrap(
         });
         return;
       }
-      phraseRecords.forEach((phrase) => {
-        const record = readablePhraseRecord(phrase, line);
-        if (record) lineResults.push({
-          ...record,
-          visualLine: String(line.index + 1),
-        });
-      });
+      phrases.forEach((record) => lineResults.push({
+        ...record,
+        visualLine: String(line.index + 1),
+      }));
     });
+    // The paragraph rectangle still reads only the semantic signal. A collision
+    // is a local layout accident, so it may merge phrase boxes into their line
+    // rectangle but must never grow one rectangle over a whole owner: a wrapped
+    // insertion keeps one clean rectangle per rendered line.
     if (!unassigned.length && promotedLineCount / ownerLines.length >= .75) {
       const paragraphBounds = readableParagraphBounds(owner, ownerLines);
       const bounds = paragraphBounds ? boundsForRects([
@@ -5155,9 +5217,23 @@ function reviewBootstrap(
     const nonTextRecords = minimalRecords.filter((record) => (
       record.tone !== "text-added" && record.tone !== "text-removed"
     ));
+    // An outer outline already localizes every change inside it, so a second and
+    // third outline drawn around nested descendants of the same change add no
+    // locative information and read as visual noise. Collapse the redundant ones
+    // (see recordNestsWithin for exactly which nestings qualify) and let the
+    // badge count carry how many facts that one box now stands for.
+    const containedRecords = mergeConnectedRecords(
+      [...nonTextRecords].sort((left, right) => (
+        (right.right - right.left) * (right.bottom - right.top)
+        - (left.right - left.left) * (left.bottom - left.top)
+      )),
+      (left, right) => left.changeId === right.changeId && (
+        recordNestsWithin(left, right) || recordNestsWithin(right, left)
+      ),
+    );
     let merged = [
       ...textRecords,
-      ...mergeConnectedRecords(nonTextRecords, (left, right) => (
+      ...mergeConnectedRecords(containedRecords, (left, right) => (
         left.changeId === right.changeId
         && left.semanticOwnerId === right.semanticOwnerId
         && left.factIdentity === right.factIdentity
@@ -5191,7 +5267,7 @@ function reviewBootstrap(
       focus: currentState.focus,
       labelReach: 26 * badgeUiScale,
     });
-    const inset = 3;
+    const inset = overlayInset;
     const documentWidth = Math.max(
       innerWidth,
       document.documentElement.scrollWidth,
@@ -5317,6 +5393,7 @@ function reviewBootstrap(
       marksSvg.style.setProperty("width", documentWidth + "px", "important");
       marksSvg.style.setProperty("height", height + "px", "important");
       const strikeRuns = [];
+      const addedDots = [];
       document.querySelectorAll("[data-pageroot-review-text]").forEach((marker) => {
         const tone = marker.getAttribute("data-pageroot-review-text") || "";
         if (tone !== "added" && tone !== "removed") return;
@@ -5324,11 +5401,23 @@ function reviewBootstrap(
         const walker = document.createTreeWalker(marker, NodeFilter.SHOW_TEXT);
         let node = walker.nextNode();
         while (node) {
+          // A marker span normally holds one text node, but the walker would also
+          // descend into a nested marker and draw its characters twice at two
+          // slightly different baselines. Let the innermost marker own its text.
+          if (node.parentElement?.closest("[data-pageroot-review-text]") !== marker) {
+            node = walker.nextNode();
+            continue;
+          }
           const value = node.textContent || "";
           let index = 0;
           while (index < value.length) {
             const end = reviewTextEvidenceGraphemeEnd(value, index);
-            if (!runtimeVisualWhitespaceCode(value.charCodeAt(index))) {
+            const code = value.charCodeAt(index);
+            // The strike is one continuous rule and crosses punctuation; a dot is
+            // per written character and skips it.
+            const marked = !runtimeVisualWhitespaceCode(code)
+              && (tone === "removed" || !reviewTextEvidenceIsPunctuationCode(code));
+            if (marked) {
               const range = document.createRange();
               range.setStart(node, index);
               range.setEnd(node, end);
@@ -5342,12 +5431,12 @@ function reviewBootstrap(
                   bottom: rect.bottom + scrollY,
                 }, fontSize, uiScale);
                 if (tone === "added") {
-                  const dot = document.createElementNS(namespace, "circle");
-                  dot.setAttribute("data-pageroot-review-text-mark", "added");
-                  dot.setAttribute("cx", String(geometry.dotX));
-                  dot.setAttribute("cy", String(geometry.dotY));
-                  dot.setAttribute("r", String(geometry.dotRadius));
-                  marksSvg.append(dot);
+                  addedDots.push({
+                    x: geometry.dotX,
+                    y: geometry.dotY,
+                    radius: geometry.dotRadius,
+                    em: geometry.em,
+                  });
                 } else {
                   strikeRuns.push(geometry);
                 }
@@ -5357,6 +5446,14 @@ function reviewBootstrap(
           }
           node = walker.nextNode();
         }
+      });
+      alignReviewTextEvidenceDotRows(addedDots).forEach((dot) => {
+        const circle = document.createElementNS(namespace, "circle");
+        circle.setAttribute("data-pageroot-review-text-mark", "added");
+        circle.setAttribute("cx", String(dot.x));
+        circle.setAttribute("cy", String(dot.y));
+        circle.setAttribute("r", String(dot.radius));
+        marksSvg.append(circle);
       });
       strikeRuns.sort((left, right) => left.strikeY - right.strikeY || left.strikeLeft - right.strikeLeft);
       const mergedStrikes = [];

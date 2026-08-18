@@ -360,6 +360,7 @@ export function mergeReviewTextRanges(ranges) {
 }
 
 const HARD_FOOTPRINT_BOUNDARY_PATTERN = /[\n\u3002\uff01\uff1f!?\uff1b;]/u;
+const PUNCTUATION_ONLY_PATTERN = /^[\s\p{P}\p{S}]+$/u;
 
 function visibleCharacterCount(value) {
   return [...value.replace(/\s/gu, "")].length;
@@ -428,6 +429,197 @@ export function readableReviewTextFootprintPlan(
         : null,
     },
   };
+}
+
+/**
+ * Token indexes that fall inside an already merged, sorted range list.
+ */
+function selectRangeTokens(tokens, ranges) {
+  const selected = [];
+  let cursor = 0;
+  tokens.forEach((token, index) => {
+    while (cursor < ranges.length && ranges[cursor].end <= token.start) cursor += 1;
+    const range = ranges[cursor];
+    if (range && token.start >= range.start && token.end <= range.end) selected.push(index);
+  });
+  return selected;
+}
+
+function tokenPairIsContiguous(side, previousIndex, index) {
+  if (previousIndex + 1 !== index) return false;
+  return /^\s*$/u.test(
+    side.source.slice(side.tokens[previousIndex].end, side.tokens[index].start),
+  );
+}
+
+/**
+ * Maximal token runs that are adjacent in both sources, not merely aligned.
+ *
+ * A run is cut wherever either side skips a token, so a match list that jumps
+ * over intervening words never claims to be one surviving phrase.
+ */
+function alignedSurvivorRuns(before, after) {
+  const beforeStream = before.selected.map((index) => before.tokens[index]);
+  const afterStream = after.selected.map((index) => after.tokens[index]);
+  const runs = [];
+  tokenMatches(beforeStream, afterStream).forEach((match) => {
+    const beforeIndex = before.selected[match.before];
+    const afterIndex = after.selected[match.after];
+    const previous = runs.at(-1);
+    if (
+      previous
+      && tokenPairIsContiguous(before, previous.before.at(-1), beforeIndex)
+      && tokenPairIsContiguous(after, previous.after.at(-1), afterIndex)
+    ) {
+      previous.before.push(beforeIndex);
+      previous.after.push(afterIndex);
+      return;
+    }
+    runs.push({ before: [beforeIndex], after: [afterIndex] });
+  });
+  return runs;
+}
+
+function survivorRunIsPhrase(run, before) {
+  const visible = run.before.reduce(
+    (total, index) => total + visibleCharacterCount(before.tokens[index].value),
+    0,
+  );
+  // A single ideograph or a lone punctuation mark matches by accident all the
+  // time; only a word-like run of at least two visible characters is evidence
+  // that the reader still sees the same phrase.
+  return visible >= 2 && run.before.some((index) => before.tokens[index].wordLike);
+}
+
+/**
+ * Grow an accepted run over neighbouring identical tokens.
+ *
+ * When a word repeats, the subsequence walk may anchor it to the far copy and
+ * leave the near one stranded as a one-token run that is too short to accept.
+ * Extending outward over contiguous equal tokens re-attaches those characters to
+ * the phrase they actually belong to, instead of reporting them as changed.
+ */
+function extendSurvivorRun(run, before, after, claimed) {
+  const step = (direction) => {
+    for (;;) {
+      const beforeEdge = direction < 0 ? run.before[0] : run.before.at(-1);
+      const afterEdge = direction < 0 ? run.after[0] : run.after.at(-1);
+      const beforeIndex = beforeEdge + direction;
+      const afterIndex = afterEdge + direction;
+      if (!before.marked.has(beforeIndex) || !after.marked.has(afterIndex)) return;
+      if (claimed.before.has(beforeIndex) || claimed.after.has(afterIndex)) return;
+      if (before.tokens[beforeIndex].value !== after.tokens[afterIndex].value) return;
+      const beforePair = direction < 0 ? [beforeIndex, beforeEdge] : [beforeEdge, beforeIndex];
+      const afterPair = direction < 0 ? [afterIndex, afterEdge] : [afterEdge, afterIndex];
+      if (
+        !tokenPairIsContiguous(before, beforePair[0], beforePair[1])
+        || !tokenPairIsContiguous(after, afterPair[0], afterPair[1])
+      ) return;
+      claimed.before.add(beforeIndex);
+      claimed.after.add(afterIndex);
+      if (direction < 0) {
+        run.before.unshift(beforeIndex);
+        run.after.unshift(afterIndex);
+      } else {
+        run.before.push(beforeIndex);
+        run.after.push(afterIndex);
+      }
+    }
+  };
+  step(1);
+  step(-1);
+}
+
+function survivingTokenIndexes(before, after) {
+  const claimed = { before: new Set(), after: new Set() };
+  const phrases = alignedSurvivorRuns(before, after)
+    .filter((run) => survivorRunIsPhrase(run, before));
+  phrases.forEach((run) => {
+    run.before.forEach((index) => claimed.before.add(index));
+    run.after.forEach((index) => claimed.after.add(index));
+  });
+  phrases.forEach((run) => extendSurvivorRun(run, before, after, claimed));
+  return claimed;
+}
+
+function residualRanges(source, tokens, selected, survivors) {
+  const residual = selected.filter((index) => !survivors.has(index));
+  return rangesForTokens(source, tokens, residual);
+}
+
+function substantialRanges(source, ranges) {
+  return ranges.filter((range) => (
+    !PUNCTUATION_ONLY_PATTERN.test(source.slice(range.start, range.end))
+  ));
+}
+
+/**
+ * Drop punctuation-only leftovers once either side still reports real words.
+ *
+ * A comma turning into an enumeration comma is below the annotation threshold,
+ * so it must never earn its own strike, dot and box beside a genuine edit. When
+ * punctuation is the only difference anywhere it is kept, because reporting a
+ * small change beats silently hiding it.
+ */
+function withoutIncidentalPunctuation(beforeText, before, afterText, after) {
+  const substantial = {
+    before: substantialRanges(beforeText, before),
+    after: substantialRanges(afterText, after),
+  };
+  if (!substantial.before.length && !substantial.after.length) return { before, after };
+  return substantial;
+}
+
+/**
+ * Drop text that survived the rewrite from both difference sides.
+ *
+ * Sentence alignment pairs one before sentence with one after sentence. A
+ * rewrite that merges four sentences into one, or splits one into four, leaves
+ * every unpaired sentence marked whole, so text the reader can still see is
+ * struck through as deleted and re-announced as inserted. Reconciling the marked
+ * token streams against each other removes exactly those survivors.
+ *
+ * The pass is monotone: it only ever shrinks the marked set, so it cannot invent
+ * an annotation. If it would empty both sides it returns the original ranges
+ * instead, keeping a pure reorder visible.
+ */
+export function reconcileReviewTextSurvivors(
+  beforeText,
+  beforeRanges,
+  afterText,
+  afterRanges,
+) {
+  const before = mergeReviewTextRanges(beforeRanges);
+  const after = mergeReviewTextRanges(afterRanges);
+  if (!before.length || !after.length) return { before, after };
+  const beforeTokens = tokenizeReviewText(beforeText);
+  const afterTokens = tokenizeReviewText(afterText);
+  const beforeSelected = selectRangeTokens(beforeTokens, before);
+  const afterSelected = selectRangeTokens(afterTokens, after);
+  if (!beforeSelected.length || !afterSelected.length) return { before, after };
+  const survivors = survivingTokenIndexes(
+    {
+      source: beforeText,
+      tokens: beforeTokens,
+      selected: beforeSelected,
+      marked: new Set(beforeSelected),
+    },
+    {
+      source: afterText,
+      tokens: afterTokens,
+      selected: afterSelected,
+      marked: new Set(afterSelected),
+    },
+  );
+  if (!survivors.before.size && !survivors.after.size) return { before, after };
+  const reconciled = withoutIncidentalPunctuation(
+    beforeText,
+    residualRanges(beforeText, beforeTokens, beforeSelected, survivors.before),
+    afterText,
+    residualRanges(afterText, afterTokens, afterSelected, survivors.after),
+  );
+  if (!reconciled.before.length && !reconciled.after.length) return { before, after };
+  return reconciled;
 }
 
 export function sentenceAwareTextDifferences(beforeText, afterText) {
@@ -515,8 +707,10 @@ export function sentenceAwareTextDifferences(beforeText, afterText) {
     if (!pairedAfter.has(index)) afterDifferences.push(afterSentences[index]);
   });
 
-  return {
-    before: mergeReviewTextRanges(beforeDifferences),
-    after: mergeReviewTextRanges(afterDifferences),
-  };
+  return reconcileReviewTextSurvivors(
+    beforeText,
+    beforeDifferences,
+    afterText,
+    afterDifferences,
+  );
 }
