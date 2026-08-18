@@ -519,13 +519,14 @@ export async function waitForProjectReady(page, {
   if (pendingConfirmation === "import" || pendingConfirmation === "continue") {
     const button = pendingConfirmation === "import" ? importButton : continueButton;
     if (pendingConfirmation === "import") {
-      await expect(page.getByRole("dialog")).toContainText("复制并保存为");
-      await expect(page.getByRole("dialog")).toContainText(
+      const importDialog = page.getByRole("dialog", { name: /导入 PageRoot/u });
+      await expect(importDialog).toContainText("复制并保存为");
+      await expect(importDialog).toContainText(
         "成功导入后，同意将原文件移至废纸篓。",
       );
-      await expect(page.getByRole("dialog").getByRole("checkbox"))
+      await expect(importDialog.getByRole("checkbox"))
         .not.toBeChecked();
-      await expect(page.getByRole("dialog").getByRole("button", { name: /^打开 /u }))
+      await expect(importDialog.getByRole("button", { name: /^打开 /u }))
         .toBeVisible();
     }
     await button.focus();
