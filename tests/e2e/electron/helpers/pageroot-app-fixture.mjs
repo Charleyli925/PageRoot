@@ -704,20 +704,106 @@ export async function waitForMainBrowserWindow(
 
 const DEFAULT_RENDERER_MOUNT_TIMEOUT = 20_000;
 const RENDERER_MOUNT_POLL_MS = 100;
+const READINESS_POLL_MS = 250;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export async function pageHasRendererMount(page, {
+// Which documents of a page were seen carrying a mounted workbench, and the
+// renderer faults that page reported. Keyed per page so a packaged-app page
+// that never went through launchPageRoot degrades to "no evidence" instead of
+// borrowing another page's history.
+const rendererMountHistory = new WeakMap();
+const rendererFaultLogs = new WeakMap();
+
+export function recordRendererFaultLog(page, sink) {
+  rendererFaultLogs.set(page, sink);
+}
+
+export function rendererFaultLog(page) {
+  return rendererFaultLogs.get(page) || [];
+}
+
+export function observedRendererMount(page, documentId) {
+  if (!documentId) return false;
+  return (rendererMountHistory.get(page) || []).includes(documentId);
+}
+
+// `data-project-state` is always one of failed/hydrating/ready/unbound while
+// main.workbench renders, so a null state means the element is absent rather
+// than undecided. Telling "never mounted" apart from "mounted then vanished"
+// needs a per-document identity, so stamp one on first observation: a reload
+// or navigation produces a new document and therefore a new id.
+export async function rendererProbe(page, {
   timeout = DEFAULT_DIAGNOSTIC_OPERATION_TIMEOUT,
 } = {}) {
   const outcome = await observeDiagnosticOperation(
-    "renderer mount probe",
-    () => page.evaluate(() => Boolean(document.querySelector("main.workbench"))),
+    "renderer readiness probe",
+    () => page.evaluate(() => {
+      const globals = window;
+      if (!globals.__PAGEROOT_E2E_DOCUMENT_ID__) {
+        globals.__PAGEROOT_E2E_DOCUMENT_ID__ = `doc-${Date.now()}-${
+          Math.random().toString(36).slice(2)
+        }`;
+      }
+      const workbench = document.querySelector("main.workbench");
+      const root = document.getElementById("root");
+      return {
+        documentId: globals.__PAGEROOT_E2E_DOCUMENT_ID__,
+        mounted: Boolean(workbench),
+        projectState: workbench?.getAttribute("data-project-state") || null,
+        hydrationStage: globals.__PAGEROOT_HYDRATION_STAGE__ || null,
+        rootChildren: root ? root.childElementCount : -1,
+      };
+    }),
     timeout,
   );
-  return outcome.kind === "value" && Boolean(outcome.value);
+  if (outcome.kind !== "value") return null;
+  const snapshot = outcome.value;
+  if (snapshot?.mounted && snapshot.documentId) {
+    const seen = rendererMountHistory.get(page) || [];
+    if (!seen.includes(snapshot.documentId)) {
+      rendererMountHistory.set(page, [...seen, snapshot.documentId]);
+    }
+  }
+  return snapshot;
+}
+
+// A first mount that has not happened yet stays "pending", and the reload the
+// launch path already performs replaces the document legitimately. Only a live
+// document that drops a workbench it had mounted is a renderer fault.
+export function classifyRendererMount({
+  mounted,
+  mountObservedForDocument,
+  documentReplaced,
+}) {
+  if (mounted) return "mounted";
+  if (documentReplaced) return "document-replaced";
+  return mountObservedForDocument ? "torn-down" : "pending";
+}
+
+export function describeRendererReadiness(reason, snapshot, faults, extra = {}) {
+  const captured = faults || [];
+  return [
+    reason,
+    `- project state: ${snapshot?.projectState ?? "absent"}`,
+    `- hydration stage: ${snapshot?.hydrationStage ?? "unmarked"}`,
+    `- #root child elements: ${
+      snapshot && typeof snapshot.rootChildren === "number" ? snapshot.rootChildren : "unknown"
+    }`,
+    `- document: ${extra.documentNote || snapshot?.documentId || "unknown"}`,
+    ...(extra.visibleFailure ? [`- visible failure: ${extra.visibleFailure}`] : []),
+    `- renderer faults: ${captured.length ? `${captured.length} captured` : "none captured"}`,
+    ...captured.map((fault) => `    ${fault}`),
+  ].join("\n");
+}
+
+export async function pageHasRendererMount(page, {
+  timeout = DEFAULT_DIAGNOSTIC_OPERATION_TIMEOUT,
+} = {}) {
+  const snapshot = await rendererProbe(page, { timeout });
+  return Boolean(snapshot?.mounted);
 }
 
 export async function ensureRendererMounted(page, {
@@ -795,6 +881,19 @@ export async function launchPageRoot({
   let nativeWindow;
   try {
     page = await waitForFirstWindow(electronApp, { timeout: firstWindowTimeout });
+    // A fatal render error can unmount the React root while leaving a live
+    // document. Keep a page-local fault log so readiness can attribute that
+    // failure instead of reducing it to a generic timeout.
+    const rendererFaults = [];
+    page.on("pageerror", (error) => {
+      appendDiagnosticValue(rendererFaults, `pageerror: ${diagnosticError(error)}`);
+    });
+    page.on("console", (message) => {
+      if (message.type() === "error") {
+        appendDiagnosticValue(rendererFaults, `console.error: ${message.text()}`);
+      }
+    });
+    recordRendererFaultLog(page, rendererFaults);
     launchDiagnostics.rendererDiagnostics = collectRendererDiagnostics(page);
     launchDiagnosticsByPage.set(page, launchDiagnostics);
     await page.waitForLoadState("domcontentloaded");
@@ -969,40 +1068,69 @@ export async function waitForProjectReady(page, {
     if (await continueButton.isVisible().catch(() => false)) return "continue";
     return "";
   };
-  const projectState = async () => {
-    let snapshot;
-    try {
-      snapshot = await page.evaluate(() => ({
-        state: document.querySelector("main.workbench")?.getAttribute("data-project-state") || null,
-        stage: window.__PAGEROOT_HYDRATION_STAGE__ || null,
-      }));
-    } catch (error) {
-      const state = `transient:${error instanceof Error ? error.name : "evaluate"}:no-detail`;
-      readinessSample(readinessSamples, state);
-      return state;
-    }
-    if (snapshot.state === "ready") {
-      readinessSample(readinessSamples, "ready");
-      return "ready";
-    }
-    const visibleFailure = includeFailureDetail && snapshot.state === "failed"
+  const visibleFailure = async (snapshot) => (
+    includeFailureDetail && snapshot?.projectState === "failed"
       ? await page.locator('[aria-label="项目读取失败"]').textContent().catch(() => "")
-      : "";
-    const state = `${snapshot.state || "missing"}:${snapshot.stage || "unmarked"}:${visibleFailure || "no-detail"}`;
-    readinessSample(readinessSamples, state);
-    return state;
+      : ""
+  );
+
+  let currentDocumentId = "";
+
+  // Settle on a ready project, or on the confirmation the startup path is
+  // waiting for. A workbench that disappears inside one live document fails
+  // immediately instead of being hidden behind the full hydration timeout.
+  const settleReady = async ({ acceptConfirmation }) => {
+    const deadline = Date.now() + timeout;
+    let snapshot = null;
+    for (;;) {
+      const confirmation = await confirmationKind();
+      if (confirmation) {
+        readinessSample(readinessSamples, `confirm:${confirmation}`);
+        if (acceptConfirmation) return confirmation;
+      } else {
+        snapshot = await rendererProbe(page, {
+          timeout: Math.min(DEFAULT_DIAGNOSTIC_OPERATION_TIMEOUT, Math.max(1, deadline - Date.now())),
+        });
+        if (snapshot) {
+          const documentReplaced = Boolean(currentDocumentId)
+            && currentDocumentId !== snapshot.documentId;
+          currentDocumentId = snapshot.documentId;
+          const state = `${snapshot.projectState || "missing"}:${snapshot.hydrationStage || "unmarked"}`;
+          readinessSample(readinessSamples, state);
+          if (snapshot.projectState === "ready") return "";
+          const classification = classifyRendererMount({
+            mounted: snapshot.mounted,
+            mountObservedForDocument: observedRendererMount(page, snapshot.documentId),
+            documentReplaced,
+          });
+          if (classification === "torn-down") {
+            throw new Error(describeRendererReadiness(
+              "PageRoot renderer unmounted the workbench it had already mounted. "
+              + "A live document must never drop main.workbench.",
+              snapshot,
+              rendererFaultLog(page),
+              { documentNote: `unchanged (${snapshot.documentId})` },
+            ));
+          }
+        } else {
+          readinessSample(readinessSamples, "transient:renderer-probe:no-detail");
+        }
+      }
+      if (Date.now() >= deadline) {
+        throw new Error(describeRendererReadiness(
+          `PageRoot project did not become ready within ${timeout}ms.`,
+          snapshot,
+          rendererFaultLog(page),
+          { visibleFailure: await visibleFailure(snapshot) },
+        ));
+      }
+      await sleep(READINESS_POLL_MS);
+    }
   };
 
   let pendingConfirmation = "";
   try {
-    await expect.poll(async () => {
-      pendingConfirmation = await confirmationKind();
-      if (pendingConfirmation) {
-        readinessSample(readinessSamples, `confirm:${pendingConfirmation}`);
-        return "confirm";
-      }
-      return projectState();
-    }, { timeout }).toMatch(/^(?:ready|confirm)$/u);
+    pendingConfirmation = await settleReady({ acceptConfirmation: true });
   } catch (cause) {
     throw await projectReadinessTimeout(page, cause, readinessSamples);
   }
@@ -1036,14 +1164,7 @@ export async function waitForProjectReady(page, {
     await button.focus();
     await button.click();
     try {
-      await expect.poll(async () => {
-        const confirming = await confirmationKind();
-        if (confirming) {
-          readinessSample(readinessSamples, `confirm:${confirming}`);
-          return "confirming";
-        }
-        return projectState();
-      }, { timeout }).toBe("ready");
+      await settleReady({ acceptConfirmation: false });
     } catch (cause) {
       throw await projectReadinessTimeout(page, cause, readinessSamples);
     }
