@@ -5,6 +5,7 @@ import test from "node:test";
 import {
   canvasPointerCapabilityFromProof,
 } from "../app/components/html-canvas-pointer-proof.js";
+import { moduleHasSubstance } from "../app/components/html-canvas-pointer-hit.js";
 
 test("editable proof wins over a selectable or button-like host", () => {
   assert.equal(
@@ -49,6 +50,36 @@ test("unmapped targets stay comment-only", () => {
   assert.equal(capability.cursor, "help");
 });
 
+test("empty modules have no substance and filled modules do", () => {
+  assert.equal(moduleHasSubstance({ children: [], textContent: "" }), false);
+  assert.equal(moduleHasSubstance({ children: [], textContent: "   \n" }), false);
+  assert.equal(moduleHasSubstance({
+    children: [{ tagName: "SCRIPT" }],
+    textContent: "var ignored = true;",
+  }), false);
+  assert.equal(moduleHasSubstance({
+    children: [{ tagName: "SCRIPT" }],
+    childNodes: [
+      { nodeType: 3, textContent: "  \n" },
+      { nodeType: 1, tagName: "SCRIPT", textContent: "var ignored = true;" },
+    ],
+    textContent: "var ignored = true;",
+  }), false);
+  assert.equal(moduleHasSubstance({
+    children: [],
+    childNodes: [{ nodeType: 3, textContent: "仓位建议" }],
+    textContent: "仓位建议",
+  }), true);
+  assert.equal(moduleHasSubstance({
+    children: [{ tagName: "P" }],
+    textContent: "仓位建议",
+  }), true);
+  assert.equal(moduleHasSubstance({
+    children: [],
+    textContent: "只有文字",
+  }), true);
+});
+
 test("classifier does not approximate editability from tag names", async () => {
   const source = await readFile(
     new URL("../app/components/html-canvas-pointer-capability.ts", import.meta.url),
@@ -74,6 +105,8 @@ test("guide and hover copy stay off the selected toolbar", async () => {
   );
   assert.equal(editor.includes("capabilityCaption"), false);
   assert.equal(editor.includes("selectionCapability.hint"), false);
+  assert.equal(editor.includes("isModulePaddingHit"), false);
+  assert.equal(editor.includes("resolveCanvasPointerHit"), true);
   assert.equal(card.includes("知道了"), false);
   assert.equal(card.includes("单击选择"), false);
   assert.equal(card.includes("点击“预览”查看最终效果。"), false);
@@ -81,4 +114,6 @@ test("guide and hover copy stay off the selected toolbar", async () => {
   assert.equal(card.includes("双击改字，自动保存在当前页"), true);
   assert.equal(card.includes("单击要改的区域，写下评论，AI 会按这里改"), true);
   assert.equal(card.includes("点右上角发送，把任务粘贴给 AI Agent"), true);
+  assert.equal(card.includes("createPortal"), true);
+  assert.equal(card.includes("document.body"), true);
 });

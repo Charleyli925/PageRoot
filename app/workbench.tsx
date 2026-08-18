@@ -1358,10 +1358,10 @@ export default function Workbench() {
         const fileName = openEvent.visibleV1FileName || "项目内的 V1 文件";
         const disposition = openEvent.disposition || "kept";
         const message = disposition === "trashed"
-          ? `初始版本 V1 已保存为 ${fileName}。原文件已移入废纸篓。`
+          ? `已保存为${fileName}，原文件已移至废纸篓。`
           : disposition === "trash-failed"
-            ? "项目已导入。原文件未能删除，仍留在原来的位置。"
-            : `初始版本 V1 已保存为 ${fileName}，与刚才选择的文件一致。原文件没有改动。`;
+            ? `已保存为${fileName}，原文件未能移至废纸篓，仍留在原来的位置。`
+            : `已保存为${fileName}，原文件已保留。`;
         setToast({
           title: "已导入 PageRoot",
           message,
@@ -8942,7 +8942,7 @@ export default function Workbench() {
       </aside>
 
       {openConfirmation ? (
-        <ExternalHtmlOpenDialog
+        <ExternalHtmlOpenDialog key={openConfirmation.requestId}
           confirmation={openConfirmation}
           deleteOriginal={openConfirmation.deleteOriginal === true}
           busy={openConfirmation.busy === true}
@@ -9042,13 +9042,13 @@ export default function Workbench() {
           }}
         />
       ) : null}
+      </main>
       <FirstEditGuideCard
         visible={firstEditGuideVisible}
         onDismiss={() => {
           void workspaceControllerRef.current?.dismissFirstEditGuide();
         }}
       />
-      </main>
       {readyReviewOverlay}
     </>
   );

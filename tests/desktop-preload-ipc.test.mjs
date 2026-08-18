@@ -8,7 +8,7 @@ import {
   PROJECT_IPC_VERSION,
 } from "../desktop/export-copy.mjs";
 
-async function loadPreloadApis(invoke) {
+async function loadPreloadApis(invoke, { env = {} } = {}) {
   const source = await readFile(
     new URL("../desktop/preload.mjs", import.meta.url),
     "utf8",
@@ -37,6 +37,7 @@ async function loadPreloadApis(invoke) {
     console,
     location: { search: "" },
     URLSearchParams,
+    process: { env },
     require(specifier) {
       assert.equal(specifier, "electron");
       return { contextBridge, ipcRenderer };
@@ -188,6 +189,25 @@ test("preload exposes one narrow UI-preferences get/record port", async () => {
   );
   assert.equal(calls.length, 2);
   assert.deepEqual(Object.keys(uiPreferences).sort(), ["get", "record"]);
+});
+
+test("preload hides the UI-preferences port during ordinary E2E launches", async () => {
+  const { uiPreferences } = await loadPreloadApis(async () => success({}), {
+    env: { PAGEROOT_E2E: "1" },
+  });
+  assert.equal(uiPreferences, undefined);
+});
+
+test("preload keeps the UI-preferences port when an E2E launch opts into the guide", async () => {
+  const { uiPreferences } = await loadPreloadApis(async () => success({
+    schemaVersion: 1,
+    firstRealHtmlEditGuide: { status: "pending", generation: 2 },
+    builtInWelcomeProjectId: null,
+  }), {
+    env: { PAGEROOT_E2E: "1", PAGEROOT_E2E_FIRST_EDIT_GUIDE: "1" },
+  });
+  assert.equal(typeof uiPreferences.get, "function");
+  assert.equal(typeof uiPreferences.record, "function");
 });
 
 test("preload exposes only preview session creation and revocation", async () => {
@@ -384,6 +404,19 @@ test("preload exposes the structured Finder reveal operation", async () => {
   assert.deepEqual(calls[0], [
     "html-projects:show-in-folder",
     "/Users/demo/report.html",
+  ]);
+});
+
+test("preload exposes the narrow configured PageRoot projects-root operation", async () => {
+  const calls = [];
+  const api = await loadPreload(async (...args) => {
+    calls.push(args);
+    return success({ opened: true });
+  });
+
+  assert.deepEqual(await api.openProjectsRoot(), { opened: true });
+  assert.deepEqual(calls[0], [
+    "html-projects:open-projects-root",
   ]);
 });
 
@@ -867,6 +900,7 @@ test("preload never replays a failed local side-effect request", async () => {
   });
   const actions = [
     ["showInFolder", "/Users/demo/report.html"],
+    ["openProjectsRoot"],
     ["openInDefaultBrowser", "/Users/demo/report.html"],
     ["revealAiTask", {
       sourcePath: "/Users/demo/report.html",

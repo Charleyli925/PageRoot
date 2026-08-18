@@ -7,10 +7,15 @@
   <style>
     * { box-sizing: border-box; }
     body { margin: 0; font-family: sans-serif; }
-    section {
+    section[data-native-case="filled-module"] {
       min-height: 420px;
       padding: 96px 40px 48px;
       background: #f6f3eb;
+    }
+    section[data-native-case="empty-module"] {
+      min-height: 96px;
+      padding: 32px;
+      background: #ece7dc;
     }
     article {
       min-height: 220px;
@@ -20,10 +25,11 @@
   </style>
 </head>
 <body>
-  <section aria-label="带顶部留白的模块">
+  <section data-native-case="empty-module" aria-label="完全空的模块"></section>
+  <section data-native-case="filled-module" aria-label="带顶部留白的模块">
     <article>
       <h1 data-native-case="module-padding-copy" data-native-mode="native-editable">
-        点击内容可以选择，点击模块留白不应触发选择。
+        点击内容可以选择小框，点击模块留白应选中整张模块。
       </h1>
     </article>
   </section>

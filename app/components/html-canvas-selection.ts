@@ -108,34 +108,6 @@ export function inferSelectionLevel(element: HTMLElement): HtmlCanvasSelectionLe
   return moduleTags.has(element.tagName) || hasModuleIdentity || directBodyBlock ? "module" : "part";
 }
 
-export function isModulePaddingHit(
-  element: HTMLElement,
-  point: { clientX: number; clientY: number },
-): boolean {
-  if (inferSelectionLevel(element) !== "module") return false;
-  const view = element.ownerDocument.defaultView;
-  if (!view) return false;
-  const rect = element.getBoundingClientRect();
-  const style = view.getComputedStyle(element);
-  const pixelValue = (value: string) => Number.parseFloat(value) || 0;
-  const contentLeft = rect.left
-    + pixelValue(style.borderLeftWidth)
-    + pixelValue(style.paddingLeft);
-  const contentRight = rect.right
-    - pixelValue(style.borderRightWidth)
-    - pixelValue(style.paddingRight);
-  const contentTop = rect.top
-    + pixelValue(style.borderTopWidth)
-    + pixelValue(style.paddingTop);
-  const contentBottom = rect.bottom
-    - pixelValue(style.borderBottomWidth)
-    - pixelValue(style.paddingBottom);
-  return point.clientX < contentLeft
-    || point.clientX > contentRight
-    || point.clientY < contentTop
-    || point.clientY > contentBottom;
-}
-
 export function defaultGlobalCommentElement(documentNode: Document): HTMLElement | null {
   return documentNode.body;
 }

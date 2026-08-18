@@ -219,7 +219,7 @@
       "patterns": [
         "^scripts/source-gate-provenance\\.mjs$",
         "^tests/source-gate-provenance\\.test\\.mjs$",
-        "^\\.github/workflows/(?:ci|developer-preview|release|release-candidate|release-dry-run)\\.yml$"
+        "^\\.github/workflows/(?:ci|ci-health|developer-preview|release|release-candidate|release-dry-run)\\.yml$"
       ],
       "suites": [],
       "nodeTests": ["tests/source-gate-provenance.test.mjs"]
@@ -262,7 +262,7 @@
       "patterns": [
         "^scripts/ci-health-report\\.mjs$",
         "^tests/ci-health-report\\.test\\.mjs$",
-        "^\\.github/workflows/(?:ci|developer-preview|release|release-candidate|release-dry-run)\\.yml$"
+        "^\\.github/workflows/(?:ci|ci-health|developer-preview|release|release-candidate|release-dry-run)\\.yml$"
       ],
       "suites": [],
       "nodeTests": [
@@ -565,7 +565,7 @@
     {
       "id": "v2-island-controller",
       "patterns": [
-        "^app/components/(?:HtmlCanvasEditor(?:\\.types)?|HtmlInteractionPreview|desktop-(?:runtime-snapshot|preview)-api|html-canvas-(?:dom|interaction|internal-types|page-view|preview-sync|selection|style-inspector)|IslandEditingController|native-edit-types|native-layout-fingerprint|html-preview-sandbox|use-preview-resource-base)\\.(?:tsx|ts|js|d\\.ts)$"
+        "^app/components/(?:HtmlCanvasEditor(?:\\.types)?|HtmlInteractionPreview|desktop-(?:runtime-snapshot|preview)-api|html-canvas-(?:dom|interaction|internal-types|page-view|preview-sync|selection|style-inspector|pointer-hit|pointer-capability)|IslandEditingController|native-edit-types|native-layout-fingerprint|html-preview-sandbox|use-preview-resource-base)\\.(?:tsx|ts|js|d\\.ts)$"
       ],
       "suites": ["typecheck", "browser-smoke", "electron-smoke"],
       "nodeTests": [
@@ -740,7 +740,7 @@
       "id": "first-real-html-guide",
       "patterns": [
         "^app/application/first-edit-guide-session\\.(?:js|d\\.ts)$",
-        "^app/components/(?:FirstEditGuideCard(?:\\.module)?|html-canvas-pointer-(?:proof|capability)|html-canvas-capability-hover|desktop-ui-preferences-api)\\.(?:tsx|ts|js|d\\.ts|css)$",
+        "^app/components/(?:FirstEditGuideCard(?:\\.module)?|html-canvas-pointer-(?:proof|capability|hit)|html-canvas-capability-hover|desktop-ui-preferences-api)\\.(?:tsx|ts|js|d\\.ts|css)$",
         "^app/workbench\\.tsx$",
         "^desktop/ui-preferences\\.mjs$",
         "^tests/(?:first-edit-guide-session|ui-preferences|canvas-pointer-capability|html-canvas-capability-hover)\\.test\\.mjs$"
