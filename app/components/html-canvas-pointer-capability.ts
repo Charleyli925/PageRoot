@@ -123,19 +123,12 @@ export function resolveCanvasPointerHit({
     canStartTextEdit,
     sourceResolution: selection.resolution as HtmlCanvasTargetResolution,
   });
-  // Rich inline markup can expose several instrumented elements while the
-  // pointer remains inside one native-edit host. Use that host as the hover
-  // identity and geometry so moving across <strong>/<em>/<span> does not
-  // restart the stable-hover timer or move the outline under the pointer.
-  const hoverElement = canStartTextEdit && sourceIndex
-    ? nativeEditHostForElement(hit, sourceIndex) ?? hit
-    : hit;
   return {
     action: "select",
     capability: {
       ...capability,
-      element: hoverElement,
-      targetKey: hoverElement.getAttribute(SOURCE_NODE_ATTRIBUTE)
+      element: hit,
+      targetKey: hit.getAttribute(SOURCE_NODE_ATTRIBUTE)
         || selection.id
         || hit.tagName,
     },
@@ -147,5 +140,19 @@ export function resolveCanvasPointerCapability(
 ): ResolvedCanvasPointerCapability | null {
   if (!input.sourceIndex) return null;
   const hit = resolveCanvasPointerHit(input);
-  return hit.action === "select" ? hit.capability : null;
+  if (hit.action !== "select") return null;
+  const capability = hit.capability;
+  if (capability.kind !== "edit-text") return capability;
+  // Rich inline markup can expose several instrumented elements while the
+  // pointer remains inside one native-edit host. Use that host only for the
+  // hover identity and geometry; click selection must retain the exact hit
+  // element so module padding continues to select the module itself.
+  const hoverElement = nativeEditHostForElement(capability.element, input.sourceIndex)
+    ?? capability.element;
+  return {
+    ...capability,
+    element: hoverElement,
+    targetKey: hoverElement.getAttribute(SOURCE_NODE_ATTRIBUTE)
+      || capability.targetKey,
+  };
 }

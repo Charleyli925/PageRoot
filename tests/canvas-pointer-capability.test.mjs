@@ -99,8 +99,8 @@ test("editable hover identity follows the native edit host across inline markup"
     new URL("../app/components/html-canvas-pointer-capability.ts", import.meta.url),
     "utf8",
   );
-  assert.match(source, /const hoverElement = canStartTextEdit/);
-  assert.match(source, /nativeEditHostForElement\(hit, sourceIndex\)/);
+  assert.match(source, /const hoverElement = nativeEditHostForElement\(capability\.element, input\.sourceIndex\)/);
+  assert.match(source, /export function resolveCanvasPointerCapability/);
   assert.match(source, /element: hoverElement/);
 });
 
