@@ -33,6 +33,7 @@ const TASK_OWNER_CASES = [
   {
     file: "app/workbench/review-document.ts",
     nodeTests: [
+      "tests/review-badge-aggregation.test.mjs",
       "tests/review-comment-source-map.test.mjs",
       "tests/review-projection-facts.test.mjs",
       "tests/review-runtime-visual.test.mjs",

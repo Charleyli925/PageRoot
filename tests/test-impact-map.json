@@ -618,12 +618,13 @@
     {
       "id": "review-document-analysis",
       "patterns": [
-        "^app/lib/(?:review-(?:projection-facts|semantic-alignment|text-diff|text-evidence-marks)|review-comment-source-map)\\.(?:d\\.ts|js)$",
+        "^app/lib/(?:review-(?:projection-facts|semantic-alignment|text-diff|text-evidence-marks|badge-aggregation)|review-comment-source-map)\\.(?:d\\.ts|js)$",
         "^app/workbench/review-document\\.ts$",
         "^scripts/benchmark-review-analysis\\.mjs$"
       ],
       "suites": ["typecheck", "browser-smoke", "ai-smoke"],
       "nodeTests": [
+        "tests/review-badge-aggregation.test.mjs",
         "tests/review-comment-source-map.test.mjs",
         "tests/review-projection-facts.test.mjs",
         "tests/review-runtime-visual.test.mjs",

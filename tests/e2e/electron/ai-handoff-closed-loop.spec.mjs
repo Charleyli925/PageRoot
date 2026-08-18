@@ -1505,16 +1505,25 @@ ${REVIEW_MASK_UNION_BEFORE}
         });
         const validLabel = (label) => {
           const text = label?.textContent?.trim() || "";
-          return text.length >= 2 && text.length <= 10;
+          // A badge may now read "{summary} ×N" when adjacent same-kind changes
+          // aggregate, so allow the multiplier suffix on top of the summary.
+          return text.length >= 2 && text.length <= 16;
         };
-        return standaloneBoxes.every((box) => {
+        // Adjacent same-summary badges collapse into one counted representative,
+        // so a box carries at most one label and an aggregated neighbour carries
+        // none. The invariant that guards real bugs is "never more than one
+        // label per box, and never more than one per text group".
+        const hasAnyLabel = boxes.some((box) => (
+          box.querySelector("[data-pageroot-review-overlay-label]")
+        ));
+        return hasAnyLabel && standaloneBoxes.every((box) => {
           const labels = box.querySelectorAll("[data-pageroot-review-overlay-label]");
-          return labels.length === 1 && validLabel(labels[0]);
+          return labels.length <= 1 && (labels.length === 0 || validLabel(labels[0]));
         }) && [...textGroups.values()].every((group) => {
           const labels = group.flatMap((box) => (
             [...box.querySelectorAll("[data-pageroot-review-overlay-label]")]
           ));
-          return labels.length === 1 && validLabel(labels[0]);
+          return labels.length <= 1 && (labels.length === 0 || validLabel(labels[0]));
         });
       })),
     ).then((states) => states.every(Boolean))).toBe(true);
@@ -3197,6 +3206,15 @@ ${REVIEW_MASK_UNION_BEFORE}
     await launched.page.getByRole("button", { name: "适应", exact: true }).click();
     await expect(launched.page.getByRole("button", { name: "适应", exact: true }))
       .toHaveAttribute("aria-pressed", "true");
+    // At "适应" the counter-scaled badges reach further, so dense same-kind
+    // changes must collapse into one "{summary} ×N" representative instead of a
+    // stack of overlapping captions. Each counted badge names its own total.
+    await expect.poll(() => afterReviewFrame.locator(
+      "[data-pageroot-review-label-count]",
+    ).evaluateAll((labels) => labels.length && labels.every((label) => {
+      const count = Number(label.getAttribute("data-pageroot-review-label-count"));
+      return count >= 2 && new RegExp(" ×" + count + "$", "u").test(label.textContent || "");
+    }))).toBe(true);
     await expect.poll(crossLineProjectionState).toMatchObject({ matches: true });
     await expect.poll(promotedScopeProjectionState).toMatchObject({ matches: true });
     await expect.poll(() => assertOverlayMaskEquivalence(afterReviewFrame)).toBe(true);

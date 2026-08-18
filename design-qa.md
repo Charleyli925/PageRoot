@@ -1358,6 +1358,74 @@ final result: passed
 
 final result: passed
 
+## AI review workspace — adjacent same-summary badge aggregation
+
+Date: 2026-08-18
+
+### Problem
+
+Every review overlay box may carry one summary badge ("新增内容", "视觉调整"…)
+anchored above its top-right corner. Badge chrome is counter-scaled by
+`--pageroot-review-ui-scale` (= 1 ÷ zoom) so it keeps a constant on-screen size.
+In dense regions this made several same-kind badges stack and overlap each other
+and the content beneath — worst at "适应" zoom, where the reach is largest. The
+`核心结论` region alone stacked four `新增内容` captions over `实验效果概览` /
+`锁单确认` / `CVR`.
+
+### Comparison target
+
+- Rendered before (crowding): `output/design-qa/badge-overlap-demo.png`
+- Rendered after (aggregated): `output/design-qa/badge-aggregated-demo.png`
+- Full state: `output/design-qa/ai-review-text-changes.png`
+
+### Design decision
+
+- Adjacent, same-summary, label-bearing boxes collapse into one representative
+  badge that reads `{summary} ×N`. The four `新增内容` captions become a single
+  `新增内容 ×4`.
+- Aggregation is geometry preserving. Every change keeps its own outline,
+  transparent mask hole and character evidence (green dots / red strike); only
+  the repeated text caption collapses. No footprint, tone, mask or box identity
+  changes, and the navigable "变化区域" count is untouched.
+- It never merges different summaries and never links boxes that do not share a
+  column or fall within one badge's vertical reach. The reach scales with zoom,
+  so aggregation is more active at "适应" than at "100%".
+- The focused change always stays the representative badge of its cluster, so
+  navigation never hides the active change's caption.
+- Badge count and the toolbar/navigator "变化区域" count remain two distinct
+  meters: one region may hold several differently-labelled badges.
+
+### Automated evidence
+
+- The AI closed-loop smoke case passed 2/2 with zero unexpected console or page
+  errors, and the design-QA capture regenerated cleanly.
+- At "适应" the after canvas asserts that every `[data-pageroot-review-label-count]`
+  badge carries `N ≥ 2` and its text ends with ` ×N`, proving a real cluster
+  collapsed rather than a malformed count.
+- The all-changes label invariant now allows an aggregated neighbour to carry no
+  caption while still forbidding more than one caption per box or text group,
+  and still requires at least one caption present.
+- The pure aggregation helper is unit tested for cluster counting, same-column
+  requirement, distance and different-summary independence, focus-preserved
+  representative, suppressed-label exclusion, and input immutability.
+
+### Consequence resolved
+
+- This supersedes the entry-state batch's known consequence that overlay badge
+  crowding became more visible at the "适应" default. Dense same-kind badges now
+  aggregate instead of overlapping.
+
+## Checklist
+
+- [x] Adjacent same-summary badges render one `{summary} ×N` representative.
+- [x] Every change keeps its outline, mask hole and character evidence.
+- [x] Different summaries and distant/other-column boxes never aggregate.
+- [x] The focused change stays its cluster's labelled representative.
+- [x] The navigable 变化区域 count is unchanged by aggregation.
+- [x] Helper is self-contained for iframe injection and unit tested.
+
+final result: passed
+
 ---
 
 # AI review entry-state and diff-legend QA

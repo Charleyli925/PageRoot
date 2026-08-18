@@ -8,6 +8,10 @@ import {
   reviewTextEvidenceGraphemeEnd,
   reviewTextEvidenceMarkGeometry,
 } from "../../app/lib/review-text-evidence-marks.js";
+import {
+  aggregateReviewBadgeLabels,
+  reviewBadgeLabelText,
+} from "../../app/lib/review-badge-aggregation.js";
 
 const reviewDocument = await readFile(
   new URL("../../app/workbench/review-document.ts", import.meta.url),
@@ -64,6 +68,8 @@ export function generatedReviewBootstrap(
     ],
     reviewTextEvidenceGraphemeEnd,
     reviewTextEvidenceMarkGeometry,
+    reviewBadgeLabelText,
+    aggregateReviewBadgeLabels,
   });
   new vm.Script(transpiled).runInContext(context);
   return context.reviewBootstrap(

@@ -43,6 +43,10 @@ import type {
 import { REVIEW_RUNTIME_VISUAL_CANDIDATE_LIMIT } from "../lib/review-runtime-visual.js";
 import { resolveRuntimeSnapshotHosts } from "../domain/runtime-snapshot-hosts.js";
 import {
+  aggregateReviewBadgeLabels,
+  reviewBadgeLabelText,
+} from "../lib/review-badge-aggregation.js";
+import {
   REVIEW_SOURCE_NODE_ATTRIBUTE,
   prepareReviewCommentSourceProjection,
   resolveReviewCommentSourceElement,
@@ -3102,6 +3106,8 @@ function reviewBootstrap(
   );
   const reviewTextEvidenceGraphemeEnd = ${reviewTextEvidenceGraphemeEnd.toString()};
   const reviewTextEvidenceMarkGeometry = ${reviewTextEvidenceMarkGeometry.toString()};
+  const reviewBadgeLabelText = ${reviewBadgeLabelText.toString()};
+  const aggregateReviewBadgeLabels = ${aggregateReviewBadgeLabels.toString()};
   const runtimeVisualBindCall = (method) => Function.prototype.call.bind(method);
   const runtimeVisualFunctionHasInstance = runtimeVisualBindCall(
     Function.prototype[Symbol.hasInstance],
@@ -5176,6 +5182,15 @@ function reviewBootstrap(
         summary: allModeSummary(record.types, record.summary),
       }));
     }
+    // Collapse adjacent same-summary badges into one "{summary} ×N" label so
+    // dense regions do not stack overlapping captions. Badge chrome is
+    // counter-scaled to a constant screen size, so the vertical reach grows as
+    // the canvas shrinks; keep the focused change as its cluster's label.
+    const badgeUiScale = 1 / Math.max(.32, Math.min(1, Number(currentState.scale || 1)));
+    merged = aggregateReviewBadgeLabels(merged, {
+      focus: currentState.focus,
+      labelReach: 26 * badgeUiScale,
+    });
     const inset = 3;
     const documentWidth = Math.max(
       innerWidth,
@@ -5428,7 +5443,11 @@ function reviewBootstrap(
       if (record.labelPrimary !== false) {
         const label = document.createElement("span");
         label.setAttribute("data-pageroot-review-overlay-label", "true");
-        label.textContent = record.summary || "内容调整";
+        const labelCount = record.labelCount || 1;
+        if (labelCount > 1) {
+          label.setAttribute("data-pageroot-review-label-count", String(labelCount));
+        }
+        label.textContent = reviewBadgeLabelText(record.summary, labelCount);
         box.append(label);
       }
       layer.append(box);
