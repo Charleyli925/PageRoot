@@ -15,9 +15,11 @@ import {
   decodeUiPreferences,
 } from "../desktop/ui-preferences.mjs";
 import {
+  classifyRendererMount,
   closeObservationTimeout,
   collectProjectReadinessDiagnostics,
   createCloseFirstCleanup,
+  describeRendererReadiness,
   ensureRendererMounted,
   launchPageRoot,
   seedDismissedFirstEditGuide,
@@ -178,6 +180,59 @@ test("Electron app fixture reports an empty renderer root without reloading", as
   );
   assert.equal(reloads, 0);
   assert.ok(evaluations >= 2);
+});
+
+test("a live document that drops a mounted workbench is a renderer fault", () => {
+  // Startup before the first mount must keep waiting.
+  assert.equal(classifyRendererMount({
+    mounted: false,
+    mountObservedForDocument: false,
+    documentReplaced: false,
+  }), "pending");
+  assert.equal(classifyRendererMount({
+    mounted: true,
+    mountObservedForDocument: false,
+    documentReplaced: false,
+  }), "mounted");
+  // The launch path reloads a renderer that stayed empty, so a replaced
+  // document is legitimate and must not be reported as a fault.
+  assert.equal(classifyRendererMount({
+    mounted: false,
+    mountObservedForDocument: true,
+    documentReplaced: true,
+  }), "document-replaced");
+  // Same document, mount gone: React tore the root down.
+  assert.equal(classifyRendererMount({
+    mounted: false,
+    mountObservedForDocument: true,
+    documentReplaced: false,
+  }), "torn-down");
+});
+
+test("renderer readiness failures name the captured renderer faults", () => {
+  const message = describeRendererReadiness(
+    "PageRoot renderer unmounted the workbench it had already mounted.",
+    {
+      documentId: "doc-1",
+      mounted: false,
+      projectState: null,
+      hydrationStage: "verify-rendered",
+      rootChildren: 0,
+    },
+    ["pageerror: Cannot read properties of undefined"],
+    { documentNote: "unchanged (doc-1)" },
+  );
+  assert.match(message, /unmounted the workbench/u);
+  assert.match(message, /hydration stage: verify-rendered/u);
+  assert.match(message, /#root child elements: 0/u);
+  assert.match(message, /document: unchanged \(doc-1\)/u);
+  assert.match(message, /renderer faults: 1 captured/u);
+  assert.match(message, /Cannot read properties of undefined/u);
+  // An absent snapshot must still produce a readable report.
+  assert.match(
+    describeRendererReadiness("timed out", null, []),
+    /project state: absent[\s\S]*renderer faults: none captured/u,
+  );
 });
 
 test("Electron app fixture bounds a hung renderer mount probe without reloading", async () => {
