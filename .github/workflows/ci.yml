@@ -367,8 +367,14 @@ jobs:
         with:
           path: ~/.cache/electron
           key: ${{ runner.os }}-electron-${{ hashFiles('package-lock.json') }}
-      - run: npm ci
+      - name: Install npm dependencies
         timeout-minutes: 10
+        run: >-
+          node scripts/ci-evidence.mjs run
+          --suite browser-${{ matrix.label }}-npm-ci
+          --stage environment-preflight
+          --
+          npm ci
       - name: Restore Playwright Chromium
         id: playwright-cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -380,15 +386,15 @@ jobs:
         timeout-minutes: 10
         # An apt mirror stall must cost minutes, not the whole job budget:
         # retry once with a four-minute attempt bound instead of hanging
-        # silently until the job timeout kills the lane.
+        # silently until the job timeout kills the lane. The evidence stage
+        # keeps such a failure classified as ci_environment, never as a
+        # product regression.
         run: |
-          for attempt in 1 2; do
-            if timeout 240 npx playwright install-deps chromium; then
-              exit 0
-            fi
-            echo "playwright install-deps attempt ${attempt} failed"
-          done
-          exit 1
+          node scripts/ci-evidence.mjs run \
+            --suite browser-${{ matrix.label }}-install-deps \
+            --stage environment-preflight \
+            -- \
+            bash -c 'for attempt in 1 2; do if timeout 240 npx playwright install-deps chromium; then exit 0; fi; echo "playwright install-deps attempt ${attempt} failed"; done; exit 1'
       - name: Install Playwright Chromium
         timeout-minutes: 5
         if: steps.playwright-cache.outputs.cache-hit != 'true'
@@ -407,8 +413,21 @@ jobs:
           --stage source-test
           --
           ${{ matrix.command }}
+      - name: Record Playwright retry evidence
+        # Runs even after a failed suite so flaky/retry counts and the first
+        # attempt's artifacts are never lost with the runner. The real-html
+        # oracle stays retry-free with no JSON reporter, so it is excluded.
+        if: always() && matrix.label != 'real-html'
+        timeout-minutes: 5
+        run: >-
+          node scripts/playwright-flaky-summary.mjs
+          --report output/playwright/native-dom-browser/results.json
+          --suite browser-${{ matrix.label }}
       - name: Upload browser failure diagnostics
-        if: failure()
+        # Always uploaded so a retry-succeeded run still preserves the first
+        # attempt's trace, video and screenshot instead of discarding them
+        # with the runner.
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         timeout-minutes: 10
         with:
@@ -456,8 +475,14 @@ jobs:
             ~/Library/Caches/electron
             ~/Library/Caches/electron-builder
           key: ${{ runner.os }}-electron-${{ hashFiles('package-lock.json') }}
-      - run: npm ci
+      - name: Install npm dependencies
         timeout-minutes: 10
+        run: >-
+          node scripts/ci-evidence.mjs run
+          --suite electron-native-npm-ci
+          --stage environment-preflight
+          --
+          npm ci
       - name: Prove hosted renderer scheduling before product tests
         timeout-minutes: 5
         run: >-
@@ -543,8 +568,14 @@ jobs:
             ~/Library/Caches/electron
             ~/Library/Caches/electron-builder
           key: ${{ runner.os }}-electron-${{ hashFiles('package-lock.json') }}
-      - run: npm ci
+      - name: Install npm dependencies
         timeout-minutes: 10
+        run: >-
+          node scripts/ci-evidence.mjs run
+          --suite electron-ai-npm-ci
+          --stage environment-preflight
+          --
+          npm ci
       - name: Prove hosted renderer scheduling before AI tests
         timeout-minutes: 5
         run: >-
@@ -634,6 +665,21 @@ jobs:
           ELECTRON_NATIVE_RESULT: ${{ needs.source-electron-native.result }}
           ELECTRON_AI_RESULT: ${{ needs.source-electron-ai.result }}
         run: |
+          {
+            echo "## Source lane results"
+            echo ""
+            echo "| lane | result |"
+            echo "|---|---|"
+            echo "| baseline-policy | $BASELINE_RESULT |"
+            echo "| branch-policy | $POLICY_RESULT |"
+            echo "| candidate-context | $CANDIDATE_CONTEXT_RESULT |"
+            echo "| release-dry-run (packaging_required=$PACKAGING_REQUIRED) | $DRY_RUN_RESULT |"
+            echo "| source-build | $BUILD_RESULT |"
+            echo "| source-node | $NODE_RESULT |"
+            echo "| browser lanes | $BROWSER_RESULT |"
+            echo "| electron-native | $ELECTRON_NATIVE_RESULT |"
+            echo "| electron-ai | $ELECTRON_AI_RESULT |"
+          } >> "$GITHUB_STEP_SUMMARY"
           test "$BASELINE_RESULT" = "success"
           test "$POLICY_RESULT" = "success"
           test "$CANDIDATE_CONTEXT_RESULT" = "success"
