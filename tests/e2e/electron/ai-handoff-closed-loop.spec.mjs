@@ -1617,10 +1617,20 @@ ${REVIEW_MASK_UNION_BEFORE}
     await expect(deletedPriority).toHaveCount(1);
     await expect.poll(() => deletedPriority.evaluate(
       (element) => getComputedStyle(element).textDecorationLine,
-    )).toContain("line-through");
+    )).toBe("none");
     await expect.poll(() => deletedPriority.evaluate(
-      (element) => getComputedStyle(element).textDecorationStyle,
-    )).toBe("dashed");
+      (element) => getComputedStyle(element).color,
+    )).toBe(await deletedPriority.evaluate(
+      (element) => getComputedStyle(element.parentElement).color,
+    ));
+    await expect.poll(() => deletedPriority.evaluate(
+      (element) => getComputedStyle(element).fontSize,
+    )).toBe(await deletedPriority.evaluate(
+      (element) => getComputedStyle(element.parentElement).fontSize,
+    ));
+    await expect.poll(() => beforeReviewFrame.locator(
+      '[data-pageroot-review-text-mark="removed"]',
+    ).count()).toBeGreaterThan(0);
     const addedText = afterReviewFrame.locator(
       '[data-pageroot-review-text="added"]',
     ).filter({ hasText: UPDATED_TEXT });
@@ -1629,15 +1639,14 @@ ${REVIEW_MASK_UNION_BEFORE}
     )).toBe("none");
     await expect.poll(() => addedText.evaluate(
       (element) => getComputedStyle(element).textEmphasisStyle,
-    )).toContain("dot");
-    await expect.poll(() => addedText.evaluate(
-      (element) => getComputedStyle(element).textEmphasisColor,
-    )).toBe("rgb(35, 155, 86)");
-    await expect.poll(() => addedText.evaluate(
-      (element) => getComputedStyle(element).textEmphasisPosition,
-    )).toContain("under");
+    )).toBe("none");
     expect(await addedText.evaluate((element) => getComputedStyle(element).color))
       .toBe(await addedText.evaluate((element) => getComputedStyle(element.parentElement).color));
+    expect(await addedText.evaluate((element) => getComputedStyle(element).fontSize))
+      .toBe(await addedText.evaluate((element) => getComputedStyle(element.parentElement).fontSize));
+    await expect.poll(() => afterReviewFrame.locator(
+      '[data-pageroot-review-text-mark="added"]',
+    ).count()).toBeGreaterThan(0);
     await expect.poll(async () => Promise.all(
       [beforeReviewFrame, afterReviewFrame].map((frame) => frame.locator(
         "[data-review-injection-stability]",
@@ -1718,10 +1727,6 @@ ${REVIEW_MASK_UNION_BEFORE}
             (box.getAttribute("data-text-groups") || box.getAttribute("data-text-group") || "")
               .split(/\s+/).includes(groupId)
           ));
-          const fontSize = Number.parseFloat(getComputedStyle(marker).fontSize || "0");
-          const dotClearance = tone === "text-added"
-            ? Math.max(4, Number.isFinite(fontSize) ? fontSize * .55 : 8)
-            : 0;
           const range = document.createRange();
           range.selectNodeContents(marker);
           const evidenceRects = [...range.getClientRects()]
@@ -1730,13 +1735,34 @@ ${REVIEW_MASK_UNION_BEFORE}
               left: rect.left,
               top: rect.top,
               right: rect.right,
-              bottom: rect.bottom + dotClearance,
+              bottom: rect.bottom,
             }));
           range.detach();
           if (!evidenceRects.length) return true;
           return frames.length > 0 && evidenceRects.every((evidence) => (
             frames.some((box) => contains(box.getBoundingClientRect(), evidence))
           ));
+        });
+      })),
+    ).then((states) => states.every(Boolean))).toBe(true);
+    await expect.poll(async () => Promise.all(
+      [beforeReviewFrame, afterReviewFrame].map((frame) => frame.locator("html").evaluate(() => {
+        const tolerance = 2;
+        const contains = (outer, inner) => (
+          outer.left <= inner.left + tolerance
+          && outer.top <= inner.top + tolerance
+          && outer.right >= inner.right - tolerance
+          && outer.bottom >= inner.bottom - tolerance
+        );
+        return [...document.querySelectorAll("[data-pageroot-review-text-mark]")].every((mark) => {
+          const tone = mark.getAttribute("data-pageroot-review-text-mark") === "removed"
+            ? "text-removed"
+            : "text-added";
+          const boxes = [...document.querySelectorAll(
+            '[data-pageroot-review-overlay-box][data-tone="' + tone + '"]',
+          )];
+          const rect = mark.getBoundingClientRect();
+          return boxes.some((box) => contains(box.getBoundingClientRect(), rect));
         });
       })),
     ).then((states) => states.every(Boolean))).toBe(true);

@@ -519,7 +519,10 @@ export async function waitForProjectReady(page, {
   if (pendingConfirmation === "import" || pendingConfirmation === "continue") {
     const button = pendingConfirmation === "import" ? importButton : continueButton;
     if (pendingConfirmation === "import") {
-      const importDialog = page.getByRole("dialog", { name: /导入 PageRoot/u });
+      const importDialog = page.locator(
+        'section[role="dialog"][data-classification="new-external"]',
+      );
+      await expect(importDialog).toBeVisible();
       await expect(importDialog).toContainText("复制并保存为");
       await expect(importDialog).toContainText(
         "成功导入后，同意将原文件移至废纸篓。",
