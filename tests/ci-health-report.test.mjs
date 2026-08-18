@@ -6,6 +6,9 @@ import { fileURLToPath } from "node:url";
 
 import {
   CI_HEALTH_WORKFLOW_INPUTS,
+  extractRestList,
+  fullGateRunIds,
+  jobTimingStats,
   renderCiHealthMarkdown,
   summarizeCiHealth,
   workflowRuns,
@@ -71,6 +74,7 @@ test("CI health inputs cover the remaining workflows and no retired review files
   );
   assert.deepEqual(CI_HEALTH_WORKFLOW_INPUTS, {
     ci: "ci.yml",
+    ciHealth: "ci-health.yml",
     releaseDryRun: "release-dry-run.yml",
     releaseCandidate: "release-candidate.yml",
     release: "release.yml",
@@ -78,4 +82,108 @@ test("CI health inputs cover the remaining workflows and no retired review files
   });
   assert.match(reportScript, /CI_HEALTH_WORKFLOW_INPUTS\.ci/u);
   assert.doesNotMatch(reportScript, /pr-feedback|draft-review|review-debt|review-gate-recovery/u);
+});
+
+test("REST list payloads unwrap the GitHub object envelope", () => {
+  assert.deepEqual(
+    extractRestList({ total_count: 1, workflow_runs: [{ id: 7 }] }, "workflow_runs", "u"),
+    [{ id: 7 }],
+  );
+  assert.deepEqual(extractRestList([{ id: 3 }], "jobs", "u"), [{ id: 3 }]);
+  assert.throws(
+    () => extractRestList({ message: "rate limited" }, "jobs", "u"),
+    /jobs array/u,
+  );
+});
+
+test("queue and execution time split per job while skipped jobs stay out", () => {
+  const stats = jobTimingStats({
+    100: [
+      {
+        name: "browser-shard-2-of-3",
+        conclusion: "success",
+        created_at: "2026-08-18T00:00:00Z",
+        started_at: "2026-08-18T00:01:00Z",
+        completed_at: "2026-08-18T00:05:00Z",
+      },
+      {
+        name: "electron-native",
+        conclusion: "skipped",
+        created_at: "2026-08-18T00:00:00Z",
+        started_at: "2026-08-18T00:00:00Z",
+        completed_at: "2026-08-18T00:00:00Z",
+      },
+    ],
+  });
+  assert.equal(stats["browser-shard"].executions, 1);
+  assert.equal(stats["browser-shard"].queue.p50Minutes, 1);
+  assert.equal(stats["browser-shard"].execution.p50Minutes, 4);
+  assert.equal(stats["electron-native"], undefined);
+});
+
+test("full-gate wall time splits from Draft feedback by an executed release-gate", () => {
+  const gateJob = {
+    name: "release-gate",
+    conclusion: "success",
+    created_at: "2026-08-18T00:08:00Z",
+    started_at: "2026-08-18T00:08:30Z",
+    completed_at: "2026-08-18T00:09:00Z",
+  };
+  const draftJob = {
+    name: "pr-feedback",
+    conclusion: "failure",
+    created_at: "2026-08-18T00:00:00Z",
+    started_at: "2026-08-18T00:00:30Z",
+    completed_at: "2026-08-18T00:01:00Z",
+  };
+  const jobsByRunId = { 100: [gateJob], 101: [draftJob] };
+  assert.deepEqual([...fullGateRunIds(jobsByRunId)], ["100"]);
+  const report = summarizeCiHealth({
+    periodDays: 30,
+    generatedAt: "2026-08-18T12:00:00.000Z",
+    ciRuns: [
+      completedRun({
+        id: 100,
+        run_started_at: "2026-08-18T00:00:00Z",
+        updated_at: "2026-08-18T00:10:00Z",
+      }),
+      completedRun({
+        id: 101,
+        conclusion: "failure",
+        html_url: "https://example.test/run/101",
+        run_started_at: "2026-08-18T00:00:00Z",
+        updated_at: "2026-08-18T00:01:00Z",
+      }),
+    ],
+    jobsByRunId,
+  });
+  assert.equal(report.fullGate.runs, 1);
+  assert.equal(report.fullGate.p50Minutes, 10);
+  assert.equal(report.draft.runs, 1);
+  assert.equal(report.draft.p50Minutes, 1);
+  assert.deepEqual(report.failureCauses, [{
+    runId: 101,
+    url: "https://example.test/run/101",
+    failedJobs: ["pr-feedback"],
+  }]);
+  const markdown = renderCiHealthMarkdown(report);
+  assert.match(markdown, /Full-gate runs: 1 runs/u);
+  assert.match(markdown, /release-gate/u);
+  assert.match(markdown, /https:\/\/example\.test\/run\/101/u);
+});
+
+test("the scheduled ci-health workflow is cloud-only, read-only and non-gating", async () => {
+  const workflow = await readFile(
+    path.join(productRoot, ".github/workflows/ci-health.yml"),
+    "utf8",
+  );
+  assert.match(workflow, /schedule:/u);
+  assert.match(workflow, /cron: "0 1 \* \* 1"/u);
+  assert.match(workflow, /workflow_dispatch:/u);
+  assert.match(workflow, /actions: read/u);
+  assert.match(workflow, /contents: read/u);
+  assert.doesNotMatch(workflow, /secrets\.|contents: write|pull-requests: write/u);
+  assert.match(workflow, /timeout-minutes: 10/u);
+  assert.match(workflow, /ci-health-report\.mjs/u);
+  assert.match(workflow, /GITHUB_STEP_SUMMARY/u);
 });
