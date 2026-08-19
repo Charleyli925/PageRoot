@@ -3987,7 +3987,17 @@ async function startBridge() {
 }
 
 async function createWindow() {
-  const port = await startBridge();
+  // Only the renderer URL needs the Bridge endpoint. Protocol installation,
+  // external-file adoption, window construction and IPC registration do not,
+  // so let the utility process boot alongside them instead of ahead of them.
+  // startBridge is idempotent and deduplicates concurrent starts, so awaiting
+  // it again below costs nothing once the boot has already settled. No IPC
+  // handler can observe a missing port either: the renderer that would call
+  // one is loaded after the await, and fetchBridgeJson still fails closed.
+  const bridgeStartup = startBridge();
+  // Claim the rejection now so a throw between here and the await below cannot
+  // surface as an unhandled rejection; the awaited promise still rejects.
+  bridgeStartup.catch(() => {});
   ensurePreviewProtocolController();
   await adoptPendingExternalFileAtStartup();
 
@@ -4141,6 +4151,7 @@ async function createWindow() {
     mainWindow = null;
   });
 
+  const port = await bridgeStartup;
   await mainWindow.loadFile(rendererPath(), {
     query: {
       bridgePort: String(port),
