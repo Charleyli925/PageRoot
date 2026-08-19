@@ -5,6 +5,7 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -617,6 +618,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const staticAssetBaseHref = previewResourceBase || documentBaseHref;
   const containerRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const hoverHintMeasureRef = useRef<HTMLDivElement>(null);
   const frameWrittenHtmlRef = useRef<string | null>(null);
   const connectFrameRef = useRef<(
     iframe: HTMLIFrameElement,
@@ -778,6 +780,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     hint: false,
     capability: null,
   });
+  const [hoverHintMeasurement, setHoverHintMeasurement] = useState<{
+    copy: string;
+    width: number;
+  } | null>(null);
   const [hasTextRange, setHasTextRange] = useState(false);
   const [selectedStyle, setSelectedStyle] = useState<SelectedStyle>({
     fontSize: 16,
@@ -5535,6 +5541,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   let hoverOutlineStyle: CSSProperties | undefined;
   let hoverHintStyle: CSSProperties | undefined;
   let hoverHintPlacement: ReturnType<typeof placeCanvasHoverHint> | undefined;
+  const hoverHintCopy = hoverChrome.capability?.hint;
+  const hoverHintMeasuredWidth = hoverHintMeasurement
+    && hoverHintMeasurement.copy === hoverHintCopy
+    ? hoverHintMeasurement.width
+    : undefined;
   if (
     (showHoverOutline || showHoverHint)
     && hoverChrome.capability?.element?.isConnected
@@ -5556,15 +5567,28 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       targetLeft: chrome.outline.left,
       targetTop: chrome.outline.top,
       targetHeight: chrome.outline.height,
+      labelWidth: hoverHintMeasuredWidth,
     });
     hoverHintStyle = showHoverHint
       ? {
         left: hoverHintPlacement.left,
         top: hoverHintPlacement.top,
-        width: hoverHintPlacement.width,
+        maxWidth: hoverHintPlacement.width,
       }
       : undefined;
   }
+  useLayoutEffect(() => {
+    const hint = hoverHintMeasureRef.current;
+    if (!showHoverHint || !hoverHintCopy || !hint) return;
+    const width = hint.getBoundingClientRect().width;
+    if (!Number.isFinite(width) || width <= 0) return;
+    setHoverHintMeasurement((current) => {
+      if (current && current.copy === hoverHintCopy && Math.abs(current.width - width) < 0.5) {
+        return current;
+      }
+      return { copy: hoverHintCopy, width };
+    });
+  }, [hoverHintCopy, hoverHintPlacement?.left, hoverHintPlacement?.top, showHoverHint]);
   const selectedPagePresentationAction = (
     !readOnly
     && !interactionLocked
@@ -5644,38 +5668,47 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         />
       ) : null}
       {showHoverOutline && showHoverHint && hoverHintStyle && hoverChrome.capability ? (
-        <div
-          className={styles.hoverHint}
-          data-testid="canvas-capability-hint"
-          data-placement={hoverHintPlacement?.placement}
-          data-html-canvas-preserve-selection="true"
-          style={hoverHintStyle}
-          role="button"
-          aria-label={hoverChrome.capability.hint}
-          onPointerDown={(event) => {
-            hoverHintPointerInsideRef.current = true;
-            event.preventDefault();
-            event.stopPropagation();
-          }}
-          onPointerEnter={() => {
-            hoverHintPointerInsideRef.current = true;
-          }}
-          onPointerLeave={() => {
-            hoverHintPointerInsideRef.current = false;
-            hoverControllerRef.current?.hide();
-          }}
-          onClick={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            const capability = hoverChrome.capability;
-            if (!interactionLocked && capability) {
+        <>
+          <div
+            ref={hoverHintMeasureRef}
+            className={`${styles.hoverHint} ${styles.hoverHintMeasure}`}
+            aria-hidden="true"
+          >
+            {hoverChrome.capability.hint}
+          </div>
+          <div
+            className={styles.hoverHint}
+            data-testid="canvas-capability-hint"
+            data-placement={hoverHintPlacement?.placement}
+            data-html-canvas-preserve-selection="true"
+            style={hoverHintStyle}
+            role="button"
+            aria-label={hoverChrome.capability.hint}
+            onPointerDown={(event) => {
+              hoverHintPointerInsideRef.current = true;
+              event.preventDefault();
+              event.stopPropagation();
+            }}
+            onPointerEnter={() => {
+              hoverHintPointerInsideRef.current = true;
+            }}
+            onPointerLeave={() => {
+              hoverHintPointerInsideRef.current = false;
               hoverControllerRef.current?.hide();
-              selectElement(capability.element);
-            }
-          }}
-        >
-          {hoverChrome.capability.hint}
-        </div>
+            }}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              const capability = hoverChrome.capability;
+              if (!interactionLocked && capability) {
+                hoverControllerRef.current?.hide();
+                selectElement(capability.element);
+              }
+            }}
+          >
+            {hoverChrome.capability.hint}
+          </div>
+        </>
       ) : null}
       {editFeedback && !interactionLocked ? (
         <NoticeBar
