@@ -723,11 +723,12 @@ shrinking). The gate counts hooks structurally, so generic-typed calls such as
 This is a guardrail against silent drift, not a hard cap, and it is deliberately
 not applied to every large file:
 
-- Exceeding a ceiling fails the gate with a message that names the low-friction
-  escape valve: if the growth is intentional, raise the number in the same
-  change. Growth is allowed, but it must be a conscious, reviewed decision
-  rather than silent drift.
-- The intent is downward. When a file shrinks, the gate prints a hint to lower
+- Exceeding a ceiling is advisory only: the architecture check prints a visible
+  notice naming the low-friction escape valve — if the growth is intentional,
+  raise the number in the same change — but a budget notice never fails the
+  gate, CI or merge, and no test asserts the ceilings. Growth is allowed, but
+  it must be a conscious, reviewed decision rather than silent drift.
+- The intent is downward. When a file shrinks, the check prints a hint to lower
   its ceiling to the new value so the ratchet follows the file down.
 - Prefer moving logic out over raising a ceiling. The budget serves the goal of
   a thinner presentation layer; it must never become a reason to block a
