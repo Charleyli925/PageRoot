@@ -126,6 +126,7 @@
   position: absolute;
   z-index: 7;
   box-sizing: border-box;
+  width: fit-content;
   max-width: 220px;
   height: 24px;
   padding: 0 9px;
@@ -144,6 +145,13 @@
   -webkit-backdrop-filter: blur(10px);
   backdrop-filter: blur(10px);
   animation: canvas-capability-hint-in 180ms ease-out;
+}
+
+.hoverHintMeasure {
+  top: 0;
+  left: 0;
+  visibility: hidden;
+  pointer-events: none;
 }
 
 @keyframes canvas-capability-hint-in {

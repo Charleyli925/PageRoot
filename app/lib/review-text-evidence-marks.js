@@ -135,18 +135,108 @@ export function reviewTextEvidenceIsWhitespaceCode(code) {
     || code === 0xfeff;
 }
 
+/**
+ * Punctuation and standalone symbols carry no green dot.
+ *
+ * A dot per punctuation mark breaks the rhythm of the row without adding
+ * evidence: the reader already sees which words changed. Removal keeps the
+ * dotted rule an even sequence under letters, digits and ideographs only. The
+ * red strikethrough is unaffected — a strike must stay a continuous line and
+ * therefore still crosses punctuation.
+ *
+ * Ranges are checked by code point instead of a `\p{P}` regex so the predicate
+ * stays self-contained for `toString()` injection into the projection iframe.
+ */
+export function reviewTextEvidenceIsPunctuationCode(code) {
+  return (code >= 0x0021 && code <= 0x002f)
+    || (code >= 0x003a && code <= 0x0040)
+    || (code >= 0x005b && code <= 0x0060)
+    || (code >= 0x007b && code <= 0x007e)
+    || (code >= 0x00a1 && code <= 0x00a9)
+    || code === 0x00ab
+    || code === 0x00b7
+    || code === 0x00bb
+    || code === 0x00bf
+    || (code >= 0x2010 && code <= 0x205e)
+    || (code >= 0x20a0 && code <= 0x20bf)
+    || (code >= 0x2190 && code <= 0x2bff)
+    || (code >= 0x3001 && code <= 0x303f)
+    || (code >= 0xfe10 && code <= 0xfe6f)
+    || (code >= 0xff01 && code <= 0xff0f)
+    || (code >= 0xff1a && code <= 0xff20)
+    || (code >= 0xff3b && code <= 0xff40)
+    || (code >= 0xff5b && code <= 0xff65);
+}
+
 export function reviewTextEvidenceUnits(value) {
   const source = String(value || "");
   const units = [];
   let index = 0;
   while (index < source.length) {
     const end = reviewTextEvidenceGraphemeEnd(source, index);
-    if (!reviewTextEvidenceIsWhitespaceCode(source.charCodeAt(index))) {
+    const code = source.charCodeAt(index);
+    if (
+      !reviewTextEvidenceIsWhitespaceCode(code)
+      && !reviewTextEvidenceIsPunctuationCode(code)
+    ) {
       units.push({ start: index, end });
     }
     index = end;
   }
   return units;
+}
+
+/**
+ * Give every rendered dot row one baseline and one radius.
+ *
+ * Font fallback resolves a Latin digit and a CJK ideograph inside the same span
+ * to different physical fonts, so their client rects differ in top and height
+ * and a purely per-character baseline scatters the dots vertically. Grouping the
+ * row and taking its lowest baseline turns the sequence back into one even
+ * dotted rule without ever covering a glyph.
+ *
+ * Rows are never merged across glyph sizes: a small caption run beside a large
+ * headline number keeps its own natural depth instead of being dragged down to
+ * the headline's baseline. Row membership is measured against the seed dot so a
+ * row can never chain into the following text line.
+ *
+ * Self-contained by design — this runs inside the projection iframe through
+ * `toString()` injection.
+ */
+export function alignReviewTextEvidenceDotRows(dots) {
+  const rows = [];
+  [...dots]
+    .sort((left, right) => left.em - right.em || left.y - right.y || left.x - right.x)
+    .forEach((dot) => {
+      const row = rows.find((candidate) => (
+        Math.abs(candidate.em - dot.em) <= Math.max(candidate.em, dot.em) * 0.12
+        && Math.abs(candidate.anchorY - dot.y) <= Math.max(1, dot.em * 0.45)
+      ));
+      if (row) {
+        row.y = Math.max(row.y, dot.y);
+        row.radius = Math.max(row.radius, dot.radius);
+        row.dots.push(dot);
+        return;
+      }
+      rows.push({
+        em: dot.em,
+        anchorY: dot.y,
+        y: dot.y,
+        radius: dot.radius,
+        dots: [dot],
+      });
+    });
+  const aligned = [];
+  const placed = new Set();
+  rows.forEach((row) => {
+    row.dots.forEach((dot) => {
+      const key = Math.round(dot.x * 2) + "|" + Math.round(row.y * 2);
+      if (placed.has(key)) return;
+      placed.add(key);
+      aligned.push({ ...dot, y: row.y, radius: row.radius });
+    });
+  });
+  return aligned.sort((left, right) => left.y - right.y || left.x - right.x);
 }
 
 export function reviewTextEvidenceMarkGeometry(rect, fontSize, scale) {
@@ -161,11 +251,17 @@ export function reviewTextEvidenceMarkGeometry(rect, fontSize, scale) {
   const extra = Math.max(0, height - em);
   const glyphTop = top + extra / 2;
   const glyphBottom = glyphTop + em;
-  const strikeThickness = Math.max(1.15, em * 0.08) * uiScale;
-  const dash = Math.max(2, em * 0.16) * uiScale;
-  const gap = Math.max(1.35, em * 0.11) * uiScale;
+  const strikeThickness = Math.max(1, em * 0.07) * uiScale;
+  // A round stroke cap extends each dash by half the stroke thickness at both
+  // ends, so it grows every dash by one thickness and eats one thickness out of
+  // every gap. Feeding the intended rhythm straight into stroke-dasharray
+  // collapsed the gaps and rendered the strike as a solid red line. Convert the
+  // intended visible rhythm into cap-compensated dash values instead, and keep
+  // the visible gap wider than the visible dash so the line always reads dashed.
+  const visibleDash = Math.max(2, em * 0.15) * uiScale;
+  const visibleGap = Math.max(2.6, em * 0.19) * uiScale;
   const inset = Math.min(width * 0.08, Math.max(0.4, em * 0.04));
-  const dotRadius = Math.max(1.4, em * 0.09) * uiScale;
+  const dotRadius = Math.max(1.3, em * 0.08) * uiScale;
   const dotGap = Math.max(0.7, em * 0.04) * uiScale;
   const dotY = glyphBottom + dotGap + dotRadius;
   return {
@@ -176,11 +272,14 @@ export function reviewTextEvidenceMarkGeometry(rect, fontSize, scale) {
     strikeLeft: left + inset,
     strikeRight: Math.max(left + inset, right - inset),
     strikeThickness,
-    dash,
-    gap,
+    visibleDash,
+    visibleGap,
+    dash: Math.max(0.01, visibleDash - strikeThickness),
+    gap: visibleGap + strikeThickness,
     dotX: (left + right) / 2,
     dotY,
     dotRadius,
+    em,
     addedClearance: Math.max(0, (dotY + dotRadius) - bottom),
   };
 }
