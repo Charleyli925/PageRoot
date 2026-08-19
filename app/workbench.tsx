@@ -241,6 +241,8 @@ import type {
 const BROWSER_PREVIEW_LOGO_PLACEHOLDER =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x2='1' y2='1'%3E%3Cstop stop-color='%236550e8'/%3E%3Cstop offset='1' stop-color='%23d45df2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='15' fill='url(%23g)'/%3E%3Cpath d='M23 23 13 32l10 9M41 23l10 9-10 9M36 16 28 48' fill='none' stroke='white' stroke-width='5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E";
 const PROJECT_REPOSITORY_URL = "https://github.com/Charleyli925/PageRoot";
+const LATEST_RELEASE_PAGE_URL =
+  "https://github.com/Charleyli925/PageRoot/releases/latest";
 
 class DeferredEditorCommandDiscardedError extends Error {
   readonly reason: NativeDeferredCommandDiscardReason;
@@ -1282,6 +1284,7 @@ export default function Workbench() {
   const [manualUpdateCheckPending, setManualUpdateCheckPending] = useState(false);
   const [manualUpdateCheckFailed, setManualUpdateCheckFailed] = useState(false);
   const [repositoryOpenFailed, setRepositoryOpenFailed] = useState(false);
+  const [releaseNotesOpenFailed, setReleaseNotesOpenFailed] = useState(false);
   const [userNoticeOpenFailed, setUserNoticeOpenFailed] = useState(false);
   const promptedUpdateVersionRef = useRef<string | null>(null);
   const [toast, setToastState] = useState<Toast>(null);
@@ -2147,6 +2150,7 @@ export default function Workbench() {
   const openAboutPageRoot = useCallback(() => {
     setManualUpdateCheckFailed(false);
     setRepositoryOpenFailed(false);
+    setReleaseNotesOpenFailed(false);
     setUserNoticeOpenFailed(false);
     setAboutOpen(true);
   }, []);
@@ -2199,6 +2203,21 @@ export default function Workbench() {
       window.open(PROJECT_REPOSITORY_URL, "_blank", "noopener,noreferrer");
     } catch {
       setRepositoryOpenFailed(true);
+    }
+  }, []);
+
+  const openReleaseNotes = useCallback(async () => {
+    setReleaseNotesOpenFailed(false);
+    try {
+      const updates = window.htmlAIUpdates;
+      if (updates) {
+        const result = await updates.openLatestRelease();
+        if (!result?.opened) throw new Error("Release notes did not open.");
+        return;
+      }
+      window.open(LATEST_RELEASE_PAGE_URL, "_blank", "noopener,noreferrer");
+    } catch {
+      setReleaseNotesOpenFailed(true);
     }
   }, []);
 
@@ -8999,6 +9018,7 @@ export default function Workbench() {
         manualCheckPending={manualUpdateCheckPending}
         manualCheckFailed={manualUpdateCheckFailed}
         repositoryOpenFailed={repositoryOpenFailed}
+        releaseNotesOpenFailed={releaseNotesOpenFailed}
         userNoticeOpenFailed={userNoticeOpenFailed}
         onClose={closeAboutPageRoot}
         onCheckForUpdates={() => void checkForApplicationUpdates()}
@@ -9007,6 +9027,7 @@ export default function Workbench() {
           setAboutOpen(false);
           setRestartUpdateOpen(true);
         }}
+        onOpenReleaseNotes={() => void openReleaseNotes()}
         onOpenRepository={() => void openProjectRepository()}
         onOpenUserNotice={() => void openUserNotice()}
       />

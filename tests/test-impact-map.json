@@ -999,6 +999,16 @@
       ]
     },
     {
+      "id": "release-notes",
+      "patterns": [
+        "^scripts/release-notes\\.mjs$",
+        "^tests/release-notes\\.test\\.mjs$",
+        "^CHANGELOG\\.md$"
+      ],
+      "suites": [],
+      "nodeTests": ["tests/release-notes.test.mjs"]
+    },
+    {
       "id": "package-manifest-contract",
       "patterns": [
         "^package\\.json$",

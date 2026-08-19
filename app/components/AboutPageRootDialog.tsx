@@ -39,11 +39,13 @@ type AboutPageRootDialogProps = {
   manualCheckPending: boolean;
   manualCheckFailed: boolean;
   repositoryOpenFailed: boolean;
+  releaseNotesOpenFailed: boolean;
   userNoticeOpenFailed: boolean;
   onClose: () => void;
   onCheckForUpdates: () => void;
   onDownloadUpdate: () => void;
   onRequestRestart: () => void;
+  onOpenReleaseNotes: () => void;
   onOpenRepository: () => void;
   onOpenUserNotice: () => void;
 };
@@ -163,11 +165,13 @@ export default function AboutPageRootDialog({
   manualCheckPending,
   manualCheckFailed,
   repositoryOpenFailed,
+  releaseNotesOpenFailed,
   userNoticeOpenFailed,
   onClose,
   onCheckForUpdates,
   onDownloadUpdate,
   onRequestRestart,
+  onOpenReleaseNotes,
   onOpenRepository,
   onOpenUserNotice,
 }: AboutPageRootDialogProps) {
@@ -279,9 +283,20 @@ export default function AboutPageRootDialog({
               <CloudArrowDownIcon size={23} weight="duotone" />
             )}
           </div>
-          <div className="about-update-copy" aria-live="polite" aria-atomic="true">
-            <strong id="about-update-title">{presentation.title}</strong>
-            <p>{presentation.detail}</p>
+          <div className="about-update-column">
+            <div className="about-update-copy" aria-live="polite" aria-atomic="true">
+              <strong id="about-update-title">{presentation.title}</strong>
+              <p>{presentation.detail}</p>
+            </div>
+            <button
+              className="about-release-notes"
+              type="button"
+              title="在浏览器中查看这个版本的更新内容"
+              onClick={onOpenReleaseNotes}
+            >
+              <span>查看更新内容</span>
+              <ArrowSquareOutIcon aria-hidden="true" size={11} weight="bold" />
+            </button>
           </div>
           <button
             className="about-update-action"
@@ -298,6 +313,11 @@ export default function AboutPageRootDialog({
             {actionLabel}
           </button>
         </section>
+        {releaseNotesOpenFailed ? (
+          <p className="about-link-error" role="alert">
+            更新内容页面没有打开，请检查网络后重试。
+          </p>
+        ) : null}
 
         <button
           className="about-github-link"
