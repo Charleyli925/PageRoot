@@ -895,6 +895,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       reuseDocument?: boolean;
     } = {},
   ) => {
+    performance.mark("pageroot:canvas:load-start");
     const frameView = iframeRef.current?.contentWindow;
     pendingFrameViewportRef.current = options.preserveViewport && frameView
       ? { left: frameView.scrollX, top: frameView.scrollY }
@@ -948,6 +949,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       });
       onEditBlockedRef.current?.(message);
     }
+    performance.mark("pageroot:canvas:instrumented");
     const sourceIndex = sourceIndexRef.current;
     const runtimeGrant = options.forceStatic || reuseCandidate ? null : editRuntimeGrant;
     let runtimeFrame: RuntimeFrameContext | null = null;
@@ -4567,6 +4569,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     }
     renderedSourceHtmlRef.current = frameSourceHtmlRef.current;
     containerRef.current?.setAttribute("data-render-verified", "true");
+    performance.mark("pageroot:canvas:render-verified");
     fencedDocumentCleanupRef.current();
 
     let editorStyle = documentNode.head.querySelector<HTMLStyleElement>(`style[${EDITOR_STYLE_ATTRIBUTE}]`);
