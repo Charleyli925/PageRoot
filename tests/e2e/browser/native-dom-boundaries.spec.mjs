@@ -192,7 +192,7 @@ test("text-edit hover caption regains its intrinsic width after the canvas widen
 
   await editor.evaluate((element) => {
     Object.assign(element.style, {
-      width: "104px",
+      width: "64px",
       minWidth: "0px",
     });
   });
