@@ -29,6 +29,7 @@ import { TrashIcon } from "@phosphor-icons/react/dist/csr/Trash";
 import { TriangleIcon } from "@phosphor-icons/react/dist/csr/Triangle";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 
+import AttachmentLightbox from "./components/AttachmentLightbox";
 import HtmlCanvasEditor from "./components/HtmlCanvasEditor";
 import type {
   HtmlCanvasCommentLayoutState,
@@ -7120,7 +7121,7 @@ export default function Workbench() {
                   ref={openHtmlButtonRef}
                   className="window-file-quick-action"
                   type="button"
-                  data-tooltip="打开本地HTML"
+                  data-tooltip="打开新的本地 HTML"
                   aria-label="打开新的本地 HTML"
                   disabled={fileRenameEditing || fileRenameBusy}
                   onClick={() => void openProject()}
@@ -7964,7 +7965,13 @@ export default function Workbench() {
                     <div>
                       <button
                         type="button"
-                        onClick={() => setPendingDeleteCommentId(null)}
+                        autoFocus
+                        onClick={() => {
+                          setPendingDeleteCommentId(null);
+                          window.requestAnimationFrame(() => {
+                            document.getElementById("composer-delete-button")?.focus();
+                          });
+                        }}
                       >取消</button>
                       <button
                         className="confirm-delete"
@@ -8011,6 +8018,7 @@ export default function Workbench() {
                         <ImageIcon aria-hidden="true" size={15} weight="bold" />
                       </button>
                       <button
+                        id="composer-delete-button"
                         className="comment-tool-button danger"
                         type="button"
                         aria-label="删除未保存评论"
@@ -8226,10 +8234,14 @@ export default function Workbench() {
                         <div>
                           <button
                             type="button"
+                            autoFocus
                             onClick={(event) => {
                               event.currentTarget.blur();
                               setPendingDeleteCommentId(null);
                               queueReviewCommentFocus(comment.target, comment.commentId);
+                              window.requestAnimationFrame(() => {
+                                document.getElementById(`comment-delete-${comment.commentId}`)?.focus();
+                              });
                             }}
                           >取消</button>
                           <button
@@ -8344,6 +8356,7 @@ export default function Workbench() {
                             </button>
                           )}
                           <button
+                            id={`comment-delete-${comment.commentId}`}
                             className="comment-tool-button danger"
                             type="button"
                             aria-label="删除评论"
@@ -8372,37 +8385,12 @@ export default function Workbench() {
       </div>
 
       {previewAttachment && attachmentObjectUrls[previewAttachment.attachmentId] ? (
-        <div
-          className="attachment-lightbox"
-          role="dialog"
-          aria-modal="true"
-          aria-label={`预览图片 ${previewAttachment.fileName}`}
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) setPreviewAttachment(null);
-          }}
-        >
-          <div className="attachment-lightbox-content">
-            <div className="attachment-lightbox-header">
-              <span>
-                <strong>{previewAttachment.fileName}</strong>
-                <small>{formatFileSize(previewAttachment.byteLength)}</small>
-              </span>
-              <button
-                type="button"
-                aria-label="关闭图片预览"
-                onClick={() => setPreviewAttachment(null)}
-              >
-                <XIcon aria-hidden="true" size={18} weight="bold" />
-              </button>
-            </div>
-            {/* Blob URLs are project-local attachment previews and cannot use next/image. */}
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={attachmentObjectUrls[previewAttachment.attachmentId]}
-              alt={previewAttachment.fileName}
-            />
-          </div>
-        </div>
+        <AttachmentLightbox
+          fileName={previewAttachment.fileName}
+          sizeLabel={formatFileSize(previewAttachment.byteLength)}
+          src={attachmentObjectUrls[previewAttachment.attachmentId]}
+          onClose={() => setPreviewAttachment(null)}
+        />
       ) : null}
 
       <div

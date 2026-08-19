@@ -10,7 +10,7 @@
   border: 1px solid #dcd9d2;
   border-radius: 14px;
   background: #f4f2ed;
-  box-shadow: 0 12px 34px rgb(37 34 27 / 8%);
+  box-shadow: 0 12px 34px rgb(28 30 38 / 8%);
 }
 
 .frame {
@@ -46,7 +46,7 @@
   border-radius: 999px;
   color: #3e3a45;
   background: rgb(255 255 255 / 94%);
-  box-shadow: 0 7px 20px rgb(37 34 27 / 13%);
+  box-shadow: 0 7px 20px rgb(28 30 38 / 13%);
   font: 650 12px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   white-space: nowrap;
   pointer-events: none;
@@ -55,8 +55,8 @@
 }
 
 .lockNotice[data-mode="history"] {
-  border-color: rgb(81 71 220 / 22%);
-  color: #4037b7;
+  border-color: rgb(90 85 223 / 22%);
+  color: var(--indigo-deep);
   background: rgb(247 246 255 / 96%);
 }
 
@@ -101,7 +101,7 @@
   border-radius: 11px;
   color: #25232a;
   background: rgb(255 255 255 / 96%);
-  box-shadow: 0 10px 30px rgb(28 25 52 / 18%);
+  box-shadow: 0 10px 30px rgb(28 30 38 / 18%);
   font: 500 12px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   backdrop-filter: blur(12px);
 }
@@ -117,7 +117,7 @@
   position: absolute;
   z-index: 6;
   box-sizing: border-box;
-  border: 1.5px solid rgb(81 71 220 / 28%);
+  border: 1.5px solid rgb(90 85 223 / 28%);
   border-radius: 4px;
   pointer-events: none;
 }
@@ -130,11 +130,11 @@
   max-width: 220px;
   height: 24px;
   padding: 0 9px;
-  border: 1px solid rgb(81 71 220 / 18%);
+  border: 1px solid rgb(90 85 223 / 18%);
   border-radius: 999px;
   color: #fff;
-  background: rgb(81 71 220 / 90%);
-  box-shadow: 0 6px 16px rgb(81 71 220 / 18%);
+  background: rgb(90 85 223 / 90%);
+  box-shadow: 0 6px 16px rgb(90 85 223 / 18%);
   font: 650 11px/22px -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
   letter-spacing: 0.01em;
   white-space: nowrap;
@@ -180,7 +180,7 @@
   padding: 0 5px;
   border: 2px solid #fff;
   border-radius: 999px;
-  color: #5147dc;
+  color: var(--indigo);
   background: #eeecff;
   box-shadow: 0 4px 12px rgb(45 39 145 / 22%);
   cursor: pointer;
@@ -195,13 +195,13 @@
 
 .commentMarker:hover {
   color: #fff;
-  background: #5147dc;
+  background: var(--indigo);
 }
 
 .commentMarker:focus-visible,
 .toolbar button:focus-visible,
 .toolbar input:focus-visible {
-  outline: 3px solid rgb(91 75 223 / 30%);
+  outline: 3px solid rgb(90 85 223 / 30%);
   outline-offset: 2px;
 }
 
@@ -222,12 +222,12 @@
 .commentToolButton {
   padding: 0 12px;
   color: #fff;
-  background: #5147dc;
-  box-shadow: 0 4px 12px rgb(81 71 220 / 22%);
+  background: var(--indigo);
+  box-shadow: 0 4px 12px rgb(90 85 223 / 22%);
 }
 
 .commentToolButton:hover {
-  background: #4338ca;
+  background: var(--indigo-deep);
 }
 
 .toolButton {
@@ -235,7 +235,7 @@
 }
 
 .presentationToolButton {
-  color: #4338ca;
+  color: var(--indigo-deep);
   background: #eceae6;
   white-space: nowrap;
 }
@@ -295,6 +295,7 @@
 
 .field,
 .colorField {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -375,7 +376,7 @@
   border: 1px solid rgb(32 29 49 / 12%);
   border-radius: 10px;
   background: rgb(255 255 255 / 98%);
-  box-shadow: 0 12px 28px rgb(28 25 52 / 18%);
+  box-shadow: 0 12px 28px rgb(28 30 38 / 18%);
 }
 
 .spacingPanel .field {
@@ -390,6 +391,7 @@
 }
 
 .iconButton {
+  position: relative;
   min-width: 38px;
   padding: 0 7px;
   font-size: 11px;
@@ -437,7 +439,7 @@
 
 .toolbar {
   border-radius: 9px;
-  box-shadow: 0 9px 24px rgb(28 25 52 / 15%);
+  box-shadow: 0 9px 24px rgb(28 30 38 / 15%);
 }
 
 /* The V5 workbench owns these controls in the application toolbar. Keeping the
