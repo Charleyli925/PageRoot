@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   aggregateReviewBadgeLabels,
+  reviewBadgeFactCount,
   reviewBadgeLabelText,
   reviewBadgesCrowd,
 } from "../app/lib/review-badge-aggregation.js";
@@ -123,4 +124,28 @@ test("reviewBadgesCrowd requires a shared column", () => {
   const otherColumn = { left: 400, right: 480, top: 0, bottom: 20 };
   assert.equal(reviewBadgesCrowd(left, sameColumn, 26), true);
   assert.equal(reviewBadgesCrowd(left, otherColumn, 26), false);
+});
+
+test("a collapsed nested box contributes every fact it stands for", () => {
+  assert.equal(reviewBadgeFactCount({}), 1);
+  assert.equal(reviewBadgeFactCount({ labelCount: 4 }), 4);
+  assert.equal(reviewBadgeFactCount({ labelCount: 0 }), 1);
+  assert.equal(reviewBadgeFactCount(undefined), 1);
+
+  const records = [
+    box({ changeId: "a", top: 0, bottom: 20, labelCount: 3 }),
+    box({ changeId: "b", top: 24, bottom: 44 }),
+  ];
+  const result = aggregateReviewBadgeLabels(records, { labelReach: 26 });
+  const representative = result.find((record) => record.labelPrimary !== false);
+  assert.equal(primaryCount(result), 1);
+  assert.equal(
+    representative.labelCount,
+    4,
+    "counting boxes instead of facts would under-report a collapsed cluster",
+  );
+  assert.equal(
+    reviewBadgeLabelText(representative.summary, representative.labelCount),
+    "视觉调整 ×4",
+  );
 });

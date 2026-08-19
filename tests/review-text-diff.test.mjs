@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   readableReviewTextFootprintPlan,
+  reconcileReviewTextSurvivors,
   reviewSentenceRanges,
   reviewTextSimilarity,
   sentenceAwareTextDifferences,
@@ -262,4 +263,104 @@ test("tiny unchanged gaps are absorbed but sentence boundaries split footprints"
 
   assert.equal(compact.before.phraseGroups.length, 1);
   assert.equal(separated.before.phraseGroups.length, 2);
+});
+
+test("merging four sentences into one keeps the surviving numbers unmarked", () => {
+  const before = "内容平台搜索挤压传统电商的趋势不变，但大盘增量呈现增速放缓态势，26Q2 日均搜索请求 96.2 亿次，YoY +18%；较 26 年 1&2 月双月大盘增速 +20% 回落 2pp；增速放缓的同时结构变化加剧：抖系份额收缩、微信与小红书接棒增长；大盘增长动能加速向内容平台迁移。";
+  const after = "大盘增量增速放缓（96.2 亿次/日，YoY +18%，较 1&2 月 +20% 回落 2pp），但结构变化加剧：抖系份额收缩，微信、小红书接棒增长。";
+  const result = compare(before, after);
+  const beforeMarked = result.before.join("");
+  const afterMarked = result.after.join("");
+
+  for (const survivor of ["96.2", "YoY", "+18%", "回落", "2pp", "结构变化加剧", "抖系份额收缩", "接棒增长"]) {
+    assert.ok(
+      !beforeMarked.includes(survivor),
+      `${survivor} is still on the page and must not be struck through`,
+    );
+    assert.ok(
+      !afterMarked.includes(survivor),
+      `${survivor} was already on the page and must not be announced as new`,
+    );
+  }
+  assert.ok(
+    beforeMarked.includes("内容平台搜索挤压传统电商的趋势不变"),
+    "text that really disappeared must stay marked",
+  );
+  const visible = (value) => [...value.replace(/\s/gu, "")].length;
+  assert.ok(
+    visible(afterMarked) < visible(after) * 0.25,
+    `a mostly-reused rewrite must not mark ${visible(afterMarked)}/${visible(after)} characters as new`,
+  );
+});
+
+test("survivor reconciliation only ever shrinks the marked set", () => {
+  const cases = [
+    ["甲乙丙丁。", "甲乙丙丁戊。"],
+    ["第一句。第二句。第三句。", "第一句和第二句与第三句合并。"],
+    ["单句改写前的完整说法。", "单句改写后的另一种完整说法。"],
+    ["列表项一；列表项二；列表项三。", "列表项三；列表项一；列表项二。"],
+    ["价格 12 元", "价格 18 元"],
+  ];
+  for (const [before, after] of cases) {
+    const reconciled = sentenceAwareTextDifferences(before, after);
+    const raw = reconcileReviewTextSurvivors(
+      before,
+      [{ start: 0, end: before.length }],
+      after,
+      [{ start: 0, end: after.length }],
+    );
+    const covered = (source, ranges) => ranges.reduce(
+      (total, range) => total + [...source.slice(range.start, range.end).replace(/\s/gu, "")].length,
+      0,
+    );
+    assert.ok(
+      covered(before, reconciled.before) <= [...before.replace(/\s/gu, "")].length,
+      `${before} → ${after}: marks cannot exceed the text`,
+    );
+    assert.ok(
+      covered(after, raw.after) <= [...after.replace(/\s/gu, "")].length,
+      `${before} → ${after}: reconciliation cannot invent marks`,
+    );
+  }
+});
+
+test("a pure reorder stays reported instead of reconciling itself away", () => {
+  const before = "甲项目说明，乙项目说明。";
+  const after = "乙项目说明，甲项目说明。";
+  const reconciled = reconcileReviewTextSurvivors(
+    before,
+    [{ start: 0, end: before.length }],
+    after,
+    [{ start: 0, end: after.length }],
+  );
+  assert.ok(
+    reconciled.before.length || reconciled.after.length,
+    "emptying both sides would hide a real change",
+  );
+});
+
+test("a punctuation-only residual never earns its own mark", () => {
+  const dropped = reconcileReviewTextSurvivors(
+    "甲乙丙、丁戊己",
+    [{ start: 0, end: 7 }],
+    "甲乙丙，丁戊己，庚辛",
+    [{ start: 0, end: 10 }],
+  );
+  assert.deepEqual(dropped.before, [], "an enumeration comma swap is below the threshold");
+  assert.deepEqual(
+    dropped.after.map((range) => "甲乙丙，丁戊己，庚辛".slice(range.start, range.end)),
+    ["，庚辛"],
+    "the inserted words keep the punctuation they arrived with, as one range",
+  );
+
+  const punctuationOnly = reconcileReviewTextSurvivors(
+    "甲乙丙、丁戊己",
+    [{ start: 0, end: 7 }],
+    "甲乙丙，丁戊己",
+    [{ start: 0, end: 7 }],
+  );
+  assert.ok(
+    punctuationOnly.before.length && punctuationOnly.after.length,
+    "when punctuation is the only change it must still be reported",
+  );
 });

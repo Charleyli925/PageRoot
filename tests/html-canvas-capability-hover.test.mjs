@@ -148,6 +148,20 @@ test("caption placement clamps horizontally inside a narrow canvas", () => {
   assert.ok(placement.left + placement.width <= 120);
 });
 
+test("caption placement uses its rendered width at the right canvas edge", () => {
+  const placement = placeCanvasHoverHint({
+    containerWidth: 640,
+    targetLeft: 600,
+    targetTop: 80,
+    targetHeight: 20,
+    labelWidth: 109,
+  });
+
+  assert.equal(placement.left, 523);
+  assert.equal(placement.width, 109);
+  assert.equal(placement.left + placement.width, 632);
+});
+
 test("hover copy stays inside the hit rectangle", () => {
   const chrome = layoutCanvasHoverChrome({
     left: 40,

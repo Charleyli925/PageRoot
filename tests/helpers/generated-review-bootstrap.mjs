@@ -5,11 +5,14 @@ import vm from "node:vm";
 import ts from "typescript";
 
 import {
+  alignReviewTextEvidenceDotRows,
   reviewTextEvidenceGraphemeEnd,
+  reviewTextEvidenceIsPunctuationCode,
   reviewTextEvidenceMarkGeometry,
 } from "../../app/lib/review-text-evidence-marks.js";
 import {
   aggregateReviewBadgeLabels,
+  reviewBadgeFactCount,
   reviewBadgeLabelText,
 } from "../../app/lib/review-badge-aggregation.js";
 
@@ -67,10 +70,26 @@ export function generatedReviewBootstrap(
       "width",
     ],
     reviewTextEvidenceGraphemeEnd,
+    reviewTextEvidenceIsPunctuationCode,
     reviewTextEvidenceMarkGeometry,
+    alignReviewTextEvidenceDotRows,
     reviewBadgeLabelText,
+    reviewBadgeFactCount,
     aggregateReviewBadgeLabels,
   });
+  // The bootstrap receives its helpers as `${fn.toString()}` injections, so a
+  // new injection that is not also provided here fails deep inside the vm with a
+  // bare ReferenceError. Compare the two lists up front and name the gap.
+  const injected = [...reviewDocument.matchAll(
+    /^\s*const (\w+) = \$\{\1\.toString\(\)\};$/gmu,
+  )].map((match) => match[1]);
+  const missing = injected.filter((name) => !(name in context));
+  assert.deepEqual(
+    missing,
+    [],
+    `review-document.ts injects ${missing.join(", ")} into the bootstrap; add it to this harness context too`,
+  );
+  assert.ok(injected.length > 0, "expected to find toString() injections to verify");
   new vm.Script(transpiled).runInContext(context);
   return context.reviewBootstrap(
     "review-session",
