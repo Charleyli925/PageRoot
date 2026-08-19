@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
@@ -146,6 +147,20 @@ test("caption placement clamps horizontally inside a narrow canvas", () => {
   assert.equal(placement.width, 104);
   assert.ok(placement.left >= 0);
   assert.ok(placement.left + placement.width <= 120);
+});
+
+test("caption width follows its copy instead of the positioning reservation", async () => {
+  const [editor, styles] = await Promise.all([
+    readFile(new URL("../app/components/HtmlCanvasEditor.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/HtmlCanvasEditor.module.css", import.meta.url), "utf8"),
+  ]);
+  const styleAssignment = editor.match(
+    /hoverHintStyle = showHoverHint\s*\?\s*\{(?<style>[\s\S]*?)\}\s*:\s*undefined;/u,
+  );
+
+  assert.ok(styleAssignment?.groups?.style);
+  assert.doesNotMatch(styleAssignment.groups.style, /\bwidth\s*:/u);
+  assert.match(styles, /\.hoverHint\s*\{[\s\S]*?\bwidth:\s*fit-content;/u);
 });
 
 test("hover copy stays inside the hit rectangle", () => {

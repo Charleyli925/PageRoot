@@ -101,6 +101,28 @@ test("hovering a filled module's padding advertises the same module click select
   await expect(editor.getByRole("toolbar")).toBeVisible();
 });
 
+test("text-edit hover caption hugs its copy instead of a fixed ribbon", async ({ page }) => {
+  const { editor, frame } = await loadFixture(page, "complex-layout.html");
+  const target = frame.locator(caseSelector("paragraph-entities"));
+
+  await target.hover({ position: { x: 20, y: 20 } });
+  const hint = editor.getByTestId("canvas-capability-hint");
+  await expect(hint).toBeVisible({ timeout: 1500 });
+  await expect(hint).toHaveText("双击文字直接编辑");
+
+  const metrics = await hint.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return {
+      inlineWidth: element.style.width,
+      width: rect.width,
+      scrollWidth: element.scrollWidth,
+    };
+  });
+  expect(metrics.inlineWidth).toBe("");
+  expect(metrics.width).toBeLessThan(160);
+  expect(Math.abs(metrics.width - metrics.scrollWidth)).toBeLessThanOrEqual(2);
+});
+
 test("clicking blank header and comment-rail surfaces commits editing and clears selection", async ({
   page,
 }) => {

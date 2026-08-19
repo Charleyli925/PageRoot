@@ -19,6 +19,7 @@ const smokeTitles = [
   "deleting a bare-text fragment ends its session without a blocked resume",
   "clicking a filled module's padding selects that module",
   "hovering a filled module's padding advertises the same module click selects",
+  "text-edit hover caption hugs its copy instead of a fixed ribbon",
   "clicking a canvas selects the dedicated surface instead of the wrapping module",
   "double-clicking a canvas reports the dedicated root and stays comment-only",
   "first double-click places a caret; a second double-click selects the word",

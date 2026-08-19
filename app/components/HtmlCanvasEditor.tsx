@@ -5561,7 +5561,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       ? {
         left: hoverHintPlacement.left,
         top: hoverHintPlacement.top,
-        width: hoverHintPlacement.width,
       }
       : undefined;
   }

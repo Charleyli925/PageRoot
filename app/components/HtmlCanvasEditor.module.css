@@ -126,6 +126,7 @@
   position: absolute;
   z-index: 7;
   box-sizing: border-box;
+  width: fit-content;
   max-width: 220px;
   height: 24px;
   padding: 0 9px;
