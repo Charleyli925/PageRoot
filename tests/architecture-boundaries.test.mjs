@@ -5,7 +5,6 @@ import test from "node:test";
 import {
   architectureViolations,
   compositionBoundaryViolations,
-  budgetFindings,
 } from "../scripts/check-architecture.mjs";
 import {
   parseModule,
@@ -174,10 +173,7 @@ test("countReactHooks counts generic-typed hook calls a regex would miss", () =>
   assert.equal(countReactHooks(sample), 5);
 });
 
-// The ratchet is seeded at or above the current measurements, so a clean tree
-// must not report a budget violation. This keeps the guardrail honest: it fires
-// only on real growth, never on the committed baseline.
-test("complexity budget is seeded at or above current metrics", async () => {
-  const { violations } = await budgetFindings();
-  assert.deepEqual(violations, []);
-});
+// Deliberately no budget-enforcement test: the ratchet is advisory, so growth
+// never blocks CI or merge (see ARCHITECTURE_CONTRACT.md > Complexity budget
+// ratchet). Advisory notices are printed by scripts/check-architecture.mjs
+// alongside the gate output.

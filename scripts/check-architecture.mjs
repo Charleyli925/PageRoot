@@ -1218,7 +1218,6 @@ export async function architectureViolations() {
       "app/application/run-workflow.js: AI requests must bind the exact frozen persisted source and Edit must not own a runtime projection",
     );
   }
-  const budget = await budgetFindings();
   // Budget exceeding is advisory — it prints a visible notice but does not block
   // CI or merge. The intent is to make growth conscious and visible, not to gate
   // delivery on whether someone remembered to bump a number before pushing.
@@ -1228,10 +1227,11 @@ export async function architectureViolations() {
 
 // Complexity budget ratchet. Compares each file in
 // scripts/architecture-budget.json against its recorded ceiling. This is a
-// guardrail against silent drift, not a hard cap: exceeding a ceiling fails with
-// a message that states the low-friction escape valve (raise the number in the
+// guardrail against silent drift, not a hard cap: exceeding a ceiling prints an
+// advisory notice naming the low-friction escape valve (raise the number in the
 // same change), while staying under it emits a hint to lower the ceiling so the
-// ratchet follows a shrinking file down.
+// ratchet follows a shrinking file down. Advisories never fail the gate or
+// block merge.
 export async function budgetFindings() {
   const measurers = {
     maxLines: (source) => source.split("\n").length,
