@@ -4,6 +4,15 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
+- 现在能看到“更新了什么”。“关于源页”的更新卡常驻一条“查看更新内容”，无论
+  当前是已是最新、发现新版本还是已下载待重启，都能直接打开该版本的更新说明；
+  页面没有打开时在同一张卡下方说明原因。以前这个位置只能跳到仓库首页，
+  用户无处得知一个版本修了什么。
+- 正式 Release 的说明正文改为 `CHANGELOG.md` 中该版本的小节，不再是自动生成的
+  英文 Pull Request 标题列表，并附上该 tag 上完整 CHANGELOG 的固定链接，跳版本
+  升级的用户也能补齐中间的变更。缺少或空白的版本小节会在创建 tag 之前就中止
+  发布，不会再发出一个没有可读说明的版本。
+
 - Filename “打开本地HTML” and “在默认浏览器中打开” hover/focus hints now
   sit horizontally centered above their icons instead of the top-right.
 - AI 审阅里，删除文字恢复为穿过原字的红色横虚线，新增文字在每个字下叠一层小绿点；两者都不再改作者颜色、字号或行距。绿点不再使用会撑开行高的 CSS 着重号。

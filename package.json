@@ -49,6 +49,7 @@
     "test:package": "node scripts/test-node-group.mjs package",
     "verify:packaged": "node scripts/verify-packaged-artifact.mjs --arch arm64",
     "release:assets": "node scripts/create-release-assets.mjs",
+    "release:notes": "node scripts/release-notes.mjs",
     "audit:dependencies": "node scripts/check-dependency-audit.mjs",
     "pr:candidate": "node scripts/classify-pr-candidate.mjs",
     "review:snapshot": "node scripts/check-pr-review-policy.mjs",
