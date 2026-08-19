@@ -1071,40 +1071,58 @@ export default function AiReviewWorkspace({
     const previewApi = window.htmlAIPreview;
     if (!previewApi) return undefined;
     let cancelled = false;
-    const createdSessions: ReviewDesktopSession[] = [];
-    void (async () => {
-      try {
-        const beforeSession = await previewApi.createSession({
-          html: documents.before,
-          bootstrapJavaScript: documents.bootstrapJavaScript.before,
-          bootstrapFallbackJavaScript: documents.bootstrapFallbackJavaScript.before,
-          ...(sourcePath ? { sourcePath } : {}),
-        });
-        createdSessions.push(beforeSession);
-        const afterSession = await previewApi.createSession({
-          html: documents.after,
-          bootstrapJavaScript: documents.bootstrapJavaScript.after,
-          bootstrapFallbackJavaScript: documents.bootstrapFallbackJavaScript.after,
-          ...(sourcePath ? { sourcePath } : {}),
-        });
-        createdSessions.push(afterSession);
-        if (cancelled) return;
-        setDesktopSessionResult({
-          documents,
-          sessions: { before: beforeSession, after: afterSession },
-          failed: false,
-        });
-      } catch {
-        if (!cancelled) {
-          setDesktopSessionResult({ documents, sessions: null, failed: true });
-        }
+    const liveSessions: ReviewDesktopSession[] = [];
+    // A session can resolve after this effect is torn down, and a snapshot taken
+    // by the cleanup is still empty while the creates are in flight. Revoking on
+    // arrival is what keeps a superseded review from leaking a live session.
+    const adopt = (session: ReviewDesktopSession) => {
+      if (cancelled) {
+        void previewApi.revokeSession(session.sessionId);
+        return session;
       }
-    })();
+      liveSessions.push(session);
+      return session;
+    };
+    const releaseLiveSessions = () => {
+      while (liveSessions.length) {
+        const session = liveSessions.pop();
+        if (session) void previewApi.revokeSession(session.sessionId);
+      }
+    };
+    // The two sides are independent, and each create resolves a preview source
+    // root and walks the declared assets of a complete document. Creating them
+    // together removes one full document scan from the review entry path.
+    void Promise.all([
+      previewApi.createSession({
+        html: documents.before,
+        bootstrapJavaScript: documents.bootstrapJavaScript.before,
+        bootstrapFallbackJavaScript: documents.bootstrapFallbackJavaScript.before,
+        ...(sourcePath ? { sourcePath } : {}),
+      }).then(adopt),
+      previewApi.createSession({
+        html: documents.after,
+        bootstrapJavaScript: documents.bootstrapJavaScript.after,
+        bootstrapFallbackJavaScript: documents.bootstrapFallbackJavaScript.after,
+        ...(sourcePath ? { sourcePath } : {}),
+      }).then(adopt),
+    ]).then(([beforeSession, afterSession]) => {
+      if (cancelled) return;
+      setDesktopSessionResult({
+        documents,
+        sessions: { before: beforeSession, after: afterSession },
+        failed: false,
+      });
+    }).catch(() => {
+      // One side failing leaves the other unusable for a paired comparison, so
+      // release it now instead of holding it until the next teardown.
+      releaseLiveSessions();
+      if (!cancelled) {
+        setDesktopSessionResult({ documents, sessions: null, failed: true });
+      }
+    });
     return () => {
       cancelled = true;
-      createdSessions.forEach((createdSession) => {
-        void previewApi.revokeSession(createdSession.sessionId);
-      });
+      releaseLiveSessions();
     };
   }, [documents, independentTransport, sourcePath]);
 

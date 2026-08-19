@@ -1392,6 +1392,26 @@ export default function Workbench() {
         });
         return;
       }
+      if (event.type === "version-refresh-warning") {
+        const refreshEvent = event as Readonly<{
+          context?: ProjectContext | null;
+          candidateLabel?: string;
+          reason?: string;
+        }>;
+        if (
+          refreshEvent.context
+          && !workspaceController.matchesCurrentProjectContext(refreshEvent.context)
+        ) return;
+        setToast({
+          title: `${refreshEvent.candidateLabel || "新版本"} 已打开，但需要复核`,
+          message: refreshEvent.reason || "项目资料尚未完成复核。",
+          tone: "warning",
+          sticky: true,
+          disposition: "background-result",
+          dedupeKey: "current-version-result",
+        });
+        return;
+      }
       if (event.type === "attachment-cleanup-failed") {
         const attachmentEvent = event as Readonly<{
           context?: ProjectContext | null;
@@ -3000,6 +3020,7 @@ export default function Workbench() {
     expectedSha256: string,
     context?: ProjectContext,
   ): Promise<void> => {
+    performance.mark("pageroot:canvas:verify-start");
     let expectedGeneration = currentDocumentSessionSnapshot().canvasGeneration;
     const waitForCurrentGeneration = async (): Promise<boolean> => {
       let attemptLimit = 40;
@@ -3033,6 +3054,7 @@ export default function Workbench() {
           throw new Error("画布已载入内容的 Hash 与源 HTML 不一致。");
         }
         acknowledgeCanvasRender("edit", expectedGeneration, renderedSha256);
+        performance.mark("pageroot:canvas:verify-ack");
         return true;
       }
       return false;
@@ -3041,6 +3063,7 @@ export default function Workbench() {
 
     // A missing acknowledgement is a disposable-Canvas failure, not a user
     // conflict. Rebuild exactly once from the authoritative Document snapshot.
+    performance.mark("pageroot:canvas:verify-rebuild");
     expectedGeneration = requiredWorkspaceController(
       workspaceControllerRef.current,
     ).reloadDocumentCanvas().canvasGeneration;
@@ -5813,6 +5836,7 @@ export default function Workbench() {
       )
     ) return;
     const operationKey = activeRunOperationKey(run);
+    performance.mark("pageroot:accept:start");
     setOpeningReadyVersion(true);
     try {
       const outcome = await requiredWorkspaceController(workspaceController)
@@ -5825,6 +5849,7 @@ export default function Workbench() {
               }
             : null,
         });
+      performance.mark("pageroot:accept:activated");
       if (outcome.status !== "succeeded") {
         if (outcome.status !== "stale") {
           setDrawer("handoff");
@@ -5847,16 +5872,15 @@ export default function Workbench() {
         committedSourcePath: string;
         lastModifiedAt: string;
         verificationWarning?: string;
-        refreshWarning?: string;
       };
       if (readyReviewSession?.operationKey === operationKey) {
+        // The canvas already acknowledged the verified Version bytes inside
+        // activateReadyVersion, so the overlay teardown, drawer close and
+        // mode switch below can land in one React commit: a single visual
+        // cut instead of a multi-frame cascade.
         setDrawer(null);
-        await new Promise<void>((resolve) => {
-          window.requestAnimationFrame(() => {
-            window.requestAnimationFrame(() => resolve());
-          });
-        });
         setReadyReviewSession(null);
+        performance.mark("pageroot:accept:overlay-closed");
       }
       if (!result.current) {
         setToast({
@@ -5887,6 +5911,7 @@ export default function Workbench() {
       setHandoffPreviewOpen(false);
       setCanvasMode("edit");
       setDrawer(null);
+      performance.mark("pageroot:accept:ui-committed");
       if (result.protocolViolation) {
         const warning = "内部 AI 的临时输出在最终化后又被修改；已提交版本本身未受影响。";
         setDrawer("handoff");
@@ -5898,10 +5923,10 @@ export default function Workbench() {
           dedupeKey: "current-version-result",
           action: { id: "open-handoff", label: "查看处理详情" },
         });
-      } else if (result.verificationWarning || result.refreshWarning) {
+      } else if (result.verificationWarning) {
         setToast({
           title: `${result.candidateLabel} 已打开，但需要复核`,
-          message: result.verificationWarning || result.refreshWarning || "",
+          message: result.verificationWarning,
           tone: "warning",
           sticky: true,
           disposition: "background-result",
