@@ -22,6 +22,7 @@ const smokeTitles = [
   "text-edit hover caption hugs its copy instead of a fixed ribbon",
   "text-edit hover caption stays at the right canvas edge",
   "text-edit hover caption stays inside a narrow canvas",
+  "text-edit hover caption regains its intrinsic width after the canvas widens",
   "clicking a canvas selects the dedicated surface instead of the wrapping module",
   "double-clicking a canvas reports the dedicated root and stays comment-only",
   "first double-click places a caret; a second double-click selects the word",

@@ -184,6 +184,44 @@ test("text-edit hover caption stays inside a narrow canvas", async ({ page }) =>
   }).toBeLessThanOrEqual(1);
 });
 
+test("text-edit hover caption regains its intrinsic width after the canvas widens", async ({
+  page,
+}) => {
+  const { editor, frame } = await loadFixture(page, "complex-layout.html");
+  const target = frame.locator(caseSelector("paragraph-entities"));
+
+  await editor.evaluate((element) => {
+    Object.assign(element.style, {
+      width: "104px",
+      minWidth: "0px",
+    });
+  });
+  await target.evaluate((element) => {
+    Object.assign(element.style, {
+      position: "fixed",
+      top: "120px",
+      left: "8px",
+      width: "48px",
+    });
+  });
+  await target.hover({ position: { x: 12, y: 12 } });
+  const hint = editor.getByTestId("canvas-capability-hint");
+  await expect(hint).toBeVisible({ timeout: 1500 });
+  await expect.poll(() => hint.evaluate((element) => (
+    element.scrollWidth - element.clientWidth
+  ))).toBeGreaterThan(1);
+
+  await editor.evaluate((element) => {
+    element.style.width = "600px";
+  });
+  await page.evaluate(() => window.dispatchEvent(new Event("resize")));
+
+  await expect(hint).toBeVisible();
+  await expect.poll(() => hint.evaluate((element) => (
+    element.scrollWidth - element.clientWidth
+  ))).toBeLessThanOrEqual(1);
+});
+
 test("clicking blank header and comment-rail surfaces commits editing and clears selection", async ({
   page,
 }) => {
