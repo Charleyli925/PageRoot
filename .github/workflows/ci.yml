@@ -389,23 +389,35 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}
-      - name: Install Playwright system dependencies
-        timeout-minutes: 10
-        # An apt mirror stall must cost minutes, not the whole job budget:
-        # retry once with a four-minute attempt bound instead of hanging
-        # silently until the job timeout kills the lane. The evidence stage
-        # keeps such a failure classified as ci_environment, never as a
-        # product regression.
-        run: |
-          node scripts/ci-evidence.mjs run \
-            --suite browser-${{ matrix.label }}-install-deps \
-            --stage environment-preflight \
-            -- \
-            bash -c 'for attempt in 1 2; do if timeout 240 npx playwright install-deps chromium; then exit 0; fi; echo "playwright install-deps attempt ${attempt} failed"; done; exit 1'
       - name: Install Playwright Chromium
         timeout-minutes: 5
         if: steps.playwright-cache.outputs.cache-hit != 'true'
         run: npx playwright install chromium
+      - name: Probe Playwright Chromium host readiness
+        id: playwright-host
+        timeout-minutes: 2
+        # The hosted image normally already carries Chromium's shared-library
+        # prerequisites. Launch the restored or freshly installed browser
+        # first, so every matrix lane avoids apt when those prerequisites are
+        # present.
+        run: |
+          if node -e 'const { chromium } = require("playwright"); (async () => { const browser = await chromium.launch({ headless: true }); await browser.close(); })().catch((error) => { console.error(error.message); process.exit(1); });'; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Install Playwright system dependencies when required
+        if: steps.playwright-host.outputs.ready != 'true'
+        timeout-minutes: 10
+        # Do not kill a slow apt parent mid-install: its child can keep the
+        # dpkg lock and make a retry fail immediately. This fallback is only
+        # reached when the launch probe proves the runner lacks a library.
+        run: >-
+          node scripts/ci-evidence.mjs run
+          --suite browser-${{ matrix.label }}-install-deps
+          --stage environment-preflight
+          --
+          npx playwright install-deps chromium
       - name: Download shared web build
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         timeout-minutes: 10

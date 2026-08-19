@@ -101,6 +101,127 @@ test("hovering a filled module's padding advertises the same module click select
   await expect(editor.getByRole("toolbar")).toBeVisible();
 });
 
+test("text-edit hover caption hugs its copy instead of a fixed ribbon", async ({ page }) => {
+  const { editor, frame } = await loadFixture(page, "complex-layout.html");
+  const target = frame.locator(caseSelector("paragraph-entities"));
+
+  await target.hover({ position: { x: 20, y: 20 } });
+  const hint = editor.getByTestId("canvas-capability-hint");
+  await expect(hint).toBeVisible({ timeout: 1500 });
+  await expect(hint).toHaveText("双击文字直接编辑");
+
+  const metrics = await hint.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return {
+      inlineWidth: element.style.width,
+      width: rect.width,
+      scrollWidth: element.scrollWidth,
+    };
+  });
+  expect(metrics.inlineWidth).toBe("");
+  expect(metrics.width).toBeLessThan(160);
+  expect(Math.abs(metrics.width - metrics.scrollWidth)).toBeLessThanOrEqual(2);
+});
+
+test("text-edit hover caption stays at the right canvas edge", async ({ page }) => {
+  const { editor, frame } = await loadFixture(page, "complex-layout.html");
+  const target = frame.locator(caseSelector("paragraph-entities"));
+
+  await target.evaluate((element) => {
+    Object.assign(element.style, {
+      position: "fixed",
+      top: "120px",
+      right: "0px",
+      width: "96px",
+    });
+  });
+  await target.hover({ position: { x: 20, y: 20 } });
+  const hint = editor.getByTestId("canvas-capability-hint");
+  await expect(hint).toBeVisible({ timeout: 1500 });
+
+  await expect.poll(async () => {
+    const [hintBox, editorBox] = await Promise.all([
+      hint.boundingBox(),
+      editor.boundingBox(),
+    ]);
+    if (!hintBox || !editorBox) return Number.POSITIVE_INFINITY;
+    return Math.abs((editorBox.x + editorBox.width) - (hintBox.x + hintBox.width));
+  }).toBeLessThanOrEqual(10);
+});
+
+test("text-edit hover caption stays inside a narrow canvas", async ({ page }) => {
+  const { editor, frame } = await loadFixture(page, "complex-layout.html");
+  const target = frame.locator(caseSelector("paragraph-entities"));
+
+  await editor.evaluate((element) => {
+    Object.assign(element.style, {
+      width: "104px",
+      minWidth: "0px",
+    });
+  });
+  await target.evaluate((element) => {
+    Object.assign(element.style, {
+      position: "fixed",
+      top: "120px",
+      right: "0px",
+      width: "48px",
+    });
+  });
+  await target.hover({ position: { x: 12, y: 12 } });
+  const hint = editor.getByTestId("canvas-capability-hint");
+  await expect(hint).toBeVisible({ timeout: 1500 });
+
+  await expect.poll(async () => {
+    const [hintBox, editorBox] = await Promise.all([
+      hint.boundingBox(),
+      editor.boundingBox(),
+    ]);
+    if (!hintBox || !editorBox) return Number.POSITIVE_INFINITY;
+    return Math.max(
+      (editorBox.x + 6) - hintBox.x,
+      (hintBox.x + hintBox.width) - (editorBox.x + editorBox.width - 6),
+    );
+  }).toBeLessThanOrEqual(1);
+});
+
+test("text-edit hover caption regains its intrinsic width after the canvas widens", async ({
+  page,
+}) => {
+  const { editor, frame } = await loadFixture(page, "complex-layout.html");
+  const target = frame.locator(caseSelector("paragraph-entities"));
+
+  await editor.evaluate((element) => {
+    Object.assign(element.style, {
+      width: "64px",
+      minWidth: "0px",
+    });
+  });
+  await target.evaluate((element) => {
+    Object.assign(element.style, {
+      position: "fixed",
+      top: "120px",
+      left: "8px",
+      width: "48px",
+    });
+  });
+  await target.hover({ position: { x: 12, y: 12 } });
+  const hint = editor.getByTestId("canvas-capability-hint");
+  await expect(hint).toBeVisible({ timeout: 1500 });
+  await expect.poll(() => hint.evaluate((element) => (
+    element.scrollWidth - element.clientWidth
+  ))).toBeGreaterThan(1);
+
+  await editor.evaluate((element) => {
+    element.style.width = "600px";
+  });
+  await page.evaluate(() => window.dispatchEvent(new Event("resize")));
+
+  await expect(hint).toBeVisible();
+  await expect.poll(() => hint.evaluate((element) => (
+    element.scrollWidth - element.clientWidth
+  ))).toBeLessThanOrEqual(1);
+});
+
 test("clicking blank header and comment-rail surfaces commits editing and clears selection", async ({
   page,
 }) => {
