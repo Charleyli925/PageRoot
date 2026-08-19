@@ -149,6 +149,20 @@ test("caption placement clamps horizontally inside a narrow canvas", () => {
   assert.ok(placement.left + placement.width <= 120);
 });
 
+test("caption placement uses its rendered width at the right canvas edge", () => {
+  const placement = placeCanvasHoverHint({
+    containerWidth: 640,
+    targetLeft: 600,
+    targetTop: 80,
+    targetHeight: 20,
+    labelWidth: 109,
+  });
+
+  assert.equal(placement.left, 523);
+  assert.equal(placement.width, 109);
+  assert.equal(placement.left + placement.width, 632);
+});
+
 test("caption width follows its copy instead of the positioning reservation", async () => {
   const [editor, styles] = await Promise.all([
     readFile(new URL("../app/components/HtmlCanvasEditor.tsx", import.meta.url), "utf8"),
@@ -160,6 +174,8 @@ test("caption width follows its copy instead of the positioning reservation", as
 
   assert.ok(styleAssignment?.groups?.style);
   assert.doesNotMatch(styleAssignment.groups.style, /\bwidth\s*:/u);
+  assert.match(editor, /labelWidth:\s*hoverHintMeasuredWidth/u);
+  assert.match(editor, /ref=\{hoverHintRef\}/u);
   assert.match(styles, /\.hoverHint\s*\{[\s\S]*?\bwidth:\s*fit-content;/u);
 });
 

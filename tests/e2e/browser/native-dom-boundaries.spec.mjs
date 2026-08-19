@@ -123,6 +123,32 @@ test("text-edit hover caption hugs its copy instead of a fixed ribbon", async ({
   expect(Math.abs(metrics.width - metrics.scrollWidth)).toBeLessThanOrEqual(2);
 });
 
+test("text-edit hover caption stays at the right canvas edge", async ({ page }) => {
+  const { editor, frame } = await loadFixture(page, "complex-layout.html");
+  const target = frame.locator(caseSelector("paragraph-entities"));
+
+  await target.evaluate((element) => {
+    Object.assign(element.style, {
+      position: "fixed",
+      top: "120px",
+      right: "0px",
+      width: "96px",
+    });
+  });
+  await target.hover({ position: { x: 20, y: 20 } });
+  const hint = editor.getByTestId("canvas-capability-hint");
+  await expect(hint).toBeVisible({ timeout: 1500 });
+
+  await expect.poll(async () => {
+    const [hintBox, editorBox] = await Promise.all([
+      hint.boundingBox(),
+      editor.boundingBox(),
+    ]);
+    if (!hintBox || !editorBox) return Number.POSITIVE_INFINITY;
+    return Math.abs((editorBox.x + editorBox.width) - (hintBox.x + hintBox.width));
+  }).toBeLessThanOrEqual(10);
+});
+
 test("clicking blank header and comment-rail surfaces commits editing and clears selection", async ({
   page,
 }) => {
