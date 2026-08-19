@@ -1502,3 +1502,81 @@ Date: 2026-08-18
 - [x] Selection emphasis remains one violet family.
 
 final result: passed
+
+## Glass material unification: real translucency, warm-fog overlays and paper grain
+
+Date: 2026-08-19
+
+### What changed and why
+
+An audit of all `backdrop-filter` declarations found most blurs were
+decorative rather than material: surfaces at 94–98 % opacity gave the blur
+nothing to transmit, and the modal overlays each used a different dim color
+and blur radius (3/5/6/8/10 px). This entry replaces that drift with the one
+formula the handoff console had already validated (deep blur, saturation
+lift, inset top highlight) and records it in DESIGN_LANGUAGE.md §3.
+
+- Review pinned toolbar, its handle, the content-map handle and the map
+  panel: 95–98 % opaque white → 76–85 % white with
+  `blur(20px) saturate(180%)` and an inset top highlight, so page content
+  now visibly breathes through the chrome while the segmented controls keep
+  their own opaque gray shells for readability.
+- Modal overlays (project drawer, external-open confirmation, review adopt
+  confirmation, About) unified to one warm fog: `rgb(34 32 27 / 36%)` +
+  `blur(16px) saturate(140%)`, with the blur animating from 0 on entry via
+  the existing overlay transition. The lightbox keeps its dark room and only
+  tightens to blur(12px).
+- Canvas floating tools (lock notice, editing toolbar, capability hint,
+  edit-status pill, history banner, comment rail header, notice bar,
+  first-edit guide card) now share the same glass family at 78–88 % opacity
+  with `saturate(140–180%)`; the source-conflict banner stays fully opaque
+  because a red alert must read as a fact, not a material.
+- The shell and workbench base layers carry a 3.5 % alpha SVG `feTurbulence`
+  grain (`--grain`), giving the flat paper tones a physical tooth. No
+  gradients were added anywhere (2.2 stays intact).
+
+### Design-language conformance
+
+- One emphasis family (2.2): no new accent color; the review violet family
+  `#6258d6` / `#4f47b8` and every segmented-control surface are untouched.
+- Quiet first (2.3): nothing animates without a state change; the overlay
+  blur only sweeps in while a modal opens.
+- Honest surfaces: grid areas that never overlay content (title bar, fixed
+  rail) keep their flat treatment — blur is only spent where content really
+  passes beneath.
+- DESIGN_LANGUAGE.md §3 gained a "材质与虚化" subsection so the formula is
+  reusable instead of rediscovered.
+
+### Evidence
+
+- Real Electron review run (`PAGEROOT_CAPTURE_REVIEW=1`,
+  ai-handoff-closed-loop "stays pending through desktop review", 1 passed):
+  `output/design-qa/ai-review-final.png` (glass toolbar and handles) and
+  `output/design-qa/ai-review-map.png` (map panel over live content).
+- Real render from the vinext dev server, 1440×900 @2x:
+  `output/design-qa/glass-workbench.png` (grain shell) and
+  `output/design-qa/glass-project-drawer.png` (warm-fog overlay).
+- `npm run gate:edit` passed (113 node tests, typecheck, architecture
+  check); the Electron closed-loop spec passed unchanged, confirming no
+  registered contract (violet family, segmented shells, copy) moved.
+
+### Known consequence
+
+- More live `backdrop-filter` area means slightly higher compositing cost;
+  blur radii are deliberately capped at 20 px and the grain layer is a
+  static 180 px tile, so no per-frame paint work is added.
+- The in-flight open-html-picker branch rewrites the project drawer and the
+  "+" popover on these same surfaces; whichever lands second should point
+  the new popover chrome at the same glass family instead of reintroducing
+  an opaque card.
+
+### Checklist
+
+- [x] Review toolbar, handles and map panel transmit page content visibly.
+- [x] All dimmed modal overlays share one warm-fog recipe.
+- [x] Grain is present on shell/workbench bases only; review surface pixels
+      and diff masks are unaffected.
+- [x] Review violet family, segmented controls and all copy unchanged.
+- [x] Reduced-motion paths untouched (no animation added or removed).
+
+final result: passed

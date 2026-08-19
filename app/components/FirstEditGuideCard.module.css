@@ -14,8 +14,8 @@
     0 1px 0 rgb(255 255 255 / 70%) inset,
     0 12px 32px rgb(37 34 27 / 12%);
   font-family: var(--ui, -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", sans-serif);
-  -webkit-backdrop-filter: blur(22px) saturate(1.2);
-  backdrop-filter: blur(22px) saturate(1.2);
+  -webkit-backdrop-filter: blur(22px) saturate(1.5);
+  backdrop-filter: blur(22px) saturate(1.5);
   pointer-events: none;
   animation: first-edit-guide-in 260ms cubic-bezier(0.22, 1, 0.36, 1);
 }
