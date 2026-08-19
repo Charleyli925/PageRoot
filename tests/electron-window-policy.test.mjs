@@ -69,3 +69,36 @@ test("Electron automation stays backgrounded unless foreground debugging is expl
     assert.doesNotMatch(preflightSource, /\.focus\(\)/u);
   }
 });
+
+test("window construction never waits for the Bridge utility process", async () => {
+  const mainProcess = await readFile(sourceUrl("../desktop/main.mjs"), "utf8");
+  const createWindow = mainProcess.slice(
+    mainProcess.indexOf("async function createWindow()"),
+  );
+  assert.ok(createWindow.startsWith("async function createWindow()"));
+
+  // The Bridge boots a separate Node process and only the renderer URL needs its
+  // endpoint. Starting it without awaiting keeps protocol installation, window
+  // construction and IPC registration off the boot's critical path.
+  const startCall = createWindow.indexOf("const bridgeStartup = startBridge();");
+  assert.notEqual(startCall, -1);
+  assert.doesNotMatch(createWindow, /const port = await startBridge\(\);/u);
+
+  // An early throw between the start and the await must not surface the deferred
+  // rejection as an unhandled one.
+  assert.match(createWindow, /bridgeStartup\.catch\(\(\) => \{\}\);/u);
+
+  const windowConstruction = createWindow.indexOf("mainWindow = new BrowserWindow({");
+  const registerIpc = createWindow.indexOf("registerProjectIpc();");
+  const awaitBridge = createWindow.indexOf("const port = await bridgeStartup;");
+  const loadRenderer = createWindow.indexOf("await mainWindow.loadFile(rendererPath()");
+  for (const offset of [windowConstruction, registerIpc, awaitBridge, loadRenderer]) {
+    assert.notEqual(offset, -1);
+  }
+  assert.ok(startCall < windowConstruction);
+  assert.ok(windowConstruction < awaitBridge);
+  assert.ok(registerIpc < awaitBridge);
+  // The renderer query string still carries the verified endpoint, so the await
+  // has to settle before the load and nowhere earlier.
+  assert.ok(awaitBridge < loadRenderer);
+});
