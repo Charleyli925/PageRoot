@@ -3282,15 +3282,6 @@ export default function Workbench() {
   }, [currentProjectSessionSnapshot, noticeIdentity, noticeTimerPaused, toast]);
 
   useEffect(() => {
-    if (!previewAttachment) return;
-    const closePreview = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setPreviewAttachment(null);
-    };
-    document.addEventListener("keydown", closePreview);
-    return () => document.removeEventListener("keydown", closePreview);
-  }, [previewAttachment]);
-
-  useEffect(() => {
     if (!drawer || previewAttachment) return;
     const closeDrawer = (event: KeyboardEvent) => {
       if (event.key === "Escape" && !event.defaultPrevented) setDrawer(null);

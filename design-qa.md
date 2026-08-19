@@ -1587,3 +1587,31 @@ Date: 2026-08-19
 - [x] Toolbar hints use `data-tooltip` and match their `aria-label`.
 
 final result: passed
+
+# Post-review fixes — lightbox Escape, badge shadow hue and preview label clipping
+
+Date: 2026-08-19
+
+## Scope
+
+- A focused review pass over the UI polish batch surfaced three concrete
+  defects introduced by the batch. All three are fixed here before the PR is
+  promoted. The muted-purple convergence decisions were re-examined and left
+  as-is per product-owner direction.
+
+## Findings
+
+- The native attachment lightbox now owns the Escape path through the dialog
+  `cancel`/`close` contract. A leftover document-level Escape listener that
+  predated the dialog is removed; it bypassed the native contract and would
+  have diverged from any future `onCancel` handling.
+- The pink update badge keeps a shadow in its own hue. The batch had swept the
+  badge's magenta shadow into the brick-red `--red` family, which clashed with
+  the `#ff4f87` brand-pink fill. The shadow is restored to the matching
+  magenta so the halo stays in the badge's hue family.
+- The review preview segmented label is no longer clipped. Raising its font to
+  9px left an 8px line box under `overflow: hidden`, which cropped the CJK
+  glyphs ("修改前" / "修改后"). The line-height is raised to 10px so the
+  glyphs fit.
+
+final result: passed
