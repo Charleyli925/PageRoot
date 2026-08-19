@@ -7001,6 +7001,33 @@ body {
   line-height: 1.55;
 }
 
+/* The update column keeps the readable CHANGELOG entry outside the polite live
+   region so status changes never re-announce this fixed link. */
+.about-update-column {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.about-release-notes {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--indigo);
+  font-size: 9px;
+  font-weight: 680;
+  line-height: 1.2;
+  transition: color 150ms ease;
+}
+
+.about-release-notes:hover {
+  color: var(--indigo-deep);
+}
+
 .about-update-action {
   min-height: 34px;
   display: inline-flex;
@@ -7200,6 +7227,7 @@ body {
 
   .about-close-button,
   .about-update-action,
+  .about-release-notes,
   .about-github-link {
     transition: none;
   }

@@ -121,7 +121,10 @@ succeeded technically but installer handoff is incomplete.
 ## Prepare the source
 
 1. Update `package.json` and the package-lock root to the same semantic version.
-2. Move relevant `CHANGELOG.md` entries from Unreleased into that version.
+2. Move relevant `CHANGELOG.md` entries from Unreleased into that version. That
+   section becomes the published Release notes and the in-app “查看更新内容”
+   destination, so write it for users; `npm run release:notes` renders exactly
+   what they will read and fails when the section is missing or empty.
 3. Open a draft Pull Request while iterating. Every ordinary Draft update runs impact-selected `pr-feedback` only. Batch accepted P0/P1 product corrections before promotion; Codex comments are informational and do not block merge.
 4. Update the final head onto current `main` and mark it Ready once, or add the `full-gate` label. That starts the complete source matrix. A PR opened already Ready also takes this path. Codex review is requested automatically for the current head and never blocks `release-gate`.
 5. Wait for the complete source lanes, any relevant candidate-only dry run and required `release-gate`. The final gate refreshes the same dependency/runtime-closure audit before attestation. A later commit on a Ready PR reruns the complete matrix for the new head.
@@ -221,14 +224,23 @@ After reviewing the candidate run:
 The workflow:
 
 1. verifies the requested version against `package.json` and the package-lock root;
-2. resolves a fresh successful `Release Candidate` run for the exact current commit, Tree Hash, version and `arm64` architecture;
-3. downloads the frozen candidate;
-4. verifies the candidate attestation, build provenance, expected file set, sizes and SHA-256 of every asset;
-5. checks that no published Release already exists;
-6. creates an annotated `v<version>` tag at that exact commit;
-7. publishes the candidate DMG, ZIP, ZIP blockmap, `latest-mac.yml`, checksum,
+2. resolves the published Release notes from the `## [<version>]` section of
+   `CHANGELOG.md` and stops before any tag exists when that section is missing
+   or empty;
+3. resolves a fresh successful `Release Candidate` run for the exact current commit, Tree Hash, version and `arm64` architecture;
+4. downloads the frozen candidate;
+5. verifies the candidate attestation, build provenance, expected file set, sizes and SHA-256 of every asset;
+6. checks that no published Release already exists;
+7. creates an annotated `v<version>` tag at that exact commit;
+8. publishes the candidate DMG, ZIP, ZIP blockmap, `latest-mac.yml`, checksum,
    legacy update manifest, build provenance and candidate attestation without
    rebuilding.
+
+Release notes are the curated CHANGELOG section for that version, never an
+automatically generated commit or Pull Request list: the in-app “查看更新内容”
+entry opens exactly this page, so the notes are product copy rather than
+engineering shorthand. Preview them at any time with
+`npm run release:notes -- --version <x.y.z>`.
 
 If publication fails after the tag push but before the GitHub Release exists, rerun the same `Release` workflow from the same `main` commit and version. It may resume only when the existing tag is annotated and resolves to the identical commit. If a Release already exists, the workflow refuses to replace its assets.
 
