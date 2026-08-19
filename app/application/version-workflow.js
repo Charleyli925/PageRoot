@@ -2,6 +2,12 @@ import { isBridgeRequestError } from "./bridge-client.js";
 
 const SHA256 = /^sha256:[a-f0-9]{64}$/u;
 
+// Non-blocking performance-timeline marks for the accept/open critical path.
+// Marks are inert outside profiling sessions and never affect control flow.
+const perfMark = (name) => {
+  globalThis.performance?.mark?.(name);
+};
+
 function succeeded(value) {
   return Object.freeze({ status: "succeeded", value: Object.freeze(value) });
 }
@@ -442,6 +448,7 @@ export class VersionWorkflow {
     this.#runSession.setActiveRun({ ...ready, error: undefined });
     try {
       const readyTarget = this.#readyOpenTarget(ready);
+      perfMark("pageroot:accept:promote-start");
       const activatedPayload = await this.#bridgeClient.activateReadyVersion({
         ...readyTarget,
         sourcePath: ready.sourcePath,
@@ -451,6 +458,7 @@ export class VersionWorkflow {
         attemptId: ready.attemptId,
         versionId: ready.candidateVersionId,
       });
+      perfMark("pageroot:accept:promote-end");
       if (!this.#isCurrentReadyRun(ready)) return stale(this.#runIdentity(ready));
       const opened = await this.#openCommittedVersion({
         run: ready,
@@ -901,6 +909,7 @@ export class VersionWorkflow {
   }
 
   async #openCommittedVersion({ run, payload, reviewLease, operation }) {
+    perfMark("pageroot:accept:open-start");
     const completion = this.#committedPayload(run, payload);
     const committedSourcePath = String(
       payload.sourcePath
@@ -908,32 +917,51 @@ export class VersionWorkflow {
       || payload.workingCopyPath
       || run.sourcePath,
     );
-    const [versionPayload, sourcePayload] = await Promise.all([
-      this.#bridgeClient.versionFile(committedSourcePath, completion.versionId),
-      this.#bridgeClient.source(committedSourcePath),
-    ]);
-    if (!this.#isNavigationCurrent(operation)) return stale(this.#runIdentity(run));
-    this.#assertVersionFileIdentity(versionPayload, run, completion.versionId);
-    this.#assertSourceIdentity(sourcePayload, run, { allowSourceTransition: true });
-    const versionSha256 = String(versionPayload.sha256 || versionPayload.contentSha256 || "");
-    const sourceSha256 = String(sourcePayload.sha256 || sourcePayload.sourceSha256 || "");
-    const content = String(versionPayload.content || "");
-    const sourceContent = String(sourcePayload.content || "");
-    const resolvedCommittedSourcePath = String(
-      sourcePayload.sourcePath
-      || committedSourcePath,
-    );
-    const lastModifiedAt = String(sourcePayload.lastModifiedAt || "");
+    // An explicit activation response already carries the authoritative
+    // post-promotion bytes. Reusing them skips re-reading megabytes over the
+    // Bridge while the review overlay is still blocking the user; identity
+    // and hash verification below still run on these bytes before they may
+    // reach the canvas, and an incomplete payload falls back to the read-back.
+    const inline = this.#inlineActivatedSource(payload);
+    let source = inline;
+    if (!source) {
+      const [versionPayload, sourcePayload] = await Promise.all([
+        this.#bridgeClient.versionFile(committedSourcePath, completion.versionId),
+        this.#bridgeClient.source(committedSourcePath),
+      ]);
+      if (!this.#isNavigationCurrent(operation)) return stale(this.#runIdentity(run));
+      this.#assertVersionFileIdentity(versionPayload, run, completion.versionId);
+      this.#assertSourceIdentity(sourcePayload, run, { allowSourceTransition: true });
+      const versionContent = String(versionPayload.content || "");
+      if (versionContent !== String(sourcePayload.content || "")) {
+        throw new Error("版本快照、源 HTML 与完成记录的 Hash 不一致，已停止打开。");
+      }
+      source = {
+        content: versionContent,
+        versionSha256: String(versionPayload.sha256 || versionPayload.contentSha256 || ""),
+        sourceSha256: String(sourcePayload.sha256 || sourcePayload.sourceSha256 || ""),
+        sourcePath: String(sourcePayload.sourcePath || committedSourcePath),
+        lastModifiedAt: String(sourcePayload.lastModifiedAt || ""),
+      };
+    } else {
+      this.#assertVersionFileIdentity(payload, run, completion.versionId);
+      this.#assertSourceIdentity(payload, run, { allowSourceTransition: true });
+    }
+    perfMark("pageroot:accept:read-end");
+    const content = source.content;
+    const versionSha256 = source.versionSha256;
+    const sourceSha256 = source.sourceSha256;
+    const resolvedCommittedSourcePath = source.sourcePath;
+    const lastModifiedAt = source.lastModifiedAt;
     if (
       versionSha256 !== completion.expectedSha256
       || sourceSha256 !== completion.expectedSha256
       || !SHA256.test(versionSha256)
-      || content !== sourceContent
       || await this.#hashPort.sha256(content) !== versionSha256
-      || await this.#hashPort.sha256(sourceContent) !== sourceSha256
     ) {
       throw new Error("版本快照、源 HTML 与完成记录的 Hash 不一致，已停止打开。");
     }
+    perfMark("pageroot:accept:hash-end");
     if (!validTimestamp(lastModifiedAt)) {
       throw new Error("当前源 HTML 缺少独立的最后修改时间，已停止打开。");
     }
@@ -1002,8 +1030,10 @@ export class VersionWorkflow {
       },
     });
     if (!context || !this.#projectSession.matches(context)) return stale(this.#runIdentity(run));
+    perfMark("pageroot:accept:commit-end");
 
     await this.#canvasPort.verifyRendered(content, versionSha256, context);
+    perfMark("pageroot:accept:canvas-verified");
     if (!this.#projectSession.matches(context)) return stale(context);
 
     this.#documentWorkflow.clearAudit();
@@ -1012,21 +1042,31 @@ export class VersionWorkflow {
     this.#commentWorkflow.queueDraft();
     this.#documentWorkflow.clearRecovery(context);
 
-    let refreshWarning = "";
-    try {
-      const refreshed = await this.#projectWorkflow.refreshWorkspace({
-        sourcePath: resolvedCommittedSourcePath,
-        epoch: context.epoch,
+    // Workspace re-hydration only refreshes project metadata for panels; the
+    // Version bytes on the canvas are verified above. Run it in the background
+    // instead of holding the review overlay open, and surface a non-fatal
+    // warning through the event channel when it cannot complete.
+    const refreshFallback = "新版本已打开，但项目资料尚未完成复核。";
+    void this.#projectWorkflow.refreshWorkspace({
+      sourcePath: resolvedCommittedSourcePath,
+      epoch: context.epoch,
+    }).then((refreshed) => {
+      if (refreshed.status === "succeeded" || refreshed.status === "stale") return;
+      this.#emitEvent({
+        type: "version-refresh-warning",
+        context,
+        candidateLabel: completion.candidateLabel,
+        reason: refreshed.reason || refreshFallback,
       });
-      if (refreshed.status !== "succeeded" && refreshed.status !== "stale") {
-        refreshWarning = refreshed.reason || "新版本已打开，但项目资料尚未完成复核。";
-      }
-    } catch (cause) {
-      refreshWarning = this.#codecs.errorMessage(
-        cause,
-        "新版本已打开，但项目资料尚未完成复核。",
-      );
-    }
+    }).catch((cause) => {
+      this.#emitEvent({
+        type: "version-refresh-warning",
+        context,
+        candidateLabel: completion.candidateLabel,
+        reason: this.#codecs.errorMessage(cause, refreshFallback),
+      });
+    });
+    perfMark("pageroot:accept:refresh-end");
 
     this.#projectWorkflow.scheduleProjectListRefreshAfterSettlement(context);
 
@@ -1039,7 +1079,6 @@ export class VersionWorkflow {
       aiCompletedAt: completion.aiCompletedAt,
       committedSourcePath: resolvedCommittedSourcePath,
       lastModifiedAt,
-      refreshWarning,
     });
   }
 
@@ -1145,6 +1184,33 @@ export class VersionWorkflow {
       throw new Error("候选版本缺少其所属项目的完整工作文件身份，不能从其他项目借用当前页面。");
     }
     return target;
+  }
+
+  // A "version-activated" response comes from the same Bridge authority that
+  // just committed the promotion transaction; its inline bytes replace the
+  // immediate read-back. Anything missing or malformed disables the fast path
+  // so the full read-back below re-establishes the source of truth.
+  #inlineActivatedSource(payload) {
+    const content = typeof payload?.content === "string" ? payload.content : "";
+    const sha256 = String(payload?.contentSha256 || "");
+    const sourcePath = String(payload?.sourcePath || "");
+    const lastModifiedAt = String(payload?.lastModifiedAt || "");
+    if (
+      payload?.ok !== true
+      || payload?.status !== "version-activated"
+      || !content
+      || !sourcePath
+      || !SHA256.test(sha256)
+      || String(payload?.sourceSha256 || sha256) !== sha256
+      || !validTimestamp(lastModifiedAt)
+    ) return null;
+    return {
+      content,
+      versionSha256: sha256,
+      sourceSha256: sha256,
+      sourcePath,
+      lastModifiedAt,
+    };
   }
 
   #assertVersionFileIdentity(payload, owner, expectedVersionId) {

@@ -606,6 +606,103 @@ test("background activation never replaces the active Canvas", async () => {
   assert.equal(harness.calls.catalogAfterSettlement.length, 1);
 });
 
+test("activation reuses activation-response bytes without a Bridge read-back", async () => {
+  const harness = createHarness({
+    activation: async (input) => ({
+      ok: true,
+      status: "version-activated",
+      projectId: input.projectId,
+      documentId: input.documentId,
+      requestId: input.requestId,
+      attemptId: input.attemptId,
+      versionId: input.versionId,
+      contentSha256: sha256(CANDIDATE_HTML),
+      sourceSha256: sha256(CANDIDATE_HTML),
+      currentHtmlSha256: sha256(CANDIDATE_HTML),
+      sourcePath: SOURCE_A,
+      content: CANDIDATE_HTML,
+      lastModifiedAt: "2026-08-12T00:00:02.000Z",
+      candidateDisplayVersionLabel: "版本 2",
+      version: versionRecord({ id: input.versionId }),
+    }),
+  });
+  const run = readyRun();
+  harness.runSession.trackRun(run, { activate: "always" });
+
+  const outcome = await harness.workflow.activateReadyVersion({ run });
+
+  assert.equal(outcome.status, "succeeded");
+  assert.equal(outcome.value.current, true);
+  assert.equal(harness.calls.versionFile.length, 0);
+  assert.equal(harness.calls.source.length, 0);
+  assert.equal(harness.documentSession.html, CANDIDATE_HTML);
+  assert.equal(harness.calls.render.at(-1)?.html, CANDIDATE_HTML);
+  assert.equal(harness.versionSession.snapshot.currentExactVersionId, "ver_0002");
+});
+
+test("activation rejects activation-response bytes whose hash does not match", async () => {
+  const harness = createHarness({
+    activation: async (input) => ({
+      ok: true,
+      status: "version-activated",
+      projectId: input.projectId,
+      documentId: input.documentId,
+      requestId: input.requestId,
+      attemptId: input.attemptId,
+      versionId: input.versionId,
+      contentSha256: sha256(CANDIDATE_HTML),
+      sourceSha256: sha256(CANDIDATE_HTML),
+      currentHtmlSha256: sha256(CANDIDATE_HTML),
+      sourcePath: SOURCE_A,
+      content: CANDIDATE_HTML.replace("candidate", "tampered"),
+      lastModifiedAt: "2026-08-12T00:00:02.000Z",
+      candidateDisplayVersionLabel: "版本 2",
+      version: versionRecord({ id: input.versionId }),
+    }),
+  });
+  const run = readyRun();
+  harness.runSession.trackRun(run, { activate: "always" });
+
+  const outcome = await harness.workflow.activateReadyVersion({ run });
+
+  assert.equal(outcome.status, "rejected");
+  assert.equal(harness.calls.commit.length, 0);
+  assert.equal(harness.documentSession.html, BASE_HTML);
+  assert.equal(harness.versionSession.snapshot.currentExactVersionId, "ver_0001");
+  assert.equal(harness.runSession.activeRun?.status, "ready-to-open");
+});
+
+test("a failed workspace refresh never blocks activation and reports through events", async () => {
+  const harness = createHarness();
+  const refreshDeferred = deferred();
+  harness.projectWorkflow.refreshWorkspace = async (input) => {
+    harness.calls.refresh.push(input);
+    return refreshDeferred.promise;
+  };
+  const events = [];
+  harness.workflow.subscribeEvents((event) => events.push(event));
+  const run = readyRun();
+  harness.runSession.trackRun(run, { activate: "always" });
+
+  const outcome = await harness.workflow.activateReadyVersion({ run });
+
+  assert.equal(outcome.status, "succeeded");
+  assert.equal(outcome.value.refreshWarning, undefined);
+  assert.equal(harness.calls.refresh.length, 1);
+  assert.equal(
+    events.some((event) => event.type === "version-refresh-warning"),
+    false,
+  );
+
+  refreshDeferred.resolve({ status: "blocked", reason: "复核未完成" });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  const warning = events.find((event) => event.type === "version-refresh-warning");
+  assert.ok(warning);
+  assert.equal(warning.reason, "复核未完成");
+  assert.equal(warning.candidateLabel, "版本 2");
+});
+
 test("history failure restores the complete prior Document and Version snapshot", async () => {
   const harness = createHarness({
     verifyRendered: async (html) => {

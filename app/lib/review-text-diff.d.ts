@@ -42,6 +42,16 @@ export function readableReviewTextFootprintPlan(
   },
 ): ReadableReviewTextFootprintPlan;
 
+export function reconcileReviewTextSurvivors(
+  beforeText: string,
+  beforeRanges: readonly ReviewTextRange[],
+  afterText: string,
+  afterRanges: readonly ReviewTextRange[],
+): {
+  before: ReviewTextRange[];
+  after: ReviewTextRange[];
+};
+
 export function sentenceAwareTextDifferences(
   beforeText: string,
   afterText: string,
