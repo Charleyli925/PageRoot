@@ -277,6 +277,38 @@ test("text selection and editing chrome stop at the rendered final line", async 
   expect(editingFinalLine.width).toBeLessThan(targetBox.width - 24);
 });
 
+test("text selection chrome stays inside an authored nested scrollport", async ({ page }) => {
+  const { editor, frame } = await loadFixture(page, "complex-layout.html");
+  const target = frame.locator(caseSelector("scroll-copy"));
+  const scrollport = frame.locator(".scroller");
+
+  await target.click();
+  await expect(editor.getByTestId("canvas-selection-chrome").first()).toBeVisible();
+  const scrollTop = await scrollport.evaluate((element) => {
+    element.scrollTop = Math.max(
+      1,
+      Math.floor((element.scrollHeight - element.clientHeight) / 2),
+    );
+    element.dispatchEvent(new Event("scroll"));
+    return element.scrollTop;
+  });
+  expect(scrollTop).toBeGreaterThan(0);
+
+  await expect.poll(async () => {
+    const [boxes, scrollportBox] = await Promise.all([
+      canvasSelectionChromeBoxes(editor),
+      scrollport.boundingBox(),
+    ]);
+    if (!scrollportBox || boxes.length === 0) return false;
+    return boxes.every((box) => (
+      box.left >= scrollportBox.x - 0.5
+      && box.top >= scrollportBox.y - 0.5
+      && box.left + box.width <= scrollportBox.x + scrollportBox.width + 0.5
+      && box.top + box.height <= scrollportBox.y + scrollportBox.height + 0.5
+    ));
+  }).toBe(true);
+});
+
 test("clicking a canvas selects the dedicated surface instead of the wrapping module", async ({ page }) => {
   const { editor, frame } = await loadFixture(page, "complex-layout.html");
   const canvas = frame.locator(caseSelector("canvas-surface"));

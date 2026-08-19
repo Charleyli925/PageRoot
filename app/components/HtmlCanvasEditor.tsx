@@ -404,6 +404,90 @@ type CommentMarker = {
 };
 
 const CANVAS_ELEMENT_CHROME_OUTSET_PX = 3;
+const CLIPPING_OVERFLOW_VALUES = new Set(["auto", "clip", "hidden", "scroll"]);
+
+type CanvasTextChromeClip = {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+};
+
+type CanvasTextChromeRectGroup = {
+  clips: CanvasTextChromeClip[];
+  rects: CanvasTextChromeRect[];
+};
+
+function overflowClipForElement(
+  element: HTMLElement,
+  view: Window,
+): CanvasTextChromeClip | null {
+  const style = view.getComputedStyle(element);
+  const clipsHorizontal = CLIPPING_OVERFLOW_VALUES.has(style.overflowX);
+  const clipsVertical = CLIPPING_OVERFLOW_VALUES.has(style.overflowY);
+  if (!clipsHorizontal && !clipsVertical) return null;
+
+  const rect = element.getBoundingClientRect();
+  const clientLeft = rect.left + element.clientLeft;
+  const clientTop = rect.top + element.clientTop;
+  return {
+    left: clipsHorizontal ? clientLeft : Number.NEGATIVE_INFINITY,
+    top: clipsVertical ? clientTop : Number.NEGATIVE_INFINITY,
+    right: clipsHorizontal
+      ? clientLeft + element.clientWidth
+      : Number.POSITIVE_INFINITY,
+    bottom: clipsVertical
+      ? clientTop + element.clientHeight
+      : Number.POSITIVE_INFINITY,
+  };
+}
+
+function clipCanvasTextChromeRect(
+  rect: CanvasTextChromeRect,
+  clips: readonly CanvasTextChromeClip[],
+): CanvasTextChromeRect | null {
+  let left = rect.left;
+  let top = rect.top;
+  let right = rect.left + rect.width;
+  let bottom = rect.top + rect.height;
+  for (const clip of clips) {
+    left = Math.max(left, clip.left);
+    top = Math.max(top, clip.top);
+    right = Math.min(right, clip.right);
+    bottom = Math.min(bottom, clip.bottom);
+    if (right <= left || bottom <= top) return null;
+  }
+  return {
+    left,
+    top,
+    width: right - left,
+    height: bottom - top,
+  };
+}
+
+function overflowClipChainForTextNode(
+  textNode: Text,
+  view: Window,
+  clipIds: Map<HTMLElement, number>,
+): { key: string; clips: CanvasTextChromeClip[] } {
+  const clips: CanvasTextChromeClip[] = [];
+  const ids: number[] = [];
+  let ancestor = textNode.parentElement;
+  while (ancestor) {
+    const clip = overflowClipForElement(ancestor, view);
+    if (clip) {
+      clips.push(clip);
+      let id = clipIds.get(ancestor);
+      if (!id) {
+        id = clipIds.size + 1;
+        clipIds.set(ancestor, id);
+      }
+      ids.push(id);
+    }
+    ancestor = ancestor.parentElement;
+  }
+  return { key: ids.join(":"), clips };
+}
 
 function visibleTextChromeRects(element: HTMLElement): CanvasTextChromeRect[] {
   const documentNode = element.ownerDocument;
@@ -412,7 +496,8 @@ function visibleTextChromeRects(element: HTMLElement): CanvasTextChromeRect[] {
   try {
     if (view.getComputedStyle(element).writingMode.startsWith("vertical")) return [];
     const walker = documentNode.createTreeWalker(element, NodeFilter.SHOW_TEXT);
-    const textRects: CanvasTextChromeRect[] = [];
+    const groups = new Map<string, CanvasTextChromeRectGroup>();
+    const clipIds = new Map<HTMLElement, number>();
     let textNode = walker.nextNode() as Text | null;
     while (textNode) {
       if (
@@ -421,18 +506,31 @@ function visibleTextChromeRects(element: HTMLElement): CanvasTextChromeRect[] {
       ) {
         const range = documentNode.createRange();
         range.selectNodeContents(textNode);
+        const { key, clips } = overflowClipChainForTextNode(textNode, view, clipIds);
+        let group = groups.get(key);
+        if (!group) {
+          group = { clips, rects: [] };
+          groups.set(key, group);
+        }
         for (const rect of Array.from(range.getClientRects())) {
-          textRects.push({
+          const clipped = clipCanvasTextChromeRect({
             left: rect.left,
             top: rect.top,
             width: rect.width,
             height: rect.height,
-          });
+          }, clips);
+          if (clipped) group.rects.push(clipped);
         }
       }
       textNode = walker.nextNode() as Text | null;
     }
-    return normalizeCanvasTextChromeRects(textRects);
+    return [...groups.values()]
+      .flatMap(({ clips, rects }) => normalizeCanvasTextChromeRects(rects)
+        .flatMap((rect) => {
+          const clipped = clipCanvasTextChromeRect(rect, clips);
+          return clipped ? [clipped] : [];
+        }))
+      .sort((left, right) => left.top - right.top || left.left - right.left);
   } catch {
     // Frame replacement can detach the source node between a selection and its
     // scheduled measurement. A missing outline is safer than stale chrome.
@@ -5762,7 +5860,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       <div className="sr-only" aria-live="polite" aria-atomic="true">
         {selectionCapability ? selectionCapability.spoken : ""}
       </div>
-      {!interactionLocked && selection && toolbarVisible && canvasSelectionChrome
+      {!interactionLocked && selection && canvasSelectionChrome
         ? canvasSelectionChrome.rects.map((rect, index) => (
           <div
             key={`${canvasSelectionChrome.mode}:${index}`}

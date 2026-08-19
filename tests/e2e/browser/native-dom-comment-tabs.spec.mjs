@@ -150,6 +150,27 @@ test("focused comments remain below the sticky rail header and global comments s
   await expect(cards.nth(1)).toContainText(localText);
 });
 
+test("focusing a saved comment keeps its target chrome while the toolbar stays hidden", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await page.goto("/");
+  const { editor, frame } = await loadFixture(page, "tabbed-comments.html", {
+    buffer: fixtureBuffer("tabbed-comments.html"),
+  });
+  const text = "评论定位仍要保留紧凑选框";
+  await saveComment(page, frame, "tab-comment-one", text);
+
+  const card = page.locator(
+    ".comment-rail-content > .comment-card:not(.draft-comment-card)",
+  ).filter({ hasText: text });
+  await expect(card).toBeVisible();
+  await card.click();
+
+  await expect(page.getByRole("toolbar", { name: /编辑/u })).toHaveCount(0);
+  await expect(editor.getByTestId("canvas-selection-chrome").first()).toBeVisible();
+});
+
 test("dense comments stay inside the Canvas bottom and wheel into view without stretching the page", async ({
   page,
 }, testInfo) => {
