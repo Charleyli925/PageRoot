@@ -105,8 +105,9 @@ test("comment textareas focus immediately and use Enter to save with Shift+Enter
 
 test("focused comments remain below the sticky rail header and global comments sort first", async ({
   page,
-}) => {
+}, testInfo) => {
   await page.setViewportSize({ width: 1600, height: 900 });
+  await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/");
   const { frame } = await loadFixture(page, "tabbed-comments.html", {
     buffer: fixtureBuffer("tabbed-comments.html"),
@@ -116,6 +117,25 @@ test("focused comments remain below the sticky rail header and global comments s
 
   const rail = page.locator('aside[aria-label="本轮评论"]');
   const header = rail.locator(".comment-rail-header");
+  const globalComment = rail.getByRole("button", {
+    name: "全局评论",
+    exact: true,
+  });
+  await expect(page.locator(".app-topbar .global-comment-button")).toHaveCount(0);
+  await expect(globalComment).toContainText("添加全局评论");
+  await expect(header).not.toContainText("与正文同步滚动");
+  expect(await globalComment.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      backgroundColor: style.backgroundColor,
+      borderTopWidth: style.borderTopWidth,
+      boxShadow: style.boxShadow,
+    };
+  })).toEqual({
+    backgroundColor: "rgba(0, 0, 0, 0)",
+    borderTopWidth: "0px",
+    boxShadow: "none",
+  });
   const localCard = rail.locator(
     ".comment-rail-content > .comment-card:not(.draft-comment-card)",
   ).filter({ hasText: localText });
@@ -130,15 +150,15 @@ test("focused comments remain below the sticky rail header and global comments s
     headerBox.y + headerBox.height + 14,
   );
 
-  await page.getByRole("button", {
-    name: "全局评论",
-    exact: true,
-  }).click();
+  await globalComment.click();
   const globalComposer = page.getByRole("region", { name: "添加评论" });
   const globalTextbox = globalComposer.getByRole("textbox", {
     name: "评论内容",
   });
   await expect(globalTextbox).toBeFocused();
+  await page.screenshot({
+    path: testInfo.outputPath("comment-rail-global-composer.png"),
+  });
   await globalTextbox.fill("整个页面优先处理");
   await globalTextbox.press("Enter");
 
@@ -473,7 +493,7 @@ test("comments keep current-tab alignment, render other tabs as neutral header c
   expect(foldedHeaderBox).not.toBeNull();
   expect(otherTabsToggleBox).not.toBeNull();
   expect(otherTabsToggleBox.width)
-    .toBeGreaterThanOrEqual(foldedHeaderBox.width - 40);
+    .toBeLessThan(foldedHeaderBox.width - 40);
   await page.screenshot({
     path: testInfo.outputPath("comment-rail-folded.png"),
   });
@@ -730,8 +750,9 @@ test("saved comment edits auto-cancel while clean and survive Tab changes while 
 
 test("dynamic comment-card controls remeasure the queue without overlap", async ({
   page,
-}) => {
+}, testInfo) => {
   await page.setViewportSize({ width: 1600, height: 900 });
+  await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/");
   const { frame } = await loadFixture(page, "tabbed-comments.html", {
     buffer: fixtureBuffer("tabbed-comments.html"),
@@ -746,6 +767,16 @@ test("dynamic comment-card controls remeasure the queue without overlap", async 
   const second = rail.locator(".comment-card").filter({
     hasText: "动态高度评论二",
   });
+  expect(await first.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      borderLeftWidth: style.borderLeftWidth,
+      boxShadow: style.boxShadow,
+    };
+  })).toEqual({
+    borderLeftWidth: "1px",
+    boxShadow: "none",
+  });
   const minimumGap = async () => {
     const boxes = await Promise.all([first.boundingBox(), second.boundingBox()]);
     if (!boxes[0] || !boxes[1]) return -1;
@@ -756,13 +787,53 @@ test("dynamic comment-card controls remeasure the queue without overlap", async 
   await first.hover();
   await first.getByRole("button", { name: "编辑评论" }).click();
   await expect(first.getByRole("textbox", { name: /编辑评论/u })).toBeVisible();
+  expect(await first.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      backgroundColor: style.backgroundColor,
+      boxShadow: style.boxShadow,
+    };
+  })).toEqual({
+    backgroundColor: "rgb(249, 248, 255)",
+    boxShadow: "rgb(90, 85, 223) 2px 0px 0px 0px inset",
+  });
+  const [cancelIcon, confirmIcon] = await Promise.all([
+    first.getByRole("button", { name: "取消编辑" }).locator("svg").getAttribute("width"),
+    first.getByRole("button", { name: "确认修改" }).locator("svg").getAttribute("width"),
+  ]);
+  expect(cancelIcon).toBe("17");
+  expect(confirmIcon).toBe("18");
   await expect.poll(minimumGap).toBeGreaterThanOrEqual(16);
 
   await first.getByRole("button", { name: "取消编辑" }).click();
   await first.hover();
+  const cardHeightBeforeDelete = await first.evaluate(
+    (element) => element.getBoundingClientRect().height,
+  );
   await first.getByRole("button", { name: "删除评论" }).click();
-  await expect(first.getByRole("alert")).toContainText("删除这条评论？");
+  const deleteConfirmation = first.getByRole("alert");
+  await expect(deleteConfirmation).toContainText("删除这条评论？");
+  const cardHeightAfterDelete = await first.evaluate(
+    (element) => element.getBoundingClientRect().height,
+  );
+  expect(Math.abs(cardHeightAfterDelete - cardHeightBeforeDelete)).toBeLessThan(0.5);
+  expect(await deleteConfirmation.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      backgroundColor: style.backgroundColor,
+      borderTopWidth: style.borderTopWidth,
+    };
+  })).toEqual({
+    backgroundColor: "rgba(0, 0, 0, 0)",
+    borderTopWidth: "0px",
+  });
+  expect(await deleteConfirmation.locator("button").evaluateAll(
+    (buttons) => buttons.map((button) => getComputedStyle(button).borderTopWidth),
+  )).toEqual(["0px", "0px"]);
   await expect.poll(minimumGap).toBeGreaterThanOrEqual(16);
+  await page.screenshot({
+    path: testInfo.outputPath("comment-card-delete-confirm-lightweight.png"),
+  });
   await first.getByRole("button", { name: "取消", exact: true }).click();
 });
 
@@ -830,12 +901,16 @@ test("comment card hover keeps geometry stable while focus aligns one unchanged 
   const focusedStyle = await cards[2].evaluate((element) => {
     const style = getComputedStyle(element);
     return {
+      backgroundColor: style.backgroundColor,
       borderColor: style.borderTopColor,
       shadow: style.boxShadow,
     };
   });
-  expect(focusedStyle.borderColor).toBe("rgb(143, 138, 232)");
-  expect(focusedStyle.shadow).toContain("rgb(90, 85, 223)");
+  expect(focusedStyle).toEqual({
+    backgroundColor: "rgb(249, 248, 255)",
+    borderColor: "rgb(222, 222, 232)",
+    shadow: "rgb(90, 85, 223) 2px 0px 0px 0px inset",
+  });
   await page.screenshot({
     path: testInfo.outputPath("comment-queue-selected-aligned.png"),
   });

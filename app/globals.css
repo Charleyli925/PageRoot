@@ -3441,12 +3441,10 @@ body {
 }
 
 .project-button,
-.global-comment-button,
 .recent-run-button {
   background: #f6f7f9 !important;
 }
 
-.global-comment-button[aria-expanded="true"],
 .project-button[aria-expanded="true"],
 .recent-run-button[aria-expanded="true"] {
   background: var(--indigo-soft) !important;
@@ -3609,43 +3607,50 @@ body {
   left: 14px;
   display: block;
   min-height: 62px;
-  padding: 0 17px;
-  border: 1px solid #e5e6ea;
-  border-radius: 14px;
-  background: rgb(255 255 255 / 84%);
-  box-shadow:
-    0 7px 20px rgb(28 30 38 / 6%),
-    inset 0 1px 0 rgb(255 255 255 / 65%);
-  backdrop-filter: blur(16px) saturate(160%);
+  padding: 0 18px;
+  border: 0;
+  border-bottom: 1px solid #e1e3e7;
+  border-radius: 10px 10px 0 0;
+  background: var(--panel);
+  box-shadow: none;
+  backdrop-filter: none;
 }
 
 .comment-rail-header-main {
   min-height: 60px;
   width: 100%;
+  display: grid;
+  align-content: start;
+  gap: 0;
+}
+
+.comment-rail-header > .comment-rail-header-main {
+  display: grid;
+}
+
+.comment-rail-header[data-has-header-actions="true"] > .comment-rail-header-main {
+  min-height: 0;
+  gap: 0;
+  padding: 10px 0 8px;
+}
+
+.comment-rail-header[data-has-header-actions="true"] .comment-rail-header-actions {
+  width: 100%;
+  display: flex;
+  justify-content: flex-start;
+  gap: 6px;
+}
+
+.comment-rail-title-row {
+  min-height: 60px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
 }
 
-.comment-rail-header > .comment-rail-header-main {
-  display: flex;
-}
-
-.comment-rail-header[data-has-header-actions="true"] > .comment-rail-header-main {
-  min-height: 0;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 9px;
-  padding: 12px 0;
-}
-
-.comment-rail-header[data-has-header-actions="true"] .comment-rail-header-actions {
-  width: 100%;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  justify-content: stretch;
-  gap: 8px;
+.comment-rail-header[data-has-header-actions="true"] .comment-rail-title-row {
+  min-height: 32px;
 }
 
 .comment-rail-header h1 {
@@ -3660,15 +3665,16 @@ body {
 }
 
 .comment-rail-header h1 span {
-  min-width: 24px;
-  height: 24px;
-  display: grid;
-  place-items: center;
-  padding: 0 6px;
-  border-radius: 999px;
-  background: var(--indigo-soft);
-  color: var(--indigo-deep);
-  font-size: 10px;
+  min-width: auto;
+  height: auto;
+  display: inline;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #9a9ca5;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
   letter-spacing: 0;
 }
 
@@ -3680,38 +3686,74 @@ body {
 
 .comment-rail-header-actions {
   min-width: 0;
+  min-height: 28px;
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
+  justify-content: flex-start;
+  gap: 6px;
+}
+
+.comment-rail-global-action {
+  min-height: 27px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 5px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #7772b8;
+  box-shadow: none;
+  font-size: 10px;
+  font-weight: 650;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    color 120ms ease,
+    background-color 120ms ease;
+}
+
+.comment-rail-global-action:hover:not(:disabled),
+.comment-rail-global-action:focus-visible {
+  border: 0;
+  background: rgb(98 92 224 / 6%);
+  color: var(--indigo-deep);
+  box-shadow: none;
 }
 
 .comment-header-action {
-  width: 100%;
-  min-height: 28px;
+  position: relative;
+  width: auto;
+  min-height: 22px;
   display: inline-flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 5px;
-  padding: 0 11px;
-  border: 1px solid #e5e3f7;
-  border-radius: 11px;
-  background: #f6f5ff;
-  color: var(--indigo-deep);
+  justify-content: flex-start;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #7b7e88;
   box-shadow: none;
-  font-size: 9px;
-  font-weight: 700;
+  font-size: 10px;
+  font-weight: 620;
   white-space: nowrap;
 }
 
 .comment-header-action:hover {
-  border-color: #d4d1f2;
-  background: #f0efff;
+  border: 0;
+  background: transparent;
   color: var(--indigo-deep);
 }
 
 .unsaved-comment-shortcut {
-  background: #faf9ff;
+  color: #625cd3;
+}
+
+.comment-header-action + .comment-header-action::before {
+  margin-right: 2px;
+  content: "·";
+  color: #b1b3ba;
 }
 
 .other-tab-comments-toggle svg {
@@ -3731,7 +3773,7 @@ body {
   display: grid;
   gap: 16px;
   padding: 0 0 2px;
-  border-top: 1px solid #eff0f3;
+  border-top: 0;
 }
 
 .other-tab-comment-group {
@@ -3771,21 +3813,19 @@ body {
   min-height: 0;
   display: block;
   padding: 14px 15px 12px;
-  border: 1px solid #e6e7eb;
-  border-left: 1px solid #dedcf6;
+  border: 1px solid #e3e4e8;
   border-radius: 16px;
   background: #fff;
-  box-shadow: 0 12px 27px rgb(28 30 38 / 5%);
+  box-shadow: none;
   color: inherit;
   text-align: left;
   white-space: normal;
 }
 
 .other-tab-comment-card:hover {
-  border-color: #dcdee4;
-  border-left-color: #cbc8ef;
+  border-color: #d6d7dd;
   background: #fff;
-  box-shadow: 0 14px 30px rgb(28 30 38 / 6%);
+  box-shadow: none;
 }
 
 .other-tab-comment-card:focus-visible {
@@ -6092,6 +6132,183 @@ body {
       0 20px 46px rgb(90 85 223 / 12%),
       0 0 0 8px rgb(90 85 223 / 11%);
   }
+}
+
+/* --------------------------------------------------------------------------
+   Approved comment hierarchy — paper cards, one elevated composer
+   -------------------------------------------------------------------------- */
+
+.comment-rail-content > .comment-card,
+.comment-rail-content > .comment-card:hover,
+.comment-rail-content > .comment-card[data-selected="true"] {
+  border: 1px solid #e3e4e8;
+  background: #fff;
+  box-shadow: none;
+}
+
+.comment-rail-content > .comment-card:hover {
+  border-color: #d6d7dd;
+}
+
+.comment-rail-content > .comment-card[data-selected="true"] {
+  border-color: #dddde5;
+  background: #fdfdff;
+}
+
+.comment-rail-content > .comment-card[data-focused="true"],
+.comment-rail-content > .comment-card[data-focused="true"]:hover,
+.comment-rail-content > .comment-card[data-focused="true"]:focus-within,
+.comment-rail-content > .comment-card[data-editing="true"],
+.comment-rail-content > .comment-card[data-editing="true"]:hover,
+.comment-rail-content > .comment-card[data-editing="true"]:focus-within {
+  z-index: 4;
+  border-color: #dedee8;
+  outline: 0;
+  background: #f9f8ff;
+  box-shadow: inset 2px 0 0 var(--indigo);
+  animation: none;
+}
+
+.comment-rail-content > .comment-card:focus-visible {
+  border-color: #dedee8;
+  outline: 2px solid rgb(90 85 223 / 24%);
+  outline-offset: 1px;
+  background: #f9f8ff;
+  box-shadow: inset 2px 0 0 var(--indigo);
+}
+
+.comment-rail-content > .comment-card[data-focused="true"] > p,
+.comment-rail-content > .comment-card[data-editing="true"] > p {
+  color: #30323a;
+}
+
+.comment-rail-content > .comment-card::before,
+.comment-rail-content > .comment-card[data-focused="true"]::before,
+.rail-comment-composer::before,
+.rail-comment-composer[data-focused="true"]::before {
+  width: 15px;
+  background: #dddceb;
+}
+
+.rail-comment-composer,
+.rail-comment-composer:hover,
+.rail-comment-composer:focus-within,
+.rail-comment-composer[data-focused="true"] {
+  z-index: 5;
+  border: 1px solid #d9d9e4;
+  background: rgb(255 255 255 / 98%);
+  box-shadow:
+    0 18px 42px rgb(42 40 84 / 12%),
+    0 2px 8px rgb(42 44 55 / 5%);
+  animation: none;
+}
+
+.rail-comment-composer textarea,
+.rail-comment-composer textarea:focus,
+.rail-comment-composer textarea:focus-visible {
+  min-height: 108px;
+  padding: 11px 12px 12px;
+  border: 0;
+  border-radius: 10px;
+  outline: 0;
+  background: #f5f6f8;
+  color: #393c46;
+  font-size: 14px;
+  line-height: 1.62;
+  box-shadow: inset 0 -2px 0 transparent;
+}
+
+.rail-comment-composer textarea:focus,
+.rail-comment-composer textarea:focus-visible {
+  background: #f7f7fa;
+  box-shadow: inset 0 -2px 0 #746ee3;
+}
+
+.comment-card-footer {
+  height: 29px;
+}
+
+.comment-card:hover .comment-card-footer,
+.comment-card:focus-within .comment-card-footer,
+.comment-card[data-focused="true"] .comment-card-footer,
+.comment-card[data-editing="true"] .comment-card-footer {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.comment-card-tools,
+.composer-footer-tools {
+  gap: 3px;
+}
+
+.comment-card-tools .comment-tool-button,
+.composer-footer-tools .comment-tool-button {
+  width: 29px;
+  height: 29px;
+  min-height: 29px;
+  border-color: transparent;
+  background: transparent;
+  color: #666872;
+}
+
+.comment-tool-button.cancel-edit,
+.comment-tool-button.confirm-edit {
+  border-color: transparent;
+  background: transparent;
+  color: #666872;
+}
+
+.comment-tool-button.cancel-edit:hover:not(:disabled),
+.comment-tool-button.confirm-edit:hover:not(:disabled) {
+  border-color: #d5d2f5;
+  background: #f4f3ff;
+  color: #514cda;
+}
+
+.comment-delete-confirm {
+  min-height: 29px;
+  margin-top: 6px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #777983;
+}
+
+.comment-delete-confirm > div {
+  gap: 12px;
+}
+
+.comment-delete-confirm button,
+.comment-delete-confirm .confirm-delete {
+  min-height: 29px;
+  padding: 0 2px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #6f717b;
+  transition: color 120ms ease;
+}
+
+.comment-delete-confirm button:hover,
+.comment-delete-confirm button:focus-visible {
+  border: 0;
+  background: transparent;
+  color: #3f4149;
+}
+
+.comment-delete-confirm .confirm-delete {
+  color: #ad5b53;
+}
+
+.comment-delete-confirm .confirm-delete:hover,
+.comment-delete-confirm .confirm-delete:focus-visible {
+  color: #913d36;
+}
+
+.composer-delete-confirm {
+  min-height: 36px;
+  margin-top: 11px;
 }
 
 .workbench[data-canvas-mode="preview"] .review-scroll-stage {

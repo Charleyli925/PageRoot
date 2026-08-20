@@ -35,8 +35,11 @@ test("comments virtualize immediately above the threshold and remain navigable",
 
   await expect(commentCount)
     .toContainText(String(initialCount));
-  await expect(commentRail.locator(".comments-header small"))
-    .toContainText(/当前加载 \d+ 条/u);
+  await expect(commentRail.getByRole("button", {
+    name: "全局评论",
+    exact: true,
+  })).toBeVisible();
+  await expect(commentRail).not.toContainText("与正文同步滚动");
   const renderedCount = await commentRail.locator(".comment-card").count();
   expect(renderedCount).toBeLessThan(40);
   await expect(page.getByTestId("html-canvas-editor")
