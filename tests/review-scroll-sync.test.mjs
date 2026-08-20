@@ -147,23 +147,30 @@ test("geometry validation rejects malformed cross-frame payloads", () => {
   });
 });
 
-test("high-velocity input emits only the newest follower target for one frame", () => {
+test("a leader position is delivered at once and a same-frame burst keeps only the newest", () => {
   const harness = createHarness();
+  const map = buildReviewScrollMap(beforeGeometry, afterGeometry);
   harness.coordinator.setLinked(true);
   harness.coordinator.updateGeometry("before", beforeGeometry);
   harness.coordinator.updateGeometry("after", afterGeometry);
   harness.coordinator.handleIntent("before");
   harness.coordinator.handlePosition("before", { top: 200, left: 0 });
+  assert.equal(
+    harness.commands.length,
+    1,
+    "the follower must not wait a frame before it starts moving",
+  );
+  assert.equal(harness.commands[0].side, "after");
+  assert.equal(harness.commands[0].top, mapReviewScrollTop(map, "before", 200));
   harness.coordinator.handlePosition("before", { top: 900, left: 0 });
   harness.coordinator.handlePosition("before", { top: 1_700, left: 0 });
+  assert.equal(harness.commands.length, 1, "a same-frame burst must not queue extra commands");
   assert.equal(harness.pendingFrameCount(), 1);
   harness.flushFrame();
-  assert.equal(harness.commands.length, 1);
-  assert.equal(harness.commands[0].side, "after");
-  assert.equal(
-    harness.commands[0].top,
-    mapReviewScrollTop(buildReviewScrollMap(beforeGeometry, afterGeometry), "before", 1_700),
-  );
+  assert.equal(harness.commands.length, 2);
+  assert.equal(harness.commands[1].top, mapReviewScrollTop(map, "before", 1_700));
+  harness.flushFrame();
+  assert.equal(harness.commands.length, 2, "an idle frame boundary must not repeat a target");
 });
 
 test("rapid reversal replaces the target directly without a stale chase animation", () => {
@@ -189,6 +196,7 @@ test("programmatic overview invalidates a queued gesture without discarding its 
   harness.coordinator.handleIntent("before");
   harness.coordinator.handlePosition("before", { top: 1_600, left: 0 });
   const before = harness.coordinator.snapshot();
+  const deliveredBeforeOverview = harness.commands.length;
   assert.equal(harness.pendingFrameCount(), 1);
 
   const gestureId = harness.coordinator.invalidateGesture();
@@ -212,7 +220,11 @@ test("programmatic overview invalidates a queued gesture without discarding its 
     before: { top: 0, left: 0 },
     after: { top: 0, left: 0 },
   });
-  assert.equal(harness.commands.length, 0, "the queued follower command must stay cancelled");
+  assert.equal(
+    harness.commands.length,
+    deliveredBeforeOverview,
+    "the invalidated gesture must not reach the follower again",
+  );
   assert.equal(harness.owners.at(-1).gestureId, gestureId);
 });
 

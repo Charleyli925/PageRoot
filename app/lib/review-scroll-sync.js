@@ -257,6 +257,7 @@ export class ReviewScrollCoordinator {
     this.lastIntentAt = Number.NEGATIVE_INFINITY;
     this.activeUntil = Number.NEGATIVE_INFINITY;
     this.frameHandle = 0;
+    this.coalescedPosition = false;
     this.idleTimer = null;
     this.takeoverOffset = 0;
     this.geometries = { before: null, after: null };
@@ -372,10 +373,19 @@ export class ReviewScrollCoordinator {
     this.activeUntil = now + this.gestureIdleMs;
     this.armIdleTimer();
 
-    if (!this.frameHandle) {
-      const gestureId = this.gestureId;
-      this.frameHandle = this.requestFrame(() => this.flushFrame(gestureId));
+    // Deliver the newest target as soon as the leader reports it. Waiting for
+    // the next animation frame adds a whole frame of lag on top of the two
+    // cross-document hops the follower already pays, and the two pages visibly
+    // drift apart. A further position inside the same frame coalesces into the
+    // frame boundary instead of queueing another command, so a stalled main
+    // thread cannot fan a burst of positions out into a burst of commands.
+    if (this.frameHandle) {
+      this.coalescedPosition = true;
+      return;
     }
+    this.emitFollowerTarget(this.gestureId);
+    const gestureId = this.gestureId;
+    this.frameHandle = this.requestFrame(() => this.flushFrame(gestureId));
   }
 
   snapshot() {
@@ -402,6 +412,12 @@ export class ReviewScrollCoordinator {
 
   flushFrame(gestureId) {
     this.frameHandle = 0;
+    if (!this.coalescedPosition) return;
+    this.coalescedPosition = false;
+    this.emitFollowerTarget(gestureId);
+  }
+
+  emitFollowerTarget(gestureId) {
     if (!this.linked || gestureId !== this.gestureId || !this.leader) return;
     const source = this.leader;
     const follower = otherSide(source);
@@ -425,6 +441,7 @@ export class ReviewScrollCoordinator {
   }
 
   cancelPendingFrame() {
+    this.coalescedPosition = false;
     if (!this.frameHandle) return;
     this.cancelFrame(this.frameHandle);
     this.frameHandle = 0;
