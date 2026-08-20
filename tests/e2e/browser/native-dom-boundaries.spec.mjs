@@ -83,6 +83,50 @@ test("clicking a filled module's padding selects that module", async ({
   await expect(frame.locator("[data-html-canvas-selected]")).toHaveCount(0);
 });
 
+test("the contextual edit toolbar stays on one quiet-glass row and defers secondary controls", async ({
+  page,
+}) => {
+  const { editor, frame } = await loadFixture(page, "module-padding-hit.html");
+  await frame.locator(caseSelector("module-padding-copy")).click();
+
+  const toolbar = editor.getByRole("toolbar");
+  await expect(toolbar).toBeVisible();
+  await expect(toolbar.getByRole("button", { name: "加粗", exact: true })).toHaveText("B加粗");
+  await expect(toolbar.getByRole("button", { name: "斜体", exact: true })).toHaveText("I斜体");
+  await expect(toolbar.getByRole("button", { name: "下划线", exact: true })).toHaveText("U下划线");
+
+  const presentation = await toolbar.evaluate((element) => {
+    const row = element.firstElementChild;
+    const commentButton = element.querySelector('button[aria-label*="留评论"]');
+    const style = getComputedStyle(element);
+    return {
+      height: element.getBoundingClientRect().height,
+      flexWrap: row ? getComputedStyle(row).flexWrap : null,
+      backdropFilter: style.backdropFilter || style.webkitBackdropFilter,
+      commentShadow: commentButton ? getComputedStyle(commentButton).boxShadow : null,
+    };
+  });
+  expect(presentation.height).toBeGreaterThanOrEqual(42);
+  expect(presentation.height).toBeLessThanOrEqual(44);
+  expect(presentation.flexWrap).toBe("nowrap");
+  expect(presentation.backdropFilter).toContain("blur(17px)");
+  expect(presentation.commentShadow).toBe("none");
+
+  await expect(toolbar.getByRole("button", { name: "上移", exact: true })).toBeVisible();
+  await expect(toolbar.getByRole("button", { name: "下移", exact: true })).toBeVisible();
+  await expect(toolbar.getByLabel("字号")).toBeHidden();
+  await expect(toolbar.getByLabel("文字颜色")).toBeHidden();
+  await expect(toolbar.getByLabel("元素填充色")).toBeHidden();
+
+  await toolbar.getByText("样式与间距", { exact: true }).click();
+  await expect(toolbar.getByLabel("字号")).toBeVisible();
+  await expect(toolbar.getByLabel("文字颜色")).toBeVisible();
+  await expect(toolbar.getByLabel("元素填充色")).toBeVisible();
+  await expect(toolbar.getByLabel("内边距")).toBeVisible();
+  await expect(toolbar.getByLabel("外间距")).toBeVisible();
+  await expect(toolbar.getByLabel("行距")).toBeVisible();
+});
+
 test("hovering a filled module's padding advertises the same module click selects", async ({
   page,
 }) => {
@@ -368,10 +412,13 @@ test("double-clicking a canvas reports the dedicated root and stays comment-only
 });
 
 test("first double-click places a caret; a second double-click selects the word", async ({ page }) => {
-  const { frame } = await loadFixture(page, "complex-layout.html");
+  const { editor, frame } = await loadFixture(page, "complex-layout.html");
   const target = frame.locator(caseSelector("heading-inline"));
+  const toolbar = editor.getByRole("toolbar");
   const wordPoint = await glyphPointForText(target, "Word");
   await activateNativeEdit(frame, "heading-inline", wordPoint);
+  await expect(toolbar.getByRole("button", { name: "编辑中", exact: true }))
+    .toHaveAttribute("aria-pressed", "true");
   expect(await nativeEditingState(frame, "heading-inline")).toMatchObject({
     targetIsActive: true,
     contenteditable: "true",
@@ -389,6 +436,8 @@ test("first double-click places a caret; a second double-click selects the word"
   const second = await selectionSnapshot(frame, "heading-inline");
   expect(second.collapsed).toBe(false);
   expect(second.activeCase).toBe("heading-inline");
+  await expect(toolbar.getByRole("button", { name: "编辑中", exact: true }))
+    .toHaveAttribute("aria-pressed", "true");
 });
 
 test("an out-of-band authored DOM mutation fails closed and never reaches source", async ({ page }) => {

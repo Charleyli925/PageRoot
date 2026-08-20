@@ -48,6 +48,14 @@ const DEFAULT_DIAGNOSTIC_OPERATION_TIMEOUT = 1_000;
 const stopPromiseKey = Symbol("pagerootAppFixtureStopPromise");
 const launchDiagnosticsByPage = new WeakMap();
 
+export async function openRailGlobalCommentComposer(page) {
+  const button = page.locator('aside[aria-label="本轮评论"]')
+    .getByRole("button", { name: "全局评论", exact: true });
+  await expect(button).toBeVisible();
+  await expect(button).toBeEnabled();
+  await button.click();
+}
+
 function redactDiagnosticSecrets(value) {
   return String(value ?? "").replace(
     /(bridgeAuthToken=)[^&\s"'\\]+/giu,
@@ -1211,8 +1219,10 @@ export async function loadedDiskFrame(
   await expect(page.getByRole("button", { name: "项目", exact: true }))
     .toBeEnabled({ timeout });
   if (editable) {
-    await expect(page.getByRole("button", { name: "全局评论", exact: true }))
-      .toBeEnabled({ timeout });
+    const globalCommentButton = page.locator('aside[aria-label="本轮评论"]')
+      .getByRole("button", { name: "全局评论", exact: true });
+    await expect(globalCommentButton).toBeVisible({ timeout });
+    await expect(globalCommentButton).toBeEnabled({ timeout });
   }
   await expect(page.locator('[aria-label="项目读取失败"]')).toHaveCount(0);
   const editor = page.getByTestId("html-canvas-editor").filter({ visible: true }).first();

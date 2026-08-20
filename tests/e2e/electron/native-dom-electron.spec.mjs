@@ -40,6 +40,7 @@ import {
   createSourceFixture as createSharedSourceFixture,
   launchPageRoot,
   loadedDiskFrame as loadDiskFrame,
+  openRailGlobalCommentComposer,
   removeValidatedTemporaryDirectory,
   removeSourceFixture as removeSharedSourceFixture,
   sendToMainRenderer,
@@ -453,7 +454,11 @@ test("Electron first launch imports the welcome HTML as V1 and sends its comment
     await expect(launched.page.locator('[aria-label="项目读取失败"]')).toHaveCount(0);
     await expect(launched.page.getByRole("button", { name: "项目", exact: true }))
       .toBeEnabled({ timeout: 30_000 });
-    await expect(launched.page.getByRole("button", { name: "全局评论", exact: true }))
+    const globalCommentButton = launched.page.locator('aside[aria-label="本轮评论"]')
+      .getByRole("button", { name: "全局评论", exact: true });
+    await expect(globalCommentButton)
+      .toBeVisible({ timeout: 30_000 });
+    await expect(globalCommentButton)
       .toBeEnabled({ timeout: 30_000 });
     await expect(launched.page.locator('[aria-label="项目读取失败"]')).toHaveCount(0);
     await expect.poll(() => (
@@ -491,7 +496,7 @@ test("Electron first launch imports the welcome HTML as V1 and sends its comment
       )
     ).toBe(true);
     await launched.electronApp.evaluate(({ clipboard }) => clipboard.clear());
-    await launched.page.getByRole("button", { name: "全局评论" }).click();
+    await openRailGlobalCommentComposer(launched.page);
     await launched.page.getByRole("textbox", { name: "评论内容" })
       .fill("把欢迎页主标题改得更简洁。");
     await launched.page.getByRole("button", { name: "评论", exact: true }).click();
@@ -2890,8 +2895,10 @@ test("workspace failure keeps the current page visible with export and relaunch 
       .toBeVisible();
     await expect(recovery.getByRole("button", { name: "重新打开源页" }))
       .toBeVisible();
-    await expect(launched.page.getByRole("button", { name: "全局评论" }))
-      .toBeDisabled();
+    const globalCommentButton = launched.page.locator('aside[aria-label="本轮评论"]')
+      .getByRole("button", { name: "全局评论", exact: true });
+    await expect(globalCommentButton).toBeVisible();
+    await expect(globalCommentButton).toBeDisabled();
     await expect(launched.page.getByTestId("html-canvas-editor")
       .filter({ visible: true })
       .first()
@@ -3063,7 +3070,7 @@ test("Electron keeps V1 autosave separate from focused-field undo", async () => 
     expect(readFileSync(managedSourcePath).equals(expected)).toBe(true);
     expect(readFileSync(sourcePath)).toEqual(original);
 
-    await firstLaunch.page.getByRole("button", { name: "全局评论" }).click();
+    await openRailGlobalCommentComposer(firstLaunch.page);
     const commentInput = firstLaunch.page.getByRole("textbox", {
       name: "评论内容",
     });

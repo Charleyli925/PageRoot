@@ -28,6 +28,7 @@ import {
   createSourceFixture as createSharedSourceFixture,
   launchPageRoot as launchSharedPageRoot,
   loadedDiskFrame,
+  openRailGlobalCommentComposer,
   removeValidatedTemporaryDirectory,
   removeSourceFixture as removeSharedSourceFixture,
   seedLegacyV3Project,
@@ -4285,10 +4286,10 @@ test("ending a copied run still warns after restart and blocks late finalization
       "AI Agent 不会被自动停止；如仍在运行，请手动停止。",
       { exact: true },
     )).toBeVisible();
-    await expect(launched.page.getByRole("button", {
-      name: "全局评论",
-      exact: true,
-    })).toBeEnabled();
+    const globalCommentButton = launched.page.locator('aside[aria-label="本轮评论"]')
+      .getByRole("button", { name: "全局评论", exact: true });
+    await expect(globalCommentButton).toBeVisible();
+    await expect(globalCommentButton).toBeEnabled();
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
 
     writeAiOutput(request.requestRoot, (base) => (
@@ -4404,7 +4405,7 @@ test("a persisted global comment stays exact after restart and sends directly", 
   let activeLaunch = firstLaunch;
   try {
     await loadedDiskFrame(firstLaunch.page, fixture.sourcePath);
-    await firstLaunch.page.getByRole("button", { name: "全局评论" }).click();
+    await openRailGlobalCommentComposer(firstLaunch.page);
     await firstLaunch.page.getByRole("textbox", { name: "评论内容" })
       .fill(commentText);
     await firstLaunch.page.getByRole("button", { name: "评论", exact: true }).click();

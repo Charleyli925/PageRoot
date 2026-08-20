@@ -8251,3 +8251,219 @@ body {
     animation: none;
   }
 }
+
+/* --------------------------------------------------------------------------
+   PageRoot V5.2 — restrained, unified top toolbar
+   -------------------------------------------------------------------------- */
+
+.workbench-header {
+  border-bottom-color: rgb(43 40 53 / 9%);
+  background: rgb(253 252 249 / 92%);
+  box-shadow: none;
+  backdrop-filter: blur(18px) saturate(116%);
+  -webkit-backdrop-filter: blur(18px) saturate(116%);
+}
+
+.window-file-icon {
+  border-color: #e1dff2;
+  background: #f2f0fa;
+  color: #625d9f;
+  box-shadow: none;
+}
+
+.window-file-about-button:hover {
+  border-color: #d6d2ec;
+  background: #edeaf7;
+  box-shadow: none;
+}
+
+.file-meta {
+  color: #9999a1;
+  font-size: 10.5px;
+  font-style: normal;
+  font-weight: 540;
+}
+
+.file-version-label,
+.window-file-folder-action {
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #74747d;
+  font-weight: 540;
+}
+
+.window-file-folder-action {
+  color: #92929a;
+}
+
+.window-file-folder-action:hover,
+.window-file-folder-action:active {
+  background: transparent;
+  color: #5f5f68;
+  text-decoration: underline;
+}
+
+.save-status {
+  color: #727c77;
+  font-weight: 540;
+}
+
+.save-status > span {
+  width: 6px;
+  height: 6px;
+  box-shadow: none;
+}
+
+.window-file-quick-action {
+  color: #7772b6;
+}
+
+.window-file-quick-action:hover:not(:disabled),
+.window-file-quick-action:focus-visible {
+  background: rgb(88 80 170 / 7%);
+  color: #5d58a7;
+}
+
+.header-actions {
+  gap: 2px;
+}
+
+.canvas-mode-switch {
+  position: relative;
+  width: 172px;
+  height: 40px;
+  flex: none;
+  gap: 0;
+  padding: 3px;
+  margin-right: 8px;
+  border: 1px solid rgb(46 43 58 / 7.5%);
+  border-radius: 12px;
+  background: transparent;
+  box-shadow: none;
+}
+
+.canvas-mode-switch::before {
+  position: absolute;
+  z-index: 0;
+  top: 2px;
+  left: 3px;
+  width: 82px;
+  height: 34px;
+  border-radius: 9px;
+  background: rgb(91 82 219 / 7.5%);
+  pointer-events: none;
+  content: "";
+  transform: translateX(0);
+  transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.canvas-mode-switch:has(button:nth-of-type(2)[aria-pressed="true"])::before {
+  transform: translateX(82px);
+}
+
+.header-actions .canvas-mode-switch button,
+.header-actions .canvas-mode-switch button:hover:not(:disabled),
+.header-actions .canvas-mode-switch button[aria-pressed="true"],
+.header-actions .canvas-mode-switch button[aria-pressed="true"]:hover {
+  position: relative;
+  z-index: 1;
+  width: 82px;
+  min-width: 82px;
+  height: 34px;
+  min-height: 34px;
+  flex: none;
+  gap: 6px;
+  padding: 0;
+  border-radius: 9px;
+  background: transparent;
+  box-shadow: none;
+  color: #77757f;
+  font-size: 15px;
+  font-weight: 600;
+  transform: none;
+}
+
+.header-actions .canvas-mode-switch button[aria-pressed="true"],
+.header-actions .canvas-mode-switch button[aria-pressed="true"]:hover {
+  color: #2e2d35;
+}
+
+.canvas-mode-switch button > svg {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  color: currentcolor;
+  transition: color 140ms ease;
+}
+
+.canvas-mode-switch button > svg * {
+  stroke-width: 1.8;
+}
+
+.canvas-mode-switch button[aria-pressed="true"] > svg {
+  color: #5b52d9;
+}
+
+.header-actions > .project-button,
+.header-actions > .recent-run-button {
+  height: 40px;
+  min-height: 40px;
+  gap: 7px;
+  padding: 0 11px;
+  border-radius: 9px;
+  background: transparent !important;
+  box-shadow: none;
+  color: #65646c;
+  font-size: 15px;
+  font-weight: 600;
+  transform: none;
+}
+
+.header-actions > .project-button:hover:not(:disabled),
+.header-actions > .project-button[aria-expanded="true"],
+.header-actions > .recent-run-button:hover:not(:disabled),
+.header-actions > .recent-run-button[aria-expanded="true"] {
+  background: rgb(43 40 51 / 4%) !important;
+  color: #2f2e35 !important;
+}
+
+.header-actions > .project-button > svg,
+.header-actions > .recent-run-button > svg {
+  width: 18px;
+  height: 18px;
+  flex: none;
+}
+
+.header-actions > .project-button > svg *,
+.header-actions > .recent-run-button > svg * {
+  stroke-width: 1.8;
+}
+
+.header-actions .header-send-button {
+  height: 40px;
+  min-height: 40px;
+  margin-left: 12px;
+  padding: 0 15px 0 14px;
+  border-radius: 10px;
+  box-shadow: 0 2px 6px rgb(65 57 166 / 14%);
+  font-size: 15px;
+  font-weight: 650;
+  transform: none;
+}
+
+.header-actions .header-send-button:hover:not(:disabled) {
+  box-shadow: 0 3px 8px rgb(65 57 166 / 16%);
+  transform: none;
+}
+
+.header-send-button[data-copied="true"] {
+  box-shadow: 0 2px 6px rgb(47 124 92 / 14%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .canvas-mode-switch::before,
+  .canvas-mode-switch button > svg {
+    transition: none;
+  }
+}

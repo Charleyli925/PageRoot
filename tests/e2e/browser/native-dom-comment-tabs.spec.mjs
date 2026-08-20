@@ -26,6 +26,14 @@ async function switchTab(frame, panelId) {
   }, panelId);
 }
 
+async function openRailGlobalCommentComposer(page) {
+  const button = page.locator('aside[aria-label="本轮评论"]')
+    .getByRole("button", { name: "全局评论", exact: true });
+  await expect(button).toBeVisible();
+  await expect(button).toBeEnabled();
+  await button.click();
+}
+
 async function saveComment(page, frame, caseId, text) {
   await frame.locator(caseSelector(caseId)).click();
   await page.getByRole("toolbar", { name: /编辑/u })
@@ -51,10 +59,7 @@ async function saveComment(page, frame, caseId, text) {
 }
 
 async function saveGlobalComment(page, text) {
-  await page.getByRole("button", {
-    name: "全局评论",
-    exact: true,
-  }).click();
+  await openRailGlobalCommentComposer(page);
   const composer = page.getByRole("region", { name: "添加评论" });
   const textbox = composer.getByRole("textbox", { name: "评论内容" });
   await expect(textbox).toBeFocused();

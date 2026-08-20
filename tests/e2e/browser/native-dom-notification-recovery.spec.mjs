@@ -13,6 +13,14 @@ async function openFixture(page, name = "notification-recovery.html") {
   });
 }
 
+async function openRailGlobalCommentComposer(page) {
+  const button = page.locator('aside[aria-label="本轮评论"]')
+    .getByRole("button", { name: "全局评论", exact: true });
+  await expect(button).toBeVisible();
+  await expect(button).toBeEnabled();
+  await button.click();
+}
+
 test.describe("notification recovery paths", () => {
   test("a browser encoding error preserves the current page and reopens the HTML picker", async ({
     page,
@@ -79,7 +87,7 @@ test.describe("notification recovery paths", () => {
     page,
   }) => {
     await openFixture(page);
-    await page.getByRole("button", { name: "全局评论" }).click();
+    await openRailGlobalCommentComposer(page);
 
     const composer = page.getByRole("region", { name: "添加评论" });
     await expect(composer).toBeVisible();
