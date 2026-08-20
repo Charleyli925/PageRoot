@@ -3,18 +3,44 @@ import {
   validationReviewFromRecord,
 } from "../domain/run-lifecycle.js";
 import { versionAuditCollections } from "../lib/version-audit-records";
-import { commentsFromRecords, selectionFromRecord } from "./comment-model";
+import { commentsFromRecords, insertionLabel, selectionFromRecord } from "./comment-model";
 import { displayVersionLabel } from "./project-model";
 import { isRecord } from "./record-model";
 import {
   decodeDraftAuditChange,
   decodeVersionAuditChange,
 } from "./version-compatibility-decoder.js";
+import { versionEntryTitle } from "./version-graph";
 import type {
   DirectEditEvent,
   UserSupplementRecord,
   Version,
 } from "./types";
+
+// The row label for a version. A version manifest has no dependable
+// AI-authored change summary and every managed file in a project shares one
+// name, so the user's own first requirement is the only stable, meaningful
+// title. See app/workbench/version-graph.ts for the rule. `peers` lets a
+// branch head fall back to naming the version it forked from.
+export function versionTitle(
+  version: Version,
+  peers: readonly Version[] = [],
+): string {
+  const branchedFrom = version.basedOnVersionId
+    && version.basedOnVersionId !== version.previousVersionId
+    ? peers.find((peer) => peer.id === version.basedOnVersionId) ?? null
+    : null;
+  return versionEntryTitle({
+    isInitial: version.source === "初始页面",
+    comments: version.comments.map((comment) => ({
+      label: insertionLabel(comment.target),
+      text: comment.text,
+    })),
+    requirement: version.requirement,
+    directEditCount: version.directEdits.length,
+    branchedFromOrdinal: branchedFrom ? branchedFrom.ordinal : null,
+  });
+}
 
 export function changesFromRecords(raw: unknown): DirectEditEvent[] {
   if (!Array.isArray(raw)) return [];
@@ -106,7 +132,7 @@ export function versionsFromWorkspace(
   payload: Record<string, unknown>,
 ): Version[] {
   if (!Array.isArray(payload.versions)) return [];
-  return payload.versions.flatMap((raw) => {
+  return payload.versions.flatMap<Version>((raw) => {
     if (!isRecord(raw)) return [];
     if (raw.schemaVersion === "4.0.0") {
       const id = String(raw.versionId || "");
@@ -123,6 +149,7 @@ export function versionsFromWorkspace(
         source: (
           sourceType === "internal-ai" ? "内部 AI" : "初始页面"
         ) as Version["source"],
+        requirement: raw.requirement ? String(raw.requirement) : null,
         contentSha256: String(raw.contentSha256 || ""),
         previousVersionId: raw.previousVersionId ? String(raw.previousVersionId) : null,
         basedOnVersionId: raw.basedOnVersionId ? String(raw.basedOnVersionId) : null,
@@ -159,6 +186,9 @@ export function versionsFromWorkspace(
       source: (
         sourceType === "internal-ai" ? "内部 AI" : "初始页面"
       ) as Version["source"],
+      // Legacy records carry the round's comments inline, so they never need the
+      // separately read requirement.
+      requirement: null,
       contentSha256: String(manifest.contentSha256 || raw.contentSha256 || ""),
       previousVersionId: manifest.previousVersionId
         ? String(manifest.previousVersionId)

@@ -131,7 +131,7 @@
   color: #574fab;
   box-shadow: 0 5px 10px rgb(31 28 51 / 10%);
   backdrop-filter: blur(20px) saturate(180%);
-  font-size: 8px;
+  font-size: 9px;
   font-weight: 740;
   transform: translateX(-50%);
 }
@@ -352,10 +352,10 @@
 
 .previewButtonLabel small {
   color: #9a9aa4;
-  font-size: 7px;
+  font-size: 9px;
   font-style: italic;
   font-weight: 500;
-  line-height: 8px;
+  line-height: 10px;
 }
 
 .segmented button[aria-pressed="true"] .previewButtonLabel small {
@@ -740,7 +740,7 @@
 }
 
 .mapHandleMain span {
-  font-size: 8px;
+  font-size: 9px;
   font-weight: 700;
   writing-mode: vertical-rl;
 }
@@ -784,7 +784,7 @@
 
 .mapNavigator small {
   color: #9999a3;
-  font-size: 7px;
+  font-size: 9px;
 }
 
 .mapPanel {
@@ -928,7 +928,7 @@
 .mapList small {
   overflow: hidden;
   color: #8d8d98;
-  font-size: 8px;
+  font-size: 9px;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
@@ -965,7 +965,7 @@
 .mapGroup h3 small {
   flex: none;
   color: #9696a1;
-  font-size: 7px;
+  font-size: 9px;
   font-weight: 560;
 }
 
@@ -1051,7 +1051,7 @@
   border: 1px solid #e2e1e8;
   border-radius: 18px;
   background: #fff;
-  box-shadow: 0 24px 70px rgb(22 22 32 / 25%);
+  box-shadow: 0 24px 70px rgb(28 30 38 / 25%);
   text-align: center;
 }
 

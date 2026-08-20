@@ -13,6 +13,9 @@ const eslintConfig = defineConfig([
     "build/**",
     "output/**",
     "next-env.d.ts",
+    // Isolated task checkouts created by `npm run task:start`. They carry other
+    // branches' build output, which must never be linted as this tree's source.
+    ".codex-worktrees/**",
   ]),
 ]);
 

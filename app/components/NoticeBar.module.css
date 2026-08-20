@@ -1,7 +1,7 @@
 .notice {
-  --notice-color: #5148ca;
-  --notice-soft: rgb(81 72 202 / 10%);
-  --notice-border: rgb(81 72 202 / 22%);
+  --notice-color: var(--indigo);
+  --notice-soft: rgb(90 85 223 / 10%);
+  --notice-border: rgb(90 85 223 / 22%);
 
   z-index: 100;
   display: grid;
