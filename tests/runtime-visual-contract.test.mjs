@@ -21,8 +21,8 @@ test("runtime snapshot producers and consumers share one immutable contract", ()
   assert.equal(RUNTIME_VISUAL_CONTRACT_VERSION, 2);
   assert.equal(RUNTIME_VISUAL_CONTRACT.candidateLimit, 128);
   assert.equal(RUNTIME_VISUAL_CONTRACT.identityAttributeLimit, 24);
-  assert.equal(RUNTIME_VISUAL_CONTRACT.ownerDeadlineMs, 3_000);
-  assert.equal(RUNTIME_VISUAL_CONTRACT.captureSettleMs, 800);
+  assert.equal(RUNTIME_VISUAL_CONTRACT.ownerDeadlineMs, 4_000);
+  assert.equal(RUNTIME_VISUAL_CONTRACT.captureSettleMs, 1_200);
   assert.equal(RUNTIME_VISUAL_CONTRACT.pageBudget.visualLimit, 32);
   assert.deepEqual(RUNTIME_VISUAL_CONTRACT.pageBudget.viewport, {
     minWidth: 320,

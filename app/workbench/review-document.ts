@@ -1438,7 +1438,7 @@ function annotateRuntimeVisualCandidates({
     ...selections.filter((selection) => !selection.commented),
   ].slice(0, REVIEW_RUNTIME_VISUAL_CANDIDATE_LIMIT);
   const candidates: ReviewRuntimeVisualCandidate[] = [];
-  prioritized.forEach(({ before, after, beforeElement, afterElement, outlineItem }) => {
+  prioritized.forEach(({ before, after, beforeElement, afterElement, outlineItem, commented }) => {
     const key = `runtime-host-${candidates.length + 1}`;
     const changeId = outlineItem.changeId || `runtime-change-${outlineItem.id}`;
     const beforeCaptureCandidate = runtimeSnapshotCaptureCandidate(key, before);
@@ -1464,6 +1464,7 @@ function annotateRuntimeVisualCandidates({
         before: before.hostTargetRef,
         after: after.hostTargetRef,
       },
+      ...(commented ? { commented: true } : {}),
       ...(outlineItem.panelKey ? { panelKey: outlineItem.panelKey } : {}),
       ...(outlineItem.panelPath?.length ? { panelPath: [...outlineItem.panelPath] } : {}),
     });
@@ -6151,9 +6152,11 @@ function* buildReviewDocumentSteps(
         afterSourceElements,
         outline,
         // Comment scope attributes are still present here; they are cleared
-        // right after candidate annotation and before serialization.
+        // right after candidate annotation and before serialization. A global
+        // page comment anchors on <body> and must not mark every host as
+        // commented, so only element-anchored comment scopes qualify.
         commentAnchors: [...beforeDocument.querySelectorAll(
-          `[${REVIEW_COMMENT_KEY_ATTRIBUTE}]`,
+          `[${REVIEW_COMMENT_KEY_ATTRIBUTE}]:not([${REVIEW_COMMENT_GLOBAL_ATTRIBUTE}])`,
         )],
       })
     : {

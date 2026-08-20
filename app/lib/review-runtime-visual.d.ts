@@ -11,6 +11,7 @@ export type ReviewRuntimeVisualCandidate = Readonly<{
     before: Readonly<Record<string, unknown>>;
     after: Readonly<Record<string, unknown>>;
   }>;
+  commented?: boolean;
   panelKey?: string;
   panelPath?: readonly string[];
 }>;

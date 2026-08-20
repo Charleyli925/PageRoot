@@ -202,9 +202,12 @@ function helperForTypes(types) {
 /**
  * Runtime evidence can add one opaque style projection per changed source
  * host. Outline aggregation remains navigation metadata; it is never runtime
- * geometry authority. Unverified hosts contribute their own suspected
- * changes: they exempt the host from dimming and label it "疑似有改动"
- * without claiming a confirmed visual fact.
+ * geometry authority. Unverified comment-anchored hosts contribute their own
+ * suspected changes: they exempt the host from dimming and label it
+ * "疑似有改动" without claiming a confirmed visual fact. Uncommented hosts
+ * never surface suspicion — a page full of unverifiable charts (for example a
+ * network-blocked chart library) must not drown the review in amber frames —
+ * so an uncommented unverified host keeps the plain dimmed presentation.
  */
 export function mergeReviewRuntimeVisualChanges(documents, verdicts) {
   const changes = Array.isArray(documents?.changes) ? documents.changes : [];
@@ -224,6 +227,7 @@ export function mergeReviewRuntimeVisualChanges(documents, verdicts) {
   ));
   const suspectedCandidates = candidates.filter((candidate) => (
     unverifiedKeys.has(candidate.key)
+    && candidate.commented === true
     && !changedKeys.has(candidate.key)
     && outlineIds.has(candidate.outlineId)
   ));

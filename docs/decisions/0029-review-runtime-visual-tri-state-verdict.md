@@ -41,42 +41,56 @@ from ADR 0021 are unchanged; what changes is the meaning of "no fact":
   the pipeline could not prove: unavailable captures, undecodable PNGs, or two
   near-uniform surfaces whose per-channel spread is at most 3 — the signature
   of a chart that never rendered).
-- Only `verified unchanged` hosts dim. `unverified` hosts keep full visibility
-  on both pages through a dim-mask exemption; the after page draws an amber
-  dashed "疑似有改动" frame, and the change list gains a synthetic suspected
-  entry (`suspected-<outlineId>`) that never folds into or overwrites a
-  confirmed change or its outline slot.
+- Only `verified unchanged` hosts dim. An `unverified` host surfaces as
+  suspected **only when a user comment anchors on it or an enclosing element**
+  — comments mark the regions the user explicitly asked AI to change, so
+  P(changed | commented) is high while an unconditional amber frame on every
+  unverifiable chart (for example a whole page of network-blocked CDN charts)
+  would drown the review in noise. A global page comment anchors on `<body>`
+  and never marks hosts as commented. Uncommented unverified hosts keep the
+  plain dimmed presentation, which is exactly the pre-change behavior.
+- A suspected host keeps full visibility on both pages through a dim-mask
+  exemption; the after page draws an amber dashed "疑似有改动" frame, and the
+  change list gains a synthetic suspected entry (`suspected-<outlineId>`) that
+  never folds into or overwrites a confirmed change or its outline slot.
 - Runtime markers carry an explicit `verdict` (`changed` or `suspected`); the
   bootstrap rejects a whole marker batch containing any other verdict.
-- The owner waits one bounded `captureSettleMs` (800 ms) after the first
-  offscreen paint before measuring, under a raised 3-second owner deadline,
-  because chart libraries initialize asynchronously and animate after first
-  paint.
+- The owner waits one bounded `captureSettleMs` (1,200 ms) after the first
+  offscreen paint before measuring, under a raised 4-second owner deadline.
+  The settle must outlast the default one-second chart entrance animation:
+  sampling mid-animation on two sides at different phases would fabricate a
+  changed verdict for an unchanged chart.
 - Host enumeration may look beyond the 32-capture budget (up to
   `candidateLimit`) so comment-anchored hosts are captured first; user comments
   mark the regions whose verification matters most.
 
 ## Consequences
 
-- A changed chart that the pipeline cannot verify is no longer hidden by
-  dimming; the reader sees both renderings side by side plus an explicit
-  uncertainty hint instead of a false "unchanged" claim.
+- A changed, commented chart that the pipeline cannot verify is no longer
+  hidden by dimming; the reader sees both renderings side by side plus an
+  explicit uncertainty hint instead of a false "unchanged" claim.
 - Genuinely unchanged charts on pages whose scripts render locally still dim
   exactly as before, because their captures produce real, non-uniform,
   matching pixels.
+- An uncommented chart that changed but cannot be verified still dims — the
+  accepted residual of the noise trade-off; the user's comment is the signal
+  that opts a region into the suspected presentation.
 - Pages that load chart libraries from the network keep their capture
-  isolation; those hosts now honestly land in the suspected presentation
-  rather than dimming. Relaxing capture-session network policy remains out of
-  scope as a security boundary decision.
+  isolation; commented hosts among them land in the suspected presentation,
+  the rest dim as before. Relaxing capture-session network policy remains out
+  of scope as a security boundary decision.
 - Authored scripts are still never parsed, classified or compared; the verdict
   is derived from owner-captured pixels only.
-- Losing the capture capability entirely (no owner route) leaves every runtime
-  host suspected instead of silently unchanged.
+- Losing the capture capability entirely (no owner route) leaves every
+  commented runtime host suspected instead of silently unchanged.
 
 ## Alternatives rejected
 
 - Tuning the raster threshold again: cannot recover evidence that was never
   captured; keeps the silent false-unchanged default for new failure modes.
+- Marking every unverifiable chart as suspected regardless of comments:
+  a network-blocked chart library floods the page with amber frames on
+  unchanged charts and desensitizes the marker.
 - Marking every commented chart as suspected regardless of verification:
   overrides real pixel evidence and desensitizes the marker.
 - Script byte-diff as a change signal: deferred; it classifies authored

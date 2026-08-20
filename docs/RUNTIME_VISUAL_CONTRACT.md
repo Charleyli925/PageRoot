@@ -119,8 +119,10 @@ The owner always has these containment properties:
 
 After the first offscreen paint the owner waits one bounded settle period
 (`captureSettleMs`) before measuring and sampling, because chart libraries
-initialize asynchronously and animate after that first paint. The settle wait
-stays subordinate to the owner deadline and never retries.
+initialize asynchronously and animate after that first paint; the settle
+outlasts the default one-second entrance animation so two sides are not
+sampled at different animation phases. The settle wait stays subordinate to
+the owner deadline and never retries.
 
 It returns only a captured/unavailable key plus an envelope, PNG
 bytes/hash/bitmap size, the owner-measured CSS-pixel layout width/height and a
@@ -162,14 +164,19 @@ chart host as context requires positive pixel evidence:
   spread of at most 3), which is the signature of a chart host that never
   rendered (blocked network, script failure, unfinished initialization).
 
-Only a verified-unchanged host may dim. An unverified host keeps full
-visibility on both pages through a dim-mask exemption and receives one
-suspected fact: the after page draws an amber dashed "疑似有改动" frame while
-the before page stays unmarked. Suspected facts are always their own synthetic
-changes (`suspected-<outlineId>`) and never fold into, or overwrite, a
-confirmed change or its outline slot; they claim an outline slot only when the
-section has no confirmed change. Losing the capture capability entirely leaves
-every runtime host unverified rather than silently unchanged.
+Only a verified-unchanged host may dim. An unverified host surfaces as
+suspected only when a user comment anchors on it or an enclosing element; a
+global page comment anchors on `<body>` and never marks hosts as commented,
+and an uncommented unverified host keeps the plain dimmed presentation so a
+page full of unverifiable charts cannot flood the review with amber frames. A
+suspected host keeps full visibility on both pages through a dim-mask
+exemption and receives one suspected fact: the after page draws an amber
+dashed "疑似有改动" frame while the before page stays unmarked. Suspected
+facts are always their own synthetic changes (`suspected-<outlineId>`) and
+never fold into, or overwrite, a confirmed change or its outline slot; they
+claim an outline slot only when the section has no confirmed change. Losing
+the capture capability entirely leaves every commented runtime host
+unverified rather than silently unchanged.
 
 Canvas-internal text has no DOM/SVG semantic representation at this boundary,
 so it follows the bounded raster rule; this contract does not add OCR, canvas
@@ -196,8 +203,8 @@ runtime delivery never clears static facts.
 ## Shared limits
 
 `app/domain/runtime-visual-contract.js` is the frozen production limit source:
-contract version, source/session identity, 3-second owner deadline, an
-800-millisecond post-paint settle wait, a
+contract version, source/session identity, 4-second owner deadline, a
+1,200-millisecond post-paint settle wait, a
 320–4,096 by 320–2,400 viewport, 32 snapshots, 4,194,304 pixels, a
 2,000,000-byte individual PNG cap, a 4,096-pixel single-edge cap and
 16,000,000 aggregate PNG bytes, plus a 65,536-byte pre-hash visible-text

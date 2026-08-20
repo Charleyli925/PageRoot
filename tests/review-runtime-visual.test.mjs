@@ -331,7 +331,7 @@ test("near-uniform pixel detection treats undecodable buffers as uniform", () =>
   assert.equal(reviewRuntimeVisualPixelsAreUniform(new Uint8Array(3)), true);
 });
 
-test("unverified candidates surface as suspected changes without claiming verified facts", () => {
+test("unverified commented candidates surface as suspected changes without claiming verified facts", () => {
   const documents = {
     changes: [{
       id: "change-1",
@@ -357,6 +357,13 @@ test("unverified candidates surface as suspected changes without claiming verifi
         helper: "本轮未修改",
         types: [],
       },
+      {
+        id: "outline-3",
+        group: "页面",
+        label: "未评论图表区",
+        helper: "本轮未修改",
+        types: [],
+      },
     ],
     runtimeVisualCandidates: [
       {
@@ -364,24 +371,38 @@ test("unverified candidates surface as suspected changes without claiming verifi
         outlineId: "outline-1",
         changeId: "change-1",
         label: "核心结论",
+        commented: true,
       },
       {
         key: "runtime-host-2",
         outlineId: "outline-2",
         changeId: "runtime-change-outline-2",
         label: "图表区",
+        commented: true,
       },
       {
         key: "runtime-host-3",
         outlineId: "outline-2",
         changeId: "runtime-change-outline-2",
         label: "图表区",
+        commented: true,
+      },
+      {
+        key: "runtime-host-4",
+        outlineId: "outline-3",
+        changeId: "runtime-change-outline-3",
+        label: "未评论图表区",
       },
     ],
   };
   const merged = mergeReviewRuntimeVisualChanges(documents, {
     changedKeys: [],
-    unverifiedKeys: ["runtime-host-1", "runtime-host-2", "runtime-host-3"],
+    unverifiedKeys: [
+      "runtime-host-1",
+      "runtime-host-2",
+      "runtime-host-3",
+      "runtime-host-4",
+    ],
   });
   assert.equal(merged.changes.length, 3);
   assert.deepEqual(merged.changes[0].types, ["text"], "confirmed change stays untouched");
@@ -401,11 +422,42 @@ test("unverified candidates surface as suspected changes without claiming verifi
   );
   assert.equal(merged.outline[1].changeId, "suspected-outline-2");
   assert.equal(merged.outline[1].helper, "疑似有改动（无法核实）");
+  assert.equal(
+    merged.outline[2].changeId,
+    undefined,
+    "an uncommented unverified host keeps the plain dimmed presentation",
+  );
   assert.deepEqual(merged.markers, [
     { candidateKey: "runtime-host-1", changeId: "suspected-outline-1", verdict: "suspected" },
     { candidateKey: "runtime-host-2", changeId: "suspected-outline-2", verdict: "suspected" },
     { candidateKey: "runtime-host-3", changeId: "suspected-outline-2", verdict: "suspected" },
-  ]);
+  ], "uncommented unverified hosts emit no suspected marker");
+});
+
+test("uncommented unverified candidates alone leave the documents untouched", () => {
+  const documents = {
+    changes: [],
+    outline: [{
+      id: "outline-1",
+      group: "页面",
+      label: "图表区",
+      helper: "本轮未修改",
+      types: [],
+    }],
+    runtimeVisualCandidates: [{
+      key: "runtime-host-1",
+      outlineId: "outline-1",
+      changeId: "runtime-change-outline-1",
+      label: "图表区",
+    }],
+  };
+  const merged = mergeReviewRuntimeVisualChanges(documents, {
+    changedKeys: [],
+    unverifiedKeys: ["runtime-host-1"],
+  });
+  assert.deepEqual(merged.changes, []);
+  assert.deepEqual(merged.markers, []);
+  assert.equal(merged.outline[0].changeId, undefined);
 });
 
 test("a changed verdict beats an unverified verdict for the same candidate", () => {
