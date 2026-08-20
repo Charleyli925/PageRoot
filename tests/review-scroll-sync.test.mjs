@@ -274,6 +274,36 @@ test("layout geometry is frozen during a gesture and committed after idle", () =
   assert.equal(harness.coordinator.snapshot().mapRevision, "1:2");
 });
 
+test("a page beyond a short reported maximum is not yanked back at the page end", () => {
+  const harness = createHarness();
+  harness.coordinator.setLinked(true);
+  harness.coordinator.updateGeometry("before", beforeGeometry);
+  harness.coordinator.updateGeometry("after", afterGeometry);
+  // Scrollbars and frozen geometry both make a reported maximum short, so
+  // native scrolling lands further down than the coordinator was told.
+  harness.coordinator.handleIntent("before");
+  harness.coordinator.handlePosition("before", { top: 3_015, left: 0 });
+  harness.flushFrame();
+  assert.equal(harness.coordinator.snapshot().positions.before.top, 3_015);
+  assert.equal(harness.commands.at(-1).top, 1_350);
+
+  harness.coordinator.handlePosition("after", {
+    top: 1_365,
+    left: 0,
+    commandId: harness.commands.at(-1).commandId,
+  });
+  harness.advance(141);
+  harness.coordinator.handleIntent("after");
+  harness.coordinator.handlePosition("after", { top: 1_365, left: 0 });
+  harness.flushFrame();
+  const takeover = harness.commands.at(-1);
+  assert.equal(takeover.side, "before");
+  assert.ok(
+    takeover.top >= 3_015,
+    "a short maximum must not pull a page back from where native scrolling put it",
+  );
+});
+
 test("horizontal following matches boundaries and stops on the applied echo", () => {
   assert.equal(followerReviewScrollLeft({
     sourceLeft: 120,

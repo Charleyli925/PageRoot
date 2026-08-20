@@ -352,10 +352,13 @@ export class ReviewScrollCoordinator {
    */
   handlePosition(side, position) {
     if (!REVIEW_SIDES.includes(side)) return;
-    const geometry = this.geometries[side] || this.pendingGeometries[side];
-    const maximum = geometry?.maximumScroll ?? Number.POSITIVE_INFINITY;
+    // A reported maximum can be short of reality: scrollbars change the layout
+    // viewport and geometry is deliberately frozen for the duration of a
+    // gesture. Record where the page actually is and let the mapping saturate,
+    // otherwise the leader looks higher than it is and drags the follower
+    // backwards at the page end.
     this.positions[side] = {
-      top: clamp(finiteNumber(position.top, 0), 0, maximum),
+      top: Math.max(0, finiteNumber(position.top, 0)),
       left: Math.max(0, finiteNumber(position.left, 0)),
     };
     if (position.commandId || !this.linked) return;
@@ -409,7 +412,7 @@ export class ReviewScrollCoordinator {
     const top = clamp(
       this.mappedTop(source, this.positions[source].top) + this.takeoverOffset,
       0,
-      followerMaximum,
+      Math.max(followerMaximum, this.positions[follower].top),
     );
     const commandId = `review-scroll-${gestureId}-${++this.commandSequence}`;
     this.positions[follower] = { top, left: this.positions[source].left };

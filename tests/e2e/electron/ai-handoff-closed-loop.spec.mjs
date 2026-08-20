@@ -3322,6 +3322,46 @@ ${REVIEW_MASK_UNION_BEFORE}
     await expect.poll(() => afterViewport.evaluate((element) => element.scrollLeft))
       .toBe(swipedLeft);
 
+    // At the page end the browser stops on the real scroll maximum, which a
+    // scrollbar-shortened measurement underreports. A synchronizer that trusts
+    // the short value drags the other page backwards while the user is still
+    // scrolling forwards.
+    const hoverPane = async (viewport) => {
+      const paneBounds = await viewport.boundingBox();
+      await launched.page.mouse.move(
+        paneBounds.x + paneBounds.width / 2,
+        paneBounds.y + paneBounds.height / 2,
+      );
+    };
+    const frameScrollState = (frame) => frame.locator("html").evaluate(() => ({
+      top: Math.round(scrollY),
+      remaining: Math.round(Math.max(
+        0,
+        document.documentElement.scrollHeight
+        - document.documentElement.clientHeight
+        - scrollY,
+      )),
+    }));
+    await hoverPane(beforeViewport);
+    for (let index = 0; index < 9; index += 1) {
+      await launched.page.mouse.wheel(0, 900);
+      await launched.page.waitForTimeout(120);
+    }
+    await expect.poll(async () => (await frameScrollState(beforeReviewFrame)).remaining)
+      .toBeLessThanOrEqual(1);
+    const leaderAtPageEnd = await frameScrollState(beforeReviewFrame);
+    await hoverPane(afterViewport);
+    await launched.page.mouse.wheel(0, 150);
+    await launched.page.waitForTimeout(240);
+    expect((await frameScrollState(afterReviewFrame)).remaining).toBeLessThanOrEqual(1);
+    expect((await frameScrollState(beforeReviewFrame)).top).toBe(leaderAtPageEnd.top);
+    await beforeReviewFrame.locator("html").evaluate(() => {
+      dispatchEvent(new WheelEvent("wheel", { deltaY: -120 }));
+      window.scrollTo(0, 0);
+    });
+    await expect.poll(() => afterReviewFrame.locator("html").evaluate(() => window.scrollY))
+      .toBe(0);
+
     const originalAfterMaximum = await afterReviewFrame.locator("html").evaluate(() => (
       Math.max(0, document.documentElement.scrollHeight - innerHeight)
     ));
