@@ -495,7 +495,7 @@ export default function AiReviewWorkspace({
     scrollMode,
     zoomMode: zoom,
   } = reviewState;
-  const [toolbarPinned, setToolbarPinned] = useState(false);
+  const [toolbarPinned, setToolbarPinned] = useState(true);
   const [mapPinned, setMapPinned] = useState(false);
   const [mapPeeked, setMapPeeked] = useState(false);
   const [confirmationAction, setConfirmationAction] = useState<ConfirmationAction | null>(null);

@@ -1238,21 +1238,33 @@ ${REVIEW_MASK_UNION_BEFORE}
     await launched.page.getByRole("button", { name: "审阅对比" }).click();
     await expect(launched.page.getByTestId("ai-review-workspace"))
       .toBeVisible({ timeout: 30_000 });
-    await launched.page.getByRole("button", {
-      name: "显示并固定审阅工具",
-    }).click();
-    const pinnedToolbarHandle = launched.page.getByRole("button", {
+    // 审阅工具默认展开，并且浮在两页之上：展开或收起都不能把页面上下推动。
+    const collapseToolbarHandle = launched.page.getByRole("button", {
       name: "收起审阅工具",
     });
-    await expect(pinnedToolbarHandle).toBeVisible();
+    await expect(collapseToolbarHandle).toBeVisible();
+    const beforePaneHeader = launched.page.locator(
+      'section[data-side="before"] > header',
+    );
+    // 展开的工具浮层盖在页头之上，把手底边因此落在页头顶边之下。
     await expect.poll(async () => {
-      const toolbarHandleBox = await pinnedToolbarHandle.boundingBox();
-      const beforePaneHeaderBox = await launched.page
-        .locator('section[data-side="before"] > header')
-        .boundingBox();
-      if (!toolbarHandleBox || !beforePaneHeaderBox) return -100;
-      return beforePaneHeaderBox.y - (toolbarHandleBox.y + toolbarHandleBox.height);
-    }).toBeGreaterThanOrEqual(-1);
+      const [toolbarHandleBox, beforePaneHeaderBox] = await Promise.all([
+        collapseToolbarHandle.boundingBox(),
+        beforePaneHeader.boundingBox(),
+      ]);
+      if (!toolbarHandleBox || !beforePaneHeaderBox) return 0;
+      return toolbarHandleBox.y + toolbarHandleBox.height - beforePaneHeaderBox.y;
+    }).toBeGreaterThan(0);
+    const pinnedPaneHeaderTop = (await beforePaneHeader.boundingBox())?.y ?? -1;
+    await collapseToolbarHandle.click();
+    await expect(launched.page.getByRole("button", {
+      name: "显示并固定审阅工具",
+    })).toBeVisible();
+    await expect.poll(async () => {
+      const collapsedPaneHeaderBox = await beforePaneHeader.boundingBox();
+      if (!collapsedPaneHeaderBox) return -100;
+      return Math.abs(collapsedPaneHeaderBox.y - pinnedPaneHeaderTop);
+    }).toBeLessThanOrEqual(1);
     const beforeReviewFrame = launched.page.frameLocator(
       'iframe[title^="修改前"]',
     );
@@ -1362,6 +1374,11 @@ ${REVIEW_MASK_UNION_BEFORE}
     }
     await launched.page.locator('section[data-side="before"] > header').hover();
     await expect(reviewCommentBubble).toBeHidden();
+    // 接下来要操作工具栏控件，先把浮层重新展开。
+    await launched.page.getByRole("button", {
+      name: "显示并固定审阅工具",
+    }).click();
+    await expect(collapseToolbarHandle).toBeVisible();
     await expect(beforeReviewFrame.locator('[data-review-tab-panel="two"]'))
       .toBeHidden();
     await beforeReviewFrame.getByRole("button", { name: "审阅标签二" })
@@ -3346,6 +3363,19 @@ ${REVIEW_MASK_UNION_BEFORE}
         - scrollY,
       )),
     }));
+    // The page-end check only means something when both pages start from the
+    // same place: an earlier harness-driven scrollIntoView can leave the two
+    // documents at different offsets, and the next gesture would carry that
+    // gap to the page end as a fixed takeover offset.
+    for (const frame of [beforeReviewFrame, afterReviewFrame]) {
+      await frame.locator("html").evaluate(() => window.scrollTo(0, 0));
+    }
+    await expect.poll(async () => (await Promise.all(
+      [beforeReviewFrame, afterReviewFrame].map((frame) => (
+        frame.locator("html").evaluate(() => Math.round(scrollY))
+      )),
+    )).reduce((total, top) => total + top, 0)).toBe(0);
+    await launched.page.waitForTimeout(240);
     await hoverPane(beforeViewport);
     for (let index = 0; index < 9; index += 1) {
       await launched.page.mouse.wheel(0, 900);
@@ -3699,9 +3729,9 @@ test("a pre-load review navigation falls back without trusting the replacement p
       { exact: true },
     )).toHaveCount(0);
     await launched.page.getByRole("button", {
-      name: "显示并固定审阅工具",
+      name: "收起审阅工具",
     }).click();
-    await expect(launched.page.getByRole("button", { name: "收起审阅工具" }))
+    await expect(launched.page.getByRole("button", { name: "显示并固定审阅工具" }))
       .toBeVisible();
   } finally {
     await stopPageRoot(launched.electronApp, launched.isolatedUserData);
