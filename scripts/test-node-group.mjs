@@ -42,6 +42,7 @@ const INTEGRATION_TESTS = new Set([
   "html-source-parser.test.mjs",
   "lifecycle-core.test.mjs",
   "product-contract.test.mjs",
+  "qoder-acp-spike-client.test.mjs",
   "qoder-handoff.test.mjs",
   "rendered-html.test.mjs",
   "schema-contract.test.mjs",

@@ -192,6 +192,20 @@ Attempt / Working Copy anchor, or a registered Promotion transaction. A cleared
 or missing runtime state never scans Request directories to revive an active
 Request or to adopt a replacement input-manifest digest.
 
+The experimental Qoder ACP v1 harness is narrower at the protocol surface but
+does not change that trust statement. It checks the runtime-sealed manifest
+Hash, exact current Request layout, frozen file identities, Candidate path and
+official finalizer; its ACP handlers reject every other filesystem and terminal
+request. The Qoder subprocess still runs with the local user's OS identity and
+can theoretically bypass ACP, so this is cooperative least privilege rather
+than hostile-process isolation. Within that cooperative boundary, handler
+abort signals close an explicit host lifecycle before late writes/finalizers,
+Candidate output is staged then atomically renamed, and detached process-group
+cleanup still runs when the direct child exits early. The harness accepts synthetic data only, is
+absent from the App/package/UI, receives a reduced child environment, and cannot
+be used as production security evidence until an OS sandbox or an explicit
+trusted-local-Agent threat model is adopted (ADR 0031).
+
 ## V2 editable-island trust boundary
 
 The rendered preview DOM is disposable and never becomes a whole-document

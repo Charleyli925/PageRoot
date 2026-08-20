@@ -588,6 +588,16 @@ test("desktop handoff changes select Electron and deterministic AI closed-loop c
   assert.ok(plan.selectedNodeTests.includes("tests/qoder-handoff.test.mjs"));
 });
 
+test("Qoder ACP spike changes select only their synthetic Node integration owner", () => {
+  const plan = selectGatePlan({
+    map,
+    lane: "task",
+    changedFiles: ["scripts/qoder-acp-spike-client.mjs"],
+  });
+  assert.deepEqual(suiteIds(plan), ["typecheck", "lint", "node-targeted"]);
+  assert.deepEqual(plan.selectedNodeTests, ["tests/qoder-acp-spike-client.test.mjs"]);
+});
+
 test("notification, comment, and presentation Browser owners select their own smoke lane", () => {
   for (const file of [
     "tests/e2e/browser/native-dom-notification-recovery.spec.mjs",

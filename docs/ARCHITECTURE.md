@@ -20,6 +20,11 @@ Comments + frozen input
   -> explicit user-controlled activation
 ```
 
+The production path above remains clipboard-only. A development-only Qoder ACP
+v1 spike separately drives a synthetic frozen Request through an allowlisted
+ACP host and the same official finalizer/Candidate boundary. It owns no product
+state, UI or package surface and is not an OS sandbox; see ADR 0031.
+
 ## Boundaries
 
 - `docs/ARCHITECTURE_CONTRACT.md` is the normative dependency, state-ownership,

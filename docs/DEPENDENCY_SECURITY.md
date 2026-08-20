@@ -14,6 +14,12 @@ verified compatible fix.
 
 ## Reviewed fixes
 
+The 2026-08-21 Qoder ACP compatibility spike pins the official
+`@agentclientprotocol/sdk` 1.3.0 and its direct `zod` 4.4.3 peer as development
+dependencies. They are used only by the synthetic command and Node integration
+owner, are absent from Electron Builder resources and the packaged runtime
+closure, and introduce no audit exception.
+
 The 2026-08-14 security baseline moves the PostCSS-selected `nanoid` closure
 to 3.3.18 and selects `vinext` 0.0.45 in place of 0.2.1. This is the
 compatible remediation path identified by the audit; the release is verified

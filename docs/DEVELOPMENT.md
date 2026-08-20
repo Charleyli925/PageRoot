@@ -46,6 +46,24 @@ and `task:sync-main` to fast-forward the clean primary checkout. See `AGENTS.md`
 and `docs/CODEX_WORKFLOW.md` for the complete automation and authorization
 boundary.
 
+## Qoder ACP v1 synthetic spike
+
+`npm run spike:qoder-acp` is a development-only compatibility probe. It
+requires an independently installed, signed-in Qoder CLI with ACP v1 support;
+set `PAGEROOT_QODER_ACP_COMMAND` to an absolute executable path when it is not
+on `PATH`. The command creates a synthetic v4 Request under an isolated
+temporary Project File, drives Qoder over ACP, runs the official finalizer and
+verifies that the result is a pending-review Candidate while the Working Copy
+and Version remain unchanged.
+
+The command never accepts a real user HTML path. Its sanitized result is written
+to ignored `output/qoder-acp-spike/report.json`; Agent text, account details,
+credentials and temporary paths are not retained. A Qoder login, model-capacity
+or network failure is a blocked live probe, not release evidence and not a test
+pass. The current harness constrains ACP calls but does not OS-sandbox the local
+Qoder process, so it must not be repurposed for real user Requests. See
+`docs/decisions/0031-qoder-acp-v1-spike.md`.
+
 ## Test lanes
 
 | Command | Purpose |
