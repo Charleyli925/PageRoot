@@ -4,8 +4,10 @@ import test from "node:test";
 import {
   ReviewScrollCoordinator,
   buildReviewScrollMap,
+  followerReviewScrollLeft,
   mapReviewScrollTop,
   normalizeReviewScrollGeometry,
+  relayedReviewScrollLeft,
 } from "../app/lib/review-scroll-sync.js";
 
 function geometry({ maximumScroll, viewportHeight = 600, revision = 1, anchors }) {
@@ -270,4 +272,64 @@ test("layout geometry is frozen during a gesture and committed after idle", () =
   assert.equal(harness.coordinator.snapshot().mapRevision, firstRevision);
   harness.advance(141);
   assert.equal(harness.coordinator.snapshot().mapRevision, "1:2");
+});
+
+test("horizontal following matches boundaries and stops on the applied echo", () => {
+  assert.equal(followerReviewScrollLeft({
+    sourceLeft: 120,
+    sourceMaximum: 400,
+    followerLeft: 0,
+    followerMaximum: 400,
+  }), 120);
+  assert.equal(followerReviewScrollLeft({
+    sourceLeft: 400,
+    sourceMaximum: 400,
+    followerLeft: 0,
+    followerMaximum: 260,
+  }), 260, "a fully scrolled page must pull the narrower page to its own end");
+  assert.equal(followerReviewScrollLeft({
+    sourceLeft: .4,
+    sourceMaximum: 400,
+    followerLeft: 120,
+    followerMaximum: 260,
+  }), 0);
+  assert.equal(followerReviewScrollLeft({
+    sourceLeft: 120,
+    sourceMaximum: 400,
+    followerLeft: 120,
+    followerMaximum: 400,
+  }), null, "the echo of an applied command must not travel back to its source");
+});
+
+test("a relayed horizontal wheel applies once and yields to native chaining", () => {
+  assert.equal(relayedReviewScrollLeft({
+    baseline: 40,
+    current: 40,
+    delta: 90,
+    maximum: 400,
+  }), 130);
+  assert.equal(relayedReviewScrollLeft({
+    baseline: 40,
+    current: 40,
+    delta: -90,
+    maximum: 400,
+  }), 0, "the relay clamps instead of overscrolling the pane");
+  assert.equal(relayedReviewScrollLeft({
+    baseline: 40,
+    current: 130,
+    delta: 90,
+    maximum: 400,
+  }), null, "a gesture the browser already chained out must not be applied twice");
+  assert.equal(relayedReviewScrollLeft({
+    baseline: 400,
+    current: 400,
+    delta: 90,
+    maximum: 400,
+  }), null, "a pane already at its end reports nothing to apply");
+  assert.equal(relayedReviewScrollLeft({
+    baseline: 40,
+    current: 40,
+    delta: Number.NaN,
+    maximum: 400,
+  }), null);
 });

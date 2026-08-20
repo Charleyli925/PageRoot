@@ -44,6 +44,20 @@ export type ReviewScrollOwner = {
   gestureId: number;
 };
 
+export type ReviewHorizontalFollowerInput = {
+  sourceLeft: number;
+  sourceMaximum: number;
+  followerLeft: number;
+  followerMaximum: number;
+};
+
+export type ReviewHorizontalRelayInput = {
+  baseline: number;
+  current: number;
+  delta: number;
+  maximum: number;
+};
+
 export type ReviewScrollCoordinatorOptions = {
   requestFrame: (callback: FrameRequestCallback) => number;
   cancelFrame: (handle: number) => void;
@@ -66,6 +80,8 @@ export function mapReviewScrollTop(
   top: number,
   fallbackMaximum?: number,
 ): number;
+export function followerReviewScrollLeft(input: ReviewHorizontalFollowerInput): number | null;
+export function relayedReviewScrollLeft(input: ReviewHorizontalRelayInput): number | null;
 
 export class ReviewScrollCoordinator {
   constructor(options: ReviewScrollCoordinatorOptions);

@@ -1,6 +1,8 @@
 const REVIEW_SIDES = ["before", "after"];
 const DEFAULT_GESTURE_IDLE_MS = 140;
 const CONTROL_POINT_EPSILON = 0.5;
+const HORIZONTAL_SETTLE_EPSILON = 0.5;
+const HORIZONTAL_BOUNDARY_EPSILON = 1;
 
 function otherSide(side) {
   return side === "before" ? "after" : "before";
@@ -187,6 +189,49 @@ function mapDirection(direction, rawTop) {
 export function mapReviewScrollTop(map, sourceSide, top, fallbackMaximum = Number.POSITIVE_INFINITY) {
   if (!map) return clamp(finiteNumber(top, 0), 0, fallbackMaximum);
   return mapDirection(map[sourceSide], top);
+}
+
+/**
+ * Horizontal review scrolling lives on the pane viewport, so the follower has
+ * to be told where to land. Boundaries match first: two pages with different
+ * overflow widths must still agree on "fully left" and "fully right". Returns
+ * null when the follower already sits on the target, which is how the echo of
+ * an applied command stops instead of bouncing back to its source.
+ *
+ * @param {import("./review-scroll-sync.js").ReviewHorizontalFollowerInput} input
+ */
+export function followerReviewScrollLeft(input) {
+  const sourceMaximum = Math.max(0, finiteNumber(input.sourceMaximum, 0));
+  const followerMaximum = Math.max(0, finiteNumber(input.followerMaximum, 0));
+  const sourceLeft = clamp(finiteNumber(input.sourceLeft, 0), 0, sourceMaximum);
+  const followerLeft = clamp(finiteNumber(input.followerLeft, 0), 0, followerMaximum);
+  const target = sourceLeft <= HORIZONTAL_BOUNDARY_EPSILON
+    ? 0
+    : sourceMaximum - sourceLeft <= HORIZONTAL_BOUNDARY_EPSILON
+      ? followerMaximum
+      : Math.min(sourceLeft, followerMaximum);
+  return Math.abs(target - followerLeft) <= HORIZONTAL_SETTLE_EPSILON ? null : target;
+}
+
+/**
+ * A wheel gesture latches onto the first scroller that can consume its combined
+ * delta, so a mixed swipe over a vertically scrollable review frame keeps the
+ * horizontal component inside the frame and drops it. The frame relays what it
+ * cannot consume and the pane applies it here. `baseline` is the pane offset
+ * recorded when the relay started: if the browser did chain the gesture out
+ * natively the offset has already moved, and the relay is dropped rather than
+ * applied a second time.
+ *
+ * @param {import("./review-scroll-sync.js").ReviewHorizontalRelayInput} input
+ */
+export function relayedReviewScrollLeft(input) {
+  const maximum = Math.max(0, finiteNumber(input.maximum, 0));
+  const baseline = clamp(finiteNumber(input.baseline, 0), 0, maximum);
+  const current = clamp(finiteNumber(input.current, 0), 0, maximum);
+  const delta = finiteNumber(input.delta, 0);
+  if (!delta || Math.abs(current - baseline) > HORIZONTAL_SETTLE_EPSILON) return null;
+  const target = clamp(baseline + delta, 0, maximum);
+  return Math.abs(target - current) <= HORIZONTAL_SETTLE_EPSILON ? null : target;
 }
 
 /**

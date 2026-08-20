@@ -5689,7 +5689,31 @@ function reviewBootstrap(
     followerGestureId = 0;
     post("scroll-intent");
   };
-  addEventListener("wheel", announceScrollIntent, { capture: true, passive: true });
+  const wheelPixels = (delta, mode, pageSize) => {
+    const value = Number(delta || 0);
+    if (!Number.isFinite(value) || !value) return 0;
+    if (mode === 1) return value * 16;
+    if (mode === 2) return value * Math.max(1, pageSize);
+    return value;
+  };
+  // Horizontal review scrolling belongs to the pane viewport, not to this
+  // document. A wheel gesture latches onto the first scroller that can consume
+  // its combined delta, so a mixed swipe here keeps the horizontal component
+  // and discards it instead of chaining out to the pane. Hand over what this
+  // document cannot consume; the pane reconciles it against native chaining.
+  const relayHorizontalWheel = (event) => {
+    const deltaX = wheelPixels(event.deltaX, event.deltaMode, innerWidth);
+    if (!deltaX) return;
+    const scroller = document.scrollingElement || document.documentElement;
+    const maximumScroll = Math.max(0, (scroller?.scrollWidth || 0) - innerWidth);
+    const consumable = deltaX > 0 ? scrollX < maximumScroll - 1 : scrollX > 1;
+    if (maximumScroll > 1 && consumable) return;
+    post("wheel-horizontal", { deltaX });
+  };
+  addEventListener("wheel", (event) => {
+    announceScrollIntent();
+    relayHorizontalWheel(event);
+  }, { capture: true, passive: true });
   addEventListener("touchstart", announceScrollIntent, { capture: true, passive: true });
   addEventListener("pointerdown", announceScrollIntent, { capture: true, passive: true });
   addEventListener("keydown", (event) => {

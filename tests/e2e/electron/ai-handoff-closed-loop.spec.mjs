@@ -3298,6 +3298,30 @@ ${REVIEW_MASK_UNION_BEFORE}
     await expect.poll(() => afterViewport.evaluate((element) => element.scrollLeft))
       .toBe(sourceLeft);
 
+    // A trackpad swipe lands inside the frame, where the vertically scrollable
+    // document keeps the horizontal component of the gesture and drops it. The
+    // pane has to take that remainder, exactly once, or the first horizontal
+    // swipe is lost and the second one moves both pages twice as far.
+    const frameHorizontalCapacity = await beforeReviewFrame.locator("html").evaluate(() => (
+      Math.max(0, document.documentElement.scrollWidth - innerWidth)
+    ));
+    expect(frameHorizontalCapacity).toBeLessThanOrEqual(1);
+    const paneMaximum = await beforeViewport.evaluate((element) => (
+      element.scrollWidth - element.clientWidth
+    ));
+    const swipedLeft = Math.min(paneMaximum, sourceLeft + 90);
+    expect(swipedLeft).toBeGreaterThan(sourceLeft);
+    const paneBox = await beforeViewport.boundingBox();
+    await launched.page.mouse.move(
+      paneBox.x + paneBox.width / 2,
+      paneBox.y + paneBox.height / 2,
+    );
+    await launched.page.mouse.wheel(90, 24);
+    await expect.poll(() => beforeViewport.evaluate((element) => element.scrollLeft))
+      .toBe(swipedLeft);
+    await expect.poll(() => afterViewport.evaluate((element) => element.scrollLeft))
+      .toBe(swipedLeft);
+
     const originalAfterMaximum = await afterReviewFrame.locator("html").evaluate(() => (
       Math.max(0, document.documentElement.scrollHeight - innerHeight)
     ));
