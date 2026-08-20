@@ -896,7 +896,7 @@
     {
       "id": "qoder-acp-agent-bridge",
       "patterns": [
-        "^scripts/(?:agent-bridge-service|qoder-acp-(?:client|spike(?:-client)?)|verify-packaged-artifact)\\.mjs$",
+        "^scripts/(?:agent-bridge-service|workspace-bridge-shutdown|qoder-acp-(?:client|spike(?:-client)?)|verify-packaged-artifact)\\.mjs$",
         "^app/components/AgentDeliveryDialog\\.tsx$",
         "^tests/(?:agent-bridge-(?:service|workspace)|qoder-acp-spike-client)\\.test\\.mjs$",
         "^tests/fixtures/(?:qoder-acp-agent|packaged-agent-bridge-runner)\\.mjs$"
@@ -947,7 +947,7 @@
     {
       "id": "bridge-lifecycle",
       "patterns": [
-        "^scripts/(?:workspace-bridge|lifecycle-core|finalize-attempt|record-user-supplement|user-supplement-core|candidate-assessment(?:-decoder)?|html-source-parser|attachment-storage|product-contract|target-identity)\\.mjs$"
+        "^scripts/(?:workspace-bridge(?:-shutdown)?|lifecycle-core|finalize-attempt|record-user-supplement|user-supplement-core|candidate-assessment(?:-decoder)?|html-source-parser|attachment-storage|product-contract|target-identity)\\.mjs$"
       ],
       "suites": ["ai-smoke"],
       "nodeTests": [

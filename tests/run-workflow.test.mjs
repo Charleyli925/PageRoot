@@ -315,6 +315,52 @@ test("an unknown create Request response only reads workspace authority and neve
   assert.equal(harness.runSession.activeSubmission, null);
 });
 
+test("a reconciled Qoder Request reserves Agent start before polling becomes visible", async () => {
+  const start = deferred();
+  const durable = runRecord({ agentDelivery: { mode: "qoder-acp" } });
+  let createCount = 0;
+  let workspaceCount = 0;
+  let harness;
+  harness = createHarness({
+    bridge: {
+      async createRequest() {
+        createCount += 1;
+        throw new Error("network disconnected after the durable POST");
+      },
+      async workspace(sourcePath) {
+        workspaceCount += 1;
+        return { runtimeState: { activeRun: { ...durable, sourcePath } } };
+      },
+      async startAgent(request) {
+        harness.calls.startAgent.push(request);
+        return start.promise;
+      },
+    },
+  });
+
+  const submitted = harness.workflow.submit({ deliveryMode: "qoder-acp" });
+  for (let index = 0; index < 10 && harness.calls.startAgent.length === 0; index += 1) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  assert.equal(createCount, 1);
+  assert.equal(workspaceCount, 1);
+  assert.equal(harness.calls.startAgent.length, 1);
+  assert.equal(
+    harness.calls.status.length,
+    0,
+    "reconciliation publication must not poll before the recovered Request starts its Agent",
+  );
+
+  start.resolve({
+    accepted: true,
+    session: { state: "starting", phase: "launching" },
+  });
+  assert.equal((await submitted).status, "succeeded");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(harness.calls.status.length, 1);
+  harness.workflow.dispose();
+});
+
 test("a malformed create Request response reconciles authority without replaying POST", async () => {
   const durable = runRecord();
   let createCount = 0;
@@ -442,9 +488,42 @@ test("Qoder ACP preflights before one durable Request and never touches the clip
   harness.workflow.dispose();
 });
 
+test("Qoder polling waits until the managed Agent start is registered", async () => {
+  const start = deferred();
+  let harness;
+  harness = createHarness({
+    bridge: {
+      async startAgent(request) {
+        harness.calls.startAgent.push(request);
+        return start.promise;
+      },
+    },
+  });
+
+  const submitted = harness.workflow.submit({ deliveryMode: "qoder-acp" });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(harness.calls.createRequest.length, 1);
+  assert.equal(harness.calls.startAgent.length, 1);
+  assert.equal(
+    harness.calls.status.length,
+    0,
+    "a pre-start status read would falsely classify the new Request as an interrupted old session",
+  );
+
+  start.resolve({
+    accepted: true,
+    session: { state: "starting", phase: "launching" },
+  });
+  assert.equal((await submitted).status, "succeeded");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(harness.calls.status.length, 1);
+  harness.workflow.dispose();
+});
+
 test("a failed Qoder preflight creates no Request and leaves editing recoverable", async () => {
-  const error = new Error("Qoder is not logged in");
-  error.code = "QODER_AUTH_REQUIRED";
+  const message = "Qoder 账号当前没有可用模型容量。PageRoot 尚未创建本轮 Request；当前 HTML 和评论保持不变，可稍后重试或改用复制任务。";
+  const error = new Error(message);
+  error.code = "QODER_CAPACITY_UNAVAILABLE";
   const harness = createHarness({
     bridge: {
       async preflightAgent() {
@@ -455,7 +534,9 @@ test("a failed Qoder preflight creates no Request and leaves editing recoverable
   const outcome = await harness.workflow.submit({ deliveryMode: "qoder-acp" });
 
   assert.equal(outcome.status, "rejected");
-  assert.equal(outcome.code, "QODER_AUTH_REQUIRED");
+  assert.equal(outcome.code, "QODER_CAPACITY_UNAVAILABLE");
+  assert.equal(outcome.reason, message);
+  assert.equal(outcome.reason.includes("Request 已保留"), false);
   assert.equal(harness.calls.createRequest.length, 0);
   assert.equal(harness.calls.startAgent.length, 0);
   assert.equal(harness.calls.handoff.length, 0);

@@ -26,12 +26,17 @@ Add a Bridge-owned `AgentBridgeService` with one first product driver,
   registration/freeze/Request creation. A local discovery, version, identity or
   static model-list failure creates no Request and leaves the current HTML
   editable. The probe does not promise that later ACP authentication, account
-  capacity or network service will remain available.
+  capacity or network service will remain available. Every probe also performs
+  bounded whole-process-group cleanup; an unconfirmed descendant establishes a
+  non-prunable Bridge shutdown fence instead of becoming a retryable failure.
 - Product discovery accepts only a protected standalone
   `@qoder-ai/qodercli` package at version 1.1.27 or newer. It rejects the CLI
   embedded in Qoder.app, validates the local package manifest/structure and
   protected executable identity, and rechecks that identity when consuming a
   short-lived one-use ticket and immediately before spawn.
+  For the npm JavaScript bundle, PageRoot's trusted Node/Electron runtime reads
+  the already-opened and hashed executable inode through an inherited file
+  descriptor; it never reopens the mutable bundle pathname to obtain code.
   Arbitrary executable injection is allowed only behind two explicit E2E
   environment fences.
 - After preflight, PageRoot creates exactly one normal Request whose durable
@@ -58,7 +63,9 @@ Add a Bridge-owned `AgentBridgeService` with one first product driver,
 - Ordinary cancellation closes the host mutation surface, requests ACP
   cancellation and performs bounded process-group cleanup before the Bridge
   persists Request cancellation. App/Bridge shutdown disposes every owned
-  session.
+  session. The Bridge exits only after every owned Agent confirms cleanup; an
+  unconfirmed or timed-out cleanup keeps the Bridge and desktop app alive and
+  aborts quit, relaunch or update installation.
 - Public Agent status contains only driver, bounded state/phase, sanitized
   Agent name/version, timestamps, event count and stable safe error copy. It
   excludes executable paths, Request paths, prompt/HTML, account data, raw

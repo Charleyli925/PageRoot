@@ -199,7 +199,10 @@ if (e2eUserDataPath) {
 
 const BRIDGE_STARTUP_SLOW_MS = 12_000;
 const RENDERER_CLOSE_TIMEOUT_MS = 30_000;
-const BRIDGE_SHUTDOWN_TIMEOUT_MS = 5_000;
+// This parent deadline must stay strictly beyond AgentBridgeService's 12 s
+// cleanup budget. Otherwise the desktop could announce an aborted exit and
+// then lose a Bridge that finishes its still-running shutdown moments later.
+const BRIDGE_SHUTDOWN_TIMEOUT_MS = 15_000;
 const MAX_HTML_BYTES = PRODUCT_MAX_HTML_BYTES;
 const MAX_STATE_BYTES = 1024 * 1024;
 const MAX_PATH_LENGTH = 4096;
@@ -3734,19 +3737,19 @@ async function coordinateApplicationExit(reason, intent = "quit") {
     }
 
     isQuitting = true;
-    sourceFileWatcher.close();
+    const watchedSourcePath = sourceFileWatcher.watchedPath;
     await stateWriteQueue.catch(() => {});
-    if (intent === "relaunch") {
-      if (bridgeProcess) await stopBridgeGracefully().catch(() => {});
-    } else {
-      await stopBridgeOrNotifyCloseAborted({
-        requestId: result.requestId,
-        stopBridge: stopBridgeGracefully,
-        notifyCloseAborted: (payload) => {
-          notifyRendererCloseAborted(payload.requestId, payload.reason);
-        },
-      });
-    }
+    await stopBridgeOrNotifyCloseAborted({
+      requestId: result.requestId,
+      stopBridge: stopBridgeGracefully,
+      notifyCloseAborted: (payload) => {
+        notifyRendererCloseAborted(payload.requestId, payload.reason);
+      },
+    });
+    // Keep file-authority monitoring alive until the Bridge has proved every
+    // managed Agent stopped. A failed relaunch/quit must return to a fully live
+    // editor instead of silently losing external-file observation.
+    sourceFileWatcher.close();
     await usageTelemetry?.shutdown({
       reason: intent === "quit" ? "quit" : intent,
     }).catch(() => {});
@@ -3779,6 +3782,7 @@ async function coordinateApplicationExit(reason, intent = "quit") {
           restartError = caught;
         } finally {
           registerProjectIpc();
+          if (watchedSourcePath) sourceFileWatcher.watch(watchedSourcePath);
           notifyRendererCloseAborted(result.requestId, error);
           resumeDeferredExternalFileOpenAfterExitAbort();
         }

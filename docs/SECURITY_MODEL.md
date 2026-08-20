@@ -213,14 +213,23 @@ frames, updates, Agent metadata and public session history are bounded. Abort
 closes the mutation surface before Qoder cancellation/process-group cleanup;
 the Bridge cancels the durable Request only after that bounded stop completes.
 Before spawn, an exclusive project-local lease and a final executable
-dev/inode/size/mtime/content identity comparison fence duplicate launch. A
-normally settled process releases that lease only after bounded process-group
-cleanup. If the Bridge crashes, the lease remains: PageRoot never invents a
+dev/inode/size/mtime/content identity comparison fence duplicate launch. The
+standalone npm JavaScript bundle is then loaded by PageRoot's trusted runtime
+from the already-opened verified file descriptor, so a pathname replacement
+cannot substitute different script bytes after that comparison. A normally
+settled process releases that lease only after bounded process-group cleanup.
+If the Bridge crashes, the lease remains: PageRoot never invents a
 surviving session, and the processing Request becomes interrupted and
 non-retryable. Durable cancellation then fences the old Request, but does not
 claim an unknown old process has stopped; the user must submit a new Request.
 Unknown cleanup and any unfinalized output/completion likewise block retry and
 clipboard fallback instead of being overwritten.
+Pre-Request version/model probes use the same bounded process-group cleanup.
+An unconfirmed probe descendant creates no Request but remains a non-prunable
+Bridge-level fence, so later preflight and application shutdown both fail
+closed rather than forgetting an unowned local process.
+Quit, relaunch and update installation also fail closed: the Bridge stays alive
+and the desktop app remains open unless all owned Agent cleanup is confirmed.
 
 The driver may retain at most 16 KiB of raw Qoder stderr only inside the live
 Bridge promise to classify authentication/capacity/process failures. It is

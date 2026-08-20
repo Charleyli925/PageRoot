@@ -73,6 +73,56 @@ const SAFE_TASK_ID = /^[A-Za-z0-9_-]{1,160}$/u;
 const PROJECT_ID = /^project_[a-f0-9]{16,64}$/u;
 const DOCUMENT_ID = /^doc_[a-f0-9]{16,64}$/u;
 const SHA256 = /^sha256:[a-f0-9]{64}$/u;
+const VERIFIED_ESM_LOADER_SOURCE = `
+import { readFileSync } from "node:fs";
+import { builtinModules, createRequire } from "node:module";
+import { dirname } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { SourceTextModule, SyntheticModule } from "node:vm";
+
+const identifier = pathToFileURL(process.argv[1]).href;
+const require = createRequire(identifier);
+const builtins = new Set(builtinModules.map((name) => name.replace(/^node:/u, "")));
+const resolveSpecifier = (specifier) => {
+  if (specifier.startsWith("node:")) return specifier;
+  if (builtins.has(specifier)) return "node:" + specifier;
+  if (/^[a-zA-Z][a-zA-Z+.-]*:/u.test(specifier)) return specifier;
+  if (specifier.startsWith(".") || specifier.startsWith("/")) {
+    return new URL(specifier, identifier).href;
+  }
+  return pathToFileURL(require.resolve(specifier)).href;
+};
+const externalModules = new Map();
+const linkExternal = async (specifier) => {
+  const resolved = resolveSpecifier(specifier);
+  if (!externalModules.has(resolved)) {
+    externalModules.set(resolved, import(resolved).then((namespace) => {
+      const names = Object.keys(namespace);
+      return new SyntheticModule(names, function initialize() {
+        for (const name of names) this.setExport(name, namespace[name]);
+      }, { identifier: resolved });
+    }));
+  }
+  return externalModules.get(resolved);
+};
+const module = new SourceTextModule(readFileSync(3, "utf8"), {
+  identifier,
+  initializeImportMeta(meta) {
+    meta.url = identifier;
+    meta.filename = fileURLToPath(identifier);
+    meta.dirname = dirname(meta.filename);
+    meta.resolve = (specifier) => resolveSpecifier(specifier);
+  },
+  importModuleDynamically: async (specifier) => {
+    const dependency = await linkExternal(specifier);
+    if (dependency.status === "unlinked") await dependency.link(() => {});
+    if (dependency.status === "linked") await dependency.evaluate();
+    return dependency;
+  },
+});
+await module.link(linkExternal);
+await module.evaluate();
+`;
 
 function policyError(code, message, details = {}) {
   const error = new Error(message);
@@ -149,6 +199,23 @@ function sameExecutableIdentity(left, right) {
   );
 }
 
+async function readHandleAtStart(handle, size) {
+  if (!Number.isSafeInteger(size) || size < 0) {
+    throw policyError(
+      "ACP_AGENT_EXECUTABLE_CHANGED",
+      "The ACP Agent executable size is invalid.",
+    );
+  }
+  const bytes = Buffer.allocUnsafe(size);
+  let offset = 0;
+  while (offset < size) {
+    const result = await handle.read(bytes, offset, size - offset, offset);
+    if (result.bytesRead === 0) break;
+    offset += result.bytesRead;
+  }
+  return bytes.subarray(0, offset);
+}
+
 async function openVerifiedAgentExecutable(executable, expectedExecutable) {
   const expectedPath = assertAbsolutePath(expectedExecutable?.path, "expected Qoder executable");
   if (executable !== expectedPath) {
@@ -174,7 +241,9 @@ async function openVerifiedAgentExecutable(executable, expectedExecutable) {
         "The ACP Agent executable is no longer a protected regular file.",
       );
     }
-    const bytes = await handle.readFile();
+    // Positional reads leave the inherited file description at byte zero so
+    // the trusted runtime can consume these exact verified bytes through fd 3.
+    const bytes = await readHandleAtStart(handle, before.size);
     const after = await handle.stat();
     const identity = {
       dev: after.dev,
@@ -754,11 +823,12 @@ class AcpFrameGuard extends Transform {
   }
 }
 
-export function qoderAcpEnvironment(overrides = {}) {
+export function qoderAcpEnvironment(overrides = {}, baseEnvironment = process.env) {
   assertObject(overrides, "Qoder environment");
+  assertObject(baseEnvironment, "Qoder base environment");
   const result = {};
   for (const name of SAFE_QODER_ENVIRONMENT_NAMES) {
-    if (typeof process.env[name] === "string") result[name] = process.env[name];
+    if (typeof baseEnvironment[name] === "string") result[name] = baseEnvironment[name];
   }
   for (const [name, value] of Object.entries(overrides)) {
     if (!SAFE_QODER_ENVIRONMENT_NAMES.has(name) || typeof value !== "string") {
@@ -813,6 +883,8 @@ function terminalExitStatus(child) {
 async function waitForExit(child) {
   const existing = processClosePromises.get(child);
   if (existing) return existing;
+  const terminal = terminalExitStatus(child);
+  if (terminal) return terminal;
   const promise = new Promise((resolve, reject) => {
     const cleanup = () => {
       child.off("close", handleClose);
@@ -1708,20 +1780,27 @@ async function waitForProcessGroupExit(child, timeoutMs) {
   return !processGroupExists(child);
 }
 
+async function waitForChildExitWithin(child, timeoutMs) {
+  if (terminalExitStatus(child)) return true;
+  return Promise.race([
+    waitForExit(child).then(() => true, () => true),
+    new Promise((resolve) => setTimeout(resolve, timeoutMs, false)),
+  ]);
+}
+
 async function terminateProcess(child, { processGroup = false } = {}) {
   if (!child) return true;
-  const alreadyExited = child.exitCode !== null || child.signalCode !== null;
+  let leaderExited = !Number.isSafeInteger(child.pid)
+    || child.exitCode !== null
+    || child.signalCode !== null;
   signalProcess(child, "SIGTERM", { processGroup });
-  if (!alreadyExited) {
-    const exited = await Promise.race([
-      waitForExit(child).then(() => true, () => true),
-      new Promise((resolve) => setTimeout(resolve, PROCESS_EXIT_GRACE_MS, false)),
-    ]);
-    if (!exited && child.exitCode === null && child.signalCode === null) {
+  if (!leaderExited) {
+    leaderExited = await waitForChildExitWithin(child, PROCESS_EXIT_GRACE_MS);
+    if (!leaderExited && child.exitCode === null && child.signalCode === null) {
       signalProcess(child, "SIGKILL", { processGroup });
+      leaderExited = await waitForChildExitWithin(child, PROCESS_EXIT_GRACE_MS);
     }
   }
-  await waitForExit(child).catch(() => {});
   if (
     processGroup
     && processGroupExists(child)
@@ -1729,14 +1808,242 @@ async function terminateProcess(child, { processGroup = false } = {}) {
   ) {
     signalProcessGroup(child, "SIGKILL");
     await waitForProcessGroupExit(child, PROCESS_EXIT_GRACE_MS);
-  } else if (!processGroup && child.exitCode === null && child.signalCode === null) {
-    signalProcess(child, "SIGKILL", { processGroup });
-    await waitForExit(child).catch(() => {});
   }
-  if (processGroup) return !processGroupExists(child);
-  return !Number.isSafeInteger(child.pid)
-    || child.exitCode !== null
-    || child.signalCode !== null;
+  if (processGroup) return leaderExited && !processGroupExists(child);
+  return leaderExited || !Number.isSafeInteger(child.pid);
+}
+
+async function trustedCurrentJavaScriptRuntime() {
+  const runtime = await realpath(process.execPath).catch(() => {
+    throw policyError(
+      "ACP_AGENT_RUNTIME_INVALID",
+      "The trusted PageRoot JavaScript runtime is unavailable.",
+    );
+  });
+  const information = await lstat(runtime).catch(() => null);
+  if (!information?.isFile() || information.isSymbolicLink()) {
+    throw policyError(
+      "ACP_AGENT_RUNTIME_INVALID",
+      "The trusted PageRoot JavaScript runtime is invalid.",
+    );
+  }
+  await access(runtime, fsConstants.X_OK).catch(() => {
+    throw policyError(
+      "ACP_AGENT_RUNTIME_INVALID",
+      "The trusted PageRoot JavaScript runtime is not executable.",
+    );
+  });
+  return runtime;
+}
+
+export async function prepareVerifiedQoderJavaScriptExecution({
+  command,
+  expectedExecutable,
+  environment = {},
+  baseEnvironment = process.env,
+} = {}) {
+  const requestedExecutable = assertAbsolutePath(command, "Qoder JavaScript command");
+  const executable = await realpath(requestedExecutable).catch(() => {
+    throw policyError("ACP_AGENT_EXECUTABLE_INVALID", "The ACP Agent executable is unavailable.");
+  });
+  const executableInformation = await lstat(executable);
+  if (!executableInformation.isFile() || executableInformation.isSymbolicLink()) {
+    throw policyError(
+      "ACP_AGENT_EXECUTABLE_INVALID",
+      "The ACP Agent executable must resolve to a regular file.",
+    );
+  }
+  await access(executable, fsConstants.X_OK).catch(() => {
+    throw policyError("ACP_AGENT_EXECUTABLE_INVALID", "The ACP Agent executable is not executable.");
+  });
+  const executableHandle = await openVerifiedAgentExecutable(executable, expectedExecutable);
+  let consumed = false;
+  try {
+    const runtime = await trustedCurrentJavaScriptRuntime();
+    const childEnvironment = qoderAcpEnvironment(environment, baseEnvironment);
+    if (process.versions.electron) {
+      // This capability is constructed inside PageRoot. It is deliberately
+      // absent from the caller-overridable environment allowlist.
+      childEnvironment.ELECTRON_RUN_AS_NODE = "1";
+    }
+    return Object.freeze({
+      executable,
+      async spawn({ args = [], cwd, detached = false, stdin = "pipe" } = {}) {
+        if (consumed) {
+          throw policyError(
+            "ACP_AGENT_EXECUTION_CONSUMED",
+            "The verified Qoder execution descriptor has already been consumed.",
+          );
+        }
+        consumed = true;
+        try {
+          return spawn(runtime, [
+            "--no-warnings",
+            "--experimental-vm-modules",
+            "--input-type=module",
+            "--eval",
+            VERIFIED_ESM_LOADER_SOURCE,
+            "--",
+            executable,
+            ...args,
+          ], {
+            cwd,
+            env: childEnvironment,
+            detached,
+            shell: false,
+            stdio: [stdin, "pipe", "pipe", executableHandle.fd],
+          });
+        } finally {
+          // spawn duplicates fd 3 into the child before returning. Closing the
+          // parent handle cannot change the inode/bytes inherited by the child.
+          await executableHandle.close().catch(() => {});
+        }
+      },
+      async close() {
+        if (consumed) return;
+        consumed = true;
+        await executableHandle.close().catch(() => {});
+      },
+    });
+  } catch (cause) {
+    await executableHandle.close().catch(() => {});
+    throw cause;
+  }
+}
+
+export async function runVerifiedQoderJavaScript({
+  command,
+  expectedExecutable,
+  args = [],
+  cwd,
+  environment = {},
+  baseEnvironment = process.env,
+  timeoutMs = 30_000,
+  maxBuffer = 128 * 1024,
+  processTerminator = terminateProcess,
+} = {}) {
+  if (typeof processTerminator !== "function") {
+    throw new TypeError("Verified Qoder process terminator must be a function.");
+  }
+  const prepared = await prepareVerifiedQoderJavaScriptExecution({
+    command,
+    expectedExecutable,
+    environment,
+    baseEnvironment,
+  });
+  const processGroup = process.platform !== "win32";
+  let child;
+  try {
+    child = await prepared.spawn({
+      args,
+      cwd,
+      detached: processGroup,
+      stdin: "ignore",
+    });
+  } catch (cause) {
+    await prepared.close();
+    throw cause;
+  }
+
+  const stdout = [];
+  const stderr = [];
+  let stdoutBytes = 0;
+  let stderrBytes = 0;
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let timeoutHandle;
+
+    const cleanup = () => {
+      clearTimeout(timeoutHandle);
+      child.stdout?.off("data", handleStdout);
+      child.stderr?.off("data", handleStderr);
+      child.off("close", handleClose);
+      child.off("error", handleError);
+    };
+    const output = () => ({
+      stdout: Buffer.concat(stdout).toString("utf8"),
+      stderr: Buffer.concat(stderr).toString("utf8"),
+    });
+    const fail = async (error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      const cleanupConfirmed = await processTerminator(child, { processGroup }).then(
+        (value) => value === true,
+        () => false,
+      );
+      const failure = cleanupConfirmed
+        ? error
+        : policyError(
+          "ACP_PREFLIGHT_CLEANUP_UNCONFIRMED",
+          "The Qoder preflight process group could not be confirmed stopped.",
+        );
+      Object.assign(failure, output());
+      reject(failure);
+    };
+    const append = (target, chunk, currentBytes, label) => {
+      const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      if (currentBytes + bytes.byteLength > maxBuffer) {
+        const error = new Error(`Qoder ${label} exceeded the preflight output limit.`);
+        error.code = "ERR_CHILD_PROCESS_STDIO_MAXBUFFER";
+        void fail(error);
+        return currentBytes;
+      }
+      target.push(bytes);
+      return currentBytes + bytes.byteLength;
+    };
+    const handleStdout = (chunk) => {
+      stdoutBytes = append(stdout, chunk, stdoutBytes, "stdout");
+    };
+    const handleStderr = (chunk) => {
+      stderrBytes = append(stderr, chunk, stderrBytes, "stderr");
+    };
+    const handleError = (cause) => {
+      void fail(cause instanceof Error ? cause : new Error(String(cause)));
+    };
+    const handleClose = async (exitCode, signal) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      const captured = output();
+      const cleanupConfirmed = await processTerminator(child, { processGroup }).then(
+        (value) => value === true,
+        () => false,
+      );
+      if (!cleanupConfirmed) {
+        const error = policyError(
+          "ACP_PREFLIGHT_CLEANUP_UNCONFIRMED",
+          "The Qoder preflight process group could not be confirmed stopped.",
+        );
+        Object.assign(error, captured);
+        reject(error);
+        return;
+      }
+      if (exitCode === 0) {
+        resolve(captured);
+        return;
+      }
+      const error = new Error(`Qoder exited with status ${exitCode ?? signal ?? "unknown"}.`);
+      error.code = exitCode;
+      error.signal = signal;
+      Object.assign(error, captured);
+      reject(error);
+    };
+
+    child.stdout?.on("data", handleStdout);
+    child.stderr?.on("data", handleStderr);
+    child.once("close", (...values) => {
+      void handleClose(...values);
+    });
+    child.once("error", handleError);
+    timeoutHandle = setTimeout(() => {
+      const error = new Error("Qoder preflight timed out.");
+      error.code = "ETIMEDOUT";
+      error.killed = true;
+      void fail(error);
+    }, timeoutMs);
+    timeoutHandle.unref?.();
+  });
 }
 
 export async function runQoderAcpTask({
@@ -1751,6 +2058,8 @@ export async function runQoderAcpTask({
   cancellationSignal,
   expectedAgentName,
   expectedExecutable,
+  useVerifiedJavaScriptRuntime = false,
+  baseEnvironment = process.env,
 }) {
   if (cancellationSignal?.aborted) {
     throw policyError("ACP_CANCELLED", "The PageRoot ACP task was cancelled.");
@@ -1769,22 +2078,44 @@ export async function runQoderAcpTask({
   await access(executable, fsConstants.X_OK).catch(() => {
     throw policyError("ACP_AGENT_EXECUTABLE_INVALID", "The ACP Agent executable is not executable.");
   });
-  const executableHandle = expectedExecutable
-    ? await openVerifiedAgentExecutable(executable, expectedExecutable)
-    : null;
   const stderr = { value: "", truncated: false };
   const processGroup = process.platform !== "win32";
   let child;
-  try {
-    child = spawn(executable, [...args], {
-      cwd: policy.requestRoot,
-      env: qoderAcpEnvironment(environment),
-      detached: processGroup,
-      shell: false,
-      stdio: ["pipe", "pipe", "pipe"],
+  if (useVerifiedJavaScriptRuntime) {
+    if (!expectedExecutable) {
+      throw policyError(
+        "ACP_AGENT_EXECUTABLE_INVALID",
+        "Verified JavaScript execution requires preflight executable identity.",
+      );
+    }
+    const prepared = await prepareVerifiedQoderJavaScriptExecution({
+      command: executable,
+      expectedExecutable,
+      environment,
+      baseEnvironment,
     });
-  } finally {
-    await executableHandle?.close().catch(() => {});
+    child = await prepared.spawn({
+      args,
+      cwd: policy.requestRoot,
+      detached: processGroup,
+      stdin: "pipe",
+    });
+  } else {
+    const executableHandle = expectedExecutable
+      ? await openVerifiedAgentExecutable(executable, expectedExecutable)
+      : null;
+    const childEnvironment = qoderAcpEnvironment(environment, baseEnvironment);
+    try {
+      child = spawn(executable, [...args], {
+        cwd: policy.requestRoot,
+        env: childEnvironment,
+        detached: processGroup,
+        shell: false,
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+    } finally {
+      await executableHandle?.close().catch(() => {});
+    }
   }
   const childExitPromise = waitForExit(child);
   void childExitPromise.catch(() => {});

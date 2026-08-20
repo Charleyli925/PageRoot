@@ -43,6 +43,7 @@ const SCRIPT_PATH = fileURLToPath(import.meta.url);
 const DEFAULT_PRODUCT_ROOT = path.resolve(path.dirname(SCRIPT_PATH), "..");
 const REQUIRED_BRIDGE_FILES = [
   "workspace-bridge.mjs",
+  "workspace-bridge-shutdown.mjs",
   "agent-bridge-service.mjs",
   "qoder-acp-client.mjs",
   "finalize-attempt.mjs",

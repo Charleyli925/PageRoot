@@ -34,6 +34,10 @@ import {
   AgentBridgeService,
   TRUSTED_LOCAL_AGENT_POLICY_VERSION,
 } from "./agent-bridge-service.mjs";
+import {
+  cancelDurableRequestAfterAgentCleanup,
+  closeWorkspaceBridgeAfterAgentCleanup,
+} from "./workspace-bridge-shutdown.mjs";
 import { createEmptySourceHistory } from "../shared/source-history.mjs";
 
 const HOST = "127.0.0.1";
@@ -1348,17 +1352,19 @@ async function cancelProjectFileRequest(body) {
   const target = await projectFileTargetForBody(body);
   if (!target) return null;
   try {
-    await agentBridgeService.cancel({
-      projectId: target.projectId,
-      documentId: target.documentId,
-      sourcePath: target.exactSourcePath,
-      requestId: body.requestId,
-      attemptId: body.attemptId || "attempt_001",
-    });
-    const cancelled = await projectFileRepository.cancelRequest({
-      target,
-      requestId: body.requestId,
-      attemptId: body.attemptId || "attempt_001",
+    const cancelled = await cancelDurableRequestAfterAgentCleanup({
+      cancelAgent: () => agentBridgeService.cancel({
+        projectId: target.projectId,
+        documentId: target.documentId,
+        sourcePath: target.exactSourcePath,
+        requestId: body.requestId,
+        attemptId: body.attemptId || "attempt_001",
+      }),
+      cancelRequest: () => projectFileRepository.cancelRequest({
+        target,
+        requestId: body.requestId,
+        attemptId: body.attemptId || "attempt_001",
+      }),
     });
     return {
       ok: true,
@@ -2435,8 +2441,19 @@ let shuttingDown = false;
 async function shutdownBridge() {
   if (shuttingDown) return;
   shuttingDown = true;
-  await agentBridgeService.dispose().catch(() => {});
-  server.close(() => process.exit(0));
+  const accepted = await closeWorkspaceBridgeAfterAgentCleanup({
+    agentBridgeService,
+    closeServer: (onClosed) => {
+      server.close(onClosed);
+      // Main reaches this signal only after renderer writes are drained and
+      // Agent cleanup is confirmed. Retire any idle/poll connection now so the
+      // Bridge exit is bounded inside the desktop's longer shutdown deadline.
+      server.closeAllConnections?.();
+    },
+    exitProcess: (code) => process.exit(code),
+    writeDiagnostic: (line) => process.stderr.write(line),
+  });
+  if (!accepted) shuttingDown = false;
 }
 
 for (const signal of ["SIGINT", "SIGTERM"]) {

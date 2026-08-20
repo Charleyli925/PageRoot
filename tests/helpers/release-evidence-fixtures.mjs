@@ -61,6 +61,7 @@ const APP_SOURCE_FILES = [
 
 const BRIDGE_FILES = [
   "workspace-bridge.mjs",
+  "workspace-bridge-shutdown.mjs",
   "agent-bridge-service.mjs",
   "qoder-acp-client.mjs",
   "finalize-attempt.mjs",

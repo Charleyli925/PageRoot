@@ -21,6 +21,7 @@ import {
   loadQoderAcpTaskPolicy,
   qoderAcpEnvironment,
   runQoderAcpTask,
+  runVerifiedQoderJavaScript,
 } from "./qoder-acp-client.mjs";
 
 export const TRUSTED_LOCAL_AGENT_POLICY_VERSION = "trusted-local-agent-v1";
@@ -249,6 +250,46 @@ function qoderFailure(code) {
   }
 }
 
+function qoderPreflightFailure(code) {
+  switch (code) {
+    case "AGENT_PREFLIGHT_CLEANUP_UNCONFIRMED":
+      return "Qoder 预检进程未确认停止。PageRoot 尚未创建本轮 Request；为避免失去控制，本次不能继续，应用也不会退出。";
+    case "QODER_AUTH_REQUIRED":
+      return "Qoder CLI 尚未登录。PageRoot 尚未创建本轮 Request；请先完成登录，再重试或改用复制任务。";
+    case "QODER_COMMAND_NOT_FOUND":
+      return "没有找到独立安装的 Qoder CLI。PageRoot 尚未创建本轮 Request；请先安装，或改用复制任务。";
+    case "QODER_COMMAND_UNTRUSTED":
+      return "找到的 Qoder CLI 不符合独立安装校验。PageRoot 尚未创建本轮 Request，也没有启动该命令。";
+    case "QODER_COMMAND_CHANGED":
+      return "Qoder CLI 在预检期间发生变化。PageRoot 尚未创建本轮 Request，也没有启动变化后的命令。";
+    case "QODER_VERSION_INVALID":
+      return "Qoder CLI 没有返回可验证的版本号。PageRoot 尚未创建本轮 Request；请更新或重新安装后再试。";
+    case "QODER_VERSION_MISMATCH":
+      return "Qoder CLI 版本与独立安装清单不一致。PageRoot 尚未创建本轮 Request；请重新安装后再试。";
+    case "QODER_ACCOUNT_CAPACITY_UNAVAILABLE":
+    case "QODER_CAPACITY_UNAVAILABLE":
+      return "Qoder 账号当前没有可用模型容量。PageRoot 尚未创建本轮 Request；当前 HTML 和评论保持不变，可稍后重试或改用复制任务。";
+    case "QODER_PREFLIGHT_TIMEOUT":
+      return "Qoder CLI 预检超时。PageRoot 尚未创建本轮 Request；当前 HTML 和评论保持不变，可重试或改用复制任务。";
+    default:
+      return "Qoder CLI 预检没有完成。PageRoot 尚未创建本轮 Request；当前 HTML 和评论保持不变，可重试或改用复制任务。";
+  }
+}
+
+function normalizedPreflightError(cause) {
+  const code = cause instanceof AgentBridgeError
+    ? cleanText(cause.code, 120) || "QODER_PREFLIGHT_FAILED"
+    : "QODER_COMMAND_UNTRUSTED";
+  const status = code === "QODER_AUTH_REQUIRED"
+    ? 401
+    : code === "QODER_COMMAND_NOT_FOUND"
+      ? 404
+      : Number.isSafeInteger(cause?.status)
+        ? cause.status
+        : 503;
+  return new AgentBridgeError(code, qoderPreflightFailure(code), { status });
+}
+
 function classifyPreflightFailure(cause) {
   const combined = `${cause?.stdout || ""}\n${cause?.stderr || ""}\n${cause?.message || ""}`;
   if (/not logged in|sign in|login required|unauthenticated/iu.test(combined)) {
@@ -423,19 +464,37 @@ async function assertCommandUnchanged(command) {
   }
 }
 
-async function preflightQoder(command) {
-  const options = {
-    env: qoderAcpEnvironment(),
+async function executePreflightCommand(command, args, environment, timeout) {
+  if (command.source === "verified-npm-package") {
+    return runVerifiedQoderJavaScript({
+      command: command.command,
+      expectedExecutable: {
+        path: command.command,
+        identity: command.identity,
+      },
+      args,
+      baseEnvironment: environment,
+      timeoutMs: timeout,
+      maxBuffer: 128 * 1024,
+    });
+  }
+  return execFileAsync(command.command, args, {
+    env: qoderAcpEnvironment({}, environment),
     encoding: "utf8",
-    timeout: 30_000,
+    timeout,
     maxBuffer: 128 * 1024,
     windowsHide: true,
-  };
+  });
+}
+
+async function preflightQoder(command, environment) {
   try {
-    const versionResult = await execFileAsync(command.command, ["--version"], {
-      ...options,
-      timeout: 10_000,
-    });
+    const versionResult = await executePreflightCommand(
+      command,
+      ["--version"],
+      environment,
+      10_000,
+    );
     const reportedVersion = cleanText(versionResult.stdout, 80).split(/\s+/u)[0];
     if (!semver.valid(reportedVersion)) {
       fail("QODER_VERSION_INVALID", "Qoder CLI 没有返回可验证的版本号。");
@@ -443,7 +502,12 @@ async function preflightQoder(command) {
     if (command.version && reportedVersion !== command.version) {
       fail("QODER_VERSION_MISMATCH", "Qoder CLI 版本与安装清单不一致。");
     }
-    const modelResult = await execFileAsync(command.command, ["--list-models"], options);
+    const modelResult = await executePreflightCommand(
+      command,
+      ["--list-models"],
+      environment,
+      30_000,
+    );
     const models = String(modelResult.stdout || "")
       .split(/\r?\n/u)
       .map((line) => cleanText(line, 160))
@@ -453,9 +517,18 @@ async function preflightQoder(command) {
     }
     return Object.freeze({ version: reportedVersion, modelCount: models.length });
   } catch (cause) {
-    if (cause instanceof AgentBridgeError) throw cause;
-    const code = classifyPreflightFailure(cause);
-    fail(code, qoderFailure(code), { status: code === "QODER_AUTH_REQUIRED" ? 401 : 503 });
+    const code = cause?.code === "ACP_PREFLIGHT_CLEANUP_UNCONFIRMED"
+      ? "AGENT_PREFLIGHT_CLEANUP_UNCONFIRMED"
+      : cause instanceof AgentBridgeError
+        ? cause.code
+        : classifyPreflightFailure(cause);
+    fail(code, qoderPreflightFailure(code), {
+      status: code === "QODER_AUTH_REQUIRED"
+        ? 401
+        : Number.isSafeInteger(cause?.status)
+          ? cause.status
+          : 503,
+    });
   }
 }
 
@@ -516,11 +589,18 @@ export class AgentBridgeService {
   #commandResolver;
   #policyLoader;
   #runTask;
+  #preflightRunner;
   #leaseStore;
+  #cancelTimeoutMs;
+  #terminalSessionTtlMs;
+  #maxRetainedSessions;
   #tickets = new Map();
   #sessions = new Map();
   #ownerToken = `agent_owner_${randomUUID().replaceAll("-", "")}`;
   #disposed = false;
+  #disposePromise = null;
+  #shutdownConfirmed = false;
+  #preflightCleanupUnconfirmed = false;
 
   constructor({
     resolveTask,
@@ -529,13 +609,20 @@ export class AgentBridgeService {
     commandResolver = resolveQoderAcpCommand,
     policyLoader = loadQoderAcpTaskPolicy,
     runTask = runQoderAcpTask,
+    preflightRunner = preflightQoder,
     leaseStore = DEFAULT_AGENT_LEASE_STORE,
+    cancelTimeoutMs = CANCEL_TIMEOUT_MS,
+    terminalSessionTtlMs = TERMINAL_SESSION_TTL_MS,
+    maxRetainedSessions = MAX_RETAINED_SESSIONS,
   } = {}) {
     if (typeof resolveTask !== "function") {
       throw new TypeError("AgentBridgeService requires a task authority resolver.");
     }
     if (!clock || typeof clock.now !== "function") {
       throw new TypeError("AgentBridgeService requires a ClockPort.");
+    }
+    if (typeof preflightRunner !== "function") {
+      throw new TypeError("AgentBridgeService requires a Qoder preflight runner.");
     }
     if (
       !leaseStore
@@ -544,13 +631,26 @@ export class AgentBridgeService {
     ) {
       throw new TypeError("AgentBridgeService requires an AgentLeaseStore.");
     }
+    if (!Number.isSafeInteger(cancelTimeoutMs) || cancelTimeoutMs <= 0) {
+      throw new TypeError("AgentBridgeService cancel timeout must be a positive integer.");
+    }
+    if (!Number.isSafeInteger(terminalSessionTtlMs) || terminalSessionTtlMs <= 0) {
+      throw new TypeError("AgentBridgeService terminal-session TTL must be a positive integer.");
+    }
+    if (!Number.isSafeInteger(maxRetainedSessions) || maxRetainedSessions <= 0) {
+      throw new TypeError("AgentBridgeService retained-session limit must be a positive integer.");
+    }
     this.#resolveTask = resolveTask;
     this.#environment = environment;
     this.#clock = clock;
     this.#commandResolver = commandResolver;
     this.#policyLoader = policyLoader;
     this.#runTask = runTask;
+    this.#preflightRunner = preflightRunner;
     this.#leaseStore = leaseStore;
+    this.#cancelTimeoutMs = cancelTimeoutMs;
+    this.#terminalSessionTtlMs = terminalSessionTtlMs;
+    this.#maxRetainedSessions = maxRetainedSessions;
   }
 
   #prune() {
@@ -559,12 +659,18 @@ export class AgentBridgeService {
       if (ticket.expiresAt <= now) this.#tickets.delete(ticketId);
     }
     const terminal = [...this.#sessions.entries()]
-      .filter(([, entry]) => !["starting", "running", "cancelling"].includes(entry.state))
+      .filter(([, entry]) => (
+        !["starting", "running", "cancelling"].includes(entry.state)
+        // keepLease means process-group cleanup was never confirmed. That is
+        // a safety fence, not presentation history, and must survive both TTL
+        // and capacity pruning until the Bridge itself is retired.
+        && entry.keepLease !== true
+      ))
       .sort((left, right) => left[1].updatedAtMs - right[1].updatedAtMs);
     for (const [key, entry] of terminal) {
       if (
-        this.#sessions.size <= MAX_RETAINED_SESSIONS
-        && entry.updatedAtMs + TERMINAL_SESSION_TTL_MS > now
+        this.#sessions.size <= this.#maxRetainedSessions
+        && entry.updatedAtMs + this.#terminalSessionTtlMs > now
       ) break;
       this.#sessions.delete(key);
     }
@@ -572,18 +678,29 @@ export class AgentBridgeService {
 
   async preflight({ driver, trustPolicyAccepted } = {}) {
     if (this.#disposed) fail("AGENT_BRIDGE_DISPOSED", "Agent Bridge 已停止。", { status: 503 });
+    if (this.#preflightCleanupUnconfirmed) {
+      fail(
+        "AGENT_PREFLIGHT_CLEANUP_UNCONFIRMED",
+        qoderPreflightFailure("AGENT_PREFLIGHT_CLEANUP_UNCONFIRMED"),
+        { status: 503 },
+      );
+    }
     validateDriver(driver);
     validateTrustPolicy(trustPolicyAccepted);
     this.#prune();
     let command;
+    let evidence;
     try {
       command = await this.#commandResolver({ environment: this.#environment });
+      evidence = await this.#preflightRunner(command, this.#environment);
+      await assertCommandUnchanged(command);
     } catch (cause) {
-      if (cause instanceof AgentBridgeError) throw cause;
-      fail("QODER_COMMAND_UNTRUSTED", qoderFailure("QODER_COMMAND_UNTRUSTED"), { status: 503 });
+      const error = normalizedPreflightError(cause);
+      if (error.code === "AGENT_PREFLIGHT_CLEANUP_UNCONFIRMED") {
+        this.#preflightCleanupUnconfirmed = true;
+      }
+      throw error;
     }
-    const evidence = await preflightQoder(command);
-    await assertCommandUnchanged(command);
     const preflightId = `preflight_${randomUUID().replaceAll("-", "")}`;
     const createdAt = this.#clock.now();
     while (this.#tickets.size >= MAX_PREFLIGHT_TICKETS) {
@@ -738,6 +855,8 @@ export class AgentBridgeService {
       policy,
       prompt: finalizerPrompt(policy),
       environment: {},
+      baseEnvironment: this.#environment,
+      useVerifiedJavaScriptRuntime: ticket.command.source === "verified-npm-package",
       cancellationSignal: controller.signal,
       expectedAgentName: ticket.command.source === "e2e-override"
         ? /qoder|pageroot-e2e/iu
@@ -818,7 +937,7 @@ export class AgentBridgeService {
         "AGENT_CANCEL_UNCONFIRMED",
         "Qoder 进程没有在限定时间内确认停止。",
         { status: 503 },
-      )), CANCEL_TIMEOUT_MS);
+      )), this.#cancelTimeoutMs);
       timeoutHandle.unref?.();
     });
     try {
@@ -826,31 +945,72 @@ export class AgentBridgeService {
     } finally {
       clearTimeout(timeoutHandle);
     }
+    if (entry.keepLease === true) {
+      fail(
+        "AGENT_CANCEL_UNCONFIRMED",
+        "Qoder 进程停止未被确认。本轮 Request 仍保持处理中，PageRoot 不会解锁或覆盖它。",
+        { status: 503 },
+      );
+    }
     return { ok: true, stopped: true, session: publicSession(entry) };
   }
 
   async dispose() {
-    if (this.#disposed) return;
+    if (this.#shutdownConfirmed) return;
+    if (this.#disposePromise) return this.#disposePromise;
     this.#disposed = true;
     this.#tickets.clear();
-    const running = [...this.#sessions.values()].filter(
-      (entry) => ["starting", "running", "cancelling"].includes(entry.state),
-    );
-    for (const entry of running) {
-      entry.controller.abort(new AgentBridgeError("ACP_CANCELLED", "Bridge shutdown."));
-    }
-    let timeoutHandle;
-    const timeout = new Promise((resolve) => {
-      timeoutHandle = setTimeout(resolve, CANCEL_TIMEOUT_MS);
-      timeoutHandle.unref?.();
-    });
+    this.#disposePromise = (async () => {
+      const running = [...this.#sessions.values()].filter(
+        (entry) => ["starting", "running", "cancelling"].includes(entry.state),
+      );
+      for (const entry of running) {
+        entry.controller.abort(new AgentBridgeError("ACP_CANCELLED", "Bridge shutdown."));
+      }
+      let timeoutHandle;
+      const timeout = new Promise((_resolve, reject) => {
+        timeoutHandle = setTimeout(() => reject(new AgentBridgeError(
+          "AGENT_SHUTDOWN_UNCONFIRMED",
+          "PageRoot 无法确认 Qoder 进程已停止；为避免失去控制，本次退出已取消。",
+          { status: 503 },
+        )), this.#cancelTimeoutMs);
+        timeoutHandle.unref?.();
+      });
+      try {
+        await Promise.race([
+          Promise.all(running.map((entry) => entry.promise)),
+          timeout,
+        ]);
+      } catch (cause) {
+        if (cause instanceof AgentBridgeError && cause.code === "AGENT_SHUTDOWN_UNCONFIRMED") {
+          throw cause;
+        }
+        throw new AgentBridgeError(
+          "AGENT_SHUTDOWN_UNCONFIRMED",
+          "PageRoot 无法确认 Qoder 进程已停止；为避免失去控制，本次退出已取消。",
+          { status: 503 },
+        );
+      } finally {
+        clearTimeout(timeoutHandle);
+      }
+
+      const unconfirmed = [...this.#sessions.values()].some((entry) => (
+        ["starting", "running", "cancelling"].includes(entry.state)
+        || entry.keepLease === true
+      )) || this.#preflightCleanupUnconfirmed;
+      if (unconfirmed) {
+        throw new AgentBridgeError(
+          "AGENT_SHUTDOWN_UNCONFIRMED",
+          "PageRoot 无法确认 Qoder 进程已停止；为避免失去控制，本次退出已取消。",
+          { status: 503 },
+        );
+      }
+      this.#shutdownConfirmed = true;
+    })();
     try {
-      await Promise.race([
-        Promise.allSettled(running.map((entry) => entry.promise)),
-        timeout,
-      ]);
+      await this.#disposePromise;
     } finally {
-      clearTimeout(timeoutHandle);
+      this.#disposePromise = null;
     }
   }
 }

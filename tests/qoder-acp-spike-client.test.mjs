@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import {
   chmod,
   mkdir,
@@ -9,12 +10,15 @@ import {
   realpath,
   rename,
   rm,
+  stat,
   symlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { createRequire } from "node:module";
 import path from "node:path";
 import test from "node:test";
+import { promisify } from "node:util";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import * as acp from "@agentclientprotocol/sdk";
@@ -23,8 +27,10 @@ import {
   captureQoderAcpReviewBoundary,
   createRestrictedQoderAcpHost,
   loadQoderAcpTaskPolicy,
+  prepareVerifiedQoderJavaScriptExecution,
   runAcpTask,
   runQoderAcpTask,
+  runVerifiedQoderJavaScript,
 } from "../scripts/qoder-acp-client.mjs";
 import { sha256 } from "../scripts/lifecycle-core.mjs";
 import { ProjectFileRepository } from "../scripts/project-file-repository.mjs";
@@ -35,6 +41,8 @@ const IDENTITIES = Object.freeze({
 });
 const READ_FILE_COUNT = 6;
 const productRoot = fileURLToPath(new URL("../", import.meta.url));
+const execFileAsync = promisify(execFile);
+const require = createRequire(import.meta.url);
 const acpSdkModuleUrl = pathToFileURL(path.join(
   productRoot,
   "node_modules",
@@ -670,7 +678,8 @@ function createSyntheticAgent(fixture, observed) {
 
 async function createStdioAgentScript(fixture) {
   const scriptPath = path.join(fixture.root, "synthetic-stdio-agent.mjs");
-  const source = `import { Readable, Writable } from "node:stream";
+  const source = `#!/usr/bin/env node
+import { Readable, Writable } from "node:stream";
 import * as acp from ${JSON.stringify(acpSdkModuleUrl)};
 
 const config = JSON.parse(process.argv[2]);
@@ -725,7 +734,8 @@ app.connect(acp.ndJsonStream(
   Readable.toWeb(process.stdin),
 ));
 `;
-  await writeFile(scriptPath, source, "utf8");
+  await writeFile(scriptPath, source, { encoding: "utf8", mode: 0o700 });
+  await chmod(scriptPath, 0o700);
   return scriptPath;
 }
 
@@ -856,6 +866,259 @@ test("ACP stdio transport completes the same synthetic Candidate contract", asyn
     }),
     /not allowed/u,
   );
+});
+
+test("ACP stdio transport runs a verified npm-style bundle with Finder's sparse PATH", async (t) => {
+  const fixture = await createFixture(t);
+  const candidate = "<!doctype html><html><head><title>Runtime Candidate</title></head><body><h1>Trusted runtime Candidate</h1></body></html>\n";
+  const scriptPath = await createStdioAgentScript(fixture);
+  const information = await stat(scriptPath);
+  const expectedExecutable = {
+    path: scriptPath,
+    identity: {
+      dev: information.dev,
+      ino: information.ino,
+      nlink: information.nlink,
+      size: information.size,
+      mtimeMs: information.mtimeMs,
+      sha256: sha256(await readFile(scriptPath)),
+    },
+  };
+  const result = await runQoderAcpTask({
+    command: scriptPath,
+    args: [JSON.stringify({
+      requestPath: fixture.requestPath,
+      manifestPath: fixture.manifestPath,
+      outputPath: fixture.outputPath,
+      finalizer: fixture.finalizer,
+      candidate,
+    })],
+    policy: fixture.policy,
+    prompt: "complete through the trusted JavaScript runtime",
+    expectedExecutable,
+    useVerifiedJavaScriptRuntime: true,
+    baseEnvironment: {
+      HOME: fixture.root,
+      PATH: "/usr/bin:/bin",
+    },
+    startupTimeoutMs: 2_000,
+    turnTimeoutMs: 3_000,
+  });
+
+  assert.equal(result.stopReason, "end_turn");
+  assert.equal(result.initialized.agentInfo.name, "pageroot-stdio-agent");
+  const status = await fixture.repository.requestStatus({
+    target: fixture.target,
+    ...IDENTITIES,
+  });
+  assert.equal(status.status, "candidate-ready");
+
+  await assert.rejects(
+    runQoderAcpTask({
+      command: scriptPath,
+      args: ["{}"],
+      policy: fixture.policy,
+      prompt: "must not spawn a drifted bundle",
+      expectedExecutable: {
+        ...expectedExecutable,
+        identity: {
+          ...expectedExecutable.identity,
+          sha256: `sha256:${"0".repeat(64)}`,
+        },
+      },
+      useVerifiedJavaScriptRuntime: true,
+      baseEnvironment: { PATH: "/usr/bin:/bin" },
+    }),
+    (error) => error?.code === "ACP_AGENT_EXECUTABLE_CHANGED",
+  );
+});
+
+test("verified JavaScript execution stays bound to the checked inode after path replacement", async (t) => {
+  const root = await realpath(
+    await mkdtemp(path.join(tmpdir(), "pageroot-qoder-inode-bind-")),
+  );
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const executable = path.join(root, "qodercli.js");
+  const retired = path.join(root, "qodercli.checked.js");
+  await writeFile(executable, `#!/usr/bin/env node
+process.stdout.write("verified-old-bytes\\n");
+`, { encoding: "utf8", mode: 0o755 });
+  await chmod(executable, 0o755);
+  const information = await stat(executable);
+  const prepared = await prepareVerifiedQoderJavaScriptExecution({
+    command: executable,
+    expectedExecutable: {
+      path: executable,
+      identity: {
+        dev: information.dev,
+        ino: information.ino,
+        nlink: information.nlink,
+        size: information.size,
+        mtimeMs: information.mtimeMs,
+        sha256: sha256(await readFile(executable)),
+      },
+    },
+    baseEnvironment: { PATH: "/usr/bin:/bin" },
+  });
+
+  await rename(executable, retired);
+  await writeFile(executable, `#!/usr/bin/env node
+process.stdout.write("unverified-replacement-bytes\\n");
+`, { encoding: "utf8", mode: 0o755 });
+  await chmod(executable, 0o755);
+
+  const child = await prepared.spawn({
+    args: [],
+    cwd: root,
+    stdin: "ignore",
+  });
+  child.stdout.setEncoding("utf8");
+  let stdout = "";
+  child.stdout.on("data", (chunk) => {
+    stdout += chunk;
+  });
+  const exitCode = await new Promise((resolve, reject) => {
+    child.once("error", reject);
+    child.once("close", resolve);
+  });
+  assert.equal(exitCode, 0);
+  assert.equal(stdout, "verified-old-bytes\n");
+  assert.doesNotMatch(stdout, /unverified-replacement/u);
+});
+
+test("verified preflight cleans same-group descendants before reporting success", async (t) => {
+  const root = await realpath(
+    await mkdtemp(path.join(tmpdir(), "pageroot-qoder-preflight-group-")),
+  );
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const executable = path.join(root, "qodercli.js");
+  const pidPath = path.join(root, "descendant.pid");
+  await writeFile(executable, `#!/usr/bin/env node
+import { spawn } from "node:child_process";
+import { writeFileSync } from "node:fs";
+const descendant = spawn(process.execPath, ["--eval", "setInterval(() => {}, 1000)"], {
+  stdio: "ignore",
+});
+writeFileSync(process.argv[2], String(descendant.pid));
+descendant.unref();
+process.stdout.write("1.1.27\\n");
+`, { encoding: "utf8", mode: 0o755 });
+  await chmod(executable, 0o755);
+  const information = await stat(executable);
+  const expectedExecutable = {
+    path: executable,
+    identity: {
+      dev: information.dev,
+      ino: information.ino,
+      nlink: information.nlink,
+      size: information.size,
+      mtimeMs: information.mtimeMs,
+      sha256: sha256(await readFile(executable)),
+    },
+  };
+  const result = await runVerifiedQoderJavaScript({
+    command: executable,
+    expectedExecutable,
+    args: [pidPath],
+    cwd: root,
+    baseEnvironment: { PATH: "/usr/bin:/bin" },
+    timeoutMs: 3_000,
+  });
+  assert.equal(result.stdout, "1.1.27\n");
+  const descendantPid = Number(await readFile(pidPath, "utf8"));
+  t.after(() => {
+    try {
+      process.kill(descendantPid, "SIGKILL");
+    } catch (error) {
+      if (error?.code !== "ESRCH") throw error;
+    }
+  });
+  assert.throws(
+    () => process.kill(descendantPid, 0),
+    (error) => error?.code === "ESRCH",
+  );
+
+  await assert.rejects(
+    runVerifiedQoderJavaScript({
+      command: executable,
+      expectedExecutable,
+      args: [pidPath],
+      cwd: root,
+      baseEnvironment: { PATH: "/usr/bin:/bin" },
+      timeoutMs: 3_000,
+      processTerminator: async () => false,
+    }),
+    (error) => error?.code === "ACP_PREFLIGHT_CLEANUP_UNCONFIRMED",
+  );
+  const unconfirmedPid = Number(await readFile(pidPath, "utf8"));
+  try {
+    process.kill(unconfirmedPid, "SIGKILL");
+  } catch (error) {
+    if (error?.code !== "ESRCH") throw error;
+  }
+});
+
+test("verified JavaScript execution uses Electron as Node without inheriting Finder PATH", async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), "pageroot-qoder-electron-runtime-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const executable = path.join(root, "qodercli.js");
+  const runner = path.join(root, "electron-runner.mjs");
+  await writeFile(executable, `#!/usr/bin/env node
+process.stdout.write(JSON.stringify({
+  electron: process.versions.electron || null,
+  runAsNode: process.env.ELECTRON_RUN_AS_NODE || null,
+}) + "\\n");
+`, { encoding: "utf8", mode: 0o755 });
+  await chmod(executable, 0o755);
+  const clientModuleUrl = pathToFileURL(path.join(
+    productRoot,
+    "scripts",
+    "qoder-acp-client.mjs",
+  )).href;
+  await writeFile(runner, `import { readFile, realpath, stat } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { runVerifiedQoderJavaScript } from ${JSON.stringify(clientModuleUrl)};
+const command = await realpath(process.env.PAGEROOT_TEST_QODER_COMMAND);
+const information = await stat(command);
+const bytes = await readFile(command);
+const result = await runVerifiedQoderJavaScript({
+  command,
+  expectedExecutable: {
+    path: command,
+    identity: {
+      dev: information.dev,
+      ino: information.ino,
+      nlink: information.nlink,
+      size: information.size,
+      mtimeMs: information.mtimeMs,
+      sha256: "sha256:" + createHash("sha256").update(bytes).digest("hex"),
+    },
+  },
+  baseEnvironment: { HOME: process.env.PAGEROOT_TEST_HOME, PATH: "/usr/bin:/bin" },
+  timeoutMs: 5_000,
+});
+process.stdout.write(JSON.stringify({
+  parentElectron: process.versions.electron || null,
+  child: JSON.parse(result.stdout),
+}));
+`, "utf8");
+
+  const electronPath = require("electron");
+  const result = await execFileAsync(electronPath, [runner], {
+    env: {
+      ...process.env,
+      ELECTRON_RUN_AS_NODE: "1",
+      PAGEROOT_TEST_HOME: root,
+      PAGEROOT_TEST_QODER_COMMAND: executable,
+    },
+    encoding: "utf8",
+    timeout: 10_000,
+    maxBuffer: 1024 * 1024,
+  });
+  const payload = JSON.parse(result.stdout);
+  assert.match(payload.parentElectron, /^\d+\./u);
+  assert.equal(payload.child.electron, payload.parentElectron);
+  assert.equal(payload.child.runAsNode, "1");
 });
 
 test("ACP stdio transport accepts a valid completed turn before immediate Agent exit", async (t) => {

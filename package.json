@@ -196,6 +196,10 @@
         "to": "bridge/workspace-bridge.mjs"
       },
       {
+        "from": "scripts/workspace-bridge-shutdown.mjs",
+        "to": "bridge/workspace-bridge-shutdown.mjs"
+      },
+      {
         "from": "scripts/agent-bridge-service.mjs",
         "to": "bridge/agent-bridge-service.mjs"
       },

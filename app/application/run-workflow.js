@@ -174,6 +174,7 @@ export class RunWorkflow {
   #timer = null;
   #pollGeneration = 0;
   #uncertainSubmissions = new Map();
+  #agentStartsPending = new Set();
   #disposed = false;
 
   constructor({
@@ -306,6 +307,7 @@ export class RunWorkflow {
     this.#disposed = true;
     this.stopPolling();
     this.#uncertainSubmissions.clear();
+    this.#agentStartsPending.clear();
     this.#listeners.clear();
     this.#eventListeners.clear();
   }
@@ -337,7 +339,10 @@ export class RunWorkflow {
 
   async pollNow({ generation = this.#pollGeneration } = {}) {
     if (!this.#isPollCurrent(generation)) return stale({ generation });
-    const runs = this.#runSession.runs.filter(isPollable);
+    const runs = this.#runSession.runs.filter((run) => (
+      isPollable(run)
+      && !this.#agentStartsPending.has(this.#codecs.operationKey(run))
+    ));
     const polls = runs.map((run) => this.#pollRun(run, generation));
     const reconciliations = [...this.#uncertainSubmissions.keys()].map(
       (sourcePath) => this.reconcileSubmission({ sourcePath, generation }),
@@ -407,6 +412,7 @@ export class RunWorkflow {
     let submissionUncertain = false;
     let durableRun = null;
     let agentPreflight = null;
+    let reservedAgentStartKey = null;
     try {
       if (deliveryMode === "qoder-acp") {
         agentPreflight = await this.#bridgeClient.preflightAgent({
@@ -609,9 +615,11 @@ export class RunWorkflow {
         });
         const reconciled = await this.reconcileSubmission({
           sourcePath: context.sourcePath,
+          reserveRecoveredAgentStart: deliveryMode === "qoder-acp",
         });
         if (reconciled.status === "succeeded") {
           durableRun = reconciled.value.run || null;
+          reservedAgentStartKey = reconciled.value.reservedAgentStartKey || null;
           submissionUncertain = this.#uncertainSubmissions.has(context.sourcePath);
           if (durableRun) {
             // Reconciliation found the durable Request. Continue through the
@@ -629,6 +637,10 @@ export class RunWorkflow {
           );
         }
       }
+      if (deliveryMode === "qoder-acp") {
+        reservedAgentStartKey ||= this.#codecs.operationKey(durableRun);
+        this.#agentStartsPending.add(reservedAgentStartKey);
+      }
       this.#runSession.trackRun(durableRun, {
         activate: this.#isCurrentRun(durableRun) ? "always" : "never",
       });
@@ -638,11 +650,11 @@ export class RunWorkflow {
         context,
         current: this.#isCurrentRun(durableRun),
       });
-      this.syncPolling();
       if (deliveryMode === "qoder-acp") {
         await this.startAgent({
           run: durableRun,
           preflightId: agentPreflight.preflightId,
+          agentStartReserved: true,
         });
       } else if (durableRun.handoffMessage) {
         await this.copyHandoff({ run: durableRun });
@@ -673,12 +685,19 @@ export class RunWorkflow {
       });
       return rejected(errorCode(cause, "RUN_SUBMISSION_REJECTED"), message);
     } finally {
+      if (reservedAgentStartKey) {
+        this.#agentStartsPending.delete(reservedAgentStartKey);
+      }
       if (!submissionUncertain) this.#runSession.releaseSubmission(submission);
       this.syncPolling();
     }
   }
 
-  async reconcileSubmission({ sourcePath = null, generation = this.#pollGeneration } = {}) {
+  async reconcileSubmission({
+    sourcePath = null,
+    generation = this.#pollGeneration,
+    reserveRecoveredAgentStart = false,
+  } = {}) {
     const entries = sourcePath
       ? [[sourcePath, this.#uncertainSubmissions.get(sourcePath)]]
       : [...this.#uncertainSubmissions.entries()];
@@ -715,10 +734,30 @@ export class RunWorkflow {
           );
         }
         if (recoveredRun) {
-          this.#runSession.trackRun(recoveredRun, {
-            activate: this.#isCurrentRun(recoveredRun) ? "always" : "never",
-            recovered: true,
-          });
+          const reservedAgentStartKey = reserveRecoveredAgentStart
+            ? this.#codecs.operationKey(recoveredRun)
+            : null;
+          if (reservedAgentStartKey) {
+            // Reserve before RunSession publication. Subscribers may
+            // synchronously request polling as soon as the durable run is
+            // visible, and /status must never race ahead of /agent/start.
+            this.#agentStartsPending.add(reservedAgentStartKey);
+          }
+          try {
+            this.#runSession.trackRun(recoveredRun, {
+              activate: this.#isCurrentRun(recoveredRun) ? "always" : "never",
+              // A Request recovered from this still-active POST submission has
+              // not survived a Bridge/app restart; it still owns the one
+              // authorized Agent start below. Background reconciliation keeps
+              // the ordinary interrupted-session projection.
+              recovered: !reserveRecoveredAgentStart,
+            });
+          } catch (cause) {
+            if (reservedAgentStartKey) {
+              this.#agentStartsPending.delete(reservedAgentStartKey);
+            }
+            throw cause;
+          }
           this.#settleUncertainSubmission(key, entry);
           this.#emitEvent({
             type: "run-submission-reconciled",
@@ -726,7 +765,7 @@ export class RunWorkflow {
             context: entry.context,
             current: this.#isCurrentRun(recoveredRun),
           });
-          outcomes.push(succeeded({ run: recoveredRun }));
+          outcomes.push(succeeded({ run: recoveredRun, reservedAgentStartKey }));
           continue;
         }
         const outcome = this.#codecs.activeRunFromRecord(payload.recentRunOutcome);
@@ -854,6 +893,7 @@ export class RunWorkflow {
   async startAgent({
     run = this.#runSession.activeRun,
     preflightId = null,
+    agentStartReserved = false,
   } = {}) {
     if (!run?.sourcePath || !run.requestId || run.requestId === "pending") {
       return blocked("RUN_AGENT_UNAVAILABLE", "当前 Request 还不能启动 Qoder CLI。");
@@ -864,6 +904,11 @@ export class RunWorkflow {
         "Bridge 无法证明旧 Qoder 会话已经停止。请结束本轮，再重新发送。",
       );
     }
+    const operationKey = this.#codecs.operationKey(run);
+    if (!agentStartReserved && this.#agentStartsPending.has(operationKey)) {
+      return blocked("RUN_AGENT_START_BUSY", "Qoder CLI 正在启动，请等待当前操作完成。");
+    }
+    this.#agentStartsPending.add(operationKey);
     let preflight = preflightId ? { preflightId, status: "ready" } : null;
     try {
       if (!preflight) {
@@ -936,6 +981,9 @@ export class RunWorkflow {
         message,
       });
       return rejected(code, message);
+    } finally {
+      this.#agentStartsPending.delete(operationKey);
+      this.syncPolling();
     }
   }
 
@@ -1424,7 +1472,10 @@ export class RunWorkflow {
 
   #hasPollingWork() {
     return this.#uncertainSubmissions.size > 0
-      || this.#runSession.runs.some(isPollable);
+      || this.#runSession.runs.some((run) => (
+        isPollable(run)
+        && !this.#agentStartsPending.has(this.#codecs.operationKey(run))
+      ));
   }
 
   #isPollCurrent(generation) {

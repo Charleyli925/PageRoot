@@ -256,12 +256,21 @@ function shellQuote(value) {
   return `'${String(value).replaceAll("'", `'\\''`)}'`;
 }
 
-function createQoderAcpE2ECommand(directory) {
+function createQoderAcpE2ECommand(directory, {
+  hang = false,
+  pidFile = null,
+} = {}) {
   const command = path.join(directory, "pageroot-qoder-acp-e2e");
   const agent = path.join(productRoot, "tests", "fixtures", "qoder-acp-agent.mjs");
+  const fixtureArgs = [
+    hang ? "--hang" : null,
+    pidFile ? `--pid-file=${pidFile}` : null,
+  ].filter(Boolean).map(shellQuote).join(" ");
   writeFileSync(
     command,
-    `#!/bin/sh\nexec ${shellQuote(process.execPath)} ${shellQuote(agent)} "$@"\n`,
+    `#!/bin/sh\nexec ${shellQuote(process.execPath)} ${shellQuote(agent)}${
+      fixtureArgs ? ` ${fixtureArgs}` : ""
+    } "$@"\n`,
     { encoding: "utf8", mode: 0o755 },
   );
   chmodSync(command, 0o755);
@@ -4154,6 +4163,94 @@ test("Qoder ACP Agent Bridge reaches review without clipboard or automatic adopt
     expect(readFileSync(workingCopyPath, "utf8")).not.toContain(
       "data-pageroot-qoder-acp",
     );
+  } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
+
+test("Qoder ACP polling waits for start and a managed stop kills the Agent", async () => {
+  test.setTimeout(120_000);
+  const fixture = createSourceFixture("qoder-acp-managed-stop.html");
+  const pidFile = path.join(fixture.sourceDirectory, "qoder-acp.pid");
+  const qoderCommand = createQoderAcpE2ECommand(fixture.sourceDirectory, {
+    hang: true,
+    pidFile,
+  });
+  const launched = await launchPageRoot({
+    activeSourcePath: fixture.sourcePath,
+    injectedEnv: {
+      PAGEROOT_QODER_ACP_ALLOW_TEST_COMMAND: "1",
+      PAGEROOT_QODER_ACP_COMMAND: qoderCommand,
+    },
+  });
+  try {
+    const bridgeTraffic = [];
+    launched.page.on("request", (request) => {
+      const url = new URL(request.url());
+      if (
+        url.hostname === "127.0.0.1"
+        && ["/agent/start", "/status"].includes(url.pathname)
+      ) bridgeTraffic.push(`${request.method()} ${url.pathname}`);
+    });
+    const workingCopyPath = await addComment(
+      launched.page,
+      fixture.sourcePath,
+      "保持 ACP 会话运行，直到我在源页停止本轮。",
+    );
+    const workingBefore = readFileSync(workingCopyPath);
+    await launched.page.getByRole("button", { name: /发给 AI/u }).click();
+    const deliveryDialog = launched.page.getByRole("dialog", { name: "怎样交给 AI？" });
+    await deliveryDialog.getByRole("button", { name: /用 Qoder CLI 自动执行/u }).click();
+
+    const stopButton = launched.page.getByRole("button", {
+      name: "停止 Qoder 并继续编辑",
+    });
+    await expect(stopButton).toBeVisible({ timeout: 60_000 });
+    await expect.poll(() => existsSync(pidFile)).toBe(true);
+    const pid = Number(readFileSync(pidFile, "utf8"));
+    expect(Number.isSafeInteger(pid)).toBe(true);
+    await launched.page.waitForTimeout(750);
+    const falseFailureToast = launched.page.locator(".toast.show").filter({
+      hasText: "Qoder CLI 没有完成本轮",
+    });
+    expect(
+      await falseFailureToast.count(),
+      `Bridge request order: ${bridgeTraffic.join(", ")}`,
+    ).toBe(0);
+
+    await stopButton.click();
+    await expect(launched.page.locator('aside[aria-label="本轮评论"]')
+      .getByRole("button", { name: "全局评论", exact: true }))
+      .toBeEnabled({ timeout: 45_000 });
+    await expect.poll(() => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch (error) {
+        if (error?.code === "ESRCH") return false;
+        throw error;
+      }
+    }).toBe(false);
+    expect(readFileSync(fixture.sourcePath)).toEqual(fixture.original);
+    expect(readFileSync(workingCopyPath)).toEqual(workingBefore);
+    expect(candidateHtmlFiles(launched.workspace, (
+      JSON.parse(readFileSync(
+        path.join(managedProjectRoots(launched.workspace)[0], ".pageroot", "project.json"),
+        "utf8",
+      )).projectId
+    ))).toHaveLength(0);
+    const requestsRoot = path.join(
+      managedProjectRoots(launched.workspace)[0],
+      ".pageroot",
+      "requests",
+    );
+    const requestDirectory = readdirSync(requestsRoot).find((name) => !name.startsWith("."));
+    const request = JSON.parse(readFileSync(
+      path.join(requestsRoot, requestDirectory, "request.json"),
+      "utf8",
+    ));
+    expect(request.status).toBe("cancelled");
   } finally {
     await stopPageRoot(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);
