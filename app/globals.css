@@ -6241,14 +6241,56 @@ body {
   gap: 3px;
 }
 
+.rail-comment-composer .composer-actions {
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.rail-comment-composer .composer-footer-tools {
+  gap: 8px;
+}
+
 .comment-card-tools .comment-tool-button,
-.composer-footer-tools .comment-tool-button {
+.composer-footer-tools .comment-tool-button,
+.rail-comment-composer > header .comment-tool-button,
+.rail-comment-composer .add-comment-button {
   width: 29px;
   height: 29px;
   min-height: 29px;
-  border-color: transparent;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
   background: transparent;
   color: #666872;
+  box-shadow: none;
+}
+
+.comment-card-tools .comment-tool-button:hover:not(:disabled),
+.composer-footer-tools .comment-tool-button:hover:not(:disabled),
+.rail-comment-composer > header .comment-tool-button:hover:not(:disabled),
+.rail-comment-composer .add-comment-button:hover:not(:disabled) {
+  border: 0;
+  background: rgb(90 85 223 / 6%);
+  color: #514cda;
+  box-shadow: none;
+}
+
+.comment-card-tools .comment-tool-button.danger:hover:not(:disabled),
+.composer-footer-tools .comment-tool-button.danger:hover:not(:disabled) {
+  border: 0;
+  background: rgb(169 77 71 / 6%);
+  color: #a14d49;
+}
+
+.rail-comment-composer .add-comment-button:disabled {
+  border: 0;
+  background: transparent;
+  color: #a7a9b1;
+  opacity: 0.62;
+}
+
+.rail-comment-composer .add-comment-button:not(:disabled) {
+  color: var(--indigo);
 }
 
 .comment-tool-button.cancel-edit,
@@ -6260,8 +6302,8 @@ body {
 
 .comment-tool-button.cancel-edit:hover:not(:disabled),
 .comment-tool-button.confirm-edit:hover:not(:disabled) {
-  border-color: #d5d2f5;
-  background: #f4f3ff;
+  border-color: transparent;
+  background: rgb(90 85 223 / 6%);
   color: #514cda;
 }
 

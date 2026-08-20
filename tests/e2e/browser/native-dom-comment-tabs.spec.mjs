@@ -63,9 +63,49 @@ async function saveGlobalComment(page, text) {
   await expect(composer).toHaveCount(0);
 }
 
+async function expectQuietComposerActions(composer) {
+  const actionButtons = composer.locator(
+    ".comment-tool-button, .add-comment-button",
+  );
+  await expect(actionButtons).toHaveCount(5);
+  expect(await actionButtons.evaluateAll((buttons) => buttons.map((button) => {
+    const style = getComputedStyle(button);
+    return {
+      backgroundColor: style.backgroundColor,
+      borderTopWidth: style.borderTopWidth,
+      boxShadow: style.boxShadow,
+      height: style.height,
+      width: style.width,
+    };
+  }))).toEqual(Array.from({ length: 5 }, () => ({
+    backgroundColor: "rgba(0, 0, 0, 0)",
+    borderTopWidth: "0px",
+    boxShadow: "none",
+    height: "29px",
+    width: "29px",
+  })));
+  const footerButtons = composer.locator(
+    ".composer-actions > .composer-footer-tools > button, "
+    + ".composer-actions > .add-comment-button",
+  );
+  await expect(footerButtons).toHaveCount(4);
+  const centerGaps = await footerButtons.evaluateAll((buttons) => {
+    const centers = buttons.map((button) => {
+      const rect = button.getBoundingClientRect();
+      return rect.left + rect.width / 2;
+    });
+    return centers.slice(1).map((center, index) => center - centers[index]);
+  });
+  expect(Math.max(...centerGaps) - Math.min(...centerGaps)).toBeLessThanOrEqual(1);
+  const submitButton = composer.getByRole("button", { name: "评论", exact: true });
+  await expect(submitButton.locator("svg")).toHaveAttribute("width", "20");
+  expect(await submitButton.evaluate((button) => getComputedStyle(button).color))
+    .toBe("rgb(90, 85, 223)");
+}
+
 test("comment textareas focus immediately and use Enter to save with Shift+Enter for new lines", async ({
   page,
-}) => {
+}, testInfo) => {
   await page.setViewportSize({ width: 1600, height: 900 });
   await page.goto("/");
   const { frame } = await loadFixture(page, "tabbed-comments.html", {
@@ -83,6 +123,10 @@ test("comment textareas focus immediately and use Enter to save with Shift+Enter
   await textbox.press("Shift+Enter");
   await textbox.pressSequentially("第二行");
   await expect(textbox).toHaveValue("第一行\n第二行");
+  await expectQuietComposerActions(composer);
+  await page.screenshot({
+    path: testInfo.outputPath("comment-rail-local-composer-quiet-actions.png"),
+  });
   await textbox.press("Enter");
   await expect(composer).toHaveCount(0);
 
@@ -156,10 +200,11 @@ test("focused comments remain below the sticky rail header and global comments s
     name: "评论内容",
   });
   await expect(globalTextbox).toBeFocused();
-  await page.screenshot({
-    path: testInfo.outputPath("comment-rail-global-composer.png"),
-  });
   await globalTextbox.fill("整个页面优先处理");
+  await expectQuietComposerActions(globalComposer);
+  await page.screenshot({
+    path: testInfo.outputPath("comment-rail-global-composer-quiet-actions.png"),
+  });
   await globalTextbox.press("Enter");
 
   const cards = rail.locator(
@@ -803,6 +848,17 @@ test("dynamic comment-card controls remeasure the queue without overlap", async 
   ]);
   expect(cancelIcon).toBe("17");
   expect(confirmIcon).toBe("18");
+  expect(await first.locator(".comment-card-tools .comment-tool-button")
+    .evaluateAll((buttons) => buttons.map((button) => {
+      const style = getComputedStyle(button);
+      return {
+        backgroundColor: style.backgroundColor,
+        borderTopWidth: style.borderTopWidth,
+      };
+    }))).toEqual(Array.from({ length: 5 }, () => ({
+      backgroundColor: "rgba(0, 0, 0, 0)",
+      borderTopWidth: "0px",
+    })));
   await expect.poll(minimumGap).toBeGreaterThanOrEqual(16);
 
   await first.getByRole("button", { name: "取消编辑" }).click();

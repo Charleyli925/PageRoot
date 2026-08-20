@@ -7886,9 +7886,7 @@ export default function Workbench() {
                     title={attachmentUploadCount > 0 ? "附件添加完成后可关闭" : "收起并保留草稿"}
                     disabled={attachmentUploadCount > 0}
                     onClick={closeCommentComposer}
-                  >
-                    <XIcon aria-hidden="true" size={15} weight="bold" />
-                  </button>
+                  ><XIcon aria-hidden="true" size={17} weight="bold" /></button>
                 </header>
                 <label htmlFor="round-comment-draft">评论内容</label>
                 {!draftTargetCanSave ? (
@@ -8022,6 +8020,7 @@ export default function Workbench() {
                     <button
                       className="add-comment-button"
                       type="button"
+                      aria-label="评论" title="提交评论"
                       disabled={
                         !draftTargetCanSave
                         || (!draft.trim() && draftAttachments.length === 0)
@@ -8033,8 +8032,7 @@ export default function Workbench() {
                         void addComment();
                       }}
                     >
-                      <ChatCircleTextIcon aria-hidden="true" size={15} weight="bold" />
-                      评论
+                      <CheckCircleIcon aria-hidden="true" size={20} weight="fill" />
                     </button>
                   </footer>
                 )}
