@@ -358,7 +358,7 @@ async function openRecentProject(page, sourcePath, options) {
   const activeBefore = await page.evaluate(
     async () => (await window.htmlAIProjects?.getActiveProject())?.sourcePath || "",
   );
-  await page.getByRole("button", { name: "项目", exact: true }).click();
+  await page.getByRole("button", { name: "打开新的本地 HTML" }).click();
   await page.locator(".recent-file-row")
     .filter({ hasText: path.basename(sourcePath) })
     .click();
@@ -3620,6 +3620,7 @@ ${REVIEW_MASK_UNION_BEFORE}
       name: "打开新的本地 HTML",
       exact: true,
     }).click();
+    await launched.page.locator(".open-local-button").click();
     const pickerFrame = await loadedDiskFrame(
       launched.page,
       pickerSourcePath,

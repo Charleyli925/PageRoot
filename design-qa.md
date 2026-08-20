@@ -1502,3 +1502,371 @@ Date: 2026-08-18
 - [x] Selection emphasis remains one violet family.
 
 final result: passed
+
+## Open-HTML popover and the centered project console
+
+Date: 2026-08-19
+
+### What changed and why
+
+Two entry points were separated by presentation as well as content. The title-bar
+“+” used to fire the OS file picker directly; it now opens an **anchored popover**
+“打开 HTML” that drops directly under the button with their left edges aligned and
+**no dimmed backdrop** — a lightweight menu-like surface holding two blocks only:
+最近打开 (recent files, up to six, current file excluded, each removable) and
+打开本地 HTML. The “项目” button, which used to slide a top-right card in, now opens
+a **centered modal console** over a dimmed, blurred backdrop, sized larger
+(`min(680px, 100vw-48px)`) as the foundation for a future project-management
+console. The project console no longer carries 最近打开 or the 打开本地 HTML
+button, so the split reads cleanly: “项目” manages existing registered projects,
+“+” opens a new or recent file. Only the popover’s 打开本地 HTML button (or a recent
+row) reaches the system picker, which always starts at the managed project root
+and does not remember the last-used directory.
+
+### Design-language conformance
+
+- The centered console mirrors the already-accepted handoff console: same
+  centered geometry, translate/scale entrance and dimmed-blur overlay, reusing
+  the shared `.side-drawer` / `.drawer-overlay` machinery via `data-drawer`
+  scoping. The handoff drawer stays a right-anchored panel; only files/history
+  became centered. No new modal vocabulary was introduced.
+- The popover keeps the accepted card chrome (radius, one-shadow, hairline
+  border) but drops the backdrop dim/blur, because a menu anchored to its
+  trigger should not darken the page it hangs from.
+- The popover body reuses the existing `.recent-files`, `.recent-file-row`,
+  `.recent-file-remove` and `.open-local-button` classes verbatim; the recent
+  list and the open-local affordance stay pixel-identical to before.
+- Both surfaces use the shared `--indigo-soft` / `--indigo-deep` tokens and the
+  standard focus-ring color; no second emphasis color appears.
+
+### Behavior and accessibility
+
+- Popover: `role="dialog"` + `aria-label`, positioned fixed from the button rect
+  and clamped to the viewport, Escape-to-close, click-outside-to-close, focus
+  starts on 打开本地 HTML, Tab wraps, and closing returns focus to the “+” button,
+  which carries `aria-haspopup="dialog"` and `aria-expanded`.
+- Console: the existing overlay click and “关闭” button dismiss it; `inert` is
+  applied while closed.
+- The popover never stacks under the first-import confirmation: selecting a
+  recent item or 打开本地 HTML closes the popover before the open flow runs, and
+  the popover is suppressed whenever an external-open confirmation is present.
+
+### Checklist
+
+- [x] Two entry points differ in both content and presentation (项目 console vs “+” popover).
+- [x] Popover anchors under “+”, left edges aligned, no backdrop dim.
+- [x] Project console is centered over a dimmed, blurred backdrop and larger.
+- [x] Popover and import confirmation never appear stacked.
+- [x] System picker starts at 文稿 › PageRoot › 项目 and forgets last directory.
+
+final result: passed
+
+## First-import confirmation: folder name, emphasised 复制, borderless option
+
+Date: 2026-08-19
+
+### What changed and why
+
+- Source visual truth: a user screenshot of the shipped confirmation where the
+  clickable projects-root breadcrumb rendered as a two-line underlined path
+  (`var › folders › … › project-files`). The user's verdict—the link is ugly
+  and unreadable, and the body copy is too long—supersedes the four-paragraph
+  copy previously fixed in `docs/IMPORT_CONFIRMATION_PRD.md` §5.1.
+- The path no longer appears in the body. The sentence now names the projects
+  root **folder** (`PageRoot › 项目`, or just the folder when “parent › folder”
+  exceeds 28 characters, as in temporary E2E roots). The complete breadcrumb
+  survives in the `title` tooltip and in the button's accessible name, so no
+  fact is lost, only the visual noise.
+- 「（点击打开）」 became the only link-styled element in the dialog; the folder
+  name itself is plain ink text.
+- Three explanatory paragraphs (V1 identity, `-V2`/`-V3` creation, sibling
+  assets) were removed. Their product facts still hold and stay documented in
+  the PRD; the bolded “复制” in “复制本文件并保存为 …-V1.html” now carries the
+  one reassurance a user needs at this moment: the original is copied, never
+  rewritten.
+- The trash option lost its card border and background; its checkbox left edge
+  now sits on the same line as the sentence above it.
+
+### Design-language conformance
+
+- One emphasis family only: the checked-state amber tint (`#fff8f1`/`#ead7c4`)
+  was off-palette and is gone. Checked state is now the existing indigo box
+  with the white check, so the dialog carries no second accent color.
+- Focus moved from the whole option row onto the checkbox, which is the control
+  that actually receives focus; buttons keep the shared ring.
+- No new component vocabulary: the sentence reuses `.fileChip`, the option row
+  reuses the existing checkbox art, and the icon stays the Phosphor
+  `FileHtml` duotone.
+
+### Evidence
+
+- Real Electron dialog, captured from the first-open confirmation with a
+  synthetic `产品首页.html`: `output/design-qa/import-confirm-real-default.png`,
+  `-hover.png` (underline lands on 点击打开 only, parentheses untouched) and
+  `-checked.png`. Design draft for the decision: `import-confirm-plan-c.png`.
+- The Electron fixture assertion was retargeted to “复制本文件并保存为” and to the
+  `^点击打开 ` accessible name, so the folder-open affordance stays gated.
+- `npm run gate:edit` passed on the change (260 node tests, typecheck,
+  architecture check).
+
+### Known consequence
+
+- A full-width 。 after the lavender file chip still reads slightly detached
+  (chip padding plus the full-width period's own bearing). Pre-existing, judged
+  P3; the alternative is dropping the chip, which was drafted and not chosen.
+
+### Checklist
+
+- [x] No filesystem path in the dialog body; full path reachable via tooltip
+      and accessible name.
+- [x] 「（点击打开）」 is the single link-styled affordance and opens the
+      projects root.
+- [x] “复制” is the only bolded word in the sentence.
+- [x] Option checkbox aligns with the sentence's left edge, no border, no
+      second accent color when checked.
+- [x] Copy in `docs/IMPORT_CONFIRMATION_PRD.md` §5.1 and catalog entry B05
+      match the shipped strings.
+
+final result: passed
+
+## Project console refocused on the current project
+
+### What changed and why
+
+The 项目 panel had grown into a mixed drawer: a two-tab split (当前项目 /
+版本历史), a full "所有项目" registry list interleaving other projects with the
+current one, and a collapsed 项目资料 disclosure that buried PROJECT.md and
+exposed a raw "项目记录文件夹" entry into the internal `.pageroot` working
+directory. The user's verdict: the panel should be one quiet current-project
+workbench — surface this project's status, its rules and its version history;
+do not show other projects here; and stop sending users into a folder of
+internal JSON/JSONL they cannot read.
+
+- The two tabs are gone. The `Drawer` type dropped its `"history"` member; the
+  panel renders one vertical workbench for `drawer === "files"`.
+- The "所有项目" registry list was removed from the panel. Switching to another
+  project stays the job of the "+" popover (recent + open local HTML), giving a
+  clean split: "+" = open/switch, 项目 = manage the current project. The
+  `registeredProjects` state, its catalog event branches and the
+  `refreshRegisteredProjects` / `openRegisteredProject` callbacks were deleted
+  from the view; the controller wiring other surfaces use is untouched.
+- PROJECT.md was promoted out of the 项目资料 disclosure into a first-class
+  「项目规则」 card between the current-file card and version history.
+- The raw 项目记录文件夹 entry was removed. `runtime-state.json`,
+  `edit-audit.jsonl` and the transaction dirs stay on disk but are no longer a
+  product entry; per-round requirements, AI returns and historical files remain
+  reachable through version history (summaries, comments, direct edits,
+  attachments and per-version Finder reveal).
+- The header eyebrow/title changed from 源页工作区 / 项目与版本 to
+  当前项目 / {project name}, so the whole surface reads as "this project".
+- The current-file card's "在文件夹中打开" now always reveals the source HTML's
+  folder (`showProjectInFolder`) instead of the records root.
+
+### Design-language conformance
+
+- Progressive disclosure (2.7) applied the right way: the one thing a user
+  actually maintains — the project rules — is visible by default instead of
+  folded, while the truly internal records are removed rather than surfaced.
+- Honest copy (2.4): the internal transaction directory is no longer a
+  browsable product entry, matching "不把内部实现词暴露给用户".
+- Same-shape reuse (2.5): the rules card reuses the existing
+  `.project-resource-icon/copy/meta` vocabulary and the shared caret; version
+  history reuses `HistoryVersionItem` unchanged. Centered-modal positioning
+  (inset/translate + dimmed, blurred backdrop) is unchanged; the dead
+  `[data-drawer="history"]` selector was folded into `[data-drawer="files"]`.
+- One emphasis family (2.2): the rules card reuses the soft indigo-family tint
+  the earlier rule-card style already defined (`#faf9ff` / `#d5d0ef`); no new
+  accent, no new `:root` tokens. Radii 14–16px, 14px card gaps and the 9–15px
+  compact type scale are as-is.
+
+### Evidence
+
+- Real render from the Next dev server (welcome / browser-preview project),
+  window ~1440×960: `output/design-qa/project-panel-current.png` shows the
+  centered console over the dimmed, blurred backdrop with header 当前项目 /
+  欢迎来到源页.html, the current-file card, the standalone 项目规则 card, and the
+  版本历史 section with its empty state — and no 所有项目 list, no 项目记录文件夹
+  entry. Workbench context: `output/design-qa/project-panel-workbench.png`.
+- The PROJECT.md editor drill-in (管理 AI 修改规则, the textarea and 返回项目) is
+  disabled in browser-only preview; it stays covered by the Electron E2E
+  (`tests/e2e/electron/native-dom-electron.spec.mjs`), which now opens the
+  rules card directly (no 项目资料 disclosure) and no longer asserts the removed
+  项目记录文件夹 entry.
+- `npm run gate:edit` passed (260 node tests, typecheck, architecture check);
+  the workbench.tsx ratchet was tightened to 8851 lines / 313 hooks.
+- Contract synced in `docs/INTERACTION_FLOW.md` §2.
+
+### Checklist
+
+- [x] Single current-project workbench; no 当前项目/版本历史 tab split.
+- [x] No other-project list in the panel; switching projects stays on "+".
+- [x] 项目规则 (PROJECT.md) is a first-class visible card, not folded.
+- [x] 项目记录文件夹 entry removed; internal records no longer a product entry.
+- [x] Header reads 当前项目 / {project name}.
+- [x] No new tokens or component treatments; centered-modal behavior unchanged.
+
+final result: passed
+
+## Project console as a version-tree workbench
+
+### What changed and why
+
+The console the previous entry shipped was still a stack of boxes: a card for the
+current file, a card for the rules, and a card-in-card version list, with copy
+that explained itself twice (“安全保留每一次修改”, “在画布中查看不会覆盖…”)
+and statistics nobody asked for (个附件, 画布类型, 已定位). The user's brief:
+fewer frames, denser and more valuable information, and above all show how the
+project actually evolved — which version each version was modified from.
+
+- **One shell, three bands.** The panel now uses the same glass footprint and
+  header/body/footer rhythm as the AI handoff panel (`min(1040px, 100vw - 96px)`
+  × `min(760px, 100vh - 96px)`, radius 24, `blur(24) saturate(135%)` over a 74%
+  overlay). Cards were replaced by bands separated with one hairline.
+- **Version tree, master-detail.** The left column is a lane graph ordered oldest
+  first; the right column is the selected version. Sequential work runs straight
+  down its lane; branching off a version that is no longer a lane tip opens a new
+  lane and draws a right-angle elbow out of the parent, so connectors never
+  overlap the line they left. Lanes are never recycled, which is what keeps the
+  20-version / 4-lane case legible.
+- **Titles come from the user, not from `summary`.** Tracked the provenance:
+  `completion.v1` and `candidate.v4` have no summary field at all, so a version's
+  `summary` is system-authored (it degrades to “已采纳的 AI Candidate”), and every
+  managed file in a project shares one name. A version row is therefore titled by
+  the user's own first requirement (“目标：要求”, plus “等 N 条”), with
+  “原始导入” for V1 and “本地编辑 · N 处” when a version only carries local edits.
+- **Detail keeps a neutral heading.** The right pane is headed “版本 N” so the same
+  sentence never appears twice on one screen; the requirement lives under
+  “我留的评论”. Lineage reads “基于 版本 N · {that version's requirement}” and is
+  clickable. AI 对话补充 renders only when it exists; 本地编辑 is a
+  before→after line. Attachment counts, canvas type and target-resolution labels
+  are gone; candidate assessment speaks only when flagged attention/blocked.
+- **Rules edit in place.** The rules row is a disclosure inside the console
+  instead of a view that replaced the panel, so expanding it no longer hides the
+  version tree. Subtitle is “每次 AI Agent 修改本项目 HTML 都会读取”. Save state
+  is silent by default and only announces “项目规则已保存” (green dot) after a
+  real edit reaches disk.
+- **Actions read as actions.** 在文件夹中打开 / 导出副本 became bordered icon
+  buttons in the header; the single decision, 在画布中预览, sits bottom-right in
+  the footer. The duplicate version-level Finder entry was removed, so the panel
+  has exactly one folder affordance.
+
+### Design-language conformance
+
+- One emphasis family (2.2): the four lane depths are all indigo
+  (`--version-lane-0..3`); no second accent enters for branches. Green stays a
+  fact (saved), amber only for a flagged assessment.
+- Quiet by default (2.3): the header status line and the rules save state say
+  nothing until there is a fact to report.
+- Honest copy (2.4): removed the self-congratulating “安全保留每一次修改” and the
+  misplaced canvas caveat; kept the one caveat that matters (只读备份) on the
+  version itself.
+- Geometry stability (2.6): row height, lane width and elbow radius are shared
+  constants between the SVG rails and the rows, so hover never shifts a dot.
+
+### Evidence
+
+- Real Electron app, populated project: `output/design-qa/impl-10-console-populated.png`
+  (V1 selected, 最新版本/当前编辑基础 flags, lineage line, footer action) and
+  `output/design-qa/impl-11-console-rules-open.png` (rules expanded with the
+  version tree still in place below).
+- `tests/version-graph.test.mjs` (15 cases) pins the lane algorithm and the
+  title rule, including the 20-version history that forks at V3, V4 and V16 and
+  resolves to four lanes with three outward-only edges.
+- `npm run gate:edit` passed (283 node tests, typecheck, architecture check).
+  Three Electron E2E specs that own the rules flow pass against the rebuilt
+  renderer: `project resources drain edited rules before leaving`,
+  `PROJECT.md read failure never becomes editable data and recovers in place`,
+  and the live-composition undo spec.
+- Contract synced in `docs/INTERACTION_FLOW.md` §2.
+
+### Fixed during QA
+
+- `.drawer-header > div` is a grid, which stacked the two header buttons; the
+  actions row now forces `display: flex`.
+- `.project-file-editor` carried `min-height: 360px` from the era when it owned
+  the whole panel, pushing the tree off-screen; inside the disclosure it is
+  bounded to `190px`–`34vh`.
+
+### Second pass: real branching history (20 versions, 3 forks)
+
+The first pass only ever rendered a one-version project, so the tree — the whole
+point of the redesign — was unverified. Re-ran the console in the real Electron
+app against production-shaped `schemaVersion: "4.0.0"` rows carrying the
+documented lineage (fork at V3, V4 and V16). The graph itself was correct on the
+first try: four lanes, three outward elbows, no crossings, correct dots and
+selection. Three real defects surfaced, all now fixed:
+
+1. **The console had no height**, so it grew past the drawer body; any
+   `scrollIntoView` then shifted the entire panel and left the detail column
+   blank while the rules row scrolled out of sight. `.project-console` now fills
+   the body (`height: 100%`) and the drawer body stops being a scroller, so the
+   tree and the detail are the only two scrollers and the rules row stays put.
+   Evidence: `output/design-qa/verify-02-branch-detail.png`.
+2. **Every AI version was titled “AI 修改”**, and the lineage read
+   “基于 版本 16 · AI 修改”. Root cause is a data fact, not a copy choice: the v4
+   workspace payload sets `comments`, `directEdits` and `supplements` to empty
+   (`app/workbench/version-model.ts`), because a v4 manifest version entry only
+   carries `versionId/ordinal/basedOnVersionId/previousVersionId/contentSha256/`
+   `snapshotRelativePath/sourceRequestId/sourceCandidateId/createdAt`. A filler
+   label repeated on 19 rows is worse than none, so an unknown requirement now
+   yields no title, and the lineage line drops the meaningless suffix.
+3. **A branch head looked identical to a sequential version.** With no
+   requirement text there was nothing to distinguish them, so a version whose
+   `basedOnVersionId` is not its `previousVersionId` is now labelled
+   “从 V3 分出”. This is derived only from fields the payload really has, and it
+   makes the tree self-explanatory. Evidence:
+   `output/design-qa/verify-01-branching-tree.png`.
+
+The empty “我留的评论 · 这一版没有留评论” block was also removed: when a version
+carries no records at all the pane states that once, quietly, instead of
+rendering a section header with a zero count.
+
+### Third pass: the requirement is wired through
+
+The gap the second pass left — a tree of V-numbers and times, because the v4
+payload carries no per-version requirement — is now closed at the source. A
+version records its `sourceRequestId`, and that round's frozen
+`change-request.json` keeps `requirements.summary`, a string built by joining the
+user's own comment texts (`app/application/run-workflow.js#summary`). The bridge
+now reads it per version and returns it on the version row:
+
+- **Cached by round.** A promoted round is immutable, so a requirement read once
+  is reused for the life of the bridge process; repeated console reads cost no
+  I/O. Failures are deliberately not cached, so a round that is merely busy is
+  retried rather than hidden for the session.
+- **Bounded.** The text is condensed to one line and capped at 120 characters, so
+  the workspace payload grows by a few KB rather than ~100KB.
+- **Fail-soft, as agreed.** A retired or unreadable round yields no requirement
+  and the row falls back to its branch label; the workspace read never fails.
+- **Guarded.** Only a plain `req_…` id is ever joined into a path, so a version
+  entry can never walk out of its own project's request directory.
+
+Title precedence is now: the version's own first comment (legacy records) → the
+round's frozen requirement → `本地编辑 · N 处` → `从 V16 分出` → empty, with
+`原始导入` for V1. The detail pane shows the requirement under `本轮要求` when a
+version has no per-comment records, so the pane is no longer bare.
+
+Evidence: `output/design-qa/verify-10-requirements.png` (every row reads as the
+user's own words, forks still labelled) and
+`output/design-qa/verify-11-requirement-detail.png` (V19 selected: lineage reads
+“基于 版本 16 · 订阅表单：邮箱填错时的提示要友好一点” and 本轮要求 carries this
+round's text). `tests/version-requirement-bridge.test.mjs` drives real rounds
+end to end — adoption, condensing, truncation, cache reuse, and the unreadable
+round — against a live bridge.
+
+### Checklist
+
+- [x] No card-in-card: bands and hairlines only.
+- [x] Lineage visible for every version; branches never cross.
+- [x] Version titles derive from the user's requirement, never from `summary`.
+- [x] Rules edit in place; save state silent until a real save.
+- [x] Header actions look clickable; one folder entry; one footer decision.
+- [x] Same glass shell and footprint as the handoff panel.
+- [x] Tree, detail and rules verified against a 20-version, 3-fork history in
+      the real Electron app; the tree and the detail scroll independently.
+- [x] No filler labels: an unknown requirement shows nothing, a branch head
+      names its fork point.
+- [x] Each version is named by the user's own requirement, read from its round
+      and cached, with a fail-soft fallback for retired rounds.
+
+final result: passed

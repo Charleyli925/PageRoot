@@ -48,6 +48,17 @@ function versionLabel(ordinal: number | undefined) {
   return Number.isFinite(value) && value > 0 ? `版本 ${value}` : "当前版本";
 }
 
+// The full breadcrumb stays in the tooltip and accessible name; the sentence only
+// carries the folder itself, plus its parent while the pair stays short enough to read.
+function folderNameFromBreadcrumb(breadcrumb: string) {
+  const segments = breadcrumb.split("›").map((segment) => segment.trim()).filter(Boolean);
+  const folder = segments.at(-1) || breadcrumb.trim();
+  const parent = segments.at(-2);
+  if (!parent) return folder;
+  const pair = `${parent} › ${folder}`;
+  return pair.length <= 28 ? pair : folder;
+}
+
 export default function ExternalHtmlOpenDialog({
   confirmation,
   deleteOriginal,
@@ -64,6 +75,7 @@ export default function ExternalHtmlOpenDialog({
   const isNewExternal = confirmation.classification === "new-external";
   const sourceFileName = confirmation.sourceFileName || "这个 HTML";
   const projectsRootLabel = confirmation.projectsRootLabel || "文稿 › PageRoot › 项目";
+  const projectsRootFolderName = folderNameFromBreadcrumb(projectsRootLabel);
   const visibleV1FileName = confirmation.visibleV1FileName || "项目内的 V1 文件";
   const projectName = confirmation.projectName || sourceFileName.replace(/\.html?$/iu, "");
   const basedOn = versionLabel(confirmation.currentBasedOnOrdinal);
@@ -189,26 +201,25 @@ export default function ExternalHtmlOpenDialog({
             <div className={styles.body} id={descriptionId}>
               <p>
                 会在「
+                <span className={styles.folderName} title={projectsRootLabel}>
+                  {projectsRootFolderName}
+                </span>
+                」
                 <button
-                  className={styles.folderLink}
+                  className={styles.openFolder}
                   type="button"
                   disabled={busy}
-                  aria-label={`打开 ${projectsRootLabel}`}
+                  aria-label={`点击打开 ${projectsRootLabel}`}
                   title={`打开 ${projectsRootLabel}`}
                   onClick={openProjectsRoot}
                 >
-                  {projectsRootLabel}
+                  （<span>点击打开</span>）
                 </button>
-                」里创建新项目，复制并保存为
+                里新建项目，<strong>复制</strong>本文件并保存为
                 {" "}
                 <span className={styles.fileChip}>{visibleV1FileName}</span>
                 。
               </p>
-              <p>
-                初始版本 V1 与你这次选择的文件完全一致。之后的修改会自动保存在项目内文件，不会回写这份原文件。
-              </p>
-              <p>后续只有在你采纳 AI 修改后，才会创建 -V2、-V3。</p>
-              <p className={styles.note}>同目录的图片等资源不会一起导入。</p>
               {folderOpenError ? (
                 <p className={styles.folderError} role="alert">{folderOpenError}</p>
               ) : null}

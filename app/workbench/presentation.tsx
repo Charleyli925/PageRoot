@@ -7,20 +7,24 @@ import {
 } from "react";
 import { ArrowCounterClockwiseIcon } from "@phosphor-icons/react/dist/csr/ArrowCounterClockwise";
 import { CaretRightIcon } from "@phosphor-icons/react/dist/csr/CaretRight";
-import { EyeIcon } from "@phosphor-icons/react/dist/csr/Eye";
+import { ChatCircleIcon } from "@phosphor-icons/react/dist/csr/ChatCircle";
 import { FileIcon } from "@phosphor-icons/react/dist/csr/File";
+import { GitBranchIcon } from "@phosphor-icons/react/dist/csr/GitBranch";
+import { PencilSimpleIcon } from "@phosphor-icons/react/dist/csr/PencilSimple";
+import { SparkleIcon } from "@phosphor-icons/react/dist/csr/Sparkle";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 import {
   formatFileSize,
   insertionLabel,
-  targetResolutionLabel,
 } from "./comment-model";
-import { formatTime, safeVersionLabel } from "./project-model";
+import { formatTime } from "./project-model";
 import {
   changeKindLabel,
   historyRecordValue,
   summarizeChangeEvents,
+  versionTitle,
 } from "./version-model";
+import { versionGraphLayout } from "./version-graph";
 import type { CommentAttachment, Version } from "./types";
 
 const PREVIEW_NAVIGATION_AUTO_COLLAPSE_MS = 3_500;
@@ -233,284 +237,319 @@ export function CommentAttachmentStrip({
   );
 }
 
-export function HistoryVersionItem({
+// Geometry shared by the lane rails and the rows they sit behind. The row height
+// must match `.version-tree-row` in globals.css or the rails drift off the dots.
+const VERSION_TREE_ROW_HEIGHT = 38;
+const VERSION_TREE_LANE_WIDTH = 17;
+const VERSION_TREE_EDGE_PADDING = 12;
+const VERSION_TREE_ELBOW_RADIUS = 6;
+const VERSION_TREE_LANE_COUNT = 4;
+
+function laneStroke(lane: number): string {
+  // One indigo family, four depths: branches stay distinguishable without
+  // introducing a second accent colour.
+  return `var(--version-lane-${lane % VERSION_TREE_LANE_COUNT})`;
+}
+
+function laneCenter(lane: number): number {
+  return VERSION_TREE_EDGE_PADDING + lane * VERSION_TREE_LANE_WIDTH;
+}
+
+function rowCenter(row: number): number {
+  return row * VERSION_TREE_ROW_HEIGHT + VERSION_TREE_ROW_HEIGHT / 2;
+}
+
+export function VersionTreeList({
+  versions,
+  selectedVersionId,
+  editingBaseVersionId,
+  onSelect,
+}: {
+  versions: readonly Version[];
+  selectedVersionId: string | null;
+  editingBaseVersionId: string | null;
+  onSelect: (versionId: string) => void;
+}) {
+  const layout = versionGraphLayout(versions);
+  const byId = new Map(versions.map((version) => [version.id, version]));
+  const railWidth = VERSION_TREE_EDGE_PADDING * 2
+    + Math.max(0, layout.laneCount - 1) * VERSION_TREE_LANE_WIDTH;
+  const railHeight = layout.rows.length * VERSION_TREE_ROW_HEIGHT;
+
+  return (
+    <div className="version-tree">
+      <svg
+        className="version-tree-rail"
+        width={railWidth}
+        height={railHeight}
+        aria-hidden="true"
+      >
+        {layout.segments.map((segment) => (
+          <path
+            key={`s${segment.lane}-${segment.fromRow}`}
+            d={`M${laneCenter(segment.lane)} ${rowCenter(segment.fromRow)}V${rowCenter(segment.toRow)}`}
+            stroke={laneStroke(segment.lane)}
+          />
+        ))}
+        {layout.edges.map((edge) => {
+          const from = laneCenter(edge.fromLane);
+          const to = laneCenter(edge.toLane);
+          const top = rowCenter(edge.fromRow);
+          // Turn out of the parent lane immediately, then run straight down the
+          // new lane: forks stay clear of the line they branched from.
+          return (
+            <path
+              key={`e${edge.fromVersionId}-${edge.toVersionId}`}
+              d={`M${from} ${top}H${to - VERSION_TREE_ELBOW_RADIUS}`
+                + `Q${to} ${top} ${to} ${top + VERSION_TREE_ELBOW_RADIUS}`
+                + `V${rowCenter(edge.toRow)}`}
+              stroke={laneStroke(edge.toLane)}
+            />
+          );
+        })}
+        {layout.rows.map((row) => (
+          <circle
+            key={`n${row.versionId}`}
+            className="version-tree-node"
+            data-current={row.versionId === editingBaseVersionId ? "true" : undefined}
+            cx={laneCenter(row.lane)}
+            cy={rowCenter(row.row)}
+            r={row.versionId === editingBaseVersionId ? 5 : 4.4}
+            fill={row.versionId === editingBaseVersionId
+              ? laneStroke(row.lane)
+              : undefined}
+            stroke={laneStroke(row.lane)}
+          />
+        ))}
+      </svg>
+      <div className="version-tree-rows">
+        {layout.rows.map((row) => {
+          const version = byId.get(row.versionId);
+          if (!version) return null;
+          const title = versionTitle(version, versions);
+          const editingBase = version.id === editingBaseVersionId;
+          return (
+            <button
+              className="version-tree-row"
+              type="button"
+              key={version.id}
+              aria-current={version.id === selectedVersionId ? "true" : undefined}
+              data-selected={version.id === selectedVersionId ? "true" : undefined}
+              style={{ paddingLeft: `${railWidth + 6}px` }}
+              onClick={() => onSelect(version.id)}
+            >
+              <span className="version-tree-ordinal">V{version.ordinal}</span>
+              <span className="version-tree-title" title={title}>{title}</span>
+              {editingBase ? (
+                <span className="version-tree-flag">当前</span>
+              ) : (
+                <time dateTime={version.generatedAt}>
+                  {formatTime(version.generatedAt)}
+                </time>
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+export function VersionDetail({
   version,
-  expanded,
-  current,
+  parent,
+  latest,
   editingBase,
   viewing,
-  viewDisabled,
   attachmentObjectUrls,
-  onToggle,
-  onView,
-  onReveal,
+  onSelectParent,
   onEnsureAttachmentPreview,
   onPreviewAttachment,
   onDownloadAttachment,
 }: {
   version: Version;
-  expanded: boolean;
-  current: boolean;
+  parent: Version | null;
+  latest: boolean;
   editingBase: boolean;
   viewing: boolean;
-  viewDisabled: boolean;
   attachmentObjectUrls: Record<string, string>;
-  onToggle: () => void;
-  onView: () => void;
-  onReveal?: () => void;
+  onSelectParent?: (versionId: string) => void;
   onEnsureAttachmentPreview: (
     attachment: CommentAttachment,
   ) => Promise<string>;
   onPreviewAttachment: (attachment: CommentAttachment) => void;
   onDownloadAttachment: (attachment: CommentAttachment) => void;
 }) {
-  const attachmentCount = version.comments.reduce(
-    (count, comment) => count + (comment.attachments?.length ?? 0),
-    0,
-  );
   const summarizedEdits = summarizeChangeEvents(version.directEdits);
-  const lineageFacts = [
-    version.basedOnVersionId && version.basedOnVersionId !== version.id
-      ? `基于 ${safeVersionLabel(version.basedOnVersionId)}`
-      : null,
-    version.previousVersionId
-      ? `前一正式版本 ${safeVersionLabel(version.previousVersionId)}`
-      : null,
-    current ? "最新正式版本" : null,
+  const flags = [
+    latest ? "最新版本" : null,
     editingBase ? "当前编辑基础" : null,
+    viewing ? "正在浏览" : null,
     version.differsFromBase ? "有本地修改" : null,
-    viewing ? "当前只读浏览" : null,
     version.saveState === "saving"
       ? "本地保存中"
       : version.saveState === "failed"
         ? "本地保存失败"
         : null,
   ].filter((value): value is string => Boolean(value));
+  // Only an unresolved assessment is worth a line here; a clean check is the
+  // expected case and stays silent.
+  const assessmentNotice = version.candidateAssessment?.status === "blocked"
+    ? "这份历史候选由早期开发测试版生成，没有通过现行安全检查。版本文件仍保留，当前 HTML 的编辑不受影响。"
+    : version.candidateAssessment?.status === "attention"
+      ? "HTML 可以打开，但与上一版的共同特征较少，当时已标记为需审阅。"
+      : null;
+
+  const parentTitle = parent ? versionTitle(parent) : "";
+  const hasRecords = version.comments.length > 0
+    || version.supplements.length > 0
+    || summarizedEdits.length > 0;
+  // Current projects keep the round's comments in the request rather than on the
+  // version, so the frozen requirement is what stands in for them here.
+  const showRequirement = Boolean(version.requirement)
+    && version.comments.length === 0;
 
   return (
-    <article
-      className="history-item version-entry"
-      data-current={current ? "true" : undefined}
+    <section
+      className="version-detail"
+      aria-label={`版本 ${version.ordinal} 详情`}
     >
-      <button
-        className="version-row"
-        type="button"
-        aria-expanded={expanded}
-        onClick={onToggle}
-      >
-        <span className="version-index">V{version.ordinal}</span>
-        <span>
-          <strong>{version.label}</strong>
-          <small>
-            {version.ordinal === 1
-              ? "原始导入"
-              : `${version.comments.length} 条评论 · 已安全保留`}
-          </small>
-          {lineageFacts.length > 0 ? (
-            <span className="version-lineage-facts">
-              {lineageFacts.map((fact) => <em key={fact}>{fact}</em>)}
-            </span>
-          ) : null}
+      <header className="version-detail-head">
+        <span className="version-detail-badge">V{version.ordinal}</span>
+        <span className="version-detail-identity">
+          <span className="version-detail-heading">
+            <strong>版本 {version.ordinal}</strong>
+            {flags.map((flag) => (
+              <em className="version-detail-flag" key={flag}>{flag}</em>
+            ))}
+          </span>
+          <small>{formatTime(version.generatedAt, true)} · 只读备份</small>
         </span>
-        <time dateTime={version.generatedAt}>
-          {formatTime(version.generatedAt)}
-        </time>
-        <CaretRightIcon aria-hidden="true" size={14} weight="bold" />
-      </button>
-      {expanded ? (
-        <section
-          className="version-inline-detail"
-          aria-label={`${version.label} 详情`}
-        >
+      </header>
+      <div className="version-detail-lineage">
+        <GitBranchIcon aria-hidden="true" size={15} weight="bold" />
+        <span>
+          {parent
+            ? <>基于 <strong>版本 {parent.ordinal}</strong>{parentTitle ? ` · ${parentTitle}` : ""}</>
+            : <>从源文件导入，是这个项目的起点</>}
+        </span>
+        {parent && onSelectParent ? (
+          <button type="button" onClick={() => onSelectParent(parent.id)}>
+            查看
+            <CaretRightIcon aria-hidden="true" size={12} weight="bold" />
+          </button>
+        ) : null}
+      </div>
+      {assessmentNotice ? (
+        <p className="version-detail-notice" role="status">{assessmentNotice}</p>
+      ) : null}
+      {showRequirement ? (
+        <section className="version-detail-group">
           <header>
-            <span>{viewing ? "当前浏览" : "只读备份"}</span>
-            <small>{formatTime(version.generatedAt, true)} 保存</small>
+            <ChatCircleIcon aria-hidden="true" size={15} weight="bold" />
+            <strong>本轮要求</strong>
           </header>
-          <div className="version-summary-facts">
-            <div><strong>{version.comments.length}</strong><span>条评论</span></div>
-            <div><strong>{attachmentCount}</strong><span>个附件</span></div>
-            <div><strong>网页</strong><span>画布类型</span></div>
-          </div>
-          {lineageFacts.length > 0 ? (
-            <div className="version-lineage-detail" aria-label="版本关系与状态">
-              {lineageFacts.map((fact) => <span key={fact}>{fact}</span>)}
-            </div>
-          ) : null}
-          <div className="version-change-summary">
-            <strong>这个版本包含</strong>
-            <ul>
-              <li>{version.summary || "完整 HTML 内容与页面结构"}</li>
-              <li>评论、图片与附件的完整保留</li>
-              <li>
-                {version.candidateAssessment?.status === "blocked"
-                  ? "旧版候选按当前安全规则复核后需要注意"
-                  : version.candidateAssessment?.status === "attention"
-                  ? "HTML 可以打开，版本连续性已标记为需审阅"
-                  : version.candidateAssessment
-                    ? "HTML 可用性与版本连续性已检查"
-                    : version.validationReview
-                      ? "旧版范围校验记录已归档"
-                      : "版本与文件完整性已校验"}
-              </li>
-            </ul>
-          </div>
-          {version.comments.length > 0
-            || version.directEdits.length > 0
-            || version.supplements.length > 0
-            || version.candidateAssessment
-            || version.validationReview ? (
-            <details className="history-records">
-              <summary>查看本版修改来源与校验</summary>
-              <section className="history-source-group">
-                <header>
-                  <strong>源页原始评论</strong>
-                  <span>{version.comments.length}</span>
-                </header>
-                {version.comments.map((comment) => (
-                  <article className="history-record" key={comment.commentId}>
-                    <div>
-                      <strong>{insertionLabel(comment.target)}</strong>
-                      <span
-                        className="target-resolution"
-                        data-resolution={comment.target.resolution}
-                      >
-                        {targetResolutionLabel(comment.target.resolution)}
-                      </span>
-                      <time dateTime={comment.updatedAt || comment.createdAt}>
-                        {formatTime(
-                          comment.updatedAt || comment.createdAt,
-                          true,
-                        )}
-                      </time>
-                    </div>
-                    {comment.text ? <p>{comment.text}</p> : null}
-                    <CommentAttachmentStrip
-                      attachments={comment.attachments}
-                      objectUrls={attachmentObjectUrls}
-                      onEnsurePreview={onEnsureAttachmentPreview}
-                      onPreview={onPreviewAttachment}
-                      onDownload={onDownloadAttachment}
-                    />
-                  </article>
-                ))}
-                {version.comments.length === 0
-                  ? <small>本版没有源页评论。</small>
-                  : null}
-              </section>
-              <section className="history-source-group">
-                <header>
-                  <strong>内部 AI 对话补充</strong>
-                  <span>{version.supplements.length}</span>
-                </header>
-                {version.supplements.map((supplement) => (
-                  <article className="history-record" key={supplement.recordId}>
-                    <div>
-                      <strong>
-                        {supplement.action === "add"
-                          ? "新增要求"
-                          : supplement.action === "amend"
-                            ? "补充修改"
-                            : "撤回要求"}
-                      </strong>
-                      <time dateTime={supplement.createdAt}>
-                        {formatTime(supplement.createdAt, true)}
-                      </time>
-                    </div>
-                    <p>{supplement.text}</p>
-                    {supplement.attachments.length > 0 ? (
-                      <small>
-                        已归档原件：
-                        {supplement.attachments
-                          .map((item) => item.fileName)
-                          .join("、")}
-                      </small>
-                    ) : supplement.evidenceState === "description-only" ? (
-                      <small>
-                        原件未归档 · {supplement.evidenceDescription}
-                      </small>
-                    ) : null}
-                  </article>
-                ))}
-                {version.supplements.length === 0
-                  ? <small>本版没有内部 AI 对话补充。</small>
-                  : null}
-              </section>
-              <section className="history-source-group">
-                <header>
-                  <strong>本地编辑</strong>
-                  <span>{summarizedEdits.length}</span>
-                </header>
-                {summarizedEdits.map((event) => (
-                  <article
-                    className="history-record history-change-record"
-                    key={event.eventId}
-                  >
-                    <div>
-                      <strong>
-                        {changeKindLabel(event)} · {insertionLabel(event.target)}
-                      </strong>
-                      <time dateTime={event.createdAt}>
-                        {formatTime(event.createdAt, true)}
-                      </time>
-                    </div>
-                    <div className="history-change-values">
-                      <span>
-                        <small>修改前</small>
-                        <del>{historyRecordValue(event, event.before)}</del>
-                      </span>
-                      <CaretRightIcon
-                        aria-hidden="true"
-                        size={14}
-                        weight="bold"
-                      />
-                      <span>
-                        <small>修改后</small>
-                        <ins>{historyRecordValue(event, event.after)}</ins>
-                      </span>
-                    </div>
-                  </article>
-                ))}
-                {version.directEdits.length === 0
-                  ? <small>本版没有本地编辑。</small>
-                  : null}
-              </section>
-              <section className="history-source-group">
-                <header>
-                  <strong>AI 结果与校验</strong>
-                  <span>已归档</span>
-                </header>
-                <p>
-                  {version.candidateAssessment?.status === "blocked"
-                    ? "这份历史候选由早期开发测试版生成；当前复核发现它没有通过现行安全检查。版本文件仍会保留，当前 HTML 的编辑不受影响。"
-                    : version.candidateAssessment?.status === "attention"
-                    ? "候选 HTML 可以打开，但系统找到的上一版共同特征较少；审阅提醒已随版本归档。"
-                    : version.candidateAssessment
-                      ? "HTML 可用性、可执行内容和上一版连续性已经检查并保存。"
-                      : version.validationReview
-                        ? "这是旧版本保留的范围校验记录。"
-                        : "版本与文件内容已经校验并保存。"}
-                </p>
-              </section>
-            </details>
-          ) : null}
-          <div className="version-detail-actions">
-            <button
-              className="view-version-button"
-              type="button"
-              disabled={viewDisabled}
-              onClick={onView}
-            >
-              <EyeIcon aria-hidden="true" size={15} weight="bold" />
-              在画布中查看
-            </button>
-            {onReveal ? (
-              <button type="button" onClick={onReveal}>
-                在文件夹中打开
-              </button>
-            ) : null}
+          <div className="version-detail-records">
+            <article className="version-detail-comment">
+              <p>{version.requirement}</p>
+            </article>
           </div>
         </section>
       ) : null}
-    </article>
+      {version.comments.length > 0 ? (
+        <section className="version-detail-group">
+          <header>
+            <ChatCircleIcon aria-hidden="true" size={15} weight="bold" />
+            <strong>我留的评论</strong>
+            <span className="version-detail-count">
+              {version.comments.length}
+            </span>
+          </header>
+          <div className="version-detail-records">
+            {version.comments.map((comment) => (
+              <article className="version-detail-comment" key={comment.commentId}>
+                <strong>{insertionLabel(comment.target)}</strong>
+                {comment.text ? <p>{comment.text}</p> : null}
+                <CommentAttachmentStrip
+                  attachments={comment.attachments}
+                  objectUrls={attachmentObjectUrls}
+                  onEnsurePreview={onEnsureAttachmentPreview}
+                  onPreview={onPreviewAttachment}
+                  onDownload={onDownloadAttachment}
+                />
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : null}
+      {version.supplements.length > 0 ? (
+        <section className="version-detail-group">
+          <header>
+            <SparkleIcon aria-hidden="true" size={15} weight="bold" />
+            <strong>AI 对话补充</strong>
+            <span className="version-detail-count">
+              {version.supplements.length}
+            </span>
+          </header>
+          <div className="version-detail-records">
+            {version.supplements.map((supplement) => (
+              <article
+                className="version-detail-comment"
+                key={supplement.recordId}
+              >
+                <strong>
+                  {supplement.action === "add"
+                    ? "新增要求"
+                    : supplement.action === "amend"
+                      ? "补充修改"
+                      : "撤回要求"}
+                </strong>
+                <p>{supplement.text}</p>
+                {supplement.attachments.length > 0 ? (
+                  <small>
+                    已归档原件：
+                    {supplement.attachments
+                      .map((item) => item.fileName)
+                      .join("、")}
+                  </small>
+                ) : supplement.evidenceState === "description-only" ? (
+                  <small>
+                    原件未归档 · {supplement.evidenceDescription}
+                  </small>
+                ) : null}
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : null}
+      {summarizedEdits.length > 0 ? (
+        <section className="version-detail-group">
+          <header>
+            <PencilSimpleIcon aria-hidden="true" size={15} weight="bold" />
+            <strong>本地编辑</strong>
+            <span className="version-detail-count">
+              {summarizedEdits.length}
+            </span>
+          </header>
+          <div className="version-detail-records">
+            {summarizedEdits.map((event) => (
+              <div className="version-detail-edit" key={event.eventId}>
+                <del>{historyRecordValue(event, event.before)}</del>
+                <CaretRightIcon aria-hidden="true" size={13} weight="bold" />
+                <ins>{historyRecordValue(event, event.after)}</ins>
+                <small>{changeKindLabel(event)}</small>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
+      {hasRecords || showRequirement ? null : (
+        <p className="version-detail-empty">
+          {version.source === "初始页面"
+            ? "这是项目的起点版本。"
+            : "这一版没有随版本保留的评论与修改记录。"}
+        </p>
+      )}
+    </section>
   );
 }
