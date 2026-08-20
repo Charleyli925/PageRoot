@@ -945,6 +945,18 @@ function waitForFirstOffscreenPaint(webContents) {
   });
 }
 
+// The first paint precedes asynchronous chart rendering (library load,
+// initialization and the roughly one-second entrance animation), so an
+// immediate capture would sample a blank or half-drawn host. The settle wait
+// stays subordinate to the owner deadline via withOwnerDeadline.
+function waitForCaptureSettle(settleMs) {
+  const duration = Math.max(0, Math.round(Number(settleMs)) || 0);
+  if (!duration) return Promise.resolve();
+  return new Promise((resolve) => {
+    setTimeout(resolve, duration);
+  });
+}
+
 async function settleOwnerCleanup(cleanup) {
   let timeoutId = null;
   const completed = Promise.resolve().then(cleanup).catch(() => undefined);
@@ -970,6 +982,7 @@ export function createRuntimeSnapshotCaptureController({
   createIsolatedSession,
   releaseIsolatedSession = async () => {},
   ownerDeadlineMs = RUNTIME_VISUAL_CONTRACT.ownerDeadlineMs,
+  captureSettleMs = RUNTIME_VISUAL_CONTRACT.captureSettleMs,
   randomToken = () => randomBytes(12).toString("hex"),
 } = {}) {
   if (typeof BrowserWindowClass !== "function") {
@@ -987,6 +1000,10 @@ export function createRuntimeSnapshotCaptureController({
   const deadlineMs = Math.max(1, Math.min(
     RUNTIME_VISUAL_CONTRACT.ownerDeadlineMs,
     Math.round(Number(ownerDeadlineMs)) || RUNTIME_VISUAL_CONTRACT.ownerDeadlineMs,
+  ));
+  const settleMs = Math.max(0, Math.min(
+    RUNTIME_VISUAL_CONTRACT.captureSettleMs,
+    Math.round(Number(captureSettleMs)) || 0,
   ));
   const activeCaptures = new Map();
 
@@ -1094,6 +1111,7 @@ export function createRuntimeSnapshotCaptureController({
       const firstPaint = waitForFirstOffscreenPaint(captureWindow.webContents);
       await withOwnerDeadline(captureWindow.loadURL(previewSession.url));
       await withOwnerDeadline(firstPaint);
+      await withOwnerDeadline(waitForCaptureSettle(settleMs));
       if (cancellationReason || captureWindow.isDestroyed()) throw new CaptureCancelledError();
 
       let capturedPixels = 0;

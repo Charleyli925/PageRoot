@@ -41,7 +41,10 @@ import type {
   ReviewRuntimeVisualCandidate,
 } from "../lib/review-runtime-visual.js";
 import { REVIEW_RUNTIME_VISUAL_CANDIDATE_LIMIT } from "../lib/review-runtime-visual.js";
-import { resolveRuntimeSnapshotHosts } from "../domain/runtime-snapshot-hosts.js";
+import {
+  RUNTIME_SNAPSHOT_HOST_ENUMERATION_LIMIT,
+  resolveRuntimeSnapshotHosts,
+} from "../domain/runtime-snapshot-hosts.js";
 import {
   aggregateReviewBadgeLabels,
   reviewBadgeFactCount,
@@ -77,12 +80,16 @@ export type ReviewSide = "before" | "after";
 // them so its legend dots stay identical to the marks drawn on the pages.
 export const REVIEW_STRUCTURE_TONE_COLOR = "#1677c8";
 export const REVIEW_STYLE_TONE_COLOR = "#6d5ce7";
+// Amber marks a runtime host the pipeline could not verify: the region keeps
+// full visibility and gets a dashed "疑似有改动" frame instead of a claim.
+export const REVIEW_SUSPECTED_TONE_COLOR = "#d97706";
 
 export type ReviewChange = {
   id: string;
   label: string;
   helper: string;
   types: ReviewChangeType[];
+  suspected?: boolean;
   beforePresent: boolean;
   afterPresent: boolean;
   panelKey?: string;
@@ -344,6 +351,15 @@ ${REVIEW_TEXT_EVIDENCE_MARKER_CSS}
     border-color: ${REVIEW_STYLE_TONE_COLOR} !important;
   }
 
+  [data-pageroot-review-overlay-box][data-tone="suspected"] {
+    border-color: ${REVIEW_SUSPECTED_TONE_COLOR} !important;
+  }
+
+  [data-pageroot-review-overlay-box][data-tone="suspected"] [data-pageroot-review-overlay-label] {
+    border-color: rgb(217 119 6 / 32%) !important;
+    color: #b45309 !important;
+  }
+
   [data-pageroot-review-overlay-box][data-shaped="true"] {
     border: 0 !important;
   }
@@ -389,6 +405,10 @@ ${REVIEW_TEXT_EVIDENCE_MARKER_CSS}
   [data-pageroot-review-overlay-box][data-tone="style"] [data-pageroot-review-overlay-shape],
   [data-pageroot-review-overlay-box][data-tone="mixed"] [data-pageroot-review-overlay-shape] {
     stroke: ${REVIEW_STYLE_TONE_COLOR} !important;
+  }
+
+  [data-pageroot-review-overlay-box][data-tone="suspected"] [data-pageroot-review-overlay-shape] {
+    stroke: ${REVIEW_SUSPECTED_TONE_COLOR} !important;
   }
 
   [data-pageroot-review-overlay-label] {
@@ -1350,6 +1370,7 @@ function annotateRuntimeVisualCandidates({
   beforeSourceElements,
   afterSourceElements,
   outline,
+  commentAnchors = [],
 }: {
   beforeHtml: string;
   afterHtml: string;
@@ -1358,6 +1379,7 @@ function annotateRuntimeVisualCandidates({
   beforeSourceElements: ReadonlyMap<string, Element>;
   afterSourceElements: ReadonlyMap<string, Element>;
   outline: readonly ReviewOutlineItem[];
+  commentAnchors?: readonly Element[];
 }): ReviewRuntimeVisualAnnotations {
   const captureCandidates: Record<ReviewSide, RuntimeSnapshotCaptureCandidate[]> = {
     before: [],
@@ -1372,10 +1394,22 @@ function annotateRuntimeVisualCandidates({
     afterHtml,
     beforeIndex,
     afterIndex,
+    maximum: RUNTIME_SNAPSHOT_HOST_ENUMERATION_LIMIT,
   });
   if (!resolved) return { candidates: [], captureCandidates, bindings };
   const outlineById = new Map(outline.map((item) => [item.id, item]));
-  const candidates: ReviewRuntimeVisualCandidate[] = [];
+  const hostIsCommented = (hostElement: Element) => commentAnchors.some((anchor) => (
+    anchor.contains(hostElement) || hostElement.contains(anchor)
+  ));
+  type RuntimeHostSelection = {
+    before: (typeof resolved.hosts)[number]["before"];
+    after: (typeof resolved.hosts)[number]["after"];
+    beforeElement: Element;
+    afterElement: Element;
+    outlineItem: ReviewOutlineItem;
+    commented: boolean;
+  };
+  const selections: RuntimeHostSelection[] = [];
   resolved.hosts.forEach(({ before, after }) => {
     const beforeElement = beforeSourceElements.get(before.sourceNodeId);
     const afterElement = afterSourceElements.get(after.sourceNodeId);
@@ -1386,6 +1420,25 @@ function annotateRuntimeVisualCandidates({
     const outlineItem = outlineById.get(beforeOutlineId);
     if (!outlineItem) return;
     if (exactHostHasEquivalentBoxStyleFact(beforeElement, afterElement)) return;
+    selections.push({
+      before,
+      after,
+      beforeElement,
+      afterElement,
+      outlineItem,
+      commented: hostIsCommented(beforeElement),
+    });
+  });
+  // Comment-anchored hosts are the regions the user explicitly cares about,
+  // so they claim the bounded capture budget (and the owner-side pixel/byte
+  // budgets, which drain in request order) before uncommented hosts. The sort
+  // is stable: source order is preserved within each priority group.
+  const prioritized = [
+    ...selections.filter((selection) => selection.commented),
+    ...selections.filter((selection) => !selection.commented),
+  ].slice(0, REVIEW_RUNTIME_VISUAL_CANDIDATE_LIMIT);
+  const candidates: ReviewRuntimeVisualCandidate[] = [];
+  prioritized.forEach(({ before, after, beforeElement, afterElement, outlineItem, commented }) => {
     const key = `runtime-host-${candidates.length + 1}`;
     const changeId = outlineItem.changeId || `runtime-change-${outlineItem.id}`;
     const beforeCaptureCandidate = runtimeSnapshotCaptureCandidate(key, before);
@@ -1411,6 +1464,7 @@ function annotateRuntimeVisualCandidates({
         before: before.hostTargetRef,
         after: after.hostTargetRef,
       },
+      ...(commented ? { commented: true } : {}),
       ...(outlineItem.panelKey ? { panelKey: outlineItem.panelKey } : {}),
       ...(outlineItem.panelPath?.length ? { panelPath: [...outlineItem.panelPath] } : {}),
     });
@@ -3812,6 +3866,7 @@ function reviewBootstrap(
         ? marker.candidateKey
         : "";
       const rawChangeId = typeof marker?.changeId === "string" ? marker.changeId : "";
+      const rawVerdict = typeof marker?.verdict === "string" ? marker.verdict : "";
       const candidateKey = safeRuntimeProjectionCandidateKey(rawCandidateKey);
       const changeId = safeKey(rawChangeId);
       if (
@@ -3819,6 +3874,7 @@ function reviewBootstrap(
         || rawCandidateKey !== candidateKey
         || !changeId
         || rawChangeId !== changeId
+        || (rawVerdict !== "changed" && rawVerdict !== "suspected")
         || runtimeVisualSetHas(seenCandidateKeys, candidateKey)
         || !runtimeVisualMapHas(runtimeBindingByCandidateKey, candidateKey)
       ) {
@@ -3834,17 +3890,20 @@ function reviewBootstrap(
         valid = false;
         break;
       }
-      runtimeVisualArrayPush(facts, {
+      const suspected = rawVerdict === "suspected";
+      const fact = {
         id: ownerKey,
         type: "style",
         semanticOwnerId: ownerKey,
         geometryOwnerId: ownerKey,
         ownerKey,
         scope: "box",
-        summary: "视觉调整",
+        summary: suspected ? "疑似有改动" : "视觉调整",
         changeId,
         candidateKey,
-      });
+      };
+      if (suspected) fact.suspected = true;
+      runtimeVisualArrayPush(facts, fact);
       runtimeVisualMapSet(nextFactsByElement, element, facts);
     }
     runtimeProjectionFactsByElement = valid
@@ -4434,6 +4493,7 @@ function reviewBootstrap(
     if (operation) fact.operation = operation;
     if (tone) fact.tone = tone;
     if (summary) fact.summary = summary;
+    if (value.suspected === true) fact.suspected = true;
     return fact;
   };
   const projectionFactIdentity = (fact) => [
@@ -5173,6 +5233,9 @@ function reviewBootstrap(
             : (structureChange === "from" || structureChange === "to"
               ? "位置调整"
               : "结构调整"));
+          // A suspected runtime host keeps the style type for filtering but
+          // renders in its own tone: it is an unverified hint, not a claim.
+          const overlayTone = fact.suspected ? "suspected" : fact.type;
           rects.forEach((rect) => records.push({
             element,
             changeId,
@@ -5184,8 +5247,8 @@ function reviewBootstrap(
             structureChange,
             scope,
             summary,
-            tone: fact.type,
-            tones: [fact.type],
+            tone: overlayTone,
+            tones: [overlayTone],
             types: [fact.type],
             left: rect.left + scrollX,
             top: rect.top + scrollY,
@@ -5524,6 +5587,10 @@ function reviewBootstrap(
       layer.append(marksSvg);
     }
     merged.forEach((record) => {
+      // The before page never draws the suspected frame: the amber hint lives
+      // on the after page only, while both sides keep the dim exemption so the
+      // reader can compare the chart directly.
+      if (record.tone === "suspected" && side === "before") return;
       const horizontalInset = inset;
       const box = document.createElement("div");
       box.setAttribute("data-pageroot-review-overlay-box", record.changeId);
@@ -6084,6 +6151,13 @@ function* buildReviewDocumentSteps(
         beforeSourceElements,
         afterSourceElements,
         outline,
+        // Comment scope attributes are still present here; they are cleared
+        // right after candidate annotation and before serialization. A global
+        // page comment anchors on <body> and must not mark every host as
+        // commented, so only element-anchored comment scopes qualify.
+        commentAnchors: [...beforeDocument.querySelectorAll(
+          `[${REVIEW_COMMENT_KEY_ATTRIBUTE}]:not([${REVIEW_COMMENT_GLOBAL_ATTRIBUTE}])`,
+        )],
       })
     : {
         candidates: [],

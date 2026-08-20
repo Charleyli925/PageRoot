@@ -5,13 +5,15 @@ import {
 } from "../domain/runtime-visual-contract.js";
 import type { RuntimeVisualEnvelope } from "../domain/runtime-visual-contract.js";
 import {
-  changedReviewRuntimeVisualCandidateKeys as changedCandidateKeysFromSnapshots,
+  classifyReviewRuntimeVisualCandidates as classifyCandidatesFromSnapshots,
   reviewRuntimeVisualMeanRgbDifference,
+  reviewRuntimeVisualPixelsAreUniform,
   reviewRuntimeVisualSnapshotComparison,
 } from "../lib/review-runtime-visual.js";
 import type {
   ReviewRuntimeVisualCandidate,
   ReviewRuntimeVisualSnapshot,
+  ReviewRuntimeVisualVerdicts,
 } from "../lib/review-runtime-visual.js";
 
 export type ReviewRuntimeVisualSide = "before" | "after";
@@ -93,15 +95,21 @@ async function rasterMeanRgbDifference(
   if (!beforePixels) return null;
   const afterPixels = await decodedPngPixels(after);
   if (!afterPixels) return null;
-  return reviewRuntimeVisualMeanRgbDifference(beforePixels, afterPixels);
+  return {
+    difference: reviewRuntimeVisualMeanRgbDifference(beforePixels, afterPixels),
+    // A pair of near-uniform surfaces is a chart host that never rendered on
+    // either side, not a verified-unchanged chart.
+    uniform: reviewRuntimeVisualPixelsAreUniform(beforePixels)
+      && reviewRuntimeVisualPixelsAreUniform(afterPixels),
+  };
 }
 
 /**
  * Runs only in trusted renderer memory after the owner parser accepted one
- * before/after pair. It never retries a capture; PNG decoding failure merely
- * suppresses that supplemental runtime fact.
+ * before/after pair. It never retries a capture; a PNG that cannot be decoded
+ * leaves its candidate unverified instead of silently reading as unchanged.
  */
-export async function changedReviewRuntimeVisualCandidateKeys({
+export async function classifyReviewRuntimeVisualCandidateKeys({
   candidates,
   before,
   after,
@@ -109,24 +117,38 @@ export async function changedReviewRuntimeVisualCandidateKeys({
   candidates: readonly ReviewRuntimeVisualCandidate[];
   before: readonly ReviewRuntimeVisualSnapshot[];
   after: readonly ReviewRuntimeVisualSnapshot[];
-}): Promise<readonly string[]> {
+}): Promise<ReviewRuntimeVisualVerdicts> {
   const beforeByKey = new Map(before.map((snapshot) => [snapshot.key, snapshot]));
   const afterByKey = new Map(after.map((snapshot) => [snapshot.key, snapshot]));
   const rasterMeanRgbDifferenceByKey = new Map<string, number>();
+  const uniformCandidateKeys = new Set<string>();
   for (const candidate of candidates) {
     const key = candidate.key;
     const beforeSnapshot = beforeByKey.get(key);
     const afterSnapshot = afterByKey.get(key);
-    if (reviewRuntimeVisualSnapshotComparison(beforeSnapshot, afterSnapshot) !== "raster") {
+    const comparison = reviewRuntimeVisualSnapshotComparison(beforeSnapshot, afterSnapshot);
+    if (comparison === "raster") {
+      const raster = await rasterMeanRgbDifference(beforeSnapshot!, afterSnapshot!);
+      if (raster) {
+        if (raster.difference !== null) {
+          rasterMeanRgbDifferenceByKey.set(key, raster.difference);
+        }
+        if (raster.uniform) uniformCandidateKeys.add(key);
+      }
       continue;
     }
-    const difference = await rasterMeanRgbDifference(beforeSnapshot!, afterSnapshot!);
-    if (difference !== null) rasterMeanRgbDifferenceByKey.set(key, difference);
+    if (comparison === "unchanged") {
+      // Byte-identical PNGs need only one side decoded. An undecodable capture
+      // reads as uniform, which fails closed into the unverified verdict.
+      const pixels = await decodedPngPixels(beforeSnapshot!);
+      if (reviewRuntimeVisualPixelsAreUniform(pixels)) uniformCandidateKeys.add(key);
+    }
   }
-  return changedCandidateKeysFromSnapshots({
+  return classifyCandidatesFromSnapshots({
     candidates,
     before,
     after,
     rasterMeanRgbDifferenceByKey,
+    uniformCandidateKeys,
   });
 }

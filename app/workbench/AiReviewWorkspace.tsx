@@ -35,6 +35,7 @@ import { WarningCircleIcon } from "@phosphor-icons/react/dist/csr/WarningCircle"
 import {
   REVIEW_STRUCTURE_TONE_COLOR,
   REVIEW_STYLE_TONE_COLOR,
+  REVIEW_SUSPECTED_TONE_COLOR,
   type ReviewCommentGroup,
   type ReviewDocuments,
   type ReviewSide,
@@ -46,12 +47,16 @@ import {
   acceptRuntimeVisualSnapshots,
   mergeReviewRuntimeVisualChanges,
 } from "../lib/review-runtime-visual.js";
+import type {
+  ReviewRuntimeVisualMarker,
+  ReviewRuntimeVisualVerdicts,
+} from "../lib/review-runtime-visual.js";
 import {
   REVIEW_TEXT_EVIDENCE_ADDED_COLOR,
   REVIEW_TEXT_EVIDENCE_REMOVED_COLOR,
 } from "../lib/review-text-evidence-marks.js";
 import {
-  changedReviewRuntimeVisualCandidateKeys,
+  classifyReviewRuntimeVisualCandidateKeys,
 } from "./review-runtime-capture-adapter";
 import {
   acceptedRuntimeVisualEnvelope,
@@ -86,7 +91,7 @@ type ReviewRuntimeVisualResult = {
   documents: ReviewDocuments;
   changes: ReviewDocuments["changes"];
   outline: ReviewDocuments["outline"];
-  markers: Array<{ candidateKey: string; changeId: string }>;
+  markers: ReviewRuntimeVisualMarker[];
 };
 type ReviewRuntimeProjectionChannel = {
   documents: ReviewDocuments;
@@ -117,12 +122,13 @@ const FILTER_LABELS: Record<ReviewChangeFilter, string> = {
 };
 
 // Legend dots reuse the canvas diff tones so the toolbar explains the marks
-// users already see on the pages: removed and added text, structure, visual.
+// users already see on the pages: removed and added text, structure, visual
+// and the amber suspected frame on unverifiable chart hosts.
 const FILTER_TONE_COLORS: Record<ReviewChangeFilter, string[]> = {
   all: [],
   text: [REVIEW_TEXT_EVIDENCE_REMOVED_COLOR, REVIEW_TEXT_EVIDENCE_ADDED_COLOR],
   structure: [REVIEW_STRUCTURE_TONE_COLOR],
-  style: [REVIEW_STYLE_TONE_COLOR],
+  style: [REVIEW_STYLE_TONE_COLOR, REVIEW_SUSPECTED_TONE_COLOR],
 };
 
 const PAGE_VIEW_LABELS: Record<ReviewPageView, string> = {
@@ -816,9 +822,9 @@ export default function AiReviewWorkspace({
     });
   }, [sendState, sessionId]);
 
-  const resolveRuntimeVisuals = useCallback((changedCandidateKeys: readonly string[]) => {
+  const resolveRuntimeVisuals = useCallback((verdicts: ReviewRuntimeVisualVerdicts) => {
     if (runtimeVisualResolutionRef.current?.documents === documents) return;
-    const merged = mergeReviewRuntimeVisualChanges(documents, changedCandidateKeys);
+    const merged = mergeReviewRuntimeVisualChanges(documents, verdicts);
     const result: ReviewRuntimeVisualResult = {
       documents,
       changes: [...merged.changes],
@@ -906,9 +912,17 @@ export default function AiReviewWorkspace({
       || runtimeVisualResolutionRef.current?.documents === documents
     ) return;
     const candidateKeys = new Set(documents.runtimeVisualCandidates.map(({ key }) => key));
+    // Without pixel evidence nothing may dim as "verified unchanged": every
+    // candidate falls back to the honest suspected presentation instead.
+    const allUnverified = (): ReviewRuntimeVisualVerdicts => Object.freeze({
+      changedKeys: Object.freeze([]),
+      unverifiedKeys: Object.freeze(
+        documents.runtimeVisualCandidates.map(({ key }) => key),
+      ),
+    });
     const captureApi = window.htmlAIReviewRuntimeSnapshots;
     if (!captureApi) {
-      resolveRuntimeVisuals([]);
+      resolveRuntimeVisuals(allUnverified());
       return;
     }
     const viewport = runtimeVisualViewportRef.current || Object.freeze({
@@ -950,21 +964,21 @@ export default function AiReviewWorkspace({
     void (async () => {
       const before = await captureSide("before");
       const after = await captureSide("after");
-      const changedCandidateKeys = await changedReviewRuntimeVisualCandidateKeys({
+      const verdicts = await classifyReviewRuntimeVisualCandidateKeys({
         candidates: documents.runtimeVisualCandidates,
         before,
         after,
       });
-      return { changedCandidateKeys };
-    })().then(({ changedCandidateKeys }) => {
+      return { verdicts };
+    })().then(({ verdicts }) => {
       if (
         runtimeVisualOwnerDocumentsRef.current !== documents
         || runtimeVisualResolutionRef.current?.documents === documents
       ) return;
-      resolveRuntimeVisuals(changedCandidateKeys);
+      resolveRuntimeVisuals(verdicts);
     }).catch(() => {
       if (runtimeVisualOwnerDocumentsRef.current === documents) {
-        resolveRuntimeVisuals([]);
+        resolveRuntimeVisuals(allUnverified());
       }
     });
   }, [documents, resolveRuntimeVisuals]);
