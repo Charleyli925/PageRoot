@@ -8,10 +8,12 @@ import { bytesToHex } from "@noble/hashes/utils.js";
 import {
   acceptRuntimeVisualSnapshots,
   changedReviewRuntimeVisualCandidateKeys,
+  classifyReviewRuntimeVisualCandidates,
   isReviewRuntimeVisualRasterDifferenceMeaningful,
   mergeReviewRuntimeVisualChanges,
   REVIEW_RUNTIME_VISUAL_RASTER_MEAN_RGB_DIFFERENCE_BUDGET,
   reviewRuntimeVisualMeanRgbDifference,
+  reviewRuntimeVisualPixelsAreUniform,
 } from "../app/lib/review-runtime-visual.js";
 import { RUNTIME_VISUAL_CONTRACT } from "../app/domain/runtime-visual-contract.js";
 
@@ -255,8 +257,181 @@ test("runtime visual merge reuses outline metadata but preserves one marker per 
   assert.deepEqual(merged.changes[0].types, ["text", "style"]);
   assert.equal(merged.changes[1].id, "runtime-change-outline-2");
   assert.deepEqual(merged.markers, [
-    { candidateKey: "runtime-host-1", changeId: "change-1" },
-    { candidateKey: "runtime-host-2", changeId: "runtime-change-outline-2" },
-    { candidateKey: "runtime-host-3", changeId: "runtime-change-outline-2" },
+    { candidateKey: "runtime-host-1", changeId: "change-1", verdict: "changed" },
+    { candidateKey: "runtime-host-2", changeId: "runtime-change-outline-2", verdict: "changed" },
+    { candidateKey: "runtime-host-3", changeId: "runtime-change-outline-2", verdict: "changed" },
   ]);
+});
+
+test("tri-state classification only dims candidates with positive pixel evidence", () => {
+  const candidates = [{ key: "runtime-host-1" }];
+  assert.deepEqual(classifyReviewRuntimeVisualCandidates({
+    candidates,
+    before: [snapshot("runtime-host-1")],
+    after: [unavailable("runtime-host-1")],
+  }), { changedKeys: [], unverifiedKeys: ["runtime-host-1"] });
+  assert.deepEqual(classifyReviewRuntimeVisualCandidates({
+    candidates,
+    before: [],
+    after: [snapshot("runtime-host-1")],
+  }), { changedKeys: [], unverifiedKeys: ["runtime-host-1"] }, "a missing capture is never verified-unchanged");
+  assert.deepEqual(classifyReviewRuntimeVisualCandidates({
+    candidates,
+    before: [snapshot("runtime-host-1")],
+    after: [snapshot("runtime-host-1")],
+  }), { changedKeys: [], unverifiedKeys: [] }, "identical non-uniform pixels stay verified unchanged");
+  assert.deepEqual(classifyReviewRuntimeVisualCandidates({
+    candidates,
+    before: [snapshot("runtime-host-1")],
+    after: [snapshot("runtime-host-1")],
+    uniformCandidateKeys: new Set(["runtime-host-1"]),
+  }), { changedKeys: [], unverifiedKeys: ["runtime-host-1"] }, "identical blank surfaces are not evidence");
+  assert.deepEqual(classifyReviewRuntimeVisualCandidates({
+    candidates,
+    before: [snapshot("runtime-host-1")],
+    after: [snapshot("runtime-host-1", CHANGED_PNG)],
+  }), { changedKeys: [], unverifiedKeys: ["runtime-host-1"] }, "an undecodable raster pair has no verdict evidence");
+  assert.deepEqual(classifyReviewRuntimeVisualCandidates({
+    candidates,
+    before: [snapshot("runtime-host-1")],
+    after: [snapshot("runtime-host-1", CHANGED_PNG)],
+    rasterMeanRgbDifferenceByKey: new Map([
+      ["runtime-host-1", REVIEW_RUNTIME_VISUAL_RASTER_MEAN_RGB_DIFFERENCE_BUDGET],
+    ]),
+  }), { changedKeys: [], unverifiedKeys: [] }, "raster noise within budget stays verified unchanged");
+  assert.deepEqual(classifyReviewRuntimeVisualCandidates({
+    candidates,
+    before: [snapshot("runtime-host-1")],
+    after: [snapshot("runtime-host-1", CHANGED_PNG)],
+    rasterMeanRgbDifferenceByKey: new Map([
+      ["runtime-host-1", REVIEW_RUNTIME_VISUAL_RASTER_MEAN_RGB_DIFFERENCE_BUDGET],
+    ]),
+    uniformCandidateKeys: new Set(["runtime-host-1"]),
+  }), { changedKeys: [], unverifiedKeys: ["runtime-host-1"] }, "two blank-ish rasters cannot verify a chart");
+  assert.deepEqual(classifyReviewRuntimeVisualCandidates({
+    candidates,
+    before: [snapshot("runtime-host-1")],
+    after: [snapshot("runtime-host-1", CHANGED_PNG)],
+    rasterMeanRgbDifferenceByKey: new Map([
+      ["runtime-host-1", REVIEW_RUNTIME_VISUAL_RASTER_MEAN_RGB_DIFFERENCE_BUDGET + 0.001],
+    ]),
+  }), { changedKeys: ["runtime-host-1"], unverifiedKeys: [] });
+});
+
+test("near-uniform pixel detection treats undecodable buffers as uniform", () => {
+  const blank = new Uint8Array(64 * 4).fill(255);
+  assert.equal(reviewRuntimeVisualPixelsAreUniform(blank), true);
+  const noisyBlank = new Uint8Array(blank);
+  noisyBlank[0] = 252;
+  assert.equal(reviewRuntimeVisualPixelsAreUniform(noisyBlank), true);
+  const rendered = new Uint8Array(blank);
+  rendered[0] = 40;
+  assert.equal(reviewRuntimeVisualPixelsAreUniform(rendered), false);
+  assert.equal(reviewRuntimeVisualPixelsAreUniform(null), true);
+  assert.equal(reviewRuntimeVisualPixelsAreUniform(new Uint8Array(3)), true);
+});
+
+test("unverified candidates surface as suspected changes without claiming verified facts", () => {
+  const documents = {
+    changes: [{
+      id: "change-1",
+      label: "核心结论",
+      helper: "文本调整",
+      types: ["text"],
+      beforePresent: true,
+      afterPresent: true,
+    }],
+    outline: [
+      {
+        id: "outline-1",
+        group: "页面",
+        label: "核心结论",
+        helper: "文本调整",
+        changeId: "change-1",
+        types: ["text"],
+      },
+      {
+        id: "outline-2",
+        group: "页面",
+        label: "图表区",
+        helper: "本轮未修改",
+        types: [],
+      },
+    ],
+    runtimeVisualCandidates: [
+      {
+        key: "runtime-host-1",
+        outlineId: "outline-1",
+        changeId: "change-1",
+        label: "核心结论",
+      },
+      {
+        key: "runtime-host-2",
+        outlineId: "outline-2",
+        changeId: "runtime-change-outline-2",
+        label: "图表区",
+      },
+      {
+        key: "runtime-host-3",
+        outlineId: "outline-2",
+        changeId: "runtime-change-outline-2",
+        label: "图表区",
+      },
+    ],
+  };
+  const merged = mergeReviewRuntimeVisualChanges(documents, {
+    changedKeys: [],
+    unverifiedKeys: ["runtime-host-1", "runtime-host-2", "runtime-host-3"],
+  });
+  assert.equal(merged.changes.length, 3);
+  assert.deepEqual(merged.changes[0].types, ["text"], "confirmed change stays untouched");
+  const suspectedChanges = merged.changes.filter((change) => change.suspected);
+  assert.deepEqual(
+    suspectedChanges.map((change) => change.id),
+    ["suspected-outline-1", "suspected-outline-2"],
+  );
+  suspectedChanges.forEach((change) => {
+    assert.equal(change.helper, "疑似有改动（无法核实）");
+    assert.deepEqual(change.types, ["style"]);
+  });
+  assert.equal(
+    merged.outline[0].changeId,
+    "change-1",
+    "an outline slot with a confirmed change is never overwritten by suspicion",
+  );
+  assert.equal(merged.outline[1].changeId, "suspected-outline-2");
+  assert.equal(merged.outline[1].helper, "疑似有改动（无法核实）");
+  assert.deepEqual(merged.markers, [
+    { candidateKey: "runtime-host-1", changeId: "suspected-outline-1", verdict: "suspected" },
+    { candidateKey: "runtime-host-2", changeId: "suspected-outline-2", verdict: "suspected" },
+    { candidateKey: "runtime-host-3", changeId: "suspected-outline-2", verdict: "suspected" },
+  ]);
+});
+
+test("a changed verdict beats an unverified verdict for the same candidate", () => {
+  const documents = {
+    changes: [],
+    outline: [{
+      id: "outline-1",
+      group: "页面",
+      label: "图表区",
+      helper: "本轮未修改",
+      types: [],
+    }],
+    runtimeVisualCandidates: [{
+      key: "runtime-host-1",
+      outlineId: "outline-1",
+      changeId: "runtime-change-outline-1",
+      label: "图表区",
+    }],
+  };
+  const merged = mergeReviewRuntimeVisualChanges(documents, {
+    changedKeys: ["runtime-host-1"],
+    unverifiedKeys: ["runtime-host-1"],
+  });
+  assert.deepEqual(merged.markers, [
+    { candidateKey: "runtime-host-1", changeId: "runtime-change-outline-1", verdict: "changed" },
+  ]);
+  assert.equal(merged.changes.length, 1);
+  assert.equal(merged.changes[0].suspected, undefined);
 });

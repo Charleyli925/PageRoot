@@ -25,7 +25,8 @@ export interface RuntimeVisualContract {
   readonly version: 2;
   readonly candidateLimit: 128;
   readonly identityAttributeLimit: 24;
-  readonly ownerDeadlineMs: 1500;
+  readonly ownerDeadlineMs: 3000;
+  readonly captureSettleMs: 800;
   readonly pageBudget: RuntimeVisualPageBudget;
 }
 

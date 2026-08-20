@@ -4,7 +4,10 @@ export const RUNTIME_VISUAL_CONTRACT = Object.freeze({
   version: RUNTIME_VISUAL_CONTRACT_VERSION,
   candidateLimit: 128,
   identityAttributeLimit: 24,
-  ownerDeadlineMs: 1_500,
+  // Chart libraries initialize asynchronously and often animate for about one
+  // second after the first paint, so a capture settles before sampling pixels.
+  ownerDeadlineMs: 3_000,
+  captureSettleMs: 800,
   pageBudget: Object.freeze({
     htmlBytes: 25 * 1024 * 1024,
     visualLimit: 32,

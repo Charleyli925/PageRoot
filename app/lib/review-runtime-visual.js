@@ -13,6 +13,15 @@ export const REVIEW_RUNTIME_VISUAL_CANDIDATE_LIMIT =
  */
 export const REVIEW_RUNTIME_VISUAL_RASTER_MEAN_RGB_DIFFERENCE_BUDGET = 0.04;
 
+/**
+ * Maximum per-channel spread (0–255 scale) for a decoded capture that still
+ * counts as one near-uniform surface. A chart host whose capture is a single
+ * flat color almost certainly never rendered (blocked network, script error,
+ * unfinished initialization), so identical blank pixels are not evidence that
+ * the chart is unchanged.
+ */
+export const REVIEW_RUNTIME_VISUAL_UNIFORM_CHANNEL_SPREAD_LIMIT = 3;
+
 export { acceptRuntimeVisualSnapshots };
 
 /**
@@ -69,33 +78,113 @@ export function isReviewRuntimeVisualRasterDifferenceMeaningful(value) {
     && value > REVIEW_RUNTIME_VISUAL_RASTER_MEAN_RGB_DIFFERENCE_BUDGET;
 }
 
+/**
+ * Detects a near-uniform decoded capture, ignoring alpha. A null/invalid RGBA
+ * buffer is treated as uniform so the caller cannot mistake an undecodable
+ * capture for verified pixels.
+ */
+export function reviewRuntimeVisualPixelsAreUniform(pixels) {
+  const rgba = rgbaPixels(pixels);
+  if (!rgba || rgba.byteLength === 0 || rgba.byteLength % 4 !== 0) return true;
+  let minRed = 255;
+  let maxRed = 0;
+  let minGreen = 255;
+  let maxGreen = 0;
+  let minBlue = 255;
+  let maxBlue = 0;
+  for (let index = 0; index < rgba.byteLength; index += 4) {
+    if (rgba[index] < minRed) minRed = rgba[index];
+    if (rgba[index] > maxRed) maxRed = rgba[index];
+    if (rgba[index + 1] < minGreen) minGreen = rgba[index + 1];
+    if (rgba[index + 1] > maxGreen) maxGreen = rgba[index + 1];
+    if (rgba[index + 2] < minBlue) minBlue = rgba[index + 2];
+    if (rgba[index + 2] > maxBlue) maxBlue = rgba[index + 2];
+  }
+  const spread = Math.max(maxRed - minRed, maxGreen - minGreen, maxBlue - minBlue);
+  return spread <= REVIEW_RUNTIME_VISUAL_UNIFORM_CHANNEL_SPREAD_LIMIT;
+}
+
+/**
+ * Tri-state verdict per candidate. Dimming a chart host now requires positive
+ * pixel evidence: everything the pipeline could not verify (missing captures,
+ * undecodable PNGs, near-uniform blank surfaces) lands in unverifiedKeys
+ * instead of silently reading as "unchanged".
+ */
+export function classifyReviewRuntimeVisualCandidates({
+  candidates,
+  before,
+  after,
+  rasterMeanRgbDifferenceByKey,
+  uniformCandidateKeys,
+} = {}) {
+  const empty = Object.freeze({
+    changedKeys: Object.freeze([]),
+    unverifiedKeys: Object.freeze([]),
+  });
+  if (!Array.isArray(candidates)) return empty;
+  const beforeByKey = new Map(
+    Array.isArray(before) ? before.map((snapshot) => [snapshot.key, snapshot]) : [],
+  );
+  const afterByKey = new Map(
+    Array.isArray(after) ? after.map((snapshot) => [snapshot.key, snapshot]) : [],
+  );
+  const uniformKeys = uniformCandidateKeys instanceof Set
+    ? uniformCandidateKeys
+    : new Set(Array.isArray(uniformCandidateKeys) ? uniformCandidateKeys : []);
+  const changedKeys = [];
+  const unverifiedKeys = [];
+  candidates.forEach((candidate) => {
+    const key = typeof candidate?.key === "string" ? candidate.key : "";
+    if (!key) return;
+    const comparison = reviewRuntimeVisualSnapshotComparison(
+      beforeByKey.get(key),
+      afterByKey.get(key),
+    );
+    if (comparison === "changed") {
+      changedKeys.push(key);
+      return;
+    }
+    if (comparison === "unavailable") {
+      unverifiedKeys.push(key);
+      return;
+    }
+    if (comparison === "unchanged") {
+      if (uniformKeys.has(key)) unverifiedKeys.push(key);
+      return;
+    }
+    const rasterDifference = rasterMeanRgbDifferenceByKey instanceof Map
+      ? rasterMeanRgbDifferenceByKey.get(key)
+      : undefined;
+    if (!Number.isFinite(rasterDifference)) {
+      // The PNG pair could not be decoded and compared, so this candidate has
+      // no pixel evidence in either direction.
+      unverifiedKeys.push(key);
+      return;
+    }
+    if (isReviewRuntimeVisualRasterDifferenceMeaningful(rasterDifference)) {
+      changedKeys.push(key);
+      return;
+    }
+    if (uniformKeys.has(key)) unverifiedKeys.push(key);
+  });
+  return Object.freeze({
+    changedKeys: Object.freeze(changedKeys),
+    unverifiedKeys: Object.freeze(unverifiedKeys),
+  });
+}
+
 export function changedReviewRuntimeVisualCandidateKeys({
   candidates,
   before,
   after,
   rasterMeanRgbDifferenceByKey,
 } = {}) {
-  if (!Array.isArray(candidates) || !Array.isArray(before) || !Array.isArray(after)) {
-    return Object.freeze([]);
-  }
-  const beforeByKey = new Map(before.map((snapshot) => [snapshot.key, snapshot]));
-  const afterByKey = new Map(after.map((snapshot) => [snapshot.key, snapshot]));
-  return Object.freeze(candidates.flatMap((candidate) => {
-    const key = typeof candidate?.key === "string" ? candidate.key : "";
-    if (!key) return [];
-    const comparison = reviewRuntimeVisualSnapshotComparison(
-      beforeByKey.get(key),
-      afterByKey.get(key),
-    );
-    if (comparison === "changed") return [key];
-    const rasterDifference = rasterMeanRgbDifferenceByKey instanceof Map
-      ? rasterMeanRgbDifferenceByKey.get(key)
-      : undefined;
-    return comparison === "raster"
-      && isReviewRuntimeVisualRasterDifferenceMeaningful(rasterDifference)
-      ? [key]
-      : [];
-  }));
+  return classifyReviewRuntimeVisualCandidates({
+    candidates,
+    before,
+    after,
+    rasterMeanRgbDifferenceByKey,
+  }).changedKeys;
 }
 
 function canonicalTypes(types) {
@@ -113,20 +202,32 @@ function helperForTypes(types) {
 /**
  * Runtime evidence can add one opaque style projection per changed source
  * host. Outline aggregation remains navigation metadata; it is never runtime
- * geometry authority.
+ * geometry authority. Unverified hosts contribute their own suspected
+ * changes: they exempt the host from dimming and label it "疑似有改动"
+ * without claiming a confirmed visual fact.
  */
-export function mergeReviewRuntimeVisualChanges(documents, changedCandidateKeys) {
+export function mergeReviewRuntimeVisualChanges(documents, verdicts) {
   const changes = Array.isArray(documents?.changes) ? documents.changes : [];
   const outline = Array.isArray(documents?.outline) ? documents.outline : [];
   const candidates = Array.isArray(documents?.runtimeVisualCandidates)
     ? documents.runtimeVisualCandidates
     : [];
-  const changedKeys = new Set(Array.isArray(changedCandidateKeys) ? changedCandidateKeys : []);
+  const changedKeys = new Set(Array.isArray(verdicts)
+    ? verdicts
+    : Array.isArray(verdicts?.changedKeys) ? verdicts.changedKeys : []);
+  const unverifiedKeys = new Set(
+    Array.isArray(verdicts?.unverifiedKeys) ? verdicts.unverifiedKeys : [],
+  );
   const outlineIds = new Set(outline.map((item) => item.id));
   const changedCandidates = candidates.filter((candidate) => (
     changedKeys.has(candidate.key) && outlineIds.has(candidate.outlineId)
   ));
-  if (!changedCandidates.length) {
+  const suspectedCandidates = candidates.filter((candidate) => (
+    unverifiedKeys.has(candidate.key)
+    && !changedKeys.has(candidate.key)
+    && outlineIds.has(candidate.outlineId)
+  ));
+  if (!changedCandidates.length && !suspectedCandidates.length) {
     return Object.freeze({
       changes,
       outline,
@@ -167,6 +268,29 @@ export function mergeReviewRuntimeVisualChanges(documents, changedCandidateKeys)
     updatedChangesById.set(change.id, change);
     syntheticChanges.push(change);
   });
+  // A suspected change is always its own synthetic entry. Folding it into an
+  // existing confirmed change would present "cannot verify" as a verified
+  // visual fact.
+  const suspectedChangeIdByOutline = new Map();
+  suspectedCandidates.forEach((candidate) => {
+    if (suspectedChangeIdByOutline.has(candidate.outlineId)) return;
+    const changeId = `suspected-${candidate.outlineId}`;
+    if (updatedChangesById.has(changeId)) return;
+    suspectedChangeIdByOutline.set(candidate.outlineId, changeId);
+    const change = Object.freeze({
+      id: changeId,
+      label: candidate.label,
+      helper: "疑似有改动（无法核实）",
+      types: Object.freeze(["style"]),
+      suspected: true,
+      beforePresent: true,
+      afterPresent: true,
+      ...(candidate.panelKey ? { panelKey: candidate.panelKey } : {}),
+      ...(candidate.panelPath?.length ? { panelPath: [...candidate.panelPath] } : {}),
+    });
+    updatedChangesById.set(change.id, change);
+    syntheticChanges.push(change);
+  });
 
   const mergedChanges = [
     ...changes.map((change) => updatedChangesById.get(change.id) || change),
@@ -177,19 +301,44 @@ export function mergeReviewRuntimeVisualChanges(documents, changedCandidateKeys)
   );
   const mergedOutline = outline.map((item) => {
     const candidate = changedCandidateByOutline.get(item.id);
-    if (!candidate) return item;
-    const types = canonicalTypes([...item.types, "style"]);
+    if (candidate) {
+      const types = canonicalTypes([...item.types, "style"]);
+      return Object.freeze({
+        ...item,
+        changeId: candidate.changeId,
+        types: Object.freeze(types),
+        helper: helperForTypes(types),
+      });
+    }
+    // A suspected host only claims the outline slot when the section has no
+    // confirmed change of its own, so the map entry stays clickable without
+    // overwriting verified facts.
+    const suspectedChangeId = suspectedChangeIdByOutline.get(item.id);
+    if (!suspectedChangeId || item.changeId) return item;
     return Object.freeze({
       ...item,
-      changeId: candidate.changeId,
-      types: Object.freeze(types),
-      helper: helperForTypes(types),
+      changeId: suspectedChangeId,
+      types: Object.freeze(canonicalTypes([...item.types, "style"])),
+      helper: "疑似有改动（无法核实）",
     });
   });
-  const markers = changedCandidates.map((candidate) => Object.freeze({
-    candidateKey: candidate.key,
-    changeId: candidate.changeId,
-  }));
+  const markers = [
+    ...changedCandidates.map((candidate) => Object.freeze({
+      candidateKey: candidate.key,
+      changeId: candidate.changeId,
+      verdict: "changed",
+    })),
+    ...suspectedCandidates.flatMap((candidate) => {
+      const changeId = suspectedChangeIdByOutline.get(candidate.outlineId);
+      return changeId
+        ? [Object.freeze({
+          candidateKey: candidate.key,
+          changeId,
+          verdict: "suspected",
+        })]
+        : [];
+    }),
+  ];
   return Object.freeze({
     changes: Object.freeze(mergedChanges),
     outline: Object.freeze(mergedOutline),

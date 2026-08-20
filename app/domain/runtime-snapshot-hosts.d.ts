@@ -37,6 +37,7 @@ export type RuntimeSnapshotCaptureCandidate = Readonly<{
 }>;
 
 export const RUNTIME_SNAPSHOT_HOST_LIMIT: 32;
+export const RUNTIME_SNAPSHOT_HOST_ENUMERATION_LIMIT: 128;
 export const EDIT_RUNTIME_HOST_LIMIT: 32;
 
 export function resolveRuntimeSnapshotHosts(options?: {

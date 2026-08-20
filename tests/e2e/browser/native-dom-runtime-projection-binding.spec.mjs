@@ -17,6 +17,7 @@ function sourceBoxSignature(values = {}) {
 async function installRuntimeProjectionFrame(page, {
   replaceBeforeReady = false,
   withCommentBinding = false,
+  side = "before",
 } = {}) {
   const sharedStyle = "width: 140px; height: 24px";
   const bindings = [
@@ -57,7 +58,7 @@ async function installRuntimeProjectionFrame(page, {
     identityAttributes: [["id", "shared-static-runtime"]],
     identityText: "静态文本与运行态样式共存",
   }] : [];
-  const bootstrap = generatedReviewBootstrap(commentBindings, bindings)
+  const bootstrap = generatedReviewBootstrap(commentBindings, bindings, side)
     .replace(/<\/script/giu, "<\\/script");
   const staticFacts = JSON.stringify([{
     id: "static-text",
@@ -101,7 +102,7 @@ async function installRuntimeProjectionFrame(page, {
         source: "pageroot-ai-review",
         contractVersion: 2,
         sessionId: "review-session",
-        side: "before",
+        side: "${side}",
         sourceSha256: "${SOURCE_SHA256}",
         type: "runtime-projection-channel",
         challenge: "0".repeat(32),
@@ -111,7 +112,7 @@ async function installRuntimeProjectionFrame(page, {
 </html>`;
 
   await page.setContent('<iframe id="review-frame" sandbox="allow-scripts"></iframe>');
-  await page.evaluate(({ source }) => {
+  await page.evaluate(({ source, frameSide }) => {
     const frame = document.querySelector("#review-frame");
     window.runtimeProjectionTest = {
       challenge: "b".repeat(32),
@@ -157,7 +158,7 @@ async function installRuntimeProjectionFrame(page, {
         message.source === "pageroot-ai-review"
         && message.contractVersion === 2
         && message.sessionId === "review-session"
-        && message.side === "before"
+        && message.side === frameSide
         && message.sourceSha256 === `sha256:${"a".repeat(64)}`
         && message.challenge === state.challenge
         && port
@@ -171,10 +172,10 @@ async function installRuntimeProjectionFrame(page, {
       }
     });
     frame.srcdoc = source;
-  }, { source: srcdoc });
+  }, { source: srcdoc, frameSide: side });
 
   await expect.poll(() => page.evaluate(() => window.runtimeProjectionTest.ready)).toBe(true);
-  await page.evaluate(({ sourceSha256, requestCommentChannel }) => {
+  await page.evaluate(({ sourceSha256, requestCommentChannel, frameSide }) => {
     const frame = document.querySelector("#review-frame");
     const state = window.runtimeProjectionTest;
     if (requestCommentChannel) {
@@ -189,12 +190,12 @@ async function installRuntimeProjectionFrame(page, {
       source: "pageroot-ai-review-parent",
       contractVersion: 2,
       sessionId: "review-session",
-      side: "before",
+      side: frameSide,
       sourceSha256,
       type: "request-runtime-projection-channel",
       challenge: state.challenge,
     }, "*");
-  }, { sourceSha256: SOURCE_SHA256, requestCommentChannel: withCommentBinding });
+  }, { sourceSha256: SOURCE_SHA256, requestCommentChannel: withCommentBinding, frameSide: side });
   await expect.poll(() => page.evaluate(() => Boolean(window.runtimeProjectionTest.port))).toBe(true);
   if (withCommentBinding) {
     await expect.poll(() => page.evaluate(() => (
@@ -204,14 +205,14 @@ async function installRuntimeProjectionFrame(page, {
   return page.frameLocator("#review-frame");
 }
 
-async function postRuntimeFacts(page, markers, overrides = {}) {
-  await page.evaluate(({ projectionMarkers, sourceSha256, messageOverrides }) => {
+async function postRuntimeFacts(page, markers, overrides = {}, side = "before") {
+  await page.evaluate(({ projectionMarkers, sourceSha256, messageOverrides, frameSide }) => {
     const port = window.runtimeProjectionTest.port;
     port.postMessage({
       source: "pageroot-ai-review-runtime-projection",
       contractVersion: 2,
       sessionId: "review-session",
-      side: "before",
+      side: frameSide,
       sourceSha256,
       type: "runtime-projection-facts",
       markers: projectionMarkers,
@@ -222,6 +223,7 @@ async function postRuntimeFacts(page, markers, overrides = {}) {
     projectionMarkers: markers,
     sourceSha256: SOURCE_SHA256,
     messageOverrides: overrides,
+    frameSide: side,
   });
 }
 
@@ -255,10 +257,10 @@ async function postReviewState(page, filter = "all") {
 test("runtime projection binds exact hosts and adds facts without outline geometry", async ({ page }) => {
   const frame = await installRuntimeProjectionFrame(page);
   await postRuntimeFacts(page, [
-    { candidateKey: "runtime-host-1", changeId: "change-1" },
-    { candidateKey: "runtime-host-2", changeId: "change-1" },
-    { candidateKey: "runtime-host-3", changeId: "change-1" },
-    { candidateKey: "runtime-host-4", changeId: "change-1" },
+    { candidateKey: "runtime-host-1", changeId: "change-1", verdict: "changed" },
+    { candidateKey: "runtime-host-2", changeId: "change-1", verdict: "changed" },
+    { candidateKey: "runtime-host-3", changeId: "change-1", verdict: "changed" },
+    { candidateKey: "runtime-host-4", changeId: "change-1", verdict: "changed" },
   ]);
 
   const sharedRuntimeBox = frame.locator(
@@ -356,7 +358,7 @@ test("hostile authored listeners cannot observe or forge runtime projection capa
     || message.portCount > 0
   ))).toBe(false);
 
-  await postRuntimeFacts(page, [{ candidateKey: "runtime-host-2", changeId: "change-1" }]);
+  await postRuntimeFacts(page, [{ candidateKey: "runtime-host-2", changeId: "change-1", verdict: "changed" }]);
   await expect(frame.locator(
     '[data-pageroot-review-overlay-box][data-pageroot-review-fact="style:runtime-projection-1"]',
   )).toHaveCount(1);
@@ -376,7 +378,7 @@ test("comment and runtime bindings keep separate ports in the same first bootstr
   ))).toBe(true);
 
   await postCommentTargets(page);
-  await postRuntimeFacts(page, [{ candidateKey: "runtime-host-2", changeId: "change-1" }]);
+  await postRuntimeFacts(page, [{ candidateKey: "runtime-host-2", changeId: "change-1", verdict: "changed" }]);
 
   await expect.poll(() => page.evaluate(() => (
     window.runtimeProjectionTest.commentLayouts.some((layout) => layout.key === "comment-1")
@@ -421,7 +423,7 @@ test("cross-session side and source runtime results preserve static facts", asyn
     await expect.poll(() => staticTextBox.count()).toBeGreaterThan(0);
     await postRuntimeFacts(
       page,
-      [{ candidateKey: "runtime-host-2", changeId: "change-1" }],
+      [{ candidateKey: "runtime-host-2", changeId: "change-1", verdict: "changed" }],
       invalidEnvelope,
     );
     await expect.poll(() => staticTextBox.count()).toBeGreaterThan(0);
@@ -433,8 +435,57 @@ test("cross-session side and source runtime results preserve static facts", asyn
 
 test("parser-time target replacement fails closed without rebinding", async ({ page }) => {
   const frame = await installRuntimeProjectionFrame(page, { replaceBeforeReady: true });
-  await postRuntimeFacts(page, [{ candidateKey: "runtime-host-2", changeId: "change-1" }]);
+  await postRuntimeFacts(page, [{ candidateKey: "runtime-host-2", changeId: "change-1", verdict: "changed" }]);
   await expect(frame.locator(
     '[data-pageroot-review-overlay-box][data-pageroot-review-fact^="style:runtime-projection-"]',
   )).toHaveCount(0);
+});
+
+test("a marker without a recognized verdict rejects the whole batch and keeps static facts", async ({ page }) => {
+  const frame = await installRuntimeProjectionFrame(page);
+  const staticTextBox = frame.locator(
+    '[data-pageroot-review-overlay-box][data-pageroot-review-fact="text:static-text"]',
+  );
+  await expect.poll(() => staticTextBox.count()).toBeGreaterThan(0);
+  await postRuntimeFacts(page, [
+    { candidateKey: "runtime-host-2", changeId: "change-1", verdict: "changed" },
+    { candidateKey: "runtime-host-4", changeId: "change-1", verdict: "definitely" },
+  ]);
+  await expect.poll(() => staticTextBox.count()).toBeGreaterThan(0);
+  await expect(frame.locator(
+    '[data-pageroot-review-overlay-box][data-pageroot-review-fact^="style:runtime-projection-"]',
+  )).toHaveCount(0);
+});
+
+test("a suspected host exempts dimming on the before page without drawing the amber frame", async ({ page }) => {
+  const frame = await installRuntimeProjectionFrame(page);
+  await postRuntimeFacts(page, [
+    { candidateKey: "runtime-host-2", changeId: "suspected-outline-1", verdict: "suspected" },
+  ]);
+  const suspectedHole = frame.locator(
+    '[data-pageroot-review-mask-hole="suspected-outline-1"]',
+  );
+  await expect.poll(() => suspectedHole.count()).toBeGreaterThan(0);
+  await expect(frame.locator(
+    '[data-pageroot-review-overlay-box][data-tone="suspected"]',
+  )).toHaveCount(0);
+});
+
+test("a suspected host draws the amber dashed frame on the after page", async ({ page }) => {
+  const frame = await installRuntimeProjectionFrame(page, { side: "after" });
+  await postRuntimeFacts(page, [
+    { candidateKey: "runtime-host-2", changeId: "suspected-outline-1", verdict: "suspected" },
+  ], {}, "after");
+  const suspectedBox = frame.locator(
+    '[data-pageroot-review-overlay-box][data-tone="suspected"]',
+  );
+  await expect(suspectedBox).toHaveCount(1);
+  await expect(suspectedBox).toHaveAttribute("data-summary", "疑似有改动");
+  await expect.poll(() => frame.locator(
+    '[data-pageroot-review-mask-hole="suspected-outline-1"]',
+  ).count()).toBeGreaterThan(0);
+  await postReviewState(page, "style");
+  await expect(suspectedBox).toHaveCount(1, { timeout: 5_000 });
+  await postReviewState(page, "text");
+  await expect(suspectedBox).toHaveCount(0);
 });
