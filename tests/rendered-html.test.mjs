@@ -96,12 +96,6 @@ test("top toolbar keeps the approved restrained visual contract", async () => {
   assert.match(selectedLayer, /background:\s*rgb\(91 82 219 \/ 7\.5%\)/u);
   assert.doesNotMatch(selectedLayer, /backdrop-filter|box-shadow|(?:^|\n)\s*border:/u);
 
-  const hiddenGlobalComment = lastCssRule(
-    css,
-    ".header-actions > .global-comment-button",
-  );
-  assert.match(hiddenGlobalComment, /display:\s*none/u);
-
   const sendButton = lastCssRule(css, ".header-actions .header-send-button");
   assert.match(sendButton, /height:\s*40px/u);
   assert.match(sendButton, /margin-left:\s*12px/u);

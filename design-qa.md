@@ -2062,6 +2062,73 @@ lift, inset top highlight) and records it in DESIGN_LANGUAGE.md §3.
 
 final result: passed
 
+# Comment composer quiet action row
+
+Date: 2026-08-20
+
+## Comparison target
+
+- Source visual truth:
+  `/var/folders/jx/w52403cs2hx39vwhd1sb3tg80000gn/T/codex-clipboard-deaeb859-b738-4c0c-af0b-d6bc59153f5f.png`
+  (`484 × 152` px, user-provided focused action-row crop).
+- Rendered implementation:
+  `output/playwright/native-dom-browser/results/native-dom-comment-tabs-co-08dd1-h-Shift-Enter-for-new-lines/comment-rail-local-composer-quiet-actions.png`
+  (`1600 × 900` px at a `1600 × 900` CSS viewport, DPR 1).
+- Focused implementation crop:
+  `output/playwright/native-dom-browser/comment-rail-local-composer-quiet-actions-crop.png`
+  (`390 × 330` px).
+- State: enabled ordinary-target new-comment Composer with text entered. The
+  same assertions also run against the global-comment Composer.
+- Density normalization: the source is a zoomed crop rather than a complete
+  1:1 screen, so comparison is limited to icon order, relative size, color,
+  framing and center-to-center spacing. The implementation crop remains at
+  native DPR 1.
+
+## Full-view comparison
+
+- The Composer remains the only elevated comment surface. Its target label,
+  inset textarea, card dimensions, close position and submission behavior are
+  unchanged.
+- The normal and global Composer screenshots keep the same card structure and
+  differ only in target copy, as intended.
+
+## Focused comparison
+
+- Attachment, image, delete and confirm controls are transparent and
+  borderless by default.
+- All four action buttons retain the original DOM/layout structure while using
+  one `8px` adjacency gap; a browser geometry assertion limits center-gap drift
+  to at most `1px`.
+- The confirm mark is now a `20px` filled Phosphor check-circle in
+  `var(--indigo)`; the other action icons remain `17px` and neutral gray.
+- Hover and keyboard focus use a light state surface without restoring a
+  visible border.
+
+## Comparison history
+
+1. P2 — the first implementation still exposed the old filled submit button
+   and framed close/tool controls. Fixed by making Composer and saved-comment
+   actions transparent with color-only/light-surface interaction feedback.
+2. P2 — an intermediate interpretation regrouped the controls. Reverted that
+   structural change, preserved the original layout, standardized only the
+   spacing, and enlarged the confirm icon to `20px` with the product purple.
+3. Post-fix evidence — the source crop and final focused implementation crop
+   were opened together. No P0/P1/P2 visual mismatch remains in the requested
+   action row.
+
+## Required fidelity surfaces
+
+- Typography: unchanged; no action text was added to the quiet icon row.
+- Spacing/layout rhythm: equal adjacent gaps; card padding and elevation
+  unchanged.
+- Colors/tokens: neutral action icons plus one purple confirmation accent.
+- Image/icon quality: existing Phosphor assets are retained; no substitute
+  glyphs or handcrafted SVGs were introduced.
+- Copy/content: accessible labels and the existing close/delete/submit
+  behavior remain unchanged.
+
+final result: passed
+
 ## Review toolbar as a real overlay: open by default, no page displacement
 
 Date: 2026-08-20

@@ -60,7 +60,6 @@ import {
 } from "./lib/attachment-selection.js";
 import {
   commentMarkerGroupKey,
-  COMMENT_VIRTUALIZATION_THRESHOLD,
   virtualizedCommentIds,
 } from "./lib/comment-virtualization.js";
 import {
@@ -7309,16 +7308,6 @@ export default function Workbench() {
             <FolderOpenIcon aria-hidden="true" size={18} weight="duotone" />
             项目
           </button>
-          <button
-            className="global-comment-button"
-            type="button"
-            aria-expanded={composerOpen && draftTarget?.tagName === "body"}
-            disabled={interactionLocked || canvasMode !== "edit"}
-            onClick={openGlobalCommentComposer}
-          >
-            <ChatCircleTextIcon aria-hidden="true" size={18} weight="duotone" />
-            全局评论
-          </button>
           {recentRunOutcome && !runInProgress && !terminalRun ? (
             <button
               className="recent-run-button"
@@ -7687,19 +7676,29 @@ export default function Workbench() {
               }
             >
               <div className="comment-rail-header-main">
-                <h1>评论 <span>{visibleCommentItems.length}</span></h1>
-                <div className="comment-rail-header-actions">
+                <div className="comment-rail-title-row">
+                  <h1>评论 <span>{visibleCommentItems.length}</span></h1>
                   {viewMode === "history" ? (
                     <small>历史版本 · 只读</small>
-                  ) : !draftInCurrentTab
-                    && !hasUnsavedCommentEdit
-                    && otherTabCommentEntryCount === 0 ? (
-                    <small>
-                      {visibleCommentItems.length > COMMENT_VIRTUALIZATION_THRESHOLD
-                        ? `当前加载 ${renderedVisibleCommentItems.length} 条`
-                        : "与正文同步滚动"}
-                    </small>
-                  ) : null}
+                  ) : (
+                    <button
+                      className="comment-rail-global-action"
+                      type="button"
+                      data-html-canvas-preserve-selection="true"
+                      aria-label="全局评论"
+                      aria-expanded={composerOpen && draftTarget?.tagName === "body"}
+                      disabled={interactionLocked}
+                      onClick={openGlobalCommentComposer}
+                    ><PlusIcon aria-hidden="true" size={12} weight="bold" />添加全局评论</button>
+                  )}
+                </div>
+                {commentLayoutReady
+                && (
+                  draftInCurrentTab
+                  || hasUnsavedCommentEdit
+                  || otherTabCommentEntryCount > 0
+                ) ? (
+                  <div className="comment-rail-header-actions">
                   {commentLayoutReady && draftInCurrentTab ? (
                     <button
                       className="comment-header-action unsaved-comment-shortcut"
@@ -7708,7 +7707,7 @@ export default function Workbench() {
                       aria-label="有一条未保存评论"
                       onClick={resumeCurrentComposer}
                     >
-                      <span>有一条未保存评论</span>
+                      <span>未保存 1</span>
                       <CaretRightIcon aria-hidden="true" size={12} weight="bold" />
                     </button>
                   ) : null}
@@ -7724,7 +7723,7 @@ export default function Workbench() {
                         unfinishedEditedComment.commentId,
                       )}
                     >
-                      <span>有一条未保存修改</span>
+                      <span>未保存修改 1</span>
                       <CaretRightIcon aria-hidden="true" size={12} weight="bold" />
                     </button>
                   ) : null}
@@ -7733,6 +7732,7 @@ export default function Workbench() {
                       className="comment-header-action other-tab-comments-toggle"
                       type="button"
                       data-html-canvas-preserve-selection="true"
+                      aria-label={`其他标签页评论 ${otherTabCommentEntryCount}`}
                       aria-expanded={otherTabCommentsOpen}
                       aria-controls="other-tab-comment-groups"
                       onClick={() => setExpandedOtherTabCommentsKey((current) => (
@@ -7741,11 +7741,12 @@ export default function Workbench() {
                           : otherTabCommentsContextKey
                       ))}
                     >
-                      <span>其他标签页评论 {otherTabCommentEntryCount}</span>
+                      <span>其他标签页 {otherTabCommentEntryCount}</span>
                       <CaretRightIcon aria-hidden="true" size={12} weight="bold" />
                     </button>
                   ) : null}
-                </div>
+                  </div>
+                ) : null}
                 <span className="round-record-counts sr-only">
                   {activeCommentCount} 条评论 · {changeEvents.length} 项直接编辑记录
                 </span>
@@ -7885,9 +7886,7 @@ export default function Workbench() {
                     title={attachmentUploadCount > 0 ? "附件添加完成后可关闭" : "收起并保留草稿"}
                     disabled={attachmentUploadCount > 0}
                     onClick={closeCommentComposer}
-                  >
-                    <XIcon aria-hidden="true" size={15} weight="bold" />
-                  </button>
+                  ><XIcon aria-hidden="true" size={17} weight="bold" /></button>
                 </header>
                 <label htmlFor="round-comment-draft">评论内容</label>
                 {!draftTargetCanSave ? (
@@ -7982,7 +7981,7 @@ export default function Workbench() {
                           }
                         }}
                       >
-                        <PaperclipIcon aria-hidden="true" size={15} weight="bold" />
+                        <PaperclipIcon aria-hidden="true" size={17} weight="bold" />
                       </button>
                       <button
                         className="comment-tool-button"
@@ -7999,7 +7998,7 @@ export default function Workbench() {
                           }
                         }}
                       >
-                        <ImageIcon aria-hidden="true" size={15} weight="bold" />
+                        <ImageIcon aria-hidden="true" size={17} weight="bold" />
                       </button>
                       <button
                         id="composer-delete-button"
@@ -8014,13 +8013,14 @@ export default function Workbench() {
                         }
                         onClick={() => setPendingDeleteCommentId("__composer")}
                       >
-                        <TrashIcon aria-hidden="true" size={15} weight="bold" />
+                        <TrashIcon aria-hidden="true" size={17} weight="bold" />
                       </button>
                       {attachmentUploadCount > 0 ? <small>正在添加附件…</small> : null}
                     </div>
                     <button
                       className="add-comment-button"
                       type="button"
+                      aria-label="评论" title="提交评论"
                       disabled={
                         !draftTargetCanSave
                         || (!draft.trim() && draftAttachments.length === 0)
@@ -8032,8 +8032,7 @@ export default function Workbench() {
                         void addComment();
                       }}
                     >
-                      <ChatCircleTextIcon aria-hidden="true" size={15} weight="bold" />
-                      评论
+                      <CheckCircleIcon aria-hidden="true" size={20} weight="fill" />
                     </button>
                   </footer>
                 )}
@@ -8264,7 +8263,7 @@ export default function Workbench() {
                               }
                             }}
                           >
-                            <PaperclipIcon aria-hidden="true" size={15} weight="bold" />
+                            <PaperclipIcon aria-hidden="true" size={17} weight="bold" />
                           </button>
                           <button
                             className="comment-tool-button"
@@ -8286,7 +8285,7 @@ export default function Workbench() {
                               }
                             }}
                           >
-                            <ImageIcon aria-hidden="true" size={15} weight="bold" />
+                            <ImageIcon aria-hidden="true" size={17} weight="bold" />
                           </button>
                           {editing ? (
                             <>
@@ -8302,7 +8301,7 @@ export default function Workbench() {
                                   cancelCommentEdit();
                                 }}
                               >
-                                <XIcon aria-hidden="true" size={15} weight="bold" />
+                                <XIcon aria-hidden="true" size={17} weight="bold" />
                               </button>
                               <button
                                 className="comment-tool-button confirm-edit"
@@ -8322,7 +8321,7 @@ export default function Workbench() {
                                   confirmCommentEdit(comment.commentId);
                                 }}
                               >
-                                <CheckCircleIcon aria-hidden="true" size={16} weight="fill" />
+                                <CheckCircleIcon aria-hidden="true" size={18} weight="fill" />
                               </button>
                             </>
                           ) : (
@@ -8336,7 +8335,7 @@ export default function Workbench() {
                                 beginCommentEdit(comment);
                               }}
                             >
-                              <PencilSimpleIcon aria-hidden="true" size={15} weight="bold" />
+                              <PencilSimpleIcon aria-hidden="true" size={17} weight="bold" />
                             </button>
                           )}
                           <button
@@ -8353,7 +8352,7 @@ export default function Workbench() {
                               queueReviewCommentFocus(comment.target, comment.commentId);
                             }}
                           >
-                            <TrashIcon aria-hidden="true" size={15} weight="bold" />
+                            <TrashIcon aria-hidden="true" size={17} weight="bold" />
                           </button>
                         </div>
                       </footer>
