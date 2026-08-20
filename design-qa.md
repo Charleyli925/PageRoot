@@ -2195,3 +2195,90 @@ was a 22 px handle instead of the review controls.
 - [x] Content-map panel title is never covered by the expanded toolbar.
 
 final result: passed
+
+## Open-HTML popover: borderless list, compact rows, full name on hover
+
+Date: 2026-08-20
+
+### Source visual truth
+
+A user screenshot of the shipped “打开 HTML” popover, with the verdict: drop the
+borders around 最近打开 and 打开本地 HTML, tighten the information density, let a
+truncated file name be readable on hover, and keep the result minimal and
+elegant. That verdict supersedes the 2026-08-19 entry’s promise that the popover
+body stays “pixel-identical” to the earlier list treatment — the classes are
+still the same ones, but their treatment is now the popover’s own.
+
+### What changed and why
+
+- **No boxes inside a box.** The recent list lost its `1px` card border, white
+  fill and 14px radius, and every row lost its hairline divider; 打开本地 HTML
+  lost its border and card fill too. A popover is already a surface — a second
+  and third framed surface inside it only added weight. Grouping now comes from
+  the 最近打开 section label and whitespace, and each row is a 9px-radius hover
+  band inset 8px from the card edge, like a menu item.
+- **Rows are one line, 30px instead of 58px.** The folder subline left the row;
+  the row is now `HTML icon · name · (state) · time`, so six entries read as one
+  quiet column instead of six stacked cards. Popover height drops from ~490px to
+  ~270px with the same six files.
+- **The full name is on hover, and it carries the folder.** A truncated name is
+  no longer a dead end: hovering a row shows the complete file name plus the
+  folder that used to occupy the second line, so nothing was removed from the
+  interface, only moved to where it is needed.
+- **Chrome quietened to match.** The header tile is 28px, the close button lost
+  its border and box, the per-row caret is gone (the whole row is the button),
+  and the remove `×` is a borderless 24px slot that appears on hover. The file
+  counter is hidden when there is nothing to count.
+
+### Design-language conformance
+
+- Hover uses the single accent family (`--indigo` at 6%) with the name shifting
+  to `--indigo-deep`; no second emphasis colour, no gradient face (2.2).
+- The hover tooltip reuses the shared `[data-tooltip]` mechanism instead of a
+  native `title` (2.5). The one addition is `data-tooltip-wrap="true"`, which
+  lets the existing bubble wrap a long name over two lines rather than run past
+  its own box; the first row flips to `data-tooltip-side="below"` so the bubble
+  never covers the dialog heading.
+- Geometry is stable (2.6): the remove slot keeps its 24px column in the default
+  state and hover only changes opacity, so no row shifts when the pointer
+  enters. Typography stays inside the 9–15px compact scale, icons stay Phosphor,
+  radius stays in the accepted set (16px card / 9px row).
+- Progressive disclosure (2.7) now applies to the row: the destructive action
+  and the full identity of the file appear on demand, the state badge and time
+  stay visible.
+
+### Behavior and accessibility
+
+- Escape, click-outside, focus start on 打开本地 HTML, Tab wrapping and focus
+  return to the “+” button are untouched.
+- The remove button stays in the tab order and `:focus-visible` reveals it, so
+  the hover-only affordance is still keyboard-reachable; `@media (hover: none)`
+  keeps it permanently visible.
+- The tooltip appears on keyboard focus as well as hover, because the shared
+  mechanism binds `:focus-visible`.
+- `prefers-reduced-motion` removes the new hover transitions along with the
+  existing popover animation.
+- The popover no longer scrolls at supported window heights (the list is capped
+  at six rows and the app enforces a 680px minimum), which is what lets the
+  tooltip escape the card; below 560px viewport height it regains
+  `max-height`/`overflow`, where a clipped bubble is the accepted trade.
+
+### Evidence
+
+- `output/design-qa/open-html-popover-rest.png`, `-hover.png`,
+  `-hover-last.png`, `-status.png`, `-error.png`, `-empty.png` — the real
+  component rendered with the real stylesheets at 2× (900×700 viewport),
+  covering rest, first-row and mid-list hover, an AI-processing badge, the amber
+  read-failure banner and the empty list.
+- `npm run gate:edit` passed (876 tests).
+
+### Checklist
+
+- [x] No border or card fill remains around 最近打开 or 打开本地 HTML.
+- [x] Six recent files fit without scrolling and read as one column.
+- [x] A truncated name is fully readable on hover, together with its folder.
+- [x] Hover and focus never move a row or a neighbouring row.
+- [x] Amber read-failure banner and empty state survive the borderless list.
+- [x] One emphasis colour; icons remain Phosphor-only.
+
+final result: passed
