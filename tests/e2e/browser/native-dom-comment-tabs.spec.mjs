@@ -26,6 +26,13 @@ async function switchTab(frame, panelId) {
   }, panelId);
 }
 
+async function openHiddenGlobalCommentComposer(page) {
+  const button = page.locator(".global-comment-button");
+  await expect(button).toBeHidden();
+  await expect(button).toBeEnabled();
+  await button.evaluate((element) => element.click());
+}
+
 async function saveComment(page, frame, caseId, text) {
   await frame.locator(caseSelector(caseId)).click();
   await page.getByRole("toolbar", { name: /编辑/u })
@@ -51,10 +58,7 @@ async function saveComment(page, frame, caseId, text) {
 }
 
 async function saveGlobalComment(page, text) {
-  await page.getByRole("button", {
-    name: "全局评论",
-    exact: true,
-  }).click();
+  await openHiddenGlobalCommentComposer(page);
   const composer = page.getByRole("region", { name: "添加评论" });
   const textbox = composer.getByRole("textbox", { name: "评论内容" });
   await expect(textbox).toBeFocused();
@@ -130,10 +134,7 @@ test("focused comments remain below the sticky rail header and global comments s
     headerBox.y + headerBox.height + 14,
   );
 
-  await page.getByRole("button", {
-    name: "全局评论",
-    exact: true,
-  }).click();
+  await openHiddenGlobalCommentComposer(page);
   const globalComposer = page.getByRole("region", { name: "添加评论" });
   const globalTextbox = globalComposer.getByRole("textbox", {
     name: "评论内容",

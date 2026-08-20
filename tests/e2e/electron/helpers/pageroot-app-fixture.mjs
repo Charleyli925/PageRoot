@@ -48,6 +48,13 @@ const DEFAULT_DIAGNOSTIC_OPERATION_TIMEOUT = 1_000;
 const stopPromiseKey = Symbol("pagerootAppFixtureStopPromise");
 const launchDiagnosticsByPage = new WeakMap();
 
+export async function openHiddenGlobalCommentComposer(page) {
+  const button = page.locator(".global-comment-button");
+  await expect(button).toBeHidden();
+  await expect(button).toBeEnabled();
+  await button.evaluate((element) => element.click());
+}
+
 function redactDiagnosticSecrets(value) {
   return String(value ?? "").replace(
     /(bridgeAuthToken=)[^&\s"'\\]+/giu,
@@ -1211,8 +1218,9 @@ export async function loadedDiskFrame(
   await expect(page.getByRole("button", { name: "项目", exact: true }))
     .toBeEnabled({ timeout });
   if (editable) {
-    await expect(page.getByRole("button", { name: "全局评论", exact: true }))
-      .toBeEnabled({ timeout });
+    const globalCommentButton = page.locator(".global-comment-button");
+    await expect(globalCommentButton).toBeHidden({ timeout });
+    await expect(globalCommentButton).toBeEnabled({ timeout });
   }
   await expect(page.locator('[aria-label="项目读取失败"]')).toHaveCount(0);
   const editor = page.getByTestId("html-canvas-editor").filter({ visible: true }).first();

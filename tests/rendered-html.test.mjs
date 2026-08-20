@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
-import { access } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import test from "node:test";
+
+function lastCssRule(css, selector) {
+  const marker = `${selector} {`;
+  const start = css.lastIndexOf(marker);
+  assert.notEqual(start, -1, `missing CSS rule: ${selector}`);
+  const end = css.indexOf("}", start);
+  assert.notEqual(end, -1, `unterminated CSS rule: ${selector}`);
+  return css.slice(start, end + 1);
+}
 
 async function render(pathname = "/") {
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
@@ -60,4 +69,41 @@ test("server-renders the public workbench without retired hosting or editor surf
     html,
     /codex-preview|_sites-preview|react-loading-skeleton|data-lexical-editor|pageroot-text-editor/iu,
   );
+});
+
+test("top toolbar keeps the approved restrained visual contract", async () => {
+  const css = await readFile(
+    new URL("../app/globals.css", import.meta.url),
+    "utf8",
+  );
+
+  const header = lastCssRule(css, ".workbench-header");
+  assert.match(header, /background:\s*rgb\(253 252 249 \/ 92%\)/u);
+  assert.match(header, /box-shadow:\s*none/u);
+  assert.match(header, /backdrop-filter:\s*blur\(18px\) saturate\(116%\)/u);
+
+  const modeFrame = lastCssRule(css, ".canvas-mode-switch");
+  assert.match(modeFrame, /width:\s*172px/u);
+  assert.match(modeFrame, /height:\s*40px/u);
+  assert.match(modeFrame, /padding:\s*3px/u);
+  assert.match(modeFrame, /border:\s*1px solid rgb\(46 43 58 \/ 7\.5%\)/u);
+  assert.match(modeFrame, /background:\s*transparent/u);
+
+  const selectedLayer = lastCssRule(css, ".canvas-mode-switch::before");
+  assert.match(selectedLayer, /top:\s*2px/u);
+  assert.match(selectedLayer, /width:\s*82px/u);
+  assert.match(selectedLayer, /height:\s*34px/u);
+  assert.match(selectedLayer, /background:\s*rgb\(91 82 219 \/ 7\.5%\)/u);
+  assert.doesNotMatch(selectedLayer, /backdrop-filter|box-shadow|(?:^|\n)\s*border:/u);
+
+  const hiddenGlobalComment = lastCssRule(
+    css,
+    ".header-actions > .global-comment-button",
+  );
+  assert.match(hiddenGlobalComment, /display:\s*none/u);
+
+  const sendButton = lastCssRule(css, ".header-actions .header-send-button");
+  assert.match(sendButton, /height:\s*40px/u);
+  assert.match(sendButton, /margin-left:\s*12px/u);
+  assert.match(sendButton, /box-shadow:\s*0 2px 6px rgb\(65 57 166 \/ 14%\)/u);
 });
