@@ -3380,6 +3380,17 @@ function reviewBootstrap(
     document.documentElement.scrollHeight,
     document.body?.scrollHeight || 0,
   );
+  // Scrollbars shrink the layout viewport below the window height: a vertical
+  // bar narrows the page enough to grow a horizontal bar, and the visible
+  // height then trails the window height by that bar. Measuring the scroll
+  // range against the window height reports a maximum short of where native
+  // scrolling actually lands, and every clamp built on it fights the browser:
+  // at the page end the synchronized page gets yanked backwards.
+  const visibleHeight = () => {
+    const scroller = document.scrollingElement || document.documentElement;
+    return scroller?.clientHeight || innerHeight;
+  };
+  const maximumScrollTop = () => Math.max(0, documentHeight() - visibleHeight());
   const safeKey = (value) => {
     const source = RuntimeVisualString(value || "");
     let result = "";
@@ -3937,7 +3948,7 @@ function reviewBootstrap(
     post("scroll-geometry", {
       scrollGeometry: {
         viewportHeight: innerHeight,
-        maximumScroll: Math.max(0, documentHeight() - innerHeight),
+        maximumScroll: maximumScrollTop(),
         revision: geometryRevision,
         anchors,
       },
@@ -4207,7 +4218,7 @@ function reviewBootstrap(
     });
   };
   const recordFocusScrollCommand = (commandId, top = scrollY, left = scrollX) => {
-    const maximumScroll = Math.max(0, documentHeight() - innerHeight);
+    const maximumScroll = maximumScrollTop();
     const resolvedTop = clamp(Number(top || 0), 0, maximumScroll);
     const resolvedLeft = Math.max(0, Number(left || 0));
     activeScrollCommand = { commandId, top: resolvedTop, left: resolvedLeft };
@@ -4219,7 +4230,7 @@ function reviewBootstrap(
     const top = clamp(
       scrollY + rect.top - Math.max(18, innerHeight * .12),
       0,
-      Math.max(0, documentHeight() - innerHeight),
+      maximumScrollTop(),
     );
     const command = recordFocusScrollCommand(token, top, scrollX);
     scrollTo({ top: command.top, left: command.left, behavior: "auto" });
@@ -4358,7 +4369,7 @@ function reviewBootstrap(
     const gestureId = Math.max(0, Math.trunc(Number(message.gestureId || 0)));
     const force = message.force === true;
     if (!force && (!acceptsFollowerScroll || gestureId !== followerGestureId)) return;
-    const maximumScroll = Math.max(0, documentHeight() - innerHeight);
+    const maximumScroll = maximumScrollTop();
     const top = clamp(Number(message.top || 0), 0, maximumScroll);
     const left = Math.max(0, Number(message.left || 0));
     const commandId = safeKey(message.commandId) || ("review-scroll-" + gestureId);
@@ -5689,7 +5700,31 @@ function reviewBootstrap(
     followerGestureId = 0;
     post("scroll-intent");
   };
-  addEventListener("wheel", announceScrollIntent, { capture: true, passive: true });
+  const wheelPixels = (delta, mode, pageSize) => {
+    const value = Number(delta || 0);
+    if (!Number.isFinite(value) || !value) return 0;
+    if (mode === 1) return value * 16;
+    if (mode === 2) return value * Math.max(1, pageSize);
+    return value;
+  };
+  // Horizontal review scrolling belongs to the pane viewport, not to this
+  // document. A wheel gesture latches onto the first scroller that can consume
+  // its combined delta, so a mixed swipe here keeps the horizontal component
+  // and discards it instead of chaining out to the pane. Hand over what this
+  // document cannot consume; the pane reconciles it against native chaining.
+  const relayHorizontalWheel = (event) => {
+    const deltaX = wheelPixels(event.deltaX, event.deltaMode, innerWidth);
+    if (!deltaX) return;
+    const scroller = document.scrollingElement || document.documentElement;
+    const maximumScroll = Math.max(0, (scroller?.scrollWidth || 0) - innerWidth);
+    const consumable = deltaX > 0 ? scrollX < maximumScroll - 1 : scrollX > 1;
+    if (maximumScroll > 1 && consumable) return;
+    post("wheel-horizontal", { deltaX });
+  };
+  addEventListener("wheel", (event) => {
+    announceScrollIntent();
+    relayHorizontalWheel(event);
+  }, { capture: true, passive: true });
   addEventListener("touchstart", announceScrollIntent, { capture: true, passive: true });
   addEventListener("pointerdown", announceScrollIntent, { capture: true, passive: true });
   addEventListener("keydown", (event) => {

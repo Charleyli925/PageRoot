@@ -56,7 +56,11 @@ import {
 import {
   acceptedRuntimeVisualEnvelope,
 } from "../domain/runtime-visual-contract.js";
-import { ReviewScrollCoordinator } from "../lib/review-scroll-sync.js";
+import {
+  ReviewScrollCoordinator,
+  followerReviewScrollLeft,
+  relayedReviewScrollLeft,
+} from "../lib/review-scroll-sync.js";
 import {
   DEFAULT_REVIEW_STATE,
   reduceReviewState,
@@ -138,6 +142,7 @@ type ReviewMessage = {
   type?: string;
   top?: number;
   left?: number;
+  deltaX?: number;
   commandId?: string;
   gestureId?: number;
   scrollGeometry?: unknown;
@@ -257,7 +262,6 @@ function ReviewDocumentPane({
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const [viewportSize, setViewportSize] = useState({ width: 590, height: 620 });
-  const [viewportScrollLeft, setViewportScrollLeft] = useState(0);
 
   const assignFrame = useCallback((frame: HTMLIFrameElement | null) => {
     iframeRef.current = frame;
@@ -307,7 +311,9 @@ function ReviewDocumentPane({
     if (!layout) return null;
     const left = Math.max(12, Math.min(documentViewportWidth - 12, layout.left)) * scale;
     const top = Math.max(12, layout.top) * scale;
-    const visibleLeft = layout.viewportLeft * scale - viewportScrollLeft;
+    // Horizontal scrolling must not re-render the pane, so the rendered side is
+    // the unscrolled one; pointer entry measures the live position instead.
+    const visibleLeft = layout.viewportLeft * scale;
     const visibleTop = layout.viewportTop * scale;
     const placement = visibleLeft < viewportSize.width * .55 ? "right" : "left";
     const verticalPlacement = visibleTop < 96
@@ -385,10 +391,7 @@ function ReviewDocumentPane({
         tabIndex={0}
         aria-label={`${side === "before" ? "修改前" : "修改后"}画布滚动区`}
         aria-busy={independentTransport && !frameUrl && !loadFailed}
-        onScroll={(event) => {
-          setViewportScrollLeft(event.currentTarget.scrollLeft);
-          onHorizontalScroll(side);
-        }}
+        onScroll={() => onHorizontalScroll(side)}
       >
         {loadFailed ? (
           <div className={styles.frameError} role="alert">
@@ -516,7 +519,11 @@ export default function AiReviewWorkspace({
     after: null,
   });
   const scalesRef = useRef<Record<ReviewSide, number>>({ before: 1, after: 1 });
-  const horizontalFollowerRef = useRef<ReviewSide | null>(null);
+  const horizontalRelayRef = useRef<Record<ReviewSide, { baseline: number; delta: number } | null>>({
+    before: null,
+    after: null,
+  });
+  const horizontalRelayFrameRef = useRef(0);
   const scrollCoordinatorRef = useRef<ReviewScrollCoordinator | null>(null);
   const frameScrollPositionsRef = useRef<Record<ReviewSide, { top: number; left: number }>>({
     before: { top: 0, left: 0 },
@@ -641,6 +648,37 @@ export default function AiReviewWorkspace({
     const scale = scalesRef.current[side];
     viewport.style.setProperty("--review-comment-scroll-x", `${safeLeft * scale}px`);
     viewport.style.setProperty("--review-comment-scroll-y", `${safeTop * scale}px`);
+  }, []);
+
+  // The pane viewport owns horizontal review scrolling, but the wheel lands
+  // inside the frame, where a mixed gesture latches onto the vertically
+  // scrollable document and drops its horizontal component. Apply the relayed
+  // remainder once per frame, after native scroll events for that frame have
+  // been delivered, so a gesture the browser did chain out is not doubled.
+  const relayHorizontalWheel = useCallback((side: ReviewSide, delta: number) => {
+    const viewport = viewportsRef.current[side];
+    if (!viewport || !Number.isFinite(delta) || !delta) return;
+    const pending = horizontalRelayRef.current[side];
+    horizontalRelayRef.current[side] = pending
+      ? { baseline: pending.baseline, delta: pending.delta + delta }
+      : { baseline: viewport.scrollLeft, delta };
+    if (horizontalRelayFrameRef.current) return;
+    horizontalRelayFrameRef.current = window.requestAnimationFrame(() => {
+      horizontalRelayFrameRef.current = 0;
+      (["before", "after"] as ReviewSide[]).forEach((relaySide) => {
+        const relay = horizontalRelayRef.current[relaySide];
+        horizontalRelayRef.current[relaySide] = null;
+        const target = viewportsRef.current[relaySide];
+        if (!relay || !target) return;
+        const next = relayedReviewScrollLeft({
+          baseline: relay.baseline,
+          current: target.scrollLeft,
+          delta: relay.delta,
+          maximum: target.scrollWidth - target.clientWidth,
+        });
+        if (next !== null) target.scrollLeft = next;
+      });
+    });
   }, []);
 
   useEffect(() => {
@@ -1252,6 +1290,10 @@ export default function AiReviewWorkspace({
         scrollCoordinatorRef.current?.handleIntent(message.side);
         return;
       }
+      if (message.type === "wheel-horizontal") {
+        relayHorizontalWheel(message.side, Number(message.deltaX || 0));
+        return;
+      }
       if (message.type === "scroll-position") {
         const top = Number(message.top || 0);
         const left = Number(message.left || 0);
@@ -1325,6 +1367,7 @@ export default function AiReviewWorkspace({
     finishPagePresentation,
     prepareReviewCommentFrame,
     prepareRuntimeVisualFrame,
+    relayHorizontalWheel,
     requestOwnerRuntimeVisualCapture,
     reviewOutline,
     sendState,
@@ -1365,23 +1408,20 @@ export default function AiReviewWorkspace({
   }, [sessionId, updateCommentScrollTransform]);
 
   const handleHorizontalScroll = useCallback((side: ReviewSide) => {
-    if (scrollMode !== "linked" || horizontalFollowerRef.current === side) return;
+    if (scrollModeRef.current !== "linked") return;
     const source = viewportsRef.current[side];
     const followerSide: ReviewSide = side === "before" ? "after" : "before";
     const follower = viewportsRef.current[followerSide];
     if (!source || !follower) return;
-    const sourceMaximum = Math.max(0, source.scrollWidth - source.clientWidth);
-    const followerMaximum = Math.max(0, follower.scrollWidth - follower.clientWidth);
-    horizontalFollowerRef.current = followerSide;
-    follower.scrollLeft = source.scrollLeft <= 1
-      ? 0
-      : sourceMaximum - source.scrollLeft <= 1
-        ? followerMaximum
-        : Math.min(source.scrollLeft, followerMaximum);
-    window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
-      if (horizontalFollowerRef.current === followerSide) horizontalFollowerRef.current = null;
-    }));
-  }, [scrollMode]);
+    const target = followerReviewScrollLeft({
+      sourceLeft: source.scrollLeft,
+      sourceMaximum: source.scrollWidth - source.clientWidth,
+      followerLeft: follower.scrollLeft,
+      followerMaximum: follower.scrollWidth - follower.clientWidth,
+    });
+    if (target === null) return;
+    follower.scrollLeft = target;
+  }, []);
 
   const selectChange = useCallback((changeId: string) => {
     const selectedChange = reviewChanges.find((change) => change.id === changeId);

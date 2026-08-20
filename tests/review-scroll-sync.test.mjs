@@ -4,8 +4,10 @@ import test from "node:test";
 import {
   ReviewScrollCoordinator,
   buildReviewScrollMap,
+  followerReviewScrollLeft,
   mapReviewScrollTop,
   normalizeReviewScrollGeometry,
+  relayedReviewScrollLeft,
 } from "../app/lib/review-scroll-sync.js";
 
 function geometry({ maximumScroll, viewportHeight = 600, revision = 1, anchors }) {
@@ -145,23 +147,30 @@ test("geometry validation rejects malformed cross-frame payloads", () => {
   });
 });
 
-test("high-velocity input emits only the newest follower target for one frame", () => {
+test("a leader position is delivered at once and a same-frame burst keeps only the newest", () => {
   const harness = createHarness();
+  const map = buildReviewScrollMap(beforeGeometry, afterGeometry);
   harness.coordinator.setLinked(true);
   harness.coordinator.updateGeometry("before", beforeGeometry);
   harness.coordinator.updateGeometry("after", afterGeometry);
   harness.coordinator.handleIntent("before");
   harness.coordinator.handlePosition("before", { top: 200, left: 0 });
+  assert.equal(
+    harness.commands.length,
+    1,
+    "the follower must not wait a frame before it starts moving",
+  );
+  assert.equal(harness.commands[0].side, "after");
+  assert.equal(harness.commands[0].top, mapReviewScrollTop(map, "before", 200));
   harness.coordinator.handlePosition("before", { top: 900, left: 0 });
   harness.coordinator.handlePosition("before", { top: 1_700, left: 0 });
+  assert.equal(harness.commands.length, 1, "a same-frame burst must not queue extra commands");
   assert.equal(harness.pendingFrameCount(), 1);
   harness.flushFrame();
-  assert.equal(harness.commands.length, 1);
-  assert.equal(harness.commands[0].side, "after");
-  assert.equal(
-    harness.commands[0].top,
-    mapReviewScrollTop(buildReviewScrollMap(beforeGeometry, afterGeometry), "before", 1_700),
-  );
+  assert.equal(harness.commands.length, 2);
+  assert.equal(harness.commands[1].top, mapReviewScrollTop(map, "before", 1_700));
+  harness.flushFrame();
+  assert.equal(harness.commands.length, 2, "an idle frame boundary must not repeat a target");
 });
 
 test("rapid reversal replaces the target directly without a stale chase animation", () => {
@@ -187,6 +196,7 @@ test("programmatic overview invalidates a queued gesture without discarding its 
   harness.coordinator.handleIntent("before");
   harness.coordinator.handlePosition("before", { top: 1_600, left: 0 });
   const before = harness.coordinator.snapshot();
+  const deliveredBeforeOverview = harness.commands.length;
   assert.equal(harness.pendingFrameCount(), 1);
 
   const gestureId = harness.coordinator.invalidateGesture();
@@ -210,7 +220,11 @@ test("programmatic overview invalidates a queued gesture without discarding its 
     before: { top: 0, left: 0 },
     after: { top: 0, left: 0 },
   });
-  assert.equal(harness.commands.length, 0, "the queued follower command must stay cancelled");
+  assert.equal(
+    harness.commands.length,
+    deliveredBeforeOverview,
+    "the invalidated gesture must not reach the follower again",
+  );
   assert.equal(harness.owners.at(-1).gestureId, gestureId);
 });
 
@@ -270,4 +284,94 @@ test("layout geometry is frozen during a gesture and committed after idle", () =
   assert.equal(harness.coordinator.snapshot().mapRevision, firstRevision);
   harness.advance(141);
   assert.equal(harness.coordinator.snapshot().mapRevision, "1:2");
+});
+
+test("a page beyond a short reported maximum is not yanked back at the page end", () => {
+  const harness = createHarness();
+  harness.coordinator.setLinked(true);
+  harness.coordinator.updateGeometry("before", beforeGeometry);
+  harness.coordinator.updateGeometry("after", afterGeometry);
+  // Scrollbars and frozen geometry both make a reported maximum short, so
+  // native scrolling lands further down than the coordinator was told.
+  harness.coordinator.handleIntent("before");
+  harness.coordinator.handlePosition("before", { top: 3_015, left: 0 });
+  harness.flushFrame();
+  assert.equal(harness.coordinator.snapshot().positions.before.top, 3_015);
+  assert.equal(harness.commands.at(-1).top, 1_350);
+
+  harness.coordinator.handlePosition("after", {
+    top: 1_365,
+    left: 0,
+    commandId: harness.commands.at(-1).commandId,
+  });
+  harness.advance(141);
+  harness.coordinator.handleIntent("after");
+  harness.coordinator.handlePosition("after", { top: 1_365, left: 0 });
+  harness.flushFrame();
+  const takeover = harness.commands.at(-1);
+  assert.equal(takeover.side, "before");
+  assert.ok(
+    takeover.top >= 3_015,
+    "a short maximum must not pull a page back from where native scrolling put it",
+  );
+});
+
+test("horizontal following matches boundaries and stops on the applied echo", () => {
+  assert.equal(followerReviewScrollLeft({
+    sourceLeft: 120,
+    sourceMaximum: 400,
+    followerLeft: 0,
+    followerMaximum: 400,
+  }), 120);
+  assert.equal(followerReviewScrollLeft({
+    sourceLeft: 400,
+    sourceMaximum: 400,
+    followerLeft: 0,
+    followerMaximum: 260,
+  }), 260, "a fully scrolled page must pull the narrower page to its own end");
+  assert.equal(followerReviewScrollLeft({
+    sourceLeft: .4,
+    sourceMaximum: 400,
+    followerLeft: 120,
+    followerMaximum: 260,
+  }), 0);
+  assert.equal(followerReviewScrollLeft({
+    sourceLeft: 120,
+    sourceMaximum: 400,
+    followerLeft: 120,
+    followerMaximum: 400,
+  }), null, "the echo of an applied command must not travel back to its source");
+});
+
+test("a relayed horizontal wheel applies once and yields to native chaining", () => {
+  assert.equal(relayedReviewScrollLeft({
+    baseline: 40,
+    current: 40,
+    delta: 90,
+    maximum: 400,
+  }), 130);
+  assert.equal(relayedReviewScrollLeft({
+    baseline: 40,
+    current: 40,
+    delta: -90,
+    maximum: 400,
+  }), 0, "the relay clamps instead of overscrolling the pane");
+  assert.equal(relayedReviewScrollLeft({
+    baseline: 40,
+    current: 130,
+    delta: 90,
+    maximum: 400,
+  }), null, "a gesture the browser already chained out must not be applied twice");
+  assert.equal(relayedReviewScrollLeft({
+    baseline: 400,
+    current: 400,
+    delta: 90,
+    maximum: 400,
+  }), null, "a pane already at its end reports nothing to apply");
+  assert.equal(relayedReviewScrollLeft({
+    baseline: 40,
+    current: 40,
+    delta: Number.NaN,
+    maximum: 400,
+  }), null);
 });
