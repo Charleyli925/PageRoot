@@ -3474,15 +3474,15 @@ body {
 }
 
 .header-send-button small {
-  min-width: 20px;
-  height: 20px;
+  min-width: 17px;
+  height: 17px;
   display: grid;
   place-items: center;
-  padding: 0 5px;
-  border-radius: 7px;
+  padding: 0 4px;
+  border-radius: 6px;
   background: rgb(255 255 255 / 16%);
   color: #fff;
-  font-size: 9px;
+  font-size: 8px;
 }
 
 .header-send-button[data-copied="true"] {
@@ -8331,14 +8331,14 @@ body {
 
 .canvas-mode-switch {
   position: relative;
-  width: 172px;
-  height: 40px;
+  width: 147px;
+  height: 34px;
   flex: none;
   gap: 0;
-  padding: 3px;
-  margin-right: 8px;
+  padding: 2.5px;
+  margin-right: 7px;
   border: 1px solid rgb(46 43 58 / 7.5%);
-  border-radius: 12px;
+  border-radius: 10px;
   background: transparent;
   box-shadow: none;
 }
@@ -8346,11 +8346,11 @@ body {
 .canvas-mode-switch::before {
   position: absolute;
   z-index: 0;
-  top: 2px;
-  left: 3px;
-  width: 82px;
-  height: 34px;
-  border-radius: 9px;
+  top: 1.5px;
+  left: 2.5px;
+  width: 70px;
+  height: 29px;
+  border-radius: 8px;
   background: rgb(91 82 219 / 7.5%);
   pointer-events: none;
   content: "";
@@ -8359,7 +8359,7 @@ body {
 }
 
 .canvas-mode-switch:has(button:nth-of-type(2)[aria-pressed="true"])::before {
-  transform: translateX(82px);
+  transform: translateX(70px);
 }
 
 .header-actions .canvas-mode-switch button,
@@ -8368,18 +8368,18 @@ body {
 .header-actions .canvas-mode-switch button[aria-pressed="true"]:hover {
   position: relative;
   z-index: 1;
-  width: 82px;
-  min-width: 82px;
-  height: 34px;
-  min-height: 34px;
+  width: 70px;
+  min-width: 70px;
+  height: 29px;
+  min-height: 29px;
   flex: none;
-  gap: 6px;
+  gap: 5px;
   padding: 0;
-  border-radius: 9px;
+  border-radius: 8px;
   background: transparent;
   box-shadow: none;
   color: #77757f;
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 600;
   transform: none;
 }
@@ -8390,8 +8390,8 @@ body {
 }
 
 .canvas-mode-switch button > svg {
-  width: 18px;
-  height: 18px;
+  width: 15px;
+  height: 15px;
   flex: none;
   color: currentcolor;
   transition: color 140ms ease;
@@ -8407,15 +8407,15 @@ body {
 
 .header-actions > .project-button,
 .header-actions > .recent-run-button {
-  height: 40px;
-  min-height: 40px;
-  gap: 7px;
-  padding: 0 11px;
-  border-radius: 9px;
+  height: 34px;
+  min-height: 34px;
+  gap: 6px;
+  padding: 0 9px;
+  border-radius: 8px;
   background: transparent !important;
   box-shadow: none;
   color: #65646c;
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 600;
   transform: none;
 }
@@ -8430,8 +8430,8 @@ body {
 
 .header-actions > .project-button > svg,
 .header-actions > .recent-run-button > svg {
-  width: 18px;
-  height: 18px;
+  width: 15px;
+  height: 15px;
   flex: none;
 }
 
@@ -8441,24 +8441,24 @@ body {
 }
 
 .header-actions .header-send-button {
-  height: 40px;
-  min-height: 40px;
-  margin-left: 12px;
-  padding: 0 15px 0 14px;
-  border-radius: 10px;
-  box-shadow: 0 2px 6px rgb(65 57 166 / 14%);
-  font-size: 15px;
+  height: 34px;
+  min-height: 34px;
+  margin-left: 10px;
+  padding: 0 13px 0 12px;
+  border-radius: 9px;
+  box-shadow: 0 2px 5px rgb(65 57 166 / 14%);
+  font-size: 13px;
   font-weight: 650;
   transform: none;
 }
 
 .header-actions .header-send-button:hover:not(:disabled) {
-  box-shadow: 0 3px 8px rgb(65 57 166 / 16%);
+  box-shadow: 0 3px 7px rgb(65 57 166 / 16%);
   transform: none;
 }
 
 .header-send-button[data-copied="true"] {
-  box-shadow: 0 2px 6px rgb(47 124 92 / 14%);
+  box-shadow: 0 2px 5px rgb(47 124 92 / 14%);
 }
 
 @media (prefers-reduced-motion: reduce) {

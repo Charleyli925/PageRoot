@@ -83,21 +83,21 @@ test("top toolbar keeps the approved restrained visual contract", async () => {
   assert.match(header, /backdrop-filter:\s*blur\(18px\) saturate\(116%\)/u);
 
   const modeFrame = lastCssRule(css, ".canvas-mode-switch");
-  assert.match(modeFrame, /width:\s*172px/u);
-  assert.match(modeFrame, /height:\s*40px/u);
-  assert.match(modeFrame, /padding:\s*3px/u);
+  assert.match(modeFrame, /width:\s*147px/u);
+  assert.match(modeFrame, /height:\s*34px/u);
+  assert.match(modeFrame, /padding:\s*2\.5px/u);
   assert.match(modeFrame, /border:\s*1px solid rgb\(46 43 58 \/ 7\.5%\)/u);
   assert.match(modeFrame, /background:\s*transparent/u);
 
   const selectedLayer = lastCssRule(css, ".canvas-mode-switch::before");
-  assert.match(selectedLayer, /top:\s*2px/u);
-  assert.match(selectedLayer, /width:\s*82px/u);
-  assert.match(selectedLayer, /height:\s*34px/u);
+  assert.match(selectedLayer, /top:\s*1\.5px/u);
+  assert.match(selectedLayer, /width:\s*70px/u);
+  assert.match(selectedLayer, /height:\s*29px/u);
   assert.match(selectedLayer, /background:\s*rgb\(91 82 219 \/ 7\.5%\)/u);
   assert.doesNotMatch(selectedLayer, /backdrop-filter|box-shadow|(?:^|\n)\s*border:/u);
 
   const sendButton = lastCssRule(css, ".header-actions .header-send-button");
-  assert.match(sendButton, /height:\s*40px/u);
-  assert.match(sendButton, /margin-left:\s*12px/u);
-  assert.match(sendButton, /box-shadow:\s*0 2px 6px rgb\(65 57 166 \/ 14%\)/u);
+  assert.match(sendButton, /height:\s*34px/u);
+  assert.match(sendButton, /margin-left:\s*10px/u);
+  assert.match(sendButton, /box-shadow:\s*0 2px 5px rgb\(65 57 166 \/ 14%\)/u);
 });
