@@ -1655,7 +1655,7 @@ export default function AiReviewWorkspace({
             disabled={accepting}
             onClick={(event) => openConfirmation("accept", event.currentTarget)}
           >
-            <CheckCircleIcon aria-hidden="true" size={18} weight="fill" />
+            <CheckCircleIcon aria-hidden="true" size={15} weight="fill" />
             {accepting ? "正在采纳并核对…" : "采纳 AI 修改"}
           </button>
         </WorkbenchHeaderActions>
