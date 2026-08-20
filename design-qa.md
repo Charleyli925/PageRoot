@@ -2128,3 +2128,70 @@ Date: 2026-08-20
   behavior remain unchanged.
 
 final result: passed
+
+## Review toolbar as a real overlay: open by default, no page displacement
+
+Date: 2026-08-20
+
+### What changed and why
+
+The review toolbar looked like an overlay but behaved like a layout row: the
+pinned state pushed a 117 px top padding into the canvas grid, so every
+expand/collapse re-laid out both pages, moved the pane headers and re-measured
+the projection. It also started collapsed, so the first thing a reviewer saw
+was a 22 px handle instead of the review controls.
+
+- The toolbar now enters review already expanded and floats above both pages.
+  The pages keep the full canvas at every moment; expanding or collapsing only
+  slides the overlay itself (one 210 ms transform, no reflow, no re-measure).
+- The dock no longer swallows pointer events: only the glass toolbar and its
+  handle are hit-testable, so a collapsed toolbar leaves the top of both pages
+  clickable instead of covering it with an invisible full-width strip.
+- Reveal is now click-only. The old `:hover` reveal fired anywhere in that
+  invisible strip and, with the dock's transparent padding no longer capturing
+  the pointer, would have flickered at the overlay's own edge.
+- The content-map drawer still steps down while the toolbar is expanded, on the
+  same curve, so the overlay never covers the map panel title.
+
+### Design-language conformance
+
+- Material unchanged: the same glass recipe, radius, shadow and violet family;
+  no new color, size or copy.
+- Honest surfaces (§3): the toolbar is now genuinely a surface floating over
+  content, which is what its blur was already claiming.
+- Quiet first: one transform per state change; reduced-motion now silences the
+  drawer offset too, and the removed grid transition left nothing behind.
+
+### Evidence
+
+- Real Electron review run, expanded default state:
+  `output/design-qa/review-annotation-all.png` — both pages start at the canvas
+  top and pass under the toolbar; page content is visible immediately below it.
+- Real Electron review run, collapsed state (`PAGEROOT_CAPTURE_REVIEW=1`):
+  `output/design-qa/ai-review-comment.png` — handle at top center, both pane
+  headers and the full page visible, nothing shifted.
+- `npm run gate:edit` passed. `playwright.ai-closed-loop.config.mjs`: 17
+  passed; the review geometry test now asserts the overlay relationship and
+  that collapsing does not move the pane header.
+  `playwright.review-annotation.config.mjs`: 1 passed.
+
+### Known consequence
+
+- While the toolbar is expanded it covers the two pane headers and the first
+  ~90 px of both pages; that is the point of an overlay, and one click on the
+  handle reveals them. Reviewers who want the page edge collapse the toolbar.
+- The page-end scroll-sync test needed an explicit "both pages start at the
+  same offset" precondition. The taller viewport made a pre-existing gap
+  visible: a harness-driven `scrollIntoViewIfNeeded` can leave the coordinator
+  holding a stale follower position, which the next gesture then preserves as a
+  fixed takeover offset. The assertion itself is unchanged.
+
+### Checklist
+
+- [x] Toolbar is expanded when review opens.
+- [x] Expanding or collapsing never moves, resizes or re-measures the pages.
+- [x] Collapsed state leaves the top of both pages interactive.
+- [x] Only the handle click changes the state; hover does nothing.
+- [x] Content-map panel title is never covered by the expanded toolbar.
+
+final result: passed

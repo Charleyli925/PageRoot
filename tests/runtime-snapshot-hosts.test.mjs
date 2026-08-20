@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   EDIT_RUNTIME_HOST_LIMIT,
+  RUNTIME_SNAPSHOT_HOST_ENUMERATION_LIMIT,
   RUNTIME_SNAPSHOT_HOST_LIMIT,
   resolveEditRuntimeHosts,
   resolveRuntimeSnapshotHosts,
@@ -76,6 +77,26 @@ test("direct source Canvas remains conservatively pairable by its exact source p
   assert.equal(resolved.hosts[0].before.kind, "canvas");
   assert.deepEqual(resolved.hosts[0].before.binding.identityAttributes, []);
   assert.deepEqual(resolved.hosts[0].before.binding.path, [1, 0]);
+});
+
+test("host enumeration may exceed the capture budget so callers can prioritize, but stays bounded", () => {
+  const canvases = Array.from(
+    { length: RUNTIME_SNAPSHOT_HOST_ENUMERATION_LIMIT + 8 },
+    () => "<canvas></canvas>",
+  ).join("");
+  const html = `<!doctype html><html><body>${canvases}</body></html>`;
+  const defaulted = resolveRuntimeSnapshotHosts({ beforeHtml: html, afterHtml: html });
+  assert.equal(defaulted?.hosts.length, RUNTIME_SNAPSHOT_HOST_LIMIT, "the default remains the capture budget");
+  const enumerated = resolveRuntimeSnapshotHosts({
+    beforeHtml: html,
+    afterHtml: html,
+    maximum: RUNTIME_SNAPSHOT_HOST_ENUMERATION_LIMIT + 8,
+  });
+  assert.equal(
+    enumerated?.hosts.length,
+    RUNTIME_SNAPSHOT_HOST_ENUMERATION_LIMIT,
+    "enumeration is clamped to the contract candidate limit",
+  );
 });
 
 test("Edit runtime admits only uniquely bound empty non-global hosts", () => {

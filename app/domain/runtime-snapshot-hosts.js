@@ -8,6 +8,10 @@ import {
 
 export const RUNTIME_SNAPSHOT_HOST_LIMIT =
   RUNTIME_VISUAL_CONTRACT.pageBudget.visualLimit;
+// Enumeration may look further than the per-page capture budget so a caller
+// can prioritize comment-anchored hosts before truncating to the budget.
+export const RUNTIME_SNAPSHOT_HOST_ENUMERATION_LIMIT =
+  RUNTIME_VISUAL_CONTRACT.candidateLimit;
 export const EDIT_RUNTIME_HOST_LIMIT = EDIT_AUTHOR_RUNTIME_BUDGET.hostCount;
 
 const DIRECT_HOST_KINDS = new Map([
@@ -327,7 +331,7 @@ export function resolveRuntimeSnapshotHosts({
     return null;
   }
   const limit = Number.isSafeInteger(maximum)
-    ? Math.max(0, Math.min(RUNTIME_SNAPSHOT_HOST_LIMIT, maximum))
+    ? Math.max(0, Math.min(RUNTIME_SNAPSHOT_HOST_ENUMERATION_LIMIT, maximum))
     : RUNTIME_SNAPSHOT_HOST_LIMIT;
   const hosts = [];
   for (const element of beforeIndex.elements) {

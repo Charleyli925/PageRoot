@@ -83,9 +83,9 @@
   padding: 8px 10px 22px;
   transform: translateY(calc(-100% + 22px));
   transition: transform 210ms cubic-bezier(.2, .8, .2, 1);
+  pointer-events: none;
 }
 
-.canvasToolbarDock:hover,
 .canvasReview[data-toolbar-open="true"] .canvasToolbarDock {
   transform: translateY(0);
 }
@@ -111,6 +111,7 @@
     0 2px 5px rgb(20 20 36 / 4%),
     0 9px 24px rgb(20 20 36 / 9%),
     inset 0 1px 0 rgb(255 255 255 / 65%);
+  pointer-events: auto;
   backdrop-filter: blur(20px) saturate(180%);
 }
 
@@ -130,10 +131,11 @@
   background: rgb(255 255 255 / 82%);
   color: #574fab;
   box-shadow: 0 5px 10px rgb(31 28 51 / 10%);
-  backdrop-filter: blur(20px) saturate(180%);
   font-size: 9px;
   font-weight: 740;
   transform: translateX(-50%);
+  pointer-events: auto;
+  backdrop-filter: blur(20px) saturate(180%);
 }
 
 .canvasReviewTitle {
@@ -421,11 +423,6 @@
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 3px;
   padding: 3px;
-  transition: padding-top 210ms cubic-bezier(.2, .8, .2, 1);
-}
-
-.canvasReview[data-toolbar-open="true"] .canvasGrid {
-  padding-top: 117px;
 }
 
 .canvasGrid[data-view="before"],
@@ -697,6 +694,7 @@
   right: 0;
   bottom: 10px;
   width: calc(42px + var(--map-panel-width));
+  transition: top 210ms cubic-bezier(.2, .8, .2, 1);
   pointer-events: none;
 }
 
@@ -1183,7 +1181,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .canvasToolbarDock,
-  .canvasGrid,
+  .mapDrawer,
   .mapHandle,
   .mapPanel,
   .reviewCommentMarker,

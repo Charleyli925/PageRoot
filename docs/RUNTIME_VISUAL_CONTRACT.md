@@ -117,6 +117,13 @@ The owner always has these containment properties:
 - one isolated rect pass, at most one PNG per host, bounded PNG/pixel budgets,
   a main-process deadline and forced cleanup.
 
+After the first offscreen paint the owner waits one bounded settle period
+(`captureSettleMs`) before measuring and sampling, because chart libraries
+initialize asynchronously and animate after that first paint; the settle
+outlasts the default one-second entrance animation so two sides are not
+sampled at different animation phases. The settle wait stays subordinate to
+the owner deadline and never retries.
+
 It returns only a captured/unavailable key plus an envelope, PNG
 bytes/hash/bitmap size, the owner-measured CSS-pixel layout width/height and a
 `renderedTextSha256`. The hash is calculated in the isolated owner from a
@@ -130,7 +137,11 @@ channel, binding, image data or text summary.
 
 After both static Review frames are ready, `AiReviewWorkspace` sends one
 bounded before/after pair through the same owner and validates the same snapshot
-envelope and parser. It compares exactly that one pair in three ordered steps:
+envelope and parser. Host enumeration may look beyond the capture budget (up to
+`candidateLimit`) so that comment-anchored hosts are ordered first before the
+list is truncated to the 32-snapshot budget; the owner drains its pixel and
+byte budgets in that same priority order. It compares exactly that one pair in
+three ordered steps:
 
 1. Bitmap and owner-measured layout dimensions differ strictly.
 2. Matching captured hosts with different `renderedTextSha256` values differ
@@ -142,11 +153,38 @@ envelope and parser. It compares exactly that one pair in three ordered steps:
    (0–255 channel scale) emits a fact; PNG byte length, encoder output and a
    small tile/sub-pixel raster difference are not facts by themselves.
 
+The comparison result is a tri-state verdict per candidate, because dimming a
+chart host as context requires positive pixel evidence:
+
+- **changed** — one of the three steps above emitted a fact;
+- **verified unchanged** — both sides were captured and the decoded pixels are
+  identical or within the raster budget, and the surface is not near-uniform;
+- **unverified** — the capture is unavailable on either side, the PNG pair
+  cannot be decoded, or both decoded surfaces are near-uniform (per-channel
+  spread of at most 3), which is the signature of a chart host that never
+  rendered (blocked network, script failure, unfinished initialization).
+
+Only a verified-unchanged host may dim. An unverified host surfaces as
+suspected only when a user comment anchors on it or an enclosing element; a
+global page comment anchors on `<body>` and never marks hosts as commented,
+and an uncommented unverified host keeps the plain dimmed presentation so a
+page full of unverifiable charts cannot flood the review with amber frames. A
+suspected host keeps full visibility on both pages through a dim-mask
+exemption and receives one suspected fact: the after page draws an amber
+dashed "疑似有改动" frame while the before page stays unmarked. Suspected
+facts are always their own synthetic changes (`suspected-<outlineId>`) and
+never fold into, or overwrite, a confirmed change or its outline slot; they
+claim an outline slot only when the section has no confirmed change. Losing
+the capture capability entirely leaves every commented runtime host
+unverified rather than silently unchanged.
+
 Canvas-internal text has no DOM/SVG semantic representation at this boundary,
 so it follows the bounded raster rule; this contract does not add OCR, canvas
 instrumentation, script causality or a second capture. A qualifying difference
-emits one opaque `{candidateKey, changeId}` fact per changed source host.
-Outline aggregation may update the content map but never chooses geometry. Each
+emits one opaque `{candidateKey, changeId, verdict}` fact per source host,
+where `verdict` is `changed` or `suspected`; any other verdict rejects the
+whole marker batch. Outline aggregation may update the content map but never
+chooses geometry. Each
 side's first managed bootstrap privately binds those keys to exact source
 `Element` references by a path plus complete narrow fingerprint; later
 bootstrap reads are unbound. The trusted parent delivers facts through a
@@ -155,7 +193,8 @@ full source SHA. The bootstrap keeps a disposable `Map<Element, facts[]>` and
 unions it with static serialized facts. It never writes runtime marker
 attributes, and replacement, disconnect or fingerprint drift has no outline
 fallback. An unavailable, malformed, late or mismatched result adds no runtime
-fact and has no user-visible capture status.
+fact and has no user-visible capture status beyond the suspected presentation
+described above.
 
 There is no second fresh pair, deterministic coordinator, Review cache or
 capture/retry UI. Static Review never waits for the owner, and empty or failed
@@ -164,7 +203,8 @@ runtime delivery never clears static facts.
 ## Shared limits
 
 `app/domain/runtime-visual-contract.js` is the frozen production limit source:
-contract version, source/session identity, 1.5-second owner deadline, a
+contract version, source/session identity, 4-second owner deadline, a
+1,200-millisecond post-paint settle wait, a
 320–4,096 by 320–2,400 viewport, 32 snapshots, 4,194,304 pixels, a
 2,000,000-byte individual PNG cap, a 4,096-pixel single-edge cap and
 16,000,000 aggregate PNG bytes, plus a 65,536-byte pre-hash visible-text

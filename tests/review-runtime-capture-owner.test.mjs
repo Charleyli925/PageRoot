@@ -252,6 +252,7 @@ function fakeOwner({
   rects = ownerRects(),
   loadURL = async () => {},
   ownerDeadlineMs,
+  captureSettleMs = 0,
   releaseIsolatedSession,
   png = PNG,
 } = {}) {
@@ -363,6 +364,7 @@ function fakeOwner({
       state.released.push(session);
     }),
     ...(ownerDeadlineMs === undefined ? {} : { ownerDeadlineMs }),
+    captureSettleMs,
     randomToken: () => `capture-${state.partitions.length + 1}`,
   });
   return { controller, state };
@@ -782,5 +784,33 @@ test("runtime snapshot owner reports its hard deadline and cleans up", async () 
   assert.deepEqual(timedOut, { outcome: "timed-out", reason: "owner-deadline" });
   assert.ok(elapsedMs < 600, `owner response waited ${elapsedMs.toFixed(1)}ms`);
   assert.deepEqual(state.revoked, ["review-preview-0001"]);
+  assert.equal(state.windows[0].destroyed, true);
+});
+
+test("capture settles after the first paint before measuring or sampling pixels", async () => {
+  const { controller, state } = fakeOwner({ captureSettleMs: 60 });
+  const startedAt = performance.now();
+  const captured = await controller.capture(request());
+  const elapsedMs = performance.now() - startedAt;
+  assert.equal(captured.outcome, "captured");
+  assert.ok(elapsedMs >= 55, `capture sampled after ${elapsedMs.toFixed(1)}ms without settling`);
+  assert.deepEqual(
+    state.captureEvents.map(({ type }) => type),
+    ["paint", "measure", "capture"],
+    "the settle wait must not reorder paint, measurement and capture",
+  );
+});
+
+test("the settle wait stays subordinate to the owner deadline", async () => {
+  const { controller, state } = fakeOwner({
+    captureSettleMs: 5_000,
+    ownerDeadlineMs: 40,
+    releaseIsolatedSession: () => new Promise(() => {}),
+  });
+  const startedAt = performance.now();
+  const timedOut = await controller.capture(request());
+  const elapsedMs = performance.now() - startedAt;
+  assert.deepEqual(timedOut, { outcome: "timed-out", reason: "owner-deadline" });
+  assert.ok(elapsedMs < 600, `owner response waited ${elapsedMs.toFixed(1)}ms`);
   assert.equal(state.windows[0].destroyed, true);
 });
