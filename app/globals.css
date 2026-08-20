@@ -4390,87 +4390,65 @@ body {
 
 .recent-files {
   display: grid;
-  gap: 8px;
+  gap: 4px;
 }
 
 .recent-files > header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 3px;
+  padding: 0 6px;
 }
 
 .recent-files > header strong {
-  font-size: 11px;
+  color: #6f7180;
+  font-size: 10px;
 }
 
 .recent-files > header small {
-  color: #92949d;
+  color: #a3a5ae;
   font-size: 9px;
 }
 
 .recent-files > div {
-  overflow: hidden;
-  border: 1px solid #e4e5e9;
-  border-radius: 14px;
-  background: #fff;
+  display: grid;
+  gap: 1px;
 }
 
 .recent-file-row {
+  position: relative;
   width: 100%;
   min-width: 0;
-  min-height: 58px;
+  min-height: 30px;
   display: grid;
-  grid-template-columns: 26px minmax(0, 1fr) auto auto 14px;
+  grid-template-columns: 16px minmax(0, 1fr) auto auto;
   align-items: center;
-  gap: 9px;
-  padding: 9px 11px;
+  gap: 8px;
+  padding: 0 4px 0 6px;
   border: 0;
-  border-bottom: 1px solid #eff0f2;
+  border-radius: 9px;
   background: transparent;
   color: #555761;
   text-align: left;
 }
 
-.recent-file-row:last-child {
-  border-bottom: 0;
-}
-
-.recent-file-row:hover {
-  background: #f8f8fb;
-  color: var(--indigo-deep);
-}
-
-.recent-file-row > span {
-  min-width: 0;
-  display: grid;
-  gap: 2px;
-}
-
-.recent-file-row strong,
-.recent-file-row small {
+.recent-file-row strong {
   overflow: hidden;
+  color: #32343a;
+  font-size: 10.5px;
+  font-weight: 620;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.recent-file-row strong {
-  color: #32343a;
-  font-size: 10px;
-}
-
-.recent-file-row small,
 .recent-file-row time {
-  color: #8d8f99;
+  color: #a0a2ab;
   font-size: 9px;
-}
-
-.recent-file-row time {
   white-space: nowrap;
 }
 
 .recent-project-status {
-  padding: 3px 6px;
+  padding: 2px 6px;
   border-radius: 999px;
   background: #efeff4;
   color: #666873;
@@ -4498,49 +4476,69 @@ body {
 
 .recent-projects-empty {
   display: block;
-  padding: 22px;
-  color: #92949d;
+  padding: 16px;
+  color: #a3a5ae;
   text-align: center;
   font-size: 10px;
 }
 
 .open-local-button {
   width: 100%;
-  min-height: 58px;
+  min-height: 32px;
   display: grid !important;
-  grid-template-columns: 38px minmax(0, 1fr) 16px;
+  grid-template-columns: 22px minmax(0, 1fr) 13px;
   align-items: center !important;
-  gap: 10px !important;
-  padding: 9px 11px !important;
-  border: 1px solid #e4e5e9 !important;
-  border-radius: 14px !important;
-  background: #fff !important;
+  gap: 8px !important;
+  padding: 0 5px 0 3px !important;
+  border: 0 !important;
+  border-radius: 9px !important;
+  background: transparent !important;
   text-align: left;
+  transition: background 120ms ease;
+}
+
+.open-local-button:hover {
+  background: rgb(81 71 220 / 6%) !important;
 }
 
 .open-local-button > span:first-child {
-  width: 38px;
-  height: 38px;
+  width: 22px;
+  height: 22px;
   display: grid;
   place-items: center;
-  border-radius: 10px;
+  border-radius: 7px;
   background: var(--indigo-soft);
   color: var(--indigo-deep);
 }
 
 .open-local-button > span:nth-child(2) {
-  display: grid;
-  gap: 2px;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
 }
 
 .open-local-button strong {
   color: #303138;
-  font-size: 11px !important;
+  font-size: 10.5px !important;
+  font-weight: 640;
+  white-space: nowrap;
 }
 
 .open-local-button small {
-  color: #8b8d96;
+  overflow: hidden;
+  color: #a3a5ae;
   font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.open-local-button > svg {
+  color: #b5b7bf;
+}
+
+.open-local-button:hover > svg {
+  color: var(--indigo-deep);
 }
 
 .project-advanced {
@@ -5389,36 +5387,63 @@ body {
 
 .recent-projects-error {
   justify-content: space-between;
+  padding: 8px 10px;
   border: 0;
-  border-bottom: 1px solid #ead9b9;
+  border-radius: 9px;
+  margin-bottom: 3px;
 }
 
 .recent-file-item {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 38px;
-  border-bottom: 1px solid #eff0f2;
+  grid-template-columns: minmax(0, 1fr) 24px;
+  align-items: center;
+  border-radius: 9px;
+  transition: background 120ms ease;
 }
 
-.recent-file-item:last-child {
-  border-bottom: 0;
+.recent-file-item:hover {
+  background: rgb(81 71 220 / 6%);
 }
 
-.recent-file-item .recent-file-row {
-  border-bottom: 0;
+.recent-file-item:hover .recent-file-row strong {
+  color: var(--indigo-deep);
 }
 
 .recent-file-remove {
+  width: 24px;
+  height: 24px;
   display: grid;
   place-items: center;
   border: 0;
-  border-left: 1px solid #eff0f2;
-  background: #fff;
-  color: #999ba3;
+  border-radius: 7px;
+  background: transparent;
+  color: #b0b2ba;
+  opacity: 0;
+  transition: opacity 120ms ease, background 120ms ease, color 120ms ease;
+}
+
+.recent-file-item:hover .recent-file-remove,
+.recent-file-remove:focus-visible {
+  opacity: 1;
 }
 
 .recent-file-remove:hover {
-  background: #fff6f5;
+  background: #fdeeec;
   color: #9a4e48;
+}
+
+@media (hover: none) {
+  .recent-file-remove {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .recent-file-item,
+  .recent-file-remove,
+  .open-local-button {
+    transition: none;
+  }
 }
 
 @media (max-width: 1180px) {
@@ -7774,6 +7799,15 @@ body {
 [data-tooltip-side="below"]:focus-visible::after,
 [data-tooltip-side="below"]:focus-within::after {
   transform: translate(-50%, 0);
+}
+
+/* Long, truncated labels (a full file name) need the tooltip to wrap instead of
+   running past its own box; the attribute may carry a second line. */
+[data-tooltip-wrap="true"]::after {
+  max-width: 240px;
+  line-height: 1.35;
+  white-space: pre-line;
+  word-break: break-word;
 }
 
 .window-file-rename-field {

@@ -9,9 +9,7 @@
   position: fixed;
   z-index: 241;
   width: min(380px, calc(100vw - 24px));
-  max-height: min(72vh, 560px);
-  overflow: auto;
-  padding: 14px 14px 12px;
+  padding: 11px 8px 9px;
   border: 1px solid #e4e3ea;
   border-radius: 16px;
   background: linear-gradient(180deg, #ffffff 0%, #fcfcfd 100%);
@@ -25,19 +23,30 @@
   animation: popIn 150ms ease-out;
 }
 
+/* The list is capped at six rows, so the popover fits without scrolling in the
+   supported window height; only a short viewport needs its own scroll, where a
+   clipped row tooltip is the acceptable trade. */
+@media (max-height: 560px) {
+  .popover {
+    max-height: calc(100vh - 24px);
+    overflow: auto;
+  }
+}
+
 .header {
   display: grid;
-  grid-template-columns: 34px minmax(0, 1fr) 28px;
-  gap: 10px;
+  grid-template-columns: 28px minmax(0, 1fr) 24px;
+  gap: 9px;
   align-items: center;
+  padding: 0 6px;
 }
 
 .icon {
-  width: 34px;
-  height: 34px;
+  width: 28px;
+  height: 28px;
   display: grid;
   place-items: center;
-  border-radius: 10px;
+  border-radius: 9px;
   background: var(--indigo-soft);
   color: var(--indigo-deep);
   box-shadow: 0 0 0 1px rgb(97 88 214 / 8%) inset;
@@ -64,26 +73,26 @@
 }
 
 .close {
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   display: grid;
   place-items: center;
-  border: 1px solid #ececf2;
-  border-radius: 9px;
-  background: #fbfbfd;
-  color: #6b6d77;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #9a9ca5;
   transition: background 120ms ease, color 120ms ease;
 }
 
 .close:hover {
-  background: #f2f2f6;
+  background: #f1f1f6;
   color: #32343a;
 }
 
 .body {
   display: grid;
-  gap: 10px;
-  margin-top: 13px;
+  gap: 8px;
+  margin-top: 10px;
 }
 
 .close:focus-visible,
