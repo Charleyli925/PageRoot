@@ -14,6 +14,7 @@ test("AI smoke configuration selects review activation and broad-edit regression
   assert.deepEqual(selected, [
     "a verified AI result stays pending through desktop review until the user accepts it",
     "a broad but related AI return is accepted without a target-scope error",
+    "a rewrite outside <main> is still reviewed",
   ]);
   assert.doesNotMatch(
     source,
