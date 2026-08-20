@@ -22,6 +22,8 @@ const DEFAULT_TERMINAL_OUTPUT_BYTES = 1024 * 1024;
 const MAX_TERMINAL_OUTPUT_BYTES = 4 * 1024 * 1024;
 const DEFAULT_STARTUP_TIMEOUT_MS = 15_000;
 const DEFAULT_TURN_TIMEOUT_MS = 10 * 60_000;
+const MAX_PROMPT_BYTES = 256 * 1024;
+const MAX_SESSION_UPDATES = 512;
 const PROCESS_EXIT_GRACE_MS = 2_000;
 const PROCESS_PROTOCOL_DRAIN_MS = 250;
 const MAX_ACP_FRAME_BYTES = MAX_HTML_BYTES + (2 * 1024 * 1024);
@@ -134,6 +136,71 @@ function sameFileIdentity(left, right) {
     && left.size === right.size;
 }
 
+function sameExecutableIdentity(left, right) {
+  return Boolean(
+    left
+    && right
+    && left.dev === right.dev
+    && left.ino === right.ino
+    && left.nlink === right.nlink
+    && left.size === right.size
+    && left.mtimeMs === right.mtimeMs
+    && left.sha256 === right.sha256,
+  );
+}
+
+async function openVerifiedAgentExecutable(executable, expectedExecutable) {
+  const expectedPath = assertAbsolutePath(expectedExecutable?.path, "expected Qoder executable");
+  if (executable !== expectedPath) {
+    throw policyError(
+      "ACP_AGENT_EXECUTABLE_CHANGED",
+      "The ACP Agent executable path changed after PageRoot preflight.",
+    );
+  }
+  const handle = await open(
+    executable,
+    fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW || 0),
+  ).catch(() => {
+    throw policyError(
+      "ACP_AGENT_EXECUTABLE_CHANGED",
+      "The ACP Agent executable could not be reopened after PageRoot preflight.",
+    );
+  });
+  try {
+    const before = await handle.stat();
+    if (!before.isFile() || before.nlink !== 1 || (before.mode & 0o022) !== 0) {
+      throw policyError(
+        "ACP_AGENT_EXECUTABLE_CHANGED",
+        "The ACP Agent executable is no longer a protected regular file.",
+      );
+    }
+    const bytes = await handle.readFile();
+    const after = await handle.stat();
+    const identity = {
+      dev: after.dev,
+      ino: after.ino,
+      nlink: after.nlink,
+      size: after.size,
+      mtimeMs: after.mtimeMs,
+      sha256: sha256(bytes),
+    };
+    if (
+      !sameFileIdentity(before, after)
+      || bytes.byteLength !== after.size
+      || !sameExecutableIdentity(identity, expectedExecutable.identity)
+    ) {
+      throw policyError(
+        "ACP_AGENT_EXECUTABLE_CHANGED",
+        "The ACP Agent executable identity changed after PageRoot preflight.",
+      );
+    }
+    return handle;
+  } catch (cause) {
+    await handle.close().catch(() => {});
+    throw cause;
+  }
+}
+
 function assertIdentity(actual, expected, label) {
   if (actual !== expected) {
     throw policyError(
@@ -205,6 +272,12 @@ async function verifiedOutputParent(outputPath, root) {
       "The Candidate output directory resolves outside the Request root.",
     );
   }
+}
+
+async function canonicalFuturePath(value, label) {
+  const requested = assertAbsolutePath(value, label);
+  const canonicalParent = await realpath(path.dirname(requested));
+  return path.join(canonicalParent, path.basename(requested));
 }
 
 function expectedManifestFile(manifest, relativePath) {
@@ -287,9 +360,40 @@ async function officialFinalizer({ requestRoot, requestId, attemptId }) {
   return Object.freeze({
     command: expectedCommand,
     args: Object.freeze(expectedArgs),
-    env: Object.freeze({}),
+    env: Object.freeze(process.versions.electron
+      ? { ELECTRON_RUN_AS_NODE: "1" }
+      : {}),
     cwd: requestRoot,
   });
+}
+
+async function assertRuntimeProcessingAuthority(policy) {
+  const runtimeAuthority = await verifiedJsonFile(
+    policy.runtimePath,
+    policy.controlRoot,
+    "Runtime authority",
+  );
+  const runtime = runtimeAuthority.value;
+  const activeRequest = runtime.activeRequest;
+  if (
+    runtime.schemaVersion !== "4.0.0"
+    || runtime.projectId !== policy.projectId
+    || runtime.documentId !== policy.documentId
+    || runtime.activeCandidateId !== null
+    || !activeRequest
+    || activeRequest.requestId !== policy.requestId
+    || activeRequest.attemptId !== policy.attemptId
+    || activeRequest.status !== "processing"
+    || activeRequest.candidateId !== null
+    || activeRequest.inputManifestSha256 !== policy.inputManifestSha256
+    || activeRequest.candidateOutputSha256 !== null
+    || activeRequest.candidateRecordSha256 !== null
+  ) {
+    throw policyError(
+      "ACP_RUNTIME_AUTHORITY_DRIFT",
+      "PageRoot no longer authorizes mutations for this ACP Attempt.",
+    );
+  }
 }
 
 async function verifiedJsonFile(filePath, root, label) {
@@ -435,7 +539,7 @@ export async function loadQoderAcpTaskPolicy(options) {
   ) {
     throw policyError(
       "ACP_INPUT_MANIFEST_SHAPE_MISMATCH",
-      "The ACP spike only accepts PageRoot's exact current frozen input manifest shape.",
+      "The Qoder ACP driver only accepts PageRoot's exact current frozen input manifest shape.",
     );
   }
 
@@ -465,7 +569,8 @@ export async function loadQoderAcpTaskPolicy(options) {
     readableFiles.set(entry.path, entry);
   }
 
-  const normalizedPromptPath = assertAbsolutePath(promptPath, "promptPath");
+  const requestedPromptPath = assertAbsolutePath(promptPath, "promptPath");
+  const normalizedPromptPath = await realpath(requestedPromptPath).catch(() => requestedPromptPath);
   const expectedPromptPath = path.join(requestRoot, "PROMPT.md");
   const promptEntry = readableFiles.get(normalizedPromptPath);
   if (
@@ -485,7 +590,7 @@ export async function loadQoderAcpTaskPolicy(options) {
     );
   }
 
-  const normalizedOutputPath = assertAbsolutePath(outputPath, "outputPath");
+  const normalizedOutputPath = await canonicalFuturePath(outputPath, "outputPath");
   await verifiedOutputParent(normalizedOutputPath, requestRoot);
   const expectedOutputPath = path.join(
     requestRoot,
@@ -503,11 +608,14 @@ export async function loadQoderAcpTaskPolicy(options) {
   if (await fileExists(normalizedOutputPath)) {
     throw policyError(
       "ACP_OUTPUT_PREEXISTS",
-      "The ACP spike requires a fresh Attempt output path.",
+      "The Qoder ACP driver requires a fresh Attempt output path.",
     );
   }
 
-  const normalizedCompletionPath = assertAbsolutePath(completionPath, "completionPath");
+  const normalizedCompletionPath = await canonicalFuturePath(
+    completionPath,
+    "completionPath",
+  );
   const expectedCompletionPath = path.join(
     requestRoot,
     "attempts",
@@ -523,7 +631,7 @@ export async function loadQoderAcpTaskPolicy(options) {
   if (await fileExists(normalizedCompletionPath)) {
     throw policyError(
       "ACP_COMPLETION_PREEXISTS",
-      "The ACP spike requires a fresh Attempt completion path.",
+      "The Qoder ACP driver requires a fresh Attempt completion path.",
     );
   }
 
@@ -536,6 +644,8 @@ export async function loadQoderAcpTaskPolicy(options) {
   return Object.freeze({
     [POLICY_BRAND]: true,
     requestRoot,
+    controlRoot,
+    runtimePath: path.join(controlRoot, "runtime-state.json"),
     manifestPath: manifestFile.path,
     promptPath: normalizedPromptPath,
     outputPath: normalizedOutputPath,
@@ -644,7 +754,7 @@ class AcpFrameGuard extends Transform {
   }
 }
 
-function qoderEnvironment(overrides = {}) {
+export function qoderAcpEnvironment(overrides = {}) {
   assertObject(overrides, "Qoder environment");
   const result = {};
   for (const name of SAFE_QODER_ENVIRONMENT_NAMES) {
@@ -877,6 +987,8 @@ export function createRestrictedQoderAcpHost(policy, {
     const release = await acquireMutationLock();
     try {
       assertActive(signal);
+      await assertRuntimeProcessingAuthority(policy);
+      assertActive(signal);
       return await operation(() => assertActive(signal));
     } finally {
       release();
@@ -1042,9 +1154,13 @@ export function createRestrictedQoderAcpHost(policy, {
             await handle.close();
           }
           checkActive();
+          await assertRuntimeProcessingAuthority(policy);
+          checkActive();
           await renameOutput(temporaryPath, policy.outputPath);
           temporaryPath = null;
           try {
+            checkActive();
+            await assertRuntimeProcessingAuthority(policy);
             checkActive();
           } catch (error) {
             const published = await readVerifiedRegularFile(
@@ -1095,6 +1211,8 @@ export function createRestrictedQoderAcpHost(policy, {
             "The Candidate output is not ready for finalization.",
           );
         }
+        await assertRuntimeProcessingAuthority(policy);
+        checkActive();
         finalizerStarted = true;
         finalizedOutputSha256 = sha256(outputInformation.bytes);
         const outputByteLimit = terminalOutputLimit(params.outputByteLimit);
@@ -1268,7 +1386,7 @@ export function createRestrictedQoderAcpHost(policy, {
 
 function buildClient(host) {
   return acp
-    .client({ name: "pageroot-qoder-acp-spike" })
+    .client({ name: "pageroot-agent-bridge" })
     .onRequest(acp.methods.client.session.requestPermission, ({ params, signal }) => (
       host.requestPermission(params, signal)
     ))
@@ -1318,6 +1436,57 @@ function timeoutController(timeoutMs) {
   };
 }
 
+function cancellationGate(signal) {
+  if (signal !== undefined && signal !== null && !(signal instanceof AbortSignal)) {
+    throw new TypeError("ACP cancellationSignal must be an AbortSignal.");
+  }
+  if (!signal) {
+    return {
+      promise: new Promise(() => {}),
+      dispose() {},
+    };
+  }
+  let rejectCancelled;
+  const promise = new Promise((_resolve, reject) => {
+    rejectCancelled = reject;
+  });
+  const cancel = () => {
+    const reason = policyError("ACP_CANCELLED", "The PageRoot ACP task was cancelled.");
+    if (signal.reason instanceof Error) reason.cause = signal.reason;
+    rejectCancelled(reason);
+  };
+  if (signal.aborted) cancel();
+  else signal.addEventListener("abort", cancel, { once: true });
+  return {
+    promise,
+    dispose() {
+      signal.removeEventListener("abort", cancel);
+    },
+  };
+}
+
+function combinedSignal(...signals) {
+  const active = signals.filter(Boolean);
+  if (active.length === 0) return undefined;
+  if (active.length === 1) return active[0];
+  return AbortSignal.any(active);
+}
+
+function normalizedAgentInfo(value) {
+  const agentInfo = value && typeof value === "object" ? value : {};
+  const clean = (input, fallback) => {
+    const normalized = String(input || fallback)
+      .replace(/[\u0000-\u001f\u007f]/gu, "")
+      .trim()
+      .slice(0, 160);
+    return normalized || fallback;
+  };
+  return Object.freeze({
+    name: clean(agentInfo.name, "unknown"),
+    version: clean(agentInfo.version, "unknown"),
+  });
+}
+
 function summarizeUpdate(update) {
   const type = String(update?.sessionUpdate || "unknown");
   if (type === "tool_call" || type === "tool_call_update") {
@@ -1337,6 +1506,8 @@ export async function runAcpTask({
   onEvent = () => {},
   startupTimeoutMs = DEFAULT_STARTUP_TIMEOUT_MS,
   turnTimeoutMs = DEFAULT_TURN_TIMEOUT_MS,
+  cancellationSignal,
+  expectedAgentName,
 }) {
   const isStream = Boolean(connection?.readable && connection?.writable);
   const isAgentApp = typeof connection?.connect === "function"
@@ -1344,16 +1515,35 @@ export async function runAcpTask({
   if (!isStream && !isAgentApp) {
     throw new TypeError("An ACP Stream or AgentApp connection is required.");
   }
+  if (typeof prompt !== "string" || !prompt.trim()) {
+    throw new TypeError("ACP prompt must be a non-empty string.");
+  }
+  if (Buffer.byteLength(prompt, "utf8") > MAX_PROMPT_BYTES) {
+    throw policyError("ACP_PROMPT_TOO_LARGE", "The ACP prompt exceeds 256 KiB.");
+  }
+  if (
+    expectedAgentName !== undefined
+    && !(expectedAgentName instanceof RegExp)
+  ) {
+    throw new TypeError("expectedAgentName must be a RegExp.");
+  }
   const host = createRestrictedQoderAcpHost(policy, { onEvent });
   const client = buildClient(host);
   const startupTimeout = timeoutController(startupTimeoutMs);
+  const cancellation = cancellationGate(cancellationSignal);
   const updates = [];
+  let droppedUpdateCount = 0;
   const cancelStartup = () => {
     void host.cancel().catch(() => {});
   };
   startupTimeout.controller.signal.addEventListener("abort", cancelStartup, { once: true });
+  cancellationSignal?.addEventListener("abort", cancelStartup, { once: true });
   try {
-    return await client.connectWith(connection, async (context) => {
+    const connected = client.connectWith(connection, async (context) => {
+      const startupSignal = combinedSignal(
+        startupTimeout.controller.signal,
+        cancellationSignal,
+      );
       const initialized = await Promise.race([
         context.request(
           acp.methods.agent.initialize,
@@ -1364,14 +1554,15 @@ export async function runAcpTask({
               terminal: true,
             },
             clientInfo: {
-              name: "pageroot-qoder-acp-spike",
-              title: "PageRoot Qoder ACP Spike",
-              version: "0.1.0",
+              name: "pageroot-agent-bridge",
+              title: "PageRoot Agent Bridge",
+              version: "1.0.0",
             },
           },
-          { cancellationSignal: startupTimeout.controller.signal },
+          { cancellationSignal: startupSignal },
         ),
         startupTimeout.expired,
+        cancellation.promise,
       ]);
       if (initialized.protocolVersion !== acp.PROTOCOL_VERSION) {
         throw policyError(
@@ -1379,23 +1570,36 @@ export async function runAcpTask({
           `Qoder selected unsupported ACP protocol ${initialized.protocolVersion}.`,
         );
       }
+      const agentInfo = normalizedAgentInfo(initialized.agentInfo);
+      if (expectedAgentName) expectedAgentName.lastIndex = 0;
+      if (expectedAgentName && !expectedAgentName.test(agentInfo.name)) {
+        throw policyError(
+          "ACP_AGENT_IDENTITY_MISMATCH",
+          "The selected ACP executable did not identify itself as Qoder CLI.",
+        );
+      }
       onEvent(Object.freeze({
         kind: "initialized",
         protocolVersion: initialized.protocolVersion,
-        agentName: initialized.agentInfo?.name || "unknown",
-        agentVersion: initialized.agentInfo?.version || "unknown",
+        agentName: agentInfo.name,
+        agentVersion: agentInfo.version,
       }));
 
       const session = await Promise.race([
         context.buildSession({
           cwd: policy.requestRoot,
           mcpServers: [],
-        }).start({ cancellationSignal: startupTimeout.controller.signal }),
+        }).start({ cancellationSignal: startupSignal }),
         startupTimeout.expired,
+        cancellation.promise,
       ]);
       startupTimeout.clear();
       host.bindSessionId(session.sessionId);
       const turnTimeout = timeoutController(turnTimeoutMs);
+      const turnSignal = combinedSignal(
+        turnTimeout.controller.signal,
+        cancellationSignal,
+      );
       const cancelTurn = () => {
         void host.cancel().catch(() => {});
         void context.notify(acp.methods.agent.session.cancel, {
@@ -1403,17 +1607,20 @@ export async function runAcpTask({
         }).catch(() => {});
       };
       turnTimeout.controller.signal.addEventListener("abort", cancelTurn, { once: true });
+      cancellationSignal?.addEventListener("abort", cancelTurn, { once: true });
       try {
         const promptPromise = session.prompt(prompt, {
-          cancellationSignal: turnTimeout.controller.signal,
+          cancellationSignal: turnSignal,
         });
         void promptPromise.catch(() => {});
         for (;;) {
           const message = await Promise.race([
             session.nextUpdate(),
             turnTimeout.expired,
+            cancellation.promise,
           ]);
           if (message.kind === "stop") {
+            onEvent(Object.freeze({ kind: "turn-stopping", stopReason: message.stopReason }));
             const completion = await host.assertTurnCompleted();
             onEvent(Object.freeze({ kind: "turn-stopped", stopReason: message.stopReason }));
             return {
@@ -1422,21 +1629,34 @@ export async function runAcpTask({
               stopReason: message.stopReason,
               completion,
               updates,
+              droppedUpdateCount,
             };
           }
           const summary = summarizeUpdate(message.update);
-          updates.push(summary);
-          onEvent(Object.freeze({ kind: "session-update", ...summary }));
+          if (updates.length < MAX_SESSION_UPDATES) {
+            updates.push(summary);
+            onEvent(Object.freeze({ kind: "session-update", ...summary }));
+          } else {
+            droppedUpdateCount += 1;
+            if (droppedUpdateCount === 1) {
+              onEvent(Object.freeze({ kind: "session-updates-truncated" }));
+            }
+          }
         }
       } finally {
         turnTimeout.controller.signal.removeEventListener("abort", cancelTurn);
+        cancellationSignal?.removeEventListener("abort", cancelTurn);
         turnTimeout.clear();
         session.dispose();
       }
     });
+    void connected.catch(() => {});
+    return await Promise.race([connected, cancellation.promise]);
   } finally {
     startupTimeout.controller.signal.removeEventListener("abort", cancelStartup);
+    cancellationSignal?.removeEventListener("abort", cancelStartup);
     startupTimeout.clear();
+    cancellation.dispose();
     await host.dispose();
   }
 }
@@ -1448,6 +1668,7 @@ function signalProcessGroup(child, signal) {
     return true;
   } catch (error) {
     if (error?.code === "ESRCH") return false;
+    if (error?.code === "EPERM") return false;
     throw error;
   }
 }
@@ -1472,7 +1693,9 @@ function processGroupExists(child) {
     return true;
   } catch (error) {
     if (error?.code === "ESRCH") return false;
-    if (error?.code === "EPERM") return true;
+    if (error?.code === "EPERM") {
+      return child.exitCode === null && child.signalCode === null;
+    }
     throw error;
   }
 }
@@ -1486,7 +1709,7 @@ async function waitForProcessGroupExit(child, timeoutMs) {
 }
 
 async function terminateProcess(child, { processGroup = false } = {}) {
-  if (!child) return;
+  if (!child) return true;
   const alreadyExited = child.exitCode !== null || child.signalCode !== null;
   signalProcess(child, "SIGTERM", { processGroup });
   if (!alreadyExited) {
@@ -1510,6 +1733,10 @@ async function terminateProcess(child, { processGroup = false } = {}) {
     signalProcess(child, "SIGKILL", { processGroup });
     await waitForExit(child).catch(() => {});
   }
+  if (processGroup) return !processGroupExists(child);
+  return !Number.isSafeInteger(child.pid)
+    || child.exitCode !== null
+    || child.signalCode !== null;
 }
 
 export async function runQoderAcpTask({
@@ -1521,7 +1748,13 @@ export async function runQoderAcpTask({
   onEvent = () => {},
   startupTimeoutMs,
   turnTimeoutMs,
+  cancellationSignal,
+  expectedAgentName,
+  expectedExecutable,
 }) {
+  if (cancellationSignal?.aborted) {
+    throw policyError("ACP_CANCELLED", "The PageRoot ACP task was cancelled.");
+  }
   const requestedExecutable = assertAbsolutePath(command, "Qoder ACP command");
   const executable = await realpath(requestedExecutable).catch(() => {
     throw policyError("ACP_AGENT_EXECUTABLE_INVALID", "The ACP Agent executable is unavailable.");
@@ -1536,20 +1769,30 @@ export async function runQoderAcpTask({
   await access(executable, fsConstants.X_OK).catch(() => {
     throw policyError("ACP_AGENT_EXECUTABLE_INVALID", "The ACP Agent executable is not executable.");
   });
+  const executableHandle = expectedExecutable
+    ? await openVerifiedAgentExecutable(executable, expectedExecutable)
+    : null;
   const stderr = { value: "", truncated: false };
   const processGroup = process.platform !== "win32";
-  const child = spawn(executable, [...args], {
-    cwd: policy.requestRoot,
-    env: qoderEnvironment(environment),
-    detached: processGroup,
-    shell: false,
-    stdio: ["pipe", "pipe", "pipe"],
-  });
+  let child;
+  try {
+    child = spawn(executable, [...args], {
+      cwd: policy.requestRoot,
+      env: qoderAcpEnvironment(environment),
+      detached: processGroup,
+      shell: false,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+  } finally {
+    await executableHandle?.close().catch(() => {});
+  }
   const childExitPromise = waitForExit(child);
   void childExitPromise.catch(() => {});
+  let turnStopObserved = false;
   const earlyExitPromise = childExitPromise.then(
     async (status) => {
       await new Promise((resolve) => setTimeout(resolve, PROCESS_PROTOCOL_DRAIN_MS));
+      if (turnStopObserved) return new Promise(() => {});
       throw policyError(
         "ACP_AGENT_EXITED_EARLY",
         "The ACP Agent process exited before the task completed.",
@@ -1579,12 +1822,18 @@ export async function runQoderAcpTask({
     Readable.toWeb(guardedStdout),
   );
   try {
+    const observeEvent = (event) => {
+      if (event?.kind === "turn-stopping") turnStopObserved = true;
+      onEvent(event);
+    };
     const result = await Promise.race([
       runAcpTask({
         connection: stream,
         policy,
         prompt,
-        onEvent,
+        onEvent: observeEvent,
+        cancellationSignal,
+        expectedAgentName,
         ...(startupTimeoutMs ? { startupTimeoutMs } : {}),
         ...(turnTimeoutMs ? { turnTimeoutMs } : {}),
       }),
@@ -1619,6 +1868,11 @@ export async function runQoderAcpTask({
     throw error;
   } finally {
     child.stdin?.end();
-    await terminateProcess(child, { processGroup });
+    if (!(await terminateProcess(child, { processGroup }))) {
+      throw policyError(
+        "ACP_PROCESS_CLEANUP_UNCONFIRMED",
+        "The ACP Agent process group could not be confirmed stopped.",
+      );
+    }
   }
 }

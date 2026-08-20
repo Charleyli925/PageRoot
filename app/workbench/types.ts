@@ -175,13 +175,29 @@ export type QoderHandoffResult = {
   reason: string | null;
 };
 
-export type QoderHandoffUiStatus = "copying" | "copied" | "failed";
+export type QoderHandoffUiStatus =
+  | "copying"
+  | "copied"
+  | "starting"
+  | "running"
+  | "completed"
+  | "failed"
+  | "interrupted"
+  | "cancelling"
+  | "cancelled";
 
 export type ProjectQoderHandoffState = {
   sourcePath: string;
   requestId: string;
   attemptId: string;
+  mode?: "clipboard" | "qoder-acp";
   status: QoderHandoffUiStatus;
+  phase?: string;
+  agentName?: string | null;
+  agentVersion?: string | null;
+  errorCode?: string | null;
+  errorMessage?: string | null;
+  retryable?: boolean;
 };
 
 export type DesktopIntegrationsApi = {

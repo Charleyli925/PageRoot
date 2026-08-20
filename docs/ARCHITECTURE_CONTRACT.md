@@ -85,13 +85,21 @@ The renderer's main workspace facts are partitioned as follows:
   unknown-write authority reconciliation, close/switch drain and narrow native
   editor-restore host port. It publishes through `ProjectRulesSession` and is
   not a second editor-state owner;
-- `RunSession`: current/background run projections, Qoder status, background
-  outcomes, the one preparing/frozen/uncertain submission lock, and operation
-  locks;
-- `RunWorkflow`: Request freeze/persisted-boundary verification, unknown-POST
-  authority reconciliation, tracked-run polling, cancellation, conflict
-  commands and confirmed clipboard handoff. It publishes through `RunSession`
-  and never creates a second run store;
+- `RunSession`: current/background run projections, per-Request Agent delivery
+  status, background outcomes, the one preparing/frozen/uncertain submission
+  lock, and operation locks. ACP events remain bounded presentation facts and
+  never become completion authority;
+- `RunWorkflow`: pre-Request Agent readiness probe, Request freeze/persisted-boundary
+  verification, safely fenced same-Request Agent start/retry, unknown-POST authority
+  reconciliation, tracked-run polling, stop-before-durable-cancel ordering,
+  conflict commands and confirmed clipboard fallback. It publishes through
+  `RunSession` and never creates a second run store;
+- Bridge `AgentBridgeService`: ephemeral trusted-local CLI discovery tickets,
+  task-keyed ACP child/session lifetime, persistent crash/orphan launch fence,
+  bounded public progress and cleanup.
+  It never owns or writes Request/Candidate/Version state; task authority is
+  re-derived from the registered Repository/runtime record, and only the
+  official finalizer plus Repository status path can publish a Candidate;
 - `VersionSession`: immutable Version records plus the current/history
   projection facts;
 - `VersionWorkflow`: Version operation identity/generation, Bridge version

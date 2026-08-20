@@ -25,7 +25,7 @@ import {
   loadQoderAcpTaskPolicy,
   runAcpTask,
   runQoderAcpTask,
-} from "../scripts/qoder-acp-spike-client.mjs";
+} from "../scripts/qoder-acp-client.mjs";
 import { sha256 } from "../scripts/lifecycle-core.mjs";
 import { ProjectFileRepository } from "../scripts/project-file-repository.mjs";
 
@@ -130,6 +130,28 @@ test("Qoder ACP policy freezes identities, hashes, and real files", async (t) =>
     loadQoderAcpTaskPolicy(fixture.options),
     (error) => error?.code === "ACP_FROZEN_INPUT_DRIFT",
   );
+});
+
+test("Qoder ACP policy canonicalizes macOS /var aliases without weakening path checks", async (t) => {
+  if (process.platform !== "darwin") {
+    t.skip("macOS path alias coverage");
+    return;
+  }
+  const fixture = await createFixture(t);
+  if (!fixture.requestPath.startsWith("/private/var/")) {
+    t.skip("temporary root is not using the /private/var alias");
+    return;
+  }
+  const alias = (value) => value.replace(/^\/private\/var\//u, "/var/");
+  const policy = await loadQoderAcpTaskPolicy({
+    requestPath: alias(fixture.options.requestPath),
+    promptPath: alias(fixture.options.promptPath),
+    outputPath: alias(fixture.options.outputPath),
+    completionPath: alias(fixture.options.completionPath),
+  });
+  assert.equal(policy.requestRoot, fixture.requestPath);
+  assert.equal(policy.promptPath, fixture.options.promptPath);
+  assert.equal(policy.outputPath, fixture.options.outputPath);
 });
 
 test("Qoder ACP policy rejects symlinked frozen input", async (t) => {
@@ -348,6 +370,43 @@ test("restricted Qoder ACP host exposes only frozen reads, Candidate write, and 
   assert.ok(events.some((event) => event.kind === "terminal-exited"));
 });
 
+test("finalizer spawn failure retains one diagnostic output and forbids replay", async (t) => {
+  const fixture = await createFixture(t);
+  const host = createRestrictedQoderAcpHost(fixture.policy, {
+    spawnProcess: () => {
+      const error = new Error("synthetic finalizer spawn failure");
+      error.code = "ENOENT";
+      throw error;
+    },
+  });
+  t.after(() => host.dispose());
+  const sessionId = "session_finalizer_spawn_failure";
+  host.bindSessionId(sessionId);
+  const candidate = "<!doctype html><html><head><title>Retained</title></head><body>Retained output</body></html>\n";
+  await host.writeTextFile({
+    sessionId,
+    path: fixture.outputPath,
+    content: candidate,
+  });
+  const terminalRequest = {
+    sessionId,
+    command: fixture.finalizer.command,
+    args: fixture.finalizer.args,
+    cwd: fixture.finalizer.cwd,
+    env: Object.entries(fixture.finalizer.env).map(([name, value]) => ({ name, value })),
+  };
+  await assert.rejects(
+    host.createTerminal(terminalRequest),
+    /synthetic finalizer spawn failure/u,
+  );
+  assert.equal(await readFile(fixture.outputPath, "utf8"), candidate);
+  await assert.rejects(readFile(fixture.completionPath), (error) => error?.code === "ENOENT");
+  await assert.rejects(
+    host.createTerminal(terminalRequest),
+    (error) => error?.code === "ACP_FINALIZER_ALREADY_STARTED",
+  );
+});
+
 test("restricted Qoder ACP host rejects cancelled and late mutating requests", async (t) => {
   const fixture = await createFixture(t);
   const host = createRestrictedQoderAcpHost(fixture.policy);
@@ -393,6 +452,31 @@ test("restricted Qoder ACP host rejects cancelled and late mutating requests", a
     (error) => error?.code === "ACP_HOST_CANCELLING",
   );
   assert.equal(await readFile(fixture.outputPath, "utf8"), candidate);
+});
+
+test("restricted Qoder ACP host rechecks durable runtime authority before every mutation", async (t) => {
+  const fixture = await createFixture(t);
+  const host = createRestrictedQoderAcpHost(fixture.policy);
+  host.bindSessionId("session_authority_drift");
+  const runtimePath = path.join(
+    fixture.target.projectRootPath,
+    ".pageroot",
+    "runtime-state.json",
+  );
+  const runtime = JSON.parse(await readFile(runtimePath, "utf8"));
+  runtime.activeRequest = null;
+  runtime.activeCandidateId = null;
+  await writeFile(runtimePath, `${JSON.stringify(runtime, null, 2)}\n`, "utf8");
+
+  await assert.rejects(
+    host.writeTextFile({
+      sessionId: "session_authority_drift",
+      path: fixture.outputPath,
+      content: "<!doctype html><html><body><h1>Late</h1></body></html>\n",
+    }),
+    (error) => error?.code === "ACP_RUNTIME_AUTHORITY_DRIFT",
+  );
+  await host.dispose();
 });
 
 test("Qoder ACP mutation lock closes cancel and finalizer overlap races", async (t) => {
@@ -516,17 +600,19 @@ function createSyntheticAgent(fixture, observed) {
     })
     .onRequest(acp.methods.agent.session.prompt, async ({ params, client }) => {
       observed.prompt = params;
-      await client.notify(acp.methods.client.session.update, {
-        sessionId,
-        update: {
-          sessionUpdate: "tool_call",
-          toolCallId: "tool_synthetic",
-          title: "Build Candidate",
-          kind: "edit",
-          status: "in_progress",
-          locations: [{ path: fixture.outputPath }],
-        },
-      });
+      for (let index = 0; index < (observed.updateCount || 1); index += 1) {
+        await client.notify(acp.methods.client.session.update, {
+          sessionId,
+          update: {
+            sessionUpdate: "tool_call",
+            toolCallId: `tool_synthetic_${index}`,
+            title: "Build Candidate",
+            kind: "edit",
+            status: "in_progress",
+            locations: [{ path: fixture.outputPath }],
+          },
+        });
+      }
       const permission = await client.request(
         acp.methods.client.session.requestPermission,
         {
@@ -603,6 +689,7 @@ const app = acp.agent({ name: "pageroot-stdio-agent" })
     return { sessionId };
   })
   .onRequest(acp.methods.agent.session.prompt, async ({ client }) => {
+    if (config.hang) return new Promise(() => {});
     await client.request(acp.methods.client.fs.readTextFile, {
       sessionId,
       path: config.manifestPath,
@@ -712,6 +799,25 @@ test("ACP ClientApp completes a synthetic PageRoot Candidate turn", async (t) =>
   assert.ok(events.some((event) => event.kind === "turn-stopped"));
 });
 
+test("ACP session progress retains and publishes only a bounded update prefix", async (t) => {
+  const fixture = await createFixture(t);
+  const observed = { updateCount: 520 };
+  const events = [];
+  const result = await runAcpTask({
+    connection: createSyntheticAgent(fixture, observed),
+    policy: fixture.policy,
+    prompt: "Complete the bounded progress fixture.",
+    onEvent: (event) => events.push(event),
+    startupTimeoutMs: 1_000,
+    turnTimeoutMs: 4_000,
+  });
+
+  assert.equal(result.updates.length, 512);
+  assert.equal(result.droppedUpdateCount, 8);
+  assert.equal(events.filter((event) => event.kind === "session-update").length, 512);
+  assert.equal(events.filter((event) => event.kind === "session-updates-truncated").length, 1);
+});
+
 test("ACP stdio transport completes the same synthetic Candidate contract", async (t) => {
   const fixture = await createFixture(t);
   const candidate = "<!doctype html><html><head><title>Stdio Candidate</title></head><body><h1>ACP stdio Candidate</h1></body></html>\n";
@@ -779,6 +885,30 @@ test("ACP stdio transport accepts a valid completed turn before immediate Agent 
     ...IDENTITIES,
   });
   assert.equal(status.status, "candidate-ready");
+});
+
+test("ACP stdio transport binds the preflight executable identity before spawn", async (t) => {
+  const fixture = await createFixture(t);
+  await assert.rejects(
+    runQoderAcpTask({
+      command: process.execPath,
+      args: ["--version"],
+      policy: fixture.policy,
+      prompt: "must not spawn",
+      expectedExecutable: {
+        path: process.execPath,
+        identity: {
+          dev: -1,
+          ino: -1,
+          nlink: 1,
+          size: 0,
+          mtimeMs: 0,
+          sha256: `sha256:${"0".repeat(64)}`,
+        },
+      },
+    }),
+    (error) => error?.code === "ACP_AGENT_EXECUTABLE_CHANGED",
+  );
 });
 
 test("ACP stdio transport fails immediately on process errors and cleans orphaned groups", async (t) => {
@@ -926,4 +1056,27 @@ test("ACP turn timeout fails closed and requests session cancellation", async (t
     (error) => error?.code === "ACP_TIMEOUT",
   );
   assert.equal(cancelled, true);
+});
+
+test("external cancellation closes the ACP mutation surface and terminates stdio", async (t) => {
+  const fixture = await createFixture(t);
+  const scriptPath = await createStdioAgentScript(fixture);
+  const controller = new AbortController();
+  const running = runQoderAcpTask({
+    command: process.execPath,
+    args: [scriptPath, JSON.stringify({
+      requestPath: fixture.requestPath,
+      hang: true,
+    })],
+    policy: fixture.policy,
+    prompt: "wait for cancellation",
+    cancellationSignal: controller.signal,
+    startupTimeoutMs: 2_000,
+    turnTimeoutMs: 10_000,
+  });
+  setTimeout(() => controller.abort(new Error("cancel test")), 150);
+  await assert.rejects(
+    running,
+    (error) => error?.code === "ACP_CANCELLED",
+  );
 });

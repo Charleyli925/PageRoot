@@ -164,6 +164,8 @@ function createHarness({
     status: [],
     cancel: [],
     resolve: [],
+    preflight: [],
+    startAgent: [],
     handoff: [],
     unlock: 0,
     fence: 0,
@@ -171,7 +173,7 @@ function createHarness({
   const client = {
     async createRequest(request) {
       calls.createRequest.push(request);
-      return { activeRun: runRecord({ sourcePath }) };
+      return { activeRun: runRecord({ sourcePath, agentDelivery: request.agentDelivery }) };
     },
     async workspace(nextSourcePath) {
       calls.workspace.push(nextSourcePath);
@@ -180,6 +182,17 @@ function createHarness({
     async status(nextSourcePath, requestId, attemptId) {
       calls.status.push([nextSourcePath, requestId, attemptId]);
       return { status: "processing" };
+    },
+    async preflightAgent(request) {
+      calls.preflight.push(request);
+      return { status: "ready", preflightId: "preflight_test" };
+    },
+    async startAgent(request) {
+      calls.startAgent.push(request);
+      return {
+        accepted: true,
+        session: { state: "starting", phase: "launching" },
+      };
     },
     async cancelActiveRun(request) {
       calls.cancel.push(request);
@@ -408,6 +421,93 @@ test("clipboard failure retains the durable Request and a retry copies without a
   assert.equal(retried.status, "succeeded");
   assert.equal(harness.runSession.activeHandoff?.status, "copied");
   assert.equal(harness.calls.createRequest.length, 1);
+});
+
+test("Qoder ACP preflights before one durable Request and never touches the clipboard", async () => {
+  const harness = createHarness();
+  const outcome = await harness.workflow.submit({ deliveryMode: "qoder-acp" });
+
+  assert.equal(outcome.status, "succeeded");
+  assert.equal(harness.calls.preflight.length, 1);
+  assert.equal(harness.calls.createRequest.length, 1);
+  assert.deepEqual(harness.calls.createRequest[0].agentDelivery, {
+    mode: "qoder-acp",
+    trustPolicyVersion: "trusted-local-agent-v1",
+  });
+  assert.equal(harness.calls.startAgent.length, 1);
+  assert.equal(harness.calls.startAgent[0].preflightId, "preflight_test");
+  assert.equal(harness.calls.handoff.length, 0);
+  assert.equal(harness.runSession.activeHandoff.mode, "qoder-acp");
+  assert.equal(harness.runSession.activeHandoff.status, "starting");
+  harness.workflow.dispose();
+});
+
+test("a failed Qoder preflight creates no Request and leaves editing recoverable", async () => {
+  const error = new Error("Qoder is not logged in");
+  error.code = "QODER_AUTH_REQUIRED";
+  const harness = createHarness({
+    bridge: {
+      async preflightAgent() {
+        throw error;
+      },
+    },
+  });
+  const outcome = await harness.workflow.submit({ deliveryMode: "qoder-acp" });
+
+  assert.equal(outcome.status, "rejected");
+  assert.equal(outcome.code, "QODER_AUTH_REQUIRED");
+  assert.equal(harness.calls.createRequest.length, 0);
+  assert.equal(harness.calls.startAgent.length, 0);
+  assert.equal(harness.calls.handoff.length, 0);
+  assert.equal(harness.runSession.activeRun, null);
+  assert.equal(harness.runSession.submissionPending, false);
+  harness.workflow.dispose();
+});
+
+test("a recovery-required Qoder Request cannot restart or fall back to clipboard", async () => {
+  const harness = createHarness();
+  const run = runRecord({ agentDelivery: { mode: "qoder-acp" } });
+  harness.runSession.trackRun(run, { activate: "always", recovered: true });
+  harness.runSession.publishHandoff({
+    ...run,
+    mode: "qoder-acp",
+    status: "interrupted",
+    retryable: false,
+    errorCode: "AGENT_RESTART_RECOVERY_REQUIRED",
+  });
+
+  const restarted = await harness.workflow.startAgent({ run });
+  const copied = await harness.workflow.copyHandoff({ run });
+
+  assert.equal(restarted.status, "blocked");
+  assert.equal(restarted.code, "RUN_AGENT_RECOVERY_REQUIRED");
+  assert.equal(copied.status, "blocked");
+  assert.equal(copied.code, "RUN_AGENT_RECOVERY_REQUIRED");
+  assert.equal(harness.calls.preflight.length, 0);
+  assert.equal(harness.calls.startAgent.length, 0);
+  assert.equal(harness.calls.handoff.length, 0);
+  harness.workflow.dispose();
+});
+
+test("Qoder output residue is projected as non-retryable", async () => {
+  const error = new Error("safe residue recovery copy");
+  error.code = "AGENT_RETRY_OUTPUT_PRESENT";
+  const harness = createHarness({
+    bridge: {
+      async startAgent(request) {
+        harness.calls.startAgent.push(request);
+        throw error;
+      },
+    },
+  });
+
+  await harness.workflow.submit({ deliveryMode: "qoder-acp" });
+
+  assert.equal(harness.runSession.activeHandoff?.status, "failed");
+  assert.equal(harness.runSession.activeHandoff?.retryable, false);
+  assert.equal((await harness.workflow.copyHandoff()).code, "RUN_AGENT_RECOVERY_REQUIRED");
+  assert.equal(harness.calls.handoff.length, 0);
+  harness.workflow.dispose();
 });
 
 test("a terminal no-change poll unlocks the current project and remains reopenable", async () => {

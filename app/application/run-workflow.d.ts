@@ -46,7 +46,13 @@ export type RunWorkflowEvent = Readonly<{
 export type RunWorkflowConstruction = Readonly<{
   bridgeClient: Pick<
     BridgeClient,
-    "createRequest" | "workspace" | "status" | "cancelActiveRun" | "resolveConflict"
+    | "createRequest"
+    | "workspace"
+    | "status"
+    | "preflightAgent"
+    | "startAgent"
+    | "cancelActiveRun"
+    | "resolveConflict"
   >;
   ensureRegistered(input?: Record<string, unknown>): Promise<RunWorkflowOutcome>;
   projectSession: ProjectSession;
@@ -99,12 +105,17 @@ export class RunWorkflow {
     previousVersionId?: string | null;
     basedOnVersionId?: string | null;
     deadlineAt?: number;
+    deliveryMode?: "clipboard" | "qoder-acp";
   }): Promise<RunWorkflowOutcome<{ run: ActiveRun }>>;
   reconcileSubmission(input?: {
     sourcePath?: string | null;
     generation?: number;
   }): Promise<RunWorkflowOutcome<{ run: ActiveRun | null }>>;
   copyHandoff(input?: { run?: ActiveRun | null }): Promise<RunWorkflowOutcome<{ run: ActiveRun }>>;
+  startAgent(input?: {
+    run?: ActiveRun | null;
+    preflightId?: string | null;
+  }): Promise<RunWorkflowOutcome<{ run: ActiveRun; agentSession: Record<string, unknown> }>>;
   cancel(input?: {
     run?: ActiveRun | null;
     agentMayBeRunning?: boolean;

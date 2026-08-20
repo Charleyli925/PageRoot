@@ -3,6 +3,17 @@ import { createRunWorkflowCodecs } from "./run-workflow-codecs.js";
 
 const SHA256 = /^sha256:[a-f0-9]{64}$/u;
 const POLL_INTERVAL_MS = 1_600;
+const TRUSTED_LOCAL_AGENT_POLICY_VERSION = "trusted-local-agent-v1";
+const DELIVERY_MODES = new Set(["clipboard", "qoder-acp"]);
+const NON_RETRYABLE_AGENT_ERRORS = new Set([
+  "ACP_PROCESS_CLEANUP_UNCONFIRMED",
+  "AGENT_DELIVERY_NOT_AUTHORIZED",
+  "AGENT_RESTART_RECOVERY_REQUIRED",
+  "AGENT_RETRY_BLOCKED",
+  "AGENT_RETRY_OUTPUT_PRESENT",
+  "AGENT_TASK_NOT_PROCESSING",
+  "AGENT_TASK_POLICY_INVALID",
+]);
 
 function succeeded(value) {
   return Object.freeze({ status: "succeeded", value });
@@ -101,6 +112,43 @@ function isPollable(run) {
   );
 }
 
+function agentHandoffState(run, session) {
+  const state = String(session?.state || "");
+  if (![
+    "starting",
+    "running",
+    "completed",
+    "failed",
+    "interrupted",
+    "cancelling",
+    "cancelled",
+  ].includes(state)) return null;
+  return {
+    sourcePath: run.sourcePath,
+    requestId: run.requestId,
+    attemptId: run.attemptId,
+    mode: "qoder-acp",
+    status: state,
+    phase: String(session.phase || state),
+    agentName: session.agentName ? String(session.agentName) : null,
+    agentVersion: session.agentVersion ? String(session.agentVersion) : null,
+    errorCode: session.errorCode ? String(session.errorCode) : null,
+    errorMessage: session.errorMessage ? String(session.errorMessage) : null,
+    retryable: session.retryable === true,
+  };
+}
+
+function qoderRecoveryRequired(run, handoff) {
+  return Boolean(
+    run?.agentDelivery?.mode === "qoder-acp"
+    && handoff?.mode === "qoder-acp"
+    && handoff.requestId === run.requestId
+    && handoff.attemptId === run.attemptId
+    && ["failed", "interrupted"].includes(handoff.status)
+    && handoff.retryable === false,
+  );
+}
+
 // RunWorkflow is the PR-5 application boundary. It owns Request submission,
 // authority reconciliation, polling, cancellation and conflict commands. It
 // deliberately receives renderer conversion helpers and narrow Canvas/Handoff
@@ -148,6 +196,8 @@ export class RunWorkflow {
       || typeof bridgeClient.createRequest !== "function"
       || typeof bridgeClient.workspace !== "function"
       || typeof bridgeClient.status !== "function"
+      || typeof bridgeClient.preflightAgent !== "function"
+      || typeof bridgeClient.startAgent !== "function"
       || typeof bridgeClient.cancelActiveRun !== "function"
       || typeof bridgeClient.resolveConflict !== "function"
     ) {
@@ -303,9 +353,13 @@ export class RunWorkflow {
     previousVersionId = this.#versionSession.snapshot.latestVersionId,
     basedOnVersionId = this.#versionSession.snapshot.currentBasedOnVersionId,
     deadlineAt = this.#clock.now() + 60_000,
+    deliveryMode = "clipboard",
   } = {}) {
     if (this.#disposed) {
       return blocked("RUN_WORKFLOW_DISPOSED", "本轮任务工作流已经停止。");
+    }
+    if (!DELIVERY_MODES.has(deliveryMode)) {
+      return rejected("RUN_DELIVERY_MODE_INVALID", "选择的 Agent 交接方式无效。");
     }
     const sourcePath = this.#projectSession.sourcePath;
     const context = copyContext(this.#projectSession.context);
@@ -352,7 +406,21 @@ export class RunWorkflow {
     let pendingRun = null;
     let submissionUncertain = false;
     let durableRun = null;
+    let agentPreflight = null;
     try {
+      if (deliveryMode === "qoder-acp") {
+        agentPreflight = await this.#bridgeClient.preflightAgent({
+          driver: "qoder-acp",
+          trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
+        });
+        if (agentPreflight?.status !== "ready" || !agentPreflight.preflightId) {
+          throw responseError(
+            "RUN_AGENT_PREFLIGHT_INVALID",
+            "Qoder CLI 预检没有返回可验证结果。",
+          );
+        }
+        if (!this.#isCurrentContext(context)) return stale(context);
+      }
       const registered = await this.#ensureRegistered({
         sourcePath: context.sourcePath,
         expectedSourceSha256: this.#documentSession.sourceSha256,
@@ -418,6 +486,7 @@ export class RunWorkflow {
         context: submissionContext,
         previousVersionId,
         basedOnVersionId,
+        deliveryMode,
       });
       this.#runSession.forgetOutcome(submissionContext.sourcePath);
       this.#runSession.trackRun(pendingRun, { activate: "always" });
@@ -494,6 +563,12 @@ export class RunWorkflow {
         })),
         comments: persistedComments.map(this.#codecs.persistedComment),
         changeEvents: persistedEvents.map(this.#codecs.persistedChangeEvent),
+        agentDelivery: deliveryMode === "qoder-acp"
+          ? {
+              mode: "qoder-acp",
+              trustPolicyVersion: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
+            }
+          : { mode: "clipboard" },
       };
       const operationId = this.#codecs.operationKey(pendingRun);
       let dispatched = false;
@@ -564,7 +639,14 @@ export class RunWorkflow {
         current: this.#isCurrentRun(durableRun),
       });
       this.syncPolling();
-      if (durableRun.handoffMessage) await this.copyHandoff({ run: durableRun });
+      if (deliveryMode === "qoder-acp") {
+        await this.startAgent({
+          run: durableRun,
+          preflightId: agentPreflight.preflightId,
+        });
+      } else if (durableRun.handoffMessage) {
+        await this.copyHandoff({ run: durableRun });
+      }
       return succeeded({ run: durableRun });
     } catch (cause) {
       const message = this.#codecs.errorMessage(
@@ -710,10 +792,17 @@ export class RunWorkflow {
     if (!run?.handoffMessage || !run.sourcePath || !run.requestId || run.requestId === "pending") {
       return blocked("RUN_HANDOFF_UNAVAILABLE", "当前 Request 没有可复制的交接内容。");
     }
+    if (qoderRecoveryRequired(run, this.#runSession.handoffForSource(run.sourcePath))) {
+      return blocked(
+        "RUN_AGENT_RECOVERY_REQUIRED",
+        "这轮不能安全改为复制任务。请结束本轮，再重新发送为新的 Request。",
+      );
+    }
     this.#runSession.publishHandoff({
       sourcePath: run.sourcePath,
       requestId: run.requestId,
       attemptId: run.attemptId,
+      mode: "clipboard",
       status: "copying",
     });
     try {
@@ -726,6 +815,7 @@ export class RunWorkflow {
         sourcePath: run.sourcePath,
         requestId: run.requestId,
         attemptId: run.attemptId,
+        mode: "clipboard",
         status: "copied",
       });
       this.#emitEvent({
@@ -740,6 +830,7 @@ export class RunWorkflow {
           sourcePath: run.sourcePath,
           requestId: run.requestId,
           attemptId: run.attemptId,
+          mode: "clipboard",
           status: "failed",
         });
       }
@@ -757,6 +848,94 @@ export class RunWorkflow {
         cause,
         "这次任务还在，打开本轮后可以重新复制",
       ));
+    }
+  }
+
+  async startAgent({
+    run = this.#runSession.activeRun,
+    preflightId = null,
+  } = {}) {
+    if (!run?.sourcePath || !run.requestId || run.requestId === "pending") {
+      return blocked("RUN_AGENT_UNAVAILABLE", "当前 Request 还不能启动 Qoder CLI。");
+    }
+    if (qoderRecoveryRequired(run, this.#runSession.handoffForSource(run.sourcePath))) {
+      return blocked(
+        "RUN_AGENT_RECOVERY_REQUIRED",
+        "Bridge 无法证明旧 Qoder 会话已经停止。请结束本轮，再重新发送。",
+      );
+    }
+    let preflight = preflightId ? { preflightId, status: "ready" } : null;
+    try {
+      if (!preflight) {
+        preflight = await this.#bridgeClient.preflightAgent({
+          driver: "qoder-acp",
+          trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
+        });
+      }
+      if (preflight?.status !== "ready" || !preflight.preflightId) {
+        throw responseError(
+          "RUN_AGENT_PREFLIGHT_INVALID",
+          "Qoder CLI 预检没有返回可验证结果。",
+        );
+      }
+      this.#runSession.publishHandoff({
+        sourcePath: run.sourcePath,
+        requestId: run.requestId,
+        attemptId: run.attemptId,
+        mode: "qoder-acp",
+        status: "starting",
+        phase: "launching",
+      });
+      const result = await this.#bridgeClient.startAgent({
+        projectId: run.projectId,
+        documentId: run.documentId,
+        sourcePath: run.sourcePath,
+        requestId: run.requestId,
+        attemptId: run.attemptId,
+        driver: "qoder-acp",
+        trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
+        preflightId: preflight.preflightId,
+      });
+      if (!this.#runSession.hasRun(run)) return stale(run);
+      const next = agentHandoffState(run, result?.session);
+      if (!next || !["starting", "running", "completed"].includes(next.status)) {
+        throw responseError("RUN_AGENT_START_UNCONFIRMED", "Qoder CLI 没有确认启动。");
+      }
+      this.#runSession.publishHandoff(next);
+      this.#emitEvent({
+        type: "run-agent-started",
+        run,
+        agentSession: result.session,
+        current: this.#isCurrentRun(run),
+      });
+      return succeeded({ run, agentSession: result.session });
+    } catch (cause) {
+      const code = errorCode(cause, "RUN_AGENT_START_FAILED");
+      const message = this.#codecs.errorMessage(
+        cause,
+        "Qoder CLI 没有启动。本轮 Request 已保留，可重试或复制任务。",
+      );
+      if (this.#runSession.hasRun(run)) {
+        this.#runSession.publishHandoff({
+          sourcePath: run.sourcePath,
+          requestId: run.requestId,
+          attemptId: run.attemptId,
+          mode: "qoder-acp",
+          status: "failed",
+          phase: "failed",
+          errorCode: code,
+          errorMessage: message,
+          retryable: !NON_RETRYABLE_AGENT_ERRORS.has(code),
+        });
+      }
+      this.#emitEvent({
+        type: "run-agent-failed",
+        run,
+        current: this.#isCurrentRun(run),
+        cause,
+        message,
+      });
+      return rejected(code, message);
     }
   }
 
@@ -1011,6 +1190,25 @@ export class RunWorkflow {
   }
 
   #processStatus(run, payload) {
+    const previousHandoff = this.#runSession.handoffForSource(run.sourcePath);
+    const agentState = agentHandoffState(run, payload.agentSession);
+    const clipboardFallbackActive = previousHandoff?.mode === "clipboard"
+      && ["copying", "copied"].includes(previousHandoff.status);
+    if (agentState && !clipboardFallbackActive) {
+      this.#runSession.publishHandoff(agentState);
+      if (
+        ["failed", "interrupted"].includes(agentState.status)
+        && previousHandoff?.status !== agentState.status
+      ) {
+        this.#emitEvent({
+          type: "run-agent-failed",
+          run,
+          agentSession: payload.agentSession,
+          current: this.#isCurrentRun(run),
+          message: agentState.errorMessage,
+        });
+      }
+    }
     const rawState = String(payload.status || payload.lifecycleState || "processing");
     const state = this.#codecs.canonicalLifecycleState(rawState, {
       readyVersion: Boolean(payload.versionId),
@@ -1148,7 +1346,7 @@ export class RunWorkflow {
     )).join("；").slice(0, 5_000);
   }
 
-  #pendingRun({ context, previousVersionId, basedOnVersionId }) {
+  #pendingRun({ context, previousVersionId, basedOnVersionId, deliveryMode }) {
     return {
       projectId: context.projectId,
       documentId: context.documentId,
@@ -1157,6 +1355,7 @@ export class RunWorkflow {
       requestPath: "",
       attemptPath: "",
       handoffMessage: "",
+      agentDelivery: { mode: deliveryMode },
       status: "submitting",
       sourcePath: context.sourcePath,
       baseSnapshotSha256: context.frozenSourceSha256,

@@ -22,7 +22,6 @@ import { FileHtmlIcon } from "@phosphor-icons/react/dist/csr/FileHtml";
 import { FolderOpenIcon } from "@phosphor-icons/react/dist/csr/FolderOpen";
 import { ImageIcon } from "@phosphor-icons/react/dist/csr/Image";
 import { PaperclipIcon } from "@phosphor-icons/react/dist/csr/Paperclip";
-import { PaperPlaneTiltIcon } from "@phosphor-icons/react/dist/csr/PaperPlaneTilt";
 import { PencilSimpleIcon } from "@phosphor-icons/react/dist/csr/PencilSimple";
 import { PlusIcon } from "@phosphor-icons/react/dist/csr/Plus";
 import { TrashIcon } from "@phosphor-icons/react/dist/csr/Trash";
@@ -44,6 +43,7 @@ import type {
 import type { DesktopEditRuntimeApi } from "./components/desktop-edit-runtime-api";
 import type { DesktopUiPreferencesApi } from "./components/desktop-ui-preferences-api";
 import AboutPageRootDialog from "./components/AboutPageRootDialog";
+import { AgentDeliveryButton, type AgentDeliveryMode } from "./components/AgentDeliveryDialog";
 import CancelAiRunDialog from "./components/CancelAiRunDialog";
 import FirstEditGuideCard from "./components/FirstEditGuideCard";
 import HtmlInteractionPreview, {
@@ -278,6 +278,7 @@ const INITIAL_RUN_SNAPSHOT: RunSessionSnapshot = {
   activeRun: null,
   activeHandoff: null,
   activeHandoffMayBeRunning: false,
+  activeHandoffManaged: false,
   activeSubmission: null,
   submissionPending: false,
   activeLocked: false,
@@ -444,7 +445,8 @@ export default function Workbench() {
       direction: SourceHistoryDirection,
     ) => Promise<boolean>;
     generateRequest?: () => void;
-  }>({});
+    agentDeliveryMode: AgentDeliveryMode;
+  }>({ agentDeliveryMode: "clipboard" });
   const deferEditorCommand = useCallback((
     kind: string,
     run: () => void,
@@ -1478,6 +1480,22 @@ export default function Workbench() {
         }
         return;
       }
+      if (runEvent.type === "run-agent-failed") {
+        if (runEvent.current && runEvent.run) {
+          setDrawer("handoff");
+          setToast({
+            title: "Qoder CLI 没有完成本轮",
+            message: runEvent.message
+              || "本轮 Request 已保留，请查看处理详情选择安全的后续操作。",
+            tone: "warning",
+            sticky: true,
+            disposition: "user-choice",
+            dedupeKey: `qoder-agent:${runEvent.run.requestId}`,
+            action: { id: "open-handoff", label: "查看处理详情" },
+          });
+        }
+        return;
+      }
       if (runEvent.type === "run-status") {
         const run = runEvent.run;
         const state = runEvent.state;
@@ -2287,9 +2305,13 @@ export default function Workbench() {
   )
     ? qoderHandoffState.status
     : "idle";
+  const currentAgentDeliveryState = currentQoderHandoffStatus === "idle" ? null : qoderHandoffState;
+  const currentAgentDeliveryMode =
+    currentAgentDeliveryState?.mode || activeRun?.agentDelivery?.mode || "clipboard";
   const handoffCancellationNeedsConfirmation = Boolean(
     activeRun?.status === "processing"
-    && runSnapshot.activeHandoffMayBeRunning,
+    && runSnapshot.activeHandoffMayBeRunning
+    && !runSnapshot.activeHandoffManaged,
   );
   const cancelRunConfirmationOpen = Boolean(
     cancelRunConfirmationKey
@@ -5653,7 +5675,10 @@ export default function Workbench() {
     });
   }, [currentProjectSessionSnapshot]);
 
-  const generateRequest = useCallback(async (fromDeferred = false) => {
+  const generateRequest = useCallback(async (
+    deliveryMode: AgentDeliveryMode, fromDeferred = false,
+  ) => {
+    if (!fromDeferred) deferredEditorReplayRef.current.agentDeliveryMode = deliveryMode;
     const currentRun = currentRunSessionSnapshot();
     const currentProject = currentProjectSessionSnapshot();
     const currentDocument = currentDocumentSessionSnapshot();
@@ -5716,6 +5741,7 @@ export default function Workbench() {
         previousVersionId: latestVersionId,
         basedOnVersionId: currentBasedOnVersionId,
         deadlineAt: Date.now() + 60_000,
+        deliveryMode,
       });
     if (outcome.status === "succeeded" || outcome.status === "stale") return;
     if (outcome.status === "unknown") {
@@ -5800,7 +5826,7 @@ export default function Workbench() {
   ]);
   useEffect(() => {
     deferredEditorReplayRef.current.generateRequest = () => {
-      void generateRequest(true);
+      void generateRequest(deferredEditorReplayRef.current.agentDeliveryMode, true);
     };
   }, [generateRequest]);
 
@@ -6451,8 +6477,8 @@ export default function Workbench() {
     activeRun && ["error", "no-change"].includes(activeRun.status) && !pendingRunOutcome,
   );
   const handoffCopyFailed = Boolean(
-    activeRun
-    && currentQoderHandoffStatus === "failed"
+    activeRun && currentAgentDeliveryState?.retryable !== false
+    && ["failed", "interrupted"].includes(currentQoderHandoffStatus)
     && ["submitting", "processing", "ready"].includes(activeRun.status),
   );
   const checkingRun = Boolean(
@@ -6461,7 +6487,7 @@ export default function Workbench() {
   );
   const processPresentation = deriveRunProgressPresentation(
     activeRun,
-    currentQoderHandoffStatus,
+    currentAgentDeliveryState || currentQoderHandoffStatus,
   );
   const processPanelEyebrow = processPresentation.header?.eyebrow
     || "等待AI返回结果";
@@ -6911,7 +6937,7 @@ export default function Workbench() {
         });
         return;
       case "retry-submit":
-        void generateRequest();
+        void generateRequest(deferredEditorReplayRef.current.agentDeliveryMode);
         return;
     }
   };
@@ -7323,59 +7349,22 @@ export default function Workbench() {
               上轮处理
             </button>
           ) : null}
-          <button
-            className="header-send-button"
-            type="button"
-            data-handoff-status={currentQoderHandoffStatus}
-            data-copied={currentQoderHandoffStatus === "copied" ? "true" : undefined}
-            disabled={
-              generating
-              || projectHydrating
-              || Boolean(projectLoadError)
-              || viewTransitioning
-              || viewMode === "history"
-              || (!runInProgress && (
-                pendingSendItemCount === 0
-                || interactionLocked
-                || persistState === "failed"
+          <AgentDeliveryButton
+            status={currentQoderHandoffStatus} deliveryMode={currentAgentDeliveryMode}
+            generating={generating} runInProgress={runInProgress}
+            pendingCount={pendingSendItemCount}
+            disabled={generating || projectHydrating || Boolean(projectLoadError)
+              || viewTransitioning || viewMode === "history" || (!runInProgress && (
+                pendingSendItemCount === 0 || interactionLocked || persistState === "failed"
                 || Boolean(draftPersistError)
-              ))
-            }
-            onClick={() => {
-              if (runInProgress || currentQoderHandoffStatus === "copied") {
-                setHandoffPreviewOpen(false);
-                setCanvasMode("edit");
-                setDrawer("handoff");
-              } else {
-                void generateRequest();
-              }
+              ))}
+            onOpenRun={() => {
+              setHandoffPreviewOpen(false);
+              setCanvasMode("edit");
+              setDrawer("handoff");
             }}
-          >
-            {currentQoderHandoffStatus === "copied" ? (
-              <CheckCircleIcon aria-hidden="true" size={15} weight="fill" />
-            ) : (
-              <PaperPlaneTiltIcon aria-hidden="true" size={15} weight="fill" />
-            )}
-            <span>
-              {generating
-                ? "正在准备…"
-                : currentQoderHandoffStatus === "copying"
-                  ? "正在复制…"
-                  : currentQoderHandoffStatus === "failed"
-                    ? "复制失败，再试一次"
-                    : currentQoderHandoffStatus === "copied" || runInProgress
-                      ? "查看本轮"
-                      : pendingSendItemCount === 0
-                        ? "写评论后再发送"
-                        : "发给 AI"}
-            </span>
-            {pendingSendItemCount > 0
-              && !runInProgress
-              && currentQoderHandoffStatus !== "copied"
-              && currentQoderHandoffStatus !== "failed"
-              ? <small>{pendingSendItemCount}</small>
-              : null}
-          </button>
+            onSelect={(mode) => void generateRequest(mode)}
+          />
         </WorkbenchHeaderActions>
         <input
           ref={fileInputRef}
@@ -7502,7 +7491,7 @@ export default function Workbench() {
           className="sent-preview-banner"
           icon={<EyeIcon aria-hidden="true" size={18} weight="duotone" />}
           title="正在预览已发送 HTML"
-          detail="这是本轮冻结并复制给 Qoder 的只读内容"
+          detail={currentAgentDeliveryMode === "qoder-acp" ? "这是本轮冻结并交给 Qoder CLI 的只读内容" : "这是本轮冻结并复制给 AI Agent 的只读内容"}
           actionLabel="返回等待处理"
           onAction={() => {
             setHandoffPreviewOpen(false);
@@ -8642,7 +8631,7 @@ export default function Workbench() {
               onRevealAiTask={() => void revealAiTaskInFinder()}
               onRetrySubmission={() => {
                 workspaceControllerRef.current?.dismissActiveRun();
-                void generateRequest();
+                void generateRequest(deferredEditorReplayRef.current.agentDeliveryMode);
               }}
               onCancelRun={requestActiveRunEnd}
             />
@@ -8676,6 +8665,7 @@ export default function Workbench() {
             pendingReconcileBusy={pendingReconcileBusy}
             handoffCopyFailed={handoffCopyFailed}
             currentQoderHandoffStatus={currentQoderHandoffStatus}
+            currentDeliveryMode={currentAgentDeliveryMode}
             cancelling={cancelling}
             resolvingConflict={resolvingConflict}
             checkingRun={checkingRun}
@@ -8684,6 +8674,14 @@ export default function Workbench() {
             onReviewReadyResult={() => void reviewReadyResult()}
             onActivateReadyResult={() => void activateReadyResult()}
             onSend={() => {
+              if (!workspaceController) return;
+              if (currentAgentDeliveryMode === "qoder-acp") {
+                void workspaceController.startRunAgent({ run: activeRun });
+              } else {
+                void workspaceController.copyRunHandoff({ run: activeRun });
+              }
+            }}
+            onCopyFallback={() => {
               if (!workspaceController) return;
               void workspaceController.copyRunHandoff({ run: activeRun });
             }}

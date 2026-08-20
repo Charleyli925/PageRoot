@@ -14,11 +14,13 @@ verified compatible fix.
 
 ## Reviewed fixes
 
-The 2026-08-21 Qoder ACP compatibility spike pins the official
-`@agentclientprotocol/sdk` 1.3.0 and its direct `zod` 4.4.3 peer as development
-dependencies. They are used only by the synthetic command and Node integration
-owner, are absent from Electron Builder resources and the packaged runtime
-closure, and introduce no audit exception.
+The 2026-08-21 Qoder ACP Agent Bridge pins the official
+`@agentclientprotocol/sdk` 1.3.0 and its direct `zod` 4.4.3 peer as production
+dependencies. Electron Builder copies exactly those two packages into the
+packaged Bridge resource closure; package tests, the artifact verifier and the
+dependency audit reject a missing, nested or undeclared ACP runtime module.
+They introduce no audit exception. The development-only synthetic probe reuses
+the same restricted client but remains outside the packaged resource allowlist.
 
 The 2026-08-14 security baseline moves the PostCSS-selected `nanoid` closure
 to 3.3.18 and selects `vinext` 0.0.45 in place of 0.2.1. This is the
@@ -57,7 +59,20 @@ their reviewed patch or minor versions. The current same-major overrides select
 PostCSS 8.5.25 and tar 7.5.22 for the build chain; related exceptions are
 removed after `npm audit` no longer reports them.
 
-The macOS package includes the compiled desktop renderer, selected desktop modules, `parse5`, `entities`, the reviewed `electron-updater` closure, schemas and build provenance; it explicitly excludes the general `node_modules` tree. `semver` is pinned at the package root so the updater closure has no hidden nested runtime copy. The dependency audit rejects missing, nested or undeclared modules in this exact packaged allowlist. These exceptions do not authorize adding the affected packages to the packaged runtime.
+The macOS package includes the compiled desktop renderer, selected desktop and
+Bridge modules, `parse5`, `entities`, `@agentclientprotocol/sdk`, `zod`, the
+reviewed `electron-updater` closure, schemas and build provenance; it explicitly
+excludes the general `node_modules` tree. `semver` is pinned at the package root
+so the updater closure has no hidden nested runtime copy. The dependency audit
+rejects missing, nested or undeclared modules in this exact packaged allowlist.
+The artifact verifier also walks every PageRoot-owned Resources subtree with
+`lstat`, rejects symlinks and all non-regular entries (including FIFOs and Unix
+sockets), rejects ASAR link entries, and byte-compares each allowlisted package
+against the clean source closure. A packaged Electron Helper then starts the
+packaged Bridge and completes a fake ACP task through the packaged official
+finalizer to a pending-review Candidate; import-only evidence is insufficient.
+These exceptions do not authorize adding the affected packages to the packaged
+runtime.
 
 Do not use `npm audit fix --force`: review every dependency update deliberately,
 prefer compatible upstream fixes or narrow overrides, and rerun all source and

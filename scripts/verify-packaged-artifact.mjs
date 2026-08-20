@@ -3,9 +3,10 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync } from "node:fs";
+import { constants as fsConstants, existsSync } from "node:fs";
 import {
   access,
+  lstat,
   mkdtemp,
   readFile,
   readdir,
@@ -42,6 +43,8 @@ const SCRIPT_PATH = fileURLToPath(import.meta.url);
 const DEFAULT_PRODUCT_ROOT = path.resolve(path.dirname(SCRIPT_PATH), "..");
 const REQUIRED_BRIDGE_FILES = [
   "workspace-bridge.mjs",
+  "agent-bridge-service.mjs",
+  "qoder-acp-client.mjs",
   "finalize-attempt.mjs",
   "lifecycle-core.mjs",
   "project-file-repository.mjs",
@@ -63,6 +66,7 @@ const REQUIRED_BRIDGE_FILES = [
   "source-transaction-service.mjs",
 ];
 const REQUIRED_PACKAGED_MODULES = [
+  "@agentclientprotocol/sdk",
   "argparse",
   "builder-util-runtime",
   "debug",
@@ -81,6 +85,7 @@ const REQUIRED_PACKAGED_MODULES = [
   "semver",
   "tiny-typed-emitter",
   "universalify",
+  "zod",
 ];
 const REQUIRED_SHARED_FILES = [
   "direct-edit-compatibility.mjs",
@@ -239,6 +244,12 @@ function normalizeRelativePath(value) {
 
 async function listFiles(root, predicate = () => true) {
   const output = [];
+  const rootInformation = await lstat(root);
+  assert.equal(
+    rootInformation.isDirectory() && !rootInformation.isSymbolicLink(),
+    true,
+    `runtime tree root must be a real directory: ${root}`,
+  );
   async function visit(directory, relativeDirectory = "") {
     const entries = await readdir(directory, { withFileTypes: true });
     entries.sort((left, right) => left.name.localeCompare(right.name));
@@ -251,11 +262,46 @@ async function listFiles(root, predicate = () => true) {
         await visit(absolutePath, relativePath);
       } else if (entry.isFile() && predicate(relativePath)) {
         output.push(normalizeRelativePath(relativePath));
+      } else if (!entry.isFile()) {
+        const kind = entry.isSymbolicLink()
+          ? "symlink"
+          : entry.isFIFO()
+            ? "FIFO"
+            : entry.isSocket()
+              ? "socket"
+              : entry.isCharacterDevice()
+                ? "character device"
+                : entry.isBlockDevice()
+                  ? "block device"
+                  : "non-regular entry";
+        assert.fail(`packaged runtime tree contains unsupported ${kind}: ${absolutePath}`);
       }
     }
   }
   await visit(root);
   return output;
+}
+
+async function listPackagedModuleNames(root) {
+  const output = [];
+  const entries = await readdir(root, { withFileTypes: true });
+  for (const entry of entries) {
+    if (!entry.isDirectory()) {
+      output.push(`${entry.name}:not-directory`);
+      continue;
+    }
+    if (!entry.name.startsWith("@")) {
+      output.push(entry.name);
+      continue;
+    }
+    const scopedEntries = await readdir(path.join(root, entry.name), { withFileTypes: true });
+    if (scopedEntries.length === 0) output.push(`${entry.name}/:empty-scope`);
+    for (const scopedEntry of scopedEntries) {
+      const packageName = `${entry.name}/${scopedEntry.name}`;
+      output.push(scopedEntry.isDirectory() ? packageName : `${packageName}:not-directory`);
+    }
+  }
+  return output.sort();
 }
 
 function sha256(buffer) {
@@ -302,10 +348,23 @@ async function assertFilesEqual(sourcePath, packagedPath, label) {
 }
 
 function asarFilePaths(asarPath) {
-  return listPackage(asarPath)
-    .map((entry) => entry.replace(/^\//, ""))
-    .filter((entry) => !statFile(asarPath, entry, false).files)
-    .sort();
+  const output = [];
+  for (const entry of listPackage(asarPath).map((value) => value.replace(/^\//, ""))) {
+    const information = statFile(asarPath, entry, false);
+    assert.equal(
+      "link" in information,
+      false,
+      `app.asar contains unsupported link entry: ${entry}`,
+    );
+    if ("files" in information) continue;
+    assert.equal(
+      Number.isSafeInteger(information.size) && information.size >= 0,
+      true,
+      `app.asar contains an invalid non-regular entry: ${entry}`,
+    );
+    output.push(entry);
+  }
+  return output.sort();
 }
 
 async function assertDirectoryMatches({ sourceRoot, packagedRoot, predicate, label }) {
@@ -420,6 +479,7 @@ function runCommand(command, arguments_, label, options = {}) {
     encoding: "utf8",
     env: options.env,
     maxBuffer: 16 * 1024 * 1024,
+    ...(options.timeoutMs ? { timeout: options.timeoutMs } : {}),
   });
   if (result.error) throw result.error;
   assert.equal(
@@ -438,6 +498,7 @@ export async function verifyAppBundle({
   verifySignature = true,
   signaturePolicy,
   expectedProvenance,
+  requirePackagedAgentBridgeSmoke = true,
 }) {
   const effectiveSignaturePolicy = signaturePolicy
     ?? (verifySignature ? "developer-id" : "none");
@@ -453,6 +514,7 @@ export async function verifyAppBundle({
     access(asarPath),
     assertSourceDependencyClosureIsClean(productRoot, sourcePackageJson),
   ]);
+  await listFiles(resourcesPath);
 
   const expectedIdentity = expectedPackagedAppIdentity({
     packageJson,
@@ -552,13 +614,9 @@ export async function verifyAppBundle({
       `shared/${fileName}`,
     );
   }
-  const packagedModuleDirectories = (await readdir(
+  const packagedModuleDirectories = await listPackagedModuleNames(
     path.join(resourcesPath, "node_modules"),
-    { withFileTypes: true },
-  ))
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => entry.name)
-    .sort();
+  );
   assert.deepEqual(
     packagedModuleDirectories,
     [...REQUIRED_PACKAGED_MODULES].sort(),
@@ -582,6 +640,13 @@ export async function verifyAppBundle({
     `${packageJson.build.productName} Helper`,
   );
   if (await existsSync(helperExecutable)) {
+    const helperInformation = await lstat(helperExecutable);
+    assert.equal(
+      helperInformation.isFile() && !helperInformation.isSymbolicLink(),
+      true,
+      `packaged Electron Helper must be a regular executable: ${helperExecutable}`,
+    );
+    await access(helperExecutable, fsConstants.X_OK);
     const lifecycleCoreUrl = pathToFileURL(
       path.join(resourcesPath, "bridge", "lifecycle-core.mjs"),
     ).href;
@@ -612,7 +677,26 @@ export async function verifyAppBundle({
         },
       },
     );
-  } else if (effectiveSignaturePolicy !== "none" && process.platform === "darwin") {
+    const packagedAgentBridgeRunner = path.join(
+      productRoot,
+      "tests",
+      "fixtures",
+      "packaged-agent-bridge-runner.mjs",
+    );
+    await access(packagedAgentBridgeRunner);
+    runCommand(
+      helperExecutable,
+      [packagedAgentBridgeRunner, resourcesPath, productRoot, helperExecutable],
+      "packaged Qoder ACP closed-loop smoke",
+      {
+        env: {
+          ...process.env,
+          ELECTRON_RUN_AS_NODE: "1",
+        },
+        timeoutMs: 60_000,
+      },
+    );
+  } else if (requirePackagedAgentBridgeSmoke) {
     assert.fail(`packaged Electron Helper is missing: ${helperExecutable}`);
   }
 

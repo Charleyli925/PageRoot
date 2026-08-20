@@ -5,9 +5,12 @@ import {
   access,
   mkdir,
   mkdtemp,
+  open,
   readFile,
   realpath,
+  rename,
   rm,
+  unlink,
   writeFile,
 } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
@@ -21,7 +24,7 @@ import {
   captureQoderAcpReviewBoundary,
   loadQoderAcpTaskPolicy,
   runQoderAcpTask,
-} from "./qoder-acp-spike-client.mjs";
+} from "./qoder-acp-client.mjs";
 import { sha256 } from "./lifecycle-core.mjs";
 import { ProjectFileRepository } from "./project-file-repository.mjs";
 
@@ -29,7 +32,8 @@ const productRoot = fileURLToPath(new URL("../", import.meta.url));
 const finalizerPath = fileURLToPath(new URL("./finalize-attempt.mjs", import.meta.url));
 const reportPath = path.join(productRoot, "output", "qoder-acp-spike", "report.json");
 const candidateMarker = "data-pageroot-qoder-acp=\"verified\"";
-const partialEvidence = { qoder: null, events: [] };
+const MAX_RETAINED_EVENTS = 2_048;
+const partialEvidence = { qoder: null, events: [], droppedEvents: 0 };
 const sourceHtml = `<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -95,6 +99,45 @@ function countEvents(events) {
     counts[key] = (counts[key] || 0) + 1;
   }
   return counts;
+}
+
+function retainEvent(target, event) {
+  if (target.events.length < MAX_RETAINED_EVENTS) target.events.push(event);
+  else target.droppedEvents += 1;
+}
+
+async function writeSafeReport(report) {
+  const directory = path.dirname(reportPath);
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  const canonicalDirectory = await realpath(directory);
+  const canonicalOutput = await realpath(path.join(productRoot, "output"));
+  if (
+    canonicalDirectory !== canonicalOutput
+    && !canonicalDirectory.startsWith(`${canonicalOutput}${path.sep}`)
+  ) {
+    throw fail("REPORT_PATH_UNSAFE", "The ACP report directory escapes PageRoot output.");
+  }
+  const target = path.join(canonicalDirectory, path.basename(reportPath));
+  const temporary = `${target}.${randomUUID()}.tmp`;
+  const handle = await open(
+    temporary,
+    fsConstants.O_WRONLY
+      | fsConstants.O_CREAT
+      | fsConstants.O_EXCL
+      | (fsConstants.O_NOFOLLOW || 0),
+    0o600,
+  );
+  try {
+    await handle.writeFile(`${JSON.stringify(report, null, 2)}\n`, "utf8");
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+  try {
+    await rename(temporary, target);
+  } finally {
+    await unlink(temporary).catch(() => {});
+  }
 }
 
 function assert(condition, code, message) {
@@ -240,8 +283,8 @@ Candidate pending PageRoot review; it must not replace or adopt the Working Copy
             "The selected ACP executable did not identify itself as Qoder CLI.",
           );
         }
-        events.push(event);
-        partialEvidence.events.push(event);
+        if (events.length < MAX_RETAINED_EVENTS) events.push(event);
+        retainEvent(partialEvidence, event);
         if (event.kind === "initialized") {
           partialEvidence.qoder = {
             protocolVersion: event.protocolVersion,
@@ -322,9 +365,9 @@ Candidate pending PageRoot review; it must not replace or adopt the Working Copy
         outputSha256: result.completion.outputSha256,
       },
       eventCounts: countEvents(events),
+      eventsTruncated: partialEvidence.droppedEvents > 0,
     };
-    await mkdir(path.dirname(reportPath), { recursive: true });
-    await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
+    await writeSafeReport(report);
     process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
   } finally {
     await rm(temporaryRoot, { recursive: true, force: true });
@@ -352,9 +395,9 @@ run().catch(async (cause) => {
     },
     ...(partialEvidence.qoder ? { qoder: partialEvidence.qoder } : {}),
     eventCounts: countEvents(partialEvidence.events),
+    eventsTruncated: partialEvidence.droppedEvents > 0,
   };
-  await mkdir(path.dirname(reportPath), { recursive: true });
-  await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
+  await writeSafeReport(report);
   process.stderr.write(`${code}: ${message}\n`);
   process.exitCode = 1;
 });

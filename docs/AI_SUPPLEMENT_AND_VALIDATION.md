@@ -9,13 +9,19 @@
 本轮有效要求由两部分组成：
 
 1. 源页发送时冻结的原始评论与本地编辑；
-2. 用户随后在 QoderWork 对话里新增、修订或撤回的要求。
+2. 复制模式下，用户随后在 QoderWork 或其他 Agent 对话里新增、修订或撤回的要求。
+
+本节的对话补充只适用于用户自行维护的复制/manual conversation。受管 Qoder ACP 会话
+只执行已经冻结的 Request/Attempt，PageRoot 不向会话注入后续聊天文本、图片或文件；
+需要改变要求时应停止本轮并建立新 Request，不能绕过冻结边界修改原 Request。
 
 第二部分不能直接改写冻结 Request。Prompt 要求内部 AI 先调用受控 helper，把用户原话写入当前 Attempt 的 `USER_SUPPLEMENT.json`，成功后才能执行。记录失败时必须停止执行该条补充。
 
 记录采用追加式 `add / amend / retract`，旧记录不能覆盖。`add` 可通过 `refersTo` 指明它补充的原始 instruction；修订会替代被引用的旧 supplement，撤回会从最终有效要求中移除被引用记录。能够取得的原始文件会复制到 `supplement-attachments/` 并记录 SHA-256；只能看见、无法取得原件时记录 `description-only`，历史中明确显示“原件未归档”。finalizer 会先封存补充记录和附件 Hash，再生成完成记录。Attempt 结束后新增要求必须建立新 Request。
 
-这套机制是项目协议，不是聊天平台同步：源页只确认受控记录成功，不能证明剪贴板内容已经被 AI 平台接收，也不能证明平台内每条对话都被遵守。
+这套机制是项目协议，不是聊天平台同步：复制模式下，源页只确认受控记录成功，不能证明
+剪贴板内容已经被 AI 平台接收，也不能证明平台内每条对话都被遵守。受管 ACP 的启动或
+stop 事件同样不是 Candidate 完成证据；仍以官方 completion 与 Repository 校验为准。
 
 ## 2. 候选校验分级
 

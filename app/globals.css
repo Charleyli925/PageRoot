@@ -8273,6 +8273,149 @@ body {
   outline-offset: 2px;
 }
 
+.agent-delivery-dialog {
+  width: min(540px, calc(100vw - 32px));
+  max-width: none;
+  padding: 0;
+  overflow: visible;
+  border: 0;
+  border-radius: 20px;
+  background: transparent;
+  color: var(--ink);
+}
+
+.agent-delivery-dialog::backdrop {
+  background: rgb(40 37 56 / 52%);
+}
+
+.agent-delivery-card {
+  padding: 26px;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: var(--paper);
+  box-shadow: 0 14px 34px rgb(28 30 38 / 24%);
+}
+
+.agent-delivery-card > header > span {
+  color: var(--indigo);
+  font-size: 9px;
+  font-weight: 760;
+  letter-spacing: 0.12em;
+}
+
+.agent-delivery-card h2 {
+  margin: 7px 0 0;
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.agent-delivery-card > header > p,
+.agent-delivery-card aside p {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.agent-delivery-options {
+  display: grid;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.agent-delivery-option {
+  min-height: 68px;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid #dfe1e7;
+  border-radius: 14px;
+  background: #fff;
+  color: #565861;
+  text-align: left;
+  cursor: pointer;
+}
+
+.agent-delivery-option.primary {
+  border-color: rgb(90 85 223 / 36%);
+  background: #f7f6ff;
+  color: var(--indigo);
+}
+
+.agent-delivery-option > span {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.agent-delivery-option strong {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 690;
+}
+
+.agent-delivery-option small {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.agent-delivery-option em {
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: rgb(90 85 223 / 10%);
+  color: var(--indigo);
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.agent-delivery-option:hover,
+.agent-delivery-option:focus-visible {
+  border-color: var(--indigo);
+}
+
+.agent-delivery-option:focus-visible,
+.agent-delivery-card footer button:focus-visible {
+  outline: 3px solid rgb(90 85 223 / 24%);
+  outline-offset: 2px;
+}
+
+.agent-delivery-card aside {
+  margin-top: 16px;
+  padding: 12px 14px;
+  border: 1px solid #e6e2d7;
+  border-radius: 12px;
+  background: #faf8f2;
+}
+
+.agent-delivery-card aside strong {
+  color: #5d574c;
+  font-size: 10px;
+  font-weight: 720;
+}
+
+.agent-delivery-card footer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 18px;
+}
+
+.agent-delivery-card footer button {
+  min-height: 34px;
+  padding: 0 14px;
+  border: 1px solid #d6d3cb;
+  border-radius: 10px;
+  background: #f1f0ec;
+  color: #47484f;
+  font-size: 11px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .window-file-title-action,
   .window-file-rename-icon,

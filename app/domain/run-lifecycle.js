@@ -72,15 +72,29 @@ function progressStep(key, label, detail, state) {
   return { key, label, detail, state };
 }
 
-function progressContext(run, handoffStatus) {
+function progressContext(run, handoffValue) {
   const completionObserved = hasObservedCompletion(run);
+  const handoff = handoffValue && typeof handoffValue === "object"
+    ? handoffValue
+    : { status: handoffValue };
+  const handoffStatus = String(handoff.status || "idle");
+  const agentMode = handoff.mode === "qoder-acp";
   return {
     run,
+    handoff,
     handoffStatus,
+    agentMode,
     status: canonicalLifecycleState(run.status),
     completionObserved,
-    copyFailed: handoffStatus === "failed" && !completionObserved,
+    copyFailed: !agentMode && handoffStatus === "failed" && !completionObserved,
     copyConfirmed: handoffStatus === "copied" || completionObserved,
+    agentFailed: agentMode
+      && ["failed", "interrupted"].includes(handoffStatus)
+      && !completionObserved,
+    agentRunning: agentMode
+      && ["starting", "running", "cancelling"].includes(handoffStatus),
+    agentCompleted: agentMode
+      && (handoffStatus === "completed" || completionObserved),
   };
 }
 
@@ -105,6 +119,11 @@ function deriveRunProgressCopy({
   status,
   copyFailed,
   copyConfirmed,
+  agentMode,
+  agentFailed,
+  agentRunning,
+  agentCompleted,
+  handoff,
 }) {
   if (run.requestId === "pending") {
     return progressPresentationCopy(
@@ -122,6 +141,19 @@ function deriveRunProgressCopy({
       "复制失败",
       "AI任务尚未复制",
       "请重新复制本轮要求，当前 HTML 未被修改。",
+    );
+  }
+  if (agentFailed) {
+    const interrupted = handoffStatus === "interrupted";
+    const recoveryRequired = handoff.retryable === false;
+    return progressPresentationCopy(
+      "Qoder 需要处理",
+      interrupted ? "Qoder 会话已中断" : "Qoder CLI 没有完成本轮",
+      interrupted ? "会话已中断" : "执行失败",
+      "本轮 Request 与当前 HTML 均已保留",
+      handoff.errorMessage || (recoveryRequired
+        ? "请结束旧 Request，再重新发送本轮要求。"
+        : "可重新启动 Qoder，或复制本轮任务给其他 Agent。"),
     );
   }
   if (status === "awaiting-conflict-resolution") {
@@ -181,6 +213,32 @@ function deriveRunProgressCopy({
       "完成前不会替换当前页面，原评论和当前 HTML 都已保留。",
     );
   }
+  if (status === "processing" && agentMode && agentCompleted) {
+    return progressPresentationCopy(
+      "正在确认结果",
+      "Qoder 已完成，PageRoot 正在核对 Candidate",
+      "正在确认结果",
+      "当前 HTML 仍未被替换",
+      "只有官方完成记录和 Candidate 校验通过后才会进入审阅。",
+    );
+  }
+  if (status === "processing" && agentMode && agentRunning) {
+    const phaseCopy = {
+      launching: ["正在启动 Qoder CLI", "正在建立受管 ACP 会话"],
+      "starting-session": ["正在连接 Qoder CLI", "ACP 会话正在初始化"],
+      "reading-task": ["Qoder 正在读取本轮任务", "只读冻结 HTML、评论、附件与项目规则"],
+      "writing-candidate": ["Qoder 正在写入候选 HTML", "当前 HTML 不会被直接覆盖"],
+      finalizing: ["Qoder 正在完成最终化", "PageRoot 将独立核对完成记录和 Candidate"],
+      cancelling: ["正在停止 Qoder CLI", "停止完成前本轮仍保持锁定"],
+    }[handoff.phase] || ["Qoder 正在处理", "PageRoot 正在接收受管 ACP 进度"];
+    return progressPresentationCopy(
+      "Qoder CLI",
+      phaseCopy[0],
+      handoffStatus === "starting" ? "正在启动" : "正在处理",
+      "页面暂时只能看",
+      phaseCopy[1],
+    );
+  }
   if (status === "processing" && copyConfirmed) {
     return progressPresentationCopy(
       "等待AI返回结果",
@@ -206,12 +264,22 @@ function deriveRunProgressStepsFromContext({
   completionObserved,
   copyFailed,
   copyConfirmed,
+  agentMode,
+  agentFailed,
+  agentRunning,
+  agentCompleted,
+  handoff,
 }) {
+  const agentDelivery = agentMode;
   const steps = [
     progressStep(
       "handoff",
-      "正在准备并复制",
-      handoffStatus === "copying"
+      agentDelivery ? "启动 Qoder CLI" : "正在准备并复制",
+      agentDelivery
+        ? handoffStatus === "starting"
+          ? "正在建立受管 ACP 会话"
+          : "本轮要求已冻结，等待 Qoder CLI"
+        : handoffStatus === "copying"
         ? "正在写入并核对剪贴板"
         : run.requestId === "pending" || status === "submitting"
           ? "正在冻结本轮要求"
@@ -221,8 +289,16 @@ function deriveRunProgressStepsFromContext({
     progressStep(
       "ai",
       "等待 AI 完成",
-      copyConfirmed ? "等待 AI 写回完成记录" : "交接完成后开始",
-      copyConfirmed ? "current" : "pending",
+      agentDelivery
+        ? agentRunning
+          ? "Qoder CLI 正在执行本轮要求"
+          : agentCompleted
+            ? "已收到 Agent 完成信号"
+            : "Agent 启动后开始"
+        : copyConfirmed ? "等待 AI 写回完成记录" : "交接完成后开始",
+      agentDelivery
+        ? agentRunning ? "current" : agentCompleted ? "done" : "pending"
+        : copyConfirmed ? "current" : "pending",
     ),
     progressStep(
       "validation",
@@ -233,6 +309,25 @@ function deriveRunProgressStepsFromContext({
     progressStep("result", "结果", "等待前序步骤完成", "pending"),
   ];
   const [handoffStep, aiStep, validationStep, resultStep] = steps;
+
+  if (agentFailed) {
+    Object.assign(
+      handoffStep,
+      progressStep(
+        "handoff",
+        handoffStatus === "interrupted" ? "Qoder 会话已中断" : "Qoder CLI 执行失败",
+        handoff.errorMessage || "本轮 Request 已安全保留",
+        "error",
+      ),
+    );
+    aiStep.detail = handoff.retryable === false
+      ? "旧 Request 结束后可重新发送"
+      : "可重新启动 Qoder 或复制任务";
+    aiStep.state = "pending";
+    validationStep.detail = "尚未收到可验证完成记录";
+    resultStep.detail = "当前 HTML 保持不变";
+    return steps;
+  }
 
   if (copyFailed) {
     Object.assign(
@@ -254,6 +349,12 @@ function deriveRunProgressStepsFromContext({
     Object.assign(
       handoffStep,
       progressStep("handoff", "已准备并复制", "交接内容已确认", "done"),
+    );
+  }
+  if (agentDelivery && (agentRunning || agentCompleted)) {
+    Object.assign(
+      handoffStep,
+      progressStep("handoff", "Qoder CLI 已启动", "受管 ACP 会话已建立", "done"),
     );
   }
   if (completionObserved) {
@@ -484,6 +585,16 @@ export function activeRunFromRecord(raw) {
   const candidateAssessment = candidateAssessmentFromRecord(
     raw.candidateAssessment,
   );
+  const rawAgentDelivery = isRecord(raw.agentDelivery) ? raw.agentDelivery : null;
+  const agentDelivery = rawAgentDelivery
+    && ["clipboard", "qoder-acp"].includes(String(rawAgentDelivery.mode || ""))
+    ? {
+        mode: String(rawAgentDelivery.mode),
+        ...(rawAgentDelivery.trustPolicyVersion
+          ? { trustPolicyVersion: String(rawAgentDelivery.trustPolicyVersion) }
+          : {}),
+      }
+    : null;
   return {
     projectId: String(raw.projectId || ""),
     documentId: String(raw.documentId || ""),
@@ -492,6 +603,7 @@ export function activeRunFromRecord(raw) {
     requestPath: String(raw.requestPath || ""),
     attemptPath: String(raw.attemptPath || ""),
     handoffMessage: String(raw.handoffMessage || ""),
+    ...(agentDelivery ? { agentDelivery } : {}),
     status,
     sourcePath: String(raw.sourcePath || ""),
     baseSnapshotSha256: String(raw.baseSnapshotSha256 || raw.sourceSha256 || ""),

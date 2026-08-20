@@ -945,6 +945,10 @@ export class WorkspaceController {
     return this.#requireRunWorkflow().copyHandoff(input);
   }
 
+  startRunAgent(input) {
+    return this.#requireRunWorkflow().startAgent(input);
+  }
+
   cancelRun(input) {
     return this.#requireRunWorkflow().cancel(input);
   }

@@ -14,16 +14,21 @@ User HTML bytes
 
 Comments + frozen input
   -> Change Request / Attempt
-  -> clipboard-only AI handoff
+  -> Agent Bridge (managed Qoder ACP or clipboard fallback)
   -> completion + candidate health/continuity assessment
   -> immutable Version
   -> explicit user-controlled activation
 ```
 
-The production path above remains clipboard-only. A development-only Qoder ACP
-v1 spike separately drives a synthetic frozen Request through an allowlisted
-ACP host and the same official finalizer/Candidate boundary. It owns no product
-state, UI or package surface and is not an OS sandbox; see ADR 0031.
+The product Agent Bridge is Bridge-owned and never owns Request, Candidate,
+Version or Working Copy state. A user may explicitly choose a managed Qoder ACP
+session or the existing clipboard fallback for each task. The Qoder driver
+preflights a verified standalone CLI before the Request is created, then starts
+only a Request whose durable `agentDelivery` record authorizes the trusted-local
+policy. ACP progress is presentation evidence only: only the official finalizer
+plus Repository validation can create a pending-review Candidate, and only an
+explicit user action can promote it. The ACP allowlist is not an OS sandbox;
+see ADR 0032. ADR 0031 remains the historical synthetic-spike decision.
 
 ## Boundaries
 
@@ -259,7 +264,8 @@ services.
 | Current source bytes, Hash, revisions, persistence projection, source-write single flight and Canvas authority generation | `app/application/document-session.js` |
 | Renderer draft revision, pending operations and reconciliation | `app/application/draft-session.js` |
 | Renderer comment working copy, composer and saved-comment edit projection | `app/application/comment-session.js` |
-| Active/background runs, Qoder status, background outcomes, submission lifecycle locks and operation locks | `app/application/run-session.js` |
+| Active/background runs, Agent delivery projection, Qoder status, background outcomes, submission lifecycle locks and operation locks | `app/application/run-session.js` |
+| Trusted-local Qoder ACP discovery, preflight tickets, process/session lifetime, bounded public progress and cancellation-before-Request ordering | `scripts/agent-bridge-service.mjs`, composed by `scripts/workspace-bridge.mjs`; durable Request/Candidate authority remains in `ProjectFileRepository` |
 | Immutable Version projection and history-view transition | `app/application/version-session.js` |
 | `PROJECT.md` editor working copy, generation, composition fence and save projection facts | `app/application/project-rules-session.js` |
 | `PROJECT.md` Bridge read/write, 700ms autosave, unknown-write reconciliation, close/switch drain and editor-restore host port | `app/application/project-rules-workflow.js`, composed by `WorkspaceController` |

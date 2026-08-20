@@ -61,6 +61,23 @@ const OPERATION_KINDS = Object.freeze([
   "poll",
 ]);
 
+function recoveredQoderHandoff(run) {
+  if (run?.status !== "processing" || run?.agentDelivery?.mode !== "qoder-acp") return null;
+  return Object.freeze({
+    sourcePath: run.sourcePath,
+    requestId: run.requestId,
+    attemptId: run.attemptId,
+    mode: "qoder-acp",
+    status: "interrupted",
+    phase: "bridge-restarted",
+    agentName: null,
+    agentVersion: null,
+    errorCode: "AGENT_RESTART_RECOVERY_REQUIRED",
+    errorMessage: "Bridge 无法证明旧 Qoder 会话已经停止。请结束本轮，再重新发送。",
+    retryable: false,
+  });
+}
+
 export class RunSession {
   #activeSourcePath;
 
@@ -253,6 +270,9 @@ export class RunSession {
     if (!run?.sourcePath) return null;
     const previous = this.runForSource(run.sourcePath);
     const sameTrackedRun = sameRun(previous, run);
+    const recoveredHandoff = recovered && !sameTrackedRun
+      ? recoveredQoderHandoff(run)
+      : null;
     if (!sameTrackedRun) this.#clearRunScopedState(run.sourcePath);
     if (recovered && !sameTrackedRun) {
       this.#deleteBySource(this.#recoveredRuns, run.sourcePath);
@@ -268,6 +288,16 @@ export class RunSession {
       )
     ) {
       this.#activeRun = run;
+    }
+    if (recoveredHandoff) {
+      this.#deleteBySource(this.#handoffs, run.sourcePath);
+      this.#handoffs.set(run.sourcePath, recoveredHandoff);
+      if (
+        samePath(this.#activeSourcePath, run.sourcePath)
+        && sameRun(this.#activeRun, recoveredHandoff)
+      ) {
+        this.#activeHandoff = recoveredHandoff;
+      }
     }
     this.#emit();
     return run;
@@ -310,8 +340,9 @@ export class RunSession {
   publishHandoff(state) {
     if (!state?.sourcePath) return false;
     const previous = this.handoffForSource(state.sourcePath);
+    const beginsDelivery = state.status === "copying" || state.status === "starting";
     if (
-      state.status !== "copying"
+      !beginsDelivery
       && previous
       && (
         previous.requestId !== state.requestId
@@ -322,12 +353,17 @@ export class RunSession {
       this.#copiedHandoffs,
       state,
     );
-    if (state.status === "copying" && !copyAlreadyConfirmed) {
+    if (beginsDelivery && !copyAlreadyConfirmed) {
       this.#deleteBySource(this.#copiedHandoffs, state.sourcePath);
     }
-    if (state.status === "copied") {
+    if (["copied", "starting", "running", "cancelling"].includes(state.status)) {
       this.#deleteBySource(this.#copiedHandoffs, state.sourcePath);
       this.#copiedHandoffs.set(state.sourcePath, state);
+    } else if (
+      state.mode === "qoder-acp"
+      && ["completed", "failed", "interrupted", "cancelled"].includes(state.status)
+    ) {
+      this.#deleteBySource(this.#copiedHandoffs, state.sourcePath);
     }
     this.#deleteBySource(this.#handoffs, state.sourcePath);
     this.#handoffs.set(state.sourcePath, state);
@@ -529,11 +565,32 @@ export class RunSession {
 
   get activeHandoffMayBeRunning() {
     if (!this.#activeRun) return false;
+    if (this.#activeHandoff?.mode === "qoder-acp") {
+      return sameRun(this.#activeHandoff, this.#activeRun) && (
+        ["starting", "running", "cancelling"].includes(this.#activeHandoff.status)
+        || (
+          (
+            this.#activeHandoff.status === "interrupted"
+            || this.#activeHandoff.errorCode === "AGENT_RESTART_RECOVERY_REQUIRED"
+          )
+          && this.#matchesTrackedRun(this.#recoveredRuns, this.#activeRun)
+        )
+      );
+    }
     return this.#matchesTrackedRun(this.#copiedHandoffs, this.#activeRun)
       || (
         this.#activeRun.status === "processing"
         && this.#matchesTrackedRun(this.#recoveredRuns, this.#activeRun)
       );
+  }
+
+  get activeHandoffManaged() {
+    return Boolean(
+      this.#activeRun
+      && this.#activeHandoff?.mode === "qoder-acp"
+      && ["starting", "running", "cancelling"].includes(this.#activeHandoff.status)
+      && sameRun(this.#activeHandoff, this.#activeRun),
+    );
   }
 
   get activeSubmission() {
@@ -564,6 +621,7 @@ export class RunSession {
       activeRun: this.#activeRun,
       activeHandoff: this.#activeHandoff,
       activeHandoffMayBeRunning: this.activeHandoffMayBeRunning,
+      activeHandoffManaged: this.activeHandoffManaged,
       activeSubmission: this.activeSubmission,
       submissionPending: this.submissionPending,
       activeLocked: this.activeLocked,

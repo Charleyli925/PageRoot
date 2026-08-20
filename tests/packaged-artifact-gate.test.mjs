@@ -1,14 +1,19 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import {
+  mkdir,
   mkdtemp,
   readFile,
   rm,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
+import { createPackage } from "@electron/asar";
 
 import {
   notarizeAndStapleDmg,
@@ -23,6 +28,7 @@ import {
 import { createSyntheticAppBundle } from "./helpers/release-evidence-fixtures.mjs";
 
 const productRoot = fileURLToPath(new URL("../", import.meta.url));
+const execFileAsync = promisify(execFile);
 
 async function verifySyntheticAppBundle(fixture, { allowUnsigned = true } = {}) {
   return verifyAppBundle({
@@ -30,6 +36,7 @@ async function verifySyntheticAppBundle(fixture, { allowUnsigned = true } = {}) 
     appPath: fixture.appPath,
     packageJson: fixture.packageJson,
     verifySignature: !allowUnsigned,
+    requirePackagedAgentBridgeSmoke: false,
   });
 }
 
@@ -97,6 +104,7 @@ test("release commands use one automated artifact lane with full tests and packa
   assert.match(verifier, /html-source-parser\.mjs/);
   assert.doesNotMatch(verifier, /scope-validator\.mjs/);
   assert.match(verifier, /packaged Bridge dependency smoke/);
+  assert.match(verifier, /packaged Qoder ACP closed-loop smoke/);
 
   const layout = expectedArtifactLayout({ productRoot, packageJson, arch: "arm64" });
   assert.match(layout.appPath, /release\/mac-arm64\/PageRoot\.app$/);
@@ -281,6 +289,23 @@ test("the app-bundle gate validates app.asar, Bridge scripts, schemas and plist 
   assert.equal(result.provenance.commitSha, "a".repeat(40));
 });
 
+test("real app verification requires the Electron Helper ACP smoke even when unsigned", async (t) => {
+  const fixture = await createSyntheticAppBundle(t, {
+    profile: "dry-run",
+    version: "0.7.0",
+    buildInfo: { builtAt: "2026-07-23T00:00:00.000Z" },
+  });
+  await assert.rejects(
+    verifyAppBundle({
+      productRoot: fixture.productRoot,
+      appPath: fixture.appPath,
+      packageJson: fixture.packageJson,
+      verifySignature: false,
+    }),
+    /packaged Electron Helper is missing/u,
+  );
+});
+
 test("the app-bundle gate reports each mutated closure boundary", async (t) => {
   const cases = [
     {
@@ -292,6 +317,53 @@ test("the app-bundle gate reports each mutated closure boundary", async (t) => {
         "stale packaged lifecycle core\n",
       ),
       expected: /bridge\/lifecycle-core\.mjs does not match source/u,
+    },
+    {
+      name: "unreviewed scoped runtime package",
+      profile: "candidate",
+      allowUnsigned: true,
+      mutate: async ({ resourcesPath }) => {
+        const packageRoot = path.join(resourcesPath, "node_modules/@agentclientprotocol/extra");
+        await mkdir(packageRoot, { recursive: true });
+        await writeFile(path.join(packageRoot, "package.json"), "{}\n");
+      },
+      expected: /packaged runtime modules must exactly match the reviewed allowlist/u,
+    },
+    {
+      name: "nested runtime package symlink",
+      profile: "candidate",
+      allowUnsigned: true,
+      mutate: ({ resourcesPath }) => symlink(
+        "/etc/passwd",
+        path.join(resourcesPath, "node_modules/parse5/dist/extra-secret.js"),
+      ),
+      expected: /unsupported symlink:.*extra-secret\.js/u,
+    },
+    {
+      name: "runtime resource FIFO",
+      profile: "candidate",
+      allowUnsigned: true,
+      mutate: ({ resourcesPath }) => execFileAsync(
+        "/usr/bin/mkfifo",
+        [path.join(resourcesPath, "rogue-runtime-pipe")],
+      ),
+      expected: /unsupported FIFO:.*rogue-runtime-pipe/u,
+    },
+    {
+      name: "app asar link entry",
+      profile: "candidate",
+      allowUnsigned: true,
+      mutate: async ({ resourcesPath, temporaryRoot }) => {
+        const asarSource = path.join(temporaryRoot, "asar-source");
+        await symlink(
+          "desktop/main.mjs",
+          path.join(asarSource, "rogue-link.mjs"),
+        );
+        const asarPath = path.join(resourcesPath, "app.asar");
+        await rm(asarPath);
+        await createPackage(asarSource, asarPath);
+      },
+      expected: /app\.asar contains unsupported link entry: rogue-link\.mjs/u,
     },
     {
       name: "build-info version drift",

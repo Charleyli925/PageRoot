@@ -61,6 +61,8 @@ const APP_SOURCE_FILES = [
 
 const BRIDGE_FILES = [
   "workspace-bridge.mjs",
+  "agent-bridge-service.mjs",
+  "qoder-acp-client.mjs",
   "finalize-attempt.mjs",
   "lifecycle-core.mjs",
   "project-file-repository.mjs",
@@ -83,6 +85,7 @@ const BRIDGE_FILES = [
 ];
 
 const PACKAGED_MODULES = [
+  "@agentclientprotocol/sdk",
   "argparse",
   "builder-util-runtime",
   "debug",
@@ -101,6 +104,7 @@ const PACKAGED_MODULES = [
   "semver",
   "tiny-typed-emitter",
   "universalify",
+  "zod",
 ];
 
 const SCHEMA_FILES = [

@@ -139,6 +139,10 @@ v3 在其历史切换边界内不兼容 v1/v2；新写入不得沿用以下旧�
 }
 ```
 
+该 finalizer `message` 是给未知外部调用者的保守机器终态，不直接作为产品通知。复制模式
+由用户手动停止外部 Agent；受管 Qoder 模式在持久取消之前已经由 Agent Bridge 停止，UI
+不得再次提示“请手动停止”。
+
 - `basedOnVersionId` 表示冻结内容的谱系基础。
 - `previousVersionId` 表示时间线上最新正式 Version。
 - `candidateVersionId` 是本次可能提交的下一版。
@@ -166,7 +170,19 @@ Prompt 指定的精确路径，不能自行计算、递增或改名：
 
 ### 4.1 锁定顺序
 
-用户触发交接时，工作台必须在任何异步操作前同步持久化或至少同步进入可持久化的：
+用户触发交接时先选择 `clipboard` 或 `qoder-acp`。工作台在任何异步预检或项目登记前同步
+进入瞬时 `preparing`：它只去重重复发送，不锁定 Canvas，也不是持久 Request 状态。用户在
+这段时间仍可编辑；后续冻结必须捕获届时最新的当前权威内容。若项目身份已经切换，整次意图
+按 stale 丢弃。
+
+`qoder-acp` 必须在冻结和 Request 发布之前完成 Bridge 的 CLI readiness probe；它验证受信
+独立 CLI 的本地来源、版本、文件身份和静态模型列表并返回短时不透明 ticket，但不保证随后
+ACP 会话的登录态、账号容量或网络服务仍可用。probe 不得创建 Request、写 output 或锁定
+Canvas，失败时退出 `preparing` 并保持可编辑。
+
+probe 通过后，或用户选择 `clipboard` 后，工作台完成必要项目登记、重新读取当前评论，并在
+没有 `await` 插入 source-authority fence 的情况下同步执行 `freezeNow()`。只有这次冻结成功，
+才同步进入：
 
 ```text
 lifecycleState=submitting
@@ -174,7 +190,7 @@ projectLocked=true
 freezeCutoffRevision=<current editRevision>
 ```
 
-随后：
+随后才允许：
 
 1. flush 同一自动写回队列。
 2. 等待 `lastPersistedRevision >= freezeCutoffRevision`。
@@ -188,6 +204,16 @@ freezeCutoffRevision=<current editRevision>
 若任一步失败，删除未发布临时目录并回到 `editing`；不得丢失评论、编辑事实或源 HTML。
 
 成功发布 Request 后，`input/base/index.html` 是本轮修改前的完整、不可变基线。无论 AI 最终成功、失败、取消或 no-change，它都不得被工作文件或后续 Request 替换。
+
+Request 的受管元数据必须冻结一个严格交付描述：`{"mode":"clipboard"}`，或
+`{"mode":"qoder-acp","trustPolicyVersion":"trusted-local-agent-v1"}`。该字段只授权
+如何把已经发布的 Request 交给 Agent，不授予 Candidate、Version 或当前 HTML authority。
+Bridge 只能从 Registry、runtime 与该 Request 派生 ACP 文件/命令权限；Renderer 不得传入
+任意命令、cwd、环境或 Request/output/finalizer 路径。一次性 preflight ticket 只能启动
+同一个 `projectId/documentId/requestId/attemptId`。只有当前 Bridge 能证明它拥有的 Qoder
+进程组已经退出、且没有 output/completion 残留时，启动失败才可重试这个 Request。Bridge
+崩溃留下的启动租约、无法确认的进程清理或任意残留都必须禁止同 Request 重启和 clipboard
+fallback；用户先持久取消旧 Request 形成 fence，再重新发送并建立新的 Request。
 
 ### 4.2 冻结边界
 
@@ -815,6 +841,14 @@ Attempt 的 `outcome.json` 是工作台写入的严格诊断终态，不是完�
 ## 18. 取消
 
 取消必须再次核对事务状态：
+
+- `clipboard`：源页只能取消自己的 Request；若交接已确认，先提示用户外部 Agent 可能仍
+  在运行，再写 durable cancel。
+- `qoder-acp`：Agent Bridge 先关闭 ACP mutation surface、发送取消并有界终止受管进程组；
+  只有停止完成后才允许写 durable cancel 并解锁 Canvas。应用关闭走同一 dispose 边界。
+  Bridge 重启后只把处理中的会话投影为不可重试的 `interrupted`，不扫描、复活或声称旧进程
+  已停止。此时“结束本轮”把 durable cancel 作为旧 Request 的 authority fence，并保守提醒
+  外部 Qoder 仍可能运行；同 Request 不得再启动或改为复制，只能重新发送为新 Request。
 
 - `submitting/processing/validating`：标记 Attempt 取消，恢复冻结评论，释放候选，回到 editing。
 - `awaiting-conflict-resolution`：放弃未提交候选，保留源外部内容，恢复评论。

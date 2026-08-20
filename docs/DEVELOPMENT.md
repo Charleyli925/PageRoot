@@ -46,6 +46,39 @@ and `task:sync-main` to fast-forward the clean primary checkout. See `AGENTS.md`
 and `docs/CODEX_WORKFLOW.md` for the complete automation and authorization
 boundary.
 
+## Product Qoder ACP Agent Bridge
+
+The packaged Bridge owns the product ACP session through
+`scripts/agent-bridge-service.mjs` and `scripts/qoder-acp-client.mjs`. The
+renderer can request only `POST /agent/preflight` and `POST /agent/start` with
+registered task identity, the fixed `qoder-acp` driver, explicit
+`trusted-local-agent-v1` consent and an opaque short-lived ticket. It cannot
+provide a command, cwd, environment or filesystem path policy.
+
+Product discovery accepts a protected standalone `@qoder-ai/qodercli` package
+at version 1.1.27 or newer. It intentionally rejects the executable embedded in
+Qoder.app and ordinary `PAGEROOT_QODER_ACP_COMMAND` overrides. Tests may inject
+a synthetic executable only with both `PAGEROOT_E2E=1` and
+`PAGEROOT_QODER_ACP_ALLOW_TEST_COMMAND=1`. The readiness probe runs before
+Request creation; a failed local CLI/version/model-list check must leave no new
+Request. Actual ACP login, capacity or network failure can still appear only
+after the Request exists. Same-Request retry is allowed only while the current
+Bridge has confirmed its process group stopped and no output/completion remains.
+A crash lease, unknown cleanup or residue requires cancelling the old Request as
+an authority fence and submitting a new one. Candidate completion remains owned
+by the official finalizer plus Repository polling.
+
+Run the deterministic owners directly while developing this boundary:
+
+```bash
+node --test tests/qoder-acp-spike-client.test.mjs
+node --test tests/agent-bridge-service.test.mjs
+node --test tests/agent-bridge-workspace.test.mjs
+```
+
+ACP is not an OS sandbox. The product presents and records an explicit
+trusted-local-Agent choice; see `docs/SECURITY_MODEL.md` and ADR 0032.
+
 ## Qoder ACP v1 synthetic spike
 
 `npm run spike:qoder-acp` is a development-only compatibility probe. It

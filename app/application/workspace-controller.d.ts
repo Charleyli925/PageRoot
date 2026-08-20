@@ -526,6 +526,7 @@ export class WorkspaceController {
     previousVersionId?: string | null;
     basedOnVersionId?: string | null;
     deadlineAt?: number;
+    deliveryMode?: "clipboard" | "qoder-acp";
   }): Promise<RunWorkflowOutcome>;
   reconcileRunSubmission(input?: {
     sourcePath?: string | null;
@@ -534,6 +535,10 @@ export class WorkspaceController {
   pollRuns(input?: { generation?: number }): Promise<RunWorkflowOutcome>;
   copyRunHandoff(input?: {
     run?: import("../domain/run-lifecycle.js").ActiveRun | null;
+  }): Promise<RunWorkflowOutcome>;
+  startRunAgent(input?: {
+    run?: import("../domain/run-lifecycle.js").ActiveRun | null;
+    preflightId?: string | null;
   }): Promise<RunWorkflowOutcome>;
   cancelRun(input?: {
     run?: import("../domain/run-lifecycle.js").ActiveRun | null;
