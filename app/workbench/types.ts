@@ -317,6 +317,10 @@ export type Version = {
   summary: string;
   generatedAt: string;
   source: "初始页面" | "内部 AI";
+  // What the user asked for in the round that produced this version, read from
+  // that round's frozen request. Null for the initial import and for rounds
+  // whose records are no longer readable.
+  requirement: string | null;
   contentSha256: string;
   previousVersionId: string | null;
   basedOnVersionId: string | null;
@@ -355,7 +359,7 @@ export type UserSupplementRecord = {
 export type PersistState = "idle" | "preview-dirty" | "queued" | "writing" | "failed" | "conflict";
 export type ViewMode = "current" | "history";
 export type CanvasMode = "edit" | "preview";
-export type Drawer = "files" | "history" | "handoff" | null;
+export type Drawer = "files" | "handoff" | null;
 export type ToastTone = "success" | "info" | "warning" | "error";
 export type ToastDisposition =
   | "silent-recover"

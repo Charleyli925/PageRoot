@@ -2071,22 +2071,6 @@ input:focus-visible,
   line-height: 1.55;
 }
 
-.files-panel > .project-rule-card {
-  min-height: 58px;
-  border-color: #d5d0ef;
-  background: #faf9ff;
-}
-
-.files-panel > .project-rule-card:hover:not(:disabled) {
-  border-color: #bdb5e9;
-  background: #f3f1ff;
-}
-
-.files-panel > .project-rule-card:disabled {
-  cursor: not-allowed;
-  opacity: 0.62;
-}
-
 .technical-files {
   margin-top: 2px;
   border-top: 1px solid var(--line-soft);
@@ -4170,6 +4154,46 @@ body {
   opacity: 1;
 }
 
+/* Project console: the current-project workbench uses the same glass shell,
+   footprint and header/body/footer rhythm as the AI handoff panel. */
+.drawer-overlay.show[data-drawer="files"] {
+  background: rgb(238 240 244 / 74%);
+  backdrop-filter: blur(13px) saturate(120%);
+}
+
+.side-drawer[data-drawer="files"] {
+  top: 50%;
+  right: auto;
+  bottom: auto;
+  left: 50%;
+  width: min(1040px, calc(100vw - 96px));
+  max-width: none;
+  height: min(760px, calc(100vh - 96px));
+  max-height: none;
+  margin: 0;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  border: 1px solid rgb(255 255 255 / 72%);
+  border-radius: 24px;
+  background: rgb(255 255 255 / 92%);
+  box-shadow:
+    0 32px 90px rgb(30 32 42 / 17%),
+    inset 0 1px 0 rgb(255 255 255 / 78%);
+  backdrop-filter: blur(24px) saturate(135%);
+  transform-origin: center;
+  transform: translate(-50%, calc(-50% + 12px)) scale(0.985);
+}
+
+.side-drawer[data-drawer="files"].open {
+  transform: translate(-50%, -50%) scale(1);
+}
+
+@media (max-width: 940px) {
+  .side-drawer[data-drawer="files"] {
+    width: calc(100vw - 36px);
+    height: calc(100vh - 48px);
+  }
+}
+
 .drawer-header {
   min-height: 82px;
   padding: 16px 18px;
@@ -4223,32 +4247,6 @@ body {
   place-items: center;
   padding: 0 !important;
   border-radius: 10px !important;
-}
-
-.project-tabs {
-  height: 54px;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 4px;
-  margin: 14px 16px 0;
-  padding: 4px;
-  border-radius: 13px;
-  background: #f0f1f4;
-}
-
-.project-tabs button {
-  border: 0;
-  border-radius: 10px;
-  background: transparent;
-  color: #797b85;
-  font-size: 11px;
-  font-weight: 680;
-}
-
-.project-tabs button[data-active="true"] {
-  background: #fff;
-  color: #25262c;
-  box-shadow: 0 1px 4px rgb(30 32 39 / 10%);
 }
 
 .drawer-body {
@@ -6303,8 +6301,7 @@ body {
   background: #fff;
 }
 
-.project-advanced .project-resource-row,
-.files-panel > .project-rule-card {
+.project-advanced .project-resource-row {
   width: 100%;
   min-height: 62px;
   display: grid;
@@ -6325,8 +6322,7 @@ body {
   border-bottom: 0;
 }
 
-.project-advanced .project-resource-row:hover:not(:disabled),
-.files-panel > .project-rule-card:hover:not(:disabled) {
+.project-advanced .project-resource-row:hover:not(:disabled) {
   border-color: #eef0f2;
   background: #f8f8fc;
   color: #403bb9;
@@ -6396,6 +6392,587 @@ body {
 
 .project-resource-row > svg {
   color: #92949d;
+}
+
+/* ---- Current-project console ------------------------------------------- */
+
+:root {
+  /* Branch rails: one indigo family at four depths, so a fork stays readable
+     without introducing a second accent colour. */
+  --version-lane-0: #3f36c6;
+  --version-lane-1: #6c62e0;
+  --version-lane-2: #9a93ea;
+  --version-lane-3: #b7b0f0;
+}
+
+.project-panel-header {
+  gap: 12px;
+}
+
+.project-panel-meta {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted) !important;
+  font-size: 11px !important;
+}
+
+.project-panel-meta > span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--green);
+}
+
+.project-panel-actions {
+  flex: none;
+  /* `.drawer-header > div` is a grid by default, which would stack these. */
+  display: flex !important;
+  align-items: center;
+  gap: 8px;
+}
+
+.project-panel-action {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgb(255 255 255 / 70%);
+  color: #54565f;
+  font-size: 11px;
+  font-weight: 620;
+  white-space: nowrap;
+  transition:
+    color 150ms ease,
+    background-color 150ms ease,
+    border-color 150ms ease;
+}
+
+.project-panel-action > svg {
+  color: var(--muted);
+}
+
+.project-panel-action:hover {
+  border-color: #cfc9f5;
+  background: #fff;
+  color: var(--indigo-deep);
+}
+
+.project-panel-action:hover > svg {
+  color: var(--indigo);
+}
+
+.project-console {
+  min-width: 0;
+  min-height: 0;
+  /* Without a definite height the console grows past the drawer body, and any
+     scrollIntoView then shifts the whole panel (leaving the detail pane blank).
+     Filling the body keeps both columns as the only scrollers. */
+  height: 100%;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+/* The console owns its own scrolling: the tree and the detail each scroll
+   independently, so scrolling the tree can never push the detail out of view.
+   That requires the drawer body to stop being the scroller. */
+.side-drawer[data-drawer="files"] > .drawer-body {
+  overflow: hidden;
+  min-height: 0;
+  padding: 0 20px;
+}
+
+.project-rules-row {
+  border-bottom: 1px solid var(--line-soft);
+}
+
+/* An expanded rules editor must not squeeze the tree out of the console. */
+.project-rules-row[data-open="true"] {
+  overflow-y: auto;
+  max-height: 52%;
+}
+
+.project-rules-summary {
+  width: 100%;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 12px 4px;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+}
+
+.project-rules-summary > svg:first-child {
+  color: var(--indigo);
+}
+
+.project-rules-summary > strong {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.project-rules-summary > small {
+  color: var(--faint);
+  font-size: 11px;
+}
+
+.project-rules-summary > svg:last-child {
+  margin-left: auto;
+  color: var(--faint);
+  transition: transform 150ms ease;
+}
+
+.project-rules-row[data-open="true"] .project-rules-summary > svg:last-child {
+  transform: rotate(90deg);
+}
+
+.project-rules-summary:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.project-rules-saved {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  color: var(--green);
+  font-size: 11px;
+  font-style: normal;
+}
+
+.project-rules-saved > span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.project-rules-saved ~ svg {
+  margin-left: 10px !important;
+}
+
+.project-rules-editor {
+  display: grid;
+  gap: 8px;
+  padding: 0 4px 14px;
+}
+
+/* The inline disclosure shares the console with the version tree, so the
+   editor keeps a workable but bounded height instead of the 360px it used
+   when it owned the whole panel. */
+.project-rules-editor > .project-file-editor {
+  min-height: 190px;
+  max-height: 34vh;
+}
+
+.project-console-body {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr);
+}
+
+.version-tree-column {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 10px 18px;
+  margin-left: -20px;
+  border-right: 1px solid var(--line-soft);
+  background: rgb(251 250 247 / 55%);
+}
+
+.version-tree-heading {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 8px 10px;
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 680;
+}
+
+.version-tree-heading > span {
+  color: var(--faint);
+  font-weight: 600;
+}
+
+.version-tree-empty,
+.version-detail-placeholder {
+  margin: 0;
+  color: var(--faint);
+  font-size: 11.5px;
+  line-height: 1.7;
+}
+
+.version-tree-empty {
+  padding: 8px;
+}
+
+.version-detail-placeholder {
+  padding: 24px;
+}
+
+.version-tree {
+  position: relative;
+}
+
+.version-tree-rail {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+}
+
+.version-tree-rail path {
+  fill: none;
+  stroke-width: 1.8;
+}
+
+.version-tree-node {
+  fill: #fff;
+  stroke-width: 2;
+}
+
+.version-tree-rows {
+  position: relative;
+}
+
+.version-tree-row {
+  width: 100%;
+  height: 38px;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding-right: 10px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+}
+
+.version-tree-row:hover {
+  background: rgb(255 255 255 / 70%);
+}
+
+.version-tree-row[data-selected="true"] {
+  background: #fff;
+  box-shadow: 0 1px 5px rgb(30 32 39 / 9%);
+}
+
+.version-tree-ordinal {
+  min-width: 26px;
+  flex: none;
+  color: var(--indigo-deep);
+  font-size: 11px;
+  font-weight: 780;
+}
+
+.version-tree-title {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 560;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.version-tree-row[data-selected="true"] .version-tree-title {
+  font-weight: 680;
+}
+
+.version-tree-row > time {
+  flex: none;
+  color: var(--faint);
+  font-size: 9.5px;
+}
+
+.version-tree-flag {
+  flex: none;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: var(--indigo-soft);
+  color: var(--indigo-deep);
+  font-size: 8.5px;
+  font-weight: 760;
+}
+
+.version-detail-column {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 20px 24px 12px;
+}
+
+.version-detail {
+  display: grid;
+  gap: 0;
+}
+
+.version-detail-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 13px;
+  padding: 0;
+  border: 0;
+}
+
+.version-detail-badge {
+  width: 44px;
+  height: 44px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 13px;
+  background: linear-gradient(140deg, #6f61f2, #4136c4);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 800;
+  box-shadow: 0 7px 18px rgb(76 51 219 / 24%);
+}
+
+.version-detail-identity {
+  min-width: 0;
+  flex: 1;
+  display: grid;
+  gap: 5px;
+}
+
+.version-detail-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.version-detail-heading > strong {
+  font-size: 16px;
+  font-weight: 740;
+  letter-spacing: -0.015em;
+}
+
+.version-detail-flag {
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--indigo-soft);
+  color: var(--indigo-deep);
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 760;
+}
+
+.version-detail-identity > small {
+  color: var(--faint);
+  font-size: 11.5px;
+}
+
+.version-detail-lineage {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+  padding: 10px 12px;
+  border-radius: 11px;
+  background: rgb(240 239 249 / 70%);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.version-detail-lineage > svg {
+  flex: none;
+  color: var(--indigo);
+}
+
+.version-detail-lineage > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.version-detail-lineage strong {
+  color: var(--ink);
+  font-weight: 650;
+}
+
+.version-detail-lineage > button {
+  min-height: 26px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: auto;
+  padding: 0 4px;
+  border: 0;
+  background: transparent;
+  color: var(--indigo-deep);
+  font-size: 11.5px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.version-detail-notice {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border-radius: 11px;
+  background: #f7f0df;
+  color: #856823;
+  font-size: 11.5px;
+  line-height: 1.65;
+}
+
+.version-detail-group {
+  margin-top: 17px;
+}
+
+.version-detail-group > header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.version-detail-group > header > svg {
+  color: var(--indigo);
+}
+
+.version-detail-group > header > strong {
+  font-size: 12px;
+  font-weight: 720;
+}
+
+.version-detail-count {
+  min-width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--indigo);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 740;
+}
+
+.version-detail-records {
+  display: grid;
+  gap: 10px;
+}
+
+.version-detail-comment {
+  display: grid;
+  gap: 3px;
+  padding-left: 12px;
+  border-left: 2px solid #d9d4f6;
+}
+
+.version-detail-comment > strong {
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 680;
+}
+
+.version-detail-comment > p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.version-detail-comment > small {
+  color: var(--faint);
+  font-size: 10.5px;
+}
+
+.version-detail-empty {
+  margin: 0;
+  color: var(--faint);
+  font-size: 11.5px;
+}
+
+.version-detail-edit {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 12px;
+}
+
+.version-detail-edit > del {
+  color: var(--faint);
+  text-decoration: line-through;
+}
+
+.version-detail-edit > ins {
+  padding: 2px 8px;
+  border-radius: 7px;
+  background: var(--indigo-soft);
+  color: var(--indigo-deep);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.version-detail-edit > svg {
+  flex: none;
+  color: var(--faint);
+}
+
+.version-detail-edit > small {
+  margin-left: auto;
+  color: var(--faint);
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+
+.project-console-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 14px 24px 18px;
+  border-top: 1px solid var(--line-soft);
+  background: rgb(255 255 255 / 40%);
+}
+
+.project-console-primary {
+  min-height: 42px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 18px;
+  border: 1px solid var(--indigo);
+  border-radius: 11px;
+  background: var(--indigo);
+  color: #fff;
+  font-size: 12.5px;
+  font-weight: 660;
+  box-shadow: 0 9px 22px rgb(76 69 211 / 20%);
+}
+
+.project-console-primary:hover:not(:disabled) {
+  background: var(--indigo-deep);
+}
+
+.project-console-primary:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  box-shadow: none;
+}
+
+@media (max-width: 940px) {
+  .project-console-body {
+    grid-template-columns: 250px minmax(0, 1fr);
+  }
+
+  .version-detail-column {
+    padding: 16px 16px 12px;
+  }
 }
 
 .file-view[data-editable="true"] {
