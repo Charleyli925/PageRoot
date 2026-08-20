@@ -45,19 +45,21 @@
   border: 1px solid rgb(46 43 52 / 18%);
   border-radius: 999px;
   color: #3e3a45;
-  background: rgb(255 255 255 / 94%);
-  box-shadow: 0 7px 20px rgb(28 30 38 / 13%);
+  background: rgb(255 255 255 / 84%);
+  box-shadow:
+    0 7px 20px rgb(28 30 38 / 13%),
+    inset 0 1px 0 rgb(255 255 255 / 60%);
   font: 650 12px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   white-space: nowrap;
   pointer-events: none;
   transform: translateX(-50%);
-  backdrop-filter: blur(10px);
+  backdrop-filter: blur(14px) saturate(160%);
 }
 
 .lockNotice[data-mode="history"] {
   border-color: rgb(90 85 223 / 22%);
   color: var(--indigo-deep);
-  background: rgb(247 246 255 / 96%);
+  background: rgb(247 246 255 / 88%);
 }
 
 .lockGlyph {
@@ -100,10 +102,12 @@
   border: 1px solid rgb(32 29 49 / 12%);
   border-radius: 11px;
   color: #25232a;
-  background: rgb(255 255 255 / 96%);
-  box-shadow: 0 10px 30px rgb(28 30 38 / 18%);
+  background: rgb(255 255 255 / 84%);
+  box-shadow:
+    0 10px 30px rgb(28 30 38 / 18%),
+    inset 0 1px 0 rgb(255 255 255 / 60%);
   font: 500 12px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  backdrop-filter: blur(12px);
+  backdrop-filter: blur(16px) saturate(160%);
 }
 
 .toolbarRow {
@@ -142,8 +146,8 @@
   text-overflow: ellipsis;
   pointer-events: auto;
   cursor: pointer;
-  -webkit-backdrop-filter: blur(10px);
-  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(12px) saturate(140%);
+  backdrop-filter: blur(12px) saturate(140%);
   animation: canvas-capability-hint-in 180ms ease-out;
 }
 

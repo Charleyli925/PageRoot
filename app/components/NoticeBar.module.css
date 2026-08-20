@@ -28,8 +28,8 @@
   transition:
     opacity 160ms ease,
     transform 200ms cubic-bezier(0.22, 1, 0.36, 1);
-  -webkit-backdrop-filter: blur(22px) saturate(1.16);
-  backdrop-filter: blur(22px) saturate(1.16);
+  -webkit-backdrop-filter: blur(22px) saturate(1.5);
+  backdrop-filter: blur(22px) saturate(1.5);
 }
 
 .notice[data-tone="success"] {
