@@ -254,6 +254,7 @@ function fakeOwner({
   ownerDeadlineMs,
   captureSettleMs = 0,
   releaseIsolatedSession,
+  frozenChartScripts,
   png = PNG,
 } = {}) {
   const state = {
@@ -266,6 +267,7 @@ function fakeOwner({
     permissionChecks: [],
     downloadHandlers: [],
     beforeRequest: [],
+    protocolHandlers: [],
     captureEvents: [],
   };
   let sessionIndex = 0;
@@ -357,6 +359,11 @@ function fakeOwner({
             state.beforeRequest.push(handler);
           },
         },
+        protocol: {
+          handle(scheme, handler) {
+            state.protocolHandlers.push({ scheme, handler });
+          },
+        },
       };
     },
     releaseIsolatedSession: releaseIsolatedSession || (async (session) => {
@@ -364,6 +371,7 @@ function fakeOwner({
       state.released.push(session);
     }),
     ...(ownerDeadlineMs === undefined ? {} : { ownerDeadlineMs }),
+    ...(frozenChartScripts === undefined ? {} : { frozenChartScripts }),
     captureSettleMs,
     randomToken: () => `capture-${state.partitions.length + 1}`,
   });
@@ -813,4 +821,61 @@ test("the settle wait stays subordinate to the owner deadline", async () => {
   assert.deepEqual(timedOut, { outcome: "timed-out", reason: "owner-deadline" });
   assert.ok(elapsedMs < 600, `owner response waited ${elapsedMs.toFixed(1)}ms`);
   assert.equal(state.windows[0].destroyed, true);
+});
+
+test("frozen chart scripts are prewarmed per capture session and served only from pinned bytes", async () => {
+  const frozenUrl = "https://cdnjs.cloudflare.com/ajax/libs/echarts/5.5.0/echarts.min.js";
+  const frozenBytes = Buffer.from("window.__pagerootFrozenEcharts = 1;", "utf8");
+  const prewarmed = [];
+  const { controller, state } = fakeOwner({
+    frozenChartScripts: {
+      prewarm: async (payload) => {
+        prewarmed.push(payload);
+      },
+      resolve: (captureSessionId, url) => (
+        captureSessionId === "review-owner-session-0001" && url === frozenUrl
+          ? frozenBytes
+          : null
+      ),
+    },
+  });
+  const captured = await controller.capture(request());
+  assert.equal(captured.outcome, "captured");
+  assert.equal(prewarmed.length, 1);
+  assert.equal(prewarmed[0].captureSessionId, "review-owner-session-0001");
+  assert.equal(typeof prewarmed[0].html, "string");
+
+  const https = state.protocolHandlers.find((entry) => entry.scheme === "https");
+  assert.ok(https, "the isolated session serves https only through the frozen handler");
+  const served = await https.handler({ url: frozenUrl });
+  assert.equal(served.status, 200);
+  assert.equal(served.headers.get("content-type"), "text/javascript; charset=utf-8");
+  assert.deepEqual(Buffer.from(await served.arrayBuffer()), frozenBytes);
+  const blocked = await https.handler({ url: "https://cdnjs.cloudflare.com/ajax/libs/other.js" });
+  assert.equal(blocked.status, 403, "an unpinned URL is blocked, never fetched");
+
+  let frozenDecision;
+  state.beforeRequest[0]({ url: frozenUrl }, (value) => {
+    frozenDecision = value;
+  });
+  assert.deepEqual(frozenDecision, { cancel: false });
+  let attackerDecision;
+  state.beforeRequest[0]({ url: "https://attacker.invalid/script.js" }, (value) => {
+    attackerDecision = value;
+  });
+  assert.deepEqual(attackerDecision, { cancel: true });
+});
+
+test("without a frozen script store the isolated session stays fully closed", async () => {
+  const { controller, state } = fakeOwner();
+  const captured = await controller.capture(request());
+  assert.equal(captured.outcome, "captured");
+  assert.equal(state.protocolHandlers.length, 0, "no https handler is installed");
+  let decision;
+  state.beforeRequest[0]({
+    url: "https://cdnjs.cloudflare.com/ajax/libs/echarts/5.5.0/echarts.min.js",
+  }, (value) => {
+    decision = value;
+  });
+  assert.deepEqual(decision, { cancel: true });
 });
