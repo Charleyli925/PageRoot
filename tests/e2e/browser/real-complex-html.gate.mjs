@@ -823,9 +823,8 @@ test("a real complex HTML file keeps layout and editable-island source authority
   }).toBe(true);
   await expect(page.getByRole("button", { name: /留评论|评论/ }).filter({ visible: true }).first())
     .toBeVisible();
-  const notice = page.locator('[role="status"], [role="alert"]').filter({ hasText: /评论/ }).first();
-  await expect(notice).toBeVisible();
-  await expect(notice).not.toContainText(/SourcePatch|source anchor|TargetRef|源码映射|原 HTML 没有变化/i);
+  const notice = page.locator('[role="status"], [role="alert"]').filter({ hasText: /评论/ });
+  await expect(notice).toHaveCount(0);
   await page.keyboard.insertText("FALLBACK_MUST_NOT_EDIT");
   const afterFallback = await exportCurrentHtml(page);
   expect(afterFallback.equals(expected), firstByteDifference(afterFallback, expected)).toBe(true);

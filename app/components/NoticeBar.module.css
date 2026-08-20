@@ -1,7 +1,7 @@
 .notice {
-  --notice-color: #5148ca;
-  --notice-soft: rgb(81 72 202 / 10%);
-  --notice-border: rgb(81 72 202 / 22%);
+  --notice-color: var(--indigo);
+  --notice-soft: rgb(90 85 223 / 10%);
+  --notice-border: rgb(90 85 223 / 22%);
 
   z-index: 100;
   display: grid;
@@ -28,8 +28,8 @@
   transition:
     opacity 160ms ease,
     transform 200ms cubic-bezier(0.22, 1, 0.36, 1);
-  -webkit-backdrop-filter: blur(22px) saturate(1.16);
-  backdrop-filter: blur(22px) saturate(1.16);
+  -webkit-backdrop-filter: blur(22px) saturate(1.5);
+  backdrop-filter: blur(22px) saturate(1.5);
 }
 
 .notice[data-tone="success"] {

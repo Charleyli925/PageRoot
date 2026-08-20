@@ -402,10 +402,10 @@ ${REVIEW_TEXT_EVIDENCE_MARKER_CSS}
     max-width: min(320px, calc(100vw - 24px)) !important;
     padding: calc(3px * var(--pageroot-review-ui-scale)) calc(7px * var(--pageroot-review-ui-scale)) !important;
     overflow: hidden !important;
-    border: 1px solid rgb(98 88 214 / 24%) !important;
+    border: 1px solid rgb(90 85 223 / 24%) !important;
     border-radius: calc(6px * var(--pageroot-review-ui-scale)) !important;
     background: rgb(255 255 255 / 94%) !important;
-    color: #514ba9 !important;
+    color: #4843c9 !important;
     box-shadow: 0 4px 12px rgb(30 25 70 / 12%) !important;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
     font-size: calc(10px * var(--pageroot-review-ui-scale)) !important;
@@ -441,10 +441,10 @@ ${REVIEW_TEXT_EVIDENCE_MARKER_CSS}
     min-height: calc(19px * var(--pageroot-review-ui-scale)) !important;
     max-width: min(320px, calc(100vw - 24px)) !important;
     padding: 0 calc(7px * var(--pageroot-review-ui-scale)) !important;
-    border: 1px solid rgb(98 88 214 / 24%) !important;
+    border: 1px solid rgb(90 85 223 / 24%) !important;
     border-radius: calc(6px * var(--pageroot-review-ui-scale)) !important;
     background: rgb(255 255 255 / 94%) !important;
-    color: #514ba9 !important;
+    color: #4843c9 !important;
     box-shadow: 0 4px 12px rgb(30 25 70 / 12%) !important;
     content: attr(data-pageroot-review-summary) !important;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;

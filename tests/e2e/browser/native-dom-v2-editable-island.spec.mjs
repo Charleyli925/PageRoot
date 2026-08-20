@@ -362,7 +362,7 @@ test("a repeated header command waits for composition and replays only once", as
   await expect(projectButton).toHaveAttribute("aria-expanded", "true");
 });
 
-test("out-of-band mutation restores the last safe draft and reports in the viewport", async ({ page }) => {
+test("out-of-band mutation restores the last safe draft without an edit-blocked notice", async ({ page }) => {
   const { editor, frame } = await openFixture(page);
   const target = await activateNativeEdit(frame, "plain");
   await setTextSelection(frame, "plain", "普通".length);
@@ -376,9 +376,6 @@ test("out-of-band mutation restores the last safe draft and reports in the viewp
   );
   const feedback = page.locator('[role="alert"], [role="status"]').filter({
     hasText: /页面内容没有改变|暂时不能直接编辑/u,
-  }).first();
-  await expect(feedback).toBeVisible();
-  expect(await feedback.evaluate((element) => (
-    getComputedStyle(element).position
-  ))).toBe("fixed");
+  });
+  await expect(feedback).toHaveCount(0);
 });

@@ -5,8 +5,8 @@
   display: grid;
   place-items: center;
   padding: 28px 20px;
-  background: rgb(26 27 34 / 42%);
-  backdrop-filter: blur(10px);
+  background: rgb(34 32 27 / 36%);
+  backdrop-filter: blur(16px) saturate(140%);
   animation: fadeIn 180ms ease-out;
 }
 
@@ -21,8 +21,8 @@
     linear-gradient(180deg, #ffffff 0%, #fcfcfd 100%);
   box-shadow:
     0 1px 0 rgb(255 255 255 / 80%) inset,
-    0 18px 50px rgb(22 22 32 / 18%),
-    0 2px 10px rgb(22 22 32 / 8%);
+    0 18px 50px rgb(28 30 38 / 18%),
+    0 2px 10px rgb(28 30 38 / 8%);
   color: #2b2c34;
   text-align: left;
   animation: riseIn 200ms ease-out;
@@ -46,14 +46,14 @@
   place-items: center;
   border-radius: 13px;
   background: #f3f1ff;
-  color: #5c55c7;
-  box-shadow: 0 0 0 1px rgb(97 88 214 / 8%) inset;
+  color: var(--indigo);
+  box-shadow: 0 0 0 1px rgb(90 85 223 / 8%) inset;
 }
 
 .icon[data-kind="known"] {
-  background: #eef4ff;
-  color: #3d6fd8;
-  box-shadow: 0 0 0 1px rgb(61 111 216 / 10%) inset;
+  background: var(--indigo-soft);
+  color: var(--indigo-deep);
+  box-shadow: 0 0 0 1px rgb(90 85 223 / 12%) inset;
 }
 
 .dialog h2 {
@@ -132,7 +132,7 @@
 }
 
 .openFolder:focus-visible {
-  outline: 2px solid #6158d6;
+  outline: 2px solid var(--indigo);
   outline-offset: 2px;
   border-radius: 4px;
 }
@@ -204,7 +204,7 @@
   border: 1.5px solid #c5c6d0;
   border-radius: 6px;
   background: #fff;
-  box-shadow: 0 1px 2px rgb(22 22 32 / 6%) inset;
+  box-shadow: 0 1px 2px rgb(28 30 38 / 6%) inset;
 }
 
 .checkbox input {
@@ -218,9 +218,9 @@
 }
 
 .deleteOption[data-checked="true"] .checkbox {
-  border-color: #6158d6;
+  border-color: var(--indigo);
   background:
-    #6158d6
+    var(--indigo)
     url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round' d='M3.5 8.2 6.6 11.2 12.5 4.8'/></svg>")
     center / 12px 12px no-repeat;
   box-shadow: none;
@@ -256,7 +256,7 @@
 
 .primary {
   border: 1px solid #5750c4;
-  background: #6158d6;
+  background: var(--indigo);
   color: #fff;
   box-shadow: 0 1px 0 rgb(255 255 255 / 18%) inset;
 }
@@ -271,12 +271,12 @@
 
 .secondary:focus-visible,
 .primary:focus-visible {
-  outline: 2px solid #6158d6;
+  outline: 2px solid var(--indigo);
   outline-offset: 2px;
 }
 
 .deleteOption:has(input:focus-visible) .checkbox {
-  outline: 2px solid #6158d6;
+  outline: 2px solid var(--indigo);
   outline-offset: 2px;
 }
 
