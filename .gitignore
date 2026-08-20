@@ -62,3 +62,6 @@ next-env.d.ts
 # local release credentials and notarization material
 *.cer
 *.provisionprofile
+
+# isolated task checkouts created by `npm run task:start`
+.codex-worktrees/

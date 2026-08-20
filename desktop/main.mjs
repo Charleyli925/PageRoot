@@ -70,6 +70,7 @@ import {
   formatProjectsRootLabel,
   publicExternalOpenRequest,
   publicFactsFromClassification,
+  resolveOpenDialogDefaultPath,
 } from "./prepared-html-open.mjs";
 import { createProjectOpenQueue } from "./project-open-queue.mjs";
 import { assertTrustedRendererEvent } from "./project-ipc-security.mjs";
@@ -1417,9 +1418,16 @@ async function getActiveProjectOperation() {
 
 async function openHtml() {
   return projectOpenQueue.run(async () => {
+    // 始终交出一个 defaultPath：macOS 只有在缺省时才沿用上次选择过的目录。
+    const defaultPath = await resolveOpenDialogDefaultPath({
+      projectsRoot: projectsRootPath(),
+      documentsRoot: app.getPath("documents"),
+      lstat,
+    });
     const result = await dialog.showOpenDialog(mainWindow, {
       title: "打开 HTML 项目",
       buttonLabel: "打开",
+      ...(defaultPath ? { defaultPath } : {}),
       properties: ["openFile"],
       filters: [
         { name: "HTML 文件", extensions: ["html", "htm"] },

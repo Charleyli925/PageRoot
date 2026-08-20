@@ -76,16 +76,21 @@
   margin: 16px 0 0;
   color: #5c5e68;
   font-size: 13.5px;
-  line-height: 1.7;
+  line-height: 1.75;
 }
 
 .body p {
   margin: 0;
 }
 
+.body strong {
+  color: #24252c;
+  font-weight: 700;
+}
+
 .fileChip {
   display: inline;
-  padding: 0.05em 0.35em;
+  padding: 0.05em 0.3em;
   border-radius: 6px;
   background: #f3f1ff;
   color: #4540a8;
@@ -93,35 +98,46 @@
   overflow-wrap: anywhere;
 }
 
-.folderLink {
+.folderName {
+  max-width: 22em;
+  display: inline-block;
+  overflow: hidden;
+  color: #24252c;
+  font-weight: 650;
+  vertical-align: bottom;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.openFolder {
   display: inline;
-  max-width: 100%;
   margin: 0;
   padding: 0;
   border: 0;
   background: transparent;
   color: #4f49b6;
   font: inherit;
-  font-weight: 680;
-  overflow-wrap: anywhere;
-  text-align: left;
-  text-decoration: underline;
-  text-decoration-thickness: 1px;
-  text-underline-offset: 2px;
+  font-weight: 650;
   cursor: pointer;
 }
 
-.folderLink:hover:not(:disabled) {
+.openFolder:hover:not(:disabled) {
   color: #38319b;
 }
 
-.folderLink:focus-visible {
-  outline: 2px solid var(--indigo);
-  outline-offset: 2px;
-  border-radius: 3px;
+.openFolder:hover:not(:disabled) span {
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
 }
 
-.folderLink:disabled {
+.openFolder:focus-visible {
+  outline: 2px solid var(--indigo);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.openFolder:disabled {
   cursor: default;
   opacity: 0.62;
 }
@@ -167,27 +183,18 @@
   font-weight: 650;
 }
 
+/* Borderless row: the checkbox left edge lines up with the sentence above it. */
 .deleteOption {
   display: grid;
   grid-template-columns: 18px minmax(0, 1fr);
   gap: 10px;
   align-items: center;
-  min-height: 44px;
-  margin: 16px 0 0;
-  padding: 11px 13px;
-  border: 1px solid #ececf2;
-  border-radius: 14px;
-  background: #fbfbfd;
+  min-height: 28px;
+  margin: 18px 0 0;
   color: #2b2c34;
   font-size: 13.5px;
   font-weight: 650;
   cursor: pointer;
-  transition: border-color 120ms ease, background 120ms ease;
-}
-
-.deleteOption[data-checked="true"] {
-  border-color: #ead7c4;
-  background: #fff8f1;
 }
 
 .checkbox {
@@ -223,7 +230,7 @@
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
-  margin-top: 22px;
+  margin-top: 20px;
   padding-top: 18px;
   border-top: 1px solid #f0f0f4;
 }
@@ -263,8 +270,12 @@
 }
 
 .secondary:focus-visible,
-.primary:focus-visible,
-.deleteOption:has(input:focus-visible) {
+.primary:focus-visible {
+  outline: 2px solid var(--indigo);
+  outline-offset: 2px;
+}
+
+.deleteOption:has(input:focus-visible) .checkbox {
   outline: 2px solid var(--indigo);
   outline-offset: 2px;
 }
