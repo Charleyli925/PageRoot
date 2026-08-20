@@ -91,30 +91,38 @@
 
 .toolbar {
   z-index: 12;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
-  width: max-content;
+  width: fit-content;
   max-width: calc(100% - 16px);
-  min-height: 42px;
-  padding: 6px 7px 5px;
+  height: 44px;
+  padding: 6px;
   border: 1px solid rgb(32 29 49 / 12%);
-  border-radius: 11px;
+  border-radius: 13px;
   color: #25232a;
-  background: rgb(255 255 255 / 84%);
-  box-shadow:
-    0 10px 30px rgb(28 30 38 / 18%),
-    inset 0 1px 0 rgb(255 255 255 / 60%);
+  background: rgb(255 255 255 / 90%);
+  box-shadow: var(--shadow);
   font: 500 12px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  backdrop-filter: blur(16px) saturate(160%);
+  white-space: nowrap;
+  -webkit-backdrop-filter: blur(17px) saturate(115%);
+  backdrop-filter: blur(17px) saturate(115%);
+  transform-origin: top left;
+  animation: canvas-toolbar-in 170ms cubic-bezier(.2, .8, .2, 1);
 }
 
 .toolbarRow {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 7px;
+  flex-wrap: nowrap;
+  gap: 4px;
+  height: 30px;
+}
+
+@keyframes canvas-toolbar-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 .hoverOutline {
@@ -168,7 +176,9 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .hoverHint {
+  .hoverHint,
+  .toolbar,
+  .spacingPanel {
     animation: none;
   }
 }
@@ -221,13 +231,14 @@
   font: inherit;
   font-weight: 650;
   cursor: pointer;
+  box-shadow: none;
+  transition: color 120ms ease, background-color 120ms ease;
 }
 
 .commentToolButton {
   padding: 0 12px;
   color: #fff;
   background: var(--indigo);
-  box-shadow: 0 4px 12px rgb(90 85 223 / 22%);
 }
 
 .commentToolButton:hover {
@@ -240,7 +251,7 @@
 
 .presentationToolButton {
   color: var(--indigo-deep);
-  background: #eceae6;
+  background: rgb(90 85 223 / 9%);
   white-space: nowrap;
 }
 
@@ -281,15 +292,21 @@
 .formatGroup {
   display: inline-flex;
   gap: 2px;
-  padding-left: 5px;
+  margin-left: 2px;
+  padding-left: 6px;
   border-left: 1px solid #e3e0e6;
 }
 
 .formatButton {
-  min-width: 38px;
-  padding: 0 7px;
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  padding: 0;
   color: #58535f;
   background: transparent;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 15px;
+  line-height: 1;
 }
 
 .formatButton[aria-pressed="true"] {
@@ -297,51 +314,18 @@
   background: #eceae6;
 }
 
-.field,
-.colorField {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  white-space: nowrap;
-}
-
-.field span,
-.colorField span {
-  color: #77727d;
-}
-
-.numberInput {
-  width: 49px;
-  height: 30px;
-  padding: 0 5px;
-  border: 1px solid #dcd8e1;
-  border-radius: 7px;
-  color: #28252d;
-  background: #fff;
-  font: inherit;
-  font-variant-numeric: tabular-nums;
-}
-
-.colorField input {
-  width: 29px;
-  height: 29px;
-  padding: 3px;
-  border: 1px solid #dcd8e1;
-  border-radius: 7px;
-  background: #fff;
-  cursor: pointer;
-}
-
 .spacingMenu {
   position: relative;
+  margin-left: 2px;
+  padding-left: 6px;
+  border-left: 1px solid #e3e0e6;
 }
 
 .spacingMenu > summary {
   display: inline-flex;
   align-items: center;
   height: 30px;
-  padding: 0 9px;
+  padding: 0 10px;
   border-radius: 7px;
   color: #58535f;
   font-weight: 650;
@@ -370,52 +354,190 @@
 
 .spacingPanel {
   position: absolute;
-  top: calc(100% + 9px);
+  top: calc(100% + 11px);
   right: 0;
   z-index: 14;
   display: grid;
-  gap: 9px;
-  min-width: 154px;
-  padding: 11px;
+  gap: 7px;
+  width: 204px;
+  padding: 8px;
   border: 1px solid rgb(32 29 49 / 12%);
-  border-radius: 10px;
-  background: rgb(255 255 255 / 98%);
-  box-shadow: 0 12px 28px rgb(28 30 38 / 18%);
+  border-radius: 12px;
+  background: rgb(255 255 255 / 94%);
+  box-shadow: var(--shadow);
+  -webkit-backdrop-filter: blur(17px) saturate(115%);
+  backdrop-filter: blur(17px) saturate(115%);
+  transform-origin: top right;
+  animation: canvas-popover-in 140ms cubic-bezier(.2, .8, .2, 1);
 }
 
-.spacingPanel .field {
+.popoverSection {
+  display: grid;
+  gap: 2px;
+}
+
+.popoverSection + .popoverSection {
+  padding-top: 7px;
+  border-top: 1px solid rgb(32 29 49 / 8%);
+}
+
+.popoverSectionLabel {
+  padding: 3px 7px 4px;
+  color: #98949d;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .1em;
+}
+
+.controlRow {
+  display: flex;
+  align-items: center;
   justify-content: space-between;
+  height: 30px;
+  padding: 0 7px;
+  border-radius: 7px;
+  color: #706c76;
+  white-space: nowrap;
+  cursor: text;
+  transition: color 120ms ease, background-color 120ms ease;
+}
+
+.controlRow:hover {
+  color: #35313a;
+  background: rgb(242 240 246 / 82%);
+}
+
+.controlRow:focus-within {
+  color: #35313a;
+  background: rgb(90 85 223 / 8%);
+}
+
+.controlRow:has(input:disabled) {
+  opacity: .42;
+  cursor: not-allowed;
+}
+
+.numberValue {
+  display: inline-flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 3px;
+  min-width: 56px;
+  color: #35313a;
+}
+
+.numberValue input {
+  width: 36px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  color: inherit;
+  background: transparent;
+  font: 600 11px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  appearance: textfield;
+}
+
+.numberValue input::-webkit-inner-spin-button,
+.numberValue input::-webkit-outer-spin-button {
+  margin: 0;
+  appearance: none;
+}
+
+.numberValue small {
+  color: #aaa6ae;
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.colorValue {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 75px;
+  color: #55515a;
+  font: 600 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  cursor: pointer;
+}
+
+.colorValue input {
+  position: absolute;
+  inset: -6px -4px;
+  width: auto;
+  height: auto;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.numberValue input:focus-visible,
+.colorValue input:focus-visible {
+  outline: 0;
+}
+
+.colorSwatch {
+  width: 14px;
+  height: 14px;
+  border: 1px solid rgb(32 29 49 / 16%);
+  border-radius: 50%;
+  background: var(--toolbar-swatch);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 72%);
 }
 
 .moveGroup {
   display: inline-flex;
   gap: 2px;
-  padding-left: 3px;
+  margin-left: 2px;
+  padding-left: 6px;
   border-left: 1px solid #e3e0e6;
 }
 
 .iconButton {
   position: relative;
-  min-width: 38px;
-  padding: 0 7px;
-  font-size: 11px;
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  padding: 0;
+  background: transparent;
 }
 
-@media (max-width: 720px) {
-  .toolbar {
-    max-width: calc(100% - 16px);
-    flex-wrap: wrap;
+@keyframes canvas-popover-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px) scale(.99);
   }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
 
-  .field span,
-  .colorField span {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip: rect(0 0 0 0);
-    white-space: nowrap;
-  }
+.toolbarDivider {
+  align-self: stretch;
+  width: 1px;
+  margin: 4px 2px;
+  background: #e3e0e6;
+}
+
+.underlineGlyph {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.visuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 /* Edge-to-edge canvas shell. */
@@ -439,11 +561,6 @@
   border-radius: 7px;
   box-shadow: none;
   font-size: 10px;
-}
-
-.toolbar {
-  border-radius: 9px;
-  box-shadow: 0 9px 24px rgb(28 30 38 / 15%);
 }
 
 /* The V5 workbench owns these controls in the application toolbar. Keeping the
