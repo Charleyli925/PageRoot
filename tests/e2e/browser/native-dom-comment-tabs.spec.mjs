@@ -835,7 +835,7 @@ test("comment card hover keeps geometry stable while focus aligns one unchanged 
     };
   });
   expect(focusedStyle.borderColor).toBe("rgb(143, 138, 232)");
-  expect(focusedStyle.shadow).toContain("rgb(94, 88, 217)");
+  expect(focusedStyle.shadow).toContain("rgb(90, 85, 223)");
   await page.screenshot({
     path: testInfo.outputPath("comment-queue-selected-aligned.png"),
   });

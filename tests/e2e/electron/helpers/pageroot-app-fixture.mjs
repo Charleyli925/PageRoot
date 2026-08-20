@@ -1152,13 +1152,13 @@ export async function waitForProjectReady(page, {
         'section[role="dialog"][data-classification="new-external"]',
       );
       await expect(importDialog).toBeVisible();
-      await expect(importDialog).toContainText("复制并保存为");
+      await expect(importDialog).toContainText("复制本文件并保存为");
       await expect(importDialog).toContainText(
         "成功导入后，同意将原文件移至废纸篓。",
       );
       await expect(importDialog.getByRole("checkbox"))
         .not.toBeChecked();
-      await expect(importDialog.getByRole("button", { name: /^打开 /u }))
+      await expect(importDialog.getByRole("button", { name: /^点击打开 /u }))
         .toBeVisible();
     }
     await button.focus();

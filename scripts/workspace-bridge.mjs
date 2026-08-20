@@ -480,7 +480,7 @@ function projectFileTargetFromBody(body = {}) {
   };
 }
 
-function projectFileVersionRows(workspace) {
+function projectFileVersionRows(workspace, requirements = new Map()) {
   return workspace.manifest.versions.map((version) => {
     const workingCopy = Array.isArray(workspace.workingCopies)
       ? workspace.workingCopies.find((entry) => entry.versionId === version.versionId)
@@ -494,11 +494,84 @@ function projectFileVersionRows(workspace) {
       requestId: version.sourceRequestId,
       attemptId: null,
       committed: true,
+      // What the user asked for in the round that produced this version, so the
+      // version tree can name it in their own words. Absent for the initial
+      // import and for rounds whose records are gone.
+      requirement: requirements.get(version.versionId) || null,
       workingCopyId: workingCopy?.workingCopyId || null,
       differsFromBase: workingCopy?.differsFromBase === true,
       saveState: workingCopy?.saveState || null,
     };
   });
+}
+
+// A promoted version's round never changes, so a requirement that was read once
+// is cached for the life of the bridge process: the first workspace read pays
+// for it and every later refresh costs nothing. Failures are deliberately not
+// cached, so a round that is merely busy is retried instead of being hidden for
+// the rest of the session.
+const versionRequirementCache = new Map();
+const VERSION_REQUIREMENT_LIMIT = 120;
+const VERSION_REQUEST_ID_PATTERN = /^req_[A-Za-z0-9_-]{1,64}$/u;
+
+function condenseVersionRequirement(value) {
+  const collapsed = String(value || "").replace(/\s+/gu, " ").trim();
+  if (!collapsed) return "";
+  return collapsed.length > VERSION_REQUIREMENT_LIMIT
+    ? `${collapsed.slice(0, VERSION_REQUIREMENT_LIMIT)}…`
+    : collapsed;
+}
+
+async function versionRequirement(cacheScope, projectRootPath, requestId) {
+  // Reject anything that is not a plain request id so the id can never walk out
+  // of the project's own request directory.
+  if (!requestId || !VERSION_REQUEST_ID_PATTERN.test(String(requestId))) return "";
+  // Keyed by project identity rather than by path: the same root can be spelled
+  // differently between reads (symlinked temp roots, renames), which would keep
+  // missing the cache.
+  const cacheKey = `${cacheScope}\u0000${requestId}`;
+  const cached = versionRequirementCache.get(cacheKey);
+  if (cached) return cached;
+  let requirement = "";
+  try {
+    const raw = await readFile(
+      path.join(
+        projectRootPath,
+        ".pageroot",
+        "requests",
+        String(requestId),
+        "change-request.json",
+      ),
+      "utf8",
+    );
+    const record = JSON.parse(raw);
+    // v3 change requests keep the requirement under `requirements.summary`;
+    // older records nested the same string under `request.summary`.
+    requirement = condenseVersionRequirement(
+      record?.requirements?.summary ?? record?.request?.summary,
+    );
+  } catch {
+    // A retired or unreadable round simply has no requirement to show. The
+    // version tree falls back to its branch label; the workspace read never
+    // fails because of it.
+    return "";
+  }
+  if (requirement) versionRequirementCache.set(cacheKey, requirement);
+  return requirement;
+}
+
+async function projectFileVersionRequirements(workspace) {
+  const projectRootPath = workspace.target?.projectRootPath;
+  const cacheScope = workspace.project?.projectId || projectRootPath;
+  const versions = Array.isArray(workspace.manifest?.versions)
+    ? workspace.manifest.versions
+    : [];
+  if (!projectRootPath || versions.length === 0) return new Map();
+  const entries = await Promise.all(versions.map(async (version) => [
+    version.versionId,
+    await versionRequirement(cacheScope, projectRootPath, version.sourceRequestId),
+  ]));
+  return new Map(entries.filter(([, requirement]) => requirement));
 }
 
 function projectFileDraftState(workspace) {
@@ -633,8 +706,9 @@ function projectFileTerminalRunOutcome(workspace, target) {
   });
 }
 
-function projectFileBaseWorkspaceState(workspace) {
+async function projectFileBaseWorkspaceState(workspace) {
   const target = workspace.target;
+  const requirements = await projectFileVersionRequirements(workspace);
   const currentVersion = workspace.manifest.versions.find(
     (version) => version.versionId === target.versionId,
   ) || null;
@@ -698,7 +772,7 @@ function projectFileBaseWorkspaceState(workspace) {
       documentId: workspace.project.documentId,
       sourceSha256: workspace.sourceSha256,
     }),
-    versions: projectFileVersionRows(workspace),
+    versions: projectFileVersionRows(workspace, requirements),
     current: {
       path: target.exactSourcePath,
       entryPath: target.exactSourcePath,
@@ -710,7 +784,7 @@ function projectFileBaseWorkspaceState(workspace) {
 
 async function projectFileWorkspaceState(sourcePath, options = {}) {
   const workspace = await projectFileWorkspaceForSource(sourcePath, options);
-  return workspace ? projectFileBaseWorkspaceState(workspace) : null;
+  return workspace ? await projectFileBaseWorkspaceState(workspace) : null;
 }
 
 function projectFileBodyIdentityMatches(workspace, body) {
@@ -741,7 +815,7 @@ async function ensureProjectFile(body) {
   }
   const workspace = await projectFileWorkspaceForSource(imported.target.exactSourcePath);
   return {
-    ...projectFileBaseWorkspaceState(workspace),
+    ...(await projectFileBaseWorkspaceState(workspace)),
     imported: imported.imported,
   };
 }
@@ -832,7 +906,7 @@ async function saveProjectFileAutosave(body) {
     throw projectFileHttpError(cause);
   }
   const next = await projectFileWorkspaceForSource(saved.target.exactSourcePath);
-  const state = projectFileBaseWorkspaceState(next);
+  const state = await projectFileBaseWorkspaceState(next);
   return {
     ok: true,
     status: "saved",
@@ -858,7 +932,7 @@ async function saveProjectFileAutosave(body) {
 async function sourceProjectFile(sourcePath) {
   const workspace = await projectFileWorkspaceForSource(sourcePath);
   if (!workspace) return null;
-  const state = projectFileBaseWorkspaceState(workspace);
+  const state = await projectFileBaseWorkspaceState(workspace);
   return {
     ok: true,
     registered: true,
@@ -1297,7 +1371,7 @@ async function continueProjectFileHistoryVersion(body) {
     });
     const next = await projectFileWorkspaceForSource(activated.target.exactSourcePath);
     return {
-      ...projectFileBaseWorkspaceState(next),
+      ...(await projectFileBaseWorkspaceState(next)),
       status: "history-working-copy-activated",
       historyActivation: activated.historyActivation,
       operationId: activated.historyActivation.operationId,

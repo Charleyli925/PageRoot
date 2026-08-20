@@ -17,7 +17,7 @@ import { ChatCircleTextIcon } from "@phosphor-icons/react/dist/csr/ChatCircleTex
 import { CheckCircleIcon } from "@phosphor-icons/react/dist/csr/CheckCircle";
 import { ClockCounterClockwiseIcon } from "@phosphor-icons/react/dist/csr/ClockCounterClockwise";
 import { EyeIcon } from "@phosphor-icons/react/dist/csr/Eye";
-import { FileIcon } from "@phosphor-icons/react/dist/csr/File";
+import { ExportIcon } from "@phosphor-icons/react/dist/csr/Export";
 import { FileHtmlIcon } from "@phosphor-icons/react/dist/csr/FileHtml";
 import { FolderOpenIcon } from "@phosphor-icons/react/dist/csr/FolderOpen";
 import { ImageIcon } from "@phosphor-icons/react/dist/csr/Image";
@@ -29,6 +29,7 @@ import { TrashIcon } from "@phosphor-icons/react/dist/csr/Trash";
 import { TriangleIcon } from "@phosphor-icons/react/dist/csr/Triangle";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 
+import AttachmentLightbox from "./components/AttachmentLightbox";
 import HtmlCanvasEditor from "./components/HtmlCanvasEditor";
 import type {
   HtmlCanvasCommentLayoutState,
@@ -51,6 +52,7 @@ import HtmlInteractionPreview, {
 import NoticeBar from "./components/NoticeBar";
 import RestartUpdateDialog from "./components/RestartUpdateDialog";
 import ExternalHtmlOpenDialog from "./workbench/ExternalHtmlOpenDialog";
+import OpenHtmlDialog from "./workbench/OpenHtmlDialog";
 import {
   MAX_ATTACHMENT_BYTES,
   MAX_COMMENT_ATTACHMENTS,
@@ -167,7 +169,8 @@ import {
 } from "./workbench/comment-model";
 import {
   CommentAttachmentStrip,
-  HistoryVersionItem,
+  VersionDetail,
+  VersionTreeList,
   PreviewNavigationBanner,
 } from "./workbench/presentation";
 import {
@@ -189,7 +192,6 @@ import {
   currentWorkingCopyPresentation,
   fileExtension,
   fileStem,
-  folderFromSourcePath,
   formatProjectTimestamp,
   formatTime,
   localFileNameFromSourcePath,
@@ -228,7 +230,6 @@ import type {
   PersistState,
   PrepareCloseDetail,
   ProjectContext,
-  RegisteredProject,
   RecentProject,
   StartupIssue,
   Toast,
@@ -626,8 +627,6 @@ export default function Workbench() {
   const [fileRenameError, setFileRenameError] = useState("");
   const [recentProjects, setRecentProjects] = useState<RecentProject[]>([]);
   const [recentProjectsError, setRecentProjectsError] = useState("");
-  const [registeredProjects, setRegisteredProjects] = useState<RegisteredProject[]>([]);
-  const [registeredProjectsError, setRegisteredProjectsError] = useState("");
   const [selection, setSelection] = useState<HtmlCanvasSelection | null>(null);
   const commentSnapshot = (
     workspaceControllerSnapshot?.commentSession as CommentSessionSnapshot<
@@ -661,7 +660,8 @@ export default function Workbench() {
   const [previewAttachment, setPreviewAttachment] = useState<CommentAttachment | null>(null);
   const [composerOpen, setComposerOpen] = useState(false);
   const [drawer, setDrawer] = useState<Drawer>(null);
-  const [expandedVersionId, setExpandedVersionId] = useState<string | null>(null);
+  const [openHtmlDialogOpen, setOpenHtmlDialogOpen] = useState(false);
+  const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [pendingDeleteCommentId, setPendingDeleteCommentId] = useState<string | null>(null);
   const [handoffPreviewOpen, setHandoffPreviewOpen] = useState(false);
@@ -1699,21 +1699,6 @@ export default function Workbench() {
         ));
         return;
       }
-      if (projectEvent.type === "project-catalog-loaded") {
-        setRegisteredProjects(
-          Array.isArray(projectEvent.projects)
-            ? projectEvent.projects as RegisteredProject[]
-            : [],
-        );
-        setRegisteredProjectsError("");
-        return;
-      }
-      if (projectEvent.type === "project-catalog-failed") {
-        setRegisteredProjectsError(String(
-          projectEvent.reason || "项目目录暂时无法读取。",
-        ));
-        return;
-      }
       if (projectEvent.type === "project-startup-failed") {
         setStartupIssue({
           title: "上次打开的 HTML 无法恢复",
@@ -2324,7 +2309,7 @@ export default function Workbench() {
   );
   const updateDownloaded = updateResult?.status === "downloaded";
   const updateDownloading = updateResult?.status === "downloading";
-  const updateBadgeLabel = updateDownloaded ? "New! 重启更新" : "New!";
+  const updateBadgeLabel = updateDownloaded ? "重启更新" : "New!";
   const currentSourceFileName =
     localFileNameFromSourcePath(sourcePath) || projectName;
   const currentSourceFileExtension = fileExtension(currentSourceFileName);
@@ -3196,11 +3181,6 @@ export default function Workbench() {
     await workspaceController.refreshRecentProjects();
   }, [workspaceController]);
 
-  const refreshRegisteredProjects = useCallback(async () => {
-    if (!workspaceController) return;
-    await workspaceController.refreshRegisteredProjects();
-  }, [workspaceController]);
-
   const forgetRecentProject = useCallback(async (recentSourcePath: string) => {
     const api = window.htmlAIProjects;
     if (!api?.forgetRecent) return;
@@ -3279,15 +3259,6 @@ export default function Workbench() {
     }, remaining);
     return () => window.clearTimeout(timeout);
   }, [currentProjectSessionSnapshot, noticeIdentity, noticeTimerPaused, toast]);
-
-  useEffect(() => {
-    if (!previewAttachment) return;
-    const closePreview = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setPreviewAttachment(null);
-    };
-    document.addEventListener("keydown", closePreview);
-    return () => document.removeEventListener("keydown", closePreview);
-  }, [previewAttachment]);
 
   useEffect(() => {
     if (!drawer || previewAttachment) return;
@@ -3678,14 +3649,6 @@ export default function Workbench() {
     await workspaceController.openProject({
       kind: recentPath ? "recent" : "local",
       sourcePath: recentPath || null,
-    });
-  }, [workspaceController]);
-
-  const openRegisteredProject = useCallback(async (registeredProjectId: string) => {
-    if (!workspaceController) return;
-    await workspaceController.openProject({
-      kind: "registered",
-      projectId: registeredProjectId,
     });
   }, [workspaceController]);
 
@@ -5649,6 +5612,28 @@ export default function Workbench() {
     return true;
   }, [projectRulesSnapshot.open, workspaceController]);
 
+  // The rules row is a disclosure inside the console, so opening it loads the
+  // file and collapsing it runs the same unsaved-changes guard as before.
+  const projectRulesOpen = Boolean(projectRulesSnapshot.open);
+  // “已保存” stays silent until the user actually edits the rules and that edit
+  // lands on disk, so an untouched project shows no status at all. Reset on both
+  // directions of the disclosure instead of in an effect.
+  const [projectRulesEdited, setProjectRulesEdited] = useState(false);
+  const toggleProjectRules = useCallback(async () => {
+    setProjectRulesEdited(false);
+    if (projectRulesOpen) {
+      await closeFileView();
+      return;
+    }
+    await viewFile("PROJECT.md");
+  }, [closeFileView, projectRulesOpen, viewFile]);
+
+  const projectRulesSavedNotice = projectRulesEdited
+    && projectRulesOpen
+    && !projectRulesSaving
+    && !projectRulesSaveError
+    && projectRulesSnapshot.content === projectRulesSnapshot.savedContent;
+
   const revealAiTaskInFinder = useCallback(async () => {
     const activeSourcePath = currentProjectSessionSnapshot().sourcePath;
     const revealAiTask = window.htmlAIProjects?.revealAiTask;
@@ -5665,26 +5650,6 @@ export default function Workbench() {
         tone: "warning",
         disposition: "background-result",
         dedupeKey: "reveal-ai-task",
-      }),
-    });
-  }, [currentProjectSessionSnapshot]);
-
-  const revealVersionInFinder = useCallback(async (version: Pick<Version, "id">) => {
-    const activeSourcePath = currentProjectSessionSnapshot().sourcePath;
-    const revealVersionFile = window.htmlAIProjects?.revealVersionFile;
-    if (!activeSourcePath || !revealVersionFile) return;
-    await runLocalUserAction({
-      kind: "reveal-version-file",
-      invoke: () => revealVersionFile({
-        sourcePath: activeSourcePath,
-        versionId: version.id,
-      }),
-      onFailure: (cause: unknown) => setToast({
-        title: "历史版本暂时无法在文件夹中打开",
-        message: productErrorMessage(cause, "请确认项目记录仍然完整后重试。"),
-        tone: "warning",
-        disposition: "background-result",
-        dedupeKey: `reveal-version-file-${version.id}`,
       }),
     });
   }, [currentProjectSessionSnapshot]);
@@ -6405,6 +6370,24 @@ export default function Workbench() {
         : version
     ))
     : versions;
+  // The console always has one version in focus: the explicit selection, else
+  // the version the user is editing from, else the newest one.
+  const consoleVersion = displayedVersions.find(
+    (version) => version.id === selectedVersionId,
+  )
+    ?? displayedVersions.find(
+      (version) => version.id === currentBasedOnVersionId,
+    )
+    ?? displayedVersions[0]
+    ?? null;
+  const consoleVersionParentId = consoleVersion
+    ? consoleVersion.basedOnVersionId || consoleVersion.previousVersionId
+    : null;
+  const consoleVersionParent = consoleVersionParentId
+    ? displayedVersions.find(
+      (version) => version.id === consoleVersionParentId,
+    ) ?? null
+    : null;
   const projectStatus = projectStatusProjection({
     currentBasedOnVersionId,
     currentExactVersionId,
@@ -6447,7 +6430,7 @@ export default function Workbench() {
   );
   const visibleRecentProjects = recentProjects
     .filter((project) => !sameLocalSourcePath(project.sourcePath, sourcePath))
-    .slice(0, 3);
+    .slice(0, 6);
   const recentProjectStatus = (projectSourcePath: string): BackgroundProjectResult | null => {
     const recorded = [...backgroundProjectResults.entries()].find(
       ([key]) => sameLocalSourcePath(key, projectSourcePath),
@@ -7120,10 +7103,15 @@ export default function Workbench() {
                   ref={openHtmlButtonRef}
                   className="window-file-quick-action"
                   type="button"
-                  data-tooltip="打开本地HTML"
+                  data-tooltip="打开新的本地 HTML"
                   aria-label="打开新的本地 HTML"
+                  aria-haspopup="dialog"
+                  aria-expanded={openHtmlDialogOpen}
                   disabled={fileRenameEditing || fileRenameBusy}
-                  onClick={() => void openProject()}
+                  onClick={() => {
+                    setOpenHtmlDialogOpen(true);
+                    void refreshRecents();
+                  }}
                 >
                   <PlusIcon aria-hidden="true" size={16} weight="bold" />
                 </button>
@@ -7309,12 +7297,12 @@ export default function Workbench() {
           <button
             className="project-button"
             type="button"
-            aria-expanded={drawer === "files" || drawer === "history"}
+            aria-expanded={drawer === "files"}
             disabled={projectHydrating || viewTransitioning || attachmentUploadCount > 0}
             onClick={() => {
               const openProjectPanel = () => {
                 setDrawer((current) => (
-                  current === "files" || current === "history" ? null : "files"
+                  current === "files" ? null : "files"
                 ));
               };
               if (deferEditorCommand("project-files", openProjectPanel)) return;
@@ -7964,7 +7952,13 @@ export default function Workbench() {
                     <div>
                       <button
                         type="button"
-                        onClick={() => setPendingDeleteCommentId(null)}
+                        autoFocus
+                        onClick={() => {
+                          setPendingDeleteCommentId(null);
+                          window.requestAnimationFrame(() => {
+                            document.getElementById("composer-delete-button")?.focus();
+                          });
+                        }}
                       >取消</button>
                       <button
                         className="confirm-delete"
@@ -8011,6 +8005,7 @@ export default function Workbench() {
                         <ImageIcon aria-hidden="true" size={15} weight="bold" />
                       </button>
                       <button
+                        id="composer-delete-button"
                         className="comment-tool-button danger"
                         type="button"
                         aria-label="删除未保存评论"
@@ -8226,10 +8221,14 @@ export default function Workbench() {
                         <div>
                           <button
                             type="button"
+                            autoFocus
                             onClick={(event) => {
                               event.currentTarget.blur();
                               setPendingDeleteCommentId(null);
                               queueReviewCommentFocus(comment.target, comment.commentId);
+                              window.requestAnimationFrame(() => {
+                                document.getElementById(`comment-delete-${comment.commentId}`)?.focus();
+                              });
                             }}
                           >取消</button>
                           <button
@@ -8344,6 +8343,7 @@ export default function Workbench() {
                             </button>
                           )}
                           <button
+                            id={`comment-delete-${comment.commentId}`}
                             className="comment-tool-button danger"
                             type="button"
                             aria-label="删除评论"
@@ -8372,37 +8372,12 @@ export default function Workbench() {
       </div>
 
       {previewAttachment && attachmentObjectUrls[previewAttachment.attachmentId] ? (
-        <div
-          className="attachment-lightbox"
-          role="dialog"
-          aria-modal="true"
-          aria-label={`预览图片 ${previewAttachment.fileName}`}
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) setPreviewAttachment(null);
-          }}
-        >
-          <div className="attachment-lightbox-content">
-            <div className="attachment-lightbox-header">
-              <span>
-                <strong>{previewAttachment.fileName}</strong>
-                <small>{formatFileSize(previewAttachment.byteLength)}</small>
-              </span>
-              <button
-                type="button"
-                aria-label="关闭图片预览"
-                onClick={() => setPreviewAttachment(null)}
-              >
-                <XIcon aria-hidden="true" size={18} weight="bold" />
-              </button>
-            </div>
-            {/* Blob URLs are project-local attachment previews and cannot use next/image. */}
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={attachmentObjectUrls[previewAttachment.attachmentId]}
-              alt={previewAttachment.fileName}
-            />
-          </div>
-        </div>
+        <AttachmentLightbox
+          fileName={previewAttachment.fileName}
+          sizeLabel={formatFileSize(previewAttachment.byteLength)}
+          src={attachmentObjectUrls[previewAttachment.attachmentId]}
+          onClose={() => setPreviewAttachment(null)}
+        />
       ) : null}
 
       <div
@@ -8418,7 +8393,7 @@ export default function Workbench() {
         data-drawer={drawer || undefined}
         inert={!drawer}
         role="dialog"
-        aria-label={drawer === "history" ? "版本历史" : drawer === "files" ? "项目文件" : "本轮处理"}
+        aria-label={drawer === "files" ? "当前项目" : "本轮处理"}
       >
         {drawer === "handoff" ? (
           <HandoffDrawerHeader
@@ -8426,122 +8401,96 @@ export default function Workbench() {
             panelTitle={processPanelTitle}
           />
         ) : drawer ? (
-          <>
-            <header className="drawer-header project-panel-header">
-              <div className="project-panel-title">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src="./brand-logo.png" alt="" />
-                <span>
-                  <small>源页工作区</small>
-                  <strong>项目与版本</strong>
-                </span>
-              </div>
+          <header className="drawer-header project-panel-header">
+            <div className="project-panel-title">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="./brand-logo.png" alt="" />
+              <span>
+                <strong>{projectName}</strong>
+                <small className="project-panel-meta">
+                  <span aria-hidden="true" />
+                  {[
+                    browserPreviewOnly ? "只读预览" : saveStatusLabel,
+                    versions.length > 0 ? `${versions.length} 个版本` : null,
+                  ].filter(Boolean).join(" · ")}
+                </small>
+              </span>
+            </div>
+            <div className="project-panel-actions">
+              {canShowCurrentFileInFolder ? (
+                <button
+                  className="project-panel-action"
+                  type="button"
+                  onClick={() => void showProjectInFolder()}
+                >
+                  <FolderOpenIcon aria-hidden="true" size={15} weight="duotone" />
+                  在文件夹中打开
+                </button>
+              ) : null}
               <button
-                className="drawer-close-button"
+                className="project-panel-action"
                 type="button"
-                aria-label="关闭项目面板"
-                title="关闭"
-                onClick={() => setDrawer(null)}
+                onClick={() => void exportCurrentHtml()}
               >
-                <XIcon aria-hidden="true" size={18} weight="bold" />
+                <ExportIcon aria-hidden="true" size={15} weight="bold" />
+                导出副本
               </button>
-            </header>
-            <nav className="project-tabs" aria-label="项目信息">
-              <button
-                type="button"
-                data-active={drawer === "files" ? "true" : "false"}
-                onClick={async () => {
-                  if (!await closeFileView()) return;
-                  setDrawer("files");
-                }}
-              >当前项目</button>
-              <button
-                type="button"
-                data-active={drawer === "history" ? "true" : "false"}
-                onClick={async () => {
-                  if (!await closeFileView()) return;
-                  setDrawer("history");
-                }}
-              >版本历史</button>
-            </nav>
-          </>
+            </div>
+            <button
+              className="drawer-close-button"
+              type="button"
+              aria-label="关闭项目面板"
+              title="关闭"
+              onClick={() => setDrawer(null)}
+            >
+              <XIcon aria-hidden="true" size={18} weight="bold" />
+            </button>
+          </header>
         ) : null}
         <div className="drawer-body">
-          {drawer === "history" ? (
-            <div className="history-list version-panel-body">
-              <header className="version-panel-heading">
-                <ClockCounterClockwiseIcon aria-hidden="true" size={22} weight="duotone" />
-                <span>
-                  <small>版本历史</small>
-                  <strong>安全保留每一次修改</strong>
-                </span>
-              </header>
-              {versions.length === 0 ? (
-                <div className="drawer-empty">首次编辑或发送给 AI 后，会建立版本 1。</div>
-              ) : (
-                <div className="version-list">
-                  {displayedVersions.map((version) => (
-                    <HistoryVersionItem
-                      key={version.id}
-                      version={version}
-                      expanded={expandedVersionId === version.id}
-                      current={version.id === latestVersionId}
-                      editingBase={version.id === currentBasedOnVersionId}
-                      viewing={viewingVersionId === version.id}
-                      viewDisabled={
-                        runInProgress
-                        || projectHydrating
-                        || Boolean(projectLoadError)
-                        || Boolean(workspaceIssue)
-                        || viewTransitioning
-                      }
-                      attachmentObjectUrls={attachmentObjectUrls}
-                      onToggle={() => setExpandedVersionId(
-                        expandedVersionId === version.id ? null : version.id,
-                      )}
-                      onView={() => void viewHistoryVersion(version)}
-                      onReveal={
-                        typeof window !== "undefined"
-                        && window.htmlAIProjects?.revealVersionFile
-                          ? () => void revealVersionInFinder(version)
-                          : undefined
-                      }
-                      onEnsureAttachmentPreview={ensureAttachmentObjectUrl}
-                      onPreviewAttachment={(attachment) => {
-                        void openAttachmentPreview(attachment);
-                      }}
-                      onDownloadAttachment={(attachment) => {
-                        void downloadAttachment(attachment);
-                      }}
-                    />
-                  ))}
-                </div>
-              )}
-              <p className="version-note">
-                在画布中查看不会覆盖当前 HTML；历史内容与当时的评论都保持只读。
-              </p>
-            </div>
-          ) : null}
-
           {drawer === "files" ? (
-            activeFileView ? (
-              <div
-                className="file-view"
-                data-editable={
-                  activeFileView.path === "PROJECT.md" && !activeFileView.error
-                    ? "true"
-                    : "false"
-                }
+            <div className="project-console">
+              <section
+                className="project-rules-row"
+                data-open={projectRulesOpen ? "true" : "false"}
               >
                 <button
-                  className="project-file-back"
+                  className="project-rules-summary"
                   type="button"
-                  onClick={() => void closeFileView()}
+                  aria-expanded={projectRulesOpen}
+                  disabled={
+                    !projectId
+                    || projectRecordsPreparing
+                    || Boolean(projectRecordsError)
+                  }
+                  onClick={() => void toggleProjectRules()}
                 >
-                  <CaretRightIcon aria-hidden="true" size={13} weight="bold" />
-                  返回项目
+                  <PencilSimpleIcon aria-hidden="true" size={15} weight="bold" />
+                  <strong>项目规则</strong>
+                  <small>每次 AI Agent 修改本项目 HTML 都会读取</small>
+                  {projectRulesSavedNotice ? (
+                    <em className="project-rules-saved" role="status">
+                      <span aria-hidden="true" />
+                      项目规则已保存
+                    </em>
+                  ) : null}
+                  <CaretRightIcon aria-hidden="true" size={15} weight="bold" />
                 </button>
-                {activeFileView.error ? (
+                {projectRecordsError ? (
+                  <section className="project-resource-error" role="alert">
+                    <div>
+                      <strong>项目规则还没有建立</strong>
+                      <span>{projectRecordsError}</span>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={projectRecordsPreparing}
+                      onClick={() => void prepareProjectRecords()}
+                    >{projectRecordsPreparing ? "正在重试…" : "重试建立"}</button>
+                  </section>
+                ) : null}
+                {projectRulesOpen && activeFileView ? (
+                  activeFileView.error ? (
                   <section className="project-file-read-error" role="alert">
                     <span className="project-resource-icon">
                       <TriangleIcon aria-hidden="true" size={20} weight="duotone" />
@@ -8556,38 +8505,8 @@ export default function Workbench() {
                       onClick={() => void viewFile(activeFileView.path)}
                     >重试读取</button>
                   </section>
-                ) : activeFileView.path === "PROJECT.md" ? (
-                  <>
-                    <header className="project-rules-heading">
-                      <span className="project-resource-icon">
-                        <FileIcon aria-hidden="true" size={20} weight="duotone" />
-                      </span>
-                      <span>
-                        <small>项目长期规则</small>
-                        <strong>管理 AI 修改规则</strong>
-                      </span>
-                      <em
-                        data-state={activeFileView.loading
-                          ? "loading"
-                          : runInProgress
-                          ? "locked"
-                          : projectRulesSaving
-                            ? "loading"
-                          : activeFileView.content === activeFileView.savedContent
-                            ? "saved"
-                            : "dirty"}
-                      >
-                        {activeFileView.loading
-                          ? "正在读取"
-                          : runInProgress
-                          ? "处理中 · 只读"
-                          : projectRulesSaving
-                            ? "正在保存"
-                          : activeFileView.content === activeFileView.savedContent
-                            ? "已保存"
-                            : "等待自动保存"}
-                      </em>
-                    </header>
+                  ) : (
+                  <div className="project-rules-editor">
                     <p className="project-file-note" id="project-rules-help">
                       {activeFileView.loading
                         ? "正在读取项目规则。内容核对完成前暂不接受编辑。"
@@ -8611,6 +8530,7 @@ export default function Workbench() {
                         finishProjectRulesComposition(event.currentTarget);
                       }}
                       onChange={(event) => {
+                        setProjectRulesEdited(true);
                         workspaceController?.updateProjectRules({
                           content: event.target.value,
                         });
@@ -8658,268 +8578,55 @@ export default function Workbench() {
                         >再次保存</button>
                       ) : null}
                     </div>
-                  </>
-                ) : (
-                  <>
-                    <strong>{workspaceFileLabel(activeFileView.path)}</strong>
-                    <pre>{activeFileView.content}</pre>
-                  </>
-                )}
-              </div>
-            ) : (
-              <div className="files-panel project-panel-body">
-                <section className="current-project-card">
-                  <span className="project-file-icon">
-                    <FileHtmlIcon aria-hidden="true" size={22} weight="duotone" />
-                  </span>
-                  <span>
-                    <small>当前文件</small>
-                    <strong>{projectName}</strong>
-                    <em>
-                      <span aria-hidden="true" />
-                      {browserPreviewOnly
-                        ? "只读预览 · 操作不会保存"
-                        : saveStatusLabel}
-                    </em>
-                  </span>
-                  <div className="current-project-actions">
-                    {canOpenProjectRootInFolder ? (
-                      <button type="button" onClick={() => void showProjectRecordsInFolder()}>在文件夹中打开</button>
-                    ) : sourcePath && typeof window !== "undefined" && window.htmlAIProjects?.showInFolder ? (
-                      <button type="button" onClick={() => void showProjectInFolder()}>在文件夹中打开</button>
-                    ) : null}
-                    <button type="button" onClick={() => void exportCurrentHtml()}>
-                      导出 HTML 副本
-                    </button>
                   </div>
-                </section>
-
-                <section className="recent-files registered-projects">
-                  <header>
-                    <strong>所有项目</strong>
-                    <small>{registeredProjects.length} 个已登记项目</small>
+                  )
+                ) : null}
+              </section>
+              <div className="project-console-body">
+                <div className="version-tree-column">
+                  <header className="version-tree-heading">
+                    <strong>版本树</strong>
+                    <span>{versions.length} 个</span>
                   </header>
-                  <div>
-                    {registeredProjectsError ? (
-                      <section className="recent-projects-error" role="status">
-                        <span>{registeredProjectsError}</span>
-                        <button type="button" onClick={() => void refreshRegisteredProjects()}>
-                          重试读取
-                        </button>
-                      </section>
-                    ) : null}
-                    {registeredProjects.length ? registeredProjects.map((project) => (
-                      <div
-                        className="recent-file-item"
-                        data-project-id={project.projectId}
-                        key={project.projectId}
-                      >
-                        <button
-                          className="recent-file-row"
-                          type="button"
-                          disabled={
-                            attachmentUploadCount > 0
-                            || project.availability !== "ready"
-                          }
-                          onClick={() => void openRegisteredProject(project.projectId)}
-                        >
-                          <FileHtmlIcon aria-hidden="true" size={19} weight="duotone" />
-                          <span>
-                            <strong>{project.projectName}</strong>
-                            <small>{folderFromSourcePath(project.registeredProjectRootPath)}</small>
-                          </span>
-                          {project.lastOpenedAt ? (
-                            <time dateTime={new Date(project.lastOpenedAt).toISOString()}>
-                              {formatProjectTimestamp(project.lastOpenedAt)}
-                            </time>
-                          ) : null}
-                          <em
-                            className="recent-project-status"
-                            data-state={project.availability}
-                          >{
-                            project.projectId === projectId
-                              ? "当前"
-                              : project.availability === "ready"
-                                ? project.hasPendingCandidate
-                                  ? "候选待审阅"
-                                  : "可打开"
-                                : project.availability === "unavailable"
-                                  ? "暂不可用"
-                                  : "需要修复"
-                          }</em>
-                          <CaretRightIcon aria-hidden="true" size={14} weight="bold" />
-                        </button>
-                      </div>
-                    )) : !registeredProjectsError ? (
-                      <span className="recent-projects-empty">还没有已登记项目</span>
-                    ) : null}
-                  </div>
-                </section>
-
-                <section className="recent-files">
-                  <header>
-                    <strong>最近打开</strong>
-                    <small>{visibleRecentProjects.length} 个文件</small>
-                  </header>
-                  <div>
-                    {recentProjectsError ? (
-                      <section className="recent-projects-error" role="status">
-                        <span>{recentProjectsError}</span>
-                        <button type="button" onClick={() => void refreshRecents()}>
-                          重试读取
-                        </button>
-                      </section>
-                    ) : null}
-                    {visibleRecentProjects.length ? visibleRecentProjects.map((project) => {
-                      const projectStatus = recentProjectStatus(project.sourcePath);
-                      return (
-                      <div className="recent-file-item" key={project.path}>
-                        <button
-                          className="recent-file-row"
-                          type="button"
-                          disabled={attachmentUploadCount > 0}
-                          onClick={() => void openProject(project.sourcePath)}
-                        >
-                          <FileHtmlIcon aria-hidden="true" size={19} weight="duotone" />
-                          <span>
-                            <strong>{project.name}</strong>
-                            <small>{folderFromSourcePath(project.sourcePath)}</small>
-                          </span>
-                          <time dateTime={new Date(project.lastOpenedAt).toISOString()}>
-                            {formatProjectTimestamp(project.lastOpenedAt)}
-                          </time>
-                          {projectStatus ? (
-                            <em
-                              className="recent-project-status"
-                              data-state={projectStatus.state}
-                            >{projectStatus.label}</em>
-                          ) : null}
-                          <CaretRightIcon aria-hidden="true" size={14} weight="bold" />
-                        </button>
-                        {typeof window !== "undefined" && window.htmlAIProjects?.forgetRecent ? (
-                          <button
-                            className="recent-file-remove"
-                            type="button"
-                            aria-label={`从最近打开中移除 ${project.name}`}
-                            title="移除这条记录"
-                            onClick={() => void forgetRecentProject(project.sourcePath)}
-                          >
-                            <XIcon aria-hidden="true" size={14} weight="bold" />
-                          </button>
-                        ) : null}
-                      </div>
-                      );
-                    }) : !recentProjectsError ? (
-                      <span className="recent-projects-empty">还没有最近打开的文件</span>
-                    ) : null}
-                  </div>
-                </section>
-
-                <button className="open-local-button" type="button" onClick={() => void openProject()}>
-                  <span><PlusIcon aria-hidden="true" size={19} weight="bold" /></span>
-                  <span>
-                    <strong>打开本地 HTML</strong>
-                    <small>选择已有的 .html 或 .htm 文件</small>
-                  </span>
-                  <CaretRightIcon aria-hidden="true" size={15} weight="bold" />
-                </button>
-
-                <details
-                  className="project-advanced"
-                  onToggle={(event) => {
-                    if (event.currentTarget.open) void prepareProjectRecords();
-                  }}
-                >
-                  <summary>
-                    <span>
-                      <strong>项目资料</strong>
-                      <small>长期规则与每轮处理记录</small>
-                    </span>
-                    <CaretRightIcon aria-hidden="true" size={14} weight="bold" />
-                  </summary>
-                  <div className="project-resource-list">
-                    {projectRecordsError ? (
-                      <section className="project-resource-error" role="alert">
-                        <div>
-                          <strong>项目资料还没有建立</strong>
-                          <span>{projectRecordsError}</span>
-                        </div>
-                        <button
-                          type="button"
-                          disabled={projectRecordsPreparing}
-                          onClick={() => void prepareProjectRecords()}
-                        >{projectRecordsPreparing ? "正在重试…" : "重试建立"}</button>
-                      </section>
-                    ) : null}
-                    <button
-                      className="project-resource-row project-rule-card"
-                      type="button"
-                      disabled={!projectId || projectRecordsPreparing || Boolean(projectRecordsError)}
-                      onClick={() => void viewFile("PROJECT.md")}
-                    >
-                      <span className="project-resource-icon">
-                        <FileIcon aria-hidden="true" size={18} weight="duotone" />
-                      </span>
-                      <span className="project-resource-copy">
-                        <strong>项目长期规则</strong>
-                        <small>
-                          {projectId
-                            ? "以后每次 AI 修改都会读取"
-                            : projectRecordsPreparing
-                              ? "正在准备可编辑的项目资料"
-                              : "打开后会自动建立项目资料"}
-                        </small>
-                      </span>
-                      <span
-                        className="project-resource-meta"
-                        data-state={runInProgress ? "locked" : "ready"}
-                      >
-                        {runInProgress
-                          ? "处理中 · 只读"
-                          : projectId
-                            ? "可编辑"
-                            : projectRecordsPreparing
-                              ? "准备中"
-                              : "待建立"}
-                      </span>
-                      <CaretRightIcon aria-hidden="true" size={14} weight="bold" />
-                    </button>
-                    <button
-                      className="project-resource-row"
-                      type="button"
-                      disabled={
-                        !projectRecordsPath
-                        || projectRecordsPreparing
-                        || Boolean(projectRecordsError)
-                      }
-                      onClick={() => void showProjectRecordsInFolder()}
-                    >
-                      <span className="project-resource-icon">
-                        <FolderOpenIcon aria-hidden="true" size={18} weight="duotone" />
-                      </span>
-                      <span className="project-resource-copy">
-                        <strong>项目记录文件夹</strong>
-                        <small>
-                          {projectRecordsPath
-                            ? "查看每轮要求、AI 返回与历史文件"
-                            : projectRecordsPreparing
-                              ? "正在建立本地记录文件夹"
-                              : "打开后会自动建立记录文件夹"}
-                        </small>
-                      </span>
-                      <span className="project-resource-meta">
-                        {projectRecordsPath
-                          ? "在文件夹中打开"
-                          : projectRecordsPreparing
-                            ? "准备中"
-                            : "待建立"}
-                      </span>
-                      <CaretRightIcon aria-hidden="true" size={14} weight="bold" />
-                    </button>
-                  </div>
-                </details>
+                  {versions.length === 0 ? (
+                    <p className="version-tree-empty">
+                      首次编辑或发送给 AI 后，会建立版本 1。
+                    </p>
+                  ) : (
+                    <VersionTreeList
+                      versions={displayedVersions}
+                      selectedVersionId={consoleVersion?.id ?? null}
+                      editingBaseVersionId={currentBasedOnVersionId}
+                      onSelect={setSelectedVersionId}
+                    />
+                  )}
+                </div>
+                <div className="version-detail-column">
+                  {consoleVersion ? (
+                    <VersionDetail
+                      version={consoleVersion}
+                      parent={consoleVersionParent}
+                      latest={consoleVersion.id === latestVersionId}
+                      editingBase={consoleVersion.id === currentBasedOnVersionId}
+                      viewing={viewingVersionId === consoleVersion.id}
+                      attachmentObjectUrls={attachmentObjectUrls}
+                      onSelectParent={setSelectedVersionId}
+                      onEnsureAttachmentPreview={ensureAttachmentObjectUrl}
+                      onPreviewAttachment={(attachment) => {
+                        void openAttachmentPreview(attachment);
+                      }}
+                      onDownloadAttachment={(attachment) => {
+                        void downloadAttachment(attachment);
+                      }}
+                    />
+                  ) : (
+                    <p className="version-detail-placeholder">
+                      还没有版本。开始编辑或发给 AI 后，这里会逐步长成一棵版本树。
+                    </p>
+                  )}
+                </div>
               </div>
-            )
+            </div>
           ) : null}
 
           {drawer === "handoff" ? (
@@ -8945,6 +8652,25 @@ export default function Workbench() {
             />
           ) : null}
         </div>
+        {drawer === "files" && consoleVersion ? (
+          <footer className="project-console-footer">
+            <button
+              className="project-console-primary"
+              type="button"
+              disabled={
+                runInProgress
+                || projectHydrating
+                || Boolean(projectLoadError)
+                || Boolean(workspaceIssue)
+                || viewTransitioning
+              }
+              onClick={() => void viewHistoryVersion(consoleVersion)}
+            >
+              <EyeIcon aria-hidden="true" size={16} weight="bold" />
+              在画布中预览
+            </button>
+          </footer>
+        ) : null}
         {drawer === "handoff" && activeRun ? (
           <HandoffFooter
             activeRun={activeRun}
@@ -9004,6 +8730,34 @@ export default function Workbench() {
             }).finally(() => {
               openHtmlButtonRef.current?.focus();
             });
+          }}
+        />
+      ) : null}
+
+      {openHtmlDialogOpen && !openConfirmation ? (
+        <OpenHtmlDialog
+          anchorRef={openHtmlButtonRef}
+          recentProjects={visibleRecentProjects}
+          recentProjectsError={recentProjectsError}
+          actionsDisabled={attachmentUploadCount > 0}
+          canForgetRecent={
+            typeof window !== "undefined"
+            && Boolean(window.htmlAIProjects?.forgetRecent)
+          }
+          statusForSource={recentProjectStatus}
+          onOpenLocal={() => {
+            setOpenHtmlDialogOpen(false);
+            void openProject();
+          }}
+          onOpenRecent={(recentSourcePath) => {
+            setOpenHtmlDialogOpen(false);
+            void openProject(recentSourcePath);
+          }}
+          onForgetRecent={(recentSourcePath) => void forgetRecentProject(recentSourcePath)}
+          onRetryRecents={() => void refreshRecents()}
+          onClose={() => {
+            setOpenHtmlDialogOpen(false);
+            openHtmlButtonRef.current?.focus();
           }}
         />
       ) : null}
