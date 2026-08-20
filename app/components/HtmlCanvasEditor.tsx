@@ -294,28 +294,28 @@ const EDITOR_DOCUMENT_STYLES = `
 
   ::selection {
     color: inherit !important;
-    background: rgba(91, 75, 223, 0.2) !important;
+    background: rgba(90, 85, 223, 0.2) !important;
   }
 
   [data-html-canvas-selected="part"] {
-    outline: 3px solid #5b4bdf !important;
+    outline: 3px solid #5a55df !important;
     outline-offset: 0 !important;
   }
 
   [data-html-canvas-selected="module"]:not([data-html-canvas-global-selected]) {
-    outline: 3px solid #5b4bdf !important;
+    outline: 3px solid #5a55df !important;
     outline-offset: 0 !important;
   }
 
   [data-html-canvas-global-selected] {
     min-height: 100vh !important;
-    outline: 3px solid #5b4bdf !important;
+    outline: 3px solid #5a55df !important;
     outline-offset: -3px !important;
   }
 
   [data-html-canvas-editing] {
     cursor: text !important;
-    box-shadow: 0 0 0 5px rgba(91, 75, 223, 0.14) !important;
+    box-shadow: 0 0 0 5px rgba(90, 85, 223, 0.14) !important;
   }
 
   [data-html-canvas-native-editing] {
@@ -5941,7 +5941,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
                 />
               </label>
 
-              <label className={styles.colorField} title="文字颜色">
+              <label className={styles.colorField} data-tooltip="文字颜色" data-tooltip-side="below">
                 <span>字色</span>
                 <input
                   type="color"
@@ -5954,7 +5954,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
 
               <label
                 className={styles.colorField}
-                title="元素填充色"
+                data-tooltip="元素填充色"
+                data-tooltip-side="below"
               >
                 <span>填充</span>
                 <input
@@ -6036,7 +6037,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
                     type="button"
                     className={styles.iconButton}
                     aria-label="上移"
-                    title="上移（Option + ↑）"
+                    data-tooltip="上移（Option + ↑）"
+                    data-tooltip-side="below"
                     disabled={!moveAvailability.up}
                     onClick={() => moveSelected("up")}
                   >
@@ -6046,7 +6048,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
                     type="button"
                     className={styles.iconButton}
                     aria-label="下移"
-                    title="下移（Option + ↓）"
+                    data-tooltip="下移（Option + ↓）"
+                    data-tooltip-side="below"
                     disabled={!moveAvailability.down}
                     onClick={() => moveSelected("down")}
                   >

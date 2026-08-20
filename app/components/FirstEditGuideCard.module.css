@@ -12,7 +12,7 @@
   background: rgb(255 254 250 / 72%);
   box-shadow:
     0 1px 0 rgb(255 255 255 / 70%) inset,
-    0 12px 32px rgb(37 34 27 / 12%);
+    0 12px 32px rgb(28 30 38 / 12%);
   font-family: var(--ui, -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", sans-serif);
   -webkit-backdrop-filter: blur(22px) saturate(1.2);
   backdrop-filter: blur(22px) saturate(1.2);
@@ -27,7 +27,7 @@
   right: 0;
   left: 0;
   height: 2px;
-  background: linear-gradient(90deg, var(--indigo, #5147dc), rgb(81 71 220 / 0%));
+  background: linear-gradient(90deg, var(--indigo), rgb(90 85 223 / 0%));
   pointer-events: none;
 }
 
@@ -76,9 +76,9 @@
   width: 22px;
   height: 22px;
   margin-top: 3px;
-  border: 1px solid rgb(81 71 220 / 12%);
+  border: 1px solid rgb(90 85 223 / 12%);
   border-radius: 999px;
-  color: var(--indigo, #5147dc);
+  color: var(--indigo);
   background: var(--indigo-soft, #eeecff);
   font: 650 11px/1 inherit;
 }

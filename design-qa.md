@@ -1870,3 +1870,116 @@ round — against a live bridge.
       and cached, with a fail-soft fallback for retired rounds.
 
 final result: passed
+
+# UI polish batch — accent, shadow, badge, tooltip and lightbox QA
+
+Date: 2026-08-19
+
+## Scope
+
+- One batch of eight interaction and visual polish fixes that were ranked by
+  ROI in the UX audit. The batch is deliberately incremental: it tightens the
+  existing design-language contract without introducing any new surface, tone
+  or component shape. Items 4 (review arrow-key navigation) and 6 (drawer
+  focus trilogy) from the audit were explicitly deferred and are out of scope.
+
+## Findings
+
+- Deleting a comment no longer strands keyboard focus. The confirm control
+  that replaces the delete affordance in place now receives focus, so the
+  keyboard and screen-reader user lands on the next logical action instead of
+  being reset to the document root.
+- The second accent color is removed. The remaining blue-tinted icon surfaces
+  now read from the indigo family, and the two gradient faces that introduced
+  an off-palette violet-blue were collapsed onto the single `--indigo` ramp,
+  closing the one-accent-color contract line.
+- Near-purple literal values on the canvas and the global sheet are
+  converged onto the `--indigo` family (`var(--indigo)`, `var(--indigo-deep)`,
+  `var(--indigo-soft)`). Convergence uses the values that are actually in
+  force: the sheet declares two `:root` token blocks and the later "PageRoot
+  V5" block wins the cascade, so `--indigo` resolves to `#5a55df` and
+  `--indigo-deep` to `#4843c9`. The dual-`:root` conflict itself is a
+  separate, deliberately untouched problem.
+- The AI review workspace keeps its own documented selection violet family
+  (`#6258d6` / `#4f47b8`) instead of converging to `--indigo`. That family is
+  the recorded review-selection contract and is asserted by the AI handoff
+  closed-loop spec, so this batch leaves it intact. The two violets differ by
+  only a few RGB steps and read as one accent in practice; folding them into
+  `--indigo` would require updating the contract and the spec together and is
+  a separate decision.
+- The amber `#fffaf0` family is used consistently across the product as the
+  warning surface, so it is kept and registered as the third semantic surface
+  in `docs/DESIGN_LANGUAGE.md` rather than recolored.
+- The attachment lightbox is now a native `<dialog>` driven by `showModal()`
+  and `close()`, reusing the existing dialog pattern instead of a hand-rolled
+  overlay. Escape-to-close, backdrop dismissal and initial focus come from the
+  platform; the pseudo-modal is gone.
+- Floating-panel `box-shadow` values are converged onto the shared
+  `--shadow` token so depth reads as one definition with global effect.
+- Badge and meta labels that rendered at 7-8 px are raised to a 9 px floor,
+  which is the smallest size that stays legible at default density.
+- Toolbar affordances move from the native `title` attribute to the shared
+  `data-tooltip` mechanism, so shortcut hints become visible to keyboard users
+  on focus, not only on hover. Each control's `data-tooltip` text now matches
+  its `aria-label` exactly, so the visible hint and the announced name agree.
+
+## Automated evidence
+
+- `npm run gate:edit` passes (291 tests, 0 failures): architecture budget,
+  `tsc --noEmit` typecheck and the node test group all run clean against the
+  batch. The `workbench.tsx` line budget in `scripts/architecture-budget.json`
+  is ratcheted down to the new physical line count after the lightbox
+  extraction.
+- The tooltip mechanism is exercised through the existing
+  `[data-tooltip]::after` rule, which triggers on hover, `focus-visible` and
+  `focus-within`, so the keyboard-visible hint is covered by the same path as
+  the pointer hint.
+
+## Known consequence
+
+- None of the changes alters layout geometry, component boundaries or state
+  flow; every edit is a token, copy, focus-target or element swap within the
+  existing surfaces. The dual-`:root` token conflict in `app/globals.css` is
+  recorded here and left intact for a dedicated follow-up.
+
+## Checklist
+
+- [x] Focus moves to the in-place confirm control after a comment delete.
+- [x] One accent family remains; no blue or gradient face survives.
+- [x] Canvas and global near-purple literals resolve to the `--indigo` family.
+- [x] Review selection violet family (`#6258d6` / `#4f47b8`) is preserved.
+- [x] Amber warning surface is registered, not recolored.
+- [x] Lightbox is a native `showModal()` dialog.
+- [x] Floating panels read depth from `var(--shadow)`.
+- [x] No badge or meta label renders below 9 px.
+- [x] Toolbar hints use `data-tooltip` and match their `aria-label`.
+
+final result: passed
+
+# Post-review fixes — lightbox Escape, badge shadow hue and preview label clipping
+
+Date: 2026-08-19
+
+## Scope
+
+- A focused review pass over the UI polish batch surfaced three concrete
+  defects introduced by the batch. All three are fixed here before the PR is
+  promoted. The muted-purple convergence decisions were re-examined and left
+  as-is per product-owner direction.
+
+## Findings
+
+- The native attachment lightbox now owns the Escape path through the dialog
+  `cancel`/`close` contract. A leftover document-level Escape listener that
+  predated the dialog is removed; it bypassed the native contract and would
+  have diverged from any future `onCancel` handling.
+- The pink update badge keeps a shadow in its own hue. The batch had swept the
+  badge's magenta shadow into the brick-red `--red` family, which clashed with
+  the `#ff4f87` brand-pink fill. The shadow is restored to the matching
+  magenta so the halo stays in the badge's hue family.
+- The review preview segmented label is no longer clipped. Raising its font to
+  9px left an 8px line box under `overflow: hidden`, which cropped the CJK
+  glyphs ("修改前" / "修改后"). The line-height is raised to 10px so the
+  glyphs fit.
+
+final result: passed
