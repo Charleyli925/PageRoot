@@ -13,6 +13,13 @@ async function openFixture(page, name = "notification-recovery.html") {
   });
 }
 
+async function openHiddenGlobalCommentComposer(page) {
+  const button = page.locator(".global-comment-button");
+  await expect(button).toBeHidden();
+  await expect(button).toBeEnabled();
+  await button.evaluate((element) => element.click());
+}
+
 test.describe("notification recovery paths", () => {
   test("a browser encoding error preserves the current page and reopens the HTML picker", async ({
     page,
@@ -79,7 +86,7 @@ test.describe("notification recovery paths", () => {
     page,
   }) => {
     await openFixture(page);
-    await page.getByRole("button", { name: "全局评论" }).click();
+    await openHiddenGlobalCommentComposer(page);
 
     const composer = page.getByRole("region", { name: "添加评论" });
     await expect(composer).toBeVisible();
