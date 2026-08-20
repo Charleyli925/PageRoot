@@ -488,7 +488,7 @@ type EditFeedback = {
   message: string;
   tone: "warning" | "error";
   sticky: boolean;
-  recovery: "comment" | "reload" | "none";
+  recovery: "reload" | "none";
 };
 
 type SourcePatchCommand = Parameters<typeof planSourcePatch>[0];
@@ -1840,6 +1840,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     updateSelectedStyle,
   ]);
 
+  // Fail-closed edit refusals stay silent in the UI; the container attribute
+  // below is the diagnostic trail relied on by tests and support tooling.
   const reportBlockedEdit = useCallback((cause: unknown) => {
     const rawDetail = cause instanceof Error
       ? cause.message
@@ -1848,41 +1850,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       "data-edit-block-detail",
       rawDetail.slice(0, 240),
     );
-    let title = "这处内容暂时不能直接编辑";
-    let message = "页面内容没有改变。你仍可以选择文字，或添加评论说明要怎么改。";
-    let code = "canvas_c02_edit_blocked";
-    if (
-      /复杂网页结构|暂不支持直接改字|source structure|structural command/iu.test(rawDetail)
-    ) {
-      code = "canvas_c05_complex_structure";
-      title = "这里暂时不能直接改字";
-      message = "这段内容里有需要保留的网页结构。你仍可以选中文字，或添加评论交给 AI 处理。";
-    } else if (/transform|zoom|多栏|flex|grid|布局|盒子|光标错位|间距变化/iu.test(rawDetail)) {
-      code = "canvas_c06_special_layout";
-      title = "这里暂时不能直接改字";
-      message = "这段文字的排版比较特殊。你仍可以选中文字调整样式，或添加评论交给 AI 处理。";
-    } else if (/图片|图标|嵌入组件|结构边界|删除键|退格/iu.test(rawDetail)) {
-      code = "canvas_c09_structure_delete";
-      title = "这处内容不能这样删除";
-      message = "请只修改文字，或添加评论说明要删除的图片、图标或组件。";
-    } else if (/输入法|输入事件|输入过程中|浏览器没有完成这次输入|候选/iu.test(rawDetail)) {
-      code = "canvas_c10_ime_incomplete";
-      title = "已恢复输入前的文字";
-      message = "输入法没有完整确认这次输入。请点回文字后重新输入；如果仍然失败，可以选中文字添加评论。";
-    } else if (/源码地图|源码节点|目标|定位|映射|漂移|唯一静态文字/iu.test(rawDetail)) {
-      code = "canvas_c11_target_drift";
-      title = "请重新选择这段文字";
-      message = "页面内容可能刚刚发生了变化。请再点一次要修改的文字，或添加评论。";
-    }
-    setEditFeedback({
-      code,
-      title,
-      message,
-      tone: "warning",
-      sticky: false,
-      recovery: "comment",
-    });
-    onEditBlockedRef.current?.(message);
   }, []);
 
   const applySourceCommand = useCallback((
@@ -2970,16 +2937,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     onRequestCommentRef.current?.(target);
     return true;
   }, []);
-
-  const requestGlobalComment = useCallback(() => {
-    if (lockedRef.current) return;
-    const documentNode = iframeRef.current?.contentDocument;
-    if (!documentNode) return;
-    const globalElement = defaultGlobalCommentElement(documentNode);
-    if (!globalElement) return;
-    const target = selectElement(globalElement, "module");
-    requestCommentForTarget(target);
-  }, [requestCommentForTarget, selectElement]);
 
   const startEditing = useCallback((
     caretPoint?: TextCaretPoint,
@@ -5604,24 +5561,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     setEditFeedbackPaused(false);
     if (recovery === "reload") {
       onRequestReload?.();
-      return;
     }
-    if (recovery !== "comment") return;
-    const target = selectedSourceSelectionRef.current;
-    if (target) {
-      requestCommentForTarget(target);
-    } else {
-      requestGlobalComment();
-    }
-  }, [
-    editFeedback?.recovery,
-    onRequestReload,
-    requestCommentForTarget,
-    requestGlobalComment,
-  ]);
+  }, [editFeedback?.recovery, onRequestReload]);
   const editFeedbackActionAvailable = editFeedback?.recovery === "reload"
-    ? Boolean(onRequestReload)
-    : editFeedback?.recovery === "comment" && Boolean(onRequestComment);
+    && Boolean(onRequestReload);
 
   return (
     <div
@@ -5721,9 +5664,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           tone={editFeedback.tone}
           actionLabel={editFeedback.recovery === "reload"
             ? reloadActionLabel
-            : editFeedback.recovery === "comment"
-              ? "添加评论"
-              : undefined}
+            : undefined}
           onAction={editFeedbackActionAvailable ? handleEditFeedbackAction : undefined}
           onDismiss={() => setEditFeedback(null)}
           onPauseChange={setEditFeedbackPaused}
