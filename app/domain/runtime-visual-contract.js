@@ -4,7 +4,12 @@ export const RUNTIME_VISUAL_CONTRACT = Object.freeze({
   version: RUNTIME_VISUAL_CONTRACT_VERSION,
   candidateLimit: 128,
   identityAttributeLimit: 24,
-  ownerDeadlineMs: 1_500,
+  // Chart libraries initialize asynchronously and animate after the first
+  // paint (ECharts defaults to a one-second entrance animation), so a capture
+  // settles past that animation before sampling pixels; sampling mid-animation
+  // on two sides at different phases would fabricate a changed verdict.
+  ownerDeadlineMs: 4_000,
+  captureSettleMs: 1_200,
   pageBudget: Object.freeze({
     htmlBytes: 25 * 1024 * 1024,
     visualLimit: 32,
