@@ -124,7 +124,7 @@ export default function OpenHtmlDialog({
       >
         <header className={styles.header}>
           <span className={styles.icon} aria-hidden="true">
-            <FolderOpenIcon size={22} weight="duotone" />
+            <FolderOpenIcon size={18} weight="duotone" />
           </span>
           <span className={styles.heading}>
             <small>源页工作区</small>
@@ -137,14 +137,14 @@ export default function OpenHtmlDialog({
             title="关闭"
             onClick={(event) => close(event)}
           >
-            <XIcon aria-hidden="true" size={16} weight="bold" />
+            <XIcon aria-hidden="true" size={14} weight="bold" />
           </button>
         </header>
         <div className={styles.body}>
           <section className="recent-files">
             <header>
               <strong>最近打开</strong>
-              <small>{recentProjects.length} 个文件</small>
+              {recentProjects.length ? <small>{recentProjects.length} 个文件</small> : null}
             </header>
             <div>
               {recentProjectsError ? (
@@ -155,31 +155,32 @@ export default function OpenHtmlDialog({
                   </button>
                 </section>
               ) : null}
-              {recentProjects.length ? recentProjects.map((project) => {
+              {recentProjects.length ? recentProjects.map((project, index) => {
                 const projectStatus = statusForSource(project.sourcePath);
                 return (
                   <div className="recent-file-item" key={project.path}>
                     <button
                       className="recent-file-row"
                       type="button"
+                      data-tooltip={`${project.name}\n${folderFromSourcePath(project.sourcePath)}`}
+                      data-tooltip-wrap="true"
+                      // The first row has the dialog title above it, so its
+                      // tooltip drops below instead of covering the heading.
+                      data-tooltip-side={index === 0 ? "below" : undefined}
                       disabled={actionsDisabled}
                       onClick={() => onOpenRecent(project.sourcePath)}
                     >
-                      <FileHtmlIcon aria-hidden="true" size={19} weight="duotone" />
-                      <span>
-                        <strong>{project.name}</strong>
-                        <small>{folderFromSourcePath(project.sourcePath)}</small>
-                      </span>
-                      <time dateTime={new Date(project.lastOpenedAt).toISOString()}>
-                        {formatProjectTimestamp(project.lastOpenedAt)}
-                      </time>
+                      <FileHtmlIcon aria-hidden="true" size={16} weight="duotone" />
+                      <strong>{project.name}</strong>
                       {projectStatus ? (
                         <em
                           className="recent-project-status"
                           data-state={projectStatus.state}
                         >{projectStatus.label}</em>
                       ) : null}
-                      <CaretRightIcon aria-hidden="true" size={14} weight="bold" />
+                      <time dateTime={new Date(project.lastOpenedAt).toISOString()}>
+                        {formatProjectTimestamp(project.lastOpenedAt)}
+                      </time>
                     </button>
                     {canForgetRecent ? (
                       <button
@@ -189,7 +190,7 @@ export default function OpenHtmlDialog({
                         title="移除这条记录"
                         onClick={() => onForgetRecent(project.sourcePath)}
                       >
-                        <XIcon aria-hidden="true" size={14} weight="bold" />
+                        <XIcon aria-hidden="true" size={13} weight="bold" />
                       </button>
                     ) : null}
                   </div>
@@ -206,12 +207,12 @@ export default function OpenHtmlDialog({
             type="button"
             onClick={() => onOpenLocal()}
           >
-            <span><PlusIcon aria-hidden="true" size={19} weight="bold" /></span>
+            <span><PlusIcon aria-hidden="true" size={14} weight="bold" /></span>
             <span>
               <strong>打开本地 HTML</strong>
-              <small>选择已有的 .html 或 .htm 文件</small>
+              <small>选择 .html 或 .htm 文件</small>
             </span>
-            <CaretRightIcon aria-hidden="true" size={15} weight="bold" />
+            <CaretRightIcon aria-hidden="true" size={13} weight="bold" />
           </button>
         </div>
       </section>

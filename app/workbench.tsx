@@ -7352,9 +7352,9 @@ export default function Workbench() {
             }}
           >
             {currentQoderHandoffStatus === "copied" ? (
-              <CheckCircleIcon aria-hidden="true" size={18} weight="fill" />
+              <CheckCircleIcon aria-hidden="true" size={15} weight="fill" />
             ) : (
-              <PaperPlaneTiltIcon aria-hidden="true" size={18} weight="fill" />
+              <PaperPlaneTiltIcon aria-hidden="true" size={15} weight="fill" />
             )}
             <span>
               {generating
