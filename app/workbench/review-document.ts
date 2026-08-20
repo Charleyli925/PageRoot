@@ -3843,13 +3843,20 @@ function reviewBootstrap(
     privateInitialBindingsClosed = true;
   };
   let runtimeProjectionFactsByElement = new RuntimeVisualMap();
+  // Fact intake and overlay rendering run after authored scripts. Chart
+  // libraries routinely mutate their own host (ECharts writes inline style,
+  // an instance attribute and canvas children into the bound element), so the
+  // source-box signature is only enforced while the parser-blocking bootstrap
+  // captures the reference — before authored scripts execute. Here the frozen
+  // reference itself is the identity: the element must still be connected and
+  // keep its tag plus frozen identity attributes. Replacement or removal
+  // still drops the fact; the page mutating its own chart host must not.
   const runtimeProjectionTargetIsCurrent = (candidateKey, element) => {
     const binding = runtimeVisualMapGet(runtimeBindingByCandidateKey, candidateKey);
     return runtimeVisualIsInstance(RuntimeVisualElement, element)
       && !runtimeVisualSetHas(runtimeInvalidCandidateKeys, candidateKey)
       && runtimeVisualNodeIsConnected(element)
-      && runtimeVisualInitialBindingMatches(element, binding)
-      && runtimeVisualInitialBindingSourceBoxMatches(element, binding);
+      && runtimeVisualInitialBindingMatches(element, binding);
   };
   const applyRuntimeProjectionFacts = (rawMarkers) => {
     const nextFactsByElement = new RuntimeVisualMap();

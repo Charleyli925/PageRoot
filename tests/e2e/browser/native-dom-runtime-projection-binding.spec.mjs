@@ -339,11 +339,16 @@ test("runtime projection binds exact hosts and adds facts without outline geomet
   await postReviewState(page, "style");
   await expect(canvasRuntimeBox).toHaveCount(0);
 
+  // A chart library mutating its own bound host (inline style, an instance
+  // attribute, injected children) is normal rendering, not a lost target: the
+  // frozen reference stays connected with its identity attributes, so the
+  // runtime box must survive exactly this kind of authored mutation.
   await frame.locator("#shared-static-runtime").evaluate((element) => {
     element.style.width = "141px";
+    element.setAttribute("_echarts_instance_", "ec_1755680000000");
   });
   await postReviewState(page, "all");
-  await expect(sharedRuntimeBox).toHaveCount(0);
+  await expect(sharedRuntimeBox).toHaveCount(1);
   await expect.poll(() => staticTextBox.count()).toBeGreaterThan(0);
 });
 
@@ -488,4 +493,26 @@ test("a suspected host draws the amber dashed frame on the after page", async ({
   await expect(suspectedBox).toHaveCount(1, { timeout: 5_000 });
   await postReviewState(page, "text");
   await expect(suspectedBox).toHaveCount(0);
+});
+
+test("a fact lands on a chart host that its library already mutated before delivery", async ({ page }) => {
+  const frame = await installRuntimeProjectionFrame(page, { side: "after" });
+  // Production order for an ECharts host: the parser-blocking bootstrap binds
+  // the source element, the chart library then rewrites width/height/style
+  // and stamps its instance attribute, and only afterwards does the capture
+  // verdict arrive. Fact intake must accept the mutated-but-identical host.
+  await frame.locator("#runtime-chart-a").evaluate((element) => {
+    element.setAttribute("width", "240");
+    element.setAttribute("height", "80");
+    element.style.cssText = "user-select: none; position: relative;";
+    element.setAttribute("_echarts_instance_", "ec_1755680000001");
+  });
+  await postRuntimeFacts(page, [
+    { candidateKey: "runtime-host-2", changeId: "suspected-outline-1", verdict: "suspected" },
+  ], {}, "after");
+  const suspectedBox = frame.locator(
+    '[data-pageroot-review-overlay-box][data-tone="suspected"]',
+  );
+  await expect(suspectedBox).toHaveCount(1);
+  await expect(suspectedBox).toHaveAttribute("data-summary", "疑似有改动");
 });

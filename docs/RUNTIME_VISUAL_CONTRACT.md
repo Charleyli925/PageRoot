@@ -204,8 +204,12 @@ bootstrap reads are unbound. The trusted parent delivers facts through a
 distinct challenged private port fenced by contract version, session, side and
 full source SHA. The bootstrap keeps a disposable `Map<Element, facts[]>` and
 unions it with static serialized facts. It never writes runtime marker
-attributes, and replacement, disconnect or fingerprint drift has no outline
-fallback. An unavailable, malformed, late or mismatched result adds no runtime
+attributes. Replacement or disconnection of the bound element drops that
+host's runtime fact with no outline fallback; the source-box signature is
+enforced only while the parser-blocking bootstrap captures the reference,
+because a chart library legitimately rewrites its own host's style, box
+attributes and children when it renders. An unavailable, malformed, late or
+mismatched result adds no runtime
 fact and has no user-visible capture status beyond the suspected presentation
 described above.
 
