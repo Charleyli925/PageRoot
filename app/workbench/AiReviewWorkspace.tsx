@@ -395,7 +395,7 @@ function ReviewDocumentPane({
       >
         {loadFailed ? (
           <div className={styles.frameError} role="alert">
-            审阅画布未能安全载入，请返回本轮处理页面后重试。
+            审阅画布未能安全载入，可返回 AI 修改前后重试。
           </div>
         ) : null}
         <div
@@ -454,7 +454,7 @@ export default function AiReviewWorkspace({
   accepting,
   error,
   notice,
-  onExit,
+  onAbout,
   onReturnBefore,
   onAccept,
   onRevealAiTask,
@@ -468,7 +468,7 @@ export default function AiReviewWorkspace({
   accepting: boolean;
   error?: string;
   notice?: string;
-  onExit: () => void;
+  onAbout: () => void;
   onReturnBefore: () => void;
   onAccept: () => void;
   onRevealAiTask: () => void;
@@ -1604,9 +1604,9 @@ export default function AiReviewWorkspace({
             <button
               className="window-file-icon window-file-about-button"
               type="button"
-              aria-label="返回本轮处理页面"
-              title="返回本轮处理页面"
-              onClick={onExit}
+              aria-label="关于源页"
+              title="关于源页"
+              onClick={onAbout}
             >
               <FileHtmlIcon aria-hidden="true" size={20} weight="duotone" />
             </button>

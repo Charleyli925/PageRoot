@@ -6930,10 +6930,7 @@ export default function Workbench() {
       notice={activeRun?.candidateAssessment?.status === "attention"
         ? "这个候选可以打开，但与上一版的共同特征较少。请重点核对整页内容，再决定是否接受。"
         : undefined}
-      onExit={() => {
-        setReadyReviewSession(null);
-        setDrawer("handoff");
-      }}
+      onAbout={openAboutPageRoot}
       onReturnBefore={() => {
         void (async () => {
           const restored = await cancelActiveRun({

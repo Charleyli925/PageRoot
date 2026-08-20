@@ -1164,7 +1164,24 @@ function candidateSections(document: Document): Element[] {
     });
   };
 
-  collect(root, 0);
+  // The content root is the densest part of the page, but a single-file HTML
+  // page has no site chrome to skip: a footer note, a header line or a nav
+  // block outside it is authored content, and a rewrite there must stay
+  // reviewable. Body-level siblings therefore become their own regions, in
+  // document order, while the root keeps expanding from depth 0 exactly as
+  // before so region granularity inside it does not shift.
+  const bodyChildren = document.body && root !== document.body
+    ? eligibleChildren(document.body).filter(hasReviewableContent)
+    : [];
+  const rootOwner = bodyChildren.find((child) => child === root || child.contains(root));
+  if (rootOwner) {
+    bodyChildren.forEach((child) => {
+      if (child === rootOwner) collect(root, 0);
+      else regions.push(child);
+    });
+  } else {
+    collect(root, 0);
+  }
   if (!regions.length && hasReviewableContent(root)) regions.push(root);
   return regions;
 }

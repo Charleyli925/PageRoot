@@ -55,6 +55,10 @@ const LINE_SCOPE_BEFORE = "甲旧，中间稳定文字保持不变，乙旧。";
 const LINE_SCOPE_AFTER = "甲新，中间稳定文字保持不变，乙新。";
 const SCOPE_PROMOTION_BEFORE = "稳定开场。甲旧，稳甲，乙旧，稳乙，丙旧。<br>丁旧，稳丁，戊旧，稳戊，己旧。<br>庚旧，稳庚，辛旧，稳辛，壬旧。<br>稳定收尾行。";
 const SCOPE_PROMOTION_AFTER = "稳定开场。甲新，稳甲，乙新，稳乙，丙新。<br>丁新，稳丁，戊新，稳戊，己新。<br>庚新，稳庚，辛新，稳辛，壬新。<br>稳定收尾行。";
+// A page footer lives outside <main>; a single-file page has no site chrome, so
+// a rewrite there must still be reviewed instead of silently disappearing.
+const OUTSIDE_MAIN_BEFORE = "口径说明：数据来自公开披露的季度公告（未经审计）；分类目口径与公告分部不同，跨期可比性受限。";
+const OUTSIDE_MAIN_AFTER = "口径说明：数据来自公开披露的季度公告（未经审计）；分类目口径与公告分部一致。";
 const REVIEW_METRIC_BEFORE_CSS = `
       [data-review-metrics] {
         display: grid;
@@ -3691,7 +3695,7 @@ test("a pre-load review navigation falls back without trusting the replacement p
       '[data-pageroot-review-marker-types~="text"]',
     ).filter({ hasText: UPDATED_TEXT }).first()).toBeVisible();
     await expect(launched.page.getByText(
-      "审阅画布未能安全载入，请返回本轮处理页面后重试。",
+      "审阅画布未能安全载入，可返回 AI 修改前后重试。",
       { exact: true },
     )).toHaveCount(0);
     await launched.page.getByRole("button", {
@@ -4565,6 +4569,78 @@ test("a committed version that the desktop cannot activate stays visibly blocked
       { timeout: 20_000 },
     ).toBe(2);
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
+  } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
+
+test("a rewrite outside <main> is still reviewed", async () => {
+  // A single-file page has no site chrome to skip: the reader can comment on a
+  // footer note, the AI can rewrite it, and the review must show that change
+  // instead of reporting the page as unchanged there.
+  const fixture = createSourceFixture(
+    "outside-main-review.html",
+    (source) => source.replace(
+      "</body>",
+      `  <footer data-review-outside-main>
+    <p>${OUTSIDE_MAIN_BEFORE}</p>
+  </footer>
+</body>`,
+    ),
+  );
+  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  try {
+    const request = await addCommentAndSubmit(
+      launched.page,
+      launched.electronApp,
+      fixture.sourcePath,
+    );
+    writeAiOutput(request.requestRoot, (base) => {
+      expect(base).toContain(OUTSIDE_MAIN_BEFORE);
+      return base
+        .replace(ORIGINAL_TEXT, UPDATED_TEXT)
+        .replace(OUTSIDE_MAIN_BEFORE, OUTSIDE_MAIN_AFTER);
+    });
+    runOfficialFinalizer(request.requestRoot, request.changeRequest);
+    await expect(launched.page.getByText(
+      "可在审阅中对比查看修改差异",
+      { exact: true },
+    ).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
+
+    await launched.page.getByRole("button", { name: "审阅对比" }).click();
+    await expect(launched.page.getByTestId("ai-review-workspace"))
+      .toBeVisible({ timeout: 30_000 });
+    const beforeReviewFrame = launched.page.frameLocator('iframe[title^="修改前"]');
+    const afterReviewFrame = launched.page.frameLocator('iframe[title^="修改后"]');
+    for (const frame of [beforeReviewFrame, afterReviewFrame]) {
+      await expect(frame.locator("html")).toHaveAttribute(
+        "data-pageroot-review-filter",
+        "all",
+        { timeout: 30_000 },
+      );
+    }
+    // The footer is a body-level sibling of <main>, so it must become its own
+    // change region carrying text evidence on both sides.
+    await expect(beforeReviewFrame.locator("[data-review-outside-main]"))
+      .toHaveAttribute("data-pageroot-review-types", /text/u, { timeout: 30_000 });
+    await expect(afterReviewFrame.locator("[data-review-outside-main]"))
+      .toHaveAttribute("data-pageroot-review-types", /text/u);
+    await expect(beforeReviewFrame.locator(
+      '[data-review-outside-main] [data-pageroot-review-text="removed"]',
+    ).filter({ hasText: "不同" }).first()).toBeVisible();
+    await expect(afterReviewFrame.locator(
+      '[data-review-outside-main] [data-pageroot-review-text="added"]',
+    ).filter({ hasText: "一致" }).first()).toBeVisible();
+    // The header icon keeps one meaning across editing and review: it opens
+    // 关于源页 instead of quietly leaving the review page.
+    await launched.page.getByTestId("ai-review-workspace")
+      .getByRole("button", { name: "关于源页" })
+      .click();
+    await expect(launched.page.getByRole("button", { name: "关闭关于源页" }))
+      .toBeVisible({ timeout: 15_000 });
+    await launched.page.getByRole("button", { name: "关闭关于源页" }).click();
+    await expect(launched.page.getByTestId("ai-review-workspace")).toBeVisible();
   } finally {
     await stopPageRoot(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);
