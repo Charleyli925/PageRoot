@@ -75,6 +75,27 @@ export function formatProjectsRootLabel(projectsRoot, {
   return display.split(/[/\\]/u).filter(Boolean).join(" › ");
 }
 
+export async function resolveOpenDialogDefaultPath({
+  projectsRoot,
+  documentsRoot,
+  lstat,
+} = {}) {
+  const fallback = typeof documentsRoot === "string" && documentsRoot.trim()
+    ? path.resolve(documentsRoot)
+    : null;
+  if (
+    typeof projectsRoot !== "string"
+    || !projectsRoot.trim()
+    || typeof lstat !== "function"
+  ) return fallback;
+  const resolved = path.resolve(projectsRoot);
+  const information = await lstat(resolved).catch(() => null);
+  if (!information?.isDirectory?.() || information.isSymbolicLink?.()) {
+    return fallback;
+  }
+  return resolved;
+}
+
 export function assertCommitAction({
   classification,
   action,

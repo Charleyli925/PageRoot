@@ -9,6 +9,7 @@ import {
   formatProjectsRootLabel,
   publicFactsFromClassification,
   publicPreparedDescriptor,
+  resolveOpenDialogDefaultPath,
 } from "../desktop/prepared-html-open.mjs";
 
 const SOURCE_SHA = `sha256:${"ab".repeat(32)}`;
@@ -32,6 +33,39 @@ test("default projects root uses the product breadcrumb and custom roots stay us
     }),
     "~ › Work › HTML 项目",
   );
+});
+
+test("the open dialog always starts from the projects root and never reuses dialog history", async () => {
+  const directory = {
+    isDirectory: () => true,
+    isSymbolicLink: () => false,
+  };
+  assert.equal(
+    await resolveOpenDialogDefaultPath({
+      projectsRoot: "/Users/demo/Documents/PageRoot/项目",
+      documentsRoot: "/Users/demo/Documents",
+      lstat: async () => directory,
+    }),
+    "/Users/demo/Documents/PageRoot/项目",
+  );
+  const missingRoot = await resolveOpenDialogDefaultPath({
+    projectsRoot: "/Users/demo/Documents/PageRoot/项目",
+    documentsRoot: "/Users/demo/Documents",
+    lstat: async () => {
+      throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    },
+  });
+  assert.equal(missingRoot, "/Users/demo/Documents");
+  const symlinkedRoot = await resolveOpenDialogDefaultPath({
+    projectsRoot: "/Users/demo/Documents/PageRoot/项目",
+    documentsRoot: "/Users/demo/Documents",
+    lstat: async () => ({
+      isDirectory: () => false,
+      isSymbolicLink: () => true,
+    }),
+  });
+  assert.equal(symlinkedRoot, "/Users/demo/Documents");
+  assert.equal(await resolveOpenDialogDefaultPath(), null);
 });
 
 test("public descriptors never include paths, keys or HTML", () => {

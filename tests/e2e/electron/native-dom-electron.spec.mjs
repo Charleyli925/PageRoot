@@ -93,7 +93,7 @@ async function openRecentProject(
     await page.keyboard.press("Escape");
     await expect(processingDialog).toBeHidden();
   }
-  await page.getByRole("button", { name: "项目", exact: true }).click();
+  await page.getByRole("button", { name: "打开新的本地 HTML" }).click();
   await page.locator(".recent-file-row")
     .filter({ hasText: recentName })
     .click();
@@ -2438,7 +2438,7 @@ test("Electron rapid project switching and immediate close preserve the last nat
       projectA.sourcePath,
     );
 
-    await firstLaunch.page.getByRole("button", { name: "项目", exact: true }).click();
+    await firstLaunch.page.getByRole("button", { name: "打开新的本地 HTML" }).click();
     await firstLaunch.page.locator(".recent-file-row")
       .filter({ hasText: "close-switch-b.html" })
       .click();
@@ -2515,17 +2515,15 @@ test("project resources drain edited rules before leaving", async () => {
     expect(projectCount()).toBe(1);
     await launched.page.getByRole("button", { name: "项目", exact: true }).click();
     expect(projectCount()).toBe(1);
-    await launched.page.getByText("项目资料", { exact: true }).click();
+    // The rules row is a disclosure inside the console: it expands in place
+    // instead of navigating away from the version tree.
     const rulesButton = launched.page.getByRole("button", {
-      name: /项目长期规则.*以后每次 AI 修改都会读取.*可编辑/u,
+      name: /项目规则.*每次 AI Agent 修改本项目 HTML 都会读取/u,
     });
     await expect(rulesButton).toBeVisible();
-    await expect(launched.page.getByRole("button", {
-      name: /项目记录文件夹.*查看每轮要求、AI 返回与历史文件.*在文件夹中打开/u,
-    })).toBeVisible();
+    await expect(rulesButton).toHaveAttribute("aria-expanded", "false");
     await rulesButton.click();
-    await expect(launched.page.getByText("管理 AI 修改规则", { exact: true }))
-      .toBeVisible();
+    await expect(rulesButton).toHaveAttribute("aria-expanded", "true");
     await expect(launched.page.getByText(
       "修改会自动保存。每次发送至 Qoder 时，源页都会把这份规则与本轮要求一起交接；规则只影响后续任务，不会修改当前 HTML。",
       { exact: true },
@@ -2535,22 +2533,23 @@ test("project resources drain edited rules before leaving", async () => {
     const originalRules = await rulesEditor.inputValue();
     const updatedRules = `${originalRules}\n\n- 测试自动保存保护`;
     await rulesEditor.fill(updatedRules);
-    await launched.page.getByRole("button", { name: "返回项目" }).click();
-    await expect(launched.page.getByText("当前文件", { exact: true })).toBeVisible();
     const projectRulesPath = path.join(projectRoot, "PROJECT.md");
     await expect.poll(
       () => readFileSync(projectRulesPath, "utf8"),
       { timeout: 20_000 },
     ).toBe(updatedRules);
+    // Only a real edit that reached disk announces itself.
+    await expect(launched.page.getByText("项目规则已保存", { exact: true }))
+      .toBeVisible();
 
-    await launched.page.getByText("项目资料", { exact: true }).click();
-    await rulesButton.click();
-    await expect(rulesEditor).toHaveValue(updatedRules);
     await rulesEditor.fill(`${updatedRules}\n- 这行只用于验证还原`);
     await launched.page.getByRole("button", { name: "还原修改" }).click();
     await expect(rulesEditor).toHaveValue(updatedRules);
-    await launched.page.getByRole("button", { name: "返回项目" }).click();
-    await expect(launched.page.getByText("当前文件", { exact: true })).toBeVisible();
+    // Collapsing keeps the console open, so the version tree stays in place.
+    await rulesButton.click();
+    await expect(rulesButton).toHaveAttribute("aria-expanded", "false");
+    await expect(rulesEditor).toHaveCount(0);
+    await expect(launched.page.getByText("版本树", { exact: true })).toBeVisible();
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
   } finally {
     await stopPageRoot(launched.electronApp, launched.isolatedUserData);
@@ -2803,9 +2802,8 @@ test("PROJECT.md read failure never becomes editable data and recovers in place"
     await loadedDiskFrame(launched.page, managedSourcePath, "list-item");
 
     await launched.page.getByRole("button", { name: "项目", exact: true }).click();
-    await launched.page.getByText("项目资料", { exact: true }).click();
     const projectRules = launched.page.getByRole("button", {
-      name: /项目长期规则/u,
+      name: /项目规则/u,
     });
     await expect(projectRules).toBeEnabled({ timeout: 20_000 });
 
@@ -2835,7 +2833,8 @@ test("PROJECT.md read failure never becomes editable data and recovers in place"
     await expect(launched.page.getByRole("textbox", { name: "项目长期规则" }))
       .toHaveCount(0);
     await expect(failure.getByRole("button", { name: "重试读取" })).toBeVisible();
-    await expect(launched.page.getByRole("button", { name: "返回项目" })).toBeVisible();
+    // The console stays put, so the version tree is still alongside the failure.
+    await expect(launched.page.getByText("版本树", { exact: true })).toBeVisible();
 
     await launched.page.unroute(projectFileRoute, rejectProjectRulesRead);
     await failure.getByRole("button", { name: "重试读取" }).click();
@@ -3248,8 +3247,7 @@ test("Electron native field undo consumes a live composition without leaving int
   try {
     await waitForProjectReady(launched.page);
     await launched.page.getByRole("button", { name: "项目", exact: true }).click();
-    await launched.page.locator(".project-advanced > summary").click();
-    await launched.page.locator(".project-rule-card").click();
+    await launched.page.locator(".project-rules-summary").click();
     const projectRules = launched.page.getByRole("textbox", {
       name: "项目长期规则",
       exact: true,
