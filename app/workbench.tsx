@@ -2309,7 +2309,7 @@ export default function Workbench() {
   );
   const updateDownloaded = updateResult?.status === "downloaded";
   const updateDownloading = updateResult?.status === "downloading";
-  const updateBadgeLabel = updateDownloaded ? "New! 重启更新" : "New!";
+  const updateBadgeLabel = updateDownloaded ? "重启更新" : "New!";
   const currentSourceFileName =
     localFileNameFromSourcePath(sourcePath) || projectName;
   const currentSourceFileExtension = fileExtension(currentSourceFileName);
