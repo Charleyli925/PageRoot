@@ -13,6 +13,8 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { flushSync } from "react-dom";
+import { ArrowDownIcon } from "@phosphor-icons/react/dist/csr/ArrowDown";
+import { ArrowUpIcon } from "@phosphor-icons/react/dist/csr/ArrowUp";
 
 import {
   EDIT_AUTHOR_RUNTIME_BUDGET,
@@ -5767,28 +5769,31 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         >
           <div className={styles.toolbarRow}>
           {selectedPagePresentationAction ? (
-            <button
-              type="button"
-              className={`${styles.toolButton} ${styles.presentationToolButton}`}
-              data-presentation-kind={selectedPagePresentationAction.kind}
-              data-current={selectedPagePresentationAction.isCurrent ? "true" : undefined}
-              aria-label={selectedPagePresentationAction.label}
-              aria-pressed={
-                selectedPagePresentationAction.kind === "activate-tab"
-                  ? selectedPagePresentationAction.isCurrent
-                  : undefined
-              }
-              title={
-                selectedPagePresentationAction.isCurrent
-                  ? "当前页签"
-                  : "快捷操作：按住 ⌥ 并单击页面中的这个控件"
-              }
-              onClick={() => {
-                executePagePresentationAction(selection);
-              }}
-            >
-              {selectedPagePresentationAction.label}
-            </button>
+            <>
+              <button
+                type="button"
+                className={`${styles.toolButton} ${styles.presentationToolButton}`}
+                data-presentation-kind={selectedPagePresentationAction.kind}
+                data-current={selectedPagePresentationAction.isCurrent ? "true" : undefined}
+                aria-label={selectedPagePresentationAction.label}
+                aria-pressed={
+                  selectedPagePresentationAction.kind === "activate-tab"
+                    ? selectedPagePresentationAction.isCurrent
+                    : undefined
+                }
+                title={
+                  selectedPagePresentationAction.isCurrent
+                    ? "当前页签"
+                    : "快捷操作：按住 ⌥ 并单击页面中的这个控件"
+                }
+                onClick={() => {
+                  executePagePresentationAction(selection);
+                }}
+              >
+                {selectedPagePresentationAction.label}
+              </button>
+              <span className={styles.toolbarDivider} aria-hidden="true" />
+            </>
           ) : null}
 
           <button
@@ -5837,7 +5842,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
                   title={textFormatRequiresSelection ? "请先选中要修改的文字" : "加粗"}
                   onClick={() => applyInlineStyle("fontWeight", selectedStyle.isBold ? "normal" : "700")}
                 >
-                  加粗
+                  <strong aria-hidden="true">B</strong>
+                  <span className={styles.visuallyHidden}>加粗</span>
                 </button>
                 <button
                   type="button"
@@ -5847,7 +5853,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
                   title={textFormatRequiresSelection ? "请先选中要修改的文字" : "斜体"}
                   onClick={() => applyInlineStyle("fontStyle", selectedStyle.isItalic ? "normal" : "italic")}
                 >
-                  斜体
+                  <em aria-hidden="true">I</em>
+                  <span className={styles.visuallyHidden}>斜体</span>
                 </button>
                 <button
                   type="button"
@@ -5860,117 +5867,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
                     selectedStyle.isUnderline ? "none" : "underline",
                   )}
                 >
-                  下划线
+                  <span className={styles.underlineGlyph} aria-hidden="true">U</span>
+                  <span className={styles.visuallyHidden}>下划线</span>
                 </button>
               </div>
-
-              <label className={styles.field}>
-                <span>字号</span>
-                <input
-                  className={styles.numberInput}
-                  type="number"
-                  min="8"
-                  max="120"
-                  step="1"
-                  value={selectedStyle.fontSize}
-                  disabled={textFormatRequiresSelection}
-                  aria-label="字号（像素）"
-                  onChange={(event) => {
-                    const value = Math.max(8, Math.min(120, Number(event.currentTarget.value)));
-                    if (Number.isFinite(value)) applyInlineStyle("fontSize", `${value}px`);
-                  }}
-                />
-              </label>
-
-              <label className={styles.colorField} data-tooltip="文字颜色" data-tooltip-side="below">
-                <span>字色</span>
-                <input
-                  type="color"
-                  value={selectedStyle.color}
-                  disabled={textFormatRequiresSelection}
-                  aria-label="文字颜色"
-                  onChange={(event) => applyInlineStyle("color", event.currentTarget.value)}
-                />
-              </label>
-
-              <label
-                className={styles.colorField}
-                data-tooltip="元素填充色"
-                data-tooltip-side="below"
-              >
-                <span>填充</span>
-                <input
-                  type="color"
-                  value={selectedStyle.backgroundColor}
-                  disabled={textFormatRequiresSelection}
-                  aria-label="元素填充色"
-                  onChange={(event) => applyInlineStyle("backgroundColor", event.currentTarget.value)}
-                />
-              </label>
-
-              <details
-                ref={spacingMenuRef}
-                className={styles.spacingMenu}
-                open={spacingMenuOpen}
-              >
-                <summary
-                  aria-expanded={spacingMenuOpen}
-                  onClick={(event) => {
-                    event.preventDefault();
-                    setSpacingMenuOpen((open) => !open);
-                  }}
-                >间距</summary>
-                <div className={styles.spacingPanel} aria-label="元素间距">
-                  <label className={styles.field}>
-                    <span>内边距</span>
-                    <input
-                      className={styles.numberInput}
-                      type="number"
-                      min="0"
-                      max="240"
-                      step="1"
-                      value={selectedStyle.padding}
-                      aria-label="内边距（像素）"
-                      onChange={(event) => {
-                        const value = Math.max(0, Math.min(240, Number(event.currentTarget.value)));
-                        if (Number.isFinite(value)) applyInlineStyle("padding", `${value}px`);
-                      }}
-                    />
-                  </label>
-                  <label className={styles.field}>
-                    <span>外间距</span>
-                    <input
-                      className={styles.numberInput}
-                      type="number"
-                      min="-120"
-                      max="240"
-                      step="1"
-                      value={selectedStyle.margin}
-                      aria-label="外间距（像素）"
-                      onChange={(event) => {
-                        const value = Math.max(-120, Math.min(240, Number(event.currentTarget.value)));
-                        if (Number.isFinite(value)) applyInlineStyle("margin", `${value}px`);
-                      }}
-                    />
-                  </label>
-                  <label className={styles.field}>
-                    <span>行距</span>
-                    <input
-                      className={styles.numberInput}
-                      type="number"
-                      min="8"
-                      max="240"
-                      step="1"
-                      value={selectedStyle.lineHeight}
-                      aria-label="行距（像素）"
-                      onChange={(event) => {
-                        const value = Math.max(8, Math.min(240, Number(event.currentTarget.value)));
-                        if (Number.isFinite(value)) applyInlineStyle("lineHeight", `${value}px`);
-                      }}
-                    />
-                  </label>
-                </div>
-              </details>
 
               {enableReorder ? (
                 <div className={styles.moveGroup} aria-label="移动选中内容">
@@ -5983,7 +5883,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
                     disabled={!moveAvailability.up}
                     onClick={() => moveSelected("up")}
                   >
-                    上移
+                    <ArrowUpIcon size={15} weight="bold" aria-hidden="true" />
                   </button>
                   <button
                     type="button"
@@ -5994,10 +5894,140 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
                     disabled={!moveAvailability.down}
                     onClick={() => moveSelected("down")}
                   >
-                    下移
+                    <ArrowDownIcon size={15} weight="bold" aria-hidden="true" />
                   </button>
                 </div>
               ) : null}
+
+              <details
+                ref={spacingMenuRef}
+                className={styles.spacingMenu}
+                open={spacingMenuOpen}
+              >
+                <summary
+                  aria-expanded={spacingMenuOpen}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    setSpacingMenuOpen((open) => !open);
+                  }}
+                >样式与间距</summary>
+                <div className={styles.spacingPanel} aria-label="样式与间距">
+                  <div className={styles.popoverSection} aria-label="文字与颜色">
+                    <span className={styles.popoverSectionLabel}>文字与颜色</span>
+                    <label className={styles.controlRow}>
+                      <span>字号</span>
+                      <span className={styles.numberValue}>
+                        <input
+                          type="number"
+                          min="8"
+                          max="120"
+                          step="1"
+                          value={selectedStyle.fontSize}
+                          disabled={textFormatRequiresSelection}
+                          aria-label="字号（像素）"
+                          onChange={(event) => {
+                            const value = Math.max(8, Math.min(120, Number(event.currentTarget.value)));
+                            if (Number.isFinite(value)) applyInlineStyle("fontSize", `${value}px`);
+                          }}
+                        />
+                        <small>px</small>
+                      </span>
+                    </label>
+                    <label className={styles.controlRow}>
+                      <span>字色</span>
+                      <span
+                        className={styles.colorValue}
+                        style={{ "--toolbar-swatch": selectedStyle.color } as CSSProperties}
+                      >
+                        <span className={styles.colorSwatch} aria-hidden="true" />
+                        <span>{selectedStyle.color.toUpperCase()}</span>
+                        <input
+                          type="color"
+                          value={selectedStyle.color}
+                          disabled={textFormatRequiresSelection}
+                          aria-label="文字颜色"
+                          onChange={(event) => applyInlineStyle("color", event.currentTarget.value)}
+                        />
+                      </span>
+                    </label>
+                    <label className={styles.controlRow}>
+                      <span>填充</span>
+                      <span
+                        className={styles.colorValue}
+                        style={{ "--toolbar-swatch": selectedStyle.backgroundColor } as CSSProperties}
+                      >
+                        <span className={styles.colorSwatch} aria-hidden="true" />
+                        <span>{selectedStyle.backgroundColor.toUpperCase()}</span>
+                        <input
+                          type="color"
+                          value={selectedStyle.backgroundColor}
+                          disabled={textFormatRequiresSelection}
+                          aria-label="元素填充色"
+                          onChange={(event) => applyInlineStyle("backgroundColor", event.currentTarget.value)}
+                        />
+                      </span>
+                    </label>
+                  </div>
+
+                  <div className={styles.popoverSection} aria-label="间距">
+                    <span className={styles.popoverSectionLabel}>间距</span>
+                    <label className={styles.controlRow}>
+                      <span>内边距</span>
+                      <span className={styles.numberValue}>
+                        <input
+                          type="number"
+                          min="0"
+                          max="240"
+                          step="1"
+                          value={selectedStyle.padding}
+                          aria-label="内边距（像素）"
+                          onChange={(event) => {
+                            const value = Math.max(0, Math.min(240, Number(event.currentTarget.value)));
+                            if (Number.isFinite(value)) applyInlineStyle("padding", `${value}px`);
+                          }}
+                        />
+                        <small>px</small>
+                      </span>
+                    </label>
+                    <label className={styles.controlRow}>
+                      <span>外间距</span>
+                      <span className={styles.numberValue}>
+                        <input
+                          type="number"
+                          min="-120"
+                          max="240"
+                          step="1"
+                          value={selectedStyle.margin}
+                          aria-label="外间距（像素）"
+                          onChange={(event) => {
+                            const value = Math.max(-120, Math.min(240, Number(event.currentTarget.value)));
+                            if (Number.isFinite(value)) applyInlineStyle("margin", `${value}px`);
+                          }}
+                        />
+                        <small>px</small>
+                      </span>
+                    </label>
+                    <label className={styles.controlRow}>
+                      <span>行距</span>
+                      <span className={styles.numberValue}>
+                        <input
+                          type="number"
+                          min="8"
+                          max="240"
+                          step="1"
+                          value={selectedStyle.lineHeight}
+                          aria-label="行距（像素）"
+                          onChange={(event) => {
+                            const value = Math.max(8, Math.min(240, Number(event.currentTarget.value)));
+                            if (Number.isFinite(value)) applyInlineStyle("lineHeight", `${value}px`);
+                          }}
+                        />
+                        <small>px</small>
+                      </span>
+                    </label>
+                  </div>
+                </div>
+              </details>
             </>
           ) : null}
           </div>
