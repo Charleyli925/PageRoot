@@ -1331,8 +1331,13 @@ ${REVIEW_MASK_UNION_BEFORE}
     await expect(reviewCommentMarkers.filter({
       hasText: ordinaryReviewCommentText,
     })).toHaveCount(1);
-    await expect(reviewCommentMarker).toHaveAttribute("role", "note");
-    await expect(reviewCommentMarker).not.toHaveAttribute("tabindex", /.+/u);
+    // 只读评论标记与 AI 预览共用同一个组件。它是可聚焦控件而不是静态说明，
+    // 因为气泡是读到评论正文的唯一入口，键盘用户必须够得到。
+    await expect(reviewCommentMarker).toHaveJSProperty("tagName", "BUTTON");
+    await expect(reviewCommentMarker).toHaveAttribute(
+      "data-comment-count",
+      "1",
+    );
     await expect(reviewCommentMarker).toHaveCSS("width", "30px");
     await expect(reviewCommentMarker).toHaveCSS("height", "30px");
     await expect(reviewCommentMarker).toHaveCSS("font-size", "15px");
@@ -1374,6 +1379,23 @@ ${REVIEW_MASK_UNION_BEFORE}
       });
     }
     await launched.page.locator('section[data-side="before"] > header').hover();
+    await expect(reviewCommentBubble).toBeHidden();
+
+    // 键盘聚焦打开同一个气泡；焦点离开前不消失。气泡绑的是
+    // :focus-visible 而不是 :focus，所以先按一次 Tab 把输入模态切回键盘，
+    // 否则前一步 hover 留下的指针模态会让焦点不可见。
+    await launched.page.keyboard.press("Tab");
+    await reviewCommentMarker.focus();
+    await expect(reviewCommentBubble).toBeVisible();
+    await expect(reviewCommentBubble).toContainText(frozenReviewComment);
+    // 只读标记不响应 Enter/Space，不进入编辑、不打开编辑工具栏。
+    await launched.page.keyboard.press("Enter");
+    await launched.page.keyboard.press("Space");
+    await expect(reviewCommentBubble).toBeVisible();
+    await expect(launched.page.locator(
+      'section[data-side="before"] [data-testid="review-comment-marker"]',
+    )).toHaveCount(2);
+    await reviewCommentMarker.blur();
     await expect(reviewCommentBubble).toBeHidden();
     // 接下来要操作工具栏控件，先把浮层重新展开。
     await launched.page.getByRole("button", {
