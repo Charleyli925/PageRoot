@@ -22,8 +22,11 @@ Comments + frozen input
 
 The product Agent Bridge is Bridge-owned and never owns Request, Candidate,
 Version or Working Copy state. A user may explicitly choose a managed Qoder ACP
-session or the existing clipboard fallback for each task. The Qoder driver
-preflights a verified standalone CLI before the Request is created, then starts
+session or the existing clipboard fallback for each task. `RunWorkflow` owns one
+shared Qoder availability projection for the delivery dialog and About. A local
+disk-only check discovers and validates the standalone package without running
+Qoder; the Qoder driver performs the complete use-time check before the Request
+is created, then starts
 only a Request whose durable `agentDelivery` record authorizes the trusted-local
 policy. ACP progress is presentation evidence only: only the official finalizer
 plus Repository validation can create a pending-review Candidate, and only an
@@ -264,8 +267,9 @@ services.
 | Current source bytes, Hash, revisions, persistence projection, source-write single flight and Canvas authority generation | `app/application/document-session.js` |
 | Renderer draft revision, pending operations and reconciliation | `app/application/draft-session.js` |
 | Renderer comment working copy, composer and saved-comment edit projection | `app/application/comment-session.js` |
-| Active/background runs, Agent delivery projection, Qoder status, background outcomes, submission lifecycle locks and operation locks | `app/application/run-session.js` |
-| Trusted-local Qoder ACP discovery, preflight tickets, process/session lifetime, bounded public progress and cancellation-before-Request ordering | `scripts/agent-bridge-service.mjs`, composed by `scripts/workspace-bridge.mjs`; durable Request/Candidate authority remains in `ProjectFileRepository` |
+| Active/background runs, Agent delivery projection, background outcomes, submission lifecycle locks and operation locks | `app/application/run-session.js` |
+| Shared Qoder availability/guidance projection, local refresh, use-time check reuse and submission sequencing | `app/application/run-workflow.js` plus the pure state model in `app/domain/qoder-availability.js`; both delivery and About consume the same `WorkspaceController` snapshot, and neither card receives or displays command, version, path, npm prefix or model count |
+| Trusted-local Qoder ACP disk discovery, preflight tickets, process/session lifetime, bounded public progress and cancellation-before-Request ordering | `scripts/agent-bridge-service.mjs`, composed by `scripts/workspace-bridge.mjs`; durable Request/Candidate authority remains in `ProjectFileRepository` |
 | Immutable Version projection and history-view transition | `app/application/version-session.js` |
 | `PROJECT.md` editor working copy, generation, composition fence and save projection facts | `app/application/project-rules-session.js` |
 | `PROJECT.md` Bridge read/write, 700ms autosave, unknown-write reconciliation, close/switch drain and editor-restore host port | `app/application/project-rules-workflow.js`, composed by `WorkspaceController` |

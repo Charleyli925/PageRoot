@@ -289,7 +289,8 @@ export type WorkspaceControllerConstruction = Readonly<{
     handoff: Readonly<{
       copy(input: {
         message: string;
-        run: import("../domain/run-lifecycle.js").ActiveRun;
+        run: import("../domain/run-lifecycle.js").ActiveRun | null;
+        purpose?: string;
       }): Promise<{ status: string; copied: boolean }>;
     }>;
     scheduler?: Readonly<{
@@ -527,6 +528,11 @@ export class WorkspaceController {
     basedOnVersionId?: string | null;
     deadlineAt?: number;
     deliveryMode?: "clipboard" | "qoder-acp";
+  }): Promise<RunWorkflowOutcome>;
+  refreshQoderAvailability(): Promise<RunWorkflowOutcome>;
+  checkQoderUsability(): Promise<RunWorkflowOutcome>;
+  copyQoderGuidance(input: {
+    kind: import("../domain/qoder-availability.js").QoderGuidanceKind;
   }): Promise<RunWorkflowOutcome>;
   reconcileRunSubmission(input?: {
     sourcePath?: string | null;

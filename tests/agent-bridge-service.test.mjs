@@ -6,6 +6,7 @@ import {
   realpath,
   rm,
   symlink,
+  unlink,
   writeFile,
 } from "node:fs/promises";
 import { createServer } from "node:net";
@@ -68,6 +69,7 @@ async function createVerifiedNpmCommand(t, {
   manifestVersion = "1.1.27",
   reportedVersion = "1.1.27",
   models = ["Finder-Sparse-Path"],
+  launcherRelativePath = [".npm-global", "bin"],
 } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), "pageroot-agent-npm-command-"));
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -81,11 +83,11 @@ async function createVerifiedNpmCommand(t, {
   );
   const bundleDirectory = path.join(packageRoot, "bundle");
   const bundle = path.join(bundleDirectory, "qodercli.js");
-  const binDirectory = path.join(home, ".npm-global", "bin");
-  await Promise.all([
-    mkdir(bundleDirectory, { recursive: true }),
-    mkdir(binDirectory, { recursive: true }),
-  ]);
+  const binDirectory = launcherRelativePath
+    ? path.join(home, ...launcherRelativePath)
+    : null;
+  await mkdir(bundleDirectory, { recursive: true });
+  if (binDirectory) await mkdir(binDirectory, { recursive: true });
   await writeFile(path.join(packageRoot, "package.json"), `${JSON.stringify({
     name: "@qoder-ai/qodercli",
     version: manifestVersion,
@@ -103,8 +105,9 @@ if (process.argv.includes("--list-models")) {
 process.exit(2);
 `, { encoding: "utf8", mode: 0o755 });
   await chmod(bundle, 0o755);
-  await symlink(bundle, path.join(binDirectory, "qodercli"));
-  return { root, home, bundle };
+  const launcher = binDirectory ? path.join(binDirectory, "qodercli") : null;
+  if (launcher) await symlink(bundle, launcher);
+  return { root, home, bundle, launcher };
 }
 
 function taskAuthority(identity = IDENTITY) {
@@ -278,6 +281,118 @@ test("verified npm Qoder uses the trusted runtime under Finder's sparse PATH", a
   assert.equal(observed.baseEnvironment.PATH, "/usr/bin:/bin");
 });
 
+test("local availability reads installation identity without running Qoder", async (t) => {
+  const command = await createFakeCommand(t);
+  let preflightCalls = 0;
+  const service = createService(command, {
+    preflightRunner: async () => {
+      preflightCalls += 1;
+      return { version: "1.1.27", modelCount: 1 };
+    },
+  });
+  t.after(() => service.dispose());
+
+  const availability = await service.availability();
+
+  assert.deepEqual(availability, {
+    ok: true,
+    status: "ready",
+    driver: "qoder-acp",
+  });
+  assert.equal(preflightCalls, 0);
+  assert.equal("command" in availability, false);
+  assert.equal("version" in availability, false);
+  assert.equal("path" in availability, false);
+});
+
+test("local availability re-reads disk after Qoder CLI is installed", async (t) => {
+  const fixture = await createVerifiedNpmCommand(t);
+  await unlink(fixture.launcher);
+  const service = new AgentBridgeService({
+    environment: { HOME: fixture.home, PATH: "/usr/bin:/bin" },
+    commandResolver: ({ environment }) => resolveQoderAcpCommand({
+      environment,
+      homeDirectory: fixture.home,
+    }),
+    resolveTask: async () => taskAuthority(),
+  });
+  t.after(() => service.dispose());
+
+  assert.equal((await service.availability()).status, "not-installed");
+  await symlink(fixture.bundle, fixture.launcher);
+  assert.equal((await service.availability()).status, "ready");
+});
+
+test("Finder-sparse discovery covers npm prefixes and common Node managers", async (t) => {
+  for (const [name, launcherDirectory, npmrcPrefix] of [
+    ["npmrc-prefix", ["custom", "npm", "bin"], "~/custom/npm"],
+    ["nvm", [".nvm", "versions", "node", "v22.4.1", "bin"], null],
+    ["volta", [".volta", "bin"], null],
+    ["fnm", [".local", "share", "fnm", "node-versions", "v22.4.1", "installation", "bin"], null],
+    ["mise", [".local", "share", "mise", "installs", "node", "22.4.1", "bin"], null],
+  ]) {
+    await t.test(name, async (caseTest) => {
+      const fixture = await createVerifiedNpmCommand(caseTest, {
+        launcherRelativePath: null,
+      });
+      const binDirectory = path.join(fixture.home, ...launcherDirectory);
+      await mkdir(binDirectory, { recursive: true });
+      await symlink(fixture.bundle, path.join(binDirectory, "qodercli"));
+      if (npmrcPrefix) {
+        await writeFile(path.join(fixture.home, ".npmrc"), `prefix=${npmrcPrefix}\n`);
+      }
+      const resolved = await resolveQoderAcpCommand({
+        environment: { HOME: fixture.home, PATH: "/usr/bin:/bin" },
+        homeDirectory: fixture.home,
+      });
+      assert.equal(resolved.command, await realpath(fixture.bundle));
+      assert.equal(resolved.source, "verified-npm-package");
+    });
+  }
+});
+
+test("local availability distinguishes unsupported or invalid installs from absence", async (t) => {
+  await t.test("unsupported-version", async (caseTest) => {
+    const fixture = await createVerifiedNpmCommand(caseTest, {
+      manifestVersion: "1.1.26",
+      reportedVersion: "1.1.26",
+    });
+    const service = new AgentBridgeService({
+      environment: { HOME: fixture.home, PATH: "/usr/bin:/bin" },
+      commandResolver: ({ environment }) => resolveQoderAcpCommand({
+        environment,
+        homeDirectory: fixture.home,
+      }),
+      resolveTask: async () => taskAuthority(),
+    });
+    caseTest.after(() => service.dispose());
+    assert.deepEqual(await service.availability(), {
+      ok: true,
+      status: "unavailable",
+      reason: "invalid-installation",
+      driver: "qoder-acp",
+    });
+  });
+
+  await t.test("wrong-package-layout", async (caseTest) => {
+    const command = await createFakeCommand(caseTest);
+    const home = path.join(path.dirname(command), "home");
+    const binDirectory = path.join(home, ".local", "bin");
+    await mkdir(binDirectory, { recursive: true });
+    await symlink(command, path.join(binDirectory, "qodercli"));
+    const service = new AgentBridgeService({
+      environment: { HOME: home, PATH: "/usr/bin:/bin" },
+      commandResolver: ({ environment }) => resolveQoderAcpCommand({
+        environment,
+        homeDirectory: home,
+      }),
+      resolveTask: async () => taskAuthority(),
+    });
+    caseTest.after(() => service.dispose());
+    assert.equal((await service.availability()).status, "unavailable");
+  });
+});
+
 test("preflight failures state that no Request exists yet", async (t) => {
   for (const [stderr, code, expectedCopy] of [
     [
@@ -361,6 +476,7 @@ test("every locally generated preflight error uses the pre-Request copy contract
     "QODER_CAPACITY_UNAVAILABLE",
     "QODER_COMMAND_NOT_FOUND",
     "QODER_COMMAND_UNTRUSTED",
+    "QODER_VERSION_UNSUPPORTED",
     "QODER_COMMAND_CHANGED",
   ]) {
     await t.test(code, async () => {

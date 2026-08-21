@@ -55,14 +55,21 @@ registered task identity, the fixed `qoder-acp` driver, explicit
 `trusted-local-agent-v1` consent and an opaque short-lived ticket. It cannot
 provide a command, cwd, environment or filesystem path policy.
 
+`GET /agent/availability` is the separate disk-only status route used whenever
+delivery or About opens. It re-runs protected package discovery without
+executing Qoder, contacting the service, creating a Request or freezing the
+Canvas. Finder/Dock sparse-PATH discovery includes configured npm prefixes plus
+common nvm, Volta, fnm, mise and asdf roots, but every candidate still passes
+the same package identity checks.
+
 Product discovery accepts a protected standalone `@qoder-ai/qodercli` package
 at version 1.1.27 or newer. It intentionally rejects the executable embedded in
 Qoder.app and ordinary `PAGEROOT_QODER_ACP_COMMAND` overrides. Tests may inject
 a synthetic executable only with both `PAGEROOT_E2E=1` and
 `PAGEROOT_QODER_ACP_ALLOW_TEST_COMMAND=1`. The readiness probe runs before
-Request creation; a failed local CLI/version/model-list check must leave no new
-Request. Actual ACP login, capacity or network failure can still appear only
-after the Request exists. Same-Request retry is allowed only while the current
+Request creation; a failed CLI/version/login/model-list check must leave no new
+Request, and a successful ticket is reused by the immediately following
+submission instead of probing twice. Same-Request retry is allowed only while the current
 Bridge has confirmed its process group stopped and no output/completion remains.
 A crash lease, unknown cleanup or residue requires cancelling the old Request as
 an authority fence and submitting a new one. Candidate completion remains owned

@@ -72,7 +72,7 @@ async function waitForProjectReady(page, timeout = 60_000) {
 async function chooseClipboardDelivery(page) {
   const dialog = page.getByRole("dialog", { name: "怎样交给 AI？" });
   await expect(dialog).toBeVisible();
-  await dialog.getByRole("button", { name: /只复制任务/u }).click();
+  await dialog.getByRole("button", { name: /复制任务/u }).click();
 }
 
 async function loadedDiskFrame(page, sourcePath, caseId) {

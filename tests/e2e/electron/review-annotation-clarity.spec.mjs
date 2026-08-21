@@ -80,7 +80,7 @@ async function submitToAi(page, electronApp) {
   await page.getByRole("button", { name: /发给 AI/u }).click();
   const dialog = page.getByRole("dialog", { name: "怎样交给 AI？" });
   await expect(dialog).toBeVisible();
-  await dialog.getByRole("button", { name: /只复制任务/u }).click();
+  await dialog.getByRole("button", { name: /复制任务/u }).click();
   await expect(page.getByText("AI任务已经复制，直接粘贴给 AI Agent", { exact: true }))
     .toBeVisible();
   let promptPath = "";

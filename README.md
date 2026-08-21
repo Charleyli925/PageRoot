@@ -187,7 +187,7 @@ AI 结果看起来合理，也可能藏着遗漏。源页把“审阅对比”�
 - macOS 12 或更高版本
 - Apple 芯片 Mac（`arm64`）
 - 当前桌面界面语言：简体中文
-- 可选的受管 Qoder 自动执行需要独立安装并登录 `@qoder-ai/qodercli` 1.1.27 或更高版本；只复制任务不需要。
+- 可选的“Qoder CLI”自动执行需要独立安装并登录 `@qoder-ai/qodercli` 1.1.27 或更高版本；“复制任务”不需要。
 - 当前构建使用 ad-hoc 签名，尚未完成 Apple 公证。首次启动如被 macOS 拦截，请按住 Control 点击 PageRoot，然后选择“打开”。
 - 可使用 Release 中的 `SHA256SUMS.txt` 校验 DMG；正式 Release 还包含 `update-manifest.json` 与 `build-info.json`，用于核对版本和源码来源。
 - 正式桌面版本默认回传有限、白名单化的 PageRoot 使用与故障统计；该遥测不回传 HTML、评论、附件、文件名/路径、剪贴板、电脑序列号或原始错误。用户明确选择的 Qoder/Agent 第三方处理是另一条数据路径，详见[使用数据说明](PRIVACY.md)。

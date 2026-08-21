@@ -275,7 +275,7 @@ test("packaged legal notice and icon remain available as reviewed resources", as
     stat(new URL("../desktop/resources/icon.icns", import.meta.url)),
   ]);
   assert.match(notice, /AI Agent 生成或修改的内容可能不准确/u);
-  assert.match(notice, /用 Qoder CLI 自动执行/u);
+  assert.match(notice, /选择“Qoder CLI”或“复制任务”/u);
   assert.match(notice, /不是操作系统沙箱/u);
   assert.match(notice, /Apache License 2\.0/u);
   assert.ok(iconInfo.size > 100_000);

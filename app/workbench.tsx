@@ -101,6 +101,10 @@ import { createCommentWorkflowCodecs } from "./application/comment-workflow-code
 import type { DocumentWorkflowOutcome } from "./application/document-workflow.js";
 import { createDocumentWorkflowCodecs } from "./application/document-workflow-codecs.js";
 import { createRunWorkflowCodecs } from "./application/run-workflow-codecs.js";
+import {
+  INITIAL_QODER_AVAILABILITY,
+  type QoderGuidanceKind,
+} from "./domain/qoder-availability.js";
 import { createWorkspaceControllerCodecs } from "./application/workspace-controller-codecs.js";
 import type { CommentSessionSnapshot } from "./application/comment-session.js";
 import type { DocumentSessionSnapshot } from "./application/document-session.js";
@@ -652,6 +656,8 @@ export default function Workbench() {
     workspaceControllerSnapshot?.comment?.draft.error ?? "";
   const runSnapshot = workspaceControllerSnapshot?.runSession
     ?? INITIAL_RUN_SNAPSHOT;
+  const qoderAvailability = workspaceControllerSnapshot?.run?.qoderAvailability
+    ?? INITIAL_QODER_AVAILABILITY;
   const backgroundProjectResults = useMemo(
     () => new Map<string, BackgroundProjectResult>(
       runSnapshot.backgroundResults,
@@ -1464,7 +1470,7 @@ export default function Workbench() {
         return;
       }
       if (runEvent.type === "run-submission-failed") {
-        if (runEvent.current) setDrawer("handoff");
+        if (runEvent.current && runEvent.run) setDrawer("handoff");
         return;
       }
       if (runEvent.type === "run-handoff-failed") {
@@ -5743,11 +5749,11 @@ export default function Workbench() {
         deadlineAt: Date.now() + 60_000,
         deliveryMode,
       });
-    if (outcome.status === "succeeded" || outcome.status === "stale") return;
+    if (outcome.status === "succeeded" || outcome.status === "stale") return outcome;
     if (outcome.status === "unknown") {
       setDrawer("handoff");
       void workspaceControllerRef.current?.dismissFirstEditGuide();
-      return;
+      return outcome;
     }
     if (outcome.status === "blocked") {
       if (outcome.code === "RUN_SUBMISSION_COMMENT_EDIT") {
@@ -5791,6 +5797,11 @@ export default function Workbench() {
         return;
       }
     }
+    if (
+      deliveryMode === "qoder-acp"
+      && requiredWorkspaceController(workspaceController)
+        .getSnapshot().run?.qoderAvailability.status !== "ready"
+    ) return outcome;
     const registrationFailure = outcome.code === "PROJECT_REGISTRATION_REJECTED"
       || outcome.code === "PROJECT_REGISTRATION_UNKNOWN"
       || outcome.code === "RUN_SUBMISSION_REGISTRATION_INVALID";
@@ -5806,6 +5817,7 @@ export default function Workbench() {
         label: registrationFailure ? "重新建立并发送" : "重新发送",
       },
     });
+    return outcome;
   }, [
     currentBasedOnVersionId,
     currentCommentSessionSnapshot,
@@ -5824,6 +5836,15 @@ export default function Workbench() {
     viewMode,
     workspaceController,
   ]);
+  const refreshQoderAvailability = async () => (
+    workspaceController?.refreshQoderAvailability() ?? null
+  );
+  const checkQoderUsability = async () => (
+    workspaceController?.checkQoderUsability() ?? null
+  );
+  const copyQoderGuidance = async (kind: QoderGuidanceKind) => (
+    workspaceController?.copyQoderGuidance({ kind }) ?? null
+  );
   useEffect(() => {
     deferredEditorReplayRef.current.generateRequest = () => {
       void generateRequest(deferredEditorReplayRef.current.agentDeliveryMode, true);
@@ -7353,6 +7374,7 @@ export default function Workbench() {
             status={currentQoderHandoffStatus} deliveryMode={currentAgentDeliveryMode}
             generating={generating} runInProgress={runInProgress}
             pendingCount={pendingSendItemCount}
+            availability={qoderAvailability}
             disabled={generating || projectHydrating || Boolean(projectLoadError)
               || viewTransitioning || viewMode === "history" || (!runInProgress && (
                 pendingSendItemCount === 0 || interactionLocked || persistState === "failed"
@@ -7363,7 +7385,10 @@ export default function Workbench() {
               setCanvasMode("edit");
               setDrawer("handoff");
             }}
-            onSelect={(mode) => void generateRequest(mode)}
+            onSelect={(mode) => generateRequest(mode)}
+            onRefreshAvailability={refreshQoderAvailability}
+            onCheckUsability={checkQoderUsability}
+            onCopyGuidance={copyQoderGuidance}
           />
         </WorkbenchHeaderActions>
         <input
@@ -8793,6 +8818,7 @@ export default function Workbench() {
         repositoryOpenFailed={repositoryOpenFailed}
         releaseNotesOpenFailed={releaseNotesOpenFailed}
         userNoticeOpenFailed={userNoticeOpenFailed}
+        qoderAvailability={qoderAvailability}
         onClose={closeAboutPageRoot}
         onCheckForUpdates={() => void checkForApplicationUpdates()}
         onDownloadUpdate={() => void downloadAvailableUpdate()}
@@ -8803,6 +8829,9 @@ export default function Workbench() {
         onOpenReleaseNotes={() => void openReleaseNotes()}
         onOpenRepository={() => void openProjectRepository()}
         onOpenUserNotice={() => void openUserNotice()}
+        onRefreshQoderAvailability={refreshQoderAvailability}
+        onCheckQoderUsability={checkQoderUsability}
+        onCopyQoderGuidance={copyQoderGuidance}
       />
 
       {toast ? (

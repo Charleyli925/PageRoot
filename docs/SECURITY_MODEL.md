@@ -27,12 +27,15 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
   opaque preflight ticket; they cannot choose a command, cwd, environment,
   prompt, Request path, Candidate path or finalizer.
 - Managed Qoder starts only after explicit `trusted-local-agent-v1` consent and
-  a pre-Request preflight. Discovery rejects the CLI embedded in Qoder.app and
-  accepts only a protected standalone `@qoder-ai/qodercli` package at the
-  minimum reviewed version. The Bridge verifies package metadata, executable
-  realpath/mode/content identity, `--version` and `--list-models`; a changed
-  executable invalidates the ticket. Arbitrary command overrides are enabled
-  only when both dedicated E2E environment fences are present.
+  a pre-Request preflight. Opening delivery or About performs a separate
+  disk-only discovery that rejects the CLI embedded in Qoder.app and accepts
+  only a protected standalone `@qoder-ai/qodercli` package at the minimum
+  reviewed version; it never runs Qoder, contacts Qoder, creates a Request or
+  locks the Canvas. Only explicit “Qoder CLI” activation performs `--version`
+  and `--list-models`, verifies executable realpath/mode/content identity and
+  obtains an opaque short-lived ticket; a changed executable invalidates that
+  ticket. Arbitrary command overrides are enabled only when both dedicated E2E
+  environment fences are present.
 - Fixed app-resource lookup for the packaged user statement and disclaimer;
   the renderer can request it but cannot choose a local path
 - Default-browser opening accepts only an already known HTML source path,
@@ -241,12 +244,22 @@ by Qoder; the user statement and Privacy notice disclose that third-party path.
 This is an explicit trusted-local-Agent policy, not hostile-process isolation.
 The Qoder subprocess still runs with the signed-in local user's OS identity and
 can theoretically read or modify files without using ACP. The selection dialog
-states that fact before each automatic task. The restricted ACP host is a
-cooperative least-privilege boundary and must never be described as an OS
-sandbox. Candidate completion still requires the official finalizer and
-Repository validation; ACP stop/progress cannot create, adopt or activate a
-Version. See ADR 0032. The synthetic live probe remains diagnostic evidence
-only and is not a release gate (ADR 0031).
+keeps only the concise task-specific disclosure that Qoder reads this turn's
+HTML, comments and attachments and that results enter review; the packaged user
+statement retains the complete local-permission, third-party-processing and
+non-sandbox disclosure. The restricted ACP host is a cooperative
+least-privilege boundary and must never be described as an OS sandbox.
+Candidate completion still requires the official finalizer and Repository
+validation; ACP stop/progress cannot create, adopt or activate a Version. See
+ADR 0032. The synthetic live probe remains diagnostic evidence only and is not
+a release gate (ADR 0031).
+
+Installation and login guidance is copied only after the user's explicit
+button action and must pass the same clipboard write/readback check as the
+normal portable handoff. A local availability failure never writes the
+clipboard. Neither the delivery card nor About receives or displays command
+paths, npm prefixes, versions or model counts; stable error classes remain in
+local diagnostics.
 
 ## V2 editable-island trust boundary
 

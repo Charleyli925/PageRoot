@@ -933,6 +933,18 @@ export class WorkspaceController {
     return this.#requireRunWorkflow().submit(input);
   }
 
+  refreshQoderAvailability() {
+    return this.#requireRunWorkflow().refreshQoderAvailability();
+  }
+
+  checkQoderUsability() {
+    return this.#requireRunWorkflow().checkQoderUsability();
+  }
+
+  copyQoderGuidance(input) {
+    return this.#requireRunWorkflow().copyQoderGuidance(input);
+  }
+
   reconcileRunSubmission(input) {
     return this.#requireRunWorkflow().reconcileSubmission(input);
   }

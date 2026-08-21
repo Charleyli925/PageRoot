@@ -9,9 +9,20 @@ import {
 import { CheckCircleIcon } from "@phosphor-icons/react/dist/csr/CheckCircle";
 import { CopyIcon } from "@phosphor-icons/react/dist/csr/Copy";
 import { PaperPlaneTiltIcon } from "@phosphor-icons/react/dist/csr/PaperPlaneTilt";
-import { ShieldCheckIcon } from "@phosphor-icons/react/dist/csr/ShieldCheck";
+import { XIcon } from "@phosphor-icons/react/dist/csr/X";
+
+import type {
+  QoderAvailabilitySnapshot,
+  QoderGuidanceKind,
+} from "../domain/qoder-availability.js";
+import QoderAvailabilityCard from "./QoderAvailabilityCard";
 
 export type AgentDeliveryMode = "qoder-acp" | "clipboard";
+
+type AgentDeliveryOutcome = Readonly<{
+  status: string;
+  reason?: string;
+}> | null | undefined;
 
 function triggerLabel({
   generating,
@@ -46,8 +57,12 @@ export function AgentDeliveryButton({
   runInProgress,
   pendingCount,
   disabled,
+  availability,
   onOpenRun,
   onSelect,
+  onRefreshAvailability,
+  onCheckUsability,
+  onCopyGuidance,
 }: {
   status: string;
   deliveryMode: AgentDeliveryMode;
@@ -55,8 +70,12 @@ export function AgentDeliveryButton({
   runInProgress: boolean;
   pendingCount: number;
   disabled: boolean;
+  availability: QoderAvailabilitySnapshot;
   onOpenRun: () => void;
-  onSelect: (mode: AgentDeliveryMode) => void;
+  onSelect: (mode: AgentDeliveryMode) => Promise<AgentDeliveryOutcome>;
+  onRefreshAvailability: () => Promise<AgentDeliveryOutcome>;
+  onCheckUsability: () => Promise<AgentDeliveryOutcome>;
+  onCopyGuidance: (kind: QoderGuidanceKind) => Promise<AgentDeliveryOutcome>;
 }) {
   const [open, setOpen] = useState(false);
   const copied = status === "copied";
@@ -85,10 +104,20 @@ export function AgentDeliveryButton({
       </button>
       <AgentDeliveryDialog
         open={open}
+        availability={availability}
         onClose={() => setOpen(false)}
-        onSelect={(mode) => {
-          setOpen(false);
-          onSelect(mode);
+        onRefreshAvailability={onRefreshAvailability}
+        onCheckUsability={onCheckUsability}
+        onCopyGuidance={onCopyGuidance}
+        onSelect={async (mode) => {
+          if (mode === "clipboard") setOpen(false);
+          const outcome = await onSelect(mode);
+          const accepted = Boolean(
+            outcome
+            && ["succeeded", "unknown", "stale"].includes(outcome.status),
+          );
+          if (mode === "qoder-acp" && accepted) setOpen(false);
+          return accepted;
         }}
       />
     </>
@@ -97,15 +126,22 @@ export function AgentDeliveryButton({
 
 export default function AgentDeliveryDialog({
   open,
+  availability,
   onClose,
   onSelect,
+  onRefreshAvailability,
+  onCheckUsability,
+  onCopyGuidance,
 }: {
   open: boolean;
+  availability: QoderAvailabilitySnapshot;
   onClose: () => void;
-  onSelect: (mode: AgentDeliveryMode) => void;
+  onSelect: (mode: AgentDeliveryMode) => Promise<boolean>;
+  onRefreshAvailability: () => Promise<AgentDeliveryOutcome>;
+  onCheckUsability: () => Promise<AgentDeliveryOutcome>;
+  onCopyGuidance: (kind: QoderGuidanceKind) => Promise<AgentDeliveryOutcome>;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
-  const qoderButtonRef = useRef<HTMLButtonElement>(null);
   const backdropReadyAtRef = useRef(0);
 
   useEffect(() => {
@@ -114,13 +150,15 @@ export default function AgentDeliveryDialog({
     if (open && !dialog.open) {
       backdropReadyAtRef.current = performance.now() + 350;
       dialog.showModal();
-      const focusFrame = requestAnimationFrame(
-        () => qoderButtonRef.current?.focus(),
-      );
+      void onRefreshAvailability();
+      const focusFrame = requestAnimationFrame(() => {
+        const primary = dialog.querySelector<HTMLElement>("[data-qoder-primary='true']");
+        (primary || dialog.querySelector<HTMLElement>(".agent-delivery-close"))?.focus();
+      });
       return () => cancelAnimationFrame(focusFrame);
     }
     if (!open && dialog.open) dialog.close();
-  }, [open]);
+  }, [onRefreshAvailability, open]);
 
   const handleBackdropPointer = (event: MouseEvent<HTMLDialogElement>) => {
     if (
@@ -143,50 +181,51 @@ export default function AgentDeliveryDialog({
       onMouseDown={handleBackdropPointer}
     >
       <article className="agent-delivery-card">
+        <button
+          className="agent-delivery-close"
+          type="button"
+          aria-label="关闭怎样交给 AI"
+          title="关闭"
+          onClick={onClose}
+        >
+          <XIcon aria-hidden="true" size={17} weight="bold" />
+        </button>
+
         <header>
-          <span>AGENT BRIDGE</span>
           <h2 id="agent-delivery-title">怎样交给 AI？</h2>
           <p id="agent-delivery-description">
-            两种方式都只会生成待审阅 Candidate；当前 HTML 不会被自动覆盖。
+            结果会先进入审阅，不会覆盖当前页面。
           </p>
         </header>
+
         <div className="agent-delivery-options">
+          <QoderAvailabilityCard
+            availability={availability}
+            surface="delivery"
+            onActivate={() => onSelect("qoder-acp")}
+            onRefreshLocal={onRefreshAvailability}
+            onCheckUsability={onCheckUsability}
+            onCopyGuidance={onCopyGuidance}
+          />
+
           <button
-            ref={qoderButtonRef}
-            className="agent-delivery-option primary"
+            className="agent-delivery-option clipboard"
             type="button"
-            onClick={() => onSelect("qoder-acp")}
+            onClick={() => void onSelect("clipboard")}
           >
-            <ShieldCheckIcon aria-hidden="true" size={23} weight="duotone" />
-            <span>
-              <strong>用 Qoder CLI 自动执行</strong>
-              <small>PageRoot 启动受管 ACP 会话并显示进度，可随时停止</small>
+            <span className="agent-delivery-option-icon" aria-hidden="true">
+              <CopyIcon size={20} weight="duotone" />
             </span>
-            <em>ACP</em>
-          </button>
-          <button
-            className="agent-delivery-option"
-            type="button"
-            onClick={() => onSelect("clipboard")}
-          >
-            <CopyIcon aria-hidden="true" size={22} weight="duotone" />
             <span>
-              <strong>只复制任务</strong>
-              <small>保留原有方式，由你粘贴给任意本地 AI Agent</small>
+              <strong>复制任务</strong>
+              <small>粘贴给 Qoder 或其他 AI Agent</small>
             </span>
           </button>
         </div>
-        <aside>
-          <strong>可信本机 Agent 提示</strong>
-          <p>
-            Qoder CLI 会使用你的本机 Qoder 账号和系统权限运行。PageRoot 会严格限制
-            ACP 文件与命令接口，但这不是操作系统沙箱。选择自动执行即表示你信任本机
-            独立安装的 Qoder CLI 处理本轮冻结资料。
-          </p>
-        </aside>
-        <footer>
-          <button type="button" onClick={onClose}>取消</button>
-        </footer>
+
+        <p className="agent-delivery-safety">
+          Qoder 会读取本轮 HTML、评论和附件；结果先进入审阅。
+        </p>
       </article>
     </dialog>
   );

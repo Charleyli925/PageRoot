@@ -249,13 +249,13 @@ v3 TargetRef 保存 label、层级、selector/结构锚点、源码位置、源 
 
 ### 5.5 发给 AI
 
-提交入口为顶部主按钮。无评论时显示“写评论后再发送”且不可用；有评论后显示“发给 AI”。用户随后选择受管 Qoder 自动执行或只复制任务。复制模式使用“正在复制…”与“复制失败，再试一次”；受管模式使用“正在启动 Qoder…”、“Qoder 正在处理”及对应失败状态；已有本轮统一显示“查看本轮”。两条交付分支共用同一冻结 Request 合同。
+提交入口为顶部主按钮。无评论时显示“写评论后再发送”且不可用；有评论后显示“发给 AI”。用户随后在同一个“怎样交给 AI？”弹窗选择“Qoder CLI”或“复制任务”。Qoder 的检查中、未安装、需要登录与暂时无法检查都在原卡片展开，不跳 About、不弹第二层；“复制任务”始终可用。复制模式使用“正在复制…”与“复制失败，再试一次”；受管模式使用“正在启动 Qoder…”、“Qoder 正在处理”及对应失败状态；已有本轮统一显示“查看本轮”。两条交付分支共用同一冻结 Request 合同。
 
 用户触发提交后必须按唯一顺序执行：
 
 1. 提交当前原生编辑 checkpoint；composition、映射或 Patch 失败立即停止。
 2. 校验本轮评论并同步进入瞬时 `preparing`；它只去重快速双击、快捷键和重复事件，不锁 Canvas。
-3. 自动模式先执行 CLI readiness probe；复制模式直接继续。probe 期间的后续编辑由最终冻结捕获，失败不建立 Request。
+3. 选择 Qoder 时先执行完整使用前检查；复制模式直接继续。检查期间的后续编辑由最终冻结捕获，失败不建立 Request。
 4. 完成必要的首次项目登记并重新读取当前评论。
 5. 同步执行 `freezeNow()`，得到届时最新、可验证的 HTML、source SHA 与 revision。
 6. 只有冻结成功才设置 `projectLocked=true` 并进入 `submitting`。
@@ -295,10 +295,7 @@ v3 TargetRef 保存 label、层级、selector/结构锚点、源码位置、源 
 
 PR 2B 在 Request 已持久化后，才从冻结 Prompt 建立 `AI任务/<日期>-候选版本N/` 的派生展示：处理中只含 `PROMPT.md`，Candidate 通过 finalizer 后才加入 `*-Vn-待审阅.html`。它由收据驱动、排他/no-replace 写入，可删除、可重建，且从不参与 Candidate、审阅、Promotion 或版本身份判断。P2 不创建 `附件快照说明.md`、`附件与图片/`、`AI_RULES.md` 或 `PROJECT.md` 副本；可见附件体验是 P3。
 
-桌面端在每轮发送前让用户选择“用 Qoder CLI 自动执行”或“只复制任务”。自动模式必须在
-Request 创建前完成独立 Qoder CLI 的本地来源、版本、文件身份与静态模型列表 readiness
-probe，并明确提示可信本机 Agent 不是 OS 沙箱；probe 失败不得锁定项目或创建 Request。
-它不保证实际 ACP 会话建立时登录、账号容量与网络仍可用。probe 成功后，
+桌面端在每轮发送前让用户选择“Qoder CLI”或“复制任务”。每次打开发送弹窗或 About 时的第一层检查只读取磁盘上的独立 Qoder CLI 包与文件身份，不运行 Qoder、不连网、不创建 Request 或锁定项目。只有用户选择 Qoder 或点击“检查并继续”时，才在 Request 创建前完成版本、登录、当前可用性与静态模型列表的完整检查；检查失败不得锁定项目或创建 Request。检查成功后，
 Bridge 才为带固定 `agentDelivery` 授权的同一 Request 启动受管 ACP 会话。Renderer 不得
 提供命令、cwd、环境、Prompt、Request/output/finalizer 路径，也不得把 ACP stop 或进度
 当作 Candidate 完成。

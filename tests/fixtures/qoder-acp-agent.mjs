@@ -11,6 +11,10 @@ if (process.argv.includes("--version")) {
 }
 
 if (process.argv.includes("--list-models")) {
+  if (process.argv.includes("--auth-required")) {
+    process.stderr.write("Not logged in. Login required.\n");
+    process.exit(1);
+  }
   process.stdout.write("MODEL\nPageRoot-E2E\n");
   process.exit(0);
 }

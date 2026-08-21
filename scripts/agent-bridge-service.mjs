@@ -7,6 +7,7 @@ import {
   mkdir,
   open,
   readFile,
+  readdir,
   realpath,
   unlink,
 } from "node:fs/promises";
@@ -235,6 +236,8 @@ function qoderFailure(code) {
       return "没有找到独立安装的 Qoder CLI。请先安装 Qoder CLI，或改用复制任务。";
     case "QODER_COMMAND_UNTRUSTED":
       return "找到的 Qoder CLI 不符合独立安装校验，PageRoot 没有启动它。";
+    case "QODER_VERSION_UNSUPPORTED":
+      return "当前 Qoder CLI 版本不受支持。请更新后再试。";
     case "ACP_CANCELLED":
       return "Qoder 已停止。";
     case "ACP_AGENT_IDENTITY_MISMATCH":
@@ -260,6 +263,8 @@ function qoderPreflightFailure(code) {
       return "没有找到独立安装的 Qoder CLI。PageRoot 尚未创建本轮 Request；请先安装，或改用复制任务。";
     case "QODER_COMMAND_UNTRUSTED":
       return "找到的 Qoder CLI 不符合独立安装校验。PageRoot 尚未创建本轮 Request，也没有启动该命令。";
+    case "QODER_VERSION_UNSUPPORTED":
+      return "当前 Qoder CLI 版本不受支持。PageRoot 尚未创建本轮 Request；请更新后再试。";
     case "QODER_COMMAND_CHANGED":
       return "Qoder CLI 在预检期间发生变化。PageRoot 尚未创建本轮 Request，也没有启动变化后的命令。";
     case "QODER_VERSION_INVALID":
@@ -318,17 +323,96 @@ function classifyRunFailure(cause) {
   return cleanText(cause?.code, 120) || "QODER_ACP_RUN_FAILED";
 }
 
-function commandCandidates(environment, homeDirectory) {
-  const values = [
-    path.join(homeDirectory, ".npm-global", "bin", "qodercli"),
-    path.join(homeDirectory, ".local", "bin", "qodercli"),
-    "/opt/homebrew/bin/qodercli",
-    "/usr/local/bin/qodercli",
-  ];
+function expandedHomePath(value, homeDirectory) {
+  const text = String(value || "").trim().replace(/^['"]|['"]$/gu, "");
+  if (!text) return null;
+  const expanded = text
+    .replace(/^~(?=\/|$)/u, homeDirectory)
+    .replaceAll("${HOME}", homeDirectory)
+    .replaceAll("$HOME", homeDirectory);
+  return path.isAbsolute(expanded) ? path.normalize(expanded) : null;
+}
+
+async function configuredNpmPrefixes(environment, homeDirectory) {
+  const prefixes = [];
+  const configured = expandedHomePath(environment.NPM_CONFIG_PREFIX, homeDirectory);
+  if (configured) prefixes.push(configured);
+  const npmrc = await readFile(path.join(homeDirectory, ".npmrc"), "utf8").catch(() => "");
+  for (const line of npmrc.split(/\r?\n/u)) {
+    const match = line.match(/^\s*prefix\s*=\s*(.+?)\s*$/u);
+    if (!match || match[1].trim().startsWith("#")) continue;
+    const prefix = expandedHomePath(match[1], homeDirectory);
+    if (prefix) prefixes.push(prefix);
+  }
+  return prefixes;
+}
+
+function versionDirectoryOrder(left, right) {
+  const leftVersion = semver.coerce(left);
+  const rightVersion = semver.coerce(right);
+  if (leftVersion && rightVersion) return semver.rcompare(leftVersion, rightVersion);
+  if (leftVersion) return -1;
+  if (rightVersion) return 1;
+  return right.localeCompare(left, "en");
+}
+
+async function versionedBinCandidates(root, suffix = ["bin", "qodercli"]) {
+  if (!root || !path.isAbsolute(root)) return [];
+  const entries = await readdir(root, { withFileTypes: true }).catch(() => []);
+  return entries
+    .filter((entry) => entry.isDirectory() && !entry.isSymbolicLink())
+    .map((entry) => entry.name)
+    .sort(versionDirectoryOrder)
+    .map((name) => path.join(root, name, ...suffix));
+}
+
+async function commandCandidates(environment, homeDirectory) {
+  const xdgDataHome = expandedHomePath(environment.XDG_DATA_HOME, homeDirectory)
+    || path.join(homeDirectory, ".local", "share");
+  const voltaHome = expandedHomePath(environment.VOLTA_HOME, homeDirectory)
+    || path.join(homeDirectory, ".volta");
+  const fnmRoots = [
+    expandedHomePath(environment.FNM_DIR, homeDirectory),
+    path.join(xdgDataHome, "fnm"),
+    path.join(homeDirectory, ".fnm"),
+  ].filter(Boolean);
+  const miseDataHome = expandedHomePath(environment.MISE_DATA_DIR, homeDirectory)
+    || path.join(xdgDataHome, "mise");
+  const asdfDataHome = expandedHomePath(environment.ASDF_DATA_DIR, homeDirectory)
+    || path.join(homeDirectory, ".asdf");
+  const values = [];
   for (const directory of String(environment.PATH || "").split(path.delimiter)) {
     if (!directory || !path.isAbsolute(directory)) continue;
     values.push(path.join(directory, "qodercli"));
   }
+  for (const prefix of await configuredNpmPrefixes(environment, homeDirectory)) {
+    values.push(path.join(prefix, "bin", "qodercli"));
+  }
+  values.push(
+    path.join(homeDirectory, ".npm-global", "bin", "qodercli"),
+    path.join(homeDirectory, ".local", "bin", "qodercli"),
+    path.join(voltaHome, "bin", "qodercli"),
+    "/opt/homebrew/bin/qodercli",
+    "/usr/local/bin/qodercli",
+  );
+  values.push(...await versionedBinCandidates(
+    path.join(homeDirectory, ".nvm", "versions", "node"),
+  ));
+  for (const root of fnmRoots) {
+    values.push(...await versionedBinCandidates(
+      path.join(root, "node-versions"),
+      ["installation", "bin", "qodercli"],
+    ));
+  }
+  values.push(...await versionedBinCandidates(
+    path.join(miseDataHome, "installs", "node"),
+  ));
+  values.push(...await versionedBinCandidates(
+    path.join(homeDirectory, ".mise", "installs", "node"),
+  ));
+  values.push(...await versionedBinCandidates(
+    path.join(asdfDataHome, "installs", "nodejs"),
+  ));
   return [...new Set(values)];
 }
 
@@ -375,23 +459,28 @@ async function validateNpmQoderCommand(candidate) {
     );
   }
   if (path.basename(executable) !== "qodercli.js" || path.basename(path.dirname(executable)) !== "bundle") {
-    return null;
+    fail("QODER_COMMAND_UNTRUSTED", "Qoder CLI executable does not match the supported package layout.");
   }
   const packageRoot = path.dirname(path.dirname(executable));
   let manifest;
   try {
     manifest = JSON.parse(await readFile(path.join(packageRoot, "package.json"), "utf8"));
   } catch {
-    return null;
+    fail("QODER_COMMAND_UNTRUSTED", "Qoder CLI package manifest could not be verified.");
   }
   if (
     manifest?.name !== "@qoder-ai/qodercli"
     || manifest?.bin?.qodercli !== "bundle/qodercli.js"
     || !semver.valid(manifest?.version)
-    || semver.lt(manifest.version, MIN_QODER_VERSION)
   ) {
     fail(
       "QODER_COMMAND_UNTRUSTED",
+      "Qoder CLI package identity could not be verified.",
+    );
+  }
+  if (semver.lt(manifest.version, MIN_QODER_VERSION)) {
+    fail(
+      "QODER_VERSION_UNSUPPORTED",
       `独立 Qoder CLI 必须是 @qoder-ai/qodercli ${MIN_QODER_VERSION} 或更高版本。`,
     );
   }
@@ -440,10 +529,20 @@ export async function resolveQoderAcpCommand({
     });
   }
 
-  for (const candidate of commandCandidates(environment, homeDirectory)) {
-    const resolved = await validateNpmQoderCommand(candidate);
-    if (resolved) return resolved;
+  let discoveredError = null;
+  for (const candidate of await commandCandidates(environment, homeDirectory)) {
+    try {
+      const resolved = await validateNpmQoderCommand(candidate);
+      if (resolved) return resolved;
+    } catch (cause) {
+      if (cause instanceof AgentBridgeError) {
+        discoveredError ||= cause;
+        continue;
+      }
+      throw cause;
+    }
   }
+  if (discoveredError) throw discoveredError;
   fail(
     "QODER_COMMAND_NOT_FOUND",
     "没有找到独立安装的 Qoder CLI。",
@@ -676,6 +775,45 @@ export class AgentBridgeService {
         && entry.updatedAtMs + this.#terminalSessionTtlMs > now
       ) break;
       this.#sessions.delete(key);
+    }
+  }
+
+  async availability() {
+    if (this.#disposed) {
+      return Object.freeze({
+        ok: true,
+        status: "unavailable",
+        reason: "check-failed",
+        driver: DRIVER,
+      });
+    }
+    try {
+      await this.#commandResolver({ environment: this.#environment });
+      return Object.freeze({
+        ok: true,
+        status: "ready",
+        driver: DRIVER,
+      });
+    } catch (cause) {
+      const code = cleanText(cause?.code, 120) || "QODER_AVAILABILITY_FAILED";
+      if (code === "QODER_COMMAND_NOT_FOUND") {
+        return Object.freeze({
+          ok: true,
+          status: "not-installed",
+          driver: DRIVER,
+        });
+      }
+      return Object.freeze({
+        ok: true,
+        status: "unavailable",
+        reason: [
+          "QODER_COMMAND_UNTRUSTED",
+          "QODER_VERSION_UNSUPPORTED",
+        ].includes(code)
+          ? "invalid-installation"
+          : "check-failed",
+        driver: DRIVER,
+      });
     }
   }
 

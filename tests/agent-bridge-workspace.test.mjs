@@ -57,6 +57,11 @@ async function createManagedRequest(t, { hang = false } = {}) {
     projectStorageVersion: "4.0.0",
   });
   assert.equal(ensured.response.status, 200, JSON.stringify(ensured.body));
+  const availability = await bridge.requestJson("/agent/availability");
+  assert.equal(availability.response.status, 200, JSON.stringify(availability.body));
+  assert.equal(availability.body.status, "ready");
+  assert.equal("command" in availability.body, false);
+  assert.equal("version" in availability.body, false);
   const preflight = await bridge.postJson("/agent/preflight", {
     driver: "qoder-acp",
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,

@@ -1381,6 +1381,10 @@ async function preflightAgent(body) {
   return agentBridgeService.preflight(body);
 }
 
+async function agentAvailability() {
+  return agentBridgeService.availability();
+}
+
 async function startAgent(body) {
   const target = await projectFileTargetForBody(body);
   if (!target) throw projectNotFoundError();
@@ -2257,6 +2261,10 @@ async function route(request, response) {
   if (request.method === "POST" && url.pathname === "/attachment/delete") {
     const body = await readBody(request);
     sendJson(response, 200, await deleteDraftAttachment(body));
+    return;
+  }
+  if (request.method === "GET" && url.pathname === "/agent/availability") {
+    sendJson(response, 200, await agentAvailability());
     return;
   }
   if (request.method === "POST" && url.pathname === "/agent/preflight") {

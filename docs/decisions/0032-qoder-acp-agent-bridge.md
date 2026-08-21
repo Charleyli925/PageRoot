@@ -19,21 +19,33 @@ authority over Request, Candidate, Version or current HTML state.
 Add a Bridge-owned `AgentBridgeService` with one first product driver,
 `qoder-acp`, while retaining clipboard as a per-task fallback.
 
-- The user chooses “用 Qoder CLI 自动执行” or “只复制任务” before each
-  submission. Choosing Qoder records explicit `trusted-local-agent-v1`
-  consent; no global implicit trust is inferred.
-- `RunWorkflow` performs a Qoder CLI readiness probe before
-  registration/freeze/Request creation. A local discovery, version, identity or
+- The user chooses “Qoder CLI” or “复制任务” in one delivery dialog before
+  each submission. Choosing Qoder records explicit `trusted-local-agent-v1`
+  consent; no global implicit trust is inferred. Expected installation,
+  authentication and availability failures expand in place, while the copy
+  path remains available and About is never a required detour.
+- `RunWorkflow` publishes one shared five-state Qoder availability projection
+  to delivery and About. Opening either surface runs a disk-only package and
+  executable discovery that does not execute Qoder, connect to its service,
+  create a Request or lock the Canvas. The result is never persisted across app
+  processes; explicit recheck always reads the disk again.
+- Selecting Qoder or “检查并继续” performs the full use-time preflight before
+  registration/freeze/Request creation. A version, identity, authentication or
   static model-list failure creates no Request and leaves the current HTML
-  editable. The probe does not promise that later ACP authentication, account
-  capacity or network service will remain available. Every probe also performs
-  bounded whole-process-group cleanup; an unconfirmed descendant establishes a
-  non-prunable Bridge shutdown fence instead of becoming a retryable failure.
+  editable. A successful short-lived ticket is reused by the immediately
+  following submit, avoiding two consecutive probes. Every process-running
+  preflight also performs bounded whole-process-group cleanup; an unconfirmed
+  descendant establishes a non-prunable Bridge shutdown fence instead of
+  becoming a retryable failure.
 - Product discovery accepts only a protected standalone
   `@qoder-ai/qodercli` package at version 1.1.27 or newer. It rejects the CLI
   embedded in Qoder.app, validates the local package manifest/structure and
   protected executable identity, and rechecks that identity when consuming a
   short-lived one-use ticket and immediately before spawn.
+  Discovery also covers Finder/Dock's sparse `PATH`, configured npm prefixes
+  and common nvm, Volta, fnm, mise and asdf roots; finding a candidate never
+  relaxes package verification. An unsupported or invalid candidate is reported
+  as unusable, not absent.
   For the npm JavaScript bundle, PageRoot's trusted Node/Electron runtime reads
   the already-opened and hashed executable inode through an inherited file
   descriptor; it never reopens the mutable bundle pathname to obtain code.
@@ -76,9 +88,11 @@ Add a Bridge-owned `AgentBridgeService` with one first product driver,
 This is a trusted-local-Agent integration, not an OS sandbox. The Qoder process
 runs as the signed-in local user and can theoretically bypass ACP to access
 other user files. ACP allowlists constrain cooperative protocol requests; they
-do not isolate a hostile local process. The selection dialog states this before
-automatic execution, and product/security documentation must preserve that
-wording.
+do not isolate a hostile local process. The selection dialog keeps the concise
+task disclosure; the packaged user statement preserves the complete local-user
+permission and non-sandbox disclosure before product use. Product/security
+documentation must preserve that boundary without filling the delivery flow
+with protocol terminology.
 
 This first phase of productization validates a locally installed npm package's
 manifest/structure, protected filesystem identity, version and ACP behavior. It
@@ -89,7 +103,10 @@ attestation is a separate decision.
 ## Ownership and packaging
 
 `RunSession` remains the only renderer owner of active/background run and Agent
-delivery projection. `RunWorkflow` owns preflight/start/retry/cancel ordering.
+delivery projection. `RunWorkflow` owns the shared availability presentation,
+guidance-copy fact, preflight-ticket reuse and preflight/start/retry/cancel
+ordering. Both user surfaces reuse `QoderAvailabilityCard` and the same domain
+presentation model rather than inferring readiness independently.
 `AgentBridgeService` owns ephemeral command tickets and child sessions plus the
 project-local crash lease; the lease is only a duplicate/orphan fence, not task
 or Candidate authority.
@@ -105,12 +122,15 @@ The synthetic spike entry point and fake Agents remain development-only.
 - Restricted-host Node tests own path/manifest/Hash/session/terminal policy,
   authority drift, cancellation races, bounded events and process cleanup.
 - Agent-service tests own explicit consent, discovery/preflight tickets,
-  identity recheck, task-keyed idempotency, sanitized status, restart projection
-  and unsafe retry refusal.
+  npm/nvm/Volta/fnm/mise discovery, same-process installation refresh, invalid
+  installation classification, identity recheck, task-keyed idempotency,
+  sanitized status, restart projection and unsafe retry refusal.
 - Real Bridge integration starts a fake ACP subprocess and proves Candidate-only
   completion, stop-before-durable-cancel and crash-fenced same-Request refusal.
 - Electron closed-loop coverage proves automatic mode avoids the clipboard,
-  reaches the existing Review UI and never automatically changes Working Copy.
+  reaches the existing Review UI and never automatically changes Working Copy;
+  authentication failure remains in the original dialog, creates no Request,
+  keeps copy available and agrees with About.
 - Package, artifact and dependency owners recursively reject special-file
   escapes and run a packaged Helper → packaged Bridge → fake ACP → packaged
   finalizer → pending-review Candidate closed loop.

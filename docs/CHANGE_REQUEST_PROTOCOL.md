@@ -175,10 +175,14 @@ Prompt 指定的精确路径，不能自行计算、递增或改名：
 这段时间仍可编辑；后续冻结必须捕获届时最新的当前权威内容。若项目身份已经切换，整次意图
 按 stale 丢弃。
 
-`qoder-acp` 必须在冻结和 Request 发布之前完成 Bridge 的 CLI readiness probe；它验证受信
-独立 CLI 的本地来源、版本、文件身份和静态模型列表并返回短时不透明 ticket，但不保证随后
-ACP 会话的登录态、账号容量或网络服务仍可用。probe 不得创建 Request、写 output 或锁定
-Canvas，失败时退出 `preparing` 并保持可编辑。
+打开发送弹窗或 About 时可以先执行只读本地检查：它只重新枚举磁盘上受支持的独立
+CLI 并验证包/文件身份，不运行 Qoder、不连接服务、不创建 Request、不写 output、不锁定
+Canvas。该结果是进程内展示事实，不得把旧的“未安装”跨进程持久化。
+
+`qoder-acp` 必须在冻结和 Request 发布之前完成 Bridge 的使用前检查；它重新绑定受信
+独立 CLI 的本地来源、版本、文件身份、登录态与静态模型列表，并返回短时不透明
+ticket。检查成功后的立即提交必须复用该 ticket，不得连续运行两次检查。使用前检查不得
+创建 Request、写 output 或锁定 Canvas，失败时退出 `preparing` 并保持可编辑。
 
 probe 通过后，或用户选择 `clipboard` 后，工作台完成必要项目登记、重新读取当前评论，并在
 没有 `await` 插入 source-authority fence 的情况下同步执行 `freezeNow()`。只有这次冻结成功，

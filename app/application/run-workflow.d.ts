@@ -5,6 +5,10 @@ import type { ProjectSession } from "./project-session.js";
 import type { RunSession } from "./run-session.js";
 import type { VersionSession } from "./version-session.js";
 import type { ActiveRun } from "../domain/run-lifecycle.js";
+import type {
+  QoderAvailabilitySnapshot,
+  QoderGuidanceKind,
+} from "../domain/qoder-availability.js";
 
 export type RunWorkflowOutcome<T = unknown> =
   | Readonly<{ status: "succeeded"; value: T }>
@@ -34,6 +38,7 @@ export type RunWorkflowCodecs = Readonly<{
 export type RunWorkflowSnapshot = Readonly<{
   polling: boolean;
   pendingReconciliations: ReadonlyArray<string>;
+  qoderAvailability: QoderAvailabilitySnapshot;
 }>;
 
 export type RunWorkflowEvent = Readonly<{
@@ -49,6 +54,7 @@ export type RunWorkflowConstruction = Readonly<{
     | "createRequest"
     | "workspace"
     | "status"
+    | "qoderAvailability"
     | "preflightAgent"
     | "startAgent"
     | "cancelActiveRun"
@@ -76,7 +82,11 @@ export type RunWorkflowConstruction = Readonly<{
       normalizeComments?(): unknown[];
     }>;
     handoff: Readonly<{
-      copy(input: { message: string; run: ActiveRun }): Promise<{
+      copy(input: {
+        message: string;
+        run: ActiveRun | null;
+        purpose?: string;
+      }): Promise<{
         status: "copied" | string;
         copied: boolean;
       }>;
@@ -100,6 +110,15 @@ export class RunWorkflow {
   startPolling(): void;
   stopPolling(): void;
   pollNow(input?: { generation?: number }): Promise<RunWorkflowOutcome>;
+  refreshQoderAvailability(): Promise<RunWorkflowOutcome<{
+    availability: QoderAvailabilitySnapshot;
+  }>>;
+  checkQoderUsability(): Promise<RunWorkflowOutcome<{
+    availability: QoderAvailabilitySnapshot;
+  }>>;
+  copyQoderGuidance(input: {
+    kind: QoderGuidanceKind;
+  }): Promise<RunWorkflowOutcome<{ kind: QoderGuidanceKind; copied: true }>>;
   submit(input?: {
     projectName?: string;
     previousVersionId?: string | null;
