@@ -13,6 +13,11 @@ import type {
 import type { DocumentWorkflowCodecs } from "./document-workflow-codecs.js";
 import type { CommentSession, CommentSessionSnapshot } from "./comment-session.js";
 import type {
+  ConversationContext,
+  ConversationSession,
+  ConversationSessionSnapshot,
+} from "./conversation-session.js";
+import type {
   DocumentSession,
   DocumentSessionSnapshot,
   PersistedBoundaryResult,
@@ -107,6 +112,7 @@ export type WorkspaceControllerSnapshot = Readonly<{
   project: ProjectWorkflowSnapshot | null;
   run: RunWorkflowSnapshot | null;
   version: VersionWorkflowSnapshot | null;
+  conversation: ConversationSessionSnapshot | null;
 }>;
 
 export type WorkspaceEvent =
@@ -236,6 +242,7 @@ export type WorkspaceControllerConstruction = Readonly<{
   draftSession: DraftSession;
   versionSession: VersionSession;
   sourceHistorySession: SourceHistorySession;
+  conversationSession?: ConversationSession | null;
   codecs: WorkspaceControllerCodecs;
   ports: Readonly<{
     hash: HashPort;
@@ -370,6 +377,13 @@ export function createRuntimeWorkspaceController(
 export class WorkspaceController {
   constructor(options: WorkspaceControllerConstruction);
   getSnapshot(): WorkspaceControllerSnapshot;
+  openConversation(
+    context: ConversationContext | null,
+  ): Promise<unknown>;
+  closeConversation(): void;
+  updateConversationDraftText(text: string): void;
+  updateConversationDraftIntent(intent: string): void;
+  flushConversationDraft(): Promise<void>;
   subscribe(
     listener: (snapshot: WorkspaceControllerSnapshot) => void,
   ): () => void;
