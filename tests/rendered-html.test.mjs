@@ -101,3 +101,45 @@ test("top toolbar keeps the approved restrained visual contract", async () => {
   assert.match(sendButton, /margin-left:\s*10px/u);
   assert.match(sendButton, /box-shadow:\s*0 2px 5px rgb\(65 57 166 \/ 14%\)/u);
 });
+
+test("a hover tooltip stays pointer-scoped and yields to the surface it opened", async () => {
+  const css = await readFile(
+    new URL("../app/globals.css", import.meta.url),
+    "utf8",
+  );
+
+  // Chromium leaves a clicked button focused. Revealing the bubble on any focus
+  // state (:focus, or :focus-within which also matches the element itself)
+  // pins it on screen long after the pointer left.
+  assert.match(
+    css,
+    /\[data-tooltip\]:hover::after,\n\[data-tooltip\]:focus-visible::after \{/u,
+  );
+  assert.doesNotMatch(css, /\[data-tooltip\][^\n{,]*:focus-within::after/u);
+  assert.doesNotMatch(css, /\[data-tooltip\][^\n{,]*:focus::after/u);
+
+  const openedTrigger = lastCssRule(css, '[data-tooltip][aria-expanded="true"]::after');
+  assert.match(openedTrigger, /opacity:\s*0/u);
+  assert.match(openedTrigger, /visibility:\s*hidden/u);
+  // The reveal rules carry the same specificity, so only source order keeps the
+  // suppression in force while the trigger's own surface is open.
+  assert.ok(
+    css.lastIndexOf('[data-tooltip][aria-expanded="true"]::after')
+      > css.lastIndexOf("[data-tooltip]:focus-visible::after"),
+    "the opened-trigger suppression must follow every tooltip reveal rule",
+  );
+});
+
+test("the anchored open-HTML popover keeps click-outside dismissal reachable", async () => {
+  const css = await readFile(
+    new URL("../app/workbench/open-html-dialog.module.css", import.meta.url),
+    "utf8",
+  );
+
+  const backdrop = lastCssRule(css, ".backdrop");
+  assert.match(backdrop, /inset:\s*0/u);
+  // The dismiss area covers the draggable title bar the popover hangs from.
+  // Without no-drag macOS keeps handling those clicks as a window drag and the
+  // click-outside dismissal never reaches the DOM.
+  assert.match(backdrop, /-webkit-app-region:\s*no-drag/u);
+});

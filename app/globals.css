@@ -7780,9 +7780,11 @@ body {
     visibility 0s linear 120ms;
 }
 
+/* Hover and keyboard focus only. Chromium leaves a clicked button focused, so
+   a plain :focus (or :focus-within, which also matches the element itself)
+   would pin the bubble on screen long after the pointer left. */
 [data-tooltip]:hover::after,
-[data-tooltip]:focus-visible::after,
-[data-tooltip]:focus-within::after {
+[data-tooltip]:focus-visible::after {
   opacity: 1;
   visibility: visible;
   transform: translate(-50%, 0);
@@ -7808,6 +7810,15 @@ body {
   line-height: 1.35;
   white-space: pre-line;
   word-break: break-word;
+}
+
+/* A trigger that already opened its own surface drops the tooltip: that surface
+   is the explanation, and a pointer resting on the trigger would otherwise pin
+   the bubble over it. Must stay after the reveal rules to win on source order. */
+[data-tooltip][aria-expanded="true"]::after {
+  opacity: 0;
+  visibility: hidden;
+  transition-delay: 0s;
 }
 
 .window-file-rename-field {
