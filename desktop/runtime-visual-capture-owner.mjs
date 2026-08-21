@@ -13,6 +13,12 @@ const RUNTIME_SNAPSHOT_CAPTURE_PARTITION_PREFIX = "pageroot-runtime-snapshot-";
 const MAX_PATH_DEPTH = 256;
 const MAX_IDENTITY_VALUE_LENGTH = 2_048;
 const OWNER_CLEANUP_GRACE_MS = 250;
+// A candidate is accepted only when two consecutive frames of the same host
+// agree, so a chart library that finishes drawing near the settle instant
+// cannot hand the two sides of one pair differently finished rasters. Bounded
+// attempts keep this subordinate to the owner deadline.
+const CAPTURE_STABILITY_ATTEMPTS = 4;
+const CAPTURE_STABILITY_INTERVAL_MS = 220;
 const RUNTIME_VISUAL_PAGE_BUDGET = RUNTIME_VISUAL_CONTRACT.pageBudget;
 const CAPTURE_REQUEST_KEYS = new Set([
   "contractVersion",
@@ -1204,41 +1210,58 @@ export function createRuntimeSnapshotCaptureController({
             ...request,
             candidates: Object.freeze([candidate]),
           });
-          const ownerRects = normalizedOwnerRects(await withOwnerDeadline(ownerExecutor(
-            captureWindow.webContents,
-            isolatedSnapshotRectScript(candidate),
-          )), ownerRequest);
-          const ownerSnapshot = ownerRects?.snapshots[0];
-          if (!ownerSnapshot || ownerSnapshot.state !== "captured" || !ownerSnapshot.rect) {
-            snapshots.push(unavailableSnapshot(candidate.key));
-            continue;
+          // One frame taken a fixed time after first paint is not evidence: a
+          // chart library that finishes drawing on either side of that instant
+          // yields two rasters of the same unchanged chart. Accept a candidate
+          // only once two consecutive frames of the same host agree, and fail
+          // closed to the static result when it never settles.
+          let accepted = false;
+          let previous = null;
+          for (let attempt = 0; attempt < CAPTURE_STABILITY_ATTEMPTS; attempt += 1) {
+            if (attempt > 0) {
+              await withOwnerDeadline(waitForCaptureSettle(CAPTURE_STABILITY_INTERVAL_MS));
+            }
+            const ownerRects = normalizedOwnerRects(await withOwnerDeadline(ownerExecutor(
+              captureWindow.webContents,
+              isolatedSnapshotRectScript(candidate),
+            )), ownerRequest);
+            const ownerSnapshot = ownerRects?.snapshots[0];
+            if (
+              !ownerSnapshot
+              || ownerSnapshot.state !== "captured"
+              || !ownerSnapshot.rect
+              || ownerSnapshot.rect.width * ownerSnapshot.rect.height > remainingPixels
+            ) break;
+            const image = await withOwnerDeadline(captureWindow.capturePage(ownerSnapshot.rect, {
+              stayHidden: true,
+            }));
+            const png = validatedPng(image);
+            if (
+              !png
+              || png.width * png.height > remainingPixels
+              || png.byteLength > remainingBytes
+            ) break;
+            const settled = previous
+              && previous.png.pngSha256 === png.pngSha256
+              && previous.rect.width === ownerSnapshot.rect.width
+              && previous.rect.height === ownerSnapshot.rect.height;
+            if (settled) {
+              capturedPixels += png.width * png.height;
+              capturedBytes += png.byteLength;
+              snapshots.push(Object.freeze({
+                key: candidate.key,
+                state: "captured",
+                ...png,
+                layoutWidth: ownerSnapshot.rect.width,
+                layoutHeight: ownerSnapshot.rect.height,
+                renderedTextSha256: renderedTextSha256(ownerSnapshot.renderedText),
+              }));
+              accepted = true;
+              break;
+            }
+            previous = { png, rect: ownerSnapshot.rect };
           }
-          if (ownerSnapshot.rect.width * ownerSnapshot.rect.height > remainingPixels) {
-            snapshots.push(unavailableSnapshot(candidate.key));
-            continue;
-          }
-          const image = await withOwnerDeadline(captureWindow.capturePage(ownerSnapshot.rect, {
-            stayHidden: true,
-          }));
-          const png = validatedPng(image);
-          if (
-            !png
-            || png.width * png.height > remainingPixels
-            || png.byteLength > remainingBytes
-          ) {
-            snapshots.push(unavailableSnapshot(candidate.key));
-            continue;
-          }
-          capturedPixels += png.width * png.height;
-          capturedBytes += png.byteLength;
-          snapshots.push(Object.freeze({
-            key: candidate.key,
-            state: "captured",
-            ...png,
-            layoutWidth: ownerSnapshot.rect.width,
-            layoutHeight: ownerSnapshot.rect.height,
-            renderedTextSha256: renderedTextSha256(ownerSnapshot.renderedText),
-          }));
+          if (!accepted) snapshots.push(unavailableSnapshot(candidate.key));
         } catch (error) {
           if (error instanceof CaptureTimedOutError || error instanceof CaptureCancelledError) {
             throw error;
