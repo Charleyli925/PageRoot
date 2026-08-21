@@ -34,6 +34,7 @@ import type {
   ReviewProjectionFact,
 } from "../lib/review-projection-facts.js";
 import { alignReviewSemanticUnits } from "../lib/review-semantic-alignment.js";
+import { reviewSectionChangeOperation } from "../lib/review-section-operation.js";
 import type {
   ReviewSemanticAlignmentMatch,
 } from "../lib/review-semantic-alignment.js";
@@ -1548,6 +1549,31 @@ function annotateRuntimeVisualCandidates({
   return { candidates, captureCandidates, bindings };
 }
 
+/**
+ * Collects the section's insertion/removal evidence for
+ * `reviewSectionChangeOperation`. Only marker elements are visited, so this
+ * stays far cheaper than the full-subtree walk the marker pass performs later.
+ */
+function sectionChangeMarks(pair: SectionPair) {
+  const marks: { textOperation: string; structureTone: string }[] = [];
+  const collect = (element: Element) => {
+    marks.push({
+      textOperation: element.hasAttribute("data-pageroot-review-text")
+        ? element.getAttribute("data-pageroot-review-text-operation") || ""
+        : "",
+      structureTone: element.getAttribute("data-pageroot-review-structure") || "",
+    });
+  };
+  [pair.before, pair.after].forEach((root) => {
+    if (!root) return;
+    collect(root);
+    root
+      .querySelectorAll("[data-pageroot-review-text],[data-pageroot-review-structure]")
+      .forEach(collect);
+  });
+  return marks;
+}
+
 function helperText(
   types: ReviewChangeType[],
   beforePresent: boolean,
@@ -1556,6 +1582,11 @@ function helperText(
 ): string {
   if (!beforePresent) return "新增内容";
   if (!afterPresent) return "删除内容";
+  // A section that exists on both sides can still be a pure insertion or
+  // removal inside itself; presence alone cannot express that.
+  const operation = pair ? reviewSectionChangeOperation(sectionChangeMarks(pair)) : null;
+  if (operation === "insert") return "新增内容";
+  if (operation === "delete") return "删除内容";
   if (pair?.moved && types.length === 1 && types[0] === "structure") return "位置调整";
   const labels = types.map((type) => (
     type === "text" ? "文本" : type === "structure" ? "结构" : "视觉"
