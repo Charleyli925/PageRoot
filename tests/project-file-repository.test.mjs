@@ -3819,3 +3819,34 @@ test("classifyOpenPath is read-only for managed, known and new HTML", async (t) 
   assert.deepEqual(await readFile(registryPath(value)), registryBefore);
 });
 
+// Forward compatibility. A Registry that carries every required member plus a
+// member a newer PageRoot added is fully explainable, so it is read normally
+// and that member survives the next Registry write. Refusing it instead would
+// lock every project out of an older build, and dropping it would destroy the
+// newer build's data just as silently as replacing the whole file.
+test("a newer Registry member survives an older build's read and write", async (t) => {
+  const value = await fixture(t);
+  const first = await importSource(value, "第一个.html");
+  const seeded = JSON.parse(await readFile(registryPath(value), "utf8"));
+  seeded.futureRegistrySection = { schemaChannel: "next" };
+  seeded.projects[first.target.projectId].ownerAccountId = "account_future";
+  await writeFile(
+    registryPath(value),
+    `${JSON.stringify(seeded, null, 2)}\n`,
+    "utf8",
+  );
+
+  await assert.doesNotReject(() => value.repository.listRegisteredProjects());
+
+  // A second import forces a full Registry read, mutation and atomic write.
+  const second = await importSource(value, "第二个.html");
+
+  const after = JSON.parse(await readFile(registryPath(value), "utf8"));
+  assert.deepEqual(after.futureRegistrySection, { schemaChannel: "next" });
+  assert.equal(
+    after.projects[first.target.projectId].ownerAccountId,
+    "account_future",
+  );
+  assert.ok(after.projects[second.target.projectId]);
+});
+

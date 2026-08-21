@@ -1277,16 +1277,15 @@ function assertRegistryTimestamp(value, label) {
   return value;
 }
 
+// Forward compatibility. A Registry record whose required members are missing
+// or invalid is still an unrecognized shape and still fails closed, because
+// reading a shape we cannot explain and then rewriting it is the destructive
+// case. A record that carries every required member plus a member a newer
+// PageRoot added is fully explainable: it is validated normally and returned
+// unchanged, so read -> modify -> write never deletes the newer member.
 function assertRegistryProjectRecord(projectId, record) {
   if (
     !isObject(record)
-    || Object.keys(record).some((key) => ![
-      "registeredProjectRootPath",
-      "rootFileIdentity",
-      "updatedAt",
-      "importSourceKey",
-      "importSourceSha256",
-    ].includes(key))
     || typeof record.registeredProjectRootPath !== "string"
     || !path.isAbsolute(record.registeredProjectRootPath)
   ) {
@@ -1317,17 +1316,10 @@ function assertRegistryProjectRecord(projectId, record) {
   return record;
 }
 
+// Same forward-compatibility rule as assertRegistryProjectRecord.
 function assertPendingImportRecord(projectId, record) {
   if (
     !isObject(record)
-    || Object.keys(record).some((key) => ![
-      "projectId",
-      "documentId",
-      "registeredProjectRootPath",
-      "createdAt",
-      "importSourceKey",
-      "importSourceSha256",
-    ].includes(key))
     || record.projectId !== projectId
     || typeof record.registeredProjectRootPath !== "string"
     || !path.isAbsolute(record.registeredProjectRootPath)

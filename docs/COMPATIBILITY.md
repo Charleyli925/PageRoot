@@ -13,6 +13,37 @@ truthful calendar deletion date. Each is therefore **not scheduled**: its next
 removal step is a separate conditional PR after the stated evidence is
 collected. A guessed date is not a support-window policy.
 
+## Forward compatibility for mutable records
+
+This is a standing policy, not a decoder entry, and it is never removed.
+
+A mutable record is one the product reads, edits and writes again: the Registry,
+`history/source-operations.json` and the Draft aggregate. For those records every
+required member stays strictly validated and fails closed when missing or
+invalid, while a member added by a newer PageRoot is preserved unchanged across
+the round trip.
+
+- Why: the Registry previously refused any record carrying a key outside a
+  hard-coded allowlist, so one added member locked the user out of every managed
+  project. The source history journal and the Draft top level previously rebuilt
+  each object from a fixed field list, so an added member was silently discarded
+  and the truncated record was written back.
+- This does not weaken `ADR 0028`. A record whose required members are missing is
+  still an unrecognized shape and still fails closed; only a fully explainable
+  record with extra members is now carried through.
+- Proof: `tests/source-history.test.mjs`, `tests/draft-service.test.mjs` and
+  `tests/project-file-repository.test.mjs` each assert the round trip and each
+  fails without the corresponding production change.
+  `tests/source-history.test.mjs` also asserts that an unknown member never
+  rescues an invalid required member.
+- Direction: this protects builds from this change onward only. A build released
+  before it still refuses or discards a newer member. Any release that adds a
+  member to a mutable record must come strictly after the release carrying
+  `docs/decisions/0032-forward-compatible-record-members.md`.
+- Not yet covered: `manifest.json`, `project.json` and `runtime-state.json`
+  preserve unknown members in code but keep strict schemas and have no
+  round-trip test; `working-copy-state.json` has not been audited.
+
 ## Draft operation IDs
 
 - Historical producer and version: an older packaged renderer with no recorded

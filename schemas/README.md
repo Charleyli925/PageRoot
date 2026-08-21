@@ -2,6 +2,31 @@
 
 Only the files listed below are product contracts and package inputs.
 
+## Unknown members in mutable records
+
+A mutable record is one this product reads, edits and writes again. For those
+records every required member stays strictly validated, and a member added by a
+newer PageRoot is preserved unchanged across the round trip. A record whose
+required members are missing or invalid is still an unrecognized shape and still
+fails closed. Dropping a member we do not recognize is silent data loss, and
+refusing the whole file over one added member locks the user out of data this
+build can otherwise read.
+
+This rule is implemented and proven by round-trip tests for
+`project-registry.v4`, `source-history.v1` and the Draft aggregate, which has no
+schema file. Those two schemas therefore drop `additionalProperties: false` and
+carry a `$comment` stating the rule.
+
+`project-manifest.v4`, `project-identity.v4` and `project-runtime-state.v4`
+already preserve unknown members in code, but their schemas still declare
+`additionalProperties: false` and no test pins the round trip, so they are not
+yet claimed by this rule. `working-copy-state.v4` has not been audited. Bringing
+those four records under the rule is a separate change.
+
+Immutable records — anything written once and never rewritten — and the
+compatibility decoders keep their strict `additionalProperties: false` form. See
+[`docs/decisions/0032-forward-compatible-record-members.md`](../docs/decisions/0032-forward-compatible-record-members.md).
+
 ## Strict v3 main records
 
 - `annotation-records.v3.schema.json`

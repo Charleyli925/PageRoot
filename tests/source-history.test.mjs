@@ -6,6 +6,7 @@ import {
   appendSourceHistoryOperations,
   applySourceHistoryAction,
   createEmptySourceHistory,
+  normalizeSourceHistory,
   sourceHistoryCapabilities,
   validateSourceHistoryOperationBytes,
 } from "../shared/source-history.mjs";
@@ -444,5 +445,69 @@ test("history refuses stale or tampered exact patches", () => {
       now,
     }),
     (error) => error.code === "INVALID_SOURCE_HISTORY_ACTION_LEDGER",
+  );
+});
+
+// A newer PageRoot may add members to the journal. An older build must be able
+// to read that journal, keep editing, and write it back without deleting the
+// members it does not understand, because a silent field-level overwrite is
+// exactly as destructive as losing the whole file.
+function journalFromNewerBuild() {
+  const before = "<p>one</p>";
+  const after = "<p>two</p>";
+  const history = appendSourceHistoryOperations(
+    createEmptySourceHistory({
+      projectId,
+      documentId,
+      sourceSha256: sha256(before),
+      now,
+    }),
+    [replacementOperation(before, after)],
+    {
+      projectId,
+      documentId,
+      sourceSha256: sha256(before),
+      targetSourceSha256: sha256(after),
+      now,
+    },
+  );
+  const journal = JSON.parse(JSON.stringify(history));
+  journal.provenance = { actor: "human", device: "device_future" };
+  journal.entries[0].provenance = { seq: 7 };
+  journal.entries[0].forwardPatches[0].anchorId = "anchor_future";
+  journal.entries[0].beforeSelection.futureAffinity = "sticky";
+  return { journal, activeSourceSha256: sha256(after) };
+}
+
+test("unknown journal members survive an older build's read and write", () => {
+  const { journal, activeSourceSha256 } = journalFromNewerBuild();
+  const reread = normalizeSourceHistory(journal, {
+    projectId,
+    documentId,
+    sourceSha256: activeSourceSha256,
+    now,
+  });
+
+  assert.deepEqual(reread.provenance, {
+    actor: "human",
+    device: "device_future",
+  });
+  assert.deepEqual(reread.entries[0].provenance, { seq: 7 });
+  assert.equal(reread.entries[0].forwardPatches[0].anchorId, "anchor_future");
+  assert.equal(reread.entries[0].beforeSelection.futureAffinity, "sticky");
+  assert.deepEqual(reread, journal);
+});
+
+test("an unknown member never rescues an invalid required member", () => {
+  const { journal, activeSourceSha256 } = journalFromNewerBuild();
+  journal.entries[0].forwardPatches[0].startOffset = -1;
+  assert.throws(
+    () => normalizeSourceHistory(journal, {
+      projectId,
+      documentId,
+      sourceSha256: activeSourceSha256,
+      now,
+    }),
+    (error) => error.code === "INVALID_SOURCE_HISTORY_PATCH",
   );
 });
