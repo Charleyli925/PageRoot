@@ -36,7 +36,7 @@ PageRoot 让用户在真实本地 HTML 上完成两类工作：
   卡片不跟页面滚动。点右上角发送进入等待后结束；Esc 和单击画布不关卡片。
   Hover 与单击共用同一命中：点内容选小框，点有内容模块的留白选大框，空模块不选。
   不把「预览可操作」做成第四种指针状态。
-- 提交给 QoderWork 时，只有待编辑文字提交、冻结与持久 Hash 校验全部成功后，当前项目才真实锁定。
+- 交给 AI Agent 时，瞬时准备只去重发送；只有待编辑文字提交、冻结与持久 Hash 校验全部成功后，当前项目才真实锁定。
 - 用户可以在一个项目处理期间继续处理其他项目。
 - 每个 AI Version 都能回答：哪个项目、哪个文件、基于哪版、前一版是什么、何时提交、何时完成、具体是哪份内容。
 - 新 Version 打开时，版本身份、源 HTML、历史快照和画布内容严格一致。
@@ -249,16 +249,17 @@ v3 TargetRef 保存 label、层级、selector/结构锚点、源码位置、源 
 
 ### 5.5 发给 AI
 
-提交入口为顶部主按钮。无评论时显示“写评论后再发送”且不可用；有评论后显示“发给 AI”。复制进行中为“正在复制…”；已复制或本轮处理中为“查看本轮”；失败为“复制失败，再试一次”。按钮仍执行同一冻结并复制 AI 任务 Prompt 的提交链路。
+提交入口为顶部主按钮。无评论时显示“写评论后再发送”且不可用；有评论后显示“发给 AI”。用户随后在同一个“怎样交给 AI？”弹窗选择“Qoder CLI”或“复制任务”。Qoder 的检查中、未安装、需要登录与暂时无法检查都在原卡片展开，不跳 About、不弹第二层；“复制任务”始终可用。复制模式使用“正在复制…”与“复制失败，再试一次”；受管模式使用“正在启动 Qoder…”、“Qoder 正在处理”及对应失败状态；已有本轮统一显示“查看本轮”。两条交付分支共用同一冻结 Request 合同。
 
 用户触发提交后必须按唯一顺序执行：
 
 1. 提交当前原生编辑 checkpoint；composition、映射或 Patch 失败立即停止。
-2. 校验本轮评论并完成必要的首次项目登记。
-3. 同步执行 `freezeNow()`，得到可验证的 HTML、source SHA 与 revision。
-4. 只有冻结成功才设置 `projectLocked=true` 并进入 `submitting`。
-5. 等待自动写回追平 revision，并重读磁盘 Hash；任一步失败都回到 editing，不建立或发布 Request。
-6. 去重快速双击、键盘快捷操作和重复事件。
+2. 校验本轮评论并同步进入瞬时 `preparing`；它只去重快速双击、快捷键和重复事件，不锁 Canvas。
+3. 选择 Qoder 时先执行完整使用前检查；复制模式直接继续。检查期间的后续编辑由最终冻结捕获，失败不建立 Request。
+4. 完成必要的首次项目登记并重新读取当前评论。
+5. 同步执行 `freezeNow()`，得到届时最新、可验证的 HTML、source SHA 与 revision。
+6. 只有冻结成功才设置 `projectLocked=true` 并进入 `submitting`。
+7. 等待自动写回追平 revision，并重读磁盘 Hash；任一步失败都回到 editing，不建立或发布 Request。
 
 锁定不能早于原生编辑 checkpoint/freeze 成功，否则失败会留下“未提交却被锁定”的假状态。
 
@@ -294,9 +295,20 @@ v3 TargetRef 保存 label、层级、selector/结构锚点、源码位置、源 
 
 PR 2B 在 Request 已持久化后，才从冻结 Prompt 建立 `AI任务/<日期>-候选版本N/` 的派生展示：处理中只含 `PROMPT.md`，Candidate 通过 finalizer 后才加入 `*-Vn-待审阅.html`。它由收据驱动、排他/no-replace 写入，可删除、可重建，且从不参与 Candidate、审阅、Promotion 或版本身份判断。P2 不创建 `附件快照说明.md`、`附件与图片/`、`AI_RULES.md` 或 `PROJECT.md` 副本；可见附件体验是 P3。
 
-桌面端只把交接消息写入系统剪贴板；写入后必须逐字 readback 一致才报告“已复制”。产品不自动打开、控制或粘贴到 QoderWork。
+桌面端在每轮发送前让用户选择“Qoder CLI”或“复制任务”。每次打开发送弹窗或 About 时的第一层检查只读取磁盘上的独立 Qoder CLI 包与文件身份，不运行 Qoder、不连网、不创建 Request 或锁定项目。只有用户选择 Qoder 或点击“检查并继续”时，才在 Request 创建前完成版本、登录、当前可用性与静态模型列表的完整检查；检查失败不得锁定项目或创建 Request。检查成功后，
+Bridge 才为带固定 `agentDelivery` 授权的同一 Request 启动受管 ACP 会话。Renderer 不得
+提供命令、cwd、环境、Prompt、Request/output/finalizer 路径，也不得把 ACP stop 或进度
+当作 Candidate 完成。
 
-剪贴板状态必须按项目和本轮 Request/Attempt 隔离。“已复制”只表示剪贴板 readback 一致，不表示 Qoder 已收到。A 项目复制失败时，A 的 Request 保持冻结且可重试；B 项目的发送按钮、复制状态和后续 Request 不得被 A 的失败占用。
+复制模式仍只把交接消息写入系统剪贴板；写入后必须逐字 readback 一致才报告“已复制”，
+且产品不自动打开或粘贴到外部 Agent。交付状态必须按项目和本轮 Request/Attempt 隔离。
+自动模式普通启动失败时，只有当前 Bridge 已确认进程组退出且没有 output/completion 残留，
+才可重试同一 Request 或回退复制。Bridge 崩溃、进程清理无法确认或存在残留时，本轮变为
+不可重试：用户先结束旧 Request 形成持久 fence，再重新发送为新 Request。取消受管会话时，
+必须先关闭 ACP mutation surface 并有界停止 Qoder 进程组，再持久取消 Request；重启后的
+未知旧进程无法由 PageRoot 停止时，durable cancel 本身是 authority fence，界面必须保守
+提示它仍可能运行。无论采用哪种交付方式，结果都只能成为待审阅 Candidate，不得自动替换
+当前 HTML。
 
 `input/base/index.html` 是本轮修改前完整、不可变的 HTML。后续 AI 成功、失败、取消或 no-change 都不得改写它。
 

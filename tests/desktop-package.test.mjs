@@ -51,6 +51,9 @@ const APP_FILE_ALLOWLIST = [
 
 const BRIDGE_FILES = [
   "workspace-bridge.mjs",
+  "workspace-bridge-shutdown.mjs",
+  "agent-bridge-service.mjs",
+  "qoder-acp-client.mjs",
   "finalize-attempt.mjs",
   "lifecycle-core.mjs",
   "project-file-repository.mjs",
@@ -73,6 +76,7 @@ const BRIDGE_FILES = [
 ];
 
 const PACKAGED_MODULES = [
+  "@agentclientprotocol/sdk",
   "parse5",
   "entities",
   "electron-updater",
@@ -91,6 +95,7 @@ const PACKAGED_MODULES = [
   "graceful-fs",
   "jsonfile",
   "universalify",
+  "zod",
 ];
 
 const SHARED_FILES = [
@@ -279,7 +284,8 @@ test("packaged legal notice and icon remain available as reviewed resources", as
     stat(new URL("../desktop/resources/icon.icns", import.meta.url)),
   ]);
   assert.match(notice, /AI Agent 生成或修改的内容可能不准确/u);
-  assert.match(notice, /只会把交接内容复制到本机剪贴板/u);
+  assert.match(notice, /选择“Qoder CLI”或“复制任务”/u);
+  assert.match(notice, /不是操作系统沙箱/u);
   assert.match(notice, /Apache License 2\.0/u);
   assert.ok(iconInfo.size > 100_000);
 });

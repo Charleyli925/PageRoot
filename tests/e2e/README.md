@@ -51,9 +51,10 @@ npm run test:ai-closed-loop
 ```
 
 It creates an isolated temporary HTML and workspace, adds a comment through the
-real canvas UI, freezes and copies the handoff, generates a controlled AI result, runs the
-official finalizer, then proves that PageRoot creates and automatically opens a
-new non-overwriting working HTML. It also injects clipboard-copy failure,
+real canvas UI, freezes one Request, and exercises both verified clipboard delivery and a
+managed fake-Qoder ACP session. The controlled Agent result runs the official finalizer,
+becomes a separate Candidate, enters Review without changing the Working Copy, and only
+after the test's explicit adoption creates and opens a non-overwriting working HTML. It also injects clipboard-copy failure,
 missing finalizer, malformed HTML, out-of-scope output, and generated-version
 activation failure.
 The suite never pauses for a person or an external model. Its oracle is the
@@ -106,9 +107,10 @@ same final commit and content hash recorded by the automated gate report.
   npx playwright test --config tests/e2e/electron/playwright.config.mjs \
     tests/e2e/electron/conflict-force-unlock.spec.mjs
   ```
-- `ai-handoff-closed-loop.spec.mjs`: real comment UI, frozen Request, clipboard
-  handoff, generated-AI/finalizer result, status polling, non-overwriting Version
-  creation, automatic working-HTML activation, and fail-closed recovery paths.
+- `ai-handoff-closed-loop.spec.mjs`: real comment UI, per-task delivery choice,
+  frozen Request, clipboard and managed Qoder ACP handoff, generated-AI/finalizer
+  result, status polling, Candidate-first review, explicit non-overwriting Version
+  adoption, and fail-closed recovery paths.
 - `packaged-runtime-smoke.spec.mjs`: the packaged `.app` executable, isolated
   user data, authored-DOM input and byte-exact export without source-runtime substitution.
 

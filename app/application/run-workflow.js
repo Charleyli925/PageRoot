@@ -1,8 +1,28 @@
 import { isBridgeRequestError } from "./bridge-client.js";
+import {
+  INITIAL_QODER_AVAILABILITY,
+  checkingQoderAvailability,
+  qoderAvailabilityFromFailureCode,
+  qoderAvailabilityFromLocalResult,
+  qoderAvailabilityWithCopiedGuidance,
+  qoderGuidanceInstruction,
+  readyQoderAvailability,
+} from "../domain/qoder-availability.js";
 import { createRunWorkflowCodecs } from "./run-workflow-codecs.js";
 
 const SHA256 = /^sha256:[a-f0-9]{64}$/u;
 const POLL_INTERVAL_MS = 1_600;
+const TRUSTED_LOCAL_AGENT_POLICY_VERSION = "trusted-local-agent-v1";
+const DELIVERY_MODES = new Set(["clipboard", "qoder-acp"]);
+const NON_RETRYABLE_AGENT_ERRORS = new Set([
+  "ACP_PROCESS_CLEANUP_UNCONFIRMED",
+  "AGENT_DELIVERY_NOT_AUTHORIZED",
+  "AGENT_RESTART_RECOVERY_REQUIRED",
+  "AGENT_RETRY_BLOCKED",
+  "AGENT_RETRY_OUTPUT_PRESENT",
+  "AGENT_TASK_NOT_PROCESSING",
+  "AGENT_TASK_POLICY_INVALID",
+]);
 
 function succeeded(value) {
   return Object.freeze({ status: "succeeded", value });
@@ -101,6 +121,43 @@ function isPollable(run) {
   );
 }
 
+function agentHandoffState(run, session) {
+  const state = String(session?.state || "");
+  if (![
+    "starting",
+    "running",
+    "completed",
+    "failed",
+    "interrupted",
+    "cancelling",
+    "cancelled",
+  ].includes(state)) return null;
+  return {
+    sourcePath: run.sourcePath,
+    requestId: run.requestId,
+    attemptId: run.attemptId,
+    mode: "qoder-acp",
+    status: state,
+    phase: String(session.phase || state),
+    agentName: session.agentName ? String(session.agentName) : null,
+    agentVersion: session.agentVersion ? String(session.agentVersion) : null,
+    errorCode: session.errorCode ? String(session.errorCode) : null,
+    errorMessage: session.errorMessage ? String(session.errorMessage) : null,
+    retryable: session.retryable === true,
+  };
+}
+
+function qoderRecoveryRequired(run, handoff) {
+  return Boolean(
+    run?.agentDelivery?.mode === "qoder-acp"
+    && handoff?.mode === "qoder-acp"
+    && handoff.requestId === run.requestId
+    && handoff.attemptId === run.attemptId
+    && ["failed", "interrupted"].includes(handoff.status)
+    && handoff.retryable === false,
+  );
+}
+
 // RunWorkflow is the PR-5 application boundary. It owns Request submission,
 // authority reconciliation, polling, cancellation and conflict commands. It
 // deliberately receives renderer conversion helpers and narrow Canvas/Handoff
@@ -126,6 +183,10 @@ export class RunWorkflow {
   #timer = null;
   #pollGeneration = 0;
   #uncertainSubmissions = new Map();
+  #agentStartsPending = new Set();
+  #qoderAvailability = INITIAL_QODER_AVAILABILITY;
+  #qoderPreflight = null;
+  #qoderCheckPromise = null;
   #disposed = false;
 
   constructor({
@@ -148,6 +209,9 @@ export class RunWorkflow {
       || typeof bridgeClient.createRequest !== "function"
       || typeof bridgeClient.workspace !== "function"
       || typeof bridgeClient.status !== "function"
+      || typeof bridgeClient.qoderAvailability !== "function"
+      || typeof bridgeClient.preflightAgent !== "function"
+      || typeof bridgeClient.startAgent !== "function"
       || typeof bridgeClient.cancelActiveRun !== "function"
       || typeof bridgeClient.resolveConflict !== "function"
     ) {
@@ -232,6 +296,7 @@ export class RunWorkflow {
     return Object.freeze({
       polling: this.#timer !== null,
       pendingReconciliations: frozenArray(this.#uncertainSubmissions.keys()),
+      qoderAvailability: this.#qoderAvailability,
     });
   }
 
@@ -256,6 +321,9 @@ export class RunWorkflow {
     this.#disposed = true;
     this.stopPolling();
     this.#uncertainSubmissions.clear();
+    this.#agentStartsPending.clear();
+    this.#qoderPreflight = null;
+    this.#qoderCheckPromise = null;
     this.#listeners.clear();
     this.#eventListeners.clear();
   }
@@ -287,7 +355,10 @@ export class RunWorkflow {
 
   async pollNow({ generation = this.#pollGeneration } = {}) {
     if (!this.#isPollCurrent(generation)) return stale({ generation });
-    const runs = this.#runSession.runs.filter(isPollable);
+    const runs = this.#runSession.runs.filter((run) => (
+      isPollable(run)
+      && !this.#agentStartsPending.has(this.#codecs.operationKey(run))
+    ));
     const polls = runs.map((run) => this.#pollRun(run, generation));
     const reconciliations = [...this.#uncertainSubmissions.keys()].map(
       (sourcePath) => this.reconcileSubmission({ sourcePath, generation }),
@@ -298,14 +369,96 @@ export class RunWorkflow {
     return succeeded({ runs: runs.length, reconciliations: reconciliations.length });
   }
 
+  async refreshQoderAvailability() {
+    if (this.#disposed) {
+      return blocked("RUN_WORKFLOW_DISPOSED", "Qoder CLI 状态检查已经停止。");
+    }
+    const previous = this.#qoderAvailability;
+    this.#setQoderAvailability(checkingQoderAvailability(previous));
+    try {
+      const result = await this.#bridgeClient.qoderAvailability();
+      if (this.#disposed) return stale({ kind: "qoder-availability" });
+      const availability = qoderAvailabilityFromLocalResult(
+        result,
+        previous,
+        validDate(this.#clock),
+      );
+      this.#setQoderAvailability(availability);
+      if (availability.status !== "ready") this.#qoderPreflight = null;
+      return succeeded({ availability });
+    } catch (cause) {
+      if (this.#disposed) return stale({ kind: "qoder-availability" });
+      const code = errorCode(cause, "QODER_AVAILABILITY_FAILED");
+      const availability = qoderAvailabilityFromFailureCode(
+        code,
+        previous,
+        validDate(this.#clock),
+      );
+      this.#qoderPreflight = null;
+      this.#setQoderAvailability(availability);
+      return rejected(
+        code,
+        this.#codecs.errorMessage(cause, "暂时无法检查 Qoder CLI。"),
+      );
+    }
+  }
+
+  async checkQoderUsability() {
+    if (this.#disposed) {
+      return blocked("RUN_WORKFLOW_DISPOSED", "Qoder CLI 状态检查已经停止。");
+    }
+    try {
+      await this.#requireQoderPreflight({ force: true });
+      this.#qoderPreflight = null;
+      return succeeded({ availability: this.#qoderAvailability });
+    } catch (cause) {
+      return rejected(
+        errorCode(cause, "QODER_PREFLIGHT_FAILED"),
+        this.#codecs.errorMessage(cause, "暂时无法检查 Qoder CLI。"),
+      );
+    }
+  }
+
+  async copyQoderGuidance({ kind } = {}) {
+    if (kind !== "install" && kind !== "login") {
+      return rejected("QODER_GUIDANCE_INVALID", "选择的 Qoder 引导无效。");
+    }
+    try {
+      const message = qoderGuidanceInstruction(kind);
+      const result = await this.#handoffPort.copy({
+        message,
+        run: null,
+        purpose: `qoder-${kind}-guidance`,
+      });
+      if (result?.status !== "copied" || result?.copied !== true) {
+        throw responseError("QODER_GUIDANCE_COPY_UNCONFIRMED", "剪贴板写入没有得到确认。");
+      }
+      this.#setQoderAvailability(qoderAvailabilityWithCopiedGuidance(
+        this.#qoderAvailability,
+        kind,
+        validDate(this.#clock),
+      ));
+      return succeeded({ kind, copied: true });
+    } catch (cause) {
+      return rejected(
+        errorCode(cause, "QODER_GUIDANCE_COPY_FAILED"),
+        this.#codecs.errorMessage(cause, "引导指令暂时无法复制，请重试。"),
+      );
+    }
+  }
+
   async submit({
     projectName = "未命名页面",
     previousVersionId = this.#versionSession.snapshot.latestVersionId,
     basedOnVersionId = this.#versionSession.snapshot.currentBasedOnVersionId,
     deadlineAt = this.#clock.now() + 60_000,
+    deliveryMode = "clipboard",
   } = {}) {
     if (this.#disposed) {
       return blocked("RUN_WORKFLOW_DISPOSED", "本轮任务工作流已经停止。");
+    }
+    if (!DELIVERY_MODES.has(deliveryMode)) {
+      return rejected("RUN_DELIVERY_MODE_INVALID", "选择的 Agent 交接方式无效。");
     }
     const sourcePath = this.#projectSession.sourcePath;
     const context = copyContext(this.#projectSession.context);
@@ -352,7 +505,13 @@ export class RunWorkflow {
     let pendingRun = null;
     let submissionUncertain = false;
     let durableRun = null;
+    let agentPreflight = null;
+    let reservedAgentStartKey = null;
     try {
+      if (deliveryMode === "qoder-acp") {
+        agentPreflight = await this.#requireQoderPreflight();
+        if (!this.#isCurrentContext(context)) return stale(context);
+      }
       const registered = await this.#ensureRegistered({
         sourcePath: context.sourcePath,
         expectedSourceSha256: this.#documentSession.sourceSha256,
@@ -418,6 +577,7 @@ export class RunWorkflow {
         context: submissionContext,
         previousVersionId,
         basedOnVersionId,
+        deliveryMode,
       });
       this.#runSession.forgetOutcome(submissionContext.sourcePath);
       this.#runSession.trackRun(pendingRun, { activate: "always" });
@@ -494,6 +654,12 @@ export class RunWorkflow {
         })),
         comments: persistedComments.map(this.#codecs.persistedComment),
         changeEvents: persistedEvents.map(this.#codecs.persistedChangeEvent),
+        agentDelivery: deliveryMode === "qoder-acp"
+          ? {
+              mode: "qoder-acp",
+              trustPolicyVersion: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
+            }
+          : { mode: "clipboard" },
       };
       const operationId = this.#codecs.operationKey(pendingRun);
       let dispatched = false;
@@ -534,9 +700,11 @@ export class RunWorkflow {
         });
         const reconciled = await this.reconcileSubmission({
           sourcePath: context.sourcePath,
+          reserveRecoveredAgentStart: deliveryMode === "qoder-acp",
         });
         if (reconciled.status === "succeeded") {
           durableRun = reconciled.value.run || null;
+          reservedAgentStartKey = reconciled.value.reservedAgentStartKey || null;
           submissionUncertain = this.#uncertainSubmissions.has(context.sourcePath);
           if (durableRun) {
             // Reconciliation found the durable Request. Continue through the
@@ -554,6 +722,10 @@ export class RunWorkflow {
           );
         }
       }
+      if (deliveryMode === "qoder-acp") {
+        reservedAgentStartKey ||= this.#codecs.operationKey(durableRun);
+        this.#agentStartsPending.add(reservedAgentStartKey);
+      }
       this.#runSession.trackRun(durableRun, {
         activate: this.#isCurrentRun(durableRun) ? "always" : "never",
       });
@@ -563,8 +735,16 @@ export class RunWorkflow {
         context,
         current: this.#isCurrentRun(durableRun),
       });
-      this.syncPolling();
-      if (durableRun.handoffMessage) await this.copyHandoff({ run: durableRun });
+      if (deliveryMode === "qoder-acp") {
+        this.#qoderPreflight = null;
+        await this.startAgent({
+          run: durableRun,
+          preflightId: agentPreflight.preflightId,
+          agentStartReserved: true,
+        });
+      } else if (durableRun.handoffMessage) {
+        await this.copyHandoff({ run: durableRun });
+      }
       return succeeded({ run: durableRun });
     } catch (cause) {
       const message = this.#codecs.errorMessage(
@@ -574,12 +754,13 @@ export class RunWorkflow {
       if (pendingRun && this.#runSession.hasRun(pendingRun)) {
         this.#runSession.removeRun(pendingRun);
       }
-      if (this.#isCurrentContext(context)) {
+      if (pendingRun && this.#isCurrentContext(context)) {
         this.#canvasPort.unlock();
-        const failedRun = pendingRun
-          ? { ...pendingRun, status: "error", error: message }
-          : null;
-        if (failedRun) this.#runSession.setActiveRun(failedRun);
+        this.#runSession.setActiveRun({
+          ...pendingRun,
+          status: "error",
+          error: message,
+        });
       }
       this.#emitEvent({
         type: "run-submission-failed",
@@ -591,12 +772,19 @@ export class RunWorkflow {
       });
       return rejected(errorCode(cause, "RUN_SUBMISSION_REJECTED"), message);
     } finally {
+      if (reservedAgentStartKey) {
+        this.#agentStartsPending.delete(reservedAgentStartKey);
+      }
       if (!submissionUncertain) this.#runSession.releaseSubmission(submission);
       this.syncPolling();
     }
   }
 
-  async reconcileSubmission({ sourcePath = null, generation = this.#pollGeneration } = {}) {
+  async reconcileSubmission({
+    sourcePath = null,
+    generation = this.#pollGeneration,
+    reserveRecoveredAgentStart = false,
+  } = {}) {
     const entries = sourcePath
       ? [[sourcePath, this.#uncertainSubmissions.get(sourcePath)]]
       : [...this.#uncertainSubmissions.entries()];
@@ -633,10 +821,30 @@ export class RunWorkflow {
           );
         }
         if (recoveredRun) {
-          this.#runSession.trackRun(recoveredRun, {
-            activate: this.#isCurrentRun(recoveredRun) ? "always" : "never",
-            recovered: true,
-          });
+          const reservedAgentStartKey = reserveRecoveredAgentStart
+            ? this.#codecs.operationKey(recoveredRun)
+            : null;
+          if (reservedAgentStartKey) {
+            // Reserve before RunSession publication. Subscribers may
+            // synchronously request polling as soon as the durable run is
+            // visible, and /status must never race ahead of /agent/start.
+            this.#agentStartsPending.add(reservedAgentStartKey);
+          }
+          try {
+            this.#runSession.trackRun(recoveredRun, {
+              activate: this.#isCurrentRun(recoveredRun) ? "always" : "never",
+              // A Request recovered from this still-active POST submission has
+              // not survived a Bridge/app restart; it still owns the one
+              // authorized Agent start below. Background reconciliation keeps
+              // the ordinary interrupted-session projection.
+              recovered: !reserveRecoveredAgentStart,
+            });
+          } catch (cause) {
+            if (reservedAgentStartKey) {
+              this.#agentStartsPending.delete(reservedAgentStartKey);
+            }
+            throw cause;
+          }
           this.#settleUncertainSubmission(key, entry);
           this.#emitEvent({
             type: "run-submission-reconciled",
@@ -644,7 +852,7 @@ export class RunWorkflow {
             context: entry.context,
             current: this.#isCurrentRun(recoveredRun),
           });
-          outcomes.push(succeeded({ run: recoveredRun }));
+          outcomes.push(succeeded({ run: recoveredRun, reservedAgentStartKey }));
           continue;
         }
         const outcome = this.#codecs.activeRunFromRecord(payload.recentRunOutcome);
@@ -710,10 +918,17 @@ export class RunWorkflow {
     if (!run?.handoffMessage || !run.sourcePath || !run.requestId || run.requestId === "pending") {
       return blocked("RUN_HANDOFF_UNAVAILABLE", "当前 Request 没有可复制的交接内容。");
     }
+    if (qoderRecoveryRequired(run, this.#runSession.handoffForSource(run.sourcePath))) {
+      return blocked(
+        "RUN_AGENT_RECOVERY_REQUIRED",
+        "这轮不能安全改为复制任务。请结束本轮，再重新发送为新的 Request。",
+      );
+    }
     this.#runSession.publishHandoff({
       sourcePath: run.sourcePath,
       requestId: run.requestId,
       attemptId: run.attemptId,
+      mode: "clipboard",
       status: "copying",
     });
     try {
@@ -726,6 +941,7 @@ export class RunWorkflow {
         sourcePath: run.sourcePath,
         requestId: run.requestId,
         attemptId: run.attemptId,
+        mode: "clipboard",
         status: "copied",
       });
       this.#emitEvent({
@@ -740,6 +956,7 @@ export class RunWorkflow {
           sourcePath: run.sourcePath,
           requestId: run.requestId,
           attemptId: run.attemptId,
+          mode: "clipboard",
           status: "failed",
         });
       }
@@ -757,6 +974,101 @@ export class RunWorkflow {
         cause,
         "这次任务还在，打开本轮后可以重新复制",
       ));
+    }
+  }
+
+  async startAgent({
+    run = this.#runSession.activeRun,
+    preflightId = null,
+    agentStartReserved = false,
+  } = {}) {
+    if (!run?.sourcePath || !run.requestId || run.requestId === "pending") {
+      return blocked("RUN_AGENT_UNAVAILABLE", "当前 Request 还不能启动 Qoder CLI。");
+    }
+    if (qoderRecoveryRequired(run, this.#runSession.handoffForSource(run.sourcePath))) {
+      return blocked(
+        "RUN_AGENT_RECOVERY_REQUIRED",
+        "Bridge 无法证明旧 Qoder 会话已经停止。请结束本轮，再重新发送。",
+      );
+    }
+    const operationKey = this.#codecs.operationKey(run);
+    if (!agentStartReserved && this.#agentStartsPending.has(operationKey)) {
+      return blocked("RUN_AGENT_START_BUSY", "Qoder CLI 正在启动，请等待当前操作完成。");
+    }
+    this.#agentStartsPending.add(operationKey);
+    let preflight = preflightId ? { preflightId, status: "ready" } : null;
+    try {
+      if (!preflight) {
+        preflight = await this.#requireQoderPreflight();
+      }
+      if (preflight?.status !== "ready" || !preflight.preflightId) {
+        throw responseError(
+          "RUN_AGENT_PREFLIGHT_INVALID",
+          "Qoder CLI 预检没有返回可验证结果。",
+        );
+      }
+      this.#runSession.publishHandoff({
+        sourcePath: run.sourcePath,
+        requestId: run.requestId,
+        attemptId: run.attemptId,
+        mode: "qoder-acp",
+        status: "starting",
+        phase: "launching",
+      });
+      const result = await this.#bridgeClient.startAgent({
+        projectId: run.projectId,
+        documentId: run.documentId,
+        sourcePath: run.sourcePath,
+        requestId: run.requestId,
+        attemptId: run.attemptId,
+        driver: "qoder-acp",
+        trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
+        preflightId: preflight.preflightId,
+      });
+      this.#qoderPreflight = null;
+      if (!this.#runSession.hasRun(run)) return stale(run);
+      const next = agentHandoffState(run, result?.session);
+      if (!next || !["starting", "running", "completed"].includes(next.status)) {
+        throw responseError("RUN_AGENT_START_UNCONFIRMED", "Qoder CLI 没有确认启动。");
+      }
+      this.#runSession.publishHandoff(next);
+      this.#emitEvent({
+        type: "run-agent-started",
+        run,
+        agentSession: result.session,
+        current: this.#isCurrentRun(run),
+      });
+      return succeeded({ run, agentSession: result.session });
+    } catch (cause) {
+      const code = errorCode(cause, "RUN_AGENT_START_FAILED");
+      const message = this.#codecs.errorMessage(
+        cause,
+        "Qoder CLI 没有启动。本轮 Request 已保留，可重试或复制任务。",
+      );
+      if (this.#runSession.hasRun(run)) {
+        this.#runSession.publishHandoff({
+          sourcePath: run.sourcePath,
+          requestId: run.requestId,
+          attemptId: run.attemptId,
+          mode: "qoder-acp",
+          status: "failed",
+          phase: "failed",
+          errorCode: code,
+          errorMessage: message,
+          retryable: !NON_RETRYABLE_AGENT_ERRORS.has(code),
+        });
+      }
+      this.#emitEvent({
+        type: "run-agent-failed",
+        run,
+        current: this.#isCurrentRun(run),
+        cause,
+        message,
+      });
+      return rejected(code, message);
+    } finally {
+      this.#agentStartsPending.delete(operationKey);
+      this.syncPolling();
     }
   }
 
@@ -1011,6 +1323,25 @@ export class RunWorkflow {
   }
 
   #processStatus(run, payload) {
+    const previousHandoff = this.#runSession.handoffForSource(run.sourcePath);
+    const agentState = agentHandoffState(run, payload.agentSession);
+    const clipboardFallbackActive = previousHandoff?.mode === "clipboard"
+      && ["copying", "copied"].includes(previousHandoff.status);
+    if (agentState && !clipboardFallbackActive) {
+      this.#runSession.publishHandoff(agentState);
+      if (
+        ["failed", "interrupted"].includes(agentState.status)
+        && previousHandoff?.status !== agentState.status
+      ) {
+        this.#emitEvent({
+          type: "run-agent-failed",
+          run,
+          agentSession: payload.agentSession,
+          current: this.#isCurrentRun(run),
+          message: agentState.errorMessage,
+        });
+      }
+    }
     const rawState = String(payload.status || payload.lifecycleState || "processing");
     const state = this.#codecs.canonicalLifecycleState(rawState, {
       readyVersion: Boolean(payload.versionId),
@@ -1148,7 +1479,7 @@ export class RunWorkflow {
     )).join("；").slice(0, 5_000);
   }
 
-  #pendingRun({ context, previousVersionId, basedOnVersionId }) {
+  #pendingRun({ context, previousVersionId, basedOnVersionId, deliveryMode }) {
     return {
       projectId: context.projectId,
       documentId: context.documentId,
@@ -1157,6 +1488,7 @@ export class RunWorkflow {
       requestPath: "",
       attemptPath: "",
       handoffMessage: "",
+      agentDelivery: { mode: deliveryMode },
       status: "submitting",
       sourcePath: context.sourcePath,
       baseSnapshotSha256: context.frozenSourceSha256,
@@ -1225,11 +1557,73 @@ export class RunWorkflow {
 
   #hasPollingWork() {
     return this.#uncertainSubmissions.size > 0
-      || this.#runSession.runs.some(isPollable);
+      || this.#runSession.runs.some((run) => (
+        isPollable(run)
+        && !this.#agentStartsPending.has(this.#codecs.operationKey(run))
+      ));
   }
 
   #isPollCurrent(generation) {
     return !this.#disposed && generation === this.#pollGeneration;
+  }
+
+  #setQoderAvailability(availability) {
+    this.#qoderAvailability = availability;
+    this.#publishSnapshot();
+    return availability;
+  }
+
+  #reusableQoderPreflight() {
+    if (!this.#qoderPreflight?.preflightId) return null;
+    const expiresAt = Date.parse(String(this.#qoderPreflight.expiresAt || ""));
+    if (!Number.isFinite(expiresAt) || expiresAt <= this.#clock.now()) {
+      this.#qoderPreflight = null;
+      return null;
+    }
+    return this.#qoderPreflight;
+  }
+
+  async #requireQoderPreflight({ force = false } = {}) {
+    if (!force) {
+      const reusable = this.#reusableQoderPreflight();
+      if (reusable) return reusable;
+    }
+    if (this.#qoderCheckPromise) return this.#qoderCheckPromise;
+    const previous = this.#qoderAvailability;
+    this.#setQoderAvailability(checkingQoderAvailability(previous));
+    const checking = (async () => {
+      try {
+        const preflight = await this.#bridgeClient.preflightAgent({
+          driver: "qoder-acp",
+          trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
+        });
+        if (preflight?.status !== "ready" || !preflight.preflightId) {
+          throw responseError(
+            "RUN_AGENT_PREFLIGHT_INVALID",
+            "Qoder CLI 检查没有返回可验证结果。",
+          );
+        }
+        this.#qoderPreflight = Object.freeze({ ...preflight });
+        this.#setQoderAvailability(readyQoderAvailability(
+          validDate(this.#clock),
+        ));
+        return this.#qoderPreflight;
+      } catch (cause) {
+        this.#qoderPreflight = null;
+        this.#setQoderAvailability(qoderAvailabilityFromFailureCode(
+          errorCode(cause, "QODER_PREFLIGHT_FAILED"),
+          previous,
+          validDate(this.#clock),
+        ));
+        throw cause;
+      }
+    })();
+    this.#qoderCheckPromise = checking;
+    try {
+      return await checking;
+    } finally {
+      if (this.#qoderCheckPromise === checking) this.#qoderCheckPromise = null;
+    }
   }
 
   #publishSnapshot() {

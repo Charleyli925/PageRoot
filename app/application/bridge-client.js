@@ -263,6 +263,23 @@ export function createBridgeClient({
       "无法建立本轮内部 AI 任务。",
       DEFAULT_REQUEST_TIMEOUT_MS,
     ),
+    qoderAvailability: () => query(
+      "/agent/availability",
+      {},
+      "暂时无法检查 Qoder CLI。",
+    ),
+    preflightAgent: (body) => command(
+      "/agent/preflight",
+      body,
+      "Qoder CLI 预检没有完成。",
+      DEFAULT_REQUEST_TIMEOUT_MS,
+    ),
+    startAgent: (body) => command(
+      "/agent/start",
+      body,
+      "Qoder CLI 启动结果暂时无法确认。",
+      DEFAULT_REQUEST_TIMEOUT_MS,
+    ),
     resolveConflict: (body) => command(
       "/conflict/resolve",
       body,

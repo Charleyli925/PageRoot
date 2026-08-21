@@ -164,14 +164,18 @@ function createHarness({
     status: [],
     cancel: [],
     resolve: [],
+    availability: [],
+    preflight: [],
+    startAgent: [],
     handoff: [],
     unlock: 0,
     fence: 0,
+    freeze: 0,
   };
   const client = {
     async createRequest(request) {
       calls.createRequest.push(request);
-      return { activeRun: runRecord({ sourcePath }) };
+      return { activeRun: runRecord({ sourcePath, agentDelivery: request.agentDelivery }) };
     },
     async workspace(nextSourcePath) {
       calls.workspace.push(nextSourcePath);
@@ -180,6 +184,25 @@ function createHarness({
     async status(nextSourcePath, requestId, attemptId) {
       calls.status.push([nextSourcePath, requestId, attemptId]);
       return { status: "processing" };
+    },
+    async qoderAvailability() {
+      calls.availability.push(true);
+      return { status: "ready" };
+    },
+    async preflightAgent(request) {
+      calls.preflight.push(request);
+      return {
+        status: "ready",
+        preflightId: "preflight_test",
+        expiresAt: "2026-08-11T00:02:00.000Z",
+      };
+    },
+    async startAgent(request) {
+      calls.startAgent.push(request);
+      return {
+        accepted: true,
+        session: { state: "starting", phase: "launching" },
+      };
     },
     async cancelActiveRun(request) {
       calls.cancel.push(request);
@@ -225,7 +248,10 @@ function createHarness({
           calls.fence += 1;
           return { ok: true };
         },
-        freeze: frozen,
+        freeze(...args) {
+          calls.freeze += 1;
+          return frozen(...args);
+        },
         unlock() {
           calls.unlock += 1;
         },
@@ -300,6 +326,52 @@ test("an unknown create Request response only reads workspace authority and neve
   assert.equal(createCount, 1);
   assert.equal(harness.runSession.activeRun?.requestId, "request_a");
   assert.equal(harness.runSession.activeSubmission, null);
+});
+
+test("a reconciled Qoder Request reserves Agent start before polling becomes visible", async () => {
+  const start = deferred();
+  const durable = runRecord({ agentDelivery: { mode: "qoder-acp" } });
+  let createCount = 0;
+  let workspaceCount = 0;
+  let harness;
+  harness = createHarness({
+    bridge: {
+      async createRequest() {
+        createCount += 1;
+        throw new Error("network disconnected after the durable POST");
+      },
+      async workspace(sourcePath) {
+        workspaceCount += 1;
+        return { runtimeState: { activeRun: { ...durable, sourcePath } } };
+      },
+      async startAgent(request) {
+        harness.calls.startAgent.push(request);
+        return start.promise;
+      },
+    },
+  });
+
+  const submitted = harness.workflow.submit({ deliveryMode: "qoder-acp" });
+  for (let index = 0; index < 10 && harness.calls.startAgent.length === 0; index += 1) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  assert.equal(createCount, 1);
+  assert.equal(workspaceCount, 1);
+  assert.equal(harness.calls.startAgent.length, 1);
+  assert.equal(
+    harness.calls.status.length,
+    0,
+    "reconciliation publication must not poll before the recovered Request starts its Agent",
+  );
+
+  start.resolve({
+    accepted: true,
+    session: { state: "starting", phase: "launching" },
+  });
+  assert.equal((await submitted).status, "succeeded");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(harness.calls.status.length, 1);
+  harness.workflow.dispose();
 });
 
 test("a malformed create Request response reconciles authority without replaying POST", async () => {
@@ -408,6 +480,258 @@ test("clipboard failure retains the durable Request and a retry copies without a
   assert.equal(retried.status, "succeeded");
   assert.equal(harness.runSession.activeHandoff?.status, "copied");
   assert.equal(harness.calls.createRequest.length, 1);
+});
+
+test("Qoder ACP preflights before one durable Request and never touches the clipboard", async () => {
+  const harness = createHarness();
+  const outcome = await harness.workflow.submit({ deliveryMode: "qoder-acp" });
+
+  assert.equal(outcome.status, "succeeded");
+  assert.equal(harness.calls.preflight.length, 1);
+  assert.equal(harness.calls.createRequest.length, 1);
+  assert.deepEqual(harness.calls.createRequest[0].agentDelivery, {
+    mode: "qoder-acp",
+    trustPolicyVersion: "trusted-local-agent-v1",
+  });
+  assert.equal(harness.calls.startAgent.length, 1);
+  assert.equal(harness.calls.startAgent[0].preflightId, "preflight_test");
+  assert.equal(harness.calls.handoff.length, 0);
+  assert.equal(harness.runSession.activeHandoff.mode, "qoder-acp");
+  assert.equal(harness.runSession.activeHandoff.status, "starting");
+  harness.workflow.dispose();
+});
+
+test("local Qoder refresh changes only shared availability state", async () => {
+  const harness = createHarness({
+    bridge: {
+      async qoderAvailability() {
+        harness.calls.availability.push(true);
+        return { status: "not-installed" };
+      },
+    },
+  });
+
+  const outcome = await harness.workflow.refreshQoderAvailability();
+
+  assert.equal(outcome.status, "succeeded");
+  assert.equal(harness.workflow.getSnapshot().qoderAvailability.status, "not-installed");
+  assert.equal(harness.calls.availability.length, 1);
+  assert.equal(harness.calls.preflight.length, 0);
+  assert.equal(harness.calls.createRequest.length, 0);
+  assert.equal(harness.calls.fence, 0);
+  assert.equal(harness.calls.freeze, 0);
+  assert.equal(harness.calls.unlock, 0);
+  assert.equal(harness.calls.handoff.length, 0);
+  harness.workflow.dispose();
+});
+
+test("an About usability check does not authorize a later Qoder submission", async () => {
+  const harness = createHarness();
+
+  const checked = await harness.workflow.checkQoderUsability();
+  assert.equal(checked.status, "succeeded");
+  assert.equal(harness.calls.preflight.length, 1);
+  assert.equal(harness.calls.createRequest.length, 0);
+  assert.equal(harness.workflow.getSnapshot().qoderAvailability.status, "ready");
+
+  const submitted = await harness.workflow.submit({ deliveryMode: "qoder-acp" });
+  assert.equal(submitted.status, "succeeded");
+  assert.equal(harness.calls.preflight.length, 2);
+  assert.equal(harness.calls.startAgent[0].preflightId, "preflight_test");
+  harness.workflow.dispose();
+});
+
+test("Qoder guidance copy is isolated from Request and Canvas authority", async () => {
+  const harness = createHarness();
+
+  const copied = await harness.workflow.copyQoderGuidance({ kind: "install" });
+
+  assert.equal(copied.status, "succeeded");
+  assert.equal(harness.calls.handoff.length, 1);
+  assert.equal(harness.calls.handoff[0].run, null);
+  assert.equal(harness.calls.handoff[0].purpose, "qoder-install-guidance");
+  assert.match(harness.calls.handoff[0].message, /@qoder-ai\/qodercli@latest/u);
+  assert.equal(harness.calls.handoff[0].message.includes(SOURCE_A), false);
+  assert.equal(harness.calls.createRequest.length, 0);
+  assert.equal(harness.calls.freeze, 0);
+  assert.equal(
+    harness.workflow.getSnapshot().qoderAvailability.guidanceCopied,
+    "install",
+  );
+  harness.workflow.dispose();
+});
+
+test("a successful use-time check retires the one-time install continuation marker", async () => {
+  const harness = createHarness();
+
+  await harness.workflow.copyQoderGuidance({ kind: "install" });
+  assert.equal(
+    harness.workflow.getSnapshot().qoderAvailability.guidanceCopied,
+    "install",
+  );
+
+  const checked = await harness.workflow.checkQoderUsability();
+
+  assert.equal(checked.status, "succeeded");
+  assert.equal(harness.workflow.getSnapshot().qoderAvailability.status, "ready");
+  assert.equal(harness.workflow.getSnapshot().qoderAvailability.guidanceCopied, null);
+  assert.equal(harness.calls.createRequest.length, 0);
+  assert.equal(harness.calls.freeze, 0);
+  harness.workflow.dispose();
+});
+
+test("a local disk refresh preserves a known authentication requirement", async () => {
+  const authError = Object.assign(new Error("Qoder CLI 尚未登录。"), {
+    code: "QODER_AUTH_REQUIRED",
+  });
+  const harness = createHarness({
+    bridge: {
+      async preflightAgent() {
+        throw authError;
+      },
+    },
+  });
+
+  const checked = await harness.workflow.checkQoderUsability();
+  assert.equal(checked.status, "rejected");
+  assert.equal(harness.workflow.getSnapshot().qoderAvailability.status, "auth-required");
+
+  const refreshed = await harness.workflow.refreshQoderAvailability();
+  assert.equal(refreshed.status, "succeeded");
+  assert.equal(harness.workflow.getSnapshot().qoderAvailability.status, "auth-required");
+  assert.equal(harness.calls.createRequest.length, 0);
+  assert.equal(harness.calls.freeze, 0);
+  harness.workflow.dispose();
+});
+
+test("a changed Qoder installation asks for a PageRoot restart in shared state", async () => {
+  const mismatch = Object.assign(new Error("version changed"), {
+    code: "QODER_VERSION_MISMATCH",
+  });
+  const harness = createHarness({
+    bridge: {
+      async preflightAgent() {
+        throw mismatch;
+      },
+    },
+  });
+
+  const checked = await harness.workflow.checkQoderUsability();
+
+  assert.equal(checked.status, "rejected");
+  assert.equal(harness.workflow.getSnapshot().qoderAvailability.status, "unavailable");
+  assert.equal(
+    harness.workflow.getSnapshot().qoderAvailability.reason,
+    "restart-required",
+  );
+  assert.equal(harness.calls.createRequest.length, 0);
+  harness.workflow.dispose();
+});
+
+test("Qoder polling waits until the managed Agent start is registered", async () => {
+  const start = deferred();
+  let harness;
+  harness = createHarness({
+    bridge: {
+      async startAgent(request) {
+        harness.calls.startAgent.push(request);
+        return start.promise;
+      },
+    },
+  });
+
+  const submitted = harness.workflow.submit({ deliveryMode: "qoder-acp" });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(harness.calls.createRequest.length, 1);
+  assert.equal(harness.calls.startAgent.length, 1);
+  assert.equal(
+    harness.calls.status.length,
+    0,
+    "a pre-start status read would falsely classify the new Request as an interrupted old session",
+  );
+
+  start.resolve({
+    accepted: true,
+    session: { state: "starting", phase: "launching" },
+  });
+  assert.equal((await submitted).status, "succeeded");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(harness.calls.status.length, 1);
+  harness.workflow.dispose();
+});
+
+test("a failed Qoder preflight creates no Request and leaves editing recoverable", async () => {
+  const message = "Qoder 账号当前没有可用模型容量。PageRoot 尚未创建本轮 Request；当前 HTML 和评论保持不变，可稍后重试或改用复制任务。";
+  const error = new Error(message);
+  error.code = "QODER_CAPACITY_UNAVAILABLE";
+  const harness = createHarness({
+    bridge: {
+      async preflightAgent() {
+        throw error;
+      },
+    },
+  });
+  const outcome = await harness.workflow.submit({ deliveryMode: "qoder-acp" });
+
+  assert.equal(outcome.status, "rejected");
+  assert.equal(outcome.code, "QODER_CAPACITY_UNAVAILABLE");
+  assert.equal(outcome.reason, message);
+  assert.equal(outcome.reason.includes("Request 已保留"), false);
+  assert.equal(harness.calls.createRequest.length, 0);
+  assert.equal(harness.calls.startAgent.length, 0);
+  assert.equal(harness.calls.handoff.length, 0);
+  assert.equal(harness.runSession.activeRun, null);
+  assert.equal(harness.runSession.submissionPending, false);
+  assert.equal(harness.calls.freeze, 0);
+  assert.equal(harness.calls.unlock, 0);
+  assert.equal(harness.workflow.getSnapshot().qoderAvailability.status, "unavailable");
+  harness.workflow.dispose();
+});
+
+test("a recovery-required Qoder Request cannot restart or fall back to clipboard", async () => {
+  const harness = createHarness();
+  const run = runRecord({ agentDelivery: { mode: "qoder-acp" } });
+  harness.runSession.trackRun(run, { activate: "always", recovered: true });
+  harness.runSession.publishHandoff({
+    ...run,
+    mode: "qoder-acp",
+    status: "interrupted",
+    retryable: false,
+    errorCode: "AGENT_RESTART_RECOVERY_REQUIRED",
+  });
+
+  const restarted = await harness.workflow.startAgent({ run });
+  const copied = await harness.workflow.copyHandoff({ run });
+
+  assert.equal(restarted.status, "blocked");
+  assert.equal(restarted.code, "RUN_AGENT_RECOVERY_REQUIRED");
+  assert.equal(copied.status, "blocked");
+  assert.equal(copied.code, "RUN_AGENT_RECOVERY_REQUIRED");
+  assert.equal(harness.calls.preflight.length, 0);
+  assert.equal(harness.calls.startAgent.length, 0);
+  assert.equal(harness.calls.handoff.length, 0);
+  harness.workflow.dispose();
+});
+
+test("Qoder output residue is projected as non-retryable", async () => {
+  const error = new Error("safe residue recovery copy");
+  error.code = "AGENT_RETRY_OUTPUT_PRESENT";
+  const harness = createHarness({
+    bridge: {
+      async startAgent(request) {
+        harness.calls.startAgent.push(request);
+        throw error;
+      },
+    },
+  });
+
+  await harness.workflow.submit({ deliveryMode: "qoder-acp" });
+
+  assert.equal(harness.runSession.activeHandoff?.status, "failed");
+  assert.equal(harness.runSession.activeHandoff?.retryable, false);
+  assert.equal((await harness.workflow.copyHandoff()).code, "RUN_AGENT_RECOVERY_REQUIRED");
+  assert.equal(harness.calls.handoff.length, 0);
+  harness.workflow.dispose();
 });
 
 test("a terminal no-change poll unlocks the current project and remains reopenable", async () => {

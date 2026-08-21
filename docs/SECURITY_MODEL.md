@@ -21,7 +21,21 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
 - Narrow Edit-menu IPC: the main process sends only `undo`/`redo` intent, and
   native field history exposes only Electron's fixed undo/redo commands; the
   renderer cannot submit a filesystem path or arbitrary editing command
-- Clipboard-only third-party AI handoff
+- Per-task Agent delivery choice: the portable path remains exact clipboard
+  write plus readback, while the managed path is a Bridge-owned Qoder ACP
+  session. Renderer payloads contain only registered task identity and an
+  opaque preflight ticket; they cannot choose a command, cwd, environment,
+  prompt, Request path, Candidate path or finalizer.
+- Managed Qoder starts only after explicit `trusted-local-agent-v1` consent and
+  a pre-Request preflight. Opening delivery or About performs a separate
+  disk-only discovery that rejects the CLI embedded in Qoder.app and accepts
+  only a protected standalone `@qoder-ai/qodercli` package at the minimum
+  reviewed version; it never runs Qoder, contacts Qoder, creates a Request or
+  locks the Canvas. Only explicit “Qoder CLI” activation performs `--version`
+  and `--list-models`, verifies executable realpath/mode/content identity and
+  obtains an opaque short-lived ticket; a changed executable invalidates that
+  ticket. Arbitrary command overrides are enabled only when both dedicated E2E
+  environment fences are present.
 - Fixed app-resource lookup for the packaged user statement and disclaimer;
   the renderer can request it but cannot choose a local path
 - Default-browser opening accepts only an already known HTML source path,
@@ -191,6 +205,61 @@ crash recovery may follow only an already-sealed `runtime-state.json` Request /
 Attempt / Working Copy anchor, or a registered Promotion transaction. A cleared
 or missing runtime state never scans Request directories to revive an active
 Request or to adopt a replacement input-manifest digest.
+
+The packaged Qoder ACP driver narrows the protocol surface but does not change
+that trust statement. It checks the runtime-sealed manifest Hash, exact current
+Request layout, frozen file identities, single Candidate path and exact
+official finalizer; every other ACP filesystem and terminal request is rejected.
+It revalidates runtime authority before mutations and Candidate publication,
+stages the output beside its destination, then atomically renames it. Prompt,
+frames, updates, Agent metadata and public session history are bounded. Abort
+closes the mutation surface before Qoder cancellation/process-group cleanup;
+the Bridge cancels the durable Request only after that bounded stop completes.
+Before spawn, an exclusive project-local lease and a final executable
+dev/inode/size/mtime/content identity comparison fence duplicate launch. The
+standalone npm JavaScript bundle is then loaded by PageRoot's trusted runtime
+from the already-opened verified file descriptor, so a pathname replacement
+cannot substitute different script bytes after that comparison. A normally
+settled process releases that lease only after bounded process-group cleanup.
+If the Bridge crashes, the lease remains: PageRoot never invents a
+surviving session, and the processing Request becomes interrupted and
+non-retryable. Durable cancellation then fences the old Request, but does not
+claim an unknown old process has stopped; the user must submit a new Request.
+Unknown cleanup and any unfinalized output/completion likewise block retry and
+clipboard fallback instead of being overwritten.
+Pre-Request version/model probes use the same bounded process-group cleanup.
+An unconfirmed probe descendant creates no Request but remains a non-prunable
+Bridge-level fence, so later preflight and application shutdown both fail
+closed rather than forgetting an unowned local process.
+Quit, relaunch and update installation also fail closed: the Bridge stays alive
+and the desktop app remains open unless all owned Agent cleanup is confirmed.
+
+The driver may retain at most 16 KiB of raw Qoder stderr only inside the live
+Bridge promise to classify authentication/capacity/process failures. It is
+discarded after classification and never enters public Agent status, PageRoot
+telemetry, reports or user-facing errors. Absolute Request paths necessarily
+appear in the user-authorized Qoder task prompt and may therefore be processed
+by Qoder; the user statement and Privacy notice disclose that third-party path.
+
+This is an explicit trusted-local-Agent policy, not hostile-process isolation.
+The Qoder subprocess still runs with the signed-in local user's OS identity and
+can theoretically read or modify files without using ACP. The selection dialog
+keeps only the concise task-specific disclosure that Qoder reads this turn's
+HTML, comments and attachments and that results enter review; the packaged user
+statement retains the complete local-permission, third-party-processing and
+non-sandbox disclosure. The restricted ACP host is a cooperative
+least-privilege boundary and must never be described as an OS sandbox.
+Candidate completion still requires the official finalizer and Repository
+validation; ACP stop/progress cannot create, adopt or activate a Version. See
+ADR 0032. The synthetic live probe remains diagnostic evidence only and is not
+a release gate (ADR 0031).
+
+Installation and login guidance is copied only after the user's explicit
+button action and must pass the same clipboard write/readback check as the
+normal portable handoff. A local availability failure never writes the
+clipboard. Neither the delivery card nor About receives or displays command
+paths, npm prefixes, versions or model counts; stable error classes remain in
+local diagnostics.
 
 ## V2 editable-island trust boundary
 

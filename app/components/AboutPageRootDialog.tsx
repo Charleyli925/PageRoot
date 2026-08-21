@@ -3,6 +3,7 @@
 import {
   useEffect,
   useRef,
+  useState,
   type MouseEvent,
 } from "react";
 import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/csr/ArrowSquareOut";
@@ -10,6 +11,12 @@ import { CheckCircleIcon } from "@phosphor-icons/react/dist/csr/CheckCircle";
 import { CloudArrowDownIcon } from "@phosphor-icons/react/dist/csr/CloudArrowDown";
 import { GithubLogoIcon } from "@phosphor-icons/react/dist/csr/GithubLogo";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
+
+import type {
+  QoderAvailabilitySnapshot,
+  QoderGuidanceKind,
+} from "../domain/qoder-availability.js";
+import QoderAvailabilityCard from "./QoderAvailabilityCard";
 
 export type AboutApplicationUpdateStatus =
   | "idle"
@@ -41,6 +48,7 @@ type AboutPageRootDialogProps = {
   repositoryOpenFailed: boolean;
   releaseNotesOpenFailed: boolean;
   userNoticeOpenFailed: boolean;
+  qoderAvailability: QoderAvailabilitySnapshot;
   onClose: () => void;
   onCheckForUpdates: () => void;
   onDownloadUpdate: () => void;
@@ -48,7 +56,15 @@ type AboutPageRootDialogProps = {
   onOpenReleaseNotes: () => void;
   onOpenRepository: () => void;
   onOpenUserNotice: () => void;
+  onRefreshQoderAvailability: () => Promise<AboutQoderOutcome>;
+  onCheckQoderUsability: () => Promise<AboutQoderOutcome>;
+  onCopyQoderGuidance: (kind: QoderGuidanceKind) => Promise<AboutQoderOutcome>;
 };
+
+type AboutQoderOutcome = Readonly<{
+  status: string;
+  reason?: string;
+}> | null | undefined;
 
 type UpdatePresentation = {
   tone: "neutral" | "checking" | "current" | "available" | "ready" | "unavailable";
@@ -167,6 +183,7 @@ export default function AboutPageRootDialog({
   repositoryOpenFailed,
   releaseNotesOpenFailed,
   userNoticeOpenFailed,
+  qoderAvailability,
   onClose,
   onCheckForUpdates,
   onDownloadUpdate,
@@ -174,9 +191,13 @@ export default function AboutPageRootDialog({
   onOpenReleaseNotes,
   onOpenRepository,
   onOpenUserNotice,
+  onRefreshQoderAvailability,
+  onCheckQoderUsability,
+  onCopyQoderGuidance,
 }: AboutPageRootDialogProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const [qoderExpanded, setQoderExpanded] = useState(false);
   const presentation = updatePresentation({
     result: updateResult,
     updatesAvailable,
@@ -216,11 +237,13 @@ export default function AboutPageRootDialog({
     if (!dialog) return;
     if (open && !dialog.open) {
       dialog.showModal();
+      setQoderExpanded(false);
+      void onRefreshQoderAvailability();
       requestAnimationFrame(() => closeButtonRef.current?.focus());
     } else if (!open && dialog.open) {
       dialog.close();
     }
-  }, [open]);
+  }, [onRefreshQoderAvailability, open]);
 
   const handleBackdropPointer = (event: MouseEvent<HTMLDialogElement>) => {
     if (event.target === event.currentTarget) onClose();
@@ -270,6 +293,19 @@ export default function AboutPageRootDialog({
           <span>版本 {appVersion || updateResult?.currentVersion || "—"}</span>
           <span>{architectureLabel(updateResult?.architecture)}</span>
         </div>
+
+        <section className="about-agent-section" aria-labelledby="about-agent-title">
+          <h3 id="about-agent-title">AI Agent</h3>
+          <QoderAvailabilityCard
+            availability={qoderAvailability}
+            surface="about"
+            expanded={qoderExpanded}
+            onToggle={() => setQoderExpanded((current) => !current)}
+            onRefreshLocal={onRefreshQoderAvailability}
+            onCheckUsability={onCheckQoderUsability}
+            onCopyGuidance={onCopyQoderGuidance}
+          />
+        </section>
 
         <section
           className="about-update-card"

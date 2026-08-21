@@ -17,7 +17,7 @@ const STEPS = [
   "打开自己的 HTML，添加为项目",
   "双击改字，自动保存在当前页",
   "单击要改的区域，写下评论，AI 会按这里改",
-  "点右上角发送，把任务粘贴给 AI Agent",
+  "点右上角发送，选择 Qoder 自动执行或复制任务",
 ] as const;
 
 function prefersReducedMotion() {

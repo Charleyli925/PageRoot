@@ -9,6 +9,10 @@
 - 明确不属于本计划：大文件 Patch transport、Bridge 路由或持久 Schema 重写、UI 改版、全仓 TypeScript 迁移、打包与发布
 
 > 本文是一份施工合同，不是生产实现授权。任何实施 PR、Ready、合并、版本或发布仍需独立授权。
+>
+> 历史边界说明：本文中的 clipboard-only / 不控制 QoderWork 约束描述的是该次编排重构
+> 的范围，已由 ADR 0032 的 Bridge-owned Qoder ACP Agent Bridge 产品决策取代。剪贴板
+> Port 仍作为 fallback 保留；Request/Candidate/Review owner 约束继续有效。
 
 ## 1. 执行结论
 
@@ -366,7 +370,7 @@ Application 层不得直接访问 React ref 或 `window.*`。Controller 通过�
 - `CanvasAuthorityPort`：fence、freeze、unlock、render acknowledgement、select/clear；
 - `ProjectOpenPort`：desktop dialog/recent/external opaque request，不接收任意 IPC；
 - `CloseCoordinationPort`：只由 Workbench 同步注册事件，Controller 计算 readiness；
-- `HandoffPort`：clipboard write + readback，不扩展为自动控制 QoderWork；
+- `HandoffPort`：clipboard write + readback，不扩展为自动控制 QoderWork（本计划的历史范围；产品 Agent Bridge 现由 ADR 0032 单独拥有）；
 - `RecoveryStorePort`：现有 browser recovery store；
 - `HashPort`：SHA-256；
 - `ClockPort` / `SchedulerPort`：`now`、timeout、interval、cancel，测试可控；
@@ -392,7 +396,7 @@ Application 层不得直接访问 React ref 或 `window.*`。Controller 通过�
    不得暴露半个 transition。
 9. AI output 仍不可信，只有完整身份、Hash、协议和完整 HTML 校验后可审阅/激活。
 10. Review 不激活 Version；Candidate 只有用户明确采用后才进入当前 HTML。
-11. QoderWork handoff 仍为 clipboard-only；不自动打开、控制或粘贴。
+11. QoderWork handoff 在本计划范围内仍为 clipboard-only；不自动打开、控制或粘贴（该历史产品边界已由 ADR 0032 取代）。
 12. browser preview 仍是只读弱能力；不得因 Controller 存在而获得本地持久权限。
 13. 用户可见控件、文案、顺序、默认模式和正常结果不变。
 14. 不增加新 npm dependency，不修改 Electron/Bridge 权限，不迁移用户数据。
