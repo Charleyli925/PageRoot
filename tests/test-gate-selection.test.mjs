@@ -353,6 +353,7 @@ test("delivery contracts select their direct package, verifier and release-archi
   assert.deepEqual(verifier.selectedNodeTests, [
     "tests/agent-bridge-service.test.mjs",
     "tests/agent-bridge-workspace.test.mjs",
+    "tests/agent-model-catalog.test.mjs",
     "tests/desktop-package.test.mjs",
     "tests/packaged-artifact-gate.test.mjs",
     "tests/qoder-acp-spike-client.test.mjs",
@@ -615,6 +616,7 @@ test("Qoder ACP Agent Bridge changes select product, package, and closed-loop ow
   assert.deepEqual(plan.selectedNodeTests, [
     "tests/agent-bridge-service.test.mjs",
     "tests/agent-bridge-workspace.test.mjs",
+    "tests/agent-model-catalog.test.mjs",
     "tests/desktop-package.test.mjs",
     "tests/qoder-acp-spike-client.test.mjs",
     "tests/run-lifecycle.test.mjs",

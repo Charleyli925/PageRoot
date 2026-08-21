@@ -958,6 +958,7 @@
       "suites": ["typecheck", "dependency-audit", "build-desktop", "electron-smoke", "ai-smoke"],
       "nodeTests": [
         "tests/agent-bridge-service.test.mjs",
+        "tests/agent-model-catalog.test.mjs",
         "tests/agent-bridge-workspace.test.mjs",
         "tests/qoder-acp-spike-client.test.mjs",
         "tests/run-workflow.test.mjs",
