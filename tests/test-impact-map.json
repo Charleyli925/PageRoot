@@ -529,6 +529,16 @@
       ]
     },
     {
+      "id": "conversation-application",
+      "patterns": [
+        "^app/application/conversation-(?:session|workflow)\\.(?:js|d\\.ts)$"
+      ],
+      "suites": ["typecheck"],
+      "nodeTests": [
+        "tests/conversation-workflow.test.mjs"
+      ]
+    },
+    {
       "id": "preview-comment-markers",
       "patterns": [
         "^app/lib/preview-comment-markers\\.(?:js|d\\.ts)$",

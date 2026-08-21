@@ -19,6 +19,9 @@ export type BridgeClient = {
   sourcePreview(sourcePath: string): Promise<BridgeJson>;
   sourceStat(sourcePath: string): Promise<BridgeJson>;
   conflictCandidate(sourcePath: string): Promise<BridgeJson>;
+  conversation(sourcePath: string): Promise<BridgeJson>;
+  conversationList(sourcePath: string): Promise<BridgeJson>;
+  saveConversationDraft(body: BridgeJson): Promise<BridgeJson>;
   status(
     sourcePath: string,
     requestId: string,
