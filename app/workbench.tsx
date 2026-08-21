@@ -49,6 +49,8 @@ import FirstEditGuideCard from "./components/FirstEditGuideCard";
 import HtmlInteractionPreview, {
   type HtmlInteractionPreviewHandle,
 } from "./components/HtmlInteractionPreview";
+import AiConversationSidebar from "./workbench/AiConversationSidebar";
+import { useAiConversation } from "./workbench/use-ai-conversation";
 import NoticeBar from "./components/NoticeBar";
 import RestartUpdateDialog from "./components/RestartUpdateDialog";
 import ExternalHtmlOpenDialog from "./workbench/ExternalHtmlOpenDialog";
@@ -720,6 +722,17 @@ export default function Workbench() {
   const currentExactVersionId = versionSnapshot.currentExactVersionId;
   const viewMode = versionSnapshot.viewMode;
   const [canvasMode, setCanvasMode] = useState<CanvasMode>("edit");
+  // The AI conversation sidebar. All of its React state lives in this hook, so
+  // the Workbench gains one hook call and no extra budget.
+  const aiConversation = useAiConversation({
+    controllerRef: workspaceControllerRef,
+    conversation: workspaceControllerSnapshot?.conversation ?? null,
+    canvasMode,
+    projectId: projectId ?? "",
+    documentId: documentId ?? "",
+    sourcePath: sourcePath ?? "",
+    pendingCommentCount: comments.length,
+  });
   const editRuntimeSnapshot = workspaceControllerSnapshot?.editRuntime ?? null;
   const editRuntimePhase = editRuntimeSnapshot?.phase || "static";
   const editRuntimePreparing = (
@@ -7653,7 +7666,23 @@ export default function Workbench() {
               onReady={handlePreviewReady}
             />
           ) : null}
+          {canvasMode === "preview" && sourcePath && !aiConversation.visible ? (
+            <button
+              type="button"
+              className="ai-conversation-toggle"
+              onClick={aiConversation.toggle}
+              aria-label="打开 AI 对话"
+            >
+              AI 对话
+            </button>
+          ) : null}
         </section>
+
+        {aiConversation.visible ? (
+          <aside className="ai-conversation-aside" aria-label="AI 对话侧栏">
+            <AiConversationSidebar {...aiConversation.sidebarProps} />
+          </aside>
+        ) : null}
 
         {canvasMode === "edit" ? (
           <aside

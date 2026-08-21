@@ -558,7 +558,8 @@
       "patterns": [
         "^app/workbench/ai-conversation-model\\.(?:js|d\\.ts)$",
         "^app/workbench/AiConversationSidebar\\.tsx$",
-        "^app/workbench/ai-conversation-sidebar\\.module\\.css$"
+        "^app/workbench/ai-conversation-sidebar\\.module\\.css$",
+        "^app/workbench/use-ai-conversation\\.ts$"
       ],
       "suites": ["typecheck"],
       "nodeTests": [
