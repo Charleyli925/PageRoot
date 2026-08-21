@@ -558,7 +558,8 @@
       "patterns": [
         "^app/workbench/ai-conversation-model\\.(?:js|d\\.ts)$",
         "^app/workbench/AiConversationSidebar\\.tsx$",
-        "^app/workbench/ai-conversation-sidebar\\.module\\.css$"
+        "^app/workbench/ai-conversation-sidebar\\.module\\.css$",
+        "^app/workbench/use-ai-conversation\\.ts$"
       ],
       "suites": ["typecheck"],
       "nodeTests": [
@@ -957,6 +958,7 @@
       "suites": ["typecheck", "dependency-audit", "build-desktop", "electron-smoke", "ai-smoke"],
       "nodeTests": [
         "tests/agent-bridge-service.test.mjs",
+        "tests/agent-model-catalog.test.mjs",
         "tests/agent-bridge-workspace.test.mjs",
         "tests/qoder-acp-spike-client.test.mjs",
         "tests/run-workflow.test.mjs",

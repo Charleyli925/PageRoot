@@ -59,6 +59,32 @@ function cleanText(value, maxLength = 160) {
     .slice(0, maxLength);
 }
 
+// The renderer offers the user a model choice, so the availability projection
+// carries the model identifiers Qoder reports. Only safe, bounded identifiers
+// cross the boundary: a model line must match a conservative identifier shape
+// (letters, digits and a few separators) and be short. Anything else — a path,
+// a sentence of raw CLI output, control bytes — is dropped, and the list is
+// capped so a hostile or broken CLI cannot flood the renderer.
+const MAX_PUBLIC_MODELS = 40;
+const SAFE_MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._/:+-]{0,79}$/u;
+
+export function parsePublicModels(stdout) {
+  const seen = new Set();
+  const models = [];
+  for (const rawLine of String(stdout || "").split(/\r?\n/u)) {
+    const line = cleanText(rawLine, 80);
+    if (!line || line.toUpperCase() === "MODEL") continue;
+    // Take the first whitespace-separated token as the identifier; a table row
+    // may carry trailing columns we do not surface.
+    const id = line.split(/\s+/u)[0];
+    if (!SAFE_MODEL_ID.test(id) || seen.has(id)) continue;
+    seen.add(id);
+    models.push(Object.freeze({ id, displayName: id }));
+    if (models.length >= MAX_PUBLIC_MODELS) break;
+  }
+  return Object.freeze(models);
+}
+
 function nowIso(clock) {
   return new Date(Math.max(0, Number(clock.now()) || 0)).toISOString();
 }
@@ -617,7 +643,13 @@ async function preflightQoder(command, environment) {
     if (models.length === 0) {
       fail("QODER_CAPACITY_UNAVAILABLE", "Qoder 当前没有返回可用模型。");
     }
-    return Object.freeze({ version: reportedVersion, modelCount: models.length });
+    // Preserve the safe, bounded identifiers so the renderer can offer a choice.
+    const publicModels = parsePublicModels(modelResult.stdout);
+    return Object.freeze({
+      version: reportedVersion,
+      modelCount: models.length,
+      models: publicModels,
+    });
   } catch (cause) {
     const code = cause?.code === "ACP_PREFLIGHT_CLEANUP_UNCONFIRMED"
       ? "AGENT_PREFLIGHT_CLEANUP_UNCONFIRMED"
@@ -862,6 +894,7 @@ export class AgentBridgeService {
       trustPolicyVersion: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
       agentVersion: evidence.version,
       modelCount: evidence.modelCount,
+      models: evidence.models ?? [],
       expiresAt: new Date(createdAt + PREFLIGHT_TTL_MS).toISOString(),
     });
   }

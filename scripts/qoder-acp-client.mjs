@@ -729,6 +729,197 @@ export async function loadQoderAcpTaskPolicy(options) {
   });
 }
 
+// The Discussion Host is deliberately not the Execution Host with a different
+// read list. Discussion has no Request, no Candidate, no finalizer and no
+// runtime authority: it reads exactly one short-lived read-only snapshot of the
+// page the user is looking at, plus the discussion prompt, and nothing else. It
+// can never write, spawn a terminal or touch `activeRequest`.
+export async function loadQoderAcpDiscussionPolicy(options) {
+  const value = assertObject(options, "ACP discussion policy options");
+  const allowedOptionNames = new Set(["snapshotRoot", "snapshotName", "promptName"]);
+  const unexpectedOption = Object.keys(value).find(
+    (name) => !allowedOptionNames.has(name),
+  );
+  if (unexpectedOption) {
+    throw policyError(
+      "ACP_DISCUSSION_OPTIONS_INVALID",
+      `ACP discussion policy options contain unsupported field ${JSON.stringify(unexpectedOption)}.`,
+    );
+  }
+  const { snapshotRoot, snapshotName = "snapshot.html", promptName = "PROMPT.md" } = value;
+  // Names are single, safe filename segments joined to the canonical root, so a
+  // caller cannot point the snapshot at a path outside the short-lived dir.
+  const safeName = (name, label) => {
+    const text = assertNonEmptyString(name, label);
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,80}$/u.test(text) || text.includes("..")) {
+      throw policyError("ACP_DISCUSSION_NAME_INVALID", `${label} must be a safe file name.`);
+    }
+    return text;
+  };
+  const safeSnapshotName = safeName(snapshotName, "snapshotName");
+  const safePromptName = safeName(promptName, "promptName");
+  if (safeSnapshotName === safePromptName) {
+    throw policyError(
+      "ACP_DISCUSSION_READ_ORDER_DUPLICATE",
+      "The discussion snapshot and prompt must be distinct files.",
+    );
+  }
+  const requestedRoot = assertAbsolutePath(snapshotRoot, "snapshotRoot");
+  const rootInformation = await lstat(requestedRoot);
+  if (rootInformation.isSymbolicLink() || !rootInformation.isDirectory()) {
+    throw policyError(
+      "ACP_DISCUSSION_UNSAFE_ROOT",
+      "The discussion snapshot root must be a real directory.",
+    );
+  }
+  const snapshotRootPath = await realpath(requestedRoot);
+
+  const snapshot = await readVerifiedRegularFile(
+    path.join(snapshotRootPath, safeSnapshotName),
+    snapshotRootPath,
+    "Discussion snapshot",
+  );
+  if (snapshot.bytes.byteLength > MAX_HTML_BYTES) {
+    throw policyError("ACP_DISCUSSION_SNAPSHOT_TOO_LARGE", "The discussion snapshot exceeds 20 MiB.");
+  }
+  const prompt = await readVerifiedRegularFile(
+    path.join(snapshotRootPath, safePromptName),
+    snapshotRootPath,
+    "Discussion prompt",
+  );
+  if (prompt.bytes.byteLength > MAX_PROMPT_BYTES) {
+    throw policyError("ACP_DISCUSSION_PROMPT_TOO_LARGE", "The discussion prompt exceeds 256 KiB.");
+  }
+
+  return Object.freeze({
+    [POLICY_BRAND]: true,
+    mode: "discussion",
+    requestRoot: snapshotRootPath,
+    snapshotPath: snapshot.path,
+    promptPath: prompt.path,
+    sourceSha256: sha256(snapshot.bytes),
+    // No outputPath, no finalizer, no runtimePath: discussion cannot mutate.
+    readableFiles: Object.freeze([
+      Object.freeze({
+        path: snapshot.path,
+        role: "discussion-snapshot",
+        sha256: sha256(snapshot.bytes),
+        byteLength: snapshot.bytes.byteLength,
+      }),
+      Object.freeze({
+        path: prompt.path,
+        role: "prompt",
+        sha256: sha256(prompt.bytes),
+        byteLength: prompt.bytes.byteLength,
+      }),
+    ]),
+  });
+}
+
+// A minimal restricted host for discussion turns. It shares the execution
+// host's file-safety and drift checks for reads, and hard-denies every
+// mutation: no write path exists, terminals are refused, and tool-permission
+// requests are always cancelled. Nothing here can create a Candidate.
+export function createRestrictedDiscussionHost(policy, { onEvent = () => {} } = {}) {
+  assertObject(policy, "policy");
+  if (
+    policy[POLICY_BRAND] !== true
+    || policy.mode !== "discussion"
+    || !Array.isArray(policy.readableFiles)
+  ) {
+    throw new TypeError("Restricted discussion host requires a verified discussion policy.");
+  }
+  if (typeof onEvent !== "function") {
+    throw new TypeError("Restricted discussion host dependencies are invalid.");
+  }
+  let sessionId = null;
+  let phase = "active";
+  let cancellationRequested = false;
+  const readableFiles = new Map(
+    policy.readableFiles.map((entry) => [entry.path, entry]),
+  );
+  const event = (kind, details = {}) => onEvent(Object.freeze({ kind, ...details }));
+  const assertActive = (signal) => {
+    if (signal?.aborted) {
+      throw policyError("ACP_REQUEST_CANCELLED", "The ACP request was cancelled.");
+    }
+    if (cancellationRequested || phase === "cancelling") {
+      throw policyError("ACP_HOST_CANCELLING", "The discussion host is cancelling.");
+    }
+    if (phase === "disposed") {
+      throw policyError("ACP_HOST_DISPOSED", "The discussion host is already closed.");
+    }
+  };
+
+  return {
+    bindSessionId(nextSessionId) {
+      assertActive();
+      if (
+        sessionId
+        || typeof nextSessionId !== "string"
+        || !/^[^\u0000-\u001f\u007f]{1,256}$/u.test(nextSessionId)
+      ) {
+        throw policyError("ACP_SESSION_BIND_INVALID", "The ACP session could not be bound.");
+      }
+      sessionId = nextSessionId;
+      event("session-bound");
+    },
+    async requestPermission(params) {
+      validateSession(sessionId, params.sessionId);
+      // Discussion needs no tool that requires permission; always decline.
+      event("permission-rejected", { toolKind: params.toolCall?.kind || "unknown" });
+      return { outcome: { outcome: "cancelled" } };
+    },
+    async readTextFile(params, signal) {
+      assertActive(signal);
+      validateSession(sessionId, params.sessionId);
+      const requestedPath = assertAbsolutePath(params.path, "fs/read_text_file path");
+      const authorized = readableFiles.get(requestedPath);
+      if (!authorized) {
+        throw policyError(
+          "ACP_READ_NOT_AUTHORIZED",
+          "Qoder requested a file outside the discussion snapshot.",
+        );
+      }
+      const file = await readVerifiedRegularFile(
+        requestedPath,
+        policy.requestRoot,
+        "ACP discussion read target",
+      );
+      assertActive(signal);
+      const { bytes } = file;
+      if (bytes.byteLength !== authorized.byteLength || sha256(bytes) !== authorized.sha256) {
+        throw policyError(
+          "ACP_FROZEN_INPUT_DRIFT",
+          "The discussion snapshot changed after the session started.",
+        );
+      }
+      event("file-read", { role: authorized.role });
+      return { content: slicedLines(bytes.toString("utf8"), params.line, params.limit) };
+    },
+    async writeTextFile() {
+      throw policyError(
+        "ACP_DISCUSSION_READONLY",
+        "A discussion turn cannot write any file.",
+      );
+    },
+    async createTerminal() {
+      throw policyError(
+        "ACP_DISCUSSION_NO_TERMINAL",
+        "A discussion turn cannot open a terminal.",
+      );
+    },
+    cancel() {
+      cancellationRequested = true;
+      if (phase === "active") phase = "cancelling";
+      return Promise.resolve();
+    },
+    dispose() {
+      phase = "disposed";
+    },
+  };
+}
+
 function validateSession(boundSessionId, receivedSessionId) {
   if (!boundSessionId || receivedSessionId !== boundSessionId) {
     throw policyError(

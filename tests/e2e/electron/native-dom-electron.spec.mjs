@@ -538,6 +538,80 @@ test("Electron preview shows the read-only comment marker and opens it on hover 
   }
 });
 
+test("Electron preview mounts the AI conversation sidebar and persists a draft across reopen", async () => {
+  test.setTimeout(90_000);
+  const sourceDirectory = mkdtempSync(
+    path.join(tmpdir(), "pageroot-ai-sidebar-e2e-"),
+  );
+  const sourcePath = path.join(sourceDirectory, "sidebar-page.html");
+  writeFileSync(
+    sourcePath,
+    `<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>侧栏页面</title></head>
+<body><main><h1 id="headline" data-native-case="sidebar-headline">季度大盘</h1></main></body>
+</html>
+`,
+    "utf8",
+  );
+
+  let electronApp = null;
+  let isolatedUserData = null;
+  try {
+    const launched = await launchPageRoot({ activeSourcePath: sourcePath });
+    electronApp = launched.electronApp;
+    isolatedUserData = launched.isolatedUserData;
+    await loadedDiskFrame(launched.page, sourcePath, "sidebar-headline");
+
+    await launched.page.getByRole("button", { name: "预览", exact: true }).click();
+    await expect(launched.page.locator('iframe[title="HTML 交互预览"]'))
+      .toBeVisible();
+
+    // The sidebar is opt-in in preview: a docked aside, not a modal.
+    const openToggle = launched.page.getByRole("button", { name: "打开 AI 对话" });
+    await expect(openToggle).toBeVisible();
+    await openToggle.click();
+
+    const sidebar = launched.page.getByTestId("ai-conversation-sidebar");
+    await expect(sidebar).toBeVisible();
+    await expect(launched.page.getByTestId("ai-conversation-mode"))
+      .toHaveText("讨论 · 只读");
+    // The preview iframe stays alive beside the sidebar — not replaced by a modal.
+    await expect(launched.page.locator('iframe[title="HTML 交互预览"]'))
+      .toBeVisible();
+
+    // Wait for the conversation to finish loading: the empty-state copy appears
+    // only once the Bridge has established this Document's conversation. Typing
+    // before that would be dropped by the controlled composer.
+    await expect(sidebar.getByText("还没有对话", { exact: false }))
+      .toBeVisible({ timeout: 15_000 });
+
+    // A draft is saved as the user types, without any send capability yet.
+    const draftText = "下一轮想把标题改短";
+    const input = launched.page.getByTestId("ai-conversation-input");
+    await input.fill(draftText);
+    await expect(input).toHaveValue(draftText);
+    // Let the debounced autosave (700ms) persist to the Bridge before leaving.
+    await launched.page.waitForTimeout(1_200);
+
+    // Collapsing closes the sidebar; reopening restores the draft from the
+    // Bridge — proving the whole persistence chain is live in the real app.
+    await launched.page.getByRole("button", { name: "收起 AI 对话" }).click();
+    await expect(sidebar).toHaveCount(0);
+    await launched.page.getByRole("button", { name: "打开 AI 对话" }).click();
+    await expect(launched.page.getByTestId("ai-conversation-input"))
+      .toHaveValue(draftText, { timeout: 15_000 });
+  } finally {
+    if (electronApp && isolatedUserData) {
+      await stopPageRoot(electronApp, isolatedUserData);
+    }
+    removeValidatedTemporaryDirectory(
+      sourceDirectory,
+      "pageroot-ai-sidebar-e2e-",
+    );
+  }
+});
+
 test("Electron first launch imports the welcome HTML as V1 and sends its comment to Qoder", async () => {
   const launched = await launchPageRoot();
   const welcomePath = path.join(launched.isolatedUserData, "欢迎来到源页.html");

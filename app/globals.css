@@ -5729,6 +5729,62 @@ body {
   grid-template-columns: minmax(0, 1fr);
 }
 
+/*
+ * When the AI conversation sidebar is docked in preview, the stage becomes two
+ * columns: the previewed page and the sidebar. A docked aside, never a modal —
+ * the user keeps scrolling the preview beside it.
+ */
+.workbench[data-canvas-mode="preview"] .review-scroll-stage:has(> .ai-conversation-aside) {
+  grid-template-columns: minmax(0, 1fr) clamp(340px, 30vw, 460px);
+}
+
+.ai-conversation-aside {
+  grid-row: 2;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+/*
+ * Below the minimum comfortable canvas width the sidebar takes over the stage
+ * rather than squeezing both to unusable widths.
+ */
+@media (max-width: 1024px) {
+  .workbench[data-canvas-mode="preview"] .review-scroll-stage:has(> .ai-conversation-aside) {
+    grid-template-columns: 0 minmax(0, 1fr);
+  }
+}
+
+.ai-conversation-toggle {
+  position: absolute;
+  z-index: 12;
+  top: 12px;
+  right: 12px;
+  min-height: 30px;
+  padding: 0 12px;
+  border: 1px solid rgb(32 29 49 / 12%);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 92%);
+  color: #5147dc;
+  font-size: 11px;
+  font-weight: 680;
+  box-shadow: 0 6px 18px rgb(45 39 145 / 14%);
+  -webkit-backdrop-filter: blur(14px) saturate(115%);
+  backdrop-filter: blur(14px) saturate(115%);
+}
+
+.ai-conversation-toggle:hover {
+  border-color: rgb(90 85 223 / 40%);
+  background: #fff;
+  color: #4339ce;
+}
+
+.ai-conversation-toggle:focus-visible {
+  outline: 3px solid rgb(90 85 223 / 32%);
+  outline-offset: 2px;
+}
+
 .workbench[data-canvas-mode="preview"] {
   --notice-rail-width: 0px;
 }
@@ -6386,6 +6442,7 @@ body {
   height: 100%;
   min-height: 0;
   padding: 0;
+  position: relative;
 }
 
 .side-drawer[data-drawer="handoff"] > .drawer-body {
