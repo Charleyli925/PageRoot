@@ -291,6 +291,11 @@ test("preflight failures state that no Request exists yet", async (t) => {
       "Qoder 账号当前没有可用模型容量。",
     ],
     [
+      "You've reached your credit usage limit. Please upgrade your subscription plan.",
+      "QODER_CAPACITY_UNAVAILABLE",
+      "Qoder 账号当前没有可用模型容量。",
+    ],
+    [
       "unexpected preflight failure",
       "QODER_PREFLIGHT_FAILED",
       "Qoder CLI 预检没有完成。",
@@ -497,6 +502,43 @@ test("Agent Bridge cancellation never reports stopped after cleanup is unconfirm
   );
 });
 
+test("Agent Bridge cancellation timeout stays live and fails closed", async (t) => {
+  const command = await createFakeCommand(t);
+  let releaseCalls = 0;
+  const service = createService(command, {
+    cancelTimeoutMs: 25,
+    leaseStore: {
+      acquire: async ({ ownerToken }) => ({ path: "memory-agent-lease", ownerToken }),
+      release: async () => {
+        releaseCalls += 1;
+        return true;
+      },
+    },
+    runTask: ({ onEvent }) => new Promise(() => {
+      onEvent({ kind: "initialized", agentName: "pageroot-e2e-qoder" });
+    }),
+  });
+  const ticket = await preflight(service);
+  await service.submit({
+    ...IDENTITY,
+    driver: "qoder-acp",
+    trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
+    preflightId: ticket.preflightId,
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  await assert.rejects(
+    service.cancel(IDENTITY),
+    (error) => error?.code === "AGENT_CANCEL_UNCONFIRMED",
+  );
+  assert.equal(service.status(IDENTITY).state, "cancelling");
+  assert.equal(releaseCalls, 0);
+  await assert.rejects(
+    service.dispose(),
+    (error) => error?.code === "AGENT_SHUTDOWN_UNCONFIRMED",
+  );
+});
+
 test("Workspace Bridge never durably cancels after Agent cancellation rejects", async () => {
   const events = [];
   const cleanupError = Object.assign(new Error("cleanup unconfirmed"), {
@@ -617,6 +659,43 @@ test("Agent Bridge rejects a policy retry that would overwrite an unfinalized ou
       && !error.message.includes("private output path")
     ),
   );
+});
+
+test("Agent Bridge identifies a real Qoder credit limit after Request creation", async (t) => {
+  const command = await createFakeCommand(t);
+  const root = await mkdtemp(path.join(os.tmpdir(), "pageroot-agent-capacity-test-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const service = createService(command, {
+    policyLoader: async () => ({
+      ...fakePolicy(),
+      outputPath: path.join(root, "output", "candidate.html"),
+      completionPath: path.join(root, "completion.json"),
+    }),
+    runTask: async () => {
+      const error = new Error(
+        "You've reached your credit usage limit. Please upgrade your subscription plan.",
+      );
+      error.code = 500;
+      throw error;
+    },
+  });
+  t.after(() => service.dispose());
+  const ticket = await preflight(service);
+  await service.submit({
+    ...IDENTITY,
+    driver: "qoder-acp",
+    trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
+    preflightId: ticket.preflightId,
+  });
+
+  const failed = await waitForState(service, "failed");
+  assert.equal(failed.errorCode, "QODER_ACCOUNT_CAPACITY_UNAVAILABLE");
+  assert.equal(failed.retryable, true);
+  assert.equal(
+    failed.errorMessage,
+    "Qoder 账号当前没有可用模型容量。本轮 Request 已保留，可稍后重试或复制给其他 Agent。",
+  );
+  assert.equal(JSON.stringify(failed).includes("upgrade your subscription"), false);
 });
 
 test("Agent Bridge marks output written before failure as cancel-and-new only", async (t) => {

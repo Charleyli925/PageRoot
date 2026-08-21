@@ -290,12 +290,15 @@ function normalizedPreflightError(cause) {
   return new AgentBridgeError(code, qoderPreflightFailure(code), { status });
 }
 
+const QODER_CAPACITY_FAILURE_PATTERN =
+  /capacity|quota|no available model|model unavailable|credit usage limit|upgrade your subscription plan/iu;
+
 function classifyPreflightFailure(cause) {
   const combined = `${cause?.stdout || ""}\n${cause?.stderr || ""}\n${cause?.message || ""}`;
   if (/not logged in|sign in|login required|unauthenticated/iu.test(combined)) {
     return "QODER_AUTH_REQUIRED";
   }
-  if (/capacity|quota|no available model|model unavailable/iu.test(combined)) {
+  if (QODER_CAPACITY_FAILURE_PATTERN.test(combined)) {
     return "QODER_CAPACITY_UNAVAILABLE";
   }
   if (cause?.killed || cause?.code === "ETIMEDOUT" || cause?.signal === "SIGTERM") {
@@ -309,7 +312,7 @@ function classifyRunFailure(cause) {
   if (/not logged in|sign in|login required|unauthenticated/iu.test(combined)) {
     return "QODER_AUTH_REQUIRED";
   }
-  if (/capacity|quota|no available model|model unavailable/iu.test(combined)) {
+  if (QODER_CAPACITY_FAILURE_PATTERN.test(combined)) {
     return "QODER_ACCOUNT_CAPACITY_UNAVAILABLE";
   }
   return cleanText(cause?.code, 120) || "QODER_ACP_RUN_FAILED";
@@ -938,7 +941,6 @@ export class AgentBridgeService {
         "Qoder 进程没有在限定时间内确认停止。",
         { status: 503 },
       )), this.#cancelTimeoutMs);
-      timeoutHandle.unref?.();
     });
     try {
       await Promise.race([entry.promise, timeout]);
@@ -974,7 +976,6 @@ export class AgentBridgeService {
           "PageRoot 无法确认 Qoder 进程已停止；为避免失去控制，本次退出已取消。",
           { status: 503 },
         )), this.#cancelTimeoutMs);
-        timeoutHandle.unref?.();
       });
       try {
         await Promise.race([
