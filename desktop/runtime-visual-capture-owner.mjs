@@ -904,7 +904,28 @@ function validatedPng(image) {
   });
 }
 
-function configureIsolatedSession(session, expectedUrl) {
+function frozenScriptResponse(bytes) {
+  return new Response(bytes, {
+    status: 200,
+    headers: {
+      "cache-control": "no-store",
+      "content-type": "text/javascript; charset=utf-8",
+      "x-content-type-options": "nosniff",
+    },
+  });
+}
+
+function blockedRequestResponse() {
+  return new Response("Blocked", {
+    status: 403,
+    headers: {
+      "cache-control": "no-store",
+      "content-type": "text/plain; charset=utf-8",
+    },
+  });
+}
+
+function configureIsolatedSession(session, expectedUrl, frozenScripts = null) {
   session?.setPermissionRequestHandler?.((_webContents, _permission, callback) => {
     callback(false);
   });
@@ -912,13 +933,35 @@ function configureIsolatedSession(session, expectedUrl) {
   session?.on?.("will-download", (event) => {
     event.preventDefault();
   });
+  // Frozen chart-library scripts are the only https surface, and only when a
+  // store pinned bytes for this capture session during prewarm. The handler
+  // never fetches: an unpinned URL is blocked, so the capture page still has
+  // no live network.
+  const frozenScriptBytes = (url) => (
+    frozenScripts ? frozenScripts.resolve(url) : null
+  );
+  const canServeFrozenScripts = Boolean(
+    frozenScripts && typeof session?.protocol?.handle === "function",
+  );
+  if (canServeFrozenScripts) {
+    session.protocol.handle("https", (request) => {
+      const bytes = frozenScriptBytes(request?.url);
+      return bytes ? frozenScriptResponse(bytes) : blockedRequestResponse();
+    });
+  }
   session?.webRequest?.onBeforeRequest?.((details, callback) => {
     let allowed = false;
     try {
       const expected = new URL(expectedUrl);
       const requested = new URL(details.url);
-      allowed = requested.protocol === "pageroot-preview:"
-        && requested.hostname === expected.hostname;
+      allowed = (
+        requested.protocol === "pageroot-preview:"
+        && requested.hostname === expected.hostname
+      ) || (
+        canServeFrozenScripts
+        && requested.protocol === "https:"
+        && frozenScriptBytes(details.url) !== null
+      );
     } catch {
       allowed = false;
     }
@@ -981,6 +1024,7 @@ export function createRuntimeSnapshotCaptureController({
   revokeSession,
   createIsolatedSession,
   releaseIsolatedSession = async () => {},
+  frozenChartScripts = null,
   ownerDeadlineMs = RUNTIME_VISUAL_CONTRACT.ownerDeadlineMs,
   captureSettleMs = RUNTIME_VISUAL_CONTRACT.captureSettleMs,
   randomToken = () => randomBytes(12).toString("hex"),
@@ -1029,6 +1073,26 @@ export function createRuntimeSnapshotCaptureController({
     }
     const operationKey = `${request.captureSessionId}:${request.side}`;
     activeCaptures.get(operationKey)?.cancel("superseded");
+
+    // Prewarm runs before the owner deadline starts and is bounded by its own
+    // budget. Freezing happens per capture session, so the before and after
+    // sides always observe the same script bytes or the same absence.
+    const sessionFrozenScripts = frozenChartScripts
+      ? {
+        resolve: (url) => frozenChartScripts.resolve(request.captureSessionId, url),
+      }
+      : null;
+    if (frozenChartScripts) {
+      try {
+        await frozenChartScripts.prewarm({
+          captureSessionId: request.captureSessionId,
+          html: request.html,
+        });
+      } catch {
+        // A failed prewarm only leaves scripts unpinned; capture proceeds and
+        // the affected hosts stay unavailable, exactly like today.
+      }
+    }
 
     let captureWindow = null;
     let previewSession = null;
@@ -1081,7 +1145,7 @@ export function createRuntimeSnapshotCaptureController({
       if (!isolatedSession || typeof isolatedSession !== "object") {
         return result("failed", "invalid-isolated-session");
       }
-      configureIsolatedSession(isolatedSession, previewSession.url);
+      configureIsolatedSession(isolatedSession, previewSession.url, sessionFrozenScripts);
       captureWindow = new BrowserWindowClass({
         show: false,
         frame: false,
