@@ -160,7 +160,12 @@ function pageScenarios(pagePath) {
   const discovered = discoverReviewRuntimePageCandidates(html);
   if (!discovered.candidates.length) return [];
   const label = path.basename(pagePath).replace(/\.html?$/iu, "").slice(0, 28);
-  return reviewRuntimePageMutations(html, discovered.hostIds).flatMap((mutation) => {
+  const hostSelectors = discovered.candidates
+    .flatMap((candidate) => candidate.identityAttributes
+      .filter(([name]) => name === "id")
+      .map(([, value]) => value));
+  return reviewRuntimePageMutations(html, discovered.hostIds, hostSelectors)
+    .flatMap((mutation) => {
     const after = discoverReviewRuntimePageCandidates(mutation.after);
     // A mutation that changed how many hosts bind would compare two different
     // populations; drop it rather than report a meaningless row.
@@ -442,7 +447,12 @@ async function main() {
         const expected = scenario.expectationByKey?.get(candidate.key)
           || scenario.chartExpectation;
         const falsePositive = expected === "unchanged" && verdict === "changed";
-        const falseNegative = expected === "changed" && verdict !== "changed";
+        // "Could not capture" and "captured but did not notice" are different
+        // failures with different fixes, so a candidate that never rendered is
+        // not counted as a miss.
+        const comparable = beforeSnapshot?.state === "captured"
+          && afterSnapshot?.state === "captured";
+        const falseNegative = expected === "changed" && comparable && verdict !== "changed";
         if ((falsePositive || falseNegative) && options.keepPixels) {
           const stem = `${renderer}-${scenarioId}-run${run}-${candidate.key}`;
           [["before", beforeSnapshot], ["after", afterSnapshot]].forEach(([side, snapshot]) => {
@@ -459,6 +469,7 @@ async function main() {
           run,
           candidateKey: candidate.key,
           expected,
+          comparable,
           verdict,
           step,
           rasterDifference,
@@ -499,6 +510,7 @@ async function main() {
       scenarioId,
       expected: [...new Set(scenarioRows.map((row) => row.expected))].join("+"),
       candidateRows: scenarioRows.length,
+      comparableRows: scenarioRows.filter((row) => row.comparable).length,
       falsePositives: scenarioRows.filter((row) => row.falsePositive).length,
       falseNegatives: scenarioRows.filter((row) => row.falseNegative).length,
       unverified: scenarioRows.filter((row) => row.verdict === "unverified").length,
@@ -569,6 +581,7 @@ async function main() {
     process.stdout.write(
       `${entry.renderer.padEnd(30)}${entry.scenarioId.padEnd(20)} expect=${entry.expected.padEnd(18)} `
       + `rows=${String(entry.candidateRows).padStart(3)} `
+      + `可比=${String(entry.comparableRows).padStart(3)} `
       + `FP=${String(entry.falsePositives).padStart(3)} `
       + `FN=${String(entry.falseNegatives).padStart(3)} `
       + `unverified=${String(entry.unverified).padStart(3)} `

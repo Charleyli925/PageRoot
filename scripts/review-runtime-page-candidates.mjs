@@ -114,6 +114,13 @@ function insertAfterBodyOpen(html, markup) {
   return html.slice(0, at) + markup + html.slice(at);
 }
 
+function insertAfterHeadOpen(html, markup) {
+  const match = /<head\b[^>]*>/iu.exec(html);
+  if (!match) return null;
+  const at = match.index + match[0].length;
+  return html.slice(0, at) + markup + html.slice(at);
+}
+
 function insertBeforeBodyClose(html, markup) {
   const at = html.toLowerCase().lastIndexOf("</body>");
   if (at < 0) return null;
@@ -135,14 +142,101 @@ const APPENDED_NOTE = '<p data-pageroot-census-appended="true" '
   + 'style="margin:16px;color:#6b7280;font-size:12px">普查追加的页尾说明文字。</p>';
 
 /**
- * Byte-level mutations only. Each one edits the authored bytes and leaves
- * every other byte untouched, which is what makes "the chart must not change"
- * a fair claim.
+ * Changes what a chart draws, on any authored page, without knowing how that
+ * page builds its option object.
+ *
+ * The library assigns itself to a global, so intercepting that access is
+ * enough to wrap every chart the page later creates. The wrap happens on read
+ * rather than on assignment: a UMD bundle publishes an empty object first and
+ * only then fills in `init`, so wrapping at assignment time would inspect a
+ * bare `{}` and silently do nothing.
+ *
+ * Byte-level edits cannot reach chart content the way they reach markup, and a
+ * census that only ever edits markup can prove "no false alarm" while proving
+ * nothing about detection — which is the more dangerous half to get wrong.
+ */
+function chartContentPatch(body) {
+  return `<script data-pageroot-census-patch="true">(function () {
+  var patched = null;
+  function wrap(library) {
+    if (!library || typeof library.init !== "function" || library.__pagerootCensusPatched) {
+      return library;
+    }
+    var originalInit = library.init;
+    library.init = function () {
+      var chart = originalInit.apply(this, arguments);
+      if (chart && typeof chart.setOption === "function" && !chart.__pagerootCensusPatched) {
+        var originalSetOption = chart.setOption;
+        chart.setOption = function (option) {
+          try { mutate(option); } catch (error) { /* never break the page */ }
+          return originalSetOption.apply(this, arguments);
+        };
+        chart.__pagerootCensusPatched = true;
+      }
+      return chart;
+    };
+    library.__pagerootCensusPatched = true;
+    return library;
+  }
+  function mutate(option) {
+${body}
+  }
+  Object.defineProperty(window, "echarts", {
+    configurable: true,
+    get: function () { return wrap(patched); },
+    set: function (value) { patched = value; },
+  });
+})();</script>`;
+}
+
+const RECOLOUR_PALETTE = ["#1f9d76", "#4cb894", "#8ad3ba", "#c4e9dc", "#0f6b50"];
+
+const RECOLOUR_PATCH = chartContentPatch(`    if (!option || typeof option !== "object") return;
+    option.color = ${JSON.stringify(RECOLOUR_PALETTE)};
+    var series = Array.isArray(option.series) ? option.series : [];
+    series.forEach(function (entry) {
+      if (!entry || typeof entry !== "object") return;
+      entry.color = null;
+      if (entry.itemStyle) entry.itemStyle.color = null;
+      if (entry.lineStyle) entry.lineStyle.color = null;
+      if (entry.areaStyle) entry.areaStyle.color = null;
+    });`);
+
+// A single SVG rule reaches inline vector charts, which no library hook can.
+const RECOLOUR_STYLE = '<style data-pageroot-census-patch="true">'
+  + `svg path,svg rect,svg polygon,svg circle{fill:${RECOLOUR_PALETTE[0]} !important}`
+  + `svg polyline,svg line{stroke:${RECOLOUR_PALETTE[0]} !important}</style>`;
+
+const RESCALE_PATCH = chartContentPatch(`    if (!option || typeof option !== "object") return;
+    var series = Array.isArray(option.series) ? option.series : [];
+    series.forEach(function (entry) {
+      if (!entry || !Array.isArray(entry.data)) return;
+      entry.data = entry.data.map(function (point) {
+        if (typeof point === "number") return point * 1.32 + 3;
+        if (point && typeof point === "object" && typeof point.value === "number") {
+          var copy = {};
+          for (var key in point) { if (Object.prototype.hasOwnProperty.call(point, key)) copy[key] = point[key]; }
+          copy.value = point.value * 1.32 + 3;
+          return copy;
+        }
+        return point;
+      });
+    });`);
+
+/**
+ * Each mutation edits the authored bytes and leaves every other byte
+ * untouched, which is what makes "the chart must not change" a fair claim.
  *
  * `noop` is the strictest false-positive probe available: both sides are the
  * same bytes, so any reported chart change is unambiguously the pipeline's.
+ * The recolour and rescale mutations are the other half — without them a
+ * census can only show that nothing is reported, never that something would
+ * be.
  */
-export function reviewRuntimePageMutations(html, hostIds) {
+export function reviewRuntimePageMutations(html, hostIds, hostSelectors = []) {
+  const selector = hostSelectors.filter((value) => /^[A-Za-z][\w-]*$/u.test(value))
+    .map((value) => `#${value}`)
+    .join(",");
   const mutations = [
     { id: "real-noop", chartExpectation: "unchanged", after: html },
     {
@@ -155,7 +249,31 @@ export function reviewRuntimePageMutations(html, hostIds) {
       chartExpectation: "unchanged",
       after: insertAfterBodyOpen(html, INSERTED_BLOCK),
     },
+    {
+      id: "real-chart-recolor",
+      chartExpectation: "changed",
+      after: insertAfterHeadOpen(html, RECOLOUR_PATCH + RECOLOUR_STYLE),
+    },
+    {
+      id: "real-chart-rescale",
+      chartExpectation: "changed",
+      after: insertAfterHeadOpen(html, RESCALE_PATCH),
+    },
   ];
+  if (selector) {
+    // Library-independent control. Inverting a host repaints everything drawn
+    // inside it, so a host that renders anything at all must be reported as
+    // changed. When this one is missed, the capture never saw the host's
+    // content and no library-level probe can be trusted on that page.
+    mutations.push({
+      id: "real-host-invert",
+      chartExpectation: "changed",
+      after: insertBeforeHeadClose(
+        html,
+        `<style data-pageroot-census-patch="true">${selector}{filter:invert(1) !important}</style>`,
+      ),
+    });
+  }
   const firstHost = hostIds[0];
   // Only ids a CSS selector can carry verbatim; anything else would need
   // escaping rules this probe has no reason to reimplement.
