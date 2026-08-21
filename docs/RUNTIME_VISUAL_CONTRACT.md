@@ -113,9 +113,22 @@ The owner always has these containment properties:
 - a hidden sandboxed BrowserWindow with no Node, preload or Bridge;
 - a disposable non-persistent partition and preview session;
 - only main-owned, declared source-relative assets for the active document;
-- denied permissions, navigation, popups, downloads, webviews and other URLs;
+- denied permissions, navigation, popups, downloads, webviews and other URLs,
+  except allowlisted chart-library scripts served from main-frozen bytes as
+  described below — the capture page itself never reaches the live network;
 - one isolated rect pass, at most one PNG per host, bounded PNG/pixel budgets,
   a main-process deadline and forced cleanup.
+
+Before the first side of a pair is captured, the main process prewarms every
+allowlisted chart-library `<script src>` URL declared in the frozen HTML
+(the same HTTPS host allowlist and bounded fetcher as the Edit one-shot
+ECharts session) and freezes the bytes, under its own bounded prewarm budget.
+The isolated session then answers exactly those pinned URLs from the frozen
+bytes and blocks every other https request; a URL that failed or missed the
+prewarm stays absent for both sides of that capture session, so a fetch that
+would succeed between the two sides can never render one side and leave the
+other blank. Frozen bytes are immutable and shared across later reviews;
+fetch failure, oversize or timeout only leaves the affected chart unverified.
 
 After the first offscreen paint the owner waits one bounded settle period
 (`captureSettleMs`) before measuring and sampling, because chart libraries

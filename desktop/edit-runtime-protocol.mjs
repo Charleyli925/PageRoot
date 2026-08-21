@@ -259,6 +259,11 @@ function permittedEchartsUrl(value) {
   }
 }
 
+// The Review snapshot owner freezes the same allowlisted chart-library
+// scripts before capturing, so the allowlist and the bounded fetcher have
+// exactly one implementation.
+export { permittedEchartsUrl };
+
 function remoteScriptTimeoutError() {
   return new TypeError("Edit runtime CDN script timed out.");
 }
@@ -375,6 +380,8 @@ async function fetchFixedEchartsBytes(initialUrl, netFetch, deadlineAt, preparat
   }
   throw new TypeError("Edit runtime CDN redirect limit exceeded.");
 }
+
+export { fetchFixedEchartsBytes };
 
 async function fixedAuthorScripts({
   html,

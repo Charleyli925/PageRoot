@@ -136,6 +136,9 @@ import {
   createRuntimeSnapshotCaptureController,
 } from "./runtime-visual-capture-owner.mjs";
 import {
+  createReviewRuntimeFrozenScriptStore,
+} from "./review-runtime-frozen-scripts.mjs";
+import {
   createEditRuntimePreparationFence,
 } from "./edit-runtime-preparation-fence.mjs";
 import {
@@ -438,8 +441,14 @@ function ensureReviewRuntimeSnapshotCaptureController() {
           Promise.resolve(
             isolatedSession.protocol?.unhandle?.("pageroot-preview"),
           ).catch(() => undefined),
+          Promise.resolve(
+            isolatedSession.protocol?.unhandle?.("https"),
+          ).catch(() => undefined),
         ]);
       },
+      frozenChartScripts: createReviewRuntimeFrozenScriptStore({
+        netFetch: (url, options) => net.fetch(url, options),
+      }),
     });
   }
   return reviewRuntimeSnapshotCaptureController;
