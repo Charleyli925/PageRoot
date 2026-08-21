@@ -3819,3 +3819,195 @@ test("classifyOpenPath is read-only for managed, known and new HTML", async (t) 
   assert.deepEqual(await readFile(registryPath(value)), registryBefore);
 });
 
+// Forward compatibility. A Registry that carries every required member plus a
+// member a newer PageRoot added is fully explainable, so it is read normally
+// and that member survives the next Registry write. Refusing it instead would
+// lock every project out of an older build, and dropping it would destroy the
+// newer build's data just as silently as replacing the whole file.
+test("a newer Registry member survives an older build's read and write", async (t) => {
+  const value = await fixture(t);
+  const first = await importSource(value, "第一个.html");
+  const seeded = JSON.parse(await readFile(registryPath(value), "utf8"));
+  seeded.futureRegistrySection = { schemaChannel: "next" };
+  seeded.projects[first.target.projectId].ownerAccountId = "account_future";
+  await writeFile(
+    registryPath(value),
+    `${JSON.stringify(seeded, null, 2)}\n`,
+    "utf8",
+  );
+
+  await assert.doesNotReject(() => value.repository.listRegisteredProjects());
+
+  // A second import forces a full Registry read, mutation and atomic write.
+  const second = await importSource(value, "第二个.html");
+
+  const after = JSON.parse(await readFile(registryPath(value), "utf8"));
+  assert.deepEqual(after.futureRegistrySection, { schemaChannel: "next" });
+  assert.equal(
+    after.projects[first.target.projectId].ownerAccountId,
+    "account_future",
+  );
+  assert.ok(after.projects[second.target.projectId]);
+});
+
+// The stored Draft is an envelope: #saveDraft rebuilds schemaVersion, project,
+// document, Working Copy and base Version from the loaded project and then
+// spreads the active snapshot over it. Those five members are authored by the
+// writer on every save, so they must never be carried back from disk as if they
+// were unknown members — a stale file would otherwise overwrite the
+// authoritative identity and pin the schema version forever.
+test("a stored Draft keeps its authoritative envelope while preserving unknown members", async (t) => {
+  const value = await fixture(t);
+  const { target } = await importSource(value, "草稿信封.html");
+  const draftFile = path.join(
+    target.projectRootPath,
+    ".pageroot",
+    "drafts",
+    `${target.workingCopyId}.json`,
+  );
+
+  await value.repository.saveDraft({
+    target,
+    operationId: "draftop_envelope_000001",
+    expectedDraftRevision: 0,
+    comments: [{ commentId: "comment_a", text: "a" }],
+    changeEvents: [],
+    deletedCommentIds: [],
+  });
+  const persisted = await json(draftFile);
+  assert.equal(persisted.workingCopyId, target.workingCopyId);
+
+  // A newer build added a member, and the envelope on disk has drifted.
+  await writeFile(
+    draftFile,
+    `${JSON.stringify({
+      ...persisted,
+      schemaVersion: "9.9.9",
+      workingCopyId: "work_ver_9999",
+      provenance: { actor: "human" },
+    }, null, 2)}\n`,
+    "utf8",
+  );
+
+  await value.repository.saveDraft({
+    target,
+    operationId: "draftop_envelope_000002",
+    expectedDraftRevision: persisted.draftRevision,
+    comments: [{ commentId: "comment_a", text: "b" }],
+    changeEvents: [],
+    deletedCommentIds: [],
+  });
+
+  const rewritten = await json(draftFile);
+  assert.equal(rewritten.schemaVersion, persisted.schemaVersion);
+  assert.equal(rewritten.workingCopyId, target.workingCopyId);
+  assert.equal(rewritten.projectId, target.projectId);
+  assert.deepEqual(rewritten.provenance, { actor: "human" });
+});
+
+// manifest.json is mutated in place and written back as the object that was
+// read, and the Working Copy state spreads the record it read before overriding
+// its authoritative members. Both orderings preserve a member a newer PageRoot
+// added; the stored Draft envelope above is the one that had to be corrected to
+// match them.
+//
+// `fileIdentity` is the counter-example and the boundary of the rule. It is
+// authored from a fresh stat on every save — a save publishes through an atomic
+// rename, so the inode legitimately changes — and is therefore replaced, not
+// round-tripped. An authored sub-record cannot carry unknown members, and its
+// schema stays strict.
+test("unknown manifest and Working Copy state members survive an ordinary save", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "清单未知成员.html");
+  const control = path.join(imported.target.projectRootPath, ".pageroot");
+  const manifestFile = path.join(control, "manifest.json");
+
+  const manifest = await json(manifestFile);
+  manifest.ownerAccountId = "account_future";
+  manifest.versions[0].provenance = { seq: 1 };
+  manifest.workingCopies[0].provenance = { seq: 2 };
+  manifest.workingCopies[0].fileIdentity.futureIdentity = "next";
+  await writeFile(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+
+  const stateFile = path.join(
+    control,
+    manifest.workingCopies[0].stateRelativePath,
+  );
+  const state = await json(stateFile);
+  state.provenance = { seq: 3 };
+  await writeFile(stateFile, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+
+  const saved = await value.repository.saveWorkingCopy({
+    target: imported.target,
+    html: html("清单未知成员 saved"),
+    expectedSourceSha256: imported.target.sourceSha256,
+    editRevision: 1,
+  });
+  assert.equal(saved.versionCreated, false);
+
+  const rewrittenManifest = await json(manifestFile);
+  assert.equal(rewrittenManifest.ownerAccountId, "account_future");
+  assert.deepEqual(rewrittenManifest.versions[0].provenance, { seq: 1 });
+  assert.deepEqual(rewrittenManifest.workingCopies[0].provenance, { seq: 2 });
+  assert.equal(
+    "futureIdentity" in rewrittenManifest.workingCopies[0].fileIdentity,
+    false,
+  );
+  assert.deepEqual(
+    Object.keys(rewrittenManifest.workingCopies[0].fileIdentity).sort(),
+    ["birthtimeMs", "device", "inode"],
+  );
+
+  const rewrittenState = await json(stateFile);
+  assert.deepEqual(rewrittenState.provenance, { seq: 3 });
+  assert.equal(rewrittenState.schemaVersion, state.schemaVersion);
+});
+
+// runtime-state.json is layered rather than uniformly preserved or authored.
+// Its root is spread by normalizeRuntimeDisplayAnchors, and historyActivation is
+// mutated in place when the desktop confirms, so both carry a member a newer
+// PageRoot added. activeRequest is replaced with a fresh literal on every status
+// transition and lastAiTask is re-derived from the AI task record, so those two
+// are authored and their schemas stay strict.
+test("unknown Runtime root and historyActivation members survive a confirmation", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "运行态未知成员.html");
+  const active = await promoteNextVersion(
+    value.repository,
+    imported.target,
+    "runtime_unknown",
+  );
+  const runtimeFile = path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "runtime-state.json",
+  );
+
+  const activated = await value.repository.activateVersionWorkingCopy({
+    target: active,
+    versionId: "ver_0001",
+    operationId: "runtime_unknown_activation_0001",
+    expectedActiveWorkingCopyId: "work_ver_0002",
+  });
+  assert.equal(activated.historyActivation.state, "desktop-pending");
+
+  const runtime = await json(runtimeFile);
+  runtime.ownerAccountId = "account_future";
+  runtime.historyActivation.provenance = { seq: 1 };
+  await writeFile(runtimeFile, `${JSON.stringify(runtime, null, 2)}\n`, "utf8");
+
+  const confirmed = await value.repository.confirmVersionWorkingCopyActivation({
+    target: activated.target,
+    operationId: "runtime_unknown_activation_0001",
+    previousWorkingCopyId: "work_ver_0002",
+    activatedWorkingCopyId: "work_ver_0001",
+    versionId: "ver_0001",
+  });
+  assert.equal(confirmed.confirmed, true);
+
+  const rewritten = await json(runtimeFile);
+  assert.equal(rewritten.historyActivation.state, "desktop-confirmed");
+  assert.equal(rewritten.ownerAccountId, "account_future");
+  assert.deepEqual(rewritten.historyActivation.provenance, { seq: 1 });
+});
+

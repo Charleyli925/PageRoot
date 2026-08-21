@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://pageroot.local/schemas/project-runtime-state.v4.schema.json",
+  "$comment": "Forward compatible per level. The root is spread on write and `historyActivation` is mutated in place when the desktop confirms, so both preserve a member added by a newer PageRoot. `activeRequest` is replaced with a fresh record on every status transition and `lastAiTask` is re-derived from the AI task record, so both are authored and stay strict.",
   "type": "object",
-  "additionalProperties": false,
   "required": [
     "schemaVersion",
     "projectId",
@@ -109,7 +109,6 @@
     },
     "historyActivation": {
       "type": ["object", "null"],
-      "additionalProperties": false,
       "required": [
         "operationId",
         "projectId",

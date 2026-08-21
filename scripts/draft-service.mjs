@@ -7,6 +7,46 @@ import { decodeDraftCommandOperationId } from "./draft-command-decoder.mjs";
 const COMMENT_ID_PATTERN = /^comment_[A-Za-z0-9_-]+$/;
 const APPLIED_OPERATION_LIMIT = 256;
 
+// Forward compatibility. Every member this build owns is rebuilt from the
+// authoritative aggregate, and every member a newer PageRoot added is carried
+// through read -> modify -> write unchanged. `editEvents` is the retired alias
+// of `changeEvents`, so it counts as known and is not carried twice.
+//
+// The five envelope members are known for a different reason. The repository
+// stores a Draft as `{ schemaVersion, projectId, documentId, workingCopyId,
+// basedOnVersionId, ...snapshot }` and rebuilds all five from the loaded
+// project on every save. Carrying them back from disk as if they were unknown
+// would let the snapshot spread a stale identity over the authoritative one and
+// pin the schema version forever.
+const KNOWN_DRAFT_KEYS = new Set([
+  "schemaVersion",
+  "projectId",
+  "documentId",
+  "workingCopyId",
+  "basedOnVersionId",
+  "annotationsRelativePath",
+  "annotationsSha256",
+  "commentIds",
+  "editEventIds",
+  "draftRevision",
+  "updatedAt",
+  "comments",
+  "changeEvents",
+  "editEvents",
+  "deletedCommentIds",
+  "appliedOperationIds",
+]);
+
+function preserveUnknownDraftMembers(snapshot, draft) {
+  let preserved = null;
+  for (const key of Object.keys(draft)) {
+    if (KNOWN_DRAFT_KEYS.has(key)) continue;
+    preserved ??= {};
+    preserved[key] = draft[key];
+  }
+  return preserved ? { ...snapshot, ...preserved } : snapshot;
+}
+
 function cleanIdentity(value) {
   return String(value ?? "").trim().slice(0, 180);
 }
@@ -33,7 +73,7 @@ export function activeDraftSnapshot(runtimeDraft, now = () => (
     ? runtimeDraft
     : {};
   const authoritative = normalizeAuthoritativeDraft(draft);
-  return {
+  return preserveUnknownDraftMembers({
     annotationsRelativePath:
       draft.annotationsRelativePath ?? "draft/annotations.json",
     annotationsSha256: draft.annotationsSha256 ?? "",
@@ -49,7 +89,7 @@ export function activeDraftSnapshot(runtimeDraft, now = () => (
     changeEvents: authoritative.changeEvents,
     deletedCommentIds: authoritative.deletedCommentIds,
     appliedOperationIds: authoritative.appliedOperationIds,
-  };
+  }, draft);
 }
 
 export function applyDraftCommand(

@@ -2,8 +2,8 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://html-change.local/schemas/source-history.v1.schema.json",
   "title": "PageRoot persistent source operation history v1",
+  "$comment": "Forward compatible. Every required member stays strictly validated, and a member added by a newer PageRoot is preserved unchanged through read, edit and write so an older build never silently deletes it. Preserved members take no part in validation and still count against the journal byte budget.",
   "type": "object",
-  "additionalProperties": false,
   "required": [
     "schemaVersion",
     "projectId",
@@ -77,7 +77,6 @@
     },
     "selection": {
       "type": "object",
-      "additionalProperties": false,
       "required": [
         "anchor",
         "focus",
@@ -104,7 +103,6 @@
     },
     "patch": {
       "type": "object",
-      "additionalProperties": false,
       "required": [
         "startOffset",
         "endOffset",
@@ -138,7 +136,6 @@
     },
     "entry": {
       "type": "object",
-      "additionalProperties": false,
       "required": [
         "operationId",
         "kind",
@@ -215,7 +212,6 @@
     },
     "appliedAction": {
       "type": "object",
-      "additionalProperties": false,
       "required": [
         "actionId",
         "direction",
