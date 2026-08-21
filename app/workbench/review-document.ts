@@ -51,6 +51,9 @@ import {
   reviewBadgeLabelText,
 } from "../lib/review-badge-aggregation.js";
 import {
+  reviewRegionAnnotations,
+} from "../lib/review-region-annotation.js";
+import {
   REVIEW_SOURCE_NODE_ATTRIBUTE,
   prepareReviewCommentSourceProjection,
   resolveReviewCommentSourceElement,
@@ -78,7 +81,10 @@ export type ReviewSide = "before" | "after";
 
 // Overlay tones for structure and visual footprints. The review toolbar reads
 // them so its legend dots stay identical to the marks drawn on the pages.
-export const REVIEW_STRUCTURE_TONE_COLOR = "#1677c8";
+// Both confirmed tones sit in the single violet accent family: at a 1.5px
+// outline the old structure blue read the same as violet anyway, and the
+// change kind is carried by caption text and the filter legend, not by hue.
+export const REVIEW_STRUCTURE_TONE_COLOR = "#6d5ce7";
 export const REVIEW_STYLE_TONE_COLOR = "#6d5ce7";
 // Amber marks a runtime host the pipeline could not verify: the region keeps
 // full visibility and gets a dashed "疑似有改动" frame instead of a claim.
@@ -324,7 +330,7 @@ ${REVIEW_TEXT_EVIDENCE_MARKER_CSS}
     max-height: none !important;
     margin: 0 !important;
     padding: 0 !important;
-    border: calc(1.5px * var(--pageroot-review-ui-scale)) dashed ${REVIEW_STRUCTURE_TONE_COLOR} !important;
+    border: calc(1.5px * var(--pageroot-review-ui-scale)) solid transparent !important;
     border-radius: calc(5px * var(--pageroot-review-ui-scale)) !important;
     outline: none !important;
     background: transparent !important;
@@ -338,21 +344,31 @@ ${REVIEW_TEXT_EVIDENCE_MARKER_CSS}
   [data-pageroot-review-overlay-box][data-tone="text-removed"],
   [data-pageroot-review-overlay-box][data-tone="text-added"] {
     border-width: calc(1px * var(--pageroot-review-ui-scale)) !important;
+  }
+
+  /* A confirmed change rests silent: the dim mask, the page-edge revision bar
+     and one caption per region already say where it is. The precise outline
+     appears only when the reader reaches for it — hover previews, focus
+     claims. */
+  [data-pageroot-review-overlay-box][data-hover="true"] {
+    border-color: rgb(109 92 231 / 55%) !important;
+  }
+
+  [data-pageroot-review-overlay-box][data-active="true"] {
     border-color: ${REVIEW_STYLE_TONE_COLOR} !important;
-    border-style: solid !important;
+    background: rgb(109 92 231 / 4%) !important;
   }
 
-  [data-pageroot-review-overlay-box][data-tone="structure"] {
-    border-color: ${REVIEW_STRUCTURE_TONE_COLOR} !important;
-  }
-
-  [data-pageroot-review-overlay-box][data-tone="style"],
-  [data-pageroot-review-overlay-box][data-tone="mixed"] {
-    border-color: ${REVIEW_STYLE_TONE_COLOR} !important;
-  }
-
+  /* The amber suspected frame is an unverified-visibility hint, not a
+     confirmed claim; it never goes quiet. */
   [data-pageroot-review-overlay-box][data-tone="suspected"] {
+    border-style: dashed !important;
     border-color: ${REVIEW_SUSPECTED_TONE_COLOR} !important;
+    background: transparent !important;
+  }
+
+  [data-pageroot-review-overlay-box][data-tone="suspected"][data-active="true"] {
+    background: rgb(217 119 6 / 6%) !important;
   }
 
   [data-pageroot-review-overlay-box][data-tone="suspected"] [data-pageroot-review-overlay-label] {
@@ -362,6 +378,7 @@ ${REVIEW_TEXT_EVIDENCE_MARKER_CSS}
 
   [data-pageroot-review-overlay-box][data-shaped="true"] {
     border: 0 !important;
+    background: transparent !important;
   }
 
   [data-pageroot-review-overlay-shape-svg] {
@@ -389,26 +406,24 @@ ${REVIEW_TEXT_EVIDENCE_MARKER_CSS}
   [data-pageroot-review-overlay-shape] {
     display: block !important;
     fill: none !important;
-    stroke: ${REVIEW_STRUCTURE_TONE_COLOR} !important;
+    stroke: transparent !important;
     stroke-width: calc(1.5px * var(--pageroot-review-ui-scale)) !important;
-    stroke-dasharray: calc(5px * var(--pageroot-review-ui-scale)) calc(4px * var(--pageroot-review-ui-scale)) !important;
     stroke-linejoin: round !important;
     stroke-linecap: round !important;
     vector-effect: non-scaling-stroke !important;
   }
 
-  [data-pageroot-review-overlay-box][data-tone="text-removed"] [data-pageroot-review-overlay-shape],
-  [data-pageroot-review-overlay-box][data-tone="text-added"] [data-pageroot-review-overlay-shape] {
-    stroke: ${REVIEW_STYLE_TONE_COLOR} !important;
+  [data-pageroot-review-overlay-box][data-hover="true"] [data-pageroot-review-overlay-shape] {
+    stroke: rgb(109 92 231 / 55%) !important;
   }
 
-  [data-pageroot-review-overlay-box][data-tone="style"] [data-pageroot-review-overlay-shape],
-  [data-pageroot-review-overlay-box][data-tone="mixed"] [data-pageroot-review-overlay-shape] {
+  [data-pageroot-review-overlay-box][data-active="true"] [data-pageroot-review-overlay-shape] {
     stroke: ${REVIEW_STYLE_TONE_COLOR} !important;
   }
 
   [data-pageroot-review-overlay-box][data-tone="suspected"] [data-pageroot-review-overlay-shape] {
     stroke: ${REVIEW_SUSPECTED_TONE_COLOR} !important;
+    stroke-dasharray: calc(5px * var(--pageroot-review-ui-scale)) calc(4px * var(--pageroot-review-ui-scale)) !important;
   }
 
   [data-pageroot-review-overlay-label] {
@@ -418,21 +433,82 @@ ${REVIEW_TEXT_EVIDENCE_MARKER_CSS}
     z-index: 2 !important;
     display: inline-flex !important;
     align-items: center !important;
-    min-height: calc(19px * var(--pageroot-review-ui-scale)) !important;
+    min-height: calc(18px * var(--pageroot-review-ui-scale)) !important;
     max-width: min(320px, calc(100vw - 24px)) !important;
-    padding: calc(3px * var(--pageroot-review-ui-scale)) calc(7px * var(--pageroot-review-ui-scale)) !important;
+    padding: calc(2px * var(--pageroot-review-ui-scale)) calc(7px * var(--pageroot-review-ui-scale)) !important;
     overflow: hidden !important;
-    border: 1px solid rgb(90 85 223 / 24%) !important;
+    border: 1px solid rgb(90 85 223 / 18%) !important;
     border-radius: calc(6px * var(--pageroot-review-ui-scale)) !important;
-    background: rgb(255 255 255 / 94%) !important;
-    color: #4843c9 !important;
-    box-shadow: 0 4px 12px rgb(30 25 70 / 12%) !important;
+    background: rgb(255 255 255 / 88%) !important;
+    color: #4f47b8 !important;
+    box-shadow: 0 2px 8px rgb(30 25 70 / 8%) !important;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
     font-size: calc(10px * var(--pageroot-review-ui-scale)) !important;
-    font-weight: 700 !important;
+    font-weight: 640 !important;
     line-height: 1.2 !important;
     white-space: nowrap !important;
     text-overflow: ellipsis !important;
+    pointer-events: auto !important;
+    cursor: pointer !important;
+  }
+
+  /* At the document's very top there is no room above the box, so the caption
+     slides just below its top edge instead of clipping outside the page. */
+  [data-pageroot-review-overlay-box][data-label-inside="true"] [data-pageroot-review-overlay-label] {
+    bottom: auto !important;
+    top: calc(100% + 4px) !important;
+  }
+
+  [data-pageroot-review-overlay-box][data-hover="true"] [data-pageroot-review-overlay-label] {
+    background: rgb(255 255 255 / 94%) !important;
+    border-color: rgb(90 85 223 / 30%) !important;
+  }
+
+  [data-pageroot-review-overlay-box][data-active="true"] [data-pageroot-review-overlay-label] {
+    background: rgb(255 255 255 / 96%) !important;
+    border-color: rgb(90 85 223 / 40%) !important;
+    color: #4843c9 !important;
+    font-weight: 700 !important;
+    box-shadow: 0 4px 14px rgb(30 25 70 / 14%) !important;
+  }
+
+  /* One page-edge revision bar per change region: a constant-width quiet
+     position index that pairs with the content map and the navigator. */
+  [data-pageroot-review-region-bar] {
+    position: absolute !important;
+    z-index: 2 !important;
+    display: block !important;
+    width: calc(3px * var(--pageroot-review-ui-scale)) !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: calc(2px * var(--pageroot-review-ui-scale)) !important;
+    outline: none !important;
+    background: ${REVIEW_STYLE_TONE_COLOR} !important;
+    box-shadow: none !important;
+    opacity: .5 !important;
+    filter: none !important;
+    transform: none !important;
+    pointer-events: auto !important;
+    cursor: pointer !important;
+  }
+
+  [data-pageroot-review-region-bar]:hover,
+  [data-pageroot-review-region-bar][data-hover="true"] {
+    opacity: .85 !important;
+  }
+
+  [data-pageroot-review-region-bar][data-active="true"] {
+    opacity: 1 !important;
+    box-shadow: 0 0 0 calc(2.5px * var(--pageroot-review-ui-scale)) rgb(109 92 231 / 14%) !important;
+  }
+
+  [data-pageroot-review-region-bar][data-suspect="true"] {
+    background: ${REVIEW_SUSPECTED_TONE_COLOR} !important;
+  }
+
+  [data-pageroot-review-region-bar][data-suspect="true"][data-active="true"] {
+    box-shadow: 0 0 0 calc(2.5px * var(--pageroot-review-ui-scale)) rgb(217 119 6 / 14%) !important;
   }
 
   [data-pageroot-review-transition-mask] {
@@ -3186,6 +3262,7 @@ function reviewBootstrap(
   const reviewBadgeLabelText = ${reviewBadgeLabelText.toString()};
   const reviewBadgeFactCount = ${reviewBadgeFactCount.toString()};
   const aggregateReviewBadgeLabels = ${aggregateReviewBadgeLabels.toString()};
+  const reviewRegionAnnotations = ${reviewRegionAnnotations.toString()};
   const runtimeVisualBindCall = (method) => Function.prototype.call.bind(method);
   const runtimeVisualFunctionHasInstance = runtimeVisualBindCall(
     Function.prototype[Symbol.hasInstance],
@@ -4875,9 +4952,14 @@ function reviewBootstrap(
       }
       return intervals;
     }, []);
-  const expandTinyTextInterval = (record, ownerBounds) => {
+  const expandTinyTextInterval = (record, ownerBounds, em) => {
     const height = Math.max(1, record.bottom - record.top);
-    const minimumWidth = Math.max(24, height * 1.6);
+    // A readable minimum is a property of the text, not of its line box. Sizing
+    // it from the line box made a two-character edit inside generous leading
+    // reserve roughly three characters of width, so the frame visibly cut into
+    // the untouched glyph on each side.
+    const glyph = Number.isFinite(em) && em > 0 ? em : height * 0.62;
+    const minimumWidth = Math.max(16, glyph * 1.5);
     if (record.right - record.left >= minimumWidth || !ownerBounds) return record;
     const leftBoundary = ownerBounds.left;
     const rightBoundary = ownerBounds.right;
@@ -4982,7 +5064,8 @@ function reviewBootstrap(
     const base = records[0];
     const exactBounds = boundsForRects(records);
     if (!exactBounds) return null;
-    const readableBounds = expandTinyTextInterval(exactBounds, ownerLine?.bounds || null);
+    const em = Number.parseFloat(getComputedStyle(base.element).fontSize || "0");
+    const readableBounds = expandTinyTextInterval(exactBounds, ownerLine?.bounds || null, em);
     const bounds = boundsForRects([
       readableBounds,
       ...records.map(textEvidenceEnvelope),
@@ -5162,6 +5245,52 @@ function reviewBootstrap(
       return { ...record, labelPrimary };
     });
   };
+  // Hover preview: moving the pointer over a change region previews its
+  // precise outline without a click. The projection layer itself never takes
+  // pointer events, so hit-testing rides the document's pointer stream, one
+  // animation frame at a time; the smallest containing region wins so a small
+  // change inside a large one stays reachable.
+  let overlayHoverRegions = [];
+  let overlayElementsByChange = new RuntimeVisualMap();
+  let hoveredChangeId = "";
+  const setHoverChange = (changeId) => {
+    if (hoveredChangeId === changeId) return;
+    const clear = runtimeVisualMapGet(overlayElementsByChange, hoveredChangeId);
+    if (clear) runtimeVisualArrayForEach(clear, (element) => {
+      element.dataset.hover = "false";
+    });
+    hoveredChangeId = changeId;
+    const mark = runtimeVisualMapGet(overlayElementsByChange, changeId);
+    if (mark) runtimeVisualArrayForEach(mark, (element) => {
+      element.dataset.hover = "true";
+    });
+  };
+  let hoverPointerFrame = 0;
+  runtimeVisualAddEventListener("pointermove", (event) => {
+    if (hoverPointerFrame) return;
+    const pageX = event.clientX + scrollX;
+    const pageY = event.clientY + scrollY;
+    hoverPointerFrame = requestAnimationFrame(() => {
+      hoverPointerFrame = 0;
+      let match = "";
+      let matchArea = Infinity;
+      runtimeVisualArrayForEach(overlayHoverRegions, (region) => {
+        if (
+          pageX < region.left || pageX > region.right
+          || pageY < region.top || pageY > region.bottom
+        ) return;
+        const area = (region.right - region.left) * (region.bottom - region.top);
+        if (area < matchArea) {
+          match = region.changeId;
+          matchArea = area;
+        }
+      });
+      setHoverChange(match);
+    });
+  }, { passive: true });
+  runtimeVisualAddEventListener("pointerout", (event) => {
+    if (event.relatedTarget === null) setHoverChange("");
+  }, { passive: true });
   function renderReviewOverlays() {
     if (projectionTransitioning) return;
     document.querySelector('[data-pageroot-review-projection-layer]')?.remove();
@@ -5365,15 +5494,53 @@ function reviewBootstrap(
         summary: allModeSummary(record.types, record.summary),
       }));
     }
-    // Collapse adjacent same-summary badges into one "{summary} ×N" label so
-    // dense regions do not stack overlapping captions. Badge chrome is
-    // counter-scaled to a constant screen size, so the vertical reach grows as
-    // the canvas shrinks; keep the focused change as its cluster's label.
+    // One contiguous stretch of a change carries one caption and one
+    // page-edge revision bar. A change may touch places far apart on the
+    // page, so captions and bars follow its spatial clusters instead of one
+    // distant caption per changeId; navigation and the 变化区域 count stay
+    // per change. Caption chrome is counter-scaled to a constant screen size,
+    // so the cluster reach grows as the canvas shrinks; adjacent same-caption
+    // stretches still collapse to one representative, and a focused change
+    // always keeps its own captions.
     const badgeUiScale = 1 / Math.max(.32, Math.min(1, Number(currentState.scale || 1)));
-    merged = aggregateReviewBadgeLabels(merged, {
+    const regions = reviewRegionAnnotations(
+      side === "before"
+        ? merged.filter((record) => record.tone !== "suspected")
+        : merged,
+      { clusterGap: 28 * badgeUiScale },
+    );
+    const labelledAnchors = aggregateReviewBadgeLabels(regions.map((region) => ({
+      changeId: region.changeId,
+      summary: region.summary,
+      left: region.left,
+      right: region.right,
+      // Cluster by caption anchor: the caption sits at the region's top edge,
+      // so two captions crowd when they share a column and their anchors sit
+      // within one caption's reach — not merely because two tall regions'
+      // edges come close somewhere far below the captions.
+      top: region.top,
+      bottom: region.top,
+    })), {
       focus: currentState.focus,
       labelReach: 26 * badgeUiScale,
     });
+    const labelByCarrier = new RuntimeVisualMap();
+    regions.forEach((region, regionIndex) => {
+      const anchor = labelledAnchors[regionIndex];
+      if (!anchor || anchor.labelPrimary === false) return;
+      const focused = currentState.focus !== "all" && currentState.focus === region.changeId;
+      // At rest a genuine cluster of same-caption stretches reads
+      // "{caption} ×N" (N stretches nearby); a focused stretch always speaks
+      // for itself with per-kind fact counts and never carries the cluster
+      // count.
+      runtimeVisualMapSet(labelByCarrier, region.carrier, {
+        text: focused
+          ? region.detail
+          : reviewBadgeLabelText(region.summary, anchor.labelCount || 1),
+        clusterCount: focused ? 1 : (anchor.labelCount || 1),
+      });
+    });
+    overlayElementsByChange = new RuntimeVisualMap();
     const inset = overlayInset;
     const documentWidth = Math.max(
       innerWidth,
@@ -5648,18 +5815,63 @@ function reviewBootstrap(
         shapeSvg.append(shape);
         box.append(shapeSvg);
       }
-      if (record.labelPrimary !== false) {
+      const regionLabel = runtimeVisualMapGet(labelByCarrier, record);
+      if (regionLabel) {
+        if (top < 28 * badgeUiScale) box.dataset.labelInside = "true";
         const label = document.createElement("span");
         label.setAttribute("data-pageroot-review-overlay-label", "true");
-        const labelCount = record.labelCount || 1;
-        if (labelCount > 1) {
-          label.setAttribute("data-pageroot-review-label-count", String(labelCount));
+        if (regionLabel.clusterCount > 1) {
+          label.setAttribute(
+            "data-pageroot-review-label-count",
+            String(regionLabel.clusterCount),
+          );
         }
-        label.textContent = reviewBadgeLabelText(record.summary, labelCount);
+        label.textContent = regionLabel.text;
+        label.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          post("select-change", { changeId: record.changeId });
+        });
         box.append(label);
       }
+      const hoverElements = runtimeVisualMapGet(overlayElementsByChange, record.changeId) || [];
+      runtimeVisualArrayPush(hoverElements, box);
+      runtimeVisualMapSet(overlayElementsByChange, record.changeId, hoverElements);
       layer.append(box);
     });
+    regions.forEach((region) => {
+      const focusedRegion = currentState.focus !== "all" && currentState.focus === region.changeId;
+      const regionElements = runtimeVisualMapGet(overlayElementsByChange, region.changeId) || [];
+      const bar = document.createElement("div");
+      bar.setAttribute("data-pageroot-review-region-bar", region.changeId);
+      if (region.suspected) bar.dataset.suspect = "true";
+      bar.dataset.active = focusedRegion ? "true" : "false";
+      const barTop = Math.max(0, region.top - inset);
+      const barHeight = Math.max(8 * badgeUiScale, region.bottom + inset - barTop);
+      bar.style.setProperty("left", (2 * badgeUiScale) + "px", "important");
+      bar.style.setProperty("top", barTop + "px", "important");
+      bar.style.setProperty("height", barHeight + "px", "important");
+      bar.setAttribute("data-top", String(barTop));
+      bar.setAttribute("data-height", String(barHeight));
+      bar.addEventListener("click", () => {
+        post("select-change", { changeId: region.changeId });
+      });
+      bar.addEventListener("pointerenter", () => setHoverChange(region.changeId));
+      bar.addEventListener("pointerleave", () => setHoverChange(""));
+      runtimeVisualArrayPush(regionElements, bar);
+      layer.append(bar);
+      runtimeVisualMapSet(overlayElementsByChange, region.changeId, regionElements);
+    });
+    overlayHoverRegions = regions.map((region) => ({
+      changeId: region.changeId,
+      left: region.left - inset,
+      top: region.top - inset,
+      right: region.right + inset,
+      bottom: region.bottom + inset,
+    }));
+    const rehover = hoveredChangeId;
+    hoveredChangeId = "";
+    setHoverChange(rehover);
     document.body.append(layer);
     document.documentElement.dataset.pagerootReviewOverlays = merged.length ? "true" : "false";
     scheduleLayoutReport();

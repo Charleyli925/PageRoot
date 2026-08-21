@@ -1527,12 +1527,14 @@ ${REVIEW_MASK_UNION_BEFORE}
         });
         const validLabel = (label) => {
           const text = label?.textContent?.trim() || "";
-          // A badge may now read "{summary} ×N" when adjacent same-kind changes
-          // aggregate, so allow the multiplier suffix on top of the summary.
-          return text.length >= 2 && text.length <= 16;
+          // A region caption may compose several kinds ("新增内容 · 视觉调整"),
+          // read "{caption} ×N" for a genuine cluster, or spell per-kind fact
+          // counts on the focused change, so the sane range is wider than one
+          // bare summary.
+          return text.length >= 2 && text.length <= 40;
         };
-        // Adjacent same-summary badges collapse into one counted representative,
-        // so a box carries at most one label and an aggregated neighbour carries
+        // One change region carries at most one caption: the region caption
+        // sits on the change's topmost box and an aggregated neighbour carries
         // none. The invariant that guards real bugs is "never more than one
         // label per box, and never more than one per text group".
         const hasAnyLabel = boxes.some((box) => (
@@ -1871,20 +1873,26 @@ ${REVIEW_MASK_UNION_BEFORE}
       "data-pageroot-review-fragment-count",
       "1",
     );
-    await expect(beforeRewriteFrame.locator(
-      "[data-pageroot-review-overlay-label]",
-    )).toHaveText("段落改写");
-    await expect(afterRewriteFrame.locator(
-      "[data-pageroot-review-overlay-label]",
-    )).toHaveText("段落改写");
-    await expect.poll(() => beforeRewriteFrame.evaluate((element) => ({
-      color: getComputedStyle(element).borderTopColor,
-      style: getComputedStyle(element).borderTopStyle,
-    }))).toEqual({ color: "rgb(109, 92, 231)", style: "solid" });
-    await expect.poll(() => afterRewriteFrame.evaluate((element) => ({
-      color: getComputedStyle(element).borderTopColor,
-      style: getComputedStyle(element).borderTopStyle,
-    }))).toEqual({ color: "rgb(109, 92, 231)", style: "solid" });
+    // The rewrite vocabulary is anchored on the per-record summary; the
+    // caption composes the kinds of its spatial stretch and may aggregate
+    // with same-caption neighbours, so caption presence and form are covered
+    // by the review-annotation-clarity contract instead of per-scenario text.
+    await expect(beforeRewriteFrame).toHaveAttribute("data-summary", "段落改写");
+    await expect(afterRewriteFrame).toHaveAttribute("data-summary", "段落改写");
+    // The quiet-by-default contract: a text box rests transparent and turns
+    // solid violet only while its change is focused.
+    for (const rewriteFrame of [beforeRewriteFrame, afterRewriteFrame]) {
+      await expect.poll(() => rewriteFrame.evaluate((element) => {
+        const style = getComputedStyle(element);
+        const claimed = element.dataset.active === "true";
+        return {
+          style: style.borderTopStyle,
+          claimMatchesFocus: claimed
+            ? style.borderTopColor === "rgb(109, 92, 231)"
+            : style.borderTopColor === "rgba(0, 0, 0, 0)",
+        };
+      })).toEqual({ style: "solid", claimMatchesFocus: true });
+    }
     for (const [frame, tone, evidenceCharacter] of [
       [beforeReviewFrame, "removed", "旧"],
       [afterReviewFrame, "added", "新"],
@@ -1924,9 +1932,7 @@ ${REVIEW_MASK_UNION_BEFORE}
         "data-pageroot-review-fragment-count",
         "1",
       );
-      await expect(lineFrame.locator(
-        "[data-pageroot-review-overlay-label]",
-      )).toHaveText("文本调整");
+      await expect(lineFrame).toHaveAttribute("data-summary", "文本调整");
       expect((await lineFrame.getAttribute("data-text-groups") || "")
         .split(/\s+/).filter(Boolean)).toEqual(lineGroups);
       await expect.poll(async () => {
@@ -1988,9 +1994,7 @@ ${REVIEW_MASK_UNION_BEFORE}
         "data-pageroot-review-fragment-count",
         "1",
       );
-      await expect(promotionFrame.locator(
-        "[data-pageroot-review-overlay-label]",
-      )).toHaveText("段落改写");
+      await expect(promotionFrame).toHaveAttribute("data-summary", "段落改写");
       expect((await promotionFrame.getAttribute("data-text-groups") || "")
         .split(/\s+/).filter(Boolean)).toEqual(promotionGroups);
       await expect.poll(async () => {
@@ -2129,9 +2133,10 @@ ${REVIEW_MASK_UNION_BEFORE}
     await expect(afterReviewFrame.locator(
       `[data-pageroot-review-mask-hole][data-text-group="${numberedLineGroup}"]`,
     )).toHaveCount(1);
-    await expect(numberedLineFrame.locator(
+    await expect.poll(() => numberedLineFrame.locator(
       "[data-pageroot-review-overlay-label]",
-    )).toHaveCount(1);
+    ).count()).toBeLessThanOrEqual(1);
+    await expect(numberedLineFrame).toHaveAttribute("data-summary", "新增内容");
     await expect(numberedLineFrame).not.toHaveAttribute("data-scope", "text-block");
     await expect.poll(async () => {
       const frameBox = await numberedLineFrame.boundingBox();
@@ -2336,9 +2341,9 @@ ${REVIEW_MASK_UNION_BEFORE}
       )));
     }, `[data-pageroot-review-overlay-box][data-tone="text-added"][data-text-group="${crossLineGroup}"]`))
       .toBe(true);
-    await expect(crossLineFrames.locator(
+    await expect.poll(() => crossLineFrames.locator(
       "[data-pageroot-review-overlay-label]",
-    )).toHaveCount(1);
+    ).count()).toBeLessThanOrEqual(1);
     for (const [frame, tone] of [
       [beforeReviewFrame, "removed"],
       [afterReviewFrame, "added"],
@@ -2395,7 +2400,7 @@ ${REVIEW_MASK_UNION_BEFORE}
             ))
             && frames.filter((frame) => (
               frame.querySelector("[data-pageroot-review-overlay-label]")
-            )).length === 1
+            )).length <= 1
             && ![...owner.querySelectorAll("[data-pageroot-review-text]")].some((candidate) => (
               /稳定(?:前|后)句/u.test(candidate.textContent || "")
             ));
@@ -2413,9 +2418,14 @@ ${REVIEW_MASK_UNION_BEFORE}
       "[data-review-added-chart] [data-pageroot-review-marker]",
     ).first().getAttribute("data-pageroot-review-marker");
     expect(addedChartChangeId).toBeTruthy();
+    // The added chart's vocabulary is anchored on its records; a caption for
+    // it renders on its own stretch or a same-caption cluster representative.
     await expect(afterReviewFrame.locator(
-      `[data-pageroot-review-overlay-box="${addedChartChangeId}"] [data-pageroot-review-overlay-label]`,
-    ).filter({ hasText: /^新增内容$/u }).first()).toBeVisible();
+      `[data-pageroot-review-overlay-box="${addedChartChangeId}"]`,
+    ).first()).toHaveAttribute("data-summary", /新增内容/u);
+    await expect(afterReviewFrame.locator(
+      "[data-pageroot-review-overlay-label]",
+    ).filter({ hasText: /新增内容/u }).first()).toBeVisible();
     const warningRemovedText = await beforeReviewFrame.locator(
       '[data-review-warning] [data-pageroot-review-text="removed"]',
     ).allTextContents();
@@ -2703,6 +2713,20 @@ ${REVIEW_MASK_UNION_BEFORE}
       await expect(afterReviewFrame.locator(maskUnionOwnerSelector)).toHaveCount(expectedCount);
       await expect(afterReviewFrame.locator(maskUnionOverlaySelector)).toHaveCount(expectedCount);
     }
+    // Switching to a type filter lands navigation on its first matching
+    // change — here the mask fixture itself — and a focused change claims its
+    // boxes with a faint violet tint. The remaining captures are a pure dim
+    // contract, so park navigation back on the page overview and wait for the
+    // claimed boxes to rest before sampling pixels.
+    await launched.page.getByRole("button", { name: "打开内容地图" }).click();
+    await launched.page.getByRole("button", { name: /完整页面/u }).click();
+    await expect.poll(async () => afterReviewFrame.locator("html").getAttribute(
+      "data-pageroot-review-focus",
+    )).toBe("all");
+    await expect.poll(async () => afterReviewFrame.locator(
+      '[data-pageroot-review-overlay-box][data-active="true"]',
+    ).count()).toBe(0);
+    await launched.page.getByRole("button", { name: "收起内容地图" }).first().click();
     await launched.page.getByRole("slider", {
       name: "非修改区域上下文可见度",
     }).fill("0");
@@ -2900,13 +2924,15 @@ ${REVIEW_MASK_UNION_BEFORE}
     await expect(beforeReviewFrame.locator(
       '[data-pageroot-review-overlay-box][data-tone="structure"]',
     ).first()).toBeAttached();
+    // The old structure blue folded into the single violet accent family: a
+    // structure box either rests transparent or claims violet while focused.
     await expect.poll(() => beforeReviewFrame.locator(
       '[data-pageroot-review-overlay-box][data-tone="structure"]',
     ).first().evaluate((element) => {
       const shape = element.querySelector("[data-pageroot-review-overlay-shape]");
       return shape ? getComputedStyle(shape).stroke : getComputedStyle(element).borderTopColor;
     }))
-      .toBe("rgb(22, 119, 200)");
+      .toMatch(/^(?:rgba\(0, 0, 0, 0\)|rgb\(109, 92, 231\))$/u);
     await expect(afterReviewFrame.locator(
       '[data-review-added-chart][data-pageroot-review-structure]',
     )).toHaveCount(1);
@@ -2986,12 +3012,20 @@ ${REVIEW_MASK_UNION_BEFORE}
     await expect(layoutStyleFrame).toHaveCount(1);
     await expect(boxStyleFrame).toHaveAttribute("data-scope", "box");
     await expect(layoutStyleFrame).toHaveAttribute("data-scope", "content");
-    await expect(boxStyleFrame.locator(
-      "[data-pageroot-review-overlay-label]",
-    )).toHaveText("视觉调整");
-    await expect(layoutStyleFrame.locator(
-      "[data-pageroot-review-overlay-label]",
-    )).toHaveText("换行调整");
+    // One change region carries one caption composing its kinds per
+    // contiguous stretch; the stretch count follows layout and zoom, so the
+    // contract is the caption vocabulary, not a fixed count. Resting form
+    // composes the kinds; the focused form adds per-kind fact counts; a
+    // resting cluster representative may append one trailing ×N.
+    const layoutChangeCaption = afterReviewFrame.locator(
+      `[data-pageroot-review-overlay-box="${afterLayoutChangeId}"] [data-pageroot-review-overlay-label]`,
+    );
+    await expect.poll(() => layoutChangeCaption.count()).toBeGreaterThan(0);
+    await expect.poll(() => layoutChangeCaption.evaluateAll((labels) => labels.every((label) => (
+      /^(?:视觉调整|换行调整|新增内容|综合调整)(?: ×\d+)?(?: · (?:视觉调整|换行调整|新增内容)(?: ×\d+)?)?(?: ×\d+)?$/u
+    ).test(label.textContent?.trim() || "")))).toBe(true);
+    await expect(layoutStyleFrame).toHaveAttribute("data-summary", "换行调整");
+    await expect(boxStyleFrame).toHaveAttribute("data-summary", "视觉调整");
     await expect.poll(() => layoutStyleFrame.evaluate((frame) => {
       const owner = document.querySelector("[data-review-layout-only]");
       if (!owner) return false;
@@ -3005,13 +3039,15 @@ ${REVIEW_MASK_UNION_BEFORE}
     await expect(afterReviewFrame.locator(
       '[data-pageroot-review-overlay-box][data-tone="style"]',
     ).first()).toBeAttached();
+    // A style box either rests transparent or, while its change is focused,
+    // claims the single violet accent.
     await expect.poll(() => afterReviewFrame.locator(
       '[data-pageroot-review-overlay-box][data-tone="style"]',
     ).first().evaluate((element) => {
       const shape = element.querySelector("[data-pageroot-review-overlay-shape]");
       return shape ? getComputedStyle(shape).stroke : getComputedStyle(element).borderTopColor;
     }))
-      .toBe("rgb(109, 92, 231)");
+      .toMatch(/^(?:rgba\(0, 0, 0, 0\)|rgb\(109, 92, 231\))$/u);
     await expect(beforeReviewFrame.locator(
       '[data-review-regression-summary][data-pageroot-review-style], [data-review-regression-summary] [data-pageroot-review-style]',
     )).toHaveCount(0);
@@ -3024,7 +3060,7 @@ ${REVIEW_MASK_UNION_BEFORE}
       .toBeVisible();
     await expect(afterReviewFrame.locator(
       '[data-pageroot-review-overlay-box][data-tone="style"] [data-pageroot-review-overlay-label]',
-    ).filter({ hasText: /^视觉调整$/u }).first()).toHaveText("视觉调整");
+    ).filter({ hasText: /^视觉调整/u }).first()).toBeVisible();
     await expect.poll(async () => Promise.all(
       [beforeReviewFrame, afterReviewFrame].map((frame) => frame.locator("html").evaluate(() => {
         const copy = document.querySelector("[data-review-inherited-copy]");
@@ -3185,7 +3221,7 @@ ${REVIEW_MASK_UNION_BEFORE}
         return {
           matches: frames.length === 1
             && frames[0]?.getAttribute("data-scope") === "text-block"
-            && labelCount === 1
+            && labelCount <= 1
             && framesArePlain,
           rangeRectCount,
           frameCount: frames.length,
@@ -3254,15 +3290,30 @@ ${REVIEW_MASK_UNION_BEFORE}
     await launched.page.getByRole("button", { name: "适应", exact: true }).click();
     await expect(launched.page.getByRole("button", { name: "适应", exact: true }))
       .toHaveAttribute("aria-pressed", "true");
-    // At "适应" the counter-scaled badges reach further, so dense same-kind
-    // changes must collapse into one "{summary} ×N" representative instead of a
-    // stack of overlapping captions. Each counted badge names its own total.
-    await expect.poll(() => afterReviewFrame.locator(
-      "[data-pageroot-review-label-count]",
-    ).evaluateAll((labels) => labels.length && labels.every((label) => {
-      const count = Number(label.getAttribute("data-pageroot-review-label-count"));
-      return count >= 2 && new RegExp(" ×" + count + "$", "u").test(label.textContent || "");
-    }))).toBe(true);
+    // At "适应" the counter-scaled captions reach further, so same-caption
+    // regions whose anchors crowd must collapse into one counted
+    // "{caption} ×N" representative: no two identical captions may overlap,
+    // and every counted caption names its own cluster total.
+    await expect.poll(() => afterReviewFrame.locator("html").evaluate(() => {
+      const labels = [...document.querySelectorAll("[data-pageroot-review-overlay-label]")];
+      const wellFormed = labels
+        .filter((label) => label.hasAttribute("data-pageroot-review-label-count"))
+        .every((label) => {
+          const count = Number(label.getAttribute("data-pageroot-review-label-count"));
+          return count >= 2 && new RegExp(" ×" + count + "$", "u").test(label.textContent || "");
+        });
+      const entries = labels.map((label) => ({
+        text: label.textContent || "",
+        rect: label.getBoundingClientRect(),
+      }));
+      const sameCaptionOverlap = entries.some((left, leftIndex) => entries.some((right, rightIndex) => (
+        leftIndex < rightIndex
+        && left.text === right.text
+        && Math.min(left.rect.right, right.rect.right) - Math.max(left.rect.left, right.rect.left) > 1
+        && Math.min(left.rect.bottom, right.rect.bottom) - Math.max(left.rect.top, right.rect.top) > 1
+      )));
+      return { hasLabels: labels.length > 0, wellFormed, sameCaptionOverlap };
+    })).toMatchObject({ hasLabels: true, wellFormed: true, sameCaptionOverlap: false });
     await expect.poll(crossLineProjectionState).toMatchObject({ matches: true });
     await expect.poll(promotedScopeProjectionState).toMatchObject({ matches: true });
     await expect.poll(() => assertOverlayMaskEquivalence(afterReviewFrame)).toBe(true);

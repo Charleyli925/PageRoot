@@ -36,6 +36,7 @@ const TASK_OWNER_CASES = [
       "tests/review-badge-aggregation.test.mjs",
       "tests/review-comment-source-map.test.mjs",
       "tests/review-projection-facts.test.mjs",
+      "tests/review-region-annotation.test.mjs",
       "tests/review-runtime-visual.test.mjs",
       "tests/review-semantic-alignment.test.mjs",
       "tests/review-text-diff.test.mjs",
