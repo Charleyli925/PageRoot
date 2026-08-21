@@ -441,8 +441,16 @@ test("runtime snapshot owner captures once through an isolated one-use Electron 
   assert.deepEqual(state.createRequests, [{ html: HTML, bootstrapJavaScript: "" }]);
   assert.deepEqual(state.revoked, ["review-preview-0001"]);
   assert.equal(state.windows[0].destroyed, true);
-  assert.equal(state.capturePage.length, 1);
-  assert.equal(state.isolatedSources.length, 1, "no second owner fact pass is allowed");
+  assert.equal(
+    state.capturePage.length,
+    2,
+    "a candidate is accepted only after two agreeing frames",
+  );
+  assert.equal(
+    state.isolatedSources.length,
+    2,
+    "each accepted frame re-measures the same host, and nothing more",
+  );
   assert.match(state.isolatedSources[0].scripts[0].code, /__pagerootRuntimeSnapshotRects/);
   assert.match(
     state.isolatedSources[0].scripts[0].code,
@@ -662,7 +670,7 @@ test("runtime snapshot owner keeps valid hosts when another frozen binding is re
     pngBytes: new Uint8Array(),
     renderedTextSha256: "",
   });
-  assert.equal(state.capturePage.length, 1);
+  assert.equal(state.capturePage.length, 2);
 });
 
 test("runtime snapshot owner captures each host before measuring the next viewport", async () => {
@@ -675,12 +683,17 @@ test("runtime snapshot owner captures each host before measuring the next viewpo
       identityAttributes: [["id", "chart-two"]],
     },
   ];
-  const rects = [
-    ownerRectsFor("runtime-host-1", { x: 11, y: 12, width: 41, height: 21 }),
-    ownerRectsFor("runtime-host-2", { x: 21, y: 22, width: 51, height: 31 }),
-  ];
+  const rectsByKey = new Map([
+    ["runtime-host-1", ownerRectsFor("runtime-host-1", { x: 11, y: 12, width: 41, height: 21 })],
+    ["runtime-host-2", ownerRectsFor("runtime-host-2", { x: 21, y: 22, width: 51, height: 31 })],
+  ]);
   const { controller, state } = fakeOwner({
-    rects: ({ index }) => rects[index],
+    // A stable host measures the same rect every time it is asked.
+    rects: ({ scripts }) => (
+      scripts[0].code.includes("runtime-host-2")
+        ? rectsByKey.get("runtime-host-2")
+        : rectsByKey.get("runtime-host-1")
+    ),
   });
   const captured = await controller.capture(request({
     html: MULTI_HOST_HTML,
@@ -695,9 +708,15 @@ test("runtime snapshot owner captures each host before measuring the next viewpo
     "capture",
     "measure",
     "capture",
+    "measure",
+    "capture",
+    "measure",
+    "capture",
   ]);
   assert.deepEqual(state.capturePage.map(({ rect }) => rect), [
     { x: 11, y: 12, width: 41, height: 21 },
+    { x: 11, y: 12, width: 41, height: 21 },
+    { x: 21, y: 22, width: 51, height: 31 },
     { x: 21, y: 22, width: 51, height: 31 },
   ]);
   assert.deepEqual(captured.envelope.runtimeVisualSnapshots.map((snapshot) => ({
@@ -707,8 +726,14 @@ test("runtime snapshot owner captures each host before measuring the next viewpo
     { layoutWidth: 41, layoutHeight: 21 },
     { layoutWidth: 51, layoutHeight: 31 },
   ]);
-  assert.match(state.isolatedSources[0].scripts[0].code, /runtime-host-1/u);
-  assert.match(state.isolatedSources[1].scripts[0].code, /runtime-host-2/u);
+  // One host is measured and captured until it settles before the next host is
+  // measured at all, so the frames of one pair never interleave.
+  assert.deepEqual(
+    state.isolatedSources.map(({ scripts }) => (
+      scripts[0].code.includes("runtime-host-2") ? "runtime-host-2" : "runtime-host-1"
+    )),
+    ["runtime-host-1", "runtime-host-1", "runtime-host-2", "runtime-host-2"],
+  );
 });
 
 test("runtime snapshot owner keeps before and after captures isolated without cancelling either side", async () => {
@@ -804,7 +829,7 @@ test("capture settles after the first paint before measuring or sampling pixels"
   assert.ok(elapsedMs >= 55, `capture sampled after ${elapsedMs.toFixed(1)}ms without settling`);
   assert.deepEqual(
     state.captureEvents.map(({ type }) => type),
-    ["paint", "measure", "capture"],
+    ["paint", "measure", "capture", "measure", "capture"],
     "the settle wait must not reorder paint, measurement and capture",
   );
 });

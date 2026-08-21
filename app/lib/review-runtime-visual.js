@@ -22,6 +22,21 @@ export const REVIEW_RUNTIME_VISUAL_RASTER_MEAN_RGB_DIFFERENCE_BUDGET = 0.04;
  */
 export const REVIEW_RUNTIME_VISUAL_UNIFORM_CHANNEL_SPREAD_LIMIT = 3;
 
+/**
+ * Per-channel delta (0–255 scale) at which one pixel counts as strongly
+ * different rather than as raster noise.
+ */
+export const REVIEW_RUNTIME_VISUAL_STRONG_CHANNEL_DELTA = 28;
+
+/**
+ * Fraction of strongly different pixels required before a raster difference is
+ * read as a real chart change. Re-sampling one unchanged chart at a different
+ * sub-pixel offset repaints only the antialiased edges of what it already drew,
+ * so its strong pixels stay a thin outline; moving the data repaints an area.
+ * Below this budget the pair proves neither verdict and stays unverified.
+ */
+export const REVIEW_RUNTIME_VISUAL_STRONG_PIXEL_RATIO_BUDGET = 0.02;
+
 export { acceptRuntimeVisualSnapshots };
 
 /**
@@ -79,6 +94,39 @@ export function isReviewRuntimeVisualRasterDifferenceMeaningful(value) {
 }
 
 /**
+ * Fraction of compared pixels whose strongest channel delta reaches
+ * REVIEW_RUNTIME_VISUAL_STRONG_CHANNEL_DELTA. A null result means the caller
+ * must fail closed because the decoded images cannot be compared as one
+ * same-sized RGBA pair.
+ */
+export function reviewRuntimeVisualStrongPixelRatio(beforePixels, afterPixels) {
+  const before = rgbaPixels(beforePixels);
+  const after = rgbaPixels(afterPixels);
+  if (
+    !before
+    || !after
+    || before.byteLength === 0
+    || before.byteLength !== after.byteLength
+    || before.byteLength % 4 !== 0
+  ) return null;
+  let strong = 0;
+  for (let index = 0; index < before.byteLength; index += 4) {
+    const delta = Math.max(
+      Math.abs(before[index] - after[index]),
+      Math.abs(before[index + 1] - after[index + 1]),
+      Math.abs(before[index + 2] - after[index + 2]),
+    );
+    if (delta >= REVIEW_RUNTIME_VISUAL_STRONG_CHANNEL_DELTA) strong += 1;
+  }
+  return strong / (before.byteLength / 4);
+}
+
+export function isReviewRuntimeVisualRasterChangeStructural(value) {
+  return Number.isFinite(value)
+    && value >= REVIEW_RUNTIME_VISUAL_STRONG_PIXEL_RATIO_BUDGET;
+}
+
+/**
  * Detects a near-uniform decoded capture, ignoring alpha. A null/invalid RGBA
  * buffer is treated as uniform so the caller cannot mistake an undecodable
  * capture for verified pixels.
@@ -115,6 +163,7 @@ export function classifyReviewRuntimeVisualCandidates({
   before,
   after,
   rasterMeanRgbDifferenceByKey,
+  rasterStrongPixelRatioByKey,
   uniformCandidateKeys,
 } = {}) {
   const empty = Object.freeze({
@@ -162,7 +211,17 @@ export function classifyReviewRuntimeVisualCandidates({
       return;
     }
     if (isReviewRuntimeVisualRasterDifferenceMeaningful(rasterDifference)) {
-      changedKeys.push(key);
+      // A difference alone is not a chart change. Re-cropping the same chart at
+      // a different sub-pixel offset also differs, so require the difference to
+      // be structural; anything weaker proves neither verdict.
+      const strongRatio = rasterStrongPixelRatioByKey instanceof Map
+        ? rasterStrongPixelRatioByKey.get(key)
+        : undefined;
+      if (isReviewRuntimeVisualRasterChangeStructural(strongRatio)) {
+        changedKeys.push(key);
+        return;
+      }
+      unverifiedKeys.push(key);
       return;
     }
     if (uniformKeys.has(key)) unverifiedKeys.push(key);
@@ -178,12 +237,14 @@ export function changedReviewRuntimeVisualCandidateKeys({
   before,
   after,
   rasterMeanRgbDifferenceByKey,
+  rasterStrongPixelRatioByKey,
 } = {}) {
   return classifyReviewRuntimeVisualCandidates({
     candidates,
     before,
     after,
     rasterMeanRgbDifferenceByKey,
+    rasterStrongPixelRatioByKey,
   }).changedKeys;
 }
 
