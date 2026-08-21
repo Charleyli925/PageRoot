@@ -542,6 +542,18 @@
       ]
     },
     {
+      "id": "ai-conversation-sidebar",
+      "patterns": [
+        "^app/workbench/ai-conversation-model\\.(?:js|d\\.ts)$",
+        "^app/workbench/AiConversationSidebar\\.tsx$",
+        "^app/workbench/ai-conversation-sidebar\\.module\\.css$"
+      ],
+      "suites": ["typecheck"],
+      "nodeTests": [
+        "tests/ai-conversation-sidebar.test.mjs"
+      ]
+    },
+    {
       "id": "runtime-capabilities",
       "patterns": ["^app/application/runtime-capabilities\\.(?:js|d\\.ts)$"],
       "suites": ["typecheck"],
