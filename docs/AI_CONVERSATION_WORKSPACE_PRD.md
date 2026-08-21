@@ -250,7 +250,11 @@ Qoder 消息不能使用“已保存”“已创建版本”“已采用”等�
 - 找不到、歧义或已经脱离文档的目标不伪造左上角标记；对应评论仍在本轮详情中保留。
 - 评论正文必须留在可信 React 宿主层，不注入 authored HTML，不暴露完整定位映射给页面脚本。
 
-预览模式的标记位置沿用审阅已验证的路径：受管 bootstrap 在页面内测量已标注目标的位置并回传，React 宿主层据此叠加绝对定位标记。预览本来就注入受管 bootstrap，因此不引入新的注入边界。
+预览模式的标记位置不需要二次改写 authored HTML。预览本来就通过受管 bootstrap 给每个元素打上源节点标识，因此标记层直接复用这条已有链路：受信主机把评论目标解析成源节点身份，只把标记键与节点身份发进页面，bootstrap 测量视口坐标并回传（滚动与 resize 时按帧节流重测），React 宿主层据此叠加绝对定位标记。
+
+回传的布局必须经白名单过滤：未请求的键、重复的键、非有限坐标一律丢弃，数量也有上限，因此页面脚本不能凭空造出标记或把它移到别处。标记层自身指针透明，只有标记接收指针事件，点击永远能落到被预览的页面上。
+
+全局评论针对整页，没有“页面原位置”可标，因此不在页面上生成标记；它的正文仍在本轮详情中可读。
 
 ### 7.3 正式审阅
 
@@ -814,26 +818,28 @@ Transport session ID 可以作为 Bridge 内部诊断关联，但不能替代 Co
 
 ### 16.6 存储布局
 
-Conversation Repository 使用项目受管目录：
+Conversation Repository 使用项目受管目录，并沿用仓库既有的持久化模式：单个 JSON 记录、有界数组、`revision` 递增、原子替换。
 
 ```text
 .pageroot/
   conversations/
+    index.json                  原子替换（Document → 对话映射与当前对话指针）
     <conversationId>/
-      conversation.json    原子替换
-      contexts.jsonl       追加
-      messages.jsonl       追加
-      turns.jsonl          追加
-      drafts.json          原子替换
+      conversation.json         原子替换（contexts / turns / messages 同处一条记录）
+      draft.json                原子替换
 ```
+
+不使用 jsonl 追加式布局。追加写入的唯一优势是降低频繁追加的成本，而本文已经规定流式片段不落盘、只在 Turn 封存时写一次，写入频率本就极低；改用既有模式可以直接复用已验证的原子写实现，测试形态与其余记录一致，一致性也更容易保证。
 
 约束：
 
 - **Bridge 侧 Conversation Repository 独占写**，Renderer 只读投影。用户可见历史读取 Repository 投影，不扫描目录猜测对话。
-- `conversation.json` 与 `drafts.json` 是可变记录，遵循保留未知成员的前向兼容约定。
-- `messages.jsonl` 与 `turns.jsonl` 是不可变追加记录，严格校验。
-- **流式片段不落盘。** 只在 Turn 封存时写一条完整消息；流式中断时一次性写入一条 `interrupted` 记录加已收到文本。落盘文件中每一行都是终态，崩溃恢复不需要修补半成品。
-- 写入必须原子、追加式、身份可验证，并遵守项目根与 Registry 边界。
+- 单写者使得 `sequence` 由记录自身的 `lastSequence` 分配即可严格递增，不需要任何协调。
+- `conversation.json`、`index.json` 与 `draft.json` 均为可变记录，遵循保留未知成员的前向兼容约定。
+- **流式片段不落盘。** 只在 Turn 封存时写入完整消息；流式中断时一次性写入一条 `interrupted` 记录加已收到文本。`draft`、`queued`、`streaming` 三个状态在写入时被拒绝，因此落盘记录里的每条消息都是终态，崩溃恢复不需要修补半成品。
+- 草稿存放在独立的小记录中，防抖的草稿写入不会重写消息历史。
+- 对话身份同时是目录名，必须在进入文件系统前通过安全模式校验，构造出的身份不得逃逸受管目录。
+- 写入必须原子、身份可验证，并遵守项目根与 Registry 边界。
 
 ### 16.7 对话长度上限
 
@@ -1107,9 +1113,9 @@ PageRoot 只展示 Qoder 明确作为用户可见消息发送的文本。内部 
 
 | 包 | 内容 | 主要落点 | 依赖 |
 |---|---|---|---|
-| **P1-A** Conversation 持久化 | 4 个 Schema、Conversation Repository（Bridge 独占写）、jsonl 追加、sequence 分配、崩溃恢复、500 条归档 | 新增 Schema 文件、新增 Repository 脚本与测试；工作区 Bridge 入口新增路由 | 无 |
+| **P1-A** Conversation 持久化 | Schema、Conversation Repository（Bridge 独占写）、原子替换与 revision 递增、sequence 分配、崩溃恢复、500 条归档 | 新增 Schema 文件、新增 Repository 脚本与测试；工作区 Bridge 入口新增路由 | 无 |
 | **P1-B** 侧栏界面骨架 | 顶部、消息流、行动条、Composer、意图开关，使用 fixture 数据，不接真实后端 | 新增 `app/workbench/` 侧栏模块与样式；Workbench 主文件挂载点 | 只需 P1-A 的 Schema 形状，不等实现 |
-| **P1-C** 预览评论标记 | 抽共享只读标记与气泡组件（含键盘支持）；预览注入评论目标标注；预览 bootstrap 测量并回传位置；预览叠加标记层；审阅改用共享组件 | 共享标记新文件、`HtmlInteractionPreview`、`AiReviewWorkspace`、Workbench 主文件传参 | 无 |
+| **P1-C** 预览评论标记 | 抽共享只读标记与气泡组件（含键盘支持）；预览 bootstrap 测量已有源节点并回传位置；预览叠加标记层；审阅改用共享组件 | 共享标记新文件、`HtmlInteractionPreview`、`AiReviewWorkspace`、Workbench 主文件传参 | 无 |
 
 三个包的新增代码互不重叠，可并行开工。
 
@@ -1194,7 +1200,7 @@ Qoder ACP Agent Bridge 分支尚未合并，且与本 PRD 的多个包共享文�
 - [ ] 重启后完成消息、草稿、模型和中断状态可恢复。
 - [ ] 流式中断不会把部分回复标为 completed。
 - [ ] 用户消息未持久化时不会发送 Qoder。
-- [ ] 落盘 jsonl 中不存在未封存的流式片段。
+- [ ] 落盘记录中不存在未封存的流式片段。
 - [ ] 消息数达到上限时自动归档并新建，旧记录不删除。
 - [ ] Message 记录中不存在任何界面或交互字段。
 
