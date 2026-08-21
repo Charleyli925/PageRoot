@@ -135,16 +135,21 @@ After the first offscreen paint the owner waits one bounded settle period
 initialize asynchronously and animate after that first paint. The settle wait
 stays subordinate to the owner deadline and never retries.
 
-The settle period is not sufficient on its own, and measurement says so. Each
-candidate is measured by scrolling its host to the viewport centre and is then
-sampled by `capturePage` without waiting for a frame that reflects that
-scroll, so the sampled pixels can belong to a pre-scroll frame. A controlled
-census (`npm run census:review-runtime-visual`, method and baseline in
-`docs/REVIEW_RUNTIME_VISUAL_CENSUS.md`) isolates the two factors: with the
-scroll removed the false-positive rate is 0 even while the entrance animation
-is still running, and with the scroll present it stays around 22% even when
-the animation finished long before the settle expired. Treat the settle wait
-as an animation guard only; it does not make a scrolled pair comparable.
+The settle period alone is not sufficient, and measurement says so. Each
+candidate is measured by scrolling its host to the viewport centre, and
+`capturePage` samples the last composited frame. A probe therefore reports
+whether centring actually moved the page, and the owner waits for the next
+offscreen frame before sampling a host that moved, bounded by a short fallback
+so a page that stops repainting cannot hold the deadline. Without that wait an
+otherwise correct rect was filled with pre-scroll pixels, which was the sole
+cause of every unchanged-chart false positive measured before it existed
+(21 of 140 rows; 0 of 140 after).
+
+The settle wait remains an animation guard only. When a chart animation
+genuinely outlasts `captureSettleMs`, two sides can still be sampled at
+different phases; that residual is smaller in magnitude, affects later
+candidates rather than the first, and is not addressed by the scroll wait.
+Method and current numbers live in `docs/REVIEW_RUNTIME_VISUAL_CENSUS.md`.
 
 It returns only a captured/unavailable key plus an envelope, PNG
 bytes/hash/bitmap size, the owner-measured CSS-pixel layout width/height and a
