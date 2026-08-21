@@ -2283,6 +2283,100 @@ still the same ones, but their treatment is now the popover’s own.
 
 final result: passed
 
+## Quick-action tooltip lifecycle and open-HTML click-outside dismissal
+
+Date: 2026-08-21
+
+### Reported defects
+
+A user screenshot of the shipped title bar: the “打开新的本地 HTML” bubble sits
+above the “+” while its own popover is open, and the report adds that the bubble
+“sometimes cannot be dismissed and stays on screen”. The second report asks for
+click-outside dismissal on that popover, because “only the X closes it”.
+
+### Root causes
+
+- The shared tooltip revealed itself on `:focus-within`, which also matches the
+  element itself. Chromium leaves a clicked button focused, so any mouse click on
+  a header quick action pinned its bubble until focus moved elsewhere — including
+  the programmatic focus return after the popover closes. With the pointer still
+  resting on the trigger, `:hover` additionally kept the bubble over the popover
+  the click had just opened.
+- The dismiss layer covers the `-webkit-app-region: drag` title bar the popover
+  hangs from but did not opt out of dragging. macOS therefore consumed every
+  click in that strip as a window drag, so clicking the header beside the popover
+  or the “+” again never reached the DOM handler that was already implemented.
+  Only the canvas area below the header dismissed the popover, which is why the
+  X button looked like the only exit. The 2026-08-20 entry above recorded
+  click-outside as “untouched”; that was true of the handler, not of the reachable
+  area.
+
+### What changed and why
+
+- **Tooltip reveal is pointer- and keyboard-scoped.** `[data-tooltip]` now
+  reveals on `:hover` and `:focus-visible` only. Mouse focus no longer pins a
+  bubble; keyboard focus still explains the control.
+- **An opened surface owns the explanation.** `[data-tooltip][aria-expanded="true"]`
+  suppresses the bubble, so a pointer resting on the trigger cannot leave it
+  floating over the popover. The rule stays last in the file because it shares
+  specificity with the reveal rules.
+- **The dismiss layer is not draggable.** The popover backdrop declares
+  `-webkit-app-region: no-drag`, matching the existing `.workbench-header button`
+  exception. The whole window, title bar included, counts as “outside” again.
+
+### Design-language conformance
+
+- 2.5 同类同形: one `[data-tooltip]` mechanism, now with one documented
+  lifecycle; no control gains a private `title` fallback.
+- 2.6 几何稳定: the bubble stays absolutely positioned and out of layout; nothing
+  moves when it appears or leaves.
+- 2.7 渐进披露: hover and keyboard focus still disclose the label, while the open
+  surface replaces it instead of doubling it.
+
+### Behavior and accessibility
+
+- Hover reveal, the 180ms delay, `data-tooltip-side="below"`, wrapping row
+  tooltips and `prefers-reduced-motion` are unchanged.
+- Tab focus still reveals the bubble (`:focus-visible` verified true), so the
+  keyboard path keeps its explanation.
+- Escape, the X button, the focus trap and focus return to “+” are unchanged; the
+  popover still cannot be double-opened by a second click on the trigger.
+
+### Evidence
+
+- `output/design-qa/quick-action-tooltip-open-popover-retired.png` — the reported
+  defect, reproduced by re-adding the two retired rules to the fixed build.
+- `output/design-qa/quick-action-tooltip-open-popover.png` — the same state after
+  the fix: no bubble over the popover.
+- `output/design-qa/quick-action-tooltip-hover.png` — hover still explains the
+  control.
+- Real-component Chromium probe (real `OpenHtmlDialog`, real stylesheets), before
+  → after: mouse click on a quick action `visible/1` → `hidden/0`; bubble while
+  the popover is open `visible/1` → `hidden/0`; after X close with the pointer
+  away `visible/1` → `hidden/0`; keyboard Tab focus `visible/1` → `visible/1`;
+  outside canvas click dismissed the popover in both runs.
+- The drag-region half cannot be exercised by automation: CDP-synthesized input
+  bypasses the browser-process hit test that consumes title-bar clicks. It is
+  guarded by the CSS contract assertion on the backdrop and by the same
+  no-drag exception the header buttons already depend on to be clickable at all.
+- `npm run gate:edit` passed.
+
+### Known consequence
+
+The Electron window can no longer be dragged by its title bar while the popover
+is open. That is the intended trade: a modal dismiss layer must own the pointer
+it covers.
+
+### Checklist
+
+- [x] A mouse click on a header quick action leaves no pinned bubble.
+- [x] No bubble overlaps the open “打开 HTML” popover.
+- [x] Keyboard focus still reveals the tooltip.
+- [x] Clicking the title bar beside the popover, or the “+” again, dismisses it.
+- [x] Escape and the X button still close the popover.
+
+final result: passed
+
 ---
 
 # AI review annotations — quiet-by-default layered model
