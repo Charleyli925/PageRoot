@@ -29,6 +29,29 @@ export function layoutCanvasHoverChrome(hitRect) {
   };
 }
 
+export function clipCanvasTargetRectToViewport(hitRect, viewport) {
+  const left = Number(hitRect?.left);
+  const top = Number(hitRect?.top);
+  const width = Math.max(0, Number(hitRect?.width));
+  const height = Math.max(0, Number(hitRect?.height));
+  const viewportWidth = Math.max(0, Number(viewport?.width));
+  const viewportHeight = Math.max(0, Number(viewport?.height));
+  if (![left, top, width, height, viewportWidth, viewportHeight].every(Number.isFinite)) {
+    return null;
+  }
+  const clippedLeft = Math.max(0, left);
+  const clippedTop = Math.max(0, top);
+  const clippedRight = Math.min(viewportWidth, left + width);
+  const clippedBottom = Math.min(viewportHeight, top + height);
+  if (clippedRight <= clippedLeft || clippedBottom <= clippedTop) return null;
+  return {
+    left: clippedLeft,
+    top: clippedTop,
+    width: clippedRight - clippedLeft,
+    height: clippedBottom - clippedTop,
+  };
+}
+
 function finiteNonNegative(value, fallback) {
   return Number.isFinite(value) ? Math.max(0, value) : fallback;
 }
@@ -121,7 +144,24 @@ export function createCanvasCapabilityHoverController({
       return;
     }
     const key = `${capability.kind}:${capability.targetKey}`;
-    if (key === currentKey) return;
+    if (key === currentKey) {
+      const current = snapshot.capability;
+      if (
+        !current
+        || current.element !== capability.element
+        || current.selectionElement !== capability.selectionElement
+        || current.cursor !== capability.cursor
+        || current.hint !== capability.hint
+        || current.spoken !== capability.spoken
+      ) {
+        emit({
+          ...snapshot,
+          cursor: capability.cursor,
+          capability,
+        });
+      }
+      return;
+    }
     clearTimers();
     currentKey = key;
     emit({
@@ -133,11 +173,13 @@ export function createCanvasCapabilityHoverController({
     hoverTimer = scheduler.setTimeout(() => {
       hoverTimer = null;
       if (currentKey !== key) return;
+      const currentCapability = snapshot.capability;
+      if (!currentCapability) return;
       emit({
-        cursor: capability.cursor,
+        cursor: currentCapability.cursor,
         outline: true,
         hint: true,
-        capability,
+        capability: currentCapability,
       });
     }, delayMs);
   };

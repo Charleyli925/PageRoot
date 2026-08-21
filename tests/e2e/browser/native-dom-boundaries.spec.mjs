@@ -83,6 +83,133 @@ test("clicking a filled module's padding selects that module", async ({
   await expect(frame.locator("[data-html-canvas-selected]")).toHaveCount(0);
 });
 
+test("selected chrome reuses hover geometry outside authored clipping", async ({ page }) => {
+  const { editor, frame } = await loadFixture(page, "selected-overlay-clipping.html");
+  const target = frame.locator(caseSelector("selected-overlay-target"));
+  const inlineChild = target.locator("strong");
+  const hoverOutline = editor.locator(
+    '[data-testid="canvas-capability-outline"][data-tone="hover"]',
+  );
+  const selectedOutline = editor.locator(
+    '[data-testid="canvas-target-outline"][data-tone="selected"]',
+  );
+
+  await inlineChild.hover();
+  await expect(hoverOutline).toBeVisible();
+  const hoverRect = await hoverOutline.boundingBox();
+  expect(hoverRect).not.toBeNull();
+  const hoverPresentation = await hoverOutline.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      borderColor: style.borderTopColor,
+      borderRadius: style.borderRadius,
+      borderWidth: style.borderTopWidth,
+    };
+  });
+
+  await inlineChild.click();
+  await expect(selectedOutline).toBeVisible();
+  await expect(hoverOutline).toHaveCount(0);
+  await expect(inlineChild).toHaveAttribute("data-html-canvas-selected", "part");
+  expect(await inlineChild.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      color: style.outlineColor,
+      offset: style.outlineOffset,
+      style: style.outlineStyle,
+      width: style.outlineWidth,
+    };
+  })).toEqual({
+    color: "rgb(20, 150, 90)",
+    offset: "3px",
+    style: "solid",
+    width: "2px",
+  });
+
+  const selectedRect = await selectedOutline.boundingBox();
+  expect(selectedRect).toEqual(hoverRect);
+  expect(selectedRect.height).toBeGreaterThan(92);
+  const selectedPresentation = await selectedOutline.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      borderColor: style.borderTopColor,
+      borderRadius: style.borderRadius,
+      borderWidth: style.borderTopWidth,
+    };
+  });
+  expect(selectedPresentation.borderRadius).toBe(hoverPresentation.borderRadius);
+  expect(selectedPresentation.borderWidth).toBe(hoverPresentation.borderWidth);
+  expect(selectedPresentation.borderColor).not.toBe(hoverPresentation.borderColor);
+
+  const coexistParent = frame.locator(caseSelector("coexist-parent"));
+  await coexistParent.click({ position: { x: 4, y: 4 } });
+  await expect(selectedOutline).toBeVisible();
+  const coexistSelectedRect = await selectedOutline.boundingBox();
+  await frame.locator(caseSelector("coexist-child")).hover();
+  await expect(hoverOutline).toBeVisible();
+  await expect(selectedOutline).toBeVisible();
+  expect(await hoverOutline.boundingBox()).not.toEqual(coexistSelectedRect);
+});
+
+test("caption selection follows the current rich child on one visual host", async ({ page }) => {
+  const { editor, frame } = await loadFixture(page, "selected-overlay-clipping.html");
+  const first = frame.locator(caseSelector("rich-child-a"));
+  const second = frame.locator(caseSelector("rich-child-b"));
+  const hint = editor.getByTestId("canvas-capability-hint");
+
+  await first.hover();
+  await expect(hint).toBeVisible();
+  await second.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    element.dispatchEvent(new PointerEvent("pointermove", {
+      bubbles: true,
+      clientX: rect.left + (rect.width / 2),
+      clientY: rect.top + (rect.height / 2),
+      pointerId: 1,
+      pointerType: "mouse",
+    }));
+  });
+  await expect(hint).toBeVisible();
+  await hint.click();
+
+  await expect(second).toHaveAttribute("data-html-canvas-selected", "part");
+  await expect(first).not.toHaveAttribute("data-html-canvas-selected", /.+/u);
+  await expect(editor.getByRole("toolbar")).toHaveAttribute("aria-label", /富文本 B/u);
+});
+
+test("selected chrome clips to the iframe viewport while retaining selection", async ({ page }) => {
+  const { editor, frame } = await loadFixture(page, "selected-overlay-clipping.html");
+  const iframe = editor.locator("iframe");
+  const target = frame.locator(caseSelector("viewport-top-target"));
+  const hoverOutline = editor.locator(
+    '[data-testid="canvas-capability-outline"][data-tone="hover"]',
+  );
+  const selectedOutline = editor.locator(
+    '[data-testid="canvas-target-outline"][data-tone="selected"]',
+  );
+
+  await target.hover({ position: { x: 24, y: 72 } });
+  await expect(hoverOutline).toBeVisible();
+  const hoverRect = await hoverOutline.boundingBox();
+  expect(hoverRect).not.toBeNull();
+  await target.click({ position: { x: 24, y: 72 } });
+  await expect(target).toHaveAttribute("data-html-canvas-selected", "module");
+  const iframeRect = await iframe.boundingBox();
+  const targetRect = await target.boundingBox();
+  expect(iframeRect).not.toBeNull();
+  expect(targetRect).not.toBeNull();
+
+  await expect(selectedOutline).toBeVisible();
+  const outlineRect = await selectedOutline.boundingBox();
+  expect(outlineRect).toEqual(hoverRect);
+  expect(outlineRect.y).toBeGreaterThanOrEqual(iframeRect.y);
+  expect(outlineRect.y + outlineRect.height).toBeLessThanOrEqual(
+    iframeRect.y + iframeRect.height,
+  );
+  expect(outlineRect.height).toBeLessThan(targetRect.height);
+  await expect(target).toHaveAttribute("data-html-canvas-selected", "module");
+});
+
 test("the contextual edit toolbar stays on one quiet-glass row and defers secondary controls", async ({
   page,
 }) => {

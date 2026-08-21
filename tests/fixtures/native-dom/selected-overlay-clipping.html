@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Selected overlay clipping fixture</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: sans-serif; }
+    .clip {
+      width: 320px;
+      height: 92px;
+      overflow: hidden;
+      background: #f3f0ff;
+    }
+    .target {
+      width: 240px;
+      height: 120px;
+      margin: 24px;
+      padding: 16px;
+      background: #ddd8ff;
+    }
+    .target strong {
+      outline: 2px solid rgb(20 150 90);
+      outline-offset: 3px;
+    }
+    .viewport-top-target {
+      position: fixed;
+      top: -40px;
+      left: 360px;
+      width: 240px;
+      height: 120px;
+      padding: 16px;
+      background: #e7f0ff;
+    }
+    .coexist-parent {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      margin: 20px;
+      padding: 12px;
+      background: #f5f3ff;
+    }
+    .later-sibling {
+      position: relative;
+      z-index: 3;
+      height: 120px;
+      background: #fff;
+    }
+  </style>
+</head>
+<body>
+  <section class="clip">
+    <article
+      class="target"
+      data-native-case="selected-overlay-target"
+      data-native-mode="native-editable"
+    >
+      选中框应在
+      <strong data-native-case="rich-child-a" aria-label="富文本 A">iframe 外</strong>
+      <em data-native-case="rich-child-b" aria-label="富文本 B">保持完整</em>。
+    </article>
+  </section>
+  <div class="later-sibling" aria-label="后置白底兄弟元素"></div>
+  <span class="coexist-parent" data-native-case="coexist-parent">
+    独立父目标
+    <input data-native-case="coexist-child" value="独立子目标">
+  </span>
+  <article
+    class="viewport-top-target"
+    data-native-case="viewport-top-target"
+    aria-label="viewport 裁剪目标"
+  >iframe viewport 只显示目标的可见交集。</article>
+</body>
+</html>

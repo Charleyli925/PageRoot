@@ -125,13 +125,17 @@
   }
 }
 
-.hoverOutline {
+.targetOutline {
   position: absolute;
   z-index: 6;
   box-sizing: border-box;
   border: 1.5px solid rgb(90 85 223 / 28%);
   border-radius: 4px;
   pointer-events: none;
+}
+
+.targetOutline[data-tone="selected"] {
+  border-color: #5a55df;
 }
 
 .hoverHint {
