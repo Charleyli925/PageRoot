@@ -22,21 +22,6 @@ export const REVIEW_RUNTIME_VISUAL_RASTER_MEAN_RGB_DIFFERENCE_BUDGET = 0.04;
  */
 export const REVIEW_RUNTIME_VISUAL_UNIFORM_CHANNEL_SPREAD_LIMIT = 3;
 
-/**
- * Per-channel delta (0–255 scale) at which one pixel counts as strongly
- * different rather than as raster noise.
- */
-export const REVIEW_RUNTIME_VISUAL_STRONG_CHANNEL_DELTA = 28;
-
-/**
- * Fraction of strongly different pixels required before a raster difference is
- * read as a real chart change. Re-sampling one unchanged chart at a different
- * sub-pixel offset repaints only the antialiased edges of what it already drew,
- * so its strong pixels stay a thin outline; moving the data repaints an area.
- * Below this budget the pair proves neither verdict and stays unverified.
- */
-export const REVIEW_RUNTIME_VISUAL_STRONG_PIXEL_RATIO_BUDGET = 0.02;
-
 export { acceptRuntimeVisualSnapshots };
 
 /**
@@ -54,6 +39,15 @@ export function reviewRuntimeVisualSnapshotComparison(before, after) {
     || before.layoutHeight !== after.layoutHeight
   ) return "changed";
   if (before.renderedTextSha256 !== after.renderedTextSha256) return "changed";
+  // The chart's own drawing surface, when both sides exposed one, answers the
+  // question window pixels cannot: it lives in the chart's coordinate space,
+  // so an unrelated edit that moves the host half a device pixel leaves it
+  // byte-identical while the window capture re-rasterizes end to end. Where
+  // this evidence exists it is strictly better than the raster budget, so it
+  // decides outright instead of being averaged into it.
+  if (before.surfaceSha256 && after.surfaceSha256) {
+    return before.surfaceSha256 === after.surfaceSha256 ? "unchanged" : "changed";
+  }
   if (before.pngSha256 === after.pngSha256) return "unchanged";
   return "raster";
 }
@@ -94,39 +88,6 @@ export function isReviewRuntimeVisualRasterDifferenceMeaningful(value) {
 }
 
 /**
- * Fraction of compared pixels whose strongest channel delta reaches
- * REVIEW_RUNTIME_VISUAL_STRONG_CHANNEL_DELTA. A null result means the caller
- * must fail closed because the decoded images cannot be compared as one
- * same-sized RGBA pair.
- */
-export function reviewRuntimeVisualStrongPixelRatio(beforePixels, afterPixels) {
-  const before = rgbaPixels(beforePixels);
-  const after = rgbaPixels(afterPixels);
-  if (
-    !before
-    || !after
-    || before.byteLength === 0
-    || before.byteLength !== after.byteLength
-    || before.byteLength % 4 !== 0
-  ) return null;
-  let strong = 0;
-  for (let index = 0; index < before.byteLength; index += 4) {
-    const delta = Math.max(
-      Math.abs(before[index] - after[index]),
-      Math.abs(before[index + 1] - after[index + 1]),
-      Math.abs(before[index + 2] - after[index + 2]),
-    );
-    if (delta >= REVIEW_RUNTIME_VISUAL_STRONG_CHANNEL_DELTA) strong += 1;
-  }
-  return strong / (before.byteLength / 4);
-}
-
-export function isReviewRuntimeVisualRasterChangeStructural(value) {
-  return Number.isFinite(value)
-    && value >= REVIEW_RUNTIME_VISUAL_STRONG_PIXEL_RATIO_BUDGET;
-}
-
-/**
  * Detects a near-uniform decoded capture, ignoring alpha. A null/invalid RGBA
  * buffer is treated as uniform so the caller cannot mistake an undecodable
  * capture for verified pixels.
@@ -157,17 +118,25 @@ export function reviewRuntimeVisualPixelsAreUniform(pixels) {
  * pixel evidence: everything the pipeline could not verify (missing captures,
  * undecodable PNGs, near-uniform blank surfaces) lands in unverifiedKeys
  * instead of silently reading as "unchanged".
+ *
+ * `stronglyChangedKeys` is the subset decided by evidence that does not depend
+ * on where the host sits in the window: differing dimensions, differing visible
+ * text, or a differing drawing-surface digest. Those readings survive a
+ * sub-pixel move and window compositing, so a caller may trust them on their
+ * own. A verdict reached only through the raster budget stays out of that
+ * subset because pixel distance alone cannot separate a redrawn chart from a
+ * shifted one.
  */
 export function classifyReviewRuntimeVisualCandidates({
   candidates,
   before,
   after,
   rasterMeanRgbDifferenceByKey,
-  rasterStrongPixelRatioByKey,
   uniformCandidateKeys,
 } = {}) {
   const empty = Object.freeze({
     changedKeys: Object.freeze([]),
+    stronglyChangedKeys: Object.freeze([]),
     unverifiedKeys: Object.freeze([]),
   });
   if (!Array.isArray(candidates)) return empty;
@@ -181,6 +150,7 @@ export function classifyReviewRuntimeVisualCandidates({
     ? uniformCandidateKeys
     : new Set(Array.isArray(uniformCandidateKeys) ? uniformCandidateKeys : []);
   const changedKeys = [];
+  const stronglyChangedKeys = [];
   const unverifiedKeys = [];
   candidates.forEach((candidate) => {
     const key = typeof candidate?.key === "string" ? candidate.key : "";
@@ -191,6 +161,7 @@ export function classifyReviewRuntimeVisualCandidates({
     );
     if (comparison === "changed") {
       changedKeys.push(key);
+      stronglyChangedKeys.push(key);
       return;
     }
     if (comparison === "unavailable") {
@@ -211,23 +182,14 @@ export function classifyReviewRuntimeVisualCandidates({
       return;
     }
     if (isReviewRuntimeVisualRasterDifferenceMeaningful(rasterDifference)) {
-      // A difference alone is not a chart change. Re-cropping the same chart at
-      // a different sub-pixel offset also differs, so require the difference to
-      // be structural; anything weaker proves neither verdict.
-      const strongRatio = rasterStrongPixelRatioByKey instanceof Map
-        ? rasterStrongPixelRatioByKey.get(key)
-        : undefined;
-      if (isReviewRuntimeVisualRasterChangeStructural(strongRatio)) {
-        changedKeys.push(key);
-        return;
-      }
-      unverifiedKeys.push(key);
+      changedKeys.push(key);
       return;
     }
     if (uniformKeys.has(key)) unverifiedKeys.push(key);
   });
   return Object.freeze({
     changedKeys: Object.freeze(changedKeys),
+    stronglyChangedKeys: Object.freeze(stronglyChangedKeys),
     unverifiedKeys: Object.freeze(unverifiedKeys),
   });
 }
@@ -237,14 +199,12 @@ export function changedReviewRuntimeVisualCandidateKeys({
   before,
   after,
   rasterMeanRgbDifferenceByKey,
-  rasterStrongPixelRatioByKey,
 } = {}) {
   return classifyReviewRuntimeVisualCandidates({
     candidates,
     before,
     after,
     rasterMeanRgbDifferenceByKey,
-    rasterStrongPixelRatioByKey,
   }).changedKeys;
 }
 
@@ -272,13 +232,14 @@ function helperWithRuntimeStyle(helper, types) {
 }
 
 /**
- * A page where most chart hosts cannot be verified has one page-level cause —
- * a blocked chart library, a script error — rather than one cause per host.
- * Drawing a frame on every host there would drown the review, so per-host
- * suspicion is bounded by scale.
+ * A page where more than one chart host cannot be verified has a shared cause —
+ * a blocked chart library, a script error, a capture budget — rather than one
+ * cause per host. Per-host suspicion is only actionable when it is isolated, so
+ * anything beyond a single unverified host stops drawing a frame each; a
+ * commented host still surfaces regardless.
  */
-function unverifiedIsPageLevel(unverifiedCount, candidateCount) {
-  return candidateCount > 0 && unverifiedCount * 2 > candidateCount;
+function unverifiedIsPageLevel(unverifiedCount) {
+  return unverifiedCount > 1;
 }
 
 /**
@@ -286,13 +247,18 @@ function unverifiedIsPageLevel(unverifiedCount, candidateCount) {
  * diff already found, and it can raise suspicion. It can never invent a
  * confirmed change.
  *
- * Current HTML bytes are authoritative, so a pixel difference is a verified
- * visual fact only where the source diff also found a change in the same
- * outline section. A pixel difference in a section whose source is unchanged
- * has no source cause the differ could see; presenting it as a confirmed
- * change lets the runtime fabricate a fact, so it lands in the amber
- * "疑似有改动" state instead. Amber costs the reviewer confidence; a false
- * confirmed change costs them trust in every other verdict on the page.
+ * Current HTML bytes are authoritative, so weak evidence needs corroboration.
+ * A raster distance cannot tell a redrawn chart from one the layout moved half
+ * a device pixel, so on its own it only earns suspicion unless the source diff
+ * also found a change in the same outline section.
+ *
+ * Evidence that does not depend on where the host sits — differing dimensions,
+ * differing visible text, a differing drawing-surface digest — needs no such
+ * corroboration. Measurement is why: on real pages a chart's data or colour is
+ * driven from a script or stylesheet outside its own section, so requiring
+ * section-level corroboration downgraded every genuine chart edit to amber (12
+ * of 12 on one page). The digest survives a move and window compositing, so
+ * trusting it is not a weakening.
  *
  * Suspicion no longer depends on whether the user happened to comment on the
  * host. That coupling hid the signal exactly where a missed change is most
@@ -310,6 +276,9 @@ export function mergeReviewRuntimeVisualChanges(documents, verdicts) {
   const changedKeys = new Set(Array.isArray(verdicts)
     ? verdicts
     : Array.isArray(verdicts?.changedKeys) ? verdicts.changedKeys : []);
+  const stronglyChangedKeys = new Set(
+    Array.isArray(verdicts?.stronglyChangedKeys) ? verdicts.stronglyChangedKeys : [],
+  );
   const unverifiedKeys = new Set(
     Array.isArray(verdicts?.unverifiedKeys) ? verdicts.unverifiedKeys : [],
   );
@@ -321,11 +290,15 @@ export function mergeReviewRuntimeVisualChanges(documents, verdicts) {
   const scopedCandidates = candidates.filter((candidate) => (
     outlineIds.has(candidate.outlineId)
   ));
+  const confirmable = (candidate) => (
+    stronglyChangedKeys.has(candidate.key)
+    || sourceChangeIds.has(candidate.changeId)
+  );
   const changedCandidates = scopedCandidates.filter((candidate) => (
-    changedKeys.has(candidate.key) && sourceChangeIds.has(candidate.changeId)
+    changedKeys.has(candidate.key) && confirmable(candidate)
   ));
   const uncorroboratedCandidates = scopedCandidates.filter((candidate) => (
-    changedKeys.has(candidate.key) && !sourceChangeIds.has(candidate.changeId)
+    changedKeys.has(candidate.key) && !confirmable(candidate)
   ));
   const unverifiedCandidates = scopedCandidates.filter((candidate) => (
     unverifiedKeys.has(candidate.key) && !changedKeys.has(candidate.key)
@@ -333,10 +306,7 @@ export function mergeReviewRuntimeVisualChanges(documents, verdicts) {
   // A comment is a floor, never a gate: a host the user asked about always
   // surfaces its suspicion, and every other unverified host surfaces too
   // unless the whole page failed to verify.
-  const pageLevelFailure = unverifiedIsPageLevel(
-    unverifiedCandidates.length,
-    scopedCandidates.length,
-  );
+  const pageLevelFailure = unverifiedIsPageLevel(unverifiedCandidates.length);
   const suspectedCandidates = [
     ...uncorroboratedCandidates,
     ...unverifiedCandidates.filter((candidate) => (
@@ -367,6 +337,28 @@ export function mergeReviewRuntimeVisualChanges(documents, verdicts) {
     })];
   }));
   const syntheticChanges = [];
+  // Position-independent evidence may open its own change entry. Without one
+  // the marker would carry a change id that appears nowhere in the list, so the
+  // revision rail and "next change" navigation would point at nothing. Weak
+  // raster evidence never reaches here: it is already suspicion by the time the
+  // filters above are applied, so pixels alone still cannot invent a change.
+  outline.forEach((outlineItem) => {
+    const candidate = changedCandidates.find((item) => item.outlineId === outlineItem.id);
+    if (!candidate || updatedChangesById.has(candidate.changeId)) return;
+    const types = Object.freeze(["style"]);
+    const change = Object.freeze({
+      id: candidate.changeId,
+      label: candidate.label,
+      helper: "视觉调整",
+      types,
+      beforePresent: true,
+      afterPresent: true,
+      ...(candidate.panelKey ? { panelKey: candidate.panelKey } : {}),
+      ...(candidate.panelPath?.length ? { panelPath: [...candidate.panelPath] } : {}),
+    });
+    updatedChangesById.set(change.id, change);
+    syntheticChanges.push(change);
+  });
   // A suspected change is always its own synthetic entry. Folding it into an
   // existing confirmed change would present "cannot verify" as a verified
   // visual fact.

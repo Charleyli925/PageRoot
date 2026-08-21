@@ -54,6 +54,7 @@ function ownerRects(renderedText = "图表 9.54", scrolled = false) {
       state: "captured",
       rect: { x: 0, y: 0, width: 1, height: 1 },
       renderedText,
+      surfaceDigest: "",
       scrolled,
     }],
   };
@@ -62,7 +63,7 @@ function ownerRects(renderedText = "图表 9.54", scrolled = false) {
 function ownerRectsFor(key, rect, renderedText = "图表 9.54", scrolled = false) {
   return {
     status: "captured",
-    snapshots: [{ key, state: "captured", rect, renderedText, scrolled }],
+    snapshots: [{ key, state: "captured", rect, renderedText, surfaceDigest: "", scrolled }],
   };
 }
 
@@ -151,7 +152,32 @@ function isolatedVisibleText({
       return [];
     }
 
+    // The probe reads markup through the prototype descriptor, so the stub has
+    // to expose it the same way a real Element does.
+    get outerHTML() {
+      return `<${this.tagName.toLowerCase()}></${this.tagName.toLowerCase()}>`;
+    }
+
     scrollIntoView() {}
+  }
+
+  class CanvasRenderingContext2D {
+    getImageData(x, y, width, height) {
+      return { data: new Uint8ClampedArray(width * height * 4) };
+    }
+  }
+
+  class HTMLCanvasElement extends Element {
+    constructor(attributes = {}) {
+      super("CANVAS", attributes);
+      this.width = 10;
+      this.height = 10;
+      this.context = new CanvasRenderingContext2D();
+    }
+
+    getContext() {
+      return this.context;
+    }
   }
 
   class TreeWalker {
@@ -237,12 +263,19 @@ function isolatedVisibleText({
     Array,
     Document,
     Element,
+    Math,
     Number,
+    Object,
     Range,
     String,
     TextEncoder,
     TreeWalker,
+    Uint8ClampedArray,
     Window,
+    // The probe binds the surface readers up front, so the isolated world has
+    // to expose them even for a case that only asserts visible text.
+    HTMLCanvasElement,
+    CanvasRenderingContext2D,
     document,
     window,
   });
@@ -688,6 +721,7 @@ test("runtime snapshot owner keeps valid hosts when another frozen binding is re
     byteLength: 0,
     pngBytes: new Uint8Array(),
     renderedTextSha256: "",
+    surfaceSha256: "",
   });
   assert.equal(state.capturePage.length, 2);
 });
@@ -784,6 +818,7 @@ test("runtime snapshot owner silently marks invalid PNG output unavailable", asy
     byteLength: 0,
     pngBytes: new Uint8Array(),
     renderedTextSha256: "",
+    surfaceSha256: "",
   });
 });
 
@@ -820,6 +855,7 @@ test("runtime snapshot owner hashes bounded visible text and suppresses an over-
     byteLength: 0,
     pngBytes: new Uint8Array(),
     renderedTextSha256: "",
+    surfaceSha256: "",
   });
   assert.deepEqual(state.capturePage || [], []);
 });
@@ -979,6 +1015,7 @@ test("an owner rect payload without a scroll fact is rejected instead of assumed
         state: "captured",
         rect: { x: 0, y: 0, width: 1, height: 1 },
         renderedText: "图表 9.54",
+        surfaceDigest: "",
       }],
     },
   });

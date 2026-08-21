@@ -42,7 +42,25 @@ const CAPTURE_CANDIDATE_KEYS = new Set([
   "kind",
   "identityAttributes",
 ]);
-const OWNER_RECT_KEYS = new Set(["key", "state", "rect", "renderedText", "scrolled"]);
+const OWNER_RECT_KEYS = new Set([
+  "key",
+  "state",
+  "rect",
+  "renderedText",
+  "surfaceDigest",
+  "scrolled",
+]);
+// The digest itself is a short decimal fold; these bound what it is folded
+// over so one hostile canvas cannot stall the owner deadline.
+const SURFACE_DIGEST_LENGTH_LIMIT = 64;
+const SURFACE_PIXEL_LIMIT = RUNTIME_VISUAL_CONTRACT.pageBudget.canvasPixels;
+const SURFACE_MARKUP_LIMIT = 2 * 1024 * 1024;
+// How far up the tree a composite-time effect is still folded in. Deeper than
+// this a filter or opacity would be a page-wide treatment, not a chart fact.
+const PRESENTATION_ANCESTOR_DEPTH = 16;
+// Resolved paint is read per drawable node, so the count is bounded the same
+// way visible text already is.
+const SURFACE_DRAWABLE_LIMIT = RUNTIME_VISUAL_CONTRACT.pageBudget.hostAtoms;
 const RECT_KEYS = new Set(["x", "y", "width", "height"]);
 
 class CaptureCancelledError extends Error {
@@ -335,12 +353,24 @@ export function isolatedSnapshotRectScript(candidate) {
   const candidate = ${safeScriptValue(candidate)};
   const maxTextNodes = ${safeScriptValue(RUNTIME_VISUAL_PAGE_BUDGET.hostAtoms)};
   const maxRenderedTextBytes = ${safeScriptValue(RUNTIME_VISUAL_PAGE_BUDGET.renderedTextBytes)};
+  const maxSurfacePixels = ${safeScriptValue(SURFACE_PIXEL_LIMIT)};
+  const maxSurfaceMarkup = ${safeScriptValue(SURFACE_MARKUP_LIMIT)};
+  const maxPresentationDepth = ${safeScriptValue(PRESENTATION_ANCESTOR_DEPTH)};
+  const maxSurfaceDrawables = ${safeScriptValue(SURFACE_DRAWABLE_LIMIT)};
   const queryElements = Function.prototype.call.bind(Element.prototype.querySelectorAll);
   const getAttribute = Function.prototype.call.bind(Element.prototype.getAttribute);
   const getRect = Function.prototype.call.bind(Element.prototype.getBoundingClientRect);
   const scrollIntoView = Function.prototype.call.bind(Element.prototype.scrollIntoView);
   const getComputedStyle = Function.prototype.call.bind(window.getComputedStyle);
   const createTreeWalker = Function.prototype.call.bind(Document.prototype.createTreeWalker);
+  // Bound in the isolated world, so the authored page cannot patch them: the
+  // digest below reads the real drawing surface, not something the page can
+  // describe to us.
+  const getContext = Function.prototype.call.bind(HTMLCanvasElement.prototype.getContext);
+  const readPixels = Function.prototype.call.bind(
+    CanvasRenderingContext2D.prototype.getImageData,
+  );
+  const outerMarkup = Object.getOwnPropertyDescriptor(Element.prototype, "outerHTML").get;
   const nextTreeNode = Function.prototype.call.bind(TreeWalker.prototype.nextNode);
   const createRange = Function.prototype.call.bind(Document.prototype.createRange);
   const selectNodeContents = Function.prototype.call.bind(Range.prototype.selectNodeContents);
@@ -786,6 +816,144 @@ export function isolatedSnapshotRectScript(candidate) {
       return null;
     }
   };
+  // Window pixels answer "what did this region of the page look like", which
+  // is not the question. A chart moved half a device pixel by an unrelated
+  // edit above it re-rasterizes its antialiasing across the whole surface and
+  // reads as a confirmed change; measurement put that at 100% of hosts on
+  // three real pages. A canvas bitmap and an SVG subtree are the chart's own
+  // output in its own coordinate space, so neither moves when the host moves.
+  //
+  // The digest is a fold rather than a cryptographic hash: it runs over
+  // megabytes inside the page process, and the owner re-hashes the compact
+  // result. A cross-origin-tainted canvas throws instead of returning pixels,
+  // and any failure yields "" so the caller falls back to the raster path
+  // rather than claiming an unchanged surface it never read.
+  const foldInto = (state, value) => {
+    let hash = state;
+    for (let index = 0; index < value.length; index += 1) {
+      hash ^= value.charCodeAt(index);
+      hash = Math.imul(hash, 16777619) >>> 0;
+    }
+    return hash >>> 0;
+  };
+  const foldBytes = (state, bytes) => {
+    let hash = state;
+    for (let index = 0; index < bytes.length; index += 1) {
+      hash ^= bytes[index];
+      hash = Math.imul(hash, 16777619) >>> 0;
+    }
+    return hash >>> 0;
+  };
+  const surfaceDigestOf = (targets) => {
+    let hash = 2166136261;
+    let readable = 0;
+    for (const target of targets) {
+      if (target.tagName === "CANVAS") {
+        const width = target.width;
+        const height = target.height;
+        if (!width || !height || width * height > maxSurfacePixels) return "";
+        const context = getContext(target, "2d");
+        if (!context) return "";
+        let image;
+        try {
+          image = readPixels(context, 0, 0, width, height);
+        } catch {
+          return "";
+        }
+        hash = foldInto(hash, "canvas:" + width + "x" + height + ";");
+        hash = foldBytes(hash, image.data);
+        readable += 1;
+        continue;
+      }
+      const markup = outerMarkup.call(target);
+      if (typeof markup !== "string" || markup.length > maxSurfaceMarkup) return "";
+      hash = foldInto(hash, "svg:" + markup.replace(/\s+/gu, " ") + ";");
+      // Markup carries geometry, not resolved paint. A stylesheet rule such as
+      // "svg path { fill: ... }" recolours the whole chart without editing one
+      // character of the subtree, and measurement showed that recolouring an
+      // inline SVG went completely undetected while only the markup was read.
+      const drawables = queryElements(target, "path,rect,circle,ellipse,polygon,polyline,line,text");
+      if (drawables.length > maxSurfaceDrawables) return "";
+      for (const drawable of drawables) {
+        const style = getComputedStyle(window, drawable);
+        hash = foldInto(
+          hash,
+          "paint:" + String(style.fill || "")
+            + "|" + String(style.stroke || "")
+            + "|" + String(style.strokeWidth || "")
+            + "|" + String(style.fillOpacity || "")
+            + "|" + String(style.strokeOpacity || "")
+            + "|" + String(style.opacity || "") + ";",
+        );
+      }
+      readable += 1;
+    }
+    return readable ? String(hash) : "";
+  };
+
+  // A drawing surface is not the whole appearance. CSS filter, opacity,
+  // mix-blend-mode and friends repaint a chart at composite time without
+  // touching one byte of its canvas, and an external stylesheet recolours an
+  // inline SVG without touching its markup. Measurement caught exactly this:
+  // inverting a host went 100% undetected on real pages once the surface
+  // decided the verdict. Folding the resolved presentation values in restores
+  // those changes as facts.
+  //
+  // Ancestor transform is deliberately excluded. A sticky or animated
+  // ancestor resolves a scroll-dependent matrix, so folding it in would
+  // reintroduce the position sensitivity this digest exists to remove; that
+  // residue stays with the pixel path instead.
+  const HOST_PRESENTATION = [
+    "filter",
+    "backdropFilter",
+    "opacity",
+    "mixBlendMode",
+    "visibility",
+    "clipPath",
+    "maskImage",
+    "transform",
+    "backgroundColor",
+    "backgroundImage",
+    "boxShadow",
+    "borderRadius",
+    "outline",
+  ];
+  const ANCESTOR_PRESENTATION = [
+    "filter",
+    "backdropFilter",
+    "opacity",
+    "mixBlendMode",
+    "visibility",
+    "clipPath",
+    "maskImage",
+  ];
+  const presentationDigestOf = (element, targets) => {
+    let hash = 2166136261;
+    const fold = (node, properties, label) => {
+      const style = getComputedStyle(window, node);
+      hash = foldInto(hash, label + ":");
+      for (const property of properties) {
+        hash = foldInto(hash, property + "=" + String(style[property] || "") + ";");
+      }
+    };
+    try {
+      fold(element, HOST_PRESENTATION, "host");
+      // The canvas or svg is a descendant of the host, so a rule aimed at it
+      // directly would otherwise slip between the host reading and the
+      // surface reading.
+      targets.forEach((target, index) => fold(target, HOST_PRESENTATION, "target" + index));
+      let ancestor = element.parentElement;
+      let depth = 0;
+      while (ancestor && depth < maxPresentationDepth) {
+        fold(ancestor, ANCESTOR_PRESENTATION, "ancestor" + depth);
+        ancestor = ancestor.parentElement;
+        depth += 1;
+      }
+    } catch {
+      return "";
+    }
+    return String(hash);
+  };
   const unavailable = () => ({
     status: "captured",
     snapshots: [{
@@ -793,6 +961,7 @@ export function isolatedSnapshotRectScript(candidate) {
       state: "unavailable",
       rect: null,
       renderedText: "",
+      surfaceDigest: "",
       scrolled: false,
     }],
   });
@@ -815,16 +984,34 @@ export function isolatedSnapshotRectScript(candidate) {
   const renderedText = hostRect && hasVisiblePaint
     ? visibleRenderedText(host, hostRect)
     : null;
+  const surfaceDigest = hostRect && hasVisiblePaint
+    ? (() => {
+      const drawn = surfaceDigestOf(paintTargets);
+      if (!drawn) return "";
+      const presentation = presentationDigestOf(host, paintTargets);
+      // Either half missing leaves the pair on the pixel path rather than
+      // letting a partial reading claim an unchanged appearance.
+      return presentation ? drawn + "." + presentation : "";
+    })()
+    : "";
   return {
     status: "captured",
     snapshots: [
       hostRect && hasVisiblePaint && renderedText !== null
-        ? { key: candidate.key, state: "captured", rect: hostRect, renderedText, scrolled }
+        ? {
+          key: candidate.key,
+          state: "captured",
+          rect: hostRect,
+          renderedText,
+          surfaceDigest,
+          scrolled,
+        }
         : {
           key: candidate.key,
           state: "unavailable",
           rect: null,
           renderedText: "",
+          surfaceDigest: "",
           scrolled,
         },
     ],
@@ -876,10 +1063,17 @@ function normalizedOwnerRects(value, request) {
     const renderedText = rawSnapshot.state === "captured"
       ? normalizedString(rawSnapshot.renderedText, RUNTIME_VISUAL_PAGE_BUDGET.renderedTextBytes)
       : rawSnapshot.renderedText === "" ? "" : undefined;
+    const surfaceDigest = typeof rawSnapshot.surfaceDigest === "string"
+      && rawSnapshot.surfaceDigest.length <= SURFACE_DIGEST_LENGTH_LIMIT
+      && /^[0-9]*(?:\.[0-9]+)?$/u.test(rawSnapshot.surfaceDigest)
+      && (rawSnapshot.state === "captured" || rawSnapshot.surfaceDigest === "")
+      ? rawSnapshot.surfaceDigest
+      : undefined;
     if (
       rect === undefined
       || renderedText === undefined
       || renderedText === null
+      || surfaceDigest === undefined
       || typeof rawSnapshot.scrolled !== "boolean"
       || (rawSnapshot.state === "captured" && !rect)
       || (
@@ -893,6 +1087,7 @@ function normalizedOwnerRects(value, request) {
       state: rawSnapshot.state,
       rect,
       renderedText,
+      surfaceDigest,
       scrolled: rawSnapshot.scrolled,
     }));
   }
@@ -911,6 +1106,7 @@ function unavailableSnapshot(key) {
     byteLength: 0,
     pngBytes: new Uint8Array(),
     renderedTextSha256: "",
+    surfaceSha256: "",
   });
 }
 
@@ -1314,6 +1510,11 @@ export function createRuntimeSnapshotCaptureController({
                 layoutWidth: ownerSnapshot.rect.width,
                 layoutHeight: ownerSnapshot.rect.height,
                 renderedTextSha256: renderedTextSha256(ownerSnapshot.renderedText),
+                // A digest the page could not produce stays empty rather than
+                // hashing "" into something that looks like evidence.
+                surfaceSha256: ownerSnapshot.surfaceDigest
+                  ? renderedTextSha256(`surface:${ownerSnapshot.surfaceDigest}`)
+                  : "",
               }));
               accepted = true;
               break;

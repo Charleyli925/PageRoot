@@ -174,11 +174,32 @@ three ordered steps:
 2. Matching captured hosts with different `renderedTextSha256` values differ
    strictly. This covers visible DOM/SVG labels and numeric characters without
    allowing a style tolerance to hide a character edit.
-3. When text and dimensions match but PNG hashes differ, trusted browser memory
+3. When text and dimensions match, the isolated owner's surface digest decides
+   whenever both sides produced one. It is not a window capture: a canvas
+   contributes its backing-store pixels, an SVG contributes its normalized
+   subtree plus the resolved paint of every drawable node, and both are folded
+   together with the presentation values that repaint a host at composite time
+   (filter, opacity, mix-blend-mode, visibility, clip-path, mask, transform,
+   background, shadow, radius, outline) for the host, for each paint target and
+   for up to sixteen ancestors. Equal digests are unchanged; different digests
+   are a change. A canvas the owner cannot read, a subtree over budget or any
+   failure yields no digest on that side, and the pair falls back to step 4
+   rather than claiming a surface it never read.
+4. When no digest pair exists and PNG hashes differ, trusted browser memory
    decodes the already captured pair once and calculates mean absolute
    RGB-channel error. Only an error greater than the fixed `0.04` budget
    (0–255 channel scale) emits a fact; PNG byte length, encoder output and a
    small tile/sub-pixel raster difference are not facts by themselves.
+
+Step 3 exists because a window capture answers the wrong question. An edit
+above a chart that shifts it half a device pixel re-rasterizes the whole
+surface: measurement on four authored pages put that at 100% of comparable
+hosts under a structurally neutral half-pixel shift, with repeatable distances
+far above any budget that still catches a real chart edit. The drawing surface
+lives in the chart's own coordinate space, so it does not move when the host
+moves. Reading the surface alone was not enough either — CSS that repaints at
+composite time leaves a canvas byte-identical, and inverting a host went 100%
+undetected until the presentation values joined the digest.
 
 The comparison result is a tri-state verdict per candidate, because dimming a
 chart host as context requires positive pixel evidence:

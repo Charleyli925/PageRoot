@@ -221,9 +221,10 @@ function verdictForPair(before, after) {
       || before.height !== after.height
       || before.layoutWidth !== after.layoutWidth
       || before.layoutHeight !== after.layoutHeight;
+    const textDiffers = before.renderedTextSha256 !== after.renderedTextSha256;
     return {
       verdict: "changed",
-      step: dimensionsDiffer ? "dimensions" : "rendered-text",
+      step: dimensionsDiffer ? "dimensions" : textDiffers ? "rendered-text" : "surface",
       rasterDifference: null,
     };
   }
@@ -234,9 +235,16 @@ function verdictForPair(before, after) {
       && reviewRuntimeVisualPixelsAreUniform(afterPixels)
     : false;
   if (comparison === "unchanged") {
+    // A surface digest can settle the pair before the PNG hash is consulted,
+    // so the reported step has to say which evidence actually decided.
+    const surfaceDecided = Boolean(before.surfaceSha256) && Boolean(after.surfaceSha256);
     return {
       verdict: uniform ? "unverified" : "unchanged",
-      step: uniform ? "uniform-surface" : "png-hash-equal",
+      step: uniform
+        ? "uniform-surface"
+        : surfaceDecided && before.pngSha256 !== after.pngSha256
+          ? "surface-equal-pixels-differ"
+          : surfaceDecided ? "surface-equal" : "png-hash-equal",
       rasterDifference: 0,
     };
   }

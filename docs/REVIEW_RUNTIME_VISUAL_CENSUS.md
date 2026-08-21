@@ -202,6 +202,73 @@ stop — but the label is weaker than the evidence deserves. Widening
 corroboration to "the source of anything that can drive this host changed" is
 the obvious follow-up; it is not implemented.
 
+## Authored pages and the surface digest
+
+`--pages` runs the same pipeline against arbitrary local HTML. The pages never
+enter the repository; only their paths are passed in and only derived counts are
+written out. Byte-level mutations cover the false-alarm side, and three probes
+cover detection: a chart-library hook that recolours the palette or rescales the
+series, and a library-independent `filter: invert(1)` on every host.
+
+One earlier probe had to be retired. Inserting a `<section>` at the top of
+`<body>` also changes which siblings match `:first-child` and `:nth-child`, so a
+page using structural selectors legitimately repaints and the probe cannot tell
+"moved" from "restyled". Displacement is now measured with `padding-top` on
+`<body>`, which moves everything and edits no node.
+
+That clean probe isolated the cause exactly:
+
+| Page (comparable hosts) | integer 160px shift | **half-pixel 157.5px shift** |
+| --- | --- | --- |
+| ECharts, 12 hosts | 0 / 36 | **36 / 36** |
+| ECharts, 8 hosts | 2 / 24 | **24 / 24** |
+| inline SVG, 3 hosts | 0 / 9 | **9 / 9** |
+| inline SVG, 2 hosts | 6 / 6 | 6 / 6 |
+
+Snapping the host onto a whole device pixel before sampling was tried and
+failed: Chromium lands scroll offsets on integer device pixels, so at a device
+ratio of 1 no scroll can compensate half a device pixel. That is why the digest
+replaces the window capture rather than correcting it.
+
+After the digest, 4 authored pages × 7 mutations × 3 runs = 786 rows:
+
+| | window pixels | surface digest |
+| --- | --- | --- |
+| False positives | 24 | **0** |
+| Missed real changes | 21 | **0** |
+| Suspected on an unchanged host | 0 | **0** |
+
+The 21 remaining "missed" rows are the harness, not the pipeline, and the
+report proves it: both sides' PNG hashes are identical in all 21, so those
+pages genuinely rendered the same and `unchanged` is the correct answer. Fifteen
+are an invalid expectation (a chart-library hook cannot change a page that has
+no chart library) and six are charts whose colours are written into the data,
+where the palette hook has nothing to override.
+
+A larger run settled two questions the 786-row run could not. 2 ECharts pages
+× 7 mutations × 15 runs = **2835 rows, 0 false positives**, including 300
+comparable `real-noop` rows where both sides are the same bytes. The
+intermittent false positive that used to appear there roughly once every three
+runs is gone, so the residue previously attributed to animation phase was
+window compositing too. All 30 remaining missed rows are the known probe gap on
+two specific hosts whose colours live in their data, and both sides' PNG hashes
+match in every one of them.
+
+Raising the capture viewport from 900 to 2400 changed the unverified count by
+exactly zero (91 → 91), so host-larger-than-viewport is **not** what makes hosts
+unverifiable here; over-collection by this harness's discoverer is. On the one
+page where the chart containers can be enumerated exactly, 12 of 16 discovered
+elements are real `echarts.init` targets and exactly 12 are comparable. Treat
+the unverified rate in this report as a property of the harness, not of the
+pipeline.
+
+Reading the surface alone was not sufficient. CSS that repaints at composite
+time leaves a canvas byte-identical, so the first digest missed the invert
+control on 100% of hosts; folding in resolved presentation values for the host,
+each paint target and the ancestor chain restored it. Ancestor `transform` is
+left out on purpose: a sticky ancestor resolves a scroll-dependent matrix, and
+folding it in would put position sensitivity straight back.
+
 ## What this rules out
 
 - **Raising `captureSettleMs`.** The dominant factor is not animation phase. A
