@@ -18,22 +18,28 @@ collected. A guessed date is not a support-window policy.
 This is a standing policy, not a decoder entry, and it is never removed.
 
 A mutable record is one the product reads, edits and writes again: the Registry,
-`history/source-operations.json`, the Draft aggregate, `manifest.json` and
-`working-copy-state.json`. For those records every required member stays
-strictly validated and fails closed when missing or invalid, while a member
-added by a newer PageRoot is preserved unchanged across the round trip.
+`history/source-operations.json`, the Draft aggregate, `manifest.json`,
+`working-copy-state.json` and `runtime-state.json`. For those records every
+required member stays strictly validated and fails closed when missing or
+invalid, while a member added by a newer PageRoot is preserved unchanged across
+the round trip.
 
 A sub-record is either preserved or authored, and only a preserved one may carry
 unknown members. Authored sub-records are rebuilt from an authoritative source on
 every write and stay strict: `workingCopies[].fileIdentity` (a fresh stat, since
-a save publishes through an atomic rename), the Runtime `lastAiTask` anchor, and
-the stored Draft envelope.
+a save publishes through an atomic rename), the Runtime `activeRequest` (replaced
+on every status transition), the Runtime `lastAiTask` anchor, the Registry
+write-lock owner file, and the stored Draft envelope. The rule is applied per
+level, not per file: `runtime-state.json` is preserved at its root and in
+`historyActivation` while authored in the other two.
 
 - Why: the Registry previously refused any record carrying a key outside a
   hard-coded allowlist, so one added member locked the user out of every managed
-  project. The source history journal and the Draft top level previously rebuilt
-  each object from a fixed field list, so an added member was silently discarded
-  and the truncated record was written back.
+  project. The Runtime `historyActivation` receipt had the same exact-key
+  rejection, so one added member made the whole Runtime unreadable. The source
+  history journal and the Draft top level previously rebuilt each object from a
+  fixed field list, so an added member was silently discarded and the truncated
+  record was written back.
 - This does not weaken `ADR 0028`. A record whose required members are missing is
   still an unrecognized shape and still fails closed; only a fully explainable
   record with extra members is now carried through.
@@ -52,10 +58,8 @@ the stored Draft envelope.
   before it still refuses or discards a newer member. Any release that adds a
   member to a mutable record must come strictly after the release carrying
   `docs/decisions/0032-forward-compatible-record-members.md`.
-- Not yet covered: `runtime-state.json` preserves its root but nests the authored
-  `lastAiTask` anchor, so it needs per-level treatment and its own test.
-  `project.json` is written once at import and never rewritten, so it is an
-  immutable record and stays strict.
+- Not yet covered: nothing. `project.json` is written once at import and never
+  rewritten, so it is an immutable record and stays strict by design.
 
 ## Draft operation IDs
 

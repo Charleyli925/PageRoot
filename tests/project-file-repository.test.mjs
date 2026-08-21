@@ -3963,3 +3963,51 @@ test("unknown manifest and Working Copy state members survive an ordinary save",
   assert.equal(rewrittenState.schemaVersion, state.schemaVersion);
 });
 
+// runtime-state.json is layered rather than uniformly preserved or authored.
+// Its root is spread by normalizeRuntimeDisplayAnchors, and historyActivation is
+// mutated in place when the desktop confirms, so both carry a member a newer
+// PageRoot added. activeRequest is replaced with a fresh literal on every status
+// transition and lastAiTask is re-derived from the AI task record, so those two
+// are authored and their schemas stay strict.
+test("unknown Runtime root and historyActivation members survive a confirmation", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "运行态未知成员.html");
+  const active = await promoteNextVersion(
+    value.repository,
+    imported.target,
+    "runtime_unknown",
+  );
+  const runtimeFile = path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "runtime-state.json",
+  );
+
+  const activated = await value.repository.activateVersionWorkingCopy({
+    target: active,
+    versionId: "ver_0001",
+    operationId: "runtime_unknown_activation_0001",
+    expectedActiveWorkingCopyId: "work_ver_0002",
+  });
+  assert.equal(activated.historyActivation.state, "desktop-pending");
+
+  const runtime = await json(runtimeFile);
+  runtime.ownerAccountId = "account_future";
+  runtime.historyActivation.provenance = { seq: 1 };
+  await writeFile(runtimeFile, `${JSON.stringify(runtime, null, 2)}\n`, "utf8");
+
+  const confirmed = await value.repository.confirmVersionWorkingCopyActivation({
+    target: activated.target,
+    operationId: "runtime_unknown_activation_0001",
+    previousWorkingCopyId: "work_ver_0002",
+    activatedWorkingCopyId: "work_ver_0001",
+    versionId: "ver_0001",
+  });
+  assert.equal(confirmed.confirmed, true);
+
+  const rewritten = await json(runtimeFile);
+  assert.equal(rewritten.historyActivation.state, "desktop-confirmed");
+  assert.equal(rewritten.ownerAccountId, "account_future");
+  assert.deepEqual(rewritten.historyActivation.provenance, { seq: 1 });
+});
+

@@ -21,7 +21,9 @@ has never seen?".
 - The Registry rejected any record carrying a key outside a hard-coded allowlist.
   A single added member turned the whole Registry into
   `UNSUPPORTED_REGISTRY_SCHEMA`, which locks the user out of **every** managed
-  project, not just the one that changed.
+  project, not just the one that changed. The Runtime `historyActivation` receipt
+  used the same `hasExactKeys` rejection, so a single added member made the whole
+  Runtime unreadable.
 - `history/source-operations.json` did the opposite and the most damaging thing.
   `cleanEntry`, `cleanPatch`, `cleanSelection`, `cleanAppliedAction` and
   `normalizeSourceHistory` rebuilt each object from a fixed field list, so an
@@ -65,8 +67,10 @@ One rule applies to every mutable record.
    carry unknown members. Authored sub-records are rebuilt from an authoritative
    source on every write and keep `additionalProperties: false`:
    `workingCopies[].fileIdentity` (a fresh stat — a save publishes through an
-   atomic rename, so the inode legitimately changes), the Runtime `lastAiTask`
-   anchor, and the stored Draft envelope.
+   atomic rename, so the inode legitimately changes), the Runtime
+   `activeRequest` (replaced on every status transition), the Runtime
+   `lastAiTask` anchor, the Registry write-lock owner file, and the stored Draft
+   envelope. The rule is applied per level, not per file.
 7. A preserved record must be written as `{ ...read, ...authoritative }`. The
    reverse order lets a stale file overwrite the identity the writer just
    computed and pin the schema version forever.
@@ -74,13 +78,13 @@ One rule applies to every mutable record.
 ## Scope
 
 Covered and pinned by tests: the Registry, the source history journal, the Draft
-aggregate, `manifest.json` (manifest, Version entries, Working Copy entries) and
-`working-copy-state.json`.
+aggregate, `manifest.json` (manifest, Version entries, Working Copy entries),
+`working-copy-state.json`, and `runtime-state.json` at its root and in
+`historyActivation`.
 
 Deliberately excluded: `project.json` is written once at import and never
-rewritten, so it is an immutable record. `runtime-state.json` preserves its root
-but nests the authored `lastAiTask` anchor, so it needs per-level treatment and
-its own test; that is a separate change.
+rewritten, so it is an immutable record. The authored sub-records listed in item
+6 stay strict for the reason given there.
 
 ## Consequences
 

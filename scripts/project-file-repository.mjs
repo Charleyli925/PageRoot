@@ -1472,17 +1472,14 @@ function assertManifest(manifest, project) {
 function assertHistoryActivation(runtime, project, manifest) {
   const activation = runtime.historyActivation;
   if (activation === undefined || activation === null) return null;
+  // Forward compatibility. The desktop confirmation mutates this receipt in
+  // place and writes it back, so it is a preserved sub-record. Every required
+  // member below is still validated, including its absence, while a member a
+  // newer PageRoot added is carried through untouched. Refusing the whole
+  // Runtime over one added member would lock the project out of an older build
+  // for a receipt that build can otherwise read in full.
   if (
-    !hasExactKeys(activation, [
-      "activatedWorkingCopyId",
-      "createdAt",
-      "documentId",
-      "operationId",
-      "previousWorkingCopyId",
-      "projectId",
-      "state",
-      "versionId",
-    ])
+    !isObject(activation)
     || activation.projectId !== project.projectId
     || activation.documentId !== project.documentId
     || !SAFE_OPERATION_ID.test(String(activation.operationId || ""))

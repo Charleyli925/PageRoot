@@ -203,6 +203,14 @@ test("v4 schemas accept repository-produced identity, Working Copy, Candidate an
   };
   await validateRejects("project-runtime-state.v4.schema.json", malformedHistoryActivation);
 
+  // The Runtime is forward compatible per level. Its root and historyActivation
+  // are preserved across a write, so both accept a member a newer PageRoot
+  // added; activeRequest and lastAiTask are authored and stay strict.
+  const futureRuntime = structuredClone(historyRuntime);
+  futureRuntime.ownerAccountId = "account_future";
+  futureRuntime.historyActivation.provenance = { seq: 1 };
+  await validate("project-runtime-state.v4.schema.json", futureRuntime);
+
   // ADR 0022 forbids one specific member, a project-wide `fileNaming`; ADR 0032
   // requires every other added member to survive. The schema states the first
   // prohibition directly instead of rejecting anything it has not seen before,

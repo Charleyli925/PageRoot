@@ -19,22 +19,26 @@ can carry unknown members:
   read, or spreads it first and overrides authoritative members after
   (`{ ...read, ...authoritative }`). Covered: `project-registry.v4`,
   `source-history.v1`, `project-manifest.v4` (manifest, Version entries, Working
-  Copy entries), `working-copy-state.v4`, and the Draft aggregate, which has no
-  schema file. These drop `additionalProperties: false` and carry a `$comment`.
+  Copy entries), `working-copy-state.v4`, `project-runtime-state.v4` (root and
+  `historyActivation`), and the Draft aggregate, which has no schema file. These
+  drop `additionalProperties: false` and carry a `$comment`.
 - **Authored** — rebuilt from an authoritative source on every write, so it
   cannot carry an unknown member and keeps `additionalProperties: false`. This is
   `workingCopies[].fileIdentity` (a fresh stat; a save publishes through an
-  atomic rename, so the inode legitimately changes), the Runtime `lastAiTask`
-  anchor (re-derived from the AI task record), and the stored Draft envelope
-  (`schemaVersion`, `projectId`, `documentId`, `workingCopyId`,
-  `basedOnVersionId`).
+  atomic rename, so the inode legitimately changes), the Runtime `activeRequest`
+  (replaced on every status transition), the Runtime `lastAiTask` anchor
+  (re-derived from the AI task record), the Registry write-lock owner file, and
+  the stored Draft envelope (`schemaVersion`, `projectId`, `documentId`,
+  `workingCopyId`, `basedOnVersionId`).
+
+A record can be layered: `project-runtime-state.v4` is preserved at its root and
+in `historyActivation` but authored in `activeRequest` and `lastAiTask`, so the
+rule is applied per level rather than per file.
 
 The reverse spread order `{ ...authoritative, ...read }` is a defect: it lets a
 stale file overwrite the identity the writer just computed and pin the schema
 version forever. `tests/project-file-repository.test.mjs` pins that case.
 
-Not covered yet: `project-runtime-state.v4` preserves its root but nests the
-authored `lastAiTask` anchor, so it needs per-level treatment and its own test.
 `project-identity.v4` is written once at import and never rewritten, so it is an
 immutable record and stays strict by the rule below.
 
