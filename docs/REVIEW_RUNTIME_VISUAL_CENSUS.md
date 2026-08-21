@@ -245,6 +245,23 @@ are an invalid expectation (a chart-library hook cannot change a page that has
 no chart library) and six are charts whose colours are written into the data,
 where the palette hook has nothing to override.
 
+A larger run settled two questions the 786-row run could not. 2 ECharts pages
+× 7 mutations × 15 runs = **2835 rows, 0 false positives**, including 300
+comparable `real-noop` rows where both sides are the same bytes. The
+intermittent false positive that used to appear there roughly once every three
+runs is gone, so the residue previously attributed to animation phase was
+window compositing too. All 30 remaining missed rows are the known probe gap on
+two specific hosts whose colours live in their data, and both sides' PNG hashes
+match in every one of them.
+
+Raising the capture viewport from 900 to 2400 changed the unverified count by
+exactly zero (91 → 91), so host-larger-than-viewport is **not** what makes hosts
+unverifiable here; over-collection by this harness's discoverer is. On the one
+page where the chart containers can be enumerated exactly, 12 of 16 discovered
+elements are real `echarts.init` targets and exactly 12 are comparable. Treat
+the unverified rate in this report as a property of the harness, not of the
+pipeline.
+
 Reading the surface alone was not sufficient. CSS that repaints at composite
 time leaves a canvas byte-identical, so the first digest missed the invert
 control on 100% of hosts; folding in resolved presentation values for the host,
