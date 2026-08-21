@@ -202,3 +202,15 @@ test("a later record joins the column it overlaps, not the nearest one", () => {
   assert.equal(left.bottom, 180, "the third record must extend its own column");
   assert.equal(left.summary, "文本调整 · 新增内容");
 });
+
+test("scattered edits on consecutive lines of one paragraph share one caption", () => {
+  // Two two-character deletions in one wrapped paragraph land at unrelated
+  // horizontal positions on neighbouring lines. They are still one region:
+  // horizontal distance only separates records that share a row.
+  const regions = reviewRegionAnnotations([
+    record({ summary: "删除内容", left: 210, right: 285, top: 100, bottom: 128 }),
+    record({ summary: "删除内容", left: 705, right: 775, top: 130, bottom: 158 }),
+  ], { clusterGap: 28 });
+  assert.equal(regions.length, 1);
+  assert.equal(regions[0].detail, "删除内容 ×2");
+});

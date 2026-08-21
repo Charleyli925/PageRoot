@@ -45,10 +45,13 @@
 /**
  * Group one page's fact records into per-change spatial clusters. Records keep
  * their own geometry; a cluster only aggregates what one caption and one
- * revision bar stand for. A record joins a cluster only when it is within
- * `clusterGap` in *both* axes: vertical adjacency alone merged side-by-side
- * grid columns into one region, which forced a single caption to speak for two
- * separate cards and anchored it on whichever card happened to be topmost.
+ * revision bar stand for. A record joins a cluster only when it is vertically
+ * within `clusterGap`, and — when it shares a row with that cluster — also
+ * horizontally within it: clustering on the vertical axis alone merged
+ * side-by-side grid columns into one region, which forced a single caption to
+ * speak for two separate cards and anchored it on whichever card happened to
+ * be topmost. A phrase on the next line of the same paragraph keeps sharing
+ * its caption wherever it starts.
  * The resting caption reads the cluster's distinct
  * fact kinds in reading order ("新增内容 · 视觉调整"), collapses three or more
  * kinds into "综合调整", and never carries a count. The focused caption spells
@@ -87,16 +90,20 @@ export function reviewRegionAnnotations(records, options = {}) {
       .sort((first, second) => first.top - second.top || first.left - second.left);
     const open = [];
     ordered.forEach((entry) => {
-      // Prefer the cluster this record shares the most horizontal extent with,
-      // so a wrapped paragraph keeps one caption while a neighbouring column
-      // keeps its own.
+      // Prefer the cluster this record shares the most horizontal extent with.
+      // Horizontal distance only disqualifies a record that shares a row with
+      // the cluster: two cards side by side are two regions, while a phrase
+      // that simply flowed onto the next line may start anywhere on it and
+      // still belongs to the same caption.
       let best = null;
       let bestOverlap = -Infinity;
       open.forEach((cluster) => {
         if (entry.top - cluster.bottom > clusterGap) return;
         const overlap = Math.min(entry.right, cluster.right)
           - Math.max(entry.left, cluster.left);
-        if (overlap < -clusterGap) return;
+        const sharesRow = Math.min(entry.bottom, cluster.bottom)
+          - Math.max(entry.top, cluster.top) > 0;
+        if (sharesRow && overlap < -clusterGap) return;
         if (overlap > bestOverlap) {
           bestOverlap = overlap;
           best = cluster;
