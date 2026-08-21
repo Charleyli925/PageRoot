@@ -25,8 +25,27 @@ const TREND_BASE = Object.freeze([117, 120, 123, 125, 126, 127, 128]);
 const TREND_LIFTED = Object.freeze([117, 121, 124, 126, 128, 130, 131]);
 const MIX_BASE = Object.freeze([46, 28, 16, 10]);
 const MIX_SHIFTED = Object.freeze([38, 33, 19, 10]);
+const PALETTE_BASE = Object.freeze(["#6c5ce7", "#8f7ff0", "#b3a8f6", "#d8d2fb"]);
+// Same geometry and same labels, different hue: only the raster step can see
+// this, so it is the control that proves step 3 still earns its place.
+const PALETTE_RECOLOURED = Object.freeze(["#1f9d76", "#4cb894", "#8ad3ba", "#c4e9dc"]);
+const LABELS_BASE = Object.freeze(["周一", "周二", "周三", "周四", "周五", "周六", "周日"]);
+// Same geometry and same colours, different visible label text. An SVG chart
+// exposes this to the renderedTextSha256 step; a canvas chart hides it there
+// and only the raster step can catch it. The pair measures both paths.
+const LABELS_RENAMED = Object.freeze(["D1", "D2", "D3", "D4", "D5", "D6", "D7"]);
+export const REVIEW_RUNTIME_CHART_RENDERERS = Object.freeze(["canvas", "svg"]);
 
-function chartScript({ animationMs, libraryDelayMs, trend, mix, inertComment }) {
+function chartScript({
+  animationMs,
+  libraryDelayMs,
+  trend,
+  mix,
+  palette,
+  labels,
+  renderer,
+  inertComment,
+}) {
   // A deterministic renderer standing in for a chart library: it starts late
   // (library fetch), animates for a bounded time, then draws the exact settled
   // frame once. Both sides receive identical parameters on purpose, so any
@@ -36,7 +55,27 @@ function chartScript({ animationMs, libraryDelayMs, trend, mix, inertComment }) 
   var DELAY_MS = ${libraryDelayMs};
   var TREND = ${JSON.stringify(trend)};
   var MIX = ${JSON.stringify(mix)};
-  function drawTrend(context, width, height, progress) {
+  var PALETTE = ${JSON.stringify(palette)};
+  var LABELS = ${JSON.stringify(labels)};
+  var RENDERER = ${JSON.stringify(renderer)};
+  var SVG_NS = "http://www.w3.org/2000/svg";
+  function trendGeometry(width, height) {
+    var minimum = Math.min.apply(null, TREND) - 6;
+    var maximum = Math.max.apply(null, TREND) + 4;
+    return {
+      x: function (index) {
+        return 28 + Math.round((width - 40) * index / (TREND.length - 1));
+      },
+      y: function (value) {
+        var ratio = (value - minimum) / (maximum - minimum);
+        return Math.round((height - 30) * (1 - ratio)) + 6;
+      },
+    };
+  }
+  function visibleCount(progress) {
+    return Math.max(2, Math.round(TREND.length * progress));
+  }
+  function drawTrendCanvas(context, width, height, progress) {
     context.fillStyle = "#ffffff";
     context.fillRect(0, 0, width, height);
     context.strokeStyle = "#e5e7f2";
@@ -48,83 +87,151 @@ function chartScript({ animationMs, libraryDelayMs, trend, mix, inertComment }) 
       context.lineTo(width - 6, gridY);
       context.stroke();
     }
-    var minimum = Math.min.apply(null, TREND) - 6;
-    var maximum = Math.max.apply(null, TREND) + 4;
-    var pointX = function (index) {
-      return 28 + Math.round((width - 40) * index / (TREND.length - 1));
-    };
-    var pointY = function (value) {
-      var ratio = (value - minimum) / (maximum - minimum);
-      return Math.round((height - 30) * (1 - ratio)) + 6;
-    };
-    var visible = Math.max(2, Math.round(TREND.length * progress));
+    var geometry = trendGeometry(width, height);
+    var visible = visibleCount(progress);
     context.beginPath();
-    context.moveTo(pointX(0), pointY(TREND[0]));
+    context.moveTo(geometry.x(0), geometry.y(TREND[0]));
     for (var index = 1; index < visible; index += 1) {
-      context.lineTo(pointX(index), pointY(TREND[index]));
+      context.lineTo(geometry.x(index), geometry.y(TREND[index]));
     }
-    context.strokeStyle = "#6c5ce7";
+    context.strokeStyle = PALETTE[0];
     context.lineWidth = 2;
     context.stroke();
-    context.lineTo(pointX(visible - 1), height - 18);
-    context.lineTo(pointX(0), height - 18);
+    context.lineTo(geometry.x(visible - 1), height - 18);
+    context.lineTo(geometry.x(0), height - 18);
     context.closePath();
-    context.fillStyle = "rgba(108, 92, 231, 0.22)";
+    context.fillStyle = PALETTE[2];
     context.fill();
+    context.fillStyle = "#6b7080";
+    context.font = "10px system-ui, sans-serif";
+    context.textAlign = "center";
+    for (var labelIndex = 0; labelIndex < LABELS.length; labelIndex += 1) {
+      context.fillText(LABELS[labelIndex], geometry.x(labelIndex), height - 4);
+    }
   }
-  function drawMix(context, width, height, progress) {
+  function drawMixCanvas(context, width, height, progress) {
     context.fillStyle = "#ffffff";
     context.fillRect(0, 0, width, height);
-    var centerX = Math.round(width / 2);
-    var centerY = Math.round(height / 2);
-    var radius = Math.round(Math.min(width, height) / 2) - 10;
     var total = MIX.reduce(function (sum, value) { return sum + value; }, 0);
-    var start = -Math.PI / 2;
-    var palette = ["#6c5ce7", "#8f7ff0", "#b3a8f6", "#d8d2fb"];
+    var top = 12;
+    context.font = "10px system-ui, sans-serif";
     for (var index = 0; index < MIX.length; index += 1) {
-      var sweep = (MIX[index] / total) * Math.PI * 2 * progress;
-      context.beginPath();
-      context.moveTo(centerX, centerY);
-      context.arc(centerX, centerY, radius, start, start + sweep);
-      context.closePath();
-      context.fillStyle = palette[index];
-      context.fill();
-      start += sweep;
+      var barWidth = Math.round((width - 70) * (MIX[index] / total) * progress);
+      context.fillStyle = PALETTE[index];
+      context.fillRect(60, top, Math.max(1, barWidth), 18);
+      context.fillStyle = "#6b7080";
+      context.textAlign = "right";
+      context.fillText(LABELS[index], 54, top + 13);
+      top += 26;
     }
-    context.beginPath();
-    context.fillStyle = "#ffffff";
-    context.arc(centerX, centerY, Math.round(radius * 0.58), 0, Math.PI * 2);
-    context.fill();
   }
-  function render(hostId, painter) {
+  function svgRoot(host, width, height) {
+    var svg = document.createElementNS(SVG_NS, "svg");
+    svg.setAttribute("width", String(width));
+    svg.setAttribute("height", String(height));
+    svg.setAttribute("viewBox", "0 0 " + width + " " + height);
+    var background = document.createElementNS(SVG_NS, "rect");
+    background.setAttribute("x", "0");
+    background.setAttribute("y", "0");
+    background.setAttribute("width", String(width));
+    background.setAttribute("height", String(height));
+    background.setAttribute("fill", "#ffffff");
+    svg.appendChild(background);
+    host.replaceChildren(svg);
+    return svg;
+  }
+  function svgText(value, x, y, anchor) {
+    var text = document.createElementNS(SVG_NS, "text");
+    text.setAttribute("x", String(x));
+    text.setAttribute("y", String(y));
+    text.setAttribute("text-anchor", anchor);
+    text.setAttribute("font-size", "10");
+    text.setAttribute("font-family", "system-ui, sans-serif");
+    text.setAttribute("fill", "#6b7080");
+    text.textContent = value;
+    return text;
+  }
+  function drawTrendSvg(host, width, height, progress) {
+    var svg = svgRoot(host, width, height);
+    var geometry = trendGeometry(width, height);
+    var visible = visibleCount(progress);
+    var points = [];
+    for (var index = 0; index < visible; index += 1) {
+      points.push(geometry.x(index) + "," + geometry.y(TREND[index]));
+    }
+    var area = document.createElementNS(SVG_NS, "polygon");
+    area.setAttribute(
+      "points",
+      points.join(" ")
+        + " " + geometry.x(visible - 1) + "," + (height - 18)
+        + " " + geometry.x(0) + "," + (height - 18),
+    );
+    area.setAttribute("fill", PALETTE[2]);
+    svg.appendChild(area);
+    var line = document.createElementNS(SVG_NS, "polyline");
+    line.setAttribute("points", points.join(" "));
+    line.setAttribute("fill", "none");
+    line.setAttribute("stroke", PALETTE[0]);
+    line.setAttribute("stroke-width", "2");
+    svg.appendChild(line);
+    for (var labelIndex = 0; labelIndex < LABELS.length; labelIndex += 1) {
+      svg.appendChild(svgText(LABELS[labelIndex], geometry.x(labelIndex), height - 4, "middle"));
+    }
+  }
+  function drawMixSvg(host, width, height, progress) {
+    var svg = svgRoot(host, width, height);
+    var total = MIX.reduce(function (sum, value) { return sum + value; }, 0);
+    var top = 12;
+    for (var index = 0; index < MIX.length; index += 1) {
+      var barWidth = Math.round((width - 70) * (MIX[index] / total) * progress);
+      var bar = document.createElementNS(SVG_NS, "rect");
+      bar.setAttribute("x", "60");
+      bar.setAttribute("y", String(top));
+      bar.setAttribute("width", String(Math.max(1, barWidth)));
+      bar.setAttribute("height", "18");
+      bar.setAttribute("fill", PALETTE[index]);
+      svg.appendChild(bar);
+      svg.appendChild(svgText(LABELS[index], 54, top + 13, "end"));
+      top += 26;
+    }
+  }
+  function render(hostId, canvasPainter, svgPainter) {
     var host = document.getElementById(hostId);
     if (!host) return;
-    // The library creates its own canvas, exactly like a real chart library:
-    // the authored host stays empty in the source bytes, which is what the
-    // owner's "host" binding requires.
-    var canvas = document.createElement("canvas");
-    canvas.width = host.clientWidth || 320;
-    canvas.height = host.clientHeight || 200;
-    host.appendChild(canvas);
-    var context = canvas.getContext("2d");
-    if (!context) return;
+    var width = host.clientWidth || 320;
+    var height = host.clientHeight || 200;
+    var paint;
+    if (RENDERER === "svg") {
+      paint = function (progress) { svgPainter(host, width, height, progress); };
+    } else {
+      // The library creates its own canvas, exactly like a real chart library:
+      // the authored host stays empty in the source bytes, which is what the
+      // owner's "host" binding requires.
+      var canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      host.appendChild(canvas);
+      var context = canvas.getContext("2d");
+      if (!context) return;
+      paint = function (progress) { canvasPainter(context, width, height, progress); };
+    }
     var startedAt = null;
     var step = function (timestamp) {
       if (startedAt === null) startedAt = timestamp;
       var elapsed = timestamp - startedAt;
       if (elapsed >= ANIMATION_MS) {
         // Drawn exactly once at progress 1, so a settled pair is byte-equal.
-        painter(context, canvas.width, canvas.height, 1);
+        paint(1);
         return;
       }
-      painter(context, canvas.width, canvas.height, elapsed / ANIMATION_MS);
+      paint(elapsed / ANIMATION_MS);
       window.requestAnimationFrame(step);
     };
     window.requestAnimationFrame(step);
   }
   window.setTimeout(function () {
-    render("${CHART_HOST_IDS[0]}", drawTrend);
-    render("${CHART_HOST_IDS[1]}", drawMix);
+    render("${CHART_HOST_IDS[0]}", drawTrendCanvas, drawTrendSvg);
+    render("${CHART_HOST_IDS[1]}", drawMixCanvas, drawMixSvg);
   }, DELAY_MS);
 })();`;
 }
@@ -232,6 +339,8 @@ export const REVIEW_RUNTIME_CHART_SCENARIO_IDS = Object.freeze([
   "structure-remove",
   "chart-script-noop",
   "chart-data-change",
+  "chart-color-change",
+  "chart-label-change",
   "chart-host-resize",
 ]);
 
@@ -239,12 +348,19 @@ export const REVIEW_RUNTIME_CHART_SCENARIO_IDS = Object.freeze([
  * Builds one scenario pair. `animationMs` and `libraryDelayMs` are applied
  * identically to both sides on purpose.
  */
-export function reviewRuntimeChartScenario(id, { animationMs = 1_000, libraryDelayMs = 120 } = {}) {
+export function reviewRuntimeChartScenario(id, {
+  animationMs = 1_000,
+  libraryDelayMs = 120,
+  renderer = "canvas",
+} = {}) {
   const script = (overrides = {}) => chartScript({
     animationMs,
     libraryDelayMs,
+    renderer,
     trend: TREND_BASE,
     mix: MIX_BASE,
+    palette: PALETTE_BASE,
+    labels: LABELS_BASE,
     inertComment: false,
     ...overrides,
   });
@@ -333,6 +449,24 @@ export function reviewRuntimeChartScenario(id, { animationMs = 1_000, libraryDel
         chartExpectation: "changed",
         before: build(baseBlocks(), BASE_FOOTER),
         after: build(baseBlocks(), BASE_FOOTER, { trend: TREND_LIFTED, mix: MIX_SHIFTED }),
+      };
+    case "chart-color-change":
+      // Identical geometry and identical labels: the dimension step and the
+      // rendered-text step both see nothing, so only the raster step can
+      // report this.
+      return {
+        chartExpectation: "changed",
+        before: build(baseBlocks(), BASE_FOOTER),
+        after: build(baseBlocks(), BASE_FOOTER, { palette: PALETTE_RECOLOURED }),
+      };
+    case "chart-label-change":
+      // Identical geometry and identical colours, different visible label
+      // text. An svg chart exposes it to the rendered-text step; a canvas
+      // chart hides it there and leaves only the raster step.
+      return {
+        chartExpectation: "changed",
+        before: build(baseBlocks(), BASE_FOOTER),
+        after: build(baseBlocks(), BASE_FOOTER, { labels: LABELS_RENAMED }),
       };
     case "chart-host-resize": {
       const after = build(baseBlocks(), BASE_FOOTER);

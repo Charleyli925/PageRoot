@@ -142,6 +142,66 @@ a 1600 ms fixture animation, which genuinely outlasts the settle, the census
 still reports 9 / 40. It is a different signature — smaller distances, later
 candidates — and needs its own change.
 
+## Matrix results
+
+The census covers two renderers, because the comparison steps do not treat
+them alike: a canvas chart draws its labels as pixels and hides them from the
+rendered-text step, while an svg chart exposes them there. Running the same
+scenarios under both is what proves each step still earns its place.
+
+2 renderers × 11 scenarios × 10 runs × 2 hosts = **440 candidate rows**, default
+viewport, default 1000 ms animation, contract settle wait.
+
+| Chart change | canvas | svg | Caught by |
+| --- | --- | --- | --- |
+| host resized | 20/20 | 20/20 | dimensions (step 1) |
+| label text | 20/20 | 20/20 | **raster** on canvas, **rendered-text** on svg |
+| series data | 20/20 | 20/20 | raster (step 3) |
+| colour only | 20/20 | 20/20 | raster (step 3) |
+| nothing (7 unrelated-edit scenarios) | 0 false | 0 false | — |
+
+**440 rows: 0 false positives, 0 false negatives, 0 unverified.**
+
+The separation is now categorical rather than marginal:
+
+| | before the scroll fix | now |
+| --- | --- | --- |
+| unchanged chart raster distance | 7.56 – 22.13 (false positives) | **exactly 0** (280/280 byte-identical) |
+| real chart change raster distance | 0.80 – 10.80 | 0.561 – 23.81 |
+| overlap | **yes** — no threshold could separate them | **none** — 14× margin at the tightest point |
+
+The tightest real signal is a canvas label rename (0.561, 14× the 0.04 budget);
+the loudest is a full recolour (23.81). Nothing unchanged produces any raster
+distance at all, so the budget is no longer the thing standing between noise
+and fact.
+
+## Reviewer-visible presentation
+
+A verdict is not what a reviewer sees. The census also runs the real merge
+rules over the real verdicts under all four combinations of the two dimensions
+that decide presentation — whether the source diff also found a change in the
+chart's section, and whether the user commented on the host:
+
+| Variant | unchanged charts | real chart changes |
+| --- | --- | --- |
+| source changed + commented | 280 silent | 160 confirmed |
+| source changed + uncommented | 280 silent | 160 confirmed |
+| source unchanged + commented | 280 silent | 160 **suspected** |
+| source unchanged + uncommented | 280 silent | 160 **suspected** |
+
+No unchanged chart produces a frame in any variant, and no real change is ever
+silent. Comment anchoring changes nothing here, which is the intended result
+of making it a floor rather than a gate.
+
+The last two rows are the designed trade-off, and the matrix shows it is the
+common case rather than a corner: a chart driven by a `<script>` outside its
+own section has no source change inside that section, so a genuine data or
+colour edit surfaces as "疑似有改动" instead of a confirmed visual change. The
+information is not lost — the host keeps its frame, caption and navigation
+stop — but the label is weaker than the evidence deserves. Widening
+corroboration to "the source of anything that can drive this host changed" is
+the obvious follow-up; it is not implemented.
+
 ## What this rules out
 
 - **Raising `captureSettleMs`.** The dominant factor is not animation phase. A
