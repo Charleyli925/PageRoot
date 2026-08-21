@@ -43,6 +43,7 @@ import {
 import type {
   ReviewRuntimeSnapshotCaptureResult,
 } from "../components/desktop-runtime-snapshot-api";
+import ReadOnlyCommentMarker from "../components/ReadOnlyCommentMarker";
 import {
   acceptRuntimeVisualSnapshots,
   mergeReviewRuntimeVisualChanges,
@@ -319,61 +320,30 @@ function ReviewDocumentPane({
     const left = Math.max(12, Math.min(documentViewportWidth - 12, layout.left)) * scale;
     const top = Math.max(12, layout.top) * scale;
     // Horizontal scrolling must not re-render the pane, so the rendered side is
-    // the unscrolled one; pointer entry measures the live position instead.
+    // the unscrolled one; pointer entry and keyboard focus measure the live
+    // position instead.
     const visibleLeft = layout.viewportLeft * scale;
     const visibleTop = layout.viewportTop * scale;
-    const placement = visibleLeft < viewportSize.width * .55 ? "right" : "left";
-    const verticalPlacement = visibleTop < 96
-      ? "below"
-      : visibleTop > viewportSize.height - 96
-        ? "above"
-        : "center";
-    const commentText = group.items.map((item) => item.text).join("；");
     return (
-      <span
+      <ReadOnlyCommentMarker
         key={group.key}
-        className={styles.reviewCommentMarker}
-        data-testid="review-comment-marker"
-        data-comment-key={group.key}
-        data-bubble-placement={placement}
-        data-bubble-vertical={verticalPlacement}
-        role="note"
-        aria-label={`用户评论：${commentText}`}
-        style={{ left, top }}
-        onPointerEnter={(event) => {
-          const viewport = viewportRef.current;
-          if (!viewport) return;
-          const markerBounds = event.currentTarget.getBoundingClientRect();
-          const viewportBounds = viewport.getBoundingClientRect();
-          const centerX = markerBounds.left + markerBounds.width / 2 - viewportBounds.left;
-          const centerY = markerBounds.top + markerBounds.height / 2 - viewportBounds.top;
-          event.currentTarget.dataset.bubblePlacement = centerX < viewportBounds.width * .55
-            ? "right"
-            : "left";
-          event.currentTarget.dataset.bubbleVertical = centerY < 96
+        group={group}
+        left={left}
+        top={top}
+        viewportRef={viewportRef}
+        initialPlacement={
+          visibleLeft < viewportSize.width * .55 ? "right" : "left"
+        }
+        initialVertical={
+          visibleTop < 96
             ? "below"
-            : centerY > viewportBounds.height - 96
+            : visibleTop > viewportSize.height - 96
               ? "above"
-              : "center";
-        }}
-      >
-        <span aria-hidden="true">评</span>
-        <span
-          className={styles.reviewCommentBubble}
-          data-testid="review-comment-bubble"
-          aria-hidden="true"
-        >
-          <strong>用户评论</strong>
-          {group.items.map((item, index) => (
-            <span className={styles.reviewCommentItem} key={`${group.key}-${index}`}>
-              <span>{item.text}</span>
-              {item.attachmentCount > 0 && !item.text.startsWith("已添加 ") ? (
-                <small>{item.attachmentCount} 个参考附件</small>
-              ) : null}
-            </span>
-          ))}
-        </span>
-      </span>
+              : "center"
+        }
+        testId="review-comment-marker"
+        bubbleTestId="review-comment-bubble"
+      />
     );
   };
 

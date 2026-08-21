@@ -516,6 +516,56 @@
       ]
     },
     {
+      "id": "conversation",
+      "patterns": [
+        "^shared/conversation\\.mjs$",
+        "^scripts/conversation-repository\\.mjs$",
+        "^schemas/conversation(?:-index|-draft)?\\.v1\\.schema\\.json$"
+      ],
+      "suites": [],
+      "nodeTests": [
+        "tests/conversation-repository.test.mjs",
+        "tests/conversation-bridge.test.mjs",
+        "tests/conversation-forward-compat.test.mjs"
+      ]
+    },
+    {
+      "id": "conversation-application",
+      "patterns": [
+        "^app/application/conversation-(?:session|workflow)\\.(?:js|d\\.ts)$"
+      ],
+      "suites": ["typecheck"],
+      "nodeTests": [
+        "tests/conversation-workflow.test.mjs"
+      ]
+    },
+    {
+      "id": "preview-comment-markers",
+      "patterns": [
+        "^app/lib/preview-comment-markers\\.(?:js|d\\.ts)$",
+        "^app/components/ReadOnlyCommentMarker\\.tsx$",
+        "^app/components/read-only-comment-marker\\.module\\.css$",
+        "^app/components/HtmlInteractionPreview\\.(?:tsx|module\\.css)$"
+      ],
+      "suites": ["typecheck"],
+      "nodeTests": [
+        "tests/preview-comment-markers.test.mjs",
+        "tests/review-comment-source-map.test.mjs"
+      ]
+    },
+    {
+      "id": "ai-conversation-sidebar",
+      "patterns": [
+        "^app/workbench/ai-conversation-model\\.(?:js|d\\.ts)$",
+        "^app/workbench/AiConversationSidebar\\.tsx$",
+        "^app/workbench/ai-conversation-sidebar\\.module\\.css$"
+      ],
+      "suites": ["typecheck"],
+      "nodeTests": [
+        "tests/ai-conversation-sidebar.test.mjs"
+      ]
+    },
+    {
       "id": "runtime-capabilities",
       "patterns": ["^app/application/runtime-capabilities\\.(?:js|d\\.ts)$"],
       "suites": ["typecheck"],
@@ -964,7 +1014,8 @@
         "tests/project-context-service.test.mjs",
         "tests/targeted-change-schema.test.mjs",
         "tests/user-supplement.test.mjs",
-        "tests/project-file-bridge.test.mjs"
+        "tests/project-file-bridge.test.mjs",
+        "tests/conversation-bridge.test.mjs"
       ]
     },
     {

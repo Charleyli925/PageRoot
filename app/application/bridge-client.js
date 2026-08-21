@@ -205,6 +205,16 @@ export function createBridgeClient({
       { sourcePath },
       "无法读取源文件冲突候选。",
     ),
+    conversation: (sourcePath) => query(
+      "/conversation",
+      { sourcePath },
+      "暂时无法读取这份文档的对话。",
+    ),
+    conversationList: (sourcePath) => query(
+      "/conversation/list",
+      { sourcePath },
+      "暂时无法读取对话历史。",
+    ),
     status: (sourcePath, requestId, attemptId) => query(
       "/status",
       { sourcePath, requestId, attemptId },
@@ -239,6 +249,11 @@ export function createBridgeClient({
       "/source-history/action",
       body,
       "无法完成这次撤销或重做。",
+    ),
+    saveConversationDraft: (body) => command(
+      "/conversation/draft",
+      body,
+      "对话草稿暂时无法保存。",
     ),
     saveDraft: (body) => command(
       "/draft",

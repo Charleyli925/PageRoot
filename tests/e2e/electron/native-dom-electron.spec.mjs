@@ -430,6 +430,114 @@ async function replayApplePinyinStyledWrapperCommit(frame, caseId) {
   });
 }
 
+test("Electron preview shows the read-only comment marker and opens it on hover and keyboard focus", async () => {
+  test.setTimeout(90_000);
+  const sourceDirectory = mkdtempSync(
+    path.join(tmpdir(), "pageroot-preview-comment-e2e-"),
+  );
+  const sourcePath = path.join(sourceDirectory, "commented-page.html");
+  const commentText = "这个标题再简洁一些。";
+  writeFileSync(
+    sourcePath,
+    `<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>带评论的页面</title></head>
+<body>
+  <main>
+    <h1 id="headline" data-native-case="preview-comment-headline">季度经营大盘</h1>
+    <p id="summary">本季度整体达成预期。</p>
+  </main>
+</body>
+</html>
+`,
+    "utf8",
+  );
+
+  let electronApp = null;
+  let isolatedUserData = null;
+  try {
+    const launched = await launchPageRoot({ activeSourcePath: sourcePath });
+    electronApp = launched.electronApp;
+    isolatedUserData = launched.isolatedUserData;
+    const { frame: editFrame } = await loadedDiskFrame(
+      launched.page,
+      sourcePath,
+      "preview-comment-headline",
+    );
+
+    // A comment anchored to one element, not a global page comment: only an
+    // element target has a place on the page to mark.
+    await editFrame.locator(caseSelector("preview-comment-headline")).click();
+    await launched.page.getByRole("toolbar", { name: /编辑/u })
+      .getByRole("button", { name: /留评论/u })
+      .click();
+    const composer = launched.page.getByRole("region", { name: "添加评论" });
+    await expect(composer).toBeVisible();
+    await composer.getByRole("textbox", { name: "评论内容" }).fill(commentText);
+    await composer.getByRole("button", { name: "评论", exact: true }).click();
+
+    await launched.page.getByRole("button", { name: "预览", exact: true }).click();
+    await expect(launched.page.locator('iframe[title="HTML 交互预览"]'))
+      .toBeVisible();
+
+    const marker = launched.page.getByTestId("preview-comment-marker");
+    await expect(marker).toHaveCount(1, { timeout: 30_000 });
+    await expect(marker).toBeVisible();
+    // The marker sits over the page, never at the viewport origin.
+    await expect.poll(async () => {
+      const box = await marker.boundingBox();
+      return box ? box.x > 0 && box.y > 0 : false;
+    }).toBe(true);
+
+    // Comment text lives in the trusted host, never inside the previewed page.
+    const previewFrame = launched.page.frames().find(
+      (frame) => /^pageroot-preview:/u.test(frame.url()),
+    );
+    if (previewFrame) {
+      await expect.poll(() => previewFrame.locator("html").evaluate(
+        (element, text) => element.innerHTML.includes(text),
+        commentText,
+      )).toBe(false);
+    }
+
+    const bubble = marker.getByTestId("preview-comment-bubble");
+    await expect(bubble).toBeHidden();
+    await marker.hover();
+    await expect(bubble).toBeVisible();
+    await expect(bubble).toContainText(commentText);
+
+    await launched.page.getByRole("button", { name: "编辑", exact: true }).hover();
+    await expect(bubble).toBeHidden();
+
+    // Keyboard focus reaches the same bubble. Press Tab first so the input
+    // modality is keyboard again; the bubble binds :focus-visible.
+    await launched.page.keyboard.press("Tab");
+    await marker.focus();
+    await expect(bubble).toBeVisible();
+    await expect(bubble).toContainText(commentText);
+
+    // The marker is read-only: it never enters editing or moves the selection.
+    await launched.page.keyboard.press("Enter");
+    await launched.page.keyboard.press("Space");
+    await expect(bubble).toBeVisible();
+    await expect(launched.page.getByRole("region", { name: "添加评论" }))
+      .toHaveCount(0);
+    await expect(launched.page.locator('iframe[title="HTML 交互预览"]'))
+      .toBeVisible();
+
+    await marker.blur();
+    await expect(bubble).toBeHidden();
+  } finally {
+    if (electronApp && isolatedUserData) {
+      await stopPageRoot(electronApp, isolatedUserData);
+    }
+    removeValidatedTemporaryDirectory(
+      sourceDirectory,
+      "pageroot-preview-comment-e2e-",
+    );
+  }
+});
+
 test("Electron first launch imports the welcome HTML as V1 and sends its comment to Qoder", async () => {
   const launched = await launchPageRoot();
   const welcomePath = path.join(launched.isolatedUserData, "欢迎来到源页.html");

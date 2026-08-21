@@ -85,6 +85,9 @@ records.
 - `version-transaction.v1.schema.json`
 - `committed-marker.v1.schema.json`
 - `source-history.v1.schema.json`
+- `conversation.v1.schema.json`
+- `conversation-index.v1.schema.json`
+- `conversation-draft.v1.schema.json`
 
 ## v4 project-file records
 
@@ -119,6 +122,32 @@ its removal evidence and fixture contract.
 `source-history.v1.schema.json` is the bounded, document-owned journal of
 byte-exact canvas source operations. Its cursor is independent from immutable
 Versions; comments, attachments, and project-rule edits are not entries.
+
+`conversation.v1.schema.json` is one AI conversation thread. A Conversation
+belongs to exactly one Document and its contexts, turns and messages live in the
+same record, so reading one Document's thread can never surface another's. Two
+rules are load-bearing and pinned by
+`tests/conversation-repository.test.mjs`:
+
+- **A stored message is always terminal.** A streaming fragment stays in Bridge
+  memory and is written once, when its Turn seals. `draft`, `queued` and
+  `streaming` are refused on write, so crash recovery never has to repair a half
+  record.
+- **A stored message carries no interface member.** `actions`, `buttons`,
+  `cardState`, `disabled`, `pending` and `controls` are refused. An executable
+  action is derived from current product state by the action bar, never read
+  from a stored fact, so scrolling back through history cannot surface a stale
+  button.
+
+`conversation-index.v1.schema.json` maps each Document to its Conversations and
+to that Document's single current Conversation. It is a rebuildable projection
+of the authoritative conversation records; it exists so the history list renders
+without opening every conversation file.
+
+`conversation-draft.v1.schema.json` is the unsent Composer content for one
+Conversation, kept in its own small record so a debounced draft write never
+rewrites the message history. A draft never enters a Request, Prompt,
+`USER_SUPPLEMENT` or Candidate.
 
 Deprecated main v1/v2 schemas and `migration-report.v1.schema.json` are not
 kept in the active source tree or release package. Their evidence exists only

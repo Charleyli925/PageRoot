@@ -7648,6 +7648,7 @@ export default function Workbench() {
               documentKey={pageViewDocumentKey}
               sourcePath={sourcePath || undefined}
               height="100%"
+              comments={comments}
               transport={interactivePreviewTransport}
               onReady={handlePreviewReady}
             />

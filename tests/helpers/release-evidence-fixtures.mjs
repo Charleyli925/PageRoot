@@ -84,6 +84,7 @@ const BRIDGE_FILES = [
   "draft-command-decoder.mjs",
   "project-context-service.mjs",
   "source-history-service.mjs",
+  "conversation-repository.mjs",
   "source-transaction-service.mjs",
 ];
 
@@ -382,6 +383,11 @@ export async function createSyntheticAppBundle(t, {
     ),
     writeFixtureFile(
       productRoot,
+      "shared/conversation.mjs",
+      "export const fixtureConversation = true;\n",
+    ),
+    writeFixtureFile(
+      productRoot,
       "shared/provenance.mjs",
       "export const fixtureProvenance = true;\n",
     ),
@@ -453,6 +459,7 @@ export async function createSyntheticAppBundle(t, {
       "direct-edit-compatibility.mjs",
       "provenance.mjs",
       "source-history.mjs",
+      "conversation.mjs",
     ].map((fileName) => copyFixtureFile(
       productRoot,
       resourcesPath,
