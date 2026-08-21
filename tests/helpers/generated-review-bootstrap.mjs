@@ -15,6 +15,9 @@ import {
   reviewBadgeFactCount,
   reviewBadgeLabelText,
 } from "../../app/lib/review-badge-aggregation.js";
+import {
+  reviewRegionAnnotations,
+} from "../../app/lib/review-region-annotation.js";
 
 const reviewDocument = await readFile(
   new URL("../../app/workbench/review-document.ts", import.meta.url),
@@ -76,6 +79,7 @@ export function generatedReviewBootstrap(
     reviewBadgeLabelText,
     reviewBadgeFactCount,
     aggregateReviewBadgeLabels,
+    reviewRegionAnnotations,
   });
   // The bootstrap receives its helpers as `${fn.toString()}` injections, so a
   // new injection that is not also provided here fails deep inside the vm with a

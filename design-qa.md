@@ -2282,3 +2282,87 @@ still the same ones, but their treatment is now the popover’s own.
 - [x] One emphasis colour; icons remain Phosphor-only.
 
 final result: passed
+
+---
+
+# AI review annotations — quiet-by-default layered model
+
+Date: 2026-08-21
+
+## Superseding direction
+
+- This entry supersedes the visual presentation half of "AI review workspace —
+  adjacent same-summary badge aggregation" (2026-08-18) and the structure-blue
+  legend detail of "AI review entry-state and diff-legend QA" (2026-08-18):
+  1. confirmed change boxes no longer rest as always-on dashed outlines; a
+     per-fact caption no longer exists;
+  2. the structure tone folded into the single violet accent family
+     (`REVIEW_STRUCTURE_TONE_COLOR` = `#6d5ce7`); at a 1.5px outline the old
+     blue was indistinguishable from violet, so the change kind is carried by
+     caption text and the filter legend, not by hue.
+- Everything else stays in force: the dim mask as the only "where" surface,
+  the frozen character-evidence marks (green dots / red dashed strike), the
+  amber suspected frame, mask/box geometry equivalence, and the aggregation
+  *logic* (now applied to caption anchors of spatial stretches instead of
+  per-record badges).
+
+## Design decision
+
+- Quiet by default → loud on reach. At rest a confirmed change paints no
+  outline: the dim mask says "where", one clickable violet revision bar per
+  contiguous stretch of a change sits at the page's left edge as a position
+  index, and each stretch carries exactly one content-language caption
+  ("新增内容 · 视觉调整", ≥3 kinds → "综合调整") at its topmost box.
+- A change that touches places far apart on the page (a document-wide text
+  pass spans thousands of pixels) gets one caption and one bar per *spatial
+  stretch* (`reviewRegionAnnotations`, cluster gap 28 × UI scale), not one
+  distant caption per changeId; navigation and the 变化区域 count stay per
+  change.
+- Hover previews: pointing at a stretch or its bar shows the change's precise
+  boxes as low-emphasis thin solid outlines; leaving rests them again.
+- Focus claims: the navigated change's boxes turn solid violet with a 4%
+  violet tint, its bars highlight, and each of its stretch captions upgrades
+  to per-kind fact counts ("新增内容 ×3 · 视觉调整 ×3"). Clicking a bar or a
+  caption navigates to that change (`select-change` message).
+- Adjacent same-caption stretches still collapse into one "{caption} ×N"
+  representative, judged by caption-anchor distance (stretch top edges) so
+  tall regions no longer over-merge; the focused change always keeps its own
+  captions without the cluster count.
+- The amber suspected frame and the character evidence never go quiet: one is
+  an unverified-visibility hint, the other is the character-level proof.
+
+## Automated evidence
+
+- `tests/e2e/electron/review-annotation-clarity.spec.mjs` extends the dense
+  report contract: resting boxes are transparent, captions ≤ stretches per
+  change with well-formed ×N cluster suffixes, every change is indexed by a
+  revision bar, hover previews and rests, focus claims while others rest.
+- `tests/e2e/electron/ai-handoff-closed-loop.spec.mjs` passes end to end with
+  the new contract: per-record vocabulary anchored on `data-summary`, quiet /
+  claimed border assertions, same-caption overlap forbidden at 适应, and the
+  mask-union pixel section parks navigation on the page overview so the
+  focused claim tint stays out of a pure dim contract.
+- `tests/review-region-annotation.test.mjs` (15 cases) covers stretch
+  clustering, caption composition, per-kind fact counts, carrier selection,
+  suspected propagation and input immutability.
+- `tests/e2e/browser/native-dom-runtime-projection-binding.spec.mjs` (18/18)
+  confirms the suspected amber frame and chart-host tolerance from PR #249/#251
+  survive unchanged.
+- Rendered evidence: `output/design-qa/review-annotation-all.png` (entry state:
+  focused stretch claimed, second change resting with bar + caption + red
+  strike only), `review-annotation-text.png`, `review-annotation-structure.png`.
+
+## Checklist
+
+- [x] Resting canvas shows no confirmed outlines; bars + captions + evidence
+      only.
+- [x] One caption and one bar per contiguous stretch; navigation counts
+      unchanged.
+- [x] Hover previews without claiming; focus claims with per-kind counts.
+- [x] Single violet accent family for confirmed marks; amber suspected and
+      red/green evidence untouched.
+- [x] Bar and caption clicks navigate to the change.
+- [x] gate lanes: region-annotation unit 15/15, projection-binding 18/18,
+      review-annotation-clarity 1/1, ai-closed-loop deterministic pass.
+
+final result: passed

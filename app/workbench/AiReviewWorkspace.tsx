@@ -162,6 +162,7 @@ type ReviewMessage = {
   checked?: boolean;
   commentLayouts?: unknown;
   challenge?: unknown;
+  changeId?: string;
 };
 
 const MAX_REVIEW_COMMENT_COORDINATE = 10_000_000;
@@ -1190,6 +1191,27 @@ export default function AiReviewWorkspace({
     return () => window.cancelAnimationFrame(focusFrame);
   }, [confirmationAction]);
 
+  const selectChange = useCallback((changeId: string) => {
+    const selectedChange = reviewChanges.find((change) => change.id === changeId);
+    dispatchReviewState({ type: "set-navigation-target", value: changeId });
+    const focusChange = () => {
+      (["before", "after"] as ReviewSide[]).forEach((side) => {
+        postToFrame(framesRef.current[side], sessionId, {
+          type: "focus-change",
+          changeId,
+          panelKey: selectedChange?.panelKey,
+          panelPath: selectedChange?.panelPath,
+          behavior: "smooth",
+        });
+      });
+    };
+    if (selectedChange?.panelPath?.length) {
+      coordinatePagePresentation(selectedChange.panelPath, focusChange);
+    } else {
+      focusChange();
+    }
+  }, [coordinatePagePresentation, reviewChanges, sessionId]);
+
   useLayoutEffect(() => {
     const handleMessage = (event: MessageEvent<ReviewMessage>) => {
       const message = event.data;
@@ -1371,6 +1393,15 @@ export default function AiReviewWorkspace({
         coordinatePagePresentation(panelPath);
         return;
       }
+      // A click on a page-edge revision bar or a region caption asks the
+      // parent to focus that change; the id must name a known change.
+      if (message.type === "select-change") {
+        const changeId = typeof message.changeId === "string" ? message.changeId : "";
+        if (changeId && reviewChanges.some((change) => change.id === changeId)) {
+          selectChange(changeId);
+        }
+        return;
+      }
     };
     window.addEventListener("message", handleMessage);
     return () => window.removeEventListener("message", handleMessage);
@@ -1383,7 +1414,9 @@ export default function AiReviewWorkspace({
     prepareRuntimeVisualFrame,
     relayHorizontalWheel,
     requestOwnerRuntimeVisualCapture,
+    reviewChanges,
     reviewOutline,
+    selectChange,
     sendState,
     sessionId,
     updateCommentScrollTransform,
@@ -1436,27 +1469,6 @@ export default function AiReviewWorkspace({
     if (target === null) return;
     follower.scrollLeft = target;
   }, []);
-
-  const selectChange = useCallback((changeId: string) => {
-    const selectedChange = reviewChanges.find((change) => change.id === changeId);
-    dispatchReviewState({ type: "set-navigation-target", value: changeId });
-    const focusChange = () => {
-      (["before", "after"] as ReviewSide[]).forEach((side) => {
-        postToFrame(framesRef.current[side], sessionId, {
-          type: "focus-change",
-          changeId,
-          panelKey: selectedChange?.panelKey,
-          panelPath: selectedChange?.panelPath,
-          behavior: "smooth",
-        });
-      });
-    };
-    if (selectedChange?.panelPath?.length) {
-      coordinatePagePresentation(selectedChange.panelPath, focusChange);
-    } else {
-      focusChange();
-    }
-  }, [coordinatePagePresentation, reviewChanges, sessionId]);
 
   const selectReviewMode = useCallback((mode: ReviewChangeFilter) => {
     dispatchReviewState({ type: "set-change-filter", value: mode });
