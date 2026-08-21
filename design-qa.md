@@ -2460,3 +2460,116 @@ Date: 2026-08-21
       review-annotation-clarity 1/1, ai-closed-loop deterministic pass.
 
 final result: passed
+
+---
+
+# Review annotation corrections found by driving the installed app
+
+Date: 2026-08-21
+
+## How these were found
+
+The quiet-by-default entry above was reviewed by driving the *packaged*
+Developer Preview through a real AI handoff on a dense Chinese report: a
+680px prose column with a wrapped multi-sentence paragraph, a four-card metric
+grid and two CDN ECharts hosts. Nine candidate shapes (pure insert, pure
+delete, mixed rewrite, structure add/remove, chart-data-only, authored-script
+rewrite with identical rendering, a change outside `<main>`, and all of them
+combined) were replayed four times each. The projection was read back from
+both review frames, so every finding below is a measurement of what the
+shipped build actually painted, not a code reading.
+
+## Findings and what changed
+
+- **An unchanged chart was announced as 视觉调整 in 13 of 28 runs.** Two
+  independent causes. The capture rect floored its origin while ceiling its
+  size, so the captured band sat up to a full pixel off the host, and because
+  that offset follows the host's fractional page position the two sides of one
+  pair were sampled at different sub-pixel phases. Separately, one frame taken
+  a fixed 1200ms after first paint let a chart library finish drawing on either
+  side of that instant. The crop now rounds to the nearest whole pixel, and a
+  candidate is accepted only once two consecutive frames of the same host agree
+  (bounded attempts, still inside the owner deadline).
+- **A byte difference was treated as a chart change.** The raster verdict now
+  requires structural evidence — strongly different pixels (≥28/255 on one
+  channel) covering ≥2% of the surface. A diffuse difference proves neither
+  verdict and lands in 疑似有改动 rather than being announced as a change.
+- **A two-character edit earned a frame about three characters wide.** The
+  readable minimum for a phrase box was sized from the line box, so generous
+  leading inflated it and the frame cut into the untouched glyph on each side.
+  It is now sized from the text's own em (1.5em, floor 16px).
+- **One caption spoke for two side-by-side cards.** Region clustering was
+  vertical-only, so two cards in one grid row merged and the caption anchored
+  on whichever card happened to be topmost. Horizontal distance now separates
+  records that *share a row*; a phrase that flowed onto the next line still
+  keeps its caption wherever it starts.
+- **The deletion rule was reported as barely visible.** `#c74f4a` at
+  `max(1, 0.07em)` reads as a grey hairline inside dimmed context. It is now
+  `#d92d20` at `max(1.2, 0.1em)`, with the dash rhythm scaled ~20% so the
+  heavier stroke still reads as dashes instead of a solid rule.
+
+## Design-language conformance
+
+- 2.2 单强调色: the strike stays a semantic fact colour in the existing red
+  family — more saturated, not a second accent, and never used to express
+  direction of change. The violet accent family is untouched.
+- 2.3 安静优先: resting state is unchanged. Confirmed boxes still paint no
+  outline until hover or focus reaches them; only the character evidence and
+  the dim mask are always on.
+- 2.6 几何稳定: nothing moves. The strike is an SVG overlay, and the tighter
+  phrase box only shrinks an overlay rectangle.
+
+## Automated evidence
+
+- `tests/review-text-evidence-marks.test.mjs`: the rule stays ≥1.2px and
+  ≤0.14em at 12/13/14/16px, and the gap never closes below the dash.
+- `tests/review-region-annotation.test.mjs` (19 cases): side-by-side columns
+  keep their own caption, a wrapped paragraph keeps one, and scattered edits on
+  consecutive lines still collapse to one `删除内容 ×3`.
+- `tests/review-runtime-visual.test.mjs`: the strong-pixel ratio separates a
+  repainted area from a shifted edge; a raster difference with no structural
+  evidence, or with no ratio at all, fails closed to unverified.
+- `tests/review-runtime-capture-owner.test.mjs` (20 cases): a candidate costs
+  two agreeing frames, hosts never interleave, and the settle wait still stays
+  subordinate to the owner deadline.
+
+## Rendered evidence
+
+Captured at 100% canvas scale from the installed
+`PageRoot-Developer-Preview-0.9.999997-dev.g8bce6ea…-arm64.dmg`:
+
+- `output/review-verification/shots/zoom/red-tiny-delete.png` — the new rule
+  through a two-character deletion.
+- `output/review-verification/shots/02-long-para-clause-delete-C-lede-before-100.png`
+  — one deleted sentence inside a dimmed paragraph.
+- `output/review-verification/shots/03-long-para-rewrite-C-lede-before-100.png`
+  — 14 deletion runs under a single paragraph rectangle.
+- `output/review-verification/shots/05-dense-region-C-metrics-*.png` — five
+  edits in one card grid, now captioned per card.
+
+## Measured result
+
+Against the same nine-shape matrix on the fixed build: unchanged charts were
+announced in 0 of 21 runs (was 13 of 28), the real chart change was still
+caught in every run, the authored-script rewrite still reported nothing about
+the chart, and the four scattered two-character deletions read as one region,
+one revision bar and one `删除内容 ×3`.
+
+## Known consequence
+
+Requiring two agreeing frames can drop a real chart change when the host never
+settles inside the deadline; one such miss was observed before the attempt
+budget was raised. That is the intended direction: the review may stay silent
+about a chart it could not verify, but it must not announce a change that did
+not happen.
+
+## Checklist
+
+- [x] The deletion rule reads as a deliberate red dashed line at body copy.
+- [x] The rule never thickens into a band over the glyph.
+- [x] A two-character edit no longer frames its untouched neighbours.
+- [x] Side-by-side cards caption themselves; wrapped prose stays one region.
+- [x] Unchanged charts stay silent; a repainted chart is still reported.
+- [x] Resting canvas, violet accent family and mask behaviour unchanged.
+
+final result: passed

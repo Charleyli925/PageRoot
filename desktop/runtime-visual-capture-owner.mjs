@@ -16,8 +16,10 @@ const OWNER_CLEANUP_GRACE_MS = 250;
 // A candidate is accepted only when two consecutive frames of the same host
 // agree, so a chart library that finishes drawing near the settle instant
 // cannot hand the two sides of one pair differently finished rasters. Bounded
-// attempts keep this subordinate to the owner deadline.
-const CAPTURE_STABILITY_ATTEMPTS = 4;
+// attempts keep this subordinate to the owner deadline: six attempts spend at
+// most ~1.1s of the 4s budget, which a busy page needs before a real chart
+// change would otherwise be dropped as never-settled.
+const CAPTURE_STABILITY_ATTEMPTS = 6;
 const CAPTURE_STABILITY_INTERVAL_MS = 220;
 const RUNTIME_VISUAL_PAGE_BUDGET = RUNTIME_VISUAL_CONTRACT.pageBudget;
 const CAPTURE_REQUEST_KEYS = new Set([
