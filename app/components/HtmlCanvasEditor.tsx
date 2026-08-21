@@ -137,11 +137,13 @@ import {
   type TextCaretPoint,
 } from "./html-canvas-interaction";
 import {
+  canvasVisualTargetElement,
   canvasPointerCapabilityFromProof,
   resolveCanvasPointerCapability,
   resolveCanvasPointerHit,
 } from "./html-canvas-pointer-capability";
 import {
+  clipCanvasTargetRectToViewport,
   createCanvasCapabilityHoverController,
   layoutCanvasHoverChrome,
   placeCanvasHoverHint,
@@ -299,20 +301,8 @@ const EDITOR_DOCUMENT_STYLES = `
     background: rgba(90, 85, 223, 0.2) !important;
   }
 
-  [data-html-canvas-selected="part"] {
-    outline: 3px solid #5a55df !important;
-    outline-offset: 0 !important;
-  }
-
-  [data-html-canvas-selected="module"]:not([data-html-canvas-global-selected]) {
-    outline: 3px solid #5a55df !important;
-    outline-offset: 0 !important;
-  }
-
   [data-html-canvas-global-selected] {
     min-height: 100vh !important;
-    outline: 3px solid #5a55df !important;
-    outline-offset: -3px !important;
   }
 
   [data-html-canvas-editing] {
@@ -387,6 +377,42 @@ type OverlayPosition = {
   toolbarLeft: number;
   toolbarTop: number;
 };
+
+function canvasTargetOutlineStyle(
+  container: HTMLElement | null,
+  iframe: HTMLIFrameElement | null,
+  element: HTMLElement | null,
+  global = false,
+): ReturnType<typeof layoutCanvasHoverChrome>["outline"] | undefined {
+  if (!container || !iframe || !element?.isConnected) return undefined;
+  const containerRect = container.getBoundingClientRect();
+  const iframeRect = iframe.getBoundingClientRect();
+  const elementRect = element.getBoundingClientRect();
+  const targetRect = global
+    ? {
+      left: 0,
+      top: 0,
+      width: iframe.clientWidth,
+      height: iframe.clientHeight,
+    }
+    : clipCanvasTargetRectToViewport({
+      left: elementRect.left,
+      top: elementRect.top,
+      width: elementRect.width,
+      height: elementRect.height,
+    }, {
+      width: iframe.clientWidth,
+      height: iframe.clientHeight,
+    });
+  if (!targetRect) return undefined;
+  const chrome = layoutCanvasHoverChrome({
+    left: iframeRect.left - containerRect.left + targetRect.left,
+    top: iframeRect.top - containerRect.top + targetRect.top,
+    width: targetRect.width,
+    height: targetRect.height,
+  });
+  return chrome.outline;
+}
 
 type InsertionPoint = {
   selection: HtmlCanvasSelection;
@@ -917,6 +943,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     // commit until the current task ends; without this cut the old DOM could
     // briefly dispatch against the next source map (or keep listeners forever
     // if the replacement document never reaches load).
+    hoverControllerRef.current?.hide();
     cleanupFrameRef.current();
     const retiringRuntimeFrame = runtimeFrameRef.current;
     runtimeFrameRef.current = null;
@@ -4455,6 +4482,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       iframe !== iframeRef.current
       || connectedFrameGeneration !== frameLoadGenerationRef.current
     ) return false;
+    hoverControllerRef.current?.hide();
     cleanupFrameRef.current();
     const documentNode = iframe.contentDocument;
     const expectedFrameHtml = expectedFrameHtmlRef.current;
@@ -5471,17 +5499,20 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       sourceResolution: selection.resolution,
     })
     : null;
+  const selectedVisualTargetElement = canvasVisualTargetElement(
+    selectedElementRef.current,
+    sourceIndexRef.current,
+  );
   const hoverTargetIsSelected = Boolean(
     hoverChrome.capability
     && selection
-    && toolbarVisible
-    && (
-      hoverChrome.capability.targetKey === selection.nodeId
-      || hoverChrome.capability.targetKey === selection.id
-      || hoverChrome.capability.element === selectedElementRef.current
-      || hoverChrome.capability.element.contains(selectedElementRef.current)
-      || selectedElementRef.current?.contains(hoverChrome.capability.element)
-    ),
+    && hoverChrome.capability.element === selectedVisualTargetElement,
+  );
+  const selectedOutlineStyle = canvasTargetOutlineStyle(
+    containerRef.current,
+    iframeRef.current,
+    selectedVisualTargetElement,
+    Boolean(selection && isPageRootSelection(selection)),
   );
   const showHoverOutline = Boolean(
     pointerCapabilityHoverEnabled
@@ -5515,29 +5546,28 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     && iframeRef.current
   ) {
     const containerRect = containerRef.current.getBoundingClientRect();
-    const iframeRect = iframeRef.current.getBoundingClientRect();
-    const elementRect = hoverChrome.capability.element.getBoundingClientRect();
-    const chrome = layoutCanvasHoverChrome({
-      left: iframeRect.left - containerRect.left + elementRect.left,
-      top: iframeRect.top - containerRect.top + elementRect.top,
-      width: Math.max(0, elementRect.width),
-      height: Math.max(0, elementRect.height),
-    });
-    hoverOutlineStyle = chrome.outline;
-    hoverHintPlacement = placeCanvasHoverHint({
-      containerWidth: containerRect.width,
-      targetLeft: chrome.outline.left,
-      targetTop: chrome.outline.top,
-      targetHeight: chrome.outline.height,
-      labelWidth: hoverHintMeasuredWidth,
-    });
-    hoverHintStyle = showHoverHint
-      ? {
-        left: hoverHintPlacement.left,
-        top: hoverHintPlacement.top,
-        maxWidth: hoverHintPlacement.width,
-      }
-      : undefined;
+    const outline = canvasTargetOutlineStyle(
+      containerRef.current,
+      iframeRef.current,
+      hoverChrome.capability.element,
+    );
+    if (outline) {
+      hoverOutlineStyle = outline;
+      hoverHintPlacement = placeCanvasHoverHint({
+        containerWidth: containerRect.width,
+        targetLeft: outline.left,
+        targetTop: outline.top,
+        targetHeight: outline.height,
+        labelWidth: hoverHintMeasuredWidth,
+      });
+      hoverHintStyle = showHoverHint
+        ? {
+          left: hoverHintPlacement.left,
+          top: hoverHintPlacement.top,
+          maxWidth: hoverHintPlacement.width,
+        }
+        : undefined;
+    }
   }
   useLayoutEffect(() => {
     const hint = hoverHintMeasureRef.current;
@@ -5607,10 +5637,20 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       <div className="sr-only" aria-live="polite" aria-atomic="true">
         {selectionCapability ? selectionCapability.spoken : ""}
       </div>
+      {!interactionLocked && selection && selectedOutlineStyle ? (
+        <div
+          className={styles.targetOutline}
+          data-testid="canvas-target-outline"
+          data-tone="selected"
+          style={selectedOutlineStyle}
+          aria-hidden="true"
+        />
+      ) : null}
       {showHoverOutline && hoverOutlineStyle ? (
         <div
-          className={styles.hoverOutline}
+          className={styles.targetOutline}
           data-testid="canvas-capability-outline"
+          data-tone="hover"
           style={hoverOutlineStyle}
           aria-hidden="true"
         />
@@ -5650,7 +5690,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
               const capability = hoverChrome.capability;
               if (!interactionLocked && capability) {
                 hoverControllerRef.current?.hide();
-                selectElement(capability.element);
+                selectElement(capability.selectionElement);
               }
             }}
           >
