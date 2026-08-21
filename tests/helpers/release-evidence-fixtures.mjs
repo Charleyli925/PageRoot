@@ -53,6 +53,7 @@ const APP_SOURCE_FILES = [
   "desktop/edit-runtime-protocol.mjs",
   "desktop/edit-runtime-preparation-fence.mjs",
   "desktop/runtime-visual-capture-owner.mjs",
+  "desktop/review-runtime-frozen-scripts.mjs",
   "app/domain/edit-runtime-contract.js",
   "app/domain/runtime-visual-contract.js",
   "public/brand-logo.png",
