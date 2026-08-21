@@ -3,6 +3,11 @@
   z-index: 240;
   inset: 0;
   background: transparent;
+  /* This popover hangs off the title bar, so its dismiss area covers the
+     draggable header. Without no-drag macOS keeps handling those clicks as a
+     window drag and click-outside never reaches the DOM, exactly like the
+     header buttons that already opt out of dragging. */
+  -webkit-app-region: no-drag;
 }
 
 .popover {

@@ -3630,6 +3630,13 @@ ${REVIEW_MASK_UNION_BEFORE}
     await launched.page.evaluate(() => {
       window.__pagerootSawHandoffFlash = false;
       window.__pagerootHandoffFlashEvents = [];
+      // Accepting promotes the Working Copy to a new source path while the
+      // review overlay is still visible. The overlay must keep its prepared
+      // session identity: a review iframe remounting mid-accept is the
+      // user-visible double-jump regression.
+      window.__pagerootReviewAcceptFrames = Array.from(document.querySelectorAll(
+        '[data-testid="ai-review-workspace"] iframe',
+      ));
       window.__pagerootHandoffObserver = new MutationObserver(() => {
         const panel = document.querySelector(".handoff-panel");
         const review = document.querySelector('[data-testid="ai-review-workspace"]');
@@ -3647,9 +3654,23 @@ ${REVIEW_MASK_UNION_BEFORE}
             sourceTitle: document.querySelector(".window-file-title-row strong")?.textContent || "",
           });
         }
+        const disconnectedFrames = reviewCoversWindow
+          ? window.__pagerootReviewAcceptFrames.filter((frame) => !frame.isConnected)
+          : [];
+        if (disconnectedFrames.length > 0) {
+          window.__pagerootReviewAcceptFrames = window.__pagerootReviewAcceptFrames
+            .filter((frame) => frame.isConnected);
+          window.__pagerootHandoffFlashEvents.push({
+            reviewFramesRemounted: disconnectedFrames.length,
+            sourceTitle: document.querySelector(".window-file-title-row strong")?.textContent || "",
+          });
+        }
       });
       window.__pagerootHandoffObserver.observe(document.body, { childList: true, subtree: true });
     });
+    expect(await launched.page.evaluate(
+      () => window.__pagerootReviewAcceptFrames.length,
+    )).toBe(2);
     await launched.page.getByRole("button", { name: "确认并采纳" }).click();
     const opened = await assertReviewAcceptPersistence({
       page: launched.page,
