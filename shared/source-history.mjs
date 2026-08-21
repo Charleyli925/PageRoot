@@ -81,6 +81,66 @@ function boundedJsonRecord(value, label) {
   return JSON.parse(serialized);
 }
 
+// Forward compatibility. A newer PageRoot may add members to any of these
+// records. Every known member stays strictly validated, and every unknown
+// member is carried through read -> modify -> write unchanged so an older
+// build never silently deletes a newer build's data. Preserved members take
+// no part in validation and still count against the journal byte budget.
+const KNOWN_SELECTION_KEYS = new Set(["anchor", "focus", "affinity"]);
+const KNOWN_PATCH_KEYS = new Set([
+  "startOffset",
+  "endOffset",
+  "before",
+  "after",
+  "kind",
+]);
+const KNOWN_ENTRY_KEYS = new Set([
+  "operationId",
+  "kind",
+  "property",
+  "editRevision",
+  "createdAt",
+  "beforeSourceSha256",
+  "afterSourceSha256",
+  "forwardPatches",
+  "reversePatches",
+  "beforeTarget",
+  "afterTarget",
+  "beforeSelection",
+  "afterSelection",
+]);
+const KNOWN_ACTION_KEYS = new Set([
+  "actionId",
+  "direction",
+  "operationId",
+  "cursor",
+  "revision",
+  "sourceSha256",
+  "appliedAt",
+]);
+const KNOWN_HISTORY_KEYS = new Set([
+  "schemaVersion",
+  "projectId",
+  "documentId",
+  "baseSourceSha256",
+  "cursor",
+  "revision",
+  "entries",
+  "appliedActions",
+  "updatedAt",
+]);
+
+function preserveUnknown(validated, raw, knownKeys) {
+  if (!isRecord(raw)) return validated;
+  let preserved = null;
+  for (const key of Object.keys(raw)) {
+    if (knownKeys.has(key)) continue;
+    preserved ??= {};
+    preserved[key] = raw[key];
+  }
+  return preserved ? { ...validated, ...preserved } : validated;
+}
+
 function cleanSelection(value, label) {
   if (value === undefined) return undefined;
   if (!isRecord(value)) {
@@ -104,7 +164,11 @@ function cleanSelection(value, label) {
       `${label} must contain safe logical offsets and affinity.`,
     );
   }
-  return { anchor, focus, affinity };
+  return preserveUnknown(
+    { anchor, focus, affinity },
+    value,
+    KNOWN_SELECTION_KEYS,
+  );
 }
 
 function cleanPatch(raw, label) {
@@ -133,7 +197,11 @@ function cleanPatch(raw, label) {
       `${label} is not an exact source patch.`,
     );
   }
-  return { startOffset, endOffset, before, after, kind };
+  return preserveUnknown(
+    { startOffset, endOffset, before, after, kind },
+    raw,
+    KNOWN_PATCH_KEYS,
+  );
 }
 
 function cleanPatches(value, label) {
@@ -206,7 +274,7 @@ function cleanEntry(raw) {
   const property = raw.property === undefined
     ? undefined
     : String(raw.property || "").slice(0, 200);
-  return {
+  return preserveUnknown({
     operationId,
     kind,
     ...(property ? { property } : {}),
@@ -240,7 +308,7 @@ function cleanEntry(raw) {
           ),
         }
       : {}),
-  };
+  }, raw, KNOWN_ENTRY_KEYS);
 }
 
 function cleanAppliedAction(raw) {
@@ -284,7 +352,7 @@ function cleanAppliedAction(raw) {
       "Applied history action has an invalid cursor or revision.",
     );
   }
-  return {
+  return preserveUnknown({
     actionId,
     direction,
     operationId,
@@ -295,7 +363,7 @@ function cleanAppliedAction(raw) {
       "appliedAction.sourceSha256",
     ),
     appliedAt: requiredTimestamp(raw.appliedAt, "appliedAction.appliedAt"),
-  };
+  }, raw, KNOWN_ACTION_KEYS);
 }
 
 function currentHistorySha256(history) {
@@ -428,7 +496,7 @@ export function normalizeSourceHistory(
       `Source history must use schema ${SOURCE_HISTORY_SCHEMA_VERSION}.`,
     );
   }
-  const normalized = {
+  const normalized = preserveUnknown({
     schemaVersion: SOURCE_HISTORY_SCHEMA_VERSION,
     projectId: requiredIdentity(value.projectId, "projectId"),
     documentId: requiredIdentity(value.documentId, "documentId"),
@@ -443,7 +511,7 @@ export function normalizeSourceHistory(
       ? value.appliedActions.map(cleanAppliedAction)
       : [],
     updatedAt: requiredTimestamp(value.updatedAt, "updatedAt"),
-  };
+  }, value, KNOWN_HISTORY_KEYS);
   if (
     normalized.projectId !== requiredIdentity(projectId, "projectId")
     || normalized.documentId !== requiredIdentity(documentId, "documentId")

@@ -84,3 +84,16 @@ test("active draft snapshot exposes only one authoritative aggregate", () => {
     appliedOperationIds: [],
   });
 });
+
+// A newer PageRoot may add members to the stored Draft. An older build must
+// carry them through its snapshot instead of deleting them on the next write.
+test("unknown draft members survive an older build's snapshot", () => {
+  const snapshot = activeDraftSnapshot(draft(7, {
+    conversation: { turnId: "turn_future" },
+    comments: [{ commentId: "comment_a", text: "a", provenance: { seq: 1 } }],
+  }), now);
+
+  assert.deepEqual(snapshot.conversation, { turnId: "turn_future" });
+  assert.deepEqual(snapshot.comments[0].provenance, { seq: 1 });
+  assert.equal(snapshot.draftRevision, 7);
+});

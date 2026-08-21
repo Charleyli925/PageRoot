@@ -46,7 +46,7 @@ function request(overrides = {}) {
   };
 }
 
-function ownerRects(renderedText = "图表 9.54") {
+function ownerRects(renderedText = "图表 9.54", scrolled = false) {
   return {
     status: "captured",
     snapshots: [{
@@ -54,14 +54,15 @@ function ownerRects(renderedText = "图表 9.54") {
       state: "captured",
       rect: { x: 0, y: 0, width: 1, height: 1 },
       renderedText,
+      scrolled,
     }],
   };
 }
 
-function ownerRectsFor(key, rect, renderedText = "图表 9.54") {
+function ownerRectsFor(key, rect, renderedText = "图表 9.54", scrolled = false) {
   return {
     status: "captured",
-    snapshots: [{ key, state: "captured", rect, renderedText }],
+    snapshots: [{ key, state: "captured", rect, renderedText, scrolled }],
   };
 }
 
@@ -282,7 +283,24 @@ function fakeOwner({
           this.windowOpenHandler = handler;
         },
         once: (event, handler) => {
-          if (event === "paint") this.paintHandlers.push(handler);
+          if (event !== "paint") return;
+          this.paintHandlers.push(handler);
+          // The offscreen compositor keeps producing frames after load, so a
+          // listener registered later is served on the next turn instead of
+          // waiting forever.
+          if (!this.loaded) return;
+          setTimeout(() => {
+            const index = this.paintHandlers.indexOf(handler);
+            if (index < 0) return;
+            this.paintHandlers.splice(index, 1);
+            state.captureEvents.push({ type: "paint" });
+            handler();
+          }, 0);
+        },
+        removeListener: (event, handler) => {
+          if (event !== "paint") return;
+          const index = this.paintHandlers.indexOf(handler);
+          if (index >= 0) this.paintHandlers.splice(index, 1);
         },
         on: (event, handler) => {
           this.handlers ??= new Map();
@@ -307,6 +325,7 @@ function fakeOwner({
         state.captureEvents.push({ type: "paint" });
         paintHandlers.forEach((handler) => handler());
       }
+      this.loaded = true;
     }
 
     async capturePage(rect, options) {
@@ -441,8 +460,16 @@ test("runtime snapshot owner captures once through an isolated one-use Electron 
   assert.deepEqual(state.createRequests, [{ html: HTML, bootstrapJavaScript: "" }]);
   assert.deepEqual(state.revoked, ["review-preview-0001"]);
   assert.equal(state.windows[0].destroyed, true);
-  assert.equal(state.capturePage.length, 1);
-  assert.equal(state.isolatedSources.length, 1, "no second owner fact pass is allowed");
+  assert.equal(
+    state.capturePage.length,
+    2,
+    "a candidate is accepted only after two agreeing frames",
+  );
+  assert.equal(
+    state.isolatedSources.length,
+    2,
+    "each accepted frame re-measures the same host, and nothing more",
+  );
   assert.match(state.isolatedSources[0].scripts[0].code, /__pagerootRuntimeSnapshotRects/);
   assert.match(
     state.isolatedSources[0].scripts[0].code,
@@ -662,7 +689,7 @@ test("runtime snapshot owner keeps valid hosts when another frozen binding is re
     pngBytes: new Uint8Array(),
     renderedTextSha256: "",
   });
-  assert.equal(state.capturePage.length, 1);
+  assert.equal(state.capturePage.length, 2);
 });
 
 test("runtime snapshot owner captures each host before measuring the next viewport", async () => {
@@ -675,12 +702,17 @@ test("runtime snapshot owner captures each host before measuring the next viewpo
       identityAttributes: [["id", "chart-two"]],
     },
   ];
-  const rects = [
-    ownerRectsFor("runtime-host-1", { x: 11, y: 12, width: 41, height: 21 }),
-    ownerRectsFor("runtime-host-2", { x: 21, y: 22, width: 51, height: 31 }),
-  ];
+  const rectsByKey = new Map([
+    ["runtime-host-1", ownerRectsFor("runtime-host-1", { x: 11, y: 12, width: 41, height: 21 })],
+    ["runtime-host-2", ownerRectsFor("runtime-host-2", { x: 21, y: 22, width: 51, height: 31 })],
+  ]);
   const { controller, state } = fakeOwner({
-    rects: ({ index }) => rects[index],
+    // A stable host measures the same rect every time it is asked.
+    rects: ({ scripts }) => (
+      scripts[0].code.includes("runtime-host-2")
+        ? rectsByKey.get("runtime-host-2")
+        : rectsByKey.get("runtime-host-1")
+    ),
   });
   const captured = await controller.capture(request({
     html: MULTI_HOST_HTML,
@@ -695,9 +727,15 @@ test("runtime snapshot owner captures each host before measuring the next viewpo
     "capture",
     "measure",
     "capture",
+    "measure",
+    "capture",
+    "measure",
+    "capture",
   ]);
   assert.deepEqual(state.capturePage.map(({ rect }) => rect), [
     { x: 11, y: 12, width: 41, height: 21 },
+    { x: 11, y: 12, width: 41, height: 21 },
+    { x: 21, y: 22, width: 51, height: 31 },
     { x: 21, y: 22, width: 51, height: 31 },
   ]);
   assert.deepEqual(captured.envelope.runtimeVisualSnapshots.map((snapshot) => ({
@@ -707,8 +745,14 @@ test("runtime snapshot owner captures each host before measuring the next viewpo
     { layoutWidth: 41, layoutHeight: 21 },
     { layoutWidth: 51, layoutHeight: 31 },
   ]);
-  assert.match(state.isolatedSources[0].scripts[0].code, /runtime-host-1/u);
-  assert.match(state.isolatedSources[1].scripts[0].code, /runtime-host-2/u);
+  // One host is measured and captured until it settles before the next host is
+  // measured at all, so the frames of one pair never interleave.
+  assert.deepEqual(
+    state.isolatedSources.map(({ scripts }) => (
+      scripts[0].code.includes("runtime-host-2") ? "runtime-host-2" : "runtime-host-1"
+    )),
+    ["runtime-host-1", "runtime-host-1", "runtime-host-2", "runtime-host-2"],
+  );
 });
 
 test("runtime snapshot owner keeps before and after captures isolated without cancelling either side", async () => {
@@ -804,7 +848,7 @@ test("capture settles after the first paint before measuring or sampling pixels"
   assert.ok(elapsedMs >= 55, `capture sampled after ${elapsedMs.toFixed(1)}ms without settling`);
   assert.deepEqual(
     state.captureEvents.map(({ type }) => type),
-    ["paint", "measure", "capture"],
+    ["paint", "measure", "capture", "measure", "capture"],
     "the settle wait must not reorder paint, measurement and capture",
   );
 });
@@ -878,4 +922,69 @@ test("without a frozen script store the isolated session stays fully closed", as
     decision = value;
   });
   assert.deepEqual(decision, { cancel: true });
+});
+
+test("a probe that scrolled the page waits for the frame that reflects it before sampling", async () => {
+  const { controller, state } = fakeOwner({ rects: ownerRects("图表 9.54", true) });
+  const captured = await controller.capture(request());
+
+  assert.equal(captured.outcome, "captured");
+  const afterLoad = state.captureEvents.slice(
+    state.captureEvents.findIndex((event) => event.type === "measure"),
+  );
+  assert.deepEqual(
+    afterLoad.map((event) => event.type),
+    ["measure", "paint", "capture", "measure", "capture"],
+    "capturePage must not sample the frame that preceded the probe scroll",
+  );
+});
+
+test("a probe that did not move the page samples without waiting for another frame", async () => {
+  const { controller, state } = fakeOwner({ rects: ownerRects("图表 9.54", false) });
+  const captured = await controller.capture(request());
+
+  assert.equal(captured.outcome, "captured");
+  const afterLoad = state.captureEvents.slice(
+    state.captureEvents.findIndex((event) => event.type === "measure"),
+  );
+  assert.deepEqual(
+    afterLoad.map((event) => event.type),
+    ["measure", "capture", "measure", "capture"],
+    "an unmoved page must not pay for a frame wait it does not need",
+  );
+});
+
+test("the isolated probe reports whether centring the host moved the page", () => {
+  const code = isolatedSnapshotRectScript({
+    key: "runtime-host-1",
+    path: [1, 0, 0],
+    tagName: "canvas",
+    kind: "canvas",
+    identityAttributes: [["id", "chart"]],
+  });
+  assert.match(code, /window\.scrollX/u);
+  assert.match(code, /window\.scrollY/u);
+  assert.match(
+    code,
+    /scrolled = window\.scrollX !== scrollBeforeX \|\| window\.scrollY !== scrollBeforeY/u,
+  );
+});
+
+test("an owner rect payload without a scroll fact is rejected instead of assumed still", async () => {
+  const { controller, state } = fakeOwner({
+    rects: {
+      status: "captured",
+      snapshots: [{
+        key: "runtime-host-1",
+        state: "captured",
+        rect: { x: 0, y: 0, width: 1, height: 1 },
+        renderedText: "图表 9.54",
+      }],
+    },
+  });
+  const captured = await controller.capture(request());
+
+  assert.equal(captured.outcome, "captured");
+  assert.equal(captured.envelope.runtimeVisualSnapshots[0].state, "unavailable");
+  assert.deepEqual(state.capturePage || [], [], "an unverifiable scroll fact must not be sampled");
 });

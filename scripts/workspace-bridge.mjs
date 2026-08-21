@@ -63,6 +63,7 @@ const PROJECT_FILE_ROOT = path.resolve(
 );
 const projectFileRepository = new ProjectFileRepository({
   projectsRoot: PROJECT_FILE_ROOT,
+  deviceId: process.env.HTML_AI_DEVICE_ID || null,
   failpoint: process.env.HTML_AI_FAILPOINT
     ? async (name) => name === process.env.HTML_AI_FAILPOINT
     : null,

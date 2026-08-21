@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://pageroot.local/schemas/project-registry.v4.schema.json",
+  "$comment": "Forward compatible. A Registry whose required members are missing or invalid is still an unrecognized shape and still fails closed. A Registry that carries every required member plus a member added by a newer PageRoot is read normally, and that member is preserved unchanged through the next Registry write.",
   "type": "object",
-  "additionalProperties": false,
   "required": ["schemaVersion", "updatedAt", "projects", "pendingImports"],
   "properties": {
     "schemaVersion": { "const": "4.0.0" },
@@ -11,7 +11,6 @@
       "type": "object",
       "additionalProperties": {
         "type": "object",
-        "additionalProperties": false,
         "required": ["registeredProjectRootPath", "rootFileIdentity", "updatedAt"],
         "dependentRequired": {
           "importSourceKey": ["importSourceSha256"],
@@ -21,7 +20,6 @@
           "registeredProjectRootPath": { "type": "string", "pattern": "^(?:/|[A-Za-z]:[\\\\/])" },
           "rootFileIdentity": {
             "type": "object",
-            "additionalProperties": false,
             "required": ["device", "inode", "birthtimeMs"],
             "properties": {
               "device": { "type": "string" },
@@ -40,7 +38,6 @@
       "type": "object",
       "additionalProperties": {
         "type": "object",
-        "additionalProperties": false,
         "required": ["projectId", "documentId", "registeredProjectRootPath", "createdAt"],
         "dependentRequired": {
           "importSourceKey": ["importSourceSha256"],

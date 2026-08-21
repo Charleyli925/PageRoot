@@ -13,6 +13,18 @@ const RUNTIME_SNAPSHOT_CAPTURE_PARTITION_PREFIX = "pageroot-runtime-snapshot-";
 const MAX_PATH_DEPTH = 256;
 const MAX_IDENTITY_VALUE_LENGTH = 2_048;
 const OWNER_CLEANUP_GRACE_MS = 250;
+// A candidate is accepted only when two consecutive frames of the same host
+// agree, so a chart library that finishes drawing near the settle instant
+// cannot hand the two sides of one pair differently finished rasters. Bounded
+// attempts keep this subordinate to the owner deadline: six attempts spend at
+// most ~1.1s of the 4s budget, which a busy page needs before a real chart
+// change would otherwise be dropped as never-settled.
+const CAPTURE_STABILITY_ATTEMPTS = 6;
+const CAPTURE_STABILITY_INTERVAL_MS = 220;
+// Upper bound on waiting for the frame that reflects a probe scroll. An
+// offscreen compositor delivers it in one frame interval; this only caps a
+// page that stops repainting entirely.
+const SCROLLED_FRAME_FALLBACK_MS = 250;
 const RUNTIME_VISUAL_PAGE_BUDGET = RUNTIME_VISUAL_CONTRACT.pageBudget;
 const CAPTURE_REQUEST_KEYS = new Set([
   "contractVersion",
@@ -30,7 +42,7 @@ const CAPTURE_CANDIDATE_KEYS = new Set([
   "kind",
   "identityAttributes",
 ]);
-const OWNER_RECT_KEYS = new Set(["key", "state", "rect", "renderedText"]);
+const OWNER_RECT_KEYS = new Set(["key", "state", "rect", "renderedText", "scrolled"]);
 const RECT_KEYS = new Set(["x", "y", "width", "height"]);
 
 class CaptureCancelledError extends Error {
@@ -363,11 +375,18 @@ export function isolatedSnapshotRectScript(candidate) {
       || rect.x + rect.width > window.innerWidth
       || rect.y + rect.height > window.innerHeight
     ) return null;
+    // Crop on the nearest whole pixel instead of flooring the origin while
+    // ceiling the size. That asymmetry offset the captured band from the host by
+    // up to a full pixel, and because the offset follows the host's fractional
+    // page position it differed between the two sides of one pair: an unchanged
+    // chart was then sampled twice at different sub-pixel phases.
+    const x = Math.min(Math.max(0, Math.round(rect.x)), window.innerWidth - 1);
+    const y = Math.min(Math.max(0, Math.round(rect.y)), window.innerHeight - 1);
     return {
-      x: Math.floor(rect.x),
-      y: Math.floor(rect.y),
-      width: Math.max(1, Math.ceil(rect.width)),
-      height: Math.max(1, Math.ceil(rect.height)),
+      x,
+      y,
+      width: Math.max(1, Math.min(Math.round(rect.width), window.innerWidth - x)),
+      height: Math.max(1, Math.min(Math.round(rect.height), window.innerHeight - y)),
     };
   };
   const alphaTokenIsVisible = (value) => {
@@ -769,13 +788,25 @@ export function isolatedSnapshotRectScript(candidate) {
   };
   const unavailable = () => ({
     status: "captured",
-    snapshots: [{ key: candidate.key, state: "unavailable", rect: null, renderedText: "" }],
+    snapshots: [{
+      key: candidate.key,
+      state: "unavailable",
+      rect: null,
+      renderedText: "",
+      scrolled: false,
+    }],
   });
   const host = childAtPath(candidate.path);
   if (!bindingMatches(host, candidate)) return unavailable();
+  // capturePage samples the last composited frame, so the owner has to know
+  // whether this probe moved the page: a rect measured after a scroll that the
+  // compositor has not committed yet would be filled with pre-scroll pixels.
+  const scrollBeforeX = window.scrollX;
+  const scrollBeforeY = window.scrollY;
   try { scrollIntoView(host, { block: "center", inline: "nearest" }); } catch {
     return unavailable();
   }
+  const scrolled = window.scrollX !== scrollBeforeX || window.scrollY !== scrollBeforeY;
   const hostRect = usableRect(host);
   const paintTargets = candidate.kind === "host"
     ? Array.from(queryElements(host, "canvas,svg"))
@@ -788,8 +819,14 @@ export function isolatedSnapshotRectScript(candidate) {
     status: "captured",
     snapshots: [
       hostRect && hasVisiblePaint && renderedText !== null
-        ? { key: candidate.key, state: "captured", rect: hostRect, renderedText }
-        : { key: candidate.key, state: "unavailable", rect: null, renderedText: "" },
+        ? { key: candidate.key, state: "captured", rect: hostRect, renderedText, scrolled }
+        : {
+          key: candidate.key,
+          state: "unavailable",
+          rect: null,
+          renderedText: "",
+          scrolled,
+        },
     ],
   };
 })()`;
@@ -843,6 +880,7 @@ function normalizedOwnerRects(value, request) {
       rect === undefined
       || renderedText === undefined
       || renderedText === null
+      || typeof rawSnapshot.scrolled !== "boolean"
       || (rawSnapshot.state === "captured" && !rect)
       || (
         typeof renderedText === "string"
@@ -855,6 +893,7 @@ function normalizedOwnerRects(value, request) {
       state: rawSnapshot.state,
       rect,
       renderedText,
+      scrolled: rawSnapshot.scrolled,
     }));
   }
   return Object.freeze({ snapshots: Object.freeze(snapshots) });
@@ -985,6 +1024,33 @@ function waitForFirstOffscreenPaint(webContents) {
   if (typeof webContents?.once !== "function") return Promise.resolve();
   return new Promise((resolve) => {
     webContents.once("paint", () => resolve());
+  });
+}
+
+/**
+ * Resolves once the offscreen compositor has produced a frame after the probe
+ * scrolled the page, so `capturePage` cannot sample a pre-scroll frame.
+ *
+ * A measured census attributed every unchanged-chart false positive to exactly
+ * this gap: the probe centred a host and the owner sampled the previous frame,
+ * filling an otherwise correct rect with content offset by the scroll
+ * distance. The bounded fallback keeps a page that never repaints from holding
+ * the owner deadline hostage; a fallback expiry is not an error, only a
+ * capture that stays as trustworthy as it was before this wait existed.
+ */
+function waitForScrolledOffscreenFrame(webContents, fallbackMs) {
+  if (typeof webContents?.once !== "function") return Promise.resolve();
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutId);
+      webContents.removeListener?.("paint", finish);
+      resolve();
+    };
+    const timeoutId = setTimeout(finish, Math.max(1, fallbackMs));
+    webContents.once("paint", finish);
   });
 }
 
@@ -1197,41 +1263,64 @@ export function createRuntimeSnapshotCaptureController({
             ...request,
             candidates: Object.freeze([candidate]),
           });
-          const ownerRects = normalizedOwnerRects(await withOwnerDeadline(ownerExecutor(
-            captureWindow.webContents,
-            isolatedSnapshotRectScript(candidate),
-          )), ownerRequest);
-          const ownerSnapshot = ownerRects?.snapshots[0];
-          if (!ownerSnapshot || ownerSnapshot.state !== "captured" || !ownerSnapshot.rect) {
-            snapshots.push(unavailableSnapshot(candidate.key));
-            continue;
+          // One frame taken a fixed time after first paint is not evidence: a
+          // chart library that finishes drawing on either side of that instant
+          // yields two rasters of the same unchanged chart. Accept a candidate
+          // only once two consecutive frames of the same host agree, and fail
+          // closed to the static result when it never settles.
+          let accepted = false;
+          let previous = null;
+          for (let attempt = 0; attempt < CAPTURE_STABILITY_ATTEMPTS; attempt += 1) {
+            if (attempt > 0) {
+              await withOwnerDeadline(waitForCaptureSettle(CAPTURE_STABILITY_INTERVAL_MS));
+            }
+            const ownerRects = normalizedOwnerRects(await withOwnerDeadline(ownerExecutor(
+              captureWindow.webContents,
+              isolatedSnapshotRectScript(candidate),
+            )), ownerRequest);
+            const ownerSnapshot = ownerRects?.snapshots[0];
+            if (
+              !ownerSnapshot
+              || ownerSnapshot.state !== "captured"
+              || !ownerSnapshot.rect
+              || ownerSnapshot.rect.width * ownerSnapshot.rect.height > remainingPixels
+            ) break;
+            if (attempt === 0 && ownerSnapshot.scrolled) {
+              await withOwnerDeadline(waitForScrolledOffscreenFrame(
+                captureWindow.webContents,
+                SCROLLED_FRAME_FALLBACK_MS,
+              ));
+            }
+            const image = await withOwnerDeadline(captureWindow.capturePage(ownerSnapshot.rect, {
+              stayHidden: true,
+            }));
+            const png = validatedPng(image);
+            if (
+              !png
+              || png.width * png.height > remainingPixels
+              || png.byteLength > remainingBytes
+            ) break;
+            const settled = previous
+              && previous.png.pngSha256 === png.pngSha256
+              && previous.rect.width === ownerSnapshot.rect.width
+              && previous.rect.height === ownerSnapshot.rect.height;
+            if (settled) {
+              capturedPixels += png.width * png.height;
+              capturedBytes += png.byteLength;
+              snapshots.push(Object.freeze({
+                key: candidate.key,
+                state: "captured",
+                ...png,
+                layoutWidth: ownerSnapshot.rect.width,
+                layoutHeight: ownerSnapshot.rect.height,
+                renderedTextSha256: renderedTextSha256(ownerSnapshot.renderedText),
+              }));
+              accepted = true;
+              break;
+            }
+            previous = { png, rect: ownerSnapshot.rect };
           }
-          if (ownerSnapshot.rect.width * ownerSnapshot.rect.height > remainingPixels) {
-            snapshots.push(unavailableSnapshot(candidate.key));
-            continue;
-          }
-          const image = await withOwnerDeadline(captureWindow.capturePage(ownerSnapshot.rect, {
-            stayHidden: true,
-          }));
-          const png = validatedPng(image);
-          if (
-            !png
-            || png.width * png.height > remainingPixels
-            || png.byteLength > remainingBytes
-          ) {
-            snapshots.push(unavailableSnapshot(candidate.key));
-            continue;
-          }
-          capturedPixels += png.width * png.height;
-          capturedBytes += png.byteLength;
-          snapshots.push(Object.freeze({
-            key: candidate.key,
-            state: "captured",
-            ...png,
-            layoutWidth: ownerSnapshot.rect.width,
-            layoutHeight: ownerSnapshot.rect.height,
-            renderedTextSha256: renderedTextSha256(ownerSnapshot.renderedText),
-          }));
+          if (!accepted) snapshots.push(unavailableSnapshot(candidate.key));
         } catch (error) {
           if (error instanceof CaptureTimedOutError || error instanceof CaptureCancelledError) {
             throw error;

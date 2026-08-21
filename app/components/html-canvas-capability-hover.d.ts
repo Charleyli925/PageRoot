@@ -42,6 +42,11 @@ export type CanvasHoverChromeLayout = Readonly<{
 
 export function layoutCanvasHoverChrome(hitRect: CanvasHoverHitRect): CanvasHoverChromeLayout;
 
+export function clipCanvasTargetRectToViewport(
+  hitRect: CanvasHoverHitRect,
+  viewport: Readonly<{ width: number; height: number }>,
+): CanvasHoverHitRect | null;
+
 export type CanvasCapabilityHoverSnapshot = Readonly<{
   cursor: "default" | "text" | "pointer" | "help";
   outline: boolean;
