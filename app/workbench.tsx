@@ -357,6 +357,7 @@ type ReadyReviewSession = {
   sessionId: string;
   documents: ReviewDocuments;
   beforeHtml: string;
+  sourcePath: string;
   beforeLabel: string;
   afterLabel: string;
 };
@@ -6068,6 +6069,7 @@ export default function Workbench() {
         sessionId: preparedReview.sessionId,
         documents: preparedReview.documents,
         beforeHtml: frozenHtml,
+        sourcePath: preparedReview.sourcePath,
         beforeLabel: run.basedOnVersionId
           ? safeVersionLabel(run.basedOnVersionId)
           : "当前版本",
@@ -6916,14 +6918,21 @@ export default function Workbench() {
     }
   };
 
+  // The review compares immutable snapshots prepared against the
+  // pre-promotion source identity. Accepting promotes the Working Copy to a
+  // new path while this overlay is still visible; the live path would rebuild
+  // both preview sessions (and retitle the header) mid-accept for nothing.
   const readyReviewOverlay = readyReviewSession ? (
     <AiReviewWorkspace
-      fileName={currentSourceFileName}
+      fileName={
+        localFileNameFromSourcePath(readyReviewSession.sourcePath)
+        || currentSourceFileName
+      }
       beforeLabel={readyReviewSession.beforeLabel}
       afterLabel={readyReviewSession.afterLabel}
       sessionId={readyReviewSession.sessionId}
       documents={readyReviewSession.documents}
-      sourcePath={sourcePath || undefined}
+      sourcePath={readyReviewSession.sourcePath || undefined}
       accepting={openingReadyVersion}
       error={activeRun?.status === "ready-to-open" ? activeRun.error : undefined}
       notice={activeRun?.candidateAssessment?.status === "attention"
