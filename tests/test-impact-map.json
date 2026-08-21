@@ -528,6 +528,20 @@
       ]
     },
     {
+      "id": "preview-comment-markers",
+      "patterns": [
+        "^app/lib/preview-comment-markers\\.(?:js|d\\.ts)$",
+        "^app/components/ReadOnlyCommentMarker\\.tsx$",
+        "^app/components/read-only-comment-marker\\.module\\.css$",
+        "^app/components/HtmlInteractionPreview\\.(?:tsx|module\\.css)$"
+      ],
+      "suites": ["typecheck"],
+      "nodeTests": [
+        "tests/preview-comment-markers.test.mjs",
+        "tests/review-comment-source-map.test.mjs"
+      ]
+    },
+    {
       "id": "runtime-capabilities",
       "patterns": ["^app/application/runtime-capabilities\\.(?:js|d\\.ts)$"],
       "suites": ["typecheck"],
