@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://html-change.local/schemas/conversation-index.v1.schema.json",
+  "title": "PageRoot AI conversation index v1",
+  "$comment": "One index per project. It maps each Document to its Conversations and to the single current Conversation for that Document. Reading a Document's conversation list never scans directories and never returns another Document's entry. Forward compatible: unknown members are preserved through read, edit and write.",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "projectId",
+    "revision",
+    "updatedAt",
+    "documents"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0.0"
+    },
+    "projectId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "updatedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "documents": {
+      "type": "array",
+      "maxItems": 500,
+      "items": {
+        "$ref": "#/$defs/documentEntry"
+      }
+    }
+  },
+  "$defs": {
+    "conversationId": {
+      "type": "string",
+      "pattern": "^conversation_[A-Za-z0-9_-]{12,180}$"
+    },
+    "documentEntry": {
+      "type": "object",
+      "required": [
+        "documentId",
+        "currentConversationId",
+        "conversations"
+      ],
+      "properties": {
+        "documentId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "currentConversationId": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/conversationId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "conversations": {
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "$ref": "#/$defs/conversationSummary"
+          }
+        }
+      }
+    },
+    "conversationSummary": {
+      "$comment": "A rebuildable projection of the authoritative conversation record. It exists so the history list renders without opening every conversation file.",
+      "type": "object",
+      "required": [
+        "conversationId",
+        "title",
+        "status",
+        "createdAt",
+        "updatedAt",
+        "messageCount"
+      ],
+      "properties": {
+        "conversationId": {
+          "$ref": "#/$defs/conversationId"
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "status": {
+          "enum": [
+            "active",
+            "archived"
+          ]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "messageCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "lastModelDisplayName": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 200
+        }
+      }
+    }
+  }
+}

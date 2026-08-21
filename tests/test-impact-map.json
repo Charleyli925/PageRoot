@@ -516,6 +516,18 @@
       ]
     },
     {
+      "id": "conversation",
+      "patterns": [
+        "^shared/conversation\\.mjs$",
+        "^scripts/conversation-repository\\.mjs$",
+        "^schemas/conversation(?:-index|-draft)?\\.v1\\.schema\\.json$"
+      ],
+      "suites": [],
+      "nodeTests": [
+        "tests/conversation-repository.test.mjs"
+      ]
+    },
+    {
       "id": "runtime-capabilities",
       "patterns": ["^app/application/runtime-capabilities\\.(?:js|d\\.ts)$"],
       "suites": ["typecheck"],
