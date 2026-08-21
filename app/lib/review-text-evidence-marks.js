@@ -6,7 +6,7 @@
  * glyphs themselves with color, emphasis, underline or background.
  */
 
-export const REVIEW_TEXT_EVIDENCE_REMOVED_COLOR = "#c74f4a";
+export const REVIEW_TEXT_EVIDENCE_REMOVED_COLOR = "#d92d20";
 export const REVIEW_TEXT_EVIDENCE_ADDED_COLOR = "#239b56";
 
 export const REVIEW_TEXT_EVIDENCE_MARKER_CSS = `
@@ -251,15 +251,17 @@ export function reviewTextEvidenceMarkGeometry(rect, fontSize, scale) {
   const extra = Math.max(0, height - em);
   const glyphTop = top + extra / 2;
   const glyphBottom = glyphTop + em;
-  const strikeThickness = Math.max(1, em * 0.07) * uiScale;
+  const strikeThickness = Math.max(1.2, em * 0.1) * uiScale;
   // A round stroke cap extends each dash by half the stroke thickness at both
   // ends, so it grows every dash by one thickness and eats one thickness out of
   // every gap. Feeding the intended rhythm straight into stroke-dasharray
   // collapsed the gaps and rendered the strike as a solid red line. Convert the
   // intended visible rhythm into cap-compensated dash values instead, and keep
   // the visible gap wider than the visible dash so the line always reads dashed.
-  const visibleDash = Math.max(2, em * 0.15) * uiScale;
-  const visibleGap = Math.max(2.6, em * 0.19) * uiScale;
+  // The rhythm scales with the thicker rule so a heavier stroke does not close
+  // the gaps it has to keep.
+  const visibleDash = Math.max(2.4, em * 0.18) * uiScale;
+  const visibleGap = Math.max(3.2, em * 0.22) * uiScale;
   const inset = Math.min(width * 0.08, Math.max(0.4, em * 0.04));
   const dotRadius = Math.max(1.3, em * 0.08) * uiScale;
   const dotGap = Math.max(0.7, em * 0.04) * uiScale;

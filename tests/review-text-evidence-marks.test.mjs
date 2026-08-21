@@ -33,8 +33,34 @@ test("character-evidence CSS cannot recolor, resize, or use emphasis", () => {
   assert.doesNotMatch(reviewDocument, /text-emphasis-style:\s*filled/u);
   assert.doesNotMatch(reviewDocument, /color:\s*#a13f3b/u);
   assert.match(reviewDocument, /data-pageroot-review-text-mark/u);
-  assert.equal(REVIEW_TEXT_EVIDENCE_REMOVED_COLOR, "#c74f4a");
+  assert.equal(REVIEW_TEXT_EVIDENCE_REMOVED_COLOR, "#d92d20");
   assert.equal(REVIEW_TEXT_EVIDENCE_ADDED_COLOR, "#239b56");
+});
+
+test("the deletion rule stays legible at body-copy sizes", () => {
+  // A 1px hairline in a muted brick red was reported as "barely visible" on a
+  // real report page. The rule has to read as a deliberate red dashed line at
+  // ordinary body copy without turning into a thick band.
+  for (const fontSize of [12, 13, 14, 16]) {
+    const geometry = reviewTextEvidenceMarkGeometry({
+      left: 0,
+      top: 0,
+      right: fontSize * 2,
+      bottom: fontSize * 1.9,
+    }, fontSize, 1);
+    assert.ok(
+      geometry.strikeThickness >= 1.2,
+      `${fontSize}px: a ${geometry.strikeThickness}px rule is a hairline`,
+    );
+    assert.ok(
+      geometry.strikeThickness <= fontSize * 0.14,
+      `${fontSize}px: a ${geometry.strikeThickness}px rule covers the glyph`,
+    );
+    assert.ok(
+      geometry.visibleDash >= 2.4 && geometry.visibleGap >= geometry.visibleDash,
+      `${fontSize}px: dash ${geometry.visibleDash} / gap ${geometry.visibleGap} lost its rhythm`,
+    );
+  }
 });
 
 test("green dots sit in existing leading and do not invent a half-em gap", () => {

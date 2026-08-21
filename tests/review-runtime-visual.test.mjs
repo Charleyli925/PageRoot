@@ -9,11 +9,15 @@ import {
   acceptRuntimeVisualSnapshots,
   changedReviewRuntimeVisualCandidateKeys,
   classifyReviewRuntimeVisualCandidates,
+  isReviewRuntimeVisualRasterChangeStructural,
   isReviewRuntimeVisualRasterDifferenceMeaningful,
   mergeReviewRuntimeVisualChanges,
   REVIEW_RUNTIME_VISUAL_RASTER_MEAN_RGB_DIFFERENCE_BUDGET,
+  REVIEW_RUNTIME_VISUAL_STRONG_CHANNEL_DELTA,
+  REVIEW_RUNTIME_VISUAL_STRONG_PIXEL_RATIO_BUDGET,
   reviewRuntimeVisualMeanRgbDifference,
   reviewRuntimeVisualPixelsAreUniform,
+  reviewRuntimeVisualStrongPixelRatio,
 } from "../app/lib/review-runtime-visual.js";
 import { RUNTIME_VISUAL_CONTRACT } from "../app/domain/runtime-visual-contract.js";
 
@@ -152,7 +156,18 @@ test("runtime comparison is strict for layout and rendered text, but requires a 
     rasterMeanRgbDifferenceByKey: new Map([
       ["runtime-host-1", REVIEW_RUNTIME_VISUAL_RASTER_MEAN_RGB_DIFFERENCE_BUDGET + 0.001],
     ]),
+    rasterStrongPixelRatioByKey: new Map([
+      ["runtime-host-1", REVIEW_RUNTIME_VISUAL_STRONG_PIXEL_RATIO_BUDGET],
+    ]),
   }), ["runtime-host-1"]);
+  assert.deepEqual(changedReviewRuntimeVisualCandidateKeys({
+    candidates,
+    before: [snapshot("runtime-host-1")],
+    after: [snapshot("runtime-host-1", CHANGED_PNG)],
+    rasterMeanRgbDifferenceByKey: new Map([
+      ["runtime-host-1", REVIEW_RUNTIME_VISUAL_RASTER_MEAN_RGB_DIFFERENCE_BUDGET + 0.001],
+    ]),
+  }), [], "a raster difference with no structural evidence is not a change");
   assert.deepEqual(changedReviewRuntimeVisualCandidateKeys({
     candidates,
     before: [snapshot("runtime-host-1")],
@@ -315,7 +330,67 @@ test("tri-state classification only dims candidates with positive pixel evidence
     rasterMeanRgbDifferenceByKey: new Map([
       ["runtime-host-1", REVIEW_RUNTIME_VISUAL_RASTER_MEAN_RGB_DIFFERENCE_BUDGET + 0.001],
     ]),
+    rasterStrongPixelRatioByKey: new Map([
+      ["runtime-host-1", REVIEW_RUNTIME_VISUAL_STRONG_PIXEL_RATIO_BUDGET],
+    ]),
   }), { changedKeys: ["runtime-host-1"], unverifiedKeys: [] });
+  // An unchanged chart re-sampled at another sub-pixel phase differs everywhere
+  // a little and nowhere much. That pair proves neither verdict, so it stays a
+  // suspected region instead of being announced as a visual change.
+  assert.deepEqual(classifyReviewRuntimeVisualCandidates({
+    candidates,
+    before: [snapshot("runtime-host-1")],
+    after: [snapshot("runtime-host-1", CHANGED_PNG)],
+    rasterMeanRgbDifferenceByKey: new Map([
+      ["runtime-host-1", REVIEW_RUNTIME_VISUAL_RASTER_MEAN_RGB_DIFFERENCE_BUDGET + 0.5],
+    ]),
+    rasterStrongPixelRatioByKey: new Map([
+      ["runtime-host-1", REVIEW_RUNTIME_VISUAL_STRONG_PIXEL_RATIO_BUDGET / 2],
+    ]),
+  }), { changedKeys: [], unverifiedKeys: ["runtime-host-1"] });
+  assert.deepEqual(classifyReviewRuntimeVisualCandidates({
+    candidates,
+    before: [snapshot("runtime-host-1")],
+    after: [snapshot("runtime-host-1", CHANGED_PNG)],
+    rasterMeanRgbDifferenceByKey: new Map([
+      ["runtime-host-1", REVIEW_RUNTIME_VISUAL_RASTER_MEAN_RGB_DIFFERENCE_BUDGET + 0.5],
+    ]),
+  }), { changedKeys: [], unverifiedKeys: ["runtime-host-1"] }, "a missing ratio fails closed");
+});
+
+test("the strong-pixel ratio separates a repainted area from a shifted edge", () => {
+  const surface = (fill) => {
+    const pixels = new Uint8Array(100 * 4);
+    for (let index = 0; index < pixels.byteLength; index += 4) {
+      pixels[index] = fill;
+      pixels[index + 1] = fill;
+      pixels[index + 2] = fill;
+      pixels[index + 3] = 255;
+    }
+    return pixels;
+  };
+  const before = surface(255);
+  const shiftedEdge = surface(255);
+  // One antialiased edge landed one pixel over: a single strongly different
+  // pixel out of a hundred.
+  shiftedEdge[0] = 0;
+  shiftedEdge[1] = 0;
+  shiftedEdge[2] = 0;
+  assert.equal(reviewRuntimeVisualStrongPixelRatio(before, shiftedEdge), 0.01);
+  assert.equal(isReviewRuntimeVisualRasterChangeStructural(0.01), false);
+  const repaintedArea = surface(255);
+  for (let index = 0; index < 10 * 4; index += 4) {
+    repaintedArea[index] = 0;
+    repaintedArea[index + 1] = 0;
+    repaintedArea[index + 2] = 0;
+  }
+  assert.equal(reviewRuntimeVisualStrongPixelRatio(before, repaintedArea), 0.1);
+  assert.equal(isReviewRuntimeVisualRasterChangeStructural(0.1), true);
+  // Noise below the per-channel delta never counts, however wide it spreads.
+  const noisy = surface(255 - (REVIEW_RUNTIME_VISUAL_STRONG_CHANNEL_DELTA - 1));
+  assert.equal(reviewRuntimeVisualStrongPixelRatio(before, noisy), 0);
+  assert.equal(reviewRuntimeVisualStrongPixelRatio(before, null), null);
+  assert.equal(isReviewRuntimeVisualRasterChangeStructural(null), false);
 });
 
 test("near-uniform pixel detection treats undecodable buffers as uniform", () => {

@@ -4952,9 +4952,14 @@ function reviewBootstrap(
       }
       return intervals;
     }, []);
-  const expandTinyTextInterval = (record, ownerBounds) => {
+  const expandTinyTextInterval = (record, ownerBounds, em) => {
     const height = Math.max(1, record.bottom - record.top);
-    const minimumWidth = Math.max(24, height * 1.6);
+    // A readable minimum is a property of the text, not of its line box. Sizing
+    // it from the line box made a two-character edit inside generous leading
+    // reserve roughly three characters of width, so the frame visibly cut into
+    // the untouched glyph on each side.
+    const glyph = Number.isFinite(em) && em > 0 ? em : height * 0.62;
+    const minimumWidth = Math.max(16, glyph * 1.5);
     if (record.right - record.left >= minimumWidth || !ownerBounds) return record;
     const leftBoundary = ownerBounds.left;
     const rightBoundary = ownerBounds.right;
@@ -5059,7 +5064,8 @@ function reviewBootstrap(
     const base = records[0];
     const exactBounds = boundsForRects(records);
     if (!exactBounds) return null;
-    const readableBounds = expandTinyTextInterval(exactBounds, ownerLine?.bounds || null);
+    const em = Number.parseFloat(getComputedStyle(base.element).fontSize || "0");
+    const readableBounds = expandTinyTextInterval(exactBounds, ownerLine?.bounds || null, em);
     const bounds = boundsForRects([
       readableBounds,
       ...records.map(textEvidenceEnvelope),

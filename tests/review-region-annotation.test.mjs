@@ -163,3 +163,42 @@ test("input records are not mutated", () => {
   reviewRegionAnnotations(records);
   assert.equal(JSON.stringify(records), snapshot);
 });
+
+test("side-by-side columns keep their own caption instead of one merged region", () => {
+  // Two cards in one grid row are vertically adjacent but horizontally far
+  // apart. Clustering on the vertical axis alone merged them, so one caption
+  // had to speak for both cards and anchored on whichever card was topmost.
+  const regions = reviewRegionAnnotations([
+    record({ summary: "文本调整", left: 90, right: 717, top: 340, bottom: 380 }),
+    record({ summary: "段落改写", left: 745, right: 1372, top: 260, bottom: 300 }),
+  ], { clusterGap: 28 });
+  assert.equal(regions.length, 2);
+  assert.deepEqual(
+    regions.map((region) => [region.left, region.summary]),
+    [[745, "段落改写"], [90, "文本调整"]],
+  );
+});
+
+test("a wrapped paragraph still clusters across its own lines", () => {
+  const regions = reviewRegionAnnotations([
+    record({ left: 90, right: 700, top: 100, bottom: 128 }),
+    record({ left: 90, right: 520, top: 130, bottom: 158 }),
+  ], { clusterGap: 28 });
+  assert.equal(regions.length, 1);
+  assert.deepEqual(
+    [regions[0].left, regions[0].top, regions[0].right, regions[0].bottom],
+    [90, 100, 700, 158],
+  );
+});
+
+test("a later record joins the column it overlaps, not the nearest one", () => {
+  const regions = reviewRegionAnnotations([
+    record({ summary: "文本调整", left: 90, right: 700, top: 100, bottom: 130 }),
+    record({ summary: "视觉调整", left: 745, right: 1372, top: 110, bottom: 140 }),
+    record({ summary: "新增内容", left: 90, right: 700, top: 150, bottom: 180 }),
+  ], { clusterGap: 28 });
+  assert.equal(regions.length, 2);
+  const left = regions.find((region) => region.left === 90);
+  assert.equal(left.bottom, 180, "the third record must extend its own column");
+  assert.equal(left.summary, "文本调整 · 新增内容");
+});

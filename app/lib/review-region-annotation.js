@@ -45,7 +45,11 @@
 /**
  * Group one page's fact records into per-change spatial clusters. Records keep
  * their own geometry; a cluster only aggregates what one caption and one
- * revision bar stand for. The resting caption reads the cluster's distinct
+ * revision bar stand for. A record joins a cluster only when it is within
+ * `clusterGap` in *both* axes: vertical adjacency alone merged side-by-side
+ * grid columns into one region, which forced a single caption to speak for two
+ * separate cards and anchored it on whichever card happened to be topmost.
+ * The resting caption reads the cluster's distinct
  * fact kinds in reading order ("新增内容 · 视觉调整"), collapses three or more
  * kinds into "综合调整", and never carries a count. The focused caption spells
  * every kind with its fact count ("新增内容 ×3 · 视觉调整 ×2"). `carrier` is
@@ -81,16 +85,31 @@ export function reviewRegionAnnotations(records, options = {}) {
     const ordered = group
       .slice()
       .sort((first, second) => first.top - second.top || first.left - second.left);
-    let current = null;
+    const open = [];
     ordered.forEach((entry) => {
-      if (current && entry.top - current.bottom <= clusterGap) {
-        current.left = Math.min(current.left, entry.left);
-        current.right = Math.max(current.right, entry.right);
-        current.bottom = Math.max(current.bottom, entry.bottom);
-        current.entries.push(entry);
+      // Prefer the cluster this record shares the most horizontal extent with,
+      // so a wrapped paragraph keeps one caption while a neighbouring column
+      // keeps its own.
+      let best = null;
+      let bestOverlap = -Infinity;
+      open.forEach((cluster) => {
+        if (entry.top - cluster.bottom > clusterGap) return;
+        const overlap = Math.min(entry.right, cluster.right)
+          - Math.max(entry.left, cluster.left);
+        if (overlap < -clusterGap) return;
+        if (overlap > bestOverlap) {
+          bestOverlap = overlap;
+          best = cluster;
+        }
+      });
+      if (best) {
+        best.left = Math.min(best.left, entry.left);
+        best.right = Math.max(best.right, entry.right);
+        best.bottom = Math.max(best.bottom, entry.bottom);
+        best.entries.push(entry);
         return;
       }
-      current = {
+      const cluster = {
         changeId,
         left: entry.left,
         top: entry.top,
@@ -98,7 +117,8 @@ export function reviewRegionAnnotations(records, options = {}) {
         bottom: entry.bottom,
         entries: [entry],
       };
-      clusters.push(current);
+      open.push(cluster);
+      clusters.push(cluster);
     });
   });
   return clusters.map((cluster) => {

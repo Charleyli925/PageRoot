@@ -363,11 +363,18 @@ export function isolatedSnapshotRectScript(candidate) {
       || rect.x + rect.width > window.innerWidth
       || rect.y + rect.height > window.innerHeight
     ) return null;
+    // Crop on the nearest whole pixel instead of flooring the origin while
+    // ceiling the size. That asymmetry offset the captured band from the host by
+    // up to a full pixel, and because the offset follows the host's fractional
+    // page position it differed between the two sides of one pair: an unchanged
+    // chart was then sampled twice at different sub-pixel phases.
+    const x = Math.min(Math.max(0, Math.round(rect.x)), window.innerWidth - 1);
+    const y = Math.min(Math.max(0, Math.round(rect.y)), window.innerHeight - 1);
     return {
-      x: Math.floor(rect.x),
-      y: Math.floor(rect.y),
-      width: Math.max(1, Math.ceil(rect.width)),
-      height: Math.max(1, Math.ceil(rect.height)),
+      x,
+      y,
+      width: Math.max(1, Math.min(Math.round(rect.width), window.innerWidth - x)),
+      height: Math.max(1, Math.min(Math.round(rect.height), window.innerHeight - y)),
     };
   };
   const alphaTokenIsVisible = (value) => {
