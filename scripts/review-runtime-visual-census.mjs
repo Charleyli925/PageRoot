@@ -31,7 +31,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import { BrowserWindow, app, nativeImage, net, protocol, session as electronSession } from "electron";
@@ -57,6 +57,10 @@ import {
   REVIEW_RUNTIME_CHART_SCENARIO_IDS,
   reviewRuntimeChartScenario,
 } from "../tests/fixtures/review-runtime-chart-scenarios.mjs";
+import {
+  discoverReviewRuntimePageCandidates,
+  reviewRuntimePageMutations,
+} from "./review-runtime-page-candidates.mjs";
 
 const VIEWPORT_WIDTH = 1_280;
 const DEFAULT_VIEWPORT_HEIGHT = 900;
@@ -70,6 +74,7 @@ function parseOptions(argv) {
     settleMs: RUNTIME_VISUAL_CONTRACT.captureSettleMs,
     viewportHeight: DEFAULT_VIEWPORT_HEIGHT,
     renderers: [...REVIEW_RUNTIME_CHART_RENDERERS],
+    pages: [],
     out: path.resolve("output/runtime-visual-census"),
     keepPixels: false,
   };
@@ -84,6 +89,9 @@ function parseOptions(argv) {
       case "--settle-ms": options.settleMs = Number(value); index += 1; break;
       case "--viewport-height": options.viewportHeight = Number(value); index += 1; break;
       case "--renderers": options.renderers = String(value).split(","); index += 1; break;
+      // Real authored pages never enter the repository; only their paths are
+      // passed in, and only derived measurements are written out.
+      case "--pages": options.pages = String(value).split(",").filter(Boolean); index += 1; break;
       case "--out": options.out = path.resolve(String(value)); index += 1; break;
       case "--keep-pixels": options.keepPixels = true; break;
       default:
@@ -132,6 +140,7 @@ function sourceSha256(html) {
 }
 
 function candidatesForSide(side) {
+  if (Array.isArray(side.candidates)) return side.candidates;
   return [...side.hostPaths.entries()].map(([id, elementPath]) => Object.freeze({
     key: `runtime-host-${id}`,
     path: [...elementPath],
@@ -139,6 +148,40 @@ function candidatesForSide(side) {
     kind: "host",
     identityAttributes: [["id", id]],
   }));
+}
+
+/**
+ * Turns each authored page into the same scenario shape the synthetic fixture
+ * produces, so one loop measures both. Candidates are rediscovered per side
+ * because a mutation can shift every element path.
+ */
+function pageScenarios(pagePath) {
+  const html = readFileSync(pagePath, "utf8");
+  const discovered = discoverReviewRuntimePageCandidates(html);
+  if (!discovered.candidates.length) return [];
+  const label = path.basename(pagePath).replace(/\.html?$/iu, "").slice(0, 28);
+  return reviewRuntimePageMutations(html, discovered.hostIds).flatMap((mutation) => {
+    const after = discoverReviewRuntimePageCandidates(mutation.after);
+    // A mutation that changed how many hosts bind would compare two different
+    // populations; drop it rather than report a meaningless row.
+    if (after.candidates.length !== discovered.candidates.length) return [];
+    const expectationByKey = mutation.changedHostId
+      ? new Map(discovered.candidates.map((candidate) => [
+        candidate.key,
+        candidate.identityAttributes.some(([name, value]) => (
+          name === "id" && value === mutation.changedHostId
+        )) ? "changed" : "unchanged",
+      ]))
+      : null;
+    return [{
+      renderer: label,
+      scenarioId: mutation.id,
+      chartExpectation: mutation.chartExpectation,
+      expectationByKey,
+      before: { html, candidates: discovered.candidates },
+      after: { html: mutation.after, candidates: after.candidates },
+    }];
+  });
 }
 
 /**
@@ -217,8 +260,8 @@ function verdictForPair(before, after) {
  * (corroboration), and whether the user commented on the host. Each run is
  * evaluated under all four combinations.
  */
-function mergePresentation({ verdicts, corroborated, commented }) {
-  const outline = REVIEW_RUNTIME_CHART_HOST_IDS.map((hostId, index) => ({
+function mergePresentation({ candidateKeys, verdicts, corroborated, commented }) {
+  const outline = candidateKeys.map((key, index) => ({
     id: `outline-${index + 1}`,
     group: "页面",
     label: `图 ${index + 1}`,
@@ -236,8 +279,8 @@ function mergePresentation({ verdicts, corroborated, commented }) {
       afterPresent: true,
     }))
     : [];
-  const runtimeVisualCandidates = REVIEW_RUNTIME_CHART_HOST_IDS.map((hostId, index) => ({
-    key: `runtime-host-${hostId}`,
+  const runtimeVisualCandidates = candidateKeys.map((key, index) => ({
+    key,
     outlineId: `outline-${index + 1}`,
     changeId: corroborated ? `change-${index + 1}` : `runtime-change-outline-${index + 1}`,
     label: `图 ${index + 1}`,
@@ -290,6 +333,9 @@ async function main() {
   const previewController = createPreviewProtocolController({
     protocolApi: protocol,
     netFetch: (url, requestOptions) => net.fetch(url, requestOptions),
+    // Authored report pages reach tens of megabytes once assets are inlined,
+    // so the session must allow what the capture contract already allows.
+    maxHtmlBytes: RUNTIME_VISUAL_CONTRACT.pageBudget.htmlBytes,
   });
   previewController.install();
 
@@ -321,15 +367,27 @@ async function main() {
 
   const rows = [];
   let sequence = 0;
-  for (const renderer of options.renderers) {
-  for (const scenarioId of options.scenarios) {
-    for (let run = 1; run <= options.runs; run += 1) {
-      sequence += 1;
-      const scenario = reviewRuntimeChartScenario(scenarioId, {
+  // Synthetic scenarios and authored pages produce the same scenario shape, so
+  // one loop measures both and the report stays comparable across them.
+  const plannedScenarios = options.pages.length
+    ? options.pages.flatMap((pagePath) => pageScenarios(path.resolve(pagePath)))
+    : options.renderers.flatMap((renderer) => options.scenarios.map((scenarioId) => ({
+      renderer,
+      scenarioId,
+      expectationByKey: null,
+      ...reviewRuntimeChartScenario(scenarioId, {
         animationMs: options.animationMs,
         libraryDelayMs: options.libraryDelayMs,
         renderer,
-      });
+      }),
+    })));
+  if (!plannedScenarios.length) {
+    throw new Error("No scenario produced any bindable runtime host.");
+  }
+  for (const scenario of plannedScenarios) {
+    const { renderer, scenarioId } = scenario;
+    for (let run = 1; run <= options.runs; run += 1) {
+      sequence += 1;
       const captureSessionId = `review-census-${String(sequence).padStart(6, "0")}`;
       const captureSide = async (side) => {
         const page = scenario[side];
@@ -356,6 +414,7 @@ async function main() {
       const beforeSnapshots = snapshotsByKey(before);
       const afterSnapshots = snapshotsByKey(after);
       const runCandidates = candidatesForSide(scenario.before);
+      const candidateKeys = runCandidates.map((candidate) => candidate.key);
       const verdictByKey = new Map();
       const detailByKey = new Map();
       runCandidates.forEach((candidate) => {
@@ -371,16 +430,17 @@ async function main() {
         unverifiedKeys: [...verdictByKey].filter(([, v]) => v === "unverified").map(([key]) => key),
       };
       const presentations = {
-        corroboratedCommented: mergePresentation({ verdicts, corroborated: true, commented: true }),
-        corroboratedUncommented: mergePresentation({ verdicts, corroborated: true, commented: false }),
-        uncorroboratedCommented: mergePresentation({ verdicts, corroborated: false, commented: true }),
-        uncorroboratedUncommented: mergePresentation({ verdicts, corroborated: false, commented: false }),
+        corroboratedCommented: mergePresentation({ candidateKeys, verdicts, corroborated: true, commented: true }),
+        corroboratedUncommented: mergePresentation({ candidateKeys, verdicts, corroborated: true, commented: false }),
+        uncorroboratedCommented: mergePresentation({ candidateKeys, verdicts, corroborated: false, commented: true }),
+        uncorroboratedUncommented: mergePresentation({ candidateKeys, verdicts, corroborated: false, commented: false }),
       };
       for (const candidate of runCandidates) {
         const beforeSnapshot = beforeSnapshots.get(candidate.key);
         const afterSnapshot = afterSnapshots.get(candidate.key);
         const { verdict, step, rasterDifference } = detailByKey.get(candidate.key);
-        const expected = scenario.chartExpectation;
+        const expected = scenario.expectationByKey?.get(candidate.key)
+          || scenario.chartExpectation;
         const falsePositive = expected === "unchanged" && verdict === "changed";
         const falseNegative = expected === "changed" && verdict !== "changed";
         if ((falsePositive || falseNegative) && options.keepPixels) {
@@ -425,30 +485,29 @@ async function main() {
       );
     }
   }
-  }
 
   controller.dispose();
 
-  const scenarioSummary = options.renderers.flatMap((renderer) => (
-    options.scenarios.map((scenarioId) => {
-      const scenarioRows = rows.filter((row) => (
-        row.scenarioId === scenarioId && row.renderer === renderer
-      ));
-      return {
-        renderer,
-        scenarioId,
-        expected: scenarioRows[0]?.expected || "unknown",
-        candidateRows: scenarioRows.length,
-        falsePositives: scenarioRows.filter((row) => row.falsePositive).length,
-        falseNegatives: scenarioRows.filter((row) => row.falseNegative).length,
-        unverified: scenarioRows.filter((row) => row.verdict === "unverified").length,
-        stepCounts: scenarioRows.reduce((counts, row) => {
-          counts[row.step] = (counts[row.step] || 0) + 1;
-          return counts;
-        }, {}),
-      };
-    })
-  ));
+  const scenarioKeys = [...new Set(rows.map((row) => `${row.renderer}\u0000${row.scenarioId}`))];
+  const scenarioSummary = scenarioKeys.map((composite) => {
+    const [renderer, scenarioId] = composite.split("\u0000");
+    const scenarioRows = rows.filter((row) => (
+      row.scenarioId === scenarioId && row.renderer === renderer
+    ));
+    return {
+      renderer,
+      scenarioId,
+      expected: [...new Set(scenarioRows.map((row) => row.expected))].join("+"),
+      candidateRows: scenarioRows.length,
+      falsePositives: scenarioRows.filter((row) => row.falsePositive).length,
+      falseNegatives: scenarioRows.filter((row) => row.falseNegative).length,
+      unverified: scenarioRows.filter((row) => row.verdict === "unverified").length,
+      stepCounts: scenarioRows.reduce((counts, row) => {
+        counts[row.step] = (counts[row.step] || 0) + 1;
+        return counts;
+      }, {}),
+    };
+  });
   // What a reviewer actually sees. A confirmed frame on a chart the source
   // never touched is the failure this whole programme exists to remove, so it
   // is counted separately from the raw verdict.
@@ -508,7 +567,7 @@ async function main() {
   process.stdout.write("\n=== Review runtime visual census ===\n");
   scenarioSummary.forEach((entry) => {
     process.stdout.write(
-      `${entry.renderer.padEnd(7)}${entry.scenarioId.padEnd(20)} expect=${entry.expected.padEnd(9)} `
+      `${entry.renderer.padEnd(30)}${entry.scenarioId.padEnd(20)} expect=${entry.expected.padEnd(18)} `
       + `rows=${String(entry.candidateRows).padStart(3)} `
       + `FP=${String(entry.falsePositives).padStart(3)} `
       + `FN=${String(entry.falseNegatives).padStart(3)} `
