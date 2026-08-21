@@ -525,7 +525,8 @@
       "suites": [],
       "nodeTests": [
         "tests/conversation-repository.test.mjs",
-        "tests/conversation-bridge.test.mjs"
+        "tests/conversation-bridge.test.mjs",
+        "tests/conversation-forward-compat.test.mjs"
       ]
     },
     {
