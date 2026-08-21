@@ -23,7 +23,7 @@ const FIXTURE_ARCHITECTURE = "arm64";
 const FIXTURE_BUILT_AT = "2026-07-29T00:00:00.000Z";
 const FIXTURE_REPOSITORY = "https://github.com/Charleyli925/PageRoot";
 
-const APP_SOURCE_FILES = [
+export const APP_SOURCE_FILES = [
   "desktop/main.mjs",
   "desktop/preload.mjs",
   "desktop/external-file-open.mjs",
@@ -47,6 +47,7 @@ const APP_SOURCE_FILES = [
   "desktop/application-update.mjs",
   "desktop/usage-telemetry.mjs",
   "desktop/ui-preferences.mjs",
+  "desktop/device-identity.mjs",
   "desktop/preview-protocol.mjs",
   "desktop/imported-asset-root.mjs",
   "desktop/edit-runtime-bootstrap.mjs",

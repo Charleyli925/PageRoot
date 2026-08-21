@@ -137,12 +137,24 @@ async function readProjection(frame) {
         types: box.dataset.types || "",
         scope: box.dataset.scope || "",
         summary: box.dataset.summary || "",
+        active: box.dataset.active || "",
         label: box.querySelector("[data-pageroot-review-overlay-label]")?.textContent || "",
+        labelCount: Number(box.querySelector("[data-pageroot-review-overlay-label]")
+          ?.getAttribute("data-pageroot-review-label-count") || 1),
         borderWidth: Number.parseFloat(getComputedStyle(box).borderTopWidth || "0"),
+        borderColor: getComputedStyle(box).borderTopColor || "",
         left: Number(box.getAttribute("data-left")),
         top: Number(box.getAttribute("data-top")),
         width: Number(box.getAttribute("data-width")),
         height: Number(box.getAttribute("data-height")),
+      }));
+    const bars = [...document.querySelectorAll("[data-pageroot-review-region-bar]")]
+      .map((bar) => ({
+        changeId: bar.getAttribute("data-pageroot-review-region-bar") || "",
+        active: bar.dataset.active || "",
+        suspect: bar.dataset.suspect || "",
+        top: Number(bar.getAttribute("data-top")),
+        height: Number(bar.getAttribute("data-height")),
       }));
     const strikes = [...document.querySelectorAll('[data-pageroot-review-text-mark="removed"]')]
       .map((line) => ({
@@ -187,7 +199,7 @@ async function readProjection(frame) {
         node = walker.nextNode();
       }
     });
-    return { boxes, strikes, dots, glyphs, marked };
+    return { boxes, bars, strikes, dots, glyphs, marked };
   });
 }
 
@@ -289,6 +301,115 @@ test("the review projection annotates a dense report cleanly and accurately", as
         ).toBeUndefined();
       }
     }
+
+    // 1a. Resting state is quiet. A confirmed change shows no outline color
+    //     until hover or focus reaches for it — the entry state focuses the
+    //     first change, so its own boxes are the one allowed claim, and only
+    //     the amber suspected frame may rest visible besides it. Captions and
+    //     revision bars follow a change's contiguous stretches: a change
+    //     never carries more captions than stretches, a resting caption
+    //     carries a ×N multiplier exactly when it represents a genuine
+    //     cluster of N nearby same-caption stretches, and every change is
+    //     indexed by at least one page-edge revision bar.
+    const restsTransparent = (color) => (
+      color === "transparent" || /^rgba\(\d+, \d+, \d+, 0\)$/u.test(color)
+    );
+    for (const [side, projection] of Object.entries(projections)) {
+      const captionsByChange = new Map();
+      for (const box of projection.boxes) {
+        if (box.tone !== "suspected" && box.active !== "true") {
+          expect(
+            restsTransparent(box.borderColor),
+            `${side}: "${box.summary}" rests with a visible ${box.borderColor} outline`,
+          ).toBe(true);
+        }
+        if (!box.label) continue;
+        if (box.active !== "true") {
+          if (box.labelCount > 1) {
+            expect(
+              box.label.endsWith(` ×${box.labelCount}`),
+              `${side}: cluster caption "${box.label}" must end with ×${box.labelCount}`,
+            ).toBe(true);
+          } else {
+            expect(
+              box.label.includes(" ×"),
+              `${side}: resting caption "${box.label}" carries a multiplier without a cluster`,
+            ).toBe(false);
+          }
+        }
+        captionsByChange.set(box.changeId, (captionsByChange.get(box.changeId) || 0) + 1);
+      }
+      const barsByChange = new Map();
+      for (const bar of projection.bars) {
+        barsByChange.set(bar.changeId, (barsByChange.get(bar.changeId) || 0) + 1);
+      }
+      for (const [changeId, count] of captionsByChange) {
+        expect(
+          count,
+          `${side}: change ${changeId} carries ${count} captions for ${barsByChange.get(changeId) || 0} stretches`,
+        ).toBeLessThanOrEqual(barsByChange.get(changeId) || 0);
+      }
+      expect(captionsByChange.size, `${side}: no caption anchors the page`)
+        .toBeGreaterThan(0);
+      for (const box of projection.boxes) {
+        expect(
+          barsByChange.has(box.changeId),
+          `${side}: change ${box.changeId} has no revision bar`,
+        ).toBe(true);
+      }
+      for (const bar of projection.bars) {
+        expect(bar.height, `${side}: a revision bar collapsed to ${bar.height}px`)
+          .toBeGreaterThan(4);
+      }
+    }
+
+    // 1b. Hover previews without claiming: pointing at a resting change shows
+    //     its outline, and leaving the page rests it again.
+    await afterFrame.locator("html").evaluate(() => {
+      const box = [...document.querySelectorAll("[data-pageroot-review-overlay-box]")]
+        .find((candidate) => (
+          candidate.dataset.active !== "true" && candidate.dataset.tone !== "suspected"
+        ));
+      if (!box) throw new Error("no resting box to hover");
+      const rect = box.getBoundingClientRect();
+      window.dispatchEvent(new PointerEvent("pointermove", {
+        clientX: rect.left + rect.width / 2,
+        clientY: rect.top + rect.height / 2,
+      }));
+    });
+    await expect.poll(async () => afterFrame.locator(
+      '[data-pageroot-review-overlay-box][data-hover="true"]',
+    ).count(), { timeout: 10_000 }).toBeGreaterThan(0);
+    await afterFrame.locator("html").evaluate(() => {
+      window.dispatchEvent(new PointerEvent("pointerout"));
+    });
+    await expect.poll(async () => afterFrame.locator(
+      '[data-pageroot-review-overlay-box][data-hover="true"]',
+    ).count(), { timeout: 10_000 }).toBe(0);
+
+    // 1c. Focus claims the outline: navigating to a change colors its own
+    //     boxes and highlights its revision bar while every other confirmed
+    //     change stays at rest.
+    await launched.page.getByRole("button", { name: "下一处变化" }).click();
+    await expect.poll(async () => {
+      const sides = {
+        before: await readProjection(beforeFrame),
+        after: await readProjection(afterFrame),
+      };
+      const activeBoxes = [...sides.before.boxes, ...sides.after.boxes]
+        .filter((box) => box.active === "true");
+      if (!activeBoxes.length) return "no active box";
+      const claimed = activeBoxes.every((box) => !restsTransparent(box.borderColor));
+      const othersRest = [...sides.before.boxes, ...sides.after.boxes]
+        .filter((box) => box.active !== "true" && box.tone !== "suspected")
+        .every((box) => restsTransparent(box.borderColor));
+      const barClaimed = [...sides.before.bars, ...sides.after.bars]
+        .some((bar) => bar.active === "true");
+      if (!claimed) return "active box still transparent";
+      if (!othersRest) return "a resting box is colored";
+      if (!barClaimed) return "no active revision bar";
+      return "ok";
+    }, { timeout: 15_000 }).toBe("ok");
 
     // 2. The strike must read as a dashed rule. A round cap adds one stroke
     //    thickness to every dash and removes it from every gap.

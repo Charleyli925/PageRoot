@@ -43,6 +43,13 @@ export function reviewRuntimeVisualMeanRgbDifference(
 
 export function isReviewRuntimeVisualRasterDifferenceMeaningful(value: unknown): boolean;
 
+export function reviewRuntimeVisualStrongPixelRatio(
+  beforePixels: Uint8Array | Uint8ClampedArray | unknown,
+  afterPixels: Uint8Array | Uint8ClampedArray | unknown,
+): number | null;
+
+export function isReviewRuntimeVisualRasterChangeStructural(value: unknown): boolean;
+
 export function reviewRuntimeVisualPixelsAreUniform(
   pixels: Uint8Array | Uint8ClampedArray | unknown,
 ): boolean;
@@ -52,6 +59,7 @@ export function classifyReviewRuntimeVisualCandidates(options?: {
   before?: readonly ReviewRuntimeVisualSnapshot[];
   after?: readonly ReviewRuntimeVisualSnapshot[];
   rasterMeanRgbDifferenceByKey?: ReadonlyMap<string, number>;
+  rasterStrongPixelRatioByKey?: ReadonlyMap<string, number>;
   uniformCandidateKeys?: ReadonlySet<string> | readonly string[];
 }): ReviewRuntimeVisualVerdicts;
 
@@ -65,6 +73,7 @@ export function changedReviewRuntimeVisualCandidateKeys(options?: {
   before?: readonly ReviewRuntimeVisualSnapshot[];
   after?: readonly ReviewRuntimeVisualSnapshot[];
   rasterMeanRgbDifferenceByKey?: ReadonlyMap<string, number>;
+  rasterStrongPixelRatioByKey?: ReadonlyMap<string, number>;
 }): readonly string[];
 
 export function mergeReviewRuntimeVisualChanges<

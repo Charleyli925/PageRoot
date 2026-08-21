@@ -3,6 +3,12 @@ import { readFile, stat } from "node:fs/promises";
 import test from "node:test";
 import semver from "semver";
 
+import {
+  REQUIRED_APP_SOURCE_FILES,
+  REQUIRED_SHARED_FILES,
+} from "../scripts/verify-packaged-artifact.mjs";
+import { APP_SOURCE_FILES } from "./helpers/release-evidence-fixtures.mjs";
+
 const APP_FILE_ALLOWLIST = [
   "desktop/main.mjs",
   "desktop/preload.mjs",
@@ -276,4 +282,33 @@ test("packaged legal notice and icon remain available as reviewed resources", as
   assert.match(notice, /只会把交接内容复制到本机剪贴板/u);
   assert.match(notice, /Apache License 2\.0/u);
   assert.ok(iconInfo.size > 100_000);
+});
+
+// The packaged runtime file set is restated in four places: the electron-builder
+// manifest, the expectation in this test, the packaged-artifact verifier and the
+// release-evidence fixture. Only the first two are compared above, so a file
+// added to the manifest but missing from the verifier used to pass every local
+// gate and fail in the release dry run, where the asar contents are checked for
+// real. Pinning all four here turns that into a local failure.
+test("every packaged runtime file list agrees with the others", () => {
+  const desktopOnly = (entries) => entries
+    .filter((entry) => entry.startsWith("desktop/"))
+    .slice()
+    .sort();
+
+  assert.deepEqual(
+    desktopOnly(REQUIRED_APP_SOURCE_FILES),
+    desktopOnly(APP_FILE_ALLOWLIST),
+    "scripts/verify-packaged-artifact.mjs disagrees with this test's allowlist",
+  );
+  assert.deepEqual(
+    desktopOnly(APP_SOURCE_FILES),
+    desktopOnly(APP_FILE_ALLOWLIST),
+    "tests/helpers/release-evidence-fixtures.mjs disagrees with this test's allowlist",
+  );
+  assert.deepEqual(
+    REQUIRED_SHARED_FILES.slice().sort(),
+    SHARED_FILES.slice().sort(),
+    "the shared resource lists disagree",
+  );
 });
