@@ -262,6 +262,10 @@
         "to": "bridge/source-history-service.mjs"
       },
       {
+        "from": "scripts/conversation-repository.mjs",
+        "to": "bridge/conversation-repository.mjs"
+      },
+      {
         "from": "scripts/source-transaction-service.mjs",
         "to": "bridge/source-transaction-service.mjs"
       },
@@ -280,6 +284,10 @@
       {
         "from": "shared/source-history.mjs",
         "to": "shared/source-history.mjs"
+      },
+      {
+        "from": "shared/conversation.mjs",
+        "to": "shared/conversation.mjs"
       },
       {
         "from": "node_modules/parse5",
@@ -418,6 +426,9 @@
           "change-request.v3.schema.json",
           "committed-marker.v1.schema.json",
           "completion.v1.schema.json",
+          "conversation.v1.schema.json",
+          "conversation-index.v1.schema.json",
+          "conversation-draft.v1.schema.json",
           "input-manifest.v1.schema.json",
           "project-state.v3.schema.json",
           "project-identity.v4.schema.json",

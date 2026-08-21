@@ -62,6 +62,7 @@ const BRIDGE_FILES = [
   "draft-command-decoder.mjs",
   "project-context-service.mjs",
   "source-history-service.mjs",
+  "conversation-repository.mjs",
   "source-transaction-service.mjs",
 ];
 
@@ -90,6 +91,7 @@ const SHARED_FILES = [
   "draft-aggregate.mjs",
   "direct-edit-compatibility.mjs",
   "source-history.mjs",
+  "conversation.mjs",
 ];
 
 const SCHEMA_FILES = [
@@ -100,6 +102,9 @@ const SCHEMA_FILES = [
   "change-request.v3.schema.json",
   "committed-marker.v1.schema.json",
   "completion.v1.schema.json",
+  "conversation.v1.schema.json",
+  "conversation-index.v1.schema.json",
+  "conversation-draft.v1.schema.json",
   "input-manifest.v1.schema.json",
   "project-state.v3.schema.json",
   "project-identity.v4.schema.json",

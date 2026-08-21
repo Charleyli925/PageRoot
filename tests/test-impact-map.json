@@ -524,7 +524,8 @@
       ],
       "suites": [],
       "nodeTests": [
-        "tests/conversation-repository.test.mjs"
+        "tests/conversation-repository.test.mjs",
+        "tests/conversation-bridge.test.mjs"
       ]
     },
     {
@@ -980,7 +981,8 @@
         "tests/project-context-service.test.mjs",
         "tests/targeted-change-schema.test.mjs",
         "tests/user-supplement.test.mjs",
-        "tests/project-file-bridge.test.mjs"
+        "tests/project-file-bridge.test.mjs",
+        "tests/conversation-bridge.test.mjs"
       ]
     },
     {

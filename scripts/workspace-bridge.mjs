@@ -30,6 +30,15 @@ import {
   ProjectFileRepository,
   ProjectFileRepositoryError,
 } from "./project-file-repository.mjs";
+import {
+  conversationListResponse,
+  conversationResponse,
+  ensureCurrentConversation,
+  readConversation,
+  readConversationDraft,
+  readConversationIndex,
+  writeConversationDraft,
+} from "./conversation-repository.mjs";
 import { createEmptySourceHistory } from "../shared/source-history.mjs";
 
 const HOST = "127.0.0.1";
@@ -1672,6 +1681,86 @@ async function deleteDraftAttachment(body) {
   return { ok: true, removed: true };
 }
 
+// Conversation reads and draft writes. The Bridge is the only conversation
+// writer; the renderer receives a projection and never touches these files.
+// A conversation belongs to exactly one Document, so the context is always
+// derived from the resolved workspace rather than from the request body.
+function conversationContext(workspace) {
+  return {
+    // The repository's `projectRoot` is the managed control root, matching the
+    // convention already used by the source-history service.
+    projectRoot: path.join(workspace.target.projectRootPath, ".pageroot"),
+    projectId: workspace.project.projectId,
+    documentId: workspace.project.documentId,
+  };
+}
+
+async function currentConversation(sourcePath) {
+  const workspace = await projectFileWorkspaceForSource(sourcePath);
+  if (!workspace) throw projectNotFoundError();
+  const context = conversationContext(workspace);
+  const conversation = await ensureCurrentConversation(context);
+  const draft = await readConversationDraft(context, conversation.conversationId);
+  return {
+    ok: true,
+    projectId: context.projectId,
+    documentId: context.documentId,
+    ...conversationResponse(conversation, draft),
+  };
+}
+
+async function documentConversations(sourcePath) {
+  const workspace = await projectFileWorkspaceForSource(sourcePath);
+  if (!workspace) throw projectNotFoundError();
+  const context = conversationContext(workspace);
+  const index = await readConversationIndex(context);
+  return {
+    ok: true,
+    projectId: context.projectId,
+    ...conversationListResponse(index, context.documentId),
+  };
+}
+
+async function saveConversationDraft(body) {
+  const workspace = await projectFileWorkspaceForSource(body.sourcePath);
+  if (!workspace) throw projectNotFoundError();
+  if (!projectFileBodyIdentityMatches(workspace, body)) {
+    throw new HttpError(
+      409,
+      "PROJECT_CONTEXT_IDENTITY_MISMATCH",
+      "The conversation identity does not match the selected project.",
+    );
+  }
+  const context = conversationContext(workspace);
+  // Reading the current conversation first keeps a draft from being written for
+  // a conversation that does not belong to this Document.
+  const conversation = await readConversation(context, body.conversationId);
+  if (!conversation) {
+    throw new HttpError(
+      404,
+      "CONVERSATION_MISSING",
+      "That conversation does not exist for this document.",
+    );
+  }
+  const draft = await writeConversationDraft(context, conversation.conversationId, {
+    text: typeof body.text === "string" ? body.text : "",
+    intent: body.intent,
+    ...(body.modelId === undefined ? {} : { modelId: body.modelId }),
+    ...(body.modelDisplayName === undefined
+      ? {}
+      : { modelDisplayName: body.modelDisplayName }),
+    ...(body.deliveryMode === undefined
+      ? {}
+      : { deliveryMode: body.deliveryMode }),
+  });
+  return {
+    ok: true,
+    projectId: context.projectId,
+    documentId: context.documentId,
+    draft,
+  };
+}
+
 async function runSourceHistoryAction(body) {
   const workspace = await projectFileWorkspaceForSource(body.sourcePath);
   if (!workspace) throw projectNotFoundError();
@@ -2084,6 +2173,31 @@ async function route(request, response) {
   if (request.method === "POST" && url.pathname === "/source-history/action") {
     const body = await readBody(request);
     sendJson(response, 200, await runSourceHistoryAction(body));
+    return;
+  }
+  if (request.method === "GET" && url.pathname === "/conversation") {
+    sendJson(
+      response,
+      200,
+      await currentConversation(
+        requiredSourcePath(url.searchParams.get("sourcePath")),
+      ),
+    );
+    return;
+  }
+  if (request.method === "GET" && url.pathname === "/conversation/list") {
+    sendJson(
+      response,
+      200,
+      await documentConversations(
+        requiredSourcePath(url.searchParams.get("sourcePath")),
+      ),
+    );
+    return;
+  }
+  if (request.method === "POST" && url.pathname === "/conversation/draft") {
+    const body = await readBody(request);
+    sendJson(response, 200, await saveConversationDraft(body));
     return;
   }
   if (request.method === "POST" && url.pathname === "/version") {
