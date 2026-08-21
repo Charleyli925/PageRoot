@@ -60,6 +60,7 @@ const REQUIRED_BRIDGE_FILES = [
   "draft-command-decoder.mjs",
   "project-context-service.mjs",
   "source-history-service.mjs",
+  "conversation-repository.mjs",
   "source-transaction-service.mjs",
 ];
 const REQUIRED_PACKAGED_MODULES = [
@@ -86,6 +87,7 @@ const REQUIRED_SHARED_FILES = [
   "direct-edit-compatibility.mjs",
   "draft-aggregate.mjs",
   "source-history.mjs",
+  "conversation.mjs",
 ];
 const REQUIRED_LEGAL_RESOURCES = [
   "PageRoot 用户声明与免责声明.txt",

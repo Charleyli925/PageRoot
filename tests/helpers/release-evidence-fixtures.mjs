@@ -80,6 +80,7 @@ const BRIDGE_FILES = [
   "draft-command-decoder.mjs",
   "project-context-service.mjs",
   "source-history-service.mjs",
+  "conversation-repository.mjs",
   "source-transaction-service.mjs",
 ];
 
@@ -374,6 +375,11 @@ export async function createSyntheticAppBundle(t, {
       "shared/source-history.mjs",
       "export const fixtureSourceHistory = true;\n",
     ),
+    writeFixtureFile(
+      productRoot,
+      "shared/conversation.mjs",
+      "export const fixtureConversation = true;\n",
+    ),
     ...SCHEMA_FILES.map((fileName) => writeFixtureFile(
       productRoot,
       "schemas/" + fileName,
@@ -441,6 +447,7 @@ export async function createSyntheticAppBundle(t, {
       "draft-aggregate.mjs",
       "direct-edit-compatibility.mjs",
       "source-history.mjs",
+      "conversation.mjs",
     ].map((fileName) => copyFixtureFile(
       productRoot,
       resourcesPath,
