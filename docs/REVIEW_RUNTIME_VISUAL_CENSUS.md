@@ -47,7 +47,7 @@ drifted host path or a host that stopped being source-empty would make every
 capture report `unavailable`, and the census would then pass by measuring
 nothing.
 
-## Baseline
+## Baseline (before the scroll paint sync)
 
 9 scenarios × 10 runs × 2 chart hosts = 180 candidate rows, default viewport
 1280×900, default 1000 ms fixture animation, contract settle wait.
@@ -118,6 +118,29 @@ Animation phase is a real but secondary factor with a distinct signature. At a
 1600 ms fixture animation, which genuinely outlasts the settle, the second
 candidate begins failing too, with small clustered distances (0.26) unlike the
 6–22 range of the scroll failures.
+
+## After the scroll paint sync
+
+The probe now reports whether centring the host actually moved the page, and
+the owner waits for the next offscreen frame before sampling a host that moved.
+Re-running the identical census:
+
+| | Before | After |
+| --- | --- | --- |
+| False positives | 21 / 140 | **0 / 140** |
+| False negatives | 0 / 40 | **0 / 40** |
+| Unverified | 0 / 180 | **0 / 180** |
+| Unchanged rows deciding on `png-hash-equal` | 119 / 140 | **140 / 140** |
+
+The last row matters most. Every unchanged chart now produces a **byte-identical
+PNG pair**, so the raster comparison and its 0.04 budget are no longer reached
+at all for this class. The observable became a function of the source instead
+of a function of when it was sampled.
+
+The residual animation factor is unchanged and out of scope for that fix: with
+a 1600 ms fixture animation, which genuinely outlasts the settle, the census
+still reports 9 / 40. It is a different signature — smaller distances, later
+candidates — and needs its own change.
 
 ## What this rules out
 
