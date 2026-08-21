@@ -321,6 +321,36 @@ test("run presentation copy follows the four stages and keeps exception actions 
   );
 });
 
+test("Qoder ACP progress is distinct from clipboard delivery and never claims Candidate readiness", () => {
+  const run = {
+    requestId: "req_qoder",
+    status: "processing",
+    completionObserved: false,
+  };
+  const running = deriveRunProgressPresentation(run, {
+    mode: "qoder-acp",
+    status: "running",
+    phase: "reading-task",
+  });
+  assert.equal(running.header.title, "Qoder 正在读取本轮任务");
+  assert.equal(running.statusLabel, "正在处理");
+  assert.equal(running.steps[0].label, "Qoder CLI 已启动");
+  assert.equal(running.steps[1].state, "current");
+  assert.equal(running.steps[3].state, "pending");
+
+  const interrupted = deriveRunProgressPresentation(run, {
+    mode: "qoder-acp",
+    status: "interrupted",
+    phase: "interrupted",
+    errorMessage: "会话已停止，但 Request 仍然保留。",
+    retryable: false,
+  });
+  assert.equal(interrupted.statusLabel, "会话已中断");
+  assert.equal(interrupted.steps[0].state, "error");
+  assert.equal(interrupted.steps[1].detail, "旧 Request 结束后可重新发送");
+  assert.match(interrupted.summaryDetail, /Request/u);
+});
+
 test("legacy validation review choices are decoded at the domain boundary", () => {
   assert.deepEqual(validationReviewFromRecord({
     status: "waived",

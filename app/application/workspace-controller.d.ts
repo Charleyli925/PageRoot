@@ -296,7 +296,8 @@ export type WorkspaceControllerConstruction = Readonly<{
     handoff: Readonly<{
       copy(input: {
         message: string;
-        run: import("../domain/run-lifecycle.js").ActiveRun;
+        run: import("../domain/run-lifecycle.js").ActiveRun | null;
+        purpose?: string;
       }): Promise<{ status: string; copied: boolean }>;
     }>;
     scheduler?: Readonly<{
@@ -540,6 +541,12 @@ export class WorkspaceController {
     previousVersionId?: string | null;
     basedOnVersionId?: string | null;
     deadlineAt?: number;
+    deliveryMode?: "clipboard" | "qoder-acp";
+  }): Promise<RunWorkflowOutcome>;
+  refreshQoderAvailability(): Promise<RunWorkflowOutcome>;
+  checkQoderUsability(): Promise<RunWorkflowOutcome>;
+  copyQoderGuidance(input: {
+    kind: import("../domain/qoder-availability.js").QoderGuidanceKind;
   }): Promise<RunWorkflowOutcome>;
   reconcileRunSubmission(input?: {
     sourcePath?: string | null;
@@ -548,6 +555,10 @@ export class WorkspaceController {
   pollRuns(input?: { generation?: number }): Promise<RunWorkflowOutcome>;
   copyRunHandoff(input?: {
     run?: import("../domain/run-lifecycle.js").ActiveRun | null;
+  }): Promise<RunWorkflowOutcome>;
+  startRunAgent(input?: {
+    run?: import("../domain/run-lifecycle.js").ActiveRun | null;
+    preflightId?: string | null;
   }): Promise<RunWorkflowOutcome>;
   cancelRun(input?: {
     run?: import("../domain/run-lifecycle.js").ActiveRun | null;

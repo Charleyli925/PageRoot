@@ -29,6 +29,8 @@ const PACKAGE_TESTS = new Set([
 ]);
 
 const INTEGRATION_TESTS = new Set([
+  "agent-bridge-service.test.mjs",
+  "agent-bridge-workspace.test.mjs",
   "application-update.test.mjs",
   "attachment-storage.test.mjs",
   "bridge-startup.test.mjs",
@@ -42,6 +44,7 @@ const INTEGRATION_TESTS = new Set([
   "html-source-parser.test.mjs",
   "lifecycle-core.test.mjs",
   "product-contract.test.mjs",
+  "qoder-acp-spike-client.test.mjs",
   "qoder-handoff.test.mjs",
   "rendered-html.test.mjs",
   "schema-contract.test.mjs",

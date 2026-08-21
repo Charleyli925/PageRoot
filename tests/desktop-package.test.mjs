@@ -3,6 +3,12 @@ import { readFile, stat } from "node:fs/promises";
 import test from "node:test";
 import semver from "semver";
 
+import {
+  REQUIRED_APP_SOURCE_FILES,
+  REQUIRED_SHARED_FILES,
+} from "../scripts/verify-packaged-artifact.mjs";
+import { APP_SOURCE_FILES } from "./helpers/release-evidence-fixtures.mjs";
+
 const APP_FILE_ALLOWLIST = [
   "desktop/main.mjs",
   "desktop/preload.mjs",
@@ -27,6 +33,7 @@ const APP_FILE_ALLOWLIST = [
   "desktop/application-update.mjs",
   "desktop/usage-telemetry.mjs",
   "desktop/ui-preferences.mjs",
+  "desktop/device-identity.mjs",
   "desktop/preview-protocol.mjs",
   "desktop/imported-asset-root.mjs",
   "desktop/edit-runtime-bootstrap.mjs",
@@ -44,6 +51,9 @@ const APP_FILE_ALLOWLIST = [
 
 const BRIDGE_FILES = [
   "workspace-bridge.mjs",
+  "workspace-bridge-shutdown.mjs",
+  "agent-bridge-service.mjs",
+  "qoder-acp-client.mjs",
   "finalize-attempt.mjs",
   "lifecycle-core.mjs",
   "project-file-repository.mjs",
@@ -67,6 +77,7 @@ const BRIDGE_FILES = [
 ];
 
 const PACKAGED_MODULES = [
+  "@agentclientprotocol/sdk",
   "parse5",
   "entities",
   "electron-updater",
@@ -85,11 +96,13 @@ const PACKAGED_MODULES = [
   "graceful-fs",
   "jsonfile",
   "universalify",
+  "zod",
 ];
 
 const SHARED_FILES = [
   "draft-aggregate.mjs",
   "direct-edit-compatibility.mjs",
+  "provenance.mjs",
   "source-history.mjs",
   "conversation.mjs",
 ];
@@ -276,7 +289,37 @@ test("packaged legal notice and icon remain available as reviewed resources", as
     stat(new URL("../desktop/resources/icon.icns", import.meta.url)),
   ]);
   assert.match(notice, /AI Agent 生成或修改的内容可能不准确/u);
-  assert.match(notice, /只会把交接内容复制到本机剪贴板/u);
+  assert.match(notice, /选择“Qoder CLI”或“复制任务”/u);
+  assert.match(notice, /不是操作系统沙箱/u);
   assert.match(notice, /Apache License 2\.0/u);
   assert.ok(iconInfo.size > 100_000);
+});
+
+// The packaged runtime file set is restated in four places: the electron-builder
+// manifest, the expectation in this test, the packaged-artifact verifier and the
+// release-evidence fixture. Only the first two are compared above, so a file
+// added to the manifest but missing from the verifier used to pass every local
+// gate and fail in the release dry run, where the asar contents are checked for
+// real. Pinning all four here turns that into a local failure.
+test("every packaged runtime file list agrees with the others", () => {
+  const desktopOnly = (entries) => entries
+    .filter((entry) => entry.startsWith("desktop/"))
+    .slice()
+    .sort();
+
+  assert.deepEqual(
+    desktopOnly(REQUIRED_APP_SOURCE_FILES),
+    desktopOnly(APP_FILE_ALLOWLIST),
+    "scripts/verify-packaged-artifact.mjs disagrees with this test's allowlist",
+  );
+  assert.deepEqual(
+    desktopOnly(APP_SOURCE_FILES),
+    desktopOnly(APP_FILE_ALLOWLIST),
+    "tests/helpers/release-evidence-fixtures.mjs disagrees with this test's allowlist",
+  );
+  assert.deepEqual(
+    REQUIRED_SHARED_FILES.slice().sort(),
+    SHARED_FILES.slice().sort(),
+    "the shared resource lists disagree",
+  );
 });

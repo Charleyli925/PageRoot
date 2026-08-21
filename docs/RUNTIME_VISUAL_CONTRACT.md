@@ -132,10 +132,24 @@ fetch failure, oversize or timeout only leaves the affected chart unverified.
 
 After the first offscreen paint the owner waits one bounded settle period
 (`captureSettleMs`) before measuring and sampling, because chart libraries
-initialize asynchronously and animate after that first paint; the settle
-outlasts the default one-second entrance animation so two sides are not
-sampled at different animation phases. The settle wait stays subordinate to
-the owner deadline and never retries.
+initialize asynchronously and animate after that first paint. The settle wait
+stays subordinate to the owner deadline and never retries.
+
+The settle period alone is not sufficient, and measurement says so. Each
+candidate is measured by scrolling its host to the viewport centre, and
+`capturePage` samples the last composited frame. A probe therefore reports
+whether centring actually moved the page, and the owner waits for the next
+offscreen frame before sampling a host that moved, bounded by a short fallback
+so a page that stops repainting cannot hold the deadline. Without that wait an
+otherwise correct rect was filled with pre-scroll pixels, which was the sole
+cause of every unchanged-chart false positive measured before it existed
+(21 of 140 rows; 0 of 140 after).
+
+The settle wait remains an animation guard only. When a chart animation
+genuinely outlasts `captureSettleMs`, two sides can still be sampled at
+different phases; that residual is smaller in magnitude, affects later
+candidates rather than the first, and is not addressed by the scroll wait.
+Method and current numbers live in `docs/REVIEW_RUNTIME_VISUAL_CENSUS.md`.
 
 It returns only a captured/unavailable key plus an envelope, PNG
 bytes/hash/bitmap size, the owner-measured CSS-pixel layout width/height and a
@@ -177,19 +191,33 @@ chart host as context requires positive pixel evidence:
   spread of at most 3), which is the signature of a chart host that never
   rendered (blocked network, script failure, unfinished initialization).
 
-Only a verified-unchanged host may dim. An unverified host surfaces as
-suspected only when a user comment anchors on it or an enclosing element; a
-global page comment anchors on `<body>` and never marks hosts as commented,
-and an uncommented unverified host keeps the plain dimmed presentation so a
-page full of unverifiable charts cannot flood the review with amber frames. A
-suspected host keeps full visibility on both pages through a dim-mask
-exemption and receives one suspected fact: the after page draws an amber
-dashed "疑似有改动" frame while the before page stays unmarked. Suspected
-facts are always their own synthetic changes (`suspected-<outlineId>`) and
-never fold into, or overwrite, a confirmed change or its outline slot; they
-claim an outline slot only when the section has no confirmed change. Losing
-the capture capability entirely leaves every commented runtime host
-unverified rather than silently unchanged.
+Only a verified-unchanged host may dim, and a runtime verdict alone never
+promotes a host to a confirmed change. Current HTML bytes are authoritative,
+so a pixel difference is a confirmed visual fact only where the source diff
+also found a change in the same outline section; it then adds the `style` type
+to that change. A pixel difference in a section whose source is unchanged has
+no source cause the differ could see, so it surfaces as suspected rather than
+letting runtime evidence invent a change, a page-edge revision bar and a
+navigation stop out of pixels alone.
+
+An unverified host surfaces as suspected regardless of whether a comment
+anchors on it. Comment anchoring is a floor, not a gate: a commented host
+always surfaces, and every other unverified host surfaces too unless more than
+half of the page's hosts failed to verify, which is one page-level cause
+(blocked network, script failure) rather than one cause per host and must not
+flood the review with amber frames. A suspected host keeps full visibility on
+both pages through a dim-mask exemption and receives one suspected fact: the
+after page draws an amber dashed "疑似有改动" frame while the before page stays
+unmarked. Suspected facts are always their own synthetic changes
+(`suspected-<outlineId>`) and never fold into, or overwrite, a confirmed
+change or its outline slot; they claim an outline slot only when the section
+has no confirmed change. Losing the capture capability entirely leaves every
+runtime host unverified rather than silently unchanged.
+
+Adding the `style` type never rewrites wording the type list cannot rebuild.
+"新增内容", "删除内容" and "位置调整" are source facts about a whole section,
+so runtime evidence preserves them; any other helper is recomputed from the
+merged type list.
 
 Canvas-internal text has no DOM/SVG semantic representation at this boundary,
 so it follows the bounded raster rule; this contract does not add OCR, canvas

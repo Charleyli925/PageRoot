@@ -7,18 +7,21 @@ import {
   CANVAS_HOVER_OUTLINE_DELAY_MS,
   CANVAS_HOVER_HINT_GAP_PX,
   CANVAS_HOVER_HINT_HEIGHT_PX,
+  clipCanvasTargetRectToViewport,
   layoutCanvasHoverChrome,
   createCanvasCapabilityHoverController,
   placeCanvasHoverHint,
 } from "../app/components/html-canvas-capability-hover.js";
 
 function capability(kind, targetKey) {
+  const element = {};
   return {
     kind,
     hint: kind === "edit-text" ? "双击文字直接编辑" : "单击选择并评论",
     spoken: "可编辑",
     cursor: kind === "edit-text" ? "text" : "pointer",
-    element: {},
+    element,
+    selectionElement: element,
     targetKey,
   };
 }
@@ -89,6 +92,31 @@ test("the same target does not restart hover timers", () => {
   controller.update(first);
   scheduler.flush(CANVAS_HOVER_HINT_DELAY_MS);
   controller.update({ ...first });
+  assert.equal(controller.snapshot.outline, true);
+  assert.equal(controller.snapshot.hint, true);
+});
+
+test("the same visual target refreshes its precise caption selection without restarting", () => {
+  const scheduler = createScheduler();
+  const controller = createCanvasCapabilityHoverController({ scheduler });
+  const visualElement = {};
+  const firstSelection = {};
+  const secondSelection = {};
+  controller.update({
+    ...capability("edit-text", "host-1"),
+    element: visualElement,
+    selectionElement: firstSelection,
+  });
+  scheduler.flush(CANVAS_HOVER_DELAY_MS - 1);
+  controller.update({
+    ...capability("edit-text", "host-1"),
+    element: visualElement,
+    selectionElement: secondSelection,
+  });
+  assert.equal(controller.snapshot.capability.selectionElement, secondSelection);
+  assert.equal(controller.snapshot.outline, false);
+  scheduler.flush(1);
+  assert.equal(controller.snapshot.capability.selectionElement, secondSelection);
   assert.equal(controller.snapshot.outline, true);
   assert.equal(controller.snapshot.hint, true);
 });
@@ -189,4 +217,44 @@ test("tiny hit rectangles keep the outline and omit the caption", () => {
   });
   assert.equal(chrome.outline.width, 24);
   assert.equal(chrome.hint, null);
+});
+
+test("selected target clipping intersects only the iframe viewport", () => {
+  assert.deepEqual(clipCanvasTargetRectToViewport({
+    left: 20,
+    top: -30,
+    width: 100,
+    height: 80,
+  }, {
+    width: 320,
+    height: 200,
+  }), {
+    left: 20,
+    top: 0,
+    width: 100,
+    height: 50,
+  });
+  assert.deepEqual(clipCanvasTargetRectToViewport({
+    left: 20,
+    top: 170,
+    width: 100,
+    height: 80,
+  }, {
+    width: 320,
+    height: 200,
+  }), {
+    left: 20,
+    top: 170,
+    width: 100,
+    height: 30,
+  });
+  assert.equal(clipCanvasTargetRectToViewport({
+    left: 20,
+    top: -90,
+    width: 100,
+    height: 80,
+  }, {
+    width: 320,
+    height: 200,
+  }), null);
 });

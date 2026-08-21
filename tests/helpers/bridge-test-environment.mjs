@@ -113,7 +113,7 @@ function postJsonForSession(session, pathname, body, init, options) {
 }
 
 async function waitForChildExit(child) {
-  if (!child || child.exitCode !== null) return;
+  if (!child || child.exitCode !== null || child.signalCode !== null) return;
   await new Promise((resolveExit) => {
     const settled = () => {
       child.off("exit", settled);
@@ -126,7 +126,7 @@ async function waitForChildExit(child) {
 
 async function stopSession(session) {
   const { child } = session;
-  if (!child || child.exitCode !== null) return;
+  if (!child || child.exitCode !== null || child.signalCode !== null) return;
   child.kill("SIGTERM");
   const timedOut = await Promise.race([
     waitForChildExit(child).then(() => false),
@@ -232,7 +232,10 @@ export async function createBridgeTestEnvironment(t, options = {}) {
     },
     async start(extraEnvironment = {}) {
       if (disposed) throw new Error("Bridge test environment has already been cleaned up");
-      if (activeSession?.child.exitCode === null) {
+      if (
+        activeSession?.child.exitCode === null
+        && activeSession.child.signalCode === null
+      ) {
         throw new Error("Bridge test environment already has a running Bridge process");
       }
       const {

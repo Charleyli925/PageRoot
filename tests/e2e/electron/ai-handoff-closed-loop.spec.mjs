@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import {
   existsSync,
+  chmodSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -251,6 +252,39 @@ function removeSourceFixture(sourceDirectory) {
   removeSharedSourceFixture(sourceDirectory, "pageroot-ai-loop-source-");
 }
 
+function shellQuote(value) {
+  return `'${String(value).replaceAll("'", `'\\''`)}'`;
+}
+
+function createQoderAcpE2ECommand(directory, {
+  hang = false,
+  pidFile = null,
+  authRequired = false,
+} = {}) {
+  const command = path.join(directory, "pageroot-qoder-acp-e2e");
+  const agent = path.join(productRoot, "tests", "fixtures", "qoder-acp-agent.mjs");
+  const fixtureArgs = [
+    hang ? "--hang" : null,
+    pidFile ? `--pid-file=${pidFile}` : null,
+    authRequired ? "--auth-required" : null,
+  ].filter(Boolean).map(shellQuote).join(" ");
+  writeFileSync(
+    command,
+    `#!/bin/sh\nexec ${shellQuote(process.execPath)} ${shellQuote(agent)}${
+      fixtureArgs ? ` ${fixtureArgs}` : ""
+    } "$@"\n`,
+    { encoding: "utf8", mode: 0o755 },
+  );
+  chmodSync(command, 0o755);
+  return command;
+}
+
+async function chooseClipboardDelivery(page) {
+  const dialog = page.getByRole("dialog", { name: "怎样交给 AI？" });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: /复制任务/u }).click();
+}
+
 
 function removeAiLoopUserData(isolatedUserData) {
   removeValidatedTemporaryDirectory(
@@ -282,6 +316,7 @@ async function addCommentAndSubmit(
     );
   }
   await page.getByRole("button", { name: /发给 AI/u }).click();
+  await chooseClipboardDelivery(page);
   await expect(page.getByText("AI任务已经复制，直接粘贴给 AI Agent", { exact: true }))
     .toBeVisible();
   await expect(page.getByRole("dialog", { name: "本轮处理" })
@@ -4159,6 +4194,273 @@ test("returning from review restores the editable pre-AI version and preserves t
   }
 });
 
+test("Qoder ACP Agent Bridge reaches review without clipboard or automatic adoption", async () => {
+  test.setTimeout(180_000);
+  const fixture = createSourceFixture("qoder-acp-agent-bridge.html");
+  const qoderCommand = createQoderAcpE2ECommand(fixture.sourceDirectory);
+  const launched = await launchPageRoot({
+    activeSourcePath: fixture.sourcePath,
+    injectedEnv: {
+      PAGEROOT_QODER_ACP_ALLOW_TEST_COMMAND: "1",
+      PAGEROOT_QODER_ACP_COMMAND: qoderCommand,
+    },
+  });
+  try {
+    const clipboardSentinel = "PAGEROOT_QODER_ACP_MUST_NOT_COPY";
+    await launched.electronApp.evaluate(
+      ({ clipboard }, value) => clipboard.writeText(value),
+      clipboardSentinel,
+    );
+    const workingCopyPath = await addComment(
+      launched.page,
+      fixture.sourcePath,
+      "请完成 Qoder ACP 自动闭环，但不要直接覆盖当前 HTML。",
+    );
+    await launched.page.getByRole("button", { name: /发给 AI/u }).click();
+    const deliveryDialog = launched.page.getByRole("dialog", { name: "怎样交给 AI？" });
+    await expect(deliveryDialog).toBeVisible();
+    await expect(deliveryDialog.getByText(
+      "Qoder 会读取本轮 HTML、评论和附件；结果先进入审阅。",
+      { exact: true },
+    )).toBeVisible();
+    await expect(deliveryDialog.getByText("AGENT BRIDGE", { exact: true })).toHaveCount(0);
+    await expect(deliveryDialog.getByText("可信本机 Agent 提示", { exact: true }))
+      .toHaveCount(0);
+    await deliveryDialog.getByRole("button", { name: /Qoder CLI/u }).click();
+
+    await expect(launched.page.getByText(
+      "可在审阅中对比查看修改差异",
+      { exact: true },
+    ).filter({ visible: true }).first()).toBeVisible({ timeout: 60_000 });
+    expect(await launched.electronApp.evaluate(({ clipboard }) => clipboard.readText()))
+      .toBe(clipboardSentinel);
+    expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
+    expect(readFileSync(workingCopyPath, "utf8")).not.toContain(
+      "data-pageroot-qoder-acp",
+    );
+
+    const projectRoot = managedProjectRoots(launched.workspace).find(
+      (root) => realpathSync(workingCopyPath).startsWith(
+        `${realpathSync(root)}${path.sep}`,
+      ),
+    );
+    expect(projectRoot).toBeTruthy();
+    const projectRecord = JSON.parse(readFileSync(
+      path.join(projectRoot, ".pageroot", "project.json"),
+      "utf8",
+    ));
+    const candidates = candidateHtmlFiles(
+      launched.workspace,
+      projectRecord.projectId,
+    );
+    expect(candidates).toHaveLength(1);
+    expect(readFileSync(candidates[0], "utf8"))
+      .toContain('data-pageroot-qoder-acp="e2e"');
+
+    await launched.page.getByRole("button", { name: "审阅对比" }).click();
+    await expect(launched.page.getByTestId("ai-review-workspace"))
+      .toBeVisible({ timeout: 30_000 });
+    expect(readFileSync(workingCopyPath, "utf8")).not.toContain(
+      "data-pageroot-qoder-acp",
+    );
+  } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
+
+test("Qoder authentication stays in one delivery dialog and matches About", async () => {
+  test.setTimeout(120_000);
+  const fixture = createSourceFixture("qoder-auth-required.html");
+  const qoderCommand = createQoderAcpE2ECommand(fixture.sourceDirectory, {
+    authRequired: true,
+  });
+  const launched = await launchPageRoot({
+    activeSourcePath: fixture.sourcePath,
+    injectedEnv: {
+      PAGEROOT_QODER_ACP_ALLOW_TEST_COMMAND: "1",
+      PAGEROOT_QODER_ACP_COMMAND: qoderCommand,
+    },
+  });
+  try {
+    let requestPosts = 0;
+    launched.page.on("request", (request) => {
+      const url = new URL(request.url());
+      if (request.method() === "POST" && url.pathname === "/request") requestPosts += 1;
+    });
+    await addComment(
+      launched.page,
+      fixture.sourcePath,
+      "验证 Qoder 登录引导不会创建本轮任务。",
+    );
+    await launched.page.getByRole("button", { name: /发给 AI/u }).click();
+    const deliveryDialog = launched.page.getByRole("dialog", { name: "怎样交给 AI？" });
+    await expect(deliveryDialog.getByRole("button", { name: /Qoder CLI/u }))
+      .toBeVisible();
+    await deliveryDialog.getByRole("button", { name: /Qoder CLI/u }).click();
+
+    await expect(deliveryDialog).toBeVisible();
+    await expect(deliveryDialog.getByText("需要登录", { exact: true })).toBeVisible();
+    await expect(deliveryDialog.getByRole("button", { name: "复制登录指令" }))
+      .toBeVisible();
+    await expect(deliveryDialog.getByRole("button", { name: /复制任务/u })).toBeVisible();
+    expect(requestPosts).toBe(0);
+    await expect(launched.page.locator(".toast.show")).toHaveCount(0);
+
+    await deliveryDialog.getByRole("button", { name: "复制登录指令" }).click();
+    await expect(deliveryDialog.getByText("✓ 登录指令已复制", { exact: true }))
+      .toBeVisible();
+    expect(await launched.electronApp.evaluate(({ clipboard }) => clipboard.readText()))
+      .toContain("qodercli login");
+    expect(requestPosts).toBe(0);
+
+    await deliveryDialog.getByRole("button", { name: "关闭怎样交给 AI" }).click();
+    await launched.page.getByRole("button", { name: "关于源页" }).click();
+    const about = launched.page.getByRole("dialog", { name: "源页" });
+    await expect(about.getByRole("heading", { name: "AI Agent" })).toBeVisible();
+    await expect(about.getByText("Qoder CLI", { exact: true })).toBeVisible();
+    await expect(about.getByText("需要登录", { exact: true })).toBeVisible();
+    expect(requestPosts).toBe(0);
+    expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
+  } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
+
+test("Qoder installed while PageRoot is open refreshes in place and continues once", async () => {
+  test.setTimeout(120_000);
+  const fixture = createSourceFixture("qoder-installed-while-open.html");
+  const qoderCommand = path.join(fixture.sourceDirectory, "pageroot-qoder-acp-e2e");
+  const launched = await launchPageRoot({
+    activeSourcePath: fixture.sourcePath,
+    injectedEnv: {
+      PAGEROOT_QODER_ACP_ALLOW_TEST_COMMAND: "1",
+      PAGEROOT_QODER_ACP_COMMAND: qoderCommand,
+    },
+  });
+  try {
+    let requestPosts = 0;
+    launched.page.on("request", (request) => {
+      const url = new URL(request.url());
+      if (request.method() === "POST" && url.pathname === "/request") requestPosts += 1;
+    });
+    await addComment(
+      launched.page,
+      fixture.sourcePath,
+      "验证 PageRoot 打开期间安装 Qoder CLI 后可原地继续。",
+    );
+    await launched.page.getByRole("button", { name: /发给 AI/u }).click();
+    const deliveryDialog = launched.page.getByRole("dialog", { name: "怎样交给 AI？" });
+    await expect(deliveryDialog.getByText("未安装", { exact: true })).toBeVisible();
+    await deliveryDialog.getByRole("button", { name: "复制给 Qoder 的安装指令" }).click();
+    await expect(deliveryDialog.getByText("✓ 安装指令已复制", { exact: true }))
+      .toBeVisible();
+    expect(requestPosts).toBe(0);
+
+    createQoderAcpE2ECommand(fixture.sourceDirectory);
+    await launched.page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await expect(deliveryDialog.getByText("可使用", { exact: true })).toBeVisible();
+    await expect(deliveryDialog.getByRole("button", { name: "检查并继续" })).toBeVisible();
+    expect(requestPosts).toBe(0);
+
+    await deliveryDialog.getByRole("button", { name: "检查并继续" }).click();
+    await expect(deliveryDialog).not.toBeVisible();
+    await expect.poll(() => requestPosts).toBe(1);
+  } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
+
+test("Qoder ACP polling waits for start and a managed stop kills the Agent", async () => {
+  test.setTimeout(120_000);
+  const fixture = createSourceFixture("qoder-acp-managed-stop.html");
+  const pidFile = path.join(fixture.sourceDirectory, "qoder-acp.pid");
+  const qoderCommand = createQoderAcpE2ECommand(fixture.sourceDirectory, {
+    hang: true,
+    pidFile,
+  });
+  const launched = await launchPageRoot({
+    activeSourcePath: fixture.sourcePath,
+    injectedEnv: {
+      PAGEROOT_QODER_ACP_ALLOW_TEST_COMMAND: "1",
+      PAGEROOT_QODER_ACP_COMMAND: qoderCommand,
+    },
+  });
+  try {
+    const bridgeTraffic = [];
+    launched.page.on("request", (request) => {
+      const url = new URL(request.url());
+      if (
+        url.hostname === "127.0.0.1"
+        && ["/agent/start", "/status"].includes(url.pathname)
+      ) bridgeTraffic.push(`${request.method()} ${url.pathname}`);
+    });
+    const workingCopyPath = await addComment(
+      launched.page,
+      fixture.sourcePath,
+      "保持 ACP 会话运行，直到我在源页停止本轮。",
+    );
+    const workingBefore = readFileSync(workingCopyPath);
+    await launched.page.getByRole("button", { name: /发给 AI/u }).click();
+    const deliveryDialog = launched.page.getByRole("dialog", { name: "怎样交给 AI？" });
+    await deliveryDialog.getByRole("button", { name: /Qoder CLI/u }).click();
+
+    const stopButton = launched.page.getByRole("button", {
+      name: "停止 Qoder 并继续编辑",
+    });
+    await expect(stopButton).toBeVisible({ timeout: 60_000 });
+    await expect.poll(() => existsSync(pidFile)).toBe(true);
+    const pid = Number(readFileSync(pidFile, "utf8"));
+    expect(Number.isSafeInteger(pid)).toBe(true);
+    await launched.page.waitForTimeout(750);
+    const falseFailureToast = launched.page.locator(".toast.show").filter({
+      hasText: "Qoder CLI 没有完成本轮",
+    });
+    expect(
+      await falseFailureToast.count(),
+      `Bridge request order: ${bridgeTraffic.join(", ")}`,
+    ).toBe(0);
+
+    await stopButton.click();
+    await expect(launched.page.locator('aside[aria-label="本轮评论"]')
+      .getByRole("button", { name: "全局评论", exact: true }))
+      .toBeEnabled({ timeout: 45_000 });
+    await expect.poll(() => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch (error) {
+        if (error?.code === "ESRCH") return false;
+        throw error;
+      }
+    }).toBe(false);
+    expect(readFileSync(fixture.sourcePath)).toEqual(fixture.original);
+    expect(readFileSync(workingCopyPath)).toEqual(workingBefore);
+    expect(candidateHtmlFiles(launched.workspace, (
+      JSON.parse(readFileSync(
+        path.join(managedProjectRoots(launched.workspace)[0], ".pageroot", "project.json"),
+        "utf8",
+      )).projectId
+    ))).toHaveLength(0);
+    const requestsRoot = path.join(
+      managedProjectRoots(launched.workspace)[0],
+      ".pageroot",
+      "requests",
+    );
+    const requestDirectory = readdirSync(requestsRoot).find((name) => !name.startsWith("."));
+    const request = JSON.parse(readFileSync(
+      path.join(requestsRoot, requestDirectory, "request.json"),
+      "utf8",
+    ));
+    expect(request.status).toBe("cancelled");
+  } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
+
 test("a clipboard handoff failure keeps the frozen Request recoverable", async () => {
   const fixture = createSourceFixture();
   const launched = await launchPageRoot({
@@ -4183,6 +4485,7 @@ test("a clipboard handoff failure keeps the frozen Request recoverable", async (
     const sendToQoder = launched.page.getByRole("button", { name: /发给 AI/u });
     await expect(sendToQoder).toBeEnabled();
     await sendToQoder.click();
+    await chooseClipboardDelivery(launched.page);
     await expect(launched.page.getByText("AI任务复制失败，请重新复制", { exact: true }))
       .toBeVisible();
     expect(await launched.electronApp.evaluate(({ clipboard }) => clipboard.readText()))
@@ -4235,6 +4538,7 @@ test("a failed handoff in project A does not block project B or replace its stat
     );
     expect(projectAWorkingCopyPath).not.toBe(realpathSync(projectA.sourcePath));
     await launched.page.getByRole("button", { name: /发给 AI/u }).click();
+    await chooseClipboardDelivery(launched.page);
     const processingDialog = launched.page.getByRole("dialog", { name: "本轮处理" });
     await expect(processingDialog.getByText(
       "交接内容尚未复制",
@@ -4262,6 +4566,7 @@ test("a failed handoff in project A does not block project B or replace its stat
     await expect(launched.page.getByRole("button", { name: /发给 AI/u }))
       .toBeEnabled();
     await launched.page.getByRole("button", { name: /发给 AI/u }).click();
+    await chooseClipboardDelivery(launched.page);
     await expect(launched.page.getByText(
       "AI任务复制失败，请重新复制",
       { exact: true },
@@ -4308,6 +4613,7 @@ test("a rapid double click creates exactly one durable Request", async () => {
     await launched.page.getByRole("button", { name: /发给 AI/u }).dblclick({
       delay: 0,
     });
+    await chooseClipboardDelivery(launched.page);
     await expect(launched.page.getByText(
       "AI任务已经复制，直接粘贴给 AI Agent",
       { exact: true },
@@ -4454,6 +4760,7 @@ test("an unknown Request outcome stays fail-closed and reconciles automatically"
     await launched.page.route(bridgeRoute, injectUnknownRequestOutcome);
 
     await launched.page.getByRole("button", { name: /发给 AI/u }).click();
+    await chooseClipboardDelivery(launched.page);
     await expect(launched.page.getByText(
       "正在确认这次发送是否成功",
       { exact: true },
@@ -4557,6 +4864,7 @@ test("a persisted global comment stays exact after restart and sends directly", 
     await expect(recoveredComment.getByText("原位置已变化")).toHaveCount(0);
 
     await activeLaunch.page.getByRole("button", { name: /发给 AI/u }).click();
+    await chooseClipboardDelivery(activeLaunch.page);
     await expect(activeLaunch.page.getByText(
       "AI任务已经复制，直接粘贴给 AI Agent",
       { exact: true },

@@ -29,12 +29,24 @@
 
 Renderer 发来的事件会在主进程再次按严格白名单过滤；未声明的事件和字段直接丢弃。
 
+上述“不收集、不回传”只描述 PageRoot 自己的产品遥测。用户主动选择 Qoder CLI 自动执行
+后，本轮冻结 HTML、评论、附件、项目规则、Request 内本机文件路径，以及 Qoder 账号或
+会话所需元数据可能按 Qoder 的服务条款和隐私政策由其服务处理；选择复制任务时，只有用户
+主动粘贴或发送后才进入相应第三方服务。ACP 文件与命令限制不是操作系统沙箱，Qoder 进程
+仍以当前用户权限运行。
+
 ## 如何区分安装、会话与项目
 
 - 首次运行会随机生成一个安装 ID，保存在本机 PageRoot Application Support 目录。它不是电脑序列号，也不能从设备硬件信息推导。
 - 每次启动随机生成新的会话 ID。
 - 项目只使用安装级随机密钥对内部项目 ID 做 HMAC 后得到的假名键；原始项目 ID 不进入发送队列。
 - 删除源页的 Application Support 数据会同时删除安装 ID、项目假名密钥和未发送队列；再次运行会生成新身份。
+
+## 记录归属所用的设备 ID
+
+- 源页会在本机 Application Support 目录单独保存一个随机设备 ID（`device-identity.json`），用于在你自己的项目文件里标注每条批注和编辑事件由谁、在哪台设备上写下。
+- 这个设备 ID **只写入你本机的项目文件，永不回传**。它与遥测安装 ID 是两个互不相同、互不关联的随机值：遥测刻意不发送真实项目身份，因此也不会把分析身份写进你的内容。
+- 它同样不是电脑序列号，也不能从设备硬件信息推导。删除 Application Support 数据会重置它；已写入项目文件的历史归属保持不变。
 
 ## 回传位置与网络边界
 
@@ -50,4 +62,8 @@ Renderer 发来的事件会在主进程再次按严格白名单过滤；未声�
 
 PageRoot’s packaged desktop app sends a limited, allowlisted set of product-usage and fault events by default. It does not send HTML, page text, comments, prompts, AI output, attachments, clipboard contents, filenames, paths, account identifiers, Mac serial numbers, raw error messages, or stack traces. A random per-install ID, a random per-launch session ID, and HMAC-derived project pseudonyms are used instead of hardware identity.
 
+That boundary applies only to PageRoot product telemetry. When the user explicitly chooses managed Qoder execution, Qoder may process the frozen task content, Request-local file paths, and account or session metadata under Qoder’s own terms and privacy policy. Clipboard delivery reaches a third-party Agent only after the user pastes or sends it. ACP restrictions are not an operating-system sandbox; Qoder still runs with the current user’s permissions.
+
 Events are sent over HTTPS to PageRoot’s PostHog US Cloud project with person-profile processing and GeoIP resolution disabled. The source IP is necessarily visible to network recipients while the connection is made, but PageRoot does not add it to event properties. There is no session replay or automatic event capture. Telemetry failures never block editing or persistence.
+
+Separately from telemetry, PageRoot stores a random device ID in `device-identity.json` under Application Support and writes it into your own project files so each comment and edit event records who authored it and on which device. That identifier is never transmitted; it is a different random value from the telemetry install ID and is not derived from hardware. Deleting Application Support data resets it and leaves attribution already written into project files unchanged.

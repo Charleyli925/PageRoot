@@ -351,8 +351,15 @@ test("delivery contracts select their direct package, verifier and release-archi
     changedFiles: ["scripts/verify-packaged-artifact.mjs"],
   });
   assert.deepEqual(verifier.selectedNodeTests, [
+    "tests/agent-bridge-service.test.mjs",
+    "tests/agent-bridge-workspace.test.mjs",
     "tests/desktop-package.test.mjs",
     "tests/packaged-artifact-gate.test.mjs",
+    "tests/qoder-acp-spike-client.test.mjs",
+    "tests/run-lifecycle.test.mjs",
+    "tests/run-session.test.mjs",
+    "tests/run-workflow.test.mjs",
+    "tests/workspace-bridge.test.mjs",
   ]);
 
   const releaseWorkflow = selectGatePlan({
@@ -588,6 +595,33 @@ test("desktop handoff changes select Electron and deterministic AI closed-loop c
     "ai-smoke",
   ]);
   assert.ok(plan.selectedNodeTests.includes("tests/qoder-handoff.test.mjs"));
+});
+
+test("Qoder ACP Agent Bridge changes select product, package, and closed-loop owners", () => {
+  const plan = selectGatePlan({
+    map,
+    lane: "task",
+    changedFiles: ["scripts/qoder-acp-client.mjs"],
+  });
+  assert.deepEqual(suiteIds(plan), [
+    "typecheck",
+    "lint",
+    "dependency-audit",
+    "node-targeted",
+    "build-desktop",
+    "electron-smoke",
+    "ai-smoke",
+  ]);
+  assert.deepEqual(plan.selectedNodeTests, [
+    "tests/agent-bridge-service.test.mjs",
+    "tests/agent-bridge-workspace.test.mjs",
+    "tests/desktop-package.test.mjs",
+    "tests/qoder-acp-spike-client.test.mjs",
+    "tests/run-lifecycle.test.mjs",
+    "tests/run-session.test.mjs",
+    "tests/run-workflow.test.mjs",
+    "tests/workspace-bridge.test.mjs",
+  ]);
 });
 
 test("notification, comment, and presentation Browser owners select their own smoke lane", () => {

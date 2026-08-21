@@ -437,8 +437,8 @@ export const DEFAULT_PROJECT_HTML = `<!doctype html>
         <div class="workflow-copy"><small>AI AGENT WORKFLOW</small><h2>你指出。<br />AI Agent 执行。<br />你审阅后决定。</h2><p>Claude Code、Codex、WorkBuddy、Qoder，以及其他能读取本地文件并执行命令的 AI Agent 都可以使用。</p></div>
         <div class="steps">
           <div class="step"><b>01</b><div><strong>在页面上选择和说明</strong><span>直接修改简单内容；复杂要求则锚定到页面、模块或文字，并附上图片和文件。</span></div></div>
-          <div class="step"><b>02</b><div><strong>源页冻结可执行任务</strong><span>准确 HTML、目标、评论、附件和项目规则被整理到受管本地文件，交接信息自动复制。</span></div></div>
-          <div class="step"><b>03</b><div><strong>交给你正在使用的 AI Agent</strong><span>AI Agent 按任务内的路径和规则读取、修改并最终化，不需要专用云端 API。</span></div></div>
+          <div class="step"><b>02</b><div><strong>源页冻结可执行任务</strong><span>准确 HTML、目标、评论、附件和项目规则被整理到受管本地文件，可选“Qoder CLI”或“复制任务”。</span></div></div>
+          <div class="step"><b>03</b><div><strong>交给你信任的 AI Agent</strong><span>受管 Qoder ACP 或你选择的本地 Agent 按任务路径和规则读取、修改并最终化。</span></div></div>
           <div class="step"><b>04</b><div><strong>逐处审阅，再决定打开哪一版</strong><span>源页先校验并独立保留结果；你对照修改前后，可打开 AI 新版，也可回到修改前继续。</span></div></div>
         </div>
       </section>

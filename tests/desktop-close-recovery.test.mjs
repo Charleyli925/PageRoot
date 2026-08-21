@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import {
   canCloseDuringHydration,
   closeAbortPayload,
@@ -9,6 +12,8 @@ import {
   shouldRecoverEditorAfterCloseAbort,
   stopBridgeOrNotifyCloseAborted,
 } from "../desktop/close-recovery.mjs";
+
+const productRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 const safeRendererState = Object.freeze({
   approvedRequestId: "close-request-0001",
@@ -87,6 +92,48 @@ test("a failed Bridge shutdown notifies the exact renderer close request and sta
     requestId: safeRendererState.approvedRequestId,
     reason: shutdownError.message,
   }]);
+});
+
+test("every final-exit intent fails closed before file watching is stopped", () => {
+  const source = readFileSync(path.join(productRoot, "desktop", "main.mjs"), "utf8");
+  const start = source.indexOf("    isQuitting = true;\n", source.indexOf("async function coordinateApplicationExit"));
+  const end = source.indexOf("    await usageTelemetry?.shutdown", start);
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+  const preparation = source.slice(start, end);
+  const bridgeStop = preparation.indexOf("await stopBridgeOrNotifyCloseAborted({");
+  const watcherStop = preparation.indexOf("sourceFileWatcher.close();");
+  assert.notEqual(bridgeStop, -1);
+  assert.notEqual(watcherStop, -1);
+  assert.ok(bridgeStop < watcherStop);
+  assert.doesNotMatch(preparation, /intent === "relaunch"/u);
+  assert.doesNotMatch(preparation, /stopBridgeGracefully\(\)\.catch/u);
+  assert.match(
+    source,
+    /if \(watchedSourcePath\) sourceFileWatcher\.watch\(watchedSourcePath\);/u,
+  );
+});
+
+test("desktop shutdown outlives the Bridge Agent cleanup budget", () => {
+  const mainSource = readFileSync(path.join(productRoot, "desktop", "main.mjs"), "utf8");
+  const serviceSource = readFileSync(
+    path.join(productRoot, "scripts", "agent-bridge-service.mjs"),
+    "utf8",
+  );
+  const bridgeSource = readFileSync(
+    path.join(productRoot, "scripts", "workspace-bridge.mjs"),
+    "utf8",
+  );
+  const desktopTimeout = Number(mainSource.match(
+    /const BRIDGE_SHUTDOWN_TIMEOUT_MS = ([\d_]+);/u,
+  )?.[1].replaceAll("_", ""));
+  const agentTimeout = Number(serviceSource.match(
+    /const CANCEL_TIMEOUT_MS = ([\d_]+);/u,
+  )?.[1].replaceAll("_", ""));
+  assert.equal(Number.isSafeInteger(desktopTimeout), true);
+  assert.equal(Number.isSafeInteger(agentTimeout), true);
+  assert.ok(desktopTimeout >= agentTimeout + 2_000);
+  assert.match(bridgeSource, /server\.closeAllConnections\?\.\(\);/u);
 });
 
 test("a failed final update install restores exit guards before returning control", async () => {

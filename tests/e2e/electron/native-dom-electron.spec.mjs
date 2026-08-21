@@ -69,6 +69,12 @@ async function waitForProjectReady(page, timeout = 60_000) {
   return waitForSharedProjectReady(page, { timeout, includeFailureDetail: true });
 }
 
+async function chooseClipboardDelivery(page) {
+  const dialog = page.getByRole("dialog", { name: "怎样交给 AI？" });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: /复制任务/u }).click();
+}
+
 async function loadedDiskFrame(page, sourcePath, caseId) {
   return loadDiskFrame(page, sourcePath, {
     expectedCase: caseId,
@@ -609,6 +615,7 @@ test("Electron first launch imports the welcome HTML as V1 and sends its comment
       .fill("把欢迎页主标题改得更简洁。");
     await launched.page.getByRole("button", { name: "评论", exact: true }).click();
     await launched.page.getByRole("button", { name: /发给 AI/u }).click();
+    await chooseClipboardDelivery(launched.page);
     await expect(
       launched.page.getByText("AI任务已经复制，直接粘贴给 AI Agent", { exact: true }),
     ).toBeVisible();
@@ -2748,6 +2755,7 @@ test("multiple orphaned comments relink in sequence and resume the original send
       .toHaveAttribute("data-resolution", "orphaned");
 
     await activeLaunch.page.getByRole("button", { name: /发给 AI/u }).click();
+    await chooseClipboardDelivery(activeLaunch.page);
     await expect(activeLaunch.page.getByText("2 条评论需要重新定位", { exact: true }))
       .toBeVisible();
     await activeLaunch.page.getByRole("button", { name: "开始重新定位" }).click();

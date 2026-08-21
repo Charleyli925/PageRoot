@@ -14,7 +14,23 @@ export type RunHandoffState = {
   sourcePath: string;
   requestId: string;
   attemptId: string;
-  status: "copying" | "copied" | "failed";
+  mode?: "clipboard" | "qoder-acp";
+  status:
+    | "copying"
+    | "copied"
+    | "starting"
+    | "running"
+    | "completed"
+    | "failed"
+    | "interrupted"
+    | "cancelling"
+    | "cancelled";
+  phase?: string;
+  agentName?: string | null;
+  agentVersion?: string | null;
+  errorCode?: string | null;
+  errorMessage?: string | null;
+  retryable?: boolean;
 };
 
 export type RunBackgroundResult = {
@@ -28,6 +44,7 @@ export type RunSessionSnapshot = {
   activeRun: ActiveRun | null;
   activeHandoff: RunHandoffState | null;
   activeHandoffMayBeRunning: boolean;
+  activeHandoffManaged: boolean;
   activeSubmission: RunSubmission | null;
   submissionPending: boolean;
   activeLocked: boolean;
@@ -93,6 +110,7 @@ export class RunSession {
   readonly activeRun: ActiveRun | null;
   readonly activeHandoff: RunHandoffState | null;
   readonly activeHandoffMayBeRunning: boolean;
+  readonly activeHandoffManaged: boolean;
   readonly activeSubmission: RunSubmission | null;
   readonly submissionPending: boolean;
   readonly activeLocked: boolean;
