@@ -132,10 +132,19 @@ fetch failure, oversize or timeout only leaves the affected chart unverified.
 
 After the first offscreen paint the owner waits one bounded settle period
 (`captureSettleMs`) before measuring and sampling, because chart libraries
-initialize asynchronously and animate after that first paint; the settle
-outlasts the default one-second entrance animation so two sides are not
-sampled at different animation phases. The settle wait stays subordinate to
-the owner deadline and never retries.
+initialize asynchronously and animate after that first paint. The settle wait
+stays subordinate to the owner deadline and never retries.
+
+The settle period is not sufficient on its own, and measurement says so. Each
+candidate is measured by scrolling its host to the viewport centre and is then
+sampled by `capturePage` without waiting for a frame that reflects that
+scroll, so the sampled pixels can belong to a pre-scroll frame. A controlled
+census (`npm run census:review-runtime-visual`, method and baseline in
+`docs/REVIEW_RUNTIME_VISUAL_CENSUS.md`) isolates the two factors: with the
+scroll removed the false-positive rate is 0 even while the entrance animation
+is still running, and with the scroll present it stays around 22% even when
+the animation finished long before the settle expired. Treat the settle wait
+as an animation guard only; it does not make a scrolled pair comparable.
 
 It returns only a captured/unavailable key plus an envelope, PNG
 bytes/hash/bitmap size, the owner-measured CSS-pixel layout width/height and a

@@ -363,6 +363,14 @@ Browser 测试继续证明 SourcePatch forward/inverse 和各编辑入口，但�
 
 当前自动化能证明 Chromium/Electron composition 事件序列、Apple 拼音临时 wrapper 轨迹、取消/迟到事件、持久化和 canonical reconcile。它不能诚实证明第三方 macOS 输入法候选窗本身。该能力在出现可无人值守、可复现并有机器 oracle 的 OS 级驱动前只登记为覆盖边界，不设人工门禁，也不伪装成已自动验证。
 
+## 审阅运行态视觉误报普查
+
+`npm run census:review-runtime-visual` 在真实 Electron 下驱动生产捕获 owner 与生产判定函数，测量「图表本不该变却被判确认变化」的比率。它不属于任何门禁层，是一条按需运行的测量车道：这类缺陷此前反复复发，正是因为每次修复都只有人工抽检、无法证伪。
+
+场景来自 `tests/fixtures/review-runtime-chart-scenarios.mjs`，全部为合成页面，且必须同时包含 `unchanged` 与 `changed` 两类期望——只有 `unchanged` 会让「什么都不报」的实现拿满分，只有 `changed` 则测不到误报。`tests/review-runtime-chart-scenarios.test.mjs` 在 node 层锁住 fixture 的宿主绑定契约；一旦路径漂移或宿主不再是源码空元素，捕获会全部返回 unavailable，普查就会在「测空」的状态下显示为干净。
+
+方法、基线与成因归属见 `docs/REVIEW_RUNTIME_VISUAL_CENSUS.md`。改动捕获时序、滚动或判定阈值时，必须用同一命令给出改动前后的对比数字，并同时报告误报与漏报两侧。
+
 ## 证据与新增测试准入
 
 每次门禁写入 `output/test-runs/<run-id>/selection.json` 和 `results.json`，记录 HEAD、工作区内容 Hash、改动文件、选择原因、命令、耗时和首个失败。Playwright 的失败截图、trace、视频和 HTML report 继续位于 `output/playwright/`。
