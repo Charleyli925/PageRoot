@@ -191,19 +191,33 @@ chart host as context requires positive pixel evidence:
   spread of at most 3), which is the signature of a chart host that never
   rendered (blocked network, script failure, unfinished initialization).
 
-Only a verified-unchanged host may dim. An unverified host surfaces as
-suspected only when a user comment anchors on it or an enclosing element; a
-global page comment anchors on `<body>` and never marks hosts as commented,
-and an uncommented unverified host keeps the plain dimmed presentation so a
-page full of unverifiable charts cannot flood the review with amber frames. A
-suspected host keeps full visibility on both pages through a dim-mask
-exemption and receives one suspected fact: the after page draws an amber
-dashed "疑似有改动" frame while the before page stays unmarked. Suspected
-facts are always their own synthetic changes (`suspected-<outlineId>`) and
-never fold into, or overwrite, a confirmed change or its outline slot; they
-claim an outline slot only when the section has no confirmed change. Losing
-the capture capability entirely leaves every commented runtime host
-unverified rather than silently unchanged.
+Only a verified-unchanged host may dim, and a runtime verdict alone never
+promotes a host to a confirmed change. Current HTML bytes are authoritative,
+so a pixel difference is a confirmed visual fact only where the source diff
+also found a change in the same outline section; it then adds the `style` type
+to that change. A pixel difference in a section whose source is unchanged has
+no source cause the differ could see, so it surfaces as suspected rather than
+letting runtime evidence invent a change, a page-edge revision bar and a
+navigation stop out of pixels alone.
+
+An unverified host surfaces as suspected regardless of whether a comment
+anchors on it. Comment anchoring is a floor, not a gate: a commented host
+always surfaces, and every other unverified host surfaces too unless more than
+half of the page's hosts failed to verify, which is one page-level cause
+(blocked network, script failure) rather than one cause per host and must not
+flood the review with amber frames. A suspected host keeps full visibility on
+both pages through a dim-mask exemption and receives one suspected fact: the
+after page draws an amber dashed "疑似有改动" frame while the before page stays
+unmarked. Suspected facts are always their own synthetic changes
+(`suspected-<outlineId>`) and never fold into, or overwrite, a confirmed
+change or its outline slot; they claim an outline slot only when the section
+has no confirmed change. Losing the capture capability entirely leaves every
+runtime host unverified rather than silently unchanged.
+
+Adding the `style` type never rewrites wording the type list cannot rebuild.
+"新增内容", "删除内容" and "位置调整" are source facts about a whole section,
+so runtime evidence preserves them; any other helper is recomputed from the
+merged type list.
 
 Canvas-internal text has no DOM/SVG semantic representation at this boundary,
 so it follows the bounded raster rule; this contract does not add OCR, canvas

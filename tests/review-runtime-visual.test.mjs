@@ -270,11 +270,14 @@ test("runtime visual merge reuses outline metadata but preserves one marker per 
   ]);
   assert.equal(merged.changes.length, 2);
   assert.deepEqual(merged.changes[0].types, ["text", "style"]);
-  assert.equal(merged.changes[1].id, "runtime-change-outline-2");
+  // outline-2 has no source change, so runtime pixels may only raise suspicion
+  // there instead of inventing a confirmed one.
+  assert.equal(merged.changes[1].id, "suspected-outline-2");
+  assert.equal(merged.changes[1].suspected, true);
   assert.deepEqual(merged.markers, [
     { candidateKey: "runtime-host-1", changeId: "change-1", verdict: "changed" },
-    { candidateKey: "runtime-host-2", changeId: "runtime-change-outline-2", verdict: "changed" },
-    { candidateKey: "runtime-host-3", changeId: "runtime-change-outline-2", verdict: "changed" },
+    { candidateKey: "runtime-host-2", changeId: "suspected-outline-2", verdict: "suspected" },
+    { candidateKey: "runtime-host-3", changeId: "suspected-outline-2", verdict: "suspected" },
   ]);
 });
 
@@ -556,9 +559,127 @@ test("a changed verdict beats an unverified verdict for the same candidate", () 
     changedKeys: ["runtime-host-1"],
     unverifiedKeys: ["runtime-host-1"],
   });
+  // The candidate is resolved once through the changed path, never counted a
+  // second time as unverified. Without a source change in the section the
+  // verdict it earns there is suspicion, not a confirmed visual fact.
   assert.deepEqual(merged.markers, [
-    { candidateKey: "runtime-host-1", changeId: "runtime-change-outline-1", verdict: "changed" },
+    { candidateKey: "runtime-host-1", changeId: "suspected-outline-1", verdict: "suspected" },
   ]);
   assert.equal(merged.changes.length, 1);
-  assert.equal(merged.changes[0].suspected, undefined);
+  assert.equal(merged.changes[0].suspected, true);
+});
+
+function sectionDocuments({ helper, types, candidateOverrides = {} }) {
+  return {
+    changes: [{
+      id: "change-1",
+      label: "观察与备注",
+      helper,
+      types,
+      beforePresent: true,
+      afterPresent: true,
+    }],
+    outline: [{
+      id: "outline-1",
+      group: "页面",
+      label: "观察与备注",
+      helper,
+      changeId: "change-1",
+      types,
+    }],
+    runtimeVisualCandidates: [{
+      key: "runtime-host-1",
+      outlineId: "outline-1",
+      changeId: "change-1",
+      label: "观察与备注",
+      ...candidateOverrides,
+    }],
+  };
+}
+
+test("runtime style evidence never rewrites wording the type list cannot rebuild", () => {
+  ["新增内容", "删除内容", "位置调整"].forEach((helper) => {
+    const merged = mergeReviewRuntimeVisualChanges(
+      sectionDocuments({ helper, types: ["structure"] }),
+      { changedKeys: ["runtime-host-1"], unverifiedKeys: [] },
+    );
+    assert.equal(merged.changes[0].helper, helper, `${helper} must survive runtime style evidence`);
+    assert.deepEqual(merged.changes[0].types, ["structure", "style"]);
+    assert.equal(merged.outline[0].helper, helper, "the outline entry keeps it too");
+  });
+});
+
+test("runtime style evidence still refreshes wording the type list does describe", () => {
+  const merged = mergeReviewRuntimeVisualChanges(
+    sectionDocuments({ helper: "文本调整", types: ["text"] }),
+    { changedKeys: ["runtime-host-1"], unverifiedKeys: [] },
+  );
+  assert.equal(merged.changes[0].helper, "文本、视觉调整");
+  assert.equal(merged.outline[0].helper, "文本、视觉调整");
+});
+
+test("an unverified host surfaces suspicion whether or not the user commented on it", () => {
+  const documents = {
+    changes: [],
+    outline: [
+      { id: "outline-1", group: "页面", label: "图 1", helper: "本轮未修改", types: [] },
+      { id: "outline-2", group: "页面", label: "图 2", helper: "本轮未修改", types: [] },
+    ],
+    runtimeVisualCandidates: [
+      {
+        key: "runtime-host-1",
+        outlineId: "outline-1",
+        changeId: "runtime-change-outline-1",
+        label: "图 1",
+      },
+      {
+        key: "runtime-host-2",
+        outlineId: "outline-2",
+        changeId: "runtime-change-outline-2",
+        label: "图 2",
+      },
+    ],
+  };
+  const merged = mergeReviewRuntimeVisualChanges(documents, {
+    changedKeys: [],
+    unverifiedKeys: ["runtime-host-1"],
+  });
+  assert.deepEqual(
+    merged.markers,
+    [{ candidateKey: "runtime-host-1", changeId: "suspected-outline-1", verdict: "suspected" }],
+    "an uncommented unverified host must not be presented as verified-unchanged context",
+  );
+});
+
+test("a page that mostly failed to verify reports per-host suspicion only where the user asked", () => {
+  const outline = [];
+  const runtimeVisualCandidates = [];
+  for (let index = 1; index <= 4; index += 1) {
+    outline.push({
+      id: `outline-${index}`,
+      group: "页面",
+      label: `图 ${index}`,
+      helper: "本轮未修改",
+      types: [],
+    });
+    runtimeVisualCandidates.push({
+      key: `runtime-host-${index}`,
+      outlineId: `outline-${index}`,
+      changeId: `runtime-change-outline-${index}`,
+      label: `图 ${index}`,
+      ...(index === 2 ? { commented: true } : {}),
+    });
+  }
+  const merged = mergeReviewRuntimeVisualChanges(
+    { changes: [], outline, runtimeVisualCandidates },
+    {
+      changedKeys: [],
+      unverifiedKeys: runtimeVisualCandidates.map((candidate) => candidate.key),
+    },
+  );
+  assert.deepEqual(
+    merged.markers.map((marker) => marker.candidateKey),
+    ["runtime-host-2"],
+    "a blocked chart library is one page-level cause, not four amber frames",
+  );
 });

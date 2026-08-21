@@ -261,14 +261,45 @@ function helperForTypes(types) {
 }
 
 /**
- * Runtime evidence can add one opaque style projection per changed source
- * host. Outline aggregation remains navigation metadata; it is never runtime
- * geometry authority. Unverified comment-anchored hosts contribute their own
- * suspected changes: they exempt the host from dimming and label it
- * "疑似有改动" without claiming a confirmed visual fact. Uncommented hosts
- * never surface suspicion — a page full of unverifiable charts (for example a
- * network-blocked chart library) must not drown the review in amber frames —
- * so an uncommented unverified host keeps the plain dimmed presentation.
+ * Wording the type list cannot reconstruct. A whole-section insertion, removal
+ * or move is a source fact, so adding runtime style evidence must not rewrite
+ * it into a generic "…调整".
+ */
+const SOURCE_AUTHORED_HELPERS = new Set(["新增内容", "删除内容", "位置调整"]);
+
+function helperWithRuntimeStyle(helper, types) {
+  return SOURCE_AUTHORED_HELPERS.has(helper) ? helper : helperForTypes(types);
+}
+
+/**
+ * A page where most chart hosts cannot be verified has one page-level cause —
+ * a blocked chart library, a script error — rather than one cause per host.
+ * Drawing a frame on every host there would drown the review, so per-host
+ * suspicion is bounded by scale.
+ */
+function unverifiedIsPageLevel(unverifiedCount, candidateCount) {
+  return candidateCount > 0 && unverifiedCount * 2 > candidateCount;
+}
+
+/**
+ * Runtime evidence can add one opaque style projection to a change the source
+ * diff already found, and it can raise suspicion. It can never invent a
+ * confirmed change.
+ *
+ * Current HTML bytes are authoritative, so a pixel difference is a verified
+ * visual fact only where the source diff also found a change in the same
+ * outline section. A pixel difference in a section whose source is unchanged
+ * has no source cause the differ could see; presenting it as a confirmed
+ * change lets the runtime fabricate a fact, so it lands in the amber
+ * "疑似有改动" state instead. Amber costs the reviewer confidence; a false
+ * confirmed change costs them trust in every other verdict on the page.
+ *
+ * Suspicion no longer depends on whether the user happened to comment on the
+ * host. That coupling hid the signal exactly where a missed change is most
+ * dangerous — the hosts nobody thought to comment on — and it let an
+ * unverified host keep the dimmed presentation that claims "verified
+ * unchanged context". Noise is bounded by scale instead, and a comment now
+ * only raises a host above that bound rather than gating it.
  */
 export function mergeReviewRuntimeVisualChanges(documents, verdicts) {
   const changes = Array.isArray(documents?.changes) ? documents.changes : [];
@@ -283,15 +314,35 @@ export function mergeReviewRuntimeVisualChanges(documents, verdicts) {
     Array.isArray(verdicts?.unverifiedKeys) ? verdicts.unverifiedKeys : [],
   );
   const outlineIds = new Set(outline.map((item) => item.id));
-  const changedCandidates = candidates.filter((candidate) => (
-    changedKeys.has(candidate.key) && outlineIds.has(candidate.outlineId)
+  // A candidate carries the outline section's own change id when the source
+  // diff found one, and a pre-allocated id when it did not, so membership in
+  // the change list is exactly the source-corroboration test.
+  const sourceChangeIds = new Set(changes.map((change) => change.id));
+  const scopedCandidates = candidates.filter((candidate) => (
+    outlineIds.has(candidate.outlineId)
   ));
-  const suspectedCandidates = candidates.filter((candidate) => (
-    unverifiedKeys.has(candidate.key)
-    && candidate.commented === true
-    && !changedKeys.has(candidate.key)
-    && outlineIds.has(candidate.outlineId)
+  const changedCandidates = scopedCandidates.filter((candidate) => (
+    changedKeys.has(candidate.key) && sourceChangeIds.has(candidate.changeId)
   ));
+  const uncorroboratedCandidates = scopedCandidates.filter((candidate) => (
+    changedKeys.has(candidate.key) && !sourceChangeIds.has(candidate.changeId)
+  ));
+  const unverifiedCandidates = scopedCandidates.filter((candidate) => (
+    unverifiedKeys.has(candidate.key) && !changedKeys.has(candidate.key)
+  ));
+  // A comment is a floor, never a gate: a host the user asked about always
+  // surfaces its suspicion, and every other unverified host surfaces too
+  // unless the whole page failed to verify.
+  const pageLevelFailure = unverifiedIsPageLevel(
+    unverifiedCandidates.length,
+    scopedCandidates.length,
+  );
+  const suspectedCandidates = [
+    ...uncorroboratedCandidates,
+    ...unverifiedCandidates.filter((candidate) => (
+      !pageLevelFailure || candidate.commented === true
+    )),
+  ];
   if (!changedCandidates.length && !suspectedCandidates.length) {
     return Object.freeze({
       changes,
@@ -312,27 +363,10 @@ export function mergeReviewRuntimeVisualChanges(documents, verdicts) {
     return [change.id, Object.freeze({
       ...change,
       types: Object.freeze(types),
-      helper: helperForTypes(types),
+      helper: helperWithRuntimeStyle(change.helper, types),
     })];
   }));
   const syntheticChanges = [];
-  outline.forEach((outlineItem) => {
-    const candidate = changedCandidates.find((item) => item.outlineId === outlineItem.id);
-    if (!candidate || updatedChangesById.has(candidate.changeId)) return;
-    const types = Object.freeze(["style"]);
-    const change = Object.freeze({
-      id: candidate.changeId,
-      label: candidate.label,
-      helper: "视觉调整",
-      types,
-      beforePresent: true,
-      afterPresent: true,
-      ...(candidate.panelKey ? { panelKey: candidate.panelKey } : {}),
-      ...(candidate.panelPath?.length ? { panelPath: [...candidate.panelPath] } : {}),
-    });
-    updatedChangesById.set(change.id, change);
-    syntheticChanges.push(change);
-  });
   // A suspected change is always its own synthetic entry. Folding it into an
   // existing confirmed change would present "cannot verify" as a verified
   // visual fact.
@@ -372,7 +406,7 @@ export function mergeReviewRuntimeVisualChanges(documents, verdicts) {
         ...item,
         changeId: candidate.changeId,
         types: Object.freeze(types),
-        helper: helperForTypes(types),
+        helper: helperWithRuntimeStyle(item.helper, types),
       });
     }
     // A suspected host only claims the outline slot when the section has no
