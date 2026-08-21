@@ -374,6 +374,11 @@ export async function createSyntheticAppBundle(t, {
       "shared/source-history.mjs",
       "export const fixtureSourceHistory = true;\n",
     ),
+    writeFixtureFile(
+      productRoot,
+      "shared/provenance.mjs",
+      "export const fixtureProvenance = true;\n",
+    ),
     ...SCHEMA_FILES.map((fileName) => writeFixtureFile(
       productRoot,
       "schemas/" + fileName,
@@ -440,6 +445,7 @@ export async function createSyntheticAppBundle(t, {
     ...[
       "draft-aggregate.mjs",
       "direct-edit-compatibility.mjs",
+      "provenance.mjs",
       "source-history.mjs",
     ].map((fileName) => copyFixtureFile(
       productRoot,

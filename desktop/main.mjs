@@ -118,6 +118,7 @@ import {
   recordFirstEditGuide,
   rememberBuiltInWelcomeProjectId,
 } from "./ui-preferences.mjs";
+import { readOrCreateDeviceIdentity } from "./device-identity.mjs";
 import {
   PREVIEW_PROTOCOL_SCHEME,
   createPreviewProtocolController,
@@ -286,6 +287,7 @@ const EDIT_CHANNELS = Object.freeze({
 let bridgeProcess = null;
 let bridgePort = null;
 let bridgeStartupPromise = null;
+let deviceIdentityPromise = null;
 const bridgeAuthToken = randomBytes(32).toString("base64url");
 let mainWindow = null;
 let rendererHasLoaded = false;
@@ -3904,10 +3906,21 @@ async function workspacePath() {
   return path.join(app.getPath("documents"), "PageRoot", "项目记录");
 }
 
+// The device identity is read once per launch and reused by every Bridge
+// restart, so a crash-and-restart cycle keeps attributing records to the same
+// device instead of minting a new one.
+function deviceIdentity() {
+  deviceIdentityPromise ??= readOrCreateDeviceIdentity({
+    userDataPath: app.getPath("userData"),
+  });
+  return deviceIdentityPromise;
+}
+
 async function launchBridge() {
-  const [port, workspace] = await Promise.all([
+  const [port, workspace, device] = await Promise.all([
     findAvailablePort(),
     workspacePath(),
+    deviceIdentity(),
   ]);
 
   const child = utilityProcess.fork(bridgeScriptPath(), [], {
@@ -3916,6 +3929,7 @@ async function launchBridge() {
       HTML_AI_ALLOW_FILE_ORIGIN: "1",
       HTML_AI_BRIDGE_AUTH_TOKEN: bridgeAuthToken,
       HTML_AI_BRIDGE_PORT: String(port),
+      HTML_AI_DEVICE_ID: device.deviceId,
       HTML_AI_WORKSPACE: workspace,
     },
     serviceName: "HTML AI Workspace Bridge",

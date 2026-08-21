@@ -36,6 +36,12 @@ Renderer 发来的事件会在主进程再次按严格白名单过滤；未声�
 - 项目只使用安装级随机密钥对内部项目 ID 做 HMAC 后得到的假名键；原始项目 ID 不进入发送队列。
 - 删除源页的 Application Support 数据会同时删除安装 ID、项目假名密钥和未发送队列；再次运行会生成新身份。
 
+## 记录归属所用的设备 ID
+
+- 源页会在本机 Application Support 目录单独保存一个随机设备 ID（`device-identity.json`），用于在你自己的项目文件里标注每条批注和编辑事件由谁、在哪台设备上写下。
+- 这个设备 ID **只写入你本机的项目文件，永不回传**。它与遥测安装 ID 是两个互不相同、互不关联的随机值：遥测刻意不发送真实项目身份，因此也不会把分析身份写进你的内容。
+- 它同样不是电脑序列号，也不能从设备硬件信息推导。删除 Application Support 数据会重置它；已写入项目文件的历史归属保持不变。
+
 ## 回传位置与网络边界
 
 数据通过 HTTPS 批量回传到源页的 PostHog US Cloud 项目。事件明确关闭 PostHog person profile 处理与 GeoIP 解析。和所有互联网请求一样，源 IP 会在建立网络连接时到达接收服务及其基础设施；源页不把 IP 写入事件属性，也不请求基于 IP 的地理信息。
@@ -51,3 +57,5 @@ Renderer 发来的事件会在主进程再次按严格白名单过滤；未声�
 PageRoot’s packaged desktop app sends a limited, allowlisted set of product-usage and fault events by default. It does not send HTML, page text, comments, prompts, AI output, attachments, clipboard contents, filenames, paths, account identifiers, Mac serial numbers, raw error messages, or stack traces. A random per-install ID, a random per-launch session ID, and HMAC-derived project pseudonyms are used instead of hardware identity.
 
 Events are sent over HTTPS to PageRoot’s PostHog US Cloud project with person-profile processing and GeoIP resolution disabled. The source IP is necessarily visible to network recipients while the connection is made, but PageRoot does not add it to event properties. There is no session replay or automatic event capture. Telemetry failures never block editing or persistence.
+
+Separately from telemetry, PageRoot stores a random device ID in `device-identity.json` under Application Support and writes it into your own project files so each comment and edit event records who authored it and on which device. That identifier is never transmitted; it is a different random value from the telemetry install ID and is not derived from hardware. Deleting Application Support data resets it and leaves attribution already written into project files unchanged.

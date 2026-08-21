@@ -85,6 +85,7 @@ const REQUIRED_PACKAGED_MODULES = [
 const REQUIRED_SHARED_FILES = [
   "direct-edit-compatibility.mjs",
   "draft-aggregate.mjs",
+  "provenance.mjs",
   "source-history.mjs",
 ];
 const REQUIRED_LEGAL_RESOURCES = [

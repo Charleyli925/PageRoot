@@ -27,6 +27,7 @@ const APP_FILE_ALLOWLIST = [
   "desktop/application-update.mjs",
   "desktop/usage-telemetry.mjs",
   "desktop/ui-preferences.mjs",
+  "desktop/device-identity.mjs",
   "desktop/preview-protocol.mjs",
   "desktop/imported-asset-root.mjs",
   "desktop/edit-runtime-bootstrap.mjs",
@@ -89,6 +90,7 @@ const PACKAGED_MODULES = [
 const SHARED_FILES = [
   "draft-aggregate.mjs",
   "direct-edit-compatibility.mjs",
+  "provenance.mjs",
   "source-history.mjs",
 ];
 
