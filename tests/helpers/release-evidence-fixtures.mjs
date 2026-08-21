@@ -23,7 +23,7 @@ const FIXTURE_ARCHITECTURE = "arm64";
 const FIXTURE_BUILT_AT = "2026-07-29T00:00:00.000Z";
 const FIXTURE_REPOSITORY = "https://github.com/Charleyli925/PageRoot";
 
-const APP_SOURCE_FILES = [
+export const APP_SOURCE_FILES = [
   "desktop/main.mjs",
   "desktop/preload.mjs",
   "desktop/external-file-open.mjs",
@@ -47,6 +47,7 @@ const APP_SOURCE_FILES = [
   "desktop/application-update.mjs",
   "desktop/usage-telemetry.mjs",
   "desktop/ui-preferences.mjs",
+  "desktop/device-identity.mjs",
   "desktop/preview-protocol.mjs",
   "desktop/imported-asset-root.mjs",
   "desktop/edit-runtime-bootstrap.mjs",
@@ -62,6 +63,9 @@ const APP_SOURCE_FILES = [
 
 const BRIDGE_FILES = [
   "workspace-bridge.mjs",
+  "workspace-bridge-shutdown.mjs",
+  "agent-bridge-service.mjs",
+  "qoder-acp-client.mjs",
   "finalize-attempt.mjs",
   "lifecycle-core.mjs",
   "project-file-repository.mjs",
@@ -80,10 +84,12 @@ const BRIDGE_FILES = [
   "draft-command-decoder.mjs",
   "project-context-service.mjs",
   "source-history-service.mjs",
+  "conversation-repository.mjs",
   "source-transaction-service.mjs",
 ];
 
 const PACKAGED_MODULES = [
+  "@agentclientprotocol/sdk",
   "argparse",
   "builder-util-runtime",
   "debug",
@@ -102,6 +108,7 @@ const PACKAGED_MODULES = [
   "semver",
   "tiny-typed-emitter",
   "universalify",
+  "zod",
 ];
 
 const SCHEMA_FILES = [
@@ -374,6 +381,16 @@ export async function createSyntheticAppBundle(t, {
       "shared/source-history.mjs",
       "export const fixtureSourceHistory = true;\n",
     ),
+    writeFixtureFile(
+      productRoot,
+      "shared/conversation.mjs",
+      "export const fixtureConversation = true;\n",
+    ),
+    writeFixtureFile(
+      productRoot,
+      "shared/provenance.mjs",
+      "export const fixtureProvenance = true;\n",
+    ),
     ...SCHEMA_FILES.map((fileName) => writeFixtureFile(
       productRoot,
       "schemas/" + fileName,
@@ -440,7 +457,9 @@ export async function createSyntheticAppBundle(t, {
     ...[
       "draft-aggregate.mjs",
       "direct-edit-compatibility.mjs",
+      "provenance.mjs",
       "source-history.mjs",
+      "conversation.mjs",
     ].map((fileName) => copyFixtureFile(
       productRoot,
       resourcesPath,

@@ -22,6 +22,15 @@ import {
   buildSourceIndex,
   instrumentPreviewHtml,
 } from "../lib/source-index.js";
+import {
+  MAX_PREVIEW_COMMENT_GROUPS,
+  previewCommentMarkerGroups,
+  previewCommentMeasureRequest,
+  safePreviewCommentLayouts,
+  type PreviewCommentGroup,
+  type PreviewCommentLayout,
+} from "../lib/preview-comment-markers.js";
+import ReadOnlyCommentMarker from "./ReadOnlyCommentMarker";
 import styles from "./HtmlInteractionPreview.module.css";
 
 export type HtmlInteractionPreviewHandle = {
@@ -34,6 +43,12 @@ type HtmlInteractionPreviewProps = {
   sourcePath?: string;
   height?: string;
   transport?: "independent-url" | "srcdoc";
+  /**
+   * Saved comments for this document. The preview renders each resolvable
+   * target as a read-only marker; an ambiguous or orphaned target produces no
+   * marker at all.
+   */
+  comments?: readonly unknown[];
   onInteraction?: () => void;
   onReady?: (sourceSha256: string | null) => void;
 };
@@ -65,6 +80,8 @@ const PREVIEW_BASE_ATTRIBUTE = "data-pageroot-preview-base";
 const PREVIEW_BOOTSTRAP_PATH = "/.pageroot/preview-bootstrap.js";
 const CAPTURE_REQUEST_TYPE = "pageroot-page-view-context-request";
 const CAPTURE_RESPONSE_TYPE = "pageroot-page-view-context-response";
+const COMMENT_MEASURE_REQUEST_TYPE = "pageroot-preview-comment-measure-request";
+const COMMENT_LAYOUT_RESPONSE_TYPE = "pageroot-preview-comment-layout";
 const CAPTURE_TIMEOUT_MS = 1_200;
 const MAX_CAPTURED_ELEMENTS = 512;
 const INDEPENDENT_PREVIEW_SANDBOX =
@@ -125,7 +142,10 @@ function previewBootstrapJavaScript({
     version: PAGE_VIEW_CONTEXT_VERSION,
     requestType: CAPTURE_REQUEST_TYPE,
     responseType: CAPTURE_RESPONSE_TYPE,
+    commentRequestType: COMMENT_MEASURE_REQUEST_TYPE,
+    commentLayoutType: COMMENT_LAYOUT_RESPONSE_TYPE,
     maxElements: MAX_CAPTURED_ELEMENTS,
+    maxCommentTargets: MAX_PREVIEW_COMMENT_GROUPS,
   }).replace(/</gu, "\\u003c");
   return String.raw`
 (() => {
@@ -219,6 +239,75 @@ function previewBootstrapJavaScript({
       snapshot: capture(),
     }, "*");
   });
+
+  // Read-only comment markers. The host resolves which source nodes carry a
+  // comment and asks only for their positions; no comment text ever enters the
+  // page. Positions are viewport-relative, so the host overlay can place a
+  // marker without knowing anything about the page's scroll model.
+  let commentTargets = [];
+  let commentFrame = 0;
+
+  const measureComments = () => {
+    const layouts = [];
+    for (const target of commentTargets) {
+      let element = null;
+      try {
+        element = document.querySelector(
+          "[" + config.sourceNodeAttribute + '="' + target.nodeId + '"]',
+        );
+      } catch {
+        element = null;
+      }
+      if (!element) continue;
+      const rect = element.getBoundingClientRect();
+      // A collapsed box means the node is not laid out. Skip it rather than
+      // pinning a marker to the page origin.
+      if (rect.width === 0 && rect.height === 0) continue;
+      layouts.push({
+        key: target.key,
+        left: rect.left + rect.width,
+        top: rect.top,
+      });
+    }
+    window.parent.postMessage({
+      type: config.commentLayoutType,
+      channelToken: config.channelToken,
+      layouts,
+    }, "*");
+  };
+
+  const scheduleCommentMeasure = () => {
+    if (commentFrame) return;
+    commentFrame = window.requestAnimationFrame(() => {
+      commentFrame = 0;
+      measureComments();
+    });
+  };
+
+  window.addEventListener("message", (event) => {
+    const payload = event.data;
+    if (
+      event.source !== window.parent
+      || !payload
+      || payload.type !== config.commentRequestType
+      || payload.channelToken !== config.channelToken
+      || !Array.isArray(payload.targets)
+    ) return;
+    commentTargets = payload.targets
+      .filter((target) => (
+        target
+        && typeof target.key === "string"
+        && typeof target.nodeId === "string"
+      ))
+      .slice(0, config.maxCommentTargets);
+    scheduleCommentMeasure();
+  });
+
+  window.addEventListener("scroll", scheduleCommentMeasure, {
+    capture: true,
+    passive: true,
+  });
+  window.addEventListener("resize", scheduleCommentMeasure, { passive: true });
 })();
 `;
 }
@@ -284,6 +373,7 @@ function preparePreviewDocument(
   sourceSha256: string;
   channelToken: string;
   bootstrapJavaScript: string;
+  sourceIndex: ReturnType<typeof buildSourceIndex>;
 } {
   const sourceIndex = buildSourceIndex(source);
   const channelToken = randomToken();
@@ -297,6 +387,7 @@ function preparePreviewDocument(
       sourceSha256: sourceIndex.sourceSha256,
       channelToken,
       bootstrapJavaScript,
+      sourceIndex,
     };
   }
 
@@ -331,6 +422,7 @@ function preparePreviewDocument(
     sourceSha256: sourceIndex.sourceSha256,
     channelToken,
     bootstrapJavaScript,
+    sourceIndex,
   };
 }
 
@@ -343,15 +435,18 @@ const HtmlInteractionPreview = forwardRef<
   sourcePath,
   height = "100%",
   transport = "srcdoc",
+  comments,
   onInteraction,
   onReady,
 }, forwardedRef) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const viewportRef = useRef<HTMLDivElement>(null);
   const sessionGenerationRef = useRef(0);
   const [reloadRevision, setReloadRevision] = useState(0);
   const [desktopSession, setDesktopSession] = useState<DesktopPreviewSession | null>(null);
   const [frameReady, setFrameReady] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
+  const [commentLayouts, setCommentLayouts] = useState<PreviewCommentLayout[]>([]);
   const independentTransport = transport === "independent-url";
   const prepared = useMemo(
     () => preparePreviewDocument(html, {
@@ -367,6 +462,56 @@ const HtmlInteractionPreview = forwardRef<
     onReady?.(null);
     return () => onReady?.(null);
   }, [onReady, prepared.sourceSha256]);
+
+  // Comment markers are derived in this trusted host. The page receives only
+  // marker keys and source-node identities; comment text never crosses into it.
+  const commentGroups = useMemo<PreviewCommentGroup[]>(
+    () => previewCommentMarkerGroups(prepared.sourceIndex, comments ?? []),
+    [comments, prepared.sourceIndex],
+  );
+  const commentGroupKeys = useMemo(
+    () => new Set(commentGroups.map((group) => group.key)),
+    [commentGroups],
+  );
+
+  useEffect(() => {
+    setCommentLayouts([]);
+  }, [prepared.channelToken]);
+
+  useEffect(() => {
+    const frameWindow = iframeRef.current?.contentWindow;
+    if (!frameWindow || !frameReady || loadFailed) return undefined;
+    if (commentGroups.length === 0) {
+      setCommentLayouts([]);
+      return undefined;
+    }
+    const handleLayout = (event: MessageEvent) => {
+      const payload = event.data;
+      if (
+        event.source !== frameWindow
+        || !payload
+        || payload.type !== COMMENT_LAYOUT_RESPONSE_TYPE
+        || payload.channelToken !== prepared.channelToken
+      ) return;
+      setCommentLayouts(
+        safePreviewCommentLayouts(payload.layouts, commentGroupKeys),
+      );
+    };
+    window.addEventListener("message", handleLayout);
+    frameWindow.postMessage({
+      type: COMMENT_MEASURE_REQUEST_TYPE,
+      channelToken: prepared.channelToken,
+      targets: previewCommentMeasureRequest(commentGroups)
+        .slice(0, MAX_PREVIEW_COMMENT_GROUPS),
+    }, "*");
+    return () => window.removeEventListener("message", handleLayout);
+  }, [
+    commentGroupKeys,
+    commentGroups,
+    frameReady,
+    loadFailed,
+    prepared.channelToken,
+  ]);
 
   useEffect(() => {
     if (!independentTransport) {
@@ -500,31 +645,57 @@ const HtmlInteractionPreview = forwardRef<
           重新载入
         </button>
       </div>
-      <iframe
-        ref={iframeRef}
-        key={independentTransport
-          ? desktopSession?.sessionId ?? `pending-${reloadRevision}`
-          : reloadRevision}
-        className={styles.frame}
-        title="HTML 交互预览"
-        {...(independentTransport
-          ? { src: frameSource ?? "about:blank" }
-          : { srcDoc: prepared.html })}
-        sandbox={frameSandbox}
-        allow="autoplay; clipboard-write; fullscreen; picture-in-picture"
-        referrerPolicy="no-referrer"
-        onLoad={() => {
-          if (independentTransport && !desktopSession) return;
-          setFrameReady(true);
-          setLoadFailed(false);
-          onReady?.(prepared.sourceSha256);
-        }}
-        onError={() => {
-          setFrameReady(false);
-          setLoadFailed(true);
-          onReady?.(null);
-        }}
-      />
+      <div className={styles.viewport} ref={viewportRef}>
+        <iframe
+          ref={iframeRef}
+          key={independentTransport
+            ? desktopSession?.sessionId ?? `pending-${reloadRevision}`
+            : reloadRevision}
+          className={styles.frame}
+          title="HTML 交互预览"
+          {...(independentTransport
+            ? { src: frameSource ?? "about:blank" }
+            : { srcDoc: prepared.html })}
+          sandbox={frameSandbox}
+          allow="autoplay; clipboard-write; fullscreen; picture-in-picture"
+          referrerPolicy="no-referrer"
+          onLoad={() => {
+            if (independentTransport && !desktopSession) return;
+            setFrameReady(true);
+            setLoadFailed(false);
+            onReady?.(prepared.sourceSha256);
+          }}
+          onError={() => {
+            setFrameReady(false);
+            setLoadFailed(true);
+            onReady?.(null);
+          }}
+        />
+        {/*
+          * The marker layer sits above the page and stays pointer-transparent,
+          * so it never intercepts a click meant for the previewed page. Only
+          * the markers themselves take pointer events.
+          */}
+        <div className={styles.commentLayer} data-testid="preview-comment-layer">
+          {commentLayouts.map((layout) => {
+            const group = commentGroups.find(
+              (candidate) => candidate.key === layout.key,
+            );
+            if (!group) return null;
+            return (
+              <ReadOnlyCommentMarker
+                key={group.key}
+                group={group}
+                left={layout.left}
+                top={layout.top}
+                viewportRef={viewportRef}
+                testId="preview-comment-marker"
+                bubbleTestId="preview-comment-bubble"
+              />
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 });

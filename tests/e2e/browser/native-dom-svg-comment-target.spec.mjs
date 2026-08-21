@@ -22,14 +22,43 @@ test("SVG comments keep the exact source node and reject runtime-only children",
   page,
 }) => {
   await page.goto("/");
-  const { frame } = await loadFixture(
+  const { editor, frame } = await loadFixture(
     page,
     "svg-comment-targets.html",
     { buffer: fixtureBuffer("svg-comment-targets.html") },
   );
   const toolbar = page.getByRole("toolbar", { name: /编辑/u });
 
+  const point = frame.locator(caseSelector("svg-point"));
+  const hoverOutline = editor.locator(
+    '[data-testid="canvas-capability-outline"][data-tone="hover"]',
+  );
+  await point.hover();
+  await expect(hoverOutline).toBeVisible();
+  const hoverRect = await hoverOutline.boundingBox();
+  expect(hoverRect).not.toBeNull();
+
   const line = frame.locator(caseSelector("svg-line"));
+  await line.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    element.dispatchEvent(new PointerEvent("pointermove", {
+      bubbles: true,
+      clientX: rect.left + (rect.width / 2),
+      clientY: rect.top + (rect.height / 2),
+      pointerId: 1,
+      pointerType: "mouse",
+    }));
+  });
+  await editor.getByTestId("canvas-capability-hint").click();
+  const selectedOutline = editor.locator(
+    '[data-testid="canvas-target-outline"][data-tone="selected"]',
+  );
+  await expect(selectedOutline).toBeVisible();
+  await expect(hoverOutline).toHaveCount(0);
+  await expect(line).toHaveAttribute("data-html-canvas-selected", "part");
+  await expect(point).not.toHaveAttribute("data-html-canvas-selected", /.+/u);
+  expect(await selectedOutline.boundingBox()).toEqual(hoverRect);
+
   await dispatchSvgClick(line);
   await expect(toolbar).toHaveAttribute(
     "aria-label",

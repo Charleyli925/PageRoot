@@ -1,0 +1,392 @@
+/*
+ * AI conversation sidebar.
+ *
+ * A docked aside, never a modal: no scrim, and the user can keep scrolling the
+ * preview beside it. The four rows are fixed so the action bar and Composer
+ * stay in view while only the fact stream scrolls.
+ */
+
+.sidebar {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  overflow: hidden;
+  border-left: 1px solid rgb(32 29 49 / 10%);
+  background: rgb(255 255 255 / 92%);
+  color: #25232a;
+  font: 500 12px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  -webkit-backdrop-filter: blur(17px) saturate(115%);
+  backdrop-filter: blur(17px) saturate(115%);
+}
+
+.header {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 12px 44px 11px 14px;
+  border-bottom: 1px solid rgb(32 29 49 / 8%);
+}
+
+.headerTitle {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.headerTitle > strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #201d31;
+  font-size: 13px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mode {
+  flex: none;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: #eeecff;
+  color: #5147dc;
+  font-size: 10px;
+  font-weight: 680;
+}
+
+.modeDetail,
+.context {
+  margin: 0;
+  color: #6c6a78;
+  font-size: 11px;
+}
+
+.context {
+  color: #8a8797;
+}
+
+.collapse {
+  position: absolute;
+  top: 11px;
+  right: 12px;
+  min-height: 24px;
+  padding: 0 8px;
+  border: 1px solid rgb(32 29 49 / 12%);
+  border-radius: 8px;
+  background: #fff;
+  color: #55575f;
+  font-size: 10px;
+  font-weight: 660;
+}
+
+.collapse:hover {
+  border-color: rgb(32 29 49 / 22%);
+  color: #201d31;
+}
+
+/* Only the immutable fact stream scrolls. */
+.stream {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  overflow-y: auto;
+}
+
+.placeholder {
+  margin: 0;
+  color: #8a8797;
+  font-size: 11px;
+}
+
+.message {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.actor {
+  color: #8a8797;
+  font-size: 10px;
+  font-weight: 680;
+}
+
+.message[data-actor="pageroot"] .actor {
+  color: #5147dc;
+}
+
+.text {
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.message[data-kind="permission-boundary"] .text,
+.message[data-kind="context-boundary"] .text {
+  padding: 8px 10px;
+  border-radius: 9px;
+  background: #f5f4fb;
+  color: #45434f;
+  font-size: 11px;
+}
+
+.message[data-kind="error"] .text {
+  color: #b4442f;
+}
+
+.truncated,
+.interrupted {
+  color: #8a8797;
+  font-size: 10px;
+}
+
+/*
+ * The current decision. It sits between the stream and the Composer and never
+ * scrolls, so a pending decision cannot disappear as the conversation grows.
+ */
+.actionBar {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border-top: 1px solid rgb(32 29 49 / 8%);
+  background: #f8f7fd;
+}
+
+.actionBar[data-kind="blocked"] {
+  background: #fdf5f3;
+}
+
+.actionBar > strong {
+  color: #201d31;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.actionBar > p {
+  margin: 0;
+  color: #6c6a78;
+  font-size: 11px;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.action {
+  min-height: 30px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  font-size: 11px;
+  font-weight: 680;
+}
+
+.action[data-tone="primary"] {
+  background: #5147dc;
+  color: #fff;
+}
+
+.action[data-tone="primary"]:hover {
+  background: #4339ce;
+}
+
+.action[data-tone="quiet"] {
+  border-color: rgb(32 29 49 / 14%);
+  background: #fff;
+  color: #45434f;
+}
+
+.action[data-tone="quiet"]:hover {
+  border-color: rgb(32 29 49 / 26%);
+  color: #201d31;
+}
+
+.action:focus-visible {
+  outline: 3px solid rgb(90 85 223 / 32%);
+  outline-offset: 2px;
+}
+
+/* Every mutable control lives here. */
+.composer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px 14px;
+  border-top: 1px solid rgb(32 29 49 / 8%);
+}
+
+.composerTop {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.intent {
+  display: inline-flex;
+  flex: none;
+  padding: 2px;
+  border-radius: 9px;
+  background: #f1f0f6;
+}
+
+.intentOption {
+  min-height: 24px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #6c6a78;
+  font-size: 11px;
+  font-weight: 660;
+}
+
+/*
+ * The selected option is carried by weight, colour and a raised surface, so it
+ * never relies on colour alone.
+ */
+.intentOption[data-selected="true"] {
+  background: #fff;
+  box-shadow: 0 1px 3px rgb(32 29 49 / 12%);
+  color: #201d31;
+  font-weight: 720;
+}
+
+.intentOption:focus-visible {
+  outline: 3px solid rgb(90 85 223 / 32%);
+  outline-offset: 1px;
+}
+
+.model,
+.modelStatic {
+  min-width: 0;
+  margin-left: auto;
+  overflow: hidden;
+  color: #6c6a78;
+  font-size: 11px;
+  font-weight: 620;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-height: 24px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+}
+
+.model:hover {
+  background: #f1f0f6;
+  color: #201d31;
+}
+
+.model:focus-visible {
+  outline: 3px solid rgb(90 85 223 / 32%);
+  outline-offset: 1px;
+}
+
+.contextSummary {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 9px;
+  background: #f5f4fb;
+  color: #45434f;
+  font-size: 11px;
+}
+
+.inputLabel {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.input {
+  width: 100%;
+  min-height: 62px;
+  padding: 9px 10px;
+  border: 1px solid rgb(32 29 49 / 14%);
+  border-radius: 10px;
+  background: #fff;
+  color: #25232a;
+  font: inherit;
+  resize: vertical;
+}
+
+.input:focus-visible {
+  border-color: rgb(90 85 223 / 55%);
+  outline: 3px solid rgb(90 85 223 / 24%);
+  outline-offset: 0;
+}
+
+.draftNotice {
+  margin: 0;
+  color: #8a8797;
+  font-size: 10px;
+}
+
+.composerActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sendReason {
+  min-width: 0;
+  overflow: hidden;
+  color: #8a8797;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.send {
+  min-height: 30px;
+  margin-left: auto;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 9px;
+  background: #5147dc;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.send:hover:not(:disabled) {
+  background: #4339ce;
+}
+
+.send:disabled {
+  background: #dedce9;
+  color: #8a8797;
+}
+
+.send:focus-visible {
+  outline: 3px solid rgb(90 85 223 / 32%);
+  outline-offset: 2px;
+}
+
+/* Reduced motion keeps every state and drops only the movement. */
+@media (prefers-reduced-motion: reduce) {
+  .sidebar * {
+    animation: none !important;
+    transition: none !important;
+  }
+}

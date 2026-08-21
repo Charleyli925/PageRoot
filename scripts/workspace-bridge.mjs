@@ -30,6 +30,23 @@ import {
   ProjectFileRepository,
   ProjectFileRepositoryError,
 } from "./project-file-repository.mjs";
+import {
+  conversationListResponse,
+  conversationResponse,
+  ensureCurrentConversation,
+  readConversation,
+  readConversationDraft,
+  readConversationIndex,
+  writeConversationDraft,
+} from "./conversation-repository.mjs";
+import {
+  AgentBridgeService,
+  TRUSTED_LOCAL_AGENT_POLICY_VERSION,
+} from "./agent-bridge-service.mjs";
+import {
+  cancelDurableRequestAfterAgentCleanup,
+  closeWorkspaceBridgeAfterAgentCleanup,
+} from "./workspace-bridge-shutdown.mjs";
 import { createEmptySourceHistory } from "../shared/source-history.mjs";
 
 const HOST = "127.0.0.1";
@@ -55,9 +72,13 @@ const PROJECT_FILE_ROOT = path.resolve(
 );
 const projectFileRepository = new ProjectFileRepository({
   projectsRoot: PROJECT_FILE_ROOT,
+  deviceId: process.env.HTML_AI_DEVICE_ID || null,
   failpoint: process.env.HTML_AI_FAILPOINT
     ? async (name) => name === process.env.HTML_AI_FAILPOINT
     : null,
+});
+const agentBridgeService = new AgentBridgeService({
+  resolveTask: resolveAgentBridgeTask,
 });
 const FINALIZER_PATH = fileURLToPath(
   new URL("./finalize-attempt.mjs", import.meta.url),
@@ -672,6 +693,7 @@ function projectFileRunForRequest({ request, candidate = null, target }) {
       request.request?.handoffMessage
       || `请执行 ${path.join(requestPath, "PROMPT.md")} 中的单轮任务，完成后运行其中的最终化（finalizer）命令。`,
     ),
+    agentDelivery: request.request?.agentDelivery || { mode: "clipboard" },
     baseSnapshotSha256: request.expectedSourceSha256,
     previousVersionId: request.previousVersionId,
     basedOnVersionId: request.basedOnVersionId,
@@ -974,6 +996,28 @@ function projectFileFinalizerCommand(target, request) {
   ].join(" ");
 }
 
+function agentDeliveryForRequest(body = {}) {
+  const mode = String(body.agentDelivery?.mode || "clipboard");
+  if (mode === "clipboard") {
+    return Object.freeze({ mode: "clipboard" });
+  }
+  if (
+    mode === "qoder-acp"
+    && body.agentDelivery?.trustPolicyVersion
+      === TRUSTED_LOCAL_AGENT_POLICY_VERSION
+  ) {
+    return Object.freeze({
+      mode,
+      trustPolicyVersion: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
+    });
+  }
+  throw new HttpError(
+    422,
+    "AGENT_DELIVERY_INVALID",
+    "The Request Agent delivery policy is invalid.",
+  );
+}
+
 function projectFilePromptForRequest(target, request, body) {
   const requestRoot = path.join(
     target.projectRootPath,
@@ -1047,6 +1091,7 @@ function projectFileReadyPayload({ request, candidate, target }) {
       requestPath: path.join(target.projectRootPath, ".pageroot", "requests", candidate.requestId),
       attemptPath: path.join(target.projectRootPath, ".pageroot", "requests", candidate.requestId, "attempts", candidate.attemptId),
       handoffMessage: String(request.request?.handoffMessage || ""),
+      agentDelivery: request.request?.agentDelivery || { mode: "clipboard" },
       baseSnapshotSha256: candidate.expectedSourceSha256,
       previousVersionId: candidate.previousVersionId,
       basedOnVersionId: candidate.basedOnVersionId,
@@ -1112,6 +1157,7 @@ async function createProjectFileRequest(body) {
     instructions: Array.isArray(body.instructions) ? body.instructions : [],
     targets: Array.isArray(body.targets) ? body.targets : [],
     preserveOutsideTargets: true,
+    agentDelivery: agentDeliveryForRequest(body),
   };
   const promptDescriptor = {
     requestId,
@@ -1178,12 +1224,21 @@ async function projectFileRequestStatus(sourcePath, requestId, attemptId) {
     });
     if (status.status === "candidate-ready") {
       const refreshed = await projectFileWorkspaceForSource(workspace.target.exactSourcePath);
-      return projectFileReadyPayload({
+      const ready = projectFileReadyPayload({
         request: status.request,
         candidate: status.candidate,
         target: refreshed.target,
       });
+      return {
+        ...ready,
+        agentSession: agentSessionForStatus({
+          request: status.request,
+          run: ready.activeRun,
+          lifecycleStatus: status.status,
+        }),
+      };
     }
+    const activeRun = projectFileActiveRun(workspace, workspace.target);
     return {
       ok: true,
       status: status.status,
@@ -1193,13 +1248,73 @@ async function projectFileRequestStatus(sourcePath, requestId, attemptId) {
       openTarget: workspace.target,
       requestId,
       attemptId,
-      activeRun: projectFileActiveRun(workspace, workspace.target),
+      activeRun,
+      agentSession: agentSessionForStatus({
+        request: status.request,
+        run: activeRun,
+        lifecycleStatus: status.status,
+      }),
       ...(status.request ? { request: status.request } : {}),
       ...(status.request?.error ? { error: status.request.error } : {}),
     };
   } catch (cause) {
     throw projectFileHttpError(cause);
   }
+}
+
+async function resolveAgentBridgeTask(identity) {
+  const workspace = await projectFileWorkspaceForSource(identity.sourcePath);
+  if (!workspace) throw projectNotFoundError();
+  if (!projectFileBodyIdentityMatches(workspace, identity)) {
+    throw new HttpError(
+      409,
+      "PROJECT_CONTEXT_IDENTITY_MISMATCH",
+      "The Agent task does not belong to the requested Project File.",
+    );
+  }
+  const target = projectFileTargetFromWorkspace(workspace);
+  let status;
+  try {
+    status = await projectFileRepository.requestStatus({
+      target,
+      requestId: identity.requestId,
+      attemptId: identity.attemptId,
+    });
+  } catch (cause) {
+    throw projectFileHttpError(cause);
+  }
+  const run = status.request
+    ? projectFileRunForRequest({ request: status.request, target })
+    : null;
+  return { target, request: status.request || null, run };
+}
+
+function agentSessionForStatus({ request, run, lifecycleStatus }) {
+  const delivery = request?.request?.agentDelivery;
+  if (delivery?.mode !== "qoder-acp" || !run) return null;
+  const identity = {
+    projectId: run.projectId,
+    documentId: run.documentId,
+    sourcePath: run.sourcePath,
+    requestId: run.requestId,
+    attemptId: run.attemptId,
+  };
+  const session = agentBridgeService.status(identity);
+  if (session) return session;
+  if (lifecycleStatus === "candidate-ready") {
+    return {
+      driver: "qoder-acp",
+      state: "completed",
+      phase: "awaiting-validation",
+      startedAt: null,
+      updatedAt: String(request.createdAt || nowIso()),
+      agentName: null,
+      agentVersion: null,
+      eventCount: 0,
+      retryable: false,
+    };
+  }
+  return agentBridgeService.interrupted(identity);
 }
 
 async function activateProjectFileCandidate(body) {
@@ -1247,10 +1362,19 @@ async function cancelProjectFileRequest(body) {
   const target = await projectFileTargetForBody(body);
   if (!target) return null;
   try {
-    const cancelled = await projectFileRepository.cancelRequest({
-      target,
-      requestId: body.requestId,
-      attemptId: body.attemptId || "attempt_001",
+    const cancelled = await cancelDurableRequestAfterAgentCleanup({
+      cancelAgent: () => agentBridgeService.cancel({
+        projectId: target.projectId,
+        documentId: target.documentId,
+        sourcePath: target.exactSourcePath,
+        requestId: body.requestId,
+        attemptId: body.attemptId || "attempt_001",
+      }),
+      cancelRequest: () => projectFileRepository.cancelRequest({
+        target,
+        requestId: body.requestId,
+        attemptId: body.attemptId || "attempt_001",
+      }),
     });
     return {
       ok: true,
@@ -1261,6 +1385,39 @@ async function cancelProjectFileRequest(body) {
   } catch (cause) {
     throw projectFileHttpError(cause);
   }
+}
+
+async function preflightAgent(body) {
+  return agentBridgeService.preflight(body);
+}
+
+async function agentAvailability() {
+  return agentBridgeService.availability();
+}
+
+async function startAgent(body) {
+  const target = await projectFileTargetForBody(body);
+  if (!target) throw projectNotFoundError();
+  if (
+    String(body.projectId || "") !== target.projectId
+    || String(body.documentId || "") !== target.documentId
+  ) {
+    throw new HttpError(
+      409,
+      "PROJECT_CONTEXT_IDENTITY_MISMATCH",
+      "The Agent task identity does not match the registered Project File.",
+    );
+  }
+  return agentBridgeService.submit({
+    driver: body.driver,
+    trustPolicyAccepted: body.trustPolicyAccepted,
+    preflightId: body.preflightId,
+    projectId: target.projectId,
+    documentId: target.documentId,
+    sourcePath: target.exactSourcePath,
+    requestId: body.requestId,
+    attemptId: body.attemptId || "attempt_001",
+  });
 }
 
 async function projectFileVersionFile(sourcePath, versionId) {
@@ -1670,6 +1827,86 @@ async function deleteDraftAttachment(body) {
   await rm(resolved.absolutePath, { force: true });
   await rm(path.dirname(resolved.absolutePath)).catch(() => {});
   return { ok: true, removed: true };
+}
+
+// Conversation reads and draft writes. The Bridge is the only conversation
+// writer; the renderer receives a projection and never touches these files.
+// A conversation belongs to exactly one Document, so the context is always
+// derived from the resolved workspace rather than from the request body.
+function conversationContext(workspace) {
+  return {
+    // The repository's `projectRoot` is the managed control root, matching the
+    // convention already used by the source-history service.
+    projectRoot: path.join(workspace.target.projectRootPath, ".pageroot"),
+    projectId: workspace.project.projectId,
+    documentId: workspace.project.documentId,
+  };
+}
+
+async function currentConversation(sourcePath) {
+  const workspace = await projectFileWorkspaceForSource(sourcePath);
+  if (!workspace) throw projectNotFoundError();
+  const context = conversationContext(workspace);
+  const conversation = await ensureCurrentConversation(context);
+  const draft = await readConversationDraft(context, conversation.conversationId);
+  return {
+    ok: true,
+    projectId: context.projectId,
+    documentId: context.documentId,
+    ...conversationResponse(conversation, draft),
+  };
+}
+
+async function documentConversations(sourcePath) {
+  const workspace = await projectFileWorkspaceForSource(sourcePath);
+  if (!workspace) throw projectNotFoundError();
+  const context = conversationContext(workspace);
+  const index = await readConversationIndex(context);
+  return {
+    ok: true,
+    projectId: context.projectId,
+    ...conversationListResponse(index, context.documentId),
+  };
+}
+
+async function saveConversationDraft(body) {
+  const workspace = await projectFileWorkspaceForSource(body.sourcePath);
+  if (!workspace) throw projectNotFoundError();
+  if (!projectFileBodyIdentityMatches(workspace, body)) {
+    throw new HttpError(
+      409,
+      "PROJECT_CONTEXT_IDENTITY_MISMATCH",
+      "The conversation identity does not match the selected project.",
+    );
+  }
+  const context = conversationContext(workspace);
+  // Reading the current conversation first keeps a draft from being written for
+  // a conversation that does not belong to this Document.
+  const conversation = await readConversation(context, body.conversationId);
+  if (!conversation) {
+    throw new HttpError(
+      404,
+      "CONVERSATION_MISSING",
+      "That conversation does not exist for this document.",
+    );
+  }
+  const draft = await writeConversationDraft(context, conversation.conversationId, {
+    text: typeof body.text === "string" ? body.text : "",
+    intent: body.intent,
+    ...(body.modelId === undefined ? {} : { modelId: body.modelId }),
+    ...(body.modelDisplayName === undefined
+      ? {}
+      : { modelDisplayName: body.modelDisplayName }),
+    ...(body.deliveryMode === undefined
+      ? {}
+      : { deliveryMode: body.deliveryMode }),
+  });
+  return {
+    ok: true,
+    projectId: context.projectId,
+    documentId: context.documentId,
+    draft,
+  };
 }
 
 async function runSourceHistoryAction(body) {
@@ -2086,6 +2323,31 @@ async function route(request, response) {
     sendJson(response, 200, await runSourceHistoryAction(body));
     return;
   }
+  if (request.method === "GET" && url.pathname === "/conversation") {
+    sendJson(
+      response,
+      200,
+      await currentConversation(
+        requiredSourcePath(url.searchParams.get("sourcePath")),
+      ),
+    );
+    return;
+  }
+  if (request.method === "GET" && url.pathname === "/conversation/list") {
+    sendJson(
+      response,
+      200,
+      await documentConversations(
+        requiredSourcePath(url.searchParams.get("sourcePath")),
+      ),
+    );
+    return;
+  }
+  if (request.method === "POST" && url.pathname === "/conversation/draft") {
+    const body = await readBody(request);
+    sendJson(response, 200, await saveConversationDraft(body));
+    return;
+  }
   if (request.method === "POST" && url.pathname === "/version") {
     throw new HttpError(
       410,
@@ -2114,6 +2376,20 @@ async function route(request, response) {
   if (request.method === "POST" && url.pathname === "/attachment/delete") {
     const body = await readBody(request);
     sendJson(response, 200, await deleteDraftAttachment(body));
+    return;
+  }
+  if (request.method === "GET" && url.pathname === "/agent/availability") {
+    sendJson(response, 200, await agentAvailability());
+    return;
+  }
+  if (request.method === "POST" && url.pathname === "/agent/preflight") {
+    const body = await readBody(request);
+    sendJson(response, 200, await preflightAgent(body));
+    return;
+  }
+  if (request.method === "POST" && url.pathname === "/agent/start") {
+    const body = await readBody(request);
+    sendJson(response, 202, await startAgent(body));
     return;
   }
   if (request.method === "POST" && url.pathname === "/request") {
@@ -2284,7 +2560,25 @@ server.listen(PORT, HOST, () => {
   );
 });
 
-for (const signal of ["SIGINT", "SIGTERM"]) {
-  process.on(signal, () => server.close(() => process.exit(0)));
+let shuttingDown = false;
+async function shutdownBridge() {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  const accepted = await closeWorkspaceBridgeAfterAgentCleanup({
+    agentBridgeService,
+    closeServer: (onClosed) => {
+      server.close(onClosed);
+      // Main reaches this signal only after renderer writes are drained and
+      // Agent cleanup is confirmed. Retire any idle/poll connection now so the
+      // Bridge exit is bounded inside the desktop's longer shutdown deadline.
+      server.closeAllConnections?.();
+    },
+    exitProcess: (code) => process.exit(code),
+    writeDiagnostic: (line) => process.stderr.write(line),
+  });
+  if (!accepted) shuttingDown = false;
 }
 
+for (const signal of ["SIGINT", "SIGTERM"]) {
+  process.on(signal, () => void shutdownBridge());
+}

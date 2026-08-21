@@ -21,6 +21,10 @@ const OWNER_CLEANUP_GRACE_MS = 250;
 // change would otherwise be dropped as never-settled.
 const CAPTURE_STABILITY_ATTEMPTS = 6;
 const CAPTURE_STABILITY_INTERVAL_MS = 220;
+// Upper bound on waiting for the frame that reflects a probe scroll. An
+// offscreen compositor delivers it in one frame interval; this only caps a
+// page that stops repainting entirely.
+const SCROLLED_FRAME_FALLBACK_MS = 250;
 const RUNTIME_VISUAL_PAGE_BUDGET = RUNTIME_VISUAL_CONTRACT.pageBudget;
 const CAPTURE_REQUEST_KEYS = new Set([
   "contractVersion",
@@ -38,7 +42,7 @@ const CAPTURE_CANDIDATE_KEYS = new Set([
   "kind",
   "identityAttributes",
 ]);
-const OWNER_RECT_KEYS = new Set(["key", "state", "rect", "renderedText"]);
+const OWNER_RECT_KEYS = new Set(["key", "state", "rect", "renderedText", "scrolled"]);
 const RECT_KEYS = new Set(["x", "y", "width", "height"]);
 
 class CaptureCancelledError extends Error {
@@ -784,13 +788,25 @@ export function isolatedSnapshotRectScript(candidate) {
   };
   const unavailable = () => ({
     status: "captured",
-    snapshots: [{ key: candidate.key, state: "unavailable", rect: null, renderedText: "" }],
+    snapshots: [{
+      key: candidate.key,
+      state: "unavailable",
+      rect: null,
+      renderedText: "",
+      scrolled: false,
+    }],
   });
   const host = childAtPath(candidate.path);
   if (!bindingMatches(host, candidate)) return unavailable();
+  // capturePage samples the last composited frame, so the owner has to know
+  // whether this probe moved the page: a rect measured after a scroll that the
+  // compositor has not committed yet would be filled with pre-scroll pixels.
+  const scrollBeforeX = window.scrollX;
+  const scrollBeforeY = window.scrollY;
   try { scrollIntoView(host, { block: "center", inline: "nearest" }); } catch {
     return unavailable();
   }
+  const scrolled = window.scrollX !== scrollBeforeX || window.scrollY !== scrollBeforeY;
   const hostRect = usableRect(host);
   const paintTargets = candidate.kind === "host"
     ? Array.from(queryElements(host, "canvas,svg"))
@@ -803,8 +819,14 @@ export function isolatedSnapshotRectScript(candidate) {
     status: "captured",
     snapshots: [
       hostRect && hasVisiblePaint && renderedText !== null
-        ? { key: candidate.key, state: "captured", rect: hostRect, renderedText }
-        : { key: candidate.key, state: "unavailable", rect: null, renderedText: "" },
+        ? { key: candidate.key, state: "captured", rect: hostRect, renderedText, scrolled }
+        : {
+          key: candidate.key,
+          state: "unavailable",
+          rect: null,
+          renderedText: "",
+          scrolled,
+        },
     ],
   };
 })()`;
@@ -858,6 +880,7 @@ function normalizedOwnerRects(value, request) {
       rect === undefined
       || renderedText === undefined
       || renderedText === null
+      || typeof rawSnapshot.scrolled !== "boolean"
       || (rawSnapshot.state === "captured" && !rect)
       || (
         typeof renderedText === "string"
@@ -870,6 +893,7 @@ function normalizedOwnerRects(value, request) {
       state: rawSnapshot.state,
       rect,
       renderedText,
+      scrolled: rawSnapshot.scrolled,
     }));
   }
   return Object.freeze({ snapshots: Object.freeze(snapshots) });
@@ -1000,6 +1024,33 @@ function waitForFirstOffscreenPaint(webContents) {
   if (typeof webContents?.once !== "function") return Promise.resolve();
   return new Promise((resolve) => {
     webContents.once("paint", () => resolve());
+  });
+}
+
+/**
+ * Resolves once the offscreen compositor has produced a frame after the probe
+ * scrolled the page, so `capturePage` cannot sample a pre-scroll frame.
+ *
+ * A measured census attributed every unchanged-chart false positive to exactly
+ * this gap: the probe centred a host and the owner sampled the previous frame,
+ * filling an otherwise correct rect with content offset by the scroll
+ * distance. The bounded fallback keeps a page that never repaints from holding
+ * the owner deadline hostage; a fallback expiry is not an error, only a
+ * capture that stays as trustworthy as it was before this wait existed.
+ */
+function waitForScrolledOffscreenFrame(webContents, fallbackMs) {
+  if (typeof webContents?.once !== "function") return Promise.resolve();
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutId);
+      webContents.removeListener?.("paint", finish);
+      resolve();
+    };
+    const timeoutId = setTimeout(finish, Math.max(1, fallbackMs));
+    webContents.once("paint", finish);
   });
 }
 
@@ -1234,6 +1285,12 @@ export function createRuntimeSnapshotCaptureController({
               || !ownerSnapshot.rect
               || ownerSnapshot.rect.width * ownerSnapshot.rect.height > remainingPixels
             ) break;
+            if (attempt === 0 && ownerSnapshot.scrolled) {
+              await withOwnerDeadline(waitForScrolledOffscreenFrame(
+                captureWindow.webContents,
+                SCROLLED_FRAME_FALLBACK_MS,
+              ));
+            }
             const image = await withOwnerDeadline(captureWindow.capturePage(ownerSnapshot.rect, {
               stayHidden: true,
             }));

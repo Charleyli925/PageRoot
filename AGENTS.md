@@ -56,7 +56,7 @@ The release and artifact gates require a clean committed tree. Any source change
 - Direct source edits still fail closed on ambiguous targets, stale hashes, external writes, invalid patch scope, identity failures and unsafe paths.
 - Privileged filesystem behavior stays behind the Electron/Bridge boundary with narrow validated IPC.
 - AI output remains untrusted until protocol, identity, hash, path and complete-HTML checks pass. Authored scripts are part of the user's requested HTML and must never be classified, compared or blocked merely because they changed. Frozen comment targets guide generation and review; they are not a pixel- or subtree-exact Version acceptance boundary. Weak page continuity forces review instead of failing an otherwise usable candidate.
-- QoderWork handoff remains clipboard-only unless the user explicitly authorizes a different product boundary.
+- QoderWork handoff remains clipboard-only unless the user explicitly authorizes a different product boundary. The only currently authorized automatic path is ADR 0032's per-task `trusted-local-agent-v1` Qoder ACP driver; it does not authorize other providers, OS-sandbox claims or Candidate auto-adoption.
 - Tests and fixtures use synthetic data only. Never commit real user HTML, attachments, project records, credentials, personal paths, logs or generated binaries.
 
 ## Progressive disclosure
@@ -99,7 +99,7 @@ When code makes a routed document inaccurate, update that document in the same P
 
 - Flag widened renderer, IPC, filesystem, managed-path or AI-output authority without explicit validation and fail-closed tests.
 - Protocol or schema changes require synchronized schemas, fixtures, compatibility notes, validators and tests.
-- QoderWork automation beyond clipboard-only handoff is a product and security boundary change.
+- QoderWork automation beyond clipboard-only handoff is a product and security boundary change; changes outside ADR 0032's fixed Qoder ACP contract require new explicit authorization.
 
 ### Release and public boundary
 

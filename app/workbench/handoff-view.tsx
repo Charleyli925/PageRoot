@@ -367,6 +367,7 @@ export function HandoffFooter({
   pendingReconcileBusy,
   handoffCopyFailed,
   currentQoderHandoffStatus,
+  currentDeliveryMode,
   cancelling,
   resolvingConflict,
   checkingRun,
@@ -375,6 +376,7 @@ export function HandoffFooter({
   onReviewReadyResult,
   onActivateReadyResult,
   onSend,
+  onCopyFallback,
   onCancel,
   onResolveConflict,
   onRevealAiTask,
@@ -389,6 +391,7 @@ export function HandoffFooter({
   pendingReconcileBusy: boolean;
   handoffCopyFailed: boolean;
   currentQoderHandoffStatus: QoderHandoffUiStatus | "idle";
+  currentDeliveryMode: "clipboard" | "qoder-acp";
   cancelling: boolean;
   resolvingConflict: boolean;
   checkingRun: boolean;
@@ -397,6 +400,7 @@ export function HandoffFooter({
   onReviewReadyResult: () => void;
   onActivateReadyResult: () => void;
   onSend: () => void;
+  onCopyFallback: () => void;
   onCancel: () => void;
   onResolveConflict: (choice: "adopt-ai" | "keep-external") => void;
   onRevealAiTask: () => void;
@@ -443,12 +447,27 @@ export function HandoffFooter({
             disabled={
               !activeRun.handoffMessage
               || currentQoderHandoffStatus === "copying"
+              || currentQoderHandoffStatus === "starting"
             }
             onClick={onSend}
           >
-            <CopyIcon aria-hidden="true" size={18} weight="bold" />
-            重新复制
+            {currentDeliveryMode === "qoder-acp" ? (
+              <ShieldCheckIcon aria-hidden="true" size={18} weight="duotone" />
+            ) : (
+              <CopyIcon aria-hidden="true" size={18} weight="bold" />
+            )}
+            {currentDeliveryMode === "qoder-acp" ? "重新启动 Qoder" : "重新复制"}
           </button>
+          {currentDeliveryMode === "qoder-acp" ? (
+            <button
+              className="secondary-action"
+              type="button"
+              onClick={onCopyFallback}
+            >
+              <CopyIcon aria-hidden="true" size={18} weight="bold" />
+              复制任务
+            </button>
+          ) : null}
           <button
             className="cancel-action"
             type="button"
@@ -507,6 +526,34 @@ export function HandoffFooter({
           />
           返回编辑
         </button>
+      ) : currentDeliveryMode === "qoder-acp" ? (
+        <>
+          <button
+            className="cancel-action"
+            type="button"
+            disabled={
+              cancelling
+              || activeRun.requestId === "pending"
+              || currentQoderHandoffStatus === "cancelling"
+            }
+            onClick={onRequestEnd}
+          >
+            <ArrowCounterClockwiseIcon aria-hidden="true" size={17} weight="bold" />
+            {cancelling
+              ? "正在结束本轮…"
+              : ["failed", "interrupted"].includes(currentQoderHandoffStatus)
+                ? "结束本轮并返回编辑"
+                : "停止 Qoder 并继续编辑"}
+          </button>
+          <button
+            className="secondary-action"
+            type="button"
+            onClick={onPreviewSentHtml}
+          >
+            <EyeIcon aria-hidden="true" size={17} weight="bold" />
+            预览已发送 HTML
+          </button>
+        </>
       ) : (
         <>
           <button

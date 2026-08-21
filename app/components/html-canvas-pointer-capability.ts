@@ -59,6 +59,7 @@ export type ResolvedCanvasPointerCapability = ReturnType<
   typeof canvasPointerCapabilityFromProof
 > & Readonly<{
   element: HTMLElement;
+  selectionElement: HTMLElement;
   targetKey: string;
 }>;
 
@@ -73,6 +74,16 @@ export type CanvasPointerHitInput = {
   sourceIndex: SourceIndexValue | null;
   enabled?: boolean;
 };
+
+export function canvasVisualTargetElement(
+  element: HTMLElement | null,
+  sourceIndex: SourceIndexValue | null,
+): HTMLElement | null {
+  if (!element || !sourceIndex) return element;
+  const dedicatedSurface = element.closest("svg, math") as HTMLElement | null;
+  if (dedicatedSurface?.hasAttribute(SOURCE_NODE_ATTRIBUTE)) return dedicatedSurface;
+  return nativeEditHostForElement(element, sourceIndex) ?? element;
+}
 
 export function resolveCanvasPointerHit({
   documentNode,
@@ -128,6 +139,7 @@ export function resolveCanvasPointerHit({
     capability: {
       ...capability,
       element: hit,
+      selectionElement: hit,
       targetKey: hit.getAttribute(SOURCE_NODE_ATTRIBUTE)
         || selection.id
         || hit.tagName,
@@ -142,12 +154,12 @@ export function resolveCanvasPointerCapability(
   const hit = resolveCanvasPointerHit(input);
   if (hit.action !== "select") return null;
   const capability = hit.capability;
-  if (capability.kind !== "edit-text") return capability;
   // Rich inline markup can expose several instrumented elements while the
-  // pointer remains inside one native-edit host. Use that host only for the
-  // hover identity and geometry; click selection must retain the exact hit
-  // element so module padding continues to select the module itself.
-  const hoverElement = nativeEditHostForElement(capability.element, input.sourceIndex)
+  // pointer remains inside one native-edit host. SVG and MathML likewise keep
+  // exact child selection while presenting one dedicated visual surface. Use
+  // the normalized element only for hover identity and geometry; click
+  // selection must retain the exact hit element.
+  const hoverElement = canvasVisualTargetElement(capability.element, input.sourceIndex)
     ?? capability.element;
   return {
     ...capability,

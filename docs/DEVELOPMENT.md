@@ -46,6 +46,64 @@ and `task:sync-main` to fast-forward the clean primary checkout. See `AGENTS.md`
 and `docs/CODEX_WORKFLOW.md` for the complete automation and authorization
 boundary.
 
+## Product Qoder ACP Agent Bridge
+
+The packaged Bridge owns the product ACP session through
+`scripts/agent-bridge-service.mjs` and `scripts/qoder-acp-client.mjs`. The
+renderer can request only `POST /agent/preflight` and `POST /agent/start` with
+registered task identity, the fixed `qoder-acp` driver, explicit
+`trusted-local-agent-v1` consent and an opaque short-lived ticket. It cannot
+provide a command, cwd, environment or filesystem path policy.
+
+`GET /agent/availability` is the separate disk-only status route used whenever
+delivery or About opens. It re-runs protected package discovery without
+executing Qoder, contacting the service, creating a Request or freezing the
+Canvas. Finder/Dock sparse-PATH discovery includes configured npm prefixes plus
+common nvm, Volta, fnm, mise and asdf roots, but every candidate still passes
+the same package identity checks.
+
+Product discovery accepts a protected standalone `@qoder-ai/qodercli` package
+at version 1.1.27 or newer. It intentionally rejects the executable embedded in
+Qoder.app and ordinary `PAGEROOT_QODER_ACP_COMMAND` overrides. Tests may inject
+a synthetic executable only with both `PAGEROOT_E2E=1` and
+`PAGEROOT_QODER_ACP_ALLOW_TEST_COMMAND=1`. The readiness probe runs before
+Request creation; a failed CLI/version/login/model-list check must leave no new
+Request, and a successful ticket is reused by the immediately following
+submission instead of probing twice. Same-Request retry is allowed only while the current
+Bridge has confirmed its process group stopped and no output/completion remains.
+A crash lease, unknown cleanup or residue requires cancelling the old Request as
+an authority fence and submitting a new one. Candidate completion remains owned
+by the official finalizer plus Repository polling.
+
+Run the deterministic owners directly while developing this boundary:
+
+```bash
+node --test tests/qoder-acp-spike-client.test.mjs
+node --test tests/agent-bridge-service.test.mjs
+node --test tests/agent-bridge-workspace.test.mjs
+```
+
+ACP is not an OS sandbox. The product presents and records an explicit
+trusted-local-Agent choice; see `docs/SECURITY_MODEL.md` and ADR 0032.
+
+## Qoder ACP v1 synthetic spike
+
+`npm run spike:qoder-acp` is a development-only compatibility probe. It
+requires an independently installed, signed-in Qoder CLI with ACP v1 support;
+set `PAGEROOT_QODER_ACP_COMMAND` to an absolute executable path when it is not
+on `PATH`. The command creates a synthetic v4 Request under an isolated
+temporary Project File, drives Qoder over ACP, runs the official finalizer and
+verifies that the result is a pending-review Candidate while the Working Copy
+and Version remain unchanged.
+
+The command never accepts a real user HTML path. Its sanitized result is written
+to ignored `output/qoder-acp-spike/report.json`; Agent text, account details,
+credentials and temporary paths are not retained. A Qoder login, model-capacity
+or network failure is a blocked live probe, not release evidence and not a test
+pass. The current harness constrains ACP calls but does not OS-sandbox the local
+Qoder process, so it must not be repurposed for real user Requests. See
+`docs/decisions/0031-qoder-acp-v1-spike.md`.
+
 ## Test lanes
 
 | Command | Purpose |

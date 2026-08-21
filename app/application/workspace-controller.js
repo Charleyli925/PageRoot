@@ -17,6 +17,8 @@ import { createBrowserRecoveryStore } from "./recovery-store.js";
 import { RunSession } from "./run-session.js";
 import { RunWorkflow } from "./run-workflow.js";
 import { SourceHistorySession } from "./source-history-session.js";
+import { ConversationSession } from "./conversation-session.js";
+import { ConversationWorkflow } from "./conversation-workflow.js";
 import { VersionSession } from "./version-session.js";
 import { VersionWorkflow } from "./version-workflow.js";
 import { createWorkspaceControllerCodecs } from "./workspace-controller-codecs.js";
@@ -165,6 +167,7 @@ export function createRuntimeWorkspaceController({
     }),
     versionSession: new VersionSession(),
     sourceHistorySession: new SourceHistorySession(),
+    conversationSession: new ConversationSession(),
     codecs,
     ports,
     documentWorkflow: {
@@ -208,6 +211,14 @@ export class WorkspaceController {
   #firstEditGuideSession = null;
   #firstEditGuideUnsubscribe = null;
   #sourceHistorySession;
+
+  #conversationWorkflow = null;
+
+  #conversationSession = null;
+
+  #conversationSessionUnsubscribe = null;
+
+  #conversationSnapshot = null;
   #runSession = null;
   #codecs;
   #hashPort;
@@ -271,6 +282,7 @@ export class WorkspaceController {
     draftSession,
     versionSession,
     sourceHistorySession,
+    conversationSession = null,
     codecs,
     ports = {},
     documentWorkflow = null,
@@ -334,6 +346,20 @@ export class WorkspaceController {
       port: ports.uiPreferences || null,
     });
     this.#sourceHistorySession = sourceHistorySession;
+    // The conversation projection is optional so an existing embedder that has
+    // not opted in keeps working unchanged.
+    if (conversationSession) {
+      this.#conversationWorkflow = new ConversationWorkflow({
+        bridgeClient,
+        conversationSession,
+      });
+      this.#conversationSessionUnsubscribe = conversationSession.subscribe(
+        (snapshot) => {
+          this.#conversationSnapshot = snapshot;
+          this.#publishAggregateSnapshot();
+        },
+      );
+    }
     this.#runSession = runSessions[0] || null;
     this.#projectSessionSnapshot = projectSession.snapshot;
     this.#documentSessionSnapshot = documentSession.snapshot;
@@ -615,6 +641,28 @@ export class WorkspaceController {
     return this.#snapshot;
   }
 
+  // Conversation commands. The view calls these; it never reaches the Bridge or
+  // the conversation session directly.
+  openConversation(context) {
+    return this.#conversationWorkflow?.open(context) ?? Promise.resolve(null);
+  }
+
+  closeConversation() {
+    this.#conversationWorkflow?.close();
+  }
+
+  updateConversationDraftText(text) {
+    this.#conversationWorkflow?.updateDraftText(text);
+  }
+
+  updateConversationDraftIntent(intent) {
+    this.#conversationWorkflow?.updateDraftIntent(intent);
+  }
+
+  flushConversationDraft() {
+    return this.#conversationWorkflow?.flushDraft() ?? Promise.resolve();
+  }
+
   subscribe(listener) {
     if (typeof listener !== "function") {
       throw new TypeError("WorkspaceController listener must be a function.");
@@ -657,6 +705,10 @@ export class WorkspaceController {
     this.#versionWorkflow = null;
     this.#runSessionUnsubscribe?.();
     this.#runSessionUnsubscribe = null;
+    this.#conversationSessionUnsubscribe?.();
+    this.#conversationSessionUnsubscribe = null;
+    this.#conversationWorkflow?.close();
+    this.#conversationWorkflow = null;
     this.#runWorkflowUnsubscribe?.();
     this.#runWorkflowUnsubscribe = null;
     this.#runWorkflow?.dispose();
@@ -933,6 +985,18 @@ export class WorkspaceController {
     return this.#requireRunWorkflow().submit(input);
   }
 
+  refreshQoderAvailability() {
+    return this.#requireRunWorkflow().refreshQoderAvailability();
+  }
+
+  checkQoderUsability() {
+    return this.#requireRunWorkflow().checkQoderUsability();
+  }
+
+  copyQoderGuidance(input) {
+    return this.#requireRunWorkflow().copyQoderGuidance(input);
+  }
+
   reconcileRunSubmission(input) {
     return this.#requireRunWorkflow().reconcileSubmission(input);
   }
@@ -943,6 +1007,10 @@ export class WorkspaceController {
 
   copyRunHandoff(input) {
     return this.#requireRunWorkflow().copyHandoff(input);
+  }
+
+  startRunAgent(input) {
+    return this.#requireRunWorkflow().startAgent(input);
   }
 
   cancelRun(input) {
@@ -1242,6 +1310,7 @@ export class WorkspaceController {
       project: this.#projectSnapshot,
       run: this.#runSnapshot,
       version: this.#versionSnapshot,
+      conversation: this.#conversationSnapshot,
     });
     for (const listener of this.#listeners) {
       try {

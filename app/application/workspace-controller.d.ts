@@ -13,6 +13,11 @@ import type {
 import type { DocumentWorkflowCodecs } from "./document-workflow-codecs.js";
 import type { CommentSession, CommentSessionSnapshot } from "./comment-session.js";
 import type {
+  ConversationContext,
+  ConversationSession,
+  ConversationSessionSnapshot,
+} from "./conversation-session.js";
+import type {
   DocumentSession,
   DocumentSessionSnapshot,
   PersistedBoundaryResult,
@@ -107,6 +112,7 @@ export type WorkspaceControllerSnapshot = Readonly<{
   project: ProjectWorkflowSnapshot | null;
   run: RunWorkflowSnapshot | null;
   version: VersionWorkflowSnapshot | null;
+  conversation: ConversationSessionSnapshot | null;
 }>;
 
 export type WorkspaceEvent =
@@ -236,6 +242,7 @@ export type WorkspaceControllerConstruction = Readonly<{
   draftSession: DraftSession;
   versionSession: VersionSession;
   sourceHistorySession: SourceHistorySession;
+  conversationSession?: ConversationSession | null;
   codecs: WorkspaceControllerCodecs;
   ports: Readonly<{
     hash: HashPort;
@@ -289,7 +296,8 @@ export type WorkspaceControllerConstruction = Readonly<{
     handoff: Readonly<{
       copy(input: {
         message: string;
-        run: import("../domain/run-lifecycle.js").ActiveRun;
+        run: import("../domain/run-lifecycle.js").ActiveRun | null;
+        purpose?: string;
       }): Promise<{ status: string; copied: boolean }>;
     }>;
     scheduler?: Readonly<{
@@ -370,6 +378,13 @@ export function createRuntimeWorkspaceController(
 export class WorkspaceController {
   constructor(options: WorkspaceControllerConstruction);
   getSnapshot(): WorkspaceControllerSnapshot;
+  openConversation(
+    context: ConversationContext | null,
+  ): Promise<unknown>;
+  closeConversation(): void;
+  updateConversationDraftText(text: string): void;
+  updateConversationDraftIntent(intent: string): void;
+  flushConversationDraft(): Promise<void>;
   subscribe(
     listener: (snapshot: WorkspaceControllerSnapshot) => void,
   ): () => void;
@@ -526,6 +541,12 @@ export class WorkspaceController {
     previousVersionId?: string | null;
     basedOnVersionId?: string | null;
     deadlineAt?: number;
+    deliveryMode?: "clipboard" | "qoder-acp";
+  }): Promise<RunWorkflowOutcome>;
+  refreshQoderAvailability(): Promise<RunWorkflowOutcome>;
+  checkQoderUsability(): Promise<RunWorkflowOutcome>;
+  copyQoderGuidance(input: {
+    kind: import("../domain/qoder-availability.js").QoderGuidanceKind;
   }): Promise<RunWorkflowOutcome>;
   reconcileRunSubmission(input?: {
     sourcePath?: string | null;
@@ -534,6 +555,10 @@ export class WorkspaceController {
   pollRuns(input?: { generation?: number }): Promise<RunWorkflowOutcome>;
   copyRunHandoff(input?: {
     run?: import("../domain/run-lifecycle.js").ActiveRun | null;
+  }): Promise<RunWorkflowOutcome>;
+  startRunAgent(input?: {
+    run?: import("../domain/run-lifecycle.js").ActiveRun | null;
+    preflightId?: string | null;
   }): Promise<RunWorkflowOutcome>;
   cancelRun(input?: {
     run?: import("../domain/run-lifecycle.js").ActiveRun | null;

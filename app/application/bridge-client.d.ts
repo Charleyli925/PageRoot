@@ -19,6 +19,9 @@ export type BridgeClient = {
   sourcePreview(sourcePath: string): Promise<BridgeJson>;
   sourceStat(sourcePath: string): Promise<BridgeJson>;
   conflictCandidate(sourcePath: string): Promise<BridgeJson>;
+  conversation(sourcePath: string): Promise<BridgeJson>;
+  conversationList(sourcePath: string): Promise<BridgeJson>;
+  saveConversationDraft(body: BridgeJson): Promise<BridgeJson>;
   status(
     sourcePath: string,
     requestId: string,
@@ -34,6 +37,9 @@ export type BridgeClient = {
   saveAttachment(body: BridgeJson): Promise<BridgeJson>;
   deleteAttachment(body: BridgeJson): Promise<BridgeJson>;
   createRequest(body: BridgeJson): Promise<BridgeJson>;
+  qoderAvailability(): Promise<BridgeJson>;
+  preflightAgent(body: BridgeJson): Promise<BridgeJson>;
+  startAgent(body: BridgeJson): Promise<BridgeJson>;
   resolveConflict(body: BridgeJson): Promise<BridgeJson>;
   activateReadyVersion(body: BridgeJson): Promise<BridgeJson>;
   continueEditingHistoryVersion(body: BridgeJson): Promise<BridgeJson>;

@@ -63,7 +63,23 @@ export function deriveRunProgressPresentation(
     | "completionObserved"
     | "candidateAssessment"
   > | null | undefined,
-  handoffStatus?: "idle" | "copying" | "copied" | "failed",
+  handoffStatus?:
+    | "idle"
+    | "copying"
+    | "copied"
+    | "failed"
+    | "starting"
+    | "running"
+    | "completed"
+    | "interrupted"
+    | "cancelling"
+    | "cancelled"
+    | Readonly<{
+        mode?: "clipboard" | "qoder-acp";
+        status: string;
+        phase?: string;
+        errorMessage?: string | null;
+      }>,
 ): RunProgressPresentation;
 
 export function deriveRunProgressSteps(
@@ -75,7 +91,23 @@ export function deriveRunProgressSteps(
     | "completionObserved"
     | "candidateAssessment"
   > | null | undefined,
-  handoffStatus?: "idle" | "copying" | "copied" | "failed",
+  handoffStatus?:
+    | "idle"
+    | "copying"
+    | "copied"
+    | "failed"
+    | "starting"
+    | "running"
+    | "completed"
+    | "interrupted"
+    | "cancelling"
+    | "cancelled"
+    | Readonly<{
+        mode?: "clipboard" | "qoder-acp";
+        status: string;
+        phase?: string;
+        errorMessage?: string | null;
+      }>,
 ): RunProgressStep[];
 
 export type ValidationReview = {
@@ -112,6 +144,10 @@ export type ActiveRun = {
   requestPath: string;
   attemptPath: string;
   handoffMessage: string;
+  agentDelivery?: {
+    mode: "clipboard" | "qoder-acp";
+    trustPolicyVersion?: string;
+  };
   status: LifecycleState;
   sourcePath: string;
   baseSnapshotSha256: string;

@@ -99,8 +99,19 @@ test("editable hover identity follows the native edit host across inline markup"
     new URL("../app/components/html-canvas-pointer-capability.ts", import.meta.url),
     "utf8",
   );
-  assert.match(source, /const hoverElement = nativeEditHostForElement\(capability\.element, input\.sourceIndex\)/);
+  assert.match(source, /const hoverElement = canvasVisualTargetElement\(capability\.element, input\.sourceIndex\)/);
+  assert.match(source, /nativeEditHostForElement\(element, sourceIndex\)/);
   assert.match(source, /export function resolveCanvasPointerCapability/);
+  assert.match(source, /element: hoverElement/);
+});
+
+test("hover chrome normalizes dedicated surfaces without changing exact selection", async () => {
+  const source = await readFile(
+    new URL("../app/components/html-canvas-pointer-capability.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /element\.closest\("svg, math"\)/);
+  assert.match(source, /selectionElement: hit/);
   assert.match(source, /element: hoverElement/);
 });
 
@@ -123,7 +134,7 @@ test("guide and hover copy stay off the selected toolbar", async () => {
   assert.equal(card.includes("打开自己的 HTML，添加为项目"), true);
   assert.equal(card.includes("双击改字，自动保存在当前页"), true);
   assert.equal(card.includes("单击要改的区域，写下评论，AI 会按这里改"), true);
-  assert.equal(card.includes("点右上角发送，把任务粘贴给 AI Agent"), true);
+  assert.equal(card.includes("点右上角发送，选择 Qoder 自动执行或复制任务"), true);
   assert.equal(card.includes("createPortal"), true);
   assert.equal(card.includes("document.body"), true);
 });

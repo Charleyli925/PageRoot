@@ -103,6 +103,44 @@ test("run session preserves copied handoff risk when refreshing the same run", (
   assert.equal(session.activeHandoffMayBeRunning, true);
 });
 
+test("run session distinguishes managed Qoder state from clipboard handoff risk", () => {
+  const sourcePath = "/tmp/qoder.html";
+  const session = new RunSession({ sourcePath });
+  const activeRun = run({ sourcePath, requestId: "req_qoder" });
+  session.trackRun(activeRun, { activate: "always" });
+  session.publishHandoff({
+    ...activeRun,
+    mode: "qoder-acp",
+    status: "running",
+    phase: "reading-task",
+  });
+  assert.equal(session.activeHandoffManaged, true);
+  assert.equal(session.activeHandoffMayBeRunning, true);
+
+  session.publishHandoff({
+    ...activeRun,
+    mode: "qoder-acp",
+    status: "interrupted",
+    phase: "interrupted",
+  });
+  assert.equal(session.activeHandoffManaged, false);
+  assert.equal(session.activeHandoffMayBeRunning, false);
+
+  session.publishHandoff({
+    ...activeRun,
+    mode: "clipboard",
+    status: "copying",
+  });
+  session.publishHandoff({
+    ...activeRun,
+    mode: "clipboard",
+    status: "copied",
+  });
+  assert.equal(session.activeHandoffManaged, false);
+  assert.equal(session.activeHandoffMayBeRunning, true);
+
+});
+
 test("run session treats a recovered processing run as potentially handed off", () => {
   const original = new RunSession({ sourcePath: "/tmp/page.html" });
   const current = run();
@@ -123,6 +161,44 @@ test("run session treats a recovered processing run as potentially handed off", 
   const fresh = new RunSession({ sourcePath: "/tmp/page.html" });
   fresh.trackRun(current);
   assert.equal(fresh.activeHandoffMayBeRunning, false);
+});
+
+test("run session treats a recovered interrupted Qoder handoff as unmanaged risk", () => {
+  const sourcePath = "/tmp/recovered-qoder.html";
+  const current = run({
+    sourcePath,
+    requestId: "req_recovered_qoder",
+    agentDelivery: {
+      mode: "qoder-acp",
+      trustPolicyVersion: "trusted-local-agent-v1",
+    },
+  });
+  const session = new RunSession({ sourcePath });
+  const snapshots = [];
+  session.subscribe((snapshot) => snapshots.push(snapshot));
+  session.trackRun(current, { recovered: true });
+
+  assert.equal(session.activeHandoff.status, "interrupted");
+  assert.equal(session.activeHandoff.errorCode, "AGENT_RESTART_RECOVERY_REQUIRED");
+  assert.equal(session.activeHandoff.retryable, false);
+  assert.equal(session.activeHandoffManaged, false);
+  assert.equal(session.activeHandoffMayBeRunning, true);
+  assert.equal(
+    snapshots
+      .filter((snapshot) => snapshot.activeRun?.requestId === current.requestId)
+      .every((snapshot) => snapshot.activeHandoffMayBeRunning),
+    true,
+  );
+
+  session.publishHandoff({
+    ...current,
+    mode: "qoder-acp",
+    status: "failed",
+    errorCode: "AGENT_RESTART_RECOVERY_REQUIRED",
+    retryable: false,
+  });
+  assert.equal(session.activeHandoffManaged, false);
+  assert.equal(session.activeHandoffMayBeRunning, true);
 });
 
 test("run session owns submission preparation, freeze and unknown-outcome locking", () => {
