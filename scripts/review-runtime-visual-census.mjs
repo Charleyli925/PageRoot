@@ -46,11 +46,14 @@ import { RUNTIME_VISUAL_CONTRACT } from "../app/domain/runtime-visual-contract.j
 import {
   REVIEW_RUNTIME_VISUAL_RASTER_MEAN_RGB_DIFFERENCE_BUDGET,
   isReviewRuntimeVisualRasterDifferenceMeaningful,
+  mergeReviewRuntimeVisualChanges,
   reviewRuntimeVisualMeanRgbDifference,
   reviewRuntimeVisualPixelsAreUniform,
   reviewRuntimeVisualSnapshotComparison,
 } from "../app/lib/review-runtime-visual.js";
 import {
+  REVIEW_RUNTIME_CHART_HOST_IDS,
+  REVIEW_RUNTIME_CHART_RENDERERS,
   REVIEW_RUNTIME_CHART_SCENARIO_IDS,
   reviewRuntimeChartScenario,
 } from "../tests/fixtures/review-runtime-chart-scenarios.mjs";
@@ -66,6 +69,7 @@ function parseOptions(argv) {
     libraryDelayMs: 120,
     settleMs: RUNTIME_VISUAL_CONTRACT.captureSettleMs,
     viewportHeight: DEFAULT_VIEWPORT_HEIGHT,
+    renderers: [...REVIEW_RUNTIME_CHART_RENDERERS],
     out: path.resolve("output/runtime-visual-census"),
     keepPixels: false,
   };
@@ -79,6 +83,7 @@ function parseOptions(argv) {
       case "--library-delay-ms": options.libraryDelayMs = Number(value); index += 1; break;
       case "--settle-ms": options.settleMs = Number(value); index += 1; break;
       case "--viewport-height": options.viewportHeight = Number(value); index += 1; break;
+      case "--renderers": options.renderers = String(value).split(","); index += 1; break;
       case "--out": options.out = path.resolve(String(value)); index += 1; break;
       case "--keep-pixels": options.keepPixels = true; break;
       default:
@@ -88,6 +93,11 @@ function parseOptions(argv) {
   const unknown = options.scenarios
     .filter((id) => !REVIEW_RUNTIME_CHART_SCENARIO_IDS.includes(id));
   if (unknown.length) throw new Error(`Unknown scenario id: ${unknown.join(", ")}`);
+  const unknownRenderers = options.renderers
+    .filter((name) => !REVIEW_RUNTIME_CHART_RENDERERS.includes(name));
+  if (unknownRenderers.length) {
+    throw new Error(`Unknown renderer: ${unknownRenderers.join(", ")}`);
+  }
   if (!Number.isInteger(options.runs) || options.runs < 1) {
     throw new Error("--runs must be a positive integer.");
   }
@@ -198,6 +208,61 @@ function verdictForPair(before, after) {
   };
 }
 
+/**
+ * Runs the real merge rules over the real verdicts so the census reports what
+ * a reviewer would actually see, not just the raw classification.
+ *
+ * Two dimensions decide that presentation and neither is visible in a verdict
+ * alone: whether the source diff also found a change in the chart's section
+ * (corroboration), and whether the user commented on the host. Each run is
+ * evaluated under all four combinations.
+ */
+function mergePresentation({ verdicts, corroborated, commented }) {
+  const outline = REVIEW_RUNTIME_CHART_HOST_IDS.map((hostId, index) => ({
+    id: `outline-${index + 1}`,
+    group: "页面",
+    label: `图 ${index + 1}`,
+    helper: corroborated ? "结构调整" : "本轮未修改",
+    types: corroborated ? ["structure"] : [],
+    ...(corroborated ? { changeId: `change-${index + 1}` } : {}),
+  }));
+  const changes = corroborated
+    ? outline.map((item, index) => ({
+      id: `change-${index + 1}`,
+      label: item.label,
+      helper: "结构调整",
+      types: ["structure"],
+      beforePresent: true,
+      afterPresent: true,
+    }))
+    : [];
+  const runtimeVisualCandidates = REVIEW_RUNTIME_CHART_HOST_IDS.map((hostId, index) => ({
+    key: `runtime-host-${hostId}`,
+    outlineId: `outline-${index + 1}`,
+    changeId: corroborated ? `change-${index + 1}` : `runtime-change-outline-${index + 1}`,
+    label: `图 ${index + 1}`,
+    ...(commented ? { commented: true } : {}),
+  }));
+  const merged = mergeReviewRuntimeVisualChanges(
+    { changes, outline, runtimeVisualCandidates },
+    verdicts,
+  );
+  const markerVerdictByKey = new Map(
+    merged.markers.map((marker) => [marker.candidateKey, marker.verdict]),
+  );
+  const presentationByKey = new Map();
+  runtimeVisualCandidates.forEach((candidate) => {
+    const markerVerdict = markerVerdictByKey.get(candidate.key);
+    presentationByKey.set(
+      candidate.key,
+      markerVerdict === "changed"
+        ? "confirmed"
+        : markerVerdict === "suspected" ? "suspected" : "silent",
+    );
+  });
+  return presentationByKey;
+}
+
 function snapshotSummary(snapshot) {
   return snapshot?.state === "captured"
     ? {
@@ -256,12 +321,14 @@ async function main() {
 
   const rows = [];
   let sequence = 0;
+  for (const renderer of options.renderers) {
   for (const scenarioId of options.scenarios) {
     for (let run = 1; run <= options.runs; run += 1) {
       sequence += 1;
       const scenario = reviewRuntimeChartScenario(scenarioId, {
         animationMs: options.animationMs,
         libraryDelayMs: options.libraryDelayMs,
+        renderer,
       });
       const captureSessionId = `review-census-${String(sequence).padStart(6, "0")}`;
       const captureSide = async (side) => {
@@ -288,15 +355,36 @@ async function main() {
       );
       const beforeSnapshots = snapshotsByKey(before);
       const afterSnapshots = snapshotsByKey(after);
-      for (const candidate of candidatesForSide(scenario.before)) {
+      const runCandidates = candidatesForSide(scenario.before);
+      const verdictByKey = new Map();
+      const detailByKey = new Map();
+      runCandidates.forEach((candidate) => {
+        const detail = verdictForPair(
+          beforeSnapshots.get(candidate.key),
+          afterSnapshots.get(candidate.key),
+        );
+        verdictByKey.set(candidate.key, detail.verdict);
+        detailByKey.set(candidate.key, detail);
+      });
+      const verdicts = {
+        changedKeys: [...verdictByKey].filter(([, v]) => v === "changed").map(([key]) => key),
+        unverifiedKeys: [...verdictByKey].filter(([, v]) => v === "unverified").map(([key]) => key),
+      };
+      const presentations = {
+        corroboratedCommented: mergePresentation({ verdicts, corroborated: true, commented: true }),
+        corroboratedUncommented: mergePresentation({ verdicts, corroborated: true, commented: false }),
+        uncorroboratedCommented: mergePresentation({ verdicts, corroborated: false, commented: true }),
+        uncorroboratedUncommented: mergePresentation({ verdicts, corroborated: false, commented: false }),
+      };
+      for (const candidate of runCandidates) {
         const beforeSnapshot = beforeSnapshots.get(candidate.key);
         const afterSnapshot = afterSnapshots.get(candidate.key);
-        const { verdict, step, rasterDifference } = verdictForPair(beforeSnapshot, afterSnapshot);
+        const { verdict, step, rasterDifference } = detailByKey.get(candidate.key);
         const expected = scenario.chartExpectation;
         const falsePositive = expected === "unchanged" && verdict === "changed";
         const falseNegative = expected === "changed" && verdict !== "changed";
         if ((falsePositive || falseNegative) && options.keepPixels) {
-          const stem = `${scenarioId}-run${run}-${candidate.key}`;
+          const stem = `${renderer}-${scenarioId}-run${run}-${candidate.key}`;
           [["before", beforeSnapshot], ["after", afterSnapshot]].forEach(([side, snapshot]) => {
             if (snapshot?.state !== "captured") return;
             writeFileSync(
@@ -306,6 +394,7 @@ async function main() {
           });
         }
         rows.push({
+          renderer,
           scenarioId,
           run,
           candidateKey: candidate.key,
@@ -315,6 +404,10 @@ async function main() {
           rasterDifference,
           falsePositive,
           falseNegative,
+          presentation: Object.fromEntries(
+            Object.entries(presentations)
+              .map(([name, byKey]) => [name, byKey.get(candidate.key)]),
+          ),
           captureOutcome: {
             before: before.outcome?.outcome || "unknown",
             after: after.outcome?.outcome || "unknown",
@@ -327,27 +420,60 @@ async function main() {
         });
       }
       process.stdout.write(
-        `${scenarioId} run ${run}/${options.runs}: `
+        `${renderer} ${scenarioId} run ${run}/${options.runs}: `
         + `${rows.slice(-2).map((row) => `${row.candidateKey.replace("runtime-host-", "")}=${row.verdict}`).join(" ")}\n`,
       );
     }
   }
+  }
 
   controller.dispose();
 
-  const scenarioSummary = options.scenarios.map((scenarioId) => {
-    const scenarioRows = rows.filter((row) => row.scenarioId === scenarioId);
+  const scenarioSummary = options.renderers.flatMap((renderer) => (
+    options.scenarios.map((scenarioId) => {
+      const scenarioRows = rows.filter((row) => (
+        row.scenarioId === scenarioId && row.renderer === renderer
+      ));
+      return {
+        renderer,
+        scenarioId,
+        expected: scenarioRows[0]?.expected || "unknown",
+        candidateRows: scenarioRows.length,
+        falsePositives: scenarioRows.filter((row) => row.falsePositive).length,
+        falseNegatives: scenarioRows.filter((row) => row.falseNegative).length,
+        unverified: scenarioRows.filter((row) => row.verdict === "unverified").length,
+        stepCounts: scenarioRows.reduce((counts, row) => {
+          counts[row.step] = (counts[row.step] || 0) + 1;
+          return counts;
+        }, {}),
+      };
+    })
+  ));
+  // What a reviewer actually sees. A confirmed frame on a chart the source
+  // never touched is the failure this whole programme exists to remove, so it
+  // is counted separately from the raw verdict.
+  const presentationSummary = [
+    "corroboratedCommented",
+    "corroboratedUncommented",
+    "uncorroboratedCommented",
+    "uncorroboratedUncommented",
+  ].map((variant) => {
+    const unchangedRows = rows.filter((row) => row.expected === "unchanged");
+    const changedRows = rows.filter((row) => row.expected === "changed");
     return {
-      scenarioId,
-      expected: scenarioRows[0]?.expected || "unknown",
-      candidateRows: scenarioRows.length,
-      falsePositives: scenarioRows.filter((row) => row.falsePositive).length,
-      falseNegatives: scenarioRows.filter((row) => row.falseNegative).length,
-      unverified: scenarioRows.filter((row) => row.verdict === "unverified").length,
-      stepCounts: scenarioRows.reduce((counts, row) => {
-        counts[row.step] = (counts[row.step] || 0) + 1;
-        return counts;
-      }, {}),
+      variant,
+      unchangedConfirmed: unchangedRows
+        .filter((row) => row.presentation[variant] === "confirmed").length,
+      unchangedSuspected: unchangedRows
+        .filter((row) => row.presentation[variant] === "suspected").length,
+      unchangedSilent: unchangedRows
+        .filter((row) => row.presentation[variant] === "silent").length,
+      changedConfirmed: changedRows
+        .filter((row) => row.presentation[variant] === "confirmed").length,
+      changedSuspected: changedRows
+        .filter((row) => row.presentation[variant] === "suspected").length,
+      changedSilent: changedRows
+        .filter((row) => row.presentation[variant] === "silent").length,
     };
   });
   const report = {
@@ -358,6 +484,7 @@ async function main() {
       animationMs: options.animationMs,
       libraryDelayMs: options.libraryDelayMs,
       settleMs: options.settleMs,
+      renderers: options.renderers,
       viewport: options.viewport,
     },
     contract: {
@@ -372,6 +499,7 @@ async function main() {
       unverified: rows.filter((row) => row.verdict === "unverified").length,
     },
     scenarioSummary,
+    presentationSummary,
     rows,
   };
   const reportPath = path.join(options.out, "review-runtime-visual-census.json");
@@ -380,12 +508,20 @@ async function main() {
   process.stdout.write("\n=== Review runtime visual census ===\n");
   scenarioSummary.forEach((entry) => {
     process.stdout.write(
-      `${entry.scenarioId.padEnd(20)} expect=${entry.expected.padEnd(9)} `
+      `${entry.renderer.padEnd(7)}${entry.scenarioId.padEnd(20)} expect=${entry.expected.padEnd(9)} `
       + `rows=${String(entry.candidateRows).padStart(3)} `
       + `FP=${String(entry.falsePositives).padStart(3)} `
       + `FN=${String(entry.falseNegatives).padStart(3)} `
       + `unverified=${String(entry.unverified).padStart(3)} `
       + `${JSON.stringify(entry.stepCounts)}\n`,
+    );
+  });
+  process.stdout.write("\n--- reviewer-visible presentation ---\n");
+  presentationSummary.forEach((entry) => {
+    process.stdout.write(
+      `${entry.variant.padEnd(26)} `
+      + `unchanged[confirmed=${entry.unchangedConfirmed} suspected=${entry.unchangedSuspected} silent=${entry.unchangedSilent}] `
+      + `changed[confirmed=${entry.changedConfirmed} suspected=${entry.changedSuspected} silent=${entry.changedSilent}]\n`,
     );
   });
   process.stdout.write(
