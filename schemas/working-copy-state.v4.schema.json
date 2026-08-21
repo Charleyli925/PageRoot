@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://pageroot.local/schemas/working-copy-state.v4.schema.json",
+  "$comment": "Forward compatible. Every write spreads the record it read before overriding its authoritative members, so a member added by a newer PageRoot is preserved.",
   "type": "object",
-  "additionalProperties": false,
   "required": [
     "schemaVersion",
     "projectId",

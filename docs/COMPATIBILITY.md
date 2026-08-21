@@ -18,10 +18,16 @@ collected. A guessed date is not a support-window policy.
 This is a standing policy, not a decoder entry, and it is never removed.
 
 A mutable record is one the product reads, edits and writes again: the Registry,
-`history/source-operations.json` and the Draft aggregate. For those records every
-required member stays strictly validated and fails closed when missing or
-invalid, while a member added by a newer PageRoot is preserved unchanged across
-the round trip.
+`history/source-operations.json`, the Draft aggregate, `manifest.json` and
+`working-copy-state.json`. For those records every required member stays
+strictly validated and fails closed when missing or invalid, while a member
+added by a newer PageRoot is preserved unchanged across the round trip.
+
+A sub-record is either preserved or authored, and only a preserved one may carry
+unknown members. Authored sub-records are rebuilt from an authoritative source on
+every write and stay strict: `workingCopies[].fileIdentity` (a fresh stat, since
+a save publishes through an atomic rename), the Runtime `lastAiTask` anchor, and
+the stored Draft envelope.
 
 - Why: the Registry previously refused any record carrying a key outside a
   hard-coded allowlist, so one added member locked the user out of every managed
@@ -31,18 +37,25 @@ the round trip.
 - This does not weaken `ADR 0028`. A record whose required members are missing is
   still an unrecognized shape and still fails closed; only a fully explainable
   record with extra members is now carried through.
+- Write ordering: a preserved record must be written as
+  `{ ...read, ...authoritative }`. The reverse order lets a stale file overwrite
+  the identity the writer just computed and pin the schema version forever. The
+  stored Draft envelope had the reverse order and was corrected.
 - Proof: `tests/source-history.test.mjs`, `tests/draft-service.test.mjs` and
   `tests/project-file-repository.test.mjs` each assert the round trip and each
   fails without the corresponding production change.
   `tests/source-history.test.mjs` also asserts that an unknown member never
-  rescues an invalid required member.
+  rescues an invalid required member, and
+  `tests/project-file-repository.test.mjs` pins both the Draft envelope defect
+  and the authored `fileIdentity` boundary.
 - Direction: this protects builds from this change onward only. A build released
   before it still refuses or discards a newer member. Any release that adds a
   member to a mutable record must come strictly after the release carrying
   `docs/decisions/0032-forward-compatible-record-members.md`.
-- Not yet covered: `manifest.json`, `project.json` and `runtime-state.json`
-  preserve unknown members in code but keep strict schemas and have no
-  round-trip test; `working-copy-state.json` has not been audited.
+- Not yet covered: `runtime-state.json` preserves its root but nests the authored
+  `lastAiTask` anchor, so it needs per-level treatment and its own test.
+  `project.json` is written once at import and never rewritten, so it is an
+  immutable record and stays strict.
 
 ## Draft operation IDs
 

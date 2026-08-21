@@ -44,12 +44,7 @@ the implementation.
 
 ## Decision
 
-One rule applies to every mutable record. This change implements and pins it for
-the Registry, the source history journal and the Draft aggregate — the three
-records whose behavior was wrong. `manifest.json`, `project.json` and
-`runtime-state.json` already satisfy the rule in code but keep strict schemas and
-have no round-trip test, and `working-copy-state.json` has not been audited;
-bringing those four under the rule is a separate change.
+One rule applies to every mutable record.
 
 1. **Required members stay strictly validated.** A record whose required members
    are missing, malformed or mutually inconsistent is still an unrecognized shape
@@ -66,13 +61,39 @@ bringing those four under the rule is a separate change.
    and carry a `$comment` stating the rule. Schemas for immutable records and for
    compatibility decoders keep their strict form, because those records are
    written once and never round-tripped.
+6. A sub-record is **preserved** or **authored**, and only a preserved one may
+   carry unknown members. Authored sub-records are rebuilt from an authoritative
+   source on every write and keep `additionalProperties: false`:
+   `workingCopies[].fileIdentity` (a fresh stat — a save publishes through an
+   atomic rename, so the inode legitimately changes), the Runtime `lastAiTask`
+   anchor, and the stored Draft envelope.
+7. A preserved record must be written as `{ ...read, ...authoritative }`. The
+   reverse order lets a stale file overwrite the identity the writer just
+   computed and pin the schema version forever.
+
+## Scope
+
+Covered and pinned by tests: the Registry, the source history journal, the Draft
+aggregate, `manifest.json` (manifest, Version entries, Working Copy entries) and
+`working-copy-state.json`.
+
+Deliberately excluded: `project.json` is written once at import and never
+rewritten, so it is an immutable record. `runtime-state.json` preserves its root
+but nests the authored `lastAiTask` anchor, so it needs per-level treatment and
+its own test; that is a separate change.
 
 ## Consequences
 
 - Registry, source history journal and Draft now behave the way `manifest.json`
-  and `runtime-state.json` already did. "What happens to an unknown member" has
-  one answer for the records that carry the risk, and a named remaining surface
-  for the rest.
+  and `runtime-state.json` already did, and `manifest.json` plus
+  `working-copy-state.json` are now pinned by tests instead of only observed.
+- Applying the rule surfaced a real defect that the rule itself created. The
+  repository stores a Draft as `{ schemaVersion, projectId, documentId,
+  workingCopyId, basedOnVersionId, ...snapshot }`, so once the snapshot preserved
+  unknown members it also carried those five envelope members back from disk and
+  spread them over the authoritative values. A tampered file could then pin
+  `schemaVersion` and reassign the Working Copy. Item 6 and item 7 exist because
+  of that defect, and `tests/project-file-repository.test.mjs` reproduces it.
 - A future member can be added to a mutable record without a schema-version bump
   and without a migration pass, which is what makes account identity, record
   provenance and portable/device data separation additive rather than breaking

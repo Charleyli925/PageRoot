@@ -12,16 +12,31 @@ fails closed. Dropping a member we do not recognize is silent data loss, and
 refusing the whole file over one added member locks the user out of data this
 build can otherwise read.
 
-This rule is implemented and proven by round-trip tests for
-`project-registry.v4`, `source-history.v1` and the Draft aggregate, which has no
-schema file. Those two schemas therefore drop `additionalProperties: false` and
-carry a `$comment` stating the rule.
+A sub-record is either **preserved** or **authored**, and only a preserved one
+can carry unknown members:
 
-`project-manifest.v4`, `project-identity.v4` and `project-runtime-state.v4`
-already preserve unknown members in code, but their schemas still declare
-`additionalProperties: false` and no test pins the round trip, so they are not
-yet claimed by this rule. `working-copy-state.v4` has not been audited. Bringing
-those four records under the rule is a separate change.
+- **Preserved** — round-tripped from disk. A writer either mutates the object it
+  read, or spreads it first and overrides authoritative members after
+  (`{ ...read, ...authoritative }`). Covered: `project-registry.v4`,
+  `source-history.v1`, `project-manifest.v4` (manifest, Version entries, Working
+  Copy entries), `working-copy-state.v4`, and the Draft aggregate, which has no
+  schema file. These drop `additionalProperties: false` and carry a `$comment`.
+- **Authored** — rebuilt from an authoritative source on every write, so it
+  cannot carry an unknown member and keeps `additionalProperties: false`. This is
+  `workingCopies[].fileIdentity` (a fresh stat; a save publishes through an
+  atomic rename, so the inode legitimately changes), the Runtime `lastAiTask`
+  anchor (re-derived from the AI task record), and the stored Draft envelope
+  (`schemaVersion`, `projectId`, `documentId`, `workingCopyId`,
+  `basedOnVersionId`).
+
+The reverse spread order `{ ...authoritative, ...read }` is a defect: it lets a
+stale file overwrite the identity the writer just computed and pin the schema
+version forever. `tests/project-file-repository.test.mjs` pins that case.
+
+Not covered yet: `project-runtime-state.v4` preserves its root but nests the
+authored `lastAiTask` anchor, so it needs per-level treatment and its own test.
+`project-identity.v4` is written once at import and never rewritten, so it is an
+immutable record and stays strict by the rule below.
 
 Immutable records — anything written once and never rewritten — and the
 compatibility decoders keep their strict `additionalProperties: false` form. See

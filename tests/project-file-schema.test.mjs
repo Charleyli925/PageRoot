@@ -203,6 +203,10 @@ test("v4 schemas accept repository-produced identity, Working Copy, Candidate an
   };
   await validateRejects("project-runtime-state.v4.schema.json", malformedHistoryActivation);
 
+  // ADR 0022 forbids one specific member, a project-wide `fileNaming`; ADR 0032
+  // requires every other added member to survive. The schema states the first
+  // prohibition directly instead of rejecting anything it has not seen before,
+  // so both assertions below must hold at once.
   const invalidManifest = { ...initialManifest, fileNaming: { stem: "legacy" } };
   const schema = JSON.parse(await readFile(
     new URL("../schemas/project-manifest.v4.schema.json", import.meta.url),
@@ -218,4 +222,16 @@ test("v4 schemas accept repository-produced identity, Working Copy, Candidate an
   const nestedWorkingCopy = structuredClone(initialManifest);
   nestedWorkingCopy.workingCopies[0].sourceRelativePath = "nested/schema-V1.htm";
   assert.equal(check(nestedWorkingCopy), false);
+
+  const futureManifest = structuredClone(initialManifest);
+  futureManifest.ownerAccountId = "account_future";
+  futureManifest.versions[0].provenance = { seq: 1 };
+  futureManifest.workingCopies[0].provenance = { seq: 2 };
+  assert.equal(check(futureManifest), true);
+
+  // fileIdentity is authored from a fresh stat on every save, so it cannot
+  // carry an added member and stays strict.
+  const futureFileIdentity = structuredClone(initialManifest);
+  futureFileIdentity.workingCopies[0].fileIdentity.futureIdentity = "next";
+  assert.equal(check(futureFileIdentity), false);
 });

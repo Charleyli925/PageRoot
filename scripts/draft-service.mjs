@@ -11,7 +11,19 @@ const APPLIED_OPERATION_LIMIT = 256;
 // authoritative aggregate, and every member a newer PageRoot added is carried
 // through read -> modify -> write unchanged. `editEvents` is the retired alias
 // of `changeEvents`, so it counts as known and is not carried twice.
+//
+// The five envelope members are known for a different reason. The repository
+// stores a Draft as `{ schemaVersion, projectId, documentId, workingCopyId,
+// basedOnVersionId, ...snapshot }` and rebuilds all five from the loaded
+// project on every save. Carrying them back from disk as if they were unknown
+// would let the snapshot spread a stale identity over the authoritative one and
+// pin the schema version forever.
 const KNOWN_DRAFT_KEYS = new Set([
+  "schemaVersion",
+  "projectId",
+  "documentId",
+  "workingCopyId",
+  "basedOnVersionId",
   "annotationsRelativePath",
   "annotationsSha256",
   "commentIds",
