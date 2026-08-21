@@ -23,7 +23,7 @@ const FIXTURE_ARCHITECTURE = "arm64";
 const FIXTURE_BUILT_AT = "2026-07-29T00:00:00.000Z";
 const FIXTURE_REPOSITORY = "https://github.com/Charleyli925/PageRoot";
 
-const APP_SOURCE_FILES = [
+export const APP_SOURCE_FILES = [
   "desktop/main.mjs",
   "desktop/preload.mjs",
   "desktop/external-file-open.mjs",
@@ -47,6 +47,7 @@ const APP_SOURCE_FILES = [
   "desktop/application-update.mjs",
   "desktop/usage-telemetry.mjs",
   "desktop/ui-preferences.mjs",
+  "desktop/device-identity.mjs",
   "desktop/preview-protocol.mjs",
   "desktop/imported-asset-root.mjs",
   "desktop/edit-runtime-bootstrap.mjs",
@@ -374,6 +375,11 @@ export async function createSyntheticAppBundle(t, {
       "shared/source-history.mjs",
       "export const fixtureSourceHistory = true;\n",
     ),
+    writeFixtureFile(
+      productRoot,
+      "shared/provenance.mjs",
+      "export const fixtureProvenance = true;\n",
+    ),
     ...SCHEMA_FILES.map((fileName) => writeFixtureFile(
       productRoot,
       "schemas/" + fileName,
@@ -440,6 +446,7 @@ export async function createSyntheticAppBundle(t, {
     ...[
       "draft-aggregate.mjs",
       "direct-edit-compatibility.mjs",
+      "provenance.mjs",
       "source-history.mjs",
     ].map((fileName) => copyFixtureFile(
       productRoot,

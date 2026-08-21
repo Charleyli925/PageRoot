@@ -18,6 +18,7 @@ import path from "node:path";
 import test from "node:test";
 
 import { sha256 } from "../scripts/lifecycle-core.mjs";
+import { createDeviceIdentifier } from "../shared/provenance.mjs";
 import {
   ProjectFileRepository,
   ProjectFileRepositoryError,
@@ -4009,5 +4010,84 @@ test("unknown Runtime root and historyActivation members survive a confirmation"
   assert.equal(rewritten.historyActivation.state, "desktop-confirmed");
   assert.equal(rewritten.ownerAccountId, "account_future");
   assert.deepEqual(rewritten.historyActivation.provenance, { seq: 1 });
+});
+
+// Provenance answers "who wrote this" and is authored by the repository, never
+// taken from the caller. An existing record keeps the author already persisted
+// on disk, so resending the whole comment list cannot turn authorship into
+// "who saved last", and a caller that supplies its own provenance is ignored in
+// both directions.
+test("a stored Draft records the author of each comment and ignores a supplied one", async (t) => {
+  const value = await fixture(t);
+  const { target } = await importSource(value, "作者归属.html");
+  const deviceId = createDeviceIdentifier();
+  const attributed = new ProjectFileRepository({
+    projectsRoot: value.projects,
+    deviceId,
+    registryWriteLockTimeoutMs: 200,
+  });
+  const draftFile = path.join(
+    target.projectRootPath,
+    ".pageroot",
+    "drafts",
+    `${target.workingCopyId}.json`,
+  );
+  const localAuthor = { actor: { kind: "human", id: "local" }, device: deviceId };
+
+  await attributed.saveDraft({
+    target,
+    operationId: "draftop_provenance_000001",
+    expectedDraftRevision: 0,
+    comments: [{ commentId: "comment_first", text: "first" }],
+    changeEvents: [],
+    deletedCommentIds: [],
+  });
+  const first = await json(draftFile);
+  assert.deepEqual(first.comments[0].provenance, localAuthor);
+
+  const forged = {
+    actor: { kind: "agent", id: "impostor" },
+    device: createDeviceIdentifier(),
+  };
+  await attributed.saveDraft({
+    target,
+    operationId: "draftop_provenance_000002",
+    expectedDraftRevision: first.draftRevision,
+    comments: [
+      { ...first.comments[0], provenance: forged },
+      { commentId: "comment_second", text: "second", provenance: forged },
+    ],
+    changeEvents: [],
+    deletedCommentIds: [],
+  });
+  const second = await json(draftFile);
+  const byId = Object.fromEntries(
+    second.comments.map((comment) => [comment.commentId, comment]),
+  );
+  assert.deepEqual(byId.comment_first.provenance, localAuthor);
+  assert.deepEqual(byId.comment_second.provenance, localAuthor);
+});
+
+// A repository with no device identity records no author rather than inventing
+// one, so a misconfigured launch cannot attribute records to a device that does
+// not exist.
+test("a Draft written without a device identity records no author", async (t) => {
+  const value = await fixture(t);
+  const { target } = await importSource(value, "无设备身份.html");
+  await value.repository.saveDraft({
+    target,
+    operationId: "draftop_provenance_000003",
+    expectedDraftRevision: 0,
+    comments: [{ commentId: "comment_only", text: "only" }],
+    changeEvents: [],
+    deletedCommentIds: [],
+  });
+  const stored = await json(path.join(
+    target.projectRootPath,
+    ".pageroot",
+    "drafts",
+    `${target.workingCopyId}.json`,
+  ));
+  assert.equal("provenance" in stored.comments[0], false);
 });
 

@@ -3,8 +3,11 @@ import {
   normalizeAuthoritativeDraft,
 } from "./draft-aggregate.mjs";
 import { decodeDraftCommandOperationId } from "./draft-command-decoder.mjs";
+import { normalizeProvenance } from "../shared/provenance.mjs";
 
 const COMMENT_ID_PATTERN = /^comment_[A-Za-z0-9_-]+$/;
+const COMMENT_ID_KEYS = ["commentId", "id"];
+const EVENT_ID_KEYS = ["eventId", "id"];
 const APPLIED_OPERATION_LIMIT = 256;
 
 // Forward compatibility. Every member this build owns is rebuilt from the
@@ -66,6 +69,43 @@ function draftError(status, code, message, details) {
   return new LifecycleError(code, message, details, status);
 }
 
+// Provenance is authored, never accepted from the caller. The renderer resends
+// the whole comment list on every save, so re-stamping everything would turn
+// "who wrote this" into "who saved last"; instead an existing record keeps the
+// author already persisted on disk and only a record this save introduces is
+// stamped. A stored value that no longer validates is treated as unknown and
+// re-stamped locally rather than blocking the save.
+function recordIdentity(record, idKeys) {
+  if (!record || typeof record !== "object") return "";
+  for (const key of idKeys) {
+    const value = cleanIdentity(record[key]);
+    if (value) return value;
+  }
+  return "";
+}
+
+function persistedProvenance(records, idKeys) {
+  const byId = new Map();
+  for (const record of Array.isArray(records) ? records : []) {
+    const id = recordIdentity(record, idKeys);
+    if (!id || record.provenance === undefined) continue;
+    try {
+      byId.set(id, normalizeProvenance(record.provenance));
+    } catch {
+      // A stored author we cannot read is not an author we can keep.
+    }
+  }
+  return byId;
+}
+
+function stampProvenance(records, idKeys, provenance, persisted) {
+  if (!provenance) return records;
+  return records.map((record) => ({
+    ...record,
+    provenance: persisted.get(recordIdentity(record, idKeys)) ?? provenance,
+  }));
+}
+
 export function activeDraftSnapshot(runtimeDraft, now = () => (
   new Date().toISOString()
 )) {
@@ -98,6 +138,7 @@ export function applyDraftCommand(
   {
     randomUUID = globalThis.crypto?.randomUUID?.bind(globalThis.crypto),
     now = () => new Date().toISOString(),
+    provenance = null,
   } = {},
 ) {
   if (typeof randomUUID !== "function") {
@@ -172,13 +213,23 @@ export function applyDraftCommand(
   const deleted = new Set(deletedCommentIds);
   const comments = body?.clear === true
     ? []
-    : mergeRecords(body?.comments, ["commentId", "id"], randomUUID)
-        .filter((comment) => !deleted.has(
-          String(comment.commentId || comment.id || ""),
-        ));
+    : stampProvenance(
+        mergeRecords(body?.comments, COMMENT_ID_KEYS, randomUUID)
+          .filter((comment) => !deleted.has(
+            String(comment.commentId || comment.id || ""),
+          )),
+        COMMENT_ID_KEYS,
+        provenance,
+        persistedProvenance(current.comments, COMMENT_ID_KEYS),
+      );
   const changeEvents = body?.clear === true
     ? []
-    : mergeRecords(body?.changeEvents, ["eventId", "id"], randomUUID);
+    : stampProvenance(
+        mergeRecords(body?.changeEvents, EVENT_ID_KEYS, randomUUID),
+        EVENT_ID_KEYS,
+        provenance,
+        persistedProvenance(current.changeEvents, EVENT_ID_KEYS),
+      );
   const appliedOperationIds = [
     ...current.appliedOperationIds,
     operationId,

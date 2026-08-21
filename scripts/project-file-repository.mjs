@@ -28,6 +28,10 @@ import {
   activeDraftSnapshot,
   applyDraftCommand,
 } from "./draft-service.mjs";
+import {
+  createProvenance,
+  isDeviceIdentifier,
+} from "../shared/provenance.mjs";
 import { assessHtmlCandidate } from "./candidate-assessment.mjs";
 import {
   AiTaskProjectionError,
@@ -1959,6 +1963,8 @@ export class ProjectFileRepository {
 
   #failpoint;
 
+  #deviceId;
+
   #registryWriteLockTimeoutMs;
 
   #registryWriteLockGraceMs;
@@ -1971,6 +1977,7 @@ export class ProjectFileRepository {
     projectsRoot = defaultProjectsRoot(),
     registryPath = path.join(projectsRoot, ".pageroot-registry.json"),
     clock = Date.now,
+    deviceId = null,
     failpoint = null,
     registryWriteLockTimeoutMs = CURRENT_REGISTRY_WRITE_LOCK_TIMEOUT_MS,
     registryWriteLockGraceMs = CURRENT_REGISTRY_WRITE_LOCK_GRACE_MS,
@@ -1978,6 +1985,10 @@ export class ProjectFileRepository {
     this.#projectsRoot = normalizedPath(projectsRoot);
     this.#registryPath = normalizedPath(registryPath);
     this.#clock = typeof clock === "function" ? clock : Date.now;
+    // A repository without a device identity records no provenance rather than
+    // inventing one, so a test double or a misconfigured launch cannot attribute
+    // a record to a device that does not exist.
+    this.#deviceId = isDeviceIdentifier(deviceId) ? String(deviceId) : null;
     this.#failpoint = typeof failpoint === "function" ? failpoint : null;
     this.#registryWriteLockTimeoutMs = Number.isSafeInteger(registryWriteLockTimeoutMs)
       && registryWriteLockTimeoutMs >= 1
@@ -1991,6 +2002,14 @@ export class ProjectFileRepository {
 
   get projectsRoot() {
     return this.#projectsRoot;
+  }
+
+  // Every record this repository authors is attributed to the local human on
+  // this device. The actor becomes an account identity once accounts exist; the
+  // shape does not change then, only the identifier does.
+  #localProvenance() {
+    if (!this.#deviceId) return null;
+    return createProvenance({ deviceId: this.#deviceId });
   }
 
   async initialize() {
@@ -3739,7 +3758,11 @@ export class ProjectFileRepository {
           changeEvents,
           deletedCommentIds,
         },
-        { randomUUID, now: () => nowIso(this.#clock) },
+        {
+          randomUUID,
+          now: () => nowIso(this.#clock),
+          provenance: this.#localProvenance(),
+        },
       );
     } catch (cause) {
       throw new ProjectFileRepositoryError(

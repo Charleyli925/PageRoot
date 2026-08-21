@@ -173,6 +173,7 @@
       "desktop/application-update.mjs",
       "desktop/usage-telemetry.mjs",
       "desktop/ui-preferences.mjs",
+      "desktop/device-identity.mjs",
       "desktop/preview-protocol.mjs",
       "desktop/imported-asset-root.mjs",
       "desktop/edit-runtime-bootstrap.mjs",
@@ -280,6 +281,10 @@
       {
         "from": "shared/source-history.mjs",
         "to": "shared/source-history.mjs"
+      },
+      {
+        "from": "shared/provenance.mjs",
+        "to": "shared/provenance.mjs"
       },
       {
         "from": "node_modules/parse5",

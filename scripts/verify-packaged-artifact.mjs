@@ -82,9 +82,10 @@ const REQUIRED_PACKAGED_MODULES = [
   "tiny-typed-emitter",
   "universalify",
 ];
-const REQUIRED_SHARED_FILES = [
+export const REQUIRED_SHARED_FILES = [
   "direct-edit-compatibility.mjs",
   "draft-aggregate.mjs",
+  "provenance.mjs",
   "source-history.mjs",
 ];
 const REQUIRED_LEGAL_RESOURCES = [
@@ -95,7 +96,7 @@ const REQUIRED_LEGAL_RESOURCES = [
   "THIRD_PARTY_NOTICES.md",
 ];
 const EXPECTED_MAC_TEAM_ID = "RNK9RB969G";
-const REQUIRED_APP_SOURCE_FILES = [
+export const REQUIRED_APP_SOURCE_FILES = [
   "desktop/main.mjs",
   "desktop/preload.mjs",
   "desktop/external-file-open.mjs",
@@ -119,6 +120,7 @@ const REQUIRED_APP_SOURCE_FILES = [
   "desktop/application-update.mjs",
   "desktop/usage-telemetry.mjs",
   "desktop/ui-preferences.mjs",
+  "desktop/device-identity.mjs",
   "desktop/preview-protocol.mjs",
   "desktop/imported-asset-root.mjs",
   "desktop/edit-runtime-bootstrap.mjs",
