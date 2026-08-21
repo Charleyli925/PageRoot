@@ -78,6 +78,7 @@ Read only the documents needed for the task:
 | Public-source privacy and contribution boundary | `docs/OPEN_SOURCE_BOUNDARY.md`, `CONTRIBUTING.md`, `SECURITY.md` |
 | Versioning, packaging, signing or GitHub Release | `docs/RELEASING.md` |
 | Product scope or acceptance criteria | `docs/MVP_PRD.md`, then `docs/VERSION_AND_PROJECT_FILES_PRD.md` for versions and project files |
+| AI conversation sidebar, discussion turns, model selection, adopt-and-continue | `docs/AI_CONVERSATION_WORKSPACE_PRD.md` |
 | Post-MVP cleanup sequence | `docs/POST_MVP_CLEANUP_PROGRAM.md` |
 | Simplification audit or ADR curation | `docs/SIMPLIFICATION_AUDIT.md`, `docs/ADR_CURATION.md` |
 
