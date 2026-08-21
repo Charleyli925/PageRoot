@@ -906,6 +906,21 @@ Discussion Snapshot 由 PageRoot 在 Turn 开始时建立、Turn 结束时删除
 
 Execution Turn 另受“一个 Document 一个活跃 Request”约束。执行进行中不接受同一 Document 的讨论发送。
 
+### 17.6 与既有 runtime-state 的边界
+
+以下是既有平台事实，本设计必须遵守，不得在其上另建：
+
+- **`activeRequest` 是 runtime-state 里的必填单槽，一个项目对应一个文档，因此“一个项目一个活跃 Request”与上面的“一个 Document 一个活跃 Request”是同一条约束。** Execution Turn 复用这条既有单槽 Request 路径；Conversation 绝不把自己建成一个常驻会话去占用该槽，否则会与既有 AI 执行流相撞。Discussion Turn 不创建 Request、不触碰 `activeRequest`，因此讨论并发只受第 17.5 条的进程上限约束。
+- **v4 的 source-history journal 没有生产写入者，是空的。** Conversation 持久化不复用它，也不在其上叠加，而是使用第 16.6 节自己的记录。
+- **可变记录保留未知成员，写回顺序固定为 `{...read, ...authoritative}`。** Conversation 的可变记录（`conversation.json`、`index.json`、`draft.json`）遵循该约定：加字段无需 bump schema、无需迁移；已知成员严格校验、权威值优先，未知成员从读取结果原样保留。不可变的追加型消息记录仍严格校验。
+
+### 17.7 记录归属（provenance）
+
+平台已提供写入方盖章的记录归属：`provenance = { actor: { kind: "human" | "agent", id }, device }`，由写入方盖章，不接受调用方传入，且已落在 Draft 的 comments/changeEvents 上。
+
+- Execution Turn 冻结时写入的评论与编辑事件属于 Draft 记录，因此自动带上 provenance；`agent` 类型可用来区分是哪一回合、哪个 Agent 产生的补充。Conversation 不重复盖章，读取即可。
+- Conversation 消息自身的 `actor`（`user` / `qoder` / `pageroot`）是产品层“谁在说话”的概念，与 provenance 的归属概念相关但不等同：`user` 对应 `human`，`qoder` 对应 `agent`，而 `pageroot` 是产品自身的系统事实，没有 provenance 对应项。因此不把 provenance 结构强塞进每条消息，只在冻结进 Draft 的记录上沿用平台已有的盖章。
+
 ## 18. 状态机与锁定矩阵
 
 ### 18.1 产品状态机
