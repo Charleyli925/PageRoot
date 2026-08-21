@@ -383,9 +383,24 @@ function filenameWithReservedSuffix(stem, suffix, extension, label, extraReserve
   return `${truncated}${suffix}${extension}`;
 }
 
-function workingCopyOrdinal(value) {
-  const id = assertId(value, WORKING_COPY_ID, "workingCopyId");
-  return Number.parseInt(id.slice("work_ver_".length), 10);
+// The Version ordinal is read from the manifest, never parsed back out of an
+// identifier. `workingCopyId` happens to embed the ordinal today, but that is a
+// property of the generator above, not a contract: nothing validates that a
+// Working Copy identifier agrees with its Version's ordinal. Recovering the
+// ordinal by slicing the identifier would make the identifier a data carrier
+// and would have to be undone before identifiers can become globally unique.
+function versionOrdinalFor(manifest, versionIdValue, label = "versionId") {
+  const version = manifest?.versions?.find(
+    (entry) => entry.versionId === versionIdValue,
+  );
+  if (!version || !Number.isSafeInteger(version.ordinal)) {
+    throw new ProjectFileRepositoryError(
+      "INVALID_MANIFEST",
+      `The manifest has no Version ordinal for ${label}.`,
+      { versionId: versionIdValue },
+    );
+  }
+  return version.ordinal;
 }
 
 function topLevelHtmlRelativePath(value, label = "sourceRelativePath") {
@@ -400,11 +415,10 @@ function topLevelHtmlRelativePath(value, label = "sourceRelativePath") {
   return relative;
 }
 
-function preferredNamingForWorkingCopyPath(relativePath, workingCopyIdValue) {
+function preferredNamingForWorkingCopyPath(relativePath, ordinal) {
   const relative = topLevelHtmlRelativePath(relativePath);
   const extension = htmlExtension(relative);
   const fileName = path.basename(relative, extension).normalize("NFC");
-  const ordinal = workingCopyOrdinal(workingCopyIdValue);
   const suffix = "-V" + ordinal;
   const stem = fileName.endsWith(suffix) && fileName.length > suffix.length
     ? fileName.slice(0, -suffix.length)
@@ -5473,7 +5487,11 @@ export class ProjectFileRepository {
     const sourceRelativePath = topLevelHtmlRelativePath(relative, "sourceRelativePath");
     const naming = preferredNamingForWorkingCopyPath(
       sourceRelativePath,
-      workingCopy.workingCopyId,
+      versionOrdinalFor(
+        loaded.manifest,
+        workingCopy.versionId,
+        "Working Copy versionId",
+      ),
     );
     const changed = (
       workingCopy.sourceRelativePath !== sourceRelativePath
