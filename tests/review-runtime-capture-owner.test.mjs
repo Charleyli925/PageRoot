@@ -269,8 +269,8 @@ function isolatedVisibleText({
     Range,
     String,
     TextEncoder,
-    Uint8ClampedArray,
     TreeWalker,
+    Uint8ClampedArray,
     Window,
     // The probe binds the surface readers up front, so the isolated world has
     // to expose them even for a case that only asserts visible text.
@@ -721,7 +721,7 @@ test("runtime snapshot owner keeps valid hosts when another frozen binding is re
     byteLength: 0,
     pngBytes: new Uint8Array(),
     renderedTextSha256: "",
-      surfaceSha256: "",
+    surfaceSha256: "",
   });
   assert.equal(state.capturePage.length, 2);
 });
@@ -818,7 +818,7 @@ test("runtime snapshot owner silently marks invalid PNG output unavailable", asy
     byteLength: 0,
     pngBytes: new Uint8Array(),
     renderedTextSha256: "",
-      surfaceSha256: "",
+    surfaceSha256: "",
   });
 });
 
@@ -855,7 +855,7 @@ test("runtime snapshot owner hashes bounded visible text and suppresses an over-
     byteLength: 0,
     pngBytes: new Uint8Array(),
     renderedTextSha256: "",
-      surfaceSha256: "",
+    surfaceSha256: "",
   });
   assert.deepEqual(state.capturePage || [], []);
 });
