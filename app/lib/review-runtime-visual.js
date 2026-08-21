@@ -54,6 +54,15 @@ export function reviewRuntimeVisualSnapshotComparison(before, after) {
     || before.layoutHeight !== after.layoutHeight
   ) return "changed";
   if (before.renderedTextSha256 !== after.renderedTextSha256) return "changed";
+  // The chart's own drawing surface, when both sides exposed one, answers the
+  // question window pixels cannot: it lives in the chart's coordinate space,
+  // so an unrelated edit that moves the host half a device pixel leaves it
+  // byte-identical while the window capture re-rasterizes end to end. Where
+  // this evidence exists it is strictly better than the raster budget, so it
+  // decides outright instead of being averaged into it.
+  if (before.surfaceSha256 && after.surfaceSha256) {
+    return before.surfaceSha256 === after.surfaceSha256 ? "unchanged" : "changed";
+  }
   if (before.pngSha256 === after.pngSha256) return "unchanged";
   return "raster";
 }

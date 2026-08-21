@@ -18,6 +18,7 @@ import {
   reviewRuntimeVisualMeanRgbDifference,
   reviewRuntimeVisualPixelsAreUniform,
   reviewRuntimeVisualStrongPixelRatio,
+  reviewRuntimeVisualSnapshotComparison,
 } from "../app/lib/review-runtime-visual.js";
 import { RUNTIME_VISUAL_CONTRACT } from "../app/domain/runtime-visual-contract.js";
 
@@ -57,6 +58,7 @@ function snapshot(key, pngBytes = PNG, overrides = {}) {
     byteLength: pngBytes.byteLength,
     pngBytes: new Uint8Array(pngBytes),
     renderedTextSha256: renderedTextHash("图表 9.54"),
+    surfaceSha256: "",
     ...overrides,
   };
 }
@@ -73,6 +75,7 @@ function unavailable(key) {
     byteLength: 0,
     pngBytes: new Uint8Array(),
     renderedTextSha256: "",
+    surfaceSha256: "",
   };
 }
 
@@ -681,5 +684,78 @@ test("a page that mostly failed to verify reports per-host suspicion only where 
     merged.markers.map((marker) => marker.candidateKey),
     ["runtime-host-2"],
     "a blocked chart library is one page-level cause, not four amber frames",
+  );
+});
+
+const surfaceHash = (value) => renderedTextHash(`surface:${value}`);
+
+test("a readable drawing surface decides ahead of the window raster", () => {
+  // The window capture differs because the host moved half a device pixel, but
+  // the chart drew exactly the same bytes into its own surface. Comparing
+  // window pixels here is what produced 100% false positives on real pages.
+  assert.equal(
+    reviewRuntimeVisualSnapshotComparison(
+      snapshot("runtime-host-1", PNG, { surfaceSha256: surfaceHash("2166136261") }),
+      snapshot("runtime-host-1", CHANGED_PNG, {
+        pngSha256: hash(CHANGED_PNG),
+        byteLength: CHANGED_PNG.byteLength,
+        surfaceSha256: surfaceHash("2166136261"),
+      }),
+    ),
+    "unchanged",
+  );
+});
+
+test("a differing drawing surface is a change even when the window pixels match", () => {
+  assert.equal(
+    reviewRuntimeVisualSnapshotComparison(
+      snapshot("runtime-host-1", PNG, { surfaceSha256: surfaceHash("1") }),
+      snapshot("runtime-host-1", PNG, { surfaceSha256: surfaceHash("2") }),
+    ),
+    "changed",
+  );
+});
+
+test("a surface reading only one side can never decide", () => {
+  // A tainted canvas, an unreadable context or a host with no surface at all
+  // leaves the digest empty on that side; the pair must fall back to the
+  // raster path instead of comparing a hash against nothing.
+  ["before", "after"].forEach((side) => {
+    const readable = { surfaceSha256: surfaceHash("2166136261") };
+    assert.equal(
+      reviewRuntimeVisualSnapshotComparison(
+        snapshot("runtime-host-1", PNG, side === "before" ? readable : { surfaceSha256: "" }),
+        snapshot("runtime-host-1", CHANGED_PNG, {
+          pngSha256: hash(CHANGED_PNG),
+          byteLength: CHANGED_PNG.byteLength,
+          ...(side === "after" ? readable : { surfaceSha256: "" }),
+        }),
+      ),
+      "raster",
+      `a digest present only on the ${side} side must not decide`,
+    );
+  });
+});
+
+test("dimension and visible-text evidence still outrank a matching surface", () => {
+  const matching = { surfaceSha256: surfaceHash("2166136261") };
+  assert.equal(
+    reviewRuntimeVisualSnapshotComparison(
+      snapshot("runtime-host-1", PNG, matching),
+      snapshot("runtime-host-1", PNG, { ...matching, layoutWidth: 2 }),
+    ),
+    "changed",
+    "a resized host changed even if it redrew the same surface bytes",
+  );
+  assert.equal(
+    reviewRuntimeVisualSnapshotComparison(
+      snapshot("runtime-host-1", PNG, matching),
+      snapshot("runtime-host-1", PNG, {
+        ...matching,
+        renderedTextSha256: renderedTextHash("图表 9.55"),
+      }),
+    ),
+    "changed",
+    "a visible label edit stays a change",
   );
 });

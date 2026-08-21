@@ -18,6 +18,10 @@ const SNAPSHOT_KEYS = new Set([
   "byteLength",
   "pngBytes",
   "renderedTextSha256",
+  // Hash of what the host actually drew, taken from the drawing surface itself
+  // rather than from the window. Empty when the host exposes no readable
+  // surface, which keeps it optional for every existing capture shape.
+  "surfaceSha256",
 ]);
 const PNG_HEADER = Object.freeze([137, 80, 78, 71, 13, 10, 26, 10]);
 const PNG_HASH_PATTERN = /^sha256:[a-f0-9]{64}$/u;
@@ -70,6 +74,7 @@ function acceptedUnavailableSnapshot(rawSnapshot, key) {
     || rawSnapshot.layoutHeight !== 0
     || rawSnapshot.byteLength !== 0
     || rawSnapshot.renderedTextSha256 !== ""
+    || rawSnapshot.surfaceSha256 !== ""
     || !pngBytes
     || pngBytes.byteLength !== 0
   ) return null;
@@ -84,6 +89,7 @@ function acceptedUnavailableSnapshot(rawSnapshot, key) {
     byteLength: 0,
     pngBytes,
     renderedTextSha256: "",
+    surfaceSha256: "",
   });
 }
 
@@ -103,6 +109,11 @@ function acceptedCapturedSnapshot(rawSnapshot, key) {
     || !PNG_HASH_PATTERN.test(rawSnapshot.pngSha256)
     || typeof rawSnapshot.renderedTextSha256 !== "string"
     || !PNG_HASH_PATTERN.test(rawSnapshot.renderedTextSha256)
+    || typeof rawSnapshot.surfaceSha256 !== "string"
+    || (
+      rawSnapshot.surfaceSha256 !== ""
+      && !PNG_HASH_PATTERN.test(rawSnapshot.surfaceSha256)
+    )
   ) return null;
   const dimensions = pngDimensions(pngBytes);
   if (
@@ -122,6 +133,7 @@ function acceptedCapturedSnapshot(rawSnapshot, key) {
     byteLength,
     pngBytes,
     renderedTextSha256: rawSnapshot.renderedTextSha256,
+    surfaceSha256: rawSnapshot.surfaceSha256,
   });
 }
 

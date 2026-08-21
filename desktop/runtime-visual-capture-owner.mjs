@@ -42,7 +42,19 @@ const CAPTURE_CANDIDATE_KEYS = new Set([
   "kind",
   "identityAttributes",
 ]);
-const OWNER_RECT_KEYS = new Set(["key", "state", "rect", "renderedText", "scrolled"]);
+const OWNER_RECT_KEYS = new Set([
+  "key",
+  "state",
+  "rect",
+  "renderedText",
+  "surfaceDigest",
+  "scrolled",
+]);
+// The digest itself is a short decimal fold; these bound what it is folded
+// over so one hostile canvas cannot stall the owner deadline.
+const SURFACE_DIGEST_LENGTH_LIMIT = 32;
+const SURFACE_PIXEL_LIMIT = RUNTIME_VISUAL_CONTRACT.pageBudget.canvasPixels;
+const SURFACE_MARKUP_LIMIT = 2 * 1024 * 1024;
 const RECT_KEYS = new Set(["x", "y", "width", "height"]);
 
 class CaptureCancelledError extends Error {
@@ -335,12 +347,22 @@ export function isolatedSnapshotRectScript(candidate) {
   const candidate = ${safeScriptValue(candidate)};
   const maxTextNodes = ${safeScriptValue(RUNTIME_VISUAL_PAGE_BUDGET.hostAtoms)};
   const maxRenderedTextBytes = ${safeScriptValue(RUNTIME_VISUAL_PAGE_BUDGET.renderedTextBytes)};
+  const maxSurfacePixels = ${safeScriptValue(SURFACE_PIXEL_LIMIT)};
+  const maxSurfaceMarkup = ${safeScriptValue(SURFACE_MARKUP_LIMIT)};
   const queryElements = Function.prototype.call.bind(Element.prototype.querySelectorAll);
   const getAttribute = Function.prototype.call.bind(Element.prototype.getAttribute);
   const getRect = Function.prototype.call.bind(Element.prototype.getBoundingClientRect);
   const scrollIntoView = Function.prototype.call.bind(Element.prototype.scrollIntoView);
   const getComputedStyle = Function.prototype.call.bind(window.getComputedStyle);
   const createTreeWalker = Function.prototype.call.bind(Document.prototype.createTreeWalker);
+  // Bound in the isolated world, so the authored page cannot patch them: the
+  // digest below reads the real drawing surface, not something the page can
+  // describe to us.
+  const getContext = Function.prototype.call.bind(HTMLCanvasElement.prototype.getContext);
+  const readPixels = Function.prototype.call.bind(
+    CanvasRenderingContext2D.prototype.getImageData,
+  );
+  const outerMarkup = Object.getOwnPropertyDescriptor(Element.prototype, "outerHTML").get;
   const nextTreeNode = Function.prototype.call.bind(TreeWalker.prototype.nextNode);
   const createRange = Function.prototype.call.bind(Document.prototype.createRange);
   const selectNodeContents = Function.prototype.call.bind(Range.prototype.selectNodeContents);
@@ -786,6 +808,62 @@ export function isolatedSnapshotRectScript(candidate) {
       return null;
     }
   };
+  // Window pixels answer "what did this region of the page look like", which
+  // is not the question. A chart moved half a device pixel by an unrelated
+  // edit above it re-rasterizes its antialiasing across the whole surface and
+  // reads as a confirmed change; measurement put that at 100% of hosts on
+  // three real pages. A canvas bitmap and an SVG subtree are the chart's own
+  // output in its own coordinate space, so neither moves when the host moves.
+  //
+  // The digest is a fold rather than a cryptographic hash: it runs over
+  // megabytes inside the page process, and the owner re-hashes the compact
+  // result. A cross-origin-tainted canvas throws instead of returning pixels,
+  // and any failure yields "" so the caller falls back to the raster path
+  // rather than claiming an unchanged surface it never read.
+  const foldInto = (state, value) => {
+    let hash = state;
+    for (let index = 0; index < value.length; index += 1) {
+      hash ^= value.charCodeAt(index);
+      hash = Math.imul(hash, 16777619) >>> 0;
+    }
+    return hash >>> 0;
+  };
+  const foldBytes = (state, bytes) => {
+    let hash = state;
+    for (let index = 0; index < bytes.length; index += 1) {
+      hash ^= bytes[index];
+      hash = Math.imul(hash, 16777619) >>> 0;
+    }
+    return hash >>> 0;
+  };
+  const surfaceDigestOf = (targets) => {
+    let hash = 2166136261;
+    let readable = 0;
+    for (const target of targets) {
+      if (target.tagName === "CANVAS") {
+        const width = target.width;
+        const height = target.height;
+        if (!width || !height || width * height > maxSurfacePixels) return "";
+        const context = getContext(target, "2d");
+        if (!context) return "";
+        let image;
+        try {
+          image = readPixels(context, 0, 0, width, height);
+        } catch {
+          return "";
+        }
+        hash = foldInto(hash, "canvas:" + width + "x" + height + ";");
+        hash = foldBytes(hash, image.data);
+        readable += 1;
+        continue;
+      }
+      const markup = outerMarkup.call(target);
+      if (typeof markup !== "string" || markup.length > maxSurfaceMarkup) return "";
+      hash = foldInto(hash, "svg:" + markup.replace(/\s+/gu, " ") + ";");
+      readable += 1;
+    }
+    return readable ? String(hash) : "";
+  };
   const unavailable = () => ({
     status: "captured",
     snapshots: [{
@@ -793,6 +871,7 @@ export function isolatedSnapshotRectScript(candidate) {
       state: "unavailable",
       rect: null,
       renderedText: "",
+      surfaceDigest: "",
       scrolled: false,
     }],
   });
@@ -815,16 +894,25 @@ export function isolatedSnapshotRectScript(candidate) {
   const renderedText = hostRect && hasVisiblePaint
     ? visibleRenderedText(host, hostRect)
     : null;
+  const surfaceDigest = hostRect && hasVisiblePaint ? surfaceDigestOf(paintTargets) : "";
   return {
     status: "captured",
     snapshots: [
       hostRect && hasVisiblePaint && renderedText !== null
-        ? { key: candidate.key, state: "captured", rect: hostRect, renderedText, scrolled }
+        ? {
+          key: candidate.key,
+          state: "captured",
+          rect: hostRect,
+          renderedText,
+          surfaceDigest,
+          scrolled,
+        }
         : {
           key: candidate.key,
           state: "unavailable",
           rect: null,
           renderedText: "",
+          surfaceDigest: "",
           scrolled,
         },
     ],
@@ -876,10 +964,17 @@ function normalizedOwnerRects(value, request) {
     const renderedText = rawSnapshot.state === "captured"
       ? normalizedString(rawSnapshot.renderedText, RUNTIME_VISUAL_PAGE_BUDGET.renderedTextBytes)
       : rawSnapshot.renderedText === "" ? "" : undefined;
+    const surfaceDigest = typeof rawSnapshot.surfaceDigest === "string"
+      && rawSnapshot.surfaceDigest.length <= SURFACE_DIGEST_LENGTH_LIMIT
+      && /^[0-9]*$/u.test(rawSnapshot.surfaceDigest)
+      && (rawSnapshot.state === "captured" || rawSnapshot.surfaceDigest === "")
+      ? rawSnapshot.surfaceDigest
+      : undefined;
     if (
       rect === undefined
       || renderedText === undefined
       || renderedText === null
+      || surfaceDigest === undefined
       || typeof rawSnapshot.scrolled !== "boolean"
       || (rawSnapshot.state === "captured" && !rect)
       || (
@@ -893,6 +988,7 @@ function normalizedOwnerRects(value, request) {
       state: rawSnapshot.state,
       rect,
       renderedText,
+      surfaceDigest,
       scrolled: rawSnapshot.scrolled,
     }));
   }
@@ -911,6 +1007,7 @@ function unavailableSnapshot(key) {
     byteLength: 0,
     pngBytes: new Uint8Array(),
     renderedTextSha256: "",
+    surfaceSha256: "",
   });
 }
 
@@ -1314,6 +1411,11 @@ export function createRuntimeSnapshotCaptureController({
                 layoutWidth: ownerSnapshot.rect.width,
                 layoutHeight: ownerSnapshot.rect.height,
                 renderedTextSha256: renderedTextSha256(ownerSnapshot.renderedText),
+                // A digest the page could not produce stays empty rather than
+                // hashing "" into something that looks like evidence.
+                surfaceSha256: ownerSnapshot.surfaceDigest
+                  ? renderedTextSha256(`surface:${ownerSnapshot.surfaceDigest}`)
+                  : "",
               }));
               accepted = true;
               break;
