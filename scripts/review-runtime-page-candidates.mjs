@@ -248,6 +248,36 @@ export function reviewRuntimePageMutations(html, hostIds, hostSelectors = []) {
       id: "real-insert-above",
       chartExpectation: "unchanged",
       after: insertAfterBodyOpen(html, INSERTED_BLOCK),
+      // Adding an element also changes which siblings match :first-child and
+      // :nth-child, so a page using structural selectors legitimately
+      // repaints. This probe therefore cannot tell "the chart moved" from
+      // "the chart was restyled", and a false positive recorded here is not
+      // evidence about displacement. The two shift probes below exist because
+      // that distinction is the whole question.
+      structurallyContaminated: true,
+    },
+    {
+      // Moves every following box without touching a single node, so a
+      // difference here can only come from position, never from selectors.
+      id: "real-shift-integer",
+      chartExpectation: "unchanged",
+      after: insertBeforeHeadClose(
+        html,
+        '<style data-pageroot-census-patch="true">body{padding-top:160px !important}</style>',
+      ),
+    },
+    {
+      // Half a CSS pixel lands the whole page on the opposite sub-pixel phase
+      // at every device ratio, which is the sharpest available probe for
+      // "same chart, different rasterisation". Before the surface digest this
+      // reported a false positive on 100% of comparable hosts across three
+      // authored pages, so it is the regression guard for that class.
+      id: "real-shift-fraction",
+      chartExpectation: "unchanged",
+      after: insertBeforeHeadClose(
+        html,
+        '<style data-pageroot-census-patch="true">body{padding-top:157.5px !important}</style>',
+      ),
     },
     {
       id: "real-chart-recolor",

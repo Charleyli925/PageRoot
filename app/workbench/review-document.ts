@@ -1491,10 +1491,17 @@ function annotateRuntimeVisualCandidates({
     const beforeElement = beforeSourceElements.get(before.sourceNodeId);
     const afterElement = afterSourceElements.get(after.sourceNodeId);
     if (!beforeElement || !afterElement) return;
-    const beforeOutlineId = runtimeOutlineId(beforeElement);
+    // Outline ids are positional, so inserting or deleting one section renumbers
+    // every section after it. Requiring the two sides to share an outline id
+    // therefore dropped every chart below an insertion: on one authored page a
+    // single added section took all twelve charts from verified to silently
+    // unverified. Pairing is decided by the host's own identity instead, which is
+    // the same identity the capture owner binds on and is unique by construction.
+    // Attribution then follows the after side, where the reviewer is looking, so
+    // the verdict lands on the section that actually contains the chart.
     const afterOutlineId = runtimeOutlineId(afterElement);
-    if (!beforeOutlineId || beforeOutlineId !== afterOutlineId) return;
-    const outlineItem = outlineById.get(beforeOutlineId);
+    if (!afterOutlineId) return;
+    const outlineItem = outlineById.get(afterOutlineId);
     if (!outlineItem) return;
     if (exactHostHasEquivalentBoxStyleFact(beforeElement, afterElement)) return;
     selections.push({

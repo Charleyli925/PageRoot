@@ -201,6 +201,12 @@ moves. Reading the surface alone was not enough either — CSS that repaints at
 composite time leaves a canvas byte-identical, and inverting a host went 100%
 undetected until the presentation values joined the digest.
 
+The capture window is offscreen with no zoom or scale override, so it renders at
+a device pixel ratio of 1 whatever display the reviewer is using. Both sides of
+a pair are therefore always sampled at the same ratio, and the ratio can never
+itself be a difference. Anything that pins a scale factor on that window would
+break this and has to prove the sub-pixel measurements again.
+
 The comparison result is a tri-state verdict per candidate, because dimming a
 chart host as context requires positive pixel evidence:
 

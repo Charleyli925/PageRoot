@@ -22,9 +22,11 @@ const SNAPSHOT_KEYS = new Set([
   // rather than from the window. Empty when the host exposes no readable
   // surface, which keeps it optional for every existing capture shape.
   "surfaceSha256",
+  "stability",
 ]);
 const PNG_HEADER = Object.freeze([137, 80, 78, 71, 13, 10, 26, 10]);
 const PNG_HASH_PATTERN = /^sha256:[a-f0-9]{64}$/u;
+const CAPTURE_STABILITY = new Set(["settled", "moving", "unknown"]);
 
 function isRecord(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -75,6 +77,7 @@ function acceptedUnavailableSnapshot(rawSnapshot, key) {
     || rawSnapshot.byteLength !== 0
     || rawSnapshot.renderedTextSha256 !== ""
     || rawSnapshot.surfaceSha256 !== ""
+    || rawSnapshot.stability !== "unknown"
     || !pngBytes
     || pngBytes.byteLength !== 0
   ) return null;
@@ -90,10 +93,55 @@ function acceptedUnavailableSnapshot(rawSnapshot, key) {
     pngBytes,
     renderedTextSha256: "",
     surfaceSha256: "",
+    stability: "unknown",
+  });
+}
+
+// A host wider or taller than the capture viewport has no croppable rect, so it
+// arrives with no pixels at all. Its drawing surface is still readable and still
+// decides the comparison, which is the whole reason the digest exists; refusing
+// the shape here would leave such a chart permanently unverifiable.
+function acceptedSurfaceOnlySnapshot(rawSnapshot, key) {
+  const pngBytes = copiedPngBytes(rawSnapshot.pngBytes);
+  const layoutWidth = boundedPositiveInteger(rawSnapshot.layoutWidth, RUNTIME_VISUAL_PAGE_BUDGET.viewport.maxWidth);
+  const layoutHeight = boundedPositiveInteger(rawSnapshot.layoutHeight, RUNTIME_VISUAL_PAGE_BUDGET.viewport.maxHeight);
+  if (
+    !pngBytes
+    || pngBytes.byteLength !== 0
+    || rawSnapshot.pngSha256 !== ""
+    || rawSnapshot.width !== 0
+    || rawSnapshot.height !== 0
+    || rawSnapshot.byteLength !== 0
+    || layoutWidth === null
+    || layoutHeight === null
+    || typeof rawSnapshot.renderedTextSha256 !== "string"
+    || !PNG_HASH_PATTERN.test(rawSnapshot.renderedTextSha256)
+    || typeof rawSnapshot.surfaceSha256 !== "string"
+    // Without pixels the digest is the only remaining evidence, so an empty one
+    // would leave nothing to compare and must not present as captured.
+    || !PNG_HASH_PATTERN.test(rawSnapshot.surfaceSha256)
+    || !CAPTURE_STABILITY.has(rawSnapshot.stability)
+  ) return null;
+  return Object.freeze({
+    key,
+    state: "captured",
+    pngSha256: "",
+    width: 0,
+    height: 0,
+    layoutWidth,
+    layoutHeight,
+    byteLength: 0,
+    pngBytes,
+    renderedTextSha256: rawSnapshot.renderedTextSha256,
+    surfaceSha256: rawSnapshot.surfaceSha256,
+    stability: rawSnapshot.stability,
   });
 }
 
 function acceptedCapturedSnapshot(rawSnapshot, key) {
+  if (rawSnapshot.byteLength === 0 && rawSnapshot.pngSha256 === "") {
+    return acceptedSurfaceOnlySnapshot(rawSnapshot, key);
+  }
   const pngBytes = copiedPngBytes(rawSnapshot.pngBytes);
   const byteLength = boundedInteger(rawSnapshot.byteLength, RUNTIME_VISUAL_PAGE_BUDGET.pngBytes);
   const layoutWidth = boundedPositiveInteger(rawSnapshot.layoutWidth, RUNTIME_VISUAL_PAGE_BUDGET.viewport.maxWidth);
@@ -114,6 +162,10 @@ function acceptedCapturedSnapshot(rawSnapshot, key) {
       rawSnapshot.surfaceSha256 !== ""
       && !PNG_HASH_PATTERN.test(rawSnapshot.surfaceSha256)
     )
+    // Whether the owner saw this host settle, saw it moving, or never had the
+    // budget to look are three different facts the comparison needs kept apart,
+    // so an envelope offering anything else is not trustworthy.
+    || !CAPTURE_STABILITY.has(rawSnapshot.stability)
   ) return null;
   const dimensions = pngDimensions(pngBytes);
   if (
@@ -134,6 +186,7 @@ function acceptedCapturedSnapshot(rawSnapshot, key) {
     pngBytes,
     renderedTextSha256: rawSnapshot.renderedTextSha256,
     surfaceSha256: rawSnapshot.surfaceSha256,
+    stability: rawSnapshot.stability,
   });
 }
 

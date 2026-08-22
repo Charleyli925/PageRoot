@@ -46,9 +46,23 @@ export function reviewRuntimeVisualSnapshotComparison(before, after) {
   // this evidence exists it is strictly better than the raster budget, so it
   // decides outright instead of being averaged into it.
   if (before.surfaceSha256 && after.surfaceSha256) {
-    return before.surfaceSha256 === after.surfaceSha256 ? "unchanged" : "changed";
+    if (before.surfaceSha256 === after.surfaceSha256) return "unchanged";
+    // A host the owner watched repaint between two frames differs between any
+    // two reads whether or not the chart changed. Measurement caught this on a
+    // chart animating forever: two byte-identical pages produced a confirmed
+    // change. Only an observed repaint counts; a host nobody had the budget to
+    // check a second time is not evidence of motion, and treating it as such
+    // silently halved real chart detection on authored pages.
+    if (before.stability === "moving" || after.stability === "moving") return "unavailable";
+    return "changed";
   }
+  // Two hosts with no pixels both carry an empty hash, so comparing those would
+  // read as unchanged without anything having been compared.
+  if (!before.pngSha256 || !after.pngSha256) return "unavailable";
   if (before.pngSha256 === after.pngSha256) return "unchanged";
+  // A raster distance measured against a host observed mid-repaint is not
+  // evidence either, and calling it a change would fabricate one.
+  if (before.stability === "moving" || after.stability === "moving") return "unavailable";
   return "raster";
 }
 

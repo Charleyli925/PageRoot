@@ -53,6 +53,7 @@ function ownerRects(renderedText = "图表 9.54", scrolled = false) {
       key: "runtime-host-1",
       state: "captured",
       rect: { x: 0, y: 0, width: 1, height: 1 },
+      layout: { width: 1, height: 1 },
       renderedText,
       surfaceDigest: "",
       scrolled,
@@ -63,7 +64,15 @@ function ownerRects(renderedText = "图表 9.54", scrolled = false) {
 function ownerRectsFor(key, rect, renderedText = "图表 9.54", scrolled = false) {
   return {
     status: "captured",
-    snapshots: [{ key, state: "captured", rect, renderedText, surfaceDigest: "", scrolled }],
+    snapshots: [{
+      key,
+      state: "captured",
+      rect,
+      layout: { width: rect.width, height: rect.height },
+      renderedText,
+      surfaceDigest: "",
+      scrolled,
+    }],
   };
 }
 
@@ -722,6 +731,7 @@ test("runtime snapshot owner keeps valid hosts when another frozen binding is re
     pngBytes: new Uint8Array(),
     renderedTextSha256: "",
     surfaceSha256: "",
+    stability: "unknown",
   });
   assert.equal(state.capturePage.length, 2);
 });
@@ -759,10 +769,12 @@ test("runtime snapshot owner captures each host before measuring the next viewpo
     "paint",
     "measure",
     "capture",
+    "paint",
     "measure",
     "capture",
     "measure",
     "capture",
+    "paint",
     "measure",
     "capture",
   ]);
@@ -819,6 +831,7 @@ test("runtime snapshot owner silently marks invalid PNG output unavailable", asy
     pngBytes: new Uint8Array(),
     renderedTextSha256: "",
     surfaceSha256: "",
+    stability: "unknown",
   });
 });
 
@@ -856,6 +869,7 @@ test("runtime snapshot owner hashes bounded visible text and suppresses an over-
     pngBytes: new Uint8Array(),
     renderedTextSha256: "",
     surfaceSha256: "",
+    stability: "unknown",
   });
   assert.deepEqual(state.capturePage || [], []);
 });
@@ -884,8 +898,8 @@ test("capture settles after the first paint before measuring or sampling pixels"
   assert.ok(elapsedMs >= 55, `capture sampled after ${elapsedMs.toFixed(1)}ms without settling`);
   assert.deepEqual(
     state.captureEvents.map(({ type }) => type),
-    ["paint", "measure", "capture", "measure", "capture"],
-    "the settle wait must not reorder paint, measurement and capture",
+    ["paint", "measure", "capture", "paint", "measure", "capture"],
+    "the second frame waits for a real paint, and the order never reorders",
   );
 });
 
@@ -970,7 +984,7 @@ test("a probe that scrolled the page waits for the frame that reflects it before
   );
   assert.deepEqual(
     afterLoad.map((event) => event.type),
-    ["measure", "paint", "capture", "measure", "capture"],
+    ["measure", "paint", "capture", "paint", "measure", "capture"],
     "capturePage must not sample the frame that preceded the probe scroll",
   );
 });
@@ -985,7 +999,7 @@ test("a probe that did not move the page samples without waiting for another fra
   );
   assert.deepEqual(
     afterLoad.map((event) => event.type),
-    ["measure", "capture", "measure", "capture"],
+    ["measure", "capture", "paint", "measure", "capture"],
     "an unmoved page must not pay for a frame wait it does not need",
   );
 });
@@ -1014,6 +1028,7 @@ test("an owner rect payload without a scroll fact is rejected instead of assumed
         key: "runtime-host-1",
         state: "captured",
         rect: { x: 0, y: 0, width: 1, height: 1 },
+        layout: { width: 1, height: 1 },
         renderedText: "图表 9.54",
         surfaceDigest: "",
       }],
