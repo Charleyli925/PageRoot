@@ -18,7 +18,7 @@ const CHART_SCRIPT = `
   };
 `;
 
-function page(title, body, script = "") {
+function page(title, body, script = "", headStyle = "") {
   return `<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -28,6 +28,7 @@ function page(title, body, script = "") {
   body { margin: 0; font-family: system-ui, sans-serif; background: #f8fafc; }
   section { padding: 24px; }
   .host { width: 240px; height: 160px; }
+  ${headStyle}
 </style>
 </head>
 <body>
@@ -184,6 +185,8 @@ export function reviewRuntimeAdversarialScenarios() {
       // the same identity must close the binding rather than pick either one.
       property: "身份重复时绑定关闭，不得任选其一",
       expectation: "mustNotConfirmUnchanged",
+      // The only page here whose binding is meant to close entirely.
+      expectedCandidates: 0,
       hostId: "adv-dup",
       before: page(
         "重复身份",
@@ -306,26 +309,31 @@ export function reviewRuntimeAdversarialScenarios() {
     }),
     Object.freeze({
       id: "composite-filter",
-      property: "合成期 filter 必须被发现",
+      // The effect is applied by the script at runtime, not written on the host
+      // in source. A box style the static diff can pin on the exact host is
+      // already reported by the static layer, and the runtime deliberately skips
+      // it to avoid saying the same thing twice — so a source-side style would
+      // test the wrong thing here. Only a runtime-applied effect exercises the
+      // presentation half of the digest.
+      property: "运行时施加的合成期 filter 必须被发现",
       expectation: "changed",
       hostId: "adv-filter",
       before: page("合成期 filter", '<div class="host" id="adv-filter"></div>', `
+        const host = document.getElementById("adv-filter");
         const canvas = document.createElement("canvas");
         canvas.width = 240; canvas.height = 160;
-        document.getElementById("adv-filter").appendChild(canvas);
+        host.appendChild(canvas);
         draw(canvas, "#0284c7");
+        host.style.filter = "none";
       `),
-      after: page(
-        "合成期 filter",
-        '<div class="host" id="adv-filter"></div>'
-        + "<style>#adv-filter { filter: invert(1); }</style>",
-        `
+      after: page("合成期 filter", '<div class="host" id="adv-filter"></div>', `
+        const host = document.getElementById("adv-filter");
         const canvas = document.createElement("canvas");
         canvas.width = 240; canvas.height = 160;
-        document.getElementById("adv-filter").appendChild(canvas);
+        host.appendChild(canvas);
         draw(canvas, "#0284c7");
-      `,
-      ),
+        host.style.filter = "invert(1)";
+      `),
     }),
   ]);
 }

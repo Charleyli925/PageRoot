@@ -153,12 +153,18 @@ async function drawnHostCount(previewController, html, candidates) {
         const rect = node.getBoundingClientRect();
         return rect.width >= 1 && rect.height >= 1;
       };
-      return selectors.filter((selector) => {
-        const host = document.querySelector(selector);
-        if (!host) return false;
-        if (host.tagName === "CANVAS" || host.tagName === "svg") return drawn(host);
-        return [...host.querySelectorAll("canvas,svg")].some(drawn);
-      }).length;
+      return {
+        // The ratio the capture actually measured at. Every sub-pixel conclusion
+        // depends on it, so a report that does not state it cannot be checked
+        // against the machine a reviewer really uses.
+        devicePixelRatio: window.devicePixelRatio,
+        drawn: selectors.filter((selector) => {
+          const host = document.querySelector(selector);
+          if (!host) return false;
+          if (host.tagName === "CANVAS" || host.tagName === "svg") return drawn(host);
+          return [...host.querySelectorAll("canvas,svg")].some(drawn);
+        }).length,
+      };
     })()`);
   } finally {
     probe.destroy();
@@ -228,6 +234,11 @@ async function main() {
       expectation: scenario.expectation,
       drawsAtRuntime: true,
       structurallyContaminated: false,
+      // Each adversarial page is authored to produce exactly one host, so a case
+      // that yields none tested nothing at all and must not read as a pass.
+      expectedCandidates: scenario.expectedCandidates === undefined
+        ? 1
+        : scenario.expectedCandidates,
     }));
   }
   for (const pagePath of pages) {
@@ -249,6 +260,7 @@ async function main() {
   }
 
   const drawnHostsByPage = new Map();
+  let devicePixelRatio = null;
   {
     for (const testCase of cases) {
       const html = testCase.before;
@@ -260,6 +272,7 @@ async function main() {
         chartExpectation: testCase.expectation,
         structurallyContaminated: testCase.structurallyContaminated,
       };
+      const expectedCandidates = testCase.expectedCandidates;
       let drawnHosts = drawnHostsByPage.has(label) ? drawnHostsByPage.get(label) : null;
       sequence += 1;
       const sessionId = `review-e2e-${String(sequence).padStart(6, "0")}`;
@@ -360,11 +373,17 @@ async function main() {
       const expectation = mutation.chartExpectation;
       if (drawnHosts === null) {
         // An unmeasurable count must stay visible rather than abort the suite or
-        // pass as zero, so it is carried as -1 and gated on below.
+        // pass as zero, so it is carried as -1 and reported below.
         try {
-          drawnHosts = documents.captureCandidates.before.length
-            ? await drawnHostCount(previewController, html, documents.captureCandidates.before)
-            : 0;
+          if (documents.captureCandidates.before.length) {
+            const measured = await drawnHostCount(
+              previewController,
+              html,
+              documents.captureCandidates.before,
+            );
+            drawnHosts = measured.drawn;
+            devicePixelRatio = measured.devicePixelRatio;
+          } else drawnHosts = 0;
         } catch {
           drawnHosts = -1;
         }
@@ -408,6 +427,9 @@ async function main() {
         return reviewRuntimeVisualSnapshotComparison(first, second) === "unchanged";
       });
       const failures = [];
+      if (expectedCandidates !== undefined && documents.candidates.length < expectedCandidates) {
+        failures.push(`候选 ${documents.candidates.length} < 期望 ${expectedCandidates}，本例什么都没测`);
+      }
       if (expectation === "mustNotConfirmUnchanged" && claimedVerifiedUnchanged) {
         failures.push("冒充已核实未变");
       }
@@ -495,6 +517,7 @@ async function main() {
     generatedAt: new Date().toISOString(),
     suspicionBudget: SUSPICION_BUDGET,
     viewport: VIEWPORT,
+    devicePixelRatio,
     totals: {
       rows: rows.length,
       gatingFailures: gatingFailures.length,
@@ -504,7 +527,8 @@ async function main() {
     rows,
   }, null, 2)}\n`);
   process.stdout.write(
-    `\n行数 ${rows.length}，门禁失败 ${gatingFailures.length}\n`
+    `\n行数 ${rows.length}，门禁失败 ${gatingFailures.length}，`
+    + `设备像素比 ${devicePixelRatio === null ? "未测" : devicePixelRatio}\n`
     + `report: ${reportPath}\n`,
   );
   app.exit(gatingFailures.length ? 1 : 0);
