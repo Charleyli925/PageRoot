@@ -102,6 +102,54 @@ function rasterEvidence(candidates, before, after) {
   return { differenceByKey, uniformKeys };
 }
 
+// Whether a candidate is a chart at all can only be answered by the loaded
+// page: a charting library creates its canvas at runtime, and a source-empty
+// container that a script fills with table rows is not a chart even though it
+// looks like a host to any static discoverer. Counting the drawn surfaces
+// inside each candidate is what makes the report's denominator real chart hosts
+// instead of guesses, which is the difference between "verified nothing" being
+// a gap and being the correct answer.
+async function drawnHostCount(previewController, html, candidates) {
+  const ids = candidates
+    .map((candidate) => candidate.identityAttributes?.find(([name]) => name === "id")?.[1])
+    .filter((id) => typeof id === "string" && id);
+  // A measurement that quietly returns zero would switch the gate off while
+  // looking like a clean page, so an unusable input is an error rather than a
+  // count.
+  if (!ids.length) throw new Error("drawnHostCount: no id-bearing candidates supplied");
+  const session = await previewController.createSession({
+    html,
+    bootstrapJavaScript: "",
+  });
+  if (!session?.sessionId || !session?.url) {
+    throw new Error("drawnHostCount: preview session unavailable");
+  }
+  const probe = new BrowserWindow({
+    show: false,
+    width: VIEWPORT.width,
+    height: VIEWPORT.height,
+    webPreferences: { offscreen: true, contextIsolation: true, nodeIntegration: false, sandbox: true },
+  });
+  try {
+    await probe.loadURL(session.url);
+    await new Promise((resolve) => setTimeout(resolve, RUNTIME_VISUAL_CONTRACT.captureSettleMs));
+    return await probe.webContents.executeJavaScript(`(() => {
+      const ids = ${JSON.stringify(ids)};
+      return ids.filter((id) => {
+        const host = document.getElementById(id);
+        if (!host) return false;
+        return [...host.querySelectorAll("canvas,svg")].some((node) => {
+          const rect = node.getBoundingClientRect();
+          return rect.width >= 1 && rect.height >= 1;
+        });
+      }).length;
+    })()`);
+  } finally {
+    probe.destroy();
+    await Promise.resolve(previewController.revokeSession(session.sessionId)).catch(() => undefined);
+  }
+}
+
 async function main() {
   const pages = process.argv.slice(process.argv.indexOf("--") + 1);
   if (!pages.length) throw new Error("Expected at least one page path.");
@@ -149,6 +197,11 @@ async function main() {
   for (const pagePath of pages) {
     const html = readFileSync(path.resolve(pagePath), "utf8");
     const label = path.basename(pagePath).slice(0, 30);
+    // Charting libraries draw into a canvas they create at runtime, so the
+    // source rarely contains one. The library reference, or an inline vector
+    // graphic, is what says this page has a runtime visual at all.
+    const pageDrawsAtRuntime = /echarts|chart\.js|plotly|highcharts|<svg|<canvas/iu.test(html);
+    let drawnHosts = null;
     for (const mutation of reviewRuntimePageMutations(html, [], [])) {
       sequence += 1;
       const sessionId = `review-e2e-${String(sequence).padStart(6, "0")}`;
@@ -178,9 +231,10 @@ async function main() {
 
       const captureSide = async (side) => {
         const candidates = documents.captureCandidates[side];
-        if (!candidates.length) return [];
+        if (!candidates.length) return { snapshots: [], outcome: "no-candidates", elapsedMs: 0 };
         const sideHtml = side === "before" ? html : mutation.after;
-        const outcome = await controller.capture({
+        const startedAt = Date.now();
+        const result = await controller.capture({
           contractVersion: RUNTIME_VISUAL_CONTRACT.version,
           captureSessionId: sessionId,
           sourceSha256: sha(sideHtml),
@@ -189,14 +243,27 @@ async function main() {
           candidates,
           viewport: VIEWPORT,
         });
-        if (outcome?.outcome !== "captured") return [];
-        return acceptRuntimeVisualSnapshots(
-          outcome.envelope.runtimeVisualSnapshots,
-          new Set(candidates.map((candidate) => candidate.key)),
-        ) || [];
+        const elapsedMs = Date.now() - startedAt;
+        // Whether the owner answered at all is a different fact from whether a
+        // host was measurable, and only the first can be a timeout. Collapsing
+        // them hides which of the two a page is failing on.
+        const outcome = result?.outcome === "captured"
+          ? "captured"
+          : `${result?.outcome || "none"}:${result?.reason || ""}`;
+        if (result?.outcome !== "captured") return { snapshots: [], outcome, elapsedMs };
+        return {
+          snapshots: acceptRuntimeVisualSnapshots(
+            result.envelope.runtimeVisualSnapshots,
+            new Set(candidates.map((candidate) => candidate.key)),
+          ) || [],
+          outcome,
+          elapsedMs,
+        };
       };
-      const before = await captureSide("before");
-      const after = await captureSide("after");
+      const beforeSide = await captureSide("before");
+      const afterSide = await captureSide("after");
+      const before = beforeSide.snapshots;
+      const after = afterSide.snapshots;
       const { differenceByKey, uniformKeys } = rasterEvidence(documents.candidates, before, after);
       const verdicts = classifyReviewRuntimeVisualCandidates({
         candidates: documents.candidates,
@@ -228,11 +295,21 @@ async function main() {
         .filter((marker) => !changeIds.has(marker.changeId))
         .map((marker) => marker.changeId);
       const expectation = mutation.chartExpectation;
-      // A page where nothing could be captured proves nothing. Every "no false
-      // positive" reading on such a row is empty, so it must never present as a
-      // pass: an all-green report built from unverified hosts is worse than a
-      // red one, because it invites trust it has not earned.
-      const nothingVerified = documents.candidates.length > 0 && capturedBoth === 0;
+      if (drawnHosts === null) {
+        drawnHosts = await drawnHostCount(
+          previewController,
+          html,
+          documents.captureCandidates.before,
+        );
+      }
+      // A page with no charting library and no inline vector graphic has no
+      // runtime visual to verify, and neither has a page whose candidates draw
+      // nothing once loaded. "Nothing verified" is the correct answer in both
+      // cases, so gating on it would fail a page for behaving exactly as a
+      // reviewer would expect.
+      const nothingVerified = drawnHosts > 0
+        && capturedBoth === 0
+        && pageDrawsAtRuntime;
       // A "must be reported" expectation is only valid when the mutation
       // actually reached the page. A chart-library hook cannot touch a page
       // that has no such library, and a palette override cannot move a chart
@@ -253,7 +330,14 @@ async function main() {
         && !renderedDifference;
       const failures = [];
       if (nothingVerified) {
-        failures.push(`未核实任何宿主（候选 ${documents.candidates.length}）`);
+        failures.push(
+          `未核实任何宿主（真实图表宿主 ${drawnHosts}，`
+          + `before=${beforeSide.outcome}/${beforeSide.elapsedMs}ms，`
+          + `after=${afterSide.outcome}/${afterSide.elapsedMs}ms）`,
+        );
+      }
+      if (expectation === "changed" && drawnHosts > 0 && capturedBoth < drawnHosts) {
+        failures.push(`核实覆盖不全 ${capturedBoth}/${drawnHosts}`);
       }
       if (expectation === "unchanged" && confirmed > 0) {
         failures.push(`假确认 ${confirmed}`);
@@ -284,11 +368,17 @@ async function main() {
         expectation,
         staticChanges: documents.changes.length,
         candidates: documents.candidates.length,
+        drawnHosts,
         capturedBoth,
         confirmed,
         suspected,
         renderedDifference,
         nothingVerified,
+        pageDrawsAtRuntime,
+        capture: {
+          before: { outcome: beforeSide.outcome, elapsedMs: beforeSide.elapsedMs },
+          after: { outcome: afterSide.outcome, elapsedMs: afterSide.elapsedMs },
+        },
         probeIneffective,
         orphanMarkers,
         failures,
@@ -298,6 +388,7 @@ async function main() {
         `${label.padEnd(32)} ${mutation.id.padEnd(20)} `
         + `静态变化=${String(documents.changes.length).padStart(3)} `
         + `候选=${String(documents.candidates.length).padStart(2)} `
+        + `图表宿主=${String(drawnHosts).padStart(2)} `
         + `两侧捕获=${String(capturedBoth).padStart(2)} `
         + `确认=${String(confirmed).padStart(2)} `
         + `疑似=${String(suspected).padStart(2)} `
