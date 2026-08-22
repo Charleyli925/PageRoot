@@ -54,6 +54,7 @@ const BRIDGE_FILES = [
   "workspace-bridge-shutdown.mjs",
   "agent-bridge-service.mjs",
   "qoder-acp-client.mjs",
+  "discussion-turn-runner.mjs",
   "finalize-attempt.mjs",
   "lifecycle-core.mjs",
   "project-file-repository.mjs",
