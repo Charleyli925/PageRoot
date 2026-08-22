@@ -880,6 +880,8 @@ Conversation Repository 使用项目受管目录，并沿用仓库既有的持�
 
 两者复用同一批文件安全校验（禁符号链接祖先、正规文件校验、身份比对），但能力集合在 Bridge 与工具 Schema 层真实不同，不靠 Prompt 文案区分。
 
+两者也复用同一个 ACP 驱动，但驱动**按带品牌策略的 `mode` 分派**：Host、向 Agent 声明的客户端能力（讨论模式为 `writeTextFile:false`、`terminal:false`）、以及是否要求 Turn 完成证据，全部由策略决定，调用方不能注入 Host。因此“执行策略配讨论 Host”或反向组合在结构上不可能出现。执行模式的 `assertTurnCompleted()` 是**强制调用**，不是可选调用：一旦该方法缺失或改名，Turn 直接失败，而不是静默跳过 finalizer 证据。讨论模式显式声明“不要求完成证据”，其 Turn 结果里没有 completion。
+
 Discussion Snapshot 由 PageRoot 在 Turn 开始时建立、Turn 结束时删除。Agent 不知道也不能推导 Working Copy 的真实路径。
 
 ### 17.3 Execution Host

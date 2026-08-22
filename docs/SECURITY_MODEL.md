@@ -207,7 +207,12 @@ or missing runtime state never scans Request directories to revive an active
 Request or to adopt a replacement input-manifest digest.
 
 The packaged Qoder ACP driver narrows the protocol surface but does not change
-that trust statement. It checks the runtime-sealed manifest Hash, exact current
+that trust statement. One driver serves both the execution and the discussion
+policy, and the branded policy `mode` — never a caller-supplied host — selects
+the host, the client capabilities declared to the Agent and whether the turn
+must prove completion; a host that cannot answer the required surface, such as a
+read-only host in an execution turn, is refused before the turn starts. For an
+execution turn it checks the runtime-sealed manifest Hash, exact current
 Request layout, frozen file identities, single Candidate path and exact
 official finalizer; every other ACP filesystem and terminal request is rejected.
 It revalidates runtime authority before mutations and Candidate publication,
