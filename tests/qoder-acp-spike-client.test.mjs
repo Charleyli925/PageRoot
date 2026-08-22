@@ -810,6 +810,10 @@ test("ACP ClientApp completes a synthetic PageRoot Candidate turn", async (t) =>
   assert.deepEqual(reviewBoundaryAfter, reviewBoundaryBefore);
   assert.equal(result.updates[0].type, "tool_call");
   assert.ok(events.some((event) => event.kind === "turn-stopped"));
+  // An execution turn passes no Agent prose: its payload is the Candidate file.
+  assert.equal(result.visibleText, "");
+  assert.equal(result.visibleTextTruncated, false);
+  assert.equal(events.some((event) => event.kind === "visible-text"), false);
 });
 
 test("ACP session progress retains and publishes only a bounded update prefix", async (t) => {
@@ -1301,6 +1305,9 @@ test("the execution driver profile fails closed on a host without completion pro
   assert.equal(fixture.policy.mode, "execution");
   assert.equal(profile.mode, "execution");
   assert.equal(profile.requiresTurnCompletion, true);
+  // ADR 0036 authorizes visible Agent prose for discussion only. An execution
+  // turn's payload is a file, so it keeps capturing nothing.
+  assert.equal(profile.visibleTextByteLimit, 0);
   assert.deepEqual(profile.clientCapabilities, {
     fs: { readTextFile: true, writeTextFile: true },
     terminal: true,

@@ -102,6 +102,29 @@ const app = acp.agent({ name: "pageroot-e2e-qoder" })
         terminalRefused = true;
       }
       if (!terminalRefused) throw new Error("PageRoot discussion terminal must be refused");
+      // Visible prose is the payload of a discussion turn (ADR 0036). The thought
+      // chunk must be dropped by the driver rather than reaching the user.
+      await client.notify(acp.methods.client.session.update, {
+        sessionId,
+        update: {
+          sessionUpdate: "agent_thought_chunk",
+          content: { type: "text", text: "internal reasoning must not surface" },
+        },
+      });
+      await client.notify(acp.methods.client.session.update, {
+        sessionId,
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          content: { type: "text", text: "这页的标题偏笼统，" },
+        },
+      });
+      await client.notify(acp.methods.client.session.update, {
+        sessionId,
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          content: { type: "text", text: "可以点明读者能得到什么。" },
+        },
+      });
       return { stopReason: "end_turn" };
     }
     const changeRequest = await client.request(acp.methods.client.fs.readTextFile, {

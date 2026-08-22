@@ -283,6 +283,31 @@ export function sidebarSendState({
 }
 
 /**
+ * The Agent's reply for the live discussion turn, projected with exactly the
+ * same shape as a stored message so the view reuses one treatment instead of
+ * inventing a second card for streaming text.
+ *
+ * Returns null until some text has arrived: an empty shell that later fills
+ * would make the stream jump for no information.
+ */
+export function sidebarLiveReply(discussion) {
+  if (!discussion) return null;
+  const text = typeof discussion.replyText === "string" ? discussion.replyText : "";
+  if (!text.trim()) return null;
+  const status = String(discussion.status || "");
+  return Object.freeze({
+    actor: "qoder",
+    actorLabel: sidebarActorLabel("qoder"),
+    text,
+    truncated: discussion.replyTruncated === true,
+    // An interrupted reply says so on the reply itself, not only in the Composer
+    // notice, because the text is what the user reads.
+    interrupted: discussion.interrupted === true,
+    streaming: status === "starting" || status === "running",
+  });
+}
+
+/**
  * The discussion turn's own visible line. A turn that stopped early must say so:
  * showing its partial text with no marker would present an interrupted answer as
  * a complete one.

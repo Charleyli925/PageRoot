@@ -268,16 +268,18 @@ export async function runDiscussionTurn({
     // The driver only returns its retained updates on a completed turn, so the
     // runner keeps its own bounded copy. That is what lets an interrupted turn
     // report what actually arrived instead of pretending it never started.
-    // Scope note: these are the driver's bounded, sanitized update summaries.
-    // Passing visible Agent text through is a separate decision (PRD §20 visible
-    // text stream) and is not enabled here.
+    // The same applies to the reply itself (ADR 0036): a timed-out turn keeps
+    // the words that did arrive, and they are marked interrupted, never shown as
+    // a finished answer.
     const retained = [];
     let droppedUpdateCount = 0;
+    let replyText = "";
     const collect = (event) => {
       if (event?.kind === "session-update") {
         if (retained.length < MAX_RETAINED_UPDATES) retained.push(event);
         else droppedUpdateCount += 1;
       }
+      if (event?.kind === "visible-text") replyText += event.text;
       onEvent(event);
     };
 
@@ -296,6 +298,8 @@ export async function runDiscussionTurn({
         turnId: safeTurnId,
         sourceSha256,
         stopReason: result?.stopReason ?? null,
+        replyText: result?.visibleText ?? replyText,
+        replyTruncated: result?.visibleTextTruncated === true,
         updates: Object.freeze([...(result?.updates ?? retained)]),
         droppedUpdateCount: result?.droppedUpdateCount ?? droppedUpdateCount,
       });
@@ -311,6 +315,8 @@ export async function runDiscussionTurn({
         turnId: safeTurnId,
         sourceSha256,
         stopReason: null,
+        replyText,
+        replyTruncated: false,
         updates: Object.freeze([...retained]),
         droppedUpdateCount,
       });

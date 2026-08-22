@@ -7,6 +7,7 @@ import {
   sidebarDiscussionNotice,
   sidebarDraftNotice,
   sidebarIntentOptions,
+  sidebarLiveReply,
   sidebarMessageStream,
   sidebarModePresentation,
   sidebarResolvedIntent,
@@ -52,6 +53,8 @@ export type AiConversationSidebarProps = {
     status?: string;
     interrupted?: boolean;
     interruptedReason?: string | null;
+    replyText?: string;
+    replyTruncated?: boolean;
   } | null;
   onIntentChange?: (intent: SidebarIntent) => void;
   onDraftChange?: (text: string) => void;
@@ -111,6 +114,7 @@ export default function AiConversationSidebar({
   });
   const draftNotice = sidebarDraftNotice(state);
   const discussionNotice = sidebarDiscussionNotice(discussion);
+  const liveReply = sidebarLiveReply(discussion);
 
   // The intent switch is a radio group: arrow keys, Home and End move between
   // its options, and the pressed state is exposed rather than implied by colour.
@@ -170,7 +174,7 @@ export default function AiConversationSidebar({
       >
         {loading ? (
           <p className={styles.placeholder}>正在读取这份文档的对话…</p>
-        ) : stream.length === 0 ? (
+        ) : stream.length === 0 && !liveReply ? (
           <p className={styles.placeholder}>
             还没有对话。说说你想改哪里，或者先问问这个页面。
           </p>
@@ -195,6 +199,30 @@ export default function AiConversationSidebar({
             </article>
           ))
         )}
+
+        {/*
+          * The live reply for the current discussion turn. It borrows the stored
+          * message treatment rather than introducing a second card, so streaming
+          * text looks like what it will become once the turn is recorded.
+          */}
+        {liveReply ? (
+          <article
+            className={styles.message}
+            data-actor={liveReply.actor}
+            data-kind="text"
+            data-status={liveReply.streaming ? "streaming" : "completed"}
+            data-testid="ai-conversation-live-reply"
+          >
+            <span className={styles.actor}>{liveReply.actorLabel}</span>
+            <p className={styles.text}>{liveReply.text}</p>
+            {liveReply.truncated ? (
+              <small className={styles.truncated}>部分内容已省略</small>
+            ) : null}
+            {liveReply.interrupted ? (
+              <small className={styles.interrupted}>这条回复没有完成</small>
+            ) : null}
+          </article>
+        ) : null}
       </div>
 
       {/*

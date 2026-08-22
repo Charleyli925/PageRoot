@@ -47,9 +47,11 @@ function cleanText(value, maxLength = 160) {
 }
 
 // The renderer receives turn state only: no snapshot path, no prompt, no page
-// bytes, no command and no environment. The context Hash is included because the
-// renderer already holds the same Working Copy Hash and needs to know which
-// bytes were discussed.
+// bytes, no command and no environment. Two things do cross: the context Hash,
+// because the renderer already holds the same Working Copy Hash and needs to know
+// which bytes were discussed, and the Agent's visible reply, which is the whole
+// payload of a discussion turn and is bounded and sanitized by the driver
+// (ADR 0036). The reply carries no authority: it cannot change the page.
 function publicDiscussion(entry) {
   if (!entry) return null;
   return Object.freeze({
@@ -64,6 +66,8 @@ function publicDiscussion(entry) {
     agentName: entry.agentName || null,
     agentVersion: entry.agentVersion || null,
     eventCount: entry.eventCount,
+    replyText: entry.replyText,
+    replyTruncated: entry.replyTruncated === true,
     interrupted: entry.interrupted === true,
     ...(entry.interruptedReason ? { interruptedReason: entry.interruptedReason } : {}),
     ...(entry.errorCode ? { errorCode: entry.errorCode } : {}),
@@ -75,6 +79,7 @@ function phaseForEvent(event, current) {
   switch (event?.kind) {
     case "initialized": return "starting-session";
     case "file-read": return "reading-page";
+    case "visible-text": return "replying";
     case "session-update": return "discussing";
     case "turn-stopping":
     case "turn-stopped": return "finishing";
@@ -237,6 +242,8 @@ export class DiscussionBridgeService {
       agentName: null,
       agentVersion: ticket.evidence?.version || null,
       eventCount: 0,
+      replyText: "",
+      replyTruncated: false,
       interrupted: false,
       interruptedReason: null,
       errorCode: null,
@@ -259,6 +266,10 @@ export class DiscussionBridgeService {
         entry.agentName = cleanText(event.agentName) || "Qoder CLI";
         entry.agentVersion = cleanText(event.agentVersion) || entry.agentVersion;
       }
+      // The reply streams in as it arrives, so the user reads it while it is
+      // being written instead of waiting for the turn to settle. The driver has
+      // already bounded and sanitized every chunk.
+      if (event?.kind === "visible-text") entry.replyText += event.text;
       touch();
     };
 
@@ -276,6 +287,9 @@ export class DiscussionBridgeService {
       if (this.#sessions.get(documentId) !== entry) return;
       entry.interrupted = outcome.interrupted === true;
       entry.interruptedReason = outcome.interruptedReason || null;
+      // The settled outcome is authoritative over the streamed fragments.
+      if (typeof outcome.replyText === "string") entry.replyText = outcome.replyText;
+      entry.replyTruncated = outcome.replyTruncated === true;
       entry.state = outcome.status === "completed"
         ? "completed"
         : outcome.interruptedReason === "cancelled"

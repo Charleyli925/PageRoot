@@ -16,6 +16,8 @@ export type DiscussionTurnProjection = {
   agentName: string | null;
   agentVersion: string | null;
   eventCount: number;
+  replyText: string;
+  replyTruncated: boolean;
   interrupted: boolean;
   interruptedReason?: string;
   errorCode?: string;
@@ -31,6 +33,8 @@ export type DiscussionTurnSnapshot = {
   turnId: string | null;
   sourceSha256: string | null;
   phase: string | null;
+  replyText: string;
+  replyTruncated: boolean;
   interrupted: boolean;
   interruptedReason: string | null;
   busy: boolean;

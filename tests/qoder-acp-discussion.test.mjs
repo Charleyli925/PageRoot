@@ -226,6 +226,9 @@ function createDiscussionAgent(policy, observed) {
         sessionId,
         path: policy.snapshotPath,
       });
+      for (const update of observed.updates ?? []) {
+        await client.notify(acp.methods.client.session.update, { sessionId, update });
+      }
       const refused = async (method, params) => client
         .request(method, { sessionId, ...params })
         .then(() => "fulfilled", (error) => `refused: ${String(error?.message || error)}`);
@@ -300,4 +303,70 @@ test("the discussion driver profile grants no execution authority", async () => 
     () => acpDriverProfile({ mode: "discussion" }),
     /verified PageRoot policy/u,
   );
+});
+
+// ADR 0036: a discussion turn may carry the Agent's visible words, bounded and
+// sanitized. These pins hold what may cross and what must not.
+
+test("a discussion turn returns the Agent's visible text and drops its reasoning", async () => {
+  const root = await discussionRoot();
+  const policy = await loadQoderAcpDiscussionPolicy({ snapshotRoot: root });
+  const observed = {
+    updates: [
+      { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "标题可以更具体，" } },
+      // Hidden reasoning must never reach the caller.
+      { sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "内部推理不得外泄" } },
+      // A non-text content block carries no visible words.
+      { sessionUpdate: "agent_message_chunk", content: { type: "image", data: "" } },
+      // Control characters are stripped on capture.
+      { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "比如\u0007加上季度。" } },
+    ],
+  };
+  const events = [];
+
+  const result = await runAcpTask({
+    connection: createDiscussionAgent(policy, observed),
+    policy,
+    prompt: "这个标题怎么改？",
+    onEvent: (value) => events.push(value),
+    startupTimeoutMs: 1_000,
+    turnTimeoutMs: 2_000,
+  });
+
+  assert.equal(result.visibleText, "标题可以更具体，比如加上季度。");
+  assert.equal(result.visibleTextTruncated, false);
+  assert.doesNotMatch(result.visibleText, /内部推理/u);
+  assert.doesNotMatch(result.visibleText, /[\u0000-\u001f]/u);
+
+  // The same text streams out as events so a caller can show it while it arrives.
+  const streamed = events
+    .filter((event) => event.kind === "visible-text")
+    .map((event) => event.text)
+    .join("");
+  assert.equal(streamed, result.visibleText);
+});
+
+test("an over-budget reply is marked truncated rather than silently clipped", async () => {
+  const root = await discussionRoot();
+  const policy = await loadQoderAcpDiscussionPolicy({ snapshotRoot: root });
+  const budget = acpDriverProfile(policy).visibleTextByteLimit;
+  assert.equal(budget, 64 * 1024);
+  const observed = {
+    updates: [
+      { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "x".repeat(budget) } },
+      { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "超出预算的内容" } },
+    ],
+  };
+
+  const result = await runAcpTask({
+    connection: createDiscussionAgent(policy, observed),
+    policy,
+    prompt: "请详细说明。",
+    startupTimeoutMs: 1_000,
+    turnTimeoutMs: 4_000,
+  });
+
+  assert.equal(Buffer.byteLength(result.visibleText, "utf8"), budget);
+  assert.equal(result.visibleTextTruncated, true);
+  assert.doesNotMatch(result.visibleText, /超出预算/u);
 });

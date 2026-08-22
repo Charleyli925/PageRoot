@@ -1782,6 +1782,53 @@ function summarizeUpdate(update) {
   return { type };
 }
 
+// ADR 0036: a discussion turn may pass visible Agent text through, bounded and
+// sanitized. Only what the Agent says is captured; `agent_thought_chunk` and
+// every other update type are dropped, so hidden reasoning never leaves the
+// driver. An execution turn captures nothing: its payload is a file, and prose
+// there would only invite confusion with Candidate authority.
+function visibleTextChunk(update) {
+  if (update?.sessionUpdate !== "agent_message_chunk") return "";
+  if (update.content?.type !== "text") return "";
+  return String(update.content.text || "")
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/gu, "");
+}
+
+function visibleTextBuffer(byteLimit) {
+  let text = "";
+  let bytes = 0;
+  let truncated = false;
+  return {
+    append(chunk) {
+      if (!chunk || truncated) return "";
+      const remaining = byteLimit - bytes;
+      if (remaining <= 0) {
+        truncated = true;
+        return "";
+      }
+      const size = Buffer.byteLength(chunk, "utf8");
+      if (size <= remaining) {
+        text += chunk;
+        bytes += size;
+        return chunk;
+      }
+      // Cut on a character boundary, then stop accepting text. A clipped reply
+      // must be marked, never silently shortened.
+      const kept = truncateUtf8Tail(chunk, remaining);
+      text += kept.value;
+      bytes += Buffer.byteLength(kept.value, "utf8");
+      truncated = true;
+      return kept.value;
+    },
+    get value() {
+      return text;
+    },
+    get truncated() {
+      return truncated;
+    },
+  };
+}
+
 // `buildClient` wires every one of these to the host, and the driver itself
 // binds, cancels and disposes it. A host that cannot answer all of them would
 // fail as an undefined-method TypeError mid-turn instead of a policy error.
@@ -1804,6 +1851,7 @@ function driverProfile({
   createHost,
   clientCapabilities,
   requiresTurnCompletion,
+  visibleTextByteLimit,
   requiredHostMethods,
 }) {
   return Object.freeze({
@@ -1811,6 +1859,7 @@ function driverProfile({
     createHost,
     clientCapabilities,
     requiresTurnCompletion,
+    visibleTextByteLimit,
     requiredHostMethods,
     assertHost(host) {
       const missing = requiredHostMethods.filter(
@@ -1842,6 +1891,8 @@ const ACP_DRIVER_PROFILES = new Map([
     }),
     // An execution turn only counts once the fixed finalizer has proven itself.
     requiresTurnCompletion: true,
+    // ADR 0036 authorizes visible text for discussion only.
+    visibleTextByteLimit: 0,
     requiredHostMethods: Object.freeze([...ACP_HOST_METHODS, "assertTurnCompleted"]),
   })],
   ["discussion", driverProfile({
@@ -1855,6 +1906,9 @@ const ACP_DRIVER_PROFILES = new Map([
     // completion evidence. It must never become an optional call on a method
     // that could silently disappear from the execution host.
     requiresTurnCompletion: false,
+    // The reply is the whole payload of a discussion turn, so it is captured
+    // within a fixed budget (ADR 0036).
+    visibleTextByteLimit: 64 * 1024,
     requiredHostMethods: ACP_HOST_METHODS,
   })],
 ]);
@@ -1911,6 +1965,8 @@ export async function runAcpTask({
   const cancellation = cancellationGate(cancellationSignal);
   const updates = [];
   let droppedUpdateCount = 0;
+  // Zero budget means this mode captures no prose at all (ADR 0036).
+  const visibleText = visibleTextBuffer(profile.visibleTextByteLimit);
   const cancelStartup = () => {
     void host.cancel().catch(() => {});
   };
@@ -2010,8 +2066,14 @@ export async function runAcpTask({
               completion,
               updates,
               droppedUpdateCount,
+              visibleText: visibleText.value,
+              visibleTextTruncated: visibleText.truncated,
             };
           }
+          // Capture the Agent's own words before the update is reduced to a
+          // summary. A mode with no text budget appends nothing.
+          const chunk = visibleText.append(visibleTextChunk(message.update));
+          if (chunk) onEvent(Object.freeze({ kind: "visible-text", text: chunk }));
           const summary = summarizeUpdate(message.update);
           if (updates.length < MAX_SESSION_UPDATES) {
             updates.push(summary);

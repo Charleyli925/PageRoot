@@ -289,6 +289,37 @@ test("cancel aborts the in-flight turn and dispose drains every owned turn", asy
   );
 });
 
+test("the reply streams into the projection and the settled outcome wins", async () => {
+  const { service } = createService({
+    runDiscussion: async (input) => {
+      // Fragments arrive first, so the user reads the answer as it is written.
+      input.onEvent({ kind: "visible-text", text: "标题" });
+      input.onEvent({ kind: "visible-text", text: "偏笼统" });
+      return {
+        status: "completed",
+        interrupted: false,
+        interruptedReason: null,
+        turnId: input.turnId,
+        sourceSha256: input.expectedSourceSha256,
+        stopReason: "end_turn",
+        replyText: "标题偏笼统，可以更具体。",
+        replyTruncated: true,
+        updates: [],
+        droppedUpdateCount: 0,
+      };
+    },
+  });
+
+  await service.start(startBody());
+  await service.dispose();
+
+  const session = service.status({ documentId: DOCUMENT_ID });
+  // The settled outcome is authoritative over the streamed fragments.
+  assert.equal(session.replyText, "标题偏笼统，可以更具体。");
+  assert.equal(session.replyTruncated, true);
+  assert.equal(session.state, "completed");
+});
+
 test("an unknown Document has no discussion session", () => {
   const { service } = createService();
   assert.equal(service.status({ documentId: "doc_dddddddddddddddd" }), null);

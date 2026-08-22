@@ -78,6 +78,10 @@ export class DiscussionTurnSession {
       turnId: this.#turn?.turnId ?? null,
       sourceSha256: this.#turn?.sourceSha256 ?? null,
       phase: this.#turn?.phase ?? null,
+      // The Agent's visible reply, bounded and sanitized by the driver. It is
+      // read-only text and carries no authority over the page (ADR 0036).
+      replyText: this.#turn?.replyText ?? "",
+      replyTruncated: this.#turn?.replyTruncated === true,
       interrupted: this.#turn?.interrupted === true,
       interruptedReason: this.#turn?.interruptedReason ?? null,
       // The Composer uses this to keep one turn per Document, so it is derived

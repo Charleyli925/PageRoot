@@ -91,6 +91,9 @@ test("a completed discussion turn snapshots the current bytes and deletes them",
   assert.equal(outcome.status, "completed");
   assert.equal(outcome.interrupted, false);
   assert.equal(outcome.stopReason, "end_turn");
+  // ADR 0036: the driver-returned reply is what the outcome carries.
+  assert.equal(outcome.replyText, "");
+  assert.equal(outcome.replyTruncated, false);
 
   // Deleted on the way out, and durable state is untouched.
   await assert.rejects(lstat(seen.snapshotRoot), (error) => error.code === "ENOENT");
@@ -112,6 +115,9 @@ test("a timed-out discussion turn is interrupted, keeps what arrived and still d
       snapshotRoot = policy.requestRoot;
       onEvent(Object.freeze({ kind: "session-update", type: "agent_message_chunk" }));
       onEvent(Object.freeze({ kind: "session-update", type: "agent_message_chunk" }));
+      // Words that arrived before the timeout must survive the interruption.
+      onEvent(Object.freeze({ kind: "visible-text", text: "说到" }));
+      onEvent(Object.freeze({ kind: "visible-text", text: "一半" }));
       const timeout = new Error("The ACP operation timed out.");
       timeout.code = "ACP_TIMEOUT";
       throw timeout;
@@ -124,6 +130,7 @@ test("a timed-out discussion turn is interrupted, keeps what arrived and still d
   // Received evidence is preserved, and the turn is not dressed up as complete.
   assert.equal(outcome.updates.length, 2);
   assert.equal(outcome.stopReason, null);
+  assert.equal(outcome.replyText, "说到一半");
   await assert.rejects(lstat(snapshotRoot), (error) => error.code === "ENOENT");
 });
 

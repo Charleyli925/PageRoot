@@ -97,6 +97,22 @@ export function sidebarStateFromRun(options?: {
   reviewing?: boolean;
 }): string;
 
+export type SidebarLiveReply = {
+  actor: "qoder";
+  actorLabel: string;
+  text: string;
+  truncated: boolean;
+  interrupted: boolean;
+  streaming: boolean;
+};
+
+export function sidebarLiveReply(discussion?: {
+  status?: string;
+  replyText?: string;
+  replyTruncated?: boolean;
+  interrupted?: boolean;
+} | null): SidebarLiveReply | null;
+
 export type SidebarDiscussionNotice = {
   tone: "progress" | "attention";
   text: string;

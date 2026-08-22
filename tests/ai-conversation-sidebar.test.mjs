@@ -7,6 +7,7 @@ import {
   sidebarDiscussionNotice,
   sidebarDraftNotice,
   sidebarIntentOptions,
+  sidebarLiveReply,
   sidebarMessageStream,
   sidebarModePresentation,
   sidebarResolvedIntent,
@@ -196,6 +197,42 @@ test("mode copy separates who may write from who may only read", () => {
   assert.equal(sidebarModePresentation("review-view").label, "审阅 · 只读");
   // An unknown state falls back to the most restrictive copy.
   assert.equal(sidebarModePresentation("unknown-state").label, "讨论 · 只读");
+});
+
+test("the live reply reuses the stored message shape and marks what is incomplete", () => {
+  // Nothing to show until words arrive: an empty shell would make the stream
+  // jump for no information.
+  assert.equal(sidebarLiveReply(null), null);
+  assert.equal(sidebarLiveReply({ status: "running", replyText: "" }), null);
+  assert.equal(sidebarLiveReply({ status: "running", replyText: "   " }), null);
+
+  const streaming = sidebarLiveReply({ status: "running", replyText: "标题可以更具体" });
+  // The same fields a stored message carries, so the view needs one treatment.
+  assert.equal(streaming.actor, "qoder");
+  assert.equal(streaming.actorLabel, "Qoder CLI");
+  assert.equal(streaming.text, "标题可以更具体");
+  assert.equal(streaming.streaming, true);
+  assert.equal(streaming.truncated, false);
+  assert.equal(streaming.interrupted, false);
+
+  const truncated = sidebarLiveReply({
+    status: "completed",
+    replyText: "很长的回复",
+    replyTruncated: true,
+  });
+  assert.equal(truncated.truncated, true);
+  assert.equal(truncated.streaming, false);
+
+  // An interrupted reply is marked on the reply itself, because the text is what
+  // the user reads.
+  const interrupted = sidebarLiveReply({
+    status: "interrupted",
+    replyText: "说到一半",
+    interrupted: true,
+  });
+  assert.equal(interrupted.interrupted, true);
+  assert.equal(interrupted.streaming, false);
+  assert.equal(interrupted.text, "说到一半");
 });
 
 test("the header's mode is derived from Request authority, not guessed", () => {

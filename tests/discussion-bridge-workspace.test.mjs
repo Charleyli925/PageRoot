@@ -116,6 +116,10 @@ test("POST /discussion/start runs one read-only turn and leaves no snapshot", as
   assert.equal(settled.interrupted, false);
   assert.ok(settled.eventCount > 0);
   assert.match(settled.agentName, /qoder/iu);
+  // ADR 0036: the visible reply reaches the user, and hidden reasoning does not.
+  assert.equal(settled.replyText, "这页的标题偏笼统，可以点明读者能得到什么。");
+  assert.equal(settled.replyTruncated, false);
+  assert.doesNotMatch(settled.replyText, /internal reasoning/iu);
 
   // The snapshot is gone and durable project state is untouched.
   const snapshotParent = path.join(ensured.projectRoot, ".pageroot", "discussion-snapshots");
