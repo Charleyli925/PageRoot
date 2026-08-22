@@ -43,7 +43,7 @@ import type {
 import type { DesktopEditRuntimeApi } from "./components/desktop-edit-runtime-api";
 import type { DesktopUiPreferencesApi } from "./components/desktop-ui-preferences-api";
 import AboutPageRootDialog from "./components/AboutPageRootDialog";
-import { AgentDeliveryButton, type AgentDeliveryMode } from "./components/AgentDeliveryDialog";
+import { AgentDeliveryButton, type AgentDeliveryMode } from "./components/AgentDeliveryButton";
 import CancelAiRunDialog from "./components/CancelAiRunDialog";
 import FirstEditGuideCard from "./components/FirstEditGuideCard";
 import HtmlInteractionPreview, {
@@ -7423,7 +7423,6 @@ export default function Workbench() {
             status={currentQoderHandoffStatus} deliveryMode={currentAgentDeliveryMode}
             generating={generating} runInProgress={runInProgress}
             pendingCount={pendingSendItemCount}
-            availability={qoderAvailability}
             disabled={generating || projectHydrating || Boolean(projectLoadError)
               || viewTransitioning || viewMode === "history" || (!runInProgress && (
                 pendingSendItemCount === 0 || interactionLocked || persistState === "failed"
@@ -7434,10 +7433,15 @@ export default function Workbench() {
               setCanvasMode("edit");
               setDrawer("handoff");
             }}
-            onSelect={(mode) => generateRequest(mode)}
-            onRefreshAvailability={refreshQoderAvailability}
-            onCheckUsability={checkQoderUsability}
-            onCopyGuidance={copyQoderGuidance}
+            onCompose={() => {
+              // The choice of destination lives in the conversation now. Preview is
+              // where that surface docks, and the page is about to be handed off
+              // anyway, so it stops presenting itself as editable.
+              setDrawer(null);
+              setCanvasMode("preview");
+              workspaceControllerRef.current?.updateConversationDraftIntent("modify");
+              aiConversation.reveal();
+            }}
           />
         </WorkbenchHeaderActions>
         <input
