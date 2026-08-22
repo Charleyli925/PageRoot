@@ -899,6 +899,23 @@ export class AgentBridgeService {
     });
   }
 
+  // This service owns the one-use preflight ticket store (see
+  // docs/STATE_OWNERSHIP.md), so a non-Request use such as a discussion turn
+  // redeems the ticket here instead of keeping a second copy of it. The caller
+  // receives the verified command only, and the same expiry, one-use and
+  // identity-recheck rules apply as for an execution submit.
+  async redeemCommandTicket(preflightId) {
+    if (this.#disposed) fail("AGENT_BRIDGE_DISPOSED", "Agent Bridge 已停止。", { status: 503 });
+    const ticket = this.#tickets.get(preflightId);
+    if (!ticket || ticket.expiresAt <= this.#clock.now()) {
+      this.#tickets.delete(preflightId);
+      fail("AGENT_PREFLIGHT_EXPIRED", "Qoder 预检已过期，请重新确认后启动。", { status: 409 });
+    }
+    this.#tickets.delete(preflightId);
+    await assertCommandUnchanged(ticket.command);
+    return ticket;
+  }
+
   async submit({
     driver,
     trustPolicyAccepted,
@@ -922,13 +939,7 @@ export class AgentBridgeService {
         { status: 409 },
       );
     }
-    const ticket = this.#tickets.get(preflightId);
-    if (!ticket || ticket.expiresAt <= this.#clock.now()) {
-      this.#tickets.delete(preflightId);
-      fail("AGENT_PREFLIGHT_EXPIRED", "Qoder 预检已过期，请重新确认后启动。", { status: 409 });
-    }
-    this.#tickets.delete(preflightId);
-    await assertCommandUnchanged(ticket.command);
+    const ticket = await this.redeemCommandTicket(preflightId);
 
     const task = await this.#resolveTask(identity);
     if (!task?.run || task.run.status !== "processing") {

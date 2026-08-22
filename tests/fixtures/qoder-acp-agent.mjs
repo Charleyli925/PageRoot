@@ -29,6 +29,10 @@ if (pidFileArgument) {
   writeFileSync(pidFileArgument.slice("--pid-file=".length), `${process.pid}\n`, "utf8");
 }
 const hang = process.argv.includes("--hang");
+// A discussion turn is read-only: the snapshot is the only readable file and the
+// snapshot directory is the whole working scope. This branch also asserts the
+// boundary from the Agent side, so the turn fails loudly if writes ever open up.
+const discussion = process.argv.includes("--discussion");
 
 const sessionId = "session_pageroot_e2e_qoder";
 let requestRoot = "";
@@ -65,6 +69,41 @@ const app = acp.agent({ name: "pageroot-e2e-qoder" })
   })
   .onRequest(acp.methods.agent.session.prompt, async ({ params, client }) => {
     if (hang) return new Promise(() => {});
+    if (discussion) {
+      const snapshot = await client.request(acp.methods.client.fs.readTextFile, {
+        sessionId,
+        path: `${requestRoot}/snapshot.html`,
+      });
+      if (!snapshot.content.includes("<html")) {
+        throw new Error("PageRoot discussion snapshot is missing");
+      }
+      let writeRefused = false;
+      try {
+        await client.request(acp.methods.client.fs.writeTextFile, {
+          sessionId,
+          path: `${requestRoot}/snapshot.html`,
+          content: "<html>rewritten</html>",
+        });
+      } catch {
+        writeRefused = true;
+      }
+      if (!writeRefused) throw new Error("PageRoot discussion write must be refused");
+      let terminalRefused = false;
+      try {
+        await client.request(acp.methods.client.terminal.create, {
+          sessionId,
+          command: "/bin/sh",
+          args: ["-c", "echo escalate"],
+          cwd: requestRoot,
+          env: [],
+          outputByteLimit: 1024,
+        });
+      } catch {
+        terminalRefused = true;
+      }
+      if (!terminalRefused) throw new Error("PageRoot discussion terminal must be refused");
+      return { stopReason: "end_turn" };
+    }
     const changeRequest = await client.request(acp.methods.client.fs.readTextFile, {
       sessionId,
       path: `${requestRoot}/change-request.json`,

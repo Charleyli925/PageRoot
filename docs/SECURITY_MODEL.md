@@ -239,6 +239,22 @@ closed rather than forgetting an unowned local process.
 Quit, relaunch and update installation also fail closed: the Bridge stays alive
 and the desktop app remains open unless all owned Agent cleanup is confirmed.
 
+A read-only discussion turn is a narrower surface on the same trust boundary.
+The renderer may request `POST /discussion/start`, `GET /discussion/status` and
+`POST /discussion/cancel` with registered document identity, the fixed
+`qoder-acp` driver, explicit `trusted-local-agent-v1` consent and a one-use
+ticket redeemed from the Agent service; it names no command and no path. The
+Bridge reads the Working Copy through the Repository, refuses a stale context
+Hash or a target that does not match the registered Project File, mints the turn
+identifier itself, and keeps at most one in-flight turn per Document. Qoder sees
+only a short-lived owner-only snapshot directory, so it cannot derive the
+Working Copy path; the snapshot is deleted on every exit path and an unconfirmed
+deletion fails the turn. No Request, Attempt, Candidate or Version is created,
+no finalizer runs, and `activeRequest` is never touched. A timed-out or
+cancelled turn is reported as interrupted with the bounded evidence that
+actually arrived, never as a completed answer. In-flight discussion turns drain
+on the same shutdown gate as execution sessions.
+
 The driver may retain at most 16 KiB of raw Qoder stderr only inside the live
 Bridge promise to classify authentication/capacity/process failures. It is
 discarded after classification and never enters public Agent status, PageRoot
