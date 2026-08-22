@@ -55,6 +55,7 @@ function snapshot(key, pngBytes = PNG, overrides = {}) {
     pngBytes: new Uint8Array(pngBytes),
     renderedTextSha256: renderedTextHash("图表 9.54"),
     surfaceSha256: "",
+    settled: true,
     ...overrides,
   };
 }
@@ -72,6 +73,7 @@ function unavailable(key) {
     pngBytes: new Uint8Array(),
     renderedTextSha256: "",
     surfaceSha256: "",
+    settled: false,
   };
 }
 
@@ -784,5 +786,55 @@ test("more than one unverified host becomes a page-level fact", () => {
     merged.markers.map((marker) => marker.candidateKey),
     ["runtime-host-3"],
     "a shared cause is one fact, and only the host the user asked about keeps its frame",
+  );
+});
+
+test("an unsettled frame cannot reach a pixel verdict but still answers stronger steps", () => {
+  // A chart that animates without pause never hands back two identical frames.
+  // Dropping such a host made whole pages report nothing at all, so the frame
+  // is kept and marked instead. Pixel distance against a half-drawn chart is
+  // not evidence, while dimensions, visible text and the drawing surface do not
+  // flicker and still decide.
+  const moving = snapshot("runtime-host-1", PNG, { settled: false });
+  const movingChanged = snapshot("runtime-host-1", CHANGED_PNG, { settled: false });
+  assert.equal(
+    reviewRuntimeVisualSnapshotComparison(moving, movingChanged),
+    "unavailable",
+    "a raster verdict on a moving target would fabricate a change",
+  );
+  assert.equal(
+    reviewRuntimeVisualSnapshotComparison(moving, moving),
+    "unchanged",
+    "identical bytes are still identical bytes",
+  );
+  assert.equal(
+    reviewRuntimeVisualSnapshotComparison(
+      moving,
+      snapshot("runtime-host-1", CHANGED_PNG, { settled: false, layoutWidth: 2 }),
+    ),
+    "changed",
+    "layout does not flicker with animation",
+  );
+  assert.equal(
+    reviewRuntimeVisualSnapshotComparison(
+      moving,
+      snapshot("runtime-host-1", CHANGED_PNG, {
+        settled: false,
+        renderedTextSha256: renderedTextHash("图表 9.55"),
+      }),
+    ),
+    "changed",
+    "visible text does not flicker with animation",
+  );
+  assert.equal(
+    reviewRuntimeVisualSnapshotComparison(
+      snapshot("runtime-host-1", PNG, { settled: false, surfaceSha256: renderedTextHash("a") }),
+      snapshot("runtime-host-1", CHANGED_PNG, {
+        settled: false,
+        surfaceSha256: renderedTextHash("b"),
+      }),
+    ),
+    "changed",
+    "the drawing surface decides regardless of frame timing",
   );
 });

@@ -22,6 +22,7 @@ const SNAPSHOT_KEYS = new Set([
   // rather than from the window. Empty when the host exposes no readable
   // surface, which keeps it optional for every existing capture shape.
   "surfaceSha256",
+  "settled",
 ]);
 const PNG_HEADER = Object.freeze([137, 80, 78, 71, 13, 10, 26, 10]);
 const PNG_HASH_PATTERN = /^sha256:[a-f0-9]{64}$/u;
@@ -75,6 +76,7 @@ function acceptedUnavailableSnapshot(rawSnapshot, key) {
     || rawSnapshot.byteLength !== 0
     || rawSnapshot.renderedTextSha256 !== ""
     || rawSnapshot.surfaceSha256 !== ""
+    || rawSnapshot.settled !== false
     || !pngBytes
     || pngBytes.byteLength !== 0
   ) return null;
@@ -90,6 +92,7 @@ function acceptedUnavailableSnapshot(rawSnapshot, key) {
     pngBytes,
     renderedTextSha256: "",
     surfaceSha256: "",
+    settled: false,
   });
 }
 
@@ -114,6 +117,9 @@ function acceptedCapturedSnapshot(rawSnapshot, key) {
       rawSnapshot.surfaceSha256 !== ""
       && !PNG_HASH_PATTERN.test(rawSnapshot.surfaceSha256)
     )
+    // Whether the owner ever saw two identical frames of this host is a fact
+    // the comparison needs, so an envelope that omits it is not trustworthy.
+    || typeof rawSnapshot.settled !== "boolean"
   ) return null;
   const dimensions = pngDimensions(pngBytes);
   if (
@@ -134,6 +140,7 @@ function acceptedCapturedSnapshot(rawSnapshot, key) {
     pngBytes,
     renderedTextSha256: rawSnapshot.renderedTextSha256,
     surfaceSha256: rawSnapshot.surfaceSha256,
+    settled: rawSnapshot.settled,
   });
 }
 

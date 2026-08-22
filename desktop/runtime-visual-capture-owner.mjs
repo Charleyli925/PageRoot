@@ -13,14 +13,16 @@ const RUNTIME_SNAPSHOT_CAPTURE_PARTITION_PREFIX = "pageroot-runtime-snapshot-";
 const MAX_PATH_DEPTH = 256;
 const MAX_IDENTITY_VALUE_LENGTH = 2_048;
 const OWNER_CLEANUP_GRACE_MS = 250;
-// A candidate is accepted only when two consecutive frames of the same host
-// agree, so a chart library that finishes drawing near the settle instant
-// cannot hand the two sides of one pair differently finished rasters. Bounded
-// attempts keep this subordinate to the owner deadline: six attempts spend at
-// most ~1.1s of the 4s budget, which a busy page needs before a real chart
-// change would otherwise be dropped as never-settled.
+// Confirming that a host settled costs a second frame, and that cost is shared
+// by every candidate in one request rather than granted to each. Six attempts
+// per host reads as ~1.1s against the 4s owner deadline, but a page of twelve
+// charts then asks for ~13s and the deadline fires first — which is exactly how
+// authored pages went from twelve verified hosts to none. The budget below is
+// therefore per request, and a host that cannot be afforded a second frame is
+// still captured and marked unsettled instead of dropped.
 const CAPTURE_STABILITY_ATTEMPTS = 6;
 const CAPTURE_STABILITY_INTERVAL_MS = 220;
+const CAPTURE_STABILITY_BUDGET_MS = 1_200;
 // Upper bound on waiting for the frame that reflects a probe scroll. An
 // offscreen compositor delivers it in one frame interval; this only caps a
 // page that stops repainting entirely.
@@ -1107,6 +1109,7 @@ function unavailableSnapshot(key) {
     pngBytes: new Uint8Array(),
     renderedTextSha256: "",
     surfaceSha256: "",
+    settled: false,
   });
 }
 
@@ -1442,6 +1445,7 @@ export function createRuntimeSnapshotCaptureController({
 
       let capturedPixels = 0;
       let capturedBytes = 0;
+      let stabilityBudgetMs = CAPTURE_STABILITY_BUDGET_MS;
       const snapshots = [];
       for (const candidate of request.candidates) {
         if (!frozenBindingKeys.has(candidate.key)) {
@@ -1466,8 +1470,29 @@ export function createRuntimeSnapshotCaptureController({
           // closed to the static result when it never settles.
           let accepted = false;
           let previous = null;
+          let latest = null;
+          const pushSnapshot = ({ png, rect, ownerSnapshot }, settledFrame) => {
+            capturedPixels += png.width * png.height;
+            capturedBytes += png.byteLength;
+            snapshots.push(Object.freeze({
+              key: candidate.key,
+              state: "captured",
+              ...png,
+              layoutWidth: rect.width,
+              layoutHeight: rect.height,
+              renderedTextSha256: renderedTextSha256(ownerSnapshot.renderedText),
+              // A digest the page could not produce stays empty rather than
+              // hashing "" into something that looks like evidence.
+              surfaceSha256: ownerSnapshot.surfaceDigest
+                ? renderedTextSha256(`surface:${ownerSnapshot.surfaceDigest}`)
+                : "",
+              settled: settledFrame,
+            }));
+          };
           for (let attempt = 0; attempt < CAPTURE_STABILITY_ATTEMPTS; attempt += 1) {
             if (attempt > 0) {
+              if (stabilityBudgetMs < CAPTURE_STABILITY_INTERVAL_MS) break;
+              stabilityBudgetMs -= CAPTURE_STABILITY_INTERVAL_MS;
               await withOwnerDeadline(waitForCaptureSettle(CAPTURE_STABILITY_INTERVAL_MS));
             }
             const ownerRects = normalizedOwnerRects(await withOwnerDeadline(ownerExecutor(
@@ -1480,7 +1505,7 @@ export function createRuntimeSnapshotCaptureController({
               || ownerSnapshot.state !== "captured"
               || !ownerSnapshot.rect
               || ownerSnapshot.rect.width * ownerSnapshot.rect.height > remainingPixels
-            ) break;
+) break;
             if (attempt === 0 && ownerSnapshot.scrolled) {
               await withOwnerDeadline(waitForScrolledOffscreenFrame(
                 captureWindow.webContents,
@@ -1500,28 +1525,27 @@ export function createRuntimeSnapshotCaptureController({
               && previous.png.pngSha256 === png.pngSha256
               && previous.rect.width === ownerSnapshot.rect.width
               && previous.rect.height === ownerSnapshot.rect.height;
+            latest = { png, rect: ownerSnapshot.rect, ownerSnapshot };
             if (settled) {
-              capturedPixels += png.width * png.height;
-              capturedBytes += png.byteLength;
-              snapshots.push(Object.freeze({
-                key: candidate.key,
-                state: "captured",
-                ...png,
-                layoutWidth: ownerSnapshot.rect.width,
-                layoutHeight: ownerSnapshot.rect.height,
-                renderedTextSha256: renderedTextSha256(ownerSnapshot.renderedText),
-                // A digest the page could not produce stays empty rather than
-                // hashing "" into something that looks like evidence.
-                surfaceSha256: ownerSnapshot.surfaceDigest
-                  ? renderedTextSha256(`surface:${ownerSnapshot.surfaceDigest}`)
-                  : "",
-              }));
+              pushSnapshot(latest, true);
               accepted = true;
               break;
             }
             previous = { png, rect: ownerSnapshot.rect };
           }
-          if (!accepted) snapshots.push(unavailableSnapshot(candidate.key));
+          // A host that never hands back two identical frames is still a host
+          // the reviewer asked about. Dropping it turns a live chart into a
+          // silent gap, which measurement showed costs whole pages: a page of
+          // twelve continuously animating charts reported nothing at all, and
+          // every "no false positive" reading on it was empty. Keep the last
+          // frame and record that it never settled; the comparison then refuses
+          // to reach a pixel verdict on it while dimensions, visible text and
+          // the drawing-surface digest still decide normally, none of which
+          // flickers with animation.
+          if (!accepted) {
+            if (latest) pushSnapshot(latest, false);
+            else snapshots.push(unavailableSnapshot(candidate.key));
+          }
         } catch (error) {
           if (error instanceof CaptureTimedOutError || error instanceof CaptureCancelledError) {
             throw error;

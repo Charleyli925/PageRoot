@@ -49,6 +49,12 @@ export function reviewRuntimeVisualSnapshotComparison(before, after) {
     return before.surfaceSha256 === after.surfaceSha256 ? "unchanged" : "changed";
   }
   if (before.pngSha256 === after.pngSha256) return "unchanged";
+  // A frame the owner never saw twice is a moving target. Dimensions, visible
+  // text and the surface digest above do not flicker with animation, so they
+  // still decide; a raster distance measured against a half-drawn chart does
+  // not, and calling it a change would fabricate one. Report that it could not
+  // be verified instead.
+  if (before.settled === false || after.settled === false) return "unavailable";
   return "raster";
 }
 

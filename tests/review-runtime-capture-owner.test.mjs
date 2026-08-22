@@ -722,6 +722,7 @@ test("runtime snapshot owner keeps valid hosts when another frozen binding is re
     pngBytes: new Uint8Array(),
     renderedTextSha256: "",
     surfaceSha256: "",
+    settled: false,
   });
   assert.equal(state.capturePage.length, 2);
 });
@@ -819,6 +820,7 @@ test("runtime snapshot owner silently marks invalid PNG output unavailable", asy
     pngBytes: new Uint8Array(),
     renderedTextSha256: "",
     surfaceSha256: "",
+    settled: false,
   });
 });
 
@@ -856,6 +858,7 @@ test("runtime snapshot owner hashes bounded visible text and suppresses an over-
     pngBytes: new Uint8Array(),
     renderedTextSha256: "",
     surfaceSha256: "",
+    settled: false,
   });
   assert.deepEqual(state.capturePage || [], []);
 });

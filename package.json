@@ -46,6 +46,7 @@
     "test:bridge": "node --test tests/workspace-bridge.test.mjs",
     "spike:qoder-acp": "node scripts/qoder-acp-spike.mjs",
     "census:review-runtime-visual": "electron scripts/review-runtime-visual-census.mjs --",
+    "e2e:review-pages": "electron scripts/review-runtime-e2e-pages.mjs --",
     "benchmark:review-analysis": "node scripts/benchmark-review-analysis.mjs",
     "benchmark:persistence": "npm run desktop:renderer && node scripts/benchmark-persistence.mjs",
     "test:package": "node scripts/test-node-group.mjs package",
