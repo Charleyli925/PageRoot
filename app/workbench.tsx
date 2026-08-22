@@ -6051,6 +6051,17 @@ export default function Workbench() {
           disposition: "background-result",
           dedupeKey: "current-version-result",
         });
+      } else if (reviewed) {
+        // Accepting from review closes the comparison and swaps the canvas back to
+        // editing in one cut. Without a word the user cannot tell which version
+        // they are now editing, so name it once, quietly, and let it dismiss
+        // itself rather than raising a dialog.
+        setToast({
+          title: `已采纳 ${result.candidateLabel}`,
+          message: "现在编辑的就是这一版；上一版仍保留在项目里。",
+          tone: "success",
+          dedupeKey: "current-version-result",
+        });
       } else if (
         toastRef.current?.dedupeKey === "activate-ready-version"
         || toastRef.current?.dedupeKey === "current-version-result"
@@ -8272,7 +8283,7 @@ export default function Workbench() {
                   : "评论会显示在这里"}</strong>
                 <span>{otherTabCommentEntryCount > 0
                   ? "其他标签页的评论可从顶部展开。"
-                  : "可以评论整个页面、模块或其中的小区块。"}</span>
+                  : "可以评论整个页面、模块或其中的小区块；写好后就能发给 AI。"}</span>
               </div>
             ) : renderedVisibleCommentItems.map((comment) => {
               const index = sortedVisibleCommentItems.findIndex(
