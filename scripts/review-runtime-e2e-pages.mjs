@@ -278,9 +278,14 @@ async function main() {
           },
         );
         window.__docs = docs;
+        const outlineIds = new Set(docs.outline.map((item) => item.id));
         return {
           changes: docs.changes.map((change) => ({ id: change.id, helper: change.helper, types: change.types })),
           outlineCount: docs.outline.length,
+          // Where candidates vanish matters: an annotator that found none is a
+          // different fact from one whose candidates fell outside the outline.
+          outsideOutline: docs.runtimeVisualCandidates
+            .filter((candidate) => !outlineIds.has(candidate.outlineId)).length,
           candidates: docs.runtimeVisualCandidates,
           captureCandidates: docs.runtimeVisualCaptureCandidates,
           sourceHtml: { before: docs.runtimeVisualSourceHtml.before.length, after: docs.runtimeVisualSourceHtml.after.length },
@@ -444,6 +449,12 @@ async function main() {
         structurallyContaminated: mutation.structurallyContaminated === true,
         expectation,
         staticChanges: documents.changes.length,
+        outlineCount: documents.outlineCount,
+        outsideOutline: documents.outsideOutline,
+        captureCandidates: {
+          before: documents.captureCandidates.before.length,
+          after: documents.captureCandidates.after.length,
+        },
         candidates: documents.candidates.length,
         drawnHosts,
         capturedBoth,
