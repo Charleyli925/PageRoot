@@ -5,6 +5,7 @@ import {
   FORBIDDEN_MESSAGE_KEYS,
   sidebarActionBar,
   sidebarDiscussionNotice,
+  sidebarDeliveryDisclosure,
   sidebarDraftNotice,
   sidebarIntentOptions,
   sidebarLiveReply,
@@ -324,16 +325,29 @@ test("the Composer sends discussion only and points modify at its real entry", (
   });
   assert.equal(discuss.canSend, true);
 
-  // Modify freezes a Request from the edit surface's comments, so this Composer
-  // must not pretend to send it and silently drop the typed text.
+  // Modify is driven by the comments already on the page, not by the Composer,
+  // so it sends without a typed sentence and nothing can be silently dropped.
   const modify = sidebarSendState({
     state: "preview-discussion",
     catalogStatus: "ready",
-    hasText: true,
+    hasText: false,
     intent: "modify",
+    pendingCommentCount: 2,
   });
-  assert.equal(modify.canSend, false);
-  assert.equal(modify.reason, "回到编辑模式提交修改");
+  assert.equal(modify.canSend, true);
+  assert.equal(modify.label, "交给 AI 修改");
+  assert.equal(modify.reason, null);
+
+  // With nothing written there is nothing for the Agent to act on, and the
+  // button says where to write it rather than only greying out.
+  const empty = sidebarSendState({
+    state: "preview-discussion",
+    catalogStatus: "ready",
+    intent: "modify",
+    pendingCommentCount: 0,
+  });
+  assert.equal(empty.canSend, false);
+  assert.equal(empty.reason, "先在编辑模式写下评论，AI 会按评论改");
 
   const continued = sidebarSendState({
     state: "ready-to-open",
@@ -411,4 +425,30 @@ test("review refuses a round even when the model catalog is still checking", () 
     hasText: true,
   });
   assert.equal(send.reason, "正在审阅 AI 候选，采纳或返回后可继续对话");
+});
+
+test("the delivery disclosure moves out of the dialog and onto the modify intent", () => {
+  // The sentence the old modal used to carry now sits beside the button that acts
+  // on it, so the user is informed without being interrupted first.
+  assert.equal(
+    sidebarDeliveryDisclosure("modify"),
+    "Qoder 会读取本轮 HTML、评论和附件；结果先进入审阅。",
+  );
+
+  // Discussion reads the page without writing it, so that sentence would be a
+  // false statement of scope there.
+  assert.equal(sidebarDeliveryDisclosure("discuss"), null);
+  assert.equal(sidebarDeliveryDisclosure("continue"), null);
+});
+
+test("a queued round blocks the modify intent instead of stacking a second Request", () => {
+  const send = sidebarSendState({
+    state: "preview-discussion",
+    catalogStatus: "ready",
+    intent: "modify",
+    pendingCommentCount: 3,
+    queued: true,
+  });
+  assert.equal(send.canSend, false);
+  assert.equal(send.reason, "正在等待上一个任务完成");
 });

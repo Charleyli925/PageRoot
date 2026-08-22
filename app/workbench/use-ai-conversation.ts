@@ -44,6 +44,11 @@ export type UseAiConversationOptions = {
   sourcePath: string;
   sourceSha256: string | null;
   pendingCommentCount: number;
+  /**
+   * Hands this round of comments to the Agent or to the clipboard. Owned by the
+   * workbench because a modification is a Request, not a conversation turn.
+   */
+  onDeliverModification?: (mode: "qoder-acp" | "clipboard") => void;
 };
 
 export function useAiConversation({
@@ -60,6 +65,7 @@ export function useAiConversation({
   sourcePath,
   sourceSha256,
   pendingCommentCount,
+  onDeliverModification,
 }: UseAiConversationOptions) {
   const [open, setOpen] = useState(false);
   // Review is the same workbench with a different Canvas, so the thread that led
@@ -104,6 +110,13 @@ export function useAiConversation({
   // Request frozen from the edit surface's comments, so the send state points the
   // user there instead of quietly dropping this text into a different flow.
   const onSend = useCallback((intent: SidebarIntent) => {
+    // A modification is a Request built from the comments already on the page, so
+    // it goes to the run pipeline rather than the discussion Bridge. The Composer
+    // has no text box in that intent, so nothing typed can be lost here.
+    if (intent === "modify") {
+      onDeliverModification?.("qoder-acp");
+      return;
+    }
     if (intent !== "discuss") return;
     const question = draftText.trim();
     if (!question) return;
@@ -121,6 +134,7 @@ export function useAiConversation({
   }, [
     controllerRef,
     draftText,
+    onDeliverModification,
     conversationId,
     projectId,
     documentId,
@@ -132,6 +146,10 @@ export function useAiConversation({
     () => sidebarStateFromRun({ activeRun, submissionPending, reviewing }),
     [activeRun, submissionPending, reviewing],
   );
+
+  const onCopyTask = useCallback(() => {
+    onDeliverModification?.("clipboard");
+  }, [onDeliverModification]);
 
   const sidebarProps = useMemo(() => ({
     state,
@@ -150,6 +168,7 @@ export function useAiConversation({
     onDraftChange,
     onIntentChange,
     onSend,
+    onCopyTask,
     onCollapse,
   }), [
     state,
@@ -161,6 +180,7 @@ export function useAiConversation({
     onDraftChange,
     onIntentChange,
     onSend,
+    onCopyTask,
     onCollapse,
   ]);
 

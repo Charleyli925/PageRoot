@@ -233,6 +233,16 @@ export function sidebarActionBar({
  * button must always say why: greying it out without an explanation leaves the
  * user with no next step.
  */
+/**
+ * The disclosure that used to live in the delivery dialog. It belongs beside the
+ * button that acts on it, so the user reads it without being interrupted by a
+ * modal first.
+ */
+export function sidebarDeliveryDisclosure(intent) {
+  if (intent !== INTENT_MODIFY) return null;
+  return "Qoder 会读取本轮 HTML、评论和附件；结果先进入审阅。";
+}
+
 export function sidebarSendState({
   state,
   catalogStatus = "ready",
@@ -240,6 +250,7 @@ export function sidebarSendState({
   queued = false,
   intent = INTENT_DISCUSS,
   discussionBusy = false,
+  pendingCommentCount = 0,
 } = {}) {
   // The review Canvas wins over every other reason. It is showing a candidate,
   // not the page a discussion would read, so no round may start from here. The
@@ -280,7 +291,20 @@ export function sidebarSendState({
   // comments rather than from this text box. Pointing there beats a send button
   // that would quietly drop what the user typed.
   if (intent === INTENT_MODIFY) {
-    return { canSend: false, label: "发送", reason: "回到编辑模式提交修改" };
+    // A modification is driven by the comments already written on the page, not by
+    // the Composer. That is why this intent shows no text box: there is no typed
+    // sentence that could be silently dropped on the way to the Agent.
+    if (queued) {
+      return { canSend: false, label: "交给 AI 修改", reason: "正在等待上一个任务完成" };
+    }
+    if (pendingCommentCount <= 0) {
+      return {
+        canSend: false,
+        label: "交给 AI 修改",
+        reason: "先在编辑模式写下评论，AI 会按评论改",
+      };
+    }
+    return { canSend: true, label: "交给 AI 修改", reason: null };
   }
   if (intent === INTENT_CONTINUE) {
     return { canSend: false, label: "发送", reason: "先采用当前结果才能继续修改" };

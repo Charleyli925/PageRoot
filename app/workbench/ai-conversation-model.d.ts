@@ -82,6 +82,8 @@ export function sidebarActionBar(options?: {
   failureMessage?: string | null;
 }): SidebarActionBar | null;
 
+export function sidebarDeliveryDisclosure(intent?: SidebarIntent | string): string | null;
+
 export function sidebarSendState(options?: {
   state?: string;
   catalogStatus?: SidebarCatalogStatus;
@@ -89,6 +91,7 @@ export function sidebarSendState(options?: {
   queued?: boolean;
   intent?: SidebarIntent;
   discussionBusy?: boolean;
+  pendingCommentCount?: number;
 }): SidebarSendState;
 
 export function sidebarStateFromRun(options?: {

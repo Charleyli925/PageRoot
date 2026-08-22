@@ -12,6 +12,7 @@ import {
   sidebarModelLine,
   sidebarModePresentation,
   sidebarResolvedIntent,
+  sidebarDeliveryDisclosure,
   sidebarSendState,
   type SidebarCatalogStatus,
   type SidebarIntent,
@@ -63,6 +64,8 @@ export type AiConversationSidebarProps = {
   onAction?: (actionId: string) => void;
   onOpenModelChoices?: () => void;
   onCollapse?: () => void;
+  /** Hands the same round to the clipboard instead of the local Agent. */
+  onCopyTask?: () => void;
 };
 
 export default function AiConversationSidebar({
@@ -88,6 +91,7 @@ export default function AiConversationSidebar({
   onAction,
   onOpenModelChoices,
   onCollapse,
+  onCopyTask,
 }: AiConversationSidebarProps) {
   const intentOptionsRef = useRef<HTMLDivElement>(null);
   const mode = sidebarModePresentation(state);
@@ -112,7 +116,9 @@ export default function AiConversationSidebar({
     discussionBusy: discussion?.status === "starting"
       || discussion?.status === "running"
       || discussion?.status === "cancelling",
+    pendingCommentCount,
   });
+  const disclosure = sidebarDeliveryDisclosure(activeIntent);
   const draftNotice = sidebarDraftNotice(state);
   const discussionNotice = sidebarDiscussionNotice(discussion);
   const liveReply = sidebarLiveReply(discussion);
@@ -342,6 +348,14 @@ export default function AiConversationSidebar({
             {`本轮将包含：${pendingCommentCount} 条评论 · 当前 HTML · 项目规则`}
           </p>
         ) : null}
+        {disclosure ? (
+          <p
+            className={styles.deliveryDisclosure}
+            data-testid="ai-conversation-delivery-disclosure"
+          >
+            {disclosure}
+          </p>
+        ) : null}
         {activeIntent === "continue" ? (
           <p
             className={styles.contextSummary}
@@ -351,9 +365,17 @@ export default function AiConversationSidebar({
           </p>
         ) : null}
 
-        <label className={styles.inputLabel} htmlFor="ai-conversation-input">
-          输入内容
-        </label>
+        {/*
+          * Modify has no text box on purpose: its input is the comments already
+          * written on the page. Showing an inert box there would invite the user to
+          * type a sentence that no Request would carry.
+          */}
+        {activeIntent === "modify" ? null : (
+          <label className={styles.inputLabel} htmlFor="ai-conversation-input">
+            输入内容
+          </label>
+        )}
+        {activeIntent === "modify" ? null : (
         <textarea
           id="ai-conversation-input"
           className={styles.input}
@@ -369,6 +391,7 @@ export default function AiConversationSidebar({
             onDraftChange?.(event.target.value)
           )}
         />
+        )}
 
         {draftNotice ? (
           <p className={styles.draftNotice} data-testid="ai-conversation-draft-notice">
@@ -401,6 +424,23 @@ export default function AiConversationSidebar({
               {send.reason}
             </span>
           ) : null}
+          {/*
+            * The clipboard path from the old delivery dialog, kept as a quiet
+            * alternative beside the primary action instead of a question asked
+            * before anything happens. Same round, same payload, different
+            * destination.
+            */}
+          {activeIntent === "modify" && onCopyTask ? (
+            <button
+              type="button"
+              className={styles.copyTask}
+              data-testid="ai-conversation-copy-task"
+              disabled={!send.canSend}
+              onClick={() => onCopyTask()}
+            >
+              复制任务
+            </button>
+          ) : null}
           <button
             type="button"
             className={styles.send}
@@ -411,7 +451,7 @@ export default function AiConversationSidebar({
             {activeIntent === "modify"
               ? "交给 AI 修改"
               : activeIntent === "continue"
-                ? "采用并继续"
+                ? "采纳并继续"
                 : send.label}
           </button>
         </div>

@@ -746,6 +746,8 @@ export default function Workbench() {
     sourcePath: sourcePath ?? "",
     sourceSha256,
     pendingCommentCount: comments.length,
+    // The same submission the header button performs. One owner, two surfaces.
+    onDeliverModification: (mode) => void generateRequest(mode),
   });
   const editRuntimeSnapshot = workspaceControllerSnapshot?.editRuntime ?? null;
   const editRuntimePhase = editRuntimeSnapshot?.phase || "static";
