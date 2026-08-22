@@ -13,6 +13,7 @@ import {
   sidebarModePresentation,
   sidebarResolvedIntent,
   sidebarDeliveryDisclosure,
+  sidebarRunProgress,
   sidebarSendState,
   type SidebarCatalogStatus,
   type SidebarIntent,
@@ -66,6 +67,8 @@ export type AiConversationSidebarProps = {
   onCollapse?: () => void;
   /** Hands the same round to the clipboard instead of the local Agent. */
   onCopyTask?: () => void;
+  /** The run's own progress steps, so a round in flight reads inside the thread. */
+  runSteps?: readonly unknown[];
 };
 
 export default function AiConversationSidebar({
@@ -92,6 +95,7 @@ export default function AiConversationSidebar({
   onOpenModelChoices,
   onCollapse,
   onCopyTask,
+  runSteps = [],
 }: AiConversationSidebarProps) {
   const intentOptionsRef = useRef<HTMLDivElement>(null);
   const mode = sidebarModePresentation(state);
@@ -119,6 +123,7 @@ export default function AiConversationSidebar({
     pendingCommentCount,
   });
   const disclosure = sidebarDeliveryDisclosure(activeIntent);
+  const runProgress = sidebarRunProgress({ state, steps: runSteps });
   const draftNotice = sidebarDraftNotice(state);
   const discussionNotice = sidebarDiscussionNotice(discussion);
   const liveReply = sidebarLiveReply(discussion);
@@ -186,7 +191,7 @@ export default function AiConversationSidebar({
       >
         {loading ? (
           <p className={styles.placeholder}>正在读取这份文档的对话…</p>
-        ) : stream.length === 0 && !liveReply ? (
+        ) : stream.length === 0 && !liveReply && !runProgress ? (
           <p className={styles.placeholder}>
             还没有对话。说说你想改哪里，或者先问问这个页面。
           </p>
@@ -233,6 +238,35 @@ export default function AiConversationSidebar({
             {liveReply.interrupted ? (
               <small className={styles.interrupted}>这条回复没有完成</small>
             ) : null}
+          </article>
+        ) : null}
+
+        {/*
+          * A round in flight, written as the turn it is. Same message treatment as
+          * everything else in the thread — the process drawer is no longer the only
+          * place this exists, and it is not a second kind of card.
+          */}
+        {runProgress ? (
+          <article
+            className={styles.message}
+            data-actor="pageroot"
+            data-kind="text"
+            data-status="streaming"
+            data-tone={runProgress.tone}
+            data-testid="ai-conversation-run-progress"
+          >
+            <span className={styles.actor}>PageRoot</span>
+            {runProgress.headline ? (
+              <p className={styles.text}>{runProgress.headline}</p>
+            ) : null}
+            {runProgress.detail ? (
+              <small className={styles.truncated}>{runProgress.detail}</small>
+            ) : null}
+            <ol className={styles.runSteps}>
+              {runProgress.steps.map((step) => (
+                <li key={step.key} data-step-state={step.state}>{step.label}</li>
+              ))}
+            </ol>
           </article>
         ) : null}
       </div>

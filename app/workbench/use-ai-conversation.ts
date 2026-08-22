@@ -92,6 +92,9 @@ export function useAiConversation({
   }, [visible, projectId, documentId, sourcePath, controllerRef]);
 
   const toggle = useCallback(() => setOpen((value) => !value), []);
+  // Submitting a round makes this the surface that reports it, so the workbench
+  // opens the thread instead of raising the process drawer over the page.
+  const reveal = useCallback(() => setOpen(true), []);
 
   const onDraftChange = useCallback((text: string) => {
     controllerRef.current?.updateConversationDraftText(text);
@@ -184,5 +187,5 @@ export function useAiConversation({
     onCollapse,
   ]);
 
-  return { open, visible, toggle, sidebarProps };
+  return { open, visible, toggle, reveal, sidebarProps };
 }

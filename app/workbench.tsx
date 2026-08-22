@@ -749,6 +749,12 @@ export default function Workbench() {
     // The same submission the header button performs. One owner, two surfaces.
     onDeliverModification: (mode) => void generateRequest(mode),
   });
+  // The run-event effect reports a submitted round by opening the thread. It is
+  // reached through a ref so that effect keeps its curated dependency list.
+  const aiConversationRevealRef = useRef<(() => void) | null>(null);
+  useEffect(() => {
+    aiConversationRevealRef.current = aiConversation.reveal;
+  }, [aiConversation.reveal]);
   const editRuntimeSnapshot = workspaceControllerSnapshot?.editRuntime ?? null;
   const editRuntimePhase = editRuntimeSnapshot?.phase || "static";
   const editRuntimePreparing = (
@@ -1484,8 +1490,9 @@ export default function Workbench() {
       if (runEvent.type === "run-submission-started" || runEvent.type === "run-submitted") {
         if (runEvent.current) {
           setHandoffPreviewOpen(false);
-          setCanvasMode("edit");
-          setDrawer("handoff");
+          // Reported in the thread, not by a drawer over the page.
+          setCanvasMode("preview");
+          aiConversationRevealRef.current?.();
           void workspaceControllerRef.current?.dismissFirstEditGuide();
         }
         return;
@@ -7034,7 +7041,10 @@ export default function Workbench() {
       }}
       onRevealAiTask={() => void revealAiTaskInFinder()}
       sidebar={aiConversation.visible ? (
-        <AiConversationSidebar {...aiConversation.sidebarProps} />
+        <AiConversationSidebar
+          {...aiConversation.sidebarProps}
+          runSteps={processSteps}
+        />
       ) : null}
     />
   ) : null;
@@ -7697,7 +7707,11 @@ export default function Workbench() {
 
         {aiConversation.visible ? (
           <aside className="ai-conversation-aside" aria-label="AI 对话侧栏">
-            <AiConversationSidebar {...aiConversation.sidebarProps} />
+            {/* Steps are computed below the hook, so they are handed in here. */}
+            <AiConversationSidebar
+              {...aiConversation.sidebarProps}
+              runSteps={processSteps}
+            />
           </aside>
         ) : null}
 

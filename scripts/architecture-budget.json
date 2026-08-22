@@ -15,8 +15,8 @@
   ],
   "files": {
     "app/workbench.tsx": {
-      "maxLines": 8912,
-      "maxHooks": 315
+      "maxLines": 8943,
+      "maxHooks": 317
     },
     "scripts/project-file-repository.mjs": {
       "maxLines": 7450

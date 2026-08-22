@@ -14,6 +14,7 @@ import {
   sidebarModePresentation,
   sidebarResolvedIntent,
   sidebarSendState,
+  sidebarRunProgress,
   sidebarStateFromRun,
 } from "../app/workbench/ai-conversation-model.js";
 
@@ -451,4 +452,49 @@ test("a queued round blocks the modify intent instead of stacking a second Reque
   });
   assert.equal(send.canSend, false);
   assert.equal(send.reason, "正在等待上一个任务完成");
+});
+
+test("a round in flight reads inside the thread instead of only in the drawer", () => {
+  const steps = [
+    { key: "handoff", label: "启动 Qoder CLI", detail: "已建立会话", state: "done" },
+    { key: "agent", label: "AI 正在修改", detail: "正在写入候选", state: "current" },
+    { key: "verify", label: "核对结果", detail: "尚未开始", state: "pending" },
+  ];
+  const progress = sidebarRunProgress({ state: "processing", steps });
+
+  // What to read first is the step actually moving, not the whole checklist.
+  assert.equal(progress.headline, "AI 正在修改");
+  assert.equal(progress.detail, "正在写入候选");
+  assert.equal(progress.tone, "quiet");
+  assert.equal(progress.steps.length, 3);
+
+  // Details ride along only for the live step; otherwise a short status turns
+  // into a wall of text.
+  assert.equal(progress.steps[0].detail, null);
+  assert.equal(progress.steps[2].detail, null);
+});
+
+test("a failed step is what the progress entry leads with", () => {
+  const progress = sidebarRunProgress({
+    state: "processing",
+    steps: [
+      { key: "handoff", label: "启动 Qoder CLI", state: "done" },
+      { key: "agent", label: "AI 正在修改", detail: "仍在进行", state: "current" },
+      { key: "verify", label: "核对失败", state: "failed" },
+    ],
+  });
+  assert.equal(progress.headline, "核对失败");
+  assert.equal(progress.tone, "attention");
+});
+
+test("progress belongs to a moving round only", () => {
+  const steps = [{ key: "handoff", label: "启动 Qoder CLI", state: "done" }];
+  // A settled round is represented by its result, not by a frozen checklist.
+  assert.equal(sidebarRunProgress({ state: "ready-to-open", steps }), null);
+  assert.equal(sidebarRunProgress({ state: "preview-discussion", steps }), null);
+  assert.equal(sidebarRunProgress({ state: "review-view", steps }), null);
+  // No steps means nothing to say.
+  assert.equal(sidebarRunProgress({ state: "processing", steps: [] }), null);
+  // Malformed entries are dropped rather than rendered as blanks.
+  assert.equal(sidebarRunProgress({ state: "processing", steps: [{ label: "无 key" }] }), null);
 });

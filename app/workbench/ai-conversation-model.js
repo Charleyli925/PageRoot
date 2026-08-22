@@ -108,6 +108,54 @@ export function sidebarStateFromRun({
   return "preview-discussion";
 }
 
+/**
+ * The run's own progress, projected for the conversation. The process drawer used
+ * to be the only place this existed, which made a round feel like it left the
+ * workbench; here it reads as the turn currently in flight.
+ *
+ * Only the states where a round is actually moving return an entry. A settled
+ * round is represented by its result, not by a frozen checklist.
+ */
+const RUN_PROGRESS_STATES = Object.freeze([
+  "preparing-delivery",
+  "processing",
+  "validating",
+  "promoting",
+]);
+
+export function sidebarRunProgress({ state, steps = [] } = {}) {
+  if (!RUN_PROGRESS_STATES.includes(String(state))) return null;
+  if (!Array.isArray(steps) || steps.length === 0) return null;
+  const projected = [];
+  for (const step of steps) {
+    if (!step || typeof step !== "object") continue;
+    const key = typeof step.key === "string" ? step.key : "";
+    const label = typeof step.label === "string" ? step.label.trim() : "";
+    if (!key || !label) continue;
+    projected.push(Object.freeze({
+      key,
+      label,
+      // The detail only rides along for the step being worked on. Showing every
+      // detail at once turns a short status into a wall of text.
+      detail: step.state === "current" && typeof step.detail === "string"
+        ? step.detail.trim() || null
+        : null,
+      state: typeof step.state === "string" ? step.state : "pending",
+    }));
+  }
+  if (projected.length === 0) return null;
+  const liveStep = projected.find((step) => step.state === "current") || null;
+  const failedStep = projected.find((step) => step.state === "failed") || null;
+  const lead = failedStep || liveStep;
+  return Object.freeze({
+    steps: Object.freeze(projected),
+    // What to read first: the thing that needs attention, else the live step.
+    headline: lead?.label ?? null,
+    detail: lead?.detail ?? null,
+    tone: failedStep ? "attention" : "quiet",
+  });
+}
+
 export function sidebarActorLabel(actor) {
   return ACTOR_LABELS[actor] ?? ACTOR_LABELS.pageroot;
 }

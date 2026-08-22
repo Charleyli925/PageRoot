@@ -82,6 +82,25 @@ export function sidebarActionBar(options?: {
   failureMessage?: string | null;
 }): SidebarActionBar | null;
 
+export type SidebarRunProgressStep = {
+  key: string;
+  label: string;
+  detail: string | null;
+  state: string;
+};
+
+export type SidebarRunProgress = {
+  steps: readonly SidebarRunProgressStep[];
+  headline: string | null;
+  detail: string | null;
+  tone: "attention" | "quiet";
+};
+
+export function sidebarRunProgress(options?: {
+  state?: string;
+  steps?: readonly unknown[];
+}): SidebarRunProgress | null;
+
 export function sidebarDeliveryDisclosure(intent?: SidebarIntent | string): string | null;
 
 export function sidebarSendState(options?: {

@@ -399,3 +399,34 @@
     transition: none !important;
   }
 }
+
+/*
+ * The run's steps. No new colour and no icons: the step being worked on is the
+ * only one at full strength, everything else recedes. Reading it should take a
+ * glance, not attention.
+ */
+.runSteps {
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 2px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.runSteps li {
+  color: #8a8797;
+}
+
+.runSteps li[data-step-state="current"] {
+  color: #201d31;
+}
+
+.runSteps li[data-step-state="done"] {
+  color: #6b6878;
+}
+
+.runSteps li[data-step-state="failed"] {
+  color: #b4442f;
+}
