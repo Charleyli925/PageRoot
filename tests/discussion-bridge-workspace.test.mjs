@@ -101,7 +101,9 @@ test("POST /discussion/start runs one read-only turn and leaves no snapshot", as
   assert.equal(started.body.accepted, true);
   const session = started.body.session;
   assert.equal(session.driver, "qoder-acp");
-  assert.equal(session.conversationId, "conversation_e2e");
+  // The Bridge resolves the document's real conversation rather than trusting
+  // the identity the caller sent.
+  assert.match(session.conversationId, /^conversation_[a-f0-9]{32}$/u);
   assert.match(session.turnId, /^turn_[a-f0-9]{32}$/u);
   assert.equal(session.sourceSha256, ensured.sourceSha256);
   // The renderer never receives command, paths, prompt or page bytes.
@@ -120,6 +122,32 @@ test("POST /discussion/start runs one read-only turn and leaves no snapshot", as
   assert.equal(settled.replyText, "这页的标题偏笼统，可以点明读者能得到什么。");
   assert.equal(settled.replyTruncated, false);
   assert.doesNotMatch(settled.replyText, /internal reasoning/iu);
+  assert.equal(settled.recorded, true);
+
+  // The round is durable: reading the conversation back shows the question and
+  // the reply as stored messages, so the answer survives a reload.
+  const conversation = await bridge.requestJson(
+    `/conversation?sourcePath=${encodeURIComponent(ensured.sourcePath)}`,
+  );
+  assert.equal(conversation.response.status, 200, JSON.stringify(conversation.body));
+  const messages = conversation.body.conversation.messages;
+  const question = messages.find((message) => message.actor === "user");
+  const reply = messages.find((message) => message.actor === "qoder");
+  assert.equal(question.text, "这页的标题怎么改更有说服力？");
+  assert.equal(question.status, "completed");
+  assert.equal(reply.text, "这页的标题偏笼统，可以点明读者能得到什么。");
+  assert.equal(reply.status, "completed");
+  assert.equal(reply.kind, "text");
+  // Hidden reasoning never reaches the durable record either.
+  for (const message of messages) {
+    assert.doesNotMatch(message.text, /internal reasoning/iu);
+  }
+  // The round records which bytes were discussed (PRD §9.2).
+  const context = conversation.body.conversation.contexts.find(
+    (value) => value.contextId === reply.contextId,
+  );
+  assert.equal(context.sourceSha256, ensured.sourceSha256);
+  assert.equal(context.side, "working-copy");
 
   // The snapshot is gone and durable project state is untouched.
   const snapshotParent = path.join(ensured.projectRoot, ".pageroot", "discussion-snapshots");

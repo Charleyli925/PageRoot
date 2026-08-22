@@ -18,6 +18,7 @@ export type DiscussionTurnProjection = {
   eventCount: number;
   replyText: string;
   replyTruncated: boolean;
+  recorded: boolean;
   interrupted: boolean;
   interruptedReason?: string;
   errorCode?: string;

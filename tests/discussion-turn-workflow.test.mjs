@@ -256,6 +256,24 @@ test("drain cancels an in-flight turn instead of waiting for it", async () => {
   assert.equal(calls.cancels.length, 1);
 });
 
+test("a settled turn asks the conversation to reload exactly once", async () => {
+  const settled = [];
+  const { workflow, session } = createWorkflow({
+    workflow: { onSettled: (context) => settled.push(context) },
+  });
+
+  session.beginTurn(CONTEXT);
+  session.publish(CONTEXT, turn({ state: "running" }));
+  // The stub status read reports a completed turn.
+  await workflow.pollNow();
+  assert.equal(settled.length, 1);
+  assert.equal(settled[0].documentId, CONTEXT.documentId);
+
+  // Polling again on an already settled turn must not reload a second time.
+  await workflow.pollNow();
+  assert.equal(settled.length, 1);
+});
+
 test("the workflow requires its dependencies", () => {
   const session = new DiscussionTurnSession();
   const scheduler = fakeScheduler();

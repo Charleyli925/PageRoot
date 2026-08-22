@@ -15,6 +15,11 @@
 //     artifact, so at a close/switch boundary PageRoot stops it instead of
 //     holding the boundary open for the turn's full budget. Waiting would block
 //     closing the app for up to two minutes to preserve something disposable.
+//
+// When a turn settles, the Bridge has sealed its reply into the conversation
+// record, so the workflow asks the conversation to reload once. The stored
+// message then replaces the live one with identical text — which is why the view
+// renders both through the same treatment.
 
 const POLL_INTERVAL_MS = 1_200;
 const DRIVER = "qoder-acp";
@@ -36,6 +41,8 @@ export class DiscussionTurnWorkflow {
 
   #requestTicket;
 
+  #onSettled;
+
   #scheduler;
 
   #intervalMs;
@@ -52,6 +59,7 @@ export class DiscussionTurnWorkflow {
     bridgeClient,
     discussionTurnSession,
     requestTicket,
+    onSettled = null,
     scheduler = globalThis,
     pollIntervalMs = POLL_INTERVAL_MS,
   }) {
@@ -78,6 +86,7 @@ export class DiscussionTurnWorkflow {
     this.#bridgeClient = bridgeClient;
     this.#session = discussionTurnSession;
     this.#requestTicket = requestTicket;
+    this.#onSettled = typeof onSettled === "function" ? onSettled : null;
     this.#scheduler = scheduler;
     this.#intervalMs = pollIntervalMs;
   }
@@ -148,7 +157,11 @@ export class DiscussionTurnWorkflow {
       const payload = await this.#bridgeClient.discussionStatus(context.sourcePath);
       if (generation !== this.#pollGeneration) return null;
       if (!sameDocument(this.#session.snapshot.context, context)) return null;
+      const wasBusy = this.#session.snapshot.busy;
       this.#session.publish(context, payload?.discussion ?? null);
+      // The turn just settled, so its reply is now a stored message. Reloading
+      // once is what moves the answer from this turn into the conversation.
+      if (wasBusy && !this.#session.snapshot.busy) this.#onSettled?.(context);
     } catch {
       // A failed status read leaves the last known projection in place and
       // retries on the next tick. It never invents a completed turn.

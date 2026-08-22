@@ -43,13 +43,21 @@ function workingCopy(overrides = {}) {
 }
 
 function createService(overrides = {}) {
-  const calls = { redeemed: [], discussions: [], runners: [] };
+  const calls = { redeemed: [], discussions: [], runners: [], recorded: [], sealed: [] };
   const service = new DiscussionBridgeService({
     redeemCommandTicket: async (preflightId) => {
       calls.redeemed.push(preflightId);
       return ticket();
     },
     readWorkingCopy: async () => workingCopy(),
+    recordQuestion: async (input) => {
+      calls.recorded.push(input);
+      return { conversationId: "conversation_recorded" };
+    },
+    sealReply: async (input) => {
+      calls.sealed.push(input);
+      return { ok: true };
+    },
     runDiscussion: async (input) => {
       calls.discussions.push(input);
       return {
@@ -97,7 +105,8 @@ test("a started discussion turn is accepted and publishes turn state only", asyn
   const session = accepted.session;
   assert.equal(session.driver, "qoder-acp");
   assert.equal(session.state, "starting");
-  assert.equal(session.conversationId, "conversation_1");
+  // The stored record is authoritative over the caller-supplied identity.
+  assert.equal(session.conversationId, "conversation_recorded");
   assert.match(session.turnId, /^turn_[a-f0-9]{32}$/u);
   assert.equal(session.sourceSha256, SOURCE_SHA256);
   // Nothing about the machine, the page or the prompt crosses the boundary.
@@ -324,4 +333,110 @@ test("an unknown Document has no discussion session", () => {
   const { service } = createService();
   assert.equal(service.status({ documentId: "doc_dddddddddddddddd" }), null);
   assert.equal(service.status({}), null);
+});
+
+// The round is durable: the question is stored before Qoder starts, and the reply
+// is sealed onto the same Turn when the round ends (ADR 0036, PRD §9).
+
+test("the question is recorded before the ticket is spent, and the reply is sealed after", async () => {
+  const { service, calls } = createService();
+
+  const accepted = await service.start(startBody());
+  const turnId = accepted.session.turnId;
+
+  // Recording happens first: a spent ticket with an unstored question would mean
+  // Qoder saw something the user's own record never did.
+  assert.equal(calls.recorded.length, 1);
+  assert.deepEqual(calls.redeemed, ["preflight_1"]);
+  const recorded = calls.recorded[0];
+  assert.equal(recorded.turnId, turnId);
+  assert.equal(recorded.question, "这个标题怎么改更有说服力？");
+  assert.equal(recorded.sourceSha256, SOURCE_SHA256);
+  assert.equal(recorded.sourcePath, SOURCE_PATH);
+  // The record is authoritative over the caller's conversation identity.
+  assert.equal(accepted.session.conversationId, "conversation_recorded");
+
+  await service.dispose();
+
+  assert.equal(calls.sealed.length, 1);
+  const sealed = calls.sealed[0];
+  assert.equal(sealed.turnId, turnId);
+  assert.equal(sealed.conversationId, "conversation_recorded");
+  assert.equal(sealed.status, "completed");
+  assert.equal(service.status({ documentId: DOCUMENT_ID }).recorded, true);
+});
+
+test("a question that cannot be stored starts no turn and spends no ticket", async () => {
+  const failure = new Error("conversation write failed");
+  failure.code = "CONVERSATION_MESSAGE_LIMIT";
+  const { service, calls } = createService({
+    recordQuestion: async () => {
+      throw failure;
+    },
+  });
+
+  await assert.rejects(
+    service.start(startBody()),
+    (error) => error.code === "CONVERSATION_MESSAGE_LIMIT" && error.status === 409,
+  );
+  assert.deepEqual(calls.redeemed, []);
+  assert.equal(calls.discussions.length, 0);
+  assert.equal(service.status({ documentId: DOCUMENT_ID }), null);
+});
+
+test("an interrupted round seals with its own status and its partial reply", async () => {
+  const { service, calls } = createService({
+    runDiscussion: async (input) => ({
+      status: "interrupted",
+      interrupted: true,
+      interruptedReason: "timeout",
+      turnId: input.turnId,
+      sourceSha256: input.expectedSourceSha256,
+      stopReason: null,
+      replyText: "说到一半",
+      replyTruncated: false,
+      updates: [],
+      droppedUpdateCount: 0,
+    }),
+  });
+
+  await service.start(startBody());
+  await service.dispose();
+
+  const sealed = calls.sealed[0];
+  // Stored as interrupted, so the record cannot read as a finished answer.
+  assert.equal(sealed.status, "interrupted");
+  assert.equal(sealed.replyText, "说到一半");
+});
+
+test("a sealing failure is reported without discarding the answer the user read", async () => {
+  const { service } = createService({
+    sealReply: async () => {
+      const failure = new Error("record unavailable");
+      failure.code = "CONVERSATION_MISSING";
+      throw failure;
+    },
+    runDiscussion: async (input) => ({
+      status: "completed",
+      interrupted: false,
+      interruptedReason: null,
+      turnId: input.turnId,
+      sourceSha256: input.expectedSourceSha256,
+      stopReason: "end_turn",
+      replyText: "已经读到的回答",
+      replyTruncated: false,
+      updates: [],
+      droppedUpdateCount: 0,
+    }),
+  });
+
+  await service.start(startBody());
+  await service.dispose();
+
+  const session = service.status({ documentId: DOCUMENT_ID });
+  assert.equal(session.recorded, false);
+  assert.equal(session.errorCode, "CONVERSATION_MISSING");
+  // The turn itself completed and its text stays visible.
+  assert.equal(session.state, "completed");
+  assert.equal(session.replyText, "已经读到的回答");
 });

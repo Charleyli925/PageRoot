@@ -68,6 +68,7 @@ function publicDiscussion(entry) {
     eventCount: entry.eventCount,
     replyText: entry.replyText,
     replyTruncated: entry.replyTruncated === true,
+    recorded: entry.recorded === true,
     interrupted: entry.interrupted === true,
     ...(entry.interruptedReason ? { interruptedReason: entry.interruptedReason } : {}),
     ...(entry.errorCode ? { errorCode: entry.errorCode } : {}),
@@ -116,6 +117,8 @@ function defaultTurnRunner({ ticket, environment }) {
 export class DiscussionBridgeService {
   #redeemCommandTicket;
   #readWorkingCopy;
+  #recordQuestion;
+  #sealReply;
   #runDiscussion;
   #createTurnRunner;
   #environment;
@@ -127,6 +130,8 @@ export class DiscussionBridgeService {
   constructor({
     redeemCommandTicket,
     readWorkingCopy,
+    recordQuestion,
+    sealReply,
     runDiscussion = runDiscussionTurn,
     createTurnRunner = defaultTurnRunner,
     environment = process.env,
@@ -136,6 +141,8 @@ export class DiscussionBridgeService {
     if (
       typeof redeemCommandTicket !== "function"
       || typeof readWorkingCopy !== "function"
+      || typeof recordQuestion !== "function"
+      || typeof sealReply !== "function"
       || typeof runDiscussion !== "function"
       || typeof createTurnRunner !== "function"
     ) {
@@ -143,6 +150,8 @@ export class DiscussionBridgeService {
     }
     this.#redeemCommandTicket = redeemCommandTicket;
     this.#readWorkingCopy = readWorkingCopy;
+    this.#recordQuestion = recordQuestion;
+    this.#sealReply = sealReply;
     this.#runDiscussion = runDiscussion;
     this.#createTurnRunner = createTurnRunner;
     this.#environment = environment;
@@ -223,15 +232,36 @@ export class DiscussionBridgeService {
       );
     }
 
-    // The renderer never names the snapshot directory: the turn id is minted
-    // here so a caller cannot choose a path segment.
+    // The renderer never names the snapshot directory: the turn identifier is
+    // minted here so a caller cannot choose a path segment. One identifier ties
+    // the snapshot directory, this session and the conversation Turn together.
     const turnId = `turn_${randomUUID().replaceAll("-", "")}`;
+
+    // PRD §9: the question must be durable before Qoder is started. A failed
+    // record means no turn at all, and no ticket is spent.
+    let recorded;
+    try {
+      recorded = await this.#recordQuestion({
+        sourcePath,
+        conversationId,
+        turnId,
+        sourceSha256: workingCopy.sourceSha256,
+        question,
+      });
+    } catch (cause) {
+      fail(
+        cleanText(cause?.code, 120) || "DISCUSSION_RECORD_FAILED",
+        "这条提问没有存下来，PageRoot 没有启动 Qoder。",
+        { status: 409 },
+      );
+    }
+    const recordedConversationId = cleanText(recorded?.conversationId, 200) || conversationId;
     const ticket = await this.#redeemCommandTicket(preflightId);
     const controller = new AbortController();
     const startedAtMs = this.#clock.now();
     const entry = {
       documentId,
-      conversationId,
+      conversationId: recordedConversationId,
       turnId,
       sourceSha256: workingCopy.sourceSha256,
       state: "starting",
@@ -244,6 +274,8 @@ export class DiscussionBridgeService {
       eventCount: 0,
       replyText: "",
       replyTruncated: false,
+      // Whether the round reached the durable conversation record.
+      recorded: false,
       interrupted: false,
       interruptedReason: null,
       errorCode: null,
@@ -283,32 +315,65 @@ export class DiscussionBridgeService {
       cancellationSignal: controller.signal,
       onEvent: observe,
       runTurn: this.#createTurnRunner({ ticket, environment: this.#environment }),
-    }).then((outcome) => {
+    }).then(
+      (outcome) => ({
+        state: outcome.status === "completed"
+          ? "completed"
+          : outcome.interruptedReason === "cancelled"
+            ? "cancelled"
+            : "interrupted",
+        interrupted: outcome.interrupted === true,
+        interruptedReason: outcome.interruptedReason || null,
+        // The settled outcome is authoritative over the streamed fragments.
+        replyText: typeof outcome.replyText === "string" ? outcome.replyText : entry.replyText,
+        replyTruncated: outcome.replyTruncated === true,
+        errorCode: null,
+        errorMessage: null,
+      }),
+      (cause) => ({
+        state: "failed",
+        // A turn that produced an answer but could not clean up still reports
+        // what the user already saw.
+        interrupted: cause?.discussionOutcome?.interrupted === true,
+        interruptedReason: cause?.discussionOutcome?.interruptedReason || null,
+        replyText: entry.replyText,
+        replyTruncated: entry.replyTruncated,
+        errorCode: cleanText(cause?.code, 120) || "DISCUSSION_TURN_FAILED",
+        errorMessage: "这轮讨论没有完成。请稍后重试。",
+      }),
+    ).then(async (settled) => {
       if (this.#sessions.get(documentId) !== entry) return;
-      entry.interrupted = outcome.interrupted === true;
-      entry.interruptedReason = outcome.interruptedReason || null;
-      // The settled outcome is authoritative over the streamed fragments.
-      if (typeof outcome.replyText === "string") entry.replyText = outcome.replyText;
-      entry.replyTruncated = outcome.replyTruncated === true;
-      entry.state = outcome.status === "completed"
-        ? "completed"
-        : outcome.interruptedReason === "cancelled"
-          ? "cancelled"
-          : "interrupted";
-      entry.phase = entry.state;
-      touch();
-    }).catch((cause) => {
-      if (this.#sessions.get(documentId) !== entry) return;
-      entry.state = "failed";
-      entry.phase = "failed";
-      entry.errorCode = cleanText(cause?.code, 120) || "DISCUSSION_TURN_FAILED";
-      entry.errorMessage = "这轮讨论没有完成。请稍后重试。";
-      // A turn that produced an answer but could not clean up still reports what
-      // the user already saw.
-      if (cause?.discussionOutcome) {
-        entry.interrupted = cause.discussionOutcome.interrupted === true;
-        entry.interruptedReason = cause.discussionOutcome.interruptedReason || null;
+      // Seal before publishing the terminal state. A round is not finished until
+      // its reply is durable, so a reader that sees a settled turn can always
+      // find that turn in the conversation record (ADR 0036). Publishing first
+      // would let the sidebar reload between the two and find nothing.
+      let recordFailure = null;
+      try {
+        await this.#sealReply({
+          sourcePath,
+          conversationId: entry.conversationId,
+          turnId,
+          status: settled.state === "failed" ? "failed" : settled.state,
+          replyText: settled.replyText,
+          replyTruncated: settled.replyTruncated,
+        });
+      } catch (cause) {
+        recordFailure = cause;
       }
+      if (this.#sessions.get(documentId) !== entry) return;
+      entry.interrupted = settled.interrupted;
+      entry.interruptedReason = settled.interruptedReason;
+      entry.replyText = settled.replyText;
+      entry.replyTruncated = settled.replyTruncated;
+      entry.recorded = recordFailure === null;
+      entry.errorCode = settled.errorCode
+        || (recordFailure
+          ? cleanText(recordFailure?.code, 120) || "DISCUSSION_RECORD_FAILED"
+          : null);
+      entry.errorMessage = settled.errorMessage
+        || (recordFailure ? "这轮讨论没有存进对话记录。" : null);
+      entry.state = settled.state;
+      entry.phase = settled.state;
       touch();
     });
     void entry.promise.catch(() => {});
@@ -339,8 +404,10 @@ export class DiscussionBridgeService {
     this.#disposed = true;
     const settling = [];
     for (const entry of this.#sessions.values()) {
-      if (!LIVE_STATES.includes(entry.state)) continue;
-      entry.controller.abort();
+      if (LIVE_STATES.includes(entry.state)) entry.controller.abort();
+      // Every owned promise is awaited, not only the live ones: a turn whose
+      // Agent already stopped may still be writing its reply into the
+      // conversation record, and dropping that write would lose the answer.
       if (entry.promise) settling.push(entry.promise.catch(() => {}));
     }
     await Promise.allSettled(settling);

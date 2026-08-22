@@ -21,6 +21,7 @@ export class DiscussionTurnWorkflow {
     bridgeClient: BridgeClient;
     discussionTurnSession: DiscussionTurnSession;
     requestTicket: () => Promise<DiscussionTurnTicket | null>;
+    onSettled?: ((context: DiscussionTurnContext) => void) | null;
     scheduler?: DiscussionTurnScheduler;
     pollIntervalMs?: number;
   });

@@ -37,6 +37,8 @@ import {
   readConversation,
   readConversationDraft,
   readConversationIndex,
+  recordDiscussionQuestion,
+  sealDiscussionReply,
   writeConversationDraft,
 } from "./conversation-repository.mjs";
 import {
@@ -83,12 +85,15 @@ const agentBridgeService = new AgentBridgeService({
 });
 // Discussion keeps its own service so the read-only turn authority never shares
 // a code path with Request execution. It redeems the one-use command ticket from
-// the Agent service and reads Working Copy bytes through the repository.
+// the Agent service, reads Working Copy bytes through the repository, and records
+// the round through the same conversation writer every other message uses.
 const discussionBridgeService = new DiscussionBridgeService({
   redeemCommandTicket: (preflightId) => agentBridgeService.redeemCommandTicket(preflightId),
   readWorkingCopy: ({ sourcePath }) => projectFileWorkspaceForSource(
     requiredSourcePath(sourcePath),
   ),
+  recordQuestion: (input) => recordDiscussionRound(input),
+  sealReply: (input) => sealDiscussionRound(input),
 });
 const FINALIZER_PATH = fileURLToPath(
   new URL("./finalize-attempt.mjs", import.meta.url),
@@ -1910,6 +1915,48 @@ async function currentConversation(sourcePath) {
     documentId: context.documentId,
     ...conversationResponse(conversation, draft),
   };
+}
+
+// The discussion service holds no path convention and no conversation identity:
+// both are resolved here from the registered workspace, so a caller cannot point
+// a round at another project's record.
+async function recordDiscussionRound({
+  sourcePath,
+  turnId,
+  sourceSha256,
+  question,
+}) {
+  const workspace = await projectFileWorkspaceForSource(requiredSourcePath(sourcePath));
+  if (!workspace) throw projectNotFoundError();
+  const context = conversationContext(workspace);
+  const conversation = await ensureCurrentConversation(context);
+  await recordDiscussionQuestion(context, {
+    conversationId: conversation.conversationId,
+    turnId,
+    sourceSha256,
+    question,
+  });
+  return { conversationId: conversation.conversationId };
+}
+
+async function sealDiscussionRound({
+  sourcePath,
+  conversationId,
+  turnId,
+  status,
+  replyText,
+  replyTruncated,
+}) {
+  const workspace = await projectFileWorkspaceForSource(requiredSourcePath(sourcePath));
+  if (!workspace) throw projectNotFoundError();
+  await sealDiscussionReply(conversationContext(workspace), {
+    conversationId,
+    turnId,
+    status,
+    replyText,
+    replyTruncated,
+  });
+  return { ok: true };
 }
 
 async function documentConversations(sourcePath) {
