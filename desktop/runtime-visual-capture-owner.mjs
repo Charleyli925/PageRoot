@@ -59,6 +59,10 @@ const OWNER_RECT_KEYS = new Set([
   "key",
   "state",
   "rect",
+  // The host's own size, which the probe reports whether or not the host fits in
+  // the capture viewport. A chart wider or taller than the viewport is still
+  // comparable through its drawing surface.
+  "layout",
   "renderedText",
   "surfaceDigest",
   "scrolled",
@@ -370,6 +374,8 @@ export function isolatedSnapshotRectScript(candidate) {
   const maxSurfaceMarkup = ${safeScriptValue(SURFACE_MARKUP_LIMIT)};
   const maxPresentationDepth = ${safeScriptValue(PRESENTATION_ANCESTOR_DEPTH)};
   const maxSurfaceDrawables = ${safeScriptValue(SURFACE_DRAWABLE_LIMIT)};
+  const maxLayoutWidth = ${safeScriptValue(RUNTIME_VISUAL_PAGE_BUDGET.viewport.maxWidth)};
+  const maxLayoutHeight = ${safeScriptValue(RUNTIME_VISUAL_PAGE_BUDGET.viewport.maxHeight)};
   const queryElements = Function.prototype.call.bind(Element.prototype.querySelectorAll);
   const getAttribute = Function.prototype.call.bind(Element.prototype.getAttribute);
   const getRect = Function.prototype.call.bind(Element.prototype.getBoundingClientRect);
@@ -404,6 +410,25 @@ export function isolatedSnapshotRectScript(candidate) {
     tagMatches(element, candidate.tagName)
     && candidate.identityAttributes.every(([name, value]) => getAttribute(element, name) === value)
   );
+  // The host's own size, independent of where it sits. A chart taller or wider
+  // than the capture viewport can still be compared through its drawing surface,
+  // which lives in the chart's own coordinate space; only the window-pixel
+  // fallback needs the host to fit. Measurement on authored pages showed this
+  // is not a corner case: one page had eight charts none of which fitted, and
+  // every one of them was permanently unverifiable for that reason alone.
+  const measuredSize = (element) => {
+    const rect = getRect(element);
+    if (
+      !Number.isFinite(rect.width)
+      || !Number.isFinite(rect.height)
+      || rect.width < 1
+      || rect.height < 1
+    ) return null;
+    return {
+      width: Math.min(Math.ceil(rect.width), maxLayoutWidth),
+      height: Math.min(Math.ceil(rect.height), maxLayoutHeight),
+    };
+  };
   const usableRect = (element) => {
     const rect = getRect(element);
     if (
@@ -993,11 +1018,12 @@ export function isolatedSnapshotRectScript(candidate) {
   const paintTargets = candidate.kind === "host"
     ? Array.from(queryElements(host, "canvas,svg"))
     : [host];
-  const hasVisiblePaint = paintTargets.some((target) => usableRect(target) !== null);
-  const renderedText = hostRect && hasVisiblePaint
-    ? visibleRenderedText(host, hostRect)
+  const hostSize = measuredSize(host);
+  const hasVisiblePaint = paintTargets.some((target) => measuredSize(target) !== null);
+  const renderedText = hostSize && hasVisiblePaint
+    ? visibleRenderedText(host, hostRect || { x: 0, y: 0, ...hostSize })
     : null;
-  const surfaceDigest = hostRect && hasVisiblePaint
+  const surfaceDigest = hostSize && hasVisiblePaint
     ? (() => {
       const drawn = surfaceDigestOf(paintTargets);
       if (!drawn) return "";
@@ -1010,11 +1036,12 @@ export function isolatedSnapshotRectScript(candidate) {
   return {
     status: "captured",
     snapshots: [
-      hostRect && hasVisiblePaint && renderedText !== null
+      hostSize && hasVisiblePaint && renderedText !== null && (hostRect || surfaceDigest)
         ? {
           key: candidate.key,
           state: "captured",
           rect: hostRect,
+          layout: hostSize,
           renderedText,
           surfaceDigest,
           scrolled,
@@ -1051,6 +1078,18 @@ function normalizedViewportRect(value, request) {
   return Object.freeze(rect);
 }
 
+function boundedLayoutValue(value, limit) {
+  return Number.isSafeInteger(value) && value >= 1 && value <= limit ? value : null;
+}
+
+function normalizedLayoutSize(value) {
+  if (!isRecord(value)) return undefined;
+  const width = boundedLayoutValue(value.width, RUNTIME_VISUAL_PAGE_BUDGET.viewport.maxWidth);
+  const height = boundedLayoutValue(value.height, RUNTIME_VISUAL_PAGE_BUDGET.viewport.maxHeight);
+  if (width === null || height === null) return undefined;
+  return Object.freeze({ width, height });
+}
+
 function normalizedOwnerRects(value, request) {
   if (
     !isRecord(value)
@@ -1070,9 +1109,15 @@ function normalizedOwnerRects(value, request) {
       || seen.has(rawSnapshot.key)
       || (rawSnapshot.state !== "captured" && rawSnapshot.state !== "unavailable")
     ) return null;
+    // A captured host without a capturable rect is expected: only the pixel
+    // fallback needs one, so the rect is optional as long as the layout size and
+    // a surface digest are present.
     const rect = rawSnapshot.state === "captured"
-      ? normalizedViewportRect(rawSnapshot.rect, request)
+      ? (rawSnapshot.rect === null ? null : normalizedViewportRect(rawSnapshot.rect, request))
       : rawSnapshot.rect === null ? null : undefined;
+    const layout = rawSnapshot.state === "captured"
+      ? normalizedLayoutSize(rawSnapshot.layout)
+      : rawSnapshot.layout === null ? null : undefined;
     const renderedText = rawSnapshot.state === "captured"
       ? normalizedString(rawSnapshot.renderedText, RUNTIME_VISUAL_PAGE_BUDGET.renderedTextBytes)
       : rawSnapshot.renderedText === "" ? "" : undefined;
@@ -1087,8 +1132,10 @@ function normalizedOwnerRects(value, request) {
       || renderedText === undefined
       || renderedText === null
       || surfaceDigest === undefined
+      || layout === undefined
       || typeof rawSnapshot.scrolled !== "boolean"
-      || (rawSnapshot.state === "captured" && !rect)
+      || (rawSnapshot.state === "captured" && !layout)
+      || (rawSnapshot.state === "captured" && !rect && !surfaceDigest)
       || (
         typeof renderedText === "string"
         && Buffer.byteLength(renderedText, "utf8") > RUNTIME_VISUAL_PAGE_BUDGET.renderedTextBytes
@@ -1099,6 +1146,7 @@ function normalizedOwnerRects(value, request) {
       key: rawSnapshot.key,
       state: rawSnapshot.state,
       rect,
+      layout,
       renderedText,
       surfaceDigest,
       scrolled: rawSnapshot.scrolled,
@@ -1483,6 +1531,24 @@ export function createRuntimeSnapshotCaptureController({
           let previous = null;
           let latest = null;
           let comparedFrames = 0;
+          let previousDigest = null;
+          let latestSurfaceOnly = null;
+          const pushSurfaceOnlySnapshot = (ownerSnapshot, stability) => {
+            snapshots.push(Object.freeze({
+              key: candidate.key,
+              state: "captured",
+              pngSha256: "",
+              width: 0,
+              height: 0,
+              byteLength: 0,
+              pngBytes: new Uint8Array(),
+              layoutWidth: ownerSnapshot.layout.width,
+              layoutHeight: ownerSnapshot.layout.height,
+              renderedTextSha256: renderedTextSha256(ownerSnapshot.renderedText),
+              surfaceSha256: renderedTextSha256(`surface:${ownerSnapshot.surfaceDigest}`),
+              stability,
+            }));
+          };
           const pushSnapshot = ({ png, rect, ownerSnapshot }, stability) => {
             capturedPixels += png.width * png.height;
             capturedBytes += png.byteLength;
@@ -1490,8 +1556,8 @@ export function createRuntimeSnapshotCaptureController({
               key: candidate.key,
               state: "captured",
               ...png,
-              layoutWidth: rect.width,
-              layoutHeight: rect.height,
+              layoutWidth: ownerSnapshot.layout.width,
+              layoutHeight: ownerSnapshot.layout.height,
               renderedTextSha256: renderedTextSha256(ownerSnapshot.renderedText),
               // A digest the page could not produce stays empty rather than
               // hashing "" into something that looks like evidence.
@@ -1516,12 +1582,30 @@ export function createRuntimeSnapshotCaptureController({
               isolatedSnapshotRectScript(candidate),
             )), ownerRequest);
             const ownerSnapshot = ownerRects?.snapshots[0];
-            if (
-              !ownerSnapshot
-              || ownerSnapshot.state !== "captured"
-              || !ownerSnapshot.rect
-              || ownerSnapshot.rect.width * ownerSnapshot.rect.height > remainingPixels
-            ) break;
+            if (!ownerSnapshot || ownerSnapshot.state !== "captured") break;
+            if (!ownerSnapshot.rect) {
+              // Nothing to crop, so there are no window pixels to settle. The
+              // drawing surface still answers the comparison, and it can also
+              // answer whether the host is still moving: reading the digest
+              // twice costs no capture. Without this a chart that repaints
+              // without pause reported a confirmed change on two byte-identical
+              // pages, which is exactly the failure the stability fact exists to
+              // prevent.
+              if (previousDigest === null) {
+                previousDigest = ownerSnapshot.surfaceDigest;
+                latestSurfaceOnly = ownerSnapshot;
+                continue;
+              }
+              pushSurfaceOnlySnapshot(
+                ownerSnapshot,
+                previousDigest === ownerSnapshot.surfaceDigest
+                  ? CAPTURE_SETTLED
+                  : CAPTURE_MOVING,
+              );
+              accepted = true;
+              break;
+            }
+            if (ownerSnapshot.rect.width * ownerSnapshot.rect.height > remainingPixels) break;
             if (attempt === 0 && ownerSnapshot.scrolled) {
               await withOwnerDeadline(waitForScrolledOffscreenFrame(
                 captureWindow.webContents,
@@ -1560,7 +1644,11 @@ export function createRuntimeSnapshotCaptureController({
           // the drawing-surface digest still decide normally, none of which
           // flickers with animation.
           if (!accepted) {
-            if (latest) {
+            if (latestSurfaceOnly) {
+              // The budget ran out before a second digest read, so whether this
+              // host is moving was never established.
+              pushSurfaceOnlySnapshot(latestSurfaceOnly, CAPTURE_STABILITY_UNKNOWN);
+            } else if (latest) {
               pushSnapshot(
                 latest,
                 comparedFrames > 0 ? CAPTURE_MOVING : CAPTURE_STABILITY_UNKNOWN,

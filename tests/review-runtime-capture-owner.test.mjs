@@ -53,6 +53,7 @@ function ownerRects(renderedText = "图表 9.54", scrolled = false) {
       key: "runtime-host-1",
       state: "captured",
       rect: { x: 0, y: 0, width: 1, height: 1 },
+      layout: { width: 1, height: 1 },
       renderedText,
       surfaceDigest: "",
       scrolled,
@@ -63,7 +64,15 @@ function ownerRects(renderedText = "图表 9.54", scrolled = false) {
 function ownerRectsFor(key, rect, renderedText = "图表 9.54", scrolled = false) {
   return {
     status: "captured",
-    snapshots: [{ key, state: "captured", rect, renderedText, surfaceDigest: "", scrolled }],
+    snapshots: [{
+      key,
+      state: "captured",
+      rect,
+      layout: { width: rect.width, height: rect.height },
+      renderedText,
+      surfaceDigest: "",
+      scrolled,
+    }],
   };
 }
 
@@ -1019,6 +1028,7 @@ test("an owner rect payload without a scroll fact is rejected instead of assumed
         key: "runtime-host-1",
         state: "captured",
         rect: { x: 0, y: 0, width: 1, height: 1 },
+        layout: { width: 1, height: 1 },
         renderedText: "图表 9.54",
         surfaceDigest: "",
       }],

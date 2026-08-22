@@ -56,6 +56,9 @@ export function reviewRuntimeVisualSnapshotComparison(before, after) {
     if (before.stability === "moving" || after.stability === "moving") return "unavailable";
     return "changed";
   }
+  // Two hosts with no pixels both carry an empty hash, so comparing those would
+  // read as unchanged without anything having been compared.
+  if (!before.pngSha256 || !after.pngSha256) return "unavailable";
   if (before.pngSha256 === after.pngSha256) return "unchanged";
   // A raster distance measured against a host observed mid-repaint is not
   // evidence either, and calling it a change would fabricate one.
