@@ -47,6 +47,9 @@ next-env.d.ts
 /output/
 /release/
 /.playwright-cli/
+# Playwright writes failure traces and its last-run marker here. It is generated
+# evidence, not source, and must never reach a commit.
+/test-results/
 *.tsbuildinfo
 /.wrangler/
 /outputs/
