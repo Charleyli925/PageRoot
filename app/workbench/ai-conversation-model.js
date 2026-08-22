@@ -71,13 +71,29 @@ const MODE_PRESENTATION = Object.freeze({
     label: "审阅 · 只读",
     detail: "讨论不会改变候选。",
   },
+  // Not a run status: this is the moment between choosing to modify and the round
+  // existing. Nothing is written yet, and the copy says so.
+  "pending-modification": {
+    label: "修改 · 待发送",
+    detail: "按你写的评论改，结果先进入审阅。",
+  },
   promoting: {
     label: "结果 · 等待决定",
     detail: "当前仍是修改前页面。",
   },
 });
 
-export function sidebarModePresentation(state) {
+export function sidebarModePresentation(state, intent) {
+  // Before a round exists, the header follows what the user is about to do. Saying
+  // "讨论 · 只读" while the Composer directly below it is preparing a modification
+  // contradicts itself, and the run status alone cannot tell them apart because no
+  // run has been created yet. Once a round exists its durable status wins again.
+  if (
+    intent === INTENT_MODIFY
+    && (state === "preview-discussion" || state === "preparing-delivery")
+  ) {
+    return MODE_PRESENTATION["pending-modification"];
+  }
   return MODE_PRESENTATION[state] ?? MODE_PRESENTATION["preview-discussion"];
 }
 

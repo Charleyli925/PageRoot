@@ -60,6 +60,7 @@ export type SidebarCatalogStatus =
 
 export function sidebarModePresentation(
   state: string,
+  intent?: SidebarIntent | string,
 ): SidebarModePresentation;
 
 export function sidebarActorLabel(actor: string): string;

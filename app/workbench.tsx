@@ -1552,7 +1552,17 @@ export default function Workbench() {
             || state === "awaiting-conflict-resolution"
             || state === "recovering-transaction"
           ) {
-            setDrawer("handoff");
+            // A finished round is reported by the conversation: the sidebar moves to
+            // "结果 · 等待决定" and its action bar carries the decision. Only the
+            // states the user cannot act on from there still raise the drawer, and
+            // they raise it because the details live nowhere else.
+            if (
+              state === "error"
+              || state === "awaiting-conflict-resolution"
+              || state === "recovering-transaction"
+            ) {
+              setDrawer("handoff");
+            }
             if (state === "ready-to-open" && toastRef.current?.dedupeKey === "ai-submit") {
               setToast(null);
             }
@@ -7439,8 +7449,8 @@ export default function Workbench() {
               // anyway, so it stops presenting itself as editable.
               setDrawer(null);
               setCanvasMode("preview");
-              workspaceControllerRef.current?.updateConversationDraftIntent("modify");
-              aiConversation.reveal();
+              // The intent is handed to reveal so it survives the conversation load.
+              aiConversation.reveal("modify");
             }}
           />
         </WorkbenchHeaderActions>

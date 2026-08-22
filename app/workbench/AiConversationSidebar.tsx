@@ -98,10 +98,11 @@ export default function AiConversationSidebar({
   runSteps = [],
 }: AiConversationSidebarProps) {
   const intentOptionsRef = useRef<HTMLDivElement>(null);
-  const mode = sidebarModePresentation(state);
   const stream = useMemo(() => sidebarMessageStream(messages), [messages]);
   const intentOptions = useMemo(() => sidebarIntentOptions(state), [state]);
   const activeIntent = sidebarResolvedIntent(state, intent);
+  // Computed after the intent because a pending modification renames the mode.
+  const mode = sidebarModePresentation(state, activeIntent);
   const actionBar = useMemo(
     () => sidebarActionBar({
       state,

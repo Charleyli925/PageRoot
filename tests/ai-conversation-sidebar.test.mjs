@@ -499,3 +499,19 @@ test("progress belongs to a moving round only", () => {
   // Malformed entries are dropped rather than rendered as blanks.
   assert.equal(sidebarRunProgress({ state: "processing", steps: [{ label: "无 key" }] }), null);
 });
+
+test("preparing a modification renames the mode instead of still claiming discussion", () => {
+  // No run exists yet, so run status alone cannot tell these apart. The header has
+  // to follow the intent, or it contradicts the Composer right below it.
+  const pending = sidebarModePresentation("preview-discussion", "modify");
+  assert.equal(pending.label, "修改 · 待发送");
+  assert.equal(pending.detail, "按你写的评论改，结果先进入审阅。");
+
+  // Discussion keeps its own honest label.
+  assert.equal(sidebarModePresentation("preview-discussion", "discuss").label, "讨论 · 只读");
+
+  // Once a round exists, its durable status wins again — the intent cannot dress
+  // a running execution up as something pending.
+  assert.equal(sidebarModePresentation("processing", "modify").label, "执行 · 写入候选");
+  assert.equal(sidebarModePresentation("review-view", "modify").label, "审阅 · 只读");
+});

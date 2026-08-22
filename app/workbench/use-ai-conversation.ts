@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { WorkspaceController } from "../application/workspace-controller.js";
 import type { ConversationSessionSnapshot } from "../application/conversation-session.js";
@@ -87,7 +87,14 @@ export function useAiConversation({
     if (!visible) return undefined;
     const controller = controllerRef.current;
     if (!controller) return undefined;
-    void controller.openConversation({ projectId, documentId, sourcePath });
+    void (async () => {
+      await controller.openConversation({ projectId, documentId, sourcePath });
+      const requested = pendingIntentRef.current;
+      if (requested) {
+        pendingIntentRef.current = null;
+        controller.updateConversationDraftIntent(requested);
+      }
+    })();
     void controller.checkQoderUsability();
     return () => {
       void controller.flushConversationDraft();
@@ -102,7 +109,18 @@ export function useAiConversation({
   const toggle = useCallback(() => setOpen((value) => !value), []);
   // Submitting a round makes this the surface that reports it, so the workbench
   // opens the thread instead of raising the process drawer over the page.
-  const reveal = useCallback(() => setOpen(true), []);
+  //
+  // An intent asked for here has to survive openConversation: that load brings the
+  // stored draft back and would otherwise overwrite it, which is why the intent is
+  // both applied now (for an already-open sidebar) and re-asserted after the load.
+  const pendingIntentRef = useRef<SidebarIntent | null>(null);
+  const reveal = useCallback((intent?: SidebarIntent) => {
+    if (intent) {
+      pendingIntentRef.current = intent;
+      controllerRef.current?.updateConversationDraftIntent(intent);
+    }
+    setOpen(true);
+  }, [controllerRef]);
 
   const onDraftChange = useCallback((text: string) => {
     controllerRef.current?.updateConversationDraftText(text);
