@@ -7025,12 +7025,30 @@ export default function Workbench() {
       if (actionId === "adopt") { void activateReadyResult(); return; }
       if (actionId === "recopy") {
         const controller = workspaceControllerRef.current;
-        if (controller && activeRun) void controller.copyRunHandoff({ run: activeRun });
+        if (!controller || !activeRun) return;
+        // Copying is invisible by nature: without a word the user cannot tell an
+        // successful re-copy from a dead button.
+        void (async () => {
+          const outcome = await controller.copyRunHandoff({ run: activeRun });
+          setToast(outcome && outcome.status === "succeeded"
+            ? {
+              title: "本轮要求已复制",
+              message: "粘贴给你的 AI；改完回到这里。",
+              tone: "success",
+              dedupeKey: "handoff-recopied",
+            }
+            : {
+              title: "复制没有成功",
+              message: "再试一次，或从「查看本轮」里取本轮要求。",
+              tone: "warning",
+              dedupeKey: "handoff-recopied",
+            });
+        })();
         return;
       }
       if (actionId === "cancel" || actionId === "dismiss") requestActiveRunEnd();
     };
-  }, [activateReadyResult, activeRun, requestActiveRunEnd, reviewReadyResult]);
+  }, [activateReadyResult, activeRun, requestActiveRunEnd, reviewReadyResult, setToast]);
 
   // The review compares immutable snapshots prepared against the
   // pre-promotion source identity. Accepting promotes the Working Copy to a

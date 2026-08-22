@@ -463,8 +463,8 @@ test("a round in flight reads inside the thread instead of only in the drawer", 
   ];
   const progress = sidebarRunProgress({ state: "processing", steps });
 
-  // What to read first is the step actually moving, not the whole checklist.
-  assert.equal(progress.headline, "AI 正在修改");
+  // The list already shows which step is live, so no headline repeats its label.
+  assert.equal(progress.headline, null);
   assert.equal(progress.detail, "正在写入候选");
   assert.equal(progress.tone, "quiet");
   assert.equal(progress.steps.length, 3);

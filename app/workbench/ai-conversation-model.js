@@ -167,12 +167,12 @@ export function sidebarRunProgress({ state, steps = [] } = {}) {
   if (projected.length === 0) return null;
   const liveStep = projected.find((step) => step.state === "current") || null;
   const failedStep = projected.find((step) => step.state === "failed") || null;
-  const lead = failedStep || liveStep;
   return Object.freeze({
     steps: Object.freeze(projected),
-    // What to read first: the thing that needs attention, else the live step.
-    headline: lead?.label ?? null,
-    detail: lead?.detail ?? null,
+    // Only a failure gets its own line. The list already shows which step is live at
+    // full strength, so repeating that label above it says the same thing twice.
+    headline: failedStep?.label ?? null,
+    detail: liveStep?.detail ?? null,
     tone: failedStep ? "attention" : "quiet",
   });
 }
