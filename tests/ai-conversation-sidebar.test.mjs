@@ -303,7 +303,8 @@ test("a live discussion turn blocks a second send and says why", () => {
     discussionBusy: true,
   });
   assert.equal(busy.canSend, false);
-  assert.equal(busy.reason, "Qoder 正在回复这轮讨论");
+  // The streaming notice above the Composer carries that sentence already.
+  assert.equal(busy.reason, null);
 
   // Once the turn settles the Composer is usable again.
   const settled = sidebarSendState({

@@ -5739,6 +5739,13 @@ body {
 }
 
 .ai-conversation-aside {
+  /*
+   * Both coordinates are named explicitly. Leaving the column to auto-placement
+   * put the sidebar on a new row below the canvas, which turned a docked side
+   * panel into a full-width bottom bar and left the right third of the window
+   * empty.
+   */
+  grid-column: 2;
   grid-row: 2;
   min-width: 0;
   min-height: 0;
