@@ -9,6 +9,7 @@ import {
   sidebarIntentOptions,
   sidebarLiveReply,
   sidebarMessageStream,
+  sidebarModelLine,
   sidebarModePresentation,
   sidebarResolvedIntent,
   sidebarSendState,
@@ -197,6 +198,30 @@ test("mode copy separates who may write from who may only read", () => {
   assert.equal(sidebarModePresentation("review-view").label, "审阅 · 只读");
   // An unknown state falls back to the most restrictive copy.
   assert.equal(sidebarModePresentation("unknown-state").label, "讨论 · 只读");
+});
+
+test("the model line names a model only when one is actually known", () => {
+  // Reading: say so.
+  assert.deepEqual(sidebarModelLine({ catalogStatus: "checking" }), {
+    kind: "checking", text: "正在读取模型…", choosable: false,
+  });
+
+  // Nothing read yet: stay silent rather than assert a fact about the account.
+  assert.equal(sidebarModelLine({ catalogStatus: "ready" }), null);
+  assert.equal(sidebarModelLine({ catalogStatus: "ready", modelDisplayName: "   " }), null);
+  // The unavailable cases explain themselves on the send button.
+  assert.equal(sidebarModelLine({ catalogStatus: "auth-required" }), null);
+  assert.equal(sidebarModelLine({ catalogStatus: "not-installed" }), null);
+  assert.equal(sidebarModelLine({ catalogStatus: "unavailable" }), null);
+
+  // One known model is plain text: a dropdown onto a single item is forbidden.
+  const single = sidebarModelLine({ modelDisplayName: "Qoder-Default", modelChoiceCount: 1 });
+  assert.equal(single.text, "Qoder-Default");
+  assert.equal(single.choosable, false);
+
+  // A picker is only offered when there is a real choice.
+  const many = sidebarModelLine({ modelDisplayName: "Qoder-Default", modelChoiceCount: 3 });
+  assert.equal(many.choosable, true);
 });
 
 test("the live reply reuses the stored message shape and marks what is incomplete", () => {

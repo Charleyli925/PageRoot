@@ -9,6 +9,7 @@ import {
   sidebarIntentOptions,
   sidebarLiveReply,
   sidebarMessageStream,
+  sidebarModelLine,
   sidebarModePresentation,
   sidebarResolvedIntent,
   sidebarSendState,
@@ -115,6 +116,11 @@ export default function AiConversationSidebar({
   const draftNotice = sidebarDraftNotice(state);
   const discussionNotice = sidebarDiscussionNotice(discussion);
   const liveReply = sidebarLiveReply(discussion);
+  const modelLine = sidebarModelLine({
+    catalogStatus,
+    modelDisplayName,
+    modelChoiceCount,
+  });
 
   // The intent switch is a radio group: arrow keys, Home and End move between
   // its options, and the pressed state is exposed rather than implied by colour.
@@ -300,28 +306,27 @@ export default function AiConversationSidebar({
           </div>
 
           {/*
-            * The model is a quiet inline affordance. With a single usable model
-            * it is plain text: offering a dropdown that opens onto one item
-            * would promise a choice the user does not have.
+            * The model is a quiet inline affordance, and it says nothing when
+            * PageRoot has not actually read a model. With a single usable model it
+            * is plain text: offering a dropdown that opens onto one item would
+            * promise a choice the user does not have.
             */}
-          {modelChoiceCount > 1 ? (
+          {modelLine?.choosable ? (
             <button
               type="button"
               className={styles.model}
               data-testid="ai-conversation-model"
               onClick={onOpenModelChoices}
-              aria-label={`当前模型 ${modelDisplayName || "未选择"}，点击切换`}
+              aria-label={`当前模型 ${modelLine.text}，点击切换`}
             >
-              {modelDisplayName || "选择模型"}
+              {modelLine.text}
               <span aria-hidden="true">▾</span>
             </button>
-          ) : (
+          ) : modelLine ? (
             <span className={styles.modelStatic} data-testid="ai-conversation-model">
-              {catalogStatus === "checking"
-                ? "正在读取模型…"
-                : modelDisplayName || "暂无可用模型"}
+              {modelLine.text}
             </span>
-          )}
+          ) : null}
         </div>
 
         {/*

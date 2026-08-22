@@ -283,6 +283,36 @@ export function sidebarSendState({
 }
 
 /**
+ * The Composer's model line.
+ *
+ * PageRoot only names a model when it actually knows one. Saying "no models
+ * available" while nothing has been read would assert a fact about the user's
+ * account that PageRoot has not established, and the unavailable cases already
+ * explain themselves on the send button (PRD §10.2) — a second line there would
+ * be noise. So the honest default is silence.
+ *
+ * Returns null when the line should not render at all.
+ */
+export function sidebarModelLine({
+  catalogStatus = "ready",
+  modelDisplayName = null,
+  modelChoiceCount = 0,
+} = {}) {
+  if (catalogStatus === "checking") {
+    return Object.freeze({ kind: "checking", text: "正在读取模型…", choosable: false });
+  }
+  const name = typeof modelDisplayName === "string" ? modelDisplayName.trim() : "";
+  if (!name) return null;
+  return Object.freeze({
+    kind: "name",
+    text: name,
+    // A picker is offered only when there is a real choice to make. PRD §10.1
+    // forbids a dropdown that opens onto a single item.
+    choosable: Number(modelChoiceCount) > 1,
+  });
+}
+
+/**
  * The Agent's reply for the live discussion turn, projected with exactly the
  * same shape as a stored message so the view reuses one treatment instead of
  * inventing a second card for streaming text.

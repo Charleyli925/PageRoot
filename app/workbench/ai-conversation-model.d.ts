@@ -97,6 +97,18 @@ export function sidebarStateFromRun(options?: {
   reviewing?: boolean;
 }): string;
 
+export type SidebarModelLine = {
+  kind: "checking" | "name";
+  text: string;
+  choosable: boolean;
+};
+
+export function sidebarModelLine(options?: {
+  catalogStatus?: SidebarCatalogStatus;
+  modelDisplayName?: string | null;
+  modelChoiceCount?: number;
+}): SidebarModelLine | null;
+
 export type SidebarLiveReply = {
   actor: "qoder";
   actorLabel: string;
