@@ -87,7 +87,54 @@ export function sidebarSendState(options?: {
   catalogStatus?: SidebarCatalogStatus;
   hasText?: boolean;
   queued?: boolean;
+  intent?: SidebarIntent;
+  discussionBusy?: boolean;
 }): SidebarSendState;
+
+export function sidebarStateFromRun(options?: {
+  activeRun?: { status?: string } | null;
+  submissionPending?: boolean;
+  reviewing?: boolean;
+}): string;
+
+export type SidebarModelLine = {
+  kind: "checking" | "name";
+  text: string;
+  choosable: boolean;
+};
+
+export function sidebarModelLine(options?: {
+  catalogStatus?: SidebarCatalogStatus;
+  modelDisplayName?: string | null;
+  modelChoiceCount?: number;
+}): SidebarModelLine | null;
+
+export type SidebarLiveReply = {
+  actor: "qoder";
+  actorLabel: string;
+  text: string;
+  truncated: boolean;
+  interrupted: boolean;
+  streaming: boolean;
+};
+
+export function sidebarLiveReply(discussion?: {
+  status?: string;
+  replyText?: string;
+  replyTruncated?: boolean;
+  interrupted?: boolean;
+} | null): SidebarLiveReply | null;
+
+export type SidebarDiscussionNotice = {
+  tone: "progress" | "attention";
+  text: string;
+};
+
+export function sidebarDiscussionNotice(discussion?: {
+  status?: string;
+  interrupted?: boolean;
+  interruptedReason?: string | null;
+} | null): SidebarDiscussionNotice | null;
 
 export function sidebarDraftNotice(state: string): string | null;
 

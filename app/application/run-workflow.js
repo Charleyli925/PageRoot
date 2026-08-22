@@ -1573,6 +1573,23 @@ export class RunWorkflow {
     return availability;
   }
 
+  /**
+   * Hands one Qoder ticket to a read-only discussion turn. This workflow owns
+   * the availability check and the consent-backed ticket, so a discussion turn
+   * asks here rather than keeping a second ticket cache. The cached ticket is
+   * dropped on the way out: a ticket handed over to be spent must never be
+   * replayed by a later execution submit.
+   */
+  async spendQoderTicket() {
+    const preflight = await this.#requireQoderPreflight();
+    this.#qoderPreflight = null;
+    return Object.freeze({
+      driver: "qoder-acp",
+      preflightId: preflight.preflightId,
+      trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
+    });
+  }
+
   #reusableQoderPreflight() {
     if (!this.#qoderPreflight?.preflightId) return null;
     const expiresAt = Date.parse(String(this.#qoderPreflight.expiresAt || ""));

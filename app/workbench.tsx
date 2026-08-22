@@ -727,10 +727,16 @@ export default function Workbench() {
   const aiConversation = useAiConversation({
     controllerRef: workspaceControllerRef,
     conversation: workspaceControllerSnapshot?.conversation ?? null,
+    discussionTurn: workspaceControllerSnapshot?.discussionTurn ?? null,
+    qoderAvailability,
+    // The header's mode comes from Request authority, not from a local guess.
+    activeRun: runSnapshot.activeRun,
+    submissionPending: runSnapshot.submissionPending,
     canvasMode,
     projectId: projectId ?? "",
     documentId: documentId ?? "",
     sourcePath: sourcePath ?? "",
+    sourceSha256,
     pendingCommentCount: comments.length,
   });
   const editRuntimeSnapshot = workspaceControllerSnapshot?.editRuntime ?? null;

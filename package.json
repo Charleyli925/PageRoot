@@ -211,6 +211,14 @@
         "to": "bridge/qoder-acp-client.mjs"
       },
       {
+        "from": "scripts/discussion-turn-runner.mjs",
+        "to": "bridge/discussion-turn-runner.mjs"
+      },
+      {
+        "from": "scripts/discussion-bridge-service.mjs",
+        "to": "bridge/discussion-bridge-service.mjs"
+      },
+      {
         "from": "scripts/finalize-attempt.mjs",
         "to": "bridge/finalize-attempt.mjs"
       },
