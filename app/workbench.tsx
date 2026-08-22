@@ -729,6 +729,13 @@ export default function Workbench() {
   const [readyReviewSession, setReadyReviewSession] =
     useState<ReadyReviewSession | null>(null);
 
+  // The decision bar acts through a ref: its handlers are defined further down,
+  // and the conversation hook is composed before them.
+  const aiDecisionRef = useRef<((actionId: string) => void) | null>(null);
+  const dispatchAiDecision = useCallback((actionId: string) => {
+    aiDecisionRef.current?.(actionId);
+  }, []);
+
   const aiConversation = useAiConversation({
     controllerRef: workspaceControllerRef,
     conversation: workspaceControllerSnapshot?.conversation ?? null,
@@ -748,6 +755,7 @@ export default function Workbench() {
     pendingCommentCount: comments.length,
     // The same submission the header button performs. One owner, two surfaces.
     onDeliverModification: (mode) => void generateRequest(mode),
+    onDecision: dispatchAiDecision,
   });
   // The run-event effect reports a submitted round by opening the thread. It is
   // reached through a ref so that effect keeps its curated dependency list.
@@ -7013,6 +7021,16 @@ export default function Workbench() {
   // pre-promotion source identity. Accepting promotes the Working Copy to a
   // new path while this overlay is still visible; the live path would rebuild
   // both preview sessions (and retitle the header) mid-accept for nothing.
+  // Same authority the process drawer used, reached from the conversation so the
+  // decision no longer requires a panel over the page.
+  useEffect(() => {
+    aiDecisionRef.current = (actionId: string) => {
+      if (actionId === "review") { void reviewReadyResult(); return; }
+      if (actionId === "adopt") { void activateReadyResult(); return; }
+      if (actionId === "cancel" || actionId === "dismiss") requestActiveRunEnd();
+    };
+  }, [activateReadyResult, requestActiveRunEnd, reviewReadyResult]);
+
   const readyReviewOverlay = readyReviewSession ? (
     <AiReviewWorkspace
       fileName={

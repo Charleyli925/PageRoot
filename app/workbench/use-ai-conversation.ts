@@ -49,6 +49,11 @@ export type UseAiConversationOptions = {
    * workbench because a modification is a Request, not a conversation turn.
    */
   onDeliverModification?: (mode: "qoder-acp" | "clipboard") => void;
+  /**
+   * Acts on the decision bar. Without this the bar renders buttons that do
+   * nothing, which is why the process drawer could not be removed before now.
+   */
+  onDecision?: (actionId: string) => void;
 };
 
 export function useAiConversation({
@@ -66,6 +71,7 @@ export function useAiConversation({
   sourceSha256,
   pendingCommentCount,
   onDeliverModification,
+  onDecision,
 }: UseAiConversationOptions) {
   const [open, setOpen] = useState(false);
   // Review is the same workbench with a different Canvas, so the thread that led
@@ -197,6 +203,11 @@ export function useAiConversation({
     catalogStatus: (qoderAvailability?.status ?? "unavailable") as SidebarCatalogStatus,
     modelDisplayName: null,
     modelChoiceCount: 0,
+    // The decision bar needs to name the version it is deciding about, and the
+    // assessment decides whether adopting without looking is offered at all.
+    candidateVersionLabel: activeRun?.candidateVersionLabel ?? null,
+    candidateStatus: activeRun?.candidateAssessment?.status ?? null,
+    failureMessage: activeRun?.error ?? null,
     pendingCommentCount,
     loading: conversation?.status === "loading",
     discussion: discussionTurn,
@@ -204,6 +215,7 @@ export function useAiConversation({
     onIntentChange,
     onSend,
     onCopyTask,
+    onAction: onDecision,
     onCollapse,
   }), [
     state,
@@ -216,6 +228,7 @@ export function useAiConversation({
     onIntentChange,
     onSend,
     onCopyTask,
+    onDecision,
     onCollapse,
   ]);
 
