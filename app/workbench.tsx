@@ -7017,20 +7017,25 @@ export default function Workbench() {
     }
   };
 
-  // The review compares immutable snapshots prepared against the
-  // pre-promotion source identity. Accepting promotes the Working Copy to a
-  // new path while this overlay is still visible; the live path would rebuild
-  // both preview sessions (and retitle the header) mid-accept for nothing.
   // Same authority the process drawer used, reached from the conversation so the
   // decision no longer requires a panel over the page.
   useEffect(() => {
     aiDecisionRef.current = (actionId: string) => {
       if (actionId === "review") { void reviewReadyResult(); return; }
       if (actionId === "adopt") { void activateReadyResult(); return; }
+      if (actionId === "recopy") {
+        const controller = workspaceControllerRef.current;
+        if (controller && activeRun) void controller.copyRunHandoff({ run: activeRun });
+        return;
+      }
       if (actionId === "cancel" || actionId === "dismiss") requestActiveRunEnd();
     };
-  }, [activateReadyResult, requestActiveRunEnd, reviewReadyResult]);
+  }, [activateReadyResult, activeRun, requestActiveRunEnd, reviewReadyResult]);
 
+  // The review compares immutable snapshots prepared against the
+  // pre-promotion source identity. Accepting promotes the Working Copy to a
+  // new path while this overlay is still visible; the live path would rebuild
+  // both preview sessions (and retitle the header) mid-accept for nothing.
   const readyReviewOverlay = readyReviewSession ? (
     <AiReviewWorkspace
       fileName={
@@ -7072,6 +7077,7 @@ export default function Workbench() {
         <AiConversationSidebar
           {...aiConversation.sidebarProps}
           runSteps={processSteps}
+          deliveryMode={currentAgentDeliveryMode}
         />
       ) : null}
     />
@@ -7743,6 +7749,7 @@ export default function Workbench() {
             <AiConversationSidebar
               {...aiConversation.sidebarProps}
               runSteps={processSteps}
+              deliveryMode={currentAgentDeliveryMode}
             />
           </aside>
         ) : null}

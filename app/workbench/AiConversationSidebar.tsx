@@ -67,6 +67,8 @@ export type AiConversationSidebarProps = {
   onCollapse?: () => void;
   /** Hands the same round to the clipboard instead of the local Agent. */
   onCopyTask?: () => void;
+  /** Which destination this round uses; the decision bar copy depends on it. */
+  deliveryMode?: "qoder-acp" | "clipboard";
   /** The run's own progress steps, so a round in flight reads inside the thread. */
   runSteps?: readonly unknown[];
 };
@@ -95,6 +97,7 @@ export default function AiConversationSidebar({
   onOpenModelChoices,
   onCollapse,
   onCopyTask,
+  deliveryMode = "qoder-acp",
   runSteps = [],
 }: AiConversationSidebarProps) {
   const intentOptionsRef = useRef<HTMLDivElement>(null);
@@ -109,8 +112,9 @@ export default function AiConversationSidebar({
       candidateVersionLabel,
       candidateStatus,
       failureMessage,
+      deliveryMode,
     }),
-    [candidateStatus, candidateVersionLabel, failureMessage, state],
+    [candidateStatus, candidateVersionLabel, deliveryMode, failureMessage, state],
   );
   const send = sidebarSendState({
     state,

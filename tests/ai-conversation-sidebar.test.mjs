@@ -490,10 +490,12 @@ test("a failed step is what the progress entry leads with", () => {
 
 test("progress belongs to a moving round only", () => {
   const steps = [{ key: "handoff", label: "启动 Qoder CLI", state: "done" }];
-  // A settled round is represented by its result, not by a frozen checklist.
-  assert.equal(sidebarRunProgress({ state: "ready-to-open", steps }), null);
+  // The result states keep the record: with the process drawer gone, the thread is
+  // the only place the round's stages exist while the user decides.
+  assert.ok(sidebarRunProgress({ state: "ready-to-open", steps }));
+  assert.ok(sidebarRunProgress({ state: "review-view", steps }));
+  // A surface with no round at all still says nothing.
   assert.equal(sidebarRunProgress({ state: "preview-discussion", steps }), null);
-  assert.equal(sidebarRunProgress({ state: "review-view", steps }), null);
   // No steps means nothing to say.
   assert.equal(sidebarRunProgress({ state: "processing", steps: [] }), null);
   // Malformed entries are dropped rather than rendered as blanks.
@@ -514,4 +516,29 @@ test("preparing a modification renames the mode instead of still claiming discus
   // a running execution up as something pending.
   assert.equal(sidebarModePresentation("processing", "modify").label, "执行 · 写入候选");
   assert.equal(sidebarModePresentation("review-view", "modify").label, "审阅 · 只读");
+});
+
+test("the clipboard round says what is actually happening and keeps the task reachable", () => {
+  // Nothing is being processed by Qoder here: the user pasted the task into an
+  // Agent of their own. Claiming otherwise would describe something that is not
+  // happening, and re-copying is the one action a failed paste needs.
+  const clipboard = sidebarActionBar({ state: "processing", deliveryMode: "clipboard" });
+  assert.equal(clipboard.title, "任务已复制，等你的 AI 改完");
+  assert.deepEqual(clipboard.actions.map((action) => action.id), ["recopy", "cancel"]);
+
+  // The managed path keeps its own wording and offers no re-copy.
+  const managed = sidebarActionBar({ state: "processing", deliveryMode: "qoder-acp" });
+  assert.equal(managed.title, "Qoder 正在处理本轮任务");
+  assert.deepEqual(managed.actions.map((action) => action.id), ["cancel"]);
+
+  // The decision is the same for both destinations: a candidate is a candidate.
+  for (const mode of ["clipboard", "qoder-acp"]) {
+    const decision = sidebarActionBar({
+      state: "ready-to-open",
+      deliveryMode: mode,
+      candidateVersionLabel: "版本 2",
+    });
+    assert.equal(decision.title, "版本 2 等待你的决定");
+    assert.deepEqual(decision.actions.map((action) => action.id), ["review", "adopt"]);
+  }
 });

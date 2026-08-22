@@ -137,6 +137,11 @@ const RUN_PROGRESS_STATES = Object.freeze([
   "processing",
   "validating",
   "promoting",
+  // The result states keep the record on screen. The process drawer used to be the
+  // only place the round's stages existed, so once it is gone the thread has to
+  // hold them — a user deciding whether to adopt still wants to see what happened.
+  "ready-to-open",
+  "review-view",
 ]);
 
 export function sidebarRunProgress({ state, steps = [] } = {}) {
@@ -240,6 +245,7 @@ export function sidebarActionBar({
   candidateVersionLabel = null,
   candidateStatus = null,
   failureMessage = null,
+  deliveryMode = "qoder-acp",
 } = {}) {
   if (state === "ready-to-open" || state === "review-view") {
     if (candidateStatus === "blocked") {
@@ -274,6 +280,22 @@ export function sidebarActionBar({
     };
   }
   if (state === "processing" || state === "validating") {
+    // The clipboard round is not being processed by Qoder at all: the user pasted
+    // the task into an Agent of their own and PageRoot is waiting for the file to
+    // come back. Saying "Qoder 正在处理" there would describe something that is not
+    // happening, and the user would lose the one action they actually need — the
+    // task back on the clipboard if the paste went wrong.
+    if (deliveryMode === "clipboard") {
+      return {
+        kind: "progress",
+        title: "任务已复制，等你的 AI 改完",
+        detail: "粘贴给任意能读写本机文件的 AI；当前页面不会被直接覆盖。",
+        actions: [
+          { id: "recopy", label: "再次复制", tone: "primary" },
+          { id: "cancel", label: "结束本轮", tone: "quiet" },
+        ],
+      };
+    }
     return {
       kind: "progress",
       title: "Qoder 正在处理本轮任务",
