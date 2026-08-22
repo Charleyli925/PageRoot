@@ -4,6 +4,7 @@ import { useMemo, useRef, type ChangeEvent } from "react";
 
 import {
   sidebarActionBar,
+  sidebarDiscussionNotice,
   sidebarDraftNotice,
   sidebarIntentOptions,
   sidebarMessageStream,
@@ -47,6 +48,11 @@ export type AiConversationSidebarProps = {
   pendingCommentCount?: number;
   queued?: boolean;
   loading?: boolean;
+  discussion?: {
+    status?: string;
+    interrupted?: boolean;
+    interruptedReason?: string | null;
+  } | null;
   onIntentChange?: (intent: SidebarIntent) => void;
   onDraftChange?: (text: string) => void;
   onSend?: (intent: SidebarIntent) => void;
@@ -71,6 +77,7 @@ export default function AiConversationSidebar({
   pendingCommentCount = 0,
   queued = false,
   loading = false,
+  discussion = null,
   onIntentChange,
   onDraftChange,
   onSend,
@@ -97,8 +104,13 @@ export default function AiConversationSidebar({
     catalogStatus,
     hasText: draftText.trim().length > 0,
     queued,
+    intent: activeIntent,
+    discussionBusy: discussion?.status === "starting"
+      || discussion?.status === "running"
+      || discussion?.status === "cancelling",
   });
   const draftNotice = sidebarDraftNotice(state);
+  const discussionNotice = sidebarDiscussionNotice(discussion);
 
   // The intent switch is a radio group: arrow keys, Home and End move between
   // its options, and the pressed state is exposed rather than implied by colour.
@@ -326,6 +338,21 @@ export default function AiConversationSidebar({
         {draftNotice ? (
           <p className={styles.draftNotice} data-testid="ai-conversation-draft-notice">
             {draftNotice}
+          </p>
+        ) : null}
+
+        {/*
+          * The discussion turn's own line. An interrupted turn says so here
+          * rather than letting partial text read as a finished answer.
+          */}
+        {discussionNotice ? (
+          <p
+            className={styles.draftNotice}
+            data-tone={discussionNotice.tone}
+            data-testid="ai-conversation-discussion-notice"
+            role={discussionNotice.tone === "attention" ? "status" : undefined}
+          >
+            {discussionNotice.text}
           </p>
         ) : null}
 

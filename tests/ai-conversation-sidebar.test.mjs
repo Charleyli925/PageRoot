@@ -4,12 +4,14 @@ import test from "node:test";
 import {
   FORBIDDEN_MESSAGE_KEYS,
   sidebarActionBar,
+  sidebarDiscussionNotice,
   sidebarDraftNotice,
   sidebarIntentOptions,
   sidebarMessageStream,
   sidebarModePresentation,
   sidebarResolvedIntent,
   sidebarSendState,
+  sidebarStateFromRun,
 } from "../app/workbench/ai-conversation-model.js";
 
 function factMessage(overrides = {}) {
@@ -194,4 +196,125 @@ test("mode copy separates who may write from who may only read", () => {
   assert.equal(sidebarModePresentation("review-view").label, "审阅 · 只读");
   // An unknown state falls back to the most restrictive copy.
   assert.equal(sidebarModePresentation("unknown-state").label, "讨论 · 只读");
+});
+
+test("the header's mode is derived from Request authority, not guessed", () => {
+  // No run: read-only discussion.
+  assert.equal(sidebarStateFromRun(), "preview-discussion");
+  assert.equal(sidebarStateFromRun({ activeRun: { status: "editing" } }), "preview-discussion");
+  assert.equal(sidebarStateFromRun({ activeRun: { status: "ready" } }), "preview-discussion");
+
+  // A durable execution run must never be shown as read-only discussion.
+  assert.equal(sidebarStateFromRun({ activeRun: { status: "processing" } }), "processing");
+  assert.equal(sidebarStateFromRun({ activeRun: { status: "validating" } }), "validating");
+  assert.equal(
+    sidebarModePresentation(
+      sidebarStateFromRun({ activeRun: { status: "processing" } }),
+    ).label,
+    "执行 · 写入候选",
+  );
+
+  assert.equal(sidebarStateFromRun({ activeRun: { status: "submitting" } }), "preparing-delivery");
+  assert.equal(sidebarStateFromRun({ submissionPending: true }), "preparing-delivery");
+  assert.equal(sidebarStateFromRun({ activeRun: { status: "ready-to-open" } }), "ready-to-open");
+  assert.equal(
+    sidebarStateFromRun({ activeRun: { status: "awaiting-conflict-resolution" } }),
+    "ready-to-open",
+  );
+  assert.equal(sidebarStateFromRun({ activeRun: { status: "committing" } }), "promoting");
+  assert.equal(
+    sidebarStateFromRun({ activeRun: { status: "recovering-transaction" } }),
+    "promoting",
+  );
+  // Reviewing wins: the review surface is read-only whatever the run says.
+  assert.equal(
+    sidebarStateFromRun({ activeRun: { status: "processing" }, reviewing: true }),
+    "review-view",
+  );
+});
+
+test("a live discussion turn blocks a second send and says why", () => {
+  const busy = sidebarSendState({
+    state: "preview-discussion",
+    catalogStatus: "ready",
+    hasText: true,
+    discussionBusy: true,
+  });
+  assert.equal(busy.canSend, false);
+  assert.equal(busy.reason, "Qoder 正在回复这轮讨论");
+
+  // Once the turn settles the Composer is usable again.
+  const settled = sidebarSendState({
+    state: "preview-discussion",
+    catalogStatus: "ready",
+    hasText: true,
+    discussionBusy: false,
+  });
+  assert.equal(settled.canSend, true);
+});
+
+test("the Composer sends discussion only and points modify at its real entry", () => {
+  const discuss = sidebarSendState({
+    state: "preview-discussion",
+    catalogStatus: "ready",
+    hasText: true,
+    intent: "discuss",
+  });
+  assert.equal(discuss.canSend, true);
+
+  // Modify freezes a Request from the edit surface's comments, so this Composer
+  // must not pretend to send it and silently drop the typed text.
+  const modify = sidebarSendState({
+    state: "preview-discussion",
+    catalogStatus: "ready",
+    hasText: true,
+    intent: "modify",
+  });
+  assert.equal(modify.canSend, false);
+  assert.equal(modify.reason, "回到编辑模式提交修改");
+
+  const continued = sidebarSendState({
+    state: "ready-to-open",
+    catalogStatus: "ready",
+    hasText: true,
+    intent: "continue",
+  });
+  assert.equal(continued.canSend, false);
+  assert.equal(continued.reason, "先采用当前结果才能继续修改");
+});
+
+test("an interrupted discussion turn is never presented as a complete answer", () => {
+  assert.equal(sidebarDiscussionNotice(null), null);
+  assert.equal(sidebarDiscussionNotice({ status: "idle" }), null);
+  assert.equal(sidebarDiscussionNotice({ status: "completed" }), null);
+
+  assert.equal(
+    sidebarDiscussionNotice({ status: "running" }).tone,
+    "progress",
+  );
+  assert.equal(
+    sidebarDiscussionNotice({ status: "cancelling" }).text,
+    "正在结束这轮讨论…",
+  );
+
+  const timedOut = sidebarDiscussionNotice({
+    status: "interrupted",
+    interrupted: true,
+    interruptedReason: "timeout",
+  });
+  assert.equal(timedOut.tone, "attention");
+  assert.match(timedOut.text, /超时中断/u);
+  assert.match(timedOut.text, /不是完整回复/u);
+
+  const cancelled = sidebarDiscussionNotice({
+    status: "cancelled",
+    interrupted: true,
+    interruptedReason: "cancelled",
+  });
+  assert.equal(cancelled.tone, "attention");
+  assert.match(cancelled.text, /不是完整回复/u);
+
+  const failed = sidebarDiscussionNotice({ status: "failed" });
+  assert.equal(failed.tone, "attention");
+  assert.match(failed.text, /没有完成/u);
 });

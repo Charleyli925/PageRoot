@@ -81,6 +81,33 @@ export function sidebarModePresentation(state) {
   return MODE_PRESENTATION[state] ?? MODE_PRESENTATION["preview-discussion"];
 }
 
+// The header's mode comes from the run's own durable status, never from a local
+// guess. That is the whole point: the sidebar must not claim "discussion ·
+// read-only" while an execution turn is writing a Candidate, and any second
+// lifecycle kept in the view would eventually drift from the Request record.
+const RUN_STATUS_TO_SIDEBAR_STATE = Object.freeze({
+  submitting: "preparing-delivery",
+  processing: "processing",
+  validating: "validating",
+  "ready-to-open": "ready-to-open",
+  "awaiting-conflict-resolution": "ready-to-open",
+  committing: "promoting",
+  "recovering-transaction": "promoting",
+});
+
+export function sidebarStateFromRun({
+  activeRun = null,
+  submissionPending = false,
+  reviewing = false,
+} = {}) {
+  if (reviewing) return "review-view";
+  const mapped = RUN_STATUS_TO_SIDEBAR_STATE[String(activeRun?.status || "")];
+  if (mapped) return mapped;
+  // A submission being prepared is authority in flight, not yet a run.
+  if (submissionPending) return "preparing-delivery";
+  return "preview-discussion";
+}
+
 export function sidebarActorLabel(actor) {
   return ACTOR_LABELS[actor] ?? ACTOR_LABELS.pageroot;
 }
@@ -211,6 +238,8 @@ export function sidebarSendState({
   catalogStatus = "ready",
   hasText = false,
   queued = false,
+  intent = INTENT_DISCUSS,
+  discussionBusy = false,
 } = {}) {
   if (catalogStatus === "checking") {
     return { canSend: false, label: "发送", reason: "正在读取模型…" };
@@ -224,11 +253,25 @@ export function sidebarSendState({
   if (catalogStatus === "unavailable") {
     return { canSend: false, label: "发送", reason: "Qoder 暂时无法确认" };
   }
+  // One discussion turn per Document. The Bridge enforces it too; saying so here
+  // keeps the user from pressing a button that would be refused.
+  if (discussionBusy) {
+    return { canSend: false, label: "发送", reason: "Qoder 正在回复这轮讨论" };
+  }
   if (state === "processing" || state === "validating") {
     return { canSend: false, label: "发送", reason: "Qoder 完成本轮后可发送" };
   }
   if (state === "promoting") {
     return { canSend: false, label: "发送", reason: "正在采用候选版本" };
+  }
+  // Modifying is a Request, and a Request is frozen from the edit surface's
+  // comments rather than from this text box. Pointing there beats a send button
+  // that would quietly drop what the user typed.
+  if (intent === INTENT_MODIFY) {
+    return { canSend: false, label: "发送", reason: "回到编辑模式提交修改" };
+  }
+  if (intent === INTENT_CONTINUE) {
+    return { canSend: false, label: "发送", reason: "先采用当前结果才能继续修改" };
   }
   if (queued) {
     return { canSend: false, label: "发送", reason: "正在等待上一个任务完成" };
@@ -237,6 +280,34 @@ export function sidebarSendState({
     return { canSend: false, label: "发送", reason: null };
   }
   return { canSend: true, label: "发送", reason: null };
+}
+
+/**
+ * The discussion turn's own visible line. A turn that stopped early must say so:
+ * showing its partial text with no marker would present an interrupted answer as
+ * a complete one.
+ */
+export function sidebarDiscussionNotice(discussion) {
+  if (!discussion) return null;
+  const status = String(discussion.status || "");
+  if (status === "starting" || status === "running") {
+    return { tone: "progress", text: "Qoder 正在阅读当前预览并回复…" };
+  }
+  if (status === "cancelling") {
+    return { tone: "progress", text: "正在结束这轮讨论…" };
+  }
+  if (discussion.interrupted === true) {
+    return {
+      tone: "attention",
+      text: discussion.interruptedReason === "timeout"
+        ? "这轮讨论超时中断，已收到的内容不是完整回复。"
+        : "这轮讨论已结束，已收到的内容不是完整回复。",
+    };
+  }
+  if (status === "failed") {
+    return { tone: "attention", text: "这轮讨论没有完成。可以重新发一次。" };
+  }
+  return null;
 }
 
 /**

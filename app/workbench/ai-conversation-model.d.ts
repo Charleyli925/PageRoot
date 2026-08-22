@@ -87,7 +87,26 @@ export function sidebarSendState(options?: {
   catalogStatus?: SidebarCatalogStatus;
   hasText?: boolean;
   queued?: boolean;
+  intent?: SidebarIntent;
+  discussionBusy?: boolean;
 }): SidebarSendState;
+
+export function sidebarStateFromRun(options?: {
+  activeRun?: { status?: string } | null;
+  submissionPending?: boolean;
+  reviewing?: boolean;
+}): string;
+
+export type SidebarDiscussionNotice = {
+  tone: "progress" | "attention";
+  text: string;
+};
+
+export function sidebarDiscussionNotice(discussion?: {
+  status?: string;
+  interrupted?: boolean;
+  interruptedReason?: string | null;
+} | null): SidebarDiscussionNotice | null;
 
 export function sidebarDraftNotice(state: string): string | null;
 
