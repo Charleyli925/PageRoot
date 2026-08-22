@@ -17,12 +17,23 @@ const OWNER_CLEANUP_GRACE_MS = 250;
 // by every candidate in one request rather than granted to each. Six attempts
 // per host reads as ~1.1s against the 4s owner deadline, but a page of twelve
 // charts then asks for ~13s and the deadline fires first — which is exactly how
-// authored pages went from twelve verified hosts to none. The budget below is
-// therefore per request, and a host that cannot be afforded a second frame is
-// still captured and marked unsettled instead of dropped.
+// authored pages went from twelve verified hosts to none.
+//
+// The second frame therefore waits for the next paint rather than a fixed
+// interval: a chart still animating repaints immediately, and a static one falls
+// back quickly, so every host on a busy page can be checked inside one shared
+// budget.
 const CAPTURE_STABILITY_ATTEMPTS = 6;
-const CAPTURE_STABILITY_INTERVAL_MS = 220;
-const CAPTURE_STABILITY_BUDGET_MS = 1_200;
+const CAPTURE_STABILITY_FRAME_FALLBACK_MS = 60;
+const CAPTURE_STABILITY_BUDGET_MS = 1_500;
+// Stability is a three-way fact, not a flag. "moving" means two frames were
+// compared and differed, which is the only reading that makes a surface digest
+// untrustworthy. "unknown" means no second frame was affordable, which is not
+// evidence of motion — treating the two alike silently halved real chart
+// detection on authored pages.
+const CAPTURE_SETTLED = "settled";
+const CAPTURE_MOVING = "moving";
+const CAPTURE_STABILITY_UNKNOWN = "unknown";
 // Upper bound on waiting for the frame that reflects a probe scroll. An
 // offscreen compositor delivers it in one frame interval; this only caps a
 // page that stops repainting entirely.
@@ -1109,7 +1120,7 @@ function unavailableSnapshot(key) {
     pngBytes: new Uint8Array(),
     renderedTextSha256: "",
     surfaceSha256: "",
-    settled: false,
+    stability: "unknown",
   });
 }
 
@@ -1471,7 +1482,8 @@ export function createRuntimeSnapshotCaptureController({
           let accepted = false;
           let previous = null;
           let latest = null;
-          const pushSnapshot = ({ png, rect, ownerSnapshot }, settledFrame) => {
+          let comparedFrames = 0;
+          const pushSnapshot = ({ png, rect, ownerSnapshot }, stability) => {
             capturedPixels += png.width * png.height;
             capturedBytes += png.byteLength;
             snapshots.push(Object.freeze({
@@ -1486,14 +1498,18 @@ export function createRuntimeSnapshotCaptureController({
               surfaceSha256: ownerSnapshot.surfaceDigest
                 ? renderedTextSha256(`surface:${ownerSnapshot.surfaceDigest}`)
                 : "",
-              settled: settledFrame,
+              stability,
             }));
           };
           for (let attempt = 0; attempt < CAPTURE_STABILITY_ATTEMPTS; attempt += 1) {
             if (attempt > 0) {
-              if (stabilityBudgetMs < CAPTURE_STABILITY_INTERVAL_MS) break;
-              stabilityBudgetMs -= CAPTURE_STABILITY_INTERVAL_MS;
-              await withOwnerDeadline(waitForCaptureSettle(CAPTURE_STABILITY_INTERVAL_MS));
+              if (stabilityBudgetMs < CAPTURE_STABILITY_FRAME_FALLBACK_MS) break;
+              const spentAt = Date.now();
+              await withOwnerDeadline(waitForScrolledOffscreenFrame(
+                captureWindow.webContents,
+                CAPTURE_STABILITY_FRAME_FALLBACK_MS,
+              ));
+              stabilityBudgetMs -= Math.max(1, Date.now() - spentAt);
             }
             const ownerRects = normalizedOwnerRects(await withOwnerDeadline(ownerExecutor(
               captureWindow.webContents,
@@ -1505,7 +1521,7 @@ export function createRuntimeSnapshotCaptureController({
               || ownerSnapshot.state !== "captured"
               || !ownerSnapshot.rect
               || ownerSnapshot.rect.width * ownerSnapshot.rect.height > remainingPixels
-) break;
+            ) break;
             if (attempt === 0 && ownerSnapshot.scrolled) {
               await withOwnerDeadline(waitForScrolledOffscreenFrame(
                 captureWindow.webContents,
@@ -1527,10 +1543,11 @@ export function createRuntimeSnapshotCaptureController({
               && previous.rect.height === ownerSnapshot.rect.height;
             latest = { png, rect: ownerSnapshot.rect, ownerSnapshot };
             if (settled) {
-              pushSnapshot(latest, true);
+              pushSnapshot(latest, CAPTURE_SETTLED);
               accepted = true;
               break;
             }
+            comparedFrames = previous ? comparedFrames + 1 : comparedFrames;
             previous = { png, rect: ownerSnapshot.rect };
           }
           // A host that never hands back two identical frames is still a host
@@ -1543,8 +1560,12 @@ export function createRuntimeSnapshotCaptureController({
           // the drawing-surface digest still decide normally, none of which
           // flickers with animation.
           if (!accepted) {
-            if (latest) pushSnapshot(latest, false);
-            else snapshots.push(unavailableSnapshot(candidate.key));
+            if (latest) {
+              pushSnapshot(
+                latest,
+                comparedFrames > 0 ? CAPTURE_MOVING : CAPTURE_STABILITY_UNKNOWN,
+              );
+            } else snapshots.push(unavailableSnapshot(candidate.key));
           }
         } catch (error) {
           if (error instanceof CaptureTimedOutError || error instanceof CaptureCancelledError) {

@@ -22,10 +22,11 @@ const SNAPSHOT_KEYS = new Set([
   // rather than from the window. Empty when the host exposes no readable
   // surface, which keeps it optional for every existing capture shape.
   "surfaceSha256",
-  "settled",
+  "stability",
 ]);
 const PNG_HEADER = Object.freeze([137, 80, 78, 71, 13, 10, 26, 10]);
 const PNG_HASH_PATTERN = /^sha256:[a-f0-9]{64}$/u;
+const CAPTURE_STABILITY = new Set(["settled", "moving", "unknown"]);
 
 function isRecord(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -76,7 +77,7 @@ function acceptedUnavailableSnapshot(rawSnapshot, key) {
     || rawSnapshot.byteLength !== 0
     || rawSnapshot.renderedTextSha256 !== ""
     || rawSnapshot.surfaceSha256 !== ""
-    || rawSnapshot.settled !== false
+    || rawSnapshot.stability !== "unknown"
     || !pngBytes
     || pngBytes.byteLength !== 0
   ) return null;
@@ -92,7 +93,7 @@ function acceptedUnavailableSnapshot(rawSnapshot, key) {
     pngBytes,
     renderedTextSha256: "",
     surfaceSha256: "",
-    settled: false,
+    stability: "unknown",
   });
 }
 
@@ -117,9 +118,10 @@ function acceptedCapturedSnapshot(rawSnapshot, key) {
       rawSnapshot.surfaceSha256 !== ""
       && !PNG_HASH_PATTERN.test(rawSnapshot.surfaceSha256)
     )
-    // Whether the owner ever saw two identical frames of this host is a fact
-    // the comparison needs, so an envelope that omits it is not trustworthy.
-    || typeof rawSnapshot.settled !== "boolean"
+    // Whether the owner saw this host settle, saw it moving, or never had the
+    // budget to look are three different facts the comparison needs kept apart,
+    // so an envelope offering anything else is not trustworthy.
+    || !CAPTURE_STABILITY.has(rawSnapshot.stability)
   ) return null;
   const dimensions = pngDimensions(pngBytes);
   if (
@@ -140,7 +142,7 @@ function acceptedCapturedSnapshot(rawSnapshot, key) {
     pngBytes,
     renderedTextSha256: rawSnapshot.renderedTextSha256,
     surfaceSha256: rawSnapshot.surfaceSha256,
-    settled: rawSnapshot.settled,
+    stability: rawSnapshot.stability,
   });
 }
 

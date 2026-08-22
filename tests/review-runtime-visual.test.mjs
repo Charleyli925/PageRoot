@@ -55,7 +55,7 @@ function snapshot(key, pngBytes = PNG, overrides = {}) {
     pngBytes: new Uint8Array(pngBytes),
     renderedTextSha256: renderedTextHash("图表 9.54"),
     surfaceSha256: "",
-    settled: true,
+    stability: "settled",
     ...overrides,
   };
 }
@@ -73,7 +73,7 @@ function unavailable(key) {
     pngBytes: new Uint8Array(),
     renderedTextSha256: "",
     surfaceSha256: "",
-    settled: false,
+    stability: "unknown",
   };
 }
 
@@ -795,8 +795,8 @@ test("an unsettled frame cannot reach a pixel verdict but still answers stronger
   // is kept and marked instead. Pixel distance against a half-drawn chart is
   // not evidence, while dimensions, visible text and the drawing surface do not
   // flicker and still decide.
-  const moving = snapshot("runtime-host-1", PNG, { settled: false });
-  const movingChanged = snapshot("runtime-host-1", CHANGED_PNG, { settled: false });
+  const moving = snapshot("runtime-host-1", PNG, { stability: "moving" });
+  const movingChanged = snapshot("runtime-host-1", CHANGED_PNG, { stability: "moving" });
   assert.equal(
     reviewRuntimeVisualSnapshotComparison(moving, movingChanged),
     "unavailable",
@@ -810,7 +810,7 @@ test("an unsettled frame cannot reach a pixel verdict but still answers stronger
   assert.equal(
     reviewRuntimeVisualSnapshotComparison(
       moving,
-      snapshot("runtime-host-1", CHANGED_PNG, { settled: false, layoutWidth: 2 }),
+      snapshot("runtime-host-1", CHANGED_PNG, { stability: "moving", layoutWidth: 2 }),
     ),
     "changed",
     "layout does not flicker with animation",
@@ -819,7 +819,7 @@ test("an unsettled frame cannot reach a pixel verdict but still answers stronger
     reviewRuntimeVisualSnapshotComparison(
       moving,
       snapshot("runtime-host-1", CHANGED_PNG, {
-        settled: false,
+        stability: "unknown",
         renderedTextSha256: renderedTextHash("图表 9.55"),
       }),
     ),
@@ -828,13 +828,32 @@ test("an unsettled frame cannot reach a pixel verdict but still answers stronger
   );
   assert.equal(
     reviewRuntimeVisualSnapshotComparison(
-      snapshot("runtime-host-1", PNG, { settled: false, surfaceSha256: renderedTextHash("a") }),
+      snapshot("runtime-host-1", PNG, { stability: "moving", surfaceSha256: renderedTextHash("a") }),
       snapshot("runtime-host-1", CHANGED_PNG, {
-        settled: false,
+        stability: "unknown",
         surfaceSha256: renderedTextHash("b"),
       }),
     ),
+    "unavailable",
+    "a chart repainting without pause differs between any two reads, changed or not",
+  );
+  assert.equal(
+    reviewRuntimeVisualSnapshotComparison(
+      snapshot("runtime-host-1", PNG, { stability: "moving", surfaceSha256: renderedTextHash("a") }),
+      snapshot("runtime-host-1", CHANGED_PNG, {
+        stability: "unknown",
+        surfaceSha256: renderedTextHash("a"),
+      }),
+    ),
+    "unchanged",
+    "an equal surface is still equal however the frames were timed",
+  );
+  assert.equal(
+    reviewRuntimeVisualSnapshotComparison(
+      snapshot("runtime-host-1", PNG, { surfaceSha256: renderedTextHash("a") }),
+      snapshot("runtime-host-1", CHANGED_PNG, { surfaceSha256: renderedTextHash("b") }),
+    ),
     "changed",
-    "the drawing surface decides regardless of frame timing",
+    "a settled pair lets the drawing surface decide outright",
   );
 });

@@ -40,6 +40,9 @@ const {
   reviewRuntimeVisualSnapshotComparison,
 } = await import(`${repo}/app/lib/review-runtime-visual.js`);
 const { reviewRuntimePageMutations } = await import(`${repo}/scripts/review-runtime-page-candidates.mjs`);
+const { reviewRuntimeAdversarialScenarios } = await import(
+  `${repo}/tests/fixtures/review-runtime-adversarial-pages.mjs`
+);
 
 const VIEWPORT = Object.freeze({ width: 1_280, height: 900 });
 // One frame per page is actionable information; more than that is a shared
@@ -110,13 +113,24 @@ function rasterEvidence(candidates, before, after) {
 // instead of guesses, which is the difference between "verified nothing" being
 // a gap and being the correct answer.
 async function drawnHostCount(previewController, html, candidates) {
-  const ids = candidates
-    .map((candidate) => candidate.identityAttributes?.find(([name]) => name === "id")?.[1])
-    .filter((id) => typeof id === "string" && id);
+  // Identity is not always an id — an inline vector graphic is often bound by
+  // tag and another attribute — so the selector is rebuilt from whatever the
+  // binding actually carries.
+  const selectors = candidates.map((candidate) => {
+    const tag = typeof candidate.tagName === "string" ? candidate.tagName.toLowerCase() : "*";
+    const attributes = Array.isArray(candidate.identityAttributes)
+      ? candidate.identityAttributes
+      : [];
+    const filters = attributes
+      .filter(([name, value]) => typeof name === "string" && typeof value === "string")
+      .map(([name, value]) => `[${name}="${value.replace(/"/gu, '\\"')}"]`)
+      .join("");
+    return filters ? `${tag}${filters}` : "";
+  }).filter((selector) => selector);
   // A measurement that quietly returns zero would switch the gate off while
   // looking like a clean page, so an unusable input is an error rather than a
   // count.
-  if (!ids.length) throw new Error("drawnHostCount: no id-bearing candidates supplied");
+  if (!selectors.length) throw new Error("drawnHostCount: no identifiable candidates supplied");
   const session = await previewController.createSession({
     html,
     bootstrapJavaScript: "",
@@ -134,14 +148,16 @@ async function drawnHostCount(previewController, html, candidates) {
     await probe.loadURL(session.url);
     await new Promise((resolve) => setTimeout(resolve, RUNTIME_VISUAL_CONTRACT.captureSettleMs));
     return await probe.webContents.executeJavaScript(`(() => {
-      const ids = ${JSON.stringify(ids)};
-      return ids.filter((id) => {
-        const host = document.getElementById(id);
+      const selectors = ${JSON.stringify(selectors)};
+      const drawn = (node) => {
+        const rect = node.getBoundingClientRect();
+        return rect.width >= 1 && rect.height >= 1;
+      };
+      return selectors.filter((selector) => {
+        const host = document.querySelector(selector);
         if (!host) return false;
-        return [...host.querySelectorAll("canvas,svg")].some((node) => {
-          const rect = node.getBoundingClientRect();
-          return rect.width >= 1 && rect.height >= 1;
-        });
+        if (host.tagName === "CANVAS" || host.tagName === "svg") return drawn(host);
+        return [...host.querySelectorAll("canvas,svg")].some(drawn);
       }).length;
     })()`);
   } finally {
@@ -151,8 +167,13 @@ async function drawnHostCount(previewController, html, candidates) {
 }
 
 async function main() {
-  const pages = process.argv.slice(process.argv.indexOf("--") + 1);
-  if (!pages.length) throw new Error("Expected at least one page path.");
+  const separator = process.argv.indexOf("--");
+  const args = separator === -1 ? [] : process.argv.slice(separator + 1);
+  const adversarial = args.includes("--adversarial");
+  const pages = args.filter((value) => !value.startsWith("--"));
+  if (!adversarial && !pages.length) {
+    throw new Error("Expected at least one page path, or --adversarial.");
+  }
   registerPreviewProtocolScheme(protocol);
   app.on("window-all-closed", () => {});
   await app.whenReady();
@@ -194,15 +215,52 @@ async function main() {
 
   let sequence = 0;
   const rows = [];
+  // One flat case list so an authored page mutation and an adversarial page are
+  // measured, gated and reported by exactly the same code. A case that only the
+  // harness knows how to score is a case nobody can trust.
+  const cases = [];
+  if (adversarial) {
+    reviewRuntimeAdversarialScenarios().forEach((scenario) => cases.push({
+      label: `对抗/${scenario.id}`,
+      mutationId: scenario.property,
+      before: scenario.before,
+      after: scenario.after,
+      expectation: scenario.expectation,
+      drawsAtRuntime: true,
+      structurallyContaminated: false,
+    }));
+  }
   for (const pagePath of pages) {
     const html = readFileSync(path.resolve(pagePath), "utf8");
     const label = path.basename(pagePath).slice(0, 30);
     // Charting libraries draw into a canvas they create at runtime, so the
     // source rarely contains one. The library reference, or an inline vector
     // graphic, is what says this page has a runtime visual at all.
-    const pageDrawsAtRuntime = /echarts|chart\.js|plotly|highcharts|<svg|<canvas/iu.test(html);
-    let drawnHosts = null;
-    for (const mutation of reviewRuntimePageMutations(html, [], [])) {
+    const drawsAtRuntime = /echarts|chart\.js|plotly|highcharts|<svg|<canvas/iu.test(html);
+    reviewRuntimePageMutations(html, [], []).forEach((mutation) => cases.push({
+      label,
+      mutationId: mutation.id,
+      before: html,
+      after: mutation.after,
+      expectation: mutation.chartExpectation,
+      drawsAtRuntime,
+      structurallyContaminated: mutation.structurallyContaminated === true,
+    }));
+  }
+
+  const drawnHostsByPage = new Map();
+  {
+    for (const testCase of cases) {
+      const html = testCase.before;
+      const label = testCase.label;
+      const pageDrawsAtRuntime = testCase.drawsAtRuntime;
+      const mutation = {
+        id: testCase.mutationId,
+        after: testCase.after,
+        chartExpectation: testCase.expectation,
+        structurallyContaminated: testCase.structurallyContaminated,
+      };
+      let drawnHosts = drawnHostsByPage.has(label) ? drawnHostsByPage.get(label) : null;
       sequence += 1;
       const sessionId = `review-e2e-${String(sequence).padStart(6, "0")}`;
       const documents = await analyst.webContents.executeJavaScript(`(() => {
@@ -296,11 +354,16 @@ async function main() {
         .map((marker) => marker.changeId);
       const expectation = mutation.chartExpectation;
       if (drawnHosts === null) {
-        drawnHosts = await drawnHostCount(
-          previewController,
-          html,
-          documents.captureCandidates.before,
-        );
+        // An unmeasurable count must stay visible rather than abort the suite or
+        // pass as zero, so it is carried as -1 and gated on below.
+        try {
+          drawnHosts = documents.captureCandidates.before.length
+            ? await drawnHostCount(previewController, html, documents.captureCandidates.before)
+            : 0;
+        } catch {
+          drawnHosts = -1;
+        }
+        drawnHostsByPage.set(label, drawnHosts);
       }
       // A page with no charting library and no inline vector graphic has no
       // runtime visual to verify, and neither has a page whose candidates draw
@@ -328,7 +391,21 @@ async function main() {
       const probeIneffective = expectation === "changed"
         && !nothingVerified
         && !renderedDifference;
+      // The strongest property the pipeline owes a reviewer. Where the owner
+      // could not read a surface — a tainted canvas, a WebGL context, a surface
+      // over budget, a closed binding — it must not answer "verified unchanged",
+      // because that is the one wrong answer a reviewer cannot catch. Reporting
+      // a change or reporting nothing verifiable are both acceptable.
+      const claimedVerifiedUnchanged = documents.candidates.some((candidate) => {
+        const first = before.find((snapshot) => snapshot.key === candidate.key);
+        const second = after.find((snapshot) => snapshot.key === candidate.key);
+        if (first?.state !== "captured" || second?.state !== "captured") return false;
+        return reviewRuntimeVisualSnapshotComparison(first, second) === "unchanged";
+      });
       const failures = [];
+      if (expectation === "mustNotConfirmUnchanged" && claimedVerifiedUnchanged) {
+        failures.push("冒充已核实未变");
+      }
       if (nothingVerified) {
         failures.push(
           `未核实任何宿主（真实图表宿主 ${drawnHosts}，`
@@ -373,6 +450,7 @@ async function main() {
         confirmed,
         suspected,
         renderedDifference,
+        claimedVerifiedUnchanged,
         nothingVerified,
         pageDrawsAtRuntime,
         capture: {
