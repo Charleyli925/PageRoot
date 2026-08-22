@@ -370,6 +370,24 @@ async function main() {
       const orphanMarkers = merged.markers
         .filter((marker) => !changeIds.has(marker.changeId))
         .map((marker) => marker.changeId);
+      // Where a marker lands is as much the answer as whether it appears. A
+      // verdict attached to the wrong section sends the reviewer to the wrong
+      // place, which a count alone cannot catch.
+      const changeById = new Map(merged.changes.map((change) => [change.id, change]));
+      const candidateByKey = new Map(documents.candidates.map((c) => [c.key, c]));
+      const attribution = merged.markers.map((marker) => ({
+        candidateKey: marker.candidateKey,
+        verdict: marker.verdict,
+        hostLabel: candidateByKey.get(marker.candidateKey)?.label ?? null,
+        changeLabel: changeById.get(marker.changeId)?.label ?? null,
+      }));
+      // The host's own section label and the label of the change the marker
+      // points at must agree, or the frame and the rail disagree about which
+      // section the reviewer is looking at.
+      const misattributed = attribution.filter((entry) => (
+        entry.hostLabel !== null && entry.changeLabel !== null
+        && entry.hostLabel !== entry.changeLabel
+      ));
       const expectation = mutation.chartExpectation;
       if (drawnHosts === null) {
         // An unmeasurable count must stay visible rather than abort the suite or
@@ -462,6 +480,10 @@ async function main() {
         failures.push(`真实改动报疑似 ${suspected} > ${SUSPICION_BUDGET}`);
       }
       if (orphanMarkers.length) failures.push(`孤儿 changeId ${orphanMarkers.length}`);
+      if (misattributed.length) {
+        failures.push(`归属错位 ${misattributed.length}：`
+          + misattributed.slice(0, 2).map((e) => `${e.hostLabel} -> ${e.changeLabel}`).join("；"));
+      }
       // A probe that also changes selector matching cannot support a
       // displacement conclusion, so its failures are recorded but not gating.
       const gating = mutation.structurallyContaminated !== true;
@@ -492,6 +514,8 @@ async function main() {
         },
         probeIneffective,
         orphanMarkers,
+        attribution,
+        misattributed,
         failures,
         gating,
       });
