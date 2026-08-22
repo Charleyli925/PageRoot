@@ -724,6 +724,11 @@ export default function Workbench() {
   const [canvasMode, setCanvasMode] = useState<CanvasMode>("edit");
   // The AI conversation sidebar. All of its React state lives in this hook, so
   // the Workbench gains one hook call and no extra budget.
+  // Declared before the conversation hook because the sidebar stays docked
+  // through review: useAiConversation reads this to keep the thread alive.
+  const [readyReviewSession, setReadyReviewSession] =
+    useState<ReadyReviewSession | null>(null);
+
   const aiConversation = useAiConversation({
     controllerRef: workspaceControllerRef,
     conversation: workspaceControllerSnapshot?.conversation ?? null,
@@ -732,6 +737,9 @@ export default function Workbench() {
     // The header's mode comes from Request authority, not from a local guess.
     activeRun: runSnapshot.activeRun,
     submissionPending: runSnapshot.submissionPending,
+    // Review is the same workbench with a different Canvas: the thread stays
+    // docked and read-only instead of disappearing and coming back.
+    reviewing: Boolean(readyReviewSession),
     canvasMode,
     projectId: projectId ?? "",
     documentId: documentId ?? "",
@@ -1295,8 +1303,6 @@ export default function Workbench() {
   const [cancelRunConfirmationKey, setCancelRunConfirmationKey] =
     useState<string | null>(null);
   const [reviewPreparing, setReviewPreparing] = useState(false);
-  const [readyReviewSession, setReadyReviewSession] =
-    useState<ReadyReviewSession | null>(null);
   const [openingReadyVersion, setOpeningReadyVersion] = useState(false);
   const [relinkingTarget, setRelinkingTarget] = useState<string | null>(null);
   const [runtimeCapabilitiesReady, setRuntimeCapabilitiesReady] = useState(false);
@@ -7025,6 +7031,9 @@ export default function Workbench() {
         });
       }}
       onRevealAiTask={() => void revealAiTaskInFinder()}
+      sidebar={aiConversation.visible ? (
+        <AiConversationSidebar {...aiConversation.sidebarProps} />
+      ) : null}
     />
   ) : null;
 

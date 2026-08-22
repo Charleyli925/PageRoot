@@ -62,7 +62,10 @@ export function useAiConversation({
   pendingCommentCount,
 }: UseAiConversationOptions) {
   const [open, setOpen] = useState(false);
-  const active = canvasMode === "preview" && Boolean(sourcePath);
+  // Review is the same workbench with a different Canvas, so the thread that led
+  // to the candidate stays on screen instead of vanishing and reappearing. It is
+  // read-only there: see sidebarSendState(reviewing).
+  const active = (canvasMode === "preview" || reviewing) && Boolean(sourcePath);
   const visible = active && open;
 
   // Load when the sidebar becomes visible for a Document; flush + drain + close

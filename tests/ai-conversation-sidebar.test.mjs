@@ -380,3 +380,35 @@ test("an interrupted discussion turn is never presented as a complete answer", (
   assert.equal(failed.tone, "attention");
   assert.match(failed.text, /没有完成/u);
 });
+
+test("the review Canvas keeps the thread on screen but refuses a new round", () => {
+  // The candidate on screen is not the page a discussion would read, so the
+  // Composer must not accept a question there. State is the single owner of that
+  // fact, so a reviewing run and an explicit review state agree.
+  assert.equal(sidebarStateFromRun({ reviewing: true }), "review-view");
+
+  const send = sidebarSendState({
+    state: "review-view",
+    catalogStatus: "ready",
+    hasText: true,
+  });
+  assert.equal(send.canSend, false);
+  assert.equal(send.reason, "正在审阅 AI 候选，采纳或返回后可继续对话");
+
+  // Being unable to type is not the same as being told nothing: the mode line
+  // still explains what this surface is.
+  const mode = sidebarModePresentation("review-view");
+  assert.equal(mode.label, "审阅 · 只读");
+  assert.equal(mode.detail, "讨论不会改变候选。");
+});
+
+test("review refuses a round even when the model catalog is still checking", () => {
+  // Reviewing outranks every other disabled reason, so the user never sees the
+  // Composer blame the model catalog for something the Canvas decided.
+  const send = sidebarSendState({
+    state: "review-view",
+    catalogStatus: "checking",
+    hasText: true,
+  });
+  assert.equal(send.reason, "正在审阅 AI 候选，采纳或返回后可继续对话");
+});

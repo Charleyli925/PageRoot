@@ -241,6 +241,18 @@ export function sidebarSendState({
   intent = INTENT_DISCUSS,
   discussionBusy = false,
 } = {}) {
+  // The review Canvas wins over every other reason. It is showing a candidate,
+  // not the page a discussion would read, so no round may start from here. The
+  // thread stays on screen so the user keeps the context that produced the
+  // candidate; it is simply not a place to type right now. State is the single
+  // owner of this fact — sidebarStateFromRun already maps reviewing to it.
+  if (state === "review-view") {
+    return {
+      canSend: false,
+      label: "发送",
+      reason: "正在审阅 AI 候选，采纳或返回后可继续对话",
+    };
+  }
   if (catalogStatus === "checking") {
     return { canSend: false, label: "发送", reason: "正在读取模型…" };
   }

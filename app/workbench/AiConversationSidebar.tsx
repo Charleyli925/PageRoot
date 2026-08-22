@@ -363,6 +363,8 @@ export default function AiConversationSidebar({
           placeholder={activeIntent === "discuss"
             ? "问问这个页面…"
             : "说说你想怎么改…"}
+          // Visible but not a place to type while a candidate is on the Canvas.
+          disabled={state === "review-view"}
           onChange={(event: ChangeEvent<HTMLTextAreaElement>) => (
             onDraftChange?.(event.target.value)
           )}

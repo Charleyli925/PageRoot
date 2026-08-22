@@ -66,6 +66,35 @@
   min-height: 0;
 }
 
+/*
+ * With the conversation docked, review becomes the same two-column stage the
+ * preview Canvas already uses: the page on the left, the thread on the right at
+ * the same width. One workbench, different Canvas — not a separate place.
+ */
+.reviewMain:has(> .reviewSidebar) {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) clamp(340px, 30vw, 460px);
+}
+
+.reviewSidebar {
+  grid-column: 2;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* Below the comfortable comparison width the candidate keeps the whole stage. */
+@media (max-width: 1024px) {
+  .reviewMain:has(> .reviewSidebar) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .reviewSidebar {
+    display: none;
+  }
+}
+
 .canvasReview {
   position: relative;
   width: 100%;

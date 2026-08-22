@@ -10,6 +10,7 @@ import {
   useState,
   useSyncExternalStore,
   type CSSProperties,
+  type ReactNode,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { BrowsersIcon } from "@phosphor-icons/react/dist/csr/Browsers";
@@ -435,6 +436,7 @@ export default function AiReviewWorkspace({
   onReturnBefore,
   onAccept,
   onRevealAiTask,
+  sidebar = null,
 }: {
   fileName: string;
   beforeLabel: string;
@@ -449,6 +451,12 @@ export default function AiReviewWorkspace({
   onReturnBefore: () => void;
   onAccept: () => void;
   onRevealAiTask: () => void;
+  /**
+   * The AI conversation, docked beside the comparison so the thread that led to
+   * this candidate stays on screen. Read-only here: the Canvas is a candidate,
+   * not the page a discussion would read.
+   */
+  sidebar?: ReactNode;
 }) {
   const fileTitle = fileName.replace(/\.(?:html?|xhtml)$/iu, "") || fileName;
   const hydrated = useSyncExternalStore(subscribeHydration, () => true, () => false);
@@ -1959,6 +1967,11 @@ export default function AiReviewWorkspace({
             <div className={styles.mapEdgeTrigger} aria-hidden="true" onMouseEnter={() => { if (!mapPinned) setMapPeeked(true); }} />
           </div>
         </section>
+        {sidebar ? (
+          <aside className={styles.reviewSidebar} aria-label="AI 对话">
+            {sidebar}
+          </aside>
+        ) : null}
       </main>
 
       <span className={styles.srAnnouncement} aria-live="polite">
