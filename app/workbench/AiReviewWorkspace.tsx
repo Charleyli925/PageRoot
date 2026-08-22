@@ -493,6 +493,8 @@ export default function AiReviewWorkspace({
   const confirmationTriggerRef = useRef<HTMLButtonElement | null>(null);
   const confirmDialogRef = useRef<HTMLElement>(null);
   const reviewInitializedRef = useRef(false);
+  const initialFocusRef = useRef(false);
+  const [framesReady, setFramesReady] = useState(false);
   const framesRef = useRef<Record<ReviewSide, HTMLIFrameElement | null>>({
     before: null,
     after: null,
@@ -1171,6 +1173,23 @@ export default function AiReviewWorkspace({
     }
   }, [coordinatePagePresentation, reviewChanges, sessionId]);
 
+  // Selecting the first change on entry only set the navigation target, so the
+  // rail and the map both said 「正在看…」 while the two pages stayed at the top
+  // showing dimmed context. A reviewer's first impression was therefore that
+  // nothing had changed, and they had to press 「下一处变化」 to reach the change
+  // the header already claimed they were looking at. Positioning goes through
+  // selectChange so it takes exactly the path that button takes, including the
+  // panel coordination a change inside a collapsed tab needs.
+  // Reading the target from a ref meant this never retried: when the frames
+  // become ready before the first change is chosen, the ref still held "all" and
+  // a ref change cannot re-run an effect. The target is therefore the state.
+  useEffect(() => {
+    if (!framesReady || initialFocusRef.current) return;
+    if (focus === "all" || !reviewChanges.some((change) => change.id === focus)) return;
+    initialFocusRef.current = true;
+    selectChange(focus);
+  }, [focus, framesReady, reviewChanges, selectChange]);
+
   useLayoutEffect(() => {
     const handleMessage = (event: MessageEvent<ReviewMessage>) => {
       const message = event.data;
@@ -1242,6 +1261,10 @@ export default function AiReviewWorkspace({
           reviewFrameReadyRef.current[message.side] = { documents, frame };
           prepareReviewCommentFrame(message.side, frame);
           prepareRuntimeVisualFrame(message.side, frame);
+          if (
+            reviewFrameReadyRef.current.before?.documents === documents
+            && reviewFrameReadyRef.current.after?.documents === documents
+          ) setFramesReady(true);
         }
         sendState(message.side);
         const owner = scrollCoordinatorRef.current?.snapshot();
@@ -1382,6 +1405,8 @@ export default function AiReviewWorkspace({
   const registerFrame = useCallback((side: ReviewSide, frame: HTMLIFrameElement | null) => {
     if (framesRef.current[side] !== frame) {
       reviewFrameReadyRef.current[side] = null;
+      setFramesReady(false);
+      initialFocusRef.current = false;
       runtimeProjectionLoadedFrameRef.current[side] = null;
       clearRuntimeProjectionDelivery(side);
       closeRuntimeProjectionChannel(side);
