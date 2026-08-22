@@ -148,4 +148,9 @@ export class RunWorkflow {
     projects?: Array<{ sourcePath?: string | null }>;
     activeSourcePath?: string | null;
   }): Promise<RunWorkflowOutcome<{ recovered: number; attempted: number }>>;
+  spendQoderTicket(): Promise<{
+    driver: string;
+    preflightId: string;
+    trustPolicyAccepted: string;
+  }>;
 }
