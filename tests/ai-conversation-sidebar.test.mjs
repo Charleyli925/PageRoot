@@ -4,12 +4,16 @@ import test from "node:test";
 import {
   FORBIDDEN_MESSAGE_KEYS,
   sidebarActionBar,
+  sidebarDiscussionNotice,
   sidebarDraftNotice,
   sidebarIntentOptions,
+  sidebarLiveReply,
   sidebarMessageStream,
+  sidebarModelLine,
   sidebarModePresentation,
   sidebarResolvedIntent,
   sidebarSendState,
+  sidebarStateFromRun,
 } from "../app/workbench/ai-conversation-model.js";
 
 function factMessage(overrides = {}) {
@@ -194,4 +198,185 @@ test("mode copy separates who may write from who may only read", () => {
   assert.equal(sidebarModePresentation("review-view").label, "审阅 · 只读");
   // An unknown state falls back to the most restrictive copy.
   assert.equal(sidebarModePresentation("unknown-state").label, "讨论 · 只读");
+});
+
+test("the model line names a model only when one is actually known", () => {
+  // Reading: say so.
+  assert.deepEqual(sidebarModelLine({ catalogStatus: "checking" }), {
+    kind: "checking", text: "正在读取模型…", choosable: false,
+  });
+
+  // Nothing read yet: stay silent rather than assert a fact about the account.
+  assert.equal(sidebarModelLine({ catalogStatus: "ready" }), null);
+  assert.equal(sidebarModelLine({ catalogStatus: "ready", modelDisplayName: "   " }), null);
+  // The unavailable cases explain themselves on the send button.
+  assert.equal(sidebarModelLine({ catalogStatus: "auth-required" }), null);
+  assert.equal(sidebarModelLine({ catalogStatus: "not-installed" }), null);
+  assert.equal(sidebarModelLine({ catalogStatus: "unavailable" }), null);
+
+  // One known model is plain text: a dropdown onto a single item is forbidden.
+  const single = sidebarModelLine({ modelDisplayName: "Qoder-Default", modelChoiceCount: 1 });
+  assert.equal(single.text, "Qoder-Default");
+  assert.equal(single.choosable, false);
+
+  // A picker is only offered when there is a real choice.
+  const many = sidebarModelLine({ modelDisplayName: "Qoder-Default", modelChoiceCount: 3 });
+  assert.equal(many.choosable, true);
+});
+
+test("the live reply reuses the stored message shape and marks what is incomplete", () => {
+  // Nothing to show until words arrive: an empty shell would make the stream
+  // jump for no information.
+  assert.equal(sidebarLiveReply(null), null);
+  assert.equal(sidebarLiveReply({ status: "running", replyText: "" }), null);
+  assert.equal(sidebarLiveReply({ status: "running", replyText: "   " }), null);
+
+  const streaming = sidebarLiveReply({ status: "running", replyText: "标题可以更具体" });
+  // The same fields a stored message carries, so the view needs one treatment.
+  assert.equal(streaming.actor, "qoder");
+  assert.equal(streaming.actorLabel, "Qoder CLI");
+  assert.equal(streaming.text, "标题可以更具体");
+  assert.equal(streaming.streaming, true);
+  assert.equal(streaming.truncated, false);
+  assert.equal(streaming.interrupted, false);
+
+  const truncated = sidebarLiveReply({
+    status: "completed",
+    replyText: "很长的回复",
+    replyTruncated: true,
+  });
+  assert.equal(truncated.truncated, true);
+  assert.equal(truncated.streaming, false);
+
+  // An interrupted reply is marked on the reply itself, because the text is what
+  // the user reads.
+  const interrupted = sidebarLiveReply({
+    status: "interrupted",
+    replyText: "说到一半",
+    interrupted: true,
+  });
+  assert.equal(interrupted.interrupted, true);
+  assert.equal(interrupted.streaming, false);
+  assert.equal(interrupted.text, "说到一半");
+});
+
+test("the header's mode is derived from Request authority, not guessed", () => {
+  // No run: read-only discussion.
+  assert.equal(sidebarStateFromRun(), "preview-discussion");
+  assert.equal(sidebarStateFromRun({ activeRun: { status: "editing" } }), "preview-discussion");
+  assert.equal(sidebarStateFromRun({ activeRun: { status: "ready" } }), "preview-discussion");
+
+  // A durable execution run must never be shown as read-only discussion.
+  assert.equal(sidebarStateFromRun({ activeRun: { status: "processing" } }), "processing");
+  assert.equal(sidebarStateFromRun({ activeRun: { status: "validating" } }), "validating");
+  assert.equal(
+    sidebarModePresentation(
+      sidebarStateFromRun({ activeRun: { status: "processing" } }),
+    ).label,
+    "执行 · 写入候选",
+  );
+
+  assert.equal(sidebarStateFromRun({ activeRun: { status: "submitting" } }), "preparing-delivery");
+  assert.equal(sidebarStateFromRun({ submissionPending: true }), "preparing-delivery");
+  assert.equal(sidebarStateFromRun({ activeRun: { status: "ready-to-open" } }), "ready-to-open");
+  assert.equal(
+    sidebarStateFromRun({ activeRun: { status: "awaiting-conflict-resolution" } }),
+    "ready-to-open",
+  );
+  assert.equal(sidebarStateFromRun({ activeRun: { status: "committing" } }), "promoting");
+  assert.equal(
+    sidebarStateFromRun({ activeRun: { status: "recovering-transaction" } }),
+    "promoting",
+  );
+  // Reviewing wins: the review surface is read-only whatever the run says.
+  assert.equal(
+    sidebarStateFromRun({ activeRun: { status: "processing" }, reviewing: true }),
+    "review-view",
+  );
+});
+
+test("a live discussion turn blocks a second send and says why", () => {
+  const busy = sidebarSendState({
+    state: "preview-discussion",
+    catalogStatus: "ready",
+    hasText: true,
+    discussionBusy: true,
+  });
+  assert.equal(busy.canSend, false);
+  assert.equal(busy.reason, "Qoder 正在回复这轮讨论");
+
+  // Once the turn settles the Composer is usable again.
+  const settled = sidebarSendState({
+    state: "preview-discussion",
+    catalogStatus: "ready",
+    hasText: true,
+    discussionBusy: false,
+  });
+  assert.equal(settled.canSend, true);
+});
+
+test("the Composer sends discussion only and points modify at its real entry", () => {
+  const discuss = sidebarSendState({
+    state: "preview-discussion",
+    catalogStatus: "ready",
+    hasText: true,
+    intent: "discuss",
+  });
+  assert.equal(discuss.canSend, true);
+
+  // Modify freezes a Request from the edit surface's comments, so this Composer
+  // must not pretend to send it and silently drop the typed text.
+  const modify = sidebarSendState({
+    state: "preview-discussion",
+    catalogStatus: "ready",
+    hasText: true,
+    intent: "modify",
+  });
+  assert.equal(modify.canSend, false);
+  assert.equal(modify.reason, "回到编辑模式提交修改");
+
+  const continued = sidebarSendState({
+    state: "ready-to-open",
+    catalogStatus: "ready",
+    hasText: true,
+    intent: "continue",
+  });
+  assert.equal(continued.canSend, false);
+  assert.equal(continued.reason, "先采用当前结果才能继续修改");
+});
+
+test("an interrupted discussion turn is never presented as a complete answer", () => {
+  assert.equal(sidebarDiscussionNotice(null), null);
+  assert.equal(sidebarDiscussionNotice({ status: "idle" }), null);
+  assert.equal(sidebarDiscussionNotice({ status: "completed" }), null);
+
+  assert.equal(
+    sidebarDiscussionNotice({ status: "running" }).tone,
+    "progress",
+  );
+  assert.equal(
+    sidebarDiscussionNotice({ status: "cancelling" }).text,
+    "正在结束这轮讨论…",
+  );
+
+  const timedOut = sidebarDiscussionNotice({
+    status: "interrupted",
+    interrupted: true,
+    interruptedReason: "timeout",
+  });
+  assert.equal(timedOut.tone, "attention");
+  assert.match(timedOut.text, /超时中断/u);
+  assert.match(timedOut.text, /不是完整回复/u);
+
+  const cancelled = sidebarDiscussionNotice({
+    status: "cancelled",
+    interrupted: true,
+    interruptedReason: "cancelled",
+  });
+  assert.equal(cancelled.tone, "attention");
+  assert.match(cancelled.text, /不是完整回复/u);
+
+  const failed = sidebarDiscussionNotice({ status: "failed" });
+  assert.equal(failed.tone, "attention");
+  assert.match(failed.text, /没有完成/u);
 });

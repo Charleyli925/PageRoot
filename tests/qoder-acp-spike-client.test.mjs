@@ -24,8 +24,11 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import * as acp from "@agentclientprotocol/sdk";
 
 import {
+  acpDriverProfile,
   captureQoderAcpReviewBoundary,
+  createRestrictedDiscussionHost,
   createRestrictedQoderAcpHost,
+  loadQoderAcpDiscussionPolicy,
   loadQoderAcpTaskPolicy,
   prepareVerifiedQoderJavaScriptExecution,
   runAcpTask,
@@ -807,6 +810,10 @@ test("ACP ClientApp completes a synthetic PageRoot Candidate turn", async (t) =>
   assert.deepEqual(reviewBoundaryAfter, reviewBoundaryBefore);
   assert.equal(result.updates[0].type, "tool_call");
   assert.ok(events.some((event) => event.kind === "turn-stopped"));
+  // An execution turn passes no Agent prose: its payload is the Candidate file.
+  assert.equal(result.visibleText, "");
+  assert.equal(result.visibleTextTruncated, false);
+  assert.equal(events.some((event) => event.kind === "visible-text"), false);
 });
 
 test("ACP session progress retains and publishes only a bounded update prefix", async (t) => {
@@ -1285,6 +1292,57 @@ test("ACP stop reason cannot replace Candidate finalization evidence", async (t)
       turnTimeoutMs: 1_000,
     }),
     (error) => error?.code === "ACP_FINALIZER_NOT_COMPLETED",
+  );
+});
+
+test("the execution driver profile fails closed on a host without completion proof", async (t) => {
+  const fixture = await createFixture(t);
+  // `runAcpTask` resolves this exact profile from the branded policy and applies
+  // `assertHost` to whatever the profile builds, so these are the driver's own
+  // execution-path rules, not a parallel copy of them.
+  const profile = acpDriverProfile(fixture.policy);
+
+  assert.equal(fixture.policy.mode, "execution");
+  assert.equal(profile.mode, "execution");
+  assert.equal(profile.requiresTurnCompletion, true);
+  // ADR 0036 authorizes visible Agent prose for discussion only. An execution
+  // turn's payload is a file, so it keeps capturing nothing.
+  assert.equal(profile.visibleTextByteLimit, 0);
+  assert.deepEqual(profile.clientCapabilities, {
+    fs: { readTextFile: true, writeTextFile: true },
+    terminal: true,
+  });
+
+  const host = profile.assertHost(profile.createHost(fixture.policy, () => {}));
+  assert.equal(typeof host.assertTurnCompleted, "function");
+  await host.dispose();
+
+  // A host that lost `assertTurnCompleted` to a rename must be refused before
+  // the turn runs. The alternative — calling it optionally — would let an
+  // execution turn silently skip its finalizer proof.
+  assert.throws(
+    () => profile.assertHost({ ...host, assertTurnCompleted: undefined }),
+    (error) => error?.code === "ACP_HOST_CONTRACT_INCOMPLETE"
+      && error.details.missing.includes("assertTurnCompleted"),
+  );
+
+  // The read-only discussion host can never stand in for an execution turn.
+  const snapshotRoot = await realpath(
+    await mkdtemp(path.join(tmpdir(), "pageroot-acp-discussion-")),
+  );
+  t.after(() => rm(snapshotRoot, { recursive: true, force: true }));
+  await writeFile(path.join(snapshotRoot, "snapshot.html"), fixture.sourceHtml, "utf8");
+  await writeFile(path.join(snapshotRoot, "PROMPT.md"), "Discuss the heading.\n", "utf8");
+  const discussionPolicy = await loadQoderAcpDiscussionPolicy({ snapshotRoot });
+  assert.throws(
+    () => profile.assertHost(createRestrictedDiscussionHost(discussionPolicy)),
+    (error) => error?.code === "ACP_HOST_CONTRACT_INCOMPLETE"
+      && error.details.mode === "execution",
+  );
+  // The execution policy cannot be re-pointed at the discussion host either.
+  assert.throws(
+    () => createRestrictedDiscussionHost(fixture.policy),
+    /verified discussion policy/u,
   );
 });
 

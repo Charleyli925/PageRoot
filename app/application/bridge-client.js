@@ -295,6 +295,23 @@ export function createBridgeClient({
       "Qoder CLI 启动结果暂时无法确认。",
       DEFAULT_REQUEST_TIMEOUT_MS,
     ),
+    startDiscussion: (body) => command(
+      "/discussion/start",
+      body,
+      "这轮讨论的启动结果暂时无法确认。",
+      DEFAULT_REQUEST_TIMEOUT_MS,
+    ),
+    discussionStatus: (sourcePath) => query(
+      "/discussion/status",
+      { sourcePath },
+      "暂时无法读取讨论状态。",
+    ),
+    cancelDiscussion: (body) => command(
+      "/discussion/cancel",
+      body,
+      "讨论的停止结果暂时无法确认。",
+      DEFAULT_REQUEST_TIMEOUT_MS,
+    ),
     resolveConflict: (body) => command(
       "/conflict/resolve",
       body,

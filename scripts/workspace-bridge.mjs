@@ -37,12 +37,15 @@ import {
   readConversation,
   readConversationDraft,
   readConversationIndex,
+  recordDiscussionQuestion,
+  sealDiscussionReply,
   writeConversationDraft,
 } from "./conversation-repository.mjs";
 import {
   AgentBridgeService,
   TRUSTED_LOCAL_AGENT_POLICY_VERSION,
 } from "./agent-bridge-service.mjs";
+import { DiscussionBridgeService } from "./discussion-bridge-service.mjs";
 import {
   cancelDurableRequestAfterAgentCleanup,
   closeWorkspaceBridgeAfterAgentCleanup,
@@ -79,6 +82,18 @@ const projectFileRepository = new ProjectFileRepository({
 });
 const agentBridgeService = new AgentBridgeService({
   resolveTask: resolveAgentBridgeTask,
+});
+// Discussion keeps its own service so the read-only turn authority never shares
+// a code path with Request execution. It redeems the one-use command ticket from
+// the Agent service, reads Working Copy bytes through the repository, and records
+// the round through the same conversation writer every other message uses.
+const discussionBridgeService = new DiscussionBridgeService({
+  redeemCommandTicket: (preflightId) => agentBridgeService.redeemCommandTicket(preflightId),
+  readWorkingCopy: ({ sourcePath }) => projectFileWorkspaceForSource(
+    requiredSourcePath(sourcePath),
+  ),
+  recordQuestion: (input) => recordDiscussionRound(input),
+  sealReply: (input) => sealDiscussionRound(input),
 });
 const FINALIZER_PATH = fileURLToPath(
   new URL("./finalize-attempt.mjs", import.meta.url),
@@ -1420,6 +1435,51 @@ async function startAgent(body) {
   });
 }
 
+async function startDiscussion(body) {
+  const target = await projectFileTargetForBody(body);
+  if (!target) throw projectNotFoundError();
+  if (
+    String(body.projectId || "") !== target.projectId
+    || String(body.documentId || "") !== target.documentId
+  ) {
+    throw new HttpError(
+      409,
+      "PROJECT_CONTEXT_IDENTITY_MISMATCH",
+      "The discussion identity does not match the registered Project File.",
+    );
+  }
+  return discussionBridgeService.start({
+    driver: body.driver,
+    trustPolicyAccepted: body.trustPolicyAccepted,
+    preflightId: body.preflightId,
+    projectId: target.projectId,
+    documentId: target.documentId,
+    sourcePath: target.exactSourcePath,
+    conversationId: body.conversationId,
+    question: body.question,
+    expectedSourceSha256: body.expectedSourceSha256,
+  });
+}
+
+async function discussionStatus(sourcePath) {
+  const workspace = await projectFileWorkspaceForSource(requiredSourcePath(sourcePath));
+  if (!workspace) throw projectNotFoundError();
+  return {
+    ok: true,
+    projectId: workspace.target.projectId,
+    documentId: workspace.target.documentId,
+    discussion: discussionBridgeService.status({
+      documentId: workspace.target.documentId,
+    }),
+  };
+}
+
+async function cancelDiscussion(body) {
+  const workspace = await projectFileWorkspaceForSource(requiredSourcePath(body.sourcePath));
+  if (!workspace) throw projectNotFoundError();
+  return discussionBridgeService.cancel({ documentId: workspace.target.documentId });
+}
+
 async function projectFileVersionFile(sourcePath, versionId) {
   const workspace = await projectFileWorkspaceForSource(sourcePath);
   if (!workspace) return null;
@@ -1855,6 +1915,48 @@ async function currentConversation(sourcePath) {
     documentId: context.documentId,
     ...conversationResponse(conversation, draft),
   };
+}
+
+// The discussion service holds no path convention and no conversation identity:
+// both are resolved here from the registered workspace, so a caller cannot point
+// a round at another project's record.
+async function recordDiscussionRound({
+  sourcePath,
+  turnId,
+  sourceSha256,
+  question,
+}) {
+  const workspace = await projectFileWorkspaceForSource(requiredSourcePath(sourcePath));
+  if (!workspace) throw projectNotFoundError();
+  const context = conversationContext(workspace);
+  const conversation = await ensureCurrentConversation(context);
+  await recordDiscussionQuestion(context, {
+    conversationId: conversation.conversationId,
+    turnId,
+    sourceSha256,
+    question,
+  });
+  return { conversationId: conversation.conversationId };
+}
+
+async function sealDiscussionRound({
+  sourcePath,
+  conversationId,
+  turnId,
+  status,
+  replyText,
+  replyTruncated,
+}) {
+  const workspace = await projectFileWorkspaceForSource(requiredSourcePath(sourcePath));
+  if (!workspace) throw projectNotFoundError();
+  await sealDiscussionReply(conversationContext(workspace), {
+    conversationId,
+    turnId,
+    status,
+    replyText,
+    replyTruncated,
+  });
+  return { ok: true };
 }
 
 async function documentConversations(sourcePath) {
@@ -2392,6 +2494,20 @@ async function route(request, response) {
     sendJson(response, 202, await startAgent(body));
     return;
   }
+  if (request.method === "POST" && url.pathname === "/discussion/start") {
+    const body = await readBody(request);
+    sendJson(response, 202, await startDiscussion(body));
+    return;
+  }
+  if (request.method === "GET" && url.pathname === "/discussion/status") {
+    sendJson(response, 200, await discussionStatus(url.searchParams.get("sourcePath")));
+    return;
+  }
+  if (request.method === "POST" && url.pathname === "/discussion/cancel") {
+    const body = await readBody(request);
+    sendJson(response, 200, await cancelDiscussion(body));
+    return;
+  }
   if (request.method === "POST" && url.pathname === "/request") {
     const body = await readBody(request);
     sendJson(response, 201, await createRequest(body));
@@ -2566,6 +2682,7 @@ async function shutdownBridge() {
   shuttingDown = true;
   const accepted = await closeWorkspaceBridgeAfterAgentCleanup({
     agentBridgeService,
+    discussionBridgeService,
     closeServer: (onClosed) => {
       server.close(onClosed);
       // Main reaches this signal only after renderer writes are drained and

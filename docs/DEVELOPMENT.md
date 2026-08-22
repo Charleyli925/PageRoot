@@ -62,6 +62,17 @@ Canvas. Finder/Dock sparse-PATH discovery includes configured npm prefixes plus
 common nvm, Volta, fnm, mise and asdf roots, but every candidate still passes
 the same package identity checks.
 
+Read-only discussion turns run through the separate
+`scripts/discussion-bridge-service.mjs` and `scripts/discussion-turn-runner.mjs`
+pair, not through the execution service. The renderer can request only
+`POST /discussion/start`, `GET /discussion/status` and `POST /discussion/cancel`
+with registered document identity, the same `qoder-acp` driver, the same
+`trusted-local-agent-v1` consent and a ticket from `POST /agent/preflight`. It
+names neither the command nor any path, including the snapshot file name, and it
+receives turn state plus the discussed context Hash only. A discussion turn
+creates no Request, Candidate or Version, runs no finalizer, and its snapshot is
+deleted when the turn ends.
+
 Product discovery accepts a protected standalone `@qoder-ai/qodercli` package
 at version 1.1.27 or newer. It intentionally rejects the executable embedded in
 Qoder.app and ordinary `PAGEROOT_QODER_ACP_COMMAND` overrides. Tests may inject

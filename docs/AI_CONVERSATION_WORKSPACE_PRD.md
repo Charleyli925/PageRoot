@@ -346,9 +346,10 @@ Discussion Host 不得直接读取 Working Copy 路径。Turn 开始时，PageRo
 
 该设计的产品含义：
 
-- 快照 SHA 就是 Context 的 `sourceSha256`。“Qoder 读的是哪份字节”永远有确定答案。
+- 快照 SHA 就是 Context 的 `sourceSha256`。“Qoder 读的是哪份字节”永远有确定答案。写快照前先核对调用方给出的 Working Copy Hash，不一致即按过期来源失败，不生成快照。
 - 外部程序在讨论进行中修改文件，不影响本轮讨论；只影响下一个 Turn 的快照。
 - Agent 拿不到任何可写路径、拿不到项目其他文件、拿不到 Working Copy 真实路径。
+- 删除是产品不变量而非清理礼节：成功、失败、超时、取消都必须删掉快照；**删除无法确认时按失败处理**（即使该轮回复本身可用），同时把已得到的结果随错误带出，供界面继续展示用户已经看到的内容。
 
 ### 9.3 讨论超时
 
@@ -374,6 +375,12 @@ Discussion Turn 使用比 Execution Turn 更短的超时预算（建议 2 分钟
 - 目录有多个可选模型时，名称带下拉指示，点击展开短列表。
 - 目录只有一个可用模型时，名称是静态文本，不带下拉指示。给用户一个点开后无可选项的下拉框违反 2.5。
 - 模型切换只影响后续 Turn，不改写历史消息。
+
+> **实现现状（阻塞，2026-08-22 核实）**：当前 ACP 协议与 SDK **没有模型选择字段**——`session/new` 参数与 schema 中均无 model 项，会话更新也不回报实际使用的模型。`qodercli --list-models` 只能**枚举**当前账号可用模型，无法指定使用哪一个。
+>
+> 因此本节的选择器目前**不实现**：提供一个选了不生效的下拉框，比不提供更坏，也直接违反设计语言 2.4（诚实文案）。现行行为：PageRoot **只在真实知道模型名时才显示它**，否则模型位保持沉默（而不是声称“暂无可用模型”——那是一个 PageRoot 并未核实的账号事实）；不可用原因由发送按钮文案承担（§10.2）。
+>
+> 解除阻塞需要下列任一成立，届时再实现选择器：ACP 增加模型字段；或查实 `qodercli` 有可靠的模型指定参数（不得猜，它是受保护的第三方可执行文件）。同时注意：把模型列表送到 Renderer 会拓宽 `docs/STATE_OWNERSHIP.md` 现有边界（该文档目前写明 Renderer 不接收 model count），属于需要显式修订的决定。
 
 ### 10.2 目录状态复用现有可用性模型
 
@@ -879,6 +886,8 @@ Conversation Repository 使用项目受管目录，并沿用仓库既有的持�
 | 其他 | — | 无通用路径读取、无 MCP、无导航、无系统自动化、无剪贴板、无宿主 IPC、无 Request/Candidate/Version/Promotion mutation |
 
 两者复用同一批文件安全校验（禁符号链接祖先、正规文件校验、身份比对），但能力集合在 Bridge 与工具 Schema 层真实不同，不靠 Prompt 文案区分。
+
+两者也复用同一个 ACP 驱动，但驱动**按带品牌策略的 `mode` 分派**：Host、向 Agent 声明的客户端能力（讨论模式为 `writeTextFile:false`、`terminal:false`）、以及是否要求 Turn 完成证据，全部由策略决定，调用方不能注入 Host。因此“执行策略配讨论 Host”或反向组合在结构上不可能出现。执行模式的 `assertTurnCompleted()` 是**强制调用**，不是可选调用：一旦该方法缺失或改名，Turn 直接失败，而不是静默跳过 finalizer 证据。讨论模式显式声明“不要求完成证据”，其 Turn 结果里没有 completion。
 
 Discussion Snapshot 由 PageRoot 在 Turn 开始时建立、Turn 结束时删除。Agent 不知道也不能推导 Working Copy 的真实路径。
 

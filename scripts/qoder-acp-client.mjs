@@ -712,6 +712,10 @@ export async function loadQoderAcpTaskPolicy(options) {
 
   return Object.freeze({
     [POLICY_BRAND]: true,
+    // The shared ACP driver selects its host, its declared client capabilities
+    // and its completion requirement from this mode, so it stays explicit here
+    // instead of being inferred from a missing field.
+    mode: "execution",
     requestRoot,
     controlRoot,
     runtimePath: path.join(controlRoot, "runtime-state.json"),
@@ -839,6 +843,13 @@ export function createRestrictedDiscussionHost(policy, { onEvent = () => {} } = 
     policy.readableFiles.map((entry) => [entry.path, entry]),
   );
   const event = (kind, details = {}) => onEvent(Object.freeze({ kind, ...details }));
+  // `buildClient` registers the whole terminal surface for every host, so every
+  // terminal method must refuse with this policy error instead of failing as an
+  // undefined-method TypeError.
+  const noTerminal = () => policyError(
+    "ACP_DISCUSSION_NO_TERMINAL",
+    "A discussion turn cannot use a terminal.",
+  );
   const assertActive = (signal) => {
     if (signal?.aborted) {
       throw policyError("ACP_REQUEST_CANCELLED", "The ACP request was cancelled.");
@@ -904,10 +915,19 @@ export function createRestrictedDiscussionHost(policy, { onEvent = () => {} } = 
       );
     },
     async createTerminal() {
-      throw policyError(
-        "ACP_DISCUSSION_NO_TERMINAL",
-        "A discussion turn cannot open a terminal.",
-      );
+      throw noTerminal();
+    },
+    async terminalOutput() {
+      throw noTerminal();
+    },
+    async waitForTerminalExit() {
+      throw noTerminal();
+    },
+    async killTerminal() {
+      throw noTerminal();
+    },
+    async releaseTerminal() {
+      throw noTerminal();
     },
     cancel() {
       cancellationRequested = true;
@@ -1762,6 +1782,154 @@ function summarizeUpdate(update) {
   return { type };
 }
 
+// ADR 0036: a discussion turn may pass visible Agent text through, bounded and
+// sanitized. Only what the Agent says is captured; `agent_thought_chunk` and
+// every other update type are dropped, so hidden reasoning never leaves the
+// driver. An execution turn captures nothing: its payload is a file, and prose
+// there would only invite confusion with Candidate authority.
+function visibleTextChunk(update) {
+  if (update?.sessionUpdate !== "agent_message_chunk") return "";
+  if (update.content?.type !== "text") return "";
+  return String(update.content.text || "")
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/gu, "");
+}
+
+function visibleTextBuffer(byteLimit) {
+  let text = "";
+  let bytes = 0;
+  let truncated = false;
+  return {
+    append(chunk) {
+      if (!chunk || truncated) return "";
+      const remaining = byteLimit - bytes;
+      if (remaining <= 0) {
+        truncated = true;
+        return "";
+      }
+      const size = Buffer.byteLength(chunk, "utf8");
+      if (size <= remaining) {
+        text += chunk;
+        bytes += size;
+        return chunk;
+      }
+      // Cut on a character boundary, then stop accepting text. A clipped reply
+      // must be marked, never silently shortened.
+      const kept = truncateUtf8Tail(chunk, remaining);
+      text += kept.value;
+      bytes += Buffer.byteLength(kept.value, "utf8");
+      truncated = true;
+      return kept.value;
+    },
+    get value() {
+      return text;
+    },
+    get truncated() {
+      return truncated;
+    },
+  };
+}
+
+// `buildClient` wires every one of these to the host, and the driver itself
+// binds, cancels and disposes it. A host that cannot answer all of them would
+// fail as an undefined-method TypeError mid-turn instead of a policy error.
+const ACP_HOST_METHODS = Object.freeze([
+  "bindSessionId",
+  "requestPermission",
+  "readTextFile",
+  "writeTextFile",
+  "createTerminal",
+  "terminalOutput",
+  "waitForTerminalExit",
+  "killTerminal",
+  "releaseTerminal",
+  "cancel",
+  "dispose",
+]);
+
+function driverProfile({
+  mode,
+  createHost,
+  clientCapabilities,
+  requiresTurnCompletion,
+  visibleTextByteLimit,
+  requiredHostMethods,
+}) {
+  return Object.freeze({
+    mode,
+    createHost,
+    clientCapabilities,
+    requiresTurnCompletion,
+    visibleTextByteLimit,
+    requiredHostMethods,
+    assertHost(host) {
+      const missing = requiredHostMethods.filter(
+        (name) => typeof host?.[name] !== "function",
+      );
+      if (missing.length > 0) {
+        throw policyError(
+          "ACP_HOST_CONTRACT_INCOMPLETE",
+          `The ${mode} ACP host does not implement ${missing.join(", ")}.`,
+          { mode, missing },
+        );
+      }
+      return host;
+    },
+  });
+}
+
+// One driver serves the two permission-separated turn kinds, and the branded
+// policy is the only thing that picks between them. Dispatching on `policy.mode`
+// — rather than letting a caller inject a host — makes an execution policy
+// paired with a discussion host, or the reverse, structurally impossible.
+const ACP_DRIVER_PROFILES = new Map([
+  ["execution", driverProfile({
+    mode: "execution",
+    createHost: (policy, onEvent) => createRestrictedQoderAcpHost(policy, { onEvent }),
+    clientCapabilities: Object.freeze({
+      fs: Object.freeze({ readTextFile: true, writeTextFile: true }),
+      terminal: true,
+    }),
+    // An execution turn only counts once the fixed finalizer has proven itself.
+    requiresTurnCompletion: true,
+    // ADR 0036 authorizes visible text for discussion only.
+    visibleTextByteLimit: 0,
+    requiredHostMethods: Object.freeze([...ACP_HOST_METHODS, "assertTurnCompleted"]),
+  })],
+  ["discussion", driverProfile({
+    mode: "discussion",
+    createHost: (policy, onEvent) => createRestrictedDiscussionHost(policy, { onEvent }),
+    clientCapabilities: Object.freeze({
+      fs: Object.freeze({ readTextFile: true, writeTextFile: false }),
+      terminal: false,
+    }),
+    // Discussion produces no Candidate, so it declares that it requires no
+    // completion evidence. It must never become an optional call on a method
+    // that could silently disappear from the execution host.
+    requiresTurnCompletion: false,
+    // The reply is the whole payload of a discussion turn, so it is captured
+    // within a fixed budget (ADR 0036).
+    visibleTextByteLimit: 64 * 1024,
+    requiredHostMethods: ACP_HOST_METHODS,
+  })],
+]);
+
+export function acpDriverProfile(policy) {
+  assertObject(policy, "policy");
+  if (policy[POLICY_BRAND] !== true) {
+    throw new TypeError("The ACP driver requires a verified PageRoot policy.");
+  }
+  const profile = typeof policy.mode === "string"
+    ? ACP_DRIVER_PROFILES.get(policy.mode)
+    : undefined;
+  if (!profile) {
+    throw policyError(
+      "ACP_POLICY_MODE_UNSUPPORTED",
+      "The ACP driver does not support this policy mode.",
+    );
+  }
+  return profile;
+}
+
 export async function runAcpTask({
   connection,
   policy,
@@ -1790,12 +1958,15 @@ export async function runAcpTask({
   ) {
     throw new TypeError("expectedAgentName must be a RegExp.");
   }
-  const host = createRestrictedQoderAcpHost(policy, { onEvent });
+  const profile = acpDriverProfile(policy);
+  const host = profile.assertHost(profile.createHost(policy, onEvent));
   const client = buildClient(host);
   const startupTimeout = timeoutController(startupTimeoutMs);
   const cancellation = cancellationGate(cancellationSignal);
   const updates = [];
   let droppedUpdateCount = 0;
+  // Zero budget means this mode captures no prose at all (ADR 0036).
+  const visibleText = visibleTextBuffer(profile.visibleTextByteLimit);
   const cancelStartup = () => {
     void host.cancel().catch(() => {});
   };
@@ -1812,10 +1983,7 @@ export async function runAcpTask({
           acp.methods.agent.initialize,
           {
             protocolVersion: acp.PROTOCOL_VERSION,
-            clientCapabilities: {
-              fs: { readTextFile: true, writeTextFile: true },
-              terminal: true,
-            },
+            clientCapabilities: profile.clientCapabilities,
             clientInfo: {
               name: "pageroot-agent-bridge",
               title: "PageRoot Agent Bridge",
@@ -1884,7 +2052,12 @@ export async function runAcpTask({
           ]);
           if (message.kind === "stop") {
             onEvent(Object.freeze({ kind: "turn-stopping", stopReason: message.stopReason }));
-            const completion = await host.assertTurnCompleted();
+            // Never soften this into an optional call: for a mode that requires
+            // completion, a renamed or missing method must fail the turn instead
+            // of silently skipping the finalizer proof.
+            const completion = profile.requiresTurnCompletion
+              ? await host.assertTurnCompleted()
+              : null;
             onEvent(Object.freeze({ kind: "turn-stopped", stopReason: message.stopReason }));
             return {
               initialized,
@@ -1893,8 +2066,14 @@ export async function runAcpTask({
               completion,
               updates,
               droppedUpdateCount,
+              visibleText: visibleText.value,
+              visibleTextTruncated: visibleText.truncated,
             };
           }
+          // Capture the Agent's own words before the update is reduced to a
+          // summary. A mode with no text budget appends nothing.
+          const chunk = visibleText.append(visibleTextChunk(message.update));
+          if (chunk) onEvent(Object.freeze({ kind: "visible-text", text: chunk }));
           const summary = summarizeUpdate(message.update);
           if (updates.length < MAX_SESSION_UPDATES) {
             updates.push(summary);
