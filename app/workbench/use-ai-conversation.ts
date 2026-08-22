@@ -76,11 +76,19 @@ export function useAiConversation({
 
   // Load when the sidebar becomes visible for a Document; flush + drain + close
   // on any change to that identity or when it stops being visible.
+  //
+  // Opening the sidebar also has to ask whether Qoder is usable. Nothing else on
+  // this surface triggers that check — the delivery dialog and the About card own
+  // the other two entry points — so without this the Composer would sit at
+  // "正在读取模型…" forever and the send button would never enable. Opening the
+  // AI sidebar is the user's explicit request to use the Agent, which is the
+  // moment PRD §10.3 allows the use-time check to run and show progress.
   useEffect(() => {
     if (!visible) return undefined;
     const controller = controllerRef.current;
     if (!controller) return undefined;
     void controller.openConversation({ projectId, documentId, sourcePath });
+    void controller.checkQoderUsability();
     return () => {
       void controller.flushConversationDraft();
       // A read-only discussion turn is cancelled at this boundary rather than
@@ -123,17 +131,23 @@ export function useAiConversation({
     if (intent !== "discuss") return;
     const question = draftText.trim();
     if (!question) return;
-    void controllerRef.current?.startDiscussionTurn(
-      { projectId, documentId, sourcePath },
-      {
-        question,
-        conversationId,
-        // The page the user is looking at is the discussion context. Passing its
-        // Hash lets the Bridge refuse a stale round instead of discussing bytes
-        // that have already moved on.
-        expectedSourceSha256: sourceSha256,
-      },
-    );
+    void (async () => {
+      const started = await controllerRef.current?.startDiscussionTurn(
+        { projectId, documentId, sourcePath },
+        {
+          question,
+          conversationId,
+          // The page the user is looking at is the discussion context. Passing its
+          // Hash lets the Bridge refuse a stale round instead of discussing bytes
+          // that have already moved on.
+          expectedSourceSha256: sourceSha256,
+        },
+      );
+      // The question is now stored by the Bridge, so the box empties. Leaving the
+      // sent text behind invites an accidental second identical round. A refused
+      // start keeps the text so the user does not have to retype it.
+      if (started) controllerRef.current?.updateConversationDraftText("");
+    })();
   }, [
     controllerRef,
     draftText,

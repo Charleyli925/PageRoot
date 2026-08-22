@@ -313,7 +313,9 @@ export function sidebarSendState({
     };
   }
   if (catalogStatus === "checking") {
-    return { canSend: false, label: "发送", reason: "正在读取模型…" };
+    // The model slot already says it is reading; the button explains itself
+    // instead of repeating that sentence word for word.
+    return { canSend: false, label: "发送", reason: "模型就绪后可发送" };
   }
   if (catalogStatus === "auth-required") {
     return { canSend: false, label: "登录 Qoder 后可发送", reason: null };
@@ -324,10 +326,11 @@ export function sidebarSendState({
   if (catalogStatus === "unavailable") {
     return { canSend: false, label: "发送", reason: "Qoder 暂时无法确认" };
   }
-  // One discussion turn per Document. The Bridge enforces it too; saying so here
-  // keeps the user from pressing a button that would be refused.
+  // One discussion turn per Document. The notice line directly above the Composer
+  // already says Qoder is replying, so the button stays quiet rather than
+  // printing a second sentence that means the same thing.
   if (discussionBusy) {
-    return { canSend: false, label: "发送", reason: "Qoder 正在回复这轮讨论" };
+    return { canSend: false, label: "发送", reason: null };
   }
   if (state === "processing" || state === "validating") {
     return { canSend: false, label: "发送", reason: "Qoder 完成本轮后可发送" };
@@ -404,10 +407,18 @@ export function sidebarModelLine({
  * Returns null until some text has arrived: an empty shell that later fills
  * would make the stream jump for no information.
  */
-export function sidebarLiveReply(discussion) {
+export function sidebarLiveReply(discussion, messages = []) {
   if (!discussion) return null;
   const text = typeof discussion.replyText === "string" ? discussion.replyText : "";
   if (!text.trim()) return null;
+  // Once this turn has a stored message, the record is what renders. Matching on
+  // turnId rather than on "has the turn settled" leaves no gap: the live block
+  // stays until the reload actually brings the message in, so the reply never
+  // blinks out and never shows twice.
+  const turnId = String(discussion.turnId || "");
+  if (turnId && Array.isArray(messages) && messages.some(
+    (message) => message && message.turnId === turnId && message.actor === "qoder",
+  )) return null;
   const status = String(discussion.status || "");
   return Object.freeze({
     actor: "qoder",

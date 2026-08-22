@@ -140,12 +140,16 @@ export type SidebarLiveReply = {
   streaming: boolean;
 };
 
-export function sidebarLiveReply(discussion?: {
-  status?: string;
-  replyText?: string;
-  replyTruncated?: boolean;
-  interrupted?: boolean;
-} | null): SidebarLiveReply | null;
+export function sidebarLiveReply(
+  discussion?: {
+    status?: string;
+    turnId?: string | null;
+    replyText?: string;
+    replyTruncated?: boolean;
+    interrupted?: boolean;
+  } | null,
+  messages?: readonly unknown[],
+): SidebarLiveReply | null;
 
 export type SidebarDiscussionNotice = {
   tone: "progress" | "attention";

@@ -126,7 +126,7 @@ export default function AiConversationSidebar({
   const runProgress = sidebarRunProgress({ state, steps: runSteps });
   const draftNotice = sidebarDraftNotice(state);
   const discussionNotice = sidebarDiscussionNotice(discussion);
-  const liveReply = sidebarLiveReply(discussion);
+  const liveReply = sidebarLiveReply(discussion, messages as readonly Record<string, unknown>[]);
   const modelLine = sidebarModelLine({
     catalogStatus,
     modelDisplayName,
