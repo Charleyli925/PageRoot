@@ -4020,10 +4020,15 @@ test("a no-change result returns to editing and remains reopenable", async () =>
       activeSourcePath: request.sourcePath,
       isolatedUserData: launched.isolatedUserData,
     });
+    await expect(launched.page.getByRole("button", { name: "上轮处理" }))
+      .toBeVisible({ timeout: 30_000 });
     await expect(launched.page.getByRole("button", { name: /AI 对话/u }))
-      .toBeEnabled({ timeout: 30_000 });
-    // The settled no-change round is reopened through the conversation; the
-    // header's recent-outcome button no longer appears for it.
+      .toBeEnabled();
+    // The settled round is not the active run after restart: the header's
+    // recent-outcome control restores it — and switches the canvas to editing,
+    // which hides the conversation. Opening the conversation again states the
+    // no-change decision once more.
+    await launched.page.getByRole("button", { name: "上轮处理" }).click();
     await launched.page.getByRole("button", { name: /AI 对话/u }).click();
     const reopenedBar = launched.page.getByTestId("ai-conversation-action-bar");
     await expect(reopenedBar.getByText("这次没有产生有效变化", { exact: true }))
@@ -4489,8 +4494,11 @@ test("a failed handoff in project A does not block project B or replace its stat
       { timeout: 20_000 },
     ).toBe(1);
     await openRecentProject(launched.page, projectB.sourcePath);
+    // B starts clean and A's failure does not follow it: the conversation opens
+    // (the old header asked for a comment first; opening is always allowed now),
+    // and sending waits for B's own comment below.
     await expect(launched.page.getByRole("button", { name: /AI 对话/u }))
-      .toBeDisabled();
+      .toBeEnabled();
     const projectBWorkingCopyPath = await addComment(
       launched.page,
       projectB.sourcePath,
