@@ -1130,3 +1130,50 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
 }
+
+/*
+ * Stepping through the changes one at a time. It used to sit beside the content map
+ * and was removed with it; it is its own capability and belongs on the review toolbar.
+ * Horizontal here, because the toolbar is a row rather than a vertical rail.
+ */
+.changeNavigator {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 2px;
+}
+
+.changeNavigator button {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #68647f;
+}
+
+.changeNavigator button:hover:not(:disabled) {
+  background: #f0effa;
+  color: #5750bb;
+}
+
+.changeNavigator button:disabled {
+  cursor: default;
+  opacity: .35;
+}
+
+.changeNavigator > span {
+  display: flex;
+  align-items: baseline;
+  gap: 1px;
+  color: #454450;
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+
+.changeNavigator small {
+  color: #9999a3;
+  font-size: 9px;
+}

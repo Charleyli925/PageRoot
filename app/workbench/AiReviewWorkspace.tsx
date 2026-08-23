@@ -576,6 +576,14 @@ export default function AiReviewWorkspace({
   const activeChange = focus === "all"
     ? null
     : reviewChanges.find((change) => change.id === focus) || null;
+  /*
+   * Stepping through changes one at a time is its own capability, independent of the
+   * content map it used to sit beside. Removing the map took this with it, which left
+   * the reviewer with no way to walk the changes in order.
+   */
+  const activeIndex = activeChange
+    ? navigableChanges.findIndex((change) => change.id === activeChange.id)
+    : -1;
 
   const closeReviewCommentChannel = useCallback(() => {
     const port = reviewCommentPortRef.current;
@@ -1435,6 +1443,14 @@ export default function AiReviewWorkspace({
 
 
 
+  const navigate = useCallback((direction: -1 | 1) => {
+    if (!navigableChanges.length) return;
+    const currentIndex = activeIndex >= 0 ? activeIndex : (direction > 0 ? -1 : 0);
+    const nextIndex = (currentIndex + direction + navigableChanges.length)
+      % navigableChanges.length;
+    selectChange(navigableChanges[nextIndex].id);
+  }, [activeIndex, navigableChanges, selectChange]);
+
   const handleSegmentedKeyDown = useCallback((event: ReactKeyboardEvent<HTMLButtonElement>) => {
     const buttons = [...(event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>(
       "button:not(:disabled)",
@@ -1733,6 +1749,28 @@ export default function AiReviewWorkspace({
                   </div>
                 </div>
               </div>
+            </div>
+            <div className={styles.changeNavigator} aria-label="逐处查看变化">
+              <button
+                type="button"
+                aria-label="上一处变化"
+                disabled={!navigableChanges.length}
+                onClick={() => navigate(-1)}
+              >
+                <CaretUpIcon aria-hidden="true" size={11} weight="bold" />
+              </button>
+              <span>
+                <strong>{activeIndex >= 0 ? activeIndex + 1 : 0}</strong>
+                <small>/{navigableChanges.length}</small>
+              </span>
+              <button
+                type="button"
+                aria-label="下一处变化"
+                disabled={!navigableChanges.length}
+                onClick={() => navigate(1)}
+              >
+                <CaretDownIcon aria-hidden="true" size={11} weight="bold" />
+              </button>
             </div>
             <button
               className={styles.canvasToolbarHandle}
