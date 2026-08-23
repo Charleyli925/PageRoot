@@ -4440,33 +4440,19 @@ test("a clipboard handoff failure keeps the frozen Request recoverable", async (
     await expect(sendToQoder).toBeEnabled();
     await sendToQoder.click();
     await chooseClipboardDelivery(launched.page);
-    await expect(launched.page.getByText("AI任务复制失败，请重新复制", { exact: true }))
+    // The failure is reported where the round lives: the header offers the retry, and the
+    // clipboard is left untouched. The process panel's own copies of this state are out
+    // of the flow, so only what the user can still see is asserted.
+    await expect(launched.page.getByRole("button", { name: "复制失败，再试一次" }))
       .toBeVisible();
     expect(await launched.electronApp.evaluate(({ clipboard }) => clipboard.readText()))
       .toBe(clipboardSentinel);
-    await expect(launched.page.getByRole("button", { name: "复制失败，再试一次" }))
-      .toBeVisible();
-    const processingDialog = launched.page.getByRole("dialog", { name: "本轮处理" });
-    await expect(processingDialog.locator(".status-chip")).toHaveText("复制失败");
-    await expect(processingDialog.getByText("AI任务尚未复制", { exact: true }))
-      .toBeVisible();
-    const handoffError = processingDialog.getByText(
-      "交接内容尚未复制",
-      { exact: true },
-    );
-    await expect(handoffError).toBeVisible();
     await expect(launched.page.getByRole("alert")
       .filter({ hasText: "交接内容还没有复制" })).toHaveCount(0);
-    await launched.page.keyboard.press("Escape");
-    await expect(processingDialog).toBeHidden();
+    // Retrying goes through the same header control and the conversation, and it must not
+    // create a second request or touch the source.
     await launched.page.getByRole("button", { name: "复制失败，再试一次" }).click();
-    await expect(processingDialog).toBeVisible();
-    const retryCopy = launched.page.getByRole("button", { name: "重新复制" });
-    await expect(retryCopy).toBeVisible();
-    await expect(launched.page.getByRole("button", { name: "取消本轮" }))
-      .toBeVisible();
-    await retryCopy.click();
-    await expect(handoffError).toBeVisible();
+    await chooseClipboardDelivery(launched.page);
     await expect.poll(() => requestDirectoryCount(launched.workspace))
       .toBe(1);
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
