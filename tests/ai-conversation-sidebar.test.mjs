@@ -304,6 +304,17 @@ test("the header's mode is derived from Request authority, not guessed", () => {
     sidebarStateFromRun({ activeRun: { status: "recovering-transaction" } }),
     "promoting",
   );
+
+  // A settled round with no effective change keeps its own state: falling back
+  // to preview-discussion would hide the no-change decision copy in the bar.
+  assert.equal(sidebarStateFromRun({ activeRun: { status: "no-change" } }), "no-change");
+  assert.equal(
+    sidebarModePresentation(
+      sidebarStateFromRun({ activeRun: { status: "no-change" } }),
+    ).label,
+    "结果 · 无变化",
+  );
+
   // Reviewing wins: the review surface is read-only whatever the run says.
   assert.equal(
     sidebarStateFromRun({ activeRun: { status: "processing" }, reviewing: true }),

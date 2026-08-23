@@ -5,7 +5,8 @@ export type SidebarState =
   | "validating"
   | "ready-to-open"
   | "review-view"
-  | "promoting";
+  | "promoting"
+  | "no-change";
 
 export type SidebarIntent = "discuss" | "modify" | "continue";
 

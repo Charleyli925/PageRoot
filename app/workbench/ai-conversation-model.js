@@ -81,6 +81,12 @@ const MODE_PRESENTATION = Object.freeze({
     label: "结果 · 等待决定",
     detail: "当前仍是修改前页面。",
   },
+  // A round that produced nothing new: the round is over, but it is still this
+  // thread's fact to state, not a return to plain preview discussion.
+  "no-change": {
+    label: "结果 · 无变化",
+    detail: "评论和当前页面都保持原样。",
+  },
 });
 
 export function sidebarModePresentation(state, intent) {
@@ -109,6 +115,10 @@ const RUN_STATUS_TO_SIDEBAR_STATE = Object.freeze({
   "awaiting-conflict-resolution": "ready-to-open",
   committing: "promoting",
   "recovering-transaction": "promoting",
+  // A settled-without-change round still needs its decision said in the thread:
+  // without this row the sidebar falls back to preview-discussion and the
+  // no-change action bar below becomes unreachable dead copy.
+  "no-change": "no-change",
 });
 
 export function sidebarStateFromRun({
