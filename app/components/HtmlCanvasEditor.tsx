@@ -853,13 +853,18 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   }, [pointerCapabilityHoverEnabled]);
 
   useEffect(() => {
-    const documentNode = iframeRef.current?.contentDocument;
-    if (!documentNode) return;
+    // contentDocument can be alive while documentElement is null: that is the
+    // iframe navigation window, where the old document is detached and the next
+    // one has not parsed its root element yet. Touching the root there throws
+    // during commit and unmounts the whole tree, so the effect simply waits for
+    // the next run, which the cursor/hover state change already schedules.
+    const rootElement = iframeRef.current?.contentDocument?.documentElement;
+    if (!rootElement) return;
     if (!pointerCapabilityHoverEnabled || hoverChrome.cursor === "default") {
-      documentNode.documentElement.removeAttribute("data-html-canvas-pointer");
+      rootElement.removeAttribute("data-html-canvas-pointer");
       return;
     }
-    documentNode.documentElement.setAttribute(
+    rootElement.setAttribute(
       "data-html-canvas-pointer",
       hoverChrome.cursor,
     );
