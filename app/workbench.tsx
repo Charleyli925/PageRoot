@@ -7075,7 +7075,8 @@ export default function Workbench() {
           }
           : {
             title: "复制没有成功",
-            message: "再试一次，或从「查看本轮」里取本轮要求。",
+            // 「查看本轮」 no longer exists: the round lives in this conversation.
+            message: "再试一次；本轮要求就在这条对话里。",
             tone: "warning",
             dedupeKey: "handoff-recopied",
           });

@@ -279,10 +279,11 @@ function createQoderAcpE2ECommand(directory, {
   return command;
 }
 
+// The destination is chosen in the AI conversation now; the dialog over the page is gone.
 async function chooseClipboardDelivery(page) {
-  const dialog = page.getByRole("dialog", { name: "怎样交给 AI？" });
-  await expect(dialog).toBeVisible();
-  await dialog.getByRole("button", { name: /复制任务/u }).click();
+  const sidebar = page.getByTestId("ai-conversation-sidebar");
+  await expect(sidebar).toBeVisible();
+  await sidebar.getByRole("button", { name: /复制给别的 AI/u }).click();
 }
 
 
@@ -315,12 +316,13 @@ async function addCommentAndSubmit(
       comment.targetSelector,
     );
   }
-  await page.getByRole("button", { name: /发给 AI/u }).click();
+  await page.getByRole("button", { name: /AI 对话/u }).click();
   await chooseClipboardDelivery(page);
-  await expect(page.getByText("AI任务已经复制，直接粘贴给 AI Agent", { exact: true }))
+  await expect(page.getByTestId("ai-conversation-action-bar")
+    .getByText("任务已复制，等你的 AI 改完", { exact: true }))
     .toBeVisible();
-  await expect(page.getByRole("dialog", { name: "本轮处理" })
-    .locator(".status-chip")).toHaveText("等待 AI 返回");
+  await expect(page.getByTestId("ai-conversation-run-progress"))
+    .toContainText("等待 AI 完成");
   let promptPath = "";
   await expect.poll(async () => {
     const copied = await electronApp.evaluate(({ clipboard }) => clipboard.readText());
@@ -328,10 +330,8 @@ async function addCommentAndSubmit(
     promptPath = match?.[1] || "";
     return Boolean(promptPath && existsSync(promptPath));
   }, { timeout: 20_000 }).toBe(true);
-  await expect(page.getByRole("button", {
-    name: "查看本轮",
-    exact: true,
-  })).toBeVisible();
+  // The round is carried by the conversation now, not by a header button opening a panel.
+  await expect(page.getByTestId("ai-conversation-run-progress")).toBeVisible();
   const requestRoot = path.dirname(promptPath);
   const changeRequest = JSON.parse(
     readFileSync(path.join(requestRoot, "change-request.json"), "utf8"),
@@ -1096,19 +1096,16 @@ ${REVIEW_MASK_UNION_BEFORE}
       "Finder metadata",
     );
     await launched.page.waitForTimeout(3_500);
-    await expect(
-      launched.page.locator(".handoff-process-board li"),
-    ).toHaveCount(4);
-    const aiProgressStep = launched.page
-      .locator(".handoff-process-board li")
-      .filter({
-        has: launched.page.locator("strong", {
-          hasText: /^等待 AI 完成$/u,
-        }),
-      });
+    // The stages are narrated in the conversation now; the process panel is out of the
+    // user flow, so its board no longer exists to assert against.
+    const runProgress = launched.page.getByTestId("ai-conversation-run-progress");
+    await expect(runProgress.locator("li")).toHaveCount(4);
+    const aiProgressStep = runProgress
+      .locator("li")
+      .filter({ hasText: "等待 AI 完成" });
     await expect(
       aiProgressStep,
-    ).toHaveAttribute("data-state", "current");
+    ).toHaveAttribute("data-step-state", "current");
     writeAiOutput(request.requestRoot, (base) => {
       expect(base.match(new RegExp(ORIGINAL_TEXT, "gu"))).toHaveLength(1);
       return base
@@ -1247,18 +1244,14 @@ ${REVIEW_MASK_UNION_BEFORE}
     });
     runOfficialFinalizer(request.requestRoot, request.changeRequest);
 
-    await expect(launched.page.getByText(
-      "可在审阅中对比查看修改差异",
-      { exact: true },
-    ).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
-    const processingDialog = launched.page.getByRole("dialog", { name: "本轮处理" });
-    await expect(processingDialog.locator(".processing-title small"))
-      .toHaveText("AI返回结果");
-    await expect(processingDialog.locator(".status-chip"))
-      .toHaveText("等待确认打开");
+    // The result is reported in the conversation; the process panel is out of the flow.
+    const readyDecision = launched.page.getByTestId("ai-conversation-action-bar");
+    await expect(readyDecision).toBeVisible({ timeout: 30_000 });
+    await expect(readyDecision).toContainText("等待你的决定");
+    await expect(runProgress).toContainText("新版本已准备好");
     await expect(
       aiProgressStep,
-    ).toHaveAttribute("data-state", "done");
+    ).toHaveAttribute("data-step-state", "done");
     const pending = await launched.page.evaluate(
       () => window.htmlAIProjects?.getActiveProject(),
     );
@@ -4067,7 +4060,7 @@ test("a no-change result returns to editing and remains reopenable", async () =>
     });
     await expect(launched.page.getByRole("button", { name: "上轮处理" }))
       .toBeVisible({ timeout: 30_000 });
-    await expect(launched.page.getByRole("button", { name: /发给 AI/u }))
+    await expect(launched.page.getByRole("button", { name: /AI 对话/u }))
       .toBeEnabled();
     await launched.page.getByRole("button", { name: "上轮处理" }).click();
     await expect(launched.page.getByText(
@@ -4216,7 +4209,7 @@ test("Qoder ACP Agent Bridge reaches review without clipboard or automatic adopt
       fixture.sourcePath,
       "请完成 Qoder ACP 自动闭环，但不要直接覆盖当前 HTML。",
     );
-    await launched.page.getByRole("button", { name: /发给 AI/u }).click();
+    await launched.page.getByRole("button", { name: /AI 对话/u }).click();
     const deliveryDialog = launched.page.getByRole("dialog", { name: "怎样交给 AI？" });
     await expect(deliveryDialog).toBeVisible();
     await expect(deliveryDialog.getByText(
@@ -4293,7 +4286,7 @@ test("Qoder authentication stays in one delivery dialog and matches About", asyn
       fixture.sourcePath,
       "验证 Qoder 登录引导不会创建本轮任务。",
     );
-    await launched.page.getByRole("button", { name: /发给 AI/u }).click();
+    await launched.page.getByRole("button", { name: /AI 对话/u }).click();
     const deliveryDialog = launched.page.getByRole("dialog", { name: "怎样交给 AI？" });
     await expect(deliveryDialog.getByRole("button", { name: /Qoder CLI/u }))
       .toBeVisible();
@@ -4350,7 +4343,7 @@ test("Qoder installed while PageRoot is open refreshes in place and continues on
       fixture.sourcePath,
       "验证 PageRoot 打开期间安装 Qoder CLI 后可原地继续。",
     );
-    await launched.page.getByRole("button", { name: /发给 AI/u }).click();
+    await launched.page.getByRole("button", { name: /AI 对话/u }).click();
     const deliveryDialog = launched.page.getByRole("dialog", { name: "怎样交给 AI？" });
     await expect(deliveryDialog.getByText("未安装", { exact: true })).toBeVisible();
     await deliveryDialog.getByRole("button", { name: "复制给 Qoder 的安装指令" }).click();
@@ -4403,7 +4396,7 @@ test("Qoder ACP polling waits for start and a managed stop kills the Agent", asy
       "保持 ACP 会话运行，直到我在源页停止本轮。",
     );
     const workingBefore = readFileSync(workingCopyPath);
-    await launched.page.getByRole("button", { name: /发给 AI/u }).click();
+    await launched.page.getByRole("button", { name: /AI 对话/u }).click();
     const deliveryDialog = launched.page.getByRole("dialog", { name: "怎样交给 AI？" });
     await deliveryDialog.getByRole("button", { name: /Qoder CLI/u }).click();
 
@@ -4482,7 +4475,7 @@ test("a clipboard handoff failure keeps the frozen Request recoverable", async (
     await launched.page.getByRole("textbox", { name: "评论内容" })
       .fill(`改为 ${UPDATED_TEXT}`);
     await launched.page.getByRole("button", { name: "评论", exact: true }).click();
-    const sendToQoder = launched.page.getByRole("button", { name: /发给 AI/u });
+    const sendToQoder = launched.page.getByRole("button", { name: /AI 对话/u });
     await expect(sendToQoder).toBeEnabled();
     await sendToQoder.click();
     await chooseClipboardDelivery(launched.page);
@@ -4537,7 +4530,7 @@ test("a failed handoff in project A does not block project B or replace its stat
       projectA.sourcePath,
     );
     expect(projectAWorkingCopyPath).not.toBe(realpathSync(projectA.sourcePath));
-    await launched.page.getByRole("button", { name: /发给 AI/u }).click();
+    await launched.page.getByRole("button", { name: /AI 对话/u }).click();
     await chooseClipboardDelivery(launched.page);
     const processingDialog = launched.page.getByRole("dialog", { name: "本轮处理" });
     await expect(processingDialog.getByText(
@@ -4563,9 +4556,9 @@ test("a failed handoff in project A does not block project B or replace its stat
       projectB.sourcePath,
     );
     expect(projectBWorkingCopyPath).not.toBe(realpathSync(projectB.sourcePath));
-    await expect(launched.page.getByRole("button", { name: /发给 AI/u }))
+    await expect(launched.page.getByRole("button", { name: /AI 对话/u }))
       .toBeEnabled();
-    await launched.page.getByRole("button", { name: /发给 AI/u }).click();
+    await launched.page.getByRole("button", { name: /AI 对话/u }).click();
     await chooseClipboardDelivery(launched.page);
     await expect(launched.page.getByText(
       "AI任务复制失败，请重新复制",
@@ -4610,7 +4603,7 @@ test("a rapid double click creates exactly one durable Request", async () => {
   try {
     await launched.electronApp.evaluate(({ clipboard }) => clipboard.clear());
     await addComment(launched.page, fixture.sourcePath);
-    await launched.page.getByRole("button", { name: /发给 AI/u }).dblclick({
+    await launched.page.getByRole("button", { name: /AI 对话/u }).dblclick({
       delay: 0,
     });
     await chooseClipboardDelivery(launched.page);
@@ -4759,7 +4752,7 @@ test("an unknown Request outcome stays fail-closed and reconciles automatically"
     };
     await launched.page.route(bridgeRoute, injectUnknownRequestOutcome);
 
-    await launched.page.getByRole("button", { name: /发给 AI/u }).click();
+    await launched.page.getByRole("button", { name: /AI 对话/u }).click();
     await chooseClipboardDelivery(launched.page);
     await expect(launched.page.getByText(
       "正在确认这次发送是否成功",
@@ -4863,7 +4856,7 @@ test("a persisted global comment stays exact after restart and sends directly", 
     await expect(recoveredComment).toHaveAttribute("data-resolution", "exact");
     await expect(recoveredComment.getByText("原位置已变化")).toHaveCount(0);
 
-    await activeLaunch.page.getByRole("button", { name: /发给 AI/u }).click();
+    await activeLaunch.page.getByRole("button", { name: /AI 对话/u }).click();
     await chooseClipboardDelivery(activeLaunch.page);
     await expect(activeLaunch.page.getByText(
       "AI任务已经复制，直接粘贴给 AI Agent",
@@ -4888,7 +4881,8 @@ test("output without the mandatory finalizer never creates or opens a version", 
     );
     writeAiOutput(request.requestRoot, (base) => base.replace(ORIGINAL_TEXT, UPDATED_TEXT));
     await launched.page.waitForTimeout(3_500);
-    await expect(launched.page.getByText("AI任务已经复制，直接粘贴给 AI Agent", { exact: true }))
+    await expect(launched.page.getByTestId("ai-conversation-action-bar")
+    .getByText("任务已复制，等你的 AI 改完", { exact: true }))
       .toBeVisible();
     expect(workingHtmlFiles(launched.workspace, request.changeRequest.projectId)).toHaveLength(1);
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
@@ -4920,7 +4914,8 @@ test("a malformed AI HTML return is rejected before completion or opening", asyn
     );
     expect(existsSync(path.join(attemptRoot, "completion.json"))).toBe(false);
     await launched.page.waitForTimeout(3_500);
-    await expect(launched.page.getByText("AI任务已经复制，直接粘贴给 AI Agent", { exact: true }))
+    await expect(launched.page.getByTestId("ai-conversation-action-bar")
+    .getByText("任务已复制，等你的 AI 改完", { exact: true }))
       .toBeVisible();
     expect(workingHtmlFiles(launched.workspace, request.changeRequest.projectId)).toHaveLength(1);
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
