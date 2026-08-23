@@ -4435,19 +4435,25 @@ test("a clipboard handoff failure keeps the frozen Request recoverable", async (
     await expect(sendToQoder).toBeEnabled();
     await sendToQoder.click();
     await chooseClipboardDelivery(launched.page);
-    // The failure is reported where the round lives: the header offers the retry, and the
-    // clipboard is left untouched. The process panel's own copies of this state are out
-    // of the flow, so only what the user can still see is asserted.
-    await expect(launched.page.getByRole("button", { name: "复制失败，再试一次" }))
-      .toBeVisible();
+    // The failure is said where the user can still act on it: a sticky notice that
+    // survives navigation, and the error step of the round inside the conversation.
+    // The clipboard is left untouched.
+    const handoffFailureNotice = launched.page.getByRole("status")
+      .filter({ hasText: "交接内容还没有复制" });
+    await expect(handoffFailureNotice).toBeVisible();
     expect(await launched.electronApp.evaluate(({ clipboard }) => clipboard.readText()))
       .toBe(clipboardSentinel);
-    await expect(launched.page.getByRole("alert")
-      .filter({ hasText: "交接内容还没有复制" })).toHaveCount(0);
-    // Retrying goes through the same header control and the conversation, and it must not
+    await expect(launched.page.getByTestId("ai-conversation-run-progress")
+      .locator("li[data-step-state=\"error\"]")
+      .filter({ hasText: "交接内容尚未复制" }))
+      .toBeVisible();
+    // Retrying goes through the conversation's own remedy, and it must not
     // create a second request or touch the source.
-    await launched.page.getByRole("button", { name: "复制失败，再试一次" }).click();
-    await chooseClipboardDelivery(launched.page);
+    await handoffFailureNotice.getByRole("button", { name: "回到 AI 对话" }).click();
+    const failureActionBar = launched.page.getByTestId("ai-conversation-action-bar");
+    await expect(failureActionBar.getByRole("button", { name: "再次复制" }))
+      .toBeVisible();
+    await failureActionBar.getByRole("button", { name: "再次复制" }).click();
     await expect.poll(() => requestDirectoryCount(launched.workspace))
       .toBe(1);
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
@@ -4474,10 +4480,15 @@ test("a failed handoff in project A does not block project B or replace its stat
     expect(projectAWorkingCopyPath).not.toBe(realpathSync(projectA.sourcePath));
     await launched.page.getByRole("button", { name: /AI 对话/u }).click();
     await chooseClipboardDelivery(launched.page);
-    // The failure surfaces on the header control, and it must not have produced a
-    // second request. The panel that used to also state it is out of the flow.
-    await expect(launched.page.getByRole("button", { name: "复制失败，再试一次" }))
+    // The failure is said by the sticky notice and by the round's own timeline, and it
+    // must not have produced a second request.
+    await expect(launched.page.getByRole("status")
+      .filter({ hasText: "交接内容还没有复制" }))
       .toBeVisible({ timeout: 30_000 });
+    await expect(launched.page.getByTestId("ai-conversation-run-progress")
+      .locator("li[data-step-state=\"error\"]")
+      .filter({ hasText: "交接内容尚未复制" }))
+      .toBeVisible();
     await expect.poll(
       () => requestDirectoryCount(launched.workspace),
       { timeout: 20_000 },
@@ -4494,26 +4505,34 @@ test("a failed handoff in project A does not block project B or replace its stat
       .toBeEnabled();
     await launched.page.getByRole("button", { name: /AI 对话/u }).click();
     await chooseClipboardDelivery(launched.page);
-    await expect(launched.page.getByText(
-      "AI任务复制失败，请重新复制",
-      { exact: true },
-    )).toBeVisible();
-    await expect(launched.page.getByRole("button", { name: "复制失败，再试一次" }))
+    // B fails on its own round: the same fact is stated for B, and the request
+    // count says the two failures are two separate rounds.
+    await expect(launched.page.getByRole("status")
+      .filter({ hasText: "交接内容还没有复制" }))
       .toBeVisible({ timeout: 30_000 });
+    await expect(launched.page.getByTestId("ai-conversation-run-progress")
+      .locator("li[data-step-state=\"error\"]")
+      .filter({ hasText: "交接内容尚未复制" }))
+      .toBeVisible();
     await expect.poll(
       () => requestDirectoryCount(launched.workspace),
       { timeout: 20_000 },
     ).toBe(2);
 
     await openRecentProject(launched.page, projectA.sourcePath, { editable: false });
-    // Each project keeps its own failed state: the retry control is what the user sees,
-    // and reopening the other project must not carry the failure across.
-    await expect(launched.page.getByRole("button", { name: "复制失败，再试一次" }))
+    // Each project keeps its own failed state: reopening A still shows A's round
+    // stuck at the same error — not B's failure and not a clean slate.
+    await launched.page.getByRole("button", { name: /AI 对话/u }).click();
+    await expect(launched.page.getByTestId("ai-conversation-run-progress")
+      .locator("li[data-step-state=\"error\"]")
+      .filter({ hasText: "交接内容尚未复制" }))
       .toBeVisible();
-    await launched.page.getByRole("button", { name: "复制失败，再试一次" }).click();
 
     await openRecentProject(launched.page, projectB.sourcePath, { editable: false });
-    await expect(launched.page.getByRole("button", { name: "复制失败，再试一次" }))
+    await launched.page.getByRole("button", { name: /AI 对话/u }).click();
+    await expect(launched.page.getByTestId("ai-conversation-run-progress")
+      .locator("li[data-step-state=\"error\"]")
+      .filter({ hasText: "交接内容尚未复制" }))
       .toBeVisible();
     expect(readFileSync(projectA.sourcePath).equals(projectA.original)).toBe(true);
     expect(readFileSync(projectB.sourcePath).equals(projectB.original)).toBe(true);
@@ -4787,10 +4806,10 @@ test("a persisted global comment stays exact after restart and sends directly", 
 
     await activeLaunch.page.getByRole("button", { name: /AI 对话/u }).click();
     await chooseClipboardDelivery(activeLaunch.page);
-    await expect(activeLaunch.page.getByText(
-      "AI任务已经复制，直接粘贴给 AI Agent",
-      { exact: true },
-    )).toBeVisible({ timeout: 30_000 });
+    // The copied-task fact now lives in the sidebar action bar instead of a toast.
+    await expect(activeLaunch.page.getByTestId("ai-conversation-action-bar")
+      .getByText("任务已复制，等你的 AI 改完", { exact: true }))
+      .toBeVisible({ timeout: 30_000 });
     await expect(activeLaunch.page.getByText(/评论需要重新定位/u)).toHaveCount(0);
   } finally {
     await stopPageRoot(activeLaunch.electronApp, firstLaunch.isolatedUserData);
