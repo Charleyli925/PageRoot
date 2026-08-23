@@ -4000,15 +4000,16 @@ test("a no-change result returns to editing and remains reopenable", async () =>
     writeAiOutput(request.requestRoot, (base) => base);
     runOfficialFinalizer(request.requestRoot, request.changeRequest);
 
-    await expect(launched.page.getByText(
-      "这次没有产生有效变化",
-      { exact: true },
-    ).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
-    await expect(launched.page.getByText(
-      "原评论和附件都已保留，调整要求后可以重新发送",
+    const noChangeBar = launched.page.getByTestId("ai-conversation-action-bar");
+    await expect(noChangeBar.getByText("这次没有产生有效变化", { exact: true }))
+      .toBeVisible({ timeout: 30_000 });
+    await expect(noChangeBar.getByText(
+      "原评论和附件都已保留，调整要求后可以重新发送。",
       { exact: true },
     )).toBeVisible();
-    await expect(launched.page.getByRole("button", { name: "返回编辑" }))
+    // The round is over with nothing to adopt: ending it from the bar returns
+    // the page to editing.
+    await expect(noChangeBar.getByRole("button", { name: "结束本轮" }))
       .toBeVisible();
     await expect(launched.page.getByRole("button", { name: "修改要求" }))
       .toHaveCount(0);
@@ -4019,15 +4020,14 @@ test("a no-change result returns to editing and remains reopenable", async () =>
       activeSourcePath: request.sourcePath,
       isolatedUserData: launched.isolatedUserData,
     });
-    await expect(launched.page.getByRole("button", { name: "上轮处理" }))
-      .toBeVisible({ timeout: 30_000 });
     await expect(launched.page.getByRole("button", { name: /AI 对话/u }))
-      .toBeEnabled();
-    await launched.page.getByRole("button", { name: "上轮处理" }).click();
-    await expect(launched.page.getByText(
-      "这次没有产生有效变化",
-      { exact: true },
-    ).filter({ visible: true }).first()).toBeVisible();
+      .toBeEnabled({ timeout: 30_000 });
+    // The settled no-change round is reopened through the conversation; the
+    // header's recent-outcome button no longer appears for it.
+    await launched.page.getByRole("button", { name: /AI 对话/u }).click();
+    const reopenedBar = launched.page.getByTestId("ai-conversation-action-bar");
+    await expect(reopenedBar.getByText("这次没有产生有效变化", { exact: true }))
+      .toBeVisible({ timeout: 30_000 });
     const aiTask = await launched.page.evaluate((sourcePath) => (
       window.htmlAIProjects?.revealAiTask({ sourcePath })
     ), request.sourcePath);
@@ -4254,7 +4254,8 @@ test("Qoder authentication stays in one delivery dialog and matches About", asyn
     await expect(deliveryDialog.getByText("需要登录", { exact: true })).toBeVisible();
     await expect(deliveryDialog.getByRole("button", { name: "复制登录指令" }))
       .toBeVisible();
-    await expect(deliveryDialog.getByRole("button", { name: /复制任务/u })).toBeVisible();
+    // Clipboard delivery lives in the conversation now, so the About card no
+    // longer offers a copy-task action; not creating a round is the contract.
     expect(requestPosts).toBe(0);
     await expect(launched.page.locator(".toast.show")).toHaveCount(0);
 
@@ -4312,11 +4313,12 @@ test("Qoder installed while PageRoot is open refreshes in place and continues on
     createQoderAcpE2ECommand(fixture.sourceDirectory);
     await launched.page.evaluate(() => window.dispatchEvent(new Event("focus")));
     await expect(deliveryDialog.getByText("可使用", { exact: true })).toBeVisible();
-    await expect(deliveryDialog.getByRole("button", { name: "检查并继续" })).toBeVisible();
+    // The About card only observes availability; continuing the round is the
+    // conversation's own send action.
     expect(requestPosts).toBe(0);
 
-    await deliveryDialog.getByRole("button", { name: "检查并继续" }).click();
-    await expect(deliveryDialog).not.toBeVisible();
+    await closeQoderAvailability(launched.page);
+    await launched.page.getByRole("button", { name: "交给 Qoder 修改" }).click();
     await expect.poll(() => requestPosts).toBe(1);
   } finally {
     await stopPageRoot(launched.electronApp, launched.isolatedUserData);
@@ -4355,8 +4357,9 @@ test("Qoder ACP polling waits for start and a managed stop kills the Agent", asy
     );
     const workingBefore = readFileSync(workingCopyPath);
     await launched.page.getByRole("button", { name: /AI 对话/u }).click();
-    const deliveryDialog = await openQoderAvailability(launched.page);
-    await deliveryDialog.getByRole("button", { name: /Qoder CLI/u }).click();
+    // The round is started from the conversation itself; the About card only
+    // observes availability and never launches the Agent.
+    await launched.page.getByRole("button", { name: "交给 Qoder 修改" }).click();
 
     const stopButton = launched.page.getByRole("button", { name: "结束本轮" });
     await expect(stopButton).toBeVisible({ timeout: 60_000 });
@@ -4435,21 +4438,16 @@ test("a clipboard handoff failure keeps the frozen Request recoverable", async (
     await expect(sendToQoder).toBeEnabled();
     await sendToQoder.click();
     await chooseClipboardDelivery(launched.page);
-    // The failure is said where the user can still act on it: a sticky notice that
-    // survives navigation, and the error step of the round inside the conversation.
-    // The clipboard is left untouched.
-    const handoffFailureNotice = launched.page.getByRole("status")
-      .filter({ hasText: "交接内容还没有复制" });
-    await expect(handoffFailureNotice).toBeVisible();
-    expect(await launched.electronApp.evaluate(({ clipboard }) => clipboard.readText()))
-      .toBe(clipboardSentinel);
+    // The failure is said by the round's own timeline, and the remedy is the
+    // action bar's re-copy action. The clipboard is left untouched.
     await expect(launched.page.getByTestId("ai-conversation-run-progress")
       .locator("li[data-step-state=\"error\"]")
       .filter({ hasText: "交接内容尚未复制" }))
       .toBeVisible();
-    // Retrying goes through the conversation's own remedy, and it must not
-    // create a second request or touch the source.
-    await handoffFailureNotice.getByRole("button", { name: "回到 AI 对话" }).click();
+    expect(await launched.electronApp.evaluate(({ clipboard }) => clipboard.readText()))
+      .toBe(clipboardSentinel);
+    // Retrying goes through the bar's own remedy, and it must not create a
+    // second request or touch the source.
     const failureActionBar = launched.page.getByTestId("ai-conversation-action-bar");
     await expect(failureActionBar.getByRole("button", { name: "再次复制" }))
       .toBeVisible();
@@ -4480,15 +4478,12 @@ test("a failed handoff in project A does not block project B or replace its stat
     expect(projectAWorkingCopyPath).not.toBe(realpathSync(projectA.sourcePath));
     await launched.page.getByRole("button", { name: /AI 对话/u }).click();
     await chooseClipboardDelivery(launched.page);
-    // The failure is said by the sticky notice and by the round's own timeline, and it
-    // must not have produced a second request.
-    await expect(launched.page.getByRole("status")
-      .filter({ hasText: "交接内容还没有复制" }))
-      .toBeVisible({ timeout: 30_000 });
+    // The failure is said by the round's own timeline, and it must not have
+    // produced a second request.
     await expect(launched.page.getByTestId("ai-conversation-run-progress")
       .locator("li[data-step-state=\"error\"]")
       .filter({ hasText: "交接内容尚未复制" }))
-      .toBeVisible();
+      .toBeVisible({ timeout: 30_000 });
     await expect.poll(
       () => requestDirectoryCount(launched.workspace),
       { timeout: 20_000 },
@@ -4505,15 +4500,12 @@ test("a failed handoff in project A does not block project B or replace its stat
       .toBeEnabled();
     await launched.page.getByRole("button", { name: /AI 对话/u }).click();
     await chooseClipboardDelivery(launched.page);
-    // B fails on its own round: the same fact is stated for B, and the request
-    // count says the two failures are two separate rounds.
-    await expect(launched.page.getByRole("status")
-      .filter({ hasText: "交接内容还没有复制" }))
-      .toBeVisible({ timeout: 30_000 });
+    // B fails on its own round: the same error step appears for B, and the
+    // request count says the two failures are two separate rounds.
     await expect(launched.page.getByTestId("ai-conversation-run-progress")
       .locator("li[data-step-state=\"error\"]")
       .filter({ hasText: "交接内容尚未复制" }))
-      .toBeVisible();
+      .toBeVisible({ timeout: 30_000 });
     await expect.poll(
       () => requestDirectoryCount(launched.workspace),
       { timeout: 20_000 },
@@ -4592,12 +4584,12 @@ test("ending a copied run still warns after restart and blocks late finalization
      * phase wording (preparing vs. confirmed) is presentation detail; what the
      * contract needs is that the handoff step is the one carrying the round.
      */
+    await launched.page.getByRole("button", { name: /AI 对话/u }).click();
     await expect(launched.page.getByTestId("ai-conversation-run-progress")
       .locator("li").filter({ hasText: "准备并复制" }))
       .toBeVisible();
-    const endRound = launched.page.getByRole("button", {
-      name: "结束本轮并继续编辑",
-    }).filter({ visible: true }).first();
+    const endRound = launched.page.getByTestId("ai-conversation-action-bar")
+      .getByRole("button", { name: "结束本轮" });
     await expect(endRound).toBeEnabled();
     await endRound.click();
 
@@ -4726,9 +4718,13 @@ test("an unknown Request outcome stays fail-closed and reconciles automatically"
     await expect(launched.page.getByTestId("ai-conversation-action-bar")
       .getByText("任务已复制，等你的 AI 改完", { exact: true })).toBeVisible({ timeout: 20_000 });
     await launched.page.unroute(bridgeRoute, injectUnknownRequestOutcome);
-    await expect(launched.page.getByRole("button", {
-      name: "结束本轮并继续编辑",
-    })).toBeEnabled();
+    // Ending the reconciled round still asks once: the task may already be in
+    // an Agent's hands, so the confirmation dialog owns the final action.
+    await launched.page.getByTestId("ai-conversation-action-bar")
+      .getByRole("button", { name: "结束本轮" }).click();
+    await expect(launched.page.getByRole("dialog", {
+      name: "AI Agent 可能仍在修改",
+    }).getByRole("button", { name: "结束本轮并继续编辑" })).toBeEnabled();
     expect(requestDirectoryCount(launched.workspace)).toBe(1);
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
   } finally {
