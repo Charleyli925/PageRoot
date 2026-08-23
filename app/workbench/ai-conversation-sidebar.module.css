@@ -228,7 +228,13 @@
  */
 .actions {
   display: flex;
-  flex-flow: row wrap;
+  flex-direction: row;
+  /*
+   * Never wrap. A decision offers at most two short replies, and wrapping put the
+   * second one on its own line, which read as a stacked confirmation form. The
+   * buttons may shrink instead; their labels are short enough to survive it.
+   */
+  flex-wrap: nowrap;
   align-items: center;
   gap: 6px;
 }
@@ -241,7 +247,7 @@
   font-size: 11px;
   font-weight: 680;
   white-space: nowrap;
-  flex: 0 0 auto;
+  flex: 0 1 auto;
 }
 
 .action[data-tone="primary"] {
