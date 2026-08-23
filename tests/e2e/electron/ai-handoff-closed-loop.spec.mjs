@@ -667,7 +667,7 @@ function candidateHtmlFiles(workspace, projectId) {
 }
 
 async function adoptReadyResult(page) {
-  await page.getByRole("button", { name: "采纳并打开" }).click();
+  await page.getByRole("button", { name: /直接采用|采纳这一版/u }).click();
 }
 
 const REVIEW_PROJECTION_CASES = Object.freeze([
@@ -4364,9 +4364,7 @@ test("Qoder ACP polling waits for start and a managed stop kills the Agent", asy
     const deliveryDialog = await openQoderAvailability(launched.page);
     await deliveryDialog.getByRole("button", { name: /Qoder CLI/u }).click();
 
-    const stopButton = launched.page.getByRole("button", {
-      name: "停止 Qoder 并继续编辑",
-    });
+    const stopButton = launched.page.getByRole("button", { name: "结束本轮" });
     await expect(stopButton).toBeVisible({ timeout: 60_000 });
     await expect.poll(() => existsSync(pidFile)).toBe(true);
     const pid = Number(readFileSync(pidFile, "utf8"));
@@ -4571,10 +4569,8 @@ test("a rapid double click creates exactly one durable Request", async () => {
       delay: 0,
     });
     await chooseClipboardDelivery(launched.page);
-    await expect(launched.page.getByText(
-      "AI任务已经复制，直接粘贴给 AI Agent",
-      { exact: true },
-    )).toBeVisible();
+    await expect(launched.page.getByTestId("ai-conversation-action-bar")
+      .getByText("任务已复制，等你的 AI 改完", { exact: true })).toBeVisible();
     await expect.poll(
       () => requestDirectoryCount(launched.workspace),
       { timeout: 20_000 },
@@ -4737,10 +4733,8 @@ test("an unknown Request outcome stays fail-closed and reconciles automatically"
     ).toBe(1);
 
     allowUnknownRequestReconcile = true;
-    await expect(launched.page.getByText(
-      "AI任务已经复制，直接粘贴给 AI Agent",
-      { exact: true },
-    )).toBeVisible({ timeout: 20_000 });
+    await expect(launched.page.getByTestId("ai-conversation-action-bar")
+      .getByText("任务已复制，等你的 AI 改完", { exact: true })).toBeVisible({ timeout: 20_000 });
     await launched.page.unroute(bridgeRoute, injectUnknownRequestOutcome);
     await expect(launched.page.getByRole("button", {
       name: "结束本轮并继续编辑",

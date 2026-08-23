@@ -359,6 +359,19 @@ export function sidebarActionBar({
       actions: [{ id: "cancel", label: "结束本轮", tone: "quiet" }],
     };
   }
+  /*
+   * A round can finish without changing anything, which is not a stage the timeline can
+   * express. It used to be stated only in the process panel, and that panel is out of
+   * the flow, so the conversation says it.
+   */
+  if (state === "no-change") {
+    return {
+      kind: "decision",
+      title: "这次没有产生有效变化",
+      detail: "原评论和附件都已保留，调整要求后可以重新发送。",
+      actions: [{ id: "dismiss", label: "结束本轮", tone: "quiet" }],
+    };
+  }
   if (state === "promoting") {
     return {
       kind: "progress",
