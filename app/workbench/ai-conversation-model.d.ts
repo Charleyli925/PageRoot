@@ -94,12 +94,17 @@ export type SidebarRunProgressStep = {
 export type SidebarRunProgress = {
   steps: readonly SidebarRunProgressStep[];
   headline: string | null;
+  /** What the Agent is saying while it works; null when it has said nothing. */
+  narration: string | null;
+  /** The stage actually running, for callers that need to name it. */
+  liveLabel: string | null;
   tone: "attention" | "quiet";
 };
 
 export function sidebarRunProgress(options?: {
   state?: string;
   steps?: readonly unknown[];
+  agentText?: string;
 }): SidebarRunProgress | null;
 
 export function sidebarDeliveryDisclosure(intent?: SidebarIntent | string): string | null;

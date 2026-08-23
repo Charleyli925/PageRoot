@@ -89,14 +89,26 @@ test("no pending decision means the action bar occupies no space", () => {
   }
 });
 
-test("an attention candidate offers review only", () => {
-  const bar = sidebarActionBar({
+test("an attention candidate is not offered for blind adoption", () => {
+  // Before the user has looked, a large change offers only the comparison:
+  // adopting it unseen is not a choice PageRoot should present.
+  const unseen = sidebarActionBar({
+    state: "ready-to-open",
+    candidateVersionLabel: "候选版本 7",
+    candidateStatus: "attention",
+  });
+  assert.deepEqual(unseen.actions.map((action) => action.id), ["review"]);
+  assert.match(unseen.detail, /变化较大/u);
+
+  // While comparing, the user is looking at it, so adopting is legitimate — and
+  // pointing at 「审阅对比」 would point at the screen they are already on.
+  const comparing = sidebarActionBar({
     state: "review-view",
     candidateVersionLabel: "候选版本 7",
     candidateStatus: "attention",
   });
-  assert.deepEqual(bar.actions.map((action) => action.id), ["review"]);
-  assert.match(bar.detail, /变化较大/u);
+  assert.deepEqual(comparing.actions.map((action) => action.id), ["adopt"]);
+  assert.match(comparing.detail, /变化较大/u);
 });
 
 test("a blocked candidate offers recovery instead of adoption", () => {
@@ -117,7 +129,8 @@ test("the intent switch is one control whose second option follows the state", (
   );
   assert.deepEqual(
     sidebarIntentOptions("preview-discussion").map((option) => option.label),
-    ["讨论", "交给 AI 修改"],
+    // The tab names the kind of round; the destination is named on the button below.
+    ["讨论", "修改"],
   );
   for (const state of ["ready-to-open", "review-view"]) {
     assert.deepEqual(
@@ -337,7 +350,7 @@ test("the Composer sends discussion only and points modify at its real entry", (
     pendingCommentCount: 2,
   });
   assert.equal(modify.canSend, true);
-  assert.equal(modify.label, "交给 AI 修改");
+  assert.equal(modify.label, "交给 Qoder 修改");
   assert.equal(modify.reason, null);
 
   // With nothing written there is nothing for the Agent to act on, and the
@@ -550,4 +563,30 @@ test("the clipboard round says what is actually happening and keeps the task rea
     assert.equal(decision.title, "版本 2 等待你的决定");
     assert.deepEqual(decision.actions.map((action) => action.id), ["review", "adopt"]);
   }
+});
+
+test("Qoder narrates the round while PageRoot states the stage", () => {
+  const steps = [
+    { key: "handoff", label: "Qoder CLI 已启动", state: "done" },
+    { key: "agent", label: "等待 AI 完成", detail: "正在执行本轮要求", state: "current" },
+  ];
+  const progress = sidebarRunProgress({
+    state: "processing",
+    steps,
+    agentText: "  正在把标题换成 2026 Q2 产品健康度回顾  ",
+  });
+
+  // ADR 0037 §4: the Agent's words are an annotation, and the stage still comes from
+  // the run's own status — the prose cannot claim a stage is finished.
+  assert.equal(progress.narration, "正在把标题换成 2026 Q2 产品健康度回顾");
+  assert.equal(progress.liveLabel, "等待 AI 完成");
+  assert.equal(progress.steps[1].state, "current");
+
+  // Nothing said means no narration block, so the view never renders an empty shell
+  // with a toggle that opens onto nothing.
+  assert.equal(sidebarRunProgress({ state: "processing", steps }).narration, null);
+  assert.equal(
+    sidebarRunProgress({ state: "processing", steps, agentText: "   " }).narration,
+    null,
+  );
 });

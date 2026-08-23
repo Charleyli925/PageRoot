@@ -1891,8 +1891,13 @@ const ACP_DRIVER_PROFILES = new Map([
     }),
     // An execution turn only counts once the fixed finalizer has proven itself.
     requiresTurnCompletion: true,
-    // ADR 0036 authorizes visible text for discussion only.
-    visibleTextByteLimit: 0,
+    // ADR 0037 gives an execution turn the same visible-text budget a discussion
+    // gets, and for the same reasons: the user could not tell a working round from
+    // a stuck one, and that opacity was itself causing duplicate sends. The
+    // boundary is unchanged — agent_message_chunk only, hidden reasoning dropped,
+    // sanitised, truncated at the same budget — and the text stays narration with
+    // zero weight in whether the Candidate is accepted.
+    visibleTextByteLimit: 64 * 1024,
     requiredHostMethods: Object.freeze([...ACP_HOST_METHODS, "assertTurnCompleted"]),
   })],
   ["discussion", driverProfile({

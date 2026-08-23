@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, type ChangeEvent } from "react";
+import { useMemo, useRef, useState, type ChangeEvent } from "react";
 
 import {
   sidebarActionBar,
@@ -67,6 +67,8 @@ export type AiConversationSidebarProps = {
   onCollapse?: () => void;
   /** Hands the same round to the clipboard instead of the local Agent. */
   onCopyTask?: () => void;
+  /** What Qoder is saying while it works (ADR 0037). */
+  agentText?: string;
   /** Which destination this round uses; the decision bar copy depends on it. */
   deliveryMode?: "qoder-acp" | "clipboard";
   /** The run's own progress steps, so a round in flight reads inside the thread. */
@@ -98,9 +100,13 @@ export default function AiConversationSidebar({
   onCollapse,
   onCopyTask,
   deliveryMode = "qoder-acp",
+  agentText = "",
   runSteps = [],
 }: AiConversationSidebarProps) {
   const intentOptionsRef = useRef<HTMLDivElement>(null);
+  // ADR 0037 §5: the narration is collapsible in one click and the choice sticks for
+  // as long as the surface is mounted, rather than springing open on every update.
+  const [narrationOpen, setNarrationOpen] = useState(true);
   const stream = useMemo(() => sidebarMessageStream(messages), [messages]);
   const intentOptions = useMemo(() => sidebarIntentOptions(state), [state]);
   const activeIntent = sidebarResolvedIntent(state, intent);
@@ -128,7 +134,7 @@ export default function AiConversationSidebar({
     pendingCommentCount,
   });
   const disclosure = sidebarDeliveryDisclosure(activeIntent);
-  const runProgress = sidebarRunProgress({ state, steps: runSteps });
+  const runProgress = sidebarRunProgress({ state, steps: runSteps, agentText });
   const draftNotice = sidebarDraftNotice(state);
   const discussionNotice = sidebarDiscussionNotice(discussion);
   const liveReply = sidebarLiveReply(discussion, messages as readonly Record<string, unknown>[]);
@@ -247,10 +253,10 @@ export default function AiConversationSidebar({
         ) : null}
 
         {/*
-          * A round in flight. It is status rather than conversation, so it is not
-          * dressed as a second message with an author: one quiet block, one
-          * indicator per stage, and the stage actually moving is the only thing at
-          * full strength. The process drawer is no longer the only place this lives.
+          * A round in flight, told as Qoder speaking in the thread rather than a
+          * panel of its own. PageRoot states the stage from the run's durable status
+          * (ADR 0037 §4) and the Agent's own words ride along underneath, collapsible
+          * in one click so the thread stays readable while a long round runs.
           */}
         {runProgress ? (
           <section
@@ -259,7 +265,7 @@ export default function AiConversationSidebar({
             data-testid="ai-conversation-run-progress"
             aria-label="本轮进度"
           >
-            <span className={styles.runActivityLabel}>本轮进度</span>
+            <span className={styles.actor}>Qoder CLI</span>
             {runProgress.headline ? (
               <p className={styles.text}>{runProgress.headline}</p>
             ) : null}
@@ -273,6 +279,27 @@ export default function AiConversationSidebar({
                 </li>
               ))}
             </ol>
+            {runProgress.narration ? (
+              <div className={styles.narration}>
+                <button
+                  type="button"
+                  className={styles.narrationToggle}
+                  data-testid="ai-conversation-narration-toggle"
+                  aria-expanded={narrationOpen}
+                  onClick={() => setNarrationOpen((open) => !open)}
+                >
+                  {narrationOpen ? "收起 Qoder 的说明" : "展开 Qoder 的说明"}
+                </button>
+                {narrationOpen ? (
+                  <p
+                    className={styles.narrationText}
+                    data-testid="ai-conversation-narration"
+                  >
+                    {runProgress.narration}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
           </section>
         ) : null}
       </div>
@@ -483,7 +510,7 @@ export default function AiConversationSidebar({
               disabled={!send.canSend}
               onClick={() => onCopyTask()}
             >
-              复制任务
+              复制给别的 AI
             </button>
           ) : null}
           <button
@@ -493,11 +520,7 @@ export default function AiConversationSidebar({
             disabled={!send.canSend}
             onClick={() => onSend?.(activeIntent)}
           >
-            {activeIntent === "modify"
-              ? "交给 AI 修改"
-              : activeIntent === "continue"
-                ? "采纳并继续"
-                : send.label}
+            {activeIntent === "continue" ? "采纳并继续" : send.label}
           </button>
         </div>
       </div>

@@ -5743,10 +5743,12 @@ body {
    * Both coordinates are named explicitly. Leaving the column to auto-placement
    * put the sidebar on a new row below the canvas, which turned a docked side
    * panel into a full-width bottom bar and left the right third of the window
-   * empty.
+   * empty. It spans every row of the stage and stretches, because sharing only
+   * the canvas row left it starting half way down the window.
    */
   grid-column: 2;
-  grid-row: 2;
+  grid-row: 1 / -1;
+  align-self: stretch;
   min-width: 0;
   min-height: 0;
   height: 100%;

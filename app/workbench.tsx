@@ -1531,6 +1531,21 @@ export default function Workbench() {
       }
       if (runEvent.type === "run-agent-failed") {
         if (runEvent.current && runEvent.run) {
+          // A refused *retry* is not a failed round. AGENT_RETRY_OUTPUT_PRESENT means
+          // an earlier attempt already produced output, which the Bridge correctly
+          // refuses to overwrite — but when that output is a usable candidate, the
+          // failure copy ("请结束本轮后重新发送") tells the user to throw away the very
+          // result the decision bar is asking them to accept. Both statements were on
+          // screen at once and the user could not tell whether the round worked.
+          if (runEvent.run.candidateVersionLabel) {
+            setToast({
+              title: "这一轮已经有结果了",
+              message: "重复的发送已被忽略；先决定要不要采纳这一版。",
+              tone: "success",
+              dedupeKey: `qoder-agent:${runEvent.run.requestId}`,
+            });
+            return;
+          }
           setDrawer("handoff");
           setToast({
             title: "Qoder CLI 没有完成本轮",

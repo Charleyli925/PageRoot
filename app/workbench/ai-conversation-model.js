@@ -144,7 +144,7 @@ const RUN_PROGRESS_STATES = Object.freeze([
   "review-view",
 ]);
 
-export function sidebarRunProgress({ state, steps = [] } = {}) {
+export function sidebarRunProgress({ state, steps = [], agentText = "" } = {}) {
   if (!RUN_PROGRESS_STATES.includes(String(state))) return null;
   if (!Array.isArray(steps) || steps.length === 0) return null;
   const projected = [];
@@ -166,12 +166,20 @@ export function sidebarRunProgress({ state, steps = [] } = {}) {
   }
   if (projected.length === 0) return null;
   const failedStep = projected.find((step) => step.state === "failed") || null;
+  const liveStep = projected.find((step) => step.state === "current") || null;
+  // ADR 0037: the Agent narrates, PageRoot states the stage. The prose is an
+  // annotation on the stage actually running and never claims a stage is done.
+  const narration = typeof agentText === "string" ? agentText.trim() : "";
   return Object.freeze({
     steps: Object.freeze(projected),
     // Only a failure gets its own line. The list already shows which step is live at
     // full strength, and each stage carries its own detail, so nothing is repeated
     // above it.
     headline: failedStep?.label ?? null,
+    // What Qoder is saying while it works. Collapsible by the view; absent when the
+    // Agent has said nothing, so an empty shell never appears.
+    narration: narration || null,
+    liveLabel: liveStep?.label ?? null,
     tone: failedStep ? "attention" : "quiet",
   });
 }
@@ -219,9 +227,12 @@ export function sidebarIntentOptions(state) {
       { value: INTENT_CONTINUE, label: "继续修改" },
     ];
   }
+  // The tab names the kind of round; the button below names the destination. Using
+  // 「交给 AI 修改」 in both places put the same words in two controls and made the
+  // pair read as a duplicate rather than a choice.
   return [
     { value: INTENT_DISCUSS, label: "讨论" },
-    { value: INTENT_MODIFY, label: "交给 AI 修改" },
+    { value: INTENT_MODIFY, label: "修改" },
   ];
 }
 
@@ -260,6 +271,19 @@ export function sidebarActionBar({
       : "结果等待你的决定";
     // An `attention` candidate offers review only: adopting a large change
     // without looking at it is not a choice PageRoot should offer.
+    // Already comparing: offering 「审阅对比」 here would point at the screen the user
+    // is looking at. The only decision left is whether to take it, and returning is
+    // owned by the review header beside it.
+    if (state === "review-view") {
+      return {
+        kind: "decision",
+        title,
+        detail: candidateStatus === "attention"
+          ? "这次变化较大，核对后再决定。"
+          : "看完就可以决定。",
+        actions: [{ id: "adopt", label: "采纳这一版", tone: "primary" }],
+      };
+    }
     if (candidateStatus === "attention") {
       return {
         kind: "decision",
@@ -389,16 +413,16 @@ export function sidebarSendState({
     // the Composer. That is why this intent shows no text box: there is no typed
     // sentence that could be silently dropped on the way to the Agent.
     if (queued) {
-      return { canSend: false, label: "交给 AI 修改", reason: "正在等待上一个任务完成" };
+      return { canSend: false, label: "交给 Qoder 修改", reason: "正在等待上一个任务完成" };
     }
     if (pendingCommentCount <= 0) {
       return {
         canSend: false,
-        label: "交给 AI 修改",
+        label: "交给 Qoder 修改",
         reason: "先在编辑模式写下评论，AI 会按评论改",
       };
     }
-    return { canSend: true, label: "交给 AI 修改", reason: null };
+    return { canSend: true, label: "交给 Qoder 修改", reason: null };
   }
   if (intent === INTENT_CONTINUE) {
     return { canSend: false, label: "发送", reason: "先采用当前结果才能继续修改" };

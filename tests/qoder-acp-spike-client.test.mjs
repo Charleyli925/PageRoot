@@ -1305,9 +1305,11 @@ test("the execution driver profile fails closed on a host without completion pro
   assert.equal(fixture.policy.mode, "execution");
   assert.equal(profile.mode, "execution");
   assert.equal(profile.requiresTurnCompletion, true);
-  // ADR 0036 authorizes visible Agent prose for discussion only. An execution
-  // turn's payload is a file, so it keeps capturing nothing.
-  assert.equal(profile.visibleTextByteLimit, 0);
+  // ADR 0037 supersedes ADR 0036's zero budget here: an execution turn now gets the
+  // same visible-text allowance a discussion gets, because a user who cannot tell a
+  // working round from a stuck one starts sending duplicates. The boundary itself is
+  // unchanged, so the two profiles share one number rather than drifting apart.
+  assert.equal(profile.visibleTextByteLimit, 64 * 1024);
   assert.deepEqual(profile.clientCapabilities, {
     fs: { readTextFile: true, writeTextFile: true },
     terminal: true,

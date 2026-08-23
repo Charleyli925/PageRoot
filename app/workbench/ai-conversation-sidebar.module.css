@@ -517,3 +517,38 @@
     animation: none;
   }
 }
+
+/*
+ * What Qoder says while it works (ADR 0037). Subordinate to the stage list above
+ * it: one text button, no border, no fill — collapsing it must feel lighter than
+ * reading it. Nothing here competes with the accent on the running stage.
+ */
+.narration {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.narrationToggle {
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #6b6878;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.narrationToggle:hover {
+  color: #201d31;
+}
+
+.narrationText {
+  margin: 0;
+  padding-left: 18px;
+  color: #55525f;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
