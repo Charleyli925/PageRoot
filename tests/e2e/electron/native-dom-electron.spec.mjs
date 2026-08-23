@@ -692,7 +692,8 @@ test("Electron first launch imports the welcome HTML as V1 and sends its comment
     await launched.page.getByRole("button", { name: /AI 对话/u }).click();
     await chooseClipboardDelivery(launched.page);
     await expect(
-      launched.page.getByText("AI任务已经复制，直接粘贴给 AI Agent", { exact: true }),
+      launched.page.getByTestId("ai-conversation-action-bar")
+        .getByText("任务已复制，等你的 AI 改完", { exact: true }),
     ).toBeVisible();
 
     let promptPath = "";
