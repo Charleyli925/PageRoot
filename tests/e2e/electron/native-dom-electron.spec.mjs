@@ -96,11 +96,6 @@ async function openRecentProject(
     await visibleToast.getByRole("button", { name: "关闭提醒" }).click();
     await expect(visibleToast).toBeHidden();
   }
-  const processingDialog = page.getByRole("dialog", { name: "本轮处理" });
-  if (await processingDialog.isVisible()) {
-    await page.keyboard.press("Escape");
-    await expect(processingDialog).toBeHidden();
-  }
   await page.getByRole("button", { name: "打开新的本地 HTML" }).click();
   await page.locator(".recent-file-row")
     .filter({ hasText: recentName })
@@ -2845,10 +2840,8 @@ test("multiple orphaned comments relink in sequence and resume the original send
       .toHaveAttribute("data-resolution", "orphaned");
 
     await recoveredFrame.locator(caseSelector("grid-card")).click();
-    await expect(activeLaunch.page.getByText(
-      "AI任务已经复制，直接粘贴给 AI Agent",
-      { exact: true },
-    )).toBeVisible({ timeout: 30_000 });
+    await expect(activeLaunch.page.getByTestId("ai-conversation-action-bar"))
+      .toContainText("任务已复制，等你的 AI 改完", { timeout: 30_000 });
     await expect.poll(
       () => requestDirectoryCount(activeLaunch.workspace),
       { timeout: 20_000 },
