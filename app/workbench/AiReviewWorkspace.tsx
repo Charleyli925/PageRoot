@@ -1747,30 +1747,30 @@ export default function AiReviewWorkspace({
                     </button>
                     <button type="button" aria-pressed={zoom === "actual"} onClick={() => dispatchReviewState({ type: "set-zoom-mode", value: "actual" })}>100%</button>
                   </div>
+                <div className={styles.changeNavigator} aria-label="逐处查看变化">
+                  <button
+                    type="button"
+                    aria-label="上一处变化"
+                    disabled={!navigableChanges.length}
+                    onClick={() => navigate(-1)}
+                  >
+                    <CaretUpIcon aria-hidden="true" size={11} weight="bold" />
+                  </button>
+                  <span>
+                    <strong>{activeIndex >= 0 ? activeIndex + 1 : 0}</strong>
+                    <small>/{navigableChanges.length}</small>
+                  </span>
+                  <button
+                    type="button"
+                    aria-label="下一处变化"
+                    disabled={!navigableChanges.length}
+                    onClick={() => navigate(1)}
+                  >
+                    <CaretDownIcon aria-hidden="true" size={11} weight="bold" />
+                  </button>
+                </div>
                 </div>
               </div>
-            </div>
-            <div className={styles.changeNavigator} aria-label="逐处查看变化">
-              <button
-                type="button"
-                aria-label="上一处变化"
-                disabled={!navigableChanges.length}
-                onClick={() => navigate(-1)}
-              >
-                <CaretUpIcon aria-hidden="true" size={11} weight="bold" />
-              </button>
-              <span>
-                <strong>{activeIndex >= 0 ? activeIndex + 1 : 0}</strong>
-                <small>/{navigableChanges.length}</small>
-              </span>
-              <button
-                type="button"
-                aria-label="下一处变化"
-                disabled={!navigableChanges.length}
-                onClick={() => navigate(1)}
-              >
-                <CaretDownIcon aria-hidden="true" size={11} weight="bold" />
-              </button>
             </div>
             <button
               className={styles.canvasToolbarHandle}
