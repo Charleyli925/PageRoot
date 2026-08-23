@@ -7501,31 +7501,20 @@ export default function Workbench() {
             </button>
           ) : null}
           <AgentDeliveryButton
-            status={currentQoderHandoffStatus} deliveryMode={currentAgentDeliveryMode}
-            generating={generating} runInProgress={runInProgress}
+            status={currentQoderHandoffStatus}
             pendingCount={pendingSendItemCount}
-            candidateReady={Boolean(activeRun?.candidateVersionLabel)}
+            attention={Boolean(activeRun?.candidateVersionLabel) || runInProgress}
             disabled={generating || projectHydrating || Boolean(projectLoadError)
-              || viewTransitioning || viewMode === "history" || (!runInProgress && (
-                pendingSendItemCount === 0 || interactionLocked || persistState === "failed"
-                || Boolean(draftPersistError)
-              ))}
-            onOpenRun={() => {
-              // 「查看本轮」 means the conversation now: it holds the stages, the decision
-              // and any failure message. Preview is where it docks, and a round in
-              // flight must not present the page as editable.
+              || viewTransitioning || viewMode === "history"}
+            onOpen={() => {
+              // One meaning: show the conversation. It carries the stages, the Agent's
+              // words and the decision, and it docks in preview, so a round in flight
+              // never leaves the page presenting itself as editable.
+              setDrawer(null);
               setHandoffPreviewOpen(false);
               setCanvasMode("preview");
-              aiConversation.reveal();
-            }}
-            onCompose={() => {
-              // The choice of destination lives in the conversation now. Preview is
-              // where that surface docks, and the page is about to be handed off
-              // anyway, so it stops presenting itself as editable.
-              setDrawer(null);
-              setCanvasMode("preview");
-              // The intent is handed to reveal so it survives the conversation load.
-              aiConversation.reveal("modify");
+              // The intent survives the conversation load; nothing is sent by opening.
+              aiConversation.reveal(runInProgress ? undefined : "modify");
             }}
           />
         </WorkbenchHeaderActions>

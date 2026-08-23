@@ -1030,7 +1030,20 @@ export class AgentBridgeService {
       // limit. It is narration only and never affects the Candidate verdict.
       if (event?.kind === "visible-text" && typeof event.text === "string") {
         const room = AGENT_VISIBLE_TEXT_LIMIT - entry.visibleText.length;
-        if (room > 0) entry.visibleText += event.text.slice(0, room);
+        if (room > 0) {
+          /*
+           * Chunk boundaries are not word boundaries. Joining them raw produced
+           * "structure.Now" and "sequence.I've", so a sentence that ended one chunk ran
+           * into the one that began the next. A single space is added only where the
+           * seam is unambiguous: a sentence end meeting a new sentence's start. Code,
+           * URLs and CJK text never match that shape and are left exactly as sent.
+           */
+          const seamNeedsSpace =
+            /[.!?]$/u.test(entry.visibleText) && /^[A-Z`]/u.test(event.text);
+          if (seamNeedsSpace && room > 1) entry.visibleText += " ";
+          const left = AGENT_VISIBLE_TEXT_LIMIT - entry.visibleText.length;
+          if (left > 0) entry.visibleText += event.text.slice(0, left);
+        }
       }
       if (event?.kind === "initialized") {
         entry.state = "running";
