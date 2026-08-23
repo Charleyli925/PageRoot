@@ -132,6 +132,8 @@ export function sidebarStateFromRun({
  * Only the states where a round is actually moving return an entry. A settled
  * round is represented by its result, not by a frozen checklist.
  */
+const MAX_NARRATION_BLOCKS = 40;
+
 const RUN_PROGRESS_STATES = Object.freeze([
   "preparing-delivery",
   "processing",
@@ -169,7 +171,17 @@ export function sidebarRunProgress({ state, steps = [], agentText = "" } = {}) {
   const liveStep = projected.find((step) => step.state === "current") || null;
   // ADR 0037: the Agent narrates, PageRoot states the stage. The prose is an
   // annotation on the stage actually running and never claims a stage is done.
+  // The Agent speaks in chunks and PageRoot concatenates them, so the raw buffer is
+  // one wall of text. Splitting on blank lines restores the paragraphs it actually
+  // wrote; the count is capped so a chatty Agent cannot grow the DOM without limit.
   const narration = typeof agentText === "string" ? agentText.trim() : "";
+  const narrationBlocks = narration
+    ? Object.freeze(narration
+      .split(/\n{2,}/u)
+      .map((block) => block.trim())
+      .filter(Boolean)
+      .slice(0, MAX_NARRATION_BLOCKS))
+    : null;
   return Object.freeze({
     steps: Object.freeze(projected),
     // Only a failure gets its own line. The list already shows which step is live at
@@ -179,6 +191,7 @@ export function sidebarRunProgress({ state, steps = [], agentText = "" } = {}) {
     // What Qoder is saying while it works. Collapsible by the view; absent when the
     // Agent has said nothing, so an empty shell never appears.
     narration: narration || null,
+    narrationBlocks: narrationBlocks && narrationBlocks.length > 0 ? narrationBlocks : null,
     liveLabel: liveStep?.label ?? null,
     tone: failedStep ? "attention" : "quiet",
   });

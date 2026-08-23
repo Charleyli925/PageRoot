@@ -4822,10 +4822,14 @@ body {
   backdrop-filter: blur(13px) saturate(120%);
 }
 
-.workbench[data-round-state="processing"] > .canvas-column,
+/*
+ * A round in flight no longer dims the page. The dimming existed so a panel could
+ * sit on top of it; with the panel out of the flow it only made a working app look
+ * broken, and the user could not read the page they are waiting on. The comments
+ * are frozen for this round, so only they recede — and only one step.
+ */
 .workbench[data-round-state="processing"] > .comments-panel {
-  filter: saturate(0.76);
-  opacity: 0.38;
+  opacity: 0.72;
 }
 
 .side-drawer[data-drawer="handoff"] {
@@ -5986,15 +5990,11 @@ body {
   color: #fff;
 }
 
-.workbench[data-round-state="processing"] > .review-scroll-stage {
-  filter: saturate(0.76);
-  opacity: 0.38;
-}
-
-.workbench[data-round-state="processing"][data-handoff-preview="true"] > .review-scroll-stage {
-  filter: none;
-  opacity: 1;
-}
+/*
+ * The previewed page stays fully legible while a round runs: it is the thing the
+ * user is waiting on, and the conversation beside it already says what is happening
+ * and that this page will not be overwritten.
+ */
 
 .history-view-banner.preview-navigation-banner {
   z-index: 29;

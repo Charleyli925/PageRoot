@@ -590,3 +590,27 @@ test("Qoder narrates the round while PageRoot states the stage", () => {
     null,
   );
 });
+
+test("the Agent's chunks read as the paragraphs it wrote, not one wall of text", () => {
+  const steps = [{ key: "agent", label: "等待 AI 完成", state: "current" }];
+  const progress = sidebarRunProgress({
+    state: "processing",
+    steps,
+    agentText: "先读清单和依赖文件。\n\n再写候选 HTML。\n\n\n最后调用 finalizer。",
+  });
+
+  // PageRoot concatenates the Agent's chunks, so the blank lines it wrote are the
+  // only paragraph boundaries there are. Blank runs of any length collapse to one.
+  assert.deepEqual(progress.narrationBlocks, [
+    "先读清单和依赖文件。",
+    "再写候选 HTML。",
+    "最后调用 finalizer。",
+  ]);
+
+  // A single paragraph is still one block, so the view has one shape to render.
+  assert.deepEqual(
+    sidebarRunProgress({ state: "processing", steps, agentText: "只有一句。" }).narrationBlocks,
+    ["只有一句。"],
+  );
+  assert.equal(sidebarRunProgress({ state: "processing", steps }).narrationBlocks, null);
+});
