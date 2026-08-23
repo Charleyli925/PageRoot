@@ -291,55 +291,54 @@ export default function AiConversationSidebar({
                   {narrationOpen ? "收起 Qoder 的说明" : "展开 Qoder 的说明"}
                 </button>
                 {narrationOpen ? (
-                  <p
+                  <div
                     className={styles.narrationText}
                     data-testid="ai-conversation-narration"
                   >
-                    {runProgress.narration}
-                  </p>
+                    {(runProgress.narrationBlocks ?? []).map((block, index) => (
+                      <p key={index}>{block}</p>
+                    ))}
+                  </div>
                 ) : null}
               </div>
             ) : null}
           </section>
         ) : null}
-      </div>
 
-      {/*
-        * The action bar never scrolls away, so a pending decision is always in
-        * view. It occupies no space when there is nothing to decide.
-        */}
-      {actionBar ? (
-        <section
-          className={styles.actionBar}
-          data-kind={actionBar.kind}
-          data-testid="ai-conversation-action-bar"
-          aria-label="当前待决定"
-        >
-          {/*
-            * While a round runs the timeline above narrates it, so this bar carries
-            * only what the timeline cannot: the action, and for the clipboard round
-            * the instruction to paste. Empty strings would leave hollow lines.
-            */}
-          {actionBar.title ? <strong>{actionBar.title}</strong> : null}
-          {actionBar.detail ? <p>{actionBar.detail}</p> : null}
-          {actionBar.actions.length > 0 ? (
-            <div className={styles.actions}>
-              {actionBar.actions.map((action) => (
-                <button
-                  key={action.id}
-                  type="button"
-                  className={styles.action}
-                  data-tone={action.tone}
-                  data-action-id={action.id}
-                  onClick={() => onAction?.(action.id)}
-                >
-                  {action.label}
-                </button>
-              ))}
-            </div>
-          ) : null}
-        </section>
-      ) : null}
+        {/*
+          * The decision reads as the next thing said in this thread rather than a
+          * band pinned above the Composer. Stage, decision and Composer used to be
+          * three separate regions, so a single round was read in three places with
+          * an empty gap between them.
+          */}
+        {actionBar ? (
+          <section
+            className={styles.actionBar}
+            data-kind={actionBar.kind}
+            data-testid="ai-conversation-action-bar"
+            aria-label="当前待决定"
+          >
+            {actionBar.title ? <strong>{actionBar.title}</strong> : null}
+            {actionBar.detail ? <p>{actionBar.detail}</p> : null}
+            {actionBar.actions.length > 0 ? (
+              <div className={styles.actions}>
+                {actionBar.actions.map((action) => (
+                  <button
+                    key={action.id}
+                    type="button"
+                    className={styles.action}
+                    data-tone={action.tone}
+                    data-action-id={action.id}
+                    onClick={() => onAction?.(action.id)}
+                  >
+                    {action.label}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </section>
+        ) : null}
+      </div>
 
       <div className={styles.composer} data-testid="ai-conversation-composer">
         <div className={styles.composerTop}>

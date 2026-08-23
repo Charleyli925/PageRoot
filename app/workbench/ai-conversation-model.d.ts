@@ -96,6 +96,8 @@ export type SidebarRunProgress = {
   headline: string | null;
   /** What the Agent is saying while it works; null when it has said nothing. */
   narration: string | null;
+  /** The same words split into the paragraphs the Agent actually wrote. */
+  narrationBlocks: readonly string[] | null;
   /** The stage actually running, for callers that need to name it. */
   liveLabel: string | null;
   tone: "attention" | "quiet";

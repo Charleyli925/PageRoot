@@ -99,6 +99,15 @@
   overflow-y: auto;
 }
 
+/*
+ * Short threads sit against the Composer instead of floating at the top with a
+ * void beneath them. Pushing the first child down keeps the scroll container
+ * healthy, which justify-content: flex-end would not.
+ */
+.stream > *:first-child {
+  margin-top: auto;
+}
+
 .placeholder {
   margin: 0;
   color: #8a8797;
@@ -151,17 +160,21 @@
  * The current decision. It sits between the stream and the Composer and never
  * scrolls, so a pending decision cannot disappear as the conversation grows.
  */
+/*
+ * Inside the thread now, so it is not a tinted band with its own border: the
+ * decision is the next thing said, and a filled region would make one round look
+ * like two places again.
+ */
 .actionBar {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 12px 14px;
-  border-top: 1px solid rgb(32 29 49 / 8%);
-  background: #f8f7fd;
+  gap: 6px;
+  padding: 12px 0 2px;
+  border-top: 1px solid rgb(32 29 49 / 7%);
 }
 
-.actionBar[data-kind="blocked"] {
-  background: #fdf5f3;
+.actionBar[data-kind="blocked"] strong {
+  color: #b4442f;
 }
 
 .actionBar > strong {
