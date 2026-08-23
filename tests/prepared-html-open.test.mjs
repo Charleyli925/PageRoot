@@ -130,7 +130,7 @@ test("commit actions reject view-initial and mismatched delete requests", () => 
       classification: "known-external",
       action: "import-new",
     }),
-    /继续当前项目/u,
+    /打开之前的项目/u,
   );
   assert.throws(
     () => assertCommitAction({

@@ -294,6 +294,7 @@ let deviceIdentityPromise = null;
 const bridgeAuthToken = randomBytes(32).toString("base64url");
 let mainWindow = null;
 let rendererHasLoaded = false;
+let rendererLoadQuery = null;
 let isQuitting = false;
 let finalExitStarted = false;
 let closeRequest = null;
@@ -1556,7 +1557,7 @@ async function commitPreparedHtmlOpenOperation(payload) {
         });
         throw new ProjectFileError(
           "OPEN_INTENT_RECLASSIFIED",
-          "这份原文件已经关联到现有项目，请确认后继续当前项目。",
+          "这个文件之前已经导入过了，请确认后打开之前的项目。",
           { confirmation: taggedConfirmation(descriptor) },
         );
       }
@@ -3607,6 +3608,12 @@ function requestRendererClose(reason) {
     resolve: resolveRequest,
     timeout,
   };
+  if (!rendererCanReceive()) {
+    // No frame to ask, so there is nothing to wait for: settle instead of hanging on
+    // a reply that can never arrive.
+    resolveRequest({ ok: true, requestId, reason: "renderer-unavailable" });
+    return promise;
+  }
   mainWindow.webContents.send(APP_CHANNELS.prepareClose, {
     requestId,
     reason,
@@ -3615,9 +3622,21 @@ function requestRendererClose(reason) {
   return promise;
 }
 
+function rendererCanReceive() {
+  if (!mainWindow || mainWindow.isDestroyed()) return false;
+  const contents = mainWindow.webContents;
+  /*
+   * isDestroyed() is not enough: the window can outlive its render frame, and
+   * sending to a disposed frame throws "Render frame was disposed". That throw used
+   * to escape mid-way through close coordination and leave the app stuck.
+   */
+  if (!contents || contents.isDestroyed()) return false;
+  return Boolean(contents.mainFrame);
+}
+
 function notifyRendererCloseAborted(requestId, error) {
   const payload = closeAbortPayload(requestId, error);
-  if (!payload || !mainWindow || mainWindow.isDestroyed()) return;
+  if (!payload || !rendererCanReceive()) return;
   mainWindow.webContents.send(APP_CHANNELS.closeAborted, payload);
 }
 
@@ -4153,6 +4172,19 @@ async function createWindow() {
         ? Math.max(-1, Math.min(255, details.exitCode))
         : -1,
     });
+    /*
+     * Reporting the fault is not the same as surviving it. With no reload the window
+     * stays on screen as a blank white rectangle for as long as the user looks at it,
+     * which reads as a dead application even though the Bridge, the project and the
+     * Working Copy are all intact. A clean exit is not a fault to recover from.
+     */
+    if (details?.reason === "clean-exit" || isQuitting || finalExitStarted) return;
+    if (!mainWindow || mainWindow.isDestroyed() || !rendererLoadQuery) return;
+    rendererHasLoaded = false;
+    // A cold boot with the original handshake, not reload(): the renderer needs those
+    // query values to reach the Bridge, and this path also runs its normal restore of
+    // the last active project instead of leaving an empty shell.
+    void mainWindow.loadFile(rendererPath(), { query: rendererLoadQuery });
   });
   mainWindow.webContents.on("unresponsive", () => {
     captureUsage("runtime_fault", {
@@ -4187,13 +4219,18 @@ async function createWindow() {
   });
 
   const port = await bridgeStartup;
-  await mainWindow.loadFile(rendererPath(), {
-    query: {
-      bridgePort: String(port),
-      bridgeAuthToken,
-      appVersion: app.getVersion(),
-    },
-  });
+  /*
+   * Remembered so a renderer that died can be booted again with the same handshake.
+   * reload() was not enough: the renderer only reaches the Bridge through these
+   * query values, and a window that comes back without them renders nothing at all —
+   * which is the blank white window users were left staring at.
+   */
+  rendererLoadQuery = {
+    bridgePort: String(port),
+    bridgeAuthToken,
+    appVersion: app.getVersion(),
+  };
+  await mainWindow.loadFile(rendererPath(), { query: rendererLoadQuery });
 }
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();

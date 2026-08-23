@@ -1069,7 +1069,7 @@ export async function waitForProjectReady(page, {
   includeFailureDetail = true,
 } = {}) {
   const importButton = page.getByRole("button", { name: "导入并打开" });
-  const continueButton = page.getByRole("button", { name: "继续当前项目" });
+  const continueButton = page.getByRole("button", { name: "打开之前的项目" });
   const readinessSamples = [];
   const confirmationKind = async () => {
     if (await importButton.isVisible().catch(() => false)) return "import";

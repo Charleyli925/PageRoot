@@ -13,6 +13,7 @@ import { FileHtmlIcon } from "@phosphor-icons/react/dist/csr/FileHtml";
 import { FolderOpenIcon } from "@phosphor-icons/react/dist/csr/FolderOpen";
 
 import { productErrorMessage } from "../lib/notification-policy.js";
+import { staleVersionSentence } from "./external-open-copy.js";
 import styles from "./external-html-open-dialog.module.css";
 
 export type ExternalHtmlOpenConfirmation = {
@@ -41,11 +42,6 @@ function requireTrustedEvent(
   event: { isTrusted?: boolean } | null,
 ) {
   return Boolean(event && event.isTrusted === true);
-}
-
-function versionLabel(ordinal: number | undefined) {
-  const value = Number(ordinal);
-  return Number.isFinite(value) && value > 0 ? `版本 ${value}` : "当前版本";
 }
 
 // The full breadcrumb stays in the tooltip and accessible name; the sentence only
@@ -78,15 +74,11 @@ export default function ExternalHtmlOpenDialog({
   const projectsRootFolderName = folderNameFromBreadcrumb(projectsRootLabel);
   const visibleV1FileName = confirmation.visibleV1FileName || "项目内的 V1 文件";
   const projectName = confirmation.projectName || sourceFileName.replace(/\.html?$/iu, "");
-  const basedOn = versionLabel(confirmation.currentBasedOnOrdinal);
-  const latestOfficial = versionLabel(confirmation.latestOfficialOrdinal);
-  const currentEditLine = confirmation.currentDiffersFromBase
-    ? `基于${basedOn} · 有已保存修改`
-    : `基于${basedOn} · 与该版本一致`;
-  const sourceRelationLine = confirmation.sourceRelation === "changed"
-    ? "当前这份原文件在首次导入后发生了变化；继续不会把这些变化自动导入或覆盖项目内容。"
-    : "当前这份原文件与项目初始版本 V1 完全一致。";
-  const primaryLabel = isNewExternal ? "导入并打开" : "继续当前项目";
+  const staleVersionNote = staleVersionSentence(
+    confirmation.currentBasedOnOrdinal,
+    confirmation.latestOfficialOrdinal,
+  );
+  const primaryLabel = isNewExternal ? "导入并打开" : "打开之前的项目";
   const busyLabel = isNewExternal ? "正在导入…" : "正在打开…";
 
   useEffect(() => {
@@ -188,11 +180,7 @@ export default function ExternalHtmlOpenDialog({
                 」导入 PageRoot 吗？
               </>
             ) : (
-              <>
-                「
-                <span className={styles.fileName}>{sourceFileName}</span>
-                」已经导入 PageRoot
-              </>
+              "这个文件之前已经导入过了"
             )}
           </h2>
         </header>
@@ -241,18 +229,14 @@ export default function ExternalHtmlOpenDialog({
           </>
         ) : (
           <div className={styles.body} id={descriptionId}>
-            <p>这份原文件已关联到项目「{projectName}」。</p>
-            <dl className={styles.facts}>
-              <div>
-                <dt>当前本地编辑</dt>
-                <dd>{currentEditLine}</dd>
-              </div>
-              <div>
-                <dt>最新正式版本</dt>
-                <dd>{latestOfficial}</dd>
-              </div>
-            </dl>
-            <p className={styles.note}>{sourceRelationLine}</p>
+            <p>
+              「
+              <span className={styles.fileName}>{sourceFileName}</span>
+              」对应项目「{projectName}」。
+            </p>
+            {staleVersionNote ? (
+              <p className={styles.note}>{staleVersionNote}</p>
+            ) : null}
           </div>
         )}
         {busy ? (

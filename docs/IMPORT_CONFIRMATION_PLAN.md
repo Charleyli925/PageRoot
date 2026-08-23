@@ -16,7 +16,7 @@
 
 1. **长期外部源归属**：Registry 已有 `importSourceKey + importSourceSha256`，但当前代码只把它当成一次导入崩溃重试证据；项目离开干净 V1 后，再次打开原稿仍可能建新项目。它必须升级为长期、唯一、与当前活动 Working Copy 无关的外部源关联。
 2. **打开分流**：本地选择器和 OS `open-file` 现在会先 `readHtmlProject + activateProject(原稿)`，Renderer 随后才通过 `/project/ensure` 导入。新流程必须先只读分类，再等待用户；确认前不得修改 active/recent、不得把原稿发布到 `DocumentSession`。
-3. **再次打开只继续当前项目**：再次打开原稿时，“继续当前项目”要打开项目当前可编辑 Working Copy。本需求不提供“查看初始版本 V1”；不可变 V1 只走既有版本历史。实施不得把最新正式 Version、当前本地编辑和 V1 混成同一个目标，也不得为这条打开链路组合 `viewHistory()`。
+3. **再次打开只打开之前的项目**：再次打开原稿时，“打开之前的项目”要打开项目当前可编辑 Working Copy。本需求不提供“查看初始版本 V1”；不可变 V1 只走既有版本历史。实施不得把最新正式 Version、当前本地编辑和 V1 混成同一个目标，也不得为这条打开链路组合 `viewHistory()`。
 4. **Canvas 终态与删除时机**：当前顶部“正在确认当前画布…”只是由缺少 render ACK 推导，初始 ACK 尝试失败后可能没有显式失败状态。删除原稿必须等新项目、Session 和新 Canvas generation/Hash 全部确认；Canvas 失败不得删原稿，也不得无限 pending。
 
 推荐两 PR：
@@ -24,7 +24,7 @@
 | PR | 完整结果 | 合并后是否改善生产行为 |
 |---|---|---|
 | PR-1：外部源唯一关联与只读分类 | Repository 能把同一路径原稿稳定解析回唯一项目；`importExternal` 即使在 V1 已修改、已晋升 V2+、活动 Working Copy 已切换后也不能建第二项目；提供只读 A/B/C 分类 | 是。即使 UI 尚未改造，Repository 底线也会阻止同源重复项目 |
-| PR-2：确认 UI、Prepared Intent、删除与 Canvas 终态 | 所有桌面入口先分类后确认；再次打开显示项目事实并只提供“继续当前项目”；选择动作安全切换；删除严格后置；画布 ACK 成功/失败可恢复 | 是。完成 PRD 全部用户体验 |
+| PR-2：确认 UI、Prepared Intent、删除与 Canvas 终态 | 所有桌面入口先分类后确认；再次打开显示项目事实并只提供“打开之前的项目”；选择动作安全切换；删除严格后置；画布 ACK 成功/失败可恢复 | 是。完成 PRD 全部用户体验 |
 
 如果选择单 PR，仍按本文 PR-1 → PR-2 的提交顺序施工，直到所有条款完成前保持 Draft，不得把半成品确认框或可勾选但不工作的删除选项标成 Ready。
 
@@ -451,7 +451,7 @@ npm run task:finish
 - 文件菜单、标题“+”、Finder/Open With、Dock/argv、冷启动 handoff 使用同一个 A/B/C classifier；
 - A 直接打开；B 显示“已经导入”；C 显示首次导入确认；
 - 确认前 active/recent、项目目录、Registry、DocumentSession、Canvas 均不变；
-- B 的“继续当前项目”打开当前活动 Working Copy；确认框不提供“查看 V1”；
+- B 的“打开之前的项目”打开当前活动 Working Copy；确认框不提供“查看 V1”；
 - C 的确认才创建 V1；取消零副作用；
 - 删除只在新 Canvas verified 后发生；
 - 所有请求、dialog、switch、Canvas 和删除步骤都有成功/取消/失败/被替换/超时/销毁终态。
@@ -735,9 +735,9 @@ retryCanvasVerification()
 - 分开显示当前基于版本、最新正式版本、是否有已保存修改；
 - 只有 `sourceRelation=unchanged` 才说当前原稿与 V1完全一致；
 - changed时显示不会自动导入/覆盖；
-- `取消 / 继续当前项目`，没有第三按钮；
+- `取消 / 打开之前的项目`，没有第三按钮；
 - 不显示删除 checkbox；
-- 主按钮是“继续当前项目”，不是“打开最新版本”，也不是“查看初始版本 V1”。
+- 主按钮是“打开之前的项目”，不是“打开最新版本”，也不是“查看初始版本 V1”。
 
 确认框使用 `role=dialog`、`aria-modal`、唯一 title/description ID、Tab循环、Shift+Tab、Escape、backdrop、屏幕阅读器可读状态；自动化按 role/name定位，禁止依赖 CSS selector 文案扫描。
 
@@ -892,7 +892,7 @@ Node测试通过依赖注入的 fake `trashItem` 验证真实调用次数和路�
 2. 新 HTML确认导入：V1 bytes=原稿 bytes，原稿保留，Canvas verified；
 3. 冷启动 argv/open-file：先显示确认，不静默导入；取消回欢迎项目；
 4. 保留原稿再次 `open-file`：显示 B dialog，项目目录数/版本数不变；
-5. B“继续当前项目”：打开已保存本地编辑，不跳只读 latest；
+5. B“打开之前的项目”：打开已保存本地编辑，不跳只读 latest；
 6. 外部原稿被改：B dialog显示 changed，不覆盖、不导入；
 7. 较新 OS request在旧 dialog可见时替换，旧 request不能迟到导入；
 8. 合成复杂/动态 HTML：打开后 Canvas最终 verified，或明确 failed+retry，绝不长期 pending；
