@@ -7383,7 +7383,18 @@ export default function Workbench() {
         </div>
 
         <WorkbenchHeaderActions aria-label="画布模式、项目和版本操作">
-          <div className="canvas-mode-switch" role="group" aria-label="画布模式">
+          <div
+            className="canvas-mode-switch"
+            role="group"
+            aria-label="画布模式"
+            /*
+             * The reason lives on the group, not on the disabled button: a disabled
+             * element dispatches no hover, so its own title never surfaces and only a
+             * screen reader ever heard it. Hovering the group works, and nothing is
+             * printed in the bar when there is no reason to give.
+             */
+            title={runInProgress ? "本轮还在进行，结束或采纳后可回到编辑" : undefined}
+          >
             <button
               type="button"
               aria-pressed={canvasMode === "edit"}
