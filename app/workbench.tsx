@@ -742,10 +742,6 @@ export default function Workbench() {
 
   // The decision bar acts through a ref: its handlers are defined further down,
   // and the conversation hook is composed before them.
-  const aiDecisionRef = useRef<((actionId: string) => void) | null>(null);
-  const dispatchAiDecision = useCallback((actionId: string) => {
-    aiDecisionRef.current?.(actionId);
-  }, []);
 
   const aiConversation = useAiConversation({
     controllerRef: workspaceControllerRef,
@@ -766,14 +762,9 @@ export default function Workbench() {
     pendingCommentCount: comments.length,
     // The same submission the header button performs. One owner, two surfaces.
     onDeliverModification: (mode) => void generateRequest(mode),
-    onDecision: dispatchAiDecision,
   });
   // The run-event effect reports a submitted round by opening the thread. It is
   // reached through a ref so that effect keeps its curated dependency list.
-  const aiConversationRevealRef = useRef<(() => void) | null>(null);
-  useEffect(() => {
-    aiConversationRevealRef.current = aiConversation.reveal;
-  }, [aiConversation.reveal]);
   const editRuntimeSnapshot = workspaceControllerSnapshot?.editRuntime ?? null;
   const editRuntimePhase = editRuntimeSnapshot?.phase || "static";
   const editRuntimePreparing = (
@@ -1511,7 +1502,7 @@ export default function Workbench() {
           setHandoffPreviewOpen(false);
           // Reported in the thread, not by a drawer over the page.
           setCanvasMode("preview");
-          aiConversationRevealRef.current?.();
+          aiConversation.reveal();
           void workspaceControllerRef.current?.dismissFirstEditGuide();
         }
         return;
@@ -7046,35 +7037,33 @@ export default function Workbench() {
 
   // Same authority the process drawer used, reached from the conversation so the
   // decision no longer requires a panel over the page.
-  useEffect(() => {
-    aiDecisionRef.current = (actionId: string) => {
-      if (actionId === "review") { void reviewReadyResult(); return; }
-      if (actionId === "adopt") { void activateReadyResult(); return; }
-      if (actionId === "recopy") {
-        const controller = workspaceControllerRef.current;
-        if (!controller || !activeRun) return;
-        // Copying is invisible by nature: without a word the user cannot tell an
-        // successful re-copy from a dead button.
-        void (async () => {
-          const outcome = await controller.copyRunHandoff({ run: activeRun });
-          setToast(outcome && outcome.status === "succeeded"
-            ? {
-              title: "本轮要求已复制",
-              message: "粘贴给你的 AI；改完回到这里。",
-              tone: "success",
-              dedupeKey: "handoff-recopied",
-            }
-            : {
-              title: "复制没有成功",
-              message: "再试一次，或从「查看本轮」里取本轮要求。",
-              tone: "warning",
-              dedupeKey: "handoff-recopied",
-            });
-        })();
-        return;
-      }
-      if (actionId === "cancel" || actionId === "dismiss") requestActiveRunEnd();
-    };
+  const handleAiDecision = useCallback((actionId: string) => {
+    if (actionId === "review") { void reviewReadyResult(); return; }
+    if (actionId === "adopt") { void activateReadyResult(); return; }
+    if (actionId === "recopy") {
+      const controller = workspaceControllerRef.current;
+      if (!controller || !activeRun) return;
+      // Copying is invisible by nature: without a word the user cannot tell an
+      // successful re-copy from a dead button.
+      void (async () => {
+        const outcome = await controller.copyRunHandoff({ run: activeRun });
+        setToast(outcome && outcome.status === "succeeded"
+          ? {
+            title: "本轮要求已复制",
+            message: "粘贴给你的 AI；改完回到这里。",
+            tone: "success",
+            dedupeKey: "handoff-recopied",
+          }
+          : {
+            title: "复制没有成功",
+            message: "再试一次，或从「查看本轮」里取本轮要求。",
+            tone: "warning",
+            dedupeKey: "handoff-recopied",
+          });
+      })();
+      return;
+    }
+    if (actionId === "cancel" || actionId === "dismiss") requestActiveRunEnd();
   }, [activateReadyResult, activeRun, requestActiveRunEnd, reviewReadyResult, setToast]);
 
   // The review compares immutable snapshots prepared against the
@@ -7121,6 +7110,7 @@ export default function Workbench() {
       sidebar={aiConversation.visible ? (
         <AiConversationSidebar
           {...aiConversation.sidebarProps}
+              onAction={handleAiDecision}
           runSteps={processSteps}
           deliveryMode={currentAgentDeliveryMode}
           agentText={currentAgentDeliveryState?.visibleText || ""}
@@ -7809,6 +7799,7 @@ export default function Workbench() {
             {/* Steps are computed below the hook, so they are handed in here. */}
             <AiConversationSidebar
               {...aiConversation.sidebarProps}
+              onAction={handleAiDecision}
               runSteps={processSteps}
               deliveryMode={currentAgentDeliveryMode}
               agentText={currentAgentDeliveryState?.visibleText || ""}

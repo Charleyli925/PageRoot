@@ -80,6 +80,9 @@ export function useAiConversation({
   const active = (canvasMode === "preview" || reviewing) && Boolean(sourcePath);
   const visible = active && open;
 
+  const [requestedIntent, setRequestedIntent] = useState<SidebarIntent | null>(
+    null,
+  );
   // Load when the sidebar becomes visible for a Document; flush + drain + close
   // on any change to that identity or when it stops being visible.
   //
@@ -95,10 +98,9 @@ export function useAiConversation({
     if (!controller) return undefined;
     void (async () => {
       await controller.openConversation({ projectId, documentId, sourcePath });
-      const requested = pendingIntentRef.current;
-      if (requested) {
-        pendingIntentRef.current = null;
-        controller.updateConversationDraftIntent(requested);
+      if (requestedIntent) {
+        controller.updateConversationDraftIntent(requestedIntent);
+        setRequestedIntent(null);
       }
     })();
     void controller.checkQoderUsability();
@@ -110,7 +112,7 @@ export function useAiConversation({
       controller.closeDiscussionTurn();
       controller.closeConversation();
     };
-  }, [visible, projectId, documentId, sourcePath, controllerRef]);
+  }, [visible, projectId, documentId, sourcePath, controllerRef, requestedIntent]);
 
   const toggle = useCallback(() => setOpen((value) => !value), []);
   // Submitting a round makes this the surface that reports it, so the workbench
@@ -119,14 +121,17 @@ export function useAiConversation({
   // An intent asked for here has to survive openConversation: that load brings the
   // stored draft back and would otherwise overwrite it, which is why the intent is
   // both applied now (for an already-open sidebar) and re-asserted after the load.
-  const pendingIntentRef = useRef<SidebarIntent | null>(null);
   const reveal = useCallback((intent?: SidebarIntent) => {
     if (intent) {
-      pendingIntentRef.current = intent;
       controllerRef.current?.updateConversationDraftIntent(intent);
+      // Only a first open needs the re-assert below: opening triggers the load that
+      // restores the stored draft over the line above. An already-open sidebar has no
+      // such load, and recording a request there would restart the effect and cancel a
+      // discussion the Agent is still answering.
+      if (!open) setRequestedIntent(intent);
     }
     setOpen(true);
-  }, [controllerRef]);
+  }, [controllerRef, open]);
 
   const onDraftChange = useCallback((text: string) => {
     controllerRef.current?.updateConversationDraftText(text);
