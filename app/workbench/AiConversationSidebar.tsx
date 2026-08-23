@@ -295,29 +295,46 @@ export default function AiConversationSidebar({
                 </li>
               ))}
             </ol>
-            {runProgress.narration ? (
-              <div className={styles.narration}>
-                <button
-                  type="button"
-                  className={styles.narrationToggle}
-                  data-testid="ai-conversation-narration-toggle"
-                  aria-expanded={narrationOpen}
-                  onClick={() => setNarrationOpen((open) => !open)}
+          </section>
+        ) : null}
+
+        {/*
+          * The Agent speaks for itself, in its own message. Nesting its words inside
+          * PageRoot's stage message put two speakers under one avatar and one signature,
+          * so the user could not tell whose words they were reading.
+          */}
+        {runProgress?.narration ? (
+          <section
+            className={styles.message}
+            data-actor="qoder"
+            data-testid="ai-conversation-narration-message"
+            aria-label="Qoder 的说明"
+          >
+            <span className={styles.avatar} aria-hidden="true">
+              {sidebarActorInitial("qoder")}
+            </span>
+            <span className={styles.actor}>Qoder CLI</span>
+            <div className={styles.narration}>
+              <button
+                type="button"
+                className={styles.narrationToggle}
+                data-testid="ai-conversation-narration-toggle"
+                aria-expanded={narrationOpen}
+                onClick={() => setNarrationOpen((open) => !open)}
+              >
+                {narrationOpen ? "收起它说的话" : "看看它说了什么"}
+              </button>
+              {narrationOpen ? (
+                <div
+                  className={styles.narrationText}
+                  data-testid="ai-conversation-narration"
                 >
-                  {narrationOpen ? "收起 Qoder 说了什么" : "看看 Qoder 说了什么"}
-                </button>
-                {narrationOpen ? (
-                  <div
-                    className={styles.narrationText}
-                    data-testid="ai-conversation-narration"
-                  >
-                    {(runProgress.narrationBlocks ?? []).map((block, index) => (
-                      <p key={index}>{block}</p>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
+                  {(runProgress.narrationBlocks ?? []).map((block, index) => (
+                    <p key={index}>{block}</p>
+                  ))}
+                </div>
+              ) : null}
+            </div>
           </section>
         ) : null}
 
