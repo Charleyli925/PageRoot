@@ -300,13 +300,16 @@
   outline-offset: 1px;
 }
 
+/*
+ * Plain text, not a tinted card. It sits inside the Composer inside the sidebar, so
+ * a fill here is a third frame — and a purple fill spends the accent on a sentence
+ * that is only telling the user what the round contains.
+ */
 .contextSummary {
   margin: 0;
-  padding: 8px 10px;
-  border-radius: 9px;
-  background: #f5f4fb;
-  color: #45434f;
-  font-size: 11px;
+  color: #6b6878;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .inputLabel {
@@ -406,14 +409,17 @@
  * block set slightly apart from the messages rather than a second message with an
  * author. One accent, no icons, no borders per row.
  */
+/*
+ * No box inside a box: the sidebar is already a panel and the thread is already a
+ * column, so a bordered card here would be a third frame around the same content.
+ * A hairline above it and the accent on the running stage carry the separation.
+ */
 .runActivity {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 12px 14px;
-  border: 1px solid rgb(32 29 49 / 7%);
-  border-radius: 12px;
-  background: rgb(255 255 255 / 70%);
+  padding: 12px 0 2px;
+  border-top: 1px solid rgb(32 29 49 / 7%);
 }
 
 .runActivityLabel {

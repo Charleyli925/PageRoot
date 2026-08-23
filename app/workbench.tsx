@@ -729,6 +729,17 @@ export default function Workbench() {
   const [readyReviewSession, setReadyReviewSession] =
     useState<ReadyReviewSession | null>(null);
 
+  /*
+   * The process panel is out of the user flow: every stage, every decision and every
+   * failure message now lives in the AI conversation, and a panel thrown over the
+   * page duplicated all of it. The component and its drawer branch are left intact
+   * so flipping this one flag brings it back; nothing in the flow depends on it.
+   */
+  const PROCESS_PANEL_IN_FLOW = false;
+  const openProcessPanel = useCallback(() => {
+    if (PROCESS_PANEL_IN_FLOW) setDrawer("handoff");
+  }, [PROCESS_PANEL_IN_FLOW]);
+
   // The decision bar acts through a ref: its handlers are defined further down,
   // and the conversation hook is composed before them.
   const aiDecisionRef = useRef<((actionId: string) => void) | null>(null);
@@ -1507,13 +1518,13 @@ export default function Workbench() {
       }
       if (runEvent.type === "run-submission-uncertain") {
         if (runEvent.current) {
-          setDrawer("handoff");
+          openProcessPanel();
           void workspaceControllerRef.current?.dismissFirstEditGuide();
         }
         return;
       }
       if (runEvent.type === "run-submission-failed") {
-        if (runEvent.current && runEvent.run) setDrawer("handoff");
+        if (runEvent.current && runEvent.run) openProcessPanel();
         return;
       }
       if (runEvent.type === "run-handoff-failed") {
@@ -1524,7 +1535,7 @@ export default function Workbench() {
             tone: "error",
             sticky: true,
             dedupeKey: `qoder-handoff:${runEvent.run.sourcePath}`,
-            action: { id: "open-handoff", label: "查看处理详情" },
+            action: { id: "open-handoff", label: "回到 AI 对话" },
           });
         }
         return;
@@ -1546,7 +1557,7 @@ export default function Workbench() {
             });
             return;
           }
-          setDrawer("handoff");
+          openProcessPanel();
           setToast({
             title: "Qoder CLI 没有完成本轮",
             message: runEvent.message
@@ -1555,7 +1566,7 @@ export default function Workbench() {
             sticky: true,
             disposition: "user-choice",
             dedupeKey: `qoder-agent:${runEvent.run.requestId}`,
-            action: { id: "open-handoff", label: "查看处理详情" },
+            action: { id: "open-handoff", label: "回到 AI 对话" },
           });
         }
         return;
@@ -1584,7 +1595,7 @@ export default function Workbench() {
               || state === "awaiting-conflict-resolution"
               || state === "recovering-transaction"
             ) {
-              setDrawer("handoff");
+              openProcessPanel();
             }
             if (state === "ready-to-open" && toastRef.current?.dedupeKey === "ai-submit") {
               setToast(null);
@@ -1597,7 +1608,7 @@ export default function Workbench() {
                 sticky: true,
                 disposition: "user-choice",
                 dedupeKey: `ai-validation-error:${run.requestId}`,
-                action: { id: "open-handoff", label: "查看详情" },
+                action: { id: "open-handoff", label: "回到 AI 对话" },
               });
             }
           }
@@ -1771,7 +1782,7 @@ export default function Workbench() {
         if (projectEvent.showHandoff) {
           setHandoffPreviewOpen(false);
           setCanvasMode("edit");
-          setDrawer("handoff");
+          openProcessPanel();
         }
         return;
       }
@@ -4576,7 +4587,7 @@ export default function Workbench() {
 
   const requestUserFlush = useCallback((fromDeferred = false) => {
     if (interactionLocked) {
-      if (runInProgress) setDrawer("handoff");
+      if (runInProgress) openProcessPanel();
       return;
     }
     if (
@@ -5098,7 +5109,7 @@ export default function Workbench() {
 
   const openGlobalCommentComposer = useCallback(() => {
     if (interactionLocked) {
-      if (runInProgress) setDrawer("handoff");
+      if (runInProgress) openProcessPanel();
       return;
     }
     setCanvasMode("edit");
@@ -5774,7 +5785,7 @@ export default function Workbench() {
       || currentDocument.persistState === "conflict"
     ) return;
     if (currentRun.activeLocked) {
-      setDrawer("handoff");
+      openProcessPanel();
       void workspaceControllerRef.current?.dismissFirstEditGuide();
       return;
     }
@@ -5819,7 +5830,7 @@ export default function Workbench() {
       });
     if (outcome.status === "succeeded" || outcome.status === "stale") return outcome;
     if (outcome.status === "unknown") {
-      setDrawer("handoff");
+      openProcessPanel();
       void workspaceControllerRef.current?.dismissFirstEditGuide();
       return outcome;
     }
@@ -5848,7 +5859,7 @@ export default function Workbench() {
         return;
       }
       if (outcome.code === "RUN_SUBMISSION_LOCKED") {
-        setDrawer("handoff");
+        openProcessPanel();
         void workspaceControllerRef.current?.dismissFirstEditGuide();
         return;
       }
@@ -5950,7 +5961,7 @@ export default function Workbench() {
       performance.mark("pageroot:accept:activated");
       if (outcome.status !== "succeeded") {
         if (outcome.status !== "stale") {
-          setDrawer("handoff");
+          openProcessPanel();
           setToast({
             title: "最新版暂时无法打开",
             message: outcome.reason,
@@ -6012,14 +6023,14 @@ export default function Workbench() {
       performance.mark("pageroot:accept:ui-committed");
       if (result.protocolViolation) {
         const warning = "内部 AI 的临时输出在最终化后又被修改；已提交版本本身未受影响。";
-        setDrawer("handoff");
+        openProcessPanel();
         setToast({
           title: `${result.candidateLabel} 已打开，但需要检查`,
           message: `${warning} 新版本内容已经核对一致；详情已保留在本轮处理记录中。`,
           tone: "warning",
           sticky: true,
           dedupeKey: "current-version-result",
-          action: { id: "open-handoff", label: "查看处理详情" },
+          action: { id: "open-handoff", label: "回到 AI 对话" },
         });
       } else if (result.verificationWarning) {
         setToast({
@@ -6278,7 +6289,7 @@ export default function Workbench() {
     const outcome = await requiredWorkspaceController(workspaceController)
       .resolveRunConflict({ run: activeRun, action });
     if (outcome.status !== "succeeded") {
-      if (outcome.status !== "stale") setDrawer("handoff");
+      if (outcome.status !== "stale") openProcessPanel();
       return;
     }
     const result = outcome.value as {
@@ -6940,7 +6951,7 @@ export default function Workbench() {
     if (!workspaceControllerRef.current?.reopenRecentRunOutcome(sourcePath)) return;
     setHandoffPreviewOpen(false);
     setCanvasMode("edit");
-    setDrawer("handoff");
+    openProcessPanel();
   };
   const handleToastAction = (action: ToastAction) => {
     setToast(null);
@@ -6957,7 +6968,8 @@ export default function Workbench() {
         void exportCurrentHtml();
         return;
       case "open-handoff":
-        setDrawer("handoff");
+        setCanvasMode("preview");
+        aiConversation.reveal();
         return;
       case "retry-history":
         void requestSourceHistoryAction(
@@ -7498,9 +7510,12 @@ export default function Workbench() {
                 || Boolean(draftPersistError)
               ))}
             onOpenRun={() => {
+              // 「查看本轮」 means the conversation now: it holds the stages, the decision
+              // and any failure message. Preview is where it docks, and a round in
+              // flight must not present the page as editable.
               setHandoffPreviewOpen(false);
-              setCanvasMode("edit");
-              setDrawer("handoff");
+              setCanvasMode("preview");
+              aiConversation.reveal();
             }}
             onCompose={() => {
               // The choice of destination lives in the conversation now. Preview is
@@ -7643,7 +7658,7 @@ export default function Workbench() {
           onAction={() => {
             setHandoffPreviewOpen(false);
             setCanvasMode("edit");
-            setDrawer("handoff");
+            openProcessPanel();
           }}
         />
       ) : viewMode === "history" ? (
