@@ -4174,7 +4174,8 @@ test("Qoder ACP Agent Bridge reaches review without clipboard or automatic adopt
       "请完成 Qoder ACP 自动闭环，但不要直接覆盖当前 HTML。",
     );
     await launched.page.getByRole("button", { name: /AI 对话/u }).click();
-    const deliveryDialog = await openQoderAvailability(launched.page);
+    // Destination, disclosure and the local-Agent action all live in the conversation.
+    const deliveryDialog = launched.page.getByTestId("ai-conversation-sidebar");
     await expect(deliveryDialog).toBeVisible();
     await expect(deliveryDialog.getByText(
       "Qoder 会读取本轮 HTML、评论和附件；结果先进入审阅。",
@@ -4183,12 +4184,10 @@ test("Qoder ACP Agent Bridge reaches review without clipboard or automatic adopt
     await expect(deliveryDialog.getByText("AGENT BRIDGE", { exact: true })).toHaveCount(0);
     await expect(deliveryDialog.getByText("可信本机 Agent 提示", { exact: true }))
       .toHaveCount(0);
-    await deliveryDialog.getByRole("button", { name: /Qoder CLI/u }).click();
+    await deliveryDialog.getByRole("button", { name: /交给 Qoder 修改/u }).click();
 
-    await expect(launched.page.getByText(
-      "可在审阅中对比查看修改差异",
-      { exact: true },
-    ).filter({ visible: true }).first()).toBeVisible({ timeout: 60_000 });
+    await expect(launched.page.getByTestId("ai-conversation-action-bar"))
+      .toContainText("等待你的决定", { timeout: 60_000 });
     expect(await launched.electronApp.evaluate(({ clipboard }) => clipboard.readText()))
       .toBe(clipboardSentinel);
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
