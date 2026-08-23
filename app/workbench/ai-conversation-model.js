@@ -165,14 +165,13 @@ export function sidebarRunProgress({ state, steps = [] } = {}) {
     }));
   }
   if (projected.length === 0) return null;
-  const liveStep = projected.find((step) => step.state === "current") || null;
   const failedStep = projected.find((step) => step.state === "failed") || null;
   return Object.freeze({
     steps: Object.freeze(projected),
     // Only a failure gets its own line. The list already shows which step is live at
-    // full strength, so repeating that label above it says the same thing twice.
+    // full strength, and each stage carries its own detail, so nothing is repeated
+    // above it.
     headline: failedStep?.label ?? null,
-    detail: liveStep?.detail ?? null,
     tone: failedStep ? "attention" : "quiet",
   });
 }
@@ -289,17 +288,23 @@ export function sidebarActionBar({
       return {
         kind: "progress",
         title: "任务已复制，等你的 AI 改完",
-        detail: "粘贴给任意能读写本机文件的 AI；当前页面不会被直接覆盖。",
+        detail: "粘贴给任意能读写本机文件的 AI。",
+        // Nothing here advances the round — PageRoot is waiting on an Agent it does
+        // not drive — so neither action takes the accent. Re-copying is a remedy,
+        // not the next step.
         actions: [
-          { id: "recopy", label: "再次复制", tone: "primary" },
+          { id: "recopy", label: "再次复制", tone: "quiet" },
           { id: "cancel", label: "结束本轮", tone: "quiet" },
         ],
       };
     }
+    // The timeline above already narrates the round, and the header already says the
+    // page is not being overwritten. Repeating either here would make the user read
+    // the same fact twice, so this carries the action alone.
     return {
       kind: "progress",
-      title: "Qoder 正在处理本轮任务",
-      detail: "当前页面不会被直接覆盖。",
+      title: null,
+      detail: null,
       actions: [{ id: "cancel", label: "结束本轮", tone: "quiet" }],
     };
   }

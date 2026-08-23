@@ -247,32 +247,33 @@ export default function AiConversationSidebar({
         ) : null}
 
         {/*
-          * A round in flight, written as the turn it is. Same message treatment as
-          * everything else in the thread — the process drawer is no longer the only
-          * place this exists, and it is not a second kind of card.
+          * A round in flight. It is status rather than conversation, so it is not
+          * dressed as a second message with an author: one quiet block, one
+          * indicator per stage, and the stage actually moving is the only thing at
+          * full strength. The process drawer is no longer the only place this lives.
           */}
         {runProgress ? (
-          <article
-            className={styles.message}
-            data-actor="pageroot"
-            data-kind="text"
-            data-status="streaming"
+          <section
+            className={styles.runActivity}
             data-tone={runProgress.tone}
             data-testid="ai-conversation-run-progress"
+            aria-label="本轮进度"
           >
-            <span className={styles.actor}>PageRoot</span>
+            <span className={styles.runActivityLabel}>本轮进度</span>
             {runProgress.headline ? (
               <p className={styles.text}>{runProgress.headline}</p>
             ) : null}
-            {runProgress.detail ? (
-              <small className={styles.truncated}>{runProgress.detail}</small>
-            ) : null}
             <ol className={styles.runSteps}>
               {runProgress.steps.map((step) => (
-                <li key={step.key} data-step-state={step.state}>{step.label}</li>
+                <li key={step.key} data-step-state={step.state}>
+                  {step.label}
+                  {step.detail ? (
+                    <span className={styles.runStepDetail}>{step.detail}</span>
+                  ) : null}
+                </li>
               ))}
             </ol>
-          </article>
+          </section>
         ) : null}
       </div>
 
@@ -287,8 +288,13 @@ export default function AiConversationSidebar({
           data-testid="ai-conversation-action-bar"
           aria-label="当前待决定"
         >
-          <strong>{actionBar.title}</strong>
-          <p>{actionBar.detail}</p>
+          {/*
+            * While a round runs the timeline above narrates it, so this bar carries
+            * only what the timeline cannot: the action, and for the clipboard round
+            * the instruction to paste. Empty strings would leave hollow lines.
+            */}
+          {actionBar.title ? <strong>{actionBar.title}</strong> : null}
+          {actionBar.detail ? <p>{actionBar.detail}</p> : null}
           {actionBar.actions.length > 0 ? (
             <div className={styles.actions}>
               {actionBar.actions.map((action) => (

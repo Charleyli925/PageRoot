@@ -463,9 +463,10 @@ test("a round in flight reads inside the thread instead of only in the drawer", 
   ];
   const progress = sidebarRunProgress({ state: "processing", steps });
 
-  // The list already shows which step is live, so no headline repeats its label.
+  // The list already shows which step is live, so no headline repeats its label and
+  // the detail rides on the stage it belongs to.
   assert.equal(progress.headline, null);
-  assert.equal(progress.detail, "正在写入候选");
+  assert.equal(progress.steps[1].detail, "正在写入候选");
   assert.equal(progress.tone, "quiet");
   assert.equal(progress.steps.length, 3);
 
@@ -525,11 +526,19 @@ test("the clipboard round says what is actually happening and keeps the task rea
   const clipboard = sidebarActionBar({ state: "processing", deliveryMode: "clipboard" });
   assert.equal(clipboard.title, "任务已复制，等你的 AI 改完");
   assert.deepEqual(clipboard.actions.map((action) => action.id), ["recopy", "cancel"]);
+  // Nothing here advances the round, so nothing takes the accent.
+  assert.deepEqual(clipboard.actions.map((action) => action.tone), ["quiet", "quiet"]);
 
-  // The managed path keeps its own wording and offers no re-copy.
+  // The clipboard instruction is not narration: the timeline cannot say "now go
+  // paste it". The managed path has nothing of that kind to add, so it says nothing
+  // and leaves the narration to the timeline above it.
   const managed = sidebarActionBar({ state: "processing", deliveryMode: "qoder-acp" });
-  assert.equal(managed.title, "Qoder 正在处理本轮任务");
+  assert.equal(managed.title, null);
+  assert.equal(managed.detail, null);
   assert.deepEqual(managed.actions.map((action) => action.id), ["cancel"]);
+
+  // And the clipboard detail no longer repeats the header sentence either.
+  assert.equal(clipboard.detail, "粘贴给任意能读写本机文件的 AI。");
 
   // The decision is the same for both destinations: a candidate is a candidate.
   for (const mode of ["clipboard", "qoder-acp"]) {

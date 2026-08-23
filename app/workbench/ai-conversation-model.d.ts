@@ -94,7 +94,6 @@ export type SidebarRunProgressStep = {
 export type SidebarRunProgress = {
   steps: readonly SidebarRunProgressStep[];
   headline: string | null;
-  detail: string | null;
   tone: "attention" | "quiet";
 };
 
