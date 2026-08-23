@@ -1099,3 +1099,34 @@
     transition: none;
   }
 }
+
+/*
+ * The way back after collapsing the conversation. A hairline tab on the stage edge:
+ * it must be findable without taking width from the comparison it makes room for.
+ */
+.reviewSidebarHandle {
+  grid-column: 2;
+  align-self: start;
+  margin-top: 12px;
+  padding: 10px 6px;
+  border: 1px solid rgb(32 29 49 / 10%);
+  border-right: 0;
+  border-radius: 10px 0 0 10px;
+  background: rgb(255 255 255 / 92%);
+  color: #4a4759;
+  font-size: 12px;
+  line-height: 1.3;
+  writing-mode: vertical-rl;
+  cursor: pointer;
+}
+
+.reviewSidebarHandle:hover {
+  color: #201d31;
+  background: #fff;
+}
+
+/* With the conversation collapsed the comparison takes the width back. */
+.reviewMain:has(> .reviewSidebarHandle) {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+}

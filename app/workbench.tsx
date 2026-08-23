@@ -7111,8 +7111,10 @@ export default function Workbench() {
           {...aiConversation.sidebarProps}
           runSteps={processSteps}
           deliveryMode={currentAgentDeliveryMode}
+          agentText={currentAgentDeliveryState?.visibleText || ""}
         />
       ) : null}
+      onShowSidebar={aiConversation.reveal}
     />
   ) : null;
 
@@ -7783,6 +7785,7 @@ export default function Workbench() {
               {...aiConversation.sidebarProps}
               runSteps={processSteps}
               deliveryMode={currentAgentDeliveryMode}
+              agentText={currentAgentDeliveryState?.visibleText || ""}
             />
           </aside>
         ) : null}
