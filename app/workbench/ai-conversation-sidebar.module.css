@@ -23,13 +23,17 @@
   backdrop-filter: blur(17px) saturate(115%);
 }
 
+/*
+ * No rule under the header. A chat that has just started has little to show, and a
+ * line here framed that emptiness as an empty box — the space read as a defect
+ * rather than as room for the conversation to grow into.
+ */
 .header {
   position: relative;
   display: flex;
   flex-direction: column;
   gap: 3px;
   padding: 12px 44px 11px 14px;
-  border-bottom: 1px solid rgb(32 29 49 / 8%);
 }
 
 .headerTitle {
@@ -218,15 +222,20 @@
   font-size: 11px;
 }
 
+/*
+ * One row. Stacked, they read as a confirmation form; side by side they read as the
+ * two replies they are. Narrow enough and they still wrap rather than clip.
+ */
 .actions {
   display: flex;
-  flex-wrap: wrap;
+  flex-flow: row wrap;
+  align-items: center;
   gap: 6px;
 }
 
 .action {
-  min-height: 30px;
-  padding: 0 12px;
+  min-height: 28px;
+  padding: 0 10px;
   border: 1px solid transparent;
   border-radius: 9px;
   font-size: 11px;
