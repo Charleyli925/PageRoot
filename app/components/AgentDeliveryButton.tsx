@@ -25,7 +25,9 @@ function triggerLabel({
   if (status === "completed") return "正在确认结果";
   if (status === "interrupted") return "Qoder 会话已中断";
   if (status === "failed") {
-    return deliveryMode === "qoder-acp" ? "Qoder 需处理" : "复制失败，再试一次";
+    // 「Qoder 需处理」 told the user a state, not a next step, and left them guessing
+    // what was expected of them. Both branches now name the action.
+    return deliveryMode === "qoder-acp" ? "本轮没完成 · 看看怎么办" : "复制失败，再试一次";
   }
   if (status === "copied" || runInProgress) return "查看本轮";
   return pendingCount === 0 ? "写评论后再发送" : "发给 AI";

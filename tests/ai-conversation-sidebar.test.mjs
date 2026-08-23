@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   FORBIDDEN_MESSAGE_KEYS,
   sidebarActionBar,
+  sidebarActorInitial,
   sidebarDiscussionNotice,
   sidebarDeliveryDisclosure,
   sidebarDraftNotice,
@@ -613,4 +614,14 @@ test("the Agent's chunks read as the paragraphs it wrote, not one wall of text",
     ["只有一句。"],
   );
   assert.equal(sidebarRunProgress({ state: "processing", steps }).narrationBlocks, null);
+});
+
+test("every speaker has an avatar mark, so the thread reads as a chat", () => {
+  // The thread had no avatars at all, which is why the run activity looked like a
+  // panel parked in the sidebar instead of someone speaking in it.
+  assert.equal(sidebarActorInitial("user"), "你");
+  assert.equal(sidebarActorInitial("qoder"), "Q");
+  assert.equal(sidebarActorInitial("pageroot"), "P");
+  // An unknown actor still gets a mark rather than an empty square.
+  assert.equal(sidebarActorInitial("someone-else"), "P");
 });

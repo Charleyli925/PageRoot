@@ -63,6 +63,8 @@ export function sidebarModePresentation(
   intent?: SidebarIntent | string,
 ): SidebarModePresentation;
 
+export function sidebarActorInitial(actor: string): string;
+
 export function sidebarActorLabel(actor: string): string;
 
 export function sidebarMessageStream(

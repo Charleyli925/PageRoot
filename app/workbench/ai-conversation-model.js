@@ -197,6 +197,20 @@ export function sidebarRunProgress({ state, steps = [], agentText = "" } = {}) {
   });
 }
 
+const ACTOR_INITIALS = Object.freeze({
+  user: "你",
+  qoder: "Q",
+  pageroot: "P",
+});
+
+/**
+ * The mark shown in a message avatar. Short by design: a chat is scanned by who is
+ * speaking, and a full name in that square would only shrink the words beside it.
+ */
+export function sidebarActorInitial(actor) {
+  return ACTOR_INITIALS[actor] ?? ACTOR_INITIALS.pageroot;
+}
+
 export function sidebarActorLabel(actor) {
   return ACTOR_LABELS[actor] ?? ACTOR_LABELS.pageroot;
 }

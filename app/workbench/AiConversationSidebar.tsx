@@ -4,6 +4,7 @@ import { useMemo, useRef, useState, type ChangeEvent } from "react";
 
 import {
   sidebarActionBar,
+  sidebarActorInitial,
   sidebarDiscussionNotice,
   sidebarDraftNotice,
   sidebarIntentOptions,
@@ -216,6 +217,9 @@ export default function AiConversationSidebar({
               data-status={message.status}
               data-testid="ai-conversation-message"
             >
+              <span className={styles.avatar} aria-hidden="true">
+                {sidebarActorInitial(message.actor)}
+              </span>
               <span className={styles.actor}>{message.actorLabel}</span>
               <p className={styles.text}>{message.text}</p>
               {message.truncated ? (
@@ -241,6 +245,9 @@ export default function AiConversationSidebar({
             data-status={liveReply.streaming ? "streaming" : "completed"}
             data-testid="ai-conversation-live-reply"
           >
+            <span className={styles.avatar} aria-hidden="true">
+              {sidebarActorInitial(liveReply.actor)}
+            </span>
             <span className={styles.actor}>{liveReply.actorLabel}</span>
             <p className={styles.text}>{liveReply.text}</p>
             {liveReply.truncated ? (
@@ -261,10 +268,14 @@ export default function AiConversationSidebar({
         {runProgress ? (
           <section
             className={styles.runActivity}
+            data-actor="qoder"
             data-tone={runProgress.tone}
             data-testid="ai-conversation-run-progress"
             aria-label="本轮进度"
           >
+            <span className={styles.avatar} aria-hidden="true">
+              {sidebarActorInitial("qoder")}
+            </span>
             <span className={styles.actor}>Qoder CLI</span>
             {runProgress.headline ? (
               <p className={styles.text}>{runProgress.headline}</p>
