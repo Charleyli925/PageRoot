@@ -418,11 +418,6 @@ async function openRecentProject(page, sourcePath, options) {
     await visibleToast.getByRole("button", { name: "关闭提醒" }).click();
     await expect(visibleToast).toBeHidden();
   }
-  const processingDialog = page.getByRole("dialog", { name: "本轮处理" });
-  if (await processingDialog.isVisible()) {
-    await page.keyboard.press("Escape");
-    await expect(processingDialog).toBeHidden();
-  }
   const activeBefore = await page.evaluate(
     async () => (await window.htmlAIProjects?.getActiveProject())?.sourcePath || "",
   );
@@ -4479,24 +4474,16 @@ test("a failed handoff in project A does not block project B or replace its stat
     expect(projectAWorkingCopyPath).not.toBe(realpathSync(projectA.sourcePath));
     await launched.page.getByRole("button", { name: /AI 对话/u }).click();
     await chooseClipboardDelivery(launched.page);
-    const processingDialog = launched.page.getByRole("dialog", { name: "本轮处理" });
-    await expect(processingDialog.getByText(
-      "交接内容尚未复制",
-      { exact: true },
-    ))
+    // The failure surfaces on the header control, and it must not have produced a
+    // second request. The panel that used to also state it is out of the flow.
+    await expect(launched.page.getByRole("button", { name: "复制失败，再试一次" }))
       .toBeVisible({ timeout: 30_000 });
     await expect.poll(
       () => requestDirectoryCount(launched.workspace),
       { timeout: 20_000 },
     ).toBe(1);
-
-    await expect(processingDialog).toBeVisible();
-    await launched.page.keyboard.press("Escape");
-    await expect(processingDialog).toBeHidden();
-    await launched.page.getByRole("button", { name: "复制失败，再试一次" }).click();
-    await expect(processingDialog).toBeVisible();
     await openRecentProject(launched.page, projectB.sourcePath);
-    await expect(launched.page.getByRole("button", { name: "写评论后再发送" }))
+    await expect(launched.page.getByRole("button", { name: /AI 对话/u }))
       .toBeDisabled();
     const projectBWorkingCopyPath = await addComment(
       launched.page,
@@ -4519,19 +4506,13 @@ test("a failed handoff in project A does not block project B or replace its stat
     ).toBe(2);
 
     await openRecentProject(launched.page, projectA.sourcePath, { editable: false });
-    await expect(processingDialog).toBeVisible();
-    await expect(launched.page.getByText("交接内容尚未复制", { exact: true }))
-      .toBeVisible();
-    await launched.page.keyboard.press("Escape");
-    await expect(processingDialog).toBeHidden();
+    // Each project keeps its own failed state: the retry control is what the user sees,
+    // and reopening the other project must not carry the failure across.
     await expect(launched.page.getByRole("button", { name: "复制失败，再试一次" }))
       .toBeVisible();
     await launched.page.getByRole("button", { name: "复制失败，再试一次" }).click();
-    await expect(launched.page.getByText("交接内容尚未复制", { exact: true }))
-      .toBeVisible();
 
     await openRecentProject(launched.page, projectB.sourcePath, { editable: false });
-    await expect(processingDialog).toBeVisible();
     await expect(launched.page.getByRole("button", { name: "复制失败，再试一次" }))
       .toBeVisible();
     expect(readFileSync(projectA.sourcePath).equals(projectA.original)).toBe(true);
