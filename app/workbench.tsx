@@ -743,6 +743,9 @@ export default function Workbench() {
   // The decision bar acts through a ref: its handlers are defined further down,
   // and the conversation hook is composed before them.
 
+  const generateRequestRef = useRef<
+    ((mode: AgentDeliveryMode) => void) | null
+  >(null);
   const aiConversation = useAiConversation({
     controllerRef: workspaceControllerRef,
     conversation: workspaceControllerSnapshot?.conversation ?? null,
@@ -760,8 +763,16 @@ export default function Workbench() {
     sourcePath: sourcePath ?? "",
     sourceSha256,
     pendingCommentCount: comments.length,
-    // The same submission the header button performs. One owner, two surfaces.
-    onDeliverModification: (mode) => void generateRequest(mode),
+    /*
+     * The same submission the header button performs. One owner, two surfaces.
+     *
+     * Reached through a ref because generateRequest is declared far below this call.
+     * Naming it directly here left React Compiler with a call to a function it had not
+     * yet analysed, so it had to assume that call could mutate anything — and that
+     * assumption cost every state setter in this component its stability, skipping
+     * optimisation for the whole component.
+     */
+    onDeliverModification: (mode) => generateRequestRef.current?.(mode),
   });
   // The run-event effect reports a submitted round by opening the thread. It is
   // reached through a ref so that effect keeps its curated dependency list.
@@ -5921,6 +5932,14 @@ export default function Workbench() {
     };
   }, [generateRequest]);
 
+  // Published for the conversation, which is constructed above this declaration and
+  // therefore cannot name it directly.
+  useEffect(() => {
+    generateRequestRef.current = (mode: AgentDeliveryMode) => {
+      void generateRequest(mode);
+    };
+  }, [generateRequest]);
+
   const activateReadyResult = useCallback(async (
     { reviewed = false }: { reviewed?: boolean } = {},
   ) => {
@@ -7516,7 +7535,7 @@ export default function Workbench() {
             status={currentQoderHandoffStatus}
             attention={Boolean(activeRun?.candidateVersionLabel) || runInProgress}
             disabled={generating || projectHydrating || Boolean(projectLoadError)
-              || viewTransitioning || viewMode === "history"}
+              || viewTransitioning || viewMode === "history" || browserPreviewOnly}
             onOpen={() => {
               // One meaning: show the conversation. It carries the stages, the Agent's
               // words and the decision, and it docks in preview, so a round in flight
