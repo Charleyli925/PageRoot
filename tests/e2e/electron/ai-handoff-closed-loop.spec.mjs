@@ -3823,10 +3823,8 @@ test("a pre-load review navigation falls back without trusting the replacement p
         'const reviewNavigationVariant = "after";',
       ));
     runOfficialFinalizer(request.requestRoot, request.changeRequest);
-    await expect(launched.page.getByText(
-      "可在审阅中对比查看修改差异",
-      { exact: true },
-    ).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
+    await expect(launched.page.getByTestId("ai-conversation-action-bar"))
+      .toContainText("等待你的决定", { timeout: 30_000 });
 
     await launched.page.getByRole("button", { name: "审阅对比" }).click();
     await expect(launched.page.getByTestId("ai-review-workspace"))
@@ -3879,10 +3877,8 @@ test("two AI versions activate in order and survive relaunch without identity dr
       (base) => base.replace(ORIGINAL_TEXT, UPDATED_TEXT),
     );
     runOfficialFinalizer(firstRequest.requestRoot, firstRequest.changeRequest);
-    await expect(launched.page.getByText(
-      "可在审阅中对比查看修改差异",
-      { exact: true },
-    ).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
+    await expect(launched.page.getByTestId("ai-conversation-action-bar"))
+      .toContainText("等待你的决定", { timeout: 30_000 });
     await adoptReadyResult(launched.page);
     await expect.poll(async () => (
       launched.page.evaluate(() => window.htmlAIProjects?.getActiveProject())
@@ -3908,10 +3904,8 @@ test("two AI versions activate in order and survive relaunch without identity dr
       (base) => base.replace(UPDATED_TEXT, SECOND_UPDATED_TEXT),
     );
     runOfficialFinalizer(secondRequest.requestRoot, secondRequest.changeRequest);
-    await expect(launched.page.getByText(
-      "可在审阅中对比查看修改差异",
-      { exact: true },
-    ).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
+    await expect(launched.page.getByTestId("ai-conversation-action-bar"))
+      .toContainText("等待你的决定", { timeout: 30_000 });
     await adoptReadyResult(launched.page);
     await expect.poll(async () => (
       launched.page.evaluate(() => window.htmlAIProjects?.getActiveProject())
@@ -4095,10 +4089,8 @@ test("returning from review restores the editable pre-AI version and preserves t
       (base) => base.replace(ORIGINAL_TEXT, UPDATED_TEXT),
     );
     runOfficialFinalizer(request.requestRoot, request.changeRequest);
-    await expect(launched.page.getByText(
-      "可在审阅中对比查看修改差异",
-      { exact: true },
-    ).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
+    await expect(launched.page.getByTestId("ai-conversation-action-bar"))
+      .toContainText("等待你的决定", { timeout: 30_000 });
     const candidateFiles = candidateHtmlFiles(
       launched.workspace,
       request.changeRequest.projectId,
@@ -4941,10 +4933,8 @@ test("a broad but related AI return is accepted without a target-scope error", a
         "<title>unauthorized title mutation</title>",
       ));
     runOfficialFinalizer(request.requestRoot, request.changeRequest);
-    await expect(launched.page.getByText(
-      "可在审阅中对比查看修改差异",
-      { exact: true },
-    ).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
+    await expect(launched.page.getByTestId("ai-conversation-action-bar"))
+      .toContainText("等待你的决定", { timeout: 30_000 });
     await expect(launched.page.getByText("已记录评论范围外的额外变化", { exact: true }))
       .toHaveCount(0);
     await expect(launched.page.getByRole("button", { name: "采用这些额外变化" }))
@@ -4980,10 +4970,8 @@ test("a committed version that the desktop cannot activate stays visibly blocked
     );
     writeAiOutput(request.requestRoot, (base) => base.replace(ORIGINAL_TEXT, UPDATED_TEXT));
     runOfficialFinalizer(request.requestRoot, request.changeRequest);
-    await expect(launched.page.getByText(
-      "可在审阅中对比查看修改差异",
-      { exact: true },
-    ).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
+    await expect(launched.page.getByTestId("ai-conversation-action-bar"))
+      .toContainText("等待你的决定", { timeout: 30_000 });
     await adoptReadyResult(launched.page);
     await expect(launched.page.getByText(/新版本文件暂时无法打开|最新版暂时无法打开/u)
       .filter({ visible: true }).first())
@@ -5031,10 +5019,8 @@ test("a rewrite outside <main> is still reviewed", async () => {
         .replace(OUTSIDE_MAIN_BEFORE, OUTSIDE_MAIN_AFTER);
     });
     runOfficialFinalizer(request.requestRoot, request.changeRequest);
-    await expect(launched.page.getByText(
-      "可在审阅中对比查看修改差异",
-      { exact: true },
-    ).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
+    await expect(launched.page.getByTestId("ai-conversation-action-bar"))
+      .toContainText("等待你的决定", { timeout: 30_000 });
 
     await launched.page.getByRole("button", { name: "审阅对比" }).click();
     await expect(launched.page.getByTestId("ai-review-workspace"))
