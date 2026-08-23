@@ -1556,7 +1556,7 @@ async function commitPreparedHtmlOpenOperation(payload) {
         });
         throw new ProjectFileError(
           "OPEN_INTENT_RECLASSIFIED",
-          "这份原文件已经关联到现有项目，请确认后继续当前项目。",
+          "这个文件之前已经导入过了，请确认后打开之前的项目。",
           { confirmation: taggedConfirmation(descriptor) },
         );
       }

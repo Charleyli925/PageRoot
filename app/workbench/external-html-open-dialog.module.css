@@ -154,35 +154,6 @@
   line-height: 1.6;
 }
 
-.facts {
-  display: grid;
-  gap: 12px;
-  margin: 2px 0;
-  padding: 13px 14px;
-  border: 1px solid #ececf2;
-  border-radius: 14px;
-  background: #f7f7fb;
-}
-
-.facts > div {
-  display: grid;
-  gap: 3px;
-}
-
-.facts dt {
-  color: #8a8b95;
-  font-size: 11px;
-  font-weight: 650;
-  letter-spacing: 0.04em;
-}
-
-.facts dd {
-  margin: 0;
-  color: #2a2b33;
-  font-size: 13.5px;
-  font-weight: 650;
-}
-
 /* Borderless row: the checkbox left edge lines up with the sentence above it. */
 .deleteOption {
   display: grid;

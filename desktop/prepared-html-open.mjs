@@ -122,7 +122,7 @@ export function assertCommitAction({
   if (classification === "known-external" && action !== "continue-current") {
     throw new ProjectFileError(
       "EXTERNAL_OPEN_ACTION_MISMATCH",
-      "已导入的原文件只能继续当前项目。",
+      "已导入的原文件只能打开之前的项目。",
     );
   }
   if (classification === "managed-project" && action !== "open-managed") {

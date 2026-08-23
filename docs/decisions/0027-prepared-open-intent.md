@@ -35,7 +35,7 @@ outside the configured projects root.
 3. Renderer confirmation is a `ProjectWorkflow` prompt snapshot. The only
    accepted actions are `import-new` (C) and `continue-current` (B).
    `view-initial` is rejected in the codec before `ProjectWorkflow` is
-   required. “继续当前项目” opens the bound project's current active Working
+   required. `continue-current` opens the bound project's current active Working
    Copy, not the latest official Version and not the original file.
 4. After the user confirms, `ProjectWorkflow` takes the existing switch fence
    only when a project is already bound (`epoch > 0`). Cold-start last-active
