@@ -268,15 +268,20 @@ export default function AiConversationSidebar({
         {runProgress ? (
           <section
             className={`${styles.message} ${styles.runActivity}`}
-            data-actor="qoder"
+            data-actor="pageroot"
             data-tone={runProgress.tone}
             data-testid="ai-conversation-run-progress"
             aria-label="本轮进度"
           >
             <span className={styles.avatar} aria-hidden="true">
-              {sidebarActorInitial("qoder")}
+              {sidebarActorInitial("pageroot")}
             </span>
-            <span className={styles.actor}>Qoder CLI</span>
+            {/*
+              * PageRoot states the stages from the run's durable status (ADR 0037 §4).
+              * Signing them 「Qoder CLI」 made the Agent look like the author of
+              * PageRoot's own bookkeeping, and put the brand mark on the wrong speaker.
+              */}
+            <span className={styles.actor}>PageRoot</span>
             {runProgress.headline ? (
               <p className={styles.text}>{runProgress.headline}</p>
             ) : null}
@@ -299,7 +304,7 @@ export default function AiConversationSidebar({
                   aria-expanded={narrationOpen}
                   onClick={() => setNarrationOpen((open) => !open)}
                 >
-                  {narrationOpen ? "收起 Qoder 的说明" : "展开 Qoder 的说明"}
+                  {narrationOpen ? "收起 Qoder 说了什么" : "看看 Qoder 说了什么"}
                 </button>
                 {narrationOpen ? (
                   <div
@@ -325,7 +330,7 @@ export default function AiConversationSidebar({
         {actionBar ? (
           <section
             className={`${styles.message} ${styles.actionBar}`}
-            data-actor="qoder"
+            data-actor="pageroot"
             data-kind={actionBar.kind}
             data-testid="ai-conversation-action-bar"
             aria-label="当前待决定"
