@@ -283,6 +283,19 @@ function createQoderAcpE2ECommand(directory, {
 // A specific change is reached by stepping the change navigator: the content map that
 // used to list them is gone. Bounded, so a change that never focuses fails the test
 // instead of looping forever.
+// Qoder availability moved out of the delivery dialog and into 关于源页; that card is
+// where installation, login and readiness are surfaced now.
+async function openQoderAvailability(page) {
+  await page.getByRole("button", { name: "关于源页" }).click();
+  const card = page.getByRole("dialog").locator(".about-agent-section");
+  await expect(card).toBeVisible();
+  return card;
+}
+
+async function closeQoderAvailability(page) {
+  await page.getByRole("button", { name: "关闭关于源页" }).click();
+}
+
 async function focusChangeById(page, frame, changeId) {
   const next = page.getByRole("button", { name: "下一处变化" });
   for (let step = 0; step < 40; step += 1) {
@@ -4161,7 +4174,7 @@ test("Qoder ACP Agent Bridge reaches review without clipboard or automatic adopt
       "请完成 Qoder ACP 自动闭环，但不要直接覆盖当前 HTML。",
     );
     await launched.page.getByRole("button", { name: /AI 对话/u }).click();
-    const deliveryDialog = launched.page.getByRole("dialog", { name: "怎样交给 AI？" });
+    const deliveryDialog = await openQoderAvailability(launched.page);
     await expect(deliveryDialog).toBeVisible();
     await expect(deliveryDialog.getByText(
       "Qoder 会读取本轮 HTML、评论和附件；结果先进入审阅。",
@@ -4238,7 +4251,7 @@ test("Qoder authentication stays in one delivery dialog and matches About", asyn
       "验证 Qoder 登录引导不会创建本轮任务。",
     );
     await launched.page.getByRole("button", { name: /AI 对话/u }).click();
-    const deliveryDialog = launched.page.getByRole("dialog", { name: "怎样交给 AI？" });
+    const deliveryDialog = await openQoderAvailability(launched.page);
     await expect(deliveryDialog.getByRole("button", { name: /Qoder CLI/u }))
       .toBeVisible();
     await deliveryDialog.getByRole("button", { name: /Qoder CLI/u }).click();
@@ -4258,7 +4271,7 @@ test("Qoder authentication stays in one delivery dialog and matches About", asyn
       .toContain("qodercli login");
     expect(requestPosts).toBe(0);
 
-    await deliveryDialog.getByRole("button", { name: "关闭怎样交给 AI" }).click();
+    await closeQoderAvailability(launched.page);
     await launched.page.getByRole("button", { name: "关于源页" }).click();
     const about = launched.page.getByRole("dialog", { name: "源页" });
     await expect(about.getByRole("heading", { name: "AI Agent" })).toBeVisible();
@@ -4295,7 +4308,7 @@ test("Qoder installed while PageRoot is open refreshes in place and continues on
       "验证 PageRoot 打开期间安装 Qoder CLI 后可原地继续。",
     );
     await launched.page.getByRole("button", { name: /AI 对话/u }).click();
-    const deliveryDialog = launched.page.getByRole("dialog", { name: "怎样交给 AI？" });
+    const deliveryDialog = await openQoderAvailability(launched.page);
     await expect(deliveryDialog.getByText("未安装", { exact: true })).toBeVisible();
     await deliveryDialog.getByRole("button", { name: "复制给 Qoder 的安装指令" }).click();
     await expect(deliveryDialog.getByText("✓ 安装指令已复制", { exact: true }))
@@ -4348,7 +4361,7 @@ test("Qoder ACP polling waits for start and a managed stop kills the Agent", asy
     );
     const workingBefore = readFileSync(workingCopyPath);
     await launched.page.getByRole("button", { name: /AI 对话/u }).click();
-    const deliveryDialog = launched.page.getByRole("dialog", { name: "怎样交给 AI？" });
+    const deliveryDialog = await openQoderAvailability(launched.page);
     await deliveryDialog.getByRole("button", { name: /Qoder CLI/u }).click();
 
     const stopButton = launched.page.getByRole("button", {
