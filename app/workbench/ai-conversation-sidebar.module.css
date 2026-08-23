@@ -99,7 +99,12 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
-  padding: 14px;
+  /*
+   * Extra room at the end so the last thing said does not butt against the Composer.
+   * A decision landing directly on top of the input read as one merged control strip
+   * instead of an answer followed by a place to reply.
+   */
+  padding: 14px 14px 16px;
   overflow-y: auto;
 }
 
