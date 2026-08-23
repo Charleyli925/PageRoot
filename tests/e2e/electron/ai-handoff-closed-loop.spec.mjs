@@ -280,6 +280,21 @@ function createQoderAcpE2ECommand(directory, {
 }
 
 // The destination is chosen in the AI conversation now; the dialog over the page is gone.
+// A specific change is reached by stepping the change navigator: the content map that
+// used to list them is gone. Bounded, so a change that never focuses fails the test
+// instead of looping forever.
+async function focusChangeById(page, frame, changeId) {
+  const next = page.getByRole("button", { name: "下一处变化" });
+  for (let step = 0; step < 40; step += 1) {
+    const focused = await frame.locator("html")
+      .getAttribute("data-pageroot-review-focus");
+    if (focused === changeId) return;
+    await next.click();
+    await page.waitForTimeout(120);
+  }
+  throw new Error(`Change ${changeId} never became focused.`);
+}
+
 async function chooseClipboardDelivery(page) {
   const sidebar = page.getByTestId("ai-conversation-sidebar");
   await expect(sidebar).toBeVisible();
@@ -2828,46 +2843,10 @@ ${REVIEW_MASK_UNION_BEFORE}
     await expect.poll(async () => afterReviewFrame.locator("html").getAttribute(
       "data-pageroot-review-filter",
     )).toBe("text");
-    await launched.page.getByRole("button", {
-      name: "打开内容地图",
-    }).click();
-    const outlineItems = launched.page.getByTestId("review-outline-item");
-    await expect.poll(() => outlineItems.count()).toBeGreaterThan(5);
-    // Under a type filter a group count must name the type, so a filtered 0
-    // never reads as "this group has no changes at all".
-    await expect(launched.page.locator("h3 small").filter({
-      hasText: /^\d+\/\d+ 个区域含文案变化$/u,
-    }).first()).toBeVisible();
-    await expect(launched.page.getByText("审阅标签一", { exact: true })).toBeVisible();
-    await expect(launched.page.getByText("审阅标签二", { exact: true })).toBeVisible();
-    expect(await launched.page.locator(
-      '[data-testid="review-outline-item"][data-changed="false"]',
-    ).count()).toBeGreaterThan(0);
-    const viewportWidth = await launched.page.evaluate(() => window.innerWidth);
-    await expect.poll(async () => {
-      const drawer = launched.page.locator('aside[aria-label="页面内容地图"]');
-      const handleBox = await drawer.locator(":scope > div").first().boundingBox();
-      const panelBox = await drawer.locator(':scope > div[aria-hidden="false"]').boundingBox();
-      if (!handleBox || !panelBox) return false;
-      const handleGap = panelBox.x - (handleBox.x + handleBox.width);
-      const rightGap = panelBox.x + panelBox.width - viewportWidth;
-      return Math.abs(handleGap) <= 1 && Math.abs(rightGap) <= 1;
-    }).toBe(true);
-    const changedMapItem = launched.page.locator(
-      '[data-testid="review-outline-item"][data-changed="true"]',
-    ).first();
-    const unchangedMapItem = launched.page.locator(
-      '[data-testid="review-outline-item"][data-changed="false"]',
-    ).first();
-    expect(await changedMapItem.evaluate((element) => getComputedStyle(element).opacity))
-      .toBe("1");
-    expect(Number(await unchangedMapItem.evaluate((element) => getComputedStyle(element).opacity)))
-      .toBeLessThan(0.7);
-    const anchorOnlyMapItem = launched.page.getByRole("button", {
-      name: /删除锚点导航/u,
-    });
-    await expect(anchorOnlyMapItem).toBeVisible();
-    await anchorOnlyMapItem.click();
+    // The content map is removed, so its outline, group counts and drawer geometry have
+    // nothing left to assert. What still matters is the focus behaviour below, and a
+    // change is reached by stepping the change navigator instead of picking it off a map.
+    await focusChangeById(launched.page, afterReviewFrame, anchorOnlyChangeId);
     await expect.poll(async () => afterReviewFrame.locator("html").getAttribute(
       "data-pageroot-review-focus",
     )).toBe(anchorOnlyChangeId);
@@ -2891,15 +2870,11 @@ ${REVIEW_MASK_UNION_BEFORE}
     await expect(afterReviewFrame.locator(
       `[data-pageroot-review-mask-hole="${anchorOnlyChangeId}"]`,
     )).toHaveCount(0);
-    const reopenOutline = launched.page.getByRole("button", { name: "打开内容地图" });
-    if (await reopenOutline.isVisible()) await reopenOutline.click();
     const ebitaChangeId = await beforeReviewFrame.locator(
       "[data-review-ebita-section]",
     ).getAttribute("data-pageroot-review-id");
     expect(ebitaChangeId).toBeTruthy();
-    await launched.page.getByRole("button", {
-      name: /3EBITA分析：文本调整/u,
-    }).click();
+    await focusChangeById(launched.page, beforeReviewFrame, ebitaChangeId);
     await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
       "data-pageroot-review-focus",
     )).toBe(ebitaChangeId);
@@ -2911,14 +2886,8 @@ ${REVIEW_MASK_UNION_BEFORE}
     ).count()).toBeGreaterThan(0);
     await beforeCounter.click();
     await expect(afterCounter).toHaveAttribute("data-count", "3");
-    await expect(launched.page.getByRole("button", { name: "打开内容地图" }))
-      .toBeVisible();
-    await launched.page.getByRole("button", { name: "打开内容地图" }).click();
-    const movedOutlineItem = launched.page.getByRole("button", {
-      name: /标签一详情：位置调整/u,
-    });
-    await expect(movedOutlineItem).toBeVisible();
-    await movedOutlineItem.click();
+    // The outline item that used to select this change lived in the content map.
+    await launched.page.getByRole("button", { name: "下一处变化" }).click();
     await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
       "data-pageroot-review-filter",
     )).toBe("text");
@@ -2962,8 +2931,6 @@ ${REVIEW_MASK_UNION_BEFORE}
     await expect(afterReviewFrame.locator('[data-review-tab-panel="two"]'))
       .toBeVisible();
     await launched.page.getByRole("button", { name: "结构变化" }).click();
-    await expect(launched.page.getByRole("button", { name: "打开内容地图" }))
-      .toBeVisible();
     await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
       "data-pageroot-review-filter",
     )).toBe("structure");
@@ -3667,19 +3634,8 @@ ${REVIEW_MASK_UNION_BEFORE}
         beforeReviewFrame.locator("html").evaluate(() => window.scrollTo(0, 0)),
         afterReviewFrame.locator("html").evaluate(() => window.scrollTo(0, 0)),
       ]);
-      const closeMapButton = launched.page.getByRole("button", {
-        name: "收起内容地图",
-      }).first();
-      if (await closeMapButton.isVisible()) await closeMapButton.click();
       await launched.page.screenshot({
         path: path.join(captureDirectory, "ai-review-final.png"),
-        animations: "disabled",
-      });
-      await launched.page.getByRole("button", {
-        name: "打开内容地图",
-      }).click();
-      await launched.page.screenshot({
-        path: path.join(captureDirectory, "ai-review-map.png"),
         animations: "disabled",
       });
     }
