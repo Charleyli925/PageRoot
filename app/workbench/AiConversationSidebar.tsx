@@ -267,7 +267,7 @@ export default function AiConversationSidebar({
           */}
         {runProgress ? (
           <section
-            className={styles.runActivity}
+            className={`${styles.message} ${styles.runActivity}`}
             data-actor="qoder"
             data-tone={runProgress.tone}
             data-testid="ai-conversation-run-progress"
@@ -324,11 +324,13 @@ export default function AiConversationSidebar({
           */}
         {actionBar ? (
           <section
-            className={styles.actionBar}
+            className={`${styles.message} ${styles.actionBar}`}
+            data-actor="qoder"
             data-kind={actionBar.kind}
             data-testid="ai-conversation-action-bar"
             aria-label="当前待决定"
           >
+            <span className={styles.avatarSpacer} aria-hidden="true" />
             {actionBar.title ? <strong>{actionBar.title}</strong> : null}
             {actionBar.detail ? <p>{actionBar.detail}</p> : null}
             {actionBar.actions.length > 0 ? (

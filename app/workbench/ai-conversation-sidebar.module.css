@@ -188,16 +188,18 @@
  * scrolls, so a pending decision cannot disappear as the conversation grows.
  */
 /*
- * Inside the thread now, so it is not a tinted band with its own border: the
- * decision is the next thing said, and a filled region would make one round look
- * like two places again.
+ * Also a message, and a continuation of the one above it: same grid, no avatar of
+ * its own, no separator. A chat groups consecutive turns from one speaker instead
+ * of fencing each block off — fencing is what made this read as three panels.
  */
 .actionBar {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 12px 0 2px;
-  border-top: 1px solid rgb(32 29 49 / 7%);
+  row-gap: 6px;
+}
+
+/* Holds the avatar column open so a continued message stays aligned with it. */
+.avatarSpacer {
+  grid-row: 1 / span 2;
+  width: 22px;
 }
 
 .actionBar[data-kind="blocked"] strong {
@@ -449,15 +451,9 @@
  * block set slightly apart from the messages rather than a second message with an
  * author. One accent, no icons, no borders per row.
  */
-/*
- * The round in flight is a message like any other: same avatar column, same body.
- * It used to be its own region, which is exactly why it read as a panel.
- */
+/* Shape comes from .message; this only tightens the stage list against its label. */
 .runActivity {
-  display: grid;
-  grid-template-columns: 22px minmax(0, 1fr);
-  gap: 4px 8px;
-  min-width: 0;
+  row-gap: 4px;
 }
 
 .runActivityLabel {
