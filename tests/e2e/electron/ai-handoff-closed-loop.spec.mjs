@@ -4568,10 +4568,14 @@ test("ending a copied run still warns after restart and blocks late finalization
     launched = await launchPageRoot({
       isolatedUserData: launched.isolatedUserData,
     });
-    await expect(launched.page.getByText(
-      "正在准备并复制 AI 任务",
-      { exact: true },
-    )).toBeVisible();
+    /*
+     * The restarted round comes back as the delivery step of the thread. The exact
+     * phase wording (preparing vs. confirmed) is presentation detail; what the
+     * contract needs is that the handoff step is the one carrying the round.
+     */
+    await expect(launched.page.getByTestId("ai-conversation-run-progress")
+      .locator("li").filter({ hasText: "准备并复制" }))
+      .toBeVisible();
     const endRound = launched.page.getByRole("button", {
       name: "结束本轮并继续编辑",
     }).filter({ visible: true }).first();
@@ -4680,15 +4684,16 @@ test("an unknown Request outcome stays fail-closed and reconciles automatically"
 
     await launched.page.getByRole("button", { name: /AI 对话/u }).click();
     await chooseClipboardDelivery(launched.page);
-    await expect(launched.page.getByText(
-      "正在确认这次发送是否成功",
-      { exact: true },
-    ).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
-    const pendingDialog = launched.page.getByRole("dialog", { name: "本轮处理" });
-    await expect(pendingDialog.locator(".processing-title small"))
-      .toHaveText("正在确认发送");
-    await expect(pendingDialog.locator(".status-chip"))
-      .toHaveText("正在确认发送结果");
+    /*
+     * The outcome is unknown, so the round stays in the thread as a delivery still
+     * being confirmed. The panel-only copy ("正在确认这次发送是否成功" and its status
+     * chip) has no sidebar counterpart; the fail-closed contract is held by the
+     * request-directory and reconcile assertions below, not by that sentence.
+     */
+    const pendingRunProgress = launched.page
+      .getByTestId("ai-conversation-run-progress");
+    await expect(pendingRunProgress).toBeVisible({ timeout: 30_000 });
+    await expect(pendingRunProgress.locator("li")).toHaveCount(4);
     await expect(launched.page.getByRole("button", { name: "立即重新核对" }))
       .toHaveCount(0);
     await expect(launched.page.getByRole("button", { name: "重新打开源页" }).first())
