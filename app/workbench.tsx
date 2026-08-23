@@ -7388,7 +7388,18 @@ export default function Workbench() {
               type="button"
               aria-pressed={canvasMode === "edit"}
               disabled={browserPreviewOnly || runInProgress || viewMode === "history"}
-              title={browserPreviewOnly ? "浏览器预览为只读模式" : undefined}
+              /*
+               * A disabled control that will not say why reads as a broken control. The
+               * round in flight is the reason, and it is temporary, so the tooltip names
+               * it instead of leaving the user to guess.
+               */
+              title={
+                browserPreviewOnly
+                  ? "浏览器预览为只读模式"
+                  : runInProgress
+                    ? "本轮还在进行，结束或采纳后可回到编辑"
+                    : undefined
+              }
               onClick={() => {
                 if (externalSourcePreview) {
                   returnToEditingFromExternalPreview();
@@ -7502,7 +7513,6 @@ export default function Workbench() {
           ) : null}
           <AgentDeliveryButton
             status={currentQoderHandoffStatus}
-            pendingCount={pendingSendItemCount}
             attention={Boolean(activeRun?.candidateVersionLabel) || runInProgress}
             disabled={generating || projectHydrating || Boolean(projectLoadError)
               || viewTransitioning || viewMode === "history"}

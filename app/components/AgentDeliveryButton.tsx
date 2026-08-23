@@ -21,13 +21,11 @@ const TRIGGER_LABEL = "AI 对话";
  */
 export function AgentDeliveryButton({
   status,
-  pendingCount,
   disabled,
   attention = false,
   onOpen,
 }: {
   status: string;
-  pendingCount: number;
   disabled: boolean;
   /** The conversation holds something the user has not dealt with yet. */
   attention?: boolean;
@@ -44,7 +42,6 @@ export function AgentDeliveryButton({
     >
       <ChatCircleTextIcon aria-hidden="true" size={15} weight="fill" />
       <span>{TRIGGER_LABEL}</span>
-      {pendingCount > 0 ? <small>{pendingCount}</small> : null}
     </button>
   );
 }
