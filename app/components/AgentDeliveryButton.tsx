@@ -11,13 +11,21 @@ function triggerLabel({
   deliveryMode,
   runInProgress,
   pendingCount,
+  candidateReady,
 }: {
   generating: boolean;
   status: string;
   deliveryMode: AgentDeliveryMode;
   runInProgress: boolean;
   pendingCount: number;
+  candidateReady: boolean;
 }) {
+  /*
+   * A candidate on screen outranks a failed attempt. A refused retry still reports
+   * failure on the handoff, and saying so here put 「本轮没完成」 next to a decision bar
+   * offering to adopt version 2 — the user could not tell whether the round worked.
+   */
+  if (candidateReady) return "结果等你决定";
   if (generating) return "正在准备…";
   if (status === "copying") return "正在复制…";
   if (status === "starting") return "正在启动 Qoder…";
@@ -47,6 +55,7 @@ export function AgentDeliveryButton({
   runInProgress,
   pendingCount,
   disabled,
+  candidateReady = false,
   onOpenRun,
   onCompose,
 }: {
@@ -56,6 +65,8 @@ export function AgentDeliveryButton({
   runInProgress: boolean;
   pendingCount: number;
   disabled: boolean;
+  /** This round already produced a Candidate awaiting the user's decision. */
+  candidateReady?: boolean;
   onOpenRun: () => void;
   onCompose: () => void;
 }) {
@@ -78,7 +89,14 @@ export function AgentDeliveryButton({
         <PaperPlaneTiltIcon aria-hidden="true" size={15} weight="fill" />
       )}
       <span>
-        {triggerLabel({ generating, status, deliveryMode, runInProgress, pendingCount })}
+        {triggerLabel({
+          generating,
+          status,
+          deliveryMode,
+          runInProgress,
+          pendingCount,
+          candidateReady,
+        })}
       </span>
       {pendingCount > 0 && !runInProgress && !["copied", "failed"].includes(status)
         ? <small>{pendingCount}</small>

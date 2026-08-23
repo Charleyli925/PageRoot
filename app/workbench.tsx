@@ -7504,6 +7504,7 @@ export default function Workbench() {
             status={currentQoderHandoffStatus} deliveryMode={currentAgentDeliveryMode}
             generating={generating} runInProgress={runInProgress}
             pendingCount={pendingSendItemCount}
+            candidateReady={Boolean(activeRun?.candidateVersionLabel)}
             disabled={generating || projectHydrating || Boolean(projectLoadError)
               || viewTransitioning || viewMode === "history" || (!runInProgress && (
                 pendingSendItemCount === 0 || interactionLocked || persistState === "failed"

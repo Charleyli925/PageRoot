@@ -555,10 +555,15 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding-left: 18px;
+  /*
+   * No left inset: that 18px was there to clear the stage dots, and with the dots
+   * gone it only narrowed an already narrow column. English prose then broke one
+   * word per line and became unreadable, so long words may break instead.
+   */
   color: #55525f;
   font-size: 12px;
   line-height: 1.55;
+  overflow-wrap: anywhere;
 }
 
 .narrationText p {
