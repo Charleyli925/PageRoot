@@ -1768,6 +1768,22 @@ export default function AiReviewWorkspace({
                   >
                     <CaretDownIcon aria-hidden="true" size={11} weight="bold" />
                   </button>
+                  {/*
+                    * The way back out of a single change. Returning to the whole page used
+                    * to live in the content map, so removing the map left a reviewer who
+                    * had focused one change with no way to see the page as a whole again.
+                    */}
+                  <button
+                    type="button"
+                    aria-label="完整页面"
+                    aria-pressed={focus === "all"}
+                    onClick={() => dispatchReviewState({
+                      type: "set-navigation-target",
+                      value: "all",
+                    })}
+                  >
+                    整页
+                  </button>
                 </div>
                 </div>
               </div>

@@ -2768,15 +2768,13 @@ ${REVIEW_MASK_UNION_BEFORE}
     // boxes with a faint violet tint. The remaining captures are a pure dim
     // contract, so park navigation back on the page overview and wait for the
     // claimed boxes to rest before sampling pixels.
-    await launched.page.getByRole("button", { name: "打开内容地图" }).click();
-    await launched.page.getByRole("button", { name: /完整页面/u }).click();
+    await launched.page.getByRole("button", { name: "完整页面" }).click();
     await expect.poll(async () => afterReviewFrame.locator("html").getAttribute(
       "data-pageroot-review-focus",
     )).toBe("all");
     await expect.poll(async () => afterReviewFrame.locator(
       '[data-pageroot-review-overlay-box][data-active="true"]',
     ).count()).toBe(0);
-    await launched.page.getByRole("button", { name: "收起内容地图" }).first().click();
     await launched.page.getByRole("slider", {
       name: "非修改区域上下文可见度",
     }).fill("0");
