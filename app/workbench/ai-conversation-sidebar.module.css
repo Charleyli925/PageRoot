@@ -220,8 +220,8 @@
 
 .actions {
   display: flex;
-  gap: 8px;
-  margin-top: 4px;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .action {
@@ -231,6 +231,8 @@
   border-radius: 9px;
   font-size: 11px;
   font-weight: 680;
+  white-space: nowrap;
+  flex: 0 0 auto;
 }
 
 .action[data-tone="primary"] {
@@ -463,100 +465,45 @@
   letter-spacing: 0.02em;
 }
 
+/*
+ * Each stage is its own line, the way consecutive messages read in a chat. The dots
+ * and the connector that used to join them made this a checklist, and a checklist is
+ * what kept it feeling like a panel parked in the thread.
+ */
 .runSteps {
   display: grid;
-  gap: 0;
+  gap: 5px;
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-/*
- * Each row carries its own indicator and the hairline that joins it to the next
- * one, so the list reads as one continuous run instead of detached lines.
- */
 .runSteps li {
-  position: relative;
-  padding: 0 0 10px 18px;
   color: #8a8797;
   font-size: 12px;
-  line-height: 1.45;
+  line-height: 1.5;
 }
 
-.runSteps li:last-child {
-  padding-bottom: 0;
-}
-
-.runSteps li::before {
-  position: absolute;
-  top: 5px;
-  left: 0;
-  width: 7px;
-  height: 7px;
-  box-sizing: border-box;
-  border: 1.5px solid rgb(32 29 49 / 26%);
-  border-radius: 50%;
-  content: "";
-}
-
-.runSteps li:not(:last-child)::after {
-  position: absolute;
-  top: 14px;
-  left: 3px;
-  width: 1px;
-  height: calc(100% - 14px);
-  background: rgb(32 29 49 / 12%);
-  content: "";
-}
-
+/* What already happened recedes; only the line in progress speaks at full strength. */
 .runSteps li[data-step-state="done"] {
-  color: #55525f;
+  color: #8a8797;
 }
 
-.runSteps li[data-step-state="done"]::before {
-  border-color: rgb(32 29 49 / 42%);
-  background: rgb(32 29 49 / 42%);
-}
-
-/* The one step actually moving: full strength, and visibly alive. */
 .runSteps li[data-step-state="current"] {
   color: #201d31;
-  font-weight: 600;
-}
-
-.runSteps li[data-step-state="current"]::before {
-  border-color: var(--indigo, #5b53d6);
-  background: var(--indigo, #5b53d6);
-  animation: run-step-pulse 1.6s ease-in-out infinite;
 }
 
 .runSteps li[data-step-state="failed"] {
   color: #b4442f;
 }
 
-.runSteps li[data-step-state="failed"]::before {
-  border-color: #b4442f;
-  background: #b4442f;
-}
-
 .runStepDetail {
   display: block;
-  margin-top: 1px;
-  color: #8a8797;
+  color: #a3a0ae;
   font-size: 11px;
-  font-weight: 400;
+  line-height: 1.5;
 }
 
-@keyframes run-step-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgb(91 83 214 / 26%); }
-  50% { box-shadow: 0 0 0 4px rgb(91 83 214 / 0%); }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .runSteps li[data-step-state="current"]::before {
-    animation: none;
-  }
-}
 
 /*
  * What Qoder says while it works (ADR 0037). Subordinate to the stage list above
