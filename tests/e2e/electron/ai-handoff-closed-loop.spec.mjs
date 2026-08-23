@@ -3165,12 +3165,17 @@ ${REVIEW_MASK_UNION_BEFORE}
     await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
       "data-pageroot-review-filter",
     )).toBe("style");
+    // Switching to a single page must widen it to the space available, never leave it at
+    // the split width. Alignment of the right edges was the old way to say that, but it
+    // silently assumed the scroll area is wider than the page: at 100% zoom a page wider
+    // than its area legitimately overflows, and the conversation docked beside the review
+    // makes that area narrower. The invariant is that the page is never the narrower one.
     await expect.poll(async () => {
       const viewport = await launched.page.locator('[aria-label="修改前画布滚动区"]').boundingBox();
       const frame = await launched.page.locator('iframe[title^="修改前"]').boundingBox();
-      if (!viewport || !frame) return 100;
-      return Math.abs((frame.x + frame.width) - (viewport.x + viewport.width));
-    }).toBeLessThanOrEqual(2);
+      if (!viewport || !frame) return -100;
+      return (frame.x + frame.width) - (viewport.x + viewport.width);
+    }).toBeGreaterThanOrEqual(-2);
     await launched.page.getByRole("button", {
       name: "双页对比（修改前与 AI 修改后）",
     }).click();
