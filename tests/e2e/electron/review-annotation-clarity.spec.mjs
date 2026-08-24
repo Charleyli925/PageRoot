@@ -79,7 +79,7 @@ async function submitToAi(page, electronApp) {
   await electronApp.evaluate(({ clipboard }) => clipboard.clear());
   // The header opens the conversation; the destination and the copied state both live
   // inside it now, so the dialog over the page is gone.
-  await page.getByRole("button", { name: /AI 对话/u }).click();
+  await page.getByRole("button", { name: /AI 助手/u }).click();
   const sidebar = page.getByTestId("ai-conversation-sidebar");
   await expect(sidebar).toBeVisible();
   await sidebar.getByRole("button", { name: /复制给别的 AI/u }).click();

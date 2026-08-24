@@ -31,7 +31,7 @@ test("pure browser use stays in a formal read-only preview", async ({ page }) =>
   await expect(page.getByRole("button", { name: "全局评论", exact: true })).toHaveCount(0);
   // The header no longer narrates the round; it opens the conversation, and a browser
   // preview has no Bridge to hold one.
-  await expect(page.getByRole("button", { name: /AI 对话/u })).toBeDisabled();
+  await expect(page.getByRole("button", { name: /AI 助手/u })).toBeDisabled();
   await expect(page.getByTestId("html-canvas-editor")).toHaveCount(0);
 
   const preview = page.locator('iframe[title="HTML 交互预览"]');

@@ -61,7 +61,7 @@ test("server-renders the public workbench without retired hosting or editor surf
     "全局评论",
     // The header opens the conversation and no longer narrates the round, so its label
     // is fixed rather than describing what is missing before a send.
-    "AI 对话",
+    "AI 助手",
     "评论会显示在这里",
   ]) {
     assert.match(html, new RegExp(entryPoint, "u"));
