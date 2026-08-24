@@ -4155,6 +4155,30 @@ body {
   top: 92px;
 }
 
+/* The persistent relink entry shares the in-card recovery language but sits
+   on the rail as a standalone status card, so it needs the card-level type
+   scale and stacking instead of the 9px embedded-strip one. */
+.comment-rail-content > .rail-relink-status {
+  z-index: 2;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+}
+
+.comment-rail-content > .rail-relink-status strong {
+  font-size: 11px;
+}
+
+.comment-rail-content > .rail-relink-status small {
+  font-size: 10px;
+}
+
+.comment-rail-content > .rail-relink-status button {
+  min-height: 32px;
+  padding: 0 10px;
+  font-size: 10px;
+}
+
 .comment-attachments .file-attachment {
   border-color: #e1e2e7;
   background: #f7f8fa;

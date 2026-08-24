@@ -9,14 +9,13 @@ const directAction: Toast = {
 };
 
 const userChoice: Toast = {
-  title: "评论需要重新定位",
-  message: "请选择新的位置。",
+  title: "无法确定工作文件",
+  message: "检测到多个同等候选文件；修改仍保留，请先恢复唯一文件位置。",
   tone: "warning",
   disposition: "user-choice",
   action: {
-    id: "relink-target",
-    label: "选择新位置",
-    commentId: "comment-1",
+    id: "retry-project-open",
+    label: "重新选择文件",
   },
 };
 
@@ -37,8 +36,8 @@ const missingDirectAction: Toast = {
 
 // @ts-expect-error A user-choice notice must name the action that resolves it.
 const missingUserChoiceAction: Toast = {
-  title: "评论需要重新定位",
-  message: "请选择新的位置。",
+  title: "无法确定工作文件",
+  message: "检测到多个同等候选文件；修改仍保留，请先恢复唯一文件位置。",
   tone: "warning",
   disposition: "user-choice",
 };

@@ -8,9 +8,13 @@ import type {
   CommentEditSession,
   CommentItem,
   DirectEditEvent,
-  Toast,
 } from "./types";
 import { isRecord } from "./record-model";
+import { canLocateTarget } from "./comment-relink-model.js";
+
+// The relink predicates live in comment-relink-model (plain JS so Node tests
+// can pin them); re-exported here for existing consumers.
+export { canLocateTarget, commentHasContent } from "./comment-relink-model.js";
 
 export function isGlobalPageTarget(target: HtmlCanvasSelection): boolean {
   return target.selector.trim().toLowerCase() === "body"
@@ -29,10 +33,6 @@ export function exactGlobalPageTarget(
     text: "",
     resolution: "exact",
   };
-}
-
-export function canLocateTarget(target: HtmlCanvasSelection): boolean {
-  return target.resolution === "exact" || target.resolution === "rebound";
 }
 
 export function canSaveCommentTarget(target: HtmlCanvasSelection): boolean {
@@ -194,34 +194,6 @@ export function attachmentFromRecord(
     ...(value.source === "clipboard" || value.source === "file-picker"
       ? { source: value.source }
       : {}),
-  };
-}
-
-export function commentHasContent(
-  comment: Pick<CommentItem, "text" | "attachments">,
-): boolean {
-  return Boolean(comment.text.trim() || comment.attachments?.length);
-}
-
-export function unsafeCommentTargetsNotice(
-  comments: CommentItem[],
-): NonNullable<Toast> {
-  const count = comments.length;
-  return {
-    title: `${count} 条评论需要重新定位`,
-    message: count === 1
-      ? "请选择这条评论的新位置，评论和附件已保留。"
-      : `将从第 1 条开始，完成后自动进入下一条。`,
-    tone: "warning",
-    sticky: true,
-    disposition: "user-choice",
-    dedupeKey: "unsafe-comment-targets",
-    action: {
-      id: "relink-target",
-      label: count === 1 ? "选择新位置" : "开始重新定位",
-      commentId: comments[0].commentId,
-      resumeSubmission: true,
-    },
   };
 }
 
