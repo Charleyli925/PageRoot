@@ -79,6 +79,18 @@ export function sidebarResolvedIntent(
   requestedIntent: string,
 ): SidebarIntent;
 
+export function conversationReadyForDocument(
+  conversation: {
+    status?: string;
+    context?: {
+      projectId?: string;
+      documentId?: string;
+    } | null;
+  } | null,
+  projectId: string,
+  documentId: string,
+): boolean;
+
 export function sidebarActionBar(options?: {
   state?: string;
   candidateVersionLabel?: string | null;

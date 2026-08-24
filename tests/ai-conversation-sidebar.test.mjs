@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   FORBIDDEN_MESSAGE_KEYS,
+  conversationReadyForDocument,
   sidebarActionBar,
   sidebarActorInitial,
   sidebarDiscussionNotice,
@@ -153,6 +154,41 @@ test("an intent that the current state does not offer falls back to discussion",
   assert.equal(sidebarResolvedIntent("ready-to-open", "modify"), "discuss");
   assert.equal(sidebarResolvedIntent("preview-discussion", "modify"), "modify");
   assert.equal(sidebarResolvedIntent("review-view", "continue"), "continue");
+});
+
+test("a reveal intent is only written directly where no load can follow it", () => {
+  const readyFor = (projectId, documentId) => ({
+    status: "ready",
+    context: { projectId, documentId, sourcePath: "/tmp/page.html" },
+  });
+  // Loaded and ready for this very Document: no load ahead of it, so a direct
+  // draft-intent write stands.
+  assert.equal(conversationReadyForDocument(readyFor("p1", "d1"), "p1", "d1"), true);
+  // First open (never loaded) and mid-load both precede a load that restores the
+  // stored draft, so the intent must be re-asserted after the load instead.
+  assert.equal(conversationReadyForDocument(null, "p1", "d1"), false);
+  assert.equal(
+    conversationReadyForDocument({
+      status: "loading",
+      context: { projectId: "p1", documentId: "d1", sourcePath: "/tmp/page.html" },
+    }, "p1", "d1"),
+    false,
+  );
+  // A Document switch deactivates the conversation while leaving the sidebar
+  // open, and a failed load leaves it closed: both are headed for the load that
+  // would quietly drop a plain write.
+  assert.equal(
+    conversationReadyForDocument({ status: "idle", context: null }, "p1", "d1"),
+    false,
+  );
+  assert.equal(
+    conversationReadyForDocument({ status: "failed", context: null }, "p1", "d1"),
+    false,
+  );
+  // Loaded, but for a Document the user is no longer on — the reopen's load
+  // would drop the write exactly the same way.
+  assert.equal(conversationReadyForDocument(readyFor("p1", "d1"), "p2", "d2"), false);
+  assert.equal(conversationReadyForDocument(readyFor("p1", "d1"), "p1", "d2"), false);
 });
 
 test("a disabled send button always says why", () => {

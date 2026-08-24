@@ -281,6 +281,23 @@ export function sidebarResolvedIntent(state, requestedIntent) {
 }
 
 /**
+ * Whether a draft-intent write can be made directly. A conversation that is
+ * loaded and ready for this very Document has no load ahead of it that would
+ * restore a stored draft over the write. Every other state does: a sidebar
+ * opened for the first time loads on becoming visible, and a Document switch
+ * closes the conversation while leaving the sidebar itself open, so the reopen
+ * that follows is headed for a load that discards a plain write.
+ */
+export function conversationReadyForDocument(conversation, projectId, documentId) {
+  return Boolean(
+    conversation
+    && conversation.status === "ready"
+    && conversation.context?.projectId === projectId
+    && conversation.context?.documentId === documentId,
+  );
+}
+
+/**
  * The action bar. Derived entirely from current product state — never from a
  * message — so a decision stays visible at any scroll position and history
  * never renders a live button.

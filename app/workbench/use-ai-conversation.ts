@@ -8,6 +8,7 @@ import type { DiscussionTurnSnapshot } from "../application/discussion-turn-sess
 import type { QoderAvailabilitySnapshot } from "../domain/qoder-availability.js";
 import type { ActiveRun } from "../domain/run-lifecycle.js";
 import {
+  conversationReadyForDocument,
   sidebarStateFromRun,
   type SidebarCatalogStatus,
   type SidebarIntent,
@@ -120,18 +121,24 @@ export function useAiConversation({
   //
   // An intent asked for here has to survive openConversation: that load brings the
   // stored draft back and would otherwise overwrite it, which is why the intent is
-  // both applied now (for an already-open sidebar) and re-asserted after the load.
+  // both applied now (for a conversation already loaded for this Document) and
+  // re-asserted after any load that may still run.
   const reveal = useCallback((intent?: SidebarIntent) => {
     if (intent) {
       controllerRef.current?.updateConversationDraftIntent(intent);
-      // Only a first open needs the re-assert below: opening triggers the load that
-      // restores the stored draft over the line above. An already-open sidebar has no
-      // such load, and recording a request there would restart the effect and cancel a
-      // discussion the Agent is still answering.
-      if (!open) setRequestedIntent(intent);
+      // Only a conversation loaded for this Document keeps the direct write above:
+      // nothing ahead of it restores a stored draft. The open flag alone must not
+      // decide this — a Document switch closes the conversation while leaving the
+      // sidebar open, and the load on reopen would quietly drop the write. Recording
+      // the request there just restarts the load effect, which holds no discussion
+      // to cancel; an already-loaded sidebar never records one, so an Agent still
+      // answering is never interrupted.
+      if (!conversationReadyForDocument(conversation, projectId, documentId)) {
+        setRequestedIntent(intent);
+      }
     }
     setOpen(true);
-  }, [controllerRef, open]);
+  }, [controllerRef, conversation, projectId, documentId]);
 
   const onDraftChange = useCallback((text: string) => {
     controllerRef.current?.updateConversationDraftText(text);
