@@ -8,6 +8,7 @@ import type { DiscussionTurnSnapshot } from "../application/discussion-turn-sess
 import type { QoderAvailabilitySnapshot } from "../domain/qoder-availability.js";
 import type { ActiveRun } from "../domain/run-lifecycle.js";
 import {
+  conversationLoadedForView,
   conversationReadyForDocument,
   sidebarStateFromRun,
   type SidebarCatalogStatus,
@@ -229,7 +230,10 @@ export function useAiConversation({
     candidateStatus: activeRun?.candidateAssessment?.status ?? null,
     failureMessage: activeRun?.error ?? null,
     pendingCommentCount,
-    loading: conversation?.status === "loading",
+    // An explicit allowlist of settled loads (see conversationLoadedForView):
+    // the empty-state copy must never appear before the load settles, because
+    // the session drops draft writes until it has published a conversation.
+    loading: !conversationLoadedForView(conversation),
     discussion: discussionTurn,
     onDraftChange,
     onIntentChange,

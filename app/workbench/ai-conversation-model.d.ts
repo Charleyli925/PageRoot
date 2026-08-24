@@ -96,6 +96,14 @@ export function conversationReadyForDocument(
   documentId: string,
 ): boolean;
 
+export function conversationLoadedForView(conversation: {
+  status?: string;
+  context?: {
+    projectId?: string;
+    documentId?: string;
+  } | null;
+} | null): boolean;
+
 export function sidebarActionBar(options?: {
   state?: string;
   candidateVersionLabel?: string | null;

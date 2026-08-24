@@ -298,6 +298,25 @@ export function conversationReadyForDocument(conversation, projectId, documentId
 }
 
 /**
+ * Whether the conversation stream has settled, so the sidebar may show its
+ * loaded content — including the empty state. Loaded is an explicit allowlist:
+ * a load that settled with a conversation ("ready"), or one that settled
+ * without a conversation while the Document context it loaded for is still
+ * attached ("idle" with a context). Everything else reads as not loaded: a
+ * null snapshot, a load in flight, the contextless idle the session publishes
+ * on subscribe and on deactivate, a failed load, or a status a future version
+ * adds. Fail-safe on purpose — the session drops draft writes until it has
+ * published a conversation, so the empty-state copy must never invite typing
+ * before the load settles: that text is silently lost to the load that
+ * follows.
+ */
+export function conversationLoadedForView(conversation) {
+  if (!conversation) return false;
+  if (conversation.status === "ready") return true;
+  return conversation.status === "idle" && conversation.context != null;
+}
+
+/**
  * The action bar. Derived entirely from current product state — never from a
  * message — so a decision stays visible at any scroll position and history
  * never renders a live button.
