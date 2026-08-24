@@ -2748,11 +2748,12 @@ test("project resources drain edited rules before leaving", async () => {
   }
 });
 
-// Unquarantined from #281: the relink toast click below now confirms the
-// handler actually ran instead of trusting Playwright's click result. On the
-// slow runner the toast button reflows between mousedown and mouseup, the
-// browser then drops the click, and the case used to time out on the flex-copy
-// host that only the handler's canvasMode("edit") write can reveal.
+// Unquarantined and hardened by the #281 product fix: the relink action now
+// lives on the persistent comment-rail card instead of a toast button, which
+// could be detached mid-click by a reflow window with no retry loop for a
+// human. The card survives reflows, so its button-state flip is a
+// deterministic oracle and the original send still resumes after every
+// target is re-proven.
 test("multiple orphaned comments relink in sequence and resume the original send", async () => {
   test.setTimeout(120_000);
   const fixture = createSourceFixture("orphaned-comments-resume-send.html");
@@ -2832,26 +2833,19 @@ test("multiple orphaned comments relink in sequence and resume the original send
 
     await activeLaunch.page.getByRole("button", { name: /AI 对话/u }).click();
     await chooseClipboardDelivery(activeLaunch.page);
-    await expect(activeLaunch.page.getByText("2 条评论需要重新定位", { exact: true }))
+    // The relink entry is a persistent card on the comment rail, not a toast
+    // button: a toast could be detached mid-click by a reflow window and a
+    // human has no retry loop (#281). The rail is outside the canvas flow, so
+    // the card's button-state flip ("正在等待选择…") is the deterministic
+    // oracle that the handler ran; no re-click loop is needed.
+    const relinkCard = activeLaunch.page.locator(".comment-rail .rail-relink-status");
+    await expect(relinkCard).toContainText("2 条评论需要重新定位");
+    await relinkCard.getByRole("button", { name: "开始重新定位" }).click();
+    await expect(relinkCard.getByRole("button", { name: "正在等待选择…" }))
       .toBeVisible();
-    // A click Playwright reports as performed can still be lost by the page:
-    // click only fires when mousedown and mouseup land on the same element,
-    // and on a slow runner the toast button reflowed between the two, so the
-    // React handler never ran and the toast stayed (#281). The handler's
-    // first statement clears the toast, so its disappearance proves it ran;
-    // re-clicking against that deterministic oracle is targeted, not a retry
-    // of the case.
-    const relinkNotice = activeLaunch.page
-      .getByText("2 条评论需要重新定位", { exact: true });
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      await activeLaunch.page.getByRole("button", { name: "开始重新定位" }).click();
-      if (await relinkNotice.isHidden()) break;
-    }
-    await expect(relinkNotice).toBeHidden();
 
     await recoveredFrame.locator(caseSelector("flex-copy")).click();
-    await expect(activeLaunch.page.getByText("1 条评论需要重新定位", { exact: true }))
-      .toBeVisible();
+    await expect(relinkCard).toContainText("1 条评论需要重新定位");
     await expect(recoveredComments.filter({ hasText: firstComment }))
       .toHaveAttribute("data-resolution", "exact");
     await expect(recoveredComments.filter({ hasText: secondComment }))
