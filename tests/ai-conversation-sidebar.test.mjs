@@ -16,6 +16,7 @@ import {
   sidebarModePresentation,
   sidebarResolvedIntent,
   sidebarSendState,
+  sidebarCopyTaskState,
   sidebarRunProgress,
   sidebarStateFromRun,
 } from "../app/workbench/ai-conversation-model.js";
@@ -420,6 +421,57 @@ test("the Composer sends discussion only and points modify at its real entry", (
   });
   assert.equal(continued.canSend, false);
   assert.equal(continued.reason, "先采用当前结果才能继续修改");
+});
+
+test("copying the task stays available when the model catalog is not", () => {
+  // The send button needs Qoder; the clipboard beside it does not. A host
+  // without the CLI is the common case, and PRD §10.2 keeps the copy path
+  // open through every catalog status rather than greying out both buttons.
+  for (const catalogStatus of ["checking", "auth-required", "not-installed", "unavailable"]) {
+    const send = sidebarSendState({
+      state: "preview-discussion",
+      catalogStatus,
+      intent: "modify",
+      pendingCommentCount: 1,
+    });
+    assert.equal(send.canSend, false, `${catalogStatus} must still block the send button`);
+    const copy = sidebarCopyTaskState({
+      state: "preview-discussion",
+      pendingCommentCount: 1,
+    });
+    assert.deepEqual(
+      copy,
+      { canCopy: true, reason: null },
+      `${catalogStatus} must not take the clipboard path down with the catalog`,
+    );
+  }
+});
+
+test("copying still needs a quiet round with comments to freeze", () => {
+  // With nothing written there is nothing to hand to any Agent.
+  const empty = sidebarCopyTaskState({ state: "preview-discussion", pendingCommentCount: 0 });
+  assert.equal(empty.canCopy, false);
+  assert.equal(empty.reason, "先在编辑模式写下评论，AI 会按评论改");
+
+  // A round already in flight owns the comments; a second delivery of the
+  // same round must wait for it.
+  const queued = sidebarCopyTaskState({ state: "preview-discussion", queued: true, pendingCommentCount: 2 });
+  assert.equal(queued.canCopy, false);
+  assert.equal(queued.reason, "正在等待上一个任务完成");
+  for (const state of ["processing", "validating", "promoting"]) {
+    const running = sidebarCopyTaskState({ state, pendingCommentCount: 2 });
+    assert.equal(running.canCopy, false, `${state} must block copying`);
+    assert.ok(running.reason, `${state} must say why copying is unavailable`);
+  }
+
+  // Review is read-only: the decision bar owns the next step there.
+  const reviewing = sidebarCopyTaskState({ state: "review-view", pendingCommentCount: 2 });
+  assert.equal(reviewing.canCopy, false);
+  assert.ok(reviewing.reason);
+
+  // Settled without a change keeps the comments, so the user may re-send.
+  const settled = sidebarCopyTaskState({ state: "no-change", pendingCommentCount: 2 });
+  assert.equal(settled.canCopy, true);
 });
 
 test("an interrupted discussion turn is never presented as a complete answer", () => {

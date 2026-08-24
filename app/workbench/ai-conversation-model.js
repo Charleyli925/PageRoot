@@ -504,6 +504,48 @@ export function sidebarSendState({
 }
 
 /**
+ * Whether the clipboard delivery beside the send button can run, and the reason
+ * when it cannot.
+ *
+ * Copying is the other branch of the same modification round (PRD §11.4): it
+ * freezes the page's comments into a Request and writes the clipboard, and
+ * neither step consults Qoder. The send button guards on the model catalog
+ * because the Agent path needs it; applying that guard here would take the
+ * clipboard down with an unreadable catalog — PRD §10.2 keeps 复制任务 available
+ * through every catalog status, and the old delivery dialog's copy option never
+ * required the CLI either. What copying does need is the round itself: no round
+ * in flight, and comments to freeze.
+ */
+export function sidebarCopyTaskState({
+  state = "preview-discussion",
+  queued = false,
+  pendingCommentCount = 0,
+} = {}) {
+  if (state === "review-view") {
+    return {
+      canCopy: false,
+      reason: "正在审阅 AI 候选，采纳或返回后可继续对话",
+    };
+  }
+  if (state === "processing" || state === "validating") {
+    return { canCopy: false, reason: "Qoder 完成本轮后可发送" };
+  }
+  if (state === "promoting") {
+    return { canCopy: false, reason: "正在采用候选版本" };
+  }
+  if (queued) {
+    return { canCopy: false, reason: "正在等待上一个任务完成" };
+  }
+  if (pendingCommentCount <= 0) {
+    return {
+      canCopy: false,
+      reason: "先在编辑模式写下评论，AI 会按评论改",
+    };
+  }
+  return { canCopy: true, reason: null };
+}
+
+/**
  * The Composer's model line.
  *
  * PageRoot only names a model when it actually knows one. Saying "no models

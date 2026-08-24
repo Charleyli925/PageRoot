@@ -16,6 +16,7 @@ import {
   sidebarDeliveryDisclosure,
   sidebarRunProgress,
   sidebarSendState,
+  sidebarCopyTaskState,
   type SidebarCatalogStatus,
   type SidebarIntent,
 } from "./ai-conversation-model.js";
@@ -134,6 +135,10 @@ export default function AiConversationSidebar({
       || discussion?.status === "cancelling",
     pendingCommentCount,
   });
+  // The clipboard button does not read the model catalog: copying is a branch
+  // of the same round that never consults Qoder, so an unreadable catalog must
+  // not grey it out with the send button it sits beside.
+  const copyTask = sidebarCopyTaskState({ state, queued, pendingCommentCount });
   const disclosure = sidebarDeliveryDisclosure(activeIntent);
   const runProgress = sidebarRunProgress({ state, steps: runSteps, agentText });
   const draftNotice = sidebarDraftNotice(state);
@@ -541,7 +546,7 @@ export default function AiConversationSidebar({
               type="button"
               className={styles.copyTask}
               data-testid="ai-conversation-copy-task"
-              disabled={!send.canSend}
+              disabled={!copyTask.canCopy}
               onClick={() => onCopyTask()}
             >
               复制给别的 AI

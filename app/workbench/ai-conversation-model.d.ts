@@ -52,6 +52,11 @@ export type SidebarSendState = {
   reason: string | null;
 };
 
+export type SidebarCopyTaskState = {
+  canCopy: boolean;
+  reason: string | null;
+};
+
 export type SidebarCatalogStatus =
   | "checking"
   | "ready"
@@ -135,6 +140,12 @@ export function sidebarSendState(options?: {
   discussionBusy?: boolean;
   pendingCommentCount?: number;
 }): SidebarSendState;
+
+export function sidebarCopyTaskState(options?: {
+  state?: string;
+  queued?: boolean;
+  pendingCommentCount?: number;
+}): SidebarCopyTaskState;
 
 export function sidebarStateFromRun(options?: {
   activeRun?: { status?: string } | null;
