@@ -1357,21 +1357,6 @@ export default function Workbench() {
   const [reviewPreparing, setReviewPreparing] = useState(false);
   const [openingReadyVersion, setOpeningReadyVersion] = useState(false);
   const [relinkingTarget, setRelinkingTarget] = useState<string | null>(null);
-  // A relink is completed on the edit canvas: the user clicks the new target
-  // there. Any preview transition that races the relink intent strands the
-  // round behind a hidden surface with no way forward, so the invariant is
-  // restored reactively instead of trusting every canvasMode writer to uphold
-  // it. Relink is a modal task anyway: switching to preview mid-relink had no
-  // path back into it.
-  useEffect(() => {
-    if (!relinkingTarget || canvasMode === "edit") return;
-    const diagWindow = window as Window & { __relinkDiag?: string[] };
-    diagWindow.__relinkDiag = [
-      ...(diagWindow.__relinkDiag ?? []),
-      `restore-edit@${performance.now().toFixed(0)}`,
-    ];
-    setCanvasMode("edit");
-  }, [relinkingTarget, canvasMode]);
   const [runtimeCapabilitiesReady, setRuntimeCapabilitiesReady] = useState(false);
   const [browserPreviewOnly, setBrowserPreviewOnly] = useState(false);
   const qoderHandoffState = runSnapshot.activeHandoff;

@@ -2840,7 +2840,19 @@ test("multiple orphaned comments relink in sequence and resume the original send
     await chooseClipboardDelivery(activeLaunch.page);
     await expect(activeLaunch.page.getByText("2 条评论需要重新定位", { exact: true }))
       .toBeVisible();
-    await activeLaunch.page.getByRole("button", { name: "开始重新定位" }).click();
+    // A click that Playwright reports as performed can still be lost by the
+    // page: click only fires when mousedown and mouseup land on the same
+    // element, and on a slow CI host the button reflowed between the two, so
+    // the React handler never ran and the toast stayed (observed with the
+    // TEMP-DIAG trace: relinkDiag null after the click). The handler's first
+    // statement clears the toast, so its disappearance proves it ran.
+    const relinkNotice = activeLaunch.page
+      .getByText("2 条评论需要重新定位", { exact: true });
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await activeLaunch.page.getByRole("button", { name: "开始重新定位" }).click();
+      if (await relinkNotice.isHidden()) break;
+    }
+    await expect(relinkNotice).toBeHidden();
 
     // TEMP-DIAG: CI-only visibility failure triage on the flex-copy host.
     const relinkSurfaceState = await activeLaunch.page.evaluate(() => {
