@@ -77,12 +77,14 @@ async function addReportComment(page, sourcePath) {
 
 async function submitToAi(page, electronApp) {
   await electronApp.evaluate(({ clipboard }) => clipboard.clear());
-  await page.getByRole("button", { name: /发给 AI/u }).click();
-  const dialog = page.getByRole("dialog", { name: "怎样交给 AI？" });
-  await expect(dialog).toBeVisible();
-  await dialog.getByRole("button", { name: /复制任务/u }).click();
-  await expect(page.getByText("AI任务已经复制，直接粘贴给 AI Agent", { exact: true }))
-    .toBeVisible();
+  // The header opens the conversation; the destination and the copied state both live
+  // inside it now, so the dialog over the page is gone.
+  await page.getByRole("button", { name: /AI 对话/u }).click();
+  const sidebar = page.getByTestId("ai-conversation-sidebar");
+  await expect(sidebar).toBeVisible();
+  await sidebar.getByRole("button", { name: /复制给别的 AI/u }).click();
+  await expect(page.getByTestId("ai-conversation-action-bar"))
+    .toContainText("任务已复制，等你的 AI 改完");
   let promptPath = "";
   await expect.poll(async () => {
     const copied = await electronApp.evaluate(({ clipboard }) => clipboard.readText());

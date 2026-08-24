@@ -5,7 +5,8 @@ export type SidebarState =
   | "validating"
   | "ready-to-open"
   | "review-view"
-  | "promoting";
+  | "promoting"
+  | "no-change";
 
 export type SidebarIntent = "discuss" | "modify" | "continue";
 
@@ -51,6 +52,11 @@ export type SidebarSendState = {
   reason: string | null;
 };
 
+export type SidebarCopyTaskState = {
+  canCopy: boolean;
+  reason: string | null;
+};
+
 export type SidebarCatalogStatus =
   | "checking"
   | "ready"
@@ -60,7 +66,10 @@ export type SidebarCatalogStatus =
 
 export function sidebarModePresentation(
   state: string,
+  intent?: SidebarIntent | string,
 ): SidebarModePresentation;
+
+export function sidebarActorInitial(actor: string): string;
 
 export function sidebarActorLabel(actor: string): string;
 
@@ -75,12 +84,52 @@ export function sidebarResolvedIntent(
   requestedIntent: string,
 ): SidebarIntent;
 
+export function conversationReadyForDocument(
+  conversation: {
+    status?: string;
+    context?: {
+      projectId?: string;
+      documentId?: string;
+    } | null;
+  } | null,
+  projectId: string,
+  documentId: string,
+): boolean;
+
 export function sidebarActionBar(options?: {
   state?: string;
   candidateVersionLabel?: string | null;
   candidateStatus?: string | null;
   failureMessage?: string | null;
+  deliveryMode?: "qoder-acp" | "clipboard";
 }): SidebarActionBar | null;
+
+export type SidebarRunProgressStep = {
+  key: string;
+  label: string;
+  detail: string | null;
+  state: string;
+};
+
+export type SidebarRunProgress = {
+  steps: readonly SidebarRunProgressStep[];
+  headline: string | null;
+  /** What the Agent is saying while it works; null when it has said nothing. */
+  narration: string | null;
+  /** The same words split into the paragraphs the Agent actually wrote. */
+  narrationBlocks: readonly string[] | null;
+  /** The stage actually running, for callers that need to name it. */
+  liveLabel: string | null;
+  tone: "attention" | "quiet";
+};
+
+export function sidebarRunProgress(options?: {
+  state?: string;
+  steps?: readonly unknown[];
+  agentText?: string;
+}): SidebarRunProgress | null;
+
+export function sidebarDeliveryDisclosure(intent?: SidebarIntent | string): string | null;
 
 export function sidebarSendState(options?: {
   state?: string;
@@ -89,7 +138,14 @@ export function sidebarSendState(options?: {
   queued?: boolean;
   intent?: SidebarIntent;
   discussionBusy?: boolean;
+  pendingCommentCount?: number;
 }): SidebarSendState;
+
+export function sidebarCopyTaskState(options?: {
+  state?: string;
+  queued?: boolean;
+  pendingCommentCount?: number;
+}): SidebarCopyTaskState;
 
 export function sidebarStateFromRun(options?: {
   activeRun?: { status?: string } | null;
@@ -118,12 +174,16 @@ export type SidebarLiveReply = {
   streaming: boolean;
 };
 
-export function sidebarLiveReply(discussion?: {
-  status?: string;
-  replyText?: string;
-  replyTruncated?: boolean;
-  interrupted?: boolean;
-} | null): SidebarLiveReply | null;
+export function sidebarLiveReply(
+  discussion?: {
+    status?: string;
+    turnId?: string | null;
+    replyText?: string;
+    replyTruncated?: boolean;
+    interrupted?: boolean;
+  } | null,
+  messages?: readonly unknown[],
+): SidebarLiveReply | null;
 
 export type SidebarDiscussionNotice = {
   tone: "progress" | "attention";

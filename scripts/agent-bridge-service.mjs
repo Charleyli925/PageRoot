@@ -27,6 +27,8 @@ import {
 
 export const TRUSTED_LOCAL_AGENT_POLICY_VERSION = "trusted-local-agent-v1";
 
+const AGENT_VISIBLE_TEXT_LIMIT = 64 * 1024;
+
 const DRIVER = "qoder-acp";
 const MIN_QODER_VERSION = "1.1.27";
 const PREFLIGHT_TTL_MS = 2 * 60_000;
@@ -696,6 +698,7 @@ function publicSession(entry) {
     agentName: entry.agentName || null,
     agentVersion: entry.agentVersion || null,
     eventCount: entry.eventCount,
+    visibleText: entry.visibleText || "",
     retryable: entry.retryable === true,
     ...(entry.errorCode ? { errorCode: entry.errorCode } : {}),
     ...(entry.errorMessage ? { errorMessage: entry.errorMessage } : {}),
@@ -1014,6 +1017,7 @@ export class AgentBridgeService {
       keepLease: false,
       controller,
       promise: null,
+      visibleText: "",
     };
     this.#sessions.set(key, entry);
 
@@ -1021,6 +1025,26 @@ export class AgentBridgeService {
       if (this.#sessions.get(key) !== entry) return;
       entry.eventCount = Math.min(MAX_PUBLIC_SESSION_EVENTS, entry.eventCount + 1);
       entry.phase = phaseForEvent(event, entry.phase);
+      // ADR 0037: what the Agent says while it works, kept bounded here as well as in
+      // the driver so a misbehaving Agent cannot grow this session record without
+      // limit. It is narration only and never affects the Candidate verdict.
+      if (event?.kind === "visible-text" && typeof event.text === "string") {
+        const room = AGENT_VISIBLE_TEXT_LIMIT - entry.visibleText.length;
+        if (room > 0) {
+          /*
+           * Chunk boundaries are not word boundaries. Joining them raw produced
+           * "structure.Now" and "sequence.I've", so a sentence that ended one chunk ran
+           * into the one that began the next. A single space is added only where the
+           * seam is unambiguous: a sentence end meeting a new sentence's start. Code,
+           * URLs and CJK text never match that shape and are left exactly as sent.
+           */
+          const seamNeedsSpace =
+            /[.!?]$/u.test(entry.visibleText) && /^[A-Z`]/u.test(event.text);
+          if (seamNeedsSpace && room > 1) entry.visibleText += " ";
+          const left = AGENT_VISIBLE_TEXT_LIMIT - entry.visibleText.length;
+          if (left > 0) entry.visibleText += event.text.slice(0, left);
+        }
+      }
       if (event?.kind === "initialized") {
         entry.state = "running";
         entry.agentName = cleanText(event.agentName) || "Qoder CLI";

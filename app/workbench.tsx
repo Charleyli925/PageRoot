@@ -43,7 +43,7 @@ import type {
 import type { DesktopEditRuntimeApi } from "./components/desktop-edit-runtime-api";
 import type { DesktopUiPreferencesApi } from "./components/desktop-ui-preferences-api";
 import AboutPageRootDialog from "./components/AboutPageRootDialog";
-import { AgentDeliveryButton, type AgentDeliveryMode } from "./components/AgentDeliveryDialog";
+import { AgentDeliveryButton, type AgentDeliveryMode } from "./components/AgentDeliveryButton";
 import CancelAiRunDialog from "./components/CancelAiRunDialog";
 import FirstEditGuideCard from "./components/FirstEditGuideCard";
 import HtmlInteractionPreview, {
@@ -724,6 +724,28 @@ export default function Workbench() {
   const [canvasMode, setCanvasMode] = useState<CanvasMode>("edit");
   // The AI conversation sidebar. All of its React state lives in this hook, so
   // the Workbench gains one hook call and no extra budget.
+  // Declared before the conversation hook because the sidebar stays docked
+  // through review: useAiConversation reads this to keep the thread alive.
+  const [readyReviewSession, setReadyReviewSession] =
+    useState<ReadyReviewSession | null>(null);
+
+  /*
+   * The process panel is out of the user flow: every stage, every decision and every
+   * failure message now lives in the AI conversation, and a panel thrown over the
+   * page duplicated all of it. The component and its drawer branch are left intact
+   * so flipping this one flag brings it back; nothing in the flow depends on it.
+   */
+  const PROCESS_PANEL_IN_FLOW = false;
+  const openProcessPanel = useCallback(() => {
+    if (PROCESS_PANEL_IN_FLOW) setDrawer("handoff");
+  }, [PROCESS_PANEL_IN_FLOW]);
+
+  // The decision bar acts through a ref: its handlers are defined further down,
+  // and the conversation hook is composed before them.
+
+  const generateRequestRef = useRef<
+    ((mode: AgentDeliveryMode) => void) | null
+  >(null);
   const aiConversation = useAiConversation({
     controllerRef: workspaceControllerRef,
     conversation: workspaceControllerSnapshot?.conversation ?? null,
@@ -732,13 +754,28 @@ export default function Workbench() {
     // The header's mode comes from Request authority, not from a local guess.
     activeRun: runSnapshot.activeRun,
     submissionPending: runSnapshot.submissionPending,
+    // Review is the same workbench with a different Canvas: the thread stays
+    // docked and read-only instead of disappearing and coming back.
+    reviewing: Boolean(readyReviewSession),
     canvasMode,
     projectId: projectId ?? "",
     documentId: documentId ?? "",
     sourcePath: sourcePath ?? "",
     sourceSha256,
     pendingCommentCount: comments.length,
+    /*
+     * The same submission the header button performs. One owner, two surfaces.
+     *
+     * Reached through a ref because generateRequest is declared far below this call.
+     * Naming it directly here left React Compiler with a call to a function it had not
+     * yet analysed, so it had to assume that call could mutate anything — and that
+     * assumption cost every state setter in this component its stability, skipping
+     * optimisation for the whole component.
+     */
+    onDeliverModification: (mode) => generateRequestRef.current?.(mode),
   });
+  // The run-event effect reports a submitted round by opening the thread. It is
+  // reached through a ref so that effect keeps its curated dependency list.
   const editRuntimeSnapshot = workspaceControllerSnapshot?.editRuntime ?? null;
   const editRuntimePhase = editRuntimeSnapshot?.phase || "static";
   const editRuntimePreparing = (
@@ -1295,8 +1332,6 @@ export default function Workbench() {
   const [cancelRunConfirmationKey, setCancelRunConfirmationKey] =
     useState<string | null>(null);
   const [reviewPreparing, setReviewPreparing] = useState(false);
-  const [readyReviewSession, setReadyReviewSession] =
-    useState<ReadyReviewSession | null>(null);
   const [openingReadyVersion, setOpeningReadyVersion] = useState(false);
   const [relinkingTarget, setRelinkingTarget] = useState<string | null>(null);
   const [runtimeCapabilitiesReady, setRuntimeCapabilitiesReady] = useState(false);
@@ -1476,21 +1511,22 @@ export default function Workbench() {
       if (runEvent.type === "run-submission-started" || runEvent.type === "run-submitted") {
         if (runEvent.current) {
           setHandoffPreviewOpen(false);
-          setCanvasMode("edit");
-          setDrawer("handoff");
+          // Reported in the thread, not by a drawer over the page.
+          setCanvasMode("preview");
+          aiConversation.reveal();
           void workspaceControllerRef.current?.dismissFirstEditGuide();
         }
         return;
       }
       if (runEvent.type === "run-submission-uncertain") {
         if (runEvent.current) {
-          setDrawer("handoff");
+          openProcessPanel();
           void workspaceControllerRef.current?.dismissFirstEditGuide();
         }
         return;
       }
       if (runEvent.type === "run-submission-failed") {
-        if (runEvent.current && runEvent.run) setDrawer("handoff");
+        if (runEvent.current && runEvent.run) openProcessPanel();
         return;
       }
       if (runEvent.type === "run-handoff-failed") {
@@ -1501,14 +1537,29 @@ export default function Workbench() {
             tone: "error",
             sticky: true,
             dedupeKey: `qoder-handoff:${runEvent.run.sourcePath}`,
-            action: { id: "open-handoff", label: "查看处理详情" },
+            action: { id: "open-handoff", label: "回到 AI 对话" },
           });
         }
         return;
       }
       if (runEvent.type === "run-agent-failed") {
         if (runEvent.current && runEvent.run) {
-          setDrawer("handoff");
+          // A refused *retry* is not a failed round. AGENT_RETRY_OUTPUT_PRESENT means
+          // an earlier attempt already produced output, which the Bridge correctly
+          // refuses to overwrite — but when that output is a usable candidate, the
+          // failure copy ("请结束本轮后重新发送") tells the user to throw away the very
+          // result the decision bar is asking them to accept. Both statements were on
+          // screen at once and the user could not tell whether the round worked.
+          if (runEvent.run.candidateVersionLabel) {
+            setToast({
+              title: "这一轮已经有结果了",
+              message: "重复的发送已被忽略；先决定要不要采纳这一版。",
+              tone: "success",
+              dedupeKey: `qoder-agent:${runEvent.run.requestId}`,
+            });
+            return;
+          }
+          openProcessPanel();
           setToast({
             title: "Qoder CLI 没有完成本轮",
             message: runEvent.message
@@ -1517,7 +1568,7 @@ export default function Workbench() {
             sticky: true,
             disposition: "user-choice",
             dedupeKey: `qoder-agent:${runEvent.run.requestId}`,
-            action: { id: "open-handoff", label: "查看处理详情" },
+            action: { id: "open-handoff", label: "回到 AI 对话" },
           });
         }
         return;
@@ -1537,7 +1588,17 @@ export default function Workbench() {
             || state === "awaiting-conflict-resolution"
             || state === "recovering-transaction"
           ) {
-            setDrawer("handoff");
+            // A finished round is reported by the conversation: the sidebar moves to
+            // "结果 · 等待决定" and its action bar carries the decision. Only the
+            // states the user cannot act on from there still raise the drawer, and
+            // they raise it because the details live nowhere else.
+            if (
+              state === "error"
+              || state === "awaiting-conflict-resolution"
+              || state === "recovering-transaction"
+            ) {
+              openProcessPanel();
+            }
             if (state === "ready-to-open" && toastRef.current?.dedupeKey === "ai-submit") {
               setToast(null);
             }
@@ -1549,7 +1610,7 @@ export default function Workbench() {
                 sticky: true,
                 disposition: "user-choice",
                 dedupeKey: `ai-validation-error:${run.requestId}`,
-                action: { id: "open-handoff", label: "查看详情" },
+                action: { id: "open-handoff", label: "回到 AI 对话" },
               });
             }
           }
@@ -1723,7 +1784,7 @@ export default function Workbench() {
         if (projectEvent.showHandoff) {
           setHandoffPreviewOpen(false);
           setCanvasMode("edit");
-          setDrawer("handoff");
+          openProcessPanel();
         }
         return;
       }
@@ -4528,7 +4589,7 @@ export default function Workbench() {
 
   const requestUserFlush = useCallback((fromDeferred = false) => {
     if (interactionLocked) {
-      if (runInProgress) setDrawer("handoff");
+      if (runInProgress) openProcessPanel();
       return;
     }
     if (
@@ -5050,7 +5111,7 @@ export default function Workbench() {
 
   const openGlobalCommentComposer = useCallback(() => {
     if (interactionLocked) {
-      if (runInProgress) setDrawer("handoff");
+      if (runInProgress) openProcessPanel();
       return;
     }
     setCanvasMode("edit");
@@ -5726,7 +5787,7 @@ export default function Workbench() {
       || currentDocument.persistState === "conflict"
     ) return;
     if (currentRun.activeLocked) {
-      setDrawer("handoff");
+      openProcessPanel();
       void workspaceControllerRef.current?.dismissFirstEditGuide();
       return;
     }
@@ -5771,7 +5832,7 @@ export default function Workbench() {
       });
     if (outcome.status === "succeeded" || outcome.status === "stale") return outcome;
     if (outcome.status === "unknown") {
-      setDrawer("handoff");
+      openProcessPanel();
       void workspaceControllerRef.current?.dismissFirstEditGuide();
       return outcome;
     }
@@ -5800,7 +5861,7 @@ export default function Workbench() {
         return;
       }
       if (outcome.code === "RUN_SUBMISSION_LOCKED") {
-        setDrawer("handoff");
+        openProcessPanel();
         void workspaceControllerRef.current?.dismissFirstEditGuide();
         return;
       }
@@ -5871,6 +5932,14 @@ export default function Workbench() {
     };
   }, [generateRequest]);
 
+  // Published for the conversation, which is constructed above this declaration and
+  // therefore cannot name it directly.
+  useEffect(() => {
+    generateRequestRef.current = (mode: AgentDeliveryMode) => {
+      void generateRequest(mode);
+    };
+  }, [generateRequest]);
+
   const activateReadyResult = useCallback(async (
     { reviewed = false }: { reviewed?: boolean } = {},
   ) => {
@@ -5902,7 +5971,7 @@ export default function Workbench() {
       performance.mark("pageroot:accept:activated");
       if (outcome.status !== "succeeded") {
         if (outcome.status !== "stale") {
-          setDrawer("handoff");
+          openProcessPanel();
           setToast({
             title: "最新版暂时无法打开",
             message: outcome.reason,
@@ -5964,14 +6033,14 @@ export default function Workbench() {
       performance.mark("pageroot:accept:ui-committed");
       if (result.protocolViolation) {
         const warning = "内部 AI 的临时输出在最终化后又被修改；已提交版本本身未受影响。";
-        setDrawer("handoff");
+        openProcessPanel();
         setToast({
           title: `${result.candidateLabel} 已打开，但需要检查`,
           message: `${warning} 新版本内容已经核对一致；详情已保留在本轮处理记录中。`,
           tone: "warning",
           sticky: true,
           dedupeKey: "current-version-result",
-          action: { id: "open-handoff", label: "查看处理详情" },
+          action: { id: "open-handoff", label: "回到 AI 对话" },
         });
       } else if (result.verificationWarning) {
         setToast({
@@ -6230,7 +6299,7 @@ export default function Workbench() {
     const outcome = await requiredWorkspaceController(workspaceController)
       .resolveRunConflict({ run: activeRun, action });
     if (outcome.status !== "succeeded") {
-      if (outcome.status !== "stale") setDrawer("handoff");
+      if (outcome.status !== "stale") openProcessPanel();
       return;
     }
     const result = outcome.value as {
@@ -6892,7 +6961,7 @@ export default function Workbench() {
     if (!workspaceControllerRef.current?.reopenRecentRunOutcome(sourcePath)) return;
     setHandoffPreviewOpen(false);
     setCanvasMode("edit");
-    setDrawer("handoff");
+    openProcessPanel();
   };
   const handleToastAction = (action: ToastAction) => {
     setToast(null);
@@ -6909,7 +6978,8 @@ export default function Workbench() {
         void exportCurrentHtml();
         return;
       case "open-handoff":
-        setDrawer("handoff");
+        setCanvasMode("preview");
+        aiConversation.reveal();
         return;
       case "retry-history":
         void requestSourceHistoryAction(
@@ -6984,6 +7054,38 @@ export default function Workbench() {
     }
   };
 
+  // Same authority the process drawer used, reached from the conversation so the
+  // decision no longer requires a panel over the page.
+  const handleAiDecision = useCallback((actionId: string) => {
+    if (actionId === "review") { void reviewReadyResult(); return; }
+    if (actionId === "adopt") { void activateReadyResult(); return; }
+    if (actionId === "recopy") {
+      const controller = workspaceControllerRef.current;
+      if (!controller || !activeRun) return;
+      // Copying is invisible by nature: without a word the user cannot tell an
+      // successful re-copy from a dead button.
+      void (async () => {
+        const outcome = await controller.copyRunHandoff({ run: activeRun });
+        setToast(outcome && outcome.status === "succeeded"
+          ? {
+            title: "本轮要求已复制",
+            message: "粘贴给你的 AI；改完回到这里。",
+            tone: "success",
+            dedupeKey: "handoff-recopied",
+          }
+          : {
+            title: "复制没有成功",
+            // 「查看本轮」 no longer exists: the round lives in this conversation.
+            message: "再试一次；本轮要求就在这条对话里。",
+            tone: "warning",
+            dedupeKey: "handoff-recopied",
+          });
+      })();
+      return;
+    }
+    if (actionId === "cancel" || actionId === "dismiss") requestActiveRunEnd();
+  }, [activateReadyResult, activeRun, requestActiveRunEnd, reviewReadyResult, setToast]);
+
   // The review compares immutable snapshots prepared against the
   // pre-promotion source identity. Accepting promotes the Working Copy to a
   // new path while this overlay is still visible; the live path would rebuild
@@ -7025,6 +7127,16 @@ export default function Workbench() {
         });
       }}
       onRevealAiTask={() => void revealAiTaskInFinder()}
+      sidebar={aiConversation.visible ? (
+        <AiConversationSidebar
+          {...aiConversation.sidebarProps}
+              onAction={handleAiDecision}
+          runSteps={processSteps}
+          deliveryMode={currentAgentDeliveryMode}
+          agentText={currentAgentDeliveryState?.visibleText || ""}
+        />
+      ) : null}
+      onShowSidebar={aiConversation.reveal}
     />
   ) : null;
 
@@ -7281,12 +7393,34 @@ export default function Workbench() {
         </div>
 
         <WorkbenchHeaderActions aria-label="画布模式、项目和版本操作">
-          <div className="canvas-mode-switch" role="group" aria-label="画布模式">
+          <div
+            className="canvas-mode-switch"
+            role="group"
+            aria-label="画布模式"
+            /*
+             * The reason lives on the group, not on the disabled button: a disabled
+             * element dispatches no hover, so its own title never surfaces and only a
+             * screen reader ever heard it. Hovering the group works, and nothing is
+             * printed in the bar when there is no reason to give.
+             */
+            title={runInProgress ? "本轮还在进行，结束或采纳后可回到编辑" : undefined}
+          >
             <button
               type="button"
               aria-pressed={canvasMode === "edit"}
               disabled={browserPreviewOnly || runInProgress || viewMode === "history"}
-              title={browserPreviewOnly ? "浏览器预览为只读模式" : undefined}
+              /*
+               * A disabled control that will not say why reads as a broken control. The
+               * round in flight is the reason, and it is temporary, so the tooltip names
+               * it instead of leaving the user to guess.
+               */
+              title={
+                browserPreviewOnly
+                  ? "浏览器预览为只读模式"
+                  : runInProgress
+                    ? "本轮还在进行，结束或采纳后可回到编辑"
+                    : undefined
+              }
               onClick={() => {
                 if (externalSourcePreview) {
                   returnToEditingFromExternalPreview();
@@ -7399,24 +7533,20 @@ export default function Workbench() {
             </button>
           ) : null}
           <AgentDeliveryButton
-            status={currentQoderHandoffStatus} deliveryMode={currentAgentDeliveryMode}
-            generating={generating} runInProgress={runInProgress}
-            pendingCount={pendingSendItemCount}
-            availability={qoderAvailability}
+            status={currentQoderHandoffStatus}
+            attention={Boolean(activeRun?.candidateVersionLabel) || runInProgress}
             disabled={generating || projectHydrating || Boolean(projectLoadError)
-              || viewTransitioning || viewMode === "history" || (!runInProgress && (
-                pendingSendItemCount === 0 || interactionLocked || persistState === "failed"
-                || Boolean(draftPersistError)
-              ))}
-            onOpenRun={() => {
+              || viewTransitioning || viewMode === "history" || browserPreviewOnly}
+            onOpen={() => {
+              // One meaning: show the conversation. It carries the stages, the Agent's
+              // words and the decision, and it docks in preview, so a round in flight
+              // never leaves the page presenting itself as editable.
+              setDrawer(null);
               setHandoffPreviewOpen(false);
-              setCanvasMode("edit");
-              setDrawer("handoff");
+              setCanvasMode("preview");
+              // The intent survives the conversation load; nothing is sent by opening.
+              aiConversation.reveal(runInProgress ? undefined : "modify");
             }}
-            onSelect={(mode) => generateRequest(mode)}
-            onRefreshAvailability={refreshQoderAvailability}
-            onCheckUsability={checkQoderUsability}
-            onCopyGuidance={copyQoderGuidance}
           />
         </WorkbenchHeaderActions>
         <input
@@ -7549,7 +7679,7 @@ export default function Workbench() {
           onAction={() => {
             setHandoffPreviewOpen(false);
             setCanvasMode("edit");
-            setDrawer("handoff");
+            openProcessPanel();
           }}
         />
       ) : viewMode === "history" ? (
@@ -7686,7 +7816,14 @@ export default function Workbench() {
 
         {aiConversation.visible ? (
           <aside className="ai-conversation-aside" aria-label="AI 对话侧栏">
-            <AiConversationSidebar {...aiConversation.sidebarProps} />
+            {/* Steps are computed below the hook, so they are handed in here. */}
+            <AiConversationSidebar
+              {...aiConversation.sidebarProps}
+              onAction={handleAiDecision}
+              runSteps={processSteps}
+              deliveryMode={currentAgentDeliveryMode}
+              agentText={currentAgentDeliveryState?.visibleText || ""}
+            />
           </aside>
         ) : null}
 

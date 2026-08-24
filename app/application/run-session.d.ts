@@ -27,6 +27,8 @@ export type RunHandoffState = {
     | "cancelled";
   phase?: string;
   agentName?: string | null;
+  /** What the Agent said while working (ADR 0037); narration with no authority. */
+  visibleText?: string;
   agentVersion?: string | null;
   errorCode?: string | null;
   errorMessage?: string | null;

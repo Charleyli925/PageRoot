@@ -1,9 +1,10 @@
 "use client";
 
-import { useMemo, useRef, type ChangeEvent } from "react";
+import { useMemo, useRef, useState, type ChangeEvent } from "react";
 
 import {
   sidebarActionBar,
+  sidebarActorInitial,
   sidebarDiscussionNotice,
   sidebarDraftNotice,
   sidebarIntentOptions,
@@ -12,7 +13,10 @@ import {
   sidebarModelLine,
   sidebarModePresentation,
   sidebarResolvedIntent,
+  sidebarDeliveryDisclosure,
+  sidebarRunProgress,
   sidebarSendState,
+  sidebarCopyTaskState,
   type SidebarCatalogStatus,
   type SidebarIntent,
 } from "./ai-conversation-model.js";
@@ -63,6 +67,14 @@ export type AiConversationSidebarProps = {
   onAction?: (actionId: string) => void;
   onOpenModelChoices?: () => void;
   onCollapse?: () => void;
+  /** Hands the same round to the clipboard instead of the local Agent. */
+  onCopyTask?: () => void;
+  /** What Qoder is saying while it works (ADR 0037). */
+  agentText?: string;
+  /** Which destination this round uses; the decision bar copy depends on it. */
+  deliveryMode?: "qoder-acp" | "clipboard";
+  /** The run's own progress steps, so a round in flight reads inside the thread. */
+  runSteps?: readonly unknown[];
 };
 
 export default function AiConversationSidebar({
@@ -88,20 +100,29 @@ export default function AiConversationSidebar({
   onAction,
   onOpenModelChoices,
   onCollapse,
+  onCopyTask,
+  deliveryMode = "qoder-acp",
+  agentText = "",
+  runSteps = [],
 }: AiConversationSidebarProps) {
   const intentOptionsRef = useRef<HTMLDivElement>(null);
-  const mode = sidebarModePresentation(state);
+  // ADR 0037 §5: the narration is collapsible in one click and the choice sticks for
+  // as long as the surface is mounted, rather than springing open on every update.
+  const [narrationOpen, setNarrationOpen] = useState(true);
   const stream = useMemo(() => sidebarMessageStream(messages), [messages]);
   const intentOptions = useMemo(() => sidebarIntentOptions(state), [state]);
   const activeIntent = sidebarResolvedIntent(state, intent);
+  // Computed after the intent because a pending modification renames the mode.
+  const mode = sidebarModePresentation(state, activeIntent);
   const actionBar = useMemo(
     () => sidebarActionBar({
       state,
       candidateVersionLabel,
       candidateStatus,
       failureMessage,
+      deliveryMode,
     }),
-    [candidateStatus, candidateVersionLabel, failureMessage, state],
+    [candidateStatus, candidateVersionLabel, deliveryMode, failureMessage, state],
   );
   const send = sidebarSendState({
     state,
@@ -112,10 +133,17 @@ export default function AiConversationSidebar({
     discussionBusy: discussion?.status === "starting"
       || discussion?.status === "running"
       || discussion?.status === "cancelling",
+    pendingCommentCount,
   });
+  // The clipboard button does not read the model catalog: copying is a branch
+  // of the same round that never consults Qoder, so an unreadable catalog must
+  // not grey it out with the send button it sits beside.
+  const copyTask = sidebarCopyTaskState({ state, queued, pendingCommentCount });
+  const disclosure = sidebarDeliveryDisclosure(activeIntent);
+  const runProgress = sidebarRunProgress({ state, steps: runSteps, agentText });
   const draftNotice = sidebarDraftNotice(state);
   const discussionNotice = sidebarDiscussionNotice(discussion);
-  const liveReply = sidebarLiveReply(discussion);
+  const liveReply = sidebarLiveReply(discussion, messages as readonly Record<string, unknown>[]);
   const modelLine = sidebarModelLine({
     catalogStatus,
     modelDisplayName,
@@ -180,7 +208,7 @@ export default function AiConversationSidebar({
       >
         {loading ? (
           <p className={styles.placeholder}>正在读取这份文档的对话…</p>
-        ) : stream.length === 0 && !liveReply ? (
+        ) : stream.length === 0 && !liveReply && !runProgress ? (
           <p className={styles.placeholder}>
             还没有对话。说说你想改哪里，或者先问问这个页面。
           </p>
@@ -194,6 +222,9 @@ export default function AiConversationSidebar({
               data-status={message.status}
               data-testid="ai-conversation-message"
             >
+              <span className={styles.avatar} aria-hidden="true">
+                {sidebarActorInitial(message.actor)}
+              </span>
               <span className={styles.actor}>{message.actorLabel}</span>
               <p className={styles.text}>{message.text}</p>
               {message.truncated ? (
@@ -219,6 +250,9 @@ export default function AiConversationSidebar({
             data-status={liveReply.streaming ? "streaming" : "completed"}
             data-testid="ai-conversation-live-reply"
           >
+            <span className={styles.avatar} aria-hidden="true">
+              {sidebarActorInitial(liveReply.actor)}
+            </span>
             <span className={styles.actor}>{liveReply.actorLabel}</span>
             <p className={styles.text}>{liveReply.text}</p>
             {liveReply.truncated ? (
@@ -229,39 +263,122 @@ export default function AiConversationSidebar({
             ) : null}
           </article>
         ) : null}
-      </div>
 
-      {/*
-        * The action bar never scrolls away, so a pending decision is always in
-        * view. It occupies no space when there is nothing to decide.
-        */}
-      {actionBar ? (
-        <section
-          className={styles.actionBar}
-          data-kind={actionBar.kind}
-          data-testid="ai-conversation-action-bar"
-          aria-label="当前待决定"
-        >
-          <strong>{actionBar.title}</strong>
-          <p>{actionBar.detail}</p>
-          {actionBar.actions.length > 0 ? (
-            <div className={styles.actions}>
-              {actionBar.actions.map((action) => (
-                <button
-                  key={action.id}
-                  type="button"
-                  className={styles.action}
-                  data-tone={action.tone}
-                  data-action-id={action.id}
-                  onClick={() => onAction?.(action.id)}
-                >
-                  {action.label}
-                </button>
+        {/*
+          * A round in flight, told as Qoder speaking in the thread rather than a
+          * panel of its own. PageRoot states the stage from the run's durable status
+          * (ADR 0037 §4) and the Agent's own words ride along underneath, collapsible
+          * in one click so the thread stays readable while a long round runs.
+          */}
+        {runProgress ? (
+          <section
+            className={`${styles.message} ${styles.runActivity}`}
+            data-actor="pageroot"
+            data-tone={runProgress.tone}
+            data-testid="ai-conversation-run-progress"
+            aria-label="本轮进度"
+          >
+            <span className={styles.avatar} aria-hidden="true">
+              {sidebarActorInitial("pageroot")}
+            </span>
+            {/*
+              * PageRoot states the stages from the run's durable status (ADR 0037 §4).
+              * Signing them 「Qoder CLI」 made the Agent look like the author of
+              * PageRoot's own bookkeeping, and put the brand mark on the wrong speaker.
+              */}
+            <span className={styles.actor}>PageRoot</span>
+            {runProgress.headline ? (
+              <p className={styles.text}>{runProgress.headline}</p>
+            ) : null}
+            <ol className={styles.runSteps}>
+              {runProgress.steps.map((step) => (
+                <li key={step.key} data-step-state={step.state}>
+                  {step.label}
+                  {step.detail ? (
+                    <span className={styles.runStepDetail}>{step.detail}</span>
+                  ) : null}
+                </li>
               ))}
+            </ol>
+          </section>
+        ) : null}
+
+        {/*
+          * The Agent speaks for itself, in its own message. Nesting its words inside
+          * PageRoot's stage message put two speakers under one avatar and one signature,
+          * so the user could not tell whose words they were reading.
+          */}
+        {runProgress?.narration ? (
+          <section
+            className={styles.message}
+            data-actor="qoder"
+            data-testid="ai-conversation-narration-message"
+            aria-label="Qoder 的说明"
+          >
+            <span className={styles.avatar} aria-hidden="true">
+              {sidebarActorInitial("qoder")}
+            </span>
+            <span className={styles.actor}>Qoder CLI</span>
+            <div className={styles.narration}>
+              <button
+                type="button"
+                className={styles.narrationToggle}
+                data-testid="ai-conversation-narration-toggle"
+                aria-expanded={narrationOpen}
+                onClick={() => setNarrationOpen((open) => !open)}
+              >
+                {narrationOpen ? "收起它说的话" : "看看它说了什么"}
+              </button>
+              {narrationOpen ? (
+                <div
+                  className={styles.narrationText}
+                  data-testid="ai-conversation-narration"
+                >
+                  {(runProgress.narrationBlocks ?? []).map((block, index) => (
+                    <p key={index}>{block}</p>
+                  ))}
+                </div>
+              ) : null}
             </div>
-          ) : null}
-        </section>
-      ) : null}
+          </section>
+        ) : null}
+
+        {/*
+          * The decision reads as the next thing said in this thread rather than a
+          * band pinned above the Composer. Stage, decision and Composer used to be
+          * three separate regions, so a single round was read in three places with
+          * an empty gap between them.
+          */}
+        {actionBar ? (
+          <section
+            className={`${styles.message} ${styles.actionBar}`}
+            data-actor="pageroot"
+            data-kind={actionBar.kind}
+            data-testid="ai-conversation-action-bar"
+            aria-label="当前待决定"
+          >
+            <span className={styles.avatarSpacer} aria-hidden="true" />
+            {actionBar.title ? <strong>{actionBar.title}</strong> : null}
+            {actionBar.detail ? <p>{actionBar.detail}</p> : null}
+            {actionBar.actions.length > 0 ? (
+              <div className={styles.actions}>
+                {actionBar.actions.map((action) => (
+                  <button
+                    key={action.id}
+                    type="button"
+                    className={styles.action}
+                    data-tone={action.tone}
+                    data-action-id={action.id}
+                    onClick={() => onAction?.(action.id)}
+                  >
+                    {action.label}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </section>
+        ) : null}
+      </div>
 
       <div className={styles.composer} data-testid="ai-conversation-composer">
         <div className={styles.composerTop}>
@@ -342,6 +459,14 @@ export default function AiConversationSidebar({
             {`本轮将包含：${pendingCommentCount} 条评论 · 当前 HTML · 项目规则`}
           </p>
         ) : null}
+        {disclosure ? (
+          <p
+            className={styles.deliveryDisclosure}
+            data-testid="ai-conversation-delivery-disclosure"
+          >
+            {disclosure}
+          </p>
+        ) : null}
         {activeIntent === "continue" ? (
           <p
             className={styles.contextSummary}
@@ -351,9 +476,17 @@ export default function AiConversationSidebar({
           </p>
         ) : null}
 
-        <label className={styles.inputLabel} htmlFor="ai-conversation-input">
-          输入内容
-        </label>
+        {/*
+          * Modify has no text box on purpose: its input is the comments already
+          * written on the page. Showing an inert box there would invite the user to
+          * type a sentence that no Request would carry.
+          */}
+        {activeIntent === "modify" ? null : (
+          <label className={styles.inputLabel} htmlFor="ai-conversation-input">
+            输入内容
+          </label>
+        )}
+        {activeIntent === "modify" ? null : (
         <textarea
           id="ai-conversation-input"
           className={styles.input}
@@ -363,10 +496,13 @@ export default function AiConversationSidebar({
           placeholder={activeIntent === "discuss"
             ? "问问这个页面…"
             : "说说你想怎么改…"}
+          // Visible but not a place to type while a candidate is on the Canvas.
+          disabled={state === "review-view"}
           onChange={(event: ChangeEvent<HTMLTextAreaElement>) => (
             onDraftChange?.(event.target.value)
           )}
         />
+        )}
 
         {draftNotice ? (
           <p className={styles.draftNotice} data-testid="ai-conversation-draft-notice">
@@ -399,6 +535,23 @@ export default function AiConversationSidebar({
               {send.reason}
             </span>
           ) : null}
+          {/*
+            * The clipboard path from the old delivery dialog, kept as a quiet
+            * alternative beside the primary action instead of a question asked
+            * before anything happens. Same round, same payload, different
+            * destination.
+            */}
+          {activeIntent === "modify" && onCopyTask ? (
+            <button
+              type="button"
+              className={styles.copyTask}
+              data-testid="ai-conversation-copy-task"
+              disabled={!copyTask.canCopy}
+              onClick={() => onCopyTask()}
+            >
+              复制给别的 AI
+            </button>
+          ) : null}
           <button
             type="button"
             className={styles.send}
@@ -406,11 +559,7 @@ export default function AiConversationSidebar({
             disabled={!send.canSend}
             onClick={() => onSend?.(activeIntent)}
           >
-            {activeIntent === "modify"
-              ? "交给 AI 修改"
-              : activeIntent === "continue"
-                ? "采用并继续"
-                : send.label}
+            {activeIntent === "continue" ? "采纳并继续" : send.label}
           </button>
         </div>
       </div>

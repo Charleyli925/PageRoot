@@ -141,6 +141,9 @@ function agentHandoffState(run, session) {
     phase: String(session.phase || state),
     agentName: session.agentName ? String(session.agentName) : null,
     agentVersion: session.agentVersion ? String(session.agentVersion) : null,
+    // ADR 0037: narration only. It reaches the view so the user can see what the
+    // Agent is doing, and it carries no authority over the Candidate.
+    visibleText: typeof session.visibleText === "string" ? session.visibleText : "",
     errorCode: session.errorCode ? String(session.errorCode) : null,
     errorMessage: session.errorMessage ? String(session.errorMessage) : null,
     retryable: session.retryable === true,

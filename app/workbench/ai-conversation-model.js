@@ -71,13 +71,35 @@ const MODE_PRESENTATION = Object.freeze({
     label: "审阅 · 只读",
     detail: "讨论不会改变候选。",
   },
+  // Not a run status: this is the moment between choosing to modify and the round
+  // existing. Nothing is written yet, and the copy says so.
+  "pending-modification": {
+    label: "修改 · 待发送",
+    detail: "按你写的评论改，结果先进入审阅。",
+  },
   promoting: {
     label: "结果 · 等待决定",
     detail: "当前仍是修改前页面。",
   },
+  // A round that produced nothing new: the round is over, but it is still this
+  // thread's fact to state, not a return to plain preview discussion.
+  "no-change": {
+    label: "结果 · 无变化",
+    detail: "评论和当前页面都保持原样。",
+  },
 });
 
-export function sidebarModePresentation(state) {
+export function sidebarModePresentation(state, intent) {
+  // Before a round exists, the header follows what the user is about to do. Saying
+  // "讨论 · 只读" while the Composer directly below it is preparing a modification
+  // contradicts itself, and the run status alone cannot tell them apart because no
+  // run has been created yet. Once a round exists its durable status wins again.
+  if (
+    intent === INTENT_MODIFY
+    && (state === "preview-discussion" || state === "preparing-delivery")
+  ) {
+    return MODE_PRESENTATION["pending-modification"];
+  }
   return MODE_PRESENTATION[state] ?? MODE_PRESENTATION["preview-discussion"];
 }
 
@@ -93,6 +115,10 @@ const RUN_STATUS_TO_SIDEBAR_STATE = Object.freeze({
   "awaiting-conflict-resolution": "ready-to-open",
   committing: "promoting",
   "recovering-transaction": "promoting",
+  // A settled-without-change round still needs its decision said in the thread:
+  // without this row the sidebar falls back to preview-discussion and the
+  // no-change action bar below becomes unreachable dead copy.
+  "no-change": "no-change",
 });
 
 export function sidebarStateFromRun({
@@ -106,6 +132,93 @@ export function sidebarStateFromRun({
   // A submission being prepared is authority in flight, not yet a run.
   if (submissionPending) return "preparing-delivery";
   return "preview-discussion";
+}
+
+/**
+ * The run's own progress, projected for the conversation. The process drawer used
+ * to be the only place this existed, which made a round feel like it left the
+ * workbench; here it reads as the turn currently in flight.
+ *
+ * Only the states where a round is actually moving return an entry. A settled
+ * round is represented by its result, not by a frozen checklist.
+ */
+const MAX_NARRATION_BLOCKS = 40;
+
+const RUN_PROGRESS_STATES = Object.freeze([
+  "preparing-delivery",
+  "processing",
+  "validating",
+  "promoting",
+  // The result states keep the record on screen. The process drawer used to be the
+  // only place the round's stages existed, so once it is gone the thread has to
+  // hold them — a user deciding whether to adopt still wants to see what happened.
+  "ready-to-open",
+  "review-view",
+]);
+
+export function sidebarRunProgress({ state, steps = [], agentText = "" } = {}) {
+  if (!RUN_PROGRESS_STATES.includes(String(state))) return null;
+  if (!Array.isArray(steps) || steps.length === 0) return null;
+  const projected = [];
+  for (const step of steps) {
+    if (!step || typeof step !== "object") continue;
+    const key = typeof step.key === "string" ? step.key : "";
+    const label = typeof step.label === "string" ? step.label.trim() : "";
+    if (!key || !label) continue;
+    projected.push(Object.freeze({
+      key,
+      label,
+      // The detail only rides along for the step being worked on. Showing every
+      // detail at once turns a short status into a wall of text.
+      detail: step.state === "current" && typeof step.detail === "string"
+        ? step.detail.trim() || null
+        : null,
+      state: typeof step.state === "string" ? step.state : "pending",
+    }));
+  }
+  if (projected.length === 0) return null;
+  const failedStep = projected.find((step) => step.state === "failed") || null;
+  const liveStep = projected.find((step) => step.state === "current") || null;
+  // ADR 0037: the Agent narrates, PageRoot states the stage. The prose is an
+  // annotation on the stage actually running and never claims a stage is done.
+  // The Agent speaks in chunks and PageRoot concatenates them, so the raw buffer is
+  // one wall of text. Splitting on blank lines restores the paragraphs it actually
+  // wrote; the count is capped so a chatty Agent cannot grow the DOM without limit.
+  const narration = typeof agentText === "string" ? agentText.trim() : "";
+  const narrationBlocks = narration
+    ? Object.freeze(narration
+      .split(/\n{2,}/u)
+      .map((block) => block.trim())
+      .filter(Boolean)
+      .slice(0, MAX_NARRATION_BLOCKS))
+    : null;
+  return Object.freeze({
+    steps: Object.freeze(projected),
+    // Only a failure gets its own line. The list already shows which step is live at
+    // full strength, and each stage carries its own detail, so nothing is repeated
+    // above it.
+    headline: failedStep?.label ?? null,
+    // What Qoder is saying while it works. Collapsible by the view; absent when the
+    // Agent has said nothing, so an empty shell never appears.
+    narration: narration || null,
+    narrationBlocks: narrationBlocks && narrationBlocks.length > 0 ? narrationBlocks : null,
+    liveLabel: liveStep?.label ?? null,
+    tone: failedStep ? "attention" : "quiet",
+  });
+}
+
+const ACTOR_INITIALS = Object.freeze({
+  user: "你",
+  qoder: "Q",
+  pageroot: "P",
+});
+
+/**
+ * The mark shown in a message avatar. Short by design: a chat is scanned by who is
+ * speaking, and a full name in that square would only shrink the words beside it.
+ */
+export function sidebarActorInitial(actor) {
+  return ACTOR_INITIALS[actor] ?? ACTOR_INITIALS.pageroot;
 }
 
 export function sidebarActorLabel(actor) {
@@ -151,9 +264,12 @@ export function sidebarIntentOptions(state) {
       { value: INTENT_CONTINUE, label: "继续修改" },
     ];
   }
+  // The tab names the kind of round; the button below names the destination. Using
+  // 「交给 AI 修改」 in both places put the same words in two controls and made the
+  // pair read as a duplicate rather than a choice.
   return [
     { value: INTENT_DISCUSS, label: "讨论" },
-    { value: INTENT_MODIFY, label: "交给 AI 修改" },
+    { value: INTENT_MODIFY, label: "修改" },
   ];
 }
 
@@ -162,6 +278,23 @@ export function sidebarResolvedIntent(state, requestedIntent) {
     sidebarIntentOptions(state).map((option) => option.value),
   );
   return allowed.has(requestedIntent) ? requestedIntent : INTENT_DISCUSS;
+}
+
+/**
+ * Whether a draft-intent write can be made directly. A conversation that is
+ * loaded and ready for this very Document has no load ahead of it that would
+ * restore a stored draft over the write. Every other state does: a sidebar
+ * opened for the first time loads on becoming visible, and a Document switch
+ * closes the conversation while leaving the sidebar itself open, so the reopen
+ * that follows is headed for a load that discards a plain write.
+ */
+export function conversationReadyForDocument(conversation, projectId, documentId) {
+  return Boolean(
+    conversation
+    && conversation.status === "ready"
+    && conversation.context?.projectId === projectId
+    && conversation.context?.documentId === documentId,
+  );
 }
 
 /**
@@ -176,6 +309,7 @@ export function sidebarActionBar({
   candidateVersionLabel = null,
   candidateStatus = null,
   failureMessage = null,
+  deliveryMode = "qoder-acp",
 } = {}) {
   if (state === "ready-to-open" || state === "review-view") {
     if (candidateStatus === "blocked") {
@@ -191,6 +325,19 @@ export function sidebarActionBar({
       : "结果等待你的决定";
     // An `attention` candidate offers review only: adopting a large change
     // without looking at it is not a choice PageRoot should offer.
+    // Already comparing: offering 「审阅对比」 here would point at the screen the user
+    // is looking at. The only decision left is whether to take it, and returning is
+    // owned by the review header beside it.
+    if (state === "review-view") {
+      return {
+        kind: "decision",
+        title,
+        detail: candidateStatus === "attention"
+          ? "这次变化较大，核对后再决定。"
+          : "看完就可以决定。",
+        actions: [{ id: "adopt", label: "采纳这一版", tone: "primary" }],
+      };
+    }
     if (candidateStatus === "attention") {
       return {
         kind: "decision",
@@ -210,11 +357,46 @@ export function sidebarActionBar({
     };
   }
   if (state === "processing" || state === "validating") {
+    // The clipboard round is not being processed by Qoder at all: the user pasted
+    // the task into an Agent of their own and PageRoot is waiting for the file to
+    // come back. Saying "Qoder 正在处理" there would describe something that is not
+    // happening, and the user would lose the one action they actually need — the
+    // task back on the clipboard if the paste went wrong.
+    if (deliveryMode === "clipboard") {
+      return {
+        kind: "progress",
+        title: "任务已复制，等你的 AI 改完",
+        detail: "粘贴给任意能读写本机文件的 AI。",
+        // Nothing here advances the round — PageRoot is waiting on an Agent it does
+        // not drive — so neither action takes the accent. Re-copying is a remedy,
+        // not the next step.
+        actions: [
+          { id: "recopy", label: "再次复制", tone: "quiet" },
+          { id: "cancel", label: "结束本轮", tone: "quiet" },
+        ],
+      };
+    }
+    // The timeline above already narrates the round, and the header already says the
+    // page is not being overwritten. Repeating either here would make the user read
+    // the same fact twice, so this carries the action alone.
     return {
       kind: "progress",
-      title: "Qoder 正在处理本轮任务",
-      detail: "当前页面不会被直接覆盖。",
+      title: null,
+      detail: null,
       actions: [{ id: "cancel", label: "结束本轮", tone: "quiet" }],
+    };
+  }
+  /*
+   * A round can finish without changing anything, which is not a stage the timeline can
+   * express. It used to be stated only in the process panel, and that panel is out of
+   * the flow, so the conversation says it.
+   */
+  if (state === "no-change") {
+    return {
+      kind: "decision",
+      title: "这次没有产生有效变化",
+      detail: "原评论和附件都已保留，调整要求后可以重新发送。",
+      actions: [{ id: "dismiss", label: "结束本轮", tone: "quiet" }],
     };
   }
   if (state === "promoting") {
@@ -233,6 +415,16 @@ export function sidebarActionBar({
  * button must always say why: greying it out without an explanation leaves the
  * user with no next step.
  */
+/**
+ * The disclosure that used to live in the delivery dialog. It belongs beside the
+ * button that acts on it, so the user reads it without being interrupted by a
+ * modal first.
+ */
+export function sidebarDeliveryDisclosure(intent) {
+  if (intent !== INTENT_MODIFY) return null;
+  return "Qoder 会读取本轮 HTML、评论和附件；结果先进入审阅。";
+}
+
 export function sidebarSendState({
   state,
   catalogStatus = "ready",
@@ -240,9 +432,24 @@ export function sidebarSendState({
   queued = false,
   intent = INTENT_DISCUSS,
   discussionBusy = false,
+  pendingCommentCount = 0,
 } = {}) {
+  // The review Canvas wins over every other reason. It is showing a candidate,
+  // not the page a discussion would read, so no round may start from here. The
+  // thread stays on screen so the user keeps the context that produced the
+  // candidate; it is simply not a place to type right now. State is the single
+  // owner of this fact — sidebarStateFromRun already maps reviewing to it.
+  if (state === "review-view") {
+    return {
+      canSend: false,
+      label: "发送",
+      reason: "正在审阅 AI 候选，采纳或返回后可继续对话",
+    };
+  }
   if (catalogStatus === "checking") {
-    return { canSend: false, label: "发送", reason: "正在读取模型…" };
+    // The model slot already says it is reading; the button explains itself
+    // instead of repeating that sentence word for word.
+    return { canSend: false, label: "发送", reason: "模型就绪后可发送" };
   }
   if (catalogStatus === "auth-required") {
     return { canSend: false, label: "登录 Qoder 后可发送", reason: null };
@@ -253,10 +460,11 @@ export function sidebarSendState({
   if (catalogStatus === "unavailable") {
     return { canSend: false, label: "发送", reason: "Qoder 暂时无法确认" };
   }
-  // One discussion turn per Document. The Bridge enforces it too; saying so here
-  // keeps the user from pressing a button that would be refused.
+  // One discussion turn per Document. The notice line directly above the Composer
+  // already says Qoder is replying, so the button stays quiet rather than
+  // printing a second sentence that means the same thing.
   if (discussionBusy) {
-    return { canSend: false, label: "发送", reason: "Qoder 正在回复这轮讨论" };
+    return { canSend: false, label: "发送", reason: null };
   }
   if (state === "processing" || state === "validating") {
     return { canSend: false, label: "发送", reason: "Qoder 完成本轮后可发送" };
@@ -268,7 +476,20 @@ export function sidebarSendState({
   // comments rather than from this text box. Pointing there beats a send button
   // that would quietly drop what the user typed.
   if (intent === INTENT_MODIFY) {
-    return { canSend: false, label: "发送", reason: "回到编辑模式提交修改" };
+    // A modification is driven by the comments already written on the page, not by
+    // the Composer. That is why this intent shows no text box: there is no typed
+    // sentence that could be silently dropped on the way to the Agent.
+    if (queued) {
+      return { canSend: false, label: "交给 Qoder 修改", reason: "正在等待上一个任务完成" };
+    }
+    if (pendingCommentCount <= 0) {
+      return {
+        canSend: false,
+        label: "交给 Qoder 修改",
+        reason: "先在编辑模式写下评论，AI 会按评论改",
+      };
+    }
+    return { canSend: true, label: "交给 Qoder 修改", reason: null };
   }
   if (intent === INTENT_CONTINUE) {
     return { canSend: false, label: "发送", reason: "先采用当前结果才能继续修改" };
@@ -280,6 +501,48 @@ export function sidebarSendState({
     return { canSend: false, label: "发送", reason: null };
   }
   return { canSend: true, label: "发送", reason: null };
+}
+
+/**
+ * Whether the clipboard delivery beside the send button can run, and the reason
+ * when it cannot.
+ *
+ * Copying is the other branch of the same modification round (PRD §11.4): it
+ * freezes the page's comments into a Request and writes the clipboard, and
+ * neither step consults Qoder. The send button guards on the model catalog
+ * because the Agent path needs it; applying that guard here would take the
+ * clipboard down with an unreadable catalog — PRD §10.2 keeps 复制任务 available
+ * through every catalog status, and the old delivery dialog's copy option never
+ * required the CLI either. What copying does need is the round itself: no round
+ * in flight, and comments to freeze.
+ */
+export function sidebarCopyTaskState({
+  state = "preview-discussion",
+  queued = false,
+  pendingCommentCount = 0,
+} = {}) {
+  if (state === "review-view") {
+    return {
+      canCopy: false,
+      reason: "正在审阅 AI 候选，采纳或返回后可继续对话",
+    };
+  }
+  if (state === "processing" || state === "validating") {
+    return { canCopy: false, reason: "Qoder 完成本轮后可发送" };
+  }
+  if (state === "promoting") {
+    return { canCopy: false, reason: "正在采用候选版本" };
+  }
+  if (queued) {
+    return { canCopy: false, reason: "正在等待上一个任务完成" };
+  }
+  if (pendingCommentCount <= 0) {
+    return {
+      canCopy: false,
+      reason: "先在编辑模式写下评论，AI 会按评论改",
+    };
+  }
+  return { canCopy: true, reason: null };
 }
 
 /**
@@ -320,10 +583,18 @@ export function sidebarModelLine({
  * Returns null until some text has arrived: an empty shell that later fills
  * would make the stream jump for no information.
  */
-export function sidebarLiveReply(discussion) {
+export function sidebarLiveReply(discussion, messages = []) {
   if (!discussion) return null;
   const text = typeof discussion.replyText === "string" ? discussion.replyText : "";
   if (!text.trim()) return null;
+  // Once this turn has a stored message, the record is what renders. Matching on
+  // turnId rather than on "has the turn settled" leaves no gap: the live block
+  // stays until the reload actually brings the message in, so the reply never
+  // blinks out and never shows twice.
+  const turnId = String(discussion.turnId || "");
+  if (turnId && Array.isArray(messages) && messages.some(
+    (message) => message && message.turnId === turnId && message.actor === "qoder",
+  )) return null;
   const status = String(discussion.status || "");
   return Object.freeze({
     actor: "qoder",

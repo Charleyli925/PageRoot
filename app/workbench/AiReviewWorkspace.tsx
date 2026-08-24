@@ -10,6 +10,7 @@ import {
   useState,
   useSyncExternalStore,
   type CSSProperties,
+  type ReactNode,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { BrowsersIcon } from "@phosphor-icons/react/dist/csr/Browsers";
@@ -26,8 +27,6 @@ import { GitDiffIcon } from "@phosphor-icons/react/dist/csr/GitDiff";
 import { LinkBreakIcon } from "@phosphor-icons/react/dist/csr/LinkBreak";
 import { LinkIcon } from "@phosphor-icons/react/dist/csr/Link";
 import { PaletteIcon } from "@phosphor-icons/react/dist/csr/Palette";
-import { PushPinIcon } from "@phosphor-icons/react/dist/csr/PushPin";
-import { SidebarSimpleIcon } from "@phosphor-icons/react/dist/csr/SidebarSimple";
 import { TextTIcon } from "@phosphor-icons/react/dist/csr/TextT";
 import { TreeStructureIcon } from "@phosphor-icons/react/dist/csr/TreeStructure";
 import { WarningCircleIcon } from "@phosphor-icons/react/dist/csr/WarningCircle";
@@ -435,6 +434,8 @@ export default function AiReviewWorkspace({
   onReturnBefore,
   onAccept,
   onRevealAiTask,
+  sidebar = null,
+  onShowSidebar,
 }: {
   fileName: string;
   beforeLabel: string;
@@ -449,6 +450,14 @@ export default function AiReviewWorkspace({
   onReturnBefore: () => void;
   onAccept: () => void;
   onRevealAiTask: () => void;
+  /**
+   * The AI conversation, docked beside the comparison so the thread that led to
+   * this candidate stays on screen. Read-only here: the Canvas is a candidate,
+   * not the page a discussion would read.
+   */
+  sidebar?: ReactNode;
+  /** Brings the conversation back after it was collapsed to free the stage. */
+  onShowSidebar?: () => void;
 }) {
   const fileTitle = fileName.replace(/\.(?:html?|xhtml)$/iu, "") || fileName;
   const hydrated = useSyncExternalStore(subscribeHydration, () => true, () => false);
@@ -467,8 +476,6 @@ export default function AiReviewWorkspace({
     zoomMode: zoom,
   } = reviewState;
   const [toolbarPinned, setToolbarPinned] = useState(true);
-  const [mapPinned, setMapPinned] = useState(false);
-  const [mapPeeked, setMapPeeked] = useState(false);
   const [confirmationAction, setConfirmationAction] = useState<ConfirmationAction | null>(null);
   const [desktopSessionResult, setDesktopSessionResult] =
     useState<ReviewDesktopSessionResult | null>(null);
@@ -485,7 +492,6 @@ export default function AiReviewWorkspace({
   const continueReviewButtonRef = useRef<HTMLButtonElement>(null);
   const confirmationTriggerRef = useRef<HTMLButtonElement | null>(null);
   const confirmDialogRef = useRef<HTMLElement>(null);
-  const mapDrawerRef = useRef<HTMLElement>(null);
   const reviewInitializedRef = useRef(false);
   const framesRef = useRef<Record<ReviewSide, HTMLIFrameElement | null>>({
     before: null,
@@ -570,19 +576,14 @@ export default function AiReviewWorkspace({
   const activeChange = focus === "all"
     ? null
     : reviewChanges.find((change) => change.id === focus) || null;
+  /*
+   * Stepping through changes one at a time is its own capability, independent of the
+   * content map it used to sit beside. Removing the map took this with it, which left
+   * the reviewer with no way to walk the changes in order.
+   */
   const activeIndex = activeChange
     ? navigableChanges.findIndex((change) => change.id === activeChange.id)
     : -1;
-  const outlineGroups = useMemo(() => {
-    const grouped = new Map<string, ReviewDocuments["outline"]>();
-    reviewOutline.forEach((item) => {
-      const items = grouped.get(item.group) || [];
-      items.push(item);
-      grouped.set(item.group, items);
-    });
-    return [...grouped.entries()].map(([label, items]) => ({ label, items }));
-  }, [reviewOutline]);
-  const mapOpen = mapPinned || mapPeeked;
 
   const closeReviewCommentChannel = useCallback(() => {
     const port = reviewCommentPortRef.current;
@@ -720,18 +721,6 @@ export default function AiReviewWorkspace({
       value: reviewChanges[0].id,
     });
   }, [activeRuntimeVisualResult, documents.changes.length, reviewChanges]);
-
-  useEffect(() => {
-    if (!mapOpen) return undefined;
-    const closeOnOutsidePointer = (event: PointerEvent) => {
-      const target = event.target;
-      if (target instanceof Node && mapDrawerRef.current?.contains(target)) return;
-      setMapPinned(false);
-      setMapPeeked(false);
-    };
-    document.addEventListener("pointerdown", closeOnOutsidePointer, true);
-    return () => document.removeEventListener("pointerdown", closeOnOutsidePointer, true);
-  }, [mapOpen]);
 
   const sendState = useCallback((side?: ReviewSide) => {
     const state = reviewStateRef.current;
@@ -1325,8 +1314,6 @@ export default function AiReviewWorkspace({
         || message.type === "action"
         || message.type === "control-state"
       ) {
-        setMapPinned(false);
-        setMapPeeked(false);
       }
       if (
         (message.type === "action" || message.type === "control-state")
@@ -1453,51 +1440,14 @@ export default function AiReviewWorkspace({
     dispatchReviewState({ type: "set-page-view", value: mode });
   }, []);
 
-  const selectOutlineItem = useCallback((item: ReviewDocuments["outline"][number]) => {
-    if (item.changeId) {
-      selectChange(item.changeId);
-      return;
-    }
-    dispatchReviewState({ type: "set-navigation-target", value: item.id });
-    const focusOutline = () => {
-      (["before", "after"] as ReviewSide[]).forEach((side) => {
-        postToFrame(framesRef.current[side], sessionId, {
-          type: "focus-outline",
-          outlineId: item.id,
-          panelKey: item.panelKey,
-          panelPath: item.panelPath,
-          behavior: "smooth",
-        });
-      });
-    };
-    if (item.panelPath?.length) coordinatePagePresentation(item.panelPath, focusOutline);
-    else focusOutline();
-  }, [coordinatePagePresentation, selectChange, sessionId]);
 
-  const selectPageOverview = useCallback(() => {
-    dispatchReviewState({ type: "set-navigation-target", value: "all" });
-    const coordinator = scrollCoordinatorRef.current;
-    const gestureId = coordinator?.invalidateGesture() || 0;
-    const commandBatchId = Date.now();
-    (["before", "after"] as ReviewSide[]).forEach((side) => {
-      const commandId = `overview-${commandBatchId}-${side}`;
-      coordinator?.handlePosition(side, { top: 0, left: 0, commandId });
-      updateCommentScrollTransform(side, 0, 0);
-      postToFrame(framesRef.current[side], sessionId, {
-        type: "set-scroll-position",
-        commandId,
-        gestureId,
-        force: true,
-        top: 0,
-        left: 0,
-      });
-    });
-  }, [sessionId, updateCommentScrollTransform]);
+
 
   const navigate = useCallback((direction: -1 | 1) => {
     if (!navigableChanges.length) return;
     const currentIndex = activeIndex >= 0 ? activeIndex : (direction > 0 ? -1 : 0);
-    const nextIndex = (currentIndex + direction + navigableChanges.length) % navigableChanges.length;
+    const nextIndex = (currentIndex + direction + navigableChanges.length)
+      % navigableChanges.length;
     selectChange(navigableChanges[nextIndex].id);
   }, [activeIndex, navigableChanges, selectChange]);
 
@@ -1797,6 +1747,44 @@ export default function AiReviewWorkspace({
                     </button>
                     <button type="button" aria-pressed={zoom === "actual"} onClick={() => dispatchReviewState({ type: "set-zoom-mode", value: "actual" })}>100%</button>
                   </div>
+                <div className={styles.changeNavigator} aria-label="逐处查看变化">
+                  <button
+                    type="button"
+                    aria-label="上一处变化"
+                    disabled={!navigableChanges.length}
+                    onClick={() => navigate(-1)}
+                  >
+                    <CaretUpIcon aria-hidden="true" size={11} weight="bold" />
+                  </button>
+                  <span>
+                    <strong>{activeIndex >= 0 ? activeIndex + 1 : 0}</strong>
+                    <small>/{navigableChanges.length}</small>
+                  </span>
+                  <button
+                    type="button"
+                    aria-label="下一处变化"
+                    disabled={!navigableChanges.length}
+                    onClick={() => navigate(1)}
+                  >
+                    <CaretDownIcon aria-hidden="true" size={11} weight="bold" />
+                  </button>
+                  {/*
+                    * The way back out of a single change. Returning to the whole page used
+                    * to live in the content map, so removing the map left a reviewer who
+                    * had focused one change with no way to see the page as a whole again.
+                    */}
+                  <button
+                    type="button"
+                    aria-label="完整页面"
+                    aria-pressed={focus === "all"}
+                    onClick={() => dispatchReviewState({
+                      type: "set-navigation-target",
+                      value: "all",
+                    })}
+                  >
+                    整页
+                  </button>
+                </div>
                 </div>
               </div>
             </div>
@@ -1859,106 +1847,23 @@ export default function AiReviewWorkspace({
               />
             </div>
 
-            <aside
-              ref={mapDrawerRef}
-              className={styles.mapDrawer}
-              data-open={mapOpen ? "true" : undefined}
-              data-pinned={mapPinned ? "true" : undefined}
-              aria-label="页面内容地图"
-              onMouseLeave={() => { if (!mapPinned) setMapPeeked(false); }}
-            >
-              <div className={styles.mapHandle}>
-                <button
-                  className={styles.mapHandleMain}
-                  type="button"
-                  aria-expanded={mapOpen}
-                  aria-label={mapOpen ? "收起内容地图" : "打开内容地图"}
-                  onClick={() => {
-                    setMapPinned((current) => !current);
-                    setMapPeeked(false);
-                  }}
-                >
-                  <SidebarSimpleIcon aria-hidden="true" size={17} weight="duotone" />
-                  <span>内容地图</span>
-                </button>
-                <div className={styles.mapNavigator} aria-label="逐处查看变化">
-                  <button type="button" aria-label="上一处变化" disabled={!navigableChanges.length} onClick={() => navigate(-1)}><CaretUpIcon aria-hidden="true" size={11} weight="bold" /></button>
-                  <span><strong>{activeIndex >= 0 ? activeIndex + 1 : 0}</strong><small>/{navigableChanges.length}</small></span>
-                  <button type="button" aria-label="下一处变化" disabled={!navigableChanges.length} onClick={() => navigate(1)}><CaretDownIcon aria-hidden="true" size={11} weight="bold" /></button>
-                </div>
-              </div>
-              <div className={styles.mapPanel} aria-hidden={!mapOpen} inert={!mapOpen ? true : undefined}>
-                <header>
-                  <div><span>页面内容地图 · {reviewOutline.length} 个区域</span><strong>{activeChange ? `正在看：${activeChange.label}` : focus === "all" ? "整页总览" : "正在看未修改区域"}</strong></div>
-                  <button type="button" aria-label={mapPinned ? "收起内容地图" : "保持内容地图展开"} aria-pressed={mapPinned} onClick={() => setMapPinned((current) => !current)}>
-                    <PushPinIcon aria-hidden="true" size={15} weight={mapPinned ? "fill" : "duotone"} />
-                  </button>
-                </header>
-                <button
-                  className={styles.mapOverview}
-                  type="button"
-                  aria-pressed={focus === "all"}
-                  onClick={selectPageOverview}
-                >
-                  <EyeIcon aria-hidden="true" size={15} weight="duotone" />
-                  <span><strong>完整页面</strong><small>查看修改前与修改后</small></span>
-                </button>
-                <div className={styles.mapGroups}>
-                  {outlineGroups.map((group) => {
-                    const matchingCount = group.items.filter((item) => (
-                      Boolean(item.changeId)
-                      && (filter === "all" || item.types.includes(filter))
-                    )).length;
-                    return (
-                    <section className={styles.mapGroup} key={group.label}>
-                      <h3>
-                        <span>{group.label}</span>
-                        <small>
-                          {filter === "all"
-                            ? `${matchingCount}/${group.items.length} 个区域有变化`
-                            : `${matchingCount}/${group.items.length} 个区域含${FILTER_LABELS[filter]}变化`}
-                        </small>
-                      </h3>
-                      <ol className={styles.mapList}>
-                        {group.items.map((item) => {
-                          const itemIndex = reviewOutline.findIndex((candidate) => candidate.id === item.id);
-                          const selected = focus === (item.changeId || item.id);
-                          const matchesFilter = Boolean(item.changeId)
-                            && (filter === "all" || item.types.includes(filter));
-                          const panelActive = Boolean(
-                            item.panelPath?.length
-                            && item.panelPath.every((key, index) => (
-                              pagePresentationPath[index] === key
-                            )),
-                          );
-                          return (
-                            <li key={item.id}>
-                              <button
-                                type="button"
-                                data-testid="review-outline-item"
-                                data-changed={item.changeId ? "true" : "false"}
-                                data-matches-filter={matchesFilter ? "true" : "false"}
-                                data-panel-active={panelActive ? "true" : undefined}
-                                aria-pressed={selected}
-                                aria-label={`${item.label}：${item.helper}`}
-                                onClick={() => selectOutlineItem(item)}
-                              >
-                                <span>{itemIndex + 1}</span>
-                                <span><strong>{item.label}</strong><small>{item.helper}</small></span>
-                              </button>
-                            </li>
-                          );
-                        })}
-                      </ol>
-                    </section>
-                    );
-                  })}
-                </div>
-              </div>
-            </aside>
-            <div className={styles.mapEdgeTrigger} aria-hidden="true" onMouseEnter={() => { if (!mapPinned) setMapPeeked(true); }} />
           </div>
         </section>
+        {sidebar ? (
+          <aside className={styles.reviewSidebar} aria-label="AI 对话">
+            {sidebar}
+          </aside>
+        ) : onShowSidebar ? (
+          <button
+            type="button"
+            className={styles.reviewSidebarHandle}
+            data-testid="review-show-conversation"
+            aria-label="打开 AI 对话"
+            onClick={onShowSidebar}
+          >
+            AI 对话
+          </button>
+        ) : null}
       </main>
 
       <span className={styles.srAnnouncement} aria-live="polite">

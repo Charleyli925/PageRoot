@@ -950,7 +950,7 @@
       "patterns": [
         "^scripts/(?:agent-bridge-service|workspace-bridge-shutdown|qoder-acp-(?:client|spike(?:-client)?)|verify-packaged-artifact)\\.mjs$",
         "^app/application/(?:bridge-client|run-workflow|workspace-controller)\\.(?:js|d\\.ts)$",
-        "^app/components/(?:AboutPageRootDialog|AgentDeliveryDialog|QoderAvailabilityCard)\\.tsx$",
+        "^app/components/(?:AboutPageRootDialog|AgentDeliveryButton|QoderAvailabilityCard)\\.tsx$",
         "^app/domain/qoder-availability\\.(?:js|d\\.ts)$",
         "^tests/(?:agent-bridge-(?:service|workspace)|qoder-acp-spike-client)\\.test\\.mjs$",
         "^tests/fixtures/(?:qoder-acp-agent|packaged-agent-bridge-runner)\\.mjs$"

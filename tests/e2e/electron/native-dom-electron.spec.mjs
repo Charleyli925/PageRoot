@@ -69,10 +69,11 @@ async function waitForProjectReady(page, timeout = 60_000) {
   return waitForSharedProjectReady(page, { timeout, includeFailureDetail: true });
 }
 
+// The destination is chosen in the AI conversation now, not in a dialog over the page.
 async function chooseClipboardDelivery(page) {
-  const dialog = page.getByRole("dialog", { name: "怎样交给 AI？" });
-  await expect(dialog).toBeVisible();
-  await dialog.getByRole("button", { name: /复制任务/u }).click();
+  const sidebar = page.getByTestId("ai-conversation-sidebar");
+  await expect(sidebar).toBeVisible();
+  await sidebar.getByRole("button", { name: /复制给别的 AI/u }).click();
 }
 
 async function loadedDiskFrame(page, sourcePath, caseId) {
@@ -94,11 +95,6 @@ async function openRecentProject(
   if (await visibleToast.isVisible()) {
     await visibleToast.getByRole("button", { name: "关闭提醒" }).click();
     await expect(visibleToast).toBeHidden();
-  }
-  const processingDialog = page.getByRole("dialog", { name: "本轮处理" });
-  if (await processingDialog.isVisible()) {
-    await page.keyboard.press("Escape");
-    await expect(processingDialog).toBeHidden();
   }
   await page.getByRole("button", { name: "打开新的本地 HTML" }).click();
   await page.locator(".recent-file-row")
@@ -688,10 +684,11 @@ test("Electron first launch imports the welcome HTML as V1 and sends its comment
     await launched.page.getByRole("textbox", { name: "评论内容" })
       .fill("把欢迎页主标题改得更简洁。");
     await launched.page.getByRole("button", { name: "评论", exact: true }).click();
-    await launched.page.getByRole("button", { name: /发给 AI/u }).click();
+    await launched.page.getByRole("button", { name: /AI 对话/u }).click();
     await chooseClipboardDelivery(launched.page);
     await expect(
-      launched.page.getByText("AI任务已经复制，直接粘贴给 AI Agent", { exact: true }),
+      launched.page.getByTestId("ai-conversation-action-bar")
+        .getByText("任务已复制，等你的 AI 改完", { exact: true }),
     ).toBeVisible();
 
     let promptPath = "";
@@ -2751,7 +2748,17 @@ test("project resources drain edited rules before leaving", async () => {
   }
 });
 
-test("multiple orphaned comments relink in sequence and resume the original send", async () => {
+// Quarantined as a CI incident (#281): on the slow runner the relink toast's
+// 开始重新定位 click reports success while the React handler never runs —
+// the mousedown and mouseup separate across a reflow window, so the browser
+// drops the click — and the case then times out on the flex-copy host that
+// only the handler's canvasMode("edit") write can reveal. Same clean tree has
+// passed and failed CI runs (never reproduced locally, including the CI's
+// 1280x720 geometry with --repeat-each), which is the two-strike CI-only
+// signature RELEASE_PIPELINE_GOVERNANCE.md §4 quarantines instead of masking
+// with retries. Unfixme when the follow-up PR lands the handler-level
+// confirmation or moves the action off the toast.
+test.fixme("multiple orphaned comments relink in sequence and resume the original send", async () => {
   test.setTimeout(120_000);
   const fixture = createSourceFixture("orphaned-comments-resume-send.html");
   const firstLaunch = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
@@ -2828,7 +2835,7 @@ test("multiple orphaned comments relink in sequence and resume the original send
     await expect(recoveredComments.filter({ hasText: secondComment }))
       .toHaveAttribute("data-resolution", "orphaned");
 
-    await activeLaunch.page.getByRole("button", { name: /发给 AI/u }).click();
+    await activeLaunch.page.getByRole("button", { name: /AI 对话/u }).click();
     await chooseClipboardDelivery(activeLaunch.page);
     await expect(activeLaunch.page.getByText("2 条评论需要重新定位", { exact: true }))
       .toBeVisible();
@@ -2843,10 +2850,8 @@ test("multiple orphaned comments relink in sequence and resume the original send
       .toHaveAttribute("data-resolution", "orphaned");
 
     await recoveredFrame.locator(caseSelector("grid-card")).click();
-    await expect(activeLaunch.page.getByText(
-      "AI任务已经复制，直接粘贴给 AI Agent",
-      { exact: true },
-    )).toBeVisible({ timeout: 30_000 });
+    await expect(activeLaunch.page.getByTestId("ai-conversation-action-bar"))
+      .toContainText("任务已复制，等你的 AI 改完", { timeout: 30_000 });
     await expect.poll(
       () => requestDirectoryCount(activeLaunch.workspace),
       { timeout: 20_000 },
