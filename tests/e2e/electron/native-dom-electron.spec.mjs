@@ -2813,17 +2813,6 @@ test("multiple orphaned comments relink in sequence and resume the original send
     activeLaunch = await launchPageRoot({
       isolatedUserData: firstLaunch.isolatedUserData,
     });
-    // TEMP-DIAG: forward renderer console output so CI-only handler errors are
-    // visible in the job log. Remove when triage ends.
-    activeLaunch.page.on("console", (message) => {
-      const text = message.text();
-      if (/TEMP-DIAG|error|Error|uncaught|Warning:/i.test(text)) {
-        console.log(`TEMP-DIAG console.${message.type()}: ${text.slice(0, 500)}`);
-      }
-    });
-    activeLaunch.page.on("pageerror", (error) => {
-      console.log(`TEMP-DIAG pageerror: ${String(error.stack || error.message || error).slice(0, 600)}`);
-    });
     const { frame: recoveredFrame } = await loadedDiskFrame(
       activeLaunch.page,
       managedSourcePath,
@@ -2840,46 +2829,7 @@ test("multiple orphaned comments relink in sequence and resume the original send
     await chooseClipboardDelivery(activeLaunch.page);
     await expect(activeLaunch.page.getByText("2 条评论需要重新定位", { exact: true }))
       .toBeVisible();
-    // A click that Playwright reports as performed can still be lost by the
-    // page: click only fires when mousedown and mouseup land on the same
-    // element, and on a slow CI host the button reflowed between the two, so
-    // the React handler never ran and the toast stayed (observed with the
-    // TEMP-DIAG trace: relinkDiag null after the click). The handler's first
-    // statement clears the toast, so its disappearance proves it ran.
-    const relinkNotice = activeLaunch.page
-      .getByText("2 条评论需要重新定位", { exact: true });
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      await activeLaunch.page.getByRole("button", { name: "开始重新定位" }).click();
-      if (await relinkNotice.isHidden()) break;
-    }
-    await expect(relinkNotice).toBeHidden();
-
-    // TEMP-DIAG: CI-only visibility failure triage on the flex-copy host.
-    const relinkSurfaceState = await activeLaunch.page.evaluate(() => {
-      const surface = document.querySelector(".canvas-edit-surface");
-      const editor = surface?.querySelector('[data-testid="html-canvas-editor"]') ?? null;
-      const iframe = editor?.querySelector("iframe") ?? null;
-      const flexCopy = editor
-        ?.querySelectorAll("iframe")[0]
-        ?.contentDocument
-        ?.querySelector('[data-native-case="flex-copy"]') ?? null;
-      const rect = (element) => {
-        const box = element?.getBoundingClientRect();
-        return box ? { w: box.width, h: box.height } : null;
-      };
-      return {
-        surfaceHidden: surface ? String(surface.hidden) : "missing",
-        surfaceDisplay: surface ? getComputedStyle(surface).display : null,
-        editorPresent: Boolean(editor),
-        editorRect: rect(editor),
-        iframeRect: rect(iframe),
-        flexCopyRect: rect(flexCopy),
-        flexCopyVisibility: flexCopy ? getComputedStyle(flexCopy).visibility : null,
-        relinkDiag: window.__relinkDiag ?? null,
-        canvasModeSetLog: (window.__canvasModeSetLog ?? []).slice(-40),
-      };
-    });
-    console.log(`TEMP-DIAG relink surface: ${JSON.stringify(relinkSurfaceState)}`);
+    await activeLaunch.page.getByRole("button", { name: "开始重新定位" }).click();
 
     await recoveredFrame.locator(caseSelector("flex-copy")).click();
     await expect(activeLaunch.page.getByText("1 条评论需要重新定位", { exact: true }))

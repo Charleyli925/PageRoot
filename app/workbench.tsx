@@ -10,7 +10,6 @@ import {
   type ChangeEvent,
   type ClipboardEvent,
   type CSSProperties,
-  type SetStateAction,
 } from "react";
 import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/csr/ArrowSquareOut";
 import { CaretRightIcon } from "@phosphor-icons/react/dist/csr/CaretRight";
@@ -722,29 +721,7 @@ export default function Workbench() {
     versionSnapshot.currentBasedOnVersionId;
   const currentExactVersionId = versionSnapshot.currentExactVersionId;
   const viewMode = versionSnapshot.viewMode;
-  const [canvasMode, setCanvasModeBase] = useState<CanvasMode>("edit");
-  // TEMP-DIAG: CI-only stuck-preview triage. Records every canvasMode write; a
-  // preview write also records its call site. Stack capture costs ~0.5ms and a
-  // run with it on every write passed CI while the run without it failed, so
-  // capture is limited to preview writes — those happen before the racing
-  // window, so timing stays faithful while the culprit stays attributable.
-  // Remove together with the TEMP-DIAG block in native-dom-electron.spec.mjs.
-  const setCanvasMode = useCallback((next: SetStateAction<CanvasMode>) => {
-    const value = typeof next === "function" ? "fn" : String(next);
-    const diagWindow = window as Window & { __canvasModeSetLog?: string[] };
-    let entry = `${value}@${performance.now().toFixed(0)}`;
-    if (value === "preview") {
-      entry += `::${(new Error().stack || "").split("\n")
-        .slice(2, 4)
-        .map((line) => line.trim())
-        .join(" <- ")}`;
-    }
-    diagWindow.__canvasModeSetLog = [
-      ...(diagWindow.__canvasModeSetLog ?? []),
-      entry,
-    ];
-    setCanvasModeBase(next);
-  }, []);
+  const [canvasMode, setCanvasMode] = useState<CanvasMode>("edit");
   // The AI conversation sidebar. All of its React state lives in this hook, so
   // the Workbench gains one hook call and no extra budget.
   // Declared before the conversation hook because the sidebar stays docked
@@ -7045,24 +7022,8 @@ export default function Workbench() {
         }
       case "relink-target":
         resumeSubmissionAfterRelinkRef.current = action.resumeSubmission === true;
-        // TEMP-DIAG: see the setCanvasMode wrapper above. Remove when triage ends.
-        (window as Window & { __relinkDiag?: string[] }).__relinkDiag = [
-          ...((window as Window & { __relinkDiag?: string[] }).__relinkDiag ?? []),
-          `enter@${performance.now().toFixed(0)}`,
-        ];
-        try {
-          beginTargetRelink(action.commentId);
-        } catch (error) {
-          (window as Window & { __relinkDiag?: string[] }).__relinkDiag = [
-            ...((window as Window & { __relinkDiag?: string[] }).__relinkDiag ?? []),
-            `begin-throw@${performance.now().toFixed(0)}:${String((error as Error | null)?.stack || error).slice(0, 400)}`,
-          ];
-        }
+        beginTargetRelink(action.commentId);
         setCanvasMode("edit");
-        (window as Window & { __relinkDiag?: string[] }).__relinkDiag = [
-          ...((window as Window & { __relinkDiag?: string[] }).__relinkDiag ?? []),
-          `mode-edit-set@${performance.now().toFixed(0)}`,
-        ];
         setDrawer(null);
         return;
       case "relaunch-app":
