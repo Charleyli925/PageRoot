@@ -2813,6 +2813,17 @@ test("multiple orphaned comments relink in sequence and resume the original send
     activeLaunch = await launchPageRoot({
       isolatedUserData: firstLaunch.isolatedUserData,
     });
+    // TEMP-DIAG: forward renderer console output so CI-only handler errors are
+    // visible in the job log. Remove when triage ends.
+    activeLaunch.page.on("console", (message) => {
+      const text = message.text();
+      if (/TEMP-DIAG|error|Error|uncaught|Warning:/i.test(text)) {
+        console.log(`TEMP-DIAG console.${message.type()}: ${text.slice(0, 500)}`);
+      }
+    });
+    activeLaunch.page.on("pageerror", (error) => {
+      console.log(`TEMP-DIAG pageerror: ${String(error.stack || error.message || error).slice(0, 600)}`);
+    });
     const { frame: recoveredFrame } = await loadedDiskFrame(
       activeLaunch.page,
       managedSourcePath,
@@ -2852,6 +2863,8 @@ test("multiple orphaned comments relink in sequence and resume the original send
         iframeRect: rect(iframe),
         flexCopyRect: rect(flexCopy),
         flexCopyVisibility: flexCopy ? getComputedStyle(flexCopy).visibility : null,
+        relinkDiag: window.__relinkDiag ?? null,
+        canvasModeSetLog: (window.__canvasModeSetLog ?? []).slice(-40),
       };
     });
     console.log(`TEMP-DIAG relink surface: ${JSON.stringify(relinkSurfaceState)}`);

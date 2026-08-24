@@ -10,6 +10,7 @@ import {
   type ChangeEvent,
   type ClipboardEvent,
   type CSSProperties,
+  type SetStateAction,
 } from "react";
 import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/csr/ArrowSquareOut";
 import { CaretRightIcon } from "@phosphor-icons/react/dist/csr/CaretRight";
@@ -721,7 +722,22 @@ export default function Workbench() {
     versionSnapshot.currentBasedOnVersionId;
   const currentExactVersionId = versionSnapshot.currentExactVersionId;
   const viewMode = versionSnapshot.viewMode;
-  const [canvasMode, setCanvasMode] = useState<CanvasMode>("edit");
+  const [canvasMode, setCanvasModeBase] = useState<CanvasMode>("edit");
+  // TEMP-DIAG: CI-only stuck-preview triage. Records every canvasMode write with
+  // its call site so the failing run can be attributed without local repro.
+  // Remove together with the TEMP-DIAG block in native-dom-electron.spec.mjs.
+  const setCanvasMode = useCallback((next: SetStateAction<CanvasMode>) => {
+    const diagWindow = window as Window & { __canvasModeSetLog?: string[] };
+    const frames = (new Error().stack || "").split("\n")
+      .slice(2, 4)
+      .map((line) => line.trim())
+      .join(" <- ");
+    diagWindow.__canvasModeSetLog = [
+      ...(diagWindow.__canvasModeSetLog ?? []),
+      `${typeof next === "function" ? "fn" : String(next)}@${performance.now().toFixed(0)}::${frames}`,
+    ];
+    setCanvasModeBase(next);
+  }, []);
   // The AI conversation sidebar. All of its React state lives in this hook, so
   // the Workbench gains one hook call and no extra budget.
   // Declared before the conversation hook because the sidebar stays docked
@@ -7022,8 +7038,24 @@ export default function Workbench() {
         }
       case "relink-target":
         resumeSubmissionAfterRelinkRef.current = action.resumeSubmission === true;
-        beginTargetRelink(action.commentId);
+        // TEMP-DIAG: see the setCanvasMode wrapper above. Remove when triage ends.
+        (window as Window & { __relinkDiag?: string[] }).__relinkDiag = [
+          ...((window as Window & { __relinkDiag?: string[] }).__relinkDiag ?? []),
+          `enter@${performance.now().toFixed(0)}`,
+        ];
+        try {
+          beginTargetRelink(action.commentId);
+        } catch (error) {
+          (window as Window & { __relinkDiag?: string[] }).__relinkDiag = [
+            ...((window as Window & { __relinkDiag?: string[] }).__relinkDiag ?? []),
+            `begin-throw@${performance.now().toFixed(0)}:${String((error as Error | null)?.stack || error).slice(0, 400)}`,
+          ];
+        }
         setCanvasMode("edit");
+        (window as Window & { __relinkDiag?: string[] }).__relinkDiag = [
+          ...((window as Window & { __relinkDiag?: string[] }).__relinkDiag ?? []),
+          `mode-edit-set@${performance.now().toFixed(0)}`,
+        ];
         setDrawer(null);
         return;
       case "relaunch-app":
