@@ -2748,7 +2748,17 @@ test("project resources drain edited rules before leaving", async () => {
   }
 });
 
-test("multiple orphaned comments relink in sequence and resume the original send", async () => {
+// Quarantined as a CI incident (#281): on the slow runner the relink toast's
+// 开始重新定位 click reports success while the React handler never runs —
+// the mousedown and mouseup separate across a reflow window, so the browser
+// drops the click — and the case then times out on the flex-copy host that
+// only the handler's canvasMode("edit") write can reveal. Same clean tree has
+// passed and failed CI runs (never reproduced locally, including the CI's
+// 1280x720 geometry with --repeat-each), which is the two-strike CI-only
+// signature RELEASE_PIPELINE_GOVERNANCE.md §4 quarantines instead of masking
+// with retries. Unfixme when the follow-up PR lands the handler-level
+// confirmation or moves the action off the toast.
+test.fixme("multiple orphaned comments relink in sequence and resume the original send", async () => {
   test.setTimeout(120_000);
   const fixture = createSourceFixture("orphaned-comments-resume-send.html");
   const firstLaunch = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
