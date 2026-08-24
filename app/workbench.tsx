@@ -170,8 +170,12 @@ import {
   recordId,
   selectionFromRecord,
   uniqueTargets,
-  unsafeCommentTargetsNotice,
 } from "./workbench/comment-model";
+import {
+  relinkNoticeCopy,
+  unsafeCommentTargetsNotice,
+  unsafeRelinkComments,
+} from "./workbench/comment-relink-model.js";
 import {
   CommentAttachmentStrip,
   VersionDetail,
@@ -1334,6 +1338,10 @@ export default function Workbench() {
   const [reviewPreparing, setReviewPreparing] = useState(false);
   const [openingReadyVersion, setOpeningReadyVersion] = useState(false);
   const [relinkingTarget, setRelinkingTarget] = useState<string | null>(null);
+  // True only while a send is parked on unsafe targets: the rail card's action
+  // resumes that send after every target is re-proven. Cancel or draining the
+  // unsafe set clears it so a later manual relink never auto-sends.
+  const [submissionRelinkPending, setSubmissionRelinkPending] = useState(false);
   const [runtimeCapabilitiesReady, setRuntimeCapabilitiesReady] = useState(false);
   const [browserPreviewOnly, setBrowserPreviewOnly] = useState(false);
   const qoderHandoffState = runSnapshot.activeHandoff;
@@ -2502,6 +2510,17 @@ export default function Workbench() {
     [comments],
   );
   const activeCommentCount = activeCommentItems.length;
+  const unsafeRelinkCommentItems = useMemo(
+    () => unsafeRelinkComments(activeCommentItems),
+    [activeCommentItems],
+  );
+  const relinkCardCopy = relinkNoticeCopy(unsafeRelinkCommentItems);
+  const relinkCardActive = Boolean(relinkingTarget && relinkingTarget !== "__composer");
+  useEffect(() => {
+    if (submissionRelinkPending && unsafeRelinkCommentItems.length === 0) {
+      setSubmissionRelinkPending(false);
+    }
+  }, [submissionRelinkPending, unsafeRelinkCommentItems.length]);
   const commentEditDraft = commentEditSession?.draftText ?? "";
   const commentEditAttachments = commentEditSession?.draftAttachments ?? [];
   const unfinishedEditedComment = commentEditSession
@@ -2741,7 +2760,16 @@ export default function Workbench() {
   const otherTabCommentEntryCount = (
     otherTabCommentItems.length + (draftInOtherTab ? 1 : 0)
   );
-  const commentRailMinimumTop = Math.max(82, 14 + commentHeaderHeight + 16);
+  const relinkRailCardVisible = Boolean(
+    commentLayoutReady
+    && viewMode === "current"
+    && !interactionLocked
+    && unsafeRelinkCommentItems.length > 0,
+  );
+  // The relink card is an absolutely placed rail-status-card; while it is up,
+  // comment cards start below it instead of underneath it.
+  const commentRailMinimumTop = Math.max(82, 14 + commentHeaderHeight + 16)
+    + (relinkRailCardVisible ? 96 : 0);
   const commentViewportBucket = Math.floor(commentViewport.top / 600);
   useEffect(() => {
     pageViewDocumentKeyRef.current = pageViewDocumentKey;
@@ -4929,20 +4957,22 @@ export default function Workbench() {
     setRelinkingTarget(null);
     updateFocusedComment(relinkingId);
     queueReviewPairReveal(nextTarget, relinkingId);
-    const remainingUnsafe = nextComments.filter(
-      (comment) => commentHasContent(comment) && !canLocateTarget(comment.target),
-    );
+    const remainingUnsafe = unsafeRelinkComments(nextComments);
     if (remainingUnsafe.length > 0) {
-      setToast(unsafeCommentTargetsNotice(remainingUnsafe));
+      // No toast here: the rail card shows the remaining count on its own
+      // durable surface while the chain advances automatically.
       window.requestAnimationFrame(() => {
         beginTargetRelink(remainingUnsafe[0].commentId);
       });
-    } else if (resumeSubmissionAfterRelinkRef.current) {
-      resumeSubmissionAfterRelinkRef.current = false;
-      setToast(null);
-      window.requestAnimationFrame(() => {
-        deferredEditorReplayRef.current.generateRequest?.();
-      });
+    } else {
+      setSubmissionRelinkPending(false);
+      if (resumeSubmissionAfterRelinkRef.current) {
+        resumeSubmissionAfterRelinkRef.current = false;
+        setToast(null);
+        window.requestAnimationFrame(() => {
+          deferredEditorReplayRef.current.generateRequest?.();
+        });
+      }
     }
     return true;
   }, [
@@ -4958,11 +4988,23 @@ export default function Workbench() {
     relinkingTargetRef.current = null;
     relinkSelectionArmedRef.current = false;
     resumeSubmissionAfterRelinkRef.current = false;
+    setSubmissionRelinkPending(false);
     setRelinkingTarget(null);
     if (relinkingId === "__composer") {
       requestComposerFocus();
     }
   }, [requestComposerFocus]);
+
+  // The durable relink entry on the comment rail. The surface is persistent,
+  // so a click lost to a reflow window can simply be repeated (#281); the
+  // toast only points here and never carries the action itself.
+  const startUnsafeTargetRelink = useCallback(() => {
+    if (unsafeRelinkCommentItems.length === 0) return;
+    resumeSubmissionAfterRelinkRef.current = submissionRelinkPending;
+    beginTargetRelink(unsafeRelinkCommentItems[0].commentId);
+    setCanvasMode("edit");
+    setDrawer(null);
+  }, [beginTargetRelink, submissionRelinkPending, unsafeRelinkCommentItems]);
 
   const clearCurrentComposer = useCallback(() => {
     composerFocusPendingRef.current = false;
@@ -5847,9 +5889,14 @@ export default function Workbench() {
         return;
       }
       if (outcome.code === "RUN_SUBMISSION_TARGET_UNSAFE") {
-        const unsafeTargets = currentCommentSessionSnapshot().comments.filter(
-          (comment) => commentHasContent(comment) && !canLocateTarget(comment.target),
+        const unsafeTargets = unsafeRelinkComments(
+          currentCommentSessionSnapshot().comments,
         );
+        // A blocked send is only recoverable on the edit canvas; flip back so
+        // the persistent rail card (the durable #281 entry) is on screen even
+        // when the send was issued from the AI sidebar in preview mode.
+        setCanvasMode("edit");
+        setSubmissionRelinkPending(true);
         setToast(unsafeCommentTargetsNotice(unsafeTargets));
         return;
       }
@@ -7020,12 +7067,6 @@ export default function Workbench() {
         }
         return;
         }
-      case "relink-target":
-        resumeSubmissionAfterRelinkRef.current = action.resumeSubmission === true;
-        beginTargetRelink(action.commentId);
-        setCanvasMode("edit");
-        setDrawer(null);
-        return;
       case "relaunch-app":
         void relaunchApp();
         return;
@@ -8048,6 +8089,28 @@ export default function Workbench() {
                   : ""}
             </span>
 
+            {relinkRailCardVisible ? (
+              <section
+                className="comment-target-recovery rail-status-card rail-relink-status"
+                role="status"
+                aria-label="评论需要重新定位"
+                data-html-canvas-preserve-selection="true"
+              >
+                <span>
+                  <strong>{relinkCardCopy.title}</strong>
+                  <small>{relinkCardCopy.detail}</small>
+                </span>
+                <button
+                  type="button"
+                  onClick={startUnsafeTargetRelink}
+                >{relinkCardActive
+                  ? "正在等待选择…"
+                  : relinkCardCopy.actionLabel}</button>
+                {relinkCardActive ? (
+                  <button type="button" onClick={cancelTargetRelink}>取消</button>
+                ) : null}
+              </section>
+            ) : null}
             {projectLoadError ? (
               <section className="round-lock-card rail-status-card" aria-label="项目读取失败">
                 <strong>当前项目暂不可编辑</strong>

@@ -567,6 +567,14 @@
       ]
     },
     {
+      "id": "comment-relink",
+      "patterns": ["^app/workbench/comment-relink-model\\.(?:js|d\\.ts)$"],
+      "suites": ["typecheck"],
+      "nodeTests": [
+        "tests/comment-relink.test.mjs"
+      ]
+    },
+    {
       "id": "runtime-capabilities",
       "patterns": ["^app/application/runtime-capabilities\\.(?:js|d\\.ts)$"],
       "suites": ["typecheck"],

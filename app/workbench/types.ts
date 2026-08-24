@@ -403,12 +403,6 @@ export type ToastAction =
       label: string;
       target: { kind: "composer" | "comment"; commentId: string };
     }
-  | {
-      id: "relink-target";
-      label: string;
-      commentId: string;
-      resumeSubmission?: boolean;
-    }
   | { id: "relaunch-app"; label: string }
   | { id: "retry-draft-persist"; label: string }
   | { id: "review-project-rules"; label: string }
