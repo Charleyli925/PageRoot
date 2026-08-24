@@ -2748,17 +2748,12 @@ test("project resources drain edited rules before leaving", async () => {
   }
 });
 
-// Quarantined as a CI incident (#281): on the slow runner the relink toast's
-// 开始重新定位 click reports success while the React handler never runs —
-// the mousedown and mouseup separate across a reflow window, so the browser
-// drops the click — and the case then times out on the flex-copy host that
-// only the handler's canvasMode("edit") write can reveal. Same clean tree has
-// passed and failed CI runs (never reproduced locally, including the CI's
-// 1280x720 geometry with --repeat-each), which is the two-strike CI-only
-// signature RELEASE_PIPELINE_GOVERNANCE.md §4 quarantines instead of masking
-// with retries. Unfixme when the follow-up PR lands the handler-level
-// confirmation or moves the action off the toast.
-test.fixme("multiple orphaned comments relink in sequence and resume the original send", async () => {
+// Unquarantined from #281: the relink toast click below now confirms the
+// handler actually ran instead of trusting Playwright's click result. On the
+// slow runner the toast button reflows between mousedown and mouseup, the
+// browser then drops the click, and the case used to time out on the flex-copy
+// host that only the handler's canvasMode("edit") write can reveal.
+test("multiple orphaned comments relink in sequence and resume the original send", async () => {
   test.setTimeout(120_000);
   const fixture = createSourceFixture("orphaned-comments-resume-send.html");
   const firstLaunch = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
@@ -2839,7 +2834,20 @@ test.fixme("multiple orphaned comments relink in sequence and resume the origina
     await chooseClipboardDelivery(activeLaunch.page);
     await expect(activeLaunch.page.getByText("2 条评论需要重新定位", { exact: true }))
       .toBeVisible();
-    await activeLaunch.page.getByRole("button", { name: "开始重新定位" }).click();
+    // A click Playwright reports as performed can still be lost by the page:
+    // click only fires when mousedown and mouseup land on the same element,
+    // and on a slow runner the toast button reflowed between the two, so the
+    // React handler never ran and the toast stayed (#281). The handler's
+    // first statement clears the toast, so its disappearance proves it ran;
+    // re-clicking against that deterministic oracle is targeted, not a retry
+    // of the case.
+    const relinkNotice = activeLaunch.page
+      .getByText("2 条评论需要重新定位", { exact: true });
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await activeLaunch.page.getByRole("button", { name: "开始重新定位" }).click();
+      if (await relinkNotice.isHidden()) break;
+    }
+    await expect(relinkNotice).toBeHidden();
 
     await recoveredFrame.locator(caseSelector("flex-copy")).click();
     await expect(activeLaunch.page.getByText("1 条评论需要重新定位", { exact: true }))

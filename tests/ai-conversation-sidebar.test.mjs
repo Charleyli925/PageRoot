@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   FORBIDDEN_MESSAGE_KEYS,
+  conversationLoadedForView,
   conversationReadyForDocument,
   sidebarActionBar,
   sidebarActorInitial,
@@ -190,6 +191,26 @@ test("a reveal intent is only written directly where no load can follow it", () 
   // would drop the write exactly the same way.
   assert.equal(conversationReadyForDocument(readyFor("p1", "d1"), "p2", "d2"), false);
   assert.equal(conversationReadyForDocument(readyFor("p1", "d1"), "p1", "d2"), false);
+});
+
+test("the empty state only appears once a load has settled", () => {
+  const context = { projectId: "p1", documentId: "d1", sourcePath: "/tmp/page.html" };
+  // Settled loads: one that published a conversation, and one that settled
+  // without a conversation while the Document it loaded for is still attached.
+  assert.equal(conversationLoadedForView({ status: "ready", context }), true);
+  assert.equal(conversationLoadedForView({ status: "idle", context }), true);
+  // Not settled: a load in flight; the contextless idle the session publishes
+  // on subscribe and on deactivate — a fresh open renders its first frame
+  // against it; a failed load; and a null snapshot before the controller has
+  // published anything.
+  assert.equal(conversationLoadedForView({ status: "loading", context }), false);
+  assert.equal(conversationLoadedForView({ status: "idle", context: null }), false);
+  assert.equal(conversationLoadedForView({ status: "failed", context }), false);
+  assert.equal(conversationLoadedForView(null), false);
+  // Fail-safe: a status this version does not know must never unlock the
+  // empty state by default, because the session drops draft writes until it
+  // has published a conversation.
+  assert.equal(conversationLoadedForView({ status: "archived", context }), false);
 });
 
 test("a disabled send button always says why", () => {

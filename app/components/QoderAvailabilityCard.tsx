@@ -113,10 +113,17 @@ export default function QoderAvailabilityCard({
     </>
   );
 
-  const summaryInteractive = availability.status === "ready"
-    && !readyAfterInstall
-    && !checking
-    && !disabled;
+  // On the About surface the summary is a details toggle whatever the
+  // availability status is, so the node keeps its tag across the async
+  // refreshes (catalog ready → usability auth-required) instead of swapping
+  // button ↔ div and detaching under a click on a slow runner (#282). Only
+  // the delivery surface ties interactivity to a ready status.
+  const summaryInteractive = surface === "about"
+    ? !disabled
+    : availability.status === "ready"
+      && !readyAfterInstall
+      && !checking
+      && !disabled;
   const summaryNode = summaryInteractive ? (
     <button
       className="qoder-card-summary"

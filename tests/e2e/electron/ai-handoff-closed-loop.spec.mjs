@@ -4225,17 +4225,11 @@ test("Qoder ACP Agent Bridge reaches review without clipboard or automatic adopt
   }
 });
 
-// Quarantined as a CI incident (#282): on the slow runner the click on the
-// availability card's Qoder CLI button lands inside the card's rebuild window
-// while the async auth-required catalog state settles, so the resolved button
-// detaches before mouseup and the click loops on "not stable" until timeout.
-// The case already targets the new .about-agent-section surface (no removed
-// dialog reference) and has passed CI on heads where this same suite is green;
-// it never reproduced locally. Two-strike CI-only signature per
-// RELEASE_PIPELINE_GOVERNANCE.md §4 — quarantined, not masked by retries.
-// Unfixme when the follow-up PR makes the card's interactive state stable
-// across availability refreshes (or awaits the settled state here).
-test.fixme("Qoder authentication stays in one delivery dialog and matches About", async () => {
+// Unquarantined from #282: the About card's summary is now a toggle button in
+// every availability status, so the async catalog → usability refreshes (ready
+// → auth-required) re-render the card without swapping the summary node's tag;
+// the resolved button no longer detaches under the click on a slow runner.
+test("Qoder authentication stays in one delivery dialog and matches About", async () => {
   test.setTimeout(120_000);
   const fixture = createSourceFixture("qoder-auth-required.html");
   const qoderCommand = createQoderAcpE2ECommand(fixture.sourceDirectory, {
