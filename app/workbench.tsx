@@ -723,18 +723,25 @@ export default function Workbench() {
   const currentExactVersionId = versionSnapshot.currentExactVersionId;
   const viewMode = versionSnapshot.viewMode;
   const [canvasMode, setCanvasModeBase] = useState<CanvasMode>("edit");
-  // TEMP-DIAG: CI-only stuck-preview triage. Records every canvasMode write with
-  // its call site so the failing run can be attributed without local repro.
+  // TEMP-DIAG: CI-only stuck-preview triage. Records every canvasMode write; a
+  // preview write also records its call site. Stack capture costs ~0.5ms and a
+  // run with it on every write passed CI while the run without it failed, so
+  // capture is limited to preview writes — those happen before the racing
+  // window, so timing stays faithful while the culprit stays attributable.
   // Remove together with the TEMP-DIAG block in native-dom-electron.spec.mjs.
   const setCanvasMode = useCallback((next: SetStateAction<CanvasMode>) => {
+    const value = typeof next === "function" ? "fn" : String(next);
     const diagWindow = window as Window & { __canvasModeSetLog?: string[] };
-    const frames = (new Error().stack || "").split("\n")
-      .slice(2, 4)
-      .map((line) => line.trim())
-      .join(" <- ");
+    let entry = `${value}@${performance.now().toFixed(0)}`;
+    if (value === "preview") {
+      entry += `::${(new Error().stack || "").split("\n")
+        .slice(2, 4)
+        .map((line) => line.trim())
+        .join(" <- ")}`;
+    }
     diagWindow.__canvasModeSetLog = [
       ...(diagWindow.__canvasModeSetLog ?? []),
-      `${typeof next === "function" ? "fn" : String(next)}@${performance.now().toFixed(0)}::${frames}`,
+      entry,
     ];
     setCanvasModeBase(next);
   }, []);
@@ -1350,6 +1357,21 @@ export default function Workbench() {
   const [reviewPreparing, setReviewPreparing] = useState(false);
   const [openingReadyVersion, setOpeningReadyVersion] = useState(false);
   const [relinkingTarget, setRelinkingTarget] = useState<string | null>(null);
+  // A relink is completed on the edit canvas: the user clicks the new target
+  // there. Any preview transition that races the relink intent strands the
+  // round behind a hidden surface with no way forward, so the invariant is
+  // restored reactively instead of trusting every canvasMode writer to uphold
+  // it. Relink is a modal task anyway: switching to preview mid-relink had no
+  // path back into it.
+  useEffect(() => {
+    if (!relinkingTarget || canvasMode === "edit") return;
+    const diagWindow = window as Window & { __relinkDiag?: string[] };
+    diagWindow.__relinkDiag = [
+      ...(diagWindow.__relinkDiag ?? []),
+      `restore-edit@${performance.now().toFixed(0)}`,
+    ];
+    setCanvasMode("edit");
+  }, [relinkingTarget, canvasMode]);
   const [runtimeCapabilitiesReady, setRuntimeCapabilitiesReady] = useState(false);
   const [browserPreviewOnly, setBrowserPreviewOnly] = useState(false);
   const qoderHandoffState = runSnapshot.activeHandoff;
