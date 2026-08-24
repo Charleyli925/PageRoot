@@ -1338,10 +1338,11 @@ export default function Workbench() {
   const [reviewPreparing, setReviewPreparing] = useState(false);
   const [openingReadyVersion, setOpeningReadyVersion] = useState(false);
   const [relinkingTarget, setRelinkingTarget] = useState<string | null>(null);
-  // True only while a send is parked on unsafe targets: the rail card's action
-  // resumes that send after every target is re-proven. Cancel or draining the
-  // unsafe set clears it so a later manual relink never auto-sends.
-  const [submissionRelinkPending, setSubmissionRelinkPending] = useState(false);
+  // Comment ids a blocked send was parked on. The send stays pending exactly
+  // while at least one of them is still unsafe, so the promise lapses by
+  // derivation — re-proofs, external reloads and cancels need no effect.
+  const [submissionRelinkPendingIds, setSubmissionRelinkPendingIds] =
+    useState<readonly string[]>([]);
   const [runtimeCapabilitiesReady, setRuntimeCapabilitiesReady] = useState(false);
   const [browserPreviewOnly, setBrowserPreviewOnly] = useState(false);
   const qoderHandoffState = runSnapshot.activeHandoff;
@@ -2514,13 +2515,18 @@ export default function Workbench() {
     () => unsafeRelinkComments(activeCommentItems),
     [activeCommentItems],
   );
+  const unsafeRelinkCommentIds = useMemo(
+    () => new Set(unsafeRelinkCommentItems.map((comment) => comment.commentId)),
+    [unsafeRelinkCommentItems],
+  );
+  // Derived, never healed inside an effect (React Compiler forbids the
+  // cascading setState): pending means one of the parked comments is still
+  // unsafe, so the send's resumption promise survives until the set drains.
+  const submissionRelinkPending = submissionRelinkPendingIds.some(
+    (commentId) => unsafeRelinkCommentIds.has(commentId),
+  );
   const relinkCardCopy = relinkNoticeCopy(unsafeRelinkCommentItems);
   const relinkCardActive = Boolean(relinkingTarget && relinkingTarget !== "__composer");
-  useEffect(() => {
-    if (submissionRelinkPending && unsafeRelinkCommentItems.length === 0) {
-      setSubmissionRelinkPending(false);
-    }
-  }, [submissionRelinkPending, unsafeRelinkCommentItems.length]);
   const commentEditDraft = commentEditSession?.draftText ?? "";
   const commentEditAttachments = commentEditSession?.draftAttachments ?? [];
   const unfinishedEditedComment = commentEditSession
@@ -4965,7 +4971,7 @@ export default function Workbench() {
         beginTargetRelink(remainingUnsafe[0].commentId);
       });
     } else {
-      setSubmissionRelinkPending(false);
+      setSubmissionRelinkPendingIds([]);
       if (resumeSubmissionAfterRelinkRef.current) {
         resumeSubmissionAfterRelinkRef.current = false;
         setToast(null);
@@ -4988,7 +4994,7 @@ export default function Workbench() {
     relinkingTargetRef.current = null;
     relinkSelectionArmedRef.current = false;
     resumeSubmissionAfterRelinkRef.current = false;
-    setSubmissionRelinkPending(false);
+    setSubmissionRelinkPendingIds([]);
     setRelinkingTarget(null);
     if (relinkingId === "__composer") {
       requestComposerFocus();
@@ -5896,7 +5902,9 @@ export default function Workbench() {
         // the persistent rail card (the durable #281 entry) is on screen even
         // when the send was issued from the AI sidebar in preview mode.
         setCanvasMode("edit");
-        setSubmissionRelinkPending(true);
+        setSubmissionRelinkPendingIds(
+          unsafeTargets.map((comment) => comment.commentId),
+        );
         setToast(unsafeCommentTargetsNotice(unsafeTargets));
         return;
       }
