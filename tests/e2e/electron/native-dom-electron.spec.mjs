@@ -2831,6 +2831,31 @@ test("multiple orphaned comments relink in sequence and resume the original send
       .toBeVisible();
     await activeLaunch.page.getByRole("button", { name: "开始重新定位" }).click();
 
+    // TEMP-DIAG: CI-only visibility failure triage on the flex-copy host.
+    const relinkSurfaceState = await activeLaunch.page.evaluate(() => {
+      const surface = document.querySelector(".canvas-edit-surface");
+      const editor = surface?.querySelector('[data-testid="html-canvas-editor"]') ?? null;
+      const iframe = editor?.querySelector("iframe") ?? null;
+      const flexCopy = editor
+        ?.querySelectorAll("iframe")[0]
+        ?.contentDocument
+        ?.querySelector('[data-native-case="flex-copy"]') ?? null;
+      const rect = (element) => {
+        const box = element?.getBoundingClientRect();
+        return box ? { w: box.width, h: box.height } : null;
+      };
+      return {
+        surfaceHidden: surface ? String(surface.hidden) : "missing",
+        surfaceDisplay: surface ? getComputedStyle(surface).display : null,
+        editorPresent: Boolean(editor),
+        editorRect: rect(editor),
+        iframeRect: rect(iframe),
+        flexCopyRect: rect(flexCopy),
+        flexCopyVisibility: flexCopy ? getComputedStyle(flexCopy).visibility : null,
+      };
+    });
+    console.log(`TEMP-DIAG relink surface: ${JSON.stringify(relinkSurfaceState)}`);
+
     await recoveredFrame.locator(caseSelector("flex-copy")).click();
     await expect(activeLaunch.page.getByText("1 条评论需要重新定位", { exact: true }))
       .toBeVisible();
