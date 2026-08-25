@@ -12,6 +12,8 @@ export type QoderAvailabilityReason =
   | "auth-required"
   | "invalid-installation"
   | "restart-required"
+  | "account-capacity"
+  | "timeout"
   | "service-unavailable"
   | null;
 

@@ -3,7 +3,6 @@
 import {
   useEffect,
   useRef,
-  useState,
   type MouseEvent,
 } from "react";
 import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/csr/ArrowSquareOut";
@@ -38,6 +37,8 @@ export type AboutApplicationUpdateResult = {
   publishedAt: string | null;
 };
 
+export type AboutOpenSource = "default" | "agent-settings";
+
 type AboutPageRootDialogProps = {
   open: boolean;
   appVersion: string;
@@ -49,6 +50,7 @@ type AboutPageRootDialogProps = {
   releaseNotesOpenFailed: boolean;
   userNoticeOpenFailed: boolean;
   qoderAvailability: QoderAvailabilitySnapshot;
+  source?: AboutOpenSource;
   onClose: () => void;
   onCheckForUpdates: () => void;
   onDownloadUpdate: () => void;
@@ -56,7 +58,6 @@ type AboutPageRootDialogProps = {
   onOpenReleaseNotes: () => void;
   onOpenRepository: () => void;
   onOpenUserNotice: () => void;
-  onRefreshQoderAvailability: () => Promise<AboutQoderOutcome>;
   onCheckQoderUsability: () => Promise<AboutQoderOutcome>;
   onCopyQoderGuidance: (kind: QoderGuidanceKind) => Promise<AboutQoderOutcome>;
 };
@@ -184,6 +185,7 @@ export default function AboutPageRootDialog({
   releaseNotesOpenFailed,
   userNoticeOpenFailed,
   qoderAvailability,
+  source = "default",
   onClose,
   onCheckForUpdates,
   onDownloadUpdate,
@@ -191,13 +193,16 @@ export default function AboutPageRootDialog({
   onOpenReleaseNotes,
   onOpenRepository,
   onOpenUserNotice,
-  onRefreshQoderAvailability,
   onCheckQoderUsability,
   onCopyQoderGuidance,
 }: AboutPageRootDialogProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
-  const [qoderExpanded, setQoderExpanded] = useState(false);
+  const qoderActionRef = useRef<HTMLButtonElement>(null);
+  const qoderAvailabilityRef = useRef(qoderAvailability);
+  useEffect(() => {
+    qoderAvailabilityRef.current = qoderAvailability;
+  }, [qoderAvailability]);
   const presentation = updatePresentation({
     result: updateResult,
     updatesAvailable,
@@ -237,13 +242,65 @@ export default function AboutPageRootDialog({
     if (!dialog) return;
     if (open && !dialog.open) {
       dialog.showModal();
-      setQoderExpanded(false);
-      void onRefreshQoderAvailability();
-      requestAnimationFrame(() => closeButtonRef.current?.focus());
     } else if (!open && dialog.open) {
       dialog.close();
     }
-  }, [onRefreshQoderAvailability, open]);
+    if (!open) return undefined;
+
+    let active = true;
+    let checkInFlight = false;
+    let lastCheckStartedAt = 0;
+    let lastCheckGuidance = qoderAvailabilityRef.current.guidanceCopied;
+    const requestCheck = (force = false) => {
+      if (!active) return;
+      const status = qoderAvailabilityRef.current.status;
+      if (!force && (status === "ready" || status === "checking")) return;
+      const now = Date.now();
+      const guidanceChanged = (
+        qoderAvailabilityRef.current.guidanceCopied !== lastCheckGuidance
+      );
+      if (
+        checkInFlight
+        || (!guidanceChanged && now - lastCheckStartedAt < 1_500)
+      ) return;
+      lastCheckStartedAt = now;
+      lastCheckGuidance = qoderAvailabilityRef.current.guidanceCopied;
+      checkInFlight = true;
+      Promise.resolve(onCheckQoderUsability())
+        .catch(() => undefined)
+        .finally(() => {
+          checkInFlight = false;
+        });
+    };
+
+    // Opening About always performs a real check. A focus/visibility return only
+    // rechecks unresolved states, and the local guard coalesces the two browser
+    // events into one request. RunWorkflow still owns the cross-surface promise.
+    requestCheck(true);
+    const handleReturnToApp = () => {
+      if (document.visibilityState === "visible") requestCheck();
+    };
+    window.addEventListener("focus", handleReturnToApp);
+    document.addEventListener("visibilitychange", handleReturnToApp);
+    const focusFrame = requestAnimationFrame(() => {
+      if (source === "agent-settings") qoderActionRef.current?.focus();
+      else closeButtonRef.current?.focus();
+    });
+    return () => {
+      active = false;
+      window.removeEventListener("focus", handleReturnToApp);
+      document.removeEventListener("visibilitychange", handleReturnToApp);
+      cancelAnimationFrame(focusFrame);
+    };
+  }, [onCheckQoderUsability, open, source]);
+
+  useEffect(() => {
+    if (!open || source !== "agent-settings") return undefined;
+    const focusFrame = requestAnimationFrame(() => {
+      qoderActionRef.current?.focus();
+    });
+    return () => cancelAnimationFrame(focusFrame);
+  }, [open, qoderAvailability.guidanceCopied, qoderAvailability.status, source]);
 
   const handleBackdropPointer = (event: MouseEvent<HTMLDialogElement>) => {
     if (event.target === event.currentTarget) onClose();
@@ -283,8 +340,6 @@ export default function AboutPageRootDialog({
               源码级本地 HTML 编辑器。
               <br />
               所见即可改，AI Agent 无缝接力。
-              <br />
-              修改前后对照审阅，再由你决定打开。
             </p>
           </div>
         </header>
@@ -299,10 +354,7 @@ export default function AboutPageRootDialog({
           <QoderAvailabilityCard
             availability={qoderAvailability}
             surface="about"
-            expanded={qoderExpanded}
-            onToggle={() => setQoderExpanded((current) => !current)}
-            onRefreshLocal={onRefreshQoderAvailability}
-            onCheckUsability={onCheckQoderUsability}
+            actionButtonRef={qoderActionRef}
             onCopyGuidance={onCopyQoderGuidance}
           />
         </section>

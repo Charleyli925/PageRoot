@@ -386,6 +386,12 @@ export class RunWorkflow {
         previous,
         validDate(this.#clock),
       );
+      if (String(result?.status || "") === "ready") {
+        // Local discovery is intentionally a weak check. Follow it with the
+        // same forced preflight used by the send path instead of ever exposing
+        // the local result as a green connection state.
+        return this.checkQoderUsability();
+      }
       this.#setQoderAvailability(availability);
       if (availability.status !== "ready") this.#qoderPreflight = null;
       return succeeded({ availability });

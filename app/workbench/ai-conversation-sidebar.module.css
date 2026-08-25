@@ -456,6 +456,16 @@
   white-space: nowrap;
 }
 
+.sendStatus {
+  min-width: 0;
+  margin-left: auto;
+  overflow: hidden;
+  color: #8a8797;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .send {
   min-height: 30px;
   margin-left: auto;

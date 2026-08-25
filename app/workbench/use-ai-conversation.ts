@@ -56,6 +56,8 @@ export type UseAiConversationOptions = {
    * nothing, which is why the process drawer could not be removed before now.
    */
   onDecision?: (actionId: string) => void;
+  /** Opens About's Qoder settings without sending or clearing the draft. */
+  onOpenAgentSettings?: () => void;
 };
 
 export function useAiConversation({
@@ -74,6 +76,7 @@ export function useAiConversation({
   pendingCommentCount,
   onDeliverModification,
   onDecision,
+  onOpenAgentSettings,
 }: UseAiConversationOptions) {
   const [open, setOpen] = useState(false);
   // Review is the same workbench with a different Canvas, so the thread that led
@@ -81,6 +84,12 @@ export function useAiConversation({
   // read-only there: see sidebarSendState(reviewing).
   const active = (canvasMode === "preview" || reviewing) && Boolean(sourcePath);
   const visible = active && open;
+  const qoderAvailabilityRef = useRef(qoderAvailability);
+  const qoderCheckInFlightRef = useRef<Promise<unknown> | null>(null);
+  const qoderCheckStartedAtRef = useRef(0);
+  useEffect(() => {
+    qoderAvailabilityRef.current = qoderAvailability;
+  }, [qoderAvailability]);
 
   // A reveal intent that arrives before the conversation is loaded for this
   // Document — on a first open, or when the sidebar reopens after a Document
@@ -96,17 +105,32 @@ export function useAiConversation({
   // Load when the sidebar becomes visible for a Document; flush + drain + close
   // on any change to that identity or when it stops being visible.
   //
-  // Opening the sidebar also has to ask whether Qoder is usable. Nothing else on
-  // this surface triggers that check — the delivery dialog and the About card own
-  // the other two entry points — so without this the Composer would sit at
-  // "正在读取模型…" forever and the send button would never enable. Opening the
-  // AI sidebar is the user's explicit request to use the Agent, which is the
-  // moment PRD §10.3 allows the use-time check to run and show progress.
+  // Opening the sidebar also has to ask whether Qoder is usable. Returning from
+  // an external login while the sidebar remains visible must do the same check
+  // without a user-facing "检测" button.
   useEffect(() => {
     if (!visible) return undefined;
     const controller = controllerRef.current;
     if (!controller) return undefined;
     let cancelled = false;
+    const requestQoderCheck = (force = false) => {
+      const status = qoderAvailabilityRef.current?.status;
+      if (!force && (status === "ready" || status === "checking")) return;
+      const now = Date.now();
+      if (
+        qoderCheckInFlightRef.current
+        || now - qoderCheckStartedAtRef.current < 1_500
+      ) return;
+      qoderCheckStartedAtRef.current = now;
+      const checking = Promise.resolve(controller.checkQoderUsability())
+        .catch(() => undefined);
+      qoderCheckInFlightRef.current = checking;
+      void checking.finally(() => {
+        if (qoderCheckInFlightRef.current === checking) {
+          qoderCheckInFlightRef.current = null;
+        }
+      });
+    };
     void (async () => {
       await controller.openConversation({ projectId, documentId, sourcePath });
       if (cancelled) return;
@@ -116,9 +140,16 @@ export function useAiConversation({
         controller.updateConversationDraftIntent(pending);
       }
     })();
-    void controller.checkQoderUsability();
+    requestQoderCheck(true);
+    const handleReturnToApp = () => {
+      if (document.visibilityState === "visible") requestQoderCheck();
+    };
+    window.addEventListener("focus", handleReturnToApp);
+    document.addEventListener("visibilitychange", handleReturnToApp);
     return () => {
       cancelled = true;
+      window.removeEventListener("focus", handleReturnToApp);
+      document.removeEventListener("visibilitychange", handleReturnToApp);
       void controller.flushConversationDraft();
       // A read-only discussion turn is cancelled at this boundary rather than
       // left running against a Document the user is no longer looking at.
@@ -241,6 +272,7 @@ export function useAiConversation({
     onCopyTask,
     onAction: onDecision,
     onCollapse,
+    onOpenAgentSettings,
   }), [
     state,
     conversation,
@@ -254,6 +286,7 @@ export function useAiConversation({
     onCopyTask,
     onDecision,
     onCollapse,
+    onOpenAgentSettings,
   ]);
 
   return { open, visible, toggle, reveal, sidebarProps };

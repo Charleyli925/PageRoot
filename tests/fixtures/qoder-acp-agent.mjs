@@ -15,6 +15,10 @@ if (process.argv.includes("--list-models")) {
     process.stderr.write("Not logged in. Login required.\n");
     process.exit(1);
   }
+  if (process.argv.includes("--capacity-unavailable")) {
+    process.stderr.write("No available model capacity.\n");
+    process.exit(1);
+  }
   process.stdout.write("MODEL\nPageRoot-E2E\n");
   process.exit(0);
 }

@@ -254,7 +254,54 @@ test("a ready catalog with text can send", () => {
     catalogStatus: "ready",
     hasText: true,
   });
-  assert.deepEqual(send, { canSend: true, label: "发送", reason: null });
+  assert.deepEqual(send, {
+    kind: "send",
+    canSend: true,
+    label: "发送",
+    reason: null,
+  });
+});
+
+test("Agent connection recovery is an explicit sidebar action, not a send", () => {
+  const checking = sidebarSendState({
+    state: "preview-discussion",
+    catalogStatus: "checking",
+    hasText: true,
+  });
+  assert.deepEqual(checking, {
+    kind: "status",
+    canSend: false,
+    label: "正在连接 Agent…",
+    reason: null,
+  });
+
+  const login = sidebarSendState({
+    state: "preview-discussion",
+    catalogStatus: "auth-required",
+    hasText: true,
+  });
+  assert.deepEqual(login, {
+    kind: "open-agent-settings",
+    canSend: false,
+    label: "登录 Qoder CLI",
+    reason: null,
+  });
+
+  const install = sidebarSendState({
+    state: "preview-discussion",
+    catalogStatus: "not-installed",
+    hasText: true,
+  });
+  assert.equal(install.kind, "open-agent-settings");
+  assert.equal(install.label, "设置 Qoder CLI");
+
+  const unavailable = sidebarSendState({
+    state: "preview-discussion",
+    catalogStatus: "unavailable",
+    hasText: true,
+  });
+  assert.equal(unavailable.kind, "status");
+  assert.equal(unavailable.label, "Agent 暂不可用");
 });
 
 test("a draft written while a round runs says it will not be sent", () => {

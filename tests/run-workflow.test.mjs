@@ -12,6 +12,11 @@ import {
   activeRunFromRecord,
   canonicalLifecycleState,
 } from "../app/domain/run-lifecycle.js";
+import {
+  INITIAL_QODER_AVAILABILITY,
+  qoderAvailabilityFromLocalResult,
+  qoderAvailabilityPresentation,
+} from "../app/domain/qoder-availability.js";
 
 const SOURCE_A = "/tmp/run-workflow-a.html";
 const SOURCE_B = "/tmp/run-workflow-b.html";
@@ -525,6 +530,42 @@ test("local Qoder refresh changes only shared availability state", async () => {
   harness.workflow.dispose();
 });
 
+test("local Qoder discovery never creates a green state without a real preflight", async () => {
+  const deferredPreflight = deferred();
+  const harness = createHarness({
+    bridge: {
+      async qoderAvailability() {
+        harness.calls.availability.push(true);
+        return { status: "ready" };
+      },
+      async preflightAgent(request) {
+        harness.calls.preflight.push(request);
+        return deferredPreflight.promise;
+      },
+    },
+  });
+  const localOnly = qoderAvailabilityFromLocalResult(
+    { status: "ready" },
+    INITIAL_QODER_AVAILABILITY,
+    "2026-08-11T00:00:00.000Z",
+  );
+  assert.notEqual(localOnly.status, "ready");
+
+  const refreshing = harness.workflow.refreshQoderAvailability();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(harness.calls.preflight.length, 1);
+  assert.equal(harness.workflow.getSnapshot().qoderAvailability.status, "checking");
+  deferredPreflight.resolve({
+    status: "ready",
+    preflightId: "preflight_after_local",
+    expiresAt: "2026-08-11T00:02:00.000Z",
+  });
+  const outcome = await refreshing;
+  assert.equal(outcome.status, "succeeded");
+  assert.equal(harness.workflow.getSnapshot().qoderAvailability.status, "ready");
+  harness.workflow.dispose();
+});
+
 test("an About usability check does not authorize a later Qoder submission", async () => {
   const harness = createHarness();
 
@@ -533,6 +574,9 @@ test("an About usability check does not authorize a later Qoder submission", asy
   assert.equal(harness.calls.preflight.length, 1);
   assert.equal(harness.calls.createRequest.length, 0);
   assert.equal(harness.workflow.getSnapshot().qoderAvailability.status, "ready");
+  assert.equal(harness.calls.fence, 0);
+  assert.equal(harness.calls.freeze, 0);
+  assert.equal(harness.calls.unlock, 0);
 
   const submitted = await harness.workflow.submit({ deliveryMode: "qoder-acp" });
   assert.equal(submitted.status, "succeeded");
@@ -597,7 +641,7 @@ test("a local disk refresh preserves a known authentication requirement", async 
   assert.equal(harness.workflow.getSnapshot().qoderAvailability.status, "auth-required");
 
   const refreshed = await harness.workflow.refreshQoderAvailability();
-  assert.equal(refreshed.status, "succeeded");
+  assert.equal(refreshed.status, "rejected");
   assert.equal(harness.workflow.getSnapshot().qoderAvailability.status, "auth-required");
   assert.equal(harness.calls.createRequest.length, 0);
   assert.equal(harness.calls.freeze, 0);
@@ -685,6 +729,61 @@ test("a failed Qoder preflight creates no Request and leaves editing recoverable
   assert.equal(harness.calls.freeze, 0);
   assert.equal(harness.calls.unlock, 0);
   assert.equal(harness.workflow.getSnapshot().qoderAvailability.status, "unavailable");
+  assert.equal(
+    harness.workflow.getSnapshot().qoderAvailability.reason,
+    "account-capacity",
+  );
+  harness.workflow.dispose();
+});
+
+test("capacity and timeout preflight failures keep truthful recovery reasons", async () => {
+  for (const [code, reason, statusLabel] of [
+    ["QODER_ACCOUNT_CAPACITY_UNAVAILABLE", "account-capacity", "暂不可用 · Qoder 额度已用完"],
+    ["QODER_PREFLIGHT_TIMEOUT", "timeout", "暂不可用 · 连接超时"],
+  ]) {
+    const error = Object.assign(new Error(code), { code });
+    const harness = createHarness({
+      bridge: {
+        async preflightAgent() {
+          throw error;
+        },
+      },
+    });
+    const outcome = await harness.workflow.checkQoderUsability();
+    assert.equal(outcome.status, "rejected");
+    const availability = harness.workflow.getSnapshot().qoderAvailability;
+    assert.equal(availability.reason, reason);
+    assert.equal(qoderAvailabilityPresentation(availability).statusLabel, statusLabel);
+    assert.equal(harness.calls.createRequest.length, 0);
+    assert.equal(harness.calls.freeze, 0);
+    assert.equal(harness.calls.fence, 0);
+    assert.equal(harness.calls.unlock, 0);
+    harness.workflow.dispose();
+  }
+});
+
+test("concurrent automatic Qoder checks share one preflight promise", async () => {
+  const preflight = deferred();
+  const harness = createHarness({
+    bridge: {
+      async preflightAgent(request) {
+        harness.calls.preflight.push(request);
+        return preflight.promise;
+      },
+    },
+  });
+  const first = harness.workflow.checkQoderUsability();
+  const second = harness.workflow.checkQoderUsability();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(harness.calls.preflight.length, 1);
+  preflight.resolve({
+    status: "ready",
+    preflightId: "preflight_shared",
+    expiresAt: "2026-08-11T00:02:00.000Z",
+  });
+  assert.equal((await first).status, "succeeded");
+  assert.equal((await second).status, "succeeded");
+  assert.equal(harness.calls.createRequest.length, 0);
   harness.workflow.dispose();
 });
 

@@ -61,7 +61,12 @@ function preserveUseFailureAfterLocalReady(previous) {
       previous.status === "auth-required"
       || (
         previous.status === "unavailable"
-        && ["restart-required", "service-unavailable"].includes(previous.reason)
+        && [
+          "account-capacity",
+          "restart-required",
+          "service-unavailable",
+          "timeout",
+        ].includes(previous.reason)
       )
     ),
   );
@@ -80,9 +85,13 @@ export function qoderAvailabilityFromLocalResult(
         checkedAt,
       });
     }
+    // `/agent/availability` only proves that a trusted CLI can be found. It does
+    // not prove authentication, account capacity, or ACP usability. Keep the
+    // visible state unverified; the application boundary immediately follows this
+    // result with a real preflight before it may create `ready`.
     return availabilitySnapshot({
-      status: "ready",
-      reason: null,
+      status: "checking",
+      reason: "checking",
       lastCheck: "local",
       checkedAt,
       guidanceCopied: previous.guidanceCopied,
@@ -148,6 +157,29 @@ export function qoderAvailabilityFromFailureCode(
       guidanceCopiedAt: previous.guidanceCopiedAt,
     });
   }
+  if ([
+    "QODER_ACCOUNT_CAPACITY_UNAVAILABLE",
+    "QODER_CAPACITY_UNAVAILABLE",
+  ].includes(normalized)) {
+    return availabilitySnapshot({
+      status: "unavailable",
+      reason: "account-capacity",
+      lastCheck: "use",
+      checkedAt,
+      guidanceCopied: previous.guidanceCopied,
+      guidanceCopiedAt: previous.guidanceCopiedAt,
+    });
+  }
+  if (normalized === "QODER_PREFLIGHT_TIMEOUT") {
+    return availabilitySnapshot({
+      status: "unavailable",
+      reason: "timeout",
+      lastCheck: "use",
+      checkedAt,
+      guidanceCopied: previous.guidanceCopied,
+      guidanceCopiedAt: previous.guidanceCopiedAt,
+    });
+  }
   if (["QODER_COMMAND_CHANGED", "QODER_VERSION_MISMATCH"].includes(normalized)) {
     return availabilitySnapshot({
       status: "unavailable",
@@ -195,8 +227,8 @@ export function qoderAvailabilityPresentation(availability) {
   const status = availability?.status || "checking";
   if (status === "ready") {
     return Object.freeze({
-      statusLabel: "可使用",
-      detail: "自动执行，并在 PageRoot 中显示进度",
+      statusLabel: "已连接",
+      detail: "真实预检已完成，可直接交给 Qoder CLI",
       tone: "ready",
     });
   }
@@ -208,9 +240,12 @@ export function qoderAvailabilityPresentation(availability) {
     });
   }
   if (status === "auth-required") {
+    const waitingForLogin = availability?.guidanceCopied === "login";
     return Object.freeze({
-      statusLabel: "需要登录",
-      detail: "完成 Qoder 登录后即可直接发送。",
+      statusLabel: waitingForLogin ? "等待登录" : "需要登录",
+      detail: waitingForLogin
+        ? "完成登录后返回源页，系统会自动复检。"
+        : "完成 Qoder 登录后即可直接发送。",
       tone: "attention",
     });
   }
@@ -230,14 +265,32 @@ export function qoderAvailabilityPresentation(availability) {
   }
   if (status === "checking") {
     return Object.freeze({
-      statusLabel: "正在检查",
-      detail: "正在检查 Qoder CLI…",
+      statusLabel: "检测中",
+      detail: "正在自动检查 Qoder CLI…",
       tone: "checking",
     });
   }
+  if (availability?.reason === "account-capacity") {
+    return Object.freeze({
+      statusLabel: "暂不可用 · Qoder 额度已用完",
+      detail: "Qoder 账号当前没有可用模型容量。",
+      tone: "attention",
+    });
+  }
+  if (availability?.reason === "timeout") {
+    return Object.freeze({
+      statusLabel: "暂不可用 · 连接超时",
+      detail: "Qoder CLI 预检没有在规定时间内完成。",
+      tone: "attention",
+    });
+  }
   return Object.freeze({
-    statusLabel: "暂时无法检查",
-    detail: "本轮任务尚未创建，当前页面不受影响。",
+    statusLabel: "暂不可用 · 连接没有完成",
+    detail: availability?.reason === "invalid-installation"
+      ? "当前安装不可用。"
+      : availability?.reason === "restart-required"
+        ? "请重新打开源页后再试。"
+        : "本轮任务尚未创建，当前页面不受影响。",
     tone: "attention",
   });
 }

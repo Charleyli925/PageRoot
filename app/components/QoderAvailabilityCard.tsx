@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState, type Ref } from "react";
 
 import {
   qoderAvailabilityPresentation,
@@ -16,279 +16,105 @@ type QoderActionOutcome = Readonly<{
 type QoderAvailabilityCardProps = {
   availability: QoderAvailabilitySnapshot;
   surface: "delivery" | "about";
-  expanded?: boolean;
   disabled?: boolean;
-  onToggle?: () => void;
-  onActivate?: () => Promise<boolean>;
-  onRefreshLocal: () => Promise<QoderActionOutcome>;
-  onCheckUsability: () => Promise<QoderActionOutcome>;
+  actionButtonRef?: Ref<HTMLButtonElement>;
   onCopyGuidance: (kind: QoderGuidanceKind) => Promise<QoderActionOutcome>;
 };
+
+function actionForAvailability(availability: QoderAvailabilitySnapshot) {
+  if (availability.status === "not-installed") {
+    return {
+      kind: "install" as const,
+      label: "复制安装指令至 Agent",
+      copiedLabel: "复制安装指令至 Agent",
+    };
+  }
+  if (availability.status === "auth-required") {
+    return {
+      kind: "login" as const,
+      label: "复制指令粘贴至 Agent",
+      copiedLabel: "重新复制",
+    };
+  }
+  return null;
+}
 
 export default function QoderAvailabilityCard({
   availability,
   surface,
-  expanded = false,
   disabled = false,
-  onToggle,
-  onActivate,
-  onRefreshLocal,
-  onCheckUsability,
+  actionButtonRef,
   onCopyGuidance,
 }: QoderAvailabilityCardProps) {
-  const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const [pendingAction, setPendingAction] = useState<QoderGuidanceKind | null>(null);
   const [actionError, setActionError] = useState("");
-  const focusRefreshCleanupRef = useRef<(() => void) | null>(null);
   const presentation = qoderAvailabilityPresentation(availability);
+  const action = actionForAvailability(availability);
   const checking = availability.status === "checking";
-  const readyAfterInstall = availability.status === "ready"
-    && availability.guidanceCopied === "install";
-  const showDetails = expanded
-    || availability.status === "not-installed"
-    || availability.status === "auth-required"
-    || availability.status === "unavailable"
-    || readyAfterInstall;
+  const actionLabel = action && availability.guidanceCopied === action.kind
+    ? action.copiedLabel
+    : action?.label;
 
-  useEffect(() => () => focusRefreshCleanupRef.current?.(), []);
-
-  const runAction = async (
-    action: string,
-    invoke: () => Promise<QoderActionOutcome | boolean>,
-  ) => {
+  const copyGuidance = async (kind: QoderGuidanceKind) => {
     if (pendingAction || disabled) return;
-    setPendingAction(action);
+    setPendingAction(kind);
     setActionError("");
     try {
-      const outcome = await invoke();
-      const succeeded = typeof outcome === "boolean"
-        ? outcome
-        : Boolean(outcome && ["succeeded", "stale"].includes(outcome.status));
-      if (!succeeded) {
-        if (action.startsWith("copy-")) {
-          setActionError("指令暂时无法复制，请重试。");
-        }
-      } else if (action === "copy-install") {
-        focusRefreshCleanupRef.current?.();
-        const refreshAfterReturn = () => {
-          focusRefreshCleanupRef.current = null;
-          void onRefreshLocal();
-        };
-        window.addEventListener("focus", refreshAfterReturn, { once: true });
-        focusRefreshCleanupRef.current = () => (
-          window.removeEventListener("focus", refreshAfterReturn)
-        );
-      }
-    } catch {
-      setActionError(
-        action.startsWith("copy-")
-          ? "指令暂时无法复制，请重试。"
-          : "这次检查没有完成，请重试。",
+      const outcome = await onCopyGuidance(kind);
+      const succeeded = Boolean(
+        outcome && ["succeeded", "stale"].includes(outcome.status),
       );
+      if (!succeeded) setActionError("指令暂时无法复制，请重试。");
+    } catch {
+      setActionError("指令暂时无法复制，请重试。");
     } finally {
       setPendingAction(null);
     }
   };
 
-  const summary = (
-    <>
-      <span className="qoder-card-brand" aria-hidden="true">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="./qoder-logo.png" alt="" />
-      </span>
-      <span className="qoder-card-copy">
-        <strong>Qoder CLI</strong>
-        {availability.status === "ready" || availability.status === "checking"
-          ? <small>{presentation.detail}</small>
-          : null}
-      </span>
-      <span
-        className="qoder-card-status"
-        data-tone={presentation.tone}
-        aria-live="polite"
-        aria-atomic="true"
-      >
-        <i aria-hidden="true" />
-        {presentation.statusLabel}
-      </span>
-    </>
-  );
-
-  // On the About surface the summary is a details toggle whatever the
-  // availability status is, so the node keeps its tag across the async
-  // refreshes (catalog ready → usability auth-required) instead of swapping
-  // button ↔ div and detaching under a click on a slow runner (#282). Only
-  // the delivery surface ties interactivity to a ready status.
-  const summaryInteractive = surface === "about"
-    ? !disabled
-    : availability.status === "ready"
-      && !readyAfterInstall
-      && !checking
-      && !disabled;
-  const summaryNode = summaryInteractive ? (
-    <button
-      className="qoder-card-summary"
-      type="button"
-      data-qoder-primary="true"
-      disabled={Boolean(pendingAction)}
-      aria-expanded={surface === "about" ? expanded : undefined}
-      onClick={() => {
-        if (surface === "about") onToggle?.();
-        else if (onActivate) void runAction("activate", onActivate);
-      }}
-    >
-      {summary}
-    </button>
-  ) : (
-    <div className="qoder-card-summary" aria-live="polite" aria-atomic="true">
-      {summary}
-    </div>
-  );
-
   return (
     <section
       className="qoder-availability-card"
       data-status={availability.status}
+      data-surface={surface}
       data-tone={presentation.tone}
-      data-expanded={showDetails ? "true" : "false"}
+      aria-busy={checking}
     >
-      {summaryNode}
-
-      {showDetails ? (
-        <div className="qoder-card-details">
-          {availability.status === "not-installed" ? (
-            <>
-              <p>{presentation.detail}</p>
-              {availability.guidanceCopied === "install" ? (
-                <div className="qoder-guidance-confirmation" role="status">
-                  <strong>✓ 安装指令已复制</strong>
-                  <span>粘贴到 Qoder 发送。安装完成后回到这里继续。</span>
-                </div>
-              ) : null}
-            </>
+      <div className="qoder-card-summary">
+        <span className="qoder-card-brand" aria-hidden="true">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="./qoder-logo.png" alt="" />
+        </span>
+        <span className="qoder-card-copy">
+          <strong>Qoder CLI</strong>
+        </span>
+        <span className="qoder-card-control">
+          <span
+            className="qoder-card-status"
+            data-tone={presentation.tone}
+            aria-live="polite"
+            aria-atomic="true"
+          >
+            <i aria-hidden="true" />
+            {presentation.statusLabel}
+          </span>
+          {action ? (
+            <button
+              ref={actionButtonRef}
+              type="button"
+              data-qoder-primary="true"
+              disabled={Boolean(pendingAction) || disabled}
+              aria-label={actionLabel}
+              onClick={() => void copyGuidance(action.kind)}
+            >
+              {pendingAction === action.kind ? "正在复制…" : actionLabel}
+            </button>
           ) : null}
-
-          {availability.status === "auth-required" ? (
-            <>
-              <p>{presentation.detail}</p>
-              {availability.guidanceCopied === "login" ? (
-                <div className="qoder-guidance-confirmation" role="status">
-                  <strong>✓ 登录指令已复制</strong>
-                  <span>粘贴到 Qoder 发送。完成登录后回到这里继续。</span>
-                </div>
-              ) : null}
-            </>
-          ) : null}
-
-          {availability.status === "unavailable" ? (
-            <p>{presentation.detail}</p>
-          ) : null}
-
-          {availability.status === "ready" && surface === "about" ? (
-            <p>检查登录和当前可用性，不会创建本轮任务。</p>
-          ) : null}
-
-          <div className="qoder-card-actions">
-            {availability.status === "not-installed" ? (
-              <>
-                <button
-                  type="button"
-                  data-qoder-primary="true"
-                  disabled={Boolean(pendingAction)}
-                  onClick={() => void runAction(
-                    "copy-install",
-                    () => onCopyGuidance("install"),
-                  )}
-                >
-                  {pendingAction === "copy-install"
-                    ? "正在复制…"
-                    : availability.guidanceCopied === "install"
-                      ? "重新复制"
-                      : "复制给 Qoder 的安装指令"}
-                </button>
-                <button
-                  className="secondary"
-                  type="button"
-                  disabled={Boolean(pendingAction)}
-                  onClick={() => void runAction("refresh", onRefreshLocal)}
-                >
-                  {pendingAction === "refresh" ? "正在检查…" : "重新检查"}
-                </button>
-              </>
-            ) : null}
-
-            {availability.status === "auth-required" ? (
-              <>
-                <button
-                  type="button"
-                  data-qoder-primary="true"
-                  disabled={Boolean(pendingAction)}
-                  onClick={() => void runAction(
-                    "copy-login",
-                    () => onCopyGuidance("login"),
-                  )}
-                >
-                  {pendingAction === "copy-login" ? "正在复制…" : "复制登录指令"}
-                </button>
-                <button
-                  className="secondary"
-                  type="button"
-                  disabled={Boolean(pendingAction)}
-                  onClick={() => void runAction(
-                    "check",
-                    surface === "delivery" && onActivate
-                      ? onActivate
-                      : onCheckUsability,
-                  )}
-                >
-                  {pendingAction === "check" ? "正在检查…" : "重新检查"}
-                </button>
-              </>
-            ) : null}
-
-            {availability.status === "unavailable" ? (
-              <button
-                type="button"
-                data-qoder-primary="true"
-                disabled={Boolean(pendingAction)}
-                onClick={() => void runAction(
-                  "check",
-                  surface === "delivery" && onActivate
-                    ? onActivate
-                    : onCheckUsability,
-                )}
-              >
-                {pendingAction === "check" ? "正在检查…" : "重新检查"}
-              </button>
-            ) : null}
-
-            {availability.status === "ready" && readyAfterInstall && surface === "delivery" ? (
-              <button
-                type="button"
-                data-qoder-primary="true"
-                disabled={Boolean(pendingAction)}
-                onClick={() => onActivate && void runAction("activate", onActivate)}
-              >
-                {pendingAction === "activate" ? "正在检查…" : "检查并继续"}
-              </button>
-            ) : null}
-
-            {availability.status === "ready" && surface === "about" ? (
-              <button
-                type="button"
-                data-qoder-primary="true"
-                disabled={Boolean(pendingAction)}
-                onClick={() => void runAction("check", onCheckUsability)}
-              >
-                {pendingAction === "check" ? "正在检查…" : "重新检查"}
-              </button>
-            ) : null}
-          </div>
-
           {actionError ? (
-            <p className="qoder-card-error" role="alert">{actionError}</p>
+            <span className="qoder-card-error" role="alert">{actionError}</span>
           ) : null}
-        </div>
-      ) : null}
+        </span>
+      </div>
     </section>
   );
 }

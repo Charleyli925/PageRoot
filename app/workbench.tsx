@@ -42,7 +42,9 @@ import type {
 } from "./components/HtmlCanvasEditor";
 import type { DesktopEditRuntimeApi } from "./components/desktop-edit-runtime-api";
 import type { DesktopUiPreferencesApi } from "./components/desktop-ui-preferences-api";
-import AboutPageRootDialog from "./components/AboutPageRootDialog";
+import AboutPageRootDialog, {
+  type AboutOpenSource,
+} from "./components/AboutPageRootDialog";
 import { AgentDeliveryButton, type AgentDeliveryMode } from "./components/AgentDeliveryButton";
 import CancelAiRunDialog from "./components/CancelAiRunDialog";
 import FirstEditGuideCard from "./components/FirstEditGuideCard";
@@ -750,6 +752,10 @@ export default function Workbench() {
   const generateRequestRef = useRef<
     ((mode: AgentDeliveryMode) => void) | null
   >(null);
+  const openAgentSettingsRef = useRef<(() => void) | null>(null);
+  const openAgentSettings = useCallback(() => {
+    openAgentSettingsRef.current?.();
+  }, []);
   const aiConversation = useAiConversation({
     controllerRef: workspaceControllerRef,
     conversation: workspaceControllerSnapshot?.conversation ?? null,
@@ -777,6 +783,7 @@ export default function Workbench() {
      * optimisation for the whole component.
      */
     onDeliverModification: (mode) => generateRequestRef.current?.(mode),
+    onOpenAgentSettings: openAgentSettings,
   });
   // The run-event effect reports a submitted round by opening the thread. It is
   // reached through a ref so that effect keeps its curated dependency list.
@@ -1349,6 +1356,7 @@ export default function Workbench() {
   const [updateResult, setUpdateResult] =
     useState<ApplicationUpdateResult | null>(null);
   const [aboutOpen, setAboutOpen] = useState(false);
+  const [aboutOpenSource, setAboutOpenSource] = useState<AboutOpenSource>("default");
   const [restartUpdateOpen, setRestartUpdateOpen] = useState(false);
   const [applicationVersion, setApplicationVersion] = useState("");
   const [desktopUpdatesAvailable, setDesktopUpdatesAvailable] = useState(false);
@@ -2265,13 +2273,21 @@ export default function Workbench() {
     }
   }, []);
 
-  const openAboutPageRoot = useCallback(() => {
+  const openAboutPageRoot = useCallback((source: AboutOpenSource = "default") => {
     setManualUpdateCheckFailed(false);
     setRepositoryOpenFailed(false);
     setReleaseNotesOpenFailed(false);
     setUserNoticeOpenFailed(false);
+    setAboutOpenSource(source);
     setAboutOpen(true);
   }, []);
+
+  useEffect(() => {
+    openAgentSettingsRef.current = () => openAboutPageRoot("agent-settings");
+    return () => {
+      openAgentSettingsRef.current = null;
+    };
+  }, [openAboutPageRoot]);
 
   useEffect(() => {
     const lifecycle = window.htmlAIAppLifecycle;
@@ -2351,6 +2367,7 @@ export default function Workbench() {
 
   const closeAboutPageRoot = useCallback(() => {
     setAboutOpen(false);
+    setAboutOpenSource("default");
   }, []);
 
   const downloadAvailableUpdate = useCallback(async () => {
@@ -5972,15 +5989,12 @@ export default function Workbench() {
     viewMode,
     workspaceController,
   ]);
-  const refreshQoderAvailability = async () => (
-    workspaceController?.refreshQoderAvailability() ?? null
-  );
-  const checkQoderUsability = async () => (
+  const checkQoderUsability = useCallback(async () => (
     workspaceController?.checkQoderUsability() ?? null
-  );
-  const copyQoderGuidance = async (kind: QoderGuidanceKind) => (
+  ), [workspaceController]);
+  const copyQoderGuidance = useCallback(async (kind: QoderGuidanceKind) => (
     workspaceController?.copyQoderGuidance({ kind }) ?? null
-  );
+  ), [workspaceController]);
   useEffect(() => {
     deferredEditorReplayRef.current.generateRequest = () => {
       void generateRequest(deferredEditorReplayRef.current.agentDeliveryMode, true);
@@ -7233,7 +7247,7 @@ export default function Workbench() {
               type="button"
               aria-label="关于源页"
               title="关于源页"
-              onClick={openAboutPageRoot}
+              onClick={() => openAboutPageRoot()}
             >
               <FileHtmlIcon aria-hidden="true" size={20} weight="duotone" />
             </button>
@@ -9083,6 +9097,7 @@ export default function Workbench() {
         releaseNotesOpenFailed={releaseNotesOpenFailed}
         userNoticeOpenFailed={userNoticeOpenFailed}
         qoderAvailability={qoderAvailability}
+        source={aboutOpenSource}
         onClose={closeAboutPageRoot}
         onCheckForUpdates={() => void checkForApplicationUpdates()}
         onDownloadUpdate={() => void downloadAvailableUpdate()}
@@ -9093,7 +9108,6 @@ export default function Workbench() {
         onOpenReleaseNotes={() => void openReleaseNotes()}
         onOpenRepository={() => void openProjectRepository()}
         onOpenUserNotice={() => void openUserNotice()}
-        onRefreshQoderAvailability={refreshQoderAvailability}
         onCheckQoderUsability={checkQoderUsability}
         onCopyQoderGuidance={copyQoderGuidance}
       />

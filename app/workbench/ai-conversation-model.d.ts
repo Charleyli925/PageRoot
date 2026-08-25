@@ -47,6 +47,7 @@ export type SidebarActionBar = {
 };
 
 export type SidebarSendState = {
+  kind: "send" | "open-agent-settings" | "status";
   canSend: boolean;
   label: string;
   reason: string | null;

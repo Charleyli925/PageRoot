@@ -50,6 +50,11 @@ async function closePageRootGracefully(electronApp, page) {
 const ORIGINAL_TEXT = "列表项中的文字保持项目符号和缩进。";
 const UPDATED_TEXT = "自动闭环验收通过";
 const SECOND_UPDATED_TEXT = "自动闭环第二版通过";
+const QODER_VISUAL_OUTPUT = path.join(
+  productRoot,
+  "output/playwright/qoder-auto-connection-sync",
+);
+mkdirSync(QODER_VISUAL_OUTPUT, { recursive: true });
 const PICKER_TEXT = "项目切换原子发布验收通过";
 const READABLE_REWRITE_BEFORE = "综搜整体仍处于放缓背景，关键不在于单纯增加曝光，而在于识别商品需求，并用更匹配的供给承接；核心仍是让模型识别电商意图，再优化结果组织，把模糊兴趣转化为可验证需求。";
 const READABLE_REWRITE_AFTER = "综搜放缓，但电商搜索仍有较高大盘。关键是识别内容浏览中的潜在商品需求，并用匹配供给承接。供给可归纳为电商意图识别、优化结果组织，将模糊兴趣转为可验证需求。";
@@ -260,6 +265,7 @@ function createQoderAcpE2ECommand(directory, {
   hang = false,
   pidFile = null,
   authRequired = false,
+  capacityUnavailable = false,
 } = {}) {
   const command = path.join(directory, "pageroot-qoder-acp-e2e");
   const agent = path.join(productRoot, "tests", "fixtures", "qoder-acp-agent.mjs");
@@ -267,6 +273,7 @@ function createQoderAcpE2ECommand(directory, {
     hang ? "--hang" : null,
     pidFile ? `--pid-file=${pidFile}` : null,
     authRequired ? "--auth-required" : null,
+    capacityUnavailable ? "--capacity-unavailable" : null,
   ].filter(Boolean).map(shellQuote).join(" ");
   writeFileSync(
     command,
@@ -4225,11 +4232,7 @@ test("Qoder ACP Agent Bridge reaches review without clipboard or automatic adopt
   }
 });
 
-// Unquarantined from #282: the About card's summary is now a toggle button in
-// every availability status, so the async catalog → usability refreshes (ready
-// → auth-required) re-render the card without swapping the summary node's tag;
-// the resolved button no longer detaches under the click on a slow runner.
-test("Qoder authentication stays in one delivery dialog and matches About", async () => {
+test("Qoder login entry opens About, preserves the draft, and rechecks automatically", async () => {
   test.setTimeout(120_000);
   const fixture = createSourceFixture("qoder-auth-required.html");
   const qoderCommand = createQoderAcpE2ECommand(fixture.sourceDirectory, {
@@ -4254,33 +4257,59 @@ test("Qoder authentication stays in one delivery dialog and matches About", asyn
       "验证 Qoder 登录引导不会创建本轮任务。",
     );
     await launched.page.getByRole("button", { name: /AI 对话/u }).click();
-    const deliveryDialog = await openQoderAvailability(launched.page);
-    await expect(deliveryDialog.getByRole("button", { name: /Qoder CLI/u }))
+    const sidebar = launched.page.getByTestId("ai-conversation-sidebar");
+    await expect(sidebar).toBeVisible();
+    // The header entry opens the comment-driven Modify intent. Choose the
+    // discussion intent explicitly before creating a text draft.
+    await expect(sidebar.getByRole("radio", { name: "修改" }))
+      .toHaveAttribute("aria-checked", "true");
+    await sidebar.getByRole("radio", { name: "讨论" }).click();
+    await expect(sidebar.getByRole("radio", { name: "讨论" }))
+      .toHaveAttribute("aria-checked", "true");
+    const input = sidebar.getByTestId("ai-conversation-input");
+    await expect(input).toBeEnabled();
+    await input.fill("保留这份登录草稿");
+    await expect(input).toHaveValue("保留这份登录草稿");
+    await expect(sidebar.getByRole("button", { name: "登录 Qoder CLI" }))
       .toBeVisible();
-    await deliveryDialog.getByRole("button", { name: /Qoder CLI/u }).click();
+    await launched.page.screenshot({
+      path: path.join(QODER_VISUAL_OUTPUT, "real-sidebar-login.png"),
+      fullPage: false,
+    });
+    await sidebar.getByRole("button", { name: "登录 Qoder CLI" }).click();
 
-    await expect(deliveryDialog).toBeVisible();
-    await expect(deliveryDialog.getByText("需要登录", { exact: true })).toBeVisible();
-    await expect(deliveryDialog.getByRole("button", { name: "复制登录指令" }))
+    const about = launched.page.getByRole("dialog", { name: "源页" });
+    await expect(about).toBeVisible();
+    await expect(about.getByRole("heading", { name: "AI Agent" })).toBeVisible();
+    await expect(about.getByText("Qoder CLI", { exact: true })).toBeVisible();
+    await expect(about.getByText("需要登录", { exact: true })).toBeVisible();
+    await expect(about.getByRole("button", { name: "复制指令粘贴至 Agent" }))
       .toBeVisible();
-    // Clipboard delivery lives in the conversation now, so the About card no
-    // longer offers a copy-task action; not creating a round is the contract.
+    await about.screenshot({
+      path: path.join(QODER_VISUAL_OUTPUT, "real-about-login.png"),
+      animations: "disabled",
+    });
     expect(requestPosts).toBe(0);
-    await expect(launched.page.locator(".toast.show")).toHaveCount(0);
-
-    await deliveryDialog.getByRole("button", { name: "复制登录指令" }).click();
-    await expect(deliveryDialog.getByText("✓ 登录指令已复制", { exact: true }))
-      .toBeVisible();
+    await about.getByRole("button", { name: "复制指令粘贴至 Agent" }).click();
+    await expect(about.getByText("等待登录", { exact: true })).toBeVisible();
+    await expect(about.getByRole("button", { name: "重新复制" })).toBeVisible();
+    await about.screenshot({
+      path: path.join(QODER_VISUAL_OUTPUT, "real-about-waiting-login.png"),
+      animations: "disabled",
+    });
     expect(await launched.electronApp.evaluate(({ clipboard }) => clipboard.readText()))
       .toContain("qodercli login");
     expect(requestPosts).toBe(0);
 
     await closeQoderAvailability(launched.page);
+    // Closing About can restore the review intent selected by the existing
+    // comment. Switch back to the discussion surface before checking that
+    // its draft survived the settings detour.
+    await sidebar.getByRole("radio", { name: "讨论" }).click();
+    await expect(sidebar.getByTestId("ai-conversation-input"))
+      .toHaveValue("保留这份登录草稿");
     await launched.page.getByRole("button", { name: "关于源页" }).click();
-    const about = launched.page.getByRole("dialog", { name: "源页" });
-    await expect(about.getByRole("heading", { name: "AI Agent" })).toBeVisible();
-    await expect(about.getByText("Qoder CLI", { exact: true })).toBeVisible();
-    await expect(about.getByText("需要登录", { exact: true })).toBeVisible();
+    await expect(about.getByText("等待登录", { exact: true })).toBeVisible();
     expect(requestPosts).toBe(0);
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
   } finally {
@@ -4314,14 +4343,17 @@ test("Qoder installed while PageRoot is open refreshes in place and continues on
     await launched.page.getByRole("button", { name: /AI 对话/u }).click();
     const deliveryDialog = await openQoderAvailability(launched.page);
     await expect(deliveryDialog.getByText("未安装", { exact: true })).toBeVisible();
-    await deliveryDialog.getByRole("button", { name: "复制给 Qoder 的安装指令" }).click();
-    await expect(deliveryDialog.getByText("✓ 安装指令已复制", { exact: true }))
+    await deliveryDialog.getByRole("button", { name: "复制安装指令至 Agent" }).click();
+    await expect(deliveryDialog.getByRole("button", { name: "复制安装指令至 Agent" }))
       .toBeVisible();
     expect(requestPosts).toBe(0);
 
     createQoderAcpE2ECommand(fixture.sourceDirectory);
-    await launched.page.evaluate(() => window.dispatchEvent(new Event("focus")));
-    await expect(deliveryDialog.getByText("可使用", { exact: true })).toBeVisible();
+    await launched.page.evaluate(() => {
+      window.dispatchEvent(new Event("focus"));
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await expect(deliveryDialog.getByText("已连接", { exact: true })).toBeVisible();
     // The About card only observes availability; continuing the round is the
     // conversation's own send action.
     expect(requestPosts).toBe(0);
@@ -4329,6 +4361,49 @@ test("Qoder installed while PageRoot is open refreshes in place and continues on
     await closeQoderAvailability(launched.page);
     await launched.page.getByRole("button", { name: "交给 Qoder 修改" }).click();
     await expect.poll(() => requestPosts).toBe(1);
+  } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
+
+test("Qoder capacity exhaustion stays unavailable without recovery buttons or a Request", async () => {
+  test.setTimeout(120_000);
+  const fixture = createSourceFixture("qoder-capacity-unavailable.html");
+  const qoderCommand = createQoderAcpE2ECommand(fixture.sourceDirectory, {
+    capacityUnavailable: true,
+  });
+  const launched = await launchPageRoot({
+    activeSourcePath: fixture.sourcePath,
+    injectedEnv: {
+      PAGEROOT_QODER_ACP_ALLOW_TEST_COMMAND: "1",
+      PAGEROOT_QODER_ACP_COMMAND: qoderCommand,
+    },
+  });
+  try {
+    let requestPosts = 0;
+    launched.page.on("request", (request) => {
+      const url = new URL(request.url());
+      if (request.method() === "POST" && url.pathname === "/request") requestPosts += 1;
+    });
+    await addComment(
+      launched.page,
+      fixture.sourcePath,
+      "额度不足时仍然不应创建本轮任务。",
+    );
+    await launched.page.getByRole("button", { name: /AI 对话/u }).click();
+    const aboutSection = await openQoderAvailability(launched.page);
+    await expect(
+      aboutSection.getByText("暂不可用 · Qoder 额度已用完", { exact: true }),
+    ).toBeVisible();
+    await expect(aboutSection.getByRole("button", { name: /检测|重新/u })).toHaveCount(0);
+    expect(requestPosts).toBe(0);
+    await launched.page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await expect(
+      aboutSection.getByText("暂不可用 · Qoder 额度已用完", { exact: true }),
+    ).toBeVisible();
+    expect(requestPosts).toBe(0);
+    expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
   } finally {
     await stopPageRoot(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);
