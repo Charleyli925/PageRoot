@@ -58,6 +58,22 @@ export type UseAiConversationOptions = {
   onDecision?: (actionId: string) => void;
 };
 
+type DeferredIntent = {
+  intent: SidebarIntent;
+  projectId: string;
+  documentId: string;
+  sourcePath: string;
+};
+
+function deferredIntentMatches(
+  pending: DeferredIntent | null,
+  identity: Omit<DeferredIntent, "intent">,
+) {
+  return pending?.projectId === identity.projectId
+    && pending.documentId === identity.documentId
+    && pending.sourcePath === identity.sourcePath;
+}
+
 export function useAiConversation({
   controllerRef,
   conversation,
@@ -92,7 +108,7 @@ export function useAiConversation({
   // just opened. The Composer then reads the default intent through a brief
   // reload window, which on a slow host drops the "copy to another Agent"
   // button long enough for a click to time out. A ref keeps the load to one.
-  const requestedIntentRef = useRef<SidebarIntent | null>(null);
+  const requestedIntentRef = useRef<DeferredIntent | null>(null);
   // Load when the sidebar becomes visible for a Document; flush + drain + close
   // on any change to that identity or when it stops being visible.
   //
@@ -106,19 +122,25 @@ export function useAiConversation({
     if (!visible) return undefined;
     const controller = controllerRef.current;
     if (!controller) return undefined;
+    const identity = { projectId, documentId, sourcePath };
     let cancelled = false;
     void (async () => {
       await controller.openConversation({ projectId, documentId, sourcePath });
       if (cancelled) return;
       const pending = requestedIntentRef.current;
-      if (pending) {
+      if (pending && deferredIntentMatches(pending, identity)) {
         requestedIntentRef.current = null;
-        controller.updateConversationDraftIntent(pending);
+        controller.updateConversationDraftIntent(pending.intent);
       }
     })();
     void controller.checkQoderUsability();
     return () => {
       cancelled = true;
+      // A choice made during this Document's load must not survive its drain and
+      // later overwrite another Document (or unexpectedly reappear on return).
+      if (deferredIntentMatches(requestedIntentRef.current, identity)) {
+        requestedIntentRef.current = null;
+      }
       void controller.flushConversationDraft();
       // A read-only discussion turn is cancelled at this boundary rather than
       // left running against a Document the user is no longer looking at.
@@ -146,8 +168,8 @@ export function useAiConversation({
     }
     // The conversation is not loaded for this Document yet — a direct write would
     // be dropped by the load that follows. Hold it for the effect to re-apply.
-    requestedIntentRef.current = intent;
-  }, [controllerRef, conversation, projectId, documentId]);
+    requestedIntentRef.current = { intent, projectId, documentId, sourcePath };
+  }, [controllerRef, conversation, projectId, documentId, sourcePath]);
 
   const onDraftChange = useCallback((text: string) => {
     controllerRef.current?.updateConversationDraftText(text);
@@ -161,8 +183,8 @@ export function useAiConversation({
     // The intent controls are visible while the first conversation load settles.
     // Preserve a quick user choice and apply it after that load restores the
     // persisted draft, for the same reason reveal(intent) defers its write.
-    requestedIntentRef.current = intent;
-  }, [controllerRef, conversation, projectId, documentId]);
+    requestedIntentRef.current = { intent, projectId, documentId, sourcePath };
+  }, [controllerRef, conversation, projectId, documentId, sourcePath]);
 
   const onCollapse = useCallback(() => setOpen(false), []);
 
