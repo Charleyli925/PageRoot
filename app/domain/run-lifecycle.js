@@ -78,7 +78,7 @@ function progressContext(run, handoffValue) {
     ? handoffValue
     : { status: handoffValue };
   const handoffStatus = String(handoff.status || "idle");
-  const agentMode = handoff.mode === "qoder-acp";
+  const agentMode = handoff.mode === "managed-agent";
   return {
     run,
     handoff,
@@ -585,16 +585,14 @@ export function activeRunFromRecord(raw) {
   const candidateAssessment = candidateAssessmentFromRecord(
     raw.candidateAssessment,
   );
-  const rawAgentDelivery = isRecord(raw.agentDelivery) ? raw.agentDelivery : null;
-  const agentDelivery = rawAgentDelivery
-    && ["clipboard", "qoder-acp"].includes(String(rawAgentDelivery.mode || ""))
-    ? {
-        mode: String(rawAgentDelivery.mode),
-        ...(rawAgentDelivery.trustPolicyVersion
-          ? { trustPolicyVersion: String(rawAgentDelivery.trustPolicyVersion) }
-          : {}),
-      }
-    : null;
+  let agentDelivery = null;
+  try {
+    agentDelivery = raw.agentDelivery
+      ? normalizeAgentDelivery(raw.agentDelivery)
+      : null;
+  } catch {
+    agentDelivery = null;
+  }
   return {
     projectId: String(raw.projectId || ""),
     documentId: String(raw.documentId || ""),
@@ -664,3 +662,4 @@ export function activeRunFromRecord(raw) {
     ...(candidateAssessment ? { candidateAssessment } : {}),
   };
 }
+import { normalizeAgentDelivery } from "../../shared/agent-delivery.mjs";

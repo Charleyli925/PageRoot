@@ -22,7 +22,6 @@
 // renders both through the same treatment.
 
 const POLL_INTERVAL_MS = 1_200;
-const DRIVER = "qoder-acp";
 const LIVE_STATES = ["starting", "running", "cancelling"];
 
 function sameDocument(left, right) {
@@ -40,6 +39,8 @@ export class DiscussionTurnWorkflow {
   #session;
 
   #requestTicket;
+
+  #freezeSelection;
 
   #onSettled;
 
@@ -59,6 +60,7 @@ export class DiscussionTurnWorkflow {
     bridgeClient,
     discussionTurnSession,
     requestTicket,
+    freezeSelection,
     onSettled = null,
     scheduler = globalThis,
     pollIntervalMs = POLL_INTERVAL_MS,
@@ -76,6 +78,9 @@ export class DiscussionTurnWorkflow {
     if (typeof requestTicket !== "function") {
       throw new TypeError("DiscussionTurnWorkflow requires a preflight ticket provider.");
     }
+    if (typeof freezeSelection !== "function") {
+      throw new TypeError("DiscussionTurnWorkflow requires Agent selection authority.");
+    }
     if (
       !scheduler
       || typeof scheduler.setInterval !== "function"
@@ -86,6 +91,7 @@ export class DiscussionTurnWorkflow {
     this.#bridgeClient = bridgeClient;
     this.#session = discussionTurnSession;
     this.#requestTicket = requestTicket;
+    this.#freezeSelection = freezeSelection;
     this.#onSettled = typeof onSettled === "function" ? onSettled : null;
     this.#scheduler = scheduler;
     this.#intervalMs = pollIntervalMs;
@@ -110,17 +116,19 @@ export class DiscussionTurnWorkflow {
     // Single-flight: one in-flight turn per Document, matched by the Bridge.
     if (this.#starting || this.#session.snapshot.busy) return null;
 
+    const selection = this.#freezeSelection();
+    if (!selection) return null;
     this.#starting = true;
-    this.#session.beginTurn(context, { conversationId });
+    this.#session.beginTurn(context, { conversationId, selection });
     try {
-      const ticket = await this.#requestTicket();
+      const ticket = await this.#requestTicket({ selection, purpose: "discussion" });
       if (!ticket?.preflightId) {
-        throw new TypeError("The discussion turn has no usable Qoder ticket.");
+        throw new TypeError("The discussion turn has no usable Agent ticket.");
       }
       // The user may have switched Document while preflight was in flight.
       if (!this.#session.isActive(context)) return null;
       const payload = await this.#bridgeClient.startDiscussion({
-        driver: DRIVER,
+        selection,
         trustPolicyAccepted: ticket.trustPolicyAccepted,
         preflightId: ticket.preflightId,
         projectId: context.projectId,

@@ -8,7 +8,7 @@ import type {
 export type DiscussionTurnTicket = {
   preflightId: string;
   trustPolicyAccepted: string;
-  driver?: string;
+  selection: AgentSelection;
 };
 
 export type DiscussionTurnScheduler = {
@@ -20,7 +20,11 @@ export class DiscussionTurnWorkflow {
   constructor(options: {
     bridgeClient: BridgeClient;
     discussionTurnSession: DiscussionTurnSession;
-    requestTicket: () => Promise<DiscussionTurnTicket | null>;
+    requestTicket: (input: {
+      selection: AgentSelection;
+      purpose: "discussion";
+    }) => Promise<DiscussionTurnTicket | null>;
+    freezeSelection: () => AgentSelection | null;
     onSettled?: ((context: DiscussionTurnContext) => void) | null;
     scheduler?: DiscussionTurnScheduler;
     pollIntervalMs?: number;

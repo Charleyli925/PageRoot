@@ -48,8 +48,15 @@ boundary.
 
 ## Product Qoder ACP Agent Bridge
 
-The packaged Bridge owns the product ACP session through
-`scripts/agent-bridge-service.mjs` and `scripts/qoder-acp-client.mjs`. The
+The packaged Bridge owns the product session through
+`scripts/agent/agent-runtime-coordinator.mjs`; the old Service exports only
+delegate existing routes. Its sole provider registry maps legacy
+`qoder-acp` to `scripts/agent/providers/qoder-provider.mjs` and the `acp`
+runtime in `scripts/agent/runtimes/acp-runtime.mjs`; unknown provider/runtime
+IDs fail closed. The restricted Host Ports now live in `scripts/agent/hosts/`,
+while frozen execution/discussion policy lives in `scripts/agent/policies/`.
+`scripts/qoder-acp-client.mjs` retains the legacy transport façade and exact
+compatibility exports without a second policy brand. The
 renderer can request only `POST /agent/preflight` and `POST /agent/start` with
 registered task identity, the fixed `qoder-acp` driver, explicit
 `trusted-local-agent-v1` consent and an opaque short-lived ticket. It cannot
@@ -86,16 +93,24 @@ A crash lease, unknown cleanup or residue requires cancelling the old Request as
 an authority fence and submitting a new one. Candidate completion remains owned
 by the official finalizer plus Repository polling.
 
+The purpose-bound one-use ticket stores provider/runtime IDs, a frozen security
+profile, an opaque installation digest
+and frozen capabilities only inside the Bridge. The renderer and Electron
+preload never receive those fields or an executable, command, spawn or path
+capability. Provider/runtime contract fixtures must be synthetic and must not
+contain a real home directory, account output or secret.
+
 Run the deterministic owners directly while developing this boundary:
 
 ```bash
 node --test tests/qoder-acp-spike-client.test.mjs
+node --test tests/agent-provider-contract.test.mjs
 node --test tests/agent-bridge-service.test.mjs
 node --test tests/agent-bridge-workspace.test.mjs
 ```
 
 ACP is not an OS sandbox. The product presents and records an explicit
-trusted-local-Agent choice; see `docs/SECURITY_MODEL.md` and ADR 0032.
+trusted-local-Agent choice; see `docs/SECURITY_MODEL.md`, ADR 0032 and ADR 0039.
 
 ## Qoder ACP v1 synthetic spike
 

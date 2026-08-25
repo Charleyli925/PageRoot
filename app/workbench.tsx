@@ -665,6 +665,28 @@ export default function Workbench() {
     workspaceControllerSnapshot?.comment?.draft.error ?? "";
   const runSnapshot = workspaceControllerSnapshot?.runSession
     ?? INITIAL_RUN_SNAPSHOT;
+  const agentCatalogSnapshot = workspaceControllerSnapshot?.run?.agentCatalog ?? null;
+  const frozenAgentSelection = runSnapshot.activeRun?.agentDelivery?.selection
+    ?? agentCatalogSnapshot?.selected
+    ?? null;
+  const frozenProvider = frozenAgentSelection
+    ? agentCatalogSnapshot?.providers?.[frozenAgentSelection.providerId]
+    : null;
+  const agentPresentation = frozenProvider?.presentation ?? {
+    agentName: frozenAgentSelection?.providerId || "Agent",
+    restartLabel: `重新启动 ${frozenAgentSelection?.providerId || "Agent"}`,
+    restartSupported: false,
+    stopLabel: `停止 ${frozenAgentSelection?.providerId || "Agent"} 并继续编辑`,
+    frozenPreviewDetail: `这是本轮冻结并交给 ${frozenAgentSelection?.providerId || "Agent"} 的只读内容`,
+  };
+  const frozenModelId = frozenAgentSelection?.resolvedModelId
+    || frozenAgentSelection?.requestedModelId
+    || null;
+  const agentModelDisplayName = frozenModelId
+    ? `${agentPresentation.agentName || frozenAgentSelection?.providerId || "Agent"} · ${frozenModelId}`
+    : frozenProvider
+      ? null
+      : frozenAgentSelection?.providerId || null;
   const qoderAvailability = workspaceControllerSnapshot?.run?.qoderAvailability
     ?? INITIAL_QODER_AVAILABILITY;
   const backgroundProjectResults = useMemo(
@@ -761,6 +783,7 @@ export default function Workbench() {
     conversation: workspaceControllerSnapshot?.conversation ?? null,
     discussionTurn: workspaceControllerSnapshot?.discussionTurn ?? null,
     qoderAvailability,
+    agentModelDisplayName,
     // The header's mode comes from Request authority, not from a local guess.
     activeRun: runSnapshot.activeRun,
     submissionPending: runSnapshot.submissionPending,
@@ -5951,7 +5974,7 @@ export default function Workbench() {
       }
     }
     if (
-      deliveryMode === "qoder-acp"
+      deliveryMode === "managed-agent"
       && requiredWorkspaceController(workspaceController)
         .getSnapshot().run?.qoderAvailability.status !== "ready"
     ) return outcome;
@@ -7748,7 +7771,11 @@ export default function Workbench() {
           className="sent-preview-banner"
           icon={<EyeIcon aria-hidden="true" size={18} weight="duotone" />}
           title="正在预览已发送 HTML"
-          detail={currentAgentDeliveryMode === "qoder-acp" ? "这是本轮冻结并交给 Qoder CLI 的只读内容" : "这是本轮冻结并复制给 AI Agent 的只读内容"}
+          detail={currentAgentDeliveryMode === "managed-agent"
+            ? agentPresentation.frozenPreviewDetail
+            : currentAgentDeliveryMode === "clipboard"
+              ? "这是本轮冻结并复制给 AI Agent 的只读内容"
+              : "这是本轮冻结的 Agent 只读内容"}
           actionLabel="返回等待处理"
           onAction={() => {
             setHandoffPreviewOpen(false);
@@ -8969,6 +8996,7 @@ export default function Workbench() {
             handoffCopyFailed={handoffCopyFailed}
             currentQoderHandoffStatus={currentQoderHandoffStatus}
             currentDeliveryMode={currentAgentDeliveryMode}
+            agentPresentation={agentPresentation}
             cancelling={cancelling}
             resolvingConflict={resolvingConflict}
             checkingRun={checkingRun}
@@ -8978,9 +9006,9 @@ export default function Workbench() {
             onActivateReadyResult={() => void activateReadyResult()}
             onSend={() => {
               if (!workspaceController) return;
-              if (currentAgentDeliveryMode === "qoder-acp") {
+              if (currentAgentDeliveryMode === "managed-agent") {
                 void workspaceController.startRunAgent({ run: activeRun });
-              } else {
+              } else if (currentAgentDeliveryMode === "clipboard") {
                 void workspaceController.copyRunHandoff({ run: activeRun });
               }
             }}

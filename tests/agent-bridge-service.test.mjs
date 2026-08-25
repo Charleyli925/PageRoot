@@ -691,7 +691,6 @@ test("Agent Bridge never invents a resumed Qoder session after restart", async (
 test("Agent Bridge persistent lease blocks a second service from racing the same Request", async (t) => {
   const command = await createFakeCommand(t);
   const root = await mkdtemp(path.join(os.tmpdir(), "pageroot-agent-lease-test-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
   const requestPath = path.join(
     root,
     "project",
@@ -749,6 +748,10 @@ test("Agent Bridge persistent lease blocks a second service from racing the same
     (error) => error?.code === "AGENT_RESTART_RECOVERY_REQUIRED",
   );
   assert.equal(secondRunCalls, 0);
+  // Node test hooks run in registration order. Remove the lease root only
+  // after both coordinators have confirmed their own lease disposition;
+  // deleting it first must now (correctly) produce a release=false fence.
+  t.after(() => rm(root, { recursive: true, force: true }));
 });
 
 test("Agent Bridge rejects a policy retry that would overwrite an unfinalized output", async (t) => {

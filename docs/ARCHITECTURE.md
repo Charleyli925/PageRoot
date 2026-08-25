@@ -14,7 +14,7 @@ User HTML bytes
 
 Comments + frozen input
   -> Change Request / Attempt
-  -> Agent Bridge (managed Qoder ACP or clipboard fallback)
+  -> Agent Bridge provider registry (Qoder provider -> ACP runtime, or clipboard fallback)
   -> completion + candidate health/continuity assessment
   -> immutable Version
   -> explicit user-controlled activation
@@ -22,16 +22,21 @@ Comments + frozen input
 
 The product Agent Bridge is Bridge-owned and never owns Request, Candidate,
 Version or Working Copy state. A user may explicitly choose a managed Qoder ACP
-session or the existing clipboard fallback for each task. `RunWorkflow` owns one
-shared Qoder availability projection for the delivery dialog and About. A local
-disk-only check discovers and validates the standalone package without running
-Qoder; the Qoder driver performs the complete use-time check before the Request
-is created, then starts
+session or the existing clipboard fallback for each task. Internally, the sole
+provider registry maps legacy `qoder-acp` to the `qoder` provider and `acp`
+runtime; unknown providers and runtimes fail closed. Renderer
+`AgentCatalogState` owns provider-keyed availability, the canonical selected
+selection and selection-keyed preflight cache. `RunWorkflow` exposes the same
+projection to the delivery surface and About. The
+Qoder provider owns the disk-only standalone-package check and the complete
+use-time version/login/model preflight; the provider-neutral Bridge does not
+know installation paths or version rules. The ACP runtime then starts
 only a Request whose durable `agentDelivery` record authorizes the trusted-local
 policy. ACP progress is presentation evidence only: only the official finalizer
 plus Repository validation can create a pending-review Candidate, and only an
 explicit user action can promote it. The ACP allowlist is not an OS sandbox;
-see ADR 0032. ADR 0031 remains the historical synthetic-spike decision.
+see ADR 0032. ADR 0039 defines the provider/runtime boundary; ADR 0031 remains
+the historical synthetic-spike decision.
 
 ## Boundaries
 
@@ -268,8 +273,11 @@ services.
 | Renderer draft revision, pending operations and reconciliation | `app/application/draft-session.js` |
 | Renderer comment working copy, composer and saved-comment edit projection | `app/application/comment-session.js` |
 | Active/background runs, Agent delivery projection, background outcomes, submission lifecycle locks and operation locks | `app/application/run-session.js` |
-| Shared Qoder availability/guidance projection, local refresh, use-time check reuse and submission sequencing | `app/application/run-workflow.js` plus the pure state model in `app/domain/qoder-availability.js`; both delivery and About consume the same `WorkspaceController` snapshot, and neither card receives or displays command, version, path, npm prefix or model count |
-| Trusted-local Qoder ACP disk discovery, preflight tickets, process/session lifetime, bounded public progress and cancellation-before-Request ordering | `scripts/agent-bridge-service.mjs`, composed by `scripts/workspace-bridge.mjs`; durable Request/Candidate authority remains in `ProjectFileRepository` |
+| Renderer Agent catalog, provider-keyed availability/guidance, selection-keyed use-time check and submission sequencing | `app/application/agent-provider-catalog.js`, `app/domain/agent-provider-state.js` and `app/application/run-workflow.js`; `qoder-availability.js` and `QoderAvailabilityCard.tsx` are compatibility wrappers only. Delivery and About consume the same `WorkspaceController` snapshot, and neither card receives command, version, path or npm prefix |
+| Provider-neutral dispatch, provider/runtime/security-profile/purpose-bound tickets, both process/session lifetimes, canonical events, cancellation-before-durable-Request and shutdown drain | `scripts/agent/agent-runtime-coordinator.mjs` plus provider/runtime registries; legacy Services are stateless façades and durable Request/Candidate authority remains in `ProjectFileRepository` |
+| Trusted-local Qoder installation discovery, package/version/login/model preflight, error classification and ACP launch descriptor | `scripts/agent/providers/qoder-provider.mjs`; legacy `qoder-acp` is mapped only by the provider registry and its external projection remains compatible |
+| Provider-neutral ACP launch and immutable standard event envelope | `scripts/agent/runtimes/acp-runtime.mjs`; transport compatibility remains in `scripts/qoder-acp-client.mjs` |
+| Frozen execution/discussion policy and permission-separated client-mediated Host Ports | `scripts/agent/policies/` and `scripts/agent/hosts/`; these constrain only requests made through the ACP Client Host, never native filesystem/command actions inside an Agent process |
 | Immutable Version projection and history-view transition | `app/application/version-session.js` |
 | `PROJECT.md` editor working copy, generation, composition fence and save projection facts | `app/application/project-rules-session.js` |
 | `PROJECT.md` Bridge read/write, 700ms autosave, unknown-write reconciliation, close/switch drain and editor-restore host port | `app/application/project-rules-workflow.js`, composed by `WorkspaceController` |
@@ -567,3 +575,18 @@ pending writes.
 Only a non-in-place main-frame navigation revokes renderer readiness. Canvas
 iframe loads and same-document navigation are subordinate UI activity; treating
 them as a Workbench reload would bypass the final close drain and is forbidden.
+
+Provider Registry owns the public Agent catalog and dispatch. The shared Agent
+Delivery codec owns durable validation and legacy read projection; the runtime
+coordinator freezes canonical selection and fingerprint in its one-use ticket.
+Workspace Bridge exposes provider, preflight, start, status and cancel routes;
+the availability route remains an alias, and handlers reuse existing session
+and Request authority.
+
+The renderer freezes a full selection synchronously at the user intent. Its
+preflight key includes provider, runtime, requested/resolved model, reasoning,
+installation digest, trust-policy version and purpose. Request creation,
+uncertain-POST reconciliation, start, retry and restart recovery read the
+durable Request selection; changing the catalog selection affects only the next
+intent. Provider differences reach React as descriptor/presentation data, and
+workflow modules cannot import provider implementations.

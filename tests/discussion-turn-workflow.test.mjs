@@ -19,6 +19,13 @@ const OTHER_CONTEXT = Object.freeze({
   documentId: "doc_cccccccccccccccc",
   sourcePath: "/tmp/pageroot/other.html",
 });
+const SELECTION = Object.freeze({
+  providerId: "qoder",
+  runtimeId: "acp",
+  requestedModelId: null,
+  resolvedModelId: null,
+  reasoning: Object.freeze({ requested: null, applied: null, resolution: "provider-default" }),
+});
 
 function turn(overrides = {}) {
   return {
@@ -84,6 +91,7 @@ function createWorkflow(overrides = {}) {
       calls.tickets += 1;
       return { preflightId: "preflight_1", trustPolicyAccepted: "trusted-local-agent-v1" };
     },
+    freezeSelection: () => SELECTION,
     scheduler,
     ...overrides.workflow,
   });
@@ -139,7 +147,7 @@ test("a started turn spends one ticket and polls until it settles", async () => 
   assert.equal(calls.tickets, 1);
   assert.equal(calls.starts.length, 1);
   const body = calls.starts[0];
-  assert.equal(body.driver, "qoder-acp");
+  assert.deepEqual(body.selection, SELECTION);
   assert.equal(body.preflightId, "preflight_1");
   assert.equal(body.trustPolicyAccepted, "trusted-local-agent-v1");
   assert.equal(body.sourcePath, CONTEXT.sourcePath);
@@ -288,7 +296,13 @@ test("the workflow requires its dependencies", () => {
     /ticket provider/u,
   );
   assert.throws(
-    () => new DiscussionTurnWorkflow({ bridgeClient, discussionTurnSession: session, requestTicket: async () => null, scheduler: {} }),
+    () => new DiscussionTurnWorkflow({
+      bridgeClient,
+      discussionTurnSession: session,
+      requestTicket: async () => null,
+      freezeSelection: () => SELECTION,
+      scheduler: {},
+    }),
     /Scheduler/u,
   );
 });

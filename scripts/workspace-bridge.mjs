@@ -47,10 +47,15 @@ import {
 } from "./agent-bridge-service.mjs";
 import { DiscussionBridgeService } from "./discussion-bridge-service.mjs";
 import {
-  cancelDurableRequestAfterAgentCleanup,
   closeWorkspaceBridgeAfterAgentCleanup,
 } from "./workspace-bridge-shutdown.mjs";
 import { createEmptySourceHistory } from "../shared/source-history.mjs";
+import {
+  defaultManagedAgentDelivery,
+  legacyDriverForAgentDelivery,
+  normalizeAgentDelivery,
+  normalizeNewAgentDelivery,
+} from "../shared/agent-delivery.mjs";
 
 const HOST = "127.0.0.1";
 const DEFAULT_PORT = 4317;
@@ -88,7 +93,7 @@ const agentBridgeService = new AgentBridgeService({
 // the Agent service, reads Working Copy bytes through the repository, and records
 // the round through the same conversation writer every other message uses.
 const discussionBridgeService = new DiscussionBridgeService({
-  redeemCommandTicket: (preflightId) => agentBridgeService.redeemCommandTicket(preflightId),
+  coordinator: agentBridgeService.runtimeCoordinator,
   readWorkingCopy: ({ sourcePath }) => projectFileWorkspaceForSource(
     requiredSourcePath(sourcePath),
   ),
@@ -1012,25 +1017,15 @@ function projectFileFinalizerCommand(target, request) {
 }
 
 function agentDeliveryForRequest(body = {}) {
-  const mode = String(body.agentDelivery?.mode || "clipboard");
-  if (mode === "clipboard") {
-    return Object.freeze({ mode: "clipboard" });
+  try {
+    return normalizeNewAgentDelivery(body.agentDelivery || { mode: "clipboard" });
+  } catch (cause) {
+    throw new HttpError(
+      422,
+      cause?.code || "AGENT_DELIVERY_INVALID",
+      "The Request Agent delivery policy is invalid.",
+    );
   }
-  if (
-    mode === "qoder-acp"
-    && body.agentDelivery?.trustPolicyVersion
-      === TRUSTED_LOCAL_AGENT_POLICY_VERSION
-  ) {
-    return Object.freeze({
-      mode,
-      trustPolicyVersion: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
-    });
-  }
-  throw new HttpError(
-    422,
-    "AGENT_DELIVERY_INVALID",
-    "The Request Agent delivery policy is invalid.",
-  );
 }
 
 function projectFilePromptForRequest(target, request, body) {
@@ -1306,7 +1301,13 @@ async function resolveAgentBridgeTask(identity) {
 
 function agentSessionForStatus({ request, run, lifecycleStatus }) {
   const delivery = request?.request?.agentDelivery;
-  if (delivery?.mode !== "qoder-acp" || !run) return null;
+  if (!run || delivery?.mode === "clipboard") return null;
+  let driver;
+  try {
+    driver = legacyDriverForAgentDelivery(delivery);
+  } catch {
+    return null;
+  }
   const identity = {
     projectId: run.projectId,
     documentId: run.documentId,
@@ -1318,7 +1319,7 @@ function agentSessionForStatus({ request, run, lifecycleStatus }) {
   if (session) return session;
   if (lifecycleStatus === "candidate-ready") {
     return {
-      driver: "qoder-acp",
+      driver,
       state: "completed",
       phase: "awaiting-validation",
       startedAt: null,
@@ -1377,14 +1378,14 @@ async function cancelProjectFileRequest(body) {
   const target = await projectFileTargetForBody(body);
   if (!target) return null;
   try {
-    const cancelled = await cancelDurableRequestAfterAgentCleanup({
-      cancelAgent: () => agentBridgeService.cancel({
+    const cancelled = await agentBridgeService.cancelDurable({
+      identity: {
         projectId: target.projectId,
         documentId: target.documentId,
         sourcePath: target.exactSourcePath,
         requestId: body.requestId,
         attemptId: body.attemptId || "attempt_001",
-      }),
+      },
       cancelRequest: () => projectFileRepository.cancelRequest({
         target,
         requestId: body.requestId,
@@ -1403,11 +1404,34 @@ async function cancelProjectFileRequest(body) {
 }
 
 async function preflightAgent(body) {
-  return agentBridgeService.preflight(body);
+  const delivery = body?.selection
+    ? normalizeAgentDelivery({
+        mode: "managed-agent",
+        selection: body.selection,
+        trustPolicyVersion: body.trustPolicyAccepted,
+      })
+    : body?.agentDelivery
+      ? normalizeAgentDelivery(body.agentDelivery)
+      : body?.driver
+        ? normalizeAgentDelivery({
+            mode: body.driver,
+            trustPolicyVersion: body.trustPolicyAccepted,
+          })
+        : defaultManagedAgentDelivery();
+  return agentBridgeService.preflight({
+    ...body,
+    driver: legacyDriverForAgentDelivery(delivery),
+    selection: delivery.selection,
+    trustPolicyAccepted: delivery.trustPolicyVersion,
+  });
 }
 
 async function agentAvailability() {
   return agentBridgeService.availability();
+}
+
+async function agentProviders() {
+  return agentBridgeService.providers();
 }
 
 async function startAgent(body) {
@@ -1423,9 +1447,24 @@ async function startAgent(body) {
       "The Agent task identity does not match the registered Project File.",
     );
   }
+  const delivery = body?.selection
+    ? normalizeAgentDelivery({
+        mode: "managed-agent",
+        selection: body.selection,
+        trustPolicyVersion: body.trustPolicyAccepted,
+      })
+    : body?.agentDelivery
+      ? normalizeAgentDelivery(body.agentDelivery)
+      : body?.driver
+        ? normalizeAgentDelivery({
+            mode: body.driver,
+            trustPolicyVersion: body.trustPolicyAccepted,
+          })
+        : defaultManagedAgentDelivery();
   return agentBridgeService.submit({
-    driver: body.driver,
-    trustPolicyAccepted: body.trustPolicyAccepted,
+    driver: legacyDriverForAgentDelivery(delivery),
+    selection: delivery.selection,
+    trustPolicyAccepted: delivery.trustPolicyVersion,
     preflightId: body.preflightId,
     projectId: target.projectId,
     documentId: target.documentId,
@@ -1448,9 +1487,22 @@ async function startDiscussion(body) {
       "The discussion identity does not match the registered Project File.",
     );
   }
+  const delivery = body?.selection
+    ? normalizeAgentDelivery({
+        mode: "managed-agent",
+        selection: body.selection,
+        trustPolicyVersion: body.trustPolicyAccepted,
+      })
+    : body?.agentDelivery
+      ? normalizeAgentDelivery(body.agentDelivery)
+      : normalizeAgentDelivery({
+          mode: body.driver,
+          trustPolicyVersion: body.trustPolicyAccepted,
+        });
   return discussionBridgeService.start({
-    driver: body.driver,
-    trustPolicyAccepted: body.trustPolicyAccepted,
+    driver: legacyDriverForAgentDelivery(delivery),
+    selection: delivery.selection,
+    trustPolicyAccepted: delivery.trustPolicyVersion,
     preflightId: body.preflightId,
     projectId: target.projectId,
     documentId: target.documentId,
@@ -1925,6 +1977,9 @@ async function recordDiscussionRound({
   turnId,
   sourceSha256,
   question,
+  providerSelection,
+  providerBinding,
+  capabilitySnapshotFingerprint,
 }) {
   const workspace = await projectFileWorkspaceForSource(requiredSourcePath(sourcePath));
   if (!workspace) throw projectNotFoundError();
@@ -1935,6 +1990,9 @@ async function recordDiscussionRound({
     turnId,
     sourceSha256,
     question,
+    providerSelection,
+    providerBinding,
+    capabilitySnapshotFingerprint,
   });
   return { conversationId: conversation.conversationId };
 }
@@ -2484,6 +2542,10 @@ async function route(request, response) {
     sendJson(response, 200, await agentAvailability());
     return;
   }
+  if (request.method === "GET" && url.pathname === "/agent/providers") {
+    sendJson(response, 200, await agentProviders());
+    return;
+  }
   if (request.method === "POST" && url.pathname === "/agent/preflight") {
     const body = await readBody(request);
     sendJson(response, 200, await preflightAgent(body));
@@ -2492,6 +2554,23 @@ async function route(request, response) {
   if (request.method === "POST" && url.pathname === "/agent/start") {
     const body = await readBody(request);
     sendJson(response, 202, await startAgent(body));
+    return;
+  }
+  if (request.method === "GET" && url.pathname === "/agent/status") {
+    sendJson(
+      response,
+      200,
+      await statusFor(
+        requiredSourcePath(url.searchParams.get("sourcePath")),
+        url.searchParams.get("requestId"),
+        url.searchParams.get("attemptId") || "attempt_001",
+      ),
+    );
+    return;
+  }
+  if (request.method === "POST" && url.pathname === "/agent/cancel") {
+    const body = await readBody(request);
+    sendJson(response, 200, await cancelActiveRun(body));
     return;
   }
   if (request.method === "POST" && url.pathname === "/discussion/start") {

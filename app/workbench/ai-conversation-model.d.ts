@@ -110,7 +110,7 @@ export function sidebarActionBar(options?: {
   candidateVersionLabel?: string | null;
   candidateStatus?: string | null;
   failureMessage?: string | null;
-  deliveryMode?: "qoder-acp" | "clipboard";
+  deliveryMode?: "managed-agent" | "clipboard";
 }): SidebarActionBar | null;
 
 export type SidebarRunProgressStep = {

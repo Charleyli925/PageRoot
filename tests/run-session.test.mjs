@@ -110,7 +110,7 @@ test("run session distinguishes managed Qoder state from clipboard handoff risk"
   session.trackRun(activeRun, { activate: "always" });
   session.publishHandoff({
     ...activeRun,
-    mode: "qoder-acp",
+    mode: "managed-agent",
     status: "running",
     phase: "reading-task",
   });
@@ -119,7 +119,7 @@ test("run session distinguishes managed Qoder state from clipboard handoff risk"
 
   session.publishHandoff({
     ...activeRun,
-    mode: "qoder-acp",
+    mode: "managed-agent",
     status: "interrupted",
     phase: "interrupted",
   });

@@ -131,6 +131,7 @@ function createHarness({
   copy = async () => ({ status: "copied", copied: true }),
   freeze = null,
   drain = async () => ({ ok: true }),
+  ensureRegistered = null,
 } = {}) {
   const projectSession = new ProjectSession();
   projectSession.openLocator(sourcePath);
@@ -238,7 +239,9 @@ function createHarness({
   };
   const workflow = new RunWorkflow({
     bridgeClient: client,
-    ensureRegistered: async () => succeeded(context),
+    ensureRegistered: async (input) => ensureRegistered
+      ? ensureRegistered(input, context)
+      : succeeded(context),
     projectSession,
     documentSession,
     commentSession,
@@ -335,7 +338,19 @@ test("an unknown create Request response only reads workspace authority and neve
 
 test("a reconciled Qoder Request reserves Agent start before polling becomes visible", async () => {
   const start = deferred();
-  const durable = runRecord({ agentDelivery: { mode: "qoder-acp" } });
+  const durable = runRecord({
+    agentDelivery: {
+      mode: "managed-agent",
+      selection: {
+        providerId: "qoder",
+        runtimeId: "acp",
+        requestedModelId: null,
+        resolvedModelId: null,
+        reasoning: { requested: null, applied: null, resolution: "provider-default" },
+      },
+      trustPolicyVersion: "trusted-local-agent-v1",
+    },
+  });
   let createCount = 0;
   let workspaceCount = 0;
   let harness;
@@ -495,14 +510,59 @@ test("Qoder ACP preflights before one durable Request and never touches the clip
   assert.equal(harness.calls.preflight.length, 1);
   assert.equal(harness.calls.createRequest.length, 1);
   assert.deepEqual(harness.calls.createRequest[0].agentDelivery, {
-    mode: "qoder-acp",
+    mode: "managed-agent",
+    selection: {
+      providerId: "qoder",
+      runtimeId: "acp",
+      requestedModelId: null,
+      resolvedModelId: null,
+      reasoning: {
+        requested: null,
+        applied: null,
+        resolution: "provider-default",
+      },
+    },
     trustPolicyVersion: "trusted-local-agent-v1",
   });
   assert.equal(harness.calls.startAgent.length, 1);
   assert.equal(harness.calls.startAgent[0].preflightId, "preflight_test");
   assert.equal(harness.calls.handoff.length, 0);
-  assert.equal(harness.runSession.activeHandoff.mode, "qoder-acp");
+  assert.equal(harness.runSession.activeHandoff.mode, "managed-agent");
   assert.equal(harness.runSession.activeHandoff.status, "starting");
+  harness.workflow.dispose();
+});
+
+test("a selection changed during preflight affects only the next Request", async () => {
+  const nextSelection = Object.freeze({
+    providerId: "qoder",
+    runtimeId: "acp",
+    requestedModelId: "qoder:next-model",
+    resolvedModelId: "qoder:next-model",
+    reasoning: Object.freeze({ requested: "high", applied: "high", resolution: "exact" }),
+  });
+  let harness;
+  harness = createHarness({
+    bridge: {
+      async preflightAgent(request) {
+        harness.calls.preflight.push(request);
+        harness.workflow.selectAgent(nextSelection);
+        return {
+          status: "ready",
+          preflightId: "preflight_frozen_selection",
+          selection: request.selection,
+          expiresAt: "2026-08-11T00:02:00.000Z",
+        };
+      },
+    },
+  });
+
+  const outcome = await harness.workflow.submit({ deliveryMode: "managed-agent" });
+  assert.equal(outcome.status, "succeeded");
+  const frozen = harness.calls.preflight[0].selection;
+  assert.deepEqual(harness.calls.createRequest[0].agentDelivery.selection, frozen);
+  assert.deepEqual(harness.calls.startAgent[0].selection, frozen);
+  assert.notDeepEqual(frozen, nextSelection);
+  assert.deepEqual(harness.workflow.freezeAgentSelection(), nextSelection);
   harness.workflow.dispose();
 });
 
@@ -806,6 +866,38 @@ test("a recovery-required Qoder Request cannot restart or fall back to clipboard
   assert.equal(restarted.code, "RUN_AGENT_RECOVERY_REQUIRED");
   assert.equal(copied.status, "blocked");
   assert.equal(copied.code, "RUN_AGENT_RECOVERY_REQUIRED");
+  assert.equal(harness.calls.preflight.length, 0);
+  assert.equal(harness.calls.startAgent.length, 0);
+  assert.equal(harness.calls.handoff.length, 0);
+  harness.workflow.dispose();
+});
+
+test("an unknown durable provider can end but cannot restart or fall back", async () => {
+  const harness = createHarness();
+  const run = runRecord({
+    agentDelivery: {
+      mode: "managed-agent",
+      selection: {
+        providerId: "future-agent",
+        runtimeId: "future-runtime",
+        requestedModelId: "future-agent:model-a",
+        resolvedModelId: "future-agent:model-a",
+        reasoning: { requested: null, applied: null, resolution: "provider-default" },
+      },
+      trustPolicyVersion: "trusted-local-agent-v1",
+    },
+  });
+  harness.runSession.trackRun(run, { activate: "always", recovered: true });
+
+  const restarted = await harness.workflow.startAgent({ run });
+  const copied = await harness.workflow.copyHandoff({ run });
+  const ended = await harness.workflow.cancel({ run });
+
+  assert.equal(restarted.status, "blocked");
+  assert.equal(restarted.code, "RUN_AGENT_RECOVERY_REQUIRED");
+  assert.equal(copied.status, "blocked");
+  assert.equal(copied.code, "RUN_AGENT_PROVIDER_UNAVAILABLE");
+  assert.equal(ended.status, "succeeded");
   assert.equal(harness.calls.preflight.length, 0);
   assert.equal(harness.calls.startAgent.length, 0);
   assert.equal(harness.calls.handoff.length, 0);

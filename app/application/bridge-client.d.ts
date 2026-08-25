@@ -38,8 +38,18 @@ export type BridgeClient = {
   deleteAttachment(body: BridgeJson): Promise<BridgeJson>;
   createRequest(body: BridgeJson): Promise<BridgeJson>;
   qoderAvailability(): Promise<BridgeJson>;
+  agentProviders(): Promise<BridgeJson>;
   preflightAgent(body: BridgeJson): Promise<BridgeJson>;
   startAgent(body: BridgeJson): Promise<BridgeJson>;
+  agentStatus(
+    sourcePath: string,
+    requestId: string,
+    attemptId?: string | null,
+  ): Promise<BridgeJson>;
+  cancelAgent(body: BridgeJson): Promise<BridgeJson>;
+  startDiscussion(body: BridgeJson): Promise<BridgeJson>;
+  discussionStatus(sourcePath: string): Promise<BridgeJson>;
+  cancelDiscussion(body: BridgeJson): Promise<BridgeJson>;
   resolveConflict(body: BridgeJson): Promise<BridgeJson>;
   activateReadyVersion(body: BridgeJson): Promise<BridgeJson>;
   continueEditingHistoryVersion(body: BridgeJson): Promise<BridgeJson>;

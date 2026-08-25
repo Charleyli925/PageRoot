@@ -1,243 +1,53 @@
-export const QODER_AVAILABILITY_STATUSES = Object.freeze([
-  "checking",
-  "ready",
-  "not-installed",
-  "auth-required",
-  "unavailable",
-]);
-
-export const QODER_GUIDANCE_KINDS = Object.freeze(["install", "login"]);
-
-export const INITIAL_QODER_AVAILABILITY = Object.freeze({
-  status: "checking",
-  reason: "initial",
-  lastCheck: null,
-  checkedAt: null,
-  guidanceCopied: null,
-  guidanceCopiedAt: null,
+import {
+  AGENT_PROVIDER_AVAILABILITY_STATUSES,
+  AGENT_PROVIDER_GUIDANCE_KINDS,
+  INITIAL_AGENT_PROVIDER_AVAILABILITY,
+  agentProviderAvailabilityFromFailureReason,
+  agentProviderAvailabilityFromLocalResult,
+  agentProviderAvailabilityWithCopiedGuidance,
+  checkingAgentProviderAvailability,
+  readyAgentProviderAvailability,
+} from "./agent-provider-state.js";
+const FAILURE_REASONS = Object.freeze({
+  QODER_COMMAND_NOT_FOUND: "not-installed",
+  QODER_AUTH_REQUIRED: "auth-required",
+  QODER_ACCOUNT_CAPACITY_UNAVAILABLE: "account-capacity",
+  QODER_CAPACITY_UNAVAILABLE: "account-capacity",
+  QODER_PREFLIGHT_TIMEOUT: "timeout",
+  QODER_COMMAND_CHANGED: "restart-required",
+  QODER_VERSION_MISMATCH: "restart-required",
+  QODER_COMMAND_UNTRUSTED: "invalid-installation",
+  QODER_VERSION_INVALID: "invalid-installation",
+  QODER_VERSION_UNSUPPORTED: "invalid-installation",
 });
 
-function cleanDate(value) {
-  return typeof value === "string" && value ? value : null;
-}
-
-function cleanGuidanceKind(value) {
-  return QODER_GUIDANCE_KINDS.includes(value) ? value : null;
-}
-
-function availabilitySnapshot({
-  status,
-  reason = null,
-  lastCheck = null,
-  checkedAt = null,
-  guidanceCopied = null,
-  guidanceCopiedAt = null,
-}) {
-  return Object.freeze({
-    status: QODER_AVAILABILITY_STATUSES.includes(status) ? status : "unavailable",
-    reason: reason ? String(reason) : null,
-    lastCheck: lastCheck === "local" || lastCheck === "use" ? lastCheck : null,
-    checkedAt: cleanDate(checkedAt),
-    guidanceCopied: cleanGuidanceKind(guidanceCopied),
-    guidanceCopiedAt: cleanDate(guidanceCopiedAt),
-  });
-}
-
-export function checkingQoderAvailability(previous = INITIAL_QODER_AVAILABILITY) {
-  return availabilitySnapshot({
-    status: "checking",
-    reason: "checking",
-    lastCheck: previous.lastCheck,
-    checkedAt: previous.checkedAt,
-    guidanceCopied: previous.guidanceCopied,
-    guidanceCopiedAt: previous.guidanceCopiedAt,
-  });
-}
-
-function preserveUseFailureAfterLocalReady(previous) {
-  return Boolean(
-    previous?.lastCheck === "use"
-    && (
-      previous.status === "auth-required"
-      || (
-        previous.status === "unavailable"
-        && [
-          "account-capacity",
-          "restart-required",
-          "service-unavailable",
-          "timeout",
-        ].includes(previous.reason)
-      )
-    ),
-  );
-}
-
-export function qoderAvailabilityFromLocalResult(
-  result,
-  previous = INITIAL_QODER_AVAILABILITY,
-  checkedAt = null,
-) {
-  const status = String(result?.status || "unavailable");
-  if (status === "ready") {
-    if (preserveUseFailureAfterLocalReady(previous)) {
-      return availabilitySnapshot({
-        ...previous,
-        checkedAt,
-      });
-    }
-    // `/agent/availability` only proves that a trusted CLI can be found. It does
-    // not prove authentication, account capacity, or ACP usability. Keep the
-    // visible state unverified; the application boundary immediately follows this
-    // result with a real preflight before it may create `ready`.
-    return availabilitySnapshot({
-      status: "checking",
-      reason: "checking",
-      lastCheck: "local",
-      checkedAt,
-      guidanceCopied: previous.guidanceCopied,
-      guidanceCopiedAt: previous.guidanceCopiedAt,
-    });
-  }
-  if (status === "not-installed") {
-    return availabilitySnapshot({
-      status: "not-installed",
-      reason: "not-installed",
-      lastCheck: "local",
-      checkedAt,
-      guidanceCopied: previous.guidanceCopied,
-      guidanceCopiedAt: previous.guidanceCopiedAt,
-    });
-  }
-  return availabilitySnapshot({
-    status: "unavailable",
-    reason: result?.reason === "invalid-installation"
-      ? "invalid-installation"
-      : "service-unavailable",
-    lastCheck: "local",
-    checkedAt,
-    guidanceCopied: previous.guidanceCopied,
-    guidanceCopiedAt: previous.guidanceCopiedAt,
-  });
-}
-
-export function readyQoderAvailability(checkedAt = null) {
-  return availabilitySnapshot({
-    status: "ready",
-    reason: null,
-    lastCheck: "use",
-    checkedAt,
-    guidanceCopied: null,
-    guidanceCopiedAt: null,
-  });
-}
+export const QODER_AVAILABILITY_STATUSES = AGENT_PROVIDER_AVAILABILITY_STATUSES;
+export const QODER_GUIDANCE_KINDS = AGENT_PROVIDER_GUIDANCE_KINDS;
+export const INITIAL_QODER_AVAILABILITY = INITIAL_AGENT_PROVIDER_AVAILABILITY;
+export const checkingQoderAvailability = checkingAgentProviderAvailability;
+export const qoderAvailabilityFromLocalResult = agentProviderAvailabilityFromLocalResult;
+export const readyQoderAvailability = readyAgentProviderAvailability;
+export const qoderAvailabilityWithCopiedGuidance = agentProviderAvailabilityWithCopiedGuidance;
 
 export function qoderAvailabilityFromFailureCode(
   code,
   previous = INITIAL_QODER_AVAILABILITY,
   checkedAt = null,
 ) {
-  const normalized = String(code || "QODER_PREFLIGHT_FAILED");
-  if (normalized === "QODER_COMMAND_NOT_FOUND") {
-    return availabilitySnapshot({
-      status: "not-installed",
-      reason: "not-installed",
-      lastCheck: "use",
-      checkedAt,
-      guidanceCopied: previous.guidanceCopied,
-      guidanceCopiedAt: previous.guidanceCopiedAt,
-    });
-  }
-  if (normalized === "QODER_AUTH_REQUIRED") {
-    return availabilitySnapshot({
-      status: "auth-required",
-      reason: "auth-required",
-      lastCheck: "use",
-      checkedAt,
-      guidanceCopied: previous.guidanceCopied,
-      guidanceCopiedAt: previous.guidanceCopiedAt,
-    });
-  }
-  if ([
-    "QODER_ACCOUNT_CAPACITY_UNAVAILABLE",
-    "QODER_CAPACITY_UNAVAILABLE",
-  ].includes(normalized)) {
-    return availabilitySnapshot({
-      status: "unavailable",
-      reason: "account-capacity",
-      lastCheck: "use",
-      checkedAt,
-      guidanceCopied: previous.guidanceCopied,
-      guidanceCopiedAt: previous.guidanceCopiedAt,
-    });
-  }
-  if (normalized === "QODER_PREFLIGHT_TIMEOUT") {
-    return availabilitySnapshot({
-      status: "unavailable",
-      reason: "timeout",
-      lastCheck: "use",
-      checkedAt,
-      guidanceCopied: previous.guidanceCopied,
-      guidanceCopiedAt: previous.guidanceCopiedAt,
-    });
-  }
-  if (["QODER_COMMAND_CHANGED", "QODER_VERSION_MISMATCH"].includes(normalized)) {
-    return availabilitySnapshot({
-      status: "unavailable",
-      reason: "restart-required",
-      lastCheck: "use",
-      checkedAt,
-      guidanceCopied: previous.guidanceCopied,
-      guidanceCopiedAt: previous.guidanceCopiedAt,
-    });
-  }
-  if ([
-    "QODER_COMMAND_UNTRUSTED",
-    "QODER_VERSION_INVALID",
-    "QODER_VERSION_UNSUPPORTED",
-  ].includes(normalized)) {
-    return availabilitySnapshot({
-      status: "unavailable",
-      reason: "invalid-installation",
-      lastCheck: "use",
-      checkedAt,
-      guidanceCopied: previous.guidanceCopied,
-      guidanceCopiedAt: previous.guidanceCopiedAt,
-    });
-  }
-  return availabilitySnapshot({
-    status: "unavailable",
-    reason: "service-unavailable",
-    lastCheck: "use",
+  return agentProviderAvailabilityFromFailureReason(
+    FAILURE_REASONS[String(code || "")] || "service-unavailable",
+    previous,
     checkedAt,
-    guidanceCopied: previous.guidanceCopied,
-    guidanceCopiedAt: previous.guidanceCopiedAt,
-  });
-}
-
-export function qoderAvailabilityWithCopiedGuidance(previous, kind, copiedAt = null) {
-  if (!QODER_GUIDANCE_KINDS.includes(kind)) return previous;
-  return availabilitySnapshot({
-    ...previous,
-    guidanceCopied: kind,
-    guidanceCopiedAt: copiedAt,
-  });
+  );
 }
 
 export function qoderAvailabilityPresentation(availability) {
   const status = availability?.status || "checking";
   if (status === "ready") {
-    return Object.freeze({
-      statusLabel: "已连接",
-      detail: "真实预检已完成，可直接交给 Qoder CLI",
-      tone: "ready",
-    });
+    return Object.freeze({ statusLabel: "已连接", detail: "真实预检已完成，可直接交给 Qoder CLI", tone: "ready" });
   }
   if (status === "not-installed") {
-    return Object.freeze({
-      statusLabel: "未安装",
-      detail: "如需从 PageRoot 直接发送，还需要 Qoder CLI。",
-      tone: "attention",
-    });
+    return Object.freeze({ statusLabel: "未安装", detail: "如需从 PageRoot 直接发送，还需要 Qoder CLI。", tone: "attention" });
   }
   if (status === "auth-required") {
     const waitingForLogin = availability?.guidanceCopied === "login";
@@ -264,11 +74,7 @@ export function qoderAvailabilityPresentation(availability) {
     });
   }
   if (status === "checking") {
-    return Object.freeze({
-      statusLabel: "检测中",
-      detail: "正在自动检查 Qoder CLI…",
-      tone: "checking",
-    });
+    return Object.freeze({ statusLabel: "检测中", detail: "正在自动检查 Qoder CLI…", tone: "checking" });
   }
   if (availability?.reason === "account-capacity") {
     return Object.freeze({
@@ -286,11 +92,7 @@ export function qoderAvailabilityPresentation(availability) {
   }
   return Object.freeze({
     statusLabel: "暂不可用 · 连接没有完成",
-    detail: availability?.reason === "invalid-installation"
-      ? "当前安装不可用。"
-      : availability?.reason === "restart-required"
-        ? "请重新打开源页后再试。"
-        : "本轮任务尚未创建，当前页面不受影响。",
+    detail: "本轮任务尚未创建，当前页面不受影响。",
     tone: "attention",
   });
 }

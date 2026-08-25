@@ -42,6 +42,7 @@ const FORBIDDEN_MESSAGE_KEYS = [
 
 const ACTOR_LABELS = Object.freeze({
   user: "你",
+  agent: "AI Agent",
   qoder: "Qoder CLI",
   pageroot: "PageRoot",
 });
@@ -209,6 +210,7 @@ export function sidebarRunProgress({ state, steps = [], agentText = "" } = {}) {
 
 const ACTOR_INITIALS = Object.freeze({
   user: "你",
+  agent: "A",
   qoder: "Q",
   pageroot: "P",
 });
@@ -328,7 +330,7 @@ export function sidebarActionBar({
   candidateVersionLabel = null,
   candidateStatus = null,
   failureMessage = null,
-  deliveryMode = "qoder-acp",
+  deliveryMode = "managed-agent",
 } = {}) {
   if (state === "ready-to-open" || state === "review-view") {
     if (candidateStatus === "blocked") {
@@ -657,7 +659,8 @@ export function sidebarLiveReply(discussion, messages = []) {
   // blinks out and never shows twice.
   const turnId = String(discussion.turnId || "");
   if (turnId && Array.isArray(messages) && messages.some(
-    (message) => message && message.turnId === turnId && message.actor === "qoder",
+    (message) => message && message.turnId === turnId
+      && (message.actor === "agent" || message.actor === "qoder"),
   )) return null;
   const status = String(discussion.status || "");
   return Object.freeze({

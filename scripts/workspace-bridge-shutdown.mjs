@@ -9,9 +9,14 @@ function writeShutdownAborted(writeDiagnostic) {
 }
 
 export async function cancelDurableRequestAfterAgentCleanup({
+  coordinator,
+  identity,
   cancelAgent,
   cancelRequest,
 } = {}) {
+  if (coordinator && typeof coordinator.cancelDurableExecution === "function") {
+    return coordinator.cancelDurableExecution({ identity, cancelRequest });
+  }
   if (typeof cancelAgent !== "function" || typeof cancelRequest !== "function") {
     throw new TypeError("Workspace Bridge cancellation dependencies are invalid.");
   }
@@ -20,6 +25,7 @@ export async function cancelDurableRequestAfterAgentCleanup({
 }
 
 export async function closeWorkspaceBridgeAfterAgentCleanup({
+  coordinator = null,
   agentBridgeService,
   discussionBridgeService = null,
   closeServer,
@@ -27,7 +33,7 @@ export async function closeWorkspaceBridgeAfterAgentCleanup({
   writeDiagnostic,
 } = {}) {
   if (
-    typeof agentBridgeService?.dispose !== "function"
+    typeof (coordinator || agentBridgeService)?.dispose !== "function"
     || typeof closeServer !== "function"
     || typeof exitProcess !== "function"
     || typeof writeDiagnostic !== "function"
@@ -42,8 +48,10 @@ export async function closeWorkspaceBridgeAfterAgentCleanup({
     // An in-flight discussion turn owns a Qoder process and a short-lived
     // snapshot, so it drains on the same gate: an unconfirmed cleanup aborts
     // the shutdown instead of leaving either behind.
+    // Production passes the one coordinator (through AgentBridgeService's
+    // façade); the discussion façade owns no independent process/session state.
     if (discussionBridgeService) await discussionBridgeService.dispose();
-    await agentBridgeService.dispose();
+    await (coordinator || agentBridgeService).dispose();
   } catch {
     writeShutdownAborted(writeDiagnostic);
     return false;

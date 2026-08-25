@@ -371,13 +371,15 @@ export class WorkspaceController {
       );
     }
     // The discussion turn projection is optional for the same reason. It asks
-    // `RunWorkflow` for the consent-backed Qoder ticket, so the renderer keeps
+    // `RunWorkflow` for the consent-backed Agent ticket, so the renderer keeps
     // exactly one availability and consent owner.
     if (discussionTurnSession) {
       this.#discussionTurnWorkflow = new DiscussionTurnWorkflow({
         bridgeClient,
         discussionTurnSession,
-        requestTicket: () => this.#runWorkflow?.spendQoderTicket() ?? Promise.resolve(null),
+        requestTicket: (input) => this.#runWorkflow?.spendAgentTicket(input)
+          ?? Promise.resolve(null),
+        freezeSelection: () => this.#runWorkflow?.freezeAgentSelection() ?? null,
         // A settled turn has been sealed into the conversation record, so the
         // stored message is loaded once and takes over from the live one.
         onSettled: (context) => {
@@ -1058,15 +1060,27 @@ export class WorkspaceController {
   }
 
   refreshQoderAvailability() {
-    return this.#requireRunWorkflow().refreshQoderAvailability();
+    return this.refreshAgentAvailability();
   }
 
   checkQoderUsability() {
-    return this.#requireRunWorkflow().checkQoderUsability();
+    return this.checkAgentUsability();
   }
 
   copyQoderGuidance(input) {
-    return this.#requireRunWorkflow().copyQoderGuidance(input);
+    return this.copyAgentGuidance(input);
+  }
+
+  refreshAgentAvailability() {
+    return this.#requireRunWorkflow().refreshAgentAvailability();
+  }
+
+  checkAgentUsability() {
+    return this.#requireRunWorkflow().checkAgentUsability();
+  }
+
+  copyAgentGuidance(input) {
+    return this.#requireRunWorkflow().copyAgentGuidance(input);
   }
 
   reconcileRunSubmission(input) {

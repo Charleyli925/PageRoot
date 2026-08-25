@@ -255,6 +255,9 @@ export async function recordDiscussionQuestion(context, {
   turnId,
   sourceSha256,
   question,
+  providerSelection,
+  providerBinding,
+  capabilitySnapshotFingerprint,
 }) {
   const contextId = newContextId();
   const questionTurnId = newTurnId();
@@ -288,7 +291,15 @@ export async function recordDiscussionQuestion(context, {
     );
     return startConversationTurn(
       questionSealed,
-      { turnId, contextId, mode: "discussion", status: "running" },
+      {
+        turnId,
+        contextId,
+        mode: "discussion",
+        status: "running",
+        providerSelection,
+        providerBinding,
+        capabilitySnapshotFingerprint,
+      },
       { now: nowIso },
     );
   });
@@ -319,7 +330,8 @@ export async function sealDiscussionReply(context, {
         messages: text
           ? [{
             messageId: newMessageId(),
-            actor: "qoder",
+            actor: "agent",
+            providerId: turn.providerBinding?.providerId,
             kind: "text",
             status,
             text,

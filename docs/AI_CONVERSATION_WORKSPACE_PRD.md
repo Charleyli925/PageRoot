@@ -1341,3 +1341,9 @@ PageRoot 不是把聊天框贴到 HTML 编辑器旁边，而是把同一份真�
 - 每条对话、每个时间点、每个模型和每次修改都能回答：它针对哪一个 Document、哪一份 HTML、哪次 Request 和哪份 Candidate。
 
 这套规则必须在不削弱现有 ID-first 身份、冻结 Request、Candidate 隔离、finalizer、Promotion 原子性与版本历史的前提下实现。
+
+Conversation v2 records provider-neutral facts. Each Agent Turn carries its
+requested/resolved provider selection, nullable validated binding and capability
+snapshot fingerprint; each reply uses actor `agent`, provider id and actual
+provider-namespaced model. v1 is projected in memory without rewriting bytes.
+Unknown-provider history stays visible and reviewable but cannot restart.

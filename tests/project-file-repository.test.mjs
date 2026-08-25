@@ -2408,6 +2408,40 @@ test("a Request freezes comments, targets and project rules alongside its exact 
     targets: [{ targetId: "target_title", selector: "h1" }],
     preserveOutsideTargets: false,
   };
+  await assert.rejects(
+    value.repository.prepareRequest({
+      target: saved.target,
+      requestId: "req_unknown_provider",
+      attemptId: "attempt_001",
+      expectedSourceSha256: saved.target.sourceSha256,
+      request: {
+        ...request,
+        agentDelivery: {
+          mode: "managed-agent",
+          selection: {
+            providerId: "future-agent",
+            runtimeId: "future-runtime",
+            requestedModelId: null,
+            resolvedModelId: null,
+            reasoning: { requested: null, applied: null, resolution: "provider-default" },
+          },
+          trustPolicyVersion: "trusted-local-agent-v1",
+        },
+      },
+      prompt: "# must not publish\n",
+    }),
+    (error) => error?.code === "AGENT_DELIVERY_INVALID"
+      && error?.details?.reasonCode === "AGENT_PROVIDER_UNSUPPORTED",
+  );
+  assert.equal(
+    await lstat(path.join(
+      saved.target.projectRootPath,
+      ".pageroot",
+      "requests",
+      "req_unknown_provider",
+    )).then(() => true, () => false),
+    false,
+  );
   const prepared = await value.repository.prepareRequest({
     target: saved.target,
     requestId: "req_frozen_inputs",
@@ -2436,6 +2470,7 @@ test("a Request freezes comments, targets and project rules alongside its exact 
   assert.deepEqual(changeRequest.requirements, {
     ...request,
     preserveOutsideTargets: true,
+    agentDelivery: { mode: "clipboard" },
   });
   assert.deepEqual(inputManifest.readOrder, [
     "PROMPT.md",
@@ -2458,6 +2493,65 @@ test("a Request freezes comments, targets and project rules alongside its exact 
   assert.deepEqual(await readFile(annotationsPath), frozenAnnotations);
   assert.deepEqual(await readFile(projectRulesPath), frozenProjectRules);
   assert.deepEqual(await readFile(changeRequestPath), frozenChangeRequest);
+});
+
+test("an existing unknown-provider Request remains readable and durably cancellable without read-time rewrite", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "unknown-provider-history.html");
+  const prepared = await value.repository.prepareRequest({
+    target: imported.target,
+    requestId: "req_unknown_history",
+    attemptId: "attempt_001",
+    expectedSourceSha256: imported.target.sourceSha256,
+    request: {
+      freezeCutoffRevision: 0,
+      summary: "historical request",
+      comments: [],
+      changeEvents: [],
+      instructions: [],
+      targets: [],
+      preserveOutsideTargets: true,
+      agentDelivery: { mode: "clipboard" },
+    },
+    prompt: "# historical request\n",
+  });
+  const requestPath = path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "requests",
+    prepared.requestId,
+    "request.json",
+  );
+  const record = JSON.parse(await readFile(requestPath, "utf8"));
+  record.request.agentDelivery = {
+    mode: "managed-agent",
+    selection: {
+      providerId: "future-agent",
+      runtimeId: "future-runtime",
+      requestedModelId: "future-agent:model-a",
+      resolvedModelId: "future-agent:model-a",
+      reasoning: { requested: "high", applied: "high", resolution: "exact" },
+    },
+    trustPolicyVersion: "trusted-local-agent-v1",
+  };
+  await writeFile(requestPath, `${JSON.stringify(record, null, 2)}\n`, "utf8");
+  const historicalBytes = await readFile(requestPath, "utf8");
+
+  const status = await value.repository.requestStatus({
+    target: imported.target,
+    requestId: prepared.requestId,
+    attemptId: prepared.attemptId,
+  });
+  assert.equal(status.request.request.agentDelivery.selection.providerId, "future-agent");
+  assert.equal(await readFile(requestPath, "utf8"), historicalBytes);
+
+  const cancelled = await value.repository.cancelRequest({
+    target: imported.target,
+    requestId: prepared.requestId,
+    attemptId: prepared.attemptId,
+  });
+  assert.equal(cancelled.status, "cancelled");
+  assert.equal(JSON.parse(await readFile(requestPath, "utf8")).status, "cancelled");
 });
 
 test("a copied project remains external and its first import creates an independent V1", async (t) => {
@@ -4090,4 +4184,3 @@ test("a Draft written without a device identity records no author", async (t) =>
   ));
   assert.equal("provenance" in stored.comments[0], false);
 });
-
