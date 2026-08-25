@@ -203,7 +203,14 @@ async function run() {
       comments: [],
       changeEvents: [],
       agentDelivery: {
-        mode: "qoder-acp",
+        mode: "managed-agent",
+        selection: {
+          providerId: "qoder",
+          runtimeId: "acp",
+          requestedModelId: null,
+          resolvedModelId: null,
+          reasoning: { requested: null, applied: null, resolution: "provider-default" },
+        },
         trustPolicyVersion,
       },
     });
@@ -236,7 +243,9 @@ async function run() {
     }
     assert.ok(ready, `packaged ACP task did not reach pending review\n${logs.stderr}`);
     assert.equal(ready.agentSession.state, "completed");
-    assert.equal(ready.activeRun.agentDelivery.mode, "qoder-acp");
+    assert.equal(ready.activeRun.agentDelivery.mode, "managed-agent");
+    assert.equal(ready.activeRun.agentDelivery.selection.providerId, "qoder");
+    assert.equal(ready.activeRun.agentDelivery.selection.runtimeId, "acp");
 
     const candidate = await requestJson(
       `/version-file?sourcePath=${encodeURIComponent(ensured.body.sourcePath)}`

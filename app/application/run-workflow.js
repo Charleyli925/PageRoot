@@ -9,6 +9,7 @@ import {
   readyQoderAvailability,
 } from "../domain/qoder-availability.js";
 import { createRunWorkflowCodecs } from "./run-workflow-codecs.js";
+import { defaultManagedAgentDelivery } from "../../shared/agent-delivery.mjs";
 
 const SHA256 = /^sha256:[a-f0-9]{64}$/u;
 const POLL_INTERVAL_MS = 1_600;
@@ -151,8 +152,10 @@ function agentHandoffState(run, session) {
 }
 
 function qoderRecoveryRequired(run, handoff) {
+  const qoderManaged = run?.agentDelivery?.mode === "managed-agent"
+    && run.agentDelivery.selection?.providerId === "qoder";
   return Boolean(
-    run?.agentDelivery?.mode === "qoder-acp"
+    (qoderManaged || run?.agentDelivery?.mode === "qoder-acp")
     && handoff?.mode === "qoder-acp"
     && handoff.requestId === run.requestId
     && handoff.attemptId === run.attemptId
@@ -666,10 +669,7 @@ export class RunWorkflow {
         comments: persistedComments.map(this.#codecs.persistedComment),
         changeEvents: persistedEvents.map(this.#codecs.persistedChangeEvent),
         agentDelivery: deliveryMode === "qoder-acp"
-          ? {
-              mode: "qoder-acp",
-              trustPolicyVersion: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
-            }
+          ? defaultManagedAgentDelivery()
           : { mode: "clipboard" },
       };
       const operationId = this.#codecs.operationKey(pendingRun);
@@ -1032,7 +1032,7 @@ export class RunWorkflow {
         sourcePath: run.sourcePath,
         requestId: run.requestId,
         attemptId: run.attemptId,
-        driver: "qoder-acp",
+        selection: defaultManagedAgentDelivery().selection,
         trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
         preflightId: preflight.preflightId,
       });
@@ -1628,7 +1628,7 @@ export class RunWorkflow {
     const checking = (async () => {
       try {
         const preflight = await this.#bridgeClient.preflightAgent({
-          driver: "qoder-acp",
+          selection: defaultManagedAgentDelivery().selection,
           purpose,
           trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
         });

@@ -252,6 +252,28 @@ test("Bridge keeps the legacy HTTP projection while tickets remain provider/runt
     status: "ready",
     driver: "qoder-acp",
   });
+  const mismatchedTicket = await service.preflight({
+    driver: "qoder-acp",
+    trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
+  });
+  assert.match(mismatchedTicket.selectionFingerprint, /^sha256:[a-f0-9]{64}$/u);
+  await assert.rejects(
+    service.submit({
+      ...IDENTITY,
+      driver: "qoder-acp",
+      selection: {
+        providerId: "qoder",
+        runtimeId: "acp",
+        requestedModelId: "qoder:Synthetic-Model",
+        resolvedModelId: "qoder:Synthetic-Model",
+        reasoning: { requested: "high", applied: "high", resolution: "exact" },
+      },
+      trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
+      preflightId: mismatchedTicket.preflightId,
+    }),
+    (error) => error?.code === "AGENT_PROVIDER_TICKET_INVALID",
+  );
+
   const ready = await service.preflight({
     driver: "qoder-acp",
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,

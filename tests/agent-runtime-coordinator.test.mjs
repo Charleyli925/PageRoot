@@ -69,7 +69,18 @@ function executionAuthority() {
     request: {
       request: {
         agentDelivery: {
-          mode: "synthetic-driver",
+          mode: "managed-agent",
+          selection: {
+            providerId: "synthetic-provider",
+            runtimeId: "synthetic-runtime",
+            requestedModelId: null,
+            resolvedModelId: null,
+            reasoning: {
+              requested: null,
+              applied: null,
+              resolution: "provider-default",
+            },
+          },
           trustPolicyVersion: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
         },
       },

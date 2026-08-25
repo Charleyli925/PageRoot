@@ -495,7 +495,18 @@ test("Qoder ACP preflights before one durable Request and never touches the clip
   assert.equal(harness.calls.preflight.length, 1);
   assert.equal(harness.calls.createRequest.length, 1);
   assert.deepEqual(harness.calls.createRequest[0].agentDelivery, {
-    mode: "qoder-acp",
+    mode: "managed-agent",
+    selection: {
+      providerId: "qoder",
+      runtimeId: "acp",
+      requestedModelId: null,
+      resolvedModelId: null,
+      reasoning: {
+        requested: null,
+        applied: null,
+        resolution: "provider-default",
+      },
+    },
     trustPolicyVersion: "trusted-local-agent-v1",
   });
   assert.equal(harness.calls.startAgent.length, 1);

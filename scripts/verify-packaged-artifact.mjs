@@ -112,6 +112,7 @@ export const REQUIRED_SHARED_FILES = [
   "provenance.mjs",
   "source-history.mjs",
   "conversation.mjs",
+  "agent-delivery.mjs",
 ];
 const REQUIRED_LEGAL_RESOURCES = [
   "PageRoot 用户声明与免责声明.txt",

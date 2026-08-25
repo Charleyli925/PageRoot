@@ -122,6 +122,7 @@ const SHARED_FILES = [
   "provenance.mjs",
   "source-history.mjs",
   "conversation.mjs",
+  "agent-delivery.mjs",
 ];
 
 const SCHEMA_FILES = [
@@ -133,8 +134,10 @@ const SCHEMA_FILES = [
   "committed-marker.v1.schema.json",
   "completion.v1.schema.json",
   "conversation.v1.schema.json",
+  "conversation.v2.schema.json",
   "conversation-index.v1.schema.json",
   "conversation-draft.v1.schema.json",
+  "conversation-draft.v2.schema.json",
   "input-manifest.v1.schema.json",
   "project-state.v3.schema.json",
   "project-identity.v4.schema.json",

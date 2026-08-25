@@ -86,8 +86,10 @@ records.
 - `committed-marker.v1.schema.json`
 - `source-history.v1.schema.json`
 - `conversation.v1.schema.json`
+- `conversation.v2.schema.json`
 - `conversation-index.v1.schema.json`
 - `conversation-draft.v1.schema.json`
+- `conversation-draft.v2.schema.json`
 
 ## v4 project-file records
 
@@ -123,7 +125,8 @@ its removal evidence and fixture contract.
 byte-exact canvas source operations. Its cursor is independent from immutable
 Versions; comments, attachments, and project-rule edits are not entries.
 
-`conversation.v1.schema.json` is one AI conversation thread. A Conversation
+`conversation.v2.schema.json` is the current writer contract for one AI
+conversation thread; v1 remains read-only compatibility. A Conversation
 belongs to exactly one Document and its contexts, turns and messages live in the
 same record, so reading one Document's thread can never surface another's. Two
 rules are load-bearing and pinned by
@@ -144,10 +147,16 @@ to that Document's single current Conversation. It is a rebuildable projection
 of the authoritative conversation records; it exists so the history list renders
 without opening every conversation file.
 
-`conversation-draft.v1.schema.json` is the unsent Composer content for one
+`conversation-draft.v2.schema.json` is the current unsent Composer content for one
 Conversation, kept in its own small record so a debounced draft write never
 rewrites the message history. A draft never enters a Request, Prompt,
 `USER_SUPPLEMENT` or Candidate.
+
+Conversation v2 binds each Agent turn to a provider selection, nullable runtime
+binding, and capability-snapshot fingerprint. Stored Agent messages use the
+generic `agent` actor plus `providerId` and the actual provider-namespaced model.
+The codec projects legacy `qoder` actors and `qoder-default` reasoning without
+rewriting v1 files; new writes are v2 and preserve unknown future members.
 
 Deprecated main v1/v2 schemas and `migration-report.v1.schema.json` are not
 kept in the active source tree or release package. Their evidence exists only

@@ -185,3 +185,28 @@ test("Bridge client retries a transient read and attaches authorization", async 
     "test-token",
   );
 });
+
+test("Bridge client exposes the five neutral Agent routes and keeps availability alias", async () => {
+  const requests = [];
+  const client = createBridgeClient({
+    baseUrl: "http://127.0.0.1:4317",
+    fetchImpl: async (input, init) => {
+      requests.push({ url: new URL(String(input)), method: String(init?.method || "GET") });
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    },
+  });
+  await client.agentProviders();
+  await client.preflightAgent({ selection: {} });
+  await client.startAgent({ selection: {} });
+  await client.agentStatus("/tmp/page.html", "req_1", "attempt_001");
+  await client.cancelAgent({ requestId: "req_1" });
+  await client.qoderAvailability();
+  assert.deepEqual(requests.map(({ url, method }) => [method, url.pathname]), [
+    ["GET", "/agent/providers"],
+    ["POST", "/agent/preflight"],
+    ["POST", "/agent/start"],
+    ["GET", "/agent/status"],
+    ["POST", "/agent/cancel"],
+    ["GET", "/agent/availability"],
+  ]);
+});

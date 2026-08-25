@@ -81,6 +81,14 @@ export function createProviderRegistry({ providers = [], runtimeRegistry } = {})
   };
 
   return Object.freeze({
+    catalog() {
+      return Object.freeze([...byProviderId.values()].map((provider) => Object.freeze({
+        providerId: provider.providerId,
+        displayName: provider.displayName,
+        runtimeId: provider.runtimeId,
+        capabilities: provider.capabilities,
+      })));
+    },
     resolveDriver,
     resolveTicket,
     async availability({ driver, environment }) {

@@ -7748,7 +7748,11 @@ export default function Workbench() {
           className="sent-preview-banner"
           icon={<EyeIcon aria-hidden="true" size={18} weight="duotone" />}
           title="正在预览已发送 HTML"
-          detail={currentAgentDeliveryMode === "qoder-acp" ? "这是本轮冻结并交给 Qoder CLI 的只读内容" : "这是本轮冻结并复制给 AI Agent 的只读内容"}
+          detail={currentAgentDeliveryMode === "qoder-acp"
+            ? "这是本轮冻结并交给 Qoder CLI 的只读内容"
+            : currentAgentDeliveryMode === "clipboard"
+              ? "这是本轮冻结并复制给 AI Agent 的只读内容"
+              : "这是本轮冻结的 Agent 只读内容"}
           actionLabel="返回等待处理"
           onAction={() => {
             setHandoffPreviewOpen(false);
@@ -8980,7 +8984,7 @@ export default function Workbench() {
               if (!workspaceController) return;
               if (currentAgentDeliveryMode === "qoder-acp") {
                 void workspaceController.startRunAgent({ run: activeRun });
-              } else {
+              } else if (currentAgentDeliveryMode === "clipboard") {
                 void workspaceController.copyRunHandoff({ run: activeRun });
               }
             }}

@@ -295,3 +295,7 @@ Rules:
 - Telemetry is observational and best effort. It never owns product state,
   never receives content or paths, and never registers a drain obligation for
   edit, save, switch, submit, close or update installation.
+- Provider Registry owns installed descriptors and dispatch. Agent Delivery
+  Codec owns canonical Request selection and legacy projection. Coordinator owns
+  preflight tickets and sessions. Conversation Repository is the only v2 writer;
+  v1 conversation records are never migrated in place.

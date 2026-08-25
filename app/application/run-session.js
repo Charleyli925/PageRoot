@@ -62,7 +62,10 @@ const OPERATION_KINDS = Object.freeze([
 ]);
 
 function recoveredQoderHandoff(run) {
-  if (run?.status !== "processing" || run?.agentDelivery?.mode !== "qoder-acp") return null;
+  const qoderManaged = run?.agentDelivery?.mode === "managed-agent"
+    && run.agentDelivery.selection?.providerId === "qoder";
+  if (run?.status !== "processing"
+    || (!qoderManaged && run?.agentDelivery?.mode !== "qoder-acp")) return null;
   return Object.freeze({
     sourcePath: run.sourcePath,
     requestId: run.requestId,

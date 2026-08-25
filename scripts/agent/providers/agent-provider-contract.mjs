@@ -61,6 +61,9 @@ export function defineAgentProvider(value) {
   }
   const providerId = assertComponentId(value.providerId, "providerId");
   const runtimeId = assertComponentId(value.runtimeId, "runtimeId");
+  const displayName = typeof value.displayName === "string" && value.displayName.trim()
+    ? value.displayName.trim().slice(0, 80)
+    : providerId;
   const securityProfile = assertAgentSecurityProfile(
     value.securityProfile,
     "provider securityProfile",
@@ -94,6 +97,7 @@ export function defineAgentProvider(value) {
     ...value,
     providerId,
     runtimeId,
+    displayName,
     securityProfile,
     legacyDrivers: Object.freeze(legacyDrivers),
     capabilities: normalizedCapabilities(value.capabilities),

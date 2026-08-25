@@ -57,6 +57,33 @@ async function createManagedRequest(t, { hang = false } = {}) {
     projectStorageVersion: "4.0.0",
   });
   assert.equal(ensured.response.status, 200, JSON.stringify(ensured.body));
+  const unknownRequest = await bridge.postJson("/request", {
+    projectId: ensured.body.projectId,
+    documentId: ensured.body.documentId,
+    sourcePath: ensured.body.sourcePath,
+    expectedSourceSha256: ensured.body.sourceSha256,
+    freezeCutoffRevision: 0,
+    summary: "must not publish",
+    comments: [],
+    changeEvents: [],
+    agentDelivery: {
+      mode: "managed-agent",
+      selection: {
+        providerId: "future-agent",
+        runtimeId: "future-runtime",
+        requestedModelId: null,
+        resolvedModelId: null,
+        reasoning: { requested: null, applied: null, resolution: "provider-default" },
+      },
+      trustPolicyVersion: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
+    },
+  });
+  assert.equal(unknownRequest.response.status, 422, JSON.stringify(unknownRequest.body));
+  assert.equal(unknownRequest.body.error.code, "AGENT_PROVIDER_UNSUPPORTED");
+  const afterUnknown = await bridge.requestJson(
+    `/workspace?sourcePath=${encodeURIComponent(ensured.body.sourcePath)}`,
+  );
+  assert.equal(afterUnknown.body.activeRun, null);
   const availability = await bridge.requestJson("/agent/availability");
   assert.equal(availability.response.status, 200, JSON.stringify(availability.body));
   assert.equal(availability.body.status, "ready");
@@ -79,7 +106,14 @@ async function createManagedRequest(t, { hang = false } = {}) {
     comments: [],
     changeEvents: [],
     agentDelivery: {
-      mode: "qoder-acp",
+      mode: "managed-agent",
+      selection: {
+        providerId: "qoder",
+        runtimeId: "acp",
+        requestedModelId: null,
+        resolvedModelId: null,
+        reasoning: { requested: null, applied: null, resolution: "provider-default" },
+      },
       trustPolicyVersion: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
     },
   });
@@ -135,7 +169,9 @@ test("workspace Agent Bridge completes Qoder ACP into pending review without ado
   );
   assert.equal(ready.body.agentSession.driver, "qoder-acp");
   assert.equal(ready.body.agentSession.state, "completed");
-  assert.equal(ready.body.activeRun.agentDelivery.mode, "qoder-acp");
+  assert.equal(ready.body.activeRun.agentDelivery.mode, "managed-agent");
+  assert.equal(ready.body.activeRun.agentDelivery.selection.providerId, "qoder");
+  assert.equal(ready.body.activeRun.agentDelivery.selection.runtimeId, "acp");
   assert.equal(await readFile(value.externalSourcePath, "utf8"), value.sourceHtml);
   assert.equal(await readFile(value.ensured.sourcePath, "utf8"), value.sourceHtml);
 

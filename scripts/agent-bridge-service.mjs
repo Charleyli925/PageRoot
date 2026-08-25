@@ -22,6 +22,14 @@ export class AgentBridgeService {
 
   get runtimeCoordinator() { return this.#coordinator; }
 
+  providers() {
+    return Object.freeze({
+      ok: true,
+      providers: this.#coordinator.providerCatalog(),
+      trustPolicyVersion: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
+    });
+  }
+
   availability() { return this.#coordinator.availability({ driver: LEGACY_DRIVER }); }
 
   preflight(input) { return this.#coordinator.preflight(input); }

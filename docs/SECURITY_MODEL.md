@@ -495,3 +495,10 @@ not contain HTML, paths, comments or credentials. A damaged or oversized file
 is treated as empty pending state. The built-in welcome `projectId` is
 recorded after welcome registration so that page never shows the
 first-real-HTML card.
+
+The renderer may name only a provider selection. It cannot provide executable
+commands, paths, permissions or a security profile. Preflight resolves the
+installed provider/runtime and freezes canonical selection plus fingerprint in
+a one-use ticket; start compares that ticket to the durable Request selection.
+Malformed policies, cross-provider model ids, unknown providers and selection
+drift fail closed.

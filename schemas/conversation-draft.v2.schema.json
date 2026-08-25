@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://html-change.local/schemas/conversation-draft.v2.schema.json",
+  "title": "Stemmio AI conversation composer draft v2",
+  "type": "object",
+  "required": ["schemaVersion", "conversationId", "revision", "updatedAt", "text", "intent"],
+  "properties": {
+    "schemaVersion": { "const": "2.0.0" },
+    "conversationId": { "type": "string", "pattern": "^conversation_[A-Za-z0-9_-]{12,180}$" },
+    "revision": { "type": "integer", "minimum": 0 },
+    "updatedAt": { "type": "string", "format": "date-time" },
+    "text": { "type": "string", "maxLength": 131072 },
+    "intent": { "enum": ["discuss", "modify", "continue"] },
+    "providerSelection": { "$ref": "#/$defs/providerSelection" },
+    "modelDisplayName": { "type": ["string", "null"], "maxLength": 200 },
+    "deliveryMode": { "enum": ["managed-agent", "clipboard"] }
+  },
+  "$defs": {
+    "nullableSelectionText": { "type": ["string", "null"], "maxLength": 160 },
+    "reasoning": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requested", "applied", "resolution"],
+      "properties": {
+        "requested": { "$ref": "#/$defs/nullableSelectionText" },
+        "applied": { "$ref": "#/$defs/nullableSelectionText" },
+        "resolution": { "enum": ["exact", "provider-default", "unsupported"] }
+      }
+    },
+    "providerSelection": {
+      "type": ["object", "null"],
+      "required": ["providerId", "runtimeId", "requestedModelId", "resolvedModelId", "reasoning"],
+      "properties": {
+        "providerId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$" },
+        "runtimeId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$" },
+        "requestedModelId": { "$ref": "#/$defs/nullableSelectionText" },
+        "resolvedModelId": { "$ref": "#/$defs/nullableSelectionText" },
+        "reasoning": { "$ref": "#/$defs/reasoning" }
+      }
+    }
+  }
+}

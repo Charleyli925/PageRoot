@@ -391,7 +391,7 @@ export function HandoffFooter({
   pendingReconcileBusy: boolean;
   handoffCopyFailed: boolean;
   currentQoderHandoffStatus: QoderHandoffUiStatus | "idle";
-  currentDeliveryMode: "clipboard" | "qoder-acp";
+  currentDeliveryMode: "clipboard" | "qoder-acp" | "managed-agent";
   cancelling: boolean;
   resolvingConflict: boolean;
   checkingRun: boolean;
@@ -439,7 +439,7 @@ export function HandoffFooter({
             ? "正在自动确认发送结果…"
             : "等待下一次自动确认…"}
         </span>
-      ) : handoffCopyFailed ? (
+      ) : handoffCopyFailed && currentDeliveryMode !== "managed-agent" ? (
         <>
           <button
             className="primary-action"

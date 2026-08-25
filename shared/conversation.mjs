@@ -14,9 +14,13 @@
 //   - `sequence` is assigned here from the record's own `lastSequence`. The
 //     Repository is the only writer, so strict increase needs no coordination.
 
-const CONVERSATION_SCHEMA_VERSION = "1.0.0";
+import { defaultManagedAgentDelivery, normalizeAgentDelivery } from "./agent-delivery.mjs";
+
+const CONVERSATION_SCHEMA_VERSION = "2.0.0";
+const LEGACY_CONVERSATION_SCHEMA_VERSION = "1.0.0";
 const CONVERSATION_INDEX_SCHEMA_VERSION = "1.0.0";
-const CONVERSATION_DRAFT_SCHEMA_VERSION = "1.0.0";
+const CONVERSATION_DRAFT_SCHEMA_VERSION = "2.0.0";
+const LEGACY_CONVERSATION_DRAFT_SCHEMA_VERSION = "1.0.0";
 
 const CONVERSATION_MESSAGE_LIMIT = 500;
 const CONVERSATION_TURN_LIMIT = 500;
@@ -49,7 +53,7 @@ const TURN_STATUSES = new Set([
   "failed",
   "cancelled",
 ]);
-const MESSAGE_ACTORS = new Set(["user", "qoder", "pageroot"]);
+const MESSAGE_ACTORS = new Set(["user", "agent", "pageroot"]);
 const MESSAGE_KINDS = new Set([
   "text",
   "progress",
@@ -68,7 +72,7 @@ const MESSAGE_STATUSES = new Set([
   "cancelled",
 ]);
 const DRAFT_INTENTS = new Set(["discuss", "modify", "continue"]);
-const DELIVERY_MODES = new Set(["qoder-acp", "clipboard"]);
+const DELIVERY_MODES = new Set(["managed-agent", "clipboard"]);
 const ARCHIVED_REASONS = new Set(["message-limit", "user"]);
 
 // A stored message must never grow interface state. These names are refused so
@@ -222,9 +226,9 @@ const KNOWN_TURN_KEYS = new Set([
   "mode",
   "status",
   "startedMessageId",
-  "modelId",
-  "modelDisplayName",
-  "reasoningEffort",
+  "providerSelection",
+  "providerBinding",
+  "capabilitySnapshotFingerprint",
   "startedAt",
   "completedAt",
   "interruptedAt",
@@ -245,9 +249,9 @@ const KNOWN_MESSAGE_KEYS = new Set([
   "createdAt",
   "completedAt",
   "parentMessageId",
-  "modelId",
+  "providerId",
+  "actualModelId",
   "modelDisplayName",
-  "reasoningEffort",
   "requestId",
   "attemptId",
   "candidateId",
@@ -300,7 +304,7 @@ const KNOWN_DRAFT_KEYS = new Set([
   "updatedAt",
   "text",
   "intent",
-  "modelId",
+  "providerSelection",
   "modelDisplayName",
   "deliveryMode",
 ]);
@@ -370,6 +374,90 @@ function cleanContext(raw, label) {
   );
 }
 
+function cleanProviderSelection(value, label) {
+  if (value === null || value === undefined) return null;
+  try {
+    return normalizeAgentDelivery({
+      mode: "managed-agent",
+      selection: value,
+      trustPolicyVersion: "trusted-local-agent-v1",
+    }).selection;
+  } catch (cause) {
+    throw conversationError(
+      "INVALID_CONVERSATION_PROVIDER_SELECTION",
+      `${label} is invalid.`,
+      { reasonCode: cause?.code || "AGENT_DELIVERY_INVALID" },
+    );
+  }
+}
+
+function cleanProviderBinding(value, label) {
+  if (value === null || value === undefined) return null;
+  if (!isRecord(value)) {
+    throw conversationError("INVALID_CONVERSATION_PROVIDER_BINDING", `${label} is invalid.`);
+  }
+  return {
+    providerId: requiredIdentity(value.providerId, `${label} providerId`),
+    runtimeId: requiredIdentity(value.runtimeId, `${label} runtimeId`),
+  };
+}
+
+function legacyConversationProjection(raw) {
+  const selection = defaultManagedAgentDelivery().selection;
+  return {
+    ...raw,
+    schemaVersion: CONVERSATION_SCHEMA_VERSION,
+    turns: Array.isArray(raw.turns) ? raw.turns.map((turn) => {
+      const {
+        modelId,
+        reasoningEffort,
+        ...rest
+      } = isRecord(turn) ? turn : {};
+      return {
+        ...rest,
+        providerSelection: {
+          ...selection,
+          requestedModelId: modelId ? `qoder:${modelId}` : null,
+          resolvedModelId: modelId ? `qoder:${modelId}` : null,
+          reasoning: reasoningEffort === "qoder-default"
+            ? { requested: null, applied: null, resolution: "provider-default" }
+            : selection.reasoning,
+        },
+        providerBinding: { providerId: "qoder", runtimeId: "acp" },
+        capabilitySnapshotFingerprint: null,
+      };
+    }) : raw.turns,
+    messages: Array.isArray(raw.messages) ? raw.messages.map((message) => {
+      if (!isRecord(message)) return message;
+      const { modelId, reasoningEffort: _reasoningEffort, ...rest } = message;
+      return {
+        ...rest,
+        actor: message.actor === "qoder" ? "agent" : message.actor,
+        ...(message.actor === "qoder" ? { providerId: "qoder" } : {}),
+        ...(modelId ? { actualModelId: `qoder:${modelId}` } : {}),
+      };
+    }) : raw.messages,
+  };
+}
+
+function legacyDraftProjection(raw) {
+  const { modelId, ...rest } = raw;
+  return {
+    ...rest,
+    schemaVersion: CONVERSATION_DRAFT_SCHEMA_VERSION,
+    ...(modelId
+      ? {
+          providerSelection: {
+            ...defaultManagedAgentDelivery().selection,
+            requestedModelId: `qoder:${modelId}`,
+            resolvedModelId: `qoder:${modelId}`,
+          },
+        }
+      : {}),
+    deliveryMode: raw.deliveryMode === "qoder-acp" ? "managed-agent" : raw.deliveryMode,
+  };
+}
+
 function cleanTurn(raw, label) {
   if (!isRecord(raw)) {
     throw conversationError(
@@ -408,11 +496,18 @@ function cleanTurn(raw, label) {
       "INVALID_CONVERSATION_TURN",
       `${label} startedMessageId`,
     ),
-    modelId: optionalReference(raw.modelId, `${label} modelId`),
-    modelDisplayName: optionalReference(
-      raw.modelDisplayName,
-      `${label} modelDisplayName`,
+    providerSelection: cleanProviderSelection(
+      raw.providerSelection,
+      `${label} providerSelection`,
     ),
+    providerBinding: cleanProviderBinding(raw.providerBinding, `${label} providerBinding`),
+    capabilitySnapshotFingerprint: raw.capabilitySnapshotFingerprint === null
+      || raw.capabilitySnapshotFingerprint === undefined
+      ? null
+      : requiredSha256(
+          raw.capabilitySnapshotFingerprint,
+          `${label} capabilitySnapshotFingerprint`,
+        ),
     startedAt: requiredTimestamp(raw.startedAt, `${label} startedAt`),
     completedAt: optionalTimestamp(raw.completedAt, `${label} completedAt`),
     interruptedAt: optionalTimestamp(
@@ -423,14 +518,13 @@ function cleanTurn(raw, label) {
     attemptId: optionalReference(raw.attemptId, `${label} attemptId`),
     candidateId: optionalReference(raw.candidateId, `${label} candidateId`),
   };
-  if (raw.reasoningEffort !== undefined && raw.reasoningEffort !== null) {
-    if (raw.reasoningEffort !== "qoder-default") {
-      throw conversationError(
-        "INVALID_CONVERSATION_TURN",
-        `${label} reasoningEffort only records that PageRoot applied no override.`,
-      );
-    }
-    base.reasoningEffort = "qoder-default";
+  if (base.providerBinding && base.providerSelection
+    && (base.providerBinding.providerId !== base.providerSelection.providerId
+      || base.providerBinding.runtimeId !== base.providerSelection.runtimeId)) {
+    throw conversationError(
+      "INVALID_CONVERSATION_PROVIDER_BINDING",
+      `${label} provider binding does not match its selection.`,
+    );
   }
   return preserveUnknown(base, raw, KNOWN_TURN_KEYS);
 }
@@ -441,6 +535,15 @@ function cleanMessage(raw, label) {
       "INVALID_CONVERSATION_MESSAGE",
       `${label} must be an object.`,
     );
+  }
+  if (raw.actor === "qoder") {
+    const { modelId, reasoningEffort: _reasoningEffort, ...rest } = raw;
+    raw = {
+      ...rest,
+      actor: "agent",
+      providerId: "qoder",
+      ...(modelId ? { actualModelId: `qoder:${modelId}` } : {}),
+    };
   }
   for (const key of Object.keys(raw)) {
     if (FORBIDDEN_MESSAGE_KEYS.has(key)) {
@@ -505,7 +608,8 @@ function cleanMessage(raw, label) {
       "INVALID_CONVERSATION_MESSAGE",
       `${label} parentMessageId`,
     ),
-    modelId: optionalReference(raw.modelId, `${label} modelId`),
+    providerId: optionalReference(raw.providerId, `${label} providerId`),
+    actualModelId: optionalReference(raw.actualModelId, `${label} actualModelId`),
     modelDisplayName: optionalReference(
       raw.modelDisplayName,
       `${label} modelDisplayName`,
@@ -514,16 +618,26 @@ function cleanMessage(raw, label) {
     attemptId: optionalReference(raw.attemptId, `${label} attemptId`),
     candidateId: optionalReference(raw.candidateId, `${label} candidateId`),
   };
-  if (raw.truncated === true) base.truncated = true;
-  if (raw.reasoningEffort !== undefined && raw.reasoningEffort !== null) {
-    if (raw.reasoningEffort !== "qoder-default") {
-      throw conversationError(
-        "INVALID_CONVERSATION_MESSAGE",
-        `${label} reasoningEffort only records that PageRoot applied no override.`,
-      );
-    }
-    base.reasoningEffort = "qoder-default";
+  if (base.actor === "agent" && !base.providerId) {
+    throw conversationError(
+      "INVALID_CONVERSATION_MESSAGE",
+      `${label} Agent actor requires providerId.`,
+    );
   }
+  if (base.actor !== "agent" && base.providerId) {
+    throw conversationError(
+      "INVALID_CONVERSATION_MESSAGE",
+      `${label} non-Agent actor cannot claim providerId.`,
+    );
+  }
+  if (base.actualModelId && base.providerId
+    && !base.actualModelId.startsWith(`${base.providerId}:`)) {
+    throw conversationError(
+      "INVALID_CONVERSATION_MESSAGE",
+      `${label} actualModelId uses another provider namespace.`,
+    );
+  }
+  if (raw.truncated === true) base.truncated = true;
   return preserveUnknown(base, raw, KNOWN_MESSAGE_KEYS);
 }
 
@@ -544,6 +658,9 @@ export function normalizeConversation(raw, { projectId, documentId } = {}) {
       "INVALID_CONVERSATION",
       "A conversation record must be an object.",
     );
+  }
+  if (raw.schemaVersion === LEGACY_CONVERSATION_SCHEMA_VERSION) {
+    raw = legacyConversationProjection(raw);
   }
   if (raw.schemaVersion !== CONVERSATION_SCHEMA_VERSION) {
     throw conversationError(
@@ -853,7 +970,9 @@ export function startConversationTurn(conversation, turn, { now } = {}) {
   const candidate = cleanTurn(
     {
       status: "queued",
-      reasoningEffort: "qoder-default",
+      providerSelection: null,
+      providerBinding: null,
+      capabilitySnapshotFingerprint: null,
       ...turn,
       startedAt: turn?.startedAt ?? now?.(),
     },
@@ -928,9 +1047,15 @@ export function sealConversationTurn(
     sequence += 1;
     return cleanMessage(
       {
-        reasoningEffort: existing.reasoningEffort,
-        modelId: existing.modelId,
-        modelDisplayName: existing.modelDisplayName,
+        ...(existing.providerBinding
+          ? { providerId: existing.providerBinding.providerId }
+          : {}),
+        ...(existing.providerSelection?.resolvedModelId
+          ? { actualModelId: existing.providerSelection.resolvedModelId }
+          : {}),
+        ...(existing.modelDisplayName
+          ? { modelDisplayName: existing.modelDisplayName }
+          : {}),
         ...message,
         turnId,
         sequence,
@@ -1284,6 +1409,9 @@ export function normalizeConversationDraft(raw, { conversationId } = {}) {
       "A conversation draft must be an object.",
     );
   }
+  if (raw.schemaVersion === LEGACY_CONVERSATION_DRAFT_SCHEMA_VERSION) {
+    raw = legacyDraftProjection(raw);
+  }
   if (raw.schemaVersion !== CONVERSATION_DRAFT_SCHEMA_VERSION) {
     throw conversationError(
       "UNSUPPORTED_CONVERSATION_SCHEMA",
@@ -1318,7 +1446,9 @@ export function normalizeConversationDraft(raw, { conversationId } = {}) {
         ),
       },
       {
-        modelId: optionalReference(raw.modelId, "draft modelId") ?? undefined,
+        providerSelection: raw.providerSelection === undefined
+          ? undefined
+          : cleanProviderSelection(raw.providerSelection, "draft providerSelection"),
         modelDisplayName: optionalReference(
           raw.modelDisplayName,
           "draft modelDisplayName",

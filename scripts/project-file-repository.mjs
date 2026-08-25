@@ -37,6 +37,10 @@ import {
   AiTaskProjectionError,
   materializeAiTaskProjection,
 } from "./ai-task-projection.mjs";
+import {
+  normalizeAgentDelivery,
+  normalizeNewAgentDelivery,
+} from "../shared/agent-delivery.mjs";
 
 export const PROJECT_FILE_SCHEMA_VERSION = "4.0.0";
 
@@ -2753,6 +2757,17 @@ export class ProjectFileRepository {
       // A caller cannot weaken it while a Request is being frozen.
       preserveOutsideTargets: true,
     };
+    try {
+      frozenRequest.agentDelivery = normalizeNewAgentDelivery(
+        frozenRequest.agentDelivery || { mode: "clipboard" },
+      );
+    } catch (cause) {
+      throw new ProjectFileRepositoryError(
+        "AGENT_DELIVERY_INVALID",
+        "The Request Agent delivery policy is invalid.",
+        { reasonCode: cause?.code || "AGENT_DELIVERY_INVALID" },
+      );
+    }
     const freezeCutoffRevision = Number(frozenRequest.freezeCutoffRevision || 0);
     if (
       !Number.isSafeInteger(freezeCutoffRevision)
@@ -2996,6 +3011,15 @@ export class ProjectFileRepository {
       );
     }
     assertCandidateId(record.candidateId);
+    try {
+      normalizeAgentDelivery(record.request?.agentDelivery || { mode: "clipboard" });
+    } catch (cause) {
+      throw new ProjectFileRepositoryError(
+        "AGENT_DELIVERY_INVALID",
+        "The frozen Request Agent delivery policy is invalid.",
+        { reasonCode: cause?.code || "AGENT_DELIVERY_INVALID" },
+      );
+    }
     assertSha256(record.expectedSourceSha256, "request expectedSourceSha256");
     assertId(record.proposedVersionId, VERSION_ID, "proposedVersionId");
     if (!Number.isSafeInteger(record.proposedVersionOrdinal) || record.proposedVersionOrdinal < 2) {
@@ -3323,6 +3347,10 @@ export class ProjectFileRepository {
   }
 
   #publicRequest(record, projectRootPath) {
+    const publicRequirements = structuredClone(record.request || {});
+    publicRequirements.agentDelivery = normalizeAgentDelivery(
+      publicRequirements.agentDelivery || { mode: "clipboard" },
+    );
     return {
       requestId: record.requestId,
       attemptId: record.attemptId,
@@ -3337,7 +3365,7 @@ export class ProjectFileRepository {
       previousVersionId: record.previousVersionId,
       status: record.status,
       createdAt: record.createdAt,
-      request: structuredClone(record.request || {}),
+      request: publicRequirements,
       projectRootPath,
       requestRelativePath: `requests/${record.requestId}`,
       ...(record.promptRelativePath ? { promptRelativePath: record.promptRelativePath } : {}),

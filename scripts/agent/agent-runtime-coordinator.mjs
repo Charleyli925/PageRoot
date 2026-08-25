@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { lstat } from "node:fs/promises";
 import path from "node:path";
 
@@ -18,6 +18,10 @@ import {
   publicExecutionSession,
 } from "./agent-session-projector.mjs";
 import { createDefaultProviderRegistry } from "./providers/provider-registry.mjs";
+import {
+  defaultManagedAgentDelivery,
+  normalizeAgentDelivery,
+} from "../../shared/agent-delivery.mjs";
 
 export const TRUSTED_LOCAL_AGENT_POLICY_VERSION = "trusted-local-agent-v1";
 
@@ -48,6 +52,22 @@ function validateTrustPolicy(value, status = 409) {
       status,
     });
   }
+}
+
+function canonicalSelection(value, trustPolicyVersion) {
+  return normalizeAgentDelivery({
+    mode: "managed-agent",
+    selection: value || defaultManagedAgentDelivery().selection,
+    trustPolicyVersion,
+  }).selection;
+}
+
+function selectionFingerprint(selection) {
+  return `sha256:${createHash("sha256").update(JSON.stringify(selection)).digest("hex")}`;
+}
+
+function sameSelection(left, right) {
+  return selectionFingerprint(left) === selectionFingerprint(right);
 }
 
 function validateExecutionIdentity(value) {
@@ -227,6 +247,10 @@ export class AgentRuntimeCoordinator {
     return !this.#acceptingStarts;
   }
 
+  providerCatalog() {
+    return this.#providerRegistry.catalog();
+  }
+
   #assertAcceptingStarts() {
     if (!this.#acceptingStarts) {
       failAgentRuntime("AGENT_BRIDGE_DISPOSED", "Agent Bridge 已停止。", { status: 503 });
@@ -282,7 +306,7 @@ export class AgentRuntimeCoordinator {
     return Object.freeze({ ok: true, ...result, driver });
   }
 
-  async preflight({ driver, trustPolicyAccepted, purpose = "execution" } = {}) {
+  async preflight({ driver, selection, trustPolicyAccepted, purpose = "execution" } = {}) {
     this.#assertAcceptingStarts();
     const ticketPurpose = validatePurpose(purpose);
     if (this.#preflightCleanupUnconfirmed) {
@@ -311,6 +335,32 @@ export class AgentRuntimeCoordinator {
       throw cause;
     }
     this.#assertAcceptingStarts();
+    const requestedSelection = selection
+      ? canonicalSelection(selection, trustPolicyAccepted)
+      : Object.freeze({
+          providerId: prepared.providerId,
+          runtimeId: prepared.runtimeId,
+          requestedModelId: null,
+          resolvedModelId: null,
+          reasoning: Object.freeze({
+            requested: null,
+            applied: null,
+            resolution: "provider-default",
+          }),
+        });
+    if (requestedSelection.providerId !== prepared.providerId
+      || requestedSelection.runtimeId !== prepared.runtimeId
+      || requestedSelection.requestedModelId !== null
+      || requestedSelection.resolvedModelId !== null
+      || requestedSelection.reasoning.resolution !== "provider-default") {
+      failAgentRuntime(
+        "AGENT_SELECTION_UNSUPPORTED",
+        "The selected Agent model or reasoning policy is unsupported.",
+        { status: 409 },
+      );
+    }
+    const resolvedSelection = requestedSelection;
+    const fingerprint = selectionFingerprint(resolvedSelection);
     const preflightId = `preflight_${randomUUID().replaceAll("-", "")}`;
     const createdAt = this.#clock.now();
     while (this.#tickets.size >= MAX_PREFLIGHT_TICKETS) {
@@ -327,6 +377,8 @@ export class AgentRuntimeCoordinator {
       installationDigest: prepared.installationDigest,
       capabilities: prepared.capabilities,
       evidence: prepared.evidence,
+      selection: resolvedSelection,
+      selectionFingerprint: fingerprint,
       createdAt,
       expiresAt: createdAt + PREFLIGHT_TTL_MS,
     }));
@@ -339,6 +391,8 @@ export class AgentRuntimeCoordinator {
       agentVersion: prepared.evidence.version,
       modelCount: prepared.evidence.modelCount,
       models: prepared.evidence.models ?? [],
+      selection: resolvedSelection,
+      selectionFingerprint: fingerprint,
       expiresAt: new Date(createdAt + PREFLIGHT_TTL_MS).toISOString(),
     });
   }
@@ -424,10 +478,13 @@ export class AgentRuntimeCoordinator {
     return true;
   }
 
-  async submit({ driver, trustPolicyAccepted, preflightId, ...identityInput } = {}) {
+  async submit({ driver, selection, trustPolicyAccepted, preflightId, ...identityInput } = {}) {
     this.#assertAcceptingStarts();
     this.#providerRegistry.resolveDriver(driver);
     validateTrustPolicy(trustPolicyAccepted);
+    const requestedSelection = selection
+      ? canonicalSelection(selection, trustPolicyAccepted)
+      : null;
     const identity = validateExecutionIdentity(identityInput);
     this.#prune();
     const key = executionKey(identity);
@@ -448,6 +505,11 @@ export class AgentRuntimeCoordinator {
       );
     }
     const ticket = await this.redeemCommandTicket(preflightId, { purpose: "execution", driver });
+    if (requestedSelection && !sameSelection(requestedSelection, ticket.selection)) {
+      failAgentRuntime("AGENT_PROVIDER_TICKET_INVALID", "Agent selection does not match its preflight ticket.", {
+        status: 409,
+      });
+    }
     if (!this.#resolveTask) throw new TypeError("Execution authority is not configured.");
     const task = await this.#resolveTask(identity);
     this.#assertAcceptingStarts();
@@ -461,9 +523,17 @@ export class AgentRuntimeCoordinator {
         status: 409,
       });
     }
-    if (task.request?.request?.agentDelivery?.mode !== ticket.driver
-      || task.request?.request?.agentDelivery?.trustPolicyVersion
-        !== TRUSTED_LOCAL_AGENT_POLICY_VERSION) {
+    let delivery;
+    try {
+      delivery = normalizeAgentDelivery(task.request?.request?.agentDelivery);
+    } catch {
+      delivery = null;
+    }
+    if (delivery?.mode !== "managed-agent"
+      || delivery.selection.providerId !== ticket.providerId
+      || delivery.selection.runtimeId !== ticket.runtimeId
+      || !sameSelection(delivery.selection, ticket.selection)
+      || delivery.trustPolicyVersion !== TRUSTED_LOCAL_AGENT_POLICY_VERSION) {
       failAgentRuntime("AGENT_DELIVERY_NOT_AUTHORIZED", "本轮 Request 没有授权所选 Agent 自动执行。", {
         status: 409,
       });
@@ -668,6 +738,7 @@ export class AgentRuntimeCoordinator {
 
   async #startDiscussion({
     driver,
+    selection,
     trustPolicyAccepted,
     preflightId,
     projectId,
@@ -719,6 +790,20 @@ export class AgentRuntimeCoordinator {
       failAgentRuntime("DISCUSSION_SOURCE_STALE", "页面内容已经变化，请重新发起讨论。", { status: 409 });
     }
     const turnId = `turn_${randomUUID().replaceAll("-", "")}`;
+    const ticketPreview = this.#tickets.get(preflightId);
+    const recordedSelection = selection
+      ? canonicalSelection(selection, trustPolicyAccepted)
+      : ticketPreview?.selection || Object.freeze({
+          providerId: "legacy-provider",
+          runtimeId: "legacy-runtime",
+          requestedModelId: null,
+          resolvedModelId: null,
+          reasoning: Object.freeze({
+            requested: null,
+            applied: null,
+            resolution: "provider-default",
+          }),
+        });
     let recorded;
     try {
       recorded = await this.#discussion.recordQuestion({
@@ -727,6 +812,14 @@ export class AgentRuntimeCoordinator {
         turnId,
         sourceSha256: workingCopy.sourceSha256,
         question,
+        providerSelection: recordedSelection,
+        providerBinding: {
+          providerId: recordedSelection.providerId,
+          runtimeId: recordedSelection.runtimeId,
+        },
+        capabilitySnapshotFingerprint: ticketPreview
+          ? selectionFingerprint(ticketPreview.capabilities)
+          : null,
       });
     } catch (cause) {
       failAgentRuntime(cleanAgentText(cause?.code, 120) || "DISCUSSION_RECORD_FAILED", "这条提问没有存下来，没有启动 Agent。", {
@@ -748,6 +841,12 @@ export class AgentRuntimeCoordinator {
     let ticket;
     try {
       ticket = await this.redeemCommandTicket(preflightId, { purpose: "discussion", driver });
+      const redeemedSelection = ticket.selection || recordedSelection;
+      if (!sameSelection(recordedSelection, redeemedSelection)) {
+        failAgentRuntime("AGENT_PROVIDER_TICKET_INVALID", "Agent selection does not match its preflight ticket.", {
+          status: 409,
+        });
+      }
     } catch (cause) {
       // The question is already durable. Seal the same Turn before surfacing the
       // ticket failure so restart can never reveal a permanently half-open round.

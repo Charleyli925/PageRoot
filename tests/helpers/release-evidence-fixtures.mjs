@@ -405,6 +405,11 @@ export async function createSyntheticAppBundle(t, {
     ),
     writeFixtureFile(
       productRoot,
+      "shared/agent-delivery.mjs",
+      "export const fixtureAgentDelivery = true;\n",
+    ),
+    writeFixtureFile(
+      productRoot,
       "shared/provenance.mjs",
       "export const fixtureProvenance = true;\n",
     ),
@@ -477,6 +482,7 @@ export async function createSyntheticAppBundle(t, {
       "provenance.mjs",
       "source-history.mjs",
       "conversation.mjs",
+      "agent-delivery.mjs",
     ].map((fileName) => copyFixtureFile(
       productRoot,
       resourcesPath,

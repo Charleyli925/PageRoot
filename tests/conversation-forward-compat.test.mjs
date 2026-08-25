@@ -81,7 +81,7 @@ test("a conversation preserves an unknown member across a disk read-edit-write r
   assert.equal(edited.contexts[0].futureContextMember, 7);
   // Authoritative wins: revision is the stored-count + 1, never the stale 999.
   assert.equal(edited.revision, 1000);
-  assert.equal(edited.schemaVersion, "1.0.0");
+  assert.equal(edited.schemaVersion, "2.0.0");
 
   const reread = await readConversation(context, conversation.conversationId);
   assert.deepEqual(reread.futureRootMember, { note: "from a newer build" });

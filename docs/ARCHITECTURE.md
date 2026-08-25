@@ -573,3 +573,10 @@ pending writes.
 Only a non-in-place main-frame navigation revokes renderer readiness. Canvas
 iframe loads and same-document navigation are subordinate UI activity; treating
 them as a Workbench reload would bypass the final close drain and is forbidden.
+
+Provider Registry owns the public Agent catalog and dispatch. The shared Agent
+Delivery codec owns durable validation and legacy read projection; the runtime
+coordinator freezes canonical selection and fingerprint in its one-use ticket.
+Workspace Bridge exposes provider, preflight, start, status and cancel routes;
+the availability route remains an alias, and handlers reuse existing session
+and Request authority.

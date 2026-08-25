@@ -73,7 +73,7 @@ export type AiConversationSidebarProps = {
   /** What Qoder is saying while it works (ADR 0037). */
   agentText?: string;
   /** Which destination this round uses; the decision bar copy depends on it. */
-  deliveryMode?: "qoder-acp" | "clipboard";
+  deliveryMode?: "qoder-acp" | "managed-agent" | "clipboard";
   /** The run's own progress steps, so a round in flight reads inside the thread. */
   runSteps?: readonly unknown[];
 };
