@@ -165,13 +165,13 @@ export default function AiConversationSidebar({
   return (
     <aside
       className={styles.sidebar}
-      aria-label="AI 对话"
+      aria-label="AI 助手"
       data-state={state}
       data-testid="ai-conversation-sidebar"
     >
       <header className={styles.header}>
         <div className={styles.headerTitle}>
-          <strong data-testid="ai-conversation-title">{title || "AI 对话"}</strong>
+          <strong data-testid="ai-conversation-title">{title || "AI 助手"}</strong>
           <span className={styles.mode} data-testid="ai-conversation-mode">
             {mode.label}
           </span>
@@ -187,7 +187,7 @@ export default function AiConversationSidebar({
             type="button"
             className={styles.collapse}
             onClick={onCollapse}
-            aria-label="收起 AI 对话"
+            aria-label="收起 AI 助手"
           >
             收起
           </button>

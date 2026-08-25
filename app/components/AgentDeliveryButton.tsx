@@ -10,7 +10,7 @@ export type AgentDeliveryMode = "qoder-acp" | "clipboard";
  * added state was another chance for the two to contradict each other. Both
  * contradictions fixed today lived in that sentence.
  */
-const TRIGGER_LABEL = "AI 对话";
+const TRIGGER_LABEL = "AI 助手";
 
 
 /**

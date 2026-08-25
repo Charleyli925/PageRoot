@@ -5793,35 +5793,6 @@ body {
   }
 }
 
-.ai-conversation-toggle {
-  position: absolute;
-  z-index: 12;
-  top: 12px;
-  right: 12px;
-  min-height: 30px;
-  padding: 0 12px;
-  border: 1px solid rgb(32 29 49 / 12%);
-  border-radius: 999px;
-  background: rgb(255 255 255 / 92%);
-  color: #5147dc;
-  font-size: 11px;
-  font-weight: 680;
-  box-shadow: 0 6px 18px rgb(45 39 145 / 14%);
-  -webkit-backdrop-filter: blur(14px) saturate(115%);
-  backdrop-filter: blur(14px) saturate(115%);
-}
-
-.ai-conversation-toggle:hover {
-  border-color: rgb(90 85 223 / 40%);
-  background: #fff;
-  color: #4339ce;
-}
-
-.ai-conversation-toggle:focus-visible {
-  outline: 3px solid rgb(90 85 223 / 32%);
-  outline-offset: 2px;
-}
-
 .workbench[data-canvas-mode="preview"] {
   --notice-rail-width: 0px;
 }
