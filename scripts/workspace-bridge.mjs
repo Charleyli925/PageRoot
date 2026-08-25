@@ -1977,6 +1977,9 @@ async function recordDiscussionRound({
   turnId,
   sourceSha256,
   question,
+  providerSelection,
+  providerBinding,
+  capabilitySnapshotFingerprint,
 }) {
   const workspace = await projectFileWorkspaceForSource(requiredSourcePath(sourcePath));
   if (!workspace) throw projectNotFoundError();
@@ -1987,6 +1990,9 @@ async function recordDiscussionRound({
     turnId,
     sourceSha256,
     question,
+    providerSelection,
+    providerBinding,
+    capabilitySnapshotFingerprint,
   });
   return { conversationId: conversation.conversationId };
 }

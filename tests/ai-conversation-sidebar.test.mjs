@@ -713,7 +713,7 @@ test("the clipboard round says what is actually happening and keeps the task rea
   // The clipboard instruction is not narration: the timeline cannot say "now go
   // paste it". The managed path has nothing of that kind to add, so it says nothing
   // and leaves the narration to the timeline above it.
-  const managed = sidebarActionBar({ state: "processing", deliveryMode: "qoder-acp" });
+  const managed = sidebarActionBar({ state: "processing", deliveryMode: "managed-agent" });
   assert.equal(managed.title, null);
   assert.equal(managed.detail, null);
   assert.deepEqual(managed.actions.map((action) => action.id), ["cancel"]);
@@ -722,7 +722,7 @@ test("the clipboard round says what is actually happening and keeps the task rea
   assert.equal(clipboard.detail, "粘贴给任意能读写本机文件的 AI。");
 
   // The decision is the same for both destinations: a candidate is a candidate.
-  for (const mode of ["clipboard", "qoder-acp"]) {
+  for (const mode of ["clipboard", "managed-agent"]) {
     const decision = sidebarActionBar({
       state: "ready-to-open",
       deliveryMode: mode,

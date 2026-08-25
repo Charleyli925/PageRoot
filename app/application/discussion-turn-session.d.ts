@@ -1,3 +1,5 @@
+import type { AgentSelection } from "../domain/agent-provider-state.js";
+
 export type DiscussionTurnContext = {
   projectId: string;
   documentId: string;
@@ -9,6 +11,7 @@ export type DiscussionTurnProjection = {
   state: string;
   phase: string;
   conversationId: string | null;
+  selection: AgentSelection | null;
   turnId: string;
   sourceSha256: string;
   startedAt: string;
@@ -31,6 +34,7 @@ export type DiscussionTurnSnapshot = {
   turn: DiscussionTurnProjection | null;
   error: unknown;
   conversationId: string | null;
+  selection: AgentSelection | null;
   turnId: string | null;
   sourceSha256: string | null;
   phase: string | null;
@@ -48,7 +52,7 @@ export class DiscussionTurnSession {
   isActive(context: DiscussionTurnContext | null): boolean;
   beginTurn(
     context: DiscussionTurnContext | null,
-    options?: { conversationId?: string | null },
+    options?: { conversationId?: string | null; selection?: AgentSelection | null },
   ): DiscussionTurnSnapshot;
   publish(
     context: DiscussionTurnContext | null,
@@ -59,3 +63,4 @@ export class DiscussionTurnSession {
 }
 
 export const DISCUSSION_LIVE_STATES: string[];
+import type { AgentSelection } from "../domain/agent-provider-state.js";

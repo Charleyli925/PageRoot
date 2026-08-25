@@ -78,7 +78,7 @@ function progressContext(run, handoffValue) {
     ? handoffValue
     : { status: handoffValue };
   const handoffStatus = String(handoff.status || "idle");
-  const agentMode = handoff.mode === "qoder-acp";
+  const agentMode = handoff.mode === "managed-agent";
   return {
     run,
     handoff,

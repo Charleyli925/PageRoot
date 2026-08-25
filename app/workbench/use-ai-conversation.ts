@@ -37,6 +37,7 @@ export type UseAiConversationOptions = {
   conversation: ConversationSessionSnapshot | null;
   discussionTurn: DiscussionTurnSnapshot | null;
   qoderAvailability: QoderAvailabilitySnapshot | null;
+  agentModelDisplayName?: string | null;
   activeRun: ActiveRun | null;
   submissionPending?: boolean;
   reviewing?: boolean;
@@ -50,7 +51,7 @@ export type UseAiConversationOptions = {
    * Hands this round of comments to the Agent or to the clipboard. Owned by the
    * workbench because a modification is a Request, not a conversation turn.
    */
-  onDeliverModification?: (mode: "qoder-acp" | "clipboard") => void;
+  onDeliverModification?: (mode: "managed-agent" | "clipboard") => void;
   /**
    * Acts on the decision bar. Without this the bar renders buttons that do
    * nothing, which is why the process drawer could not be removed before now.
@@ -65,6 +66,7 @@ export function useAiConversation({
   conversation,
   discussionTurn,
   qoderAvailability,
+  agentModelDisplayName = null,
   activeRun,
   submissionPending = false,
   reviewing = false,
@@ -201,7 +203,7 @@ export function useAiConversation({
     // it goes to the run pipeline rather than the discussion Bridge. The Composer
     // has no text box in that intent, so nothing typed can be lost here.
     if (intent === "modify") {
-      onDeliverModification?.("qoder-acp");
+      onDeliverModification?.("managed-agent");
       return;
     }
     if (intent !== "discuss") return;
@@ -253,7 +255,7 @@ export function useAiConversation({
     // Qoder's availability is the model catalog's readiness: one owner supplies
     // both, so the Composer can never claim ready while the Agent is not.
     catalogStatus: (qoderAvailability?.status ?? "unavailable") as SidebarCatalogStatus,
-    modelDisplayName: null,
+    modelDisplayName: agentModelDisplayName,
     modelChoiceCount: 0,
     // The decision bar needs to name the version it is deciding about, and the
     // assessment decides whether adopting without looking is offered at all.
@@ -278,6 +280,7 @@ export function useAiConversation({
     conversation,
     draftText,
     qoderAvailability,
+    agentModelDisplayName,
     discussionTurn,
     pendingCommentCount,
     onDraftChange,

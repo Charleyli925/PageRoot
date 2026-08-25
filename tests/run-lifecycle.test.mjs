@@ -328,7 +328,7 @@ test("Qoder ACP progress is distinct from clipboard delivery and never claims Ca
     completionObserved: false,
   };
   const running = deriveRunProgressPresentation(run, {
-    mode: "qoder-acp",
+    mode: "managed-agent",
     status: "running",
     phase: "reading-task",
   });
@@ -339,7 +339,7 @@ test("Qoder ACP progress is distinct from clipboard delivery and never claims Ca
   assert.equal(running.steps[3].state, "pending");
 
   const interrupted = deriveRunProgressPresentation(run, {
-    mode: "qoder-acp",
+    mode: "managed-agent",
     status: "interrupted",
     phase: "interrupted",
     errorMessage: "会话已停止，但 Request 仍然保留。",

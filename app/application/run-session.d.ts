@@ -14,7 +14,7 @@ export type RunHandoffState = {
   sourcePath: string;
   requestId: string;
   attemptId: string;
-  mode?: "clipboard" | "qoder-acp";
+  mode?: "clipboard" | "managed-agent";
   status:
     | "copying"
     | "copied"

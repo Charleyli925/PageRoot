@@ -2,7 +2,7 @@
 
 import { ChatCircleTextIcon } from "@phosphor-icons/react/dist/csr/ChatCircleText";
 
-export type AgentDeliveryMode = "qoder-acp" | "clipboard";
+export type AgentDeliveryMode = "managed-agent" | "clipboard";
 
 /*
  * The top bar opens the conversation. It does not narrate the round: six inputs once

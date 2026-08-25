@@ -368,6 +368,7 @@ export function HandoffFooter({
   handoffCopyFailed,
   currentQoderHandoffStatus,
   currentDeliveryMode,
+  agentPresentation,
   cancelling,
   resolvingConflict,
   checkingRun,
@@ -391,7 +392,12 @@ export function HandoffFooter({
   pendingReconcileBusy: boolean;
   handoffCopyFailed: boolean;
   currentQoderHandoffStatus: QoderHandoffUiStatus | "idle";
-  currentDeliveryMode: "clipboard" | "qoder-acp" | "managed-agent";
+  currentDeliveryMode: "clipboard" | "managed-agent";
+  agentPresentation: Readonly<{
+    restartLabel?: string;
+    restartSupported?: boolean;
+    stopLabel?: string;
+  }>;
   cancelling: boolean;
   resolvingConflict: boolean;
   checkingRun: boolean;
@@ -439,26 +445,30 @@ export function HandoffFooter({
             ? "正在自动确认发送结果…"
             : "等待下一次自动确认…"}
         </span>
-      ) : handoffCopyFailed && currentDeliveryMode !== "managed-agent" ? (
+      ) : handoffCopyFailed ? (
         <>
-          <button
-            className="primary-action"
-            type="button"
-            disabled={
-              !activeRun.handoffMessage
-              || currentQoderHandoffStatus === "copying"
-              || currentQoderHandoffStatus === "starting"
-            }
-            onClick={onSend}
-          >
-            {currentDeliveryMode === "qoder-acp" ? (
-              <ShieldCheckIcon aria-hidden="true" size={18} weight="duotone" />
-            ) : (
-              <CopyIcon aria-hidden="true" size={18} weight="bold" />
-            )}
-            {currentDeliveryMode === "qoder-acp" ? "重新启动 Qoder" : "重新复制"}
-          </button>
-          {currentDeliveryMode === "qoder-acp" ? (
+          {currentDeliveryMode !== "managed-agent" || agentPresentation.restartSupported ? (
+            <button
+              className="primary-action"
+              type="button"
+              disabled={
+                !activeRun.handoffMessage
+                || currentQoderHandoffStatus === "copying"
+                || currentQoderHandoffStatus === "starting"
+              }
+              onClick={onSend}
+            >
+              {currentDeliveryMode === "managed-agent" ? (
+                <ShieldCheckIcon aria-hidden="true" size={18} weight="duotone" />
+              ) : (
+                <CopyIcon aria-hidden="true" size={18} weight="bold" />
+              )}
+              {currentDeliveryMode === "managed-agent"
+                ? agentPresentation.restartLabel || "重新启动 Agent"
+                : "重新复制"}
+            </button>
+          ) : null}
+          {currentDeliveryMode === "managed-agent" && agentPresentation.restartSupported ? (
             <button
               className="secondary-action"
               type="button"
@@ -526,7 +536,7 @@ export function HandoffFooter({
           />
           返回编辑
         </button>
-      ) : currentDeliveryMode === "qoder-acp" ? (
+      ) : currentDeliveryMode === "managed-agent" ? (
         <>
           <button
             className="cancel-action"
@@ -543,7 +553,7 @@ export function HandoffFooter({
               ? "正在结束本轮…"
               : ["failed", "interrupted"].includes(currentQoderHandoffStatus)
                 ? "结束本轮并返回编辑"
-                : "停止 Qoder 并继续编辑"}
+                : agentPresentation.stopLabel || "停止 Agent 并继续编辑"}
           </button>
           <button
             className="secondary-action"

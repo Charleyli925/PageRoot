@@ -6,9 +6,15 @@ import type { RunSession } from "./run-session.js";
 import type { VersionSession } from "./version-session.js";
 import type { ActiveRun } from "../domain/run-lifecycle.js";
 import type {
-  QoderAvailabilitySnapshot,
-  QoderGuidanceKind,
-} from "../domain/qoder-availability.js";
+  AgentProviderAvailabilitySnapshot,
+  AgentProviderGuidanceKind,
+  AgentSelection,
+} from "../domain/agent-provider-state.js";
+import type {
+  AgentCatalogSnapshot,
+  AgentCatalogState,
+  AgentProviderPresentation,
+} from "./agent-provider-catalog.js";
 
 export type RunWorkflowOutcome<T = unknown> =
   | Readonly<{ status: "succeeded"; value: T }>
@@ -38,7 +44,9 @@ export type RunWorkflowCodecs = Readonly<{
 export type RunWorkflowSnapshot = Readonly<{
   polling: boolean;
   pendingReconciliations: ReadonlyArray<string>;
-  qoderAvailability: QoderAvailabilitySnapshot;
+  qoderAvailability: AgentProviderAvailabilitySnapshot;
+  agentCatalog: AgentCatalogSnapshot;
+  agentPresentation: AgentProviderPresentation;
 }>;
 
 export type RunWorkflowEvent = Readonly<{
@@ -98,6 +106,7 @@ export type RunWorkflowConstruction = Readonly<{
     clearInterval(handle: unknown): void;
   }>;
   clock: Readonly<{ now(): number }>;
+  agentCatalog?: AgentCatalogState | null;
 }>;
 
 export class RunWorkflow {
@@ -110,21 +119,30 @@ export class RunWorkflow {
   startPolling(): void;
   stopPolling(): void;
   pollNow(input?: { generation?: number }): Promise<RunWorkflowOutcome>;
+  refreshAgentAvailability(): Promise<RunWorkflowOutcome<{
+    availability: AgentProviderAvailabilitySnapshot;
+  }>>;
+  checkAgentUsability(): Promise<RunWorkflowOutcome<{
+    availability: AgentProviderAvailabilitySnapshot;
+  }>>;
+  copyAgentGuidance(input: {
+    kind: AgentProviderGuidanceKind;
+  }): Promise<RunWorkflowOutcome<{ kind: AgentProviderGuidanceKind; copied: true }>>;
   refreshQoderAvailability(): Promise<RunWorkflowOutcome<{
-    availability: QoderAvailabilitySnapshot;
+    availability: AgentProviderAvailabilitySnapshot;
   }>>;
   checkQoderUsability(): Promise<RunWorkflowOutcome<{
-    availability: QoderAvailabilitySnapshot;
+    availability: AgentProviderAvailabilitySnapshot;
   }>>;
   copyQoderGuidance(input: {
-    kind: QoderGuidanceKind;
-  }): Promise<RunWorkflowOutcome<{ kind: QoderGuidanceKind; copied: true }>>;
+    kind: AgentProviderGuidanceKind;
+  }): Promise<RunWorkflowOutcome<{ kind: AgentProviderGuidanceKind; copied: true }>>;
   submit(input?: {
     projectName?: string;
     previousVersionId?: string | null;
     basedOnVersionId?: string | null;
     deadlineAt?: number;
-    deliveryMode?: "clipboard" | "qoder-acp";
+    deliveryMode?: "clipboard" | "managed-agent" | string;
   }): Promise<RunWorkflowOutcome<{ run: ActiveRun }>>;
   reconcileSubmission(input?: {
     sourcePath?: string | null;
@@ -134,6 +152,7 @@ export class RunWorkflow {
   startAgent(input?: {
     run?: ActiveRun | null;
     preflightId?: string | null;
+    agentStartReserved?: boolean;
   }): Promise<RunWorkflowOutcome<{ run: ActiveRun; agentSession: Record<string, unknown> }>>;
   cancel(input?: {
     run?: ActiveRun | null;
@@ -148,9 +167,17 @@ export class RunWorkflow {
     projects?: Array<{ sourcePath?: string | null }>;
     activeSourcePath?: string | null;
   }): Promise<RunWorkflowOutcome<{ recovered: number; attempted: number }>>;
-  spendQoderTicket(purpose?: "execution" | "discussion"): Promise<{
-    driver: string;
+  freezeAgentSelection(): AgentSelection | null;
+  selectAgent(selection: AgentSelection): AgentSelection;
+  spendAgentTicket(input?: {
+    selection?: AgentSelection | null;
+    purpose?: "execution" | "discussion";
+  }): Promise<{
     preflightId: string;
+    selection: AgentSelection;
+    securityProfile: "client-mediated" | "agent-native";
+    purpose: string;
     trustPolicyAccepted: string;
   }>;
+  spendQoderTicket(purpose?: "execution" | "discussion"): ReturnType<RunWorkflow["spendAgentTicket"]>;
 }

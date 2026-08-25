@@ -190,7 +190,7 @@ export type ProjectQoderHandoffState = {
   sourcePath: string;
   requestId: string;
   attemptId: string;
-  mode?: "clipboard" | "qoder-acp";
+  mode?: "clipboard" | "managed-agent";
   status: QoderHandoffUiStatus;
   phase?: string;
   agentName?: string | null;

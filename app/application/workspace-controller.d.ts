@@ -559,12 +559,17 @@ export class WorkspaceController {
     previousVersionId?: string | null;
     basedOnVersionId?: string | null;
     deadlineAt?: number;
-    deliveryMode?: "clipboard" | "qoder-acp";
+    deliveryMode?: "clipboard" | "managed-agent" | string;
   }): Promise<RunWorkflowOutcome>;
   refreshQoderAvailability(): Promise<RunWorkflowOutcome>;
   checkQoderUsability(): Promise<RunWorkflowOutcome>;
   copyQoderGuidance(input: {
-    kind: import("../domain/qoder-availability.js").QoderGuidanceKind;
+    kind: import("../domain/agent-provider-state.js").AgentProviderGuidanceKind;
+  }): Promise<RunWorkflowOutcome>;
+  refreshAgentAvailability(): Promise<RunWorkflowOutcome>;
+  checkAgentUsability(): Promise<RunWorkflowOutcome>;
+  copyAgentGuidance(input: {
+    kind: import("../domain/agent-provider-state.js").AgentProviderGuidanceKind;
   }): Promise<RunWorkflowOutcome>;
   reconcileRunSubmission(input?: {
     sourcePath?: string | null;

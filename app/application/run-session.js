@@ -1,4 +1,9 @@
 import { isLockedLifecycleState } from "../domain/run-lifecycle.js";
+import {
+  MANAGED_AGENT_MODE,
+  TRUSTED_LOCAL_AGENT_POLICY_VERSION,
+  normalizeAgentDelivery,
+} from "../../shared/agent-delivery.mjs";
 
 function normalizedPath(value) {
   return value ? String(value) : null;
@@ -61,23 +66,37 @@ const OPERATION_KINDS = Object.freeze([
   "poll",
 ]);
 
-function recoveredQoderHandoff(run) {
-  const qoderManaged = run?.agentDelivery?.mode === "managed-agent"
-    && run.agentDelivery.selection?.providerId === "qoder";
+function runDelivery(run) {
+  try {
+    return normalizeAgentDelivery(run?.agentDelivery);
+  } catch {
+    try {
+      return normalizeAgentDelivery({
+        ...run?.agentDelivery,
+        trustPolicyVersion: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
+      });
+    } catch {
+      return null;
+    }
+  }
+}
+
+function recoveredAgentHandoff(run) {
+  const delivery = runDelivery(run);
   if (run?.status !== "processing"
-    || (!qoderManaged && run?.agentDelivery?.mode !== "qoder-acp")) return null;
+    || delivery?.mode !== MANAGED_AGENT_MODE) return null;
   return Object.freeze({
     sourcePath: run.sourcePath,
     requestId: run.requestId,
     attemptId: run.attemptId,
-    mode: "qoder-acp",
+    mode: MANAGED_AGENT_MODE,
     status: "interrupted",
     phase: "bridge-restarted",
     agentName: null,
     agentVersion: null,
     visibleText: "",
     errorCode: "AGENT_RESTART_RECOVERY_REQUIRED",
-    errorMessage: "Bridge 无法证明旧 Qoder 会话已经停止。请结束本轮，再重新发送。",
+    errorMessage: "Bridge 无法证明旧 Agent 会话已经停止。请结束本轮，再重新发送。",
     retryable: false,
   });
 }
@@ -275,7 +294,7 @@ export class RunSession {
     const previous = this.runForSource(run.sourcePath);
     const sameTrackedRun = sameRun(previous, run);
     const recoveredHandoff = recovered && !sameTrackedRun
-      ? recoveredQoderHandoff(run)
+      ? recoveredAgentHandoff(run)
       : null;
     if (!sameTrackedRun) this.#clearRunScopedState(run.sourcePath);
     if (recovered && !sameTrackedRun) {
@@ -364,7 +383,7 @@ export class RunSession {
       this.#deleteBySource(this.#copiedHandoffs, state.sourcePath);
       this.#copiedHandoffs.set(state.sourcePath, state);
     } else if (
-      state.mode === "qoder-acp"
+      state.mode === MANAGED_AGENT_MODE
       && ["completed", "failed", "interrupted", "cancelled"].includes(state.status)
     ) {
       this.#deleteBySource(this.#copiedHandoffs, state.sourcePath);
@@ -569,7 +588,7 @@ export class RunSession {
 
   get activeHandoffMayBeRunning() {
     if (!this.#activeRun) return false;
-    if (this.#activeHandoff?.mode === "qoder-acp") {
+    if (this.#activeHandoff?.mode === MANAGED_AGENT_MODE) {
       return sameRun(this.#activeHandoff, this.#activeRun) && (
         ["starting", "running", "cancelling"].includes(this.#activeHandoff.status)
         || (
@@ -591,7 +610,7 @@ export class RunSession {
   get activeHandoffManaged() {
     return Boolean(
       this.#activeRun
-      && this.#activeHandoff?.mode === "qoder-acp"
+      && this.#activeHandoff?.mode === MANAGED_AGENT_MODE
       && ["starting", "running", "cancelling"].includes(this.#activeHandoff.status)
       && sameRun(this.#activeHandoff, this.#activeRun),
     );

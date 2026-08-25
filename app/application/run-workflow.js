@@ -1,20 +1,15 @@
 import { isBridgeRequestError } from "./bridge-client.js";
-import {
-  INITIAL_QODER_AVAILABILITY,
-  checkingQoderAvailability,
-  qoderAvailabilityFromFailureCode,
-  qoderAvailabilityFromLocalResult,
-  qoderAvailabilityWithCopiedGuidance,
-  qoderGuidanceInstruction,
-  readyQoderAvailability,
-} from "../domain/qoder-availability.js";
 import { createRunWorkflowCodecs } from "./run-workflow-codecs.js";
-import { defaultManagedAgentDelivery } from "../../shared/agent-delivery.mjs";
+import { AgentCatalogState } from "./agent-provider-catalog.js";
+import {
+  CLIPBOARD_DELIVERY_MODE,
+  MANAGED_AGENT_MODE,
+  TRUSTED_LOCAL_AGENT_POLICY_VERSION,
+  normalizeAgentDelivery,
+} from "../../shared/agent-delivery.mjs";
 
 const SHA256 = /^sha256:[a-f0-9]{64}$/u;
 const POLL_INTERVAL_MS = 1_600;
-const TRUSTED_LOCAL_AGENT_POLICY_VERSION = "trusted-local-agent-v1";
-const DELIVERY_MODES = new Set(["clipboard", "qoder-acp"]);
 const NON_RETRYABLE_AGENT_ERRORS = new Set([
   "ACP_PROCESS_CLEANUP_UNCONFIRMED",
   "AGENT_DELIVERY_NOT_AUTHORIZED",
@@ -137,7 +132,7 @@ function agentHandoffState(run, session) {
     sourcePath: run.sourcePath,
     requestId: run.requestId,
     attemptId: run.attemptId,
-    mode: "qoder-acp",
+    mode: MANAGED_AGENT_MODE,
     status: state,
     phase: String(session.phase || state),
     agentName: session.agentName ? String(session.agentName) : null,
@@ -151,17 +146,52 @@ function agentHandoffState(run, session) {
   };
 }
 
-function qoderRecoveryRequired(run, handoff) {
-  const qoderManaged = run?.agentDelivery?.mode === "managed-agent"
-    && run.agentDelivery.selection?.providerId === "qoder";
+function agentRecoveryRequired(run, handoff) {
+  const delivery = deliveryForRun(run);
   return Boolean(
-    (qoderManaged || run?.agentDelivery?.mode === "qoder-acp")
-    && handoff?.mode === "qoder-acp"
+    delivery?.mode === MANAGED_AGENT_MODE
+    && Boolean(handoff)
+    && handoff.mode !== CLIPBOARD_DELIVERY_MODE
     && handoff.requestId === run.requestId
     && handoff.attemptId === run.attemptId
     && ["failed", "interrupted"].includes(handoff.status)
     && handoff.retryable === false,
   );
+}
+
+function frozenDeliveryForMode(deliveryMode, selection, provider) {
+  if (deliveryMode === CLIPBOARD_DELIVERY_MODE) {
+    return Object.freeze({ mode: CLIPBOARD_DELIVERY_MODE });
+  }
+  if (deliveryMode === MANAGED_AGENT_MODE) {
+    if (!selection || !provider) {
+      throw responseError("AGENT_SELECTION_UNAVAILABLE", "当前没有可用的 Agent 选择。");
+    }
+    return Object.freeze({
+      mode: MANAGED_AGENT_MODE,
+      selection,
+      trustPolicyVersion: provider.trustPolicyVersion,
+    });
+  }
+  return normalizeAgentDelivery({
+    mode: deliveryMode,
+    trustPolicyVersion: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
+  });
+}
+
+function deliveryForRun(run) {
+  try {
+    return normalizeAgentDelivery(run?.agentDelivery);
+  } catch {
+    try {
+      return normalizeAgentDelivery({
+        ...run?.agentDelivery,
+        trustPolicyVersion: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
+      });
+    } catch {
+      return null;
+    }
+  }
 }
 
 // RunWorkflow is the PR-5 application boundary. It owns Request submission,
@@ -184,17 +214,15 @@ export class RunWorkflow {
   #hashPort;
   #scheduler;
   #clock;
+  #agentCatalog;
+  #ownsAgentCatalog = false;
+  #unsubscribeAgentCatalog = null;
   #listeners = new Set();
   #eventListeners = new Set();
   #timer = null;
   #pollGeneration = 0;
   #uncertainSubmissions = new Map();
   #agentStartsPending = new Set();
-  #qoderAvailability = INITIAL_QODER_AVAILABILITY;
-  #qoderPreflight = null;
-  #qoderPreflightPurpose = null;
-  #qoderCheckPromise = null;
-  #qoderCheckPurpose = null;
   #disposed = false;
 
   constructor({
@@ -211,13 +239,17 @@ export class RunWorkflow {
     ports = {},
     scheduler = globalThis,
     clock,
+    agentCatalog = null,
   } = {}) {
     if (
       !bridgeClient
       || typeof bridgeClient.createRequest !== "function"
       || typeof bridgeClient.workspace !== "function"
       || typeof bridgeClient.status !== "function"
-      || typeof bridgeClient.qoderAvailability !== "function"
+      || (
+        typeof bridgeClient.agentAvailability !== "function"
+        && typeof bridgeClient.qoderAvailability !== "function"
+      )
       || typeof bridgeClient.preflightAgent !== "function"
       || typeof bridgeClient.startAgent !== "function"
       || typeof bridgeClient.cancelActiveRun !== "function"
@@ -298,13 +330,24 @@ export class RunWorkflow {
     this.#hashPort = ports.hash;
     this.#scheduler = scheduler;
     this.#clock = clock;
+    this.#agentCatalog = agentCatalog || new AgentCatalogState({
+      bridgeClient,
+      handoffPort: this.#handoffPort,
+      clock,
+    });
+    this.#ownsAgentCatalog = !agentCatalog;
+    this.#unsubscribeAgentCatalog = this.#agentCatalog.subscribe(() => {
+      this.#publishSnapshot();
+    });
   }
 
   getSnapshot() {
     return Object.freeze({
       polling: this.#timer !== null,
       pendingReconciliations: frozenArray(this.#uncertainSubmissions.keys()),
-      qoderAvailability: this.#qoderAvailability,
+      agentCatalog: this.#agentCatalog.getSnapshot(),
+      agentPresentation: this.#agentCatalog.presentation(),
+      qoderAvailability: this.#agentCatalog.availability(),
     });
   }
 
@@ -330,8 +373,9 @@ export class RunWorkflow {
     this.stopPolling();
     this.#uncertainSubmissions.clear();
     this.#agentStartsPending.clear();
-    this.#qoderPreflight = null;
-    this.#qoderCheckPromise = null;
+    this.#unsubscribeAgentCatalog?.();
+    this.#unsubscribeAgentCatalog = null;
+    if (this.#ownsAgentCatalog) this.#agentCatalog.dispose();
     this.#listeners.clear();
     this.#eventListeners.clear();
   }
@@ -377,88 +421,74 @@ export class RunWorkflow {
     return succeeded({ runs: runs.length, reconciliations: reconciliations.length });
   }
 
-  async refreshQoderAvailability() {
+  async refreshAgentAvailability() {
+    const displayName = this.#agentCatalog.presentation().displayName || "Agent";
     if (this.#disposed) {
-      return blocked("RUN_WORKFLOW_DISPOSED", "Qoder CLI 状态检查已经停止。");
+      return blocked("RUN_WORKFLOW_DISPOSED", `${displayName} 状态检查已经停止。`);
     }
-    const previous = this.#qoderAvailability;
-    this.#setQoderAvailability(checkingQoderAvailability(previous));
     try {
-      const result = await this.#bridgeClient.qoderAvailability();
-      if (this.#disposed) return stale({ kind: "qoder-availability" });
-      const availability = qoderAvailabilityFromLocalResult(
-        result,
-        previous,
-        validDate(this.#clock),
-      );
-      if (String(result?.status || "") === "ready") {
+      const refreshed = await this.#agentCatalog.refreshAvailability();
+      if (this.#disposed) return stale({ kind: "agent-availability" });
+      if (String(refreshed?.result?.status || "") === "ready") {
         // Local discovery is intentionally a weak check. Follow it with the
         // same forced preflight used by the send path instead of ever exposing
         // the local result as a green connection state.
-        return this.checkQoderUsability();
+        return this.checkAgentUsability();
       }
-      this.#setQoderAvailability(availability);
-      if (availability.status !== "ready") this.#qoderPreflight = null;
-      return succeeded({ availability });
+      return succeeded({ availability: this.#agentCatalog.availability() });
     } catch (cause) {
-      if (this.#disposed) return stale({ kind: "qoder-availability" });
-      const code = errorCode(cause, "QODER_AVAILABILITY_FAILED");
-      const availability = qoderAvailabilityFromFailureCode(
-        code,
-        previous,
-        validDate(this.#clock),
-      );
-      this.#qoderPreflight = null;
-      this.#setQoderAvailability(availability);
+      if (this.#disposed) return stale({ kind: "agent-availability" });
+      const code = errorCode(cause, "AGENT_AVAILABILITY_FAILED");
       return rejected(
         code,
-        this.#codecs.errorMessage(cause, "暂时无法检查 Qoder CLI。"),
+        this.#codecs.errorMessage(cause, `暂时无法检查 ${displayName}。`),
       );
     }
   }
 
-  async checkQoderUsability() {
+  async checkAgentUsability() {
+    const displayName = this.#agentCatalog.presentation().displayName || "Agent";
     if (this.#disposed) {
-      return blocked("RUN_WORKFLOW_DISPOSED", "Qoder CLI 状态检查已经停止。");
+      return blocked("RUN_WORKFLOW_DISPOSED", `${displayName} 状态检查已经停止。`);
     }
     try {
-      await this.#requireQoderPreflight({ force: true });
-      this.#qoderPreflight = null;
-      return succeeded({ availability: this.#qoderAvailability });
+      const selection = this.#agentCatalog.freezeSelected();
+      const preflight = await this.#agentCatalog.preflight(selection, { force: true });
+      this.#agentCatalog.discardTicket(preflight);
+      return succeeded({ availability: this.#agentCatalog.availability() });
     } catch (cause) {
       return rejected(
-        errorCode(cause, "QODER_PREFLIGHT_FAILED"),
-        this.#codecs.errorMessage(cause, "暂时无法检查 Qoder CLI。"),
+        errorCode(cause, "AGENT_PREFLIGHT_FAILED"),
+        this.#codecs.errorMessage(cause, `暂时无法检查 ${displayName}。`),
       );
     }
   }
 
-  async copyQoderGuidance({ kind } = {}) {
+  async copyAgentGuidance({ kind } = {}) {
     if (kind !== "install" && kind !== "login") {
-      return rejected("QODER_GUIDANCE_INVALID", "选择的 Qoder 引导无效。");
+      return rejected("AGENT_GUIDANCE_INVALID", "选择的 Agent 引导无效。");
     }
     try {
-      const message = qoderGuidanceInstruction(kind);
-      const result = await this.#handoffPort.copy({
-        message,
-        run: null,
-        purpose: `qoder-${kind}-guidance`,
-      });
-      if (result?.status !== "copied" || result?.copied !== true) {
-        throw responseError("QODER_GUIDANCE_COPY_UNCONFIRMED", "剪贴板写入没有得到确认。");
-      }
-      this.#setQoderAvailability(qoderAvailabilityWithCopiedGuidance(
-        this.#qoderAvailability,
-        kind,
-        validDate(this.#clock),
-      ));
-      return succeeded({ kind, copied: true });
+      const result = await this.#agentCatalog.copyGuidance(kind);
+      return succeeded(result);
     } catch (cause) {
       return rejected(
-        errorCode(cause, "QODER_GUIDANCE_COPY_FAILED"),
+        errorCode(cause, "AGENT_GUIDANCE_COPY_FAILED"),
         this.#codecs.errorMessage(cause, "引导指令暂时无法复制，请重试。"),
       );
     }
+  }
+
+  refreshQoderAvailability() {
+    return this.refreshAgentAvailability();
+  }
+
+  checkQoderUsability() {
+    return this.checkAgentUsability();
+  }
+
+  copyQoderGuidance(input) {
+    return this.copyAgentGuidance(input);
   }
 
   async submit({
@@ -471,7 +501,15 @@ export class RunWorkflow {
     if (this.#disposed) {
       return blocked("RUN_WORKFLOW_DISPOSED", "本轮任务工作流已经停止。");
     }
-    if (!DELIVERY_MODES.has(deliveryMode)) {
+    let frozenAgentDelivery;
+    try {
+      const selected = this.#agentCatalog.freezeSelected();
+      frozenAgentDelivery = frozenDeliveryForMode(
+        deliveryMode,
+        selected,
+        this.#agentCatalog.provider(selected),
+      );
+    } catch {
       return rejected("RUN_DELIVERY_MODE_INVALID", "选择的 Agent 交接方式无效。");
     }
     const sourcePath = this.#projectSession.sourcePath;
@@ -522,8 +560,14 @@ export class RunWorkflow {
     let agentPreflight = null;
     let reservedAgentStartKey = null;
     try {
-      if (deliveryMode === "qoder-acp") {
-        agentPreflight = await this.#requireQoderPreflight();
+      if (frozenAgentDelivery.mode === MANAGED_AGENT_MODE) {
+        agentPreflight = await this.#agentCatalog.spendTicket(
+          frozenAgentDelivery.selection,
+          {
+            purpose: "execution",
+            trustPolicyVersion: frozenAgentDelivery.trustPolicyVersion,
+          },
+        );
         if (!this.#isCurrentContext(context)) return stale(context);
       }
       const registered = await this.#ensureRegistered({
@@ -591,7 +635,7 @@ export class RunWorkflow {
         context: submissionContext,
         previousVersionId,
         basedOnVersionId,
-        deliveryMode,
+        agentDelivery: frozenAgentDelivery,
       });
       this.#runSession.forgetOutcome(submissionContext.sourcePath);
       this.#runSession.trackRun(pendingRun, { activate: "always" });
@@ -668,9 +712,7 @@ export class RunWorkflow {
         })),
         comments: persistedComments.map(this.#codecs.persistedComment),
         changeEvents: persistedEvents.map(this.#codecs.persistedChangeEvent),
-        agentDelivery: deliveryMode === "qoder-acp"
-          ? defaultManagedAgentDelivery()
-          : { mode: "clipboard" },
+        agentDelivery: frozenAgentDelivery,
       };
       const operationId = this.#codecs.operationKey(pendingRun);
       let dispatched = false;
@@ -711,7 +753,7 @@ export class RunWorkflow {
         });
         const reconciled = await this.reconcileSubmission({
           sourcePath: context.sourcePath,
-          reserveRecoveredAgentStart: deliveryMode === "qoder-acp",
+          reserveRecoveredAgentStart: frozenAgentDelivery.mode === MANAGED_AGENT_MODE,
         });
         if (reconciled.status === "succeeded") {
           durableRun = reconciled.value.run || null;
@@ -733,7 +775,7 @@ export class RunWorkflow {
           );
         }
       }
-      if (deliveryMode === "qoder-acp") {
+      if (frozenAgentDelivery.mode === MANAGED_AGENT_MODE) {
         reservedAgentStartKey ||= this.#codecs.operationKey(durableRun);
         this.#agentStartsPending.add(reservedAgentStartKey);
       }
@@ -746,8 +788,7 @@ export class RunWorkflow {
         context,
         current: this.#isCurrentRun(durableRun),
       });
-      if (deliveryMode === "qoder-acp") {
-        this.#qoderPreflight = null;
+      if (frozenAgentDelivery.mode === MANAGED_AGENT_MODE) {
         await this.startAgent({
           run: durableRun,
           preflightId: agentPreflight.preflightId,
@@ -929,7 +970,17 @@ export class RunWorkflow {
     if (!run?.handoffMessage || !run.sourcePath || !run.requestId || run.requestId === "pending") {
       return blocked("RUN_HANDOFF_UNAVAILABLE", "当前 Request 没有可复制的交接内容。");
     }
-    if (qoderRecoveryRequired(run, this.#runSession.handoffForSource(run.sourcePath))) {
+    const delivery = deliveryForRun(run);
+    if (
+      delivery?.mode === MANAGED_AGENT_MODE
+      && !this.#agentCatalog.provider(delivery.selection)
+    ) {
+      return blocked(
+        "RUN_AGENT_PROVIDER_UNAVAILABLE",
+        "这一 Request 的 Agent Provider 未安装，可继续审阅或结束本轮。",
+      );
+    }
+    if (agentRecoveryRequired(run, this.#runSession.handoffForSource(run.sourcePath))) {
       return blocked(
         "RUN_AGENT_RECOVERY_REQUIRED",
         "这轮不能安全改为复制任务。请结束本轮，再重新发送为新的 Request。",
@@ -993,36 +1044,50 @@ export class RunWorkflow {
     preflightId = null,
     agentStartReserved = false,
   } = {}) {
+    const delivery = deliveryForRun(run);
+    const presentation = this.#agentCatalog.presentation(delivery?.selection);
     if (!run?.sourcePath || !run.requestId || run.requestId === "pending") {
-      return blocked("RUN_AGENT_UNAVAILABLE", "当前 Request 还不能启动 Qoder CLI。");
+      return blocked(
+        "RUN_AGENT_UNAVAILABLE",
+        presentation.startUnavailable || "当前 Request 还不能启动 Agent。",
+      );
     }
-    if (qoderRecoveryRequired(run, this.#runSession.handoffForSource(run.sourcePath))) {
+    if (!delivery || delivery.mode !== MANAGED_AGENT_MODE) {
+      return blocked("RUN_AGENT_UNAVAILABLE", "当前 Request 不是受管 Agent 交接。");
+    }
+    if (agentRecoveryRequired(run, this.#runSession.handoffForSource(run.sourcePath))) {
       return blocked(
         "RUN_AGENT_RECOVERY_REQUIRED",
-        "Bridge 无法证明旧 Qoder 会话已经停止。请结束本轮，再重新发送。",
+        `Bridge 无法证明旧 ${presentation.agentName || "Agent"} 会话已经停止。请结束本轮，再重新发送。`,
       );
     }
     const operationKey = this.#codecs.operationKey(run);
     if (!agentStartReserved && this.#agentStartsPending.has(operationKey)) {
-      return blocked("RUN_AGENT_START_BUSY", "Qoder CLI 正在启动，请等待当前操作完成。");
+      return blocked(
+        "RUN_AGENT_START_BUSY",
+        presentation.startBusy || "Agent 正在启动，请等待当前操作完成。",
+      );
     }
     this.#agentStartsPending.add(operationKey);
     let preflight = preflightId ? { preflightId, status: "ready" } : null;
     try {
       if (!preflight) {
-        preflight = await this.#requireQoderPreflight();
+        preflight = await this.#agentCatalog.spendTicket(delivery.selection, {
+          purpose: "execution",
+          trustPolicyVersion: delivery.trustPolicyVersion,
+        });
       }
       if (preflight?.status !== "ready" || !preflight.preflightId) {
         throw responseError(
           "RUN_AGENT_PREFLIGHT_INVALID",
-          "Qoder CLI 预检没有返回可验证结果。",
+          "Agent 预检没有返回可验证结果。",
         );
       }
       this.#runSession.publishHandoff({
         sourcePath: run.sourcePath,
         requestId: run.requestId,
         attemptId: run.attemptId,
-        mode: "qoder-acp",
+        mode: MANAGED_AGENT_MODE,
         status: "starting",
         phase: "launching",
       });
@@ -1032,15 +1097,14 @@ export class RunWorkflow {
         sourcePath: run.sourcePath,
         requestId: run.requestId,
         attemptId: run.attemptId,
-        selection: defaultManagedAgentDelivery().selection,
-        trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
+        selection: delivery.selection,
+        trustPolicyAccepted: delivery.trustPolicyVersion,
         preflightId: preflight.preflightId,
       });
-      this.#qoderPreflight = null;
       if (!this.#runSession.hasRun(run)) return stale(run);
       const next = agentHandoffState(run, result?.session);
       if (!next || !["starting", "running", "completed"].includes(next.status)) {
-        throw responseError("RUN_AGENT_START_UNCONFIRMED", "Qoder CLI 没有确认启动。");
+        throw responseError("RUN_AGENT_START_UNCONFIRMED", "Agent 没有确认启动。");
       }
       this.#runSession.publishHandoff(next);
       this.#emitEvent({
@@ -1054,14 +1118,15 @@ export class RunWorkflow {
       const code = errorCode(cause, "RUN_AGENT_START_FAILED");
       const message = this.#codecs.errorMessage(
         cause,
-        "Qoder CLI 没有启动。本轮 Request 已保留，可重试或复制任务。",
+        presentation.startFailure
+          || "Agent 没有启动。本轮 Request 已保留，可重试或复制任务。",
       );
       if (this.#runSession.hasRun(run)) {
         this.#runSession.publishHandoff({
           sourcePath: run.sourcePath,
           requestId: run.requestId,
           attemptId: run.attemptId,
-          mode: "qoder-acp",
+          mode: MANAGED_AGENT_MODE,
           status: "failed",
           phase: "failed",
           errorCode: code,
@@ -1490,7 +1555,7 @@ export class RunWorkflow {
     )).join("；").slice(0, 5_000);
   }
 
-  #pendingRun({ context, previousVersionId, basedOnVersionId, deliveryMode }) {
+  #pendingRun({ context, previousVersionId, basedOnVersionId, agentDelivery }) {
     return {
       projectId: context.projectId,
       documentId: context.documentId,
@@ -1499,7 +1564,7 @@ export class RunWorkflow {
       requestPath: "",
       attemptPath: "",
       handoffMessage: "",
-      agentDelivery: { mode: deliveryMode },
+      agentDelivery,
       status: "submitting",
       sourcePath: context.sourcePath,
       baseSnapshotSha256: context.frozenSourceSha256,
@@ -1578,91 +1643,32 @@ export class RunWorkflow {
     return !this.#disposed && generation === this.#pollGeneration;
   }
 
-  #setQoderAvailability(availability) {
-    this.#qoderAvailability = availability;
-    this.#publishSnapshot();
-    return availability;
-  }
-
-  /**
-   * Hands one Qoder ticket to a read-only discussion turn. This workflow owns
-   * the availability check and the consent-backed ticket, so a discussion turn
-   * asks here rather than keeping a second ticket cache. The cached ticket is
-   * dropped on the way out: a ticket handed over to be spent must never be
-   * replayed by a later execution submit.
-   */
-  async spendQoderTicket(purpose = "discussion") {
-    const preflight = await this.#requireQoderPreflight({ purpose });
-    this.#qoderPreflight = null;
-    this.#qoderPreflightPurpose = null;
+  async spendAgentTicket({ selection = this.#agentCatalog.freezeSelected(), purpose = "discussion" } = {}) {
+    const provider = this.#agentCatalog.provider(selection);
+    const preflight = await this.#agentCatalog.spendTicket(selection, {
+      purpose,
+      trustPolicyVersion: provider?.trustPolicyVersion,
+    });
     return Object.freeze({
-      driver: "qoder-acp",
       preflightId: preflight.preflightId,
-      trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
+      selection: preflight.selection,
+      securityProfile: preflight.securityProfile,
+      purpose: preflight.purpose,
+      trustPolicyAccepted: preflight.trustPolicyVersion,
     });
   }
 
-  #reusableQoderPreflight(purpose) {
-    if (!this.#qoderPreflight?.preflightId) return null;
-    if (this.#qoderPreflightPurpose !== purpose) return null;
-    const expiresAt = Date.parse(String(this.#qoderPreflight.expiresAt || ""));
-    if (!Number.isFinite(expiresAt) || expiresAt <= this.#clock.now()) {
-      this.#qoderPreflight = null;
-      return null;
-    }
-    return this.#qoderPreflight;
+  freezeAgentSelection() {
+    return this.#agentCatalog.freezeSelected();
   }
 
-  async #requireQoderPreflight({ force = false, purpose = "execution" } = {}) {
-    if (!force) {
-      const reusable = this.#reusableQoderPreflight(purpose);
-      if (reusable) return reusable;
-    }
-    if (this.#qoderCheckPromise) {
-      if (this.#qoderCheckPurpose === purpose) return this.#qoderCheckPromise;
-      await this.#qoderCheckPromise.catch(() => {});
-      return this.#requireQoderPreflight({ force, purpose });
-    }
-    const previous = this.#qoderAvailability;
-    this.#setQoderAvailability(checkingQoderAvailability(previous));
-    const checking = (async () => {
-      try {
-        const preflight = await this.#bridgeClient.preflightAgent({
-          selection: defaultManagedAgentDelivery().selection,
-          purpose,
-          trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
-        });
-        if (preflight?.status !== "ready" || !preflight.preflightId) {
-          throw responseError(
-            "RUN_AGENT_PREFLIGHT_INVALID",
-            "Qoder CLI 检查没有返回可验证结果。",
-          );
-        }
-        this.#qoderPreflight = Object.freeze({ ...preflight });
-        this.#qoderPreflightPurpose = purpose;
-        this.#setQoderAvailability(readyQoderAvailability(
-          validDate(this.#clock),
-        ));
-        return this.#qoderPreflight;
-      } catch (cause) {
-        this.#qoderPreflight = null;
-        this.#qoderPreflightPurpose = null;
-        this.#setQoderAvailability(qoderAvailabilityFromFailureCode(
-          errorCode(cause, "QODER_PREFLIGHT_FAILED"),
-          previous,
-          validDate(this.#clock),
-        ));
-        throw cause;
-      }
-    })();
-    this.#qoderCheckPromise = checking;
-    this.#qoderCheckPurpose = purpose;
-    try {
-      return await checking;
-    } finally {
-      if (this.#qoderCheckPromise === checking) this.#qoderCheckPromise = null;
-      if (this.#qoderCheckPromise === null) this.#qoderCheckPurpose = null;
-    }
+  selectAgent(selection) {
+    return this.#agentCatalog.select(selection);
+  }
+
+  // Compatibility facade for existing controller callers.
+  spendQoderTicket(purpose = "discussion") {
+    return this.spendAgentTicket({ purpose });
   }
 
   #publishSnapshot() {

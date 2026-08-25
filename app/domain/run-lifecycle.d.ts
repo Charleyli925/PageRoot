@@ -75,7 +75,7 @@ export function deriveRunProgressPresentation(
     | "cancelling"
     | "cancelled"
     | Readonly<{
-        mode?: "clipboard" | "qoder-acp";
+        mode?: "clipboard" | "managed-agent";
         status: string;
         phase?: string;
         errorMessage?: string | null;
@@ -103,7 +103,7 @@ export function deriveRunProgressSteps(
     | "cancelling"
     | "cancelled"
     | Readonly<{
-        mode?: "clipboard" | "qoder-acp";
+        mode?: "clipboard" | "managed-agent";
         status: string;
         phase?: string;
         errorMessage?: string | null;

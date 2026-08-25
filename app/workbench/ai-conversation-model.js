@@ -330,7 +330,7 @@ export function sidebarActionBar({
   candidateVersionLabel = null,
   candidateStatus = null,
   failureMessage = null,
-  deliveryMode = "qoder-acp",
+  deliveryMode = "managed-agent",
 } = {}) {
   if (state === "ready-to-open" || state === "review-view") {
     if (candidateStatus === "blocked") {

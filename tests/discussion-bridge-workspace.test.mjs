@@ -133,7 +133,8 @@ test("POST /discussion/start runs one read-only turn and leaves no snapshot", as
   assert.equal(conversation.response.status, 200, JSON.stringify(conversation.body));
   const messages = conversation.body.conversation.messages;
   const question = messages.find((message) => message.actor === "user");
-  const reply = messages.find((message) => message.actor === "qoder");
+  const reply = messages.find((message) => message.actor === "agent");
+  assert.equal(reply.providerId, "qoder");
   assert.equal(question.text, "这页的标题怎么改更有说服力？");
   assert.equal(question.status, "completed");
   assert.equal(reply.text, "这页的标题偏笼统，可以点明读者能得到什么。");

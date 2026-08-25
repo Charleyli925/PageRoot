@@ -649,6 +649,8 @@ Request 持久化后，Repository 才能基于冻结 Prompt 建立 `AI任务/<�
 - 主按钮「交给 AI 修改」自动执行并在对话内显示进度。按下即确认本轮采用
   `trusted-local-agent-v1`——这是原弹窗中「选择即确认」的同一个显式动作，只是不再由
   一个盖住页面的模态承载。到提交为止的点击次数与弹窗时代相同。
+- 按下的同一同步事件会冻结 provider、runtime、model 与 reasoning；随后即使用户切换
+  下一轮 Agent 选择，正在预检、登记、排空、对账或启动的 Request 仍显示并使用这份冻结选择。
 - 安静的次要动作「复制任务」保留通用本地文件交接，用户把一条简洁指令粘贴给 Qoder 或
   任意能够读取本机文件并执行命令的 Agent；它与主按钮同时可用。
 - 修改意图下不渲染输入框。该意图的输入是页面上已写好的评论，因此不存在被静默丢弃的
@@ -693,6 +695,9 @@ unavailable` 状态。打开 About 或侧栏立即进入“检测中”并执行
 - 自动执行模式在预检成功后才冻结并创建一个带固定 `agentDelivery` 授权的 Request。
   Bridge 从已登记项目与该 Request 派生命令、cwd、输入、输出和 finalizer 权限；Renderer
   不传这些路径。它使用一次性短时 ticket 启动 Qoder，自动模式不读写剪贴板。
+- preflight ticket 同时绑定 installation digest、trust policy 与 `execution` / `discussion`
+  purpose；领取即从 Renderer cache 删除，讨论 ticket 不能用于执行。未知 Provider 的历史
+  Request 仍可结束和审阅，但不会回退成 Qoder 或剪贴板，也不显示重新启动动作。
 - ACP 初始化、读取任务、写 Candidate、finalizer 和停止事件只用于显示进度；它们不表示
   Candidate 已完成。只有 completion 与 Repository 校验通过才进入待审阅。
 - Qoder 普通启动失败时，只有当前 Bridge 已确认所拥有的进程组退出且没有

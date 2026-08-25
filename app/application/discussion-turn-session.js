@@ -35,6 +35,8 @@ export class DiscussionTurnSession {
 
   #conversationId = null;
 
+  #selection = null;
+
   #observer = null;
 
   #listeners = new Set();
@@ -75,6 +77,7 @@ export class DiscussionTurnSession {
       turn: this.#turn,
       error: this.#error,
       conversationId: this.#conversationId,
+      selection: this.#selection,
       turnId: this.#turn?.turnId ?? null,
       sourceSha256: this.#turn?.sourceSha256 ?? null,
       phase: this.#turn?.phase ?? null,
@@ -98,11 +101,15 @@ export class DiscussionTurnSession {
    * Marks the local intent to start a turn. The projection is cleared first, so
    * a previous answer never sits under a new question.
    */
-  beginTurn(context, { conversationId = null } = {}) {
+  beginTurn(context, { conversationId = null, selection = null } = {}) {
     this.#context = context ? { ...context } : null;
     this.#turn = null;
     this.#error = null;
     this.#conversationId = conversationId;
+    this.#selection = selection ? Object.freeze({
+      ...selection,
+      reasoning: Object.freeze({ ...selection.reasoning }),
+    }) : null;
     this.#status = context ? "starting" : "idle";
     this.#emit();
     return this.snapshot;
@@ -143,6 +150,7 @@ export class DiscussionTurnSession {
     this.#turn = null;
     this.#error = null;
     this.#conversationId = null;
+    this.#selection = null;
     this.#status = "idle";
     this.#emit();
   }
