@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+  chmod,
   copyFile,
   mkdir,
   mkdtemp,
@@ -70,12 +71,22 @@ const BRIDGE_FILES = [
   "agent/agent-lease-store.mjs",
   "agent/agent-events.mjs",
   "agent/agent-errors.mjs",
+  "agent/codex-feature-flags.mjs",
+  "agent/codex-runtime-lock.json",
+  "agent/macho-code-fingerprint.mjs",
   "agent/providers/agent-provider-contract.mjs",
   "agent/providers/provider-registry.mjs",
   "agent/providers/qoder-provider.mjs",
+  "agent/providers/codex-provider.mjs",
   "agent/runtimes/agent-runtime-contract.mjs",
   "agent/runtimes/runtime-registry.mjs",
   "agent/runtimes/acp-runtime.mjs",
+  "agent/runtimes/acp-authentication.mjs",
+  "agent/runtimes/acp-probe.mjs",
+  "agent/runtimes/agent-native-acp-runner.mjs",
+  "agent/sandbox/macos-agent-sandbox.mjs",
+  "agent/native/codex-workspace.mjs",
+  "agent/native/bridge-finalizer.mjs",
   "agent/policies/discussion-policy.mjs",
   "agent/policies/execution-policy.mjs",
   "agent/hosts/discussion-host.mjs",
@@ -107,6 +118,9 @@ const BRIDGE_FILES = [
 
 const PACKAGED_MODULES = [
   "@agentclientprotocol/sdk",
+  "@agentclientprotocol/codex-acp",
+  "@openai/codex",
+  "@openai/codex-darwin-arm64",
   "argparse",
   "builder-util-runtime",
   "debug",
@@ -142,6 +156,7 @@ const LEGAL_RESOURCE_FILES = [
   "NOTICE",
   "PRIVACY.md",
   "THIRD_PARTY_NOTICES.md",
+  "CODEX_RUNTIME_SBOM.spdx.json",
 ];
 
 function assertProfile(profile) {
@@ -199,6 +214,7 @@ function fixtureExtraResources() {
     { from: "NOTICE", to: "NOTICE" },
     { from: "PRIVACY.md", to: "PRIVACY.md" },
     { from: "THIRD_PARTY_NOTICES.md", to: "THIRD_PARTY_NOTICES.md" },
+    { from: "CODEX_RUNTIME_SBOM.spdx.json", to: "CODEX_RUNTIME_SBOM.spdx.json" },
   ];
 }
 
@@ -435,6 +451,21 @@ export async function createSyntheticAppBundle(t, {
         "export const fixture = " + JSON.stringify(moduleName) + ";\n",
       ),
     ]),
+    writeFixtureFile(
+      productRoot,
+      "node_modules/@openai/codex/bin/codex.js",
+      "#!/usr/bin/env node\n",
+    ),
+    writeFixtureFile(
+      productRoot,
+      "node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex",
+      "fixture-codex-binary\n",
+    ),
+    writeFixtureFile(
+      productRoot,
+      "node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex-code-mode-host",
+      "fixture-code-mode-host\n",
+    ),
   ]);
 
   const relativeAppPath = syntheticAppRelativePath(
@@ -500,6 +531,21 @@ export async function createSyntheticAppBundle(t, {
         "node_modules/" + moduleName + "/dist/index.js",
       ),
     ]),
+    copyFixtureFile(
+      productRoot,
+      resourcesPath,
+      "node_modules/@openai/codex/bin/codex.js",
+    ),
+    copyFixtureFile(
+      productRoot,
+      resourcesPath,
+      "node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex",
+    ),
+    copyFixtureFile(
+      productRoot,
+      resourcesPath,
+      "node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex-code-mode-host",
+    ),
     ...SCHEMA_FILES.map((fileName) => copyFixtureFile(
       productRoot,
       resourcesPath,
@@ -541,6 +587,12 @@ export async function createSyntheticAppBundle(t, {
       applicationUpdateContents,
     ),
   ]);
+  await Promise.all([
+    "node_modules/@agentclientprotocol/codex-acp/dist/index.js",
+    "node_modules/@openai/codex/bin/codex.js",
+    "node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex",
+    "node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex-code-mode-host",
+  ].map((relativePath) => chmod(path.join(resourcesPath, relativePath), 0o755)));
 
   return {
     appPath,

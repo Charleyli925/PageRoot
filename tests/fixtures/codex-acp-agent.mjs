@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
-import { spawn } from "node:child_process";
-import { writeFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import { Readable, Writable } from "node:stream";
 
 import * as acp from "@agentclientprotocol/sdk";
@@ -10,6 +11,10 @@ const behavior = process.argv.find((value) => value.startsWith("--fixture="))
   ?.slice("--fixture=".length) || "ready";
 const pidFile = process.argv.find((value) => value.startsWith("--pid-file="))
   ?.slice("--pid-file=".length) || null;
+const outsideRead = process.argv.find((value) => value.startsWith("--outside-read="))
+  ?.slice("--outside-read=".length) || null;
+const outsideWrite = process.argv.find((value) => value.startsWith("--outside-write="))
+  ?.slice("--outside-write=".length) || null;
 let requestRoot = "";
 
 if (behavior === "early-exit") process.exit(7);
@@ -53,6 +58,30 @@ if (behavior === "oversized-frame") {
       return {};
     })
     .onRequest(acp.methods.agent.session.new, ({ params }) => {
+      if (behavior === "sandbox-denials") {
+        let readDenied = false;
+        let writeDenied = false;
+        let spawnDenied = false;
+        try {
+          readFileSync(outsideRead, "utf8");
+        } catch {
+          readDenied = true;
+        }
+        try {
+          writeFileSync(outsideWrite, "escape", "utf8");
+        } catch {
+          writeDenied = true;
+        }
+        const forbidden = spawnSync(process.execPath, ["--version"], { encoding: "utf8" });
+        spawnDenied = forbidden.error?.code === "EPERM" || forbidden.status !== 0;
+        const nativeRead = spawnSync(process.env.CODEX_PATH, [outsideRead], { encoding: "utf8" });
+        const nativeReadDenied = nativeRead.error?.code === "EPERM"
+          || nativeRead.status !== 0
+          || nativeRead.stdout !== "sandbox-secret";
+        if (!readDenied || !writeDenied || !spawnDenied || !nativeReadDenied) {
+          throw new Error("synthetic preflight sandbox boundary was bypassed");
+        }
+      }
       if (behavior === "descendant" || behavior === "cancel-stream") {
         const descendant = behavior === "cancel-stream"
           ? spawn(process.env.CODEX_PATH, ["30"], { stdio: "ignore" })
@@ -110,11 +139,54 @@ if (behavior === "oversized-frame") {
     })
     .onRequest(acp.methods.agent.session.prompt, async ({ params, client }) => {
       if (behavior === "execution") {
-        writeFileSync(
-          `${requestRoot}/output/index.html`,
-          "<!doctype html><html><head><title>Codex Candidate</title></head><body><main><h1>Codex Candidate</h1></main></body></html>",
-          "utf8",
+        const outputPath = `${requestRoot}/output/index.html`;
+        const candidate = "<!doctype html><html><head><title>Codex Candidate</title></head><body><main><h1>Codex Candidate</h1></main></body></html>";
+        const codeModeHost = path.join(path.dirname(process.env.CODEX_PATH), "codex-code-mode-host");
+        const hostSource = `
+          import { spawnSync } from "node:child_process";
+          const [outputPath, candidate] = process.argv.slice(1);
+          const tool = spawnSync(
+            "/bin/zsh",
+            ["-f", "-c", 'print -r -- "$2" > "$1"', "--", outputPath, candidate],
+            { encoding: "utf8" },
+          );
+          if (tool.status !== 0) {
+            process.stderr.write(tool.stderr || String(tool.error || "synthetic tool failed"));
+            process.exit(tool.status || 1);
+          }
+        `;
+        const codexSource = `
+          import { spawnSync } from "node:child_process";
+          const [host, outputPath, candidate, hostSource] = process.argv.slice(1);
+          const child = spawnSync(
+            host,
+            ["--input-type=module", "--eval", hostSource, "--", outputPath, candidate],
+            { encoding: "utf8" },
+          );
+          if (child.status !== 0) {
+            process.stderr.write(child.stderr || String(child.error || "synthetic code-mode host failed"));
+            process.exit(child.status || 1);
+          }
+        `;
+        const codex = spawnSync(
+          process.env.CODEX_PATH,
+          [
+            "--input-type=module",
+            "--eval",
+            codexSource,
+            "--",
+            codeModeHost,
+            outputPath,
+            candidate,
+            hostSource,
+          ],
+          { encoding: "utf8" },
         );
+        if (codex.status !== 0) {
+          throw new Error(
+            codex.stderr || String(codex.error || "synthetic Codex execution failed"),
+          );
+        }
         await client.notify(acp.methods.client.session.update, {
           sessionId: params.sessionId,
           update: {

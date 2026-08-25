@@ -24,7 +24,7 @@ const selection = Object.freeze({
   }),
 });
 
-function fixture() {
+function fixture({ currentModelId = "gpt-synthetic" } = {}) {
   const calls = [];
   const installation = Object.freeze({ fixture: "codex-installation", codexVersion: "0.148.0" });
   const provider = createCodexProvider({
@@ -57,7 +57,7 @@ function fixture() {
         modes: Object.freeze([
           Object.freeze({ id: "read-only", displayName: "Read-only" }),
         ]),
-        currentModelId: "gpt-synthetic",
+        currentModelId,
         currentReasoning: "high",
         currentMode: "read-only",
       });
@@ -92,7 +92,7 @@ test("Codex provider probes through ACP without a legacy driver and freezes agen
     runtimeId: "acp",
     requestedModelId: null,
     resolvedModelId: "codex:gpt-synthetic",
-    reasoning: { requested: null, applied: "high", resolution: "provider-default" },
+    reasoning: { requested: null, applied: null, resolution: "provider-default" },
   });
   assert.deepEqual(calls, ["installation", "probe", "verify"]);
 
@@ -129,6 +129,15 @@ test("Codex model and reasoning selections must resolve exactly against the live
   );
 });
 
+test("Codex Provider-default selection falls back to the first live catalog model", async () => {
+  const { registry } = fixture({ currentModelId: null });
+  const prepared = await registry.preflightForSelection(selection, "discussion", {
+    environment: {},
+  });
+  assert.equal(prepared.selection.requestedModelId, null);
+  assert.equal(prepared.selection.resolvedModelId, "codex:gpt-synthetic");
+});
+
 test("Codex execution remains disabled at registry and ticket boundaries", async () => {
   const { registry } = fixture();
   await assert.rejects(
@@ -137,25 +146,64 @@ test("Codex execution remains disabled at registry and ticket boundaries", async
   );
 });
 
-test("Codex feature flags are closed by default and ordinary environment cannot force them", () => {
+test("Codex execution preflight binds the pinned code-mode host before probing", () => {
+  const provider = createCodexProvider({ capabilities: { execution: true } });
+  const codeModeHostIdentity = Object.freeze({ sha256: "host" });
+  const launch = provider.createProbeLaunch({
+    installation: {
+      adapterEntry: "/runtime/adapter.mjs",
+      adapterEntryIdentity: Object.freeze({ sha256: "adapter" }),
+      adapterVersion: "1.6.2",
+      codexBinary: "/runtime/codex",
+      codexBinaryIdentity: Object.freeze({ sha256: "codex" }),
+      codeModeHost: "/runtime/codex-code-mode-host",
+      codeModeHostIdentity,
+    },
+    purpose: "execution",
+    baseEnvironment: {},
+  });
+  assert.equal(launch.codeModeHost, "/runtime/codex-code-mode-host");
+  assert.equal(launch.codeModeHostIdentity, codeModeHostIdentity);
+});
+
+test("Codex Discussion and Execution have independent hard rollback gates", () => {
   const production = createDefaultProviderRegistry({
     environment: {
       PAGEROOT_CODEX_DISCUSSION: "1",
       PAGEROOT_CODEX_EXECUTION: "1",
     },
   });
-  assert.deepEqual(production.catalog().map((provider) => provider.providerId), ["qoder"]);
+  assert.deepEqual(production.catalog().map((provider) => provider.providerId), ["qoder", "codex"]);
+  assert.equal(production.catalog()[1].capabilities.discussion, true);
+  assert.equal(production.catalog()[1].capabilities.execution, true);
 
-  const testRegistry = createDefaultProviderRegistry({
+  const discussionOnly = createDefaultProviderRegistry({
+    codexBuildGates: { codexDiscussion: true, codexExecution: false },
+  });
+  assert.deepEqual(discussionOnly.catalog().map((provider) => provider.providerId), ["qoder", "codex"]);
+  assert.equal(discussionOnly.catalog()[1].capabilities.discussion, true);
+  assert.equal(discussionOnly.catalog()[1].capabilities.execution, false);
+
+  const explicitTestOverride = createDefaultProviderRegistry({
     environment: {
       PAGEROOT_E2E: "1",
       PAGEROOT_CODEX_ALLOW_TEST_FLAGS: "1",
       PAGEROOT_CODEX_DISCUSSION: "1",
     },
+    codexBuildGates: { codexDiscussion: false, codexExecution: false },
   });
-  assert.deepEqual(testRegistry.catalog().map((provider) => provider.providerId), ["qoder", "codex"]);
-  assert.equal(testRegistry.catalog()[1].capabilities.discussion, true);
-  assert.equal(testRegistry.catalog()[1].capabilities.execution, false);
+  assert.deepEqual(explicitTestOverride.catalog().map((provider) => provider.providerId), ["qoder", "codex"]);
+  assert.equal(explicitTestOverride.catalog()[1].capabilities.discussion, true);
+  assert.equal(explicitTestOverride.catalog()[1].capabilities.execution, false);
+
+  const ordinaryEnvironmentCannotOpen = createDefaultProviderRegistry({
+    environment: {
+      PAGEROOT_CODEX_DISCUSSION: "1",
+      PAGEROOT_CODEX_EXECUTION: "1",
+    },
+    codexBuildGates: { codexDiscussion: false, codexExecution: false },
+  });
+  assert.deepEqual(ordinaryEnvironmentCannotOpen.catalog().map((provider) => provider.providerId), ["qoder"]);
 });
 
 test("Codex failures classify capacity and erase raw secret-bearing fields", () => {

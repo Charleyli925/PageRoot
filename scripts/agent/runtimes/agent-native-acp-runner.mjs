@@ -1,10 +1,9 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
+import { fstatSync, lstatSync, watch } from "node:fs";
 import {
-  access,
   chmod,
   constants as fsConstants,
-  copyFile,
   lstat,
   mkdir,
   mkdtemp,
@@ -21,11 +20,14 @@ import { Readable, Transform, Writable } from "node:stream";
 import * as acp from "@agentclientprotocol/sdk";
 
 import { terminateManagedProcess } from "../hosts/execution-host.mjs";
-import { macosAgentSandboxProfile } from "../sandbox/macos-agent-sandbox.mjs";
 import {
+  macosAgentSandboxProfile,
+  packagedRuntimeReadRoot,
+} from "../sandbox/macos-agent-sandbox.mjs";
+import {
+  collectCodexExecutionOutput,
   disposeCodexExecutionWorkspace,
   prepareCodexExecutionWorkspace,
-  publishCodexExecutionOutput,
 } from "../native/codex-workspace.mjs";
 import { runAcpTask } from "../../qoder-acp-client.mjs";
 
@@ -155,33 +157,168 @@ async function openVerifiedAdapter(filePath, expectedIdentity) {
   }
 }
 
-async function assertCodexBinary(filePath, expectedIdentity) {
-  const resolved = await realpath(filePath).catch(() => {
-    throw runtimeError("CODEX_INNER_UNAVAILABLE", "The pinned Codex App Server is unavailable.");
-  });
-  if (resolved !== filePath) {
-    throw runtimeError("CODEX_INNER_INCOMPATIBLE", "The pinned Codex binary path changed.");
+export async function writeVerifiedDiscussionInput(targetPath, verifiedBytes, {
+  beforeWrite,
+} = {}) {
+  const bytes = Buffer.from(verifiedBytes);
+  if (typeof beforeWrite === "function") await beforeWrite();
+  const handle = await open(
+    targetPath,
+    fsConstants.O_WRONLY
+      | fsConstants.O_CREAT
+      | fsConstants.O_EXCL
+      | (fsConstants.O_NOFOLLOW || 0),
+    0o400,
+  );
+  try {
+    let offset = 0;
+    while (offset < bytes.byteLength) {
+      const { bytesWritten } = await handle.write(bytes, offset, bytes.byteLength - offset, offset);
+      if (bytesWritten === 0) {
+        throw runtimeError("CODEX_DISCUSSION_INPUT_DRIFT", "The verified discussion copy was incomplete.");
+      }
+      offset += bytesWritten;
+    }
+    await handle.sync();
+    const information = await handle.stat();
+    if (!information.isFile() || information.nlink !== 1 || information.size !== bytes.byteLength) {
+      throw runtimeError("CODEX_DISCUSSION_INPUT_DRIFT", "The verified discussion copy changed.");
+    }
+  } finally {
+    await handle.close();
   }
-  const information = await lstat(resolved);
-  if (!information.isFile() || information.isSymbolicLink()
-    || information.nlink !== 1 || (information.mode & 0o022) !== 0
-    || !sameIdentity(information, expectedIdentity)) {
-    throw runtimeError("CODEX_INNER_INCOMPATIBLE", "The pinned Codex binary identity changed.");
-  }
-  await access(resolved, fsConstants.X_OK).catch(() => {
-    throw runtimeError("CODEX_INNER_INCOMPATIBLE", "The pinned Codex binary is not executable.");
-  });
-  return resolved;
 }
 
-async function assertCodeModeHost(filePath, expectedIdentity) {
-  if (!filePath || !expectedIdentity) {
+async function stageVerifiedExecutable(filePath, expectedIdentity, label, targetPath) {
+  const resolved = await realpath(filePath).catch(() => {
+    throw runtimeError("CODEX_INNER_UNAVAILABLE", `The pinned ${label} is unavailable.`);
+  });
+  if (resolved !== filePath) {
+    throw runtimeError("CODEX_INNER_INCOMPATIBLE", `The pinned ${label} path changed.`);
+  }
+  const handle = await open(
+    resolved,
+    fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW || 0),
+  );
+  let targetHandle;
+  try {
+    const information = await handle.stat();
+    if (!information.isFile() || information.nlink !== 1
+      || (information.mode & 0o022) !== 0 || (information.mode & 0o111) === 0
+      || !sameIdentity(information, expectedIdentity)) {
+      throw runtimeError("CODEX_INNER_INCOMPATIBLE", `The pinned ${label} identity changed.`);
+    }
+    targetHandle = await open(
+      targetPath,
+      fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL,
+      0o500,
+    );
+    const digest = createHash("sha256");
+    const buffer = Buffer.allocUnsafe(1024 * 1024);
+    let offset = 0;
+    while (offset < information.size) {
+      const { bytesRead } = await handle.read(
+        buffer,
+        0,
+        Math.min(buffer.byteLength, information.size - offset),
+        offset,
+      );
+      if (bytesRead === 0) break;
+      digest.update(buffer.subarray(0, bytesRead));
+      const { bytesWritten } = await targetHandle.write(buffer, 0, bytesRead, offset);
+      if (bytesWritten !== bytesRead) {
+        throw runtimeError("CODEX_INNER_INCOMPATIBLE", `The pinned ${label} copy was incomplete.`);
+      }
+      offset += bytesRead;
+    }
+    await targetHandle.sync();
+    const after = await handle.stat();
+    const staged = await targetHandle.stat();
+    if (!sameIdentity(information, after) || offset !== after.size || staged.size !== after.size
+      || digest.digest("hex") !== expectedIdentity.sha256) {
+      throw runtimeError("CODEX_INNER_INCOMPATIBLE", `The pinned ${label} bytes changed.`);
+    }
+    const retainedHandle = targetHandle;
+    targetHandle = null;
+    return Object.freeze({ handle: retainedHandle, identity: staged, path: targetPath, label });
+  } finally {
+    await targetHandle?.close().catch(() => {});
+    await handle.close().catch(() => {});
+  }
+}
+
+function assertBoundExecutable(binding) {
+  const descriptor = fstatSync(binding.handle.fd);
+  const current = lstatSync(binding.path);
+  if (!descriptor.isFile() || !current.isFile() || current.isSymbolicLink()
+    || descriptor.nlink !== 1 || (descriptor.mode & 0o111) === 0
+    || !sameIdentity(descriptor, binding.identity) || !sameIdentity(current, binding.identity)) {
+    throw runtimeError(
+      "CODEX_INNER_INCOMPATIBLE",
+      `The private ${binding.label} launch binding changed.`,
+    );
+  }
+}
+
+export async function prepareBoundAgentNativeExecutables(launch) {
+  if (Boolean(launch.codeModeHost) !== Boolean(launch.codeModeHostIdentity)
+    || (launch.purpose === "execution" && !launch.codeModeHost)) {
     throw runtimeError(
       "CODEX_INNER_INCOMPATIBLE",
       "The pinned Codex code-mode host identity is unavailable.",
     );
   }
-  return assertCodexBinary(filePath, expectedIdentity);
+  const root = await realpath(await mkdtemp(path.join(os.tmpdir(), "stemmio-codex-runtime-")));
+  const codexBinary = path.join(root, "codex");
+  const codeModeHost = launch.codeModeHost
+    ? path.join(root, "codex-code-mode-host")
+    : null;
+  let codexBinding;
+  let codeModeHostBinding;
+  try {
+    codexBinding = await stageVerifiedExecutable(
+      launch.codexBinary,
+      launch.codexBinaryIdentity,
+      "Codex App Server",
+      codexBinary,
+    );
+    codeModeHostBinding = codeModeHost
+      ? await stageVerifiedExecutable(
+        launch.codeModeHost,
+        launch.codeModeHostIdentity,
+        "Codex code-mode host",
+        codeModeHost,
+      )
+      : null;
+    await chmod(root, 0o500);
+    return Object.freeze({
+      root,
+      codexBinary,
+      codeModeHost,
+      codexBinding,
+      codeModeHostBinding,
+      assertUnchanged() {
+        assertBoundExecutable(codexBinding);
+        if (codeModeHostBinding) assertBoundExecutable(codeModeHostBinding);
+      },
+      dispose: async () => {
+        await Promise.all([
+          codexBinding.handle.close().catch(() => {}),
+          codeModeHostBinding?.handle.close().catch(() => {}),
+        ]);
+        await chmod(root, 0o700).catch(() => {});
+        await rm(root, { recursive: true, force: true });
+      },
+    });
+  } catch (cause) {
+    await Promise.all([
+      codexBinding?.handle.close().catch(() => {}),
+      codeModeHostBinding?.handle.close().catch(() => {}),
+    ]);
+    await chmod(root, 0o700).catch(() => {});
+    await rm(root, { recursive: true, force: true });
+    throw cause;
+  }
 }
 
 export function codexAcpEnvironment({
@@ -273,24 +410,29 @@ export async function withAgentNativeAcpProcess(launch, operation) {
     || typeof operation !== "function") {
     throw new TypeError("Agent-native ACP launch and operation are required.");
   }
-  const adapterHandle = await openVerifiedAdapter(
-    launch.adapterEntry,
-    launch.adapterEntryIdentity,
-  );
-  const codexBinary = await assertCodexBinary(launch.codexBinary, launch.codexBinaryIdentity);
-  if (launch.purpose === "execution") {
-    await assertCodeModeHost(launch.codeModeHost, launch.codeModeHostIdentity);
-  }
-  const runtime = await realpath(process.execPath);
-  const adapterArgs = Array.isArray(launch.adapterArgs)
-    && launch.adapterArgs.length <= 16
-    && launch.adapterArgs.every((value) => typeof value === "string" && value.length <= 1_024)
-    ? launch.adapterArgs
-    : [];
-  const processGroup = process.platform !== "win32";
-  const diagnostic = boundedDiagnostic();
+  const binding = await prepareBoundAgentNativeExecutables(launch);
+  let adapterHandle;
   let child;
-  const runtimeArguments = [
+  let bindingWatcher;
+  let rejectBindingCompromise;
+  const bindingCompromised = new Promise((_resolve, reject) => {
+    rejectBindingCompromise = reject;
+  });
+  void bindingCompromised.catch(() => {});
+  try {
+    adapterHandle = await openVerifiedAdapter(
+      launch.adapterEntry,
+      launch.adapterEntryIdentity,
+    );
+    const runtime = await realpath(process.execPath);
+    const adapterArgs = Array.isArray(launch.adapterArgs)
+      && launch.adapterArgs.length <= 16
+      && launch.adapterArgs.every((value) => typeof value === "string" && value.length <= 1_024)
+      ? launch.adapterArgs
+      : [];
+    const processGroup = process.platform !== "win32";
+    const diagnostic = boundedDiagnostic();
+    const runtimeArguments = [
       "--no-warnings",
       "--experimental-vm-modules",
       "--input-type=module",
@@ -300,55 +442,88 @@ export async function withAgentNativeAcpProcess(launch, operation) {
       launch.adapterEntry,
       ...adapterArgs,
     ];
-  const sandboxed = typeof launch.sandboxProfile === "string";
-  const executable = sandboxed ? "/usr/bin/sandbox-exec" : runtime;
-  const spawnArguments = sandboxed
-    ? ["-p", launch.sandboxProfile, runtime, ...runtimeArguments]
-    : runtimeArguments;
-  try {
-    child = spawn(executable, spawnArguments, {
-      cwd: launch.cwd,
-      env: codexAcpEnvironment({
-        baseEnvironment: launch.baseEnvironment,
-        codexBinary,
-        mode: launch.mode,
-        config: launch.codexConfig,
-      }),
-      detached: processGroup,
-      shell: false,
-      stdio: ["pipe", "pipe", "pipe", adapterHandle.fd],
+    const sandboxProfile = typeof launch.sandboxProfileFactory === "function"
+      ? launch.sandboxProfileFactory(Object.freeze({
+        codexBinary: binding.codexBinary,
+        codeModeHost: binding.codeModeHost,
+      }))
+      : launch.sandboxProfile;
+    const sandboxed = typeof sandboxProfile === "string";
+    const executable = sandboxed ? "/usr/bin/sandbox-exec" : runtime;
+    const spawnArguments = sandboxed
+      ? ["-p", sandboxProfile, runtime, ...runtimeArguments]
+      : runtimeArguments;
+    binding.assertUnchanged();
+    bindingWatcher = watch(binding.root, { persistent: false }, () => {
+      try {
+        binding.assertUnchanged();
+      } catch {
+        const cause = runtimeError(
+          "CODEX_INNER_INCOMPATIBLE",
+          "The private Codex launch binding changed while the native process was active.",
+        );
+        rejectBindingCompromise(cause);
+        if (child?.pid) {
+          try {
+            process.kill(processGroup ? -child.pid : child.pid, "SIGKILL");
+          } catch {}
+        }
+      }
     });
-  } finally {
-    await adapterHandle.close().catch(() => {});
-  }
-  child.stderr?.on("data", (chunk) => diagnostic.append(chunk));
-  child.stdin?.on("error", () => {});
-  const guardedStdout = child.stdout.pipe(new AcpFrameGuard());
-  const stream = acp.ndJsonStream(
-    Writable.toWeb(child.stdin),
-    Readable.toWeb(guardedStdout),
-  );
-  let operationError = null;
-  try {
-    return await operation({ stream, child });
-  } catch (cause) {
-    operationError = cause instanceof Error ? cause : new Error(String(cause));
-    if (!operationError.code && operationError.message === "ACP connection closed") {
-      operationError.code = "CODEX_ACP_CONNECTION_CLOSED";
+    try {
+      child = spawn(executable, spawnArguments, {
+        cwd: launch.cwd,
+        env: codexAcpEnvironment({
+          baseEnvironment: launch.baseEnvironment,
+          codexBinary: binding.codexBinary,
+          mode: launch.mode,
+          config: launch.codexConfig,
+        }),
+        detached: processGroup,
+        shell: false,
+        stdio: ["pipe", "pipe", "pipe", adapterHandle.fd],
+      });
+      binding.assertUnchanged();
+    } finally {
+      await adapterHandle.close().catch(() => {});
+      adapterHandle = null;
     }
-    throw operationError;
-  } finally {
-    child.stdin?.end();
-    const cleanupConfirmed = await terminateManagedProcess(child, { processGroup }).catch(() => false);
-    if (!cleanupConfirmed) {
-      const cleanup = runtimeError(
-        "AGENT_PROCESS_CLEANUP_UNCONFIRMED",
-        "The Codex ACP process group could not be confirmed stopped.",
-        { diagnostic: diagnostic.snapshot() },
-      );
-      if (operationError) cleanup.cause = operationError;
-      throw cleanup;
+    child.stderr?.on("data", (chunk) => diagnostic.append(chunk));
+    child.stdin?.on("error", () => {});
+    const guardedStdout = child.stdout.pipe(new AcpFrameGuard());
+    const stream = acp.ndJsonStream(
+      Writable.toWeb(child.stdin),
+      Readable.toWeb(guardedStdout),
+    );
+    let operationError = null;
+    try {
+      return await Promise.race([
+        operation({ stream, child }),
+        bindingCompromised,
+      ]);
+    } catch (cause) {
+      operationError = cause instanceof Error ? cause : new Error(String(cause));
+      if (!operationError.code && operationError.message === "ACP connection closed") {
+        operationError.code = "CODEX_ACP_CONNECTION_CLOSED";
+      }
+      throw operationError;
+    } finally {
+      child.stdin?.end();
+      const cleanupConfirmed = await terminateManagedProcess(child, { processGroup }).catch(() => false);
+      if (!cleanupConfirmed) {
+        const cleanup = runtimeError(
+          "AGENT_PROCESS_CLEANUP_UNCONFIRMED",
+          "The Codex ACP process group could not be confirmed stopped.",
+          { diagnostic: diagnostic.snapshot() },
+        );
+        if (operationError) cleanup.cause = operationError;
+        throw cleanup;
+      }
     }
+  } finally {
+    bindingWatcher?.close();
+    await adapterHandle?.close().catch(() => {});
+    await binding.dispose();
   }
 }
 
@@ -393,8 +568,7 @@ async function prepareDiscussionIsolation(launch) {
       if (`sha256:${createHash("sha256").update(before).digest("hex")}` !== readable.sha256) {
         throw runtimeError("CODEX_DISCUSSION_INPUT_DRIFT", "The discussion input changed before sandboxing.");
       }
-      await copyFile(readable.path, target, fsConstants.COPYFILE_EXCL);
-      await chmod(target, 0o400);
+      await writeVerifiedDiscussionInput(target, before);
       copiedFiles.push(Object.freeze({ ...readable, path: target }));
       if (readable.role === "discussion-snapshot") snapshotText = before.toString("utf8");
     }
@@ -402,9 +576,12 @@ async function prepareDiscussionIsolation(launch) {
     const authFile = await existingAuthFile(launch.baseEnvironment);
     if (authFile) await symlink(authFile, path.join(codexHome, "auth.json"));
     const packageRoot = path.resolve(path.dirname(launch.adapterEntry), "..", "..", "..");
-    const sandboxProfile = macosAgentSandboxProfile({
-      runtime: await realpath(process.execPath),
-      codexBinary: launch.codexBinary,
+    const runtime = await realpath(process.execPath);
+    const sandboxProfileFactory = ({ codexBinary, codeModeHost }) => macosAgentSandboxProfile({
+      runtime,
+      runtimeReadRoot: packagedRuntimeReadRoot(runtime),
+      codexBinary,
+      codeModeHost,
       packageRoot,
       contextRoot,
       stateRoot,
@@ -447,7 +624,7 @@ async function prepareDiscussionIsolation(launch) {
         cwd: contextRoot,
         policy: isolatedPolicy,
         prompt: inlinePrompt,
-        sandboxProfile,
+        sandboxProfileFactory,
         baseEnvironment: Object.freeze({
           ...(launch.baseEnvironment || {}),
           HOME: homeRoot,
@@ -496,12 +673,11 @@ export async function runAgentNativeAcp(launch) {
           ? { turnTimeoutMs: workspace.launch.turnTimeoutMs }
           : {}),
       }));
-      const published = await publishCodexExecutionOutput({
+      const pendingCompletion = await collectCodexExecutionOutput({
         workspace,
-        policy: launch.policy,
         cancellationSignal: launch.cancellationSignal,
       });
-      return Object.freeze({ ...result, completion: published });
+      return Object.freeze({ ...result, pendingCompletion });
     } finally {
       await disposeCodexExecutionWorkspace(workspace);
     }

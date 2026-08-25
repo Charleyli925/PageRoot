@@ -816,6 +816,91 @@ test("ACP ClientApp completes a synthetic PageRoot Candidate turn", async (t) =>
   assert.equal(events.some((event) => event.kind === "visible-text"), false);
 });
 
+test("Bridge-finalized ACP turns register no PageRoot host mutation surface", async (t) => {
+  const fixture = await createFixture(t);
+  const observed = { denied: [] };
+  const sessionId = "session_bridge_finalized";
+  const agent = acp
+    .agent({ name: "pageroot-hostile-bridge-finalized-agent" })
+    .onRequest(acp.methods.agent.initialize, ({ params }) => {
+      observed.capabilities = params.clientCapabilities;
+      return {
+        protocolVersion: acp.PROTOCOL_VERSION,
+        agentCapabilities: { loadSession: false },
+        authMethods: [],
+      };
+    })
+    .onRequest(acp.methods.agent.session.new, () => ({ sessionId }))
+    .onRequest(acp.methods.agent.session.prompt, async ({ client }) => {
+      observed.permission = await client.request(
+        acp.methods.client.session.requestPermission,
+        {
+          sessionId,
+          toolCall: {
+            toolCallId: "tool_hostile",
+            title: "Escape Bridge authority",
+            kind: "edit",
+            status: "pending",
+          },
+          options: [{ optionId: "allow", kind: "allow_once", name: "Allow" }],
+        },
+      );
+      const attempts = [
+        [acp.methods.client.fs.readTextFile, {
+          sessionId,
+          path: fixture.manifestPath,
+        }],
+        [acp.methods.client.fs.writeTextFile, {
+          sessionId,
+          path: fixture.outputPath,
+          content: "<!doctype html><title>escaped</title>",
+        }],
+        [acp.methods.client.terminal.create, {
+          sessionId,
+          command: fixture.finalizer.command,
+          args: fixture.finalizer.args,
+          cwd: fixture.finalizer.cwd,
+          env: [],
+          outputByteLimit: 1024,
+        }],
+        [acp.methods.client.terminal.output, { sessionId, terminalId: "forged" }],
+        [acp.methods.client.terminal.waitForExit, { sessionId, terminalId: "forged" }],
+        [acp.methods.client.terminal.kill, { sessionId, terminalId: "forged" }],
+        [acp.methods.client.terminal.release, { sessionId, terminalId: "forged" }],
+      ];
+      for (const [method, params] of attempts) {
+        try {
+          await client.request(method, params);
+          observed.denied.push(false);
+        } catch {
+          observed.denied.push(true);
+        }
+      }
+      return { stopReason: "end_turn" };
+    });
+
+  const result = await runAcpTask({
+    connection: agent,
+    policy: fixture.policy,
+    prompt: "Attempt every legacy PageRoot host operation.",
+    completionAuthority: "bridge",
+    startupTimeoutMs: 1_000,
+    turnTimeoutMs: 2_000,
+  });
+
+  assert.equal(result.stopReason, "end_turn");
+  assert.deepEqual(observed.capabilities, {
+    fs: { readTextFile: false, writeTextFile: false },
+    terminal: false,
+    session: { configOptions: { boolean: {} } },
+    auth: { terminal: false },
+  });
+  assert.deepEqual(observed.permission, { outcome: { outcome: "cancelled" } });
+  assert.deepEqual(observed.denied, Array(7).fill(true));
+  assert.equal(await stat(fixture.outputPath).catch(() => null), null);
+  assert.equal(await readFile(fixture.target.exactSourcePath, "utf8"), fixture.sourceHtml);
+});
+
 test("ACP session progress retains and publishes only a bounded update prefix", async (t) => {
   const fixture = await createFixture(t);
   const observed = { updateCount: 520 };
@@ -1040,9 +1125,10 @@ process.stdout.write("1.1.27\\n");
       if (error?.code !== "ESRCH") throw error;
     }
   });
-  assert.throws(
-    () => process.kill(descendantPid, 0),
-    (error) => error?.code === "ESRCH",
+  assert.equal(
+    await waitForProcessExit(descendantPid, 3_000),
+    true,
+    "the verified preflight retained a same-group descendant",
   );
 
   await assert.rejects(

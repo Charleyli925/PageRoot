@@ -81,6 +81,76 @@ async function stopChild(child) {
   }
 }
 
+async function runCommand(executable, args, { env = process.env, cwd = resourcesPath } = {}) {
+  const child = spawn(executable, args, {
+    cwd,
+    env,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const stdout = [];
+  const stderr = [];
+  child.stdout.on("data", (chunk) => stdout.push(chunk));
+  child.stderr.on("data", (chunk) => stderr.push(chunk));
+  const exit = await new Promise((resolve, reject) => {
+    child.once("error", reject);
+    child.once("exit", (code, signal) => resolve({ code, signal }));
+  });
+  const output = Buffer.concat([...stdout, ...stderr]).toString("utf8");
+  assert.deepEqual(exit, { code: 0, signal: null }, output);
+  return output;
+}
+
+async function verifyPackagedCodexRuntime() {
+  const providerUrl = pathToFileURL(path.join(
+    resourcesPath,
+    "bridge",
+    "agent",
+    "providers",
+    "codex-provider.mjs",
+  )).href;
+  const flagsUrl = pathToFileURL(path.join(
+    resourcesPath,
+    "bridge",
+    "agent",
+    "codex-feature-flags.mjs",
+  )).href;
+  const [{ resolvePinnedCodexInstallation }, { CODEX_BUILD_GATES }] = await Promise.all([
+    import(providerUrl),
+    import(flagsUrl),
+  ]);
+  assert.deepEqual(CODEX_BUILD_GATES, { codexDiscussion: true, codexExecution: true });
+  const installation = await resolvePinnedCodexInstallation();
+  assert.equal(installation.platform, "darwin-arm64");
+  for (const executable of [
+    installation.adapterEntry,
+    installation.codexWrapper,
+    installation.codexBinary,
+    installation.codeModeHost,
+  ]) {
+    assert.equal(executable.startsWith(`${resourcesPath}${path.sep}`), true);
+  }
+  const adapterVersion = await runCommand(helperExecutable, [
+    installation.adapterEntry,
+    "--version",
+  ], {
+    env: {
+      PATH: "/usr/bin:/bin",
+      ELECTRON_RUN_AS_NODE: "1",
+      CODEX_PATH: installation.codexBinary,
+    },
+  });
+  assert.match(adapterVersion, /@agentclientprotocol\/codex-acp 1\.6\.2/u);
+  const codexVersion = await runCommand(installation.codexBinary, ["--version"], {
+    env: {
+      HOME: os.tmpdir(),
+      PATH: "/usr/bin:/bin",
+      TMPDIR: os.tmpdir(),
+    },
+  });
+  assert.match(codexVersion, /codex-cli 0\.148\.0/u);
+  return Object.freeze({ adapterVersion: "1.6.2", codexVersion: "0.148.0" });
+}
+
 async function run() {
   const temporaryRoot = await realpath(
     await mkdtemp(path.join(os.tmpdir(), "pageroot-packaged-agent-")),
@@ -88,6 +158,7 @@ async function run() {
   let bridge = null;
   const logs = { stdout: "", stderr: "" };
   try {
+    const packagedCodex = await verifyPackagedCodexRuntime();
     const fakeAgentSource = await readFile(
       path.join(productRoot, "tests", "fixtures", "qoder-acp-agent.mjs"),
       "utf8",
@@ -193,6 +264,10 @@ async function run() {
       trustPolicyAccepted: trustPolicyVersion,
     });
     assert.equal(preflight.response.status, 200, JSON.stringify(preflight.body));
+    assert.equal(preflight.body.selection?.providerId, "qoder");
+    assert.equal(preflight.body.selection?.runtimeId, "acp");
+    assert.ok(preflight.body.selection?.resolvedModelId);
+    const selection = preflight.body.selection;
     const request = await postJson("/request", {
       projectId: ensured.body.projectId,
       documentId: ensured.body.documentId,
@@ -204,13 +279,7 @@ async function run() {
       changeEvents: [],
       agentDelivery: {
         mode: "managed-agent",
-        selection: {
-          providerId: "qoder",
-          runtimeId: "acp",
-          requestedModelId: null,
-          resolvedModelId: null,
-          reasoning: { requested: null, applied: null, resolution: "provider-default" },
-        },
+        selection,
         trustPolicyVersion,
       },
     });
@@ -222,6 +291,7 @@ async function run() {
       requestId: request.body.requestId,
       attemptId: request.body.attemptId,
       driver: "qoder-acp",
+      selection,
       trustPolicyAccepted: trustPolicyVersion,
       preflightId: preflight.body.preflightId,
     });
@@ -269,6 +339,7 @@ async function run() {
       status: ready.status,
       agentState: ready.agentSession.state,
       candidateStatus: candidateRecord.status,
+      packagedCodex,
     })}\n`);
   } finally {
     await stopChild(bridge);

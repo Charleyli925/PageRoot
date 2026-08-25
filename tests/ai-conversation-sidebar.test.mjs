@@ -5,6 +5,7 @@ import {
   FORBIDDEN_MESSAGE_KEYS,
   conversationLoadedForView,
   conversationReadyForDocument,
+  sidebarAgentPurpose,
   sidebarActionBar,
   sidebarActorInitial,
   sidebarDiscussionNotice,
@@ -15,12 +16,55 @@ import {
   sidebarMessageStream,
   sidebarModelLine,
   sidebarModePresentation,
+  sidebarProviderChoiceState,
+  sidebarRestoredChoiceState,
+  sidebarRunAgentPresentation,
   sidebarResolvedIntent,
   sidebarSendState,
   sidebarCopyTaskState,
   sidebarRunProgress,
   sidebarStateFromRun,
 } from "../app/workbench/ai-conversation-model.js";
+
+test("an incompatible selected Provider leaves the sole compatible Provider selectable", () => {
+  const qoderOnly = [{ id: "qoder", label: "Qoder" }];
+  assert.deepEqual(sidebarProviderChoiceState(qoderOnly, "codex"), {
+    selectedProvider: null,
+    showSelector: true,
+  });
+  assert.deepEqual(sidebarProviderChoiceState(qoderOnly, "qoder"), {
+    selectedProvider: "qoder",
+    showSelector: false,
+  });
+});
+
+test("a removed restored model or reasoning choice requires explicit reselection", () => {
+  const removedModel = sidebarRestoredChoiceState({
+    modelChoices: [{ id: "codex:gpt-current" }],
+    selectedModel: "codex:gpt-removed",
+    reasoningChoices: [{ id: "high" }],
+    selectedReasoning: "high",
+  });
+  assert.equal(removedModel.modelUnavailable, true);
+  assert.equal(removedModel.notice, "上次选择的模型已不可用，请重新选择后继续。");
+
+  const removedReasoning = sidebarRestoredChoiceState({
+    modelChoices: [{ id: "codex:gpt-current" }],
+    selectedModel: "codex:gpt-current",
+    reasoningChoices: [{ id: "medium" }],
+    selectedReasoning: "high",
+  });
+  assert.equal(removedReasoning.reasoningUnavailable, true);
+  assert.equal(
+    removedReasoning.notice,
+    "上次选择的推理强度已不可用，请重新选择后继续。",
+  );
+});
+
+test("a restored modification intent preflights execution rather than discussion", () => {
+  assert.equal(sidebarAgentPurpose("modify"), "execution");
+  assert.equal(sidebarAgentPurpose("discuss"), "discussion");
+});
 
 function factMessage(overrides = {}) {
   return {
@@ -361,6 +405,13 @@ test("the live reply reuses the stored message shape and marks what is incomplet
   assert.equal(streaming.truncated, false);
   assert.equal(streaming.interrupted, false);
 
+  const codexStreaming = sidebarLiveReply(
+    { status: "running", replyText: "Codex reply" },
+    [],
+    "Codex",
+  );
+  assert.equal(codexStreaming.actorLabel, "Codex");
+
   const truncated = sidebarLiveReply({
     status: "completed",
     replyText: "很长的回复",
@@ -552,6 +603,10 @@ test("an interrupted discussion turn is never presented as a complete answer", (
     "progress",
   );
   assert.equal(
+    sidebarDiscussionNotice({ status: "running" }, "Codex").text,
+    "Codex 正在阅读当前预览并回复…",
+  );
+  assert.equal(
     sidebarDiscussionNotice({ status: "cancelling" }).text,
     "正在结束这轮讨论…",
   );
@@ -616,6 +671,10 @@ test("the delivery disclosure moves out of the dialog and onto the modify intent
   assert.equal(
     sidebarDeliveryDisclosure("modify"),
     "Qoder 会读取本轮 HTML、评论和附件；结果先进入审阅。",
+  );
+  assert.equal(
+    sidebarDeliveryDisclosure("modify", "Codex"),
+    "Codex 会读取本轮 HTML、评论和附件；结果先进入审阅。",
   );
 
   // Discussion reads the page without writing it, so that sentence would be a
@@ -698,6 +757,27 @@ test("preparing a modification renames the mode instead of still claiming discus
   // a running execution up as something pending.
   assert.equal(sidebarModePresentation("processing", "modify").label, "执行 · 写入候选");
   assert.equal(sidebarModePresentation("review-view", "modify").label, "审阅 · 只读");
+});
+
+test("discussion mode names the selected Provider instead of hard-coding Qoder", () => {
+  assert.equal(
+    sidebarModePresentation("preview-discussion", "discuss", "Codex").detail,
+    "Codex 可以阅读当前预览，但不能修改 HTML。",
+  );
+  assert.equal(
+    sidebarModePresentation("preparing-delivery", "discuss", "Qoder").detail,
+    "Qoder 可以阅读当前预览，但不能修改 HTML。",
+  );
+});
+
+test("execution narration names the frozen run Provider instead of Qoder", () => {
+  assert.deepEqual(sidebarRunAgentPresentation("Codex"), {
+    actor: "agent",
+    actorLabel: "Codex",
+    actorInitial: "C",
+    ariaLabel: "Codex 的说明",
+  });
+  assert.equal(sidebarRunAgentPresentation("Qoder").actorLabel, "Qoder");
 });
 
 test("the clipboard round says what is actually happening and keeps the task reachable", () => {

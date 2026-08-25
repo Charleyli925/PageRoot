@@ -11,6 +11,8 @@ import type { ActiveRun } from "../domain/run-lifecycle.js";
 import {
   conversationLoadedForView,
   conversationReadyForDocument,
+  sidebarAgentPurpose,
+  sidebarProviderChoiceState,
   sidebarStateFromRun,
   type SidebarCatalogStatus,
   type SidebarIntent,
@@ -79,6 +81,94 @@ function deferredIntentMatches(
     && pending.sourcePath === identity.sourcePath;
 }
 
+function persistedSelectionMatchesLiveCatalog(
+  selection: AgentCatalogSnapshot["selected"],
+  provider: AgentCatalogSnapshot["providers"][string] | null | undefined,
+) {
+  if (!selection || !provider || provider.runtimeId !== selection.runtimeId) return false;
+  const liveModelIds = new Set((provider.models || []).map((model) => String(model.id || "")));
+  for (const modelId of [selection.requestedModelId, selection.resolvedModelId]) {
+    if (modelId && !liveModelIds.has(modelId)) return false;
+  }
+  if (selection.reasoning.resolution === "provider-default") return true;
+  return selection.reasoning.resolution === "exact"
+    && Boolean(selection.reasoning.requested)
+    && (provider.reasoningEfforts || []).some(
+      (effort) => String(effort.id || "") === selection.reasoning.requested,
+    );
+}
+
+async function restoreConversationAgentSelection({
+  controller,
+  catalog,
+  persistedSelection,
+  purpose,
+  isCurrent = () => true,
+  checkUsability = (nextPurpose) => controller.checkAgentUsability({ purpose: nextPurpose }),
+}: {
+  controller: WorkspaceController;
+  catalog: AgentCatalogSnapshot | null | undefined;
+  persistedSelection: AgentCatalogSnapshot["selected"];
+  purpose: "discussion" | "execution";
+  isCurrent?: () => boolean;
+  checkUsability?: (purpose: "discussion" | "execution") => Promise<{ status: string }>;
+}) {
+  const persistedProvider = persistedSelection
+    ? catalog?.providers?.[persistedSelection.providerId]
+    : null;
+  if (persistedSelection && (!persistedProvider
+    || persistedProvider.runtimeId !== persistedSelection.runtimeId)) {
+    controller.restoreAgentSelection(persistedSelection);
+    return;
+  }
+  const persistedProviderCompatible = Boolean(
+    persistedSelection
+    && persistedProvider
+    && persistedProvider.runtimeId === persistedSelection.runtimeId
+    && persistedProvider.capabilities?.[purpose] === true,
+  );
+  const baseProvider = persistedProviderCompatible
+    ? persistedProvider!
+    : Object.values(catalog?.providers || {})
+      .find((provider) => provider.capabilities?.[purpose] === true);
+  if (!baseProvider || !isCurrent()) return;
+
+  // Query live choices from the Provider default before trusting a possibly
+  // stale model or reasoning value restored from disk.
+  const baseSelection = baseProvider.selection;
+  controller.selectAgent(baseSelection);
+  const defaultCheck = await checkUsability(purpose);
+  if (!isCurrent()) return;
+  if (defaultCheck.status !== "succeeded") {
+    // The live catalog could not be established, but the durable draft still
+    // owns its explicit choice. Keep that authority selected so a later retry
+    // checks the same model/reasoning instead of silently running the default.
+    if (persistedSelection) controller.selectAgent(persistedSelection);
+    return;
+  }
+
+  const liveCatalog = controller.getSnapshot().run?.agentCatalog;
+  const liveProvider = persistedSelection
+    ? liveCatalog?.providers?.[persistedSelection.providerId]
+    : null;
+  if (persistedSelection && persistedSelectionMatchesLiveCatalog(persistedSelection, liveProvider)) {
+    if (JSON.stringify(persistedSelection) === JSON.stringify(baseSelection)) return;
+    controller.selectAgent(persistedSelection);
+    // A transient failure of a still-listed choice must leave that explicit
+    // selection active and unavailable; silently running the default would
+    // contradict the conversation draft's authority.
+    await checkUsability(purpose);
+    return;
+  }
+
+  if (!persistedSelection) return;
+  // Keep a disappeared explicit choice active and fail its preflight. The live
+  // catalog remains projected from the safe default probe, so the user can see
+  // replacements, but no Turn or Request can silently use one before reselecting.
+  controller.selectAgent(persistedSelection);
+  await checkUsability(purpose);
+}
+
 export function useAiConversation({
   controllerRef,
   conversation,
@@ -108,6 +198,19 @@ export function useAiConversation({
   const agentAvailabilityRef = useRef(qoderAvailability);
   const agentCheckInFlightRef = useRef<Promise<unknown> | null>(null);
   const agentCheckStartedAtRef = useRef(0);
+  const agentCheckTailRef = useRef<Promise<void>>(Promise.resolve());
+  const selectionRestoreGenerationRef = useRef(0);
+  const queueAgentCheck = useCallback((
+    controller: WorkspaceController,
+    purpose: "discussion" | "execution",
+  ) => {
+    const checking = agentCheckTailRef.current.then(
+      () => controller.checkAgentUsability({ purpose }),
+      () => controller.checkAgentUsability({ purpose }),
+    );
+    agentCheckTailRef.current = checking.then(() => undefined, () => undefined);
+    return checking;
+  }, []);
   useEffect(() => {
     agentAvailabilityRef.current = qoderAvailability;
   }, [qoderAvailability]);
@@ -123,6 +226,12 @@ export function useAiConversation({
   // reload window, which on a slow host drops the "copy to another Agent"
   // button long enough for a click to time out. A ref keeps the load to one.
   const requestedIntentRef = useRef<DeferredIntent | null>(null);
+  const activeIntent = (conversation?.draftIntent ?? "discuss") as SidebarIntent;
+  const activePurpose = sidebarAgentPurpose(activeIntent);
+  const activePurposeRef = useRef(activePurpose);
+  useEffect(() => {
+    activePurposeRef.current = activePurpose;
+  }, [activePurpose]);
   // Load when the sidebar becomes visible for a Document; flush + drain + close
   // on any change to that identity or when it stops being visible.
   //
@@ -134,6 +243,7 @@ export function useAiConversation({
     const controller = controllerRef.current;
     if (!controller) return undefined;
     const identity = { projectId, documentId, sourcePath };
+    selectionRestoreGenerationRef.current += 1;
     let cancelled = false;
     const requestAgentCheck = (force = false) => {
       const status = agentAvailabilityRef.current?.status;
@@ -144,7 +254,7 @@ export function useAiConversation({
         || now - agentCheckStartedAtRef.current < 1_500
       ) return;
       agentCheckStartedAtRef.current = now;
-      const checking = Promise.resolve(controller.checkAgentUsability())
+      const checking = queueAgentCheck(controller, activePurposeRef.current)
         .catch(() => undefined);
       agentCheckInFlightRef.current = checking;
       void checking.finally(() => {
@@ -155,16 +265,38 @@ export function useAiConversation({
     };
     void (async () => {
       await controller.openConversation({ projectId, documentId, sourcePath });
+      const catalogOutcome = await controller.refreshAgentCatalog();
       if (cancelled) return;
       const pending = requestedIntentRef.current;
+      const refreshedCatalog = catalogOutcome.status === "succeeded"
+        ? (catalogOutcome.value as { catalog?: AgentCatalogSnapshot })?.catalog
+        : null;
       if (pending && deferredIntentMatches(pending, identity)) {
         requestedIntentRef.current = null;
         controller.updateConversationDraftIntent(pending.intent);
       }
+      const currentConversation = controller.getSnapshot().conversation;
+      if (!currentConversation
+        || !conversationReadyForDocument(currentConversation, projectId, documentId)) return;
+      const restoreGeneration = selectionRestoreGenerationRef.current;
+      await restoreConversationAgentSelection({
+        controller,
+        catalog: refreshedCatalog,
+        persistedSelection: currentConversation.draftProviderSelection,
+        purpose: sidebarAgentPurpose(currentConversation.draftIntent),
+        checkUsability: (purpose) => queueAgentCheck(controller, purpose),
+        isCurrent: () => (
+          !cancelled
+          && selectionRestoreGenerationRef.current === restoreGeneration
+          && controllerRef.current === controller
+          && conversationReadyForDocument(
+            controller.getSnapshot().conversation,
+            projectId,
+            documentId,
+          )
+        ),
+      });
     })();
-    void Promise.resolve(controller.refreshAgentCatalog())
-      .then(() => requestAgentCheck(true))
-      .catch(() => requestAgentCheck(true));
     const handleReturnToApp = () => {
       if (document.visibilityState === "visible") requestAgentCheck();
     };
@@ -172,6 +304,7 @@ export function useAiConversation({
     document.addEventListener("visibilitychange", handleReturnToApp);
     return () => {
       cancelled = true;
+      selectionRestoreGenerationRef.current += 1;
       window.removeEventListener("focus", handleReturnToApp);
       document.removeEventListener("visibilitychange", handleReturnToApp);
       // A choice made during this Document's load must not survive its drain and
@@ -179,14 +312,15 @@ export function useAiConversation({
       if (deferredIntentMatches(requestedIntentRef.current, identity)) {
         requestedIntentRef.current = null;
       }
-      void controller.flushConversationDraft();
+      void controller.flushConversationDraft().finally(() => {
+        controller.closeConversation(identity);
+      });
       // A read-only discussion turn is cancelled at this boundary rather than
       // left running against a Document the user is no longer looking at.
       void controller.drainDiscussionTurn();
       controller.closeDiscussionTurn();
-      controller.closeConversation();
     };
-  }, [visible, projectId, documentId, sourcePath, controllerRef]);
+  }, [visible, projectId, documentId, sourcePath, controllerRef, queueAgentCheck]);
 
   const toggle = useCallback(() => setOpen((value) => !value), []);
   // Submitting a round makes this the surface that reports it, so the workbench
@@ -201,6 +335,7 @@ export function useAiConversation({
     setOpen(true);
     if (!intent) return;
     if (conversationReadyForDocument(conversation, projectId, documentId)) {
+      selectionRestoreGenerationRef.current += 1;
       controllerRef.current?.updateConversationDraftIntent(intent);
       return;
     }
@@ -215,14 +350,17 @@ export function useAiConversation({
 
   const onIntentChange = useCallback((intent: SidebarIntent) => {
     if (conversationReadyForDocument(conversation, projectId, documentId)) {
+      selectionRestoreGenerationRef.current += 1;
       controllerRef.current?.updateConversationDraftIntent(intent);
-      return;
+    } else {
+      // The intent controls are visible while the first conversation load settles.
+      // Preserve a quick user choice and apply it after that load restores the
+      // persisted draft, for the same reason reveal(intent) defers its write.
+      requestedIntentRef.current = { intent, projectId, documentId, sourcePath };
     }
-    // The intent controls are visible while the first conversation load settles.
-    // Preserve a quick user choice and apply it after that load restores the
-    // persisted draft, for the same reason reveal(intent) defers its write.
-    requestedIntentRef.current = { intent, projectId, documentId, sourcePath };
-  }, [controllerRef, conversation, projectId, documentId, sourcePath]);
+    const controller = controllerRef.current;
+    if (controller) void queueAgentCheck(controller, sidebarAgentPurpose(intent));
+  }, [controllerRef, conversation, projectId, documentId, sourcePath, queueAgentCheck]);
 
   const onCollapse = useCallback(() => setOpen(false), []);
 
@@ -281,16 +419,36 @@ export function useAiConversation({
   }, [onDeliverModification]);
 
   const providerChoices = useMemo(() => Object.values(agentCatalog?.providers || {})
-    .filter((provider) => provider.capabilities?.discussion === true)
+    .filter((provider) => provider.capabilities?.[activePurpose] === true)
     .map((provider) => ({
       id: provider.providerId,
       label: provider.presentation.displayName,
       runtimeId: provider.runtimeId,
-    })), [agentCatalog]);
+    })), [activePurpose, agentCatalog]);
   const selectedProvider = agentCatalog?.selected?.providerId || null;
-  const activeProvider = selectedProvider
-    ? agentCatalog?.providers?.[selectedProvider]
+  const providerChoiceState = useMemo(
+    () => sidebarProviderChoiceState(providerChoices, selectedProvider),
+    [providerChoices, selectedProvider],
+  );
+  const activeProvider = providerChoiceState.selectedProvider
+    ? agentCatalog?.providers?.[providerChoiceState.selectedProvider]
     : null;
+  const discussionProvider = discussionTurn?.selection?.providerId
+    ? agentCatalog?.providers?.[discussionTurn.selection.providerId]
+    : null;
+  const runProviderId = activeRun?.agentDelivery?.selection?.providerId || null;
+  const runProvider = runProviderId ? agentCatalog?.providers?.[runProviderId] : null;
+  const runAgentName = String(
+    runProvider?.presentation.agentName
+      || runProviderId
+      || activeProvider?.presentation.agentName
+      || "Agent",
+  );
+  const discussionAgentName = String(
+    discussionProvider?.presentation.agentName
+      || activeProvider?.presentation.agentName
+      || "Agent",
+  );
   const modelChoices = useMemo(() => (activeProvider?.models || []).map((model) => ({
     id: String(model.id || ""),
     label: String(model.displayName || model.id || ""),
@@ -302,44 +460,126 @@ export function useAiConversation({
   const onProviderChange = useCallback((providerId: string) => {
     const provider = agentCatalog?.providers?.[providerId];
     if (!provider) return;
-    controllerRef.current?.selectAgent(provider.selection);
-    void controllerRef.current?.checkAgentUsability();
-  }, [agentCatalog, controllerRef]);
+    selectionRestoreGenerationRef.current += 1;
+    const selected = controllerRef.current?.selectAgent(provider.selection);
+    if (selected) {
+      const rawDisplayName = (provider.models || []).find((model) => (
+        model.id === selected.resolvedModelId || model.id === selected.requestedModelId
+      ))?.displayName || null;
+      const displayName = rawDisplayName ? String(rawDisplayName) : null;
+      controllerRef.current?.updateConversationDraftAgentSelection(selected, displayName);
+    }
+    const controller = controllerRef.current;
+    if (controller) void queueAgentCheck(controller, activePurpose);
+  }, [activePurpose, agentCatalog, controllerRef, queueAgentCheck]);
   const onModelChange = useCallback((modelId: string) => {
-    const selected = agentCatalog?.selected;
-    if (!selected || !modelId) return;
-    controllerRef.current?.selectAgent({
-      ...selected,
-      requestedModelId: modelId,
-      resolvedModelId: modelId,
-      reasoning: { ...selected.reasoning, resolution: "exact" },
+    const currentSelection = agentCatalog?.selected;
+    if (!currentSelection) return;
+    selectionRestoreGenerationRef.current += 1;
+    const nextSelection = controllerRef.current?.selectAgent({
+      ...currentSelection,
+      requestedModelId: modelId || null,
+      resolvedModelId: modelId || null,
     });
-    void controllerRef.current?.checkAgentUsability();
-  }, [agentCatalog, controllerRef]);
+    const displayName = modelChoices.find((model) => model.id === modelId)?.label || null;
+    if (nextSelection) {
+      controllerRef.current?.updateConversationDraftAgentSelection(nextSelection, displayName);
+    }
+    const controller = controllerRef.current;
+    if (controller) void queueAgentCheck(controller, activePurpose);
+  }, [activePurpose, agentCatalog, controllerRef, modelChoices, queueAgentCheck]);
   const onReasoningChange = useCallback((reasoning: string) => {
     const selected = agentCatalog?.selected;
-    if (!selected || !reasoning) return;
-    controllerRef.current?.selectAgent({
+    if (!selected) return;
+    selectionRestoreGenerationRef.current += 1;
+    const next = controllerRef.current?.selectAgent({
       ...selected,
-      reasoning: { requested: reasoning, applied: reasoning, resolution: "exact" },
+      reasoning: reasoning
+        ? { requested: reasoning, applied: reasoning, resolution: "exact" }
+        : { requested: null, applied: null, resolution: "provider-default" },
     });
-    void controllerRef.current?.checkAgentUsability();
-  }, [agentCatalog, controllerRef]);
+    if (next) {
+      controllerRef.current?.updateConversationDraftAgentSelection(
+        next,
+        conversation?.draftModelDisplayName ?? null,
+      );
+    }
+    const controller = controllerRef.current;
+    if (controller) void queueAgentCheck(controller, activePurpose);
+  }, [
+    activePurpose,
+    agentCatalog,
+    controllerRef,
+    conversation?.draftModelDisplayName,
+    queueAgentCheck,
+  ]);
   const onAgentAction = useCallback(() => {
     const kind = activeProvider?.presentation?.authAction
       && typeof activeProvider.presentation.authAction === "object"
       ? String((activeProvider.presentation.authAction as { kind?: unknown }).kind || "")
       : "";
     if (kind === "open-url" || kind === "show-device-code") {
-      void controllerRef.current?.authenticateAgent();
+      void (async () => {
+        const controller = controllerRef.current;
+        if (!controller) return;
+        selectionRestoreGenerationRef.current += 1;
+        const origin = {
+          projectId,
+          documentId,
+          sourcePath,
+          conversationId: conversation?.conversationId || null,
+          generation: selectionRestoreGenerationRef.current,
+        };
+        const result = await controller.authenticateAgent();
+        const currentConversation = controller.getSnapshot().conversation;
+        if (
+          result?.status !== "succeeded"
+          || controllerRef.current !== controller
+          || selectionRestoreGenerationRef.current !== origin.generation
+          || currentConversation?.conversationId !== origin.conversationId
+          || !conversationReadyForDocument(
+            currentConversation,
+            origin.projectId,
+            origin.documentId,
+          )
+          || currentConversation.context?.sourcePath !== origin.sourcePath
+        ) return;
+        await restoreConversationAgentSelection({
+          controller,
+          catalog: controller.getSnapshot().run?.agentCatalog,
+          persistedSelection: currentConversation.draftProviderSelection,
+          purpose: activePurpose,
+          checkUsability: (purpose) => queueAgentCheck(controller, purpose),
+          isCurrent: () => (
+            controllerRef.current === controller
+            && selectionRestoreGenerationRef.current === origin.generation
+            && conversationReadyForDocument(
+              controller.getSnapshot().conversation,
+              origin.projectId,
+              origin.documentId,
+            )
+          ),
+        });
+      })();
       return;
     }
     if (kind === "retry") {
-      void controllerRef.current?.checkAgentUsability();
+      const controller = controllerRef.current;
+      if (controller) void queueAgentCheck(controller, activePurpose);
       return;
     }
     onOpenAgentSettings?.();
-  }, [activeProvider, controllerRef, onOpenAgentSettings]);
+  }, [
+    activeProvider,
+    activePurpose,
+    controllerRef,
+    conversation,
+    documentId,
+    onOpenAgentSettings,
+    projectId,
+    queueAgentCheck,
+    sourcePath,
+  ]);
 
   const sidebarProps = useMemo(() => ({
     state,
@@ -350,19 +590,23 @@ export function useAiConversation({
     // Qoder's availability is the model catalog's readiness: one owner supplies
     // both, so the Composer can never claim ready while the Agent is not.
     catalogStatus: (qoderAvailability?.status ?? "unavailable") as SidebarCatalogStatus,
-    modelDisplayName: agentModelDisplayName,
+    modelDisplayName: activeProvider ? agentModelDisplayName : null,
     modelChoiceCount: modelChoices.length,
     providerChoices,
-    selectedProvider,
+    selectedProvider: providerChoiceState.selectedProvider,
     modelChoices,
-    selectedModel: agentCatalog?.selected?.resolvedModelId
-      || agentCatalog?.selected?.requestedModelId
-      || null,
+    selectedModel: activeProvider
+      ? agentCatalog?.selected?.resolvedModelId || agentCatalog?.selected?.requestedModelId || null
+      : null,
     reasoningChoices,
-    selectedReasoning: agentCatalog?.selected?.reasoning.applied
-      || agentCatalog?.selected?.reasoning.requested
-      || null,
+    selectedReasoning: activeProvider
+      ? agentCatalog?.selected?.reasoning.applied
+        || agentCatalog?.selected?.reasoning.requested
+        || null
+      : null,
     agentName: String(activeProvider?.presentation.agentName || "Agent"),
+    runAgentName,
+    discussionAgentName,
     authActionLabel: activeProvider?.presentation.authAction
       && typeof activeProvider.presentation.authAction === "object"
       ? String((activeProvider.presentation.authAction as { label?: unknown }).label || "")
@@ -397,10 +641,12 @@ export function useAiConversation({
     agentModelDisplayName,
     agentCatalog,
     providerChoices,
-    selectedProvider,
+    providerChoiceState,
     modelChoices,
     reasoningChoices,
     discussionTurn,
+    discussionAgentName,
+    runAgentName,
     pendingCommentCount,
     onDraftChange,
     onIntentChange,

@@ -945,3 +945,22 @@ but cannot start, restart, or fall back to clipboard or another provider.
 Candidate and Version codecs contain no provider selection and remain unchanged;
 review and adoption continue to validate their existing Request, Hash and source
 authority rather than the availability of the historical provider.
+
+### 23.1 Codex agent-native execution
+
+A Codex execution ticket freezes purpose, Provider/runtime, security profile,
+model/reasoning, installation digest, Request and Attempt. The Agent works only
+against read-only copies of the manifest-verified inputs and may create exactly
+one temporary `output/index.html`. That file, a successful ACP stop or Agent
+prose is not completion evidence. Once the Agent process group is stopped, the
+Bridge revalidates runtime authority, every frozen input and the single safe
+HTML file before creating the canonical Attempt output with `wx`. The Bridge
+then invokes the existing repository finalizer using its fixed executable and
+arguments. Only matching completion evidence lets normal Request status
+projection publish the Candidate. Review rejection leaves the Working Copy
+unchanged; explicit adoption uses the unchanged promotion transaction.
+
+Cancellation before publication writes no output. Cancellation cannot overlap a
+started Bridge finalizer; cleanup uncertainty keeps the lease. Missing/multiple,
+linked, escaped, incomplete, oversized or drifting output and any frozen-input
+drift fail the Attempt without Candidate authority.

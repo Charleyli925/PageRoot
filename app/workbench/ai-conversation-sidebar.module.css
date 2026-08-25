@@ -172,7 +172,8 @@
   color: #fff;
 }
 
-.message[data-actor="qoder"] .avatar {
+.message[data-actor="qoder"] .avatar,
+.message[data-actor="agent"] .avatar {
   background: rgb(32 29 49 / 10%);
   color: #43414f;
 }

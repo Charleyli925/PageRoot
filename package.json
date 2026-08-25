@@ -235,6 +235,18 @@
         "to": "bridge/agent/agent-errors.mjs"
       },
       {
+        "from": "scripts/agent/codex-feature-flags.mjs",
+        "to": "bridge/agent/codex-feature-flags.mjs"
+      },
+      {
+        "from": "scripts/agent/codex-runtime-lock.json",
+        "to": "bridge/agent/codex-runtime-lock.json"
+      },
+      {
+        "from": "scripts/agent/macho-code-fingerprint.mjs",
+        "to": "bridge/agent/macho-code-fingerprint.mjs"
+      },
+      {
         "from": "scripts/agent/providers/agent-provider-contract.mjs",
         "to": "bridge/agent/providers/agent-provider-contract.mjs"
       },
@@ -247,6 +259,10 @@
         "to": "bridge/agent/providers/qoder-provider.mjs"
       },
       {
+        "from": "scripts/agent/providers/codex-provider.mjs",
+        "to": "bridge/agent/providers/codex-provider.mjs"
+      },
+      {
         "from": "scripts/agent/runtimes/agent-runtime-contract.mjs",
         "to": "bridge/agent/runtimes/agent-runtime-contract.mjs"
       },
@@ -257,6 +273,30 @@
       {
         "from": "scripts/agent/runtimes/acp-runtime.mjs",
         "to": "bridge/agent/runtimes/acp-runtime.mjs"
+      },
+      {
+        "from": "scripts/agent/runtimes/acp-authentication.mjs",
+        "to": "bridge/agent/runtimes/acp-authentication.mjs"
+      },
+      {
+        "from": "scripts/agent/runtimes/acp-probe.mjs",
+        "to": "bridge/agent/runtimes/acp-probe.mjs"
+      },
+      {
+        "from": "scripts/agent/runtimes/agent-native-acp-runner.mjs",
+        "to": "bridge/agent/runtimes/agent-native-acp-runner.mjs"
+      },
+      {
+        "from": "scripts/agent/sandbox/macos-agent-sandbox.mjs",
+        "to": "bridge/agent/sandbox/macos-agent-sandbox.mjs"
+      },
+      {
+        "from": "scripts/agent/native/codex-workspace.mjs",
+        "to": "bridge/agent/native/codex-workspace.mjs"
+      },
+      {
+        "from": "scripts/agent/native/bridge-finalizer.mjs",
+        "to": "bridge/agent/native/bridge-finalizer.mjs"
       },
       {
         "from": "scripts/agent/policies/discussion-policy.mjs",
@@ -407,6 +447,27 @@
       {
         "from": "node_modules/@agentclientprotocol/sdk",
         "to": "node_modules/@agentclientprotocol/sdk",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "node_modules/@agentclientprotocol/codex-acp",
+        "to": "node_modules/@agentclientprotocol/codex-acp",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "node_modules/@openai/codex",
+        "to": "node_modules/@openai/codex",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "node_modules/@openai/codex-darwin-arm64",
+        "to": "node_modules/@openai/codex-darwin-arm64",
         "filter": [
           "**/*"
         ]
@@ -593,6 +654,10 @@
       {
         "from": "THIRD_PARTY_NOTICES.md",
         "to": "THIRD_PARTY_NOTICES.md"
+      },
+      {
+        "from": "CODEX_RUNTIME_SBOM.spdx.json",
+        "to": "CODEX_RUNTIME_SBOM.spdx.json"
       }
     ],
     "mac": {

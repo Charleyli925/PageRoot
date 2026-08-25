@@ -107,13 +107,7 @@ async function createManagedRequest(t, { hang = false } = {}) {
     changeEvents: [],
     agentDelivery: {
       mode: "managed-agent",
-      selection: {
-        providerId: "qoder",
-        runtimeId: "acp",
-        requestedModelId: null,
-        resolvedModelId: null,
-        reasoning: { requested: null, applied: null, resolution: "provider-default" },
-      },
+      selection: preflight.body.selection,
       trustPolicyVersion: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
     },
   });
@@ -133,6 +127,7 @@ async function createManagedRequest(t, { hang = false } = {}) {
     driver: "qoder-acp",
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
     preflightId: preflight.body.preflightId,
+    selection: preflight.body.selection,
   });
   assert.equal(started.response.status, 202, JSON.stringify(started.body));
   return {
@@ -294,6 +289,7 @@ test("Bridge crash fences an interrupted Qoder Request from restart and clipboar
     driver: "qoder-acp",
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
     preflightId: preflight.body.preflightId,
+    selection: preflight.body.selection,
   });
   assert.equal(retried.response.status, 409, JSON.stringify(retried.body));
   assert.equal(retried.body.error.code, "AGENT_RESTART_RECOVERY_REQUIRED");

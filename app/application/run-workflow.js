@@ -467,14 +467,14 @@ export class RunWorkflow {
     }
   }
 
-  async checkAgentUsability() {
+  async checkAgentUsability({ purpose = "execution" } = {}) {
     const displayName = this.#agentCatalog.presentation().displayName || "Agent";
     if (this.#disposed) {
       return blocked("RUN_WORKFLOW_DISPOSED", `${displayName} 状态检查已经停止。`);
     }
     try {
       const selection = this.#agentCatalog.freezeSelected();
-      const preflight = await this.#agentCatalog.preflight(selection, { force: true });
+      const preflight = await this.#agentCatalog.preflight(selection, { force: true, purpose });
       this.#agentCatalog.discardTicket(preflight);
       return succeeded({ availability: this.#agentCatalog.availability() });
     } catch (cause) {
@@ -611,6 +611,11 @@ export class RunWorkflow {
             purpose: "execution",
             trustPolicyVersion: frozenAgentDelivery.trustPolicyVersion,
           },
+        );
+        frozenAgentDelivery = frozenDeliveryForMode(
+          MANAGED_AGENT_MODE,
+          agentPreflight.selection,
+          this.#agentCatalog.provider(agentPreflight.selection),
         );
         if (!this.#isCurrentContext(context)) return stale(context);
       }
@@ -1708,6 +1713,10 @@ export class RunWorkflow {
 
   selectAgent(selection) {
     return this.#agentCatalog.select(selection);
+  }
+
+  restoreAgentSelection(selection) {
+    return this.#agentCatalog.restore(selection);
   }
 
   // Compatibility facade for existing controller callers.

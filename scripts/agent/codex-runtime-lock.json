@@ -25,8 +25,14 @@
       "version": "0.148.0-darwin-arm64",
       "integrity": "sha512-xgBPFiF1fHUlRS7HE6wGB56LjBJh16kGD7b4TTbwdVBZNB4QDkTok+vdkAGrfpVkfKcwGNhPSKDgCw+KMZOVug==",
       "binarySha256": "b0308517b20543012fa2171aa3d46ce455a7456c4eb2a552ab9468ba4eeb1e50",
-      "codeModeHostSha256": "cc3269e735a0fa2823693d51ca8c5fe98aa704c7e6ceb7ed366ea1e161de2ced",
-      "packageManifestSha256": "e257e5ec362f1e65466a17a7d8e71c9030fb5ce7590329528ef4e5431f468d07"
+    "binaryCodeSha256": "bc057b49c74605e97a63d70bebbbbe29846c7b40f37fe4ab2cc66e58baf0ceba",
+    "codeModeHostSha256": "cc3269e735a0fa2823693d51ca8c5fe98aa704c7e6ceb7ed366ea1e161de2ced",
+    "codeModeHostCodeSha256": "74f5b9e4e3da7bfab704047f22672876e1eaa8329da4d5852ad4585ebe17323a",
+    "ripgrepSha256": "9cf8c71c9c0fec96864ec303345cb272854d24b0037c0554485eeff72db56930",
+    "ripgrepCodeSha256": "28053169d0f22dd7ad1a70db499f853e4884932410e6f24415ae957e6cc332fc",
+    "zshSha256": "a50ab84daf2b8e5348cd6941002718e92ac637eaad126232ec594e1129b1eab5",
+    "zshCodeSha256": "9eafaaf405d7416fbadbd461b7a361bc1289b2601f8521498ea54cebdc72f2a6",
+    "packageManifestSha256": "e257e5ec362f1e65466a17a7d8e71c9030fb5ce7590329528ef4e5431f468d07"
     }
   },
   "appServerSchema": {

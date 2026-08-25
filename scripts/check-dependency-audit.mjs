@@ -9,6 +9,9 @@ const scriptPath = fileURLToPath(import.meta.url);
 const productRoot = path.resolve(path.dirname(scriptPath), "..");
 
 export const acceptedAdvisories = Object.freeze({});
+const SELF_CONTAINED_RUNTIME_MODULES = Object.freeze(new Set([
+  "@agentclientprotocol/codex-acp",
+]));
 
 export function evaluateAuditReport(report, {
   allowlist = acceptedAdvisories,
@@ -79,6 +82,7 @@ export function evaluatePackagedRuntimeClosure(packageJson, packageLock) {
       missingPackages.push(packagePath);
       continue;
     }
+    if (SELF_CONTAINED_RUNTIME_MODULES.has(moduleName)) continue;
     for (const dependencyName of Object.keys(lockedPackage.dependencies || {})) {
       const dependencyPath = `node_modules/${dependencyName}`;
       if (!packageLock.packages[dependencyPath]) {

@@ -2095,6 +2095,9 @@ async function saveConversationDraft(body) {
   const draft = await writeConversationDraft(context, conversation.conversationId, {
     text: typeof body.text === "string" ? body.text : "",
     intent: body.intent,
+    ...(body.providerSelection === undefined
+      ? {}
+      : { providerSelection: body.providerSelection }),
     ...(body.modelId === undefined ? {} : { modelId: body.modelId }),
     ...(body.modelDisplayName === undefined
       ? {}
@@ -2595,7 +2598,7 @@ async function route(request, response) {
   }
   if (request.method === "POST" && url.pathname === "/agent/authenticate") {
     const body = await readBody(request);
-    sendJson(response, 202, await authenticateAgent(body));
+    sendJson(response, 200, await authenticateAgent(body));
     return;
   }
   if (request.method === "POST" && url.pathname === "/agent/start") {

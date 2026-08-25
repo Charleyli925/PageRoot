@@ -32,6 +32,13 @@ const IDENTITY = Object.freeze({
   attemptId: "attempt_001",
   sourcePath: "/tmp/pageroot-agent-bridge.html",
 });
+const QODER_SELECTION = Object.freeze({
+  providerId: "qoder",
+  runtimeId: "acp",
+  requestedModelId: null,
+  resolvedModelId: "qoder:Synthetic-Qoder",
+  reasoning: Object.freeze({ requested: null, applied: null, resolution: "provider-default" }),
+});
 
 async function createFakeCommand(t) {
   const root = await mkdtemp(path.join(os.tmpdir(), "pageroot-agent-service-"));
@@ -110,7 +117,7 @@ process.exit(2);
   return { root, home, bundle, launcher };
 }
 
-function taskAuthority(identity = IDENTITY) {
+function taskAuthority(identity = IDENTITY, selection = QODER_SELECTION) {
   return {
     run: {
       ...identity,
@@ -123,7 +130,8 @@ function taskAuthority(identity = IDENTITY) {
     request: {
       request: {
         agentDelivery: {
-          mode: "qoder-acp",
+          mode: "managed-agent",
+          selection,
           trustPolicyVersion: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
         },
       },
@@ -212,6 +220,7 @@ test("Agent Bridge preflight is explicit, bounded, and consumed by one Qoder tas
     driver: "qoder-acp",
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
     preflightId: ticket.preflightId,
+    selection: ticket.selection,
   });
   assert.equal(started.accepted, true);
   assert.equal(started.session.state, "starting");
@@ -252,7 +261,10 @@ test("verified npm Qoder uses the trusted runtime under Finder's sparse PATH", a
       environment: commandEnvironment,
       homeDirectory: fixture.home,
     }),
-    resolveTask: async () => taskAuthority(),
+    resolveTask: async () => taskAuthority(IDENTITY, Object.freeze({
+      ...QODER_SELECTION,
+      resolvedModelId: "qoder:Finder-Sparse-Path",
+    })),
     policyLoader: async () => fakePolicy(),
     leaseStore: {
       acquire: async ({ ownerToken }) => ({ path: "memory-agent-lease", ownerToken }),
@@ -274,6 +286,7 @@ test("verified npm Qoder uses the trusted runtime under Finder's sparse PATH", a
     driver: "qoder-acp",
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
     preflightId: ticket.preflightId,
+    selection: ticket.selection,
   });
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(observed.useVerifiedJavaScriptRuntime, true);
@@ -507,7 +520,7 @@ test("unconfirmed preflight cleanup fences later starts and Bridge shutdown", as
     preflightRunner: async () => {
       preflightCalls += 1;
       throw new AgentBridgeError(
-        "AGENT_PREFLIGHT_CLEANUP_UNCONFIRMED",
+        "AGENT_PROCESS_CLEANUP_UNCONFIRMED",
         "private process-group detail",
         { status: 503 },
       );
@@ -517,7 +530,7 @@ test("unconfirmed preflight cleanup fences later starts and Bridge shutdown", as
   await assert.rejects(
     preflight(service),
     (error) => (
-      error?.code === "AGENT_PREFLIGHT_CLEANUP_UNCONFIRMED"
+      error?.code === "AGENT_PROCESS_CLEANUP_UNCONFIRMED"
       && error.message.includes("尚未创建本轮 Request")
       && !error.message.includes("private process-group")
     ),
@@ -554,6 +567,7 @@ test("Agent Bridge cancellation aborts the managed task before reporting stopped
     driver: "qoder-acp",
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
     preflightId: ticket.preflightId,
+    selection: ticket.selection,
   });
 
   const cancelled = await service.cancel(IDENTITY);
@@ -598,6 +612,7 @@ test("Agent Bridge cancellation never reports stopped after cleanup is unconfirm
     driver: "qoder-acp",
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
     preflightId: ticket.preflightId,
+    selection: ticket.selection,
   });
   await new Promise((resolve) => setImmediate(resolve));
 
@@ -640,6 +655,7 @@ test("Agent Bridge cancellation timeout stays live and fails closed", async (t) 
     driver: "qoder-acp",
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
     preflightId: ticket.preflightId,
+    selection: ticket.selection,
   });
   await new Promise((resolve) => setImmediate(resolve));
 
@@ -730,6 +746,7 @@ test("Agent Bridge persistent lease blocks a second service from racing the same
     driver: "qoder-acp",
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
     preflightId: firstTicket.preflightId,
+    selection: firstTicket.selection,
   });
 
   let secondRunCalls = 0;
@@ -744,6 +761,7 @@ test("Agent Bridge persistent lease blocks a second service from racing the same
       driver: "qoder-acp",
       trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
       preflightId: secondTicket.preflightId,
+    selection: secondTicket.selection,
     }),
     (error) => error?.code === "AGENT_RESTART_RECOVERY_REQUIRED",
   );
@@ -771,6 +789,7 @@ test("Agent Bridge rejects a policy retry that would overwrite an unfinalized ou
       driver: "qoder-acp",
       trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
       preflightId: ticket.preflightId,
+    selection: ticket.selection,
     }),
     (error) => (
       error instanceof AgentBridgeError
@@ -805,6 +824,7 @@ test("Agent Bridge identifies a real Qoder credit limit after Request creation",
     driver: "qoder-acp",
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
     preflightId: ticket.preflightId,
+    selection: ticket.selection,
   });
 
   const failed = await waitForState(service, "failed");
@@ -844,6 +864,7 @@ test("Agent Bridge marks output written before failure as cancel-and-new only", 
     driver: "qoder-acp",
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
     preflightId: ticket.preflightId,
+    selection: ticket.selection,
   });
   const failed = await waitForState(service, "failed");
   assert.equal(failed.state, "failed");
@@ -886,6 +907,7 @@ test("Agent Bridge keeps an uncertain cleanup fenced and blocks same-Request ret
     driver: "qoder-acp",
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
     preflightId: firstTicket.preflightId,
+    selection: firstTicket.selection,
   });
   const failed = await waitForState(service, "failed");
   assert.equal(failed.errorCode, "AGENT_RESTART_RECOVERY_REQUIRED");
@@ -900,6 +922,7 @@ test("Agent Bridge keeps an uncertain cleanup fenced and blocks same-Request ret
       driver: "qoder-acp",
       trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
       preflightId: retryTicket.preflightId,
+    selection: retryTicket.selection,
     }),
     (error) => error?.code === "AGENT_RESTART_RECOVERY_REQUIRED",
   );
@@ -944,6 +967,7 @@ test("cleanup-unconfirmed fences survive terminal TTL and capacity pruning", asy
       driver: "qoder-acp",
       trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
       preflightId: ticket.preflightId,
+    selection: ticket.selection,
     });
     const failed = await waitForState(service, "failed", identity);
     assert.equal(failed.errorCode, "AGENT_RESTART_RECOVERY_REQUIRED");
@@ -985,6 +1009,7 @@ test("Agent Bridge shutdown rejects when an owned Agent never confirms cleanup",
     driver: "qoder-acp",
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
     preflightId: ticket.preflightId,
+    selection: ticket.selection,
   });
   await new Promise((resolve) => setImmediate(resolve));
 
@@ -1074,6 +1099,7 @@ test("Agent Bridge treats directories and special files at result paths as resid
         driver: "qoder-acp",
         trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
         preflightId: ticket.preflightId,
+    selection: ticket.selection,
       });
       const failed = await waitForState(service, "failed");
       assert.equal(failed.errorCode, "AGENT_RETRY_OUTPUT_PRESENT");

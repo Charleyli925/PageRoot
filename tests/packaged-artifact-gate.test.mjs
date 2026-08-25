@@ -37,6 +37,7 @@ async function verifySyntheticAppBundle(fixture, { allowUnsigned = true } = {}) 
     packageJson: fixture.packageJson,
     verifySignature: !allowUnsigned,
     requirePackagedAgentBridgeSmoke: false,
+    requirePackagedCodexRuntime: false,
   });
 }
 
@@ -277,7 +278,8 @@ test("the app-bundle gate validates app.asar, Bridge scripts, schemas and plist 
   assert.equal(result.version, "0.7.0");
   assert.equal(result.asarFileCount, 36);
   assert.equal(result.schemaFileCount, 5);
-  assert.equal(result.legalResourceCount, 5);
+  assert.equal(result.legalResourceCount, 6);
+  assert.equal(result.codexRuntime, null);
   assert.deepEqual(result.applicationUpdate, {
     owner: "Charleyli925",
     repo: "PageRoot",
@@ -301,6 +303,7 @@ test("real app verification requires the Electron Helper ACP smoke even when uns
       appPath: fixture.appPath,
       packageJson: fixture.packageJson,
       verifySignature: false,
+      requirePackagedCodexRuntime: false,
     }),
     /packaged Electron Helper is missing/u,
   );

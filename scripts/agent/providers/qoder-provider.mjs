@@ -62,6 +62,16 @@ export function parsePublicModels(stdout) {
   return Object.freeze(models);
 }
 
+function projectedQoderEvidence(evidence) {
+  const models = Object.freeze((evidence?.models || []).map((model) => Object.freeze({
+    ...model,
+    id: String(model.id || "").startsWith(`${QODER_PROVIDER_ID}:`)
+      ? String(model.id)
+      : `${QODER_PROVIDER_ID}:${String(model.id || "")}`,
+  })));
+  return Object.freeze({ ...evidence, models });
+}
+
 export function qoderFailure(code) {
   switch (code) {
     case "QODER_AUTH_REQUIRED":
@@ -497,7 +507,33 @@ export function createQoderProvider({
       authAction: { kind: "copy-command", label: "登录 Qoder" },
     },
     resolveInstallation: ({ environment }) => commandResolver({ environment }),
-    preflight: (installation, { environment }) => preflightRunner(installation, environment),
+    preflight: async (installation, { environment }) => projectedQoderEvidence(
+      await preflightRunner(installation, environment),
+    ),
+    resolveSelection(selection, { evidence }) {
+      if (selection.reasoning?.resolution !== "provider-default") {
+        fail("QODER_REASONING_UNAVAILABLE", "Qoder does not expose a selectable reasoning effort.");
+      }
+      if (!selection.requestedModelId) {
+        const resolvedModelId = evidence.models?.[0]?.id || null;
+        if (!resolvedModelId) {
+          fail("QODER_MODEL_UNAVAILABLE", "Qoder did not expose a usable default model.");
+        }
+        return Object.freeze({
+          ...selection,
+          requestedModelId: null,
+          resolvedModelId,
+        });
+      }
+      const availableModels = new Set((evidence.models || []).map((model) => model.id));
+      if (!availableModels.has(selection.requestedModelId)) {
+        fail("QODER_MODEL_UNAVAILABLE", "The selected Qoder model is not in the live catalog.");
+      }
+      return Object.freeze({
+        ...selection,
+        resolvedModelId: selection.requestedModelId,
+      });
+    },
     assertInstallationUnchanged: assertQoderInstallationUnchanged,
     installationDigest,
     availabilityFailure(cause) {
@@ -541,6 +577,12 @@ export function createQoderProvider({
         expectedAgentName: installation.source === "e2e-override"
           ? /qoder|pageroot-e2e/iu
           : /qoder/iu,
+        sessionConfigOptions: ticket.selection.resolvedModelId
+          ? Object.freeze([Object.freeze({
+              id: "model",
+              value: ticket.selection.resolvedModelId.slice(`${QODER_PROVIDER_ID}:`.length),
+            })])
+          : Object.freeze([]),
         ...(turnTimeoutMs ? { turnTimeoutMs } : {}),
         onEvent,
       });

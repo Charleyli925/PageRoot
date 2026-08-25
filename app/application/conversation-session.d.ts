@@ -12,6 +12,7 @@ export type ConversationDraftProjection = {
   text: string;
   intent: string;
   modelId?: string | null;
+  providerSelection?: import("../domain/agent-provider-state.js").AgentSelection | null;
   modelDisplayName?: string | null;
   deliveryMode?: string;
 };
@@ -48,6 +49,8 @@ export type ConversationSessionSnapshot = Readonly<{
   title: string;
   draftText: string;
   draftIntent: string;
+  draftProviderSelection: import("../domain/agent-provider-state.js").AgentSelection | null;
+  draftModelDisplayName: string | null;
 }>;
 
 export class ConversationSession {
@@ -71,6 +74,10 @@ export class ConversationSession {
   fail(context: ConversationContext, error: unknown): boolean;
   setDraftText(text: string): boolean;
   setDraftIntent(intent: string): boolean;
+  setDraftAgentSelection(
+    selection: import("../domain/agent-provider-state.js").AgentSelection,
+    modelDisplayName?: string | null,
+  ): boolean;
   acknowledgeDraft(
     context: ConversationContext,
     draft: ConversationDraftProjection,

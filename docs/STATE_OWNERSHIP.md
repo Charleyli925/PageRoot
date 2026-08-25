@@ -300,3 +300,11 @@ Rules:
   Codec owns canonical Request selection and legacy projection. Coordinator owns
   preflight tickets and sessions. Conversation Repository is the only v2 writer;
   v1 conversation records are never migrated in place.
+- A Codex ProviderBinding owns only reconstructible provider/session/model
+  evidence. Product Conversation, Context, Turn and frozen Request remain the
+  authority across Provider switches. Disabling Codex does not delete history.
+- The native Codex Attempt workspace is temporary capability state, not project
+  state. Its `output/index.html` has no Candidate authority. The Bridge-owned
+  fixed finalizer and Repository-verified completion evidence alone may publish
+  the existing Request-bound Candidate; Review and explicit adoption retain
+  their current owners.

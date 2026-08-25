@@ -6,6 +6,7 @@ import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { machoCodeFingerprint } from "./agent/macho-code-fingerprint.mjs";
 
 const scriptPath = fileURLToPath(import.meta.url);
 const productRoot = path.resolve(path.dirname(scriptPath), "..");
@@ -48,6 +49,11 @@ function assertEqual(actual, expected, label) {
   }
 }
 
+function adapterBundlePackageNames(source) {
+  return [...new Set([...source.matchAll(/^\/\/ node_modules\/((?:@[^/]+\/)?[^/]+)\//gmu)]
+    .map((match) => match[1]))].sort();
+}
+
 function runCodex(codexEntry, args) {
   const result = spawnSync(process.execPath, [codexEntry, ...args], {
     cwd: productRoot,
@@ -64,10 +70,11 @@ function runCodex(codexEntry, args) {
 }
 
 export async function verifyCodexRuntimeLock() {
-  const [manifest, packageJson, packageLock] = await Promise.all([
+  const [manifest, packageJson, packageLock, runtimeSbom] = await Promise.all([
     json(lockPath),
     json(path.join(productRoot, "package.json")),
     json(path.join(productRoot, "package-lock.json")),
+    json(path.join(productRoot, "CODEX_RUNTIME_SBOM.spdx.json")),
   ]);
   const packages = packageLock.packages || {};
   for (const [key, descriptor] of [
@@ -91,7 +98,6 @@ export async function verifyCodexRuntimeLock() {
     manifest.acpSdk.version,
     "adapter ACP SDK override",
   );
-
   const adapterEntry = path.join(
     productRoot,
     "node_modules",
@@ -100,8 +106,89 @@ export async function verifyCodexRuntimeLock() {
     "dist",
     "index.js",
   );
+  const adapterBytes = await readFile(adapterEntry);
+  const bundledPackageNames = adapterBundlePackageNames(adapterBytes.toString("utf8"));
+
+  assertEqual(runtimeSbom.spdxVersion, "SPDX-2.3", "Codex runtime SBOM version");
+  const sbomPackages = new Map(runtimeSbom.packages?.map((entry) => [entry.name, entry]));
+  const expectedSbomNames = [...new Set([
+    manifest.adapter.name,
+    manifest.codex.name,
+    "@openai/codex-darwin-arm64",
+    ...bundledPackageNames,
+  ])].sort();
+  assertEqual(
+    JSON.stringify([...sbomPackages.keys()].sort()),
+    JSON.stringify(expectedSbomNames),
+    "Codex runtime SBOM package inventory",
+  );
+  for (const [packageName, expectedVersion] of expectedSbomNames.map((packageName) => [
+    packageName,
+    packageName === manifest.adapter.name
+      ? manifest.adapter.version
+      : packageName === manifest.codex.name
+        ? manifest.codex.version
+        : packageName === "@openai/codex-darwin-arm64"
+          ? manifest.codex.platformPackage.version
+          : packages[`node_modules/${packageName}`]?.version,
+  ])) {
+    const locked = packages[`node_modules/${packageName}`];
+    const sbom = sbomPackages.get(packageName);
+    assertEqual(sbom?.versionInfo, expectedVersion, `${packageName} SBOM version`);
+    assertEqual(sbom?.licenseDeclared, locked?.license, `${packageName} SBOM license`);
+    assertEqual(
+      sbom?.checksums?.find((entry) => entry.algorithm === "SHA512")?.checksumValue,
+      Buffer.from(String(locked?.integrity || "").replace(/^sha512-/u, ""), "base64")
+        .toString("hex"),
+      `${packageName} SBOM checksum`,
+    );
+  }
+  const relationships = runtimeSbom.relationships || [];
+  const relationshipExists = (spdxElementId, relationshipType, relatedSpdxElement) => (
+    relationships.some((entry) => entry.spdxElementId === spdxElementId
+      && entry.relationshipType === relationshipType
+      && entry.relatedSpdxElement === relatedSpdxElement)
+  );
+  for (const sbom of sbomPackages.values()) {
+    assertEqual(
+      relationshipExists("SPDXRef-DOCUMENT", "DESCRIBES", sbom.SPDXID),
+      true,
+      `${sbom.name} SBOM document relationship`,
+    );
+  }
+  const adapterLock = packages[`node_modules/${manifest.adapter.name}`];
+  for (const dependencyName of Object.keys(adapterLock?.dependencies || {})) {
+    assertEqual(
+      relationshipExists(
+        "SPDXRef-Package-codex-acp",
+        "DEPENDS_ON",
+        sbomPackages.get(dependencyName)?.SPDXID,
+      ),
+      true,
+      `${dependencyName} adapter SBOM relationship`,
+    );
+  }
+  for (const [packageName, expectedVersion] of [
+    [manifest.adapter.name, manifest.adapter.version],
+    [manifest.acpSdk.name, manifest.acpSdk.version],
+    [manifest.codex.name, manifest.codex.version],
+    ["@openai/codex-darwin-arm64", manifest.codex.platformPackage.version],
+    ["zod", packageJson.dependencies?.zod],
+  ]) {
+    const locked = packages[`node_modules/${packageName}`];
+    const sbom = sbomPackages.get(packageName);
+    assertEqual(sbom?.versionInfo, expectedVersion, `${packageName} SBOM version`);
+    assertEqual(sbom?.licenseDeclared, locked?.license, `${packageName} SBOM license`);
+    assertEqual(
+      sbom?.checksums?.find((entry) => entry.algorithm === "SHA512")?.checksumValue,
+      Buffer.from(String(locked?.integrity || "").replace(/^sha512-/u, ""), "base64")
+        .toString("hex"),
+      `${packageName} SBOM checksum`,
+    );
+  }
+
   const codexEntry = path.join(productRoot, "node_modules", "@openai", "codex", "bin", "codex.js");
-  assertEqual(sha256(await readFile(adapterEntry)), manifest.adapter.entrySha256, "adapter entry hash");
+  assertEqual(sha256(adapterBytes), manifest.adapter.entrySha256, "adapter entry hash");
   assertEqual(sha256(await readFile(codexEntry)), manifest.codex.wrapperSha256, "Codex wrapper hash");
 
   const platformKey = `${process.platform}-${process.arch}`;
@@ -117,15 +204,41 @@ export async function verifyCodexRuntimeLock() {
     assertEqual(locked?.integrity, manifest.codex.platformPackage.integrity, "Codex platform integrity");
     const triple = "aarch64-apple-darwin";
     const vendorRoot = path.join(platformRoot, "vendor", triple);
+    const codexBinary = await readFile(path.join(vendorRoot, "bin", "codex"));
+    const codeModeHost = await readFile(path.join(vendorRoot, "bin", "codex-code-mode-host"));
+    const ripgrep = await readFile(path.join(vendorRoot, "codex-path", "rg"));
+    const bundledZsh = await readFile(path.join(vendorRoot, "codex-resources", "zsh", "bin", "zsh"));
     assertEqual(
-      sha256(await readFile(path.join(vendorRoot, "bin", "codex"))),
+      sha256(codexBinary),
       manifest.codex.platformPackage.binarySha256,
       "Codex binary hash",
     );
     assertEqual(
-      sha256(await readFile(path.join(vendorRoot, "bin", "codex-code-mode-host"))),
+      machoCodeFingerprint(codexBinary).sha256,
+      manifest.codex.platformPackage.binaryCodeSha256,
+      "Codex binary code fingerprint",
+    );
+    assertEqual(
+      sha256(codeModeHost),
       manifest.codex.platformPackage.codeModeHostSha256,
       "Codex code-mode host hash",
+    );
+    assertEqual(
+      machoCodeFingerprint(codeModeHost).sha256,
+      manifest.codex.platformPackage.codeModeHostCodeSha256,
+      "Codex code-mode host code fingerprint",
+    );
+    assertEqual(sha256(ripgrep), manifest.codex.platformPackage.ripgrepSha256, "Codex ripgrep hash");
+    assertEqual(
+      machoCodeFingerprint(ripgrep).sha256,
+      manifest.codex.platformPackage.ripgrepCodeSha256,
+      "Codex ripgrep code fingerprint",
+    );
+    assertEqual(sha256(bundledZsh), manifest.codex.platformPackage.zshSha256, "Codex zsh hash");
+    assertEqual(
+      machoCodeFingerprint(bundledZsh).sha256,
+      manifest.codex.platformPackage.zshCodeSha256,
+      "Codex zsh code fingerprint",
     );
     assertEqual(
       sha256(await readFile(path.join(vendorRoot, "codex-package.json"))),

@@ -38,6 +38,7 @@ import {
   readPackagedPlistIdentity,
 } from "./packaged-app-identity.mjs";
 import { assertBuildInfo, expectedBuildInfo } from "./release-provenance.mjs";
+import { machoCodeFingerprint } from "./agent/macho-code-fingerprint.mjs";
 
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
 const DEFAULT_PRODUCT_ROOT = path.resolve(path.dirname(SCRIPT_PATH), "..");
@@ -50,12 +51,22 @@ const REQUIRED_BRIDGE_FILES = [
   "agent/agent-lease-store.mjs",
   "agent/agent-events.mjs",
   "agent/agent-errors.mjs",
+  "agent/codex-feature-flags.mjs",
+  "agent/codex-runtime-lock.json",
+  "agent/macho-code-fingerprint.mjs",
   "agent/providers/agent-provider-contract.mjs",
   "agent/providers/provider-registry.mjs",
   "agent/providers/qoder-provider.mjs",
+  "agent/providers/codex-provider.mjs",
   "agent/runtimes/agent-runtime-contract.mjs",
   "agent/runtimes/runtime-registry.mjs",
   "agent/runtimes/acp-runtime.mjs",
+  "agent/runtimes/acp-authentication.mjs",
+  "agent/runtimes/acp-probe.mjs",
+  "agent/runtimes/agent-native-acp-runner.mjs",
+  "agent/sandbox/macos-agent-sandbox.mjs",
+  "agent/native/codex-workspace.mjs",
+  "agent/native/bridge-finalizer.mjs",
   "agent/policies/discussion-policy.mjs",
   "agent/policies/execution-policy.mjs",
   "agent/hosts/discussion-host.mjs",
@@ -86,6 +97,9 @@ const REQUIRED_BRIDGE_FILES = [
 ];
 const REQUIRED_PACKAGED_MODULES = [
   "@agentclientprotocol/sdk",
+  "@agentclientprotocol/codex-acp",
+  "@openai/codex",
+  "@openai/codex-darwin-arm64",
   "argparse",
   "builder-util-runtime",
   "debug",
@@ -120,6 +134,7 @@ const REQUIRED_LEGAL_RESOURCES = [
   "NOTICE",
   "PRIVACY.md",
   "THIRD_PARTY_NOTICES.md",
+  "CODEX_RUNTIME_SBOM.spdx.json",
 ];
 const EXPECTED_MAC_TEAM_ID = "RNK9RB969G";
 export const REQUIRED_APP_SOURCE_FILES = [
@@ -391,20 +406,118 @@ function asarFilePaths(asarPath) {
   return output.sort();
 }
 
-async function assertDirectoryMatches({ sourceRoot, packagedRoot, predicate, label }) {
+async function assertDirectoryMatches({
+  sourceRoot,
+  packagedRoot,
+  predicate,
+  label,
+  signedMachOFiles = new Set(),
+}) {
   const [sourceFiles, packagedFiles] = await Promise.all([
     listFiles(sourceRoot, predicate),
     listFiles(packagedRoot, predicate),
   ]);
   assert.deepEqual(packagedFiles, sourceFiles, `${label} file list does not match source`);
   for (const relativePath of sourceFiles) {
-    await assertFilesEqual(
-      path.join(sourceRoot, relativePath),
-      path.join(packagedRoot, relativePath),
-      `${label}/${relativePath}`,
-    );
+    if (signedMachOFiles.has(relativePath)) {
+      const [source, packaged] = await Promise.all([
+        readFile(path.join(sourceRoot, relativePath)),
+        readFile(path.join(packagedRoot, relativePath)),
+      ]);
+      assert.deepEqual(
+        machoCodeFingerprint(packaged),
+        machoCodeFingerprint(source),
+        `${label}/${relativePath} code content does not match source`,
+      );
+    } else {
+      await assertFilesEqual(
+        path.join(sourceRoot, relativePath),
+        path.join(packagedRoot, relativePath),
+        `${label}/${relativePath}`,
+      );
+    }
   }
   return sourceFiles;
+}
+
+async function assertPackagedCodexRuntime(resourcesPath) {
+  const binaryRoot = path.join(
+    resourcesPath,
+    "node_modules",
+    "@openai",
+    "codex-darwin-arm64",
+    "vendor",
+    "aarch64-apple-darwin",
+    "bin",
+  );
+  const executables = [
+    path.join(resourcesPath, "node_modules", "@agentclientprotocol", "codex-acp", "dist", "index.js"),
+    path.join(resourcesPath, "node_modules", "@openai", "codex", "bin", "codex.js"),
+    path.join(binaryRoot, "codex"),
+    path.join(binaryRoot, "codex-code-mode-host"),
+    path.join(resourcesPath, "node_modules", "@openai", "codex-darwin-arm64", "vendor", "aarch64-apple-darwin", "codex-path", "rg"),
+    path.join(resourcesPath, "node_modules", "@openai", "codex-darwin-arm64", "vendor", "aarch64-apple-darwin", "codex-resources", "zsh", "bin", "zsh"),
+  ];
+  for (const executable of executables) {
+    const information = await lstat(executable);
+    assert.equal(
+      information.isFile() && !information.isSymbolicLink() && information.nlink === 1,
+      true,
+      `packaged Codex runtime executable is unsafe: ${executable}`,
+    );
+    await access(executable, fsConstants.X_OK);
+  }
+  const runtimeLock = JSON.parse(await readFile(
+    path.join(resourcesPath, "bridge", "agent", "codex-runtime-lock.json"),
+    "utf8",
+  ));
+  for (const [fileName, expected] of [
+    ["codex", runtimeLock.codex.platformPackage.binaryCodeSha256],
+    ["codex-code-mode-host", runtimeLock.codex.platformPackage.codeModeHostCodeSha256],
+  ]) {
+    const executable = path.join(binaryRoot, fileName);
+    assert.equal(
+      machoCodeFingerprint(await readFile(executable)).sha256,
+      expected,
+      `packaged ${fileName} code fingerprint drifted`,
+    );
+    if (process.platform === "darwin" && commandExists("/usr/bin/codesign")) {
+      runCommand("/usr/bin/codesign", ["--verify", "--strict", executable], `${fileName} signature`);
+      assert.equal(
+        runCommand("/usr/bin/lipo", ["-archs", executable], `${fileName} architecture`),
+        "arm64",
+      );
+    }
+  }
+  for (const [relativePath, expected] of [
+    ["codex-path/rg", runtimeLock.codex.platformPackage.ripgrepCodeSha256],
+    ["codex-resources/zsh/bin/zsh", runtimeLock.codex.platformPackage.zshCodeSha256],
+  ]) {
+    const executable = path.join(
+      resourcesPath,
+      "node_modules",
+      "@openai",
+      "codex-darwin-arm64",
+      "vendor",
+      "aarch64-apple-darwin",
+      relativePath,
+    );
+    assert.equal(
+      machoCodeFingerprint(await readFile(executable)).sha256,
+      expected,
+      `packaged ${relativePath} code fingerprint drifted`,
+    );
+    if (process.platform === "darwin" && commandExists("/usr/bin/codesign")) {
+      runCommand("/usr/bin/codesign", ["--verify", "--strict", executable], `${relativePath} signature`);
+      assert.equal(runCommand("/usr/bin/lipo", ["-archs", executable], `${relativePath} architecture`), "arm64");
+    }
+  }
+  return Object.freeze({
+    adapter: "1.6.2",
+    codex: "0.148.0",
+    platform: "darwin-arm64",
+    executableCount: executables.length,
+  });
 }
 
 async function assertSchemaBundleMatches({
@@ -523,6 +636,7 @@ export async function verifyAppBundle({
   signaturePolicy,
   expectedProvenance,
   requirePackagedAgentBridgeSmoke = true,
+  requirePackagedCodexRuntime = true,
 }) {
   const effectiveSignaturePolicy = signaturePolicy
     ?? (verifySignature ? "developer-id" : "none");
@@ -651,8 +765,19 @@ export async function verifyAppBundle({
       sourceRoot: path.join(productRoot, "node_modules", moduleName),
       packagedRoot: path.join(resourcesPath, "node_modules", moduleName),
       label: `node_modules/${moduleName}`,
+      ...(requirePackagedCodexRuntime && moduleName === "@openai/codex-darwin-arm64" ? {
+        signedMachOFiles: new Set([
+          "vendor/aarch64-apple-darwin/bin/codex",
+          "vendor/aarch64-apple-darwin/bin/codex-code-mode-host",
+          "vendor/aarch64-apple-darwin/codex-path/rg",
+          "vendor/aarch64-apple-darwin/codex-resources/zsh/bin/zsh",
+        ]),
+      } : {}),
     });
   }
+  const codexRuntime = requirePackagedCodexRuntime
+    ? await assertPackagedCodexRuntime(resourcesPath)
+    : null;
 
   const helperExecutable = path.join(
     appPath,
@@ -823,6 +948,7 @@ export async function verifyAppBundle({
     asarFileCount: expectedAsarFiles.length,
     schemaFileCount: schemas.length,
     legalResourceCount: REQUIRED_LEGAL_RESOURCES.length,
+    codexRuntime,
     applicationUpdate,
     provenance,
     telemetry,
@@ -1137,6 +1263,10 @@ async function main() {
   }
   console.log(
     `App ${result.version}: ${result.app.asarFileCount} app.asar files, ${result.app.schemaFileCount} schemas`,
+  );
+  console.log(
+    `Codex ACP ${result.app.codexRuntime.adapter} -> ${result.app.codexRuntime.codex} `
+      + `(${result.app.codexRuntime.platform}, ${result.app.codexRuntime.executableCount} executables)`,
   );
   if (result.dmg && !result.dmg.mounted) {
     console.log(`DMG mount skipped: ${result.dmg.reason}`);

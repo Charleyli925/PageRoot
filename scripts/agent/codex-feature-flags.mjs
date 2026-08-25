@@ -1,6 +1,6 @@
 export const CODEX_BUILD_GATES = Object.freeze({
-  codexDiscussion: false,
-  codexExecution: false,
+  codexDiscussion: true,
+  codexExecution: true,
 });
 
 export function resolveCodexFeatureFlags({

@@ -502,3 +502,24 @@ installed provider/runtime and freezes canonical selection plus fingerprint in
 a one-use ticket; start compares that ticket to the durable Request selection.
 Malformed policies, cross-provider model ids, unknown providers and selection
 drift fail closed.
+
+Codex uses an `agent-native` boundary because its App Server can execute tools
+inside the Agent process rather than through the Qoder Client Host. Each turn
+runs in a new macOS sandbox and process group. Discussion can read only its
+copied ContextSnapshot and isolated Codex state; it cannot spawn commands or
+write files. Execution receives read-only frozen Request copies plus one
+writable `output/` directory. The outer sandbox binds escalation-sensitive
+execution to the exact parent chain `sandbox-exec -> Electron/Node -> Codex ->
+code-mode-host -> sandbox-exec -> allowlisted tools`. Only the verified Codex
+binary receives model-transport network and authentication-state access; tool
+processes cannot read that state, use network, restart Node/Codex/sandbox, or
+write outside the one output directory.
+
+The Agent never receives finalizer authority. After its process tree is
+confirmed stopped, the Bridge rejects missing/multiple files, path escape,
+symlink, hardlink, TOCTOU, oversized or incomplete HTML, cancellation and frozen
+input/runtime drift. It then uses an already-verified inode of the repository's
+fixed finalizer with fixed arguments and checks completion identity and hashes.
+Raw stderr, auth tokens, login URLs, prompts, HTML and absolute paths are not
+telemetry. Cleanup uncertainty retains the lease and blocks publication or
+retry.

@@ -330,11 +330,21 @@ export class AgentRuntimeCoordinator {
   startAuthentication({ selection } = {}) {
     this.#assertAcceptingStarts();
     const requestedSelection = this.#selectionForInput({ selection });
+    if (this.#preflightCleanupUnconfirmed) {
+      failAgentRuntime(
+        "AGENT_PREFLIGHT_CLEANUP_UNCONFIRMED",
+        this.#providerRegistry.preflightFailureMessageForSelection(
+          requestedSelection,
+          "AGENT_PREFLIGHT_CLEANUP_UNCONFIRMED",
+        ),
+        { status: 503 },
+      );
+    }
     const key = `${requestedSelection.providerId}:${requestedSelection.runtimeId}`;
     const existing = this.#authenticationSessions.get(key);
     if (existing) return Object.freeze({ ok: true, status: "starting", idempotent: true });
     const controller = new AbortController();
-    const entry = { controller, promise: null, status: "starting" };
+    const entry = { controller, promise: null, status: "starting", errorCode: null };
     this.#authenticationSessions.set(key, entry);
     entry.promise = Promise.resolve().then(() => (
       this.#providerRegistry.authenticateForSelection(requestedSelection, {
@@ -346,6 +356,9 @@ export class AgentRuntimeCoordinator {
     }).catch((cause) => {
       entry.status = "failed";
       entry.errorCode = cleanAgentText(cause?.code, 120) || "AGENT_AUTHENTICATION_FAILED";
+      if (cause?.code === "AGENT_PROCESS_CLEANUP_UNCONFIRMED") {
+        this.#preflightCleanupUnconfirmed = true;
+      }
     }).finally(() => {
       if (this.#authenticationSessions.get(key) === entry) {
         this.#authenticationSessions.delete(key);
@@ -360,7 +373,34 @@ export class AgentRuntimeCoordinator {
     });
   }
 
-  async preflight({ driver, selection, trustPolicyAccepted, purpose = "execution" } = {}) {
+  async authenticate(input = {}) {
+    const requestedSelection = this.#selectionForInput(input);
+    const key = `${requestedSelection.providerId}:${requestedSelection.runtimeId}`;
+    this.startAuthentication({ selection: requestedSelection });
+    const entry = this.#authenticationSessions.get(key);
+    if (!entry?.promise) {
+      failAgentRuntime(
+        "AGENT_AUTHENTICATION_FAILED",
+        "Agent 登录会话没有启动。",
+        { status: 503 },
+      );
+    }
+    await entry.promise;
+    if (entry.status !== "ready") {
+      failAgentRuntime(
+        entry.errorCode || "AGENT_AUTHENTICATION_FAILED",
+        "Agent 登录没有完成。",
+        { status: 503 },
+      );
+    }
+    return Object.freeze({ ok: true, status: "ready" });
+  }
+
+  preflight(input = {}) {
+    return this.#trackStart(() => this.#performPreflight(input));
+  }
+
+  async #performPreflight({ driver, selection, trustPolicyAccepted, purpose = "execution" } = {}) {
     this.#assertAcceptingStarts();
     const ticketPurpose = validatePurpose(purpose);
     const requestedSelection = this.#selectionForInput({
@@ -389,7 +429,8 @@ export class AgentRuntimeCoordinator {
         { environment: this.#environment },
       );
     } catch (cause) {
-      if (cause?.code === "AGENT_PREFLIGHT_CLEANUP_UNCONFIRMED") {
+      if (cause?.code === "AGENT_PREFLIGHT_CLEANUP_UNCONFIRMED"
+        || cause?.code === "AGENT_PROCESS_CLEANUP_UNCONFIRMED") {
         this.#preflightCleanupUnconfirmed = true;
       }
       throw cause;
@@ -1148,6 +1189,11 @@ export class AgentRuntimeCoordinator {
       }
       for (const entry of entries) {
         if (LIVE_STATES.has(entry.state)) {
+          // Once Candidate finalization starts it owns an indivisible durable
+          // transition. Shutdown must drain that transition (or time out and
+          // refuse to exit); aborting here could leave published output without
+          // completion evidence and would violate Candidate authority.
+          if (entry.purpose === "execution" && entry.finalizerStarted === true) continue;
           entry.cancelState = "requested";
           entry.controller.abort(new AgentRuntimeError("AGENT_CANCELLED", "Bridge shutdown."));
         }

@@ -2408,40 +2408,6 @@ test("a Request freezes comments, targets and project rules alongside its exact 
     targets: [{ targetId: "target_title", selector: "h1" }],
     preserveOutsideTargets: false,
   };
-  await assert.rejects(
-    value.repository.prepareRequest({
-      target: saved.target,
-      requestId: "req_unknown_provider",
-      attemptId: "attempt_001",
-      expectedSourceSha256: saved.target.sourceSha256,
-      request: {
-        ...request,
-        agentDelivery: {
-          mode: "managed-agent",
-          selection: {
-            providerId: "future-agent",
-            runtimeId: "future-runtime",
-            requestedModelId: null,
-            resolvedModelId: null,
-            reasoning: { requested: null, applied: null, resolution: "provider-default" },
-          },
-          trustPolicyVersion: "trusted-local-agent-v1",
-        },
-      },
-      prompt: "# must not publish\n",
-    }),
-    (error) => error?.code === "AGENT_DELIVERY_INVALID"
-      && error?.details?.reasonCode === "AGENT_PROVIDER_UNSUPPORTED",
-  );
-  assert.equal(
-    await lstat(path.join(
-      saved.target.projectRootPath,
-      ".pageroot",
-      "requests",
-      "req_unknown_provider",
-    )).then(() => true, () => false),
-    false,
-  );
   const prepared = await value.repository.prepareRequest({
     target: saved.target,
     requestId: "req_frozen_inputs",

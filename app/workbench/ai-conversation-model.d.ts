@@ -68,11 +68,38 @@ export type SidebarCatalogStatus =
 export function sidebarModePresentation(
   state: string,
   intent?: SidebarIntent | string,
+  agentName?: string,
 ): SidebarModePresentation;
 
 export function sidebarActorInitial(actor: string): string;
+export function sidebarRunAgentPresentation(agentName?: string): Readonly<{
+  actor: "agent";
+  actorLabel: string;
+  actorInitial: string;
+  ariaLabel: string;
+}>;
 
 export function sidebarActorLabel(actor: string): string;
+
+export function sidebarProviderChoiceState(
+  providerChoices: readonly Readonly<{ id: string; label: string }>[],
+  selectedProvider: string | null | undefined,
+): Readonly<{ selectedProvider: string | null; showSelector: boolean }>;
+
+export function sidebarRestoredChoiceState(options?: {
+  modelChoices?: readonly Readonly<{ id?: string }>[];
+  selectedModel?: string | null;
+  reasoningChoices?: readonly Readonly<{ id?: string }>[];
+  selectedReasoning?: string | null;
+}): Readonly<{
+  modelUnavailable: boolean;
+  reasoningUnavailable: boolean;
+  notice: string | null;
+}>;
+
+export function sidebarAgentPurpose(
+  intent: SidebarIntent | string | null | undefined,
+): "discussion" | "execution";
 
 export function sidebarMessageStream(
   messages: readonly unknown[],
@@ -138,7 +165,10 @@ export function sidebarRunProgress(options?: {
   agentText?: string;
 }): SidebarRunProgress | null;
 
-export function sidebarDeliveryDisclosure(intent?: SidebarIntent | string): string | null;
+export function sidebarDeliveryDisclosure(
+  intent?: SidebarIntent | string,
+  agentName?: string,
+): string | null;
 
 export function sidebarSendState(options?: {
   state?: string;
@@ -196,6 +226,7 @@ export function sidebarLiveReply(
     interrupted?: boolean;
   } | null,
   messages?: readonly unknown[],
+  agentName?: string,
 ): SidebarLiveReply | null;
 
 export type SidebarDiscussionNotice = {
@@ -207,7 +238,7 @@ export function sidebarDiscussionNotice(discussion?: {
   status?: string;
   interrupted?: boolean;
   interruptedReason?: string | null;
-} | null): SidebarDiscussionNotice | null;
+} | null, agentName?: string): SidebarDiscussionNotice | null;
 
 export function sidebarDraftNotice(state: string): string | null;
 

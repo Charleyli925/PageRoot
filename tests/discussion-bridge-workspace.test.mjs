@@ -69,6 +69,7 @@ function startBody(ensured, preflight, overrides = {}) {
     driver: "qoder-acp",
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
     preflightId: preflight.preflightId,
+    selection: preflight.selection,
     projectId: ensured.projectId,
     documentId: ensured.documentId,
     sourcePath: ensured.sourcePath,

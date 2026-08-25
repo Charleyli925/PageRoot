@@ -90,7 +90,7 @@ const MODE_PRESENTATION = Object.freeze({
   },
 });
 
-export function sidebarModePresentation(state, intent) {
+export function sidebarModePresentation(state, intent, agentName = "Qoder") {
   // Before a round exists, the header follows what the user is about to do. Saying
   // "讨论 · 只读" while the Composer directly below it is preparing a modification
   // contradicts itself, and the run status alone cannot tell them apart because no
@@ -101,7 +101,14 @@ export function sidebarModePresentation(state, intent) {
   ) {
     return MODE_PRESENTATION["pending-modification"];
   }
-  return MODE_PRESENTATION[state] ?? MODE_PRESENTATION["preview-discussion"];
+  const presentation = MODE_PRESENTATION[state] ?? MODE_PRESENTATION["preview-discussion"];
+  if (state === "preview-discussion" || state === "preparing-delivery") {
+    return Object.freeze({
+      ...presentation,
+      detail: `${String(agentName || "Agent")} 可以阅读当前预览，但不能修改 HTML。`,
+    });
+  }
+  return presentation;
 }
 
 // The header's mode comes from the run's own durable status, never from a local
@@ -225,6 +232,16 @@ export function sidebarActorInitial(actor) {
 
 export function sidebarActorLabel(actor) {
   return ACTOR_LABELS[actor] ?? ACTOR_LABELS.pageroot;
+}
+
+export function sidebarRunAgentPresentation(agentName = "Agent") {
+  const actorLabel = String(agentName || "Agent").trim().slice(0, 80) || "Agent";
+  return Object.freeze({
+    actor: "agent",
+    actorLabel,
+    actorInitial: Array.from(actorLabel)[0]?.toUpperCase() || "A",
+    ariaLabel: `${actorLabel} 的说明`,
+  });
 }
 
 /**
@@ -441,9 +458,9 @@ export function sidebarActionBar({
  * button that acts on it, so the user reads it without being interrupted by a
  * modal first.
  */
-export function sidebarDeliveryDisclosure(intent) {
+export function sidebarDeliveryDisclosure(intent, agentName = "Qoder") {
   if (intent !== INTENT_MODIFY) return null;
-  return "Qoder 会读取本轮 HTML、评论和附件；结果先进入审阅。";
+  return `${String(agentName || "Agent")} 会读取本轮 HTML、评论和附件；结果先进入审阅。`;
 }
 
 export function sidebarSendState({
@@ -661,7 +678,7 @@ export function sidebarModelLine({
  * Returns null until some text has arrived: an empty shell that later fills
  * would make the stream jump for no information.
  */
-export function sidebarLiveReply(discussion, messages = []) {
+export function sidebarLiveReply(discussion, messages = [], agentName = "Qoder CLI") {
   if (!discussion) return null;
   const text = typeof discussion.replyText === "string" ? discussion.replyText : "";
   if (!text.trim()) return null;
@@ -677,7 +694,7 @@ export function sidebarLiveReply(discussion, messages = []) {
   const status = String(discussion.status || "");
   return Object.freeze({
     actor: "qoder",
-    actorLabel: sidebarActorLabel("qoder"),
+    actorLabel: String(agentName || "Agent"),
     text,
     truncated: discussion.replyTruncated === true,
     // An interrupted reply says so on the reply itself, not only in the Composer
@@ -692,11 +709,11 @@ export function sidebarLiveReply(discussion, messages = []) {
  * showing its partial text with no marker would present an interrupted answer as
  * a complete one.
  */
-export function sidebarDiscussionNotice(discussion) {
+export function sidebarDiscussionNotice(discussion, agentName = "Qoder") {
   if (!discussion) return null;
   const status = String(discussion.status || "");
   if (status === "starting" || status === "running") {
-    return { tone: "progress", text: "Qoder 正在阅读当前预览并回复…" };
+    return { tone: "progress", text: `${String(agentName || "Agent")} 正在阅读当前预览并回复…` };
   }
   if (status === "cancelling") {
     return { tone: "progress", text: "正在结束这轮讨论…" };
@@ -713,6 +730,49 @@ export function sidebarDiscussionNotice(discussion) {
     return { tone: "attention", text: "这轮讨论没有完成。可以重新发一次。" };
   }
   return null;
+}
+
+export function sidebarProviderChoiceState(providerChoices, selectedProvider) {
+  const choices = Array.isArray(providerChoices) ? providerChoices : [];
+  const selected = typeof selectedProvider === "string"
+    && choices.some((provider) => provider?.id === selectedProvider)
+    ? selectedProvider
+    : null;
+  return Object.freeze({
+    selectedProvider: selected,
+    showSelector: choices.length > 1 || (choices.length > 0 && selected === null),
+  });
+}
+
+export function sidebarRestoredChoiceState({
+  modelChoices = [],
+  selectedModel = null,
+  reasoningChoices = [],
+  selectedReasoning = null,
+} = {}) {
+  const modelUnavailable = Boolean(
+    selectedModel
+    && modelChoices.length > 0
+    && !modelChoices.some((model) => model?.id === selectedModel),
+  );
+  const reasoningUnavailable = Boolean(
+    selectedReasoning
+    && reasoningChoices.length > 0
+    && !reasoningChoices.some((reasoning) => reasoning?.id === selectedReasoning),
+  );
+  return Object.freeze({
+    modelUnavailable,
+    reasoningUnavailable,
+    notice: modelUnavailable
+      ? "上次选择的模型已不可用，请重新选择后继续。"
+      : reasoningUnavailable
+        ? "上次选择的推理强度已不可用，请重新选择后继续。"
+        : null,
+  });
+}
+
+export function sidebarAgentPurpose(intent) {
+  return intent === INTENT_MODIFY ? "execution" : "discussion";
 }
 
 /**

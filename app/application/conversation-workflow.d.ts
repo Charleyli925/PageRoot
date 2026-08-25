@@ -18,12 +18,16 @@ export class ConversationWorkflow {
   });
   readonly session: ConversationSession;
   open(context: ConversationContext | null): Promise<unknown>;
-  close(): void;
+  close(context?: ConversationContext | null): boolean;
   listConversations(
     context: ConversationContext | null,
   ): Promise<unknown>;
   updateDraftText(text: string): void;
   updateDraftIntent(intent: string): void;
+  updateDraftAgentSelection(
+    selection: import("../domain/agent-provider-state.js").AgentSelection,
+    modelDisplayName?: string | null,
+  ): void;
   flushDraft(): Promise<void>;
 }
 

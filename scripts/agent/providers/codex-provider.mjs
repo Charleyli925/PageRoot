@@ -4,12 +4,14 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { sha256 } from "../../lifecycle-core.mjs";
+import { machoCodeFingerprint } from "../macho-code-fingerprint.mjs";
 import {
   agentProviderError,
   defineAgentProvider,
 } from "./agent-provider-contract.mjs";
 import { loadExecutionPolicy } from "../policies/execution-policy.mjs";
 import { runBridgeFinalizer } from "../native/bridge-finalizer.mjs";
+import { publishCodexExecutionOutput } from "../native/codex-workspace.mjs";
 
 export const CODEX_PROVIDER_ID = "codex";
 export const CODEX_RUNTIME_ID = "acp";
@@ -27,6 +29,16 @@ function clean(value, maximum = 200) {
     .replace(/[\u0000-\u001f\u007f]/gu, "")
     .trim()
     .slice(0, maximum);
+}
+
+export async function finalizeCodexExecution(input) {
+  const pendingCompletion = input?.runtimeResult?.pendingCompletion;
+  await publishCodexExecutionOutput({
+    pendingCompletion,
+    policy: input?.policy,
+    cancellationSignal: input?.cancellationSignal,
+  });
+  return runBridgeFinalizer(input);
 }
 
 async function runtimeLock() {
@@ -51,7 +63,7 @@ async function packageManifest(packageRoot) {
   }
 }
 
-async function fileIdentity(filePath, { executable = false } = {}) {
+async function fileIdentity(filePath, { executable = false, macho = false } = {}) {
   const resolved = await realpath(filePath).catch(() => {
     failure("CODEX_INSTALLATION_CORRUPT", "A pinned Codex runtime file is unavailable.");
   });
@@ -73,6 +85,7 @@ async function fileIdentity(filePath, { executable = false } = {}) {
     size: information.size,
     mtimeMs: information.mtimeMs,
     sha256: createHash("sha256").update(bytes).digest("hex"),
+    ...(macho ? { codeFingerprint: machoCodeFingerprint(bytes) } : {}),
   });
 }
 
@@ -81,7 +94,7 @@ function targetForPlatform() {
   if (key !== "darwin-arm64") {
     failure(
       "CODEX_PLATFORM_UNSUPPORTED",
-      "This Stemmio build does not include a supported Codex runtime for this platform.",
+      "This PageRoot build does not include a supported Codex runtime for this platform.",
       409,
     );
   }
@@ -122,21 +135,39 @@ export async function resolvePinnedCodexInstallation() {
     target.executableName,
   );
   const codeModeHost = path.join(path.dirname(codexBinary), "codex-code-mode-host");
+  const ripgrep = path.join(platformRoot, "vendor", target.triple, "codex-path", "rg");
+  const bundledZsh = path.join(
+    platformRoot,
+    "vendor",
+    target.triple,
+    "codex-resources",
+    "zsh",
+    "bin",
+    "zsh",
+  );
   const [
     adapterEntryIdentity,
     codexWrapperIdentity,
     codexBinaryIdentity,
     codeModeHostIdentity,
+    ripgrepIdentity,
+    bundledZshIdentity,
   ] = await Promise.all([
     fileIdentity(adapterEntry, { executable: true }),
     fileIdentity(codexWrapper, { executable: true }),
-    fileIdentity(codexBinary, { executable: true }),
-    fileIdentity(codeModeHost, { executable: true }),
+    fileIdentity(codexBinary, { executable: true, macho: true }),
+    fileIdentity(codeModeHost, { executable: true, macho: true }),
+    fileIdentity(ripgrep, { executable: true, macho: true }),
+    fileIdentity(bundledZsh, { executable: true, macho: true }),
   ]);
   if (adapterEntryIdentity.sha256 !== lock.adapter.entrySha256
     || codexWrapperIdentity.sha256 !== lock.codex.wrapperSha256
-    || codexBinaryIdentity.sha256 !== lock.codex.platformPackage.binarySha256
-    || codeModeHostIdentity.sha256 !== lock.codex.platformPackage.codeModeHostSha256) {
+    || codexBinaryIdentity.codeFingerprint.sha256
+      !== lock.codex.platformPackage.binaryCodeSha256
+    || codeModeHostIdentity.codeFingerprint.sha256
+      !== lock.codex.platformPackage.codeModeHostCodeSha256
+    || ripgrepIdentity.codeFingerprint.sha256 !== lock.codex.platformPackage.ripgrepCodeSha256
+    || bundledZshIdentity.codeFingerprint.sha256 !== lock.codex.platformPackage.zshCodeSha256) {
     failure("CODEX_INSTALLATION_INCOMPATIBLE", "The pinned Codex runtime bytes are incompatible.");
   }
   return Object.freeze({
@@ -150,6 +181,10 @@ export async function resolvePinnedCodexInstallation() {
     codexBinaryIdentity,
     codeModeHost,
     codeModeHostIdentity,
+    ripgrep,
+    ripgrepIdentity,
+    bundledZsh,
+    bundledZshIdentity,
     codexVersion: lock.codex.version,
     platform: target.key,
   });
@@ -171,16 +206,22 @@ export async function assertPinnedCodexInstallationUnchanged(installation) {
     codexWrapperIdentity,
     codexBinaryIdentity,
     codeModeHostIdentity,
+    ripgrepIdentity,
+    bundledZshIdentity,
   ] = await Promise.all([
     fileIdentity(installation.adapterEntry, { executable: true }),
     fileIdentity(installation.codexWrapper, { executable: true }),
-    fileIdentity(installation.codexBinary, { executable: true }),
-    fileIdentity(installation.codeModeHost, { executable: true }),
+    fileIdentity(installation.codexBinary, { executable: true, macho: true }),
+    fileIdentity(installation.codeModeHost, { executable: true, macho: true }),
+    fileIdentity(installation.ripgrep, { executable: true, macho: true }),
+    fileIdentity(installation.bundledZsh, { executable: true, macho: true }),
   ]);
   if (!sameIdentity(adapterEntryIdentity, installation.adapterEntryIdentity)
     || !sameIdentity(codexWrapperIdentity, installation.codexWrapperIdentity)
     || !sameIdentity(codexBinaryIdentity, installation.codexBinaryIdentity)
-    || !sameIdentity(codeModeHostIdentity, installation.codeModeHostIdentity)) {
+    || !sameIdentity(codeModeHostIdentity, installation.codeModeHostIdentity)
+    || !sameIdentity(ripgrepIdentity, installation.ripgrepIdentity)
+    || !sameIdentity(bundledZshIdentity, installation.bundledZshIdentity)) {
     failure("CODEX_INSTALLATION_CHANGED", "The pinned Codex runtime changed after preflight.", 409);
   }
 }
@@ -194,6 +235,8 @@ function installationDigest(installation) {
     codexWrapperIdentity: installation.codexWrapperIdentity,
     codexBinaryIdentity: installation.codexBinaryIdentity,
     codeModeHostIdentity: installation.codeModeHostIdentity,
+    ripgrepIdentity: installation.ripgrepIdentity,
+    bundledZshIdentity: installation.bundledZshIdentity,
     platform: installation.platform,
   }), "utf8"));
 }
@@ -207,6 +250,8 @@ export const CODEX_LOCKED_CONFIG = Object.freeze({
   features: Object.freeze({
     apps: false,
     browser_use: false,
+    code_mode: false,
+    code_mode_host: false,
     computer_use: false,
     hooks: false,
     memories: false,
@@ -216,6 +261,14 @@ export const CODEX_LOCKED_CONFIG = Object.freeze({
     recommended_plugins: false,
     skill_search: false,
     standalone_web_search: false,
+  }),
+});
+const CODEX_EXECUTION_CONFIG = Object.freeze({
+  ...CODEX_LOCKED_CONFIG,
+  features: Object.freeze({
+    ...CODEX_LOCKED_CONFIG.features,
+    code_mode: true,
+    code_mode_host: true,
   }),
 });
 
@@ -228,7 +281,7 @@ export function codexFailure(code) {
     case "CODEX_ACCOUNT_CAPACITY_UNAVAILABLE":
       return "Codex 账号当前没有可用容量。可稍后重试，或切换到其他 Agent。";
     case "CODEX_PLATFORM_UNSUPPORTED":
-      return "当前 Stemmio 安装包不支持在此平台运行 Codex。";
+      return "当前 PageRoot 安装包不支持在此平台运行 Codex。";
     case "AGENT_PROCESS_CLEANUP_UNCONFIRMED":
       return "Codex 进程尚未确认完全停止。为避免失去控制，本轮不能继续。";
     case "AGENT_CANCELLED":
@@ -332,7 +385,7 @@ export function createCodexProvider({
       agentName: "Codex",
       description: "使用当前 Codex / ChatGPT 账号讨论或审阅页面。",
       readyDetail: "Codex 账号和实时模型目录已确认。",
-      notInstalledDetail: "当前 Stemmio 安装不包含可验证的 Codex runtime。",
+      notInstalledDetail: "当前 PageRoot 安装不包含可验证的 Codex runtime。",
       authRequiredDetail: "登录 Codex 后即可开始只读讨论。",
       unavailableDetail: "Codex runtime 或实时模型目录当前不可用。",
       checkingDetail: "正在检查 Codex 账号和模型…",
@@ -348,6 +401,8 @@ export function createCodexProvider({
         adapterVersion: installation.adapterVersion,
         codexBinary: installation.codexBinary,
         codexBinaryIdentity: installation.codexBinaryIdentity,
+        codeModeHost: installation.codeModeHost,
+        codeModeHostIdentity: installation.codeModeHostIdentity,
         codexConfig: CODEX_LOCKED_CONFIG,
         baseEnvironment,
       });
@@ -361,6 +416,8 @@ export function createCodexProvider({
         adapterVersion: installation.adapterVersion,
         codexBinary: installation.codexBinary,
         codexBinaryIdentity: installation.codexBinaryIdentity,
+        codeModeHost: installation.codeModeHost,
+        codeModeHostIdentity: installation.codeModeHostIdentity,
         codexConfig: CODEX_LOCKED_CONFIG,
         baseEnvironment,
         cancellationSignal,
@@ -369,14 +426,19 @@ export function createCodexProvider({
     preflight: (installation, { probe }) => preflightEvidence(installation, probe),
     resolveSelection(selection, { evidence }) {
       const availableModels = new Set(evidence.models.map((model) => model.id));
-      const requestedModelId = selection.requestedModelId || evidence.currentModelId;
+      const requestedModelId = selection.requestedModelId
+        || evidence.currentModelId
+        || evidence.models[0]?.id;
       if (!requestedModelId || !availableModels.has(requestedModelId)) {
         failure("CODEX_MODEL_UNAVAILABLE", "The selected Codex model is not in the live catalog.", 409);
       }
       const availableReasoning = new Set(
         evidence.reasoningEfforts.map((effort) => effort.id),
       );
-      const requestedReasoning = selection.reasoning?.requested || evidence.currentReasoning;
+      const explicitReasoning = selection.reasoning?.requested !== null;
+      const requestedReasoning = explicitReasoning
+        ? selection.reasoning.requested
+        : evidence.currentReasoning;
       if (requestedReasoning && !availableReasoning.has(requestedReasoning)) {
         failure(
           "CODEX_REASONING_UNAVAILABLE",
@@ -384,8 +446,6 @@ export function createCodexProvider({
           409,
         );
       }
-      const explicitModel = selection.requestedModelId !== null;
-      const explicitReasoning = selection.reasoning?.requested !== null;
       return Object.freeze({
         providerId: CODEX_PROVIDER_ID,
         runtimeId: CODEX_RUNTIME_ID,
@@ -393,8 +453,8 @@ export function createCodexProvider({
         resolvedModelId: requestedModelId,
         reasoning: Object.freeze({
           requested: selection.reasoning?.requested ?? null,
-          applied: requestedReasoning || null,
-          resolution: explicitModel || explicitReasoning ? "exact" : "provider-default",
+          applied: explicitReasoning ? requestedReasoning : null,
+          resolution: explicitReasoning ? "exact" : "provider-default",
         }),
       });
     },
@@ -414,7 +474,7 @@ export function createCodexProvider({
     normalizeRuntimeError: normalizeCodexError,
     preflightFailureMessage: codexFailure,
     loadExecutionPolicy,
-    finalizeExecution: runBridgeFinalizer,
+    finalizeExecution: finalizeCodexExecution,
     createRuntimeLaunch({
       ticket,
       policy,
@@ -434,7 +494,9 @@ export function createCodexProvider({
         codexBinaryIdentity: ticket.installation.codexBinaryIdentity,
         codeModeHost: ticket.installation.codeModeHost,
         codeModeHostIdentity: ticket.installation.codeModeHostIdentity,
-        codexConfig: CODEX_LOCKED_CONFIG,
+        codexConfig: ticket.purpose === "execution"
+          ? CODEX_EXECUTION_CONFIG
+          : CODEX_LOCKED_CONFIG,
         selection: ticket.selection,
         sessionConfigOptions: Object.freeze([
           Object.freeze({

@@ -3,12 +3,14 @@ import { createHash } from "node:crypto";
 import {
   access,
   chmod,
+  copyFile,
   link,
   lstat,
   mkdir,
   mkdtemp,
   readFile,
   realpath,
+  rename,
   rm,
   symlink,
   writeFile,
@@ -17,10 +19,18 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { runBridgeFinalizer } from "../scripts/agent/native/bridge-finalizer.mjs";
-import { publishCodexExecutionOutput } from "../scripts/agent/native/codex-workspace.mjs";
+import {
+  disposeCodexExecutionWorkspace,
+  prepareCodexExecutionWorkspace,
+  publishCodexExecutionOutput,
+  publishCodexOutputThroughVerifiedHandle,
+} from "../scripts/agent/native/codex-workspace.mjs";
+import { finalizeCodexExecution } from "../scripts/agent/providers/codex-provider.mjs";
 import { runAgentNativeAcp } from "../scripts/agent/runtimes/agent-native-acp-runner.mjs";
-import { loadExecutionPolicy } from "../scripts/agent/policies/execution-policy.mjs";
+import {
+  loadExecutionPolicy,
+  verifiedOutputParent,
+} from "../scripts/agent/policies/execution-policy.mjs";
 import { sha256 } from "../scripts/lifecycle-core.mjs";
 import { ProjectFileRepository } from "../scripts/project-file-repository.mjs";
 
@@ -40,10 +50,11 @@ async function identity(filePath) {
   });
 }
 
-async function fixture(t, suffix = "complete") {
+async function fixture(t, suffix = "complete", { sourceHtml: sourceOverride = null } = {}) {
   const root = await realpath(await mkdtemp(path.join(os.tmpdir(), `stemmio-codex-${suffix}-`)));
   t.after(() => rm(root, { recursive: true, force: true }));
-  const sourceHtml = "<!doctype html><html><head><title>Before</title></head><body><main><h1>Before</h1></main></body></html>";
+  const sourceHtml = sourceOverride
+    || "<!doctype html><html><head><title>Before</title></head><body><main><h1>Before</h1></main></body></html>";
   const sourcePath = path.join(root, "external.html");
   await writeFile(sourcePath, sourceHtml);
   const projectsRoot = path.join(root, "projects");
@@ -96,12 +107,42 @@ async function fixture(t, suffix = "complete") {
   };
 }
 
+test("large frozen HTML stays on disk instead of overflowing the Codex instruction prompt", {
+  skip: process.platform !== "darwin",
+}, async (t) => {
+  const largeText = "frozen-page-content-".repeat(20_000);
+  const sourceHtml = `<!doctype html><html><head><title>Large</title></head><body><main><p>${largeText}</p></main></body></html>`;
+  const value = await fixture(t, "large_prompt", { sourceHtml });
+  const workspace = await prepareCodexExecutionWorkspace({
+    policy: value.policy,
+    adapterEntry,
+    baseEnvironment: process.env,
+  });
+  try {
+    assert.ok(Buffer.byteLength(sourceHtml, "utf8") > 256 * 1024);
+    assert.ok(Buffer.byteLength(workspace.launch.prompt, "utf8") < 256 * 1024);
+    assert.doesNotMatch(workspace.launch.prompt, /frozen-page-content-/u);
+    assert.match(workspace.launch.prompt, /input\/base\/index\.html/u);
+    assert.equal(
+      await readFile(path.join(workspace.root, "attempt-root", "input", "base", "index.html"), "utf8"),
+      sourceHtml,
+    );
+  } finally {
+    await disposeCodexExecutionWorkspace(workspace);
+  }
+});
+
 test("agent-native output has no Candidate authority until the Bridge finalizer succeeds", {
   skip: process.platform !== "darwin",
 }, async (t) => {
   const value = await fixture(t);
-  const codexBinary = await realpath("/usr/bin/true");
-  const codexBinaryIdentity = await identity(codexBinary);
+  const codexBinary = path.join(value.root, "codex-node");
+  const codeModeHost = path.join(value.root, "code-mode-node");
+  await Promise.all([
+    copyFile(process.execPath, codexBinary),
+    copyFile(process.execPath, codeModeHost),
+  ]);
+  await Promise.all([chmod(codexBinary, 0o500), chmod(codeModeHost, 0o500)]);
   const result = await runAgentNativeAcp({
     securityProfile: "agent-native",
     purpose: "execution",
@@ -110,9 +151,9 @@ test("agent-native output has no Candidate authority until the Bridge finalizer 
     adapterVersion: "1.6.2",
     adapterArgs: ["--fixture=execution"],
     codexBinary,
-    codexBinaryIdentity,
-    codeModeHost: codexBinary,
-    codeModeHostIdentity: codexBinaryIdentity,
+    codexBinaryIdentity: await identity(codexBinary),
+    codeModeHost,
+    codeModeHostIdentity: await identity(codeModeHost),
     codexConfig: {},
     sessionConfigOptions: [{ id: "model", value: "gpt-synthetic" }],
     cwd: value.policy.requestRoot,
@@ -121,10 +162,10 @@ test("agent-native output has no Candidate authority until the Bridge finalizer 
     prompt: "This prompt must be replaced by the native workspace prompt.",
     baseEnvironment: process.env,
     onEvent() {},
-    turnTimeoutMs: 5_000,
+    turnTimeoutMs: 15_000,
   });
-  assert.match(result.completion.outputSha256, /^sha256:[a-f0-9]{64}$/u);
-  assert.equal(await access(value.outputPath).then(() => true, () => false), true);
+  assert.match(result.pendingCompletion.outputSha256, /^sha256:[a-f0-9]{64}$/u);
+  assert.equal(await access(value.outputPath).then(() => true, () => false), false);
   assert.equal(await access(value.completionPath).then(() => true, () => false), false);
   const beforeFinalizer = await value.repository.workspace({ sourcePath: value.target.exactSourcePath });
   assert.equal(beforeFinalizer.activeCandidate, null);
@@ -132,7 +173,10 @@ test("agent-native output has no Candidate authority until the Bridge finalizer 
   assert.equal(await readFile(value.sourcePath, "utf8"), value.sourceHtml);
   assert.equal(await readFile(value.target.exactSourcePath, "utf8"), value.sourceHtml);
 
-  const completion = await runBridgeFinalizer({ policy: value.policy });
+  const completion = await finalizeCodexExecution({
+    policy: value.policy,
+    runtimeResult: result,
+  });
   assert.equal(completion.status, "completed");
   const reopened = new ProjectFileRepository({ projectsRoot: value.projectsRoot });
   const status = await reopened.requestStatus({
@@ -259,4 +303,63 @@ test("Bridge refuses publication after cancellation or frozen-input drift", asyn
     assert.equal(await access(value.outputPath).then(() => true, () => false), false);
     assert.equal(await access(value.completionPath).then(() => true, () => false), false);
   });
+});
+
+test("Candidate publication fails closed when its verified output ancestor is replaced", async (t) => {
+  const value = await fixture(t, "ancestor_swap");
+  const outputRoot = path.dirname(value.outputPath);
+  const movedOutputRoot = `${outputRoot}-moved`;
+  const escapeRoot = path.join(value.root, "escape-output");
+  await mkdir(escapeRoot, { mode: 0o700 });
+  const expectedParent = await verifiedOutputParent(value.outputPath, value.policy.requestRoot);
+  await rename(outputRoot, movedOutputRoot);
+  await symlink(escapeRoot, outputRoot);
+
+  await assert.rejects(
+    publishCodexOutputThroughVerifiedHandle(
+      value.outputPath,
+      value.policy.requestRoot,
+      expectedParent,
+      Buffer.from(validHtml),
+    ),
+    { code: "AGENT_UNSAFE_ANCESTOR" },
+  );
+  assert.equal(
+    await access(path.join(escapeRoot, "candidate.html")).then(() => true, () => false),
+    false,
+  );
+  assert.equal(
+    await access(path.join(movedOutputRoot, "candidate.html")).then(() => true, () => false),
+    false,
+  );
+});
+
+test("Candidate publication clears generated bytes after a post-open ancestor rename", async (t) => {
+  const value = await fixture(t, "post_open_swap");
+  const outputRoot = path.dirname(value.outputPath);
+  const movedOutputRoot = `${outputRoot}-moved`;
+  const escapeRoot = path.join(value.root, "post-open-escape");
+  await mkdir(escapeRoot, { mode: 0o700 });
+  const expectedParent = await verifiedOutputParent(value.outputPath, value.policy.requestRoot);
+
+  await assert.rejects(
+    publishCodexOutputThroughVerifiedHandle(
+      value.outputPath,
+      value.policy.requestRoot,
+      expectedParent,
+      Buffer.from(validHtml),
+      {
+        beforeWrite: async () => {
+          await rename(outputRoot, movedOutputRoot);
+          await symlink(escapeRoot, outputRoot);
+        },
+      },
+    ),
+    { code: "AGENT_UNSAFE_ANCESTOR" },
+  );
+  assert.equal(await readFile(path.join(movedOutputRoot, "candidate.html"), "utf8"), "");
+  assert.equal(
+    await access(path.join(escapeRoot, "candidate.html")).then(() => true, () => false),
+    false,
+  );
 });

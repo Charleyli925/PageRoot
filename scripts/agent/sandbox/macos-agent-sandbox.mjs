@@ -12,14 +12,24 @@ function subpath(filePath) {
   return `(subpath ${sandboxString(path.resolve(filePath))})`;
 }
 
+export function packagedRuntimeReadRoot(runtime) {
+  const resolved = path.resolve(runtime);
+  const marker = `${path.sep}Contents${path.sep}Frameworks${path.sep}`;
+  const index = resolved.indexOf(marker);
+  return index > 0 ? resolved.slice(0, index) : null;
+}
+
 export function macosAgentSandboxProfile({
   runtime,
+  runtimeReadRoot = null,
   codexBinary,
   codeModeHost = null,
   packageRoot,
   contextRoot,
   stateRoot,
   authFile = null,
+  authRoot = null,
+  allowAuthentication = false,
   allowOutputRoot = null,
   allowToolProcesses = false,
 } = {}) {
@@ -41,6 +51,19 @@ export function macosAgentSandboxProfile({
   }
   if (codeModeHost !== null && (typeof codeModeHost !== "string" || !path.isAbsolute(codeModeHost))) {
     throw new TypeError("Codex sandbox code-mode host must be absolute.");
+  }
+  if (runtimeReadRoot !== null
+    && (typeof runtimeReadRoot !== "string" || !path.isAbsolute(runtimeReadRoot))) {
+    throw new TypeError("Codex sandbox runtime read root must be absolute.");
+  }
+  if (authRoot !== null && (typeof authRoot !== "string" || !path.isAbsolute(authRoot))) {
+    throw new TypeError("Codex sandbox auth root must be absolute.");
+  }
+  if (allowAuthentication && authRoot === null) {
+    throw new TypeError("Codex authentication sandbox requires an auth root.");
+  }
+  if (allowOutputRoot !== null && !allowToolProcesses) {
+    throw new TypeError("Codex sandbox output writes require the isolated tool process chain.");
   }
   const readable = [
     literal(runtime),
@@ -75,6 +98,16 @@ export function macosAgentSandboxProfile({
     "/usr/bin/tr",
     "/usr/bin/wc",
   ].map((filePath) => path.resolve(filePath));
+  const toolLaunchers = [
+    ...(codeModeHost ? [path.resolve(codeModeHost)] : []),
+    ...toolExecutables,
+  ];
+  const toolProcessExecRules = toolLaunchers.flatMap((launcher) => (
+    toolExecutables.map((executable) => (
+      `(with-filter (process-path ${sandboxString(launcher)})`
+        + ` (allow process-exec ${literal(executable)}))`
+    ))
+  ));
   return [
     "(version 1)",
     "(deny default)",
@@ -86,6 +119,10 @@ export function macosAgentSandboxProfile({
       + ` (allow process-exec ${literal(runtime)}))`,
     `(with-filter (process-path ${sandboxString(path.resolve(runtime))})`
       + ` (allow process-exec ${literal(codexBinary)}))`,
+    ...(runtimeReadRoot
+      ? [`(with-filter (process-path ${sandboxString(path.resolve(runtime))})`
+        + ` (allow file-read* ${subpath(runtimeReadRoot)}))`]
+      : []),
     ...(codeModeHost
       ? [
         `(with-filter ${codexProcess} (allow process-exec ${literal(codeModeHost)}))`,
@@ -94,7 +131,7 @@ export function macosAgentSandboxProfile({
       ]
       : []),
     ...(allowToolProcesses
-      ? toolExecutables.map((filePath) => `(allow process-exec ${literal(filePath)})`)
+      ? toolProcessExecRules
       : []),
     ...readable.map((filter) => `(allow file-read* ${filter})`),
     ...(codeModeHost ? [
@@ -115,8 +152,27 @@ export function macosAgentSandboxProfile({
       ? [`(with-filter (process-path ${sandboxString(path.resolve(codexBinary))})`
         + ` (allow file-read* ${literal(authFile)}))`]
       : []),
+    ...(authRoot
+      ? [
+        `(with-filter ${codexProcess} (allow file-read* ${subpath(authRoot)}))`,
+        ...(allowAuthentication
+          ? [`(with-filter ${codexProcess} (allow file-write* ${subpath(authRoot)}))`]
+          : []),
+      ]
+      : []),
     `(with-filter ${codexProcess} (allow file-write* ${subpath(stateRoot)}))`,
-    ...(allowOutputRoot ? [`(allow file-write* ${subpath(allowOutputRoot)})`] : []),
+    ...(allowAuthentication
+      ? [
+        `(with-filter ${codexProcess} (allow process-exec ${literal("/usr/bin/open")}))`,
+        `(allow file-read* ${literal("/usr/bin/open")})`,
+      ]
+      : []),
+    ...(allowOutputRoot
+      ? toolExecutables.map((filePath) => (
+          `(with-filter (process-path ${sandboxString(filePath)})`
+            + ` (allow file-write* ${subpath(allowOutputRoot)}))`
+        ))
+      : []),
     // Only the verified Codex binary receives model-transport network access.
     // Tool descendants have a different process path and remain network-denied.
     `(with-filter ${codexProcess} (allow network*))`,

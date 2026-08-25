@@ -1,9 +1,21 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import {
+  chmod,
+  lstat,
+  mkdir,
+  mkdtemp,
+  realpath,
+  rm,
+  symlink,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
 import * as acp from "@agentclientprotocol/sdk";
 
+import {
+  macosAgentSandboxProfile,
+  packagedRuntimeReadRoot,
+} from "../sandbox/macos-agent-sandbox.mjs";
 import { withAgentNativeAcpProcess } from "./agent-native-acp-runner.mjs";
 
 const DEFAULT_PROBE_TIMEOUT_MS = 30_000;
@@ -51,6 +63,17 @@ function withTimeout(operation, timeoutMs) {
     handle.unref?.();
   });
   return Promise.race([operation, expired]).finally(() => clearTimeout(handle));
+}
+
+async function existingAuthFile(baseEnvironment) {
+  const codexHome = baseEnvironment?.CODEX_HOME
+    || (baseEnvironment?.HOME ? path.join(baseEnvironment.HOME, ".codex") : null);
+  if (!codexHome) return null;
+  const candidate = path.join(codexHome, "auth.json");
+  const information = await lstat(candidate).catch(() => null);
+  return information?.isFile() && !information.isSymbolicLink()
+    ? realpath(candidate)
+    : null;
 }
 
 function selectOptions(configOptions, id) {
@@ -132,15 +155,56 @@ function normalizeCatalog(session) {
 }
 
 export async function probeAgentNativeAcp(launch) {
+  if (process.platform !== "darwin") {
+    throw probeError(
+      "CODEX_SANDBOX_PLATFORM_UNSUPPORTED",
+      "Codex preflight requires the pinned macOS sandbox boundary.",
+    );
+  }
   const timeoutMs = Number.isSafeInteger(launch?.timeoutMs) && launch.timeoutMs > 0
     ? launch.timeoutMs
     : DEFAULT_PROBE_TIMEOUT_MS;
-  const probeRoot = await mkdtemp(path.join(os.tmpdir(), "stemmio-codex-probe-"));
+  const root = await realpath(await mkdtemp(path.join(os.tmpdir(), "stemmio-codex-probe-")));
+  const probeRoot = path.join(root, "context");
+  const stateRoot = path.join(root, "state");
+  const codexHome = path.join(stateRoot, "codex-home");
+  const homeRoot = path.join(stateRoot, "home");
+  const temporaryRoot = path.join(stateRoot, "tmp");
   try {
+    await Promise.all([
+      mkdir(probeRoot, { mode: 0o500 }),
+      mkdir(codexHome, { recursive: true, mode: 0o700 }),
+      mkdir(homeRoot, { recursive: true, mode: 0o700 }),
+      mkdir(temporaryRoot, { recursive: true, mode: 0o700 }),
+    ]);
+    const authFile = await existingAuthFile(launch.baseEnvironment);
+    if (authFile) await symlink(authFile, path.join(codexHome, "auth.json"));
+    const runtime = await realpath(process.execPath);
+    const packageRoot = path.resolve(path.dirname(launch.adapterEntry), "..", "..", "..");
+    const sandboxProfileFactory = ({ codexBinary, codeModeHost }) => macosAgentSandboxProfile({
+      runtime,
+      runtimeReadRoot: packagedRuntimeReadRoot(runtime),
+      codexBinary,
+      codeModeHost,
+      packageRoot,
+      contextRoot: probeRoot,
+      stateRoot,
+      authFile,
+    });
     return await withAgentNativeAcpProcess({
       ...launch,
       cwd: probeRoot,
       mode: "read-only",
+      sandboxProfileFactory,
+      baseEnvironment: Object.freeze({
+        ...(launch.baseEnvironment || {}),
+        HOME: homeRoot,
+        CODEX_HOME: codexHome,
+        TMPDIR: temporaryRoot,
+        XDG_CACHE_HOME: path.join(stateRoot, "cache"),
+        XDG_CONFIG_HOME: path.join(stateRoot, "config"),
+        XDG_DATA_HOME: path.join(stateRoot, "data"),
+      }),
     }, ({ stream }) => withTimeout(probeClient().connectWith(stream, async (context) => {
       const initialized = await context.request(acp.methods.agent.initialize, {
         protocolVersion: acp.PROTOCOL_VERSION,
@@ -202,6 +266,7 @@ export async function probeAgentNativeAcp(launch) {
       }
     }), timeoutMs));
   } finally {
-    await rm(probeRoot, { recursive: true, force: true });
+    await chmod(probeRoot, 0o700).catch(() => {});
+    await rm(root, { recursive: true, force: true });
   }
 }

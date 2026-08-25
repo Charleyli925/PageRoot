@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { parsePublicModels } from "../scripts/agent-bridge-service.mjs";
+import { createQoderProvider } from "../scripts/agent/providers/qoder-provider.mjs";
 
 // The model catalog is the first thing the renderer receives about Qoder that
 // is not a bounded status enum, so the parser is the boundary that keeps raw
@@ -66,4 +67,57 @@ test("no input yields an empty, frozen list", () => {
   assert.deepEqual(parsePublicModels(""), []);
   assert.deepEqual(parsePublicModels(null), []);
   assert.ok(Object.isFrozen(parsePublicModels("Qwen3.8-Max")));
+});
+
+test("Qoder projects namespaced model authority and sends only the raw ACP value", async () => {
+  const provider = createQoderProvider({
+    commandResolver: async () => null,
+    preflightRunner: async () => ({
+      version: "1.1.27",
+      modelCount: 1,
+      models: [{ id: "Qwen3.8-Max", displayName: "Qwen3.8-Max" }],
+    }),
+    policyLoader: async () => ({}),
+  });
+  const installation = {
+    command: "/tmp/qodercli.js",
+    identity: {},
+    source: "e2e-override",
+  };
+  const evidence = await provider.preflight(installation, { environment: {} });
+  assert.deepEqual(evidence.models.map((model) => model.id), ["qoder:Qwen3.8-Max"]);
+  const providerDefault = await provider.resolveSelection({
+    providerId: "qoder",
+    runtimeId: "acp",
+    requestedModelId: null,
+    resolvedModelId: null,
+    reasoning: { requested: null, applied: null, resolution: "provider-default" },
+  }, { evidence });
+  assert.equal(providerDefault.requestedModelId, null);
+  assert.equal(providerDefault.resolvedModelId, "qoder:Qwen3.8-Max");
+  const selection = await provider.resolveSelection({
+    providerId: "qoder",
+    runtimeId: "acp",
+    requestedModelId: "qoder:Qwen3.8-Max",
+    resolvedModelId: "qoder:Qwen3.8-Max",
+    reasoning: { requested: null, applied: null, resolution: "provider-default" },
+  }, { evidence });
+  const launch = provider.createRuntimeLaunch({
+    ticket: { installation, selection },
+    policy: {},
+    prompt: "test",
+    baseEnvironment: {},
+    cancellationSignal: null,
+    onEvent() {},
+  });
+  assert.deepEqual(launch.sessionConfigOptions, [{ id: "model", value: "Qwen3.8-Max" }]);
+  const defaultLaunch = provider.createRuntimeLaunch({
+    ticket: { installation, selection: providerDefault },
+    policy: {},
+    prompt: "test",
+    baseEnvironment: {},
+    cancellationSignal: null,
+    onEvent() {},
+  });
+  assert.deepEqual(defaultLaunch.sessionConfigOptions, [{ id: "model", value: "Qwen3.8-Max" }]);
 });

@@ -231,7 +231,7 @@ test("the Bridge refuses an unusable discussion before spawning anything", async
     assert.deepEqual(calls.redeemed, [], "no ticket may be redeemed by a refused start");
   };
 
-  await rejects({ driver: "clipboard" }, "AGENT_DRIVER_UNSUPPORTED", 422);
+  await rejects({ driver: "clipboard" }, "AGENT_DRIVER_UNSUPPORTED", 400);
   await rejects({ trustPolicyAccepted: "nope" }, "AGENT_TRUST_POLICY_REQUIRED", 422);
   await rejects({ projectId: "project_zz" }, "DISCUSSION_IDENTITY_INVALID", 422);
   await rejects({ conversationId: "../escape" }, "DISCUSSION_IDENTITY_INVALID", 422);

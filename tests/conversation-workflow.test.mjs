@@ -95,6 +95,8 @@ function stubBridge(overrides = {}) {
               updatedAt: "2026-08-21T00:00:01.000Z",
               text: body.text,
               intent: body.intent,
+              providerSelection: body.providerSelection,
+              modelDisplayName: body.modelDisplayName,
             },
           };
       },
@@ -186,6 +188,28 @@ test("a draft write is debounced into one request", async () => {
   assert.equal(bridge.calls.drafts[0].text, "一二三");
 });
 
+test("a Provider and model choice is persisted with the active conversation draft", async () => {
+  const bridge = stubBridge();
+  const timers = manualTimers();
+  const { session, workflow } = createWorkflow(bridge, timers);
+  await workflow.open(documentContext("doc_a", "/tmp/a.html"));
+  const selection = {
+    providerId: "codex",
+    runtimeId: "acp",
+    requestedModelId: "codex:gpt-test",
+    resolvedModelId: "codex:gpt-test",
+    reasoning: { requested: null, applied: null, resolution: "provider-default" },
+  };
+
+  workflow.updateDraftAgentSelection(selection, "GPT Test");
+  assert.deepEqual(session.snapshot.draftProviderSelection, selection);
+  await workflow.flushDraft();
+
+  assert.deepEqual(bridge.calls.drafts[0].providerSelection, selection);
+  assert.equal(bridge.calls.drafts[0].modelDisplayName, "GPT Test");
+  assert.deepEqual(session.snapshot.draftProviderSelection, selection);
+});
+
 test("flushing a draft at a drain boundary sends the pending text", async () => {
   const bridge = stubBridge();
   const timers = manualTimers();
@@ -229,6 +253,14 @@ test("a draft write in flight coalesces later edits into one follow-up", async (
 
   workflow.updateDraftText("第一次");
   const flushing = workflow.flushDraft();
+  const laterSelection = {
+    providerId: "codex",
+    runtimeId: "acp",
+    requestedModelId: "codex:gpt-later",
+    resolvedModelId: "codex:gpt-later",
+    reasoning: { requested: "high", applied: "high", resolution: "exact" },
+  };
+  workflow.updateDraftAgentSelection(laterSelection, "GPT Later");
   workflow.updateDraftText("第二次");
   workflow.updateDraftText("第三次");
   timers.runAll();
@@ -243,6 +275,199 @@ test("a draft write in flight coalesces later edits into one follow-up", async (
     bridge.calls.drafts[bridge.calls.drafts.length - 1].text,
     "第三次",
   );
+  assert.deepEqual(
+    bridge.calls.drafts[bridge.calls.drafts.length - 1].providerSelection,
+    laterSelection,
+  );
+  assert.deepEqual(workflow.session.snapshot.draftProviderSelection, laterSelection);
+});
+
+test("a stale draft acknowledgement preserves an intentional Provider-default model label", async () => {
+  let releaseWrite = () => {};
+  const firstWrite = new Promise((resolve) => {
+    releaseWrite = resolve;
+  });
+  let writeCount = 0;
+  const bridge = stubBridge({
+    saveConversationDraft: async (body) => {
+      writeCount += 1;
+      if (writeCount === 1) await firstWrite;
+      return {
+        ok: true,
+        draft: {
+          schemaVersion: "1.0.0",
+          conversationId: body.conversationId,
+          revision: writeCount,
+          updatedAt: "2026-08-21T00:00:01.000Z",
+          text: body.text,
+          intent: body.intent,
+          providerSelection: body.providerSelection,
+          modelDisplayName: body.modelDisplayName,
+        },
+      };
+    },
+  });
+  const timers = manualTimers();
+  const { workflow } = createWorkflow(bridge, timers);
+  await workflow.open(documentContext("doc_a", "/tmp/a.html"));
+  const explicit = {
+    providerId: "codex",
+    runtimeId: "acp",
+    requestedModelId: "codex:gpt-explicit",
+    resolvedModelId: "codex:gpt-explicit",
+    reasoning: { requested: null, applied: null, resolution: "provider-default" },
+  };
+  const providerDefault = {
+    ...explicit,
+    requestedModelId: null,
+    resolvedModelId: null,
+  };
+
+  workflow.updateDraftAgentSelection(explicit, "GPT Explicit");
+  const flushing = workflow.flushDraft();
+  workflow.updateDraftAgentSelection(providerDefault, null);
+  releaseWrite();
+  await flushing;
+  await workflow.flushDraft();
+
+  const lastWrite = bridge.calls.drafts[bridge.calls.drafts.length - 1];
+  assert.deepEqual(lastWrite.providerSelection, providerDefault);
+  assert.equal(lastWrite.modelDisplayName, null);
+  assert.equal(workflow.session.snapshot.draftModelDisplayName, null);
+});
+
+test("a close-boundary flush waits for the active draft write and its coalesced successor", async () => {
+  let releaseWrite = () => {};
+  const firstWrite = new Promise((resolve) => {
+    releaseWrite = resolve;
+  });
+  let writeCount = 0;
+  const bridge = stubBridge({
+    saveConversationDraft: async (body) => {
+      writeCount += 1;
+      if (writeCount === 1) await firstWrite;
+      return {
+        ok: true,
+        draft: {
+          schemaVersion: "1.0.0",
+          conversationId: body.conversationId,
+          revision: writeCount,
+          updatedAt: "2026-08-21T00:00:01.000Z",
+          text: body.text,
+          intent: body.intent,
+          providerSelection: body.providerSelection,
+          modelDisplayName: body.modelDisplayName,
+        },
+      };
+    },
+  });
+  const timers = manualTimers();
+  const { workflow } = createWorkflow(bridge, timers);
+  await workflow.open(documentContext("doc_a", "/tmp/a.html"));
+
+  workflow.updateDraftText("older");
+  const firstFlush = workflow.flushDraft();
+  workflow.updateDraftText("latest");
+  const boundaryFlush = workflow.flushDraft();
+  let boundarySettled = false;
+  void boundaryFlush.then(() => { boundarySettled = true; });
+  await Promise.resolve();
+  assert.equal(boundarySettled, false);
+
+  releaseWrite();
+  await Promise.all([firstFlush, boundaryFlush]);
+  workflow.close();
+
+  assert.equal(bridge.calls.drafts.length, 2);
+  assert.equal(bridge.calls.drafts[1].text, "latest");
+  assert.equal(workflow.session.snapshot.status, "idle");
+});
+
+test("a coalesced draft keeps its originating Document after the next one opens", async () => {
+  let releaseWrite = () => {};
+  const firstWrite = new Promise((resolve) => {
+    releaseWrite = resolve;
+  });
+  let writeCount = 0;
+  const bridge = stubBridge({
+    conversation: async (sourcePath) => sourcePath === "/tmp/a.html"
+      ? conversationPayload("doc_a", "conversation_aaaaaaaaaaaa")
+      : conversationPayload("doc_b", "conversation_bbbbbbbbbbbb"),
+    saveConversationDraft: async (body) => {
+      writeCount += 1;
+      if (writeCount === 1) await firstWrite;
+      return {
+        ok: true,
+        draft: {
+          schemaVersion: "1.0.0",
+          conversationId: body.conversationId,
+          revision: writeCount,
+          updatedAt: "2026-08-21T00:00:01.000Z",
+          text: body.text,
+          intent: body.intent,
+        },
+      };
+    },
+  });
+  const timers = manualTimers();
+  const { workflow } = createWorkflow(bridge, timers);
+  const first = documentContext("doc_a", "/tmp/a.html");
+  const second = documentContext("doc_b", "/tmp/b.html");
+  await workflow.open(first);
+
+  workflow.updateDraftText("A older");
+  const firstFlush = workflow.flushDraft();
+  workflow.updateDraftText("A latest");
+  const boundaryFlush = workflow.flushDraft();
+  await workflow.open(second);
+  workflow.updateDraftText("B latest");
+  const secondFlush = workflow.flushDraft();
+
+  releaseWrite();
+  await Promise.all([firstFlush, boundaryFlush, secondFlush]);
+
+  assert.deepEqual(bridge.calls.drafts.map((draft) => ({
+    documentId: draft.documentId,
+    conversationId: draft.conversationId,
+    text: draft.text,
+  })), [
+    {
+      documentId: "doc_a",
+      conversationId: "conversation_aaaaaaaaaaaa",
+      text: "A older",
+    },
+    {
+      documentId: "doc_a",
+      conversationId: "conversation_aaaaaaaaaaaa",
+      text: "A latest",
+    },
+    {
+      documentId: "doc_b",
+      conversationId: "conversation_bbbbbbbbbbbb",
+      text: "B latest",
+    },
+  ]);
+  assert.equal(workflow.session.snapshot.context.documentId, "doc_b");
+  assert.equal(workflow.session.snapshot.draftText, "B latest");
+});
+
+test("a delayed close is fenced from deactivating the next Document", async () => {
+  const bridge = stubBridge({
+    conversation: async (sourcePath) => sourcePath === "/tmp/a.html"
+      ? conversationPayload("doc_a", "conversation_aaaaaaaaaaaa")
+      : conversationPayload("doc_b", "conversation_bbbbbbbbbbbb"),
+  });
+  const timers = manualTimers();
+  const { workflow } = createWorkflow(bridge, timers);
+  const first = documentContext("doc_a", "/tmp/a.html");
+  const second = documentContext("doc_b", "/tmp/b.html");
+  await workflow.open(first);
+  await workflow.open(second);
+
+  assert.equal(workflow.close(first), false);
+  assert.equal(workflow.session.snapshot.context.documentId, "doc_b");
+  assert.equal(workflow.close(second), true);
+  assert.equal(workflow.session.snapshot.status, "idle");
 });
 
 test("a failed load reports failure without leaving a stale conversation", async () => {

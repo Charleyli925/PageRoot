@@ -86,6 +86,25 @@ finalizer to a pending-review Candidate; import-only evidence is insufficient.
 These exceptions do not authorize adding the affected packages to the packaged
 runtime.
 
+The Codex Developer Preview additionally packages only the exact
+`@agentclientprotocol/codex-acp`, `@openai/codex` wrapper and
+`@openai/codex-darwin-arm64` platform directory. The adapter entry is a
+self-contained reviewed bundle whose exact hash is locked; its declared build
+dependencies are not copied as an unused general-purpose runtime tree. The
+separate ACP SDK remains the Bridge's allowlisted dependency. Artifact
+verification byte-compares the JavaScript/package content and packages an exact
+SPDX 2.3 runtime SBOM that inventories every package marker embedded in the
+adapter bundle plus every shipped Codex package. The runtime-lock verifier derives
+that bundle inventory from the locked adapter entry and checks every package,
+checksum, license, document relationship and direct adapter relationship. macOS
+re-signing may replace only the Mach-O signature
+blob and its three dependent load-command sizes, so all four native executables
+must also match the locked canonical code fingerprint, valid code signature,
+arm64 architecture and executable bits. The packaged Electron Helper receives a
+process-filtered read allowance for its containing `.app` bundle so it can load
+Electron Framework; Codex and tool descendants do not inherit that allowance.
+Other Codex platform aliases remain unsupported and absent.
+
 Do not use `npm audit fix --force`: review every dependency update deliberately,
 prefer compatible upstream fixes or narrow overrides, and rerun all source and
 artifact gates after any dependency change.

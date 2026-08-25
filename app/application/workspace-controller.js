@@ -690,8 +690,8 @@ export class WorkspaceController {
     return this.#conversationWorkflow?.open(context) ?? Promise.resolve(null);
   }
 
-  closeConversation() {
-    this.#conversationWorkflow?.close();
+  closeConversation(context = null) {
+    return this.#conversationWorkflow?.close(context) ?? false;
   }
 
   updateConversationDraftText(text) {
@@ -700,6 +700,10 @@ export class WorkspaceController {
 
   updateConversationDraftIntent(intent) {
     this.#conversationWorkflow?.updateDraftIntent(intent);
+  }
+
+  updateConversationDraftAgentSelection(selection, modelDisplayName = null) {
+    this.#conversationWorkflow?.updateDraftAgentSelection(selection, modelDisplayName);
   }
 
   flushConversationDraft() {
@@ -1083,8 +1087,12 @@ export class WorkspaceController {
     return this.#requireRunWorkflow().selectAgent(selection);
   }
 
-  checkAgentUsability() {
-    return this.#requireRunWorkflow().checkAgentUsability();
+  restoreAgentSelection(selection) {
+    return this.#requireRunWorkflow().restoreAgentSelection(selection);
+  }
+
+  checkAgentUsability(options) {
+    return this.#requireRunWorkflow().checkAgentUsability(options);
   }
 
   authenticateAgent() {

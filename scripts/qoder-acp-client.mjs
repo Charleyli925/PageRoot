@@ -491,33 +491,31 @@ export async function captureQoderAcpReviewBoundary({
   };
 }
 
-function buildClient(host) {
+function bridgeOwnedHostOperation() {
+  throw policyError(
+    "ACP_BRIDGE_HOST_OPERATION",
+    "Bridge-finalized ACP turns cannot access PageRoot host operations.",
+  );
+}
+
+function buildClient(host, { completionAuthority = "agent-host" } = {}) {
+  const bridgeOwned = completionAuthority === "bridge";
+  const permissionHandler = bridgeOwned
+    ? () => ({ outcome: { outcome: "cancelled" } })
+    : ({ params, signal }) => host.requestPermission(params, signal);
+  const hostHandler = (method) => bridgeOwned
+    ? bridgeOwnedHostOperation
+    : ({ params, signal }) => host[method](params, signal);
   return acp
     .client({ name: "pageroot-agent-bridge" })
-    .onRequest(acp.methods.client.session.requestPermission, ({ params, signal }) => (
-      host.requestPermission(params, signal)
-    ))
-    .onRequest(acp.methods.client.fs.readTextFile, ({ params, signal }) => (
-      host.readTextFile(params, signal)
-    ))
-    .onRequest(acp.methods.client.fs.writeTextFile, ({ params, signal }) => (
-      host.writeTextFile(params, signal)
-    ))
-    .onRequest(acp.methods.client.terminal.create, ({ params, signal }) => (
-      host.createTerminal(params, signal)
-    ))
-    .onRequest(acp.methods.client.terminal.output, ({ params, signal }) => (
-      host.terminalOutput(params, signal)
-    ))
-    .onRequest(acp.methods.client.terminal.waitForExit, ({ params, signal }) => (
-      host.waitForTerminalExit(params, signal)
-    ))
-    .onRequest(acp.methods.client.terminal.kill, ({ params, signal }) => (
-      host.killTerminal(params, signal)
-    ))
-    .onRequest(acp.methods.client.terminal.release, ({ params, signal }) => (
-      host.releaseTerminal(params, signal)
-    ));
+    .onRequest(acp.methods.client.session.requestPermission, permissionHandler)
+    .onRequest(acp.methods.client.fs.readTextFile, hostHandler("readTextFile"))
+    .onRequest(acp.methods.client.fs.writeTextFile, hostHandler("writeTextFile"))
+    .onRequest(acp.methods.client.terminal.create, hostHandler("createTerminal"))
+    .onRequest(acp.methods.client.terminal.output, hostHandler("terminalOutput"))
+    .onRequest(acp.methods.client.terminal.waitForExit, hostHandler("waitForTerminalExit"))
+    .onRequest(acp.methods.client.terminal.kill, hostHandler("killTerminal"))
+    .onRequest(acp.methods.client.terminal.release, hostHandler("releaseTerminal"));
 }
 
 function timeoutController(timeoutMs) {
@@ -806,7 +804,7 @@ export async function runAcpTask({
   }
   const profile = acpDriverProfile(policy);
   const host = profile.assertHost(profile.createHost(policy, onEvent));
-  const client = buildClient(host);
+  const client = buildClient(host, { completionAuthority });
   const startupTimeout = timeoutController(startupTimeoutMs);
   const cancellation = cancellationGate(cancellationSignal);
   const updates = [];

@@ -40,10 +40,10 @@ const QODER_PRESENTATION = Object.freeze({
   primaryActionDataAttribute: "data-qoder-primary",
   guidancePurposePrefix: "qoder",
   readyDetail: "真实预检已完成，可直接交给 Qoder CLI",
-  notInstalledDetail: "如需从 Stemmio 直接发送，还需要 Qoder CLI。",
+  notInstalledDetail: "如需从 PageRoot 直接发送，还需要 Qoder CLI。",
   authRequiredDetail: "完成 Qoder 登录后即可直接发送。",
-  invalidInstallationDetail: "当前安装不是 Stemmio 支持的独立 Qoder CLI。",
-  restartRequiredDetail: "Qoder CLI 已发生变化，重新打开 Stemmio 后即可继续。",
+  invalidInstallationDetail: "当前安装不是 PageRoot 支持的独立 Qoder CLI。",
+  restartRequiredDetail: "Qoder CLI 已发生变化，重新打开 PageRoot 后即可继续。",
   checkingDetail: "正在自动检查 Qoder CLI…",
   capacityStatusLabel: "暂不可用 · Qoder 额度已用完",
   capacityDetail: "Qoder 账号当前没有可用模型容量。",
@@ -55,6 +55,7 @@ const QODER_PRESENTATION = Object.freeze({
   restartSupported: true,
   stopLabel: "停止 Qoder 并继续编辑",
   frozenPreviewDetail: "这是本轮冻结并交给 Qoder CLI 的只读内容",
+  authAction: Object.freeze({ kind: "copy-command", label: "登录 Qoder CLI" }),
 });
 
 const AGENT_SECURITY_PROFILES = new Set(["client-mediated", "agent-native"]);
@@ -65,15 +66,15 @@ function qoderGuidanceInstruction(kind) {
       "请帮我完成这台 Mac 上独立 Qoder CLI 的官方登录流程。",
       "使用 Qoder 官方支持的登录入口 `qodercli login`；如果需要交互式登录，请启动 `qodercli` 后使用 `/login`。",
       "完成浏览器或令牌登录后，验证 `qodercli --list-models` 能返回当前账号可用的模型。",
-      "不要修改 Stemmio，也不要修改当前项目。完成后只告诉我登录和可用性验证结果。",
+      "不要修改 PageRoot，也不要修改当前项目。完成后只告诉我登录和可用性验证结果。",
     ].join("\n");
   }
   return [
-    "请帮我在这台 Mac 上准备 Stemmio 支持的独立 Qoder CLI。",
+    "请帮我在这台 Mac 上准备 PageRoot 支持的独立 Qoder CLI。",
     "使用 Qoder 官方 npm 包 `@qoder-ai/qodercli@latest`，不要使用 Qoder 应用包内置的命令。",
     "将它安装到 Finder 或 Dock 启动的应用也能稳定发现的位置；优先使用用户可写的稳定全局目录，或保留当前 nvm、Volta、fnm、mise 配置并确保 qodercli 启动器真实存在。",
     "安装后使用 Qoder 官方登录流程完成登录，并验证 `qodercli --version` 与 `qodercli --list-models` 均可用。",
-    "不要修改 Stemmio，也不要修改当前项目。完成后只告诉我安装、版本、登录和可用性验证结果。",
+    "不要修改 PageRoot，也不要修改当前项目。完成后只告诉我安装、版本、登录和可用性验证结果。",
   ].join("\n");
 }
 
@@ -114,7 +115,7 @@ function catalogPresentation(provider) {
     notInstalledDetail: String(value.notInstalledDetail || "当前 Agent runtime 不可用。"),
     authRequiredDetail: String(value.authRequiredDetail || "登录后即可继续。"),
     invalidInstallationDetail: String(value.unavailableDetail || "当前 Agent runtime 不可用。"),
-    restartRequiredDetail: "Agent runtime 已发生变化，请重新打开 Stemmio。",
+    restartRequiredDetail: "Agent runtime 已发生变化，请重新打开 PageRoot。",
     checkingDetail: String(value.checkingDetail || "正在检查 Agent…"),
     capacityStatusLabel: "暂不可用 · 账号容量不足",
     capacityDetail: "当前账号没有可用模型容量。",
@@ -151,11 +152,8 @@ function descriptorFromCatalog(provider, trustPolicyVersion) {
       securityProfile: provider.securityProfile || QODER_AGENT_PROVIDER.securityProfile,
       trustPolicyVersion: String(trustPolicyVersion || QODER_AGENT_PROVIDER.trustPolicyVersion),
       presentation: Object.freeze({
-        ...QODER_AGENT_PROVIDER.presentation,
         ...catalogPresentation(provider),
-        logoSrc: QODER_AGENT_PROVIDER.presentation.logoSrc,
-        cardClassName: QODER_AGENT_PROVIDER.presentation.cardClassName,
-        primaryActionDataAttribute: QODER_AGENT_PROVIDER.presentation.primaryActionDataAttribute,
+        ...QODER_AGENT_PROVIDER.presentation,
       }),
       capabilities: Object.freeze({ ...provider.capabilities }),
     });
@@ -179,10 +177,21 @@ function descriptorFromCatalog(provider, trustPolicyVersion) {
 }
 
 function frozenProviderEntry(descriptor, previous = null) {
+  const compatiblePrevious = previous?.runtimeId === descriptor.runtimeId
+    ? previous
+    : null;
   return Object.freeze({
     ...descriptor,
-    availability: previous?.availability || INITIAL_AGENT_PROVIDER_AVAILABILITY,
-    installationDigest: previous?.installationDigest || null,
+    // A provider-list refresh can race a successful preflight. Preserve the
+    // live choice projection only for the same runtime so the later catalog
+    // response cannot erase models that were already verified.
+    models: Object.freeze([...(compatiblePrevious?.models || descriptor.models || [])]),
+    reasoningEfforts: Object.freeze([
+      ...(compatiblePrevious?.reasoningEfforts || descriptor.reasoningEfforts || []),
+    ]),
+    modes: Object.freeze([...(compatiblePrevious?.modes || descriptor.modes || [])]),
+    availability: compatiblePrevious?.availability || INITIAL_AGENT_PROVIDER_AVAILABILITY,
+    installationDigest: compatiblePrevious?.installationDigest || null,
   });
 }
 
@@ -312,6 +321,18 @@ export class AgentCatalogState {
     return frozen;
   }
 
+  restore(selection) {
+    const frozen = freezeAgentSelection(selection);
+    const provider = this.#providers.get(frozen.providerId);
+    if (provider?.runtimeId === frozen.runtimeId) return this.select(frozen);
+    // A durable conversation may name a Provider removed by a build rollback.
+    // Retain that selection only as blocked authority so the UI can require an
+    // explicit compatible reselection; it must never become a silent fallback.
+    this.#selected = frozen;
+    this.#publish();
+    return frozen;
+  }
+
   async refreshCatalog() {
     if (typeof this.#bridgeClient.agentProviders !== "function") {
       throw new TypeError("Agent catalog requires a provider-list bridge method.");
@@ -334,7 +355,7 @@ export class AgentCatalogState {
       }
     }
     this.#providers = next;
-    if (!this.provider(this.#selected)) this.#selected = descriptors[0].selection;
+    if (!this.#selected) this.#selected = descriptors[0].selection;
     this.#publish();
     return this.getSnapshot();
   }
@@ -351,7 +372,11 @@ export class AgentCatalogState {
   }
 
   availability(selection = this.#selected) {
-    return this.provider(selection)?.availability || INITIAL_AGENT_PROVIDER_AVAILABILITY;
+    const provider = this.provider(selection);
+    if (provider) return provider.availability;
+    return selection
+      ? agentProviderAvailabilityFromFailureReason("invalid-installation")
+      : INITIAL_AGENT_PROVIDER_AVAILABILITY;
   }
 
   presentation(selection = this.#selected) {
@@ -493,17 +518,6 @@ export class AgentCatalogState {
           trustPolicyVersion: trust,
           installationDigest: String(preflight.installationDigest || digest || ""),
         });
-        this.#providers.set(frozen.providerId, Object.freeze({
-          ...this.#providers.get(frozen.providerId),
-          models: Object.freeze([...(preflight.models || [])]),
-          reasoningEfforts: Object.freeze([...(preflight.reasoningEfforts || [])]),
-          modes: Object.freeze([...(preflight.modes || [])]),
-          capabilities: Object.freeze({
-            ...(this.#providers.get(frozen.providerId)?.capabilities || {}),
-            ...(preflight.capabilities || {}),
-          }),
-        }));
-        if (this.#isSelected(frozen)) this.#selected = returnedSelection;
         const finalKey = agentPreflightKey(result.selection, {
           installationDigest: result.installationDigest,
           trustPolicyVersion: trust,
@@ -511,11 +525,23 @@ export class AgentCatalogState {
         });
         this.#preflightBySelection.set(finalKey, result);
         if (finalKey !== key) this.#preflightBySelection.delete(key);
-        if (
+        const canProject = (
           !this.#disposed
           && this.#generationByProvider.get(frozen.providerId) === generation
           && this.#canProjectAvailability(frozen)
-        ) {
+        );
+        if (canProject) {
+          this.#providers.set(frozen.providerId, Object.freeze({
+            ...this.#providers.get(frozen.providerId),
+            models: Object.freeze([...(preflight.models || [])]),
+            reasoningEfforts: Object.freeze([...(preflight.reasoningEfforts || [])]),
+            modes: Object.freeze([...(preflight.modes || [])]),
+            capabilities: Object.freeze({
+              ...(this.#providers.get(frozen.providerId)?.capabilities || {}),
+              ...(preflight.capabilities || {}),
+            }),
+          }));
+          if (this.#isSelected(frozen)) this.#selected = returnedSelection;
           this.#setProviderDigest(frozen.providerId, result.installationDigest);
           this.#setAvailability(
             frozen.providerId,

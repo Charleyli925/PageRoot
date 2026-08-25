@@ -92,6 +92,25 @@ test("two providers keep separate in-flight preflights and one-use tickets", asy
   assert.deepEqual(catalog.getSnapshot().preflightBySelection, {});
 });
 
+test("a restored Provider removed by rollback stays selected and unavailable", async () => {
+  const removed = selection("removed");
+  const catalog = new AgentCatalogState({
+    bridgeClient: {
+      async preflightAgent() {
+        throw new Error("must not preflight a removed Provider");
+      },
+    },
+    providers: [QODER_AGENT_PROVIDER],
+  });
+  catalog.restore(removed);
+  assert.deepEqual(catalog.getSnapshot().selected, removed);
+  assert.equal(catalog.availability().status, "unavailable");
+  assert.throws(
+    () => catalog.select(removed),
+    (error) => error?.code === "AGENT_PROVIDER_UNSUPPORTED",
+  );
+});
+
 test("model, reasoning, installation, trust and purpose are all preflight key authority", () => {
   const base = selection("first");
   const variants = [
@@ -157,6 +176,108 @@ test("same provider model and purpose share only their exact in-flight promise",
   const execution = catalog.preflight(first, { purpose: "execution" });
   assert.notEqual(execution, left);
   assert.equal(calls, 2);
+});
+
+test("an older preflight cannot overwrite a newer provider catalog projection", async () => {
+  const starts = [];
+  const first = selection("first");
+  const catalog = new AgentCatalogState({
+    bridgeClient: {
+      preflightAgent(body) {
+        const pending = deferred();
+        starts.push({ body, pending });
+        return pending.promise;
+      },
+    },
+    providers: [provider("first", first)],
+    selected: first,
+    clock: { now: () => 10 },
+  });
+  const older = catalog.preflight(first, { purpose: "discussion" });
+  const newer = catalog.preflight(first, { purpose: "execution" });
+  starts[1].pending.resolve({
+    status: "ready",
+    preflightId: "ticket_newer",
+    selection: first,
+    models: [{ id: "new-model", displayName: "New model" }],
+    reasoningEfforts: [{ id: "high", displayName: "High" }],
+    modes: [{ id: "agent", displayName: "Agent" }],
+    capabilities: { execution: true },
+    expiresAt: new Date(20_000).toISOString(),
+  });
+  await newer;
+  starts[0].pending.resolve({
+    status: "ready",
+    preflightId: "ticket_older",
+    selection: first,
+    models: [{ id: "retired-model", displayName: "Retired model" }],
+    reasoningEfforts: [{ id: "low", displayName: "Low" }],
+    modes: [{ id: "read-only", displayName: "Read only" }],
+    capabilities: { discussion: true },
+    expiresAt: new Date(20_000).toISOString(),
+  });
+  await older;
+  const projected = catalog.getSnapshot().providers.first;
+  assert.deepEqual(projected.models.map((model) => model.id), ["new-model"]);
+  assert.deepEqual(projected.reasoningEfforts.map((effort) => effort.id), ["high"]);
+  assert.deepEqual(projected.modes.map((mode) => mode.id), ["agent"]);
+});
+
+test("a late provider-list refresh preserves a successful live model projection", async () => {
+  const providersPending = deferred();
+  const preflightPending = deferred();
+  const first = selection("first");
+  const resolved = freezeAgentSelection({
+    ...first,
+    resolvedModelId: "first:model-live",
+  });
+  const catalog = new AgentCatalogState({
+    bridgeClient: {
+      agentProviders: () => providersPending.promise,
+      preflightAgent: () => preflightPending.promise,
+    },
+    providers: [provider("first", first)],
+    selected: first,
+    clock: { now: () => 10 },
+  });
+
+  const checking = catalog.preflight(first, { purpose: "execution" });
+  const refreshing = catalog.refreshCatalog();
+  preflightPending.resolve({
+    status: "ready",
+    preflightId: "ticket_live_projection",
+    selection: resolved,
+    models: [{ id: "first:model-live", displayName: "Live model" }],
+    reasoningEfforts: [{ id: "high", displayName: "High" }],
+    modes: [{ id: "agent", displayName: "Agent" }],
+    expiresAt: new Date(20_000).toISOString(),
+  });
+  await checking;
+  providersPending.resolve({
+    trustPolicyVersion: TRUST,
+    providers: [{
+      providerId: "first",
+      runtimeId: "synthetic-runtime",
+      displayName: "First",
+      securityProfile: "client-mediated",
+      capabilities: { discussion: true, execution: true },
+      presentation: { agentName: "First" },
+    }],
+  });
+  await refreshing;
+
+  const snapshot = catalog.getSnapshot();
+  assert.equal(snapshot.selected.resolvedModelId, "first:model-live");
+  assert.equal(snapshot.providers.first.availability.status, "ready");
+  assert.deepEqual(snapshot.providers.first.models, [
+    { id: "first:model-live", displayName: "Live model" },
+  ]);
+  assert.deepEqual(snapshot.providers.first.reasoningEfforts, [
+    { id: "high", displayName: "High" },
+  ]);
+  assert.deepEqual(snapshot.providers.first.modes, [
+    { id: "agent", displayName: "Agent" },
+  ]);
 });
 
 test("concurrent consumers cannot spend the same preflight ticket twice", async () => {
@@ -299,6 +420,12 @@ test("dynamic catalog adds Codex and live preflight replaces only its provider b
   });
   const before = catalog.getSnapshot().providers.qoder;
   await catalog.refreshCatalog();
+  const refreshedQoder = catalog.getSnapshot().providers.qoder;
+  assert.equal(refreshedQoder.presentation.displayName, "Qoder CLI");
+  assert.deepEqual(refreshedQoder.presentation.authAction, {
+    kind: "copy-command",
+    label: "登录 Qoder CLI",
+  });
   const codex = catalog.getSnapshot().providers.codex;
   assert.equal(codex.presentation.authAction.kind, "open-url");
   assert.equal(codex.capabilities.execution, false);

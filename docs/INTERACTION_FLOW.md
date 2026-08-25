@@ -1203,3 +1203,14 @@ A 项目 processing 时切换 B 项目：
     显示图。无法原位同步的结构变化必须保留当前 iframe 或显式进入新 generation，
     不得把本代静默静态重建写成已接受限制。
 26. 打开未绑定 HTML 先出现导入确认；取消后当前项目不变。勾选删除也必须等新画布确认后才把原稿移入废纸篓。再次打开同一原稿只出现“已经导入”确认，主操作打开之前的项目，不出现“查看初始版本 V1”。
+27. 用户选择 Codex 时，未登录状态只显示显式登录动作；预检不创建 Request、
+    不自动打开浏览器。登录后模型和 reasoning 来自实时目录。Discussion 流式回复
+    进入同一产品 Conversation，切换 Qoder/Codex 只重建 ProviderBinding，评论、草稿
+    和可见历史保留，原 HTML 与项目文件逐字节不变。
+28. Codex 修改先冻结 managed-agent selection 和 Request，再在隔离 Attempt 中只生成
+    一个 HTML 输出。进程停止、Bridge 校验和固定 finalizer 全部成功后才进入现有双页
+    Review；拒绝不改 Working Copy，显式采用才创建新 Version，外部原稿始终不变。
+29. 用户可随时取消。只有 provider acknowledgement、完整进程树终止和 lease 安全
+    释放均确认后才显示已停止；否则明确显示 cleanup failure。关闭
+    `codexExecution` 时只读 Discussion 继续，关闭全部 Codex 时 Qoder、复制任务和
+    历史 Conversation/Review 继续可用。

@@ -9,6 +9,7 @@ import {
   realpath,
   rm,
   symlink,
+  unlink,
   writeFile,
 } from "node:fs/promises";
 import os from "node:os";
@@ -22,7 +23,10 @@ import {
   readVerifiedRegularFile,
   verifiedOutputParent,
 } from "../policies/execution-policy.mjs";
-import { macosAgentSandboxProfile } from "../sandbox/macos-agent-sandbox.mjs";
+import {
+  macosAgentSandboxProfile,
+  packagedRuntimeReadRoot,
+} from "../sandbox/macos-agent-sandbox.mjs";
 
 function nativeError(code, message) {
   const error = new Error(message);
@@ -98,7 +102,7 @@ async function copyFrozenInputs(policy, inputRoot) {
     copied.push(Object.freeze({
       ...readable,
       path: target,
-      bytes: original.bytes,
+      workspaceRelativePath: path.posix.join("input", ...workspaceRelative),
     }));
   }
   const directories = new Set(copied.flatMap((entry) => {
@@ -119,15 +123,14 @@ async function copyFrozenInputs(policy, inputRoot) {
 
 function executionPrompt(policy, copied) {
   const sections = copied.map((entry) => [
-    `<stemmio-frozen-input path=${JSON.stringify(entry.relativePath)}`,
+    `<stemmio-frozen-input path=${JSON.stringify(entry.workspaceRelativePath)}`,
     ` role=${JSON.stringify(entry.role)} sha256=${JSON.stringify(entry.sha256)}`,
-    ` byteLength=${entry.byteLength}>`,
-    entry.bytes.toString("utf8"),
-    "</stemmio-frozen-input>",
+    ` byteLength=${entry.byteLength} />`,
   ].join(""));
   const prompt = [
     "Complete this single frozen Stemmio HTML task.",
-    "All authoritative inputs are inlined below and are also read-only under input/.",
+    "Read every authoritative input listed below from the read-only input/ directory.",
+    "Treat PROMPT.md and the frozen Request metadata as the instruction authority.",
     "Write exactly one complete HTML document to output/index.html.",
     "Do not write another path. Do not run or mention a finalizer.",
     "The Bridge will validate and finalize the result after your process tree stops.",
@@ -138,7 +141,7 @@ function executionPrompt(policy, copied) {
   if (Buffer.byteLength(prompt, "utf8") > MAX_PROMPT_BYTES) {
     throw nativeError(
       "CODEX_EXECUTION_CONTEXT_TOO_LARGE",
-      "The frozen Request is too large for the command-free Codex execution boundary.",
+      "The Codex execution instruction manifest is too large.",
     );
   }
   return prompt;
@@ -163,10 +166,12 @@ export async function prepareCodexExecutionWorkspace(launch) {
     const copied = await copyFrozenInputs(launch.policy, inputRoot);
     const state = await runtimeState(root, launch.baseEnvironment);
     const packageRoot = path.resolve(path.dirname(launch.adapterEntry), "..", "..", "..");
-    const sandboxProfile = macosAgentSandboxProfile({
-      runtime: await realpath(process.execPath),
-      codexBinary: launch.codexBinary,
-      codeModeHost: launch.codeModeHost,
+    const runtime = await realpath(process.execPath);
+    const sandboxProfileFactory = ({ codexBinary, codeModeHost }) => macosAgentSandboxProfile({
+      runtime,
+      runtimeReadRoot: packagedRuntimeReadRoot(runtime),
+      codexBinary,
+      codeModeHost,
       packageRoot,
       contextRoot: attemptRoot,
       stateRoot: state.stateRoot,
@@ -181,7 +186,7 @@ export async function prepareCodexExecutionWorkspace(launch) {
         ...launch,
         cwd: attemptRoot,
         prompt: executionPrompt(launch.policy, copied),
-        sandboxProfile,
+        sandboxProfileFactory,
         baseEnvironment: state.environment,
       }),
     });
@@ -220,15 +225,120 @@ async function verifiedNativeOutput(outputRoot) {
   }
 }
 
+function sameObjectIdentity(left, right) {
+  return left.dev === right.dev
+    && left.ino === right.ino
+    && left.nlink === right.nlink;
+}
+
+function sameDirectoryIdentity(left, right) {
+  return left.dev === right.dev && left.ino === right.ino;
+}
+
+function sameIdentity(left, right) {
+  return sameObjectIdentity(left, right) && left.size === right.size;
+}
+
+export async function publishCodexOutputThroughVerifiedHandle(
+  outputPath,
+  requestRoot,
+  expectedParent,
+  bytes,
+  { beforeWrite } = {},
+) {
+  const handle = await open(
+    outputPath,
+    fsConstants.O_RDWR
+      | fsConstants.O_CREAT
+      | fsConstants.O_EXCL
+      | (fsConstants.O_NOFOLLOW || 0),
+    0o600,
+  );
+  let handleIdentity;
+  try {
+    handleIdentity = await handle.stat();
+    if (!handleIdentity.isFile() || handleIdentity.nlink !== 1 || handleIdentity.size !== 0) {
+      throw nativeError("CODEX_PUBLISHED_OUTPUT_UNSAFE", "The reserved Candidate output is unsafe.");
+    }
+    const openedParent = await verifiedOutputParent(outputPath, requestRoot);
+    const pathIdentity = await lstat(outputPath);
+    if (!sameDirectoryIdentity(openedParent.information, expectedParent.information)
+      || !sameIdentity(pathIdentity, handleIdentity)) {
+      throw nativeError(
+        "CODEX_OUTPUT_DIRECTORY_DRIFT",
+        "The Candidate output directory changed while its destination was reserved.",
+      );
+    }
+    if (typeof beforeWrite === "function") await beforeWrite();
+    const written = await handle.write(bytes, 0, bytes.byteLength, 0);
+    if (written.bytesWritten !== bytes.byteLength) {
+      throw nativeError("CODEX_PUBLISHED_OUTPUT_INCOMPLETE", "The Candidate output write was incomplete.");
+    }
+    await handle.sync();
+    const after = await handle.stat();
+    const afterParent = await verifiedOutputParent(outputPath, requestRoot);
+    const afterPath = await lstat(outputPath);
+    if (!sameDirectoryIdentity(afterParent.information, expectedParent.information)
+      || !sameIdentity(afterPath, after) || after.size !== bytes.byteLength) {
+      throw nativeError(
+        "CODEX_PUBLISHED_OUTPUT_DRIFT",
+        "The Candidate output path changed during publication.",
+      );
+    }
+    const published = Buffer.allocUnsafe(after.size);
+    const read = await handle.read(published, 0, after.size, 0);
+    if (read.bytesRead !== after.size || sha256(published) !== sha256(bytes)) {
+      throw nativeError("CODEX_PUBLISHED_OUTPUT_DRIFT", "Published Codex output bytes changed.");
+    }
+  } catch (cause) {
+    if (handleIdentity) {
+      await handle.truncate(0).catch(() => {});
+      await handle.sync().catch(() => {});
+      const current = await lstat(outputPath).catch(() => null);
+      if (current && sameObjectIdentity(current, handleIdentity)) {
+        await unlink(outputPath).catch(() => {});
+      }
+    }
+    throw cause;
+  } finally {
+    await handle.close();
+  }
+}
+
+export async function collectCodexExecutionOutput({
+  workspace,
+  cancellationSignal,
+} = {}) {
+  if (cancellationSignal?.aborted) {
+    throw nativeError("AGENT_CANCELLED", "Codex execution was cancelled before output collection.");
+  }
+  const output = await verifiedNativeOutput(workspace.outputRoot);
+  if (cancellationSignal?.aborted) {
+    throw nativeError("AGENT_CANCELLED", "Codex execution was cancelled before output collection.");
+  }
+  return Object.freeze({
+    outputSha256: output.sha256,
+    outputBytes: Buffer.from(output.bytes),
+  });
+}
+
 export async function publishCodexExecutionOutput({
   workspace,
+  pendingCompletion,
   policy,
   cancellationSignal,
 } = {}) {
   if (cancellationSignal?.aborted) {
     throw nativeError("AGENT_CANCELLED", "Codex execution was cancelled before output publication.");
   }
-  const output = await verifiedNativeOutput(workspace.outputRoot);
+  const output = pendingCompletion || await collectCodexExecutionOutput({
+    workspace,
+    cancellationSignal,
+  });
+  if (!Buffer.isBuffer(output?.outputBytes)
+    || output.outputSha256 !== sha256(output.outputBytes)) {
+    throw nativeError("CODEX_NATIVE_OUTPUT_INVALID", "The collected Codex output is invalid.");
+  }
   await assertRuntimeProcessingAuthority(policy);
   for (const readable of policy.readableFiles) {
     const current = await readVerifiedRegularFile(
@@ -240,7 +350,7 @@ export async function publishCodexExecutionOutput({
       throw nativeError("CODEX_FROZEN_INPUT_DRIFT", "A frozen Request input changed during execution.");
     }
   }
-  await verifiedOutputParent(policy.outputPath, policy.requestRoot);
+  const outputParent = await verifiedOutputParent(policy.outputPath, policy.requestRoot);
   const completionExists = await lstat(policy.completionPath).then(
     () => true,
     (cause) => cause?.code !== "ENOENT",
@@ -251,16 +361,13 @@ export async function publishCodexExecutionOutput({
   if (cancellationSignal?.aborted) {
     throw nativeError("AGENT_CANCELLED", "Codex execution was cancelled before output publication.");
   }
-  await writeFile(policy.outputPath, output.bytes, { flag: "wx", mode: 0o600 });
-  const published = await readVerifiedRegularFile(
+  await publishCodexOutputThroughVerifiedHandle(
     policy.outputPath,
     policy.requestRoot,
-    "Published Codex Candidate",
+    outputParent,
+    output.outputBytes,
   );
-  if (sha256(published.bytes) !== output.sha256) {
-    throw nativeError("CODEX_PUBLISHED_OUTPUT_DRIFT", "Published Codex output changed before finalization.");
-  }
-  return Object.freeze({ outputSha256: output.sha256 });
+  return Object.freeze({ outputSha256: output.outputSha256 });
 }
 
 export async function disposeCodexExecutionWorkspace(workspace) {

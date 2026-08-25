@@ -89,7 +89,11 @@ function createWorkflow(overrides = {}) {
     discussionTurnSession: session,
     requestTicket: async () => {
       calls.tickets += 1;
-      return { preflightId: "preflight_1", trustPolicyAccepted: "trusted-local-agent-v1" };
+      return {
+        preflightId: "preflight_1",
+        trustPolicyAccepted: "trusted-local-agent-v1",
+        selection: SELECTION,
+      };
     },
     freezeSelection: () => SELECTION,
     scheduler,
@@ -162,6 +166,27 @@ test("a started turn spends one ticket and polls until it settles", async () => 
   assert.equal(session.snapshot.busy, false);
   assert.equal(workflow.polling, false);
   assert.ok(scheduler.state.cleared.length > 0);
+});
+
+test("a discussion sends the model resolved by its spent preflight ticket", async () => {
+  const resolvedSelection = Object.freeze({
+    ...SELECTION,
+    resolvedModelId: "qoder:resolved-default",
+  });
+  const { workflow, session, calls } = createWorkflow({
+    workflow: {
+      requestTicket: async () => ({
+        preflightId: "preflight_resolved_default",
+        trustPolicyAccepted: "trusted-local-agent-v1",
+        selection: resolvedSelection,
+      }),
+    },
+  });
+
+  await workflow.start(CONTEXT, { question: "Which model is authoritative?" });
+
+  assert.deepEqual(calls.starts[0].selection, resolvedSelection);
+  assert.deepEqual(session.snapshot.selection, resolvedSelection);
 });
 
 test("a second start for the same Document is refused locally", async () => {

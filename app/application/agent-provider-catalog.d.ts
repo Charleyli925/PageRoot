@@ -63,6 +63,7 @@ export class AgentCatalogState {
   dispose(): void;
   refreshCatalog(): Promise<AgentCatalogSnapshot>;
   select(selection: AgentSelection): AgentSelection;
+  restore(selection: AgentSelection): AgentSelection;
   freezeSelected(): AgentSelection | null;
   provider(selection?: AgentSelection | null): AgentProviderEntry | null;
   availability(selection?: AgentSelection | null): AgentProviderAvailabilitySnapshot;

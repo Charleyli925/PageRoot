@@ -481,10 +481,25 @@ test("a draft is stored apart from the message history", async () => {
   const saved = await writeConversationDraft(context, conversation.conversationId, {
     text: "下一轮想法",
     intent: "modify",
+    providerSelection: {
+      providerId: "codex",
+      runtimeId: "acp",
+      requestedModelId: "codex:gpt-test",
+      resolvedModelId: "codex:gpt-test",
+      reasoning: { requested: null, applied: null, resolution: "provider-default" },
+    },
+    modelDisplayName: "GPT Test",
   });
   assert.equal(saved.text, "下一轮想法");
   assert.equal(saved.intent, "modify");
+  assert.equal(saved.providerSelection.providerId, "codex");
+  assert.equal(saved.providerSelection.reasoning.resolution, "provider-default");
+  assert.equal(saved.modelDisplayName, "GPT Test");
   assert.equal(saved.revision, 1);
+
+  const reopenedDraft = await readConversationDraft(context, conversation.conversationId);
+  assert.deepEqual(reopenedDraft.providerSelection, saved.providerSelection);
+  assert.equal(reopenedDraft.modelDisplayName, "GPT Test");
 
   const unchanged = await readConversation(context, conversation.conversationId);
   assert.equal(unchanged.revision, conversation.revision);

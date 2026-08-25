@@ -242,3 +242,23 @@ name fails during source review rather than after formal packaging begins.
 - Never include real user documents in tests.
 
 See `tests/TEST_STRATEGY.md` for suite ownership and `docs/ARCHITECTURE.md` for component boundaries.
+
+## Codex ACP development
+
+The supported runtime is exact-pinned and packaged; development and production
+must not use `npx`, an arbitrary `CODEX_PATH`, MCP, plugins, skills or a PATH
+fallback. Run `npm run verify:codex-runtime` after dependency installation. Any
+Codex or adapter upgrade must regenerate both App Server Schema trees, update
+the runtime lock and `CODEX_RUNTIME_SBOM.spdx.json`, and rerun the provider,
+protocol, cancellation, sandbox, Candidate-authority, Qoder regression and
+packaged Electron suites.
+
+`codexDiscussion` and `codexExecution` are independent hard gates in
+`scripts/agent/codex-feature-flags.mjs`; ordinary environment variables cannot
+open a disabled production gate. Use the explicit UI login action, then retry
+preflight to refresh auth and the live model catalog. A corrupt/incompatible
+runtime, empty catalog, capacity failure or unconfirmed cleanup fails closed.
+For rollback, close Execution first, then Discussion if needed; do not delete
+Conversation, Turn, Candidate or Review records. The current package target is
+macOS arm64. x64 and other platforms return unsupported rather than searching
+the host.

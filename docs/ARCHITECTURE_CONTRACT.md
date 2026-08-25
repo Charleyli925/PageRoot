@@ -760,3 +760,21 @@ not applied to every large file:
 
 The budget is a trend brake, not a design target. There is no enforced descent
 schedule; the numbers track real progress, they do not mandate it.
+
+### Codex ACP runtime contract
+
+- The packaged Codex runtime is macOS arm64 only and consists of the exact
+  adapter, ACP SDK, Codex wrapper, platform binary and code-mode host recorded
+  by `scripts/agent/codex-runtime-lock.json` and
+  `CODEX_RUNTIME_SBOM.spdx.json`. No PATH fallback is permitted.
+- `agent-native` and `client-mediated` are distinct security profiles. A
+  Provider, preflight ticket or runtime launch cannot substitute one for the
+  other.
+- `codexDiscussion` and `codexExecution` are independent build gates. Capability
+  is enforced at preflight, ticket redemption and start, not only in React.
+- A bridge-owned finalizer may run only after native output publication and
+  confirmed process cleanup. An ACP stop reason or output without completion
+  evidence cannot enter Review.
+- Updating the adapter, SDK, Codex, platform binary or code-mode host requires a
+  new integrity lock, App Server Schema fingerprints, SPDX SBOM and the full
+  compatibility, sandbox and packaged-runtime suites on one exact head.

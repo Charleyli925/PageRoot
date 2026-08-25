@@ -388,9 +388,13 @@ export class WorkspaceController {
   openConversation(
     context: ConversationContext | null,
   ): Promise<unknown>;
-  closeConversation(): void;
+  closeConversation(context?: ConversationContext | null): boolean;
   updateConversationDraftText(text: string): void;
   updateConversationDraftIntent(intent: string): void;
+  updateConversationDraftAgentSelection(
+    selection: import("../domain/agent-provider-state.js").AgentSelection,
+    modelDisplayName?: string | null,
+  ): void;
   flushConversationDraft(): Promise<void>;
   startDiscussionTurn(
     context: DiscussionTurnContext | null,
@@ -571,7 +575,10 @@ export class WorkspaceController {
   selectAgent(
     selection: import("../domain/agent-provider-state.js").AgentSelection,
   ): import("../domain/agent-provider-state.js").AgentSelection;
-  checkAgentUsability(): Promise<RunWorkflowOutcome>;
+  restoreAgentSelection(
+    selection: import("../domain/agent-provider-state.js").AgentSelection,
+  ): import("../domain/agent-provider-state.js").AgentSelection;
+  checkAgentUsability(options?: { purpose?: "discussion" | "execution" }): Promise<RunWorkflowOutcome>;
   authenticateAgent(): Promise<RunWorkflowOutcome>;
   copyAgentGuidance(input: {
     kind: import("../domain/agent-provider-state.js").AgentProviderGuidanceKind;

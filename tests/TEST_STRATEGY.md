@@ -378,3 +378,20 @@ Browser 测试继续证明 SourcePatch forward/inverse 和各编辑入口，但�
 每次门禁写入 `output/test-runs/<run-id>/selection.json` 和 `results.json`，记录 HEAD、工作区内容 Hash、改动文件、选择原因、命令、耗时和首个失败。Playwright 的失败截图、trace、视频和 HTML report 继续位于 `output/playwright/`。
 
 新增测试至少要回答四件事：对应哪个真实故障；使用哪个独立 oracle；属于哪个门禁层；是否已经被更低成本测试覆盖。不能给出明确答案的重复排列或纯“代码里存在某个字符串”测试，不应加入常规门禁。
+
+## Codex ACP 证据分层
+
+Codex 接入不以单一 happy path 代替安全证明。Node contract 层锁定
+Provider/purpose/ticket、ACP auth/model/config/event 和 Qoder 回归；macOS
+sandbox 层实际尝试外部读写、状态读取、runtime/Codex/sandbox 重启、链接、
+多输出、超限/残缺 HTML、冻结输入漂移与取消竞态；Repository oracle 证明
+finalizer 前无 Candidate、completion 后才进入 Review，外部原稿和 Working
+Copy 不变。真实账号 Discussion/Execution 只作为 exact-head 开发证据，不把
+账号、内容或日志提交为 fixture。
+
+Package 层必须 byte-compare allowlisted Bridge 与 Codex 模块，检查四个
+runtime executable 的可执行位、SPDX SBOM、sparse PATH 下的 adapter/Codex
+版本启动，以及 packaged Qoder closed loop。Developer Preview 再运行真实
+登录账号的 Discussion 与 Execution，检查关闭进程树、Candidate authority
+和 source-preserving 不变量。任何 cleanup、sandbox 或 authority 失败都阻止
+Execution 完成声明，不能降级成 UI 隐藏。

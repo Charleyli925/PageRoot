@@ -51,7 +51,7 @@ PageRoot 只保留两个顶层页面模式：
 
 ### 2.5 不展示用户改不了的东西
 
-不向用户显示他无法选择、无法影响、也不需要理解的参数。该原则判定“思考深度”不出现在界面上：`reasoningEffort` 作为 provenance 记录保留，界面标签不存在。
+不向用户显示他无法选择、无法影响、也不需要理解的参数。模型与推理强度只有在当前 Provider 的实时目录提供多个可选项时才出现；未显式选择时保持 Provider 默认。隐藏推理内容始终不可见。
 
 ### 2.6 待决定的行动必须常驻可见
 
@@ -121,7 +121,7 @@ AI 侧栏走[设计语言](DESIGN_LANGUAGE.md)已定的材质体系，不发明�
 - 不根据自然语言自动猜测用户是在“讨论”还是“继续修改”。
 - 不让 Qoder 直接修改当前 Working Copy、历史快照、正式 Version 或冻结 base。
 - 不展示或持久化模型隐藏推理、Chain of Thought、原始 stderr、完整终端日志、账号凭证或外部原文件路径。
-- 第一阶段不提供思考深度、温度、Top P、上下文窗口或最大输出 token 等参数，界面上也不提示它们存在。
+- 第一阶段不提供温度、Top P、上下文窗口或最大输出 token 等参数。推理强度只按 §10.5 的实时目录规则出现；模型隐藏推理内容始终不可见。
 - 不提供 Token 用量、额度余量或成本估算界面；额度问题由用户在 Qoder 侧查看。
 - 第一阶段不自动同步复制模式中外部 Agent 的回复。
 - 第一阶段不提供多人共享对话、云端同步、消息逐条删除、对话分支合并或跨 Document 对话。
@@ -442,11 +442,11 @@ PageRoot 维护进程内模型目录，并把“用户是否已同意本机 Qode
 
 在用户确认或主动重新选择前，不发送新的 Turn 或 Request。
 
-### 10.5 思考深度不出现在界面上
+### 10.5 推理强度来自实时目录并保持 Provider 默认
 
-PageRoot 不传显式 reasoning-effort 覆盖，由 Qoder 对所选模型使用自己的默认策略。
+PageRoot 初始不传显式 reasoning-effort 覆盖，由当前 Provider 对所选模型使用自己的默认策略。Turn/Request 以 `provider-default` 记录这一事实。
 
-每个 Turn/Request 记录 `reasoningEffort = qoder-default`，用于解释没有发生 PageRoot 侧覆盖。**该记录不对应任何界面元素。** 界面上不存在“思考深度”标签、说明或控件。不记录也不展示模型隐藏推理内容。
+当前 Provider 的实时目录报告多个推理强度时，Composer 显示选择控件；只有用户显式选择后才发送 exact override，并将 requested/applied/resolution 一并冻结到 Turn/Request。切换 Provider 后重新使用该 Provider 的实时目录，不能沿用另一个 Provider 的值。不记录也不展示模型隐藏推理内容。
 
 ### 10.6 模型记录与执行一致性
 
@@ -999,7 +999,7 @@ ready-to-open / review-view
 - `conversationId`
 - 产生该 Version 的 `turnId`
 - `requestId / attemptId / candidateId`
-- 模型与 `qoder-default` 思考深度记录
+- 模型与 `provider-default` / `exact` 推理强度记录
 - 用户原始修改要求
 - Qoder 可见完成摘要
 - PageRoot 校验与采用结果
@@ -1123,7 +1123,7 @@ PageRoot 只展示 Qoder 明确作为用户可见消息发送的文本。内部 
 | 上次模型失效 | `上次使用的模型已不可用，请确认当前模型后继续。` |
 | 排队中 | `正在等待上一个任务完成` |
 
-界面上不存在思考深度相关文案。
+当前 Provider 的实时目录提供多个推理强度时，显示 `推理` 选择器与 `Provider 默认`；目录不提供选择或只有一个固定值时不显示该控件。任何模型隐藏推理内容及其说明始终不可见。
 
 ### 23.3 结果
 
@@ -1204,7 +1204,7 @@ Qoder ACP Agent Bridge 分支尚未合并，且与本 PRD 的多个包共享文�
 - [ ] 正常路径中不存在任何模态；模态只用于破坏性确认。
 - [ ] 评论标记在编辑模式与 AI 预览中视觉完全一致。
 - [ ] 预期内失败全部就地展开，不产生 Toast、不新开界面。
-- [ ] 界面上不存在思考深度标签、说明或控件。
+- [ ] 推理强度仅在当前 Provider 的实时目录提供多个可选项时显示，并始终提供 `Provider 默认`；模型隐藏推理标签、说明和内容均不可见。
 - [ ] 待决定动作在任何滚动位置都可见。
 - [ ] 用户可见文案不含 2.7 列出的任何实现术语。
 - [ ] 从“我想改”到执行不超过两次点击；从结果就绪到页面切换不超过一次点击。
@@ -1322,7 +1322,7 @@ Qoder ACP Agent Bridge 分支尚未合并，且与本 PRD 的多个包共享文�
 - `NOTIFICATION_MESSAGE_CATALOG.md`：新增模式、模型、排队、流式中断、文本截断、上下文漂移、对话归档与采用并继续文案。
 - `TEST_STRATEGY.md`：增加 Schema、Repository、Bridge、Electron 端到端、重启、Document 切换、并发、键盘和 package 验证。
 - `scripts/architecture-budget.json`：M1 删除交付弹窗与等待工作台后下调天花板；新增代码不得抬高 Workbench 主文件预算。
-- 新 ADR 一：记录“Conversation 为 Document 级持久事实、AI 只在 Preview/Review、Discussion/Execution/Review Host 权限分离、模型目录预加载与用户可选、思考深度由 Qoder 默认且不呈现”。
+- 新 ADR 一：记录“Conversation 为 Document 级持久事实、AI 只在 Preview/Review、Discussion/Execution/Review Host 权限分离、模型目录预加载与用户可选、推理强度由 Provider 实时目录决定且默认不覆盖”。
 - 新 ADR 二：显式取代 ADR 0032 中“公开 Agent 状态排除原始输出”的子句，定义可见文本流的 allowlist 与字节预算。不得静默改写 ADR 0032 的其余结论。
 
 ## 27. 最终产品口径

@@ -381,8 +381,12 @@ export function createDefaultProviderRegistry({
   runTask,
   environment = process.env,
   codexProvider,
+  codexBuildGates,
 } = {}) {
-  const codexFlags = resolveCodexFeatureFlags({ environment });
+  const codexFlags = resolveCodexFeatureFlags({
+    environment,
+    ...(codexBuildGates ? { buildGates: codexBuildGates } : {}),
+  });
   const runtimeRegistry = createRuntimeRegistry([
     createAcpRuntime({ ...(runTask ? { runTask } : {}) }),
   ]);

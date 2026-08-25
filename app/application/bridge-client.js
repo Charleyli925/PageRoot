@@ -1,6 +1,7 @@
 const DEFAULT_READ_TIMEOUT_MS = 15_000;
 const DEFAULT_WRITE_TIMEOUT_MS = 15_000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 60_000;
+const AGENT_AUTHENTICATION_TIMEOUT_MS = 10 * 60_000 + 30_000;
 const DEFAULT_ATTACHMENT_TIMEOUT_MS = 30_000;
 const DEFAULT_RETRY_DELAY_MS = 180;
 const PROJECT_FILE_STORAGE_VERSION = "4.0.0";
@@ -305,8 +306,8 @@ export function createBridgeClient({
     authenticateAgent: (body) => command(
       "/agent/authenticate",
       body,
-      "Agent 登录没有启动。",
-      DEFAULT_REQUEST_TIMEOUT_MS,
+      "Agent 登录没有完成。",
+      AGENT_AUTHENTICATION_TIMEOUT_MS,
     ),
     startAgent: (body) => command(
       "/agent/start",

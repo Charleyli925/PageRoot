@@ -15,7 +15,7 @@ const IDENTITY = Object.freeze({
   sourcePath: "/tmp/runtime-contract.html",
 });
 
-function registry({ run, verifyTicket } = {}) {
+function registry({ run, verifyTicket, authenticate, finalizeExecution, preflight } = {}) {
   const capabilities = Object.freeze({
     availability: true,
     preflight: true,
@@ -68,10 +68,11 @@ function registry({ run, verifyTicket } = {}) {
       return true;
     },
     availabilityForSelection: async () => ({ status: "ready" }),
-    preflightForSelection: async (received) => {
+    authenticateForSelection: authenticate || (async () => ({ status: "ready" })),
+    preflightForSelection: preflight || (async (received) => {
       if (received?.providerId !== selection.providerId) throw new Error("selection mismatch");
       return prepared(null);
-    },
+    }),
     availability: async () => ({ status: "ready" }),
     preflight: async ({ driver }) => prepared(driver),
     verifyTicket: verifyTicket || (async (ticket) => ticket),
@@ -81,6 +82,7 @@ function registry({ run, verifyTicket } = {}) {
       finalizer: { command: "/bin/false", args: [], cwd: "/tmp", env: {} },
     }),
     run: run || (async () => {}),
+    finalizeExecution: finalizeExecution || (async () => {}),
     classifyRunFailure: (_ticket, cause) => cause?.code || "AGENT_RUN_FAILED",
     failureMessage: (_ticket, code) => `failure:${code}`,
     failureMessageForDriver: (_driver, code) => `failure:${code}`,
@@ -90,6 +92,14 @@ function registry({ run, verifyTicket } = {}) {
     createTurnRunner: () => async () => ({ stopReason: "end_turn" }),
   };
 }
+
+const SYNTHETIC_SELECTION = Object.freeze({
+  providerId: "synthetic-provider",
+  runtimeId: "synthetic-runtime",
+  requestedModelId: null,
+  resolvedModelId: null,
+  reasoning: Object.freeze({ requested: null, applied: null, resolution: "provider-default" }),
+});
 
 function executionAuthority() {
   return {
@@ -174,6 +184,66 @@ test("preflight tickets are purpose-bound, one-use, TTL-bound, and reverify inst
   await coordinator.shutdown();
 });
 
+test("unconfirmed authentication cleanup fences later starts and shutdown", async () => {
+  const coordinator = new AgentRuntimeCoordinator({
+    providerRegistry: registry({
+      authenticate: async () => {
+        throw Object.assign(new Error("native authentication cleanup uncertain"), {
+          code: "AGENT_PROCESS_CLEANUP_UNCONFIRMED",
+        });
+      },
+    }),
+  });
+
+  coordinator.startAuthentication({ selection: SYNTHETIC_SELECTION });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.throws(
+    () => coordinator.startAuthentication({ selection: SYNTHETIC_SELECTION }),
+    (error) => error?.code === "AGENT_PREFLIGHT_CLEANUP_UNCONFIRMED",
+  );
+  await assert.rejects(
+    ready(coordinator),
+    (error) => error?.code === "AGENT_PREFLIGHT_CLEANUP_UNCONFIRMED",
+  );
+  await assert.rejects(
+    coordinator.shutdown(),
+    (error) => error?.code === "AGENT_SHUTDOWN_UNCONFIRMED",
+  );
+});
+
+test("managed authentication resolves only after the native session completes", async () => {
+  let finishAuthentication;
+  const pending = new Promise((resolve) => {
+    finishAuthentication = resolve;
+  });
+  const coordinator = new AgentRuntimeCoordinator({
+    providerRegistry: registry({ authenticate: async () => pending }),
+  });
+  let settled = false;
+  const authenticating = coordinator.authenticate({ selection: SYNTHETIC_SELECTION })
+    .finally(() => { settled = true; });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(settled, false);
+  finishAuthentication({ status: "ready" });
+  assert.deepEqual(await authenticating, { ok: true, status: "ready" });
+  await coordinator.shutdown();
+});
+
+test("managed authentication exposes the native terminal failure", async () => {
+  const coordinator = new AgentRuntimeCoordinator({
+    providerRegistry: registry({
+      authenticate: async () => {
+        throw Object.assign(new Error("login rejected"), { code: "CODEX_AUTH_REQUIRED" });
+      },
+    }),
+  });
+  await assert.rejects(
+    coordinator.authenticate({ selection: SYNTHETIC_SELECTION }),
+    (error) => error?.code === "CODEX_AUTH_REQUIRED",
+  );
+  await coordinator.shutdown();
+});
+
 test("release false keeps the lease fence and blocks shutdown", async () => {
   const coordinator = new AgentRuntimeCoordinator({
     providerRegistry: registry(),
@@ -191,12 +261,56 @@ test("release false keeps the lease fence and blocks shutdown", async () => {
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
     preflightId: ticket.preflightId,
   });
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(coordinator.executionStatus(IDENTITY).errorCode, "AGENT_RESTART_RECOVERY_REQUIRED");
   await assert.rejects(
     coordinator.shutdown(),
     (error) => error?.code === "AGENT_SHUTDOWN_UNCONFIRMED",
   );
+  assert.equal(coordinator.executionStatus(IDENTITY).errorCode, "AGENT_RESTART_RECOVERY_REQUIRED");
+});
+
+test("shutdown drains a started Candidate finalizer without aborting it", async () => {
+  let releaseFinalizer;
+  let markFinalizerStarted;
+  let finalizerSignal;
+  let releases = 0;
+  const finalizerGate = new Promise((resolve) => { releaseFinalizer = resolve; });
+  const finalizerStarted = new Promise((resolve) => { markFinalizerStarted = resolve; });
+  const coordinator = new AgentRuntimeCoordinator({
+    providerRegistry: registry({
+      run: async () => ({ output: "published" }),
+      finalizeExecution: async (_ticket, { cancellationSignal }) => {
+        finalizerSignal = cancellationSignal;
+        markFinalizerStarted();
+        await finalizerGate;
+      },
+    }),
+    resolveTask: async () => executionAuthority(),
+    leaseStore: {
+      acquire: async ({ ownerToken }) => ({ key: "finalizer", path: "memory", ownerToken }),
+      release: async () => { releases += 1; return true; },
+    },
+    cancelTimeoutMs: 500,
+  });
+  const ticket = await ready(coordinator);
+  await coordinator.submit({
+    ...IDENTITY,
+    driver: "synthetic-driver",
+    trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
+    preflightId: ticket.preflightId,
+  });
+  await finalizerStarted;
+  await assert.rejects(
+    coordinator.cancelExecution(IDENTITY),
+    (error) => error?.code === "AGENT_FINALIZER_IN_PROGRESS",
+  );
+  const shutdown = coordinator.shutdown();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(finalizerSignal.aborted, false);
+  assert.equal(coordinator.executionStatus(IDENTITY).phase, "finalizing");
+  releaseFinalizer();
+  await shutdown;
+  assert.equal(coordinator.executionStatus(IDENTITY).state, "completed");
+  assert.equal(releases, 1);
 });
 
 test("durable cancellation is never written after cleanup or lease release fails", async () => {
@@ -333,6 +447,38 @@ test("a start racing shutdown fails closed before recording or spawning", async 
   await assert.rejects(start, (error) => error?.code === "AGENT_BRIDGE_DISPOSED");
   await shutdown;
   assert.equal(records, 0);
+});
+
+test("shutdown drains an in-flight provider preflight before confirming exit", async () => {
+  let releasePreflight;
+  let markPreflightStarted;
+  const preflightGate = new Promise((resolve) => { releasePreflight = resolve; });
+  const preflightStarted = new Promise((resolve) => { markPreflightStarted = resolve; });
+  const coordinator = new AgentRuntimeCoordinator({
+    providerRegistry: registry({
+      preflight: async (received) => {
+        markPreflightStarted();
+        await preflightGate;
+        return {
+          providerId: received.providerId,
+          runtimeId: received.runtimeId,
+          securityProfile: "client-mediated",
+          installation: Object.freeze({ generation: 1 }),
+          installationDigest: `sha256:${"a".repeat(64)}`,
+          capabilities: Object.freeze({ execution: true, discussion: true }),
+          evidence: Object.freeze({ version: "1.0.0", modelCount: 1, models: [] }),
+          selection: SYNTHETIC_SELECTION,
+        };
+      },
+    }),
+    cancelTimeoutMs: 500,
+  });
+  const preflight = ready(coordinator);
+  await preflightStarted;
+  const shutdown = coordinator.shutdown();
+  releasePreflight();
+  await assert.rejects(preflight, (error) => error?.code === "AGENT_BRIDGE_DISPOSED");
+  await shutdown;
 });
 
 test("shutdown drains a discussion start waiting on lease acquisition", async () => {

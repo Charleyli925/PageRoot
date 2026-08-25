@@ -590,3 +590,14 @@ uncertain-POST reconciliation, start, retry and restart recovery read the
 durable Request selection; changing the catalog selection affects only the next
 intent. Provider differences reach React as descriptor/presentation data, and
 workflow modules cannot import provider implementations.
+
+Codex is registered through the same Provider Registry as Qoder, using the
+exact-pinned `codex-acp 1.6.2 -> Codex App Server 0.148.0` chain. Discussion
+creates a short-lived, read-only ContextSnapshot and has no product mutation
+authority. Execution creates a separate native Attempt workspace whose frozen
+inputs are read-only and whose only writable surface is `output/index.html`.
+After the complete process group stops, the Bridge rechecks the Request and
+output, publishes the bytes to the existing Attempt output, and invokes the
+existing fixed finalizer. Provider sessions, visible prose, stop reasons and
+process exit codes never create a Candidate; Repository-verified completion,
+Review and explicit adoption remain the only path to a new Working Copy.

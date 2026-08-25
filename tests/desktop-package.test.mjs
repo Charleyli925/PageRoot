@@ -58,12 +58,22 @@ const BRIDGE_FILES = [
   "agent/agent-lease-store.mjs",
   "agent/agent-events.mjs",
   "agent/agent-errors.mjs",
+  "agent/codex-feature-flags.mjs",
+  "agent/codex-runtime-lock.json",
+  "agent/macho-code-fingerprint.mjs",
   "agent/providers/agent-provider-contract.mjs",
   "agent/providers/provider-registry.mjs",
   "agent/providers/qoder-provider.mjs",
+  "agent/providers/codex-provider.mjs",
   "agent/runtimes/agent-runtime-contract.mjs",
   "agent/runtimes/runtime-registry.mjs",
   "agent/runtimes/acp-runtime.mjs",
+  "agent/runtimes/acp-authentication.mjs",
+  "agent/runtimes/acp-probe.mjs",
+  "agent/runtimes/agent-native-acp-runner.mjs",
+  "agent/sandbox/macos-agent-sandbox.mjs",
+  "agent/native/codex-workspace.mjs",
+  "agent/native/bridge-finalizer.mjs",
   "agent/policies/discussion-policy.mjs",
   "agent/policies/execution-policy.mjs",
   "agent/hosts/discussion-host.mjs",
@@ -95,6 +105,9 @@ const BRIDGE_FILES = [
 
 const PACKAGED_MODULES = [
   "@agentclientprotocol/sdk",
+  "@agentclientprotocol/codex-acp",
+  "@openai/codex",
+  "@openai/codex-darwin-arm64",
   "parse5",
   "entities",
   "electron-updater",
@@ -160,6 +173,7 @@ const LEGAL_RESOURCE_FILES = [
   "PRIVACY.md",
   "NOTICE",
   "THIRD_PARTY_NOTICES.md",
+  "CODEX_RUNTIME_SBOM.spdx.json",
 ];
 
 function sorted(values) {

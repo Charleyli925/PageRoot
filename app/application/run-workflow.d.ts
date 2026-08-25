@@ -122,7 +122,7 @@ export class RunWorkflow {
   refreshAgentAvailability(): Promise<RunWorkflowOutcome<{
     availability: AgentProviderAvailabilitySnapshot;
   }>>;
-  checkAgentUsability(): Promise<RunWorkflowOutcome<{
+  checkAgentUsability(options?: { purpose?: "discussion" | "execution" }): Promise<RunWorkflowOutcome<{
     availability: AgentProviderAvailabilitySnapshot;
   }>>;
   refreshAgentCatalog(): Promise<RunWorkflowOutcome>;
@@ -171,6 +171,7 @@ export class RunWorkflow {
   }): Promise<RunWorkflowOutcome<{ recovered: number; attempted: number }>>;
   freezeAgentSelection(): AgentSelection | null;
   selectAgent(selection: AgentSelection): AgentSelection;
+  restoreAgentSelection(selection: AgentSelection): AgentSelection;
   spendAgentTicket(input?: {
     selection?: AgentSelection | null;
     purpose?: "execution" | "discussion";

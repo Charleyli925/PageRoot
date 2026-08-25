@@ -566,6 +566,34 @@ test("a selection changed during preflight affects only the next Request", async
   harness.workflow.dispose();
 });
 
+test("execution persists and starts the model resolved by its spent preflight ticket", async () => {
+  let harness;
+  harness = createHarness({
+    bridge: {
+      async preflightAgent(request) {
+        harness.calls.preflight.push(request);
+        return {
+          status: "ready",
+          preflightId: "preflight_resolved_default",
+          selection: {
+            ...request.selection,
+            resolvedModelId: "qoder:resolved-default",
+          },
+          expiresAt: "2026-08-11T00:02:00.000Z",
+        };
+      },
+    },
+  });
+
+  const outcome = await harness.workflow.submit({ deliveryMode: "managed-agent" });
+
+  assert.equal(outcome.status, "succeeded");
+  const resolvedSelection = harness.calls.createRequest[0].agentDelivery.selection;
+  assert.equal(resolvedSelection.resolvedModelId, "qoder:resolved-default");
+  assert.deepEqual(harness.calls.startAgent[0].selection, resolvedSelection);
+  harness.workflow.dispose();
+});
+
 test("local Qoder refresh changes only shared availability state", async () => {
   const harness = createHarness({
     bridge: {
@@ -705,6 +733,17 @@ test("a local disk refresh preserves a known authentication requirement", async 
   assert.equal(harness.workflow.getSnapshot().qoderAvailability.status, "auth-required");
   assert.equal(harness.calls.createRequest.length, 0);
   assert.equal(harness.calls.freeze, 0);
+  harness.workflow.dispose();
+});
+
+test("a Discussion usability check requests a discussion-scoped preflight", async () => {
+  const harness = createHarness();
+
+  const checked = await harness.workflow.checkAgentUsability({ purpose: "discussion" });
+
+  assert.equal(checked.status, "succeeded");
+  assert.equal(harness.calls.preflight.length, 1);
+  assert.equal(harness.calls.preflight[0].purpose, "discussion");
   harness.workflow.dispose();
 });
 

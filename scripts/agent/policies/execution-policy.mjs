@@ -168,6 +168,7 @@ export async function verifiedOutputParent(outputPath, root) {
       "The Candidate output directory resolves outside the Request root.",
     );
   }
+  return Object.freeze({ path: parentPath, canonical, information });
 }
 
 async function canonicalFuturePath(value, label) {

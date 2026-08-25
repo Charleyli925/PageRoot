@@ -12,6 +12,9 @@ import {
   sidebarMessageStream,
   sidebarModelLine,
   sidebarModePresentation,
+  sidebarProviderChoiceState,
+  sidebarRestoredChoiceState,
+  sidebarRunAgentPresentation,
   sidebarResolvedIntent,
   sidebarDeliveryDisclosure,
   sidebarRunProgress,
@@ -54,6 +57,8 @@ export type AiConversationSidebarProps = {
   reasoningChoices?: readonly Readonly<{ id: string; label: string }>[];
   selectedReasoning?: string | null;
   agentName?: string;
+  runAgentName?: string;
+  discussionAgentName?: string;
   authActionLabel?: string | null;
   executionAvailable?: boolean;
   candidateVersionLabel?: string | null;
@@ -106,6 +111,8 @@ export default function AiConversationSidebar({
   reasoningChoices = [],
   selectedReasoning = null,
   agentName = "Agent",
+  runAgentName = agentName,
+  discussionAgentName = agentName,
   authActionLabel = null,
   executionAvailable = true,
   candidateVersionLabel = null,
@@ -139,7 +146,7 @@ export default function AiConversationSidebar({
   const intentOptions = useMemo(() => sidebarIntentOptions(state), [state]);
   const activeIntent = sidebarResolvedIntent(state, intent);
   // Computed after the intent because a pending modification renames the mode.
-  const mode = sidebarModePresentation(state, activeIntent);
+  const mode = sidebarModePresentation(state, activeIntent, agentName);
   const actionBar = useMemo(
     () => sidebarActionBar({
       state,
@@ -168,16 +175,30 @@ export default function AiConversationSidebar({
   // of the same round that never consults Qoder, so an unreadable catalog must
   // not grey it out with the send button it sits beside.
   const copyTask = sidebarCopyTaskState({ state, queued, pendingCommentCount });
-  const disclosure = sidebarDeliveryDisclosure(activeIntent);
+  const disclosure = sidebarDeliveryDisclosure(activeIntent, agentName);
   const runProgress = sidebarRunProgress({ state, steps: runSteps, agentText });
+  const runAgent = sidebarRunAgentPresentation(runAgentName);
   const draftNotice = sidebarDraftNotice(state);
-  const discussionNotice = sidebarDiscussionNotice(discussion);
-  const liveReply = sidebarLiveReply(discussion, messages as readonly Record<string, unknown>[]);
+  const discussionNotice = sidebarDiscussionNotice(discussion, discussionAgentName);
+  const liveReply = sidebarLiveReply(
+    discussion,
+    messages as readonly Record<string, unknown>[],
+    discussionAgentName,
+  );
   const modelLine = sidebarModelLine({
     catalogStatus,
     modelDisplayName,
     modelChoiceCount,
   });
+  const providerChoiceState = sidebarProviderChoiceState(providerChoices, selectedProvider);
+  const restoredChoice = sidebarRestoredChoiceState({
+    modelChoices,
+    selectedModel,
+    reasoningChoices,
+    selectedReasoning,
+  });
+  const selectedModelUnavailable = restoredChoice.modelUnavailable;
+  const selectedReasoningUnavailable = restoredChoice.reasoningUnavailable;
 
   // The intent switch is a radio group: arrow keys, Home and End move between
   // its options, and the pressed state is exposed rather than implied by colour.
@@ -294,7 +315,7 @@ export default function AiConversationSidebar({
         ) : null}
 
         {/*
-          * A round in flight, told as Qoder speaking in the thread rather than a
+          * A round in flight, told as the selected Agent speaking in the thread rather than a
           * panel of its own. PageRoot states the stage from the run's durable status
           * (ADR 0037 §4) and the Agent's own words ride along underneath, collapsible
           * in one click so the thread stays readable while a long round runs.
@@ -340,14 +361,14 @@ export default function AiConversationSidebar({
         {runProgress?.narration ? (
           <section
             className={styles.message}
-            data-actor="qoder"
+            data-actor={runAgent.actor}
             data-testid="ai-conversation-narration-message"
-            aria-label="Qoder 的说明"
+            aria-label={runAgent.ariaLabel}
           >
             <span className={styles.avatar} aria-hidden="true">
-              {sidebarActorInitial("qoder")}
+              {runAgent.actorInitial}
             </span>
-            <span className={styles.actor}>Qoder CLI</span>
+            <span className={styles.actor}>{runAgent.actorLabel}</span>
             <div className={styles.narration}>
               <button
                 type="button"
@@ -457,7 +478,7 @@ export default function AiConversationSidebar({
             * is plain text: offering a dropdown that opens onto one item would
             * promise a choice the user does not have.
             */}
-          {modelLine?.choosable ? (
+          {modelLine?.choosable && onOpenModelChoices ? (
             <button
               type="button"
               className={styles.model}
@@ -475,23 +496,30 @@ export default function AiConversationSidebar({
           ) : null}
         </div>
 
-        {providerChoices.length > 1 || modelChoices.length > 1 || reasoningChoices.length > 1 ? (
+        {providerChoiceState.showSelector
+          || modelChoices.length > 1
+          || reasoningChoices.length > 1
+          || selectedModelUnavailable
+          || selectedReasoningUnavailable ? (
           <div className={styles.agentChoices} data-testid="ai-conversation-agent-choices">
-            {providerChoices.length > 1 ? (
+            {providerChoiceState.showSelector ? (
               <label>
                 <span>Agent</span>
                 <select
-                  value={selectedProvider ?? ""}
+                  value={providerChoiceState.selectedProvider ?? ""}
                   onChange={(event) => onProviderChange?.(event.target.value)}
                   aria-label="选择 Agent Provider"
                 >
+                  {providerChoiceState.selectedProvider === null ? (
+                    <option value="" disabled>请选择可用于当前操作的 Agent</option>
+                  ) : null}
                   {providerChoices.map((provider) => (
                     <option key={provider.id} value={provider.id}>{provider.label}</option>
                   ))}
                 </select>
               </label>
             ) : null}
-            {modelChoices.length > 1 ? (
+            {modelChoices.length > 1 || selectedModelUnavailable ? (
               <label>
                 <span>模型</span>
                 <select
@@ -499,13 +527,19 @@ export default function AiConversationSidebar({
                   onChange={(event) => onModelChange?.(event.target.value)}
                   aria-label="选择模型"
                 >
+                  {selectedModelUnavailable ? (
+                    <option value={selectedModel ?? ""} disabled>
+                      上次模型已不可用，请重新选择
+                    </option>
+                  ) : null}
+                  <option value="">Provider 默认</option>
                   {modelChoices.map((model) => (
                     <option key={model.id} value={model.id}>{model.label}</option>
                   ))}
                 </select>
               </label>
             ) : null}
-            {reasoningChoices.length > 1 ? (
+            {reasoningChoices.length > 1 || selectedReasoningUnavailable ? (
               <label>
                 <span>推理</span>
                 <select
@@ -513,6 +547,12 @@ export default function AiConversationSidebar({
                   onChange={(event) => onReasoningChange?.(event.target.value)}
                   aria-label="选择推理强度"
                 >
+                  {selectedReasoningUnavailable ? (
+                    <option value={selectedReasoning ?? ""} disabled>
+                      上次推理强度已不可用，请重新选择
+                    </option>
+                  ) : null}
+                  <option value="">Provider 默认</option>
                   {reasoningChoices.map((reasoning) => (
                     <option key={reasoning.id} value={reasoning.id}>{reasoning.label}</option>
                   ))}
@@ -520,6 +560,11 @@ export default function AiConversationSidebar({
               </label>
             ) : null}
           </div>
+        ) : null}
+        {restoredChoice.notice ? (
+          <p className={styles.draftNotice} role="status">
+            {restoredChoice.notice}
+          </p>
         ) : null}
 
         {/*

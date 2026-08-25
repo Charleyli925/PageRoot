@@ -84,6 +84,8 @@ export class ConversationSession {
       title: this.#conversation?.title ?? "",
       draftText: this.#draft?.text ?? "",
       draftIntent: this.#draft?.intent ?? DEFAULT_INTENT,
+      draftProviderSelection: this.#draft?.providerSelection ?? null,
+      draftModelDisplayName: this.#draft?.modelDisplayName ?? null,
     });
   }
 
@@ -154,6 +156,25 @@ export class ConversationSession {
     return true;
   }
 
+  setDraftAgentSelection(selection, modelDisplayName = null) {
+    if (!this.#conversation || !selection) return false;
+    const previous = this.#draft?.providerSelection ?? null;
+    const previousKey = previous ? JSON.stringify(previous) : null;
+    const nextKey = JSON.stringify(selection);
+    const nextDisplayName = modelDisplayName ? String(modelDisplayName) : null;
+    if (
+      previousKey === nextKey
+      && (this.#draft?.modelDisplayName ?? null) === nextDisplayName
+    ) return false;
+    this.#draft = {
+      ...(this.#draft || {}),
+      providerSelection: selection,
+      modelDisplayName: nextDisplayName,
+    };
+    this.#emit();
+    return true;
+  }
+
   /**
    * Accepts the Bridge's acknowledged draft. A stale acknowledgement never
    * overwrites text the user has typed since.
@@ -162,7 +183,16 @@ export class ConversationSession {
     if (!this.isActive(context) || !draft) return false;
     if (draft.conversationId !== this.#conversation?.conversationId) return false;
     if (Number(draft.revision) < Number(this.#draft?.revision ?? -1)) return false;
-    this.#draft = { ...draft, text: this.#draft?.text ?? draft.text };
+    this.#draft = {
+      ...draft,
+      text: this.#draft?.text ?? draft.text,
+      intent: this.#draft?.intent ?? draft.intent,
+      providerSelection: this.#draft?.providerSelection ?? draft.providerSelection,
+      modelDisplayName: this.#draft
+        && Object.prototype.hasOwnProperty.call(this.#draft, "modelDisplayName")
+        ? this.#draft.modelDisplayName
+        : draft.modelDisplayName,
+    };
     this.#emit();
     return true;
   }

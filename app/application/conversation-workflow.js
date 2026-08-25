@@ -22,6 +22,17 @@ function sameDocument(left, right) {
   );
 }
 
+function draftSnapshotKey(snapshot) {
+  const context = snapshot?.context;
+  if (!context?.sourcePath || !snapshot?.conversationId) return null;
+  return JSON.stringify([
+    context.projectId,
+    context.documentId,
+    context.sourcePath,
+    snapshot.conversationId,
+  ]);
+}
+
 export class ConversationWorkflow {
   #bridgeClient;
 
@@ -33,9 +44,9 @@ export class ConversationWorkflow {
 
   #timerHost;
 
-  #pendingWrite = false;
+  #pendingWrites = new Map();
 
-  #writing = false;
+  #writing = null;
 
   constructor({
     bridgeClient,
@@ -87,9 +98,11 @@ export class ConversationWorkflow {
     }
   }
 
-  close() {
+  close(context = null) {
+    if (context && !this.#session.isActive(context)) return false;
     this.#cancelTimer();
     this.#session.deactivate();
+    return true;
   }
 
   async listConversations(context) {
@@ -112,6 +125,12 @@ export class ConversationWorkflow {
 
   updateDraftIntent(intent) {
     if (this.#session.setDraftIntent(intent)) this.#scheduleDraftWrite();
+  }
+
+  updateDraftAgentSelection(selection, modelDisplayName = null) {
+    if (this.#session.setDraftAgentSelection(selection, modelDisplayName)) {
+      this.#scheduleDraftWrite();
+    }
   }
 
   #cancelTimer() {
@@ -137,37 +156,46 @@ export class ConversationWorkflow {
     await this.#writeDraft();
   }
 
-  async #writeDraft() {
+  async #writeDraft(snapshot = this.#session.snapshot) {
     if (this.#writing) {
-      // Single-flight: coalesce into one follow-up write rather than queueing
-      // one request per keystroke.
-      this.#pendingWrite = true;
+      // Single-flight: coalesce each Document into one follow-up snapshot. The
+      // snapshot must be captured now: opening another Document replaces the
+      // shared Session before this write drains.
+      const key = draftSnapshotKey(snapshot);
+      if (key) this.#pendingWrites.set(key, snapshot);
+      await this.#writing;
       return;
     }
-    const snapshot = this.#session.snapshot;
     const context = snapshot.context;
     if (!context?.sourcePath || !snapshot.conversationId) return;
-    this.#writing = true;
-    try {
-      const payload = await this.#bridgeClient.saveConversationDraft({
-        sourcePath: context.sourcePath,
-        projectId: context.projectId,
-        documentId: context.documentId,
-        conversationId: snapshot.conversationId,
-        text: snapshot.draftText,
-        intent: snapshot.draftIntent,
-      });
-      if (payload?.draft) this.#session.acknowledgeDraft(context, payload.draft);
-    } catch {
-      // A failed draft write keeps the local text; the next edit retries. It
-      // never blocks the user and never touches message history.
-    } finally {
-      this.#writing = false;
-      if (this.#pendingWrite) {
-        this.#pendingWrite = false;
-        await this.#writeDraft();
+    const writing = (async () => {
+      try {
+        const payload = await this.#bridgeClient.saveConversationDraft({
+          sourcePath: context.sourcePath,
+          projectId: context.projectId,
+          documentId: context.documentId,
+          conversationId: snapshot.conversationId,
+          text: snapshot.draftText,
+          intent: snapshot.draftIntent,
+          providerSelection: snapshot.draftProviderSelection,
+          modelDisplayName: snapshot.draftModelDisplayName,
+        });
+        if (payload?.draft) this.#session.acknowledgeDraft(context, payload.draft);
+      } catch {
+        // A failed draft write keeps the local text; the next edit retries. It
+        // never blocks the user and never touches message history.
+      } finally {
+        if (this.#writing === writing) this.#writing = null;
+        const next = this.#pendingWrites.entries().next().value;
+        if (next) {
+          const [key, pendingSnapshot] = next;
+          this.#pendingWrites.delete(key);
+          await this.#writeDraft(pendingSnapshot);
+        }
       }
-    }
+    })();
+    this.#writing = writing;
+    await writing;
   }
 }
 

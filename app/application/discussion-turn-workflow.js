@@ -122,13 +122,15 @@ export class DiscussionTurnWorkflow {
     this.#session.beginTurn(context, { conversationId, selection });
     try {
       const ticket = await this.#requestTicket({ selection, purpose: "discussion" });
-      if (!ticket?.preflightId) {
+      if (!ticket?.preflightId || !ticket.selection) {
         throw new TypeError("The discussion turn has no usable Agent ticket.");
       }
       // The user may have switched Document while preflight was in flight.
       if (!this.#session.isActive(context)) return null;
+      const resolvedSelection = ticket.selection;
+      this.#session.beginTurn(context, { conversationId, selection: resolvedSelection });
       const payload = await this.#bridgeClient.startDiscussion({
-        selection,
+        selection: resolvedSelection,
         trustPolicyAccepted: ticket.trustPolicyAccepted,
         preflightId: ticket.preflightId,
         projectId: context.projectId,

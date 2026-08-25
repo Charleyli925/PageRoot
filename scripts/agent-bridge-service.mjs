@@ -40,7 +40,7 @@ export class AgentBridgeService {
     );
   }
 
-  authenticate(input) { return this.#coordinator.startAuthentication(input); }
+  authenticate(input) { return this.#coordinator.authenticate(input); }
 
   preflight(input) { return this.#coordinator.preflight(input); }
 
