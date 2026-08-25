@@ -419,19 +419,24 @@ async function addComment(page, sourcePath, text = (
   ))?.sourcePath || sourcePath;
 }
 
-async function openRecentProject(page, sourcePath, options) {
+async function dismissVisibleToast(page) {
   const visibleToast = page.locator(".toast.show");
   await visibleToast.waitFor({ state: "visible", timeout: 2_000 }).catch(() => {});
-  if (await visibleToast.isVisible()) {
-    await visibleToast.getByRole("button", { name: "关闭提醒" }).click();
-    await expect(visibleToast).toBeHidden();
-  }
+  if (!(await visibleToast.isVisible())) return;
+  await visibleToast.getByRole("button", { name: "关闭提醒" }).click();
+  await expect(visibleToast).toBeHidden();
+}
+
+async function openProjectFromList(page, sourcePath, options) {
+  await dismissVisibleToast(page);
   const activeBefore = await page.evaluate(
     async () => (await window.htmlAIProjects?.getActiveProject())?.sourcePath || "",
   );
   await page.getByRole("button", { name: "打开新的本地 HTML" }).click();
+  // Rows are Registry projects, so they carry the project folder name rather
+  // than the source file name.
   await page.locator(".recent-file-row")
-    .filter({ hasText: path.basename(sourcePath) })
+    .filter({ hasText: path.basename(sourcePath, path.extname(sourcePath)) })
     .click();
   await waitForProjectReady(page);
   await expect.poll(async () => {
@@ -444,6 +449,22 @@ async function openRecentProject(page, sourcePath, options) {
     async () => (await window.htmlAIProjects?.getActiveProject())?.sourcePath || "",
   );
   return loadedDiskFrame(page, activeSourcePath, options);
+}
+
+// A Recent entry cannot make a project (ADR 0024), so a source that has never
+// been imported is opened the way a user opens it the first time: through the
+// local-file entry, which registers it and only then makes it a list row.
+async function importLocalProject(launched, sourcePath, options) {
+  await dismissVisibleToast(launched.page);
+  await launched.electronApp.evaluate(({ dialog }, filePath) => {
+    dialog.showOpenDialog = async () => ({
+      canceled: false,
+      filePaths: [filePath],
+    });
+  }, sourcePath);
+  await launched.page.getByRole("button", { name: "打开新的本地 HTML" }).click();
+  await launched.page.locator(".open-local-button").click();
+  return loadedDiskFrame(launched.page, sourcePath, options);
 }
 
 function managedProjectRoots(workspace) {
@@ -4516,7 +4537,7 @@ test("a failed handoff in project A does not block project B or replace its stat
       () => requestDirectoryCount(launched.workspace),
       { timeout: 20_000 },
     ).toBe(1);
-    await openRecentProject(launched.page, projectB.sourcePath);
+    await importLocalProject(launched, projectB.sourcePath);
     // B starts clean and A's failure does not follow it: the conversation opens
     // (the old header asked for a comment first; opening is always allowed now),
     // and sending waits for B's own comment below.
@@ -4542,7 +4563,7 @@ test("a failed handoff in project A does not block project B or replace its stat
       { timeout: 20_000 },
     ).toBe(2);
 
-    await openRecentProject(launched.page, projectA.sourcePath, { editable: false });
+    await openProjectFromList(launched.page, projectA.sourcePath, { editable: false });
     // Each project keeps its own failed state: reopening A still shows A's round
     // stuck at the same error — not B's failure and not a clean slate.
     await launched.page.getByRole("button", { name: /AI 助手/u }).click();
@@ -4551,7 +4572,7 @@ test("a failed handoff in project A does not block project B or replace its stat
       .filter({ hasText: "交接内容尚未复制" }))
       .toBeVisible();
 
-    await openRecentProject(launched.page, projectB.sourcePath, { editable: false });
+    await openProjectFromList(launched.page, projectB.sourcePath, { editable: false });
     await launched.page.getByRole("button", { name: /AI 助手/u }).click();
     await expect(launched.page.getByTestId("ai-conversation-run-progress")
       .locator("li[data-step-state=\"error\"]")

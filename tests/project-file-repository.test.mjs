@@ -306,6 +306,52 @@ test("the Registry alone determines catalog membership and secure project opens"
   );
 });
 
+test("an unopenable project stays a catalog row instead of disappearing", async (t) => {
+  const value = await fixture(t);
+  const ready = await importSource(value, "ready.html");
+  const moved = await importSource(value, "moved.html");
+  const broken = await importSource(value, "broken.html");
+
+  // Registry membership is the only fact that decides who is in the catalog, so
+  // a project whose folder left its registered place and a project whose own
+  // metadata no longer parses must both remain rows the list can explain.
+  await rename(
+    moved.target.projectRootPath,
+    path.join(value.root, "outside the projects root"),
+  );
+  await writeFile(
+    path.join(broken.target.projectRootPath, ".pageroot", "manifest.json"),
+    "{ not json",
+    "utf8",
+  );
+
+  const rows = await value.repository.listRegisteredProjects();
+  assert.deepEqual(
+    new Set(rows.map((row) => row.projectId)),
+    new Set([
+      ready.target.projectId,
+      moved.target.projectId,
+      broken.target.projectId,
+    ]),
+  );
+  const byProjectId = new Map(rows.map((row) => [row.projectId, row]));
+  assert.equal(byProjectId.get(ready.target.projectId)?.availability, "ready");
+  assert.equal(byProjectId.get(moved.target.projectId)?.availability, "unavailable");
+  assert.equal(byProjectId.get(broken.target.projectId)?.availability, "invalid");
+
+  // A row that cannot be opened keeps its display name and publishes no
+  // resolved target, so nothing downstream can mistake it for openable.
+  const brokenRow = byProjectId.get(broken.target.projectId);
+  assert.equal(
+    brokenRow?.projectName,
+    path.basename(broken.target.projectRootPath),
+  );
+  assert.equal(brokenRow?.documentId, null);
+  assert.equal(brokenRow?.activeWorkingCopyId, null);
+  assert.equal(brokenRow?.activeSourcePath, null);
+  assert.equal(brokenRow?.hasPendingCandidate, false);
+});
+
 test("AI task projections are re-creatable, collision-safe and never Candidate authority", async (t) => {
   const value = await fixture(t);
   const imported = await importSource(value, "ai-task-projection.html");

@@ -28,9 +28,9 @@
   animation: popIn 150ms ease-out;
 }
 
-/* The list is capped at six rows, so the popover fits without scrolling in the
-   supported window height; only a short viewport needs its own scroll, where a
-   clipped row tooltip is the acceptable trade. */
+/* The project list carries its own scroll cap, so the popover fits without
+   scrolling in the supported window height; only a short viewport needs its own
+   scroll, where a clipped row tooltip is the acceptable trade. */
 @media (max-height: 560px) {
   .popover {
     max-height: calc(100vh - 24px);

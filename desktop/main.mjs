@@ -3047,18 +3047,27 @@ async function listRegisteredProjects() {
     );
   }
   const state = await loadProjectState();
-  const recentTimes = new Map(state.recent.map((entry) => [
-    path.resolve(entry.path),
-    Number(entry.lastOpenedAt) || 0,
-  ]));
-  return payload.projects
+  // Recent and the Registry can spell the same file differently — macOS exposes
+  // one volume as both /var and /private/var — so the ranking is merged on the
+  // real-path identity every other Recent comparison already uses. Matching on
+  // the spelling would silently drop every last-opened time and leave the list
+  // in name order.
+  const recentTimes = new Map(await Promise.all(state.recent.map(
+    async (entry) => [
+      await existingPathIdentity(entry.path),
+      Number(entry.lastOpenedAt) || 0,
+    ],
+  )));
+  const ranked = await Promise.all(payload.projects
     .map(assertRegisteredProjectCatalogRow)
-    .map((project) => Object.freeze({
+    .map(async (project) => Object.freeze({
       ...project,
       lastOpenedAt: project.activeSourcePath
-        ? recentTimes.get(path.resolve(project.activeSourcePath)) || null
+        ? recentTimes.get(await existingPathIdentity(project.activeSourcePath))
+          || null
         : null,
-    }))
+    })));
+  return ranked
     .sort((left, right) => (
       Number(right.lastOpenedAt || 0) - Number(left.lastOpenedAt || 0)
       || left.projectName.localeCompare(right.projectName, "zh-CN")

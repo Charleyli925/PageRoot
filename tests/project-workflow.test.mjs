@@ -735,6 +735,47 @@ test("source rename settles before the catalog refresh and never downgrades on c
   assert.equal(outcome.status, "succeeded");
 });
 
+test("the catalog projection keeps a Registry member Recent has never seen", async (t) => {
+  // Desktop merges Recent's lastOpenedAt and owns the order (ADR 0024). A
+  // project Recent has never ranked is still a Registry member, so the
+  // renderer projection may neither drop it nor re-order what it received.
+  const desktopOrder = [
+    {
+      projectId: "project_catalog_a",
+      projectName: "A",
+      availability: "ready",
+      lastOpenedAt: 1767225600000,
+    },
+    {
+      projectId: "project_catalog_b",
+      projectName: "B",
+      availability: "ready",
+      lastOpenedAt: null,
+    },
+  ];
+  const harness = createHarness({
+    projectOpen: {
+      async listRegistered() {
+        return desktopOrder;
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+
+  const outcome = await harness.workflow.refreshRegisteredProjects();
+  assert.equal(outcome.status, "succeeded");
+  assert.deepEqual(outcome.value.projects, desktopOrder);
+
+  const loaded = harness.events.filter(
+    (event) => event.type === "project-catalog-loaded",
+  );
+  assert.equal(loaded.length, 1);
+  assert.deepEqual(
+    loaded[0].projects.map((project) => project.projectId),
+    ["project_catalog_a", "project_catalog_b"],
+  );
+});
+
 test("a Registry project open routes only its projectId through the desktop authority", async (t) => {
   const openedProjectIds = [];
   const harness = createHarness({

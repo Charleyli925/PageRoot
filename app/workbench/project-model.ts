@@ -60,18 +60,6 @@ export function sameLocalSourcePath(
   );
 }
 
-export function folderFromSourcePath(sourcePath: string | null): string {
-  if (!sourcePath) return "尚未打开本地文件";
-  const normalized = sourcePath.replace(/[\\/]+$/u, "");
-  const parts = normalized.split(/[\\/]/u).filter(Boolean);
-  if (parts.length === 0) return sourcePath;
-  const last = parts.at(-1) || normalized;
-  if (/\.html?$/iu.test(last)) {
-    return parts.at(-2) || last;
-  }
-  return last;
-}
-
 export function safeVersionLabel(versionId: string): string {
   const match = versionId.match(/(\d+)$/);
   return match ? `版本 ${Number(match[1])}` : versionId;

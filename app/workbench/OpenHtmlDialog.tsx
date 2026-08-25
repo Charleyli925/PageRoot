@@ -10,26 +10,26 @@ import {
   type RefObject,
 } from "react";
 import { CaretRightIcon } from "@phosphor-icons/react/dist/csr/CaretRight";
-import { FileHtmlIcon } from "@phosphor-icons/react/dist/csr/FileHtml";
 import { FolderOpenIcon } from "@phosphor-icons/react/dist/csr/FolderOpen";
 import { PlusIcon } from "@phosphor-icons/react/dist/csr/Plus";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 
-import type { BackgroundProjectResult, RecentProject } from "./types";
-import { folderFromSourcePath, formatProjectTimestamp } from "./project-model";
+import type { BackgroundProjectResult, RegisteredProject } from "./types";
+import RegisteredProjectList from "./RegisteredProjectList";
 import styles from "./open-html-dialog.module.css";
 
 type OpenHtmlDialogProps = {
   anchorRef: RefObject<HTMLElement | null>;
-  recentProjects: RecentProject[];
-  recentProjectsError: string;
+  projects: RegisteredProject[];
+  projectsError: string;
+  activeProjectId: string | null;
   actionsDisabled: boolean;
   canForgetRecent: boolean;
   statusForSource: (sourcePath: string) => BackgroundProjectResult | null;
   onOpenLocal: () => void;
-  onOpenRecent: (sourcePath: string) => void;
+  onOpenProject: (projectId: string) => void;
   onForgetRecent: (sourcePath: string) => void;
-  onRetryRecents: () => void;
+  onRetryProjects: () => void;
   onClose: () => void;
 };
 
@@ -39,15 +39,16 @@ function requireTrustedEvent(event: { isTrusted?: boolean } | null) {
 
 export default function OpenHtmlDialog({
   anchorRef,
-  recentProjects,
-  recentProjectsError,
+  projects,
+  projectsError,
+  activeProjectId,
   actionsDisabled,
   canForgetRecent,
   statusForSource,
   onOpenLocal,
-  onOpenRecent,
+  onOpenProject,
   onForgetRecent,
-  onRetryRecents,
+  onRetryProjects,
   onClose,
 }: OpenHtmlDialogProps) {
   const dialogRef = useRef<HTMLElement>(null);
@@ -141,65 +142,17 @@ export default function OpenHtmlDialog({
           </button>
         </header>
         <div className={styles.body}>
-          <section className="recent-files">
-            <header>
-              <strong>最近打开</strong>
-              {recentProjects.length ? <small>{recentProjects.length} 个文件</small> : null}
-            </header>
-            <div>
-              {recentProjectsError ? (
-                <section className="recent-projects-error" role="status">
-                  <span>{recentProjectsError}</span>
-                  <button type="button" onClick={() => onRetryRecents()}>
-                    重试读取
-                  </button>
-                </section>
-              ) : null}
-              {recentProjects.length ? recentProjects.map((project, index) => {
-                const projectStatus = statusForSource(project.sourcePath);
-                return (
-                  <div className="recent-file-item" key={project.path}>
-                    <button
-                      className="recent-file-row"
-                      type="button"
-                      data-tooltip={`${project.name}\n${folderFromSourcePath(project.sourcePath)}`}
-                      data-tooltip-wrap="true"
-                      // The first row has the dialog title above it, so its
-                      // tooltip drops below instead of covering the heading.
-                      data-tooltip-side={index === 0 ? "below" : undefined}
-                      disabled={actionsDisabled}
-                      onClick={() => onOpenRecent(project.sourcePath)}
-                    >
-                      <FileHtmlIcon aria-hidden="true" size={16} weight="duotone" />
-                      <strong>{project.name}</strong>
-                      {projectStatus ? (
-                        <em
-                          className="recent-project-status"
-                          data-state={projectStatus.state}
-                        >{projectStatus.label}</em>
-                      ) : null}
-                      <time dateTime={new Date(project.lastOpenedAt).toISOString()}>
-                        {formatProjectTimestamp(project.lastOpenedAt)}
-                      </time>
-                    </button>
-                    {canForgetRecent ? (
-                      <button
-                        className="recent-file-remove"
-                        type="button"
-                        aria-label={`从最近打开中移除 ${project.name}`}
-                        title="移除这条记录"
-                        onClick={() => onForgetRecent(project.sourcePath)}
-                      >
-                        <XIcon aria-hidden="true" size={13} weight="bold" />
-                      </button>
-                    ) : null}
-                  </div>
-                );
-              }) : !recentProjectsError ? (
-                <span className="recent-projects-empty">还没有最近打开的文件</span>
-              ) : null}
-            </div>
-          </section>
+          <RegisteredProjectList
+            projects={projects}
+            error={projectsError}
+            activeProjectId={activeProjectId}
+            actionsDisabled={actionsDisabled}
+            canForgetRecent={canForgetRecent}
+            statusForSource={statusForSource}
+            onOpen={onOpenProject}
+            onForgetRecent={onForgetRecent}
+            onRetry={onRetryProjects}
+          />
 
           <button
             ref={openLocalButtonRef}

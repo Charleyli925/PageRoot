@@ -4439,6 +4439,14 @@ body {
   gap: 1px;
 }
 
+/* Registry membership decides how many rows exist, so the list scrolls instead
+   of growing the popover past the window. */
+.project-catalog-rows {
+  max-height: 268px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
 .recent-file-row {
   position: relative;
   width: 100%;
@@ -5435,6 +5443,16 @@ body {
 
 .recent-file-item:hover .recent-file-row strong {
   color: var(--indigo-deep);
+}
+
+/* A project that cannot be opened right now must not offer the hover
+   affordance of one that can. */
+.recent-file-item:hover:has(.recent-file-row:disabled) {
+  background: transparent;
+}
+
+.recent-file-item:hover:has(.recent-file-row:disabled) .recent-file-row strong {
+  color: #32343a;
 }
 
 .recent-file-remove {

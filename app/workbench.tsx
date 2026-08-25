@@ -239,7 +239,7 @@ import type {
   PersistState,
   PrepareCloseDetail,
   ProjectContext,
-  RecentProject,
+  RegisteredProject,
   StartupIssue,
   Toast,
   ToastAction,
@@ -637,8 +637,8 @@ export default function Workbench() {
   const [fileRenameBusy, setFileRenameBusy] = useState(false);
   const [fileRenameDraft, setFileRenameDraft] = useState("");
   const [fileRenameError, setFileRenameError] = useState("");
-  const [recentProjects, setRecentProjects] = useState<RecentProject[]>([]);
-  const [recentProjectsError, setRecentProjectsError] = useState("");
+  const [registeredProjects, setRegisteredProjects] = useState<RegisteredProject[]>([]);
+  const [registeredProjectsError, setRegisteredProjectsError] = useState("");
   const [selection, setSelection] = useState<HtmlCanvasSelection | null>(null);
   const commentSnapshot = (
     workspaceControllerSnapshot?.commentSession as CommentSessionSnapshot<
@@ -1797,18 +1797,18 @@ export default function Workbench() {
         }
         return;
       }
-      if (projectEvent.type === "project-recents-loaded") {
-        setRecentProjects(
+      if (projectEvent.type === "project-catalog-loaded") {
+        setRegisteredProjects(
           Array.isArray(projectEvent.projects)
-            ? projectEvent.projects as RecentProject[]
+            ? projectEvent.projects as RegisteredProject[]
             : [],
         );
-        setRecentProjectsError("");
+        setRegisteredProjectsError("");
         return;
       }
-      if (projectEvent.type === "project-recents-failed") {
-        setRecentProjectsError(String(
-          projectEvent.reason || "最近打开记录暂时无法读取。",
+      if (projectEvent.type === "project-catalog-failed") {
+        setRegisteredProjectsError(String(
+          projectEvent.reason || "项目目录暂时无法读取。",
         ));
         return;
       }
@@ -3317,9 +3317,9 @@ export default function Workbench() {
       });
   }, [workspaceController]);
 
-  const refreshRecents = useCallback(async () => {
+  const refreshRegisteredProjects = useCallback(async () => {
     if (!workspaceController) return;
-    await workspaceController.refreshRecentProjects();
+    await workspaceController.refreshRegisteredProjects();
   }, [workspaceController]);
 
   const forgetRecentProject = useCallback(async (recentSourcePath: string) => {
@@ -3327,17 +3327,17 @@ export default function Workbench() {
     if (!api?.forgetRecent) return;
     try {
       await api.forgetRecent(recentSourcePath);
-      setRecentProjects((current) => current.filter(
-        (project) => project.sourcePath !== recentSourcePath,
-      ));
-      setRecentProjectsError("");
+      // Recent only ranks the catalog, so the project stays listed. Re-reading
+      // the catalog keeps the authoritative order instead of predicting it
+      // here (ADR 0024).
+      await workspaceController?.refreshRegisteredProjects();
     } catch (cause) {
-      setRecentProjectsError(productErrorMessage(
+      setRegisteredProjectsError(productErrorMessage(
         cause,
-        "这条最近打开记录暂时无法移除，可以重试。",
+        "这个项目的最近打开时间暂时无法清除，可以重试。",
       ));
     }
-  }, []);
+  }, [workspaceController]);
 
   const refreshWorkspace = useCallback(async (
     sourceOverride?: string | null,
@@ -3790,6 +3790,16 @@ export default function Workbench() {
     await workspaceController.openProject({
       kind: recentPath ? "recent" : "local",
       sourcePath: recentPath || null,
+    });
+  }, [workspaceController]);
+
+  const openRegisteredProject = useCallback(async (registeredProjectId: string) => {
+    if (!workspaceController) return;
+    // Only the projectId travels; the registered root path stays authoritative
+    // in the backend (ADR 0024).
+    await workspaceController.openProject({
+      kind: "registered",
+      projectId: registeredProjectId,
     });
   }, [workspaceController]);
 
@@ -6629,9 +6639,6 @@ export default function Workbench() {
     && typeof window !== "undefined"
     && window.htmlAIProjects?.openInDefaultBrowser,
   );
-  const visibleRecentProjects = recentProjects
-    .filter((project) => !sameLocalSourcePath(project.sourcePath, sourcePath))
-    .slice(0, 6);
   const recentProjectStatus = (projectSourcePath: string): BackgroundProjectResult | null => {
     const recorded = [...backgroundProjectResults.entries()].find(
       ([key]) => sameLocalSourcePath(key, projectSourcePath),
@@ -7371,7 +7378,7 @@ export default function Workbench() {
                   disabled={fileRenameEditing || fileRenameBusy}
                   onClick={() => {
                     setOpenHtmlDialogOpen(true);
-                    void refreshRecents();
+                    void refreshRegisteredProjects();
                   }}
                 >
                   <PlusIcon aria-hidden="true" size={16} weight="bold" />
@@ -9013,8 +9020,9 @@ export default function Workbench() {
       {openHtmlDialogOpen && !openConfirmation ? (
         <OpenHtmlDialog
           anchorRef={openHtmlButtonRef}
-          recentProjects={visibleRecentProjects}
-          recentProjectsError={recentProjectsError}
+          projects={registeredProjects}
+          projectsError={registeredProjectsError}
+          activeProjectId={projectId || null}
           actionsDisabled={attachmentUploadCount > 0}
           canForgetRecent={
             typeof window !== "undefined"
@@ -9025,12 +9033,12 @@ export default function Workbench() {
             setOpenHtmlDialogOpen(false);
             void openProject();
           }}
-          onOpenRecent={(recentSourcePath) => {
+          onOpenProject={(registeredProjectId) => {
             setOpenHtmlDialogOpen(false);
-            void openProject(recentSourcePath);
+            void openRegisteredProject(registeredProjectId);
           }}
           onForgetRecent={(recentSourcePath) => void forgetRecentProject(recentSourcePath)}
-          onRetryRecents={() => void refreshRecents()}
+          onRetryProjects={() => void refreshRegisteredProjects()}
           onClose={() => {
             setOpenHtmlDialogOpen(false);
             openHtmlButtonRef.current?.focus();

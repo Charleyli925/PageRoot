@@ -87,23 +87,44 @@ async function loadedDiskFrame(page, sourcePath, caseId) {
   });
 }
 
-async function openRecentProject(
+async function dismissVisibleToast(page) {
+  const visibleToast = page.locator(".toast.show");
+  await visibleToast.waitFor({ state: "visible", timeout: 2_000 }).catch(() => {});
+  if (!(await visibleToast.isVisible())) return;
+  await visibleToast.getByRole("button", { name: "关闭提醒" }).click();
+  await expect(visibleToast).toBeHidden();
+}
+
+async function openProjectFromList(
   page,
   sourcePath,
   caseId = "list-item",
-  recentName = path.basename(sourcePath),
+  // The popover lists Registry projects, whose display name is the project
+  // folder name — the source stem without its .html extension.
+  projectName = path.basename(sourcePath, path.extname(sourcePath)),
 ) {
-  const visibleToast = page.locator(".toast.show");
-  await visibleToast.waitFor({ state: "visible", timeout: 2_000 }).catch(() => {});
-  if (await visibleToast.isVisible()) {
-    await visibleToast.getByRole("button", { name: "关闭提醒" }).click();
-    await expect(visibleToast).toBeHidden();
-  }
+  await dismissVisibleToast(page);
   await page.getByRole("button", { name: "打开新的本地 HTML" }).click();
   await page.locator(".recent-file-row")
-    .filter({ hasText: recentName })
+    .filter({ hasText: projectName })
     .click();
   return loadedDiskFrame(page, sourcePath, caseId);
+}
+
+// A Recent entry cannot make a project (ADR 0024), so a source that has never
+// been imported is opened the way a user opens it the first time: through the
+// local-file entry, which registers it and only then makes it a list row.
+async function importLocalProject(launched, sourcePath, caseId = "list-item") {
+  await dismissVisibleToast(launched.page);
+  await launched.electronApp.evaluate(({ dialog }, filePath) => {
+    dialog.showOpenDialog = async () => ({
+      canceled: false,
+      filePaths: [filePath],
+    });
+  }, sourcePath);
+  await launched.page.getByRole("button", { name: "打开新的本地 HTML" }).click();
+  await launched.page.locator(".open-local-button").click();
+  return loadedDiskFrame(launched.page, sourcePath, caseId);
 }
 
 async function waitForFreshDiskFrame(page, previousDocumentToken, caseId) {
@@ -2640,10 +2661,7 @@ test("Electron rapid project switching and immediate close preserve the last nat
       projectA.sourcePath,
     );
 
-    await firstLaunch.page.getByRole("button", { name: "打开新的本地 HTML" }).click();
-    await firstLaunch.page.locator(".recent-file-row")
-      .filter({ hasText: "close-switch-b.html" })
-      .click();
+    await importLocalProject(firstLaunch, projectB.sourcePath, "list-item");
     await loadedDiskFrame(firstLaunch.page, projectB.sourcePath, "list-item");
     await expect.poll(
       () => readFileSync(projectAWorkingCopyPath, "utf8"),
@@ -2651,11 +2669,11 @@ test("Electron rapid project switching and immediate close preserve the last nat
     ).toContain(switchedText);
     expect(readFileSync(projectA.sourcePath, "utf8")).not.toContain(switchedText);
 
-    ({ frame } = await openRecentProject(
+    ({ frame } = await openProjectFromList(
       firstLaunch.page,
       projectAWorkingCopyPath,
       "list-item",
-      path.basename(projectA.sourcePath),
+      path.basename(projectA.sourcePath, ".html"),
     ));
     await expect(frame.locator(caseSelector("list-item"))).toHaveText(switchedText);
     await activateNativeEdit(frame, "list-item");
@@ -2690,6 +2708,48 @@ test("Electron rapid project switching and immediate close preserve the last nat
     }
     removeSourceFixture(projectA.sourceDirectory);
     removeSourceFixture(projectB.sourceDirectory);
+  }
+});
+
+test("Electron still lists a registered project Recent no longer ranks", async () => {
+  test.setTimeout(180_000);
+  const ranked = createSourceFixture("catalog-ranked.html");
+  const unranked = createSourceFixture("catalog-unranked.html");
+  const unrankedName = path.basename(unranked.sourcePath, ".html");
+  const forgetLabel = `清除 ${unrankedName} 的最近打开时间`;
+  const launched = await launchPageRoot({
+    activeSourcePath: ranked.sourcePath,
+  });
+  try {
+    await loadedDiskFrame(launched.page, ranked.sourcePath, "list-item");
+    await importLocalProject(launched, unranked.sourcePath, "list-item");
+    await openProjectFromList(launched.page, ranked.sourcePath, "list-item");
+
+    await dismissVisibleToast(launched.page);
+    await launched.page.getByRole("button", { name: "打开新的本地 HTML" }).click();
+    const unrankedItem = launched.page.locator(".recent-file-item")
+      .filter({ hasText: unrankedName });
+    await expect(unrankedItem).toHaveCount(1);
+    // Recent only ranks the catalog and cannot remove a member (ADR 0024):
+    // clearing the last-opened time drops the timestamp, and Registry
+    // membership keeps the row listed and openable.
+    await unrankedItem.getByRole("button", { name: forgetLabel }).click();
+    await expect(unrankedItem.locator("time")).toBeEmpty();
+    await expect(unrankedItem.getByRole("button", { name: forgetLabel }))
+      .toHaveCount(0);
+
+    await unrankedItem.locator(".recent-file-row").click();
+    const { frame } = await loadedDiskFrame(
+      launched.page,
+      unranked.sourcePath,
+      "list-item",
+    );
+    await expect(frame.locator(caseSelector("list-item")))
+      .toHaveText(ORIGINAL_LIST_TEXT);
+  } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeSourceFixture(ranked.sourceDirectory);
+    removeSourceFixture(unranked.sourceDirectory);
   }
 });
 
