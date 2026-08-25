@@ -8,6 +8,8 @@ import {
   agentProviderError,
   defineAgentProvider,
 } from "./agent-provider-contract.mjs";
+import { loadExecutionPolicy } from "../policies/execution-policy.mjs";
+import { runBridgeFinalizer } from "../native/bridge-finalizer.mjs";
 
 export const CODEX_PROVIDER_ID = "codex";
 export const CODEX_RUNTIME_ID = "acp";
@@ -119,14 +121,22 @@ export async function resolvePinnedCodexInstallation() {
     "bin",
     target.executableName,
   );
-  const [adapterEntryIdentity, codexWrapperIdentity, codexBinaryIdentity] = await Promise.all([
+  const codeModeHost = path.join(path.dirname(codexBinary), "codex-code-mode-host");
+  const [
+    adapterEntryIdentity,
+    codexWrapperIdentity,
+    codexBinaryIdentity,
+    codeModeHostIdentity,
+  ] = await Promise.all([
     fileIdentity(adapterEntry, { executable: true }),
     fileIdentity(codexWrapper, { executable: true }),
     fileIdentity(codexBinary, { executable: true }),
+    fileIdentity(codeModeHost, { executable: true }),
   ]);
   if (adapterEntryIdentity.sha256 !== lock.adapter.entrySha256
     || codexWrapperIdentity.sha256 !== lock.codex.wrapperSha256
-    || codexBinaryIdentity.sha256 !== lock.codex.platformPackage.binarySha256) {
+    || codexBinaryIdentity.sha256 !== lock.codex.platformPackage.binarySha256
+    || codeModeHostIdentity.sha256 !== lock.codex.platformPackage.codeModeHostSha256) {
     failure("CODEX_INSTALLATION_INCOMPATIBLE", "The pinned Codex runtime bytes are incompatible.");
   }
   return Object.freeze({
@@ -138,6 +148,8 @@ export async function resolvePinnedCodexInstallation() {
     codexWrapperIdentity,
     codexBinary,
     codexBinaryIdentity,
+    codeModeHost,
+    codeModeHostIdentity,
     codexVersion: lock.codex.version,
     platform: target.key,
   });
@@ -154,14 +166,21 @@ function sameIdentity(left, right) {
 }
 
 export async function assertPinnedCodexInstallationUnchanged(installation) {
-  const [adapterEntryIdentity, codexWrapperIdentity, codexBinaryIdentity] = await Promise.all([
+  const [
+    adapterEntryIdentity,
+    codexWrapperIdentity,
+    codexBinaryIdentity,
+    codeModeHostIdentity,
+  ] = await Promise.all([
     fileIdentity(installation.adapterEntry, { executable: true }),
     fileIdentity(installation.codexWrapper, { executable: true }),
     fileIdentity(installation.codexBinary, { executable: true }),
+    fileIdentity(installation.codeModeHost, { executable: true }),
   ]);
   if (!sameIdentity(adapterEntryIdentity, installation.adapterEntryIdentity)
     || !sameIdentity(codexWrapperIdentity, installation.codexWrapperIdentity)
-    || !sameIdentity(codexBinaryIdentity, installation.codexBinaryIdentity)) {
+    || !sameIdentity(codexBinaryIdentity, installation.codexBinaryIdentity)
+    || !sameIdentity(codeModeHostIdentity, installation.codeModeHostIdentity)) {
     failure("CODEX_INSTALLATION_CHANGED", "The pinned Codex runtime changed after preflight.", 409);
   }
 }
@@ -174,6 +193,7 @@ function installationDigest(installation) {
     codexVersion: installation.codexVersion,
     codexWrapperIdentity: installation.codexWrapperIdentity,
     codexBinaryIdentity: installation.codexBinaryIdentity,
+    codeModeHostIdentity: installation.codeModeHostIdentity,
     platform: installation.platform,
   }), "utf8"));
 }
@@ -298,6 +318,7 @@ export function createCodexProvider({
     displayName: "Codex",
     runtimeId: CODEX_RUNTIME_ID,
     securityProfile: "agent-native",
+    finalizationOwner: "bridge",
     legacyDrivers: [],
     capabilities: {
       availability: true,
@@ -392,13 +413,8 @@ export function createCodexProvider({
     normalizePreflightError: normalizeCodexError,
     normalizeRuntimeError: normalizeCodexError,
     preflightFailureMessage: codexFailure,
-    loadExecutionPolicy() {
-      failure(
-        "AGENT_CAPABILITY_UNSUPPORTED",
-        "Codex execution is disabled until its sandbox authority gate passes.",
-        409,
-      );
-    },
+    loadExecutionPolicy,
+    finalizeExecution: runBridgeFinalizer,
     createRuntimeLaunch({
       ticket,
       policy,
@@ -416,6 +432,8 @@ export function createCodexProvider({
         adapterVersion: ticket.installation.adapterVersion,
         codexBinary: ticket.installation.codexBinary,
         codexBinaryIdentity: ticket.installation.codexBinaryIdentity,
+        codeModeHost: ticket.installation.codeModeHost,
+        codeModeHostIdentity: ticket.installation.codeModeHostIdentity,
         codexConfig: CODEX_LOCKED_CONFIG,
         selection: ticket.selection,
         sessionConfigOptions: Object.freeze([

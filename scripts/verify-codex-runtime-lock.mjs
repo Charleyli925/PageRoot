@@ -123,6 +123,11 @@ export async function verifyCodexRuntimeLock() {
       "Codex binary hash",
     );
     assertEqual(
+      sha256(await readFile(path.join(vendorRoot, "bin", "codex-code-mode-host"))),
+      manifest.codex.platformPackage.codeModeHostSha256,
+      "Codex code-mode host hash",
+    );
+    assertEqual(
       sha256(await readFile(path.join(vendorRoot, "codex-package.json"))),
       manifest.codex.platformPackage.packageManifestSha256,
       "Codex package manifest hash",

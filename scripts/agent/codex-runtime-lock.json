@@ -25,6 +25,7 @@
       "version": "0.148.0-darwin-arm64",
       "integrity": "sha512-xgBPFiF1fHUlRS7HE6wGB56LjBJh16kGD7b4TTbwdVBZNB4QDkTok+vdkAGrfpVkfKcwGNhPSKDgCw+KMZOVug==",
       "binarySha256": "b0308517b20543012fa2171aa3d46ce455a7456c4eb2a552ab9468ba4eeb1e50",
+      "codeModeHostSha256": "cc3269e735a0fa2823693d51ca8c5fe98aa704c7e6ceb7ed366ea1e161de2ced",
       "packageManifestSha256": "e257e5ec362f1e65466a17a7d8e71c9030fb5ce7590329528ef4e5431f468d07"
     }
   },

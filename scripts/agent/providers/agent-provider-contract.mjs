@@ -114,6 +114,10 @@ export function defineAgentProvider(value) {
   const legacyDrivers = Array.isArray(value.legacyDrivers)
     ? [...new Set(value.legacyDrivers.map((driver) => assertComponentId(driver, "legacy driver")))]
     : [];
+  const finalizationOwner = value.finalizationOwner || "agent-host";
+  if (finalizationOwner !== "agent-host" && finalizationOwner !== "bridge") {
+    throw new TypeError(`Agent provider ${providerId} finalization owner is invalid.`);
+  }
   const requiredMethods = [
     "resolveInstallation",
     "preflight",
@@ -140,6 +144,7 @@ export function defineAgentProvider(value) {
     displayName,
     securityProfile,
     legacyDrivers: Object.freeze(legacyDrivers),
+    finalizationOwner,
     capabilities: normalizedCapabilities(value.capabilities),
     presentation: normalizedPresentation(value.presentation, { providerId, displayName }),
   });

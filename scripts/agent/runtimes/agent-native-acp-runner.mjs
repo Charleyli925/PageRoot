@@ -22,6 +22,11 @@ import * as acp from "@agentclientprotocol/sdk";
 
 import { terminateManagedProcess } from "../hosts/execution-host.mjs";
 import { macosAgentSandboxProfile } from "../sandbox/macos-agent-sandbox.mjs";
+import {
+  disposeCodexExecutionWorkspace,
+  prepareCodexExecutionWorkspace,
+  publishCodexExecutionOutput,
+} from "../native/codex-workspace.mjs";
 import { runAcpTask } from "../../qoder-acp-client.mjs";
 
 const MAX_ACP_FRAME_BYTES = 4 * 1024 * 1024;
@@ -169,6 +174,16 @@ async function assertCodexBinary(filePath, expectedIdentity) {
   return resolved;
 }
 
+async function assertCodeModeHost(filePath, expectedIdentity) {
+  if (!filePath || !expectedIdentity) {
+    throw runtimeError(
+      "CODEX_INNER_INCOMPATIBLE",
+      "The pinned Codex code-mode host identity is unavailable.",
+    );
+  }
+  return assertCodexBinary(filePath, expectedIdentity);
+}
+
 export function codexAcpEnvironment({
   baseEnvironment = process.env,
   codexBinary,
@@ -263,6 +278,9 @@ export async function withAgentNativeAcpProcess(launch, operation) {
     launch.adapterEntryIdentity,
   );
   const codexBinary = await assertCodexBinary(launch.codexBinary, launch.codexBinaryIdentity);
+  if (launch.purpose === "execution") {
+    await assertCodeModeHost(launch.codeModeHost, launch.codeModeHostIdentity);
+  }
   const runtime = await realpath(process.execPath);
   const adapterArgs = Array.isArray(launch.adapterArgs)
     && launch.adapterArgs.length <= 16
@@ -452,11 +470,41 @@ export async function runAgentNativeAcp(launch) {
   if (launch.securityProfile !== "agent-native") {
     throw new TypeError("Agent-native ACP runner requires the agent-native security profile.");
   }
-  if (launch.purpose !== "discussion") {
+  if (launch.purpose !== "discussion" && launch.purpose !== "execution") {
     throw runtimeError(
       "AGENT_CAPABILITY_UNSUPPORTED",
-      "Codex execution is disabled until the native sandbox authority gate passes.",
+      "The requested Codex operation is unsupported.",
     );
+  }
+  if (launch.purpose === "execution") {
+    const workspace = await prepareCodexExecutionWorkspace(launch);
+    try {
+      const result = await withAgentNativeAcpProcess(workspace.launch, ({ stream }) => runAcpTask({
+        connection: stream,
+        policy: workspace.launch.policy,
+        prompt: workspace.launch.prompt,
+        onEvent: workspace.launch.onEvent,
+        cancellationSignal: workspace.launch.cancellationSignal,
+        expectedAgentName: /codex/iu,
+        sessionConfigOptions: workspace.launch.sessionConfigOptions,
+        completionAuthority: "bridge",
+        sessionCwd: workspace.launch.cwd,
+        ...(workspace.launch.startupTimeoutMs
+          ? { startupTimeoutMs: workspace.launch.startupTimeoutMs }
+          : {}),
+        ...(workspace.launch.turnTimeoutMs
+          ? { turnTimeoutMs: workspace.launch.turnTimeoutMs }
+          : {}),
+      }));
+      const published = await publishCodexExecutionOutput({
+        workspace,
+        policy: launch.policy,
+        cancellationSignal: launch.cancellationSignal,
+      });
+      return Object.freeze({ ...result, completion: published });
+    } finally {
+      await disposeCodexExecutionWorkspace(workspace);
+    }
   }
   const isolated = await prepareDiscussionIsolation(launch);
   try {

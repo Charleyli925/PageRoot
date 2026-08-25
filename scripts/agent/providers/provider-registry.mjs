@@ -310,6 +310,32 @@ export function createProviderRegistry({ providers = [], runtimeRegistry } = {})
       }
     },
     run: runTicket,
+    async finalizeExecution(ticket, input) {
+      const { provider } = resolveTicket(ticket, "execution");
+      if (provider.finalizationOwner === "agent-host") {
+        const completion = input?.runtimeResult?.completion;
+        if (!completion || !["completed", "no-change"].includes(completion.status)) {
+          throw agentProviderError(
+            "AGENT_FINALIZER_NOT_COMPLETED",
+            "The Agent turn stopped without verified completion evidence.",
+            { status: 409 },
+          );
+        }
+        return completion;
+      }
+      if (typeof provider.finalizeExecution !== "function") {
+        throw agentProviderError(
+          "AGENT_FINALIZER_UNSUPPORTED",
+          "The selected Agent provider has no Bridge finalizer.",
+          { status: 409 },
+        );
+      }
+      try {
+        return await provider.finalizeExecution(input);
+      } catch (cause) {
+        throw provider.normalizeRuntimeError(cause);
+      }
+    },
     createTurnRunner(ticket, { environment }) {
       resolveTicket(ticket, "discussion");
       return ({ policy, prompt, turnTimeoutMs, cancellationSignal, onEvent }) => runTicket(ticket, {

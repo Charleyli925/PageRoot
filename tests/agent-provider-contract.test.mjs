@@ -353,9 +353,12 @@ test("Bridge keeps the legacy HTTP projection while tickets remain provider/runt
   assert.equal(ready.driver, "qoder-acp");
   assert.equal(ready.agentVersion, "1.1.27");
   assert.equal(ready.modelCount, 1);
-  for (const internal of ["providerId", "runtimeId", "installation", "installationDigest", "capabilities"]) {
+  for (const internal of ["providerId", "runtimeId", "installation"]) {
     assert.equal(internal in ready, false, `${internal} must stay Bridge-internal`);
   }
+  assert.equal(ready.securityProfile, "client-mediated");
+  assert.match(ready.installationDigest, /^sha256:[a-f0-9]{64}$/u);
+  assert.deepEqual(ready.capabilities, fixture.capabilities);
 
   const started = await service.submit({
     ...IDENTITY,

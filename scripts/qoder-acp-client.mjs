@@ -769,6 +769,8 @@ export async function runAcpTask({
   cancellationSignal,
   expectedAgentName,
   sessionConfigOptions = [],
+  completionAuthority = "agent-host",
+  sessionCwd = policy?.requestRoot,
 }) {
   const isStream = Boolean(connection?.readable && connection?.writable);
   const isAgentApp = typeof connection?.connect === "function"
@@ -796,6 +798,12 @@ export async function runAcpTask({
     ))) {
     throw new TypeError("ACP session config options are invalid.");
   }
+  if (completionAuthority !== "agent-host" && completionAuthority !== "bridge") {
+    throw new TypeError("ACP completion authority is invalid.");
+  }
+  if (typeof sessionCwd !== "string" || !path.isAbsolute(sessionCwd)) {
+    throw new TypeError("ACP session cwd must be absolute.");
+  }
   const profile = acpDriverProfile(policy);
   const host = profile.assertHost(profile.createHost(policy, onEvent));
   const client = buildClient(host);
@@ -816,12 +824,19 @@ export async function runAcpTask({
         startupTimeout.controller.signal,
         cancellationSignal,
       );
+      const clientCapabilities = completionAuthority === "bridge"
+        ? Object.freeze({
+            fs: Object.freeze({ readTextFile: false, writeTextFile: false }),
+            terminal: false,
+            session: Object.freeze({ configOptions: Object.freeze({ boolean: Object.freeze({}) }) }),
+          })
+        : profile.clientCapabilities;
       const initialized = await Promise.race([
         context.request(
           acp.methods.agent.initialize,
           {
             protocolVersion: acp.PROTOCOL_VERSION,
-            clientCapabilities: profile.clientCapabilities,
+            clientCapabilities,
             clientInfo: {
               name: "pageroot-agent-bridge",
               title: "PageRoot Agent Bridge",
@@ -856,7 +871,7 @@ export async function runAcpTask({
 
       const session = await Promise.race([
         context.buildSession({
-          cwd: policy.requestRoot,
+          cwd: sessionCwd,
           mcpServers: [],
         }).start({ cancellationSignal: startupSignal }),
         startupTimeout.expired,
@@ -915,7 +930,7 @@ export async function runAcpTask({
             // Never soften this into an optional call: for a mode that requires
             // completion, a renamed or missing method must fail the turn instead
             // of silently skipping the finalizer proof.
-            const completion = profile.requiresTurnCompletion
+            const completion = profile.requiresTurnCompletion && completionAuthority === "agent-host"
               ? await host.assertTurnCompleted()
               : null;
             onEvent(Object.freeze({ kind: "turn-stopped", stopReason: message.stopReason }));
@@ -991,6 +1006,7 @@ export async function prepareVerifiedQoderJavaScriptExecution({
   expectedExecutable,
   environment = {},
   baseEnvironment = process.env,
+  requireExecutable = true,
 } = {}) {
   const requestedExecutable = assertAbsolutePath(command, "Qoder JavaScript command");
   const executable = await realpath(requestedExecutable).catch(() => {
@@ -1003,9 +1019,11 @@ export async function prepareVerifiedQoderJavaScriptExecution({
       "The ACP Agent executable must resolve to a regular file.",
     );
   }
-  await access(executable, fsConstants.X_OK).catch(() => {
-    throw policyError("ACP_AGENT_EXECUTABLE_INVALID", "The ACP Agent executable is not executable.");
-  });
+  if (requireExecutable) {
+    await access(executable, fsConstants.X_OK).catch(() => {
+      throw policyError("ACP_AGENT_EXECUTABLE_INVALID", "The ACP Agent executable is not executable.");
+    });
+  }
   const executableHandle = await openVerifiedAgentExecutable(executable, expectedExecutable);
   let consumed = false;
   try {

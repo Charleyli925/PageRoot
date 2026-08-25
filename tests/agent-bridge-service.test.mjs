@@ -233,7 +233,7 @@ test("Agent Bridge preflight is explicit, bounded, and consumed by one Qoder tas
   assert.equal(duplicate.idempotent, true);
   assert.equal(observed.calls, 1);
 
-  resolveRun({ stopReason: "end_turn" });
+  resolveRun({ stopReason: "end_turn", completion: { status: "completed" } });
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(service.status(IDENTITY).state, "completed");
   assert.equal(service.status(IDENTITY).phase, "awaiting-validation");
@@ -260,7 +260,7 @@ test("verified npm Qoder uses the trusted runtime under Finder's sparse PATH", a
     },
     runTask: async (input) => {
       observed = input;
-      return { stopReason: "end_turn" };
+      return { stopReason: "end_turn", completion: { status: "completed" } };
     },
   });
   t.after(() => service.dispose());

@@ -4,6 +4,7 @@ export function executionPhaseForEvent(event, current) {
     case "file-read": return "reading-task";
     case "file-written": return "writing-candidate";
     case "terminal-created": return "finalizing";
+    case "bridge-finalizer-started": return "finalizing";
     case "completion":
     case "completion-verified":
     case "turn-stopping":

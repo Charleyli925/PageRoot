@@ -10,6 +10,7 @@ const behavior = process.argv.find((value) => value.startsWith("--fixture="))
   ?.slice("--fixture=".length) || "ready";
 const pidFile = process.argv.find((value) => value.startsWith("--pid-file="))
   ?.slice("--pid-file=".length) || null;
+let requestRoot = "";
 
 if (behavior === "early-exit") process.exit(7);
 if (behavior === "oversized-frame") {
@@ -51,14 +52,17 @@ if (behavior === "oversized-frame") {
       authenticated = true;
       return {};
     })
-    .onRequest(acp.methods.agent.session.new, () => {
+    .onRequest(acp.methods.agent.session.new, ({ params }) => {
       if (behavior === "descendant" || behavior === "cancel-stream") {
-        const descendant = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
-          stdio: "ignore",
-        });
+        const descendant = behavior === "cancel-stream"
+          ? spawn(process.env.CODEX_PATH, ["30"], { stdio: "ignore" })
+          : spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+              stdio: "ignore",
+            });
         descendantPid = descendant.pid;
         if (pidFile) writeFileSync(pidFile, `${descendant.pid}\n`, "utf8");
       }
+      requestRoot = params?.cwd || requestRoot;
       return {
         sessionId: "synthetic-codex-session",
         models: {
@@ -105,6 +109,21 @@ if (behavior === "oversized-frame") {
       };
     })
     .onRequest(acp.methods.agent.session.prompt, async ({ params, client }) => {
+      if (behavior === "execution") {
+        writeFileSync(
+          `${requestRoot}/output/index.html`,
+          "<!doctype html><html><head><title>Codex Candidate</title></head><body><main><h1>Codex Candidate</h1></main></body></html>",
+          "utf8",
+        );
+        await client.notify(acp.methods.client.session.update, {
+          sessionId: params.sessionId,
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: "Candidate prepared" },
+          },
+        });
+        return { stopReason: "end_turn" };
+      }
       if (behavior !== "discussion" && behavior !== "cancel-stream") {
         throw new Error("unsupported synthetic prompt");
       }

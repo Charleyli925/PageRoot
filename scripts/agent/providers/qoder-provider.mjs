@@ -477,6 +477,7 @@ export function createQoderProvider({
     displayName: "Qoder",
     runtimeId: QODER_RUNTIME_ID,
     securityProfile: "client-mediated",
+    finalizationOwner: "agent-host",
     legacyDrivers: [QODER_LEGACY_DRIVER],
     capabilities: {
       availability: true,

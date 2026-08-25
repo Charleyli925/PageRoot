@@ -4,7 +4,10 @@ import { defineAgentRuntime } from "../../../scripts/agent/runtimes/agent-runtim
 
 export function createSyntheticQoderProviderFixture({
   calls = [],
-  runOutcome = Object.freeze({ stopReason: "end_turn" }),
+  runOutcome = Object.freeze({
+    stopReason: "end_turn",
+    completion: Object.freeze({ status: "completed" }),
+  }),
   securityProfile = "client-mediated",
   launchSecurityProfile = securityProfile,
   legacyDrivers = ["qoder-acp"],

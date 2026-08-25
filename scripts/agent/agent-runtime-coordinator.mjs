@@ -671,6 +671,7 @@ export class AgentRuntimeCoordinator {
       controller,
       promise: null,
       visibleText: "",
+      finalizerStarted: false,
     };
     this.#executionSessions.set(key, entry);
     const pendingEvents = [];
@@ -697,8 +698,20 @@ export class AgentRuntimeCoordinator {
       projectionActive = true;
       for (const event of pendingEvents.splice(0)) publishEvent(event);
     });
-    entry.promise = Promise.resolve(runtimePromise).then(() => {
+    entry.promise = Promise.resolve(runtimePromise).then(async (runtimeResult) => {
       if (this.#executionSessions.get(key) !== entry) return;
+      if (controller.signal.aborted) {
+        throw new AgentRuntimeError("AGENT_CANCELLED", "Cancelled before Bridge finalization.");
+      }
+      entry.finalizerStarted = true;
+      entry.phase = "finalizing";
+      this.#touch(entry);
+      await this.#providerRegistry.finalizeExecution(ticket, {
+        policy,
+        runtimeResult,
+        cancellationSignal: controller.signal,
+        onEvent: observe,
+      });
       entry.state = "completed";
       entry.phase = "awaiting-validation";
       entry.retryable = false;
@@ -762,6 +775,13 @@ export class AgentRuntimeCoordinator {
     const entry = this.#executionSessions.get(executionKey(identity));
     if (!entry || !LIVE_STATES.has(entry.state)) {
       return { ok: true, stopped: false, session: publicExecutionSession(entry, entry?.driver) };
+    }
+    if (entry.finalizerStarted === true) {
+      failAgentRuntime(
+        "AGENT_FINALIZER_IN_PROGRESS",
+        "Bridge 正在固定化 Candidate，当前不能与取消交错。",
+        { status: 409 },
+      );
     }
     entry.cancelState = "requested";
     entry.state = "cancelling";
