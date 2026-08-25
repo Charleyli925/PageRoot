@@ -30,7 +30,15 @@ export class AgentBridgeService {
     });
   }
 
-  availability() { return this.#coordinator.availability({ driver: LEGACY_DRIVER }); }
+  assertSelection(selection, purpose) {
+    return this.#coordinator.assertSelection(selection, purpose);
+  }
+
+  availability(input = {}) {
+    return this.#coordinator.availability(
+      input.selection || input.driver ? input : { driver: LEGACY_DRIVER },
+    );
+  }
 
   preflight(input) { return this.#coordinator.preflight(input); }
 
@@ -42,7 +50,12 @@ export class AgentBridgeService {
 
   status(input) { return this.#coordinator.executionStatus(input); }
 
-  interrupted(input) { return this.#coordinator.interrupted(input, { driver: LEGACY_DRIVER }); }
+  interrupted(input, options = {}) {
+    return this.#coordinator.interrupted(
+      input,
+      options.selection || options.driver ? options : { driver: LEGACY_DRIVER },
+    );
+  }
 
   cancel(input) { return this.#coordinator.cancelExecution(input); }
 

@@ -14,6 +14,18 @@ verified compatible fix.
 
 ## Reviewed fixes
 
+The 2026-08-26 Codex ACP integration exact-pins
+`@agentclientprotocol/codex-acp` 1.6.2, `@openai/codex` 0.148.0 and the shared
+`@agentclientprotocol/sdk` 1.3.0. The adapter override prevents its compatible
+version ranges from selecting a different inner Codex or ACP SDK. A checked-in
+runtime lock records npm integrity, upstream adapter commit, licenses, adapter
+and binary hashes, and fingerprints produced by running both App Server schema
+generators with that exact Codex. `npm run verify:codex-runtime` regenerates the
+Schema trees and fails on dependency, binary or Schema drift. The supported
+packaged target remains macOS arm64; other optional Codex platform packages are
+lockfile inputs for source testing and are not silently presented as supported
+Stemmio binaries.
+
 The 2026-08-21 Qoder ACP Agent Bridge pins the official
 `@agentclientprotocol/sdk` 1.3.0 and its direct `zod` 4.4.3 peer as production
 dependencies. Electron Builder copies exactly those two packages into the

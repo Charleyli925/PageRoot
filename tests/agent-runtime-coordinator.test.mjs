@@ -23,6 +23,28 @@ function registry({ run, verifyTicket } = {}) {
     discussion: true,
     modelCatalog: true,
   });
+  const selection = Object.freeze({
+    providerId: "synthetic-provider",
+    runtimeId: "synthetic-runtime",
+    requestedModelId: null,
+    resolvedModelId: null,
+    reasoning: Object.freeze({
+      requested: null,
+      applied: null,
+      resolution: "provider-default",
+    }),
+  });
+  const prepared = (driver) => Object.freeze({
+    ...(driver ? { driver } : {}),
+    providerId: "synthetic-provider",
+    runtimeId: "synthetic-runtime",
+    securityProfile: "client-mediated",
+    installation: Object.freeze({ generation: 1 }),
+    installationDigest: `sha256:${"a".repeat(64)}`,
+    capabilities,
+    evidence: Object.freeze({ version: "1.0.0", modelCount: 1, models: [] }),
+    selection,
+  });
   return {
     resolveDriver(driver) {
       if (driver !== "synthetic-driver") throw Object.assign(new Error("unsupported"), {
@@ -30,17 +52,28 @@ function registry({ run, verifyTicket } = {}) {
       });
       return {};
     },
+    selectionFromDriver(driver) {
+      this.resolveDriver(driver);
+      return selection;
+    },
+    resolveSelection(received) {
+      if (received?.providerId !== selection.providerId
+        || received?.runtimeId !== selection.runtimeId) {
+        throw Object.assign(new Error("unsupported"), { code: "AGENT_PROVIDER_UNSUPPORTED" });
+      }
+      return {};
+    },
+    assertCapabilityForSelection(received) {
+      this.resolveSelection(received);
+      return true;
+    },
+    availabilityForSelection: async () => ({ status: "ready" }),
+    preflightForSelection: async (received) => {
+      if (received?.providerId !== selection.providerId) throw new Error("selection mismatch");
+      return prepared(null);
+    },
     availability: async () => ({ status: "ready" }),
-    preflight: async ({ driver }) => Object.freeze({
-      driver,
-      providerId: "synthetic-provider",
-      runtimeId: "synthetic-runtime",
-      securityProfile: "client-mediated",
-      installation: Object.freeze({ generation: 1 }),
-      installationDigest: `sha256:${"a".repeat(64)}`,
-      capabilities,
-      evidence: Object.freeze({ version: "1.0.0", modelCount: 1, models: [] }),
-    }),
+    preflight: async ({ driver }) => prepared(driver),
     verifyTicket: verifyTicket || (async (ticket) => ticket),
     loadExecutionPolicy: async (_ticket, input) => ({
       ...input,
@@ -52,6 +85,8 @@ function registry({ run, verifyTicket } = {}) {
     failureMessage: (_ticket, code) => `failure:${code}`,
     failureMessageForDriver: (_driver, code) => `failure:${code}`,
     preflightFailureMessageForDriver: (_driver, code) => `preflight:${code}`,
+    failureMessageForSelection: (_selection, code) => `failure:${code}`,
+    preflightFailureMessageForSelection: (_selection, code) => `preflight:${code}`,
     createTurnRunner: () => async () => ({ stopReason: "end_turn" }),
   };
 }

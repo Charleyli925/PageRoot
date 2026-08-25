@@ -68,7 +68,7 @@ test("malformed policy, reasoning and cross-provider model ids fail closed", () 
   }
 });
 
-test("unknown provider history is readable but cannot resolve to an installed start driver", () => {
+test("delivery codecs preserve unknown selections while legacy projection stays Qoder-only", () => {
   const delivery = normalizeAgentDelivery({
     mode: "managed-agent",
     selection: {
@@ -84,9 +84,7 @@ test("unknown provider history is readable but cannot resolve to an installed st
   assert.throws(() => legacyDriverForAgentDelivery(delivery), {
     code: "AGENT_PROVIDER_UNSUPPORTED",
   });
-  assert.throws(() => normalizeNewAgentDelivery(delivery), {
-    code: "AGENT_PROVIDER_UNSUPPORTED",
-  });
+  assert.deepEqual(normalizeNewAgentDelivery(delivery), delivery);
 });
 
 test("new writers reject legacy delivery while its historical projection stays readable", () => {

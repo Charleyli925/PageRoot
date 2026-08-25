@@ -14,6 +14,8 @@ Primary runtime dependencies include:
 | @noble/hashes | MIT |
 | @phosphor-icons/react | MIT |
 | @agentclientprotocol/sdk | Apache-2.0 |
+| @agentclientprotocol/codex-acp | Apache-2.0 |
+| OpenAI Codex CLI | Apache-2.0 |
 | Zod | MIT |
 
 Build and test dependencies include TypeScript, Vite, Playwright, ESLint, Tailwind CSS, electron-builder, Wrangler and their transitive dependencies under their respective licenses. The packaged Electron application includes Electron and Chromium license material. Some transitive build-only packages use Apache-2.0, BSD, ISC, MPL-2.0, LGPL, CC-BY or other OSI-compatible terms.

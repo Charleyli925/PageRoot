@@ -145,7 +145,5 @@ export function legacyDriverForAgentDelivery(value) {
 // cancellable, but a build may create a managed Request only for a binding it
 // can actually dispatch now.
 export function normalizeNewAgentDelivery(value) {
-  const delivery = normalizeAgentDelivery(value, { allowLegacy: false });
-  if (delivery.mode === MANAGED_AGENT_MODE) legacyDriverForAgentDelivery(delivery);
-  return delivery;
+  return normalizeAgentDelivery(value, { allowLegacy: false });
 }
