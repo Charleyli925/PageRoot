@@ -50,6 +50,16 @@ in `qoder-acp-client.mjs`; their PR2 extraction is not part of this decision.
 Run/Discussion coordination and durable ownership also stay unchanged; their
 PR3 convergence is not part of this decision.
 
+The immediately following PR2 completes that planned extraction without
+changing this decision: `scripts/agent/policies/` now owns the one branded
+execution/discussion policy family, and `scripts/agent/hosts/` owns the two
+permission-separated Host Ports. `qoder-acp-client.mjs` retains the legacy
+exports as compatibility adapters and owns the legacy error name/code/copy
+mapping as well as transport/provider behavior.
+The shared Host/Policy sources contain no provider or transport identifier, so
+a runtime can invoke only the sealed Host Port and cannot select paths,
+commands, completion evidence or mutation authority.
+
 ## Compatibility and security
 
 `qoder-acp` is a versioned compatibility adapter for the existing renderer,
@@ -83,6 +93,11 @@ is intentionally kept at its behavioral owners:
 - `desktop-preload-ipc`: no Agent executable, spawn, command or path capability;
 - `qoder-acp-spike-client`: the existing restricted host, completion and
   process-cleanup boundary.
+
+The PR2 contract supplements that golden baseline with legacy behavior mapping
+and shared-brand assertions, a source-literal ownership gate, discussion read-only
+denial, execution single-output/fixed-finalizer/completion proof, and
+cancel-before-late-mutation coverage.
 
 These tests use synthetic fixtures only. A real installed Qoder account remains
 optional developer evidence and is not a deterministic gate.

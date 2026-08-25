@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
@@ -11,6 +12,20 @@ import {
   classifyQoderRunFailure,
   normalizedQoderPreflightError,
 } from "../scripts/agent/providers/qoder-provider.mjs";
+import {
+  acpDriverProfile,
+  createRestrictedDiscussionHost,
+  createRestrictedQoderAcpHost,
+  loadQoderAcpDiscussionPolicy,
+  loadQoderAcpTaskPolicy,
+} from "../scripts/qoder-acp-client.mjs";
+import { createDiscussionHost } from "../scripts/agent/hosts/discussion-host.mjs";
+import { createExecutionHost } from "../scripts/agent/hosts/execution-host.mjs";
+import { loadDiscussionPolicy } from "../scripts/agent/policies/discussion-policy.mjs";
+import {
+  AGENT_POLICY_BRAND,
+  loadExecutionPolicy,
+} from "../scripts/agent/policies/execution-policy.mjs";
 import { createSyntheticQoderProviderFixture } from "./fixtures/agent-provider/qoder-provider.mjs";
 
 const IDENTITY = Object.freeze({
@@ -31,6 +46,64 @@ function fixtureRegistry(options) {
     }),
   };
 }
+
+test("shared policy brand stays neutral while the legacy facade preserves errors", async () => {
+  assert.notEqual(loadQoderAcpTaskPolicy, loadExecutionPolicy);
+  assert.notEqual(loadQoderAcpDiscussionPolicy, loadDiscussionPolicy);
+  assert.notEqual(createRestrictedQoderAcpHost, createExecutionHost);
+  assert.notEqual(createRestrictedDiscussionHost, createDiscussionHost);
+  assert.equal(typeof AGENT_POLICY_BRAND, "symbol");
+
+  await assert.rejects(
+    loadExecutionPolicy({ unsupported: true }),
+    (error) => error?.name === "AgentPolicyError"
+      && error?.code === "AGENT_POLICY_OPTIONS_INVALID"
+      && error?.message.includes("Agent execution policy options"),
+  );
+  await assert.rejects(
+    loadQoderAcpTaskPolicy({ unsupported: true }),
+    (error) => error?.name === "QoderAcpPolicyError"
+      && error?.code === "ACP_POLICY_OPTIONS_INVALID"
+      && error?.message.includes("ACP task policy options"),
+  );
+
+  const policy = Object.freeze({
+    [AGENT_POLICY_BRAND]: true,
+    mode: "discussion",
+    requestRoot: "/synthetic/discussion",
+    readableFiles: Object.freeze([]),
+  });
+  assert.equal(acpDriverProfile(policy).mode, "discussion");
+
+  const genericHost = createDiscussionHost(policy);
+  genericHost.bindSessionId("generic-session");
+  await assert.rejects(
+    genericHost.readTextFile({ sessionId: "generic-session", path: "/synthetic/file.html" }),
+    (error) => error?.name === "AgentPolicyError"
+      && error?.code === "AGENT_READ_NOT_AUTHORIZED"
+      && error?.message === "The Agent requested a file outside the discussion snapshot.",
+  );
+
+  const legacyHost = createRestrictedDiscussionHost(policy);
+  legacyHost.bindSessionId("legacy-session");
+  await assert.rejects(
+    legacyHost.readTextFile({ sessionId: "legacy-session", path: "/synthetic/file.html" }),
+    (error) => error?.name === "QoderAcpPolicyError"
+      && error?.code === "ACP_READ_NOT_AUTHORIZED"
+      && error?.message === "Qoder requested a file outside the discussion snapshot.",
+  );
+});
+
+test("shared host and policy sources contain no provider or transport ownership literals", async () => {
+  const sources = await Promise.all([
+    "../scripts/agent/policies/discussion-policy.mjs",
+    "../scripts/agent/policies/execution-policy.mjs",
+    "../scripts/agent/hosts/discussion-host.mjs",
+    "../scripts/agent/hosts/execution-host.mjs",
+  ].map((relativePath) => readFile(new URL(relativePath, import.meta.url), "utf8")));
+  const forbidden = /qoder|codex|acp|app-server/iu;
+  for (const source of sources) assert.doesNotMatch(source, forbidden);
+});
 
 test("legacy qoder-acp dispatch resolves once to the qoder provider and ACP runtime", async () => {
   const { fixture, registry } = fixtureRegistry();

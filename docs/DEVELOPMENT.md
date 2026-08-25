@@ -52,8 +52,10 @@ The packaged Bridge owns the product session through
 `scripts/agent-bridge-service.mjs`. Its sole provider registry maps legacy
 `qoder-acp` to `scripts/agent/providers/qoder-provider.mjs` and the `acp`
 runtime in `scripts/agent/runtimes/acp-runtime.mjs`; unknown provider/runtime
-IDs fail closed. The existing restricted host/process implementation remains in
-`scripts/qoder-acp-client.mjs`. The
+IDs fail closed. The restricted Host Ports now live in `scripts/agent/hosts/`,
+while frozen execution/discussion policy lives in `scripts/agent/policies/`.
+`scripts/qoder-acp-client.mjs` retains the legacy transport façade and exact
+compatibility exports without a second policy brand. The
 renderer can request only `POST /agent/preflight` and `POST /agent/start` with
 registered task identity, the fixed `qoder-acp` driver, explicit
 `trusted-local-agent-v1` consent and an opaque short-lived ticket. It cannot

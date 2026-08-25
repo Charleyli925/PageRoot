@@ -4,55 +4,35 @@ import {
   lstat,
   open,
   realpath,
-  rename,
-  unlink,
 } from "node:fs/promises";
 import { spawn } from "node:child_process";
-import { randomUUID } from "node:crypto";
 import { Readable, Transform, Writable } from "node:stream";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
 import * as acp from "@agentclientprotocol/sdk";
 
 import { sha256 } from "./lifecycle-core.mjs";
+import {
+  AGENT_POLICY_BRAND,
+  MAX_HTML_BYTES,
+  MAX_PROMPT_BYTES,
+  assertAbsolutePath,
+  assertObject,
+  loadExecutionPolicy,
+  readVerifiedRegularFile,
+} from "./agent/policies/execution-policy.mjs";
+import { loadDiscussionPolicy } from "./agent/policies/discussion-policy.mjs";
+import {
+  createExecutionHost,
+  terminateManagedProcess,
+} from "./agent/hosts/execution-host.mjs";
+import { createDiscussionHost } from "./agent/hosts/discussion-host.mjs";
 
-const MAX_HTML_BYTES = 20 * 1024 * 1024;
-const DEFAULT_TERMINAL_OUTPUT_BYTES = 1024 * 1024;
-const MAX_TERMINAL_OUTPUT_BYTES = 4 * 1024 * 1024;
 const DEFAULT_STARTUP_TIMEOUT_MS = 15_000;
 const DEFAULT_TURN_TIMEOUT_MS = 10 * 60_000;
-const MAX_PROMPT_BYTES = 256 * 1024;
 const MAX_SESSION_UPDATES = 512;
-const PROCESS_EXIT_GRACE_MS = 2_000;
 const PROCESS_PROTOCOL_DRAIN_MS = 250;
 const MAX_ACP_FRAME_BYTES = MAX_HTML_BYTES + (2 * 1024 * 1024);
-const POLICY_BRAND = Symbol("pageroot-qoder-acp-policy");
-const FINALIZER_PATH = fileURLToPath(new URL("./finalize-attempt.mjs", import.meta.url));
-const EXPECTED_READ_ORDER = Object.freeze([
-  "PROMPT.md",
-  "input/AI_RULES.md",
-  "change-request.json",
-  "input/PROJECT.md",
-  "input/base/index.html",
-  "input/annotations/records.json",
-]);
-const EXPECTED_READ_ROLES = Object.freeze(new Map([
-  ["PROMPT.md", "prompt"],
-  ["input/AI_RULES.md", "policy"],
-  ["change-request.json", "change-request"],
-  ["input/PROJECT.md", "project-rules"],
-  ["input/base/index.html", "base-html"],
-  ["input/annotations/records.json", "annotations"],
-]));
-const EXPECTED_MEDIA_TYPES = Object.freeze(new Map([
-  ["PROMPT.md", "text/markdown"],
-  ["input/AI_RULES.md", "text/markdown"],
-  ["change-request.json", "application/json"],
-  ["input/PROJECT.md", "text/markdown"],
-  ["input/base/index.html", "text/html"],
-  ["input/annotations/records.json", "application/json"],
-]));
 const SAFE_QODER_ENVIRONMENT_NAMES = Object.freeze(new Set([
   "HOME",
   "LANG",
@@ -69,10 +49,6 @@ const SAFE_QODER_ENVIRONMENT_NAMES = Object.freeze(new Set([
   "XDG_DATA_HOME",
 ]));
 const processClosePromises = new WeakMap();
-const SAFE_TASK_ID = /^[A-Za-z0-9_-]{1,160}$/u;
-const PROJECT_ID = /^project_[a-f0-9]{16,64}$/u;
-const DOCUMENT_ID = /^doc_[a-f0-9]{16,64}$/u;
-const SHA256 = /^sha256:[a-f0-9]{64}$/u;
 const VERIFIED_ESM_LOADER_SOURCE = `
 import { readFileSync } from "node:fs";
 import { builtinModules, createRequire } from "node:module";
@@ -124,6 +100,17 @@ await module.link(linkExternal);
 await module.evaluate();
 `;
 
+const LEGACY_COMMON_MESSAGES = Object.freeze({
+  RUNTIME_AUTHORITY_DRIFT: "PageRoot no longer authorizes mutations for this ACP Attempt.",
+  INPUT_MANIFEST_SHAPE_MISMATCH:
+    "The Qoder ACP driver only accepts PageRoot's exact current frozen input manifest shape.",
+  OUTPUT_PREEXISTS: "The Qoder ACP driver requires a fresh Attempt output path.",
+  COMPLETION_PREEXISTS: "The Qoder ACP driver requires a fresh Attempt completion path.",
+  READ_NOT_AUTHORIZED_EXECUTION: "Qoder requested a file outside the frozen read set.",
+  READ_NOT_AUTHORIZED_DISCUSSION: "Qoder requested a file outside the discussion snapshot.",
+  WRITE_NOT_AUTHORIZED: "Qoder may only write the exact Candidate output path.",
+});
+
 function policyError(code, message, details = {}) {
   const error = new Error(message);
   error.name = "QoderAcpPolicyError";
@@ -132,50 +119,99 @@ function policyError(code, message, details = {}) {
   return error;
 }
 
-function assertObject(value, label) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError(`${label} must be an object.`);
+function legacyCommonMessage(cause, mode) {
+  const suffix = String(cause.code || "").replace(/^AGENT_/u, "");
+  if (suffix === "READ_NOT_AUTHORIZED") {
+    return mode === "discussion"
+      ? LEGACY_COMMON_MESSAGES.READ_NOT_AUTHORIZED_DISCUSSION
+      : LEGACY_COMMON_MESSAGES.READ_NOT_AUTHORIZED_EXECUTION;
   }
-  return value;
+  const exact = LEGACY_COMMON_MESSAGES[suffix];
+  if (exact) return exact;
+  return String(cause.message || "")
+    .replace(/^Agent execution policy options/u, "ACP task policy options")
+    .replaceAll("The Agent", "The ACP")
+    .replaceAll("Agent line", "ACP line")
+    .replaceAll("Agent limit", "ACP limit")
+    .replaceAll("Agent session", "ACP session")
+    .replaceAll("Agent discussion", "ACP discussion")
+    .replaceAll("Agent read", "ACP read")
+    .replaceAll("Agent turn", "ACP turn");
 }
 
-function assertNonEmptyString(value, label) {
-  if (typeof value !== "string" || !value.trim()) {
-    throw new TypeError(`${label} must be a non-empty string.`);
+function adaptLegacyCommonError(cause, mode) {
+  if (!(cause instanceof Error)) return cause;
+  if (cause.name === "AgentPolicyError" && /^AGENT_[A-Z0-9_]+$/u.test(cause.code)) {
+    const suffix = cause.code.slice("AGENT_".length);
+    const message = legacyCommonMessage(cause, mode);
+    cause.name = "QoderAcpPolicyError";
+    cause.code = `ACP_${suffix}`;
+    cause.message = message;
+    return cause;
   }
-  return value;
+  if (cause instanceof TypeError) {
+    cause.message = String(cause.message)
+      .replace(/^Agent execution policy options/u, "ACP task policy options")
+      .replace(/^Agent discussion policy options/u, "ACP discussion policy options")
+      .replace(
+        /^Restricted execution host requires a verified PageRoot task policy\.$/u,
+        "Restricted ACP host requires a verified PageRoot task policy.",
+      )
+      .replace(
+        /^Restricted execution host dependencies are invalid\.$/u,
+        "Restricted ACP host dependencies are invalid.",
+      )
+      .replaceAll("agent/read_text_file path", "fs/read_text_file path")
+      .replaceAll("agent/write_text_file path", "fs/write_text_file path");
+  }
+  return cause;
 }
 
-function assertAbsolutePath(value, label) {
-  const candidate = assertNonEmptyString(value, label);
-  if (!path.isAbsolute(candidate)) {
-    throw new TypeError(`${label} must be an absolute path.`);
+async function loadLegacyPolicy(loader, options, mode) {
+  try {
+    return await loader(options);
+  } catch (cause) {
+    throw adaptLegacyCommonError(cause, mode);
   }
-  return path.resolve(candidate);
 }
 
-function inside(root, candidate, { allowRoot = false } = {}) {
-  const relative = path.relative(root, candidate);
-  return (allowRoot && relative === "")
-    || Boolean(relative && !relative.startsWith("..") && !path.isAbsolute(relative));
+function adaptLegacyHost(host, mode) {
+  return Object.fromEntries(Object.entries(host).map(([name, value]) => {
+    if (typeof value !== "function") return [name, value];
+    return [name, function legacyHostMethod(...args) {
+      try {
+        const result = value.apply(host, args);
+        return result && typeof result.then === "function"
+          ? result.catch((cause) => { throw adaptLegacyCommonError(cause, mode); })
+          : result;
+      } catch (cause) {
+        throw adaptLegacyCommonError(cause, mode);
+      }
+    }];
+  }));
 }
 
-async function assertNoSymlinkAncestors(root, candidate, label) {
-  const relative = path.relative(root, candidate);
-  if (relative.startsWith("..") || path.isAbsolute(relative)) {
-    throw policyError("ACP_PATH_OUTSIDE_REQUEST", `${label} escapes the Request root.`);
+export function loadQoderAcpTaskPolicy(options) {
+  return loadLegacyPolicy(loadExecutionPolicy, options, "execution");
+}
+
+export function loadQoderAcpDiscussionPolicy(options) {
+  return loadLegacyPolicy(loadDiscussionPolicy, options, "discussion");
+}
+
+export function createRestrictedQoderAcpHost(policy, dependencies) {
+  try {
+    return adaptLegacyHost(createExecutionHost(policy, dependencies), "execution");
+  } catch (cause) {
+    throw adaptLegacyCommonError(cause, "execution");
   }
-  const parts = relative ? relative.split(path.sep) : [];
-  let current = root;
-  for (const part of parts.slice(0, -1)) {
-    current = path.join(current, part);
-    const information = await lstat(current);
-    if (information.isSymbolicLink() || !information.isDirectory()) {
-      throw policyError(
-        "ACP_UNSAFE_ANCESTOR",
-        `${label} has a non-directory or symlink ancestor.`,
-      );
-    }
+}
+
+export function createRestrictedDiscussionHost(policy, dependencies) {
+  try {
+    return adaptLegacyHost(createDiscussionHost(policy, dependencies), "discussion");
+  } catch (cause) {
+    throw adaptLegacyCommonError(cause, "discussion");
   }
 }
 
@@ -270,713 +306,6 @@ async function openVerifiedAgentExecutable(executable, expectedExecutable) {
   }
 }
 
-function assertIdentity(actual, expected, label) {
-  if (actual !== expected) {
-    throw policyError(
-      "ACP_TASK_IDENTITY_MISMATCH",
-      `${label} does not match the PageRoot task identity.`,
-    );
-  }
-}
-
-async function verifiedRegularFile(filePath, root, label) {
-  const resolved = path.resolve(filePath);
-  if (!inside(root, resolved)) {
-    throw policyError("ACP_PATH_OUTSIDE_REQUEST", `${label} escapes the Request root.`);
-  }
-  await assertNoSymlinkAncestors(root, resolved, label);
-  const information = await lstat(resolved);
-  if (information.isSymbolicLink() || !information.isFile()) {
-    throw policyError("ACP_UNSAFE_FILE", `${label} must be a regular, non-symlink file.`);
-  }
-  const canonical = await realpath(resolved);
-  if (!inside(root, canonical)) {
-    throw policyError("ACP_REALPATH_OUTSIDE_REQUEST", `${label} resolves outside the Request root.`);
-  }
-  return { path: resolved, canonical, information };
-}
-
-async function readVerifiedRegularFile(filePath, root, label) {
-  const verified = await verifiedRegularFile(filePath, root, label);
-  const handle = await open(
-    verified.path,
-    fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW || 0),
-  );
-  try {
-    const before = await handle.stat();
-    if (!before.isFile() || before.nlink !== 1 || !sameFileIdentity(before, verified.information)) {
-      throw policyError("ACP_FILE_CHANGED", `${label} changed while it was being opened.`);
-    }
-    const bytes = await handle.readFile();
-    const after = await handle.stat();
-    if (!sameFileIdentity(before, after) || bytes.byteLength !== after.size) {
-      throw policyError("ACP_FILE_CHANGED", `${label} changed while it was being read.`);
-    }
-    return { ...verified, information: after, bytes };
-  } finally {
-    await handle.close();
-  }
-}
-
-async function verifiedOutputParent(outputPath, root) {
-  const parentPath = path.dirname(outputPath);
-  if (!inside(root, outputPath) || !inside(root, parentPath, { allowRoot: true })) {
-    throw policyError(
-      "ACP_OUTPUT_OUTSIDE_REQUEST",
-      "The Candidate output path escapes the Request root.",
-    );
-  }
-  await assertNoSymlinkAncestors(root, outputPath, "Candidate output");
-  const information = await lstat(parentPath);
-  if (information.isSymbolicLink() || !information.isDirectory()) {
-    throw policyError(
-      "ACP_UNSAFE_OUTPUT_DIRECTORY",
-      "The Candidate output directory must be a real directory.",
-    );
-  }
-  const canonical = await realpath(parentPath);
-  if (!inside(root, canonical, { allowRoot: true })) {
-    throw policyError(
-      "ACP_OUTPUT_REALPATH_OUTSIDE_REQUEST",
-      "The Candidate output directory resolves outside the Request root.",
-    );
-  }
-}
-
-async function canonicalFuturePath(value, label) {
-  const requested = assertAbsolutePath(value, label);
-  const canonicalParent = await realpath(path.dirname(requested));
-  return path.join(canonicalParent, path.basename(requested));
-}
-
-function expectedManifestFile(manifest, relativePath) {
-  const matches = manifest.files.filter((entry) => entry?.path === relativePath);
-  if (matches.length !== 1) {
-    throw policyError(
-      "ACP_MANIFEST_ENTRY_INVALID",
-      `The frozen read path ${JSON.stringify(relativePath)} has no unique manifest entry.`,
-    );
-  }
-  return matches[0];
-}
-
-async function verifyFrozenEntry(requestRoot, manifest, relativePath) {
-  if (
-    typeof relativePath !== "string"
-    || !relativePath
-    || path.isAbsolute(relativePath)
-    || relativePath.split(/[\\/]/u).some((part) => !part || part === "." || part === "..")
-  ) {
-    throw policyError(
-      "ACP_MANIFEST_PATH_INVALID",
-      "The frozen input manifest contains an unsafe read path.",
-    );
-  }
-  const entry = assertObject(expectedManifestFile(manifest, relativePath), "manifest file entry");
-  const file = await readVerifiedRegularFile(
-    path.join(requestRoot, ...relativePath.split("/")),
-    requestRoot,
-    `Frozen input ${relativePath}`,
-  );
-  const { bytes } = file;
-  if (
-    entry.byteLength !== bytes.byteLength
-    || entry.sha256 !== sha256(bytes)
-  ) {
-    throw policyError(
-      "ACP_FROZEN_INPUT_DRIFT",
-      `Frozen input ${JSON.stringify(relativePath)} no longer matches its manifest.`,
-    );
-  }
-  return Object.freeze({
-    path: file.path,
-    relativePath,
-    role: String(entry.role || "unknown"),
-    byteLength: bytes.byteLength,
-    sha256: entry.sha256,
-  });
-}
-
-function projectRootForRequest(requestRoot, requestId) {
-  const requestsRoot = path.dirname(requestRoot);
-  const controlRoot = path.dirname(requestsRoot);
-  if (
-    path.basename(requestRoot) !== requestId
-    || path.basename(requestsRoot) !== "requests"
-    || path.basename(controlRoot) !== ".pageroot"
-  ) {
-    throw policyError(
-      "ACP_REQUEST_LAYOUT_INVALID",
-      "The Request root is not the current PageRoot .pageroot/requests layout.",
-    );
-  }
-  return path.dirname(controlRoot);
-}
-
-async function officialFinalizer({ requestRoot, requestId, attemptId }) {
-  const projectRoot = projectRootForRequest(requestRoot, requestId);
-  const expectedCommand = await realpath(process.execPath);
-  const expectedFinalizerPath = await realpath(FINALIZER_PATH);
-  const expectedArgs = [
-    expectedFinalizerPath,
-    "--project-root",
-    projectRoot,
-    "--request-id",
-    requestId,
-    "--attempt-id",
-    attemptId,
-  ];
-  return Object.freeze({
-    command: expectedCommand,
-    args: Object.freeze(expectedArgs),
-    env: Object.freeze(process.versions.electron
-      ? { ELECTRON_RUN_AS_NODE: "1" }
-      : {}),
-    cwd: requestRoot,
-  });
-}
-
-async function assertRuntimeProcessingAuthority(policy) {
-  const runtimeAuthority = await verifiedJsonFile(
-    policy.runtimePath,
-    policy.controlRoot,
-    "Runtime authority",
-  );
-  const runtime = runtimeAuthority.value;
-  const activeRequest = runtime.activeRequest;
-  if (
-    runtime.schemaVersion !== "4.0.0"
-    || runtime.projectId !== policy.projectId
-    || runtime.documentId !== policy.documentId
-    || runtime.activeCandidateId !== null
-    || !activeRequest
-    || activeRequest.requestId !== policy.requestId
-    || activeRequest.attemptId !== policy.attemptId
-    || activeRequest.status !== "processing"
-    || activeRequest.candidateId !== null
-    || activeRequest.inputManifestSha256 !== policy.inputManifestSha256
-    || activeRequest.candidateOutputSha256 !== null
-    || activeRequest.candidateRecordSha256 !== null
-  ) {
-    throw policyError(
-      "ACP_RUNTIME_AUTHORITY_DRIFT",
-      "PageRoot no longer authorizes mutations for this ACP Attempt.",
-    );
-  }
-}
-
-async function verifiedJsonFile(filePath, root, label) {
-  const file = await readVerifiedRegularFile(filePath, root, label);
-  try {
-    return {
-      file,
-      value: assertObject(JSON.parse(file.bytes.toString("utf8")), label),
-    };
-  } catch (cause) {
-    if (cause?.name === "QoderAcpPolicyError") throw cause;
-    throw policyError("ACP_AUTHORITY_INVALID", `${label} is not valid JSON.`);
-  }
-}
-
-export async function loadQoderAcpTaskPolicy(options) {
-  const value = assertObject(options, "ACP task policy options");
-  const allowedOptionNames = new Set([
-    "requestPath",
-    "promptPath",
-    "outputPath",
-    "completionPath",
-  ]);
-  const unexpectedOption = Object.keys(value).find((name) => !allowedOptionNames.has(name));
-  if (unexpectedOption) {
-    throw policyError(
-      "ACP_POLICY_OPTIONS_INVALID",
-      `ACP task policy options contain unsupported field ${JSON.stringify(unexpectedOption)}.`,
-    );
-  }
-  const {
-    requestPath,
-    promptPath,
-    outputPath,
-    completionPath,
-  } = value;
-  const requestedRoot = assertAbsolutePath(requestPath, "requestPath");
-  const requestInformation = await lstat(requestedRoot);
-  if (requestInformation.isSymbolicLink() || !requestInformation.isDirectory()) {
-    throw policyError("ACP_UNSAFE_REQUEST_ROOT", "The Request root must be a real directory.");
-  }
-  const requestRoot = await realpath(requestedRoot);
-  const requestId = path.basename(requestRoot);
-  if (!SAFE_TASK_ID.test(requestId)) {
-    throw policyError("ACP_REQUEST_ID_INVALID", "The Request root has an invalid Request identity.");
-  }
-  const projectRoot = projectRootForRequest(requestRoot, requestId);
-  const controlRoot = path.join(projectRoot, ".pageroot");
-  const requestAuthority = await verifiedJsonFile(
-    path.join(requestRoot, "request.json"),
-    requestRoot,
-    "Request authority",
-  );
-  const requestRecord = requestAuthority.value;
-  const attemptId = String(requestRecord.attemptId || "");
-  const projectId = String(requestRecord.projectId || "");
-  const documentId = String(requestRecord.documentId || "");
-  const inputManifestSha256 = String(requestRecord.inputManifestSha256 || "");
-  const expectedOutputRelativePath = `requests/${requestId}/attempts/${attemptId}/output/candidate.html`;
-  if (
-    requestRecord.schemaVersion !== "4.0.0"
-    || requestRecord.requestId !== requestId
-    || !SAFE_TASK_ID.test(attemptId)
-    || !PROJECT_ID.test(projectId)
-    || !DOCUMENT_ID.test(documentId)
-    || !SHA256.test(inputManifestSha256)
-    || requestRecord.status !== "processing"
-    || requestRecord.inputManifestRelativePath !== `requests/${requestId}/input-manifest.json`
-    || requestRecord.promptRelativePath !== `requests/${requestId}/PROMPT.md`
-    || requestRecord.outputRelativePath !== expectedOutputRelativePath
-  ) {
-    throw policyError(
-      "ACP_REQUEST_AUTHORITY_MISMATCH",
-      "request.json does not describe one current frozen PageRoot Attempt.",
-    );
-  }
-  const runtimeAuthority = await verifiedJsonFile(
-    path.join(controlRoot, "runtime-state.json"),
-    controlRoot,
-    "Runtime authority",
-  );
-  const runtime = runtimeAuthority.value;
-  const activeRequest = runtime.activeRequest;
-  if (
-    runtime.schemaVersion !== "4.0.0"
-    || runtime.projectId !== projectId
-    || runtime.documentId !== documentId
-    || runtime.activeCandidateId !== null
-    || !activeRequest
-    || activeRequest.requestId !== requestId
-    || activeRequest.attemptId !== attemptId
-    || activeRequest.status !== "processing"
-    || activeRequest.candidateId !== null
-    || activeRequest.inputManifestSha256 !== inputManifestSha256
-    || activeRequest.candidateOutputSha256 !== null
-    || activeRequest.candidateRecordSha256 !== null
-  ) {
-    throw policyError(
-      "ACP_RUNTIME_AUTHORITY_MISMATCH",
-      "The external runtime authority does not seal this active PageRoot Attempt.",
-    );
-  }
-  const manifestPath = path.join(requestRoot, "input-manifest.json");
-  const manifestFile = await readVerifiedRegularFile(
-    manifestPath,
-    requestRoot,
-    "Frozen input manifest",
-  );
-  const manifestBytes = manifestFile.bytes;
-  if (
-    typeof inputManifestSha256 !== "string"
-    || inputManifestSha256 !== sha256(manifestBytes)
-  ) {
-    throw policyError(
-      "ACP_INPUT_MANIFEST_HASH_MISMATCH",
-      "The frozen input manifest does not match PageRoot's external runtime authority.",
-    );
-  }
-  let manifest;
-  try {
-    manifest = JSON.parse(manifestBytes.toString("utf8"));
-  } catch {
-    throw policyError(
-      "ACP_INPUT_MANIFEST_INVALID",
-      "The frozen input manifest is not valid JSON.",
-    );
-  }
-  assertObject(manifest, "input manifest");
-  if (manifest.frozen !== true || !Array.isArray(manifest.readOrder) || !Array.isArray(manifest.files)) {
-    throw policyError(
-      "ACP_INPUT_MANIFEST_INVALID",
-      "The input manifest does not describe a frozen ordered input set.",
-    );
-  }
-  assertIdentity(manifest.projectId, projectId, "projectId");
-  assertIdentity(manifest.documentId, documentId, "documentId");
-  assertIdentity(manifest.requestId, requestId, "requestId");
-  assertIdentity(manifest.attemptId, attemptId, "attemptId");
-  if (
-    manifest.readOrder.length !== EXPECTED_READ_ORDER.length
-    || manifest.readOrder.some((value, index) => value !== EXPECTED_READ_ORDER[index])
-    || manifest.files.length !== EXPECTED_READ_ORDER.length
-  ) {
-    throw policyError(
-      "ACP_INPUT_MANIFEST_SHAPE_MISMATCH",
-      "The Qoder ACP driver only accepts PageRoot's exact current frozen input manifest shape.",
-    );
-  }
-
-  const readableFiles = new Map();
-  readableFiles.set(manifestFile.path, Object.freeze({
-    path: manifestFile.path,
-    relativePath: "input-manifest.json",
-    role: "manifest",
-    byteLength: manifestBytes.byteLength,
-    sha256: sha256(manifestBytes),
-  }));
-  for (const relativePath of manifest.readOrder) {
-    const entry = await verifyFrozenEntry(requestRoot, manifest, relativePath);
-    if (
-      entry.role !== EXPECTED_READ_ROLES.get(relativePath)
-      || expectedManifestFile(manifest, relativePath).mediaType
-        !== EXPECTED_MEDIA_TYPES.get(relativePath)
-    ) {
-      throw policyError(
-        "ACP_MANIFEST_ENTRY_INVALID",
-        `Frozen input ${JSON.stringify(relativePath)} has an unexpected role or media type.`,
-      );
-    }
-    if (readableFiles.has(entry.path)) {
-      throw policyError("ACP_READ_ORDER_DUPLICATE", "The input read order contains duplicates.");
-    }
-    readableFiles.set(entry.path, entry);
-  }
-
-  const requestedPromptPath = assertAbsolutePath(promptPath, "promptPath");
-  const normalizedPromptPath = await realpath(requestedPromptPath).catch(() => requestedPromptPath);
-  const expectedPromptPath = path.join(requestRoot, "PROMPT.md");
-  const promptEntry = readableFiles.get(normalizedPromptPath);
-  if (
-    normalizedPromptPath !== expectedPromptPath
-    || !promptEntry
-    || promptEntry.role !== "prompt"
-  ) {
-    throw policyError(
-      "ACP_PROMPT_NOT_AUTHORIZED",
-      "PROMPT.md is not the manifest-authorized prompt for this Request.",
-      {
-        expectedPromptPath,
-        normalizedPromptPath,
-        manifestRole: promptEntry?.role ?? null,
-        authorized: Boolean(promptEntry),
-      },
-    );
-  }
-
-  const normalizedOutputPath = await canonicalFuturePath(outputPath, "outputPath");
-  await verifiedOutputParent(normalizedOutputPath, requestRoot);
-  const expectedOutputPath = path.join(
-    requestRoot,
-    "attempts",
-    attemptId,
-    "output",
-    "candidate.html",
-  );
-  if (normalizedOutputPath !== expectedOutputPath) {
-    throw policyError(
-      "ACP_OUTPUT_ATTEMPT_MISMATCH",
-      "The Candidate output does not belong to the authorized Attempt.",
-    );
-  }
-  if (await fileExists(normalizedOutputPath)) {
-    throw policyError(
-      "ACP_OUTPUT_PREEXISTS",
-      "The Qoder ACP driver requires a fresh Attempt output path.",
-    );
-  }
-
-  const normalizedCompletionPath = await canonicalFuturePath(
-    completionPath,
-    "completionPath",
-  );
-  const expectedCompletionPath = path.join(
-    requestRoot,
-    "attempts",
-    attemptId,
-    "completion.json",
-  );
-  if (normalizedCompletionPath !== expectedCompletionPath) {
-    throw policyError(
-      "ACP_COMPLETION_OUTSIDE_REQUEST",
-      "The completion path escapes the Request root.",
-    );
-  }
-  if (await fileExists(normalizedCompletionPath)) {
-    throw policyError(
-      "ACP_COMPLETION_PREEXISTS",
-      "The Qoder ACP driver requires a fresh Attempt completion path.",
-    );
-  }
-
-  const normalizedFinalizer = await officialFinalizer({
-    requestRoot,
-    requestId,
-    attemptId,
-  });
-
-  return Object.freeze({
-    [POLICY_BRAND]: true,
-    // The shared ACP driver selects its host, its declared client capabilities
-    // and its completion requirement from this mode, so it stays explicit here
-    // instead of being inferred from a missing field.
-    mode: "execution",
-    requestRoot,
-    controlRoot,
-    runtimePath: path.join(controlRoot, "runtime-state.json"),
-    manifestPath: manifestFile.path,
-    promptPath: normalizedPromptPath,
-    outputPath: normalizedOutputPath,
-    completionPath: normalizedCompletionPath,
-    inputManifestSha256,
-    projectId,
-    documentId,
-    requestId,
-    attemptId,
-    readableFiles: Object.freeze([...readableFiles.values()]),
-    finalizer: normalizedFinalizer,
-  });
-}
-
-// The Discussion Host is deliberately not the Execution Host with a different
-// read list. Discussion has no Request, no Candidate, no finalizer and no
-// runtime authority: it reads exactly one short-lived read-only snapshot of the
-// page the user is looking at, plus the discussion prompt, and nothing else. It
-// can never write, spawn a terminal or touch `activeRequest`.
-export async function loadQoderAcpDiscussionPolicy(options) {
-  const value = assertObject(options, "ACP discussion policy options");
-  const allowedOptionNames = new Set(["snapshotRoot", "snapshotName", "promptName"]);
-  const unexpectedOption = Object.keys(value).find(
-    (name) => !allowedOptionNames.has(name),
-  );
-  if (unexpectedOption) {
-    throw policyError(
-      "ACP_DISCUSSION_OPTIONS_INVALID",
-      `ACP discussion policy options contain unsupported field ${JSON.stringify(unexpectedOption)}.`,
-    );
-  }
-  const { snapshotRoot, snapshotName = "snapshot.html", promptName = "PROMPT.md" } = value;
-  // Names are single, safe filename segments joined to the canonical root, so a
-  // caller cannot point the snapshot at a path outside the short-lived dir.
-  const safeName = (name, label) => {
-    const text = assertNonEmptyString(name, label);
-    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,80}$/u.test(text) || text.includes("..")) {
-      throw policyError("ACP_DISCUSSION_NAME_INVALID", `${label} must be a safe file name.`);
-    }
-    return text;
-  };
-  const safeSnapshotName = safeName(snapshotName, "snapshotName");
-  const safePromptName = safeName(promptName, "promptName");
-  if (safeSnapshotName === safePromptName) {
-    throw policyError(
-      "ACP_DISCUSSION_READ_ORDER_DUPLICATE",
-      "The discussion snapshot and prompt must be distinct files.",
-    );
-  }
-  const requestedRoot = assertAbsolutePath(snapshotRoot, "snapshotRoot");
-  const rootInformation = await lstat(requestedRoot);
-  if (rootInformation.isSymbolicLink() || !rootInformation.isDirectory()) {
-    throw policyError(
-      "ACP_DISCUSSION_UNSAFE_ROOT",
-      "The discussion snapshot root must be a real directory.",
-    );
-  }
-  const snapshotRootPath = await realpath(requestedRoot);
-
-  const snapshot = await readVerifiedRegularFile(
-    path.join(snapshotRootPath, safeSnapshotName),
-    snapshotRootPath,
-    "Discussion snapshot",
-  );
-  if (snapshot.bytes.byteLength > MAX_HTML_BYTES) {
-    throw policyError("ACP_DISCUSSION_SNAPSHOT_TOO_LARGE", "The discussion snapshot exceeds 20 MiB.");
-  }
-  const prompt = await readVerifiedRegularFile(
-    path.join(snapshotRootPath, safePromptName),
-    snapshotRootPath,
-    "Discussion prompt",
-  );
-  if (prompt.bytes.byteLength > MAX_PROMPT_BYTES) {
-    throw policyError("ACP_DISCUSSION_PROMPT_TOO_LARGE", "The discussion prompt exceeds 256 KiB.");
-  }
-
-  return Object.freeze({
-    [POLICY_BRAND]: true,
-    mode: "discussion",
-    requestRoot: snapshotRootPath,
-    snapshotPath: snapshot.path,
-    promptPath: prompt.path,
-    sourceSha256: sha256(snapshot.bytes),
-    // No outputPath, no finalizer, no runtimePath: discussion cannot mutate.
-    readableFiles: Object.freeze([
-      Object.freeze({
-        path: snapshot.path,
-        role: "discussion-snapshot",
-        sha256: sha256(snapshot.bytes),
-        byteLength: snapshot.bytes.byteLength,
-      }),
-      Object.freeze({
-        path: prompt.path,
-        role: "prompt",
-        sha256: sha256(prompt.bytes),
-        byteLength: prompt.bytes.byteLength,
-      }),
-    ]),
-  });
-}
-
-// A minimal restricted host for discussion turns. It shares the execution
-// host's file-safety and drift checks for reads, and hard-denies every
-// mutation: no write path exists, terminals are refused, and tool-permission
-// requests are always cancelled. Nothing here can create a Candidate.
-export function createRestrictedDiscussionHost(policy, { onEvent = () => {} } = {}) {
-  assertObject(policy, "policy");
-  if (
-    policy[POLICY_BRAND] !== true
-    || policy.mode !== "discussion"
-    || !Array.isArray(policy.readableFiles)
-  ) {
-    throw new TypeError("Restricted discussion host requires a verified discussion policy.");
-  }
-  if (typeof onEvent !== "function") {
-    throw new TypeError("Restricted discussion host dependencies are invalid.");
-  }
-  let sessionId = null;
-  let phase = "active";
-  let cancellationRequested = false;
-  const readableFiles = new Map(
-    policy.readableFiles.map((entry) => [entry.path, entry]),
-  );
-  const event = (kind, details = {}) => onEvent(Object.freeze({ kind, ...details }));
-  // `buildClient` registers the whole terminal surface for every host, so every
-  // terminal method must refuse with this policy error instead of failing as an
-  // undefined-method TypeError.
-  const noTerminal = () => policyError(
-    "ACP_DISCUSSION_NO_TERMINAL",
-    "A discussion turn cannot use a terminal.",
-  );
-  const assertActive = (signal) => {
-    if (signal?.aborted) {
-      throw policyError("ACP_REQUEST_CANCELLED", "The ACP request was cancelled.");
-    }
-    if (cancellationRequested || phase === "cancelling") {
-      throw policyError("ACP_HOST_CANCELLING", "The discussion host is cancelling.");
-    }
-    if (phase === "disposed") {
-      throw policyError("ACP_HOST_DISPOSED", "The discussion host is already closed.");
-    }
-  };
-
-  return {
-    bindSessionId(nextSessionId) {
-      assertActive();
-      if (
-        sessionId
-        || typeof nextSessionId !== "string"
-        || !/^[^\u0000-\u001f\u007f]{1,256}$/u.test(nextSessionId)
-      ) {
-        throw policyError("ACP_SESSION_BIND_INVALID", "The ACP session could not be bound.");
-      }
-      sessionId = nextSessionId;
-      event("session-bound");
-    },
-    async requestPermission(params) {
-      validateSession(sessionId, params.sessionId);
-      // Discussion needs no tool that requires permission; always decline.
-      event("permission-rejected", { toolKind: params.toolCall?.kind || "unknown" });
-      return { outcome: { outcome: "cancelled" } };
-    },
-    async readTextFile(params, signal) {
-      assertActive(signal);
-      validateSession(sessionId, params.sessionId);
-      const requestedPath = assertAbsolutePath(params.path, "fs/read_text_file path");
-      const authorized = readableFiles.get(requestedPath);
-      if (!authorized) {
-        throw policyError(
-          "ACP_READ_NOT_AUTHORIZED",
-          "Qoder requested a file outside the discussion snapshot.",
-        );
-      }
-      const file = await readVerifiedRegularFile(
-        requestedPath,
-        policy.requestRoot,
-        "ACP discussion read target",
-      );
-      assertActive(signal);
-      const { bytes } = file;
-      if (bytes.byteLength !== authorized.byteLength || sha256(bytes) !== authorized.sha256) {
-        throw policyError(
-          "ACP_FROZEN_INPUT_DRIFT",
-          "The discussion snapshot changed after the session started.",
-        );
-      }
-      event("file-read", { role: authorized.role });
-      return { content: slicedLines(bytes.toString("utf8"), params.line, params.limit) };
-    },
-    async writeTextFile() {
-      throw policyError(
-        "ACP_DISCUSSION_READONLY",
-        "A discussion turn cannot write any file.",
-      );
-    },
-    async createTerminal() {
-      throw noTerminal();
-    },
-    async terminalOutput() {
-      throw noTerminal();
-    },
-    async waitForTerminalExit() {
-      throw noTerminal();
-    },
-    async killTerminal() {
-      throw noTerminal();
-    },
-    async releaseTerminal() {
-      throw noTerminal();
-    },
-    cancel() {
-      cancellationRequested = true;
-      if (phase === "active") phase = "cancelling";
-      return Promise.resolve();
-    },
-    dispose() {
-      phase = "disposed";
-    },
-  };
-}
-
-function validateSession(boundSessionId, receivedSessionId) {
-  if (!boundSessionId || receivedSessionId !== boundSessionId) {
-    throw policyError(
-      "ACP_SESSION_ID_MISMATCH",
-      "The ACP operation does not belong to the active PageRoot task session.",
-    );
-  }
-}
-
-function slicedLines(content, line, limit) {
-  if (line == null && limit == null) return content;
-  const start = line == null ? 0 : line - 1;
-  if (!Number.isSafeInteger(start) || start < 0 || start > 1_000_000) {
-    throw policyError("ACP_READ_RANGE_INVALID", "ACP line must be a positive integer.");
-  }
-  if (
-    limit != null
-    && (!Number.isSafeInteger(limit) || limit <= 0 || limit > 100_000)
-  ) {
-    throw policyError("ACP_READ_RANGE_INVALID", "ACP limit must be a positive integer.");
-  }
-  const lines = content.match(/[^\n]*(?:\n|$)/gu) || [];
-  if (lines.at(-1) === "") lines.pop();
-  return lines.slice(start, limit == null ? undefined : start + limit).join("");
-}
-
-function terminalOutputLimit(value) {
-  if (value == null) return DEFAULT_TERMINAL_OUTPUT_BYTES;
-  if (!Number.isSafeInteger(value) || value <= 0 || value > MAX_TERMINAL_OUTPUT_BYTES) {
-    throw policyError(
-      "ACP_TERMINAL_OUTPUT_LIMIT_INVALID",
-      "The terminal output byte limit is outside PageRoot's supported range.",
-    );
-  }
-  return value;
-}
-
 function truncateUtf8Tail(value, byteLimit) {
   const bytes = Buffer.from(value, "utf8");
   if (bytes.byteLength <= byteLimit) return { value, truncated: false };
@@ -1048,39 +377,6 @@ export function qoderAcpEnvironment(overrides = {}, baseEnvironment = process.en
     result[name] = value;
   }
   return result;
-}
-
-function envArrayMatches(requested, expected) {
-  if (!Array.isArray(requested)) return false;
-  const entries = Object.entries(expected);
-  if (requested.length !== entries.length) return false;
-  const received = new Map();
-  for (const entry of requested) {
-    if (
-      !entry
-      || typeof entry !== "object"
-      || typeof entry.name !== "string"
-      || typeof entry.value !== "string"
-      || received.has(entry.name)
-    ) return false;
-    received.set(entry.name, entry.value);
-  }
-  return entries.every(([name, value]) => received.get(name) === value);
-}
-
-function finalizerRequestMatches(params, finalizer) {
-  const args = Array.isArray(params.args) ? params.args : [];
-  const cwdMatches = typeof params.cwd === "string"
-    && path.isAbsolute(params.cwd)
-    && path.resolve(params.cwd) === finalizer.cwd;
-  if (!cwdMatches || !envArrayMatches(params.env, finalizer.env)) return false;
-  return (
-    typeof params.command === "string"
-    && path.isAbsolute(params.command)
-    && path.resolve(params.command) === finalizer.command
-    && args.length === finalizer.args.length
-    && args.every((argument, index) => argument === finalizer.args[index])
-  );
 }
 
 function terminalExitStatus(child) {
@@ -1193,478 +489,6 @@ export async function captureQoderAcpReviewBoundary({
     contentSha256: sha256(Buffer.from(workspace.content, "utf8")),
     versionSnapshots,
   };
-}
-
-export function createRestrictedQoderAcpHost(policy, {
-  spawnProcess = spawn,
-  renameOutput = rename,
-  onEvent = () => {},
-} = {}) {
-  assertObject(policy, "policy");
-  if (policy[POLICY_BRAND] !== true || !Array.isArray(policy.readableFiles)) {
-    throw new TypeError("Restricted ACP host requires a verified PageRoot task policy.");
-  }
-  if (
-    typeof spawnProcess !== "function"
-    || typeof renameOutput !== "function"
-    || typeof onEvent !== "function"
-  ) {
-    throw new TypeError("Restricted ACP host dependencies are invalid.");
-  }
-  let sessionId = null;
-  let finalizerStarted = false;
-  let finalizerOutcome = null;
-  let finalizedOutputSha256 = null;
-  let outputWritten = false;
-  let phase = "active";
-  let cancellationRequested = false;
-  let cancellationPromise = null;
-  let mutationTail = Promise.resolve();
-  const terminals = new Map();
-  const inFlight = new Set();
-  const readableFiles = new Map(
-    policy.readableFiles.map((entry) => [entry.path, entry]),
-  );
-
-  const event = (kind, details = {}) => onEvent(Object.freeze({ kind, ...details }));
-  const assertActive = (signal) => {
-    if (signal?.aborted) {
-      throw policyError("ACP_REQUEST_CANCELLED", "The ACP request was cancelled.");
-    }
-    if (cancellationRequested || phase === "cancelling") {
-      throw policyError("ACP_HOST_CANCELLING", "The ACP task host is cancelling.");
-    }
-    if (phase === "finalized") {
-      throw policyError("ACP_HOST_FINALIZED", "The ACP task host already finalized its Candidate.");
-    }
-    if (phase === "disposed") {
-      throw policyError("ACP_HOST_DISPOSED", "The ACP task host is already closed.");
-    }
-  };
-  const trackActive = async (signal, operation) => {
-    const promise = (async () => {
-      assertActive(signal);
-      return operation(() => assertActive(signal));
-    })();
-    inFlight.add(promise);
-    try {
-      return await promise;
-    } finally {
-      inFlight.delete(promise);
-    }
-  };
-  const acquireMutationLock = async () => {
-    let release;
-    const current = new Promise((resolve) => {
-      release = resolve;
-    });
-    const previous = mutationTail;
-    mutationTail = previous.then(
-      () => current,
-      () => current,
-    );
-    await previous.catch(() => {});
-    return release;
-  };
-  const mutate = async (signal, operation) => {
-    const release = await acquireMutationLock();
-    try {
-      assertActive(signal);
-      await assertRuntimeProcessingAuthority(policy);
-      assertActive(signal);
-      return await operation(() => assertActive(signal));
-    } finally {
-      release();
-    }
-  };
-  const terminal = (receivedSessionId, terminalId, signal) => {
-    assertActive(signal);
-    validateSession(sessionId, receivedSessionId);
-    const record = terminals.get(terminalId);
-    if (!record) {
-      throw policyError("ACP_TERMINAL_UNKNOWN", "The ACP terminal is not owned by this task.");
-    }
-    return record;
-  };
-  const stopTerminals = async () => {
-    const releases = [...terminals.values()].map(async (record) => {
-      await terminateProcess(record.child, { processGroup: record.processGroup });
-      await record.exitPromise.catch(() => {});
-    });
-    await Promise.all(releases);
-    terminals.clear();
-  };
-
-  const host = {
-    bindSessionId(nextSessionId) {
-      assertActive();
-      if (
-        sessionId
-        || typeof nextSessionId !== "string"
-        || !/^[^\u0000-\u001f\u007f]{1,256}$/u.test(nextSessionId)
-      ) {
-        throw policyError("ACP_SESSION_BIND_INVALID", "The ACP session could not be bound.");
-      }
-      sessionId = nextSessionId;
-      event("session-bound");
-    },
-    async requestPermission(params, signal) {
-      validateSession(sessionId, params.sessionId);
-      if (signal?.aborted || cancellationRequested || phase !== "active") {
-        return { outcome: { outcome: "cancelled" } };
-      }
-      const options = Array.isArray(params.options) ? params.options : [];
-      const optionIds = new Set();
-      const validOptions = options.every((option) => (
-        option
-        && typeof option.optionId === "string"
-        && option.optionId.length > 0
-        && option.optionId.length <= 256
-        && !optionIds.has(option.optionId)
-        && Boolean(optionIds.add(option.optionId))
-      ));
-      const allowOnce = validOptions
-        ? options.find((option) => option.kind === "allow_once")
-        : null;
-      if (!allowOnce) {
-        event("permission-rejected", { toolKind: params.toolCall?.kind || "unknown" });
-        return { outcome: { outcome: "cancelled" } };
-      }
-      event("permission-allowed-once", { toolKind: params.toolCall?.kind || "unknown" });
-      return { outcome: { outcome: "selected", optionId: allowOnce.optionId } };
-    },
-    async readTextFile(params, signal) {
-      return trackActive(signal, async (checkActive) => {
-        validateSession(sessionId, params.sessionId);
-        const requestedPath = assertAbsolutePath(params.path, "fs/read_text_file path");
-        const authorized = readableFiles.get(requestedPath);
-        if (!authorized) {
-          throw policyError(
-            "ACP_READ_NOT_AUTHORIZED",
-            "Qoder requested a file outside the frozen read set.",
-          );
-        }
-        const file = await readVerifiedRegularFile(
-          requestedPath,
-          policy.requestRoot,
-          "ACP read target",
-        );
-        checkActive();
-        const { bytes } = file;
-        if (bytes.byteLength !== authorized.byteLength || sha256(bytes) !== authorized.sha256) {
-          throw policyError(
-            "ACP_FROZEN_INPUT_DRIFT",
-            "A frozen input changed after the ACP session started.",
-          );
-        }
-        event("file-read", { role: authorized.role });
-        return { content: slicedLines(bytes.toString("utf8"), params.line, params.limit) };
-      });
-    },
-    async writeTextFile(params, signal) {
-      return trackActive(signal, () => mutate(signal, async (checkActive) => {
-        validateSession(sessionId, params.sessionId);
-        const requestedPath = assertAbsolutePath(params.path, "fs/write_text_file path");
-        if (requestedPath !== policy.outputPath) {
-          throw policyError(
-            "ACP_WRITE_NOT_AUTHORIZED",
-            "Qoder may only write the exact Candidate output path.",
-          );
-        }
-        let temporaryPath = null;
-        try {
-          if (await fileExists(policy.completionPath)) {
-            throw policyError(
-              "ACP_OUTPUT_ALREADY_FINALIZED",
-              "The Candidate output is immutable after finalization.",
-            );
-          }
-          checkActive();
-          if (finalizerStarted) {
-            throw policyError(
-              "ACP_FINALIZER_ALREADY_STARTED",
-              "The Candidate output is immutable once finalization starts.",
-            );
-          }
-          if (outputWritten) {
-            throw policyError(
-              "ACP_OUTPUT_ALREADY_WRITTEN",
-              "The synthetic Candidate output accepts exactly one committed write.",
-            );
-          }
-          if (typeof params.content !== "string" || !params.content.trim()) {
-            throw policyError("ACP_OUTPUT_EMPTY", "The Candidate output must not be empty.");
-          }
-          const bytes = Buffer.from(params.content, "utf8");
-          if (bytes.byteLength > MAX_HTML_BYTES) {
-            throw policyError("ACP_OUTPUT_TOO_LARGE", "The Candidate output exceeds 20 MiB.");
-          }
-          await verifiedOutputParent(policy.outputPath, policy.requestRoot);
-          checkActive();
-          try {
-            const existing = await lstat(policy.outputPath);
-            if (existing.isSymbolicLink() || !existing.isFile() || existing.nlink !== 1) {
-              throw policyError(
-                "ACP_UNSAFE_OUTPUT_FILE",
-                "The Candidate output must be a single-link regular file.",
-              );
-            }
-            throw policyError(
-              "ACP_OUTPUT_ALREADY_WRITTEN",
-              "The synthetic Candidate output must be fresh before its single committed write.",
-            );
-          } catch (error) {
-            if (error?.code !== "ENOENT") throw error;
-          }
-          checkActive();
-          temporaryPath = `${policy.outputPath}.pageroot-acp-${randomUUID()}.tmp`;
-          const flags = fsConstants.O_WRONLY
-            | fsConstants.O_CREAT
-            | fsConstants.O_EXCL
-            | (fsConstants.O_NOFOLLOW || 0);
-          const handle = await open(temporaryPath, flags, 0o600);
-          try {
-            const information = await handle.stat();
-            if (!information.isFile() || information.nlink !== 1) {
-              throw policyError(
-                "ACP_UNSAFE_OUTPUT_FILE",
-                "The Candidate output staging file must be a single-link regular file.",
-              );
-            }
-            await handle.writeFile(bytes);
-            await handle.sync();
-          } finally {
-            await handle.close();
-          }
-          checkActive();
-          await assertRuntimeProcessingAuthority(policy);
-          checkActive();
-          await renameOutput(temporaryPath, policy.outputPath);
-          temporaryPath = null;
-          try {
-            checkActive();
-            await assertRuntimeProcessingAuthority(policy);
-            checkActive();
-          } catch (error) {
-            const published = await readVerifiedRegularFile(
-              policy.outputPath,
-              policy.requestRoot,
-              "Cancelled Candidate output",
-            );
-            if (sha256(published.bytes) === sha256(bytes)) {
-              await unlink(policy.outputPath);
-            }
-            throw error;
-          }
-          outputWritten = true;
-          event("file-written", { byteLength: bytes.byteLength });
-          return {};
-        } finally {
-          if (temporaryPath) await unlink(temporaryPath).catch(() => {});
-        }
-      }));
-    },
-    async createTerminal(params, signal) {
-      return trackActive(signal, () => mutate(signal, async (checkActive) => {
-        validateSession(sessionId, params.sessionId);
-        if (finalizerStarted) {
-          throw policyError(
-            "ACP_FINALIZER_ALREADY_STARTED",
-            "The task finalizer can be launched only once.",
-          );
-        }
-        if (!finalizerRequestMatches(params, policy.finalizer)) {
-          throw policyError(
-            "ACP_TERMINAL_NOT_AUTHORIZED",
-            "The ACP terminal may execute only the frozen PageRoot finalizer.",
-          );
-        }
-        const outputInformation = await readVerifiedRegularFile(
-          policy.outputPath,
-          policy.requestRoot,
-          "Candidate output",
-        );
-        checkActive();
-        if (
-          outputInformation.information.size <= 0
-          || outputInformation.information.size > MAX_HTML_BYTES
-        ) {
-          throw policyError(
-            "ACP_OUTPUT_NOT_READY",
-            "The Candidate output is not ready for finalization.",
-          );
-        }
-        await assertRuntimeProcessingAuthority(policy);
-        checkActive();
-        finalizerStarted = true;
-        finalizedOutputSha256 = sha256(outputInformation.bytes);
-        const outputByteLimit = terminalOutputLimit(params.outputByteLimit);
-        const child = spawnProcess(policy.finalizer.command, [...policy.finalizer.args], {
-          cwd: policy.finalizer.cwd,
-          env: { ...policy.finalizer.env },
-          detached: process.platform !== "win32",
-          shell: false,
-          stdio: ["ignore", "pipe", "pipe"],
-        });
-        const terminalId = `term_${randomUUID().replaceAll("-", "")}`;
-        const record = {
-          child,
-          processGroup: process.platform !== "win32",
-          output: "",
-          outputByteLimit,
-          truncated: false,
-          exitPromise: null,
-        };
-        const append = (chunk) => {
-          const next = truncateUtf8Tail(record.output + chunk.toString(), outputByteLimit);
-          record.output = next.value;
-          record.truncated ||= next.truncated;
-        };
-        child.stdout?.on("data", append);
-        child.stderr?.on("data", append);
-        record.exitPromise = waitForExit(child).then((status) => {
-          finalizerOutcome = {
-            status,
-            truncated: record.truncated,
-          };
-          event("terminal-exited", { exitCode: status?.exitCode ?? null });
-          return status;
-        });
-        void record.exitPromise.catch(() => {});
-        terminals.set(terminalId, record);
-        event("terminal-created", { executable: path.basename(policy.finalizer.command) });
-        return { terminalId };
-      }));
-    },
-    async terminalOutput(params, signal) {
-      return trackActive(signal, async () => {
-        const record = terminal(params.sessionId, params.terminalId, signal);
-        return {
-          output: record.output,
-          truncated: record.truncated,
-          ...(terminalExitStatus(record.child)
-            ? { exitStatus: terminalExitStatus(record.child) }
-            : {}),
-        };
-      });
-    },
-    async waitForTerminalExit(params, signal) {
-      return trackActive(signal, async (checkActive) => {
-        const record = terminal(params.sessionId, params.terminalId, signal);
-        const status = await record.exitPromise;
-        checkActive();
-        return status;
-      });
-    },
-    async killTerminal(params, signal) {
-      return trackActive(signal, async () => {
-        const record = terminal(params.sessionId, params.terminalId, signal);
-        if (record.child.exitCode === null && record.child.signalCode === null) {
-          signalProcess(record.child, "SIGTERM", { processGroup: record.processGroup });
-        }
-        event("terminal-killed");
-        return {};
-      });
-    },
-    async releaseTerminal(params, signal) {
-      return trackActive(signal, async (checkActive) => {
-        const record = terminal(params.sessionId, params.terminalId, signal);
-        await terminateProcess(record.child, { processGroup: record.processGroup });
-        await record.exitPromise.catch(() => {});
-        checkActive();
-        terminals.delete(params.terminalId);
-        event("terminal-released");
-        return {};
-      });
-    },
-    async assertTurnCompleted() {
-      return trackActive(null, async (checkActive) => {
-        if (
-          !finalizerStarted
-          || !finalizerOutcome
-          || finalizerOutcome.status?.exitCode !== 0
-          || finalizerOutcome.status?.signal
-          || finalizerOutcome.truncated
-        ) {
-          throw policyError(
-            "ACP_FINALIZER_NOT_COMPLETED",
-            "The ACP turn stopped without one clean, complete PageRoot finalizer run.",
-          );
-        }
-        const [output, completionFile] = await Promise.all([
-          readVerifiedRegularFile(policy.outputPath, policy.requestRoot, "Finalized Candidate"),
-          readVerifiedRegularFile(policy.completionPath, policy.requestRoot, "Completion record"),
-        ]);
-        checkActive();
-        const currentOutputSha256 = sha256(output.bytes);
-        if (currentOutputSha256 !== finalizedOutputSha256) {
-          throw policyError(
-            "ACP_FINALIZED_OUTPUT_CHANGED",
-            "The Candidate output changed during or after finalization.",
-          );
-        }
-        let completion;
-        try {
-          completion = JSON.parse(completionFile.bytes.toString("utf8"));
-        } catch {
-          throw policyError(
-            "ACP_COMPLETION_INVALID",
-            "The finalizer did not write a valid completion record.",
-          );
-        }
-        const projectRoot = projectRootForRequest(policy.requestRoot, policy.requestId);
-        const controlRoot = path.join(projectRoot, ".pageroot");
-        const outputRelativePath = path.relative(controlRoot, policy.outputPath).split(path.sep).join("/");
-        if (
-          completion?.projectId !== policy.projectId
-          || completion?.documentId !== policy.documentId
-          || completion?.requestId !== policy.requestId
-          || completion?.attemptId !== policy.attemptId
-          || completion?.inputManifestSha256 !== policy.inputManifestSha256
-          || completion?.outputRelativePath !== outputRelativePath
-          || completion?.outputSha256 !== currentOutputSha256
-          || !["completed", "no-change"].includes(completion?.status)
-        ) {
-          throw policyError(
-            "ACP_COMPLETION_IDENTITY_MISMATCH",
-            "The completion record does not match the frozen PageRoot task and Candidate.",
-          );
-        }
-        checkActive();
-        phase = "finalized";
-        event("completion-verified", { status: completion.status });
-        return Object.freeze({
-          status: completion.status,
-          outputSha256: currentOutputSha256,
-        });
-      });
-    },
-    async cancel() {
-      if (cancellationRequested || phase !== "active") {
-        return cancellationPromise || Promise.resolve();
-      }
-      cancellationRequested = true;
-      event("host-cancelling");
-      cancellationPromise = (async () => {
-        const release = await acquireMutationLock();
-        try {
-          if (phase === "active") phase = "cancelling";
-        } finally {
-          release();
-        }
-        await stopTerminals();
-      })();
-      await cancellationPromise;
-    },
-    async dispose() {
-      if (phase === "disposed") return;
-      phase = "disposed";
-      await cancellationPromise?.catch(() => {});
-      await stopTerminals();
-      await Promise.allSettled([...inFlight]);
-    },
-  };
-  return host;
 }
 
 function buildClient(host) {
@@ -1920,7 +744,7 @@ const ACP_DRIVER_PROFILES = new Map([
 
 export function acpDriverProfile(policy) {
   assertObject(policy, "policy");
-  if (policy[POLICY_BRAND] !== true) {
+  if (policy[AGENT_POLICY_BRAND] !== true) {
     throw new TypeError("The ACP driver requires a verified PageRoot policy.");
   }
   const profile = typeof policy.mode === "string"
@@ -2108,86 +932,6 @@ export async function runAcpTask({
   }
 }
 
-function signalProcessGroup(child, signal) {
-  if (!Number.isSafeInteger(child?.pid) || child.pid <= 0) return false;
-  try {
-    process.kill(-child.pid, signal);
-    return true;
-  } catch (error) {
-    if (error?.code === "ESRCH") return false;
-    if (error?.code === "EPERM") return false;
-    throw error;
-  }
-}
-
-function signalProcess(child, signal, { processGroup = false } = {}) {
-  if (processGroup && Number.isSafeInteger(child?.pid) && child.pid > 0) {
-    if (signalProcessGroup(child, signal)) return;
-  }
-  if (Number.isSafeInteger(child?.pid) && child.pid > 0) {
-    try {
-      child.kill(signal);
-    } catch (error) {
-      if (error?.code !== "ESRCH") throw error;
-    }
-  }
-}
-
-function processGroupExists(child) {
-  if (!Number.isSafeInteger(child?.pid) || child.pid <= 0) return false;
-  try {
-    process.kill(-child.pid, 0);
-    return true;
-  } catch (error) {
-    if (error?.code === "ESRCH") return false;
-    if (error?.code === "EPERM") {
-      return child.exitCode === null && child.signalCode === null;
-    }
-    throw error;
-  }
-}
-
-async function waitForProcessGroupExit(child, timeoutMs) {
-  const deadline = Date.now() + timeoutMs;
-  while (processGroupExists(child) && Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, 25));
-  }
-  return !processGroupExists(child);
-}
-
-async function waitForChildExitWithin(child, timeoutMs) {
-  if (terminalExitStatus(child)) return true;
-  return Promise.race([
-    waitForExit(child).then(() => true, () => true),
-    new Promise((resolve) => setTimeout(resolve, timeoutMs, false)),
-  ]);
-}
-
-async function terminateProcess(child, { processGroup = false } = {}) {
-  if (!child) return true;
-  let leaderExited = !Number.isSafeInteger(child.pid)
-    || child.exitCode !== null
-    || child.signalCode !== null;
-  signalProcess(child, "SIGTERM", { processGroup });
-  if (!leaderExited) {
-    leaderExited = await waitForChildExitWithin(child, PROCESS_EXIT_GRACE_MS);
-    if (!leaderExited && child.exitCode === null && child.signalCode === null) {
-      signalProcess(child, "SIGKILL", { processGroup });
-      leaderExited = await waitForChildExitWithin(child, PROCESS_EXIT_GRACE_MS);
-    }
-  }
-  if (
-    processGroup
-    && processGroupExists(child)
-    && !(await waitForProcessGroupExit(child, PROCESS_EXIT_GRACE_MS))
-  ) {
-    signalProcessGroup(child, "SIGKILL");
-    await waitForProcessGroupExit(child, PROCESS_EXIT_GRACE_MS);
-  }
-  if (processGroup) return leaderExited && !processGroupExists(child);
-  return leaderExited || !Number.isSafeInteger(child.pid);
-}
-
 async function trustedCurrentJavaScriptRuntime() {
   const runtime = await realpath(process.execPath).catch(() => {
     throw policyError(
@@ -2295,7 +1039,7 @@ export async function runVerifiedQoderJavaScript({
   baseEnvironment = process.env,
   timeoutMs = 30_000,
   maxBuffer = 128 * 1024,
-  processTerminator = terminateProcess,
+  processTerminator = terminateManagedProcess,
 } = {}) {
   if (typeof processTerminator !== "function") {
     throw new TypeError("Verified Qoder process terminator must be a function.");
@@ -2574,7 +1318,7 @@ export async function runQoderAcpTask({
     throw error;
   } finally {
     child.stdin?.end();
-    if (!(await terminateProcess(child, { processGroup }))) {
+    if (!(await terminateManagedProcess(child, { processGroup }))) {
       throw policyError(
         "ACP_PROCESS_CLEANUP_UNCONFIRMED",
         "The ACP Agent process group could not be confirmed stopped.",
