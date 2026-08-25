@@ -592,7 +592,7 @@
         "^scripts/check-architecture\\.mjs$",
         "^tests/fixtures/architecture-boundaries/",
         "^(?:CONTRIBUTING|docs/(?:ARCHITECTURE|ARCHITECTURE_CONTRACT|COMPATIBILITY|INTERACTION_FLOW|STATE_OWNERSHIP|ENGINEERING_STANDARDS|SECURITY_MODEL|RUNTIME_VISUAL_CONTRACT|WORKBENCH_ORCHESTRATION_REFACTOR_PLAN))\\.md$",
-        "^docs/decisions/(?:0003-session-ownership-and-mutation-outcomes|0004-v2-editable-islands|0007-independent-interactive-preview|0008-safe-presentation-actions-in-edit-mode|0009-persistent-source-patch-history|0011-workbench-session-decomposition|0012-id-first-project-context|0013-edit-runtime-visual-projection|0015-safe-host-fallback-and-direct-text-nodes|0016-owner-controlled-review-runtime-capture|0017-shared-runtime-snapshot-owner|0018-source-transaction-kernel|0019-workspace-controller-orchestration|0021-review-runtime-visual-comparison-noise-tolerance|0022-edit-one-shot-author-runtime|0025-edit-direct-one-shot-runtime|0031-qoder-acp-v1-spike|0032-qoder-acp-agent-bridge)\\.md$"
+      "^docs/decisions/(?:0003-session-ownership-and-mutation-outcomes|0004-v2-editable-islands|0007-independent-interactive-preview|0008-safe-presentation-actions-in-edit-mode|0009-persistent-source-patch-history|0011-workbench-session-decomposition|0012-id-first-project-context|0013-edit-runtime-visual-projection|0015-safe-host-fallback-and-direct-text-nodes|0016-owner-controlled-review-runtime-capture|0017-shared-runtime-snapshot-owner|0018-source-transaction-kernel|0019-workspace-controller-orchestration|0021-review-runtime-visual-comparison-noise-tolerance|0022-edit-one-shot-author-runtime|0025-edit-direct-one-shot-runtime|0031-qoder-acp-v1-spike|0032-qoder-acp-agent-bridge|0039-provider-neutral-agent-runtime)\\.md$"
       ],
       "suites": ["typecheck"],
       "nodeTests": [
@@ -956,19 +956,22 @@
     {
       "id": "qoder-acp-agent-bridge",
       "patterns": [
-        "^scripts/(?:agent-bridge-service|workspace-bridge-shutdown|qoder-acp-(?:client|spike(?:-client)?)|verify-packaged-artifact)\\.mjs$",
+        "^scripts/(?:agent-bridge-service|discussion-bridge-service|workspace-bridge-shutdown|qoder-acp-(?:client|spike(?:-client)?)|verify-packaged-artifact)\\.mjs$",
+        "^scripts/agent/(?:providers|runtimes)/[a-z0-9-]+\\.mjs$",
         "^app/application/(?:bridge-client|run-workflow|workspace-controller)\\.(?:js|d\\.ts)$",
         "^app/components/(?:AboutPageRootDialog|AgentDeliveryButton|QoderAvailabilityCard)\\.tsx$",
         "^app/domain/qoder-availability\\.(?:js|d\\.ts)$",
-        "^tests/(?:agent-bridge-(?:service|workspace)|qoder-acp-spike-client)\\.test\\.mjs$",
-        "^tests/fixtures/(?:qoder-acp-agent|packaged-agent-bridge-runner)\\.mjs$"
+        "^tests/(?:agent-provider-contract|agent-bridge-(?:service|workspace)|discussion-bridge-service|qoder-acp-spike-client)\\.test\\.mjs$",
+        "^tests/fixtures/(?:agent-provider/|qoder-acp-agent|packaged-agent-bridge-runner)"
       ],
       "suites": ["typecheck", "dependency-audit", "build-desktop", "electron-smoke", "ai-smoke"],
       "nodeTests": [
+        "tests/agent-provider-contract.test.mjs",
         "tests/agent-bridge-service.test.mjs",
         "tests/agent-model-catalog.test.mjs",
         "tests/agent-bridge-workspace.test.mjs",
         "tests/qoder-acp-spike-client.test.mjs",
+        "tests/discussion-bridge-service.test.mjs",
         "tests/run-workflow.test.mjs",
         "tests/run-session.test.mjs",
         "tests/run-lifecycle.test.mjs",

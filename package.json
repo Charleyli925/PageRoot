@@ -208,6 +208,30 @@
         "to": "bridge/agent-bridge-service.mjs"
       },
       {
+        "from": "scripts/agent/providers/agent-provider-contract.mjs",
+        "to": "bridge/agent/providers/agent-provider-contract.mjs"
+      },
+      {
+        "from": "scripts/agent/providers/provider-registry.mjs",
+        "to": "bridge/agent/providers/provider-registry.mjs"
+      },
+      {
+        "from": "scripts/agent/providers/qoder-provider.mjs",
+        "to": "bridge/agent/providers/qoder-provider.mjs"
+      },
+      {
+        "from": "scripts/agent/runtimes/agent-runtime-contract.mjs",
+        "to": "bridge/agent/runtimes/agent-runtime-contract.mjs"
+      },
+      {
+        "from": "scripts/agent/runtimes/runtime-registry.mjs",
+        "to": "bridge/agent/runtimes/runtime-registry.mjs"
+      },
+      {
+        "from": "scripts/agent/runtimes/acp-runtime.mjs",
+        "to": "bridge/agent/runtimes/acp-runtime.mjs"
+      },
+      {
         "from": "scripts/qoder-acp-client.mjs",
         "to": "bridge/qoder-acp-client.mjs"
       },

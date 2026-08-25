@@ -29,6 +29,7 @@ const PACKAGE_TESTS = new Set([
 ]);
 
 const INTEGRATION_TESTS = new Set([
+  "agent-provider-contract.test.mjs",
   "agent-bridge-service.test.mjs",
   "agent-bridge-workspace.test.mjs",
   "application-update.test.mjs",

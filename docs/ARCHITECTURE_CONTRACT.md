@@ -94,12 +94,17 @@ The renderer's main workspace facts are partitioned as follows:
   reconciliation, tracked-run polling, stop-before-durable-cancel ordering,
   conflict commands and confirmed clipboard fallback. It publishes through
   `RunSession` and never creates a second run store;
-- Bridge `AgentBridgeService`: ephemeral trusted-local CLI discovery tickets,
-  task-keyed ACP child/session lifetime, persistent crash/orphan launch fence,
+- Bridge `AgentBridgeService`: ephemeral provider/runtime-bound preflight tickets,
+  task-keyed child/session lifetime, persistent crash/orphan launch fence,
   bounded public progress and cleanup.
   It never owns or writes Request/Candidate/Version state; task authority is
   re-derived from the registered Repository/runtime record, and only the
   official finalizer plus Repository status path can publish a Candidate;
+- Bridge Agent provider/runtime registries: the provider registry is the sole
+  legacy-driver/provider dispatch point and the runtime registry is the sole
+  runtime dispatch point. The Qoder provider owns installation, version,
+  login/model preflight and raw-error normalization. Unknown IDs fail closed;
+  opaque installation facts, digests and capabilities stay inside the ticket;
 - `VersionSession`: immutable Version records plus the current/history
   projection facts;
 - `VersionWorkflow`: Version operation identity/generation, Bridge version

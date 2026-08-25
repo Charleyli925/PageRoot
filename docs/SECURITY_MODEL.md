@@ -206,8 +206,12 @@ Attempt / Working Copy anchor, or a registered Promotion transaction. A cleared
 or missing runtime state never scans Request directories to revive an active
 Request or to adopt a replacement input-manifest digest.
 
-The packaged Qoder ACP driver narrows the protocol surface but does not change
-that trust statement. One driver serves both the execution and the discussion
+The packaged Qoder ACP provider/runtime path narrows the protocol surface but
+does not change that trust statement. The sole provider registry maps legacy
+`qoder-acp` to the Qoder provider and ACP runtime; unknown identifiers fail
+closed. Provider/runtime IDs, the opaque installation digest and capabilities
+remain inside the Bridge ticket, and preload exposes no executable, spawn,
+command or path capability. One restricted driver still serves execution and discussion
 policy, and the branded policy `mode` — never a caller-supplied host — selects
 the host, the client capabilities declared to the Agent and whether the turn
 must prove completion; a host that cannot answer the required surface, such as a

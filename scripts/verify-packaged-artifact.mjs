@@ -45,6 +45,12 @@ const REQUIRED_BRIDGE_FILES = [
   "workspace-bridge.mjs",
   "workspace-bridge-shutdown.mjs",
   "agent-bridge-service.mjs",
+  "agent/providers/agent-provider-contract.mjs",
+  "agent/providers/provider-registry.mjs",
+  "agent/providers/qoder-provider.mjs",
+  "agent/runtimes/agent-runtime-contract.mjs",
+  "agent/runtimes/runtime-registry.mjs",
+  "agent/runtimes/acp-runtime.mjs",
   "qoder-acp-client.mjs",
   "discussion-turn-runner.mjs",
   "discussion-bridge-service.mjs",
@@ -594,8 +600,8 @@ export async function verifyAppBundle({
   const bridgePackagedRoot = path.join(resourcesPath, "bridge");
   const packagedBridgeFiles = await listFiles(bridgePackagedRoot);
   assert.deepEqual(
-    packagedBridgeFiles,
-    [...REQUIRED_BRIDGE_FILES].sort(),
+    [...packagedBridgeFiles].sort((left, right) => left.localeCompare(right)),
+    [...REQUIRED_BRIDGE_FILES].sort((left, right) => left.localeCompare(right)),
     "packaged Bridge resources are incomplete or contain stale files",
   );
   for (const fileName of REQUIRED_BRIDGE_FILES) {

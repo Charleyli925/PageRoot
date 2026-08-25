@@ -14,7 +14,7 @@ User HTML bytes
 
 Comments + frozen input
   -> Change Request / Attempt
-  -> Agent Bridge (managed Qoder ACP or clipboard fallback)
+  -> Agent Bridge provider registry (Qoder provider -> ACP runtime, or clipboard fallback)
   -> completion + candidate health/continuity assessment
   -> immutable Version
   -> explicit user-controlled activation
@@ -22,16 +22,19 @@ Comments + frozen input
 
 The product Agent Bridge is Bridge-owned and never owns Request, Candidate,
 Version or Working Copy state. A user may explicitly choose a managed Qoder ACP
-session or the existing clipboard fallback for each task. `RunWorkflow` owns one
-shared Qoder availability projection for the delivery dialog and About. A local
-disk-only check discovers and validates the standalone package without running
-Qoder; the Qoder driver performs the complete use-time check before the Request
-is created, then starts
+session or the existing clipboard fallback for each task. Internally, the sole
+provider registry maps legacy `qoder-acp` to the `qoder` provider and `acp`
+runtime; unknown providers and runtimes fail closed. `RunWorkflow` owns one
+shared Qoder availability projection for the delivery dialog and About. The
+Qoder provider owns the disk-only standalone-package check and the complete
+use-time version/login/model preflight; the provider-neutral Bridge does not
+know installation paths or version rules. The ACP runtime then starts
 only a Request whose durable `agentDelivery` record authorizes the trusted-local
 policy. ACP progress is presentation evidence only: only the official finalizer
 plus Repository validation can create a pending-review Candidate, and only an
 explicit user action can promote it. The ACP allowlist is not an OS sandbox;
-see ADR 0032. ADR 0031 remains the historical synthetic-spike decision.
+see ADR 0032. ADR 0039 defines the provider/runtime boundary; ADR 0031 remains
+the historical synthetic-spike decision.
 
 ## Boundaries
 
@@ -269,7 +272,9 @@ services.
 | Renderer comment working copy, composer and saved-comment edit projection | `app/application/comment-session.js` |
 | Active/background runs, Agent delivery projection, background outcomes, submission lifecycle locks and operation locks | `app/application/run-session.js` |
 | Shared Qoder availability/guidance projection, local refresh, use-time check reuse and submission sequencing | `app/application/run-workflow.js` plus the pure state model in `app/domain/qoder-availability.js`; both delivery and About consume the same `WorkspaceController` snapshot, and neither card receives or displays command, version, path, npm prefix or model count |
-| Trusted-local Qoder ACP disk discovery, preflight tickets, process/session lifetime, bounded public progress and cancellation-before-Request ordering | `scripts/agent-bridge-service.mjs`, composed by `scripts/workspace-bridge.mjs`; durable Request/Candidate authority remains in `ProjectFileRepository` |
+| Provider-neutral Agent dispatch, internal provider/runtime-bound tickets, process/session lifetime, bounded public progress and cancellation-before-Request ordering | `scripts/agent-bridge-service.mjs` plus `scripts/agent/providers/provider-registry.mjs` and `scripts/agent/runtimes/runtime-registry.mjs`, composed by `scripts/workspace-bridge.mjs`; durable Request/Candidate authority remains in `ProjectFileRepository` |
+| Trusted-local Qoder installation discovery, package/version/login/model preflight, error classification and ACP launch descriptor | `scripts/agent/providers/qoder-provider.mjs`; legacy `qoder-acp` is mapped only by the provider registry and its external projection remains compatible |
+| Provider-neutral ACP launch and immutable standard event envelope | `scripts/agent/runtimes/acp-runtime.mjs`, delegating the existing restricted execution/discussion host and cleanup implementation in `scripts/qoder-acp-client.mjs` |
 | Immutable Version projection and history-view transition | `app/application/version-session.js` |
 | `PROJECT.md` editor working copy, generation, composition fence and save projection facts | `app/application/project-rules-session.js` |
 | `PROJECT.md` Bridge read/write, 700ms autosave, unknown-write reconciliation, close/switch drain and editor-restore host port | `app/application/project-rules-workflow.js`, composed by `WorkspaceController` |

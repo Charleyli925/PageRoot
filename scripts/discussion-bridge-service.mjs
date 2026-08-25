@@ -25,7 +25,7 @@ import {
   runDiscussionTurn,
 } from "./discussion-turn-runner.mjs";
 import { nowIso } from "./lifecycle-core.mjs";
-import { runQoderAcpTask } from "./qoder-acp-client.mjs";
+import { providerRegistry as defaultProviderRegistry } from "./agent/providers/provider-registry.mjs";
 
 const DRIVER = "qoder-acp";
 const PROJECT_ID = /^project_[a-f0-9]{16,64}$/u;
@@ -92,28 +92,6 @@ function phaseForEvent(event, current) {
 // Discussion reuses the execution path's spawn contract unchanged: verified
 // executable identity, no shell, `--acp`, and the Agent-name fence. Only the
 // policy differs, and the shared driver derives the read-only host from it.
-function defaultTurnRunner({ ticket, environment }) {
-  return async ({ policy, prompt, turnTimeoutMs, cancellationSignal, onEvent }) => runQoderAcpTask({
-    command: ticket.command.command,
-    expectedExecutable: {
-      path: ticket.command.command,
-      identity: ticket.command.identity,
-    },
-    args: ["--acp"],
-    policy,
-    prompt,
-    environment: {},
-    baseEnvironment: environment,
-    useVerifiedJavaScriptRuntime: ticket.command.source === "verified-npm-package",
-    cancellationSignal,
-    expectedAgentName: ticket.command.source === "e2e-override"
-      ? /qoder|pageroot-e2e/iu
-      : /qoder/iu,
-    turnTimeoutMs,
-    onEvent,
-  });
-}
-
 export class DiscussionBridgeService {
   #redeemCommandTicket;
   #readWorkingCopy;
@@ -121,6 +99,7 @@ export class DiscussionBridgeService {
   #sealReply;
   #runDiscussion;
   #createTurnRunner;
+  #providerRegistry;
   #environment;
   #clock;
   #turnTimeoutMs;
@@ -133,7 +112,8 @@ export class DiscussionBridgeService {
     recordQuestion,
     sealReply,
     runDiscussion = runDiscussionTurn,
-    createTurnRunner = defaultTurnRunner,
+    createTurnRunner,
+    providerRegistry = defaultProviderRegistry,
     environment = process.env,
     clock = Date,
     turnTimeoutMs = DISCUSSION_TURN_TIMEOUT_MS,
@@ -144,7 +124,8 @@ export class DiscussionBridgeService {
       || typeof recordQuestion !== "function"
       || typeof sealReply !== "function"
       || typeof runDiscussion !== "function"
-      || typeof createTurnRunner !== "function"
+      || (createTurnRunner !== undefined && typeof createTurnRunner !== "function")
+      || typeof providerRegistry?.resolveDriver !== "function"
     ) {
       throw new TypeError("DiscussionBridgeService dependencies are invalid.");
     }
@@ -153,7 +134,10 @@ export class DiscussionBridgeService {
     this.#recordQuestion = recordQuestion;
     this.#sealReply = sealReply;
     this.#runDiscussion = runDiscussion;
-    this.#createTurnRunner = createTurnRunner;
+    this.#providerRegistry = providerRegistry;
+    this.#createTurnRunner = createTurnRunner || (({ ticket, environment: baseEnvironment }) => (
+      providerRegistry.createTurnRunner(ticket, { environment: baseEnvironment })
+    ));
     this.#environment = environment;
     this.#clock = clock;
     this.#turnTimeoutMs = turnTimeoutMs;
@@ -181,7 +165,9 @@ export class DiscussionBridgeService {
     if (this.#disposed) {
       fail("AGENT_BRIDGE_DISPOSED", "Agent Bridge 已停止。", { status: 503 });
     }
-    if (driver !== DRIVER) {
+    try {
+      this.#providerRegistry.resolveDriver(driver);
+    } catch {
       fail("AGENT_DRIVER_UNSUPPORTED", "PageRoot 只支持受管 Qoder ACP 讨论。", { status: 422 });
     }
     if (trustPolicyAccepted !== TRUSTED_LOCAL_AGENT_POLICY_VERSION) {
