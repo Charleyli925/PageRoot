@@ -308,9 +308,17 @@ async function focusChangeById(page, frame, changeId) {
   throw new Error(`Change ${changeId} never became focused.`);
 }
 
-async function chooseClipboardDelivery(page) {
+async function chooseModifyIntent(page) {
   const sidebar = page.getByTestId("ai-conversation-sidebar");
   await expect(sidebar).toBeVisible();
+  const modifyIntent = sidebar.getByRole("radio", { name: "修改", exact: true });
+  await modifyIntent.click();
+  await expect(modifyIntent).toHaveAttribute("aria-checked", "true");
+  return sidebar;
+}
+
+async function chooseClipboardDelivery(page) {
+  const sidebar = await chooseModifyIntent(page);
   await sidebar.getByRole("button", { name: /复制给别的 AI/u }).click();
 }
 
@@ -4194,6 +4202,7 @@ test("Qoder ACP Agent Bridge reaches review without clipboard or automatic adopt
     await expect(deliveryDialog.getByText("AGENT BRIDGE", { exact: true })).toHaveCount(0);
     await expect(deliveryDialog.getByText("可信本机 Agent 提示", { exact: true }))
       .toHaveCount(0);
+    await chooseModifyIntent(launched.page);
     await deliveryDialog.getByRole("button", { name: /交给 Qoder 修改/u }).click();
 
     await expect(launched.page.getByTestId("ai-conversation-action-bar"))
@@ -4337,6 +4346,7 @@ test("Qoder installed while PageRoot is open refreshes in place and continues on
     expect(requestPosts).toBe(0);
 
     await closeQoderAvailability(launched.page);
+    await chooseModifyIntent(launched.page);
     await launched.page.getByRole("button", { name: "交给 Qoder 修改" }).click();
     await expect.poll(() => requestPosts).toBe(1);
   } finally {
@@ -4378,6 +4388,7 @@ test("Qoder ACP polling waits for start and a managed stop kills the Agent", asy
     await launched.page.getByRole("button", { name: /AI 助手/u }).click();
     // The round is started from the conversation itself; the About card only
     // observes availability and never launches the Agent.
+    await chooseModifyIntent(launched.page);
     await launched.page.getByRole("button", { name: "交给 Qoder 修改" }).click();
 
     const stopButton = launched.page.getByRole("button", { name: "结束本轮" });

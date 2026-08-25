@@ -2539,7 +2539,6 @@ export default function Workbench() {
     && unfinishedEditedComment
     && commentEditSessionHasChanges(commentEditSession),
   );
-  const pendingSendItemCount = activeCommentCount;
   const interactionPreviewHtml = useMemo(() => {
     if (externalSourcePreview?.html) return externalSourcePreview.html;
     if (!browserPreviewOnly || projectName !== WELCOME_PROJECT_NAME) return html;
@@ -7158,14 +7157,9 @@ export default function Workbench() {
         setDrawer(null);
         setHandoffPreviewOpen(false);
         setCanvasMode("preview");
-        // With one shared entry, the current page context chooses the useful starting
-        // intent: comments mean modification; an untouched preview starts as discussion.
-        // The intent survives the conversation load; nothing is sent by opening.
-        aiConversation.reveal(
-          runInProgress
-            ? undefined
-            : pendingSendItemCount > 0 ? "modify" : "discuss",
-        );
+        // Opening is navigation, not an intent change. A new conversation defaults to
+        // discussion; an existing one restores the user's persisted selection.
+        aiConversation.reveal();
       }}
     />
   );

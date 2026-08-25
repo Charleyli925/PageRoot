@@ -154,8 +154,15 @@ export function useAiConversation({
   }, [controllerRef]);
 
   const onIntentChange = useCallback((intent: SidebarIntent) => {
-    controllerRef.current?.updateConversationDraftIntent(intent);
-  }, [controllerRef]);
+    if (conversationReadyForDocument(conversation, projectId, documentId)) {
+      controllerRef.current?.updateConversationDraftIntent(intent);
+      return;
+    }
+    // The intent controls are visible while the first conversation load settles.
+    // Preserve a quick user choice and apply it after that load restores the
+    // persisted draft, for the same reason reveal(intent) defers its write.
+    requestedIntentRef.current = intent;
+  }, [controllerRef, conversation, projectId, documentId]);
 
   const onCollapse = useCallback(() => setOpen(false), []);
 

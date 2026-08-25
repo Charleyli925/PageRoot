@@ -73,6 +73,9 @@ async function waitForProjectReady(page, timeout = 60_000) {
 async function chooseClipboardDelivery(page) {
   const sidebar = page.getByTestId("ai-conversation-sidebar");
   await expect(sidebar).toBeVisible();
+  const modifyIntent = sidebar.getByRole("radio", { name: "修改", exact: true });
+  await modifyIntent.click();
+  await expect(modifyIntent).toHaveAttribute("aria-checked", "true");
   await sidebar.getByRole("button", { name: /复制给别的 AI/u }).click();
 }
 
@@ -559,6 +562,11 @@ test("Electron preview mounts the AI conversation sidebar and persists a draft a
     isolatedUserData = launched.isolatedUserData;
     await loadedDiskFrame(launched.page, sourcePath, "sidebar-headline");
 
+    await openRailGlobalCommentComposer(launched.page);
+    await launched.page.getByRole("textbox", { name: "评论内容" })
+      .fill("这条评论留给后续修改，但现在先讨论页面。");
+    await launched.page.getByRole("button", { name: "评论", exact: true }).click();
+
     await launched.page.getByRole("button", { name: "预览", exact: true }).click();
     await expect(launched.page.locator('iframe[title="HTML 交互预览"]'))
       .toBeVisible();
@@ -598,6 +606,8 @@ test("Electron preview mounts the AI conversation sidebar and persists a draft a
     await launched.page.getByRole("button", { name: "AI 助手" }).click();
     await expect(launched.page.getByTestId("ai-conversation-input"))
       .toHaveValue(draftText, { timeout: 15_000 });
+    await expect(launched.page.getByRole("radio", { name: "讨论" }))
+      .toHaveAttribute("aria-checked", "true");
   } finally {
     if (electronApp && isolatedUserData) {
       await stopPageRoot(electronApp, isolatedUserData);
