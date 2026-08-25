@@ -49,7 +49,8 @@ boundary.
 ## Product Qoder ACP Agent Bridge
 
 The packaged Bridge owns the product session through
-`scripts/agent-bridge-service.mjs`. Its sole provider registry maps legacy
+`scripts/agent/agent-runtime-coordinator.mjs`; the old Service exports only
+delegate existing routes. Its sole provider registry maps legacy
 `qoder-acp` to `scripts/agent/providers/qoder-provider.mjs` and the `acp`
 runtime in `scripts/agent/runtimes/acp-runtime.mjs`; unknown provider/runtime
 IDs fail closed. The restricted Host Ports now live in `scripts/agent/hosts/`,
@@ -92,7 +93,8 @@ A crash lease, unknown cleanup or residue requires cancelling the old Request as
 an authority fence and submitting a new one. Candidate completion remains owned
 by the official finalizer plus Repository polling.
 
-The one-use ticket stores provider/runtime IDs, an opaque installation digest
+The purpose-bound one-use ticket stores provider/runtime IDs, a frozen security
+profile, an opaque installation digest
 and frozen capabilities only inside the Bridge. The renderer and Electron
 preload never receive those fields or an executable, command, spawn or path
 capability. Provider/runtime contract fixtures must be synthetic and must not

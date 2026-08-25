@@ -5,6 +5,8 @@ import { defineAgentRuntime } from "../../../scripts/agent/runtimes/agent-runtim
 export function createSyntheticQoderProviderFixture({
   calls = [],
   runOutcome = Object.freeze({ stopReason: "end_turn" }),
+  securityProfile = "client-mediated",
+  launchSecurityProfile = securityProfile,
 } = {}) {
   const installation = Object.freeze({
     fixtureId: "synthetic-qoder-installation",
@@ -20,6 +22,7 @@ export function createSyntheticQoderProviderFixture({
   const provider = defineAgentProvider({
     providerId: "qoder",
     runtimeId: "acp",
+    securityProfile,
     legacyDrivers: ["qoder-acp"],
     capabilities,
     async resolveInstallation() {
@@ -51,6 +54,9 @@ export function createSyntheticQoderProviderFixture({
     normalizePreflightError(cause) {
       return cause;
     },
+    normalizeRuntimeError(cause) {
+      return cause;
+    },
     preflightFailureMessage() {
       return "Synthetic preflight failure.";
     },
@@ -69,7 +75,11 @@ export function createSyntheticQoderProviderFixture({
     },
     createRuntimeLaunch(input) {
       calls.push("provider:create-launch");
-      return Object.freeze({ ...input, fixtureLaunch: true });
+      return Object.freeze({
+        ...input,
+        securityProfile: launchSecurityProfile,
+        fixtureLaunch: true,
+      });
     },
     classifyRunFailure(cause) {
       return cause?.code || "SYNTHETIC_RUN_FAILED";

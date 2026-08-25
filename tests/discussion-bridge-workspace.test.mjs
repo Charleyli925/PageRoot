@@ -57,6 +57,7 @@ async function createDiscussionEnvironment(t) {
   assert.equal(ensured.response.status, 200, JSON.stringify(ensured.body));
   const preflight = await bridge.postJson("/agent/preflight", {
     driver: "qoder-acp",
+    purpose: "discussion",
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
   });
   assert.equal(preflight.response.status, 200, JSON.stringify(preflight.body));

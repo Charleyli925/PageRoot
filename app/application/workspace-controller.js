@@ -377,7 +377,8 @@ export class WorkspaceController {
       this.#discussionTurnWorkflow = new DiscussionTurnWorkflow({
         bridgeClient,
         discussionTurnSession,
-        requestTicket: () => this.#runWorkflow?.spendQoderTicket() ?? Promise.resolve(null),
+        requestTicket: () => this.#runWorkflow?.spendQoderTicket("discussion")
+          ?? Promise.resolve(null),
         // A settled turn has been sealed into the conversation record, so the
         // stored message is loaded once and takes over from the live one.
         onSettled: (context) => {

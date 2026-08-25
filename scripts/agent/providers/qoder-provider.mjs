@@ -75,7 +75,7 @@ export function qoderFailure(code) {
       return "找到的 Qoder CLI 不符合独立安装校验，PageRoot 没有启动它。";
     case "QODER_VERSION_UNSUPPORTED":
       return "当前 Qoder CLI 版本不受支持。请更新后再试。";
-    case "ACP_CANCELLED":
+    case "AGENT_CANCELLED":
       return "Qoder 已停止。";
     case "ACP_AGENT_IDENTITY_MISMATCH":
       return "ACP 进程没有证明自己是 Qoder CLI，PageRoot 已停止它。";
@@ -155,6 +155,24 @@ export function classifyQoderRunFailure(cause) {
     return "QODER_ACCOUNT_CAPACITY_UNAVAILABLE";
   }
   return cleanProviderText(cause?.code, 120) || "QODER_ACP_RUN_FAILED";
+}
+
+const QODER_RUNTIME_CODE_MAP = Object.freeze({
+  ACP_CANCELLED: "AGENT_CANCELLED",
+  ACP_OUTPUT_PREEXISTS: "AGENT_OUTPUT_PREEXISTS",
+  ACP_COMPLETION_PREEXISTS: "AGENT_COMPLETION_PREEXISTS",
+  ACP_PROCESS_CLEANUP_UNCONFIRMED: "AGENT_PROCESS_CLEANUP_UNCONFIRMED",
+});
+
+export function normalizeQoderRuntimeError(cause) {
+  const code = QODER_RUNTIME_CODE_MAP[cleanProviderText(cause?.code, 120)]
+    || cleanProviderText(cause?.code, 120)
+    || "QODER_ACP_RUN_FAILED";
+  if (cause instanceof Error) {
+    cause.code = code;
+    return cause;
+  }
+  return Object.assign(new Error("Agent runtime failed."), { code });
 }
 
 function expandedHomePath(value, homeDirectory) {
@@ -457,6 +475,7 @@ export function createQoderProvider({
   return defineAgentProvider({
     providerId: QODER_PROVIDER_ID,
     runtimeId: QODER_RUNTIME_ID,
+    securityProfile: "client-mediated",
     legacyDrivers: [QODER_LEGACY_DRIVER],
     capabilities: {
       availability: true,
@@ -480,6 +499,7 @@ export function createQoderProvider({
       });
     },
     normalizePreflightError: normalizedQoderPreflightError,
+    normalizeRuntimeError: normalizeQoderRuntimeError,
     preflightFailureMessage: qoderPreflightFailure,
     loadExecutionPolicy: policyLoader,
     createRuntimeLaunch({
@@ -493,6 +513,7 @@ export function createQoderProvider({
     }) {
       const installation = ticket.installation;
       return Object.freeze({
+        securityProfile: "client-mediated",
         command: installation.command,
         expectedExecutable: {
           path: installation.command,

@@ -189,7 +189,9 @@ export class RunWorkflow {
   #agentStartsPending = new Set();
   #qoderAvailability = INITIAL_QODER_AVAILABILITY;
   #qoderPreflight = null;
+  #qoderPreflightPurpose = null;
   #qoderCheckPromise = null;
+  #qoderCheckPurpose = null;
   #disposed = false;
 
   constructor({
@@ -1589,9 +1591,10 @@ export class RunWorkflow {
    * dropped on the way out: a ticket handed over to be spent must never be
    * replayed by a later execution submit.
    */
-  async spendQoderTicket() {
-    const preflight = await this.#requireQoderPreflight();
+  async spendQoderTicket(purpose = "discussion") {
+    const preflight = await this.#requireQoderPreflight({ purpose });
     this.#qoderPreflight = null;
+    this.#qoderPreflightPurpose = null;
     return Object.freeze({
       driver: "qoder-acp",
       preflightId: preflight.preflightId,
@@ -1599,8 +1602,9 @@ export class RunWorkflow {
     });
   }
 
-  #reusableQoderPreflight() {
+  #reusableQoderPreflight(purpose) {
     if (!this.#qoderPreflight?.preflightId) return null;
+    if (this.#qoderPreflightPurpose !== purpose) return null;
     const expiresAt = Date.parse(String(this.#qoderPreflight.expiresAt || ""));
     if (!Number.isFinite(expiresAt) || expiresAt <= this.#clock.now()) {
       this.#qoderPreflight = null;
@@ -1609,18 +1613,23 @@ export class RunWorkflow {
     return this.#qoderPreflight;
   }
 
-  async #requireQoderPreflight({ force = false } = {}) {
+  async #requireQoderPreflight({ force = false, purpose = "execution" } = {}) {
     if (!force) {
-      const reusable = this.#reusableQoderPreflight();
+      const reusable = this.#reusableQoderPreflight(purpose);
       if (reusable) return reusable;
     }
-    if (this.#qoderCheckPromise) return this.#qoderCheckPromise;
+    if (this.#qoderCheckPromise) {
+      if (this.#qoderCheckPurpose === purpose) return this.#qoderCheckPromise;
+      await this.#qoderCheckPromise.catch(() => {});
+      return this.#requireQoderPreflight({ force, purpose });
+    }
     const previous = this.#qoderAvailability;
     this.#setQoderAvailability(checkingQoderAvailability(previous));
     const checking = (async () => {
       try {
         const preflight = await this.#bridgeClient.preflightAgent({
           driver: "qoder-acp",
+          purpose,
           trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
         });
         if (preflight?.status !== "ready" || !preflight.preflightId) {
@@ -1630,12 +1639,14 @@ export class RunWorkflow {
           );
         }
         this.#qoderPreflight = Object.freeze({ ...preflight });
+        this.#qoderPreflightPurpose = purpose;
         this.#setQoderAvailability(readyQoderAvailability(
           validDate(this.#clock),
         ));
         return this.#qoderPreflight;
       } catch (cause) {
         this.#qoderPreflight = null;
+        this.#qoderPreflightPurpose = null;
         this.#setQoderAvailability(qoderAvailabilityFromFailureCode(
           errorCode(cause, "QODER_PREFLIGHT_FAILED"),
           previous,
@@ -1645,10 +1656,12 @@ export class RunWorkflow {
       }
     })();
     this.#qoderCheckPromise = checking;
+    this.#qoderCheckPurpose = purpose;
     try {
       return await checking;
     } finally {
       if (this.#qoderCheckPromise === checking) this.#qoderCheckPromise = null;
+      if (this.#qoderCheckPromise === null) this.#qoderCheckPurpose = null;
     }
   }
 

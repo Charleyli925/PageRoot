@@ -1,5 +1,6 @@
 import {
   agentProviderError,
+  assertAgentSecurityProfile,
   assertProviderTicket,
 } from "./agent-provider-contract.mjs";
 import { createQoderProvider } from "./qoder-provider.mjs";
@@ -67,6 +68,7 @@ export function createProviderRegistry({ providers = [], runtimeRegistry } = {})
     const binding = bindingForProvider(resolveProvider(ticket.providerId));
     if (
       binding.provider.runtimeId !== ticket.runtimeId
+      || binding.provider.securityProfile !== ticket.securityProfile
       || !binding.provider.legacyDrivers.includes(ticket.driver)
     ) {
       throw agentProviderError(
@@ -100,6 +102,7 @@ export function createProviderRegistry({ providers = [], runtimeRegistry } = {})
           driver,
           providerId: provider.providerId,
           runtimeId: provider.runtimeId,
+          securityProfile: provider.securityProfile,
           installation,
           installationDigest: provider.installationDigest(installation),
           capabilities: provider.capabilities,
@@ -123,11 +126,29 @@ export function createProviderRegistry({ providers = [], runtimeRegistry } = {})
     },
     async loadExecutionPolicy(ticket, input) {
       const { provider } = resolveTicket(ticket);
-      return provider.loadExecutionPolicy(input);
+      try {
+        return await provider.loadExecutionPolicy(input);
+      } catch (cause) {
+        throw provider.normalizeRuntimeError(cause);
+      }
     },
     async run(ticket, input) {
       const { provider, runtime } = resolveTicket(ticket);
-      return runtime.run(provider.createRuntimeLaunch({ ticket, ...input }));
+      const launch = provider.createRuntimeLaunch({ ticket, ...input });
+      if (!launch || typeof launch !== "object" || Array.isArray(launch)
+        || assertAgentSecurityProfile(launch.securityProfile, "launch securityProfile")
+          !== ticket.securityProfile) {
+        throw agentProviderError(
+          "AGENT_SECURITY_PROFILE_MISMATCH",
+          "Agent launch security profile does not match its ticket.",
+          { status: 409 },
+        );
+      }
+      try {
+        return await runtime.run(Object.freeze({ ...launch }));
+      } catch (cause) {
+        throw provider.normalizeRuntimeError(cause);
+      }
     },
     createTurnRunner(ticket, { environment }) {
       resolveTicket(ticket);
@@ -142,7 +163,7 @@ export function createProviderRegistry({ providers = [], runtimeRegistry } = {})
     },
     classifyRunFailure(ticket, cause) {
       const { provider } = resolveTicket(ticket);
-      return provider.classifyRunFailure(cause);
+      return provider.classifyRunFailure(provider.normalizeRuntimeError(cause));
     },
     failureMessage(ticket, code) {
       const { provider } = resolveTicket(ticket);

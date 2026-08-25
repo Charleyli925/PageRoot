@@ -1,6 +1,10 @@
 import { LifecycleError } from "../../lifecycle-core.mjs";
 
 const SAFE_COMPONENT_ID = /^[a-z][a-z0-9-]{0,63}$/u;
+export const AGENT_SECURITY_PROFILES = Object.freeze([
+  "client-mediated",
+  "agent-native",
+]);
 const CAPABILITY_NAMES = Object.freeze([
   "availability",
   "preflight",
@@ -27,6 +31,17 @@ function assertComponentId(value, label) {
   return value;
 }
 
+export function assertAgentSecurityProfile(value, label = "securityProfile") {
+  if (!AGENT_SECURITY_PROFILES.includes(value)) {
+    throw agentProviderError(
+      "AGENT_SECURITY_PROFILE_INVALID",
+      `Agent ${label} is invalid.`,
+      { status: 409 },
+    );
+  }
+  return value;
+}
+
 function normalizedCapabilities(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new TypeError("Agent provider capabilities must be an object.");
@@ -46,6 +61,10 @@ export function defineAgentProvider(value) {
   }
   const providerId = assertComponentId(value.providerId, "providerId");
   const runtimeId = assertComponentId(value.runtimeId, "runtimeId");
+  const securityProfile = assertAgentSecurityProfile(
+    value.securityProfile,
+    "provider securityProfile",
+  );
   const legacyDrivers = Array.isArray(value.legacyDrivers)
     ? [...new Set(value.legacyDrivers.map((driver) => assertComponentId(driver, "legacy driver")))]
     : [];
@@ -59,6 +78,7 @@ export function defineAgentProvider(value) {
     "installationDigest",
     "availabilityFailure",
     "normalizePreflightError",
+    "normalizeRuntimeError",
     "preflightFailureMessage",
     "loadExecutionPolicy",
     "createRuntimeLaunch",
@@ -74,6 +94,7 @@ export function defineAgentProvider(value) {
     ...value,
     providerId,
     runtimeId,
+    securityProfile,
     legacyDrivers: Object.freeze(legacyDrivers),
     capabilities: normalizedCapabilities(value.capabilities),
   });
@@ -89,6 +110,7 @@ export function assertProviderTicket(ticket) {
   }
   assertComponentId(ticket.providerId, "ticket providerId");
   assertComponentId(ticket.runtimeId, "ticket runtimeId");
+  assertAgentSecurityProfile(ticket.securityProfile, "ticket securityProfile");
   if (typeof ticket.installationDigest !== "string" || !/^sha256:[a-f0-9]{64}$/u.test(ticket.installationDigest)) {
     throw agentProviderError(
       "AGENT_PROVIDER_TICKET_INVALID",

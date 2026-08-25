@@ -94,9 +94,9 @@ The renderer's main workspace facts are partitioned as follows:
   reconciliation, tracked-run polling, stop-before-durable-cancel ordering,
   conflict commands and confirmed clipboard fallback. It publishes through
   `RunSession` and never creates a second run store;
-- Bridge `AgentBridgeService`: ephemeral provider/runtime-bound preflight tickets,
-  task-keyed child/session lifetime, persistent crash/orphan launch fence,
-  bounded public progress and cleanup.
+- Bridge `AgentRuntimeCoordinator`: ephemeral provider/runtime/security-profile/
+  purpose-bound preflight tickets, both session lifetimes, persistent launch
+  fence, bounded canonical progress and cleanup. Legacy Services only delegate.
   It never owns or writes Request/Candidate/Version state; task authority is
   re-derived from the registered Repository/runtime record, and only the
   official finalizer plus Repository status path can publish a Candidate;
@@ -112,6 +112,10 @@ The renderer's main workspace facts are partitioned as follows:
   including cancellation fencing, completion proof and managed terminal
   cleanup. Provider/runtime code may invoke these ports but cannot choose their
   paths, command, success criteria or durable outcome;
+  these Ports constrain only requests mediated through the ACP Client Host.
+  They are not a sandbox for native filesystem or command operations performed
+  by an Agent process. An `agent-native` provider requires a separate sandbox
+  conformance and security gate before registration;
 - `VersionSession`: immutable Version records plus the current/history
   projection facts;
 - `VersionWorkflow`: Version operation identity/generation, Bridge version

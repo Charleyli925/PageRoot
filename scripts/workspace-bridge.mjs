@@ -47,7 +47,6 @@ import {
 } from "./agent-bridge-service.mjs";
 import { DiscussionBridgeService } from "./discussion-bridge-service.mjs";
 import {
-  cancelDurableRequestAfterAgentCleanup,
   closeWorkspaceBridgeAfterAgentCleanup,
 } from "./workspace-bridge-shutdown.mjs";
 import { createEmptySourceHistory } from "../shared/source-history.mjs";
@@ -88,7 +87,7 @@ const agentBridgeService = new AgentBridgeService({
 // the Agent service, reads Working Copy bytes through the repository, and records
 // the round through the same conversation writer every other message uses.
 const discussionBridgeService = new DiscussionBridgeService({
-  redeemCommandTicket: (preflightId) => agentBridgeService.redeemCommandTicket(preflightId),
+  coordinator: agentBridgeService.runtimeCoordinator,
   readWorkingCopy: ({ sourcePath }) => projectFileWorkspaceForSource(
     requiredSourcePath(sourcePath),
   ),
@@ -1377,14 +1376,14 @@ async function cancelProjectFileRequest(body) {
   const target = await projectFileTargetForBody(body);
   if (!target) return null;
   try {
-    const cancelled = await cancelDurableRequestAfterAgentCleanup({
-      cancelAgent: () => agentBridgeService.cancel({
+    const cancelled = await agentBridgeService.cancelDurable({
+      identity: {
         projectId: target.projectId,
         documentId: target.documentId,
         sourcePath: target.exactSourcePath,
         requestId: body.requestId,
         attemptId: body.attemptId || "attempt_001",
-      }),
+      },
       cancelRequest: () => projectFileRepository.cancelRequest({
         target,
         requestId: body.requestId,

@@ -208,6 +208,26 @@
         "to": "bridge/agent-bridge-service.mjs"
       },
       {
+        "from": "scripts/agent/agent-runtime-coordinator.mjs",
+        "to": "bridge/agent/agent-runtime-coordinator.mjs"
+      },
+      {
+        "from": "scripts/agent/agent-session-projector.mjs",
+        "to": "bridge/agent/agent-session-projector.mjs"
+      },
+      {
+        "from": "scripts/agent/agent-lease-store.mjs",
+        "to": "bridge/agent/agent-lease-store.mjs"
+      },
+      {
+        "from": "scripts/agent/agent-events.mjs",
+        "to": "bridge/agent/agent-events.mjs"
+      },
+      {
+        "from": "scripts/agent/agent-errors.mjs",
+        "to": "bridge/agent/agent-errors.mjs"
+      },
+      {
         "from": "scripts/agent/providers/agent-provider-contract.mjs",
         "to": "bridge/agent/providers/agent-provider-contract.mjs"
       },

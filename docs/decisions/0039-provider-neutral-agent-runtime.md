@@ -35,8 +35,9 @@ Introduce two internal contracts and two fail-closed registries under
   runtimes and legacy drivers fail closed before a ticket is consumed or a
   process is started.
 
-The Bridge continues to own the bounded one-use ticket store and task/session
-lifecycle. Each internal ticket now binds `providerId`, `runtimeId`, an opaque
+The Bridge coordinator owns the bounded purpose-bound one-use ticket store and
+both session lifecycles. Each ticket binds `providerId`, `runtimeId`,
+`securityProfile`, purpose, an opaque
 installation, `installationDigest` and frozen capabilities as well as preflight
 evidence. Redemption rechecks the installation and digest. None of those new
 fields crosses the existing HTTP/session projection; renderer callers still
@@ -47,8 +48,8 @@ ACP runtime is deliberately thin in this phase: it delegates to the existing
 hardened ACP process/host implementation while owning the immutable standard
 event adapter. Restricted execution/discussion hosts and filesystem policy stay
 in `qoder-acp-client.mjs`; their PR2 extraction is not part of this decision.
-Run/Discussion coordination and durable ownership also stay unchanged; their
-PR3 convergence is not part of this decision.
+PR3 converges Run/Discussion coordination in `AgentRuntimeCoordinator`; the old
+Service classes remain stateless compatibility façades.
 
 The immediately following PR2 completes that planned extraction without
 changing this decision: `scripts/agent/policies/` now owns the one branded
@@ -56,9 +57,9 @@ execution/discussion policy family, and `scripts/agent/hosts/` owns the two
 permission-separated Host Ports. `qoder-acp-client.mjs` retains the legacy
 exports as compatibility adapters and owns the legacy error name/code/copy
 mapping as well as transport/provider behavior.
-The shared Host/Policy sources contain no provider or transport identifier, so
-a runtime can invoke only the sealed Host Port and cannot select paths,
-commands, completion evidence or mutation authority.
+The shared Host/Policy sources contain no provider or transport identifier.
+They constrain requests mediated by the ACP Client Host; they do not constrain
+native filesystem or command operations inside an Agent process.
 
 ## Compatibility and security
 
@@ -75,6 +76,12 @@ spawn, but they remain inside the Bridge ticket. Availability, preflight,
 session status and Electron preload expose no executable, command, spawn or
 path capability. Raw stderr remains live-process-only classification input and
 never enters a public response.
+
+The canonical provider/ticket/launch descriptor freezes one of
+`client-mediated | agent-native`. Qoder is fixed to `client-mediated`.
+`agent-native` reserves a future contract shape only; no such provider is
+registered. It requires an independent sandbox conformance/security gate, and
+a ticket/launch profile mismatch fails closed.
 
 ## Golden compatibility baseline
 

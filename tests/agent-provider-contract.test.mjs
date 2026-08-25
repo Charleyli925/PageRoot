@@ -10,6 +10,7 @@ import { createProviderRegistry } from "../scripts/agent/providers/provider-regi
 import { createRuntimeRegistry } from "../scripts/agent/runtimes/runtime-registry.mjs";
 import {
   classifyQoderRunFailure,
+  normalizeQoderRuntimeError,
   normalizedQoderPreflightError,
 } from "../scripts/agent/providers/qoder-provider.mjs";
 import {
@@ -112,6 +113,7 @@ test("legacy qoder-acp dispatch resolves once to the qoder provider and ACP runt
   assert.equal(prepared.driver, "qoder-acp");
   assert.equal(prepared.providerId, "qoder");
   assert.equal(prepared.runtimeId, "acp");
+  assert.equal(prepared.securityProfile, "client-mediated");
   assert.match(prepared.installationDigest, /^sha256:[a-f0-9]{64}$/u);
   assert.deepEqual(prepared.capabilities, fixture.capabilities);
   assert.deepEqual(prepared.evidence.models, [
@@ -156,11 +158,64 @@ test("unknown provider, runtime, and legacy driver fail closed", async () => {
       driver: "qoder-acp",
       providerId: "unknown-provider",
       runtimeId: "acp",
+      securityProfile: "client-mediated",
       installationDigest: `sha256:${"a".repeat(64)}`,
       capabilities: fixture.capabilities,
     }),
     (error) => error?.code === "AGENT_PROVIDER_UNSUPPORTED",
   );
+});
+
+test("security profiles are frozen across provider, ticket, and runtime launch", async () => {
+  const mismatched = createSyntheticQoderProviderFixture({
+    securityProfile: "client-mediated",
+    launchSecurityProfile: "agent-native",
+  });
+  const registry = createProviderRegistry({
+    providers: [mismatched.provider],
+    runtimeRegistry: createRuntimeRegistry([mismatched.runtime]),
+  });
+  const prepared = await registry.preflight({ driver: "qoder-acp", environment: {} });
+  assert.equal(Object.isFrozen(prepared), true);
+  assert.equal(prepared.securityProfile, "client-mediated");
+  await assert.rejects(
+    registry.run(Object.freeze({
+      ...prepared,
+      preflightId: "preflight_security_mismatch",
+    }), {
+      policy: {},
+      prompt: "test",
+      onEvent: () => {},
+    }),
+    (error) => ["AGENT_SECURITY_PROFILE_MISMATCH", "AGENT_SECURITY_PROFILE_INVALID"]
+      .includes(error?.code),
+  );
+
+  const reserved = createSyntheticQoderProviderFixture({ securityProfile: "agent-native" });
+  assert.equal(reserved.provider.securityProfile, "agent-native");
+  assert.equal(Object.isFrozen(reserved.provider), true);
+  assert.throws(
+    () => createSyntheticQoderProviderFixture({ securityProfile: "unknown-profile" }),
+    (error) => error?.code === "AGENT_SECURITY_PROFILE_INVALID",
+  );
+});
+
+test("provider boundary normalizes ACP raw failures before coordinator ownership", async () => {
+  const mappings = {
+    ACP_CANCELLED: "AGENT_CANCELLED",
+    ACP_OUTPUT_PREEXISTS: "AGENT_OUTPUT_PREEXISTS",
+    ACP_COMPLETION_PREEXISTS: "AGENT_COMPLETION_PREEXISTS",
+    ACP_PROCESS_CLEANUP_UNCONFIRMED: "AGENT_PROCESS_CLEANUP_UNCONFIRMED",
+  };
+  for (const [raw, canonical] of Object.entries(mappings)) {
+    const cause = Object.assign(new Error("private runtime detail"), { code: raw });
+    assert.equal(normalizeQoderRuntimeError(cause).code, canonical);
+  }
+  const coordinatorSource = await readFile(
+    new URL("../scripts/agent/agent-runtime-coordinator.mjs", import.meta.url),
+    "utf8",
+  );
+  assert.doesNotMatch(coordinatorSource, /\bACP_/u);
 });
 
 test("Bridge keeps the legacy HTTP projection while tickets remain provider/runtime bound", async (t) => {

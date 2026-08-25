@@ -245,6 +245,14 @@ closed rather than forgetting an unowned local process.
 Quit, relaunch and update installation also fail closed: the Bridge stays alive
 and the desktop app remains open unless all owned Agent cleanup is confirmed.
 
+Every provider, ticket and launch descriptor freezes one `securityProfile`.
+The installed Qoder mapping is `client-mediated`: the Host modules can allow
+or deny only file and terminal requests sent through the ACP Client Host. They
+do not constrain native file or command operations performed inside the Agent
+process. `agent-native` is reserved by the contract but no such provider is
+registered; registration requires a separate sandbox conformance and security
+gate. Unknown or mixed ticket/launch profiles fail closed.
+
 A read-only discussion turn is a narrower surface on the same trust boundary.
 The renderer may request `POST /discussion/start`, `GET /discussion/status` and
 `POST /discussion/cancel` with registered document identity, the fixed
