@@ -231,6 +231,7 @@ const PROJECT_CHANNELS = Object.freeze({
   listRecentProjects: "html-projects:list-recent",
   listRegisteredProjects: "html-projects:list-registered",
   openRegisteredProject: "html-projects:open-registered",
+  renameRegisteredProject: "html-projects:rename-registered-project",
   openRecent: "html-projects:open-recent",
   forgetRecent: "html-projects:forget-recent",
   acceptExternalOpen: "html-projects:accept-external-open",
@@ -3169,6 +3170,181 @@ async function openRegisteredProject(projectIdInput) {
   });
 }
 
+function assertRegisteredProjectRenamePayload(payload) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    throw new TypeError("项目重命名参数无效。");
+  }
+  const allowedKeys = new Set(["projectId", "stem"]);
+  if (Object.keys(payload).some((key) => !allowedKeys.has(key))) {
+    throw new TypeError("项目重命名参数包含未支持的字段。");
+  }
+  // Only the shape is checked here. Which names a project folder may carry is a
+  // Registry rule, so the Registry stays its single judge instead of two layers
+  // keeping two copies of the rule that can drift apart.
+  const stem = typeof payload.stem === "string" ? payload.stem : "";
+  if (!stem || stem.length > 180 || stem.includes("\0")) {
+    throw new TypeError("项目名称无效。");
+  }
+  return { projectId: assertRegisteredProjectId(payload.projectId), stem };
+}
+
+async function adoptRenamedRegisteredProjectPath(state, {
+  previousSourcePath,
+  nextSourcePath,
+  registeredProjectRootPath,
+  sourceSha256,
+}) {
+  const activePathIdentity = state.activePath
+    ? await existingPathIdentity(state.activePath)
+    : null;
+  const recentPathIdentities = await Promise.all(
+    state.recent.map((entry) => existingPathIdentity(entry.path)),
+  );
+  const movesActiveProject = activePathIdentity === previousSourcePath
+    || activePathIdentity === nextSourcePath;
+  const replacedIndex = recentPathIdentities.findIndex(
+    (identity) => identity === previousSourcePath || identity === nextSourcePath,
+  );
+  // A rename is not an open. A project that was never in Recent must not gain
+  // an entry here, or renaming it would make it rank as freshly opened.
+  if (replacedIndex >= 0) {
+    const replaced = state.recent[replacedIndex];
+    state.recent = state.recent.map((entry, index) => (
+      index === replacedIndex
+        ? {
+          path: nextSourcePath,
+          name: path.basename(nextSourcePath),
+          lastOpenedAt: Number(replaced.lastOpenedAt) || Date.now(),
+        }
+        : entry
+    ));
+  }
+  if (movesActiveProject) {
+    state.activePath = nextSourcePath;
+    state.activeManagedLocator = rebaseActiveManagedLocator(
+      state.activeManagedLocator,
+      {
+        previousSourcePath,
+        nextSourcePath,
+        sourceSha256,
+        projectRootPath: registeredProjectRootPath,
+      },
+    );
+  }
+  // Imported asset roots are keyed by the project folder, so the move has to
+  // carry the memo to the new key. Losing it would silently downgrade a C-class
+  // project's preview to the copied assets instead of the live originals.
+  const carriedAssetRoot = await importedAssetRootForProjectPath(
+    state.importedAssetRoots,
+    previousSourcePath,
+  );
+  if (carriedAssetRoot) {
+    state.importedAssetRoots = rememberImportedAssetRoot(
+      await forgetImportedAssetRootsForPath(
+        state.importedAssetRoots,
+        previousSourcePath,
+      ),
+      {
+        projectRootPath: registeredProjectRootPath,
+        originalSourcePath: carriedAssetRoot.originalSourcePath,
+      },
+    );
+  }
+  await persistProjectState();
+  if (movesActiveProject) {
+    sourceFileWatcher.watch(nextSourcePath);
+    await restoreActiveImportedAssetSource(nextSourcePath);
+  }
+  return movesActiveProject;
+}
+
+async function renameRegisteredProjectOperation(payload) {
+  const requested = assertRegisteredProjectRenamePayload(payload);
+  const response = await fetchBridgeCommand("/registered-project/rename", {
+    projectId: requested.projectId,
+    stem: requested.stem,
+  });
+  const target = response.openTarget;
+  const previousProjectRootPath = typeof response.previousProjectRootPath === "string"
+    ? path.resolve(response.previousProjectRootPath)
+    : "";
+  const registeredProjectRootPath = typeof target?.projectRootPath === "string"
+    ? path.resolve(target.projectRootPath)
+    : "";
+  const reportedSourcePath = typeof target?.exactSourcePath === "string"
+    ? path.resolve(target.exactSourcePath)
+    : "";
+  if (
+    response.projectId !== requested.projectId
+    || typeof response.projectName !== "string"
+    || !response.projectName
+    || !target
+    || typeof target !== "object"
+    || target.targetKind !== "working-copy"
+    || target.projectId !== requested.projectId
+    || !/^doc_[a-f0-9]{16,64}$/u.test(String(target.documentId || ""))
+    || !/^work_ver_\d{4,}$/u.test(String(target.workingCopyId || ""))
+    || !/^ver_\d{4,}$/u.test(String(target.versionId || ""))
+    || !/^sha256:[a-f0-9]{64}$/u.test(String(response.sourceSha256 || ""))
+    || target.sourceSha256 !== response.sourceSha256
+    || !previousProjectRootPath
+    || !registeredProjectRootPath
+    || path.basename(registeredProjectRootPath) !== response.projectName
+    // Both folders are direct children of the same projects root and the
+    // visible HTML sits directly inside the project folder. The canonical
+    // previous path below is derived from exactly those two facts, so they are
+    // asserted here rather than assumed.
+    || path.dirname(previousProjectRootPath) !== path.dirname(registeredProjectRootPath)
+    || path.dirname(reportedSourcePath) !== registeredProjectRootPath
+  ) {
+    throw new ProjectFileError(
+      "REGISTERED_PROJECT_RENAME_TARGET_INVALID",
+      "项目目录未确认这次重命名的结果，桌面状态没有改变。",
+    );
+  }
+  const nextSourcePath = await existingPathIdentity(
+    assertHtmlPath(reportedSourcePath, "openTarget.exactSourcePath"),
+  );
+  const project = await readHtmlProject(nextSourcePath);
+  if (project.sha256 !== response.sourceSha256) {
+    throw new ProjectFileError(
+      "REGISTERED_PROJECT_HASH_MISMATCH",
+      "项目 HTML 在读取期间发生变化，桌面状态没有改变。",
+    );
+  }
+  // The previous folder no longer exists, so realpath() can no longer resolve
+  // it. Swapping the folder name inside the already-canonical new path
+  // reproduces the exact identity the previous path carried while it existed,
+  // which is the form the persisted active and recent paths were recorded in.
+  const previousSourcePath = path.join(
+    path.dirname(path.dirname(nextSourcePath)),
+    path.basename(previousProjectRootPath),
+    path.basename(nextSourcePath),
+  );
+  const state = await loadProjectState();
+  const movedActiveProject = await adoptRenamedRegisteredProjectPath(state, {
+    previousSourcePath,
+    nextSourcePath,
+    registeredProjectRootPath,
+    sourceSha256: response.sourceSha256,
+  });
+  return {
+    ...project,
+    projectId: requested.projectId,
+    projectName: response.projectName,
+    previousProjectRootPath,
+    registeredProjectRootPath,
+    previousSourcePath,
+    sourcePath: nextSourcePath,
+    renamed: response.renamed === true,
+    movedActiveProject,
+  };
+}
+
+async function renameRegisteredProject(payload) {
+  return projectOpenQueue.run(() => renameRegisteredProjectOperation(payload));
+}
+
 async function openRecent(filePath) {
   return projectOpenQueue.run(async () => {
     const normalizedPath = assertHtmlPath(filePath);
@@ -3347,6 +3523,10 @@ function registerProjectIpc() {
   ipcMain.handle(
     PROJECT_CHANNELS.openRegisteredProject,
     trustedProject(openRegisteredProject),
+  );
+  ipcMain.handle(
+    PROJECT_CHANNELS.renameRegisteredProject,
+    trustedProject(renameRegisteredProject),
   );
   ipcMain.handle(PROJECT_CHANNELS.openRecent, trustedProject(openRecent));
   ipcMain.handle(PROJECT_CHANNELS.forgetRecent, trustedProject(forgetRecentProject));

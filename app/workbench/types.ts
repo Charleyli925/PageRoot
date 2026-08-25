@@ -149,6 +149,18 @@ export type DesktopProjectsApi = {
   listRecentProjects: () => Promise<RecentProject[]>;
   listRegisteredProjects?: () => Promise<RegisteredProject[]>;
   openRegisteredProject?: (projectId: string) => Promise<HtmlProject>;
+  renameRegisteredProject?: (payload: {
+    projectId: string;
+    stem: string;
+  }) => Promise<HtmlProject & {
+    projectId: string;
+    projectName: string;
+    previousProjectRootPath: string;
+    registeredProjectRootPath: string;
+    previousSourcePath: string;
+    renamed: boolean;
+    movedActiveProject: boolean;
+  }>;
   openRecent: (sourcePath: string) => Promise<HtmlOpenResult>;
   forgetRecent?: (sourcePath: string) => Promise<{ sourcePath: string }>;
   acceptExternalOpen?: (requestId: string) => Promise<HtmlOpenResult>;

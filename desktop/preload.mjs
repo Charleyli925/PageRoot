@@ -22,6 +22,7 @@ const channels = Object.freeze({
   listRecentProjects: "html-projects:list-recent",
   listRegisteredProjects: "html-projects:list-registered",
   openRegisteredProject: "html-projects:open-registered",
+  renameRegisteredProject: "html-projects:rename-registered-project",
   openRecent: "html-projects:open-recent",
   forgetRecent: "html-projects:forget-recent",
   acceptExternalOpen: "html-projects:accept-external-open",
@@ -155,6 +156,13 @@ const projectsApi = Object.freeze({
   openRegisteredProject: (projectId) => invokeProject(
     channels.openRegisteredProject,
     projectId,
+  ),
+  renameRegisteredProject: (payload) => invokeProject(
+    channels.renameRegisteredProject,
+    {
+      projectId: payload?.projectId,
+      stem: payload?.stem,
+    },
   ),
   openRecent: (sourcePath) => invokeProject(channels.openRecent, sourcePath),
   forgetRecent: (sourcePath) => invokeProject(channels.forgetRecent, sourcePath),

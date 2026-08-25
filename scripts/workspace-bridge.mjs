@@ -361,6 +361,7 @@ function projectFileHttpError(cause) {
       "PROMOTION_WORKING_COPY_MISSING",
       "PROMOTION_VERSION_MISSING",
       "IMPORT_REGISTRY_CONFLICT",
+      "PROJECT_DIRECTORY_COLLISION",
       "IMPORT_IDENTITY_MISMATCH",
       "IMPORT_RECOVERY_INVALID",
       "IMPORT_RECOVERY_AMBIGUOUS",
@@ -391,6 +392,8 @@ function projectFileHttpError(cause) {
         "INVALID_OPERATION_ID",
         "INVALID_RECONCILE_REASON",
         "INVALID_FILE_STEM",
+        "INVALID_PROJECT_NAME",
+        "PROJECT_NAME_TOO_LONG",
         "PATH_COMPONENT_TOO_LONG",
         "INVALID_CANDIDATE_ID",
         "CANDIDATE_UNUSABLE",
@@ -439,6 +442,32 @@ async function registeredProjectOpen(projectId) {
       sourcePath: resolved.target.exactSourcePath,
       sourceSha256: resolved.sourceSha256,
       openTarget: resolved.target,
+    };
+  } catch (cause) {
+    throw projectFileHttpError(cause);
+  }
+}
+
+async function renameRegisteredProject(body = {}) {
+  try {
+    const renamed = await projectFileRepository.renameRegisteredProject({
+      projectId: registeredProjectId(body?.projectId),
+      stem: body?.stem,
+    });
+    // The response carries both sides of the move because the caller owns
+    // runtime state keyed by the visible HTML path. Which path is registered
+    // stays a Registry fact, reported here rather than recomputed by the caller.
+    return {
+      ok: true,
+      renamed: renamed.renamed,
+      projectId: renamed.projectId,
+      projectName: renamed.projectName,
+      previousProjectRootPath: renamed.previousProjectRootPath,
+      registeredProjectRootPath: renamed.registeredProjectRootPath,
+      previousSourcePath: renamed.previousSourcePath,
+      sourcePath: renamed.target.exactSourcePath,
+      sourceSha256: renamed.sourceSha256,
+      openTarget: renamed.target,
     };
   } catch (cause) {
     throw projectFileHttpError(cause);
@@ -2388,6 +2417,11 @@ async function route(request, response) {
       200,
       await registeredProjectOpen(url.searchParams.get("projectId")),
     );
+    return;
+  }
+  if (request.method === "POST" && url.pathname === "/registered-project/rename") {
+    const body = await readBody(request);
+    sendJson(response, 200, await renameRegisteredProject(body));
     return;
   }
   if (request.method === "POST" && url.pathname === "/managed-working-copy/reconcile") {

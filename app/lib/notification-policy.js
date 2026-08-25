@@ -55,6 +55,12 @@ const PRODUCT_ERROR_MESSAGES = Object.freeze({
     "当前工作文件身份无法核对，PageRoot 没有切换路径。",
   INVALID_RENAME_STEM:
     "请输入不含路径、后缀和特殊符号的文件名。",
+  PROJECT_DIRECTORY_COLLISION:
+    "已经有同名的项目文件夹，请换一个项目名。",
+  INVALID_PROJECT_NAME:
+    "请输入不含路径和特殊符号、也不以点开头或结尾的项目名。",
+  PROJECT_NAME_TOO_LONG:
+    "项目名太长，请换一个更短的名字。",
   REGISTERED_PROJECT_PATH_MISMATCH:
     "当前文件夹不是项目的登记位置。PageRoot 没有写入。",
   REGISTERED_PROJECT_IDENTITY_CHANGED:

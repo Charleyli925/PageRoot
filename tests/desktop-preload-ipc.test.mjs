@@ -390,6 +390,40 @@ test("preload exposes Registry catalog reads and projectId-only opens", async ()
   ]);
 });
 
+test("preload narrows a registered project rename to projectId and stem", async () => {
+  const calls = [];
+  const api = await loadPreload(async (...args) => {
+    calls.push(args);
+    return success({
+      renamed: true,
+      projectId: "project_0123456789abcdef",
+      projectName: "季度报告",
+    });
+  });
+
+  assert.deepEqual(
+    await api.renameRegisteredProject({
+      projectId: "project_0123456789abcdef",
+      stem: "季度报告",
+      registeredProjectRootPath: "/Users/demo/Documents/PageRoot/项目/报告",
+    }),
+    {
+      renamed: true,
+      projectId: "project_0123456789abcdef",
+      projectName: "季度报告",
+    },
+  );
+  // The renderer may only ask for a name. Any extra field it passes is dropped
+  // here so the Main process never receives a path it could be talked into
+  // trusting instead of the registered one.
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [
+    [
+      "html-projects:rename-registered-project",
+      { projectId: "project_0123456789abcdef", stem: "季度报告" },
+    ],
+  ]);
+});
+
 test("preload exposes the structured Finder reveal operation", async () => {
   const calls = [];
   const api = await loadPreload(async (...args) => {

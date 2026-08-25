@@ -3930,6 +3930,96 @@ test("Electron follows a title-bar rename, then Finder, then another title-bar r
   }
 });
 
+// The project name is the registered folder name, so renaming it in product has
+// to move that folder on disk while leaving the HTML inside it alone. The two
+// pencils in the window are deliberately different operations.
+test("Electron renames the project folder from the header and leaves the HTML name alone", async () => {
+  const fixture = createSourceFixture("project-folder-rename.html");
+  let electronApp = null;
+  let isolatedUserData = null;
+  try {
+    const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+    electronApp = launched.electronApp;
+    isolatedUserData = launched.isolatedUserData;
+    await loadedDiskFrame(launched.page, fixture.sourcePath, "list-item");
+    const managedSourcePath = await managedWorkingCopyPath(
+      launched.page,
+      fixture.sourcePath,
+    );
+    const htmlName = path.basename(managedSourcePath);
+    const previousRoot = path.dirname(managedSourcePath);
+    const projectsRoot = path.dirname(previousRoot);
+    const beforeWorkspace = await bridgeJson(
+      launched.page,
+      `/workspace?sourcePath=${encodeURIComponent(managedSourcePath)}`,
+    );
+    const beforeTarget = beforeWorkspace.body?.openTarget || beforeWorkspace.body;
+    const beforeIds = {
+      projectId: beforeTarget.projectId,
+      documentId: beforeTarget.documentId,
+      workingCopyId: beforeTarget.workingCopyId || beforeTarget.activeWorkingCopyId,
+    };
+    const beforeManifest = await readManagedManifest(managedSourcePath);
+    const projectNameChip = (name) => launched.page.locator(
+      `[title="项目文件夹：${name}"]`,
+    );
+    await expect(projectNameChip(path.basename(previousRoot)))
+      .toHaveText(`项目 · ${path.basename(previousRoot)}`);
+
+    await launched.page.getByRole("button", { name: /^重命名项目/u }).click();
+    const nameInput = launched.page.getByRole("textbox", { name: "项目名" });
+    await expect(nameInput).toBeFocused();
+    await expect(nameInput).toHaveValue(path.basename(previousRoot));
+    await nameInput.fill("renamed-project-folder");
+    await nameInput.press("Enter");
+
+    const nextRoot = path.join(projectsRoot, "renamed-project-folder");
+    const nextSourcePath = path.join(nextRoot, htmlName);
+    await expect.poll(() => existsSync(nextSourcePath)).toBe(true);
+    expect(existsSync(previousRoot)).toBe(false);
+    await waitForActiveSourcePath(launched.page, nextSourcePath);
+    // The HTML kept its own name through the folder move.
+    await waitForTitleStem(launched.page, path.basename(htmlName, ".html"));
+    await expect(projectNameChip("renamed-project-folder"))
+      .toHaveText("项目 · renamed-project-folder");
+
+    const afterWorkspace = await bridgeJson(
+      launched.page,
+      `/workspace?sourcePath=${encodeURIComponent(nextSourcePath)}`,
+    );
+    const afterTarget = afterWorkspace.body?.openTarget || afterWorkspace.body;
+    expect(afterTarget.projectId).toBe(beforeIds.projectId);
+    expect(afterTarget.documentId).toBe(beforeIds.documentId);
+    expect(afterTarget.workingCopyId || afterTarget.activeWorkingCopyId)
+      .toBe(beforeIds.workingCopyId);
+    const afterManifest = await readManagedManifest(nextSourcePath);
+    expect(afterManifest.versions.length).toBe(beforeManifest.versions.length);
+    expect(afterManifest.workingCopies[0].sourceRelativePath).toBe(htmlName);
+
+    const desktopState = await readDesktopProjectState(isolatedUserData);
+    expect(sameDesktopSourcePath(desktopState.activePath, nextSourcePath)).toBe(true);
+    expect(sameDesktopSourcePath(desktopState.recent[0].path, nextSourcePath)).toBe(true);
+
+    const beforeRevision = Number(
+      await launched.page.locator("[data-persist-state]").first()
+        .getAttribute("data-persisted-revision"),
+    );
+    const editorFrame = await currentEditorFrame(launched.page);
+    await activateNativeEdit(editorFrame, "list-item");
+    await setTextSelection(editorFrame, "list-item", 0, 0);
+    await launched.page.keyboard.insertText("改名后仍可编辑。");
+    await launched.page.keyboard.press("Escape");
+    await expectCheckpointPersisted(launched.page, beforeRevision);
+    expect(readFileSync(nextSourcePath, "utf8")).toContain("改名后仍可编辑。");
+    expect(readFileSync(nextSourcePath, "utf8")).toContain(ORIGINAL_LIST_TEXT);
+  } finally {
+    if (electronApp && isolatedUserData) {
+      await stopPageRoot(electronApp, isolatedUserData);
+    }
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
+
 test("Electron keeps PageRoot bytes when Finder renames and edits the same file", async () => {
   const fixture = createSourceFixture("finder-rename-conflict.html");
   let electronApp = null;

@@ -55,6 +55,7 @@ import NoticeBar from "./components/NoticeBar";
 import RestartUpdateDialog from "./components/RestartUpdateDialog";
 import ExternalHtmlOpenDialog from "./workbench/ExternalHtmlOpenDialog";
 import OpenHtmlDialog from "./workbench/OpenHtmlDialog";
+import RenameProjectDialog from "./workbench/RenameProjectDialog";
 import {
   MAX_ATTACHMENT_BYTES,
   MAX_COMMENT_ATTACHMENTS,
@@ -637,6 +638,9 @@ export default function Workbench() {
   const [fileRenameBusy, setFileRenameBusy] = useState(false);
   const [fileRenameDraft, setFileRenameDraft] = useState("");
   const [fileRenameError, setFileRenameError] = useState("");
+  const [projectRenameOpen, setProjectRenameOpen] = useState(false);
+  const [projectRenameBusy, setProjectRenameBusy] = useState(false);
+  const [projectRenameError, setProjectRenameError] = useState("");
   const [recentProjects, setRecentProjects] = useState<RecentProject[]>([]);
   const [recentProjectsError, setRecentProjectsError] = useState("");
   const [selection, setSelection] = useState<HtmlCanvasSelection | null>(null);
@@ -1073,6 +1077,14 @@ export default function Workbench() {
               const open = window.htmlAIProjects?.openRegisteredProject;
               if (!open) throw new Error("当前 PageRoot 版本缺少项目目录打开通道。");
               return open(registeredProjectId);
+            },
+            renameRegistered: async (input: {
+              projectId: string;
+              stem: string;
+            }) => {
+              const rename = window.htmlAIProjects?.renameRegisteredProject;
+              if (!rename) throw new Error("当前 PageRoot 版本缺少项目重命名通道。");
+              return rename(input);
             },
             acceptExternal: async (requestId: string) => {
               const accept = window.htmlAIProjects?.acceptExternalOpen;
@@ -1679,6 +1691,8 @@ export default function Workbench() {
         lastModifiedAt?: unknown;
         showHandoff?: unknown;
         contentChanged?: unknown;
+        projectId?: unknown;
+        renamed?: unknown;
       }>;
       if (projectEvent.type === "project-hydration-stage") {
         markProjectHydrationStage(String(projectEvent.stage || ""));
@@ -1941,6 +1955,31 @@ export default function Workbench() {
           });
           return;
         }
+        return;
+      }
+      if (projectEvent.type === "project-renamed") {
+        setProjectRenameOpen(false);
+        setProjectRenameError("");
+        setToast({
+          title: "项目名已更新",
+          message: projectEvent.renamed === false
+            ? "项目文件夹已经叫这个名字，没有需要修改的地方。"
+            : `项目文件夹已改名为「${String(projectEvent.projectName || "")}」；HTML 文件名、历史版本和评论都没有变。`,
+          tone: "success",
+          disposition: "background-result",
+          dedupeKey: "registered-project-renamed",
+        });
+        return;
+      }
+      if (projectEvent.type === "project-rename-unknown") {
+        setToast({
+          title: "项目名可能已经改了",
+          message: "文件夹改名已经提交，但项目状态还没有完成刷新。请稍后确认项目名再继续编辑。",
+          tone: "warning",
+          sticky: true,
+          disposition: "inform-in-place",
+          dedupeKey: "registered-project-rename-unknown",
+        });
         return;
       }
       if (
@@ -2443,6 +2482,31 @@ export default function Workbench() {
     && !projectLoadError
     && !workspaceIssue
     && !viewTransitioning
+    && viewMode === "current"
+    && persistState === "idle"
+    && editRevision === lastPersistedRevision
+  );
+  // The project's display name is the registered folder name and nothing else
+  // (PRD §12). ProjectSession already carries the authoritative root path, so
+  // the header reads the name off it instead of storing a second copy.
+  const registeredProjectName = localFileNameFromSourcePath(
+    projectSnapshot.openTarget?.projectRootPath,
+  );
+  const canRenameRegisteredProject = Boolean(
+    projectId
+    && registeredProjectName
+    && projectSnapshot.openTarget?.targetKind === "working-copy"
+    && typeof window !== "undefined"
+    && window.htmlAIProjects?.renameRegisteredProject
+    && runtimeCapabilitiesReady
+    && !browserPreviewOnly
+    && !runInProgress
+    && !projectHydrating
+    && !projectLoadError
+    && !workspaceIssue
+    && !viewTransitioning
+    && !fileRenameEditing
+    && !fileRenameBusy
     && viewMode === "current"
     && persistState === "idle"
     && editRevision === lastPersistedRevision
@@ -4072,6 +4136,51 @@ export default function Workbench() {
   }, [
     canOfferFileRename,
     fileRenameDraft,
+    workspaceController,
+  ]);
+
+  const closeProjectRename = useCallback(() => {
+    // Nothing tears the dialog down mid-transaction: the folder move is already
+    // in flight and the caller still owes the user its result.
+    if (projectRenameBusy) return;
+    setProjectRenameOpen(false);
+    setProjectRenameError("");
+  }, [projectRenameBusy]);
+
+  const commitProjectRename = useCallback(async (stem: string) => {
+    if (!workspaceController || !canRenameRegisteredProject) {
+      setProjectRenameError("当前状态还不能重命名项目，请等待文件安全保存。");
+      return;
+    }
+    setProjectRenameBusy(true);
+    setProjectRenameError("");
+    try {
+      const controller = requiredWorkspaceController(workspaceController);
+      const outcome = await controller.renameRegisteredProject({ projectId, stem });
+      if (outcome.status !== "succeeded") {
+        throw Object.assign(
+          new Error(
+            outcome.status === "unknown"
+              ? "项目名已经修改，但项目状态还没有完成刷新。"
+              : ("reason" in outcome && outcome.reason)
+                || "项目名没有修改，请检查名称后重试。",
+          ),
+          { code: "code" in outcome ? outcome.code : undefined },
+        );
+      }
+      setProjectRenameOpen(false);
+      setProjectRenameError("");
+    } catch (cause) {
+      setProjectRenameError(productErrorMessage(
+        cause,
+        "项目名没有修改，请检查名称后重试。",
+      ));
+    } finally {
+      setProjectRenameBusy(false);
+    }
+  }, [
+    canRenameRegisteredProject,
+    projectId,
     workspaceController,
   ]);
 
@@ -7415,6 +7524,28 @@ export default function Workbench() {
                   ))}
                 </span>
               ) : null}
+              {registeredProjectName ? (
+                <span
+                  className="file-version-label"
+                  title={`项目文件夹：${registeredProjectName}`}
+                >
+                  项目 · {registeredProjectName}
+                </span>
+              ) : null}
+              {canRenameRegisteredProject ? (
+                <button
+                  className="window-file-folder-action"
+                  type="button"
+                  aria-label={`重命名项目 ${registeredProjectName}`}
+                  title="重命名项目文件夹（HTML 文件名不变）"
+                  onClick={() => {
+                    setProjectRenameError("");
+                    setProjectRenameOpen(true);
+                  }}
+                >
+                  重命名项目
+                </button>
+              ) : null}
               {canOpenProjectRootInFolder ? (
                 <button
                   className="window-file-folder-action"
@@ -9007,6 +9138,16 @@ export default function Workbench() {
               openHtmlButtonRef.current?.focus();
             });
           }}
+        />
+      ) : null}
+
+      {projectRenameOpen ? (
+        <RenameProjectDialog
+          projectName={registeredProjectName}
+          busy={projectRenameBusy}
+          error={projectRenameError}
+          onCancel={closeProjectRename}
+          onConfirm={(stem) => void commitProjectRename(stem)}
         />
       ) : null}
 

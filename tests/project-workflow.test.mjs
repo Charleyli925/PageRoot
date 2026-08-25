@@ -2232,3 +2232,232 @@ test("continue-current opens the bound project without importing again", async (
   assert.equal(harness.projectSession.sourcePath, A_PATH);
 });
 
+const RENAMED_PROJECT_ROOT = "/tmp/PageRoot/renamed-project";
+const RENAMED_PROJECT_SOURCE = `${RENAMED_PROJECT_ROOT}/project-workflow-old.html`;
+
+function registeredRenameHarness({ projectOpen = {} } = {}) {
+  return createHarness({
+    openTarget: managedOpenTarget(),
+    bridge: {
+      async workspace(sourcePath) {
+        // The folder moved, not the project: rehydration has to keep answering
+        // with the same identity or the rename would look like a switch.
+        return {
+          ...workspacePayload(sourcePath, OLD_HTML),
+          projectId: "project_old",
+          documentId: "document_old",
+          sourcePath,
+        };
+      },
+    },
+    projectOpen: {
+      async reconcileActiveManagedSource(payload) {
+        return locatorResult(payload, {
+          sourcePath: OLD_PATH,
+          status: "unchanged",
+        });
+      },
+      async listRecent() {
+        return [];
+      },
+      async listRegistered() {
+        return [];
+      },
+      ...projectOpen,
+    },
+  });
+}
+
+function renamedRegisteredProject(payload, { previousSourcePath = OLD_PATH } = {}) {
+  return {
+    projectId: payload.projectId,
+    projectName: payload.stem,
+    previousSourcePath,
+    sourcePath: RENAMED_PROJECT_SOURCE,
+    sha256: sha256(OLD_HTML),
+    registeredProjectRootPath: RENAMED_PROJECT_ROOT,
+    renamed: true,
+  };
+}
+
+test("renaming the open project moves its folder and keeps every identity", async (t) => {
+  const renameCalls = [];
+  const harness = registeredRenameHarness({
+    projectOpen: {
+      async renameRegistered(payload) {
+        renameCalls.push(payload);
+        return renamedRegisteredProject(payload);
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+
+  const renamed = await harness.workflow.renameRegisteredProject({
+    projectId: "project_old",
+    stem: "renamed-project",
+  });
+  assert.equal(renamed.status, "succeeded");
+  assert.deepEqual(renameCalls, [{ projectId: "project_old", stem: "renamed-project" }]);
+  assert.equal(renamed.value.projectName, "renamed-project");
+  assert.equal(renamed.value.sourcePath, RENAMED_PROJECT_SOURCE);
+  assert.equal(harness.projectSession.context?.projectId, "project_old");
+  assert.equal(harness.projectSession.context?.documentId, "document_old");
+  assert.equal(harness.projectSession.context?.sourcePath, RENAMED_PROJECT_SOURCE);
+  // ProjectSession fences later payloads on projectRootPath, so the moved root
+  // has to be adopted alongside the moved file.
+  assert.equal(harness.projectSession.openTarget?.projectRootPath, RENAMED_PROJECT_ROOT);
+  assert.equal(harness.projectSession.openTarget?.exactSourcePath, RENAMED_PROJECT_SOURCE);
+  assert.equal(harness.projectSession.openTarget?.workingCopyId, "work_ver_0001");
+  assert.equal(harness.projectSession.openTarget?.versionId, "ver_0001");
+  assert.equal(harness.documentSession.sourceSha256, sha256(OLD_HTML));
+  assert.equal(harness.runSession.snapshot.activeSourcePath, RENAMED_PROJECT_SOURCE);
+  assert.equal(harness.documentWorkflow.resetCount, 1);
+  const event = harness.events.find((entry) => entry.type === "project-renamed");
+  assert.equal(event?.projectName, "renamed-project");
+  assert.equal(event?.movedActiveProject, true);
+  assert.equal(event?.renamed, true);
+  assert.ok(harness.unlockCount >= 1);
+});
+
+test("renaming a project nobody is editing never fences the open canvas", async (t) => {
+  const renameCalls = [];
+  let catalogReads = 0;
+  const harness = registeredRenameHarness({
+    projectOpen: {
+      async renameRegistered(payload) {
+        renameCalls.push(payload);
+        return { projectId: payload.projectId, projectName: payload.stem, renamed: true };
+      },
+      async listRegistered() {
+        catalogReads += 1;
+        return [];
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+
+  const renamed = await harness.workflow.renameRegisteredProject({
+    projectId: "project_other",
+    stem: "other-renamed",
+  });
+  assert.equal(renamed.status, "succeeded");
+  assert.deepEqual(renameCalls, [{ projectId: "project_other", stem: "other-renamed" }]);
+  // The open project is untouched, so its drain and canvas fence stay out of it.
+  assert.equal(harness.fenceCount, 0);
+  assert.equal(harness.unlockCount, 0);
+  assert.equal(harness.projectSession.context?.sourcePath, OLD_PATH);
+  assert.equal(harness.documentWorkflow.resetCount, 0);
+  assert.equal(catalogReads, 1);
+  const event = harness.events.find((entry) => entry.type === "project-renamed");
+  assert.equal(event?.projectId, "project_other");
+  assert.equal(event?.movedActiveProject, false);
+});
+
+test("a lost rename reply is settled from the project Desktop now reports", async (t) => {
+  const harness = registeredRenameHarness({
+    projectOpen: {
+      async renameRegistered() {
+        throw new Error("电脑没有回应这次重命名。");
+      },
+      async getActive() {
+        return { sourcePath: RENAMED_PROJECT_SOURCE, sha256: sha256(OLD_HTML) };
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+
+  const renamed = await harness.workflow.renameRegisteredProject({
+    projectId: "project_old",
+    stem: "renamed-project",
+  });
+  assert.equal(renamed.status, "succeeded");
+  assert.equal(harness.projectSession.context?.sourcePath, RENAMED_PROJECT_SOURCE);
+  assert.equal(harness.projectSession.openTarget?.projectRootPath, RENAMED_PROJECT_ROOT);
+  assert.equal(harness.projectSession.context?.projectId, "project_old");
+  assert.equal(
+    harness.events.some((entry) => entry.type === "project-rename-unknown"),
+    false,
+  );
+});
+
+test("a rejected rename leaves the open project on its original folder", async (t) => {
+  const harness = registeredRenameHarness({
+    projectOpen: {
+      async renameRegistered() {
+        throw Object.assign(new Error("已经有同名的项目文件夹。"), {
+          code: "PROJECT_DIRECTORY_COLLISION",
+        });
+      },
+      async getActive() {
+        // Desktop still reports the old folder, so nothing moved.
+        return { sourcePath: OLD_PATH, sha256: sha256(OLD_HTML) };
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+
+  const renamed = await harness.workflow.renameRegisteredProject({
+    projectId: "project_old",
+    stem: "renamed-project",
+  });
+  assert.equal(renamed.status, "rejected");
+  assert.equal(renamed.code, "PROJECT_DIRECTORY_COLLISION");
+  assert.equal(harness.projectSession.context?.sourcePath, OLD_PATH);
+  assert.equal(harness.projectSession.openTarget?.projectRootPath, "/tmp/project-root");
+  assert.equal(harness.documentWorkflow.resetCount, 0);
+  assert.ok(harness.unlockCount >= 1);
+});
+
+test("renaming to the name the folder already has moves nothing", async (t) => {
+  const renameCalls = [];
+  const harness = registeredRenameHarness({
+    projectOpen: {
+      async renameRegistered(payload) {
+        renameCalls.push(payload);
+        return renamedRegisteredProject(payload);
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+
+  const renamed = await harness.workflow.renameRegisteredProject({
+    projectId: "project_old",
+    stem: "tmp",
+  });
+  assert.equal(renamed.status, "succeeded");
+  assert.equal(renamed.value.unchanged, true);
+  assert.deepEqual(renameCalls, []);
+  assert.equal(
+    harness.events.some((entry) => entry.type === "project-renamed"),
+    false,
+  );
+  assert.equal(harness.projectSession.context?.sourcePath, OLD_PATH);
+});
+
+test("an empty project name is refused before the folder is touched", async (t) => {
+  const renameCalls = [];
+  const harness = registeredRenameHarness({
+    projectOpen: {
+      async renameRegistered(payload) {
+        renameCalls.push(payload);
+        return renamedRegisteredProject(payload);
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+
+  const renamed = await harness.workflow.renameRegisteredProject({
+    projectId: "project_old",
+    stem: "   ",
+  });
+  assert.equal(renamed.status, "rejected");
+  assert.equal(renamed.code, "PROJECT_RENAME_STEM_REQUIRED");
+  assert.deepEqual(renameCalls, []);
+  assert.equal(harness.projectSession.context?.sourcePath, OLD_PATH);
+
+  const unaddressed = await harness.workflow.renameRegisteredProject({ stem: "anything" });
+  assert.equal(unaddressed.status, "rejected");
+  assert.equal(unaddressed.code, "PROJECT_RENAME_PROJECT_REQUIRED");
+  assert.deepEqual(renameCalls, []);
+});
+

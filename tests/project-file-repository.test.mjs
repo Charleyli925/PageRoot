@@ -1733,6 +1733,270 @@ test("same-parent root and Working Copy renames preserve identity; moves outside
   assert.equal(await readFile(afterReturn.target.exactSourcePath, "utf8"), html("after return"));
 });
 
+// The display name of a project is the projection of its registered folder
+// name, so an in-product rename has to move the folder for real. Nothing else
+// may move with it: the managed HTML keeps its own name, and every stable
+// identifier, Version and Draft stays exactly where it was.
+test("an in-product project rename moves the folder and keeps every managed name and identity", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "初始名.html");
+  const promoted = await promoteNextVersion(value.repository, imported.target, "rename");
+  await value.repository.saveDraft({
+    target: promoted,
+    operationId: "draftop_rename_000001",
+    expectedDraftRevision: 0,
+    comments: [{ commentId: "comment_kept", text: "kept across the rename" }],
+    changeEvents: [],
+    deletedCommentIds: [],
+  });
+  const before = await value.repository.resolveRegisteredProjectOpenTarget({
+    projectId: imported.target.projectId,
+  });
+  const previousRoot = before.target.projectRootPath;
+  const manifestBefore = await json(path.join(previousRoot, ".pageroot", "manifest.json"));
+  const visibleBefore = (await readdir(previousRoot)).sort();
+
+  const renamed = await value.repository.renameRegisteredProject({
+    projectId: imported.target.projectId,
+    stem: "重命名后的项目",
+  });
+
+  const nextRoot = path.join(value.projects, "重命名后的项目");
+  assert.equal(renamed.renamed, true);
+  assert.equal(renamed.projectName, "重命名后的项目");
+  assert.equal(renamed.previousProjectRootPath, previousRoot);
+  assert.equal(renamed.registeredProjectRootPath, nextRoot);
+  assert.equal(renamed.previousSourcePath, before.target.exactSourcePath);
+  assert.equal(renamed.target.projectId, imported.target.projectId);
+  assert.equal(renamed.target.documentId, imported.target.documentId);
+  assert.equal(renamed.target.workingCopyId, promoted.workingCopyId);
+  assert.equal(renamed.target.versionId, promoted.versionId);
+  assert.equal(renamed.sourceSha256, renamed.target.sourceSha256);
+  assert.equal(path.dirname(renamed.target.exactSourcePath), nextRoot);
+  assert.equal(
+    path.basename(renamed.target.exactSourcePath),
+    path.basename(before.target.exactSourcePath),
+  );
+
+  assert.deepEqual((await readdir(nextRoot)).sort(), visibleBefore);
+  assert.deepEqual(
+    await json(path.join(nextRoot, ".pageroot", "manifest.json")),
+    manifestBefore,
+  );
+  assert.deepEqual(
+    (await readdir(value.projects)).filter((entry) => entry !== ".pageroot-registry.json"),
+    ["重命名后的项目"],
+  );
+  const draft = await json(path.join(
+    nextRoot,
+    ".pageroot",
+    "drafts",
+    `${promoted.workingCopyId}.json`,
+  ));
+  assert.equal(draft.comments[0].commentId, "comment_kept");
+
+  const registry = await json(registryPath(value));
+  assert.equal(
+    registry.projects[imported.target.projectId].registeredProjectRootPath,
+    nextRoot,
+  );
+  assert.equal(Object.hasOwn(registry, "pendingProjectRenames"), false);
+
+  const row = (await value.repository.listRegisteredProjects()).find(
+    (entry) => entry.projectId === imported.target.projectId,
+  );
+  assert.equal(row?.projectName, "重命名后的项目");
+  assert.equal(row?.availability, "ready");
+  assert.equal(row?.registeredProjectRootPath, nextRoot);
+});
+
+test("renaming a project to the name it already has changes nothing", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "同名.html");
+  const registryBefore = await readFile(registryPath(value), "utf8");
+
+  const unchanged = await value.repository.renameRegisteredProject({
+    projectId: imported.target.projectId,
+    stem: "同名",
+  });
+
+  assert.equal(unchanged.renamed, false);
+  assert.equal(unchanged.projectName, "同名");
+  assert.equal(unchanged.previousProjectRootPath, imported.target.projectRootPath);
+  assert.equal(unchanged.registeredProjectRootPath, imported.target.projectRootPath);
+  assert.equal(unchanged.previousSourcePath, unchanged.target.exactSourcePath);
+  assert.equal(await readFile(registryPath(value), "utf8"), registryBefore);
+});
+
+// On a case-insensitive filesystem the new name resolves to the project's own
+// folder, which must read as the rename it is rather than as an occupant.
+test("a project rename that only changes letter case is not a collision with itself", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "Case.html");
+  assert.equal(path.basename(imported.target.projectRootPath), "Case");
+
+  const renamed = await value.repository.renameRegisteredProject({
+    projectId: imported.target.projectId,
+    stem: "CASE",
+  });
+
+  assert.equal(renamed.renamed, true);
+  assert.equal(renamed.projectName, "CASE");
+  assert.equal(renamed.registeredProjectRootPath, path.join(value.projects, "CASE"));
+  const registry = await json(registryPath(value));
+  assert.equal(
+    registry.projects[imported.target.projectId].registeredProjectRootPath,
+    path.join(value.projects, "CASE"),
+  );
+});
+
+// Import may sanitize a name it derived from a file it found. A rename applies a
+// name a human typed, so an unusable request is refused instead of silently
+// turned into a different name.
+test("a project rename refuses a taken or unusable name without touching the Registry", async (t) => {
+  const value = await fixture(t);
+  const a = await importSource(value, "甲.html");
+  const b = await importSource(value, "乙.html");
+  const registryBefore = await readFile(registryPath(value), "utf8");
+  const listingBefore = (await readdir(value.projects)).sort();
+
+  await assert.rejects(
+    value.repository.renameRegisteredProject({ projectId: a.target.projectId, stem: "乙" }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "PROJECT_DIRECTORY_COLLISION",
+  );
+
+  // A registered path whose folder is currently missing is still claimed by its
+  // record: moving into it would leave two records naming one directory.
+  const parked = path.join(value.root, "乙 挂起");
+  await rename(b.target.projectRootPath, parked);
+  await assert.rejects(
+    value.repository.renameRegisteredProject({ projectId: a.target.projectId, stem: "乙" }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "PROJECT_DIRECTORY_COLLISION",
+  );
+  await rename(parked, b.target.projectRootPath);
+
+  for (const stem of [
+    "",
+    "   ",
+    ".",
+    "..",
+    ".隐藏",
+    "结尾点.",
+    "子/目录",
+    "反斜杠\\名",
+    "con",
+    "带\u0000控制符",
+  ]) {
+    await assert.rejects(
+      value.repository.renameRegisteredProject({ projectId: a.target.projectId, stem }),
+      (error) => error instanceof ProjectFileRepositoryError
+        && error.code === "INVALID_PROJECT_NAME",
+      stem,
+    );
+  }
+
+  await assert.rejects(
+    value.repository.renameRegisteredProject({
+      projectId: a.target.projectId,
+      stem: "长".repeat(68),
+    }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "PROJECT_NAME_TOO_LONG",
+  );
+
+  await assert.rejects(
+    value.repository.renameRegisteredProject({
+      projectId: `project_${"f".repeat(16)}`,
+      stem: "任意名字",
+    }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "REGISTERED_PROJECT_UNAVAILABLE",
+  );
+
+  assert.equal(await readFile(registryPath(value), "utf8"), registryBefore);
+  assert.deepEqual((await readdir(value.projects)).sort(), listingBefore);
+});
+
+// The marker is durable before the move, so both crash windows settle without
+// guessing: before the move the Registry is already correct and the marker is
+// simply dropped, and after the move the marker is the evidence that lets the
+// recorded target be committed.
+test("a crash on either side of the folder move settles the rename marker on the next start", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "崩溃恢复.html");
+  const previousRoot = imported.target.projectRootPath;
+
+  const beforeMove = new ProjectFileRepository({
+    projectsRoot: value.projects,
+    failpoint: (name) => name === "registered-project-rename-before-move",
+  });
+  await assert.rejects(
+    beforeMove.renameRegisteredProject({
+      projectId: imported.target.projectId,
+      stem: "第一次尝试",
+    }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "INJECTED_FAILPOINT",
+  );
+  let registry = await json(registryPath(value));
+  assert.equal(
+    registry.pendingProjectRenames[imported.target.projectId].nextProjectRootPath,
+    path.join(value.projects, "第一次尝试"),
+  );
+  assert.equal(
+    registry.projects[imported.target.projectId].registeredProjectRootPath,
+    previousRoot,
+  );
+
+  await new ProjectFileRepository({ projectsRoot: value.projects }).initialize();
+  registry = await json(registryPath(value));
+  assert.equal(Object.hasOwn(registry, "pendingProjectRenames"), false);
+  assert.equal(
+    registry.projects[imported.target.projectId].registeredProjectRootPath,
+    previousRoot,
+  );
+
+  const afterMove = new ProjectFileRepository({
+    projectsRoot: value.projects,
+    failpoint: (name) => name === "registered-project-rename-after-move",
+  });
+  await assert.rejects(
+    afterMove.renameRegisteredProject({
+      projectId: imported.target.projectId,
+      stem: "第二次尝试",
+    }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "INJECTED_FAILPOINT",
+  );
+  const nextRoot = path.join(value.projects, "第二次尝试");
+  registry = await json(registryPath(value));
+  assert.equal(
+    registry.projects[imported.target.projectId].registeredProjectRootPath,
+    previousRoot,
+  );
+  assert.deepEqual(
+    (await readdir(value.projects)).filter((entry) => entry !== ".pageroot-registry.json"),
+    ["第二次尝试"],
+  );
+
+  const restarted = new ProjectFileRepository({ projectsRoot: value.projects });
+  await restarted.initialize();
+  registry = await json(registryPath(value));
+  assert.equal(Object.hasOwn(registry, "pendingProjectRenames"), false);
+  assert.equal(
+    registry.projects[imported.target.projectId].registeredProjectRootPath,
+    nextRoot,
+  );
+  const resolved = await restarted.resolveRegisteredProjectOpenTarget({
+    projectId: imported.target.projectId,
+  });
+  assert.equal(resolved.target.projectRootPath, nextRoot);
+  assert.equal(resolved.target.documentId, imported.target.documentId);
+  assert.equal(await readFile(resolved.target.exactSourcePath, "utf8"), html("V1"));
+});
+
 test("a cross-volume-style move remains external until the project returns to its exact registered path", async (t) => {
   const value = await fixture(t);
   const imported = await importSource(value, "跨卷.html");

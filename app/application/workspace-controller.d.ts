@@ -548,6 +548,18 @@ export class WorkspaceController {
     lastModifiedAt?: string | null;
     unchanged?: boolean;
   }>>;
+  renameRegisteredProject(input: {
+    projectId: string;
+    stem: string;
+    deadlineAt?: number;
+  }): Promise<ProjectWorkflowOutcome<{
+    projectId: string;
+    projectName: string;
+    context?: ProjectContext;
+    sourcePath?: string;
+    renamed?: boolean;
+    unchanged?: boolean;
+  }>>;
   observeExternalSourceChange(input?: {
     reason?: "watch" | "rename" | "startup" | "safe-action";
     watcherGeneration?: number;

@@ -164,6 +164,25 @@ function sourceStem(sourcePath) {
   return name.slice(0, Math.max(0, name.length - extension.length)).normalize("NFC");
 }
 
+// A project folder carries no extension, so its requested name is taken as
+// typed. Stripping a trailing ".html" here — the way a source rename must —
+// would silently refuse the folder name the user actually asked for.
+function normalizedProjectStem(value) {
+  return String(value || "").normalize("NFC").trim();
+}
+
+function sourceParentPath(sourcePath) {
+  const value = String(sourcePath || "");
+  const separator = Math.max(value.lastIndexOf("/"), value.lastIndexOf("\\"));
+  return separator <= 0 ? "" : value.slice(0, separator);
+}
+
+function projectFolderName(sourcePath) {
+  const parent = sourceParentPath(sourcePath);
+  const separator = Math.max(parent.lastIndexOf("/"), parent.lastIndexOf("\\"));
+  return parent.slice(separator + 1).normalize("NFC");
+}
+
 function rebasedManagedOpenTarget(openTarget, nextSourcePath, sourceSha256) {
   if (!openTarget || typeof openTarget !== "object" || Array.isArray(openTarget)) {
     return null;
@@ -1289,6 +1308,53 @@ export class ProjectWorkflow {
     return operation;
   }
 
+  renameRegisteredProject({ projectId, stem, deadlineAt } = {}) {
+    if (this.#disposed) {
+      return Promise.resolve(blocked(
+        "PROJECT_WORKFLOW_DISPOSED",
+        "项目工作流已经停止。",
+      ));
+    }
+    const requestedProjectId = String(projectId || "");
+    if (!requestedProjectId) {
+      return Promise.resolve(rejected(
+        "PROJECT_RENAME_PROJECT_REQUIRED",
+        "没有指定要重命名的项目。",
+      ));
+    }
+    // Renaming a project nobody is editing moves a folder the open session does
+    // not touch. Sending it through the open project's rename queue would let
+    // an unrelated busy canvas block it, so it takes its own path instead.
+    if (requestedProjectId !== String(this.#projectSession.context?.projectId || "")) {
+      return this.#renameUnopenedRegisteredProject({
+        projectId: requestedProjectId,
+        stem,
+      });
+    }
+    if (this.#renamePromise) return this.#renamePromise;
+    if (this.#sourceLocatorPromise) {
+      return this.#sourceLocatorPromise.then(() => this.renameRegisteredProject({
+        projectId: requestedProjectId,
+        stem,
+        deadlineAt,
+      }));
+    }
+    const operation = this.#runOpenRegisteredProjectRename({
+      projectId: requestedProjectId,
+      stem,
+      deadlineAt,
+    });
+    this.#renamePromise = operation;
+    this.#sourceLocatorPromise = operation;
+    operation.finally(() => {
+      if (this.#renamePromise === operation) this.#renamePromise = null;
+      if (this.#sourceLocatorPromise === operation) this.#sourceLocatorPromise = null;
+    }).catch(() => {
+      // #runOpenRegisteredProjectRename converts failures to typed outcomes.
+    });
+    return operation;
+  }
+
   reconcileExternalSourceLocator(input = {}) {
     if (this.#disposed) {
       return Promise.resolve(blocked(
@@ -1600,6 +1666,354 @@ export class ProjectWorkflow {
         operationId,
         cause,
         "SOURCE_RENAME_REJECTED",
+        reason,
+      );
+    } finally {
+      if (canvasFrozen) {
+        this.#setRename("idle", null);
+        const unlock = () => {
+          if (!this.#disposed) this.#canvasPort.unlock?.();
+        };
+        if (typeof this.#canvasPort.requestFrame === "function") {
+          this.#canvasPort.requestFrame(unlock);
+        } else {
+          unlock();
+        }
+      }
+    }
+  }
+
+  async #renameUnopenedRegisteredProject({ projectId, stem }) {
+    const operationId = this.#nextOperationId("project-rename");
+    const requestedStem = normalizedProjectStem(stem);
+    if (!requestedStem) {
+      return rejected("PROJECT_RENAME_STEM_REQUIRED", "请输入新的项目名。");
+    }
+    if (typeof this.#projectOpenPort.renameRegistered !== "function") {
+      return blocked("PROJECT_RENAME_UNAVAILABLE", "当前运行环境不能安全修改项目名。");
+    }
+    try {
+      const result = await this.#projectOpenPort.renameRegistered({
+        projectId,
+        stem: requestedStem,
+      });
+      const projectName = String(result?.projectName || "").normalize("NFC");
+      if (
+        !result
+        || String(result.projectId || "") !== projectId
+        || projectName !== requestedStem
+      ) {
+        throw new Error("重命名结果与所选项目不一致。");
+      }
+      await this.refreshRegisteredProjects();
+      this.#emit({
+        type: "project-renamed",
+        context: this.#projectSession.context,
+        operationId,
+        projectId,
+        projectName,
+        renamed: result.renamed === true,
+        movedActiveProject: false,
+      });
+      return succeeded({
+        projectId,
+        projectName,
+        renamed: result.renamed === true,
+      });
+    } catch (cause) {
+      const reason = projectErrorMessage(
+        this.#codecs,
+        cause,
+        "项目名没有修改，请检查名称后重试。",
+      );
+      const outcome = this.#outcomeFromCause(
+        operationId,
+        cause,
+        "PROJECT_RENAME_REJECTED",
+        reason,
+      );
+      // A lost reply may still have moved the folder. Re-reading the catalog is
+      // the only way the list can stop offering a name that no longer exists.
+      if (outcome.status === "unknown") void this.refreshRegisteredProjects();
+      return outcome;
+    }
+  }
+
+  async #runOpenRegisteredProjectRename({ projectId, stem, deadlineAt } = {}) {
+    let context = this.#projectSession.context;
+    let previousSourcePath = context?.sourcePath || "";
+    let expectedSha256 = this.#documentSession.sourceSha256;
+    const requestedStem = normalizedProjectStem(stem);
+    const operationId = this.#nextOperationId("project-rename");
+    const renameDeadline = Number(deadlineAt) || Date.now() + SWITCH_DEADLINE_MS;
+    let canvasFrozen = false;
+    let renameCommitted = false;
+    try {
+      if (!context || !this.#projectSession.matches(context)) {
+        return blocked("PROJECT_RENAME_CONTEXT_REQUIRED", "当前项目身份尚未完成初始化。");
+      }
+      // The folder about to move holds the file the canvas is editing, so the
+      // locator is reconciled first. An unnoticed Finder move would otherwise
+      // let this rename act on a path that is no longer this project.
+      if (this.#managedOpenTarget()) {
+        const reconciled = await this.#runLocatorReconcile({
+          reason: "rename",
+          previousSourcePath,
+        });
+        if (reconciled.status === "rejected" || reconciled.status === "unknown") {
+          return reconciled;
+        }
+        context = this.#projectSession.context;
+        previousSourcePath = context?.sourcePath || previousSourcePath;
+        expectedSha256 = this.#documentSession.sourceSha256;
+        if (!context || !this.#projectSession.matches(context)) {
+          return stale(context || { sourcePath: previousSourcePath });
+        }
+        if (this.#documentSession.persistState === "conflict") {
+          return blocked(
+            "PROJECT_RENAME_CONFLICT",
+            "当前 HTML 与外部文件存在冲突，请先选择要保留的版本。",
+          );
+        }
+      }
+      if (!previousSourcePath || !expectedSha256 || !SHA256.test(expectedSha256)) {
+        return blocked("PROJECT_RENAME_SOURCE_REQUIRED", "当前源 HTML 尚未形成可验证的文件身份。");
+      }
+      if (!requestedStem) {
+        return rejected("PROJECT_RENAME_STEM_REQUIRED", "请输入新的项目名。");
+      }
+      if (this.#runSession.activeLocked) {
+        return blocked("PROJECT_RENAME_RUN_LOCKED", "当前 AI 任务仍在处理，不能修改项目名。");
+      }
+      if (this.projectHydrating || this.projectLoadError || this.#isHistoryView()) {
+        return blocked("PROJECT_RENAME_VIEW_UNAVAILABLE", "当前视图尚未形成可安全重命名的项目。");
+      }
+      if (typeof this.#projectOpenPort.renameRegistered !== "function") {
+        return blocked("PROJECT_RENAME_UNAVAILABLE", "当前运行环境不能安全修改项目名。");
+      }
+
+      if (requestedStem === projectFolderName(previousSourcePath)) {
+        return succeeded({
+          context,
+          unchanged: true,
+          projectId,
+          projectName: requestedStem,
+        });
+      }
+
+      const committed = this.#canvasPort.fencePendingEdit?.({
+        resumeEditing: true,
+        trigger: "registered-project-rename",
+      });
+      if (!committed || !committed.ok) {
+        return blocked(
+          "PROJECT_RENAME_NATIVE_EDIT_PENDING",
+          String(committed?.reason || "请先完成当前文字输入，再修改项目名。"),
+        );
+      }
+      if (
+        committed.html !== this.#documentSession.html
+        || committed.pendingMutation
+      ) {
+        const enqueued = this.#documentWorkflow.enqueueEdit({
+          html: committed.html,
+          mutation: committed.pendingMutation || undefined,
+          context,
+        });
+        if (enqueued.status !== "succeeded") {
+          return this.#dependencyOutcome(
+            enqueued,
+            context,
+            "PROJECT_RENAME_DOCUMENT_EDIT_REJECTED",
+            "当前文字尚未安全进入源 HTML 写回队列。",
+          );
+        }
+      }
+
+      const drained = await this.#drainCoordinator.drain("switch", {
+        deadlineAt: renameDeadline,
+      });
+      if (!drained.ok) {
+        return blocked(
+          "PROJECT_RENAME_DRAIN_INCOMPLETE",
+          String(drained.reason || "当前项目尚未完成安全保存。"),
+        );
+      }
+      if (
+        this.#disposed
+        || !this.#projectSession.matches(context)
+        || !this.#codecs.sameSourcePath(this.#projectSession.sourcePath, previousSourcePath)
+        || this.#documentSession.sourceSha256 !== expectedSha256
+        || !documentIsStable(this.#documentSession)
+        || this.#documentWorkflow.hasHistoryAction
+      ) {
+        return stale(context);
+      }
+
+      const frozen = this.#canvasPort.freeze(
+        "编辑画布尚未完成安全收口，不能修改项目名。",
+      );
+      if (!frozen?.ok) {
+        return blocked(
+          "PROJECT_RENAME_CANVAS_FENCE_REJECTED",
+          String(frozen?.reason || "编辑画布尚未完成安全收口。"),
+        );
+      }
+      canvasFrozen = true;
+      if (
+        frozen.html !== this.#documentSession.html
+        || frozen.pendingMutation
+      ) {
+        const enqueued = this.#documentWorkflow.enqueueEdit({
+          html: frozen.html,
+          mutation: frozen.pendingMutation || undefined,
+          context,
+        });
+        if (enqueued.status !== "succeeded") {
+          return this.#dependencyOutcome(
+            enqueued,
+            context,
+            "PROJECT_RENAME_FINAL_EDIT_REJECTED",
+            "刚刚的文字输入没有安全写入源 HTML。",
+          );
+        }
+        return blocked(
+          "PROJECT_RENAME_FINAL_EDIT_QUEUED",
+          "刚刚还有文字输入，源页正在安全保存，请稍后再试。",
+        );
+      }
+
+      this.#setRename("renaming", operationId);
+      let result;
+      try {
+        result = await this.#projectOpenPort.renameRegistered({
+          projectId,
+          stem: requestedStem,
+        });
+      } catch (cause) {
+        const active = typeof this.#projectOpenPort.getActive === "function"
+          ? await this.#projectOpenPort.getActive().catch(() => null)
+          : null;
+        // A lost reply is not a lost rename. Desktop is the only place that can
+        // say whether the folder already moved, and the folder it now reports
+        // for these exact document bytes is that answer.
+        if (
+          !active
+          || active.sha256 !== expectedSha256
+          || projectFolderName(active.sourcePath) !== requestedStem
+        ) throw cause;
+        result = {
+          ...active,
+          projectId,
+          projectName: requestedStem,
+          previousSourcePath,
+          registeredProjectRootPath: sourceParentPath(active.sourcePath),
+          renamed: true,
+          replayed: true,
+        };
+      }
+      if (
+        !result
+        || String(result.projectId || "") !== projectId
+        || String(result.projectName || "").normalize("NFC") !== requestedStem
+        || !this.#codecs.sameSourcePath(result.previousSourcePath, previousSourcePath)
+        || String(result.sha256 || "") !== expectedSha256
+        || !String(result.sourcePath || "")
+        || !String(result.registeredProjectRootPath || "")
+      ) {
+        throw new Error("重命名结果与当前项目身份不一致。");
+      }
+      renameCommitted = true;
+      if (
+        this.#disposed
+        || !this.#projectSession.matches(context)
+        || this.#documentSession.sourceSha256 !== expectedSha256
+      ) return stale(context);
+
+      const nextSourcePath = String(result.sourcePath);
+      const openTarget = this.#projectSession.openTarget;
+      const transitioned = this.#publishSourceLocatorChange({
+        previousSourcePath,
+        nextSourcePath,
+        context,
+        expectedSha256,
+        // The folder moved, so the open target has to adopt the new root as well
+        // as the new file. ProjectSession compares projectRootPath when it
+        // fences later payloads; a stale root would make each of them look like
+        // it belongs to some other project.
+        openTarget: openTarget
+          ? {
+            ...openTarget,
+            projectRootPath: String(result.registeredProjectRootPath),
+          }
+          : null,
+      });
+      if (!transitioned || !this.#projectSession.context) {
+        throw new Error("项目已重命名，但当前项目身份已经变化。");
+      }
+
+      const [recents, hydrated] = await Promise.all([
+        this.refreshRecents(),
+        this.refreshWorkspace({
+          sourcePath: nextSourcePath,
+          epoch: transitioned.epoch,
+          fromDeferred: true,
+        }),
+      ]);
+      if (
+        recents.status !== "succeeded"
+        || hydrated.status !== "succeeded"
+      ) {
+        return unknown(
+          operationId,
+          "项目名已经修改，但项目状态还没有完成刷新。",
+        );
+      }
+      const nextContext = this.#projectSession.context;
+      if (!nextContext || !this.#codecs.sameSourcePath(nextContext.sourcePath, nextSourcePath)) {
+        return stale(transitioned);
+      }
+      this.scheduleProjectListRefreshAfterSettlement(nextContext);
+      this.#emit({
+        type: "project-renamed",
+        context: nextContext,
+        operationId,
+        projectId,
+        projectName: requestedStem,
+        previousSourcePath,
+        sourcePath: nextSourcePath,
+        renamed: result.renamed === true,
+        movedActiveProject: true,
+      });
+      return succeeded({
+        context: nextContext,
+        projectId,
+        projectName: requestedStem,
+        sourcePath: nextSourcePath,
+        renamed: result.renamed === true,
+      });
+    } catch (cause) {
+      const reason = projectErrorMessage(
+        this.#codecs,
+        cause,
+        renameCommitted
+          ? "项目名已经修改，但项目状态还没有完成刷新。"
+          : "项目名没有修改，请检查名称后重试。",
+      );
+      if (renameCommitted) {
+        this.#emit({
+          type: "project-rename-unknown",
+          context,
+          operationId,
+          projectId,
+          reason,
+        });
+        return unknown(operationId, reason);
+      }
+      return this.#outcomeFromCause(
+        operationId,
+        cause,
+        "PROJECT_RENAME_REJECTED",
         reason,
       );
     } finally {

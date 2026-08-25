@@ -96,6 +96,8 @@ const WORKING_COPY_ID = /^work_ver_\d{4,}$/u;
 const SHA256 = /^sha256:[a-f0-9]{64}$/u;
 const SAFE_REQUEST_ID = /^[A-Za-z0-9_-]{1,160}$/u;
 const SAFE_OPERATION_ID = /^[A-Za-z0-9_-]{8,160}$/u;
+const WINDOWS_RESERVED_STEM =
+  /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/iu;
 const RECONCILE_LOCATOR_REASONS = new Set([
   "watch",
   "rename",
@@ -336,6 +338,38 @@ function safeProjectName(sourcePath) {
     .replace(/^\.+|\.+$/gu, "")
     .trim();
   return sanitized || "未命名项目";
+}
+
+// Import sanitizes a name it derived from a file it found; a rename applies a
+// name a human typed. The rejection rules are therefore the ones
+// desktop/source-rename.mjs already enforces for a visible HTML name, with one
+// difference: an unusable name is reported instead of silently repaired,
+// because quietly registering a different name than the one requested is the
+// worse outcome once the request is explicit.
+function assertProjectDirectoryStem(value) {
+  const stem = String(value ?? "").normalize("NFC").trim();
+  if (
+    !stem
+    || stem.startsWith(".")
+    || stem.endsWith(".")
+    || /[\u0000-\u001f\u007f<>:"/\\|?*]/u.test(stem)
+    || WINDOWS_RESERVED_STEM.test(stem)
+  ) {
+    throw new ProjectFileRepositoryError(
+      "INVALID_PROJECT_NAME",
+      "A project name must carry no path, no leading or trailing dot and no reserved character.",
+    );
+  }
+  // Import first stages a hidden sibling whose name wraps the project
+  // directory name. Reserve the same room here so a rename cannot produce a
+  // project directory that a later import of the same project could not stage.
+  if (utf8ByteLength(stem) > MAX_PATH_COMPONENT_BYTES - IMPORT_STAGING_WRAPPER_BYTES) {
+    throw new ProjectFileRepositoryError(
+      "PROJECT_NAME_TOO_LONG",
+      "The project name has no remaining UTF-8 filename space.",
+    );
+  }
+  return stem;
 }
 
 function assertPreferredFileStem(value, label = "preferredFileStem") {
@@ -1370,6 +1404,28 @@ function assertPendingImportRecord(projectId, record) {
   return record;
 }
 
+// Same forward-compatibility rule as assertRegistryProjectRecord.
+function assertPendingProjectRenameRecord(projectId, record) {
+  if (
+    !isObject(record)
+    || record.projectId !== projectId
+    || typeof record.previousProjectRootPath !== "string"
+    || !path.isAbsolute(record.previousProjectRootPath)
+    || typeof record.nextProjectRootPath !== "string"
+    || !path.isAbsolute(record.nextProjectRootPath)
+  ) {
+    throw new ProjectFileRepositoryError(
+      "INVALID_REGISTRY",
+      "The pending project rename record is invalid.",
+      { projectId },
+    );
+  }
+  assertId(record.projectId, PROJECT_ID, "pending project rename projectId");
+  assertFileIdentity(record.rootFileIdentity, "pending project rename rootFileIdentity");
+  assertRegistryTimestamp(record.startedAt, "pending project rename startedAt");
+  return record;
+}
+
 function assertRegistry(registry) {
   if (
     !isObject(registry)
@@ -1390,6 +1446,22 @@ function assertRegistry(registry) {
   for (const [projectId, record] of Object.entries(registry.pendingImports)) {
     assertId(projectId, PROJECT_ID, "pending import projectId");
     assertPendingImportRecord(projectId, record);
+  }
+  // A rename transaction marker is an optional top-level member: a Registry
+  // written before in-product project rename existed carries none and must keep
+  // opening. It is only validated when it is present, and it is deleted rather
+  // than left empty so an unused Registry keeps its previous bytes.
+  if (Object.hasOwn(registry, "pendingProjectRenames")) {
+    if (!isObject(registry.pendingProjectRenames)) {
+      throw new ProjectFileRepositoryError(
+        "UNSUPPORTED_REGISTRY_SCHEMA",
+        "The project Registry uses an unsupported schema.",
+      );
+    }
+    for (const [projectId, record] of Object.entries(registry.pendingProjectRenames)) {
+      assertId(projectId, PROJECT_ID, "pending project rename projectId");
+      assertPendingProjectRenameRecord(projectId, record);
+    }
   }
   return registry;
 }
@@ -1853,6 +1925,23 @@ function publicOpenTarget({
   });
 }
 
+// A rename reports both sides of the move. The caller owns runtime state keyed
+// by the visible HTML path, so it needs the path it must stop watching as well
+// as the open target it must adopt; the Registry stays the only authority for
+// which of the two is now registered.
+function renamedRegisteredProject({ renamed, previousProjectRootPath, previous, next }) {
+  return {
+    renamed,
+    projectId: next.target.projectId,
+    projectName: path.basename(next.target.projectRootPath),
+    previousProjectRootPath,
+    previousSourcePath: previous.target.exactSourcePath,
+    registeredProjectRootPath: next.target.projectRootPath,
+    target: next.target,
+    sourceSha256: next.sourceSha256,
+  };
+}
+
 function requestRootPath(paths, requestId) {
   const id = String(requestId || "");
   if (!SAFE_REQUEST_ID.test(id)) {
@@ -2041,6 +2130,7 @@ export class ProjectFileRepository {
           );
         }
         await this.#recoverPublishedImports();
+        await this.#recoverPendingProjectRenames();
       });
     });
   }
@@ -2051,6 +2141,10 @@ export class ProjectFileRepository {
 
   async resolveRegisteredProjectOpenTarget({ projectId } = {}) {
     return this.#serial(() => this.#resolveRegisteredProjectOpenTarget({ projectId }));
+  }
+
+  async renameRegisteredProject({ projectId, stem } = {}) {
+    return this.#serial(() => this.#renameRegisteredProject({ projectId, stem }));
   }
 
   async importExternal({
@@ -5322,6 +5416,165 @@ export class ProjectFileRepository {
       }),
       sourceSha256: resolved.source.sha256,
     };
+  }
+
+  // The display name of a project is the projection of its registered folder
+  // name, so an in-product rename has to move the folder for real and then
+  // re-point the Registry. The order below keeps the project openable through
+  // every reachable interruption: the marker is durable before the move, and a
+  // move whose Registry path was never committed is still recovered by
+  // #recoverRegisteredRootRename, which finds a same-parent root by its file
+  // identity instead of by its name.
+  async #renameRegisteredProject({ projectId, stem }) {
+    const id = assertId(projectId, PROJECT_ID, "projectId");
+    const nextStem = assertProjectDirectoryStem(stem);
+    await this.#assertProjectsRoot();
+    await this.#readRegistry();
+    return this.#withRegistryWriteLock(async () => {
+      await this.#recoverPendingProjectRenames();
+      // Resolving the open target first is the verification step: it proves the
+      // project is registered, its root is present with a continuous file
+      // identity, and project.json, the manifest and the visible Working Copy
+      // still agree. It also yields the exact visible HTML path the caller has
+      // to rebase away from.
+      const before = await this.#resolveRegisteredProjectOpenTarget({ projectId: id });
+      const previousProjectRootPath = before.target.projectRootPath;
+      const nextProjectRootPath = path.join(this.#projectsRoot, nextStem);
+      if (path.basename(previousProjectRootPath) === nextStem) {
+        return renamedRegisteredProject({
+          renamed: false,
+          previousProjectRootPath,
+          previous: before,
+          next: before,
+        });
+      }
+      await this.#assertProjectRenameTargetIsFree({
+        projectId: id,
+        previousProjectRootPath,
+        nextProjectRootPath,
+      });
+      const registry = await this.#readRegistry();
+      const record = registry.projects[id];
+      registry.pendingProjectRenames = {
+        ...registry.pendingProjectRenames,
+        [id]: {
+          projectId: id,
+          previousProjectRootPath,
+          nextProjectRootPath,
+          rootFileIdentity: assertFileIdentity(
+            record.rootFileIdentity,
+            "registered rootFileIdentity",
+          ),
+          startedAt: nowIso(this.#clock),
+        },
+      };
+      await this.#writeRegistry(registry);
+      await this.#hit("registered-project-rename-before-move", {
+        projectId: id,
+        nextProjectRootPath,
+      });
+      await rename(previousProjectRootPath, nextProjectRootPath);
+      await syncDirectory(this.#projectsRoot);
+      await this.#hit("registered-project-rename-after-move", {
+        projectId: id,
+        nextProjectRootPath,
+      });
+      await this.#commitPendingProjectRename(id);
+      return renamedRegisteredProject({
+        renamed: true,
+        previousProjectRootPath,
+        previous: before,
+        next: await this.#resolveRegisteredProjectOpenTarget({ projectId: id }),
+      });
+    });
+  }
+
+  async #assertProjectRenameTargetIsFree({
+    projectId,
+    previousProjectRootPath,
+    nextProjectRootPath,
+  }) {
+    const registry = await this.#readRegistry();
+    // A registered path whose directory is currently missing still belongs to
+    // its record. Moving into it would leave two records naming one directory,
+    // and the loser would then report a changed identity rather than the name
+    // collision this actually is.
+    const conflicting = [
+      ...Object.entries(registry.projects),
+      ...Object.entries(registry.pendingImports),
+    ].some(([otherId, record]) => (
+      otherId !== projectId && samePath(record.registeredProjectRootPath, nextProjectRootPath)
+    ));
+    if (conflicting) {
+      throw new ProjectFileRepositoryError(
+        "PROJECT_DIRECTORY_COLLISION",
+        "The requested project name is already registered by another project.",
+        { projectId },
+      );
+    }
+    // On a case-insensitive filesystem a change of letter case names the same
+    // directory, so its own root is not an occupant.
+    if (samePath(previousProjectRootPath, nextProjectRootPath)) return;
+    const target = await this.#assertRegisteredProjectRootPath(nextProjectRootPath, {
+      allowMissing: true,
+    });
+    if (target.information) {
+      throw new ProjectFileRepositoryError(
+        "PROJECT_DIRECTORY_COLLISION",
+        "The selected project directory is already occupied.",
+        { projectId },
+      );
+    }
+  }
+
+  // Only two states are reachable between a durable rename marker and its
+  // commit: the root never moved, or it sits at the recorded target carrying the
+  // recorded file identity. That identity was recorded moments earlier under
+  // this same write lock, which is what proves the directory now at the target
+  // is the one that was moved; every later open still re-verifies the stable
+  // identifiers before trusting it. Any other state is left to
+  // #recoverRegisteredRootRename, which searches by file identity.
+  async #commitPendingProjectRename(projectId) {
+    const registry = await this.#readRegistry();
+    const pending = registry.pendingProjectRenames?.[projectId];
+    if (!pending) return null;
+    const record = registry.projects[projectId];
+    const moved = await this.#assertRegisteredProjectRootPath(pending.nextProjectRootPath, {
+      allowMissing: true,
+    });
+    let committed = null;
+    if (
+      record
+      && moved.information
+      && samePath(record.registeredProjectRootPath, pending.previousProjectRootPath)
+      && sameFileIdentity(pending.rootFileIdentity, copyFileIdentity(moved.information))
+    ) {
+      record.registeredProjectRootPath = moved.projectRootPath;
+      record.rootFileIdentity = copyFileIdentity(moved.information);
+      record.updatedAt = nowIso(this.#clock);
+      committed = moved.projectRootPath;
+    }
+    delete registry.pendingProjectRenames[projectId];
+    if (Object.keys(registry.pendingProjectRenames).length === 0) {
+      delete registry.pendingProjectRenames;
+    }
+    await this.#writeRegistry(registry);
+    return committed;
+  }
+
+  async #recoverPendingProjectRenames() {
+    const registry = await this.#readRegistry();
+    const recovered = [];
+    for (const projectId of Object.keys(registry.pendingProjectRenames || {})) {
+      try {
+        if (await this.#commitPendingProjectRename(projectId)) recovered.push(projectId);
+      } catch {
+        // The marker is retained so a later attempt can still settle it. The
+        // project stays reachable in the meantime because its root is found by
+        // file identity, not by the name this transaction was changing.
+      }
+    }
+    return recovered;
   }
 
   async #reconcileWorkingCopyLocator({
