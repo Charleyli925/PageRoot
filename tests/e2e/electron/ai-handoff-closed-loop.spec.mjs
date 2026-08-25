@@ -4193,8 +4193,7 @@ test("Qoder ACP Agent Bridge reaches review without clipboard or automatic adopt
     );
     await launched.page.getByRole("button", { name: /AI 助手/u }).click();
     // Destination, disclosure and the local-Agent action all live in the conversation.
-    const deliveryDialog = launched.page.getByTestId("ai-conversation-sidebar");
-    await expect(deliveryDialog).toBeVisible();
+    const deliveryDialog = await chooseModifyIntent(launched.page);
     await expect(deliveryDialog.getByText(
       "Qoder 会读取本轮 HTML、评论和附件；结果先进入审阅。",
       { exact: true },
@@ -4202,7 +4201,6 @@ test("Qoder ACP Agent Bridge reaches review without clipboard or automatic adopt
     await expect(deliveryDialog.getByText("AGENT BRIDGE", { exact: true })).toHaveCount(0);
     await expect(deliveryDialog.getByText("可信本机 Agent 提示", { exact: true }))
       .toHaveCount(0);
-    await chooseModifyIntent(launched.page);
     await deliveryDialog.getByRole("button", { name: /交给 Qoder 修改/u }).click();
 
     await expect(launched.page.getByTestId("ai-conversation-action-bar"))
