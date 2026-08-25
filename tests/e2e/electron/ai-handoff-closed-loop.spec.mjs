@@ -315,9 +315,17 @@ async function focusChangeById(page, frame, changeId) {
   throw new Error(`Change ${changeId} never became focused.`);
 }
 
-async function chooseClipboardDelivery(page) {
+async function chooseModifyIntent(page) {
   const sidebar = page.getByTestId("ai-conversation-sidebar");
   await expect(sidebar).toBeVisible();
+  const modifyIntent = sidebar.getByRole("radio", { name: "修改", exact: true });
+  await modifyIntent.click();
+  await expect(modifyIntent).toHaveAttribute("aria-checked", "true");
+  return sidebar;
+}
+
+async function chooseClipboardDelivery(page) {
+  const sidebar = await chooseModifyIntent(page);
   await sidebar.getByRole("button", { name: /复制给别的 AI/u }).click();
 }
 
@@ -351,7 +359,7 @@ async function addCommentAndSubmit(
       comment.targetSelector,
     );
   }
-  await page.getByRole("button", { name: /AI 对话/u }).click();
+  await page.getByRole("button", { name: /AI 助手/u }).click();
   await chooseClipboardDelivery(page);
   await expect(page.getByTestId("ai-conversation-action-bar")
     .getByText("任务已复制，等你的 AI 改完", { exact: true }))
@@ -1295,8 +1303,18 @@ ${REVIEW_MASK_UNION_BEFORE}
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
 
     await launched.page.getByRole("button", { name: "审阅对比" }).click();
-    await expect(launched.page.getByTestId("ai-review-workspace"))
-      .toBeVisible({ timeout: 30_000 });
+    const reviewWorkspace = launched.page.getByTestId("ai-review-workspace");
+    await expect(reviewWorkspace).toBeVisible({ timeout: 30_000 });
+    const reviewSidebar = reviewWorkspace.getByTestId("ai-conversation-sidebar");
+    await expect(launched.page.getByTestId("ai-conversation-sidebar")).toHaveCount(1);
+    await expect(reviewSidebar).toBeVisible();
+    await reviewSidebar.getByRole("button", { name: "收起 AI 助手" }).click();
+    await expect(reviewSidebar).toHaveCount(0);
+    await expect(launched.page.getByTestId("review-show-conversation")).toHaveCount(0);
+    const reviewAiEntry = launched.page.getByRole("button", { name: "AI 助手" });
+    await expect(reviewAiEntry).toHaveCount(1);
+    await reviewAiEntry.click();
+    await expect(launched.page.getByTestId("ai-conversation-sidebar")).toBeVisible();
     // 审阅工具默认展开，并且浮在两页之上：展开或收起都不能把页面上下推动。
     const collapseToolbarHandle = launched.page.getByRole("button", {
       name: "收起审阅工具",
@@ -4029,14 +4047,14 @@ test("a no-change result returns to editing and remains reopenable", async () =>
     });
     await expect(launched.page.getByRole("button", { name: "上轮处理" }))
       .toBeVisible({ timeout: 30_000 });
-    await expect(launched.page.getByRole("button", { name: /AI 对话/u }))
+    await expect(launched.page.getByRole("button", { name: /AI 助手/u }))
       .toBeEnabled();
     // The settled round is not the active run after restart: the header's
     // recent-outcome control restores it — and switches the canvas to editing,
     // which hides the conversation. Opening the conversation again states the
     // no-change decision once more.
     await launched.page.getByRole("button", { name: "上轮处理" }).click();
-    await launched.page.getByRole("button", { name: /AI 对话/u }).click();
+    await launched.page.getByRole("button", { name: /AI 助手/u }).click();
     const reopenedBar = launched.page.getByTestId("ai-conversation-action-bar");
     await expect(reopenedBar.getByText("这次没有产生有效变化", { exact: true }))
       .toBeVisible({ timeout: 30_000 });
@@ -4180,10 +4198,9 @@ test("Qoder ACP Agent Bridge reaches review without clipboard or automatic adopt
       fixture.sourcePath,
       "请完成 Qoder ACP 自动闭环，但不要直接覆盖当前 HTML。",
     );
-    await launched.page.getByRole("button", { name: /AI 对话/u }).click();
+    await launched.page.getByRole("button", { name: /AI 助手/u }).click();
     // Destination, disclosure and the local-Agent action all live in the conversation.
-    const deliveryDialog = launched.page.getByTestId("ai-conversation-sidebar");
-    await expect(deliveryDialog).toBeVisible();
+    const deliveryDialog = await chooseModifyIntent(launched.page);
     await expect(deliveryDialog.getByText(
       "Qoder 会读取本轮 HTML、评论和附件；结果先进入审阅。",
       { exact: true },
@@ -4256,14 +4273,11 @@ test("Qoder login entry opens About, preserves the draft, and rechecks automatic
       fixture.sourcePath,
       "验证 Qoder 登录引导不会创建本轮任务。",
     );
-    await launched.page.getByRole("button", { name: /AI 对话/u }).click();
+    await launched.page.getByRole("button", { name: /AI 助手/u }).click();
     const sidebar = launched.page.getByTestId("ai-conversation-sidebar");
     await expect(sidebar).toBeVisible();
-    // The header entry opens the comment-driven Modify intent. Choose the
-    // discussion intent explicitly before creating a text draft.
-    await expect(sidebar.getByRole("radio", { name: "修改" }))
-      .toHaveAttribute("aria-checked", "true");
-    await sidebar.getByRole("radio", { name: "讨论" }).click();
+    // The unified header entry opens the general discussion surface. Keep that
+    // intent while creating a draft so the settings detour proves it survives.
     await expect(sidebar.getByRole("radio", { name: "讨论" }))
       .toHaveAttribute("aria-checked", "true");
     const input = sidebar.getByTestId("ai-conversation-input");
@@ -4340,7 +4354,7 @@ test("Qoder installed while PageRoot is open refreshes in place and continues on
       fixture.sourcePath,
       "验证 PageRoot 打开期间安装 Qoder CLI 后可原地继续。",
     );
-    await launched.page.getByRole("button", { name: /AI 对话/u }).click();
+    await launched.page.getByRole("button", { name: /AI 助手/u }).click();
     const deliveryDialog = await openQoderAvailability(launched.page);
     await expect(deliveryDialog.getByText("未安装", { exact: true })).toBeVisible();
     await deliveryDialog.getByRole("button", { name: "复制安装指令至 Agent" }).click();
@@ -4359,6 +4373,7 @@ test("Qoder installed while PageRoot is open refreshes in place and continues on
     expect(requestPosts).toBe(0);
 
     await closeQoderAvailability(launched.page);
+    await chooseModifyIntent(launched.page);
     await launched.page.getByRole("button", { name: "交给 Qoder 修改" }).click();
     await expect.poll(() => requestPosts).toBe(1);
   } finally {
@@ -4391,7 +4406,7 @@ test("Qoder capacity exhaustion stays unavailable without recovery buttons or a 
       fixture.sourcePath,
       "额度不足时仍然不应创建本轮任务。",
     );
-    await launched.page.getByRole("button", { name: /AI 对话/u }).click();
+    await launched.page.getByRole("button", { name: /AI 助手/u }).click();
     const aboutSection = await openQoderAvailability(launched.page);
     await expect(
       aboutSection.getByText("暂不可用 · Qoder 额度已用完", { exact: true }),
@@ -4440,9 +4455,10 @@ test("Qoder ACP polling waits for start and a managed stop kills the Agent", asy
       "保持 ACP 会话运行，直到我在源页停止本轮。",
     );
     const workingBefore = readFileSync(workingCopyPath);
-    await launched.page.getByRole("button", { name: /AI 对话/u }).click();
+    await launched.page.getByRole("button", { name: /AI 助手/u }).click();
     // The round is started from the conversation itself; the About card only
     // observes availability and never launches the Agent.
+    await chooseModifyIntent(launched.page);
     await launched.page.getByRole("button", { name: "交给 Qoder 修改" }).click();
 
     const stopButton = launched.page.getByRole("button", { name: "结束本轮" });
@@ -4518,7 +4534,7 @@ test("a clipboard handoff failure keeps the frozen Request recoverable", async (
     await launched.page.getByRole("textbox", { name: "评论内容" })
       .fill(`改为 ${UPDATED_TEXT}`);
     await launched.page.getByRole("button", { name: "评论", exact: true }).click();
-    const sendToQoder = launched.page.getByRole("button", { name: /AI 对话/u });
+    const sendToQoder = launched.page.getByRole("button", { name: /AI 助手/u });
     await expect(sendToQoder).toBeEnabled();
     await sendToQoder.click();
     await chooseClipboardDelivery(launched.page);
@@ -4560,7 +4576,7 @@ test("a failed handoff in project A does not block project B or replace its stat
       projectA.sourcePath,
     );
     expect(projectAWorkingCopyPath).not.toBe(realpathSync(projectA.sourcePath));
-    await launched.page.getByRole("button", { name: /AI 对话/u }).click();
+    await launched.page.getByRole("button", { name: /AI 助手/u }).click();
     await chooseClipboardDelivery(launched.page);
     // The failure is said by the round's own timeline, and it must not have
     // produced a second request.
@@ -4576,16 +4592,16 @@ test("a failed handoff in project A does not block project B or replace its stat
     // B starts clean and A's failure does not follow it: the conversation opens
     // (the old header asked for a comment first; opening is always allowed now),
     // and sending waits for B's own comment below.
-    await expect(launched.page.getByRole("button", { name: /AI 对话/u }))
+    await expect(launched.page.getByRole("button", { name: /AI 助手/u }))
       .toBeEnabled();
     const projectBWorkingCopyPath = await addComment(
       launched.page,
       projectB.sourcePath,
     );
     expect(projectBWorkingCopyPath).not.toBe(realpathSync(projectB.sourcePath));
-    await expect(launched.page.getByRole("button", { name: /AI 对话/u }))
+    await expect(launched.page.getByRole("button", { name: /AI 助手/u }))
       .toBeEnabled();
-    await launched.page.getByRole("button", { name: /AI 对话/u }).click();
+    await launched.page.getByRole("button", { name: /AI 助手/u }).click();
     await chooseClipboardDelivery(launched.page);
     // B fails on its own round: the same error step appears for B, and the
     // request count says the two failures are two separate rounds.
@@ -4601,14 +4617,14 @@ test("a failed handoff in project A does not block project B or replace its stat
     await openRecentProject(launched.page, projectA.sourcePath, { editable: false });
     // Each project keeps its own failed state: reopening A still shows A's round
     // stuck at the same error — not B's failure and not a clean slate.
-    await launched.page.getByRole("button", { name: /AI 对话/u }).click();
+    await launched.page.getByRole("button", { name: /AI 助手/u }).click();
     await expect(launched.page.getByTestId("ai-conversation-run-progress")
       .locator("li[data-step-state=\"error\"]")
       .filter({ hasText: "交接内容尚未复制" }))
       .toBeVisible();
 
     await openRecentProject(launched.page, projectB.sourcePath, { editable: false });
-    await launched.page.getByRole("button", { name: /AI 对话/u }).click();
+    await launched.page.getByRole("button", { name: /AI 助手/u }).click();
     await expect(launched.page.getByTestId("ai-conversation-run-progress")
       .locator("li[data-step-state=\"error\"]")
       .filter({ hasText: "交接内容尚未复制" }))
@@ -4629,7 +4645,7 @@ test("a rapid double click creates exactly one durable Request", async () => {
   try {
     await launched.electronApp.evaluate(({ clipboard }) => clipboard.clear());
     await addComment(launched.page, fixture.sourcePath);
-    await launched.page.getByRole("button", { name: /AI 对话/u }).dblclick({
+    await launched.page.getByRole("button", { name: /AI 助手/u }).dblclick({
       delay: 0,
     });
     await chooseClipboardDelivery(launched.page);
@@ -4671,7 +4687,7 @@ test("ending a copied run still warns after restart and blocks late finalization
      * phase wording (preparing vs. confirmed) is presentation detail; what the
      * contract needs is that the handoff step is the one carrying the round.
      */
-    await launched.page.getByRole("button", { name: /AI 对话/u }).click();
+    await launched.page.getByRole("button", { name: /AI 助手/u }).click();
     await expect(launched.page.getByTestId("ai-conversation-run-progress")
       .locator("li").filter({ hasText: "准备并复制" }))
       .toBeVisible();
@@ -4780,7 +4796,7 @@ test("an unknown Request outcome stays fail-closed and reconciles automatically"
     };
     await launched.page.route(bridgeRoute, injectUnknownRequestOutcome);
 
-    await launched.page.getByRole("button", { name: /AI 对话/u }).click();
+    await launched.page.getByRole("button", { name: /AI 助手/u }).click();
     await chooseClipboardDelivery(launched.page);
     /*
      * The outcome is unknown, so the round stays in the thread as a delivery still
@@ -4887,7 +4903,7 @@ test("a persisted global comment stays exact after restart and sends directly", 
     await expect(recoveredComment).toHaveAttribute("data-resolution", "exact");
     await expect(recoveredComment.getByText("原位置已变化")).toHaveCount(0);
 
-    await activeLaunch.page.getByRole("button", { name: /AI 对话/u }).click();
+    await activeLaunch.page.getByRole("button", { name: /AI 助手/u }).click();
     await chooseClipboardDelivery(activeLaunch.page);
     // The copied-task fact now lives in the sidebar action bar instead of a toast.
     await expect(activeLaunch.page.getByTestId("ai-conversation-action-bar")

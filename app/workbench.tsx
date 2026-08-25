@@ -1577,7 +1577,7 @@ export default function Workbench() {
             tone: "error",
             sticky: true,
             dedupeKey: `qoder-handoff:${runEvent.run.sourcePath}`,
-            action: { id: "open-handoff", label: "回到 AI 对话" },
+            action: { id: "open-handoff", label: "回到 AI 助手" },
           });
         }
         return;
@@ -1608,7 +1608,7 @@ export default function Workbench() {
             sticky: true,
             disposition: "user-choice",
             dedupeKey: `qoder-agent:${runEvent.run.requestId}`,
-            action: { id: "open-handoff", label: "回到 AI 对话" },
+            action: { id: "open-handoff", label: "回到 AI 助手" },
           });
         }
         return;
@@ -1650,7 +1650,7 @@ export default function Workbench() {
                 sticky: true,
                 disposition: "user-choice",
                 dedupeKey: `ai-validation-error:${run.requestId}`,
-                action: { id: "open-handoff", label: "回到 AI 对话" },
+                action: { id: "open-handoff", label: "回到 AI 助手" },
               });
             }
           }
@@ -2579,7 +2579,6 @@ export default function Workbench() {
     && unfinishedEditedComment
     && commentEditSessionHasChanges(commentEditSession),
   );
-  const pendingSendItemCount = activeCommentCount;
   const interactionPreviewHtml = useMemo(() => {
     if (externalSourcePreview?.html) return externalSourcePreview.html;
     if (!browserPreviewOnly || projectName !== WELCOME_PROJECT_NAME) return html;
@@ -6132,7 +6131,7 @@ export default function Workbench() {
           tone: "warning",
           sticky: true,
           dedupeKey: "current-version-result",
-          action: { id: "open-handoff", label: "回到 AI 对话" },
+          action: { id: "open-handoff", label: "回到 AI 助手" },
         });
       } else if (result.verificationWarning) {
         setToast({
@@ -7183,6 +7182,25 @@ export default function Workbench() {
     if (actionId === "cancel" || actionId === "dismiss") requestActiveRunEnd();
   }, [activateReadyResult, activeRun, requestActiveRunEnd, reviewReadyResult, setToast]);
 
+  const aiAssistantEntry = (
+    <AgentDeliveryButton
+      status={currentQoderHandoffStatus}
+      attention={Boolean(activeRun?.candidateVersionLabel) || runInProgress}
+      disabled={generating || projectHydrating || Boolean(projectLoadError)
+        || viewTransitioning || viewMode === "history" || browserPreviewOnly}
+      onOpen={() => {
+        // One meaning: show the conversation. It carries the stages, the Agent's
+        // words and the decision, and it docks in preview or review.
+        setDrawer(null);
+        setHandoffPreviewOpen(false);
+        setCanvasMode("preview");
+        // Opening is navigation, not an intent change. A new conversation defaults to
+        // discussion; an existing one restores the user's persisted selection.
+        aiConversation.reveal();
+      }}
+    />
+  );
+
   // The review compares immutable snapshots prepared against the
   // pre-promotion source identity. Accepting promotes the Working Copy to a
   // new path while this overlay is still visible; the live path would rebuild
@@ -7224,6 +7242,7 @@ export default function Workbench() {
         });
       }}
       onRevealAiTask={() => void revealAiTaskInFinder()}
+      assistantEntry={aiAssistantEntry}
       sidebar={aiConversation.visible ? (
         <AiConversationSidebar
           {...aiConversation.sidebarProps}
@@ -7233,7 +7252,6 @@ export default function Workbench() {
           agentText={currentAgentDeliveryState?.visibleText || ""}
         />
       ) : null}
-      onShowSidebar={aiConversation.reveal}
     />
   ) : null;
 
@@ -7629,22 +7647,7 @@ export default function Workbench() {
               上轮处理
             </button>
           ) : null}
-          <AgentDeliveryButton
-            status={currentQoderHandoffStatus}
-            attention={Boolean(activeRun?.candidateVersionLabel) || runInProgress}
-            disabled={generating || projectHydrating || Boolean(projectLoadError)
-              || viewTransitioning || viewMode === "history" || browserPreviewOnly}
-            onOpen={() => {
-              // One meaning: show the conversation. It carries the stages, the Agent's
-              // words and the decision, and it docks in preview, so a round in flight
-              // never leaves the page presenting itself as editable.
-              setDrawer(null);
-              setHandoffPreviewOpen(false);
-              setCanvasMode("preview");
-              // The intent survives the conversation load; nothing is sent by opening.
-              aiConversation.reveal(runInProgress ? undefined : "modify");
-            }}
-          />
+          {!readyReviewOverlay ? aiAssistantEntry : null}
         </WorkbenchHeaderActions>
         <input
           ref={fileInputRef}
@@ -7903,20 +7906,10 @@ export default function Workbench() {
               onReady={handlePreviewReady}
             />
           ) : null}
-          {canvasMode === "preview" && sourcePath && !aiConversation.visible ? (
-            <button
-              type="button"
-              className="ai-conversation-toggle"
-              onClick={aiConversation.toggle}
-              aria-label="打开 AI 对话"
-            >
-              AI 对话
-            </button>
-          ) : null}
         </section>
 
-        {aiConversation.visible ? (
-          <aside className="ai-conversation-aside" aria-label="AI 对话侧栏">
+        {aiConversation.visible && !readyReviewOverlay ? (
+          <aside className="ai-conversation-aside" aria-label="AI 助手侧栏">
             {/* Steps are computed below the hook, so they are handed in here. */}
             <AiConversationSidebar
               {...aiConversation.sidebarProps}

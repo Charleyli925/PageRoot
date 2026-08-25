@@ -434,8 +434,8 @@ export default function AiReviewWorkspace({
   onReturnBefore,
   onAccept,
   onRevealAiTask,
+  assistantEntry = null,
   sidebar = null,
-  onShowSidebar,
 }: {
   fileName: string;
   beforeLabel: string;
@@ -450,14 +450,14 @@ export default function AiReviewWorkspace({
   onReturnBefore: () => void;
   onAccept: () => void;
   onRevealAiTask: () => void;
+  /** The same top-level AI entry used by Preview, hosted in Review's fixed header. */
+  assistantEntry?: ReactNode;
   /**
    * The AI conversation, docked beside the comparison so the thread that led to
    * this candidate stays on screen. Read-only here: the Canvas is a candidate,
    * not the page a discussion would read.
-   */
+  */
   sidebar?: ReactNode;
-  /** Brings the conversation back after it was collapsed to free the stage. */
-  onShowSidebar?: () => void;
 }) {
   const fileTitle = fileName.replace(/\.(?:html?|xhtml)$/iu, "") || fileName;
   const hydrated = useSyncExternalStore(subscribeHydration, () => true, () => false);
@@ -1597,6 +1597,7 @@ export default function AiReviewWorkspace({
         </div>
 
         <WorkbenchHeaderActions aria-label="审阅结果操作">
+          {assistantEntry}
           <button
             className="recent-run-button"
             type="button"
@@ -1875,19 +1876,9 @@ export default function AiReviewWorkspace({
           </div>
         </section>
         {sidebar ? (
-          <aside className={styles.reviewSidebar} aria-label="AI 对话">
+          <aside className={styles.reviewSidebar} aria-label="AI 助手">
             {sidebar}
           </aside>
-        ) : onShowSidebar ? (
-          <button
-            type="button"
-            className={styles.reviewSidebarHandle}
-            data-testid="review-show-conversation"
-            aria-label="打开 AI 对话"
-            onClick={onShowSidebar}
-          >
-            AI 对话
-          </button>
         ) : null}
       </main>
 
