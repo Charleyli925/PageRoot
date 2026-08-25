@@ -34,8 +34,20 @@ export default function CancelAiRunDialog({
     }
   }, [open]);
 
+  const closeDialog = () => {
+    const dialog = dialogRef.current;
+    if (dialog?.open) dialog.close();
+    onClose();
+  };
+
+  const confirmAndClose = () => {
+    const dialog = dialogRef.current;
+    if (dialog?.open) dialog.close();
+    onConfirm();
+  };
+
   const handleBackdropPointer = (event: MouseEvent<HTMLDialogElement>) => {
-    if (event.target === event.currentTarget) onClose();
+    if (event.target === event.currentTarget) closeDialog();
   };
 
   return (
@@ -46,7 +58,7 @@ export default function CancelAiRunDialog({
       aria-describedby="cancel-ai-run-description"
       onCancel={(event) => {
         event.preventDefault();
-        onClose();
+        closeDialog();
       }}
       onClose={onClose}
       onMouseDown={handleBackdropPointer}
@@ -60,7 +72,7 @@ export default function CancelAiRunDialog({
           <button
             className="cancel-ai-run-end"
             type="button"
-            onClick={onConfirm}
+            onClick={confirmAndClose}
           >
             结束本轮并继续编辑
           </button>
@@ -68,7 +80,7 @@ export default function CancelAiRunDialog({
             ref={waitButtonRef}
             className="cancel-ai-run-wait"
             type="button"
-            onClick={onClose}
+            onClick={closeDialog}
           >
             继续等待
           </button>

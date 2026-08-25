@@ -4682,6 +4682,7 @@ test("ending a copied run still warns after restart and blocks late finalization
     launched = await launchPageRoot({
       isolatedUserData: launched.isolatedUserData,
     });
+    await waitForProjectReady(launched.page);
     /*
      * The restarted round comes back as the delivery step of the thread. The exact
      * phase wording (preparing vs. confirmed) is presentation detail; what the
@@ -4711,6 +4712,7 @@ test("ending a copied run still warns after restart and blocks late finalization
     await expect(endRound).toBeEnabled();
 
     await endRound.click();
+    await expect(warning).toBeVisible();
     await warning.getByRole("button", {
       name: "结束本轮并继续编辑",
     }).click();
