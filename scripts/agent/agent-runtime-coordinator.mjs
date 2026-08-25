@@ -197,6 +197,7 @@ export class AgentRuntimeCoordinator {
     this.#environment = environment;
     this.#clock = clock;
     this.#providerRegistry = providerRegistry || createDefaultProviderRegistry({
+      environment,
       commandResolver,
       ...(policyLoader ? { policyLoader } : {}),
       ...(runTask ? { runTask } : {}),

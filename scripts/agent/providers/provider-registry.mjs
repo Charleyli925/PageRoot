@@ -5,6 +5,8 @@ import {
   assertProviderTicket,
 } from "./agent-provider-contract.mjs";
 import { createQoderProvider } from "./qoder-provider.mjs";
+import { createCodexProvider } from "./codex-provider.mjs";
+import { resolveCodexFeatureFlags } from "../codex-feature-flags.mjs";
 import { createAcpRuntime } from "../runtimes/acp-runtime.mjs";
 import { createRuntimeRegistry } from "../runtimes/runtime-registry.mjs";
 
@@ -126,7 +128,7 @@ export function createProviderRegistry({ providers = [], runtimeRegistry } = {})
   };
 
   const prepareForSelection = async (selection, purpose, environment, legacyDriver = null) => {
-    const { provider } = resolveSelection(selection);
+    const { provider, runtime } = resolveSelection(selection);
     if (provider.capabilities.preflight !== true) {
       throw agentProviderError(
         "AGENT_CAPABILITY_UNSUPPORTED",
@@ -137,10 +139,37 @@ export function createProviderRegistry({ providers = [], runtimeRegistry } = {})
     assertProviderCapability(provider, purpose);
     try {
       const installation = await provider.resolveInstallation({ environment });
+      let probe = null;
+      if (typeof provider.createProbeLaunch === "function") {
+        if (typeof runtime.probe !== "function") {
+          throw agentProviderError(
+            "AGENT_RUNTIME_PROBE_UNSUPPORTED",
+            "The selected Agent runtime cannot perform a safe preflight probe.",
+            { status: 409 },
+          );
+        }
+        const probeLaunch = provider.createProbeLaunch({
+          installation,
+          selection,
+          purpose,
+          baseEnvironment: environment,
+        });
+        if (!probeLaunch || typeof probeLaunch !== "object" || Array.isArray(probeLaunch)
+          || assertAgentSecurityProfile(probeLaunch.securityProfile, "probe securityProfile")
+            !== provider.securityProfile) {
+          throw agentProviderError(
+            "AGENT_SECURITY_PROFILE_MISMATCH",
+            "Agent probe security profile does not match its provider.",
+            { status: 409 },
+          );
+        }
+        probe = await runtime.probe(Object.freeze({ ...probeLaunch }));
+      }
       const evidence = await provider.preflight(installation, {
         environment,
         purpose,
         selection,
+        probe,
       });
       await provider.assertInstallationUnchanged(installation);
       const resolvedSelection = assertResolvedSelection(
@@ -291,16 +320,29 @@ export function createDefaultProviderRegistry({
   preflightRunner,
   policyLoader,
   runTask,
+  environment = process.env,
+  codexProvider,
 } = {}) {
+  const codexFlags = resolveCodexFeatureFlags({ environment });
   const runtimeRegistry = createRuntimeRegistry([
     createAcpRuntime({ ...(runTask ? { runTask } : {}) }),
   ]);
+  const providers = [createQoderProvider({
+    ...(commandResolver ? { commandResolver } : {}),
+    ...(preflightRunner ? { preflightRunner } : {}),
+    ...(policyLoader ? { policyLoader } : {}),
+  })];
+  if (codexProvider) providers.push(codexProvider);
+  else if (codexFlags.codexDiscussion || codexFlags.codexExecution) {
+    providers.push(createCodexProvider({
+      capabilities: {
+        discussion: codexFlags.codexDiscussion,
+        execution: codexFlags.codexExecution,
+      },
+    }));
+  }
   return createProviderRegistry({
-    providers: [createQoderProvider({
-      ...(commandResolver ? { commandResolver } : {}),
-      ...(preflightRunner ? { preflightRunner } : {}),
-      ...(policyLoader ? { policyLoader } : {}),
-    })],
+    providers,
     runtimeRegistry,
   });
 }

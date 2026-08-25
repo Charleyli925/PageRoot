@@ -1,4 +1,8 @@
 import { runQoderAcpTask } from "../../qoder-acp-client.mjs";
+import {
+  probeAgentNativeAcp,
+} from "./acp-probe.mjs";
+import { runAgentNativeAcp } from "./agent-native-acp-runner.mjs";
 import { assertAgentSecurityProfile } from "../providers/agent-provider-contract.mjs";
 import { defineAgentRuntime } from "./agent-runtime-contract.mjs";
 
@@ -32,19 +36,34 @@ function acpCancellationSignal(signal) {
 // existing module. This adapter is the provider-neutral runtime boundary: it
 // accepts one verified launch descriptor and owns no provider discovery,
 // version, login, model or error-classification rule.
-export function createAcpRuntime({ runTask = runQoderAcpTask } = {}) {
-  if (typeof runTask !== "function") {
+export function createAcpRuntime({
+  runTask = runQoderAcpTask,
+  probeAgentNative = probeAgentNativeAcp,
+  runAgentNative = runAgentNativeAcp,
+} = {}) {
+  if (typeof runTask !== "function"
+    || typeof probeAgentNative !== "function"
+    || typeof runAgentNative !== "function") {
     throw new TypeError("ACP runtime requires a task runner.");
   }
   return defineAgentRuntime({
     runtimeId: "acp",
+    probe(launch) {
+      if (launch?.securityProfile !== "agent-native") {
+        throw new TypeError("ACP probe requires an agent-native launch descriptor.");
+      }
+      return probeAgentNative(Object.freeze({ ...launch }));
+    },
     run(launch) {
       if (!launch || typeof launch !== "object" || Array.isArray(launch)) {
         throw new TypeError("ACP runtime requires a launch descriptor.");
       }
       assertAgentSecurityProfile(launch.securityProfile, "ACP launch securityProfile");
       const onEvent = typeof launch.onEvent === "function" ? launch.onEvent : () => {};
-      return runTask({
+      const runner = launch.securityProfile === "agent-native"
+        ? runAgentNative
+        : runTask;
+      return runner({
         ...launch,
         cancellationSignal: acpCancellationSignal(launch.cancellationSignal),
         onEvent(event) {

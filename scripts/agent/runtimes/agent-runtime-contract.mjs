@@ -10,5 +10,10 @@ export function defineAgentRuntime(value) {
   if (typeof value.run !== "function") {
     throw new TypeError(`Agent runtime ${value.runtimeId} requires run().`);
   }
+  for (const method of ["probe", "authenticate"]) {
+    if (value[method] !== undefined && typeof value[method] !== "function") {
+      throw new TypeError(`Agent runtime ${value.runtimeId} ${method} must be a function.`);
+    }
+  }
   return Object.freeze({ ...value });
 }
