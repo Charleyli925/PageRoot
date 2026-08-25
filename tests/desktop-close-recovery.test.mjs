@@ -116,8 +116,8 @@ test("every final-exit intent fails closed before file watching is stopped", () 
 
 test("desktop shutdown outlives the Bridge Agent cleanup budget", () => {
   const mainSource = readFileSync(path.join(productRoot, "desktop", "main.mjs"), "utf8");
-  const serviceSource = readFileSync(
-    path.join(productRoot, "scripts", "agent-bridge-service.mjs"),
+  const coordinatorSource = readFileSync(
+    path.join(productRoot, "scripts", "agent", "agent-runtime-coordinator.mjs"),
     "utf8",
   );
   const bridgeSource = readFileSync(
@@ -127,7 +127,7 @@ test("desktop shutdown outlives the Bridge Agent cleanup budget", () => {
   const desktopTimeout = Number(mainSource.match(
     /const BRIDGE_SHUTDOWN_TIMEOUT_MS = ([\d_]+);/u,
   )?.[1].replaceAll("_", ""));
-  const agentTimeout = Number(serviceSource.match(
+  const agentTimeout = Number(coordinatorSource.match(
     /const CANCEL_TIMEOUT_MS = ([\d_]+);/u,
   )?.[1].replaceAll("_", ""));
   assert.equal(Number.isSafeInteger(desktopTimeout), true);

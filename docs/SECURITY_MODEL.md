@@ -206,9 +206,15 @@ Attempt / Working Copy anchor, or a registered Promotion transaction. A cleared
 or missing runtime state never scans Request directories to revive an active
 Request or to adopt a replacement input-manifest digest.
 
-The packaged Qoder ACP driver narrows the protocol surface but does not change
-that trust statement. One driver serves both the execution and the discussion
-policy, and the branded policy `mode` — never a caller-supplied host — selects
+The packaged Qoder ACP provider/runtime path narrows the protocol surface but
+does not change that trust statement. The sole provider registry maps legacy
+`qoder-acp` to the Qoder provider and ACP runtime; unknown identifiers fail
+closed. Provider/runtime IDs, the opaque installation digest and capabilities
+remain inside the Bridge ticket, and preload exposes no executable, spawn,
+command or path capability. One restricted driver still serves execution and
+discussion policy through the provider-neutral modules under
+`scripts/agent/policies/` and `scripts/agent/hosts/`. Their one shared branded
+policy `mode` — never a caller-supplied host — selects
 the host, the client capabilities declared to the Agent and whether the turn
 must prove completion; a host that cannot answer the required surface, such as a
 read-only host in an execution turn, is refused before the turn starts. For an
@@ -238,6 +244,14 @@ Bridge-level fence, so later preflight and application shutdown both fail
 closed rather than forgetting an unowned local process.
 Quit, relaunch and update installation also fail closed: the Bridge stays alive
 and the desktop app remains open unless all owned Agent cleanup is confirmed.
+
+Every provider, ticket and launch descriptor freezes one `securityProfile`.
+The installed Qoder mapping is `client-mediated`: the Host modules can allow
+or deny only file and terminal requests sent through the ACP Client Host. They
+do not constrain native file or command operations performed inside the Agent
+process. `agent-native` is reserved by the contract but no such provider is
+registered; registration requires a separate sandbox conformance and security
+gate. Unknown or mixed ticket/launch profiles fail closed.
 
 A read-only discussion turn is a narrower surface on the same trust boundary.
 The renderer may request `POST /discussion/start`, `GET /discussion/status` and
@@ -481,3 +495,10 @@ not contain HTML, paths, comments or credentials. A damaged or oversized file
 is treated as empty pending state. The built-in welcome `projectId` is
 recorded after welcome registration so that page never shows the
 first-real-HTML card.
+
+The renderer may name only a provider selection. It cannot provide executable
+commands, paths, permissions or a security profile. Preflight resolves the
+installed provider/runtime and freezes canonical selection plus fingerprint in
+a one-use ticket; start compares that ticket to the durable Request selection.
+Malformed policies, cross-provider model ids, unknown providers and selection
+drift fail closed.

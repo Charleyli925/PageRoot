@@ -46,6 +46,24 @@ const RUNTIME_SESSION_CONSTRUCTORS = [
   "EditAuthorRuntimeSession",
   "FirstEditGuideSession",
 ];
+const PROVIDER_LITERAL_BRANCH = /\b(?:[A-Za-z_$][\w$]*\s*(?:\?\.|\.)\s*)*(?:providerId|mode)\s*(?:===|!==|==|!=)\s*["'`](?:qoder|codex|qoder-acp|codex-acp)["'`]|["'`](?:qoder|codex|qoder-acp|codex-acp)["'`]\s*(?:===|!==|==|!=)\s*(?:[A-Za-z_$][\w$]*\s*(?:\?\.|\.)\s*)*(?:providerId|mode)\b/u;
+const PROVIDER_IMPLEMENTATION_IMPORT = /(?:^|\/)(?:qoder-availability|QoderAvailabilityCard|qoder-provider)(?:\.[^/]*)?$/u;
+
+export function providerNeutralRendererViolations({ file = "", source = "" } = {}) {
+  const violations = [];
+  const workflow = /^app\/application\/(?:run|discussion|review|version)[^/]*\.(?:js|ts)$/u.test(file);
+  const react = /\.tsx$/u.test(file);
+  if ((workflow || react) && PROVIDER_LITERAL_BRANCH.test(source)) {
+    violations.push(`${file}: provider selection branches must use canonical delivery and descriptor data`);
+  }
+  if (
+    workflow
+    && importedSpecifiers(source).some((specifier) => PROVIDER_IMPLEMENTATION_IMPORT.test(specifier))
+  ) {
+    violations.push(`${file}: workflows cannot import provider implementations or legacy presentation`);
+  }
+  return violations;
+}
 
 async function sourceFiles(directory) {
   const entries = await readdir(directory, { withFileTypes: true });
@@ -241,6 +259,7 @@ export async function architectureViolations() {
   for (const filePath of files) {
     const file = relative(filePath);
     const source = await readFile(filePath, "utf8");
+    violations.push(...providerNeutralRendererViolations({ file, source }));
     if (file.startsWith("app/application/")) {
       applicationSources.push({ file, source });
     }

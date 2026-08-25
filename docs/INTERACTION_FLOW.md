@@ -650,31 +650,40 @@ Request 持久化后，Repository 才能基于冻结 Prompt 建立 `AI任务/<�
 - 主按钮「交给 AI 修改」自动执行并在对话内显示进度。按下即确认本轮采用
   `trusted-local-agent-v1`——这是原弹窗中「选择即确认」的同一个显式动作，只是不再由
   一个盖住页面的模态承载。到提交为止的点击次数与弹窗时代相同。
+- 按下的同一同步事件会冻结 provider、runtime、model 与 reasoning；随后即使用户切换
+  下一轮 Agent 选择，正在预检、登记、排空、对账或启动的 Request 仍显示并使用这份冻结选择。
 - 安静的次要动作「复制任务」保留通用本地文件交接，用户把一条简洁指令粘贴给 Qoder 或
   任意能够读取本机文件并执行命令的 Agent；它与主按钮同时可用。
 - 修改意图下不渲染输入框。该意图的输入是页面上已写好的评论，因此不存在被静默丢弃的
   已输入文本。没有评论时按钮说明去哪里写，而不是只变灰。
 
-About 与该侧栏共用同一份 `checking / ready / not-installed / auth-required /
-unavailable` 状态。每次打开任一入口都重新执行只读本地检查：只解析真实磁盘上的独立
-Qoder CLI、受支持包身份和文件身份，不运行 Qoder、不联网、不创建 Request、不冻结页面。
-Finder/Dock 的稀疏 `PATH` 之外还读取受控的 npm prefix，以及 nvm、Volta、fnm、mise、
-asdf 常见安装根；候选必须最终通过真实包身份校验。旧的“未安装”不持久化到下一个进程。
+About 与 AI 对话侧栏共用同一份 `checking / ready / not-installed / auth-required /
+unavailable` 状态。打开 About 或侧栏立即进入“检测中”并执行真实 Qoder preflight；窗口
+从外部终端返回时，只要状态尚未 `ready`，`focus` 与 `visibilitychange` 会合并为一次自动
+复检。检测、复制指令和打开 About 都是只读 UI 操作，不运行 Request、不冻结 HTML、不
+改变评论或草稿。弱的 `/agent/availability` 只证明可信 CLI 可被发现，永远不能直接生成
+绿色状态；只有 `qodercli --version` 与 `qodercli --list-models` 的完整预检成功才显示
+“已连接”。
 
-按下「交给 AI 修改」或 About 内的“检查并继续”才执行完整使用前检查。成功即直接继续冻结、
-建 Request 和启动处理，不再二次确认；失败留在原处并说明原因：
+状态区保持统一的 140px 控制槽，只在需要用户恢复时显示动作：
 
-- 未安装：提供“复制给 Qoder 的安装指令”与“重新检查”。复制后返回 PageRoot 的第一次
-  窗口聚焦会自动重读一次本地磁盘；识别成功后显示“检查并继续”，但不自动联网或发送。
-- 需要登录：提供“复制登录指令”与“重新检查”。官方登录是终端/TUI 流程，PageRoot
-  不猜路径、不接管账号，也不在没有稳定 GUI API 时假装直接登录。
-- 暂时无法检查：只提供原地重新检查，并明确本轮任务尚未创建、当前页面不受影响。
-- 找到但包身份或版本不受支持时显示“无法使用当前安装”，不得降级为“未安装”；检查期间
-  CLI 身份或报告版本发生变化时显示“请重新打开 PageRoot”。
+- 检测中：只显示“检测中”，不显示按钮；
+- 已连接：只显示“已连接”，不显示重新检测；
+- 未安装：显示“未安装”和“复制安装指令至 Agent”；
+- 需要登录：显示“需要登录”和“复制指令粘贴至 Agent”；复制成功后原位变为“等待登录”
+  与“重新复制”，用户即使没有点击复制按钮而在终端自行登录，返回源页也会自动复检；
+- 额度不足、连接超时或其他不可用：保留“暂不可用 · …”的准确原因，不显示恢复按钮，
+  也不显示绿色状态；安装或版本校验失败继续显示安装不可用/需要重新打开源页的原因。
+
+主界面的右下角在 `auth-required` 时显示可点击的“登录 Qoder CLI”，在 `not-installed`
+时显示“设置 Qoder CLI”；点击只打开 About 的 Qoder 区域并把复制动作聚焦，不调用发送、
+不清空对话输入、不关闭侧栏。`unavailable` 只显示原因状态；“复制给别的 AI”仍由评论
+状态决定，不继承 Qoder 的 gating。发送前仍重新取得本轮 preflight，不能复用几分钟前的
+`ready`。
 
 预期的安装、登录、版本、容量、超时或网络失败不使用全局通知。未知错误也不得映射成
-“未安装”；内部稳定错误码与发现路径只进入本地诊断。About 的 `AI Agent` 紧凑卡只用于
-主动检查和准备，不是发送失败后的必经路径，也不创建完整设置页。
+“未安装”；内部稳定错误码与发现路径只进入本地诊断。About 的 `AI Agent` 区域只用于
+自动状态展示和安装/登录恢复，不创建完整设置页。
 
 交接详情显示：
 
@@ -687,6 +696,9 @@ asdf 常见安装根；候选必须最终通过真实包身份校验。旧的“
 - 自动执行模式在预检成功后才冻结并创建一个带固定 `agentDelivery` 授权的 Request。
   Bridge 从已登记项目与该 Request 派生命令、cwd、输入、输出和 finalizer 权限；Renderer
   不传这些路径。它使用一次性短时 ticket 启动 Qoder，自动模式不读写剪贴板。
+- preflight ticket 同时绑定 installation digest、trust policy 与 `execution` / `discussion`
+  purpose；领取即从 Renderer cache 删除，讨论 ticket 不能用于执行。未知 Provider 的历史
+  Request 仍可结束和审阅，但不会回退成 Qoder 或剪贴板，也不显示重新启动动作。
 - ACP 初始化、读取任务、写 Candidate、finalizer 和停止事件只用于显示进度；它们不表示
   Candidate 已完成。只有 completion 与 Repository 校验通过才进入待审阅。
 - Qoder 普通启动失败时，只有当前 Bridge 已确认所拥有的进程组退出且没有

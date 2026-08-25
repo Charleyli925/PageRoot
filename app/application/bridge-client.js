@@ -283,6 +283,11 @@ export function createBridgeClient({
       {},
       "暂时无法检查 Qoder CLI。",
     ),
+    agentProviders: () => query(
+      "/agent/providers",
+      {},
+      "暂时无法读取 Agent Provider 列表。",
+    ),
     preflightAgent: (body) => command(
       "/agent/preflight",
       body,
@@ -294,6 +299,16 @@ export function createBridgeClient({
       body,
       "Qoder CLI 启动结果暂时无法确认。",
       DEFAULT_REQUEST_TIMEOUT_MS,
+    ),
+    agentStatus: (sourcePath, requestId, attemptId) => query(
+      "/agent/status",
+      { sourcePath, requestId, attemptId },
+      "暂时无法读取 Agent 任务状态。",
+    ),
+    cancelAgent: (body) => command(
+      "/agent/cancel",
+      body,
+      "Agent 的停止结果暂时无法确认。",
     ),
     startDiscussion: (body) => command(
       "/discussion/start",

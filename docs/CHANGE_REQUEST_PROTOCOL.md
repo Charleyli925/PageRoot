@@ -933,3 +933,15 @@ Attempt 的 `outcome.json` 是工作台写入的严格诊断终态，不是完�
 - 新运行时不读取 v1/v2 项目记录或 legacy marker。
 - 旧目录和活动源切换前已有独立、只读、Hash 可校验的完整归档。
 - 旧 HTML 快照只可作为普通 HTML 新建项目，不还原旧评论、Request、Attempt 或 Version 关系。
+
+## 23. Agent delivery v2
+
+New Request writers persist `{mode: "clipboard"}` or canonical
+`managed-agent` provider/runtime, namespaced-model and reasoning selection with
+`trusted-local-agent-v1`. `qoder-acp` is read only through the compatibility
+codec. Frozen requirements, recovery/status reads and the one-use ticket compare
+the same selection. Unknown-provider history remains reviewable and cancellable,
+but cannot start, restart, or fall back to clipboard or another provider.
+Candidate and Version codecs contain no provider selection and remain unchanged;
+review and adoption continue to validate their existing Request, Hash and source
+authority rather than the availability of the historical provider.

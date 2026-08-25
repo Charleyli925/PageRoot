@@ -290,7 +290,7 @@ test("a context, turn or message must reference records inside its own conversat
   );
 });
 
-test("reasoningEffort records only that PageRoot applied no override", () => {
+test("an unbound turn does not invent provider reasoning", () => {
   let conversation = seededConversation();
   const turnId = "turn_effort123456789";
   conversation = startConversationTurn(
@@ -298,20 +298,8 @@ test("reasoningEffort records only that PageRoot applied no override", () => {
     { turnId, contextId: "context_seed123456789", mode: "discussion" },
     { now: fixedNow },
   );
-  assert.equal(conversation.turns[0].reasoningEffort, "qoder-default");
-  assert.throws(
-    () => startConversationTurn(
-      seededConversation(),
-      {
-        turnId: "turn_effort223456789",
-        contextId: "context_seed123456789",
-        mode: "discussion",
-        reasoningEffort: "high",
-      },
-      { now: fixedNow },
-    ),
-    (error) => error.code === "INVALID_CONVERSATION_TURN",
-  );
+  assert.equal(conversation.turns[0].providerSelection, null);
+  assert.equal(conversation.turns[0].providerBinding, null);
 });
 
 test("a conversation title is a bounded safe summary of the first user message", () => {

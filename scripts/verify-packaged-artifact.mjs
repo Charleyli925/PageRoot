@@ -45,6 +45,21 @@ const REQUIRED_BRIDGE_FILES = [
   "workspace-bridge.mjs",
   "workspace-bridge-shutdown.mjs",
   "agent-bridge-service.mjs",
+  "agent/agent-runtime-coordinator.mjs",
+  "agent/agent-session-projector.mjs",
+  "agent/agent-lease-store.mjs",
+  "agent/agent-events.mjs",
+  "agent/agent-errors.mjs",
+  "agent/providers/agent-provider-contract.mjs",
+  "agent/providers/provider-registry.mjs",
+  "agent/providers/qoder-provider.mjs",
+  "agent/runtimes/agent-runtime-contract.mjs",
+  "agent/runtimes/runtime-registry.mjs",
+  "agent/runtimes/acp-runtime.mjs",
+  "agent/policies/discussion-policy.mjs",
+  "agent/policies/execution-policy.mjs",
+  "agent/hosts/discussion-host.mjs",
+  "agent/hosts/execution-host.mjs",
   "qoder-acp-client.mjs",
   "discussion-turn-runner.mjs",
   "discussion-bridge-service.mjs",
@@ -97,6 +112,7 @@ export const REQUIRED_SHARED_FILES = [
   "provenance.mjs",
   "source-history.mjs",
   "conversation.mjs",
+  "agent-delivery.mjs",
 ];
 const REQUIRED_LEGAL_RESOURCES = [
   "PageRoot 用户声明与免责声明.txt",
@@ -594,8 +610,8 @@ export async function verifyAppBundle({
   const bridgePackagedRoot = path.join(resourcesPath, "bridge");
   const packagedBridgeFiles = await listFiles(bridgePackagedRoot);
   assert.deepEqual(
-    packagedBridgeFiles,
-    [...REQUIRED_BRIDGE_FILES].sort(),
+    [...packagedBridgeFiles].sort((left, right) => left.localeCompare(right)),
+    [...REQUIRED_BRIDGE_FILES].sort((left, right) => left.localeCompare(right)),
     "packaged Bridge resources are incomplete or contain stale files",
   );
   for (const fileName of REQUIRED_BRIDGE_FILES) {

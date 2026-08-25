@@ -208,6 +208,66 @@
         "to": "bridge/agent-bridge-service.mjs"
       },
       {
+        "from": "scripts/agent/agent-runtime-coordinator.mjs",
+        "to": "bridge/agent/agent-runtime-coordinator.mjs"
+      },
+      {
+        "from": "scripts/agent/agent-session-projector.mjs",
+        "to": "bridge/agent/agent-session-projector.mjs"
+      },
+      {
+        "from": "scripts/agent/agent-lease-store.mjs",
+        "to": "bridge/agent/agent-lease-store.mjs"
+      },
+      {
+        "from": "scripts/agent/agent-events.mjs",
+        "to": "bridge/agent/agent-events.mjs"
+      },
+      {
+        "from": "scripts/agent/agent-errors.mjs",
+        "to": "bridge/agent/agent-errors.mjs"
+      },
+      {
+        "from": "scripts/agent/providers/agent-provider-contract.mjs",
+        "to": "bridge/agent/providers/agent-provider-contract.mjs"
+      },
+      {
+        "from": "scripts/agent/providers/provider-registry.mjs",
+        "to": "bridge/agent/providers/provider-registry.mjs"
+      },
+      {
+        "from": "scripts/agent/providers/qoder-provider.mjs",
+        "to": "bridge/agent/providers/qoder-provider.mjs"
+      },
+      {
+        "from": "scripts/agent/runtimes/agent-runtime-contract.mjs",
+        "to": "bridge/agent/runtimes/agent-runtime-contract.mjs"
+      },
+      {
+        "from": "scripts/agent/runtimes/runtime-registry.mjs",
+        "to": "bridge/agent/runtimes/runtime-registry.mjs"
+      },
+      {
+        "from": "scripts/agent/runtimes/acp-runtime.mjs",
+        "to": "bridge/agent/runtimes/acp-runtime.mjs"
+      },
+      {
+        "from": "scripts/agent/policies/discussion-policy.mjs",
+        "to": "bridge/agent/policies/discussion-policy.mjs"
+      },
+      {
+        "from": "scripts/agent/policies/execution-policy.mjs",
+        "to": "bridge/agent/policies/execution-policy.mjs"
+      },
+      {
+        "from": "scripts/agent/hosts/discussion-host.mjs",
+        "to": "bridge/agent/hosts/discussion-host.mjs"
+      },
+      {
+        "from": "scripts/agent/hosts/execution-host.mjs",
+        "to": "bridge/agent/hosts/execution-host.mjs"
+      },
+      {
         "from": "scripts/qoder-acp-client.mjs",
         "to": "bridge/qoder-acp-client.mjs"
       },
@@ -314,6 +374,10 @@
       {
         "from": "shared/conversation.mjs",
         "to": "shared/conversation.mjs"
+      },
+      {
+        "from": "shared/agent-delivery.mjs",
+        "to": "shared/agent-delivery.mjs"
       },
       {
         "from": "shared/provenance.mjs",
@@ -471,8 +535,10 @@
           "committed-marker.v1.schema.json",
           "completion.v1.schema.json",
           "conversation.v1.schema.json",
+          "conversation.v2.schema.json",
           "conversation-index.v1.schema.json",
           "conversation-draft.v1.schema.json",
+          "conversation-draft.v2.schema.json",
           "input-manifest.v1.schema.json",
           "project-state.v3.schema.json",
           "project-identity.v4.schema.json",

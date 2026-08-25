@@ -5,6 +5,7 @@ import test from "node:test";
 import {
   architectureViolations,
   compositionBoundaryViolations,
+  providerNeutralRendererViolations,
 } from "../scripts/check-architecture.mjs";
 import {
   parseModule,
@@ -64,6 +65,29 @@ test("final composition gate rejects each retired boundary escape", async () => 
     compositionBoundaryViolations({ projectWorkflow: missingDrain }).join("\n"),
     /switch, close, history, and request boundaries must use typed DrainCoordinator commands/,
   );
+});
+
+test("provider-neutral renderer gate rejects provider branches and workflow implementation imports", () => {
+  assert.match(providerNeutralRendererViolations({
+    file: "app/workbench/example.tsx",
+    source: 'const selected = providerId === "qoder";',
+  }).join("\n"), /descriptor data/u);
+  assert.match(providerNeutralRendererViolations({
+    file: "app/workbench/example.tsx",
+    source: 'const selected = request.selection.providerId === "codex";',
+  }).join("\n"), /descriptor data/u);
+  assert.match(providerNeutralRendererViolations({
+    file: "app/application/discussion-turn-workflow.js",
+    source: 'const legacy = delivery?.mode === "qoder-acp";',
+  }).join("\n"), /descriptor data/u);
+  assert.match(providerNeutralRendererViolations({
+    file: "app/application/run-workflow.js",
+    source: 'import value from "../domain/qoder-availability.js";',
+  }).join("\n"), /cannot import provider implementations/u);
+  assert.deepEqual(providerNeutralRendererViolations({
+    file: "app/application/run-workflow.js",
+    source: 'const managed = delivery.mode === "managed-agent";',
+  }), []);
 });
 
 // The gate proves runtime coordination through structure, not source strings.

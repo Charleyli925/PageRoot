@@ -42,6 +42,7 @@ const FORBIDDEN_MESSAGE_KEYS = [
 
 const ACTOR_LABELS = Object.freeze({
   user: "你",
+  agent: "AI Agent",
   qoder: "Qoder CLI",
   pageroot: "PageRoot",
 });
@@ -209,6 +210,7 @@ export function sidebarRunProgress({ state, steps = [], agentText = "" } = {}) {
 
 const ACTOR_INITIALS = Object.freeze({
   user: "你",
+  agent: "A",
   qoder: "Q",
   pageroot: "P",
 });
@@ -328,7 +330,7 @@ export function sidebarActionBar({
   candidateVersionLabel = null,
   candidateStatus = null,
   failureMessage = null,
-  deliveryMode = "qoder-acp",
+  deliveryMode = "managed-agent",
 } = {}) {
   if (state === "ready-to-open" || state === "review-view") {
     if (candidateStatus === "blocked") {
@@ -460,36 +462,65 @@ export function sidebarSendState({
   // owner of this fact — sidebarStateFromRun already maps reviewing to it.
   if (state === "review-view") {
     return {
+      kind: "status",
       canSend: false,
       label: "发送",
       reason: "正在审阅 AI 候选，采纳或返回后可继续对话",
     };
   }
   if (catalogStatus === "checking") {
-    // The model slot already says it is reading; the button explains itself
-    // instead of repeating that sentence word for word.
-    return { canSend: false, label: "发送", reason: "模型就绪后可发送" };
+    return {
+      kind: "status",
+      canSend: false,
+      label: "正在连接 Agent…",
+      reason: null,
+    };
   }
   if (catalogStatus === "auth-required") {
-    return { canSend: false, label: "登录 Qoder 后可发送", reason: null };
+    return {
+      kind: "open-agent-settings",
+      canSend: false,
+      label: "登录 Qoder CLI",
+      reason: null,
+    };
   }
   if (catalogStatus === "not-installed") {
-    return { canSend: false, label: "安装 Qoder CLI 后可发送", reason: null };
+    return {
+      kind: "open-agent-settings",
+      canSend: false,
+      label: "设置 Qoder CLI",
+      reason: null,
+    };
   }
   if (catalogStatus === "unavailable") {
-    return { canSend: false, label: "发送", reason: "Qoder 暂时无法确认" };
+    return {
+      kind: "status",
+      canSend: false,
+      label: "Agent 暂不可用",
+      reason: "Qoder 暂时无法确认",
+    };
   }
   // One discussion turn per Document. The notice line directly above the Composer
   // already says Qoder is replying, so the button stays quiet rather than
   // printing a second sentence that means the same thing.
   if (discussionBusy) {
-    return { canSend: false, label: "发送", reason: null };
+    return { kind: "send", canSend: false, label: "发送", reason: null };
   }
   if (state === "processing" || state === "validating") {
-    return { canSend: false, label: "发送", reason: "Qoder 完成本轮后可发送" };
+    return {
+      kind: "send",
+      canSend: false,
+      label: "发送",
+      reason: "Qoder 完成本轮后可发送",
+    };
   }
   if (state === "promoting") {
-    return { canSend: false, label: "发送", reason: "正在采用候选版本" };
+    return {
+      kind: "send",
+      canSend: false,
+      label: "发送",
+      reason: "正在采用候选版本",
+    };
   }
   // Modifying is a Request, and a Request is frozen from the edit surface's
   // comments rather than from this text box. Pointing there beats a send button
@@ -499,27 +530,43 @@ export function sidebarSendState({
     // the Composer. That is why this intent shows no text box: there is no typed
     // sentence that could be silently dropped on the way to the Agent.
     if (queued) {
-      return { canSend: false, label: "交给 Qoder 修改", reason: "正在等待上一个任务完成" };
+      return {
+        kind: "send",
+        canSend: false,
+        label: "交给 Qoder 修改",
+        reason: "正在等待上一个任务完成",
+      };
     }
     if (pendingCommentCount <= 0) {
       return {
+        kind: "send",
         canSend: false,
         label: "交给 Qoder 修改",
         reason: "先在编辑模式写下评论，AI 会按评论改",
       };
     }
-    return { canSend: true, label: "交给 Qoder 修改", reason: null };
+    return { kind: "send", canSend: true, label: "交给 Qoder 修改", reason: null };
   }
   if (intent === INTENT_CONTINUE) {
-    return { canSend: false, label: "发送", reason: "先采用当前结果才能继续修改" };
+    return {
+      kind: "send",
+      canSend: false,
+      label: "发送",
+      reason: "先采用当前结果才能继续修改",
+    };
   }
   if (queued) {
-    return { canSend: false, label: "发送", reason: "正在等待上一个任务完成" };
+    return {
+      kind: "send",
+      canSend: false,
+      label: "发送",
+      reason: "正在等待上一个任务完成",
+    };
   }
   if (!hasText) {
-    return { canSend: false, label: "发送", reason: null };
+    return { kind: "send", canSend: false, label: "发送", reason: null };
   }
-  return { canSend: true, label: "发送", reason: null };
+  return { kind: "send", canSend: true, label: "发送", reason: null };
 }
 
 /**
@@ -612,7 +659,8 @@ export function sidebarLiveReply(discussion, messages = []) {
   // blinks out and never shows twice.
   const turnId = String(discussion.turnId || "");
   if (turnId && Array.isArray(messages) && messages.some(
-    (message) => message && message.turnId === turnId && message.actor === "qoder",
+    (message) => message && message.turnId === turnId
+      && (message.actor === "agent" || message.actor === "qoder"),
   )) return null;
   const status = String(discussion.status || "");
   return Object.freeze({

@@ -42,7 +42,9 @@ import type {
 } from "./components/HtmlCanvasEditor";
 import type { DesktopEditRuntimeApi } from "./components/desktop-edit-runtime-api";
 import type { DesktopUiPreferencesApi } from "./components/desktop-ui-preferences-api";
-import AboutPageRootDialog from "./components/AboutPageRootDialog";
+import AboutPageRootDialog, {
+  type AboutOpenSource,
+} from "./components/AboutPageRootDialog";
 import { AgentDeliveryButton, type AgentDeliveryMode } from "./components/AgentDeliveryButton";
 import CancelAiRunDialog from "./components/CancelAiRunDialog";
 import FirstEditGuideCard from "./components/FirstEditGuideCard";
@@ -663,6 +665,28 @@ export default function Workbench() {
     workspaceControllerSnapshot?.comment?.draft.error ?? "";
   const runSnapshot = workspaceControllerSnapshot?.runSession
     ?? INITIAL_RUN_SNAPSHOT;
+  const agentCatalogSnapshot = workspaceControllerSnapshot?.run?.agentCatalog ?? null;
+  const frozenAgentSelection = runSnapshot.activeRun?.agentDelivery?.selection
+    ?? agentCatalogSnapshot?.selected
+    ?? null;
+  const frozenProvider = frozenAgentSelection
+    ? agentCatalogSnapshot?.providers?.[frozenAgentSelection.providerId]
+    : null;
+  const agentPresentation = frozenProvider?.presentation ?? {
+    agentName: frozenAgentSelection?.providerId || "Agent",
+    restartLabel: `重新启动 ${frozenAgentSelection?.providerId || "Agent"}`,
+    restartSupported: false,
+    stopLabel: `停止 ${frozenAgentSelection?.providerId || "Agent"} 并继续编辑`,
+    frozenPreviewDetail: `这是本轮冻结并交给 ${frozenAgentSelection?.providerId || "Agent"} 的只读内容`,
+  };
+  const frozenModelId = frozenAgentSelection?.resolvedModelId
+    || frozenAgentSelection?.requestedModelId
+    || null;
+  const agentModelDisplayName = frozenModelId
+    ? `${agentPresentation.agentName || frozenAgentSelection?.providerId || "Agent"} · ${frozenModelId}`
+    : frozenProvider
+      ? null
+      : frozenAgentSelection?.providerId || null;
   const qoderAvailability = workspaceControllerSnapshot?.run?.qoderAvailability
     ?? INITIAL_QODER_AVAILABILITY;
   const backgroundProjectResults = useMemo(
@@ -750,11 +774,16 @@ export default function Workbench() {
   const generateRequestRef = useRef<
     ((mode: AgentDeliveryMode) => void) | null
   >(null);
+  const openAgentSettingsRef = useRef<(() => void) | null>(null);
+  const openAgentSettings = useCallback(() => {
+    openAgentSettingsRef.current?.();
+  }, []);
   const aiConversation = useAiConversation({
     controllerRef: workspaceControllerRef,
     conversation: workspaceControllerSnapshot?.conversation ?? null,
     discussionTurn: workspaceControllerSnapshot?.discussionTurn ?? null,
     qoderAvailability,
+    agentModelDisplayName,
     // The header's mode comes from Request authority, not from a local guess.
     activeRun: runSnapshot.activeRun,
     submissionPending: runSnapshot.submissionPending,
@@ -777,6 +806,7 @@ export default function Workbench() {
      * optimisation for the whole component.
      */
     onDeliverModification: (mode) => generateRequestRef.current?.(mode),
+    onOpenAgentSettings: openAgentSettings,
   });
   // The run-event effect reports a submitted round by opening the thread. It is
   // reached through a ref so that effect keeps its curated dependency list.
@@ -1349,6 +1379,7 @@ export default function Workbench() {
   const [updateResult, setUpdateResult] =
     useState<ApplicationUpdateResult | null>(null);
   const [aboutOpen, setAboutOpen] = useState(false);
+  const [aboutOpenSource, setAboutOpenSource] = useState<AboutOpenSource>("default");
   const [restartUpdateOpen, setRestartUpdateOpen] = useState(false);
   const [applicationVersion, setApplicationVersion] = useState("");
   const [desktopUpdatesAvailable, setDesktopUpdatesAvailable] = useState(false);
@@ -2265,13 +2296,21 @@ export default function Workbench() {
     }
   }, []);
 
-  const openAboutPageRoot = useCallback(() => {
+  const openAboutPageRoot = useCallback((source: AboutOpenSource = "default") => {
     setManualUpdateCheckFailed(false);
     setRepositoryOpenFailed(false);
     setReleaseNotesOpenFailed(false);
     setUserNoticeOpenFailed(false);
+    setAboutOpenSource(source);
     setAboutOpen(true);
   }, []);
+
+  useEffect(() => {
+    openAgentSettingsRef.current = () => openAboutPageRoot("agent-settings");
+    return () => {
+      openAgentSettingsRef.current = null;
+    };
+  }, [openAboutPageRoot]);
 
   useEffect(() => {
     const lifecycle = window.htmlAIAppLifecycle;
@@ -2351,6 +2390,7 @@ export default function Workbench() {
 
   const closeAboutPageRoot = useCallback(() => {
     setAboutOpen(false);
+    setAboutOpenSource("default");
   }, []);
 
   const downloadAvailableUpdate = useCallback(async () => {
@@ -5933,7 +5973,7 @@ export default function Workbench() {
       }
     }
     if (
-      deliveryMode === "qoder-acp"
+      deliveryMode === "managed-agent"
       && requiredWorkspaceController(workspaceController)
         .getSnapshot().run?.qoderAvailability.status !== "ready"
     ) return outcome;
@@ -5971,15 +6011,12 @@ export default function Workbench() {
     viewMode,
     workspaceController,
   ]);
-  const refreshQoderAvailability = async () => (
-    workspaceController?.refreshQoderAvailability() ?? null
-  );
-  const checkQoderUsability = async () => (
+  const checkQoderUsability = useCallback(async () => (
     workspaceController?.checkQoderUsability() ?? null
-  );
-  const copyQoderGuidance = async (kind: QoderGuidanceKind) => (
+  ), [workspaceController]);
+  const copyQoderGuidance = useCallback(async (kind: QoderGuidanceKind) => (
     workspaceController?.copyQoderGuidance({ kind }) ?? null
-  );
+  ), [workspaceController]);
   useEffect(() => {
     deferredEditorReplayRef.current.generateRequest = () => {
       void generateRequest(deferredEditorReplayRef.current.agentDeliveryMode, true);
@@ -7251,7 +7288,7 @@ export default function Workbench() {
               type="button"
               aria-label="关于源页"
               title="关于源页"
-              onClick={openAboutPageRoot}
+              onClick={() => openAboutPageRoot()}
             >
               <FileHtmlIcon aria-hidden="true" size={20} weight="duotone" />
             </button>
@@ -7737,7 +7774,11 @@ export default function Workbench() {
           className="sent-preview-banner"
           icon={<EyeIcon aria-hidden="true" size={18} weight="duotone" />}
           title="正在预览已发送 HTML"
-          detail={currentAgentDeliveryMode === "qoder-acp" ? "这是本轮冻结并交给 Qoder CLI 的只读内容" : "这是本轮冻结并复制给 AI Agent 的只读内容"}
+          detail={currentAgentDeliveryMode === "managed-agent"
+            ? agentPresentation.frozenPreviewDetail
+            : currentAgentDeliveryMode === "clipboard"
+              ? "这是本轮冻结并复制给 AI Agent 的只读内容"
+              : "这是本轮冻结的 Agent 只读内容"}
           actionLabel="返回等待处理"
           onAction={() => {
             setHandoffPreviewOpen(false);
@@ -8948,6 +8989,7 @@ export default function Workbench() {
             handoffCopyFailed={handoffCopyFailed}
             currentQoderHandoffStatus={currentQoderHandoffStatus}
             currentDeliveryMode={currentAgentDeliveryMode}
+            agentPresentation={agentPresentation}
             cancelling={cancelling}
             resolvingConflict={resolvingConflict}
             checkingRun={checkingRun}
@@ -8957,9 +8999,9 @@ export default function Workbench() {
             onActivateReadyResult={() => void activateReadyResult()}
             onSend={() => {
               if (!workspaceController) return;
-              if (currentAgentDeliveryMode === "qoder-acp") {
+              if (currentAgentDeliveryMode === "managed-agent") {
                 void workspaceController.startRunAgent({ run: activeRun });
-              } else {
+              } else if (currentAgentDeliveryMode === "clipboard") {
                 void workspaceController.copyRunHandoff({ run: activeRun });
               }
             }}
@@ -9076,6 +9118,7 @@ export default function Workbench() {
         releaseNotesOpenFailed={releaseNotesOpenFailed}
         userNoticeOpenFailed={userNoticeOpenFailed}
         qoderAvailability={qoderAvailability}
+        source={aboutOpenSource}
         onClose={closeAboutPageRoot}
         onCheckForUpdates={() => void checkForApplicationUpdates()}
         onDownloadUpdate={() => void downloadAvailableUpdate()}
@@ -9086,7 +9129,6 @@ export default function Workbench() {
         onOpenReleaseNotes={() => void openReleaseNotes()}
         onOpenRepository={() => void openProjectRepository()}
         onOpenUserNotice={() => void openUserNotice()}
-        onRefreshQoderAvailability={refreshQoderAvailability}
         onCheckQoderUsability={checkQoderUsability}
         onCopyQoderGuidance={copyQoderGuidance}
       />

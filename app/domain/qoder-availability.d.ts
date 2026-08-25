@@ -1,9 +1,10 @@
-export type QoderAvailability =
-  | "checking"
-  | "ready"
-  | "not-installed"
-  | "auth-required"
-  | "unavailable";
+import type {
+  AgentProviderAvailabilitySnapshot,
+  AgentProviderAvailabilityStatus,
+  AgentProviderGuidanceKind,
+} from "./agent-provider-state.js";
+
+export type QoderAvailability = AgentProviderAvailabilityStatus;
 
 export type QoderAvailabilityReason =
   | "initial"
@@ -12,19 +13,14 @@ export type QoderAvailabilityReason =
   | "auth-required"
   | "invalid-installation"
   | "restart-required"
+  | "account-capacity"
+  | "timeout"
   | "service-unavailable"
   | null;
 
-export type QoderGuidanceKind = "install" | "login";
+export type QoderGuidanceKind = AgentProviderGuidanceKind;
 
-export type QoderAvailabilitySnapshot = Readonly<{
-  status: QoderAvailability;
-  reason: QoderAvailabilityReason;
-  lastCheck: "local" | "use" | null;
-  checkedAt: string | null;
-  guidanceCopied: QoderGuidanceKind | null;
-  guidanceCopiedAt: string | null;
-}>;
+export type QoderAvailabilitySnapshot = AgentProviderAvailabilitySnapshot;
 
 export type QoderAvailabilityPresentation = Readonly<{
   statusLabel: string;

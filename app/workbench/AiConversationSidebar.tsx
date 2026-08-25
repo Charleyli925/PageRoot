@@ -65,6 +65,7 @@ export type AiConversationSidebarProps = {
   onDraftChange?: (text: string) => void;
   onSend?: (intent: SidebarIntent) => void;
   onAction?: (actionId: string) => void;
+  onOpenAgentSettings?: () => void;
   onOpenModelChoices?: () => void;
   onCollapse?: () => void;
   /** Hands the same round to the clipboard instead of the local Agent. */
@@ -72,7 +73,7 @@ export type AiConversationSidebarProps = {
   /** What Qoder is saying while it works (ADR 0037). */
   agentText?: string;
   /** Which destination this round uses; the decision bar copy depends on it. */
-  deliveryMode?: "qoder-acp" | "clipboard";
+  deliveryMode?: "managed-agent" | "clipboard";
   /** The run's own progress steps, so a round in flight reads inside the thread. */
   runSteps?: readonly unknown[];
 };
@@ -98,10 +99,11 @@ export default function AiConversationSidebar({
   onDraftChange,
   onSend,
   onAction,
+  onOpenAgentSettings,
   onOpenModelChoices,
   onCollapse,
   onCopyTask,
-  deliveryMode = "qoder-acp",
+  deliveryMode = "managed-agent",
   agentText = "",
   runSteps = [],
 }: AiConversationSidebarProps) {
@@ -497,7 +499,10 @@ export default function AiConversationSidebar({
             ? "问问这个页面…"
             : "说说你想怎么改…"}
           // Visible but not a place to type while a candidate is on the Canvas.
-          disabled={state === "review-view"}
+          // The Bridge load is also a boundary: before it settles there is no
+          // conversation to receive a draft, so inviting typing would silently
+          // discard the first keystrokes.
+          disabled={loading || state === "review-view"}
           onChange={(event: ChangeEvent<HTMLTextAreaElement>) => (
             onDraftChange?.(event.target.value)
           )}
@@ -552,15 +557,31 @@ export default function AiConversationSidebar({
               复制给别的 AI
             </button>
           ) : null}
-          <button
-            type="button"
-            className={styles.send}
-            data-testid="ai-conversation-send"
-            disabled={!send.canSend}
-            onClick={() => onSend?.(activeIntent)}
-          >
-            {activeIntent === "continue" ? "采纳并继续" : send.label}
-          </button>
+          {send.kind === "status" ? (
+            <span
+              className={styles.sendStatus}
+              data-testid="ai-conversation-agent-status"
+              aria-live="polite"
+            >
+              {send.label}
+            </span>
+          ) : (
+            <button
+              type="button"
+              className={styles.send}
+              data-testid="ai-conversation-send"
+              disabled={send.kind === "send" && !send.canSend}
+              onClick={() => {
+                if (send.kind === "open-agent-settings") {
+                  onOpenAgentSettings?.();
+                  return;
+                }
+                onSend?.(activeIntent);
+              }}
+            >
+              {activeIntent === "continue" ? "采纳并继续" : send.label}
+            </button>
+          )}
         </div>
       </div>
     </aside>

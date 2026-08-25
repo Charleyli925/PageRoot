@@ -47,6 +47,7 @@ export type SidebarActionBar = {
 };
 
 export type SidebarSendState = {
+  kind: "send" | "open-agent-settings" | "status";
   canSend: boolean;
   label: string;
   reason: string | null;
@@ -109,7 +110,7 @@ export function sidebarActionBar(options?: {
   candidateVersionLabel?: string | null;
   candidateStatus?: string | null;
   failureMessage?: string | null;
-  deliveryMode?: "qoder-acp" | "clipboard";
+  deliveryMode?: "managed-agent" | "clipboard";
 }): SidebarActionBar | null;
 
 export type SidebarRunProgressStep = {

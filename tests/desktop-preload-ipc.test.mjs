@@ -47,6 +47,7 @@ async function loadPreloadApis(invoke, { env = {} } = {}) {
     filename: "desktop/preload.mjs",
   });
   return {
+    worlds: Object.fromEntries(exposed),
     projects: exposed.get("htmlAIProjects"),
     integrations: exposed.get("htmlAIIntegrations"),
     updates: exposed.get("htmlAIUpdates"),
@@ -87,6 +88,19 @@ test("preload declares one immutable desktop runtime capability manifest", async
   assert.equal(runtime.capabilities.closeCoordination, "electron-handshake");
   assert.equal(runtime.capabilities.interactivePreview, "independent-url");
   assert.equal(Object.isFrozen(runtime.capabilities), true);
+});
+
+test("preload exposes no Agent executable, spawn, command, or path capability", async () => {
+  const { worlds } = await loadPreloadApis(async () => success(null));
+  assert.equal("htmlAIAgent" in worlds, false);
+  const visit = (value, location) => {
+    if (!value || typeof value !== "object") return;
+    for (const [name, nested] of Object.entries(value)) {
+      assert.doesNotMatch(name, /(?:executable|spawn|command|path)/iu, `${location}.${name}`);
+      visit(nested, `${location}.${name}`);
+    }
+  };
+  for (const [name, value] of Object.entries(worlds)) visit(value, name);
 });
 
 test("preload exposes one narrow Review-only Runtime Snapshot capture method", async () => {
