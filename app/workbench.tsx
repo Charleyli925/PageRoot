@@ -7158,8 +7158,14 @@ export default function Workbench() {
         setDrawer(null);
         setHandoffPreviewOpen(false);
         setCanvasMode("preview");
+        // With one shared entry, the current page context chooses the useful starting
+        // intent: comments mean modification; an untouched preview starts as discussion.
         // The intent survives the conversation load; nothing is sent by opening.
-        aiConversation.reveal(runInProgress ? undefined : "modify");
+        aiConversation.reveal(
+          runInProgress
+            ? undefined
+            : pendingSendItemCount > 0 ? "modify" : "discuss",
+        );
       }}
     />
   );
