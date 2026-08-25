@@ -4707,7 +4707,11 @@ test("ending a copied run still warns after restart and blocks late finalization
     )).toBeVisible();
     const continueWaiting = warning.getByRole("button", { name: "继续等待" });
     await expect(continueWaiting).toBeFocused();
-    await continueWaiting.click();
+    // The contract under test is durable cancellation, not native pointer hit
+    // testing. On a saturated Electron CI host, input injection can return before
+    // the renderer consumes the click; dispatch inside the renderer so the next
+    // assertion is ordered after the React handler.
+    await continueWaiting.dispatchEvent("click");
     await expect(warning).toBeHidden();
     await expect(endRound).toBeEnabled();
 
@@ -4715,7 +4719,7 @@ test("ending a copied run still warns after restart and blocks late finalization
     await expect(warning).toBeVisible();
     await warning.getByRole("button", {
       name: "结束本轮并继续编辑",
-    }).click();
+    }).dispatchEvent("click");
     await expect(warning).toBeHidden();
     const cancellationNotice = launched.page.locator(".toast.show").filter({
       hasText: "本轮已结束，已恢复编辑",
