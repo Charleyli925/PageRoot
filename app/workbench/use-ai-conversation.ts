@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { WorkspaceController } from "../application/workspace-controller.js";
+import type { AgentCatalogSnapshot } from "../application/agent-provider-catalog.js";
 import type { ConversationSessionSnapshot } from "../application/conversation-session.js";
 import type { DiscussionTurnSnapshot } from "../application/discussion-turn-session.js";
 import type { QoderAvailabilitySnapshot } from "../domain/qoder-availability.js";
@@ -37,6 +38,7 @@ export type UseAiConversationOptions = {
   conversation: ConversationSessionSnapshot | null;
   discussionTurn: DiscussionTurnSnapshot | null;
   qoderAvailability: QoderAvailabilitySnapshot | null;
+  agentCatalog?: AgentCatalogSnapshot | null;
   agentModelDisplayName?: string | null;
   activeRun: ActiveRun | null;
   submissionPending?: boolean;
@@ -82,6 +84,7 @@ export function useAiConversation({
   conversation,
   discussionTurn,
   qoderAvailability,
+  agentCatalog = null,
   agentModelDisplayName = null,
   activeRun,
   submissionPending = false,
@@ -102,11 +105,11 @@ export function useAiConversation({
   // read-only there: see sidebarSendState(reviewing).
   const active = (canvasMode === "preview" || reviewing) && Boolean(sourcePath);
   const visible = active && open;
-  const qoderAvailabilityRef = useRef(qoderAvailability);
-  const qoderCheckInFlightRef = useRef<Promise<unknown> | null>(null);
-  const qoderCheckStartedAtRef = useRef(0);
+  const agentAvailabilityRef = useRef(qoderAvailability);
+  const agentCheckInFlightRef = useRef<Promise<unknown> | null>(null);
+  const agentCheckStartedAtRef = useRef(0);
   useEffect(() => {
-    qoderAvailabilityRef.current = qoderAvailability;
+    agentAvailabilityRef.current = qoderAvailability;
   }, [qoderAvailability]);
 
   // A reveal intent that arrives before the conversation is loaded for this
@@ -132,21 +135,21 @@ export function useAiConversation({
     if (!controller) return undefined;
     const identity = { projectId, documentId, sourcePath };
     let cancelled = false;
-    const requestQoderCheck = (force = false) => {
-      const status = qoderAvailabilityRef.current?.status;
+    const requestAgentCheck = (force = false) => {
+      const status = agentAvailabilityRef.current?.status;
       if (!force && (status === "ready" || status === "checking")) return;
       const now = Date.now();
       if (
-        qoderCheckInFlightRef.current
-        || now - qoderCheckStartedAtRef.current < 1_500
+        agentCheckInFlightRef.current
+        || now - agentCheckStartedAtRef.current < 1_500
       ) return;
-      qoderCheckStartedAtRef.current = now;
-      const checking = Promise.resolve(controller.checkQoderUsability())
+      agentCheckStartedAtRef.current = now;
+      const checking = Promise.resolve(controller.checkAgentUsability())
         .catch(() => undefined);
-      qoderCheckInFlightRef.current = checking;
+      agentCheckInFlightRef.current = checking;
       void checking.finally(() => {
-        if (qoderCheckInFlightRef.current === checking) {
-          qoderCheckInFlightRef.current = null;
+        if (agentCheckInFlightRef.current === checking) {
+          agentCheckInFlightRef.current = null;
         }
       });
     };
@@ -159,9 +162,11 @@ export function useAiConversation({
         controller.updateConversationDraftIntent(pending.intent);
       }
     })();
-    requestQoderCheck(true);
+    void Promise.resolve(controller.refreshAgentCatalog())
+      .then(() => requestAgentCheck(true))
+      .catch(() => requestAgentCheck(true));
     const handleReturnToApp = () => {
-      if (document.visibilityState === "visible") requestQoderCheck();
+      if (document.visibilityState === "visible") requestAgentCheck();
     };
     window.addEventListener("focus", handleReturnToApp);
     document.addEventListener("visibilitychange", handleReturnToApp);
@@ -275,6 +280,67 @@ export function useAiConversation({
     onDeliverModification?.("clipboard");
   }, [onDeliverModification]);
 
+  const providerChoices = useMemo(() => Object.values(agentCatalog?.providers || {})
+    .filter((provider) => provider.capabilities?.discussion === true)
+    .map((provider) => ({
+      id: provider.providerId,
+      label: provider.presentation.displayName,
+      runtimeId: provider.runtimeId,
+    })), [agentCatalog]);
+  const selectedProvider = agentCatalog?.selected?.providerId || null;
+  const activeProvider = selectedProvider
+    ? agentCatalog?.providers?.[selectedProvider]
+    : null;
+  const modelChoices = useMemo(() => (activeProvider?.models || []).map((model) => ({
+    id: String(model.id || ""),
+    label: String(model.displayName || model.id || ""),
+  })).filter((model) => model.id && model.label), [activeProvider]);
+  const reasoningChoices = useMemo(() => (activeProvider?.reasoningEfforts || []).map((effort) => ({
+    id: String(effort.id || ""),
+    label: String(effort.displayName || effort.id || ""),
+  })).filter((effort) => effort.id && effort.label), [activeProvider]);
+  const onProviderChange = useCallback((providerId: string) => {
+    const provider = agentCatalog?.providers?.[providerId];
+    if (!provider) return;
+    controllerRef.current?.selectAgent(provider.selection);
+    void controllerRef.current?.checkAgentUsability();
+  }, [agentCatalog, controllerRef]);
+  const onModelChange = useCallback((modelId: string) => {
+    const selected = agentCatalog?.selected;
+    if (!selected || !modelId) return;
+    controllerRef.current?.selectAgent({
+      ...selected,
+      requestedModelId: modelId,
+      resolvedModelId: modelId,
+      reasoning: { ...selected.reasoning, resolution: "exact" },
+    });
+    void controllerRef.current?.checkAgentUsability();
+  }, [agentCatalog, controllerRef]);
+  const onReasoningChange = useCallback((reasoning: string) => {
+    const selected = agentCatalog?.selected;
+    if (!selected || !reasoning) return;
+    controllerRef.current?.selectAgent({
+      ...selected,
+      reasoning: { requested: reasoning, applied: reasoning, resolution: "exact" },
+    });
+    void controllerRef.current?.checkAgentUsability();
+  }, [agentCatalog, controllerRef]);
+  const onAgentAction = useCallback(() => {
+    const kind = activeProvider?.presentation?.authAction
+      && typeof activeProvider.presentation.authAction === "object"
+      ? String((activeProvider.presentation.authAction as { kind?: unknown }).kind || "")
+      : "";
+    if (kind === "open-url" || kind === "show-device-code") {
+      void controllerRef.current?.authenticateAgent();
+      return;
+    }
+    if (kind === "retry") {
+      void controllerRef.current?.checkAgentUsability();
+      return;
+    }
+    onOpenAgentSettings?.();
+  }, [activeProvider, controllerRef, onOpenAgentSettings]);
+
   const sidebarProps = useMemo(() => ({
     state,
     title: conversation?.title ?? "",
@@ -285,7 +351,26 @@ export function useAiConversation({
     // both, so the Composer can never claim ready while the Agent is not.
     catalogStatus: (qoderAvailability?.status ?? "unavailable") as SidebarCatalogStatus,
     modelDisplayName: agentModelDisplayName,
-    modelChoiceCount: 0,
+    modelChoiceCount: modelChoices.length,
+    providerChoices,
+    selectedProvider,
+    modelChoices,
+    selectedModel: agentCatalog?.selected?.resolvedModelId
+      || agentCatalog?.selected?.requestedModelId
+      || null,
+    reasoningChoices,
+    selectedReasoning: agentCatalog?.selected?.reasoning.applied
+      || agentCatalog?.selected?.reasoning.requested
+      || null,
+    agentName: String(activeProvider?.presentation.agentName || "Agent"),
+    authActionLabel: activeProvider?.presentation.authAction
+      && typeof activeProvider.presentation.authAction === "object"
+      ? String((activeProvider.presentation.authAction as { label?: unknown }).label || "")
+      : null,
+    executionAvailable: activeProvider?.capabilities?.execution === true,
+    onProviderChange,
+    onModelChange,
+    onReasoningChange,
     // The decision bar needs to name the version it is deciding about, and the
     // assessment decides whether adopting without looking is offered at all.
     candidateVersionLabel: activeRun?.candidateVersionLabel ?? null,
@@ -303,13 +388,18 @@ export function useAiConversation({
     onCopyTask,
     onAction: onDecision,
     onCollapse,
-    onOpenAgentSettings,
+    onOpenAgentSettings: onAgentAction,
   }), [
     state,
     conversation,
     draftText,
     qoderAvailability,
     agentModelDisplayName,
+    agentCatalog,
+    providerChoices,
+    selectedProvider,
+    modelChoices,
+    reasoningChoices,
     discussionTurn,
     pendingCommentCount,
     onDraftChange,
@@ -318,7 +408,10 @@ export function useAiConversation({
     onCopyTask,
     onDecision,
     onCollapse,
-    onOpenAgentSettings,
+    onAgentAction,
+    onProviderChange,
+    onModelChange,
+    onReasoningChange,
   ]);
 
   return { open, visible, toggle, reveal, sidebarProps };

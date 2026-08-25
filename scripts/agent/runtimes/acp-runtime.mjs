@@ -3,6 +3,7 @@ import {
   probeAgentNativeAcp,
 } from "./acp-probe.mjs";
 import { runAgentNativeAcp } from "./agent-native-acp-runner.mjs";
+import { authenticateAgentNativeAcp } from "./acp-authentication.mjs";
 import { assertAgentSecurityProfile } from "../providers/agent-provider-contract.mjs";
 import { defineAgentRuntime } from "./agent-runtime-contract.mjs";
 
@@ -40,10 +41,12 @@ export function createAcpRuntime({
   runTask = runQoderAcpTask,
   probeAgentNative = probeAgentNativeAcp,
   runAgentNative = runAgentNativeAcp,
+  authenticateAgentNative = authenticateAgentNativeAcp,
 } = {}) {
   if (typeof runTask !== "function"
     || typeof probeAgentNative !== "function"
-    || typeof runAgentNative !== "function") {
+    || typeof runAgentNative !== "function"
+    || typeof authenticateAgentNative !== "function") {
     throw new TypeError("ACP runtime requires a task runner.");
   }
   return defineAgentRuntime({
@@ -53,6 +56,12 @@ export function createAcpRuntime({
         throw new TypeError("ACP probe requires an agent-native launch descriptor.");
       }
       return probeAgentNative(Object.freeze({ ...launch }));
+    },
+    authenticate(launch) {
+      if (launch?.securityProfile !== "agent-native") {
+        throw new TypeError("ACP authentication requires an agent-native launch descriptor.");
+      }
+      return authenticateAgentNative(Object.freeze({ ...launch }));
     },
     run(launch) {
       if (!launch || typeof launch !== "object" || Array.isArray(launch)) {

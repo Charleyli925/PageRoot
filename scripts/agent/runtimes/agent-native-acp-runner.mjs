@@ -1,11 +1,27 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { access, constants as fsConstants, lstat, open, realpath } from "node:fs/promises";
+import {
+  access,
+  chmod,
+  constants as fsConstants,
+  copyFile,
+  lstat,
+  mkdir,
+  mkdtemp,
+  open,
+  readFile,
+  realpath,
+  rm,
+  symlink,
+} from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { Readable, Transform, Writable } from "node:stream";
 
 import * as acp from "@agentclientprotocol/sdk";
 
 import { terminateManagedProcess } from "../hosts/execution-host.mjs";
+import { macosAgentSandboxProfile } from "../sandbox/macos-agent-sandbox.mjs";
 import { runAcpTask } from "../../qoder-acp-client.mjs";
 
 const MAX_ACP_FRAME_BYTES = 4 * 1024 * 1024;
@@ -256,8 +272,7 @@ export async function withAgentNativeAcpProcess(launch, operation) {
   const processGroup = process.platform !== "win32";
   const diagnostic = boundedDiagnostic();
   let child;
-  try {
-    child = spawn(runtime, [
+  const runtimeArguments = [
       "--no-warnings",
       "--experimental-vm-modules",
       "--input-type=module",
@@ -266,7 +281,14 @@ export async function withAgentNativeAcpProcess(launch, operation) {
       "--",
       launch.adapterEntry,
       ...adapterArgs,
-    ], {
+    ];
+  const sandboxed = typeof launch.sandboxProfile === "string";
+  const executable = sandboxed ? "/usr/bin/sandbox-exec" : runtime;
+  const spawnArguments = sandboxed
+    ? ["-p", launch.sandboxProfile, runtime, ...runtimeArguments]
+    : runtimeArguments;
+  try {
+    child = spawn(executable, spawnArguments, {
       cwd: launch.cwd,
       env: codexAcpEnvironment({
         baseEnvironment: launch.baseEnvironment,
@@ -312,6 +334,120 @@ export async function withAgentNativeAcpProcess(launch, operation) {
   }
 }
 
+async function existingAuthFile(baseEnvironment) {
+  const codexHome = baseEnvironment?.CODEX_HOME
+    || (baseEnvironment?.HOME ? path.join(baseEnvironment.HOME, ".codex") : null);
+  if (!codexHome) return null;
+  const candidate = path.join(codexHome, "auth.json");
+  const information = await lstat(candidate).catch(() => null);
+  return information?.isFile() && !information.isSymbolicLink()
+    ? realpath(candidate)
+    : null;
+}
+
+async function prepareDiscussionIsolation(launch) {
+  if (process.platform !== "darwin") {
+    throw runtimeError(
+      "CODEX_SANDBOX_PLATFORM_UNSUPPORTED",
+      "Codex Discussion requires the pinned macOS sandbox boundary.",
+    );
+  }
+  const policy = launch.policy;
+  const root = await realpath(await mkdtemp(path.join(os.tmpdir(), "stemmio-codex-turn-")));
+  const contextRoot = path.join(root, "context");
+  const stateRoot = path.join(root, "state");
+  const codexHome = path.join(stateRoot, "codex-home");
+  const temporaryRoot = path.join(stateRoot, "tmp");
+  const homeRoot = path.join(stateRoot, "home");
+  await Promise.all([
+    mkdir(contextRoot, { mode: 0o700 }),
+    mkdir(codexHome, { recursive: true, mode: 0o700 }),
+    mkdir(temporaryRoot, { recursive: true, mode: 0o700 }),
+    mkdir(homeRoot, { recursive: true, mode: 0o700 }),
+  ]);
+  const copiedFiles = [];
+  let snapshotText = null;
+  try {
+    for (const readable of policy.readableFiles) {
+      const name = path.basename(readable.path);
+      const target = path.join(contextRoot, name);
+      const before = await readFile(readable.path);
+      if (`sha256:${createHash("sha256").update(before).digest("hex")}` !== readable.sha256) {
+        throw runtimeError("CODEX_DISCUSSION_INPUT_DRIFT", "The discussion input changed before sandboxing.");
+      }
+      await copyFile(readable.path, target, fsConstants.COPYFILE_EXCL);
+      await chmod(target, 0o400);
+      copiedFiles.push(Object.freeze({ ...readable, path: target }));
+      if (readable.role === "discussion-snapshot") snapshotText = before.toString("utf8");
+    }
+    await chmod(contextRoot, 0o500);
+    const authFile = await existingAuthFile(launch.baseEnvironment);
+    if (authFile) await symlink(authFile, path.join(codexHome, "auth.json"));
+    const packageRoot = path.resolve(path.dirname(launch.adapterEntry), "..", "..", "..");
+    const sandboxProfile = macosAgentSandboxProfile({
+      runtime: await realpath(process.execPath),
+      codexBinary: launch.codexBinary,
+      packageRoot,
+      contextRoot,
+      stateRoot,
+      authFile,
+    });
+    const isolatedPolicy = Object.freeze({
+      ...policy,
+      requestRoot: contextRoot,
+      snapshotPath: path.join(contextRoot, path.basename(policy.snapshotPath)),
+      promptPath: path.join(contextRoot, path.basename(policy.promptPath)),
+      readableFiles: Object.freeze(copiedFiles),
+    });
+    if (snapshotText === null) {
+      throw runtimeError(
+        "CODEX_DISCUSSION_INPUT_MISSING",
+        "The Codex discussion snapshot is unavailable.",
+      );
+    }
+    const inlinePrompt = [
+      launch.prompt,
+      "",
+      "For this sandboxed Codex turn, the exact read-only snapshot is inlined below.",
+      "Do not invoke a command, file, network, MCP, skill, plugin, app, or subagent tool.",
+      `Snapshot SHA-256: ${policy.sourceSha256}`,
+      `Snapshot UTF-8 byte length: ${Buffer.byteLength(snapshotText, "utf8")}`,
+      "<stemmio-read-only-snapshot>",
+      snapshotText,
+      "</stemmio-read-only-snapshot>",
+    ].join("\n");
+    if (Buffer.byteLength(inlinePrompt, "utf8") > 256 * 1024) {
+      throw runtimeError(
+        "CODEX_DISCUSSION_CONTEXT_TOO_LARGE",
+        "The current page is too large for a command-free Codex discussion turn.",
+      );
+    }
+    return Object.freeze({
+      root,
+      launch: Object.freeze({
+        ...launch,
+        cwd: contextRoot,
+        policy: isolatedPolicy,
+        prompt: inlinePrompt,
+        sandboxProfile,
+        baseEnvironment: Object.freeze({
+          ...(launch.baseEnvironment || {}),
+          HOME: homeRoot,
+          CODEX_HOME: codexHome,
+          TMPDIR: temporaryRoot,
+          XDG_CACHE_HOME: path.join(stateRoot, "cache"),
+          XDG_CONFIG_HOME: path.join(stateRoot, "config"),
+          XDG_DATA_HOME: path.join(stateRoot, "data"),
+        }),
+      }),
+    });
+  } catch (cause) {
+    await chmod(contextRoot, 0o700).catch(() => {});
+    await rm(root, { recursive: true, force: true });
+    throw cause;
+  }
+}
+
 export async function runAgentNativeAcp(launch) {
   if (launch.securityProfile !== "agent-native") {
     throw new TypeError("Agent-native ACP runner requires the agent-native security profile.");
@@ -322,14 +458,23 @@ export async function runAgentNativeAcp(launch) {
       "Codex execution is disabled until the native sandbox authority gate passes.",
     );
   }
-  return withAgentNativeAcpProcess(launch, ({ stream }) => runAcpTask({
-    connection: stream,
-    policy: launch.policy,
-    prompt: launch.prompt,
-    onEvent: launch.onEvent,
-    cancellationSignal: launch.cancellationSignal,
-    expectedAgentName: /codex/iu,
-    ...(launch.startupTimeoutMs ? { startupTimeoutMs: launch.startupTimeoutMs } : {}),
-    ...(launch.turnTimeoutMs ? { turnTimeoutMs: launch.turnTimeoutMs } : {}),
-  }));
+  const isolated = await prepareDiscussionIsolation(launch);
+  try {
+    return await withAgentNativeAcpProcess(isolated.launch, ({ stream }) => runAcpTask({
+      connection: stream,
+      policy: isolated.launch.policy,
+      prompt: isolated.launch.prompt,
+      onEvent: isolated.launch.onEvent,
+      cancellationSignal: isolated.launch.cancellationSignal,
+      expectedAgentName: /codex/iu,
+      sessionConfigOptions: isolated.launch.sessionConfigOptions,
+      ...(isolated.launch.startupTimeoutMs
+        ? { startupTimeoutMs: isolated.launch.startupTimeoutMs }
+        : {}),
+      ...(isolated.launch.turnTimeoutMs ? { turnTimeoutMs: isolated.launch.turnTimeoutMs } : {}),
+    }));
+  } finally {
+    await chmod(path.join(isolated.root, "context"), 0o700).catch(() => {});
+    await rm(isolated.root, { recursive: true, force: true });
+  }
 }

@@ -23,12 +23,16 @@ export type AgentProviderDescriptor = Readonly<{
   trustPolicyVersion: string;
   selection: AgentSelection;
   presentation: AgentProviderPresentation;
+  capabilities?: Readonly<Record<string, boolean>>;
   failureReason?: (code: unknown) => string;
   guidanceInstruction?: (kind: "install" | "login") => string;
 }>;
 export type AgentProviderEntry = AgentProviderDescriptor & Readonly<{
   availability: AgentProviderAvailabilitySnapshot;
   installationDigest: string | null;
+  models?: readonly Readonly<Record<string, unknown>>[];
+  reasoningEfforts?: readonly Readonly<Record<string, unknown>>[];
+  modes?: readonly Readonly<Record<string, unknown>>[];
 }>;
 export type AgentPreflight = Readonly<Record<string, unknown> & {
   status: string;
@@ -57,6 +61,7 @@ export class AgentCatalogState {
   getSnapshot(): AgentCatalogSnapshot;
   subscribe(listener: (snapshot: AgentCatalogSnapshot) => void): () => void;
   dispose(): void;
+  refreshCatalog(): Promise<AgentCatalogSnapshot>;
   select(selection: AgentSelection): AgentSelection;
   freezeSelected(): AgentSelection | null;
   provider(selection?: AgentSelection | null): AgentProviderEntry | null;

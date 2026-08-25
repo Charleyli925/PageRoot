@@ -21,11 +21,15 @@ if (behavior === "oversized-frame") {
 } else if (behavior === "hang-initialize") {
   process.stdin.resume();
 } else {
+  let authenticated = behavior !== "auth-flow" && behavior !== "auth-required";
+  let descendantPid = null;
   const app = acp.agent({ name: "synthetic-codex-acp" })
     .onRequest(acp.methods.agent.initialize, () => ({
       protocolVersion: acp.PROTOCOL_VERSION,
       agentCapabilities: { loadSession: false },
-      authMethods: [],
+      authMethods: behavior === "auth-flow"
+        ? [{ id: "chat-gpt", name: "ChatGPT", description: "Synthetic login" }]
+        : [],
       agentInfo: {
         name: behavior === "wrong-identity" ? "synthetic-other-agent" : "@agentclientprotocol/codex-acp",
         title: "Synthetic Codex",
@@ -36,14 +40,23 @@ if (behavior === "oversized-frame") {
       "authentication/status",
       (params) => params ?? {},
       () => ({
-        type: behavior === "auth-required" ? "unauthenticated" : "chat-gpt",
+        type: authenticated ? "chat-gpt" : "unauthenticated",
       }),
     )
+    .onRequest(acp.methods.agent.authenticate, ({ params }) => {
+      const methodId = params?.methodId;
+      if (behavior !== "auth-flow" || methodId !== "chat-gpt") {
+        throw new Error("unsupported synthetic authentication");
+      }
+      authenticated = true;
+      return {};
+    })
     .onRequest(acp.methods.agent.session.new, () => {
-      if (behavior === "descendant") {
+      if (behavior === "descendant" || behavior === "cancel-stream") {
         const descendant = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
           stdio: "ignore",
         });
+        descendantPid = descendant.pid;
         if (pidFile) writeFileSync(pidFile, `${descendant.pid}\n`, "utf8");
       }
       return {
@@ -84,6 +97,48 @@ if (behavior === "oversized-frame") {
     })
     .onRequest(acp.methods.agent.session.close, () => {
       return {};
+    })
+    .onRequest(acp.methods.agent.session.setConfigOption, ({ params }) => {
+      const { configId, value } = params;
+      return {
+        configOptions: [{ id: configId, type: "select", currentValue: value, options: [] }],
+      };
+    })
+    .onRequest(acp.methods.agent.session.prompt, async ({ params, client }) => {
+      if (behavior !== "discussion" && behavior !== "cancel-stream") {
+        throw new Error("unsupported synthetic prompt");
+      }
+      await client.notify(acp.methods.client.session.update, {
+        sessionId: params.sessionId,
+        update: {
+          sessionUpdate: "agent_thought_chunk",
+          content: { type: "text", text: "synthetic hidden reasoning" },
+        },
+      });
+      await client.notify(acp.methods.client.session.update, {
+        sessionId: params.sessionId,
+        update: {
+          sessionUpdate: "tool_call",
+          toolCallId: "synthetic-read-attempt",
+          title: "Read snapshot",
+          kind: "read",
+          status: "failed",
+        },
+      });
+      await client.notify(acp.methods.client.session.update, {
+        sessionId: params.sessionId,
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          content: {
+            type: "text",
+            text: behavior === "cancel-stream"
+              ? `Synthetic Codex reply pid=${descendantPid}`
+              : "Synthetic Codex reply",
+          },
+        },
+      });
+      if (behavior === "cancel-stream") return new Promise(() => {});
+      return { stopReason: "end_turn" };
     });
 
   app.connect(acp.ndJsonStream(

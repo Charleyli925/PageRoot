@@ -47,6 +47,15 @@ export type AiConversationSidebarProps = {
   catalogStatus?: SidebarCatalogStatus;
   modelDisplayName?: string | null;
   modelChoiceCount?: number;
+  providerChoices?: readonly Readonly<{ id: string; label: string }>[];
+  selectedProvider?: string | null;
+  modelChoices?: readonly Readonly<{ id: string; label: string }>[];
+  selectedModel?: string | null;
+  reasoningChoices?: readonly Readonly<{ id: string; label: string }>[];
+  selectedReasoning?: string | null;
+  agentName?: string;
+  authActionLabel?: string | null;
+  executionAvailable?: boolean;
   candidateVersionLabel?: string | null;
   candidateStatus?: string | null;
   failureMessage?: string | null;
@@ -67,6 +76,9 @@ export type AiConversationSidebarProps = {
   onAction?: (actionId: string) => void;
   onOpenAgentSettings?: () => void;
   onOpenModelChoices?: () => void;
+  onProviderChange?: (providerId: string) => void;
+  onModelChange?: (modelId: string) => void;
+  onReasoningChange?: (reasoning: string) => void;
   onCollapse?: () => void;
   /** Hands the same round to the clipboard instead of the local Agent. */
   onCopyTask?: () => void;
@@ -87,6 +99,15 @@ export default function AiConversationSidebar({
   catalogStatus = "ready",
   modelDisplayName = null,
   modelChoiceCount = 0,
+  providerChoices = [],
+  selectedProvider = null,
+  modelChoices = [],
+  selectedModel = null,
+  reasoningChoices = [],
+  selectedReasoning = null,
+  agentName = "Agent",
+  authActionLabel = null,
+  executionAvailable = true,
   candidateVersionLabel = null,
   candidateStatus = null,
   failureMessage = null,
@@ -101,6 +122,9 @@ export default function AiConversationSidebar({
   onAction,
   onOpenAgentSettings,
   onOpenModelChoices,
+  onProviderChange,
+  onModelChange,
+  onReasoningChange,
   onCollapse,
   onCopyTask,
   deliveryMode = "managed-agent",
@@ -136,6 +160,9 @@ export default function AiConversationSidebar({
       || discussion?.status === "running"
       || discussion?.status === "cancelling",
     pendingCommentCount,
+    agentName,
+    authActionLabel,
+    executionAvailable,
   });
   // The clipboard button does not read the model catalog: copying is a branch
   // of the same round that never consults Qoder, so an unreadable catalog must
@@ -447,6 +474,53 @@ export default function AiConversationSidebar({
             </span>
           ) : null}
         </div>
+
+        {providerChoices.length > 1 || modelChoices.length > 1 || reasoningChoices.length > 1 ? (
+          <div className={styles.agentChoices} data-testid="ai-conversation-agent-choices">
+            {providerChoices.length > 1 ? (
+              <label>
+                <span>Agent</span>
+                <select
+                  value={selectedProvider ?? ""}
+                  onChange={(event) => onProviderChange?.(event.target.value)}
+                  aria-label="选择 Agent Provider"
+                >
+                  {providerChoices.map((provider) => (
+                    <option key={provider.id} value={provider.id}>{provider.label}</option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+            {modelChoices.length > 1 ? (
+              <label>
+                <span>模型</span>
+                <select
+                  value={selectedModel ?? ""}
+                  onChange={(event) => onModelChange?.(event.target.value)}
+                  aria-label="选择模型"
+                >
+                  {modelChoices.map((model) => (
+                    <option key={model.id} value={model.id}>{model.label}</option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+            {reasoningChoices.length > 1 ? (
+              <label>
+                <span>推理</span>
+                <select
+                  value={selectedReasoning ?? ""}
+                  onChange={(event) => onReasoningChange?.(event.target.value)}
+                  aria-label="选择推理强度"
+                >
+                  {reasoningChoices.map((reasoning) => (
+                    <option key={reasoning.id} value={reasoning.id}>{reasoning.label}</option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+          </div>
+        ) : null}
 
         {/*
           * The round's context summary belongs to the Composer, not to the fact

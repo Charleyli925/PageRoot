@@ -41,7 +41,10 @@ import {
   sealDiscussionReply,
   writeConversationDraft,
 } from "./conversation-repository.mjs";
-import { AgentBridgeService } from "./agent-bridge-service.mjs";
+import {
+  AgentBridgeService,
+  TRUSTED_LOCAL_AGENT_POLICY_VERSION,
+} from "./agent-bridge-service.mjs";
 import { DiscussionBridgeService } from "./discussion-bridge-service.mjs";
 import {
   closeWorkspaceBridgeAfterAgentCleanup,
@@ -1441,12 +1444,34 @@ async function preflightAgent(body) {
   });
 }
 
-async function agentAvailability() {
+async function agentAvailability(searchParams = null) {
+  const providerId = searchParams?.get("providerId");
+  const runtimeId = searchParams?.get("runtimeId");
+  if (providerId || runtimeId) {
+    return agentBridgeService.availability({
+      selection: {
+        providerId,
+        runtimeId,
+        requestedModelId: null,
+        resolvedModelId: null,
+        reasoning: { requested: null, applied: null, resolution: "provider-default" },
+      },
+    });
+  }
   return agentBridgeService.availability();
 }
 
 async function agentProviders() {
   return agentBridgeService.providers();
+}
+
+async function authenticateAgent(body) {
+  const delivery = normalizeAgentDelivery({
+    mode: "managed-agent",
+    selection: body?.selection,
+    trustPolicyVersion: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
+  });
+  return agentBridgeService.authenticate({ selection: delivery.selection });
 }
 
 async function startAgent(body) {
@@ -2556,7 +2581,7 @@ async function route(request, response) {
     return;
   }
   if (request.method === "GET" && url.pathname === "/agent/availability") {
-    sendJson(response, 200, await agentAvailability());
+    sendJson(response, 200, await agentAvailability(url.searchParams));
     return;
   }
   if (request.method === "GET" && url.pathname === "/agent/providers") {
@@ -2566,6 +2591,11 @@ async function route(request, response) {
   if (request.method === "POST" && url.pathname === "/agent/preflight") {
     const body = await readBody(request);
     sendJson(response, 200, await preflightAgent(body));
+    return;
+  }
+  if (request.method === "POST" && url.pathname === "/agent/authenticate") {
+    const body = await readBody(request);
+    sendJson(response, 202, await authenticateAgent(body));
     return;
   }
   if (request.method === "POST" && url.pathname === "/agent/start") {

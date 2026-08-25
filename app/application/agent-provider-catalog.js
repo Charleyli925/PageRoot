@@ -40,10 +40,10 @@ const QODER_PRESENTATION = Object.freeze({
   primaryActionDataAttribute: "data-qoder-primary",
   guidancePurposePrefix: "qoder",
   readyDetail: "真实预检已完成，可直接交给 Qoder CLI",
-  notInstalledDetail: "如需从 PageRoot 直接发送，还需要 Qoder CLI。",
+  notInstalledDetail: "如需从 Stemmio 直接发送，还需要 Qoder CLI。",
   authRequiredDetail: "完成 Qoder 登录后即可直接发送。",
-  invalidInstallationDetail: "当前安装不是 PageRoot 支持的独立 Qoder CLI。",
-  restartRequiredDetail: "Qoder CLI 已发生变化，重新打开 PageRoot 后即可继续。",
+  invalidInstallationDetail: "当前安装不是 Stemmio 支持的独立 Qoder CLI。",
+  restartRequiredDetail: "Qoder CLI 已发生变化，重新打开 Stemmio 后即可继续。",
   checkingDetail: "正在自动检查 Qoder CLI…",
   capacityStatusLabel: "暂不可用 · Qoder 额度已用完",
   capacityDetail: "Qoder 账号当前没有可用模型容量。",
@@ -65,15 +65,15 @@ function qoderGuidanceInstruction(kind) {
       "请帮我完成这台 Mac 上独立 Qoder CLI 的官方登录流程。",
       "使用 Qoder 官方支持的登录入口 `qodercli login`；如果需要交互式登录，请启动 `qodercli` 后使用 `/login`。",
       "完成浏览器或令牌登录后，验证 `qodercli --list-models` 能返回当前账号可用的模型。",
-      "不要修改 PageRoot，也不要修改当前项目。完成后只告诉我登录和可用性验证结果。",
+      "不要修改 Stemmio，也不要修改当前项目。完成后只告诉我登录和可用性验证结果。",
     ].join("\n");
   }
   return [
-    "请帮我在这台 Mac 上准备 PageRoot 支持的独立 Qoder CLI。",
+    "请帮我在这台 Mac 上准备 Stemmio 支持的独立 Qoder CLI。",
     "使用 Qoder 官方 npm 包 `@qoder-ai/qodercli@latest`，不要使用 Qoder 应用包内置的命令。",
     "将它安装到 Finder 或 Dock 启动的应用也能稳定发现的位置；优先使用用户可写的稳定全局目录，或保留当前 nvm、Volta、fnm、mise 配置并确保 qodercli 启动器真实存在。",
     "安装后使用 Qoder 官方登录流程完成登录，并验证 `qodercli --version` 与 `qodercli --list-models` 均可用。",
-    "不要修改 PageRoot，也不要修改当前项目。完成后只告诉我安装、版本、登录和可用性验证结果。",
+    "不要修改 Stemmio，也不要修改当前项目。完成后只告诉我安装、版本、登录和可用性验证结果。",
   ].join("\n");
 }
 
@@ -83,12 +83,100 @@ export const QODER_AGENT_PROVIDER = Object.freeze({
   securityProfile: "client-mediated",
   trustPolicyVersion: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
   selection: freezeAgentSelection(defaultManagedAgentDelivery().selection),
+  capabilities: Object.freeze({
+    availability: true,
+    preflight: true,
+    modelCatalog: true,
+    discussion: true,
+    execution: true,
+  }),
   presentation: QODER_PRESENTATION,
   failureReason(code) {
     return QODER_FAILURE_REASONS[String(code || "")] || "service-unavailable";
   },
   guidanceInstruction: qoderGuidanceInstruction,
 });
+
+function catalogPresentation(provider) {
+  const value = provider?.presentation && typeof provider.presentation === "object"
+    ? provider.presentation
+    : {};
+  const displayName = String(value.displayName || provider?.displayName || provider?.providerId || "Agent");
+  return Object.freeze({
+    displayName,
+    agentName: String(value.agentName || displayName),
+    description: String(value.description || ""),
+    logoSrc: null,
+    cardClassName: "agent-provider-card",
+    primaryActionDataAttribute: null,
+    guidancePurposePrefix: String(provider?.providerId || "agent"),
+    readyDetail: String(value.readyDetail || "真实预检已完成，可以继续。"),
+    notInstalledDetail: String(value.notInstalledDetail || "当前 Agent runtime 不可用。"),
+    authRequiredDetail: String(value.authRequiredDetail || "登录后即可继续。"),
+    invalidInstallationDetail: String(value.unavailableDetail || "当前 Agent runtime 不可用。"),
+    restartRequiredDetail: "Agent runtime 已发生变化，请重新打开 Stemmio。",
+    checkingDetail: String(value.checkingDetail || "正在检查 Agent…"),
+    capacityStatusLabel: "暂不可用 · 账号容量不足",
+    capacityDetail: "当前账号没有可用模型容量。",
+    timeoutDetail: "Agent 预检没有在规定时间内完成。",
+    startUnavailable: "当前 Request 还不能启动 Agent。",
+    startBusy: "Agent 正在启动，请等待当前操作完成。",
+    startFailure: "Agent 没有启动。本轮 Request 已保留，可重试或复制任务。",
+    restartLabel: `重新启动 ${displayName}`,
+    restartSupported: false,
+    stopLabel: `停止 ${displayName} 并继续编辑`,
+    frozenPreviewDetail: `这是本轮冻结并交给 ${displayName} 的只读内容`,
+    authAction: value.authAction || null,
+  });
+}
+
+function catalogFailureReason(code) {
+  const value = String(code || "");
+  if (/AUTH_REQUIRED/u.test(value)) return "auth-required";
+  if (/NOT_FOUND|UNAVAILABLE/u.test(value) && /COMMAND|INSTALLATION/u.test(value)) {
+    return "not-installed";
+  }
+  if (/CAPACITY|RATE_LIMIT/u.test(value)) return "account-capacity";
+  if (/TIMEOUT/u.test(value)) return "timeout";
+  if (/CHANGED|MISMATCH/u.test(value)) return "restart-required";
+  if (/UNTRUSTED|INVALID|CORRUPT|INCOMPATIBLE/u.test(value)) return "invalid-installation";
+  return "service-unavailable";
+}
+
+function descriptorFromCatalog(provider, trustPolicyVersion) {
+  if (!provider?.providerId || !provider?.runtimeId) return null;
+  if (provider.providerId === QODER_AGENT_PROVIDER.providerId) {
+    return Object.freeze({
+      ...QODER_AGENT_PROVIDER,
+      securityProfile: provider.securityProfile || QODER_AGENT_PROVIDER.securityProfile,
+      trustPolicyVersion: String(trustPolicyVersion || QODER_AGENT_PROVIDER.trustPolicyVersion),
+      presentation: Object.freeze({
+        ...QODER_AGENT_PROVIDER.presentation,
+        ...catalogPresentation(provider),
+        logoSrc: QODER_AGENT_PROVIDER.presentation.logoSrc,
+        cardClassName: QODER_AGENT_PROVIDER.presentation.cardClassName,
+        primaryActionDataAttribute: QODER_AGENT_PROVIDER.presentation.primaryActionDataAttribute,
+      }),
+      capabilities: Object.freeze({ ...provider.capabilities }),
+    });
+  }
+  return Object.freeze({
+    providerId: String(provider.providerId),
+    runtimeId: String(provider.runtimeId),
+    securityProfile: String(provider.securityProfile),
+    trustPolicyVersion: String(trustPolicyVersion || TRUSTED_LOCAL_AGENT_POLICY_VERSION),
+    selection: freezeAgentSelection({
+      providerId: provider.providerId,
+      runtimeId: provider.runtimeId,
+      requestedModelId: null,
+      resolvedModelId: null,
+      reasoning: { requested: null, applied: null, resolution: "provider-default" },
+    }),
+    presentation: catalogPresentation(provider),
+    capabilities: Object.freeze({ ...provider.capabilities }),
+    failureReason: catalogFailureReason,
+  });
+}
 
 function frozenProviderEntry(descriptor, previous = null) {
   return Object.freeze({
@@ -109,6 +197,21 @@ function validDate(clock) {
 function preflightExpired(preflight, clock) {
   const expiresAt = Date.parse(String(preflight?.expiresAt || ""));
   return !Number.isFinite(expiresAt) || expiresAt <= clock.now();
+}
+
+function preflightSelectionResolves(requested, returned) {
+  return requested.providerId === returned.providerId
+    && requested.runtimeId === returned.runtimeId
+    && requested.requestedModelId === returned.requestedModelId
+    && requested.reasoning.requested === returned.reasoning.requested
+    && (
+      requested.requestedModelId === null
+      || requested.requestedModelId === returned.resolvedModelId
+    )
+    && (
+      requested.reasoning.requested === null
+      || requested.reasoning.requested === returned.reasoning.applied
+    );
 }
 
 export class AgentCatalogState {
@@ -207,6 +310,33 @@ export class AgentCatalogState {
     );
     this.#publish();
     return frozen;
+  }
+
+  async refreshCatalog() {
+    if (typeof this.#bridgeClient.agentProviders !== "function") {
+      throw new TypeError("Agent catalog requires a provider-list bridge method.");
+    }
+    const payload = await this.#bridgeClient.agentProviders();
+    const descriptors = (Array.isArray(payload?.providers) ? payload.providers : [])
+      .map((provider) => descriptorFromCatalog(provider, payload?.trustPolicyVersion))
+      .filter(Boolean);
+    if (descriptors.length === 0) {
+      throw Object.assign(new Error("The Agent provider catalog is empty."), {
+        code: "AGENT_PROVIDER_CATALOG_EMPTY",
+      });
+    }
+    const next = new Map();
+    for (const descriptor of descriptors) {
+      const previous = this.#providers.get(descriptor.providerId);
+      next.set(descriptor.providerId, frozenProviderEntry(descriptor, previous));
+      if (!this.#generationByProvider.has(descriptor.providerId)) {
+        this.#generationByProvider.set(descriptor.providerId, 0);
+      }
+    }
+    this.#providers = next;
+    if (!this.provider(this.#selected)) this.#selected = descriptors[0].selection;
+    this.#publish();
+    return this.getSnapshot();
   }
 
   freezeSelected() {
@@ -342,7 +472,7 @@ export class AgentCatalogState {
           });
         }
         const returnedSelection = freezeAgentSelection(preflight.selection || frozen);
-        if (agentPreflightKey(returnedSelection) !== agentPreflightKey(frozen)) {
+        if (!preflightSelectionResolves(frozen, returnedSelection)) {
           throw Object.assign(new Error("Agent preflight returned a different selection."), {
             code: "AGENT_PREFLIGHT_SELECTION_MISMATCH",
           });
@@ -363,6 +493,17 @@ export class AgentCatalogState {
           trustPolicyVersion: trust,
           installationDigest: String(preflight.installationDigest || digest || ""),
         });
+        this.#providers.set(frozen.providerId, Object.freeze({
+          ...this.#providers.get(frozen.providerId),
+          models: Object.freeze([...(preflight.models || [])]),
+          reasoningEfforts: Object.freeze([...(preflight.reasoningEfforts || [])]),
+          modes: Object.freeze([...(preflight.modes || [])]),
+          capabilities: Object.freeze({
+            ...(this.#providers.get(frozen.providerId)?.capabilities || {}),
+            ...(preflight.capabilities || {}),
+          }),
+        }));
+        if (this.#isSelected(frozen)) this.#selected = returnedSelection;
         const finalKey = agentPreflightKey(result.selection, {
           installationDigest: result.installationDigest,
           trustPolicyVersion: trust,

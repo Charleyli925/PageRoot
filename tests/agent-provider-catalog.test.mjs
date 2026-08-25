@@ -242,3 +242,72 @@ test("descriptor runtime and security profile stay part of dispatch authority", 
     (error) => error?.code === "AGENT_SECURITY_PROFILE_MISMATCH",
   );
 });
+
+test("dynamic catalog adds Codex and live preflight replaces only its provider binding", async () => {
+  const resolvedCodex = freezeAgentSelection({
+    providerId: "codex",
+    runtimeId: "acp",
+    requestedModelId: null,
+    resolvedModelId: "codex:gpt-synthetic",
+    reasoning: { requested: null, applied: "high", resolution: "provider-default" },
+  });
+  const catalog = new AgentCatalogState({
+    bridgeClient: {
+      async agentProviders() {
+        return {
+          trustPolicyVersion: TRUST,
+          providers: [
+            {
+              providerId: "qoder",
+              runtimeId: "acp",
+              displayName: "Qoder",
+              securityProfile: "client-mediated",
+              capabilities: { discussion: true, execution: true },
+              presentation: { agentName: "Qoder" },
+            },
+            {
+              providerId: "codex",
+              runtimeId: "acp",
+              displayName: "Codex",
+              securityProfile: "agent-native",
+              capabilities: { discussion: true, execution: false },
+              presentation: {
+                agentName: "Codex",
+                authAction: { kind: "open-url", label: "登录 Codex" },
+              },
+            },
+          ],
+        };
+      },
+      async preflightAgent() {
+        return {
+          status: "ready",
+          preflightId: "ticket_codex_live",
+          selection: resolvedCodex,
+          securityProfile: "agent-native",
+          purpose: "discussion",
+          trustPolicyVersion: TRUST,
+          installationDigest: `sha256:${"c".repeat(64)}`,
+          models: [{ id: "codex:gpt-synthetic", displayName: "GPT Synthetic" }],
+          reasoningEfforts: [{ id: "high", displayName: "High" }],
+          capabilities: { discussion: true, execution: false },
+          expiresAt: new Date(20_000).toISOString(),
+        };
+      },
+    },
+    clock: { now: () => 10 },
+  });
+  const before = catalog.getSnapshot().providers.qoder;
+  await catalog.refreshCatalog();
+  const codex = catalog.getSnapshot().providers.codex;
+  assert.equal(codex.presentation.authAction.kind, "open-url");
+  assert.equal(codex.capabilities.execution, false);
+  catalog.select(codex.selection);
+  await catalog.preflight(codex.selection, { purpose: "discussion" });
+  const after = catalog.getSnapshot();
+  assert.equal(after.selected.resolvedModelId, "codex:gpt-synthetic");
+  assert.deepEqual(after.providers.codex.models, [
+    { id: "codex:gpt-synthetic", displayName: "GPT Synthetic" },
+  ]);
+  assert.equal(after.providers.qoder.availability, before.availability);
+});

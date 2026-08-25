@@ -567,7 +567,12 @@ export class WorkspaceController {
     kind: import("../domain/agent-provider-state.js").AgentProviderGuidanceKind;
   }): Promise<RunWorkflowOutcome>;
   refreshAgentAvailability(): Promise<RunWorkflowOutcome>;
+  refreshAgentCatalog(): Promise<RunWorkflowOutcome>;
+  selectAgent(
+    selection: import("../domain/agent-provider-state.js").AgentSelection,
+  ): import("../domain/agent-provider-state.js").AgentSelection;
   checkAgentUsability(): Promise<RunWorkflowOutcome>;
+  authenticateAgent(): Promise<RunWorkflowOutcome>;
   copyAgentGuidance(input: {
     kind: import("../domain/agent-provider-state.js").AgentProviderGuidanceKind;
   }): Promise<RunWorkflowOutcome>;

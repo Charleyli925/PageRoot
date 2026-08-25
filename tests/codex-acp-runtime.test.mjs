@@ -6,6 +6,7 @@ import path from "node:path";
 import test from "node:test";
 
 import { probeAgentNativeAcp } from "../scripts/agent/runtimes/acp-probe.mjs";
+import { authenticateAgentNativeAcp } from "../scripts/agent/runtimes/acp-authentication.mjs";
 
 const adapterEntry = path.resolve("tests/fixtures/codex-acp-agent.mjs");
 
@@ -66,6 +67,11 @@ test("agent-native ACP probe reports auth-required without creating a session", 
   assert.deepEqual(result.auth, { status: "required", type: "unauthenticated" });
   assert.deepEqual(result.models, []);
   assert.equal("sessionId" in result, false);
+});
+
+test("agent-native ACP authentication is explicit and creates no model session", async () => {
+  const result = await authenticateAgentNativeAcp(await launch("auth-flow"));
+  assert.deepEqual(result, { status: "ready" });
 });
 
 test("agent-native ACP probe fails closed on identity, timeout, frame, UTF-8, and exit faults", async () => {

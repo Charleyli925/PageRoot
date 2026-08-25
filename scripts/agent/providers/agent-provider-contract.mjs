@@ -13,6 +13,13 @@ const CAPABILITY_NAMES = Object.freeze([
   "modelCatalog",
 ]);
 
+const ACTION_KINDS = Object.freeze(new Set([
+  "open-url",
+  "show-device-code",
+  "copy-command",
+  "retry",
+]));
+
 const PURPOSE_CAPABILITIES = Object.freeze({
   discussion: "discussion",
   execution: "execution",
@@ -60,6 +67,37 @@ function normalizedCapabilities(value) {
   ));
 }
 
+function cleanPresentationText(value, maximum = 240) {
+  return String(value || "")
+    .replace(/[\u0000-\u001f\u007f]/gu, "")
+    .trim()
+    .slice(0, maximum);
+}
+
+function normalizedPresentation(value, { providerId, displayName }) {
+  const input = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const action = input.authAction && typeof input.authAction === "object"
+    && !Array.isArray(input.authAction)
+    && ACTION_KINDS.has(input.authAction.kind)
+    ? Object.freeze({
+        kind: input.authAction.kind,
+        label: cleanPresentationText(input.authAction.label, 80) || `登录 ${displayName}`,
+      })
+    : null;
+  return Object.freeze({
+    displayName,
+    agentName: cleanPresentationText(input.agentName, 80) || displayName,
+    description: cleanPresentationText(input.description),
+    readyDetail: cleanPresentationText(input.readyDetail),
+    notInstalledDetail: cleanPresentationText(input.notInstalledDetail),
+    authRequiredDetail: cleanPresentationText(input.authRequiredDetail),
+    unavailableDetail: cleanPresentationText(input.unavailableDetail),
+    checkingDetail: cleanPresentationText(input.checkingDetail),
+    ...(action ? { authAction: action } : {}),
+    providerId,
+  });
+}
+
 export function defineAgentProvider(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new TypeError("Agent provider must be an object.");
@@ -103,6 +141,7 @@ export function defineAgentProvider(value) {
     securityProfile,
     legacyDrivers: Object.freeze(legacyDrivers),
     capabilities: normalizedCapabilities(value.capabilities),
+    presentation: normalizedPresentation(value.presentation, { providerId, displayName }),
   });
 }
 

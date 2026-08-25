@@ -1075,8 +1075,20 @@ export class WorkspaceController {
     return this.#requireRunWorkflow().refreshAgentAvailability();
   }
 
+  refreshAgentCatalog() {
+    return this.#requireRunWorkflow().refreshAgentCatalog();
+  }
+
+  selectAgent(selection) {
+    return this.#requireRunWorkflow().selectAgent(selection);
+  }
+
   checkAgentUsability() {
     return this.#requireRunWorkflow().checkAgentUsability();
+  }
+
+  authenticateAgent() {
+    return this.#requireRunWorkflow().authenticateAgent();
   }
 
   copyAgentGuidance(input) {

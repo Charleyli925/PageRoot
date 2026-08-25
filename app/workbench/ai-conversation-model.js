@@ -454,6 +454,10 @@ export function sidebarSendState({
   intent = INTENT_DISCUSS,
   discussionBusy = false,
   pendingCommentCount = 0,
+  agentName = "Qoder",
+  authActionLabel = "登录 Qoder CLI",
+  setupActionLabel = "设置 Qoder CLI",
+  executionAvailable = true,
 } = {}) {
   // The review Canvas wins over every other reason. It is showing a candidate,
   // not the page a discussion would read, so no round may start from here. The
@@ -480,7 +484,7 @@ export function sidebarSendState({
     return {
       kind: "open-agent-settings",
       canSend: false,
-      label: "登录 Qoder CLI",
+      label: authActionLabel || `登录 ${agentName}`,
       reason: null,
     };
   }
@@ -488,7 +492,7 @@ export function sidebarSendState({
     return {
       kind: "open-agent-settings",
       canSend: false,
-      label: "设置 Qoder CLI",
+      label: setupActionLabel || `设置 ${agentName}`,
       reason: null,
     };
   }
@@ -497,7 +501,7 @@ export function sidebarSendState({
       kind: "status",
       canSend: false,
       label: "Agent 暂不可用",
-      reason: "Qoder 暂时无法确认",
+      reason: `${agentName} 暂时无法确认`,
     };
   }
   // One discussion turn per Document. The notice line directly above the Composer
@@ -511,7 +515,7 @@ export function sidebarSendState({
       kind: "send",
       canSend: false,
       label: "发送",
-      reason: "Qoder 完成本轮后可发送",
+      reason: `${agentName} 完成本轮后可发送`,
     };
   }
   if (state === "promoting") {
@@ -526,6 +530,14 @@ export function sidebarSendState({
   // comments rather than from this text box. Pointing there beats a send button
   // that would quietly drop what the user typed.
   if (intent === INTENT_MODIFY) {
+    if (!executionAvailable) {
+      return {
+        kind: "send",
+        canSend: false,
+        label: `交给 ${agentName} 修改`,
+        reason: `${agentName} 当前只开放只读讨论，可复制给别的 AI`,
+      };
+    }
     // A modification is driven by the comments already written on the page, not by
     // the Composer. That is why this intent shows no text box: there is no typed
     // sentence that could be silently dropped on the way to the Agent.
@@ -533,7 +545,7 @@ export function sidebarSendState({
       return {
         kind: "send",
         canSend: false,
-        label: "交给 Qoder 修改",
+        label: `交给 ${agentName} 修改`,
         reason: "正在等待上一个任务完成",
       };
     }
@@ -541,11 +553,11 @@ export function sidebarSendState({
       return {
         kind: "send",
         canSend: false,
-        label: "交给 Qoder 修改",
+        label: `交给 ${agentName} 修改`,
         reason: "先在编辑模式写下评论，AI 会按评论改",
       };
     }
-    return { kind: "send", canSend: true, label: "交给 Qoder 修改", reason: null };
+    return { kind: "send", canSend: true, label: `交给 ${agentName} 修改`, reason: null };
   }
   if (intent === INTENT_CONTINUE) {
     return {

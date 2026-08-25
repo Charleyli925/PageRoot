@@ -167,6 +167,12 @@ function frozenDeliveryForMode(deliveryMode, selection, provider) {
     if (!selection || !provider) {
       throw responseError("AGENT_SELECTION_UNAVAILABLE", "当前没有可用的 Agent 选择。");
     }
+    if (provider.capabilities?.execution === false) {
+      throw responseError(
+        "AGENT_CAPABILITY_UNSUPPORTED",
+        "当前 Agent Provider 尚未开放修改能力。",
+      );
+    }
     return Object.freeze({
       mode: MANAGED_AGENT_MODE,
       selection,
@@ -446,6 +452,21 @@ export class RunWorkflow {
     }
   }
 
+  async refreshAgentCatalog() {
+    if (this.#disposed) {
+      return blocked("RUN_WORKFLOW_DISPOSED", "Agent Provider 列表已经停止更新。");
+    }
+    try {
+      const catalog = await this.#agentCatalog.refreshCatalog();
+      return succeeded({ catalog });
+    } catch (cause) {
+      return rejected(
+        errorCode(cause, "AGENT_PROVIDER_CATALOG_FAILED"),
+        this.#codecs.errorMessage(cause, "暂时无法读取 Agent Provider 列表。"),
+      );
+    }
+  }
+
   async checkAgentUsability() {
     const displayName = this.#agentCatalog.presentation().displayName || "Agent";
     if (this.#disposed) {
@@ -460,6 +481,26 @@ export class RunWorkflow {
       return rejected(
         errorCode(cause, "AGENT_PREFLIGHT_FAILED"),
         this.#codecs.errorMessage(cause, `暂时无法检查 ${displayName}。`),
+      );
+    }
+  }
+
+  async authenticateAgent() {
+    const selection = this.#agentCatalog.freezeSelected();
+    const provider = this.#agentCatalog.provider(selection);
+    if (!selection || !provider?.presentation?.authAction) {
+      return blocked("AGENT_AUTHENTICATION_UNSUPPORTED", "当前 Agent 不支持受管登录。");
+    }
+    if (typeof this.#bridgeClient.authenticateAgent !== "function") {
+      return blocked("AGENT_AUTHENTICATION_UNSUPPORTED", "Agent 登录通道不可用。");
+    }
+    try {
+      const result = await this.#bridgeClient.authenticateAgent({ selection });
+      return succeeded(result);
+    } catch (cause) {
+      return rejected(
+        errorCode(cause, "AGENT_AUTHENTICATION_FAILED"),
+        this.#codecs.errorMessage(cause, "Agent 登录没有启动。"),
       );
     }
   }
@@ -509,8 +550,11 @@ export class RunWorkflow {
         selected,
         this.#agentCatalog.provider(selected),
       );
-    } catch {
-      return rejected("RUN_DELIVERY_MODE_INVALID", "选择的 Agent 交接方式无效。");
+    } catch (cause) {
+      return rejected(
+        errorCode(cause, "RUN_DELIVERY_MODE_INVALID"),
+        this.#codecs.errorMessage(cause, "选择的 Agent 交接方式无效。"),
+      );
     }
     const sourcePath = this.#projectSession.sourcePath;
     const context = copyContext(this.#projectSession.context);

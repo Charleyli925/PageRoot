@@ -220,10 +220,25 @@ export function codexFailure(code) {
 
 export function normalizeCodexError(cause) {
   const raw = clean(cause?.code, 120);
-  const code = raw || "CODEX_RUNTIME_FAILED";
+  const categoryText = clean([
+    raw,
+    cause?.name,
+    cause?.message,
+    cause?.data?.details,
+  ].join(" "), 1_000).toLowerCase();
+  const code = /capacity|quota|rate.?limit|too many requests/u.test(categoryText)
+    ? "CODEX_ACCOUNT_CAPACITY_UNAVAILABLE"
+    : /unauthenticated|auth(?:entication)? required|login required/u.test(categoryText)
+      ? "CODEX_AUTH_REQUIRED"
+      : /timeout|timed out/u.test(categoryText)
+        ? "CODEX_RUNTIME_TIMEOUT"
+        : raw || "CODEX_RUNTIME_FAILED";
   if (cause instanceof Error) {
     cause.code = code;
     cause.message = codexFailure(code);
+    for (const field of ["data", "details", "stdout", "stderr", "qoderStderr"]) {
+      if (field in cause) delete cause[field];
+    }
     return cause;
   }
   return agentProviderError(code, codexFailure(code), { status: 503 });
@@ -292,6 +307,16 @@ export function createCodexProvider({
       execution: false,
       ...capabilities,
     },
+    presentation: {
+      agentName: "Codex",
+      description: "使用当前 Codex / ChatGPT 账号讨论或审阅页面。",
+      readyDetail: "Codex 账号和实时模型目录已确认。",
+      notInstalledDetail: "当前 Stemmio 安装不包含可验证的 Codex runtime。",
+      authRequiredDetail: "登录 Codex 后即可开始只读讨论。",
+      unavailableDetail: "Codex runtime 或实时模型目录当前不可用。",
+      checkingDetail: "正在检查 Codex 账号和模型…",
+      authAction: { kind: "open-url", label: "登录 Codex" },
+    },
     resolveInstallation: () => installationResolver(),
     createProbeLaunch({ installation, purpose, baseEnvironment }) {
       return Object.freeze({
@@ -306,18 +331,51 @@ export function createCodexProvider({
         baseEnvironment,
       });
     },
+    createAuthLaunch({ installation, baseEnvironment, cancellationSignal }) {
+      return Object.freeze({
+        securityProfile: "agent-native",
+        purpose: "authentication",
+        adapterEntry: installation.adapterEntry,
+        adapterEntryIdentity: installation.adapterEntryIdentity,
+        adapterVersion: installation.adapterVersion,
+        codexBinary: installation.codexBinary,
+        codexBinaryIdentity: installation.codexBinaryIdentity,
+        codexConfig: CODEX_LOCKED_CONFIG,
+        baseEnvironment,
+        cancellationSignal,
+      });
+    },
     preflight: (installation, { probe }) => preflightEvidence(installation, probe),
-    resolveSelection(selection) {
-      if (selection.requestedModelId !== null
-        || selection.resolvedModelId !== null
-        || selection.reasoning?.resolution !== "provider-default") {
+    resolveSelection(selection, { evidence }) {
+      const availableModels = new Set(evidence.models.map((model) => model.id));
+      const requestedModelId = selection.requestedModelId || evidence.currentModelId;
+      if (!requestedModelId || !availableModels.has(requestedModelId)) {
+        failure("CODEX_MODEL_UNAVAILABLE", "The selected Codex model is not in the live catalog.", 409);
+      }
+      const availableReasoning = new Set(
+        evidence.reasoningEfforts.map((effort) => effort.id),
+      );
+      const requestedReasoning = selection.reasoning?.requested || evidence.currentReasoning;
+      if (requestedReasoning && !availableReasoning.has(requestedReasoning)) {
         failure(
-          "AGENT_SELECTION_UNSUPPORTED",
-          "Codex model selection is not enabled until the live catalog contract is connected.",
+          "CODEX_REASONING_UNAVAILABLE",
+          "The selected Codex reasoning effort is not in the live catalog.",
           409,
         );
       }
-      return selection;
+      const explicitModel = selection.requestedModelId !== null;
+      const explicitReasoning = selection.reasoning?.requested !== null;
+      return Object.freeze({
+        providerId: CODEX_PROVIDER_ID,
+        runtimeId: CODEX_RUNTIME_ID,
+        requestedModelId: selection.requestedModelId,
+        resolvedModelId: requestedModelId,
+        reasoning: Object.freeze({
+          requested: selection.reasoning?.requested ?? null,
+          applied: requestedReasoning || null,
+          resolution: explicitModel || explicitReasoning ? "exact" : "provider-default",
+        }),
+      });
     },
     assertInstallationUnchanged: installationVerifier,
     installationDigest: installationDigester,
@@ -359,6 +417,16 @@ export function createCodexProvider({
         codexBinary: ticket.installation.codexBinary,
         codexBinaryIdentity: ticket.installation.codexBinaryIdentity,
         codexConfig: CODEX_LOCKED_CONFIG,
+        selection: ticket.selection,
+        sessionConfigOptions: Object.freeze([
+          Object.freeze({
+            id: "model",
+            value: ticket.selection.resolvedModelId.slice(`${CODEX_PROVIDER_ID}:`.length),
+          }),
+          ...(ticket.selection.reasoning.applied
+            ? [Object.freeze({ id: "reasoning_effort", value: ticket.selection.reasoning.applied })]
+            : []),
+        ]),
         cwd: policy.requestRoot,
         mode: ticket.purpose === "discussion" ? "read-only" : "agent",
         policy,

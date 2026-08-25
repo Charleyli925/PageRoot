@@ -125,6 +125,8 @@ export class RunWorkflow {
   checkAgentUsability(): Promise<RunWorkflowOutcome<{
     availability: AgentProviderAvailabilitySnapshot;
   }>>;
+  refreshAgentCatalog(): Promise<RunWorkflowOutcome>;
+  authenticateAgent(): Promise<RunWorkflowOutcome>;
   copyAgentGuidance(input: {
     kind: AgentProviderGuidanceKind;
   }): Promise<RunWorkflowOutcome<{ kind: AgentProviderGuidanceKind; copied: true }>>;

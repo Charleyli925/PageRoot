@@ -783,6 +783,7 @@ export default function Workbench() {
     conversation: workspaceControllerSnapshot?.conversation ?? null,
     discussionTurn: workspaceControllerSnapshot?.discussionTurn ?? null,
     qoderAvailability,
+    agentCatalog: agentCatalogSnapshot,
     agentModelDisplayName,
     // The header's mode comes from Request authority, not from a local guess.
     activeRun: runSnapshot.activeRun,

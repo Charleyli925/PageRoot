@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createCodexProvider } from "../scripts/agent/providers/codex-provider.mjs";
+import {
+  createCodexProvider,
+  normalizeCodexError,
+} from "../scripts/agent/providers/codex-provider.mjs";
 import {
   createDefaultProviderRegistry,
   createProviderRegistry,
@@ -84,6 +87,13 @@ test("Codex provider probes through ACP without a legacy driver and freezes agen
   assert.deepEqual(prepared.evidence.models, [
     { id: "codex:gpt-synthetic", displayName: "GPT Synthetic", description: "" },
   ]);
+  assert.deepEqual(prepared.selection, {
+    providerId: "codex",
+    runtimeId: "acp",
+    requestedModelId: null,
+    resolvedModelId: "codex:gpt-synthetic",
+    reasoning: { requested: null, applied: "high", resolution: "provider-default" },
+  });
   assert.deepEqual(calls, ["installation", "probe", "verify"]);
 
   const ticket = Object.freeze({
@@ -93,6 +103,30 @@ test("Codex provider probes through ACP without a legacy driver and freezes agen
   });
   await registry.verifyTicket(ticket, { purpose: "discussion" });
   assert.deepEqual(calls, ["installation", "probe", "verify", "verify"]);
+});
+
+test("Codex model and reasoning selections must resolve exactly against the live catalog", async () => {
+  const { registry } = fixture();
+  const exact = await registry.preflightForSelection({
+    ...selection,
+    requestedModelId: "codex:gpt-synthetic",
+    resolvedModelId: "codex:gpt-synthetic",
+    reasoning: { requested: "high", applied: "high", resolution: "exact" },
+  }, "discussion", { environment: {} });
+  assert.equal(exact.selection.resolvedModelId, "codex:gpt-synthetic");
+  assert.deepEqual(exact.selection.reasoning, {
+    requested: "high",
+    applied: "high",
+    resolution: "exact",
+  });
+  await assert.rejects(
+    registry.preflightForSelection({
+      ...selection,
+      requestedModelId: "codex:unknown",
+      resolvedModelId: "codex:unknown",
+    }, "discussion", { environment: {} }),
+    { code: "CODEX_MODEL_UNAVAILABLE" },
+  );
 });
 
 test("Codex execution remains disabled at registry and ticket boundaries", async () => {
@@ -122,4 +156,17 @@ test("Codex feature flags are closed by default and ordinary environment cannot 
   assert.deepEqual(testRegistry.catalog().map((provider) => provider.providerId), ["qoder", "codex"]);
   assert.equal(testRegistry.catalog()[1].capabilities.discussion, true);
   assert.equal(testRegistry.catalog()[1].capabilities.execution, false);
+});
+
+test("Codex failures classify capacity and erase raw secret-bearing fields", () => {
+  const secret = "secret-canary-do-not-surface";
+  const error = Object.assign(new Error(`quota exceeded ${secret}`), {
+    data: { details: `rate limit ${secret}` },
+    stderr: secret,
+    details: { raw: secret },
+  });
+  const normalized = normalizeCodexError(error);
+  assert.equal(normalized.code, "CODEX_ACCOUNT_CAPACITY_UNAVAILABLE");
+  assert.doesNotMatch(JSON.stringify(normalized), new RegExp(secret, "u"));
+  assert.doesNotMatch(normalized.message, new RegExp(secret, "u"));
 });

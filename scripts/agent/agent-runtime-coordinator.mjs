@@ -147,6 +147,7 @@ export class AgentRuntimeCoordinator {
   #executionSessions = new Map();
   #discussionSessions = new Map();
   #pendingStarts = new Set();
+  #authenticationSessions = new Map();
   #eventReducer;
   #ownerToken = `agent_owner_${randomUUID().replaceAll("-", "")}`;
   #acceptingStarts = true;
@@ -326,6 +327,39 @@ export class AgentRuntimeCoordinator {
     return Object.freeze({ ok: true, ...result, ...(driver ? { driver } : {}) });
   }
 
+  startAuthentication({ selection } = {}) {
+    this.#assertAcceptingStarts();
+    const requestedSelection = this.#selectionForInput({ selection });
+    const key = `${requestedSelection.providerId}:${requestedSelection.runtimeId}`;
+    const existing = this.#authenticationSessions.get(key);
+    if (existing) return Object.freeze({ ok: true, status: "starting", idempotent: true });
+    const controller = new AbortController();
+    const entry = { controller, promise: null, status: "starting" };
+    this.#authenticationSessions.set(key, entry);
+    entry.promise = Promise.resolve().then(() => (
+      this.#providerRegistry.authenticateForSelection(requestedSelection, {
+        environment: this.#environment,
+        cancellationSignal: controller.signal,
+      })
+    )).then(() => {
+      entry.status = "ready";
+    }).catch((cause) => {
+      entry.status = "failed";
+      entry.errorCode = cleanAgentText(cause?.code, 120) || "AGENT_AUTHENTICATION_FAILED";
+    }).finally(() => {
+      if (this.#authenticationSessions.get(key) === entry) {
+        this.#authenticationSessions.delete(key);
+      }
+    });
+    void entry.promise.catch(() => {});
+    return Object.freeze({
+      ok: true,
+      status: "starting",
+      idempotent: false,
+      action: Object.freeze({ kind: "open-url", label: "继续登录" }),
+    });
+  }
+
   async preflight({ driver, selection, trustPolicyAccepted, purpose = "execution" } = {}) {
     this.#assertAcceptingStarts();
     const ticketPurpose = validatePurpose(purpose);
@@ -401,6 +435,16 @@ export class AgentRuntimeCoordinator {
       agentVersion: prepared.evidence.version,
       modelCount: prepared.evidence.modelCount,
       models: prepared.evidence.models ?? [],
+      reasoningEfforts: prepared.evidence.reasoningEfforts ?? [],
+      modes: prepared.evidence.modes ?? [],
+      currentModelId: prepared.evidence.currentModelId ?? null,
+      currentReasoning: prepared.evidence.currentReasoning ?? null,
+      currentMode: prepared.evidence.currentMode ?? null,
+      auth: prepared.evidence.auth ?? null,
+      securityProfile: prepared.securityProfile,
+      capabilities: prepared.capabilities,
+      installationDigest: prepared.installationDigest,
+      purpose: ticketPurpose,
       selection: resolvedSelection,
       selectionFingerprint: fingerprint,
       expiresAt: new Date(createdAt + PREFLIGHT_TTL_MS).toISOString(),
@@ -1078,6 +1122,10 @@ export class AgentRuntimeCoordinator {
         ...this.#discussionSessions.values(),
         ...this.#executionSessions.values(),
       ];
+      const authenticationEntries = [...this.#authenticationSessions.values()];
+      for (const entry of authenticationEntries) {
+        entry.controller.abort(new AgentRuntimeError("AGENT_CANCELLED", "Bridge shutdown."));
+      }
       for (const entry of entries) {
         if (LIVE_STATES.has(entry.state)) {
           entry.cancelState = "requested";
@@ -1091,7 +1139,10 @@ export class AgentRuntimeCoordinator {
       );
       try {
         await Promise.race([
-          Promise.allSettled(entries.map((entry) => entry.promise).filter(Boolean)),
+          Promise.allSettled([
+            ...entries.map((entry) => entry.promise).filter(Boolean),
+            ...authenticationEntries.map((entry) => entry.promise).filter(Boolean),
+          ]),
           timeout.promise,
         ]);
       } catch {
@@ -1104,7 +1155,9 @@ export class AgentRuntimeCoordinator {
         timeout.clear();
       }
       const unconfirmed = entries.some((entry) => LIVE_STATES.has(entry.state)
-        || entry.keepLease === true || entry.lease) || this.#preflightCleanupUnconfirmed;
+        || entry.keepLease === true || entry.lease)
+        || this.#authenticationSessions.size > 0
+        || this.#preflightCleanupUnconfirmed;
       if (unconfirmed) {
         failAgentRuntime(
           "AGENT_SHUTDOWN_UNCONFIRMED",

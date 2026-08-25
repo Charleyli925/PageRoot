@@ -283,6 +283,14 @@ export function createBridgeClient({
       {},
       "暂时无法检查 Qoder CLI。",
     ),
+    agentAvailability: ({ selection } = {}) => query(
+      "/agent/availability",
+      selection ? {
+        providerId: selection.providerId,
+        runtimeId: selection.runtimeId,
+      } : {},
+      "暂时无法检查 Agent。",
+    ),
     agentProviders: () => query(
       "/agent/providers",
       {},
@@ -292,6 +300,12 @@ export function createBridgeClient({
       "/agent/preflight",
       body,
       "Qoder CLI 预检没有完成。",
+      DEFAULT_REQUEST_TIMEOUT_MS,
+    ),
+    authenticateAgent: (body) => command(
+      "/agent/authenticate",
+      body,
+      "Agent 登录没有启动。",
       DEFAULT_REQUEST_TIMEOUT_MS,
     ),
     startAgent: (body) => command(

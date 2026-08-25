@@ -148,6 +148,10 @@ export function sidebarSendState(options?: {
   intent?: SidebarIntent;
   discussionBusy?: boolean;
   pendingCommentCount?: number;
+  agentName?: string;
+  authActionLabel?: string | null;
+  setupActionLabel?: string | null;
+  executionAvailable?: boolean;
 }): SidebarSendState;
 
 export function sidebarCopyTaskState(options?: {

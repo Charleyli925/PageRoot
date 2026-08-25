@@ -387,6 +387,37 @@
   outline-offset: 1px;
 }
 
+.agentChoices {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.agentChoices label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  color: #8a8797;
+  font-size: 10px;
+}
+
+.agentChoices select {
+  max-width: 132px;
+  min-height: 26px;
+  border: 1px solid rgb(32 29 49 / 12%);
+  border-radius: 7px;
+  background: #fff;
+  color: #35323e;
+  font: inherit;
+}
+
+.agentChoices select:focus-visible {
+  outline: 3px solid rgb(90 85 223 / 28%);
+  outline-offset: 1px;
+}
+
 /*
  * Plain text, not a tinted card. It sits inside the Composer inside the sidebar, so
  * a fill here is a third frame — and a purple fill spends the accent on a sentence

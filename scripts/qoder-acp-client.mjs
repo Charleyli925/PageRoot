@@ -768,6 +768,7 @@ export async function runAcpTask({
   turnTimeoutMs = DEFAULT_TURN_TIMEOUT_MS,
   cancellationSignal,
   expectedAgentName,
+  sessionConfigOptions = [],
 }) {
   const isStream = Boolean(connection?.readable && connection?.writable);
   const isAgentApp = typeof connection?.connect === "function"
@@ -786,6 +787,14 @@ export async function runAcpTask({
     && !(expectedAgentName instanceof RegExp)
   ) {
     throw new TypeError("expectedAgentName must be a RegExp.");
+  }
+  if (!Array.isArray(sessionConfigOptions) || sessionConfigOptions.length > 8
+    || sessionConfigOptions.some((option) => (
+      !option || typeof option !== "object" || Array.isArray(option)
+      || typeof option.id !== "string" || !/^[a-z][a-z0-9_]{0,63}$/u.test(option.id)
+      || typeof option.value !== "string" || option.value.length > 200
+    ))) {
+    throw new TypeError("ACP session config options are invalid.");
   }
   const profile = acpDriverProfile(policy);
   const host = profile.assertHost(profile.createHost(policy, onEvent));
@@ -853,6 +862,28 @@ export async function runAcpTask({
         startupTimeout.expired,
         cancellation.promise,
       ]);
+      for (const option of sessionConfigOptions) {
+        const response = await Promise.race([
+          context.request(acp.methods.agent.session.setConfigOption, {
+            sessionId: session.sessionId,
+            configId: option.id,
+            value: option.value,
+          }, { cancellationSignal: startupSignal }),
+          startupTimeout.expired,
+          cancellation.promise,
+        ]);
+        const applied = Array.isArray(response?.configOptions)
+          ? response.configOptions.find((entry) => entry?.id === option.id)?.currentValue
+          : null;
+        if (String(applied || "") !== option.value) {
+          throw policyError(
+            "ACP_SESSION_CONFIG_MISMATCH",
+            "The Agent did not apply the preflighted model configuration.",
+            { configId: option.id },
+          );
+        }
+        onEvent(Object.freeze({ kind: "session-config-applied", configId: option.id }));
+      }
       startupTimeout.clear();
       host.bindSessionId(session.sessionId);
       const turnTimeout = timeoutController(turnTimeoutMs);

@@ -221,6 +221,8 @@ export function createProviderRegistry({ providers = [], runtimeRegistry } = {})
         displayName: provider.displayName,
         runtimeId: provider.runtimeId,
         capabilities: provider.capabilities,
+        securityProfile: provider.securityProfile,
+        presentation: provider.presentation,
       })));
     },
     resolveDriver,
@@ -249,6 +251,37 @@ export function createProviderRegistry({ providers = [], runtimeRegistry } = {})
     },
     preflightForSelection(selection, purpose, { environment } = {}) {
       return prepareForSelection(selection, purpose, environment);
+    },
+    async authenticateForSelection(selection, { environment, cancellationSignal } = {}) {
+      const { provider, runtime } = resolveSelection(selection);
+      if (typeof provider.createAuthLaunch !== "function" || typeof runtime.authenticate !== "function") {
+        throw agentProviderError(
+          "AGENT_AUTHENTICATION_UNSUPPORTED",
+          "The selected Agent provider does not support managed authentication.",
+          { status: 409 },
+        );
+      }
+      const installation = await provider.resolveInstallation({ environment });
+      const launch = provider.createAuthLaunch({
+        installation,
+        baseEnvironment: environment,
+        cancellationSignal,
+      });
+      if (assertAgentSecurityProfile(launch?.securityProfile, "authentication securityProfile")
+        !== provider.securityProfile) {
+        throw agentProviderError(
+          "AGENT_SECURITY_PROFILE_MISMATCH",
+          "Agent authentication security profile does not match its provider.",
+          { status: 409 },
+        );
+      }
+      try {
+        const result = await runtime.authenticate(Object.freeze({ ...launch }));
+        await provider.assertInstallationUnchanged(installation);
+        return result;
+      } catch (cause) {
+        throw provider.normalizePreflightError(cause);
+      }
     },
     async availability({ driver, environment }) {
       return this.availabilityForSelection(selectionFromDriver(driver), { environment });

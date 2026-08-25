@@ -40,6 +40,8 @@ export class AgentBridgeService {
     );
   }
 
+  authenticate(input) { return this.#coordinator.startAuthentication(input); }
+
   preflight(input) { return this.#coordinator.preflight(input); }
 
   redeemCommandTicket(preflightId, options) {

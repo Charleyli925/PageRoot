@@ -38,8 +38,10 @@ export type BridgeClient = {
   deleteAttachment(body: BridgeJson): Promise<BridgeJson>;
   createRequest(body: BridgeJson): Promise<BridgeJson>;
   qoderAvailability(): Promise<BridgeJson>;
+  agentAvailability(input?: { selection?: Readonly<Record<string, unknown>> }): Promise<BridgeJson>;
   agentProviders(): Promise<BridgeJson>;
   preflightAgent(body: BridgeJson): Promise<BridgeJson>;
+  authenticateAgent(body: BridgeJson): Promise<BridgeJson>;
   startAgent(body: BridgeJson): Promise<BridgeJson>;
   agentStatus(
     sourcePath: string,

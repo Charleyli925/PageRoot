@@ -186,7 +186,7 @@ test("Bridge client retries a transient read and attaches authorization", async 
   );
 });
 
-test("Bridge client exposes the five neutral Agent routes and keeps availability alias", async () => {
+test("Bridge client exposes neutral Agent catalog, auth, run routes and the availability alias", async () => {
   const requests = [];
   const client = createBridgeClient({
     baseUrl: "http://127.0.0.1:4317",
@@ -197,6 +197,7 @@ test("Bridge client exposes the five neutral Agent routes and keeps availability
   });
   await client.agentProviders();
   await client.preflightAgent({ selection: {} });
+  await client.authenticateAgent({ selection: {} });
   await client.startAgent({ selection: {} });
   await client.agentStatus("/tmp/page.html", "req_1", "attempt_001");
   await client.cancelAgent({ requestId: "req_1" });
@@ -204,6 +205,7 @@ test("Bridge client exposes the five neutral Agent routes and keeps availability
   assert.deepEqual(requests.map(({ url, method }) => [method, url.pathname]), [
     ["GET", "/agent/providers"],
     ["POST", "/agent/preflight"],
+    ["POST", "/agent/authenticate"],
     ["POST", "/agent/start"],
     ["GET", "/agent/status"],
     ["POST", "/agent/cancel"],
