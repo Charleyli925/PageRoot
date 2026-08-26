@@ -321,3 +321,111 @@ export function createExternalFileOpenMailbox({
     },
   });
 }
+
+/**
+ * Main-process authority for the ordering boundary between a renderer close
+ * generation and external-mailbox delivery. It owns no paths: the mailbox
+ * remains the sole FIFO, while this coordinator prevents that FIFO head from
+ * crossing into a renderer before the exact close abort has been observed.
+ */
+export function createExternalFileOpenDeliveryCoordinator() {
+  let generation = 0;
+  let currentClose = null;
+  let barrier = null;
+  let deliveredHeadRequestId = null;
+  const attempts = new Map();
+
+  const keyOf = (authority) => (
+    authority
+    && typeof authority.requestId === "string"
+    && authority.requestId
+    && Number.isSafeInteger(authority.generation)
+    && authority.generation > 0
+  ) ? `${authority.generation}:${authority.requestId}` : null;
+  const matching = (left, right) => {
+    const leftKey = keyOf(left);
+    return Boolean(leftKey && leftKey === keyOf(right));
+  };
+  const publicAuthority = (record) => record ? Object.freeze({
+    requestId: record.requestId,
+    generation: record.generation,
+  }) : null;
+  const remember = (record) => {
+    attempts.set(keyOf(record), record);
+    while (attempts.size > 32) attempts.delete(attempts.keys().next().value);
+  };
+
+  return Object.freeze({
+    beginClose(requestId) {
+      const id = String(requestId || "");
+      if (!id || currentClose) return null;
+      generation += 1;
+      currentClose = {
+        requestId: id,
+        generation,
+        phase: "preparing",
+        abortNotified: false,
+      };
+      remember(currentClose);
+      return publicAuthority(currentClose);
+    },
+    isCurrent(authority) {
+      return matching(currentClose, authority)
+        && currentClose.phase === "preparing";
+    },
+    commitClose(authority) {
+      if (!matching(currentClose, authority) || currentClose.phase !== "preparing") {
+        return false;
+      }
+      currentClose.phase = "committed";
+      return true;
+    },
+    invalidateClose() {
+      if (barrier) return publicAuthority(barrier);
+      if (!currentClose || currentClose.phase !== "preparing") return null;
+      currentClose.phase = "invalidated";
+      barrier = currentClose;
+      return publicAuthority(barrier);
+    },
+    markCloseAborted(authority) {
+      const record = attempts.get(keyOf(authority));
+      if (!record || record.abortNotified) return false;
+      record.abortNotified = true;
+      return true;
+    },
+    releaseBarrier(authority) {
+      if (!matching(barrier, authority)) return false;
+      barrier = null;
+      return true;
+    },
+    abortClose(authority) {
+      const record = attempts.get(keyOf(authority));
+      if (!record) return false;
+      record.phase = "aborted";
+      if (matching(currentClose, authority)) currentClose = null;
+      return true;
+    },
+    canDeliver() {
+      return barrier === null;
+    },
+    beginRendererLoad() {
+      deliveredHeadRequestId = null;
+    },
+    shouldDeliver(requestId) {
+      const id = String(requestId || "");
+      return Boolean(id && barrier === null && deliveredHeadRequestId !== id);
+    },
+    markDelivered(requestId) {
+      const id = String(requestId || "");
+      if (!id || barrier) return false;
+      deliveredHeadRequestId = id;
+      return true;
+    },
+    acknowledge(requestId) {
+      const id = String(requestId || "");
+      if (!id || deliveredHeadRequestId !== id) return false;
+      deliveredHeadRequestId = null;
+      return true;
+    },
+  });
+}
