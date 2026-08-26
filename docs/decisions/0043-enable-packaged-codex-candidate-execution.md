@@ -20,9 +20,13 @@ pure Discussion stays out of scope.
   `@openai/codex-darwin-${arch}`. Electron Builder expands `${arch}` for the
   exact artifact; other operating systems and CPU packages are excluded.
 - The artifact verifier requires the reviewed module allowlist to match source
-  bytes, revalidates wrapper/platform/runtime manifests, executes the packaged
-  native binary with `--version`, and confirms the packaged feature-gate module
-  exposes Execution while keeping Discussion disabled.
+  bytes. Because application signing legitimately rewrites Mach-O signatures,
+  native executables are compared after both signatures are removed and
+  deterministically normalized with the same entitlement; their executable
+  content may not change. The verifier also revalidates wrapper/platform/runtime
+  manifests, executes the packaged native binary with `--version`, and confirms
+  the packaged feature-gate module exposes Execution while keeping Discussion
+  disabled.
 - The existing right-sidebar chooser remains the only Agent surface. Selecting
   a different Provider immediately runs that Provider's real preflight; a slow
   Qoder check cannot suppress a Codex check. Codex login/reinstall states do not

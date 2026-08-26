@@ -63,6 +63,28 @@ test("a packaged Mach-O may be re-signed but not replaced", async (t) => {
     entitlementsPath,
     label: "synthetic native runtime",
   });
+
+  const replacementPath = path.join(temporaryRoot, "replacement-runtime");
+  await copyFile("/bin/echo", replacementPath);
+  await execFileAsync("codesign", [
+    "--force",
+    "--sign",
+    "-",
+    "--identifier",
+    "app.pageroot.synthetic-packaged-runtime",
+    "--entitlements",
+    entitlementsPath,
+    replacementPath,
+  ]);
+  await assert.rejects(
+    assertSignedMachOContentEqual({
+      sourcePath,
+      packagedPath: replacementPath,
+      entitlementsPath,
+      label: "replaced native runtime",
+    }),
+    /executable content does not match source/u,
+  );
 });
 
 async function verifySyntheticAppBundle(fixture, { allowUnsigned = true } = {}) {
