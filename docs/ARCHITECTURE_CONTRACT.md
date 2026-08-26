@@ -744,9 +744,9 @@ structurally (call presence), because the repository has no DOM test harness for
 ### Complexity budget ratchet
 
 `scripts/architecture-budget.json` records a line count and total React-hook
-count ceiling for files with a demonstrated regrowth risk (currently only
-`app/workbench.tsx`, which the Workbench orchestration refactor is actively
-shrinking). The gate counts hooks structurally, so generic-typed calls such as
+count ceiling for files with a demonstrated regrowth risk (currently
+`app/workbench.tsx`, `app/components/HtmlCanvasEditor.tsx` and
+`scripts/project-file-repository.mjs`). The gate counts hooks structurally, so generic-typed calls such as
 `useState<T>()` are included.
 
 This is a guardrail against silent drift, not a hard cap, and it is deliberately

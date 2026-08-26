@@ -1,0 +1,547 @@
+"use client";
+
+import type {
+  CSSProperties,
+  KeyboardEvent as ReactKeyboardEvent,
+  MouseEvent as ReactMouseEvent,
+  PointerEvent as ReactPointerEvent,
+  RefObject,
+} from "react";
+import { ArrowDownIcon } from "@phosphor-icons/react/dist/csr/ArrowDown";
+import { ArrowUpIcon } from "@phosphor-icons/react/dist/csr/ArrowUp";
+
+import type { PagePresentationAction } from "../lib/page-view-context.js";
+import {
+  isPageRootSelection,
+  type MoveAvailability,
+} from "./html-canvas-selection";
+import type {
+  EditableStyleProperty,
+  SelectedStyle,
+} from "./html-canvas-style-inspector";
+import type {
+  CanvasCapabilityHoverSnapshot,
+  CanvasHoverHintPlacement,
+} from "./html-canvas-capability-hover";
+import NoticeBar, { type NoticeUsageCapture } from "./NoticeBar";
+import type {
+  HtmlCanvasInteractionMode,
+  HtmlCanvasSelection,
+} from "./HtmlCanvasEditor.types";
+import styles from "./HtmlCanvasEditor.module.css";
+
+export type HtmlCanvasCommentMarker = {
+  key: string;
+  selection: HtmlCanvasSelection;
+  count?: number;
+  label?: string;
+  placement?: "target-corner" | "tab-side";
+  left: number;
+  top: number;
+};
+
+export type HtmlCanvasEditFeedback = {
+  code: string;
+  title: string;
+  message: string;
+  tone: "warning" | "error";
+  sticky: boolean;
+  recovery: "reload" | "none";
+};
+
+export type HtmlCanvasSelectionChromeProps = {
+  canvasTransitionActive: boolean;
+  selectionCapabilitySpoken: string;
+  interactionLocked: boolean;
+  selection: HtmlCanvasSelection | null;
+  selectedOutlineStyle: CSSProperties | undefined;
+  showHoverOutline: boolean;
+  showHoverHint: boolean;
+  hoverOutlineStyle: CSSProperties | undefined;
+  hoverHintStyle: CSSProperties | undefined;
+  hoverHintPlacement: CanvasHoverHintPlacement | undefined;
+  hoverChrome: CanvasCapabilityHoverSnapshot;
+  hoverHintMeasureRef: RefObject<HTMLDivElement | null>;
+  editFeedback: HtmlCanvasEditFeedback | null;
+  reloadActionLabel: string;
+  editFeedbackActionAvailable: boolean;
+  renderedMode: HtmlCanvasInteractionMode;
+  commentMarkers: readonly HtmlCanvasCommentMarker[];
+  toolbarVisible: boolean;
+  overlayPosition: { toolbarLeft: number; toolbarTop: number } | null;
+  toolbarRef: RefObject<HTMLDivElement | null>;
+  hasTextRange: boolean;
+  isEditing: boolean;
+  toolbarStyle: CSSProperties | undefined;
+  selectedPagePresentationAction: PagePresentationAction | null;
+  readOnly: boolean;
+  selectedNativeEditAvailable: boolean;
+  selectedStyle: SelectedStyle;
+  textFormatRequiresSelection: boolean;
+  enableReorder: boolean;
+  moveAvailability: MoveAvailability;
+  spacingMenuRef: RefObject<HTMLDetailsElement | null>;
+  spacingMenuOpen: boolean;
+  usageProjectId?: string;
+  usageCapture?: NoticeUsageCapture;
+  onHoverHintPointerDown: (event: ReactPointerEvent<HTMLDivElement>) => void;
+  onHoverHintPointerEnter: () => void;
+  onHoverHintPointerLeave: () => void;
+  onHoverHintClick: (event: ReactMouseEvent<HTMLDivElement>) => void;
+  onEditFeedbackAction: () => void;
+  onDismissEditFeedback: () => void;
+  onPauseEditFeedback: (paused: boolean) => void;
+  onSelectCommentMarker: (selection: HtmlCanvasSelection) => void;
+  onToolbarKeyDown: (event: ReactKeyboardEvent<HTMLDivElement>) => void;
+  onToolbarPointerDownCapture: (event: ReactPointerEvent<HTMLDivElement>) => void;
+  onToolbarMouseDownCapture: (event: ReactMouseEvent<HTMLDivElement>) => void;
+  onExecutePresentationAction: () => void;
+  onComment: () => void;
+  onStartEditing: () => void;
+  onApplyInlineStyle: (property: EditableStyleProperty, value: string) => void;
+  onMoveSelected: (direction: "up" | "down") => void;
+  onToggleSpacingMenu: () => void;
+};
+
+export function HtmlCanvasSelectionChrome({
+  canvasTransitionActive,
+  selectionCapabilitySpoken,
+  interactionLocked,
+  selection,
+  selectedOutlineStyle,
+  showHoverOutline,
+  showHoverHint,
+  hoverOutlineStyle,
+  hoverHintStyle,
+  hoverHintPlacement,
+  hoverChrome,
+  hoverHintMeasureRef,
+  editFeedback,
+  reloadActionLabel,
+  editFeedbackActionAvailable,
+  renderedMode,
+  commentMarkers,
+  toolbarVisible,
+  overlayPosition,
+  toolbarRef,
+  hasTextRange,
+  isEditing,
+  toolbarStyle,
+  selectedPagePresentationAction,
+  readOnly,
+  selectedNativeEditAvailable,
+  selectedStyle,
+  textFormatRequiresSelection,
+  enableReorder,
+  moveAvailability,
+  spacingMenuRef,
+  spacingMenuOpen,
+  usageProjectId,
+  usageCapture,
+  onHoverHintPointerDown,
+  onHoverHintPointerEnter,
+  onHoverHintPointerLeave,
+  onHoverHintClick,
+  onEditFeedbackAction,
+  onDismissEditFeedback,
+  onPauseEditFeedback,
+  onSelectCommentMarker,
+  onToolbarKeyDown,
+  onToolbarPointerDownCapture,
+  onToolbarMouseDownCapture,
+  onExecutePresentationAction,
+  onComment,
+  onStartEditing,
+  onApplyInlineStyle,
+  onMoveSelected,
+  onToggleSpacingMenu,
+}: HtmlCanvasSelectionChromeProps) {
+  return (
+    <>
+      <div
+        className="canvas-transition-overlay"
+        data-active={canvasTransitionActive ? "true" : undefined}
+        aria-hidden="true"
+      />
+      <div className="sr-only" aria-live="polite" aria-atomic="true">
+        {selectionCapabilitySpoken}
+      </div>
+      {!interactionLocked && selection && selectedOutlineStyle ? (
+        <div
+          className={styles.targetOutline}
+          data-testid="canvas-target-outline"
+          data-tone="selected"
+          style={selectedOutlineStyle}
+          aria-hidden="true"
+        />
+      ) : null}
+      {showHoverOutline && hoverOutlineStyle ? (
+        <div
+          className={styles.targetOutline}
+          data-testid="canvas-capability-outline"
+          data-tone="hover"
+          style={hoverOutlineStyle}
+          aria-hidden="true"
+        />
+      ) : null}
+      {showHoverOutline && showHoverHint && hoverHintStyle && hoverChrome.capability ? (
+        <>
+          <div
+            ref={hoverHintMeasureRef}
+            className={`${styles.hoverHint} ${styles.hoverHintMeasure}`}
+            aria-hidden="true"
+          >
+            {hoverChrome.capability.hint}
+          </div>
+          <div
+            className={styles.hoverHint}
+            data-testid="canvas-capability-hint"
+            data-placement={hoverHintPlacement?.placement}
+            data-html-canvas-preserve-selection="true"
+            style={hoverHintStyle}
+            role="button"
+            aria-label={hoverChrome.capability.hint}
+            onPointerDown={onHoverHintPointerDown}
+            onPointerEnter={onHoverHintPointerEnter}
+            onPointerLeave={onHoverHintPointerLeave}
+            onClick={onHoverHintClick}
+          >
+            {hoverChrome.capability.hint}
+          </div>
+        </>
+      ) : null}
+      {editFeedback && !interactionLocked ? (
+        <NoticeBar
+          placement="viewport"
+          title={editFeedback.title}
+          message={editFeedback.message}
+          tone={editFeedback.tone}
+          actionLabel={editFeedback.recovery === "reload"
+            ? reloadActionLabel
+            : undefined}
+          onAction={editFeedbackActionAvailable ? onEditFeedbackAction : undefined}
+          onDismiss={onDismissEditFeedback}
+          onPauseChange={onPauseEditFeedback}
+          dismissLabel="关闭修改提示"
+          usageCode={editFeedback.code}
+          usageDisposition={editFeedback.recovery === "none"
+            ? "inform-in-place"
+            : "direct-action"}
+          usageSurface="canvas"
+          usageProjectId={usageProjectId}
+          usageCapture={usageCapture}
+        />
+      ) : null}
+
+      {interactionLocked ? (
+        <div
+          className={styles.lockNotice}
+          data-mode={renderedMode}
+          role="status"
+          aria-label={
+            renderedMode === "history"
+              ? "正在查看历史版本，只读"
+              : "本轮已锁定，仅可滚动浏览"
+          }
+        >
+          <span className={styles.lockGlyph} aria-hidden="true"><span /></span>
+          <span>
+            {renderedMode === "history"
+              ? "正在查看历史版本 · 只读"
+              : "本轮已锁定 · 仅可浏览"}
+          </span>
+        </div>
+      ) : null}
+
+      {!interactionLocked ? commentMarkers.map((marker) => (
+        <button
+          key={marker.key}
+          type="button"
+          className={styles.commentMarker}
+          data-global={isPageRootSelection(marker.selection) ? "true" : undefined}
+          data-placement={marker.placement}
+          style={{ left: marker.left, top: marker.top }}
+          aria-label={marker.count && marker.count > 1
+            ? `${marker.label || marker.selection.label}已有${marker.count}条评论`
+            : marker.label || `${marker.selection.label}已有1条评论`}
+          title={`查看${marker.label || marker.selection.label}的${marker.count || 1}条评论`}
+          onClick={() => onSelectCommentMarker(marker.selection)}
+        >
+          <span className={styles.commentGlyph} aria-hidden="true">
+            评{marker.count || 1}
+          </span>
+        </button>
+      )) : null}
+
+      {!interactionLocked
+      && toolbarVisible
+      && selection
+      && !isPageRootSelection(selection)
+      && overlayPosition ? (
+        <div
+          ref={toolbarRef}
+          className={styles.toolbar}
+          data-selection-level={selection.level}
+          data-text-range={hasTextRange ? "true" : undefined}
+          data-text-editing={isEditing ? "true" : undefined}
+          style={toolbarStyle}
+          role="toolbar"
+          aria-label={`编辑${selection.label}`}
+          onKeyDown={onToolbarKeyDown}
+          onPointerDownCapture={onToolbarPointerDownCapture}
+          onMouseDownCapture={onToolbarMouseDownCapture}
+        >
+          <div className={styles.toolbarRow}>
+          {selectedPagePresentationAction ? (
+            <>
+              <button
+                type="button"
+                className={`${styles.toolButton} ${styles.presentationToolButton}`}
+                data-presentation-kind={selectedPagePresentationAction.kind}
+                data-current={selectedPagePresentationAction.isCurrent ? "true" : undefined}
+                aria-label={selectedPagePresentationAction.label}
+                aria-pressed={
+                  selectedPagePresentationAction.kind === "activate-tab"
+                    ? selectedPagePresentationAction.isCurrent
+                    : undefined
+                }
+                title={
+                  selectedPagePresentationAction.isCurrent
+                    ? "当前页签"
+                    : "快捷操作：按住 ⌥ 并单击页面中的这个控件"
+                }
+                onClick={onExecutePresentationAction}
+              >
+                {selectedPagePresentationAction.label}
+              </button>
+              <span className={styles.toolbarDivider} aria-hidden="true" />
+            </>
+          ) : null}
+
+          <button
+            type="button"
+            className={styles.commentToolButton}
+            aria-label={`给${selection.label}留评论`}
+            onClick={onComment}
+          >
+            评论
+          </button>
+
+          {!readOnly && selection.level === "part" ? (
+            <>
+              <button
+                type="button"
+                className={styles.toolButton}
+                aria-pressed={isEditing}
+                disabled={!selectedNativeEditAvailable}
+                title={!selectedNativeEditAvailable
+                  ? "这段内容不是当前源码中的唯一静态文字"
+                  : "像文档一样在原位置编辑文字"}
+                onClick={onStartEditing}
+              >
+                {isEditing ? "编辑中" : "编辑"}
+              </button>
+
+              <div className={styles.formatGroup} aria-label="文字格式">
+                <button
+                  type="button"
+                  className={styles.formatButton}
+                  aria-pressed={selectedStyle.isBold}
+                  disabled={textFormatRequiresSelection}
+                  title={textFormatRequiresSelection ? "请先选中要修改的文字" : "加粗"}
+                  onClick={() => onApplyInlineStyle("fontWeight", selectedStyle.isBold ? "normal" : "700")}
+                >
+                  <strong aria-hidden="true">B</strong>
+                  <span className={styles.visuallyHidden}>加粗</span>
+                </button>
+                <button
+                  type="button"
+                  className={styles.formatButton}
+                  aria-pressed={selectedStyle.isItalic}
+                  disabled={textFormatRequiresSelection}
+                  title={textFormatRequiresSelection ? "请先选中要修改的文字" : "斜体"}
+                  onClick={() => onApplyInlineStyle("fontStyle", selectedStyle.isItalic ? "normal" : "italic")}
+                >
+                  <em aria-hidden="true">I</em>
+                  <span className={styles.visuallyHidden}>斜体</span>
+                </button>
+                <button
+                  type="button"
+                  className={styles.formatButton}
+                  aria-pressed={selectedStyle.isUnderline}
+                  disabled={textFormatRequiresSelection}
+                  title={textFormatRequiresSelection ? "请先选中要修改的文字" : "下划线"}
+                  onClick={() => onApplyInlineStyle(
+                    "textDecorationLine",
+                    selectedStyle.isUnderline ? "none" : "underline",
+                  )}
+                >
+                  <span className={styles.underlineGlyph} aria-hidden="true">U</span>
+                  <span className={styles.visuallyHidden}>下划线</span>
+                </button>
+              </div>
+
+              {enableReorder ? (
+                <div className={styles.moveGroup} aria-label="移动选中内容">
+                  <button
+                    type="button"
+                    className={styles.iconButton}
+                    aria-label="上移"
+                    data-tooltip="上移（Option + ↑）"
+                    data-tooltip-side="below"
+                    disabled={!moveAvailability.up}
+                    onClick={() => onMoveSelected("up")}
+                  >
+                    <ArrowUpIcon size={15} weight="bold" aria-hidden="true" />
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.iconButton}
+                    aria-label="下移"
+                    data-tooltip="下移（Option + ↓）"
+                    data-tooltip-side="below"
+                    disabled={!moveAvailability.down}
+                    onClick={() => onMoveSelected("down")}
+                  >
+                    <ArrowDownIcon size={15} weight="bold" aria-hidden="true" />
+                  </button>
+                </div>
+              ) : null}
+
+              <details
+                ref={spacingMenuRef}
+                className={styles.spacingMenu}
+                open={spacingMenuOpen}
+              >
+                <summary
+                  aria-expanded={spacingMenuOpen}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    onToggleSpacingMenu();
+                  }}
+                >样式与间距</summary>
+                <div className={styles.spacingPanel} aria-label="样式与间距">
+                  <div className={styles.popoverSection} aria-label="文字与颜色">
+                    <span className={styles.popoverSectionLabel}>文字与颜色</span>
+                    <label className={styles.controlRow}>
+                      <span>字号</span>
+                      <span className={styles.numberValue}>
+                        <input
+                          type="number"
+                          min="8"
+                          max="120"
+                          step="1"
+                          value={selectedStyle.fontSize}
+                          disabled={textFormatRequiresSelection}
+                          aria-label="字号（像素）"
+                          onChange={(event) => {
+                            const value = Math.max(8, Math.min(120, Number(event.currentTarget.value)));
+                            if (Number.isFinite(value)) onApplyInlineStyle("fontSize", `${value}px`);
+                          }}
+                        />
+                        <small>px</small>
+                      </span>
+                    </label>
+                    <label className={styles.controlRow}>
+                      <span>字色</span>
+                      <span
+                        className={styles.colorValue}
+                        style={{ "--toolbar-swatch": selectedStyle.color } as CSSProperties}
+                      >
+                        <span className={styles.colorSwatch} aria-hidden="true" />
+                        <span>{selectedStyle.color.toUpperCase()}</span>
+                        <input
+                          type="color"
+                          value={selectedStyle.color}
+                          disabled={textFormatRequiresSelection}
+                          aria-label="文字颜色"
+                          onChange={(event) => onApplyInlineStyle("color", event.currentTarget.value)}
+                        />
+                      </span>
+                    </label>
+                    <label className={styles.controlRow}>
+                      <span>填充</span>
+                      <span
+                        className={styles.colorValue}
+                        style={{ "--toolbar-swatch": selectedStyle.backgroundColor } as CSSProperties}
+                      >
+                        <span className={styles.colorSwatch} aria-hidden="true" />
+                        <span>{selectedStyle.backgroundColor.toUpperCase()}</span>
+                        <input
+                          type="color"
+                          value={selectedStyle.backgroundColor}
+                          disabled={textFormatRequiresSelection}
+                          aria-label="元素填充色"
+                          onChange={(event) => onApplyInlineStyle("backgroundColor", event.currentTarget.value)}
+                        />
+                      </span>
+                    </label>
+                  </div>
+
+                  <div className={styles.popoverSection} aria-label="间距">
+                    <span className={styles.popoverSectionLabel}>间距</span>
+                    <label className={styles.controlRow}>
+                      <span>内边距</span>
+                      <span className={styles.numberValue}>
+                        <input
+                          type="number"
+                          min="0"
+                          max="240"
+                          step="1"
+                          value={selectedStyle.padding}
+                          aria-label="内边距（像素）"
+                          onChange={(event) => {
+                            const value = Math.max(0, Math.min(240, Number(event.currentTarget.value)));
+                            if (Number.isFinite(value)) onApplyInlineStyle("padding", `${value}px`);
+                          }}
+                        />
+                        <small>px</small>
+                      </span>
+                    </label>
+                    <label className={styles.controlRow}>
+                      <span>外间距</span>
+                      <span className={styles.numberValue}>
+                        <input
+                          type="number"
+                          min="-120"
+                          max="240"
+                          step="1"
+                          value={selectedStyle.margin}
+                          aria-label="外间距（像素）"
+                          onChange={(event) => {
+                            const value = Math.max(-120, Math.min(240, Number(event.currentTarget.value)));
+                            if (Number.isFinite(value)) onApplyInlineStyle("margin", `${value}px`);
+                          }}
+                        />
+                        <small>px</small>
+                      </span>
+                    </label>
+                    <label className={styles.controlRow}>
+                      <span>行距</span>
+                      <span className={styles.numberValue}>
+                        <input
+                          type="number"
+                          min="8"
+                          max="240"
+                          step="1"
+                          value={selectedStyle.lineHeight}
+                          aria-label="行距（像素）"
+                          onChange={(event) => {
+                            const value = Math.max(8, Math.min(240, Number(event.currentTarget.value)));
+                            if (Number.isFinite(value)) onApplyInlineStyle("lineHeight", `${value}px`);
+                          }}
+                        />
+                        <small>px</small>
+                      </span>
+                    </label>
+                  </div>
+                </div>
+              </details>
+            </>
+          ) : null}
+          </div>
+        </div>
+      ) : null}
+    </>
+  );
+}
