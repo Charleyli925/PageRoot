@@ -9,24 +9,9 @@ import {
   useState,
   type ChangeEvent,
   type ClipboardEvent,
-  type CSSProperties,
 } from "react";
-import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/csr/ArrowSquareOut";
-import { CaretRightIcon } from "@phosphor-icons/react/dist/csr/CaretRight";
-import { ChatCircleTextIcon } from "@phosphor-icons/react/dist/csr/ChatCircleText";
-import { CheckCircleIcon } from "@phosphor-icons/react/dist/csr/CheckCircle";
 import { ClockCounterClockwiseIcon } from "@phosphor-icons/react/dist/csr/ClockCounterClockwise";
 import { EyeIcon } from "@phosphor-icons/react/dist/csr/Eye";
-import { ExportIcon } from "@phosphor-icons/react/dist/csr/Export";
-import { FileHtmlIcon } from "@phosphor-icons/react/dist/csr/FileHtml";
-import { FolderOpenIcon } from "@phosphor-icons/react/dist/csr/FolderOpen";
-import { ImageIcon } from "@phosphor-icons/react/dist/csr/Image";
-import { PaperclipIcon } from "@phosphor-icons/react/dist/csr/Paperclip";
-import { PencilSimpleIcon } from "@phosphor-icons/react/dist/csr/PencilSimple";
-import { PlusIcon } from "@phosphor-icons/react/dist/csr/Plus";
-import { TrashIcon } from "@phosphor-icons/react/dist/csr/Trash";
-import { TriangleIcon } from "@phosphor-icons/react/dist/csr/Triangle";
-import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 
 import AttachmentLightbox from "./components/AttachmentLightbox";
 import HtmlCanvasEditor from "./components/HtmlCanvasEditor";
@@ -71,7 +56,6 @@ import {
   computeCommentRailMinimumOffset,
   layoutCommentRailItems,
   routeCommentRailWheel,
-  shouldSubmitCommentOnEnter,
   stabilizeCommentTargetLayouts,
 } from "./lib/comment-rail-layout.js";
 import {
@@ -178,10 +162,17 @@ import {
   unsafeCommentTargetsNotice,
   unsafeRelinkComments,
 } from "./workbench/comment-relink-model.js";
+import { CommentRailView } from "./workbench/comment-rail-view";
 import {
-  CommentAttachmentStrip,
-  VersionDetail,
-  VersionTreeList,
+  WorkbenchFileHeaderView,
+  WorkbenchHeaderToolbar,
+} from "./workbench/file-header-view";
+import {
+  ProjectFilesConsole,
+  ProjectFilesFooter,
+  ProjectFilesHeader,
+} from "./workbench/project-files-view";
+import {
   PreviewNavigationBanner,
 } from "./workbench/presentation";
 import {
@@ -195,7 +186,6 @@ import {
   type ReviewDocuments,
 } from "./workbench/review-document";
 import {
-  WorkbenchHeaderActions,
   WorkbenchHeaderShell,
 } from "./workbench/workbench-header-shell";
 import {
@@ -210,7 +200,6 @@ import {
   projectStatusProjection,
   safeVersionLabel,
   sameLocalSourcePath,
-  workspaceFileLabel,
 } from "./workbench/project-model";
 import {
   authoritativeDraftRevision,
@@ -7299,378 +7288,165 @@ export default function Workbench() {
       <WorkbenchHeaderShell
         data-file-renaming={fileRenameEditing ? "true" : undefined}
       >
-        <div className="window-file">
-          <span
-            className="window-file-icon-cluster"
-            data-update-visible={updateActionVisible ? "true" : undefined}
-            data-update-downloaded={updateDownloaded ? "true" : undefined}
-          >
-            <button
-              className="window-file-icon window-file-about-button"
-              type="button"
-              aria-label="关于源页"
-              title="关于源页"
-              onClick={() => openAboutPageRoot()}
-            >
-              <FileHtmlIcon aria-hidden="true" size={20} weight="duotone" />
-            </button>
-            {updateActionVisible ? (
-              <button
-                className="header-update-badge window-file-update-badge"
-                type="button"
-                data-update-downloaded={updateDownloaded ? "true" : undefined}
-                aria-label={updateDownloaded
-                  ? `PageRoot ${updateResult?.latestVersion || "新版本"} 已下载，重启更新`
-                  : updateDownloading
-                    ? `正在下载 PageRoot ${updateResult?.latestVersion || "新版本"}`
-                    : `发现 PageRoot ${updateResult?.latestVersion || "新版本"}，下载更新`}
-                title={updateDownloaded
-                  ? `重启更新 PageRoot ${updateResult?.latestVersion || "新版本"}`
-                  : updateDownloading
-                    ? `正在下载 PageRoot ${updateResult?.latestVersion || "新版本"}`
-                    : `下载 PageRoot ${updateResult?.latestVersion || "新版本"}`}
-                disabled={updateDownloading}
-                onClick={() => {
-                  if (updateDownloaded) {
-                    setRestartUpdateOpen(true);
-                  } else if (updateResult?.status === "available") {
-                    void downloadAvailableUpdate();
-                  }
-                }}
-              >
-                <span>{updateBadgeLabel}</span>
-              </button>
-            ) : null}
-          </span>
-          <div className="window-file-copy">
-            <div
-              className="window-file-title-row"
-              data-renaming={fileRenameEditing ? "true" : undefined}
-              role={fileRenameEditing ? undefined : "status"}
-              aria-live={fileRenameEditing ? undefined : "polite"}
-              aria-atomic={fileRenameEditing ? undefined : "true"}
-            >
-              {fileRenameEditing ? (
-                <label className="window-file-rename-field">
-                  <span className="sr-only">文件名（不含后缀）</span>
-                  <input
-                    ref={fileRenameInputRef}
-                    aria-label="文件名（不含后缀）"
-                    aria-invalid={fileRenameError ? "true" : undefined}
-                    aria-describedby={fileRenameError
-                      ? "window-file-rename-error"
-                      : undefined}
-                    autoComplete="off"
-                    disabled={fileRenameBusy}
-                    maxLength={180}
-                    spellCheck={false}
-                    value={fileRenameDraft}
-                    onBlur={() => {
-                      if (fileRenameErrorRef.current) {
-                        cancelFileRename();
-                        return;
-                      }
-                      void commitFileRename();
-                    }}
-                    onChange={(event) => {
-                      setFileRenameDraft(event.target.value);
-                      if (fileRenameError) {
-                        fileRenameErrorRef.current = "";
-                        setFileRenameError("");
-                      }
-                    }}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        event.preventDefault();
-                        void commitFileRename();
-                      } else if (event.key === "Escape") {
-                        event.preventDefault();
-                        cancelFileRename();
-                      }
-                    }}
-                  />
-                  <span aria-hidden="true">{currentSourceFileExtension}</span>
-                </label>
-              ) : canOfferFileRename ? (
-                <button
-                  className="window-file-title-action"
-                  type="button"
-                  aria-label={`重命名文件 ${currentSourceFileStem}`}
-                  title="重命名文件"
-                  onClick={beginFileRename}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === "F2") {
-                      event.preventDefault();
-                      beginFileRename();
-                    }
-                  }}
-                >
-                  <strong>{currentSourceFileStem}</strong>
-                  <PencilSimpleIcon
-                    className="window-file-rename-icon"
-                    aria-hidden="true"
-                    size={13}
-                    weight="bold"
-                  />
-                </button>
-              ) : (
-                <strong title={currentSourceFileName}>
-                  {currentSourceFileStem}
-                </strong>
-              )}
-              <span className="window-file-quick-actions">
-                  <button
-                  ref={openHtmlButtonRef}
-                  className="window-file-quick-action"
-                  type="button"
-                  data-tooltip="打开新的本地 HTML"
-                  aria-label="打开新的本地 HTML"
-                  aria-haspopup="dialog"
-                  aria-expanded={openHtmlDialogOpen}
-                  disabled={fileRenameEditing || fileRenameBusy}
-                  onClick={() => {
-                    setOpenHtmlDialogOpen(true);
-                    void refreshRecents();
-                  }}
-                >
-                  <PlusIcon aria-hidden="true" size={16} weight="bold" />
-                </button>
-                <button
-                  className="window-file-quick-action"
-                  type="button"
-                  data-tooltip="在默认浏览器中打开"
-                  aria-label={`在默认浏览器中打开 ${currentSourceFileName}`}
-                  disabled={
-                    !canOpenCurrentHtmlInDefaultBrowser
-                    || fileRenameEditing
-                    || fileRenameBusy
-                    || persistState !== "idle"
-                    || editRevision !== lastPersistedRevision
-                  }
-                  onClick={() => void openCurrentHtmlInDefaultBrowser()}
-                >
-                  <ArrowSquareOutIcon
-                    aria-hidden="true"
-                    size={16}
-                    weight="bold"
-                  />
-                </button>
-              </span>
-              {fileRenameError ? (
-                <span
-                  id="window-file-rename-error"
-                  className="window-file-rename-error"
-                  role="alert"
-                >
-                  {fileRenameError}
-                </span>
-              ) : null}
-            </div>
-            <span className="file-meta">
-              {headerStatusFacts.length ? (
-                <span className="file-version-label project-status-facts">
-                  {headerStatusFacts.map((fact) => (
-                    <span key={fact}>{fact}</span>
-                  ))}
-                </span>
-              ) : null}
-              {canOpenProjectRootInFolder ? (
-                <button
-                  className="window-file-folder-action"
-                  type="button"
-                  aria-label="在文件夹中打开当前项目文件夹"
-                  title="在文件夹中打开当前项目文件夹"
-                  onClick={() => void showProjectRecordsInFolder()}
-                >
-                  在文件夹中打开
-                </button>
-              ) : canShowCurrentFileInFolder ? (
-                <button
-                  className="window-file-folder-action"
-                  type="button"
-                  aria-label={`在文件夹中打开 ${currentSourceFileName}`}
-                  title="在文件夹中打开当前文件"
-                  onClick={() => void showProjectInFolder()}
-                >
-                  在文件夹中打开
-                </button>
-              ) : null}
-              <span
-                className="save-status"
-                data-persist-state={persistState}
-                data-file-renaming={fileRenameBusy ? "true" : undefined}
-                data-edit-revision={editRevision}
-                data-persisted-revision={lastPersistedRevision}
-                data-canvas-generation={canvasGeneration}
-                data-canvas-authority={canvasAuthority?.status}
-                data-render-generation={visibleCanvasAck?.generation}
-                data-rendered-sha256={visibleCanvasAck?.sha256 || undefined}
-                role={canvasAuthority?.status === "failed" ? "button" : "status"}
-                aria-live="polite"
-                tabIndex={canvasAuthority?.status === "failed" ? 0 : undefined}
-                onClick={canvasAuthority?.status === "failed" ? () => {
-                  void workspaceController?.retryCanvasVerification({
-                    context: captureProjectContext() || undefined,
-                  });
-                } : undefined}
-                onKeyDown={canvasAuthority?.status === "failed" ? (event) => {
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    void workspaceController?.retryCanvasVerification({
-                      context: captureProjectContext() || undefined,
-                    });
-                  }
-                } : undefined}
-              >
-                <span aria-hidden="true" />
-                {saveStatusLabel}
-              </span>
-            </span>
-          </div>
-        </div>
+        <WorkbenchFileHeaderView
+          fileRenameInputRef={fileRenameInputRef}
+          openHtmlButtonRef={openHtmlButtonRef}
+          updateActionVisible={updateActionVisible}
+          updateDownloaded={updateDownloaded}
+          updateDownloading={updateDownloading}
+          updateResult={updateResult}
+          updateBadgeLabel={updateBadgeLabel}
+          fileRenameEditing={fileRenameEditing}
+          fileRenameBusy={fileRenameBusy}
+          fileRenameError={fileRenameError}
+          fileRenameDraft={fileRenameDraft}
+          currentSourceFileStem={currentSourceFileStem}
+          currentSourceFileExtension={currentSourceFileExtension}
+          currentSourceFileName={currentSourceFileName}
+          canOfferFileRename={canOfferFileRename}
+          openHtmlDialogOpen={openHtmlDialogOpen}
+          canOpenCurrentHtmlInDefaultBrowser={canOpenCurrentHtmlInDefaultBrowser}
+          persistState={persistState}
+          editRevision={editRevision}
+          lastPersistedRevision={lastPersistedRevision}
+          headerStatusFacts={headerStatusFacts}
+          canOpenProjectRootInFolder={canOpenProjectRootInFolder}
+          canShowCurrentFileInFolder={canShowCurrentFileInFolder}
+          canvasGeneration={canvasGeneration}
+          canvasAuthority={canvasAuthority}
+          visibleCanvasAck={visibleCanvasAck}
+          saveStatusLabel={saveStatusLabel}
+          onOpenAbout={openAboutPageRoot}
+          onDownloadOrRestartUpdate={() => {
+            if (updateDownloaded) {
+              setRestartUpdateOpen(true);
+            } else if (updateResult?.status === "available") {
+              void downloadAvailableUpdate();
+            }
+          }}
+          onFileRenameBlur={() => {
+            if (fileRenameErrorRef.current) {
+              cancelFileRename();
+              return;
+            }
+            void commitFileRename();
+          }}
+          onFileRenameChange={(value) => {
+            setFileRenameDraft(value);
+            if (fileRenameError) {
+              fileRenameErrorRef.current = "";
+              setFileRenameError("");
+            }
+          }}
+          onFileRenameKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              void commitFileRename();
+            } else if (event.key === "Escape") {
+              event.preventDefault();
+              cancelFileRename();
+            }
+          }}
+          onBeginFileRename={beginFileRename}
+          onOpenHtmlDialog={() => {
+            setOpenHtmlDialogOpen(true);
+            void refreshRecents();
+          }}
+          onOpenInDefaultBrowser={() => void openCurrentHtmlInDefaultBrowser()}
+          onShowProjectRecordsInFolder={() => void showProjectRecordsInFolder()}
+          onShowProjectInFolder={() => void showProjectInFolder()}
+          onRetryCanvasVerification={() => {
+            void workspaceController?.retryCanvasVerification({
+              context: captureProjectContext() || undefined,
+            });
+          }}
+        />
 
-        <WorkbenchHeaderActions aria-label="画布模式、项目和版本操作">
-          <div
-            className="canvas-mode-switch"
-            role="group"
-            aria-label="画布模式"
-            /*
-             * The reason lives on the group, not on the disabled button: a disabled
-             * element dispatches no hover, so its own title never surfaces and only a
-             * screen reader ever heard it. Hovering the group works, and nothing is
-             * printed in the bar when there is no reason to give.
-             */
-            title={runInProgress ? "本轮还在进行，结束或采纳后可回到编辑" : undefined}
-          >
-            <button
-              type="button"
-              aria-pressed={canvasMode === "edit"}
-              disabled={browserPreviewOnly || runInProgress || viewMode === "history"}
-              /*
-               * A disabled control that will not say why reads as a broken control. The
-               * round in flight is the reason, and it is temporary, so the tooltip names
-               * it instead of leaving the user to guess.
-               */
-              title={
-                browserPreviewOnly
-                  ? "浏览器预览为只读模式"
-                  : runInProgress
-                    ? "本轮还在进行，结束或采纳后可回到编辑"
-                    : undefined
+        <WorkbenchHeaderToolbar
+          runInProgress={runInProgress}
+          canvasMode={canvasMode}
+          browserPreviewOnly={browserPreviewOnly}
+          viewMode={viewMode}
+          interactionLocked={interactionLocked}
+          projectHydrating={projectHydrating}
+          viewTransitioning={viewTransitioning}
+          attachmentUploadCount={attachmentUploadCount}
+          drawer={drawer}
+          recentRunOutcome={recentRunOutcome}
+          terminalRun={terminalRun}
+          readyReviewOverlay={readyReviewOverlay}
+          aiAssistantEntry={aiAssistantEntry}
+          onSelectEdit={() => {
+            if (externalSourcePreview) {
+              returnToEditingFromExternalPreview();
+              return;
+            }
+            if (canvasMode !== "preview") {
+              setCanvasMode("edit");
+              return;
+            }
+            if (previewToEditPendingRef.current) return;
+            previewToEditPendingRef.current = true;
+            const expectedDocumentKey = pageViewDocumentKeyRef.current;
+            const captureContext = interactionPreviewRef.current
+              ?.capturePageViewContext() ?? Promise.resolve(null);
+            void captureContext
+              .catch(() => null)
+              .then((capturedContext) => {
+                if (
+                  pageViewDocumentKeyRef.current !== expectedDocumentKey
+                  || isViewTransitioning()
+                ) return;
+                const nextContext = (
+                  capturedContext?.documentKey === expectedDocumentKey
+                ) ? capturedContext : null;
+                setPageViewContext(nextContext);
+                editorRef.current?.applyPageViewContext(nextContext);
+                invalidateEditCanvasRenderAck();
+                setCanvasMode("edit");
+              })
+              .finally(() => {
+                previewToEditPendingRef.current = false;
+              });
+          }}
+          onSelectPreview={() => {
+            if (!browserPreviewOnly && interactionLocked) return;
+            if (browserPreviewOnly) {
+              setCanvasMode("preview");
+              return;
+            }
+            const enterPreview = () => {
+              const committed = editorRef.current?.fencePendingEdit({
+                resumeEditing: false,
+                trigger: "manual",
+              });
+              if (!committed || !committed.ok) {
+                editorRef.current?.showCommitBlocked(
+                  committed?.reason || "请点回文字完成输入，再进入预览。",
+                );
+                return;
               }
-              onClick={() => {
-                if (externalSourcePreview) {
-                  returnToEditingFromExternalPreview();
-                  return;
-                }
-                if (canvasMode !== "preview") {
-                  setCanvasMode("edit");
-                  return;
-                }
-                if (previewToEditPendingRef.current) return;
-                previewToEditPendingRef.current = true;
-                const expectedDocumentKey = pageViewDocumentKeyRef.current;
-                const captureContext = interactionPreviewRef.current
-                  ?.capturePageViewContext() ?? Promise.resolve(null);
-                void captureContext
-                  .catch(() => null)
-                  .then((capturedContext) => {
-                    if (
-                      pageViewDocumentKeyRef.current !== expectedDocumentKey
-                      || isViewTransitioning()
-                    ) return;
-                    const nextContext = (
-                      capturedContext?.documentKey === expectedDocumentKey
-                    ) ? capturedContext : null;
-                    setPageViewContext(nextContext);
-                    editorRef.current?.applyPageViewContext(nextContext);
-                    invalidateEditCanvasRenderAck();
-                    setCanvasMode("edit");
-                  })
-                  .finally(() => {
-                    previewToEditPendingRef.current = false;
-                  });
-              }}
-            >
-              <PencilSimpleIcon aria-hidden="true" size={16} weight="bold" />
-              编辑
-            </button>
-            <button
-              type="button"
-              aria-pressed={canvasMode === "preview"}
-              disabled={!browserPreviewOnly && interactionLocked}
-              title={browserPreviewOnly
-                ? "只读运行页面自身的脚本和交互；操作不会保存"
-                : interactionLocked
-                  ? "当前状态只能使用编辑画布"
-                  : "运行页面自身的脚本和交互"}
-              onClick={() => {
-                if (!browserPreviewOnly && interactionLocked) return;
-                if (browserPreviewOnly) {
-                  setCanvasMode("preview");
-                  return;
-                }
-                const enterPreview = () => {
-                  const committed = editorRef.current?.fencePendingEdit({
-                    resumeEditing: false,
-                    trigger: "manual",
-                  });
-                  if (!committed || !committed.ok) {
-                    editorRef.current?.showCommitBlocked(
-                      committed?.reason || "请点回文字完成输入，再进入预览。",
-                    );
-                    return;
-                  }
-                  editorRef.current?.clearSelection();
-                  setPageViewContext(null);
-                  editorRef.current?.applyPageViewContext(null);
-                  setSelection(null);
-                  updateFocusedComment(null);
-                  setCanvasMode("preview");
-                };
-                if (deferEditorCommand("project-switch", enterPreview)) return;
-                enterPreview();
-              }}
-            >
-              <EyeIcon aria-hidden="true" size={16} weight="bold" />
-              预览
-            </button>
-          </div>
-          <button
-            className="project-button"
-            type="button"
-            aria-expanded={drawer === "files"}
-            disabled={projectHydrating || viewTransitioning || attachmentUploadCount > 0}
-            onClick={() => {
-              const openProjectPanel = () => {
-                setDrawer((current) => (
-                  current === "files" ? null : "files"
-                ));
-              };
-              if (deferEditorCommand("project-files", openProjectPanel)) return;
-              openProjectPanel();
-            }}
-          >
-            <FolderOpenIcon aria-hidden="true" size={18} weight="duotone" />
-            项目
-          </button>
-          {recentRunOutcome && !runInProgress && !terminalRun ? (
-            <button
-              className="recent-run-button"
-              type="button"
-              aria-expanded={drawer === "handoff"}
-              onClick={reopenRecentRunOutcome}
-            >
-              <ClockCounterClockwiseIcon
-                aria-hidden="true"
-                size={18}
-                weight="duotone"
-              />
-              上轮处理
-            </button>
-          ) : null}
-          {!readyReviewOverlay ? aiAssistantEntry : null}
-        </WorkbenchHeaderActions>
+              editorRef.current?.clearSelection();
+              setPageViewContext(null);
+              editorRef.current?.applyPageViewContext(null);
+              setSelection(null);
+              updateFocusedComment(null);
+              setCanvasMode("preview");
+            };
+            if (deferEditorCommand("project-switch", enterPreview)) return;
+            enterPreview();
+          }}
+          onToggleProjectPanel={() => {
+            const openProjectPanel = () => {
+              setDrawer((current) => (
+                current === "files" ? null : "files"
+              ));
+            };
+            if (deferEditorCommand("project-files", openProjectPanel)) return;
+            openProjectPanel();
+          }}
+          reopenRecentRunOutcome={reopenRecentRunOutcome}
+        />
         <input
           ref={fileInputRef}
           className="sr-only"
@@ -7944,760 +7720,103 @@ export default function Workbench() {
         ) : null}
 
         {canvasMode === "edit" ? (
-          <aside
-            ref={commentsPanelRef}
-            className="comments-panel comment-rail"
-            aria-label={viewMode === "history" ? "历史版本评论" : "本轮评论"}
-            aria-busy={!commentLayoutReady}
-            data-layout-ready={commentLayoutReady ? "true" : "false"}
-            data-layout-generation={commentLayoutAuthority.viewContextGeneration}
-            data-layout-text-editing={
-              commentLayoutAuthority.textEditing ? "true" : undefined
-            }
-            data-rail-min-offset={commentRailMinimumOffset}
-            data-rail-following={commentRailFollowsFocus ? "true" : "false"}
-            style={{
-              "--comment-rail-height": `${canvasDocumentHeight}px`,
-            } as CSSProperties}
-            tabIndex={-1}
-          >
-          <div
-            className="comment-rail-content"
-            style={{
-              minHeight: `${commentRailContentHeight}px`,
-              "--comment-rail-offset": `${commentRailOffset}px`,
-            } as CSSProperties}
-          >
-            <header
-              ref={commentsHeaderRef}
-              className="comments-header comment-rail-header"
-              data-has-header-actions={
-                commentLayoutReady
-                && (
-                  draftInCurrentTab
-                  || hasUnsavedCommentEdit
-                  || otherTabCommentEntryCount > 0
-                )
-                  ? "true"
-                  : undefined
-              }
-              data-other-tabs-open={
-                commentLayoutReady && otherTabCommentsOpen
-                  ? "true"
-                  : undefined
-              }
-            >
-              <div className="comment-rail-header-main">
-                <div className="comment-rail-title-row">
-                  <h1>评论 <span>{visibleCommentItems.length}</span></h1>
-                  {viewMode === "history" ? (
-                    <small>历史版本 · 只读</small>
-                  ) : (
-                    <button
-                      className="comment-rail-global-action"
-                      type="button"
-                      data-html-canvas-preserve-selection="true"
-                      aria-label="全局评论"
-                      aria-expanded={composerOpen && draftTarget?.tagName === "body"}
-                      disabled={interactionLocked}
-                      onClick={openGlobalCommentComposer}
-                    ><PlusIcon aria-hidden="true" size={12} weight="bold" />添加全局评论</button>
-                  )}
-                </div>
-                {commentLayoutReady
-                && (
-                  draftInCurrentTab
-                  || hasUnsavedCommentEdit
-                  || otherTabCommentEntryCount > 0
-                ) ? (
-                  <div className="comment-rail-header-actions">
-                  {commentLayoutReady && draftInCurrentTab ? (
-                    <button
-                      className="comment-header-action unsaved-comment-shortcut"
-                      type="button"
-                      data-html-canvas-preserve-selection="true"
-                      aria-label="有一条未保存评论"
-                      onClick={resumeCurrentComposer}
-                    >
-                      <span>未保存 1</span>
-                      <CaretRightIcon aria-hidden="true" size={12} weight="bold" />
-                    </button>
-                  ) : null}
-                  {commentLayoutReady
-                  && hasUnsavedCommentEdit
-                  && unfinishedEditedComment ? (
-                    <button
-                      className="comment-header-action unsaved-comment-edit-shortcut"
-                      type="button"
-                      data-html-canvas-preserve-selection="true"
-                      aria-label="有一条未保存修改"
-                      onClick={() => resumeCommentEdit(
-                        unfinishedEditedComment.commentId,
-                      )}
-                    >
-                      <span>未保存修改 1</span>
-                      <CaretRightIcon aria-hidden="true" size={12} weight="bold" />
-                    </button>
-                  ) : null}
-                  {commentLayoutReady && otherTabCommentEntryCount > 0 ? (
-                    <button
-                      className="comment-header-action other-tab-comments-toggle"
-                      type="button"
-                      data-html-canvas-preserve-selection="true"
-                      aria-label={`其他标签页评论 ${otherTabCommentEntryCount}`}
-                      aria-expanded={otherTabCommentsOpen}
-                      aria-controls="other-tab-comment-groups"
-                      onClick={() => setExpandedOtherTabCommentsKey((current) => (
-                        current === otherTabCommentsContextKey
-                          ? ""
-                          : otherTabCommentsContextKey
-                      ))}
-                    >
-                      <span>其他标签页 {otherTabCommentEntryCount}</span>
-                      <CaretRightIcon aria-hidden="true" size={12} weight="bold" />
-                    </button>
-                  ) : null}
-                  </div>
-                ) : null}
-                <span className="round-record-counts sr-only">
-                  {activeCommentCount} 条评论 · {changeEvents.length} 项直接编辑记录
-                </span>
-              </div>
-              {commentLayoutReady
-              && otherTabCommentsOpen
-              && otherTabCommentGroups.length > 0 ? (
-                <div
-                  id="other-tab-comment-groups"
-                  className="other-tab-comment-groups"
-                  role="region"
-                  aria-label="其他标签页评论"
-                >
-                  {otherTabCommentGroups.map((group) => (
-                    <section
-                      className="other-tab-comment-group"
-                      aria-label={`${group.label}的评论`}
-                      key={group.key}
-                    >
-                      <div className="other-tab-comment-group-header">
-                        <strong>{group.label}</strong>
-                      </div>
-                      <div className="other-tab-comment-list">
-                        {group.entries.map((entry) => {
-                          if (entry.kind === "draft") {
-                            return (
-                              <button
-                                className="comment-card other-tab-comment-card draft-comment-card"
-                                type="button"
-                                data-html-canvas-preserve-selection="true"
-                                aria-label={`${group.label}：未保存评论：${insertionLabel(entry.target)}：${entry.previewText}`}
-                                key={entry.key}
-                                onClick={() => {
-                                  setExpandedOtherTabCommentsKey("");
-                                  window.requestAnimationFrame(resumeCurrentComposer);
-                                }}
-                              >
-                                <span className="comment-card-header">
-                                  <span className="comment-target">
-                                    {insertionLabel(entry.target)}
-                                  </span>
-                                  <span className="unsaved-comment-status">未保存</span>
-                                </span>
-                                <span className="other-tab-comment-card-body">
-                                  {entry.previewText}
-                                </span>
-                              </button>
-                            );
-                          }
-                          return (
-                            <button
-                              className="comment-card other-tab-comment-card"
-                              type="button"
-                              data-html-canvas-preserve-selection="true"
-                              aria-label={`${group.label}：${insertionLabel(entry.target)}：${entry.previewText}`}
-                              key={entry.key}
-                              onClick={() => {
-                                setExpandedOtherTabCommentsKey("");
-                                setComposerOpen(false);
-                                setPendingDeleteCommentId(null);
-                                window.requestAnimationFrame(() => {
-                                  focusCommentTarget(
-                                    entry.target,
-                                    entry.comment.commentId,
-                                  );
-                                });
-                              }}
-                            >
-                              <span className="comment-card-header">
-                                <span className="comment-target">
-                                  {insertionLabel(entry.target)}
-                                </span>
-                                <time
-                                  dateTime={
-                                    entry.comment.updatedAt
-                                    || entry.comment.createdAt
-                                  }
-                                >
-                                  {formatTime(
-                                    entry.comment.updatedAt
-                                    || entry.comment.createdAt,
-                                    true,
-                                  )}
-                                </time>
-                              </span>
-                              <span className="other-tab-comment-card-body">
-                                {entry.previewText}
-                              </span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </section>
-                  ))}
-                </div>
-              ) : null}
-            </header>
-            <span className="sr-only" role="status" aria-live="polite">
-              {composerInCurrentTab && Number.isFinite(composerTop)
-                ? "评论输入框已与画布目标同时定位"
-                : focusedCommentId
-                  ? "评论与画布目标已同时定位"
-                  : ""}
-            </span>
-
-            {relinkRailCardVisible ? (
-              <section
-                className="comment-target-recovery rail-status-card rail-relink-status"
-                role="status"
-                aria-label="评论需要重新定位"
-                data-html-canvas-preserve-selection="true"
-              >
-                <span>
-                  <strong>{relinkCardCopy.title}</strong>
-                  <small>{relinkCardCopy.detail}</small>
-                </span>
-                <button
-                  type="button"
-                  onClick={startUnsafeTargetRelink}
-                >{relinkCardActive
-                  ? "正在等待选择…"
-                  : relinkCardCopy.actionLabel}</button>
-                {relinkCardActive ? (
-                  <button type="button" onClick={cancelTargetRelink}>取消</button>
-                ) : null}
-              </section>
-            ) : null}
-            {projectLoadError ? (
-              <section className="round-lock-card rail-status-card" aria-label="项目读取失败">
-                <strong>当前项目暂不可编辑</strong>
-                <span>{projectLoadError}</span>
-                <button type="button" onClick={() => {
-                  void workspaceController?.retryProjectHydration();
-                }}>重试读取</button>
-              </section>
-            ) : !commentLayoutReady ? null
-            : composerInCurrentTab
-              && draftTarget
-              && Number.isFinite(composerTop)
-              && !interactionLocked ? (
-              <section
-                className="comment-composer rail-comment-composer"
-                aria-label="添加评论"
-                data-html-canvas-preserve-selection="true"
-                data-comment-measure="__composer"
-                data-comment-measure-key={composerMeasurementKey}
-                data-focused="true"
-                style={{ top: `${composerTop as number}px` }}
-              >
-                <header>
-                  <div className="composer-target" data-empty={!draftTarget ? "true" : "false"}>
-                    <strong>{draftTargetScope}</strong>
-                    <span>“{insertionLabel(draftTarget)}”</span>
-                  </div>
-                  <button
-                    className="comment-tool-button"
-                    type="button"
-                    aria-label="关闭评论编辑器"
-                    title={attachmentUploadCount > 0 ? "附件添加完成后可关闭" : "收起并保留草稿"}
-                    disabled={attachmentUploadCount > 0}
-                    onClick={closeCommentComposer}
-                  ><XIcon aria-hidden="true" size={17} weight="bold" /></button>
-                </header>
-                <label htmlFor="round-comment-draft">评论内容</label>
-                {!draftTargetCanSave ? (
-                  <div className="comment-target-recovery" role="status">
-                    <span>
-                      <strong>原位置已变化</strong>
-                      <small>草稿和附件仍保留，请在画布中选择新的位置。</small>
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => beginTargetRelink("__composer")}
-                    >{relinkingTarget === "__composer" ? "正在等待选择…" : "重新选择目标"}</button>
-                    {relinkingTarget === "__composer" ? (
-                      <button type="button" onClick={cancelTargetRelink}>取消</button>
-                    ) : null}
-                  </div>
-                ) : null}
-                <textarea
-                  id="round-comment-draft"
-                  ref={composerRef}
-                  value={draft}
-                  disabled={!draftTargetCanSave || interactionLocked}
-                  placeholder={draftTarget.tagName === "body"
-                    ? "输入对整个页面的修改要求…"
-                    : "输入对这部分内容的修改要求…"}
-                  onChange={(event) => {
-                    workspaceControllerRef.current?.setCommentComposerDraft(
-                      event.target.value,
-                    );
-                  }}
-                  onPaste={(event) => {
-                    const commentId = draftCommentId
-                      || currentCommentSessionSnapshot().composerCommentId;
-                    if (commentId) pasteImages(event, { kind: "composer", commentId });
-                  }}
-                  onKeyDown={(event) => {
-                    if (shouldSubmitCommentOnEnter({
-                      key: event.key,
-                      shiftKey: event.shiftKey,
-                      isComposing: event.nativeEvent.isComposing,
-                    })) {
-                      event.preventDefault();
-                      void addComment();
-                    }
-                  }}
-                />
-                <CommentAttachmentStrip
-                  attachments={draftAttachments}
-                  objectUrls={attachmentObjectUrls}
-                  editable={!interactionLocked}
-                  onEnsurePreview={ensureAttachmentObjectUrl}
-                  onPreview={(attachment) => void openAttachmentPreview(attachment)}
-                  onDownload={(attachment) => void downloadAttachment(attachment)}
-                  onRemove={removeComposerAttachment}
-                />
-                {pendingDeleteCommentId === "__composer" ? (
-                  <footer className="comment-delete-confirm composer-delete-confirm" role="alert">
-                    <span>删除这条未保存评论？</span>
-                    <div>
-                      <button
-                        type="button"
-                        autoFocus
-                        onClick={() => {
-                          setPendingDeleteCommentId(null);
-                          window.requestAnimationFrame(() => {
-                            document.getElementById("composer-delete-button")?.focus();
-                          });
-                        }}
-                      >取消</button>
-                      <button
-                        className="confirm-delete"
-                        type="button"
-                        onClick={discardCurrentComposer}
-                      >删除</button>
-                    </div>
-                  </footer>
-                ) : (
-                  <footer className="composer-actions">
-                    <div className="composer-footer-tools">
-                      <button
-                        className="comment-tool-button"
-                        type="button"
-                        aria-label="添加附件"
-                        title="添加附件"
-                        disabled={interactionLocked || !draftCommentId}
-                        onClick={() => {
-                          if (draftCommentId) {
-                            openAttachmentPicker(
-                              { kind: "composer", commentId: draftCommentId },
-                              "all",
-                            );
-                          }
-                        }}
-                      >
-                        <PaperclipIcon aria-hidden="true" size={17} weight="bold" />
-                      </button>
-                      <button
-                        className="comment-tool-button"
-                        type="button"
-                        aria-label="添加图片"
-                        title="添加图片"
-                        disabled={interactionLocked || !draftCommentId}
-                        onClick={() => {
-                          if (draftCommentId) {
-                            openAttachmentPicker(
-                              { kind: "composer", commentId: draftCommentId },
-                              "image",
-                            );
-                          }
-                        }}
-                      >
-                        <ImageIcon aria-hidden="true" size={17} weight="bold" />
-                      </button>
-                      <button
-                        id="composer-delete-button"
-                        className="comment-tool-button danger"
-                        type="button"
-                        aria-label="删除未保存评论"
-                        title="删除未保存评论"
-                        disabled={
-                          interactionLocked
-                          || attachmentUploadCount > 0
-                          || (!draft.trim() && draftAttachments.length === 0)
-                        }
-                        onClick={() => setPendingDeleteCommentId("__composer")}
-                      >
-                        <TrashIcon aria-hidden="true" size={17} weight="bold" />
-                      </button>
-                      {attachmentUploadCount > 0 ? <small>正在添加附件…</small> : null}
-                    </div>
-                    <button
-                      className="add-comment-button"
-                      type="button"
-                      aria-label="评论" title="提交评论"
-                      disabled={
-                        !draftTargetCanSave
-                        || (!draft.trim() && draftAttachments.length === 0)
-                        || attachmentUploadCount > 0
-                        || interactionLocked
-                      }
-                      onClick={(event) => {
-                        event.currentTarget.blur();
-                        void addComment();
-                      }}
-                    >
-                      <CheckCircleIcon aria-hidden="true" size={20} weight="fill" />
-                    </button>
-                  </footer>
-                )}
-              </section>
-            ) : hasCollapsedCommentDraft
-              && draftTarget
-              && draftRecoveryTop !== undefined ? (
-              <button
-                className="comment-card draft-comment-card"
-                type="button"
-                data-html-canvas-preserve-selection="true"
-                aria-label={`未保存评论：${insertionLabel(draftTarget)}：${draft.trim() || `已添加 ${draftAttachments.length} 个附件`}`}
-                data-comment-measure="__draft_recovery"
-                data-comment-measure-key={draftRecoveryMeasurementKey}
-                style={{ top: `${draftRecoveryTop}px` }}
-                onClick={resumeCurrentComposer}
-              >
-                <span className="comment-card-header">
-                  <span className="comment-target">
-                    {insertionLabel(draftTarget)}
-                  </span>
-                  <span className="unsaved-comment-status">未保存</span>
-                </span>
-                <span className="other-tab-comment-card-body">
-                  {draft.trim() || `已添加 ${draftAttachments.length} 个附件`}
-                </span>
-              </button>
-            ) : null}
-
-            {(commentLayoutReady || expectedCommentLayoutTargetIds.length === 0)
-            && sortedVisibleCommentItems.length === 0
-            && !composerInCurrentTab
-            && !hasCollapsedCommentDraft ? (
-              <div
-                className="comments-empty"
-                style={{ top: `${commentRailMinimumTop}px` }}
-              >
-                <ChatCircleTextIcon aria-hidden="true" size={24} weight="duotone" />
-                <strong>{otherTabCommentEntryCount > 0
-                  ? "这个标签页还没有评论"
-                  : "评论会显示在这里"}</strong>
-                <span>{otherTabCommentEntryCount > 0
-                  ? "其他标签页的评论可从顶部展开。"
-                  : "可以评论整个页面、模块或其中的小区块；写好后就能发给 AI。"}</span>
-              </div>
-            ) : renderedVisibleCommentItems.map((comment) => {
-              const index = sortedVisibleCommentItems.findIndex(
-                (item) => item.commentId === comment.commentId,
-              );
-              const editable = viewMode === "current" && !interactionLocked;
-              const editing = (
-                editingCommentId === comment.commentId
-                && commentEditSession?.commentId === comment.commentId
-              );
-              const activeEditSession = (
-                editing
-                && commentEditSession?.commentId === comment.commentId
-              )
-                ? commentEditSession
-                : null;
-              const shownAttachments = activeEditSession
-                ? activeEditSession.draftAttachments
-                : comment.attachments;
-              const deleting = pendingDeleteCommentId === comment.commentId;
-              const targetLayout = commentTargetLayouts[comment.target.id];
-              const targetResolution =
-                targetLayout?.resolution ?? comment.target.resolution;
-              const targetLocatable = commentTargetIsLocatable(comment.target);
-              return (
-                <article
-                  className="comment-card"
-                  data-html-canvas-preserve-selection="true"
-                  data-comment-measure={comment.commentId}
-                  data-comment-measure-key={commentMeasurementKeys[comment.commentId]}
-                  data-selected={selection?.selector === comment.target.selector ? "true" : "false"}
-                  data-focused={focusedCommentId === comment.commentId ? "true" : undefined}
-                  data-resolution={targetResolution}
-                  data-editing={editing ? "true" : undefined}
-                  role="group"
-                  aria-current={focusedCommentId === comment.commentId ? "location" : undefined}
-                  tabIndex={editable && targetLocatable ? 0 : -1}
-                  aria-label={`${insertionLabel(comment.target)}：${comment.text}`}
-                  style={{
-                    top: `${visibleCommentPositions[comment.commentId]}px`,
-                  }}
-                  onClick={() => {
-                    if (!editing && !deleting && editable && targetLocatable) {
-                      focusCommentTarget(comment.target, comment.commentId);
-                    }
-                  }}
-                  onKeyDown={(event) => {
-                    if (
-                      event.target === event.currentTarget
-                      && !editing
-                      && !deleting
-                      && editable
-                      && targetLocatable
-                      && (event.key === "Enter" || event.key === " ")
-                    ) {
-                      event.preventDefault();
-                      focusCommentTarget(comment.target, comment.commentId);
-                    }
-                  }}
-                  key={comment.commentId}
-                >
-                  <header className="comment-card-header">
-                    <span className="comment-target">{insertionLabel(comment.target)}</span>
-                    <time dateTime={comment.updatedAt || comment.createdAt}>
-                      {formatTime(comment.updatedAt || comment.createdAt, true)}
-                    </time>
-                  </header>
-                  {!targetLocatable && editable ? (
-                    <div
-                      className="comment-target-recovery"
-                      role="status"
-                      onClick={(event) => event.stopPropagation()}
-                    >
-                      <span>
-                        <strong>原位置已变化</strong>
-                        <small>评论和附件仍保留，重新关联后即可发送。</small>
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => beginTargetRelink(comment.commentId)}
-                      >{relinkingTarget === comment.commentId
-                        ? "正在等待选择…"
-                        : "重新选择目标"}</button>
-                      {relinkingTarget === comment.commentId ? (
-                        <button type="button" onClick={cancelTargetRelink}>取消</button>
-                      ) : null}
-                    </div>
-                  ) : null}
-                  {editing ? (
-                    <textarea
-                      ref={commentEditRef}
-                      className="comment-edit-textarea"
-                      aria-label={`编辑评论 ${index + 1}`}
-                      value={commentEditDraft}
-                      onClick={(event) => event.stopPropagation()}
-                      onChange={(event) => updateCommentEditDraft(
-                        event.target.value,
-                      )}
-                      onKeyDown={(event) => {
-                        if (event.key === "Escape") {
-                          event.preventDefault();
-                          cancelCommentEdit();
-                        } else if (shouldSubmitCommentOnEnter({
-                          key: event.key,
-                          shiftKey: event.shiftKey,
-                          isComposing: event.nativeEvent.isComposing,
-                        })) {
-                          event.preventDefault();
-                          confirmCommentEdit(comment.commentId);
-                        }
-                      }}
-                      onPaste={(event) => pasteImages(event, {
-                        kind: "comment",
-                        commentId: comment.commentId,
-                      })}
-                    />
-                  ) : <p>{comment.text || "已添加参考附件"}</p>}
-                  <CommentAttachmentStrip
-                    attachments={shownAttachments}
-                    objectUrls={attachmentObjectUrls}
-                    editable={editable && editing}
-                    onEnsurePreview={ensureAttachmentObjectUrl}
-                    onPreview={(attachment) => void openAttachmentPreview(attachment)}
-                    onDownload={(attachment) => void downloadAttachment(attachment)}
-                    onRemove={(attachment) => removeCommentAttachment(
-                      comment.commentId,
-                      attachment,
-                    )}
-                  />
-                  {editable ? (
-                    deleting ? (
-                      <footer
-                        className="comment-delete-confirm"
-                        role="alert"
-                        onClick={(event) => event.stopPropagation()}
-                      >
-                        <span>删除这条评论？</span>
-                        <div>
-                          <button
-                            type="button"
-                            autoFocus
-                            onClick={(event) => {
-                              event.currentTarget.blur();
-                              setPendingDeleteCommentId(null);
-                              queueReviewCommentFocus(comment.target, comment.commentId);
-                              window.requestAnimationFrame(() => {
-                                document.getElementById(`comment-delete-${comment.commentId}`)?.focus();
-                              });
-                            }}
-                          >取消</button>
-                          <button
-                            className="confirm-delete"
-                            type="button"
-                            onClick={(event) => {
-                              event.currentTarget.blur();
-                              deleteComment(comment.commentId);
-                            }}
-                          >删除</button>
-                        </div>
-                      </footer>
-                    ) : (
-                      <footer className="comment-card-footer">
-                        {shownAttachments?.length ? (
-                          <span>{shownAttachments.length} 个附件</span>
-                        ) : null}
-                        <div className="comment-card-tools">
-                          <button
-                            className="comment-tool-button"
-                            type="button"
-                            aria-label="添加附件"
-                            title="添加附件"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              if (beginCommentEdit(comment, false)) {
-                                window.requestAnimationFrame(() => {
-                                  openAttachmentPicker(
-                                    {
-                                      kind: "comment",
-                                      commentId: comment.commentId,
-                                    },
-                                    "all",
-                                  );
-                                });
-                              }
-                            }}
-                          >
-                            <PaperclipIcon aria-hidden="true" size={17} weight="bold" />
-                          </button>
-                          <button
-                            className="comment-tool-button"
-                            type="button"
-                            aria-label="添加图片"
-                            title="添加图片"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              if (beginCommentEdit(comment, false)) {
-                                window.requestAnimationFrame(() => {
-                                  openAttachmentPicker(
-                                    {
-                                      kind: "comment",
-                                      commentId: comment.commentId,
-                                    },
-                                    "image",
-                                  );
-                                });
-                              }
-                            }}
-                          >
-                            <ImageIcon aria-hidden="true" size={17} weight="bold" />
-                          </button>
-                          {editing ? (
-                            <>
-                              <button
-                                className="comment-tool-button cancel-edit"
-                                type="button"
-                                aria-label="取消编辑"
-                                title="取消编辑"
-                                disabled={attachmentUploadCount > 0}
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  event.currentTarget.blur();
-                                  cancelCommentEdit();
-                                }}
-                              >
-                                <XIcon aria-hidden="true" size={17} weight="bold" />
-                              </button>
-                              <button
-                                className="comment-tool-button confirm-edit"
-                                type="button"
-                                aria-label="确认修改"
-                                title="确认修改"
-                                disabled={
-                                  attachmentUploadCount > 0
-                                  || (
-                                    !commentEditDraft.trim()
-                                    && commentEditAttachments.length === 0
-                                  )
-                                }
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  event.currentTarget.blur();
-                                  confirmCommentEdit(comment.commentId);
-                                }}
-                              >
-                                <CheckCircleIcon aria-hidden="true" size={18} weight="fill" />
-                              </button>
-                            </>
-                          ) : (
-                            <button
-                              className="comment-tool-button"
-                              type="button"
-                              aria-label="编辑评论"
-                              title="编辑评论"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                beginCommentEdit(comment);
-                              }}
-                            >
-                              <PencilSimpleIcon aria-hidden="true" size={17} weight="bold" />
-                            </button>
-                          )}
-                          <button
-                            id={`comment-delete-${comment.commentId}`}
-                            className="comment-tool-button danger"
-                            type="button"
-                            aria-label="删除评论"
-                            title="删除评论"
-                            disabled={attachmentUploadCount > 0}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              event.currentTarget.blur();
-                              setPendingDeleteCommentId(comment.commentId);
-                              queueReviewCommentFocus(comment.target, comment.commentId);
-                            }}
-                          >
-                            <TrashIcon aria-hidden="true" size={17} weight="bold" />
-                          </button>
-                        </div>
-                      </footer>
-                    )
-                  ) : null}
-                </article>
-              );
-            })}
-
-          </div>
-          </aside>
+          <CommentRailView
+            commentsPanelRef={commentsPanelRef}
+            commentsHeaderRef={commentsHeaderRef}
+            composerRef={composerRef}
+            commentEditRef={commentEditRef}
+            viewMode={viewMode}
+            commentLayoutReady={commentLayoutReady}
+            commentLayoutAuthority={commentLayoutAuthority}
+            commentRailMinimumOffset={commentRailMinimumOffset}
+            commentRailFollowsFocus={commentRailFollowsFocus}
+            canvasDocumentHeight={canvasDocumentHeight}
+            commentRailContentHeight={commentRailContentHeight}
+            commentRailOffset={commentRailOffset}
+            commentRailMinimumTop={commentRailMinimumTop}
+            visibleCommentItems={visibleCommentItems}
+            draftInCurrentTab={draftInCurrentTab}
+            hasUnsavedCommentEdit={hasUnsavedCommentEdit}
+            otherTabCommentEntryCount={otherTabCommentEntryCount}
+            otherTabCommentsOpen={otherTabCommentsOpen}
+            otherTabCommentsContextKey={otherTabCommentsContextKey}
+            composerOpen={composerOpen}
+            draftTarget={draftTarget}
+            interactionLocked={interactionLocked}
+            unfinishedEditedComment={unfinishedEditedComment}
+            otherTabCommentGroups={otherTabCommentGroups}
+            activeCommentCount={activeCommentCount}
+            changeEvents={changeEvents}
+            composerInCurrentTab={composerInCurrentTab}
+            composerTop={composerTop}
+            focusedCommentId={focusedCommentId}
+            relinkRailCardVisible={relinkRailCardVisible}
+            relinkCardCopy={relinkCardCopy}
+            relinkCardActive={relinkCardActive}
+            projectLoadError={projectLoadError}
+            draftTargetScope={draftTargetScope}
+            attachmentUploadCount={attachmentUploadCount}
+            draftTargetCanSave={draftTargetCanSave}
+            composerMeasurementKey={composerMeasurementKey}
+            draft={draft}
+            draftCommentId={draftCommentId}
+            relinkingTarget={relinkingTarget}
+            draftAttachments={draftAttachments}
+            attachmentObjectUrls={attachmentObjectUrls}
+            pendingDeleteCommentId={pendingDeleteCommentId}
+            hasCollapsedCommentDraft={hasCollapsedCommentDraft}
+            draftRecoveryTop={draftRecoveryTop}
+            draftRecoveryMeasurementKey={draftRecoveryMeasurementKey}
+            expectedCommentLayoutTargetIds={expectedCommentLayoutTargetIds}
+            sortedVisibleCommentItems={sortedVisibleCommentItems}
+            renderedVisibleCommentItems={renderedVisibleCommentItems}
+            editingCommentId={editingCommentId}
+            commentEditSession={commentEditSession}
+            commentTargetLayouts={commentTargetLayouts}
+            selection={selection}
+            commentMeasurementKeys={commentMeasurementKeys}
+            visibleCommentPositions={visibleCommentPositions}
+            commentEditDraft={commentEditDraft}
+            commentEditAttachments={commentEditAttachments}
+            openGlobalCommentComposer={openGlobalCommentComposer}
+            resumeCurrentComposer={resumeCurrentComposer}
+            resumeCommentEdit={resumeCommentEdit}
+            setExpandedOtherTabCommentsKey={setExpandedOtherTabCommentsKey}
+            setComposerOpen={setComposerOpen}
+            setPendingDeleteCommentId={setPendingDeleteCommentId}
+            focusCommentTarget={focusCommentTarget}
+            startUnsafeTargetRelink={startUnsafeTargetRelink}
+            cancelTargetRelink={cancelTargetRelink}
+            onRetryProjectHydration={() => {
+              void workspaceController?.retryProjectHydration();
+            }}
+            closeCommentComposer={closeCommentComposer}
+            beginTargetRelink={beginTargetRelink}
+            onComposerDraftChange={(value) => {
+              workspaceControllerRef.current?.setCommentComposerDraft(value);
+            }}
+            onComposerPaste={(event) => {
+              const commentId = draftCommentId
+                || currentCommentSessionSnapshot().composerCommentId;
+              if (commentId) pasteImages(event, { kind: "composer", commentId });
+            }}
+            addComment={addComment}
+            ensureAttachmentObjectUrl={ensureAttachmentObjectUrl}
+            openAttachmentPreview={openAttachmentPreview}
+            downloadAttachment={downloadAttachment}
+            removeComposerAttachment={removeComposerAttachment}
+            discardCurrentComposer={discardCurrentComposer}
+            openAttachmentPicker={openAttachmentPicker}
+            commentTargetIsLocatable={commentTargetIsLocatable}
+            updateCommentEditDraft={updateCommentEditDraft}
+            cancelCommentEdit={cancelCommentEdit}
+            confirmCommentEdit={confirmCommentEdit}
+            pasteImages={pasteImages}
+            removeCommentAttachment={removeCommentAttachment}
+            queueReviewCommentFocus={queueReviewCommentFocus}
+            deleteComment={deleteComment}
+            beginCommentEdit={beginCommentEdit}
+          />
         ) : null}
       </div>
 
@@ -8731,232 +7850,58 @@ export default function Workbench() {
             panelTitle={processPanelTitle}
           />
         ) : drawer ? (
-          <header className="drawer-header project-panel-header">
-            <div className="project-panel-title">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src="./brand-logo.png" alt="" />
-              <span>
-                <strong>{projectName}</strong>
-                <small className="project-panel-meta">
-                  <span aria-hidden="true" />
-                  {[
-                    browserPreviewOnly ? "只读预览" : saveStatusLabel,
-                    versions.length > 0 ? `${versions.length} 个版本` : null,
-                  ].filter(Boolean).join(" · ")}
-                </small>
-              </span>
-            </div>
-            <div className="project-panel-actions">
-              {canShowCurrentFileInFolder ? (
-                <button
-                  className="project-panel-action"
-                  type="button"
-                  onClick={() => void showProjectInFolder()}
-                >
-                  <FolderOpenIcon aria-hidden="true" size={15} weight="duotone" />
-                  在文件夹中打开
-                </button>
-              ) : null}
-              <button
-                className="project-panel-action"
-                type="button"
-                onClick={() => void exportCurrentHtml()}
-              >
-                <ExportIcon aria-hidden="true" size={15} weight="bold" />
-                导出副本
-              </button>
-            </div>
-            <button
-              className="drawer-close-button"
-              type="button"
-              aria-label="关闭项目面板"
-              title="关闭"
-              onClick={() => setDrawer(null)}
-            >
-              <XIcon aria-hidden="true" size={18} weight="bold" />
-            </button>
-          </header>
+          <ProjectFilesHeader
+            projectName={projectName}
+            browserPreviewOnly={browserPreviewOnly}
+            saveStatusLabel={saveStatusLabel}
+            versions={versions}
+            canShowCurrentFileInFolder={canShowCurrentFileInFolder}
+            onShowInFolder={() => void showProjectInFolder()}
+            onExport={() => void exportCurrentHtml()}
+            onClose={() => setDrawer(null)}
+          />
         ) : null}
         <div className="drawer-body">
           {drawer === "files" ? (
-            <div className="project-console">
-              <section
-                className="project-rules-row"
-                data-open={projectRulesOpen ? "true" : "false"}
-              >
-                <button
-                  className="project-rules-summary"
-                  type="button"
-                  aria-expanded={projectRulesOpen}
-                  disabled={
-                    !projectId
-                    || projectRecordsPreparing
-                    || Boolean(projectRecordsError)
-                  }
-                  onClick={() => void toggleProjectRules()}
-                >
-                  <PencilSimpleIcon aria-hidden="true" size={15} weight="bold" />
-                  <strong>项目规则</strong>
-                  <small>每次 AI Agent 修改本项目 HTML 都会读取</small>
-                  {projectRulesSavedNotice ? (
-                    <em className="project-rules-saved" role="status">
-                      <span aria-hidden="true" />
-                      项目规则已保存
-                    </em>
-                  ) : null}
-                  <CaretRightIcon aria-hidden="true" size={15} weight="bold" />
-                </button>
-                {projectRecordsError ? (
-                  <section className="project-resource-error" role="alert">
-                    <div>
-                      <strong>项目规则还没有建立</strong>
-                      <span>{projectRecordsError}</span>
-                    </div>
-                    <button
-                      type="button"
-                      disabled={projectRecordsPreparing}
-                      onClick={() => void prepareProjectRecords()}
-                    >{projectRecordsPreparing ? "正在重试…" : "重试建立"}</button>
-                  </section>
-                ) : null}
-                {projectRulesOpen && activeFileView ? (
-                  activeFileView.error ? (
-                  <section className="project-file-read-error" role="alert">
-                    <span className="project-resource-icon">
-                      <TriangleIcon aria-hidden="true" size={20} weight="duotone" />
-                    </span>
-                    <div>
-                      <small>{workspaceFileLabel(activeFileView.path)}</small>
-                      <strong>内容没有读取成功</strong>
-                      <p>{activeFileView.error}</p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => void viewFile(activeFileView.path)}
-                    >重试读取</button>
-                  </section>
-                  ) : (
-                  <div className="project-rules-editor">
-                    <p className="project-file-note" id="project-rules-help">
-                      {activeFileView.loading
-                        ? "正在读取项目规则。内容核对完成前暂不接受编辑。"
-                        : runInProgress
-                        ? "本轮已经使用冻结时的规则。AI 处理完成前这里保持只读，不会把临时修改追加入本轮。"
-                        : "修改会自动保存。每次发送至 Qoder 时，源页都会把这份规则与本轮要求一起交接；规则只影响后续任务，不会修改当前 HTML。"}
-                    </p>
-                    <textarea
-                      key={projectRulesEditorGeneration}
-                      ref={projectRulesEditorRef}
-                      className="project-file-editor"
-                      aria-label="项目长期规则"
-                      aria-describedby="project-rules-help"
-                      spellCheck={false}
-                      disabled={activeFileView.loading || runInProgress}
-                      value={activeFileView.content}
-                      onCompositionStart={(event) => {
-                        beginProjectRulesComposition(event.currentTarget);
-                      }}
-                      onCompositionEnd={(event) => {
-                        finishProjectRulesComposition(event.currentTarget);
-                      }}
-                      onChange={(event) => {
-                        setProjectRulesEdited(true);
-                        workspaceController?.updateProjectRules({
-                          content: event.target.value,
-                        });
-                      }}
-                    />
-                    {projectRulesSaveError ? (
-                      <p className="project-file-save-error" role="status">
-                        {projectRulesSaveError}
-                      </p>
-                    ) : null}
-                    <div className="project-file-actions">
-                      <small>
-                        {projectRulesSaving
-                          ? "正在自动保存"
-                          : activeFileView.content === activeFileView.savedContent
-                          ? "当前内容已记录"
-                          : "修改将在稍后自动保存"}
-                      </small>
-                      <button
-                        type="button"
-                        disabled={
-                          activeFileView.loading
-                          || projectRulesSaving
-                          || runInProgress
-                          || activeFileView.content === activeFileView.savedContent
-                        }
-                        onPointerDown={(event) => {
-                          if (projectRulesCompositionActive) {
-                            event.preventDefault();
-                          }
-                        }}
-                        onMouseDown={(event) => {
-                          if (projectRulesCompositionActive) {
-                            event.preventDefault();
-                          }
-                        }}
-                        onClick={restoreProjectRules}
-                      >还原修改</button>
-                      {projectRulesSaveError ? (
-                        <button
-                          className="drawer-primary"
-                          type="button"
-                          disabled={projectRulesSaving || runInProgress}
-                          onClick={() => void saveProjectRules()}
-                        >再次保存</button>
-                      ) : null}
-                    </div>
-                  </div>
-                  )
-                ) : null}
-              </section>
-              <div className="project-console-body">
-                <div className="version-tree-column">
-                  <header className="version-tree-heading">
-                    <strong>版本树</strong>
-                    <span>{versions.length} 个</span>
-                  </header>
-                  {versions.length === 0 ? (
-                    <p className="version-tree-empty">
-                      首次编辑或发送给 AI 后，会建立版本 1。
-                    </p>
-                  ) : (
-                    <VersionTreeList
-                      versions={displayedVersions}
-                      selectedVersionId={consoleVersion?.id ?? null}
-                      editingBaseVersionId={currentBasedOnVersionId}
-                      onSelect={setSelectedVersionId}
-                    />
-                  )}
-                </div>
-                <div className="version-detail-column">
-                  {consoleVersion ? (
-                    <VersionDetail
-                      version={consoleVersion}
-                      parent={consoleVersionParent}
-                      latest={consoleVersion.id === latestVersionId}
-                      editingBase={consoleVersion.id === currentBasedOnVersionId}
-                      viewing={viewingVersionId === consoleVersion.id}
-                      attachmentObjectUrls={attachmentObjectUrls}
-                      onSelectParent={setSelectedVersionId}
-                      onEnsureAttachmentPreview={ensureAttachmentObjectUrl}
-                      onPreviewAttachment={(attachment) => {
-                        void openAttachmentPreview(attachment);
-                      }}
-                      onDownloadAttachment={(attachment) => {
-                        void downloadAttachment(attachment);
-                      }}
-                    />
-                  ) : (
-                    <p className="version-detail-placeholder">
-                      还没有版本。开始编辑或发给 AI 后，这里会逐步长成一棵版本树。
-                    </p>
-                  )}
-                </div>
-              </div>
-            </div>
+            <ProjectFilesConsole
+              projectRulesOpen={projectRulesOpen}
+              projectId={projectId}
+              projectRecordsPreparing={projectRecordsPreparing}
+              projectRecordsError={projectRecordsError}
+              projectRulesSavedNotice={projectRulesSavedNotice}
+              activeFileView={activeFileView}
+              runInProgress={runInProgress}
+              projectRulesEditorGeneration={projectRulesEditorGeneration}
+              projectRulesEditorRef={projectRulesEditorRef}
+              projectRulesSaveError={projectRulesSaveError}
+              projectRulesSaving={projectRulesSaving}
+              projectRulesCompositionActive={projectRulesCompositionActive}
+              versions={versions}
+              displayedVersions={displayedVersions}
+              consoleVersion={consoleVersion}
+              currentBasedOnVersionId={currentBasedOnVersionId}
+              consoleVersionParent={consoleVersionParent}
+              latestVersionId={latestVersionId}
+              viewingVersionId={viewingVersionId}
+              attachmentObjectUrls={attachmentObjectUrls}
+              toggleProjectRules={toggleProjectRules}
+              prepareProjectRecords={prepareProjectRecords}
+              viewFile={viewFile}
+              beginProjectRulesComposition={beginProjectRulesComposition}
+              finishProjectRulesComposition={finishProjectRulesComposition}
+              onProjectRulesChange={(content) => {
+                setProjectRulesEdited(true);
+                workspaceController?.updateProjectRules({
+                  content,
+                });
+              }}
+              restoreProjectRules={restoreProjectRules}
+              saveProjectRules={saveProjectRules}
+              setSelectedVersionId={setSelectedVersionId}
+              ensureAttachmentObjectUrl={ensureAttachmentObjectUrl}
+              openAttachmentPreview={openAttachmentPreview}
+              downloadAttachment={downloadAttachment}
+            />
           ) : null}
 
           {drawer === "handoff" ? (
@@ -8982,24 +7927,16 @@ export default function Workbench() {
             />
           ) : null}
         </div>
-        {drawer === "files" && consoleVersion ? (
-          <footer className="project-console-footer">
-            <button
-              className="project-console-primary"
-              type="button"
-              disabled={
-                runInProgress
-                || projectHydrating
-                || Boolean(projectLoadError)
-                || Boolean(workspaceIssue)
-                || viewTransitioning
-              }
-              onClick={() => void viewHistoryVersion(consoleVersion)}
-            >
-              <EyeIcon aria-hidden="true" size={16} weight="bold" />
-              在画布中预览
-            </button>
-          </footer>
+        {drawer === "files" ? (
+          <ProjectFilesFooter
+            consoleVersion={consoleVersion}
+            runInProgress={runInProgress}
+            projectHydrating={projectHydrating}
+            projectLoadError={projectLoadError}
+            workspaceIssue={workspaceIssue}
+            viewTransitioning={viewTransitioning}
+            viewHistoryVersion={viewHistoryVersion}
+          />
         ) : null}
         {drawer === "handoff" && activeRun ? (
           <HandoffFooter
