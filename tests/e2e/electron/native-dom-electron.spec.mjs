@@ -2686,6 +2686,69 @@ test("Electron rapid project switching and immediate close preserve the last nat
   }
 });
 
+test("Electron tab keyboard navigation manages focus and a persisted Start suppresses activePath restart", async () => {
+  test.setTimeout(180_000);
+  const fixture = createSourceFixture("workbench-tabs-restart.html");
+  const firstLaunch = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  let firstClosed = false;
+  let reopened = null;
+  try {
+    await loadedDiskFrame(firstLaunch.page, fixture.sourcePath, "list-item");
+    const tablist = firstLaunch.page.getByRole("tablist", { name: "已打开的 HTML" });
+    await expect(tablist.getByRole("tab")).toHaveCount(2);
+    await firstLaunch.page.getByRole("button", { name: "新标签页" }).click();
+    await expect(tablist.getByRole("tab")).toHaveCount(3);
+
+    const firstStart = tablist.getByRole("tab").nth(0);
+    const documentTab = tablist.getByRole("tab").nth(1);
+    const lastStart = tablist.getByRole("tab").nth(2);
+    await expect(lastStart).toHaveAttribute("aria-selected", "true");
+    await lastStart.focus();
+
+    await lastStart.press("ArrowLeft");
+    await expect(documentTab).toHaveAttribute("aria-selected", "true", { timeout: 60_000 });
+    await expect(documentTab).toBeFocused();
+    await loadedDiskFrame(firstLaunch.page, fixture.sourcePath, "list-item");
+    await documentTab.press("ArrowRight");
+    await expect(lastStart).toHaveAttribute("aria-selected", "true");
+    await expect(lastStart).toBeFocused();
+    await lastStart.press("Home");
+    await expect(firstStart).toHaveAttribute("aria-selected", "true");
+    await expect(firstStart).toBeFocused();
+    await firstStart.press("End");
+    await expect(lastStart).toHaveAttribute("aria-selected", "true");
+    await expect(lastStart).toBeFocused();
+
+    const tabsStatePath = path.join(firstLaunch.isolatedUserData, "workbench-tabs.json");
+    await expect.poll(() => {
+      try {
+        return JSON.parse(readFileSync(tabsStatePath, "utf8"));
+      } catch {
+        return null;
+      }
+    }).toMatchObject({ version: 1, activeTabId: null });
+
+    await closePageRootGracefully(firstLaunch.electronApp, firstLaunch.page);
+    firstClosed = true;
+    reopened = await launchPageRoot({ isolatedUserData: firstLaunch.isolatedUserData });
+    const reopenedTabs = reopened.page.getByRole("tablist", { name: "已打开的 HTML" });
+    await expect(reopenedTabs.getByRole("tab")).toHaveCount(2);
+    await expect(reopenedTabs.getByRole("tab").nth(0)).toHaveAttribute("aria-selected", "true");
+    await expect(reopened.page.locator("main.workbench")).toHaveAttribute("data-start-page", "true");
+    await expect(reopened.page.locator("main.workbench")).toHaveAttribute("data-project-state", "unbound");
+    await expect(reopenedTabs.getByRole("tab").nth(1)).not.toHaveText("HTML");
+  } finally {
+    if (reopened) {
+      await stopPageRoot(reopened.electronApp, reopened.isolatedUserData);
+    } else if (!firstClosed) {
+      await stopPageRoot(firstLaunch.electronApp, firstLaunch.isolatedUserData);
+    } else {
+      removeIsolatedUserData(firstLaunch.isolatedUserData);
+    }
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
+
 test("project resources drain edited rules before leaving", async () => {
   const fixture = createSourceFixture("project-resources.html");
   const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });

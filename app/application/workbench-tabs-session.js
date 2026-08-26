@@ -62,6 +62,7 @@ function frozenSnapshot({
 export class WorkbenchTabsSession {
   #listeners = new Set();
   #pendingPriorStatus = null;
+  #restoredDocumentTabIds = new Set();
   #snapshot = frozenSnapshot({
     revision: 0,
     tabs: [startTab()],
@@ -108,6 +109,9 @@ export class WorkbenchTabsSession {
     }
     const start = startTab();
     tabs.unshift(start);
+    this.#restoredDocumentTabIds = new Set(
+      tabs.filter((tab) => tab.kind === "document").map((tab) => tab.tabId),
+    );
     const requestedActive = String(source.activeTabId || "");
     const pendingTabId = tabs.some(
       (tab) => tab.kind === "document" && tab.tabId === requestedActive,
@@ -156,8 +160,10 @@ export class WorkbenchTabsSession {
       ? freezeTab({ ...tabs[existingIndex], title: tab.title, status: tab.status })
       : tab;
     if (existingIndex >= 0) tabs[existingIndex] = resolved;
-    else tabs.push(resolved);
-    const shouldFocus = focus || this.#snapshot.pendingTabId === resolved.tabId;
+    else if (tabs.length < MAX_TABS) tabs.push(resolved);
+    else return null;
+    this.#restoredDocumentTabIds.delete(resolved.tabId);
+    const shouldFocus = focus;
     return this.#publish({
       tabs,
       activeTabId: shouldFocus ? resolved.tabId : this.#snapshot.activeTabId,
@@ -225,6 +231,7 @@ export class WorkbenchTabsSession {
       !target || target.projectId !== projectId || target.documentId !== documentId
       || this.#snapshot.pendingTabId !== tabId
     ) return null;
+    this.#restoredDocumentTabIds.delete(tabId);
     this.#pendingPriorStatus = null;
     return this.#publish({
       ...this.#snapshot,
@@ -269,9 +276,58 @@ export class WorkbenchTabsSession {
     return changed ? this.#publish({ ...this.#snapshot, tabs }) : this.#snapshot;
   }
 
+  reconcileRegisteredProjects(projects) {
+    const registry = new Map();
+    for (const project of Array.isArray(projects) ? projects : []) {
+      if (!project || typeof project !== "object") continue;
+      const projectId = String(project.projectId || "");
+      const documentId = String(project.documentId || "");
+      if (!projectId || !documentId) continue;
+      registry.set(documentKey(projectId, documentId), project);
+    }
+    const missing = [];
+    let changed = false;
+    const tabs = this.#snapshot.tabs.flatMap((tab) => {
+      if (tab.kind !== "document" || !this.#restoredDocumentTabIds.has(tab.tabId)) {
+        return [tab];
+      }
+      const project = registry.get(documentKey(tab.projectId, tab.documentId));
+      if (!project || project.availability !== "ready") {
+        missing.push(tab);
+        this.#restoredDocumentTabIds.delete(tab.tabId);
+        changed = true;
+        return [];
+      }
+      const title = String(project.projectName || "").trim();
+      if (!title || title === tab.title) return [tab];
+      changed = true;
+      return [freezeTab({ ...tab, title })];
+    });
+    if (!changed) return Object.freeze({ snapshot: this.#snapshot, missing: Object.freeze([]) });
+    if (!tabs.some((tab) => tab.kind === "start")) tabs.unshift(startTab());
+    const activeStillExists = tabs.some((tab) => tab.tabId === this.#snapshot.activeTabId);
+    const activeTabId = activeStillExists
+      ? this.#snapshot.activeTabId
+      : tabs.find((tab) => tab.kind === "start")?.tabId || tabs[0].tabId;
+    const pendingTabId = tabs.some((tab) => tab.tabId === this.#snapshot.pendingTabId)
+      ? this.#snapshot.pendingTabId
+      : null;
+    const snapshot = this.#publish({
+      ...this.#snapshot,
+      tabs,
+      activeTabId,
+      pendingTabId,
+      mountedDocumentTabId: tabs.some((tab) => tab.tabId === this.#snapshot.mountedDocumentTabId)
+        ? this.#snapshot.mountedDocumentTabId
+        : null,
+    });
+    return Object.freeze({ snapshot, missing: Object.freeze(missing) });
+  }
+
   close(tabId) {
     const index = this.#snapshot.tabs.findIndex((tab) => tab.tabId === tabId);
     if (index < 0) return Object.freeze({ snapshot: this.#snapshot, nextTabId: null });
+    this.#restoredDocumentTabIds.delete(tabId);
     const tabs = this.#snapshot.tabs.filter((tab) => tab.tabId !== tabId);
     if (!tabs.length) tabs.push(startTab());
     const wasActive = this.#snapshot.activeTabId === tabId;
@@ -303,8 +359,26 @@ export class WorkbenchTabsSession {
         }))),
     });
   }
+
+  canAddTab() {
+    return this.#snapshot.tabs.length < MAX_TABS;
+  }
 }
 
 export function createWorkbenchTabsSession() {
   return new WorkbenchTabsSession();
+}
+
+export function reconcileWorkbenchTabsWhenReady({
+  session,
+  tabsPersistenceReady,
+  registeredProjectsReady,
+  registeredProjects,
+}) {
+  if (
+    !session
+    || !tabsPersistenceReady
+    || !registeredProjectsReady
+  ) return null;
+  return session.reconcileRegisteredProjects(registeredProjects);
 }

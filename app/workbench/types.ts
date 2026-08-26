@@ -152,6 +152,10 @@ export type DesktopProjectsApi = {
   openRecent: (sourcePath: string) => Promise<HtmlOpenResult>;
   forgetRecent?: (sourcePath: string) => Promise<{ sourcePath: string }>;
   acceptExternalOpen?: (requestId: string) => Promise<HtmlOpenResult>;
+  acknowledgeExternalOpen?: (requestId: string) => Promise<{
+    acknowledged: boolean;
+    requestId: string;
+  }>;
   commitPreparedHtmlOpen?: (payload: {
     requestId: string;
     action: "import-new" | "continue-current" | "open-managed";

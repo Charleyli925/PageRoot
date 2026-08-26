@@ -31,6 +31,7 @@ function initialSnapshot() {
     status: "idle",
     activeRequestId: null,
     queuedRequestId: null,
+    queuedRequestIds: Object.freeze([]),
     deferredRequestId: null,
     deferredSequence: 0,
     confirmation: null,
@@ -40,7 +41,7 @@ function initialSnapshot() {
 
 /**
  * Owns renderer-side external-file delivery. At most one request is opened at
- * a time; a newer OS request replaces only work that has not started yet.
+ * a time; later OS requests remain FIFO behind confirmations and deferrals.
  * Deferred requests stay here rather than leaking into Workbench's ordinary
  * project-picker retry state.
  */
@@ -51,7 +52,7 @@ export class ExternalFileOpenSession {
 
   #active = null;
 
-  #queued = null;
+  #queue = [];
 
   #deferred = null;
 
@@ -86,7 +87,7 @@ export class ExternalFileOpenSession {
         ? "opening"
         : this.#deferred
           ? "deferred"
-          : this.#queued
+          : this.#queue.length
             ? "queued"
             : this.#attention
               ? "attention"
@@ -94,7 +95,8 @@ export class ExternalFileOpenSession {
     this.#snapshot = Object.freeze({
       status,
       activeRequestId: this.#active?.requestId || null,
-      queuedRequestId: this.#queued?.requestId || null,
+      queuedRequestId: this.#queue[0]?.requestId || null,
+      queuedRequestIds: Object.freeze(this.#queue.map((request) => request.requestId)),
       deferredRequestId: this.#deferred?.requestId || null,
       deferredSequence: this.#deferredSequence,
       confirmation: this.#confirmation,
@@ -125,9 +127,8 @@ export class ExternalFileOpenSession {
     const drain = async () => {
       while (generation === this.#generation) {
         if (this.#awaitingConfirmation) break;
-        const request = this.#queued;
+        const request = this.#queue.shift() || null;
         if (!request) break;
-        this.#queued = null;
         this.#active = request;
         this.#emit();
 
@@ -135,7 +136,7 @@ export class ExternalFileOpenSession {
         try {
           result = await this.#execute?.(request, {
             isSuperseded: () => (
-              generation !== this.#generation || this.#queued !== null
+              generation !== this.#generation
             ),
           });
         } catch {
@@ -153,7 +154,7 @@ export class ExternalFileOpenSession {
         }
         this.#active = null;
         this.#confirmation = null;
-        if (result === "deferred" && !this.#queued) {
+        if (result === "deferred") {
           this.#deferred = request;
           this.#deferredSequence += 1;
           this.#sawSwitchBlocker = false;
@@ -166,7 +167,7 @@ export class ExternalFileOpenSession {
     const promise = drain().finally(() => {
       if (this.#drainPromise !== promise) return;
       this.#drainPromise = null;
-      if (this.#queued && !this.#deferred && !this.#awaitingConfirmation) {
+      if (this.#queue.length && !this.#deferred && !this.#awaitingConfirmation) {
         void this.#drain();
       } else {
         this.#emit();
@@ -182,19 +183,9 @@ export class ExternalFileOpenSession {
       return false;
     }
     this.#execute = execute;
-    // A newly delivered OS intent is newer than an earlier retry waiting for
-    // the editor or persistence drain to become safe. It also replaces a
-    // confirmation the user has not accepted yet.
-    this.#deferred = null;
-    this.#attention = null;
-    if (this.#awaitingConfirmation) {
-      this.#awaitingConfirmation = false;
-      this.#confirmation = null;
-      this.#active = null;
-    }
-    this.#queued = request;
+    this.#queue.push(request);
     this.#emit();
-    void this.#drain();
+    if (!this.#deferred && !this.#awaitingConfirmation) void this.#drain();
     return true;
   }
 
@@ -249,7 +240,7 @@ export class ExternalFileOpenSession {
   resume(execute) {
     if (!this.#deferred || typeof execute !== "function") return false;
     this.#execute = execute;
-    this.#queued = this.#deferred;
+    this.#queue.unshift(this.#deferred);
     this.#deferred = null;
     this.#emit();
     void this.#drain();
@@ -280,7 +271,7 @@ export class ExternalFileOpenSession {
     this.#generation += 1;
     this.#observer = null;
     this.#active = null;
-    this.#queued = null;
+    this.#queue = [];
     this.#deferred = null;
     this.#confirmation = null;
     this.#attention = null;

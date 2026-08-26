@@ -593,7 +593,7 @@ test("preload exposes explicit recent-record removal", async () => {
   ]);
 });
 
-test("preload accepts only an opaque main-process external-open request", async () => {
+test("preload accepts and acknowledges only an opaque main-process external-open request", async () => {
   const calls = [];
   const api = await loadPreload(async (...args) => {
     calls.push(args);
@@ -606,6 +606,11 @@ test("preload accepts only an opaque main-process external-open request", async 
   );
   assert.deepEqual(JSON.parse(JSON.stringify(calls[0])), [
     "html-projects:accept-external-open",
+    { requestId: "external_request_1" },
+  ]);
+  await api.acknowledgeExternalOpen("external_request_1");
+  assert.deepEqual(JSON.parse(JSON.stringify(calls[1])), [
+    "html-projects:ack-external-open",
     { requestId: "external_request_1" },
   ]);
 });

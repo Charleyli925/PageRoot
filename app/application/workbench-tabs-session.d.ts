@@ -26,7 +26,7 @@ export class WorkbenchTabsSession {
     title: string;
     status?: WorkbenchTabStatus;
     focus?: boolean;
-  }): WorkbenchTabsSnapshot;
+  }): WorkbenchTabsSnapshot | null;
   stageDocument(input: {
     projectId: string;
     documentId: string;
@@ -38,7 +38,18 @@ export class WorkbenchTabsSession {
   commitDocument(input: { tabId: string; projectId: string; documentId: string; title: string }): WorkbenchTabsSnapshot | null;
   cancelSwitch(tabId: string): WorkbenchTabsSnapshot;
   updateStatus(projectId: string, documentId: string, status: WorkbenchTabStatus): WorkbenchTabsSnapshot;
+  reconcileRegisteredProjects(projects: readonly unknown[]): Readonly<{
+    snapshot: WorkbenchTabsSnapshot;
+    missing: readonly WorkbenchTab[];
+  }>;
   close(tabId: string): Readonly<{ snapshot: WorkbenchTabsSnapshot; nextTabId: string | null }>;
+  canAddTab(): boolean;
   serialize(): Readonly<Record<string, unknown>>;
 }
 export function createWorkbenchTabsSession(): WorkbenchTabsSession;
+export function reconcileWorkbenchTabsWhenReady(input: {
+  session: WorkbenchTabsSession;
+  tabsPersistenceReady: boolean;
+  registeredProjectsReady: boolean;
+  registeredProjects: readonly unknown[];
+}): ReturnType<WorkbenchTabsSession["reconcileRegisteredProjects"]> | null;

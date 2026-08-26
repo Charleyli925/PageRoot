@@ -1019,7 +1019,13 @@ export class ProjectWorkflow {
           return inAppBlock("当前撤销或重做没有安全完成，已取消关闭。");
         }
       }
-      if (!this.#isHistoryView() && !this.#runSession.activeLocked) {
+      const canvasIsMounted = typeof this.#canvasPort.isMounted !== "function"
+        || this.#canvasPort.isMounted();
+      if (
+        !this.#isHistoryView()
+        && !this.#runSession.activeLocked
+        && canvasIsMounted
+      ) {
         const frozen = this.#canvasPort.freeze();
         if (!frozen) {
           return inAppBlock("编辑画布尚未就绪，已取消关闭以避免丢失文字草稿。");
@@ -1988,7 +1994,7 @@ export class ProjectWorkflow {
       },
       drain: async () => {
         if (this.#openConfirmation) {
-          this.cancelExternalOpen({
+          await this.cancelExternalOpen({
             requestId: this.#openConfirmation.requestId,
           });
         }
@@ -2279,10 +2285,13 @@ export class ProjectWorkflow {
     }
     let canvasFrozen = false;
     let applied = false;
+    const canvasIsMounted = typeof this.#canvasPort.isMounted !== "function"
+      || this.#canvasPort.isMounted();
     if (
       this.#projectSession.sourcePath
       && !this.projectLoadError
       && !this.#isHistoryView()
+      && canvasIsMounted
     ) {
       const cutoff = this.#documentSession.editRevision;
       const frozen = this.#canvasPort.freeze(
@@ -2385,6 +2394,7 @@ export class ProjectWorkflow {
           requestId: request.requestId,
           reason,
         });
+        await this.#ackExternalOpen(request.requestId);
         return "complete";
       }
       const opened = await this.#projectOpenPort.acceptExternal(request.requestId);
@@ -2411,6 +2421,7 @@ export class ProjectWorkflow {
       })) {
         throw new Error("无法安排外部 HTML 的安全切换。");
       }
+      await this.#ackExternalOpen(request.requestId);
     } catch (cause) {
       if (!isSuperseded()) {
         this.#emit({
@@ -2424,6 +2435,7 @@ export class ProjectWorkflow {
             "文件可能已移动、暂时不可读，或不是完整的 HTML 页面；当前项目仍保持打开。",
           ),
         });
+        await this.#ackExternalOpen(request.requestId);
       }
     }
     return "complete";
@@ -2467,6 +2479,25 @@ export class ProjectWorkflow {
     void this.#projectOpenPort.cancelPrepared(requestId);
   }
 
+  async #ackExternalOpen(requestId) {
+    if (typeof this.#projectOpenPort.ackExternal !== "function") return true;
+    try {
+      await this.#projectOpenPort.ackExternal(requestId);
+      return true;
+    } catch (cause) {
+      this.#emit({
+        type: "external-open-ack-failed",
+        requestId,
+        reason: projectErrorMessage(
+          this.#codecs,
+          cause,
+          "外部 HTML 已处理，但下一个打开请求尚未解锁。",
+        ),
+      });
+      return false;
+    }
+  }
+
   setExternalOpenDeleteOriginal({ requestId, deleteOriginal } = {}) {
     const confirmation = this.#openConfirmation;
     if (!confirmation || confirmation.requestId !== String(requestId || "")) {
@@ -2486,12 +2517,19 @@ export class ProjectWorkflow {
     return succeeded({ deleteOriginal: deleteOriginal === true });
   }
 
-  cancelExternalOpen({ requestId } = {}) {
+  async cancelExternalOpen({ requestId } = {}) {
     const confirmation = this.#openConfirmation;
     if (!confirmation || confirmation.requestId !== String(requestId || "")) {
       return stale({ requestId: String(requestId || "") });
     }
     this.#cancelPreparedIntent(confirmation.requestId);
+    const acknowledged = await this.#ackExternalOpen(confirmation.requestId);
+    if (!acknowledged) {
+      return rejected(
+        "EXTERNAL_OPEN_ACK_REJECTED",
+        "这次打开已取消，但下一个 Finder 请求尚未解锁。",
+      );
+    }
     this.#externalFileOpenSession.cancelConfirmation(confirmation.requestId);
     this.#clearOpenConfirmation();
     return succeeded({ canceled: true, requestId: confirmation.requestId });
@@ -2629,6 +2667,7 @@ export class ProjectWorkflow {
         );
         disposition = finalized?.disposition || "kept";
       }
+      await this.#ackExternalOpen(confirmation.requestId);
       this.#externalFileOpenSession.completeConfirmation(confirmation.requestId);
       this.#clearOpenConfirmation();
       this.#emit({

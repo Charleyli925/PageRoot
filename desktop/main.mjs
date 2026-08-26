@@ -238,6 +238,7 @@ const PROJECT_CHANNELS = Object.freeze({
   openRecent: "html-projects:open-recent",
   forgetRecent: "html-projects:forget-recent",
   acceptExternalOpen: "html-projects:accept-external-open",
+  acknowledgeExternalOpen: "html-projects:ack-external-open",
   commitPreparedHtmlOpen: "html-projects:commit-prepared-open",
   cancelPreparedHtmlOpen: "html-projects:cancel-prepared-open",
   finalizePreparedHtmlOpen: "html-projects:finalize-prepared-open",
@@ -1247,24 +1248,53 @@ async function acceptExternalFileOpen(payload) {
       "外部 HTML 打开请求无效。",
     );
   }
-  const request = externalFileOpenMailbox.consume(payload.requestId);
+  const request = externalFileOpenMailbox.peek();
   if (!request) {
     throw new ProjectFileError(
       "EXTERNAL_OPEN_REQUEST_EXPIRED",
       "这次外部打开请求已经失效，请从 QoderWork 再点一次 PageRoot。",
     );
   }
-  try {
-    return await projectOpenQueue.run(() => openExternalFileRequest(request));
-  } finally {
-    const next = externalFileOpenMailbox.peek();
-    if (next && rendererHasLoaded && mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send(
-        APP_CHANNELS.externalOpenRequested,
-        publicMailboxRequest(next),
-      );
-    }
+  if (request.requestId !== payload.requestId) {
+    throw new ProjectFileError(
+      "EXTERNAL_OPEN_REQUEST_OUT_OF_ORDER",
+      "请先完成前一个外部 HTML 打开请求。",
+    );
   }
+  const begun = externalFileOpenMailbox.begin(
+    request.requestId,
+    (next) => projectOpenQueue.run(() => openExternalFileRequest(next)),
+  );
+  if (!begun) {
+    throw new ProjectFileError(
+      "EXTERNAL_OPEN_REQUEST_BUSY",
+      "前一个外部 HTML 仍在等待处理。",
+    );
+  }
+  return begun;
+}
+
+function acknowledgeExternalFileOpen(payload) {
+  assertExactPayload(payload, ["requestId"], {
+    code: "INVALID_EXTERNAL_OPEN_ACK",
+    message: "外部 HTML 打开回执无效。",
+  });
+  const requestId = String(payload.requestId || "");
+  const consumed = externalFileOpenMailbox.acknowledge(requestId);
+  if (!consumed) {
+    throw new ProjectFileError(
+      "EXTERNAL_OPEN_ACK_OUT_OF_ORDER",
+      "外部 HTML 打开回执与队首请求不一致。",
+    );
+  }
+  const next = externalFileOpenMailbox.peek();
+  if (next && rendererHasLoaded && mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send(
+      APP_CHANNELS.externalOpenRequested,
+      publicMailboxRequest(next),
+    );
+  }
+  return { acknowledged: true, requestId };
 }
 
 async function currentActivePath() {
@@ -3383,6 +3413,10 @@ function registerProjectIpc() {
   ipcMain.handle(
     PROJECT_CHANNELS.acceptExternalOpen,
     trustedProject(acceptExternalFileOpen, "external_open"),
+  );
+  ipcMain.handle(
+    PROJECT_CHANNELS.acknowledgeExternalOpen,
+    trustedProject(acknowledgeExternalFileOpen, "external_open_ack"),
   );
   ipcMain.handle(
     PROJECT_CHANNELS.commitPreparedHtmlOpen,

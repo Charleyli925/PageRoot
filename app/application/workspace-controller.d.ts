@@ -450,7 +450,7 @@ export class WorkspaceController {
     action?: string;
     deleteOriginal?: boolean;
   }): Promise<ProjectWorkflowOutcome>;
-  cancelExternalOpen(input?: { requestId?: string }): ProjectWorkflowOutcome;
+  cancelExternalOpen(input?: { requestId?: string }): Promise<ProjectWorkflowOutcome>;
   setExternalOpenDeleteOriginal(input?: {
     requestId?: string;
     deleteOriginal?: boolean;

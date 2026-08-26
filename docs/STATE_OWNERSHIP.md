@@ -3,7 +3,7 @@
 | Mutable fact | Sole owner | Durable authority | Consumers |
 | --- | --- | --- | --- |
 | Open source locator before first durable action, registered identity, renderer generation and late-query fence | Renderer `ProjectSession` | active-file record before registration; project registry and `project.json` afterwards | Application workflows and the Controller aggregate snapshot |
-| Latest unaccepted OS/QoderWork HTML-open request, committed-exit one-shot handoff, plus FIFO active/recent-project transitions | Main-process external-file-open mailbox and `ProjectOpenQueue` | in-memory for the current process plus one private, validated `userData` handoff record after close commits; no renderer-supplied path authority | preload lifecycle delivery, startup adoption and trusted project IPC |
+| FIFO OS/QoderWork HTML-open requests, the single renderer-delivered head awaiting explicit acknowledgement, committed-exit handoff, plus active/recent-project transitions | Main-process external-file-open mailbox and `ProjectOpenQueue` | in-memory for the current process plus one private, validated `userData` handoff record after close commits; no renderer-supplied path authority | preload lifecycle delivery, startup adoption and trusted project IPC; Main never publishes the next head before renderer accept/cancel/reject acknowledgement |
 | Prepared A/B/C open intent, commit receipt and one-shot original-file trash disposition | Main-process `desktop/prepared-html-open.mjs` store | none; process memory only; delete consent is never persisted | trusted project IPC and `ProjectWorkflow` commit/finalize/rollback |
 | Open-confirmation prompt, C-class delete checkbox and busy/retry projection | Renderer `ProjectWorkflow` | none; reset per request and cancelled on close | Workbench `ExternalHtmlOpenDialog` |
 | External HTML request IDs, active/queued/deferred renderer delivery, blocker-transition/manual retry policy and unaccepted-result fence | Renderer `ExternalFileOpenSession` | none; bounded in-memory state only | `ProjectWorkflow` composition and Workbench presentation |
@@ -12,7 +12,7 @@
 | Canonical external-source path → unique `projectId` lookup, first-import Hash relation, and read-only A/B/C open classification | `ProjectFileRepository` | Registry `importSourceKey` / `importSourceSha256` pair plus the bound project's current active Working Copy | `/project/open-classification`, `/project/ensure` and Desktop Prepared Intent |
 | Registry project-catalog membership, availability and validated registered-project OpenTarget resolution | `ProjectFileRepository` Registry reader | Registry `projectId → registeredProjectRootPath` records plus validated per-project metadata; Desktop Recent may rank but never add/remove/authorize a member | read-only catalog route, `ProjectWorkflow` projectId open command and Workbench project list |
 | Runtime Bridge/Session/workflow composition, aggregate-observer lifecycle, registration operation identity, single-flight, stale-result fence and cross-Session publication sequence | `createRuntimeWorkspaceController()` and `WorkspaceController` | none; the factory creates the one fact-owner set and the Controller publishes only frozen aggregate projections through existing Project, Document, Comment, Draft, Version and SourceHistory owners | Workbench aggregate-snapshot subscription, Controller commands and presentation-event adapter |
-| Browser-workbench tab order, active/pending tab, mounted content-outlet tab, runtime-owner tab identity and lightweight status/title projection | Renderer `WorkbenchTabsSession`; `WorkbenchTabsWorkflow` alone coordinates activation | validated `workbench-tabs.json` stores only `tabId + projectId + documentId` and the active document tab; no path, HTML, Hash, Request, Candidate, Version or Conversation authority | TabBar, StartPage and global project sidebar; document activation delegates to the existing `ProjectWorkflow` switch drain and commits only after Controller identity publication |
+| Browser-workbench tab order, active/pending tab, mounted content-outlet tab, runtime-owner tab identity and lightweight status/title projection | Renderer `WorkbenchTabsSession`; `WorkbenchTabsWorkflow` alone coordinates activation/close | validated `workbench-tabs.json` stores only `tabId + projectId + documentId` and the active document tab; `activeTabId: null` authoritatively means Start; no path, title, HTML, Hash, Request, Candidate, Version or Conversation authority | TabBar, StartPage and global project sidebar; document activation delegates to existing `ProjectWorkflow`, mounts only a post-open Controller identity, and keeps the operation locked through hydration/Canvas verification |
 | Project hydration generation and load outcome, switch/open operation, accepted-result execution, close request identity, project-switch publication, Prepared Intent commit after confirmation, and the unified managed-source prepare/commit handoff for Candidate promotion, historical Working Copy continuation and Registry opens | Renderer `ProjectWorkflow`, composed by `WorkspaceController` | none; it publishes through existing Session owners and trusted ProjectOpen/Canvas ports | Workbench commands and presentation-event adapter |
 | Durable source filename transaction, pending operation and active/recent path rebase | Desktop source-rename transaction | active-file `pendingRename` / `lastRename`, then filesystem path | trusted desktop rename port and Bridge relink |
 | Current active managed Working Copy restart cache | Main `activeManagedLocator` in the private active-file record | none; non-authoritative, fail-closed cache of the last verified identity tuple and path. Registry plus project metadata remain the only write authority. Missing cache never guesses by name or Hash | startup `getActiveProject`, Finder locator reconcile and trusted `reconcileActiveManagedSource` IPC |
@@ -159,11 +159,14 @@ Rules:
 - A tab is presentation and navigation, never a second Workspace. The renderer
   creates exactly one runtime `WorkspaceController`. `WorkbenchTabsWorkflow`
   asks the existing `ProjectWorkflow.openProject(kind=registered)` to run its
-  canonical `prepareSwitch`/drain/Canvas fence, then commits the pending tab only
-  after the aggregate Project identity matches. Start tabs unmount the document
-  content outlet after a switch drain while retaining `runtimeOwnerTabId`, so
-  close/quit obligations remain owned by the same Controller. Inactive tabs keep
-  no contenteditable, Selection or IME DOM.
+  canonical `prepareSwitch`/drain/Canvas fence, rejects pre-open matching
+  identity, then mounts only a newer aggregate Project epoch. The operation
+  remains locked until hydration, accepted-result FIFO and Canvas verification
+  settle. Start activation calls the same canonical `prepareSwitch`; only then
+  does it unmount the document outlet while retaining `runtimeOwnerTabId`, so
+  close/quit obligations remain owned by the same Controller. Close and activate
+  are mutually exclusive. Inactive tabs keep no contenteditable, Selection or
+  IME DOM.
 - `RunSession` owns the one in-memory submission lifecycle. `preparing` blocks
   duplicate intent and drain without freezing the current canvas; `frozen`
   blocks edits until the Request is known; `uncertain` preserves a current

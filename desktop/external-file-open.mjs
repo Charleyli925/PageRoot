@@ -257,6 +257,7 @@ export function createExternalFileOpenMailbox({
 } = {}) {
   const pending = [];
   let activationTail = Promise.resolve();
+  let inFlight = null;
 
   const consume = (requestId) => {
     if (
@@ -284,6 +285,25 @@ export function createExternalFileOpenMailbox({
     },
     size() {
       return pending.length;
+    },
+    begin(requestId, activate) {
+      const request = pending[0] || null;
+      if (!request || request.requestId !== requestId || typeof activate !== "function") {
+        return null;
+      }
+      if (inFlight?.requestId === requestId) return inFlight.promise;
+      if (inFlight) return null;
+      const promise = activationTail.then(() => activate(request));
+      activationTail = promise.catch(() => undefined);
+      inFlight = Object.freeze({ requestId, promise });
+      return promise;
+    },
+    acknowledge(requestId) {
+      if (inFlight && inFlight.requestId !== requestId) return null;
+      const request = consume(requestId);
+      if (!request) return null;
+      inFlight = null;
+      return request;
     },
     consume,
     accept(requestId, activate) {

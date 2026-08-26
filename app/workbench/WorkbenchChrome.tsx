@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import {
   CaretRightIcon,
   FileHtmlIcon,
@@ -10,6 +11,19 @@ import {
 } from "@phosphor-icons/react";
 import type { WorkbenchTab, WorkbenchTabsSnapshot } from "../application/workbench-tabs-session.js";
 import type { RecentProject, RegisteredProject } from "./types";
+
+export function nextWorkbenchTabIndex(
+  key: string,
+  currentIndex: number,
+  tabCount: number,
+): number | null {
+  if (tabCount <= 0 || currentIndex < 0 || currentIndex >= tabCount) return null;
+  if (key === "ArrowLeft") return (currentIndex - 1 + tabCount) % tabCount;
+  if (key === "ArrowRight") return (currentIndex + 1) % tabCount;
+  if (key === "Home") return 0;
+  if (key === "End") return tabCount - 1;
+  return null;
+}
 
 export function WorkbenchTabBar({
   snapshot,
@@ -22,9 +36,23 @@ export function WorkbenchTabBar({
   onClose: (tab: WorkbenchTab) => void;
   onNew: () => void;
 }) {
+  const tabButtonsRef = useRef(new Map<string, HTMLButtonElement>());
+  const pendingKeyboardFocusRef = useRef<string | null>(null);
+  useEffect(() => {
+    const pending = pendingKeyboardFocusRef.current;
+    if (!pending || pending !== snapshot.activeTabId) return;
+    pendingKeyboardFocusRef.current = null;
+    tabButtonsRef.current.get(pending)?.focus();
+  }, [snapshot.activeTabId]);
+
   return (
     <nav className="workbench-tabbar" aria-label="已打开的 HTML">
-      <div className="workbench-tablist" role="tablist" aria-orientation="horizontal">
+      <div
+        className="workbench-tablist"
+        role="tablist"
+        aria-label="已打开的 HTML"
+        aria-orientation="horizontal"
+      >
         {snapshot.tabs.map((tab) => {
           const selected = snapshot.activeTabId === tab.tabId;
           const pending = snapshot.pendingTabId === tab.tabId;
@@ -37,12 +65,33 @@ export function WorkbenchTabBar({
               key={tab.tabId}
             >
               <button
+                id={`workbench-tab-${tab.tabId}`}
                 type="button"
                 role="tab"
                 aria-selected={selected}
                 aria-controls="workbench-content-outlet"
                 tabIndex={selected ? 0 : -1}
+                ref={(element) => {
+                  if (element) tabButtonsRef.current.set(tab.tabId, element);
+                  else tabButtonsRef.current.delete(tab.tabId);
+                }}
                 onClick={() => onSelect(tab)}
+                onKeyDown={(event) => {
+                  if (event.altKey || event.ctrlKey || event.metaKey) return;
+                  const currentIndex = snapshot.tabs.findIndex(
+                    (candidate) => candidate.tabId === tab.tabId,
+                  );
+                  const targetIndex = nextWorkbenchTabIndex(
+                    event.key,
+                    currentIndex,
+                    snapshot.tabs.length,
+                  );
+                  if (targetIndex === null) return;
+                  event.preventDefault();
+                  const target = snapshot.tabs[targetIndex];
+                  pendingKeyboardFocusRef.current = target.tabId;
+                  onSelect(target);
+                }}
               >
                 <span className="workbench-tab-status" aria-hidden="true" />
                 <span>{tab.title}</span>
@@ -85,18 +134,25 @@ export function WorkbenchStartToolbar({ onOpenSidebar }: { onOpenSidebar: () => 
 }
 
 export function WorkbenchStartPage({
+  activeTabId,
   recentProjects,
   onOpenLocal,
   onOpenRecent,
   onOpenSidebar,
 }: {
+  activeTabId: string;
   recentProjects: RecentProject[];
   onOpenLocal: () => void;
   onOpenRecent: (sourcePath: string) => void;
   onOpenSidebar: () => void;
 }) {
   return (
-    <section id="workbench-content-outlet" className="workbench-start-page" aria-labelledby="workbench-start-title">
+    <section
+      id="workbench-content-outlet"
+      className="workbench-start-page"
+      role="tabpanel"
+      aria-labelledby={`workbench-tab-${activeTabId}`}
+    >
       <div className="workbench-start-card">
         <span className="workbench-start-icon"><FileHtmlIcon aria-hidden="true" size={28} weight="duotone" /></span>
         <h1 id="workbench-start-title">打开 HTML</h1>

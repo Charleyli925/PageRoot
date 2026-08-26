@@ -266,9 +266,9 @@ services.
 | --- | --- |
 | Bridge routes, timeouts and structured outcomes | `app/application/bridge-client.js` |
 | Runtime Bridge/Session/workflow composition, aggregate frozen snapshot and application event stream | `createRuntimeWorkspaceController()` and `WorkspaceController` in `app/application/workspace-controller.js` |
-| Browser-workbench tab presentation and safe activation | `app/application/workbench-tabs-session.js` owns order/active/pending/mounted/runtime-owner projection; `app/application/workbench-tabs-workflow.js` delegates document switches to the one `WorkspaceController`/`ProjectWorkflow` and confirms identity before commit; `app/workbench/WorkbenchChrome.tsx` is presentation only |
+| Browser-workbench tab presentation and safe activation | `app/application/workbench-tabs-session.js` owns bounded order/active/pending/mounted/runtime-owner projection and Registry-title reconciliation; `app/application/workbench-tabs-workflow.js` serializes activation/close, delegates to the one `WorkspaceController`/`ProjectWorkflow`, rejects pre-open identity, mounts the newer epoch, then waits for hydration/Canvas settlement; `app/workbench/WorkbenchChrome.tsx` is presentation only |
 | Open/registered project identity, session generation and late-query fencing | `app/application/project-session.js` |
-| External OS/QoderWork HTML-open delivery, opaque request deduplication, read-only A/B/C classification, Prepared Intent, committed-exit one-shot handoff, cold-start native failure presentation from stable product codes, whole project-open transition ordering, monotonic deferred-transition notification, blocker-gated/manual safe-switch retry, accepted-result FIFO and final renderer fence | `desktop/external-file-open.mjs`, `desktop/prepared-html-open.mjs`, `desktop/project-open-queue.mjs`, `app/application/external-file-open-session.js`, `app/application/project-application-session.js` |
+| External OS/QoderWork HTML-open FIFO delivery with explicit renderer acknowledgement, opaque request deduplication, read-only A/B/C classification, Prepared Intent, committed-exit one-shot handoff, cold-start native failure presentation from stable product codes, whole project-open transition ordering, confirmation/deferred head retention, blocker-gated/manual safe-switch retry, accepted-result FIFO and final renderer fence | `desktop/external-file-open.mjs`, `desktop/prepared-html-open.mjs`, `desktop/project-open-queue.mjs`, `app/application/external-file-open-session.js`, `app/application/project-application-session.js` |
 | First-open and already-imported confirmation prompt | `app/workbench/ExternalHtmlOpenDialog.tsx`, projected from `ProjectWorkflow` |
 | Current source bytes, Hash, revisions, persistence projection, source-write single flight and Canvas authority generation | `app/application/document-session.js` |
 | Renderer draft revision, pending operations and reconciliation | `app/application/draft-session.js` |
@@ -355,9 +355,12 @@ strict version-1 schema contains only tab IDs and durable `projectId +
 documentId` pairs; titles are refreshed from the Registry projection after
 open. It never persists source paths, HTML, Hashes or AI authority. Writes use
 same-directory temporary creation plus atomic rename. `html-projects.json`
-continues to own `activePath` compatibility, and restoration treats a stored
-active document as pending until Registry open and Controller identity
-publication succeed.
+continues to own `activePath` compatibility. Any valid tabs record suppresses
+that compatibility startup: `activeTabId: null` restores Start, while a stored
+active document remains pending until Registry open, a newer Controller epoch,
+hydration and Canvas verification succeed. Registry-title/missing-item
+reconciliation waits for both tabs and catalog readiness regardless of arrival
+order; missing items are removed with an actionable Finder recovery notice.
 
 Direct edits form ordered revisions and are written through a single queue. Every write checks the expected source Hash, uses a same-directory temporary file and atomic replacement, then rereads the result. External modification causes a fail-closed conflict.
 

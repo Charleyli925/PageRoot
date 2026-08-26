@@ -15,6 +15,7 @@ function snapshot(overrides = {}) {
     status: "idle",
     activeRequestId: null,
     queuedRequestId: null,
+    queuedRequestIds: [],
     deferredRequestId: null,
     deferredSequence: 0,
     confirmation: null,
@@ -23,7 +24,7 @@ function snapshot(overrides = {}) {
   };
 }
 
-test("external file session serializes delivery and lets the newest queued request win", async () => {
+test("external file session preserves every queued request in FIFO order", async () => {
   const session = new ExternalFileOpenSession();
   let releaseFirst;
   const firstReleased = new Promise((resolve) => {
@@ -43,7 +44,7 @@ test("external file session serializes delivery and lets the newest queued reque
     if (value.requestId === "external_first") {
       markFirstStarted();
       await firstReleased;
-      assert.equal(isSuperseded(), true);
+      assert.equal(isSuperseded(), false);
     }
     order.push(`finish:${value.requestId}`);
     if (value.requestId === "external_latest") markLatestFinished();
@@ -57,7 +58,8 @@ test("external file session serializes delivery and lets the newest queued reque
   assert.deepEqual(session.snapshot, snapshot({
     status: "opening",
     activeRequestId: "external_first",
-    queuedRequestId: "external_latest",
+    queuedRequestId: "external_second",
+    queuedRequestIds: ["external_second", "external_latest"],
   }));
 
   releaseFirst();
@@ -66,6 +68,8 @@ test("external file session serializes delivery and lets the newest queued reque
   assert.deepEqual(order, [
     "start:external_first",
     "finish:external_first",
+    "start:external_second",
+    "finish:external_second",
     "start:external_latest",
     "finish:external_latest",
   ]);
@@ -169,16 +173,20 @@ test("external file session resumes only after an observed switch blocker clears
   assert.equal(session.snapshot.status, "idle");
 });
 
-test("a newer external request supersedes a deferred request before it resumes", async () => {
+test("a newer external request waits behind a deferred request", async () => {
   const session = new ExternalFileOpenSession();
   const calls = [];
   let finishSecond;
   const secondFinished = new Promise((resolve) => {
     finishSecond = resolve;
   });
+  let firstAttempts = 0;
   const execute = async (value) => {
     calls.push(value.requestId);
-    if (value.requestId === "external_first") return "deferred";
+    if (value.requestId === "external_first") {
+      firstAttempts += 1;
+      return firstAttempts === 1 ? "deferred" : "complete";
+    }
     finishSecond();
     return "complete";
   };
@@ -187,9 +195,14 @@ test("a newer external request supersedes a deferred request before it resumes",
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(session.snapshot.status, "deferred");
   assert.equal(session.enqueue(request("second"), execute), true);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(calls, ["external_first"]);
+  assert.equal(session.snapshot.deferredRequestId, "external_first");
+  assert.equal(session.snapshot.queuedRequestId, "external_second");
+  assert.equal(session.resume(execute), true);
   await secondFinished;
   await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual(calls, ["external_first", "external_second"]);
+  assert.deepEqual(calls, ["external_first", "external_first", "external_second"]);
   assert.equal(session.snapshot.status, "idle");
 });
 
@@ -208,7 +221,7 @@ test("a successful active request remains publishable when its queued successor 
     if (value.requestId === "external_first") {
       markFirstStarted();
       await firstReleased;
-      assert.equal(isSuperseded(), true);
+      assert.equal(isSuperseded(), false);
       // The Workbench may publish this already-accepted project even though a
       // newer request is queued. That successor can fail without making the
       // renderer diverge from the main-process active/recent source.
@@ -229,7 +242,7 @@ test("a successful active request remains publishable when its queued successor 
   assert.equal(session.snapshot.status, "idle");
 });
 
-test("a newer OS request replaces an unanswered confirmation and resets its facts", async () => {
+test("a newer OS request waits behind an unanswered confirmation", async () => {
   const session = new ExternalFileOpenSession();
   const first = {
     requestId: "external_first",
@@ -261,10 +274,13 @@ test("a newer OS request replaces an unanswered confirmation and resets its fact
   assert.equal(session.enqueue(second, execute), true);
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(session.snapshot.status, "awaiting-confirmation");
+  assert.equal(session.snapshot.activeRequestId, "external_first");
+  assert.equal(session.snapshot.queuedRequestId, "external_second");
+  assert.equal(session.snapshot.confirmation.sourceFileName, "first.html");
+  assert.equal(session.cancelConfirmation("external_first"), true);
+  await new Promise((resolve) => setImmediate(resolve));
   assert.equal(session.snapshot.activeRequestId, "external_second");
   assert.equal(session.snapshot.confirmation.classification, "known-external");
   assert.equal(session.snapshot.confirmation.sourceFileName, "second.html");
-  assert.equal(session.cancelConfirmation("external_first"), false);
   assert.equal(session.cancelConfirmation("external_second"), true);
-  assert.equal(session.snapshot.status, "idle");
 });

@@ -168,6 +168,35 @@ test("external open mailbox preserves every opaque request in FIFO order", () =>
   assert.equal(mailbox.consume(second.requestId), null);
 });
 
+test("external open mailbox holds its head until the renderer explicitly acknowledges it", async () => {
+  let nextId = 0;
+  const mailbox = createExternalFileOpenMailbox({
+    createRequestId: () => `external_${++nextId}`,
+    platform: "darwin",
+  });
+  const first = mailbox.publish("/Users/demo/first.html");
+  const second = mailbox.publish("/Users/demo/second.html");
+  let opens = 0;
+  const opening = mailbox.begin(first.requestId, async () => {
+    opens += 1;
+    return { openKind: "confirmation", requestId: first.requestId };
+  });
+  assert.ok(opening);
+  assert.equal(mailbox.begin(second.requestId, async () => null), null);
+  assert.deepEqual(await opening, { openKind: "confirmation", requestId: first.requestId });
+  assert.equal(opens, 1);
+  assert.deepEqual(mailbox.peek(), first, "preparing a confirmation must not consume the head");
+  assert.deepEqual(
+    await mailbox.begin(first.requestId, async () => { opens += 1; }),
+    { openKind: "confirmation", requestId: first.requestId },
+    "a renderer retry reuses the in-flight result",
+  );
+  assert.equal(opens, 1);
+  assert.equal(mailbox.acknowledge(second.requestId), null);
+  assert.deepEqual(mailbox.acknowledge(first.requestId), first);
+  assert.deepEqual(mailbox.peek(), second);
+});
+
 test("external open mailbox serializes accepted active-project mutations", async () => {
   let nextId = 0;
   const mailbox = createExternalFileOpenMailbox({

@@ -25,6 +25,7 @@ const channels = Object.freeze({
   openRecent: "html-projects:open-recent",
   forgetRecent: "html-projects:forget-recent",
   acceptExternalOpen: "html-projects:accept-external-open",
+  acknowledgeExternalOpen: "html-projects:ack-external-open",
   commitPreparedHtmlOpen: "html-projects:commit-prepared-open",
   cancelPreparedHtmlOpen: "html-projects:cancel-prepared-open",
   finalizePreparedHtmlOpen: "html-projects:finalize-prepared-open",
@@ -164,6 +165,10 @@ const projectsApi = Object.freeze({
   forgetRecent: (sourcePath) => invokeProject(channels.forgetRecent, sourcePath),
   acceptExternalOpen: (requestId) => invokeProject(
     channels.acceptExternalOpen,
+    { requestId },
+  ),
+  acknowledgeExternalOpen: (requestId) => invokeProject(
+    channels.acknowledgeExternalOpen,
     { requestId },
   ),
   commitPreparedHtmlOpen: (payload) => invokeProject(

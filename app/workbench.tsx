@@ -107,6 +107,7 @@ import type { RunOperationKind, RunSessionSnapshot } from "./application/run-ses
 import type { VersionSessionSnapshot } from "./application/version-session.js";
 import {
   createWorkbenchTabsSession,
+  reconcileWorkbenchTabsWhenReady,
   type WorkbenchTab,
 } from "./application/workbench-tabs-session.js";
 import { WorkbenchTabsWorkflow } from "./application/workbench-tabs-workflow.js";
@@ -303,6 +304,7 @@ const INITIAL_EXTERNAL_FILE_OPEN_SNAPSHOT = {
   status: "idle" as const,
   activeRequestId: null,
   queuedRequestId: null,
+  queuedRequestIds: [],
   deferredRequestId: null,
   deferredSequence: 0,
   confirmation: null,
@@ -451,7 +453,9 @@ export default function Workbench() {
   const workbenchTabsWorkflowRef = useRef<WorkbenchTabsWorkflow | null>(null);
   const tabsHydratedRef = useRef(false);
   const tabsStateControlsStartupRef = useRef(false);
+  const restoredPendingTabIdRef = useRef("");
   const restoredTabOpeningRef = useRef("");
+  const restoredCatalogRequestedRef = useRef(false);
   const lastBoundDocumentRef = useRef("");
   const startPageRequestedRef = useRef(true);
   const focusNextOpenedDocumentRef = useRef(false);
@@ -655,6 +659,7 @@ export default function Workbench() {
   const [fileRenameError, setFileRenameError] = useState("");
   const [recentProjects, setRecentProjects] = useState<RecentProject[]>([]);
   const [registeredProjects, setRegisteredProjects] = useState<RegisteredProject[]>([]);
+  const [registeredProjectsReady, setRegisteredProjectsReady] = useState(false);
   const [recentProjectsError, setRecentProjectsError] = useState("");
   const [selection, setSelection] = useState<HtmlCanvasSelection | null>(null);
   const commentSnapshot = (
@@ -1147,6 +1152,11 @@ export default function Workbench() {
               if (!accept) throw new Error("当前 PageRoot 版本缺少外部文件打开通道。");
               return accept(requestId);
             },
+            ackExternal: async (requestId: string) => {
+              const acknowledge = window.htmlAIProjects?.acknowledgeExternalOpen;
+              if (!acknowledge) return { acknowledged: true, requestId };
+              return acknowledge(requestId);
+            },
             commitPrepared: async (payload: {
               requestId: string;
               action: "import-new" | "continue-current" | "open-managed";
@@ -1361,7 +1371,11 @@ export default function Workbench() {
         if (stored) {
           storedStatePresent = true;
           session.hydrate(stored);
-          tabsStateControlsStartupRef.current = Boolean(session.snapshot.pendingTabId);
+          // A valid tabs record is the browser-shell navigation authority even
+          // when activeTabId is null. In that state the user deliberately left
+          // Start selected, so the activePath compatibility fallback stays suppressed.
+          tabsStateControlsStartupRef.current = true;
+          restoredPendingTabIdRef.current = session.snapshot.pendingTabId || "";
           startPageRequestedRef.current = !session.snapshot.pendingTabId;
         }
       })
@@ -1385,15 +1399,6 @@ export default function Workbench() {
     return unsubscribe;
   }, []);
 
-  useEffect(() => {
-    const pending = workbenchTabsSessionRef.current.snapshot.pendingTabId;
-    if (!workspaceController || !tabsPersistenceReady || !pending) return;
-    if (restoredTabOpeningRef.current === pending) return;
-    restoredTabOpeningRef.current = pending;
-    void workbenchTabsWorkflowRef.current?.restorePending().finally(() => {
-      if (restoredTabOpeningRef.current === pending) restoredTabOpeningRef.current = "";
-    });
-  }, [tabsPersistenceReady, workspaceController, workbenchTabsSnapshot.pendingTabId]);
   const invalidateEditCanvasRenderAck = useCallback(() => {
     setCanvasRenderAcks((current) => (
       current.edit ? { ...current, edit: null } : current
@@ -1497,6 +1502,75 @@ export default function Workbench() {
     const incoming = memory.withRepeatCount(next);
     setToastState((current) => nextPresentedNotice(current, incoming) as Toast);
   }, []);
+  useEffect(() => {
+    const reconciled = reconcileWorkbenchTabsWhenReady({
+      session: workbenchTabsSessionRef.current,
+      tabsPersistenceReady,
+      registeredProjectsReady,
+      registeredProjects,
+    });
+    if (!reconciled) return;
+    if (
+      restoredPendingTabIdRef.current
+      && !reconciled.snapshot.tabs.some(
+        (tab) => tab.tabId === restoredPendingTabIdRef.current,
+      )
+    ) {
+      restoredPendingTabIdRef.current = "";
+    }
+    if (reconciled.missing.length === 0) return;
+    const activeTab = reconciled.snapshot.tabs.find(
+      (tab) => tab.tabId === reconciled.snapshot.activeTabId,
+    );
+    if (activeTab?.kind === "start" && !reconciled.snapshot.pendingTabId) {
+      startPageRequestedRef.current = true;
+    }
+    setGlobalSidebarOpen(true);
+    setToast({
+      title: reconciled.missing.length === 1
+        ? "无法恢复一个 HTML"
+        : `无法恢复 ${reconciled.missing.length} 个 HTML`,
+      message: "项目可能已移动或删除。已保留可用标签，可从 Finder 重新打开。",
+      tone: "warning",
+      sticky: true,
+      disposition: "background-result",
+      dedupeKey: "workbench-restored-projects-missing",
+      action: { id: "retry-project-open", label: "从 Finder 重新打开" },
+    });
+  }, [
+    registeredProjects,
+    registeredProjectsReady,
+    setToast,
+    tabsPersistenceReady,
+  ]);
+  useEffect(() => {
+    const pending = restoredPendingTabIdRef.current;
+    if (!workspaceController || !tabsPersistenceReady || !pending) return;
+    if (workbenchTabsSessionRef.current.snapshot.pendingTabId !== pending) return;
+    if (restoredTabOpeningRef.current === pending) return;
+    restoredTabOpeningRef.current = pending;
+    void workbenchTabsWorkflowRef.current?.restorePending()
+      .then((outcome) => {
+        if (!outcome || outcome.status === "succeeded") return;
+        const session = workbenchTabsSessionRef.current;
+        session.close(pending);
+        startPageRequestedRef.current = true;
+        setGlobalSidebarOpen(true);
+        setToast({
+          title: "无法恢复这个 HTML",
+          message: outcome.reason || "项目可能已移动或删除，请从 Finder 重新打开。",
+          tone: "warning",
+          sticky: true,
+          disposition: "background-result",
+          dedupeKey: `workbench-restore-failed:${pending}`,
+          action: { id: "retry-project-open", label: "从 Finder 重新打开" },
+        });
+      })
+      .finally(() => {
+        if (restoredTabOpeningRef.current === pending) restoredTabOpeningRef.current = "";
+        if (restoredPendingTabIdRef.current === pending) restoredPendingTabIdRef.current = "";
+      });
+  }, [tabsPersistenceReady, setToast, workspaceController, workbenchTabsSnapshot.pendingTabId]);
   const [pausedNoticeIdentity, setPausedNoticeIdentity] =
     useState<string | null>(null);
   const noticeDeadlineRef = useRef<{
@@ -1941,14 +2015,15 @@ export default function Workbench() {
         return;
       }
       if (projectEvent.type === "project-catalog-loaded") {
-        setRegisteredProjects(
-          Array.isArray(projectEvent.projects)
-            ? projectEvent.projects as RegisteredProject[]
-            : [],
-        );
+        const projects = Array.isArray(projectEvent.projects)
+          ? projectEvent.projects as RegisteredProject[]
+          : [];
+        setRegisteredProjects(projects);
+        setRegisteredProjectsReady(true);
         return;
       }
       if (projectEvent.type === "project-catalog-failed") {
+        setRegisteredProjectsReady(false);
         setRecentProjectsError(String(
           projectEvent.reason || "项目目录暂时无法读取。",
         ));
@@ -2584,13 +2659,15 @@ export default function Workbench() {
   const currentSourceFileStem = fileStem(currentSourceFileName);
   useEffect(() => {
     if (!projectId || !documentId) return;
+    const tabsSession = workbenchTabsSessionRef.current;
     const identity = `${projectId}\u0000${documentId}`;
     const firstBinding = lastBoundDocumentRef.current !== identity;
     if (firstBinding) lastBoundDocumentRef.current = identity;
-    const focus = !startPageRequestedRef.current && (
+    const switchingDocument = Boolean(tabsSession.snapshot.pendingTabId);
+    const focus = !switchingDocument && !startPageRequestedRef.current && (
       firstBinding || focusNextOpenedDocumentRef.current
     );
-    workbenchTabsSessionRef.current.bindDocument({
+    const bound = tabsSession.bindDocument({
       projectId,
       documentId,
       title: currentSourceFileStem || projectName,
@@ -2603,6 +2680,16 @@ export default function Workbench() {
             : "normal",
       focus,
     });
+    if (!bound) {
+      setToast({
+        title: "标签页已满",
+        message: "最多可同时打开 24 个标签页。请先关闭一个，再打开这份 HTML。",
+        tone: "warning",
+        sticky: true,
+        dedupeKey: "workbench-tab-capacity",
+      });
+      return;
+    }
     if (focus) focusNextOpenedDocumentRef.current = false;
   }, [
     currentSourceFileStem,
@@ -3547,6 +3634,20 @@ export default function Workbench() {
   }, [tabsPersistenceReady, workspaceController]);
 
   useEffect(() => {
+    if (
+      !workspaceController
+      || !tabsPersistenceReady
+      || !tabsStateControlsStartupRef.current
+      || restoredCatalogRequestedRef.current
+      || !workbenchTabsSessionRef.current.snapshot.tabs.some(
+        (tab) => tab.kind === "document",
+      )
+    ) return;
+    restoredCatalogRequestedRef.current = true;
+    void workspaceController.refreshRegisteredProjects();
+  }, [tabsPersistenceReady, workspaceController]);
+
+  useEffect(() => {
     if (!toast) {
       noticeDeadlineRef.current = null;
       return;
@@ -3975,29 +4076,66 @@ export default function Workbench() {
   }, [workspaceController]);
   const openProject = useCallback(async (recentPath?: string) => {
     if (!workspaceController) return;
+    if (!workbenchTabsSessionRef.current.canAddTab()) {
+      setToast({
+        title: "标签页已满",
+        message: "请先关闭一个标签页，再打开新的 HTML。",
+        tone: "warning",
+        sticky: true,
+        dedupeKey: "workbench-tab-capacity",
+      });
+      return;
+    }
     startPageRequestedRef.current = false;
     focusNextOpenedDocumentRef.current = true;
-    await workspaceController.openProject({
+    const outcome = await workspaceController.openProject({
       kind: recentPath ? "recent" : "local",
       sourcePath: recentPath || null,
     });
-  }, [workspaceController]);
+    if (outcome.status !== "succeeded") {
+      const snapshot = workbenchTabsSessionRef.current.snapshot;
+      startPageRequestedRef.current = snapshot.tabs.find(
+        (tab) => tab.tabId === snapshot.activeTabId,
+      )?.kind === "start";
+      focusNextOpenedDocumentRef.current = false;
+    }
+  }, [setToast, workspaceController]);
+  const presentWorkbenchTabOutcome = useCallback((outcome: unknown) => {
+    if (!outcome || typeof outcome !== "object" || (outcome as { status?: string }).status === "succeeded") return;
+    const result = outcome as { reason?: string; code?: string };
+    setToast({
+      title: result.code === "WORKBENCH_TAB_SWITCH_BUSY"
+        ? "标签页正在切换"
+        : "暂时无法完成标签页操作",
+      message: result.reason || "请稍后重试。",
+      tone: "warning",
+      sticky: false,
+      dedupeKey: `workbench-tab:${result.code || "rejected"}`,
+    });
+  }, [setToast]);
   const selectWorkbenchTab = useCallback((tab: WorkbenchTab) => {
-    startPageRequestedRef.current = tab.kind === "start";
-    void workbenchTabsWorkflowRef.current?.activate(tab.tabId);
-  }, []);
+    void workbenchTabsWorkflowRef.current?.activate(tab.tabId).then((outcome) => {
+      presentWorkbenchTabOutcome(outcome);
+      if (outcome.status === "succeeded") {
+        startPageRequestedRef.current = tab.kind === "start";
+      }
+    });
+  }, [presentWorkbenchTabOutcome]);
   const createWorkbenchStartTab = useCallback(() => {
-    startPageRequestedRef.current = true;
-    void workbenchTabsWorkflowRef.current?.createStart();
-  }, []);
+    void workbenchTabsWorkflowRef.current?.createStart().then((outcome) => {
+      presentWorkbenchTabOutcome(outcome);
+      if (outcome.status === "succeeded") startPageRequestedRef.current = true;
+    });
+  }, [presentWorkbenchTabOutcome]);
   const closeWorkbenchTab = useCallback((tab: WorkbenchTab) => {
-    void workbenchTabsWorkflowRef.current?.close(tab.tabId).then(() => {
+    void workbenchTabsWorkflowRef.current?.close(tab.tabId).then((outcome) => {
+      presentWorkbenchTabOutcome(outcome);
       const active = workbenchTabsSessionRef.current.snapshot.tabs.find(
         (item) => item.tabId === workbenchTabsSessionRef.current.snapshot.activeTabId,
       );
       startPageRequestedRef.current = active?.kind === "start";
     });
-  }, []);
+  }, [presentWorkbenchTabOutcome]);
   const openRegisteredWorkbenchProject = useCallback((project: RegisteredProject) => {
     if (!project.documentId || project.availability !== "ready") return;
     const tab = workbenchTabsSessionRef.current.stageDocument({
@@ -4005,10 +4143,19 @@ export default function Workbench() {
       documentId: project.documentId,
       title: project.projectName,
     });
-    if (!tab) return;
-    startPageRequestedRef.current = false;
-    void workbenchTabsWorkflowRef.current?.activate(tab.tabId);
-  }, []);
+    if (!tab) {
+      presentWorkbenchTabOutcome({
+        status: "rejected",
+        code: "WORKBENCH_TAB_CAPACITY",
+        reason: "最多可同时打开 24 个标签页。请先关闭一个。",
+      });
+      return;
+    }
+    void workbenchTabsWorkflowRef.current?.activate(tab.tabId).then((outcome) => {
+      presentWorkbenchTabOutcome(outcome);
+      if (outcome.status === "succeeded") startPageRequestedRef.current = false;
+    });
+  }, [presentWorkbenchTabOutcome]);
   useEffect(() => {
     const handleWorkbenchShortcut = (event: KeyboardEvent) => {
       const command = event.metaKey || event.ctrlKey;
@@ -7845,6 +7992,7 @@ export default function Workbench() {
       />
       {startPageActive ? (
         <WorkbenchStartPage
+          activeTabId={activeWorkbenchTab.tabId}
           recentProjects={recentProjects}
           onOpenLocal={() => void openProject()}
           onOpenRecent={(recentSourcePath) => void openProject(recentSourcePath)}
@@ -7856,6 +8004,8 @@ export default function Workbench() {
       ) : (
       <div
         id="workbench-content-outlet"
+        role="tabpanel"
+        aria-labelledby={`workbench-tab-${activeWorkbenchTab.tabId}`}
         ref={reviewStageRef}
         className="review-scroll-stage"
         data-review-active={readyReviewOverlay ? "true" : undefined}
@@ -8254,7 +8404,7 @@ export default function Workbench() {
             });
           }}
           onCancel={() => {
-            workspaceController?.cancelExternalOpen({
+            void workspaceController?.cancelExternalOpen({
               requestId: openConfirmation.requestId,
             });
             openHtmlButtonRef.current?.focus();

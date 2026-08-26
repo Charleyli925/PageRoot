@@ -811,6 +811,49 @@ test("a Registry project opens from Start without fencing an unmounted Canvas", 
   assert.equal(harness.documentSession.html, B_HTML);
 });
 
+test("a retained Controller can switch Registry projects while Start owns the unmounted outlet", async (t) => {
+  let fenceCount = 0;
+  let freezeCount = 0;
+  const harness = createHarness({
+    canvas: {
+      isMounted: () => false,
+      fencePendingEdit: () => {
+        fenceCount += 1;
+        return null;
+      },
+      freeze: () => {
+        freezeCount += 1;
+        return null;
+      },
+    },
+    projectOpen: {
+      async openRegistered() {
+        return {
+          name: "B",
+          sourcePath: B_PATH,
+          html: B_HTML,
+          sha256: sha256(B_HTML),
+        };
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+
+  const opening = await harness.workflow.openProject({
+    kind: "registered",
+    projectId: "project_catalog_b",
+  });
+  assert.equal(opening.status, "succeeded");
+  await waitFor(
+    () => harness.projectSession.context?.sourcePath === B_PATH
+      && !harness.workflow.projectHydrating,
+    "retained Controller did not publish the Registry project from Start",
+  );
+  assert.equal(fenceCount, 0);
+  assert.equal(freezeCount, 0);
+  assert.equal(harness.documentSession.html, B_HTML);
+});
+
 test("a v4 Working Copy transition uses the exact managed desktop activation", async (t) => {
   const calls = [];
   const managedTarget = {
@@ -1082,6 +1125,60 @@ test("an external request arriving during close preparation cancels that exact c
   await waitFor(() => harness.workflow.getSnapshot().externalOpen.status === "idle");
 });
 
+test("two unregistered OS opens keep confirmation and acknowledgement order", async (t) => {
+  const order = [];
+  const harness = createHarness({
+    initialProject: false,
+    projectOpen: {
+      async acceptExternal(requestId) {
+        order.push(`accept:${requestId}`);
+        return {
+          openKind: "confirmation",
+          requestId,
+          classification: "new-external",
+          sourceFileName: `${requestId}.html`,
+          visibleV1FileName: `${requestId}-V1.html`,
+          projectsRootLabel: "文稿 › PageRoot › 项目",
+        };
+      },
+      async ackExternal(requestId) {
+        order.push(`ack:${requestId}`);
+        return { acknowledged: true, requestId };
+      },
+      async cancelPrepared() {
+        return { canceled: true };
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+
+  assert.equal(harness.workflow.acceptExternalProject({
+    requestId: "external_first",
+    sourcePath: A_PATH,
+  }).status, "succeeded");
+  assert.equal(harness.workflow.acceptExternalProject({
+    requestId: "external_second",
+    sourcePath: B_PATH,
+  }).status, "succeeded");
+  await waitFor(() => (
+    harness.workflow.getSnapshot().openConfirmation?.requestId === "external_first"
+  ));
+  assert.deepEqual(order, ["accept:external_first"]);
+  assert.equal(harness.workflow.getSnapshot().externalOpen.queuedRequestId, "external_second");
+
+  assert.equal((await harness.workflow.cancelExternalOpen({ requestId: "external_first" })).status, "succeeded");
+  await waitFor(() => (
+    harness.workflow.getSnapshot().openConfirmation?.requestId === "external_second"
+  ));
+  assert.deepEqual(order, [
+    "accept:external_first",
+    "ack:external_first",
+    "accept:external_second",
+  ]);
+  assert.equal((await harness.workflow.cancelExternalOpen({ requestId: "external_second" })).status, "succeeded");
+  await waitFor(() => order.at(-1) === "ack:external_second");
+});
+
 test("close drains an in-flight local picker before it commits", async (t) => {
   let resolveLocal;
   const harness = createHarness({
@@ -1228,6 +1325,27 @@ test("committed close rejects new external work and abort unlocks only its own f
   harness.workflow.abortClose({ requestId: "close_owned_freeze" });
   assert.equal(harness.unlockCount, 1);
   assert.equal(harness.workflow.getSnapshot().close.phase, "idle");
+});
+
+test("close trusts the prior Start navigation fence when the Canvas outlet is unmounted", async (t) => {
+  let freezeCount = 0;
+  const harness = createHarness({
+    canvas: {
+      isMounted: () => false,
+      freeze: () => {
+        freezeCount += 1;
+        return null;
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+
+  const readiness = await harness.workflow.prepareClose({
+    requestId: "close_from_start_outlet",
+    deadlineAt: Date.now() + 2_000,
+  });
+  assert.deepEqual(readiness, { ready: true });
+  assert.equal(freezeCount, 0);
 });
 
 test("a stuck immutable hydration can close without waiting for the remote read", async (t) => {
