@@ -350,7 +350,9 @@ test("comment cards keep stable anchors while nearby source text is being edited
   );
 });
 
-test("indexed script tabs keep hidden comments grouped, suppress ghost markers, and shrink the canvas", async ({
+test("indexed script tabs keep hidden comments grouped, suppress ghost markers, and shrink the canvas", {
+  tag: ["@gate-smoke","@smoke-comments"],
+}, async ({
   page,
 }) => {
   const browserErrors = [];

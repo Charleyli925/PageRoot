@@ -37,7 +37,7 @@ rule is applied per level rather than per file.
 
 The reverse spread order `{ ...authoritative, ...read }` is a defect: it lets a
 stale file overwrite the identity the writer just computed and pin the schema
-version forever. `tests/project-file-repository.test.mjs` pins that case.
+version forever. `tests/project-working-copy-save.test.mjs` pins that case.
 
 `project-identity.v4` is written once at import and never rewritten, so it is an
 immutable record and stays strict by the rule below.

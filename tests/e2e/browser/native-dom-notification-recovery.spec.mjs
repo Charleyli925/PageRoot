@@ -22,7 +22,9 @@ async function openRailGlobalCommentComposer(page) {
 }
 
 test.describe("notification recovery paths", () => {
-  test("a browser encoding error preserves the current page and reopens the HTML picker", async ({
+  test("a browser encoding error preserves the current page and reopens the HTML picker", {
+  tag: ["@smoke-notification"],
+}, async ({
     page,
   }) => {
     await openFixture(page);
@@ -60,7 +62,9 @@ test.describe("notification recovery paths", () => {
     await expect(notice).toHaveCount(0);
   });
 
-  test("a notice dismissal is keyboard-accessible and keeps the current page visible", async ({
+  test("a notice dismissal is keyboard-accessible and keeps the current page visible", {
+  tag: ["@smoke-notification"],
+}, async ({
     page,
   }) => {
     await openFixture(page);
@@ -135,7 +139,9 @@ test.describe("notification recovery paths", () => {
     await expect(attachments).toContainText("overflow.txt");
   });
 
-  test("one unsaved comment blocks a second target and Canvas selection keeps its scroll", async ({
+  test("one unsaved comment blocks a second target and Canvas selection keeps its scroll", {
+  tag: ["@gate-smoke","@smoke-comments"],
+}, async ({
     page,
   }) => {
     const { frame } = await openFixture(page);

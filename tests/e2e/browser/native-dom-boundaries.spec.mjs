@@ -22,7 +22,9 @@ test.beforeEach(async ({ page }) => {
   await page.goto("/");
 });
 
-test("pure browser use stays in a formal read-only preview", async ({ page }) => {
+test("pure browser use stays in a formal read-only preview", {
+  tag: ["@gate-smoke","@smoke-editing"],
+}, async ({ page }) => {
   await expect(page.getByText("浏览器预览 · 只读", { exact: true })).toBeVisible();
   await expect(page.getByText("操作不会保存", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "编辑", exact: true })).toBeDisabled();
@@ -40,7 +42,9 @@ test("pure browser use stays in a formal read-only preview", async ({ page }) =>
   expect(await page.evaluate(() => Boolean(window.htmlAIProjects))).toBe(false);
 });
 
-test("the edit iframe is same-origin but never executes author scripts or refresh", async ({ page }) => {
+test("the edit iframe is same-origin but never executes author scripts or refresh", {
+  tag: ["@gate-smoke","@smoke-editing"],
+}, async ({ page }) => {
   const { iframe, frame } = await loadFixture(page, "complex-layout.html");
   await expect(iframe).toHaveAttribute("sandbox", "allow-same-origin");
   expect((await iframe.getAttribute("sandbox")).split(/\s+/)).not.toContain("allow-scripts");
@@ -530,7 +534,9 @@ test("clicking a canvas selects the dedicated surface instead of the wrapping mo
     .not.toHaveAttribute("data-html-canvas-selected", /.+/u);
 });
 
-test("double-clicking a canvas reports the dedicated root and stays comment-only", async ({ page }) => {
+test("double-clicking a canvas reports the dedicated root and stays comment-only", {
+  tag: ["@gate-smoke","@smoke-editing"],
+}, async ({ page }) => {
   const { editor, frame } = await loadFixture(page, "complex-layout.html");
   const canvas = frame.locator(caseSelector("canvas-surface"));
   await canvas.scrollIntoViewIfNeeded();
@@ -540,7 +546,9 @@ test("double-clicking a canvas reports the dedicated root and stays comment-only
     .toContain("EDITABLE_ISLAND_ROOT_UNSUPPORTED");
 });
 
-test("first double-click places a caret; a second double-click selects the word", async ({ page }) => {
+test("first double-click places a caret; a second double-click selects the word", {
+  tag: ["@gate-smoke","@smoke-editing"],
+}, async ({ page }) => {
   const { editor, frame } = await loadFixture(page, "complex-layout.html");
   const target = frame.locator(caseSelector("heading-inline"));
   const toolbar = editor.getByRole("toolbar");

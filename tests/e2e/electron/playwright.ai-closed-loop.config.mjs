@@ -12,7 +12,7 @@ const artifactRoot = path.join(
 
 export default defineConfig({
   testDir: currentDirectory,
-  testMatch: /ai-handoff-closed-loop\.spec\.mjs/,
+  testMatch: /ai-(?:review-adoption|provider-availability|run-lifecycle|candidate-validation|request-comments)\.spec\.mjs/,
   outputDir: path.join(artifactRoot, "results"),
   workers: 1,
   // CI absorbs one transient Electron launch/hydration stall per test, matching

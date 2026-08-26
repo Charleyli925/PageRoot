@@ -6,12 +6,25 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  annotateGatePlan,
   assertFullyAutomatedPlan,
+  compactGatePlan,
   normalizeRepositoryPath,
   omitMissingNodeTests,
   selectGatePlan,
   validateImpactMap,
 } from "./test-gate-core.mjs";
+import { CAPABILITY_SMOKE_SUITES, countTagOccurrences } from "./gate-smoke-suites.mjs";
+import {
+  assertResumeCompatible,
+  assertReusableBuildArtifacts,
+  BUILD_OUTPUTS,
+  buildGateFingerprint,
+  collectBuildArtifactHashes,
+  hashFile,
+  suitesForResume,
+  resumeEnvSubset,
+} from "./test-gate-resume.mjs";
 import {
   DEVELOPER_PREVIEW_ARTIFACT_PATTERN,
   developerPreviewPackageJson,
@@ -33,6 +46,7 @@ function parseArguments(argv) {
     base: null,
     dryRun: false,
     realHtmlPath: null,
+    resume: null,
   };
   if (argv[0] && !argv[0].startsWith("--")) options.lane = argv.shift();
   while (argv.length > 0) {
@@ -41,12 +55,16 @@ function parseArguments(argv) {
     else if (argument === "--base") options.base = argv.shift() || null;
     else if (argument === "--arch") options.arch = argv.shift() || "";
     else if (argument === "--real-html") options.realHtmlPath = argv.shift() || null;
+    else if (argument === "--resume") options.resume = argv.shift() || null;
     else throw new Error(`Unknown argument: ${argument}`);
   }
-  if (!/^(?:edit|task|main|release|developer-package|candidate-app|artifact)$/u.test(options.lane)) {
+  if (!/^(?:edit|task|plan|main|release|developer-package|candidate-app|artifact)$/u.test(options.lane)) {
     throw new Error(
-      "Lane must be edit, task, main, release, developer-package, candidate-app or artifact.",
+      "Lane must be edit, task, plan, main, release, developer-package, candidate-app or artifact.",
     );
+  }
+  if (options.resume && options.lane !== "task") {
+    throw new Error("--resume is only supported for the task gate.");
   }
   if (options.arch !== "arm64") throw new Error("--arch must be arm64.");
   if (options.realHtmlPath) {
@@ -130,6 +148,13 @@ function shellDisplay(command, args) {
 }
 
 function commandForSuite(suiteId, context) {
+  const smoke = CAPABILITY_SMOKE_SUITES[suiteId];
+  if (smoke) {
+    return {
+      command: "npx",
+      args: ["playwright", "test", "--config", smoke.config, "--grep", smoke.tag],
+    };
+  }
   const simple = {
     "build-web": packageCommand("build"),
     "build-desktop": packageCommand("desktop:renderer"),
@@ -142,10 +167,6 @@ function commandForSuite(suiteId, context) {
     "node-package": packageCommand("test:package"),
     "node-smoke": { command: process.execPath, args: [path.join(productRoot, "scripts/test-node-group.mjs"), "smoke"] },
     "node-full": { command: process.execPath, args: [path.join(productRoot, "scripts/test-node-group.mjs"), "full"] },
-    "browser-smoke": {
-      command: "npx",
-      args: ["playwright", "test", "--config", "tests/e2e/browser/playwright.smoke.config.mjs"],
-    },
     "browser-full": {
       command: "npx",
       args: ["playwright", "test", "--config", "tests/e2e/browser/playwright.config.mjs"],
@@ -154,17 +175,9 @@ function commandForSuite(suiteId, context) {
       command: "npx",
       args: ["playwright", "test", "--config", "tests/e2e/browser/playwright.real-html.config.mjs"],
     },
-    "electron-smoke": {
-      command: "npx",
-      args: ["playwright", "test", "--config", "tests/e2e/electron/playwright.smoke.config.mjs"],
-    },
     "electron-full": {
       command: "npx",
       args: ["playwright", "test", "--config", "tests/e2e/electron/playwright.config.mjs"],
-    },
-    "ai-smoke": {
-      command: "npx",
-      args: ["playwright", "test", "--config", "tests/e2e/electron/playwright.ai-smoke.config.mjs"],
     },
     "ai-closed-loop": {
       command: "npx",
@@ -314,11 +327,70 @@ async function assertReleaseRepositoryStable(repository) {
   }
 }
 
+async function inventoryFiles() {
+  const tracked = nullSeparated((await runCapture("git", ["ls-files", "-z"])).stdout);
+  const untracked = nullSeparated(
+    (await runCapture("git", ["ls-files", "-z", "--others", "--exclude-standard"])).stdout,
+  );
+  return [...new Set([...tracked, ...untracked])];
+}
+
+function smokeRuntimeDirectory(runtime) {
+  return runtime === "browser" ? "tests/e2e/browser/" : "tests/e2e/electron/";
+}
+
+function smokeSpecMatchesRuntime(file, runtime) {
+  if (!file.startsWith(smokeRuntimeDirectory(runtime))) return false;
+  const isAiSpec = /\/ai-[\w.-]+\.spec\.mjs$/u.test(file);
+  if (runtime === "ai") return isAiSpec;
+  if (runtime === "electron") return !isAiSpec;
+  return true;
+}
+
+async function smokeTagCounts(files) {
+  const counts = {};
+  const specFiles = files.filter((file) => /^tests\/e2e\/.*\.spec\.mjs$/u.test(file));
+  const sources = new Map();
+  for (const smoke of Object.values(CAPABILITY_SMOKE_SUITES)) {
+    const key = `${smoke.runtime}:${smoke.tag}`;
+    if (counts[key] != null) continue;
+    let total = 0;
+    for (const file of specFiles) {
+      if (!smokeSpecMatchesRuntime(file, smoke.runtime)) continue;
+      const absolute = path.join(productRoot, file);
+      if (!existsSync(absolute)) continue;
+      if (!sources.has(file)) {
+        sources.set(file, await readFile(absolute, "utf8"));
+      }
+      total += countTagOccurrences(sources.get(file), smoke.tag);
+    }
+    counts[key] = total;
+  }
+  return counts;
+}
+
+async function loadPreviousRun(runId) {
+  const reportDirectory = path.join(productRoot, "output/test-runs", runId);
+  const selectionPath = path.join(reportDirectory, "selection.json");
+  const resultsPath = path.join(reportDirectory, "results.json");
+  const fingerprintPath = path.join(reportDirectory, "fingerprint.json");
+  if (!existsSync(selectionPath) || !existsSync(resultsPath) || !existsSync(fingerprintPath)) {
+    throw new Error(`Cannot resume: evidence for ${runId} is incomplete.`);
+  }
+  const selection = JSON.parse(await readFile(selectionPath, "utf8"));
+  const summary = JSON.parse(await readFile(resultsPath, "utf8"));
+  const fingerprint = JSON.parse(await readFile(fingerprintPath, "utf8"));
+  const results = Array.isArray(summary.results) ? summary.results : [];
+  return { reportDirectory, selection, results, fingerprint };
+}
+
 async function main() {
   const options = parseArguments(process.argv.slice(2));
   const map = validateImpactMap(JSON.parse(await readFile(mapPath, "utf8")));
   const files = await changedFiles(options.base);
-  if ((options.lane === "edit" || options.lane === "task") && files.length === 0) {
+  const planningLane = options.lane === "plan";
+  const selectionLane = planningLane ? "task" : options.lane;
+  if ((selectionLane === "edit" || selectionLane === "task") && files.length === 0) {
     throw new Error(
       `No changed files were found for the ${options.lane} gate. `
       + "Pass --base <git-ref> for a committed task, or use the release gate for complete coverage.",
@@ -336,12 +408,17 @@ async function main() {
       `${options.lane} gates require a clean Git worktree. Commit every source change first.`,
     );
   }
-  const plan = omitMissingNodeTests(
-    assertFullyAutomatedPlan(selectGatePlan({ map, lane: options.lane, changedFiles: files })),
-    (file) => {
-      const absolute = path.resolve(productRoot, file);
-      return absolute.startsWith(`${productRoot}${path.sep}`) && existsSync(absolute);
-    },
+  const inventory = await inventoryFiles();
+  const tagCounts = await smokeTagCounts(inventory);
+  const plan = annotateGatePlan(
+    omitMissingNodeTests(
+      assertFullyAutomatedPlan(selectGatePlan({ map, lane: selectionLane, changedFiles: files })),
+      (file) => {
+        const absolute = path.resolve(productRoot, file);
+        return absolute.startsWith(`${productRoot}${path.sep}`) && existsSync(absolute);
+      },
+    ),
+    { map, inventoryFiles: inventory, tagCounts },
   );
   const repository = await repositoryEvidence(files);
   const packageJson = JSON.parse(await readFile(path.join(productRoot, "package.json"), "utf8"));
@@ -378,8 +455,10 @@ async function main() {
       : undefined,
   });
   const startedAt = new Date();
-  const runId = `${startedAt.toISOString().replace(/[:.]/gu, "-")}-${options.lane}`;
-  const reportDirectory = path.join(productRoot, "output/test-runs", runId);
+  const previousRun = options.resume ? await loadPreviousRun(options.resume) : null;
+  const runId = previousRun?.selection.runId || `${startedAt.toISOString().replace(/[:.]/gu, "-")}-${options.lane}`;
+  const reportDirectory = previousRun?.reportDirectory
+    || path.join(productRoot, "output/test-runs", runId);
   await mkdir(reportDirectory, { recursive: true });
   const context = {
     options,
@@ -395,27 +474,79 @@ async function main() {
     schemaVersion: 1,
     runId,
     lane: options.lane,
-    dryRun: options.dryRun,
-    startedAt: startedAt.toISOString(),
+    dryRun: options.dryRun || planningLane,
+    startedAt: previousRun?.selection.startedAt || startedAt.toISOString(),
+    resumedAt: previousRun ? startedAt.toISOString() : null,
     repository,
     changedFiles: files,
+    matchedOwners: plan.matchedOwners,
+    fileMatches: plan.fileMatches,
+    nodeTestOrigins: plan.nodeTestOrigins,
+    ruleStats: plan.ruleStats,
+    warnings: plan.warnings,
+    estimatedFanout: plan.estimatedFanout,
+    runtimeCanaries: plan.runtimeCanaries,
     selectedNodeTests: plan.selectedNodeTests,
     suites: selectedSuites,
+    compact: compactGatePlan(plan),
     options: {
       arch: options.arch,
       base: options.base,
       realHtmlPath: options.realHtmlPath,
+      resume: options.resume,
     },
   };
   await writeJson(path.join(reportDirectory, "selection.json"), selection);
+  if (planningLane) {
+    console.log(JSON.stringify(compactGatePlan(plan), null, 2));
+    return;
+  }
+  const fingerprint = buildGateFingerprint({
+    tree: repository.tree,
+    changeSetSha256: repository.changeSetSha256,
+    baseRef: options.base,
+    packageLockSha256: await hashFile(path.join(productRoot, "package-lock.json")),
+    nodeVersion: process.version,
+    platform: process.platform,
+    arch: process.arch,
+    suiteCommands: selectedSuites.map((suite) => ({ id: suite.id, command: suite.command })),
+    envSubset: resumeEnvSubset(),
+    artifactHashes: await collectBuildArtifactHashes(
+      productRoot,
+      selectedSuites.map((suite) => suite.id),
+    ),
+  });
+  if (previousRun) {
+    assertResumeCompatible(previousRun.fingerprint, fingerprint);
+  }
+  await writeJson(path.join(reportDirectory, "fingerprint.json"), fingerprint);
 
   console.log(`Automated ${options.lane} gate: ${selectedSuites.length} step(s)`);
   console.log(`Evidence: ${reportDirectory}`);
+  if (plan.warnings.length > 0) {
+    console.log(`Width warnings: ${plan.warnings.length}`);
+    for (const warning of plan.warnings) console.log(`- ${warning.code}: ${warning.message}`);
+  }
   for (const suite of selectedSuites) console.log(`- ${suite.id}: ${suite.command}`);
 
-  const results = [];
+  const suitePlan = previousRun
+    ? suitesForResume(selectedSuites, previousRun.results)
+    : selectedSuites.map((suite) => ({ ...suite, resume: "run", previous: null }));
+  if (previousRun) await assertReusableBuildArtifacts(productRoot, suitePlan);
+
+  const results = previousRun
+    ? previousRun.results
+      .filter((result) => (
+        suitePlan.some((suite) => suite.id === result.id && suite.resume === "reuse")
+      ))
+      .map((result) => ({ ...result, reused: true }))
+    : [];
   if (!options.dryRun) {
-    for (const suite of selectedSuites) {
+    for (const suite of suitePlan) {
+      if (suite.resume === "reuse") {
+        console.log(`\n[${suite.id}] reused previous pass`);
+        continue;
+      }
       if (cleanSourceLane) {
         await assertReleaseRepositoryStable(repository);
       }
@@ -424,6 +555,7 @@ async function main() {
       console.log(`\n[${suite.id}] ${shellDisplay(command.command, command.args)}`);
       const env = {
         ...process.env,
+        ...(CAPABILITY_SMOKE_SUITES[suite.id] ? { PAGEROOT_SMOKE_SUITE: suite.id } : {}),
         ...(options.realHtmlPath && suite.id === "real-html"
           ? { PAGEROOT_REAL_HTML_PATH: options.realHtmlPath }
           : {}),
@@ -447,6 +579,7 @@ async function main() {
         failure = error instanceof Error ? error.message : String(error);
       }
       const suiteCompletedAt = new Date();
+      const outputRelative = BUILD_OUTPUTS[suite.id];
       results.push({
         id: suite.id,
         status: exitCode === 0 && !failure ? "passed" : "failed",
@@ -456,6 +589,9 @@ async function main() {
         completedAt: suiteCompletedAt.toISOString(),
         durationMs: suiteCompletedAt.getTime() - suiteStartedAt.getTime(),
         command: shellDisplay(command.command, command.args),
+        outputHash: outputRelative
+          ? (await collectBuildArtifactHashes(productRoot, [suite.id]))[outputRelative]
+          : null,
       });
       await writeJson(path.join(reportDirectory, "results.json"), { results });
       if (exitCode !== 0 || failure) break;
@@ -490,12 +626,13 @@ async function main() {
     runId,
     lane: options.lane,
     status: options.dryRun ? "dry-run" : failed ? "failed" : "passed",
-    startedAt: startedAt.toISOString(),
+    startedAt: selection.startedAt,
     completedAt: completedAt.toISOString(),
-    durationMs: completedAt.getTime() - startedAt.getTime(),
+    durationMs: completedAt.getTime() - new Date(selection.startedAt).getTime(),
     selectedCount: selectedSuites.length,
-    executedCount: results.length,
+    executedCount: results.filter((result) => !result.reused).length,
     passedCount: results.filter((result) => result.status === "passed").length,
+    reusedCount: suitePlan.filter((suite) => suite.resume === "reuse").length,
     failedSuite: failed?.id || null,
     developerPreviewAttestation,
     packageDeliveryReport: !options.dryRun

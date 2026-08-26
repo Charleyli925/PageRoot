@@ -1,0 +1,352 @@
+import { expect, test } from "@playwright/test";
+import {
+  ORIGINAL_TEXT,
+  UPDATED_TEXT,
+  addComment,
+  addCommentAndSubmit,
+  chooseClipboardDelivery,
+  closePageRootGracefully,
+  createSourceFixture,
+  launchPageRoot,
+  openRecentProject,
+  removeSourceFixture,
+  requestDirectoryCount,
+  runOfficialFinalizer,
+  workingHtmlFiles,
+  writeAiOutput,
+} from "./ai-closed-loop-helpers.mjs";
+
+test("a clipboard handoff failure keeps the frozen Request recoverable", {
+  tag: ["@smoke-run-lifecycle"],
+}, async () => {
+  const fixture = createSourceFixture();
+  const launched = await launchPageRoot({
+    activeSourcePath: fixture.sourcePath,
+    injectedEnv: { PAGEROOT_E2E_QODER_HANDOFF_FAILURE: "1" },
+  });
+  try {
+    const clipboardSentinel = "PAGEROOT_QODER_HANDOFF_FAILURE_SENTINEL";
+    await launched.electronApp.evaluate(
+      ({ clipboard }, value) => clipboard.writeText(value),
+      clipboardSentinel,
+    );
+    const frame = await loadedDiskFrame(launched.page, fixture.sourcePath);
+    await frame.locator(caseSelector("list-item")).click();
+    await launched.page.getByRole("button", { name: /给.+留评论/u })
+      .filter({ visible: true })
+      .first()
+      .click();
+    await launched.page.getByRole("textbox", { name: "评论内容" })
+      .fill(`改为 ${UPDATED_TEXT}`);
+    await launched.page.getByRole("button", { name: "评论", exact: true }).click();
+    const sendToQoder = launched.page.getByRole("button", { name: /AI 助手/u });
+    await expect(sendToQoder).toBeEnabled();
+    await sendToQoder.click();
+    await chooseClipboardDelivery(launched.page);
+    // The failure is said by the round's own timeline, and the remedy is the
+    // action bar's re-copy action. The clipboard is left untouched.
+    await expect(launched.page.getByTestId("ai-conversation-run-progress")
+      .locator("li[data-step-state=\"error\"]")
+      .filter({ hasText: "交接内容尚未复制" }))
+      .toBeVisible();
+    expect(await launched.electronApp.evaluate(({ clipboard }) => clipboard.readText()))
+      .toBe(clipboardSentinel);
+    // Retrying goes through the bar's own remedy, and it must not create a
+    // second request or touch the source.
+    const failureActionBar = launched.page.getByTestId("ai-conversation-action-bar");
+    await expect(failureActionBar.getByRole("button", { name: "再次复制" }))
+      .toBeVisible();
+    await failureActionBar.getByRole("button", { name: "再次复制" }).click();
+    await expect.poll(() => requestDirectoryCount(launched.workspace))
+      .toBe(1);
+    expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
+  } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
+
+test("a failed handoff in project A does not block project B or replace its state", async () => {
+  test.setTimeout(180_000);
+  const projectA = createSourceFixture("project-a.html");
+  const projectB = createSourceFixture("project-b.html");
+  const launched = await launchPageRoot({
+    activeSourcePath: projectA.sourcePath,
+    recentSourcePaths: [projectA.sourcePath, projectB.sourcePath],
+    injectedEnv: { PAGEROOT_E2E_QODER_HANDOFF_FAILURE: "1" },
+  });
+  try {
+    const projectAWorkingCopyPath = await addComment(
+      launched.page,
+      projectA.sourcePath,
+    );
+    expect(projectAWorkingCopyPath).not.toBe(realpathSync(projectA.sourcePath));
+    await launched.page.getByRole("button", { name: /AI 助手/u }).click();
+    await chooseClipboardDelivery(launched.page);
+    // The failure is said by the round's own timeline, and it must not have
+    // produced a second request.
+    await expect(launched.page.getByTestId("ai-conversation-run-progress")
+      .locator("li[data-step-state=\"error\"]")
+      .filter({ hasText: "交接内容尚未复制" }))
+      .toBeVisible({ timeout: 30_000 });
+    await expect.poll(
+      () => requestDirectoryCount(launched.workspace),
+      { timeout: 20_000 },
+    ).toBe(1);
+    await openRecentProject(launched.page, projectB.sourcePath);
+    // B starts clean and A's failure does not follow it: the conversation opens
+    // (the old header asked for a comment first; opening is always allowed now),
+    // and sending waits for B's own comment below.
+    await expect(launched.page.getByRole("button", { name: /AI 助手/u }))
+      .toBeEnabled();
+    const projectBWorkingCopyPath = await addComment(
+      launched.page,
+      projectB.sourcePath,
+    );
+    expect(projectBWorkingCopyPath).not.toBe(realpathSync(projectB.sourcePath));
+    await expect(launched.page.getByRole("button", { name: /AI 助手/u }))
+      .toBeEnabled();
+    await launched.page.getByRole("button", { name: /AI 助手/u }).click();
+    await chooseClipboardDelivery(launched.page);
+    // B fails on its own round: the same error step appears for B, and the
+    // request count says the two failures are two separate rounds.
+    await expect(launched.page.getByTestId("ai-conversation-run-progress")
+      .locator("li[data-step-state=\"error\"]")
+      .filter({ hasText: "交接内容尚未复制" }))
+      .toBeVisible({ timeout: 30_000 });
+    await expect.poll(
+      () => requestDirectoryCount(launched.workspace),
+      { timeout: 20_000 },
+    ).toBe(2);
+
+    await openRecentProject(launched.page, projectA.sourcePath, { editable: false });
+    // Each project keeps its own failed state: reopening A still shows A's round
+    // stuck at the same error — not B's failure and not a clean slate.
+    await launched.page.getByRole("button", { name: /AI 助手/u }).click();
+    await expect(launched.page.getByTestId("ai-conversation-run-progress")
+      .locator("li[data-step-state=\"error\"]")
+      .filter({ hasText: "交接内容尚未复制" }))
+      .toBeVisible();
+
+    await openRecentProject(launched.page, projectB.sourcePath, { editable: false });
+    await launched.page.getByRole("button", { name: /AI 助手/u }).click();
+    await expect(launched.page.getByTestId("ai-conversation-run-progress")
+      .locator("li[data-step-state=\"error\"]")
+      .filter({ hasText: "交接内容尚未复制" }))
+      .toBeVisible();
+    expect(readFileSync(projectA.sourcePath).equals(projectA.original)).toBe(true);
+    expect(readFileSync(projectB.sourcePath).equals(projectB.original)).toBe(true);
+  } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeSourceFixture(projectA.sourceDirectory);
+    removeSourceFixture(projectB.sourceDirectory);
+  }
+});
+
+test("a rapid double click creates exactly one durable Request", {
+  tag: ["@smoke-run-lifecycle"],
+}, async () => {
+  test.setTimeout(120_000);
+  const fixture = createSourceFixture("double-submit.html");
+  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  try {
+    await launched.electronApp.evaluate(({ clipboard }) => clipboard.clear());
+    await addComment(launched.page, fixture.sourcePath);
+    await launched.page.getByRole("button", { name: /AI 助手/u }).dblclick({
+      delay: 0,
+    });
+    await chooseClipboardDelivery(launched.page);
+    await expect(launched.page.getByTestId("ai-conversation-action-bar")
+      .getByText("任务已复制，等你的 AI 改完", { exact: true })).toBeVisible();
+    await expect.poll(
+      () => requestDirectoryCount(launched.workspace),
+      { timeout: 20_000 },
+    ).toBe(1);
+    await launched.page.waitForTimeout(1_000);
+    expect(requestDirectoryCount(launched.workspace)).toBe(1);
+    const copied = await launched.electronApp.evaluate(
+      ({ clipboard }) => clipboard.readText(),
+    );
+    expect(copied).toMatch(/请执行\s+.+?\/PROMPT\.md\s+中的单轮任务/u);
+    expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
+  } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
+
+test("ending a copied run still warns after restart and blocks late finalization", async () => {
+  test.setTimeout(120_000);
+  const fixture = createSourceFixture("cancel-copied-run.html");
+  let launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  try {
+    const request = await addCommentAndSubmit(
+      launched.page,
+      launched.electronApp,
+      fixture.sourcePath,
+    );
+    await closePageRootGracefully(launched.electronApp, launched.page);
+    launched = await launchPageRoot({
+      isolatedUserData: launched.isolatedUserData,
+    });
+    await waitForProjectReady(launched.page);
+    /*
+     * The restarted round comes back as the delivery step of the thread. The exact
+     * phase wording (preparing vs. confirmed) is presentation detail; what the
+     * contract needs is that the handoff step is the one carrying the round.
+     */
+    await launched.page.getByRole("button", { name: /AI 助手/u }).click();
+    await expect(launched.page.getByTestId("ai-conversation-run-progress")
+      .locator("li").filter({ hasText: "准备并复制" }))
+      .toBeVisible();
+    const endRound = launched.page.getByTestId("ai-conversation-action-bar")
+      .getByRole("button", { name: "结束本轮" });
+    await expect(endRound).toBeEnabled();
+    await endRound.click();
+
+    const warning = launched.page.getByRole("dialog", {
+      name: "AI Agent 可能仍在修改",
+    });
+    await expect(warning).toBeVisible();
+    await expect(warning.getByText(
+      "结束本轮后，AI Agent 的修改将不会保存到源页。建议先停止 AI Agent。",
+      { exact: true },
+    )).toBeVisible();
+    const continueWaiting = warning.getByRole("button", { name: "继续等待" });
+    await expect(continueWaiting).toBeFocused();
+    // The contract under test is durable cancellation, not native pointer hit
+    // testing. On a saturated Electron CI host, input injection can return before
+    // the renderer consumes the click; dispatch inside the renderer so the next
+    // assertion is ordered after the React handler.
+    await continueWaiting.dispatchEvent("click");
+    await expect(warning).toBeHidden();
+    await expect(endRound).toBeEnabled();
+
+    await endRound.click();
+    await expect(warning).toBeVisible();
+    await warning.getByRole("button", {
+      name: "结束本轮并继续编辑",
+    }).dispatchEvent("click");
+    await expect(warning).toBeHidden();
+    const cancellationNotice = launched.page.locator(".toast.show").filter({
+      hasText: "本轮已结束，已恢复编辑",
+    });
+    await expect(cancellationNotice).toBeVisible();
+    await expect(cancellationNotice.getByText(
+      "AI Agent 不会被自动停止；如仍在运行，请手动停止。",
+      { exact: true },
+    )).toBeVisible();
+    const globalCommentButton = launched.page.locator('aside[aria-label="本轮评论"]')
+      .getByRole("button", { name: "全局评论", exact: true });
+    await expect(globalCommentButton).toBeVisible();
+    await expect(globalCommentButton).toBeEnabled();
+    expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
+
+    writeAiOutput(request.requestRoot, (base) => (
+      base.replace(ORIGINAL_TEXT, UPDATED_TEXT)
+    ));
+    const lateFinalization = runOfficialFinalizer(
+      request.requestRoot,
+      request.changeRequest,
+    );
+    expect(lateFinalization).toMatchObject({
+      ok: true,
+      status: "cancelled",
+      accepted: false,
+      retryable: false,
+    });
+    expect(lateFinalization.message)
+      .toBe("本轮已在源页结束。请停止 AI Agent，不要重试。");
+    expect(existsSync(path.join(
+      request.requestRoot,
+      "attempts",
+      "attempt_001",
+      "completion.json",
+    ))).toBe(false);
+    expect(
+      workingHtmlFiles(
+        launched.workspace,
+        request.changeRequest.projectId,
+      ),
+    ).toHaveLength(1);
+    expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
+  } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
+
+test("an unknown Request outcome stays fail-closed and reconciles automatically", {
+  tag: ["@smoke-run-lifecycle"],
+}, async () => {
+  test.setTimeout(120_000);
+  const fixture = createSourceFixture("unknown-request-outcome.html");
+  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  try {
+    await addComment(launched.page, fixture.sourcePath);
+    let requestDispatched = false;
+    let allowUnknownRequestReconcile = false;
+    const bridgeRoute = "**/*";
+    const injectUnknownRequestOutcome = async (route) => {
+      const url = new URL(route.request().url());
+      if (url.pathname === "/request" && !requestDispatched) {
+        requestDispatched = true;
+        const response = await route.fetch();
+        if (!response.ok()) {
+          await route.fulfill({ response });
+          return;
+        }
+        await route.abort("timedout");
+        return;
+      }
+      if (
+        url.pathname === "/workspace"
+        && requestDispatched
+        && !allowUnknownRequestReconcile
+      ) {
+        await route.abort("timedout");
+        return;
+      }
+      await route.continue();
+    };
+    await launched.page.route(bridgeRoute, injectUnknownRequestOutcome);
+
+    await launched.page.getByRole("button", { name: /AI 助手/u }).click();
+    await chooseClipboardDelivery(launched.page);
+    /*
+     * The outcome is unknown, so the round stays in the thread as a delivery still
+     * being confirmed. The panel-only copy ("正在确认这次发送是否成功" and its status
+     * chip) has no sidebar counterpart; the fail-closed contract is held by the
+     * request-directory and reconcile assertions below, not by that sentence.
+     */
+    const pendingRunProgress = launched.page
+      .getByTestId("ai-conversation-run-progress");
+    await expect(pendingRunProgress).toBeVisible({ timeout: 30_000 });
+    await expect(pendingRunProgress.locator("li")).toHaveCount(4);
+    await expect(launched.page.getByRole("button", { name: "立即重新核对" }))
+      .toHaveCount(0);
+    await expect(launched.page.getByRole("button", { name: "重新打开源页" }).first())
+      .toHaveCount(0);
+    await expect.poll(
+      () => requestDirectoryCount(launched.workspace),
+      { timeout: 20_000 },
+    ).toBe(1);
+
+    allowUnknownRequestReconcile = true;
+    await expect(launched.page.getByTestId("ai-conversation-action-bar")
+      .getByText("任务已复制，等你的 AI 改完", { exact: true })).toBeVisible({ timeout: 20_000 });
+    await launched.page.unroute(bridgeRoute, injectUnknownRequestOutcome);
+    // Ending the reconciled round still asks once: the task may already be in
+    // an Agent's hands, so the confirmation dialog owns the final action.
+    await launched.page.getByTestId("ai-conversation-action-bar")
+      .getByRole("button", { name: "结束本轮" }).click();
+    await expect(launched.page.getByRole("dialog", {
+      name: "AI Agent 可能仍在修改",
+    }).getByRole("button", { name: "结束本轮并继续编辑" })).toBeEnabled();
+    expect(requestDirectoryCount(launched.workspace)).toBe(1);
+    expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
+  } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});

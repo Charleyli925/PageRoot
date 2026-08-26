@@ -1,0 +1,1089 @@
+import { expect, test } from "@playwright/test";
+import {
+  ORIGINAL_LIST_TEXT,
+  ProjectFileRepository,
+  activateNativeEdit,
+  addCanvasComment,
+  bridgeJson,
+  caseSelector,
+  chooseClipboardDelivery,
+  closePageRootGracefully,
+  cpSync,
+  createSourceFixture,
+  currentEditorFrame,
+  existsSync,
+  expectCheckpointPersisted,
+  fixtureBuffer,
+  launchPageRoot,
+  loadedDiskFrame,
+  managedWorkingCopyPath,
+  mkdirSync,
+  mkdtempSync,
+  openRailGlobalCommentComposer,
+  openRecentProject,
+  path,
+  readDesktopProjectState,
+  readFileSync,
+  readManagedManifest,
+  readdirSync,
+  realpathSync,
+  removeIsolatedUserData,
+  removeSourceFixture,
+  renameSync,
+  setTextSelection,
+  stopPageRoot,
+  symlinkSync,
+  tmpdir,
+  waitForActiveSourcePath,
+  waitForDesktopActivePath,
+  waitForProjectReady,
+  waitForTitleStem,
+  writeFileSync,
+} from "./electron-native-harness.mjs";
+
+test("Electron first launch imports the welcome HTML as V1 and sends its comment to Qoder", {
+  tag: ["@gate-smoke","@smoke-project-lifecycle","@smoke-agent"],
+}, async () => {
+  const launched = await launchPageRoot();
+  const welcomePath = path.join(launched.isolatedUserData, "欢迎来到源页.html");
+  const welcomeLogoPath = path.join(
+    launched.isolatedUserData,
+    "brand-logo.png",
+  );
+  try {
+    const canonicalWelcomePath = path.join(
+      realpathSync(launched.isolatedUserData),
+      "欢迎来到源页.html",
+    );
+    await waitForProjectReady(launched.page);
+    let managedWelcomePath = "";
+    await expect.poll(
+      async () => {
+        const active = await launched.page.evaluate(
+          () => window.htmlAIProjects?.getActiveProject(),
+        );
+        managedWelcomePath = String(active?.sourcePath || "");
+        return Boolean(
+          managedWelcomePath && managedWelcomePath !== canonicalWelcomePath,
+        );
+      },
+      { timeout: 20_000 },
+    ).toBe(true);
+    expect(path.basename(managedWelcomePath)).toBe("欢迎来到源页-V1.html");
+    await expect(launched.page.locator('[aria-label="项目读取失败"]')).toHaveCount(0);
+    await expect(launched.page.getByRole("button", { name: "项目", exact: true }))
+      .toBeEnabled({ timeout: 30_000 });
+    const globalCommentButton = launched.page.locator('aside[aria-label="本轮评论"]')
+      .getByRole("button", { name: "全局评论", exact: true });
+    await expect(globalCommentButton)
+      .toBeVisible({ timeout: 30_000 });
+    await expect(globalCommentButton)
+      .toBeEnabled({ timeout: 30_000 });
+    await expect(launched.page.locator('[aria-label="项目读取失败"]')).toHaveCount(0);
+    await expect.poll(() => (
+      existsSync(welcomePath)
+      && existsSync(welcomeLogoPath)
+      && existsSync(path.join(managedWelcomePath, "..", ".pageroot", "manifest.json"))
+    )).toBe(true);
+    expect(readFileSync(managedWelcomePath)).toEqual(readFileSync(welcomePath));
+    const projectRoot = path.dirname(managedWelcomePath);
+    const manifest = JSON.parse(readFileSync(
+      path.join(projectRoot, ".pageroot", "manifest.json"),
+      "utf8",
+    ));
+    expect(manifest.versions.map((version) => version.versionId)).toEqual(["ver_0001"]);
+    expect(manifest.workingCopies).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        workingCopyId: "work_ver_0001",
+        sourceRelativePath: "欢迎来到源页-V1.html",
+      }),
+    ]));
+
+    const editor = launched.page.getByTestId("html-canvas-editor")
+      .filter({ visible: true })
+      .first();
+    await editor.waitFor({ state: "visible" });
+    const editorHandle = await editor.elementHandle();
+    await launched.page.waitForFunction(
+      (element) => element?.getAttribute("data-render-verified") === "true",
+      editorHandle,
+    );
+    const welcomeFrame = await currentEditorFrame(launched.page);
+    await expect.poll(() =>
+      welcomeFrame.locator('img[alt="源页 Logo"]').evaluate(
+        (image) => image.complete && image.naturalWidth > 0,
+      )
+    ).toBe(true);
+    await launched.electronApp.evaluate(({ clipboard }) => clipboard.clear());
+    await openRailGlobalCommentComposer(launched.page);
+    await launched.page.getByRole("textbox", { name: "评论内容" })
+      .fill("把欢迎页主标题改得更简洁。");
+    await launched.page.getByRole("button", { name: "评论", exact: true }).click();
+    await launched.page.getByRole("button", { name: /AI 助手/u }).click();
+    await chooseClipboardDelivery(launched.page);
+    await expect(
+      launched.page.getByTestId("ai-conversation-action-bar")
+        .getByText("任务已复制，等你的 AI 改完", { exact: true }),
+    ).toBeVisible();
+
+    let promptPath = "";
+    await expect.poll(async () => {
+      const copied = await launched.electronApp.evaluate(
+        ({ clipboard }) => clipboard.readText(),
+      );
+      promptPath = copied.match(/请执行\s+(.+?\/PROMPT\.md)\s+中的单轮任务/u)?.[1] || "";
+      return Boolean(promptPath && existsSync(promptPath));
+    }, { timeout: 20_000 }).toBe(true);
+    const changeRequest = JSON.parse(
+      readFileSync(path.join(path.dirname(promptPath), "change-request.json"), "utf8"),
+    );
+    expect(changeRequest.projectId).toBe(manifest.projectId);
+    expect(changeRequest.requirements.instructions[0].text)
+      .toBe("把欢迎页主标题改得更简洁。");
+  } finally {
+    await stopPageRoot(
+      launched.electronApp,
+      launched.isolatedUserData,
+    );
+  }
+});
+
+test("Electron retries a managed Working Copy activation after the first response is lost", async () => {
+  test.setTimeout(120_000);
+  const source = createSourceFixture("managed-activation-retry.html");
+  const launched = await launchPageRoot({ activeSourcePath: source.sourcePath });
+  try {
+    await waitForProjectReady(launched.page);
+    const v1Path = await managedWorkingCopyPath(launched.page, source.sourcePath);
+    const projectsRoot = path.dirname(path.dirname(v1Path));
+    const repository = new ProjectFileRepository({ projectsRoot });
+    const workspace = await repository.workspace({ sourcePath: v1Path });
+    const candidate = await repository.createCandidate({
+      target: workspace.target,
+      requestId: "req_e2e_managed_activation_retry",
+      candidateId: "candidate_e2e_managed_activation_retry_0001",
+      html: "<!doctype html><html><head><title>V2 retry</title></head><body><p>V2 retry</p></body></html>",
+      expectedSourceSha256: workspace.sourceSha256,
+    });
+    const promoted = await repository.promoteCandidate({
+      target: workspace.target,
+      candidateId: candidate.candidate.candidateId,
+    });
+    const expectedManagedPath = realpathSync(promoted.target.exactSourcePath);
+    const payload = {
+      previousSourcePath: v1Path,
+      nextSourcePath: promoted.target.exactSourcePath,
+      expectedSha256: promoted.target.sourceSha256,
+      projectId: promoted.target.projectId,
+      documentId: promoted.target.documentId,
+      workingCopyId: promoted.target.workingCopyId,
+      versionId: promoted.target.versionId,
+      projectRootPath: promoted.target.projectRootPath,
+      operationId: "e2e_managed_activation_retry_0001",
+    };
+
+    // The first call commits the main-process project state. Treat the return
+    // value as lost, then replay exactly the same operation as the renderer
+    // would after a Bridge response interruption.
+    await launched.page.evaluate((input) => (
+      window.htmlAIProjects.activateManagedWorkingCopy(input)
+    ), payload);
+    const replayed = await launched.page.evaluate((input) => (
+      window.htmlAIProjects.activateManagedWorkingCopy(input)
+    ), payload);
+    expect(replayed.sourcePath).toBe(expectedManagedPath);
+    expect(replayed.sha256).toBe(promoted.target.sourceSha256);
+    const active = await launched.page.evaluate(() => window.htmlAIProjects.getActiveProject());
+    expect(active?.sourcePath).toBe(expectedManagedPath);
+    const state = JSON.parse(readFileSync(
+      path.join(launched.isolatedUserData, "html-projects.json"),
+      "utf8",
+    ));
+    expect(state.lastManagedActivation?.operationId).toBe(payload.operationId);
+    const staleOperation = await launched.page.evaluate(async (input) => {
+      try {
+        const result = await window.htmlAIProjects.activateManagedWorkingCopy(input);
+        return { inputOperationId: input.operationId, result };
+      } catch (error) {
+        return {
+          inputOperationId: input.operationId,
+          message: error?.message || null,
+        };
+      }
+    }, {
+      ...payload,
+      operationId: "e2e_managed_activation_stale_0001",
+    });
+    const stateAfterStaleAttempt = JSON.parse(readFileSync(
+      path.join(launched.isolatedUserData, "html-projects.json"),
+      "utf8",
+    ));
+    expect(staleOperation).toMatchObject({
+      inputOperationId: "e2e_managed_activation_stale_0001",
+      message: "当前桌面文件已变化，不能提交过期的托管工作文件切换。",
+    });
+    expect(stateAfterStaleAttempt.lastManagedActivation?.operationId).toBe(payload.operationId);
+  } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeSourceFixture(source.sourceDirectory);
+  }
+});
+
+test("Electron Finder reveals verified project, visible Version Working Copy and derived AI task", async () => {
+  test.setTimeout(120_000);
+  const source = createSourceFixture("finder-derived-projections.html");
+  const launched = await launchPageRoot({ activeSourcePath: source.sourcePath });
+  try {
+    await waitForProjectReady(launched.page);
+    const initialWorkingCopyPath = await managedWorkingCopyPath(
+      launched.page,
+      source.sourcePath,
+    );
+    const projectsRoot = path.dirname(path.dirname(initialWorkingCopyPath));
+    const repository = new ProjectFileRepository({ projectsRoot });
+    let active = (await repository.workspace({ sourcePath: initialWorkingCopyPath })).target;
+    let v2Target = null;
+    for (let ordinal = 2; ordinal <= 6; ordinal += 1) {
+      const candidate = await repository.createCandidate({
+        target: active,
+        requestId: `req_e2e_finder_${ordinal}`,
+        candidateId: `candidate_e2e_finder_${ordinal}_0001`,
+        html: `<!doctype html><html><head><title>Finder V${ordinal}</title></head><body><p>Finder V${ordinal}</p></body></html>`,
+        expectedSourceSha256: active.sourceSha256,
+      });
+      active = (await repository.promoteCandidate({
+        target: active,
+        candidateId: candidate.candidate.candidateId,
+      })).target;
+      if (ordinal === 2) v2Target = active;
+    }
+    expect(v2Target?.workingCopyId).toBe("work_ver_0002");
+    const continued = await repository.activateVersionWorkingCopy({
+      target: active,
+      versionId: "ver_0002",
+      operationId: "e2e_finder_continue_v2_0001",
+      expectedActiveWorkingCopyId: "work_ver_0006",
+    });
+    const desktopV2 = await launched.page.evaluate((payload) => (
+      window.htmlAIProjects.activateManagedWorkingCopy(payload)
+    ), {
+      previousSourcePath: initialWorkingCopyPath,
+      nextSourcePath: continued.target.exactSourcePath,
+      expectedSha256: continued.target.sourceSha256,
+      projectId: continued.target.projectId,
+      documentId: continued.target.documentId,
+      workingCopyId: continued.target.workingCopyId,
+      versionId: continued.target.versionId,
+      projectRootPath: continued.target.projectRootPath,
+      operationId: continued.historyActivation.operationId,
+    });
+    expect(desktopV2.sourcePath).toBe(realpathSync(continued.target.exactSourcePath));
+    await repository.confirmVersionWorkingCopyActivation({
+      target: active,
+      operationId: continued.historyActivation.operationId,
+      previousWorkingCopyId: "work_ver_0006",
+      activatedWorkingCopyId: "work_ver_0002",
+      versionId: "ver_0002",
+    });
+
+    const revealedVersion = await launched.page.evaluate((sourcePath) => (
+      window.htmlAIProjects.revealVersionFile({ sourcePath, versionId: "ver_0002" })
+    ), desktopV2.sourcePath);
+    expect(revealedVersion.versionPath).toBe(realpathSync(v2Target.exactSourcePath));
+    expect(revealedVersion.versionPath.includes(`${path.sep}.pageroot${path.sep}`)).toBe(false);
+    const openedRoot = await bridgeJson(launched.page, "/open-folder", {
+      method: "POST",
+      body: { sourcePath: desktopV2.sourcePath },
+    });
+    expect(openedRoot.status).toBe(200);
+    expect(openedRoot.body.path).toBe(continued.target.projectRootPath);
+
+    const requestId = "req_e2e_visible_ai_task_0001";
+    const request = await repository.prepareRequest({
+      target: continued.target,
+      requestId,
+      attemptId: "attempt_001",
+      expectedSourceSha256: continued.target.sourceSha256,
+      request: {
+        freezeCutoffRevision: 0,
+        summary: "从历史 Version 2 生成待审阅的 Version 7",
+        comments: [],
+        changeEvents: [],
+        instructions: [],
+        targets: [],
+      },
+      prompt: "# E2E AI task\n\n只生成候选 HTML。\n",
+    });
+    const processingTask = await launched.page.evaluate((sourcePath) => (
+      window.htmlAIProjects.revealAiTask({ sourcePath })
+    ), desktopV2.sourcePath);
+    expect(processingTask.aiTaskPath).toMatch(/\/AI任务\/\d{4}-\d{2}-\d{2}-候选版本7$/u);
+    expect(processingTask.aiTaskPath.includes(`${path.sep}.pageroot${path.sep}`)).toBe(false);
+    expect(readFileSync(path.join(processingTask.aiTaskPath, "PROMPT.md"), "utf8"))
+      .toBe("# E2E AI task\n\n只生成候选 HTML。\n");
+
+    const candidateHtml = "<!doctype html><html><head><title>Finder V7</title></head><body><p>Finder V7 Candidate</p></body></html>";
+    const completed = await repository.completeRequest({
+      target: continued.target,
+      requestId,
+      attemptId: "attempt_001",
+      html: candidateHtml,
+    });
+    expect(completed.status).toBe("candidate-ready");
+    const readyTask = await launched.page.evaluate((sourcePath) => (
+      window.htmlAIProjects.revealAiTask({ sourcePath })
+    ), desktopV2.sourcePath);
+    const readyProjection = await repository.materializeAiTaskProjection({
+      target: continued.target,
+      requestId,
+      attemptId: "attempt_001",
+      candidateId: request.candidateId,
+    });
+    expect(readyTask.aiTaskPath).toBe(realpathSync(readyProjection.taskPath));
+    expect(readFileSync(readyProjection.candidatePath, "utf8")).toBe(candidateHtml);
+
+    writeFileSync(readyProjection.candidatePath, "<!doctype html><html><head><title>tampered</title></head><body><p>tampered</p></body></html>", "utf8");
+    const rebuiltTask = await launched.page.evaluate((sourcePath) => (
+      window.htmlAIProjects.revealAiTask({ sourcePath })
+    ), desktopV2.sourcePath);
+    expect(rebuiltTask.aiTaskPath).not.toBe(realpathSync(readyProjection.taskPath));
+    const hiddenCandidate = await repository.readCandidate({
+      target: continued.target,
+      candidateId: request.candidateId,
+    });
+    expect(hiddenCandidate.content).toBe(candidateHtml);
+    const promoted = await repository.promoteCandidate({
+      target: continued.target,
+      candidateId: request.candidateId,
+    });
+    expect(promoted.version).toMatchObject({
+      versionId: "ver_0007",
+      basedOnVersionId: "ver_0002",
+      previousVersionId: "ver_0006",
+    });
+  } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeSourceFixture(source.sourceDirectory);
+  }
+});
+
+test("Electron v4 registry only recovers Finder rename and protects moved copies plus Promotion collisions", async () => {
+  test.setTimeout(120_000);
+  const sourceDirectory = mkdtempSync(path.join(tmpdir(), "pageroot-native-source-e2e-"));
+  const sourcePath = path.join(sourceDirectory, "finder-registry-state.html");
+  const originalExternal = fixtureBuffer("source-fidelity.html");
+  writeFileSync(sourcePath, originalExternal);
+  const isolatedUserData = mkdtempSync(path.join(tmpdir(), "pageroot-native-e2e-"));
+  const outsideRoot = mkdtempSync(path.join(tmpdir(), "pageroot-managed-root-outside-"));
+  let electronApp = null;
+  try {
+    const launched = await launchPageRoot({ isolatedUserData });
+    electronApp = launched.electronApp;
+
+    const preview = await bridgeJson(
+      launched.page,
+      `/workspace?sourcePath=${encodeURIComponent(sourcePath)}`,
+    );
+    expect(preview.status).toBe(200);
+    expect(preview.body).toMatchObject({ registered: false });
+    const ensured = await bridgeJson(launched.page, "/project/ensure", {
+      method: "POST",
+      body: {
+        sourcePath,
+        expectedSourceSha256: preview.body.sourceSha256,
+        projectStorageVersion: "4.0.0",
+      },
+    });
+    expect(ensured.status).toBe(200);
+    expect(ensured.body).toMatchObject({
+      registered: true,
+      projectFileSchemaVersion: "4.0.0",
+      imported: true,
+    });
+    expect(readFileSync(sourcePath)).toEqual(originalExternal);
+
+    const firstTarget = ensured.body.openTarget;
+    const projectsRoot = path.dirname(firstTarget.projectRootPath);
+    const finderRenamedRoot = path.join(projectsRoot, "Finder 改名项目");
+    const firstWorkingCopyName = path.basename(firstTarget.exactSourcePath);
+    renameSync(firstTarget.projectRootPath, finderRenamedRoot);
+    const finderRenamedPath = path.join(finderRenamedRoot, firstWorkingCopyName);
+
+    const rootRecovered = await bridgeJson(
+      launched.page,
+      `/workspace?sourcePath=${encodeURIComponent(finderRenamedPath)}`,
+    );
+    expect(rootRecovered.status).toBe(200);
+    expect(rootRecovered.body).toMatchObject({
+      registered: true,
+      projectId: firstTarget.projectId,
+      documentId: firstTarget.documentId,
+    });
+    expect(rootRecovered.body.openTarget.projectRootPath).toBe(finderRenamedRoot);
+
+    const finderRenamedHtml = path.join(finderRenamedRoot, "Finder-B-V1.html");
+    renameSync(finderRenamedPath, finderRenamedHtml);
+    const htmlRecovered = await bridgeJson(
+      launched.page,
+      `/workspace?sourcePath=${encodeURIComponent(finderRenamedHtml)}`,
+    );
+    expect(htmlRecovered.status).toBe(200);
+    expect(htmlRecovered.body.openTarget).toMatchObject({
+      projectId: firstTarget.projectId,
+      workingCopyId: firstTarget.workingCopyId,
+      exactSourcePath: finderRenamedHtml,
+    });
+    const renamedManifest = JSON.parse(readFileSync(
+      path.join(finderRenamedRoot, ".pageroot", "manifest.json"),
+      "utf8",
+    ));
+    expect(renamedManifest.workingCopies[0]).toMatchObject({
+      sourceRelativePath: "Finder-B-V1.html",
+      preferredFileStem: "Finder-B",
+      preferredExtension: ".html",
+      workingCopyId: firstTarget.workingCopyId,
+    });
+
+    const movedRoot = path.join(outsideRoot, "moved-project");
+    const bytesBeforeMove = readFileSync(finderRenamedHtml);
+    const targetBeforeMove = htmlRecovered.body.openTarget;
+    renameSync(finderRenamedRoot, movedRoot);
+    const movedHtml = path.join(movedRoot, "Finder-B-V1.html");
+    const blockedSave = await bridgeJson(launched.page, "/autosave", {
+      method: "POST",
+      body: {
+        ...targetBeforeMove,
+        html: "<!doctype html><html><head><title>blocked</title></head><body><p>blocked</p></body></html>",
+        expectedSourceSha256: targetBeforeMove.sourceSha256,
+        editRevision: 1,
+      },
+    });
+    expect(blockedSave.status).toBe(404);
+    expect(blockedSave.body?.error?.code).toBe("REGISTERED_PROJECT_UNAVAILABLE");
+    expect(readFileSync(movedHtml)).toEqual(bytesBeforeMove);
+
+    const movedPreview = await bridgeJson(
+      launched.page,
+      `/workspace?sourcePath=${encodeURIComponent(movedHtml)}`,
+    );
+    expect(movedPreview.status).toBe(200);
+    expect(movedPreview.body).toMatchObject({ registered: false });
+
+    renameSync(movedRoot, finderRenamedRoot);
+    const returned = await bridgeJson(
+      launched.page,
+      `/workspace?sourcePath=${encodeURIComponent(finderRenamedHtml)}`,
+    );
+    expect(returned.status).toBe(200);
+    expect(returned.body).toMatchObject({
+      registered: true,
+      projectId: firstTarget.projectId,
+      documentId: firstTarget.documentId,
+    });
+
+    const copiedRoot = path.join(projectsRoot, "Finder 副本项目");
+    cpSync(finderRenamedRoot, copiedRoot, { recursive: true });
+    const copiedHtml = path.join(copiedRoot, "Finder-B-V1.html");
+    const copiedManifestPath = path.join(copiedRoot, ".pageroot", "manifest.json");
+    const copiedManifestBefore = readFileSync(copiedManifestPath);
+    const copiedPreview = await bridgeJson(
+      launched.page,
+      `/workspace?sourcePath=${encodeURIComponent(copiedHtml)}`,
+    );
+    expect(copiedPreview.status).toBe(200);
+    expect(copiedPreview.body).toMatchObject({ registered: false });
+    expect(readFileSync(copiedManifestPath)).toEqual(copiedManifestBefore);
+
+    const repository = new ProjectFileRepository({ projectsRoot });
+    await repository.initialize();
+    const workspace = await repository.workspace({ sourcePath: finderRenamedHtml });
+    const candidate = await repository.createCandidate({
+      target: workspace.target,
+      requestId: "req_e2e_registered_root",
+      candidateId: "candidate_e2e_registered_root_0001",
+      html: "<!doctype html><html><head><title>Finder candidate</title></head><body><p>Candidate retained for explicit adoption.</p></body></html>",
+      expectedSourceSha256: workspace.sourceSha256,
+    });
+    const userFile = path.join(finderRenamedRoot, "Finder-B-V2.html");
+    const userDirectory = path.join(finderRenamedRoot, "Finder-B-V2-V2.html");
+    const userSymlink = path.join(finderRenamedRoot, "Finder-B-V2-V2-V2.html");
+    const userSymlinkTarget = path.join(outsideRoot, "user-symlink-target.html");
+    writeFileSync(userFile, "user file must not be overwritten", "utf8");
+    mkdirSync(userDirectory);
+    writeFileSync(userSymlinkTarget, "user symlink target", "utf8");
+    symlinkSync(userSymlinkTarget, userSymlink);
+
+    const promoted = await repository.promoteCandidate({
+      target: workspace.target,
+      candidateId: candidate.candidate.candidateId,
+    });
+    expect(path.basename(promoted.target.exactSourcePath)).toBe("Finder-B-V2-V2-V2-V2.html");
+    expect(readFileSync(userFile, "utf8")).toBe("user file must not be overwritten");
+    expect(readdirSync(userDirectory)).toEqual([]);
+    expect(readFileSync(userSymlinkTarget, "utf8")).toBe("user symlink target");
+  } finally {
+    if (electronApp) {
+      await stopPageRoot(electronApp, isolatedUserData, { cleanup: false });
+    }
+    removeIsolatedUserData(isolatedUserData);
+    removeValidatedTemporaryDirectory(outsideRoot, "pageroot-managed-root-outside-");
+    removeValidatedTemporaryDirectory(sourceDirectory, "pageroot-native-source-e2e-");
+  }
+});
+
+test("Electron safely renames the managed V1 without starting a new project", {
+  tag: ["@gate-smoke","@smoke-project-lifecycle"],
+}, async () => {
+  const launched = await launchPageRoot();
+  const externalOriginalPath = path.join(
+    realpathSync(launched.isolatedUserData),
+    "欢迎来到源页.html",
+  );
+  try {
+    await waitForProjectReady(launched.page);
+    let managedOriginalPath = "";
+    await expect.poll(
+      async () => {
+        const active = await launched.page.evaluate(
+          () => window.htmlAIProjects?.getActiveProject(),
+        );
+        managedOriginalPath = String(active?.sourcePath || "");
+        return Boolean(
+          managedOriginalPath && managedOriginalPath !== externalOriginalPath,
+        );
+      },
+      { timeout: 20_000 },
+    ).toBe(true);
+    expect(path.basename(managedOriginalPath)).toBe("欢迎来到源页-V1.html");
+    const projectRoot = path.dirname(managedOriginalPath);
+    const renamedPath = path.join(projectRoot, "我的页面-V1.html");
+    const originalBytes = readFileSync(externalOriginalPath);
+    const originalManifest = JSON.parse(readFileSync(
+      path.join(projectRoot, ".pageroot", "manifest.json"),
+      "utf8",
+    ));
+    const projectId = originalManifest.projectId;
+
+    const title = launched.page.getByRole("button", {
+      name: "重命名文件 欢迎来到源页-V1",
+      exact: true,
+    });
+    await expect(title).toBeVisible();
+    await title.click();
+    const input = launched.page.getByRole("textbox", {
+      name: "文件名（不含后缀）",
+      exact: true,
+    });
+    await expect(input).toHaveValue("欢迎来到源页-V1");
+    await expect(input.locator("..")).toContainText(".html");
+    await input.fill("我的页面-V1");
+    const header = launched.page.locator("header.workbench-header");
+    await expect(header).toHaveAttribute("data-file-renaming", "true");
+    const fileHeader = launched.page.locator(".window-file");
+    const fileHeaderBox = await fileHeader.boundingBox();
+    expect(fileHeaderBox).not.toBeNull();
+    await fileHeader.click({
+      position: {
+        x: fileHeaderBox.width - 8,
+        y: fileHeaderBox.height / 2,
+      },
+    });
+
+    await expect(input).toHaveCount(0);
+    await expect(header).not.toHaveAttribute("data-file-renaming", "true");
+    await expect.poll(
+      async () => (
+        await launched.page.evaluate(() => window.htmlAIProjects?.getActiveProject())
+      )?.sourcePath,
+      { timeout: 20_000 },
+    ).toBe(renamedPath);
+    await expect(launched.page.getByRole("button", {
+      name: "重命名文件 我的页面-V1",
+      exact: true,
+    })).toBeVisible();
+    expect(readFileSync(externalOriginalPath)).toEqual(originalBytes);
+    expect(existsSync(managedOriginalPath)).toBe(false);
+    expect(readFileSync(renamedPath)).toEqual(originalBytes);
+
+    const state = JSON.parse(
+      readFileSync(path.join(launched.isolatedUserData, "html-projects.json"), "utf8"),
+    );
+    expect(state.version).toBe(2);
+    expect(state.activePath).toBe(renamedPath);
+    expect(state.recent[0].path).toBe(renamedPath);
+    expect(state.pendingRename).toBeNull();
+    expect(state.lastRename.sourcePath).toBe(renamedPath);
+
+    const renamedManifest = JSON.parse(readFileSync(
+      path.join(projectRoot, ".pageroot", "manifest.json"),
+      "utf8",
+    ));
+    expect(renamedManifest.projectId).toBe(projectId);
+    expect(renamedManifest.documentId).toBe(originalManifest.documentId);
+    expect(renamedManifest.workingCopies).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        workingCopyId: "work_ver_0001",
+        sourceRelativePath: "我的页面-V1.html",
+        preferredFileStem: "我的页面",
+        preferredExtension: ".html",
+      }),
+    ]));
+    const registry = JSON.parse(readFileSync(
+      path.join(path.dirname(projectRoot), ".pageroot-registry.json"),
+      "utf8",
+    ));
+    expect(realpathSync(registry.projects[projectId].registeredProjectRootPath))
+      .toBe(realpathSync(projectRoot));
+  } finally {
+    await stopPageRoot(
+      launched.electronApp,
+      launched.isolatedUserData,
+    );
+  }
+});
+
+test("Electron rapid project switching and immediate close preserve the last native edit", async () => {
+  test.setTimeout(180_000);
+  const projectA = createSourceFixture("close-switch-a.html");
+  const projectB = createSourceFixture("close-switch-b.html");
+  const firstLaunch = await launchPageRoot({
+    activeSourcePath: projectA.sourcePath,
+    recentSourcePaths: [projectA.sourcePath, projectB.sourcePath],
+  });
+  let firstClosed = false;
+  let reopened = null;
+  try {
+    const switchedText = "快速切换仍然安全写回";
+    const closeText = "关闭前最后一次原位编辑";
+    let { frame } = await loadedDiskFrame(
+      firstLaunch.page,
+      projectA.sourcePath,
+      "list-item",
+    );
+    await activateNativeEdit(frame, "list-item");
+    await setTextSelection(frame, "list-item", 0, ORIGINAL_LIST_TEXT.length);
+    await firstLaunch.page.keyboard.insertText(switchedText);
+    await expect(frame.locator(caseSelector("list-item"))).toHaveText(switchedText);
+    const projectAWorkingCopyPath = await managedWorkingCopyPath(
+      firstLaunch.page,
+      projectA.sourcePath,
+    );
+
+    await firstLaunch.page.getByRole("button", { name: "打开新的本地 HTML" }).click();
+    await firstLaunch.page.locator(".recent-file-row")
+      .filter({ hasText: "close-switch-b.html" })
+      .click();
+    await loadedDiskFrame(firstLaunch.page, projectB.sourcePath, "list-item");
+    await expect.poll(
+      () => readFileSync(projectAWorkingCopyPath, "utf8"),
+      { timeout: 20_000 },
+    ).toContain(switchedText);
+    expect(readFileSync(projectA.sourcePath, "utf8")).not.toContain(switchedText);
+
+    ({ frame } = await openRecentProject(
+      firstLaunch.page,
+      projectAWorkingCopyPath,
+      "list-item",
+      path.basename(projectA.sourcePath),
+    ));
+    await expect(frame.locator(caseSelector("list-item"))).toHaveText(switchedText);
+    await activateNativeEdit(frame, "list-item");
+    await setTextSelection(frame, "list-item", 0, switchedText.length);
+    await firstLaunch.page.keyboard.insertText(closeText);
+    await expect(frame.locator(caseSelector("list-item"))).toHaveText(closeText);
+
+    await closePageRootGracefully(firstLaunch.electronApp, firstLaunch.page);
+    firstClosed = true;
+    reopened = await launchPageRoot({
+      isolatedUserData: firstLaunch.isolatedUserData,
+    });
+    const { frame: reopenedFrame } = await loadedDiskFrame(
+      reopened.page,
+      projectAWorkingCopyPath,
+      "list-item",
+    );
+    await expect(reopenedFrame.locator(caseSelector("list-item")))
+      .toHaveText(closeText);
+    expect(readFileSync(projectAWorkingCopyPath, "utf8")).toContain(closeText);
+    expect(readFileSync(projectA.sourcePath, "utf8")).not.toContain(closeText);
+  } finally {
+    if (reopened) {
+      await stopPageRoot(reopened.electronApp, reopened.isolatedUserData);
+    } else if (!firstClosed) {
+      await stopPageRoot(
+        firstLaunch.electronApp,
+        firstLaunch.isolatedUserData,
+      );
+    } else {
+      removeIsolatedUserData(firstLaunch.isolatedUserData);
+    }
+    removeSourceFixture(projectA.sourceDirectory);
+    removeSourceFixture(projectB.sourceDirectory);
+  }
+});
+
+test("Electron follows a same-directory Finder rename then a title-bar rename", async () => {
+  const fixture = createSourceFixture("finder-rename-sync.html");
+  let electronApp = null;
+  let isolatedUserData = null;
+  try {
+    const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+    electronApp = launched.electronApp;
+    isolatedUserData = launched.isolatedUserData;
+    await loadedDiskFrame(
+      launched.page,
+      fixture.sourcePath,
+      "list-item",
+    );
+    const managedSourcePath = await managedWorkingCopyPath(
+      launched.page,
+      fixture.sourcePath,
+    );
+    const beforeWorkspace = await bridgeJson(
+      launched.page,
+      `/workspace?sourcePath=${encodeURIComponent(managedSourcePath)}`,
+    );
+    const beforeTarget = beforeWorkspace.body?.openTarget || beforeWorkspace.body;
+    const beforeIds = {
+      projectId: beforeTarget.projectId,
+      documentId: beforeTarget.documentId,
+      workingCopyId: beforeTarget.workingCopyId || beforeTarget.activeWorkingCopyId,
+      versionId: beforeTarget.versionId
+        || beforeTarget.currentExactVersionId
+        || beforeTarget.currentBasedOnVersionId,
+    };
+    const beforeManifest = await readManagedManifest(managedSourcePath);
+    const beforeVersionCount = beforeManifest.versions.length;
+    const finderName = "Finder 新名字-V1.html";
+    const finderPath = path.join(path.dirname(managedSourcePath), finderName);
+    renameSync(managedSourcePath, finderPath);
+
+    await waitForTitleStem(launched.page, path.basename(finderName, ".html"));
+    await waitForActiveSourcePath(launched.page, finderPath);
+    const { frame } = await loadedDiskFrame(
+      launched.page,
+      finderPath,
+      "list-item",
+    );
+
+    const afterWorkspace = await bridgeJson(
+      launched.page,
+      `/workspace?sourcePath=${encodeURIComponent(finderPath)}`,
+    );
+    const afterTarget = afterWorkspace.body?.openTarget || afterWorkspace.body;
+    expect(afterTarget.projectId).toBe(beforeIds.projectId);
+    expect(afterTarget.documentId).toBe(beforeIds.documentId);
+    expect(afterTarget.workingCopyId || afterTarget.activeWorkingCopyId)
+      .toBe(beforeIds.workingCopyId);
+    expect(
+      afterTarget.versionId
+      || afterTarget.currentExactVersionId
+      || afterTarget.currentBasedOnVersionId,
+    ).toBe(beforeIds.versionId);
+    const desktopState = await readDesktopProjectState(isolatedUserData);
+    expect(sameDesktopSourcePath(desktopState.activePath, finderPath)).toBe(true);
+    expect(sameDesktopSourcePath(desktopState.recent[0].path, finderPath)).toBe(true);
+    expect(sameDesktopSourcePath(
+      desktopState.activeManagedLocator.sourcePath,
+      finderPath,
+    )).toBe(true);
+    const afterManifest = await readManagedManifest(finderPath);
+    expect(afterManifest.versions.length).toBe(beforeVersionCount);
+    expect(afterManifest.workingCopies[0].sourceRelativePath).toBe(finderName);
+
+    const beforeRevision = Number(
+      await launched.page.locator("[data-persist-state]").first()
+        .getAttribute("data-persisted-revision"),
+    );
+    await activateNativeEdit(frame, "list-item");
+    await setTextSelection(frame, "list-item", 0, 0);
+    await launched.page.keyboard.insertText("定位后仍可编辑。");
+    await launched.page.keyboard.press("Escape");
+    await expectCheckpointPersisted(launched.page, beforeRevision);
+    expect(readFileSync(finderPath, "utf8")).toContain("定位后仍可编辑。");
+    expect(readFileSync(finderPath, "utf8")).toContain(ORIGINAL_LIST_TEXT);
+    await addCanvasComment(
+      launched.page,
+      await currentEditorFrame(launched.page),
+      "list-item",
+      "Finder 改名后评论仍保留。",
+    );
+
+    await launched.page.getByRole("button", { name: /重命名文件/u }).click();
+    const renameInput = launched.page.getByRole("textbox", { name: "文件名（不含后缀）" });
+    await expect(renameInput).toBeFocused();
+    await renameInput.fill("pageroot-renamed-V1");
+    await renameInput.press("Enter");
+    const pagerootPath = path.join(
+      path.dirname(finderPath),
+      "pageroot-renamed-V1.html",
+    );
+    await waitForTitleStem(launched.page, "pageroot-renamed-V1");
+    await expect.poll(() => existsSync(pagerootPath)).toBe(true);
+    const finalManifest = await readManagedManifest(pagerootPath);
+    expect(finalManifest.versions.length).toBe(beforeVersionCount);
+    expect(readFileSync(pagerootPath, "utf8")).toContain("定位后仍可编辑。");
+    await expect(launched.page.locator(".comment-card").filter({
+      hasText: "Finder 改名后评论仍保留。",
+    })).toHaveCount(1);
+  } finally {
+    if (electronApp && isolatedUserData) {
+      await stopPageRoot(electronApp, isolatedUserData);
+    }
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
+
+test("Electron follows a title-bar rename, then Finder, then another title-bar rename", async () => {
+  const fixture = createSourceFixture("title-bar-finder-loop.html");
+  let electronApp = null;
+  let isolatedUserData = null;
+  try {
+    const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+    electronApp = launched.electronApp;
+    isolatedUserData = launched.isolatedUserData;
+    await loadedDiskFrame(launched.page, fixture.sourcePath, "list-item");
+    const managedSourcePath = await managedWorkingCopyPath(
+      launched.page,
+      fixture.sourcePath,
+    );
+    const beforeWorkspace = await bridgeJson(
+      launched.page,
+      `/workspace?sourcePath=${encodeURIComponent(managedSourcePath)}`,
+    );
+    const beforeTarget = beforeWorkspace.body?.openTarget || beforeWorkspace.body;
+    const beforeIds = {
+      projectId: beforeTarget.projectId,
+      documentId: beforeTarget.documentId,
+      workingCopyId: beforeTarget.workingCopyId || beforeTarget.activeWorkingCopyId,
+    };
+    const projectDirectory = path.dirname(managedSourcePath);
+
+    await launched.page.getByRole("button", { name: /重命名文件/u }).click();
+    const firstInput = launched.page.getByRole("textbox", { name: "文件名（不含后缀）" });
+    await expect(firstInput).toBeFocused();
+    await firstInput.fill("title-first-V1");
+    await firstInput.press("Enter");
+    const titleBarPath = path.join(projectDirectory, "title-first-V1.html");
+    await waitForTitleStem(launched.page, "title-first-V1");
+    await expect.poll(() => existsSync(titleBarPath)).toBe(true);
+    await waitForActiveSourcePath(launched.page, titleBarPath);
+    await expect(launched.page.locator("#window-file-rename-error")).toHaveCount(0);
+
+    const finderName = "finder-second-V1.html";
+    const finderPath = path.join(projectDirectory, finderName);
+    renameSync(titleBarPath, finderPath);
+    await waitForTitleStem(launched.page, path.basename(finderName, ".html"));
+    await waitForActiveSourcePath(launched.page, finderPath);
+    await expect(launched.page.locator("#window-file-rename-error")).toHaveCount(0);
+
+    await launched.page.getByRole("button", { name: /重命名文件/u }).click();
+    const secondInput = launched.page.getByRole("textbox", { name: "文件名（不含后缀）" });
+    await expect(secondInput).toBeFocused();
+    await expect(secondInput).toHaveValue("finder-second-V1");
+    await secondInput.fill("title-third-V1");
+    await secondInput.press("Enter");
+    const finalPath = path.join(projectDirectory, "title-third-V1.html");
+    await waitForTitleStem(launched.page, "title-third-V1");
+    await expect.poll(() => existsSync(finalPath)).toBe(true);
+    await waitForActiveSourcePath(launched.page, finalPath);
+    await expect(launched.page.locator("#window-file-rename-error")).toHaveCount(0);
+
+    const afterWorkspace = await bridgeJson(
+      launched.page,
+      `/workspace?sourcePath=${encodeURIComponent(finalPath)}`,
+    );
+    const afterTarget = afterWorkspace.body?.openTarget || afterWorkspace.body;
+    expect(afterTarget.projectId).toBe(beforeIds.projectId);
+    expect(afterTarget.documentId).toBe(beforeIds.documentId);
+    expect(afterTarget.workingCopyId || afterTarget.activeWorkingCopyId)
+      .toBe(beforeIds.workingCopyId);
+    const afterManifest = await readManagedManifest(finalPath);
+    expect(afterManifest.workingCopies[0].sourceRelativePath)
+      .toBe("title-third-V1.html");
+  } finally {
+    if (electronApp && isolatedUserData) {
+      await stopPageRoot(electronApp, isolatedUserData);
+    }
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
+
+test("Electron keeps PageRoot bytes when Finder renames and edits the same file", async () => {
+  const fixture = createSourceFixture("finder-rename-conflict.html");
+  let electronApp = null;
+  let isolatedUserData = null;
+  try {
+    const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+    electronApp = launched.electronApp;
+    isolatedUserData = launched.isolatedUserData;
+    await loadedDiskFrame(launched.page, fixture.sourcePath, "list-item");
+    const managedSourcePath = await managedWorkingCopyPath(
+      launched.page,
+      fixture.sourcePath,
+    );
+    const finderPath = path.join(
+      path.dirname(managedSourcePath),
+      "finder-conflict-V1.html",
+    );
+    const original = readFileSync(managedSourcePath);
+    renameSync(managedSourcePath, finderPath);
+    writeFileSync(finderPath, `${original.toString("utf8")}\n<!-- finder-external -->\n`, "utf8");
+
+    await waitForTitleStem(launched.page, "finder-conflict-V1");
+    await waitForActiveSourcePath(launched.page, finderPath);
+    await expect.poll(async () => (
+      launched.page.locator("[data-persist-state]").first().getAttribute("data-persist-state")
+    )).toBe("conflict");
+    expect(readFileSync(finderPath, "utf8")).toContain("finder-external");
+    const editorFrame = await currentEditorFrame(launched.page);
+    await expect(editorFrame.locator(caseSelector("list-item")))
+      .toContainText(ORIGINAL_LIST_TEXT);
+    expect(await editorFrame.locator("body").innerHTML()).not.toContain("finder-external");
+  } finally {
+    if (electronApp && isolatedUserData) {
+      await stopPageRoot(electronApp, isolatedUserData);
+    }
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
+
+test("Electron does not follow a copied Working Copy or leave the title stuck after a real rename error", async () => {
+  const fixture = createSourceFixture("finder-rename-copy.html");
+  let electronApp = null;
+  let isolatedUserData = null;
+  try {
+    const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+    electronApp = launched.electronApp;
+    isolatedUserData = launched.isolatedUserData;
+    await loadedDiskFrame(launched.page, fixture.sourcePath, "list-item");
+    const managedSourcePath = await managedWorkingCopyPath(
+      launched.page,
+      fixture.sourcePath,
+    );
+    const originalStem = path.basename(managedSourcePath, path.extname(managedSourcePath));
+    const copiedPath = path.join(
+      path.dirname(managedSourcePath),
+      "copied-working-copy.html",
+    );
+    cpSync(managedSourcePath, copiedPath);
+    const copyDeadline = Date.now() + 800;
+    await expect.poll(async () => {
+      const current = await launched.page.evaluate(() => (
+        window.htmlAIProjects?.getActiveProject()
+      ));
+      if (current?.sourcePath !== managedSourcePath) return current?.sourcePath || "";
+      return Date.now() >= copyDeadline ? managedSourcePath : "";
+    }).toBe(managedSourcePath);
+    await expect(titleStemLocator(launched.page)).toHaveText(originalStem);
+
+    await launched.page.getByRole("button", { name: /重命名文件/u }).click();
+    const renameInput = launched.page.getByRole("textbox", { name: "文件名（不含后缀）" });
+    await renameInput.fill("bad/name");
+    await launched.page.locator("[data-persist-state]").first().click({ force: true });
+    await expect(launched.page.locator("#window-file-rename-error")).toBeVisible();
+    await launched.page.locator("body").click({ position: { x: 12, y: 12 }, force: true });
+    await expect(launched.page.getByRole("button", { name: /重命名文件/u })).toBeVisible();
+    await expect(titleStemLocator(launched.page)).toHaveText(originalStem);
+    expect(existsSync(managedSourcePath)).toBe(true);
+  } finally {
+    if (electronApp && isolatedUserData) {
+      await stopPageRoot(electronApp, isolatedUserData);
+    }
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
+
+test("Electron follows a same-parent project folder rename then a title-bar rename", async () => {
+  const fixture = createSourceFixture("finder-folder-rename.html");
+  let electronApp = null;
+  let isolatedUserData = null;
+  try {
+    const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+    electronApp = launched.electronApp;
+    isolatedUserData = launched.isolatedUserData;
+    await loadedDiskFrame(launched.page, fixture.sourcePath, "list-item");
+    const managedSourcePath = await managedWorkingCopyPath(
+      launched.page,
+      fixture.sourcePath,
+    );
+    const beforeWorkspace = await bridgeJson(
+      launched.page,
+      `/workspace?sourcePath=${encodeURIComponent(managedSourcePath)}`,
+    );
+    const beforeTarget = beforeWorkspace.body?.openTarget || beforeWorkspace.body;
+    const projectRoot = path.dirname(managedSourcePath);
+    const renamedRoot = path.join(path.dirname(projectRoot), "Finder 项目文件夹");
+    const relocatedPath = path.join(renamedRoot, path.basename(managedSourcePath));
+    renameSync(projectRoot, renamedRoot);
+    await waitForDesktopActivePath(isolatedUserData, relocatedPath);
+    await waitForActiveSourcePath(launched.page, relocatedPath);
+    await waitForTitleStem(
+      launched.page,
+      path.basename(managedSourcePath, path.extname(managedSourcePath)),
+    );
+
+    await launched.page.getByRole("button", { name: /重命名文件/u }).click();
+    const renameInput = launched.page.getByRole("textbox", { name: "文件名（不含后缀）" });
+    await expect(renameInput).toBeFocused();
+    await renameInput.fill("folder-renamed-V1");
+    await renameInput.press("Enter");
+    const pagerootPath = path.join(renamedRoot, "folder-renamed-V1.html");
+    await waitForTitleStem(launched.page, "folder-renamed-V1");
+    await expect.poll(() => existsSync(pagerootPath)).toBe(true);
+    const afterWorkspace = await bridgeJson(
+      launched.page,
+      `/workspace?sourcePath=${encodeURIComponent(pagerootPath)}`,
+    );
+    const afterTarget = afterWorkspace.body?.openTarget || afterWorkspace.body;
+    expect(afterTarget.projectId).toBe(beforeTarget.projectId);
+    expect(afterTarget.workingCopyId).toBe(beforeTarget.workingCopyId);
+  } finally {
+    if (electronApp && isolatedUserData) {
+      await stopPageRoot(electronApp, isolatedUserData);
+    }
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
+
+test("Electron does not follow a Working Copy moved out of the registered project root", async () => {
+  const fixture = createSourceFixture("finder-rename-escaped.html");
+  let electronApp = null;
+  let isolatedUserData = null;
+  let outsideDirectory = null;
+  try {
+    const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+    electronApp = launched.electronApp;
+    isolatedUserData = launched.isolatedUserData;
+    await loadedDiskFrame(launched.page, fixture.sourcePath, "list-item");
+    const managedSourcePath = await managedWorkingCopyPath(
+      launched.page,
+      fixture.sourcePath,
+    );
+    const originalStem = path.basename(managedSourcePath, path.extname(managedSourcePath));
+    outsideDirectory = mkdtempSync(path.join(tmpdir(), "pageroot-native-escaped-"));
+    const escapedPath = path.join(outsideDirectory, path.basename(managedSourcePath));
+    renameSync(managedSourcePath, escapedPath);
+    const moveDeadline = Date.now() + 1_200;
+    await expect.poll(async () => {
+      try {
+        const state = await readDesktopProjectState(isolatedUserData);
+        if (sameDesktopSourcePath(state.activePath, escapedPath)) return "followed";
+      } catch {
+        return "";
+      }
+      return Date.now() >= moveDeadline ? "stayed" : "";
+    }).toBe("stayed");
+    await expect(titleStemLocator(launched.page)).toHaveText(originalStem);
+    expect(existsSync(escapedPath)).toBe(true);
+    expect(existsSync(managedSourcePath)).toBe(false);
+  } finally {
+    if (electronApp && isolatedUserData) {
+      await stopPageRoot(electronApp, isolatedUserData);
+    }
+    if (outsideDirectory) {
+      removeValidatedTemporaryDirectory(outsideDirectory, "pageroot-native-escaped-");
+    }
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});

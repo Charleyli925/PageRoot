@@ -6,16 +6,16 @@ import aiConfig from "./playwright.ai-closed-loop.config.mjs";
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
 const productRoot = path.resolve(currentDirectory, "../../..");
+const smokeId = process.env.PAGEROOT_SMOKE_SUITE || "ai-smoke";
 
 export default defineConfig({
   ...aiConfig,
-  grep: /a verified AI result stays pending through desktop review until the user accepts it|a broad but related AI return is accepted without a target-scope error|a rewrite outside <main> is still reviewed/u,
-  outputDir: path.join(productRoot, "output/playwright/ai-closed-loop-smoke/results"),
+  outputDir: path.join(productRoot, "output/playwright", smokeId, "results"),
   reporter: [
     ["list"],
     ["html", {
       open: "never",
-      outputFolder: path.join(productRoot, "output/playwright/ai-closed-loop-smoke/report"),
+      outputFolder: path.join(productRoot, "output/playwright", smokeId, "report"),
     }],
   ],
 });

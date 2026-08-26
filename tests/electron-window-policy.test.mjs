@@ -5,21 +5,29 @@ import test from "node:test";
 const sourceUrl = (relativePath) => new URL(relativePath, import.meta.url);
 
 test("Electron automation stays backgrounded unless foreground debugging is explicit", async () => {
+  const nativeSpecFiles = [
+    "./e2e/electron/electron-native-harness.mjs",
+    "./e2e/electron/electron-project-lifecycle.spec.mjs",
+    "./e2e/electron/electron-edit-runtime.spec.mjs",
+    "./e2e/electron/electron-native-input.spec.mjs",
+    "./e2e/electron/electron-comments-and-rules.spec.mjs",
+    "./e2e/electron/electron-source-recovery.spec.mjs",
+  ];
   const [
     mainProcess,
     appFixture,
-    nativeSuite,
-    aiSuite,
-    preflightSuite,
-    preflightMain,
+    ...productSuites
   ] = await Promise.all([
     readFile(sourceUrl("../desktop/main.mjs"), "utf8"),
-    readFile(sourceUrl("./e2e/electron/helpers/pageroot-app-fixture.mjs"), "utf8"),
-    readFile(sourceUrl("./e2e/electron/native-dom-electron.spec.mjs"), "utf8"),
-    readFile(sourceUrl("./e2e/electron/ai-handoff-closed-loop.spec.mjs"), "utf8"),
+    readFile(sourceUrl("./e2e/electron/helpers/electron-app-launch.mjs"), "utf8"),
+    ...nativeSpecFiles.map((file) => readFile(sourceUrl(file), "utf8")),
+    readFile(sourceUrl("./e2e/electron/ai-closed-loop-helpers.mjs"), "utf8"),
     readFile(sourceUrl("./e2e/electron/ci-environment-preflight.spec.mjs"), "utf8"),
     readFile(sourceUrl("./e2e/electron/fixtures/ci-preflight-main.mjs"), "utf8"),
   ]);
+  const preflightSuite = productSuites.at(-2);
+  const preflightMain = productSuites.at(-1);
+  const nativeAndAiSuites = productSuites.slice(0, -2);
 
   assert.match(mainProcess, /PAGEROOT_E2E_FOREGROUND === "1"/u);
   // 后台 E2E 不再使用 accessory 激活策略彻底隐藏应用：Dock 图标保留，
@@ -54,8 +62,8 @@ test("Electron automation stays backgrounded unless foreground debugging is expl
   assert.doesNotMatch(appFixture, /window\?\.show\(\)/u);
   assert.doesNotMatch(appFixture, /window\?\.focus\(\)/u);
 
-  for (const productSuite of [nativeSuite, aiSuite]) {
-    assert.match(productSuite, /\.\/helpers\/pageroot-app-fixture\.mjs/u);
+  assert.match(nativeAndAiSuites[0], /\.\/helpers\/pageroot-app-fixture\.mjs/u);
+  for (const productSuite of nativeAndAiSuites) {
     assert.doesNotMatch(productSuite, /page\.bringToFront\(\)/u);
     assert.doesNotMatch(productSuite, /app\.focus\(\{\s*steal:\s*true\s*\}\)/u);
     assert.doesNotMatch(productSuite, /window\?\.show\(\)/u);

@@ -97,13 +97,13 @@ rewritten, so it is an immutable record. The authored sub-records listed in item
   unknown members it also carried those five envelope members back from disk and
   spread them over the authoritative values. A tampered file could then pin
   `schemaVersion` and reassign the Working Copy. Item 6 and item 7 exist because
-  of that defect, and `tests/project-file-repository.test.mjs` reproduces it.
+  of that defect, and `tests/project-working-copy-save.test.mjs` reproduces it.
 - A future member can be added to a mutable record without a schema-version bump
   and without a migration pass, which is what makes account identity, record
   provenance and portable/device data separation additive rather than breaking
   changes.
 - `tests/source-history.test.mjs`, `tests/draft-service.test.mjs` and
-  `tests/project-file-repository.test.mjs` each prove the round trip and each
+  `tests/project-working-copy-save.test.mjs` each prove the round trip and each
   fails without the corresponding production change. `source-history` also proves
   that an unknown member never rescues an invalid required member.
 - **This protects builds from this change onward only.** A build released before

@@ -11,7 +11,9 @@ test.beforeEach(async ({ page }) => {
   await page.goto("/");
 });
 
-test("edit mode reveals semantic source content without running authored actions or changing bytes", async ({
+test("edit mode reveals semantic source content without running authored actions or changing bytes", {
+  tag: ["@gate-smoke","@smoke-editing"],
+}, async ({
   page,
 }) => {
   const original = fixtureBuffer("presentation-actions.html");
