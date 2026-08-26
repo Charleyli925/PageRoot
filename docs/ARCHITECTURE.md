@@ -266,6 +266,7 @@ services.
 | --- | --- |
 | Bridge routes, timeouts and structured outcomes | `app/application/bridge-client.js` |
 | Runtime Bridge/Session/workflow composition, aggregate frozen snapshot and application event stream | `createRuntimeWorkspaceController()` and `WorkspaceController` in `app/application/workspace-controller.js` |
+| Browser-workbench tab presentation and safe activation | `app/application/workbench-tabs-session.js` owns order/active/pending/mounted/runtime-owner projection; `app/application/workbench-tabs-workflow.js` delegates document switches to the one `WorkspaceController`/`ProjectWorkflow` and confirms identity before commit; `app/workbench/WorkbenchChrome.tsx` is presentation only |
 | Open/registered project identity, session generation and late-query fencing | `app/application/project-session.js` |
 | External OS/QoderWork HTML-open delivery, opaque request deduplication, read-only A/B/C classification, Prepared Intent, committed-exit one-shot handoff, cold-start native failure presentation from stable product codes, whole project-open transition ordering, monotonic deferred-transition notification, blocker-gated/manual safe-switch retry, accepted-result FIFO and final renderer fence | `desktop/external-file-open.mjs`, `desktop/prepared-html-open.mjs`, `desktop/project-open-queue.mjs`, `app/application/external-file-open-session.js`, `app/application/project-application-session.js` |
 | First-open and already-imported confirmation prompt | `app/workbench/ExternalHtmlOpenDialog.tsx`, projected from `ProjectWorkflow` |
@@ -348,6 +349,15 @@ editing authority; `IslandEditingController` and `SourcePatchEngine` remain
 the only production text and source-mutation route.
 
 ## Persistence
+
+Desktop tab restoration uses a separate bounded `workbench-tabs.json`. Its
+strict version-1 schema contains only tab IDs and durable `projectId +
+documentId` pairs; titles are refreshed from the Registry projection after
+open. It never persists source paths, HTML, Hashes or AI authority. Writes use
+same-directory temporary creation plus atomic rename. `html-projects.json`
+continues to own `activePath` compatibility, and restoration treats a stored
+active document as pending until Registry open and Controller identity
+publication succeed.
 
 Direct edits form ordered revisions and are written through a single queue. Every write checks the expected source Hash, uses a same-directory temporary file and atomic replacement, then rereads the result. External modification causes a fail-closed conflict.
 
