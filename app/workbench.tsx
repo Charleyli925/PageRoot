@@ -94,6 +94,7 @@ import {
   type QoderGuidanceKind,
 } from "./domain/qoder-availability.js";
 import { createWorkspaceControllerCodecs } from "./application/workspace-controller-codecs.js";
+import { createBrowserFileTabIdentity } from "./application/browser-file-tab-identity.js";
 import type { CommentSessionSnapshot } from "./application/comment-session.js";
 import type { DocumentSessionSnapshot } from "./application/document-session.js";
 import { runLocalUserAction } from "./application/local-action-outcomes.js";
@@ -4596,13 +4597,22 @@ export default function Workbench() {
         fatal: true,
         ignoreBOM: true,
       }).decode(await file.arrayBuffer());
+      const sourceSha256 = await browserSha256(fileHtml);
+      const tabIdentity = await createBrowserFileTabIdentity({
+        name: file.name,
+        size: file.size,
+        lastModified: file.lastModified,
+        sourceSha256,
+        sha256: browserSha256,
+      });
       workspaceController.acceptBrowserProject({
         operationId,
         project: {
+          ...tabIdentity,
           name: file.name,
           sourcePath: null,
           html: fileHtml,
-          sha256: await browserSha256(fileHtml),
+          sha256: sourceSha256,
         },
       });
     } catch (cause) {

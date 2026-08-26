@@ -417,6 +417,18 @@
       ]
     },
     {
+      "id": "browser-file-tab-identity",
+      "patterns": [
+        "^app/application/browser-file-tab-identity\\.(?:js|d\\.ts)$",
+        "^tests/browser-file-tab-identity\\.test\\.mjs$"
+      ],
+      "suites": ["typecheck", "browser-smoke"],
+      "nodeTests": [
+        "tests/browser-file-tab-identity.test.mjs",
+        "tests/project-workflow.test.mjs"
+      ]
+    },
+    {
       "id": "workspace-controller",
       "patterns": [
         "^app/application/workspace-controller(?:-codecs)?\\.(?:js|d\\.ts)$",

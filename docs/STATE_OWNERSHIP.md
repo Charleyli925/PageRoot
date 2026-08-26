@@ -176,6 +176,13 @@ Rules:
   registered-tab switch may stage or refresh that identity, but only
   `WorkbenchTabsWorkflow` may commit its active/mounted tab after Controller
   identity verification.
+- Browser-only file input has no filesystem locator authority. After bytes are
+  decoded and hashed, it mints a presentation identity from a versioned digest
+  of NFC filename, size, last-modified time and content Hash. The resulting
+  `project_browser_* + doc_browser_*` pair lets reselection deduplicate and
+  `project-applied` replace Start, but it never becomes path, HTML or Hash
+  authority. Desktop identities continue to come only from verified
+  Bridge/managed-open results.
 - A failed Desktop acknowledgement retains an opaque request-keyed completion
   in `ProjectWorkflow`: retry performs only that ack, while the external Session
   keeps the FIFO head and withholds successors. Close drain cancels and

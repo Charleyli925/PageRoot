@@ -123,6 +123,8 @@ Workbench 只确认已提交 loading surface、传入窄 port 并消费快照。
 - Accepted ProjectApplication 的慢 A/快 B Node 联测把真实 `project-applied`
   事件同步投影到同一 `WorkbenchTabsSession`，必须同时保留 A/B、只聚焦 B 且不重复；pending
   registered switch 的事件投影不得越过 `WorkbenchTabsWorkflow` 身份核对提前 commit。
+- Browser-file identity Node 测试证明版本化 metadata/content 摘要重选稳定、同内容异名不混同且不携带
+  path/HTML/Hash 权威；ProjectWorkflow→TabsSession 联测证明 Start 原位成为文档、重复打开仍只有一个标签。
 - 外部打开 FIFO：Main mailbox Node 测试证明队首在 renderer 显式 ack 前不消费、不发送后继；renderer
   Session/ProjectWorkflow 测试证明两个未登记 OS 请求依次显示确认，并覆盖接受、取消、拒绝与 deferred
   的回执顺序；另证明直接/终态/确认后 ack 失败只重试同一回执且不重复打开或提交，以及关闭会逐个取消并回执全部排队确认。preload 合同只暴露 opaque requestId

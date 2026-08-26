@@ -15,6 +15,7 @@ import {
   createWorkbenchTabsSession,
   projectAppliedEventToWorkbenchTabs,
 } from "../app/application/workbench-tabs-session.js";
+import { createBrowserFileTabIdentity } from "../app/application/browser-file-tab-identity.js";
 
 const OLD_PATH = "/tmp/project-workflow-old.html";
 const RENAMED_PATH = "/tmp/project-workflow-renamed.html";
@@ -921,13 +922,27 @@ test("v4 exposes no relocation workflow that can retarget a moved project", (t) 
 test("a trusted direct browser file submission still enters the accepted FIFO", async (t) => {
   const harness = createHarness();
   t.after(() => harness.workflow.dispose());
+  const tabsSession = createWorkbenchTabsSession();
+  const unsubscribeTabs = harness.workflow.subscribeEvents((event) => {
+    projectAppliedEventToWorkbenchTabs({ session: tabsSession, event });
+  });
+  t.after(unsubscribeTabs);
+  const identity = await createBrowserFileTabIdentity({
+    name: "browser-fixture.html",
+    size: Buffer.byteLength(A_HTML),
+    lastModified: 1_786_000_000_000,
+    sourceSha256: sha256(A_HTML),
+    sha256: async (value) => sha256(value),
+  });
+  const project = {
+    ...identity,
+    name: "browser-fixture.html",
+    sourcePath: null,
+    html: A_HTML,
+  };
 
   const outcome = harness.workflow.acceptBrowserProject({
-    project: {
-      name: "browser-fixture.html",
-      sourcePath: null,
-      html: A_HTML,
-    },
+    project,
   });
   assert.equal(outcome.status, "succeeded");
   await waitFor(
@@ -938,6 +953,17 @@ test("a trusted direct browser file submission still enters the accepted FIFO", 
   assert.equal(harness.projectSession.sourcePath, null);
   assert.equal(harness.documentSession.html, A_HTML);
   assert.equal(harness.documentSession.sourceSha256, sha256(A_HTML));
+  assert.equal(tabsSession.snapshot.tabs.length, 1);
+  assert.equal(tabsSession.snapshot.tabs[0].kind, "document");
+  assert.equal(tabsSession.snapshot.activeTabId, `document:${identity.projectId}:${identity.documentId}`);
+
+  assert.equal(harness.workflow.acceptBrowserProject({ project }).status, "succeeded");
+  await waitFor(
+    () => harness.projectSession.epoch === 3
+      && harness.workflow.getSnapshot().projectApplication.status === "idle",
+    "reselected browser file did not pass the accepted project boundary",
+  );
+  assert.equal(tabsSession.snapshot.tabs.filter((tab) => tab.kind === "document").length, 1);
 });
 
 test("a second in-memory browser file can switch after the first HTML is applied", async (t) => {
