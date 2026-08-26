@@ -190,6 +190,7 @@ test("a disabled send button always says why", () => {
     { catalogStatus: "auth-required" },
     { catalogStatus: "not-installed" },
     { catalogStatus: "unavailable" },
+    { state: "preparing-delivery", pendingCommentCount: 1 },
     { state: "processing", hasText: true },
     { state: "promoting", hasText: true },
     { state: "preview-ready", queued: true, pendingCommentCount: 1 },
@@ -249,6 +250,33 @@ test("Agent connection recovery is an explicit sidebar action, not a send", () =
   });
   assert.equal(unavailable.kind, "status");
   assert.equal(unavailable.label, "Agent 暂不可用");
+});
+
+test("Candidate decisions and in-flight delivery win over Agent setup", () => {
+  for (const catalogStatus of ["checking", "auth-required", "not-installed", "unavailable"]) {
+    const decision = sidebarSendState({
+      state: "ready-to-open",
+      catalogStatus,
+      intent: "continue",
+      pendingCommentCount: 2,
+    });
+    assert.deepEqual(decision, {
+      kind: "status",
+      canSend: false,
+      label: "先处理当前结果",
+      reason: null,
+    });
+
+    const preparing = sidebarSendState({
+      state: "preparing-delivery",
+      catalogStatus,
+      intent: "modify",
+      pendingCommentCount: 2,
+    });
+    assert.equal(preparing.kind, "send");
+    assert.equal(preparing.canSend, false);
+    assert.equal(preparing.reason, "正在冻结本轮评论和页面内容");
+  }
 });
 
 test("mode copy separates who may write from who may only read", () => {
@@ -361,7 +389,9 @@ test("the Composer sends only the page-comment modification", () => {
     intent: "continue",
   });
   assert.equal(continued.canSend, false);
-  assert.equal(continued.reason, "先采用当前结果才能继续修改");
+  assert.equal(continued.kind, "status");
+  assert.equal(continued.label, "先处理当前结果");
+  assert.equal(continued.reason, null);
 });
 
 test("copying the task stays available when the model catalog is not", () => {
@@ -399,7 +429,7 @@ test("copying still needs a quiet round with comments to freeze", () => {
   const queued = sidebarCopyTaskState({ state: "preview-ready", queued: true, pendingCommentCount: 2 });
   assert.equal(queued.canCopy, false);
   assert.equal(queued.reason, "正在等待上一个任务完成");
-  for (const state of ["processing", "validating", "promoting"]) {
+  for (const state of ["preparing-delivery", "processing", "validating", "promoting", "ready-to-open"]) {
     const running = sidebarCopyTaskState({ state, pendingCommentCount: 2 });
     assert.equal(running.canCopy, false, `${state} must block copying`);
     assert.ok(running.reason, `${state} must say why copying is unavailable`);

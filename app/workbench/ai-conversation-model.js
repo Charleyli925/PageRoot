@@ -427,6 +427,41 @@ export function sidebarSendState({
       reason: "正在审阅 AI 候选，采纳或返回后可继续对话",
     };
   }
+  // Lifecycle authority wins over provider availability. While a Request is
+  // being frozen there is no second action to take, and once a Candidate is
+  // ready the decision bar — not the Composer — owns review/adoption.
+  if (state === "preparing-delivery") {
+    return {
+      kind: "send",
+      canSend: false,
+      label: "正在准备修改…",
+      reason: "正在冻结本轮评论和页面内容",
+    };
+  }
+  if (state === "ready-to-open") {
+    return {
+      kind: "status",
+      canSend: false,
+      label: "先处理当前结果",
+      reason: null,
+    };
+  }
+  if (state === "processing" || state === "validating") {
+    return {
+      kind: "send",
+      canSend: false,
+      label: "发送",
+      reason: "Qoder 完成本轮后可发送",
+    };
+  }
+  if (state === "promoting") {
+    return {
+      kind: "send",
+      canSend: false,
+      label: "发送",
+      reason: "正在采用候选版本",
+    };
+  }
   if (catalogStatus === "checking") {
     return {
       kind: "status",
@@ -457,22 +492,6 @@ export function sidebarSendState({
       canSend: false,
       label: "Agent 暂不可用",
       reason: "Qoder 暂时无法确认",
-    };
-  }
-  if (state === "processing" || state === "validating") {
-    return {
-      kind: "send",
-      canSend: false,
-      label: "发送",
-      reason: "Qoder 完成本轮后可发送",
-    };
-  }
-  if (state === "promoting") {
-    return {
-      kind: "send",
-      canSend: false,
-      label: "发送",
-      reason: "正在采用候选版本",
     };
   }
   // Modifying is a Request, and a Request is frozen from the edit surface's
@@ -534,6 +553,12 @@ export function sidebarCopyTaskState({
       canCopy: false,
       reason: "正在审阅 AI 候选，采纳或返回后可继续对话",
     };
+  }
+  if (state === "preparing-delivery") {
+    return { canCopy: false, reason: "正在冻结本轮评论和页面内容" };
+  }
+  if (state === "ready-to-open") {
+    return { canCopy: false, reason: "先处理当前结果" };
   }
   if (state === "processing" || state === "validating") {
     return { canCopy: false, reason: "Qoder 完成本轮后可发送" };
