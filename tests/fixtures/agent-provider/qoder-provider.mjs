@@ -7,6 +7,8 @@ export function createSyntheticQoderProviderFixture({
   runOutcome = Object.freeze({ stopReason: "end_turn" }),
   securityProfile = "client-mediated",
   launchSecurityProfile = securityProfile,
+  legacyDrivers = ["qoder-acp"],
+  capabilities: capabilityOverrides = {},
 } = {}) {
   const installation = Object.freeze({
     fixtureId: "synthetic-qoder-installation",
@@ -16,14 +18,15 @@ export function createSyntheticQoderProviderFixture({
     availability: true,
     preflight: true,
     execution: true,
-    discussion: true,
+    discussion: legacyDrivers.length > 0,
     modelCatalog: true,
+    ...capabilityOverrides,
   });
   const provider = defineAgentProvider({
     providerId: "qoder",
     runtimeId: "acp",
     securityProfile,
-    legacyDrivers: ["qoder-acp"],
+    legacyDrivers,
     capabilities,
     async resolveInstallation() {
       calls.push("provider:resolve-installation");

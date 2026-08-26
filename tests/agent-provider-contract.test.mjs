@@ -48,6 +48,20 @@ function fixtureRegistry(options) {
   };
 }
 
+function providerSelection() {
+  return Object.freeze({
+    providerId: "qoder",
+    runtimeId: "acp",
+    requestedModelId: null,
+    resolvedModelId: null,
+    reasoning: Object.freeze({
+      requested: null,
+      applied: null,
+      resolution: "provider-default",
+    }),
+  });
+}
+
 test("shared policy brand stays neutral while the legacy facade preserves errors", async () => {
   assert.notEqual(loadQoderAcpTaskPolicy, loadExecutionPolicy);
   assert.notEqual(loadQoderAcpDiscussionPolicy, loadDiscussionPolicy);
@@ -141,6 +155,88 @@ test("legacy qoder-acp dispatch resolves once to the qoder provider and ACP runt
     "provider:create-launch",
     "runtime:run",
   ]);
+});
+
+test("selection-first dispatch supports a provider with no legacy driver", async () => {
+  const { fixture, registry } = fixtureRegistry({ legacyDrivers: [] });
+  const selection = providerSelection();
+
+  assert.equal(fixture.capabilities.discussion, false);
+
+  assert.deepEqual(await registry.availabilityForSelection(selection, { environment: {} }), {
+    status: "ready",
+  });
+  const prepared = await registry.preflightForSelection(selection, "execution", {
+    environment: {},
+  });
+  assert.equal("driver" in prepared, false);
+  assert.deepEqual(prepared.selection, selection);
+  assert.throws(() => registry.resolveDriver("qoder-acp"), {
+    code: "AGENT_DRIVER_UNSUPPORTED",
+  });
+
+  const ticket = Object.freeze({
+    ...prepared,
+    purpose: "execution",
+    preflightId: "preflight_selection_first",
+  });
+  await registry.verifyTicket(ticket, { purpose: "execution" });
+  await registry.run(ticket, {
+    policy: {},
+    prompt: "selection-first execution",
+    onEvent: () => {},
+  });
+  assert.ok(fixture.calls.includes("runtime:run"));
+});
+
+test("selection-only providers cannot advertise the legacy Discussion path", () => {
+  assert.throws(
+    () => createSyntheticQoderProviderFixture({
+      legacyDrivers: [],
+      capabilities: { discussion: true },
+    }),
+    /cannot declare the legacy Discussion capability/u,
+  );
+});
+
+test("provider capability is enforced at preflight, ticket verification, and start", async () => {
+  const { registry } = fixtureRegistry({
+    capabilities: { execution: false },
+  });
+  const selection = providerSelection();
+  await assert.rejects(
+    registry.preflightForSelection(selection, "execution", { environment: {} }),
+    { code: "AGENT_CAPABILITY_UNSUPPORTED" },
+  );
+  const prepared = await registry.preflightForSelection(selection, "discussion", {
+    environment: {},
+  });
+  const crossPurpose = Object.freeze({
+    ...prepared,
+    purpose: "execution",
+    preflightId: "preflight_capability_fence",
+  });
+  await assert.rejects(
+    registry.verifyTicket(crossPurpose, { purpose: "execution" }),
+    { code: "AGENT_CAPABILITY_UNSUPPORTED" },
+  );
+  await assert.rejects(
+    registry.run(crossPurpose, { policy: {}, prompt: "must not run", onEvent: () => {} }),
+    { code: "AGENT_CAPABILITY_UNSUPPORTED" },
+  );
+});
+
+test("a provider without an explicit selector accepts only its provider default", async () => {
+  const { registry } = fixtureRegistry({ legacyDrivers: [] });
+  const selectedModel = {
+    ...providerSelection(),
+    requestedModelId: "qoder:synthetic-model",
+    resolvedModelId: "qoder:synthetic-model",
+  };
+  await assert.rejects(
+    registry.preflightForSelection(selectedModel, "execution", { environment: {} }),
+    { code: "AGENT_SELECTION_UNSUPPORTED" },
+  );
 });
 
 test("unknown provider, runtime, and legacy driver fail closed", async () => {

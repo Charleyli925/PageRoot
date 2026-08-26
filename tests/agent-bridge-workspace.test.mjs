@@ -89,6 +89,28 @@ async function createManagedRequest(t, { hang = false } = {}) {
   assert.equal(availability.body.status, "ready");
   assert.equal("command" in availability.body, false);
   assert.equal("version" in availability.body, false);
+  const selectedAvailability = await bridge.requestJson(
+    `/agent/availability?selection=${encodeURIComponent(JSON.stringify({
+      providerId: "qoder",
+      runtimeId: "acp",
+      requestedModelId: null,
+      resolvedModelId: null,
+      reasoning: { requested: null, applied: null, resolution: "provider-default" },
+    }))}`,
+  );
+  assert.equal(selectedAvailability.response.status, 200, JSON.stringify(selectedAvailability.body));
+  assert.equal(selectedAvailability.body.status, "ready");
+  const unknownAvailability = await bridge.requestJson(
+    `/agent/availability?selection=${encodeURIComponent(JSON.stringify({
+      providerId: "future-agent",
+      runtimeId: "future-runtime",
+      requestedModelId: null,
+      resolvedModelId: null,
+      reasoning: { requested: null, applied: null, resolution: "provider-default" },
+    }))}`,
+  );
+  assert.equal(unknownAvailability.response.status, 400, JSON.stringify(unknownAvailability.body));
+  assert.equal(unknownAvailability.body.error.code, "AGENT_PROVIDER_UNSUPPORTED");
   const preflight = await bridge.postJson("/agent/preflight", {
     driver: "qoder-acp",
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,

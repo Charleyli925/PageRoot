@@ -1,11 +1,16 @@
 import {
   agentProviderError,
   assertAgentSecurityProfile,
+  assertProviderCapability,
   assertProviderTicket,
 } from "./agent-provider-contract.mjs";
 import { createQoderProvider } from "./qoder-provider.mjs";
 import { createAcpRuntime } from "../runtimes/acp-runtime.mjs";
 import { createRuntimeRegistry } from "../runtimes/runtime-registry.mjs";
+import {
+  normalizeAgentDelivery,
+  TRUSTED_LOCAL_AGENT_POLICY_VERSION,
+} from "../../../shared/agent-delivery.mjs";
 
 function unsupportedDriver() {
   throw agentProviderError(
@@ -13,6 +18,56 @@ function unsupportedDriver() {
     "当前只支持 Qoder CLI 的 ACP 驱动。",
     { status: 400 },
   );
+}
+
+function selectionForProvider(provider) {
+  return Object.freeze({
+    providerId: provider.providerId,
+    runtimeId: provider.runtimeId,
+    requestedModelId: null,
+    resolvedModelId: null,
+    reasoning: Object.freeze({
+      requested: null,
+      applied: null,
+      resolution: "provider-default",
+    }),
+  });
+}
+
+function assertResolvedSelection(selection, provider) {
+  let normalized;
+  try {
+    normalized = normalizeAgentDelivery({
+      mode: "managed-agent",
+      selection,
+      trustPolicyVersion: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
+    }, { allowLegacy: false }).selection;
+  } catch {
+    throw agentProviderError(
+      "AGENT_SELECTION_UNSUPPORTED",
+      "The requested Agent provider selection is unsupported.",
+      { status: 409 },
+    );
+  }
+  if (normalized.providerId !== provider.providerId
+    || normalized.runtimeId !== provider.runtimeId) {
+    throw agentProviderError(
+      "AGENT_SELECTION_UNSUPPORTED",
+      "The requested Agent provider selection is unsupported.",
+      { status: 409 },
+    );
+  }
+  return normalized;
+}
+
+function sameSelection(left, right) {
+  return left.providerId === right.providerId
+    && left.runtimeId === right.runtimeId
+    && left.requestedModelId === right.requestedModelId
+    && left.resolvedModelId === right.resolvedModelId
+    && left.reasoning.requested === right.reasoning.requested
+    && left.reasoning.applied === right.reasoning.applied
+    && left.reasoning.resolution === right.reasoning.resolution;
 }
 
 export function createProviderRegistry({ providers = [], runtimeRegistry } = {}) {
@@ -57,19 +112,37 @@ export function createProviderRegistry({ providers = [], runtimeRegistry } = {})
     runtime: runtimeRegistry.resolve(provider.runtimeId),
   });
 
+  const resolveSelection = (selection) => {
+    if (!selection || typeof selection !== "object" || Array.isArray(selection)) {
+      throw agentProviderError(
+        "AGENT_SELECTION_UNSUPPORTED",
+        "The requested Agent provider selection is unsupported.",
+        { status: 400 },
+      );
+    }
+    const provider = resolveProvider(selection.providerId);
+    assertResolvedSelection(selection, provider);
+    return bindingForProvider(provider);
+  };
+
   const resolveDriver = (driver) => {
     const providerId = byLegacyDriver.get(String(driver || ""));
     if (!providerId) unsupportedDriver();
     return bindingForProvider(resolveProvider(providerId));
   };
 
-  const resolveTicket = (ticketInput) => {
+  const selectionFromDriver = (driver) => selectionForProvider(resolveDriver(driver).provider);
+
+  const resolveTicket = (ticketInput, purpose = ticketInput?.purpose) => {
     const ticket = assertProviderTicket(ticketInput);
     const binding = bindingForProvider(resolveProvider(ticket.providerId));
+    const legacyDriverMatches = ticket.driver === undefined
+      || ticket.driver === null
+      || binding.provider.legacyDrivers.includes(ticket.driver);
     if (
       binding.provider.runtimeId !== ticket.runtimeId
       || binding.provider.securityProfile !== ticket.securityProfile
-      || !binding.provider.legacyDrivers.includes(ticket.driver)
+      || !legacyDriverMatches
     ) {
       throw agentProviderError(
         "AGENT_PROVIDER_TICKET_INVALID",
@@ -77,7 +150,80 @@ export function createProviderRegistry({ providers = [], runtimeRegistry } = {})
         { status: 409 },
       );
     }
+    if (purpose) assertProviderCapability(binding.provider, purpose);
     return binding;
+  };
+
+  const prepareForSelection = async (selection, purpose, environment, legacyDriver = null) => {
+    const { provider } = resolveSelection(selection);
+    const requestedSelection = assertResolvedSelection(selection, provider);
+    const resolvesSelection = typeof provider.resolveSelection === "function";
+    if (!resolvesSelection && !sameSelection(requestedSelection, selectionForProvider(provider))) {
+      throw agentProviderError(
+        "AGENT_SELECTION_UNSUPPORTED",
+        "The selected Agent model or reasoning policy is unsupported.",
+        { status: 409 },
+      );
+    }
+    if (provider.capabilities.preflight !== true) {
+      throw agentProviderError(
+        "AGENT_CAPABILITY_UNSUPPORTED",
+        "The selected Agent provider does not support preflight.",
+        { status: 409 },
+      );
+    }
+    assertProviderCapability(provider, purpose);
+    try {
+      const installation = await provider.resolveInstallation({ environment });
+      const evidence = await provider.preflight(installation, {
+        environment,
+        purpose,
+        selection: requestedSelection,
+      });
+      await provider.assertInstallationUnchanged(installation);
+      const resolvedSelection = assertResolvedSelection(
+        resolvesSelection
+          ? await provider.resolveSelection(requestedSelection, { evidence, purpose })
+          : requestedSelection,
+        provider,
+      );
+      return Object.freeze({
+        ...(legacyDriver ? { driver: legacyDriver } : {}),
+        purpose,
+        providerId: provider.providerId,
+        runtimeId: provider.runtimeId,
+        securityProfile: provider.securityProfile,
+        installation,
+        installationDigest: provider.installationDigest(installation),
+        capabilities: provider.capabilities,
+        evidence,
+        selection: resolvedSelection,
+      });
+    } catch (cause) {
+      if (["AGENT_CAPABILITY_UNSUPPORTED", "AGENT_SELECTION_UNSUPPORTED"].includes(cause?.code)) {
+        throw cause;
+      }
+      throw provider.normalizePreflightError(cause);
+    }
+  };
+
+  const runTicket = async (ticket, input) => {
+    const { provider, runtime } = resolveTicket(ticket, ticket.purpose);
+    const launch = provider.createRuntimeLaunch({ ticket, ...input });
+    if (!launch || typeof launch !== "object" || Array.isArray(launch)
+      || assertAgentSecurityProfile(launch.securityProfile, "launch securityProfile")
+        !== ticket.securityProfile) {
+      throw agentProviderError(
+        "AGENT_SECURITY_PROFILE_MISMATCH",
+        "Agent launch security profile does not match its ticket.",
+        { status: 409 },
+      );
+    }
+    try {
+      return await runtime.run(Object.freeze({ ...launch }));
+    } catch (cause) {
+      throw provider.normalizeRuntimeError(cause);
+    }
   };
 
   return Object.freeze({
@@ -90,9 +236,22 @@ export function createProviderRegistry({ providers = [], runtimeRegistry } = {})
       })));
     },
     resolveDriver,
+    selectionFromDriver,
+    resolveSelection,
+    assertCapabilityForSelection(selection, purpose) {
+      const { provider } = resolveSelection(selection);
+      return assertProviderCapability(provider, purpose);
+    },
     resolveTicket,
-    async availability({ driver, environment }) {
-      const { provider } = resolveDriver(driver);
+    async availabilityForSelection(selection, { environment } = {}) {
+      const { provider } = resolveSelection(selection);
+      if (provider.capabilities.availability !== true) {
+        throw agentProviderError(
+          "AGENT_CAPABILITY_UNSUPPORTED",
+          "The selected Agent provider does not support availability checks.",
+          { status: 409 },
+        );
+      }
       try {
         await provider.resolveInstallation({ environment });
         return Object.freeze({ status: "ready" });
@@ -100,28 +259,17 @@ export function createProviderRegistry({ providers = [], runtimeRegistry } = {})
         return provider.availabilityFailure(cause);
       }
     },
-    async preflight({ driver, environment }) {
-      const { provider } = resolveDriver(driver);
-      try {
-        const installation = await provider.resolveInstallation({ environment });
-        const evidence = await provider.preflight(installation, { environment });
-        await provider.assertInstallationUnchanged(installation);
-        return Object.freeze({
-          driver,
-          providerId: provider.providerId,
-          runtimeId: provider.runtimeId,
-          securityProfile: provider.securityProfile,
-          installation,
-          installationDigest: provider.installationDigest(installation),
-          capabilities: provider.capabilities,
-          evidence,
-        });
-      } catch (cause) {
-        throw provider.normalizePreflightError(cause);
-      }
+    preflightForSelection(selection, purpose, { environment } = {}) {
+      return prepareForSelection(selection, purpose, environment);
     },
-    async verifyTicket(ticket) {
-      const { provider } = resolveTicket(ticket);
+    async availability({ driver, environment }) {
+      return this.availabilityForSelection(selectionFromDriver(driver), { environment });
+    },
+    preflight({ driver, environment, purpose = "execution" }) {
+      return prepareForSelection(selectionFromDriver(driver), purpose, environment, driver);
+    },
+    async verifyTicket(ticket, { purpose = ticket?.purpose } = {}) {
+      const { provider } = resolveTicket(ticket, purpose);
       await provider.assertInstallationUnchanged(ticket.installation);
       if (provider.installationDigest(ticket.installation) !== ticket.installationDigest) {
         throw agentProviderError(
@@ -133,34 +281,17 @@ export function createProviderRegistry({ providers = [], runtimeRegistry } = {})
       return ticket;
     },
     async loadExecutionPolicy(ticket, input) {
-      const { provider } = resolveTicket(ticket);
+      const { provider } = resolveTicket(ticket, "execution");
       try {
         return await provider.loadExecutionPolicy(input);
       } catch (cause) {
         throw provider.normalizeRuntimeError(cause);
       }
     },
-    async run(ticket, input) {
-      const { provider, runtime } = resolveTicket(ticket);
-      const launch = provider.createRuntimeLaunch({ ticket, ...input });
-      if (!launch || typeof launch !== "object" || Array.isArray(launch)
-        || assertAgentSecurityProfile(launch.securityProfile, "launch securityProfile")
-          !== ticket.securityProfile) {
-        throw agentProviderError(
-          "AGENT_SECURITY_PROFILE_MISMATCH",
-          "Agent launch security profile does not match its ticket.",
-          { status: 409 },
-        );
-      }
-      try {
-        return await runtime.run(Object.freeze({ ...launch }));
-      } catch (cause) {
-        throw provider.normalizeRuntimeError(cause);
-      }
-    },
+    run: runTicket,
     createTurnRunner(ticket, { environment }) {
-      resolveTicket(ticket);
-      return ({ policy, prompt, turnTimeoutMs, cancellationSignal, onEvent }) => this.run(ticket, {
+      resolveTicket(ticket, "discussion");
+      return ({ policy, prompt, turnTimeoutMs, cancellationSignal, onEvent }) => runTicket(ticket, {
         policy,
         prompt,
         turnTimeoutMs,
@@ -170,12 +301,20 @@ export function createProviderRegistry({ providers = [], runtimeRegistry } = {})
       });
     },
     classifyRunFailure(ticket, cause) {
-      const { provider } = resolveTicket(ticket);
+      const { provider } = resolveTicket(ticket, ticket.purpose);
       return provider.classifyRunFailure(provider.normalizeRuntimeError(cause));
     },
     failureMessage(ticket, code) {
-      const { provider } = resolveTicket(ticket);
+      const { provider } = resolveTicket(ticket, ticket.purpose);
       return provider.failureMessage(code);
+    },
+    failureMessageForSelection(selection, code) {
+      const { provider } = resolveSelection(selection);
+      return provider.failureMessage(code);
+    },
+    preflightFailureMessageForSelection(selection, code) {
+      const { provider } = resolveSelection(selection);
+      return provider.preflightFailureMessage(code);
     },
     failureMessageForDriver(driver, code) {
       const { provider } = resolveDriver(driver);

@@ -1983,6 +1983,8 @@ export class ProjectFileRepository {
 
   #deviceId;
 
+  #normalizeNewAgentDelivery;
+
   #registryWriteLockTimeoutMs;
 
   #registryWriteLockGraceMs;
@@ -1996,6 +1998,7 @@ export class ProjectFileRepository {
     registryPath = path.join(projectsRoot, ".pageroot-registry.json"),
     clock = Date.now,
     deviceId = null,
+    agentDeliveryNormalizer = normalizeNewAgentDelivery,
     failpoint = null,
     registryWriteLockTimeoutMs = CURRENT_REGISTRY_WRITE_LOCK_TIMEOUT_MS,
     registryWriteLockGraceMs = CURRENT_REGISTRY_WRITE_LOCK_GRACE_MS,
@@ -2007,6 +2010,10 @@ export class ProjectFileRepository {
     // inventing one, so a test double or a misconfigured launch cannot attribute
     // a record to a device that does not exist.
     this.#deviceId = isDeviceIdentifier(deviceId) ? String(deviceId) : null;
+    if (typeof agentDeliveryNormalizer !== "function") {
+      throw new TypeError("ProjectFileRepository requires an Agent delivery normalizer.");
+    }
+    this.#normalizeNewAgentDelivery = agentDeliveryNormalizer;
     this.#failpoint = typeof failpoint === "function" ? failpoint : null;
     this.#registryWriteLockTimeoutMs = Number.isSafeInteger(registryWriteLockTimeoutMs)
       && registryWriteLockTimeoutMs >= 1
@@ -2758,7 +2765,7 @@ export class ProjectFileRepository {
       preserveOutsideTargets: true,
     };
     try {
-      frozenRequest.agentDelivery = normalizeNewAgentDelivery(
+      frozenRequest.agentDelivery = this.#normalizeNewAgentDelivery(
         frozenRequest.agentDelivery || { mode: "clipboard" },
       );
     } catch (cause) {

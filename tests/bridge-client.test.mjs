@@ -200,6 +200,9 @@ test("Bridge client exposes the five neutral Agent routes and keeps availability
   await client.startAgent({ selection: {} });
   await client.agentStatus("/tmp/page.html", "req_1", "attempt_001");
   await client.cancelAgent({ requestId: "req_1" });
+  await client.agentAvailability({
+    selection: { providerId: "synthetic", runtimeId: "runtime" },
+  });
   await client.qoderAvailability();
   assert.deepEqual(requests.map(({ url, method }) => [method, url.pathname]), [
     ["GET", "/agent/providers"],
@@ -208,5 +211,11 @@ test("Bridge client exposes the five neutral Agent routes and keeps availability
     ["GET", "/agent/status"],
     ["POST", "/agent/cancel"],
     ["GET", "/agent/availability"],
+    ["GET", "/agent/availability"],
   ]);
+  assert.deepEqual(
+    JSON.parse(requests.at(-2).url.searchParams.get("selection")),
+    { providerId: "synthetic", runtimeId: "runtime" },
+  );
+  assert.equal(requests.at(-1).url.searchParams.has("selection"), false);
 });
