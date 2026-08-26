@@ -45,6 +45,7 @@ const RUNTIME_SESSION_CONSTRUCTORS = [
   "ProjectApplicationSession",
   "EditAuthorRuntimeSession",
   "FirstEditGuideSession",
+  "WorkbenchTabsSession",
 ];
 const PROVIDER_LITERAL_BRANCH = /\b(?:[A-Za-z_$][\w$]*\s*(?:\?\.|\.)\s*)*(?:providerId|mode)\s*(?:===|!==|==|!=)\s*["'`](?:qoder|codex|qoder-acp|codex-acp)["'`]|["'`](?:qoder|codex|qoder-acp|codex-acp)["'`]\s*(?:===|!==|==|!=)\s*(?:[A-Za-z_$][\w$]*\s*(?:\?\.|\.)\s*)*(?:providerId|mode)\b/u;
 const PROVIDER_IMPLEMENTATION_IMPORT = /(?:^|\/)(?:qoder-availability|QoderAvailabilityCard|qoder-provider)(?:\.[^/]*)?$/u;
@@ -115,11 +116,12 @@ export function compositionBoundaryViolations({
     );
   }
   if (
-    /\bnew\s+(?:ProjectSession|DocumentSession|CommentSession|DraftSession|VersionSession|SourceHistorySession|RunSession|ProjectRulesSession|ExternalFileOpenSession|ProjectApplicationSession|FirstEditGuideSession)\b/u.test(workbench)
-    || /\b(?:projectSessionRef|documentSessionRef|commentSessionRef|draftSessionRef|versionSessionRef|sourceHistorySessionRef|runSessionRef|projectRulesSessionRef)\b/u.test(workbench)
+    /\bnew\s+(?:ProjectSession|DocumentSession|CommentSession|DraftSession|VersionSession|SourceHistorySession|RunSession|ProjectRulesSession|ExternalFileOpenSession|ProjectApplicationSession|FirstEditGuideSession|WorkbenchTabsSession|WorkbenchTabsWorkflow)\b/u.test(workbench)
+    || /\bcreateWorkbenchTabsSession\s*\(/u.test(workbench)
+    || /\b(?:projectSessionRef|documentSessionRef|commentSessionRef|draftSessionRef|versionSessionRef|sourceHistorySessionRef|runSessionRef|projectRulesSessionRef|workbenchTabsSessionRef|workbenchTabsWorkflowRef|restoredPendingTabIdRef|restoredTabOpeningRef|tabsStateControlsStartupRef)\b/u.test(workbench)
   ) {
     violations.push(
-      "app/workbench.tsx: Workbench cannot own runtime Session construction or refs",
+      "app/workbench.tsx: Workbench cannot own runtime Session/Workflow construction or refs",
     );
   }
   if (
@@ -171,6 +173,18 @@ export function compositionBoundaryViolations({
   ) {
     violations.push(
       "app/application/workspace-controller.js: runtime factory and public aggregate contract must stay complete",
+    );
+  }
+  if (
+    !/\bworkbenchTabsSession:\s*new\s+WorkbenchTabsSession\s*\(/u.test(workspaceController)
+    || !/\bnew\s+WorkbenchTabsWorkflow\s*\(/u.test(workspaceController)
+    || !/\bworkbenchTabs:\s*this\.#workbenchTabsSnapshot\b/u.test(workspaceController)
+    || !/\bactivateWorkbenchTab\s*\(/u.test(workspaceController)
+    || !/\bcreateWorkbenchStartTab\s*\(/u.test(workspaceController)
+    || !/\bcloseWorkbenchTab\s*\(/u.test(workspaceController)
+  ) {
+    violations.push(
+      "app/application/workspace-controller.js: WorkspaceController must compose, project, and command the tabs workflow",
     );
   }
   if (

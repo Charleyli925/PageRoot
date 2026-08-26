@@ -67,6 +67,25 @@ test("final composition gate rejects each retired boundary escape", async () => 
   );
 });
 
+test("composition gate rejects tabs and future navigation business construction in Workbench", () => {
+  assert.match(compositionBoundaryViolations({
+    workbench: [
+      'import { WorkbenchTabsSession } from "./application/workbench-tabs-session.js";',
+      'import { WorkbenchTabsWorkflow } from "./application/workbench-tabs-workflow.js";',
+      "const tabs = new WorkbenchTabsSession();",
+      "const navigation = new WorkbenchTabsWorkflow({ session: tabs, controller });",
+    ].join("\n"),
+  }).join("\n"), /cannot own runtime Session\/Workflow construction/u);
+
+  assert.match(compositionBoundaryViolations({
+    workbench: 'const tabs = createWorkbenchTabsSession();',
+  }).join("\n"), /cannot own runtime Session\/Workflow construction/u);
+
+  assert.match(compositionBoundaryViolations({
+    workbench: "const workbenchTabsSessionRef = useRef(tabs);",
+  }).join("\n"), /cannot own runtime Session\/Workflow construction/u);
+});
+
 test("provider-neutral renderer gate rejects provider branches and workflow implementation imports", () => {
   assert.match(providerNeutralRendererViolations({
     file: "app/workbench/example.tsx",

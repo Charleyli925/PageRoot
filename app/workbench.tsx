@@ -107,15 +107,9 @@ import type { ProjectSessionSnapshot } from "./application/project-session.js";
 import type { RunOperationKind, RunSessionSnapshot } from "./application/run-session.js";
 import type { VersionSessionSnapshot } from "./application/version-session.js";
 import {
-  createWorkbenchTabsSession,
-  projectAppliedEventToWorkbenchTabs,
-  reconcileWorkbenchTabsWhenReady,
+  INITIAL_WORKBENCH_TABS_SNAPSHOT,
   type WorkbenchTab,
 } from "./application/workbench-tabs-session.js";
-import {
-  WorkbenchTabsWorkflow,
-  workbenchTabOutcomeHasCommittedDocument,
-} from "./application/workbench-tabs-workflow.js";
 import type { SourceHistoryDirection } from "./domain/source-history.js";
 import {
   EDIT_AUTHOR_RUNTIME_VERIFICATION_DEADLINE_MS,
@@ -454,19 +448,7 @@ function documentEditFailureReason(outcome: DocumentEditOutcome): string {
 }
 
 export default function Workbench() {
-  const workbenchTabsSessionRef = useRef(createWorkbenchTabsSession());
-  const workbenchTabsWorkflowRef = useRef<WorkbenchTabsWorkflow | null>(null);
-  const tabsHydratedRef = useRef(false);
-  const tabsStateControlsStartupRef = useRef(false);
-  const restoredPendingTabIdRef = useRef("");
-  const restoredTabOpeningRef = useRef("");
-  const restoredCatalogRequestedRef = useRef(false);
-  const startPageRequestedRef = useRef(true);
-  const [workbenchTabsSnapshot, setWorkbenchTabsSnapshot] = useState(
-    () => createWorkbenchTabsSession().snapshot,
-  );
   const [globalSidebarOpen, setGlobalSidebarOpen] = useState(false);
-  const [tabsPersistenceReady, setTabsPersistenceReady] = useState(false);
   const editorRef = useRef<HtmlCanvasEditorHandle>(null);
   const interactionPreviewRef = useRef<HtmlInteractionPreviewHandle>(null);
   const previewToEditPendingRef = useRef(false);
@@ -587,6 +569,8 @@ export default function Workbench() {
     useState<WorkspaceControllerSnapshot | null>(null);
   const [workspaceController, setWorkspaceController] =
     useState<WorkspaceController | null>(null);
+  const workbenchTabsSnapshot = workspaceControllerSnapshot?.workbenchTabs
+    ?? INITIAL_WORKBENCH_TABS_SNAPSHOT;
   const [importedCanvasBase, setImportedCanvasBase] = useState<{
     managedSourcePath: string;
     externalSourcePath: string;
@@ -662,7 +646,6 @@ export default function Workbench() {
   const [fileRenameError, setFileRenameError] = useState("");
   const [recentProjects, setRecentProjects] = useState<RecentProject[]>([]);
   const [registeredProjects, setRegisteredProjects] = useState<RegisteredProject[]>([]);
-  const [registeredProjectsReady, setRegisteredProjectsReady] = useState(false);
   const [recentProjectsError, setRecentProjectsError] = useState("");
   const [selection, setSelection] = useState<HtmlCanvasSelection | null>(null);
   const commentSnapshot = (
@@ -947,6 +930,14 @@ export default function Workbench() {
       ports: {
         hash: { sha256: browserSha256 },
         canvas: { invalidateRenderAcks: invalidateCanvasRenderAcks },
+        ...(window.htmlAIWorkbenchTabs ? {
+          workbenchTabs: {
+            get: () => window.htmlAIWorkbenchTabs!.get(),
+            set: (value: Readonly<Record<string, unknown>>) => (
+              window.htmlAIWorkbenchTabs!.set(value)
+            ),
+          },
+        } : {}),
         projectSource: {
           activateManagedWorkingCopy: async (input: {
             previousSourcePath: string;
@@ -1338,70 +1329,16 @@ export default function Workbench() {
       clock: { now: Date.now },
     });
     workspaceControllerRef.current = controller;
-    workbenchTabsWorkflowRef.current = new WorkbenchTabsWorkflow({
-      session: workbenchTabsSessionRef.current,
-      controller,
-    });
     setWorkspaceController(controller);
     setWorkspaceControllerSnapshot(controller.getSnapshot());
     return () => {
       if (workspaceControllerRef.current === controller) {
         workspaceControllerRef.current = null;
-        workbenchTabsWorkflowRef.current = null;
       }
       setWorkspaceController((current) => current === controller ? null : current);
       controller.dispose();
     };
   }, [deferEditorCommand, invalidateCanvasRenderAcks, isViewTransitioning]);
-  useEffect(() => {
-    const session = workbenchTabsSessionRef.current;
-    const unsubscribe = session.subscribe((snapshot) => {
-      setWorkbenchTabsSnapshot(snapshot);
-      if (tabsHydratedRef.current) {
-        void window.htmlAIWorkbenchTabs?.set(session.serialize()).catch(() => {});
-      }
-    });
-    const tabsApi = window.htmlAIWorkbenchTabs;
-    if (!tabsApi) {
-      tabsHydratedRef.current = true;
-      startPageRequestedRef.current = false;
-      queueMicrotask(() => setTabsPersistenceReady(true));
-      return unsubscribe;
-    }
-    let storedStatePresent = false;
-    void tabsApi.get()
-      .then((stored) => {
-        if (stored) {
-          storedStatePresent = true;
-          session.hydrate(stored);
-          // A valid tabs record is the browser-shell navigation authority even
-          // when activeTabId is null. In that state the user deliberately left
-          // Start selected, so the activePath compatibility fallback stays suppressed.
-          tabsStateControlsStartupRef.current = true;
-          restoredPendingTabIdRef.current = session.snapshot.pendingTabId || "";
-          startPageRequestedRef.current = !session.snapshot.pendingTabId;
-        }
-      })
-      .catch(() => {})
-      .finally(() => {
-        if (!storedStatePresent) {
-          startPageRequestedRef.current = false;
-          const current = workspaceControllerRef.current?.getSnapshot().projectSession;
-          if (current?.projectId && current.documentId) {
-            session.bindDocument({
-              projectId: current.projectId,
-              documentId: current.documentId,
-              title: "HTML",
-              focus: true,
-            });
-          }
-        }
-        tabsHydratedRef.current = true;
-        setTabsPersistenceReady(true);
-      });
-    return unsubscribe;
-  }, []);
-
   const invalidateEditCanvasRenderAck = useCallback(() => {
     setCanvasRenderAcks((current) => (
       current.edit ? { ...current, edit: null } : current
@@ -1505,92 +1442,6 @@ export default function Workbench() {
     const incoming = memory.withRepeatCount(next);
     setToastState((current) => nextPresentedNotice(current, incoming) as Toast);
   }, []);
-  useEffect(() => {
-    const reconciled = reconcileWorkbenchTabsWhenReady({
-      session: workbenchTabsSessionRef.current,
-      tabsPersistenceReady,
-      registeredProjectsReady,
-      registeredProjects,
-    });
-    if (!reconciled) return;
-    if (
-      restoredPendingTabIdRef.current
-      && !reconciled.snapshot.tabs.some(
-        (tab) => tab.tabId === restoredPendingTabIdRef.current,
-      )
-    ) {
-      restoredPendingTabIdRef.current = "";
-    }
-    if (reconciled.missing.length === 0) return;
-    const activeTab = reconciled.snapshot.tabs.find(
-      (tab) => tab.tabId === reconciled.snapshot.activeTabId,
-    );
-    if (activeTab?.kind === "start" && !reconciled.snapshot.pendingTabId) {
-      startPageRequestedRef.current = true;
-    }
-    setGlobalSidebarOpen(true);
-    setToast({
-      title: reconciled.missing.length === 1
-        ? "无法恢复一个 HTML"
-        : `无法恢复 ${reconciled.missing.length} 个 HTML`,
-      message: "项目可能已移动或删除。已保留可用标签，可从 Finder 重新打开。",
-      tone: "warning",
-      sticky: true,
-      disposition: "background-result",
-      dedupeKey: "workbench-restored-projects-missing",
-      action: { id: "retry-project-open", label: "从 Finder 重新打开" },
-    });
-  }, [
-    registeredProjects,
-    registeredProjectsReady,
-    setToast,
-    tabsPersistenceReady,
-  ]);
-  useEffect(() => {
-    const pending = restoredPendingTabIdRef.current;
-    if (!workspaceController || !tabsPersistenceReady || !pending) return;
-    if (workbenchTabsSessionRef.current.snapshot.pendingTabId !== pending) return;
-    if (restoredTabOpeningRef.current === pending) return;
-    restoredTabOpeningRef.current = pending;
-    void workbenchTabsWorkflowRef.current?.restorePending()
-      .then((outcome) => {
-        if (!outcome || outcome.status === "succeeded") return;
-        const session = workbenchTabsSessionRef.current;
-        if (workbenchTabOutcomeHasCommittedDocument(outcome)) {
-          const target = session.snapshot.tabs.find((tab) => tab.tabId === pending);
-          if (target?.kind === "document" && target.projectId && target.documentId) {
-            session.updateStatus(target.projectId, target.documentId, "error");
-          }
-          startPageRequestedRef.current = false;
-          setToast({
-            title: "HTML 已打开，但恢复未完成",
-            message: outcome.reason || "当前标签和 Controller 身份已对齐，请重试权威读取。",
-            tone: "error",
-            sticky: true,
-            disposition: "direct-action",
-            dedupeKey: `workbench-restore-settle-failed:${pending}`,
-            action: { id: "retry-project-hydration", label: "重试恢复" },
-          });
-          return;
-        }
-        session.close(pending);
-        startPageRequestedRef.current = true;
-        setGlobalSidebarOpen(true);
-        setToast({
-          title: "无法恢复这个 HTML",
-          message: outcome.reason || "项目可能已移动或删除，请从 Finder 重新打开。",
-          tone: "warning",
-          sticky: true,
-          disposition: "background-result",
-          dedupeKey: `workbench-restore-failed:${pending}`,
-          action: { id: "retry-project-open", label: "从 Finder 重新打开" },
-        });
-      })
-      .finally(() => {
-        if (restoredTabOpeningRef.current === pending) restoredTabOpeningRef.current = "";
-        if (restoredPendingTabIdRef.current === pending) restoredPendingTabIdRef.current = "";
-      });
-  }, [tabsPersistenceReady, setToast, workspaceController, workbenchTabsSnapshot.pendingTabId]);
   const [pausedNoticeIdentity, setPausedNoticeIdentity] =
     useState<string | null>(null);
   const noticeDeadlineRef = useRef<{
@@ -1637,6 +1488,53 @@ export default function Workbench() {
             tone: "success",
             disposition: "background-result",
             dedupeKey: "working-copy-recovered",
+          });
+        }
+        return;
+      }
+      if (event.type === "workbench-tabs-restore-missing") {
+        const missingValue = (event as { missing?: unknown }).missing;
+        const missing = Array.isArray(missingValue) ? missingValue : [];
+        setGlobalSidebarOpen(true);
+        setToast({
+          title: missing.length === 1
+            ? "无法恢复一个 HTML"
+            : `无法恢复 ${missing.length} 个 HTML`,
+          message: "项目可能已移动或删除。已保留可用标签，可从 Finder 重新打开。",
+          tone: "warning",
+          sticky: true,
+          disposition: "background-result",
+          dedupeKey: "workbench-restored-projects-missing",
+          action: { id: "retry-project-open", label: "从 Finder 重新打开" },
+        });
+        return;
+      }
+      if (event.type === "workbench-tabs-restore-failed") {
+        const failure = event as { tabId?: unknown; committed?: unknown; reason?: unknown };
+        if (failure.committed === true) {
+          setToast({
+            title: "HTML 已打开，但恢复未完成",
+            message: String(
+              failure.reason || "当前标签和 Controller 身份已对齐，请重试权威读取。",
+            ),
+            tone: "error",
+            sticky: true,
+            disposition: "direct-action",
+            dedupeKey: `workbench-restore-settle-failed:${String(failure.tabId || "")}`,
+            action: { id: "retry-project-hydration", label: "重试恢复" },
+          });
+        } else {
+          setGlobalSidebarOpen(true);
+          setToast({
+            title: "无法恢复这个 HTML",
+            message: String(
+              failure.reason || "项目可能已移动或删除，请从 Finder 重新打开。",
+            ),
+            tone: "warning",
+            sticky: true,
+            disposition: "background-result",
+            dedupeKey: `workbench-restore-failed:${String(failure.tabId || "")}`,
+            action: { id: "retry-project-open", label: "从 Finder 重新打开" },
           });
         }
         return;
@@ -1942,22 +1840,6 @@ export default function Workbench() {
       }
       if (projectEvent.type === "project-applied") {
         const project = projectEvent.project as HtmlProject;
-        const pendingTabId = workbenchTabsSessionRef.current.snapshot.pendingTabId;
-        projectAppliedEventToWorkbenchTabs({
-          session: workbenchTabsSessionRef.current,
-          event: {
-            type: "project-applied",
-            project,
-            activeLocked: projectEvent.activeLocked === true,
-          },
-          title: fileStem(project.name) || project.name,
-        });
-        if (!pendingTabId) {
-          // Exact-identity Desktop events project synchronously above. Browser
-          // fallback projects the aggregate identity after this authoritative
-          // event; cancel/failure paths never publish it.
-          startPageRequestedRef.current = false;
-        }
         setStartupIssue(null);
         setProjectName(project.name);
         setProjectRecordsPath(null);
@@ -2081,11 +1963,9 @@ export default function Workbench() {
           ? projectEvent.projects as RegisteredProject[]
           : [];
         setRegisteredProjects(projects);
-        setRegisteredProjectsReady(true);
         return;
       }
       if (projectEvent.type === "project-catalog-failed") {
-        setRegisteredProjectsReady(false);
         setRecentProjectsError(String(
           projectEvent.reason || "项目目录暂时无法读取。",
         ));
@@ -2728,28 +2608,21 @@ export default function Workbench() {
   const currentSourceFileExtension = fileExtension(currentSourceFileName);
   const currentSourceFileStem = fileStem(currentSourceFileName);
   useEffect(() => {
-    if (!projectId || !documentId) return;
-    const tabsSession = workbenchTabsSessionRef.current;
+    if (!workspaceController || !projectId || !documentId) return;
     const tabId = `document:${projectId}:${documentId}`;
-    const alreadyProjected = Boolean(tabsSession.resolveTab(tabId));
-    tabsSession.bindDocument({
+    const projected = workspaceController.getSnapshot().workbenchTabs;
+    if (!projected?.tabs.some((tab) => tab.tabId === tabId)) return;
+    workspaceController.updateWorkbenchTabStatus(
       projectId,
       documentId,
-      title: currentSourceFileStem || projectName,
-      status: projectLoadError || persistState === "failed" || persistState === "conflict"
+      projectLoadError || persistState === "failed" || persistState === "conflict"
         ? "error"
         : readyReviewSession
           ? "review-ready"
           : runInProgress
             ? "processing"
             : "normal",
-      // Event projection owns normal creation/focus. This is a safe fallback
-      // for browser-only/id-less projects and otherwise only refreshes the
-      // current title/status projection.
-      focus: !alreadyProjected
-        && !tabsSession.snapshot.pendingTabId
-        && !startPageRequestedRef.current,
-    });
+    );
   }, [
     currentSourceFileStem,
     documentId,
@@ -2759,6 +2632,7 @@ export default function Workbench() {
     projectName,
     readyReviewSession,
     runInProgress,
+    workspaceController,
   ]);
   const canOfferFileRename = Boolean(
     sourcePath
@@ -3683,30 +3557,6 @@ export default function Workbench() {
     });
   }, [workspaceController]);
   useEffect(() => {
-    if (
-      !workspaceController
-      || !window.htmlAIProjects
-      || !tabsPersistenceReady
-      || tabsStateControlsStartupRef.current
-    ) return;
-    void workspaceController.openProject({ kind: "startup" });
-  }, [tabsPersistenceReady, workspaceController]);
-
-  useEffect(() => {
-    if (
-      !workspaceController
-      || !tabsPersistenceReady
-      || !tabsStateControlsStartupRef.current
-      || restoredCatalogRequestedRef.current
-      || !workbenchTabsSessionRef.current.snapshot.tabs.some(
-        (tab) => tab.kind === "document",
-      )
-    ) return;
-    restoredCatalogRequestedRef.current = true;
-    void workspaceController.refreshRegisteredProjects();
-  }, [tabsPersistenceReady, workspaceController]);
-
-  useEffect(() => {
     if (!toast) {
       noticeDeadlineRef.current = null;
       return;
@@ -4135,16 +3985,10 @@ export default function Workbench() {
   }, [workspaceController]);
   const openProject = useCallback(async (recentPath?: string) => {
     if (!workspaceController) return;
-    const outcome = await workspaceController.openProject({
+    await workspaceController.openProject({
       kind: recentPath ? "recent" : "local",
       sourcePath: recentPath || null,
     });
-    if (outcome.status !== "succeeded") {
-      const snapshot = workbenchTabsSessionRef.current.snapshot;
-      startPageRequestedRef.current = snapshot.tabs.find(
-        (tab) => tab.tabId === snapshot.activeTabId,
-      )?.kind === "start";
-    }
   }, [workspaceController]);
   const presentWorkbenchTabOutcome = useCallback((outcome: unknown) => {
     if (!outcome || typeof outcome !== "object" || (outcome as { status?: string }).status === "succeeded") return;
@@ -4160,38 +4004,36 @@ export default function Workbench() {
     });
   }, [setToast]);
   const selectWorkbenchTab = useCallback((tab: WorkbenchTab) => {
-    void workbenchTabsWorkflowRef.current?.activate(tab.tabId).then((outcome) => {
+    if (!workspaceController) return;
+    void workspaceController.activateWorkbenchTab(tab.tabId).then((outcome) => {
       presentWorkbenchTabOutcome(outcome);
-      if (outcome.status === "succeeded") {
-        startPageRequestedRef.current = tab.kind === "start";
-      }
     });
-  }, [presentWorkbenchTabOutcome]);
+  }, [presentWorkbenchTabOutcome, workspaceController]);
   const createWorkbenchStartTab = useCallback(() => {
-    void workbenchTabsWorkflowRef.current?.createStart().then((outcome) => {
+    if (!workspaceController) return;
+    void workspaceController.createWorkbenchStartTab().then((outcome) => {
       presentWorkbenchTabOutcome(outcome);
-      if (outcome.status === "succeeded") {
-        startPageRequestedRef.current = true;
-      }
     });
-  }, [presentWorkbenchTabOutcome]);
+  }, [presentWorkbenchTabOutcome, workspaceController]);
   const closeWorkbenchTab = useCallback((tab: WorkbenchTab) => {
-    void workbenchTabsWorkflowRef.current?.close(tab.tabId).then((outcome) => {
+    if (!workspaceController) return;
+    void workspaceController.closeWorkbenchTab(tab.tabId).then((outcome) => {
       presentWorkbenchTabOutcome(outcome);
-      const active = workbenchTabsSessionRef.current.snapshot.tabs.find(
-        (item) => item.tabId === workbenchTabsSessionRef.current.snapshot.activeTabId,
+      const snapshot = workspaceController.getSnapshot().workbenchTabs
+        ?? INITIAL_WORKBENCH_TABS_SNAPSHOT;
+      const active = snapshot.tabs.find(
+        (item) => item.tabId === snapshot.activeTabId,
       );
-      startPageRequestedRef.current = active?.kind === "start";
       if (outcome.status === "succeeded" && active) {
         window.requestAnimationFrame(() => {
           document.getElementById(`workbench-tab-${active.tabId}`)?.focus();
         });
       }
     });
-  }, [presentWorkbenchTabOutcome]);
+  }, [presentWorkbenchTabOutcome, workspaceController]);
   const openRegisteredWorkbenchProject = useCallback((project: RegisteredProject) => {
-    if (!project.documentId || project.availability !== "ready") return;
-    const tab = workbenchTabsSessionRef.current.stageDocument({
+    if (!workspaceController || !project.documentId || project.availability !== "ready") return;
+    const tab = workspaceController.stageWorkbenchDocument({
       projectId: project.projectId,
       documentId: project.documentId,
       title: project.projectName,
@@ -4204,11 +4046,10 @@ export default function Workbench() {
       });
       return;
     }
-    void workbenchTabsWorkflowRef.current?.activate(tab.tabId).then((outcome) => {
+    void workspaceController.activateWorkbenchTab(tab.tabId).then((outcome) => {
       presentWorkbenchTabOutcome(outcome);
-      if (outcome.status === "succeeded") startPageRequestedRef.current = false;
     });
-  }, [presentWorkbenchTabOutcome]);
+  }, [presentWorkbenchTabOutcome, workspaceController]);
   useEffect(() => {
     const handleWorkbenchShortcut = (event: KeyboardEvent) => {
       const command = event.metaKey || event.ctrlKey;
@@ -4219,8 +4060,8 @@ export default function Workbench() {
         return;
       }
       if (event.key.toLowerCase() === "w") {
-        const active = workbenchTabsSessionRef.current.snapshot.tabs.find(
-          (tab) => tab.tabId === workbenchTabsSessionRef.current.snapshot.activeTabId,
+        const active = workbenchTabsSnapshot.tabs.find(
+          (tab) => tab.tabId === workbenchTabsSnapshot.activeTabId,
         );
         if (!active) return;
         event.preventDefault();
@@ -4229,15 +4070,15 @@ export default function Workbench() {
       }
       const numeric = Number(event.key);
       if (Number.isInteger(numeric) && numeric >= 1 && numeric <= 9) {
-        const tab = workbenchTabsSessionRef.current.snapshot.tabs[numeric - 1];
+        const tab = workbenchTabsSnapshot.tabs[numeric - 1];
         if (!tab) return;
         event.preventDefault();
         selectWorkbenchTab(tab);
         return;
       }
-      if (event.key === "Tab" && workbenchTabsSessionRef.current.snapshot.tabs.length > 1) {
+      if (event.key === "Tab" && workbenchTabsSnapshot.tabs.length > 1) {
         event.preventDefault();
-        const snapshot = workbenchTabsSessionRef.current.snapshot;
+        const snapshot = workbenchTabsSnapshot;
         const currentIndex = snapshot.tabs.findIndex((tab) => tab.tabId === snapshot.activeTabId);
         const direction = event.shiftKey ? -1 : 1;
         const nextIndex = (currentIndex + direction + snapshot.tabs.length) % snapshot.tabs.length;
@@ -4246,7 +4087,7 @@ export default function Workbench() {
     };
     window.addEventListener("keydown", handleWorkbenchShortcut);
     return () => window.removeEventListener("keydown", handleWorkbenchShortcut);
-  }, [closeWorkbenchTab, createWorkbenchStartTab, selectWorkbenchTab]);
+  }, [closeWorkbenchTab, createWorkbenchStartTab, selectWorkbenchTab, workbenchTabsSnapshot]);
 
   const resumeDeferredProjectApplication = useCallback(() => (
     workspaceController?.resumeDeferredProjectApplication().status === "succeeded"

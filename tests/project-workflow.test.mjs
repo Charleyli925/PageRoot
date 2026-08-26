@@ -12,7 +12,7 @@ import { ProjectWorkflow } from "../app/application/project-workflow.js";
 import { RunSession } from "../app/application/run-session.js";
 import { VersionSession } from "../app/application/version-session.js";
 import {
-  createWorkbenchTabsSession,
+  WorkbenchTabsSession,
   projectAppliedEventToWorkbenchTabs,
 } from "../app/application/workbench-tabs-session.js";
 import { createBrowserFileTabIdentity } from "../app/application/browser-file-tab-identity.js";
@@ -922,7 +922,7 @@ test("v4 exposes no relocation workflow that can retarget a moved project", (t) 
 test("a trusted direct browser file submission still enters the accepted FIFO", async (t) => {
   const harness = createHarness();
   t.after(() => harness.workflow.dispose());
-  const tabsSession = createWorkbenchTabsSession();
+  const tabsSession = new WorkbenchTabsSession();
   const unsubscribeTabs = harness.workflow.subscribeEvents((event) => {
     projectAppliedEventToWorkbenchTabs({ session: tabsSession, event });
   });
@@ -1064,7 +1064,7 @@ test("accepted projects retain FIFO order while the predecessor hydrates slowly"
     },
   });
   t.after(() => harness.workflow.dispose());
-  const tabsSession = createWorkbenchTabsSession();
+  const tabsSession = new WorkbenchTabsSession();
   const unsubscribeTabs = harness.workflow.subscribeEvents((event) => {
     projectAppliedEventToWorkbenchTabs({ session: tabsSession, event });
   });

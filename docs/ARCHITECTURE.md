@@ -266,7 +266,7 @@ services.
 | --- | --- |
 | Bridge routes, timeouts and structured outcomes | `app/application/bridge-client.js` |
 | Runtime Bridge/Session/workflow composition, aggregate frozen snapshot and application event stream | `createRuntimeWorkspaceController()` and `WorkspaceController` in `app/application/workspace-controller.js` |
-| Browser-workbench tab presentation and safe activation | `app/application/workbench-tabs-session.js` owns identity-deduplicated order/active/pending/mounted/runtime-owner projection, active-Start replacement and Registry-title reconciliation without a product tab-count limit; `app/application/workbench-tabs-workflow.js` serializes activation/close, delegates to the one `WorkspaceController`/`ProjectWorkflow`, rejects pre-open identity, mounts the newer epoch, then waits for hydration/Canvas settlement while distinguishing post-commit recovery; `app/workbench/WorkbenchChrome.tsx` is presentation only |
+| Browser-workbench tab presentation and safe activation | `createRuntimeWorkspaceController()` constructs the one `WorkbenchTabsSession`; `WorkspaceController` owns its `WorkbenchTabsWorkflow`, startup restore, Registry reconciliation, persistence host port, aggregate projection and commands. The Session retains identity-deduplicated order/active/pending/mounted/runtime-owner facts, active-Start replacement and unlimited tabs. The workflow rejects pre-open identity, mounts the newer epoch, then waits for hydration/Canvas settlement while distinguishing post-commit recovery. `app/workbench/WorkbenchChrome.tsx` is presentation only and React owns no tab workflow/session or restore transaction ref/effect. |
 | Open/registered project identity, session generation and late-query fencing | `app/application/project-session.js` |
 | External OS/QoderWork HTML-open FIFO delivery with explicit renderer acknowledgement, opaque request deduplication, read-only A/B/C classification, Prepared Intent, committed-exit one-shot handoff, cold-start native failure presentation from stable product codes, whole project-open transition ordering, blocker-gated deferred head retention, request-keyed ack-only retry, accepted-result FIFO and final renderer fence | `desktop/external-file-open.mjs`, `desktop/prepared-html-open.mjs`, `desktop/project-open-queue.mjs`, `app/application/external-file-open-session.js`, `app/application/project-application-session.js` |
 | First-open and already-imported confirmation prompt | `app/workbench/ExternalHtmlOpenDialog.tsx`, projected from `ProjectWorkflow` |
@@ -359,8 +359,10 @@ continues to own `activePath` compatibility. Any valid tabs record suppresses
 that compatibility startup: `activeTabId: null` restores Start, while a stored
 active document remains pending until Registry open, a newer Controller epoch,
 hydration and Canvas verification succeed. Registry-title/missing-item
-reconciliation waits for both tabs and catalog readiness regardless of arrival
-order; missing items are removed with an actionable Finder recovery notice.
+reconciliation and restore ordering live below React in `WorkspaceController`:
+the Controller reads tabs first, requests the Registry catalog when needed,
+removes missing items with an actionable Finder recovery event, and activates
+the pending identity through its owned workflow.
 
 Direct edits form ordered revisions and are written through a single queue. Every write checks the expected source Hash, uses a same-directory temporary file and atomic replacement, then rereads the result. External modification causes a fail-closed conflict.
 

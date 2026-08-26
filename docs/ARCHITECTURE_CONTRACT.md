@@ -167,7 +167,10 @@ Document, Comment, Run and Version Sessions. It exposes their immutable
 aggregate snapshot through its fixed `getSnapshot()`/`subscribe()` contract and
 forwards typed workflow events through `subscribeEvents()`; it does not create a
 second mutable store. It owns the unique `DrainCoordinator`, protocol Sessions,
-and Project, Comment, Run and Version workflow composition. `DocumentSession`
+and Project, Comment, Run, Version and Workbench Tabs workflow composition.
+The Tabs snapshot is part of the same aggregate; startup restore, Registry
+reconciliation and tab persistence enter through Controller-owned commands and
+narrow host ports, never React refs or effects. `DocumentSession`
 may derive `hasPendingWrite` and `isFlushing` for that snapshot, but neither a
 pending-write payload nor a Promise crosses into Workbench.
 
@@ -175,7 +178,7 @@ Workbench owns only presentation state and narrow host adapters. It receives
 the aggregate snapshot and Controller commands, never a business Session or the
 Bridge client. Its direct-Bridge allowance is exactly 0: the checked architecture
 gate permits no `bridgeClient.*` call, generic Bridge-command escape, business
-Session construction or Session ref in Workbench. The gate also forbids React,
+Session/Workflow construction or Session ref in Workbench. The gate also forbids React,
 Workbench, component or desktop imports from Application composition code.
 
 An asynchronous result may update state only when its complete identity is

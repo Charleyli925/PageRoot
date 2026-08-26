@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  createWorkbenchTabsSession,
+  WorkbenchTabsSession,
   projectAppliedEventToWorkbenchTabs,
 } from "../app/application/workbench-tabs-session.js";
 import {
@@ -48,7 +48,7 @@ function controllerFixture({
 }
 
 test("document activation commits only after ProjectWorkflow publication matches identity", async () => {
-  const session = createWorkbenchTabsSession();
+  const session = new WorkbenchTabsSession();
   session.bindDocument({ projectId: "project_alpha", documentId: "doc_alpha", title: "Alpha" });
   session.bindDocument({ projectId: "project_beta", documentId: "doc_beta", title: "Beta", focus: false });
   let eventProjectionObserved = false;
@@ -81,7 +81,7 @@ test("document activation commits only after ProjectWorkflow publication matches
 
 test("document activation mounts the verified identity but remains busy until hydration settles", async () => {
   let finishHydration;
-  const session = createWorkbenchTabsSession();
+  const session = new WorkbenchTabsSession();
   const alpha = session.bindDocument({ projectId: "project_alpha", documentId: "doc_alpha", title: "Alpha" }).tabs.find((tab) => tab.kind === "document");
   session.bindDocument({ projectId: "project_beta", documentId: "doc_beta", title: "Beta", focus: false });
   const { controller } = controllerFixture({
@@ -116,7 +116,7 @@ test("document activation mounts the verified identity but remains busy until hy
 
 test("post-commit settle timeout is explicit and never authorizes restore cleanup", async () => {
   const timers = [];
-  const session = createWorkbenchTabsSession();
+  const session = new WorkbenchTabsSession();
   session.bindDocument({ projectId: "project_alpha", documentId: "doc_alpha", title: "Alpha" });
   session.bindDocument({ projectId: "project_beta", documentId: "doc_beta", title: "Beta", focus: false });
   const { controller } = controllerFixture({
@@ -162,7 +162,7 @@ test("post-commit settle timeout is explicit and never authorizes restore cleanu
 
 test("returning from Start ignores pre-open identity and keeps the new epoch operation locked until settled", async () => {
   let finishHydration;
-  const session = createWorkbenchTabsSession();
+  const session = new WorkbenchTabsSession();
   const beta = session.bindDocument({ projectId: "project_beta", documentId: "doc_beta", title: "Beta" }).tabs.find((tab) => tab.kind === "document");
   const start = session.createStart({ focus: true }).tabs.find((tab) => tab.kind === "start");
   assert.equal(session.snapshot.activeTabId, start.tabId);
@@ -203,7 +203,7 @@ test("returning from Start ignores pre-open identity and keeps the new epoch ope
 });
 
 test("start activation uses the canonical native-edit fence and drain before unmounting", async () => {
-  const session = createWorkbenchTabsSession();
+  const session = new WorkbenchTabsSession();
   const document = session.bindDocument({ projectId: "project_alpha", documentId: "doc_alpha", title: "Alpha" }).tabs.find((tab) => tab.kind === "document");
   const { controller, calls } = controllerFixture();
   const workflow = new WorkbenchTabsWorkflow({ session, controller });
@@ -215,7 +215,7 @@ test("start activation uses the canonical native-edit fence and drain before unm
 });
 
 test("start activation keeps the mounted DOM owner when the native-edit fence blocks before drain", async () => {
-  const session = createWorkbenchTabsSession();
+  const session = new WorkbenchTabsSession();
   const document = session.bindDocument({ projectId: "project_alpha", documentId: "doc_alpha", title: "Alpha" }).tabs.find((tab) => tab.kind === "document");
   const { controller, calls } = controllerFixture({
     prepareResult: { status: "blocked", code: "PROJECT_SWITCH_NATIVE_EDIT", reason: "请先完成输入法组字。" },
@@ -234,7 +234,7 @@ test("start activation keeps the mounted DOM owner when the native-edit fence bl
 test("close rejects while activation is pending and never removes its target", async () => {
   let releaseOpen;
   const openReleased = new Promise((resolve) => { releaseOpen = resolve; });
-  const session = createWorkbenchTabsSession();
+  const session = new WorkbenchTabsSession();
   session.bindDocument({ projectId: "project_alpha", documentId: "doc_alpha", title: "Alpha" });
   session.bindDocument({ projectId: "project_beta", documentId: "doc_beta", title: "Beta", focus: false });
   const { controller } = controllerFixture({

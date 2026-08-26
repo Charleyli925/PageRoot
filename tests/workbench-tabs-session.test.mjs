@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  createWorkbenchTabsSession,
+  WorkbenchTabsSession,
   projectAppliedEventToWorkbenchTabs,
   reconcileWorkbenchTabsWhenReady,
 } from "../app/application/workbench-tabs-session.js";
@@ -11,7 +11,7 @@ const a = { projectId: "project_alpha", documentId: "doc_alpha", title: "Alpha" 
 const b = { projectId: "project_beta", documentId: "doc_beta", title: "Beta" };
 
 test("tabs deduplicate by durable project and document identity", () => {
-  const session = createWorkbenchTabsSession();
+  const session = new WorkbenchTabsSession();
   session.bindDocument(a);
   session.bindDocument({ ...a, title: "Alpha renamed" });
   assert.equal(session.snapshot.tabs.filter((tab) => tab.kind === "document").length, 1);
@@ -22,7 +22,7 @@ test("tabs deduplicate by durable project and document identity", () => {
 });
 
 test("opening from the active Start converts only that blank tab in place", () => {
-  const session = createWorkbenchTabsSession();
+  const session = new WorkbenchTabsSession();
   session.createStart({ focus: true });
   const before = session.snapshot.tabs.length;
   const inactiveStartId = session.snapshot.tabs.find(
@@ -40,7 +40,7 @@ test("opening from the active Start converts only that blank tab in place", () =
 });
 
 test("same-batch authoritative project events retain every identity and focus the newest", () => {
-  const session = createWorkbenchTabsSession();
+  const session = new WorkbenchTabsSession();
   const apply = (project, activeLocked = false) => projectAppliedEventToWorkbenchTabs({
     session,
     event: { type: "project-applied", project, activeLocked },
@@ -58,7 +58,7 @@ test("same-batch authoritative project events retain every identity and focus th
 });
 
 test("staging a registered project from active Start reuses the blank slot", () => {
-  const session = createWorkbenchTabsSession();
+  const session = new WorkbenchTabsSession();
   session.createStart({ focus: true });
   const before = session.snapshot.tabs.length;
   const replacedStartId = session.snapshot.activeTabId;
@@ -80,7 +80,7 @@ test("staging a registered project from active Start reuses the blank slot", () 
 });
 
 test("opening an already represented document from active Start removes the blank and focuses the existing tab", () => {
-  const session = createWorkbenchTabsSession();
+  const session = new WorkbenchTabsSession();
   session.bindDocument(a);
   session.createStart({ focus: true });
   const before = session.snapshot.tabs.length;
@@ -91,7 +91,7 @@ test("opening an already represented document from active Start removes the blan
 });
 
 test("switch is pending until the single mounted controller publishes the document", () => {
-  const session = createWorkbenchTabsSession();
+  const session = new WorkbenchTabsSession();
   session.bindDocument(a);
   session.bindDocument({ ...b, focus: false });
   const beta = session.snapshot.tabs.find((tab) => tab.projectId === b.projectId);
@@ -104,7 +104,7 @@ test("switch is pending until the single mounted controller publishes the docume
 });
 
 test("closing the last document enters the start tab without deleting durable facts", () => {
-  const session = createWorkbenchTabsSession();
+  const session = new WorkbenchTabsSession();
   const document = session.bindDocument(a).tabs.find((tab) => tab.kind === "document");
   const result = session.close(document.tabId);
   assert.equal(result.snapshot.tabs.some((tab) => tab.kind === "document"), false);
@@ -113,7 +113,7 @@ test("closing the last document enters the start tab without deleting durable fa
 });
 
 test("serialized state contains identity and presentation only", () => {
-  const session = createWorkbenchTabsSession();
+  const session = new WorkbenchTabsSession();
   session.bindDocument(a);
   const serialized = JSON.stringify(session.serialize());
   assert.match(serialized, /project_alpha/u);
@@ -121,7 +121,7 @@ test("serialized state contains identity and presentation only", () => {
 });
 
 test("persisted null active identity restores Start without selecting a legacy document", () => {
-  const session = createWorkbenchTabsSession();
+  const session = new WorkbenchTabsSession();
   session.hydrate({
     version: 1,
     activeTabId: null,
@@ -139,7 +139,7 @@ test("persisted null active identity restores Start without selecting a legacy d
 });
 
 test("restored document titles are projected from the registry and never persisted", () => {
-  const session = createWorkbenchTabsSession();
+  const session = new WorkbenchTabsSession();
   session.hydrate({
     version: 1,
     activeTabId: "document:project_alpha:doc_alpha",
@@ -169,7 +169,7 @@ test("restored document titles are projected from the registry and never persist
 });
 
 test("missing restored documents are removed and leave a usable Start tab", () => {
-  const session = createWorkbenchTabsSession();
+  const session = new WorkbenchTabsSession();
   session.hydrate({
     version: 1,
     activeTabId: "document:project_alpha:doc_alpha",
@@ -189,7 +189,7 @@ test("missing restored documents are removed and leave a usable Start tab", () =
 });
 
 test("restore reconciliation is deterministic when catalog readiness arrives first", () => {
-  const session = createWorkbenchTabsSession();
+  const session = new WorkbenchTabsSession();
   const registeredProjects = [
     { ...a, projectName: "Catalog first", availability: "ready" },
   ];
@@ -218,7 +218,7 @@ test("restore reconciliation is deterministic when catalog readiness arrives fir
 });
 
 test("restore reconciliation is deterministic when tabs hydration arrives first", () => {
-  const session = createWorkbenchTabsSession();
+  const session = new WorkbenchTabsSession();
   session.hydrate({
     version: 1,
     activeTabId: null,
@@ -245,7 +245,7 @@ test("restore reconciliation is deterministic when tabs hydration arrives first"
 });
 
 test("tab order remains identity-deduplicated across many open documents", () => {
-  const session = createWorkbenchTabsSession();
+  const session = new WorkbenchTabsSession();
   for (let index = 0; index < 40; index += 1) {
     assert.ok(session.bindDocument({
       projectId: `project_unlimited_${index}`,

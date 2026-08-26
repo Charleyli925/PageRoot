@@ -68,6 +68,13 @@ import type {
   VersionReviewCandidate,
   VersionWorkflowSnapshot,
 } from "./version-workflow.js";
+import type {
+  WorkbenchTab,
+  WorkbenchTabStatus,
+  WorkbenchTabsSession,
+  WorkbenchTabsSnapshot,
+} from "./workbench-tabs-session.js";
+import type { WorkbenchTabsOutcome } from "./workbench-tabs-workflow.js";
 
 export type OperationIdentity = Readonly<{
   operationId: string;
@@ -113,6 +120,8 @@ export type WorkspaceControllerSnapshot = Readonly<{
   run: RunWorkflowSnapshot | null;
   version: VersionWorkflowSnapshot | null;
   conversation: ConversationSessionSnapshot | null;
+  workbenchTabs: WorkbenchTabsSnapshot | null;
+  workbenchTabsReady: boolean;
 }>;
 
 export type WorkspaceEvent =
@@ -243,6 +252,7 @@ export type WorkspaceControllerConstruction = Readonly<{
   versionSession: VersionSession;
   sourceHistorySession: SourceHistorySession;
   conversationSession?: ConversationSession | null;
+  workbenchTabsSession?: WorkbenchTabsSession | null;
   codecs: WorkspaceControllerCodecs;
   ports: Readonly<{
     hash: HashPort;
@@ -251,6 +261,10 @@ export type WorkspaceControllerConstruction = Readonly<{
     projectSource?: ProjectSourceActivationPort;
     editRuntime?: EditAuthorRuntimePort;
     uiPreferences?: FirstEditGuidePort;
+    workbenchTabs?: Readonly<{
+      get(): Promise<unknown>;
+      set(value: Readonly<Record<string, unknown>>): Promise<unknown>;
+    }>;
   }>;
   documentWorkflow?: Readonly<{
     codecs: DocumentWorkflowCodecs;
@@ -385,6 +399,20 @@ export class WorkspaceController {
   updateConversationDraftText(text: string): void;
   updateConversationDraftIntent(intent: string): void;
   flushConversationDraft(): Promise<void>;
+  activateWorkbenchTab(tabId: string, input?: { deadlineMs?: number }): Promise<WorkbenchTabsOutcome>;
+  createWorkbenchStartTab(): Promise<WorkbenchTabsOutcome>;
+  closeWorkbenchTab(tabId: string): Promise<WorkbenchTabsOutcome>;
+  stageWorkbenchDocument(input: {
+    projectId: string;
+    documentId: string;
+    title: string;
+    status?: WorkbenchTabStatus;
+  }): WorkbenchTab | null;
+  updateWorkbenchTabStatus(
+    projectId: string,
+    documentId: string,
+    status: WorkbenchTabStatus,
+  ): WorkbenchTabsSnapshot | null;
   subscribe(
     listener: (snapshot: WorkspaceControllerSnapshot) => void,
   ): () => void;

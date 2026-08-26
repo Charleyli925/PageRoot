@@ -58,19 +58,21 @@ function frozenSnapshot({
   });
 }
 
+export const INITIAL_WORKBENCH_TABS_SNAPSHOT = frozenSnapshot({
+  revision: 0,
+  tabs: [startTab()],
+  activeTabId: "start:1",
+  pendingTabId: null,
+  mountedDocumentTabId: null,
+  runtimeOwnerTabId: null,
+});
+
 export class WorkbenchTabsSession {
   #listeners = new Set();
   #pendingPriorStatus = null;
   #stagedStartReplacement = null;
   #restoredDocumentTabIds = new Set();
-  #snapshot = frozenSnapshot({
-    revision: 0,
-    tabs: [startTab()],
-    activeTabId: "start:1",
-    pendingTabId: null,
-    mountedDocumentTabId: null,
-    runtimeOwnerTabId: null,
-  });
+  #snapshot = INITIAL_WORKBENCH_TABS_SNAPSHOT;
 
   get snapshot() {
     return this.#snapshot;
@@ -433,10 +435,6 @@ export class WorkbenchTabsSession {
     });
   }
 
-}
-
-export function createWorkbenchTabsSession() {
-  return new WorkbenchTabsSession();
 }
 
 export function projectAppliedEventToWorkbenchTabs({ session, event, title }) {

@@ -15,6 +15,7 @@ export type WorkbenchTabsSnapshot = Readonly<{
   mountedDocumentTabId: string | null;
   runtimeOwnerTabId: string | null;
 }>;
+export const INITIAL_WORKBENCH_TABS_SNAPSHOT: WorkbenchTabsSnapshot;
 export class WorkbenchTabsSession {
   readonly snapshot: WorkbenchTabsSnapshot;
   subscribe(listener: (snapshot: WorkbenchTabsSnapshot) => void): () => void;
@@ -47,7 +48,6 @@ export class WorkbenchTabsSession {
   close(tabId: string): Readonly<{ snapshot: WorkbenchTabsSnapshot; nextTabId: string | null }>;
   serialize(): Readonly<Record<string, unknown>>;
 }
-export function createWorkbenchTabsSession(): WorkbenchTabsSession;
 export function projectAppliedEventToWorkbenchTabs(input: {
   session: WorkbenchTabsSession;
   event: Readonly<{
