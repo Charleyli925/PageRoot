@@ -480,15 +480,60 @@ export class RunWorkflow {
   }
 
   refreshQoderAvailability() {
-    return this.refreshAgentAvailability();
+    const selection = this.#agentCatalog.getSnapshot().providers.qoder?.selection ?? null;
+    if (!selection) {
+      return Promise.resolve(rejected("AGENT_PROVIDER_UNSUPPORTED", "Qoder CLI 不可用。"));
+    }
+    if (this.#disposed) {
+      return Promise.resolve(blocked("RUN_WORKFLOW_DISPOSED", "Qoder CLI 状态检查已经停止。"));
+    }
+    return this.#agentCatalog.refreshAvailability(selection)
+      .then((refreshed) => {
+        if (this.#disposed) return stale({ kind: "agent-availability" });
+        if (String(refreshed?.result?.status || "") === "ready") {
+          return this.checkQoderUsability();
+        }
+        return succeeded({ availability: this.#agentCatalog.availability(selection) });
+      })
+      .catch((cause) => rejected(
+        errorCode(cause, "AGENT_AVAILABILITY_FAILED"),
+        this.#codecs.errorMessage(cause, "暂时无法检查 Qoder CLI。"),
+      ));
   }
 
-  checkQoderUsability() {
-    return this.checkAgentUsability();
+  async checkQoderUsability() {
+    const selection = this.#agentCatalog.getSnapshot().providers.qoder?.selection ?? null;
+    if (!selection) return rejected("AGENT_PROVIDER_UNSUPPORTED", "Qoder CLI 不可用。");
+    if (this.#disposed) {
+      return blocked("RUN_WORKFLOW_DISPOSED", "Qoder CLI 状态检查已经停止。");
+    }
+    try {
+      const preflight = await this.#agentCatalog.preflight(selection, { force: true });
+      this.#agentCatalog.discardTicket(preflight);
+      return succeeded({ availability: this.#agentCatalog.availability(selection) });
+    } catch (cause) {
+      return rejected(
+        errorCode(cause, "AGENT_PREFLIGHT_FAILED"),
+        this.#codecs.errorMessage(cause, "暂时无法检查 Qoder CLI。"),
+      );
+    }
   }
 
-  copyQoderGuidance(input) {
-    return this.copyAgentGuidance(input);
+  async copyQoderGuidance({ kind } = {}) {
+    if (kind !== "install" && kind !== "login") {
+      return rejected("AGENT_GUIDANCE_INVALID", "选择的 Qoder 引导无效。");
+    }
+    const selection = this.#agentCatalog.getSnapshot().providers.qoder?.selection ?? null;
+    if (!selection) return rejected("AGENT_PROVIDER_UNSUPPORTED", "Qoder CLI 不可用。");
+    try {
+      const result = await this.#agentCatalog.copyGuidance(kind, selection);
+      return succeeded(result);
+    } catch (cause) {
+      return rejected(
+        errorCode(cause, "AGENT_GUIDANCE_COPY_FAILED"),
+        this.#codecs.errorMessage(cause, "Qoder 引导指令暂时无法复制，请重试。"),
+      );
+    }
   }
 
   async submit({

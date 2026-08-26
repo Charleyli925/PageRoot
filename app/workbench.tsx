@@ -703,6 +703,8 @@ export default function Workbench() {
     : null;
   const qoderAvailability = workspaceControllerSnapshot?.run?.qoderAvailability
     ?? INITIAL_QODER_AVAILABILITY;
+  const aboutQoderAvailability = agentCatalogSnapshot?.providers?.qoder?.availability
+    ?? INITIAL_QODER_AVAILABILITY;
   const backgroundProjectResults = useMemo(
     () => new Map<string, BackgroundProjectResult>(
       runSnapshot.backgroundResults,
@@ -9137,7 +9139,7 @@ export default function Workbench() {
         repositoryOpenFailed={repositoryOpenFailed}
         releaseNotesOpenFailed={releaseNotesOpenFailed}
         userNoticeOpenFailed={userNoticeOpenFailed}
-        qoderAvailability={qoderAvailability}
+        qoderAvailability={aboutQoderAvailability}
         source={aboutOpenSource}
         onClose={closeAboutPageRoot}
         onCheckForUpdates={() => void checkForApplicationUpdates()}

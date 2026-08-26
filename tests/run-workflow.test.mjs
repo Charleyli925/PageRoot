@@ -678,6 +678,27 @@ test("an About usability check does not authorize a later Qoder submission", asy
   harness.workflow.dispose();
 });
 
+test("About keeps checking and guiding Qoder while Codex is selected", async () => {
+  const harness = createHarness();
+  const codex = harness.workflow.getSnapshot().agentCatalog.providers.codex.selection;
+  harness.workflow.selectAgent(codex);
+
+  const checked = await harness.workflow.checkQoderUsability();
+  assert.equal(checked.status, "succeeded");
+  assert.equal(harness.calls.preflight.at(-1).selection.providerId, "qoder");
+  assert.equal(harness.workflow.freezeAgentSelection().providerId, "codex");
+  assert.equal(
+    harness.workflow.getSnapshot().agentCatalog.providers.qoder.availability.status,
+    "ready",
+  );
+
+  const copied = await harness.workflow.copyQoderGuidance({ kind: "install" });
+  assert.equal(copied.status, "succeeded");
+  assert.equal(harness.calls.handoff.at(-1).purpose, "qoder-install-guidance");
+  assert.equal(harness.workflow.freezeAgentSelection().providerId, "codex");
+  harness.workflow.dispose();
+});
+
 test("Qoder guidance copy is isolated from Request and Canvas authority", async () => {
   const harness = createHarness();
 

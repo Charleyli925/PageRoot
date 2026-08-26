@@ -294,6 +294,16 @@ export class AgentCatalogState {
       frozen.providerId,
       (this.#generationByProvider.get(frozen.providerId) || 0) + 1,
     );
+    // A preflight started before this selection generation can no longer
+    // publish availability. Do not let its promise suppress the fresh check
+    // required when the user switches away and then back to this Provider.
+    // The old process may still settle, but its generation fence and identity
+    // check keep it from replacing the new authority or clearing its map entry.
+    for (const [key, inflight] of this.#inflightBySelection) {
+      if (inflight.providerId === frozen.providerId) {
+        this.#inflightBySelection.delete(key);
+      }
+    }
     this.#publish();
     return frozen;
   }
@@ -403,7 +413,7 @@ export class AgentCatalogState {
       if (reusable) this.#preflightBySelection.delete(key);
     }
     const inflight = this.#inflightBySelection.get(key);
-    if (inflight) return inflight;
+    if (inflight) return inflight.promise;
     const generation = (this.#generationByProvider.get(frozen.providerId) || 0) + 1;
     this.#generationByProvider.set(frozen.providerId, generation);
     const previous = provider.availability;
@@ -492,12 +502,15 @@ export class AgentCatalogState {
         }
         throw cause;
       } finally {
-        if (this.#inflightBySelection.get(key) === checking) {
+        if (this.#inflightBySelection.get(key)?.promise === checking) {
           this.#inflightBySelection.delete(key);
         }
       }
     })();
-    this.#inflightBySelection.set(key, checking);
+    this.#inflightBySelection.set(key, Object.freeze({
+      providerId: frozen.providerId,
+      promise: checking,
+    }));
     return checking;
   }
 

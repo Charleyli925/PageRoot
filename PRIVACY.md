@@ -29,11 +29,14 @@
 
 Renderer 发来的事件会在主进程再次按严格白名单过滤；未声明的事件和字段直接丢弃。
 
-上述“不收集、不回传”只描述 PageRoot 自己的产品遥测。用户主动选择 Qoder CLI 自动执行
-后，本轮冻结 HTML、评论、附件、项目规则、Request 内本机文件路径，以及 Qoder 账号或
-会话所需元数据可能按 Qoder 的服务条款和隐私政策由其服务处理；选择复制任务时，只有用户
-主动粘贴或发送后才进入相应第三方服务。ACP 文件与命令限制不是操作系统沙箱，Qoder 进程
-仍以当前用户权限运行。
+上述“不收集、不回传”只描述 PageRoot 自己的产品遥测。用户主动选择 Qoder CLI 或 Codex
+自动执行后，本轮冻结 HTML、评论、附件、项目规则、Request 内本机文件路径，以及相应
+Agent 账号或会话所需元数据，可能按该 Agent 的服务条款和隐私政策由其服务处理。Codex 是
+应用内置、按本轮启动的本机 Agent；修改时可能以当前用户的读取权限访问这台 Mac 上的其他
+本机文件，并将完成任务所需的内容发送至 Codex 服务。选择复制任务时，只有用户主动粘贴或
+发送后才进入相应第三方服务。ACP 文件与命令限制及 Codex Execution sandbox 都不是对本机
+读取权限的完整隔离；两个 Agent 的结果都必须先进入 PageRoot 候选审阅，只有用户明确采纳
+后才会成为正式版本。
 
 ## 如何区分安装、会话与项目
 
@@ -62,7 +65,7 @@ Renderer 发来的事件会在主进程再次按严格白名单过滤；未声�
 
 PageRoot’s packaged desktop app sends a limited, allowlisted set of product-usage and fault events by default. It does not send HTML, page text, comments, prompts, AI output, attachments, clipboard contents, filenames, paths, account identifiers, Mac serial numbers, raw error messages, or stack traces. A random per-install ID, a random per-launch session ID, and HMAC-derived project pseudonyms are used instead of hardware identity.
 
-That boundary applies only to PageRoot product telemetry. When the user explicitly chooses managed Qoder execution, Qoder may process the frozen task content, Request-local file paths, and account or session metadata under Qoder’s own terms and privacy policy. Clipboard delivery reaches a third-party Agent only after the user pastes or sends it. ACP restrictions are not an operating-system sandbox; Qoder still runs with the current user’s permissions.
+That boundary applies only to PageRoot product telemetry. When the user explicitly chooses managed Qoder or Codex execution, that Agent may process frozen task content, Request-local file paths, and account or session metadata under its own terms and privacy policy. The bundled, per-request Codex Agent may use the current user’s read access to inspect other local files and send task-required content to the Codex service. Clipboard delivery reaches a third-party Agent only after the user pastes or sends it. ACP restrictions and the Codex execution sandbox do not fully isolate local read access. Both managed paths produce a reviewable Candidate first; only explicit adoption creates a formal Version.
 
 Events are sent over HTTPS to PageRoot’s PostHog US Cloud project with person-profile processing and GeoIP resolution disabled. The source IP is necessarily visible to network recipients while the connection is made, but PageRoot does not add it to event properties. There is no session replay or automatic event capture. Telemetry failures never block editing or persistence.
 

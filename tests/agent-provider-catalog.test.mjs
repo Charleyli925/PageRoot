@@ -109,6 +109,60 @@ test("two providers keep separate in-flight preflights and one-use tickets", asy
   assert.deepEqual(catalog.getSnapshot().preflightBySelection, {});
 });
 
+test("switching away and back starts a fresh Provider preflight", async () => {
+  const starts = [];
+  const bridgeClient = {
+    preflightAgent(body) {
+      const pending = deferred();
+      starts.push({ body, pending });
+      return pending.promise;
+    },
+  };
+  const first = selection("first");
+  const second = selection("second");
+  const catalog = new AgentCatalogState({
+    bridgeClient,
+    providers: [provider("first", first), provider("second", second)],
+    selected: first,
+    clock: { now: () => 10 },
+  });
+
+  const staleFirst = catalog.preflight(first, { purpose: "execution" });
+  catalog.select(second);
+  const secondCheck = catalog.preflight(second, { purpose: "execution" });
+  catalog.select(first);
+  const currentFirst = catalog.preflight(first, { purpose: "execution" });
+  assert.equal(starts.length, 3);
+  assert.notEqual(currentFirst, staleFirst);
+
+  starts[0].pending.resolve({
+    status: "ready",
+    preflightId: "ticket_stale_first",
+    selection: first,
+    expiresAt: new Date(20_000).toISOString(),
+  });
+  await staleFirst;
+  assert.equal(catalog.availability(first).status, "checking");
+
+  starts[2].pending.resolve({
+    status: "ready",
+    preflightId: "ticket_current_first",
+    selection: first,
+    expiresAt: new Date(20_000).toISOString(),
+  });
+  assert.equal((await currentFirst).preflightId, "ticket_current_first");
+  assert.equal(catalog.availability(first).status, "ready");
+
+  starts[1].pending.resolve({
+    status: "ready",
+    preflightId: "ticket_stale_second",
+    selection: second,
+    expiresAt: new Date(20_000).toISOString(),
+  });
+  await secondCheck;
+  assert.equal(catalog.availability(first).status, "ready");
+});
+
 test("model, reasoning, installation, trust and purpose are all preflight key authority", () => {
   const base = selection("first");
   const variants = [

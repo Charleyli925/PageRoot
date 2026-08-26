@@ -93,8 +93,6 @@ export function useAiConversation({
   const active = (canvasMode === "preview" || reviewing) && Boolean(sourcePath);
   const visible = active && open;
   const agentAvailabilityRef = useRef(qoderAvailability);
-  const agentChecksInFlightRef = useRef(new Map<string, Promise<unknown>>());
-  const agentCheckStartedAtRef = useRef(new Map<string, number>());
   useEffect(() => {
     agentAvailabilityRef.current = qoderAvailability;
   }, [qoderAvailability]);
@@ -121,7 +119,9 @@ export function useAiConversation({
   // selected Provider's real preflight. In-flight checks are keyed by Provider
   // selection so a slow Qoder check cannot suppress a newly selected Codex
   // check (or vice versa). Returning from an external login retries the same
-  // selected Provider without adding a separate connection surface.
+  // selected Provider without adding a separate connection surface. The
+  // AgentCatalog is the single in-flight owner; duplicating its promise map in
+  // the view can strand a Provider at `checking` after switch-away/switch-back.
   useEffect(() => {
     if (!visible || !selectedAgentChoiceId) return undefined;
     const controller = controllerRef.current;
@@ -129,21 +129,7 @@ export function useAiConversation({
     const requestAgentCheck = (force = false) => {
       const status = agentAvailabilityRef.current?.status;
       if (!force && (status === "ready" || status === "checking")) return;
-      const now = Date.now();
-      const lastStartedAt = agentCheckStartedAtRef.current.get(selectedAgentChoiceId) ?? 0;
-      if (
-        agentChecksInFlightRef.current.has(selectedAgentChoiceId)
-        || now - lastStartedAt < 1_500
-      ) return;
-      agentCheckStartedAtRef.current.set(selectedAgentChoiceId, now);
-      const checking = Promise.resolve(controller.checkAgentUsability())
-        .catch(() => undefined);
-      agentChecksInFlightRef.current.set(selectedAgentChoiceId, checking);
-      void checking.finally(() => {
-        if (agentChecksInFlightRef.current.get(selectedAgentChoiceId) === checking) {
-          agentChecksInFlightRef.current.delete(selectedAgentChoiceId);
-        }
-      });
+      void Promise.resolve(controller.checkAgentUsability()).catch(() => undefined);
     };
     requestAgentCheck(true);
     const handleReturnToApp = () => {
