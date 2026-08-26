@@ -9,6 +9,7 @@ import {
   copyFile,
   lstat,
   mkdtemp,
+  open,
   readFile,
   readdir,
   rm,
@@ -385,6 +386,28 @@ async function assertFilesEqual(sourcePath, packagedPath, label) {
     sha256(source),
     `${label} does not match source: ${packagedPath}`,
   );
+}
+
+const MACH_O_MAGICS = new Set([
+  "cafebabe",
+  "cafebabf",
+  "bebafeca",
+  "bfbafeca",
+  "cefaedfe",
+  "cffaedfe",
+  "feedface",
+  "feedfacf",
+]);
+
+async function isMachOFile(filePath) {
+  const handle = await open(filePath, "r");
+  try {
+    const magic = Buffer.alloc(4);
+    const { bytesRead } = await handle.read(magic, 0, magic.length, 0);
+    return bytesRead === magic.length && MACH_O_MAGICS.has(magic.toString("hex"));
+  } finally {
+    await handle.close();
+  }
 }
 
 export async function assertSignedMachOContentEqual({
@@ -764,19 +787,13 @@ export async function verifyAppBundle({
   );
   for (const moduleName of requiredModules) {
     const codexPlatformModule = `@openai/codex-darwin-${arch}`;
-    const codexNativeRelativePath = path.join(
-      "vendor",
-      `${arch === "arm64" ? "aarch64" : "x86_64"}-apple-darwin`,
-      "bin",
-      "codex",
-    );
     await assertDirectoryMatches({
       sourceRoot: path.join(productRoot, "node_modules", moduleName),
       packagedRoot: path.join(resourcesPath, "node_modules", moduleName),
       label: `node_modules/${moduleName}`,
       compareFile: moduleName === codexPlatformModule
-        ? async (sourcePath, packagedPath, label, relativePath) => {
-          if (relativePath !== codexNativeRelativePath) {
+        ? async (sourcePath, packagedPath, label) => {
+          if (!await isMachOFile(sourcePath)) {
             await assertFilesEqual(sourcePath, packagedPath, label);
             return;
           }
