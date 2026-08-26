@@ -985,6 +985,10 @@ export class WorkspaceController {
     return this.#requireRunWorkflow().submit(input);
   }
 
+  selectAgent(selection) {
+    return this.#requireRunWorkflow().selectAgent(selection);
+  }
+
   refreshQoderAvailability() {
     return this.refreshAgentAvailability();
   }

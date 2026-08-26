@@ -6,6 +6,7 @@ import type { WorkspaceController } from "../application/workspace-controller.js
 import type { ConversationSessionSnapshot } from "../application/conversation-session.js";
 import type { QoderAvailabilitySnapshot } from "../domain/qoder-availability.js";
 import type { ActiveRun } from "../domain/run-lifecycle.js";
+import type { AgentSelection } from "../domain/agent-provider-state.js";
 import {
   conversationLoadedForView,
   sidebarStateFromRun,
@@ -29,6 +30,13 @@ export type UseAiConversationOptions = {
   conversation: ConversationSessionSnapshot | null;
   qoderAvailability: QoderAvailabilitySnapshot | null;
   agentModelDisplayName?: string | null;
+  agentChoices?: readonly Readonly<{
+    id: string;
+    label: string;
+    detail?: string | null;
+    selection: AgentSelection;
+  }>[];
+  selectedAgentChoiceId?: string | null;
   activeRun: ActiveRun | null;
   submissionPending?: boolean;
   reviewing?: boolean;
@@ -56,6 +64,8 @@ export function useAiConversation({
   conversation,
   qoderAvailability,
   agentModelDisplayName = null,
+  agentChoices = [],
+  selectedAgentChoiceId = null,
   activeRun,
   submissionPending = false,
   reviewing = false,
@@ -151,6 +161,12 @@ export function useAiConversation({
     onDeliverModification?.("clipboard");
   }, [onDeliverModification]);
 
+  const onSelectModelChoice = useCallback((choiceId: string) => {
+    const choice = agentChoices.find((candidate) => candidate.id === choiceId);
+    if (!choice) return;
+    controllerRef.current?.selectAgent(choice.selection);
+  }, [agentChoices, controllerRef]);
+
   const sidebarProps = useMemo(() => ({
     state,
     title: conversation?.title ?? "",
@@ -159,7 +175,10 @@ export function useAiConversation({
     // both, so the Composer can never claim ready while the Agent is not.
     catalogStatus: (qoderAvailability?.status ?? "unavailable") as SidebarCatalogStatus,
     modelDisplayName: agentModelDisplayName,
-    modelChoiceCount: 0,
+    modelChoiceCount: agentChoices.length,
+    modelChoices: agentChoices.map(({ id, label, detail }) => ({ id, label, detail })),
+    selectedModelChoiceId: selectedAgentChoiceId,
+    onSelectModelChoice,
     // The decision bar needs to name the version it is deciding about, and the
     // assessment decides whether adopting without looking is offered at all.
     candidateVersionLabel: activeRun?.candidateVersionLabel ?? null,
@@ -180,12 +199,15 @@ export function useAiConversation({
     conversation,
     qoderAvailability,
     agentModelDisplayName,
+    agentChoices,
+    selectedAgentChoiceId,
     pendingCommentCount,
     onSend,
     onCopyTask,
     onDecision,
     onCollapse,
     onOpenAgentSettings,
+    onSelectModelChoice,
   ]);
 
   return { open, visible, toggle, reveal, sidebarProps };

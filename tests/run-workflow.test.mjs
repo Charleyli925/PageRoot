@@ -532,6 +532,39 @@ test("Qoder ACP preflights before one durable Request and never touches the clip
   harness.workflow.dispose();
 });
 
+test("provider-resolved default model is frozen into the durable Request and runtime start", async () => {
+  let harness;
+  harness = createHarness({
+    bridge: {
+      async preflightAgent(request) {
+        harness.calls.preflight.push(request);
+        return {
+          status: "ready",
+          preflightId: "preflight_resolved_default",
+          selection: {
+            ...request.selection,
+            resolvedModelId: "qoder:resolved-default",
+          },
+          expiresAt: "2026-08-11T00:02:00.000Z",
+        };
+      },
+    },
+  });
+
+  const outcome = await harness.workflow.submit({ deliveryMode: "managed-agent" });
+
+  assert.equal(outcome.status, "succeeded");
+  assert.equal(
+    harness.calls.createRequest[0].agentDelivery.selection.resolvedModelId,
+    "qoder:resolved-default",
+  );
+  assert.deepEqual(
+    harness.calls.startAgent[0].selection,
+    harness.calls.createRequest[0].agentDelivery.selection,
+  );
+  harness.workflow.dispose();
+});
+
 test("a selection changed during preflight affects only the next Request", async () => {
   const nextSelection = Object.freeze({
     providerId: "qoder",

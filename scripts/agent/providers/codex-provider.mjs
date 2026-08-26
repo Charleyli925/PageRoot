@@ -18,6 +18,8 @@ import {
   CodexAppServerError,
   probeCodexAppServer,
 } from "../runtimes/codex-app-server-client.mjs";
+import { CodexExecutionError } from "../runtimes/codex-app-server-runtime.mjs";
+import { loadExecutionPolicy } from "../policies/execution-policy.mjs";
 
 export const CODEX_PROVIDER_ID = "codex";
 export const CODEX_RUNTIME_ID = "app-server";
@@ -195,7 +197,7 @@ export async function assertCodexInstallationUnchanged(installation) {
 
 function normalizeCodexError(cause) {
   if (cause instanceof AgentProviderError) return cause;
-  const code = cause instanceof CodexAppServerError
+  const code = cause instanceof CodexAppServerError || cause instanceof CodexExecutionError
     ? cause.code
     : "CODEX_PREFLIGHT_FAILED";
   const status = Number.isSafeInteger(cause?.status) ? cause.status : 503;
@@ -228,6 +230,18 @@ function codexFailure(code) {
     return "当前构建尚未开放 Codex 修改能力。";
   }
   return "Codex 没有完成本轮任务。Request 与当前 HTML 均已保留。";
+}
+
+function codexExecutionPrompt(policy) {
+  return [
+    "Complete this single frozen Stemmio page-modification task.",
+    `Read ${policy.manifestPath} and then every file in its exact readOrder.`,
+    `Follow ${policy.promptPath}.`,
+    `Write one complete HTML document only to ${policy.outputPath}.`,
+    "Do not run a finalizer, do not create any other file, and do not modify any other path.",
+    "After the Candidate file is complete, stop. Stemmio alone runs and verifies the fixed finalizer.",
+    "The result remains a Candidate pending review and cannot replace the Working Copy without explicit adoption.",
+  ].join("\n");
 }
 
 function selectionForCodex() {
@@ -286,8 +300,11 @@ function resolvedSelection(requested, { evidence } = {}) {
 export function createCodexProvider({
   installationResolver = resolveBundledCodexInstallation,
   probeRunner = probeCodexAppServer,
+  executionEnabled = false,
+  policyLoader = loadExecutionPolicy,
 } = {}) {
-  if (typeof installationResolver !== "function" || typeof probeRunner !== "function") {
+  if (typeof installationResolver !== "function" || typeof probeRunner !== "function"
+    || typeof policyLoader !== "function") {
     throw new TypeError("Codex provider dependencies are invalid.");
   }
   return defineAgentProvider({
@@ -299,7 +316,7 @@ export function createCodexProvider({
     capabilities: {
       availability: true,
       preflight: true,
-      execution: false,
+      execution: executionEnabled === true,
       modelCatalog: true,
     },
     resolveInstallation: ({ environment }) => installationResolver({ environment }),
@@ -334,11 +351,39 @@ export function createCodexProvider({
     normalizePreflightError: normalizeCodexError,
     normalizeRuntimeError: normalizeCodexError,
     preflightFailureMessage: codexPreflightFailure,
-    loadExecutionPolicy() {
-      fail("CODEX_EXECUTION_DISABLED", "Codex execution is disabled in this build.", { status: 409 });
+    loadExecutionPolicy(input) {
+      if (executionEnabled !== true) {
+        fail("CODEX_EXECUTION_DISABLED", "Codex execution is disabled in this build.", { status: 409 });
+      }
+      return policyLoader(input);
     },
-    createRuntimeLaunch() {
-      fail("CODEX_EXECUTION_DISABLED", "Codex execution is disabled in this build.", { status: 409 });
+    createRuntimeLaunch({
+      ticket,
+      policy,
+      baseEnvironment,
+      cancellationSignal,
+      onEvent,
+    } = {}) {
+      if (executionEnabled !== true) {
+        fail("CODEX_EXECUTION_DISABLED", "Codex execution is disabled in this build.", { status: 409 });
+      }
+      const namespacedModel = String(ticket?.selection?.resolvedModelId || "");
+      if (!namespacedModel.startsWith("codex:") || namespacedModel.length <= "codex:".length) {
+        fail("AGENT_SELECTION_UNSUPPORTED", "The resolved Codex model is unavailable.", { status: 409 });
+      }
+      return Object.freeze({
+        securityProfile: "agent-native",
+        command: ticket.installation.command,
+        expectedCommandIdentity: ticket.installation.commandIdentity,
+        cwd: path.dirname(policy.outputPath),
+        environment: baseEnvironment,
+        policy,
+        prompt: codexExecutionPrompt(policy),
+        model: namespacedModel.slice("codex:".length),
+        effort: ticket.selection.reasoning.applied,
+        cancellationSignal,
+        onEvent,
+      });
     },
     classifyRunFailure(cause) {
       return String(cause?.code || "CODEX_EXECUTION_FAILED");

@@ -569,6 +569,10 @@ export class RunWorkflow {
           },
         );
         if (!this.#isCurrentContext(context)) return stale(context);
+        frozenAgentDelivery = Object.freeze({
+          ...frozenAgentDelivery,
+          selection: agentPreflight.selection,
+        });
       }
       const registered = await this.#ensureRegistered({
         sourcePath: context.sourcePath,

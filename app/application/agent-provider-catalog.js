@@ -12,6 +12,7 @@ import {
   defaultManagedAgentDelivery,
   TRUSTED_LOCAL_AGENT_POLICY_VERSION,
 } from "../../shared/agent-delivery.mjs";
+import { AGENT_FEATURE_GATES } from "../../shared/agent-feature-gates.mjs";
 
 const QODER_FAILURE_REASONS = Object.freeze({
   QODER_COMMAND_NOT_FOUND: "not-installed",
@@ -90,6 +91,69 @@ export const QODER_AGENT_PROVIDER = Object.freeze({
   guidanceInstruction: qoderGuidanceInstruction,
 });
 
+const CODEX_FAILURE_REASONS = Object.freeze({
+  CODEX_INSTALLATION_MISSING: "not-installed",
+  CODEX_AUTH_REQUIRED: "auth-required",
+  CODEX_APP_SERVER_TIMEOUT: "timeout",
+  CODEX_TURN_TIMEOUT: "timeout",
+  CODEX_INSTALLATION_CHANGED: "restart-required",
+  CODEX_VERSION_MISMATCH: "invalid-installation",
+  CODEX_INSTALLATION_UNTRUSTED: "invalid-installation",
+});
+
+const CODEX_PRESENTATION = Object.freeze({
+  displayName: "Codex",
+  agentName: "Codex",
+  logoSrc: null,
+  cardClassName: "codex-availability-card",
+  primaryActionDataAttribute: "data-codex-primary",
+  readyDetail: "真实预检已完成，可直接交给 Codex 修改",
+  notInstalledDetail: "当前 Stemmio 安装不包含受支持的 Codex runtime。",
+  authRequiredDetail: "请先在 Codex 中完成登录，再回到 Stemmio 重试。",
+  invalidInstallationDetail: "内置 Codex runtime 未通过固定版本与完整性校验。",
+  restartRequiredDetail: "内置 Codex runtime 已发生变化，请重新打开 Stemmio。",
+  checkingDetail: "正在检查 Codex…",
+  timeoutDetail: "Codex 预检没有在规定时间内完成。",
+  startUnavailable: "当前 Request 还不能启动 Codex。",
+  startBusy: "Codex 正在启动，请等待当前操作完成。",
+  startFailure: "Codex 没有启动。本轮 Request 已保留，可安全结束后重试。",
+  restartLabel: "重新启动 Codex",
+  restartSupported: true,
+  stopLabel: "停止 Codex 并继续编辑",
+  frozenPreviewDetail: "这是本轮冻结并交给 Codex 的只读任务资料",
+  localReadDisclosure: "Codex 修改时可能读取这台 Mac 上的本机文件。",
+});
+
+export const CODEX_AGENT_PROVIDER = Object.freeze({
+  providerId: "codex",
+  runtimeId: "app-server",
+  securityProfile: "agent-native",
+  trustPolicyVersion: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
+  selection: Object.freeze({
+    providerId: "codex",
+    runtimeId: "app-server",
+    requestedModelId: null,
+    resolvedModelId: null,
+    reasoning: Object.freeze({
+      requested: null,
+      applied: null,
+      resolution: "provider-default",
+    }),
+  }),
+  presentation: CODEX_PRESENTATION,
+  failureReason(code) {
+    return CODEX_FAILURE_REASONS[String(code || "")] || "service-unavailable";
+  },
+});
+
+export function defaultAgentProviders({
+  codexExecution = AGENT_FEATURE_GATES.codexExecution,
+} = {}) {
+  return Object.freeze(codexExecution
+    ? [QODER_AGENT_PROVIDER, CODEX_AGENT_PROVIDER]
+    : [QODER_AGENT_PROVIDER]);
+}
+
 function frozenProviderEntry(descriptor, previous = null) {
   return Object.freeze({
     ...descriptor,
@@ -111,6 +175,28 @@ function preflightExpired(preflight, clock) {
   return !Number.isFinite(expiresAt) || expiresAt <= clock.now();
 }
 
+function preflightResolvedRequestedSelection(requested, returned) {
+  if (
+    requested.providerId !== returned.providerId
+    || requested.runtimeId !== returned.runtimeId
+    || requested.requestedModelId !== returned.requestedModelId
+    || requested.reasoning.requested !== returned.reasoning.requested
+  ) return false;
+  if (
+    typeof returned.resolvedModelId !== "string"
+    || !returned.resolvedModelId.startsWith(`${requested.providerId}:`)
+  ) return false;
+  if (requested.requestedModelId && returned.resolvedModelId !== requested.requestedModelId) {
+    return false;
+  }
+  if (requested.reasoning.requested === null) {
+    return returned.reasoning.applied === null
+      && returned.reasoning.resolution === "provider-default";
+  }
+  return returned.reasoning.applied === requested.reasoning.requested
+    && returned.reasoning.resolution === "exact";
+}
+
 export class AgentCatalogState {
   #bridgeClient;
   #handoffPort;
@@ -128,7 +214,7 @@ export class AgentCatalogState {
     bridgeClient,
     handoffPort = null,
     clock = Date,
-    providers = [QODER_AGENT_PROVIDER],
+    providers = defaultAgentProviders(),
     selected = null,
   } = {}) {
     if (!bridgeClient || typeof bridgeClient.preflightAgent !== "function") {
@@ -347,7 +433,10 @@ export class AgentCatalogState {
           });
         }
         const returnedSelection = freezeAgentSelection(preflight.selection || frozen);
-        if (agentPreflightKey(returnedSelection) !== agentPreflightKey(frozen)) {
+        if (
+          agentPreflightKey(returnedSelection) !== agentPreflightKey(frozen)
+          && !preflightResolvedRequestedSelection(frozen, returnedSelection)
+        ) {
           throw Object.assign(new Error("Agent preflight returned a different selection."), {
             code: "AGENT_PREFLIGHT_SELECTION_MISMATCH",
           });
@@ -368,6 +457,7 @@ export class AgentCatalogState {
           trustPolicyVersion: trust,
           installationDigest: String(preflight.installationDigest || digest || ""),
         });
+        if (this.#isSelected(frozen)) this.#selected = returnedSelection;
         const finalKey = agentPreflightKey(result.selection, {
           installationDigest: result.installationDigest,
           trustPolicyVersion: trust,
