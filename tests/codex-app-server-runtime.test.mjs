@@ -201,9 +201,9 @@ test("Codex App Server runtime requires the agent-native profile", async () => {
 test("codexExecution registers Codex and its runtime only when the hard gate is enabled", () => {
   assert.deepEqual(
     createDefaultProviderRegistry().catalog().map((entry) => entry.providerId),
-    ["qoder"],
+    ["qoder", "codex"],
   );
-  const enabled = createDefaultProviderRegistry({ codexExecution: true });
-  assert.deepEqual(enabled.catalog().map((entry) => entry.providerId), ["qoder", "codex"]);
-  assert.equal(enabled.catalog()[1].capabilities.execution, true);
+  const disabled = createDefaultProviderRegistry({ codexExecution: false });
+  assert.deepEqual(disabled.catalog().map((entry) => entry.providerId), ["qoder"]);
+  assert.equal(createDefaultProviderRegistry().catalog()[1].capabilities.execution, true);
 });

@@ -30,6 +30,10 @@ export type UseAiConversationOptions = {
   conversation: ConversationSessionSnapshot | null;
   qoderAvailability: QoderAvailabilitySnapshot | null;
   agentModelDisplayName?: string | null;
+  agentActionName?: string | null;
+  agentSettingsName?: string | null;
+  agentSettingsSupported?: boolean;
+  agentLocalReadDisclosure?: string | null;
   agentChoices?: readonly Readonly<{
     id: string;
     label: string;
@@ -64,6 +68,10 @@ export function useAiConversation({
   conversation,
   qoderAvailability,
   agentModelDisplayName = null,
+  agentActionName = "Qoder",
+  agentSettingsName = "Qoder CLI",
+  agentSettingsSupported = true,
+  agentLocalReadDisclosure = null,
   agentChoices = [],
   selectedAgentChoiceId = null,
   activeRun,
@@ -84,59 +92,56 @@ export function useAiConversation({
   // read-only there: see sidebarSendState(reviewing).
   const active = (canvasMode === "preview" || reviewing) && Boolean(sourcePath);
   const visible = active && open;
-  const qoderAvailabilityRef = useRef(qoderAvailability);
-  const qoderCheckInFlightRef = useRef<Promise<unknown> | null>(null);
-  const qoderCheckStartedAtRef = useRef(0);
+  const agentAvailabilityRef = useRef(qoderAvailability);
   useEffect(() => {
-    qoderAvailabilityRef.current = qoderAvailability;
+    agentAvailabilityRef.current = qoderAvailability;
   }, [qoderAvailability]);
 
   // Load when the sidebar becomes visible for a Document and close it on any
   // identity change or when it stops being visible.
   //
-  // Opening the sidebar also has to ask whether Qoder is usable. Returning from
-  // an external login while the sidebar remains visible must do the same check
-  // without a user-facing "检测" button.
   useEffect(() => {
     if (!visible) return undefined;
     const controller = controllerRef.current;
     if (!controller) return undefined;
     let cancelled = false;
-    const requestQoderCheck = (force = false) => {
-      const status = qoderAvailabilityRef.current?.status;
-      if (!force && (status === "ready" || status === "checking")) return;
-      const now = Date.now();
-      if (
-        qoderCheckInFlightRef.current
-        || now - qoderCheckStartedAtRef.current < 1_500
-      ) return;
-      qoderCheckStartedAtRef.current = now;
-      const checking = Promise.resolve(controller.checkQoderUsability())
-        .catch(() => undefined);
-      qoderCheckInFlightRef.current = checking;
-      void checking.finally(() => {
-        if (qoderCheckInFlightRef.current === checking) {
-          qoderCheckInFlightRef.current = null;
-        }
-      });
-    };
     void (async () => {
       await controller.openConversation({ projectId, documentId, sourcePath });
       if (cancelled) return;
     })();
-    requestQoderCheck(true);
+    return () => {
+      cancelled = true;
+      controller.closeConversation();
+    };
+  }, [visible, projectId, documentId, sourcePath, controllerRef]);
+
+  // Opening the sidebar and switching the in-place Agent chooser both run the
+  // selected Provider's real preflight. In-flight checks are keyed by Provider
+  // selection so a slow Qoder check cannot suppress a newly selected Codex
+  // check (or vice versa). Returning from an external login retries the same
+  // selected Provider without adding a separate connection surface. The
+  // AgentCatalog is the single in-flight owner; duplicating its promise map in
+  // the view can strand a Provider at `checking` after switch-away/switch-back.
+  useEffect(() => {
+    if (!visible || !selectedAgentChoiceId) return undefined;
+    const controller = controllerRef.current;
+    if (!controller) return undefined;
+    const requestAgentCheck = (force = false) => {
+      const status = agentAvailabilityRef.current?.status;
+      if (!force && (status === "ready" || status === "checking")) return;
+      void Promise.resolve(controller.checkAgentUsability()).catch(() => undefined);
+    };
+    requestAgentCheck(true);
     const handleReturnToApp = () => {
-      if (document.visibilityState === "visible") requestQoderCheck();
+      if (document.visibilityState === "visible") requestAgentCheck();
     };
     window.addEventListener("focus", handleReturnToApp);
     document.addEventListener("visibilitychange", handleReturnToApp);
     return () => {
-      cancelled = true;
       window.removeEventListener("focus", handleReturnToApp);
       document.removeEventListener("visibilitychange", handleReturnToApp);
-      controller.closeConversation();
     };
-  }, [visible, projectId, documentId, sourcePath, controllerRef]);
+  }, [visible, selectedAgentChoiceId, controllerRef]);
 
   const toggle = useCallback(() => setOpen((value) => !value), []);
   // Submitting a round makes this the surface that reports it, so the workbench
@@ -175,6 +180,10 @@ export function useAiConversation({
     // both, so the Composer can never claim ready while the Agent is not.
     catalogStatus: (qoderAvailability?.status ?? "unavailable") as SidebarCatalogStatus,
     modelDisplayName: agentModelDisplayName,
+    agentActionName,
+    agentSettingsName,
+    agentSettingsSupported,
+    agentLocalReadDisclosure,
     modelChoiceCount: agentChoices.length,
     modelChoices: agentChoices.map(({ id, label, detail }) => ({ id, label, detail })),
     selectedModelChoiceId: selectedAgentChoiceId,
@@ -199,6 +208,10 @@ export function useAiConversation({
     conversation,
     qoderAvailability,
     agentModelDisplayName,
+    agentActionName,
+    agentSettingsName,
+    agentSettingsSupported,
+    agentLocalReadDisclosure,
     agentChoices,
     selectedAgentChoiceId,
     pendingCommentCount,

@@ -990,15 +990,15 @@ export class WorkspaceController {
   }
 
   refreshQoderAvailability() {
-    return this.refreshAgentAvailability();
+    return this.#requireRunWorkflow().refreshQoderAvailability();
   }
 
   checkQoderUsability() {
-    return this.checkAgentUsability();
+    return this.#requireRunWorkflow().checkQoderUsability();
   }
 
   copyQoderGuidance(input) {
-    return this.copyAgentGuidance(input);
+    return this.#requireRunWorkflow().copyQoderGuidance(input);
   }
 
   refreshAgentAvailability() {

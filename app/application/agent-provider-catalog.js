@@ -54,6 +54,7 @@ const QODER_PRESENTATION = Object.freeze({
   startFailure: "Qoder CLI 没有启动。本轮 Request 已保留，可重试或复制任务。",
   restartLabel: "重新启动 Qoder",
   restartSupported: true,
+  settingsSupported: true,
   stopLabel: "停止 Qoder 并继续编辑",
   frozenPreviewDetail: "这是本轮冻结并交给 Qoder CLI 的只读内容",
 });
@@ -119,6 +120,7 @@ const CODEX_PRESENTATION = Object.freeze({
   startFailure: "Codex 没有启动。本轮 Request 已保留，可安全结束后重试。",
   restartLabel: "重新启动 Codex",
   restartSupported: true,
+  settingsSupported: false,
   stopLabel: "停止 Codex 并继续编辑",
   frozenPreviewDetail: "这是本轮冻结并交给 Codex 的只读任务资料",
   localReadDisclosure: "Codex 修改时可能读取这台 Mac 上的本机文件。",
@@ -292,6 +294,16 @@ export class AgentCatalogState {
       frozen.providerId,
       (this.#generationByProvider.get(frozen.providerId) || 0) + 1,
     );
+    // A preflight started before this selection generation can no longer
+    // publish availability. Do not let its promise suppress the fresh check
+    // required when the user switches away and then back to this Provider.
+    // The old process may still settle, but its generation fence and identity
+    // check keep it from replacing the new authority or clearing its map entry.
+    for (const [key, inflight] of this.#inflightBySelection) {
+      if (inflight.providerId === frozen.providerId) {
+        this.#inflightBySelection.delete(key);
+      }
+    }
     this.#publish();
     return frozen;
   }
@@ -299,6 +311,14 @@ export class AgentCatalogState {
   freezeSelected() {
     if (!this.#selected) return null;
     return freezeAgentSelection(this.#selected);
+  }
+
+  freezeProviderSelection(providerId) {
+    const provider = this.#providers.get(String(providerId || ""));
+    if (!provider) return null;
+    return this.#selected?.providerId === provider.providerId
+      ? freezeAgentSelection(this.#selected)
+      : freezeAgentSelection(provider.selection);
   }
 
   provider(selection = this.#selected) {
@@ -401,7 +421,7 @@ export class AgentCatalogState {
       if (reusable) this.#preflightBySelection.delete(key);
     }
     const inflight = this.#inflightBySelection.get(key);
-    if (inflight) return inflight;
+    if (inflight) return inflight.promise;
     const generation = (this.#generationByProvider.get(frozen.providerId) || 0) + 1;
     this.#generationByProvider.set(frozen.providerId, generation);
     const previous = provider.availability;
@@ -458,7 +478,13 @@ export class AgentCatalogState {
           trustPolicyVersion: trust,
           installationDigest: String(preflight.installationDigest || digest || ""),
         });
-        if (this.#isSelected(frozen)) this.#selected = returnedSelection;
+        const generationIsCurrent = (
+          !this.#disposed
+          && this.#generationByProvider.get(frozen.providerId) === generation
+        );
+        if (!generationIsCurrent) return result;
+        const wasSelected = this.#isSelected(frozen);
+        if (wasSelected) this.#selected = returnedSelection;
         const finalKey = agentPreflightKey(result.selection, {
           installationDigest: result.installationDigest,
           trustPolicyVersion: trust,
@@ -466,11 +492,7 @@ export class AgentCatalogState {
         });
         this.#preflightBySelection.set(finalKey, result);
         if (finalKey !== key) this.#preflightBySelection.delete(key);
-        if (
-          !this.#disposed
-          && this.#generationByProvider.get(frozen.providerId) === generation
-          && this.#canProjectAvailability(frozen)
-        ) {
+        if (wasSelected || this.#canProjectAvailability(frozen)) {
           this.#setProviderDigest(frozen.providerId, result.installationDigest);
           this.#setAvailability(
             frozen.providerId,
@@ -490,12 +512,15 @@ export class AgentCatalogState {
         }
         throw cause;
       } finally {
-        if (this.#inflightBySelection.get(key) === checking) {
+        if (this.#inflightBySelection.get(key)?.promise === checking) {
           this.#inflightBySelection.delete(key);
         }
       }
     })();
-    this.#inflightBySelection.set(key, checking);
+    this.#inflightBySelection.set(key, Object.freeze({
+      providerId: frozen.providerId,
+      promise: checking,
+    }));
     return checking;
   }
 

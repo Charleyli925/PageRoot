@@ -120,3 +120,33 @@ test("packaged runtime dependencies form one explicit hoisted closure", () => {
   assert.equal(missing.passed, false);
   assert.deepEqual(missing.missingPackages, ["node_modules/entities"]);
 });
+
+test("packaged runtime closure resolves the selected platform and architecture macros", () => {
+  const packageJson = {
+    build: {
+      extraResources: [{
+        from: "node_modules/@openai/codex-darwin-${arch}",
+        to: "node_modules/@openai/codex-darwin-${arch}",
+      }],
+    },
+  };
+  const packageLock = {
+    packages: {
+      "": {},
+      "node_modules/@openai/codex-darwin-arm64": {},
+    },
+  };
+  assert.deepEqual(
+    evaluatePackagedRuntimeClosure(packageJson, packageLock, {
+      platform: "darwin",
+      arch: "arm64",
+    }),
+    {
+      managedModules: ["@openai/codex-darwin-arm64"],
+      missingPackages: [],
+      missingResources: [],
+      nestedPackages: [],
+      passed: true,
+    },
+  );
+});

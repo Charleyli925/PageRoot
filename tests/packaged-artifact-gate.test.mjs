@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import {
+  copyFile,
   mkdir,
   mkdtemp,
   readFile,
@@ -22,13 +23,70 @@ import {
 import {
   appBundleSignaturePolicyForProfile,
   assertNoRetiredEditorArtifacts,
+  assertPackagedAgentFeatureGates,
+  assertSignedMachOContentEqual,
   expectedArtifactLayout,
   verifyAppBundle,
+  verifyPackagedCodexRuntime,
 } from "../scripts/verify-packaged-artifact.mjs";
 import { createSyntheticAppBundle } from "./helpers/release-evidence-fixtures.mjs";
 
 const productRoot = fileURLToPath(new URL("../", import.meta.url));
 const execFileAsync = promisify(execFile);
+
+test("a packaged Mach-O may be re-signed but not replaced", async (t) => {
+  if (process.platform !== "darwin") {
+    t.skip("Mach-O signing is macOS-only");
+    return;
+  }
+  const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), "pageroot-macho-contract-"));
+  t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
+  const sourcePath = path.join(temporaryRoot, "source-true");
+  const packagedPath = path.join(temporaryRoot, "packaged-true");
+  const entitlementsPath = path.join(productRoot, "desktop/resources/entitlements.mac.plist");
+  await Promise.all([
+    copyFile("/usr/bin/true", sourcePath),
+    copyFile("/usr/bin/true", packagedPath),
+  ]);
+  await execFileAsync("codesign", [
+    "--force",
+    "--sign",
+    "-",
+    "--identifier",
+    "app.pageroot.synthetic-packaged-runtime",
+    "--entitlements",
+    entitlementsPath,
+    packagedPath,
+  ]);
+  await assertSignedMachOContentEqual({
+    sourcePath,
+    packagedPath,
+    entitlementsPath,
+    label: "synthetic native runtime",
+  });
+
+  const replacementPath = path.join(temporaryRoot, "replacement-runtime");
+  await copyFile("/bin/echo", replacementPath);
+  await execFileAsync("codesign", [
+    "--force",
+    "--sign",
+    "-",
+    "--identifier",
+    "app.pageroot.synthetic-packaged-runtime",
+    "--entitlements",
+    entitlementsPath,
+    replacementPath,
+  ]);
+  await assert.rejects(
+    assertSignedMachOContentEqual({
+      sourcePath,
+      packagedPath: replacementPath,
+      entitlementsPath,
+      label: "replaced native runtime",
+    }),
+    /executable content does not match source/u,
+  );
+});
 
 async function verifySyntheticAppBundle(fixture, { allowUnsigned = true } = {}) {
   return verifyAppBundle({
@@ -121,6 +179,43 @@ test("release commands use one automated artifact lane with full tests and packa
     "PageRoot-" + packageJson.version + "-arm64.zip.blockmap",
   );
   assert.equal(path.basename(layout.updateInfoPath), "latest-mac.yml");
+});
+
+test("the pinned Codex package passes the native packaged-runtime verifier", async (t) => {
+  if (process.platform !== "darwin") {
+    t.skip("the packaged artifact verifier targets the macOS application");
+    return;
+  }
+  const result = await verifyPackagedCodexRuntime({
+    resourcesPath: productRoot,
+    arch: process.arch,
+  });
+  assert.equal(result.version, "0.149.1");
+  assert.match(result.installationDigest, /^sha256:[a-f0-9]{64}$/u);
+});
+
+test("the packaged verifier permits the exact one-flag Codex rollback", () => {
+  for (const codexExecution of [true, false]) {
+    const source = Object.freeze({ codexDiscussion: false, codexExecution });
+    assert.doesNotThrow(() => assertPackagedAgentFeatureGates(
+      { ...source },
+      source,
+    ));
+    assert.throws(
+      () => assertPackagedAgentFeatureGates(
+        { codexDiscussion: false, codexExecution: !codexExecution },
+        source,
+      ),
+      /do not match the source-owned rollback state/u,
+    );
+  }
+  assert.throws(
+    () => assertPackagedAgentFeatureGates(
+      { codexDiscussion: true, codexExecution: false },
+      { codexDiscussion: true, codexExecution: false },
+    ),
+    /must keep pure Codex Discussion disabled/u,
+  );
 });
 
 test("app-only profiles keep dry-run unsigned without weakening Candidate signature gates", () => {
@@ -301,6 +396,7 @@ test("real app verification requires the Electron Helper ACP smoke even when uns
       appPath: fixture.appPath,
       packageJson: fixture.packageJson,
       verifySignature: false,
+      requirePackagedCodexRuntime: false,
     }),
     /packaged Electron Helper is missing/u,
   );

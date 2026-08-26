@@ -94,6 +94,8 @@ const BRIDGE_FILES = [
 
 const PACKAGED_MODULES = [
   "@agentclientprotocol/sdk",
+  "@openai/codex",
+  "@openai/codex-darwin-${arch}",
   "parse5",
   "entities",
   "electron-updater",
@@ -304,13 +306,18 @@ test("package security boundaries retain CSP, entitlements and final plist clean
 });
 
 test("packaged legal notice and icon remain available as reviewed resources", async () => {
-  const [notice, iconInfo] = await Promise.all([
+  const [notice, privacy, iconInfo] = await Promise.all([
     readFile(new URL("../PageRoot 用户声明与免责声明.txt", import.meta.url), "utf8"),
+    readFile(new URL("../PRIVACY.md", import.meta.url), "utf8"),
     stat(new URL("../desktop/resources/icon.icns", import.meta.url)),
   ]);
   assert.match(notice, /AI Agent 生成或修改的内容可能不准确/u);
-  assert.match(notice, /选择“Qoder CLI”或“复制任务”/u);
-  assert.match(notice, /不是操作系统沙箱/u);
+  assert.match(notice, /选择“Qoder CLI”“Codex”或“复制任务”/u);
+  assert.match(notice, /Codex 修改时可能以当前用户的读取权限访问/u);
+  assert.match(notice, /不构成对本机读取权限的完整操作系统隔离/u);
+  assert.match(notice, /只有用户明确采纳后才成为正式版本/u);
+  assert.match(privacy, /用户主动选择 Qoder CLI 或 Codex/u);
+  assert.match(privacy, /将完成任务所需的内容发送至 Codex 服务/u);
   assert.match(notice, /Apache License 2\.0/u);
   assert.ok(iconInfo.size > 100_000);
 });

@@ -6,8 +6,10 @@ import { fileURLToPath } from "node:url";
 
 import {
   createPackageDeliverySnapshot,
+  isTransientGitHubCommandFailure,
   pullRequestStatusLabel,
   renderPackageDeliveryMarkdown,
+  retryTransientGitHubCommand,
   selectPackageBaseline,
   summarizeStatusChecks,
 } from "../scripts/package-delivery-report.mjs";
@@ -15,6 +17,51 @@ import {
 const productRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const headSha = "a".repeat(40);
 const treeSha = "b".repeat(40);
+
+test("delivery evidence retries only bounded GitHub transport failures", () => {
+  for (const failure of [
+    new Error('Get "https://api.github.com/example": EOF'),
+    Object.assign(new Error("spawnSync gh ETIMEDOUT"), { code: "ETIMEDOUT" }),
+    new Error("gh failed: HTTP 503: temporarily unavailable"),
+    new Error("Could not resolve host: api.github.com"),
+  ]) {
+    assert.equal(isTransientGitHubCommandFailure(failure), true);
+  }
+  for (const failure of [
+    new Error("gh failed: HTTP 401: Bad credentials"),
+    new Error("gh failed: HTTP 404: Not Found"),
+    new Error("GitHub commit Pull Request response must be an array"),
+  ]) {
+    assert.equal(isTransientGitHubCommandFailure(failure), false);
+  }
+
+  let transientAttempts = 0;
+  const retries = [];
+  assert.equal(retryTransientGitHubCommand(() => {
+    transientAttempts += 1;
+    if (transientAttempts < 3) throw new Error("GitHub request failed: EOF");
+    return "ok";
+  }, {
+    attempts: 3,
+    onRetry: (retry) => retries.push(retry),
+  }), "ok");
+  assert.equal(transientAttempts, 3);
+  assert.deepEqual(retries.map(({ nextAttempt }) => nextAttempt), [2, 3]);
+
+  let permanentAttempts = 0;
+  assert.throws(() => retryTransientGitHubCommand(() => {
+    permanentAttempts += 1;
+    throw new Error("HTTP 401: Bad credentials");
+  }), /Bad credentials/u);
+  assert.equal(permanentAttempts, 1);
+
+  let exhaustedAttempts = 0;
+  assert.throws(() => retryTransientGitHubCommand(() => {
+    exhaustedAttempts += 1;
+    throw new Error("GitHub request failed: EOF");
+  }, { attempts: 2 }), /EOF/u);
+  assert.equal(exhaustedAttempts, 2);
+});
 
 test("formal reports use the prior stable tag when packaging an exact tagged commit", () => {
   assert.equal(

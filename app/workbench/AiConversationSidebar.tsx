@@ -38,6 +38,10 @@ export type AiConversationSidebarProps = {
   messages: readonly unknown[];
   catalogStatus?: SidebarCatalogStatus;
   modelDisplayName?: string | null;
+  agentActionName?: string | null;
+  agentSettingsName?: string | null;
+  agentSettingsSupported?: boolean;
+  agentLocalReadDisclosure?: string | null;
   modelChoiceCount?: number;
   modelChoices?: readonly Readonly<{
     id: string;
@@ -60,7 +64,7 @@ export type AiConversationSidebarProps = {
   onCollapse?: () => void;
   /** Hands the same round to the clipboard instead of the local Agent. */
   onCopyTask?: () => void;
-  /** What Qoder is saying while it works (ADR 0037). */
+  /** What the selected Agent is saying while it works (ADR 0037). */
   agentText?: string;
   /** Which destination this round uses; the decision bar copy depends on it. */
   deliveryMode?: "managed-agent" | "clipboard";
@@ -74,6 +78,10 @@ export default function AiConversationSidebar({
   messages,
   catalogStatus = "ready",
   modelDisplayName = null,
+  agentActionName = "Qoder",
+  agentSettingsName = "Qoder CLI",
+  agentSettingsSupported = true,
+  agentLocalReadDisclosure = null,
   modelChoiceCount = 0,
   modelChoices = [],
   selectedModelChoiceId = null,
@@ -99,6 +107,8 @@ export default function AiConversationSidebar({
   // as long as the surface is mounted, rather than springing open on every update.
   const [narrationOpen, setNarrationOpen] = useState(true);
   const [modelChoicesOpen, setModelChoicesOpen] = useState(false);
+  const resolvedAgentActionName = agentActionName || "Agent";
+  const resolvedAgentSettingsName = agentSettingsName || resolvedAgentActionName;
   const stream = useMemo(() => sidebarMessageStream(messages), [messages]);
   const activeIntent = sidebarResolvedIntent(state);
   // Product state alone determines the one available action and mode copy.
@@ -119,12 +129,23 @@ export default function AiConversationSidebar({
     queued,
     intent: activeIntent,
     pendingCommentCount,
+    agentName: resolvedAgentActionName,
+    agentSettingsName: resolvedAgentSettingsName,
+    agentSettingsSupported,
   });
   // The clipboard button does not read the model catalog: copying is a branch
   // of the same round that never consults Qoder, so an unreadable catalog must
   // not grey it out with the send button it sits beside.
-  const copyTask = sidebarCopyTaskState({ state, queued, pendingCommentCount });
-  const disclosure = sidebarDeliveryDisclosure(activeIntent);
+  const copyTask = sidebarCopyTaskState({
+    state,
+    queued,
+    pendingCommentCount,
+    agentName: resolvedAgentActionName,
+  });
+  const disclosure = sidebarDeliveryDisclosure(activeIntent, {
+    agentName: resolvedAgentActionName,
+    localReadDisclosure: agentLocalReadDisclosure,
+  });
   const runProgress = sidebarRunProgress({ state, steps: runSteps, agentText });
   const modelLine = sidebarModelLine({
     catalogStatus,
@@ -208,7 +229,7 @@ export default function AiConversationSidebar({
         )}
 
         {/*
-          * A round in flight, told as Qoder speaking in the thread rather than a
+          * A round in flight, told inside the thread rather than a
           * panel of its own. PageRoot states the stage from the run's durable status
           * (ADR 0037 §4) and the Agent's own words ride along underneath, collapsible
           * in one click so the thread stays readable while a long round runs.
@@ -226,7 +247,7 @@ export default function AiConversationSidebar({
             </span>
             {/*
               * PageRoot states the stages from the run's durable status (ADR 0037 §4).
-              * Signing them 「Qoder CLI」 made the Agent look like the author of
+              * Signing them with an Agent name made the Agent look like the author of
               * PageRoot's own bookkeeping, and put the brand mark on the wrong speaker.
               */}
             <span className={styles.actor}>PageRoot</span>
@@ -254,14 +275,14 @@ export default function AiConversationSidebar({
         {runProgress?.narration ? (
           <section
             className={styles.message}
-            data-actor="qoder"
+            data-actor="agent"
             data-testid="ai-conversation-narration-message"
-            aria-label="Qoder 的说明"
+            aria-label={`${resolvedAgentActionName} 的说明`}
           >
             <span className={styles.avatar} aria-hidden="true">
-              {sidebarActorInitial("qoder")}
+              {sidebarActorInitial("agent")}
             </span>
-            <span className={styles.actor}>Qoder CLI</span>
+            <span className={styles.actor}>{resolvedAgentActionName}</span>
             <div className={styles.narration}>
               <button
                 type="button"

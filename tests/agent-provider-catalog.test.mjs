@@ -14,14 +14,14 @@ import {
 
 const TRUST = "trusted-local-agent-v1";
 
-test("Codex remains hidden behind its hard gate while preserving the shared Agent chooser", () => {
+test("the source-owned hard gate exposes Codex through the shared Agent chooser", () => {
   assert.deepEqual(
     defaultAgentProviders().map(({ providerId }) => providerId),
-    ["qoder"],
+    ["qoder", "codex"],
   );
   assert.deepEqual(
-    defaultAgentProviders({ codexExecution: true }).map(({ providerId }) => providerId),
-    ["qoder", "codex"],
+    defaultAgentProviders({ codexExecution: false }).map(({ providerId }) => providerId),
+    ["qoder"],
   );
   assert.equal(
     CODEX_AGENT_PROVIDER.presentation.localReadDisclosure,
@@ -107,6 +107,76 @@ test("two providers keep separate in-flight preflights and one-use tickets", asy
   const spent = await catalog.spendTicket(second, { purpose: "execution" });
   assert.equal(spent.preflightId, "ticket_second");
   assert.deepEqual(catalog.getSnapshot().preflightBySelection, {});
+});
+
+test("switching away and back starts a fresh Provider preflight", async () => {
+  const starts = [];
+  const bridgeClient = {
+    preflightAgent(body) {
+      const pending = deferred();
+      starts.push({ body, pending });
+      return pending.promise;
+    },
+  };
+  const first = selection("first");
+  const second = selection("second");
+  const catalog = new AgentCatalogState({
+    bridgeClient,
+    providers: [provider("first", first), provider("second", second)],
+    selected: first,
+    clock: { now: () => 10 },
+  });
+
+  const staleFirst = catalog.preflight(first, { purpose: "execution" });
+  catalog.select(second);
+  const secondCheck = catalog.preflight(second, { purpose: "execution" });
+  catalog.select(first);
+  const currentFirst = catalog.preflight(first, { purpose: "execution" });
+  assert.equal(starts.length, 3);
+  assert.notEqual(currentFirst, staleFirst);
+
+  const staleResolvedFirst = freezeAgentSelection({
+    ...first,
+    resolvedModelId: "first:stale-default",
+  });
+  const currentResolvedFirst = freezeAgentSelection({
+    ...first,
+    resolvedModelId: "first:current-default",
+  });
+
+  starts[0].pending.resolve({
+    status: "ready",
+    preflightId: "ticket_stale_first",
+    selection: staleResolvedFirst,
+    expiresAt: new Date(20_000).toISOString(),
+  });
+  await staleFirst;
+  assert.equal(catalog.availability(first).status, "checking");
+  assert.equal(catalog.freezeSelected().resolvedModelId, null);
+  assert.equal(
+    Object.values(catalog.getSnapshot().preflightBySelection)
+      .some((preflight) => preflight.preflightId === "ticket_stale_first"),
+    false,
+  );
+
+  starts[2].pending.resolve({
+    status: "ready",
+    preflightId: "ticket_current_first",
+    selection: currentResolvedFirst,
+    expiresAt: new Date(20_000).toISOString(),
+  });
+  assert.equal((await currentFirst).preflightId, "ticket_current_first");
+  assert.equal(catalog.freezeSelected().resolvedModelId, "first:current-default");
+  assert.equal(catalog.availability(first).status, "ready");
+
+  starts[1].pending.resolve({
+    status: "ready",
+    preflightId: "ticket_stale_second",
+    selection: second,
+    expiresAt: new Date(20_000).toISOString(),
+  });
+  await secondCheck;
+  assert.equal(catalog.availability(first).status, "ready");
 });
 
 test("model, reasoning, installation, trust and purpose are all preflight key authority", () => {

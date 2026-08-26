@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { CommentSession } from "../app/application/comment-session.js";
@@ -17,6 +18,25 @@ import { createEmptySourceHistory } from "../app/domain/source-history.js";
 
 const SOURCE_PATH = "/tmp/workspace-controller.html";
 const NEXT_SOURCE_PATH = "/tmp/workspace-controller-next.html";
+
+test("Qoder compatibility actions stay pinned to the Qoder workflow", () => {
+  const source = readFileSync(
+    new URL("../app/application/workspace-controller.js", import.meta.url),
+    "utf8",
+  );
+  assert.match(
+    source,
+    /refreshQoderAvailability\(\) \{\s+return this\.#requireRunWorkflow\(\)\.refreshQoderAvailability\(\);\s+\}/u,
+  );
+  assert.match(
+    source,
+    /checkQoderUsability\(\) \{\s+return this\.#requireRunWorkflow\(\)\.checkQoderUsability\(\);\s+\}/u,
+  );
+  assert.match(
+    source,
+    /copyQoderGuidance\(input\) \{\s+return this\.#requireRunWorkflow\(\)\.copyQoderGuidance\(input\);\s+\}/u,
+  );
+});
 
 function sha256(html) {
   return `sha256:${createHash("sha256").update(html).digest("hex")}`;

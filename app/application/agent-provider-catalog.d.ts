@@ -12,6 +12,8 @@ export type AgentProviderPresentation = Readonly<{
   primaryActionDataAttribute: string | null;
   restartLabel?: string;
   restartSupported?: boolean;
+  settingsSupported?: boolean;
+  localReadDisclosure?: string;
   stopLabel?: string;
   frozenPreviewDetail?: string;
   [key: string]: unknown;
@@ -63,6 +65,7 @@ export class AgentCatalogState {
   dispose(): void;
   select(selection: AgentSelection): AgentSelection;
   freezeSelected(): AgentSelection | null;
+  freezeProviderSelection(providerId: string): AgentSelection | null;
   provider(selection?: AgentSelection | null): AgentProviderEntry | null;
   availability(selection?: AgentSelection | null): AgentProviderAvailabilitySnapshot;
   presentation(selection?: AgentSelection | null): AgentProviderPresentation;
