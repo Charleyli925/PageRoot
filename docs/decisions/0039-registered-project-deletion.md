@@ -191,13 +191,39 @@ inside PageRoot, and a plain "confirm" button is muscle memory.
 - Deleting a project deletes its AI request and attempt records along with
   everything else in the directory. There is no separate retention of run
   history outside the project, and this ADR does not create one.
-- Restoring the folder from the system trash does *not* restore the project.
-  The Registry record is gone, so the restored directory is an unregistered
-  copy, and ADR 0024 forbids the catalog from adopting it. Reopening the HTML
-  inside it imports a new project from V1. Making a trashed project restorable
-  as itself would require preserving its record, which is a different decision
-  with a different failure surface, and is out of scope here.
+- Restoring the folder from the system trash does *not* restore the project
+  under this proposal. The Registry record is gone, so the restored directory is
+  an unregistered copy, and ADR 0024 forbids the catalog from adopting it.
+  Reopening the HTML inside it imports a new project from V1. **This is the one
+  point still open (see Open questions below), so it is not yet a settled
+  consequence.**
 - This ADR authorizes deleting a whole project only. Deleting a single Version,
   a single comment thread, or the `AI任务/` projection tree remains unspecified.
   Bulk or multi-select deletion is likewise not authorized: the confirmation
   described here is per-project by design.
+
+## Open questions
+
+**What should happen when the user drags the project folder back out of the
+trash?** The proposal above answers "it becomes an unregistered copy, and
+reopening its HTML imports a new project from V1." That answer is internally
+consistent and needs no new state, but it is not obviously the behaviour a user
+expects: the operating system told them the folder was restored, and PageRoot
+would still show no history.
+
+The alternative is to keep the Registry record as a tombstone so a restored
+folder can rebind to its original `projectId`, versions, drafts and comments.
+That is a materially different design, not a detail of this one:
+
+- A tombstone is a Registry member that authorizes nothing, which is close to
+  the orphan state §2 rejects. Distinguishing the two needs an explicit rule.
+- Tombstones need an expiry policy, or Registry grows without bound.
+- Rebinding a restored folder means matching it by file identity or by
+  `projectId` inside `.pageroot`, which reopens exactly the "adopt an
+  unregistered copy" path ADR 0024 closed.
+- The confirmation copy changes: "can be restored from the trash" would then
+  mean restored *as this project*, which is a stronger promise than the current
+  wording makes.
+
+Deciding this changes §2, §3, §4 and the confirmation text, so it is settled
+before implementation rather than during it.
