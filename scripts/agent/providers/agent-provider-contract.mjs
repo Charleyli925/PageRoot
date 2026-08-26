@@ -76,6 +76,12 @@ export function defineAgentProvider(value) {
   const legacyDrivers = Array.isArray(value.legacyDrivers)
     ? [...new Set(value.legacyDrivers.map((driver) => assertComponentId(driver, "legacy driver")))]
     : [];
+  const capabilities = normalizedCapabilities(value.capabilities);
+  if (legacyDrivers.length === 0 && capabilities.discussion === true) {
+    throw new TypeError(
+      `Selection-only Agent provider ${providerId} cannot declare the legacy Discussion capability.`,
+    );
+  }
   const requiredMethods = [
     "resolveInstallation",
     "preflight",
@@ -102,7 +108,7 @@ export function defineAgentProvider(value) {
     displayName,
     securityProfile,
     legacyDrivers: Object.freeze(legacyDrivers),
-    capabilities: normalizedCapabilities(value.capabilities),
+    capabilities,
   });
 }
 

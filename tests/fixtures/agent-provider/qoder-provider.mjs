@@ -18,7 +18,7 @@ export function createSyntheticQoderProviderFixture({
     availability: true,
     preflight: true,
     execution: true,
-    discussion: true,
+    discussion: legacyDrivers.length > 0,
     modelCatalog: true,
     ...capabilityOverrides,
   });

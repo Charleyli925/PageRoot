@@ -278,9 +278,14 @@ export function createBridgeClient({
       "无法建立本轮内部 AI 任务。",
       DEFAULT_REQUEST_TIMEOUT_MS,
     ),
-    qoderAvailability: () => query(
+    agentAvailability: ({ selection } = {}) => query(
       "/agent/availability",
-      {},
+      { selection: selection ? JSON.stringify(selection) : null },
+      "暂时无法检查 Agent。",
+    ),
+    qoderAvailability: ({ selection } = {}) => query(
+      "/agent/availability",
+      { selection: selection ? JSON.stringify(selection) : null },
       "暂时无法检查 Qoder CLI。",
     ),
     agentProviders: () => query(

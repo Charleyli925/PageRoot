@@ -1444,8 +1444,26 @@ async function preflightAgent(body) {
   });
 }
 
-async function agentAvailability() {
-  return agentBridgeService.availability();
+function availabilitySelection(value) {
+  if (!value) return null;
+  try {
+    return normalizeAgentDelivery({
+      mode: "managed-agent",
+      selection: JSON.parse(value),
+      trustPolicyVersion: defaultManagedAgentDelivery().trustPolicyVersion,
+    }, { allowLegacy: false }).selection;
+  } catch {
+    throw new HttpError(
+      400,
+      "AGENT_SELECTION_INVALID",
+      "The Agent availability selection is invalid.",
+    );
+  }
+}
+
+async function agentAvailability(selectionInput = null) {
+  const selection = availabilitySelection(selectionInput);
+  return agentBridgeService.availability(selection ? { selection } : {});
 }
 
 async function agentProviders() {
@@ -2558,7 +2576,7 @@ async function route(request, response) {
     return;
   }
   if (request.method === "GET" && url.pathname === "/agent/availability") {
-    sendJson(response, 200, await agentAvailability());
+    sendJson(response, 200, await agentAvailability(url.searchParams.get("selection")));
     return;
   }
   if (request.method === "GET" && url.pathname === "/agent/providers") {

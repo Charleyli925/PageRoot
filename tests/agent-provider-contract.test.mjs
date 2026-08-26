@@ -161,6 +161,8 @@ test("selection-first dispatch supports a provider with no legacy driver", async
   const { fixture, registry } = fixtureRegistry({ legacyDrivers: [] });
   const selection = providerSelection();
 
+  assert.equal(fixture.capabilities.discussion, false);
+
   assert.deepEqual(await registry.availabilityForSelection(selection, { environment: {} }), {
     status: "ready",
   });
@@ -187,9 +189,18 @@ test("selection-first dispatch supports a provider with no legacy driver", async
   assert.ok(fixture.calls.includes("runtime:run"));
 });
 
+test("selection-only providers cannot advertise the legacy Discussion path", () => {
+  assert.throws(
+    () => createSyntheticQoderProviderFixture({
+      legacyDrivers: [],
+      capabilities: { discussion: true },
+    }),
+    /cannot declare the legacy Discussion capability/u,
+  );
+});
+
 test("provider capability is enforced at preflight, ticket verification, and start", async () => {
   const { registry } = fixtureRegistry({
-    legacyDrivers: [],
     capabilities: { execution: false },
   });
   const selection = providerSelection();
