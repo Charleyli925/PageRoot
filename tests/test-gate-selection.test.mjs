@@ -359,6 +359,7 @@ test("delivery contracts select their direct package, verifier and release-archi
     "tests/agent-provider-catalog.test.mjs",
     "tests/agent-provider-contract.test.mjs",
     "tests/agent-runtime-coordinator.test.mjs",
+    "tests/codex-provider-contract.test.mjs",
     "tests/desktop-package.test.mjs",
     "tests/packaged-artifact-gate.test.mjs",
     "tests/qoder-acp-spike-client.test.mjs",
@@ -603,7 +604,7 @@ test("desktop handoff changes select Electron and deterministic AI closed-loop c
   assert.ok(plan.selectedNodeTests.includes("tests/qoder-handoff.test.mjs"));
 });
 
-test("Qoder ACP Agent Bridge changes select product, package, and closed-loop owners", () => {
+test("Agent runtime provider changes select product, package, and closed-loop owners", () => {
   const plan = selectGatePlan({
     map,
     lane: "task",
@@ -627,6 +628,7 @@ test("Qoder ACP Agent Bridge changes select product, package, and closed-loop ow
     "tests/agent-provider-catalog.test.mjs",
     "tests/agent-provider-contract.test.mjs",
     "tests/agent-runtime-coordinator.test.mjs",
+    "tests/codex-provider-contract.test.mjs",
     "tests/desktop-package.test.mjs",
     "tests/qoder-acp-spike-client.test.mjs",
     "tests/run-lifecycle.test.mjs",
