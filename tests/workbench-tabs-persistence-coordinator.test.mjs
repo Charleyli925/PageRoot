@@ -44,6 +44,38 @@ test("tabs persistence is revisioned single-flight and drains the latest receipt
   assert.equal(coordinator.snapshot.restartSafe, true);
 });
 
+test("close can pin one persistence revision without mistaking a later revision for its receipt", async () => {
+  const releases = [];
+  const coordinator = new WorkbenchTabsPersistenceCoordinator({
+    port: {
+      async get() { return null; },
+      set() { return new Promise((resolve) => releases.push(resolve)); },
+    },
+  });
+  coordinator.commit(A);
+  const closingRevision = coordinator.pinCloseRevision();
+  const draining = coordinator.drain({
+    deadlineAt: Date.now() + 1_000,
+    throughRevision: closingRevision,
+  });
+  assert.deepEqual(coordinator.commit(B), {
+    requestedRevision: closingRevision,
+    deferred: true,
+  });
+  assert.equal(coordinator.snapshot.requestedRevision, closingRevision);
+  releases.shift()();
+  assert.deepEqual(await draining, { ok: true, revision: closingRevision });
+  assert.equal(coordinator.releaseCloseRevision(), true);
+  assert.equal(coordinator.snapshot.requestedRevision, 2);
+  assert.equal(coordinator.snapshot.acknowledgedRevision, 1);
+  await new Promise((resolve) => setImmediate(resolve));
+  releases.shift()();
+  assert.deepEqual(await coordinator.drain({
+    deadlineAt: Date.now() + 1_000,
+    throughRevision: 2,
+  }), { ok: true, revision: 2 });
+});
+
 test("tabs persistence rejection failure-closes close and close-abort retry re-acknowledges", async () => {
   let fail = true;
   const snapshots = [];

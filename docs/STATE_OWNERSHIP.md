@@ -176,7 +176,10 @@ Rules:
   registered-tab switch may stage or refresh that identity, but only
   `WorkbenchNavigationWorkflow` may commit its active/mounted tab through the
   synchronous application receipt after Controller
-  identity verification.
+  identity verification. A non-null transaction/application generation is
+  synchronously authorized before ProjectWorkflow mutates Controller Sessions;
+  expired or terminal generations cannot later resume a deferred application.
+  Null transaction identity is reserved for legal authority refresh.
 - Browser-only file input has no filesystem locator authority. After bytes are
   decoded and hashed, it mints a presentation identity from a versioned digest
   of NFC filename, size, last-modified time and content Hash. The resulting
@@ -188,6 +191,11 @@ Rules:
   in `ProjectWorkflow`: retry performs only that ack, while the external Session
   keeps the FIFO head and withholds successors. Close drain cancels and
   acknowledges every queued confirmation until the Session is idle.
+- Desktop close synchronously freezes the same navigation admission stream
+  before awaiting idle, drains one pinned tabs-persistence revision, then enters
+  the Project close boundary. Ready retains that freeze through final exit;
+  close rejection or abort releases it before retry. Finder FIFO acknowledgement
+  requires the matching terminal navigation outcome.
 - `RunSession` owns the one in-memory submission lifecycle. `preparing` blocks
   duplicate intent and drain without freezing the current canvas; `frozen`
   blocks edits until the Request is known; `uncertain` preserves a current

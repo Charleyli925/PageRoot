@@ -926,6 +926,9 @@ test("project application requires the synchronous navigation receipt before pre
   const receipts = [];
   const harness = createHarness({
     navigation: {
+      authorizeProjectApplication() {
+        return { accepted: true, kind: "transaction" };
+      },
       applyProject(input) {
         order.push("application-port");
         const receipt = Object.freeze({
@@ -962,6 +965,56 @@ test("project application requires the synchronous navigation receipt before pre
   assert.deepEqual(order, ["application-port", "presentation-event"]);
   assert.equal(receipts[0].transactionId, "navigation-browser-A");
   assert.equal(receipts[0].applicationId, outcome.value.applicationId);
+});
+
+test("a terminal transaction rejects its deferred application before Controller authority changes", async (t) => {
+  let applicationAuthorityOpen = true;
+  let canvasReady = false;
+  let applyCount = 0;
+  const harness = createHarness({
+    canvas: {
+      freeze() {
+        return canvasReady
+          ? {
+              ok: true,
+              html: harness.documentSession.html,
+              sourceSha256: harness.documentSession.sourceSha256,
+            }
+          : { ok: false, reason: "defer once" };
+      },
+    },
+    navigation: {
+      authorizeProjectApplication() {
+        return applicationAuthorityOpen
+          ? { accepted: true, kind: "transaction" }
+          : { accepted: false, kind: "stale" };
+      },
+      applyProject() {
+        applyCount += 1;
+        return {};
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+  const prior = harness.projectSession.snapshot;
+  const accepted = harness.workflow.acceptProject({
+    name: "Late B",
+    projectId: "project_late_b",
+    documentId: "doc_late_b",
+    sourcePath: B_PATH,
+    html: B_HTML,
+    sha256: sha256(B_HTML),
+  }, { transactionId: "navigation-expired" });
+  assert.equal(accepted.status, "succeeded");
+  await waitFor(() => harness.workflow.getSnapshot().projectApplication.status === "deferred");
+
+  applicationAuthorityOpen = false;
+  canvasReady = true;
+  assert.equal(harness.workflow.resumeDeferredProjectApplication().status, "succeeded");
+  await waitFor(() => harness.workflow.getSnapshot().projectApplication.status === "idle");
+  assert.deepEqual(harness.projectSession.snapshot, prior);
+  assert.equal(harness.documentSession.html, OLD_HTML);
+  assert.equal(applyCount, 0);
 });
 
 test("a trusted direct browser file submission still enters the accepted FIFO", async (t) => {
@@ -1211,6 +1264,7 @@ test("native input delivered after the switch drain defers without losing the ac
 
 test("direct external ACK waits for the correlated navigation terminal", async (t) => {
   const order = [];
+  let appliedApplicationId = null;
   let resolveTerminal;
   const terminal = new Promise((resolve) => { resolveTerminal = resolve; });
   const harness = createHarness({
@@ -1233,8 +1287,12 @@ test("direct external ACK waits for the correlated navigation terminal", async (
       },
     },
     navigation: {
+      authorizeProjectApplication() {
+        return { accepted: true, kind: "transaction" };
+      },
       applyProject(input) {
         order.push("apply-receipt");
+        appliedApplicationId = input.applicationId;
         return { transactionId: input.transactionId, epoch: input.epoch };
       },
       async waitForTerminal(transactionId) {
@@ -1242,7 +1300,11 @@ test("direct external ACK waits for the correlated navigation terminal", async (
         order.push("wait-terminal");
         await terminal;
         order.push("terminal");
-        return { transactionId };
+        return {
+          transactionId,
+          outcome: { status: "succeeded", value: {} },
+          receipt: { applicationId: appliedApplicationId },
+        };
       },
     },
   });
@@ -1265,6 +1327,109 @@ test("direct external ACK waits for the correlated navigation terminal", async (
   resolveTerminal();
   await waitFor(() => order.includes("ack"));
   assert.deepEqual(order, ["accept", "apply-receipt", "wait-terminal", "terminal", "ack"]);
+});
+
+test("external FIFO does not ACK until waitForTerminal returns a real terminal contract", async (t) => {
+  const order = [];
+  const harness = createHarness({
+    initialProject: false,
+    canvas: { isMounted: () => false },
+    projectOpen: {
+      async acceptExternal() {
+        order.push("accept");
+        return {
+          projectId: "project_external_unsettled",
+          documentId: "doc_external_unsettled",
+          name: "External unsettled",
+          sourcePath: A_PATH,
+          html: A_HTML,
+          sha256: sha256(A_HTML),
+        };
+      },
+      async ackExternal() {
+        order.push("ack");
+      },
+    },
+    navigation: {
+      authorizeProjectApplication() {
+        return { accepted: false, kind: "stale" };
+      },
+      applyProject() {
+        order.push("apply-receipt");
+        return {};
+      },
+      async waitForTerminal() {
+        order.push("wait-terminal");
+        return null;
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+  harness.workflow.prepareSwitch = async () => succeeded({ prepared: true });
+  assert.equal(harness.workflow.acceptExternalProject({
+    requestId: "external-unsettled",
+    sourcePath: A_PATH,
+    transactionId: "navigation-external-unsettled",
+  }).status, "succeeded");
+  await waitFor(() => harness.workflow.getSnapshot().externalOpen.status === "deferred");
+  assert.deepEqual(order, ["accept", "wait-terminal"]);
+  assert.equal(harness.projectSession.sourcePath, null);
+});
+
+test("external FIFO ACKs a correlated expired terminal without applying its stale project", async (t) => {
+  const order = [];
+  const harness = createHarness({
+    initialProject: false,
+    canvas: { isMounted: () => false },
+    projectOpen: {
+      async acceptExternal() {
+        order.push("accept");
+        return {
+          projectId: "project_external_expired",
+          documentId: "doc_external_expired",
+          name: "External expired",
+          sourcePath: A_PATH,
+          html: A_HTML,
+          sha256: sha256(A_HTML),
+        };
+      },
+      async ackExternal() {
+        order.push("ack");
+      },
+    },
+    navigation: {
+      authorizeProjectApplication() {
+        return { accepted: false, kind: "stale" };
+      },
+      applyProject() {
+        order.push("apply-receipt");
+        return {};
+      },
+      async waitForTerminal(transactionId) {
+        order.push("terminal");
+        return {
+          transactionId,
+          outcome: {
+            status: "rejected",
+            code: "WORKBENCH_NAVIGATION_APPLY_TIMEOUT",
+            reason: "expired",
+          },
+          receipt: null,
+        };
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+  harness.workflow.prepareSwitch = async () => succeeded({ prepared: true });
+  assert.equal(harness.workflow.acceptExternalProject({
+    requestId: "external-expired",
+    sourcePath: A_PATH,
+    transactionId: "navigation-external-expired",
+  }).status, "succeeded");
+  await waitFor(() => order.includes("ack"));
+  assert.deepEqual(order, ["accept", "terminal", "ack"]);
+  assert.equal(harness.projectSession.sourcePath, null);
+  assert.equal(harness.workflow.getSnapshot().projectApplication.status, "idle");
 });
 
 test("an external request arriving during close preparation cancels that exact close", async (t) => {

@@ -577,6 +577,12 @@ export class WorkspaceController {
         ports: {
           ...projectWorkflow.ports,
           navigation: {
+            authorizeProjectApplication: (input) => {
+              if (!this.#workbenchNavigationWorkflow) {
+                return Object.freeze({ accepted: false, kind: "stale" });
+              }
+              return this.#workbenchNavigationWorkflow.authorizeProjectApplication(input);
+            },
             applyProject: (input) => {
               if (!this.#workbenchNavigationWorkflow) {
                 throw new Error("Workbench navigation workflow is unavailable.");
@@ -1166,26 +1172,84 @@ export class WorkspaceController {
   }
 
   async prepareClose(input) {
-    const navigationReady = await this.#requireWorkbenchNavigationWorkflow().prepareClose(input);
-    if (!navigationReady) {
+    const navigation = this.#requireWorkbenchNavigationWorkflow();
+    const project = this.#requireProjectWorkflow();
+    const requestId = String(input?.requestId || "");
+    const abortPreparation = () => {
+      navigation.abortClose({ requestId });
+      this.#workbenchTabsPersistenceCoordinator?.releaseCloseRevision();
+    };
+    if (!navigation.beginClose({ requestId })) {
       return Object.freeze({
         ready: false,
-        reason: "HTML 导航尚未在关闭时限内完成。",
+        reason: "另一个关闭核对正在进行。",
         presentation: "in-app",
       });
     }
-    const tabsPersisted = await this.#workbenchTabsPersistenceCoordinator?.drain(input);
-    if (tabsPersisted && !tabsPersisted.ok) {
-      return Object.freeze({
-        ready: false,
-        reason: tabsPersisted.reason || "标签页状态尚未安全写入。",
-        presentation: "in-app",
+    try {
+      const navigationReady = await navigation.prepareClose(input);
+      if (!navigationReady) {
+        abortPreparation();
+        return Object.freeze({
+          ready: false,
+          reason: "HTML 导航尚未在关闭时限内完成。",
+          presentation: "in-app",
+        });
+      }
+      const persistenceRevision = Number(
+        this.#workbenchTabsPersistenceCoordinator?.pinCloseRevision()
+        ?? this.#workbenchTabsPersistenceCoordinator?.snapshot.requestedRevision
+        ?? 0,
+      );
+      const tabsPersisted = await this.#workbenchTabsPersistenceCoordinator?.drain({
+        ...input,
+        throughRevision: persistenceRevision,
       });
+      if (tabsPersisted && !tabsPersisted.ok) {
+        abortPreparation();
+        return Object.freeze({
+          ready: false,
+          reason: tabsPersisted.reason || "标签页状态尚未安全写入。",
+          presentation: "in-app",
+        });
+      }
+      const projectReady = await project.prepareClose(input);
+      const persistence = this.#workbenchTabsPersistenceCoordinator?.snapshot;
+      if (
+        !projectReady?.ready
+        || Number(persistence?.requestedRevision || 0) !== persistenceRevision
+        || Number(persistence?.acknowledgedRevision || 0) < persistenceRevision
+      ) {
+        if (projectReady?.ready) project.abortClose(input);
+        abortPreparation();
+        if (projectReady?.ready) {
+          return Object.freeze({
+            ready: false,
+            reason: "标签页状态在关闭核对期间发生变化，请重试关闭。",
+            presentation: "in-app",
+          });
+        }
+        return projectReady;
+      }
+      if (!navigation.commitClose({ requestId })) {
+        project.abortClose(input);
+        abortPreparation();
+        return Object.freeze({
+          ready: false,
+          reason: "桌面外壳已取消本次关闭。",
+          presentation: "in-app",
+        });
+      }
+      return projectReady;
+    } catch (cause) {
+      abortPreparation();
+      throw cause;
     }
-    return this.#requireProjectWorkflow().prepareClose(input);
   }
 
   abortClose(input) {
+    this.#workbenchNavigationWorkflow?.abortClose(input);
+    this.#workbenchTabsPersistenceCoordinator?.releaseCloseRevision();
     this.#workbenchTabsPersistenceCoordinator?.retry();
     return this.#requireProjectWorkflow().abortClose(input);
   }

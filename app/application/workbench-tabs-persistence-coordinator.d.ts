@@ -15,8 +15,10 @@ export class WorkbenchTabsPersistenceCoordinator {
   readonly snapshot: WorkbenchTabsPersistenceSnapshot;
   subscribe(listener: (snapshot: WorkbenchTabsPersistenceSnapshot) => void): () => void;
   load(): Promise<unknown>;
-  commit(state: Readonly<Record<string, unknown>>): Readonly<{ requestedRevision: number }> | null;
+  commit(state: Readonly<Record<string, unknown>>): Readonly<{ requestedRevision: number; deferred?: boolean }> | null;
+  pinCloseRevision(): number | null;
+  releaseCloseRevision(): boolean;
   retry(): boolean;
-  drain(input: { deadlineAt: number }): Promise<Readonly<{ ok: boolean; revision?: number; reason?: string }>>;
+  drain(input: { deadlineAt: number; throughRevision?: number }): Promise<Readonly<{ ok: boolean; revision?: number; reason?: string }>>;
   dispose(): void;
 }

@@ -13,7 +13,7 @@ export type ProjectApplication<T> = Readonly<{
 
 export type ProjectApplicationExecution<T> = (
   application: ProjectApplication<T>,
-) => Promise<"complete" | "deferred" | void> | "complete" | "deferred" | void;
+) => Promise<"complete" | "deferred" | "stale" | void> | "complete" | "deferred" | "stale" | void;
 
 export type ProjectApplicationDeferredSwitchRetry = "idle" | "blocked" | "action-required" | "resumed";
 
@@ -23,6 +23,7 @@ export class ProjectApplicationSession<T> {
   ): void;
   enqueue(application: ProjectApplication<T>, execute: ProjectApplicationExecution<T>): boolean;
   resume(execute: ProjectApplicationExecution<T>): boolean;
+  cancel(applicationId: string, result?: string): boolean;
   reconcileDeferredSwitch(options: {
     switchBlocked: boolean;
     execute: ProjectApplicationExecution<T>;

@@ -56,6 +56,7 @@ export class WorkbenchNavigationWorkflow {
   #disposed = false;
   #terminalReceipts = new Map();
   #idleWaiters = new Set();
+  #closeFreeze = null;
 
   constructor({
     session,
@@ -247,17 +248,68 @@ export class WorkbenchNavigationWorkflow {
   }
 
   resumeDeferredProjectApplication() {
+    if (this.#closeFreeze) return rejected(
+      "WORKBENCH_NAVIGATION_CLOSE_FROZEN",
+      "窗口正在完成关闭核对，暂不继续 HTML 切换。",
+    );
     return this.#projectWorkflow.resumeDeferredProjectApplication();
   }
 
   resumeDeferredExternalProject() {
+    if (this.#closeFreeze) return rejected(
+      "WORKBENCH_NAVIGATION_CLOSE_FROZEN",
+      "窗口正在完成关闭核对，暂不继续外部 HTML 打开。",
+    );
     return this.#projectWorkflow.resumeDeferredExternalProject();
+  }
+
+  beginClose({ requestId } = {}) {
+    const id = String(requestId || "");
+    if (!id || this.#disposed) return false;
+    if (this.#closeFreeze) return false;
+    this.#closeFreeze = Object.freeze({ requestId: id, phase: "preparing" });
+    return true;
+  }
+
+  commitClose({ requestId } = {}) {
+    const id = String(requestId || "");
+    if (!this.#closeFreeze || this.#closeFreeze.requestId !== id) return false;
+    this.#closeFreeze = Object.freeze({ requestId: id, phase: "ready" });
+    return true;
+  }
+
+  abortClose({ requestId } = {}) {
+    const id = String(requestId || "");
+    if (!this.#closeFreeze || this.#closeFreeze.requestId !== id) return false;
+    this.#closeFreeze = null;
+    return true;
+  }
+
+  authorizeProjectApplication({ transactionId: receivedTransactionId, applicationId } = {}) {
+    const received = String(receivedTransactionId || "");
+    const receivedApplication = String(applicationId || "");
+    if (!received) {
+      return Object.freeze({ accepted: true, kind: "authority-refresh" });
+    }
+    const active = this.#active;
+    if (
+      !active
+      || active.transactionId !== received
+      || active.applicationAuthorityOpen !== true
+      || this.#terminalReceipts.has(received)
+      || !receivedApplication
+      || (active.applicationId && active.applicationId !== receivedApplication)
+    ) {
+      return Object.freeze({ accepted: false, kind: "stale" });
+    }
+    active.applicationId = receivedApplication;
+    return Object.freeze({ accepted: true, kind: "transaction" });
   }
 
   applyProject({ transactionId: receivedTransactionId, applicationId, project, epoch, activeLocked }) {
     const active = this.#active;
     const received = String(receivedTransactionId || "");
-    if (!active || !received || active.transactionId !== received) {
+    if (!received) {
       const snapshot = projectAppliedEventToWorkbenchTabs({
         session: this.#tabs,
         event: { type: "project-applied", project, activeLocked },
@@ -265,7 +317,7 @@ export class WorkbenchNavigationWorkflow {
       });
       const activeTab = snapshot?.tabs.find((tab) => tab.tabId === snapshot.activeTabId) || null;
       return Object.freeze({
-        transactionId: received || "uncorrelated",
+        transactionId: "uncorrelated",
         applicationId: applicationId ? String(applicationId) : null,
         projectId: String(project?.projectId || "") || null,
         documentId: String(project?.documentId || "") || null,
@@ -274,6 +326,26 @@ export class WorkbenchNavigationWorkflow {
         kind: "authority-refresh",
       });
     }
+    const receivedApplication = String(applicationId || "");
+    if (
+      !active
+      || active.transactionId !== received
+      || active.applicationAuthorityOpen !== true
+      || this.#terminalReceipts.has(received)
+      || !receivedApplication
+      || (active.applicationId && active.applicationId !== receivedApplication)
+    ) {
+      return Object.freeze({
+        transactionId: received,
+        applicationId: receivedApplication || null,
+        projectId: String(project?.projectId || "") || null,
+        documentId: String(project?.documentId || "") || null,
+        epoch: Number(epoch) || 0,
+        tabId: null,
+        kind: "stale",
+      });
+    }
+    active.applicationId = receivedApplication;
 
     const projectId = String(project?.projectId || "");
     const documentId = String(project?.documentId || "");
@@ -310,6 +382,7 @@ export class WorkbenchNavigationWorkflow {
       kind: String(active.intent.kind || "project"),
     });
     active.receipt = receipt;
+    active.applicationAuthorityOpen = false;
     this.#session.applied(active.transactionId, receipt);
     active.resolveReceipt?.(receipt);
     return receipt;
@@ -380,6 +453,7 @@ export class WorkbenchNavigationWorkflow {
 
   dispose() {
     this.#disposed = true;
+    this.#closeFreeze = null;
     if (this.#active) this.#rollbackAndRelease(this.#active, {
       code: "WORKBENCH_NAVIGATION_DISPOSED",
       reason: "导航已停止。",
@@ -548,7 +622,14 @@ export class WorkbenchNavigationWorkflow {
 
   async #finishExternalWhenApplied(active) {
     const receipt = await this.#waitForReceipt(active, 15_000, null);
-    if (!receipt || this.#active !== active || active.externalAuto !== true) return;
+    if (this.#active !== active || active.externalAuto !== true) return;
+    if (!receipt) {
+      this.#complete(active, { outcome: rejected(
+        "WORKBENCH_NAVIGATION_APPLY_TIMEOUT",
+        "外部 HTML 已接收，但应用回执未在时限内到达。",
+      ) });
+      return;
+    }
     const result = await this.#finishOpened(active, succeeded({
       opened: true,
       applicationId: receipt.applicationId,
@@ -594,7 +675,13 @@ export class WorkbenchNavigationWorkflow {
         settle(receipt);
       };
       active.cancelReceiptWait = () => settle(null);
-      timer = this.#setTimer(() => settle(null), deadlineMs);
+      timer = this.#setTimer(() => {
+        this.#expireApplicationAuthority(active);
+        if (expectedApplicationId) {
+          this.#projectWorkflow.cancelProjectApplication?.(expectedApplicationId);
+        }
+        settle(null);
+      }, deadlineMs);
     });
   }
 
@@ -669,7 +756,17 @@ export class WorkbenchNavigationWorkflow {
     const completion = new Promise((resolve) => { release = resolve; });
     this.#admissionTail = predecessor.then(() => completion);
     return predecessor.then(async () => {
-      if (this.#disposed) return rejected("WORKBENCH_NAVIGATION_DISPOSED", "导航已停止。");
+      if (this.#disposed) {
+        release();
+        return rejected("WORKBENCH_NAVIGATION_DISPOSED", "导航已停止。");
+      }
+      if (this.#closeFreeze) {
+        release();
+        return rejected(
+          "WORKBENCH_NAVIGATION_CLOSE_FROZEN",
+          "窗口正在完成关闭核对，暂不接收新的 HTML 导航。",
+        );
+      }
       this.#ordinal += 1;
       const id = transactionId(this.#ordinal, this.#clock.now());
       const active = {
@@ -682,6 +779,8 @@ export class WorkbenchNavigationWorkflow {
         requestId: null,
         continuation: null,
         browserAuthority: null,
+        applicationId: null,
+        applicationAuthorityOpen: true,
         cancelReceiptWait: null,
         cancelSettlementWait: null,
         release,
@@ -714,6 +813,12 @@ export class WorkbenchNavigationWorkflow {
     if (this.#active !== active) {
       return Promise.resolve(rejected("WORKBENCH_NAVIGATION_STALE", "这次导航已经结束。"));
     }
+    if (this.#closeFreeze) {
+      return Promise.resolve(rejected(
+        "WORKBENCH_NAVIGATION_CLOSE_FROZEN",
+        "窗口正在完成关闭核对，暂不继续这次 HTML 导航。",
+      ));
+    }
     return Promise.resolve().then(execute).then(
       (result) => result?.suspended ? result.outcome : this.#complete(active, result),
       (cause) => this.#complete(active, { outcome: rejected(
@@ -729,6 +834,7 @@ export class WorkbenchNavigationWorkflow {
       "这次导航已经结束。",
     );
     const outcome = result.outcome || succeeded();
+    this.#expireApplicationAuthority(active);
     const error = outcome.status === "succeeded"
       ? null
       : outcomeError(outcome, "WORKBENCH_NAVIGATION_REJECTED", "导航失败。");
@@ -759,6 +865,7 @@ export class WorkbenchNavigationWorkflow {
 
   #rollbackAndRelease(active, error) {
     if (this.#active !== active) return;
+    this.#expireApplicationAuthority(active);
     this.#tabs.restoreAuthority(active.priorTabs);
     if (active.browserAuthority) this.#browserDocuments?.restore(active.browserAuthority);
     this.#session.finish(active.transactionId, { error });
@@ -784,6 +891,11 @@ export class WorkbenchNavigationWorkflow {
     active.cancelReceiptWait = null;
     active.cancelSettlementWait = null;
     active.resolveReceipt = null;
+  }
+
+  #expireApplicationAuthority(active) {
+    if (!active) return;
+    active.applicationAuthorityOpen = false;
   }
 
   #controllerMatchesPrior(prior) {

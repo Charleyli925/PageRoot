@@ -939,6 +939,10 @@ export class ProjectWorkflow {
       : blocked("PROJECT_APPLICATION_NOT_DEFERRED", "没有等待继续的 HTML 切换。");
   }
 
+  cancelProjectApplication(applicationId) {
+    return this.#projectApplicationSession.cancel(applicationId, "stale");
+  }
+
   reconcileDeferred() {
     if (this.#disposed) return;
     const switchBlocked = this.#drainCoordinator
@@ -2345,10 +2349,11 @@ export class ProjectWorkflow {
       }
     }
     try {
-      this.#applyProject(project, {
+      const applicationApplied = this.#applyProject(project, {
         applicationId: application.applicationId,
         transactionId: metadata.transactionId || null,
       });
+      if (!applicationApplied) return "stale";
       applied = true;
       const epoch = this.#projectSession.epoch;
       // Accepted-result FIFO owns synchronous publication order, not remote
@@ -2479,7 +2484,23 @@ export class ProjectWorkflow {
         navigationTransactionId
         && typeof this.#navigationPort?.waitForTerminal === "function"
       ) {
-        await this.#navigationPort.waitForTerminal(navigationTransactionId);
+        const terminal = await this.#navigationPort.waitForTerminal(navigationTransactionId);
+        if (
+          !terminal
+          || terminal.transactionId !== navigationTransactionId
+          || !terminal.outcome
+          || !["succeeded", "rejected", "blocked", "stale", "unknown"]
+            .includes(String(terminal.outcome.status || ""))
+          || (
+            terminal.receipt?.applicationId
+            && terminal.receipt.applicationId !== applicationId
+          )
+        ) {
+          return "deferred";
+        }
+        if (!terminal.receipt && terminal.outcome.status !== "succeeded") {
+          this.#projectApplicationSession.cancel(applicationId, "stale");
+        }
       } else {
         await this.#projectApplicationSession.waitFor(applicationId);
       }
@@ -2761,10 +2782,18 @@ export class ProjectWorkflow {
           code: "EXTERNAL_OPEN_COMMIT_INVALID",
         });
       }
-      this.#applyProject(project, {
+      const applicationApplied = this.#applyProject(project, {
         applicationId: `prepared-${confirmation.requestId}`,
         transactionId,
       });
+      if (!applicationApplied) {
+        if (typeof this.#projectOpenPort.rollbackPrepared === "function") {
+          await this.#projectOpenPort.rollbackPrepared(confirmation.requestId);
+        }
+        throw Object.assign(new Error("这次导航已经结束，迟到的 HTML 不会替换当前页面。"), {
+          code: "WORKBENCH_NAVIGATION_STALE_APPLICATION",
+        });
+      }
       const epoch = this.#projectSession.epoch;
       try {
         const [, hydrated] = await Promise.all([
@@ -2917,6 +2946,19 @@ export class ProjectWorkflow {
     applicationId = null,
     transactionId = null,
   } = {}) {
+    const receivedTransactionId = transactionId ? String(transactionId) : null;
+    const authorization = this.#navigationPort?.authorizeProjectApplication?.({
+      transactionId: receivedTransactionId,
+      applicationId,
+    }) || null;
+    if (receivedTransactionId && authorization?.accepted !== true) {
+      this.#emit({
+        type: "project-application-stale",
+        transactionId: receivedTransactionId,
+        applicationId: applicationId ? String(applicationId) : null,
+      });
+      return false;
+    }
     this.#markHydrationStage("apply-start");
     const outgoingRun = this.#runSession.activeRun;
     const outgoingSourcePath = this.#projectSession.sourcePath;
@@ -2989,6 +3031,7 @@ export class ProjectWorkflow {
     if (!this.#runSession.activeLocked) this.#canvasPort.unlock?.();
     this.#markHydrationStage("apply-authority:unlocked");
     this.#markHydrationStage("apply-complete");
+    return true;
   }
 
   async #hydrateWorkspace({ sourcePath, epoch, sourceTransitionToken }) {

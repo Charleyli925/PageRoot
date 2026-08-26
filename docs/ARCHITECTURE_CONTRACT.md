@@ -193,7 +193,11 @@ idle -> admitted -> preparing -> awaiting-user/opening
 ```
 
 `ProjectWorkflow` calls the synchronous navigation application port while the
-new Project/Document authority is being published. The returned receipt is the
+new Project/Document authority is being published. A non-null transaction must
+first pass the navigation workflow's live transaction/application-generation
+authorization; mismatched, expired or terminal transactions are rejected before
+any Controller Session changes. A null transaction remains the explicit legal
+path for an authority refresh. The returned receipt is the
 only authority for tab mutation, hydration and Canvas settlement;
 `project-applied` remains presentation information and React may not infer an
 application from any-pending state. A pre-applied failure restores the captured
@@ -203,6 +207,13 @@ identity as committed-error. A close may cancel an awaiting-user prompt, but it
 must wait for committing, applied, hydrating, finalizing and acknowledgement
 work to reach a terminal receipt. Cold-start priority is explicit OS external
 FIFO, persisted active tab, `activePath` compatibility, then Start.
+
+Desktop close synchronously freezes that admission stream before its first
+await. The freeze spans navigation-idle settlement, a pinned tabs-persistence
+revision, and the ProjectWorkflow close drain. Ready keeps the freeze through
+final exit; blocked or aborted close releases it, including final-exit abort IPC,
+before navigation retry. External FIFO acknowledgement requires a correlated
+terminal navigation outcome and never treats a missing terminal as success.
 
 An asynchronous result may update state only when its complete identity is
 current:

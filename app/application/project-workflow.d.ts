@@ -115,6 +115,10 @@ export type ProjectWorkflowConstruction = Readonly<{
       hydrate(projects: unknown[], activeSourcePath: string | null): void | Promise<void>;
     }>;
     navigation?: Readonly<{
+      authorizeProjectApplication(input: Readonly<Record<string, unknown>>): Readonly<{
+        accepted: boolean;
+        kind: string;
+      }>;
       applyProject(input: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>>;
       waitForTerminal?(transactionId: string): Promise<Readonly<Record<string, unknown>> | null>;
     }>;
@@ -148,6 +152,7 @@ export class ProjectWorkflow {
     project: ProjectWorkflowProject,
     input?: { kind?: string; operationId?: string; sourcePath?: string | null; transactionId?: string | null },
   ): ProjectWorkflowOutcome;
+  cancelProjectApplication(applicationId: string): boolean;
   acceptBrowserProject(input: {
     operationId?: string;
     project: ProjectWorkflowProject;

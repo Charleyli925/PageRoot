@@ -187,7 +187,12 @@ export function compositionBoundaryViolations({
     || !/\bworkbenchTabs:\s*this\.#workbenchTabsSnapshot\b/u.test(workspaceController)
     || !/\bworkbenchNavigation:\s*this\.#workbenchNavigationSnapshot\b/u.test(workspaceController)
     || !/\bworkbenchTabsPersistence:\s*this\.#workbenchTabsPersistenceSnapshot\b/u.test(workspaceController)
-    || !/\bthis\.#workbenchTabsPersistenceCoordinator\?\.drain\(input\)/u.test(workspaceController)
+    || !/\bnavigation\.beginClose\(\{\s*requestId\s*\}\)/u.test(workspaceController)
+    || !/\bthis\.#workbenchTabsPersistenceCoordinator\?\.pinCloseRevision\(\)/u.test(workspaceController)
+    || !/\bthroughRevision:\s*persistenceRevision\b/u.test(workspaceController)
+    || !/\bnavigation\.commitClose\(\{\s*requestId\s*\}\)/u.test(workspaceController)
+    || !/\bthis\.#workbenchNavigationWorkflow\?\.abortClose\(input\)/u.test(workspaceController)
+    || !/\bthis\.#workbenchTabsPersistenceCoordinator\?\.releaseCloseRevision\(\)/u.test(workspaceController)
     || !/\bactivateWorkbenchTab\s*\(/u.test(workspaceController)
     || !/\bcreateWorkbenchStartTab\s*\(/u.test(workspaceController)
     || !/\bcloseWorkbenchTab\s*\(/u.test(workspaceController)
@@ -198,8 +203,10 @@ export function compositionBoundaryViolations({
   }
   if (
     /\b(?:projectAppliedEventToWorkbenchTabs|workbenchTabsSessionRef|workbenchTabsWorkflowRef|navigationTransactionRef|pendingNavigationRef)\b/u.test(workbench)
+    || !/\bthis\.#navigationPort\?\.authorizeProjectApplication\?\.\s*\(/u.test(projectWorkflow)
     || !/\bthis\.#navigationPort\?\.applyProject\?\.\s*\(/u.test(projectWorkflow)
     || !/\bapplicationReceipt\b/u.test(projectWorkflow)
+    || !/\bauthorizeProjectApplication:\s*\(input\)\s*=>/u.test(workspaceController)
     || !/\bapplicationReceipt\b/u.test(workspaceController)
   ) {
     violations.push(

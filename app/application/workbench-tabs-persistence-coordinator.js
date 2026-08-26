@@ -29,6 +29,8 @@ export class WorkbenchTabsPersistenceCoordinator {
   #latest = null;
   #writing = false;
   #disposed = false;
+  #closeRevision = null;
+  #bufferedWhileClose = null;
 
   constructor({
     port = null,
@@ -74,6 +76,13 @@ export class WorkbenchTabsPersistenceCoordinator {
 
   commit(state) {
     if (this.#disposed || typeof this.#port?.set !== "function") return null;
+    if (this.#closeRevision !== null) {
+      this.#bufferedWhileClose = state;
+      return Object.freeze({
+        requestedRevision: this.#closeRevision,
+        deferred: true,
+      });
+    }
     const requestedRevision = this.#snapshot.requestedRevision + 1;
     this.#latest = Object.freeze({ requestedRevision, state });
     this.#publish({
@@ -87,6 +96,21 @@ export class WorkbenchTabsPersistenceCoordinator {
     return Object.freeze({ requestedRevision });
   }
 
+  pinCloseRevision() {
+    if (this.#disposed || this.#closeRevision !== null) return null;
+    this.#closeRevision = this.#snapshot.requestedRevision;
+    return this.#closeRevision;
+  }
+
+  releaseCloseRevision() {
+    if (this.#closeRevision === null) return false;
+    this.#closeRevision = null;
+    const buffered = this.#bufferedWhileClose;
+    this.#bufferedWhileClose = null;
+    if (buffered) this.commit(buffered);
+    return true;
+  }
+
   retry() {
     if (this.#disposed || !this.#latest) return false;
     if (this.#latest.requestedRevision <= this.#snapshot.acknowledgedRevision) return true;
@@ -95,7 +119,10 @@ export class WorkbenchTabsPersistenceCoordinator {
     return true;
   }
 
-  drain({ deadlineAt } = {}) {
+  drain({ deadlineAt, throughRevision } = {}) {
+    const targetRevision = Number.isFinite(Number(throughRevision))
+      ? Math.max(0, Number(throughRevision))
+      : this.#snapshot.requestedRevision;
     if (this.#snapshot.phase === "failed") {
       return Promise.resolve(Object.freeze({
         ok: false,
@@ -104,7 +131,7 @@ export class WorkbenchTabsPersistenceCoordinator {
     }
     if (
       this.#snapshot.phase !== "loading"
-      && this.#snapshot.acknowledgedRevision >= this.#snapshot.requestedRevision
+      && this.#snapshot.acknowledgedRevision >= targetRevision
     ) {
       return Promise.resolve(Object.freeze({ ok: true, revision: this.#snapshot.acknowledgedRevision }));
     }
@@ -114,6 +141,7 @@ export class WorkbenchTabsPersistenceCoordinator {
     }
     return new Promise((resolve) => {
       const waiter = {
+        targetRevision,
         timer: null,
         resolve: (result) => {
           if (!this.#drainWaiters.delete(waiter)) return;
@@ -131,6 +159,8 @@ export class WorkbenchTabsPersistenceCoordinator {
 
   dispose() {
     this.#disposed = true;
+    this.#closeRevision = null;
+    this.#bufferedWhileClose = null;
     for (const waiter of [...this.#drainWaiters]) waiter.resolve({
       ok: false,
       reason: "标签页状态写入已停止。",
@@ -179,14 +209,14 @@ export class WorkbenchTabsPersistenceCoordinator {
       });
       return;
     }
-    if (
-      this.#snapshot.phase === "loading"
-      || this.#snapshot.acknowledgedRevision < this.#snapshot.requestedRevision
-    ) return;
-    for (const waiter of [...this.#drainWaiters]) waiter.resolve({
-      ok: true,
-      revision: this.#snapshot.acknowledgedRevision,
-    });
+    if (this.#snapshot.phase === "loading") return;
+    for (const waiter of [...this.#drainWaiters]) {
+      if (this.#snapshot.acknowledgedRevision < waiter.targetRevision) continue;
+      waiter.resolve({
+        ok: true,
+        revision: this.#snapshot.acknowledgedRevision,
+      });
+    }
   }
 
   #publish(next) {

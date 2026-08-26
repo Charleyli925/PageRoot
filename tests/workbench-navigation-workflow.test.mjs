@@ -82,6 +82,9 @@ function fixture({
   acceptBrowser,
   browserDocuments = null,
   tabsPersistence = null,
+  clock = { now: () => 1_000 },
+  setTimer,
+  clearTimer,
 } = {}) {
   const tabs = new WorkbenchTabsSession();
   tabs.bindDocument({ ...A, title: A.name });
@@ -162,6 +165,10 @@ function fixture({
       queueMicrotask(() => apply(input, B));
       return { status: "succeeded", value: { requestId: input.requestId } };
     },
+    cancelProjectApplication(applicationId) {
+      calls.push(`cancel-application:${applicationId}`);
+      return true;
+    },
     async confirmExternalOpen(input) {
       calls.push(`confirm:${input.requestId}`);
       if (confirm) return confirm({ input, apply: (project, options) => apply(input, project, options), publish, workflow });
@@ -180,7 +187,9 @@ function fixture({
     controller,
     browserDocuments,
     tabsPersistence,
-    clock: { now: () => 1_000 },
+    clock,
+    ...(setTimer ? { setTimer } : {}),
+    ...(clearTimer ? { clearTimer } : {}),
   });
   return { tabs, navigation, phases, calls, controller, projectWorkflow, workflow, publish, apply };
 }
@@ -717,4 +726,129 @@ test("presentation listener failure cannot interrupt navigation or tab authority
   assert.equal(outcome.status, "succeeded");
   assertAlignedNavigation(harness, B);
   assert.equal(harness.navigation.snapshot.phase, "idle");
+});
+
+test("receipt deadline expires application authority before a deferred external apply resumes", async () => {
+  const timers = [];
+  const harness = fixture({
+    acceptExternal: () => ({ status: "succeeded", value: { requestId: "external-late" } }),
+    setTimer(callback, delayMs) {
+      const timer = { callback, delayMs, canceled: false };
+      timers.push(timer);
+      return timer;
+    },
+    clearTimer(timer) {
+      timer.canceled = true;
+    },
+  });
+  const accepted = await harness.workflow.acceptExternalProject({ requestId: "external-late" });
+  assert.equal(accepted.status, "succeeded");
+  const transactionId = harness.navigation.snapshot.transactionId;
+  assert.equal(timers.length, 1);
+  assert.equal(timers[0].delayMs, 15_000);
+  timers[0].callback();
+  await nextTurn();
+  const terminal = await harness.workflow.waitForTerminal(transactionId);
+  assert.equal(terminal.outcome.status, "rejected");
+  assert.equal(terminal.outcome.code, "WORKBENCH_NAVIGATION_APPLY_TIMEOUT");
+  assert.deepEqual(harness.workflow.authorizeProjectApplication({
+    transactionId,
+    applicationId: "application-late",
+  }), { accepted: false, kind: "stale" });
+  const lateReceipt = harness.workflow.applyProject({
+    transactionId,
+    applicationId: "application-late",
+    project: B,
+    epoch: 2,
+    activeLocked: false,
+  });
+  assert.equal(lateReceipt.kind, "stale");
+  assertAlignedNavigation(harness, A);
+  assert.equal(harness.navigation.snapshot.phase, "idle");
+});
+
+test("null transaction remains a legal authority refresh while non-null stale identity is rejected", () => {
+  const harness = fixture();
+  harness.publish(projectSnapshot(B, 2));
+  assert.deepEqual(harness.workflow.authorizeProjectApplication({
+    transactionId: null,
+    applicationId: "authority-refresh",
+  }), { accepted: true, kind: "authority-refresh" });
+  const refreshed = harness.workflow.applyProject({
+    transactionId: null,
+    applicationId: "authority-refresh",
+    project: B,
+    epoch: 2,
+    activeLocked: false,
+  });
+  assert.equal(refreshed.kind, "authority-refresh");
+  assertAlignedNavigation(harness, B);
+  assert.deepEqual(harness.workflow.authorizeProjectApplication({
+    transactionId: "navigation-stale",
+    applicationId: "application-stale",
+  }), { accepted: false, kind: "stale" });
+});
+
+test("receipt deadline cancels a known deferred application generation", async () => {
+  const timers = [];
+  const harness = fixture({
+    open: async () => ({
+      status: "succeeded",
+      value: { opened: true, applicationId: "application-deferred" },
+    }),
+    setTimer(callback, delayMs) {
+      const timer = { callback, delayMs, canceled: false };
+      timers.push(timer);
+      return timer;
+    },
+    clearTimer(timer) {
+      timer.canceled = true;
+    },
+  });
+  const opening = harness.workflow.openProject({ kind: "local" });
+  await nextTurn();
+  assert.equal(timers.length, 1);
+  timers[0].callback();
+  const outcome = await opening;
+  assert.equal(outcome.code, "WORKBENCH_NAVIGATION_APPLY_TIMEOUT");
+  assert.equal(harness.calls.includes("cancel-application:application-deferred"), true);
+  assertAlignedNavigation(harness, A);
+});
+
+test("close freeze rejects every same-tick ingress and abort or final-exit retry reopens admission", async () => {
+  const persisted = [];
+  const harness = fixture({
+    tabsPersistence: { commit: (state) => persisted.push(state) },
+  });
+  assert.equal(harness.workflow.beginClose({ requestId: "close-one" }), true);
+  const outcomes = await Promise.all([
+    harness.workflow.openProject({ kind: "local" }),
+    harness.workflow.activateTab(`document:${A.projectId}:${A.documentId}`),
+    harness.workflow.openRegisteredProject({ ...B, title: B.name }),
+    harness.workflow.createStart(),
+    harness.workflow.closeTab(`document:${A.projectId}:${A.documentId}`),
+    harness.workflow.acceptBrowserProject({ project: B }),
+    harness.workflow.acceptExternalProject({ requestId: "external-frozen" }),
+    harness.workflow.confirmOpen({ requestId: "confirmation-frozen" }),
+  ]);
+  assert.deepEqual(
+    outcomes.map((outcome) => outcome.code),
+    Array(outcomes.length).fill("WORKBENCH_NAVIGATION_CLOSE_FROZEN"),
+  );
+  assert.equal(persisted.length, 0);
+  assertAlignedNavigation(harness, A);
+
+  assert.equal(harness.workflow.abortClose({ requestId: "close-one" }), true);
+  assert.equal((await harness.workflow.openProject({ kind: "local" })).status, "succeeded");
+  assertAlignedNavigation(harness, B);
+  assert.equal(persisted.length, 1);
+
+  assert.equal(harness.workflow.beginClose({ requestId: "close-two" }), true);
+  assert.equal(harness.workflow.commitClose({ requestId: "close-two" }), true);
+  assert.equal(
+    (await harness.workflow.createStart()).code,
+    "WORKBENCH_NAVIGATION_CLOSE_FROZEN",
+  );
+  assert.equal(harness.workflow.abortClose({ requestId: "close-two" }), true);
+  assert.equal((await harness.workflow.createStart()).status, "succeeded");
 });

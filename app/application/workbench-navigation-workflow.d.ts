@@ -22,6 +22,9 @@ export class WorkbenchNavigationWorkflow {
     controller: WorkspaceController;
     browserDocuments?: BrowserDocumentSession | null;
     tabsPersistence?: WorkbenchTabsPersistenceCoordinator | null;
+    clock?: Readonly<{ now(): number }>;
+    setTimer?: (callback: () => void, delayMs: number) => unknown;
+    clearTimer?: (handle: unknown) => void;
   });
   openProject(input?: Record<string, unknown>): Promise<WorkbenchNavigationOutcome>;
   activateTab(tabId: string, input?: { deadlineMs?: number; intentKind?: string }): Promise<WorkbenchNavigationOutcome>;
@@ -35,6 +38,13 @@ export class WorkbenchNavigationWorkflow {
   retryOpen(input?: Record<string, unknown>): Promise<WorkbenchNavigationOutcome>;
   resumeDeferredProjectApplication(): ProjectWorkflowOutcome;
   resumeDeferredExternalProject(): ProjectWorkflowOutcome;
+  beginClose(input: { requestId: string }): boolean;
+  commitClose(input: { requestId: string }): boolean;
+  abortClose(input: { requestId: string }): boolean;
+  authorizeProjectApplication(input: {
+    transactionId?: string | null;
+    applicationId?: string | null;
+  }): Readonly<{ accepted: boolean; kind: "authority-refresh" | "transaction" | "stale" }>;
   applyProject(input: Readonly<Record<string, unknown>>): WorkbenchNavigationReceipt;
   onConfirmationPresented(input: { transactionId?: string; requestId?: string }): boolean;
   onTerminalFailure(input: { transactionId?: string; reason?: string }): boolean;
