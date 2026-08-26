@@ -218,4 +218,7 @@ test("Bridge client exposes the five neutral Agent routes and keeps availability
     { providerId: "synthetic", runtimeId: "runtime" },
   );
   assert.equal(requests.at(-1).url.searchParams.has("selection"), false);
+  assert.equal("startDiscussion" in client, false);
+  assert.equal("discussionStatus" in client, false);
+  assert.equal("cancelDiscussion" in client, false);
 });

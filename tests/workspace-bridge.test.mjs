@@ -50,6 +50,22 @@ test("POST /version remains a 410 tombstone", async (t) => {
   assert.equal(response.body.error.code, "LOCAL_VERSIONING_REMOVED");
 });
 
+test("retired Discussion routes expose no Bridge authority", async (t) => {
+  const environment = await createBridgeTestEnvironment(t, {
+    prefix: "pageroot-bridge-no-discussion-",
+  });
+  const bridge = await environment.start();
+  const responses = await Promise.all([
+    bridge.postJson("/discussion/start", {}),
+    bridge.requestJson("/discussion/status"),
+    bridge.postJson("/discussion/cancel", {}),
+  ]);
+  for (const response of responses) {
+    assert.equal(response.response.status, 404);
+    assert.equal(response.body.error.code, "NOT_FOUND");
+  }
+});
+
 test("configured bridge authentication protects every route and leaves CORS preflight usable", async (t) => {
   const environment = await createBridgeTestEnvironment(t, {
     prefix: "pageroot-bridge-auth-",

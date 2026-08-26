@@ -455,7 +455,7 @@ export default function AiReviewWorkspace({
   /**
    * The AI conversation, docked beside the comparison so the thread that led to
    * this candidate stays on screen. Read-only here: the Canvas is a candidate,
-   * not the page a discussion would read.
+   * not the editable page a new modification would use.
   */
   sidebar?: ReactNode;
 }) {

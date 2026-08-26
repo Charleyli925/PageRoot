@@ -1,6 +1,6 @@
 # ADR 0036: A discussion turn may show bounded visible Agent text, and that text never carries authority
 
-- Status: Accepted
+- Status: Superseded on 2026-08-26 when the Discussion product line was retired
 - Date: 2026-08-22
 - Supersedes: the Agent-output clause of ADR 0032 for discussion turns only
 

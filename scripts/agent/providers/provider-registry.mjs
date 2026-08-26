@@ -289,17 +289,6 @@ export function createProviderRegistry({ providers = [], runtimeRegistry } = {})
       }
     },
     run: runTicket,
-    createTurnRunner(ticket, { environment }) {
-      resolveTicket(ticket, "discussion");
-      return ({ policy, prompt, turnTimeoutMs, cancellationSignal, onEvent }) => runTicket(ticket, {
-        policy,
-        prompt,
-        turnTimeoutMs,
-        cancellationSignal,
-        onEvent,
-        baseEnvironment: environment,
-      });
-    },
     classifyRunFailure(ticket, cause) {
       const { provider } = resolveTicket(ticket, ticket.purpose);
       return provider.classifyRunFailure(provider.normalizeRuntimeError(cause));

@@ -21,12 +21,10 @@ import {
   loadExecutionPolicy,
   readVerifiedRegularFile,
 } from "./agent/policies/execution-policy.mjs";
-import { loadDiscussionPolicy } from "./agent/policies/discussion-policy.mjs";
 import {
   createExecutionHost,
   terminateManagedProcess,
 } from "./agent/hosts/execution-host.mjs";
-import { createDiscussionHost } from "./agent/hosts/discussion-host.mjs";
 
 const DEFAULT_STARTUP_TIMEOUT_MS = 15_000;
 const DEFAULT_TURN_TIMEOUT_MS = 10 * 60_000;
@@ -107,7 +105,6 @@ const LEGACY_COMMON_MESSAGES = Object.freeze({
   OUTPUT_PREEXISTS: "The Qoder ACP driver requires a fresh Attempt output path.",
   COMPLETION_PREEXISTS: "The Qoder ACP driver requires a fresh Attempt completion path.",
   READ_NOT_AUTHORIZED_EXECUTION: "Qoder requested a file outside the frozen read set.",
-  READ_NOT_AUTHORIZED_DISCUSSION: "Qoder requested a file outside the discussion snapshot.",
   WRITE_NOT_AUTHORIZED: "Qoder may only write the exact Candidate output path.",
 });
 
@@ -119,12 +116,10 @@ function policyError(code, message, details = {}) {
   return error;
 }
 
-function legacyCommonMessage(cause, mode) {
+function legacyCommonMessage(cause) {
   const suffix = String(cause.code || "").replace(/^AGENT_/u, "");
   if (suffix === "READ_NOT_AUTHORIZED") {
-    return mode === "discussion"
-      ? LEGACY_COMMON_MESSAGES.READ_NOT_AUTHORIZED_DISCUSSION
-      : LEGACY_COMMON_MESSAGES.READ_NOT_AUTHORIZED_EXECUTION;
+    return LEGACY_COMMON_MESSAGES.READ_NOT_AUTHORIZED_EXECUTION;
   }
   const exact = LEGACY_COMMON_MESSAGES[suffix];
   if (exact) return exact;
@@ -134,16 +129,15 @@ function legacyCommonMessage(cause, mode) {
     .replaceAll("Agent line", "ACP line")
     .replaceAll("Agent limit", "ACP limit")
     .replaceAll("Agent session", "ACP session")
-    .replaceAll("Agent discussion", "ACP discussion")
     .replaceAll("Agent read", "ACP read")
     .replaceAll("Agent turn", "ACP turn");
 }
 
-function adaptLegacyCommonError(cause, mode) {
+function adaptLegacyCommonError(cause) {
   if (!(cause instanceof Error)) return cause;
   if (cause.name === "AgentPolicyError" && /^AGENT_[A-Z0-9_]+$/u.test(cause.code)) {
     const suffix = cause.code.slice("AGENT_".length);
-    const message = legacyCommonMessage(cause, mode);
+    const message = legacyCommonMessage(cause);
     cause.name = "QoderAcpPolicyError";
     cause.code = `ACP_${suffix}`;
     cause.message = message;
@@ -152,7 +146,6 @@ function adaptLegacyCommonError(cause, mode) {
   if (cause instanceof TypeError) {
     cause.message = String(cause.message)
       .replace(/^Agent execution policy options/u, "ACP task policy options")
-      .replace(/^Agent discussion policy options/u, "ACP discussion policy options")
       .replace(
         /^Restricted execution host requires a verified PageRoot task policy\.$/u,
         "Restricted ACP host requires a verified PageRoot task policy.",
@@ -167,51 +160,39 @@ function adaptLegacyCommonError(cause, mode) {
   return cause;
 }
 
-async function loadLegacyPolicy(loader, options, mode) {
+async function loadLegacyPolicy(loader, options) {
   try {
     return await loader(options);
   } catch (cause) {
-    throw adaptLegacyCommonError(cause, mode);
+    throw adaptLegacyCommonError(cause);
   }
 }
 
-function adaptLegacyHost(host, mode) {
+function adaptLegacyHost(host) {
   return Object.fromEntries(Object.entries(host).map(([name, value]) => {
     if (typeof value !== "function") return [name, value];
     return [name, function legacyHostMethod(...args) {
       try {
         const result = value.apply(host, args);
         return result && typeof result.then === "function"
-          ? result.catch((cause) => { throw adaptLegacyCommonError(cause, mode); })
+          ? result.catch((cause) => { throw adaptLegacyCommonError(cause); })
           : result;
       } catch (cause) {
-        throw adaptLegacyCommonError(cause, mode);
+        throw adaptLegacyCommonError(cause);
       }
     }];
   }));
 }
 
 export function loadQoderAcpTaskPolicy(options) {
-  return loadLegacyPolicy(loadExecutionPolicy, options, "execution");
-}
-
-export function loadQoderAcpDiscussionPolicy(options) {
-  return loadLegacyPolicy(loadDiscussionPolicy, options, "discussion");
+  return loadLegacyPolicy(loadExecutionPolicy, options);
 }
 
 export function createRestrictedQoderAcpHost(policy, dependencies) {
   try {
-    return adaptLegacyHost(createExecutionHost(policy, dependencies), "execution");
+    return adaptLegacyHost(createExecutionHost(policy, dependencies));
   } catch (cause) {
-    throw adaptLegacyCommonError(cause, "execution");
-  }
-}
-
-export function createRestrictedDiscussionHost(policy, dependencies) {
-  try {
-    return adaptLegacyHost(createDiscussionHost(policy, dependencies), "discussion");
-  } catch (cause) {
-    throw adaptLegacyCommonError(cause, "discussion");
+    throw adaptLegacyCommonError(cause);
   }
 }
 
@@ -606,11 +587,8 @@ function summarizeUpdate(update) {
   return { type };
 }
 
-// ADR 0036: a discussion turn may pass visible Agent text through, bounded and
-// sanitized. Only what the Agent says is captured; `agent_thought_chunk` and
-// every other update type are dropped, so hidden reasoning never leaves the
-// driver. An execution turn captures nothing: its payload is a file, and prose
-// there would only invite confusion with Candidate authority.
+// Visible Agent narration is bounded and sanitized. Only what the Agent says is
+// captured; hidden reasoning and every other update type are dropped.
 function visibleTextChunk(update) {
   if (update?.sessionUpdate !== "agent_message_chunk") return "";
   if (update.content?.type !== "text") return "";
@@ -701,10 +679,6 @@ function driverProfile({
   });
 }
 
-// One driver serves the two permission-separated turn kinds, and the branded
-// policy is the only thing that picks between them. Dispatching on `policy.mode`
-// — rather than letting a caller inject a host — makes an execution policy
-// paired with a discussion host, or the reverse, structurally impossible.
 const ACP_DRIVER_PROFILES = new Map([
   ["execution", driverProfile({
     mode: "execution",
@@ -715,30 +689,9 @@ const ACP_DRIVER_PROFILES = new Map([
     }),
     // An execution turn only counts once the fixed finalizer has proven itself.
     requiresTurnCompletion: true,
-    // ADR 0037 gives an execution turn the same visible-text budget a discussion
-    // gets, and for the same reasons: the user could not tell a working round from
-    // a stuck one, and that opacity was itself causing duplicate sends. The
-    // boundary is unchanged — agent_message_chunk only, hidden reasoning dropped,
-    // sanitised, truncated at the same budget — and the text stays narration with
-    // zero weight in whether the Candidate is accepted.
+    // Agent narration is bounded and has zero weight in Candidate acceptance.
     visibleTextByteLimit: 64 * 1024,
     requiredHostMethods: Object.freeze([...ACP_HOST_METHODS, "assertTurnCompleted"]),
-  })],
-  ["discussion", driverProfile({
-    mode: "discussion",
-    createHost: (policy, onEvent) => createRestrictedDiscussionHost(policy, { onEvent }),
-    clientCapabilities: Object.freeze({
-      fs: Object.freeze({ readTextFile: true, writeTextFile: false }),
-      terminal: false,
-    }),
-    // Discussion produces no Candidate, so it declares that it requires no
-    // completion evidence. It must never become an optional call on a method
-    // that could silently disappear from the execution host.
-    requiresTurnCompletion: false,
-    // The reply is the whole payload of a discussion turn, so it is captured
-    // within a fixed budget (ADR 0036).
-    visibleTextByteLimit: 64 * 1024,
-    requiredHostMethods: ACP_HOST_METHODS,
   })],
 ]);
 

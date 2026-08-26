@@ -120,11 +120,6 @@ test("model, reasoning, installation, trust and purpose are all preflight key au
     trustPolicyVersion: "trusted-local-agent-v2",
     purpose: "execution",
   }), baseKey);
-  assert.notEqual(agentPreflightKey(base, {
-    installationDigest: "sha256:one",
-    trustPolicyVersion: TRUST,
-    purpose: "discussion",
-  }), baseKey);
 });
 
 test("same provider model and purpose share only their exact in-flight promise", async () => {
@@ -142,19 +137,19 @@ test("same provider model and purpose share only their exact in-flight promise",
     selected: first,
     clock: { now: () => 10 },
   });
-  const left = catalog.preflight(first, { purpose: "discussion" });
-  const right = catalog.preflight(first, { purpose: "discussion" });
+  const left = catalog.preflight(first, { purpose: "execution" });
+  const right = catalog.preflight(first, { purpose: "execution" });
   assert.equal(left, right);
   assert.equal(calls, 1);
   pending.resolve({
     status: "ready",
-    preflightId: "ticket_discussion",
+    preflightId: "ticket_execution",
     selection: first,
     expiresAt: new Date(20_000).toISOString(),
   });
   await left;
 
-  const execution = catalog.preflight(first, { purpose: "execution" });
+  const execution = catalog.preflight(first, { purpose: "execution", force: true });
   assert.notEqual(execution, left);
   assert.equal(calls, 2);
 });

@@ -169,15 +169,4 @@ export class RunWorkflow {
   }): Promise<RunWorkflowOutcome<{ recovered: number; attempted: number }>>;
   freezeAgentSelection(): AgentSelection | null;
   selectAgent(selection: AgentSelection): AgentSelection;
-  spendAgentTicket(input?: {
-    selection?: AgentSelection | null;
-    purpose?: "execution" | "discussion";
-  }): Promise<{
-    preflightId: string;
-    selection: AgentSelection;
-    securityProfile: "client-mediated" | "agent-native";
-    purpose: string;
-    trustPolicyAccepted: string;
-  }>;
-  spendQoderTicket(purpose?: "execution" | "discussion"): ReturnType<RunWorkflow["spendAgentTicket"]>;
 }

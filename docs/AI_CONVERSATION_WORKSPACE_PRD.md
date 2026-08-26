@@ -2,9 +2,15 @@
 
 - 文档版本：PRD v0.2
 - 最近更新：2026-08-21（Asia/Shanghai，UTC+8）
-- 状态：产品方案已定稿；分期实施尚未进入产品代码、Schema 或发布范围
+- 状态：历史方案；Discussion 产品线已于 2026-08-26 退役
 - 适用范围：PageRoot 桌面版单 HTML 项目的评论、预览、Qoder CLI 对话、受管 AI 修改、Candidate 审阅、正式版本晋升与对话历史
 - 关联文档：[MVP 产品需求](MVP_PRD.md)、[交互流程](INTERACTION_FLOW.md)、[设计语言](DESIGN_LANGUAGE.md)、[Change Request 协议](CHANGE_REQUEST_PROTOCOL.md)、[版本与项目文件产品需求](VERSION_AND_PROJECT_FILES_PRD.md)、[状态所有权](STATE_OWNERSHIP.md)、[安全模型](SECURITY_MODEL.md)、[ADR 0032](decisions/0032-qoder-acp-agent-bridge.md)
+
+> **当前产品覆盖规则（2026-08-26）：** Qoder 与 Codex 都不再提供新 Discussion Turn。
+> AI 侧栏只保留历史 Conversation 可读、Execution 进度、Candidate 决策和基于页面评论的
+> “交给 AI 修改”。本文其余 Discussion、讨论草稿、讨论 Host、讨论路由和讨论并发章节仅作
+> 已交付方案的历史记录，不再是实现或验收要求。旧记录中的 `discussion` mode 和 `discuss`
+> draft intent 只为无损读取保留，不能成为新的发送能力。
 
 本文定义 PageRoot 下一阶段的目标产品规则。它不是对现有 Agent 交付弹窗或处理抽屉的局部换皮，而是把编辑、评论、AI 讨论、受管执行、Candidate 决策与审阅统一为一个围绕真实 HTML 的连续工作流。
 

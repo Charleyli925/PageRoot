@@ -289,6 +289,11 @@ export class AgentCatalogState {
     trustPolicyVersion = null,
     installationDigest = null,
   } = {}) {
+    if (purpose !== "execution") {
+      return Promise.reject(Object.assign(new Error("Agent preflight purpose is unsupported."), {
+        code: "AGENT_CAPABILITY_UNSUPPORTED",
+      }));
+    }
     const frozen = freezeAgentSelection(selection);
     const provider = this.provider(frozen);
     if (!provider) return Promise.reject(this.#unsupportedProvider(frozen.providerId));

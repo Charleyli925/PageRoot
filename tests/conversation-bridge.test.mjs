@@ -41,7 +41,7 @@ test("GET /conversation establishes and then restores the document's conversatio
   assert.equal(created.body.conversation.messages.length, 0);
   assert.equal(created.body.atMessageLimit, false);
   assert.equal(created.body.draft.text, "");
-  assert.equal(created.body.draft.intent, "discuss");
+  assert.equal(created.body.draft.intent, "modify");
 
   // Opening the sidebar again restores the same conversation rather than
   // starting a second one.

@@ -781,7 +781,6 @@ export default function Workbench() {
   const aiConversation = useAiConversation({
     controllerRef: workspaceControllerRef,
     conversation: workspaceControllerSnapshot?.conversation ?? null,
-    discussionTurn: workspaceControllerSnapshot?.discussionTurn ?? null,
     qoderAvailability,
     agentModelDisplayName,
     // The header's mode comes from Request authority, not from a local guess.
@@ -794,7 +793,6 @@ export default function Workbench() {
     projectId: projectId ?? "",
     documentId: documentId ?? "",
     sourcePath: sourcePath ?? "",
-    sourceSha256,
     pendingCommentCount: comments.length,
     /*
      * The same submission the header button performs. One owner, two surfaces.
@@ -7194,8 +7192,8 @@ export default function Workbench() {
         setDrawer(null);
         setHandoffPreviewOpen(false);
         setCanvasMode("preview");
-        // Opening is navigation, not an intent change. A new conversation defaults to
-        // discussion; an existing one restores the user's persisted selection.
+        // Opening is navigation. New actions on this surface are modifications;
+        // historical conversation messages remain readable above them.
         aiConversation.reveal();
       }}
     />

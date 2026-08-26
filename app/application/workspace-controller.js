@@ -19,8 +19,6 @@ import { RunWorkflow } from "./run-workflow.js";
 import { SourceHistorySession } from "./source-history-session.js";
 import { ConversationSession } from "./conversation-session.js";
 import { ConversationWorkflow } from "./conversation-workflow.js";
-import { DiscussionTurnSession } from "./discussion-turn-session.js";
-import { DiscussionTurnWorkflow } from "./discussion-turn-workflow.js";
 import { VersionSession } from "./version-session.js";
 import { VersionWorkflow } from "./version-workflow.js";
 import { createWorkspaceControllerCodecs } from "./workspace-controller-codecs.js";
@@ -170,7 +168,6 @@ export function createRuntimeWorkspaceController({
     versionSession: new VersionSession(),
     sourceHistorySession: new SourceHistorySession(),
     conversationSession: new ConversationSession(),
-    discussionTurnSession: new DiscussionTurnSession(),
     codecs,
     ports,
     documentWorkflow: {
@@ -216,12 +213,6 @@ export class WorkspaceController {
   #sourceHistorySession;
 
   #conversationWorkflow = null;
-
-  #discussionTurnWorkflow = null;
-
-  #discussionTurnSessionUnsubscribe = null;
-
-  #discussionTurnSnapshot = null;
 
   #conversationSession = null;
 
@@ -292,7 +283,6 @@ export class WorkspaceController {
     versionSession,
     sourceHistorySession,
     conversationSession = null,
-    discussionTurnSession = null,
     codecs,
     ports = {},
     documentWorkflow = null,
@@ -369,39 +359,6 @@ export class WorkspaceController {
           this.#publishAggregateSnapshot();
         },
       );
-    }
-    // The discussion turn projection is optional for the same reason. It asks
-    // `RunWorkflow` for the consent-backed Agent ticket, so the renderer keeps
-    // exactly one availability and consent owner.
-    if (discussionTurnSession) {
-      this.#discussionTurnWorkflow = new DiscussionTurnWorkflow({
-        bridgeClient,
-        discussionTurnSession,
-        requestTicket: (input) => this.#runWorkflow?.spendAgentTicket(input)
-          ?? Promise.resolve(null),
-        freezeSelection: () => this.#runWorkflow?.freezeAgentSelection() ?? null,
-        // A settled turn has been sealed into the conversation record, so the
-        // stored message is loaded once and takes over from the live one.
-        onSettled: (context) => {
-          void this.#conversationWorkflow?.open(context);
-        },
-      });
-      this.#discussionTurnSessionUnsubscribe = discussionTurnSession.subscribe(
-        (snapshot) => {
-          this.#discussionTurnSnapshot = snapshot;
-          this.#publishAggregateSnapshot();
-        },
-      );
-      // A read-only discussion turn never blocks a boundary: it reports resolved
-      // and is cancelled on the way out. Holding close or a Document switch open
-      // for up to the turn's full budget, to preserve something disposable that
-      // produces no Version and no Candidate, would be the wrong trade.
-      this.#drainCoordinator.replace("discussion-turn", {
-        label: "结束本轮 AI 讨论",
-        alwaysDrain: true,
-        inspect: () => ({ state: "resolved" }),
-        drain: () => this.#discussionTurnWorkflow?.drain() ?? Promise.resolve(),
-      });
     }
     this.#runSession = runSessions[0] || null;
     this.#projectSessionSnapshot = projectSession.snapshot;
@@ -706,28 +663,6 @@ export class WorkspaceController {
     return this.#conversationWorkflow?.flushDraft() ?? Promise.resolve();
   }
 
-  // Discussion turn commands. The view never reaches the Bridge, the Qoder
-  // ticket or the discussion session directly.
-  startDiscussionTurn(context, options) {
-    return this.#discussionTurnWorkflow?.start(context, options) ?? Promise.resolve(null);
-  }
-
-  cancelDiscussionTurn() {
-    return this.#discussionTurnWorkflow?.cancel() ?? Promise.resolve(null);
-  }
-
-  /**
-   * The discussion drain boundary. A read-only turn in flight is cancelled, not
-   * awaited, so closing or switching is never held open for its full budget.
-   */
-  drainDiscussionTurn() {
-    return this.#discussionTurnWorkflow?.drain() ?? Promise.resolve();
-  }
-
-  closeDiscussionTurn() {
-    this.#discussionTurnWorkflow?.close();
-  }
-
   subscribe(listener) {
     if (typeof listener !== "function") {
       throw new TypeError("WorkspaceController listener must be a function.");
@@ -774,15 +709,6 @@ export class WorkspaceController {
     this.#conversationSessionUnsubscribe = null;
     this.#conversationWorkflow?.close();
     this.#conversationWorkflow = null;
-    this.#discussionTurnSessionUnsubscribe?.();
-    this.#discussionTurnSessionUnsubscribe = null;
-    // Renderer teardown stops polling and clears the projection. It does not
-    // wait on the Agent: the Bridge disposes its own in-flight discussion turns
-    // on the shutdown gate and fails closed on unconfirmed cleanup.
-    this.#discussionTurnWorkflow?.close();
-    this.#discussionTurnWorkflow?.dispose();
-    this.#discussionTurnWorkflow = null;
-    this.#drainCoordinator.remove("discussion-turn");
     this.#runWorkflowUnsubscribe?.();
     this.#runWorkflowUnsubscribe = null;
     this.#runWorkflow?.dispose();
@@ -1397,7 +1323,6 @@ export class WorkspaceController {
       run: this.#runSnapshot,
       version: this.#versionSnapshot,
       conversation: this.#conversationSnapshot,
-      discussionTurn: this.#discussionTurnSnapshot,
     });
     for (const listener of this.#listeners) {
       try {

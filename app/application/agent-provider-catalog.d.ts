@@ -65,13 +65,13 @@ export class AgentCatalogState {
   refreshAvailability(selection?: AgentSelection | null): Promise<unknown>;
   preflight(selection?: AgentSelection | null, options?: {
     force?: boolean;
-    purpose?: string;
+    purpose?: "execution";
     trustPolicyVersion?: string | null;
     installationDigest?: string | null;
   }): Promise<AgentPreflight>;
   spendTicket(selection?: AgentSelection | null, options?: {
     force?: boolean;
-    purpose?: string;
+    purpose?: "execution";
     trustPolicyVersion?: string | null;
     installationDigest?: string | null;
   }): Promise<AgentPreflight>;

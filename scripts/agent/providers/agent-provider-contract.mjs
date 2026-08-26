@@ -9,12 +9,10 @@ const CAPABILITY_NAMES = Object.freeze([
   "availability",
   "preflight",
   "execution",
-  "discussion",
   "modelCatalog",
 ]);
 
 const PURPOSE_CAPABILITIES = Object.freeze({
-  discussion: "discussion",
   execution: "execution",
 });
 
@@ -77,11 +75,6 @@ export function defineAgentProvider(value) {
     ? [...new Set(value.legacyDrivers.map((driver) => assertComponentId(driver, "legacy driver")))]
     : [];
   const capabilities = normalizedCapabilities(value.capabilities);
-  if (legacyDrivers.length === 0 && capabilities.discussion === true) {
-    throw new TypeError(
-      `Selection-only Agent provider ${providerId} cannot declare the legacy Discussion capability.`,
-    );
-  }
   const requiredMethods = [
     "resolveInstallation",
     "preflight",

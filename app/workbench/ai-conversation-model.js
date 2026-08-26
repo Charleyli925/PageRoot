@@ -15,7 +15,7 @@
  * than inventing a second one.
  */
 const SIDEBAR_STATES = new Set([
-  "preview-discussion",
+  "preview-ready",
   "preparing-delivery",
   "processing",
   "validating",
@@ -24,7 +24,6 @@ const SIDEBAR_STATES = new Set([
   "promoting",
 ]);
 
-const INTENT_DISCUSS = "discuss";
 const INTENT_MODIFY = "modify";
 const INTENT_CONTINUE = "continue";
 
@@ -48,13 +47,13 @@ const ACTOR_LABELS = Object.freeze({
 });
 
 const MODE_PRESENTATION = Object.freeze({
-  "preview-discussion": {
-    label: "讨论 · 只读",
-    detail: "Qoder 可以阅读当前预览，但不能修改 HTML。",
+  "preview-ready": {
+    label: "修改 · 待发送",
+    detail: "按页面评论发起修改，结果先进入审阅。",
   },
   "preparing-delivery": {
-    label: "讨论 · 只读",
-    detail: "Qoder 可以阅读当前预览，但不能修改 HTML。",
+    label: "修改 · 准备中",
+    detail: "正在冻结本轮评论和页面内容。",
   },
   processing: {
     label: "执行 · 写入候选",
@@ -70,43 +69,26 @@ const MODE_PRESENTATION = Object.freeze({
   },
   "review-view": {
     label: "审阅 · 只读",
-    detail: "讨论不会改变候选。",
-  },
-  // Not a run status: this is the moment between choosing to modify and the round
-  // existing. Nothing is written yet, and the copy says so.
-  "pending-modification": {
-    label: "修改 · 待发送",
-    detail: "按你写的评论改，结果先进入审阅。",
+    detail: "采纳后才能在结果基础上继续修改。",
   },
   promoting: {
     label: "结果 · 等待决定",
     detail: "当前仍是修改前页面。",
   },
   // A round that produced nothing new: the round is over, but it is still this
-  // thread's fact to state, not a return to plain preview discussion.
+  // thread's fact to state, not a return to the idle preview.
   "no-change": {
     label: "结果 · 无变化",
     detail: "评论和当前页面都保持原样。",
   },
 });
 
-export function sidebarModePresentation(state, intent) {
-  // Before a round exists, the header follows what the user is about to do. Saying
-  // "讨论 · 只读" while the Composer directly below it is preparing a modification
-  // contradicts itself, and the run status alone cannot tell them apart because no
-  // run has been created yet. Once a round exists its durable status wins again.
-  if (
-    intent === INTENT_MODIFY
-    && (state === "preview-discussion" || state === "preparing-delivery")
-  ) {
-    return MODE_PRESENTATION["pending-modification"];
-  }
-  return MODE_PRESENTATION[state] ?? MODE_PRESENTATION["preview-discussion"];
+export function sidebarModePresentation(state) {
+  return MODE_PRESENTATION[state] ?? MODE_PRESENTATION["preview-ready"];
 }
 
 // The header's mode comes from the run's own durable status, never from a local
-// guess. That is the whole point: the sidebar must not claim "discussion ·
-// read-only" while an execution turn is writing a Candidate, and any second
+// guess. Any second
 // lifecycle kept in the view would eventually drift from the Request record.
 const RUN_STATUS_TO_SIDEBAR_STATE = Object.freeze({
   submitting: "preparing-delivery",
@@ -117,7 +99,7 @@ const RUN_STATUS_TO_SIDEBAR_STATE = Object.freeze({
   committing: "promoting",
   "recovering-transaction": "promoting",
   // A settled-without-change round still needs its decision said in the thread:
-  // without this row the sidebar falls back to preview-discussion and the
+  // without this row the sidebar falls back to preview-ready and the
   // no-change action bar below becomes unreachable dead copy.
   "no-change": "no-change",
 });
@@ -132,7 +114,7 @@ export function sidebarStateFromRun({
   if (mapped) return mapped;
   // A submission being prepared is authority in flight, not yet a run.
   if (submissionPending) return "preparing-delivery";
-  return "preview-discussion";
+  return "preview-ready";
 }
 
 /**
@@ -255,31 +237,10 @@ export function sidebarMessageStream(messages) {
     }));
 }
 
-/**
- * The intent switch. It is one control in every state; only its second option
- * changes, so the user learns it once.
- */
-export function sidebarIntentOptions(state) {
-  if (state === "ready-to-open" || state === "review-view") {
-    return [
-      { value: INTENT_DISCUSS, label: "讨论结果" },
-      { value: INTENT_CONTINUE, label: "继续修改" },
-    ];
-  }
-  // The tab names the kind of round; the button below names the destination. Using
-  // 「交给 AI 修改」 in both places put the same words in two controls and made the
-  // pair read as a duplicate rather than a choice.
-  return [
-    { value: INTENT_DISCUSS, label: "讨论" },
-    { value: INTENT_MODIFY, label: "修改" },
-  ];
-}
-
-export function sidebarResolvedIntent(state, requestedIntent) {
-  const allowed = new Set(
-    sidebarIntentOptions(state).map((option) => option.value),
-  );
-  return allowed.has(requestedIntent) ? requestedIntent : INTENT_DISCUSS;
+export function sidebarResolvedIntent(state) {
+  return state === "ready-to-open" || state === "review-view"
+    ? INTENT_CONTINUE
+    : INTENT_MODIFY;
 }
 
 /**
@@ -449,14 +410,12 @@ export function sidebarDeliveryDisclosure(intent) {
 export function sidebarSendState({
   state,
   catalogStatus = "ready",
-  hasText = false,
   queued = false,
-  intent = INTENT_DISCUSS,
-  discussionBusy = false,
+  intent = INTENT_MODIFY,
   pendingCommentCount = 0,
 } = {}) {
   // The review Canvas wins over every other reason. It is showing a candidate,
-  // not the page a discussion would read, so no round may start from here. The
+  // so no round may start from here. The
   // thread stays on screen so the user keeps the context that produced the
   // candidate; it is simply not a place to type right now. State is the single
   // owner of this fact — sidebarStateFromRun already maps reviewing to it.
@@ -466,6 +425,41 @@ export function sidebarSendState({
       canSend: false,
       label: "发送",
       reason: "正在审阅 AI 候选，采纳或返回后可继续对话",
+    };
+  }
+  // Lifecycle authority wins over provider availability. While a Request is
+  // being frozen there is no second action to take, and once a Candidate is
+  // ready the decision bar — not the Composer — owns review/adoption.
+  if (state === "preparing-delivery") {
+    return {
+      kind: "send",
+      canSend: false,
+      label: "正在准备修改…",
+      reason: "正在冻结本轮评论和页面内容",
+    };
+  }
+  if (state === "ready-to-open") {
+    return {
+      kind: "status",
+      canSend: false,
+      label: "先处理当前结果",
+      reason: null,
+    };
+  }
+  if (state === "processing" || state === "validating") {
+    return {
+      kind: "send",
+      canSend: false,
+      label: "发送",
+      reason: "Qoder 完成本轮后可发送",
+    };
+  }
+  if (state === "promoting") {
+    return {
+      kind: "send",
+      canSend: false,
+      label: "发送",
+      reason: "正在采用候选版本",
     };
   }
   if (catalogStatus === "checking") {
@@ -498,28 +492,6 @@ export function sidebarSendState({
       canSend: false,
       label: "Agent 暂不可用",
       reason: "Qoder 暂时无法确认",
-    };
-  }
-  // One discussion turn per Document. The notice line directly above the Composer
-  // already says Qoder is replying, so the button stays quiet rather than
-  // printing a second sentence that means the same thing.
-  if (discussionBusy) {
-    return { kind: "send", canSend: false, label: "发送", reason: null };
-  }
-  if (state === "processing" || state === "validating") {
-    return {
-      kind: "send",
-      canSend: false,
-      label: "发送",
-      reason: "Qoder 完成本轮后可发送",
-    };
-  }
-  if (state === "promoting") {
-    return {
-      kind: "send",
-      canSend: false,
-      label: "发送",
-      reason: "正在采用候选版本",
     };
   }
   // Modifying is a Request, and a Request is frozen from the edit surface's
@@ -555,18 +527,7 @@ export function sidebarSendState({
       reason: "先采用当前结果才能继续修改",
     };
   }
-  if (queued) {
-    return {
-      kind: "send",
-      canSend: false,
-      label: "发送",
-      reason: "正在等待上一个任务完成",
-    };
-  }
-  if (!hasText) {
-    return { kind: "send", canSend: false, label: "发送", reason: null };
-  }
-  return { kind: "send", canSend: true, label: "发送", reason: null };
+  return { kind: "send", canSend: false, label: "发送", reason: null };
 }
 
 /**
@@ -583,7 +544,7 @@ export function sidebarSendState({
  * in flight, and comments to freeze.
  */
 export function sidebarCopyTaskState({
-  state = "preview-discussion",
+  state = "preview-ready",
   queued = false,
   pendingCommentCount = 0,
 } = {}) {
@@ -592,6 +553,12 @@ export function sidebarCopyTaskState({
       canCopy: false,
       reason: "正在审阅 AI 候选，采纳或返回后可继续对话",
     };
+  }
+  if (state === "preparing-delivery") {
+    return { canCopy: false, reason: "正在冻结本轮评论和页面内容" };
+  }
+  if (state === "ready-to-open") {
+    return { canCopy: false, reason: "先处理当前结果" };
   }
   if (state === "processing" || state === "validating") {
     return { canCopy: false, reason: "Qoder 完成本轮后可发送" };
@@ -641,81 +608,8 @@ export function sidebarModelLine({
   });
 }
 
-/**
- * The Agent's reply for the live discussion turn, projected with exactly the
- * same shape as a stored message so the view reuses one treatment instead of
- * inventing a second card for streaming text.
- *
- * Returns null until some text has arrived: an empty shell that later fills
- * would make the stream jump for no information.
- */
-export function sidebarLiveReply(discussion, messages = []) {
-  if (!discussion) return null;
-  const text = typeof discussion.replyText === "string" ? discussion.replyText : "";
-  if (!text.trim()) return null;
-  // Once this turn has a stored message, the record is what renders. Matching on
-  // turnId rather than on "has the turn settled" leaves no gap: the live block
-  // stays until the reload actually brings the message in, so the reply never
-  // blinks out and never shows twice.
-  const turnId = String(discussion.turnId || "");
-  if (turnId && Array.isArray(messages) && messages.some(
-    (message) => message && message.turnId === turnId
-      && (message.actor === "agent" || message.actor === "qoder"),
-  )) return null;
-  const status = String(discussion.status || "");
-  return Object.freeze({
-    actor: "qoder",
-    actorLabel: sidebarActorLabel("qoder"),
-    text,
-    truncated: discussion.replyTruncated === true,
-    // An interrupted reply says so on the reply itself, not only in the Composer
-    // notice, because the text is what the user reads.
-    interrupted: discussion.interrupted === true,
-    streaming: status === "starting" || status === "running",
-  });
-}
-
-/**
- * The discussion turn's own visible line. A turn that stopped early must say so:
- * showing its partial text with no marker would present an interrupted answer as
- * a complete one.
- */
-export function sidebarDiscussionNotice(discussion) {
-  if (!discussion) return null;
-  const status = String(discussion.status || "");
-  if (status === "starting" || status === "running") {
-    return { tone: "progress", text: "Qoder 正在阅读当前预览并回复…" };
-  }
-  if (status === "cancelling") {
-    return { tone: "progress", text: "正在结束这轮讨论…" };
-  }
-  if (discussion.interrupted === true) {
-    return {
-      tone: "attention",
-      text: discussion.interruptedReason === "timeout"
-        ? "这轮讨论超时中断，已收到的内容不是完整回复。"
-        : "这轮讨论已结束，已收到的内容不是完整回复。",
-    };
-  }
-  if (status === "failed") {
-    return { tone: "attention", text: "这轮讨论没有完成。可以重新发一次。" };
-  }
-  return null;
-}
-
-/**
- * A draft is saved but never sent while a round is running. The Composer says
- * so rather than silently keeping the text.
- */
-export function sidebarDraftNotice(state) {
-  return state === "processing" || state === "validating" || state === "promoting"
-    ? "仅保存草稿，不会发送给当前任务"
-    : null;
-}
-
 export {
   SIDEBAR_STATES,
-  INTENT_DISCUSS,
   INTENT_MODIFY,
   INTENT_CONTINUE,
   FORBIDDEN_MESSAGE_KEYS,

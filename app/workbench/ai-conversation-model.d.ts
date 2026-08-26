@@ -1,5 +1,5 @@
 export type SidebarState =
-  | "preview-discussion"
+  | "preview-ready"
   | "preparing-delivery"
   | "processing"
   | "validating"
@@ -8,7 +8,7 @@ export type SidebarState =
   | "promoting"
   | "no-change";
 
-export type SidebarIntent = "discuss" | "modify" | "continue";
+export type SidebarIntent = "modify" | "continue";
 
 export type SidebarModePresentation = {
   label: string;
@@ -26,11 +26,6 @@ export type SidebarMessage = {
   sequence: number;
   createdAt: string;
   modelDisplayName: string | null;
-};
-
-export type SidebarIntentOption = {
-  value: SidebarIntent;
-  label: string;
 };
 
 export type SidebarAction = {
@@ -67,7 +62,6 @@ export type SidebarCatalogStatus =
 
 export function sidebarModePresentation(
   state: string,
-  intent?: SidebarIntent | string,
 ): SidebarModePresentation;
 
 export function sidebarActorInitial(actor: string): string;
@@ -78,11 +72,8 @@ export function sidebarMessageStream(
   messages: readonly unknown[],
 ): SidebarMessage[];
 
-export function sidebarIntentOptions(state: string): SidebarIntentOption[];
-
 export function sidebarResolvedIntent(
   state: string,
-  requestedIntent: string,
 ): SidebarIntent;
 
 export function conversationReadyForDocument(
@@ -143,10 +134,8 @@ export function sidebarDeliveryDisclosure(intent?: SidebarIntent | string): stri
 export function sidebarSendState(options?: {
   state?: string;
   catalogStatus?: SidebarCatalogStatus;
-  hasText?: boolean;
   queued?: boolean;
   intent?: SidebarIntent;
-  discussionBusy?: boolean;
   pendingCommentCount?: number;
 }): SidebarSendState;
 
@@ -174,41 +163,7 @@ export function sidebarModelLine(options?: {
   modelChoiceCount?: number;
 }): SidebarModelLine | null;
 
-export type SidebarLiveReply = {
-  actor: "qoder";
-  actorLabel: string;
-  text: string;
-  truncated: boolean;
-  interrupted: boolean;
-  streaming: boolean;
-};
-
-export function sidebarLiveReply(
-  discussion?: {
-    status?: string;
-    turnId?: string | null;
-    replyText?: string;
-    replyTruncated?: boolean;
-    interrupted?: boolean;
-  } | null,
-  messages?: readonly unknown[],
-): SidebarLiveReply | null;
-
-export type SidebarDiscussionNotice = {
-  tone: "progress" | "attention";
-  text: string;
-};
-
-export function sidebarDiscussionNotice(discussion?: {
-  status?: string;
-  interrupted?: boolean;
-  interruptedReason?: string | null;
-} | null): SidebarDiscussionNotice | null;
-
-export function sidebarDraftNotice(state: string): string | null;
-
 export const SIDEBAR_STATES: ReadonlySet<string>;
-export const INTENT_DISCUSS: "discuss";
 export const INTENT_MODIFY: "modify";
 export const INTENT_CONTINUE: "continue";
 export const FORBIDDEN_MESSAGE_KEYS: readonly string[];

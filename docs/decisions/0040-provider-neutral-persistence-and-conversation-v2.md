@@ -4,6 +4,10 @@
 
 Accepted.
 
+Amended 2026-08-26: new Discussion turns are retired. Conversation v2 continues
+to read historical discussion modes and draft intents without rewriting them,
+but no renderer, Bridge, provider or runtime surface can create another one.
+
 ## Decision
 
 New Requests persist one canonical `managed-agent` provider/runtime/model and

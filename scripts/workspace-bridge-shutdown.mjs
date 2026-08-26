@@ -27,7 +27,6 @@ export async function cancelDurableRequestAfterAgentCleanup({
 export async function closeWorkspaceBridgeAfterAgentCleanup({
   coordinator = null,
   agentBridgeService,
-  discussionBridgeService = null,
   closeServer,
   exitProcess,
   writeDiagnostic,
@@ -40,17 +39,7 @@ export async function closeWorkspaceBridgeAfterAgentCleanup({
   ) {
     throw new TypeError("Workspace Bridge shutdown dependencies are invalid.");
   }
-  if (discussionBridgeService !== null && typeof discussionBridgeService.dispose !== "function") {
-    throw new TypeError("Workspace Bridge shutdown dependencies are invalid.");
-  }
-
   try {
-    // An in-flight discussion turn owns a Qoder process and a short-lived
-    // snapshot, so it drains on the same gate: an unconfirmed cleanup aborts
-    // the shutdown instead of leaving either behind.
-    // Production passes the one coordinator (through AgentBridgeService's
-    // façade); the discussion façade owns no independent process/session state.
-    if (discussionBridgeService) await discussionBridgeService.dispose();
     await (coordinator || agentBridgeService).dispose();
   } catch {
     writeShutdownAborted(writeDiagnostic);

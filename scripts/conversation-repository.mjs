@@ -8,7 +8,6 @@ import {
   conversationAtMessageLimit,
   conversationSummary,
   conversationTitleFromMessage,
-  conversationTurnById,
   conversationsForDocument,
   createEmptyConversation,
   createEmptyConversationDraft,
@@ -239,110 +238,6 @@ export async function mutateConversation(
   } catch (error) {
     throw serviceError(error);
   }
-}
-
-// A discussion round is recorded in two steps, because sealing a Turn is the
-// only path that writes a message.
-//
-// Step one seals the user's question in its own Turn. PRD §9 forbids sending to
-// Qoder before that question is durable, and a question is a fact the moment the
-// user sends it, so it does not wait for a reply. It also records the round's
-// Context: the discussed bytes' Hash, which is the snapshot Hash (PRD §9.2).
-// Step one then opens the Agent's Turn as running, so a crash leaves a visibly
-// unfinished round rather than a silent gap.
-export async function recordDiscussionQuestion(context, {
-  conversationId,
-  turnId,
-  sourceSha256,
-  question,
-  providerSelection,
-  providerBinding,
-  capabilitySnapshotFingerprint,
-}) {
-  const contextId = newContextId();
-  const questionTurnId = newTurnId();
-  const questionMessageId = newMessageId();
-  return mutateConversation(context, conversationId, (current) => {
-    const withContext = appendConversationContext(
-      current,
-      { contextId, sourceSha256, side: "working-copy" },
-      { now: nowIso },
-    );
-    const questionStarted = startConversationTurn(
-      withContext,
-      { turnId: questionTurnId, contextId, mode: "discussion", status: "running" },
-      { now: nowIso },
-    );
-    const questionSealed = sealConversationTurn(
-      questionStarted,
-      {
-        turnId: questionTurnId,
-        status: "completed",
-        messages: [{
-          messageId: questionMessageId,
-          actor: "user",
-          kind: "text",
-          status: "completed",
-          text: question,
-          contextId,
-        }],
-      },
-      { now: nowIso },
-    );
-    return startConversationTurn(
-      questionSealed,
-      {
-        turnId,
-        contextId,
-        mode: "discussion",
-        status: "running",
-        providerSelection,
-        providerBinding,
-        capabilitySnapshotFingerprint,
-      },
-      { now: nowIso },
-    );
-  });
-}
-
-// Step two seals the Agent's Turn with whatever it actually said (ADR 0036). An
-// interrupted or failed round seals with that status, so a partial reply is
-// stored as partial and never reads as a finished answer. A round with no text
-// seals with no message rather than an empty one.
-export async function sealDiscussionReply(context, {
-  conversationId,
-  turnId,
-  status,
-  replyText = "",
-  replyTruncated = false,
-}) {
-  return mutateConversation(context, conversationId, (current) => {
-    const turn = conversationTurnById(current, turnId);
-    // A round that never opened, or a late duplicate for one already sealed, is
-    // left exactly as it is instead of being sealed twice.
-    if (!turn || (turn.status !== "queued" && turn.status !== "running")) return current;
-    const text = String(replyText || "").trim();
-    return sealConversationTurn(
-      current,
-      {
-        turnId,
-        status,
-        messages: text
-          ? [{
-            messageId: newMessageId(),
-            actor: "agent",
-            providerId: turn.providerBinding?.providerId,
-            kind: "text",
-            status,
-            text,
-            truncated: replyTruncated === true,
-            contextId: turn.contextId,
-          }]
-          : [],
-      },
-      { now: nowIso },
-    );
-  });
 }
 
 export async function createConversation(

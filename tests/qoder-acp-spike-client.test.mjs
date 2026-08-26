@@ -26,9 +26,7 @@ import * as acp from "@agentclientprotocol/sdk";
 import {
   acpDriverProfile,
   captureQoderAcpReviewBoundary,
-  createRestrictedDiscussionHost,
   createRestrictedQoderAcpHost,
-  loadQoderAcpDiscussionPolicy,
   loadQoderAcpTaskPolicy,
   prepareVerifiedQoderJavaScriptExecution,
   runAcpTask,
@@ -1305,10 +1303,8 @@ test("the execution driver profile fails closed on a host without completion pro
   assert.equal(fixture.policy.mode, "execution");
   assert.equal(profile.mode, "execution");
   assert.equal(profile.requiresTurnCompletion, true);
-  // ADR 0037 supersedes ADR 0036's zero budget here: an execution turn now gets the
-  // same visible-text allowance a discussion gets, because a user who cannot tell a
-  // working round from a stuck one starts sending duplicates. The boundary itself is
-  // unchanged, so the two profiles share one number rather than drifting apart.
+  // Execution narration stays bounded so a user can distinguish progress from a
+  // stuck round without giving prose any Candidate authority.
   assert.equal(profile.visibleTextByteLimit, 64 * 1024);
   assert.deepEqual(profile.clientCapabilities, {
     fs: { readTextFile: true, writeTextFile: true },
@@ -1328,24 +1324,6 @@ test("the execution driver profile fails closed on a host without completion pro
       && error.details.missing.includes("assertTurnCompleted"),
   );
 
-  // The read-only discussion host can never stand in for an execution turn.
-  const snapshotRoot = await realpath(
-    await mkdtemp(path.join(tmpdir(), "pageroot-acp-discussion-")),
-  );
-  t.after(() => rm(snapshotRoot, { recursive: true, force: true }));
-  await writeFile(path.join(snapshotRoot, "snapshot.html"), fixture.sourceHtml, "utf8");
-  await writeFile(path.join(snapshotRoot, "PROMPT.md"), "Discuss the heading.\n", "utf8");
-  const discussionPolicy = await loadQoderAcpDiscussionPolicy({ snapshotRoot });
-  assert.throws(
-    () => profile.assertHost(createRestrictedDiscussionHost(discussionPolicy)),
-    (error) => error?.code === "ACP_HOST_CONTRACT_INCOMPLETE"
-      && error.details.mode === "execution",
-  );
-  // The execution policy cannot be re-pointed at the discussion host either.
-  assert.throws(
-    () => createRestrictedDiscussionHost(fixture.policy),
-    /verified discussion policy/u,
-  );
 });
 
 test("ACP turn timeout fails closed and requests session cancellation", async (t) => {

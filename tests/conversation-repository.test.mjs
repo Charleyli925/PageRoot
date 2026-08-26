@@ -476,7 +476,7 @@ test("a draft is stored apart from the message history", async () => {
   const conversation = await ensureCurrentConversation(context);
   const empty = await readConversationDraft(context, conversation.conversationId);
   assert.equal(empty.text, "");
-  assert.equal(empty.intent, "discuss");
+  assert.equal(empty.intent, "modify");
 
   const saved = await writeConversationDraft(context, conversation.conversationId, {
     text: "下一轮想法",

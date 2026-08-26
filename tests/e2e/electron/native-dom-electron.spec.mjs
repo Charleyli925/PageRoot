@@ -73,9 +73,8 @@ async function waitForProjectReady(page, timeout = 60_000) {
 async function chooseClipboardDelivery(page) {
   const sidebar = page.getByTestId("ai-conversation-sidebar");
   await expect(sidebar).toBeVisible();
-  const modifyIntent = sidebar.getByRole("radio", { name: "修改", exact: true });
-  await modifyIntent.click();
-  await expect(modifyIntent).toHaveAttribute("aria-checked", "true");
+  await expect(sidebar.getByTestId("ai-conversation-intent")).toHaveCount(0);
+  await expect(sidebar.getByTestId("ai-conversation-input")).toHaveCount(0);
   await sidebar.getByRole("button", { name: /复制给别的 AI/u }).click();
 }
 
@@ -537,7 +536,7 @@ test("Electron preview shows the read-only comment marker and opens it on hover 
   }
 });
 
-test("Electron preview mounts the AI conversation sidebar and persists a draft across reopen", async () => {
+test("Electron preview mounts the modification-only AI sidebar across reopen", async () => {
   test.setTimeout(90_000);
   const sourceDirectory = mkdtempSync(
     path.join(tmpdir(), "pageroot-ai-sidebar-e2e-"),
@@ -564,7 +563,7 @@ test("Electron preview mounts the AI conversation sidebar and persists a draft a
 
     await openRailGlobalCommentComposer(launched.page);
     await launched.page.getByRole("textbox", { name: "评论内容" })
-      .fill("这条评论留给后续修改，但现在先讨论页面。");
+      .fill("请把季度大盘标题改得更简洁。");
     await launched.page.getByRole("button", { name: "评论", exact: true }).click();
 
     await launched.page.getByRole("button", { name: "预览", exact: true }).click();
@@ -580,7 +579,7 @@ test("Electron preview mounts the AI conversation sidebar and persists a draft a
     const sidebar = launched.page.getByTestId("ai-conversation-sidebar");
     await expect(sidebar).toBeVisible();
     await expect(launched.page.getByTestId("ai-conversation-mode"))
-      .toHaveText("讨论 · 只读");
+      .toHaveText("修改 · 待发送");
     // The preview iframe stays alive beside the sidebar — not replaced by a modal.
     await expect(launched.page.locator('iframe[title="HTML 交互预览"]'))
       .toBeVisible();
@@ -588,26 +587,20 @@ test("Electron preview mounts the AI conversation sidebar and persists a draft a
     // Wait for the conversation to finish loading: the empty-state copy appears
     // only once the Bridge has established this Document's conversation. Typing
     // before that would be dropped by the controlled composer.
-    await expect(sidebar.getByText("还没有对话", { exact: false }))
+    await expect(sidebar.getByText("还没有修改记录", { exact: false }))
       .toBeVisible({ timeout: 15_000 });
+    await expect(sidebar.getByTestId("ai-conversation-input")).toHaveCount(0);
+    await expect(sidebar.getByTestId("ai-conversation-intent")).toHaveCount(0);
+    await expect(sidebar.getByTestId("ai-conversation-context-summary"))
+      .toContainText("1 条评论");
 
-    // A draft is saved as the user types, without any send capability yet.
-    const draftText = "下一轮想把标题改短";
-    const input = launched.page.getByTestId("ai-conversation-input");
-    await input.fill(draftText);
-    await expect(input).toHaveValue(draftText);
-    // Let the debounced autosave (700ms) persist to the Bridge before leaving.
-    await launched.page.waitForTimeout(1_200);
-
-    // Collapsing closes the sidebar; reopening restores the draft from the
-    // Bridge — proving the whole persistence chain is live in the real app.
+    // Collapsing and reopening keeps the same single-purpose product surface.
     await launched.page.getByRole("button", { name: "收起 AI 助手" }).click();
     await expect(sidebar).toHaveCount(0);
     await launched.page.getByRole("button", { name: "AI 助手" }).click();
-    await expect(launched.page.getByTestId("ai-conversation-input"))
-      .toHaveValue(draftText, { timeout: 15_000 });
-    await expect(launched.page.getByRole("radio", { name: "讨论" }))
-      .toHaveAttribute("aria-checked", "true");
+    await expect(launched.page.getByTestId("ai-conversation-mode"))
+      .toHaveText("修改 · 待发送", { timeout: 15_000 });
+    await expect(launched.page.getByTestId("ai-conversation-input")).toHaveCount(0);
   } finally {
     if (electronApp && isolatedUserData) {
       await stopPageRoot(electronApp, isolatedUserData);

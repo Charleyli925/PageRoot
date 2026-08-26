@@ -3,6 +3,10 @@
 - Status: Accepted
 - Date: 2026-08-25
 
+> 2026-08-26 amendment: Discussion was removed from the current product. The
+> Discussion items below remain historical baseline only; provider capability,
+> ticket, coordinator, Bridge and package surfaces are now execution-only.
+
 ## Context
 
 ADR 0032 authorized one trusted-local Qoder ACP path without authorizing
@@ -95,14 +99,12 @@ is intentionally kept at its behavioral owners:
   Working Copy/Version and stop-before-durable-cancel;
 - `run-workflow`: durable `agentDelivery: qoder-acp`, preflight-before-Request,
   Execution projection, no clipboard side effect and explicit adoption;
-- `discussion-bridge-service` and `discussion-turn-runner`: Discussion
-  projection, read-only snapshot and no Request/Candidate/Version;
 - `desktop-preload-ipc`: no Agent executable, spawn, command or path capability;
 - `qoder-acp-spike-client`: the existing restricted host, completion and
   process-cleanup boundary.
 
 The PR2 contract supplements that golden baseline with legacy behavior mapping
-and shared-brand assertions, a source-literal ownership gate, discussion read-only
+and shared-brand assertions, a source-literal ownership gate, removed-purpose
 denial, execution single-output/fixed-finalizer/completion proof, and
 cancel-before-late-mutation coverage.
 

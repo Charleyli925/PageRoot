@@ -11,8 +11,6 @@ import { sha256 } from "../lifecycle-core.mjs";
 import { failAgentRuntime } from "./agent-errors.mjs";
 
 const AGENT_LEASE_DIRECTORY = "agent-bridge-leases";
-const PURPOSES = new Set(["execution", "discussion"]);
-
 function requiredComponent(value, label) {
   const normalized = String(value || "");
   if (!/^[A-Za-z0-9_-]{1,160}$/u.test(normalized)) {
@@ -27,17 +25,14 @@ export function agentLeaseKey({
   purpose,
   projectId,
   documentId,
-  turnId,
   requestId,
   attemptId,
 } = {}) {
-  if (!PURPOSES.has(purpose)) throw new TypeError("Agent lease purpose is invalid.");
-  const subject = purpose === "discussion"
-    ? [requiredComponent(turnId, "turnId")]
-    : [
-      requiredComponent(requestId, "requestId"),
-      requiredComponent(attemptId, "attemptId"),
-    ];
+  if (purpose !== "execution") throw new TypeError("Agent lease purpose is invalid.");
+  const subject = [
+    requiredComponent(requestId, "requestId"),
+    requiredComponent(attemptId, "attemptId"),
+  ];
   return [
     requiredComponent(providerId, "providerId"),
     requiredComponent(runtimeId, "runtimeId"),
@@ -48,27 +43,19 @@ export function agentLeaseKey({
   ].join(":");
 }
 
-function leaseRoot({ purpose, requestPath, projectRoot }) {
-  if (purpose === "execution") {
-    const requestRoot = path.resolve(String(requestPath || ""));
-    const requestsRoot = path.dirname(requestRoot);
-    if (!path.isAbsolute(requestRoot) || path.basename(requestRoot) !== path.basename(String(requestPath || ""))
-      || path.basename(requestsRoot) !== "requests") {
-      failAgentRuntime(
-        "AGENT_TASK_POLICY_INVALID",
-        "本轮 Request 路径不能建立安全的 Agent 启动租约。",
-        { status: 409 },
-      );
-    }
-    return path.dirname(requestsRoot);
+function leaseRoot({ purpose, requestPath }) {
+  const requestRoot = path.resolve(String(requestPath || ""));
+  const requestsRoot = path.dirname(requestRoot);
+  if (purpose !== "execution" || !path.isAbsolute(requestRoot)
+    || path.basename(requestRoot) !== path.basename(String(requestPath || ""))
+    || path.basename(requestsRoot) !== "requests") {
+    failAgentRuntime(
+      "AGENT_TASK_POLICY_INVALID",
+      "本轮 Request 路径不能建立安全的 Agent 启动租约。",
+      { status: 409 },
+    );
   }
-  const root = path.resolve(String(projectRoot || ""));
-  if (!path.isAbsolute(root) || root.includes("\0")) {
-    failAgentRuntime("AGENT_TASK_POLICY_INVALID", "讨论轮无法建立安全的 Agent 启动租约。", {
-      status: 409,
-    });
-  }
-  return path.join(root, ".pageroot");
+  return path.dirname(requestsRoot);
 }
 
 function leaseTarget(input) {
