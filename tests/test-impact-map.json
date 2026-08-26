@@ -681,6 +681,7 @@
       "patterns": [
         "^app/lib/(?:review-(?:projection-facts|semantic-alignment|text-diff|text-evidence-marks|badge-aggregation|region-annotation)|review-comment-source-map)\\.(?:d\\.ts|js)$",
         "^app/workbench/review-document\\.ts$",
+        "^app/workbench/review/.+\\.ts$",
         "^scripts/benchmark-review-analysis\\.mjs$"
       ],
       "suites": ["typecheck", "browser-smoke", "ai-smoke"],

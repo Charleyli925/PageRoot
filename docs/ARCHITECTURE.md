@@ -320,7 +320,7 @@ services.
 | Typed, per-element review projection fact normalization and filtering | `app/lib/review-projection-facts.js` |
 | Review-specific strict text/raster-tolerant snapshot comparison and marker merge | `app/lib/review-runtime-visual.js` |
 | Review runtime-capture migration interface and capture identity | `app/workbench/review-runtime-capture-adapter.ts` |
-| Formal AI review analysis, first-bootstrap exact-element binding, additive static/runtime fact union, global mask and overlay projection | `app/workbench/review-document.ts` |
+| Formal AI review analysis, first-bootstrap exact-element binding, additive static/runtime fact union, global mask and overlay projection | `app/workbench/review-document.ts` orchestrates `app/workbench/review/` pipeline modules (parse, semantic pairing, structure/style/text diffs, comment binding, runtime projection, serialize) |
 | Formal AI review composition, private runtime-projection port lifecycle and isolated-frame coordination | `app/workbench/AiReviewWorkspace.tsx` |
 
 The V2 source-fidelity path remains a protected core: `SourceIndex`,
