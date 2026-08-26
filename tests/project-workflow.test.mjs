@@ -773,6 +773,44 @@ test("a Registry project open routes only its projectId through the desktop auth
   assert.equal(harness.documentSession.html, B_HTML);
 });
 
+test("a Registry project opens from Start without fencing an unmounted Canvas", async (t) => {
+  let fenceCount = 0;
+  const harness = createHarness({
+    initialProject: false,
+    canvas: {
+      isMounted: () => false,
+      fencePendingEdit: () => {
+        fenceCount += 1;
+        return null;
+      },
+    },
+    projectOpen: {
+      async openRegistered() {
+        return {
+          name: "B",
+          sourcePath: B_PATH,
+          html: B_HTML,
+          sha256: sha256(B_HTML),
+        };
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+
+  const opening = await harness.workflow.openProject({
+    kind: "registered",
+    projectId: "project_catalog_b",
+  });
+  assert.equal(opening.status, "succeeded");
+  await waitFor(
+    () => harness.projectSession.context?.sourcePath === B_PATH
+      && !harness.workflow.projectHydrating,
+    "registered project did not publish from Start",
+  );
+  assert.equal(fenceCount, 0);
+  assert.equal(harness.documentSession.html, B_HTML);
+});
+
 test("a v4 Working Copy transition uses the exact managed desktop activation", async (t) => {
   const calls = [];
   const managedTarget = {
@@ -2231,4 +2269,3 @@ test("continue-current opens the bound project without importing again", async (
   assert.equal(finalized, 1);
   assert.equal(harness.projectSession.sourcePath, A_PATH);
 });
-

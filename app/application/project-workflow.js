@@ -586,7 +586,9 @@ export class ProjectWorkflow {
         }
       }
 
-      const shouldCommitCanvas = !this.#isHistoryView();
+      const canvasIsMounted = typeof this.#canvasPort.isMounted !== "function"
+        || this.#canvasPort.isMounted();
+      const shouldCommitCanvas = !this.#isHistoryView() && canvasIsMounted;
       let committed = shouldCommitCanvas
         ? this.#canvasPort.fencePendingEdit({
             resumeEditing: false,
