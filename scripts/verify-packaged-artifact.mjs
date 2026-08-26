@@ -45,6 +45,7 @@ import {
   codexInstallationDigest,
   resolveBundledCodexInstallation,
 } from "./agent/providers/codex-provider.mjs";
+import { AGENT_FEATURE_GATES } from "../shared/agent-feature-gates.mjs";
 
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
 const DEFAULT_PRODUCT_ROOT = path.resolve(path.dirname(SCRIPT_PATH), "..");
@@ -606,6 +607,32 @@ function runCommand(command, arguments_, label, options = {}) {
   return `${result.stdout ?? ""}${result.stderr ?? ""}`.trim();
 }
 
+export function assertPackagedAgentFeatureGates(
+  packagedFeatureGates,
+  sourceFeatureGates = AGENT_FEATURE_GATES,
+) {
+  assert.deepEqual(
+    Object.keys(sourceFeatureGates).sort(),
+    ["codexDiscussion", "codexExecution"],
+    "source Agent feature gates changed shape",
+  );
+  assert.equal(
+    sourceFeatureGates.codexDiscussion,
+    false,
+    "source Agent feature gates must keep pure Codex Discussion disabled",
+  );
+  assert.equal(
+    typeof sourceFeatureGates.codexExecution,
+    "boolean",
+    "source Codex execution gate must be boolean",
+  );
+  assert.deepEqual(
+    packagedFeatureGates,
+    sourceFeatureGates,
+    "packaged Agent feature gates do not match the source-owned rollback state",
+  );
+}
+
 export async function verifyPackagedCodexRuntime({ resourcesPath, arch }) {
   assert.equal(path.isAbsolute(resourcesPath), true, "Codex resourcesPath must be absolute");
   const installation = await resolveBundledCodexInstallation({
@@ -635,10 +662,8 @@ export async function verifyPackagedCodexRuntime({ resourcesPath, arch }) {
   const gateModule = await import(
     `${pathToFileURL(gatePath).href}?verify=${sha256(gateBytes)}`
   );
-  assert.deepEqual(
+  assertPackagedAgentFeatureGates(
     gateModule.AGENT_FEATURE_GATES,
-    { codexDiscussion: false, codexExecution: true },
-    "packaged Agent feature gates do not enable only Codex execution",
   );
   return Object.freeze({
     version: installation.version,

@@ -23,6 +23,7 @@ import {
 import {
   appBundleSignaturePolicyForProfile,
   assertNoRetiredEditorArtifacts,
+  assertPackagedAgentFeatureGates,
   assertSignedMachOContentEqual,
   expectedArtifactLayout,
   verifyAppBundle,
@@ -191,6 +192,30 @@ test("the pinned Codex package passes the native packaged-runtime verifier", asy
   });
   assert.equal(result.version, "0.149.1");
   assert.match(result.installationDigest, /^sha256:[a-f0-9]{64}$/u);
+});
+
+test("the packaged verifier permits the exact one-flag Codex rollback", () => {
+  for (const codexExecution of [true, false]) {
+    const source = Object.freeze({ codexDiscussion: false, codexExecution });
+    assert.doesNotThrow(() => assertPackagedAgentFeatureGates(
+      { ...source },
+      source,
+    ));
+    assert.throws(
+      () => assertPackagedAgentFeatureGates(
+        { codexDiscussion: false, codexExecution: !codexExecution },
+        source,
+      ),
+      /do not match the source-owned rollback state/u,
+    );
+  }
+  assert.throws(
+    () => assertPackagedAgentFeatureGates(
+      { codexDiscussion: true, codexExecution: false },
+      { codexDiscussion: true, codexExecution: false },
+    ),
+    /must keep pure Codex Discussion disabled/u,
+  );
 });
 
 test("app-only profiles keep dry-run unsigned without weakening Candidate signature gates", () => {
