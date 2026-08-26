@@ -408,7 +408,8 @@ export type ToastAction =
   | { id: "retry-history"; label: string; direction?: "undo" | "redo" }
   | { id: "open-project"; label: string; sourcePath: string }
   | { id: "retry-project-open"; label: string; sourcePath?: string }
-  | { id: "retry-external-project-open"; label: string }
+  | { id: "retry-project-hydration"; label: string }
+  | { id: "retry-external-project-open"; label: string; requestId?: string }
   | { id: "retry-project-application"; label: string }
   | {
       id: "open-attachment-picker";

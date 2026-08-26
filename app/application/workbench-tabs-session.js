@@ -62,6 +62,7 @@ function frozenSnapshot({
 export class WorkbenchTabsSession {
   #listeners = new Set();
   #pendingPriorStatus = null;
+  #stagedStartReplacement = null;
   #restoredDocumentTabIds = new Set();
   #snapshot = frozenSnapshot({
     revision: 0,
@@ -150,6 +151,14 @@ export class WorkbenchTabsSession {
       status,
     });
     if (!tab) throw new TypeError("valid project/document tab identity is required");
+    if (
+      this.#stagedStartReplacement
+      && this.#stagedStartReplacement.projectId === tab.projectId
+      && this.#stagedStartReplacement.documentId === tab.documentId
+    ) {
+      this.#stagedStartReplacement = tab;
+      return this.#snapshot;
+    }
     const existingIndex = this.#snapshot.tabs.findIndex((item) => (
       item.kind === "document"
       && item.projectId === tab.projectId
@@ -159,9 +168,25 @@ export class WorkbenchTabsSession {
     const resolved = existingIndex >= 0
       ? freezeTab({ ...tabs[existingIndex], title: tab.title, status: tab.status })
       : tab;
-    if (existingIndex >= 0) tabs[existingIndex] = resolved;
-    else if (tabs.length < MAX_TABS) tabs.push(resolved);
-    else return null;
+    const activeStartIndex = focus
+      ? tabs.findIndex((item) => (
+        item.tabId === this.#snapshot.activeTabId && item.kind === "start"
+      ))
+      : -1;
+    if (existingIndex >= 0 && activeStartIndex >= 0) {
+      tabs[existingIndex] = resolved;
+      tabs.splice(activeStartIndex, 1);
+    } else if (existingIndex >= 0) {
+      tabs[existingIndex] = resolved;
+    } else if (activeStartIndex >= 0) {
+      // Browser behavior: opening from the active blank page converts that
+      // one tab into the document. Other explicitly-created Start tabs remain.
+      tabs.splice(activeStartIndex, 1, resolved);
+    } else if (tabs.length < MAX_TABS) {
+      tabs.push(resolved);
+    } else {
+      return null;
+    }
     this.#restoredDocumentTabIds.delete(resolved.tabId);
     const shouldFocus = focus;
     return this.#publish({
@@ -189,14 +214,40 @@ export class WorkbenchTabsSession {
       && item.projectId === projectId
       && item.documentId === documentId
     ));
-    if (existing) return existing;
+    const activeStart = this.#snapshot.tabs.find((item) => (
+      item.tabId === this.#snapshot.activeTabId && item.kind === "start"
+    ));
+    if (existing && !activeStart) return existing;
+    if (activeStart) {
+      if (this.#stagedStartReplacement) return null;
+      this.#stagedStartReplacement = existing || tab;
+      return this.#stagedStartReplacement;
+    }
     if (this.#snapshot.tabs.length >= MAX_TABS) return null;
     this.#publish({ ...this.#snapshot, tabs: [...this.#snapshot.tabs, tab] });
     return tab;
   }
 
+  resolveTab(tabId) {
+    return this.#snapshot.tabs.find((tab) => tab.tabId === tabId)
+      || (this.#stagedStartReplacement?.tabId === tabId
+        ? this.#stagedStartReplacement
+        : null);
+  }
+
+  discardUnstartedDocument(tabId) {
+    if (
+      this.#stagedStartReplacement?.tabId === tabId
+      && this.#snapshot.pendingTabId !== tabId
+    ) {
+      this.#stagedStartReplacement = null;
+      return true;
+    }
+    return false;
+  }
+
   beginSwitch(tabId) {
-    const target = this.#snapshot.tabs.find((tab) => tab.tabId === tabId);
+    const target = this.resolveTab(tabId);
     if (!target) return null;
     if (target.kind === "start") return this.#publish({
       ...this.#snapshot,
@@ -226,13 +277,41 @@ export class WorkbenchTabsSession {
   }
 
   commitDocument({ tabId, projectId, documentId, title }) {
-    const target = this.#snapshot.tabs.find((tab) => tab.tabId === tabId && tab.kind === "document");
+    const target = this.resolveTab(tabId);
     if (
       !target || target.projectId !== projectId || target.documentId !== documentId
       || this.#snapshot.pendingTabId !== tabId
     ) return null;
     this.#restoredDocumentTabIds.delete(tabId);
     this.#pendingPriorStatus = null;
+    if (this.#stagedStartReplacement?.tabId === tabId) {
+      const activeStartIndex = this.#snapshot.tabs.findIndex((tab) => (
+        tab.tabId === this.#snapshot.activeTabId && tab.kind === "start"
+      ));
+      if (activeStartIndex < 0) return null;
+      const tabs = [...this.#snapshot.tabs];
+      const existingTargetIndex = tabs.findIndex((tab) => tab.tabId === tabId);
+      const committedTarget = freezeTab({
+        ...target,
+        title: String(title || target.title),
+        status: "normal",
+      });
+      if (existingTargetIndex >= 0) {
+        tabs[existingTargetIndex] = committedTarget;
+        tabs.splice(activeStartIndex, 1);
+      } else {
+        tabs.splice(activeStartIndex, 1, committedTarget);
+      }
+      this.#stagedStartReplacement = null;
+      return this.#publish({
+        ...this.#snapshot,
+        tabs,
+        activeTabId: tabId,
+        pendingTabId: null,
+        mountedDocumentTabId: tabId,
+        runtimeOwnerTabId: tabId,
+      });
+    }
     return this.#publish({
       ...this.#snapshot,
       tabs: this.#snapshot.tabs.map((tab) => tab.tabId === tabId
@@ -249,6 +328,9 @@ export class WorkbenchTabsSession {
     if (this.#snapshot.pendingTabId !== tabId) return this.#snapshot;
     const priorStatus = this.#pendingPriorStatus;
     this.#pendingPriorStatus = null;
+    if (this.#stagedStartReplacement?.tabId === tabId) {
+      this.#stagedStartReplacement = null;
+    }
     return this.#publish({
       ...this.#snapshot,
       tabs: this.#snapshot.tabs.map((tab) => (
@@ -362,6 +444,13 @@ export class WorkbenchTabsSession {
 
   canAddTab() {
     return this.#snapshot.tabs.length < MAX_TABS;
+  }
+
+  canRepresentNewDocument() {
+    if (this.canAddTab()) return true;
+    return this.#snapshot.tabs.some((tab) => (
+      tab.tabId === this.#snapshot.activeTabId && tab.kind === "start"
+    ));
   }
 }
 

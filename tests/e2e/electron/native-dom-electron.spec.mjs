@@ -2694,28 +2694,38 @@ test("Electron tab keyboard navigation manages focus and a persisted Start suppr
   let reopened = null;
   try {
     await loadedDiskFrame(firstLaunch.page, fixture.sourcePath, "list-item");
+    await expect(firstLaunch.page.getByRole("button", { name: "导入并打开" }))
+      .toBeHidden({ timeout: 30_000 });
     const tablist = firstLaunch.page.getByRole("tablist", { name: "已打开的 HTML" });
-    await expect(tablist.getByRole("tab")).toHaveCount(2);
+    await expect(tablist.getByRole("tab")).toHaveCount(1);
+    await firstLaunch.page.getByRole("button", { name: "新标签页" }).click();
     await firstLaunch.page.getByRole("button", { name: "新标签页" }).click();
     await expect(tablist.getByRole("tab")).toHaveCount(3);
 
-    const firstStart = tablist.getByRole("tab").nth(0);
-    const documentTab = tablist.getByRole("tab").nth(1);
+    const documentTab = tablist.getByRole("tab").nth(0);
+    const firstStart = tablist.getByRole("tab").nth(1);
     const lastStart = tablist.getByRole("tab").nth(2);
     await expect(lastStart).toHaveAttribute("aria-selected", "true");
     await lastStart.focus();
 
     await lastStart.press("ArrowLeft");
-    await expect(documentTab).toHaveAttribute("aria-selected", "true", { timeout: 60_000 });
+    await expect(firstStart).toHaveAttribute("aria-selected", "true", { timeout: 60_000 });
+    await expect(firstStart).toBeFocused();
+    await firstStart.press("ArrowLeft");
+    await expect(documentTab).toHaveAttribute("aria-selected", "true");
     await expect(documentTab).toBeFocused();
     await loadedDiskFrame(firstLaunch.page, fixture.sourcePath, "list-item");
     await documentTab.press("ArrowRight");
-    await expect(lastStart).toHaveAttribute("aria-selected", "true");
-    await expect(lastStart).toBeFocused();
-    await lastStart.press("Home");
     await expect(firstStart).toHaveAttribute("aria-selected", "true");
     await expect(firstStart).toBeFocused();
-    await firstStart.press("End");
+    await firstStart.press("Home");
+    await expect(documentTab).toHaveAttribute("aria-selected", "true", { timeout: 60_000 });
+    await expect(documentTab).toBeFocused();
+    await loadedDiskFrame(firstLaunch.page, fixture.sourcePath, "list-item");
+    await firstLaunch.page.evaluate(() => new Promise((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(resolve));
+    }));
+    await documentTab.press("End");
     await expect(lastStart).toHaveAttribute("aria-selected", "true");
     await expect(lastStart).toBeFocused();
 
@@ -2737,6 +2747,31 @@ test("Electron tab keyboard navigation manages focus and a persisted Start suppr
     await expect(reopened.page.locator("main.workbench")).toHaveAttribute("data-start-page", "true");
     await expect(reopened.page.locator("main.workbench")).toHaveAttribute("data-project-state", "unbound");
     await expect(reopenedTabs.getByRole("tab").nth(1)).not.toHaveText("HTML");
+
+    const restoredTitle = (await reopenedTabs.getByRole("tab").nth(1).innerText()).trim();
+    await reopened.page.getByRole("button", { name: "查看现有项目" }).click();
+    await reopened.page.getByRole("button", { name: restoredTitle, exact: true }).click();
+    await expect(reopenedTabs.getByRole("tab")).toHaveCount(1, { timeout: 60_000 });
+    await expect(reopenedTabs.getByRole("tab").first()).toHaveAttribute("aria-selected", "true");
+    await loadedDiskFrame(reopened.page, fixture.sourcePath, "list-item");
+
+    await reopened.page.getByRole("button", { name: "新标签页" }).click();
+    await expect(reopenedTabs.getByRole("tab")).toHaveCount(2);
+    const activeStart = reopenedTabs.getByRole("tab").nth(1);
+    await expect(activeStart).toHaveAttribute("aria-selected", "true");
+    const inactiveClose = reopened.page.getByRole("button", { name: `关闭 ${restoredTitle}` });
+    await inactiveClose.focus();
+    await inactiveClose.press("Enter");
+    await expect(reopenedTabs.getByRole("tab")).toHaveCount(1);
+    await expect(reopenedTabs.getByRole("tab").first()).toBeFocused();
+
+    await reopened.page.getByRole("button", { name: "新标签页" }).click();
+    await expect(reopenedTabs.getByRole("tab")).toHaveCount(2);
+    const closingActiveStart = reopenedTabs.getByRole("tab").nth(1);
+    await closingActiveStart.focus();
+    await closingActiveStart.press(process.platform === "darwin" ? "Meta+w" : "Control+w");
+    await expect(reopenedTabs.getByRole("tab")).toHaveCount(1);
+    await expect(reopenedTabs.getByRole("tab").first()).toBeFocused();
   } finally {
     if (reopened) {
       await stopPageRoot(reopened.electronApp, reopened.isolatedUserData);

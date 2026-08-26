@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createWorkbenchTabsSession } from "../app/application/workbench-tabs-session.js";
-import { WorkbenchTabsWorkflow } from "../app/application/workbench-tabs-workflow.js";
+import {
+  WorkbenchTabsWorkflow,
+  workbenchTabOutcomeHasCommittedDocument,
+} from "../app/application/workbench-tabs-workflow.js";
 
 function controllerFixture({
   prepareResult = { status: "succeeded" },
@@ -90,11 +93,57 @@ test("document activation mounts the verified identity but remains busy until hy
   assert.equal(session.snapshot.activeTabId, beta.tabId);
 });
 
+test("post-commit settle timeout is explicit and never authorizes restore cleanup", async () => {
+  const timers = [];
+  const session = createWorkbenchTabsSession();
+  session.bindDocument({ projectId: "project_alpha", documentId: "doc_alpha", title: "Alpha" });
+  session.bindDocument({ projectId: "project_beta", documentId: "doc_beta", title: "Beta", focus: false });
+  const { controller } = controllerFixture({
+    async openProject({ publish }) {
+      publish({
+        projectSession: { projectId: "project_beta", documentId: "doc_beta", epoch: 2 },
+        project: {
+          hydration: { phase: "hydrating", error: null },
+          projectApplication: { status: "idle" },
+        },
+      });
+      return { status: "succeeded" };
+    },
+  });
+  const workflow = new WorkbenchTabsWorkflow({
+    session,
+    controller,
+    setTimer(callback) {
+      const timer = { callback, cleared: false };
+      timers.push(timer);
+      return timer;
+    },
+    clearTimer(timer) {
+      timer.cleared = true;
+    },
+  });
+  const beta = session.snapshot.tabs.find((tab) => tab.projectId === "project_beta");
+  const activation = workflow.activate(beta.tabId);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(session.snapshot.activeTabId, beta.tabId);
+  const liveTimer = timers.findLast((timer) => !timer.cleared);
+  assert.ok(liveTimer);
+  liveTimer.callback();
+  const outcome = await activation;
+  assert.equal(outcome.status, "rejected");
+  assert.equal(outcome.committed, true);
+  assert.equal(outcome.tabId, beta.tabId);
+  assert.equal(workbenchTabOutcomeHasCommittedDocument(outcome), true);
+  assert.equal(session.snapshot.activeTabId, beta.tabId);
+  assert.equal(session.snapshot.mountedDocumentTabId, beta.tabId);
+  assert.equal(session.snapshot.tabs.some((tab) => tab.tabId === beta.tabId), true);
+});
+
 test("returning from Start ignores pre-open identity and keeps the new epoch operation locked until settled", async () => {
   let finishHydration;
   const session = createWorkbenchTabsSession();
   const beta = session.bindDocument({ projectId: "project_beta", documentId: "doc_beta", title: "Beta" }).tabs.find((tab) => tab.kind === "document");
-  const start = session.createStart({ focus: true }).tabs.find((tab) => tab.kind === "start" && tab.tabId !== "start:1");
+  const start = session.createStart({ focus: true }).tabs.find((tab) => tab.kind === "start");
   assert.equal(session.snapshot.activeTabId, start.tabId);
   const { controller } = controllerFixture({
     initialSnapshot: {
@@ -137,7 +186,7 @@ test("start activation uses the canonical native-edit fence and drain before unm
   const document = session.bindDocument({ projectId: "project_alpha", documentId: "doc_alpha", title: "Alpha" }).tabs.find((tab) => tab.kind === "document");
   const { controller, calls } = controllerFixture();
   const workflow = new WorkbenchTabsWorkflow({ session, controller });
-  const start = session.createStart({ focus: false }).tabs.find((tab) => tab.kind === "start" && tab.tabId !== "start:1");
+  const start = session.createStart({ focus: false }).tabs.find((tab) => tab.kind === "start");
   await workflow.activate(start.tabId);
   assert.deepEqual(calls, ["prepareSwitch", "fence", "drain"]);
   assert.equal(session.snapshot.mountedDocumentTabId, null);

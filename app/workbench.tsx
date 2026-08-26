@@ -110,7 +110,10 @@ import {
   reconcileWorkbenchTabsWhenReady,
   type WorkbenchTab,
 } from "./application/workbench-tabs-session.js";
-import { WorkbenchTabsWorkflow } from "./application/workbench-tabs-workflow.js";
+import {
+  WorkbenchTabsWorkflow,
+  workbenchTabOutcomeHasCommittedDocument,
+} from "./application/workbench-tabs-workflow.js";
 import type { SourceHistoryDirection } from "./domain/source-history.js";
 import {
   EDIT_AUTHOR_RUNTIME_VERIFICATION_DEADLINE_MS,
@@ -1090,6 +1093,9 @@ export default function Workbench() {
         },
         ports: {
           hash: { sha256: browserSha256 },
+          externalCapacity: {
+            canAccept: () => workbenchTabsSessionRef.current.canRepresentNewDocument(),
+          },
           canvas: {
             invalidateRenderAcks: invalidateCanvasRenderAcks,
             isMounted: () => Boolean(editorRef.current),
@@ -1553,6 +1559,23 @@ export default function Workbench() {
       .then((outcome) => {
         if (!outcome || outcome.status === "succeeded") return;
         const session = workbenchTabsSessionRef.current;
+        if (workbenchTabOutcomeHasCommittedDocument(outcome)) {
+          const target = session.snapshot.tabs.find((tab) => tab.tabId === pending);
+          if (target?.kind === "document" && target.projectId && target.documentId) {
+            session.updateStatus(target.projectId, target.documentId, "error");
+          }
+          startPageRequestedRef.current = false;
+          setToast({
+            title: "HTML 已打开，但恢复未完成",
+            message: outcome.reason || "当前标签和 Controller 身份已对齐，请重试权威读取。",
+            tone: "error",
+            sticky: true,
+            disposition: "direct-action",
+            dedupeKey: `workbench-restore-settle-failed:${pending}`,
+            action: { id: "retry-project-hydration", label: "重试恢复" },
+          });
+          return;
+        }
         session.close(pending);
         startPageRequestedRef.current = true;
         setGlobalSidebarOpen(true);
@@ -1649,6 +1672,28 @@ export default function Workbench() {
               sourcePath: openEvent.sourcePath,
             },
           } : {}),
+        });
+        return;
+      }
+      if (event.type === "external-open-ack-failed") {
+        const ackEvent = event as Readonly<{
+          requestId?: string;
+          confirmation?: boolean;
+          reason?: string;
+        }>;
+        if (!ackEvent.confirmation || !ackEvent.requestId) return;
+        setToast({
+          title: "HTML 已处理，等待 Finder 回执",
+          message: ackEvent.reason || "回执暂时发送失败；重试只会发送回执，不会重复打开 HTML。",
+          tone: "warning",
+          sticky: true,
+          disposition: "direct-action",
+          dedupeKey: `external-open-ack:${ackEvent.requestId}`,
+          action: {
+            id: "retry-external-project-open",
+            label: "重试回执",
+            requestId: ackEvent.requestId,
+          },
         });
         return;
       }
@@ -1881,6 +1926,8 @@ export default function Workbench() {
         lastModifiedAt?: unknown;
         showHandoff?: unknown;
         contentChanged?: unknown;
+        requestId?: unknown;
+        ackPending?: unknown;
       }>;
       if (projectEvent.type === "project-hydration-stage") {
         markProjectHydrationStage(String(projectEvent.stage || ""));
@@ -2056,14 +2103,33 @@ export default function Workbench() {
         return;
       }
       if (projectEvent.type === "external-project-open-deferred") {
+        const ackPending = projectEvent.ackPending === true;
         setToast({
-          title: "暂不能切换到 QoderWork 中的 HTML",
-          message: "当前画布仍在安全恢复；已保留当前 HTML。恢复后可手动重试打开。",
+          title: ackPending
+            ? "HTML 已处理，等待 Finder 回执"
+            : "暂不能切换到 QoderWork 中的 HTML",
+          message: ackPending
+            ? "回执暂时发送失败；重试只会发送回执，不会重复打开 HTML。"
+            : "当前画布仍在安全恢复；已保留当前 HTML。恢复后可手动重试打开。",
           tone: "warning",
           sticky: true,
           disposition: "direct-action",
           dedupeKey: "external-project-open-deferred",
-          action: { id: "retry-external-project-open", label: "重试打开" },
+          action: {
+            id: "retry-external-project-open",
+            label: ackPending ? "重试回执" : "重试打开",
+          },
+        });
+        return;
+      }
+      if (projectEvent.type === "external-project-open-capacity") {
+        setToast({
+          title: "标签页已满",
+          message: String(projectEvent.reason || "请先关闭一个标签页，外部 HTML 会保留并继续打开。"),
+          tone: "warning",
+          sticky: true,
+          disposition: "defer-and-resume",
+          dedupeKey: "external-project-open-capacity",
         });
         return;
       }
@@ -4076,7 +4142,7 @@ export default function Workbench() {
   }, [workspaceController]);
   const openProject = useCallback(async (recentPath?: string) => {
     if (!workspaceController) return;
-    if (!workbenchTabsSessionRef.current.canAddTab()) {
+    if (!workbenchTabsSessionRef.current.canRepresentNewDocument()) {
       setToast({
         title: "标签页已满",
         message: "请先关闭一个标签页，再打开新的 HTML。",
@@ -4134,6 +4200,11 @@ export default function Workbench() {
         (item) => item.tabId === workbenchTabsSessionRef.current.snapshot.activeTabId,
       );
       startPageRequestedRef.current = active?.kind === "start";
+      if (outcome.status === "succeeded" && active) {
+        window.requestAnimationFrame(() => {
+          document.getElementById(`workbench-tab-${active.tabId}`)?.focus();
+        });
+      }
     });
   }, [presentWorkbenchTabOutcome]);
   const openRegisteredWorkbenchProject = useCallback((project: RegisteredProject) => {
@@ -4231,6 +4302,7 @@ export default function Workbench() {
     projectSnapshot,
     runSnapshot,
     viewTransitioning,
+    workbenchTabsSnapshot.revision,
     workspaceController,
   ]);
   useEffect(() => {
@@ -7456,8 +7528,15 @@ export default function Workbench() {
       case "retry-project-open":
         void openProject(action.sourcePath);
         return;
+      case "retry-project-hydration":
+        void workspaceController?.retryProjectHydration();
+        return;
       case "retry-external-project-open":
-        void resumeDeferredExternalProject();
+        if (action.requestId) {
+          void workspaceController?.retryExternalOpen({ requestId: action.requestId });
+        } else {
+          void resumeDeferredExternalProject();
+        }
         return;
       case "retry-project-application":
         void resumeDeferredProjectApplication();

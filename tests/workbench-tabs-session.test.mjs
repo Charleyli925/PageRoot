@@ -20,6 +20,57 @@ test("tabs deduplicate by durable project and document identity", () => {
   );
 });
 
+test("opening from the active Start converts only that blank tab in place", () => {
+  const session = createWorkbenchTabsSession();
+  session.createStart({ focus: true });
+  const before = session.snapshot.tabs.length;
+  const inactiveStartId = session.snapshot.tabs.find(
+    (tab) => tab.kind === "start" && tab.tabId !== session.snapshot.activeTabId,
+  ).tabId;
+  session.bindDocument(a);
+  assert.equal(session.snapshot.tabs.length, before);
+  assert.equal(session.snapshot.tabs.some((tab) => tab.tabId === inactiveStartId), true);
+  assert.equal(session.snapshot.tabs.find(
+    (tab) => tab.tabId === session.snapshot.activeTabId,
+  )?.projectId, a.projectId);
+  session.bindDocument({ ...a, title: "Alpha renamed" });
+  assert.equal(session.snapshot.tabs.filter((tab) => tab.kind === "document").length, 1);
+  assert.equal(session.snapshot.tabs.length, before);
+});
+
+test("staging a registered project from active Start reuses the blank slot", () => {
+  const session = createWorkbenchTabsSession();
+  session.createStart({ focus: true });
+  const before = session.snapshot.tabs.length;
+  const replacedStartId = session.snapshot.activeTabId;
+  const staged = session.stageDocument(a);
+  assert.ok(staged);
+  assert.equal(session.snapshot.tabs.length, before);
+  assert.equal(session.snapshot.tabs.some((tab) => tab.tabId === replacedStartId), true);
+  assert.equal(session.snapshot.tabs.some((tab) => tab.tabId === staged.tabId), false);
+  assert.equal(session.resolveTab(staged.tabId)?.tabId, staged.tabId);
+  session.beginSwitch(staged.tabId);
+  assert.equal(session.snapshot.pendingTabId, staged.tabId);
+  assert.equal(session.snapshot.activeTabId, replacedStartId);
+  session.bindDocument({ ...a, title: "Alpha renamed", focus: false });
+  session.commitDocument({ ...a, tabId: staged.tabId, title: "Alpha renamed" });
+  assert.equal(session.snapshot.activeTabId, staged.tabId);
+  assert.equal(session.snapshot.tabs.some((tab) => tab.tabId === replacedStartId), false);
+  assert.equal(session.snapshot.tabs.find((tab) => tab.tabId === staged.tabId)?.title, "Alpha renamed");
+  assert.equal(session.snapshot.tabs.length, before);
+});
+
+test("opening an already represented document from active Start removes the blank and focuses the existing tab", () => {
+  const session = createWorkbenchTabsSession();
+  session.bindDocument(a);
+  session.createStart({ focus: true });
+  const before = session.snapshot.tabs.length;
+  session.bindDocument({ ...a, title: "Alpha existing" });
+  assert.equal(session.snapshot.tabs.length, before - 1);
+  assert.equal(session.snapshot.tabs.filter((tab) => tab.kind === "document").length, 1);
+  assert.equal(session.snapshot.tabs.find((tab) => tab.tabId === session.snapshot.activeTabId)?.title, "Alpha existing");
+});
+
 test("switch is pending until the single mounted controller publishes the document", () => {
   const session = createWorkbenchTabsSession();
   session.bindDocument(a);
@@ -176,20 +227,45 @@ test("restore reconciliation is deterministic when tabs hydration arrives first"
 
 test("binding a twenty-fifth document fails closed instead of creating invalid persistence", () => {
   const session = createWorkbenchTabsSession();
-  for (let index = 0; index < 23; index += 1) {
+  for (let index = 0; index < 24; index += 1) {
     assert.ok(session.bindDocument({
       projectId: `project_capacity_${index}`,
       documentId: `doc_capacity_${index}`,
       title: `Capacity ${index}`,
-      focus: false,
+      focus: index === 0,
     }));
   }
   assert.equal(session.snapshot.tabs.length, 24);
   assert.equal(session.canAddTab(), false);
+  assert.equal(session.canRepresentNewDocument(), false);
   assert.equal(session.bindDocument({
     projectId: "project_capacity_overflow",
     documentId: "doc_capacity_overflow",
     title: "Overflow",
   }), null);
   assert.equal(session.snapshot.tabs.length, 24);
+});
+
+test("a full workbench can replace its active Start slot with one accepted document", () => {
+  const session = createWorkbenchTabsSession();
+  for (let index = 0; index < 23; index += 1) {
+    session.bindDocument({
+      projectId: `project_replace_${index}`,
+      documentId: `doc_replace_${index}`,
+      title: `Replace ${index}`,
+      focus: false,
+    });
+  }
+  assert.equal(session.snapshot.tabs.length, 24);
+  assert.equal(session.canAddTab(), false);
+  assert.equal(session.canRepresentNewDocument(), true);
+  const bound = session.bindDocument({
+    projectId: "project_replacement",
+    documentId: "doc_replacement",
+    title: "Replacement",
+  });
+  assert.ok(bound);
+  assert.equal(bound.tabs.length, 24);
+  assert.equal(bound.tabs.some((tab) => tab.kind === "start"), false);
+  assert.equal(bound.tabs.find((tab) => tab.tabId === bound.activeTabId)?.projectId, "project_replacement");
 });

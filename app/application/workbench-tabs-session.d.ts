@@ -33,6 +33,8 @@ export class WorkbenchTabsSession {
     title: string;
     status?: WorkbenchTabStatus;
   }): WorkbenchTab | null;
+  resolveTab(tabId: string): WorkbenchTab | null;
+  discardUnstartedDocument(tabId: string): boolean;
   beginSwitch(tabId: string): WorkbenchTabsSnapshot | null;
   commitStart(tabId: string): WorkbenchTabsSnapshot | null;
   commitDocument(input: { tabId: string; projectId: string; documentId: string; title: string }): WorkbenchTabsSnapshot | null;
@@ -44,6 +46,7 @@ export class WorkbenchTabsSession {
   }>;
   close(tabId: string): Readonly<{ snapshot: WorkbenchTabsSnapshot; nextTabId: string | null }>;
   canAddTab(): boolean;
+  canRepresentNewDocument(): boolean;
   serialize(): Readonly<Record<string, unknown>>;
 }
 export function createWorkbenchTabsSession(): WorkbenchTabsSession;

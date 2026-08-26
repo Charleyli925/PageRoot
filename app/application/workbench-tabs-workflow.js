@@ -1,9 +1,19 @@
-function rejected(code, reason) {
-  return Object.freeze({ status: "rejected", code, reason });
+function rejected(code, reason, details = {}) {
+  return Object.freeze({ status: "rejected", code, reason, ...details });
 }
 
 function succeeded(value = {}) {
   return Object.freeze({ status: "succeeded", value: Object.freeze(value) });
+}
+
+export function workbenchTabOutcomeHasCommittedDocument(outcome) {
+  return Boolean(
+    outcome
+    && outcome.status === "rejected"
+    && outcome.committed === true
+    && typeof outcome.tabId === "string"
+    && outcome.tabId,
+  );
 }
 
 export class WorkbenchTabsWorkflow {
@@ -27,7 +37,10 @@ export class WorkbenchTabsWorkflow {
   }
 
   async activate(tabId, { deadlineMs = 15_000 } = {}) {
-    if (this.#operation) return rejected("WORKBENCH_TAB_SWITCH_BUSY", "另一个标签页正在打开。");
+    if (this.#operation) {
+      this.#session.discardUnstartedDocument(tabId);
+      return rejected("WORKBENCH_TAB_SWITCH_BUSY", "另一个标签页正在打开。");
+    }
     const operation = { kind: "activate", tabId };
     this.#operation = operation;
     try {
@@ -38,7 +51,7 @@ export class WorkbenchTabsWorkflow {
   }
 
   async #activate(tabId, { deadlineMs }) {
-    const target = this.#session.snapshot.tabs.find((tab) => tab.tabId === tabId);
+    const target = this.#session.resolveTab(tabId);
     if (!target) return rejected("WORKBENCH_TAB_NOT_FOUND", "这个标签页已经关闭。");
     if (target.tabId === this.#session.snapshot.activeTabId) return succeeded({ unchanged: true });
     this.#session.beginSwitch(tabId);
@@ -111,12 +124,14 @@ export class WorkbenchTabsWorkflow {
       return rejected(
         "WORKBENCH_TAB_OPEN_TIMEOUT",
         "HTML 已进入当前标签，但权威读取和画布核对未在时限内完成。",
+        { committed: true, tabId },
       );
     }
     if (settled.failed) {
       return rejected(
         "WORKBENCH_TAB_OPEN_REJECTED",
         settled.reason || "这个 HTML 没有完成权威读取。",
+        { committed: true, tabId },
       );
     }
     return succeeded({ tabId });

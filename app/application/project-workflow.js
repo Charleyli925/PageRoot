@@ -223,6 +223,7 @@ export class ProjectWorkflow {
   #projectOpenPort;
   #viewStatePort;
   #recentRunsPort;
+  #externalCapacityPort;
   #policies;
   #scheduler;
   #clock;
@@ -236,6 +237,7 @@ export class ProjectWorkflow {
   #pendingOpen = null;
   #browserOpenOperationId = null;
   #openConfirmation = null;
+  #externalAckPending = new Map();
   #renamePromise = null;
   #sourceLocatorPromise = null;
   #pendingLocatorReconcile = null;
@@ -411,6 +413,9 @@ export class ProjectWorkflow {
     this.#projectOpenPort = ports.projectOpen;
     this.#viewStatePort = ports.viewState;
     this.#recentRunsPort = ports.recentRuns;
+    this.#externalCapacityPort = ports.externalCapacity || Object.freeze({
+      canAccept: () => true,
+    });
     this.#policies = policies;
     this.#scheduler = scheduler;
     this.#clock = clock;
@@ -458,6 +463,7 @@ export class ProjectWorkflow {
     }
     this.#locatorRetryHandle = null;
     this.#pendingLocatorReconcile = null;
+    this.#externalAckPending.clear();
     this.#externalFileOpenSession.setObserver(null);
     this.#projectApplicationSession.setObserver(null);
     this.#externalFileOpenSession.dispose();
@@ -924,12 +930,19 @@ export class ProjectWorkflow {
       return;
     }
     if (this.#externalFileOpenSession.snapshot.status === "deferred") {
+      const externalBlocked = switchBlocked
+        || this.#externalCapacityPort.canAccept() !== true;
       const retry = this.#externalFileOpenSession.reconcileDeferredSwitch({
-        switchBlocked,
+        switchBlocked: externalBlocked,
         execute: (request, options) => this.#openExternalProject(request, options),
       });
       if (retry === "action-required") {
-        this.#emit({ type: "external-project-open-deferred" });
+        const requestId = this.#externalFileOpenSession.snapshot.deferredRequestId;
+        this.#emit({
+          type: "external-project-open-deferred",
+          requestId,
+          ackPending: Boolean(requestId && this.#externalAckPending.has(requestId)),
+        });
       }
       return;
     }
@@ -1992,19 +2005,7 @@ export class ProjectWorkflow {
         }
         return { state: "resolved" };
       },
-      drain: async () => {
-        if (this.#openConfirmation) {
-          await this.cancelExternalOpen({
-            requestId: this.#openConfirmation.requestId,
-          });
-        }
-        await this.#waitUntil(
-          () => (
-            this.#externalFileOpenSession.snapshot.status === "idle"
-            && !this.#openConfirmation
-          ),
-        );
-      },
+      drain: ({ deadlineAt }) => this.#drainExternalOpenForClose(deadlineAt),
     });
     this.#drainCoordinator.replace("project-application", {
       label: "等待已接收的 HTML 切换完成",
@@ -2385,6 +2386,19 @@ export class ProjectWorkflow {
 
   async #openExternalProject(request, { isSuperseded }) {
     if (isSuperseded()) return "complete";
+    if (this.#externalAckPending.has(request.requestId)) {
+      return await this.#retryPendingExternalAck(request.requestId)
+        ? "complete"
+        : "deferred";
+    }
+    if (this.#externalCapacityPort.canAccept() !== true) {
+      this.#emit({
+        type: "external-project-open-capacity",
+        requestId: request.requestId,
+        reason: "标签页已满，请先关闭一个再继续打开。",
+      });
+      return "deferred";
+    }
     const operationId = this.#nextOpenOperation();
     try {
       if (typeof this.#projectOpenPort.acceptExternal !== "function") {
@@ -2394,8 +2408,9 @@ export class ProjectWorkflow {
           requestId: request.requestId,
           reason,
         });
-        await this.#ackExternalOpen(request.requestId);
-        return "complete";
+        return await this.#ackWithCompletion(request.requestId, { kind: "session" })
+          ? "complete"
+          : "deferred";
       }
       const opened = await this.#projectOpenPort.acceptExternal(request.requestId);
       if (isSuperseded() || this.#snapshot.close.phase === "ready") return "complete";
@@ -2421,7 +2436,9 @@ export class ProjectWorkflow {
       })) {
         throw new Error("无法安排外部 HTML 的安全切换。");
       }
-      await this.#ackExternalOpen(request.requestId);
+      if (!await this.#ackWithCompletion(request.requestId, { kind: "session" })) {
+        return "deferred";
+      }
     } catch (cause) {
       if (!isSuperseded()) {
         this.#emit({
@@ -2435,7 +2452,9 @@ export class ProjectWorkflow {
             "文件可能已移动、暂时不可读，或不是完整的 HTML 页面；当前项目仍保持打开。",
           ),
         });
-        await this.#ackExternalOpen(request.requestId);
+        if (!await this.#ackWithCompletion(request.requestId, { kind: "session" })) {
+          return "deferred";
+        }
       }
     }
     return "complete";
@@ -2488,6 +2507,7 @@ export class ProjectWorkflow {
       this.#emit({
         type: "external-open-ack-failed",
         requestId,
+        confirmation: this.#confirmationRequiresExternalAck(requestId),
         reason: projectErrorMessage(
           this.#codecs,
           cause,
@@ -2496,6 +2516,50 @@ export class ProjectWorkflow {
       });
       return false;
     }
+  }
+
+  #confirmationRequiresExternalAck(requestId) {
+    const snapshot = this.#externalFileOpenSession.snapshot;
+    return snapshot.status === "awaiting-confirmation"
+      && snapshot.activeRequestId === String(requestId || "");
+  }
+
+  #applyExternalAckCompletion(requestId, completion) {
+    if (completion.kind === "cancel-confirmation") {
+      if (completion.external === true) {
+        this.#externalFileOpenSession.cancelConfirmation(requestId);
+      }
+      if (this.#openConfirmation?.requestId === requestId) {
+        this.#clearOpenConfirmation();
+      }
+      return succeeded({ canceled: true, requestId });
+    }
+    if (completion.kind === "complete-confirmation") {
+      if (completion.external === true) {
+        this.#externalFileOpenSession.completeConfirmation(requestId);
+      }
+      if (this.#openConfirmation?.requestId === requestId) {
+        this.#clearOpenConfirmation();
+      }
+      this.#emit(completion.event);
+      return succeeded(completion.value);
+    }
+    return succeeded({ requestId, acknowledged: true });
+  }
+
+  async #ackWithCompletion(requestId, completion) {
+    if (!await this.#ackExternalOpen(requestId)) {
+      this.#externalAckPending.set(requestId, Object.freeze({ ...completion }));
+      return null;
+    }
+    this.#externalAckPending.delete(requestId);
+    return this.#applyExternalAckCompletion(requestId, completion);
+  }
+
+  async #retryPendingExternalAck(requestId) {
+    const completion = this.#externalAckPending.get(requestId);
+    if (!completion) return null;
+    return this.#ackWithCompletion(requestId, completion);
   }
 
   setExternalOpenDeleteOriginal({ requestId, deleteOriginal } = {}) {
@@ -2518,21 +2582,33 @@ export class ProjectWorkflow {
   }
 
   async cancelExternalOpen({ requestId } = {}) {
+    const requestedId = String(requestId || "");
+    if (this.#externalAckPending.has(requestedId)) {
+      return await this.#retryPendingExternalAck(requestedId) || rejected(
+        "EXTERNAL_OPEN_ACK_REJECTED",
+        "这次打开已取消，但下一个 Finder 请求尚未解锁。",
+      );
+    }
     const confirmation = this.#openConfirmation;
     if (!confirmation || confirmation.requestId !== String(requestId || "")) {
       return stale({ requestId: String(requestId || "") });
     }
     this.#cancelPreparedIntent(confirmation.requestId);
-    const acknowledged = await this.#ackExternalOpen(confirmation.requestId);
-    if (!acknowledged) {
+    const completion = {
+      kind: "cancel-confirmation",
+      external: this.#confirmationRequiresExternalAck(confirmation.requestId),
+    };
+    const completed = completion.external
+      ? await this.#ackWithCompletion(confirmation.requestId, completion)
+      : this.#applyExternalAckCompletion(confirmation.requestId, completion);
+    if (!completed) {
+      this.#setOpenConfirmation({ ...confirmation, busy: false });
       return rejected(
         "EXTERNAL_OPEN_ACK_REJECTED",
         "这次打开已取消，但下一个 Finder 请求尚未解锁。",
       );
     }
-    this.#externalFileOpenSession.cancelConfirmation(confirmation.requestId);
-    this.#clearOpenConfirmation();
-    return succeeded({ canceled: true, requestId: confirmation.requestId });
+    return completed;
   }
 
   async confirmExternalOpen({
@@ -2549,6 +2625,12 @@ export class ProjectWorkflow {
     const confirmation = this.#openConfirmation;
     if (!confirmation || confirmation.requestId !== String(requestId || "")) {
       return stale({ requestId: String(requestId || "") });
+    }
+    if (this.#externalAckPending.has(confirmation.requestId)) {
+      return await this.#retryPendingExternalAck(confirmation.requestId) || rejected(
+        "EXTERNAL_OPEN_ACK_REJECTED",
+        "HTML 已完成打开，但下一个 Finder 请求尚未解锁。",
+      );
     }
     if (
       confirmation.classification === "new-external"
@@ -2667,23 +2749,39 @@ export class ProjectWorkflow {
         );
         disposition = finalized?.disposition || "kept";
       }
-      await this.#ackExternalOpen(confirmation.requestId);
-      this.#externalFileOpenSession.completeConfirmation(confirmation.requestId);
-      this.#clearOpenConfirmation();
-      this.#emit({
-        type: "external-open-completed",
-        requestId: confirmation.requestId,
-        action,
-        imported: action === "import-new",
-        disposition,
-        visibleV1FileName: confirmation.visibleV1FileName,
-        sourcePath: project.sourcePath,
-      });
-      return succeeded({
-        requestId: confirmation.requestId,
-        opened: true,
-        disposition,
-      });
+      const completion = {
+        kind: "complete-confirmation",
+        external: this.#confirmationRequiresExternalAck(confirmation.requestId),
+        event: Object.freeze({
+          type: "external-open-completed",
+          requestId: confirmation.requestId,
+          action,
+          imported: action === "import-new",
+          disposition,
+          visibleV1FileName: confirmation.visibleV1FileName,
+          sourcePath: project.sourcePath,
+        }),
+        value: Object.freeze({
+          requestId: confirmation.requestId,
+          opened: true,
+          disposition,
+        }),
+      };
+      const completed = completion.external
+        ? await this.#ackWithCompletion(confirmation.requestId, completion)
+        : this.#applyExternalAckCompletion(confirmation.requestId, completion);
+      if (!completed) {
+        this.#setOpenConfirmation({
+          ...confirmation,
+          deleteOriginal: shouldDelete,
+          busy: false,
+        });
+        return rejected(
+          "EXTERNAL_OPEN_ACK_REJECTED",
+          "HTML 已完成打开，但下一个 Finder 请求尚未解锁。",
+        );
+      }
+      return completed;
     } catch (cause) {
       const reclassified = cause?.details?.confirmation
         || cause?.confirmation;
@@ -2732,6 +2830,8 @@ export class ProjectWorkflow {
   }
 
   retryExternalOpen({ requestId } = {}) {
+    const pending = this.#externalAckPending.get(String(requestId || ""));
+    if (pending) return this.#retryPendingExternalAck(String(requestId || ""));
     const confirmation = this.#openConfirmation;
     if (!confirmation || confirmation.requestId !== String(requestId || "")) {
       return Promise.resolve(stale({ requestId: String(requestId || "") }));
@@ -3632,6 +3732,27 @@ export class ProjectWorkflow {
       };
       this.#scheduler.setTimeout(poll, 40);
     });
+  }
+
+  async #drainExternalOpenForClose(deadlineAt) {
+    while (this.#clock.now() < Number(deadlineAt)) {
+      const confirmation = this.#openConfirmation;
+      if (confirmation) {
+        const canceled = await this.cancelExternalOpen({
+          requestId: confirmation.requestId,
+        });
+        if (canceled.status !== "succeeded") {
+          await new Promise((resolve) => this.#scheduler.setTimeout(resolve, 40));
+        }
+        continue;
+      }
+      if (this.#externalFileOpenSession.snapshot.status === "idle") return true;
+      await this.#waitUntil(() => (
+        Boolean(this.#openConfirmation)
+        || this.#externalFileOpenSession.snapshot.status === "idle"
+      ));
+    }
+    return false;
   }
 
   #dependencyOutcome(outcome, identity, fallbackCode, fallbackReason) {

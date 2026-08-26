@@ -112,6 +112,9 @@ export type ProjectWorkflowConstruction = Readonly<{
     recentRuns: Readonly<{
       hydrate(projects: unknown[], activeSourcePath: string | null): void | Promise<void>;
     }>;
+    externalCapacity?: Readonly<{
+      canAccept(): boolean;
+    }>;
   }>;
   policies: object;
   scheduler?: Readonly<{

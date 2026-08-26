@@ -162,11 +162,18 @@ Rules:
   canonical `prepareSwitch`/drain/Canvas fence, rejects pre-open matching
   identity, then mounts only a newer aggregate Project epoch. The operation
   remains locked until hydration, accepted-result FIFO and Canvas verification
-  settle. Start activation calls the same canonical `prepareSwitch`; only then
+  settle. A failure after identity commit remains attached to the mounted target
+  tab and offers hydration retry; it is never handled as pre-commit cleanup.
+  Start activation calls the same canonical `prepareSwitch`; only then
   does it unmount the document outlet while retaining `runtimeOwnerTabId`, so
   close/quit obligations remain owned by the same Controller. Close and activate
   are mutually exclusive. Inactive tabs keep no contenteditable, Selection or
   IME DOM.
+- `ProjectWorkflow` consults the tabs Session's narrow capacity projection before
+  accepting an external request. A failed Desktop acknowledgement retains an
+  opaque request-keyed completion in the workflow: retry performs only that ack,
+  while the external Session keeps the FIFO head and withholds successors. Close
+  drain cancels and acknowledges every queued confirmation until the Session is idle.
 - `RunSession` owns the one in-memory submission lifecycle. `preparing` blocks
   duplicate intent and drain without freezing the current canvas; `frozen`
   blocks edits until the Request is known; `uncertain` preserves a current

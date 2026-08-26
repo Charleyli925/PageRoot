@@ -151,6 +151,7 @@ function createHarness({
   bridge = {},
   canvas = {},
   projectOpen = {},
+  externalCapacity = {},
   policies = {},
   projectRulesWorkflow: rulesWorkflow = {},
   initialProject = true,
@@ -411,6 +412,10 @@ function createHarness({
       hash: { sha256: async (value) => sha256(value) },
       canvas: canvasPort,
       projectOpen: openPort,
+      externalCapacity: {
+        canAccept: () => true,
+        ...externalCapacity,
+      },
       viewState,
       recentRuns,
     },
@@ -1125,6 +1130,49 @@ test("an external request arriving during close preparation cancels that exact c
   await waitFor(() => harness.workflow.getSnapshot().externalOpen.status === "idle");
 });
 
+test("a full tab workbench defers OS accept before Controller authority and resumes after capacity clears", async (t) => {
+  let capacity = false;
+  let acceptCount = 0;
+  const harness = createHarness({
+    externalCapacity: {
+      canAccept: () => capacity,
+    },
+    projectOpen: {
+      async acceptExternal() {
+        acceptCount += 1;
+        return {
+          name: "A",
+          sourcePath: A_PATH,
+          html: A_HTML,
+          sha256: sha256(A_HTML),
+        };
+      },
+      async ackExternal(requestId) {
+        return { acknowledged: true, requestId };
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+
+  const beforeContext = harness.projectSession.context;
+  assert.equal(harness.workflow.acceptExternalProject({
+    requestId: "external_capacity",
+    sourcePath: A_PATH,
+  }).status, "succeeded");
+  await waitFor(() => harness.workflow.getSnapshot().externalOpen.status === "deferred");
+  assert.equal(acceptCount, 0);
+  assert.deepEqual(harness.projectSession.context, beforeContext);
+
+  capacity = true;
+  harness.workflow.reconcileDeferred();
+  await waitFor(() => (
+    acceptCount === 1
+    && harness.projectSession.context?.sourcePath === A_PATH
+    && harness.workflow.getSnapshot().externalOpen.status === "idle"
+  ));
+  assert.equal(harness.documentSession.html, A_HTML);
+});
+
 test("two unregistered OS opens keep confirmation and acknowledgement order", async (t) => {
   const order = [];
   const harness = createHarness({
@@ -1177,6 +1225,186 @@ test("two unregistered OS opens keep confirmation and acknowledgement order", as
   ]);
   assert.equal((await harness.workflow.cancelExternalOpen({ requestId: "external_second" })).status, "succeeded");
   await waitFor(() => order.at(-1) === "ack:external_second");
+});
+
+test("direct external ack rejection defers the head and retry never accepts or enqueues it twice", async (t) => {
+  const accepted = [];
+  const acknowledgements = [];
+  let rejectFirstAck = true;
+  const harness = createHarness({
+    projectOpen: {
+      async acceptExternal(requestId) {
+        accepted.push(requestId);
+        return requestId === "external_ack_first"
+          ? { name: "A", sourcePath: A_PATH, html: A_HTML, sha256: sha256(A_HTML) }
+          : { name: "B", sourcePath: B_PATH, html: B_HTML, sha256: sha256(B_HTML) };
+      },
+      async ackExternal(requestId) {
+        acknowledgements.push(requestId);
+        if (requestId === "external_ack_first" && rejectFirstAck) {
+          rejectFirstAck = false;
+          throw new Error("ack unavailable");
+        }
+        return { acknowledged: true, requestId };
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+
+  harness.workflow.acceptExternalProject({
+    requestId: "external_ack_first",
+    sourcePath: A_PATH,
+  });
+  harness.workflow.acceptExternalProject({
+    requestId: "external_ack_second",
+    sourcePath: B_PATH,
+  });
+  await waitFor(() => harness.workflow.getSnapshot().externalOpen.status === "deferred");
+  assert.deepEqual(accepted, ["external_ack_first"]);
+  assert.deepEqual(acknowledgements, ["external_ack_first"]);
+
+  assert.equal(harness.workflow.resumeDeferredExternalProject().status, "succeeded");
+  await waitFor(() => (
+    harness.workflow.getSnapshot().externalOpen.status === "idle"
+    && accepted.length === 2
+  ));
+  assert.deepEqual(accepted, ["external_ack_first", "external_ack_second"]);
+  assert.deepEqual(acknowledgements, [
+    "external_ack_first",
+    "external_ack_first",
+    "external_ack_second",
+  ]);
+  assert.equal(harness.projectSession.context?.sourcePath, B_PATH);
+});
+
+test("terminal external failure remains deferred until ack retry without reopening", async (t) => {
+  let acceptCount = 0;
+  let ackCount = 0;
+  const harness = createHarness({
+    projectOpen: {
+      async acceptExternal() {
+        acceptCount += 1;
+        return { invalid: true };
+      },
+      async ackExternal(requestId) {
+        ackCount += 1;
+        if (ackCount === 1) throw new Error("ack unavailable");
+        return { acknowledged: true, requestId };
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+
+  harness.workflow.acceptExternalProject({
+    requestId: "external_terminal_ack",
+    sourcePath: A_PATH,
+  });
+  await waitFor(() => harness.workflow.getSnapshot().externalOpen.status === "deferred");
+  assert.equal(acceptCount, 1);
+  assert.equal(ackCount, 1);
+  assert.equal(harness.workflow.resumeDeferredExternalProject().status, "succeeded");
+  await waitFor(() => harness.workflow.getSnapshot().externalOpen.status === "idle");
+  assert.equal(acceptCount, 1);
+  assert.equal(ackCount, 2);
+  assert.equal(harness.projectSession.context?.sourcePath, OLD_PATH);
+});
+
+test("confirmed external open retries only its failed ack and never commits twice", async (t) => {
+  let commitCount = 0;
+  let ackCount = 0;
+  const harness = createHarness({
+    initialProject: false,
+    projectOpen: {
+      async acceptExternal(requestId) {
+        return {
+          openKind: "confirmation",
+          requestId,
+          classification: "new-external",
+          sourceFileName: "confirm.html",
+          visibleV1FileName: "confirm-V1.html",
+          projectsRootLabel: "文稿 › PageRoot › 项目",
+        };
+      },
+      async commitPrepared() {
+        commitCount += 1;
+        return { name: "A", sourcePath: A_PATH, html: A_HTML, sha256: sha256(A_HTML) };
+      },
+      async finalizePrepared() {
+        return { disposition: "kept" };
+      },
+      async ackExternal(requestId) {
+        ackCount += 1;
+        if (ackCount === 1) throw new Error("ack unavailable");
+        return { acknowledged: true, requestId };
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+  harness.workflow.acceptExternalProject({
+    requestId: "external_confirm_ack",
+    sourcePath: A_PATH,
+  });
+  await waitFor(() => harness.workflow.getSnapshot().openConfirmation?.requestId === "external_confirm_ack");
+  const first = await harness.workflow.confirmExternalOpen({
+    requestId: "external_confirm_ack",
+    action: "import-new",
+  });
+  assert.equal(first.code, "EXTERNAL_OPEN_ACK_REJECTED");
+  assert.equal(commitCount, 1);
+  assert.equal(harness.workflow.getSnapshot().externalOpen.status, "awaiting-confirmation");
+  const retried = await harness.workflow.retryExternalOpen({ requestId: "external_confirm_ack" });
+  assert.equal(retried.status, "succeeded");
+  assert.equal(commitCount, 1);
+  assert.equal(ackCount, 2);
+  assert.equal(harness.workflow.getSnapshot().externalOpen.status, "idle");
+  assert.equal(harness.workflow.getSnapshot().openConfirmation, null);
+});
+
+test("close drains and acknowledges every queued external confirmation", async (t) => {
+  const order = [];
+  const harness = createHarness({
+    initialProject: false,
+    projectOpen: {
+      async acceptExternal(requestId) {
+        order.push(`accept:${requestId}`);
+        return {
+          openKind: "confirmation",
+          requestId,
+          classification: "new-external",
+          sourceFileName: `${requestId}.html`,
+          visibleV1FileName: `${requestId}-V1.html`,
+          projectsRootLabel: "文稿 › PageRoot › 项目",
+        };
+      },
+      async ackExternal(requestId) {
+        order.push(`ack:${requestId}`);
+        return { acknowledged: true, requestId };
+      },
+      async cancelPrepared() {
+        return { canceled: true };
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+  for (const requestId of ["close_confirmation_1", "close_confirmation_2", "close_confirmation_3"]) {
+    harness.workflow.acceptExternalProject({ requestId, sourcePath: A_PATH });
+  }
+  await waitFor(() => harness.workflow.getSnapshot().openConfirmation?.requestId === "close_confirmation_1");
+  const closed = await harness.workflow.prepareClose({
+    requestId: "close_all_confirmations",
+    deadlineAt: Date.now() + 2_000,
+  });
+  assert.deepEqual(closed, { ready: true });
+  assert.deepEqual(order, [
+    "accept:close_confirmation_1",
+    "ack:close_confirmation_1",
+    "accept:close_confirmation_2",
+    "ack:close_confirmation_2",
+    "accept:close_confirmation_3",
+    "ack:close_confirmation_3",
+  ]);
+  assert.equal(harness.workflow.getSnapshot().externalOpen.status, "idle");
+  assert.equal(harness.workflow.getSnapshot().openConfirmation, null);
 });
 
 test("close drains an in-flight local picker before it commits", async (t) => {
@@ -2136,6 +2364,7 @@ test("cancelling the local picker does not drain the current project", async (t)
 
 test("startup confirmation commits without fencing a nonexistent Canvas", async (t) => {
   let fenced = 0;
+  let ackCount = 0;
   const harness = createHarness({
     initialProject: false,
     canvas: {
@@ -2166,6 +2395,10 @@ test("startup confirmation commits without fencing a nonexistent Canvas", async 
       async finalizePrepared() {
         return { disposition: "kept" };
       },
+      async ackExternal() {
+        ackCount += 1;
+        throw new Error("startup confirmation has no external mailbox head");
+      },
     },
   });
   t.after(() => harness.workflow.dispose());
@@ -2181,6 +2414,7 @@ test("startup confirmation commits without fencing a nonexistent Canvas", async 
     action: "import-new",
   });
   assert.equal(confirmed.status, "succeeded");
+  assert.equal(ackCount, 0);
   assert.equal(fenced, 0);
   await waitFor(
     () => harness.projectSession.sourcePath === A_PATH

@@ -7,7 +7,10 @@ export type WorkbenchTabsOutcome = Readonly<{
   status: "rejected";
   code: string;
   reason: string;
+  committed?: boolean;
+  tabId?: string;
 }>;
+export function workbenchTabOutcomeHasCommittedDocument(outcome: unknown): boolean;
 export class WorkbenchTabsWorkflow {
   constructor(input: { session: WorkbenchTabsSession; controller: WorkspaceController });
   activate(tabId: string, input?: { deadlineMs?: number }): Promise<WorkbenchTabsOutcome>;
